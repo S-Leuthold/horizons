@@ -16,7 +16,7 @@
 Currently only available via GitHub:
 
 ```r
-devtools::install_github("samleuthold/horizons")
+devtools::install_github("S-Leuthold/horizons")
 ```
 
 ---
