@@ -1,4 +1,8 @@
-# horizons
+# horizons 
+
+<p align="right">
+  <img src="man/figures/logo.png" width="200" alt="horizons hex sticker">
+</p>
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![R-CMD-check](https://github.com/s-leuthold/horizons/actions/workflows/R-CMD-check.yaml/badge.svg)](https://github.com/s-leuthold/horizons/actions)
