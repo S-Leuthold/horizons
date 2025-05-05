@@ -31,11 +31,12 @@
 #' @param bayesian_iter Integer. Number of Bayesian tuning iterations per model (default = 15).
 #' @param cv_folds Integer. Number of cross-validation folds used in resampling (default = 5).
 #'
-#' @return A tibble with one row per finalized workflow. Columns include:
-#'   \item{wflow_id}{Workflow ID string summarizing model specification.}
-#'   \item{rsq}{R² value on the hold-out data.}
-#'   \item{rmse}{Root Mean Squared Error.}
-#'   \item{rrmse}{Relative Root Mean Squared Error (%).}
+#' @return A named list with the following elements:
+#' \describe{
+#'   \item{evaluation_results}{A tibble with hold-out performance metrics for each finalized model (`rsq`, `rmse`, `rrmse`).}
+#'   \item{tuned_models}{A tibble of tuned workflows, including `final_wf`, `fitted_wf`, and back-transformed tuning results.}
+#'   \item{training_data}{The internal training split used during model fitting.}
+#'   \item{evaluation_data}{The held-out test set used to evaluate final models.}
 #'
 #' @details
 #' This function integrates several modular components from the `tidymodels` and `workflowsets` ecosystems.
@@ -124,7 +125,7 @@ full_model_evaluation <- function(input_data,
     stop("Model evaluation run terminated.")
   })
 
-  # cli::cli_progress_step("Model grid constructed with {.val {nrow(model_grid)}} combinations.")
+   cli::cli_progress_step("Model grid constructed with {.val {nrow(model_grid)}} combinations.")
 
   ## ---------------------------------------------------------------------------
   ## Step 3: Set up Workflow Sets
@@ -259,6 +260,11 @@ full_model_evaluation <- function(input_data,
   cli::cli_progress_step("Model evaluation complete. Minimum RRMSE = {round(min(evaluation_results$rrmse), 3)}%, Maximum RRMSE = {round(max(evaluation_results$rrmse), 3)}%")
   cli::cli_progress_done()
 
-  return(evaluation_results)
+  return(list(
+    evaluation_results = evaluation_results,
+    tuned_models       = tuned_models,
+    training_data      = training_data,
+    evaluation_data    = evaluation_data
+  ))
 }
 

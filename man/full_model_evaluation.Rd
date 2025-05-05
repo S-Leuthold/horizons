@@ -44,11 +44,12 @@ full_model_evaluation(
 \item{cv_folds}{Integer. Number of cross-validation folds used in resampling (default = 5).}
 }
 \value{
-A tibble with one row per finalized workflow. Columns include:
-\item{wflow_id}{Workflow ID string summarizing model specification.}
-\item{rsq}{R² value on the hold-out data.}
-\item{rmse}{Root Mean Squared Error.}
-\item{rrmse}{Relative Root Mean Squared Error (\%).}
+A named list with the following elements:
+\describe{
+\item{evaluation_results}{A tibble with hold-out performance metrics for each finalized model (\code{rsq}, \code{rmse}, \code{rrmse}).}
+\item{tuned_models}{A tibble of tuned workflows, including \code{final_wf}, \code{fitted_wf}, and back-transformed tuning results.}
+\item{training_data}{The internal training split used during model fitting.}
+\item{evaluation_data}{The held-out test set used to evaluate final models.}
 }
 \description{
 Constructs and evaluates an ensemble of models to predict a soil property using

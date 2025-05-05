@@ -141,26 +141,26 @@ build_model_grid <- function(models,
 
     if (include_covariates == TRUE) {
 
+      covariate_names <- setdiff(names(covariate_data), "Sample_ID")
+
       if (expand_covariate_grid == TRUE) {
 
-        covariate_names <- setdiff(names(covariate_data), "Sample_ID")
-        num_covar       <- length(covariate_names)
+        num_covar <- length(covariate_names)
 
-        covariate_combinations <- purrr::map(0:num_covar, ~ combn(x        = covariate_names,
-                                                                  m        = .x,
+        covariate_combinations <- purrr::map(0:num_covar, ~ combn(x = covariate_names,
+                                                                  m = .x,
                                                                   simplify = FALSE)) %>%
-                                    purrr::flatten() %>%
-                                    purrr::map(~ if (length(.x) == 0) "No Covariates" else .x)
+          purrr::flatten() %>%
+          purrr::map(~ if (length(.x) == 0) "No Covariates" else .x)
 
       } else {
-
-        covariate_combinations <- list(NULL)
-
-      }} else {
-
-        covariate_combinations <- list(NULL)
-
+        covariate_combinations <- c(list("No Covariates"),
+                                    purrr::map(covariate_names, ~ .x))
       }
+
+    } else {
+      covariate_combinations <- list(NULL)
+    }
 
     ## -------------------------------------------------------------------------
     ## Stage 2: Expand parameter grid
