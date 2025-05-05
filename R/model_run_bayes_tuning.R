@@ -66,7 +66,7 @@ run_bayesian_tuning <- function(tuned_wf_set,
       save_pred     = TRUE,
       allow_par     = TRUE,
       save_workflow = TRUE,
-      verbose       = FALSE,
+      verbose       = TRUE,
       seed          = 0307,
       no_improve    = 10L,
       parallel_over = "everything"
@@ -78,7 +78,7 @@ run_bayesian_tuning <- function(tuned_wf_set,
       save_pred     = TRUE,
       allow_par     = FALSE,
       save_workflow = TRUE,
-      verbose       = FALSE,
+      verbose       = TRUE,
       seed          = 0307,
       no_improve    = 10L
     ) -> bayesian_controls

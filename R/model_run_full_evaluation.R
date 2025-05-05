@@ -230,19 +230,22 @@ full_model_evaluation <- function(input_data,
     stop("Model evaluation run terminated.")
   })
 
-  cli::cli_progress_step("Bayesian tuning complete.")
+  cli::cli_progress_step("Bayesian tuning complete. Back-transforming predictions...")
+
+  tuned_models %>%
+    dplyr::mutate(result = purrr::map2(result,
+                                       wflow_id,
+                                       backtransform_tune_results)) -> tuned_models
 
   ## ---------------------------------------------------------------------------
   ## Step 5: Finalize Tuned Models
   ## ---------------------------------------------------------------------------
 
-  tuned_models <- tuned_models %>%
-    dplyr::mutate(
-      best_model = purrr::map(result, tune::select_best, metric = "rrmse"),
-      workflow   = purrr::map(info, ~ .x$workflow[[1]]),
-      final_wf   = purrr::map2(workflow, best_model, tune::finalize_workflow),
-      fitted_wf  = purrr::map(final_wf, ~ parsnip::fit(.x, data = training_data))
-    )
+  tuned_models %>%
+    dplyr::mutate(best_model = purrr::map(result, tune::select_best, metric = "rrmse"),
+                  workflow   = purrr::map(info, ~ .x$workflow[[1]]),
+                  final_wf   = purrr::map2(workflow, best_model, tune::finalize_workflow),
+                  fitted_wf  = purrr::map(final_wf, ~ parsnip::fit(.x, data = training_data))) -> tuned_models
 
   cli::cli_progress_step("Tuned models finalized.")
 
@@ -250,10 +253,8 @@ full_model_evaluation <- function(input_data,
   ## Step 6: Predict and Evaluate on Hold-Out
   ## ---------------------------------------------------------------------------
 
-  evaluation_results <- evaluate_final_models(
-    finalized_wf_sets = tuned_models,
-    holdout_data      = evaluation_data
-  )
+  evaluate_final_models(finalized_wf_sets = tuned_models,
+                        holdout_data      = evaluation_data) -> evaluation_results
 
   cli::cli_progress_step("Model evaluation complete. Minimum RRMSE = {round(min(evaluation_results$rrmse), 3)}%, Maximum RRMSE = {round(max(evaluation_results$rrmse), 3)}%")
   cli::cli_progress_done()

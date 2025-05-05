@@ -47,11 +47,14 @@ filter_workflows <- function(wf_set_tuned,
                              r2_quintile    = 0.4) {
 
   ## ---------------------------------------------------------------------------
-  ## Step 1: Compute average cross-validation metrics per workflow
+  ## Step 1: Safely compute average cross-validation metrics per workflow
   ## ---------------------------------------------------------------------------
 
+  safe_collect <- purrr::possibly(collect_metrics, otherwise = NULL)
+
   wf_set_tuned %>%
-    dplyr::mutate(metrics = purrr::map(.x = .data$result, .f = collect_metrics)) %>%
+    dplyr::mutate(metrics = purrr::map(.x = .data$result, .f = safe_collect)) %>%
+    dplyr::filter(!purrr::map_lgl(.data$metrics, is.null)) %>%
     tidyr::unnest(.data$metrics) %>%
     dplyr::filter(.data$.metric %in% c("rrmse", "rsq")) %>%
     dplyr::group_by(.data$wflow_id, .data$.metric) %>%
@@ -74,19 +77,23 @@ filter_workflows <- function(wf_set_tuned,
   ## Step 3: Tag each workflow as passed or rejected based on thresholds
   ## ---------------------------------------------------------------------------
 
-  wf_set_tuned %>%
-    dplyr::mutate(metrics = purrr::map(.x = .data$result,
-                                       .f = collect_metrics),
+  workflow_summary <- wf_set_tuned %>%
+    dplyr::mutate(metrics = purrr::map(.x = .data$result, .f = safe_collect),
                   passed = purrr::map_lgl(.x = .data$metrics,
-                                          .f = ~ {rrmse <- dplyr::filter(.x, .data$.metric == "rrmse") %>%
-                                                            dplyr::pull(.data$mean) %>%
-                                                            mean(na.rm = TRUE)
+                                          .f = ~ {
+                                            if (is.null(.x)) return(FALSE)
+                                            rrmse <- dplyr::filter(.x, .data$.metric == "rrmse") %>%
+                                              dplyr::pull(.data$mean) %>%
+                                              mean(na.rm = TRUE)
 
-                                                  r2    <- dplyr::filter(.x, .data$.metric == "rsq") %>%
-                                                            dplyr::pull(.data$mean) %>%
-                                                            mean(na.rm = TRUE)
+                                            r2 <- dplyr::filter(.x, .data$.metric == "rsq") %>%
+                                              dplyr::pull(.data$mean) %>%
+                                              mean(na.rm = TRUE)
 
-                    !is.na(rrmse) && !is.na(r2) && rrmse <= rrmse_threshold && r2 >= r2_threshold})) -> workflow_summary
+                                            !is.na(rrmse) && !is.na(r2) &&
+                                              rrmse <= rrmse_threshold &&
+                                              r2 >= r2_threshold
+                                          }))
 
   ## ---------------------------------------------------------------------------
   ## Step 4: Subset passed and rejected workflows
@@ -101,9 +108,11 @@ filter_workflows <- function(wf_set_tuned,
 
   class(passed_workflows) <- c("workflow_set", class(passed_workflows))
 
-  tibble::tibble(Variable        = stringr::str_extract(string = unique(workflow_metrics$wflow_id), pattern = "^[^_]+"),
-                 RRMSE_Threshold = rrmse_threshold,
-                 RSQ_Threshold   = r2_threshold) -> threshold_summary
+  tibble::tibble(
+    Variable        = stringr::str_extract(string = unique(workflow_metrics$wflow_id), pattern = "^[^_]+"),
+    RRMSE_Threshold = rrmse_threshold,
+    RSQ_Threshold   = r2_threshold
+  ) -> threshold_summary
 
   ## ---------------------------------------------------------------------------
   ## Step 6: Return filtered results and summary
