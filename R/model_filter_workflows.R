@@ -15,6 +15,7 @@
 #' @importFrom rlang .data
 #' @importFrom stringr str_extract
 #' @importFrom stats quantile
+#' @importFrom hardhat extract_parameter_set_dials
 #'
 #' @param wf_set_tuned A tuned `workflow_set` object (from `workflow_map(tune_grid)`)
 #'   containing resampling results for multiple model/recipe configurations.
@@ -47,7 +48,35 @@ filter_workflows <- function(wf_set_tuned,
                              r2_quintile    = 0.4) {
 
   ## ---------------------------------------------------------------------------
-  ## Step 1: Safely compute average cross-validation metrics per workflow
+  ## Step 1: Remove any workflows with unknown parameters
+  ## ---------------------------------------------------------------------------
+
+  wf_set_tuned %>%
+    dplyr::mutate(has_unknown_params = purrr::map_lgl(info,
+                                                      ~ {wf <- try(.x$workflow[[1]], silent = TRUE)
+                                                         param_set <- try(hardhat::extract_parameter_set_dials(wf), silent = TRUE)
+
+                                                         if (inherits(param_set, "try-error")) return(TRUE)
+
+                                                         any(purrr::map_lgl(param_set$object, ~ inherits(.x, "unknown")))
+
+                                                         })) -> wf_set_tuned
+
+  dplyr::filter(wf_set_tuned, has_unknown_params) %>%
+    dplyr::pull(wflow_id) -> unknowns
+
+  if (length(unknowns) > 0) {
+    cli::cli_alert_warning("Workflows with unknown parameters will be excluded:")
+    cli::cli_ul()
+    cli::cli_li(unknowns)
+    cli::cli_end()
+  }
+
+  wf_set_tuned %>%
+    dplyr::filter(!.data$has_unknown_params) -> wf_set_tuned
+
+  ## ---------------------------------------------------------------------------
+  ## Step 2: Safely compute average cross-validation metrics per workflow
   ## ---------------------------------------------------------------------------
 
   safe_collect <- purrr::possibly(collect_metrics, otherwise = NULL)
@@ -62,7 +91,7 @@ filter_workflows <- function(wf_set_tuned,
     tidyr::pivot_wider(names_from = .data$.metric, values_from = .data$mean) -> workflow_metrics
 
   ## ---------------------------------------------------------------------------
-  ## Step 2: Define dynamic filtering thresholds from quantiles
+  ## Step 3: Define dynamic filtering thresholds from quantiles
   ## ---------------------------------------------------------------------------
 
   rrmse_threshold <- stats::quantile(workflow_metrics$rrmse,
@@ -74,7 +103,7 @@ filter_workflows <- function(wf_set_tuned,
                                   na.rm = TRUE)
 
   ## ---------------------------------------------------------------------------
-  ## Step 3: Tag each workflow as passed or rejected based on thresholds
+  ## Step 4: Tag each workflow as passed or rejected based on thresholds
   ## ---------------------------------------------------------------------------
 
   workflow_summary <- wf_set_tuned %>%
@@ -96,7 +125,7 @@ filter_workflows <- function(wf_set_tuned,
                                           }))
 
   ## ---------------------------------------------------------------------------
-  ## Step 4: Subset passed and rejected workflows
+  ## Step 5: Subset passed and rejected workflows
   ## ---------------------------------------------------------------------------
 
   passed_workflows   <- dplyr::filter(workflow_summary, .data$passed)
@@ -125,3 +154,4 @@ filter_workflows <- function(wf_set_tuned,
     threshold_summary  = threshold_summary
   ))
 }
+

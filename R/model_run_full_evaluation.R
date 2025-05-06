@@ -37,6 +37,7 @@
 #'   \item{tuned_models}{A tibble of tuned workflows, including `final_wf`, `fitted_wf`, and back-transformed tuning results.}
 #'   \item{training_data}{The internal training split used during model fitting.}
 #'   \item{evaluation_data}{The held-out test set used to evaluate final models.}
+#'}
 #'
 #' @details
 #' This function integrates several modular components from the `tidymodels` and `workflowsets` ecosystems.

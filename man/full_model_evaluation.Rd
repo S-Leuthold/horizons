@@ -51,6 +51,7 @@ A named list with the following elements:
 \item{training_data}{The internal training split used during model fitting.}
 \item{evaluation_data}{The held-out test set used to evaluate final models.}
 }
+}
 \description{
 Constructs and evaluates an ensemble of models to predict a soil property using
 MIR spectra and optional covariates. The function performs model grid construction,

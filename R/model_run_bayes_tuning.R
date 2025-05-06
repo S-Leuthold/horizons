@@ -15,6 +15,7 @@
 #' @importFrom future plan multisession sequential
 #' @importFrom furrr future_map2 furrr_options
 #' @importFrom yardstick metric_set
+#' @importFrom progressr handlers with_progress progressor
 #'
 #' @param tuned_wf_set A filtered `workflow_set` returned by [filter_workflows()],
 #'   with prior tuning results stored in the `result` column.
@@ -60,7 +61,7 @@ run_bayesian_tuning <- function(tuned_wf_set,
 
   if (parallel == TRUE) {
 
-    future::plan(future::multisession, workers = parallel::detectCores(logical = TRUE) - 1)
+    future::plan(future::multisession, workers = 4)
 
     tune::control_bayes(
       save_pred     = TRUE,
@@ -69,7 +70,7 @@ run_bayesian_tuning <- function(tuned_wf_set,
       verbose       = TRUE,
       seed          = 0307,
       no_improve    = 10L,
-      parallel_over = "everything"
+      parallel_over = "resamples"
     ) -> bayesian_controls
 
   } else {
@@ -115,39 +116,41 @@ run_bayesian_tuning <- function(tuned_wf_set,
   ## Step 3: Run Bayesian tuning
   ## ---------------------------------------------------------------------------
 
-  furrr::future_map2(
-    .x = rebuilt_wf_tbl$workflow,
-    .y = tuned_wf_set$result,
-    .f = ~ tune::tune_bayes(
-      object    = .x,
-      resamples = folds,
-      initial   = .y,
-      iter      = iterations,
-      metrics   = yardstick::metric_set(rrmse, rsq),
-      control   = bayesian_controls
-    ),
-    .options = furrr::furrr_options(seed = TRUE)
-  ) -> bayesian_tuned_models
+  progressr::handlers("cli")
 
-  rebuilt_wf_tbl$result  <- bayesian_tuned_models
-  rebuilt_wf_tbl$metrics <- purrr::map(bayesian_tuned_models, tune::collect_metrics)
+  progressr::with_progress({
+    p <- progressr::progressor(steps = nrow(rebuilt_wf_tbl))
 
-  return(rebuilt_wf_tbl)
-
-  if (parallel == TRUE) future::plan(sequential)
+    bayesian_tuned_models <- furrr::future_map2(
+      .x = rebuilt_wf_tbl$workflow,
+      .y = tuned_wf_set$result,
+      .f = ~ {
+        p(message = paste("Tuning:", .x$fit$spec$mode))
+        tune::tune_bayes(
+          object    = .x,
+          resamples = folds,
+          initial   = .y,
+          iter      = iterations,
+          metrics   = yardstick::metric_set(yardstick::rrmse, yardstick::rsq),
+          control   = bayesian_controls
+        )
+      },
+      .options = furrr::furrr_options(seed = TRUE)
+    )
+  })
 
   ## ---------------------------------------------------------------------------
   ## Step 4: Update results and metrics
   ## ---------------------------------------------------------------------------
 
-  rebuilt_wf_set$result  <- bayesian_tuned_models
-  rebuilt_wf_set$metrics <- purrr::map(bayesian_tuned_models, tune::collect_metrics)
+  rebuilt_wf_tbl$result  <- bayesian_tuned_models
+  rebuilt_wf_tbl$metrics <- purrr::map(bayesian_tuned_models, tune::collect_metrics)
 
   ## ---------------------------------------------------------------------------
   ## Step 5: Return final tuned workflow_set object
   ## ---------------------------------------------------------------------------
 
-  return(rebuilt_wf_set)
+  if (parallel == TRUE) future::plan(sequential)
+
+  return(rebuilt_wf_tbl)
 }
-
-
