@@ -32,7 +32,6 @@ Valid options include:
 \item{"No Transformation"}
 \item{"Log Transformation"}
 \item{"Square Root Transformation"}
-\item{"Box-Cox Transformation"}
 }}
 
 \item{covariate_selection}{Character vector of covariate names to include. Use \code{"No Covariates"} or \code{NULL} to exclude.}

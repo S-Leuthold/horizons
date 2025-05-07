@@ -8,14 +8,15 @@
 #' via `workflow_set()` and filtered using `filter_workflows()`. It assumes a consistent
 #' structure of fitted workflows with a `Response` column as the target.
 #'
-#' @import dplyr
-#' @import purrr
-#' @import tidyr
-#' @import tibble
-#' @import yardstick
+#' @importFrom dplyr mutate select rename case_when
+#' @importFrom purrr map map2
+#' @importFrom tidyr pivot_wider unnest
+#' @importFrom tibble tibble
+#' @importFrom yardstick metric_set rsq rmse
 #' @importFrom magrittr %>%
 #' @importFrom rlang .data
 #' @importFrom stats predict
+#' @importFrom cli cli_abort
 #'
 #' @param finalized_wf_sets A tibble of fitted workflows, typically from `full_model_evaluation()`,
 #'        containing at least `fitted_wf` (workflow object) and `wflow_id` (identifier).
@@ -30,7 +31,8 @@
 #'   \item{rrmse}{Relative RMSE as a percentage.}
 #' }
 #'
-#' @seealso \code{\link[yardstick]{metric_set}}, \code{\link{rrmse_vec}}, \code{\link{full_model_evaluation}}
+#' @seealso \code{\link[yardstick]{metric_set}}, \code{\link[yardstick]{rsq}},
+#'   \code{\link[yardstick]{rmse}}, \code{\link{rrmse_vec}}, \code{\link{full_model_evaluation}}
 #'
 #' @examples
 #' \dontrun{
@@ -40,81 +42,74 @@
 #'
 #' @keywords internal
 
-evaluate_final_models <- function(finalized_wf_sets,
-                                  holdout_data) {
+evaluate_final_models <- function(finalized_wf_sets, holdout_data) {
 
   ## ---------------------------------------------------------------------------
-  ## Step 1: Input Validation
+  ## Step 1: Validate Inputs
   ## ---------------------------------------------------------------------------
 
   if (!"fitted_wf" %in% names(finalized_wf_sets)) {
-    cli::cli_alert_danger("Input {.arg finalized_wf_sets} must include a {.field fitted_wf} column.")
-    stop("Aborting: Missing `fitted_wf` in finalized workflow set.")
+    cli::cli_abort("Missing {.field fitted_wf} column in finalized_wf_sets.")
   }
 
-  if (!"Response" %in% colnames(holdout_data)) {
-    cli::cli_alert_danger("Input {.arg holdout_data} must include a {.field Response} column.")
-    stop("Aborting: Missing `Response` column in holdout data.")
+  if (!"Response" %in% names(holdout_data)) {
+    cli::cli_abort("Holdout data must include a {.field Response} column.")
   }
 
-  eval_metrics <- yardstick::metric_set(rsq, rrmse, rmse)
+  ## ---------------------------------------------------------------------------
+  ## Step 2: Set up metric function
+  ## ---------------------------------------------------------------------------
+
+  eval_metrics <- yardstick::metric_set(rsq, rmse, rrmse)
 
   ## ---------------------------------------------------------------------------
-  ## Step 2: Predict and Evaluate
+  ## Step 3: Inner function: predict + back-transform
   ## ---------------------------------------------------------------------------
+
+  predict_and_evaluate <- function(wf, id) {
+
+    predict(wf, new_data = holdout_data) %>%
+      dplyr::rename(estimate = .pred) %>%
+      dplyr::mutate(estimate = dplyr::case_when(
+        grepl("Log", id)  ~ exp(estimate),
+        grepl("Sqrt", id) ~ estimate^2,
+        TRUE              ~ estimate
+      )) -> preds
+
+    tibble::tibble(
+      Sample_ID = holdout_data$Sample_ID,
+      estimate  = preds$estimate,
+      truth     = holdout_data$Response
+    )
+  }
+
+  ## ---------------------------------------------------------------------------
+  ## Step 4: Run predictions + evaluate metrics for each model
+  ##  --------------------------------------------------------------------------
 
   finalized_wf_sets %>%
+    dplyr::mutate(
+      predictions = purrr::map2(.x = fitted_wf,
+                                .y = wflow_id,
+                                .f = predict_and_evaluate),
 
-    ## -------------------------------------------------------------------------
-    ## Stage 1: Bake holdout data using each recipe
-    ## -------------------------------------------------------------------------
+      final_metrics = purrr::map(
+        predictions,
+        ~ eval_metrics(data     = .x,
+                       truth    = truth,
+                       estimate = estimate) %>%
+          dplyr::select(-.estimator) %>%
+          tidyr::pivot_wider(names_from  = .metric,
+                             values_from = .estimate)
+      )
+    ) %>%
+    dplyr::select(wflow_id, final_metrics) %>%
+    tidyr::unnest(final_metrics) -> result
 
-    dplyr::mutate(baked_data = purrr::map(.x = fitted_wf,
-                                          .f = ~ { recipe <- hardhat::extract_recipe(.x)
-                                     recipes::bake(recipe, new_data = holdout_data)})) %>%
+  ## ---------------------------------------------------------------------------
+  ## Step 5: Return result tibble
+  ## ---------------------------------------------------------------------------
 
-    ## -------------------------------------------------------------------------
-    ## Stage 2: Predict from each model
-    ## -------------------------------------------------------------------------
-
-    dplyr::mutate(predictions = purrr::map2(.x = fitted_wf,
-                                            .y = baked_data,
-                                            .f = ~ {stats::predict(hardhat::extract_fit_parsnip(.x), new_data = .y) %>%
-                                      dplyr::rename(estimate = .pred)})) %>%
-
-    ## -------------------------------------------------------------------------
-    ## Stage 3: Back-transform predictions based on workflow ID
-    ## -------------------------------------------------------------------------
-
-    dplyr::mutate(predictions = purrr::map2(.x = predictions,
-                                            .y = wflow_id,
-                                            .f = ~ {.x$estimate <- dplyr::case_when(grepl("Log", .y)  ~ exp(.x$estimate),
-                                                                                    grepl("Sqrt", .y) ~ (.x$estimate)^2,
-                                                                                    TRUE              ~ .x$estimate)
-
-                                                    tibble::tibble(Sample_ID = holdout_data$Sample_ID,
-                                                                   estimate  = .x$estimate,
-                                                                    truth     = holdout_data$Response)})) %>%
-
-    ## -------------------------------------------------------------------------
-    ## Stage 4: Compute final metrics
-    ## -------------------------------------------------------------------------
-
-    dplyr::mutate(final_metrics = purrr::map(.x = predictions,
-                                             .f = ~ {eval_metrics(data     = .x,
-                                                                  truth    = truth,
-                                                                  estimate = estimate) %>%
-                                       dplyr::select(-.estimator) %>%
-                                       tidyr::pivot_wider(names_from  = .metric,
-                                                          values_from = .estimate)})) %>%
-
-  ## -------------------------------------------------------------------------
-  ## Step 3: Return summary table
-  ## -------------------------------------------------------------------------
-
-  dplyr::select(wflow_id, final_metrics) %>%
-  tidyr::unnest(final_metrics) -> model_eval_stats
-
-  return(model_eval_stats)
+  return(result)
 
 }

@@ -56,101 +56,75 @@ run_bayesian_tuning <- function(tuned_wf_set,
                                 iterations = 15) {
 
   ## ---------------------------------------------------------------------------
-  ## Step 1: Configure Bayesian tuning control parameters
+  ## Step 1: Configure Bayesian tuning control
   ## ---------------------------------------------------------------------------
 
-  if (parallel == TRUE) {
-
-    future::plan(future::multisession, workers = 4)
-
-    tune::control_bayes(
+  if (parallel) {
+    future::plan(future::multisession, workers = 3)
+    control <- tune::control_bayes(
       save_pred     = TRUE,
       allow_par     = TRUE,
       save_workflow = TRUE,
-      verbose       = TRUE,
+      verbose       = FALSE,
       seed          = 0307,
       no_improve    = 10L,
       parallel_over = "resamples"
-    ) -> bayesian_controls
-
+    )
   } else {
-
-    tune::control_bayes(
+    control <- tune::control_bayes(
       save_pred     = TRUE,
       allow_par     = FALSE,
       save_workflow = TRUE,
-      verbose       = TRUE,
+      verbose       = FALSE,
       seed          = 0307,
       no_improve    = 10L
-    ) -> bayesian_controls
+    )
   }
 
   ## ---------------------------------------------------------------------------
-  ## Step 2: Rebuild the workflow set with correct recipe and spec
+  ## Step 2: Rebuild workflows
   ## ---------------------------------------------------------------------------
 
-  tuned_wf_set %>%
-    dplyr::mutate(
-      workflow   = purrr::map(info, ~ .x$workflow[[1]]),
-      preproc    = purrr::map(workflow, hardhat::extract_preprocessor),
-      model_spec = purrr::map(workflow, hardhat::extract_spec_parsnip)
-    ) -> rebuilt_wf_set
-
-  workflowsets::workflow_set(
-    preproc = rebuilt_wf_set$preproc,
-    models  = rebuilt_wf_set$model_spec,
-    cross   = FALSE
-  ) %>%
-    dplyr::mutate(wflow_id = rebuilt_wf_set$wflow_id) -> rebuilt_wf_set
+  tuned_wf_set <- tuned_wf_set %>%
+    dplyr::mutate(workflow = purrr::map(info, ~ .x$workflow[[1]]))
 
   ## ---------------------------------------------------------------------------
-  ## Step 2: Rebuild workflow tibble with proper access to prior workflow and tuning results
-  ## ---------------------------------------------------------------------------
-
-  tuned_wf_set %>%
-    dplyr::mutate(
-      workflow = purrr::map(info, ~ .x$workflow[[1]])
-    ) -> rebuilt_wf_tbl
-
-  ## ---------------------------------------------------------------------------
-  ## Step 3: Run Bayesian tuning
+  ## Step 3: Bayesian tuning with progress
   ## ---------------------------------------------------------------------------
 
   progressr::handlers("cli")
+  model_results <- progressr::with_progress({
+    p <- progressr::progressor(steps = nrow(tuned_wf_set))
 
-  progressr::with_progress({
-    p <- progressr::progressor(steps = nrow(rebuilt_wf_tbl))
-
-    bayesian_tuned_models <- furrr::future_map2(
-      .x = rebuilt_wf_tbl$workflow,
+    furrr::future_map2(
+      .x = tuned_wf_set$workflow,
       .y = tuned_wf_set$result,
-      .f = ~ {
-        p(message = paste("Tuning:", .x$fit$spec$mode))
-        tune::tune_bayes(
-          object    = .x,
-          resamples = folds,
-          initial   = .y,
-          iter      = iterations,
-          metrics   = yardstick::metric_set(yardstick::rrmse, yardstick::rsq),
-          control   = bayesian_controls
+      .f = function(wf, init) {
+        p(message = paste("Tuning:", wf$fit$spec$mode))
+        result <- safe_tune_bayes(
+          wf         = wf,
+          initial_res = init,
+          folds      = folds,
+          iterations = iterations,
+          control    = control
         )
+        if (!is.null(result$error)) {
+          cli::cli_alert_warning("Bayes tuning failed: {result$error$message}")
+        }
+        result
       },
       .options = furrr::furrr_options(seed = TRUE)
     )
   })
 
   ## ---------------------------------------------------------------------------
-  ## Step 4: Update results and metrics
+  ## Step 4: Attach tuning results and metrics
   ## ---------------------------------------------------------------------------
 
-  rebuilt_wf_tbl$result  <- bayesian_tuned_models
-  rebuilt_wf_tbl$metrics <- purrr::map(bayesian_tuned_models, tune::collect_metrics)
+  tuned_wf_set$result  <- purrr::map(model_results, "result")
+  tuned_wf_set$metrics <- purrr::map(tuned_wf_set$result, tune::collect_metrics)
 
-  ## ---------------------------------------------------------------------------
-  ## Step 5: Return final tuned workflow_set object
-  ## ---------------------------------------------------------------------------
+  if (parallel) future::plan(future::sequential)
 
-  if (parallel == TRUE) future::plan(sequential)
-
-  return(rebuilt_wf_tbl)
+  return(tuned_wf_set)
 }

@@ -12,7 +12,7 @@
 #' @import tibble
 #' @importFrom magrittr %>%
 #' @importFrom rlang .data
-#' @importFrom recipes recipe update_role update_role_requirements
+#' @importFrom recipes recipe update_role update_role_requirements has_role all_predictors all_outcomes
 #' @importFrom recipes step_log step_sqrt step_BoxCox step_pca
 #'
 #' @param input_data A data frame with spectral predictors and a response variable named `Response`.
@@ -32,7 +32,6 @@
 #'     \item{"No Transformation"}
 #'     \item{"Log Transformation"}
 #'     \item{"Square Root Transformation"}
-#'     \item{"Box-Cox Transformation"}
 #'   }
 #' @param covariate_selection Character vector of covariate names to include. Use `"No Covariates"` or `NULL` to exclude.
 #' @param covariate_data Optional data frame of covariates (must include a `Sample_ID` column). Required if covariates are selected.
@@ -77,71 +76,56 @@ build_recipe <- function(input_data,
   ## ---------------------------------------------------------------------------
 
   if (!is.data.frame(input_data)) {
-    cli::cli_alert_danger("Input `input_data` must be a data frame.")
-    stop("Aborting: Invalid `input_data` format.")
+    li::cli_alert_danger("▶ build_recipe: Input is not a data frame.")
+    stop("Aborting: Invalid input_data.")
   }
 
   if (!"Sample_ID" %in% names(input_data)) {
-    cli::cli_alert_danger("Input `input_data` must contain a {.field Sample_ID} column.")
-    stop("Aborting: Missing `Sample_ID` in `input_data`.")
+    cli::cli_alert_danger("▶ build_recipe: Sample_ID column is missing.")
+    stop("Aborting: Sample_ID required.")
   }
 
   if (is.null(covariate_selection) ||
       length(covariate_selection) == 0 ||
       identical(covariate_selection, "No Covariates")) {
-
     covariate_selection <- NULL
-
   } else {
-
     if (is.null(covariate_data)) {
-      cli::cli_alert_danger("`covariate_selection` provided, but `covariate_data` is missing.")
-      stop("Aborting: Must supply `covariate_data` if covariates are requested.")
+      cli::cli_alert_danger("▶ build_recipe: Covariates requested, but no covariate_data supplied.")
+      stop("Aborting: Missing covariate_data.")
     }
 
     covariate_selection <- as.character(unlist(covariate_selection))
-
     missing_covars <- setdiff(covariate_selection, names(covariate_data))
 
     if (length(missing_covars) > 0) {
-      cli::cli_alert_danger("The following covariates are missing from `covariate_data`: {.val {missing_covars}}")
-      cli::cli_alert_info("Available columns are: {.val {names(covariate_data)}}")
-      stop("Aborting: Covariate mismatch in `covariate_data`.")
+      cli::cli_alert_danger("▶ build_recipe: Missing covariates: {.val {missing_covars}}")
+      cli::cli_alert_info("▶ build_recipe: Available: {.val {names(covariate_data)}}")
+      stop("Aborting: Covariate mismatch.")
     }
 
     if (!"Sample_ID" %in% names(covariate_data)) {
-      cli::cli_alert_danger("Input `covariate_data` must contain a {.field Sample_ID} column.")
-      stop("Aborting: Missing `Sample_ID` in `covariate_data`.")
+      cli::cli_alert_danger("▶ build_recipe: Sample_ID column missing in covariate_data.")
+      stop("Aborting: Invalid covariate_data.")
     }
-
   }
 
   ## ---------------------------------------------------------------------------
-  ## Step 2: Initialize the recipe
+  ## Step 2: Role Assignment
   ## ---------------------------------------------------------------------------
 
-   input_data %>%
-    dplyr::select(-Sample_ID, -Response) %>%
-    purrr::imap_dfr(~ tibble::tibble(name = .y, type = class(.x)[1])) -> col_info
-
-  col_info %>%
-    dplyr::filter(type %in% c("numeric", "integer")) %>%
-    dplyr::pull(name) -> predictor_cols
-
-  col_info %>%
-    dplyr::filter(!name %in% predictor_cols) %>%
-    dplyr::pull(name) -> non_predictor_cols
+  input_data %>%
+    dplyr::select(dplyr::any_of(c("Project",
+                                  "Sample_ID",
+                                  "Response",
+                                  "transformation_applied")),
+                  dplyr::any_of(as.character(seq(600, 4000, 2)))) -> input_data
 
   recipes::recipe(Response ~ ., data = input_data) %>%
     recipes::update_role(Sample_ID, new_role = "id") %>%
-    recipes::update_role(!!predictor_cols, new_role = "predictor") %>%
-    recipes::update_role(!!non_predictor_cols, new_role = "metadata") %>%
-    recipes::update_role_requirements(role = "id", bake = TRUE) -> model_recipe
-
-  predictor_cols <- model_recipe %>%
-    summary() %>%
-    dplyr::filter(role == "predictor") %>%
-    dplyr::pull(variable)
+    recipes::update_role(Project, new_role = "metadata") %>%
+    recipes::update_role_requirements(role = "id", bake = TRUE) %>%
+    recipes::update_role_requirements(role = "metadata", bake = TRUE)-> model_recipe
 
   ## ---------------------------------------------------------------------------
   ## Step 3: Response Transformation
@@ -149,9 +133,9 @@ build_recipe <- function(input_data,
 
   switch(response_transformation,
          "No Transformation"          = model_recipe,
-         "Log Transformation"         = model_recipe %>% recipes::step_log(all_outcomes()),
-         "Square Root Transformation" = model_recipe %>% recipes::step_sqrt(all_outcomes()),
-         "Box-Cox Transformation"     = model_recipe %>% recipes::step_BoxCox(all_outcomes()),
+         "Log Transformation"         = model_recipe %>% recipes::step_log(all_outcomes(), skip = TRUE),
+         "Square Root Transformation" = model_recipe %>% recipes::step_sqrt(all_outcomes(), skip = TRUE),
+         "Box-Cox Transformation"     = model_recipe %>% recipes::step_BoxCox(all_outcomes(), skip = TRUE),
          cli::cli_abort("Unsupported {.field response transformation}: {.val {response_transformation}}")) -> model_recipe
 
   ## ---------------------------------------------------------------------------

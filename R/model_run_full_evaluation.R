@@ -97,9 +97,10 @@ full_model_evaluation <- function(input_data,
   missing_vars <- setdiff(variable, colnames(input_data))
 
   if (length(missing_vars) > 0) {
-    stop("The following response variables were not found in `input_data`: ",
-         paste(missing_vars, collapse = ", "))
-  }
+
+    cli::cli_abort("Missing response vars: ", paste(missing_vars, collapse = ", "))
+
+    }
 
   set.seed(0307)
 
@@ -121,16 +122,20 @@ full_model_evaluation <- function(input_data,
                                    include_covariates    = include_covariates,
                                    covariate_data        = covariate_data,
                                    expand_covariate_grid = expand_covariate_grid)
-  }, error = function(e) {
-    cli::cli_alert_danger("Model grid construction failed: {e$message}")
-    stop("Model evaluation run terminated.")
-  })
+    }, error = function(e) {
 
-   cli::cli_progress_step("Model grid constructed with {.val {nrow(model_grid)}} combinations.")
+      cli::cli_alert_danger("Grid construction failed: {e$message}")
+      stop("Terminating.")
+
+    })
+
+  cli::cli_alert_success("Model grid built: {nrow(model_grid)} rows")
 
   ## ---------------------------------------------------------------------------
   ## Step 3: Set up Workflow Sets
   ## ---------------------------------------------------------------------------
+
+  ##
 
   tryCatch({
     wf_grid <- tibble::tibble(
@@ -142,106 +147,105 @@ full_model_evaluation <- function(input_data,
                                               response_transformation = ..1,
                                               spectral_transformation = ..2,
                                               covariate_selection     = ..3,
-                                              covariate_data           = covariate_data))
-    )
-  }, error = function(e) {
-    cli::cli_alert_danger("Could not create initial workflow grid: {e$message}")
-    stop("Model evaluation run terminated.")
-  })
+                                              covariate_data          = covariate_data)))
+    }, error = function(e) {
 
-   cli::cli_progress_step("Initial workflow grid created.")
+      cli::cli_alert_danger("Workflow grid error: {e$message}")
+      stop("Terminating.")
 
-  tryCatch({
-    wf_set <- workflowsets::workflow_set(
-      preproc = wf_grid$recipe,
-      models  = wf_grid$model_spec,
-      cross   = FALSE
-    )
-  }, error = function(e) {
-    cli::cli_alert_danger("Could not assign the workflow grid to a `workflow_set` object.")
-    cat(conditionMessage(e))
-    stop("Model evaluation run terminated.")
-  })
+    })
 
-   cli::cli_progress_step("Initial workflow set created.")
+  ##
 
   tryCatch({
+    wf_set <- workflowsets::workflow_set(preproc = wf_grid$recipe,
+                                         models  = wf_grid$model_spec,
+                                         cross   = FALSE)
+    }, error = function(e) {
+
+      cli::cli_alert_danger("workflow_set failed: {e$message}")
+      stop("Terminating.")
+
+    })
+
+  ##
+
+  tryCatch({
+
     wf_set <- dplyr::mutate(wf_set,
-                            wflow_id = clean_workflow_id(
-                              model          = model_grid$Model,
-                              transformation = model_grid$Transformation,
-                              preprocessing  = model_grid$Preprocessing,
-                              covariates     = model_grid$Covariates
-                            ))
-  }, error = function(e) {
-    cli::cli_alert_danger("Could not add clean workflow IDs to the workflow set.")
-    cat(conditionMessage(e))
-    stop("Model evaluation run terminated.")
-  })
+                            wflow_id = clean_workflow_id(model          = model_grid$Model,
+                                                         transformation = model_grid$Transformation,
+                                                         preprocessing  = model_grid$Preprocessing,
+                                                         covariates     = model_grid$Covariates
+                                                         ))
+    }, error = function(e) {
 
-  cli::cli_progress_step("Finalized workflow set created.")
+      cli::cli_alert_danger("Failed to assign wflow_id: {e$message}")
+      stop("Terminating.")
+
+    })
 
   ## ---------------------------------------------------------------------------
-  ## Step 4: Tune and Calibrate Models
+  ## Step 4: Initial Grid Tuning
   ## ---------------------------------------------------------------------------
 
-  control_grid <- tune::control_grid(
-    save_pred     = TRUE,
-    allow_par     = TRUE,
-    save_workflow = TRUE,
-    verbose       = FALSE,
-    parallel_over = "everything"
-  )
 
-  cli::cli_progress_step("Starting initial grid search: {.val {grid_size * nrow(wf_set) * cv_folds}} models to be evaluated.")
+  control_grid <- tune::control_grid(save_pred     = TRUE,
+                                     allow_par     = TRUE,
+                                     save_workflow = TRUE,
+                                     verbose       = FALSE,
+                                     parallel_over = "everything")
+
+  cli::cli_alert_info("Starting initial grid search: {.val {grid_size * nrow(wf_set) * cv_folds}} models to be evaluated.")
 
   tryCatch({
-    initial_tune_results <- workflowsets::workflow_map(
-      object    = wf_set,
-      fn        = "tune_grid",
-      resamples = folds,
-      metrics   = yardstick::metric_set(rrmse, rsq),
-      grid      = grid_size,
-      control   = control_grid
-    )
-  }, error = function(e) {
-    cli::cli_alert_danger("Errors occurred during initial model tuning.")
-    cat(conditionMessage(e))
-    stop("Model evaluation run terminated.")
-  })
+    workflowsets::workflow_map(object    = wf_set,
+                               fn        = "tune_grid",
+                               resamples = folds,
+                               metrics   = yardstick::metric_set(rrmse, rsq),
+                               grid      = grid_size,
+                               control   = control_grid) -> initial_tune_results
 
-  cli::cli_progress_step("Initial hyperparameter search complete.")
+    }, error = function(e) {
+
+    cli::cli_alert_danger("Initial tuning failed: {e$message}")
+    stop("Terminating.")
+
+    })
+
+  cli::cli_alert_success("Initial tuning complete.")
+
+  ## ---------------------------------------------------------------------------
+  ## Step 5: Filter + Bayesian Tuning
+  ## ---------------------------------------------------------------------------
 
   halfway_tuned  <- filter_workflows(wf_set_tuned = initial_tune_results)
   wf_set_updated <- halfway_tuned$passed_workflows
 
-  cli::cli_progress_step("{nrow(wf_set_updated)} of {nrow(wf_set)} workflows passed initial filter.")
+  cli::cli_alert_info("{nrow(wf_set_updated)} workflows passed filter.")
 
-  cli::cli_progress_step("Starting Bayesian tuning: {.val {bayesian_iter * nrow(wf_set_updated) * cv_folds}} models to be evaluated.")
+  cli::cli_alert_info("Starting initial grid search: {.val {grid_size * nrow(wf_set_updated) * cv_folds}} models to be evaluated.")
 
   tryCatch({
-    tuned_models <- run_bayesian_tuning(
-      tuned_wf_set = wf_set_updated,
-      folds        = folds,
-      iterations   = bayesian_iter,
-      parallel     = TRUE
-    )
+    run_bayesian_tuning(tuned_wf_set = wf_set_updated,
+                        folds        = folds,
+                        iterations   = bayesian_iter,
+                        parallel     = TRUE) -> tuned_models
+
   }, error = function(e) {
-    cli::cli_alert_danger("Errors occurred during Bayesian tuning.")
-    cat(conditionMessage(e))
-    stop("Model evaluation run terminated.")
+
+    cli::cli_alert_danger("Bayesian tuning failed: {e$message}")
+    stop("Terminating.")
+
   })
 
-  cli::cli_progress_step("Bayesian tuning complete. Back-transforming predictions...")
-
-  tuned_models %>%
-    dplyr::mutate(result = purrr::map2(result,
-                                       wflow_id,
-                                       backtransform_tune_results)) -> tuned_models
+  cli::cli_alert_success("Bayesian tuning complete.")
 
   ## ---------------------------------------------------------------------------
-  ## Step 5: Finalize Tuned Models
+  ## Step 6: Finalize Workflows
   ## ---------------------------------------------------------------------------
+
+  cli::cli_alert_info("Finalizing tuned models.")
 
   tuned_models %>%
     dplyr::mutate(best_model = purrr::map(result, tune::select_best, metric = "rrmse"),
@@ -249,14 +253,18 @@ full_model_evaluation <- function(input_data,
                   final_wf   = purrr::map2(workflow, best_model, tune::finalize_workflow),
                   fitted_wf  = purrr::map(final_wf, ~ parsnip::fit(.x, data = training_data))) -> tuned_models
 
-  cli::cli_progress_step("Tuned models finalized.")
+  cli::cli_alert_success("Finalization complete.")
 
   ## ---------------------------------------------------------------------------
-  ## Step 6: Predict and Evaluate on Hold-Out
+  ## Step 7: Holdout Evaluation
   ## ---------------------------------------------------------------------------
 
-  evaluate_final_models(finalized_wf_sets = tuned_models,
-                        holdout_data      = evaluation_data) -> evaluation_results
+  cli::cli_alert_info("Evaluating models on holdout data.")
+
+  evaluation_results <- evaluate_final_models(
+    finalized_wf_sets = tuned_models,
+    holdout_data      = evaluation_data
+  )
 
   cli::cli_progress_step("Model evaluation complete. Minimum RRMSE = {round(min(evaluation_results$rrmse), 3)}%, Maximum RRMSE = {round(max(evaluation_results$rrmse), 3)}%")
   cli::cli_progress_done()
@@ -268,4 +276,6 @@ full_model_evaluation <- function(input_data,
     evaluation_data    = evaluation_data
   ))
 }
+
+
 

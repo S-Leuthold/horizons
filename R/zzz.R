@@ -6,7 +6,7 @@
 .onLoad <- function(libname, pkgname) {
 
   # Startup message
-  packageStartupMessage("Welcome to samssoilspecstack. Good luck.")
+  packageStartupMessage("horizons v0.1.0 loaded. Super fragile, use with caution.")
 
   # Optional: Register future plan if not already set
   if (requireNamespace("future", quietly = TRUE) &&

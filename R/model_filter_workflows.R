@@ -51,16 +51,20 @@ filter_workflows <- function(wf_set_tuned,
   ## Step 1: Remove any workflows with unknown parameters
   ## ---------------------------------------------------------------------------
 
-  wf_set_tuned %>%
-    dplyr::mutate(has_unknown_params = purrr::map_lgl(info,
-                                                      ~ {wf <- try(.x$workflow[[1]], silent = TRUE)
-                                                         param_set <- try(hardhat::extract_parameter_set_dials(wf), silent = TRUE)
 
-                                                         if (inherits(param_set, "try-error")) return(TRUE)
+  wf_set_tuned <- wf_set_tuned %>%
+    dplyr::mutate(
+      has_unknown_params = purrr::map_lgl(info, ~ {
+        wf <- try(.x$workflow[[1]], silent = TRUE)
+        param_set <- try(hardhat::extract_parameter_set_dials(wf), silent = TRUE)
+        if (inherits(param_set, "try-error")) return(TRUE)
+        any(purrr::map_lgl(param_set$object, ~ inherits(.x, "unknown")))
+      })
+    )
 
-                                                         any(purrr::map_lgl(param_set$object, ~ inherits(.x, "unknown")))
-
-                                                         })) -> wf_set_tuned
+  # Remove them
+  wf_set_tuned <- wf_set_tuned %>%
+    dplyr::filter(!has_unknown_params)
 
   dplyr::filter(wf_set_tuned, has_unknown_params) %>%
     dplyr::pull(wflow_id) -> unknowns

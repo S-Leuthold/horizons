@@ -40,6 +40,7 @@ evaluate_final_models(finalized_wf_sets = finalized_models,
 
 }
 \seealso{
-\code{\link[yardstick]{metric_set}}, \code{\link{rrmse_vec}}, \code{\link{full_model_evaluation}}
+\code{\link[yardstick]{metric_set}}, \code{\link[yardstick]{rsq}},
+\code{\link[yardstick]{rmse}}, \code{\link{rrmse_vec}}, \code{\link{full_model_evaluation}}
 }
 \keyword{internal}
