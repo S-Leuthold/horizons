@@ -60,11 +60,11 @@ run_bayesian_tuning <- function(tuned_wf_set,
   ## ---------------------------------------------------------------------------
 
   if (parallel) {
-    future::plan(future::multisession, workers = 3)
+    future::plan(future::multisession, workers = 9)
     control <- tune::control_bayes(
-      save_pred     = TRUE,
+      save_pred     = FALSE,
       allow_par     = TRUE,
-      save_workflow = TRUE,
+      save_workflow = FALSE,
       verbose       = FALSE,
       seed          = 0307,
       no_improve    = 10L,
@@ -72,9 +72,9 @@ run_bayesian_tuning <- function(tuned_wf_set,
     )
   } else {
     control <- tune::control_bayes(
-      save_pred     = TRUE,
+      save_pred     = FALSE,
       allow_par     = FALSE,
-      save_workflow = TRUE,
+      save_workflow = FALSE,
       verbose       = FALSE,
       seed          = 0307,
       no_improve    = 10L

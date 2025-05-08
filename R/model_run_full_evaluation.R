@@ -230,7 +230,7 @@ full_model_evaluation <- function(input_data,
     run_bayesian_tuning(tuned_wf_set = wf_set_updated,
                         folds        = folds,
                         iterations   = bayesian_iter,
-                        parallel     = TRUE) -> tuned_models
+                        parallel     = FALSE) -> tuned_models
 
   }, error = function(e) {
 
