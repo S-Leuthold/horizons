@@ -1,0 +1,19 @@
+# macOS system file
+.DS_Store
+
+# RStudio temporary workspace files
+.RDataTmp*
+.Rhistory
+.Rproj.user
+
+# R build ignores
+.Rbuildignore
+
+# Evaluation results and other large binary artifacts
+*.qs
+*.rds
+*.RData
+*.tmp
+
+# Other stuff you don't want tracked
+evaluation_results.qs
