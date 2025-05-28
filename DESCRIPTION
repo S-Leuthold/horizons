@@ -1,0 +1,57 @@
+Package: horizons
+Title: Spectral Ensemble Modeling and Covariate Prediction for Soil Data
+Version: 0.1.0
+Authors@R: 
+    person(given  = "Sam",
+           family = "Leuthold",
+           email  = "sam.leuthold@colostate.edu",
+           role   = c("aut", "cre"))
+Description: Provides functions to construct, tune, and evaluate spectral ensemble models 
+    for soil property prediction using mid-infrared (MIR) data. Includes a modular system 
+    for generating model grids, applying spectral and response transformations, predicting 
+    covariates using OSSL data, and managing workflows via the 'tidymodels' framework. 
+    Designed for internal use on high-performance systems, with support for parallel execution 
+    and spectral clustering.
+License: MIT + file LICENSE
+Encoding: UTF-8
+LazyData: true
+Imports:
+    cli,
+    cluster,
+    Cubist,
+    dials,
+    dplyr,
+    FactoMineR,
+    furrr,
+    future,
+    glue,
+    hardhat,
+    here,
+    magrittr,
+    opusreader2,
+    parsnip,
+    plsmod,
+    progressr,
+    prospectr,
+    purrr,
+    qs,
+    readr,
+    recipes,
+    rlang,
+    rsample,
+    rules,
+    spectrolab,
+    stacks,
+    stringr,
+    tibble,
+    tidyr,
+    tidyselect,
+    tune,
+    workflows,
+    workflowsets,
+    yardstick
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.3.2
+Suggests: 
+    testthat (>= 3.0.0)
+Config/testthat/edition: 3
