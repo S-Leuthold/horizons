@@ -21,10 +21,10 @@ This package is designed for researchers in soil biogeochemistry and environment
 
 ## Installation
 
-\```r
+```r
 # Install from GitHub
 remotes::install_github("S-Leuthold/horizons")
-\```
+```
 
 ---
 
@@ -44,7 +44,7 @@ remotes::install_github("S-Leuthold/horizons")
 
 ## Usage Example
 
-\```r
+```r
 library(horizons)
 
 results <- full_model_evaluation(
@@ -60,7 +60,7 @@ results <- full_model_evaluation(
   bayesian_iter = 15,
   cv_folds = 5
 )
-\```
+```
 
 ---
 
