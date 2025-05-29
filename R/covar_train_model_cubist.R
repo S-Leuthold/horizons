@@ -52,21 +52,31 @@
 #'   Sand  = runif(100, 50, 80)
 #' )
 #'
-#' result <- cubist_model_function_covar(input_data = df, covariate = "Sand")
+#' # Updated example call to use the new function name
+#' result <- fit_cubist_model(input_data = df, covariate = "Sand")
 #' result$Evaluation
 #' }
 #'
 #' @seealso
-#' \code{\link{predict_covariates}}, \code{\link{evaluate_predictions}}, \code{\link{reduce_dimensions_pca_covpred}}
+#' \code{\link{predict_covariates}}, \code{\link{evaluate_predictions}}, \code{\link{reduce_dimensions_pca}} # Updated link
 #'
 #' @keywords internal
 
-cubist_model_function_covar <- function(input_data,
-                                        covariate) {
+fit_cubist_model <- function(input_data,
+                             covariate) {
+
+  ## ---------------------------------------------------------------------------
+  ## Step 0: Data validation
+  ## ---------------------------------------------------------------------------
 
   cli::cli_progress_step("Preparing training data for covariate {.val {covariate}}")
 
   covariate_name <- grep(covariate, colnames(input_data), value = TRUE)
+
+  if (length(covariate_name) == 0) {
+    cli::cli_alert_danger("Covariate '{covariate}' not found in input_data.")
+    return(NULL)
+  }
 
   input_data$Response <- input_data[[covariate_name]]
 
@@ -75,61 +85,115 @@ cubist_model_function_covar <- function(input_data,
                   dplyr::starts_with("Dim.")) %>%
     tidyr::drop_na() -> input_data
 
+  if (nrow(input_data) == 0) {
+    cli::cli_alert_warning("Input data for covariate '{covariate}' is empty after dropping NAs. Cannot train model.")
+    return(NULL)
+  }
+
   ## ---------------------------------------------------------------------------
   ## Step 1: Data Preparation
   ## ---------------------------------------------------------------------------
 
   set.seed(0307)
 
-  split_obj  <- rsample::initial_split(input_data, strata = Response)
-  Train_Data <- rsample::training(split_obj)
-  Test_Data  <- rsample::testing(split_obj)
-  CV_Folds   <- rsample::vfold_cv(Train_Data, v = 3)
+  safely_execute(expr          = {rsample::initial_split(input_data, strata = Response)},
+                 default_value = NULL,
+                 error_message = glue::glue("Failed to create initial data split for {covariate}")) -> split_data
+
+  if (is.null(split_data)) return(NULL)
+
+  Train_Data <- rsample::training(split_data)
+  Test_Data  <- rsample::testing(split_data)
+
+
+  safely_execute(expr          = {rsample::vfold_cv(Train_Data, v = 3)},
+                 default_value = NULL,
+                 error_message = glue::glue("Failed to create CV folds for {covariate}")) -> CV_Folds
+
+  if (is.null(CV_Folds)) return(NULL)
 
   ## ---------------------------------------------------------------------------
   ## Step 2: Define and Tune Cubist Model
   ## ---------------------------------------------------------------------------
 
-  parsnip::cubist_rules(committees = tune::tune(),
-                        neighbors  = tune::tune(),
-                        max_rules  = tune::tune()) %>%
-    parsnip::set_engine("Cubist") %>%
-    parsnip::set_mode("regression") -> model_spec
+    ## ---------------------------------------------------------------------------
+    ## Stage 1: Define cubist model specifications
+    ## ---------------------------------------------------------------------------
 
-  workflows::workflow() %>%
-    workflows::add_model(model_spec) %>%
-    workflows::add_formula(Response ~ .) -> wf
+    parsnip::cubist_rules(committees = tune::tune(),
+                          neighbors  = tune::tune(),
+                          max_rules  = tune::tune()) %>%
+      parsnip::set_engine("Cubist") %>%
+      parsnip::set_mode("regression") -> model_spec
 
-  future::plan(future::multisession, workers = parallel::detectCores(logical = TRUE) - 1)
+    workflows::workflow() %>%
+      workflows::add_model(model_spec) %>%
+      workflows::add_formula(Response ~ .) -> wf
 
-  dials::grid_space_filling(rules::committees(range = c(2L, 20L)),
-                            dials::neighbors(range = c(2L, 9L)),
-                            dials::max_rules(),
-                            size = 5,
-                            type = "max_entropy") -> grid
+    ## ---------------------------------------------------------------------------
+    ## Stage 2: Initial Grid Search for Hyperparameter Tuning
+    ## ---------------------------------------------------------------------------
 
-  cli::cli_progress_step("Running grid search for {.val {covariate}}")
+    safely_execute(expr          = {future::plan(future::multisession,
+                                                 workers = parallel::detectCores(logical = TRUE) - 1)},
+                   default_value = NULL,
+                   error_message = "Failed to set parallel plan for tuning")
 
-  tune::tune_grid(object    = wf,
-                  resamples = CV_Folds,
-                  grid      = grid,
-                  control   = tune::control_grid(allow_par = TRUE)) -> grid_res
+    dials::grid_space_filling(rules::committees(range = c(2L, 20L)),
+                              dials::neighbors(range = c(2L, 9L)),
+                              dials::max_rules(),
+                              size = 5,
+                              type = "max_entropy") -> grid
 
-  cli::cli_progress_step("Running Bayesian optimization for {.val {covariate}}")
+    cli::cli_progress_step("Running grid search for {.val {covariate}}")
 
-  tune::tune_bayes(object    = wf,
-                   resamples = CV_Folds,
-                   initial   = grid_res,
-                   iter      = 2,
-                   control   = tune::control_bayes(allow_par = TRUE)) -> bayes_res
+    safely_execute(expr          = {tune::tune_grid(object    = wf,
+                                   resamples = CV_Folds,
+                                   grid      = grid,
+                                   control   = tune::control_grid(allow_par = TRUE))},
+                   default_value = NULL,
+                   error_message = glue::glue("Grid tuning faliled for {covariate}")) -> grid_res
 
-  best_params <- tune::select_best(bayes_res,
-                                   metric = "rmse")
+    if(is.null(grid_res)){
+      safely_execute(expr = {future::plan(future::sequential)})
+      return(NULL)
+    }
 
-  final_wf    <- tune::finalize_workflow(wf,
-                                         best_params)
+    ## ---------------------------------------------------------------------------
+    ## Stage 3: Bayesian Optimization for Hyperparameter Tuning
+    ## ---------------------------------------------------------------------------
 
-  future::plan(future::sequential)
+    cli::cli_progress_step("Running Bayesian optimization for {.val {covariate}}")
+
+    safely_execute(expr        = {tune::tune_bayes(object    = wf,
+                                                   resamples = CV_Folds,
+                                                   initial   = grid_res,
+                                                   iter      = 2,
+                                                   control   = tune::control_bayes(allow_par = TRUE))},
+                   default_value = NULL,
+                   error_message = glue::glue("Bayesian tuning failed for {covariate}")) -> bayes_res
+
+    if(is.null(bayes_res)){
+      safely_execute(expr = {future::plan(future::sequential)})
+      return(NULL)
+    }
+
+    ## ---------------------------------------------------------------------------
+    ## Stage 4: Finalizing workflow
+    ## ---------------------------------------------------------------------------
+
+    cli::cli_progress_step("Finalizing workflow for {.val {covariate}}")
+
+    best_params <- tune::select_best(bayes_res,
+                                     metric = "rmse")
+
+    final_wf    <- tune::finalize_workflow(wf,
+                                           best_params)
+
+    safely_execute(expr          = {future::plan(future::sequential)},
+                   default_value = NULL,
+                   error_message = "Failed to reset parallel plan after Cubist tuning")
+
 
   ## ---------------------------------------------------------------------------
   ## Step 3: Final Fit and Evaluation
@@ -137,15 +201,25 @@ cubist_model_function_covar <- function(input_data,
 
   cli::cli_progress_step("Evaluating final model for {.val {covariate}}")
 
-  final_wf %>%
-    tune::last_fit(split_obj) %>%
-    tune::collect_predictions() %>%
-    dplyr::rename(Predicted = .pred) %>%
-    soilspec::eval(pred = .$Predicted,
-                   obs  = .$Response,
-                   obj  = "quant") -> eval
+  safely_execute(expr          = {final_wf %>%
+                                    tune::last_fit(split_data) %>%
+                                    tune::collect_predictions() %>%
+                                    dplyr::rename(Predicted = .pred) %>%
+                                    drop_na() %>%
+                                    soilspec::eval(pred = .$Predicted,
+                                                   obs  = .$Response,
+                                                   obj  = "quant")},
+                 default_value = NULL,
+                 error_message = ("Failed to perform last_fit() or collect_predictions() for the current model.")) -> eval
 
-  fitted_model <- final_wf %>% parsnip::fit(Train_Data)
+  if (is.null(eval)) return(NULL)
+
+  safely_execute(expr          = {final_wf %>% parsnip::fit(Train_Data)},
+                 default_value = NULL,
+                 error_message = glue::glue("Failed to fit final workflow for {covariate}")) -> fitted_model
+
+  if(is.null(fitted_model)) return(NULL)
+
 
   return(list(Model           = fitted_model,
               Best_Parameters = best_params,
