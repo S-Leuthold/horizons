@@ -41,11 +41,11 @@
 #'
 #' @keywords internal
 
-create_training_subsets <- function(training_data,
-                                    pca_model,
-                                    kmeans_model,
-                                    n_components,
-                                    coverage = 0.8) {
+create_clustered_subsets <- function(training_data,
+                                     pca_model,
+                                     kmeans_model,
+                                     n_components,
+                                     coverage = 0.8) {
 
   ## ---------------------------------------------------------------------------
   ## Step 1: Project training data into PCA space

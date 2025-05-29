@@ -90,6 +90,14 @@ predict_covariates <- function(covariates,
 
       cli::cli_alert_info("Starting prediction of covariates.")
 
+
+    ## -------------------------------------------------------------------------
+    ## Check for lat/long if spatail data is requested.
+    ## -------------------------------------------------------------------------
+
+
+      #TODO
+
   ## ---------------------------------------------------------------------------
   ## Step 1.5: Smooth and normalize the data
   ## ---------------------------------------------------------------------------
@@ -109,15 +117,14 @@ predict_covariates <- function(covariates,
   ## Step 2: Load the OSSL data
   ## ---------------------------------------------------------------------------
 
-  tryCatch({
+  safely_execute(expr          = {download_ossl_data(covariates = covariates,
+                                                     max_samples = 500)},
+                 default_value = NULL,
+                 error_message = "Error downloading OSSL data for {covariates}") -> training_data
 
-    training_data <- download_ossl_data(covariates = covariates)
-
-    }, error = function(e) {
-
-      stop("Error in downloading OSSL data: ", e$message)
-
-    })
+  if(is.null(training_data)) {
+    cli::cli_abort("Aborting: OSSL data loading failed.")
+  }
 
   cli::cli_progress_step("OSSL data loaded and processed.")
 
@@ -125,17 +132,16 @@ predict_covariates <- function(covariates,
   ## Step 3: Reduce dimensions
   ## ---------------------------------------------------------------------------
 
-  cli::cli_progress_step("Running dimensionality reduction...")
+  safely_execute(expr          = {reduce_dimensions_pca(training_data = training_data,
+                                                        new_data      = input_data)},
+                 default_value = NULL,
+                 error_message = "Error during dimensionality reduction") -> reduced_dimensions_data
 
-  tryCatch({
+  if(is.null(reduced_dimensions_data)) {
+    cli::cli_abort("Aborting: Dimensionality reduction failed.")
+  }
 
-    reduced_dimensions_data <- reduce_dimensions_pca_covpred(training_data = training_data,
-                                                             new_data      = input_data)
-  }, error = function(e) {
-
-     stop("Error during dimensionality reduction: ", e$message)
-
-    })
+  ## ---------------------------------------------------------------------------
 
   training_data <- reduced_dimensions_data$training_data
   input_data    <- reduced_dimensions_data$new_data
@@ -148,20 +154,20 @@ predict_covariates <- function(covariates,
 
   cli::cli_progress_step("Running clustering analysis...")
 
-  tryCatch({
+  safely_execute(expr          = {cluster_spectral_data(input_data = input_data)},
+                 default_value = NULL,
+                 error_message = "Error during clustering of input data") -> clustering_results
 
-    clustering_results <- cluster_input_data(input_data = input_data)
+  if(is.null(clustering_results)) {
+    cli::cli_abort("Aborting: Clustering analysis of input data failed.")
+  }
 
-    }, error = function(e) {
-
-       stop("Error during clustering of input data: ", e$message)
-
-    })
+  ## ---------------------------------------------------------------------------
 
   input_data    <- clustering_results$input_data
   pca_model     <- clustering_results$pca_model
   kmeans_model  <- clustering_results$kmeans_model
-  n_componenets <- clustering_results$ncomp
+  n_components  <- clustering_results$ncomp
 
   cli::cli_progress_step("Clustering analysis complete.")
 
@@ -169,20 +175,19 @@ predict_covariates <- function(covariates,
   ## Step 5: Build per-cluster training subsets
   ## ---------------------------------------------------------------------------
 
-  cli::cli_progress_step("Segmenting data...")
+   cli::cli_progress_step("Segmenting data...")
 
-  tryCatch({
-    training_data_clustered <- create_training_subsets(training_data = training_data,
-                                                       pca_model     = pca_model,
-                                                       kmeans_model  = kmeans_model,
-                                                       n_components  = n_componenets,
-                                                       coverage      = 0.80)
-  }, error = function(e) {
+  safely_execute(expr          = {create_clustered_subsets(training_data = training_data,
+                                                           pca_model     = pca_model,
+                                                           kmeans_model  = kmeans_model,
+                                                           n_components  = n_components,
+                                                           coverage      = 0.80)},
+                 default_value = NULL,
+                 error_message = "Error during training data segmentation.") -> training_data_clustered
 
-    stop("Error during training data segmentation: ", e$message)
-
-  })
-
+  if (is.null(training_data_clustered)) {
+    cli::cli_abort("Aborting: Training data segmentation failed.")
+  }
 
   ## ---------------------------------------------------------------------------
   ## Step 6: Split training data into train/holdout
@@ -223,11 +228,9 @@ predict_covariates <- function(covariates,
   ## Step 8: Train Cubist models across clusters and covariates
   ## ---------------------------------------------------------------------------
 
-  model_grid <- purrr::cross_df(list(
-    cluster          = names(training_data),
-    covariate        = covariates
-  )) %>%
-    dplyr::mutate(training_subset = purrr::map(cluster, ~ training_data[[.x]]))
+  purrr::cross_df(list(cluster   = names(training_data),
+                       covariate = covariates)) %>%
+    dplyr::mutate(training_subset = purrr::map(cluster, ~ training_data[[.x]])) -> model_grid
 
   cli::cli_progress_step("Setting up Cubist models...")
 
@@ -238,8 +241,13 @@ predict_covariates <- function(covariates,
 
     cli::cli_progress_step("Calibrating model for: {covariate} ({cluster})")
 
-    calibrated_model <- cubist_model_function_covar(input_data = training_subset,
-                                                    covariate  = covariate)
+    calibrated_model <- fit_cubist_model(input_data = training_subset,
+                                         covariate  = covariate)
+
+    if(is.null(calibrated_model)) {
+      cli::cli_alert_danger("Model calibration failed for {covariate} in {cluster}. Skipping.")
+      return(NULL)
+    }
 
     list(outcome     = covariate,
          cluster     = cluster,
@@ -247,6 +255,12 @@ predict_covariates <- function(covariates,
          best_params = calibrated_model$Best_Parameters,
          evaluation  = calibrated_model$Evaluation)
   })
+
+  Calibrated_Models <- purrr::compact(Calibrated_Models)
+
+  if (length(Calibrated_Models) == 0) {
+    cli::cli_abort("Aborting: No Cubist models were successfully calibrated.")
+  }
 
   cli::cli_progress_step("Cubist models calibrated.")
 
@@ -263,10 +277,16 @@ predict_covariates <- function(covariates,
     input_data %>%
       dplyr::filter(Cluster == as.numeric(stringr::str_split_i(model_info$cluster, "_", 2))) -> input_data_local
 
-    if (nrow(input_data_local) == 0) return(NULL)
+    if (nrow(input_data_local) == 0) return (NULL)
 
-    preds <- predict(object   = model_info$model,
-                     new_data = input_data_local)
+     safely_execute(expr          = {predict(object   = model_info$model,
+                                             new_data = input_data_local)},
+                    default_value = NULL,
+                    error_message = "Prediction failed for {model_info$outcome} in {model_info$cluster}") -> preds
+
+    if(is.null(preds)) {
+      return(NULL)
+    }
 
     input_data_local %>%
       dplyr::select(Sample_ID,
@@ -275,12 +295,12 @@ predict_covariates <- function(covariates,
       dplyr::mutate(Predicted_Values = preds$.pred,
                     Covariate        = model_info$outcome)
 
-  }) %>%  dplyr::bind_rows() %>%
-          dplyr::group_by(Sample_ID,
-                          Covariate,
-                          Source,
-                          Cluster) %>%
-          dplyr::ungroup()
+    }) %>%  dplyr::bind_rows() %>%
+            dplyr::group_by(Sample_ID,
+                            Covariate,
+                            Source,
+                            Cluster) %>%
+            dplyr::ungroup()
 
 
   ## ---------------------------------------------------------------------------
@@ -307,8 +327,10 @@ predict_covariates <- function(covariates,
   ## Step 11: Evaluate holdout predictions
   ## ---------------------------------------------------------------------------
 
-  evaluation_stats <- evaluate_predictions(measured_data = holdout_measurements,
-                                           modeled_data  = holdout_predictions)
+  safely_execute(expr          = {evaluate_predictions(measured_data = holdout_measurements,
+                                                       modeled_data  = holdout_predictions)},
+                 default_value = NULL,
+                 error_message = "Error evaluating predictions for holdout data") -> evaluation_stats
 
   cli::cli_progress_step("Prediction and evaluation complete.")
   cli::cli_progress_done()

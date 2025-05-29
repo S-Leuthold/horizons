@@ -40,7 +40,7 @@
 #'
 #' @keywords internal
 
-cluster_input_data <- function(input_data) {
+cluster_spectral_data <- function(input_data) {
 
   ## ---------------------------------------------------------------------------
   ## Step 1: PCA Preparation — scale and reduce

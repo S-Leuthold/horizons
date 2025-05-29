@@ -29,33 +29,57 @@
 #'
 #' @keywords internal
 
-reduce_dimensions_pca_covpred <- function(training_data,
-                                          new_data) {
+reduce_dimensions_pca <- function(training_data,
+                                  new_data) {
 
   ## ---------------------------------------------------------------------------
   ## Step 1: Run PCA on training spectral columns
   ## ---------------------------------------------------------------------------
 
-  Training_PCA <- FactoMineR::PCA(X          = dplyr::select(training_data, c(`608`:`3992`)),
-                                  scale.unit = TRUE,
-                                  graph      = FALSE,
-                                  ncp        = 80)
+  cli::cli_progress_step("Fitting PCA on training data.")
+
+  safely_execute(expr          = {FactoMineR::PCA(X          = dplyr::select(training_data, c(`608`:`3992`)),
+                                                  scale.unit = TRUE,
+                                                  graph      = FALSE,
+                                                  ncp        = 80)},
+                 default_value = NULL,
+                 error_message = "Failed to perform PCA on training data") -> Training_PCA
+
+  if(is.null(Training_PCA)) {
+    return(NULL)
+  }
 
   ## ---------------------------------------------------------------------------
   ## Step 2: Project training data into PCA space and join metadata
   ## ---------------------------------------------------------------------------
 
-  tibble::as_tibble(Training_PCA$ind$coord) %>%
-    dplyr::bind_cols(dplyr::select(training_data, -c(`608`:`3992`))) -> training_scores
+  cli::cli_progress_step("Extracting PCA scores for training data.")
+
+  safely_execute(expr          = {tibble::as_tibble(Training_PCA$ind$coord) %>%
+                                   dplyr::bind_cols(dplyr::select(training_data, -c(`608`:`3992`)))},
+                 default_value = NULL,
+                 error_message = "Failed to extract or combine training PCA scores") -> training_scores
+
+  if(is.null(training_scores)) {
+    return(NULL)
+  }
 
   ## ---------------------------------------------------------------------------
   ## Step 3: Project new data using the same PCA and join metadata
   ## ---------------------------------------------------------------------------
 
-  predict(Training_PCA,
-          newdata = dplyr::select(new_data, c(`608`:`3992`)))$coord %>%
-   tibble::as_tibble() %>%
-   dplyr::bind_cols(dplyr::select(new_data, -c(`608`:`3992`))) -> new_scores
+  cli::cli_progress_step("Predicting PCA scores for new data.")
+
+  safely_execute(expr         = {predict(object  = Training_PCA,
+                                         newdata = dplyr::select(new_data, c(`608`:`3992`)))$coord %>%
+                                                    tibble::as_tibble() %>%
+                                                    dplyr::bind_cols(dplyr::select(new_data, -c(`608`:`3992`)))},
+                 default_value = NULL,
+                 error_message = "Failed to project new data into PCA space") -> new_scores
+
+  if(is.null(new_scores)){
+    return(NULL)
+  }
 
   ## ---------------------------------------------------------------------------
   ## Step 4: Return as list
