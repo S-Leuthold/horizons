@@ -118,7 +118,7 @@ predict_covariates <- function(covariates,
   ## ---------------------------------------------------------------------------
 
   safely_execute(expr          = {download_ossl_data(covariates = covariates,
-                                                     max_samples = 500)},
+                                                     max_samples = NULL)},
                  default_value = NULL,
                  error_message = "Error downloading OSSL data for {covariates}") -> training_data
 
