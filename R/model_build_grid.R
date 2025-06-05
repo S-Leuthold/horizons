@@ -13,7 +13,7 @@
 #' @importFrom cli cli_alert_danger cli_alert_info cli_alert_success
 #' @importFrom rlang .data
 #'
-#' #' @param models Character vector of model types. Accepted values include:
+#' @param models Character vector of model types. Accepted values include:
 #'   "Partial Least Squares Regression", "Cubist", "Memory Based Learning",
 #'   "Random Forest", "Support Vector Machine", and "Bagged Neural Network".
 #'

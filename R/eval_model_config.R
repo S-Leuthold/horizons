@@ -57,6 +57,8 @@ evaluate_model_config <- function(input_data,
   ## Step 2: Build Recipe + Workflow
   ## ---------------------------------------------------------------------------
 
+  cli::cli_alert_success("Building recipe and workflow.")
+
   safely_execute(expr = {build_recipe(input_data              = train,
                                       response_transformation = transformation,
                                       spectral_transformation = preprocessing,
@@ -119,6 +121,8 @@ evaluate_model_config <- function(input_data,
   ## Step 3: Initial Grid Tuning
   ## ---------------------------------------------------------------------------
 
+  cli::cli_alert_success("Running initial grid search.")
+
   safely_execute(expr = {tune::tune_grid(object    = workflow,
                                          resamples = folds,
                                          grid      = grid_size,
@@ -148,7 +152,7 @@ evaluate_model_config <- function(input_data,
 
   if(pruning){
 
-    safely_execute(expr = {min(yardstick::collect_metrics(grid_res) %>%
+    safely_execute(expr = {min(tune::collect_metrics(grid_res) %>%
                             dplyr::filter(.metric == "rrmse") %>%
                             dplyr::pull(mean), na.rm = TRUE)},
                    default_value = Inf,
@@ -170,6 +174,8 @@ evaluate_model_config <- function(input_data,
   ## ---------------------------------------------------------------------------
   ## Step 5: Bayesian Tuning
   ## ---------------------------------------------------------------------------
+
+  cli::cli_alert_success("Running Bayesian tuning.")
 
   tibble::tibble(wflow_id = wflow_id,
                  info     = list(tibble::tibble(workflow = list(workflow))),
@@ -201,6 +207,8 @@ evaluate_model_config <- function(input_data,
   ## ---------------------------------------------------------------------------
   ## Step 6: Finalize + Fit
   ## ---------------------------------------------------------------------------
+
+  cli::cli_alert_success("Finalizing and fitting best models.")
 
   safely_execute(expr = {bayes_res %>%
                           dplyr::mutate(best_model = purrr::map(result, tune::select_best, metric = "rrmse"),
@@ -245,6 +253,8 @@ evaluate_model_config <- function(input_data,
   ## ---------------------------------------------------------------------------
   ## Step 8: Collect and return results.
   ## ---------------------------------------------------------------------------
+
+  cli::cli_alert_success("Evaluation completed successfully!")
 
   return(list(evaluation_results = evaluation_res,
               tuned_models       = finalized_wf,
