@@ -84,10 +84,10 @@ run_bayesian_tuning <- function(tuned_wf_set,
   results <- list()
   warning_log <- list()
 
-  cli::cli_alert_info("Starting Bayesian tuning on {.val {length(workflows)}} workflows.")
+  #cli::cli_alert_info("Starting Bayesian tuning on {.val {length(workflows)}} workflows.")
 
   tune_function <- function(wf, init, id, idx) {
-    cli::cli_progress_step("Tuning model {.val {id}} ({.val {idx}} of {.val {length(wf_ids)}})")
+    #cli::cli_progress_step("Tuning model {.val {id}} ({.val {idx}} of {.val {length(wf_ids)}})")
 
     result <- tryCatch({
       withCallingHandlers(
@@ -137,7 +137,7 @@ run_bayesian_tuning <- function(tuned_wf_set,
   tuned_wf_set$result  <- purrr::map(results, "result")
   tuned_wf_set$metrics <- purrr::map(tuned_wf_set$result, ~ if (!is.null(.)) tune::collect_metrics(.) else NULL)
 
-  cli::cli_alert_success("Bayesian tuning complete. {.val {sum(!purrr::map_lgl(tuned_wf_set$result, is.null))}} of {.val {length(wf_ids)}} models succeeded.")
+  #cli::cli_alert_success("Bayesian tuning complete. {.val {sum(!purrr::map_lgl(tuned_wf_set$result, is.null))}} of {.val {length(wf_ids)}} models succeeded.")
 
   return(tuned_wf_set = tuned_wf_set)
 }

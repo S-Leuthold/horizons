@@ -2,7 +2,7 @@
 % Please edit documentation in R/model_build_grid.R
 \name{build_model_grid}
 \alias{build_model_grid}
-\title{Build Model Parameter Grid for Ensemble Evaluation}
+\title{Build Full Parameter Grid for Ensemble Model Evaluation}
 \usage{
 build_model_grid(
   models,
@@ -15,65 +15,56 @@ build_model_grid(
 )
 }
 \arguments{
-\item{models}{Character vector of model types. Supported values include:
-\itemize{
-\item{"Partial Least Squares Regression"}
-\item{"Cubist"}
-\item{"Memory Based Learning"}
-\item{"Random Forest"}
-\item{"Support Vector Machine"}
-\item{"Bagged Neural Network"}
-}}
+\item{models}{Character vector of model types. Accepted values include:
+"Partial Least Squares Regression", "Cubist", "Memory Based Learning",
+"Random Forest", "Support Vector Machine", and "Bagged Neural Network".}
 
 \item{transformations}{Character vector of response transformations. Options include:
-\itemize{
-\item{"No Transformation"}
-\item{"Log Transformation"}
-\item{"Square Root Transformation"}
-}}
+"No Transformation", "Log Transformation", and "Square Root Transformation".}
 
 \item{preprocessing}{Character vector of spectral preprocessing methods. Options include:
-\itemize{
-\item{"No Preprocessing"}
-\item{"Savitzky Golay - 0 Deriv"}
-\item{"Savitzky Golay - 1 Deriv"}
-\item{"Standard Normal Variate - Savitzky Golay - 0 Deriv"}
-\item{"Standard Normal Variate - Savitzky Golay - 1 Deriv"}
-}}
+"No Preprocessing", "Savitzky Golay - 0 Deriv", "Savitzky Golay - 1 Deriv",
+"Savitzky Golay - 2 Deriv", "Standard Normal Variate - Savitzky Golay - 0 Deriv",
+and "Standard Normal Variate - Savitzky Golay - 1 Deriv".}
 
 \item{variables}{Character vector of response variable names.}
 
-\item{include_covariates}{Logical. If TRUE, covariates will be included in the grid.}
+\item{include_covariates}{Logical. If \code{TRUE}, covariate combinations will be included in the grid.}
 
-\item{covariate_data}{Optional data frame of covariates (must contain a \code{Sample_ID} column).}
+\item{covariate_data}{Optional data frame of covariates (must include \code{Sample_ID}). Required if \code{include_covariates = TRUE}.}
 
-\item{expand_covariate_grid}{Logical. If TRUE, includes all combinations of covariates.}
+\item{expand_covariate_grid}{Logical. If \code{TRUE}, generate all covariate subsets; if \code{FALSE}, use singletons + no covariates.}
 }
 \value{
-A tibble of all model parameter combinations, including model type,
-transformation, preprocessing, covariate subset (or NULL/"No Covariates"), and response variable.
+A tibble of all modeling configurations with the following columns:
+\describe{
+\item{model}{Character. Model type.}
+\item{transformation}{Character. Response transformation.}
+\item{preprocessing}{Character. Spectral preprocessing method.}
+\item{covariates}{List-column of covariates to include (or \code{NULL}).}
+\item{include_covariates}{Logical. Whether covariates are included.}
+\item{variable}{Character. Name of response variable.}
+}
 }
 \description{
-Constructs a grid of modeling configurations by expanding all combinations of:
-model type, response transformation, spectral preprocessing, and optional covariate
-inclusion. This grid serves as the foundation for constructing workflow sets in
-the full ensemble evaluation pipeline.
+Constructs a tibble of modeling configurations by expanding all combinations of:
+model type, response transformation, spectral preprocessing, response variable,
+and covariate inclusion logic. This function standardizes input validation,
+supports optional covariate subset expansion, and returns a structure compatible
+with \code{run_batch_models()}.
 }
-\examples{
-\dontrun{
-build_model_grid(
-  models = c("Cubist", "Random Forest"),
-  transformations = c("No Transformation"),
-  preprocessing = c("Savitzky Golay - 0 Deriv", "Standard Normal Variate - Savitzky Golay - 0 Deriv"),
-  variables = "SOC",
-  include_covariates = TRUE,
-  covariate_data = tibble::tibble(Sample_ID = 1:3, clay = c(10, 20, 30), pH = c(6.5, 6.8, 7)),
-  expand_covariate_grid = FALSE
-)
+\section{Covariate Expansion Logic}{
+
+If \code{include_covariates = TRUE}, the function will extract covariate names
+from \code{covariate_data} and generate:
+\itemize{
+\item All subsets (if \code{expand_covariate_grid = TRUE})
+\item Singleton + "No Covariates" (if \code{FALSE})
+}
+If \code{include_covariates = FALSE}, the covariate column will be \code{NULL} for all rows.
 }
 
-}
 \seealso{
-\code{\link{clean_workflow_id}}, \code{\link{build_recipe}}, \code{\link{full_model_evaluation}}
+\code{\link[=run_batch_models]{run_batch_models()}}, \code{\link[=safe_run_model]{safe_run_model()}}
 }
 \keyword{internal}

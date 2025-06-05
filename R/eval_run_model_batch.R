@@ -81,6 +81,7 @@
 #'   variable       = "MAOM_C_g_kg"
 #' )
 #' }
+#' @export
 
 run_model_evaluation <- function(config,
                                  input_data,
