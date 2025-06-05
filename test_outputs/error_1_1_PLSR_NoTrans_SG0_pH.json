@@ -1,0 +1,15 @@
+{
+  "row": 1,
+  "config": [
+    {
+      "model": "Partial Least Squares Regression",
+      "transformation": "No Transformation",
+      "preprocessing": "Savitzky Golay - 0 Deriv",
+      "covariates": "pH",
+      "include_covariates": true
+    }
+  ],
+  "error_message": "evaluate_model_config() returned NULL",
+  "reason": {},
+  "time": "2025-06-05 17:02:25.50969"
+}
