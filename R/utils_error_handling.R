@@ -41,14 +41,7 @@ safely_execute <- function(expr,
                            default_value       = NULL,
                            error_message       = NULL,
                            log_error           = TRUE,
-<<<<<<< codex/remove-unused-call-argument-or-pass-to-purrr--safely
                            return_result_list  = getOption("horizons.return_safely_result", FALSE)) {
-=======
-                           call                = rlang::caller_env(),
-                           return_result_list  = getOption("horizons.return_safely_result", FALSE),
-                           capture_trace       = getOption("horizons.capture_error_trace", FALSE),
-                           trace_log_file      = NULL) {
->>>>>>> main
 
   ## ---------------------------------------------------------------------------
   ## Step 1: Capture the expression into a quosure.
