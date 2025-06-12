@@ -9,7 +9,8 @@ safely_execute(
   default_value = NULL,
   error_message = NULL,
   log_error = TRUE,
-  call = rlang::caller_env()
+  call = rlang::caller_env(),
+  return_result_list = getOption("horizons.return_safely_result", FALSE)
 )
 }
 \arguments{
@@ -27,9 +28,16 @@ if an error occurs (default: \code{TRUE}).}
 
 \item{call}{The call to evaluate. Passed to \code{purrr::safely} for more informative
 error messages.}
+
+\item{return_result_list}{Logical. If \code{TRUE}, the function returns a list containing
+the result and any caught error. Defaults to the option
+\code{horizons.return_safely_result} which is \code{FALSE}.}
 }
 \value{
-The result of \code{expr} if successful, or \code{default_value} if an error occurs.
+If \code{return_result_list} is \code{FALSE} (default), the result of \code{expr}
+if successful or \code{default_value} if an error occurs. If
+\code{return_result_list} is \code{TRUE}, a list with components \code{result}
+and \code{error} is returned.
 }
 \description{
 This helper function wraps an expression or function call using \code{purrr::safely()}
