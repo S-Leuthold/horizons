@@ -18,11 +18,19 @@
 #'                           containing both the result and any caught error
 #'                           (default is controlled by the option
 #'                           `horizons.return_safely_result`, which is `FALSE`).
+#' @param capture_trace Logical. If `TRUE`, capture the call stack for any error
+#'                      using `rlang::last_trace()` (or `rlang::trace_back()` if
+#'                      unavailable). The trace is attached to the error object
+#'                      and returned when `return_result_list` is `TRUE`.
+#' @param trace_log_file Optional file path. If provided and `capture_trace` is
+#'                      `TRUE`, the captured trace will be appended to this file
+#'                      for later inspection.
 #'
 #' @return If `return_result_list` is `FALSE` (default), the result of `expr` if
 #'         successful, or `default_value` if an error occurs. If
-#'         `return_result_list` is `TRUE`, a list with components `result` and
-#'         `error` is returned.
+#'         `return_result_list` is `TRUE`, a list with components `result`,
+#'         `error`, and optionally `trace` (when `capture_trace` is `TRUE`) is
+#'         returned.
 #'
 #' @importFrom purrr safely
 #' @importFrom cli cli_warn
@@ -36,7 +44,9 @@ safely_execute <- function(expr,
                            error_message       = NULL,
                            log_error           = TRUE,
                            call                = rlang::caller_env(),
-                           return_result_list  = getOption("horizons.return_safely_result", FALSE)) {
+                           return_result_list  = getOption("horizons.return_safely_result", FALSE),
+                           capture_trace       = getOption("horizons.capture_error_trace", FALSE),
+                           trace_log_file      = NULL) {
 
   ## ---------------------------------------------------------------------------
   ## Step 1: Capture the expression into a quosure.
@@ -62,11 +72,29 @@ safely_execute <- function(expr,
 
   result_list <- safe_evaluator()
 
+  trace <- NULL
+
   ## ---------------------------------------------------------------------------
   ## Step 4: Check for errors and log them if necessary.
   ## ---------------------------------------------------------------------------
 
   if (!is.null(result_list$error)) {
+
+    if (capture_trace) {
+      if (exists("last_trace", asNamespace("rlang"), inherits = FALSE)) {
+        trace <- tryCatch(rlang::last_trace(), error = function(e) NULL)
+      } else {
+        trace <- tryCatch(rlang::trace_back(), error = function(e) NULL)
+      }
+      attr(result_list$error, "trace") <- trace
+      if (!is.null(trace_log_file)) {
+        try({
+          cat(capture.output(print(trace)), file = trace_log_file,
+              sep = "\n", append = TRUE)
+        }, silent = TRUE)
+      }
+    }
+
     if (log_error) {
       if (!is.null(error_message)) {
 
@@ -91,7 +119,9 @@ safely_execute <- function(expr,
       }
 
     if (return_result_list) {
-      return(structure(list(result = default_value, error = result_list$error),
+      return(structure(list(result = default_value,
+                           error  = result_list$error,
+                           trace  = trace),
                        class = "horizons_safely_result"))
     }
     return(default_value)
@@ -104,7 +134,9 @@ safely_execute <- function(expr,
 
 
   if (return_result_list) {
-    return(structure(list(result = result_list$result, error = NULL),
+    return(structure(list(result = result_list$result,
+                         error  = NULL,
+                         trace  = NULL),
                      class = "horizons_safely_result"))
   }
 
