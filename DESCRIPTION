@@ -1,6 +1,6 @@
 Package: horizons
 Title: Spectral Ensemble Modeling and Covariate Prediction for Soil Data
-Version: 0.1.0
+Version: 0.2.0
 Authors@R: 
     person(given  = "Sam",
            family = "Leuthold",
@@ -14,7 +14,9 @@ Description: Provides functions to construct, tune, and evaluate spectral ensemb
     and spectral clustering.
 License: MIT + file LICENSE
 Encoding: UTF-8
-LazyData: true
+LazyData: false
+Remotes:
+    spectral-cockpit/opusreader2
 Imports:
     cli,
     cluster,
