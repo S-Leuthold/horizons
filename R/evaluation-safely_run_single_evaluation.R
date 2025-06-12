@@ -164,8 +164,6 @@ safe_run_model <- function(config_row,
   ## Step 6: Done
   ## ---------------------------------------------------------------------------
 
-  cli::cli_alert_success("Completed config {row_index}: {config_desc}")
-
   return(list(status_summary = status_summary,
               output_path    = status_summary$output_path))
 

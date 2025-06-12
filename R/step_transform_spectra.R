@@ -50,40 +50,53 @@ process_spectra <- function(input_vector,
   start <- 1 + ((window_size - 1) / 2)
   end   <- length(input_vector) - ((window_size - 1) / 2)
 
-  out <-  switch(preprocessing,
-                "No Preprocessing" = {
+  out <-  switch(as.character(preprocessing),
+                "raw" = {
                   input_vector[start:end]
                 },
-                "Savitzky Golay - 0 Deriv" = {
+                "sg" = {
                   input_vector %>%
                     matrix(nrow = 1) %>%
                     prospectr::savitzkyGolay(m = 0, p = 1, w = window_size) %>%
                     as.vector()
                 },
-                "Savitzky Golay - 2 Deriv" = {
+                "snv" = {
+                  input_vector %>%
+                    matrix(nrow = 1) %>%
+                    prospectr::standardNormalVariate() %>%
+                    as.vector()
+                },
+                "deriv1" = {
+                  input_vector %>%
+                    matrix(nrow = 1) %>%
+                    prospectr::savitzkyGolay(m = 1, p = 1, w = window_size) %>%
+                    as.vector()
+                },
+                "deriv2" = {
                   input_vector %>%
                     matrix(nrow = 1) %>%
                     prospectr::savitzkyGolay(m = 2, p = 3, w = window_size) %>%
                     as.vector()
                 },
-                "Standard Normal Variate - Savitzky Golay - 0 Deriv" = {
+                "snv_deriv1" = {
                   input_vector %>%
                     matrix(nrow = 1) %>%
-                    prospectr::savitzkyGolay(m = 0, p = 1, w = window_size) %>%
                     prospectr::standardNormalVariate() %>%
-                    as.vector()
-                },
-                "Savitzky Golay - 1 Deriv" = {
-                  input_vector %>%
-                    matrix(nrow = 1) %>%
                     prospectr::savitzkyGolay(m = 1, p = 1, w = window_size) %>%
                     as.vector()
                 },
-                "Standard Normal Variate - Savitzky Golay - 1 Deriv" = {
+                "snv_deriv2" = {
                   input_vector %>%
                     matrix(nrow = 1) %>%
-                    prospectr::savitzkyGolay(m = 1, p = 1, w = window_size) %>%
                     prospectr::standardNormalVariate() %>%
+                    prospectr::savitzkyGolay(m = 2, p = 3, w = window_size) %>%
+                    as.vector()
+                },
+                "msc_deriv1" = {
+                  input_vector %>%
+                    matrix(nrow = 1) %>%
+                    prospectr::msc() %>%
+                    prospectr::savitzkyGolay(m = 1, p = 1, w = window_size) %>%
                     as.vector()
                 },
                 stop(glue::glue("Unknown preprocessing type: {preprocessing}"))

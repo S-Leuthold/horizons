@@ -138,7 +138,7 @@ run_model_evaluation <- function(config,
     raw_outputs[[i]]  <- result
     summary_rows[[i]] <- result$status_summary
 
-    cli::cli_inform("({i}/{nrow(config)}) Sleeping and collecting garbage...")
+    cli::cli_inform("Sleeping and collecting garbage...")
     gc(verbose = FALSE, full = TRUE)
     Sys.sleep(1)
   }
@@ -157,7 +157,7 @@ run_model_evaluation <- function(config,
     }
 
     qs::qsave(summary_tbl, summary_file)
-    cli::cli_alert_success("Saved summary table to: {.path {summary_file}}")
+    cli::cli_h2("Saved summary table to: {.path {summary_file}}")
 
   }
 
@@ -167,8 +167,8 @@ run_model_evaluation <- function(config,
 
   duration <- difftime(Sys.time(), start_time, units = "mins")
 
-  cli::cli_h1("🌱 horizons run finished in {.val {round(duration, 1)}} minutes.")
   cli::cli_h2("Full model evaluation completed for {.val {nrow(config)}} configurations. Results saved to {.path {output_dir}}.")
+  cli::cli_h1("🌱 horizons run finished in {.val {round(duration, 1)}} minutes.")
 
   if (return_outputs) {
     return(list(summary = summary_tbl, raw_results = raw_outputs))
