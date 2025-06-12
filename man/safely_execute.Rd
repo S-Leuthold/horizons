@@ -10,7 +10,9 @@ safely_execute(
   error_message = NULL,
   log_error = TRUE,
   call = rlang::caller_env(),
-  return_result_list = getOption("horizons.return_safely_result", FALSE)
+  return_result_list = getOption("horizons.return_safely_result", FALSE),
+  capture_trace = getOption("horizons.capture_error_trace", FALSE),
+  trace_log_file = NULL
 )
 }
 \arguments{
@@ -32,12 +34,21 @@ error messages.}
 \item{return_result_list}{Logical. If \code{TRUE}, the function returns a list containing
 the result and any caught error. Defaults to the option
 \code{horizons.return_safely_result} which is \code{FALSE}.}
+
+\item{capture_trace}{Logical. Capture the call stack for any error using
+\code{rlang::last_trace()} (or \code{rlang::trace_back()} if unavailable).
+The trace is attached to the error object and returned when
+\code{return_result_list} is \code{TRUE}.}
+
+\item{trace_log_file}{Optional file path. If provided and \code{capture_trace}
+is \code{TRUE}, the captured trace will be appended to this file.}
 }
 \value{
 If \code{return_result_list} is \code{FALSE} (default), the result of \code{expr}
 if successful or \code{default_value} if an error occurs. If
-\code{return_result_list} is \code{TRUE}, a list with components \code{result}
-and \code{error} is returned.
+\code{return_result_list} is \code{TRUE}, a list with components \code{result},
+\code{error}, and optionally \code{trace} (when \code{capture_trace} is
+\code{TRUE}) is returned.
 }
 \description{
 This helper function wraps an expression or function call using \code{purrr::safely()}
