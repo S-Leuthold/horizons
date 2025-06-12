@@ -131,7 +131,7 @@ build_recipe <- function(input_data,
   ## Step 3: Response Transformation
   ## ---------------------------------------------------------------------------
 
-  switch(response_transformation,
+  switch(as.character(response_transformation),
          "No Transformation"          = model_recipe,
          "Log Transformation"         = model_recipe %>% recipes::step_log(all_outcomes(), skip = TRUE),
          "Square Root Transformation" = model_recipe %>% recipes::step_sqrt(all_outcomes(), skip = TRUE),

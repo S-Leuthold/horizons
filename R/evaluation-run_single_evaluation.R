@@ -83,7 +83,7 @@ evaluate_model_config <- function(input_data,
 
   safely_execute(expr = {define_model_specifications(model)},
                  default_value = NULL,
-                 error_message = "Model Model specification failed for {wflow_id}") -> model_spec
+                 error_message = "Model specification failed for {wflow_id}") -> model_spec
 
   if (is.null(model_spec)) {
 
@@ -117,20 +117,37 @@ evaluate_model_config <- function(input_data,
                 reason             = "Workflow construction failed"))
   }
 
+  ##----------------------------------------------------------------------------
+
+  param_set <- hardhat::extract_parameter_set_dials(workflow)
+
+  if("mtry" %in% param_set$name) {
+
+    recipe %>%
+      recipes::prep() %>%
+      recipes::bake(new_data = NULL) %>%
+      dplyr::select(-Project, -Sample_ID, -Response)-> eval_data
+
+    hardhat::extract_parameter_set_dials(workflow) %>%
+      dials::finalize(eval_data) -> param_set
+
+  }
+
   ## ---------------------------------------------------------------------------
   ## Step 3: Initial Grid Tuning
   ## ---------------------------------------------------------------------------
 
   cli::cli_alert_success("Running initial grid search.")
 
-  safely_execute(expr = {tune::tune_grid(object    = workflow,
-                                         resamples = folds,
-                                         grid      = grid_size,
-                                         metrics   = yardstick::metric_set(rrmse, rsq),
-                                         control   = tune::control_grid(save_pred     = FALSE,
-                                                                        save_workflow = TRUE,
-                                                                        verbose       = FALSE,
-                                                                        parallel_over = "resamples"))},
+  safely_execute(expr = {tune::tune_grid(object     = workflow,
+                                         resamples  = folds,
+                                         param_info = param_set,
+                                         grid       = grid_size,
+                                         metrics    = yardstick::metric_set(rrmse, rsq),
+                                         control    = tune::control_grid(save_pred     = FALSE,
+                                                                         save_workflow = TRUE,
+                                                                         verbose       = FALSE,
+                                                                         parallel_over = "resamples"))},
                  default_value = NULL,
                  error_message = "Grid tuning failed for {wflow_id}") -> grid_res
 
@@ -177,21 +194,25 @@ evaluate_model_config <- function(input_data,
 
   cli::cli_alert_success("Running Bayesian tuning.")
 
-  tibble::tibble(wflow_id = wflow_id,
-                 info     = list(tibble::tibble(workflow = list(workflow))),
-                 result   = list(grid_res),
-                 option   = list(list())) -> wf_set
-
-  class(wf_set) <- c("workflow_set", class(wf_set))
-  wf_set$rank <- NA_integer_
-
-  safely_execute(expr = {run_bayesian_tuning(tuned_wf_set = wf_set,
-                                             folds        = folds,
-                                             iterations   = bayesian_iter,
-                                             parallel     = FALSE)},
-                 default_value = NULL,
-                 error_message = "Bayesian tuning failed for {wflow_id}") -> bayes_res
-
+  suppressWarnings({
+    suppressMessages({
+      safely_execute(expr = {tune::tune_bayes(object     = workflow,
+                                              initial    = grid_res,
+                                              resamples  = folds,
+                                              param_info = param_set,
+                                              iter       = bayesian_iter,
+                                              metrics    = yardstick::metric_set(rrmse, rsq),
+                                              control    = tune::control_bayes(save_pred     = FALSE,
+                                                                               save_workflow = TRUE,
+                                                                               verbose       = FALSE,
+                                                                               seed          = 307,
+                                                                               no_improve    = 10L,
+                                                                               allow_par     = TRUE,
+                                                                               parallel_over = "resamples"))},
+                     default_value  = NULL,
+                     error_message  = "Bayesian tuning failed for {wflow_id}") -> bayes_res
+    })
+  })
   if (is.null(bayes_res)) {
 
     cli::cli_alert_warning("Skipping model: Bayesian tuning failed.")
@@ -210,10 +231,14 @@ evaluate_model_config <- function(input_data,
 
   cli::cli_alert_success("Finalizing and fitting best models.")
 
-  safely_execute(expr = {bayes_res %>%
-                          dplyr::mutate(best_model = purrr::map(result, tune::select_best, metric = "rrmse"),
-                                        final_wf   = purrr::map2(info, best_model, ~ tune::finalize_workflow(.x$workflow[[1]], .y)),
-                                        fitted_wf  = purrr::map(final_wf, ~ parsnip::fit(.x, data = train)))},
+  safely_execute(expr = {best_model <- tune::select_best(bayes_res, metric = "rrmse")
+                         final_wf   <- tune::finalize_workflow(workflow, best_model)
+                         fitted_wf  <- parsnip::fit(final_wf, data = train)
+                         tibble::tibble(wflow_id  = wflow_id,
+                                        workflow  = list(workflow),
+                                        result    = list(bayes_res),
+                                        final_wf  = list(final_wf),
+                                        fitted_wf = list(fitted_wf))},
                  default_value = NULL,
                  error_message = "Finalization failed for {wflow_id}") -> finalized_wf
 
@@ -254,7 +279,7 @@ evaluate_model_config <- function(input_data,
   ## Step 8: Collect and return results.
   ## ---------------------------------------------------------------------------
 
-  cli::cli_alert_success("Evaluation completed successfully!")
+  cli::cli_alert_success("Evaluation completed successfully: RRMSE = {round(evaluation_res$rrmse, 2)}%, R-squared = {round(evaluation_res$rsq * 100, 3)}%")
 
   return(list(evaluation_results = evaluation_res,
               tuned_models       = finalized_wf,

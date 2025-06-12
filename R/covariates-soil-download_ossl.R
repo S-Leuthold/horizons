@@ -84,7 +84,7 @@ download_ossl_data <- function(covariates,
   ## Step 2: Ensure required data is downloaded
   ## ---------------------------------------------------------------------------
 
-  safely_execute(expr          = {download_horizons_data(force = TRUE)},
+  safely_execute(expr          = {download_horizons_data(force = FALSE)},
                  default_value = NULL,
                  log_error     = FALSE,
                  error_message = "Failed to download the required OSSL data")
