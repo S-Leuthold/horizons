@@ -12,8 +12,6 @@
 #'                      syntax (e.g., `{my_var}`).
 #' @param log_error Logical. If `TRUE`, an error message will be logged using `cli::cli_warn()`
 #'                  if an error occurs (default: `TRUE`).
-#' @param call The call to evaluate. Passed to `purrr::safely` for more informative
-#'             error messages.
 #' @param return_result_list Logical. If `TRUE`, the function returns a list
 #'                           containing both the result and any caught error
 #'                           (default is controlled by the option
@@ -43,10 +41,14 @@ safely_execute <- function(expr,
                            default_value       = NULL,
                            error_message       = NULL,
                            log_error           = TRUE,
+<<<<<<< codex/remove-unused-call-argument-or-pass-to-purrr--safely
+                           return_result_list  = getOption("horizons.return_safely_result", FALSE)) {
+=======
                            call                = rlang::caller_env(),
                            return_result_list  = getOption("horizons.return_safely_result", FALSE),
                            capture_trace       = getOption("horizons.capture_error_trace", FALSE),
                            trace_log_file      = NULL) {
+>>>>>>> main
 
   ## ---------------------------------------------------------------------------
   ## Step 1: Capture the expression into a quosure.
