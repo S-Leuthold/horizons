@@ -40,7 +40,7 @@ safe_run_model(
 \value{
 A named list with:
 \describe{
-\item{status_summary}{A one-row tibble with model ID, RMSE, R², pruned file path, error path, and status flag.}
+\item{status_summary}{A one-row tibble with model ID, RMSE, R², pruned file path, error path, error message, and status flag.}
 \item{pruned_output_path}{Path to \code{.qs} file with pruned model result (if successful).}
 }
 }
