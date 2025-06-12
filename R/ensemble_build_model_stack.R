@@ -93,7 +93,7 @@ build_ensemble_stack <- function(top_workflows,
     ## Stage 1: Clean up and split the data
     ## -------------------------------------------------------------------------
 
-    cli::cli_progress_step("Creating {.val {cv_folds}}-fold CV resamples stratified by {.val {variable}}")
+    if (verbose) cli::cli_progress_step("Creating {.val {cv_folds}}-fold CV resamples stratified by {.val {variable}}")
 
     input_data %>%
       rename(Response = !!sym(variable)) -> input_data
@@ -127,34 +127,17 @@ build_ensemble_stack <- function(top_workflows,
   ## Step 2: Tune the models.
   ## ---------------------------------------------------------------------------
 
-  cli::cli_progress_step("Tuning top workflows with {.fun tune_bayes}")
+  if (verbose) cli::cli_progress_step("Tuning top workflows with {.fun tune_bayes}")
 
   top_workflows %>%
     dplyr::mutate(results = purrr::map2(.x = workflow,
                                         .y = wflow_id,
-                                        .f =  ~ tryCatch({
-
-                                          tuned <- tune::tune_bayes(object    = .x,
-                                                                    resamples = resamples,
-                                                                    iter      = 20,
-                                                                    control   = stack_controls,
-                                                                    metrics   = yardstick::metric_set(yardstick::rmse, yardstick::rsq, rrmse))
-
-                                          best_params <- tune::select_best(tuned, metric = "rmse")
-
-                                          finalized_wf <- tune::finalize_workflow(.x, best_params)
-
-                                          tune::fit_resamples(object    = finalized_wf,
-                                                              resamples = resamples,
-                                                              control   = refit_controls)
-
-                                          }, error = function(e) {
-
-                                            cli::cli_warn("Model failed to tune: {.emph {e$message}}")
-                                            NULL
-
-                                        })
-    )) %>%
+                                        .f = safely_execute(expr = {tune_and_refit(wflow     = workflow,
+                                                                                   resamples = x,
+                                                                                   metrics   = x,
+                                                                                   control_bayes = stack_controls,
+                                                                                   control_refits = X)},
+                                                            ))) %>%
     dplyr::filter(!purrr::map_lgl(results, is.null)) -> tuned_models
 
     ## -------------------------------------------------------------------------
