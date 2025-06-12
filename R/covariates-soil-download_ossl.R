@@ -4,7 +4,8 @@
 #' from the Open Soil Spectroscopy Library (OSSL). Applies smoothing and standard normal variate (SNV)
 #' preprocessing to spectra, joins soil covariate information, and caches the final processed dataset.
 #'
-#' If a cached version matching the requested covariates is found, it will be loaded automatically.
+#' If cached processed MIR spectra are found, they will be loaded automatically
+#' to avoid reprocessing.
 #'
 #' @import dplyr
 #' @import purrr
@@ -46,7 +47,7 @@
 #'   \item{Caching processed datasets locally for faster reuse.}
 #' }
 #'
-#' If a suitable cached dataset already exists (i.e., contains the requested covariates), it will be reused automatically.
+#' Cached processed spectra are reused automatically when available.
 #'
 #' @seealso
 #' \code{\link{predict_covariates}}, \code{\link{create_input_data}}
@@ -84,7 +85,7 @@ download_ossl_data <- function(covariates,
   ## Step 2: Ensure required data is downloaded
   ## ---------------------------------------------------------------------------
 
-  safely_execute(expr          = {download_horizons_data(force = FALSE)},
+  safely_execute(expr          = {download_horizons_data(force = FALSE, ask = FALSE)},
                  default_value = NULL,
                  log_error     = FALSE,
                  error_message = "Failed to download the required OSSL data") -> download_result
@@ -93,7 +94,7 @@ download_ossl_data <- function(covariates,
     cli::cli_abort("Aborting: Unable to download or locate required OSSL data.")
   }
 
-  cli::cli_progress_step("Required data is present.")
+  cli::cli_progress_step("Required OSSL raw data is available.")
 
   ## ---------------------------------------------------------------------------
   ## Step 3: Load data from cache
