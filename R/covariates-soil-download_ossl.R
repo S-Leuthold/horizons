@@ -4,7 +4,8 @@
 #' from the Open Soil Spectroscopy Library (OSSL). Applies smoothing and standard normal variate (SNV)
 #' preprocessing to spectra, joins soil covariate information, and caches the final processed dataset.
 #'
-#' If a cached version matching the requested covariates is found, it will be loaded automatically.
+#' If cached processed MIR spectra are found, they will be loaded automatically
+#' to avoid reprocessing.
 #'
 #' @import dplyr
 #' @import purrr
@@ -46,7 +47,7 @@
 #'   \item{Caching processed datasets locally for faster reuse.}
 #' }
 #'
-#' If a suitable cached dataset already exists (i.e., contains the requested covariates), it will be reused automatically.
+#' Cached processed spectra are reused automatically when available.
 #'
 #' @seealso
 #' \code{\link{predict_covariates}}, \code{\link{create_input_data}}
@@ -84,12 +85,16 @@ download_ossl_data <- function(covariates,
   ## Step 2: Ensure required data is downloaded
   ## ---------------------------------------------------------------------------
 
-  safely_execute(expr          = {download_horizons_data(force = FALSE)},
+  safely_execute(expr          = {download_horizons_data(force = FALSE, ask = FALSE)},
                  default_value = NULL,
                  log_error     = FALSE,
-                 error_message = "Failed to download the required OSSL data")
+                 error_message = "Failed to download the required OSSL data") -> download_result
 
-  cli::cli_progress_step("Required data is present.")
+  if (is.null(download_result)) {
+    cli::cli_abort("Aborting: Unable to download or locate required OSSL data.")
+  }
+
+  cli::cli_progress_step("Required OSSL raw data is available.")
 
   ## ---------------------------------------------------------------------------
   ## Step 3: Load data from cache
@@ -182,28 +187,19 @@ download_ossl_data <- function(covariates,
                  default_value = NULL,
                  error_message = "Failed to get the path for processed  MIR spectra") -> processed_mir_path
 
+  processed_mir <- NULL
+
   if (!is.null(processed_mir_path)) {
 
     cli::cli_progress_step("Loading processed MIR spectra from the cache at {processed_mir_path}")
 
-    safely_execute(expr          = {qs::qread(processed_mir_path)},
-                   default_value = NULL,
-                   error_message = glue::glue("Failed to read processed MIR data from {processed_mir_path}")) -> processed_mir
+    processed_mir <- safely_execute(expr          = {qs::qread(processed_mir_path)},
+                                    default_value = NULL,
+                                    error_message = glue::glue("Failed to read processed MIR data from {processed_mir_path}"))
 
-    if(all(covariates %in% colnames(processed_mir))){
-
-      cli::cli_progress_step("Successfully loaded processed MIR data containing requested covariates from cache.")
-
-    } else {
-
-      cli::cli_alert_danger("Cached processed MIR data does not contain requested covariates. Reprocessing now.")
-      processed_mir <- NULL
-
+    if (!is.null(processed_mir)) {
+      cli::cli_progress_step("Successfully loaded processed MIR data from cache.")
     }
-
-  } else {
-
-    processed_mir <- NULL
 
   }
 
