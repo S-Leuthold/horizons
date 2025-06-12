@@ -87,7 +87,11 @@ download_ossl_data <- function(covariates,
   safely_execute(expr          = {download_horizons_data(force = FALSE)},
                  default_value = NULL,
                  log_error     = FALSE,
-                 error_message = "Failed to download the required OSSL data")
+                 error_message = "Failed to download the required OSSL data") -> download_result
+
+  if (is.null(download_result)) {
+    cli::cli_abort("Aborting: Unable to download or locate required OSSL data.")
+  }
 
   cli::cli_progress_step("Required data is present.")
 
@@ -182,28 +186,19 @@ download_ossl_data <- function(covariates,
                  default_value = NULL,
                  error_message = "Failed to get the path for processed  MIR spectra") -> processed_mir_path
 
+  processed_mir <- NULL
+
   if (!is.null(processed_mir_path)) {
 
     cli::cli_progress_step("Loading processed MIR spectra from the cache at {processed_mir_path}")
 
-    safely_execute(expr          = {qs::qread(processed_mir_path)},
-                   default_value = NULL,
-                   error_message = glue::glue("Failed to read processed MIR data from {processed_mir_path}")) -> processed_mir
+    processed_mir <- safely_execute(expr          = {qs::qread(processed_mir_path)},
+                                    default_value = NULL,
+                                    error_message = glue::glue("Failed to read processed MIR data from {processed_mir_path}"))
 
-    if(all(covariates %in% colnames(processed_mir))){
-
-      cli::cli_progress_step("Successfully loaded processed MIR data containing requested covariates from cache.")
-
-    } else {
-
-      cli::cli_alert_danger("Cached processed MIR data does not contain requested covariates. Reprocessing now.")
-      processed_mir <- NULL
-
+    if (!is.null(processed_mir)) {
+      cli::cli_progress_step("Successfully loaded processed MIR data from cache.")
     }
-
-  } else {
-
-    processed_mir <- NULL
 
   }
 
