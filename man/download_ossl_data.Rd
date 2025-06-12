@@ -33,7 +33,8 @@ from the Open Soil Spectroscopy Library (OSSL). Applies smoothing and standard n
 preprocessing to spectra, joins soil covariate information, and caches the final processed dataset.
 }
 \details{
-Cached processed MIR spectra are loaded automatically when available to avoid reprocessing.
+If cached processed MIR spectra are found, they will be loaded automatically
+to avoid reprocessing.
 
 The function workflow includes:
 \enumerate{

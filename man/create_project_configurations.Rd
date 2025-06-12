@@ -13,6 +13,7 @@ create_project_configurations(
   climate_covariates = NULL,
   spatial_covariates = NULL,
   expand_covariate_grid = TRUE,
+  include_covariates = TRUE,
   verbose = TRUE
 )
 }

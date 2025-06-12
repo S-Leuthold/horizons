@@ -16,7 +16,7 @@ Invisibly returns the paths of the cached files.
 }
 \description{
 Downloads location metadata, lab data, and raw MIR data for the OSSL dataset.
-Stores them in a user-specific cache directory so they don\u2019t need to be redownloaded.
-If the data already exists, it\u2019s reused silently unless \code{force = TRUE},
-in which case the user is asked whether to re-download it.
+Stores them in a user-specific cache directory so they don\u2019t need to be
+redownloaded. If the data already exists, it\u2019s reused silently unless
+\code{force = TRUE}, in which case the user can choose to re-download it.
 }

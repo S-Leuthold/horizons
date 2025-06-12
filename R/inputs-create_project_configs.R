@@ -35,6 +35,7 @@ create_project_configurations <- function(project_data,
                                           climate_covariates    = NULL,
                                           spatial_covariates    = NULL,
                                           expand_covariate_grid = TRUE,
+                                          include_covariates    = TRUE,
                                           verbose               = TRUE) {
 
   ## ---------------------------------------------------------------------------
@@ -83,6 +84,8 @@ create_project_configurations <- function(project_data,
 
   # ----------------------------------------------------------------------------
 
+
+
   if (!is.null(climate_covariates)) {
 
   safely_execute(expr = {fetch_climate_covariates(input_data = project_data) %>%
@@ -91,6 +94,10 @@ create_project_configurations <- function(project_data,
                                         dplyr::all_of(climate_covariates))},
                  default_value = NULL,
                  error_message = "Failure fetching weather covariates") -> climate_covs
+  } else {
+
+    climate_covs <- NULL
+
   }
 
   ## ---------------------------------------------------------------------------
@@ -110,6 +117,10 @@ create_project_configurations <- function(project_data,
         default_value = NULL,
         error_message = "Failure fetching spatial covariates") -> spatial_covs
 
+  } else {
+
+    spatial_covs <- NULL
+
   }
 
   ## ---------------------------------------------------------------------------
@@ -126,7 +137,7 @@ create_project_configurations <- function(project_data,
   ## Step 5: Create Covariate Combinations
   ## ---------------------------------------------------------------------------
 
-  if (isTRUE(include_covariates) && exists("covariate_data")) {
+  if (isTRUE(include_covariates) && !is.null(covariate_data)) {
 
     covariate_names <- setdiff(names(covariate_data), c("Project", "Sample_ID"))
 
@@ -141,8 +152,11 @@ create_project_configurations <- function(project_data,
       covariate_combos <- list("No Covariates", covariate_names)
 
     }
+
   } else {
+
     covariate_combos <- list("No Covariates")
+
   }
 
   ## ---------------------------------------------------------------------------
@@ -159,11 +173,4 @@ create_project_configurations <- function(project_data,
               covariate_data         = covariate_data))
 }
 
-# create_project_configurations(project_data = test_data,
-#                               models = c("random_forest", "cubist"),
-#                               transformations = "Log Transformation",
-#                               preprocessing = c("deriv2", "snv"),
-#                               soil_covariates = c("pH", "Clay", "CEC"),
-#                               climate_covariates = NULL,
-#                               spatial_covariates = NULL,
-#                               expand_covariate_grid = TRUE)
+
