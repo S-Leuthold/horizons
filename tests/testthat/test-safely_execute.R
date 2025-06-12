@@ -11,7 +11,9 @@ test_that("safely_execute can return result list", {
 
 test_that("safely_execute returns default and error on failure", {
   res <- horizons:::safely_execute({stop("oops")}, default_value = NA,
-                                    log_error = FALSE, return_result_list = TRUE)
+                                    log_error = FALSE, return_result_list = TRUE,
+                                    capture_trace = TRUE)
   expect_true(inherits(res$error, "error"))
   expect_true(is.na(res$result))
+  expect_false(is.null(res$trace))
 })
