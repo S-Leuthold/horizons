@@ -14,8 +14,15 @@
 #'                  if an error occurs (default: `TRUE`).
 #' @param call The call to evaluate. Passed to `purrr::safely` for more informative
 #'             error messages.
+#' @param return_result_list Logical. If `TRUE`, the function returns a list
+#'                           containing both the result and any caught error
+#'                           (default is controlled by the option
+#'                           `horizons.return_safely_result`, which is `FALSE`).
 #'
-#' @return The result of `expr` if successful, or `default_value` if an error occurs.
+#' @return If `return_result_list` is `FALSE` (default), the result of `expr` if
+#'         successful, or `default_value` if an error occurs. If
+#'         `return_result_list` is `TRUE`, a list with components `result` and
+#'         `error` is returned.
 #'
 #' @importFrom purrr safely
 #' @importFrom cli cli_warn
@@ -25,10 +32,11 @@
 
 
 safely_execute <- function(expr,
-                           default_value = NULL,
-                           error_message = NULL,
-                           log_error     = TRUE,
-                           call          = rlang::caller_env()) {
+                           default_value       = NULL,
+                           error_message       = NULL,
+                           log_error           = TRUE,
+                           call                = rlang::caller_env(),
+                           return_result_list  = getOption("horizons.return_safely_result", FALSE)) {
 
   ## ---------------------------------------------------------------------------
   ## Step 1: Capture the expression into a quosure.
@@ -82,6 +90,10 @@ safely_execute <- function(expr,
           }
       }
 
+    if (return_result_list) {
+      return(structure(list(result = default_value, error = result_list$error),
+                       class = "horizons_safely_result"))
+    }
     return(default_value)
 
   }
@@ -90,6 +102,11 @@ safely_execute <- function(expr,
   ## Step 5: Return the result if no error occurred.
   ## ---------------------------------------------------------------------------
 
+
+  if (return_result_list) {
+    return(structure(list(result = result_list$result, error = NULL),
+                     class = "horizons_safely_result"))
+  }
 
   return(result_list$result)
 }
