@@ -1,8 +1,9 @@
 #' Download and Cache All Required OSSL Data
 #'
 #' Downloads location metadata, lab data, and raw MIR data for the OSSL dataset.
-#' Stores them in a user-specific cache directory so they don’t need to be redownloaded.
-#' If the data already exists, it’s reused silently.
+#' Stores them in a user-specific cache directory so they don\u2019t need to be
+#' redownloaded. If the data already exists, it\u2019s reused silently unless
+#' \code{force = TRUE}, in which case the user can choose to re-download it.
 #'
 #' @param force Logical. If TRUE, forces re-download of all data even if present.
 #' @param ask Logical. If TRUE (default), prompts the user for confirmation before download.
@@ -25,13 +26,15 @@ download_horizons_data <- function(force = FALSE,
   lab_file      <- file.path(cache_dir, "ossl_lab_data.qs")
   mir_file      <- file.path(cache_dir, "ossl_mir_raw.qs")
 
+  existing_files <- all(file.exists(c(location_file,
+                                      lab_file,
+                                      mir_file)))
+
   ## ---------------------------------------------------------------------------
   ## Step 2: Check if data already exists
   ## ---------------------------------------------------------------------------
 
-  if (all(file.exists(c(location_file,
-                        lab_file,
-                        mir_file))) && !force) {
+  if (existing_files && !force) {
 
     cli::cli_alert_success("OSSL data already present in cache at {.path {cache_dir}}")
 
@@ -46,8 +49,14 @@ download_horizons_data <- function(force = FALSE,
 
   if (ask) {
 
+      confirm_title <- if (existing_files && force) {
+        glue::glue("OSSL data already cached at {cache_dir}. Re-download now?")
+      } else {
+        glue::glue("The OSSL data (~1–2GB total) is missing in cache at {cache_dir}. Download now?")
+      }
+
       utils::menu(c("Yes, download the data", "No, cancel"),
-                  title = glue::glue("The OSSL data (~1–2GB total) is missing in cache at {cache_dir}. Download now?")) -> response
+                  title = confirm_title) -> response
 
     if (response != 1) {
 
