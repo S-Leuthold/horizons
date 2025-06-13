@@ -115,10 +115,7 @@ clean_workflow_id <- function(model,
   ## Step 5: Combine all pieces into indexed workflow ID
   ## ---------------------------------------------------------------------------
 
-  index <- seq_along(model)
-
-  paste0(index, "_",
-         model_abbrev, "_",
+  paste0(model_abbrev, "_",
          transf_abbrev, "_",
          preprocess_abbrev, "_",
          covar_abbrev) -> workflow_id

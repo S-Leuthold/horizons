@@ -43,7 +43,9 @@ reduce_dimensions_pca <- function(training_data,
                                                   graph      = FALSE,
                                                   ncp        = 80)},
                  default_value = NULL,
-                 error_message = "Failed to perform PCA on training data") -> Training_PCA
+                 error_message = "Failed to perform PCA on training data") -> Training_PCA_safe
+
+  Training_PCA <- Training_PCA_safe$result
 
   if(is.null(Training_PCA)) {
     return(NULL)
@@ -58,7 +60,9 @@ reduce_dimensions_pca <- function(training_data,
   safely_execute(expr          = {tibble::as_tibble(Training_PCA$ind$coord) %>%
                                    dplyr::bind_cols(dplyr::select(training_data, -c(`608`:`3992`)))},
                  default_value = NULL,
-                 error_message = "Failed to extract or combine training PCA scores") -> training_scores
+                 error_message = "Failed to extract or combine training PCA scores") -> training_scores_safe
+
+  training_scores <- training_scores_safe$result
 
   if(is.null(training_scores)) {
     return(NULL)
@@ -75,7 +79,9 @@ reduce_dimensions_pca <- function(training_data,
                                                     tibble::as_tibble() %>%
                                                     dplyr::bind_cols(dplyr::select(new_data, -c(`608`:`3992`)))},
                  default_value = NULL,
-                 error_message = "Failed to project new data into PCA space") -> new_scores
+                 error_message = "Failed to project new data into PCA space") -> new_scores_safe
+
+  new_scores <- new_scores_safe$result
 
   if(is.null(new_scores)){
     return(NULL)

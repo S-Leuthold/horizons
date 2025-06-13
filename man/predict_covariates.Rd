@@ -4,7 +4,13 @@
 \alias{predict_covariates}
 \title{Predict Covariates from MIR Spectra Using Clustered Cubist Models}
 \usage{
-predict_covariates(covariates, input_data)
+predict_covariates(
+  covariates,
+  input_data,
+  verbose = TRUE,
+  refresh = FALSE,
+  cache_dir = tools::R_user_dir("horizons", "cache")
+)
 }
 \arguments{
 \item{covariates}{Character vector of covariate names to predict (e.g., "Sand", "pH").}

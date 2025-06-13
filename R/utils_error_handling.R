@@ -1,139 +1,108 @@
 #' Safely Execute an Expression and Capture Errors
 #'
-#' This helper function wraps an expression or function call using `purrr::safely()`
-#' to prevent errors from stopping execution. It optionally logs the error
-#' and returns a specified default value on failure.
+#' This function wraps an expression using `purrr::safely()` to ensure errors
+#' do not halt execution. It captures error messages, optionally logs them,
+#' and can attach trace information for debugging.
 #'
-#' @param expr An R expression or function call to execute safely.
-#' @param default_value The value to return if `expr` results in an error (default: `NULL`).
-#' @param error_message A character string. If provided, this message will be used
-#'                      in a `cli::cli_warn` call if an error occurs. You can
-#'                      embed variables from the calling environment using glue-style
-#'                      syntax (e.g., `{my_var}`).
-#' @param log_error Logical. If `TRUE`, an error message will be logged using `cli::cli_warn()`
-#'                  if an error occurs (default: `TRUE`).
-#' @param return_result_list Logical. If `TRUE`, the function returns a list
-#'                           containing both the result and any caught error
-#'                           (default is controlled by the option
-#'                           `horizons.return_safely_result`, which is `FALSE`).
-#' @param capture_trace Logical. If `TRUE`, capture the call stack for any error
-#'                      using `rlang::last_trace()` (or `rlang::trace_back()` if
-#'                      unavailable). The trace is attached to the error object
-#'                      and returned when `return_result_list` is `TRUE`.
-#' @param trace_log_file Optional file path. If provided and `capture_trace` is
-#'                      `TRUE`, the captured trace will be appended to this file
-#'                      for later inspection.
+#' @param expr An R expression to evaluate.
+#' @param default_value Value to return as `result` if an error occurs (default: `NULL`).
+#' @param error_message Optional character string. If provided, it will be evaluated
+#'        using `glue::glue()` and shown as part of the warning.
+#' @param log_error Logical. Should errors be logged with `cli::cli_warn()`? (default: `TRUE`)
+#' @param capture_trace Logical. If `TRUE`, captures the call trace using `rlang`.
+#' @param trace_log_file Optional path to write the trace if `capture_trace = TRUE`.
 #'
-#' @return If `return_result_list` is `FALSE` (default), the result of `expr` if
-#'         successful, or `default_value` if an error occurs. If
-#'         `return_result_list` is `TRUE`, a list with components `result`,
-#'         `error`, and optionally `trace` (when `capture_trace` is `TRUE`) is
-#'         returned.
-#'
-#' @importFrom purrr safely
-#' @importFrom cli cli_warn
-#' @importFrom rlang enquos eval_tidy
+#' @return A list with elements:
+#'   - `result`: the evaluated result or `default_value` on error
+#'   - `error`: the error object (or `NULL` if none)
+#'   - `trace`: call trace if `capture_trace = TRUE` and an error occurred
 #'
 #' @keywords internal
 
-
 safely_execute <- function(expr,
-                           default_value       = NULL,
-                           error_message       = NULL,
-                           log_error           = TRUE,
-                           return_result_list  = getOption("horizons.return_safely_result", FALSE)) {
+                           default_value   = NULL,
+                           error_message   = NULL,
+                           log_error       = TRUE,
+                           capture_trace   = FALSE,
+                           trace_log_file  = NULL) {
 
   ## ---------------------------------------------------------------------------
-  ## Step 1: Capture the expression into a quosure.
+  ## Step 1: Capture the incoming code block.
   ## ---------------------------------------------------------------------------
 
   expr_quo <- rlang::enquo(expr)
 
   ## ---------------------------------------------------------------------------
-  ## Step 2: Create a safe version of the function.
+  ## Step 2: Create a safely-wrapped function to evaluate the code block.
   ## ---------------------------------------------------------------------------
 
-  safe_evaluator <- purrr::safely(function(){
+  safe_eval <- purrr::safely(function() {
 
-    rlang::eval_tidy(expr_quo,
-                     env = rlang::caller_env())
-  },
+    rlang::eval_tidy(expr_quo, env = rlang::caller_env())
 
-  otherwise = default_value, quiet = TRUE)
+    }, otherwise = default_value, quiet = TRUE)
 
   ## ---------------------------------------------------------------------------
-  ## Step 3: Execute the safe evaluator and handle errors.
+  ## Step 3: Run wrapper and store results.
   ## ---------------------------------------------------------------------------
 
-  result_list <- safe_evaluator()
+  result_list <- safe_eval()
+
+  ## ---------------------------------------------------------------------------
+  ## Step 4: Conditionally trace error back upstream.
+  ## ---------------------------------------------------------------------------
 
   trace <- NULL
 
-  ## ---------------------------------------------------------------------------
-  ## Step 4: Check for errors and log them if necessary.
-  ## ---------------------------------------------------------------------------
-
   if (!is.null(result_list$error)) {
-
     if (capture_trace) {
-      if (exists("last_trace", asNamespace("rlang"), inherits = FALSE)) {
-        trace <- tryCatch(rlang::last_trace(), error = function(e) NULL)
-      } else {
-        trace <- tryCatch(rlang::trace_back(), error = function(e) NULL)
-      }
-      attr(result_list$error, "trace") <- trace
+      trace <- tryCatch(
+        if (exists("last_trace", asNamespace("rlang"), inherits = FALSE)) {
+          rlang::last_trace()
+          } else {
+            rlang::trace_back()
+          },
+        error = function(e) NULL
+      )
+
+      ## -----------------------------------------------------------------------
+      ## Step 4.1: Conditionally write traceback to disk
+      ## -----------------------------------------------------------------------
+
       if (!is.null(trace_log_file)) {
         try({
-          cat(capture.output(print(trace)), file = trace_log_file,
-              sep = "\n", append = TRUE)
+          cat(capture.output(print(trace)),
+              file  = trace_log_file,
+              sep    = "\n",
+              append = TRUE)
         }, silent = TRUE)
       }
     }
 
+    ## -------------------------------------------------------------------------
+    ## Step 4.2: Conditionally log error via cli::cli_warn() using interpolated message
+    ## -------------------------------------------------------------------------
+
     if (log_error) {
-      if (!is.null(error_message)) {
 
-          evaluated_message <- tryCatch(
-
-            glue::glue(error_message, .envir = rlang::caller_env()),
-            error = function(e) {
-
-            paste0(error_message, " (Error evaluating message: ", e$message, ")")
-
-            }
-
-          )
-
-          cli::cli_warn("{evaluated_message}: {result_list$error$message}")
-
-          } else {
-
-          cli::cli_warn("An error occurred: {result_list$error$message}")
-
-          }
+      msg <- if (!is.null(error_message)) {
+        tryCatch(
+          glue::glue(error_message, .envir = rlang::caller_env()),
+          error = function(e) paste0(error_message, " (error in message: ", e$message, ")")
+        )
+      } else {
+        "An error occurred"
       }
 
-    if (return_result_list) {
-      return(structure(list(result = default_value,
-                           error  = result_list$error,
-                           trace  = trace),
-                       class = "horizons_safely_result"))
+      cli::cli_warn("{msg}: {result_list$error$message}")
     }
-    return(default_value)
-
   }
 
   ## ---------------------------------------------------------------------------
-  ## Step 5: Return the result if no error occurred.
+  ## Step 5: Return result, error, and trace.
   ## ---------------------------------------------------------------------------
 
-
-  if (return_result_list) {
-    return(structure(list(result = result_list$result,
-                         error  = NULL,
-                         trace  = NULL),
-                     class = "horizons_safely_result"))
-  }
-
-  return(result_list$result)
+  return(list(result = result_list$result,
+              error  = result_list$error,
+              trace  = trace))
 }

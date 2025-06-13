@@ -65,7 +65,6 @@ parse_filename_metadata <- function(file_name,
     }
   )
 
-  # Add fallback defaults, if needed
   if (!"Fraction" %in% names(metadata)) {
     metadata$Fraction <- default_fraction
     cli::cli_alert("No fraction found in file name {.file {file_name}}. Using default: {.val {default_fraction}}.")

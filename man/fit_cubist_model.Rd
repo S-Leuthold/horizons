@@ -4,7 +4,7 @@
 \alias{fit_cubist_model}
 \title{Fit a Cubist Model for a Single Covariate Using PCA-Transformed Spectral Data}
 \usage{
-fit_cubist_model(input_data, covariate)
+fit_cubist_model(input_data, covariate, verbose)
 }
 \arguments{
 \item{input_data}{A data frame containing PCA-transformed predictors (\code{Dim.1}, \code{Dim.2}, ..., \code{Dim.50})

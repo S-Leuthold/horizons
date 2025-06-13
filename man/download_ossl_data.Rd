@@ -4,21 +4,16 @@
 \alias{download_ossl_data}
 \title{Download and Preprocess OSSL MIR and Covariate Data}
 \usage{
-download_ossl_data(
-  covariates,
-  window_size = 9,
-  bounding_box = NA,
-  max_samples = NULL
-)
+download_ossl_data(covariates, window_size = 9, max_samples = NULL)
 }
 \arguments{
 \item{covariates}{Character vector of covariate names to retrieve (e.g., \code{"Sand"}, \code{"pH"}, \code{"SOC"}).}
 
 \item{window_size}{Integer. Width of the Savitzky-Golay smoothing window for spectral preprocessing (default = 9).}
 
-\item{bounding_box}{Optional. A bounding box for spatial subsetting (not currently implemented).}
-
 \item{max_samples}{Optional. Integer. Maximum number of samples to process from OSSL for testing/debugging. If NULL, all samples are processed.}
+
+\item{bounding_box}{Optional. A bounding box for spatial subsetting (not currently implemented).}
 }
 \value{
 A tibble containing:

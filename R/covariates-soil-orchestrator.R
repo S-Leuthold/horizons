@@ -35,7 +35,10 @@
 #' @export
 
 predict_covariates <- function(covariates,
-                               input_data) {
+                               input_data,
+                               verbose   = TRUE,
+                               refresh   = FALSE,
+                               cache_dir = tools::R_user_dir("horizons", "cache")) {
 
   ## ---------------------------------------------------------------------------
   ## Step 1: Input Validation
@@ -88,15 +91,61 @@ predict_covariates <- function(covariates,
       print(dup_check)
     }
 
-      cli::cli_alert_info("Starting prediction of covariates.")
+    if(verbose) cli::cli_alert_info("Starting prediction of covariates.")
+
+  ## ---------------------------------------------------------------------------
+  ## Step 1: Check for cached covariates
+  ## ---------------------------------------------------------------------------
+
+  build_cache_path <- function(project,
+                               covariate,
+                               cache_dir) {
+
+     proj_slug <- janitor::make_clean_names(project)
+     file.path(cache_dir, proj_slug, paste0(covariate, ".qs"))
+   }
+
+  ## --------------------------------------------------------------------------
+
+   get_cached_covariates <- function(project, covariate, cache_dir){
+     path <- build_cache_path(project, covariate, cache_dir)
+     if(file.exists(path)) {
+       return(tryCatch(qs::qread(path), error = function(e) NULL))
+     } else {
+       return(NULL)
+     }
+   }
 
 
-    ## -------------------------------------------------------------------------
-    ## Check for lat/long if spatail data is requested.
-    ## -------------------------------------------------------------------------
+  project_ids <- input_data$Project
 
+  cov_lookup  <- expand.grid(project          = project_ids,
+                             covariate        = covariates,
+                             stringsAsFactors = FALSE)
 
-      #TODO
+  ## ---------------------------------------------------------------------------
+
+  cov_lookup %>%
+    dplyr::mutate(cache_result = purrr::map2(.x = project,
+                                             .y = covariate,
+                                             .f = ~get_cached_covariates(.x,
+                                                                         .y,
+                                                                         cache_dir))) -> cov_lookup
+
+  ## ---------------------------------------------------------------------------
+
+  cov_lookup %>%
+    dplyr::mutate(missing = purrr::map_lgl(cache_result, is.null)) -> cov_lookup
+
+  covs_to_predict <- dplyr::filter(cov_lookup, Missing)
+  predicted_covs  <- dplyr::filter(cov_lookup, !Missing)
+
+  ## ---------------------------------------------------------------------------
+
+  input_data %>%
+    filter(Project %in% unique(covs_to_predict$Project)) -> input_data
+
+  covariates <- unique(covs_to_predict$covariate)
 
   ## ---------------------------------------------------------------------------
   ## Step 1.5: Smooth and normalize the data
@@ -120,13 +169,15 @@ predict_covariates <- function(covariates,
   safely_execute(expr          = {download_ossl_data(covariates = covariates,
                                                      max_samples = NULL)},
                  default_value = NULL,
-                 error_message = "Error downloading OSSL data for {covariates}") -> training_data
+                 error_message = "Error downloading OSSL data for {covariates}") -> training_data_safe
+
+  training_data <- training_data_safe$result
 
   if(is.null(training_data)) {
     cli::cli_abort("Aborting: OSSL data loading failed.")
   }
 
-  cli::cli_progress_step("OSSL data loaded and processed.")
+  if(verbose) cli::cli_progress_step("OSSL data loaded and processed.")
 
   ## ---------------------------------------------------------------------------
   ## Step 3: Reduce dimensions
@@ -135,7 +186,9 @@ predict_covariates <- function(covariates,
   safely_execute(expr          = {reduce_dimensions_pca(training_data = training_data,
                                                         new_data      = input_data)},
                  default_value = NULL,
-                 error_message = "Error during dimensionality reduction") -> reduced_dimensions_data
+                 error_message = "Error during dimensionality reduction") -> reduced_dimensions_data_safe
+
+  reduced_dimensions_data <- reduced_dimensions_data_safe$result
 
   if(is.null(reduced_dimensions_data)) {
     cli::cli_abort("Aborting: Dimensionality reduction failed.")
@@ -146,17 +199,19 @@ predict_covariates <- function(covariates,
   training_data <- reduced_dimensions_data$training_data
   input_data    <- reduced_dimensions_data$new_data
 
-  cli::cli_progress_step("Dimensionality reduction complete.")
+  if(verbose) cli::cli_progress_step("Dimensionality reduction complete.")
 
   ## ---------------------------------------------------------------------------
   ## Step 4: Cluster the new data
   ## ---------------------------------------------------------------------------
 
-  cli::cli_progress_step("Running clustering analysis...")
+  if(verbose) cli::cli_progress_step("Running clustering analysis...")
 
   safely_execute(expr          = {cluster_spectral_data(input_data = input_data)},
                  default_value = NULL,
-                 error_message = "Error during clustering of input data") -> clustering_results
+                 error_message = "Error during clustering of input data") -> clustering_results_safe
+
+  clustering_results <- clustering_results_safe$result
 
   if(is.null(clustering_results)) {
     cli::cli_abort("Aborting: Clustering analysis of input data failed.")
@@ -169,13 +224,13 @@ predict_covariates <- function(covariates,
   kmeans_model  <- clustering_results$kmeans_model
   n_components  <- clustering_results$ncomp
 
-  cli::cli_progress_step("Clustering analysis complete.")
+  if(verbose) cli::cli_progress_step("Clustering analysis complete.")
 
   ## ---------------------------------------------------------------------------
   ## Step 5: Build per-cluster training subsets
   ## ---------------------------------------------------------------------------
 
-   cli::cli_progress_step("Segmenting data...")
+  if(verbose)  cli::cli_progress_step("Segmenting data...")
 
   safely_execute(expr          = {create_clustered_subsets(training_data = training_data,
                                                            pca_model     = pca_model,
@@ -183,7 +238,9 @@ predict_covariates <- function(covariates,
                                                            n_components  = n_components,
                                                            coverage      = 0.80)},
                  default_value = NULL,
-                 error_message = "Error during training data segmentation.") -> training_data_clustered
+                 error_message = "Error during training data segmentation.") -> training_data_clustered_safe
+
+  training_data_clustered <- training_data_clustered_safe$result
 
   if (is.null(training_data_clustered)) {
     cli::cli_abort("Aborting: Training data segmentation failed.")
@@ -222,7 +279,7 @@ predict_covariates <- function(covariates,
                   .before = 2) %>%
     dplyr::rename(Sample_ID = Sample_Index) -> holdout_spectra
 
-  cli::cli_progress_step("Training data and holdouts created.")
+   if(verbose) cli::cli_progress_step("Training data and holdouts created.")
 
   ## ---------------------------------------------------------------------------
   ## Step 8: Train Cubist models across clusters and covariates
@@ -232,17 +289,18 @@ predict_covariates <- function(covariates,
                        covariate = covariates)) %>%
     dplyr::mutate(training_subset = purrr::map(cluster, ~ training_data[[.x]])) -> model_grid
 
-  cli::cli_progress_step("Setting up Cubist models...")
+   if(verbose) cli::cli_progress_step("Setting up Cubist models...")
 
   Calibrated_Models <- purrr::pmap(model_grid,
                                    function(covariate,
                                             cluster,
                                             training_subset) {
 
-    cli::cli_progress_step("Calibrating model for: {covariate} ({cluster})")
+    if(verbose) cli::cli_progress_step("Calibrating model for: {covariate} ({cluster})")
 
     calibrated_model <- fit_cubist_model(input_data = training_subset,
-                                         covariate  = covariate)
+                                         covariate  = covariate,
+                                         verbose    = verbose)
 
     if(is.null(calibrated_model)) {
       cli::cli_alert_danger("Model calibration failed for {covariate} in {cluster}. Skipping.")
@@ -262,7 +320,7 @@ predict_covariates <- function(covariates,
     cli::cli_abort("Aborting: No Cubist models were successfully calibrated.")
   }
 
-  cli::cli_progress_step("Cubist models calibrated.")
+  if(verbose) cli::cli_progress_step("Cubist models calibrated.")
 
   ## ---------------------------------------------------------------------------
   ## Step 9: Predict covariates for new samples
@@ -282,21 +340,25 @@ predict_covariates <- function(covariates,
      safely_execute(expr          = {predict(object   = model_info$model,
                                              new_data = input_data_local)},
                     default_value = NULL,
-                    error_message = "Prediction failed for {model_info$outcome} in {model_info$cluster}") -> preds
+                    error_message = "Prediction failed for {model_info$outcome} in {model_info$cluster}") -> preds_safe
+
+     preds <- preds_safe$result
 
     if(is.null(preds)) {
       return(NULL)
     }
 
     input_data_local %>%
-      dplyr::select(Sample_ID,
+      dplyr::select(Project,
+                    Sample_ID,
                     Cluster,
                     Source) %>%
       dplyr::mutate(Predicted_Values = preds$.pred,
                     Covariate        = model_info$outcome)
 
     }) %>%  dplyr::bind_rows() %>%
-            dplyr::group_by(Sample_ID,
+            dplyr::group_by(Project,
+                            Sample_ID,
                             Covariate,
                             Source,
                             Cluster) %>%
@@ -313,7 +375,8 @@ predict_covariates <- function(covariates,
                   -Cluster) %>%
     tidyr::pivot_wider(names_from  = Covariate,
                        values_from = Predicted_Values) %>%
-    dplyr::select(Sample_ID,
+    dplyr::select(Project,
+                  Sample_ID,
            all_of(covariates)) -> holdout_predictions
 
   predictions %>%
@@ -330,16 +393,61 @@ predict_covariates <- function(covariates,
   safely_execute(expr          = {evaluate_predictions(measured_data = holdout_measurements,
                                                        modeled_data  = holdout_predictions)},
                  default_value = NULL,
-                 error_message = "Error evaluating predictions for holdout data") -> evaluation_stats
+                 error_message = "Error evaluating predictions for holdout data") -> evaluation_stats_safe
 
-  cli::cli_progress_step("Prediction and evaluation complete.")
-  cli::cli_progress_done()
+  evaluation_stats <- evaluation_stats_safe$result
+
+  if(verbose) cli::cli_progress_step("Prediction and evaluation complete.")
 
   ## ---------------------------------------------------------------------------
-  ## Step 12: Return output
+  ## Step 12: Save to cache and combine with previous cached data.
   ## ---------------------------------------------------------------------------
 
-  return(list(Predicted_Values      = unknown_predictions,
+  purrr::walk(.x = covariates,
+              .f = function(cov) {
+                purrr::walk(.x = unique(unknown_predictions$Project),
+                            .f = function(proj){
+
+                              cache_path <- build_cache_path(proj, cov, cache_dir)
+                              dir.create(dirname(cache_path),
+                                         showWarnings = FALSE,
+                                         recursive    = TRUE)
+
+                              unknown_predictions %>%
+                                dplyr::filter(Project == proj) %>%
+                                dplyr::select(Project,
+                                              Sample_ID,
+                                              !!cov) %>%
+                                qs::qsave(cache_path)
+
+                              if (verbose) cli::cli_alert_success("Cached predictions: {.val {proj}} — {.val {cov}}")
+                            })
+              })
+
+  cached_predictions <- if (nrow(predicted_covs) > 0) {
+    dplyr::bind_rows(predicted_covs$cache_result)
+  } else {
+    tibble::tibble()
+  }
+
+  long_predictions <- dplyr::bind_rows(cached_predictions, unknown_predictions) %>%
+    dplyr::mutate(Source = "Final") %>%
+    tidyr::pivot_longer(cols = covariates, names_to = "Covariate", values_to = "Predicted_Values") %>%
+    dplyr::distinct(Project, Sample_ID, Covariate, .keep_all = TRUE)
+
+  final_predictions <- long_predictions %>%
+    tidyr::pivot_wider(names_from = Covariate, values_from = Predicted_Values) %>%
+    dplyr::select(Project, Sample_ID, all_of(covariates))
+
+  if(verbose) cli::cli_progress_step("Newly predicted variables saved to cache.")
+  if(verbose) cli::cli_progress_done()
+
+
+  ## ---------------------------------------------------------------------------
+  ## Step 13: Return output
+  ## ---------------------------------------------------------------------------
+
+  return(list(Predicted_Values      = final_predictions,
               Evaluation_Statistics = evaluation_stats
   ))
 }
