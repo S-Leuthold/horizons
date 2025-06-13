@@ -63,13 +63,14 @@
 #' @keywords internal
 
 fit_cubist_model <- function(input_data,
-                             covariate) {
+                             covariate,
+                             verbose) {
 
   ## ---------------------------------------------------------------------------
   ## Step 0: Data validation
   ## ---------------------------------------------------------------------------
 
-  cli::cli_progress_step("Preparing training data for covariate {.val {covariate}}")
+  if(verbose) cli::cli_progress_step("Preparing training data for covariate {.val {covariate}}")
 
   covariate_name <- grep(covariate, colnames(input_data), value = TRUE)
 
@@ -98,7 +99,9 @@ fit_cubist_model <- function(input_data,
 
   safely_execute(expr          = {rsample::initial_split(input_data, strata = Response)},
                  default_value = NULL,
-                 error_message = glue::glue("Failed to create initial data split for {covariate}")) -> split_data
+                 error_message = glue::glue("Failed to create initial data split for {covariate}")) -> split_data_safe
+
+  split_data <- split_data_safe$result
 
   if (is.null(split_data)) return(NULL)
 
@@ -108,7 +111,9 @@ fit_cubist_model <- function(input_data,
 
   safely_execute(expr          = {rsample::vfold_cv(Train_Data, v = 3)},
                  default_value = NULL,
-                 error_message = glue::glue("Failed to create CV folds for {covariate}")) -> CV_Folds
+                 error_message = glue::glue("Failed to create CV folds for {covariate}")) -> CV_Folds_safe
+
+  CV_Folds <- CV_Folds_safe$result
 
   if (is.null(CV_Folds)) return(NULL)
 
@@ -145,14 +150,16 @@ fit_cubist_model <- function(input_data,
                               size = 5,
                               type = "max_entropy") -> grid
 
-    cli::cli_progress_step("Running grid search for {.val {covariate}}")
+    if(verbose) cli::cli_progress_step("Running grid search for {.val {covariate}}")
 
     safely_execute(expr          = {tune::tune_grid(object    = wf,
                                    resamples = CV_Folds,
                                    grid      = grid,
                                    control   = tune::control_grid(allow_par = TRUE))},
                    default_value = NULL,
-                   error_message = glue::glue("Grid tuning faliled for {covariate}")) -> grid_res
+                   error_message = glue::glue("Grid tuning faliled for {covariate}")) -> grid_res_safe
+
+    grid_res <- grid_res_safe$result
 
     if(is.null(grid_res)){
       safely_execute(expr = {future::plan(future::sequential)})
@@ -163,7 +170,7 @@ fit_cubist_model <- function(input_data,
     ## Stage 3: Bayesian Optimization for Hyperparameter Tuning
     ## ---------------------------------------------------------------------------
 
-    cli::cli_progress_step("Running Bayesian optimization for {.val {covariate}}")
+    if(verbose) cli::cli_progress_step("Running Bayesian optimization for {.val {covariate}}")
 
     safely_execute(expr        = {tune::tune_bayes(object    = wf,
                                                    resamples = CV_Folds,
@@ -171,7 +178,9 @@ fit_cubist_model <- function(input_data,
                                                    iter      = 2,
                                                    control   = tune::control_bayes(allow_par = TRUE))},
                    default_value = NULL,
-                   error_message = glue::glue("Bayesian tuning failed for {covariate}")) -> bayes_res
+                   error_message = glue::glue("Bayesian tuning failed for {covariate}")) -> bayes_res_safe
+
+    bayes_res <- bayes_res_safe$result
 
     if(is.null(bayes_res)){
       safely_execute(expr = {future::plan(future::sequential)})
@@ -199,7 +208,7 @@ fit_cubist_model <- function(input_data,
   ## Step 3: Final Fit and Evaluation
   ## ---------------------------------------------------------------------------
 
-  cli::cli_progress_step("Evaluating final model for {.val {covariate}}")
+  if(verbose) cli::cli_progress_step("Evaluating final model for {.val {covariate}}")
 
   safely_execute(expr          = {final_wf %>%
                                     tune::last_fit(split_data) %>%
@@ -210,16 +219,19 @@ fit_cubist_model <- function(input_data,
                                                    obs  = .$Response,
                                                    obj  = "quant")},
                  default_value = NULL,
-                 error_message = ("Failed to perform last_fit() or collect_predictions() for the current model.")) -> eval
+                 error_message = ("Failed to perform last_fit() or collect_predictions() for the current model.")) -> eval_safe
+
+  eval <- eval_safe$result
 
   if (is.null(eval)) return(NULL)
 
   safely_execute(expr          = {final_wf %>% parsnip::fit(Train_Data)},
                  default_value = NULL,
-                 error_message = glue::glue("Failed to fit final workflow for {covariate}")) -> fitted_model
+                 error_message = glue::glue("Failed to fit final workflow for {covariate}")) -> fitted_model_safe
+
+  fitted_model <- fitted_model_safe$result
 
   if(is.null(fitted_model)) return(NULL)
-
 
   return(list(Model           = fitted_model,
               Best_Parameters = best_params,

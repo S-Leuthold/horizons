@@ -170,9 +170,11 @@ create_project_data <- function(projects,
                         name = "Reading, resampling, and fetching metadata for the OPUS files.",
                         clear = TRUE)
         ) %>% purrr::compact() %>%
-              dplyr::bind_rows() -> spectra
+              dplyr::bind_rows() -> spectra_safe
 
       cli::cli_progress_done()
+
+      spectra <- spectra_safe$result
 
       if (nrow(spectra) == 0) {
         cli::cli_warn("All OPUS files failed for project {.val {project_name}}. Remove project or replace files to continue.")
@@ -205,7 +207,9 @@ create_project_data <- function(projects,
 
       safely_execute(expr = readr::read_csv(project_def$sample_obs, show_col_types = FALSE),
                      error_message = "Failed to read sample observations csv for {.val {project_name}}",
-                     default_value = NULL) -> sample_df
+                     default_value = NULL) -> sample_df_safe
+
+      sample_df <- sample_df_safe$result
 
       coord_cols <- names(sample_df)[stringr::str_detect(names(sample_df), "Long|Lat|Longitude|Latitude")]
 
@@ -219,7 +223,9 @@ create_project_data <- function(projects,
                                                                 dplyr::all_of(join_vars)),
                                     by = c("Project", "Sample_ID"))},
                      default_value = NULL,
-                     error_message = "Failed to join spectra with sample observations for project '{project_name}'")  -> joined
+                     error_message = "Failed to join spectra with sample observations for project '{project_name}'")  -> joined_safe
+
+      joined <- joined_safe$result
 
       ## -------------------------------------------------------------------------
       ## Stage 5: Optionally drop NA

@@ -1,12 +1,12 @@
 ## -----------------------------------------------------------------------------
 ## zzz.R
-## Startup configuration for samssoilspecstack
+## Startup configuration for horizons
 ## -----------------------------------------------------------------------------
 
 .onLoad <- function(libname, pkgname) {
 
   # Startup message
-  packageStartupMessage("horizons v0.1.0 loaded. Super fragile, use with caution.")
+  packageStartupMessage("horizons v0.5.0 loaded. Super fragile, use with caution.")
 
   # Optional: Register future plan if not already set
   if (requireNamespace("future", quietly = TRUE) &&

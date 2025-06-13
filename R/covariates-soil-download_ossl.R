@@ -64,7 +64,6 @@
 
 download_ossl_data <- function(covariates,
                                window_size = 9,
-                               bounding_box = NA,
                                max_samples = NULL) {
 
   ## ---------------------------------------------------------------------------
@@ -85,10 +84,13 @@ download_ossl_data <- function(covariates,
   ## Step 2: Ensure required data is downloaded
   ## ---------------------------------------------------------------------------
 
-  safely_execute(expr          = {download_horizons_data(force = FALSE, ask = FALSE)},
+  safely_execute(expr          = {download_horizons_data(force = FALSE,
+                                                         ask   = TRUE)},
                  default_value = NULL,
                  log_error     = FALSE,
-                 error_message = "Failed to download the required OSSL data") -> download_result
+                 error_message = "Failed to download the required OSSL data") -> download_result_safe
+
+  download_result <- download_result_safe$result
 
   if (is.null(download_result)) {
     cli::cli_abort("Aborting: Unable to download or locate required OSSL data.")
@@ -102,15 +104,19 @@ download_ossl_data <- function(covariates,
 
   safely_execute(expr          = {qs::qread(get_ossl_data_path("location"))},
                  default_value = NULL,
-                 error_message = "Failed to load the required OSSL location data from cache")   -> location_data
+                 error_message = "Failed to load the required OSSL location data from cache")   -> location_data_safe
 
   safely_execute(expr          = {qs::qread(get_ossl_data_path("lab"))},
                  default_value = NULL,
-                 error_message = "Failed to load the required OSSL laboratory data from cache") -> lab_data
+                 error_message = "Failed to load the required OSSL laboratory data from cache") -> lab_data_safe
 
   safely_execute(expr          = {qs::qread(get_ossl_data_path("mir"))},
                  default_value = NULL,
-                 error_message = "Failed to load the required OSSL MIR data from cache")        -> mir_data
+                 error_message = "Failed to load the required OSSL MIR data from cache")        -> mir_data_safe
+
+  location_data <- location_data_safe$result
+  lab_data      <- lab_data_safe$result
+  mir_data      <- mir_data_safe$result
 
   if(is.null(location_data) || is.null(lab_data) || is.null(mir_data)) {
     cli::cli_abort("Aborting: One or more required OSSL datasets failed to load from cache.")
@@ -130,17 +136,15 @@ download_ossl_data <- function(covariates,
                                                 Top_Depth = layer.upper.depth_usda_cm) %>%
                                    dplyr::filter(Top_Depth == 0)},
                  default_value = NULL,
-                 error_message = "Failed to subset/clean OSSL location metadata") -> location_data
+                 error_message = "Failed to subset/clean OSSL location metadata") -> location_data_safe
+
+  location_data <- location_data_safe$result
 
   if(is.null(location_data)){
     cli::cli_abort("Aborting: Issues with subsetting or cleaning OSSL location metadata.")
   }
 
   cli::cli_progress_step("Location data processed and ready to go.")
-
-  ## ---------------------------------------------------------------------------
-
-  ## TODO: Apply bounding_box spatial filter here if implemented
 
   ## ---------------------------------------------------------------------------
   ## Step 5: Subset and reshape lab data
@@ -173,7 +177,9 @@ download_ossl_data <- function(covariates,
                                    tidyr::pivot_wider(names_from  = final_variable,
                                                       values_from = Measured_Value)},
                  default_value = NULL,
-                 error_message = "Failed to process OSSL lab measurements") -> lab_data
+                 error_message = "Failed to process OSSL lab measurements") -> lab_data_safe
+
+  lab_data <- lab_data_safe$result
 
   if (is.null(lab_data)) {
     cli::cli_abort("Aborting: OSSL lab measurements were corrupted at some point.")
@@ -185,7 +191,9 @@ download_ossl_data <- function(covariates,
 
   safely_execute(expr          = {get_processed_mir_path()},
                  default_value = NULL,
-                 error_message = "Failed to get the path for processed  MIR spectra") -> processed_mir_path
+                 error_message = "Failed to get the path for processed  MIR spectra") -> processed_mir_path_safe
+
+  processed_mir_path <- processed_mir_path_safe$result
 
   processed_mir <- NULL
 
@@ -193,9 +201,11 @@ download_ossl_data <- function(covariates,
 
     cli::cli_progress_step("Loading processed MIR spectra from the cache at {processed_mir_path}")
 
-    processed_mir <- safely_execute(expr          = {qs::qread(processed_mir_path)},
-                                    default_value = NULL,
-                                    error_message = glue::glue("Failed to read processed MIR data from {processed_mir_path}"))
+    safely_execute(expr          = {qs::qread(processed_mir_path)},
+                   default_value = NULL,
+                   error_message = glue::glue("Failed to read processed MIR data from {processed_mir_path}")) -> processed_mir_safe
+
+    processed_mir <- processed_mir_safe$result
 
     if (!is.null(processed_mir)) {
       cli::cli_progress_step("Successfully loaded processed MIR data from cache.")
@@ -225,7 +235,9 @@ download_ossl_data <- function(covariates,
                                       dplyr::mutate(Wavenumber = stringr::str_split_i(Wavenumber, "\\.", 2),
                                       Wavenumber = stringr::str_split_i(Wavenumber, "_", 1))},
                   default_value = NULL,
-                   error_message = "Failed to filter/select/pivot the raw OSSL MIR spectra") -> mir_data
+                   error_message = "Failed to filter/select/pivot the raw OSSL MIR spectra") -> mir_data_safe
+
+    mir_data <- mir_data_safe$result
 
 
   if(is.null(mir_data)){
@@ -288,7 +300,9 @@ download_ossl_data <- function(covariates,
                            list_rbind()
                        })},
                  default_value = NULL,
-                 error_message = "Failed during parallel SNV/SG transformation of OSSL MIR spectra") -> processed_mir
+                 error_message = "Failed during parallel SNV/SG transformation of OSSL MIR spectra") -> processed_mir_safe
+
+  processed_mir <- processed_mir_safe$result
 
   if (is.null(processed_mir)) {
     cli::cli_abort("Aborting: OSSL MIR spectra processing failed.")
@@ -315,7 +329,9 @@ download_ossl_data <- function(covariates,
                                 dplyr::mutate(Sample_Index = dplyr::row_number(),
                                               .before = everything())},
               default_value = NULL,
-              error_message = "Failed to join lab data with processed MIR spectra") -> OSSL_Data
+              error_message = "Failed to join lab data with processed MIR spectra") -> OSSL_Data_safe
+
+  OSSL_Data <- OSSL_Data_safe$result
 
   if(is.null(OSSL_Data)) {
     cli::cli_abort("Aborting: Joining lab data with processed MIR spectra failed.")

@@ -82,7 +82,8 @@ safe_run_model <- function(config_row,
                                                cv_folds           = cv_folds)},
                  default_value     = NULL,
                  error_message     = "Failed model run at config row {row_index}: {config_desc}",
-                 return_result_list = TRUE) -> model_res_safe
+                 log_error         = TRUE,
+                 capture_trace     = FALSE) -> model_res_safe
 
   model_res  <- model_res_safe$result
   run_error  <- model_res_safe$error
