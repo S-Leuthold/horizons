@@ -117,7 +117,9 @@ fetch_climate_covariates <- function(input_data,
     lat_rad <- lat * deg_to_rad
 
 
-    Ra <- solar_constant * (minutes_per_day / pi) * (acos(-tan(lat_rad) * tan(0.409 * cos(2 * pi * (doy - doy_offset) / 365))))
+    suppressWarnings({
+      Ra <- solar_constant * (minutes_per_day / pi) * (acos(-tan(lat_rad) * tan(0.409 * cos(2 * pi * (doy - doy_offset) / 365))))
+    })
 
     pet <- hargreaves_coef * (tmean + tmean_adjustment) * sqrt(pmax(tmax - tmin, 0)) * Ra
 
@@ -184,8 +186,9 @@ fetch_climate_covariates <- function(input_data,
   safely_execute(expr = {compute_daymet_grid_id(input_data$Longitude,
                                                 input_data$Latitude)},
                  default_value = NULL,
-                 error_message = "Failed to compute input grid ID.") -> grid_ids
+                 error_message = "Failed to compute input grid ID.") -> grid_ids_safe
 
+  grid_ids <- grid_ids_safe$result
 
   if(is.null(grid_ids)){
     return(NULL)
@@ -223,8 +226,9 @@ fetch_climate_covariates <- function(input_data,
                                                                        silent   = TRUE,
                                                                        internal = TRUE)},
                              default_value = NULL,
-                             error_message = "Daymet download for {grid_id} failed") %>%
-                purrr::pluck(., "data") -> daymet_data
+                             error_message = "Daymet download for {grid_id} failed") -> daymet_data_safe
+
+              daymet_data <- daymet_data_safe$result %>% purrr::pluck(., "data")
 
               if(is.null(daymet_data)){
                 cli::cli_alert_warning("Daymet download for grid ID {grid_id} failed. Skipping this grid cell.")
@@ -237,7 +241,9 @@ fetch_climate_covariates <- function(input_data,
                                                                lat       = coords$Latitude,
                                                                gdd_base  = gdd_base)},
                              default_value = NULL,
-                             error_message = "Failed to summarize Daymet data for grid ID {grid_id}") -> daymet_summary
+                             error_message = "Failed to summarize Daymet data for grid ID {grid_id}") -> daymet_summary_safe
+
+              daymet_summary <- daymet_summary_safe$result
 
               if(is.null(daymet_summary)){
                 cli::cli_alert_warning("Failed to summarize Daymet data for grid ID {grid_id}. Skipping.")

@@ -61,14 +61,13 @@ create_project_configurations <- function(project_data,
     cli::cli_h2("Predicting soil biophysical covariates: {.val {soil_covariates}}")
 
     safely_execute(expr = {predict_covariates(covariates = soil_covariates,
-                                              input_data = project_data)},
+                                              input_data = project_data,
+                                              verbose    = verbose)},
                    default_value = NULL,
-                   error_message = "Soil covariate prediction failed") -> soil_covs
+                   error_message = "Soil covariate prediction failed") -> soil_covs_safe
 
-    if (verbose){
-      cli::cli_h2("Prediction Statistics")
-      print(soil_covs[[2]])
-    }
+    soil_covs <- soil_covs_safe$result
+
   }
 
 
@@ -84,7 +83,7 @@ create_project_configurations <- function(project_data,
 
   # ----------------------------------------------------------------------------
 
-
+  ## There's an unecessary join step in this, but, whatever. Not worth fixing now.
 
   if (!is.null(climate_covariates)) {
 
@@ -93,7 +92,10 @@ create_project_configurations <- function(project_data,
                                         Sample_ID,
                                         dplyr::all_of(climate_covariates))},
                  default_value = NULL,
-                 error_message = "Failure fetching weather covariates") -> climate_covs
+                 error_message = "Failure fetching weather covariates") -> climate_covs_safe
+
+    climate_covs <- climate_covs_safe$result
+
   } else {
 
     climate_covs <- NULL
@@ -115,7 +117,9 @@ create_project_configurations <- function(project_data,
                       Sample_ID,
                       dplyr::all_of(spatial_covariates))},
         default_value = NULL,
-        error_message = "Failure fetching spatial covariates") -> spatial_covs
+        error_message = "Failure fetching spatial covariates") -> spatial_covs_safe
+
+    spatial_covs <- spatial_covs_safe$result
 
   } else {
 
@@ -133,6 +137,7 @@ create_project_configurations <- function(project_data,
     purrr::compact() %>%
     purrr::reduce(dplyr::left_join, by = c("Project", "Sample_ID")) -> covariate_data
 
+
   ## ---------------------------------------------------------------------------
   ## Step 5: Create Covariate Combinations
   ## ---------------------------------------------------------------------------
@@ -143,21 +148,21 @@ create_project_configurations <- function(project_data,
 
     if (isTRUE(expand_covariate_grid)) {
 
-      purrr::map(0:length(covariate_names), ~ utils::combn(covariate_names, m = .x, simplify = FALSE)) %>%
-        purrr::flatten() %>%
-        purrr::map(~ if (length(.x) == 0) "No Covariates" else .x) -> covariate_combos
-
+      covariate_combos <- purrr::map(
+        0:length(covariate_names),
+        ~ utils::combn(covariate_names, m = .x, simplify = FALSE)
+      ) %>%
+        purrr::flatten()
     } else {
 
-      covariate_combos <- list("No Covariates", covariate_names)
-
+      covariate_combos <- list(character(0), covariate_names)
     }
 
   } else {
 
-    covariate_combos <- list("No Covariates")
-
+    covariate_combos <- list(character(0))
   }
+
 
   ## ---------------------------------------------------------------------------
   ## Step 6: Build Configuration Grid
@@ -166,8 +171,12 @@ create_project_configurations <- function(project_data,
   tidyr::crossing(model          = models,
                   transformation = transformations,
                   preprocessing  = preprocessing,
-                  covariates     = covariate_combos) %>%
-    dplyr::mutate(covariates = purrr::map(covariates, ~ if (identical(.x, "No Covariates")) character(0) else .x)) -> model_configs
+                  covariates     = covariate_combos) -> model_configs
+
+  if (verbose){
+    cli::cli_h2("Prediction Statistics")
+    print(soil_covs[[2]])
+  }
 
   return(list(project_configurations = model_configs,
               covariate_data         = covariate_data))

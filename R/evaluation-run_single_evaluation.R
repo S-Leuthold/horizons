@@ -65,7 +65,9 @@ evaluate_model_config <- function(input_data,
                                       covariate_selection     = covariates,
                                       covariate_data          = covariate_data)},
               default_value = NULL,
-              error_message = "Failed to build recipe for {wflow_id}") -> recipe
+              error_message = "Failed to build recipe for {wflow_id}") -> recipe_safe
+
+  recipe <- recipe_safe$result
 
   if (is.null(recipe)) {
 
@@ -83,7 +85,9 @@ evaluate_model_config <- function(input_data,
 
   safely_execute(expr = {define_model_specifications(model)},
                  default_value = NULL,
-                 error_message = "Model specification failed for {wflow_id}") -> model_spec
+                 error_message = "Model specification failed for {wflow_id}") -> model_spec_safe
+
+  model_spec <- model_spec_safe$result
 
   if (is.null(model_spec)) {
 
@@ -103,7 +107,9 @@ evaluate_model_config <- function(input_data,
                           workflows::add_recipe(recipe) %>%
                           workflows::add_model(model_spec)},
                  default_value = NULL,
-                 error_message = "Workflow creation failed for {wflow_id}") -> workflow
+                 error_message = "Workflow creation failed for {wflow_id}") -> workflow_safe
+
+  workflow <- workflow_safe$result
 
   if (is.null(workflow)) {
 
@@ -139,17 +145,24 @@ evaluate_model_config <- function(input_data,
 
   cli::cli_alert_success("Running initial grid search.")
 
-  safely_execute(expr = {tune::tune_grid(object     = workflow,
-                                         resamples  = folds,
-                                         param_info = param_set,
-                                         grid       = grid_size,
-                                         metrics    = yardstick::metric_set(rrmse, rsq),
-                                         control    = tune::control_grid(save_pred     = FALSE,
-                                                                         save_workflow = TRUE,
-                                                                         verbose       = FALSE,
-                                                                         parallel_over = "resamples"))},
-                 default_value = NULL,
-                 error_message = "Grid tuning failed for {wflow_id}") -> grid_res
+  suppressWarnings({
+    suppressMessages({
+      safely_execute(expr = {tune::tune_grid(object     = workflow,
+                                             resamples  = folds,
+                                             param_info = param_set,
+                                             grid       = grid_size,
+                                             metrics    = yardstick::metric_set(rrmse, rsq),
+                                             control    = tune::control_grid(save_pred     = FALSE,
+                                                                             save_workflow = TRUE,
+                                                                             verbose       = FALSE,
+                                                                             parallel_over = "resamples"))},
+                     default_value = NULL,
+                     error_message = "Grid tuning failed for {wflow_id}") -> grid_res_safe
+
+    })
+  })
+
+  grid_res <- grid_res_safe$result
 
   if (is.null(grid_res)) {
 
@@ -173,8 +186,9 @@ evaluate_model_config <- function(input_data,
                             dplyr::filter(.metric == "rrmse") %>%
                             dplyr::pull(mean), na.rm = TRUE)},
                    default_value = Inf,
-                   error_message = "Failed to calculate minimum RRMSE for {wflow_id}") -> min_rrmse
+                   error_message = "Failed to calculate minimum RRMSE for {wflow_id}") -> min_rrmse_safe
 
+    min_rrmse <- min_rrmse_safe$result
 
     if (is.infinite(min_rrmse) || min_rrmse > 50) {
 
@@ -210,9 +224,12 @@ evaluate_model_config <- function(input_data,
                                                                                allow_par     = TRUE,
                                                                                parallel_over = "resamples"))},
                      default_value  = NULL,
-                     error_message  = "Bayesian tuning failed for {wflow_id}") -> bayes_res
+                     error_message  = "Bayesian tuning failed for {wflow_id}") -> bayes_res_safe
     })
   })
+
+  bayes_res <- bayes_res_safe$result
+
   if (is.null(bayes_res)) {
 
     cli::cli_alert_warning("Skipping model: Bayesian tuning failed.")
@@ -240,7 +257,9 @@ evaluate_model_config <- function(input_data,
                                         final_wf  = list(final_wf),
                                         fitted_wf = list(fitted_wf))},
                  default_value = NULL,
-                 error_message = "Finalization failed for {wflow_id}") -> finalized_wf
+                 error_message = "Finalization failed for {wflow_id}") -> finalized_wf_safe
+
+  finalized_wf <- finalized_wf_safe$result
 
   if (is.null(finalized_wf)) {
 
@@ -261,7 +280,9 @@ evaluate_model_config <- function(input_data,
   safely_execute(expr = {evaluate_final_models(finalized_wf_sets = finalized_wf,
                                                holdout_data      = test)},
                  default_value = NULL,
-                 error_message = "Holdout evaluation failed for {wflow_id}") -> evaluation_res
+                 error_message = "Holdout evaluation failed for {wflow_id}") -> evaluation_res_safe
+
+  evaluation_res <- evaluation_res_safe$result
 
   if (is.null(evaluation_res)) {
 
