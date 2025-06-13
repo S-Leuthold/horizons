@@ -93,67 +93,102 @@ predict_covariates <- function(covariates,
 
     if(verbose) cli::cli_alert_info("Starting prediction of covariates.")
 
-  ## ---------------------------------------------------------------------------
-  ## Step 1: Check for cached covariates
-  ## ---------------------------------------------------------------------------
+   ## ---------------------------------------------------------------------------
+   ## Step 1: Check for cached covariates
+   ## ---------------------------------------------------------------------------
 
-  build_cache_path <- function(project,
-                               covariate,
-                               cache_dir) {
+   build_cache_path <- function(project,
+                                covariate,
+                                cache_dir) {
 
      proj_slug <- janitor::make_clean_names(project)
+
      file.path(cache_dir, proj_slug, paste0(covariate, ".qs"))
-   }
 
-  ## --------------------------------------------------------------------------
+    }
 
-   get_cached_covariates <- function(project, covariate, cache_dir){
+   get_cached_covariates <- function(project, covariate,
+                                     cache_dir,
+                                     refresh = FALSE) {
+
      path <- build_cache_path(project, covariate, cache_dir)
-     if(file.exists(path)) {
+
+     if (!refresh && file.exists(path)) {
+       cli::cli_alert_info("Cache hit: {.val {project}} — {.val {covariate}}")
        return(tryCatch(qs::qread(path), error = function(e) NULL))
      } else {
+       if (!file.exists(path)) {
+         cli::cli_alert_info("Cache miss: {.val {project}} — {.val {covariate}}")
+       } else if (refresh) {
+         cli::cli_alert_info("Refresh requested: Skipping cache for {.val {project}} — {.val {covariate}}")
+       }
        return(NULL)
      }
    }
 
+   project_ids <- unique(input_data$Project)
 
-  project_ids <- input_data$Project
+   cov_lookup <- expand.grid(
+     project   = project_ids,
+     covariate = covariates,
+     stringsAsFactors = FALSE
+   )
 
-  cov_lookup  <- expand.grid(project          = project_ids,
-                             covariate        = covariates,
-                             stringsAsFactors = FALSE)
+   if(verbose) cli::cli_progress_step("Checking cache for {.val {nrow(cov_lookup)}} project-covariate pairs")
 
-  ## ---------------------------------------------------------------------------
+   cov_lookup <- cov_lookup %>%
+     dplyr::mutate(cache_result = purrr::map2(
+       .x = project,
+       .y = covariate,
+       .f = ~get_cached_covariates(.x, .y, cache_dir, refresh = refresh)))
 
-  cov_lookup %>%
-    dplyr::mutate(cache_result = purrr::map2(.x = project,
-                                             .y = covariate,
-                                             .f = ~get_cached_covariates(.x,
-                                                                         .y,
-                                                                         cache_dir))) -> cov_lookup
+   cov_lookup <- cov_lookup %>%
+     dplyr::mutate(missing = purrr::map_lgl(cache_result, is.null))
 
-  ## ---------------------------------------------------------------------------
+   covs_to_predict <- dplyr::filter(cov_lookup, missing)
+   predicted_covs  <- dplyr::filter(cov_lookup, !missing)
 
-  cov_lookup %>%
-    dplyr::mutate(missing = purrr::map_lgl(cache_result, is.null)) -> cov_lookup
+   if(verbose) cli::cli_progress_step("Cached: {.val {nrow(predicted_covs)}} | To predict: {.val {nrow(covs_to_predict)}}")
 
-  covs_to_predict <- dplyr::filter(cov_lookup, Missing)
-  predicted_covs  <- dplyr::filter(cov_lookup, !Missing)
+   ## ---------------------------------------------------------------------------
 
-  ## ---------------------------------------------------------------------------
+   input_data <- input_data %>%
+     dplyr::filter(Project %in% unique(covs_to_predict$project))
 
-  input_data %>%
-    filter(Project %in% unique(covs_to_predict$Project)) -> input_data
+   if (nrow(covs_to_predict) == 0) {
 
-  covariates <- unique(covs_to_predict$covariate)
+     if(verbose) cli::cli_alert_success("All requested covariates found in cache. Skipping model prediction.")
+
+     cached_predictions <- dplyr::bind_rows(predicted_covs$cache_result)
+
+     long_predictions <- cached_predictions %>%
+       tidyr::pivot_longer(cols = all_of(covariates),
+                           names_to = "Covariate",
+                           values_to = "Predicted_Values") %>%
+       dplyr::distinct(Project, Sample_ID, Covariate, .keep_all = TRUE)
+
+     final_predictions <- long_predictions %>%
+       tidyr::pivot_wider(names_from = Covariate,
+                          values_from = Predicted_Values) %>%
+       dplyr::select(Project, Sample_ID, all_of(covariates))
+
+     evaluation_stats <- glue::glue("Run with {.val {refresh == TRUE}} if you want to view the evaluation statistics.")
+
+     if (verbose) cli::cli_progress_done()
+
+     return(list(Predicted_Values      = final_predictions,
+                 Evaluation_Statistics = evaluation_stats))
+   }
+
+   covariates <- unique(covs_to_predict$covariate)
 
   ## ---------------------------------------------------------------------------
   ## Step 1.5: Smooth and normalize the data
   ## ---------------------------------------------------------------------------
 
-  input_data %>%
-    dplyr::select(`600`:`4000`) %>%
-    prospectr::savitzkyGolay(X = .,
+     input_data %>%
+       dplyr::select(`600`:`4000`) %>%
+       prospectr::savitzkyGolay(X = .,
                              m = 0,
                              p = 1,
                              w = 9) %>%
@@ -428,7 +463,7 @@ predict_covariates <- function(covariates,
     dplyr::bind_rows(predicted_covs$cache_result)
   } else {
     tibble::tibble()
-  }
+    }
 
   long_predictions <- dplyr::bind_rows(cached_predictions, unknown_predictions) %>%
     dplyr::mutate(Source = "Final") %>%
@@ -451,4 +486,3 @@ predict_covariates <- function(covariates,
               Evaluation_Statistics = evaluation_stats
   ))
 }
-

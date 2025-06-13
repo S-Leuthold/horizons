@@ -47,6 +47,10 @@ evaluate_model_config <- function(input_data,
                                 preprocessing  = preprocessing,
                                 covariates     = covariates)
 
+  print(glue::glue(">> Running: {paste(covariates, collapse = '+')}"))
+  print(glue::glue(">> Workflow ID: {wflow_id}"))
+
+
   input_data <- dplyr::rename(input_data, Response = !!rlang::sym(variable))
   split      <- rsample::initial_split(input_data, prop = 0.8, strata = Response)
   train      <- rsample::training(split)
