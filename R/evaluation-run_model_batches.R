@@ -92,6 +92,7 @@ run_model_evaluation <- function(config,
                                  bayesian_iter = 15,
                                  cv_folds = 5,
                                  return_outputs = FALSE,
+                                 pruning        = TRUE,
                                  save_summary = TRUE,
                                  summary_file = NULL) {
 
@@ -133,6 +134,7 @@ run_model_evaluation <- function(config,
                              output_dir     = output_dir,
                              grid_size      = grid_size,
                              bayesian_iter  = bayesian_iter,
+                             pruning        = pruning,
                              cv_folds       = cv_folds)
 
     raw_outputs[[i]]  <- result

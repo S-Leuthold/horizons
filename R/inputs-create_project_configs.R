@@ -36,6 +36,7 @@ create_project_configurations <- function(project_data,
                                           spatial_covariates    = NULL,
                                           expand_covariate_grid = TRUE,
                                           include_covariates    = TRUE,
+                                          refresh               = FALSE,
                                           verbose               = TRUE) {
 
   ## ---------------------------------------------------------------------------
@@ -62,7 +63,8 @@ create_project_configurations <- function(project_data,
 
     safely_execute(expr = {predict_covariates(covariates = soil_covariates,
                                               input_data = project_data,
-                                              verbose    = verbose)},
+                                              verbose    = verbose,
+                                              refresh    = refresh)},
                    default_value = NULL,
                    error_message = "Soil covariate prediction failed") -> soil_covs_safe
 

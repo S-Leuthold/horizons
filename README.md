@@ -37,7 +37,6 @@ remotes::install_github("S-Leuthold/horizons")
 - Grid and Bayesian hyperparameter tuning
 - Ensemble stacking using `stacks::stacks()`
 - Planned support for spectral characterization (PCA overlays, loadings plots)
-- Parallel execution with `furrr` + `progressr`
 - Batch evaluation of model configurations with structured logging
 
 ---
@@ -47,19 +46,71 @@ remotes::install_github("S-Leuthold/horizons")
 ```r
 library(horizons)
 
-results <- full_model_evaluation(
-  input_data = mydata,
-  models = c("Random Forest", "Partial Least Squares Regression"),
-  transformations = "Log Transformation",
-  preprocessing = "Standard Normal Variate - Savitzky Golay - 0 Derivative",
-  variable = "MAOM_C_g_kg",
-  include_covariates = TRUE,
-  covariate_data = my_covs,
-  expand_covariate_grid = TRUE,
-  grid_size = 5,
-  bayesian_iter = 15,
-  cv_folds = 5
-)
+## -----------------------------------------------------------------------------
+## Step 1. Build horizons projects object
+## -----------------------------------------------------------------------------
+
+projects <- project_list("project" = project_entry(spectra_path     = "./opus_files/",
+                                                sample_obs          = "./fraction_data.csv",
+                                                file_name_format    = "project_sampleid_fraction_scanid_wellid",
+                                                file_name_delimiter = "_"))
+
+## -----------------------------------------------------------------------------
+## Step 2: Load the input data
+## -----------------------------------------------------------------------------
+
+create_project_data(projects  = projects,
+                    variables = "MAOM_C_g_kg") -> project_data
+
+## -----------------------------------------------------------------------------
+## Step 3: Set up project configurations
+## -----------------------------------------------------------------------------
+
+create_project_configurations(project_data       = project_data,
+                              models             = c("random_forest",
+                                                     "cubist",
+                                                     "xgboost",
+                                                     "elastic_net",
+                                                     "svm_rbf",
+                                                     "mars",
+                                                     "plsr",
+                                                     "mlp_nn"),
+                              transformations    = c("No Transformation",
+                                                     "Log Transformation",
+                                                     "Square Root Transformation"),
+                              preprocessing      = c("raw",
+                                                     "sg",
+                                                     "snv",
+                                                     "deriv1",
+                                                     "deriv2",
+                                                     "snv_deriv1",
+                                                     "snv_deriv2",
+                                                     "msc_deriv1"),
+                              soil_covariates    = c("pH",
+                                                     "Nitrogen",
+                                                     "Clay"),
+                              climate_covariates = c("AI",
+                                                     "GDD"),
+                              spatial_covariates = NULL,
+                              refresh            = FALSE,
+                              verbose            = TRUE) -> project_configs
+
+
+
+## -----------------------------------------------------------------------------
+## Step 4: Run the model evaluation
+## -----------------------------------------------------------------------------
+
+run_model_evaluation(config         = project_configs$project_configurations,
+                     input_data     = project_data,
+                     covariate_data = project_configs$covariate_data,
+                     variable       = "MAOM_C_g_kg",
+                     output_dir     = "./model_results",
+                     grid_size      = 25,
+                     bayesian_iter  = 25,
+                     cv_folds       = 10,
+                     return_outputs = FALSE,
+                     pruning        = FALSE) -> results
 ```
 
 ---
