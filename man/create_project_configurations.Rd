@@ -14,6 +14,7 @@ create_project_configurations(
   spatial_covariates = NULL,
   expand_covariate_grid = TRUE,
   include_covariates = TRUE,
+  refresh = FALSE,
   verbose = TRUE
 )
 }

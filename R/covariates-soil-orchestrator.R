@@ -172,7 +172,7 @@ predict_covariates <- function(covariates,
                           values_from = Predicted_Values) %>%
        dplyr::select(Project, Sample_ID, all_of(covariates))
 
-     evaluation_stats <- glue::glue("Run with {.val {refresh == TRUE}} if you want to view the evaluation statistics.")
+     evaluation_stats <- "Run with refresh == TRUE to get a new set of eval stats."
 
      if (verbose) cli::cli_progress_done()
 

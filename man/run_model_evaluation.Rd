@@ -14,6 +14,7 @@ run_model_evaluation(
   bayesian_iter = 15,
   cv_folds = 5,
   return_outputs = FALSE,
+  pruning = TRUE,
   save_summary = TRUE,
   summary_file = NULL
 )
