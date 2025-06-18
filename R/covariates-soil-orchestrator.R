@@ -463,15 +463,22 @@ predict_covariates <- function(covariates,
     dplyr::bind_rows(predicted_covs$cache_result)
   } else {
     tibble::tibble()
-    }
+  }
 
-  long_predictions <- dplyr::bind_rows(cached_predictions, unknown_predictions) %>%
+  all_predictions <- dplyr::bind_rows(cached_predictions, unknown_predictions)
+
+  long_predictions <- all_predictions %>%
     dplyr::mutate(Source = "Final") %>%
-    tidyr::pivot_longer(cols = covariates, names_to = "Covariate", values_to = "Predicted_Values") %>%
-    dplyr::distinct(Project, Sample_ID, Covariate, .keep_all = TRUE)
+    tidyr::pivot_longer(cols = covariates,
+                        names_to = "Covariate",
+                        values_to = "Predicted_Values") %>%
+    dplyr::group_by(Project, Sample_ID, Covariate) %>%
+    dplyr::summarise(Predicted_Values = dplyr::first(na.omit(Predicted_Values)),
+                     .groups = "drop")
 
   final_predictions <- long_predictions %>%
-    tidyr::pivot_wider(names_from = Covariate, values_from = Predicted_Values) %>%
+    tidyr::pivot_wider(names_from = Covariate,
+                       values_from = Predicted_Values) %>%
     dplyr::select(Project, Sample_ID, all_of(covariates))
 
   if(verbose) cli::cli_progress_step("Newly predicted variables saved to cache.")
