@@ -173,15 +173,36 @@ build_ensemble_stack <- function(results_dir,
       cli::cli_h1("Candidate Models for Ensemble")
 
       top_models %>%
-        tidyr::separate(wflow_id,
-                        into = c("Model",
-                                 "Transformation",
-                                 "Preprocessing",
-                                 "Covariates"),
-                        sep = "_",
-                        remove = FALSE,
-                        extra = "merge") %>%
-        dplyr::mutate(Covariates = stringr::str_replace_all(Covariates, "\\+", ", ")) %>%
+        dplyr::mutate(Model        = dplyr::case_when(str_detect(wflow_id, "random_forest") ~ "Random Forest",
+                                                      str_detect(wflow_id, "cubist")        ~ "Cubist",
+                                                      str_detect(wflow_id, "xgboost")       ~ "XGBoost",
+                                                      str_detect(wflow_id, "lightgbm")      ~ "LightGBM",
+                                                      str_detect(wflow_id, "elastic_net")   ~ "Elastic Net",
+                                                      str_detect(wflow_id, "svm_rbf")       ~ "SVM (RBF)",
+                                                      str_detect(wflow_id, "mars")          ~ "MARS",
+                                                      str_detect(wflow_id, "plsr")          ~ "PLSR",
+                                                      str_detect(wflow_id, "mlp_nn")        ~ "MLP Neural Net",
+                                                      TRUE ~ wflow_id),
+                      Transformation = case_when(str_detect(wflow_id, "NoTrans") ~ "None",
+                                                 str_detect(wflow_id, "Log")     ~ "Log",
+                                                 str_detect(wflow_id, "Sqrt")    ~ "Square Root",
+                                                 TRUE ~ NA_character_),
+                      Preprocessing = case_when(str_detect(wflow_id, "snv_deriv2") ~ "SNV + Derivative 2",
+                                                str_detect(wflow_id, "snv_deriv1") ~ "SNV + Derivative 1",
+                                                str_detect(wflow_id, "msc_deriv1") ~ "MSC + Derivative 1",
+                                                str_detect(wflow_id, "deriv2")     ~ "Derivative 2",
+                                                str_detect(wflow_id, "deriv1")     ~ "Derivative 1",
+                                                str_detect(wflow_id, "snv")        ~ "SNV",
+                                                str_detect(wflow_id, "msc")        ~ "MSC",
+                                                str_detect(wflow_id, "sg")         ~ "Savitzky-Golay",
+                                                str_detect(wflow_id, "raw")        ~ "Raw",
+                                                TRUE ~ NA_character_),
+                      check      = stringr::str_count(wflow_id, "_"),
+                      Covariates = case_when(check == 3 ~ stringr::str_split_i(wflow_id, "_", i = 4),
+                                             check == 4 ~ stringr::str_split_i(wflow_id, "_", i = 5),
+                                             check == 5 ~ stringr::str_split_i(wflow_id, "_", i = 6),
+                                             check == 6 ~ stringr::str_split_i(wflow_id, "_", i = 7),
+                                             check == 7 ~ stringr::str_split_i(wflow_id, "_", i = 8))) %>%
         dplyr::select(Model, Transformation, Preprocessing, Covariates) %>%
         dplyr::distinct() %>%
         print(., n = Inf)
@@ -288,15 +309,11 @@ build_ensemble_stack <- function(results_dir,
       dplyr::filter(.metric %in% c("rmse", "rsq", "mae")) %>%
       tidyr::pivot_wider(names_from = .metric, values_from = .estimate) -> candidate_metrics
 
-
-
   ## ---------------------------------------------------------------------------
-  ## Step 4: Stack and blend the models.
+  ## Step 4: Stack the models.
   ## ---------------------------------------------------------------------------
 
   model_stack <- stacks::stacks()
-
-  i <- 1
 
   for(i in seq_len(nrow(top_models))){
 
@@ -308,14 +325,24 @@ build_ensemble_stack <- function(results_dir,
     })
   }
 
+  if(verbose) cli::cli_alert_success("Model stack built from {nrow(top_models)} candidates")
+
+  ## ---------------------------------------------------------------------------
+  ## Step 5: Tune the parameters for the blending and finalize
+  ## ---------------------------------------------------------------------------
+
+  tune_blend(model_stack = model_stack,
+             test_data   = testing_data) -> best_params
+
   model_stack %>%
     stacks::blend_predictions(metric       = yardstick::metric_set(rrmse),
-                              mixture      = 0.5,
-                              penalty      = 0.01,
-                              non_negative = FALSE) %>%
+                              mixture      = best_params$mixture,
+                              penalty      = best_params$penalty,
+                              non_negative = best_params$non_negative) %>%
     stacks::fit_members() -> model_stack
 
-  if(verbose) cli::cli_alert_success("Model stack built from {nrow(top_models)} candidates")
+
+  if(verbose) cli::cli_alert_success("Model stack blended and finalized.")
 
   ## ---------------------------------------------------------------------------
   ## Step 5: Predict on hold out data
