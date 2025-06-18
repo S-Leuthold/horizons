@@ -27,9 +27,13 @@
 
 tune_and_refit <- function(wflow,
                            resamples,
+                           iter   = 20,
                            metrics,
                            control_bayes,
-                           control_refit){
+                           control_refit,
+                           verbose = TRUE){
+
+  if (verbose) cli::cli_alert_info("Tuning workflow with {.val tune_bayes()}")
 
   tune::tune_bayes(object    = wflow,
                    resamples = resamples,
