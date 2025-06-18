@@ -4,7 +4,15 @@
 \alias{tune_and_refit}
 \title{Tune and Refit a Workflow Using Bayesian Optimization}
 \usage{
-tune_and_refit(wflow, resamples, metrics, control_bayes, control_refit)
+tune_and_refit(
+  wflow,
+  resamples,
+  iter = 20,
+  metrics,
+  control_bayes,
+  control_refit,
+  verbose = TRUE
+)
 }
 \arguments{
 \item{wflow}{A \code{workflow} object to be tuned and refit.}
