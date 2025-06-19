@@ -14,9 +14,10 @@ evaluate_model_config(
   covariates,
   include_covariates,
   pruning = TRUE,
-  grid_size = 10,
-  bayesian_iter = 15,
-  cv_folds = 5
+  grid_size = 25,
+  bayesian_iter = 20,
+  cv_folds = 10,
+  verbose = FALSE
 )
 }
 \arguments{
