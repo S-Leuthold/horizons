@@ -11,10 +11,11 @@ safe_run_model(
   variable,
   row_index,
   output_dir,
-  grid_size = 10,
-  bayesian_iter = 15,
-  cv_folds = 5,
-  pruning = TRUE
+  grid_size = 25,
+  bayesian_iter = 20,
+  cv_folds = 10,
+  pruning = TRUE,
+  verbose = FALSE
 )
 }
 \arguments{

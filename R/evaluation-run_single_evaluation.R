@@ -32,9 +32,10 @@ evaluate_model_config <- function(input_data,
                                   covariates,
                                   include_covariates,
                                   pruning       = TRUE,
-                                  grid_size     = 10,
-                                  bayesian_iter = 15,
-                                  cv_folds      = 5) {
+                                  grid_size     = 25,
+                                  bayesian_iter = 20,
+                                  cv_folds      = 10,
+                                  verbose       = FALSE) {
 
   ## ---------------------------------------------------------------------------
   ## Step 1: Split and Fold
@@ -57,7 +58,7 @@ evaluate_model_config <- function(input_data,
   ## Step 2: Build Recipe + Workflow
   ## ---------------------------------------------------------------------------
 
-  cli::cli_alert_success("Building recipe and workflow.")
+  if(verbose) cli::cli_alert_success("Building recipe and workflow.")
 
   safely_execute(expr = {build_recipe(input_data              = train,
                                       response_transformation = transformation,
@@ -143,7 +144,7 @@ evaluate_model_config <- function(input_data,
   ## Step 3: Initial Grid Tuning
   ## ---------------------------------------------------------------------------
 
-  cli::cli_alert_success("Running initial grid search.")
+  if(verbose) cli::cli_alert_success("Running initial grid search.")
 
   suppressWarnings({
     suppressMessages({
@@ -155,7 +156,7 @@ evaluate_model_config <- function(input_data,
                                              control    = tune::control_grid(save_pred     = FALSE,
                                                                              save_workflow = TRUE,
                                                                              verbose       = FALSE,
-                                                                             parallel_over = "resamples"))},
+                                                                             allow_par     = FALSE))},
                      default_value = NULL,
                      error_message = "Grid tuning failed for {wflow_id}") -> grid_res_safe
 
@@ -206,7 +207,7 @@ evaluate_model_config <- function(input_data,
   ## Step 5: Bayesian Tuning
   ## ---------------------------------------------------------------------------
 
-  cli::cli_alert_success("Running Bayesian tuning.")
+  if(verbose) cli::cli_alert_success("Running Bayesian tuning.")
 
   suppressWarnings({
     suppressMessages({
@@ -221,8 +222,7 @@ evaluate_model_config <- function(input_data,
                                                                                verbose       = FALSE,
                                                                                seed          = 307,
                                                                                no_improve    = 10L,
-                                                                               allow_par     = TRUE,
-                                                                               parallel_over = "resamples"))},
+                                                                               allow_par     = FALSE))},
                      default_value  = NULL,
                      error_message  = "Bayesian tuning failed for {wflow_id}") -> bayes_res_safe
     })
@@ -246,7 +246,7 @@ evaluate_model_config <- function(input_data,
   ## Step 6: Finalize + Fit
   ## ---------------------------------------------------------------------------
 
-  cli::cli_alert_success("Finalizing and fitting best models.")
+  if(verbose) cli::cli_alert_success("Finalizing and fitting best models.")
 
   safely_execute(expr = {best_model <- tune::select_best(bayes_res, metric = "rrmse")
                          final_wf   <- tune::finalize_workflow(workflow, best_model)
@@ -300,7 +300,7 @@ evaluate_model_config <- function(input_data,
   ## Step 8: Collect and return results.
   ## ---------------------------------------------------------------------------
 
-  cli::cli_alert_success("Evaluation completed successfully: RRMSE = {round(evaluation_res$rrmse, 2)}%, R-squared = {round(evaluation_res$rsq * 100, 3)}%")
+  if(verbose) cli::cli_alert_success("Evaluation completed successfully: RRMSE = {round(evaluation_res$rrmse, 2)}%, R-squared = {round(evaluation_res$rsq * 100, 3)}%")
 
   return(list(evaluation_results = evaluation_res,
               tuned_models       = finalized_wf,

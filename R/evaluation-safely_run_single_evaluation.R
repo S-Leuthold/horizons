@@ -48,10 +48,11 @@ safe_run_model <- function(config_row,
                            variable,
                            row_index,
                            output_dir,
-                           grid_size     = 10,
-                           bayesian_iter = 15,
-                           cv_folds      = 5,
-                           pruning       = TRUE) {
+                           grid_size     = 25,
+                           bayesian_iter = 20,
+                           cv_folds      = 10,
+                           pruning       = TRUE,
+                           verbose       = FALSE) {
 
   ## ---------------------------------------------------------------------------
   ## Step 1: Setup
@@ -62,7 +63,7 @@ safe_run_model <- function(config_row,
                     preprocessing  = config_row$preprocessing,
                     covariates     = config_row$covariates) -> config_desc
 
-  cli::cli_h2("Running model configuration {row_index}: {config_desc}")
+  if(verbose) cli::cli_h2("Running model configuration {row_index}: {config_desc}")
 
   ## ---------------------------------------------------------------------------
   ## Step 2: Safely run model evaluation
@@ -79,7 +80,8 @@ safe_run_model <- function(config_row,
                                                pruning            = pruning,
                                                grid_size          = grid_size,
                                                bayesian_iter      = bayesian_iter,
-                                               cv_folds           = cv_folds)},
+                                               cv_folds           = cv_folds,
+                                               verbose            = FALSE)},
                  default_value     = NULL,
                  error_message     = "Failed model run at config row {row_index}: {config_desc}",
                  log_error         = TRUE,
@@ -114,8 +116,8 @@ safe_run_model <- function(config_row,
                    error_message      = error_obj$error_message,
                    status             = "error") -> status_summary
 
-    cli::cli_alert_danger("Model run failed at: {row_index} - {config_desc}")
-    cli::cli_alert_info("Logged error to: {.path {error_file}}")
+    if(verbose) cli::cli_alert_danger("Model run failed at: {row_index} - {config_desc}")
+    if(verbose) cli::cli_alert_info("Logged error to: {.path {error_file}}")
 
     return(list(status_summary     = status_summary,
                 output_path        = NA_character_))

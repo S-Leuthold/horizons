@@ -87,96 +87,182 @@ run_model_evaluation <- function(config,
                                  input_data,
                                  covariate_data,
                                  variable,
-                                 output_dir = NULL,
-                                 grid_size = 10,
-                                 bayesian_iter = 15,
-                                 cv_folds = 5,
+                                 output_dir     = NULL,
+                                 grid_size      = 25,
+                                 bayesian_iter  = 20,
+                                 cv_folds       = 10,
                                  return_outputs = FALSE,
                                  pruning        = TRUE,
-                                 save_summary = TRUE,
-                                 summary_file = NULL) {
+                                 summary_file   = NULL,
+                                 parallel       = TRUE) {
 
   cli::cli_h1("Starting full model evaluation across {.val {nrow(config)}} model combinations")
 
   start_time <- Sys.time()
 
   ## ---------------------------------------------------------------------------
-  ## Step 1: Create a repository for the model output.
+  ## Step 1: Create Output Directory
   ## ---------------------------------------------------------------------------
 
   if (is.null(output_dir)) {
-
-    output_dir <- paste0(variable, "_model_outputs_", format(Sys.time(), "%Y-%m-%d_%H:%M"))
-
+    output_dir <- paste0(variable, "_model_outputs_", format(Sys.time(), "%Y-%m-%d_%H-%M"))
   }
 
   fs::dir_create(output_dir)
-
   cli::cli_alert_success("Output directory created at {.path {output_dir}}")
 
-  raw_outputs  <- vector("list", length = nrow(config))
-  summary_rows <- vector("list", length = nrow(config))
+  # ---------------------------------------------------------------------------
+  # Step 3: Define a CLI-based Polling Progress Bar (Your brilliant idea)
+  # ---------------------------------------------------------------------------
 
+  # This function will run in the background on its own core
+  poll_output_dir <- function(dir, total, interval = 2) {
 
-  ## ---------------------------------------------------------------------------
-  ## Step 2: Iterate over configurations
-  ## ---------------------------------------------------------------------------
+    # Use the more robust cli progress bar
+    cli::cli_progress_bar(
+      name = "Running Models",
+      total = total,
+      format = "{cli::pb_name} {cli::pb_bar} {cli::pb_percent} | {cli::pb_current}/{cli::pb_total} | ETA: {cli::pb_eta}"
+    )
 
-  for (i in seq_len(nrow(config))) {
-
-    config_row <- config[i, , drop = FALSE]
-
-    result <- safe_run_model(config_row     = config_row,
-                             input_data     = input_data,
-                             covariate_data = covariate_data,
-                             variable       = variable,
-                             row_index      = i,
-                             output_dir     = output_dir,
-                             grid_size      = grid_size,
-                             bayesian_iter  = bayesian_iter,
-                             pruning        = pruning,
-                             cv_folds       = cv_folds)
-
-    raw_outputs[[i]]  <- result
-    summary_rows[[i]] <- result$status_summary
-
-    cli::cli_inform("Sleeping and collecting garbage...")
-    gc(verbose = FALSE, full = TRUE)
-    Sys.sleep(1)
+    done <- 0
+    while (done < total) {
+      # Count the files created by the workers
+      done <- length(list.files(dir, pattern = "^result_.*\\.qs$"))
+      cli::cli_progress_update(set = done)
+      Sys.sleep(interval)
+    }
+    # The bar will auto-terminate when the loop ends
   }
 
-  ## ---------------------------------------------------------------------------
-  ## Step 3: Assemble and optionally save summary
-  ## ---------------------------------------------------------------------------
+  # ---------------------------------------------------------------------------
+  # Step 4: Add the missing return statement to your model runner
+  # ---------------------------------------------------------------------------
 
-  summary_tbl <- dplyr::bind_rows(summary_rows)
+  # Your original function was perfect, just needed to return the result
+  run_one_model <- function(config_row, row_index) {
+    result <- safe_run_model(
+      config_row     = config_row,
+      input_data     = input_data,
+      covariate_data = covariate_data,
+      variable       = variable,
+      row_index      = row_index,
+      output_dir     = output_dir,
+      grid_size      = grid_size,
+      bayesian_iter  = bayesian_iter,
+      cv_folds       = cv_folds,
+      pruning        = pruning,
+      verbose        = FALSE
+    )
 
-  if (save_summary) {
+    # The missing piece: return the result object
+    return(result)
+  }
 
-    if (is.null(summary_file)) {
-      timestamp     <- format(Sys.time(), "%Y%m%d_%H%M%S")
-      summary_file  <- fs::path(output_dir, glue::glue("batch_summary_{variable}_{timestamp}.qs"))
+
+  # ---------------------------------------------------------------------------
+  # Step 5: Run Models with Polling
+  # ---------------------------------------------------------------------------
+
+  if (parallel) {
+
+    future::plan(future::multisession, workers = parallel::detectCores() - 2)
+    cli::cli_alert_success("Initialized parallel workflow with {.val {future::nbrOfWorkers()}} workers.")
+
+    # -------------------------------------------------------------------------
+    # Step 1: FIRE a non-blocking set of futures.
+    # This dispatches all jobs to the workers but DOES NOT wait for them.
+    # The main R session remains free.
+    # -------------------------------------------------------------------------
+    cli::cli_inform("Dispatching models to background workers...")
+
+    # We manually create a list of promises ("futures"), one for each model.
+    # This does not block the main R session.
+    futures <- purrr::map2(
+      .x = split(config, seq_len(nrow(config))),
+      .y = seq_len(nrow(config)),
+      .f = ~ future::future(run_one_model(.x, .y), seed = TRUE)
+    )
+
+    # -------------------------------------------------------------------------
+    # Step 2: MONITOR progress by polling from the Main R Session.
+    # Now that the main session is free, we can run the progress bar here.
+    # -------------------------------------------------------------------------
+
+    # This function now runs in the main R session, where it can draw to the console.
+    poll_output_dir(output_dir, total = nrow(config))
+
+    # -------------------------------------------------------------------------
+    # Step 3: COLLECT the results.
+    # The polling is done, which means all the .qs files exist and the workers
+    # have finished their calculations. Now we resolve the promises.
+    # -------------------------------------------------------------------------
+    cli::cli_inform("All models complete. Collecting results...")
+
+    results <- future::value(futures) # This collects the return values from all futures.
+
+    # Process the results as before
+    summary_tbl <- dplyr::bind_rows(purrr::map(results, "status_summary"))
+
+    future::plan(sequential)
+    cli::cli_alert_success("Workflow complete.")
+
+
+  } else {
+
+    raw_outputs  <- vector("list", length = nrow(config))
+    summary_rows <- vector("list", length = nrow(config))
+
+    for (i in seq_len(nrow(config))) {
+      config_row <- config[i, , drop = FALSE]
+      result <- run_one_model(config_row = config_row, row_index = i)
+      raw_outputs[[i]]  <- result
+      summary_rows[[i]] <- result$status_summary
+      cli::cli_inform("Sleeping and collecting garbage...")
     }
 
-    qs::qsave(summary_tbl, summary_file)
-    cli::cli_h2("Saved summary table to: {.path {summary_file}}")
-
+    summary_tbl <- dplyr::bind_rows(summary_rows)
   }
 
   ## ---------------------------------------------------------------------------
-  ## Step 4: Return results
+  ## Step 5: Summarize Results
+  ## ---------------------------------------------------------------------------
+
+  if (parallel) {
+    summary_tbl <- purrr::map_dfr(results, "status_summary")
+    raw_outputs <- results
+  }
+
+  if (is.null(summary_file)) {
+    timestamp    <- format(Sys.time(), "%Y%m%d_%H%M%S")
+    summary_file <- fs::path(output_dir, glue::glue("batch_summary_{variable}_{timestamp}.qs"))
+  }
+
+  qs::qsave(summary_tbl, summary_file)
+  cli::cli_h2("Saved summary table to: {.path {summary_file}}")
+
+  ## ---------------------------------------------------------------------------
+  ## Step 6: Error Summary
+  ## ---------------------------------------------------------------------------
+
+  error_logs <- list.files(output_dir, pattern = "^error_.*\\.json$")
+  if (length(error_logs) > 0) {
+    cli::cli_alert_warning("⚠️ {length(error_logs)} model failures logged.")
+  } else {
+    cli::cli_alert_success("No model failures detected.")
+  }
+
+  ## ---------------------------------------------------------------------------
+  ## Step 7: Return
   ## ---------------------------------------------------------------------------
 
   duration <- difftime(Sys.time(), start_time, units = "mins")
-
-  cli::cli_h2("Full model evaluation completed for {.val {nrow(config)}} configurations. Results saved to {.path {output_dir}}.")
-  cli::cli_h1("🌱 horizons run finished in {.val {round(duration, 1)}} minutes.")
+  cli::cli_h2("Full evaluation completed in {.val {round(duration, 1)}} minutes.")
 
   if (return_outputs) {
     return(list(summary = summary_tbl, raw_results = raw_outputs))
   } else {
     return(summary_tbl)
   }
-
 }
 

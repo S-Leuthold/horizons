@@ -10,13 +10,13 @@ run_model_evaluation(
   covariate_data,
   variable,
   output_dir = NULL,
-  grid_size = 10,
-  bayesian_iter = 15,
-  cv_folds = 5,
+  grid_size = 25,
+  bayesian_iter = 20,
+  cv_folds = 10,
   return_outputs = FALSE,
   pruning = TRUE,
-  save_summary = TRUE,
-  summary_file = NULL
+  summary_file = NULL,
+  parallel = TRUE
 )
 }
 \arguments{
@@ -46,9 +46,9 @@ along with the target response variable.}
 
 \item{return_outputs}{Logical. If \code{TRUE}, also return the full list of raw outputs from each \code{safe_run_model()} call. Default = \code{FALSE}.}
 
-\item{save_summary}{Logical. If \code{TRUE}, save the final summary table to disk as a \code{.qs} file. Default = \code{TRUE}.}
-
 \item{summary_file}{Optional. Full file path for saving the summary table. If \code{NULL}, a timestamped file will be created in \code{output_dir}.}
+
+\item{save_summary}{Logical. If \code{TRUE}, save the final summary table to disk as a \code{.qs} file. Default = \code{TRUE}.}
 }
 \value{
 Either:
