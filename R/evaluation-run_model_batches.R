@@ -174,7 +174,7 @@ run_model_evaluation <- function(config,
     # This dispatches all jobs to the workers but DOES NOT wait for them.
     # The main R session remains free.
     # -------------------------------------------------------------------------
-    cli::cli_inform("Dispatching models to background workers...")
+    cli::cli_alert_success("Dispatching models to background workers...")
 
     # We manually create a list of promises ("futures"), one for each model.
     # This does not block the main R session.
@@ -197,7 +197,7 @@ run_model_evaluation <- function(config,
     # The polling is done, which means all the .qs files exist and the workers
     # have finished their calculations. Now we resolve the promises.
     # -------------------------------------------------------------------------
-    cli::cli_inform("All models complete. Collecting results...")
+    cli::cli_alert_success("All models complete. Collecting results...")
 
     results <- future::value(futures) # This collects the return values from all futures.
 
