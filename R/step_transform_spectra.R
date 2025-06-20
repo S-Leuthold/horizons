@@ -58,9 +58,7 @@ process_spectra <- function(input_vector,
                   input_vector %>%
                     matrix(nrow = 1) %>%
                     prospectr::savitzkyGolay(m = 0, p = 1, w = window_size) %>%
-                    as.vector()  -> processed
-
-                  processed[start:end]
+                    as.vector()
                 },
                 "snv" = {
                   input_vector %>%

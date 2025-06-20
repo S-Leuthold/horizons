@@ -14,7 +14,8 @@ safe_run_model(
   grid_size = 10,
   bayesian_iter = 15,
   cv_folds = 5,
-  pruning = TRUE
+  pruning = TRUE,
+  save_output = FALSE
 )
 }
 \arguments{
