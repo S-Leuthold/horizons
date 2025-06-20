@@ -35,6 +35,7 @@
 #' @param return_outputs Logical. If `TRUE`, also return the full list of raw outputs from each `safe_run_model()` call. Default = `FALSE`.
 #' @param save_summary Logical. If `TRUE`, save the final summary table to disk as a `.qs` file. Default = `TRUE`.
 #' @param summary_file Optional. Full file path for saving the summary table. If `NULL`, a timestamped file will be created in `output_dir`.
+#' @param pruning Logical. Whether to skip poor models early using RRMSE thresholds.
 #'
 #' @return Either:
 #' \describe{
@@ -87,14 +88,16 @@ run_model_evaluation <- function(config,
                                  input_data,
                                  covariate_data,
                                  variable,
-                                 output_dir = NULL,
-                                 grid_size = 10,
-                                 bayesian_iter = 15,
-                                 cv_folds = 5,
-                                 return_outputs = FALSE,
-                                 pruning        = TRUE,
-                                 save_summary = TRUE,
-                                 summary_file = NULL) {
+                                 output_dir             = NULL,
+                                 grid_size_eval         = 10,
+                                 bayesian_iter_eval     = 15,
+                                 cv_folds_eval          = 5,
+                                 retrain_top_models     = TRUE,
+                                 number_models_retained = 15,
+                                 grid_size_final        = 25,
+                                 bayesian_iter_final    = 20,
+                                 cv_folds_final         = 15,
+                                 pruning                = FALSE) {
 
   cli::cli_h1("Starting full model evaluation across {.val {nrow(config)}} model combinations")
 
@@ -119,7 +122,7 @@ run_model_evaluation <- function(config,
 
 
   ## ---------------------------------------------------------------------------
-  ##
+  ## Step 1.5: Write some aggresive memory saver functions.
   ## ---------------------------------------------------------------------------
 
   defragment_memory <- function() {
@@ -127,7 +130,7 @@ run_model_evaluation <- function(config,
 
     for(i in 1:3) {
       gc(verbose = FALSE, full = TRUE)
-      Sys.sleep(0.1)  # Small delay between collections
+      Sys.sleep(0.1)
     }
 
     if(exists(".Random.seed")) rm(.Random.seed, envir = .GlobalEnv)
@@ -144,6 +147,8 @@ run_model_evaluation <- function(config,
 
   }
 
+  time_log <- numeric(nrow(config))
+
   ## ---------------------------------------------------------------------------
   ## Step 2: Iterate over configurations
   ## ---------------------------------------------------------------------------
@@ -155,30 +160,32 @@ run_model_evaluation <- function(config,
 
     start_time_i <- Sys.time()
 
-    config_row <- config[i, , drop = FALSE]
+    config_row_i <- config[i, , drop = FALSE]
 
-    result <- safe_run_model(config_row     = config_row,
-                             input_data     = input_data,
-                             covariate_data = covariate_data,
-                             variable       = variable,
-                             row_index      = i,
-                             output_dir     = output_dir,
-                             grid_size      = grid_size,
-                             bayesian_iter  = bayesian_iter,
-                             pruning        = pruning,
-                             cv_folds       = cv_folds)
+    result_i <- safe_run_model(config_row     = config_row_i,
+                               input_data     = input_data,
+                               covariate_data = covariate_data,
+                               variable       = variable,
+                               row_index      = i,
+                               output_dir     = output_dir,
+                               grid_size      = grid_size_eval,
+                               bayesian_iter  = bayesian_iter_eval,
+                               cv_folds       = cv_folds_eval,
+                               pruning        = pruning,
+                               save_output    = FALSE)
 
-    raw_outputs[[i]]  <- result
-    summary_rows[[i]] <- result$status_summary
+    raw_outputs[[i]]  <- result_i
+    summary_rows[[i]] <- result_i$status_summary
 
-    cli::cli_alert_success("Quick snooze and taking out the trash.")
+    cli::cli_alert_success("Quick snooze and taking out the trash. 💤")
 
     aggressive_cleanup()
     Sys.sleep(1)
 
-    mem_usage <- round(pryr::mem_used() / 1073741824, 2)
+    BYTES_PER_GB <- 1073741824
+    mem_usage <- round(pryr::mem_used() / BYTES_PER_GB, 2)
 
-    if (mem_usage < 2) {
+    if(mem_usage < 2) {
       cli::cli_alert_success("Current Memory Usage: {.val {mem_usage}} GB")
     } else if (mem_usage < 4) {
       cli::cli_alert_warning("Current Memory Usage: {.val {mem_usage}} GB")
@@ -188,49 +195,145 @@ run_model_evaluation <- function(config,
 
     ## -------------------------------------------------------------------------
 
-    end_time_i <- Sys.time()
-    duration_i <- difftime(end_time_i, start_time_i, units = "mins")
+    end_time_i  <- Sys.time()
+    duration_i  <- difftime(end_time_i, start_time_i, units = "mins")
+    time_log[i] <- duration_i
 
-    cli::cli_alert_success("Model evaluation finished in {.val {round(duration_i, 3)}} minutes.")
+    if(i %in% seq(0, 10000, 25)){
 
+      mean_duration    <- mean(as.numeric(time_log))
+      remaining_models <- nrow(config) - i
+      eta_mins         <- remaining_models * mean_duration
+      eta_time         <- Sys.time() + (eta_mins*60)
+      rounded_eta      <- format(eta_time, "%D at %I:%M %p")
 
+      cli::cli_alert_success("Model evaluation finished in {.val {round(duration_i, 3)}} minutes.")
+      cli::cli_alert_success("Estimated run completion: {.val {rounded_eta}}")
+
+    } else {
+
+      cli::cli_alert_success("Model evaluation finished in {.val {round(duration_i, 3)}} minutes.")
+
+    }
   }
 
-
-  future::plan(sequential)
-
   ## ---------------------------------------------------------------------------
-  ## Step 3: Assemble and optionally save summary
+  ## Step 3: Assemble and save summary
   ## ---------------------------------------------------------------------------
 
-  summary_tbl <- dplyr::bind_rows(summary_rows)
+  summary_tbl  <- dplyr::bind_rows(summary_rows)
 
-  if (save_summary) {
+  timestamp    <- format(Sys.time(), "%Y%m%d_%H%M%S")
+  summary_file <- fs::path(output_dir, glue::glue("batch_summary_{variable}_{timestamp}.qs"))
+  qs::qsave(summary_tbl, summary_file)
 
-    if (is.null(summary_file)) {
-      timestamp     <- format(Sys.time(), "%Y%m%d_%H%M%S")
-      summary_file  <- fs::path(output_dir, glue::glue("batch_summary_{variable}_{timestamp}.qs"))
+  cli::cli_h2("Saved full evaluation summary table to: {.path {summary_file}}")
+
+  ## ---------------------------------------------------------------------------
+  ## Step 5: Retrain top models
+  ## ---------------------------------------------------------------------------
+
+  if(isTRUE(retrain_top_models)){
+
+    cli::cli_h1("Retraining and saving the top {.val {number_models_retained}} model configurations.")
+
+    ## -------------------------------------------------------------------------
+
+    summary_tbl %>%
+      filter(status == "success",
+             !is.na(rrmse)) %>%
+      arrange(rrmse) %>%
+      dplyr::slice(1:number_models_retained) -> top_models
+
+    refit_outputs  <- vector("list", length = nrow(top_models))
+    refit_summary  <- vector("list", length = nrow(top_models))
+    time_log_refit <- numeric(nrow(top_models))
+
+    ## -------------------------------------------------------------------------
+
+    for (j in seq_len(nrow(top_models))) {
+
+      start_time_j <- Sys.time()
+
+      idx          <- top_models$row[j]
+      config_row_j <- config[idx, , drop = FALSE]
+
+      safe_run_model(config_row     = config_row_j,
+                     input_data     = input_data,
+                     covariate_data = covariate_data,
+                     variable       = variable,
+                     row_index      = idx,
+                     output_dir     = output_dir,
+                     grid_size      = grid_size_final,
+                     bayesian_iter  = bayesian_iter_final,
+                     cv_folds       = cv_folds_final,
+                     pruning        = FALSE,
+                     save_output    = TRUE)  -> result_j
+
+      refit_outputs[[j]] <- result_j
+      refit_summary[[j]] <- result_j$status_summary
+
+      cli::cli_alert_success("Quick snooze and taking out the trash. 💤")
+
+      aggressive_cleanup()
+      Sys.sleep(1)
+
+      mem_usage <- round(pryr::mem_used() / BYTES_PER_GB, 2)
+
+      if(mem_usage < 2) {
+        cli::cli_alert_success("Current Memory Usage: {.val {mem_usage}} GB")
+      } else if (mem_usage < 4) {
+        cli::cli_alert_warning("Current Memory Usage: {.val {mem_usage}} GB")
+      } else {
+        cli::cli_alert_danger("Current Memory Usage: {.val {mem_usage}} GB")
+      }
+
+      ## -------------------------------------------------------------------------
+
+      end_time_j  <- Sys.time()
+      duration_j  <- difftime(end_time_j, start_time_j, units = "mins")
+      time_log_refit[j] <- duration_j
+
+      if(j %in% seq(0, 100, 5)){
+
+        mean_duration    <- mean(as.numeric(time_log))
+        remaining_models <- nrow(config) - j
+        eta_mins         <- remaining_models * mean_duration
+        eta_time         <- Sys.time() + (eta_mins*60)
+        rounded_eta      <- format(eta_time, "%D at %I:%M %p")
+
+        cli::cli_alert_success("Model refitting finished in {.val {round(duration_j, 3)}} minutes.")
+        cli::cli_alert_success("Estimated refitting completion: {.val {rounded_eta}}")
+
+      } else {
+
+        cli::cli_alert_success("Model evaluation finished in {.val {round(duration_j, 3)}} minutes.")
+
+      }
     }
 
-    qs::qsave(summary_tbl, summary_file)
-    cli::cli_h2("Saved summary table to: {.path {summary_file}}")
+    future::plan(sequential)
 
-  }
+    refit_tbl <- dplyr::bind_rows(refit_summary)
+    qs::qsave(refit_tbl, fs::path(output_dir, glue::glue("refit_summary_{variable}_{timestamp}.qs")))
 
-  ## ---------------------------------------------------------------------------
-  ## Step 4: Return results
-  ## ---------------------------------------------------------------------------
+    duration <- difftime(Sys.time(), start_time, units = "mins")
 
-  duration <- difftime(Sys.time(), start_time, units = "mins")
+    cli::cli_h1("🌱 horizons model evaluation and refitting finished in {.val {round(duration/60, 2)}} hours.")
 
-  cli::cli_h2("Full model evaluation completed for {.val {nrow(config)}} configurations. Results saved to {.path {output_dir}}.")
-  cli::cli_h1("🌱 horizons run finished in {.val {round(duration, 1)}} minutes.")
+    return(list(full_summary  = summary_tbl,
+                refit_summary = refit_tbl))
 
-  if (return_outputs) {
-    return(list(summary = summary_tbl, raw_results = raw_outputs))
   } else {
-    return(summary_tbl)
-  }
 
-}
+    future::plan(sequential)
+
+    duration <- difftime(Sys.time(), start_time, units = "mins")
+
+    cli::cli_h2("Full model evaluation completed for {.val {nrow(config)}} configurations. Logs saved to {.path {output_dir}}.")
+    cli::cli_h1("🌱 horizons model evaluation finished in {.val {round(duration/60, 2)}} hours.")
+
+    return(summary_tbl)
+    }
+  }
 

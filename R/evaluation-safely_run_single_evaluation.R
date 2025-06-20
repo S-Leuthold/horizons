@@ -51,7 +51,8 @@ safe_run_model <- function(config_row,
                            grid_size     = 10,
                            bayesian_iter = 15,
                            cv_folds      = 5,
-                           pruning       = TRUE) {
+                           pruning       = TRUE,
+                           save_output   = FALSE) {
 
   ## ---------------------------------------------------------------------------
   ## Step 1: Setup
@@ -88,7 +89,7 @@ safe_run_model <- function(config_row,
   model_res  <- model_res_safe$result
 
   ## ---------------------------------------------------------------------------
-  ## Step 3: Handle and log error result (true error, not just pruned)
+  ## Step 3: Handle and log error result
   ## ---------------------------------------------------------------------------
 
   if (is.null(model_res) || isTRUE(model_res$error)) {
@@ -103,41 +104,36 @@ safe_run_model <- function(config_row,
       "evaluate_model_config() returned NULL with no error message"
     }
 
-    # Build error object for JSON
-    error_obj <- list(
-      row           = row_index,
-      config        = config_row,
-      error_message = error_msg,
-      call          = NULL,  # no useful call unless a real error object
-      time          = as.character(Sys.time())
-    )
+    error_obj <- list(row           = row_index,
+                      config        = config_row,
+                      error_message = error_msg,
+                      call          = NULL,
+                      time          = as.character(Sys.time()))
 
-    jsonlite::write_json(error_obj, error_file, pretty = TRUE, auto_unbox = TRUE)
+    jsonlite::write_json(error_obj,
+                         error_file,
+                         pretty = TRUE,
+                         auto_unbox = TRUE)
 
-    tibble::tibble(
-      row              = row_index,
-      wflow_id         = config_desc,
-      rsq              = NA_real_,
-      rmse             = NA_real_,
-      rrmse            = NA_real_,
-      output_path      = NA_character_,
-      error_log_path   = error_file,
-      error_message    = error_msg,
-      status           = "error"
-    ) -> status_summary
+    tibble::tibble(row              = row_index,
+                   wflow_id         = config_desc,
+                   rsq              = NA_real_,
+                   rmse             = NA_real_,
+                   rrmse            = NA_real_,
+                   saved_path       = NA_character_,
+                   error_log_path   = error_file,
+                   error_message    = error_msg,
+                   status           = "error") -> status_summary
 
     cli::cli_alert_danger("Model run failed at: {row_index} - {config_desc}")
     cli::cli_alert_info("Logged error to: {.path {error_file}}")
 
-    return(list(
-      status_summary = status_summary,
-      output_path    = NA_character_
-    ))
+    return(list(status_summary = status_summary,
+                output_path    = NA_character_))
   }
 
-
   ## ---------------------------------------------------------------------------
-  ## Step 4: Build initial status summary
+  ## Step 4: Build status summary
   ## ---------------------------------------------------------------------------
 
   tibble::tibble(row                = row_index,
@@ -146,36 +142,40 @@ safe_run_model <- function(config_row,
                  rsq                = NA_real_,
                  rmse               = NA_real_,
                  rrmse              = NA_real_,
-                 output_path        = NA_character_,
+                 saved_path         = NA_character_,
                  error_log_path     = NA_character_,
-                 error_message = NA_character_,
-                 status        = if (isTRUE(model_res$pruned)) "pruned" else "success") -> status_summary
+                 error_message      = NA_character_,
+                 status             =  dplyr::case_when(isTRUE(model_res$pruned) ~ "pruned",
+                                                        isTRUE(model_res$error)  ~ "error",
+                                                        TRUE                     ~ "success")) -> status_summary
+
+  if (!isTRUE(model_res$pruned) &&
+      !is.null(model_res$evaluation_results) &&
+      nrow(model_res$evaluation_results) > 0) {
+
+    model_res$evaluation_results %>%
+      dplyr::filter(!is.na(rrmse)) %>%
+      dplyr::arrange(rrmse) %>%
+      dplyr::slice(1) -> best_workflow
+
+    status_summary$rsq   <- best_workflow$rsq
+    status_summary$rmse  <- best_workflow$rmse
+    status_summary$rrmse <- best_workflow$rrmse
+
+    }
 
   ## ---------------------------------------------------------------------------
   ## Step 5: Save result if not an error
   ## ---------------------------------------------------------------------------
 
-  if (!isTRUE(model_res$error)) {
+  if(isTRUE(save_output)){
 
-    file_name                  <- paste0("result_", row_index, "_", config_desc, ".qs")
-    output_path                <- fs::path(output_dir, file_name)
-    status_summary$output_path <- output_path
+  file_name                  <- paste0("result_", row_index, "_", config_desc, ".qs")
+  saved_path                 <- fs::path(output_dir, file_name)
+  status_summary$saved_path  <- saved_path
 
-    qs::qsave(model_res, output_path)
+  qs::qsave(model_res, saved_path)
 
-    if (!isTRUE(model_res$pruned) &&
-        !is.null(model_res$evaluation_results) &&
-        nrow(model_res$evaluation_results) > 0) {
-
-      model_res$evaluation_results %>%
-        dplyr::filter(!is.na(rrmse)) %>%
-        dplyr::arrange(rrmse) %>%
-        dplyr::slice(1) -> best
-
-      status_summary$rsq   <- best$rsq
-      status_summary$rmse  <- best$rmse
-      status_summary$rrmse <- best$rrmse
-    }
   }
 
 
@@ -184,7 +184,9 @@ safe_run_model <- function(config_row,
   ## ---------------------------------------------------------------------------
 
   return(list(status_summary = status_summary,
-              output_path    = status_summary$output_path))
+              saved_path     = status_summary$saved_path))
 
 }
+
+
 
