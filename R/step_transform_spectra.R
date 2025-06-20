@@ -58,13 +58,17 @@ process_spectra <- function(input_vector,
                   input_vector %>%
                     matrix(nrow = 1) %>%
                     prospectr::savitzkyGolay(m = 0, p = 1, w = window_size) %>%
-                    as.vector()
+                    as.vector()  -> processed
+
+                  processed[start:end]
                 },
                 "snv" = {
                   input_vector %>%
                     matrix(nrow = 1) %>%
                     prospectr::standardNormalVariate() %>%
-                    as.vector()
+                    as.vector() -> processed
+
+                  processed[start:end]
                 },
                 "deriv1" = {
                   input_vector %>%

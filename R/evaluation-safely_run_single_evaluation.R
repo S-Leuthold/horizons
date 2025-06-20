@@ -86,41 +86,55 @@ safe_run_model <- function(config_row,
                  capture_trace     = FALSE) -> model_res_safe
 
   model_res  <- model_res_safe$result
-  run_error  <- model_res_safe$error
 
   ## ---------------------------------------------------------------------------
-  ## Step 3: Handle null result (true error, not just pruned)
+  ## Step 3: Handle and log error result (true error, not just pruned)
   ## ---------------------------------------------------------------------------
 
-  if (is.null(model_res)) {
+  if (is.null(model_res) || isTRUE(model_res$error)) {
 
     error_file <- fs::path(output_dir, paste0("error_", row_index, "_", config_desc, ".json"))
 
-    error_obj <- list(row           = row_index,
-                      config        = config_row,
-                      error_message = if (!is.null(run_error)) run_error$message else "evaluate_model_config() returned NULL",
-                      call          = if (!is.null(run_error)) deparse(run_error$call) else NULL,
-                      time          = as.character(Sys.time()))
+    error_msg <- if (!is.null(model_res_safe$error)) {
+      conditionMessage(model_res_safe$error)
+    } else if (!is.null(model_res$reason)) {
+      model_res$reason
+    } else {
+      "evaluate_model_config() returned NULL with no error message"
+    }
+
+    # Build error object for JSON
+    error_obj <- list(
+      row           = row_index,
+      config        = config_row,
+      error_message = error_msg,
+      call          = NULL,  # no useful call unless a real error object
+      time          = as.character(Sys.time())
+    )
 
     jsonlite::write_json(error_obj, error_file, pretty = TRUE, auto_unbox = TRUE)
 
-    tibble::tibble(row                = row_index,
-                   wflow_id           = config_desc,
-                   rsq                = NA_real_,
-                   rmse               = NA_real_,
-                   rrmse              = NA_real_,
-                   output_path        = NA_character_,
-                   error_log_path     = error_file,
-                   error_message      = error_obj$error_message,
-                   status             = "error") -> status_summary
+    tibble::tibble(
+      row              = row_index,
+      wflow_id         = config_desc,
+      rsq              = NA_real_,
+      rmse             = NA_real_,
+      rrmse            = NA_real_,
+      output_path      = NA_character_,
+      error_log_path   = error_file,
+      error_message    = error_msg,
+      status           = "error"
+    ) -> status_summary
 
     cli::cli_alert_danger("Model run failed at: {row_index} - {config_desc}")
     cli::cli_alert_info("Logged error to: {.path {error_file}}")
 
-    return(list(status_summary     = status_summary,
-                output_path        = NA_character_))
-
+    return(list(
+      status_summary = status_summary,
+      output_path    = NA_character_
+    ))
   }
+
 
   ## ---------------------------------------------------------------------------
   ## Step 4: Build initial status summary
@@ -134,10 +148,8 @@ safe_run_model <- function(config_row,
                  rrmse              = NA_real_,
                  output_path        = NA_character_,
                  error_log_path     = NA_character_,
-                 error_message      = if (isTRUE(model_res$error)) model_res$reason else NA_character_,
-                 status             = if (isTRUE(model_res$error)) "error"
-                                      else if (isTRUE(model_res$pruned)) "pruned"
-                                      else "success") -> status_summary
+                 error_message = NA_character_,
+                 status        = if (isTRUE(model_res$pruned)) "pruned" else "success") -> status_summary
 
   ## ---------------------------------------------------------------------------
   ## Step 5: Save result if not an error
