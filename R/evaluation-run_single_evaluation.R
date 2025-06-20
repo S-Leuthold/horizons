@@ -78,7 +78,7 @@ evaluate_model_config <- function(input_data,
                 error              = TRUE,
                 pruned             = FALSE,
                 wflow_id           = wflow_id,
-                reason             = "Recipe construction failed"))
+                reason             = conditionMessage(recipe_safe$error)))
     }
 
   ## ---------------------------------------------------------------------------
@@ -98,7 +98,7 @@ evaluate_model_config <- function(input_data,
                 error              = TRUE,
                 pruned             = FALSE,
                 wflow_id           = wflow_id,
-                reason             = "Model specification failed"))
+                reason             = conditionMessage(model_spec_safe$error)))
   }
 
   ## ---------------------------------------------------------------------------
@@ -120,7 +120,7 @@ evaluate_model_config <- function(input_data,
                 error              = TRUE,
                 pruned             = FALSE,
                 wflow_id           = wflow_id,
-                reason             = "Workflow construction failed"))
+                reason             = conditionMessage(workflow_safe$error)))
   }
 
   ##----------------------------------------------------------------------------
@@ -155,7 +155,8 @@ evaluate_model_config <- function(input_data,
                                              control    = tune::control_grid(save_pred     = FALSE,
                                                                              save_workflow = TRUE,
                                                                              verbose       = FALSE,
-                                                                             parallel_over = "resamples"))},
+                                                                             allow_par     = TRUE,
+                                                                             parallel_over = "everything"))},
                      default_value = NULL,
                      error_message = "Grid tuning failed for {wflow_id}") -> grid_res_safe
 
@@ -168,12 +169,14 @@ evaluate_model_config <- function(input_data,
 
     cli::cli_alert_warning("Skipping model: Initial grid search failed.")
 
+    notes_out <- capture.output(tune::show_notes(.Last.tune.result))
+
     return(list(evaluation_results = NULL,
                 tuned_models       = NULL,
                 error              = TRUE,
                 pruned             = FALSE,
                 wflow_id           = wflow_id,
-                reason             = "Initial grid search failed"))
+                reason             = notes_out))
   }
 
   ## ---------------------------------------------------------------------------
@@ -222,7 +225,7 @@ evaluate_model_config <- function(input_data,
                                                                                seed          = 307,
                                                                                no_improve    = 10L,
                                                                                allow_par     = TRUE,
-                                                                               parallel_over = "resamples"))},
+                                                                               parallel_over = "everything"))},
                      default_value  = NULL,
                      error_message  = "Bayesian tuning failed for {wflow_id}") -> bayes_res_safe
     })
@@ -234,12 +237,14 @@ evaluate_model_config <- function(input_data,
 
     cli::cli_alert_warning("Skipping model: Bayesian tuning failed.")
 
+    notes_out <- capture.output(tune::show_notes(.Last.tune.result))
+
     return(list(evaluation_results = NULL,
                 tuned_models       = NULL,
                 error              = TRUE,
                 pruned             = FALSE,
                 wflow_id           = wflow_id,
-                reason             = "Bayesian tuning failed"))
+                reason             = notes_out))
   }
 
   ## ---------------------------------------------------------------------------
@@ -270,7 +275,7 @@ evaluate_model_config <- function(input_data,
                 error              = TRUE,
                 pruned             = FALSE,
                 wflow_id           = wflow_id,
-                reason             = "Model finalization failed"))
+                reason             = finalized_wf_safe$errors))
   }
 
   ## ---------------------------------------------------------------------------
@@ -293,7 +298,7 @@ evaluate_model_config <- function(input_data,
                 error              = TRUE,
                 pruned             = FALSE,
                 wflow_id           = wflow_id,
-                reason             = "Holdout evaluation failed"))
+                reason             = conditionMessage(evaluation_res_safe$error)))
   }
 
   ## ---------------------------------------------------------------------------
