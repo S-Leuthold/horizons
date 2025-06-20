@@ -119,10 +119,41 @@ run_model_evaluation <- function(config,
 
 
   ## ---------------------------------------------------------------------------
+  ##
+  ## ---------------------------------------------------------------------------
+
+  defragment_memory <- function() {
+
+
+    for(i in 1:3) {
+      gc(verbose = FALSE, full = TRUE)
+      Sys.sleep(0.1)  # Small delay between collections
+    }
+
+    if(exists(".Random.seed")) rm(.Random.seed, envir = .GlobalEnv)
+    gc(verbose = FALSE, full = TRUE)
+
+  }
+
+  aggressive_cleanup <- function() {
+
+    defragment_memory()
+    rm(list = ls(pattern = "^temp_|^tmp_"), envir = parent.frame())
+    if(exists("flush.console")) flush.console()
+    invisible(gc(verbose = FALSE, full = TRUE))
+
+  }
+
+  ## ---------------------------------------------------------------------------
   ## Step 2: Iterate over configurations
   ## ---------------------------------------------------------------------------
 
+  future::plan(multisession, workers = parallel::detectCores() - 3)
+  cli::cli_alert_success("Parallel backend registered with {.val {parallel::detectCores() - 3}} workers.")
+
   for (i in seq_len(nrow(config))) {
+
+    start_time_i <- Sys.time()
 
     config_row <- config[i, , drop = FALSE]
 
@@ -140,10 +171,33 @@ run_model_evaluation <- function(config,
     raw_outputs[[i]]  <- result
     summary_rows[[i]] <- result$status_summary
 
-    cli::cli_inform("Sleeping and collecting garbage...")
-    gc(verbose = FALSE, full = TRUE)
+    cli::cli_alert_success("Quick snooze and taking out the trash.")
+
+    aggressive_cleanup()
     Sys.sleep(1)
+
+    mem_usage <- round(pryr::mem_used() / 1073741824, 2)
+
+    if (mem_usage < 2) {
+      cli::cli_alert_success("Current Memory Usage: {.val {mem_usage}} GB")
+    } else if (mem_usage < 4) {
+      cli::cli_alert_warning("Current Memory Usage: {.val {mem_usage}} GB")
+    } else {
+      cli::cli_alert_danger("Current Memory Usage: {.val {mem_usage}} GB")
+    }
+
+    ## -------------------------------------------------------------------------
+
+    end_time_i <- Sys.time()
+    duration_i <- difftime(end_time_i, start_time_i, units = "mins")
+
+    cli::cli_alert_success("Model evaluation finished in {.val {round(duration_i, 3)}} minutes.")
+
+
   }
+
+
+  future::plan(sequential)
 
   ## ---------------------------------------------------------------------------
   ## Step 3: Assemble and optionally save summary

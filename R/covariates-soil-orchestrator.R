@@ -165,14 +165,16 @@ predict_covariates <- function(covariates,
        tidyr::pivot_longer(cols = all_of(covariates),
                            names_to = "Covariate",
                            values_to = "Predicted_Values") %>%
-       dplyr::distinct(Project, Sample_ID, Covariate, .keep_all = TRUE)
+       dplyr::group_by(Project, Sample_ID, Covariate) %>%
+       dplyr::summarise(Predicted_Values = dplyr::first(na.omit(Predicted_Values)),
+                        .groups = "drop")
 
      final_predictions <- long_predictions %>%
        tidyr::pivot_wider(names_from = Covariate,
                           values_from = Predicted_Values) %>%
        dplyr::select(Project, Sample_ID, all_of(covariates))
 
-     evaluation_stats <- "Run with refresh == TRUE to get a new set of eval stats."
+     evaluation_stats <- "Run with refresh = TRUE to get a new set of eval stats."
 
      if (verbose) cli::cli_progress_done()
 
