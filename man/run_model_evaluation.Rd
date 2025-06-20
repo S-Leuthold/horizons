@@ -10,13 +10,15 @@ run_model_evaluation(
   covariate_data,
   variable,
   output_dir = NULL,
-  grid_size = 10,
-  bayesian_iter = 15,
-  cv_folds = 5,
-  return_outputs = FALSE,
-  pruning = TRUE,
-  save_summary = TRUE,
-  summary_file = NULL
+  grid_size_eval = 10,
+  bayesian_iter_eval = 15,
+  cv_folds_eval = 5,
+  retrain_top_models = TRUE,
+  number_models_retained = 15,
+  grid_size_final = 25,
+  bayesian_iter_final = 20,
+  cv_folds_final = 15,
+  pruning = FALSE
 )
 }
 \arguments{
@@ -37,6 +39,8 @@ along with the target response variable.}
 \item{variable}{Character string specifying the name of the response variable to model (must be present in \code{input_data}).}
 
 \item{output_dir}{Directory where all pruned results and error logs will be saved. Default is \code{"batch_model_outputs"}.}
+
+\item{pruning}{Logical. Whether to skip poor models early using RRMSE thresholds.}
 
 \item{grid_size}{Integer. Number of hyperparameter combinations to evaluate per model in the initial grid search (default = 10).}
 
