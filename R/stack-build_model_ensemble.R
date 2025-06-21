@@ -87,7 +87,7 @@ build_ensemble_stack <- function(results_dir,
   ## ---------------------------------------------------------------------------
 
   safely_execute(expr = {fs::dir_ls(path   = results_dir,
-                                    regexp = "batch_summary.*\\.qs$") %>%
+                                    regexp = "refit_summary.*\\.qs$") %>%
                           .[1] -> batch_summary_path
 
                          qs::qread(batch_summary_path)},
@@ -152,7 +152,7 @@ build_ensemble_stack <- function(results_dir,
     ## ---------------------------------------------------------------------------
 
     safely_execute(expr = {top_models %>%
-                            dplyr::pull(output_path) %>%
+                            dplyr::pull(saved_path) %>%
                             purrr::map(qs::qread) %>%
                             dplyr::bind_rows() %>%
                             purrr::pluck(., "tuned_models")},

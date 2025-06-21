@@ -201,7 +201,7 @@ run_model_evaluation <- function(config,
 
     if(i %in% seq(0, 10000, 25)){
 
-      mean_duration    <- mean(as.numeric(time_log))
+      mean_duration    <- median(as.numeric(time_log)*60)
       remaining_models <- nrow(config) - i
       eta_mins         <- remaining_models * mean_duration
       eta_time         <- Sys.time() + (eta_mins*60)
