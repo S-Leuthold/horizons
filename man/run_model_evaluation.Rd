@@ -2,7 +2,7 @@
 % Please edit documentation in R/evaluation-run_model_batches.R
 \name{run_model_evaluation}
 \alias{run_model_evaluation}
-\title{Run Full Batch Model Evaluation Across a Configuration Grid}
+\title{Run Full Batch Model Evaluation Across Configuration Grid}
 \usage{
 run_model_evaluation(
   config,
@@ -22,96 +22,87 @@ run_model_evaluation(
 )
 }
 \arguments{
-\item{config}{A tibble of model configurations to evaluate. Must include the following columns:
-\describe{
-\item{model}{Character. Name of the model to run (e.g., \code{"PLSR"}, \code{"Cubist"}).}
-\item{transformation}{Character. Outcome transformation label (e.g., \code{"Log Transformation"}).}
-\item{preprocessing}{Character. Spectral preprocessing method (e.g., \code{"SNV + SG1"}).}
-\item{covariates}{List-column of covariates to include (e.g., \code{c("Clay", "pH")}).}
-\item{include_covariates}{Logical. Whether to include external covariates in modeling.}
+\item{config}{A \code{tibble} of model configurations to evaluate. Must include columns:
+\itemize{
+\item \code{model}: Name of model (e.g., \code{"PLSR"}, \code{"Cubist"}).
+\item \code{transformation}: Outcome transformation label (e.g., \code{"Log Transformation"}).
+\item \code{preprocessing}: Spectral preprocessing method (e.g., \code{"SNV + SG1"}).
+\item \code{covariates}: List-column of covariate sets (e.g., \code{c("Clay", "pH")}).
+\item \code{include_covariates}: Logical flag.
 }}
 
-\item{input_data}{A preprocessed spectral tibble containing columns \code{Sample_ID}, \code{Wavenumber}, and \code{Absorbance},
-along with the target response variable.}
+\item{input_data}{A \code{tibble} with preprocessed spectral data, including \code{Sample_ID},
+wavenumber columns, and the target response variable.}
 
-\item{covariate_data}{A tibble of predicted covariate values, matched by \code{Sample_ID}. Required if \code{include_covariates = TRUE}.}
+\item{covariate_data}{Optional \code{tibble} of predicted covariates matched by \code{Sample_ID}.
+Required if \code{include_covariates = TRUE} in any row of \code{config}.}
 
-\item{variable}{Character string specifying the name of the response variable to model (must be present in \code{input_data}).}
+\item{variable}{Character. Name of the response variable (must be in \code{input_data}).}
 
-\item{output_dir}{Directory where all pruned results and error logs will be saved. Default is \code{"batch_model_outputs"}.}
+\item{output_dir}{Path to output directory. Defaults to timestamped folder under \code{variable}.}
 
-\item{pruning}{Logical. Whether to skip poor models early using RRMSE thresholds.}
+\item{grid_size_eval}{Integer. Number of combinations in the initial grid search (default = 10).}
 
-\item{grid_size}{Integer. Number of hyperparameter combinations to evaluate per model in the initial grid search (default = 10).}
+\item{bayesian_iter_eval}{Integer. Number of iterations in Bayesian tuning (default = 15).}
 
-\item{bayesian_iter}{Integer. Number of iterations to run in the Bayesian tuning phase (default = 15).}
+\item{cv_folds_eval}{Integer. Number of CV folds during evaluation phase (default = 5).}
 
-\item{cv_folds}{Integer. Number of cross-validation folds used during resampling (default = 5).}
+\item{retrain_top_models}{Logical. Whether to refit the top N models after screening (default = \code{TRUE}).}
 
-\item{return_outputs}{Logical. If \code{TRUE}, also return the full list of raw outputs from each \code{safe_run_model()} call. Default = \code{FALSE}.}
+\item{number_models_retained}{Integer. Number of top models to refit if \code{retrain_top_models = TRUE} (default = 15).}
 
-\item{save_summary}{Logical. If \code{TRUE}, save the final summary table to disk as a \code{.qs} file. Default = \code{TRUE}.}
+\item{grid_size_final}{Integer. Grid size for refitting stage (default = 25).}
 
-\item{summary_file}{Optional. Full file path for saving the summary table. If \code{NULL}, a timestamped file will be created in \code{output_dir}.}
+\item{bayesian_iter_final}{Integer. Bayesian iterations during refitting (default = 20).}
+
+\item{cv_folds_final}{Integer. Number of CV folds for refitting phase (default = 15).}
+
+\item{pruning}{Logical. Whether to enable pruning of poor configurations early (default = \code{FALSE}).}
 }
 \value{
-Either:
-\describe{
-\item{Tibble (default)}{A summary table with one row per model configuration. Includes workflow ID, performance metrics, status flags, and file paths.}
-\item{List (if \code{return_outputs = TRUE})}{A list with two elements:
-\describe{
-\item{summary}{Tibble as above.}
-\item{raw_results}{List of all outputs returned by \code{safe_run_model()} for further inspection.}
-}
-}
+If \code{retrain_top_models = FALSE}, returns a \code{tibble} summarizing evaluation metrics
+for each configuration. If \code{TRUE}, returns a \code{list} with:
+\itemize{
+\item \strong{full_summary}: A \code{tibble} of metrics and metadata from the initial evaluation.
+\item \strong{refit_summary}: A \code{tibble} of metrics from the final refitting stage.
 }
 }
 \description{
-Iterates over a tibble of model configurations to safely execute the full ensemble modeling
-pipeline for each combination. For each configuration, this function:
-(1) calls \code{full_model_evaluation()} with atomic inputs,
-(2) wraps the run in error handling and structured logging via \code{safe_run_model()},
-(3) prunes the output to retain only evaluation metrics and workflows required for stacking,
-and (4) aggregates a run-level summary table of model performance, file paths, and error status.
+Executes ensemble modeling workflows for a grid of model configurations, applying
+grid + Bayesian tuning, evaluation, pruning, and optional refitting of top-performing models.
+Each model run is isolated and fault-tolerant, using \code{safe_run_model()} for robust logging and
+\code{prune_model_output()} to minimize memory. Supports caching, parallel execution, and ETA tracking.
 }
 \details{
-Designed for high-throughput batch modeling of spectral data with optional covariates.
-Can optionally return full raw results for interactive inspection, or save only a lightweight
-summary table for downstream filtering and stacking.
-
-This function is optimized for large-scale, memory-safe model screening over 100s of configurations.
-It is designed to work with atomic modeling inputs — no internal covariate grid expansion is performed.
-Covariates should be precomputed using \code{predict_covariates()} and passed in full.
-
-Each model run is safely wrapped via \code{safe_run_model()}, and results are pruned via \code{prune_model_output()}
-to retain only metrics and fitted workflows. Errors are logged to JSON files and do not interrupt the loop.
-Garbage collection and timing gaps are included by default to reduce memory pressure.
-
-Output files are saved in the specified \code{output_dir}. A timestamped summary file is written automatically
-unless \code{save_summary = FALSE}. These files can be reloaded using \code{qs::qread()} for further analysis or stacking.
-}
-\section{Run Lifecycle}{
-
+This function is designed for large-scale, reproducible modeling across 100s of candidate
+configurations. Each model run:
 \enumerate{
-\item Loop over each row of \code{config}
-\item Call \code{safe_run_model()} with filtered inputs
-\item Save pruned output as \code{.qs} file
-\item Aggregate evaluation metrics and paths into \code{summary}
-\item Optionally return raw results and/or write summary file
-}
+\item Is isolated and wrapped in \code{safe_run_model()} to prevent failure propagation.
+\item Produces a pruned \code{.qs} file with only workflows and metrics needed for stacking.
+\item Logs run metadata (time, memory, status) and handles memory cleanup between runs.
+\item Returns a summary table for all configurations, and optionally retrains the top-N models.
 }
 
+Memory usage is tracked with thresholds, and parallel evaluation is handled via \code{future::plan(multisession)}.
+Outputs are written to disk in \code{output_dir}, including timestamped summary files for downstream stacking.
+
+ETA messages are printed every 25 configurations or 5 refits.
+}
 \examples{
 \dontrun{
-results <- run_batch_models(
-  config         = expanded_model_grid,
-  input_data     = Input_Data,
-  covariate_data = Covariate_Data$Predicted_Values,
-  variable       = "MAOM_C_g_kg"
+results <- run_model_evaluation(
+  config                = model_config_grid,
+  input_data            = spectral_data,
+  covariate_data        = predicted_covs,
+  variable              = "MAOM_C_g_kg",
+  grid_size_eval        = 10,
+  bayesian_iter_eval    = 15,
+  number_models_retained = 20
 )
 }
+
 }
 \seealso{
-\code{\link[=safe_run_model]{safe_run_model()}}, \code{\link[=prune_model_output]{prune_model_output()}}, \code{\link[=full_model_evaluation]{full_model_evaluation()}},
-\code{\link[qs:qread]{qs::qread()}}, \code{\link[stacks:add_candidates]{stacks::add_candidates()}}
+\code{\link{safe_run_model}}, \code{\link{prune_model_output}}, \code{\link{full_model_evaluation}},
+\code{\link[qs]{qread}}, \code{\link[stacks]{add_candidates}}
 }

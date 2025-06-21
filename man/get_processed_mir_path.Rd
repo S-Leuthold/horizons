@@ -2,14 +2,31 @@
 % Please edit documentation in R/utils_get_processed_ossl_mir.R
 \name{get_processed_mir_path}
 \alias{get_processed_mir_path}
-\title{Get Path to Processed MIR Spectra}
+\title{Get Path to Processed MIR Spectra File}
 \usage{
 get_processed_mir_path()
 }
 \value{
-Path to the processed MIR spectra \code{.qs} file if it exists, NULL otherwise.
+A character string giving the path to the \code{ossl_mir_processed.qs} file,
+or \code{NULL} if the file does not exist.
 }
 \description{
-Get Path to Processed MIR Spectra
+Returns the full path to the cached processed mid-infrared (MIR) spectral
+dataset if it exists on disk. This file typically contains spectra that have
+been preprocessed (e.g., trimmed, smoothed, transformed) for modeling use.
 }
-\keyword{internal}
+\details{
+This function checks the Horizons user cache directory
+(\code{tools::R_user_dir("horizons", "cache")}) for a processed version of the
+raw OSSL MIR spectra. It is intended to support reproducible preprocessing
+workflows without redundant computation.
+}
+\examples{
+\dontrun{
+get_processed_mir_path()
+}
+
+}
+\seealso{
+\code{\link{get_ossl_data_path}}, \code{\link{download_horizons_data}}
+}

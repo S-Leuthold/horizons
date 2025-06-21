@@ -2,29 +2,47 @@
 % Please edit documentation in R/covariates-soil-reduce_dimensionality.R
 \name{reduce_dimensions_pca}
 \alias{reduce_dimensions_pca}
-\title{Reduce Dimensionality of Spectral Data Using PCA}
+\title{Reduce Spectral Dimensionality Using PCA}
 \usage{
 reduce_dimensions_pca(training_data, new_data)
 }
 \arguments{
-\item{training_data}{A data frame containing training spectra, with numeric columns from \code{608} to \code{3992} representing wavenumbers.
-Additional metadata columns are preserved.}
+\item{training_data}{A \code{data.frame} or \code{tibble} containing training MIR spectra with numeric
+wavenumber columns (typically \code{608}–\code{3992}) and any number of metadata columns (e.g., \code{Sample_ID}, \code{Project}).}
 
-\item{new_data}{A data frame containing new spectra to project, with the same structure and wavenumber columns as \code{training_data}.}
+\item{new_data}{A \code{data.frame} or \code{tibble} containing new MIR spectra to be projected into PCA space.
+Must have the same spectral columns as \code{training_data}.}
 }
 \value{
-A list with:
-\item{training_data}{A tibble of PCA-transformed training data with original metadata.}
-\item{new_data}{A tibble of PCA-transformed new data with original metadata.}
+A named \code{list} with two elements:
+\itemize{
+\item \strong{training_data}: A \code{tibble} containing the PCA-transformed training data joined to its original metadata.
+\item \strong{new_data}: A \code{tibble} containing the PCA-transformed new data joined to its original metadata.
+}
 }
 \description{
-Applies PCA to training spectra and projects both training and new data into
-a lower-dimensional space for covariate prediction. Retains up to 80 principal
-components using \code{FactoMineR::PCA()}.
+Performs principal component analysis (PCA) on training MIR spectral data, and projects both
+training and new samples into the same reduced-dimensional space. PCA is applied using
+\code{FactoMineR::PCA()} with scaling enabled, retaining up to 80 components.
 }
 \details{
-PCA is performed on the training set using \code{FactoMineR::PCA()} with scaling enabled and up to 80 components retained.
-The trained PCA model is then used to project the \code{new_data} onto the same principal component space to ensure
-consistent dimensionality reduction across datasets.
+PCA is fit to the spectral columns of \code{training_data} using \code{FactoMineR::PCA()} with \code{scale.unit = TRUE}
+and \code{ncp = 80}. The resulting PCA object is used to project \code{new_data} via \code{stats::predict()} to ensure
+dimensional consistency across datasets.
+
+Spectral columns should be numeric and represent evenly spaced wavenumbers between ~600–4000 cm⁻¹.
+All non-spectral columns are preserved and returned alongside the transformed scores.
+
+This function is intended for dimensionality reduction prior to clustering or model calibration
+in MIR-based soil property prediction workflows.
 }
-\keyword{internal}
+\examples{
+\dontrun{
+reduced <- reduce_dimensions_pca(training_data = ossl_data, new_data = unknown_data)
+
+names(reduced)
+head(reduced$training_data)
+head(reduced$new_data)
+}
+
+}

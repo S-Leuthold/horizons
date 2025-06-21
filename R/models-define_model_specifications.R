@@ -1,45 +1,50 @@
-#' Define Parsnip Model Specifications for Soil Spectral Regression
+#' Define a Parsnip Model Specification for Soil Spectral Modeling
 #'
-#' Returns a tunable `parsnip` model specification object for the specified model type.
-#' Each model is initialized with appropriate hyperparameters marked for tuning using `tune()`,
-#' and is intended for use in model grids and workflow sets. Supports a curated set of models
-#' relevant to soil spectroscopy and ensemble learning.
+#' Constructs a tunable `parsnip` model specification for one of several supported
+#' regression algorithms commonly used in soil spectroscopy and ensemble modeling.
+#' Each specification includes `tune()` placeholders for relevant hyperparameters,
+#' and is intended for use in `workflow()` objects or within model grids.
 #'
-#' @import dplyr
-#' @import purrr
-#' @import tidyr
-#' @import tibble
-#' @importFrom magrittr %>%
-#' @importFrom rlang .data
-#' @importFrom parsnip rand_forest cubist_rules boost_tree linear_reg svm_rbf mars pls mlp set_engine set_mode
-#' @importFrom tune tune
-#' @importFrom cli cli_abort
-#'
-#' @param model_type Character string specifying model type. Must be one of:
+#' @param model_type Character. One of the following canonical model slugs:
 #'   \itemize{
-#'     \item{"random_forest"}
-#'     \item{"cubist"}
-#'     \item{"xgboost"}
-#'     \item{"elastic_net"}
-#'     \item{"svm_rbf"}
-#'     \item{"mars"}
-#'     \item{"plsr"}
-#'     \item{"mlp_nn"}
+#'     \item{\code{"random_forest"}}
+#'     \item{\code{"cubist"}}
+#'     \item{\code{"xgboost"}}
+#'     \item{\code{"lightgbm"}}
+#'     \item{\code{"elastic_net"}}
+#'     \item{\code{"svm_rbf"}}
+#'     \item{\code{"mars"}}
+#'     \item{\code{"plsr"}}
+#'     \item{\code{"mlp_nn"}}
 #'   }
 #'
-#' @return A `parsnip` model specification object with tunable hyperparameters,
-#' ready to be added to a `workflow()` or `workflow_set()`.
+#' @return A `parsnip` model specification object with tunable hyperparameters.
 #'
-#' @seealso \code{\link[parsnip]{set_engine}}, \code{\link[tune]{tune}}, \code{\link{build_model_grid}}
+#' @details
+#' This function standardizes model setup across workflows. Each model spec is returned
+#' with regression mode enabled, an appropriate modeling engine selected, and all key
+#' hyperparameters marked as tunable. Designed for compatibility with `tune_grid()`,
+#' `workflowsets::workflow_set()`, and `stacks::stacks()`.
+#'
+#' @seealso
+#'   \code{\link[parsnip]{set_engine}},
+#'   \code{\link[tune]{tune}},
+#'   \code{\link{build_model_grid}}
 #'
 #' @examples
 #' \dontrun{
-#' define_model_specifications("Random Forest")
-#' define_model_specifications("Elastic Net")
-#' define_model_specifications("Neural Network")
+#' define_model_specifications("random_forest")
+#' define_model_specifications("plsr")
+#' define_model_specifications("mlp_nn")
 #' }
 #'
+#' @importFrom parsnip rand_forest boost_tree linear_reg svm_rbf mars mlp pls cubist_rules set_engine set_mode
+#' @importFrom tune tune
+#' @importFrom cli cli_abort
+
+#'
 #' @keywords internal
+
 
 
 define_model_specifications <- function(model_type) {

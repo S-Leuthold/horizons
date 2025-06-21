@@ -19,48 +19,68 @@ safe_run_model(
 )
 }
 \arguments{
-\item{config_row}{A single-row tibble with configuration details. Must contain:
+\item{config_row}{A single-row \code{tibble} containing a model configuration. Must include:
 \code{model}, \code{transformation}, \code{preprocessing}, \code{covariates}, and \code{include_covariates}.}
 
-\item{input_data}{A preprocessed tibble of spectral data with \code{Sample_ID}, \code{Wavenumber}, and \code{Absorbance}.}
+\item{input_data}{A \code{tibble} with preprocessed spectral data. Must include \code{Sample_ID},
+\code{Wavenumber}, \code{Absorbance}, and the target response variable.}
 
-\item{covariate_data}{Optional tibble of predicted covariates (if \code{include_covariates = TRUE}).}
+\item{covariate_data}{Optional \code{tibble} of predicted covariates (must include \code{Sample_ID}),
+required if \code{include_covariates = TRUE}.}
 
-\item{variable}{Character name of the outcome variable to predict.}
+\item{variable}{Character. Name of the outcome variable to predict.}
 
-\item{row_index}{Integer indicating the row number (used for logging and filenames).}
+\item{row_index}{Integer. The row index of the configuration in the batch grid, used for labeling files and logging.}
 
-\item{output_dir}{Directory for saving pruned results and error logs.}
+\item{output_dir}{Character path to a directory for saving model output and error logs.}
 
-\item{grid_size}{Number of grid search candidates per model (default = 10).}
+\item{grid_size}{Integer. Number of candidates for initial grid tuning (default = 10).}
 
-\item{bayesian_iter}{Number of Bayesian tuning iterations (default = 15).}
+\item{bayesian_iter}{Integer. Number of iterations for Bayesian tuning (default = 15).}
 
-\item{cv_folds}{Number of cross-validation folds (default = 5).}
+\item{cv_folds}{Integer. Number of cross-validation folds used in tuning (default = 5).}
+
+\item{pruning}{Logical. Whether to skip poorly performing models based on RRMSE after grid tuning (default = \code{TRUE}).}
+
+\item{save_output}{Logical. Whether to save the full model result to disk as a \code{.qs} file (default = \code{FALSE}).}
 }
 \value{
-A named list with:
-\describe{
-\item{status_summary}{A one-row tibble with model ID, RMSE, R², pruned file path, error path, error message, and status flag.}
-\item{pruned_output_path}{Path to \code{.qs} file with pruned model result (if successful).}
+A named \code{list} with:
+\itemize{
+\item \strong{status_summary}: A one-row \code{tibble} containing:
+\code{row}, \code{wflow_id}, \code{rrmse}, \code{rmse}, \code{rsq},
+\code{status} (\code{"success"}, \code{"pruned"}, or \code{"error"}),
+file paths (if saved), and any captured error messages.
+\item \strong{saved_path}: File path to the pruned model result (\code{.qs}), or \code{NA} if not saved.
 }
 }
 \description{
-Executes a full ensemble model evaluation for a single configuration row,
-with error handling, output pruning, and structured logging. Intended for
-internal use within batch modeling workflows. Wraps \code{full_model_evaluation()}
-and saves output summaries for downstream stacking and diagnostics.
+Evaluates a single model configuration row using the \code{evaluate_model_config()} function,
+with robust error handling, logging, output pruning, and optional result caching.
+Designed for internal use within \code{run_model_evaluation()} or other batch modeling workflows.
 }
 \details{
-This function is designed for internal use in \code{run_batch_models()}, where it is
-called iteratively across a grid of model configurations. The returned summary row
-supports monitoring and downstream filtering, while pruned results retain key
-evaluation metrics and stacking-ready workflows.
+This function isolates evaluation of a single configuration for safe execution in parallelized batch loops.
+On success, model outputs are pruned and optionally saved. If an error occurs, the error object is written to a
+JSON file and logged to the console via \code{cli}. Pruned workflows are intended for use in stacking via \code{stacks::add_candidates()}.
 
-Errors are caught and written to \code{.json} files in the specified \code{output_dir}.
-CLI progress messages are displayed throughout the run.
+It is typically called inside \code{run_model_evaluation()} or a \code{purrr::map()} workflow.
+}
+\examples{
+\dontrun{
+result <- safe_run_model(
+  config_row     = config[1, ],
+  input_data     = spectral_data,
+  covariate_data = predicted_covs,
+  variable       = "MAOM_C_g_kg",
+  row_index      = 1,
+  output_dir     = "outputs"
+)
+
+result$status_summary
+}
+
 }
 \seealso{
-\code{\link[=full_model_evaluation]{full_model_evaluation()}}, \code{\link[=prune_model_output]{prune_model_output()}}, \code{\link[=run_batch_models]{run_batch_models()}}
+\code{\link{evaluate_model_config}}, \code{\link{run_model_evaluation}}, \code{\link{prune_model_output}}
 }
-\keyword{internal}

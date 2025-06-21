@@ -10,30 +10,29 @@ rrmse_vec(data, truth, estimate, na_rm = TRUE, ...)
 rrmse(data, truth, estimate, na_rm = TRUE, ...)
 }
 \arguments{
-\item{data}{A data frame with columns for observed and predicted values.}
+\item{data}{A data frame containing columns for observed and predicted values.}
 
 \item{truth}{The column identifier for observed values (quoted or unquoted).}
 
 \item{estimate}{The column identifier for predicted values (quoted or unquoted).}
 
-\item{na_rm}{Logical; should missing values be removed before computation? Default is TRUE.}
+\item{na_rm}{Logical. Should missing values be removed before computation? Default is \code{TRUE}.}
 
 \item{...}{Additional arguments passed to \code{rmse_vec()}.}
 }
 \value{
-\code{rrmse_vec()} returns a numeric value indicating the relative RMSE as a percentage.
-\code{rrmse} returns a \code{yardstick} metric function that can be used in metric sets.
+\code{rrmse_vec()} returns a numeric value (percentage).
+\code{rrmse} is a yardstick metric usable in \code{metric_set()} pipelines.
 }
 \description{
-A custom regression metric for evaluating model accuracy relative to the scale
-of the true values. RRMSE is computed as RMSE divided by the mean of the observed
-values and expressed as a percentage. It is unitless, bounded below by 0, and useful
-for comparing model performance across differently scaled variables.
+A unitless regression metric defined as the RMSE divided by the mean of the observed values,
+expressed as a percentage. Useful for comparing prediction accuracy across differently scaled
+soil properties or other variables with varying magnitudes.
 }
 \details{
-This function is useful for evaluating model performance on variables that span different
-units or orders of magnitude. It provides an interpretable, unitless error measure that
-facilitates fair model comparison across multiple targets.
+RRMSE is especially appropriate in spectral modeling contexts where different soil properties
+(e.g., clay \%, SOC, CEC) vary in scale. By expressing RMSE as a proportion of the mean of the
+true values, it facilitates fairer performance comparisons across models and targets.
 }
 \examples{
 rrmse_vec(
@@ -46,12 +45,10 @@ library(yardstick)
 data <- tibble::tibble(obs = c(100, 120, 140), pred = c(105, 118, 135))
 rrmse_vec(data, truth = obs, estimate = pred)
 
-# Use as part of a yardstick metric set
 metric_set(rrmse, rsq)(data, truth = obs, estimate = pred)
 
 }
 \seealso{
-\code{\link[yardstick]{rmse_vec}} for root mean squared error,
-\code{\link[yardstick]{metric_set}} for bundling metrics.
+\code{\link[yardstick]{rmse_vec}}, \code{\link[yardstick]{metric_set}}
 }
 \keyword{internal}

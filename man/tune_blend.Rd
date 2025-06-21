@@ -2,7 +2,7 @@
 % Please edit documentation in R/stack-tune_blend.R
 \name{tune_blend}
 \alias{tune_blend}
-\title{Tune Blending Parameters for Ensemble Stack}
+\title{Tune Ensemble Blending Hyperparameters via Grid Search}
 \usage{
 tune_blend(
   model_stack,
@@ -14,29 +14,55 @@ tune_blend(
 )
 }
 \arguments{
-\item{model_stack}{A fitted \code{stacks} object created from \code{add_candidates()},
-\code{blend_predictions()}, and \code{fit_members()}.}
+\item{model_stack}{A fitted \code{stacks::stacks()} object. Must have already
+undergone \code{add_candidates()} and \code{blend_predictions()} steps.}
 
-\item{test_data}{A \code{data.frame} or \code{tibble} containing the holdout data used
-to evaluate blending performance. Must include the same predictors
-used in the stack.}
+\item{test_data}{A data frame containing the holdout observations with
+predictors and a \code{Response} column (target variable). Used to evaluate
+final predictions.}
+
+\item{penalty_grid}{Numeric vector of penalty values (λ) to test. Defaults to
+25 log-spaced values from 1e-5 to 1.}
+
+\item{mixture_grid}{Numeric vector of mixture values (α) from 0 (ridge) to 1 (lasso).
+Defaults to increments of 0.1.}
+
+\item{negative_grid}{Logical vector indicating whether to constrain coefficients
+to be non-negative. Defaults to \code{c(TRUE, FALSE)}.}
+
+\item{verbose}{Logical; if TRUE, prints best configuration to console. Default is TRUE.}
 }
 \value{
-A tibble with the best performing blend configuration based on
-R², including the corresponding \code{penalty}, \code{mixture}, and
-\code{non_negative} values.
+A tibble with the best blend configuration based on R². Columns include:
+\itemize{
+\item{\code{penalty}}{Optimal penalty value (λ)}
+\item{\code{mixture}}{Optimal mixture value (α)}
+\item{\code{non_negative}}{Whether coefficients were constrained to be ≥ 0}
+\item{\code{rsq}}{Best R² achieved on holdout set}
+}
 }
 \description{
-This helper function performs a grid search over blending hyperparameters
-for an ensemble stack built using \code{stacks::blend_predictions()}. It explores
-combinations of penalty strength, mixture (ridge-lasso balance), and
-non-negativity constraints to identify the configuration that maximizes
-predictive performance on a provided test set.
+Performs a parallelized grid search over blending hyperparameters for a
+stacked ensemble model built with the \code{stacks} package. Explores combinations
+of penalty strength (\code{λ}), mixture (\code{α}), and non-negativity constraints
+to identify the configuration that maximizes holdout set performance (R²).
+}
+\details{
+Uses \code{furrr::future_pmap()} with parallel execution to test all blending
+configurations. Internally calls \code{blend_predictions()} and \code{fit_members()} for
+each configuration and evaluates predictions using \code{yardstick::rsq()}.
 }
 \examples{
 \dontrun{
-  best_blend <- tune_blend(model_stack = my_stack, test_data = holdout)
+tune_blend(model_stack = my_stack,
+           test_data   = holdout_samples)
 }
 
-internal
 }
+\seealso{
+\code{\link[stacks]{blend_predictions}},
+\code{\link[stacks]{fit_members}},
+\code{\link[yardstick]{rsq}},
+\code{\link[furrr]{future_pmap}}
+}
+\keyword{internal}

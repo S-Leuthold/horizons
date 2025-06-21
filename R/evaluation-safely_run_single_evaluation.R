@@ -1,46 +1,64 @@
 #' Safely Run a Single Model Configuration and Log Results
 #'
-#' Executes a full ensemble model evaluation for a single configuration row,
-#' with error handling, output pruning, and structured logging. Intended for
-#' internal use within batch modeling workflows. Wraps `full_model_evaluation()`
-#' and saves output summaries for downstream stacking and diagnostics.
+#' Evaluates a single model configuration row using the `evaluate_model_config()` function,
+#' with robust error handling, logging, output pruning, and optional result caching.
+#' Designed for internal use within `run_model_evaluation()` or other batch modeling workflows.
 #'
-#' @import dplyr
-#' @import purrr
-#' @import tibble
-#' @importFrom cli cli_h2 cli_alert_success cli_alert_danger cli_alert_info
-#' @importFrom fs dir_create path
-#' @importFrom jsonlite write_json
-#' @importFrom qs qsave
-#'
-#' @param config_row A single-row tibble with configuration details. Must contain:
+#' @param config_row A single-row `tibble` containing a model configuration. Must include:
 #'   `model`, `transformation`, `preprocessing`, `covariates`, and `include_covariates`.
-#' @param input_data A preprocessed tibble of spectral data with `Sample_ID`, `Wavenumber`, and `Absorbance`.
-#' @param covariate_data Optional tibble of predicted covariates (if `include_covariates = TRUE`).
-#' @param variable Character name of the outcome variable to predict.
-#' @param row_index Integer indicating the row number (used for logging and filenames).
-#' @param output_dir Directory for saving pruned results and error logs.
-#' @param grid_size Number of grid search candidates per model (default = 10).
-#' @param bayesian_iter Number of Bayesian tuning iterations (default = 15).
-#' @param cv_folds Number of cross-validation folds (default = 5).
+#' @param input_data A `tibble` with preprocessed spectral data. Must include `Sample_ID`,
+#'   `Wavenumber`, `Absorbance`, and the target response variable.
+#' @param covariate_data Optional `tibble` of predicted covariates (must include `Sample_ID`),
+#'   required if `include_covariates = TRUE`.
+#' @param variable Character. Name of the outcome variable to predict.
+#' @param row_index Integer. The row index of the configuration in the batch grid, used for labeling files and logging.
+#' @param output_dir Character path to a directory for saving model output and error logs.
+#' @param grid_size Integer. Number of candidates for initial grid tuning (default = 10).
+#' @param bayesian_iter Integer. Number of iterations for Bayesian tuning (default = 15).
+#' @param cv_folds Integer. Number of cross-validation folds used in tuning (default = 5).
+#' @param pruning Logical. Whether to skip poorly performing models based on RRMSE after grid tuning (default = `TRUE`).
+#' @param save_output Logical. Whether to save the full model result to disk as a `.qs` file (default = `FALSE`).
 #'
-#' @return A named list with:
-#' \describe{
-#'   \item{status_summary}{A one-row tibble with model ID, RMSE, R², pruned file path, error path, error message, and status flag.}
-#'   \item{pruned_output_path}{Path to `.qs` file with pruned model result (if successful).}
+#' @return A named `list` with:
+#' \itemize{
+#'   \item \strong{status_summary}: A one-row `tibble` containing:
+#'     \code{row}, \code{wflow_id}, \code{rrmse}, \code{rmse}, \code{rsq},
+#'     \code{status} (`"success"`, `"pruned"`, or `"error"`),
+#'     file paths (if saved), and any captured error messages.
+#'   \item \strong{saved_path}: File path to the pruned model result (`.qs`), or `NA` if not saved.
 #' }
 #'
 #' @details
-#' This function is designed for internal use in `run_batch_models()`, where it is
-#' called iteratively across a grid of model configurations. The returned summary row
-#' supports monitoring and downstream filtering, while pruned results retain key
-#' evaluation metrics and stacking-ready workflows.
+#' This function isolates evaluation of a single configuration for safe execution in parallelized batch loops.
+#' On success, model outputs are pruned and optionally saved. If an error occurs, the error object is written to a
+#' JSON file and logged to the console via `cli`. Pruned workflows are intended for use in stacking via `stacks::add_candidates()`.
 #'
-#' Errors are caught and written to `.json` files in the specified `output_dir`.
-#' CLI progress messages are displayed throughout the run.
+#' It is typically called inside `run_model_evaluation()` or a `purrr::map()` workflow.
 #'
-#' @seealso [full_model_evaluation()], [prune_model_output()], [run_batch_models()]
-#' @keywords internal
+#' @examples
+#' \dontrun{
+#' result <- safe_run_model(
+#'   config_row     = config[1, ],
+#'   input_data     = spectral_data,
+#'   covariate_data = predicted_covs,
+#'   variable       = "MAOM_C_g_kg",
+#'   row_index      = 1,
+#'   output_dir     = "outputs"
+#' )
+#'
+#' result$status_summary
+#' }
+#'
+#' @seealso
+#' \code{\link{evaluate_model_config}}, \code{\link{run_model_evaluation}}, \code{\link{prune_model_output}}
+#'
+#' @importFrom dplyr tibble mutate filter slice case_when
+#' @importFrom cli cli_h2 cli_alert_success cli_alert_danger cli_alert_info cli_alert_warning
+#' @importFrom fs path dir_create
+#' @importFrom qs qsave
+#' @importFrom jsonlite write_json
+#' @export
+
 
 safe_run_model <- function(config_row,
                            input_data,

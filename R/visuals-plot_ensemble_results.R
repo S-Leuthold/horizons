@@ -16,8 +16,6 @@
 #'   \item `Model_Weights`: Horizontal barplot of model weights from the stacked ensemble
 #' }
 #'
-#' @export
-#'
 #' @examples
 #' \dontrun{
 #' results <- build_ensemble_stack(...)
@@ -25,6 +23,17 @@
 #' print(plots$Obs_vs_Pred)
 #' print(plots$Model_Weights)
 #' }
+#'
+#' @importFrom dplyr filter mutate case_when select bind_rows
+#' @importFrom tidyr pivot_wider
+#' @importFrom ggplot2 ggplot aes geom_abline geom_point geom_smooth
+#'             scale_x_continuous scale_y_continuous scale_shape_discrete
+#'             theme_minimal theme element_rect element_text element_blank
+#' @importFrom stringr str_detect
+#' @importFrom gt gt cols_label fmt_number tab_header
+#' @importFrom tibble tibble
+#' @import patchwork
+#' @export
 
 plot_ensemble_results <- function(ensemble_results){
 

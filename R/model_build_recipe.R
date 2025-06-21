@@ -1,69 +1,63 @@
-#' Build Modeling Recipe with Spectral and Covariate Transformations
+#' Build Tidymodels Recipe for Spectral + Covariate Modeling
 #'
-#' Constructs a `recipe` object for use in tidymodels workflows. This function applies
-#' user-defined response transformations (e.g., log, square root), spectral preprocessing
-#' via custom steps (e.g., SNV + SG), optional PCA-based dimensionality reduction, and
-#' covariate injection from an external dataset. Designed to be modular and composable
-#' for ensemble modeling workflows.
+#' Constructs a preprocessing pipeline using the \pkg{recipes} framework. Applies user-specified
+#' transformations to the response and spectra, optionally adds covariates, and includes PCA
+#' dimensionality reduction. This function supports stacking workflows and harmonized modeling
+#' across different preprocessing combinations.
 #'
-#' @import dplyr
-#' @import purrr
-#' @import tidyr
-#' @import tibble
-#' @importFrom magrittr %>%
-#' @importFrom rlang .data
-#' @importFrom recipes recipe update_role update_role_requirements has_role all_predictors all_outcomes
-#' @importFrom recipes step_log step_sqrt step_BoxCox step_pca
-#'
-#' @param input_data A data frame with spectral predictors and a response variable named `Response`.
-#'                   Must include a `Sample_ID` column to enable covariate alignment.
-#' @param spectral_transformation Character string specifying spectral preprocessing method.
-#'        Valid options include:
+#' @param input_data A data frame containing a `Response` column, spectral predictors
+#'   (named as wavenumbers, e.g., `600`, `602`, ...), and a `Sample_ID` column.
+#' @param spectral_transformation Character. Spectral preprocessing pipeline. One of:
 #'   \itemize{
-#'     \item{"No Preprocessing"}
-#'     \item{"Savitzky Golay - 0 Deriv"}
-#'     \item{"Savitzky Golay - 1 Deriv"}
-#'     \item{"Standard Normal Variate - Savitzky Golay - 0 Deriv"}
-#'     \item{"Standard Normal Variate - Savitzky Golay - 1 Deriv"}
+#'     \item{"raw"}
+#'     \item{"sg"}
+#'     \item{"snv"}
+#'     \item{"deriv1"}
+#'     \item{"deriv2"}
+#'     \item{"snv_deriv1"}
+#'     \item{"snv_deriv2"}
+#'     \item{"msc_deriv1"}
 #'   }
-#' @param response_transformation Character string specifying transformation to apply to the response variable.
-#'        Valid options include:
+#' @param response_transformation Character. Transformation applied to response variable. One of:
 #'   \itemize{
 #'     \item{"No Transformation"}
 #'     \item{"Log Transformation"}
 #'     \item{"Square Root Transformation"}
 #'   }
-#' @param covariate_selection Character vector of covariate names to include. Use `"No Covariates"` or `NULL` to exclude.
-#' @param covariate_data Optional data frame of covariates (must include a `Sample_ID` column). Required if covariates are selected.
+#' @param covariate_selection Optional character vector of covariates to include (e.g., `"Clay"`, `"pH"`).
+#'   Use `"No Covariates"` or `NULL` to exclude.
+#' @param covariate_data Optional data frame of covariates (must include `Sample_ID`). Required
+#'   if any covariates are selected.
 #'
-#' @return A `recipes::recipe` object with all preprocessing and transformation steps applied.
+#' @return A \code{recipes::recipe} object containing the full preprocessing pipeline.
+#'
+#' @details
+#' Roles for \code{Sample_ID} and \code{Project} (if present) are set to \code{"id"} and
+#' \code{"metadata"}, respectively. Response transformation steps are marked \code{skip = TRUE}
+#' to preserve inverse-transform compatibility. Spectral preprocessing is handled by
+#' \code{\link{step_transform_spectra}}; covariates are injected using \code{\link{step_add_covariates}}.
 #'
 #' @seealso \code{\link{step_transform_spectra}}, \code{\link{step_add_covariates}}, \code{\link{build_model_grid}}
 #'
+#' @importFrom recipes recipe update_role update_role_requirements step_log step_sqrt step_BoxCox step_pca all_outcomes all_predictors
+#' @importFrom dplyr select any_of all_of
+#' @importFrom cli cli_alert_danger cli_alert_info cli_abort
+#' @importFrom glue glue
+#'
 #' @examples
 #' \dontrun{
-#' # Example usage
-#' input_df <- dplyr::tibble(
-#'   Sample_ID = 1:3,
-#'   `Dim.1` = rnorm(3),
-#'   `Dim.2` = rnorm(3),
-#'   Response = c(2.1, 3.5, 1.8)
+#' build_recipe(
+#'   input_data              = df,
+#'   spectral_transformation = "snv_deriv1",
+#'   response_transformation = "Log Transformation",
+#'   covariate_selection     = c("Clay", "pH"),
+#'   covariate_data          = covariates
 #' )
-#'
-#' covariates_df <- dplyr::tibble(
-#'   Sample_ID = 1:3,
-#'   clay = c(10, 20, 30),
-#'   pH = c(6.5, 6.8, 7)
-#' )
-#'
-#' build_recipe(input_data              = input_df,
-#'              spectral_transformation = "Savitzky Golay - 0 Deriv",
-#'              response_transformation = "Log Transformation",
-#'              covariate_selection     = c("clay", "pH"),
-#'              covariate_data          = covariates_df)
 #' }
 #'
 #' @keywords internal
+
+
 
 build_recipe <- function(input_data,
                          spectral_transformation,

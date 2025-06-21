@@ -1,23 +1,45 @@
-#' Safely Execute an Expression and Capture Errors
+#' Safely Evaluate an Expression with Optional Logging and Tracing
 #'
-#' This function wraps an expression using `purrr::safely()` to ensure errors
-#' do not halt execution. It captures error messages, optionally logs them,
-#' and can attach trace information for debugging.
+#' Evaluates an expression using `purrr::safely()` to prevent errors from halting execution.
+#' If an error occurs, it returns a default value, optionally logs a custom message,
+#' and can capture the call trace for debugging.
 #'
-#' @param expr An R expression to evaluate.
-#' @param default_value Value to return as `result` if an error occurs (default: `NULL`).
-#' @param error_message Optional character string. If provided, it will be evaluated
-#'        using `glue::glue()` and shown as part of the warning.
-#' @param log_error Logical. Should errors be logged with `cli::cli_warn()`? (default: `TRUE`)
-#' @param capture_trace Logical. If `TRUE`, captures the call trace using `rlang`.
-#' @param trace_log_file Optional path to write the trace if `capture_trace = TRUE`.
+#' @param expr An expression to evaluate, passed unquoted.
+#' @param default_value Value to return if the expression errors. Default is `NULL`.
+#' @param error_message Optional string interpolated via `glue::glue()`, used as the log message.
+#' @param log_error Logical. If `TRUE` (default), logs the error using `cli::cli_warn()`.
+#' @param capture_trace Logical. If `TRUE`, captures a traceback using `rlang::trace_back()`.
+#' @param trace_log_file Optional file path to write the trace, if `capture_trace = TRUE`.
 #'
-#' @return A list with elements:
-#'   - `result`: the evaluated result or `default_value` on error
-#'   - `error`: the error object (or `NULL` if none)
-#'   - `trace`: call trace if `capture_trace = TRUE` and an error occurred
+#' @return A named list with elements:
+#' \describe{
+#'   \item{`result`}{The evaluated result or `default_value` if an error occurred.}
+#'   \item{`error`}{The error object, or `NULL` if the evaluation succeeded.}
+#'   \item{`trace`}{A trace object from `rlang`, or `NULL` if not captured.}
+#' }
+#'
+#' @details
+#' This function is useful when running potentially fragile code inside mapping,
+#' parallelization, or ensemble modeling workflows. By capturing and optionally logging
+#' errors without interrupting the overall workflow, it supports robust batch execution.
+#'
+#' If `capture_trace = TRUE`, the call stack is stored and optionally written to disk.
+#' This is helpful when debugging complex pipelines.
+#'
+#' @seealso \code{\link[purrr]{safely}}, \code{\link[rlang]{trace_back}}, \code{\link[cli]{cli_warn}}
+#'
+#' @examples
+#' \dontrun{
+#' safely_execute(log("oops"), default_value = NA, error_message = "Failed to take log")
+#' }
+#'
+#' @importFrom rlang enquo caller_env eval_tidy trace_back last_trace
+#' @importFrom purrr safely
+#' @importFrom cli cli_warn
+#' @importFrom glue glue
 #'
 #' @keywords internal
+
 
 safely_execute <- function(expr,
                            default_value   = NULL,

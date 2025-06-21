@@ -15,54 +15,72 @@ create_project_data(
 }
 \arguments{
 \item{projects}{A named list of project entries, typically created using
-\code{project_list()}, where each entry includes a
-\code{spectra_path}, \code{sample_obs}, and
-\code{default_fraction}.}
+\code{\link{project_list}}, where each element contains:
+\itemize{
+\item \code{spectra_path}: folder containing OPUS \code{.0} files
+\item \code{sample_obs}: path to CSV file with sample-level data
+\item \code{file_name_format}: string defining the filename parsing template
+\item \code{file_name_delimiter}: character delimiter in filenames
+\item \code{default_fraction}: fallback for samples lacking parsed fraction info
+}}
 
-\item{variables}{A character vector of sample observation variables to
-join with the spectral matrix (e.g., \code{"Sand"}, \code{"pH"}).}
+\item{variables}{Character vector of sample observation variables (e.g., \code{"Sand"}, \code{"pH"}) to join.}
 
-\item{save_spectra}{Logical; should the final dataset be saved to disk as an
-\code{.rds} file? Defaults to \code{FALSE}.}
+\item{save_spectra}{Logical. If \code{TRUE}, saves the full wide-format tibble as an \code{.rds} file.}
 
-\item{save_locale}{Folder path for saving output if \code{save_spectra = TRUE}.
-Required if saving is enabled.}
+\item{save_locale}{Directory path for saving the \code{.rds} file if \code{save_spectra = TRUE}.}
 
-\item{drop_na}{Logical; if \code{TRUE}, drops rows where all requested
-\code{variables} are missing. Defaults to \code{TRUE}.}
+\item{drop_na}{Logical. If \code{TRUE}, rows missing all requested variables are dropped. Default = \code{TRUE}.}
 
-\item{verbose}{Logical; print progress messages using \pkg{cli}. Defaults to \code{TRUE}.}
+\item{verbose}{Logical. Whether to print progress messages using \pkg{cli}. Default = \code{TRUE}.}
 }
 \value{
 A tibble in wide format with:
 \itemize{
-\item One row per sample and fraction
-\item Columns for Project, Sample_ID, Fraction, and absorbance values (600–4000 cm⁻¹)
-\item Optionally joined sample-level variables
+\item One row per unique Project–Sample_ID–Fraction
+\item Columns for absorbance at 2 cm⁻¹ intervals from 600 to 4000 cm⁻¹
+\item Any matched sample-level observation columns requested via \code{variables}
 }
 }
 \description{
-Imports and processes OPUS spectral data from one or more projects, joins
-the cleaned spectra with sample-level observational data, and returns a
-wide-format matrix ready for modeling. Supports flexible project-specific
-paths and optional inclusion of metadata or covariates.
+Imports, processes, and merges OPUS spectral files across one or more projects. Applies
+standardized resampling (2 cm⁻¹ resolution, 600–4000 cm⁻¹), parses metadata from filenames,
+joins cleaned spectra with sample-level observations, and returns a wide-format matrix
+ready for MIR model development. Can optionally save the output to disk.
+}
+\details{
+This function is a standardized entry point for spectral model development. Each \code{.0} OPUS file
+is read and resampled to a uniform grid. Metadata is parsed from filenames, and absorbance spectra
+are reshaped to wide format. Optional sample variables are joined from a CSV defined in each project entry.
+
+Spectra are grouped and averaged when multiple scans exist for the same Sample_ID–Fraction pair.
+
+A warning is issued for projects with no \code{.0} files or if OPUS channels are inconsistent within a project.
+Invalid or unreadable files are skipped, but execution continues across other projects.
 }
 \examples{
 \dontrun{
 projects <- project_list(
   FFAR = project_entry("data/FFAR/spectra", "data/FFAR/soil.csv"),
-  AONR = project_entry("data/AONR/OPUS", "data/AONR/soil.csv", "Clay")
+  AONR = project_entry("data/AONR/OPUS", "data/AONR/soil.csv", default_fraction = "Clay")
 )
 
-df <- create_input_data(
-  projects  = projects,
-  variables = c("Sand", "pH")
+spectra_data <- create_project_data(
+  projects      = projects,
+  variables     = c("Sand", "pH"),
+  save_spectra  = TRUE,
+  save_locale   = "data/processed"
 )
-
-glimpse(df)
 }
 
 }
 \seealso{
-\code{\link{project_entry}}, \code{\link{project_list}}, \code{\link{read_spectral_data}}
+\code{\link{project_entry}}, \code{\link{project_list}}, \code{\link{read_spectral_data}},
+\code{\link{parse_filename_metadata}}
+
+Other input_preparation: 
+\code{\link{create_project_configurations}()},
+\code{\link{project_entry}()},
+\code{\link{project_list}()}
 }
+\concept{input_preparation}

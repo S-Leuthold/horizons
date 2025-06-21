@@ -2,7 +2,7 @@
 % Please edit documentation in R/model_build_recipe.R
 \name{build_recipe}
 \alias{build_recipe}
-\title{Build Modeling Recipe with Spectral and Covariate Transformations}
+\title{Build Tidymodels Recipe for Spectral + Covariate Modeling}
 \usage{
 build_recipe(
   input_data,
@@ -13,62 +13,58 @@ build_recipe(
 )
 }
 \arguments{
-\item{input_data}{A data frame with spectral predictors and a response variable named \code{Response}.
-Must include a \code{Sample_ID} column to enable covariate alignment.}
+\item{input_data}{A data frame containing a \code{Response} column, spectral predictors
+(named as wavenumbers, e.g., \code{600}, \code{602}, ...), and a \code{Sample_ID} column.}
 
-\item{spectral_transformation}{Character string specifying spectral preprocessing method.
-Valid options include:
+\item{spectral_transformation}{Character. Spectral preprocessing pipeline. One of:
 \itemize{
-\item{"No Preprocessing"}
-\item{"Savitzky Golay - 0 Deriv"}
-\item{"Savitzky Golay - 1 Deriv"}
-\item{"Standard Normal Variate - Savitzky Golay - 0 Deriv"}
-\item{"Standard Normal Variate - Savitzky Golay - 1 Deriv"}
+\item{"raw"}
+\item{"sg"}
+\item{"snv"}
+\item{"deriv1"}
+\item{"deriv2"}
+\item{"snv_deriv1"}
+\item{"snv_deriv2"}
+\item{"msc_deriv1"}
 }}
 
-\item{response_transformation}{Character string specifying transformation to apply to the response variable.
-Valid options include:
+\item{response_transformation}{Character. Transformation applied to response variable. One of:
 \itemize{
 \item{"No Transformation"}
 \item{"Log Transformation"}
 \item{"Square Root Transformation"}
 }}
 
-\item{covariate_selection}{Character vector of covariate names to include. Use \code{"No Covariates"} or \code{NULL} to exclude.}
+\item{covariate_selection}{Optional character vector of covariates to include (e.g., \code{"Clay"}, \code{"pH"}).
+Use \code{"No Covariates"} or \code{NULL} to exclude.}
 
-\item{covariate_data}{Optional data frame of covariates (must include a \code{Sample_ID} column). Required if covariates are selected.}
+\item{covariate_data}{Optional data frame of covariates (must include \code{Sample_ID}). Required
+if any covariates are selected.}
 }
 \value{
-A \code{recipes::recipe} object with all preprocessing and transformation steps applied.
+A \code{recipes::recipe} object containing the full preprocessing pipeline.
 }
 \description{
-Constructs a \code{recipe} object for use in tidymodels workflows. This function applies
-user-defined response transformations (e.g., log, square root), spectral preprocessing
-via custom steps (e.g., SNV + SG), optional PCA-based dimensionality reduction, and
-covariate injection from an external dataset. Designed to be modular and composable
-for ensemble modeling workflows.
+Constructs a preprocessing pipeline using the \pkg{recipes} framework. Applies user-specified
+transformations to the response and spectra, optionally adds covariates, and includes PCA
+dimensionality reduction. This function supports stacking workflows and harmonized modeling
+across different preprocessing combinations.
+}
+\details{
+Roles for \code{Sample_ID} and \code{Project} (if present) are set to \code{"id"} and
+\code{"metadata"}, respectively. Response transformation steps are marked \code{skip = TRUE}
+to preserve inverse-transform compatibility. Spectral preprocessing is handled by
+\code{\link{step_transform_spectra}}; covariates are injected using \code{\link{step_add_covariates}}.
 }
 \examples{
 \dontrun{
-# Example usage
-input_df <- dplyr::tibble(
-  Sample_ID = 1:3,
-  `Dim.1` = rnorm(3),
-  `Dim.2` = rnorm(3),
-  Response = c(2.1, 3.5, 1.8)
+build_recipe(
+  input_data              = df,
+  spectral_transformation = "snv_deriv1",
+  response_transformation = "Log Transformation",
+  covariate_selection     = c("Clay", "pH"),
+  covariate_data          = covariates
 )
-
-covariates_df <- dplyr::tibble(
-  Sample_ID = 1:3,
-  clay = c(10, 20, 30),
-  pH = c(6.5, 6.8, 7)
-)
-
-build_recipe(input_data              = input_df,
-             spectral_transformation = "Savitzky Golay - 0 Deriv",
-             response_transformation = "Log Transformation",
-             covariate_selection     = c("clay", "pH"),
-             covariate_data          = covariates_df)
 }
 
 }

@@ -2,7 +2,7 @@
 % Please edit documentation in R/covariates-soil-create_clustered_subsets.R
 \name{create_clustered_subsets}
 \alias{create_clustered_subsets}
-\title{Create Clustered Training Subsets Based on PCA Projection}
+\title{Create Clustered Training Subsets from PCA Scores}
 \usage{
 create_clustered_subsets(
   training_data,
@@ -13,42 +13,46 @@ create_clustered_subsets(
 )
 }
 \arguments{
-\item{training_data}{A tibble containing spectral data projected onto PCA components
-(e.g., columns \code{Dim.1}, \code{Dim.2}, ..., \code{Dim.n}) and associated metadata.}
+\item{training_data}{A \code{tibble} of MIR spectral data already projected into principal component space
+(i.e., columns named \code{Dim.1}, \code{Dim.2}, ...). All non-spectral columns are retained in the output.}
 
-\item{pca_model}{A PCA model object created via \code{\link[stats]{prcomp}}.}
+\item{pca_model}{A PCA model object returned by \code{stats::prcomp()} used for projection into PCA space.}
 
-\item{kmeans_model}{A fitted k-means clustering model (from \code{\link[stats]{kmeans}}).}
+\item{kmeans_model}{A fitted \code{kmeans} object whose cluster centers define proximity for sample selection.}
 
-\item{n_components}{Integer. Number of principal components to use when projecting data.}
+\item{n_components}{Integer. Number of PCA components to use during projection (e.g., 50).}
 
-\item{coverage}{Numeric (between 0 and 1). Proportion of samples within each cluster
-to retain based on proximity to the centroid (default = 0.8).}
+\item{coverage}{Numeric (between 0 and 1). Proportion of samples per cluster to retain based on distance
+to the cluster centroid. Defaults to \code{0.8}.}
 }
 \value{
-A named list of tibbles. Each tibble contains the most representative training samples
-for a given cluster (e.g., "Cluster_1", "Cluster_2", etc.).
+A named \code{list} of \code{tibble}s. Each element represents a training subset corresponding to one cluster
+(e.g., \code{"Cluster_1"}, \code{"Cluster_2"}, ...), retaining only the samples closest to the centroid in PCA space.
 }
 \description{
-Projects training samples into PCA space, assigns them to clusters based on distance
-to k-means centroids, and selects a representative subset of samples within each cluster.
-The closest samples to the cluster center are retained according to a user-specified coverage proportion.
+Projects training samples into PCA space, assigns them to clusters based on
+proximity to k-means centroids, and selects a representative subset from each cluster.
+The most central samples—defined by Euclidean distance in PCA space—are retained according to
+a user-specified coverage threshold.
 }
 \details{
-This method prioritizes samples closest to the cluster center in PCA space, improving calibration efficiency
-by removing outliers and redundant points. Coverage can be tuned to balance model robustness and training size.
+This function is designed to facilitate localized model calibration by filtering training samples
+based on their similarity to cluster centers. This approach reduces outlier influence and computational
+burden, particularly when paired with local model ensembles. Coverage values near \code{1.0} retain most samples,
+while lower values emphasize only the most representative.
+
+Cluster assignments are made using nearest-centroid classification in PCA space.
+Euclidean distances are used for all calculations.
 }
 \examples{
 \dontrun{
-training_subsets <- create_training_subsets(training_data = my_data,
-                                            pca_model     = my_pca_model,
-                                            kmeans_model  = my_kmeans_model,
-                                            n_components  = 50,
-                                            coverage      = 0.8)
+training_subsets <- create_clustered_subsets(
+  training_data = my_training_data,
+  pca_model     = my_pca_model,
+  kmeans_model  = my_kmeans_model,
+  n_components  = 50,
+  coverage      = 0.8
+)
 }
 
 }
-\seealso{
-\code{\link[stats]{prcomp}}, \code{\link[stats]{kmeans}}, \code{\link[stats]{quantile}}
-}
-\keyword{internal}
