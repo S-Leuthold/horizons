@@ -2,17 +2,39 @@
 % Please edit documentation in R/inputs-define_projects_object.R
 \name{project_list}
 \alias{project_list}
-\title{Define a Named List of Projects for \code{create_input_data()}}
+\title{Define a Named List of Projects for Spectral Ingestion}
 \usage{
 project_list(...)
 }
 \arguments{
-\item{...}{Named calls to \code{project_entry()}. Each name will populate the \code{Project} column.}
+\item{...}{Named calls to \code{\link{project_entry}}. Each name will populate the \code{Project} column
+in the combined dataset.}
 }
 \value{
-A named list of project definitions.
+A named list of project definitions, validated for structure.
 }
 \description{
-Wraps multiple \code{project_entry()} calls into a named list. Each name becomes the
-project identifier in the returned dataset.
+Wraps multiple \code{\link{project_entry}} calls into a named list, where each name
+becomes the project identifier used by \code{\link{create_project_data}}. This enables
+batch ingestion of multi-project spectral datasets.
 }
+\details{
+Each argument must be explicitly named. These names become keys used throughout
+ingestion and downstream processing, including metadata joins and progress reporting.
+}
+\examples{
+project_list(
+  FFAR = project_entry("data/FFAR/spectra", "data/FFAR/soil.csv", "sampleid_fraction", "_"),
+  AONR = project_entry("data/AONR/OPUS", "data/AONR/soil.csv", "sampleid_fraction", "_", "Clay")
+)
+
+}
+\seealso{
+\code{\link{project_entry}}, \code{\link{create_project_data}}
+
+Other input_preparation: 
+\code{\link{create_project_configurations}()},
+\code{\link{create_project_data}()},
+\code{\link{project_entry}()}
+}
+\concept{input_preparation}

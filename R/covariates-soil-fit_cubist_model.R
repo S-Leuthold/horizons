@@ -1,50 +1,38 @@
-#' Fit a Cubist Model for a Single Covariate Using PCA-Transformed Spectral Data
+#' Fit a Cubist Model Using PCA-Transformed Spectral Data
 #'
-#' This function builds, tunes, and evaluates a Cubist model for predicting a single
-#' soil covariate from PCA-transformed MIR spectra. It applies an initial grid search
-#' followed by Bayesian optimization for hyperparameter tuning.
+#' Builds, tunes, and evaluates a Cubist model to predict a single soil covariate
+#' using PCA-transformed MIR spectra. The function applies a max entropy grid search
+#' followed by Bayesian optimization to tune hyperparameters, then fits the final model
+#' and returns both performance metrics and workflow objects.
 #'
-#' @import dplyr
-#' @import purrr
-#' @import tidyr
-#' @import tibble
-#' @import Cubist
-#' @import rules
-#' @importFrom magrittr %>%
-#' @importFrom rlang .data
-#' @importFrom stats predict quantile
-#' @importFrom glue glue
-#' @importFrom here here
-#' @importFrom tidyselect starts_with
-#' @importFrom parsnip cubist_rules set_engine set_mode fit
-#' @importFrom workflows workflow add_model add_formula
-#' @importFrom rsample initial_split training testing vfold_cv
-#' @importFrom dials grid_space_filling neighbors
-#' @importFrom rules committees max_rules
-#' @importFrom tune tune_grid tune_bayes control_grid control_bayes select_best finalize_workflow last_fit collect_predictions
-#' @importFrom future plan multisession sequential
+#' @param input_data A `tibble` or `data.frame` containing PCA-transformed predictors
+#'   (`Dim.1`, `Dim.2`, ..., `Dim.n`) and one numeric column corresponding to the
+#'   covariate to be modeled. All rows with `NA` in the response are removed.
+#' @param covariate A character string. Name of the column to use as the response variable (e.g., `"Sand"`, `"pH"`).
+#' @param verbose Logical. If `TRUE`, prints progress messages using `cli::cli_*()` during model training. Defaults to `FALSE`.
 #'
-#' @param input_data A data frame containing PCA-transformed predictors (`Dim.1`, `Dim.2`, ..., `Dim.50`)
-#'        and one column matching the `covariate` to model as the response.
-#' @param covariate A character string indicating which covariate to predict (e.g., `"Sand"`, `"pH"`).
-#'
-#' @return A list with three elements:
-#'   \item{Model}{The finalized, fitted Cubist workflow object.}
-#'   \item{Best_Parameters}{A tibble of the optimal hyperparameter values selected via Bayesian optimization.}
-#'   \item{Evaluation}{Hold-out evaluation statistics.}
+#' @return A named `list` with the following components:
+#' \itemize{
+#'   \item \strong{Model}: A fitted Cubist workflow (`workflow`) trained on the full training set.
+#'   \item \strong{Best_Parameters}: A `tibble` containing the best hyperparameter configuration selected via Bayesian optimization.
+#'   \item \strong{Evaluation}: A `tibble` of evaluation metrics (e.g., RMSE, R², CCC) computed on the hold-out set using `soilspec::eval()`.
+#' }
 #'
 #' @details
-#' The modeling process proceeds in three stages:
+#' The modeling pipeline follows three main stages:
 #' \enumerate{
-#'   \item{Split input data into training and testing sets with stratification on the response.}
-#'   \item{Perform an initial max entropy grid search on committees, neighbors, and max_rules hyperparameters.}
-#'   \item{Refine the model via Bayesian optimization, finalize the workflow, and evaluate on a hold-out set.}
+#'   \item Stratified data split into training/testing sets.
+#'   \item Max entropy grid search for tuning `committees`, `neighbors`, and `max_rules` using `tune::tune_grid()`.
+#'   \item Bayesian optimization using `tune::tune_bayes()` for refinement.
 #' }
-#' Parallelization is automatically enabled for tuning phases via \code{future::plan(multisession)}.
+#' The model is finalized with `tune::finalize_workflow()` and fitted to the training set.
+#' Performance metrics are computed on the hold-out set using `tune::last_fit()` and `soilspec::eval()`.
+#'
+#' Parallel tuning is enabled with `future::plan(multisession)` and automatically reset afterward.
+#' All error handling is wrapped with `safely_execute()` for fault-tolerant orchestration.
 #'
 #' @examples
 #' \dontrun{
-#' # Simulated PCA-transformed dataset
 #' df <- tibble::tibble(
 #'   Dim.1 = rnorm(100),
 #'   Dim.2 = rnorm(100),
@@ -52,15 +40,29 @@
 #'   Sand  = runif(100, 50, 80)
 #' )
 #'
-#' # Updated example call to use the new function name
-#' result <- fit_cubist_model(input_data = df, covariate = "Sand")
+#' result <- fit_cubist_model(input_data = df, covariate = "Sand", verbose = TRUE)
 #' result$Evaluation
 #' }
 #'
 #' @seealso
-#' \code{\link{predict_covariates}}, \code{\link{evaluate_predictions}}, \code{\link{reduce_dimensions_pca}} # Updated link
+#' \code{\link{predict_covariates}}, \code{\link{evaluate_predictions}}, \code{\link{reduce_dimensions_pca}}
 #'
-#' @keywords internal
+#' @importFrom dplyr select rename mutate bind_rows starts_with
+#' @importFrom purrr map
+#' @importFrom tidyr drop_na
+#' @importFrom tibble tibble as_tibble
+#' @importFrom stats quantile
+#' @importFrom rsample initial_split training testing vfold_cv
+#' @importFrom dials grid_space_filling neighbors
+#' @importFrom rules committees max_rules
+#' @importFrom parsnip cubist_rules set_engine set_mode fit
+#' @importFrom workflows workflow add_model add_formula
+#' @importFrom tune tune_grid tune_bayes control_grid control_bayes select_best finalize_workflow last_fit collect_predictions
+#' @importFrom future plan multisession sequential
+#' @importFrom glue glue
+#' @importFrom cli cli_progress_step cli_alert_danger cli_alert_warning
+#' @export
+
 
 fit_cubist_model <- function(input_data,
                              covariate,

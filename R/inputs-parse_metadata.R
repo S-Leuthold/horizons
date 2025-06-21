@@ -1,17 +1,34 @@
-#' Parse Sample Metadata from File Name Based on Format and Delimiter
+#' Parse Sample Metadata from File Name
 #'
-#' Interprets a file name using a user-defined format string and delimiter to extract
-#' sample identifiers and optional metadata (e.g., fraction labels).
+#' Interprets a file name using a format string and delimiter to extract sample-level metadata,
+#' such as `Sample_ID` and `Fraction`. Useful for batch processing OPUS files where metadata
+#' is embedded in the file name.
 #'
-#' @param file_name Character. File name (e.g., \code{"FFAR_001_Bulk.0"}).
-#' @param format_string Character. Format specification for filename fields (e.g., \code{"project_sampleid_fraction"}).
-#'                      Recognized tokens include: \code{"sampleid"}, \code{"fraction"}, \code{"project"}, and \code{"ignore"}.
-#'                      Order matters and should match filename structure.
+#' @param file_name Character. The file name (e.g., \code{"FFAR_001_Bulk.0"}).
+#' @param format_string Character. A format template describing each part of the file name (e.g., \code{"project_sampleid_fraction"}).
+#'   Allowed tokens: \code{"sampleid"}, \code{"fraction"}, \code{"project"}, \code{"ignore"}, \code{"wellid"}, \code{"scanid"}.
+#'   Tokens must appear in the same order as in the actual file name.
 #' @param delimiter Character. Delimiter used to split the file name (default = \code{"_"}).
-#' @param default_fraction Character. Fallback value for \code{Fraction} if not present or parsed.
+#' @param default_fraction Character. Value to assign if \code{fraction} is not provided or cannot be parsed.
 #'
-#' @return A tibble with \code{Sample_ID} and \code{Fraction} columns.
+#' @return A tibble with columns \code{Sample_ID} and \code{Fraction}, and optionally other parsed tokens.
+#'
+#' @details
+#' This function is typically used during OPUS spectral ingestion to extract metadata from filenames.
+#' If a required token like \code{sampleid} is missing from the filename, a warning is issued and the
+#' default value `"UNKNOWN"` is used.
+#'
+#' @seealso \code{\link{project_entry}}, \code{\link{create_project_data}}
+#'
+#' @importFrom purrr set_names map map_chr
+#' @importFrom tibble as_tibble tibble
+#' @importFrom tools file_path_sans_ext
+#' @importFrom cli cli_warn cli_alert cli_alert_danger
+#' @importFrom rlang %||%
+#'
 #' @keywords internal
+
+
 
 parse_filename_metadata <- function(file_name,
                                     format_string,

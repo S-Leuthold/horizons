@@ -1,46 +1,50 @@
-#' Evaluate Finalized Workflows on Hold-Out Data
+#' Evaluate Final Models on Holdout Data
 #'
-#' Applies each finalized model workflow to a held-out evaluation dataset, computes predictions,
-#' performs any required back-transformations (e.g., inverse log or square-root), and evaluates
-#' model performance using a standard set of regression metrics: R², RMSE, and RRMSE.
+#' Applies each finalized workflow to a held-out dataset, optionally back-transforms
+#' predictions (e.g., exponentiating log-transformed outputs), and computes evaluation
+#' metrics including R², RMSE, and RRMSE. Assumes the target variable is named \code{Response}.
 #'
-#' This function is designed to be called after `fit()` has been applied to workflows created
-#' via `workflow_set()` and filtered using `filter_workflows()`. It assumes a consistent
-#' structure of fitted workflows with a `Response` column as the target.
+#' @param finalized_wf_sets A tibble of fitted workflows, typically returned by
+#'        \code{full_model_evaluation()}, with at least two columns:
+#'        \code{fitted_wf} (a fitted workflow object) and \code{wflow_id} (string ID).
+#' @param holdout_data A data frame including columns \code{Sample_ID} and \code{Response},
+#'        along with any required predictors or covariates.
+#'
+#' @return A tibble with one row per workflow ID and columns:
+#'   \itemize{
+#'     \item{\code{wflow_id}}{Identifier for the workflow}
+#'     \item{\code{rsq}}{R²: Coefficient of determination}
+#'     \item{\code{rmse}}{Root Mean Squared Error}
+#'     \item{\code{rrmse}}{Relative RMSE as a percentage}
+#'   }
+#'
+#' @details
+#' Back-transformations are inferred from the workflow ID string:
+#' \code{"Log"} triggers \code{exp()}, and \code{"Sqrt"} triggers squaring.
+#' This function assumes a consistent naming scheme from \code{clean_workflow_id()}.
+#'
+#' @seealso
+#'   \code{\link{rrmse_vec}}, \code{\link[yardstick]{metric_set}},
+#'   \code{\link{full_model_evaluation}}, \code{\link[workflowsets]{workflow_set}}
+#'
+#' @examples
+#' \dontrun{
+#' evaluate_final_models(
+#'   finalized_wf_sets = fitted_model_tbl,
+#'   holdout_data      = test_samples
+#' )
+#' }
 #'
 #' @importFrom dplyr mutate select rename case_when
 #' @importFrom purrr map map2
 #' @importFrom tidyr pivot_wider unnest
-#' @importFrom tibble tibble
 #' @importFrom yardstick metric_set rsq rmse
-#' @importFrom magrittr %>%
-#' @importFrom rlang .data
-#' @importFrom stats predict
 #' @importFrom cli cli_abort
-#'
-#' @param finalized_wf_sets A tibble of fitted workflows, typically from `full_model_evaluation()`,
-#'        containing at least `fitted_wf` (workflow object) and `wflow_id` (identifier).
-#' @param holdout_data A data frame containing `Sample_ID`, `Response`, and any required covariates
-#'        or predictors. Used for final model evaluation.
-#'
-#' @return A tibble with one row per model/workflow ID, containing:
-#' \describe{
-#'   \item{wflow_id}{Identifier string describing the model configuration.}
-#'   \item{rsq}{Coefficient of determination (R²).}
-#'   \item{rmse}{Root Mean Squared Error.}
-#'   \item{rrmse}{Relative RMSE as a percentage.}
-#' }
-#'
-#' @seealso \code{\link[yardstick]{metric_set}}, \code{\link[yardstick]{rsq}},
-#'   \code{\link[yardstick]{rmse}}, \code{\link{rrmse_vec}}, \code{\link{full_model_evaluation}}
-#'
-#' @examples
-#' \dontrun{
-#' evaluate_final_models(finalized_wf_sets = finalized_models,
-#'                       holdout_data = test_data)
-#' }
-#'
+#' @importFrom tibble tibble
+
 #' @keywords internal
+
+
 
 evaluate_final_models <- function(finalized_wf_sets, holdout_data) {
 

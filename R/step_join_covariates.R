@@ -1,25 +1,19 @@
-#' @title Add Scaled Covariates to Recipe Dataset
-#' @description Adds scaled covariates to a recipe dataset via left join using
-#'   a shared Sample ID column. Scales covariate data during `prep()` and joins
-#'   it to the dataset at `bake()` time.
+#' Add Scaled Covariates to a Recipe Dataset
 #'
-#' @param recipe A `recipe` object.
-#' @param covariate_data A data frame of covariates to be joined.
-#' @param role Character. Variable role for new covariates (default: "predictor").
-#' @param trained Logical. Has the step been trained? (required by `recipes`).
-#' @param skip Logical. Should this step be skipped when baking?
-#' @param id Character. Unique step identifier.
-#' @param sample_id_column Optional. Name of sample ID column. If NULL, will attempt
-#'   to detect it based on variables with role = "id".
+#' Adds scaled covariate columns to a recipe via left join using a common sample ID column.
+#' Covariates are standardized (mean = 0, SD = 1) during `prep()` and joined to the recipe
+#' data during `bake()`. Useful for integrating precomputed covariates (e.g., from external
+#' models or databases) into tidymodels workflows.
 #'
-#' @return A `step_add_covariates` step added to the recipe.
+#' @param recipe A `recipes::recipe` object.
+#' @param covariate_data A data frame of covariates to join. Must include an identifier column for merging.
+#' @param role Character string indicating the role for the covariates. Default is `"predictor"`.
+#' @param trained Logical. Has the step been trained? Required for step methods.
+#' @param skip Logical. Should the step be skipped when baking? Default is FALSE.
+#' @param id Character string. Unique identifier for the step.
+#' @param sample_id_column Optional. Name of the ID column used for joining. If NULL, attempts to detect a variable with role = `"id"`.
 #'
-#' @importFrom recipes step add_step rand_id bake prep
-#' @importFrom dplyr select mutate across everything bind_cols relocate left_join filter pull
-#' @importFrom glue glue
-#' @importFrom rlang %||%
-#'
-#' @export
+#' @return A `step_add_covariates` step to be added to a `recipe` pipeline.
 #'
 #' @examples
 #' \dontrun{
@@ -27,7 +21,17 @@
 #'   update_role(Sample_ID, new_role = "id") %>%
 #'   step_add_covariates(covariate_data = predicted_covs)
 #' }
-# ------------------------------------------------------------------------------
+#'
+#' @seealso
+#'   \code{\link[recipes]{recipe}}, \code{\link[recipes]{prep}}, \code{\link[recipes]{bake}}
+#'
+#' @importFrom cli cli_abort
+#' @importFrom dplyr filter pull mutate across select relocate left_join all_of everything
+#' @importFrom glue glue
+#' @importFrom recipes add_step step prep bake rand_id
+#' @importFrom rlang as_string ensym
+#'
+#' @export
 
 ## -----------------------------------------------------------------------------
 ## Step 1: User-facing step function

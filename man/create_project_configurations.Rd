@@ -19,40 +19,78 @@ create_project_configurations(
 )
 }
 \arguments{
-\item{project_data}{A dataframe with Project and Sample_ID columns.}
+\item{project_data}{A \code{tibble} with \code{Project} and \code{Sample_ID} columns, representing the prediction set.}
 
-\item{models}{Character vector of model names (e.g., "random_forest", "cubist").}
+\item{models}{Character vector of model names to include (e.g., \code{"random_forest"}, \code{"cubist"}).}
 
-\item{transformations}{Character vector of outcome transformations.}
+\item{transformations}{Character vector of response transformation labels (e.g., \code{"none"}, \code{"log"}).}
 
-\item{preprocessing}{Character vector of preprocessing pipeline names.}
+\item{preprocessing}{Character vector of preprocessing pipeline names (e.g., \code{"SNV"}, \code{"SG-1D"}).}
 
-\item{soil_covariates}{Optional character vector (or "all") of soil covariates to predict.}
+\item{soil_covariates}{Optional character vector (or \code{"all"}) of soil covariates to predict using MIR spectra.}
 
-\item{climate_covariates}{Optional character vector (or "all") of climate covariates to fetch.}
+\item{climate_covariates}{Optional character vector (or \code{"all"}) of climate covariates to fetch using Daymet.}
 
-\item{spatial_covariates}{Optional character vector of spatial covariates to fetch.}
+\item{spatial_covariates}{Optional character vector of spatial covariates to fetch (currently not implemented).}
 
-\item{expand_covariate_grid}{Logical. If TRUE, generate all possible covariate subsets.}
+\item{expand_covariate_grid}{Logical. If \code{TRUE}, generate all possible non-empty covariate subsets.
+If \code{FALSE}, include either no covariates or the full set. Default = \code{TRUE}.}
 
-\item{include_covariates}{Logical. Whether to include covariates in modeling grid.}
+\item{include_covariates}{Logical. Whether to include any covariate combinations in the modeling grid. Default = \code{TRUE}.}
+
+\item{refresh}{Logical. Whether to refresh cached predictions for soil and climate covariates. Default = \code{FALSE}.}
+
+\item{verbose}{Logical. Whether to print progress and prediction summaries using \code{cli}. Default = \code{TRUE}.}
 }
 \value{
-A tibble of model configurations, one per row, with a list-column of covariates.
+A named \code{list} with:
+\itemize{
+\item \strong{project_configurations}: A \code{tibble} of model configurations, one per row,
+with columns \code{model}, \code{transformation}, \code{preprocessing}, and a list-column \code{covariates}.
+\item \strong{covariate_data}: A wide-format \code{tibble} of all covariates (soil, climate, spatial)
+merged by \code{Project} and \code{Sample_ID}.
+}
 }
 \description{
-Builds a model configuration grid by combining model types, response
-transformations, preprocessing pipelines, and covariate combinations.
-Covariates may be predicted or fetched from soil, climate, and spatial domains.
+Generates a structured grid of model configurations by combining model types, response
+transformations, spectral preprocessing pipelines, and optional covariate subsets. Covariates
+may include predicted soil properties (via \code{predict_covariates()}), fetched climate covariates
+(via \code{fetch_climate_covariates()}), or spatial variables (placeholder).
+}
+\details{
+If \code{soil_covariates = "all"}, the function will use a default set:
+\code{c("clay", "sand", "silt", "phh2o", "ocd", "cec", "bdod")}. If \code{climate_covariates = "all"},
+it will fetch: \code{c("MAT", "MAP", "PET", "AI", "GDD", "Precip_Seasonality")}.
+
+The function does not currently fetch spatial covariates but includes placeholder logic
+for future support. Merged covariate data is returned for downstream use in model fitting.
+
+If \code{expand_covariate_grid = TRUE}, all combinations of covariates (including the empty set) are considered.
+If \code{FALSE}, only two cases are evaluated: no covariates, and all covariates.
 }
 \examples{
-create_project_configurations(
-  project_data = project_data,
-  models       = c("xgboost", "cubist"),
-  transformations = c("none", "log"),
-  preprocessing   = c("SNV", "SG-1D"),
-  soil_covariates = "all",
+\dontrun{
+config_grid <- create_project_configurations(
+  project_data       = my_project_data,
+  models             = c("xgboost", "cubist"),
+  transformations    = c("none", "log"),
+  preprocessing      = c("SNV", "SG-1D"),
+  soil_covariates    = "all",
   climate_covariates = c("MAT", "MAP"),
-  spatial_covariates = NULL
+  expand_covariate_grid = TRUE
 )
+
+config_grid$project_configurations
+config_grid$covariate_data
 }
+
+}
+\seealso{
+\code{\link{predict_covariates}}, \code{\link{fetch_climate_covariates}}, \code{\link{run_model_evaluation}}
+
+Other input_preparation: 
+\code{\link{create_project_data}()},
+\code{\link{project_entry}()},
+\code{\link{project_list}()}
+}
+\concept{input_preparation}

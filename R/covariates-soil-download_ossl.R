@@ -1,19 +1,56 @@
-#' Download and Preprocess OSSL MIR and Covariate Data
+#' Download and Preprocess OSSL Spectral and Covariate Data
 #'
 #' Retrieves topsoil mid-infrared (MIR) spectral data and associated covariate measurements
-#' from the Open Soil Spectroscopy Library (OSSL). Applies smoothing and standard normal variate (SNV)
-#' preprocessing to spectra, joins soil covariate information, and caches the final processed dataset.
+#' from the Open Soil Spectroscopy Library (OSSL). Applies Savitzky-Golay smoothing followed by
+#' standard normal variate (SNV) preprocessing to the spectra, reshapes and filters lab data,
+#' and joins all components into a unified dataset. Final outputs are cached for reuse.
 #'
-#' If cached processed MIR spectra are found, they will be loaded automatically
-#' to avoid reprocessing.
+#' @param covariates A character vector of covariate names to retrieve (e.g., `"Sand"`, `"pH"`, `"SOC"`).
+#'   Covariate names must match those defined in the internal OSSL variable dictionary.
+#' @param window_size Integer. Width of the Savitzky-Golay smoothing window (must be odd). Defaults to `9`.
+#' @param max_samples Optional integer. If supplied, limits the number of samples processed—useful for debugging or testing.
+#'   If `NULL`, all available samples are used.
+#' @param bounding_box Currently unused. Placeholder for future spatial subsetting based on bounding box coordinates.
 #'
-#' @import dplyr
-#' @import purrr
-#' @import tidyr
-#' @import tibble
-#' @importFrom magrittr %>%
-#' @importFrom rlang .data
-#' @importFrom stats predict quantile
+#' @return A `tibble` containing:
+#' \itemize{
+#'   \item Preprocessed MIR spectra: SNV-SG0 transformed reflectance values at 2 cm⁻¹ resolution between 600–4000 cm⁻¹.
+#'   \item Covariate data: Wide-format table of measured values for requested soil properties.
+#'   \item Sample index: A sequential index column for internal referencing.
+#' }
+#'
+#' @details
+#' This function follows a multi-step pipeline:
+#' \enumerate{
+#'   \item Read and filter the internal OSSL variable dictionary.
+#'   \item Load cached raw data files (location, lab, and MIR) from disk using `qs::qread()`.
+#'   \item Filter and reshape metadata to include only topsoil layers and desired covariates.
+#'   \item Load and optionally subsample MIR spectra.
+#'   \item Apply parallelized SNV and Savitzky-Golay preprocessing via `furrr::future_map()`.
+#'   \item Cache the resulting processed spectra using `qs::qsave()` for future reuse.
+#'   \item Join processed spectra with lab data by `Layer_ID`.
+#' }
+#'
+#' If previously processed MIR spectra exist in cache, they are loaded automatically to avoid reprocessing.
+#' Progress and errors are communicated through `cli`-based messaging and `safely_execute()` wrappers.
+#'
+#' @examples
+#' \dontrun{
+#' # Download and preprocess OSSL data for pH and Sand
+#' ossl_data <- download_ossl_data(covariates = c("pH", "Sand"))
+#'
+#' # Preview structure
+#' glimpse(ossl_data)
+#' }
+#'
+#' @seealso
+#' \code{\link{predict_covariates}}, \code{\link{create_input_data}}
+#'
+#' @importFrom dplyr filter select distinct mutate rename group_by ungroup inner_join starts_with row_number
+#' @importFrom purrr map map_chr map_dfr pluck
+#' @importFrom tidyr pivot_longer pivot_wider drop_na
+#' @importFrom tibble tibble as_tibble
+#' @importFrom stats quantile
 #' @importFrom readr read_csv
 #' @importFrom qs qread qread_url qsave
 #' @importFrom future plan multisession sequential
@@ -22,45 +59,10 @@
 #' @importFrom progressr with_progress handlers progressor
 #' @importFrom here here
 #' @importFrom glue glue
-#' @importFrom cli cli_progress_message cli_progress_step cli_alert_success cli_alert_danger cli_alert_info
+#' @importFrom cli cli_progress_message cli_progress_step cli_alert_success cli_alert_danger cli_alert_info cli_abort
 #' @importFrom stringr str_split_i
-#'
-#' @param covariates Character vector of covariate names to retrieve (e.g., `"Sand"`, `"pH"`, `"SOC"`).
-#' @param window_size Integer. Width of the Savitzky-Golay smoothing window for spectral preprocessing (default = 9).
-#' @param bounding_box Optional. A bounding box for spatial subsetting (not currently implemented).
-#' @param max_samples Optional. Integer. Maximum number of samples to process from OSSL for testing/debugging. If NULL, all samples are processed.
+#' @export
 
-#'
-#' @return A tibble containing:
-#' \itemize{
-#'   \item{Preprocessed MIR spectra (SNV-SG0, 2 cm⁻¹ interval, 600–4000 cm⁻¹)}
-#'   \item{Covariate measurements for each sample}
-#' }
-#'
-#' @details
-#' The function workflow includes:
-#' \enumerate{
-#'   \item{Reading the OSSL variable dictionary for analyte selection.}
-#'   \item{Downloading topsoil metadata and filtering for U.S. sites (optional spatial subsetting to come).}
-#'   \item{Downloading laboratory measurements and reshaping to analyte-wide format.}
-#'   \item{Loading raw OSSL MIR spectra, smoothing with Savitzky-Golay, applying SNV.}
-#'   \item{Caching processed datasets locally for faster reuse.}
-#' }
-#'
-#' Cached processed spectra are reused automatically when available.
-#'
-#' @seealso
-#' \code{\link{predict_covariates}}, \code{\link{create_input_data}}
-#'
-#' @examples
-#' \dontrun{
-#' # Example: Download and preprocess OSSL data for Sand and pH
-#' ossl_data <- download_ossl_data(covariates = c("Sand", "pH"))
-#'
-#' glimpse(ossl_data)
-#' }
-#'
-#' @keywords internal
 
 download_ossl_data <- function(covariates,
                                window_size = 9,

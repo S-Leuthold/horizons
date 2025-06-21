@@ -2,17 +2,41 @@
 % Please edit documentation in R/utils_find_cache_path.R
 \name{get_ossl_data_path}
 \alias{get_ossl_data_path}
-\title{Get Path to Cached OSSL Data}
+\title{Get Path to Cached OSSL Dataset File}
 \usage{
 get_ossl_data_path(type = c("location", "lab", "mir"))
 }
 \arguments{
-\item{type}{One of "location", "lab", or "mir".}
+\item{type}{A character string indicating which dataset to retrieve.
+Must be one of:
+\itemize{
+\item{\code{"location"}}{Geospatial metadata}
+\item{\code{"lab"}}{Laboratory measurements (e.g., OC, pH, texture)}
+\item{\code{"mir"}}{Raw MIR spectral data}
+}}
 }
 \value{
-Path to the cached file or NULL if not present.
+A character string giving the path to the requested \code{.qs} file,
+or \code{NULL} if the file does not exist.
 }
 \description{
-Returns the path to a specific cached file if it exists.
+Returns the full path to a cached Open Soil Spectral Library (OSSL) dataset
+file if it exists on disk. Supports retrieval of location metadata, lab data,
+or raw MIR spectra stored via \code{download_horizons_data()}.
+}
+\details{
+This function checks the Horizons user cache directory
+(\code{tools::R_user_dir("horizons", "cache")}) for expected OSSL data files.
+It is typically used internally to conditionally load cached data or
+trigger downloads if needed.
+}
+\examples{
+\dontrun{
+get_ossl_data_path("lab")
+}
+
+}
+\seealso{
+\code{\link{download_horizons_data}}
 }
 \keyword{internal}

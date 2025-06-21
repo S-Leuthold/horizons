@@ -1,27 +1,61 @@
-#' Tune Blending Parameters for Ensemble Stack
+#' Tune Ensemble Blending Hyperparameters via Grid Search
 #'
-#' This helper function performs a grid search over blending hyperparameters
-#' for an ensemble stack built using `stacks::blend_predictions()`. It explores
-#' combinations of penalty strength, mixture (ridge-lasso balance), and
-#' non-negativity constraints to identify the configuration that maximizes
-#' predictive performance on a provided test set.
+#' Performs a parallelized grid search over blending hyperparameters for a
+#' stacked ensemble model built with the `stacks` package. Explores combinations
+#' of penalty strength (`λ`), mixture (`α`), and non-negativity constraints
+#' to identify the configuration that maximizes holdout set performance (R²).
 #'
-#' @param model_stack A fitted `stacks` object created from `add_candidates()`,
-#'        `blend_predictions()`, and `fit_members()`.
-#' @param test_data A `data.frame` or `tibble` containing the holdout data used
-#'        to evaluate blending performance. Must include the same predictors
-#'        used in the stack.
+#' @param model_stack A fitted `stacks::stacks()` object. Must have already
+#'   undergone `add_candidates()` and `blend_predictions()` steps.
+#' @param test_data A data frame containing the holdout observations with
+#'   predictors and a `Response` column (target variable). Used to evaluate
+#'   final predictions.
+#' @param penalty_grid Numeric vector of penalty values (λ) to test. Defaults to
+#'   25 log-spaced values from 1e-5 to 1.
+#' @param mixture_grid Numeric vector of mixture values (α) from 0 (ridge) to 1 (lasso).
+#'   Defaults to increments of 0.1.
+#' @param negative_grid Logical vector indicating whether to constrain coefficients
+#'   to be non-negative. Defaults to `c(TRUE, FALSE)`.
+#' @param verbose Logical; if TRUE, prints best configuration to console. Default is TRUE.
 #'
-#' @return A tibble with the best performing blend configuration based on
-#'         R², including the corresponding `penalty`, `mixture`, and
-#'         `non_negative` values.
+#' @return A tibble with the best blend configuration based on R². Columns include:
+#'   \itemize{
+#'     \item{\code{penalty}}{Optimal penalty value (λ)}
+#'     \item{\code{mixture}}{Optimal mixture value (α)}
+#'     \item{\code{non_negative}}{Whether coefficients were constrained to be ≥ 0}
+#'     \item{\code{rsq}}{Best R² achieved on holdout set}
+#'   }
+#'
+#' @details
+#' Uses `furrr::future_pmap()` with parallel execution to test all blending
+#' configurations. Internally calls `blend_predictions()` and `fit_members()` for
+#' each configuration and evaluates predictions using `yardstick::rsq()`.
+#'
+#' @seealso
+#'   \code{\link[stacks]{blend_predictions}},
+#'   \code{\link[stacks]{fit_members}},
+#'   \code{\link[yardstick]{rsq}},
+#'   \code{\link[furrr]{future_pmap}}
 #'
 #' @examples
 #' \dontrun{
-#'   best_blend <- tune_blend(model_stack = my_stack, test_data = holdout)
+#' tune_blend(model_stack = my_stack,
+#'            test_data   = holdout_samples)
 #' }
 #'
-#' internal
+#' @importFrom cli cli_alert_success
+#' @importFrom dplyr mutate filter pull bind_rows arrange slice
+#' @importFrom furrr future_pmap furrr_options
+#' @importFrom future plan sequential multisession
+#' @importFrom glue glue
+#' @importFrom parallel detectCores
+#' @importFrom progressr handlers with_progress progressor
+#' @importFrom stacks blend_predictions fit_members
+#' @importFrom tibble tibble
+#' @importFrom yardstick rsq metric_set metrics
+#'
+#'
+#' @keywords internal
 
 
 tune_blend <- function(model_stack,

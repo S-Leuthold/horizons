@@ -1,15 +1,37 @@
-#' Read Absorbance Data from an OPUS File
+#' Read Absorbance Spectra from an OPUS File
 #'
-#' Extracts absorbance values from a single `.0` OPUS file. Attempts to read the
-#' \code{"ab_no_atm_comp"} channel first, then falls back to \code{"ab"} if needed.
+#' Extracts absorbance values from a single `.0` OPUS file, using the \code{"ab_no_atm_comp"}
+#' channel when available, or falling back to \code{"ab"}. Returns a long-format tibble
+#' with spectral absorbance data and the source channel used.
 #'
-#' @param file_path Full path to a `.0` OPUS file.
+#' @param file_path Character. Full path to a `.0` OPUS file.
 #'
-#' @return A tibble with columns: \code{File_Name}, \code{Wavenumber}, \code{Absorbance}.
-#'         Includes an attribute \code{"channel_used"} indicating the channel read.
-#'         Returns \code{NULL} if no valid absorbance data is found.
+#' @return A tibble with columns:
+#'   \itemize{
+#'     \item \code{File_Name}: The basename of the file.
+#'     \item \code{Wavenumber}: Wavenumber in cm⁻¹ (as numeric).
+#'     \item \code{Absorbance}: Absorbance value at each wavenumber.
+#'   }
+#' Includes an attribute \code{"channel_used"} indicating which spectral channel was read.
+#' Returns \code{NULL} (with a warning) if no valid absorbance data is available.
+#'
+#' @details
+#' This function is designed for use within spectral ingestion workflows such as
+#' \code{\link{create_project_data}}. It relies on the \pkg{opusreader2} package to
+#' parse binary OPUS files.
+#'
+#' @seealso \code{\link{create_project_data}}, \code{\link[opusreader2]{read_opus}}
+#'
+#' @importFrom opusreader2 read_opus
+#' @importFrom purrr pluck
+#' @importFrom tibble as_tibble
+#' @importFrom tidyr pivot_longer
+#' @importFrom dplyr rename mutate select
+#' @importFrom cli cli_warn
 #'
 #' @keywords internal
+
+
 
 read_spectral_data <- function(file_path) {
 

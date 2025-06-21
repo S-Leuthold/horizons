@@ -2,7 +2,7 @@
 % Please edit documentation in R/covariates-soil-orchestrator.R
 \name{predict_covariates}
 \alias{predict_covariates}
-\title{Predict Covariates from MIR Spectra Using Clustered Cubist Models}
+\title{Predict Soil Covariates from MIR Spectra Using Clustered Cubist Models}
 \usage{
 predict_covariates(
   covariates,
@@ -13,23 +13,61 @@ predict_covariates(
 )
 }
 \arguments{
-\item{covariates}{Character vector of covariate names to predict (e.g., "Sand", "pH").}
+\item{covariates}{A character vector of covariate names to predict (e.g., \code{"Sand"}, \code{"pH"}).
+Covariates must be present in the OSSL training dataset.}
 
-\item{input_data}{A data frame of wide-format MIR spectra. Must include \code{Sample_ID} and numeric wavenumber columns (600–4000 cm⁻¹).}
+\item{input_data}{A \code{data.frame} or \code{tibble} containing wide-format MIR spectra.
+Must include a \code{Sample_ID} column and numeric wavenumber columns ranging from \code{600} to \code{4000} (2 cm⁻¹ interval).
+A \code{Project} column is also expected for cache partitioning.}
+
+\item{verbose}{Logical. If \code{TRUE}, prints progress updates via \verb{cli::cli_*()} functions. Defaults to \code{TRUE}.}
+
+\item{refresh}{Logical. If \code{TRUE}, forces re-calculation of predictions and bypasses cached results. Defaults to \code{FALSE}.}
+
+\item{cache_dir}{Character path. Directory where project- and covariate-specific predictions are cached using \code{qs::qsave()}.
+Defaults to \code{tools::R_user_dir("horizons", "cache")}.}
 }
 \value{
-A list with:
-\item{Predicted_Values}{A tibble of covariate predictions for the unknown samples.}
-\item{Evaluation_Statistics}{A tibble of model evaluation metrics (e.g., RMSE, R²) based on the hold-out set.}
+A named \code{list} with two elements:
+\itemize{
+\item \strong{Predicted_Values}: A \code{tibble} with one row per sample and one column per predicted covariate.
+Includes \code{Project} and \code{Sample_ID}.
+\item \strong{Evaluation_Statistics}: A \code{tibble} of model evaluation metrics for the hold-out data
+(e.g., RMSE, R², CCC). If predictions are loaded from cache, a placeholder message is returned instead.
+}
 }
 \description{
-This function calibrates and applies Cubist models trained on clustered OSSL
-data to predict selected covariates (e.g., Sand, pH) for new spectral samples.
-It includes PCA-based dimensionality reduction, k-means clustering, per-cluster
-Cubist model calibration, and hold-out evaluation of model performance.
+Predicts soil covariate values (e.g., Sand, pH) from mid-infrared (MIR) spectra using
+a clustered modeling workflow built on OSSL data. Includes PCA-based dimensionality reduction,
+k-means clustering, per-cluster Cubist model calibration, prediction on new data, and optional
+retrieval of cached predictions.
 }
 \details{
-The function first smooths and normalizes the MIR input spectra, projects the training data into PCA space,
-clusters the samples, calibrates per-cluster Cubist models, predicts on new samples, and evaluates model performance.
-Duplicate \code{Sample_ID} values are flagged. Progress steps are printed to the console.
+This function implements a hybrid local-global modeling strategy:
+\enumerate{
+\item Smooth and normalize input MIR spectra using Savitzky-Golay (SG0) + SNV.
+\item Download and preprocess topsoil OSSL data for training.
+\item Perform PCA on OSSL data, then apply projection to new samples.
+\item Cluster samples using k-means on PCA scores.
+\item Create representative training subsets for each cluster using proximity filtering.
+\item Fit Cubist models per covariate per cluster using grid + Bayesian tuning.
+\item Predict covariate values for each cluster subset and evaluate performance using a 5\% hold-out.
+\item Save new predictions to disk and merge with cached predictions.
+}
+
+If all requested project-covariate pairs are already cached and \code{refresh = FALSE}, the function
+returns only cached predictions and skips modeling. Otherwise, only missing pairs are recalculated.
+}
+\examples{
+\dontrun{
+preds <- predict_covariates(
+  covariates = c("Sand", "pH"),
+  input_data = my_mir_data,
+  refresh = TRUE
+)
+
+preds$Predicted_Values
+preds$Evaluation_Statistics
+}
+
 }

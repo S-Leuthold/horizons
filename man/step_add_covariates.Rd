@@ -2,7 +2,7 @@
 % Please edit documentation in R/step_join_covariates.R
 \name{step_add_covariates}
 \alias{step_add_covariates}
-\title{Add Scaled Covariates to Recipe Dataset}
+\title{Add Scaled Covariates to a Recipe Dataset}
 \usage{
 step_add_covariates(
   recipe,
@@ -15,28 +15,28 @@ step_add_covariates(
 )
 }
 \arguments{
-\item{recipe}{A \code{recipe} object.}
+\item{recipe}{A \code{recipes::recipe} object.}
 
-\item{covariate_data}{A data frame of covariates to be joined.}
+\item{covariate_data}{A data frame of covariates to join. Must include an identifier column for merging.}
 
-\item{role}{Character. Variable role for new covariates (default: "predictor").}
+\item{role}{Character string indicating the role for the covariates. Default is \code{"predictor"}.}
 
-\item{trained}{Logical. Has the step been trained? (required by \code{recipes}).}
+\item{trained}{Logical. Has the step been trained? Required for step methods.}
 
-\item{skip}{Logical. Should this step be skipped when baking?}
+\item{skip}{Logical. Should the step be skipped when baking? Default is FALSE.}
 
-\item{id}{Character. Unique step identifier.}
+\item{id}{Character string. Unique identifier for the step.}
 
-\item{sample_id_column}{Optional. Name of sample ID column. If NULL, will attempt
-to detect it based on variables with role = "id".}
+\item{sample_id_column}{Optional. Name of the ID column used for joining. If NULL, attempts to detect a variable with role = \code{"id"}.}
 }
 \value{
-A \code{step_add_covariates} step added to the recipe.
+A \code{step_add_covariates} step to be added to a \code{recipe} pipeline.
 }
 \description{
-Adds scaled covariates to a recipe dataset via left join using
-a shared Sample ID column. Scales covariate data during \code{prep()} and joins
-it to the dataset at \code{bake()} time.
+Adds scaled covariate columns to a recipe via left join using a common sample ID column.
+Covariates are standardized (mean = 0, SD = 1) during \code{prep()} and joined to the recipe
+data during \code{bake()}. Useful for integrating precomputed covariates (e.g., from external
+models or databases) into tidymodels workflows.
 }
 \examples{
 \dontrun{
@@ -44,4 +44,8 @@ recipe(data = soil_data) \%>\%
   update_role(Sample_ID, new_role = "id") \%>\%
   step_add_covariates(covariate_data = predicted_covs)
 }
+
+}
+\seealso{
+\code{\link[recipes]{recipe}}, \code{\link[recipes]{prep}}, \code{\link[recipes]{bake}}
 }

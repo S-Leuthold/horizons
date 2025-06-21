@@ -1,16 +1,49 @@
-#' Download and Cache All Required OSSL Data
+#' Download and Cache OSSL Core Datasets
 #'
-#' Downloads location metadata, lab data, and raw MIR data for the OSSL dataset.
-#' Stores them in a user-specific cache directory so they don\u2019t need to be
-#' redownloaded. If the data already exists, it\u2019s reused silently unless
-#' \code{force = TRUE}, in which case the user can choose to re-download it.
+#' Downloads and locally caches the Open Soil Spectral Library (OSSL) datasets required
+#' for Horizons workflows, including location metadata, laboratory measurements, and raw
+#' MIR spectral data. Data are stored in the user-level cache directory defined by
+#' `tools::R_user_dir("horizons", "cache")`.
 #'
-#' @param force Logical. If TRUE, forces re-download of all data even if present.
-#' @param ask Logical. If TRUE (default), prompts the user for confirmation before download.
+#' If the data already exist, they are reused unless `force = TRUE`. If any files are missing,
+#' or if `force = TRUE`, the user will be prompted before download (unless `ask = FALSE`).
 #'
-#' @return Invisibly returns the paths of the cached files.
+#' @param force Logical. If `TRUE`, forces re-download of all files even if they are present.
+#' @param ask Logical. If `TRUE` (default), prompts the user before downloading any files.
+#'
+#' @return Invisibly returns a named list of local file paths for:
+#' \describe{
+#'   \item{`location`}{Cached path to the OSSL location metadata.}
+#'   \item{`lab`}{Cached path to the OSSL laboratory data.}
+#'   \item{`mir`}{Cached path to the OSSL raw MIR spectra.}
+#' }
+#'
+#' @details
+#' This function ensures reproducibility and minimizes network overhead by storing
+#' the following files in the Horizons cache:
+#' \itemize{
+#'   \item `ossl_soilsite_L0_v1.2.qs` — site/location metadata
+#'   \item `ossl_soillab_L1_v1.2.qs` — harmonized lab measurements
+#'   \item `ossl_mir_L0_v1.2.qs` — raw MIR spectra in absorbance units
+#' }
+#'
+#' These datasets are used as base inputs for downstream functions such as `build_ossl_dataset()`.
+#'
+#' @seealso \code{\link{build_ossl_dataset}}, \code{\link[qs]{qread_url}}, \code{\link[tools]{R_user_dir}}
+#'
+#' @examples
+#' \dontrun{
+#' download_horizons_data()
+#' }
+#'
+#' @importFrom cli cli_alert_success cli_alert_info cli_progress_step
+#' @importFrom glue glue
+#' @importFrom qs qread_url qsave
+#' @importFrom tools R_user_dir
+#' @importFrom utils menu
+#'
 #' @export
-#'
+
 
 download_horizons_data <- function(force = FALSE,
                                    ask   = TRUE) {
