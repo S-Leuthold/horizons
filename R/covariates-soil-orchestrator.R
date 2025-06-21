@@ -122,8 +122,6 @@ predict_covariates <- function(covariates,
       print(dup_check)
     }
 
-    if(verbose) cli::cli_alert_info("Starting prediction of covariates.")
-
    ## ---------------------------------------------------------------------------
    ## Step 1: Check for cached covariates
    ## ---------------------------------------------------------------------------
@@ -136,9 +134,9 @@ predict_covariates <- function(covariates,
 
      file.path(cache_dir, proj_slug, paste0(covariate, ".qs"))
 
-    }
+   }
 
-   if(verbose) cli::cli_progress_step("Checking cache for {.val {nrow(cov_lookup)}} project-covariate pairs")
+   if(verbose) cli::cli_alert_success("Starting prediction of covariates.")
 
    get_cached_covariates <- function(project, covariate,
                                      cache_dir,
@@ -166,6 +164,8 @@ predict_covariates <- function(covariates,
      covariate = covariates,
      stringsAsFactors = FALSE
    )
+
+   if(verbose) cli::cli_alert_success("Checking cache for {.val {nrow(cov_lookup)}} project-covariate pairs")
 
    cov_lookup <- cov_lookup %>%
      dplyr::mutate(cache_result = purrr::map2(
