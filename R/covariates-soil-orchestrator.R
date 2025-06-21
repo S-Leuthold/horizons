@@ -107,6 +107,8 @@ predict_covariates <- function(covariates,
 
     }
 
+   if(verbose) cli::cli_progress_step("Checking cache for {.val {nrow(cov_lookup)}} project-covariate pairs")
+
    get_cached_covariates <- function(project, covariate,
                                      cache_dir,
                                      refresh = FALSE) {
@@ -133,8 +135,6 @@ predict_covariates <- function(covariates,
      covariate = covariates,
      stringsAsFactors = FALSE
    )
-
-   if(verbose) cli::cli_progress_step("Checking cache for {.val {nrow(cov_lookup)}} project-covariate pairs")
 
    cov_lookup <- cov_lookup %>%
      dplyr::mutate(cache_result = purrr::map2(
