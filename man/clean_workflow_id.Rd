@@ -2,21 +2,24 @@
 % Please edit documentation in R/model_generate_workflow_ids.R
 \name{clean_workflow_id}
 \alias{clean_workflow_id}
-\title{Generate Clean Workflow Identifiers}
+\title{Construct Compact Workflow Identifiers}
 \usage{
 clean_workflow_id(model, transformation, preprocessing, covariates)
 }
 \arguments{
-\item{model}{Character vector of model names. Supported values include:
+\item{model}{Character vector of model names. Recommended values include:
 \itemize{
-\item{"Partial Least Squares Regression"}
-\item{"Cubist"}
-\item{"Random Forest"}
-\item{"Support Vector Machine"}
-\item{"Bagged Neural Network"}
+\item{"random_forest"}
+\item{"cubist"}
+\item{"xgboost"}
+\item{"elastic_net"}
+\item{"svm_rbf"}
+\item{"mars"}
+\item{"plsr"}
+\item{"mlp_nn"}
 }}
 
-\item{transformation}{Character vector of response transformation labels. Typical values:
+\item{transformation}{Character vector of response transformation labels. Supported values:
 \itemize{
 \item{"No Transformation"}
 \item{"Log Transformation"}
@@ -24,41 +27,34 @@ clean_workflow_id(model, transformation, preprocessing, covariates)
 \item{"Box-Cox Transformation"}
 }}
 
-\item{preprocessing}{Character vector of spectral preprocessing methods. Supported:
+\item{preprocessing}{Character vector of spectral preprocessing methods. Supported values:
 \itemize{
-\item{"No Preprocessing"}
-\item{"Savitzky Golay - 0 Deriv"}
-\item{"Savitzky Golay - 1 Deriv"}
-\item{"Standard Normal Variate - Savitzky Golay - 0 Deriv"}
-\item{"Standard Normal Variate - Savitzky Golay - 1 Deriv"}
+\item{"raw"}
+\item{"sg"}
+\item{"snv"}
+\item{"deriv1"}
+\item{"deriv2"}
+\item{"snv_deriv1"}
+\item{"snv_deriv2"}
+\item{"msc_deriv1"}
 }}
 
-\item{covariates}{List-column of character vectors representing covariate combinations per workflow.
-Can include NULL or "No Covariates" to indicate absence of covariates.}
+\item{covariates}{Character vector or list of character vectors naming covariates.
+If \code{NULL}, \code{"NoCovs"} will be used.}
 }
 \value{
-A character vector of unique workflow ID strings.
+A character vector of compact workflow ID strings.
 }
 \description{
-Constructs standardized and compact workflow ID strings from modeling metadata,
-including model type, response transformation, spectral preprocessing, and covariate specification.
-Useful for labeling workflows in \code{workflowsets::workflow_set()} and downstream model tracking.
+Generates standardized workflow ID strings from model configuration metadata:
+model type, response transformation, spectral preprocessing, and covariates.
+These IDs are useful for tracking workflow configurations in stacking pipelines,
+model audits, and file naming conventions.
 }
 \details{
-Each element in the output is formatted as:
-\code{<index>_<model>_<transformation>_<preprocessing>_<covariates>}
-}
-\examples{
-\dontrun{
-clean_workflow_id(
-  model = c("Cubist", "Random Forest"),
-  transformation = c("Log Transformation", "No Transformation"),
-  preprocessing = c("Savitzky Golay - 0 Deriv", "No Preprocessing"),
-  covariates = list(c("Soil_pH", "CEC"), NULL)
-)
-}
+Each ID follows the format:
+\code{<model>_<transformation>_<preprocessing>_<covariates>}
 }
 \seealso{
-\code{\link[workflowsets:workflow_set]{workflowsets::workflow_set()}}
+\code{\link{parse_workflow_id}}
 }
-\keyword{internal}

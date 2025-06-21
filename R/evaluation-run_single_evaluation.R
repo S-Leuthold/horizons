@@ -1,27 +1,83 @@
 #' Evaluate a Single Model Configuration on Spectral Data
 #'
-#' Executes preprocessing, model specification, grid tuning, Bayesian tuning,
-#' final model fitting, and hold-out evaluation for a single model configuration.
-#' Intended for use inside `safe_run_model()` within the batch modeling pipeline.
+#' Builds, tunes, fits, and evaluates a single spectral model configuration for a specified response variable.
+#' This includes response transformation, spectral preprocessing, optional covariate inclusion, grid search,
+#' Bayesian optimization, final model fitting, and hold-out evaluation. Designed for use within
+#' `safe_run_model()` in the `horizons` batch modeling pipeline.
 #'
-#' @param input_data A tibble containing columns `Sample_ID`, `Wavenumber`, `Absorbance`, and the target variable.
-#' @param covariate_data Optional tibble of covariates, must include `Sample_ID`.
-#' @param variable Character. The name of the response variable.
-#' @param model Character. Model type (e.g. `"Cubist"`, `"PLSR"`).
-#' @param transformation Character. Response transformation label.
-#' @param preprocessing Character. Spectral preprocessing method.
-#' @param covariates List of covariate names to include, or NULL.
-#' @param include_covariates Logical. Whether to include covariates.
-#' @param grid_size Integer. Number of grid search candidates per model (default = 10).
-#' @param bayesian_iter Integer. Number of Bayesian optimization iterations (default = 15).
-#' @param cv_folds Integer. Number of cross-validation folds (default = 5).
+#' @param input_data A `tibble` containing spectral features with columns: `Sample_ID`, `Wavenumber`, `Absorbance`,
+#'   and the target response variable.
+#' @param covariate_data Optional `tibble` containing external covariates, matched by `Sample_ID`.
+#'   Required if `include_covariates = TRUE`.
+#' @param variable Character. Name of the response variable to model (must be in `input_data`).
+#' @param model Character. Model type to evaluate (e.g., `"Cubist"`, `"PLSR"`, `"SVM"`).
+#' @param transformation Character. Outcome transformation label (e.g., `"Log Transformation"`).
+#' @param preprocessing Character. Spectral preprocessing method (e.g., `"SNV + SG1"`).
+#' @param covariates Optional character vector of covariate names to include in the model.
+#' @param include_covariates Logical. Whether to include covariates in the model workflow.
+#' @param pruning Logical. Whether to skip poor-performing models after grid tuning based on RRMSE threshold (default = `TRUE`).
+#' @param grid_size Integer. Number of initial grid search candidates (default = 10).
+#' @param bayesian_iter Integer. Number of Bayesian tuning iterations (default = 15).
+#' @param cv_folds Integer. Number of cross-validation folds for resampling (default = 5).
 #'
-#' @return A named list with:
-#' \describe{
-#'   \item{evaluation_results}{Tibble of holdout performance metrics.}
-#'   \item{tuned_models}{Tibble with `wflow_id`, `workflow`, and tuning results (stack-compatible).}
+#' @return A named `list` containing:
+#' \itemize{
+#'   \item \strong{evaluation_results}: A `tibble` of hold-out performance metrics (RRMSE, R², etc.).
+#'   \item \strong{tuned_models}: A `tibble` containing the full tuned workflow, final workflow, and fitted model (stack-compatible).
+#'   \item \strong{error}: Logical flag indicating whether the model failed.
+#'   \item \strong{pruned}: Logical flag indicating whether the model was pruned due to poor early results.
+#'   \item \strong{wflow_id}: Character ID of the workflow.
+#'   \item \strong{reason}: Text summary of any error or pruning reason (or `NULL` if successful).
 #' }
-#' @keywords internal
+#'
+#' @details
+#' The function proceeds through the full modeling lifecycle:
+#' \enumerate{
+#'   \item Build recipe with response transformation, spectral preprocessing, and optional covariates.
+#'   \item Define the model specification via `define_model_specifications()`.
+#'   \item Perform grid search using `tune::tune_grid()` to explore hyperparameter space.
+#'   \item Optionally prune poor configurations early using RRMSE thresholds.
+#'   \item Refine using Bayesian optimization (`tune::tune_bayes()`).
+#'   \item Finalize, fit, and evaluate the best model on a hold-out set.
+#'   \item Return workflows and evaluation outputs for stacking and inspection.
+#' }
+#'
+#' All stages use `safely_execute()` for robust error handling. Messages are emitted via `cli` to support real-time monitoring.
+#' The function supports automatic `mtry` finalization and dynamic tuning grid construction.
+#'
+#' @examples
+#' \dontrun{
+#' config_result <- evaluate_model_config(
+#'   input_data        = my_spectral_data,
+#'   covariate_data    = my_covs,
+#'   variable          = "MAOM_C_g_kg",
+#'   model             = "cubist",
+#'   transformation    = "Log",
+#'   preprocessing     = "snv",
+#'   covariates        = c("Clay", "pH"),
+#'   include_covariates = TRUE
+#' )
+#'
+#' config_result$evaluation_results
+#' }
+#'
+#' @seealso
+#' \code{\link{safe_run_model}}, \code{\link{run_model_evaluation}},
+#' \code{\link{build_recipe}}, \code{\link{define_model_specifications}},
+#' \code{\link{evaluate_final_models}}
+#'
+#' @importFrom dplyr filter mutate select pull arrange rename bind_cols
+#' @importFrom tibble tibble as_tibble
+#' @importFrom recipes prep bake
+#' @importFrom workflows workflow add_recipe add_model
+#' @importFrom tune tune_grid tune_bayes select_best finalize_workflow control_grid control_bayes collect_metrics
+#' @importFrom rsample initial_split training testing vfold_cv
+#' @importFrom yardstick metric_set rsq
+#' @importFrom hardhat extract_parameter_set_dials
+#' @importFrom glue glue
+#' @importFrom cli cli_alert_success cli_alert_warning
+#' @export
+
 
 evaluate_model_config <- function(input_data,
                                   covariate_data,

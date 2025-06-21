@@ -1,7 +1,48 @@
-#' Create summary tables
+#' Generate Summary Table of Candidate and Ensemble Model Metrics
 #'
-#' internal
+#' Produces a tidy `tibble` summarizing performance metrics (R², RMSE, MAE)
+#' across all candidate models and the final ensemble. This function extracts
+#' key model metadata—including model type, response transformation, spectral
+#' preprocessing, and covariate grouping—from workflow IDs and assembles them
+#' into a unified results table for comparison.
 #'
+#' @param ensemble_metrics A single-row `tibble` or named list containing the ensemble
+#'        model's evaluation metrics. Must include `rsq`, `rmse`, and `mae`.
+#' @param candidate_metrics A `tibble` containing candidate model results, including a
+#'        `Model` column with workflow IDs and metric columns (`rsq`, `rmse`, `mae`).
+#'
+#' @return A `tibble` with one row per model (candidate or ensemble), and columns:
+#' \describe{
+#'   \item{ModelType}{Descriptive name of the model type (e.g., "Random Forest").}
+#'   \item{Transformation}{Response transformation applied (e.g., "Log", "None").}
+#'   \item{Preprocessing}{Spectral preprocessing used (e.g., "SNV + Derivative 1").}
+#'   \item{Covariates}{Covariate specification parsed from model ID.}
+#'   \item{rsq}{R-squared (coefficient of determination).}
+#'   \item{rmse}{Root Mean Squared Error.}
+#'   \item{mae}{Mean Absolute Error.}
+#'   \item{Group}{Model group: "Candidate Models" or "Ensemble".}
+#' }
+#'
+#' @details
+#' This function assumes that model names follow a structured naming convention
+#' (e.g., `<index>_<model>_<transformation>_<preprocessing>_<covariates>`).
+#' It uses string parsing to infer model metadata from these identifiers.
+#'
+#' @seealso \code{\link{clean_workflow_id}}, \code{\link{evaluate_final_models}}
+#'
+#' @examples
+#' \dontrun{
+#' create_summary_table(ensemble_metrics = best_stack_metrics,
+#'                      candidate_metrics = best_candidate_metrics)
+#' }
+#'
+#' @importFrom dplyr mutate case_when select bind_rows
+#' @importFrom stringr str_detect str_split_i str_count
+#' @importFrom tibble tibble
+#' @keywords internal
+#' @export
+
+
 create_summary_table <- function(ensemble_metrics,
                                  candidate_metrics){
 

@@ -1,40 +1,58 @@
-#' Fetch Climate Covariates Using Daymet and Hargreaves PET
+#' Retrieve and Summarize Climate Covariates from Daymet
 #'
-#' This function retrieves daily climate data from Daymet for a set of input coordinates and
-#' computes key climate covariates using the Hargreaves method for PET (Potential Evapotranspiration).
-#' It groups samples by Daymet 4-km grid cell to minimize redundant downloads and summarizes
-#' climate variables (MAT, MAP, PET, AI, GDD, Precip_Seasonality) for each unique grid.
-#' Loud, graceful failures are implemented using cli-based error handling.
+#' Fetches daily gridded climate data from the Daymet API for a set of geographic coordinates,
+#' then computes key annual covariates including temperature, precipitation, PET (Hargreaves),
+#' aridity index, growing degree days, and precipitation seasonality. Samples are grouped by
+#' Daymet's 4-km grid resolution to minimize redundant downloads. The function is fault-tolerant
+#' and provides progress updates and warnings via the `cli` package.
 #'
-#' @import dplyr
-#' @import purrr
-#' @import tibble
-#' @import lubridate
+#' @param input_data A `data.frame` or `tibble` with numeric `Longitude` and `Latitude` columns (in decimal degrees).
+#'   Other columns (e.g., `Sample_ID`, `Layer_ID`) are preserved and joined to the output.
+#' @param start_year Integer. First year of daily climate data to download (inclusive). Defaults to `2003`.
+#' @param end_year Integer. Final year of daily climate data to download (inclusive). Defaults to `2024`.
+#' @param gdd_base Numeric. Base temperature (°C) used to compute growing degree days (GDD). Defaults to `10`.
+#' @param cache_dir File path. Directory where Daymet `.csv` files will be stored and reused.
+#'   Defaults to `tools::R_user_dir("horizons", "cache")`.
+#'
+#' @return A `tibble` with one row per input sample, containing the original columns plus six additional climate covariates:
+#' \itemize{
+#'   \item \strong{MAT}: Mean annual temperature (°C)
+#'   \item \strong{MAP}: Mean annual precipitation (mm)
+#'   \item \strong{PET}: Mean annual potential evapotranspiration (mm), estimated using the Hargreaves method
+#'   \item \strong{AI}: Aridity Index (MAP / PET)
+#'   \item \strong{GDD}: Mean annual Growing Degree Days (base defined by `gdd_base`)
+#'   \item \strong{Precip_Seasonality}: Coefficient of variation (CV%) of monthly precipitation totals
+#' }
+#'
+#' @details
+#' To reduce redundant API calls, samples are aggregated to the nearest Daymet 4-km grid cell using
+#' rounded coordinate matching. Climate data is then downloaded once per grid cell and summarized
+#' annually over the specified date range. PET is calculated daily using the Hargreaves method.
+#' Precipitation seasonality is quantified as the coefficient of variation in monthly means.
+#'
+#' Progress is displayed using `cli::cli_progress_step()` and warnings are surfaced with
+#' `cli_alert_warning()`. Failures during download or summarization do not halt execution
+#' but may result in missing covariates for affected locations.
+#'
+#' @examples
+#' \dontrun{
+#' fetch_climate_covariates(
+#'   input_data = my_soil_data,
+#'   start_year = 2010,
+#'   end_year = 2020,
+#'   gdd_base = 5
+#' )
+#' }
+#'
+#' @importFrom dplyr mutate group_by ungroup summarize select left_join bind_rows filter
+#' @importFrom purrr map pluck
+#' @importFrom tibble tibble
+#' @importFrom lubridate month
 #' @importFrom cli cli_progress_step cli_alert_success cli_alert_warning cli_abort cli_progress_done
 #' @importFrom glue glue
 #' @importFrom daymetr download_daymet
-#'
-#' @param input_data A data frame with columns `Longitude` and `Latitude`. Additional columns (e.g., `Layer_ID`) are preserved for joining.
-#' @param start_year The first year of climate data to retrieve (default: 2003).
-#' @param end_year The final year of climate data to retrieve (default: 2024).
-#' @param gdd_base Base temperature (°C) for Growing Degree Days calculation (default: 10).
-#' @param cache_dir Directory for storing Daymet downloads (default: user cache directory).
-#'
-#' @return A data frame joining input data with climate covariates:
-#'   \item{MAT}{Mean annual temperature (°C).}
-#'   \item{MAP}{Mean annual precipitation (mm).}
-#'   \item{PET}{Mean annual potential evapotranspiration (mm, estimated by Hargreaves).}
-#'   \item{AI}{Aridity Index (MAP / PET).}
-#'   \item{GDD}{Mean annual Growing Degree Days (base temperature defined by `gdd_base`).}
-#'   \item{Precip_Seasonality}{Coefficient of variation (CV%) of monthly precipitation totals.}
-#'
-#' @details
-#' The function uses the Daymet API to download daily climate data for each unique 4-km grid cell
-#' represented by the input coordinates. Hargreaves PET is calculated for each day, and
-#' annual summaries are averaged across the specified date range.
-#' This approach minimizes API calls while ensuring data consistency.
-#'
 #' @export
+
 
 
 fetch_climate_covariates <- function(input_data,

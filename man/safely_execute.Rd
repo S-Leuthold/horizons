@@ -2,7 +2,7 @@
 % Please edit documentation in R/utils_error_handling.R
 \name{safely_execute}
 \alias{safely_execute}
-\title{Safely Execute an Expression and Capture Errors}
+\title{Safely Evaluate an Expression with Optional Logging and Tracing}
 \usage{
 safely_execute(
   expr,
@@ -14,30 +14,46 @@ safely_execute(
 )
 }
 \arguments{
-\item{expr}{An R expression to evaluate.}
+\item{expr}{An expression to evaluate, passed unquoted.}
 
-\item{default_value}{Value to return as \code{result} if an error occurs (default: \code{NULL}).}
+\item{default_value}{Value to return if the expression errors. Default is \code{NULL}.}
 
-\item{error_message}{Optional character string. If provided, it will be evaluated
-using \code{glue::glue()} and shown as part of the warning.}
+\item{error_message}{Optional string interpolated via \code{glue::glue()}, used as the log message.}
 
-\item{log_error}{Logical. Should errors be logged with \code{cli::cli_warn()}? (default: \code{TRUE})}
+\item{log_error}{Logical. If \code{TRUE} (default), logs the error using \code{cli::cli_warn()}.}
 
-\item{capture_trace}{Logical. If \code{TRUE}, captures the call trace using \code{rlang}.}
+\item{capture_trace}{Logical. If \code{TRUE}, captures a traceback using \code{rlang::trace_back()}.}
 
-\item{trace_log_file}{Optional path to write the trace if \code{capture_trace = TRUE}.}
+\item{trace_log_file}{Optional file path to write the trace, if \code{capture_trace = TRUE}.}
 }
 \value{
-A list with elements:
-\itemize{
-\item \code{result}: the evaluated result or \code{default_value} on error
-\item \code{error}: the error object (or \code{NULL} if none)
-\item \code{trace}: call trace if \code{capture_trace = TRUE} and an error occurred
+A named list with elements:
+\describe{
+\item{\code{result}}{The evaluated result or \code{default_value} if an error occurred.}
+\item{\code{error}}{The error object, or \code{NULL} if the evaluation succeeded.}
+\item{\code{trace}}{A trace object from \code{rlang}, or \code{NULL} if not captured.}
 }
 }
 \description{
-This function wraps an expression using \code{purrr::safely()} to ensure errors
-do not halt execution. It captures error messages, optionally logs them,
-and can attach trace information for debugging.
+Evaluates an expression using \code{purrr::safely()} to prevent errors from halting execution.
+If an error occurs, it returns a default value, optionally logs a custom message,
+and can capture the call trace for debugging.
+}
+\details{
+This function is useful when running potentially fragile code inside mapping,
+parallelization, or ensemble modeling workflows. By capturing and optionally logging
+errors without interrupting the overall workflow, it supports robust batch execution.
+
+If \code{capture_trace = TRUE}, the call stack is stored and optionally written to disk.
+This is helpful when debugging complex pipelines.
+}
+\examples{
+\dontrun{
+safely_execute(log("oops"), default_value = NA, error_message = "Failed to take log")
+}
+
+}
+\seealso{
+\code{\link[purrr]{safely}}, \code{\link[rlang]{trace_back}}, \code{\link[cli]{cli_warn}}
 }
 \keyword{internal}

@@ -13,38 +13,30 @@ project_entry(
 )
 }
 \arguments{
-\item{spectra_path}{Character. Path to the folder containing OPUS \code{.0} spectral files.
-Must be a valid directory.}
+\item{spectra_path}{Character. Path to a directory containing OPUS \code{.0} spectral files.}
 
-\item{sample_obs}{Character. Path to a \code{.csv} file containing sample-level observations
-(e.g., physicochemical properties, site metadata). Must exist.}
+\item{sample_obs}{Character. Path to a \code{.csv} file with sample-level observations.}
 
-\item{file_name_format}{Character. A delimiter-separated string describing the position and role
-of metadata fields in each file name (e.g., \code{"sampleid_fraction"}).
-Required tokens include \code{"sampleid"}. Optional tokens include
-\code{"fraction"}, \code{"project"}, or \code{"ignore"}.}
+\item{file_name_format}{Character. Delimiter-separated format string describing metadata fields in the file name.
+Must include the \code{"sampleid"} token. Other valid tokens include \code{"fraction"}, \code{"project"}, and \code{"ignore"}.}
 
-\item{file_name_delimiter}{Character. Delimiter used to separate tokens in the file name (e.g., \code{"_"} or \code{"-"}).
-Defaults to \code{"_"}.}
+\item{file_name_delimiter}{Character. Delimiter used to split the filename string (default: \code{"_"}).}
 
-\item{default_fraction}{Character. Default value to assign if \code{fraction} is not provided or
-cannot be parsed from the file name. Defaults to \code{"GroundBulk"}.}
+\item{default_fraction}{Character. Default fraction to assign if no fraction is parsed (default: \code{"GroundBulk"}).}
 }
 \value{
-A structured list with five fields used to define a project for ingestion.
+A list with elements: \code{spectra_path}, \code{sample_obs}, \code{file_name_format},
+\code{file_name_delimiter}, and \code{default_fraction}.
 }
 \description{
-Creates a structured project entry used by \code{create_project_data()} to
+Creates a structured project entry used by \code{\link{create_project_data}} to
 locate and parse OPUS spectral files, join sample-level observations, and
-assign metadata fields. Each project entry specifies the paths, file parsing
-rules, and fallback defaults for a single dataset.
+assign metadata fields. Each entry defines a dataset's input files and parsing rules.
 }
 \details{
-This function is typically called inside a named list passed to \code{project_list()},
-where each list element represents a project used in downstream ingestion workflows.
-The \code{file_name_format} string is interpreted positionally and should match the structure
-of all file names within \code{spectra_path}. If filenames deviate, parsing errors or warnings
-will be raised at runtime.
+This function is typically used inside a call to \code{\link{project_list}}, which assembles
+multiple project entries into a single structure passed to \code{\link{create_project_data}}.
+File name parsing is tokenized by position, and mismatches will cause runtime warnings.
 }
 \examples{
 project_entry(
@@ -57,5 +49,11 @@ project_entry(
 
 }
 \seealso{
-\code{\link{project_list}}, \code{\link{create_project_data}}, \code{\link{parse_filename_metadata}}
+\code{\link{create_project_data}}, \code{\link{project_list}}, \code{\link{parse_filename_metadata}}
+
+Other input_preparation: 
+\code{\link{create_project_configurations}()},
+\code{\link{create_project_data}()},
+\code{\link{project_list}()}
 }
+\concept{input_preparation}

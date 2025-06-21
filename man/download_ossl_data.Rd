@@ -2,51 +2,56 @@
 % Please edit documentation in R/covariates-soil-download_ossl.R
 \name{download_ossl_data}
 \alias{download_ossl_data}
-\title{Download and Preprocess OSSL MIR and Covariate Data}
+\title{Download and Preprocess OSSL Spectral and Covariate Data}
 \usage{
 download_ossl_data(covariates, window_size = 9, max_samples = NULL)
 }
 \arguments{
-\item{covariates}{Character vector of covariate names to retrieve (e.g., \code{"Sand"}, \code{"pH"}, \code{"SOC"}).}
+\item{covariates}{A character vector of covariate names to retrieve (e.g., \code{"Sand"}, \code{"pH"}, \code{"SOC"}).
+Covariate names must match those defined in the internal OSSL variable dictionary.}
 
-\item{window_size}{Integer. Width of the Savitzky-Golay smoothing window for spectral preprocessing (default = 9).}
+\item{window_size}{Integer. Width of the Savitzky-Golay smoothing window (must be odd). Defaults to \code{9}.}
 
-\item{max_samples}{Optional. Integer. Maximum number of samples to process from OSSL for testing/debugging. If NULL, all samples are processed.}
+\item{max_samples}{Optional integer. If supplied, limits the number of samples processed—useful for debugging or testing.
+If \code{NULL}, all available samples are used.}
 
-\item{bounding_box}{Optional. A bounding box for spatial subsetting (not currently implemented).}
+\item{bounding_box}{Currently unused. Placeholder for future spatial subsetting based on bounding box coordinates.}
 }
 \value{
-A tibble containing:
+A \code{tibble} containing:
 \itemize{
-\item{Preprocessed MIR spectra (SNV-SG0, 2 cm⁻¹ interval, 600–4000 cm⁻¹)}
-\item{Covariate measurements for each sample}
+\item Preprocessed MIR spectra: SNV-SG0 transformed reflectance values at 2 cm⁻¹ resolution between 600–4000 cm⁻¹.
+\item Covariate data: Wide-format table of measured values for requested soil properties.
+\item Sample index: A sequential index column for internal referencing.
 }
 }
 \description{
 Retrieves topsoil mid-infrared (MIR) spectral data and associated covariate measurements
-from the Open Soil Spectroscopy Library (OSSL). Applies smoothing and standard normal variate (SNV)
-preprocessing to spectra, joins soil covariate information, and caches the final processed dataset.
+from the Open Soil Spectroscopy Library (OSSL). Applies Savitzky-Golay smoothing followed by
+standard normal variate (SNV) preprocessing to the spectra, reshapes and filters lab data,
+and joins all components into a unified dataset. Final outputs are cached for reuse.
 }
 \details{
-If cached processed MIR spectra are found, they will be loaded automatically
-to avoid reprocessing.
-
-The function workflow includes:
+This function follows a multi-step pipeline:
 \enumerate{
-\item{Reading the OSSL variable dictionary for analyte selection.}
-\item{Downloading topsoil metadata and filtering for U.S. sites (optional spatial subsetting to come).}
-\item{Downloading laboratory measurements and reshaping to analyte-wide format.}
-\item{Loading raw OSSL MIR spectra, smoothing with Savitzky-Golay, applying SNV.}
-\item{Caching processed datasets locally for faster reuse.}
+\item Read and filter the internal OSSL variable dictionary.
+\item Load cached raw data files (location, lab, and MIR) from disk using \code{qs::qread()}.
+\item Filter and reshape metadata to include only topsoil layers and desired covariates.
+\item Load and optionally subsample MIR spectra.
+\item Apply parallelized SNV and Savitzky-Golay preprocessing via \code{furrr::future_map()}.
+\item Cache the resulting processed spectra using \code{qs::qsave()} for future reuse.
+\item Join processed spectra with lab data by \code{Layer_ID}.
 }
 
-Cached processed spectra are reused automatically when available.
+If previously processed MIR spectra exist in cache, they are loaded automatically to avoid reprocessing.
+Progress and errors are communicated through \code{cli}-based messaging and \code{safely_execute()} wrappers.
 }
 \examples{
 \dontrun{
-# Example: Download and preprocess OSSL data for Sand and pH
-ossl_data <- download_ossl_data(covariates = c("Sand", "pH"))
+# Download and preprocess OSSL data for pH and Sand
+ossl_data <- download_ossl_data(covariates = c("pH", "Sand"))
 
+# Preview structure
 glimpse(ossl_data)
 }
 
@@ -54,4 +59,3 @@ glimpse(ossl_data)
 \seealso{
 \code{\link{predict_covariates}}, \code{\link{create_input_data}}
 }
-\keyword{internal}

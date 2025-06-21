@@ -2,42 +2,50 @@
 % Please edit documentation in R/models-define_model_specifications.R
 \name{define_model_specifications}
 \alias{define_model_specifications}
-\title{Define Parsnip Model Specifications for Soil Spectral Regression}
+\title{Define a Parsnip Model Specification for Soil Spectral Modeling}
 \usage{
 define_model_specifications(model_type)
 }
 \arguments{
-\item{model_type}{Character string specifying model type. Must be one of:
+\item{model_type}{Character. One of the following canonical model slugs:
 \itemize{
-\item{"random_forest"}
-\item{"cubist"}
-\item{"xgboost"}
-\item{"elastic_net"}
-\item{"svm_rbf"}
-\item{"mars"}
-\item{"plsr"}
-\item{"mlp_nn"}
+\item{\code{"random_forest"}}
+\item{\code{"cubist"}}
+\item{\code{"xgboost"}}
+\item{\code{"lightgbm"}}
+\item{\code{"elastic_net"}}
+\item{\code{"svm_rbf"}}
+\item{\code{"mars"}}
+\item{\code{"plsr"}}
+\item{\code{"mlp_nn"}}
 }}
 }
 \value{
-A \code{parsnip} model specification object with tunable hyperparameters,
-ready to be added to a \code{workflow()} or \code{workflow_set()}.
+A \code{parsnip} model specification object with tunable hyperparameters.
 }
 \description{
-Returns a tunable \code{parsnip} model specification object for the specified model type.
-Each model is initialized with appropriate hyperparameters marked for tuning using \code{tune()},
-and is intended for use in model grids and workflow sets. Supports a curated set of models
-relevant to soil spectroscopy and ensemble learning.
+Constructs a tunable \code{parsnip} model specification for one of several supported
+regression algorithms commonly used in soil spectroscopy and ensemble modeling.
+Each specification includes \code{tune()} placeholders for relevant hyperparameters,
+and is intended for use in \code{workflow()} objects or within model grids.
+}
+\details{
+This function standardizes model setup across workflows. Each model spec is returned
+with regression mode enabled, an appropriate modeling engine selected, and all key
+hyperparameters marked as tunable. Designed for compatibility with \code{tune_grid()},
+\code{workflowsets::workflow_set()}, and \code{stacks::stacks()}.
 }
 \examples{
 \dontrun{
-define_model_specifications("Random Forest")
-define_model_specifications("Elastic Net")
-define_model_specifications("Neural Network")
+define_model_specifications("random_forest")
+define_model_specifications("plsr")
+define_model_specifications("mlp_nn")
 }
 
 }
 \seealso{
-\code{\link[parsnip]{set_engine}}, \code{\link[tune]{tune}}, \code{\link{build_model_grid}}
+\code{\link[parsnip]{set_engine}},
+\code{\link[tune]{tune}},
+\code{\link{build_model_grid}}
 }
 \keyword{internal}

@@ -2,39 +2,48 @@
 % Please edit documentation in R/covariates-soil-fit_cubist_model.R
 \name{fit_cubist_model}
 \alias{fit_cubist_model}
-\title{Fit a Cubist Model for a Single Covariate Using PCA-Transformed Spectral Data}
+\title{Fit a Cubist Model Using PCA-Transformed Spectral Data}
 \usage{
 fit_cubist_model(input_data, covariate, verbose)
 }
 \arguments{
-\item{input_data}{A data frame containing PCA-transformed predictors (\code{Dim.1}, \code{Dim.2}, ..., \code{Dim.50})
-and one column matching the \code{covariate} to model as the response.}
+\item{input_data}{A \code{tibble} or \code{data.frame} containing PCA-transformed predictors
+(\code{Dim.1}, \code{Dim.2}, ..., \code{Dim.n}) and one numeric column corresponding to the
+covariate to be modeled. All rows with \code{NA} in the response are removed.}
 
-\item{covariate}{A character string indicating which covariate to predict (e.g., \code{"Sand"}, \code{"pH"}).}
+\item{covariate}{A character string. Name of the column to use as the response variable (e.g., \code{"Sand"}, \code{"pH"}).}
+
+\item{verbose}{Logical. If \code{TRUE}, prints progress messages using \verb{cli::cli_*()} during model training. Defaults to \code{FALSE}.}
 }
 \value{
-A list with three elements:
-\item{Model}{The finalized, fitted Cubist workflow object.}
-\item{Best_Parameters}{A tibble of the optimal hyperparameter values selected via Bayesian optimization.}
-\item{Evaluation}{Hold-out evaluation statistics.}
+A named \code{list} with the following components:
+\itemize{
+\item \strong{Model}: A fitted Cubist workflow (\code{workflow}) trained on the full training set.
+\item \strong{Best_Parameters}: A \code{tibble} containing the best hyperparameter configuration selected via Bayesian optimization.
+\item \strong{Evaluation}: A \code{tibble} of evaluation metrics (e.g., RMSE, R², CCC) computed on the hold-out set using \code{soilspec::eval()}.
+}
 }
 \description{
-This function builds, tunes, and evaluates a Cubist model for predicting a single
-soil covariate from PCA-transformed MIR spectra. It applies an initial grid search
-followed by Bayesian optimization for hyperparameter tuning.
+Builds, tunes, and evaluates a Cubist model to predict a single soil covariate
+using PCA-transformed MIR spectra. The function applies a max entropy grid search
+followed by Bayesian optimization to tune hyperparameters, then fits the final model
+and returns both performance metrics and workflow objects.
 }
 \details{
-The modeling process proceeds in three stages:
+The modeling pipeline follows three main stages:
 \enumerate{
-\item{Split input data into training and testing sets with stratification on the response.}
-\item{Perform an initial max entropy grid search on committees, neighbors, and max_rules hyperparameters.}
-\item{Refine the model via Bayesian optimization, finalize the workflow, and evaluate on a hold-out set.}
+\item Stratified data split into training/testing sets.
+\item Max entropy grid search for tuning \code{committees}, \code{neighbors}, and \code{max_rules} using \code{tune::tune_grid()}.
+\item Bayesian optimization using \code{tune::tune_bayes()} for refinement.
 }
-Parallelization is automatically enabled for tuning phases via \code{future::plan(multisession)}.
+The model is finalized with \code{tune::finalize_workflow()} and fitted to the training set.
+Performance metrics are computed on the hold-out set using \code{tune::last_fit()} and \code{soilspec::eval()}.
+
+Parallel tuning is enabled with \code{future::plan(multisession)} and automatically reset afterward.
+All error handling is wrapped with \code{safely_execute()} for fault-tolerant orchestration.
 }
 \examples{
 \dontrun{
-# Simulated PCA-transformed dataset
 df <- tibble::tibble(
   Dim.1 = rnorm(100),
   Dim.2 = rnorm(100),
@@ -42,13 +51,11 @@ df <- tibble::tibble(
   Sand  = runif(100, 50, 80)
 )
 
-# Updated example call to use the new function name
-result <- fit_cubist_model(input_data = df, covariate = "Sand")
+result <- fit_cubist_model(input_data = df, covariate = "Sand", verbose = TRUE)
 result$Evaluation
 }
 
 }
 \seealso{
-\code{\link{predict_covariates}}, \code{\link{evaluate_predictions}}, \code{\link{reduce_dimensions_pca}} # Updated link
+\code{\link{predict_covariates}}, \code{\link{evaluate_predictions}}, \code{\link{reduce_dimensions_pca}}
 }
-\keyword{internal}

@@ -1,47 +1,48 @@
-#' Evaluate Predicted Covariate Values Against Measured Data
+#' Evaluate Predicted Covariates Against Measured Values
 #'
-#' Joins modeled and measured covariate values by \code{Sample_ID}, computes evaluation metrics
-#' for each covariate independently, and returns a tidy summary of model performance. Metrics are
-#' computed using \code{\link[soilspec]{eval}}, including RMSE, R², CCC, and RPIQ.
+#' Compares predicted and observed covariate values by `Sample_ID`, computes evaluation metrics
+#' for each covariate independently, and returns a tidy summary of model performance. Metrics include
+#' RMSE, R², CCC, RPIQ, and others via `soilspec::eval()`. Errors or non-numeric columns are gracefully skipped.
 #'
-#' @import dplyr
-#' @import purrr
-#' @import tidyr
-#' @import tibble
-#' @import cli
-#' @importFrom magrittr %>%
-#' @importFrom rlang .data
+#' @param measured_data A `data.frame` or `tibble` containing observed covariate values.
+#'   Must include a `Sample_ID` column and one or more numeric columns representing measured covariates.
+#' @param modeled_data A `data.frame` or `tibble` containing predicted covariate values.
+#'   Must also include `Sample_ID` and matching column names for predicted covariates.
 #'
-#' @param measured_data A data frame containing observed covariate values with columns:
-#'   \itemize{
-#'     \item \code{Sample_ID} (character or integer)
-#'     \item One or more numeric columns corresponding to measured covariates.
-#'   }
-#' @param modeled_data A data frame containing model predictions with matching \code{Sample_ID}
-#' and corresponding predicted covariate columns.
-#'
-#' @return A tibble summarizing evaluation metrics per covariate, with columns including:
-#' \item{Covariate}{The covariate name}
-#' \item{RMSE}{Root Mean Squared Error}
-#' \item{R2}{Coefficient of Determination}
-#' \item{CCC}{Concordance Correlation Coefficient}
-#' \item{RPIQ}{Ratio of Performance to Inter-Quartile Distance}
-#' and others.
+#' @return A `tibble` summarizing evaluation metrics for each covariate. Includes columns:
+#' \itemize{
+#'   \item \strong{Covariate}: Name of the covariate being evaluated
+#'   \item \strong{RMSE}: Root Mean Squared Error
+#'   \item \strong{R2}: Coefficient of Determination
+#'   \item \strong{CCC}: Concordance Correlation Coefficient
+#'   \item \strong{RPIQ}: Ratio of Performance to Interquartile Distance
+#'   \item Other metrics computed by `soilspec::eval()`
+#' }
 #'
 #' @details
-#' Non-numeric columns or missing predictions are automatically skipped, and a warning
-#' is printed using \code{\link[cli]{cli_alert_warning}} if evaluation cannot be performed
-#' for a particular covariate.
+#' The function performs an inner join on `Sample_ID`, appending `_measured` and `_modeled` suffixes
+#' to corresponding columns. Only numeric covariates with valid observed and predicted values are evaluated.
+#' Any covariate with missing data or evaluation errors is skipped, with a warning logged via `cli::cli_alert_warning()`.
+#'
+#' Metrics are computed using `soilspec::eval()` with `obj = "quant"` and `na.rm = TRUE`.
+#' This function is especially useful for assessing external validation or covariate prediction workflows.
 #'
 #' @examples
 #' \dontrun{
-#' results <- evaluate_predictions(measured_data = my_measured_data,
-#'                                 modeled_data  = my_predicted_data)
+#' results <- evaluate_predictions(
+#'   measured_data = my_measured_data,
+#'   modeled_data  = my_predicted_data
+#' )
 #' }
 #'
 #' @seealso
 #' \code{\link[soilspec]{eval}}
 #'
+#' @importFrom dplyr distinct inner_join mutate bind_rows
+#' @importFrom purrr map
+#' @importFrom tidyr drop_na
+#' @importFrom tibble tibble as_tibble
+#' @importFrom cli cli_alert_warning
 #' @export
 
 evaluate_predictions <- function(measured_data,

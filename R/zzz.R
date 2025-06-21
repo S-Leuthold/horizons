@@ -6,7 +6,7 @@
 .onLoad <- function(libname, pkgname) {
 
   # Startup message
-  packageStartupMessage("horizons v0.5.0 loaded. Super fragile, use with caution.")
+  packageStartupMessage("horizons v0.7.5 loaded. Please flag bugs on Github (www.github.com/S-Leuthold/horizons)")
 
   # Optional: Register future plan if not already set
   if (requireNamespace("future", quietly = TRUE) &&
