@@ -1,17 +1,19 @@
 Package: horizons
 Title: Spectral Ensemble Modeling and Covariate Prediction for Soil Data
-Version: 0.2.0
+Version: 0.7.5
 Authors@R: 
     person(given  = "Sam",
            family = "Leuthold",
            email  = "sam.leuthold@colostate.edu",
            role   = c("aut", "cre"))
-Description: Provides functions to construct, tune, and evaluate spectral ensemble models 
-    for soil property prediction using mid-infrared (MIR) data. Includes a modular system 
-    for generating model grids, applying spectral and response transformations, predicting 
-    covariates using OSSL data, and managing workflows via the 'tidymodels' framework. 
-    Designed for internal use on high-performance systems, with support for parallel execution 
-    and spectral clustering.
+Description: Tools for constructing, tuning, and evaluating stacked ensemble models
+    for soil property prediction using mid-infrared (MIR) spectroscopy. Includes
+    modular workflows for spectral preprocessing, response transformation, covariate
+    integration, and model stacking using the 'tidymodels' ecosystem. Covariates can
+    also be predicted directly from spectra using a locally-weighted Cubist modeling
+    approach trained on global OSSL data. Designed for reproducible, high-throughput
+    modeling pipelines with support for clustered calibration, caching, and parallel
+    execution on high-performance systems.
 License: MIT + file LICENSE
 Encoding: UTF-8
 LazyData: false
@@ -24,17 +26,24 @@ Imports:
     dials,
     dplyr,
     FactoMineR,
+    fs,
     furrr,
     future,
+    ggplot2,
     glue,
+    gt,
     hardhat,
     here,
-    magrittr,
+    jsonlite,
+    lubridate,
     opusreader2,
+    parallel,
     parsnip,
+    patchwork,
     plsmod,
     progressr,
     prospectr,
+    pryr,
     purrr,
     qs,
     readr,
@@ -44,11 +53,14 @@ Imports:
     rules,
     spectrolab,
     stacks,
+    stats,
     stringr,
     tibble,
     tidyr,
     tidyselect,
+    tools,
     tune,
+    utils,
     workflows,
     workflowsets,
     yardstick
