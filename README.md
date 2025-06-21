@@ -12,7 +12,7 @@
 
 `horizons` is a modular R framework for analyzing mid-infrared (MIR) soil spectra. Built on the `tidymodels` ecosystem, it provides a suite of tools for reproducible soil property prediction and spectral analysis. The package supports end-to-end workflows, including data ingestion, spectral preprocessing, automated covariate fetching, robust model tuning, and ensemble stacking.
 
-Designed for researchers in soil biogeochemistry and environmental data science, `horizons` prioritizes transparency, modularity, and reproducibility. While it does not provide a graphical user interface, it offers a powerful and flexible foundation for rigorous modeling and analysis.
+Designed for researchers in soil biogeochemistry and environmental data science, `horizons` prioritizes transparency, modularity, and reproducibility. It aim to offer a powerful and flexible foundation for rigorous modeling and analysis.
 
 > **Note**: `horizons` is in active development and remains experimental. The whole thing is subject to break, be weird, and not handle edge cases well. If you find a bug, please submit an issue or a pull request, and I'll try to update things to fix it. This is kind of a passion project though, so mileage may vary as to how fast things get done.
 
