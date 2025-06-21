@@ -1,6 +1,3 @@
-Of course. Here is the updated README in Markdown format.
-
-````markdown
 # horizons
 
 > Spectral Ensemble Modeling and Covariate Prediction for Soil Data
@@ -17,7 +14,7 @@ Of course. Here is the updated README in Markdown format.
 
 Designed for researchers in soil biogeochemistry and environmental data science, `horizons` prioritizes transparency, modularity, and reproducibility. While it does not provide a graphical user interface, it offers a powerful and flexible foundation for rigorous modeling and analysis.
 
-> **Note**: `horizons` is in active development and remains experimental. The whole thing is subject to break, be weird, and not handle edge cases well. If you find a bug, please submit an issue or a pull request, and I'll try to update things to fix it. This is kind of a passion project though, so mileage may vary as to how fast things get done. 
+> **Note**: `horizons` is in active development and remains experimental. The whole thing is subject to break, be weird, and not handle edge cases well. If you find a bug, please submit an issue or a pull request, and I'll try to update things to fix it. This is kind of a passion project though, so mileage may vary as to how fast things get done.
 
 ---
 
@@ -146,4 +143,3 @@ Future development will focus on:
 ## License
 
 MIT © 2025 Sam Leuthold
-````
