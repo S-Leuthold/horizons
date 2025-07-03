@@ -69,6 +69,7 @@ create_project_configurations <- function(project_data,
                                           models,
                                           transformations,
                                           preprocessing,
+                                          feature_selection,
                                           soil_covariates       = NULL,
                                           climate_covariates    = NULL,
                                           spatial_covariates    = NULL,
@@ -89,6 +90,8 @@ create_project_configurations <- function(project_data,
 
   if (is.character(soil_covariates) && length(soil_covariates) == 1 && soil_covariates == "all") {
 
+    ## TODO make this work.
+
     soil_covariates <- c("clay", "sand", "silt", "phh2o", "ocd", "cec", "bdod")
 
   }
@@ -107,6 +110,10 @@ create_project_configurations <- function(project_data,
                    error_message = "Soil covariate prediction failed") -> soil_covs_safe
 
     soil_covs <- soil_covs_safe$result
+
+  } else {
+
+    soil_covs <- NULL
 
   }
 
@@ -171,11 +178,22 @@ create_project_configurations <- function(project_data,
   ## Step 4: Merge Covariates
   ## ---------------------------------------------------------------------------
 
+  if (is.null(soil_covs) && is.null(climate_covs) && is.null(spatial_covs)) {
+
+    cli::cli_alert_warning("All covariate datasets are NULL. Resulting configurations will not contain any covariates.")
+
+    covariate_data <- NULL
+
+  } else {
+
   list(soil_covs[[1]],
        climate_covs,
        spatial_covs) %>%
     purrr::compact() %>%
     purrr::reduce(dplyr::left_join, by = c("Project", "Sample_ID")) -> covariate_data
+
+
+    }
 
 
   ## ---------------------------------------------------------------------------
@@ -208,12 +226,13 @@ create_project_configurations <- function(project_data,
   ## Step 6: Build Configuration Grid
   ## ---------------------------------------------------------------------------
 
-  tidyr::crossing(model          = models,
-                  transformation = transformations,
-                  preprocessing  = preprocessing,
-                  covariates     = covariate_combos) -> model_configs
+  tidyr::crossing(model             = models,
+                  transformation    = transformations,
+                  preprocessing     = preprocessing,
+                  feature_selection = feature_selection,
+                  covariates        = covariate_combos) -> model_configs
 
-  if (verbose){
+  if (verbose & !is.null(soil_covs)) {
     cli::cli_h2("Prediction Statistics")
     print(soil_covs[[2]])
   }

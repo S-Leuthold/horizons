@@ -9,6 +9,7 @@ create_project_configurations(
   models,
   transformations,
   preprocessing,
+  feature_selection,
   soil_covariates = NULL,
   climate_covariates = NULL,
   spatial_covariates = NULL,
