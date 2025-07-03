@@ -72,6 +72,9 @@ build_ensemble_stack <- function(results_dir,
                                  cv_folds      = 10,
                                  verbose       = TRUE){
 
+  requireNamespace("plsmod", quietly = TRUE)
+
+
   ## ---------------------------------------------------------------------------
   ## Step 0: Validate updates
   ## ---------------------------------------------------------------------------

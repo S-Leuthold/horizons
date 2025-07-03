@@ -65,6 +65,9 @@ tune_blend <- function(model_stack,
                        negative_grid = c(TRUE, FALSE),
                        verbose       = TRUE){
 
+  requireNamespace("plsmod", quietly = TRUE)
+
+
   on.exit(future::plan(sequential), add = TRUE)
 
   tuning_grid <- expand.grid(penalty         = penalty_grid,

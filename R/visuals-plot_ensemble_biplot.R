@@ -35,7 +35,7 @@
 #' @import patchwork
 #' @export
 
-plot_ensemble_results <- function(ensemble_results){
+plot_ensemble_biplot <- function(ensemble_results){
 
 
   ## ---------------------------------------------------------------------------
