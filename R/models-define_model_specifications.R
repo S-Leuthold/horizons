@@ -41,7 +41,7 @@
 #' @importFrom parsnip rand_forest boost_tree linear_reg svm_rbf mars mlp pls cubist_rules set_engine set_mode
 #' @importFrom tune tune
 #' @importFrom cli cli_abort
-
+#' @import plsmod
 #'
 #' @keywords internal
 

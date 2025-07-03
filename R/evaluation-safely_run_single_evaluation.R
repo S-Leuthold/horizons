@@ -76,10 +76,11 @@ safe_run_model <- function(config_row,
   ## Step 1: Setup
   ## ---------------------------------------------------------------------------
 
-  clean_workflow_id(model          = config_row$model,
-                    transformation = config_row$transformation,
-                    preprocessing  = config_row$preprocessing,
-                    covariates     = config_row$covariates) -> config_desc
+  clean_workflow_id(model             = config_row$model,
+                    transformation    = config_row$transformation,
+                    preprocessing     = config_row$preprocessing,
+                    feature_selection = config_row$feature_selection,
+                    covariates        = config_row$covariates) -> config_desc
 
   cli::cli_h2("Running model configuration {row_index}: {config_desc}")
 
@@ -93,6 +94,7 @@ safe_run_model <- function(config_row,
                                                model              = config_row$model,
                                                transformation     = config_row$transformation,
                                                preprocessing      = config_row$preprocessing,
+                                               feature_selection  = config_row$feature_selection,
                                                covariates         = config_row$covariates,
                                                include_covariates = config_row$include_covariates,
                                                pruning            = pruning,

@@ -54,6 +54,7 @@
 clean_workflow_id <- function(model,
                               transformation,
                               preprocessing,
+                              feature_selection,
                               covariates) {
 
   ## ---------------------------------------------------------------------------
@@ -85,6 +86,20 @@ clean_workflow_id <- function(model,
   )
 
   ## ---------------------------------------------------------------------------
+  ## Step 3: Standardize feature selection
+  ## ---------------------------------------------------------------------------
+
+  feature_abbrev <- dplyr::case_when(
+    feature_selection == "pca"         ~ "PCA",
+    feature_selection == "correlation" ~ "Corr",
+    feature_selection == "boruta"      ~ "Boruta",
+    feature_selection == "shap"        ~ "SHAP",
+    feature_selection == "none"        ~ "NoFeatSel",
+    TRUE                               ~ stringr::str_replace_all(feature_selection, "\\s+", "_")
+  )
+
+
+  ## ---------------------------------------------------------------------------
   ## Step 3: Format covariate label
   ## ---------------------------------------------------------------------------
 
@@ -103,6 +118,7 @@ clean_workflow_id <- function(model,
   paste(model,
         transf_abbrev,
         preprocess_abbrev,
+        feature_abbrev,
         covar_abbrev,
         sep = "_")
 }

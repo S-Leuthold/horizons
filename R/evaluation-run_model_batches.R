@@ -92,6 +92,8 @@ run_model_evaluation <- function(config,
                                  cv_folds_final         = 15,
                                  pruning                = FALSE) {
 
+  ## TODO: Add a "include_covariate" lever
+
   cli::cli_h1("Starting full model evaluation across {.val {nrow(config)}} model combinations")
 
   start_time <- Sys.time()

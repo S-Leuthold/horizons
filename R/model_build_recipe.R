@@ -62,6 +62,7 @@
 build_recipe <- function(input_data,
                          spectral_transformation,
                          response_transformation,
+                         feature_selection_method,
                          covariate_selection = NULL,
                          covariate_data      = NULL) {
 
@@ -142,14 +143,21 @@ build_recipe <- function(input_data,
     recipes::update_role_requirements(role = "predictor") -> model_recipe
 
   ## ---------------------------------------------------------------------------
-  ## Step 5: PCA Normalization
+  ## Step 5: Feature Selection
   ## ---------------------------------------------------------------------------
 
-  model_recipe %>%
-    recipes::step_pca(recipes::all_predictors(),
-                      threshold = 0.995,
-                      options   = list(scale. = TRUE,
-                                       center = TRUE)) -> model_recipe
+  switch(as.character(feature_selection_method),
+
+         "pca" = model_recipe %>%
+                  recipes::step_pca(recipes::all_predictors(),
+                                    threshold = 0.995,
+                                    options   = list(scale. = TRUE,
+                                                     center = TRUE)),
+         "correlation" = model_recipe %>%
+                          step_select_correlation(all_predictors(),
+                                                  outcome = "Response"),
+
+         cli::cli_abort("Unsupported {.field feature selection method}: {.val {feature_selection_method}}")) -> model_recipe
 
   ## ---------------------------------------------------------------------------
   ## Step 6: Covariate Additions
