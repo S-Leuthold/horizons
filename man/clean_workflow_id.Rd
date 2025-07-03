@@ -4,7 +4,13 @@
 \alias{clean_workflow_id}
 \title{Construct Compact Workflow Identifiers}
 \usage{
-clean_workflow_id(model, transformation, preprocessing, covariates)
+clean_workflow_id(
+  model,
+  transformation,
+  preprocessing,
+  feature_selection,
+  covariates
+)
 }
 \arguments{
 \item{model}{Character vector of model names. Recommended values include:

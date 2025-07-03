@@ -8,6 +8,7 @@ build_recipe(
   input_data,
   spectral_transformation,
   response_transformation,
+  feature_selection_method,
   covariate_selection = NULL,
   covariate_data = NULL
 )

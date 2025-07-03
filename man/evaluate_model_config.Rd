@@ -11,6 +11,7 @@ evaluate_model_config(
   model,
   transformation,
   preprocessing,
+  feature_selection,
   covariates,
   include_covariates,
   pruning = TRUE,

@@ -85,6 +85,7 @@ evaluate_model_config <- function(input_data,
                                   model,
                                   transformation,
                                   preprocessing,
+                                  feature_selection,
                                   covariates,
                                   include_covariates,
                                   pruning       = TRUE,
@@ -98,10 +99,11 @@ evaluate_model_config <- function(input_data,
 
   stopifnot(variable %in% colnames(input_data))
 
-  wflow_id <- clean_workflow_id(model          = model,
-                                transformation = transformation,
-                                preprocessing  = preprocessing,
-                                covariates     = covariates)
+  wflow_id <- clean_workflow_id(model             = model,
+                                transformation    = transformation,
+                                preprocessing     = preprocessing,
+                                feature_selection = feature_selection,
+                                covariates        = covariates)
 
   input_data <- dplyr::rename(input_data, Response = !!rlang::sym(variable))
   split      <- rsample::initial_split(input_data, prop = 0.8, strata = Response)
@@ -115,11 +117,12 @@ evaluate_model_config <- function(input_data,
 
   cli::cli_alert_success("Building recipe and workflow.")
 
-  safely_execute(expr = {build_recipe(input_data              = train,
-                                      response_transformation = transformation,
-                                      spectral_transformation = preprocessing,
-                                      covariate_selection     = covariates,
-                                      covariate_data          = covariate_data)},
+  safely_execute(expr = {build_recipe(input_data               = train,
+                                      response_transformation  = transformation,
+                                      spectral_transformation  = preprocessing,
+                                      feature_selection_method = feature_selection,
+                                      covariate_selection      = covariates,
+                                      covariate_data           = covariate_data)},
               default_value = NULL,
               error_message = "Failed to build recipe for {wflow_id}") -> recipe_safe
 
