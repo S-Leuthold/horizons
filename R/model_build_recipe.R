@@ -156,6 +156,9 @@ build_recipe <- function(input_data,
          "correlation" = model_recipe %>%
                           step_select_correlation(all_predictors(),
                                                   outcome = "Response"),
+         "boruta" = model_recipe %>%
+                          step_select_boruta(all_predictors(),
+                                             outcome = "Response"),
 
          cli::cli_abort("Unsupported {.field feature selection method}: {.val {feature_selection_method}}")) -> model_recipe
 
