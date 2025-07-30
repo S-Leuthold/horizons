@@ -17,6 +17,10 @@ projects <- project_list("FFAR" = project_entry(spectra_path        = "../../../
                          "MOYS" = project_entry(spectra_path        = "../../../../../../../Desktop/_brain/1_Current_Projects/AI-CLIMATE/2_Data_Processed/MOYS/opus_files/",
                                                 sample_obs          = "../../../../../../../Desktop/_brain/1_Current_Projects/AI-CLIMATE/2_Data_Processed/MOYS/fraction_data.csv",
                                                 file_name_format    = "project_sampleid_fraction_scanid_wellid",
+                                                file_name_delimiter = "_"),
+                         "AONR" = project_entry(spectra_path        = "../../../../../../../Desktop/_brain/1_Current_Projects/AI-CLIMATE/2_Data_Processed/AONR/opus_files/",
+                                                sample_obs          = "../../../../../../../Desktop/_brain/1_Current_Projects/AI-CLIMATE/2_Data_Processed/AONR/speco_data.csv",
+                                                file_name_format    = "project_sampleid_fraction_scanid_wellid",
                                                 file_name_delimiter = "_"))
 
 projects <- project_list("AONR" = project_entry(spectra_path        = "../../../../../../../Desktop/_brain/1_Current_Projects/AI-CLIMATE/2_Data_Processed/AONR/opus_files/",

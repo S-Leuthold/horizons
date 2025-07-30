@@ -65,7 +65,7 @@ fetch_climate_covariates <- function(input_data,
   ## Step 0: Input validation
   ## ---------------------------------------------------------------------------
 
-  cli::cli_progress_step("Starting to fetch climate covatiate data.")
+  cli::cli_progress_step("Starting to fetch climate covariate data.")
 
   required_cols <- c("Longitude", "Latitude")
   missing_cols <- setdiff(required_cols, colnames(input_data))

@@ -80,17 +80,22 @@ build_recipe <- function(input_data,
     stop("Aborting: Sample_ID required.")
   }
 
-  if (is.null(covariate_selection) ||
-      length(covariate_selection) == 0 ||
-      identical(covariate_selection, "No Covariates")) {
+  covariate_selection <- as.character(unlist(covariate_selection))
+
+  if (length(covariate_selection) == 0 ||
+      all(is.na(covariate_selection)) ||
+      all(covariate_selection %in% c("No Covariates", "", "NA"))) {
     covariate_selection <- NULL
-  } else {
+  }
+
+
+  if (!is.null(covariate_selection)) {
+
     if (is.null(covariate_data)) {
       cli::cli_alert_danger("▶ build_recipe: Covariates requested, but no covariate_data supplied.")
       stop("Aborting: Missing covariate_data.")
     }
 
-    covariate_selection <- as.character(unlist(covariate_selection))
     missing_covars <- setdiff(covariate_selection, names(covariate_data))
 
     if (length(missing_covars) > 0) {
@@ -159,6 +164,9 @@ build_recipe <- function(input_data,
          "boruta" = model_recipe %>%
                           step_select_boruta(all_predictors(),
                                              outcome = "Response"),
+         "shap"   = model_recipe %>%
+                          step_select_shap(all_predictors(),
+                                           outcome = "Response"),
 
          cli::cli_abort("Unsupported {.field feature selection method}: {.val {feature_selection_method}}")) -> model_recipe
 

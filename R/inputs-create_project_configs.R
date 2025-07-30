@@ -195,6 +195,8 @@ create_project_configurations <- function(project_data,
 
     }
 
+  covariate_data %>%
+    tidyr::drop_na() -> covariate_data
 
   ## ---------------------------------------------------------------------------
   ## Step 5: Create Covariate Combinations
@@ -220,7 +222,6 @@ create_project_configurations <- function(project_data,
 
     covariate_combos <- list(character(0))
   }
-
 
   ## ---------------------------------------------------------------------------
   ## Step 6: Build Configuration Grid

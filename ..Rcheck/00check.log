@@ -1,0 +1,41 @@
+* using log directory ‘/Users/samleuthold/Library/CloudStorage/Dropbox/1_Current Projects/NSF - CLIMATE AI/3_Code/horizons/..Rcheck’
+* using R version 4.4.1 (2024-06-14)
+* using platform: aarch64-apple-darwin20
+* R was compiled by
+    Apple clang version 14.0.0 (clang-1400.0.29.202)
+    GNU Fortran (GCC) 12.2.0
+* running under: macOS 15.5
+* using session charset: UTF-8
+* using options ‘--no-manual --as-cran’
+* checking for file ‘./DESCRIPTION’ ... OK
+* this is package ‘horizons’ version ‘0.7.5’
+* package encoding: UTF-8
+* checking CRAN incoming feasibility ... [2s/11s] WARNING
+Maintainer: ‘Sam Leuthold <sam.leuthold@colostate.edu>’
+
+New submission
+
+Unknown, possibly misspelled, fields in DESCRIPTION:
+  ‘Remotes’
+
+Strong dependencies not in mainstream repositories:
+  opusreader2
+
+The build time stamp is missing.
+* checking package namespace information ... OK
+* checking package dependencies ... ERROR
+Package suggested but not available for checking: ‘shapviz’
+
+Namespace dependencies missing from DESCRIPTION Imports/Depends entries:
+  'FactoMineR', 'SHAPforxgboost', 'cluster', 'daymetr', 'forcats',
+  'gt', 'hardhat', 'patchwork', 'plsmod', 'pryr', 'rules', 'stacks',
+  'xgboost', 'zoo'
+
+Imports includes 29 non-default packages.
+Importing from so many packages makes the package vulnerable to any of
+them becoming unavailable.  Move as many as possible to Suggests and
+use conditionally.
+
+See section ‘The DESCRIPTION file’ in the ‘Writing R Extensions’
+manual.
+* DONE
