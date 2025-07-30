@@ -34,8 +34,8 @@
 #' @importFrom cli cli_abort cli_alert_info cli_alert_warning
 #' @importFrom glue glue
 #' @importFrom stats cor sd
+#' @importFrom zoo rollmean
 #' @importFrom rlang enquos
-
 #'
 #' @export
 
@@ -103,88 +103,54 @@ step_select_correlation_new <- function(columns,
 #' @export
 prep.step_select_correlation <- function(x, training, info = NULL, ...) {
 
-  ## ---------------------------------------------------------------------------
-  ## Stage 1: Evaluate column predictors
-  ## ---------------------------------------------------------------------------
-
+  ## Stage 1: Evaluate column predictors (No changes)
   col_names <- recipes::recipes_eval_select(x$columns, training, info)
-
   if (!is.character(x$outcome) || length(x$outcome) != 1) {
     cli::cli_abort("The {.arg outcome} must be a single character string.")
   }
   if (!x$outcome %in% names(training)) {
     cli::cli_abort("Outcome column {.val {x$outcome}} not found in training data.")
   }
-
   outcome_vec <- training[[x$outcome]]
   spectra_mat <- as.matrix(training[, col_names])
 
   ## ---------------------------------------------------------------------------
-  ## Stage 2: Compute absolute Spearman correlation for sliding window
+  ## Stage 2: Vectorized correlation and rolling mean
   ## ---------------------------------------------------------------------------
 
-  window_size <- 3
-  n_windows   <-  ncol(spectra_mat) - window_size + 1
+  cli::cli_alert_info("Calculating vectorized correlations...")
 
-  purrr::map_dbl(.x = seq_len(n_windows),
-                 .f = function(i) {
+  # 1. Calculate all correlations in one fast operation
+  all_cor_scores <- stats::cor(spectra_mat, outcome_vec, method = "spearman")
 
-                   window_cols <- spectra_mat[, i:(i + window_size - 1), drop = FALSE]
+  # 2. Use a highly efficient rolling mean function
+  window_size   <- 3
+  window_scores <- zoo::rollmean(x = abs(as.vector(all_cor_scores)), k = window_size)
 
-                   tryCatch({
+  threshold <- mean(window_scores, na.rm = TRUE) + stats::sd(window_scores, na.rm = TRUE)
+  keep_indices <- which(window_scores >= threshold)
 
-                     mean(abs(apply(X      = window_cols,
-                                    MARGIN = 2,
-                                    FUN    = function(col) cor(col, outcome_vec, method = "spearman"))), na.rm = TRUE)
-
-                     }, error = function(e) {
-
-                       NA_real_
-                    })  ->  avg_correlation
-
-                   return(avg_correlation)
-
-                  }) -> window_scores
-
-  ## ---------------------------------------------------------------------------
-  ## Stage 3: Apply the dynamic threshold (mean + 1 sd)
-  ## ---------------------------------------------------------------------------
-
-  keep_cols <- which(window_scores >= (mean(window_scores, na.rm = TRUE) + stats::sd(window_scores, na.rm = TRUE)))
-
-  ## ---------------------------------------------------------------------------
-  ## Stage 4: Extract the wavenumbers that should be reatined.
-  ## ---------------------------------------------------------------------------
-
-  unique(
-    unlist(
-      purrr::map(.x = keep_cols,
-                 .f = ~ col_names[.x:(.x+window_size - 1)]
-                 )
-      )
-    ) -> kept_wavenumbers
-
-  if (length(kept_wavenumbers) > 0.75 * length(col_names)) {
-    cli::cli_alert_info("High selection density: {length(kept_wavenumbers)} of {length(col_names)} wavenumbers retained. Consider revisiting thresholds.")
-  }
-
-  if (length(kept_wavenumbers) == 0) {
-    cli::cli_alert_warning("No wavenumbers selected. Consider adjusting the threshold or window size.")
+  if (length(keep_indices) == 0) {
+    cli::cli_alert_warning("No windows met the threshold. Retaining all predictors.")
     kept_wavenumbers <- col_names
+  } else {
+    ## Stage 4: Extract the wavenumbers that should be retained
+    kept_wavenumbers <- unique(
+      unlist(
+        purrr::map(keep_indices, ~ col_names[.x:(.x + window_size - 1)])
+      )
+    )
   }
 
-  ## ---------------------------------------------------------------------------
-  ## Stage 5: Return the trained object
-  ## ---------------------------------------------------------------------------
-
-  step_select_correlation_new(columns       = x$columns,
-                              outcome       = x$outcome,
-                              role          = x$role,
-                              trained       = TRUE,
-                              selected_vars = kept_wavenumbers,
-                              skip          = x$skip,
-                              id            = x$id)
-
+  step_select_correlation_new(
+    columns       = col_names,
+    outcome       = x$outcome,
+    role          = x$role,
+    trained       = TRUE,
+    selected_vars = kept_wavenumbers,
+    skip          = x$skip,
+    id            = x$id
+  )
 }
 
 ## -----------------------------------------------------------------------------
@@ -198,14 +164,12 @@ bake.step_select_correlation <- function(object, new_data, ...) {
     cli::cli_abort("This step has not been trained yet. Please call `prep()` first.")
   }
 
-  if (!all(object$selected_vars %in% names(new_data))) {
-    cli::cli_abort("Some selected wavenumbers are missing in new_data.")
-  }
+  original_predictors <- object$columns
+  other_cols          <- setdiff(names(new_data), original_predictors)
+  keep_cols           <- c(object$selected_vars, other_cols)
+  final_cols          <- intersect(keep_cols, names(new_data))
 
-  keep_cols <- c(object$selected_vars,
-                 setdiff(names(new_data), object$columns))
-
-  dplyr::select(new_data, dplyr::all_of(keep_cols))
+  new_data[, final_cols, drop = FALSE]
 
 }
 
