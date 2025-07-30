@@ -1,6 +1,8 @@
 Package: horizons
 Title: Spectral Ensemble Modeling and Covariate Prediction for Soil Data
 Version: 0.7.5
+Author: Sam Leuthold [aut, cre]
+Maintainer: Sam Leuthold <sam.leuthold@colostate.edu>
 Authors@R: 
     person(given  = "Sam",
            family = "Leuthold",
@@ -22,10 +24,10 @@ Remotes:
 Imports:
     cli,
     cluster,
-    Cubist,
     dials,
     dplyr,
     FactoMineR,
+    forcats,
     fs,
     furrr,
     future,
@@ -51,7 +53,6 @@ Imports:
     rlang,
     rsample,
     rules,
-    spectrolab,
     stacks,
     stats,
     stringr,
@@ -63,11 +64,25 @@ Imports:
     utils,
     workflows,
     workflowsets,
-    yardstick
+    yardstick,
+    zoo
 Roxygen: list(markdown = TRUE)
 RoxygenNote: 7.3.2
 Suggests: 
-    testthat (>= 3.0.0)
+    testthat (>= 3.0.0),
+    withr,
+    Boruta,
+    Cubist,
+    daymetr,
+    earth,
+    glmnet,
+    kernlab,
+    lightgbm,
+    mixOmics,
+    nnet,
+    SHAPforxgboost,
+    spectrolab,
+    xgboost
 Config/testthat/edition: 3
 Depends: 
     R (>= 2.10)

@@ -105,7 +105,7 @@ prep.step_select_boruta <- function(x, training, info = NULL, ...) {
   ## ---------------------------------------------------------------------------
 
   cluster_spectral_predictors(spectra_mat,
-                              k      = 300,
+                              k      = 150,
                               method = "correlation") -> cluster_result
 
   reduced_mat   <- cluster_result$reduced_mat
@@ -121,7 +121,8 @@ prep.step_select_boruta <- function(x, training, info = NULL, ...) {
   boruta_fit <- Boruta::Boruta(x       = reduced_mat,
                                y       = outcome_vec,
                                doTrace = 0,
-                               maxRuns = 100)
+                               maxRuns = 40,
+                               holdHistory = FALSE)
 
   kept_cluster_vars <- Boruta::getSelectedAttributes(boruta_fit, withTentative = TRUE)
 

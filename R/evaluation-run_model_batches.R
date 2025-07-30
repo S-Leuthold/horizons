@@ -194,16 +194,17 @@ run_model_evaluation <- function(config,
     duration_i  <- difftime(end_time_i, start_time_i, units = "mins")
     time_log[i] <- duration_i
 
-    if(i %in% seq(0, 10000, 25)){
+    if(i %in% seq(0, 10000, 5)){
 
-      mean_duration    <- median(as.numeric(time_log)*60)
+      mean_duration    <- mean(as.numeric(time_log)*60)
       remaining_models <- nrow(config) - i
       eta_mins         <- remaining_models * mean_duration
       eta_time         <- Sys.time() + (eta_mins*60)
       rounded_eta      <- format(eta_time, "%D at %I:%M %p")
 
       cli::cli_alert_success("Model evaluation finished in {.val {round(duration_i, 3)}} minutes.")
-      cli::cli_alert_success("Estimated run completion: {.val {rounded_eta}}")
+      cli::cli_alert_warning("Mean Run Duration: {.val {round(mean_duration, 3)}} minutes.")
+      cli::cli_alert_warning("Estimated run completion: {.val {rounded_eta}}")
 
     } else {
 
