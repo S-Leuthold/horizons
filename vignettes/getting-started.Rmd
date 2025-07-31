@@ -1,0 +1,302 @@
+---
+title: "Getting Started with horizons"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Getting Started with horizons}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  fig.width = 7,
+  fig.height = 5,
+  warning = FALSE,
+  message = FALSE
+)
+```
+
+```{r setup}
+library(horizons)
+library(dplyr)
+library(ggplot2)
+```
+
+# Introduction
+
+The `horizons` package provides a comprehensive framework for analyzing mid-infrared (MIR) soil spectra using machine learning approaches. Built on the `tidymodels` ecosystem, it offers end-to-end workflows for soil property prediction from spectral data.
+
+This vignette walks through the basic workflow of the `horizons` package, from data loading to model evaluation.
+
+## Package Philosophy
+
+`horizons` is designed around four core principles:
+
+1. **Modularity**: Each step in the modeling pipeline is a discrete, testable function
+2. **Reproducibility**: All operations are logged and cacheable for reproducible results
+3. **Scalability**: Built for high-throughput analysis with parallel processing support
+4. **Domain Integration**: Incorporates soil science best practices and established spectroscopy methods
+
+## Workflow Overview
+
+The typical `horizons` workflow consists of four main steps:
+
+1. **Project Setup**: Define data sources and load spectral data
+2. **Configuration Generation**: Create modeling configurations with covariates
+3. **Model Evaluation**: Run batch model training and evaluation
+4. **Ensemble Building**: Combine top models into a stacked ensemble
+
+# Step 1: Project Setup
+
+## Defining Project Structure
+
+The first step is defining your project structure using `project_list()` and `project_entry()`:
+
+```{r project_setup, eval=FALSE}
+# Define project locations
+projects <- project_list(
+  "soil_carbon_study" = project_entry(
+    spectra_path = "./data/opus_files/",
+    sample_obs = "./data/sample_metadata.csv",
+    file_name_format = "project_sampleid_fraction_scanid",
+    file_name_delimiter = "_"
+  )
+)
+```
+
+The `file_name_format` parameter tells horizons how to parse your OPUS file names to extract:
+- `project`: Project identifier
+- `sampleid`: Unique sample identifier  
+- `fraction`: Soil fraction (e.g., bulk, MAOM, POM)
+- `scanid`: Unique scan identifier
+This is modular and will adapt to your samples. 
+
+
+## Loading Project Data
+
+Once your project structure is defined, use `create_project_data()` to load and merge spectral data with sample metadata:
+
+```{r data_loading, eval=FALSE}
+# Load and merge spectral data
+project_data <- create_project_data(
+  projects = projects,
+  variables = c("MAOM_C_g_kg", "pH", "Clay_pct")
+)
+```
+
+This function:
+- Reads all OPUS files from the specified directory
+- Parses filenames to extract metadata
+- Merges with sample-level data
+- Resamples all spectra to a common wavenumber grid
+- Returns a wide-format tibble with spectral and sample data
+
+# Step 2: Configuration Generation
+
+## Creating Model Configurations
+
+The `create_project_configurations()` function generates a comprehensive grid of modeling approaches to test:
+
+```{r config_generation, eval=FALSE}
+project_configs <- create_project_configurations(
+  project_data = project_data,
+  models = c("random_forest", "cubist", "plsr"),
+  transformations = c("No Transformation", "Log Transformation"),
+  preprocessing = c("snv", "deriv1", "snv_deriv1"),
+  soil_covariates = c("pH", "Clay_pct"),
+  climate_covariates = "all",
+  refresh = FALSE,
+  verbose = TRUE
+)
+```
+
+### Available Options
+
+**Models**: 
+- `random_forest`: Random Forest regression
+- `cubist`: Cubist rule-based models
+- `plsr`: Partial Least Squares Regression
+- `xgboost`: Extreme Gradient Boosting
+- `elastic_net`: Elastic Net regression
+- `svm_rbf`: Support Vector Machine with RBF kernel
+
+**Preprocessing**:
+- `snv`: Standard Normal Variate
+- `msc`: Multiplicative Scatter Correction  
+- `deriv1`: First derivative (Savitzky-Golay)
+- `deriv2`: Second derivative (Savitzky-Golay)
+- `snv_deriv1`: SNV followed by first derivative
+- `snv_deriv2`: SNV followed by second derivative
+
+**Transformations**:
+- `"No Transformation"`: Use raw response values
+- `"Log Transformation"`: Natural log transformation
+- `"Square Root Transformation"`: Square root transformation
+- `"Box-Cox Transformation"`: Box-Cox transformation
+
+## Covariate Integration
+
+The configuration step automatically:
+
+1. **Predicts soil covariates** from spectra using pre-trained models on OSSL data
+2. **Fetches climate covariates** from Daymet API based on sample coordinates
+3. **Creates covariate combinations** for testing different predictor sets
+
+### Climate Variables
+
+When `climate_covariates = "all"`, the following variables are computed:
+- Mean Annual Temperature (MAT)
+- Mean Annual Precipitation (MAP)  
+- Potential Evapotranspiration (PET)
+- Aridity Index (AI)
+- Growing Degree Days (GDD)
+- Precipitation Seasonality
+
+# Step 3: Model Evaluation
+
+## Running Batch Evaluation
+
+The `run_model_evaluation()` function trains and evaluates all model configurations:
+
+```{r model_evaluation, eval=FALSE}
+run_model_evaluation(
+  config = project_configs$project_configurations,
+  input_data = project_data,
+  covariate_data = project_configs$covariate_data,
+  variable = "MAOM_C_g_kg",
+  output_dir = "./model_results",
+  grid_size_eval = 10,
+  bayesian_iter_eval = 15,
+  number_models_retained = 10,
+  pruning = TRUE
+)
+```
+
+### Evaluation Process
+
+For each configuration:
+
+1. **Data Splitting**: Creates training/validation/test splits
+2. **Preprocessing**: Applies spectral transformations and response transformations
+3. **Initial Tuning**: Grid search across hyperparameters (`grid_size_eval`)
+4. **Bayesian Optimization**: Refines hyperparameters (`bayesian_iter_eval`)
+5. **Final Evaluation**: Tests on holdout set
+6. **Model Retention**: Saves top performing models
+
+### Output Structure
+
+Results are saved in the specified `output_dir`:
+```
+model_results/
+├── configurations_log.json    # Configuration metadata
+├── evaluation_results.qs      # Evaluation metrics
+├── model_artifacts/           # Saved model objects
+└── error_log.json            # Error logging
+```
+
+# Step 4: Ensemble Building
+
+## Creating Stacked Ensemble
+
+The final step combines top-performing models into a stacked ensemble:
+
+```{r ensemble_building, eval=FALSE}
+final_ensemble <- build_ensemble_stack(
+  results_dir = "./model_results",
+  input_data = project_data,
+  variable = "MAOM_C_g_kg",
+  filter_metric = "rrmse",
+  n_best = 10
+)
+```
+
+### Ensemble Process
+
+1. **Model Selection**: Ranks models by specified metric (`filter_metric`)
+2. **Resampling`: Creates new cross-validation folds for ensemble training
+3. **Candidate Generation**: Generates predictions from top `n_best` models
+4. **Ensemble Blending**: Uses penalized regression to combine predictions
+5. **Final Training**: Trains ensemble on full dataset
+
+## Model Evaluation and Visualization
+
+```{r visualization, eval=FALSE}
+# Create performance summary
+summary_table <- create_summary_table(final_ensemble)
+print(summary_table)
+
+# Plot ensemble results
+plot_ensemble_biplot(final_ensemble) +
+  labs(title = "Ensemble Model Performance",
+       subtitle = "MAOM Carbon Prediction from MIR Spectra")
+
+# Show model contribution
+plot_ensemble_upset(final_ensemble) +
+  labs(title = "Model Contributions to Ensemble")
+```
+
+# Understanding Model Performance
+
+## Evaluation Metrics
+
+`horizons` uses several metrics to evaluate model performance:
+
+- **RRMSE**: Relative Root Mean Square Error (primary metric)
+- **R²**: Coefficient of determination
+- **MAE**: Mean Absolute Error
+- **CCC**: Concordance Correlation Coefficient
+- **RPIQ**: Ratio of Performance to Interquartile Range
+
+## Interpreting Results
+
+**RRMSE Guidelines** (Soil Spectroscopy):
+- < 10%: Excellent prediction
+- 10-15%: Good prediction  
+- 15-20%: Fair prediction
+- > 20%: Poor prediction
+
+**R² Interpretation**:
+- > 0.9: Excellent fit
+- 0.8-0.9: Good fit
+- 0.6-0.8: Moderate fit
+- < 0.6: Poor fit
+
+# Best Practices
+
+## Data Quality
+
+1. **Sample Size**: Minimum 100 samples recommended
+2. **Spectral Quality**: Remove noisy or contaminated spectra
+3. **Reference Data**: Ensure accurate laboratory measurements
+4. **Geographic Coverage**: Include representative sample locations
+
+## Model Selection
+
+1. **Cross-Validation**: Use adequate CV folds (5-10 recommended)
+2. **Feature Selection**: Consider feature selection for high-dimensional data
+3. **Hyperparameter Tuning**: Balance thoroughness with computational cost
+4. **Ensemble Diversity**: Include diverse model types in ensemble
+
+## Computational Considerations
+
+1. **Parallel Processing**: Use multiple cores for faster execution
+2. **Memory Management**: Monitor memory usage for large datasets
+3. **Caching**: Enable caching for reproducible results
+4. **Error Handling**: Review error logs for failed configurations
+
+# Next Steps
+
+This vignette covered the basic workflow. For more advanced topics, see:
+
+- **Advanced Modeling**: Ensemble stacking and model interpretation
+- **Preprocessing**: Custom spectral transformations and feature selection  
+- **Covariate Integration**: Working with soil and climate data
+- **Troubleshooting**: Common issues and solutions
+
+# Session Information
+
+```{r session_info}
+sessionInfo()
+```

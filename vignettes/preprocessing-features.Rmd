@@ -1,0 +1,832 @@
+---
+title: "Spectral Preprocessing and Feature Selection"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Spectral Preprocessing and Feature Selection}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  fig.width = 7,
+  fig.height = 5,
+  warning = FALSE,
+  message = FALSE
+)
+```
+
+```{r setup}
+library(horizons)
+library(dplyr)
+library(ggplot2)
+library(patchwork)
+library(recipes)
+```
+
+# Introduction
+
+Spectral preprocessing and feature selection are critical steps in soil spectroscopy modeling. This vignette provides detailed guidance on:
+
+- Understanding spectral preprocessing methods
+- Choosing appropriate preprocessing techniques
+- Implementing feature selection strategies
+- Creating custom preprocessing workflows
+- Evaluating preprocessing effectiveness
+
+# Understanding Spectral Data
+
+## Characteristics of MIR Spectra
+
+Mid-infrared (MIR) spectra have unique characteristics that influence preprocessing choices:
+
+```{r spectral_characteristics, eval=FALSE}
+# Load example spectral data
+data("sample_spectra")  # Hypothetical data
+
+# Visualize raw spectral characteristics
+plot_spectral_overview <- function(spectral_data) {
+  
+  # Raw spectra plot
+  p1 <- spectral_data %>%
+    select(sample_id, starts_with("X")) %>%
+    slice_sample(n = 50) %>%  # Sample for visualization
+    pivot_longer(cols = starts_with("X"), 
+                names_to = "wavenumber", 
+                values_to = "absorbance") %>%
+    mutate(wavenumber = as.numeric(gsub("X", "", wavenumber))) %>%
+    ggplot(aes(x = wavenumber, y = absorbance, group = sample_id)) +
+    geom_line(alpha = 0.3, color = "steelblue") +
+    scale_x_reverse() +
+    labs(title = "Raw MIR Spectra", 
+         x = "Wavenumber (cm⁻¹)", 
+         y = "Absorbance") +
+    theme_minimal()
+  
+  # Spectral statistics
+  spectral_stats <- spectral_data %>%
+    select(starts_with("X")) %>%
+    summarise(across(everything(), list(
+      mean = ~ mean(.x, na.rm = TRUE),
+      sd = ~ sd(.x, na.rm = TRUE),
+      cv = ~ sd(.x, na.rm = TRUE) / mean(.x, na.rm = TRUE)
+    ))) %>%
+    pivot_longer(everything(), 
+                names_to = c("wavenumber", "statistic"), 
+                names_sep = "_",
+                values_to = "value") %>%
+    mutate(wavenumber = as.numeric(gsub("X", "", wavenumber)))
+  
+  # Coefficient of variation plot
+  p2 <- spectral_stats %>%
+    filter(statistic == "cv") %>%
+    ggplot(aes(x = wavenumber, y = value)) +
+    geom_line(color = "darkred", size = 1) +
+    scale_x_reverse() +
+    labs(title = "Spectral Variability (CV)", 
+         x = "Wavenumber (cm⁻¹)", 
+         y = "Coefficient of Variation") +
+    theme_minimal()
+  
+  return(p1 / p2)
+}
+
+# Create overview
+spectral_overview <- plot_spectral_overview(project_data)
+print(spectral_overview)
+```
+
+## Common Spectral Issues
+
+1. **Baseline Drift**: Systematic shifts in spectral baseline
+2. **Multiplicative Scatter**: Light scattering effects from particle size
+3. **Additive Scatter**: Constant offset in absorbance values
+4. **Noise**: Random variation in spectral measurements
+5. **Outliers**: Anomalous spectral features or measurements
+
+# Preprocessing Methods
+
+## Standard Normal Variate (SNV)
+
+SNV corrects for multiplicative scatter effects by normalizing each spectrum:
+
+```{r snv_demo, eval=FALSE}
+# Demonstrate SNV preprocessing
+demonstrate_snv <- function(spectral_data) {
+  
+  # Apply SNV to subset of spectra
+  demo_spectra <- spectral_data %>%
+    slice_head(n = 10) %>%
+    select(sample_id, starts_with("X"))
+  
+  # Raw spectra
+  raw_long <- demo_spectra %>%
+    pivot_longer(cols = starts_with("X"), 
+                names_to = "wavenumber", 
+                values_to = "absorbance") %>%
+    mutate(wavenumber = as.numeric(gsub("X", "", wavenumber)),
+           type = "Raw")
+  
+  # Apply SNV
+  recipe_snv <- recipe(~ ., data = demo_spectra) %>%
+    step_transform_spectra(starts_with("X"), method = "snv") %>%
+    prep()
+  
+  snv_spectra <- bake(recipe_snv, demo_spectra)
+  
+  # SNV processed spectra
+  snv_long <- snv_spectra %>%
+    pivot_longer(cols = starts_with("X"), 
+                names_to = "wavenumber", 
+                values_to = "absorbance") %>%
+    mutate(wavenumber = as.numeric(gsub("X", "", wavenumber)),
+           type = "SNV")
+  
+  # Combine and plot
+  combined_data <- bind_rows(raw_long, snv_long)
+  
+  plot_comparison <- combined_data %>%
+    ggplot(aes(x = wavenumber, y = absorbance, color = sample_id)) +
+    geom_line(alpha = 0.7) +
+    facet_wrap(~type, scales = "free_y") +
+    scale_x_reverse() +
+    labs(title = "SNV Preprocessing Effect", 
+         x = "Wavenumber (cm⁻¹)", 
+         y = "Absorbance") +
+    theme_minimal() +
+    theme(legend.position = "none")
+  
+  return(plot_comparison)
+}
+
+# Create SNV demonstration
+snv_demo_plot <- demonstrate_snv(project_data)
+print(snv_demo_plot)
+```
+
+## Multiplicative Scatter Correction (MSC)
+
+MSC corrects scatter effects using a reference spectrum:
+
+```{r msc_explanation, eval=FALSE}
+# Understanding MSC parameters
+explain_msc <- function(spectral_data) {
+  
+  # Calculate mean spectrum (typical reference)
+  mean_spectrum <- spectral_data %>%
+    select(starts_with("X")) %>%
+    summarise(across(everything(), mean, na.rm = TRUE))
+  
+  # Show MSC correction for one spectrum
+  sample_spectrum <- spectral_data %>%
+    slice_head(n = 1) %>%
+    select(starts_with("X")) %>%
+    as.numeric()
+  
+  reference_spectrum <- as.numeric(mean_spectrum)
+  
+  # Linear regression: sample = a + b * reference
+  msc_model <- lm(sample_spectrum ~ reference_spectrum)
+  
+  # MSC corrected spectrum
+  corrected_spectrum <- (sample_spectrum - coef(msc_model)[1]) / coef(msc_model)[2]
+  
+  # Visualization
+  comparison_data <- data.frame(
+    wavenumber = as.numeric(gsub("X", "", names(mean_spectrum))),
+    reference = reference_spectrum,
+    original = sample_spectrum,
+    corrected = corrected_spectrum
+  ) %>%
+    pivot_longer(cols = c(reference, original, corrected), 
+                names_to = "spectrum_type", 
+                values_to = "absorbance")
+  
+  msc_plot <- comparison_data %>%
+    ggplot(aes(x = wavenumber, y = absorbance, color = spectrum_type)) +
+    geom_line(size = 1, alpha = 0.8) +
+    scale_x_reverse() +
+    labs(title = "MSC Preprocessing", 
+         subtitle = paste("Slope:", round(coef(msc_model)[2], 3), 
+                         "Intercept:", round(coef(msc_model)[1], 3)),
+         x = "Wavenumber (cm⁻¹)", 
+         y = "Absorbance",
+         color = "Spectrum Type") +
+    theme_minimal()
+  
+  return(msc_plot)
+}
+```
+
+## Savitzky-Golay Derivatives
+
+Derivatives enhance spectral features and reduce baseline effects:
+
+```{r derivatives_demo, eval=FALSE}
+# Demonstrate derivative preprocessing
+demonstrate_derivatives <- function(spectral_data) {
+  
+  # Take one representative spectrum
+  demo_spectrum <- spectral_data %>%
+    slice_head(n = 1) %>%
+    select(starts_with("X"))
+  
+  # Create recipes for different derivative orders
+  recipe_raw <- recipe(~ ., data = demo_spectrum) %>%
+    prep()
+  
+  recipe_deriv1 <- recipe(~ ., data = demo_spectrum) %>%
+    step_transform_spectra(starts_with("X"), method = "deriv1") %>%
+    prep()
+  
+  recipe_deriv2 <- recipe(~ ., data = demo_spectrum) %>%
+    step_transform_spectra(starts_with("X"), method = "deriv2") %>%
+    prep()
+  
+  # Apply preprocessing
+  raw_data <- bake(recipe_raw, demo_spectrum)
+  deriv1_data <- bake(recipe_deriv1, demo_spectrum)
+  deriv2_data <- bake(recipe_deriv2, demo_spectrum)
+  
+  # Combine for plotting
+  plot_data <- bind_rows(
+    raw_data %>% mutate(type = "Raw"),
+    deriv1_data %>% mutate(type = "1st Derivative"),
+    deriv2_data %>% mutate(type = "2nd Derivative")
+  ) %>%
+    pivot_longer(cols = starts_with("X"), 
+                names_to = "wavenumber", 
+                values_to = "absorbance") %>%
+    mutate(wavenumber = as.numeric(gsub("X", "", wavenumber)))
+  
+  # Create comparison plot
+  derivative_plot <- plot_data %>%
+    ggplot(aes(x = wavenumber, y = absorbance)) +
+    geom_line(color = "steelblue", size = 0.8) +
+    facet_wrap(~type, scales = "free_y", ncol = 1) +
+    scale_x_reverse() +
+    labs(title = "Derivative Preprocessing Effects", 
+         x = "Wavenumber (cm⁻¹)", 
+         y = "Absorbance / Derivative") +
+    theme_minimal()
+  
+  return(derivative_plot)
+}
+
+# Create derivative demonstration
+deriv_demo_plot <- demonstrate_derivatives(project_data)
+print(deriv_demo_plot)
+```
+
+# Feature Selection Methods
+
+## Correlation-Based Selection
+
+Remove highly correlated spectral variables to reduce redundancy:
+
+```{r correlation_selection, eval=FALSE}
+# Demonstrate correlation-based feature selection
+analyze_spectral_correlation <- function(spectral_data, threshold = 0.95) {
+  
+  # Extract spectral variables
+  spectral_vars <- spectral_data %>%
+    select(starts_with("X"))
+  
+  # Calculate correlation matrix
+  cor_matrix <- cor(spectral_vars, use = "complete.obs")
+  
+  # Identify highly correlated variables
+  high_cor_pairs <- which(abs(cor_matrix) > threshold & cor_matrix != 1, 
+                         arr.ind = TRUE)
+  
+  # Visualization of correlation structure
+  cor_plot <- cor_matrix[1:50, 1:50] %>%  # Subset for visualization
+    as.data.frame() %>%
+    mutate(var1 = rownames(.)) %>%
+    pivot_longer(cols = -var1, names_to = "var2", values_to = "correlation") %>%
+    ggplot(aes(x = var1, y = var2, fill = correlation)) +
+    geom_tile() +
+    scale_fill_gradient2(low = "blue", high = "red", mid = "white", 
+                        midpoint = 0, limit = c(-1, 1)) +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1),
+          axis.text.y = element_text(size = 6)) +
+    labs(title = "Spectral Variable Correlation", 
+         x = "Wavenumber", y = "Wavenumber")
+  
+  # Apply correlation filter
+  recipe_cor <- recipe(~ ., data = spectral_data) %>%
+    step_select_correlation(starts_with("X"), threshold = threshold) %>%
+    prep()
+  
+  # Summary of feature reduction
+  original_features <- sum(grepl("^X", names(spectral_data)))
+  selected_features <- sum(grepl("^X", names(bake(recipe_cor, spectral_data))))
+  
+  cli::cli_inform("Correlation filtering: {original_features} → {selected_features} features")
+  cli::cli_inform("Reduction: {round((1 - selected_features/original_features) * 100, 1)}%")
+  
+  return(list(
+    correlation_plot = cor_plot,
+    recipe = recipe_cor,
+    reduction_summary = list(
+      original = original_features,
+      selected = selected_features,
+      reduction_pct = (1 - selected_features/original_features) * 100
+    )
+  ))
+}
+
+# Apply correlation analysis
+cor_analysis <- analyze_spectral_correlation(project_data, threshold = 0.95)
+print(cor_analysis$correlation_plot)
+```
+
+## Boruta Feature Selection
+
+Boruta uses random forest importance to identify relevant features:
+
+```{r boruta_selection, eval=FALSE}
+# Demonstrate Boruta feature selection
+analyze_boruta_selection <- function(spectral_data, response_var, max_runs = 100) {
+  
+  # Prepare data
+  model_data <- spectral_data %>%
+    select(all_of(response_var), starts_with("X")) %>%
+    na.omit()
+  
+  # Create recipe with Boruta selection
+  recipe_boruta <- recipe(model_data, 
+                         formula = as.formula(paste(response_var, "~ ."))) %>%
+    step_select_boruta(starts_with("X"), 
+                      outcome = response_var,
+                      max_runs = max_runs,
+                      confidence_level = 0.99) %>%
+    prep()
+  
+  # Apply selection
+  selected_data <- bake(recipe_boruta, model_data)
+  
+  # Extract selection results
+  boruta_step <- recipe_boruta$steps[[1]]
+  selected_vars <- boruta_step$selected_variables
+  
+  # Visualization of selected wavenumbers
+  selected_wavenumbers <- as.numeric(gsub("X", "", selected_vars))
+  
+  selection_plot <- data.frame(
+    wavenumber = as.numeric(gsub("X", "", names(model_data)[grepl("^X", names(model_data))])),
+    selected = names(model_data)[grepl("^X", names(model_data))] %in% selected_vars
+  ) %>%
+    ggplot(aes(x = wavenumber, y = as.numeric(selected), color = selected)) +
+    geom_point(alpha = 0.7) +
+    scale_x_reverse() +
+    scale_color_manual(values = c("FALSE" = "lightblue", "TRUE" = "darkred")) +
+    labs(title = "Boruta Feature Selection Results", 
+         subtitle = paste("Selected:", length(selected_vars), "of", 
+                         sum(grepl("^X", names(model_data))), "features"),
+         x = "Wavenumber (cm⁻¹)", 
+         y = "Selected",
+         color = "Selected") +
+    theme_minimal()
+  
+  # Feature importance plot (if available)
+  if (!is.null(boruta_step$importance_scores)) {
+    importance_data <- data.frame(
+      variable = names(boruta_step$importance_scores),
+      importance = boruta_step$importance_scores,
+      wavenumber = as.numeric(gsub("X", "", names(boruta_step$importance_scores)))
+    ) %>%
+      arrange(desc(importance)) %>%
+      slice_head(n = 50)  # Top 50 for visualization
+    
+    importance_plot <- importance_data %>%
+      ggplot(aes(x = wavenumber, y = importance)) +
+      geom_point(color = "darkgreen", alpha = 0.7) +
+      scale_x_reverse() +
+      labs(title = "Top Feature Importance Scores", 
+           x = "Wavenumber (cm⁻¹)", 
+           y = "Importance Score") +
+      theme_minimal()
+    
+    combined_plot <- selection_plot / importance_plot
+  } else {
+    combined_plot <- selection_plot
+  }
+  
+  return(list(
+    selection_plot = combined_plot,
+    selected_variables = selected_vars,
+    recipe = recipe_boruta
+  ))
+}
+
+# Apply Boruta analysis
+boruta_analysis <- analyze_boruta_selection(project_data, "MAOM_C_g_kg")
+print(boruta_analysis$selection_plot)
+```
+
+## SHAP-Based Selection
+
+SHAP values provide model-agnostic feature importance:
+
+```{r shap_selection, eval=FALSE}
+# Note: This demonstrates the corrected SHAP implementation
+# (addressing the issue identified in the audit)
+
+implement_true_shap_selection <- function(spectral_data, response_var, n_features = 100) {
+  
+  # Prepare data
+  model_data <- spectral_data %>%
+    select(all_of(response_var), starts_with("X")) %>%
+    na.omit()
+  
+  # Train XGBoost model for SHAP calculation
+  library(xgboost)
+  library(SHAPforxgboost)
+  
+  # Create DMatrix
+  X <- model_data %>% select(starts_with("X")) %>% as.matrix()
+  y <- model_data[[response_var]]
+  
+  dtrain <- xgb.DMatrix(data = X, label = y)
+  
+  # Train model
+  xgb_model <- xgboost(
+    data = dtrain,
+    nrounds = 100,
+    objective = "reg:squarederror",
+    verbose = FALSE
+  )
+  
+  # Calculate SHAP values (corrected implementation)
+  shap_values <- shap.values(xgb_model = xgb_model, X_train = X)
+  
+  # Calculate mean absolute SHAP values for feature importance
+  shap_importance <- shap_values$mean_shap_score
+  names(shap_importance) <- colnames(X)
+  
+  # Select top features based on SHAP importance
+  top_features <- names(sort(abs(shap_importance), decreasing = TRUE)[1:n_features])
+  
+  # Visualization
+  shap_plot_data <- data.frame(
+    variable = names(shap_importance),
+    importance = abs(shap_importance),
+    wavenumber = as.numeric(gsub("X", "", names(shap_importance))),
+    selected = names(shap_importance) %in% top_features
+  )
+  
+  shap_plot <- shap_plot_data %>%
+    ggplot(aes(x = wavenumber, y = importance, color = selected)) +
+    geom_point(alpha = 0.7) +
+    scale_x_reverse() +
+    scale_color_manual(values = c("FALSE" = "lightblue", "TRUE" = "darkred")) +
+    labs(title = "SHAP-Based Feature Selection", 
+         subtitle = paste("Selected:", n_features, "features"),
+         x = "Wavenumber (cm⁻¹)", 
+         y = "Mean |SHAP Value|",
+         color = "Selected") +
+    theme_minimal()
+  
+  return(list(
+    plot = shap_plot,
+    selected_features = top_features,
+    shap_importance = shap_importance
+  ))
+}
+
+# Apply SHAP analysis (corrected version)
+shap_analysis <- implement_true_shap_selection(project_data, "MAOM_C_g_kg")
+print(shap_analysis$plot)
+```
+
+# Custom Preprocessing Workflows
+
+## Combining Multiple Methods
+
+Create sophisticated preprocessing pipelines:
+
+```{r custom_workflows, eval=FALSE}
+# Advanced preprocessing workflow
+create_advanced_preprocessing <- function(data, response_var) {
+  
+  # Define multiple preprocessing approaches
+  preprocessing_recipes <- list(
+    
+    # Minimal preprocessing
+    "minimal" = recipe(data, formula = as.formula(paste(response_var, "~ ."))) %>%
+      step_transform_spectra(starts_with("X"), method = "snv"),
+    
+    # Standard approach
+    "standard" = recipe(data, formula = as.formula(paste(response_var, "~ ."))) %>%
+      step_transform_spectra(starts_with("X"), method = "snv_deriv1") %>%
+      step_select_correlation(starts_with("X"), threshold = 0.95),
+    
+    # Advanced approach
+    "advanced" = recipe(data, formula = as.formula(paste(response_var, "~ ."))) %>%
+      step_transform_spectra(starts_with("X"), method = "snv_deriv1") %>%
+      step_select_correlation(starts_with("X"), threshold = 0.98) %>%
+      step_select_boruta(starts_with("X"), outcome = response_var) %>%
+      recipes::step_pca(starts_with("X"), threshold = 0.99),
+    
+    # Feature selection focus
+    "feature_focused" = recipe(data, formula = as.formula(paste(response_var, "~ ."))) %>%
+      step_transform_spectra(starts_with("X"), method = "snv") %>%
+      step_select_shap(starts_with("X"), outcome = response_var, n_features = 50),
+    
+    # Dimensionality reduction focus
+    "dim_reduction" = recipe(data, formula = as.formula(paste(response_var, "~ ."))) %>%
+      step_transform_spectra(starts_with("X"), method = "msc_deriv1") %>%
+      recipes::step_pca(starts_with("X"), threshold = 0.95, prefix = "PC")
+  )
+  
+  return(preprocessing_recipes)
+}
+
+# Create and compare preprocessing approaches
+preprocessing_recipes <- create_advanced_preprocessing(project_data, "MAOM_C_g_kg")
+
+# Prep all recipes
+prepped_recipes <- map(preprocessing_recipes, prep)
+
+# Compare feature numbers after preprocessing
+feature_comparison <- map_dfr(prepped_recipes, function(recipe) {
+  baked_data <- bake(recipe, project_data)
+  n_spectral <- sum(grepl("^X|^PC", names(baked_data)))
+  n_total <- ncol(baked_data) - 1  # Exclude response
+  
+  data.frame(
+    spectral_features = n_spectral,
+    total_features = n_total
+  )
+}, .id = "preprocessing_method")
+
+print(feature_comparison)
+```
+
+## Spectral Region Selection
+
+Focus on specific spectral regions for targeted analysis:
+
+```{r spectral_regions, eval=FALSE}
+# Define important spectral regions for soil analysis
+define_spectral_regions <- function() {
+  
+  regions <- list(
+    # Organic matter regions
+    "organic" = c(2800, 3000, 1650, 1750),  # C-H, C=O stretches
+    
+    # Clay mineral regions  
+    "clay" = c(900, 1200, 1400, 1500),      # Si-O, Al-OH bends
+    
+    # Carbonate regions
+    "carbonate" = c(1350, 1450, 2500, 2600), # CO3 stretches
+    
+    # Quartz regions
+    "quartz" = c(1050, 1100, 780, 800),     # Si-O stretches
+    
+    # Water regions
+    "water" = c(1600, 1700, 3200, 3600),    # O-H bends and stretches
+    
+    # Full fingerprint region
+    "fingerprint" = c(600, 1800)            # Complex overlapping bands
+  )
+  
+  return(regions)
+}
+
+# Create region-specific preprocessing
+create_region_specific_recipe <- function(data, response_var, region_name) {
+  
+  regions <- define_spectral_regions()
+  region_range <- regions[[region_name]]
+  
+  # Select variables in the specified range
+  if (length(region_range) == 2) {
+    # Single range
+    selected_vars <- names(data)[grepl("^X", names(data))]
+    wavenumbers <- as.numeric(gsub("X", "", selected_vars))
+    region_vars <- selected_vars[wavenumbers >= min(region_range) & 
+                                wavenumbers <= max(region_range)]
+  } else {
+    # Multiple ranges
+    selected_vars <- names(data)[grepl("^X", names(data))]
+    wavenumbers <- as.numeric(gsub("X", "", selected_vars))
+    region_vars <- c()
+    
+    for (i in seq(1, length(region_range), by = 2)) {
+      range_vars <- selected_vars[wavenumbers >= region_range[i] & 
+                                 wavenumbers <= region_range[i + 1]]
+      region_vars <- c(region_vars, range_vars)
+    }
+  }
+  
+  # Create recipe focusing on selected region
+  recipe_region <- recipe(data, formula = as.formula(paste(response_var, "~ ."))) %>%
+    recipes::step_rm(-all_of(c(response_var, region_vars))) %>%
+    step_transform_spectra(all_of(region_vars), method = "snv_deriv1") %>%
+    step_select_correlation(all_of(region_vars), threshold = 0.95)
+  
+  return(recipe_region)
+}
+
+# Example: Focus on organic matter region
+organic_recipe <- create_region_specific_recipe(project_data, "MAOM_C_g_kg", "organic")
+organic_prepped <- prep(organic_recipe)
+organic_data <- bake(organic_prepped, project_data)
+
+cli::cli_inform("Organic region features: {sum(grepl('^X', names(organic_data)))}")
+```
+
+# Evaluating Preprocessing Effectiveness
+
+## Cross-Validation Comparison
+
+Compare preprocessing methods using cross-validation:
+
+```{r preprocessing_evaluation, eval=FALSE}
+# Evaluate preprocessing methods
+evaluate_preprocessing_methods <- function(data, response_var, methods_list) {
+  
+  # Setup cross-validation
+  cv_folds <- rsample::vfold_cv(data, v = 5, strata = response_var)
+  
+  # Evaluate each preprocessing method
+  results <- map_dfr(names(methods_list), function(method_name) {
+    
+    method_recipe <- methods_list[[method_name]]
+    
+    # Simple linear model for quick evaluation
+    workflow <- workflows::workflow() %>%
+      workflows::add_recipe(method_recipe) %>%
+      workflows::add_model(parsnip::linear_reg())
+    
+    # Cross-validation
+    cv_results <- tune::fit_resamples(
+      workflow,
+      resamples = cv_folds,
+      metrics = yardstick::metric_set(yardstick::rmse, yardstick::rsq, rrmse)
+    )
+    
+    # Extract metrics
+    metrics <- tune::collect_metrics(cv_results)
+    
+    metrics %>%
+      select(.metric, mean, std_err) %>%
+      mutate(preprocessing_method = method_name)
+    
+  }, .id = "method_id")
+  
+  return(results)
+}
+
+# Compare preprocessing methods
+method_comparison <- evaluate_preprocessing_methods(
+  project_data, 
+  "MAOM_C_g_kg", 
+  preprocessing_recipes
+)
+
+# Visualize comparison
+comparison_plot <- method_comparison %>%
+  filter(.metric %in% c("rmse", "rsq")) %>%
+  ggplot(aes(x = preprocessing_method, y = mean, fill = preprocessing_method)) +
+  geom_col(alpha = 0.7) +
+  geom_errorbar(aes(ymin = mean - std_err, ymax = mean + std_err), 
+                width = 0.2) +
+  facet_wrap(~.metric, scales = "free_y") +
+  coord_flip() +
+  labs(title = "Preprocessing Method Comparison", 
+       x = "Preprocessing Method", 
+       y = "Cross-Validation Performance") +
+  theme_minimal() +
+  guides(fill = "none")
+
+print(comparison_plot)
+```
+
+## Feature Stability Analysis
+
+Assess feature selection stability across resampling:
+
+```{r stability_analysis, eval=FALSE}
+# Analyze feature selection stability
+analyze_feature_stability <- function(data, response_var, n_bootstrap = 50) {
+  
+  # Bootstrap sampling
+  bootstrap_samples <- rsample::bootstraps(data, times = n_bootstrap)
+  
+  # Apply feature selection to each bootstrap sample
+  feature_selection_results <- map(bootstrap_samples$splits, function(split) {
+    
+    train_data <- rsample::analysis(split)
+    
+    # Apply Boruta selection
+    recipe_boruta <- recipe(train_data, 
+                           formula = as.formula(paste(response_var, "~ ."))) %>%
+      step_select_boruta(starts_with("X"), outcome = response_var) %>%
+      prep()
+    
+    # Extract selected features
+    selected_features <- recipe_boruta$steps[[1]]$selected_variables
+    
+    return(selected_features)
+  })
+  
+  # Calculate selection frequency for each feature
+  all_features <- names(data)[grepl("^X", names(data))]
+  
+  selection_frequency <- map_dbl(all_features, function(feature) {
+    sum(map_lgl(feature_selection_results, ~ feature %in% .x)) / n_bootstrap
+  })
+  
+  names(selection_frequency) <- all_features
+  
+  # Visualize stability
+  stability_data <- data.frame(
+    variable = names(selection_frequency),
+    frequency = selection_frequency,
+    wavenumber = as.numeric(gsub("X", "", names(selection_frequency)))
+  )
+  
+  stability_plot <- stability_data %>%
+    ggplot(aes(x = wavenumber, y = frequency)) +
+    geom_point(alpha = 0.6, color = "steelblue") +
+    geom_hline(yintercept = 0.5, linetype = "dashed", color = "red") +
+    scale_x_reverse() +
+    labs(title = "Feature Selection Stability", 
+         subtitle = paste("Based on", n_bootstrap, "bootstrap samples"),
+         x = "Wavenumber (cm⁻¹)", 
+         y = "Selection Frequency") +
+    theme_minimal()
+  
+  return(list(
+    stability_plot = stability_plot,
+    selection_frequency = selection_frequency,
+    stable_features = names(selection_frequency)[selection_frequency > 0.5]
+  ))
+}
+
+# Analyze stability
+stability_analysis <- analyze_feature_stability(project_data, "MAOM_C_g_kg")
+print(stability_analysis$stability_plot)
+
+cli::cli_inform("Stable features (>50% selection): {length(stability_analysis$stable_features)}")
+```
+
+# Best Practices and Recommendations
+
+## Preprocessing Guidelines
+
+1. **Start Simple**: Begin with basic SNV or MSC preprocessing
+2. **Consider Data Characteristics**: Choose methods based on your specific data issues
+3. **Validate Effects**: Always validate preprocessing effectiveness using cross-validation
+4. **Document Choices**: Record preprocessing decisions and rationale
+5. **Test Combinations**: Evaluate combinations of preprocessing methods
+
+## Feature Selection Strategy
+
+1. **Multiple Methods**: Use multiple feature selection approaches
+2. **Stability Testing**: Assess feature selection stability across resampling
+3. **Domain Knowledge**: Incorporate spectroscopic knowledge of important regions
+4. **Computational Balance**: Balance thoroughness with computational efficiency
+5. **Validation**: Always validate feature selection using independent data
+
+## Common Pitfalls
+
+1. **Over-preprocessing**: Excessive preprocessing can remove useful information
+2. **Data Leakage**: Ensure preprocessing is applied within cross-validation folds
+3. **Fixed Thresholds**: Avoid hard-coded thresholds without validation
+4. **Ignoring Interactions**: Consider that preprocessing methods can interact
+5. **Insufficient Validation**: Always validate preprocessing choices
+
+# Summary
+
+This vignette covered:
+
+- Understanding spectral data characteristics and common issues
+- Implementing standard preprocessing methods (SNV, MSC, derivatives)
+- Applying various feature selection techniques (correlation, Boruta, SHAP)
+- Creating custom preprocessing workflows
+- Evaluating preprocessing effectiveness through cross-validation
+- Best practices for preprocessing and feature selection
+
+Key takeaways:
+- Preprocessing is data-dependent and should be validated empirically
+- Feature selection can significantly improve model performance and interpretability
+- Stability analysis helps identify robust feature selection strategies
+- Multiple preprocessing approaches should be tested and compared
+
+For more information, see the other vignettes:
+- **Getting Started**: Basic workflow overview
+- **Advanced Modeling**: Ensemble methods and model interpretation
+- **Covariate Integration**: Working with soil and climate data
+
+# Session Information
+
+```{r session_info}
+sessionInfo()
+```

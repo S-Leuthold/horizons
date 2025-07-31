@@ -5,7 +5,8 @@
 <img src="man/figures/logo.png" align="right" width="140"/>
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE.md)
-[![R-CMD-check](https://img.shields.io/badge/R--CMD--check-failing-red)](https://github.com/S-Leuthold/horizons/actions)
+[![R-CMD-check](https://img.shields.io/badge/R--CMD--check-passing-green)](https://github.com/S-Leuthold/horizons/actions)
+[![Codecov test coverage](https://codecov.io/gh/S-Leuthold/horizons/branch/main/graph/badge.svg)](https://codecov.io/gh/S-Leuthold/horizons?branch=main)
 ![Lifecycle: experimental](https://img.shields.io/badge/lifecycle-experimental-orange.svg)
 
 ---

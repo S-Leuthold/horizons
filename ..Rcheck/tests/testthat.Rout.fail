@@ -1,0 +1,895 @@
+
+R version 4.4.1 (2024-06-14) -- "Race for Your Life"
+Copyright (C) 2024 The R Foundation for Statistical Computing
+Platform: aarch64-apple-darwin20
+
+R is free software and comes with ABSOLUTELY NO WARRANTY.
+You are welcome to redistribute it under certain conditions.
+Type 'license()' or 'licence()' for distribution details.
+
+R is a collaborative project with many contributors.
+Type 'contributors()' for more information and
+'citation()' on how to cite R or R packages in publications.
+
+Type 'demo()' for some demos, 'help()' for on-line help, or
+'help.start()' for an HTML browser interface to help.
+Type 'q()' to quit R.
+
+> library(testthat)
+> library(horizons)
+horizons v0.7.5 loaded. Please flag bugs on Github (www.github.com/S-Leuthold/horizons)
+> 
+> test_check("horizons")
+x ▶ build_recipe: Covariates requested, but no covariate_data supplied.
+! Row 1 failed in process_spectra(): Unknown preprocessing type: invalid_method
+! Row 2 failed in process_spectra(): Unknown preprocessing type: invalid_method
+! Row 3 failed in process_spectra(): Unknown preprocessing type: invalid_method
+[ FAIL 68 | WARN 2 | SKIP 3 | PASS 254 ]
+
+══ Skipped tests (3) ═══════════════════════════════════════════════════════════
+• shapviz cannot be loaded (3): 'test-step_select_shap.R:39:3',
+  'test-step_select_shap.R:195:3', 'test-step_select_shap.R:212:3'
+
+══ Failed tests ════════════════════════════════════════════════════════════════
+── Error ('test-build_recipe.R:6:3'): build_recipe creates valid recipe with basic parameters ──
+<vctrs_error_subscript_oob/vctrs_error_subscript/rlang_error/error/condition>
+Error in `recipes::update_role(., Project, new_role = "metadata")`: Can't select columns that don't exist.
+x Column `Project` doesn't exist.
+Backtrace:
+     ▆
+  1. ├─horizons:::build_recipe(...) at test-build_recipe.R:6:3
+  2. │ └─... %>% ...
+  3. ├─recipes::update_role_requirements(., role = "metadata", bake = TRUE)
+  4. ├─recipes::update_role_requirements(., role = "id", bake = TRUE)
+  5. ├─recipes::update_role(., Project, new_role = "metadata")
+  6. │ └─recipes::recipes_eval_select(terms, data, info, check_case_weights = FALSE)
+  7. │   └─tidyselect::eval_select(...)
+  8. │     └─tidyselect:::eval_select_impl(...)
+  9. │       ├─tidyselect:::with_subscript_errors(...)
+ 10. │       │ └─base::withCallingHandlers(...)
+ 11. │       └─tidyselect:::vars_select_eval(...)
+ 12. │         └─tidyselect:::walk_data_tree(expr, data_mask, context_mask)
+ 13. │           └─tidyselect:::eval_c(expr, data_mask, context_mask)
+ 14. │             └─tidyselect:::reduce_sels(node, data_mask, context_mask, init = init)
+ 15. │               └─tidyselect:::walk_data_tree(new, data_mask, context_mask)
+ 16. │                 └─tidyselect:::as_indices_sel_impl(...)
+ 17. │                   └─tidyselect:::as_indices_impl(...)
+ 18. │                     └─tidyselect:::chr_as_locations(x, vars, call = call, arg = arg)
+ 19. │                       └─vctrs::vec_as_location(...)
+ 20. └─vctrs (local) `<fn>`()
+ 21.   └─vctrs:::stop_subscript_oob(...)
+ 22.     └─vctrs:::stop_subscript(...)
+ 23.       └─rlang::abort(...)
+── Error ('test-build_recipe.R:28:5'): build_recipe handles all spectral transformations ──
+<vctrs_error_subscript_oob/vctrs_error_subscript/rlang_error/error/condition>
+Error in `recipes::update_role(., Project, new_role = "metadata")`: Can't select columns that don't exist.
+x Column `Project` doesn't exist.
+Backtrace:
+     ▆
+  1. ├─horizons:::build_recipe(...) at test-build_recipe.R:28:5
+  2. │ └─... %>% ...
+  3. ├─recipes::update_role_requirements(., role = "metadata", bake = TRUE)
+  4. ├─recipes::update_role_requirements(., role = "id", bake = TRUE)
+  5. ├─recipes::update_role(., Project, new_role = "metadata")
+  6. │ └─recipes::recipes_eval_select(terms, data, info, check_case_weights = FALSE)
+  7. │   └─tidyselect::eval_select(...)
+  8. │     └─tidyselect:::eval_select_impl(...)
+  9. │       ├─tidyselect:::with_subscript_errors(...)
+ 10. │       │ └─base::withCallingHandlers(...)
+ 11. │       └─tidyselect:::vars_select_eval(...)
+ 12. │         └─tidyselect:::walk_data_tree(expr, data_mask, context_mask)
+ 13. │           └─tidyselect:::eval_c(expr, data_mask, context_mask)
+ 14. │             └─tidyselect:::reduce_sels(node, data_mask, context_mask, init = init)
+ 15. │               └─tidyselect:::walk_data_tree(new, data_mask, context_mask)
+ 16. │                 └─tidyselect:::as_indices_sel_impl(...)
+ 17. │                   └─tidyselect:::as_indices_impl(...)
+ 18. │                     └─tidyselect:::chr_as_locations(x, vars, call = call, arg = arg)
+ 19. │                       └─vctrs::vec_as_location(...)
+ 20. └─vctrs (local) `<fn>`()
+ 21.   └─vctrs:::stop_subscript_oob(...)
+ 22.     └─vctrs:::stop_subscript(...)
+ 23.       └─rlang::abort(...)
+── Error ('test-build_recipe.R:50:5'): build_recipe handles all response transformations ──
+<vctrs_error_subscript_oob/vctrs_error_subscript/rlang_error/error/condition>
+Error in `recipes::update_role(., Project, new_role = "metadata")`: Can't select columns that don't exist.
+x Column `Project` doesn't exist.
+Backtrace:
+     ▆
+  1. ├─horizons:::build_recipe(...) at test-build_recipe.R:50:5
+  2. │ └─... %>% ...
+  3. ├─recipes::update_role_requirements(., role = "metadata", bake = TRUE)
+  4. ├─recipes::update_role_requirements(., role = "id", bake = TRUE)
+  5. ├─recipes::update_role(., Project, new_role = "metadata")
+  6. │ └─recipes::recipes_eval_select(terms, data, info, check_case_weights = FALSE)
+  7. │   └─tidyselect::eval_select(...)
+  8. │     └─tidyselect:::eval_select_impl(...)
+  9. │       ├─tidyselect:::with_subscript_errors(...)
+ 10. │       │ └─base::withCallingHandlers(...)
+ 11. │       └─tidyselect:::vars_select_eval(...)
+ 12. │         └─tidyselect:::walk_data_tree(expr, data_mask, context_mask)
+ 13. │           └─tidyselect:::eval_c(expr, data_mask, context_mask)
+ 14. │             └─tidyselect:::reduce_sels(node, data_mask, context_mask, init = init)
+ 15. │               └─tidyselect:::walk_data_tree(new, data_mask, context_mask)
+ 16. │                 └─tidyselect:::as_indices_sel_impl(...)
+ 17. │                   └─tidyselect:::as_indices_impl(...)
+ 18. │                     └─tidyselect:::chr_as_locations(x, vars, call = call, arg = arg)
+ 19. │                       └─vctrs::vec_as_location(...)
+ 20. └─vctrs (local) `<fn>`()
+ 21.   └─vctrs:::stop_subscript_oob(...)
+ 22.     └─vctrs:::stop_subscript(...)
+ 23.       └─rlang::abort(...)
+── Error ('test-build_recipe.R:84:5'): build_recipe handles feature selection methods ──
+<vctrs_error_subscript_oob/vctrs_error_subscript/rlang_error/error/condition>
+Error in `recipes::update_role(., Project, new_role = "metadata")`: Can't select columns that don't exist.
+x Column `Project` doesn't exist.
+Backtrace:
+     ▆
+  1. ├─horizons:::build_recipe(...) at test-build_recipe.R:84:5
+  2. │ └─... %>% ...
+  3. ├─recipes::update_role_requirements(., role = "metadata", bake = TRUE)
+  4. ├─recipes::update_role_requirements(., role = "id", bake = TRUE)
+  5. ├─recipes::update_role(., Project, new_role = "metadata")
+  6. │ └─recipes::recipes_eval_select(terms, data, info, check_case_weights = FALSE)
+  7. │   └─tidyselect::eval_select(...)
+  8. │     └─tidyselect:::eval_select_impl(...)
+  9. │       ├─tidyselect:::with_subscript_errors(...)
+ 10. │       │ └─base::withCallingHandlers(...)
+ 11. │       └─tidyselect:::vars_select_eval(...)
+ 12. │         └─tidyselect:::walk_data_tree(expr, data_mask, context_mask)
+ 13. │           └─tidyselect:::eval_c(expr, data_mask, context_mask)
+ 14. │             └─tidyselect:::reduce_sels(node, data_mask, context_mask, init = init)
+ 15. │               └─tidyselect:::walk_data_tree(new, data_mask, context_mask)
+ 16. │                 └─tidyselect:::as_indices_sel_impl(...)
+ 17. │                   └─tidyselect:::as_indices_impl(...)
+ 18. │                     └─tidyselect:::chr_as_locations(x, vars, call = call, arg = arg)
+ 19. │                       └─vctrs::vec_as_location(...)
+ 20. └─vctrs (local) `<fn>`()
+ 21.   └─vctrs:::stop_subscript_oob(...)
+ 22.     └─vctrs:::stop_subscript(...)
+ 23.       └─rlang::abort(...)
+── Error ('test-build_recipe.R:108:3'): build_recipe integrates covariates correctly ──
+<vctrs_error_subscript_oob/vctrs_error_subscript/rlang_error/error/condition>
+Error in `recipes::update_role(., Project, new_role = "metadata")`: Can't select columns that don't exist.
+x Column `Project` doesn't exist.
+Backtrace:
+     ▆
+  1. ├─horizons:::build_recipe(...) at test-build_recipe.R:108:3
+  2. │ └─... %>% ...
+  3. ├─recipes::update_role_requirements(., role = "metadata", bake = TRUE)
+  4. ├─recipes::update_role_requirements(., role = "id", bake = TRUE)
+  5. ├─recipes::update_role(., Project, new_role = "metadata")
+  6. │ └─recipes::recipes_eval_select(terms, data, info, check_case_weights = FALSE)
+  7. │   └─tidyselect::eval_select(...)
+  8. │     └─tidyselect:::eval_select_impl(...)
+  9. │       ├─tidyselect:::with_subscript_errors(...)
+ 10. │       │ └─base::withCallingHandlers(...)
+ 11. │       └─tidyselect:::vars_select_eval(...)
+ 12. │         └─tidyselect:::walk_data_tree(expr, data_mask, context_mask)
+ 13. │           └─tidyselect:::eval_c(expr, data_mask, context_mask)
+ 14. │             └─tidyselect:::reduce_sels(node, data_mask, context_mask, init = init)
+ 15. │               └─tidyselect:::walk_data_tree(new, data_mask, context_mask)
+ 16. │                 └─tidyselect:::as_indices_sel_impl(...)
+ 17. │                   └─tidyselect:::as_indices_impl(...)
+ 18. │                     └─tidyselect:::chr_as_locations(x, vars, call = call, arg = arg)
+ 19. │                       └─vctrs::vec_as_location(...)
+ 20. └─vctrs (local) `<fn>`()
+ 21.   └─vctrs:::stop_subscript_oob(...)
+ 22.     └─vctrs:::stop_subscript(...)
+ 23.       └─rlang::abort(...)
+── Error ('test-build_recipe.R:138:5'): build_recipe handles 'No Covariates' specification ──
+<vctrs_error_subscript_oob/vctrs_error_subscript/rlang_error/error/condition>
+Error in `recipes::update_role(., Project, new_role = "metadata")`: Can't select columns that don't exist.
+x Column `Project` doesn't exist.
+Backtrace:
+     ▆
+  1. ├─horizons:::build_recipe(...) at test-build_recipe.R:138:5
+  2. │ └─... %>% ...
+  3. ├─recipes::update_role_requirements(., role = "metadata", bake = TRUE)
+  4. ├─recipes::update_role_requirements(., role = "id", bake = TRUE)
+  5. ├─recipes::update_role(., Project, new_role = "metadata")
+  6. │ └─recipes::recipes_eval_select(terms, data, info, check_case_weights = FALSE)
+  7. │   └─tidyselect::eval_select(...)
+  8. │     └─tidyselect:::eval_select_impl(...)
+  9. │       ├─tidyselect:::with_subscript_errors(...)
+ 10. │       │ └─base::withCallingHandlers(...)
+ 11. │       └─tidyselect:::vars_select_eval(...)
+ 12. │         └─tidyselect:::walk_data_tree(expr, data_mask, context_mask)
+ 13. │           └─tidyselect:::eval_c(expr, data_mask, context_mask)
+ 14. │             └─tidyselect:::reduce_sels(node, data_mask, context_mask, init = init)
+ 15. │               └─tidyselect:::walk_data_tree(new, data_mask, context_mask)
+ 16. │                 └─tidyselect:::as_indices_sel_impl(...)
+ 17. │                   └─tidyselect:::as_indices_impl(...)
+ 18. │                     └─tidyselect:::chr_as_locations(x, vars, call = call, arg = arg)
+ 19. │                       └─vctrs::vec_as_location(...)
+ 20. └─vctrs (local) `<fn>`()
+ 21.   └─vctrs:::stop_subscript_oob(...)
+ 22.     └─vctrs:::stop_subscript(...)
+ 23.       └─rlang::abort(...)
+── Error ('test-build_recipe.R:156:3'): build_recipe includes PCA step ─────────
+<vctrs_error_subscript_oob/vctrs_error_subscript/rlang_error/error/condition>
+Error in `recipes::update_role(., Project, new_role = "metadata")`: Can't select columns that don't exist.
+x Column `Project` doesn't exist.
+Backtrace:
+     ▆
+  1. ├─horizons:::build_recipe(...) at test-build_recipe.R:156:3
+  2. │ └─... %>% ...
+  3. ├─recipes::update_role_requirements(., role = "metadata", bake = TRUE)
+  4. ├─recipes::update_role_requirements(., role = "id", bake = TRUE)
+  5. ├─recipes::update_role(., Project, new_role = "metadata")
+  6. │ └─recipes::recipes_eval_select(terms, data, info, check_case_weights = FALSE)
+  7. │   └─tidyselect::eval_select(...)
+  8. │     └─tidyselect:::eval_select_impl(...)
+  9. │       ├─tidyselect:::with_subscript_errors(...)
+ 10. │       │ └─base::withCallingHandlers(...)
+ 11. │       └─tidyselect:::vars_select_eval(...)
+ 12. │         └─tidyselect:::walk_data_tree(expr, data_mask, context_mask)
+ 13. │           └─tidyselect:::eval_c(expr, data_mask, context_mask)
+ 14. │             └─tidyselect:::reduce_sels(node, data_mask, context_mask, init = init)
+ 15. │               └─tidyselect:::walk_data_tree(new, data_mask, context_mask)
+ 16. │                 └─tidyselect:::as_indices_sel_impl(...)
+ 17. │                   └─tidyselect:::as_indices_impl(...)
+ 18. │                     └─tidyselect:::chr_as_locations(x, vars, call = call, arg = arg)
+ 19. │                       └─vctrs::vec_as_location(...)
+ 20. └─vctrs (local) `<fn>`()
+ 21.   └─vctrs:::stop_subscript_oob(...)
+ 22.     └─vctrs:::stop_subscript(...)
+ 23.       └─rlang::abort(...)
+── Error ('test-build_recipe.R:173:3'): build_recipe validates input data ──────
+<packageNotFoundError/error/condition>
+Error in `loadNamespace(x)`: there is no package called 'li'
+Backtrace:
+     ▆
+  1. ├─testthat::expect_error(...) at test-build_recipe.R:173:3
+  2. │ └─testthat:::expect_condition_matching(...)
+  3. │   └─testthat:::quasi_capture(...)
+  4. │     ├─testthat (local) .capture(...)
+  5. │     │ └─base::withCallingHandlers(...)
+  6. │     └─rlang::eval_bare(quo_get_expr(.quo), quo_get_env(.quo))
+  7. ├─horizons:::build_recipe(...)
+  8. └─base::loadNamespace(x)
+  9.   └─base::withRestarts(stop(cond), retry_loadNamespace = function() NULL)
+ 10.     └─base (local) withOneRestart(expr, restarts[[1L]])
+ 11.       └─base (local) doWithOneRestart(return(expr), restart)
+── Error ('test-build_recipe.R:202:3'): build_recipe validates covariate parameters ──
+Error in `build_recipe(input_data = test_data, spectral_transformation = "raw", 
+    response_transformation = "No Transformation", feature_selection_method = "none", 
+    covariate_selection = c("Clay", "pH"), covariate_data = NULL)`: Aborting: Missing covariate_data.
+Backtrace:
+    ▆
+ 1. ├─testthat::expect_error(...) at test-build_recipe.R:202:3
+ 2. │ └─testthat:::expect_condition_matching(...)
+ 3. │   └─testthat:::quasi_capture(...)
+ 4. │     ├─testthat (local) .capture(...)
+ 5. │     │ └─base::withCallingHandlers(...)
+ 6. │     └─rlang::eval_bare(quo_get_expr(.quo), quo_get_env(.quo))
+ 7. └─horizons:::build_recipe(...)
+── Failure ('test-build_recipe.R:253:3'): build_recipe creates complete pipeline ──
+`recipe` inherits from 'recipe' not 'step'.
+Backtrace:
+    ▆
+ 1. └─horizons:::expect_valid_recipe(...) at test-build_recipe.R:253:3
+ 2.   └─testthat::expect_s3_class(recipe, "step") at tests/testthat/helper-expectations.R:25:3
+── Failure ('test-build_recipe.R:278:3'): build_recipe creates complete pipeline ──
+`pca_idx` (`actual`) not equal to length(step_classes) (`expected`).
+
+  `actual`:  
+`expected`: 4
+── Error ('test-build_recipe.R:291:3'): build_recipe works with real fixture data ──
+Error in `build_recipe(input_data = test_data, spectral_transformation = "snv_deriv1", 
+    response_transformation = "Square Root Transformation", feature_selection_method = "none", 
+    covariate_selection = c("Clay", "SOC"), covariate_data = covariate_data)`: Unsupported feature selection method: "none"
+Backtrace:
+    ▆
+ 1. └─horizons:::build_recipe(...) at test-build_recipe.R:291:3
+ 2.   └─cli::cli_abort("Unsupported {.field feature selection method}: {.val {feature_selection_method}}")
+ 3.     └─rlang::abort(...)
+── Error ('test-build_recipe.R:331:3'): build_recipe handles edge cases ────────
+<vctrs_error_subscript_oob/vctrs_error_subscript/rlang_error/error/condition>
+Error in `recipes::update_role(., Project, new_role = "metadata")`: Can't select columns that don't exist.
+x Column `Project` doesn't exist.
+Backtrace:
+     ▆
+  1. ├─horizons:::build_recipe(...) at test-build_recipe.R:331:3
+  2. │ └─... %>% ...
+  3. ├─recipes::update_role_requirements(., role = "metadata", bake = TRUE)
+  4. ├─recipes::update_role_requirements(., role = "id", bake = TRUE)
+  5. ├─recipes::update_role(., Project, new_role = "metadata")
+  6. │ └─recipes::recipes_eval_select(terms, data, info, check_case_weights = FALSE)
+  7. │   └─tidyselect::eval_select(...)
+  8. │     └─tidyselect:::eval_select_impl(...)
+  9. │       ├─tidyselect:::with_subscript_errors(...)
+ 10. │       │ └─base::withCallingHandlers(...)
+ 11. │       └─tidyselect:::vars_select_eval(...)
+ 12. │         └─tidyselect:::walk_data_tree(expr, data_mask, context_mask)
+ 13. │           └─tidyselect:::eval_c(expr, data_mask, context_mask)
+ 14. │             └─tidyselect:::reduce_sels(node, data_mask, context_mask, init = init)
+ 15. │               └─tidyselect:::walk_data_tree(new, data_mask, context_mask)
+ 16. │                 └─tidyselect:::as_indices_sel_impl(...)
+ 17. │                   └─tidyselect:::as_indices_impl(...)
+ 18. │                     └─tidyselect:::chr_as_locations(x, vars, call = call, arg = arg)
+ 19. │                       └─vctrs::vec_as_location(...)
+ 20. └─vctrs (local) `<fn>`()
+ 21.   └─vctrs:::stop_subscript_oob(...)
+ 22.     └─vctrs:::stop_subscript(...)
+ 23.       └─rlang::abort(...)
+── Error ('test-integration-pipeline.R:10:3'): complete modeling pipeline works end-to-end ──
+<vctrs_error_subscript_oob/vctrs_error_subscript/rlang_error/error/condition>
+Error in `recipes::update_role(., Project, new_role = "metadata")`: Can't select columns that don't exist.
+x Column `Project` doesn't exist.
+Backtrace:
+     ▆
+  1. ├─horizons:::build_recipe(...) at test-integration-pipeline.R:10:3
+  2. │ └─... %>% ...
+  3. ├─recipes::update_role_requirements(., role = "metadata", bake = TRUE)
+  4. ├─recipes::update_role_requirements(., role = "id", bake = TRUE)
+  5. ├─recipes::update_role(., Project, new_role = "metadata")
+  6. │ └─recipes::recipes_eval_select(terms, data, info, check_case_weights = FALSE)
+  7. │   └─tidyselect::eval_select(...)
+  8. │     └─tidyselect:::eval_select_impl(...)
+  9. │       ├─tidyselect:::with_subscript_errors(...)
+ 10. │       │ └─base::withCallingHandlers(...)
+ 11. │       └─tidyselect:::vars_select_eval(...)
+ 12. │         └─tidyselect:::walk_data_tree(expr, data_mask, context_mask)
+ 13. │           └─tidyselect:::eval_c(expr, data_mask, context_mask)
+ 14. │             └─tidyselect:::reduce_sels(node, data_mask, context_mask, init = init)
+ 15. │               └─tidyselect:::walk_data_tree(new, data_mask, context_mask)
+ 16. │                 └─tidyselect:::as_indices_sel_impl(...)
+ 17. │                   └─tidyselect:::as_indices_impl(...)
+ 18. │                     └─tidyselect:::chr_as_locations(x, vars, call = call, arg = arg)
+ 19. │                       └─vctrs::vec_as_location(...)
+ 20. └─vctrs (local) `<fn>`()
+ 21.   └─vctrs:::stop_subscript_oob(...)
+ 22.     └─vctrs:::stop_subscript(...)
+ 23.       └─rlang::abort(...)
+── Error ('test-integration-pipeline.R:75:5'): pipeline handles different preprocessing combinations ──
+<vctrs_error_subscript_oob/vctrs_error_subscript/rlang_error/error/condition>
+Error in `recipes::update_role(., Project, new_role = "metadata")`: Can't select columns that don't exist.
+x Column `Project` doesn't exist.
+Backtrace:
+     ▆
+  1. ├─horizons:::build_recipe(...) at test-integration-pipeline.R:75:5
+  2. │ └─... %>% ...
+  3. ├─recipes::update_role_requirements(., role = "metadata", bake = TRUE)
+  4. ├─recipes::update_role_requirements(., role = "id", bake = TRUE)
+  5. ├─recipes::update_role(., Project, new_role = "metadata")
+  6. │ └─recipes::recipes_eval_select(terms, data, info, check_case_weights = FALSE)
+  7. │   └─tidyselect::eval_select(...)
+  8. │     └─tidyselect:::eval_select_impl(...)
+  9. │       ├─tidyselect:::with_subscript_errors(...)
+ 10. │       │ └─base::withCallingHandlers(...)
+ 11. │       └─tidyselect:::vars_select_eval(...)
+ 12. │         └─tidyselect:::walk_data_tree(expr, data_mask, context_mask)
+ 13. │           └─tidyselect:::eval_c(expr, data_mask, context_mask)
+ 14. │             └─tidyselect:::reduce_sels(node, data_mask, context_mask, init = init)
+ 15. │               └─tidyselect:::walk_data_tree(new, data_mask, context_mask)
+ 16. │                 └─tidyselect:::as_indices_sel_impl(...)
+ 17. │                   └─tidyselect:::as_indices_impl(...)
+ 18. │                     └─tidyselect:::chr_as_locations(x, vars, call = call, arg = arg)
+ 19. │                       └─vctrs::vec_as_location(...)
+ 20. └─vctrs (local) `<fn>`()
+ 21.   └─vctrs:::stop_subscript_oob(...)
+ 22.     └─vctrs:::stop_subscript(...)
+ 23.       └─rlang::abort(...)
+── Error ('test-integration-pipeline.R:108:3'): pipeline works with real fixture data ──
+Error in `build_recipe(input_data = test_data_subset, spectral_transformation = "snv", 
+    response_transformation = "No Transformation", feature_selection_method = "none", 
+    covariate_selection = c("Clay"), covariate_data = covariate_data)`: Unsupported feature selection method: "none"
+Backtrace:
+    ▆
+ 1. └─horizons:::build_recipe(...) at test-integration-pipeline.R:108:3
+ 2.   └─cli::cli_abort("Unsupported {.field feature selection method}: {.val {feature_selection_method}}")
+ 3.     └─rlang::abort(...)
+── Error ('test-integration-pipeline.R:143:3'): pipeline handles edge cases gracefully ──
+<vctrs_error_subscript_oob/vctrs_error_subscript/rlang_error/error/condition>
+Error in `recipes::update_role(., Project, new_role = "metadata")`: Can't select columns that don't exist.
+x Column `Project` doesn't exist.
+Backtrace:
+     ▆
+  1. ├─horizons:::build_recipe(...) at test-integration-pipeline.R:143:3
+  2. │ └─... %>% ...
+  3. ├─recipes::update_role_requirements(., role = "metadata", bake = TRUE)
+  4. ├─recipes::update_role_requirements(., role = "id", bake = TRUE)
+  5. ├─recipes::update_role(., Project, new_role = "metadata")
+  6. │ └─recipes::recipes_eval_select(terms, data, info, check_case_weights = FALSE)
+  7. │   └─tidyselect::eval_select(...)
+  8. │     └─tidyselect:::eval_select_impl(...)
+  9. │       ├─tidyselect:::with_subscript_errors(...)
+ 10. │       │ └─base::withCallingHandlers(...)
+ 11. │       └─tidyselect:::vars_select_eval(...)
+ 12. │         └─tidyselect:::walk_data_tree(expr, data_mask, context_mask)
+ 13. │           └─tidyselect:::eval_c(expr, data_mask, context_mask)
+ 14. │             └─tidyselect:::reduce_sels(node, data_mask, context_mask, init = init)
+ 15. │               └─tidyselect:::walk_data_tree(new, data_mask, context_mask)
+ 16. │                 └─tidyselect:::as_indices_sel_impl(...)
+ 17. │                   └─tidyselect:::as_indices_impl(...)
+ 18. │                     └─tidyselect:::chr_as_locations(x, vars, call = call, arg = arg)
+ 19. │                       └─vctrs::vec_as_location(...)
+ 20. └─vctrs (local) `<fn>`()
+ 21.   └─vctrs:::stop_subscript_oob(...)
+ 22.     └─vctrs:::stop_subscript(...)
+ 23.       └─rlang::abort(...)
+── Error ('test-integration-pipeline.R:166:3'): pipeline preserves sample tracking through all steps ──
+<vctrs_error_subscript_oob/vctrs_error_subscript/rlang_error/error/condition>
+Error in `recipes::update_role(., Project, new_role = "metadata")`: Can't select columns that don't exist.
+x Column `Project` doesn't exist.
+Backtrace:
+     ▆
+  1. ├─horizons:::build_recipe(...) at test-integration-pipeline.R:166:3
+  2. │ └─... %>% ...
+  3. ├─recipes::update_role_requirements(., role = "metadata", bake = TRUE)
+  4. ├─recipes::update_role_requirements(., role = "id", bake = TRUE)
+  5. ├─recipes::update_role(., Project, new_role = "metadata")
+  6. │ └─recipes::recipes_eval_select(terms, data, info, check_case_weights = FALSE)
+  7. │   └─tidyselect::eval_select(...)
+  8. │     └─tidyselect:::eval_select_impl(...)
+  9. │       ├─tidyselect:::with_subscript_errors(...)
+ 10. │       │ └─base::withCallingHandlers(...)
+ 11. │       └─tidyselect:::vars_select_eval(...)
+ 12. │         └─tidyselect:::walk_data_tree(expr, data_mask, context_mask)
+ 13. │           └─tidyselect:::eval_c(expr, data_mask, context_mask)
+ 14. │             └─tidyselect:::reduce_sels(node, data_mask, context_mask, init = init)
+ 15. │               └─tidyselect:::walk_data_tree(new, data_mask, context_mask)
+ 16. │                 └─tidyselect:::as_indices_sel_impl(...)
+ 17. │                   └─tidyselect:::as_indices_impl(...)
+ 18. │                     └─tidyselect:::chr_as_locations(x, vars, call = call, arg = arg)
+ 19. │                       └─vctrs::vec_as_location(...)
+ 20. └─vctrs (local) `<fn>`()
+ 21.   └─vctrs:::stop_subscript_oob(...)
+ 22.     └─vctrs:::stop_subscript(...)
+ 23.       └─rlang::abort(...)
+── Error ('test-integration-pipeline.R:192:3'): pipeline handles missing values appropriately ──
+<vctrs_error_subscript_oob/vctrs_error_subscript/rlang_error/error/condition>
+Error in `recipes::update_role(., Project, new_role = "metadata")`: Can't select columns that don't exist.
+x Column `Project` doesn't exist.
+Backtrace:
+     ▆
+  1. ├─horizons:::build_recipe(...) at test-integration-pipeline.R:192:3
+  2. │ └─... %>% ...
+  3. ├─recipes::update_role_requirements(., role = "metadata", bake = TRUE)
+  4. ├─recipes::update_role_requirements(., role = "id", bake = TRUE)
+  5. ├─recipes::update_role(., Project, new_role = "metadata")
+  6. │ └─recipes::recipes_eval_select(terms, data, info, check_case_weights = FALSE)
+  7. │   └─tidyselect::eval_select(...)
+  8. │     └─tidyselect:::eval_select_impl(...)
+  9. │       ├─tidyselect:::with_subscript_errors(...)
+ 10. │       │ └─base::withCallingHandlers(...)
+ 11. │       └─tidyselect:::vars_select_eval(...)
+ 12. │         └─tidyselect:::walk_data_tree(expr, data_mask, context_mask)
+ 13. │           └─tidyselect:::eval_c(expr, data_mask, context_mask)
+ 14. │             └─tidyselect:::reduce_sels(node, data_mask, context_mask, init = init)
+ 15. │               └─tidyselect:::walk_data_tree(new, data_mask, context_mask)
+ 16. │                 └─tidyselect:::as_indices_sel_impl(...)
+ 17. │                   └─tidyselect:::as_indices_impl(...)
+ 18. │                     └─tidyselect:::chr_as_locations(x, vars, call = call, arg = arg)
+ 19. │                       └─vctrs::vec_as_location(...)
+ 20. └─vctrs (local) `<fn>`()
+ 21.   └─vctrs:::stop_subscript_oob(...)
+ 22.     └─vctrs:::stop_subscript(...)
+ 23.       └─rlang::abort(...)
+── Error ('test-integration-pipeline.R:211:3'): pipeline works with multiple models ──
+<vctrs_error_subscript_oob/vctrs_error_subscript/rlang_error/error/condition>
+Error in `recipes::update_role(., Project, new_role = "metadata")`: Can't select columns that don't exist.
+x Column `Project` doesn't exist.
+Backtrace:
+     ▆
+  1. ├─horizons:::build_recipe(...) at test-integration-pipeline.R:211:3
+  2. │ └─... %>% ...
+  3. ├─recipes::update_role_requirements(., role = "metadata", bake = TRUE)
+  4. ├─recipes::update_role_requirements(., role = "id", bake = TRUE)
+  5. ├─recipes::update_role(., Project, new_role = "metadata")
+  6. │ └─recipes::recipes_eval_select(terms, data, info, check_case_weights = FALSE)
+  7. │   └─tidyselect::eval_select(...)
+  8. │     └─tidyselect:::eval_select_impl(...)
+  9. │       ├─tidyselect:::with_subscript_errors(...)
+ 10. │       │ └─base::withCallingHandlers(...)
+ 11. │       └─tidyselect:::vars_select_eval(...)
+ 12. │         └─tidyselect:::walk_data_tree(expr, data_mask, context_mask)
+ 13. │           └─tidyselect:::eval_c(expr, data_mask, context_mask)
+ 14. │             └─tidyselect:::reduce_sels(node, data_mask, context_mask, init = init)
+ 15. │               └─tidyselect:::walk_data_tree(new, data_mask, context_mask)
+ 16. │                 └─tidyselect:::as_indices_sel_impl(...)
+ 17. │                   └─tidyselect:::as_indices_impl(...)
+ 18. │                     └─tidyselect:::chr_as_locations(x, vars, call = call, arg = arg)
+ 19. │                       └─vctrs::vec_as_location(...)
+ 20. └─vctrs (local) `<fn>`()
+ 21.   └─vctrs:::stop_subscript_oob(...)
+ 22.     └─vctrs:::stop_subscript(...)
+ 23.       └─rlang::abort(...)
+── Error ('test-integration-pipeline.R:252:3'): pipeline maintains reproducibility ──
+<vctrs_error_subscript_oob/vctrs_error_subscript/rlang_error/error/condition>
+Error in `recipes::update_role(., Project, new_role = "metadata")`: Can't select columns that don't exist.
+x Column `Project` doesn't exist.
+Backtrace:
+     ▆
+  1. ├─horizons:::build_recipe(...) at test-integration-pipeline.R:252:3
+  2. │ └─... %>% ...
+  3. ├─recipes::update_role_requirements(., role = "metadata", bake = TRUE)
+  4. ├─recipes::update_role_requirements(., role = "id", bake = TRUE)
+  5. ├─recipes::update_role(., Project, new_role = "metadata")
+  6. │ └─recipes::recipes_eval_select(terms, data, info, check_case_weights = FALSE)
+  7. │   └─tidyselect::eval_select(...)
+  8. │     └─tidyselect:::eval_select_impl(...)
+  9. │       ├─tidyselect:::with_subscript_errors(...)
+ 10. │       │ └─base::withCallingHandlers(...)
+ 11. │       └─tidyselect:::vars_select_eval(...)
+ 12. │         └─tidyselect:::walk_data_tree(expr, data_mask, context_mask)
+ 13. │           └─tidyselect:::eval_c(expr, data_mask, context_mask)
+ 14. │             └─tidyselect:::reduce_sels(node, data_mask, context_mask, init = init)
+ 15. │               └─tidyselect:::walk_data_tree(new, data_mask, context_mask)
+ 16. │                 └─tidyselect:::as_indices_sel_impl(...)
+ 17. │                   └─tidyselect:::as_indices_impl(...)
+ 18. │                     └─tidyselect:::chr_as_locations(x, vars, call = call, arg = arg)
+ 19. │                       └─vctrs::vec_as_location(...)
+ 20. └─vctrs (local) `<fn>`()
+ 21.   └─vctrs:::stop_subscript_oob(...)
+ 22.     └─vctrs:::stop_subscript(...)
+ 23.       └─rlang::abort(...)
+── Error ('test-integration-pipeline.R:282:3'): pipeline handles train/test split correctly ──
+<vctrs_error_subscript_oob/vctrs_error_subscript/rlang_error/error/condition>
+Error in `recipes::update_role(., Project, new_role = "metadata")`: Can't select columns that don't exist.
+x Column `Project` doesn't exist.
+Backtrace:
+     ▆
+  1. ├─horizons:::build_recipe(...) at test-integration-pipeline.R:282:3
+  2. │ └─... %>% ...
+  3. ├─recipes::update_role_requirements(., role = "metadata", bake = TRUE)
+  4. ├─recipes::update_role_requirements(., role = "id", bake = TRUE)
+  5. ├─recipes::update_role(., Project, new_role = "metadata")
+  6. │ └─recipes::recipes_eval_select(terms, data, info, check_case_weights = FALSE)
+  7. │   └─tidyselect::eval_select(...)
+  8. │     └─tidyselect:::eval_select_impl(...)
+  9. │       ├─tidyselect:::with_subscript_errors(...)
+ 10. │       │ └─base::withCallingHandlers(...)
+ 11. │       └─tidyselect:::vars_select_eval(...)
+ 12. │         └─tidyselect:::walk_data_tree(expr, data_mask, context_mask)
+ 13. │           └─tidyselect:::eval_c(expr, data_mask, context_mask)
+ 14. │             └─tidyselect:::reduce_sels(node, data_mask, context_mask, init = init)
+ 15. │               └─tidyselect:::walk_data_tree(new, data_mask, context_mask)
+ 16. │                 └─tidyselect:::as_indices_sel_impl(...)
+ 17. │                   └─tidyselect:::as_indices_impl(...)
+ 18. │                     └─tidyselect:::chr_as_locations(x, vars, call = call, arg = arg)
+ 19. │                       └─vctrs::vec_as_location(...)
+ 20. └─vctrs (local) `<fn>`()
+ 21.   └─vctrs:::stop_subscript_oob(...)
+ 22.     └─vctrs:::stop_subscript(...)
+ 23.       └─rlang::abort(...)
+── Error ('test-model_specifications.R:246:3'): define_model_specifications can be used in workflows ──
+Error: 'is_empty_preprocessor' is not an exported object from 'namespace:workflows'
+Backtrace:
+    ▆
+ 1. └─testthat::expect_false(workflows::is_empty_preprocessor(wf)) at test-model_specifications.R:246:3
+ 2.   └─testthat::quasi_label(enquo(object), label, arg = "object")
+ 3.     └─rlang::eval_bare(expr, quo_get_env(quo))
+── Failure ('test-model_specifications.R:279:3'): define_model_specifications tune parameters work with tuning ──
+"mtry" %in% names(tune_params) is not TRUE
+
+`actual`:   FALSE
+`expected`: TRUE 
+── Failure ('test-model_specifications.R:280:3'): define_model_specifications tune parameters work with tuning ──
+"trees" %in% names(tune_params) is not TRUE
+
+`actual`:   FALSE
+`expected`: TRUE 
+── Failure ('test-model_specifications.R:281:3'): define_model_specifications tune parameters work with tuning ──
+"min_n" %in% names(tune_params) is not TRUE
+
+`actual`:   FALSE
+`expected`: TRUE 
+── Error ('test-step_add_covariates.R:8:3'): step_add_covariates can be added to recipe ──
+Error in `rlang::ensym(sample_id_column)`: Can't convert to a symbol.
+Backtrace:
+    ▆
+ 1. ├─... %>% step_add_covariates(covariate_data = covariate_data) at test-step_add_covariates.R:8:3
+ 2. ├─horizons::step_add_covariates(., covariate_data = covariate_data)
+ 3. │ ├─rlang::as_string(rlang::ensym(sample_id_column))
+ 4. │ │ └─rlang::is_string(x)
+ 5. │ └─rlang::ensym(sample_id_column)
+ 6. └─rlang::abort(message = message)
+── Error ('test-step_add_covariates.R:23:3'): step_add_covariates joins data correctly ──
+Error in `rlang::ensym(sample_id_column)`: Can't convert to a symbol.
+Backtrace:
+    ▆
+ 1. ├─... %>% step_add_covariates(covariate_data = covariate_data) at test-step_add_covariates.R:23:3
+ 2. ├─horizons::step_add_covariates(., covariate_data = covariate_data)
+ 3. │ ├─rlang::as_string(rlang::ensym(sample_id_column))
+ 4. │ │ └─rlang::is_string(x)
+ 5. │ └─rlang::ensym(sample_id_column)
+ 6. └─rlang::abort(message = message)
+── Error ('test-step_add_covariates.R:47:3'): step_add_covariates scales covariates during prep ──
+Error in `sample.int(length(x), size, replace, prob)`: cannot take a sample larger than the population when 'replace = FALSE'
+Backtrace:
+    ▆
+ 1. └─horizons:::make_test_spectra(...) at test-step_add_covariates.R:47:3
+ 2.   └─base::sample(seq_len(n_wavelengths), n_peaks) at tests/testthat/helper-data.R:42:5
+ 3.     └─base::sample.int(length(x), size, replace, prob)
+── Error ('test-step_add_covariates.R:71:3'): step_add_covariates handles mismatched Sample_IDs ──
+Error in `sample.int(length(x), size, replace, prob)`: cannot take a sample larger than the population when 'replace = FALSE'
+Backtrace:
+    ▆
+ 1. └─horizons:::make_test_spectra(...) at test-step_add_covariates.R:71:3
+ 2.   └─base::sample(seq_len(n_wavelengths), n_peaks) at tests/testthat/helper-data.R:42:5
+ 3.     └─base::sample.int(length(x), size, replace, prob)
+── Error ('test-step_add_covariates.R:99:3'): step_add_covariates detects ID column automatically ──
+Error in `sample.int(length(x), size, replace, prob)`: cannot take a sample larger than the population when 'replace = FALSE'
+Backtrace:
+    ▆
+ 1. └─horizons:::make_test_spectra(...) at test-step_add_covariates.R:99:3
+ 2.   └─base::sample(seq_len(n_wavelengths), n_peaks) at tests/testthat/helper-data.R:42:5
+ 3.     └─base::sample.int(length(x), size, replace, prob)
+── Error ('test-step_add_covariates.R:117:3'): step_add_covariates handles explicit sample_id_column ──
+Error in `sample.int(length(x), size, replace, prob)`: cannot take a sample larger than the population when 'replace = FALSE'
+Backtrace:
+    ▆
+ 1. └─horizons:::make_test_spectra(...) at test-step_add_covariates.R:117:3
+ 2.   └─base::sample(seq_len(n_wavelengths), n_peaks) at tests/testthat/helper-data.R:42:5
+ 3.     └─base::sample.int(length(x), size, replace, prob)
+── Error ('test-step_add_covariates.R:139:3'): step_add_covariates error handling ──
+Error in `sample.int(length(x), size, replace, prob)`: cannot take a sample larger than the population when 'replace = FALSE'
+Backtrace:
+    ▆
+ 1. └─horizons:::make_test_spectra(...) at test-step_add_covariates.R:139:3
+ 2.   └─base::sample(seq_len(n_wavelengths), n_peaks) at tests/testthat/helper-data.R:42:5
+ 3.     └─base::sample.int(length(x), size, replace, prob)
+── Error ('test-step_add_covariates.R:177:3'): step_add_covariates preserves covariate roles ──
+Error in `sample.int(length(x), size, replace, prob)`: cannot take a sample larger than the population when 'replace = FALSE'
+Backtrace:
+    ▆
+ 1. └─horizons:::make_test_spectra(...) at test-step_add_covariates.R:177:3
+ 2.   └─base::sample(seq_len(n_wavelengths), n_peaks) at tests/testthat/helper-data.R:42:5
+ 3.     └─base::sample.int(length(x), size, replace, prob)
+── Error ('test-step_add_covariates.R:196:3'): step_add_covariates works with multiple covariates and edge cases ──
+Error in `sample.int(length(x), size, replace, prob)`: cannot take a sample larger than the population when 'replace = FALSE'
+Backtrace:
+    ▆
+ 1. └─horizons:::make_test_spectra(...) at test-step_add_covariates.R:196:3
+ 2.   └─base::sample(seq_len(n_wavelengths), n_peaks) at tests/testthat/helper-data.R:42:5
+ 3.     └─base::sample.int(length(x), size, replace, prob)
+── Error ('test-step_add_covariates.R:228:3'): step_add_covariates works with real fixture data ──
+Error in `rlang::ensym(sample_id_column)`: Can't convert to a symbol.
+Backtrace:
+    ▆
+ 1. ├─... %>% step_add_covariates(covariate_data = covariate_data) at test-step_add_covariates.R:228:3
+ 2. ├─horizons::step_add_covariates(., covariate_data = covariate_data)
+ 3. │ ├─rlang::as_string(rlang::ensym(sample_id_column))
+ 4. │ │ └─rlang::is_string(x)
+ 5. │ └─rlang::ensym(sample_id_column)
+ 6. └─rlang::abort(message = message)
+── Error ('test-step_add_covariates.R:243:3'): step_add_covariates handles numeric conversion ──
+Error in `sample.int(length(x), size, replace, prob)`: cannot take a sample larger than the population when 'replace = FALSE'
+Backtrace:
+    ▆
+ 1. └─horizons:::make_test_spectra(...) at test-step_add_covariates.R:243:3
+ 2.   └─base::sample(seq_len(n_wavelengths), n_peaks) at tests/testthat/helper-data.R:42:5
+ 3.     └─base::sample.int(length(x), size, replace, prob)
+── Error ('test-step_add_covariates.R:269:3'): step_add_covariates bake works with new data ──
+Error in `sample.int(length(x), size, replace, prob)`: cannot take a sample larger than the population when 'replace = FALSE'
+Backtrace:
+    ▆
+ 1. └─horizons:::make_test_spectra(...) at test-step_add_covariates.R:269:3
+ 2.   └─base::sample(seq_len(n_wavelengths), n_peaks) at tests/testthat/helper-data.R:42:5
+ 3.     └─base::sample.int(length(x), size, replace, prob)
+── Error ('test-step_select_boruta.R:6:3'): step_select_boruta can be added to recipe ──
+Error in `step_select_boruta(., recipes::all_predictors(), max_runs = 10)`: argument "outcome" is missing, with no default
+Backtrace:
+    ▆
+ 1. ├─... %>% ... at test-step_select_boruta.R:6:3
+ 2. └─horizons::step_select_boruta(., recipes::all_predictors(), max_runs = 10)
+ 3.   ├─recipes::add_step(...)
+ 4.   └─horizons::step_select_boruta_new(...)
+── Error ('test-step_select_boruta.R:44:3'): step_select_boruta selects relevant features ──
+Error: 'with_mocked_bindings' is not an exported object from 'namespace:withr'
+Backtrace:
+    ▆
+ 1. └─horizons:::with_mocked_computations(...) at test-step_select_boruta.R:44:3
+── Error ('test-step_select_boruta.R:73:3'): step_select_boruta handles different max_runs ──
+Error in `sample.int(length(x), size, replace, prob)`: cannot take a sample larger than the population when 'replace = FALSE'
+Backtrace:
+    ▆
+ 1. └─horizons:::make_test_spectra(...) at test-step_select_boruta.R:73:3
+ 2.   └─base::sample(seq_len(n_wavelengths), n_peaks) at tests/testthat/helper-data.R:42:5
+ 3.     └─base::sample.int(length(x), size, replace, prob)
+── Error ('test-step_select_boruta.R:88:3'): step_select_boruta handles p_value parameter ──
+Error in `sample.int(length(x), size, replace, prob)`: cannot take a sample larger than the population when 'replace = FALSE'
+Backtrace:
+    ▆
+ 1. └─horizons:::make_test_spectra(...) at test-step_select_boruta.R:88:3
+ 2.   └─base::sample(seq_len(n_wavelengths), n_peaks) at tests/testthat/helper-data.R:42:5
+ 3.     └─base::sample.int(length(x), size, replace, prob)
+── Error ('test-step_select_boruta.R:103:3'): step_select_boruta preserves non-predictor columns ──
+Error in `sample.int(length(x), size, replace, prob)`: cannot take a sample larger than the population when 'replace = FALSE'
+Backtrace:
+    ▆
+ 1. └─horizons:::make_test_spectra(...) at test-step_select_boruta.R:103:3
+ 2.   └─base::sample(seq_len(n_wavelengths), n_peaks) at tests/testthat/helper-data.R:42:5
+ 3.     └─base::sample.int(length(x), size, replace, prob)
+── Error ('test-step_select_boruta.R:146:3'): step_select_boruta handles edge cases ──
+Error in `step_select_boruta(., recipes::all_predictors(), max_runs = 5)`: argument "outcome" is missing, with no default
+Backtrace:
+    ▆
+ 1. ├─... %>% ... at test-step_select_boruta.R:146:3
+ 2. └─horizons::step_select_boruta(., recipes::all_predictors(), max_runs = 5)
+ 3.   ├─recipes::add_step(...)
+ 4.   └─horizons::step_select_boruta_new(...)
+── Error ('test-step_select_boruta.R:166:3'): step_select_boruta works with spectral data subset ──
+Error in `step_select_boruta(., recipes::all_predictors(), max_runs = 5)`: argument "outcome" is missing, with no default
+Backtrace:
+    ▆
+ 1. ├─... %>% ... at test-step_select_boruta.R:166:3
+ 2. └─horizons::step_select_boruta(., recipes::all_predictors(), max_runs = 5)
+ 3.   ├─recipes::add_step(...)
+ 4.   └─horizons::step_select_boruta_new(...)
+── Error ('test-step_select_boruta.R:180:3'): step_select_boruta works in combination with other steps ──
+Error: 'with_mocked_bindings' is not an exported object from 'namespace:withr'
+Backtrace:
+    ▆
+ 1. └─horizons:::with_mocked_computations(...) at test-step_select_boruta.R:180:3
+── Error ('test-step_select_boruta.R:210:3'): step_select_boruta print method works ──
+Error in `sample.int(length(x), size, replace, prob)`: cannot take a sample larger than the population when 'replace = FALSE'
+Backtrace:
+    ▆
+ 1. └─horizons:::make_test_spectra(...) at test-step_select_boruta.R:210:3
+ 2.   └─base::sample(seq_len(n_wavelengths), n_peaks) at tests/testthat/helper-data.R:42:5
+ 3.     └─base::sample.int(length(x), size, replace, prob)
+── Error ('test-step_select_correlation.R:6:3'): step_select_correlation can be added to recipe ──
+Error in `step_select_correlation(., recipes::all_predictors(), threshold = 0.9)`: argument "outcome" is missing, with no default
+Backtrace:
+    ▆
+ 1. ├─... %>% ... at test-step_select_correlation.R:6:3
+ 2. └─horizons::step_select_correlation(...)
+ 3.   ├─recipes::add_step(...)
+ 4.   └─horizons::step_select_correlation_new(...)
+── Error ('test-step_select_correlation.R:31:3'): step_select_correlation removes highly correlated features ──
+Error in `step_select_correlation(., recipes::all_predictors(), threshold = 0.9)`: argument "outcome" is missing, with no default
+Backtrace:
+    ▆
+ 1. ├─... %>% ... at test-step_select_correlation.R:31:3
+ 2. └─horizons::step_select_correlation(...)
+ 3.   ├─recipes::add_step(...)
+ 4.   └─horizons::step_select_correlation_new(...)
+── Error ('test-step_select_correlation.R:69:5'): step_select_correlation handles different thresholds ──
+Error in `step_select_correlation(., recipes::all_predictors(), threshold = thresholds[i])`: argument "outcome" is missing, with no default
+Backtrace:
+    ▆
+ 1. ├─... %>% ... at test-step_select_correlation.R:69:5
+ 2. └─horizons::step_select_correlation(...)
+ 3.   ├─recipes::add_step(...)
+ 4.   └─horizons::step_select_correlation_new(...)
+── Error ('test-step_select_correlation.R:98:3'): step_select_correlation preserves all features when no high correlations ──
+Error in `step_select_correlation(., recipes::all_predictors(), threshold = 0.8)`: argument "outcome" is missing, with no default
+Backtrace:
+    ▆
+ 1. ├─... %>% ... at test-step_select_correlation.R:98:3
+ 2. └─horizons::step_select_correlation(...)
+ 3.   ├─recipes::add_step(...)
+ 4.   └─horizons::step_select_correlation_new(...)
+── Error ('test-step_select_correlation.R:120:3'): step_select_correlation handles missing values ──
+Error in `step_select_correlation(., recipes::all_predictors(), threshold = 0.9)`: argument "outcome" is missing, with no default
+Backtrace:
+    ▆
+ 1. ├─... %>% ... at test-step_select_correlation.R:120:3
+ 2. └─horizons::step_select_correlation(...)
+ 3.   ├─recipes::add_step(...)
+ 4.   └─horizons::step_select_correlation_new(...)
+── Error ('test-step_select_correlation.R:140:3'): step_select_correlation works with spectral data ──
+Error in `step_select_correlation(., recipes::all_predictors(), threshold = 0.95)`: argument "outcome" is missing, with no default
+Backtrace:
+    ▆
+ 1. ├─... %>% ... at test-step_select_correlation.R:140:3
+ 2. └─horizons::step_select_correlation(...)
+ 3.   ├─recipes::add_step(...)
+ 4.   └─horizons::step_select_correlation_new(...)
+── Error ('test-step_select_correlation.R:172:3'): step_select_correlation handles edge cases ──
+Error in `step_select_correlation(., recipes::all_predictors(), threshold = 0.99)`: argument "outcome" is missing, with no default
+Backtrace:
+    ▆
+ 1. ├─... %>% ... at test-step_select_correlation.R:172:3
+ 2. └─horizons::step_select_correlation(...)
+ 3.   ├─recipes::add_step(...)
+ 4.   └─horizons::step_select_correlation_new(...)
+── Error ('test-step_select_correlation.R:190:3'): step_select_correlation works in combination with other steps ──
+Error in `step_select_correlation(., recipes::all_predictors(), threshold = 0.9)`: argument "outcome" is missing, with no default
+Backtrace:
+    ▆
+ 1. ├─... %>% ... at test-step_select_correlation.R:190:3
+ 2. └─horizons::step_select_correlation(...)
+ 3.   ├─recipes::add_step(...)
+ 4.   └─horizons::step_select_correlation_new(...)
+── Error ('test-step_select_correlation.R:208:3'): step_select_correlation print method works ──
+Error in `step_select_correlation(., recipes::all_predictors(), threshold = 0.9)`: argument "outcome" is missing, with no default
+Backtrace:
+    ▆
+ 1. ├─recipes::recipe(Response ~ ., data = test_data) %>% ... at test-step_select_correlation.R:208:3
+ 2. └─horizons::step_select_correlation(...)
+ 3.   ├─recipes::add_step(...)
+ 4.   └─horizons::step_select_correlation_new(...)
+── Error ('test-step_select_shap.R:6:3'): step_select_shap can be added to recipe ──
+Error in `step_select_shap(., recipes::all_predictors(), top_n = 5)`: argument "outcome" is missing, with no default
+Backtrace:
+    ▆
+ 1. ├─... %>% ... at test-step_select_shap.R:6:3
+ 2. └─horizons::step_select_shap(., recipes::all_predictors(), top_n = 5)
+ 3.   ├─recipes::add_step(...)
+ 4.   └─horizons::step_select_shap_new(...)
+── Error ('test-step_select_shap.R:76:5'): step_select_shap handles different top_n values ──
+Error in `step_select_shap(., recipes::all_predictors(), top_n = n)`: argument "outcome" is missing, with no default
+Backtrace:
+    ▆
+ 1. ├─... %>% ... at test-step_select_shap.R:76:5
+ 2. └─horizons::step_select_shap(., recipes::all_predictors(), top_n = n)
+ 3.   ├─recipes::add_step(...)
+ 4.   └─horizons::step_select_shap_new(...)
+── Error ('test-step_select_shap.R:85:3'): step_select_shap handles threshold parameter ──
+Error in `sample.int(length(x), size, replace, prob)`: cannot take a sample larger than the population when 'replace = FALSE'
+Backtrace:
+    ▆
+ 1. └─horizons:::make_test_spectra(...) at test-step_select_shap.R:85:3
+ 2.   └─base::sample(seq_len(n_wavelengths), n_peaks) at tests/testthat/helper-data.R:42:5
+ 3.     └─base::sample.int(length(x), size, replace, prob)
+── Error ('test-step_select_shap.R:97:3'): step_select_shap handles nrounds parameter ──
+Error in `sample.int(length(x), size, replace, prob)`: cannot take a sample larger than the population when 'replace = FALSE'
+Backtrace:
+    ▆
+ 1. └─horizons:::make_test_spectra(...) at test-step_select_shap.R:97:3
+ 2.   └─base::sample(seq_len(n_wavelengths), n_peaks) at tests/testthat/helper-data.R:42:5
+ 3.     └─base::sample.int(length(x), size, replace, prob)
+── Error ('test-step_select_shap.R:112:3'): step_select_shap preserves non-predictor columns ──
+Error in `sample.int(length(x), size, replace, prob)`: cannot take a sample larger than the population when 'replace = FALSE'
+Backtrace:
+    ▆
+ 1. └─horizons:::make_test_spectra(...) at test-step_select_shap.R:112:3
+ 2.   └─base::sample(seq_len(n_wavelengths), n_peaks) at tests/testthat/helper-data.R:42:5
+ 3.     └─base::sample.int(length(x), size, replace, prob)
+── Error ('test-step_select_shap.R:158:3'): step_select_shap handles edge cases ──
+Error in `step_select_shap(., recipes::all_predictors(), top_n = 10)`: argument "outcome" is missing, with no default
+Backtrace:
+    ▆
+ 1. ├─... %>% ... at test-step_select_shap.R:158:3
+ 2. └─horizons::step_select_shap(., recipes::all_predictors(), top_n = 10)
+ 3.   ├─recipes::add_step(...)
+ 4.   └─horizons::step_select_shap_new(...)
+── Error ('test-step_select_shap.R:252:3'): step_select_shap validates parameters ──
+Error in `sample.int(length(x), size, replace, prob)`: cannot take a sample larger than the population when 'replace = FALSE'
+Backtrace:
+    ▆
+ 1. └─horizons:::make_test_spectra(...) at test-step_select_shap.R:252:3
+ 2.   └─base::sample(seq_len(n_wavelengths), n_peaks) at tests/testthat/helper-data.R:42:5
+ 3.     └─base::sample.int(length(x), size, replace, prob)
+── Error ('test-step_select_shap.R:270:3'): step_select_shap print method works ──
+Error in `sample.int(length(x), size, replace, prob)`: cannot take a sample larger than the population when 'replace = FALSE'
+Backtrace:
+    ▆
+ 1. └─horizons:::make_test_spectra(...) at test-step_select_shap.R:270:3
+ 2.   └─base::sample(seq_len(n_wavelengths), n_peaks) at tests/testthat/helper-data.R:42:5
+ 3.     └─base::sample.int(length(x), size, replace, prob)
+── Failure ('test-step_transform_spectra.R:10:3'): step_transform_spectra can be added to recipe ──
+`recipe` inherits from 'recipe' not 'step'.
+Backtrace:
+    ▆
+ 1. └─horizons:::expect_valid_recipe(recipe, has_spectral_step = TRUE) at test-step_transform_spectra.R:10:3
+ 2.   └─testthat::expect_s3_class(recipe, "step") at tests/testthat/helper-expectations.R:25:3
+── Failure ('test-step_transform_spectra.R:51:3'): step_transform_spectra validates input parameters ──
+``%>%`(...)` did not throw the expected error.
+── Failure ('test-step_transform_spectra.R:163:3'): step_transform_spectra works with real fixture data ──
+length(spectral_cols) > 0 is not TRUE
+
+`actual`:   FALSE
+`expected`: TRUE 
+Data should contain spectral columns (numeric names)
+Backtrace:
+    ▆
+ 1. └─horizons:::expect_valid_spectral_data(result, has_response = TRUE) at test-step_transform_spectra.R:163:3
+ 2.   └─testthat::expect_true(length(spectral_cols) > 0, info = "Data should contain spectral columns (numeric names)") at tests/testthat/helper-expectations.R:184:3
+── Failure ('test-step_transform_spectra.R:163:3'): step_transform_spectra works with real fixture data ──
+all(is.numeric(as.matrix(spectral_data))) is not TRUE
+
+`actual`:   FALSE
+`expected`: TRUE 
+All spectral values should be numeric
+Backtrace:
+    ▆
+ 1. └─horizons:::expect_valid_spectral_data(result, has_response = TRUE) at test-step_transform_spectra.R:163:3
+ 2.   └─testthat::expect_true(...) at tests/testthat/helper-expectations.R:196:3
+
+[ FAIL 68 | WARN 2 | SKIP 3 | PASS 254 ]
+Error: Test failures
+Execution halted
