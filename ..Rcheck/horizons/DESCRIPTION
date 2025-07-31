@@ -1,5 +1,6 @@
 Package: horizons
-Title: Spectral Ensemble Modeling and Covariate Prediction for Soil Data
+Title: Spectral Ensemble Modeling and Covariate Prediction for Soil
+        Data
 Version: 0.7.5
 Author: Sam Leuthold [aut, cre]
 Maintainer: Sam Leuthold <sam.leuthold@colostate.edu>
@@ -19,74 +20,20 @@ Description: Tools for constructing, tuning, and evaluating stacked ensemble mod
 License: MIT + file LICENSE
 Encoding: UTF-8
 LazyData: false
-Remotes:
-    spectral-cockpit/opusreader2
-Imports:
-    cli,
-    cluster,
-    daymetr,
-    dials,
-    dplyr,
-    FactoMineR,
-    forcats,
-    fs,
-    furrr,
-    future,
-    ggplot2,
-    glue,
-    gt,
-    hardhat,
-    here,
-    jsonlite,
-    lubridate,
-    opusreader2,
-    parallel,
-    parsnip,
-    patchwork,
-    plsmod,
-    progressr,
-    prospectr,
-    pryr,
-    purrr,
-    qs,
-    readr,
-    recipes,
-    rlang,
-    rsample,
-    rules,
-    SHAPforxgboost,
-    stacks,
-    stats,
-    stringr,
-    tibble,
-    tidyr,
-    tidyselect,
-    tools,
-    tune,
-    utils,
-    workflows,
-    workflowsets,
-    xgboost,
-    yardstick,
-    zoo
+Remotes: spectral-cockpit/opusreader2
+Imports: cli, cluster, daymetr, dials, dplyr, FactoMineR, forcats, fs,
+        furrr, future, ggplot2, glue, gt, hardhat, here, jsonlite,
+        lubridate, opusreader2, parallel, parsnip, patchwork, plsmod,
+        progressr, prospectr, pryr, purrr, qs, readr, recipes, rlang,
+        rsample, rules, SHAPforxgboost, stacks, stats, stringr, tibble,
+        tidyr, tidyselect, tools, tune, utils, workflows, workflowsets,
+        xgboost, yardstick, zoo
 Roxygen: list(markdown = TRUE)
 RoxygenNote: 7.3.2
-Suggests: 
-    testthat (>= 3.0.0),
-    withr,
-    Boruta,
-    covr,
-    Cubist,
-    earth,
-    glmnet,
-    kernlab,
-    lightgbm,
-    mixOmics,
-    nnet,
-    spectrolab,
-    knitr,
-    rmarkdown
+Suggests: testthat (>= 3.0.0), withr, Boruta, covr, Cubist, earth,
+        glmnet, kernlab, lightgbm, mixOmics, nnet, spectrolab, knitr,
+        rmarkdown
 Config/testthat/edition: 3
 VignetteBuilder: knitr
-Depends: 
-    R (>= 2.10)
+Depends: R (>= 2.10)
+Built: R 4.4.1; ; 2025-07-31 02:11:48 UTC; unix

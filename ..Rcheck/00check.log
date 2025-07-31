@@ -6,36 +6,400 @@
     GNU Fortran (GCC) 12.2.0
 * running under: macOS 15.5
 * using session charset: UTF-8
-* using options ‘--no-manual --as-cran’
+* using options ‘--no-manual --no-build-vignettes’
 * checking for file ‘./DESCRIPTION’ ... OK
 * this is package ‘horizons’ version ‘0.7.5’
 * package encoding: UTF-8
-* checking CRAN incoming feasibility ... [2s/11s] WARNING
-Maintainer: ‘Sam Leuthold <sam.leuthold@colostate.edu>’
-
-New submission
-
-Unknown, possibly misspelled, fields in DESCRIPTION:
-  ‘Remotes’
-
-Strong dependencies not in mainstream repositories:
-  opusreader2
-
-The build time stamp is missing.
 * checking package namespace information ... OK
-* checking package dependencies ... ERROR
-Package suggested but not available for checking: ‘shapviz’
+* checking package dependencies ... NOTE
+Package suggested but not available for checking: ‘covr’
+* checking if this is a source package ... OK
+* checking if there is a namespace ... OK
+* checking for executable files ... OK
+* checking for hidden files and directories ... NOTE
+Found the following hidden files and directories:
+  .DS_Store
+  .RData
+  .RDataTmp
+  .RDataTmp1
+  .RDataTmp2
+  .RDataTmp3
+  .RDataTmp4
+  .Rhistory
+  .Rproj.user/.DS_Store
+  .gitignore
+  R/.DS_Store
+  dev/.DS_Store
+  ..Rcheck
+  .Rproj.user
+  .claude
+  .git
+  .github
+These were most likely included in error. See section ‘Package
+structure’ in the ‘Writing R Extensions’ manual.
+* checking for portable file names ... OK
+* checking for sufficient/correct file permissions ... OK
+* checking whether package ‘horizons’ can be installed ... OK
+* checking installed package size ... OK
+* checking package directory ... OK
+* checking DESCRIPTION meta-information ... NOTE
+Checking should be performed on sources prepared by ‘R CMD build’.
+* checking top-level files ... OK
+* checking for left-over files ... OK
+* checking index information ... OK
+* checking package subdirectories ... WARNING
+Found the following directory with the name of a check directory:
+  ./..Rcheck
+Most likely, these were included erroneously.
+* checking code files for non-ASCII characters ... WARNING
+Found the following files with non-ASCII characters:
+  R/covariates-soil-orchestrator.R
+  R/evaluation-run_model_batches.R
+  R/model_build_recipe.R
+  R/stack-build_model_ensemble.R
+  R/stack-tune_blend.R
+  R/step-feature_selection_boruta.R
+  R/step-feature_selection_correlation.R
+  R/step-feature_selection_shap.R
+  R/utils_download_horizons_data.R
+  R/visuals-plot_ensemble_biplot.R
+Portable packages must use only ASCII characters in their R code and
+NAMESPACE directives, except perhaps in comments.
+Use \uxxxx escapes for other characters.
+Function ‘tools::showNonASCIIfile’ can help in finding non-ASCII
+characters in files.
+* checking R files for syntax errors ... OK
+* checking whether the package can be loaded ... OK
+* checking whether the package can be loaded with stated dependencies ... OK
+* checking whether the package can be unloaded cleanly ... OK
+* checking whether the namespace can be loaded with stated dependencies ... OK
+* checking whether the namespace can be unloaded cleanly ... OK
+* checking whether startup messages can be suppressed ... OK
+* checking dependencies in R code ... WARNING
+'::' or ':::' imports not declared from:
+  ‘janitor’ ‘li’ ‘soilspec’
+'loadNamespace' or 'requireNamespace' call not declared from: ‘tidymodels’
+Namespace in Imports field not imported from: ‘workflowsets’
+  All declared Imports should be used.
+There are ::: calls to the package's namespace in its code. A package
+  almost never needs to use ::: for its own objects:
+  ‘safely_execute’
+* checking S3 generic/method consistency ... OK
+* checking replacement functions ... OK
+* checking foreign function calls ... OK
+* checking R code for possible problems ... NOTE
+File ‘horizons/R/zzz.R’:
+  .onLoad calls:
+    packageStartupMessage("horizons v0.7.5 loaded. Please flag bugs on Github (www.github.com/S-Leuthold/horizons)")
 
-Namespace dependencies missing from DESCRIPTION Imports/Depends entries:
-  'FactoMineR', 'SHAPforxgboost', 'cluster', 'daymetr', 'forcats',
-  'gt', 'hardhat', 'patchwork', 'plsmod', 'pryr', 'rules', 'stacks',
-  'xgboost', 'zoo'
+See section ‘Good practice’ in '?.onAttach'.
 
-Imports includes 29 non-default packages.
-Importing from so many packages makes the package vulnerable to any of
-them becoming unavailable.  Move as many as possible to Suggests and
-use conditionally.
+tune_blend : <anonymous>: warning in predict(obj = blended, new_data =
+  test_data): partial argument match of 'obj' to 'object'
+build_ensemble_stack: no visible binding for global variable
+  ‘saved_path’
+build_ensemble_stack: no visible binding for global variable ‘Model’
+build_ensemble_stack: no visible binding for global variable
+  ‘Transformation’
+build_ensemble_stack: no visible binding for global variable
+  ‘Preprocessing’
+build_ensemble_stack: no visible binding for global variable
+  ‘Covariates’
+build_ensemble_stack : <anonymous>: no visible binding for global
+  variable ‘Predicted’
+build_ensemble_stack: no visible binding for global variable ‘Observed’
+build_ensemble_stack: no visible binding for global variable
+  ‘Predicted’
+build_ensemble_stack: no visible binding for global variable
+  ‘.estimate’
+cluster_spectral_predictors : <anonymous>: no visible global function
+  definition for ‘median’
+create_project_configurations: no visible global function definition
+  for ‘fetch_spatial_covariates’
+create_summary_table: no visible binding for global variable ‘Model’
+create_summary_table: no visible binding for global variable
+  ‘ModelType’
+create_summary_table: no visible binding for global variable
+  ‘Transformation’
+create_summary_table: no visible binding for global variable
+  ‘Preprocessing’
+create_summary_table: no visible binding for global variable
+  ‘Covariates’
+create_summary_table: no visible binding for global variable ‘Group’
+download_ossl_data: no visible binding for global variable
+  ‘longitude.point_wgs84_dd’
+download_ossl_data: no visible binding for global variable
+  ‘latitude.point_wgs84_dd’
+download_ossl_data: no visible binding for global variable
+  ‘layer.upper.depth_usda_cm’
+evaluate_model_config: no visible global function definition for
+  ‘capture.output’
+evaluate_model_config: no visible binding for global variable
+  ‘.Last.tune.result’
+fetch_climate_covariates : summarize_daymet: no visible binding for
+  global variable ‘tmin..deg.c.’
+fetch_climate_covariates : summarize_daymet: no visible binding for
+  global variable ‘tmax..deg.c.’
+fetch_climate_covariates : summarize_daymet: no visible binding for
+  global variable ‘Tmean’
+fetch_climate_covariates : summarize_daymet: no visible binding for
+  global variable ‘yday’
+fetch_climate_covariates : summarize_daymet: no visible binding for
+  global variable ‘year’
+fetch_climate_covariates : summarize_daymet: no visible binding for
+  global variable ‘prcp..mm.day.’
+fetch_climate_covariates : summarize_daymet: no visible binding for
+  global variable ‘PET’
+fetch_climate_covariates : summarize_daymet: no visible binding for
+  global variable ‘MAT’
+fetch_climate_covariates : summarize_daymet: no visible binding for
+  global variable ‘MAP’
+fetch_climate_covariates : summarize_daymet: no visible binding for
+  global variable ‘GDD’
+fetch_climate_covariates : summarize_daymet: no visible binding for
+  global variable ‘monthly_prcp’
+fetch_climate_covariates : summarize_daymet: no visible binding for
+  global variable ‘monthly_mean’
+fetch_climate_covariates: no visible binding for global variable
+  ‘Daymet_GridID’
+fetch_climate_covariates: no visible binding for global variable
+  ‘Longitude’
+fetch_climate_covariates: no visible binding for global variable
+  ‘Latitude’
+fetch_climate_covariates : <anonymous>: no visible binding for global
+  variable ‘Daymet_GridID’
+parse_filename_metadata: no visible global function definition for
+  ‘setNames’
+plot_ensemble_biplot: no visible binding for global variable
+  ‘.estimate’
+plot_ensemble_biplot: no visible binding for global variable ‘Observed’
+plot_ensemble_biplot: no visible binding for global variable
+  ‘Predicted’
+plot_ensemble_biplot: no visible binding for global variable ‘Model’
+plot_ensemble_upset: no visible binding for global variable ‘status’
+plot_ensemble_upset: no visible binding for global variable
+  ‘config_desc’
+plot_ensemble_upset: no visible binding for global variable
+  ‘saved_path’
+plot_ensemble_upset: no visible binding for global variable
+  ‘error_log_path’
+plot_ensemble_upset: no visible binding for global variable
+  ‘error_message’
+plot_ensemble_upset: no visible binding for global variable
+  ‘Covariates’
+plot_ensemble_upset: no visible binding for global variable
+  ‘Model_Group’
+plot_ensemble_upset: no visible binding for global variable
+  ‘Preprocessing_Group’
+plot_ensemble_upset: no visible global function definition for
+  ‘reorder’
+plot_ensemble_upset: no visible binding for global variable ‘.estimate’
+plot_ensemble_upset: no visible binding for global variable ‘component’
+plot_ensemble_upset: no visible binding for global variable ‘category’
+plot_ensemble_upset: no visible binding for global variable
+  ‘mean_metric’
+plot_ensemble_upset: no visible binding for global variable ‘cat_order’
+plot_ensemble_upset: no visible binding for global variable
+  ‘comp_order’
+plot_ensemble_upset: no visible binding for global variable
+  ‘final_order’
+plot_ensemble_upset: no visible binding for global variable ‘y’
+plot_ensemble_upset: no visible binding for global variable ‘x’
+plot_ensemble_upset: no visible binding for global variable ‘xend’
+plot_ensemble_upset: no visible binding for global variable ‘yend’
+predict_covariates: no visible binding for global variable ‘project’
+predict_covariates: no visible binding for global variable ‘covariate’
+predict_covariates: no visible binding for global variable
+  ‘cache_result’
+predict_covariates: no visible global function definition for ‘na.omit’
+predict_covariates: no visible binding for global variable ‘cluster’
+prep.step_add_covariates: no visible binding for global variable ‘role’
+prep.step_add_covariates: no visible binding for global variable
+  ‘variable’
+run_model_evaluation : aggressive_cleanup: no visible global function
+  definition for ‘flush.console’
+run_model_evaluation: no visible binding for global variable ‘status’
+safely_execute: no visible global function definition for
+  ‘capture.output’
+tune_blend : <anonymous>: no visible binding for global variable
+  ‘Observed’
+tune_blend : <anonymous>: no visible binding for global variable
+  ‘.estimate’
+Undefined global functions or variables:
+  .Last.tune.result .estimate Covariates Daymet_GridID GDD Group
+  Latitude Longitude MAP MAT Model ModelType Model_Group Observed PET
+  Predicted Preprocessing Preprocessing_Group Tmean Transformation
+  cache_result capture.output cat_order category cluster comp_order
+  component config_desc covariate error_log_path error_message
+  fetch_spatial_covariates final_order flush.console
+  latitude.point_wgs84_dd layer.upper.depth_usda_cm
+  longitude.point_wgs84_dd mean_metric median monthly_mean monthly_prcp
+  na.omit prcp..mm.day. project reorder role saved_path setNames status
+  tmax..deg.c. tmin..deg.c. variable x xend y yday year yend
+Consider adding
+  importFrom("stats", "median", "na.omit", "reorder", "setNames")
+  importFrom("utils", "capture.output", "flush.console")
+to your NAMESPACE file.
+* checking Rd files ... NOTE
+checkRd: (-1) evaluate_final_models.Rd:20: Lost braces in \itemize; \value handles \item{}{} directly
+checkRd: (-1) evaluate_final_models.Rd:21: Lost braces in \itemize; \value handles \item{}{} directly
+checkRd: (-1) evaluate_final_models.Rd:22: Lost braces in \itemize; \value handles \item{}{} directly
+checkRd: (-1) evaluate_final_models.Rd:23: Lost braces in \itemize; \value handles \item{}{} directly
+checkRd: (-1) get_ossl_data_path.Rd:13: Lost braces in \itemize; meant \describe ?
+checkRd: (-1) get_ossl_data_path.Rd:14: Lost braces in \itemize; meant \describe ?
+checkRd: (-1) get_ossl_data_path.Rd:15: Lost braces in \itemize; meant \describe ?
+checkRd: (-1) tune_blend.Rd:38: Lost braces in \itemize; \value handles \item{}{} directly
+checkRd: (-1) tune_blend.Rd:39: Lost braces in \itemize; \value handles \item{}{} directly
+checkRd: (-1) tune_blend.Rd:40: Lost braces in \itemize; \value handles \item{}{} directly
+checkRd: (-1) tune_blend.Rd:41: Lost braces in \itemize; \value handles \item{}{} directly
+* checking Rd metadata ... OK
+* checking Rd cross-references ... WARNING
+Missing link or links in Rd file 'build_recipe.Rd':
+  ‘step_transform_spectra’ ‘build_model_grid’
 
-See section ‘The DESCRIPTION file’ in the ‘Writing R Extensions’
-manual.
+Missing link or links in Rd file 'clean_workflow_id.Rd':
+  ‘parse_workflow_id’
+
+Missing link or links in Rd file 'define_model_specifications.Rd':
+  ‘build_model_grid’
+
+Missing link or links in Rd file 'download_horizons_data.Rd':
+  ‘build_ossl_dataset’
+
+Missing link or links in Rd file 'download_ossl_data.Rd':
+  ‘create_input_data’
+
+Missing link or links in Rd file 'evaluate_final_models.Rd':
+  ‘full_model_evaluation’
+
+Missing link or links in Rd file 'plot_ensemble_upset.Rd':
+  ‘run_batch_evaluation’ ‘evaluate_stacks’ ‘plot_metric_summary’
+
+Missing link or links in Rd file 'run_model_evaluation.Rd':
+  ‘prune_model_output’ ‘full_model_evaluation’
+
+Missing link or links in Rd file 'safe_run_model.Rd':
+  ‘prune_model_output’
+
+See section 'Cross-references' in the 'Writing R Extensions' manual.
+* checking for missing documentation entries ... WARNING
+Undocumented code objects:
+  ‘step_add_covariates_new’ ‘step_select_boruta_new’
+  ‘step_select_correlation_new’ ‘step_select_shap_new’
+  ‘step_transform_spectra’ ‘step_transform_spectra_new’
+All user-level objects in a package should have documentation entries.
+See chapter ‘Writing R documentation files’ in the ‘Writing R
+Extensions’ manual.
+* checking for code/documentation mismatches ... WARNING
+Codoc mismatches from Rd file 'build_ensemble_stack.Rd':
+build_ensemble_stack
+  Code: function(results_dir, input_data, variable, filter_metric =
+                 "rsq", n_best = 10, test_prop = 0.2, cv_folds = 10,
+                 verbose = TRUE)
+  Docs: function(top_workflows, input_data, variable, test_prop = 0.2,
+                 cv_folds = 5)
+  Argument names in code not in docs:
+    results_dir filter_metric n_best verbose
+  Argument names in docs not in code:
+    top_workflows
+  Mismatches in argument names:
+    Position: 1 Code: results_dir Docs: top_workflows
+    Position: 4 Code: filter_metric Docs: test_prop
+    Position: 5 Code: n_best Docs: cv_folds
+  Mismatches in argument default values:
+    Name: 'cv_folds' Code: 10 Docs: 5
+
+* checking Rd \usage sections ... WARNING
+Undocumented arguments in Rd file 'clean_workflow_id.Rd'
+  ‘feature_selection’
+
+Undocumented arguments in Rd file 'create_project_configurations.Rd'
+  ‘feature_selection’
+
+Documented arguments not in \usage in Rd file 'download_ossl_data.Rd':
+  ‘bounding_box’
+
+Undocumented arguments in Rd file 'evaluate_model_config.Rd'
+  ‘feature_selection’
+
+Documented arguments not in \usage in Rd file 'plot_ensemble_biplot.Rd':
+  ‘include_candidate_models’ ‘point_color’
+
+Undocumented arguments in Rd file 'process_spectra.Rd'
+  ‘input_vector’
+Documented arguments not in \usage in Rd file 'process_spectra.Rd':
+  ‘recipe’ ‘...’ ‘role’ ‘trained’ ‘skip’ ‘id’
+
+Functions with \usage entries need to have the appropriate \alias
+entries, and all their arguments documented.
+The \usage entries must correspond to syntactically valid R code.
+See chapter ‘Writing R documentation files’ in the ‘Writing R
+Extensions’ manual.
+* checking Rd contents ... OK
+* checking for unstated dependencies in examples ... OK
+* checking R/sysdata.rda ... OK
+* checking files in ‘vignettes’ ... WARNING
+Files in the 'vignettes' directory but no files in 'inst/doc':
+  ‘advanced-modeling.Rmd’ ‘covariate-integration.Rmd’
+  ‘getting-started.Rmd’ ‘preprocessing-features.Rmd’
+* checking examples ... ERROR
+Running examples in ‘horizons-Ex.R’ failed
+The error most likely occurred in:
+
+> ### Name: project_entry
+> ### Title: Define a Project for Spectral Data Ingestion
+> ### Aliases: project_entry
+> 
+> ### ** Examples
+> 
+> project_entry(
++   spectra_path        = "data/FFAR/spectra",
++   sample_obs          = "data/FFAR/soil.csv",
++   file_name_format    = "project_sampleid_fraction_ignore_ignore",
++   file_name_delimiter = "_",
++   default_fraction    = "Bulk"
++ )
+Error in `project_entry()`:
+! The provided `spectra_path` does not exist: 'data/FFAR/spectra'
+Backtrace:
+    ▆
+ 1. └─horizons::project_entry(...)
+ 2.   └─cli::cli_abort("The provided `spectra_path` does not exist: {.path {spectra_path}}")
+ 3.     └─rlang::abort(...)
+Execution halted
+* checking for unstated dependencies in ‘tests’ ... OK
+* checking tests ... ERROR
+  Running ‘testthat.R’
+Running the tests in ‘tests/testthat.R’ failed.
+Last 13 lines of output:
+   2.   └─testthat::expect_true(length(spectral_cols) > 0, info = "Data should contain spectral columns (numeric names)") at tests/testthat/helper-expectations.R:184:3
+  ── Failure ('test-step_transform_spectra.R:163:3'): step_transform_spectra works with real fixture data ──
+  all(is.numeric(as.matrix(spectral_data))) is not TRUE
+  
+  `actual`:   FALSE
+  `expected`: TRUE 
+  All spectral values should be numeric
+  Backtrace:
+      ▆
+   1. └─horizons:::expect_valid_spectral_data(result, has_response = TRUE) at test-step_transform_spectra.R:163:3
+   2.   └─testthat::expect_true(...) at tests/testthat/helper-expectations.R:196:3
+  
+  [ FAIL 68 | WARN 2 | SKIP 3 | PASS 254 ]
+  Error: Test failures
+  Execution halted
+* checking for unstated dependencies in vignettes ... OK
+* checking package vignettes ... WARNING
+Directory 'inst/doc' does not exist.
+Package vignettes without corresponding single PDF/HTML:
+  ‘advanced-modeling.Rmd’
+  ‘covariate-integration.Rmd’
+  ‘getting-started.Rmd’
+  ‘preprocessing-features.Rmd’
+* checking running R code from vignettes ... OK
+  ‘advanced-modeling.Rmd’ using ‘UTF-8’... OK
+  ‘covariate-integration.Rmd’ using ‘UTF-8’... OK
+  ‘getting-started.Rmd’ using ‘UTF-8’... OK
+  ‘preprocessing-features.Rmd’ using ‘UTF-8’... OK
+* checking re-building of vignette outputs ... SKIPPED
 * DONE
+Status: 2 ERRORs, 9 WARNINGs, 5 NOTEs
