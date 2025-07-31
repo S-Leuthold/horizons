@@ -24,6 +24,7 @@ Remotes:
 Imports:
     cli,
     cluster,
+    daymetr,
     dials,
     dplyr,
     FactoMineR,
@@ -53,6 +54,7 @@ Imports:
     rlang,
     rsample,
     rules,
+    SHAPforxgboost,
     stacks,
     stats,
     stringr,
@@ -64,6 +66,7 @@ Imports:
     utils,
     workflows,
     workflowsets,
+    xgboost,
     yardstick,
     zoo
 Roxygen: list(markdown = TRUE)
@@ -72,17 +75,18 @@ Suggests:
     testthat (>= 3.0.0),
     withr,
     Boruta,
+    covr,
     Cubist,
-    daymetr,
     earth,
     glmnet,
     kernlab,
     lightgbm,
     mixOmics,
     nnet,
-    SHAPforxgboost,
     spectrolab,
-    xgboost
+    knitr,
+    rmarkdown
 Config/testthat/edition: 3
+VignetteBuilder: knitr
 Depends: 
     R (>= 2.10)

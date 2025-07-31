@@ -1,0 +1,1076 @@
+---
+title: "Covariate Integration in horizons"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Covariate Integration in horizons}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  fig.width = 7,
+  fig.height = 5,
+  warning = FALSE,
+  message = FALSE
+)
+```
+
+```{r setup}
+library(horizons)
+library(dplyr)
+library(ggplot2)
+library(patchwork)
+```
+
+# Introduction
+
+Integrating auxiliary covariates with spectral data can significantly improve soil property predictions. The `horizons` package provides sophisticated workflows for:
+
+- Predicting soil properties from spectra using OSSL data
+- Fetching climate covariates from remote sensing APIs
+- Creating covariate combinations and interactions
+- Evaluating covariate contributions to model performance
+- Handling missing and incomplete covariate data
+
+This vignette provides comprehensive guidance on covariate integration strategies and best practices.
+
+# Understanding Covariate Types
+
+## Spectral-Derived Soil Covariates
+
+The package can predict soil properties directly from spectra using pre-trained models:
+
+```{r soil_covariates_overview, eval=FALSE}
+# Available soil covariates that can be predicted from spectra
+available_soil_covariates <- c(
+  "pH",                    # Soil pH (water)
+  "SOC_pct",              # Soil organic carbon (%)
+  "Clay_pct",             # Clay content (%)
+  "Sand_pct",             # Sand content (%)
+  "Silt_pct",             # Silt content (%)
+  "CEC_meq_100g",         # Cation exchange capacity
+  "N_pct",                # Total nitrogen (%)
+  "P_ppm",                # Available phosphorus (ppm)
+  "K_ppm",                # Available potassium (ppm)
+  "Ca_ppm",               # Exchangeable calcium (ppm)
+  "Mg_ppm",               # Exchangeable magnesium (ppm)
+  "BD_g_cm3"              # Bulk density (g/cm³)
+)
+
+# Display information about each covariate
+covariate_info <- data.frame(
+  Covariate = available_soil_covariates,
+  Type = c("Chemical", "Chemical", "Physical", "Physical", "Physical",
+           "Chemical", "Chemical", "Chemical", "Chemical", 
+           "Chemical", "Chemical", "Physical"),
+  Units = c("pH units", "%", "%", "%", "%", "meq/100g", 
+           "%", "ppm", "ppm", "ppm", "ppm", "g/cm³"),
+  Typical_Range = c("4.0-8.5", "0.5-15", "5-60", "10-90", "5-80",
+                   "5-50", "0.05-2", "5-100", "50-500", 
+                   "200-5000", "50-800", "0.8-1.8")
+)
+
+print(covariate_info)
+```
+
+## Climate Covariates
+
+Climate variables are automatically fetched based on sample coordinates:
+
+```{r climate_covariates_overview, eval=FALSE}
+# Available climate covariates from Daymet
+available_climate_covariates <- c(
+  "MAT",                  # Mean Annual Temperature (°C)
+  "MAP",                  # Mean Annual Precipitation (mm)
+  "PET",                  # Potential Evapotranspiration (mm)
+  "AI",                   # Aridity Index (MAP/PET)
+  "GDD",                  # Growing Degree Days (base 5°C)
+  "Prec_Seasonality",     # Precipitation Seasonality (CV)
+  "Temp_Seasonality",     # Temperature Seasonality (CV)
+  "Max_Temp_Warmest",     # Maximum temperature of warmest month
+  "Min_Temp_Coldest",     # Minimum temperature of coldest month
+  "Prec_Wettest_Month",   # Precipitation of wettest month
+  "Prec_Driest_Month"     # Precipitation of driest month
+)
+
+# Display climate variable information
+climate_info <- data.frame(
+  Variable = available_climate_covariates,
+  Description = c(
+    "Average temperature across all years",
+    "Total precipitation across all years", 
+    "Hargreaves potential evapotranspiration",
+    "Ratio of precipitation to evapotranspiration",
+    "Accumulated degree days above 5°C",
+    "Coefficient of variation in monthly precipitation",
+    "Coefficient of variation in monthly temperature",
+    "Highest monthly temperature",
+    "Lowest monthly temperature", 
+    "Highest monthly precipitation",
+    "Lowest monthly precipitation"
+  ),
+  Units = c("°C", "mm", "mm", "dimensionless", "degree-days",
+           "dimensionless", "dimensionless", "°C", "°C", "mm", "mm")
+)
+
+print(climate_info)
+```
+
+# Soil Covariate Prediction
+
+## Understanding the OSSL Workflow
+
+The soil covariate prediction uses a sophisticated workflow based on the Open Soil Spectral Library:
+
+```{r ossl_workflow, eval=FALSE}
+# Demonstrate the OSSL prediction workflow
+demonstrate_ossl_workflow <- function(spectral_data) {
+  
+  # Step 1: Load OSSL calibration data
+  cli::cli_h2("Step 1: Loading OSSL Data")
+  ossl_data <- get_processed_mir_path()  # Internal OSSL data
+  cli::cli_inform("✓ OSSL data loaded: {nrow(ossl_data)} samples")
+  
+  # Step 2: Spectral clustering for local calibration
+  cli::cli_h2("Step 2: Spectral Clustering")
+  clustered_data <- cluster_spectral_data(
+    spectral_data = spectral_data,
+    ossl_data = ossl_data,
+    n_clusters = 10,
+    method = "hierarchical"
+  )
+  
+  cli::cli_inform("✓ Spectral clustering completed")
+  cli::cli_inform("  - Clusters: {max(clustered_data$cluster_id)}")
+  cli::cli_inform("  - Samples per cluster: {range(table(clustered_data$cluster_id))}")
+  
+  # Step 3: Local model training
+  cli::cli_h2("Step 3: Local Model Training")
+  covariate_predictions <- predict_covariates(
+    target_spectra = spectral_data,
+    ossl_data = ossl_data,
+    covariates = c("pH", "Clay_pct", "SOC_pct"),
+    clustering_method = "hierarchical",
+    model_type = "cubist"
+  )
+  
+  cli::cli_inform("✓ Covariate predictions completed")
+  cli::cli_inform("  - Predicted variables: {names(select(covariate_predictions, -sample_id))}")
+  
+  return(covariate_predictions)
+}
+
+# Run demonstration
+soil_predictions <- demonstrate_ossl_workflow(project_data)
+```
+
+## Customizing Soil Predictions
+
+### Model Selection for Soil Prediction
+
+```{r custom_soil_models, eval=FALSE}
+# Compare different models for soil property prediction
+compare_soil_prediction_models <- function(spectral_data, target_property = "pH") {
+  
+  # Define different model approaches
+  model_configs <- list(
+    "cubist" = list(
+      model_type = "cubist",
+      parameters = list(committees = 20, neighbors = 5)
+    ),
+    "random_forest" = list(
+      model_type = "random_forest", 
+      parameters = list(trees = 500, mtry = 50)
+    ),
+    "pls" = list(
+      model_type = "pls",
+      parameters = list(ncomp = 20)
+    )
+  )
+  
+  # Test each model
+  model_results <- map_dfr(names(model_configs), function(model_name) {
+    
+    config <- model_configs[[model_name]]
+    
+    # Predict using specific model
+    predictions <- predict_covariates(
+      target_spectra = spectral_data,
+      covariates = target_property,
+      model_type = config$model_type,
+      model_parameters = config$parameters
+    )
+    
+    # Calculate prediction statistics
+    pred_stats <- predictions %>%
+      summarise(
+        model = model_name,
+        mean_prediction = mean(.data[[target_property]], na.rm = TRUE),
+        sd_prediction = sd(.data[[target_property]], na.rm = TRUE),
+        min_prediction = min(.data[[target_property]], na.rm = TRUE),
+        max_prediction = max(.data[[target_property]], na.rm = TRUE),
+        n_predictions = sum(!is.na(.data[[target_property]]))
+      )
+    
+    return(pred_stats)
+    
+  }, .id = "model_id")
+  
+  return(model_results)
+}
+
+# Compare models for pH prediction
+ph_model_comparison <- compare_soil_prediction_models(project_data, "pH")
+print(ph_model_comparison)
+```
+
+### Quality Assessment of Predictions
+
+```{r prediction_quality, eval=FALSE}
+# Assess quality of soil property predictions
+assess_prediction_quality <- function(predictions, reference_data = NULL) {
+  
+  # Internal consistency checks
+  quality_checks <- list()
+  
+  # Check 1: Reasonable value ranges
+  if ("pH" %in% names(predictions)) {
+    ph_range_check <- predictions$pH >= 3.5 & predictions$pH <= 10.5
+    quality_checks$pH_range <- list(
+      valid_range = sum(ph_range_check, na.rm = TRUE),
+      total = sum(!is.na(predictions$pH)),
+      percentage = mean(ph_range_check, na.rm = TRUE) * 100
+    )
+  }
+  
+  if ("Clay_pct" %in% names(predictions)) {
+    clay_range_check <- predictions$Clay_pct >= 0 & predictions$Clay_pct <= 100
+    quality_checks$Clay_range <- list(
+      valid_range = sum(clay_range_check, na.rm = TRUE),
+      total = sum(!is.na(predictions$Clay_pct)),
+      percentage = mean(clay_range_check, na.rm = TRUE) * 100
+    )
+  }
+  
+  # Check 2: Texture sum constraint (if all texture fractions present)
+  texture_vars <- c("Clay_pct", "Sand_pct", "Silt_pct")
+  if (all(texture_vars %in% names(predictions))) {
+    texture_sums <- rowSums(predictions[texture_vars], na.rm = FALSE)
+    texture_check <- abs(texture_sums - 100) < 5  # Allow 5% tolerance
+    
+    quality_checks$texture_constraint <- list(
+      valid_sums = sum(texture_check, na.rm = TRUE),
+      total = sum(!is.na(texture_sums)),
+      percentage = mean(texture_check, na.rm = TRUE) * 100
+    )
+  }
+  
+  # Check 3: Cross-validation with reference data (if available)
+  if (!is.null(reference_data)) {
+    # Match samples between predictions and reference
+    common_samples <- intersect(predictions$sample_id, reference_data$sample_id)
+    
+    if (length(common_samples) > 10) {
+      pred_subset <- predictions %>% filter(sample_id %in% common_samples)
+      ref_subset <- reference_data %>% filter(sample_id %in% common_samples)
+      
+      validation_results <- map_dfr(names(pred_subset)[-1], function(var) {
+        if (var %in% names(ref_subset)) {
+          pred_vals <- pred_subset[[var]]
+          ref_vals <- ref_subset[[var]]
+          
+          # Calculate validation metrics
+          valid_pairs <- !is.na(pred_vals) & !is.na(ref_vals)
+          
+          if (sum(valid_pairs) > 5) {
+            r_squared <- cor(pred_vals[valid_pairs], ref_vals[valid_pairs])^2
+            rmse <- sqrt(mean((pred_vals[valid_pairs] - ref_vals[valid_pairs])^2))
+            mae <- mean(abs(pred_vals[valid_pairs] - ref_vals[valid_pairs]))
+            
+            return(data.frame(
+              variable = var,
+              n_pairs = sum(valid_pairs),
+              r_squared = r_squared,
+              rmse = rmse,
+              mae = mae
+            ))
+          }
+        }
+        return(NULL)
+      })
+      
+      quality_checks$validation <- validation_results
+    }
+  }
+  
+  return(quality_checks)
+}
+
+# Assess prediction quality
+prediction_quality <- assess_prediction_quality(soil_predictions)
+print(prediction_quality)
+```
+
+# Climate Covariate Integration
+
+## Understanding Daymet Data
+
+The climate covariate system uses Daymet daily surface weather data:
+
+```{r daymet_overview, eval=FALSE}
+# Demonstrate climate data fetching
+demonstrate_climate_fetching <- function(sample_locations) {
+  
+  cli::cli_h2("Climate Data Fetching Process")
+  
+  # Step 1: Coordinate validation
+  cli::cli_inform("Step 1: Validating coordinates")
+  
+  valid_coords <- sample_locations %>%
+    filter(!is.na(longitude), !is.na(latitude)) %>%
+    filter(longitude >= -180, longitude <= 180) %>%
+    filter(latitude >= -90, latitude <= 90) %>%
+    filter(latitude >= 14, latitude <= 71) %>%  # Daymet coverage
+    filter(longitude >= -179, longitude <= -60)  # North America
+  
+  cli::cli_inform("✓ Valid coordinates: {nrow(valid_coords)} of {nrow(sample_locations)}")
+  
+  # Step 2: Spatial aggregation to reduce API calls
+  cli::cli_inform("Step 2: Spatial aggregation (4km Daymet grid)")
+  
+  # Group samples by Daymet 4km grid
+  grid_size <- 0.04  # Approximately 4km at mid-latitudes
+  
+  aggregated_coords <- valid_coords %>%
+    mutate(
+      grid_lon = round(longitude / grid_size) * grid_size,
+      grid_lat = round(latitude / grid_size) * grid_size
+    ) %>%
+    group_by(grid_lon, grid_lat) %>%
+    summarise(
+      n_samples = n(),
+      sample_ids = list(sample_id),
+      .groups = "drop"
+    )
+  
+  cli::cli_inform("✓ Grid cells to fetch: {nrow(aggregated_coords)}")
+  cli::cli_inform("  - Samples per grid cell: {range(aggregated_coords$n_samples)}")
+  
+  # Step 3: Fetch climate data
+  cli::cli_inform("Step 3: Fetching Daymet data")
+  
+  climate_data <- fetch_climate_covariates(
+    coordinates = valid_coords,
+    variables = "all",
+    years = 2003:2023,  # 20-year climatology
+    cache = TRUE
+  )
+  
+  cli::cli_inform("✓ Climate data fetched")
+  cli::cli_inform("  - Variables: {names(select(climate_data, -sample_id, -longitude, -latitude))}")
+  
+  return(climate_data)
+}
+
+# Example coordinate data
+example_coords <- data.frame(
+  sample_id = paste0("sample_", 1:100),
+  longitude = runif(100, -120, -90),  # Western US
+  latitude = runif(100, 35, 45)       # Mid-latitudes
+)
+
+# Demonstrate climate fetching
+# climate_data <- demonstrate_climate_fetching(example_coords)
+```
+
+## Custom Climate Variables
+
+### Derived Climate Indices
+
+```{r custom_climate_indices, eval=FALSE}
+# Create custom climate indices
+calculate_custom_climate_indices <- function(climate_data) {
+  
+  enhanced_climate <- climate_data %>%
+    mutate(
+      # Water balance indices
+      Water_Deficit = pmax(0, PET - MAP),
+      Water_Surplus = pmax(0, MAP - PET),
+      
+      # Temperature indices
+      Temp_Range = Max_Temp_Warmest - Min_Temp_Coldest,
+      Growing_Season_Length = pmax(0, (MAT - 5) * 365 / 30),  # Rough estimate
+      
+      # Precipitation indices
+      Drought_Index = Prec_Driest_Month / MAP * 12,
+      Wet_Season_Intensity = Prec_Wettest_Month / MAP * 12,
+      
+      # Compound indices
+      Climatic_Water_Balance = MAP - PET,
+      Continentality = Temp_Range / abs(latitude),  # If latitude available
+      
+      # Stress indices
+      Heat_Stress_Days = pmax(0, (Max_Temp_Warmest - 30) * 30),  # Days >30°C
+      Frost_Risk = pmax(0, (5 - Min_Temp_Coldest) * 30),        # Risk days
+      
+      # Categorical climate classification
+      Climate_Zone = case_when(
+        AI > 2.0 ~ "Humid",
+        AI > 1.0 ~ "Sub-humid", 
+        AI > 0.5 ~ "Semi-arid",
+        AI > 0.2 ~ "Arid",
+        TRUE ~ "Hyper-arid"
+      ),
+      
+      Thermal_Zone = case_when(
+        MAT > 20 ~ "Tropical",
+        MAT > 15 ~ "Warm_temperate",
+        MAT > 10 ~ "Cool_temperate",
+        MAT > 5 ~ "Boreal",
+        TRUE ~ "Arctic"
+      )
+    )
+  
+  return(enhanced_climate)
+}
+
+# Apply custom indices
+# enhanced_climate <- calculate_custom_climate_indices(climate_data)
+```
+
+### Temporal Climate Patterns
+
+```{r temporal_patterns, eval=FALSE}
+# Analyze temporal patterns in climate data
+analyze_climate_temporality <- function(daily_climate_data) {
+  
+  # Calculate monthly statistics
+  monthly_stats <- daily_climate_data %>%
+    mutate(month = lubridate::month(date)) %>%
+    group_by(sample_id, month) %>%
+    summarise(
+      temp_mean = mean(temperature, na.rm = TRUE),
+      temp_max = max(temperature, na.rm = TRUE),
+      temp_min = min(temperature, na.rm = TRUE),
+      precip_sum = sum(precipitation, na.rm = TRUE),
+      .groups = "drop"
+    )
+  
+  # Calculate seasonal patterns
+  seasonal_patterns <- monthly_stats %>%
+    mutate(
+      season = case_when(
+        month %in% c(12, 1, 2) ~ "Winter",
+        month %in% c(3, 4, 5) ~ "Spring", 
+        month %in% c(6, 7, 8) ~ "Summer",
+        month %in% c(9, 10, 11) ~ "Fall"
+      )
+    ) %>%
+    group_by(sample_id, season) %>%
+    summarise(
+      seasonal_temp = mean(temp_mean, na.rm = TRUE),
+      seasonal_precip = sum(precip_sum, na.rm = TRUE),
+      .groups = "drop"
+    ) %>%
+    pivot_wider(
+      names_from = season,
+      values_from = c(seasonal_temp, seasonal_precip),
+      names_sep = "_"
+    )
+  
+  # Calculate temporal variability indices
+  temporal_indices <- monthly_stats %>%
+    group_by(sample_id) %>%
+    summarise(
+      # Temperature variability
+      temp_seasonality = sd(temp_mean, na.rm = TRUE),
+      temp_cv = sd(temp_mean, na.rm = TRUE) / mean(temp_mean, na.rm = TRUE),
+      
+      # Precipitation variability
+      precip_seasonality = sd(precip_sum, na.rm = TRUE),
+      precip_cv = sd(precip_sum, na.rm = TRUE) / mean(precip_sum, na.rm = TRUE),
+      
+      # Extreme indices
+      n_hot_months = sum(temp_mean > quantile(temp_mean, 0.9, na.rm = TRUE), na.rm = TRUE),
+      n_cold_months = sum(temp_mean < quantile(temp_mean, 0.1, na.rm = TRUE), na.rm = TRUE),
+      n_wet_months = sum(precip_sum > quantile(precip_sum, 0.9, na.rm = TRUE), na.rm = TRUE),
+      n_dry_months = sum(precip_sum < quantile(precip_sum, 0.1, na.rm = TRUE), na.rm = TRUE),
+      
+      .groups = "drop"
+    )
+  
+  # Combine all temporal features
+  temporal_features <- seasonal_patterns %>%
+    left_join(temporal_indices, by = "sample_id")
+  
+  return(temporal_features)
+}
+```
+
+# Covariate Selection and Interaction
+
+## Evaluating Covariate Importance
+
+```{r covariate_importance, eval=FALSE}
+# Evaluate the importance of different covariate groups
+evaluate_covariate_importance <- function(spectral_data, covariate_data, response_var) {
+  
+  # Combine spectral and covariate data
+  combined_data <- spectral_data %>%
+    left_join(covariate_data, by = "sample_id")
+  
+  # Define covariate groups
+  covariate_groups <- list(
+    "soil_chemical" = c("pH", "SOC_pct", "N_pct", "CEC_meq_100g"),
+    "soil_physical" = c("Clay_pct", "Sand_pct", "Silt_pct", "BD_g_cm3"),
+    "climate_temp" = c("MAT", "Max_Temp_Warmest", "Min_Temp_Coldest", "Temp_Seasonality"),
+    "climate_precip" = c("MAP", "Prec_Wettest_Month", "Prec_Driest_Month", "Prec_Seasonality"),
+    "climate_water" = c("PET", "AI", "Water_Deficit", "Water_Surplus")
+  )
+  
+  # Evaluate each group's contribution
+  group_importance <- map_dfr(names(covariate_groups), function(group_name) {
+    
+    group_vars <- covariate_groups[[group_name]]
+    available_vars <- intersect(group_vars, names(combined_data))
+    
+    if (length(available_vars) > 0) {
+      # Model with spectral data only
+      spectral_only_recipe <- recipe(combined_data, 
+                                   formula = as.formula(paste(response_var, "~ ."))) %>%
+        step_transform_spectra(starts_with("X"), method = "snv_deriv1") %>%
+        recipes::step_rm(all_of(names(covariate_data)[-1]))  # Remove all covariates
+      
+      # Model with spectral + covariate group
+      with_covariates_recipe <- recipe(combined_data, 
+                                     formula = as.formula(paste(response_var, "~ ."))) %>%
+        step_transform_spectra(starts_with("X"), method = "snv_deriv1") %>%
+        recipes::step_rm(all_of(setdiff(names(covariate_data)[-1], available_vars)))
+      
+      # Cross-validation comparison
+      cv_folds <- rsample::vfold_cv(combined_data, v = 5)
+      
+      # Test both models
+      rf_model <- parsnip::rand_forest(trees = 500) %>%
+        parsnip::set_engine("ranger") %>%
+        parsnip::set_mode("regression")
+      
+      # Spectral only
+      spectral_workflow <- workflows::workflow() %>%
+        workflows::add_recipe(spectral_only_recipe) %>%
+        workflows::add_model(rf_model)
+      
+      spectral_results <- tune::fit_resamples(
+        spectral_workflow, cv_folds,
+        metrics = yardstick::metric_set(yardstick::rmse, yardstick::rsq)
+      )
+      
+      # With covariates
+      covariate_workflow <- workflows::workflow() %>%
+        workflows::add_recipe(with_covariates_recipe) %>%
+        workflows::add_model(rf_model)
+      
+      covariate_results <- tune::fit_resamples(
+        covariate_workflow, cv_folds,
+        metrics = yardstick::metric_set(yardstick::rmse, yardstick::rsq)
+      )
+      
+      # Compare performance
+      spectral_metrics <- tune::collect_metrics(spectral_results)
+      covariate_metrics <- tune::collect_metrics(covariate_results)
+      
+      # Calculate improvement
+      rmse_improvement <- (spectral_metrics$mean[spectral_metrics$.metric == "rmse"] - 
+                          covariate_metrics$mean[covariate_metrics$.metric == "rmse"]) /
+                         spectral_metrics$mean[spectral_metrics$.metric == "rmse"] * 100
+      
+      rsq_improvement <- (covariate_metrics$mean[covariate_metrics$.metric == "rsq"] - 
+                         spectral_metrics$mean[spectral_metrics$.metric == "rsq"]) /
+                        spectral_metrics$mean[spectral_metrics$.metric == "rsq"] * 100
+      
+      return(data.frame(
+        covariate_group = group_name,
+        n_variables = length(available_vars),
+        rmse_improvement_pct = rmse_improvement,
+        rsq_improvement_pct = rsq_improvement,
+        variables = paste(available_vars, collapse = ", ")
+      ))
+    }
+    
+    return(NULL)
+    
+  }, .id = "group_id")
+  
+  return(group_importance)
+}
+
+# Evaluate covariate importance
+# covariate_importance <- evaluate_covariate_importance(
+#   project_data, soil_predictions, "MAOM_C_g_kg"
+# )
+# print(covariate_importance)
+```
+
+## Creating Covariate Interactions
+
+```{r covariate_interactions, eval=FALSE}
+# Create meaningful covariate interactions
+create_covariate_interactions <- function(covariate_data) {
+  
+  enhanced_covariates <- covariate_data %>%
+    mutate(
+      # Soil chemistry interactions
+      pH_SOC_interaction = pH * SOC_pct,
+      pH_Clay_interaction = pH * Clay_pct,
+      CEC_Clay_ratio = CEC_meq_100g / Clay_pct,
+      
+      # Texture interactions
+      Clay_Sand_ratio = Clay_pct / Sand_pct,
+      Silt_Clay_ratio = Silt_pct / Clay_pct,
+      Fine_fraction = Clay_pct + Silt_pct,
+      
+      # Climate-soil interactions
+      MAT_SOC_interaction = MAT * SOC_pct,
+      MAP_Clay_interaction = MAP * Clay_pct,
+      AI_pH_interaction = AI * pH,
+      
+      # Water-soil interactions
+      PET_BD_interaction = PET * BD_g_cm3,
+      MAP_CEC_interaction = MAP * CEC_meq_100g,
+      
+      # Compound indices
+      Soil_Quality_Index = (SOC_pct * CEC_meq_100g) / (BD_g_cm3 * 10),
+      Climate_Stress_Index = (PET - MAP) / MAT,
+      Weathering_Index = MAT * MAP / 1000,
+      
+      # Categorical interactions
+      Climate_Soil_Zone = paste(
+        case_when(
+          AI > 1 ~ "Humid",
+          AI > 0.5 ~ "SemiArid", 
+          TRUE ~ "Arid"
+        ),
+        case_when(
+          Clay_pct > 35 ~ "Clay",
+          Sand_pct > 70 ~ "Sand",
+          TRUE ~ "Loam"
+        ),
+        sep = "_"
+      )
+    )
+  
+  return(enhanced_covariates)
+}
+
+# Create interactions
+# enhanced_covariates <- create_covariate_interactions(all_covariates)
+```
+
+# Handling Missing Covariate Data
+
+## Missing Data Patterns
+
+```{r missing_data_analysis, eval=FALSE}
+# Analyze patterns of missing covariate data
+analyze_missing_patterns <- function(covariate_data) {
+  
+  # Calculate missing percentages
+  missing_summary <- covariate_data %>%
+    summarise(across(everything(), ~ sum(is.na(.x)) / length(.x) * 100)) %>%
+    pivot_longer(everything(), names_to = "variable", values_to = "missing_pct") %>%
+    arrange(desc(missing_pct))
+  
+  # Visualize missing patterns
+  missing_plot <- missing_summary %>%
+    filter(missing_pct > 0) %>%
+    mutate(variable = reorder(variable, missing_pct)) %>%
+    ggplot(aes(x = variable, y = missing_pct)) +
+    geom_col(fill = "steelblue", alpha = 0.7) +
+    coord_flip() +
+    labs(title = "Missing Data Patterns", 
+         x = "Variable", 
+         y = "Missing Percentage (%)") +
+    theme_minimal()
+  
+  # Missing pattern matrix
+  library(VIM)  # For missing data visualization
+  missing_pattern <- VIM::aggr(covariate_data, 
+                              col = c("lightblue", "red"),
+                              numbers = TRUE, 
+                              sortVars = TRUE)
+  
+  # Co-occurrence of missing values
+  missing_combinations <- covariate_data %>%
+    mutate(across(everything(), ~ ifelse(is.na(.x), 1, 0))) %>%
+    group_by(across(everything())) %>%
+    count() %>%
+    arrange(desc(n)) %>%
+    slice_head(n = 10)  # Top 10 missing patterns
+  
+  return(list(
+    summary = missing_summary,
+    plot = missing_plot,
+    patterns = missing_pattern,
+    combinations = missing_combinations
+  ))
+}
+
+# Analyze missing patterns
+# missing_analysis <- analyze_missing_patterns(all_covariates)
+# print(missing_analysis$plot)
+```
+
+## Imputation Strategies
+
+```{r imputation_strategies, eval=FALSE}
+# Implement various imputation strategies for missing covariates
+implement_imputation_strategies <- function(covariate_data, method = "multiple") {
+  
+  strategies <- list()
+  
+  # Simple imputation methods
+  strategies$mean_imputation <- covariate_data %>%
+    mutate(across(where(is.numeric), ~ ifelse(is.na(.x), mean(.x, na.rm = TRUE), .x)))
+  
+  strategies$median_imputation <- covariate_data %>%
+    mutate(across(where(is.numeric), ~ ifelse(is.na(.x), median(.x, na.rm = TRUE), .x)))
+  
+  # K-nearest neighbors imputation
+  if (requireNamespace("VIM", quietly = TRUE)) {
+    strategies$knn_imputation <- VIM::kNN(covariate_data, k = 5)[, 1:ncol(covariate_data)]
+  }
+  
+  # Predictive mean matching
+  if (requireNamespace("mice", quietly = TRUE)) {
+    mice_imputation <- mice::mice(covariate_data, m = 5, method = "pmm", 
+                                 printFlag = FALSE, seed = 123)
+    strategies$mice_imputation <- mice::complete(mice_imputation)
+  }
+  
+  # Random forest imputation
+  if (requireNamespace("missForest", quietly = TRUE)) {
+    rf_imputation <- missForest::missForest(covariate_data, verbose = FALSE)
+    strategies$rf_imputation <- rf_imputation$ximp
+  }
+  
+  # Geographic-based imputation (if coordinates available)
+  if (all(c("longitude", "latitude") %in% names(covariate_data))) {
+    strategies$geographic_imputation <- covariate_data %>%
+      group_by(
+        lon_group = round(longitude / 0.5) * 0.5,  # 0.5 degree groups
+        lat_group = round(latitude / 0.5) * 0.5
+      ) %>%
+      mutate(across(where(is.numeric), ~ ifelse(is.na(.x), 
+                                               mean(.x, na.rm = TRUE), .x))) %>%
+      ungroup() %>%
+      select(-lon_group, -lat_group)
+  }
+  
+  # Return based on method choice
+  if (method == "all") {
+    return(strategies)
+  } else if (method %in% names(strategies)) {
+    return(strategies[[method]])
+  } else {
+    return(strategies$mean_imputation)  # Default
+  }
+}
+
+# Apply imputation
+# imputed_covariates <- implement_imputation_strategies(all_covariates, method = "mice")
+```
+
+# Covariate Effect Evaluation
+
+## Performance Decomposition
+
+```{r performance_decomposition, eval=FALSE}
+# Decompose model performance by covariate contributions
+decompose_covariate_effects <- function(spectral_data, covariate_data, response_var) {
+  
+  # Combine data
+  full_data <- spectral_data %>%
+    left_join(covariate_data, by = "sample_id")
+  
+  # Define model variants
+  model_variants <- list(
+    "spectral_only" = c("starts_with('X')"),
+    "spectral_soil" = c("starts_with('X')", "pH", "SOC_pct", "Clay_pct", "Sand_pct"),
+    "spectral_climate" = c("starts_with('X')", "MAT", "MAP", "PET", "AI"),
+    "spectral_all" = c("starts_with('X')", names(covariate_data)[-1])
+  )
+  
+  # Evaluate each variant
+  variant_results <- map_dfr(names(model_variants), function(variant_name) {
+    
+    # Create appropriate recipe
+    if (variant_name == "spectral_only") {
+      recipe_variant <- recipe(full_data, 
+                              formula = as.formula(paste(response_var, "~ ."))) %>%
+        step_transform_spectra(starts_with("X"), method = "snv_deriv1") %>%
+        recipes::step_rm(all_of(names(covariate_data)[-1]))
+    } else {
+      keep_vars <- c()
+      if (grepl("soil", variant_name)) {
+        keep_vars <- c(keep_vars, c("pH", "SOC_pct", "Clay_pct", "Sand_pct"))
+      }
+      if (grepl("climate", variant_name)) {
+        keep_vars <- c(keep_vars, c("MAT", "MAP", "PET", "AI"))
+      }
+      if (variant_name == "spectral_all") {
+        keep_vars <- names(covariate_data)[-1]
+      }
+      
+      remove_vars <- setdiff(names(covariate_data)[-1], keep_vars)
+      
+      recipe_variant <- recipe(full_data, 
+                              formula = as.formula(paste(response_var, "~ ."))) %>%
+        step_transform_spectra(starts_with("X"), method = "snv_deriv1") %>%
+        recipes::step_rm(all_of(remove_vars))
+    }
+    
+    # Cross-validation
+    cv_folds <- rsample::vfold_cv(full_data, v = 5)
+    
+    model <- parsnip::rand_forest(trees = 500) %>%
+      parsnip::set_engine("ranger") %>%
+      parsnip::set_mode("regression")
+    
+    workflow <- workflows::workflow() %>%
+      workflows::add_recipe(recipe_variant) %>%
+      workflows::add_model(model)
+    
+    cv_results <- tune::fit_resamples(
+      workflow, cv_folds,
+      metrics = yardstick::metric_set(yardstick::rmse, yardstick::rsq, rrmse)
+    )
+    
+    # Extract metrics
+    metrics <- tune::collect_metrics(cv_results)
+    
+    return(data.frame(
+      variant = variant_name,
+      rmse = metrics$mean[metrics$.metric == "rmse"],
+      rsq = metrics$mean[metrics$.metric == "rsq"],
+      rrmse = metrics$mean[metrics$.metric == "rrmse"]
+    ))
+    
+  }, .id = "variant_id")
+  
+  # Calculate incremental improvements
+  baseline_rmse <- variant_results$rmse[variant_results$variant == "spectral_only"]
+  
+  improvement_results <- variant_results %>%
+    mutate(
+      rmse_improvement = (baseline_rmse - rmse) / baseline_rmse * 100,
+      relative_rmse = rmse / baseline_rmse
+    ) %>%
+    arrange(rmse)
+  
+  # Visualization
+  improvement_plot <- improvement_results %>%
+    mutate(variant = reorder(variant, rmse_improvement)) %>%
+    ggplot(aes(x = variant, y = rmse_improvement)) +
+    geom_col(fill = "steelblue", alpha = 0.7) +
+    coord_flip() +
+    labs(title = "Covariate Contribution to Model Performance", 
+         x = "Model Variant", 
+         y = "RMSE Improvement (%)") +
+    theme_minimal()
+  
+  return(list(
+    results = improvement_results,
+    plot = improvement_plot
+  ))
+}
+
+# Decompose effects
+# effect_decomposition <- decompose_covariate_effects(
+#   project_data, all_covariates, "MAOM_C_g_kg"
+# )
+# print(effect_decomposition$plot)
+```
+
+# Best Practices and Recommendations
+
+## Covariate Selection Guidelines
+
+1. **Domain Knowledge**: Use soil science knowledge to select relevant covariates
+2. **Correlation Analysis**: Avoid highly correlated covariates (|r| > 0.9)
+3. **Missing Data**: Consider missingness patterns when selecting covariates
+4. **Geographic Scope**: Ensure covariate availability across your study area  
+5. **Temporal Consistency**: Match temporal scales of covariates and response data
+
+## Quality Control Procedures
+
+```{r quality_control, eval=FALSE}
+# Implement comprehensive quality control for covariates
+implement_covariate_qc <- function(covariate_data) {
+  
+  qc_results <- list()
+  
+  # 1. Range checks
+  range_checks <- covariate_data %>%
+    summarise(
+      # Soil properties
+      pH_valid = sum(pH >= 3 & pH <= 11, na.rm = TRUE) / sum(!is.na(pH)) * 100,
+      SOC_valid = sum(SOC_pct >= 0 & SOC_pct <= 50, na.rm = TRUE) / sum(!is.na(SOC_pct)) * 100,
+      Clay_valid = sum(Clay_pct >= 0 & Clay_pct <= 100, na.rm = TRUE) / sum(!is.na(Clay_pct)) * 100,
+      
+      # Climate variables
+      MAT_valid = sum(MAT >= -50 & MAT <= 50, na.rm = TRUE) / sum(!is.na(MAT)) * 100,
+      MAP_valid = sum(MAP >= 0 & MAP <= 5000, na.rm = TRUE) / sum(!is.na(MAP)) * 100
+    )
+  
+  qc_results$range_checks <- range_checks
+  
+  # 2. Outlier detection
+  outlier_detection <- covariate_data %>%
+    select(where(is.numeric)) %>%
+    summarise(across(everything(), ~ {
+      Q1 <- quantile(.x, 0.25, na.rm = TRUE)
+      Q3 <- quantile(.x, 0.75, na.rm = TRUE)
+      IQR <- Q3 - Q1
+      outliers <- sum(.x < (Q1 - 1.5 * IQR) | .x > (Q3 + 1.5 * IQR), na.rm = TRUE)
+      outliers / sum(!is.na(.x)) * 100
+    })) %>%
+    pivot_longer(everything(), names_to = "variable", values_to = "outlier_pct")
+  
+  qc_results$outliers <- outlier_detection
+  
+  # 3. Consistency checks
+  if (all(c("Clay_pct", "Sand_pct", "Silt_pct") %in% names(covariate_data))) {
+    texture_consistency <- covariate_data %>%
+      mutate(texture_sum = Clay_pct + Sand_pct + Silt_pct) %>%
+      summarise(
+        texture_sum_valid = sum(abs(texture_sum - 100) < 5, na.rm = TRUE) / 
+                           sum(!is.na(texture_sum)) * 100
+      )
+    
+    qc_results$texture_consistency <- texture_consistency
+  }
+  
+  return(qc_results)
+}
+
+# Apply quality control
+# qc_results <- implement_covariate_qc(all_covariates)
+# print(qc_results)
+```
+
+## Integration Workflow Optimization
+
+```{r workflow_optimization, eval=FALSE}
+# Optimize the covariate integration workflow
+optimize_covariate_workflow <- function(spectral_data, response_var) {
+  
+  # Step 1: Efficient soil covariate prediction
+  cli::cli_h2("Optimizing Soil Covariate Prediction")
+  
+  # Use clustering for efficient prediction
+  soil_covariates <- predict_covariates(
+    target_spectra = spectral_data,
+    covariates = c("pH", "SOC_pct", "Clay_pct", "Sand_pct", "CEC_meq_100g"),
+    clustering_method = "hierarchical",
+    n_clusters = 10,
+    model_type = "cubist",
+    cache = TRUE
+  )
+  
+  # Step 2: Climate data with spatial aggregation
+  cli::cli_h2("Optimizing Climate Data Fetching")
+  
+  # Extract unique coordinates for efficient API usage
+  unique_coords <- spectral_data %>%
+    select(sample_id, longitude, latitude) %>%
+    distinct(longitude, latitude, .keep_all = TRUE)
+  
+  climate_covariates <- fetch_climate_covariates(
+    coordinates = unique_coords,
+    variables = c("MAT", "MAP", "PET", "AI"),
+    spatial_aggregation = TRUE,
+    cache = TRUE
+  )
+  
+  # Map back to all samples
+  climate_full <- spectral_data %>%
+    select(sample_id, longitude, latitude) %>%
+    left_join(climate_covariates, by = c("longitude", "latitude"))
+  
+  # Step 3: Quality control and filtering
+  cli::cli_h2("Quality Control")
+  
+  # Combine covariates
+  all_covariates <- soil_covariates %>%
+    left_join(climate_full, by = "sample_id")
+  
+  # Apply QC filters
+  qc_filtered <- all_covariates %>%
+    filter(
+      pH >= 3 & pH <= 11,
+      SOC_pct >= 0 & SOC_pct <= 50,
+      Clay_pct >= 0 & Clay_pct <= 100,
+      MAT >= -20 & MAT <= 40,
+      MAP >= 0 & MAP <= 3000
+    )
+  
+  # Step 4: Feature selection
+  cli::cli_h2("Covariate Selection")
+  
+  # Remove highly correlated covariates
+  numeric_covariates <- qc_filtered %>%
+    select(where(is.numeric), -sample_id)
+  
+  cor_matrix <- cor(numeric_covariates, use = "complete.obs")
+  high_cor_pairs <- which(abs(cor_matrix) > 0.9 & cor_matrix != 1, arr.ind = TRUE)
+  
+  if (nrow(high_cor_pairs) > 0) {
+    remove_vars <- unique(rownames(cor_matrix)[high_cor_pairs[, 1]])
+    final_covariates <- qc_filtered %>%
+      select(-all_of(remove_vars))
+  } else {
+    final_covariates <- qc_filtered
+  }
+  
+  cli::cli_inform("✓ Workflow completed")
+  cli::cli_inform("  - Final covariates: {ncol(final_covariates) - 1}")
+  cli::cli_inform("  - Valid samples: {nrow(final_covariates)}")
+  
+  return(final_covariates)
+}
+
+# Run optimized workflow
+# optimized_covariates <- optimize_covariate_workflow(project_data, "MAOM_C_g_kg")
+```
+
+# Summary
+
+This vignette covered comprehensive covariate integration strategies:
+
+- **Soil Covariate Prediction**: Using OSSL data and spectral clustering
+- **Climate Data Integration**: Fetching and processing Daymet climate variables  
+- **Custom Variable Creation**: Deriving meaningful interactions and indices
+- **Missing Data Handling**: Multiple imputation strategies
+- **Quality Control**: Comprehensive validation and filtering procedures
+- **Performance Evaluation**: Assessing covariate contributions to model accuracy
+
+Key recommendations:
+- Use domain knowledge to guide covariate selection
+- Implement robust quality control procedures
+- Consider spatial and temporal patterns in covariate data
+- Evaluate incremental benefits of covariate groups
+- Handle missing data appropriately for your use case
+
+For more information, see the other vignettes:
+- **Getting Started**: Basic workflow overview
+- **Advanced Modeling**: Ensemble methods and interpretation
+- **Preprocessing and Feature Selection**: Spectral data processing
+
+# Session Information
+
+```{r session_info}
+sessionInfo()
+```
