@@ -13,6 +13,7 @@
 #' @param wavelengths Numeric vector. Wavenumbers to include. Default is 600:4000 by 2.
 #' @param response_range Numeric vector of length 2. Range for response values.
 #' @param add_noise Logical. Whether to add realistic noise to spectra.
+#' @param add_project Logical. Whether to add Project column (default TRUE).
 #' @param seed Integer. Random seed for reproducibility.
 #'
 #' @return A data frame with Sample_ID, Response, and spectral columns.
@@ -20,6 +21,7 @@ make_test_spectra <- function(n_samples = 10,
                               wavelengths = seq(600, 4000, by = 2),
                               response_range = c(0.5, 5.0),
                               add_noise = TRUE,
+                              add_project = TRUE,
                               seed = 123) {
   
   set.seed(seed)
@@ -74,6 +76,11 @@ make_test_spectra <- function(n_samples = 10,
     Response = responses,
     stringsAsFactors = FALSE
   )
+  
+  # Add Project column if requested
+  if (add_project) {
+    result$Project <- "TEST_PROJECT"
+  }
   
   result <- cbind(result, spectra_df)
   
