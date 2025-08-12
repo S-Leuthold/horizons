@@ -71,7 +71,7 @@ build_recipe <- function(input_data,
   ## ---------------------------------------------------------------------------
 
   if (!is.data.frame(input_data)) {
-    li::cli_alert_danger("▶ build_recipe: Input is not a data frame.")
+    cli::cli_alert_danger("▶ build_recipe: Input is not a data frame.")
     stop("Aborting: Invalid input_data.")
   }
 
@@ -167,6 +167,7 @@ build_recipe <- function(input_data,
          "shap"   = model_recipe %>%
                           step_select_shap(all_predictors(),
                                            outcome = "Response"),
+         "none"   = model_recipe,
 
          cli::cli_abort("Unsupported {.field feature selection method}: {.val {feature_selection_method}}")) -> model_recipe
 

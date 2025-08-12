@@ -26,7 +26,7 @@ projects <- project_list("FFAR" = project_entry(spectra_path        = "../../../
                                                 file_name_format    = "project_sampleid_fraction_scanid_wellid",
                                                 file_name_delimiter = "_")) %>%
   create_project_data(projects  = .,
-                      variables = "MAOM_C_g_kg")  -> proj_data
+                      variables = "POM_C_g_kg")  -> proj_data
 
 ## -----------------------------------------------------------------------------
 ## Step 3: Create project configurations
@@ -56,32 +56,15 @@ create_project_configurations(project_data       = proj_data,
                                                      "msc_deriv1"),
                               feature_selection = c("pca",
                                                     "correlation",
-                                                    "shap"),
+                                                    "shap",
+                                                    "none"),
                               soil_covariates    = c("pH",
                                                      "Clay",
                                                      "CEC"),
-                              climate_covariates = c("all"),
+                              climate_covariates = c("AI", "MAP"),
                               spatial_covariates = NULL,
                               refresh            = FALSE,
                               verbose            = TRUE) -> configs
-
-
-## Debugging the MARS and elastic_net models -----------------------------------
-
-create_project_configurations(project_data       = proj_data,
-                              models             = c("elastic_net",
-                                                     "mars"),
-                              transformations    = c("No Transformation",
-                                                     "Log Transformation"),
-                              preprocessing      = c("snv_deriv1",
-                                                     "raw"),
-                              feature_selection = c("pca",
-                                                    "shap"),
-                              soil_covariates    = NULL,
-                              climate_covariates = c("MAP"),
-                              spatial_covariates = NULL,
-                              refresh            = FALSE,
-                              verbose            = TRUE) -> test_configs
 
 
 ## -----------------------------------------------------------------------------
@@ -92,8 +75,8 @@ set.seed(0307)
 
 configs %>%
   purrr::pluck(., "project_configurations") %>%
-  dplyr::group_by(model) %>%
-  dplyr::slice_sample(n = 50) %>%
+  dplyr::filter(feature_selection == "none") %>%
+  dplyr::slice_sample(n = 1) %>%
   dplyr::ungroup() %>%
   dplyr::slice_sample(prop = 1) -> random_configs
 
@@ -105,8 +88,8 @@ configs %>%
 run_model_evaluation(config                 = random_configs,
                      input_data             = proj_data,
                      covariate_data         = configs$covariate_data,
-                     variable               = "MAOM_C_g_kg",
-                     output_dir             = "../../../../../../../Desktop/_brain/1_Current_Projects/horizons/4_Results/MAOM_250729",
+                     variable               = "POM_C_g_kg",
+                     output_dir             = "../../../../../../../Desktop/_brain/1_Current_Projects/horizons/4_Results/test",
                      grid_size_eval         = 10,
                      bayesian_iter_eval     = 15,
                      cv_folds_eval          = 10,
@@ -115,4 +98,104 @@ run_model_evaluation(config                 = random_configs,
                      grid_size_final        = 15,
                      bayesian_iter_final    = 15,
                      cv_folds_final         = 10,
-                     pruning                = FALSE) -> results
+                     pruning                = FALSE) -> pom_results
+
+## -----------------------------------------------------------------------------
+## Step 6: Create Plots
+## -----------------------------------------------------------------------------
+
+qread("../../../../../../../Desktop/_brain/1_Current_Projects/horizons/4_Results/MAOM_250729/batch_summary_MAOM_C_g_kg_20250730_210657.qs") -> maom_results
+
+## Figure 1: UpSet Plot
+
+plot_ensemble_upset("../../../../../../../Desktop/_brain/1_Current_Projects/horizons/4_Results/MAOM_250729/",
+                    ensemble_results = NULL)
+## Figure 2:
+
+## Figure 3:
+
+## Figure 4: Component Interactions (Network Plot)
+
+plot_component_chord_diagram(results_data          = maom_results,
+                             metric                = "rrmse",
+                             performance_threshold = 0.75,
+                             covariate_handling    = "simplified",
+                             top_interactions      = 400,
+                             min_co_occurrence     = 5,
+                             show_significance     = FALSE)
+
+## -----------------------------------------------------------------------------
+##
+## -----------------------------------------------------------------------------
+
+hierarchical_interaction_decomposition(maom_results,
+                                       metric = "rrmse",
+                                       covariate_handling = c("simplified"),
+                                       max_interaction_level = 5) -> decomp_results_maom
+
+analyze_component_synergy_effects(decomp_results_maom) -> x
+
+plot_component_synergy_effects(x)
+
+x$model_info
+plot_models_radar(maom_results,
+                  metric = "rrmse")
+
+plot_component_value_interactions(
+  results$full_summary %>% filter(status == "success"),
+  metric = "rrmse",
+  focus_components = c("models", "preprocessing")
+)
+
+plot_all_component_interactions(
+  results$full_summary,
+  metric = "rrmse",
+  layout = "facet",
+  max_interactions_per_panel = 25
+)
+
+plot_all_component_interactions(
+  results$full_summary %>% filter(status == "success"),
+  metric = "rrmse",
+  layout = "ranked"
+)
+
+plot_covariate_effects(results_data     = results$full_summary %>% filter(status == "success"),
+                       metric           = "rrmse",
+                       analysis_type    = c("model_specific"),
+                       min_observations = 5,
+                       effect_threshold = 0)
+
+plot_covariate_effects(results_data     = pom_results$full_summary %>% filter(status == "success"),
+                       metric           = "rmse",
+                       analysis_type    = c("individual"),
+                       min_observations = 5,
+                       effect_threshold = 0)
+
+
+## -----------------------------------------------------------------------------
+## Step 7: Ensemble Model
+## -----------------------------------------------------------------------------
+
+build_ensemble_stack(results_dir    = "../../../../../../../Desktop/_brain/1_Current_Projects/horizons/4_Results/MAOM_250729",
+                    input_data     = proj_data,
+                    variable       = "MAOM_C_g_kg",
+                    filter_metric  = "rsq",
+                    n_best         = 4,
+                    test_prop      = 0.2,
+                    cv_folds       = 10,
+                    verbose        = TRUE) -> stack_results
+
+build_ensemble_stack(results_dir    = "../../../../../../../Desktop/_brain/1_Current_Projects/horizons/4_Results/POM_250804",
+                    input_data     = proj_data,
+                    variable       = "POM_C_g_kg",
+                    filter_metric  = "rsq",
+                    n_best         = 4,
+                    test_prop      = 0.2,
+                    cv_folds       = 10,
+                    verbose        = TRUE) -> pom_stack_results
+
+
+plot_ensemble_biplot(stack_results)
+plot_ensemble_upset("../../../../../../../Desktop/_brain/1_Current_Projects/horizons/4_Results/MAOM_250729",
+                    ensemble_results = stack_results)
