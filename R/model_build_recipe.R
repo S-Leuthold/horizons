@@ -167,6 +167,9 @@ build_recipe <- function(input_data,
          "shap"   = model_recipe %>%
                           step_select_shap(all_predictors(),
                                            outcome = "Response"),
+         "cars"   = model_recipe %>%
+                          step_select_cars(all_predictors(),
+                                           outcome = "Response"),
          "none"   = model_recipe,
 
          cli::cli_abort("Unsupported {.field feature selection method}: {.val {feature_selection_method}}")) -> model_recipe
