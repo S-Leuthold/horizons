@@ -13,54 +13,61 @@ devtools::install(build_vignettes = FALSE, upgrade = "never", quick = TRUE)
 devtools::load_all()
 ## -----------------------------------------------------------------------------
 
-projects <- project_list("FFAR" = project_entry(spectra_path        = "../../../../../../../Desktop/_brain/1_Current_Projects/AI-CLIMATE/2_Data_Processed/FFAR/opus_files/",
-                                                sample_obs          = "../../../../../../../Desktop/_brain/1_Current_Projects/AI-CLIMATE/2_Data_Processed/FFAR/fraction_data.csv",
-                                                file_name_format    = "project_sampleid_fraction_scanid_wellid",
-                                                file_name_delimiter = "_"),
-                         "MOYS" = project_entry(spectra_path        = "../../../../../../../Desktop/_brain/1_Current_Projects/AI-CLIMATE/2_Data_Processed/MOYS/opus_files/",
-                                                sample_obs          = "../../../../../../../Desktop/_brain/1_Current_Projects/AI-CLIMATE/2_Data_Processed/MOYS/fraction_data.csv",
-                                                file_name_format    = "project_sampleid_fraction_scanid_wellid",
-                                                file_name_delimiter = "_"),
-                         "AONR" = project_entry(spectra_path        = "../../../../../../../Desktop/_brain/1_Current_Projects/AI-CLIMATE/2_Data_Processed/AONR/opus_files/",
-                                                sample_obs          = "../../../../../../../Desktop/_brain/1_Current_Projects/AI-CLIMATE/2_Data_Processed/AONR/soils_data.csv",
-                                                file_name_format    = "project_sampleid_fraction_scanid_wellid",
-                                                file_name_delimiter = "_")) %>%
+
+
+project_list("FFAR" = project_entry(spectra_path        = "~/Desktop/_brain/1_Current_Projects/AI-CLIMATE/data/processed/FFAR/opus_files",
+                                    sample_obs          = "~/Desktop/_brain/1_Current_Projects/AI-CLIMATE/data/processed/FFAR/fraction_data.csv",
+                                    file_name_format    = "project_sampleid_fraction_scanid_wellid",
+                                    file_name_delimiter = "_"),
+             "MOYS" = project_entry(spectra_path        = "~/Desktop/_brain/1_Current_Projects/AI-CLIMATE/data/processed/MOYS/opus_files",
+                                    sample_obs          = "~/Desktop/_brain/1_Current_Projects/AI-CLIMATE/data/processed/MOYS/fraction_data.csv",
+                                    file_name_format    = "project_sampleid_fraction_scanid_wellid",
+                                    file_name_delimiter = "_"),
+             "AONR" = project_entry(spectra_path        = "~/Desktop/_brain/1_Current_Projects/AI-CLIMATE/data/processed/AONR/opus_files",
+                                    sample_obs          = "~/Desktop/_brain/1_Current_Projects/AI-CLIMATE/data/processed/AONR/soils_data.csv",
+                                    file_name_format    = "project_sampleid_fraction_scanid_wellid",
+                                    file_name_delimiter = "_")) %>%
   create_project_data(projects  = .,
-                      variables = "POM_C_g_kg")  -> proj_data
+                      variables = "POM_C_g_kg")  -> proj_data_POM
 
 ## -----------------------------------------------------------------------------
 ## Step 3: Create project configurations
 ## -----------------------------------------------------------------------------
 
-## TODO: Implement RPD as a metric.
-
-create_project_configurations(project_data       = proj_data,
-                              models             = c("random_forest",
+create_project_configurations(project_data       = pom_proj_data,
+                              models             = c(
+                                                     "random_forest",
                                                      "cubist",
-                                                     "xgboost",
+                                                    # "xgboost",
                                                      "elastic_net",
-                                                     "svm_rbf",
-                                                     "mars",
+                                                    # "svm_rbf",
+                                                    # "mars",
                                                      "plsr",
-                                                     "mlp_nn"),
-                              transformations    = c("No Transformation",
-                                                     "Log Transformation",
-                                                     "Square Root Transformation"),
-                              preprocessing      = c("raw",
+                                                     "mlp_nn"
+                                                     ),
+                              transformations    = c(
+                                                     "No Transformation",
+                                                     "Log Transformation"
+                                                     #"Square Root Transformation"
+                                                     ),
+                              preprocessing      = c(
+                                                     "raw",
                                                      "sg",
                                                      "snv",
-                                                     "deriv1",
-                                                     "deriv2",
-                                                     "snv_deriv1",
-                                                     "snv_deriv2",
-                                                     "msc_deriv1"),
-                              feature_selection = c("pca",
+                                                     "deriv1"
+                                                    # "deriv2",
+                                                    # "snv_deriv1",
+                                                    # "snv_deriv2",
+                                                    # "msc_deriv1"
+                                                    ),
+                              feature_selection = c(
+                                                    "none",
+                                                    "pca",
                                                     "correlation",
-                                                    "shap",
-                                                    "none"),
-                              soil_covariates    = c("pH",
-                                                     "Clay",
-                                                     "CEC"),
+                                                   # "shap",
+                                                    "none"
+                                                   ),
+                              soil_covariates    = c("pH", "Clay"),
                               climate_covariates = c("AI", "MAP"),
                               spatial_covariates = NULL,
                               refresh            = FALSE,
@@ -71,25 +78,22 @@ create_project_configurations(project_data       = proj_data,
 ## Step 4: Create random configurations
 ## -----------------------------------------------------------------------------
 
-set.seed(0307)
-
-configs %>%
-  purrr::pluck(., "project_configurations") %>%
-  dplyr::filter(feature_selection == "none") %>%
-  dplyr::slice_sample(n = 1) %>%
-  dplyr::ungroup() %>%
-  dplyr::slice_sample(prop = 1) -> random_configs
+sample_configs(configs         = configs$project_configurations,
+               n_per_group     = 3,
+               ensure_baseline = TRUE,
+               factorial_pairs = NULL,
+               verbose         = TRUE)  -> downsampled_configs
 
 
 ## -----------------------------------------------------------------------------
 ## Step 5: Run the model evaluation
 ## -----------------------------------------------------------------------------
 
-run_model_evaluation(config                 = random_configs,
-                     input_data             = proj_data,
+run_model_evaluation(config                 = downsampled_configs,
+                     input_data             = pom_proj_data,
                      covariate_data         = configs$covariate_data,
                      variable               = "POM_C_g_kg",
-                     output_dir             = "../../../../../../../Desktop/_brain/1_Current_Projects/horizons/4_Results/test",
+                     output_dir             = "~/Desktop/_brain/1_Current_Projects/AI-CLIMATE/results/POM_C_g_kg_0818",
                      grid_size_eval         = 10,
                      bayesian_iter_eval     = 15,
                      cv_folds_eval          = 10,
@@ -98,7 +102,12 @@ run_model_evaluation(config                 = random_configs,
                      grid_size_final        = 15,
                      bayesian_iter_final    = 15,
                      cv_folds_final         = 10,
-                     pruning                = FALSE) -> pom_results
+                     pruning                = FALSE,
+                     parallel_strategy      = "cv_folds",
+                     workers                = NULL,
+                     chunk_size             = 50,
+                     checkpoint_dir         = NULL,
+                     resume                 = FALSE) -> pom_results
 
 ## -----------------------------------------------------------------------------
 ## Step 6: Create Plots

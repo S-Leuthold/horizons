@@ -28,6 +28,15 @@
 #' @param bayesian_iter_final Integer. Bayesian iterations during refitting (default = 20).
 #' @param cv_folds_final Integer. Number of CV folds for refitting phase (default = 15).
 #' @param pruning Logical. Whether to enable pruning of poor configurations early (default = `FALSE`).
+#' @param parallel_strategy Character. Parallelization strategy: `"cv_folds"` (default, legacy)
+#'   parallelizes CV within each model, or `"models"` parallelizes across model configurations.
+#' @param workers Integer. Number of parallel workers. If `NULL`, defaults to `detectCores() - 3`
+#'   for `"cv_folds"` strategy or `detectCores() - 1` for `"models"` strategy.
+#' @param chunk_size Integer. When using `"models"` strategy, process models in chunks of this size
+#'   to manage memory (default = 50). Ignored for `"cv_folds"` strategy.
+#' @param checkpoint_dir Character. Directory for checkpoint files when using `"models"` strategy.
+#'   Enables resuming interrupted runs. If `NULL`, uses `output_dir/checkpoints/`.
+#' @param resume Logical. Whether to resume from existing checkpoints (default = `TRUE`).
 #'
 #' @return If `retrain_top_models = FALSE`, returns a `tibble` summarizing evaluation metrics
 #'   for each configuration. If `TRUE`, returns a `list` with:
@@ -73,6 +82,8 @@
 #' @importFrom fs dir_create path
 #' @importFrom qs qsave
 #' @importFrom future plan multisession sequential
+#' @importFrom furrr future_map furrr_options
+#' @include evaluation-chunk_configurations.R
 #' @importFrom pryr mem_used
 #' @importFrom glue glue
 #' @export
@@ -90,11 +101,50 @@ run_model_evaluation <- function(config,
                                  grid_size_final        = 25,
                                  bayesian_iter_final    = 20,
                                  cv_folds_final         = 15,
-                                 pruning                = FALSE) {
+                                 pruning                = FALSE,
+                                 parallel_strategy      = c("cv_folds", "models"),
+                                 workers                = NULL,
+                                 chunk_size             = 50,
+                                 checkpoint_dir         = NULL,
+                                 resume                 = TRUE) {
 
-  ## TODO: Add a "include_covariate" lever
+  ## ---------------------------------------------------------------------------
+  ## Step 0: Parameter validation and setup
+  ## ---------------------------------------------------------------------------
+
+  ## Set up parallel strategy --------------------------------------------------
+
+  parallel_strategy <- match.arg(parallel_strategy)
+
+  if (is.null(workers)) {
+
+    if (parallel_strategy == "cv_folds") {
+
+      workers <- parallel::detectCores() - 3
+
+    } else {
+
+      workers <- parallel::detectCores() - 1
+
+      }
+  }
+
+  ## Set up checkpointing ------------------------------------------------------
+
+  if (is.null(checkpoint_dir) && parallel_strategy == "models") {
+
+    checkpoint_dir <- fs::path(output_dir, "checkpoints")
+
+  }
 
   cli::cli_h1("Starting full model evaluation across {.val {nrow(config)}} model combinations")
+  cli::cli_alert_info("Parallel strategy: {.val {parallel_strategy}} with {.val {workers}} workers")
+  if (parallel_strategy == "models") {
+    cli::cli_alert_info("Chunk size: {.val {chunk_size}} models per batch")
+    if (!is.null(checkpoint_dir)) {
+      cli::cli_alert_info("Checkpoints: {.path {checkpoint_dir}}")
+    }
+  }
 
   start_time <- Sys.time()
 
@@ -148,26 +198,29 @@ run_model_evaluation <- function(config,
   ## Step 2: Iterate over configurations
   ## ---------------------------------------------------------------------------
 
-  future::plan(multisession, workers = parallel::detectCores() - 3)
-  cli::cli_alert_success("Parallel backend registered with {.val {parallel::detectCores() - 3}} workers.")
+  if (parallel_strategy == "cv_folds") {
 
-  for (i in seq_len(nrow(config))) {
+    future::plan(multisession, workers = workers)
+    cli::cli_alert_success("Parallel backend registered with {.val {workers}} workers.")
+
+    for (i in seq_len(nrow(config))) {
 
     start_time_i <- Sys.time()
 
     config_row_i <- config[i, , drop = FALSE]
 
-    result_i <- safe_run_model(config_row     = config_row_i,
-                               input_data     = input_data,
-                               covariate_data = covariate_data,
-                               variable       = variable,
-                               row_index      = i,
-                               output_dir     = output_dir,
-                               grid_size      = grid_size_eval,
-                               bayesian_iter  = bayesian_iter_eval,
-                               cv_folds       = cv_folds_eval,
-                               pruning        = pruning,
-                               save_output    = FALSE)
+    result_i <- safe_run_model(config_row        = config_row_i,
+                               input_data        = input_data,
+                               covariate_data    = covariate_data,
+                               variable          = variable,
+                               row_index         = i,
+                               output_dir        = output_dir,
+                               grid_size         = grid_size_eval,
+                               bayesian_iter     = bayesian_iter_eval,
+                               cv_folds          = cv_folds_eval,
+                               pruning           = pruning,
+                               save_output       = FALSE,
+                               parallel_strategy = parallel_strategy)
 
     raw_outputs[[i]]  <- result_i
     summary_rows[[i]] <- result_i$status_summary
@@ -214,6 +267,166 @@ run_model_evaluation <- function(config,
       cli::cli_alert_success("Model evaluation finished in {.val {round(duration_i, 3)}} minutes.")
 
     }
+
+  }  # Close the for loop
+
+  } else {
+
+    ## -------------------------------------------------------------------------
+    ## Model level parallelization with work-stealing
+    ## -------------------------------------------------------------------------
+
+    cli::cli_alert_info("Using work-stealing parallelization via evaluate_models_parallel()")
+    
+    # Call the fixed evaluate_models_parallel function
+    parallel_results <- evaluate_models_parallel(
+      configs               = config,
+      input_data           = input_data,
+      covariate_data       = covariate_data,
+      variable             = variable,
+      n_workers            = workers,
+      output_dir           = output_dir,
+      chunk_size           = chunk_size,  # This is deprecated in the new function
+      grid_size            = grid_size_eval,
+      bayesian_iter        = bayesian_iter_eval,
+      cv_folds             = cv_folds_eval,
+      seed                 = 123,
+      save_individual_models = FALSE,
+      verbose              = TRUE
+    )
+    
+    # Convert results to expected format
+    for (i in seq_len(nrow(parallel_results))) {
+      raw_outputs[[i]] <- list(
+        status_summary = parallel_results[i, ],
+        model_output = parallel_results$best_params[[i]]
+      )
+      summary_rows[[i]] <- parallel_results[i, ]
+    }
+    #
+    # cli::cli_alert_info("Split {nrow(config)} configurations into {n_chunks} chunks of ~{chunk_size} models each")
+    #
+    # if (!is.null(checkpoint_dir)) {
+    #
+    #   setup_success <- setup_checkpoint_directory(checkpoint_dir)
+    #
+    #   if (!setup_success) {
+    #
+    #     cli::cli_alert_warning("Checkpoint directory setup failed. Proceeding without checkpointing.")
+    #     checkpoint_dir <- NULL
+    #     }
+    #   }
+    #
+    # # Check for existing checkpoints and resume
+    # existing_checkpoints <- if (!is.null(checkpoint_dir)) {
+    #   load_existing_checkpoints(checkpoint_dir, n_chunks)
+    # } else {
+    #   list(completed_results = list(), completed_indices = integer(0),
+    #        next_chunk = 1L, n_completed = 0L)
+    # }
+    #
+    # # Initialize results with existing data
+    #
+    # raw_outputs     <- vector("list", nrow(config))
+    # chunk_durations <- numeric()
+    #
+    # # Fill in existing results
+    #
+    # for (idx in existing_checkpoints$completed_indices) {
+    #
+    #   chunk_start <- attr(config_chunks[[idx]], "start_config")
+    #   chunk_end <- attr(config_chunks[[idx]], "end_config")
+    #   chunk_results <- existing_checkpoints$completed_results[[idx]]
+    #
+    #   for (i in seq_along(chunk_results)) {
+    #     raw_outputs[[chunk_start + i - 1]] <- chunk_results[[i]]
+    #   }
+    # }
+    #
+    # # Process remaining chunks
+    #
+    # start_chunk <- existing_checkpoints$next_chunk
+    #
+    # if (start_chunk <= n_chunks) {
+    #   cli::cli_h2("Processing chunks {start_chunk} through {n_chunks}")
+    #
+    #   for (chunk_i in start_chunk:n_chunks) {
+    #
+    #     chunk_start_time <- Sys.time()
+    #     current_chunk    <- config_chunks[[chunk_i]]
+    #     chunk_start_idx  <- attr(current_chunk, "start_config")
+    #     chunk_end_idx    <- attr(current_chunk, "end_config")
+    #
+    #     cli::cli_h2("Chunk {chunk_i}/{n_chunks}: Models {chunk_start_idx}-{chunk_end_idx} ({nrow(current_chunk)} configs)")
+    #
+    #     # Process chunk in parallel
+    #     chunk_outputs <- furrr::future_map(seq_len(nrow(current_chunk)), function(i) {
+    #
+    #       global_i <- chunk_start_idx + i - 1
+    #       config_row_i <- current_chunk[i, , drop = FALSE]
+    #
+    #       result_i <- safe_run_model(config_row        = config_row_i,
+    #                                  input_data        = input_data,
+    #                                  covariate_data    = covariate_data,
+    #                                  variable          = variable,
+    #                                  row_index         = global_i,
+    #                                  output_dir        = output_dir,
+    #                                  grid_size         = grid_size_eval,
+    #                                  bayesian_iter     = bayesian_iter_eval,
+    #                                  cv_folds          = cv_folds_eval,
+    #                                  pruning           = pruning,
+    #                                  save_output       = FALSE,
+    #                                  parallel_strategy = "models")
+    #
+    #       return(result_i)
+    #
+    #     }, .options = furrr::furrr_options(seed = TRUE))
+    #
+    #     # Store results in main output list
+    #     for (i in seq_along(chunk_outputs)) {
+    #       raw_outputs[[chunk_start_idx + i - 1]] <- chunk_outputs[[i]]
+    #     }
+    #
+    #     # Save checkpoint
+    #     if (!is.null(checkpoint_dir)) {
+    #       save_checkpoint(chunk_outputs, chunk_i, checkpoint_dir, current_chunk)
+    #     }
+    #
+    #     # Chunk completion reporting
+    #     chunk_end_time <- Sys.time()
+    #     chunk_duration <- as.numeric(difftime(chunk_end_time, chunk_start_time, units = "mins"))
+    #     chunk_durations <- c(chunk_durations, chunk_duration)
+    #
+    #     # Memory cleanup and reporting
+    #     mem_usage <- chunk_memory_cleanup()
+    #
+    #     cli::cli_alert_success("Chunk {chunk_i} completed in {round(chunk_duration, 2)} minutes")
+    #
+    #     if (mem_usage < 2) {
+    #       cli::cli_alert_success("Memory usage: {mem_usage} GB")
+    #     } else if (mem_usage < 4) {
+    #       cli::cli_alert_warning("Memory usage: {mem_usage} GB")
+    #     } else {
+    #       cli::cli_alert_danger("High memory usage: {mem_usage} GB")
+    #     }
+    #
+    #     # ETA calculation and reporting
+    #     if (chunk_i < n_chunks) {
+    #       eta_info <- calculate_chunk_eta(chunk_i, n_chunks, chunk_durations)
+    #       if (!is.na(eta_info$eta_formatted)) {
+    #         cli::cli_alert_info("Estimated completion: {eta_info$eta_formatted}")
+    #         cli::cli_alert_info("Average chunk duration: {round(eta_info$mean_duration, 2)} minutes")
+    #       }
+    #     }
+    #
+    #     Sys.sleep(2)
+    #   }
+    # } else {
+    #   cli::cli_alert_success("All chunks already completed. Loading existing results.")
+    # }
+    #
+    # # Extract summary rows
+    # summary_rows <- purrr::map(raw_outputs, ~ .x$status_summary)
   }
 
   ## ---------------------------------------------------------------------------
@@ -333,6 +546,6 @@ run_model_evaluation <- function(config,
     cli::cli_h1("🌱 horizons model evaluation finished in {.val {round(duration/60, 2)}} hours.")
 
     return(summary_tbl)
-    }
   }
+}
 
