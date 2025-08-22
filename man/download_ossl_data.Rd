@@ -4,7 +4,14 @@
 \alias{download_ossl_data}
 \title{Download and Preprocess OSSL Spectral and Covariate Data}
 \usage{
-download_ossl_data(covariates, window_size = 9, max_samples = NULL)
+download_ossl_data(
+  covariates,
+  window_size = 9,
+  max_samples = NULL,
+  parallel = FALSE,
+  n_workers = NULL,
+  allow_nested = FALSE
+)
 }
 \arguments{
 \item{covariates}{A character vector of covariate names to retrieve (e.g., \code{"Sand"}, \code{"pH"}, \code{"SOC"}).
@@ -14,6 +21,12 @@ Covariate names must match those defined in the internal OSSL variable dictionar
 
 \item{max_samples}{Optional integer. If supplied, limits the number of samples processed—useful for debugging or testing.
 If \code{NULL}, all available samples are used.}
+
+\item{parallel}{Logical. Enable parallel processing for spectral preprocessing. Defaults to \code{FALSE} (safe for nested contexts).}
+
+\item{n_workers}{Integer. Number of parallel workers. If \code{NULL}, uses \code{min(10, detectCores()-1)} for safety.}
+
+\item{allow_nested}{Logical. Allow parallel processing even when already in parallel context. Defaults to \code{FALSE} (recommended).}
 
 \item{bounding_box}{Currently unused. Placeholder for future spatial subsetting based on bounding box coordinates.}
 }
