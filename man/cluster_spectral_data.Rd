@@ -4,12 +4,23 @@
 \alias{cluster_spectral_data}
 \title{Cluster Mid-Infrared Spectra via PCA and K-Means}
 \usage{
-cluster_spectral_data(input_data)
+cluster_spectral_data(
+  input_data,
+  parallel = FALSE,
+  n_workers = NULL,
+  allow_nested = FALSE
+)
 }
 \arguments{
 \item{input_data}{A \code{tibble} containing MIR spectra for multiple samples. Must include numeric columns
 representing wavenumber features (e.g., \code{Dim.600}, \code{Dim.602}, ...). A column named \code{Sample_ID} is
 recommended but not required. Any non-spectral columns are preserved in the output.}
+
+\item{parallel}{Logical. Enable parallel processing for clustering operations. Defaults to \code{FALSE} (safe for nested contexts).}
+
+\item{n_workers}{Integer. Number of parallel workers. If \code{NULL}, uses \code{min(10, detectCores()-1)} for safety.}
+
+\item{allow_nested}{Logical. Allow parallel processing even when already in parallel context. Defaults to \code{FALSE} (recommended).}
 }
 \value{
 A \code{list} with the following components:

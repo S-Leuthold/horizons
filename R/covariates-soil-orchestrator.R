@@ -14,6 +14,9 @@
 #' @param refresh Logical. If `TRUE`, forces re-calculation of predictions and bypasses cached results. Defaults to `FALSE`.
 #' @param cache_dir Character path. Directory where project- and covariate-specific predictions are cached using `qs::qsave()`.
 #'   Defaults to `tools::R_user_dir("horizons", "cache")`.
+#' @param parallel Logical. Enable parallel processing for Cubist model training. Defaults to `FALSE` (safe for nested contexts).
+#' @param n_workers Integer. Number of parallel workers for model fitting. If `NULL`, uses `min(10, detectCores()-1)` for safety.
+#' @param allow_nested Logical. Allow parallel processing even when already in parallel context. Defaults to `FALSE` (recommended).
 #'
 #' @return A named `list` with two elements:
 #' \itemize{
@@ -69,7 +72,10 @@ predict_covariates <- function(covariates,
                                input_data,
                                verbose   = TRUE,
                                refresh   = FALSE,
-                               cache_dir = tools::R_user_dir("horizons", "cache")) {
+                               cache_dir = tools::R_user_dir("horizons", "cache"),
+                               parallel  = FALSE,
+                               n_workers = NULL,
+                               allow_nested = FALSE) {
 
   ## ---------------------------------------------------------------------------
   ## Step 1: Input Validation
@@ -252,7 +258,10 @@ predict_covariates <- function(covariates,
   ## ---------------------------------------------------------------------------
 
   safely_execute(expr          = {reduce_dimensions_pca(training_data = training_data,
-                                                        new_data      = input_data)},
+                                                        new_data      = input_data,
+                                                        parallel      = parallel,
+                                                        n_workers     = n_workers,
+                                                        allow_nested  = allow_nested)},
                  default_value = NULL,
                  error_message = "Error during dimensionality reduction") -> reduced_dimensions_data_safe
 
@@ -275,7 +284,10 @@ predict_covariates <- function(covariates,
 
   if(verbose) cli::cli_progress_step("Running clustering analysis...")
 
-  safely_execute(expr          = {cluster_spectral_data(input_data = input_data)},
+  safely_execute(expr          = {cluster_spectral_data(input_data    = input_data,
+                                                        parallel      = parallel,
+                                                        n_workers     = n_workers,
+                                                        allow_nested  = allow_nested)},
                  default_value = NULL,
                  error_message = "Error during clustering of input data") -> clustering_results_safe
 
@@ -366,9 +378,12 @@ predict_covariates <- function(covariates,
 
     if(verbose) cli::cli_progress_step("Calibrating model for: {covariate} ({cluster})")
 
-    calibrated_model <- fit_cubist_model(input_data = training_subset,
-                                         covariate  = covariate,
-                                         verbose    = verbose)
+    calibrated_model <- fit_cubist_model(input_data    = training_subset,
+                                         covariate     = covariate,
+                                         verbose       = verbose,
+                                         parallel      = parallel,
+                                         n_workers     = n_workers,
+                                         allow_nested  = allow_nested)
 
     if(is.null(calibrated_model)) {
       cli::cli_alert_danger("Model calibration failed for {covariate} in {cluster}. Skipping.")

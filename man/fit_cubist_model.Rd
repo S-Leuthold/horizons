@@ -4,7 +4,14 @@
 \alias{fit_cubist_model}
 \title{Fit a Cubist Model Using PCA-Transformed Spectral Data}
 \usage{
-fit_cubist_model(input_data, covariate, verbose)
+fit_cubist_model(
+  input_data,
+  covariate,
+  verbose,
+  parallel = FALSE,
+  n_workers = NULL,
+  allow_nested = FALSE
+)
 }
 \arguments{
 \item{input_data}{A \code{tibble} or \code{data.frame} containing PCA-transformed predictors
@@ -14,6 +21,12 @@ covariate to be modeled. All rows with \code{NA} in the response are removed.}
 \item{covariate}{A character string. Name of the column to use as the response variable (e.g., \code{"Sand"}, \code{"pH"}).}
 
 \item{verbose}{Logical. If \code{TRUE}, prints progress messages using \verb{cli::cli_*()} during model training. Defaults to \code{FALSE}.}
+
+\item{parallel}{Logical. Enable parallel processing for hyperparameter tuning. Defaults to \code{FALSE} (safe for nested contexts).}
+
+\item{n_workers}{Integer. Number of parallel workers for tuning. If \code{NULL}, uses \code{min(10, detectCores()-1)} for safety.}
+
+\item{allow_nested}{Logical. Allow parallel processing even when already in parallel context. Defaults to \code{FALSE} (recommended).}
 }
 \value{
 A named \code{list} with the following components:

@@ -15,7 +15,10 @@ finalize_top_workflows(
   bayesian_iter_final = 25,
   cv_folds_final = 10,
   seed = 123,
-  verbose = TRUE
+  verbose = TRUE,
+  parallel = FALSE,
+  n_workers = NULL,
+  allow_nested = FALSE
 )
 }
 \arguments{
@@ -39,6 +42,12 @@ model performance metrics and best parameters}
 \item{cv_folds_final}{Integer. Cross-validation folds for final tuning (default: 10)}
 
 \item{verbose}{Logical. Print progress information (default: TRUE)}
+
+\item{parallel}{Logical. Enable parallel processing for model tuning. Defaults to \code{FALSE} (safe for nested contexts).}
+
+\item{n_workers}{Integer. Number of parallel workers for tuning. If \code{NULL}, uses \code{min(10, detectCores()-1)} for safety.}
+
+\item{allow_nested}{Logical. Allow parallel processing even when already in parallel context. Defaults to \code{FALSE} (recommended).}
 }
 \value{
 A tibble containing finalized model information with columns:

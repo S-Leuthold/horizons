@@ -101,8 +101,6 @@ VignetteBuilder: knitr
 Depends: 
     R (>= 2.10)
 Collate: 
-    'analysis-component_synergy_effects.R'
-    'analysis-hierarchical_interaction_decomposition.R'
     'covariates-climate-orchestrator.R'
     'covariates-soil-cluster_spectral_data.R'
     'covariates-soil-create_clustered_subsets.R'
@@ -148,13 +146,4 @@ Collate:
     'utils_error_handling.R'
     'utils_find_cache_path.R'
     'utils_get_processed_ossl_mir.R'
-    'visuals-create_summary_table.R'
-    'visuals-plot_component_chord_diagram.R'
-    'visuals-plot_component_effects_enhanced.R'
-    'visuals-plot_component_interactions.R'
-    'visuals-plot_component_network_bundling.R'
-    'visuals-plot_component_value_interactions.R'
-    'visuals-plot_ensemble_biplot.R'
-    'visuals-plot_ensemble_upset.R'
-    'visuals-plot_models_radar.R'
     'zzz.R'
