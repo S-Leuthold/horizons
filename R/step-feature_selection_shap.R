@@ -4,6 +4,8 @@
 #' important spectral bands using an XGBoost model. Retains predictors
 #' with mean absolute SHAP values exceeding an adaptive threshold.
 #'
+#' Currently it's variable importance, not SHAP. This is a known issue, and I'm working on it.
+#'
 #' @param recipe A `recipes::recipe()` object.
 #' @param ... Selector functions to choose spectral predictor columns.
 #' @param outcome Character. Name of the outcome variable to use for modeling.
