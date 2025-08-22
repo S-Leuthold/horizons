@@ -146,6 +146,7 @@ evaluate_models_parallel <- function(configs,
       if (verbose) cli::cli_alert_info("Using multicore (shared memory) with {n_workers} workers")
     }
   } else {
+    future::plan(sequential)
     if(verbose) cli::cli_alert_info("Using sequential processing (parallel={parallel}, n_workers={n_workers})")
   }
 
