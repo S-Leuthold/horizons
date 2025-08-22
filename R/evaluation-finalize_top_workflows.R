@@ -17,6 +17,9 @@
 #' @param bayesian_iter_final Integer. Bayesian optimization iterations (default: 25)
 #' @param cv_folds_final Integer. Cross-validation folds for final tuning (default: 10)
 #' @param verbose Logical. Print progress information (default: TRUE)
+#' @param parallel Logical. Enable parallel processing for model tuning. Defaults to `FALSE` (safe for nested contexts).
+#' @param n_workers Integer. Number of parallel workers for tuning. If `NULL`, uses `min(10, detectCores()-1)` for safety.
+#' @param allow_nested Logical. Allow parallel processing even when already in parallel context. Defaults to `FALSE` (recommended).
 #'
 #' @return A tibble containing finalized model information with columns:
 #' \itemize{
@@ -46,7 +49,10 @@ finalize_top_workflows <- function(parallel_results,
                                    bayesian_iter_final = 25,
                                    cv_folds_final = 10,
                                    seed = 123,
-                                   verbose = TRUE) {
+                                   verbose = TRUE,
+                                   parallel = FALSE,
+                                   n_workers = NULL,
+                                   allow_nested = FALSE) {
 
   start_time <- Sys.time()
   
@@ -115,7 +121,30 @@ finalize_top_workflows <- function(parallel_results,
   }
   
   ## ---------------------------------------------------------------------------
-  ## Step 3: Data Preparation
+  ## Step 3: Setup Parallel Processing with Safety Controls
+  ## ---------------------------------------------------------------------------
+
+  # Determine safe worker count
+  if (is.null(n_workers)) {
+    max_cores <- parallel::detectCores(logical = TRUE)
+    n_workers <- pmax(1, pmin(max_cores - 1, 10))  # Cap at 10 for safety
+  }
+
+  # Check for nested parallelization
+  if (!allow_nested && !identical(future::plan(), future::sequential())) {
+    if(verbose) cli::cli_alert_warning("Nested parallelization detected. Setting parallel=FALSE for safety")
+    parallel <- FALSE
+  }
+
+  # Determine if we can use parallel for tuning
+  use_parallel_tuning <- parallel && n_workers > 1
+  
+  if (verbose && use_parallel_tuning) {
+    cli::cli_alert_info("Parallel tuning enabled with {n_workers} workers")
+  }
+
+  ## ---------------------------------------------------------------------------
+  ## Step 4: Data Preparation
   ## ---------------------------------------------------------------------------
   
   if (verbose) {
@@ -375,7 +404,7 @@ finalize_top_workflows <- function(parallel_results,
                 save_pred = FALSE,
                 save_workflow = FALSE,
                 verbose = FALSE,
-                allow_par = FALSE
+                allow_par = use_parallel_tuning
               )
             )
           })
@@ -420,7 +449,7 @@ finalize_top_workflows <- function(parallel_results,
                 verbose = FALSE,
                 seed = 307,
                 no_improve = 10L,
-                allow_par = FALSE
+                allow_par = use_parallel_tuning
               )
             )
           })

@@ -11,6 +11,9 @@
 #' @param max_samples Optional integer. If supplied, limits the number of samples processed—useful for debugging or testing.
 #'   If `NULL`, all available samples are used.
 #' @param bounding_box Currently unused. Placeholder for future spatial subsetting based on bounding box coordinates.
+#' @param parallel Logical. Enable parallel processing for spectral preprocessing. Defaults to `FALSE` (safe for nested contexts).
+#' @param n_workers Integer. Number of parallel workers. If `NULL`, uses `min(10, detectCores()-1)` for safety.
+#' @param allow_nested Logical. Allow parallel processing even when already in parallel context. Defaults to `FALSE` (recommended).
 #'
 #' @return A `tibble` containing:
 #' \itemize{
@@ -66,7 +69,10 @@
 
 download_ossl_data <- function(covariates,
                                window_size = 9,
-                               max_samples = NULL) {
+                               max_samples = NULL,
+                               parallel = FALSE,
+                               n_workers = NULL,
+                               allow_nested = FALSE) {
 
   ## ---------------------------------------------------------------------------
   ## Step 1: Read the OSSL data dictionary
@@ -257,11 +263,44 @@ download_ossl_data <- function(covariates,
   }
 
   ## ---------------------------------------------------------------------------
-
-  safely_execute(expr          = {future::plan(future::multisession,
-                                               workers = parallel::detectCores(logical = TRUE) - 1)},
-                 default_value = NULL,
-                 error_message = "Failed to set parallel plan for processing")
+  ## Parallel processing setup with safety controls
+  ## ---------------------------------------------------------------------------
+  
+  # Store original plan for cleanup
+  original_plan <- future::plan()
+  on.exit(future::plan(original_plan), add = TRUE)
+  
+  if (parallel) {
+    # Check for nested parallelization
+    if (!allow_nested && !identical(future::plan(), future::sequential())) {
+      cli::cli_alert_warning("Nested parallelization detected in download_ossl_data. Setting parallel=FALSE for safety")
+      parallel <- FALSE
+    }
+  }
+  
+  if (parallel) {
+    # Set worker count with safety cap
+    if (is.null(n_workers)) {
+      available_cores <- parallel::detectCores(logical = TRUE)
+      n_workers <- min(10, available_cores - 1)
+      cli::cli_alert_info("Using {n_workers} workers for MIR spectral preprocessing (capped for safety)")
+    } else {
+      # Still apply safety cap to user-specified workers
+      n_workers <- min(n_workers, 10)
+      if (n_workers != n_workers) {
+        cli::cli_alert_warning("Worker count capped at 10 for safety (requested: {n_workers})")
+      }
+    }
+    
+    safely_execute(expr          = {future::plan(future::multisession,
+                                                 workers = n_workers)},
+                   default_value = NULL,
+                   error_message = "Failed to set parallel plan for processing")
+  } else {
+    safely_execute(expr          = {future::plan(future::sequential)},
+                   default_value = NULL,
+                   error_message = "Failed to set sequential plan for processing")
+  }
 
   cli::cli_progress_step("Applying SNV and SG transformation to MIR data.")
 
@@ -316,10 +355,6 @@ download_ossl_data <- function(covariates,
   ## ---------------------------------------------------------------------------
 
   cli::cli_progress_step("OSSL MIR data processed.")
-
-  safely_execute(expr          = {future::plan(future::sequential)},
-                 default_value = NULL,
-                 error_message = "Failed to reset parallel plan after preprocessing")
 
  }
   ## ---------------------------------------------------------------------------

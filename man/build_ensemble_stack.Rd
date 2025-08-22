@@ -21,6 +21,12 @@ build_ensemble_stack(
 
 \item{cv_folds}{Integer. Number of cross-validation folds used for resampling during tuning (default = \code{5}).}
 
+\item{parallel}{Logical. Enable parallel processing for model fitting. Defaults to \code{FALSE} (safe for nested contexts).}
+
+\item{n_workers}{Integer. Number of parallel workers for fitting. If \code{NULL}, uses \code{min(10, detectCores()-1)} for safety.}
+
+\item{allow_nested}{Logical. Allow parallel processing even when already in parallel context. Defaults to \code{FALSE} (recommended).}
+
 \item{top_workflows}{A tibble containing the candidate workflows. Must include columns:
 \code{wflow_id} (character) and \code{workflow} (list-column of \code{workflow()} objects).}
 }

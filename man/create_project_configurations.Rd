@@ -16,7 +16,10 @@ create_project_configurations(
   expand_covariate_grid = TRUE,
   include_covariates = TRUE,
   refresh = FALSE,
-  verbose = TRUE
+  verbose = TRUE,
+  parallel = FALSE,
+  n_workers = NULL,
+  allow_nested = FALSE
 )
 }
 \arguments{
@@ -42,6 +45,12 @@ If \code{FALSE}, include either no covariates or the full set. Default = \code{T
 \item{refresh}{Logical. Whether to refresh cached predictions for soil and climate covariates. Default = \code{FALSE}.}
 
 \item{verbose}{Logical. Whether to print progress and prediction summaries using \code{cli}. Default = \code{TRUE}.}
+
+\item{parallel}{Logical. Enable parallel processing for soil covariate prediction. Defaults to \code{FALSE} (safe for nested contexts).}
+
+\item{n_workers}{Integer. Number of parallel workers for covariate prediction. If \code{NULL}, uses \code{min(10, detectCores()-1)} for safety.}
+
+\item{allow_nested}{Logical. Allow parallel processing even when already in parallel context. Defaults to \code{FALSE} (recommended).}
 }
 \value{
 A named \code{list} with:
