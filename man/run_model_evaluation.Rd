@@ -18,7 +18,12 @@ run_model_evaluation(
   grid_size_final = 25,
   bayesian_iter_final = 20,
   cv_folds_final = 15,
-  pruning = FALSE
+  pruning = FALSE,
+  parallel_strategy = c("cv_folds", "models"),
+  workers = NULL,
+  chunk_size = 50,
+  checkpoint_dir = NULL,
+  resume = TRUE
 )
 }
 \arguments{
@@ -58,6 +63,20 @@ Required if \code{include_covariates = TRUE} in any row of \code{config}.}
 \item{cv_folds_final}{Integer. Number of CV folds for refitting phase (default = 15).}
 
 \item{pruning}{Logical. Whether to enable pruning of poor configurations early (default = \code{FALSE}).}
+
+\item{parallel_strategy}{Character. Parallelization strategy: \code{"cv_folds"} (default, legacy)
+parallelizes CV within each model, or \code{"models"} parallelizes across model configurations.}
+
+\item{workers}{Integer. Number of parallel workers. If \code{NULL}, defaults to \code{detectCores() - 3}
+for \code{"cv_folds"} strategy or \code{detectCores() - 1} for \code{"models"} strategy.}
+
+\item{chunk_size}{Integer. When using \code{"models"} strategy, process models in chunks of this size
+to manage memory (default = 50). Ignored for \code{"cv_folds"} strategy.}
+
+\item{checkpoint_dir}{Character. Directory for checkpoint files when using \code{"models"} strategy.
+Enables resuming interrupted runs. If \code{NULL}, uses \verb{output_dir/checkpoints/}.}
+
+\item{resume}{Logical. Whether to resume from existing checkpoints (default = \code{TRUE}).}
 }
 \value{
 If \code{retrain_top_models = FALSE}, returns a \code{tibble} summarizing evaluation metrics
