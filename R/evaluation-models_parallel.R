@@ -19,6 +19,8 @@
 #' @param seed Integer. Random seed for reproducibility (default: 123)
 #' @param save_individual_models Logical. Save each successful model immediately (default: FALSE)
 #' @param verbose Logical. Print progress information (default: TRUE)
+#' @param parallel Logical. Enable parallel processing for model evaluation. Defaults to `TRUE` (top-level orchestrator).
+#' @param allow_nested Logical. Allow parallel processing even when already in parallel context. Defaults to `FALSE` (recommended).
 #'
 #' @return A tibble containing all model results with columns:
 #' \itemize{
@@ -53,7 +55,9 @@ evaluate_models_parallel <- function(configs,
                                      cv_folds               = 5,
                                      seed                   = 123,
                                      save_individual_models = FALSE,
-                                     verbose                = TRUE) {
+                                     verbose                = TRUE,
+                                     parallel               = TRUE,
+                                     allow_nested           = FALSE) {
 
   start_time <- Sys.time()
 
@@ -119,15 +123,29 @@ evaluate_models_parallel <- function(configs,
     cli::cli_alert_info("Using dynamic scheduling for optimal load balancing")
   }
 
-  ## Setup parallel backend ----------------------------------------------------
+  ## Setup parallel backend with safety controls -------------------------------
 
-  # Use multicore for shared memory on Unix/Mac, fallback to multisession on Windows/RStudio
-  if (.Platform$OS.type == "windows" || Sys.getenv("RSTUDIO") == "1") {
-    future::plan(future::multisession, workers = n_workers)
-    if (verbose) cli::cli_alert_info("Using multisession with {n_workers} workers")
+  # Check for nested parallelization
+  if (!allow_nested && !identical(future::plan(), future::sequential())) {
+    if(verbose) cli::cli_alert_warning("Nested parallelization detected. Setting parallel=FALSE for safety")
+    parallel <- FALSE
+  }
+
+  # Set parallel plan with proper cleanup
+  if (parallel && n_workers > 1) {
+    old_plan <- future::plan()
+    on.exit(future::plan(old_plan), add = TRUE)
+    
+    # Use multicore for shared memory on Unix/Mac, fallback to multisession on Windows/RStudio
+    if (.Platform$OS.type == "windows" || Sys.getenv("RSTUDIO") == "1") {
+      future::plan(future::multisession, workers = n_workers)
+      if (verbose) cli::cli_alert_info("Using multisession with {n_workers} workers")
+    } else {
+      future::plan(future::multicore, workers = n_workers)
+      if (verbose) cli::cli_alert_info("Using multicore (shared memory) with {n_workers} workers")
+    }
   } else {
-    future::plan(future::multicore, workers = n_workers)
-    if (verbose) cli::cli_alert_info("Using multicore (shared memory) with {n_workers} workers")
+    if(verbose) cli::cli_alert_info("Using sequential processing (parallel={parallel}, n_workers={n_workers})")
   }
 
   # Increase memory limits for large spectral data
@@ -185,18 +203,22 @@ evaluate_models_parallel <- function(configs,
 
         # Call the single model evaluation function
         result <- evaluate_single_model_parallel(
-          input_data       = input_data,
-          covariate_data   = covariate_data,
-          variable         = variable,
-          model            = config$model,
-          transformation   = config$transformation,
-          preprocessing    = config$preprocessing,
+          input_data        = input_data,
+          covariate_data    = covariate_data,
+          variable          = variable,
+          model             = config$model,
+          transformation    = config$transformation,
+          preprocessing     = config$preprocessing,
           feature_selection = config$feature_selection,
-          covariates       = config$covariates[[1]],  # Extract from list column
-          grid_size        = grid_size,
-          bayesian_iter    = bayesian_iter,
-          cv_folds         = cv_folds,
-          seed             = model_seed
+          covariates        = config$covariates[[1]],  # Extract from list column
+          include_covariates = ifelse(is.null(config$covariates[[1]]), FALSE, length(config$covariates[[1]]) > 0),
+          grid_size         = grid_size,
+          bayesian_iter     = bayesian_iter,
+          cv_folds          = cv_folds,
+          seed              = model_seed,
+          parallel          = FALSE,     # Already running in parallel context
+          n_workers         = NULL,      # Not used when parallel=FALSE
+          allow_nested      = FALSE      # Prevent any nested parallelization
         )
 
         # Add configuration information back to result

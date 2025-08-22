@@ -8,6 +8,9 @@
 #'   wavenumber columns (typically `608`–`3992`) and any number of metadata columns (e.g., `Sample_ID`, `Project`).
 #' @param new_data A `data.frame` or `tibble` containing new MIR spectra to be projected into PCA space.
 #'   Must have the same spectral columns as `training_data`.
+#' @param parallel Logical. Enable parallel processing for PCA operations. Defaults to `FALSE` (safe for nested contexts).
+#' @param n_workers Integer. Number of parallel workers. If `NULL`, uses `min(10, detectCores()-1)` for safety.
+#' @param allow_nested Logical. Allow parallel processing even when already in parallel context. Defaults to `FALSE` (recommended).
 #'
 #' @return A named `list` with two elements:
 #' \itemize{
@@ -43,7 +46,10 @@
 #' @export
 
 reduce_dimensions_pca <- function(training_data,
-                                  new_data) {
+                                  new_data,
+                                  parallel = FALSE,
+                                  n_workers = NULL,
+                                  allow_nested = FALSE) {
 
   ## ---------------------------------------------------------------------------
   ## Step 1: Run PCA on training spectral columns

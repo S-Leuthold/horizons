@@ -9,7 +9,10 @@ predict_covariates(
   input_data,
   verbose = TRUE,
   refresh = FALSE,
-  cache_dir = tools::R_user_dir("horizons", "cache")
+  cache_dir = tools::R_user_dir("horizons", "cache"),
+  parallel = FALSE,
+  n_workers = NULL,
+  allow_nested = FALSE
 )
 }
 \arguments{
@@ -26,6 +29,12 @@ A \code{Project} column is also expected for cache partitioning.}
 
 \item{cache_dir}{Character path. Directory where project- and covariate-specific predictions are cached using \code{qs::qsave()}.
 Defaults to \code{tools::R_user_dir("horizons", "cache")}.}
+
+\item{parallel}{Logical. Enable parallel processing for Cubist model training. Defaults to \code{FALSE} (safe for nested contexts).}
+
+\item{n_workers}{Integer. Number of parallel workers for model fitting. If \code{NULL}, uses \code{min(10, detectCores()-1)} for safety.}
+
+\item{allow_nested}{Logical. Allow parallel processing even when already in parallel context. Defaults to \code{FALSE} (recommended).}
 }
 \value{
 A named \code{list} with two elements:

@@ -20,6 +20,9 @@
 #' @param bayesian_iter Integer. Number of Bayesian tuning iterations (default = 15)
 #' @param cv_folds Integer. Number of cross-validation folds (default = 5)
 #' @param seed Integer. Random seed for reproducible train/test splits and CV folds (default = NULL)
+#' @param parallel Logical. Enable parallel processing for model tuning. Defaults to `FALSE` (safe for nested contexts).
+#' @param n_workers Integer. Number of parallel workers for tuning. If `NULL`, uses `min(10, detectCores()-1)` for safety.
+#' @param allow_nested Logical. Allow parallel processing even when already in parallel context. Defaults to `FALSE` (recommended).
 #'
 #' @return A list containing minimal information for memory efficiency:
 #' \itemize{
@@ -46,7 +49,10 @@ evaluate_single_model_parallel <- function(input_data,
                                           grid_size          = 10,
                                           bayesian_iter      = 15,
                                           cv_folds           = 5,
-                                          seed               = NULL) {
+                                          seed               = NULL,
+                                          parallel           = FALSE,
+                                          n_workers          = NULL,
+                                          allow_nested       = FALSE) {
 
 
   start_time   <- Sys.time()
