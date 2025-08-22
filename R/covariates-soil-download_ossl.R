@@ -272,7 +272,8 @@ download_ossl_data <- function(covariates,
   
   if (parallel) {
     # Check for nested parallelization
-    if (!allow_nested && !identical(future::plan(), future::sequential())) {
+    current_plan_class <- class(future::plan())[1]
+    if (!allow_nested && !identical(current_plan_class, "sequential")) {
       cli::cli_alert_warning("Nested parallelization detected in download_ossl_data. Setting parallel=FALSE for safety")
       parallel <- FALSE
     }
