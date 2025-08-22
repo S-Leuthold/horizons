@@ -156,8 +156,8 @@ fit_cubist_model <- function(input_data,
     }
 
     # Check for nested parallelization
-    current_plan <- deparse(substitute(future::plan()))[1]
-    if (!allow_nested && !identical(future::plan(), future::sequential())) {
+    current_plan_class <- class(future::plan())[1]
+    if (!allow_nested && !identical(current_plan_class, "sequential")) {
       if(verbose) cli::cli_alert_warning("Nested parallelization detected. Setting parallel=FALSE for safety")
       parallel <- FALSE
     }
