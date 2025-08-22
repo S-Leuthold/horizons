@@ -17,6 +17,9 @@
 #' @param include_covariates Logical. Whether to include any covariate combinations in the modeling grid. Default = `TRUE`.
 #' @param refresh Logical. Whether to refresh cached predictions for soil and climate covariates. Default = `FALSE`.
 #' @param verbose Logical. Whether to print progress and prediction summaries using `cli`. Default = `TRUE`.
+#' @param parallel Logical. Enable parallel processing for soil covariate prediction. Defaults to `FALSE` (safe for nested contexts).
+#' @param n_workers Integer. Number of parallel workers for covariate prediction. If `NULL`, uses `min(10, detectCores()-1)` for safety.
+#' @param allow_nested Logical. Allow parallel processing even when already in parallel context. Defaults to `FALSE` (recommended).
 #'
 #' @return A named `list` with:
 #' \itemize{
@@ -76,7 +79,10 @@ create_project_configurations <- function(project_data,
                                           expand_covariate_grid = TRUE,
                                           include_covariates    = TRUE,
                                           refresh               = FALSE,
-                                          verbose               = TRUE) {
+                                          verbose               = TRUE,
+                                          parallel              = FALSE,
+                                          n_workers             = NULL,
+                                          allow_nested          = FALSE) {
 
   ## ---------------------------------------------------------------------------
   ## Step 0: Input Validation
@@ -102,10 +108,14 @@ create_project_configurations <- function(project_data,
 
     cli::cli_h2("Predicting soil biophysical covariates: {.val {soil_covariates}}")
 
-    safely_execute(expr = {predict_covariates(covariates = soil_covariates,
-                                              input_data = project_data,
-                                              verbose    = verbose,
-                                              refresh    = refresh)},
+    safely_execute(expr = {predict_covariates(covariates    = soil_covariates,
+                                              input_data     = project_data,
+                                              verbose        = verbose,
+                                              refresh        = refresh,
+                                              cache_dir      = tools::R_user_dir("horizons", "cache"),
+                                              parallel       = parallel,
+                                              n_workers      = n_workers,
+                                              allow_nested   = allow_nested)},
                    default_value = NULL,
                    error_message = "Soil covariate prediction failed") -> soil_covs_safe
 

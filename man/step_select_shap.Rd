@@ -38,6 +38,8 @@ important spectral bands using an XGBoost model. Retains predictors
 with mean absolute SHAP values exceeding an adaptive threshold.
 }
 \details{
+Currently it's variable importance, not SHAP. This is a known issue, and I'm working on it.
+
 The step fits a shallow XGBoost model on the input spectral data (after optional
 preprocessing) and computes SHAP values. Variables with SHAP importance ≥ mean + 1 SD
 are retained. Requires \code{xgboost} and \code{SHAPforxgboost}.

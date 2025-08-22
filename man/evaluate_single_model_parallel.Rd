@@ -17,7 +17,10 @@ evaluate_single_model_parallel(
   grid_size = 10,
   bayesian_iter = 15,
   cv_folds = 5,
-  seed = NULL
+  seed = NULL,
+  parallel = FALSE,
+  n_workers = NULL,
+  allow_nested = FALSE
 )
 }
 \arguments{
@@ -47,6 +50,12 @@ Absorbance, and the target response variable}
 \item{cv_folds}{Integer. Number of cross-validation folds (default = 5)}
 
 \item{seed}{Integer. Random seed for reproducible train/test splits and CV folds (default = NULL)}
+
+\item{parallel}{Logical. Enable parallel processing for model tuning. Defaults to \code{FALSE} (safe for nested contexts).}
+
+\item{n_workers}{Integer. Number of parallel workers for tuning. If \code{NULL}, uses \code{min(10, detectCores()-1)} for safety.}
+
+\item{allow_nested}{Logical. Allow parallel processing even when already in parallel context. Defaults to \code{FALSE} (recommended).}
 
 \item{pruning}{Logical. Whether to skip poor-performing models after grid tuning (default = TRUE)}
 }

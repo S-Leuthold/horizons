@@ -16,6 +16,9 @@
 #' @param variable Character. The name of the outcome variable (unquoted) to use for stratified resampling and evaluation.
 #' @param test_prop Numeric. Proportion of the data to allocate to the holdout test set (default = \code{0.2}).
 #' @param cv_folds Integer. Number of cross-validation folds used for resampling during tuning (default = \code{5}).
+#' @param parallel Logical. Enable parallel processing for model fitting. Defaults to \code{FALSE} (safe for nested contexts).
+#' @param n_workers Integer. Number of parallel workers for fitting. If \code{NULL}, uses \code{min(10, detectCores()-1)} for safety.
+#' @param allow_nested Logical. Allow parallel processing even when already in parallel context. Defaults to \code{FALSE} (recommended).
 #'
 #' @return A named list with the following elements:
 #' \itemize{
@@ -70,7 +73,10 @@ build_ensemble_stack <- function(results_dir,
                                  n_best        = 10,
                                  test_prop     = 0.2,
                                  cv_folds      = 10,
-                                 verbose       = TRUE){
+                                 verbose       = TRUE,
+                                 parallel      = FALSE,
+                                 n_workers     = NULL,
+                                 allow_nested  = FALSE){
 
   requireNamespace("plsmod", quietly = TRUE)
 
@@ -84,6 +90,29 @@ build_ensemble_stack <- function(results_dir,
      cli::cli_abort("Variable {.val {variable}} not found in training data.")
 
     }
+
+  ## ---------------------------------------------------------------------------
+  ## Step 0.5: Setup Parallel Processing with Safety Controls
+  ## ---------------------------------------------------------------------------
+
+  # Determine safe worker count
+  if (is.null(n_workers)) {
+    max_cores <- parallel::detectCores(logical = TRUE)
+    n_workers <- pmax(1, pmin(max_cores - 1, 10))  # Cap at 10 for safety
+  }
+
+  # Check for nested parallelization
+  if (!allow_nested && !identical(future::plan(), future::sequential())) {
+    if(verbose) cli::cli_alert_warning("Nested parallelization detected. Setting parallel=FALSE for safety")
+    parallel <- FALSE
+  }
+
+  # Determine if we can use parallel for fitting
+  use_parallel_fitting <- parallel && n_workers > 1
+  
+  if (verbose && use_parallel_fitting) {
+    cli::cli_alert_info("Parallel fitting enabled with {n_workers} workers")
+  }
 
   ## ---------------------------------------------------------------------------
   ## Step 1: Read model evaluation results
@@ -261,7 +290,8 @@ build_ensemble_stack <- function(results_dir,
                     safely_execute(expr = {tune::fit_resamples(object    = wf,
                                                                resamples = resamples,
                                                                control   = tune::control_resamples(save_pred     = TRUE,
-                                                                                                   save_workflow = TRUE))},
+                                                                                                   save_workflow = TRUE,
+                                                                                                   allow_par     = use_parallel_fitting))},
                                    default_value = NULL,
                                    error_message = glue::glue("Refit failed for {id}"))
                     })
