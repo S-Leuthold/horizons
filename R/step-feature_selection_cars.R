@@ -133,6 +133,11 @@ prep.step_select_cars <- function(x, training, info = NULL, ...) {
   
   for (iter in 1:n_iterations) {
     
+    # Safety check - need at least 2 variables for meaningful PLS
+    if(length(selected_vars) < 2) {
+      break
+    }
+    
     # Exponentially decreasing retention rate
     retention_rate <- (n_vars / length(selected_vars))^(iter / n_iterations)
     n_keep         <- max(1, floor(length(selected_vars) * retention_rate))
@@ -145,14 +150,35 @@ prep.step_select_cars <- function(x, training, info = NULL, ...) {
     X_weighted     <- sweep(X_subset, 2, weights[selected_vars], "*")
     y_subset       <- outcome_vec[mc_samples]
     
-    # Fit PLS model
-    pls_fit        <- pls::plsr(y_subset ~ X_weighted, 
-                                ncomp      = min(n_components, ncol(X_weighted) - 1),
+    # Fit PLS model (need to create a data frame for the formula interface)
+    pls_data       <- as.data.frame(X_weighted)
+    pls_data$y     <- y_subset
+    
+    # Determine number of components safely
+    n_comp_use <- min(n_components, ncol(X_weighted) - 1)
+    if(n_comp_use < 1) n_comp_use <- 1
+    
+    pls_fit        <- pls::plsr(y ~ ., 
+                                data       = pls_data,
+                                ncomp      = n_comp_use,
                                 validation = "LOO")
     
     # Get variable importance from regression coefficients
-    coef_matrix    <- coef(pls_fit, ncomp = min(n_components, ncol(X_weighted) - 1))
-    var_importance <- abs(coef_matrix[, 1])
+    coef_result    <- coef(pls_fit, ncomp = n_comp_use)
+    
+    # Handle matrix, array, and vector cases robustly
+    var_importance <- tryCatch({
+      if(is.array(coef_result) && length(dim(coef_result)) > 1 && dim(coef_result)[2] >= 1) {
+        # Matrix case with at least 1 column
+        abs(coef_result[, 1])
+      } else {
+        # Vector case or degenerate matrix
+        abs(as.vector(coef_result))
+      }
+    }, error = function(e) {
+      # Ultimate fallback - flatten everything
+      abs(as.vector(coef_result))
+    })
     
     # Update weights using EDF (Exponentially Decreasing Function)
     weights[selected_vars] <- weights[selected_vars] * var_importance
@@ -162,8 +188,18 @@ prep.step_select_cars <- function(x, training, info = NULL, ...) {
     keep_indices        <- which(var_importance >= importance_threshold)
     selected_vars       <- selected_vars[keep_indices]
     
-    # Calculate RMSECV for monitoring
-    rmsecv_values[iter] <- sqrt(mean(pls::RMSEP(pls_fit, estimate = "CV")$val[1, , ]))
+    # Calculate RMSECV for monitoring  
+    rmsecv_values[iter] <- tryCatch({
+      sqrt(mean(pls::RMSEP(pls_fit, estimate = "CV")$val[1, , ]))
+    }, error = function(e) {
+      # Fallback: use validation stats if available
+      if(!is.null(pls_fit$validation)) {
+        sqrt(mean((pls_fit$validation$PRESS)/(nrow(pls_data))))
+      } else {
+        # Ultimate fallback
+        NA_real_
+      }
+    })
     
     # Early stopping if only one variable left
     if (length(selected_vars) <= 1) break
@@ -177,6 +213,11 @@ prep.step_select_cars <- function(x, training, info = NULL, ...) {
   weights      <- rep(1, n_vars)
   
   for (i in 1:optimal_iter) {
+    # Safety check
+    if(length(selected_vars) < 2) {
+      break
+    }
+    
     retention_rate <- (n_vars / length(selected_vars))^(i / n_iterations)
     n_keep        <- max(1, floor(length(selected_vars) * retention_rate))
     mc_samples    <- sample(n_samples, floor(n_samples * mc_ratio))
@@ -185,12 +226,34 @@ prep.step_select_cars <- function(x, training, info = NULL, ...) {
     X_weighted    <- sweep(X_subset, 2, weights[selected_vars], "*")
     y_subset      <- outcome_vec[mc_samples]
     
-    pls_fit       <- pls::plsr(y_subset ~ X_weighted,
-                               ncomp      = min(n_components, ncol(X_weighted) - 1),
+    # Create data frame for PLS
+    pls_data      <- as.data.frame(X_weighted)
+    pls_data$y    <- y_subset
+    
+    # Determine number of components safely
+    n_comp_use    <- min(n_components, ncol(X_weighted) - 1)
+    if(n_comp_use < 1) n_comp_use <- 1
+    
+    pls_fit       <- pls::plsr(y ~ .,
+                               data       = pls_data,
+                               ncomp      = n_comp_use,
                                validation = "LOO")
     
-    coef_matrix   <- coef(pls_fit, ncomp = min(n_components, ncol(X_weighted) - 1))
-    var_importance <- abs(coef_matrix[, 1])
+    coef_result   <- coef(pls_fit, ncomp = n_comp_use)
+    
+    # Handle matrix, array, and vector cases robustly
+    var_importance <- tryCatch({
+      if(is.array(coef_result) && length(dim(coef_result)) > 1 && dim(coef_result)[2] >= 1) {
+        # Matrix case with at least 1 column
+        abs(coef_result[, 1])
+      } else {
+        # Vector case or degenerate matrix
+        abs(as.vector(coef_result))
+      }
+    }, error = function(e) {
+      # Ultimate fallback - flatten everything
+      abs(as.vector(coef_result))
+    })
     
     weights[selected_vars] <- weights[selected_vars] * var_importance
     
