@@ -87,6 +87,7 @@ Suggests:
     lightgbm,
     mixOmics,
     nnet,
+    pls,
     spectrolab,
     knitr,
     rmarkdown,
@@ -131,6 +132,7 @@ Collate:
     'stack-build_model_ensemble.R'
     'stack-tune_blend.R'
     'step-feature_selection_boruta.R'
+    'step-feature_selection_cars.R'
     'step-feature_selection_correlation.R'
     'step-feature_selection_shap.R'
     'step_join_covariates.R'

@@ -101,30 +101,64 @@ prep.step_select_boruta <- function(x, training, info = NULL, ...) {
   spectra_mat  <- as.matrix(training[, col_names, drop = FALSE])
 
   ## ---------------------------------------------------------------------------
-  ## Stage 2: Cluster predictors before Boruta
+  ## Stage 2: Variance filtering and clustering
   ## ---------------------------------------------------------------------------
 
+  # Remove near-constant features before clustering
+  variance_check <- apply(spectra_mat, 2, var, na.rm = TRUE)
+  keep_cols <- variance_check > 1e-10
+  
+  if(sum(keep_cols) < ncol(spectra_mat)) {
+    cli::cli_alert_info("Filtering {ncol(spectra_mat) - sum(keep_cols)} near-constant features before clustering")
+    spectra_mat <- spectra_mat[, keep_cols, drop = FALSE]
+    col_names_filtered <- col_names[keep_cols]
+  } else {
+    col_names_filtered <- col_names
+  }
+
+  # Use more aggressive clustering for spectral data (k=50 instead of 150)
   cluster_spectral_predictors(spectra_mat,
-                              k      = 150,
+                              k      = min(50, ncol(spectra_mat)),
                               method = "correlation") -> cluster_result
 
   reduced_mat   <- cluster_result$reduced_mat
   cluster_map   <- cluster_result$cluster_map
   cluster_vars  <- cluster_result$selected_vars
 
-  cli::cli_alert_info("Boruta feature selection using {length(cluster_vars)} clustered predictors (from {length(col_names)} original wavenumbers)...")
+  cli::cli_alert_info("Boruta feature selection using {length(cluster_vars)} clustered predictors (from {length(col_names_filtered)} variance-filtered wavenumbers)...")
 
   ## ---------------------------------------------------------------------------
-  ## Stage 3: Run Boruta
+  ## Stage 3: Run Boruta with optimized parameters
   ## ---------------------------------------------------------------------------
 
-  boruta_fit <- Boruta::Boruta(x       = reduced_mat,
-                               y       = outcome_vec,
-                               doTrace = 0,
-                               maxRuns = 40,
-                               holdHistory = FALSE)
+  # Optimize Random Forest parameters for correlated features
+  n_features <- ncol(reduced_mat)
+  optimal_mtry <- min(max(5, round(sqrt(n_features) * 2)), n_features - 1)
 
-  kept_cluster_vars <- Boruta::getSelectedAttributes(boruta_fit, withTentative = TRUE)
+  boruta_fit <- tryCatch({
+    Boruta::Boruta(x       = reduced_mat,
+                   y       = outcome_vec,
+                   doTrace = 0,
+                   maxRuns = 100,        # Increased from 40 for spectral data
+                   ntree   = 1000,       # More trees for stability
+                   mtry    = optimal_mtry, # Optimized for correlated predictors
+                   holdHistory = FALSE)
+  }, error = function(e) {
+    cli::cli_alert_warning("Boruta failed: {e$message}")
+    cli::cli_alert_info("Falling back to correlation-based selection")
+    NULL
+  })
+
+  # Handle Boruta results or fallback
+  if(!is.null(boruta_fit)) {
+    kept_cluster_vars <- Boruta::getSelectedAttributes(boruta_fit, withTentative = TRUE)
+  } else {
+    # Fallback: select top 50 most correlated features
+    cors <- abs(cor(reduced_mat, outcome_vec, use = "pairwise.complete.obs"))
+    top_cors <- sort(cors[,1], decreasing = TRUE)[1:min(50, length(cors[,1]))]
+    kept_cluster_vars <- names(top_cors)
+    cli::cli_alert_info("Selected {length(kept_cluster_vars)} features via correlation fallback")
+  }
 
   ## ---------------------------------------------------------------------------
   ## Stage 4: Map back to original wavenumbers
@@ -133,8 +167,8 @@ prep.step_select_boruta <- function(x, training, info = NULL, ...) {
   kept_wavenumbers <- unique(unlist(cluster_map[kept_cluster_vars]))
 
   if (length(kept_wavenumbers) == 0) {
-    cli::cli_alert_warning("No wavenumbers retained by Boruta. Retaining all original predictors.")
-    kept_wavenumbers <- col_names
+    cli::cli_alert_warning("No wavenumbers retained by Boruta. Retaining all variance-filtered predictors.")
+    kept_wavenumbers <- col_names_filtered
   }
 
   ## ---------------------------------------------------------------------------
