@@ -298,7 +298,7 @@ download_ossl_data <- function(covariates,
                    default_value = NULL,
                    error_message = "Failed to set parallel plan for processing")
   } else {
-    safely_execute(expr          = {future::plan(future::sequential)},
+    safely_execute(expr          = {future::plan(sequential)},
                    default_value = NULL,
                    error_message = "Failed to set sequential plan for processing")
   }

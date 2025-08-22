@@ -11,7 +11,7 @@
   # Optional: Register future plan if not already set
   if (requireNamespace("future", quietly = TRUE) &&
       is.null(future::plan("list"))) {
-    future::plan(future::sequential)
+    future::plan(sequential)
   }
 
   # Optional: Silence verbose packages used internally
