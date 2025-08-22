@@ -281,18 +281,20 @@ run_model_evaluation <- function(config,
     # Call the fixed evaluate_models_parallel function
     parallel_results <- evaluate_models_parallel(
       configs               = config,
-      input_data           = input_data,
-      covariate_data       = covariate_data,
-      variable             = variable,
-      n_workers            = workers,
-      output_dir           = output_dir,
-      chunk_size           = chunk_size,  # This is deprecated in the new function
-      grid_size            = grid_size_eval,
-      bayesian_iter        = bayesian_iter_eval,
-      cv_folds             = cv_folds_eval,
-      seed                 = 123,
+      input_data            = input_data,
+      covariate_data        = covariate_data,
+      variable              = variable,
+      n_workers             = workers,
+      output_dir            = output_dir,
+      chunk_size            = chunk_size,  # This is deprecated in the new function
+      grid_size             = grid_size_eval,
+      bayesian_iter         = bayesian_iter_eval,
+      cv_folds              = cv_folds_eval,
+      seed                  = 123,
       save_individual_models = FALSE,
-      verbose              = TRUE
+      verbose               = TRUE,
+      parallel              = TRUE,      # Top-level orchestrator should parallelize
+      allow_nested          = FALSE      # Prevent nested parallelization
     )
     
     # Convert results to expected format

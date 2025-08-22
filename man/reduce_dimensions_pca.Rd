@@ -4,7 +4,13 @@
 \alias{reduce_dimensions_pca}
 \title{Reduce Spectral Dimensionality Using PCA}
 \usage{
-reduce_dimensions_pca(training_data, new_data)
+reduce_dimensions_pca(
+  training_data,
+  new_data,
+  parallel = FALSE,
+  n_workers = NULL,
+  allow_nested = FALSE
+)
 }
 \arguments{
 \item{training_data}{A \code{data.frame} or \code{tibble} containing training MIR spectra with numeric
@@ -12,6 +18,12 @@ wavenumber columns (typically \code{608}–\code{3992}) and any number of metada
 
 \item{new_data}{A \code{data.frame} or \code{tibble} containing new MIR spectra to be projected into PCA space.
 Must have the same spectral columns as \code{training_data}.}
+
+\item{parallel}{Logical. Enable parallel processing for PCA operations. Defaults to \code{FALSE} (safe for nested contexts).}
+
+\item{n_workers}{Integer. Number of parallel workers. If \code{NULL}, uses \code{min(10, detectCores()-1)} for safety.}
+
+\item{allow_nested}{Logical. Allow parallel processing even when already in parallel context. Defaults to \code{FALSE} (recommended).}
 }
 \value{
 A named \code{list} with two elements:

@@ -17,7 +17,9 @@ evaluate_models_parallel(
   cv_folds = 5,
   seed = 123,
   save_individual_models = FALSE,
-  verbose = TRUE
+  verbose = TRUE,
+  parallel = TRUE,
+  allow_nested = FALSE
 )
 }
 \arguments{
@@ -46,6 +48,10 @@ evaluate_models_parallel(
 \item{save_individual_models}{Logical. Save each successful model immediately (default: FALSE)}
 
 \item{verbose}{Logical. Print progress information (default: TRUE)}
+
+\item{parallel}{Logical. Enable parallel processing for model evaluation. Defaults to \code{TRUE} (top-level orchestrator).}
+
+\item{allow_nested}{Logical. Allow parallel processing even when already in parallel context. Defaults to \code{FALSE} (recommended).}
 }
 \value{
 A tibble containing all model results with columns:

@@ -7,6 +7,9 @@
 #' @param input_data A `tibble` containing MIR spectra for multiple samples. Must include numeric columns
 #'   representing wavenumber features (e.g., `Dim.600`, `Dim.602`, ...). A column named `Sample_ID` is
 #'   recommended but not required. Any non-spectral columns are preserved in the output.
+#' @param parallel Logical. Enable parallel processing for clustering operations. Defaults to `FALSE` (safe for nested contexts).
+#' @param n_workers Integer. Number of parallel workers. If `NULL`, uses `min(10, detectCores()-1)` for safety.
+#' @param allow_nested Logical. Allow parallel processing even when already in parallel context. Defaults to `FALSE` (recommended).
 #'
 #' @return A `list` with the following components:
 #' \itemize{
@@ -41,7 +44,10 @@
 #' @export
 
 
-cluster_spectral_data <- function(input_data) {
+cluster_spectral_data <- function(input_data,
+                                  parallel = FALSE,
+                                  n_workers = NULL,
+                                  allow_nested = FALSE) {
 
   ## ---------------------------------------------------------------------------
   ## Step 1: PCA Preparation — scale and reduce
