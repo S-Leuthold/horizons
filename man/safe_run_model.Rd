@@ -15,7 +15,8 @@ safe_run_model(
   bayesian_iter = 15,
   cv_folds = 5,
   pruning = TRUE,
-  save_output = FALSE
+  save_output = FALSE,
+  parallel_strategy = "cv_folds"
 )
 }
 \arguments{

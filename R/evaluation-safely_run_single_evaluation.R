@@ -70,7 +70,8 @@ safe_run_model <- function(config_row,
                            bayesian_iter = 15,
                            cv_folds      = 5,
                            pruning       = TRUE,
-                           save_output   = FALSE) {
+                           save_output   = FALSE,
+                           parallel_strategy = "cv_folds") {
 
   ## ---------------------------------------------------------------------------
   ## Step 1: Setup
@@ -99,7 +100,8 @@ safe_run_model <- function(config_row,
                                                pruning            = pruning,
                                                grid_size          = grid_size,
                                                bayesian_iter      = bayesian_iter,
-                                               cv_folds           = cv_folds)},
+                                               cv_folds           = cv_folds,
+                                               parallel_strategy  = parallel_strategy)},
                  default_value     = NULL,
                  error_message     = "Failed model run at config row {row_index}: {config_desc}",
                  log_error         = TRUE,

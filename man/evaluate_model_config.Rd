@@ -17,7 +17,8 @@ evaluate_model_config(
   pruning = TRUE,
   grid_size = 10,
   bayesian_iter = 15,
-  cv_folds = 5
+  cv_folds = 5,
+  parallel_strategy = "cv_folds"
 )
 }
 \arguments{

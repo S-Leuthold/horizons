@@ -91,13 +91,17 @@ evaluate_model_config <- function(input_data,
                                   pruning       = TRUE,
                                   grid_size     = 10,
                                   bayesian_iter = 15,
-                                  cv_folds      = 5) {
+                                  cv_folds      = 5,
+                                  parallel_strategy = "cv_folds") {
 
   ## ---------------------------------------------------------------------------
   ## Step 1: Split and Fold
   ## ---------------------------------------------------------------------------
 
   stopifnot(variable %in% colnames(input_data))
+  
+  # Set allow_par based on parallel strategy
+  allow_par_setting <- (parallel_strategy == "cv_folds")
 
   wflow_id <- clean_workflow_id(model             = model,
                                 transformation    = transformation,
@@ -214,7 +218,7 @@ evaluate_model_config <- function(input_data,
                                              control    = tune::control_grid(save_pred     = FALSE,
                                                                              save_workflow = TRUE,
                                                                              verbose       = FALSE,
-                                                                             allow_par     = TRUE,
+                                                                             allow_par     = allow_par_setting,
                                                                              parallel_over = "everything"))},
                      default_value = NULL,
                      error_message = "Grid tuning failed for {wflow_id}") -> grid_res_safe
@@ -283,7 +287,7 @@ evaluate_model_config <- function(input_data,
                                                                                verbose       = FALSE,
                                                                                seed          = 307,
                                                                                no_improve    = 10L,
-                                                                               allow_par     = TRUE,
+                                                                               allow_par     = allow_par_setting,
                                                                                parallel_over = "everything"))},
                      default_value  = NULL,
                      error_message  = "Bayesian tuning failed for {wflow_id}") -> bayes_res_safe

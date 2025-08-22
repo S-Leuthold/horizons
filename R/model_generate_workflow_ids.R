@@ -94,6 +94,7 @@ clean_workflow_id <- function(model,
     feature_selection == "correlation" ~ "Corr",
     feature_selection == "boruta"      ~ "Boruta",
     feature_selection == "shap"        ~ "SHAP",
+    feature_selection == "cars"        ~ "CARS",
     feature_selection == "none"        ~ "NoFeatSel",
     TRUE                               ~ stringr::str_replace_all(feature_selection, "\\s+", "_")
   )
@@ -103,13 +104,12 @@ clean_workflow_id <- function(model,
   ## Step 3: Format covariate label
   ## ---------------------------------------------------------------------------
 
-  covar_abbrev <- purrr::map_chr(covariates, function(x) {
-    if (is.null(x) || identical(x, "No Covariates") || length(x) == 0) {
-      "NoCovs"
-    } else {
-      paste(sort(make.names(x)), collapse = "+")
-    }
-  })
+  # Handle covariates as a single vector, not mapping over them
+  if (is.null(covariates) || identical(covariates, "No Covariates") || length(covariates) == 0) {
+    covar_abbrev <- "NoCovs"
+  } else {
+    covar_abbrev <- paste(sort(make.names(covariates)), collapse = "+")
+  }
 
   ## ---------------------------------------------------------------------------
   ## Step 4: Combine components into workflow IDs
