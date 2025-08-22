@@ -131,7 +131,8 @@ finalize_top_workflows <- function(parallel_results,
   }
 
   # Check for nested parallelization
-  if (!allow_nested && !identical(future::plan(), future::sequential())) {
+  current_plan_class <- class(future::plan())[1]
+  if (!allow_nested && !identical(current_plan_class, "sequential")) {
     if(verbose) cli::cli_alert_warning("Nested parallelization detected. Setting parallel=FALSE for safety")
     parallel <- FALSE
   }
