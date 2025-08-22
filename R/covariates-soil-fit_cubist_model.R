@@ -192,7 +192,7 @@ fit_cubist_model <- function(input_data,
     grid_res <- grid_res_safe$result
 
     if(is.null(grid_res)){
-      safely_execute(expr = {future::plan(future::sequential)})
+      safely_execute(expr = {future::plan(sequential)})
       return(NULL)
     }
 
@@ -213,7 +213,7 @@ fit_cubist_model <- function(input_data,
     bayes_res <- bayes_res_safe$result
 
     if(is.null(bayes_res)){
-      safely_execute(expr = {future::plan(future::sequential)})
+      safely_execute(expr = {future::plan(sequential)})
       return(NULL)
     }
 
