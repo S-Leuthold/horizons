@@ -10,6 +10,9 @@
 #'   covariate to be modeled. All rows with `NA` in the response are removed.
 #' @param covariate A character string. Name of the column to use as the response variable (e.g., `"Sand"`, `"pH"`).
 #' @param verbose Logical. If `TRUE`, prints progress messages using `cli::cli_*()` during model training. Defaults to `FALSE`.
+#' @param parallel Logical. Enable parallel processing for hyperparameter tuning. Defaults to `FALSE` (safe for nested contexts).
+#' @param n_workers Integer. Number of parallel workers for tuning. If `NULL`, uses `min(10, detectCores()-1)` for safety.
+#' @param allow_nested Logical. Allow parallel processing even when already in parallel context. Defaults to `FALSE` (recommended).
 #'
 #' @return A named `list` with the following components:
 #' \itemize{
@@ -66,7 +69,10 @@
 
 fit_cubist_model <- function(input_data,
                              covariate,
-                             verbose) {
+                             verbose,
+                             parallel = FALSE,
+                             n_workers = NULL,
+                             allow_nested = FALSE) {
 
   ## ---------------------------------------------------------------------------
   ## Step 0: Data validation
@@ -141,10 +147,32 @@ fit_cubist_model <- function(input_data,
     ## Stage 2: Initial Grid Search for Hyperparameter Tuning
     ## ---------------------------------------------------------------------------
 
-    safely_execute(expr          = {future::plan(future::multisession,
-                                                 workers = parallel::detectCores(logical = TRUE) - 1)},
-                   default_value = NULL,
-                   error_message = "Failed to set parallel plan for tuning")
+    ## Step 2.1: Configure parallel processing with safety controls -----------
+
+    # Determine safe worker count
+    if (is.null(n_workers)) {
+      max_cores <- parallel::detectCores(logical = TRUE)
+      n_workers <- pmax(1, pmin(max_cores - 1, 10))  # Cap at 10 for safety
+    }
+
+    # Check for nested parallelization
+    current_plan <- deparse(substitute(future::plan()))[1]
+    if (!allow_nested && !identical(future::plan(), future::sequential())) {
+      if(verbose) cli::cli_alert_warning("Nested parallelization detected. Setting parallel=FALSE for safety")
+      parallel <- FALSE
+    }
+
+    # Set parallel plan with proper cleanup
+    if (parallel && n_workers > 1) {
+      old_plan <- future::plan()
+      on.exit(future::plan(old_plan), add = TRUE)
+      
+      safely_execute(expr          = {future::plan(future::multisession, workers = n_workers)},
+                     default_value = NULL,
+                     error_message = glue::glue("Failed to set parallel plan for {covariate} tuning"))
+    } else {
+      if(verbose) cli::cli_alert_info("Using sequential processing for {.val {covariate}} (parallel={parallel}, n_workers={n_workers})")
+    }
 
     dials::grid_space_filling(rules::committees(range = c(2L, 20L)),
                               dials::neighbors(range = c(2L, 9L)),
@@ -200,11 +228,6 @@ fit_cubist_model <- function(input_data,
 
     final_wf    <- tune::finalize_workflow(wf,
                                            best_params)
-
-    safely_execute(expr          = {future::plan(future::sequential)},
-                   default_value = NULL,
-                   error_message = "Failed to reset parallel plan after Cubist tuning")
-
 
   ## ---------------------------------------------------------------------------
   ## Step 3: Final Fit and Evaluation
