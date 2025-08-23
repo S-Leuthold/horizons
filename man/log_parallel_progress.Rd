@@ -2,7 +2,7 @@
 % Please edit documentation in R/utils-parallel_logging.R
 \name{log_parallel_progress}
 \alias{log_parallel_progress}
-\title{Simple File-Based Logging for Parallel Workers}
+\title{Simple, Directory-Aware Logger for Parallel Workers}
 \usage{
 log_parallel_progress(
   message,
@@ -12,15 +12,16 @@ log_parallel_progress(
 )
 }
 \arguments{
-\item{message}{Character. Message to log}
+\item{message}{Character. Message to log.}
 
-\item{log_file}{Character. Path to log file (default: "parallel_progress.log" in temp)}
+\item{log_file}{Character. Path to \strong{directory} (recommended) or single file.
+Default: \code{file.path(tempdir(), "parallel_models")}.}
 
-\item{worker_id}{Integer. Worker identifier (optional)}
+\item{worker_id}{Integer. Optional worker identifier to include (e.g., \code{Sys.getpid() \%\% 100}).}
 
-\item{include_timestamp}{Logical. Include timestamp in log entry}
+\item{include_timestamp}{Logical. Include \verb{YYYY-mm-dd HH:MM:SS} timestamp (default TRUE).}
 }
 \description{
-Provides thread-safe logging for parallel workers that write to a shared log file.
-Each worker can append progress messages without console output conflicts.
+Appends a log line to a per-worker file when given a directory, or to a single
+file when given a file path (back-compat). Safe to call in parallel workers.
 }

@@ -11,13 +11,16 @@ monitor_parallel_progress(
 )
 }
 \arguments{
-\item{log_file}{Character. Path to log file}
+\item{log_file}{Character. Path to a single log file OR a directory of logs.
+If NULL, defaults to \code{file.path(tempdir(), "parallel_progress.log")}.}
 
 \item{refresh_seconds}{Numeric. Seconds between refreshes (default: 5)}
 
-\item{show_recent}{Integer. Number of recent models to show (default: 5)}
+\item{show_recent}{Integer. Number of recent completed models to show (default: 5)}
 }
 \description{
 Live dashboard for monitoring parallel model evaluation progress.
-Updates automatically every few seconds with comprehensive statistics.
+Accepts either a single log file or a directory containing multiple
+per-worker logs (e.g., "parallel_\if{html}{\out{<PID>}}.log"). Lines are merged in
+chronological order by their leading timestamp.
 }
