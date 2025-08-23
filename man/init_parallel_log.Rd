@@ -2,18 +2,21 @@
 % Please edit documentation in R/utils-parallel_logging.R
 \name{init_parallel_log}
 \alias{init_parallel_log}
-\title{Initialize Parallel Progress Log}
+\title{Initialize Parallel Progress Logs}
 \usage{
 init_parallel_log(log_file = NULL, n_models = NULL)
 }
 \arguments{
-\item{log_file}{Character. Path to log file}
+\item{log_file}{Character. Path to \strong{directory} (recommended) or single file.
+Default: \code{file.path(tempdir(), "parallel_models")}.}
 
-\item{n_models}{Integer. Total number of models to process}
+\item{n_models}{Integer. Total number of models (optional, for header).}
 }
 \value{
-Character. Path to initialized log file
+Character. The path you should pass around (directory or file).
 }
 \description{
-Creates or clears a log file for parallel progress tracking
+Initializes a logging destination for parallel runs. If a \strong{directory} is
+provided, creates it (if needed) and writes a header to \code{master.log}. If a
+\strong{file} path is provided, initializes that single file (backward compatible).
 }

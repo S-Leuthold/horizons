@@ -92,6 +92,7 @@ Suggests:
     spectrolab,
     knitr,
     rmarkdown,
+    RhpcBLASctl,
     RColorBrewer,
     car,
     shapr,

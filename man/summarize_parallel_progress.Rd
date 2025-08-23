@@ -2,16 +2,16 @@
 % Please edit documentation in R/utils-parallel_logging.R
 \name{summarize_parallel_progress}
 \alias{summarize_parallel_progress}
-\title{Get Parallel Progress Summary}
+\title{Summarize Parallel Progress}
 \usage{
 summarize_parallel_progress(log_file = NULL, return_details = FALSE)
 }
 \arguments{
-\item{log_file}{Character. Path to log file}
+\item{log_file}{Character. Path to directory or file. Default: directory under \code{tempdir()}.}
 
-\item{return_details}{Logical. Return detailed statistics}
+\item{return_details}{Logical. Return a list of detailed stats (default FALSE).}
 }
 \description{
-Analyzes the log file to provide comprehensive progress summary including
-best models, worker stats, and ETA with confidence intervals
+Analyzes logs (directory or file) to produce counts, rates, ETA, and best R².
+Compatible with per-worker logs written by \code{log_parallel_progress()}.
 }

@@ -1,274 +1,233 @@
-#' Simple File-Based Logging for Parallel Workers
-#'
-#' @description
-#' Provides thread-safe logging for parallel workers that write to a shared log file.
-#' Each worker can append progress messages without console output conflicts.
-#'
-#' @param message Character. Message to log
-#' @param log_file Character. Path to log file (default: "parallel_progress.log" in temp)
-#' @param worker_id Integer. Worker identifier (optional)
-#' @param include_timestamp Logical. Include timestamp in log entry
-#'
-#' @export
+# ---------- Shared helpers (internal) -----------------------------------------
 
-log_parallel_progress <- function(message, 
-                                 log_file = NULL,
-                                 worker_id = NULL,
-                                 include_timestamp = TRUE) {
-  
-  # Default log file in temp directory
-  if (is.null(log_file)) {
-    log_file <- file.path(tempdir(), "parallel_progress.log")
-  }
-  
-  # Create log entry with subtle worker ID at the end
-  if (include_timestamp) {
-    timestamp <- format(Sys.time(), "%Y-%m-%d %H:%M:%S")
-    if (!is.null(worker_id)) {
-      log_entry <- sprintf("[%s] %s [W%02d]\n", timestamp, message, worker_id)
-    } else {
-      log_entry <- sprintf("[%s] %s\n", timestamp, message)
-    }
+`%||%` <- function(x, y) if (is.null(x) || length(x) == 0 || all(is.na(x))) y else x
+
+.is_dir <- function(path) isTRUE(dir.exists(path))
+
+.worker_log_path <- function(log_path) {
+  # If a directory is given, write to per-PID file inside it
+  if (.is_dir(log_path)) {
+    file.path(log_path, sprintf("parallel_%d.log", Sys.getpid()))
   } else {
-    if (!is.null(worker_id)) {
-      log_entry <- sprintf("%s [W%02d]\n", message, worker_id)
-    } else {
-      log_entry <- sprintf("%s\n", message)
-    }
+    # Back-compat: treat as a single file path
+    log_path
   }
-  
-  # Thread-safe append to file
-  tryCatch({
-    cat(log_entry, file = log_file, append = TRUE)
-  }, error = function(e) {
-    # Silently fail if can't write (to avoid breaking parallel execution)
-    NULL
-  })
-  
-  invisible(NULL)
 }
 
-#' Initialize Parallel Progress Log
+.master_log_path <- function(log_dir) {
+  if (.is_dir(log_dir)) file.path(log_dir, "master.log") else log_dir
+}
+
+.read_merged_lines <- function(path_or_dir) {
+  if (.is_dir(path_or_dir)) {
+    files <- unique(c(
+      Sys.glob(file.path(path_or_dir, "parallel_*.log")),
+      file.path(path_or_dir, "master.log")
+    ))
+    files <- files[file.exists(files)]
+    if (!length(files)) return(character())
+    lines <- unlist(lapply(files, function(f) readLines(f, warn = FALSE)), use.names = FALSE)
+  } else {
+    if (!file.exists(path_or_dir)) return(character())
+    lines <- readLines(path_or_dir, warn = FALSE)
+  }
+  if (!length(lines)) return(lines)
+  # Order by leading timestamp "YYYY-MM-DD HH:MM:SS"
+  ord <- order(substr(lines, 1L, 19L), decreasing = FALSE, na.last = TRUE)
+  lines[ord]
+}
+
+.parse_ts <- function(line) {
+  ts <- substr(line, 1L, 19L)
+  suppressWarnings(as.POSIXct(ts, format = "%Y-%m-%d %H:%M:%S", tz = ""))
+}
+
+# ---------- API ----------------------------------------------------------------
+
+#' Initialize Parallel Progress Logs
 #'
 #' @description
-#' Creates or clears a log file for parallel progress tracking
+#' Initializes a logging destination for parallel runs. If a **directory** is
+#' provided, creates it (if needed) and writes a header to `master.log`. If a
+#' **file** path is provided, initializes that single file (backward compatible).
 #'
-#' @param log_file Character. Path to log file
-#' @param n_models Integer. Total number of models to process
-#' @return Character. Path to initialized log file
+#' @param log_file Character. Path to **directory** (recommended) or single file.
+#'   Default: `file.path(tempdir(), "parallel_models")`.
+#' @param n_models Integer. Total number of models (optional, for header).
+#' @return Character. The path you should pass around (directory or file).
+#' @importFrom cli cli_alert_success
 #' @export
-
 init_parallel_log <- function(log_file = NULL, n_models = NULL) {
-  
   if (is.null(log_file)) {
-    log_file <- file.path(tempdir(), "parallel_progress.log")
+    # Default to a directory
+    log_file <- file.path(tempdir(), "parallel_models")
   }
-  
-  # Create header
+
+  if (.is_dir(log_file) || !grepl("\\.log$", basename(log_file), ignore.case = TRUE)) {
+    # Treat as directory; ensure exists
+    dir.create(log_file, recursive = TRUE, showWarnings = FALSE)
+    target <- file.path(log_file, "master.log")
+  } else {
+    # Treat as single file
+    dir.create(dirname(log_file), recursive = TRUE, showWarnings = FALSE)
+    target <- log_file
+  }
+
   header <- paste0(
     "==============================================\n",
     "Parallel Model Evaluation Log\n",
-    "Started: ", format(Sys.time(), "%Y-%m-%d %H:%M:%S"), "\n"
-  )
-  
-  if (!is.null(n_models)) {
-    header <- paste0(header, "Total models: ", n_models, "\n")
-  }
-  
-  header <- paste0(
-    header,
+    "Started: ", format(Sys.time(), "%Y-%m-%d %H:%M:%S"), "\n",
+    if (!is.null(n_models)) paste0("Total models: ", n_models, "\n") else "",
     "==============================================\n\n"
   )
-  
-  # Write header (overwrites existing file)
-  cat(header, file = log_file, append = FALSE)
-  
-  cli::cli_alert_success("Log file initialized: {log_file}")
-  
+
+  cat(header, file = target, append = FALSE)
+
+  cli::cli_alert_success("Log initialized at: {if (.is_dir(log_file)) paste0(log_file, '/master.log') else log_file}")
   return(log_file)
 }
 
-#' Tail Parallel Progress Log
+#' Simple, Directory-Aware Logger for Parallel Workers
 #'
 #' @description
-#' Shows the last N lines of the parallel progress log
+#' Appends a log line to a per-worker file when given a directory, or to a single
+#' file when given a file path (back-compat). Safe to call in parallel workers.
 #'
-#' @param n Integer. Number of lines to show (default: 20)
-#' @param log_file Character. Path to log file
+#' @param message Character. Message to log.
+#' @param log_file Character. Path to **directory** (recommended) or single file.
+#'   Default: `file.path(tempdir(), "parallel_models")`.
+#' @param worker_id Integer. Optional worker identifier to include (e.g., `Sys.getpid() %% 100`).
+#' @param include_timestamp Logical. Include `YYYY-mm-dd HH:MM:SS` timestamp (default TRUE).
 #' @export
-
-tail_parallel_log <- function(n = 20, log_file = NULL) {
-  
+log_parallel_progress <- function(message,
+                                  log_file = NULL,
+                                  worker_id = NULL,
+                                  include_timestamp = TRUE) {
   if (is.null(log_file)) {
-    log_file <- file.path(tempdir(), "parallel_progress.log")
+    log_file <- file.path(tempdir(), "parallel_models")  # directory default
   }
-  
-  if (!file.exists(log_file)) {
-    cli::cli_alert_warning("Log file not found: {log_file}")
-    return(invisible(NULL))
-  }
-  
-  # Read and display last n lines
-  lines <- readLines(log_file)
-  n_lines <- length(lines)
-  
-  if (n_lines == 0) {
-    cli::cli_alert_info("Log file is empty")
-    return(invisible(NULL))
-  }
-  
-  start_line <- max(1, n_lines - n + 1)
-  recent_lines <- lines[start_line:n_lines]
-  
-  cat(paste(recent_lines, collapse = "\n"), "\n")
-  
-  invisible(recent_lines)
+  target <- .worker_log_path(log_file)
+
+  ts <- if (isTRUE(include_timestamp)) sprintf("[%s] ", format(Sys.time(), "%Y-%m-%d %H:%M:%S")) else ""
+  wid <- if (!is.null(worker_id)) sprintf(" [W%02d]", as.integer(worker_id)) else ""
+  line <- sprintf("%s%s%s\n", ts, message, wid)
+
+  # Best effort write; don't crash workers on I/O issues
+  tryCatch({
+    dir.create(dirname(target), recursive = TRUE, showWarnings = FALSE)
+    cat(line, file = target, append = TRUE)
+  }, error = function(e) invisible(NULL))
+  invisible(NULL)
 }
 
-#' Get Parallel Progress Summary
+#' Tail Parallel Progress Logs
 #'
 #' @description
-#' Analyzes the log file to provide comprehensive progress summary including
-#' best models, worker stats, and ETA with confidence intervals
+#' Shows the last N lines of the logs from a directory (merging all worker files)
+#' or from a single file if a file path is given.
 #'
-#' @param log_file Character. Path to log file
-#' @param return_details Logical. Return detailed statistics
+#' @param n Integer. Number of lines to show (default 20)
+#' @param log_file Character. Path to directory or file. Default: directory under `tempdir()`.
 #' @export
-
-summarize_parallel_progress <- function(log_file = NULL, return_details = FALSE) {
-  
+tail_parallel_log <- function(n = 20, log_file = NULL) {
   if (is.null(log_file)) {
-    log_file <- file.path(tempdir(), "parallel_progress.log")
+    log_file <- file.path(tempdir(), "parallel_models")
   }
-  
-  if (!file.exists(log_file)) {
-    cli::cli_alert_warning("Log file not found: {log_file}")
+  lines <- .read_merged_lines(log_file)
+  if (!length(lines)) {
+    cli::cli_alert_success("No log data yet at: {log_file}")
     return(invisible(NULL))
   }
-  
-  lines <- readLines(log_file)
-  
-  # Parse different line types
+  n_lines <- length(lines)
+  start_line <- max(1, n_lines - n + 1)
+  recent <- lines[start_line:n_lines]
+  cat(paste(recent, collapse = "\n"), "\n")
+  invisible(recent)
+}
+
+#' Summarize Parallel Progress
+#'
+#' @description
+#' Analyzes logs (directory or file) to produce counts, rates, ETA, and best R².
+#' Compatible with per-worker logs written by `log_parallel_progress()`.
+#'
+#' @param log_file Character. Path to directory or file. Default: directory under `tempdir()`.
+#' @param return_details Logical. Return a list of detailed stats (default FALSE).
+#' @importFrom cli cli_alert_info cli_alert_warning cli_alert_success cli_alert_danger cli_h3
+#' @export
+summarize_parallel_progress <- function(log_file = NULL, return_details = FALSE) {
+  if (is.null(log_file)) {
+    log_file <- file.path(tempdir(), "parallel_models")
+  }
+
+  lines <- .read_merged_lines(log_file)
+  if (!length(lines)) {
+    cli::cli_alert_warning("No log data found at: {log_file}")
+    return(invisible(NULL))
+  }
+
   start_lines <- grep("START \\[", lines, value = TRUE)
-  done_lines <- grep("✓ DONE \\[", lines, value = TRUE)
-  fail_lines <- grep("✗ FAIL \\[", lines, value = TRUE)
-  
-  n_started <- length(start_lines)
+  done_lines  <- grep("✓ DONE \\[", lines, value = TRUE)
+  fail_lines  <- grep("✗ FAIL \\[", lines, value = TRUE)
+
+  n_started   <- length(start_lines)
   n_completed <- length(done_lines)
-  n_failed <- length(fail_lines)
-  
-  # Extract total from first START line
-  if (length(start_lines) > 0) {
-    total_match <- regmatches(start_lines[1], regexpr("\\d+/\\d+", start_lines[1]))
-    if (length(total_match) > 0) {
-      total_models <- as.numeric(sub(".*/", "", total_match[1]))
-    } else {
-      total_models <- NA
-    }
-  } else {
-    total_models <- NA
+  n_failed    <- length(fail_lines)
+
+  # Total models: take max denominator from any START "[ i/Total ]"
+  total_models <- NA_integer_
+  if (length(start_lines)) {
+    # extract "/Total]" piece
+    totals <- suppressWarnings(as.integer(sub("^.*\\/(\\d+)\\].*$", "\\1", start_lines)))
+    totals <- totals[is.finite(totals)]
+    if (length(totals)) total_models <- max(totals, na.rm = TRUE)
   }
-  
-  # Parse metrics from completed models
-  metrics_data <- NULL
-  if (length(done_lines) > 0) {
-    # Extract R² values
-    rsq_values <- numeric()
-    model_times <- numeric()
-    
-    for (line in done_lines) {
-      # Extract R²
-      rsq_match <- regmatches(line, regexpr("R²=\\d+\\.\\d+", line))
-      if (length(rsq_match) > 0) {
-        rsq_values <- c(rsq_values, as.numeric(sub("R²=", "", rsq_match)))
-      }
-      
-      # Extract runtime (in seconds)
-      time_match <- regmatches(line, regexpr("\\d+\\.\\d+s", line))
-      if (length(time_match) > 0) {
-        model_times <- c(model_times, as.numeric(sub("s", "", time_match)))
-      }
-    }
-    
-    metrics_data <- list(
-      rsq_values = rsq_values,
-      model_times = model_times
-    )
+
+  # Metrics & times from DONE lines
+  rsq_values <- suppressWarnings(as.numeric(sub("R²=", "", regmatches(done_lines, regexpr("R²=\\d+\\.\\d+", done_lines)))))
+  rsq_values <- rsq_values[is.finite(rsq_values)]
+  model_times <- suppressWarnings(as.numeric(sub("s", "", regmatches(done_lines, regexpr("\\d+\\.\\d+s", done_lines)))))
+  model_times <- model_times[is.finite(model_times)]
+
+  # Timing window
+  ts <- .parse_ts(lines); ts <- ts[!is.na(ts)]
+  start_time   <- if (length(ts)) min(ts) else NULL
+  last_time    <- if (length(ts)) max(ts) else NULL
+  elapsed_mins <- if (!is.null(start_time) && !is.null(last_time)) as.numeric(difftime(last_time, start_time, units = "mins")) else NA_real_
+
+  progress_pct <- if (!is.na(total_models) && total_models > 0) round(100 * n_completed / total_models, 1) else NA_real_
+  success_rate <- if ((n_completed + n_failed) > 0) round(100 * n_completed / (n_completed + n_failed), 1) else NA_real_
+  rate         <- if (n_completed > 0 && is.finite(elapsed_mins) && elapsed_mins > 0) n_completed / elapsed_mins else NA_real_
+  best_rsq     <- if (length(rsq_values)) max(rsq_values, na.rm = TRUE) else NA_real_
+
+  # ETA via quantiles if enough samples; else ±20% bands around mean
+  remaining <- if (!is.na(total_models)) max(total_models - n_completed - n_failed, 0L) else NA_integer_
+  eta <- list(eta_median = NA_real_, eta_lower = NA_real_, eta_upper = NA_real_)
+  if (length(model_times) >= 5 && is.finite(remaining) && remaining > 0) {
+    qs  <- quantile(model_times, probs = c(0.05, 0.5, 0.95), na.rm = TRUE)
+    eta$eta_lower  <- (qs[[1]] * remaining) / 60
+    eta$eta_median <- (qs[[2]] * remaining) / 60
+    eta$eta_upper  <- (qs[[3]] * remaining) / 60
+  } else if (is.finite(remaining) && remaining > 0 && is.finite(elapsed_mins) && elapsed_mins > 0 && n_completed > 0) {
+    avg <- (elapsed_mins * 60) / n_completed
+    eta$eta_median <- (avg * remaining) / 60
+    eta$eta_lower  <- eta$eta_median * 0.8
+    eta$eta_upper  <- eta$eta_median * 1.2
   }
-  
-  # Get timing info
-  elapsed_mins <- NA
-  start_time <- NULL
-  
-  time_lines <- grep("\\[\\d{4}-\\d{2}-\\d{2}", lines, value = TRUE)
-  if (length(time_lines) > 0) {
-    times <- sub("\\[(\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2})\\].*", "\\1", time_lines)
-    times <- times[times != time_lines]
-    
-    if (length(times) >= 2) {
-      start_time <- as.POSIXct(times[1], format = "%Y-%m-%d %H:%M:%S")
-      last_time <- as.POSIXct(times[length(times)], format = "%Y-%m-%d %H:%M:%S")
-      elapsed_mins <- as.numeric(difftime(last_time, start_time, units = "mins"))
-    }
-  }
-  
-  # Calculate statistics
-  progress_pct <- if (!is.na(total_models)) {
-    round(100 * n_completed / total_models, 1)
-  } else NA
-  
-  success_rate <- if (n_completed + n_failed > 0) {
-    round(100 * n_completed / (n_completed + n_failed), 1)
-  } else NA
-  
-  rate <- if (n_completed > 0 && !is.na(elapsed_mins) && elapsed_mins > 0) {
-    n_completed / elapsed_mins
-  } else NA
-  
-  # Best model so far
-  best_rsq <- if (length(metrics_data$rsq_values) > 0) {
-    max(metrics_data$rsq_values, na.rm = TRUE)
-  } else NA
-  
-  # ETA calculation with confidence interval
-  eta_info <- calculate_eta_with_ci(
-    n_completed = n_completed,
-    n_remaining = total_models - n_completed,
-    elapsed_mins = elapsed_mins,
-    model_times = metrics_data$model_times
-  )
-  
+
   # Display summary
   cli::cli_h3("Progress Summary")
-  
-  if (!is.na(total_models)) {
-    cli::cli_alert_info("Progress: {n_completed}/{total_models} ({progress_pct}%)")
-  }
-  
+  if (!is.na(total_models)) cli::cli_alert_info("Progress: {n_completed}/{total_models} ({progress_pct}%)")
   cli::cli_alert_success("Completed: {n_completed}")
   cli::cli_alert_danger("Failed: {n_failed}")
-  
-  if (!is.na(success_rate)) {
-    cli::cli_alert_info("Success rate: {success_rate}%")
-  }
-  
-  if (!is.na(elapsed_mins)) {
-    cli::cli_alert_info("Elapsed: {round(elapsed_mins, 1)} minutes")
-  }
-  
-  if (!is.na(rate)) {
-    cli::cli_alert_info("Rate: {round(rate, 2)} models/minute")
-  }
-  
-  if (!is.na(best_rsq)) {
-    cli::cli_alert_success("Best R² so far: {round(best_rsq, 3)}")
-  }
-  
-  if (!is.na(eta_info$eta_median)) {
-    cli::cli_alert_info("ETA: {round(eta_info$eta_median, 1)} min (95% CI: {round(eta_info$eta_lower, 1)}-{round(eta_info$eta_upper, 1)} min)")
-  }
-  
-  if (return_details) {
+  if (!is.na(success_rate)) cli::cli_alert_info("Success rate: {success_rate}%")
+  if (!is.na(elapsed_mins)) cli::cli_alert_info("Elapsed: {round(elapsed_mins, 1)} minutes")
+  if (!is.na(rate))         cli::cli_alert_info("Rate: {round(rate, 2)} models/minute")
+  if (!is.na(best_rsq))     cli::cli_alert_success("Best R² so far: {round(best_rsq, 3)}")
+  if (!is.na(eta$eta_median))
+    cli::cli_alert_info("ETA: {round(eta$eta_median,1)} min (95% CI: {round(eta$eta_lower,1)}–{round(eta$eta_upper,1)} min)")
+
+  if (isTRUE(return_details)) {
     return(list(
       n_started = n_started,
       n_completed = n_completed,
@@ -279,60 +238,11 @@ summarize_parallel_progress <- function(log_file = NULL, return_details = FALSE)
       elapsed_mins = elapsed_mins,
       rate = rate,
       best_rsq = best_rsq,
-      metrics_data = metrics_data,
-      eta_info = eta_info,
+      metrics_data = list(rsq_values = rsq_values, model_times = model_times),
+      eta_info = eta,
       start_time = start_time
     ))
   }
-  
+
   invisible(NULL)
-}
-
-#' Calculate ETA with Confidence Intervals
-#'
-#' @description
-#' Calculates estimated time to completion with confidence intervals
-#' based on recent model completion times
-#'
-#' @param n_completed Number of completed models
-#' @param n_remaining Number of remaining models
-#' @param elapsed_mins Total elapsed time in minutes
-#' @param model_times Vector of individual model completion times
-#' @return List with eta_median, eta_lower, eta_upper
-
-calculate_eta_with_ci <- function(n_completed, n_remaining, elapsed_mins, model_times = NULL) {
-  
-  if (is.na(n_remaining) || n_remaining <= 0 || is.na(elapsed_mins) || elapsed_mins <= 0) {
-    return(list(eta_median = NA, eta_lower = NA, eta_upper = NA))
-  }
-  
-  if (!is.null(model_times) && length(model_times) >= 10) {
-    # Use recent model times for more accurate estimate
-    recent_times <- tail(model_times, 100)  # Use last 100 models
-    
-    # Calculate per-model time statistics
-    time_per_model_median <- median(recent_times, na.rm = TRUE) / 60  # Convert to minutes
-    time_per_model_q25 <- quantile(recent_times, 0.25, na.rm = TRUE) / 60
-    time_per_model_q75 <- quantile(recent_times, 0.75, na.rm = TRUE) / 60
-    
-    # Calculate ETAs
-    eta_median <- n_remaining * time_per_model_median
-    eta_lower <- n_remaining * time_per_model_q25
-    eta_upper <- n_remaining * time_per_model_q75
-    
-  } else {
-    # Fallback to simple average
-    avg_time_per_model <- elapsed_mins / n_completed
-    
-    eta_median <- n_remaining * avg_time_per_model
-    # Simple ±20% confidence interval
-    eta_lower <- eta_median * 0.8
-    eta_upper <- eta_median * 1.2
-  }
-  
-  return(list(
-    eta_median = eta_median,
-    eta_lower = eta_lower,
-    eta_upper = eta_upper
-  ))
 }

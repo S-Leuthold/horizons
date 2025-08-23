@@ -23,61 +23,51 @@ evaluate_models_parallel(
 )
 }
 \arguments{
-\item{configs}{A tibble of model configurations, typically from \code{create_project_configurations()}}
+\item{configs}{A tibble of model configurations}
 
-\item{input_data}{A tibble containing spectral features and response variable}
+\item{input_data}{Tibble of spectral features and response variable}
 
-\item{covariate_data}{Optional tibble containing external covariates}
+\item{covariate_data}{Optional tibble of external covariates}
 
-\item{variable}{Character. Name of the response variable to model}
+\item{variable}{Character. Response variable name}
 
-\item{n_workers}{Integer. Number of parallel workers to use (default: 4)}
+\item{n_workers}{Integer. Requested parallel workers (default: 4)}
 
-\item{output_dir}{Character. Directory to save results (default: tempdir())}
+\item{output_dir}{Directory for results/logs (default: \code{Sys.getenv("TMPDIR")})}
 
-\item{chunk_size}{Integer. DEPRECATED - kept for backwards compatibility}
-
-\item{grid_size}{Integer. Grid search size for each model (default: 10)}
+\item{grid_size}{Integer. Grid search candidates per model (default: 10)}
 
 \item{bayesian_iter}{Integer. Bayesian optimization iterations (default: 15)}
 
 \item{cv_folds}{Integer. Cross-validation folds (default: 5)}
 
-\item{seed}{Integer. Random seed for reproducibility (default: 123)}
+\item{seed}{Integer. Base random seed (default: 123)}
 
-\item{save_individual_models}{Logical. Save each successful model immediately (default: FALSE)}
+\item{save_individual_models}{Logical. Save each successful model separately}
 
-\item{verbose}{Logical. Print progress information (default: TRUE)}
+\item{verbose}{Logical. Print progress messages}
 
-\item{parallel}{Logical. Enable parallel processing for model evaluation. Defaults to \code{TRUE} (top-level orchestrator).}
+\item{parallel}{Logical. Enable top-level parallelization (default: TRUE)}
 
-\item{allow_nested}{Logical. Allow parallel processing even when already in parallel context. Defaults to \code{FALSE} (recommended).}
+\item{allow_nested}{Logical. Allow nested parallelism (default: FALSE)}
 }
 \value{
-A tibble containing all model results with columns:
-\itemize{
-\item Configuration columns from input configs
-\item \strong{rmse, rrmse, rsq, mae, rpd}: Performance metrics
-\item \strong{runtime_seconds}: Execution time per model
-\item \strong{status}: "success" or "failed"
-\item \strong{best_params}: Nested list of optimal hyperparameters
-\item \strong{error_info}: Error details for failed models
-\item \strong{tuning_info}: Timing and convergence details
-}
+A tibble with configuration, performance metrics, runtime, and error info
 }
 \description{
 Orchestrates parallel evaluation of multiple spectral model configurations using
-\code{evaluate_single_model_parallel()}. Uses work-stealing parallelization for optimal
-load balancing - each model is processed as an independent task, preventing idle
-workers when some models take longer than others.
+\code{evaluate_single_model_parallel()}. Each configuration is evaluated independently,
+and results are logged to per-worker files in the run directory (\code{TMPDIR}).
+
+Parallel execution uses the \pkg{future} / \pkg{furrr} framework with work-stealing
+for load balancing. Worker count is capped by system cores, config size, and the
+environment variable \code{HORIZONS_WORKERS}. Node-local scratch space (\code{TMPDIR}) is
+recommended for high performance.
 }
 \details{
-This function provides a clean parallel interface that:
 \itemize{
-\item Uses work-stealing for optimal load balancing
-\item Prevents nested parallelization issues
-\item Aggregates results into a single tibble
-\item Saves detailed error logs for debugging
-\item Manages memory efficiently across workers
+\item Logs are written to per-worker files (\verb{parallel_<PID>.log}) in \code{output_dir}
+\item Prevents nested parallelism by forcing workers to run sequentially
+\item Tracks memory usage, timing, and metrics validity
 }
 }

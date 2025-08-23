@@ -14,7 +14,7 @@ create_ascii_progress_bar(current, total, width = 40)
 \item{width}{Width of progress bar in characters}
 }
 \value{
-Character string with progress bar
+Character string progress bar
 }
 \description{
 Create ASCII Progress Bar

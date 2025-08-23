@@ -2,15 +2,16 @@
 % Please edit documentation in R/utils-parallel_logging.R
 \name{tail_parallel_log}
 \alias{tail_parallel_log}
-\title{Tail Parallel Progress Log}
+\title{Tail Parallel Progress Logs}
 \usage{
 tail_parallel_log(n = 20, log_file = NULL)
 }
 \arguments{
-\item{n}{Integer. Number of lines to show (default: 20)}
+\item{n}{Integer. Number of lines to show (default 20)}
 
-\item{log_file}{Character. Path to log file}
+\item{log_file}{Character. Path to directory or file. Default: directory under \code{tempdir()}.}
 }
 \description{
-Shows the last N lines of the parallel progress log
+Shows the last N lines of the logs from a directory (merging all worker files)
+or from a single file if a file path is given.
 }
