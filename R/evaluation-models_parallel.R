@@ -159,8 +159,8 @@ evaluate_models_parallel <- function(configs,
     seed       = NULL,
     stdout     = FALSE,
     conditions = NULL,
-    chunk_size = 10,
-    scheduling = 1.0     # finite (not Inf) limits scheduler chatter
+    chunk_size = 1,
+    scheduling = Inf     # finite (not Inf) limits scheduler chatter
   )
 
   if (verbose) {
