@@ -2,7 +2,7 @@
 % Please edit documentation in R/utils-parallel_monitoring.R
 \name{monitor_parallel_progress}
 \alias{monitor_parallel_progress}
-\title{Real-time Parallel Progress Monitor}
+\title{Real-time Parallel Progress Monitor (dir-aware)}
 \usage{
 monitor_parallel_progress(
   log_file = NULL,
@@ -11,16 +11,14 @@ monitor_parallel_progress(
 )
 }
 \arguments{
-\item{log_file}{Character. Path to a single log file OR a directory of logs.
-If NULL, defaults to \code{file.path(tempdir(), "parallel_progress.log")}.}
+\item{log_file}{Path to directory or single log file. If \code{NULL}, defaults to
+\code{file.path(tempdir(), "parallel_progress.log")}.}
 
-\item{refresh_seconds}{Numeric. Seconds between refreshes (default: 5)}
+\item{refresh_seconds}{Seconds between refreshes (default: 5)}
 
-\item{show_recent}{Integer. Number of recent completed models to show (default: 5)}
+\item{show_recent}{How many recent "DONE" entries to display (default: 5)}
 }
 \description{
-Live dashboard for monitoring parallel model evaluation progress.
-Accepts either a single log file or a directory containing multiple
-per-worker logs (e.g., "parallel_\if{html}{\out{<PID>}}.log"). Lines are merged in
-chronological order by their leading timestamp.
+Live dashboard for monitoring a running parallel evaluation. Accepts either a
+directory of per-worker logs or a single log file.
 }

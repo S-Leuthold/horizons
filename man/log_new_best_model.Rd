@@ -9,14 +9,13 @@ log_new_best_model(log_file, model_id, rsq, previous_best = NULL)
 \arguments{
 \item{log_file}{Path to a directory or a single file}
 
-\item{model_id}{Model identifier}
+\item{model_id}{Model identifier (string)}
 
-\item{rsq}{R-squared value}
+\item{rsq}{Numeric R² value}
 
-\item{previous_best}{Previous best R-squared (optional)}
+\item{previous_best}{Previous best R² (optional)}
 }
 \description{
 If \code{log_file} is a directory, appends to \code{master.log} within it (single writer).
-If it's a file, appends to that file. This function does \strong{not} attempt to
-coordinate with worker logs; it's intended for the master/orchestrator.
+If it's a file, appends to that file. This is for the \strong{orchestrator} only.
 }

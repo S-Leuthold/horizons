@@ -10,7 +10,7 @@ format_time(minutes)
 \item{minutes}{Numeric minutes}
 }
 \value{
-String (e.g., "2h 15m" or "45m")
+Formatted string like "2h 15m" or "45m"
 }
 \description{
 Format Time Duration
