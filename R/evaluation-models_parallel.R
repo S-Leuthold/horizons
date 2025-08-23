@@ -136,10 +136,10 @@ evaluate_models_parallel <- function(configs,
   if (parallel && n_workers > 1) {
     old_plan <- future::plan()
     on.exit(future::plan(old_plan), add = TRUE)
-    
+
     # Use multisession for better stability across all platforms
     # Multicore can cause issues on some Linux systems with OpenBLAS
-    future::plan(future::multisession, workers = n_workers)
+    future::plan(future::multicore, workers = n_workers)
     if (verbose) cli::cli_alert_info("Using multisession with {n_workers} workers")
   } else {
     future::plan(sequential)
@@ -157,7 +157,7 @@ evaluate_models_parallel <- function(configs,
   # Initialize log file for progress tracking
   log_file <- file.path(output_dir, "parallel_progress.log")
   best_rsq_so_far <- 0  # Track best model
-  
+
   if (verbose) {
     log_file <- init_parallel_log(log_file, n_models = n_configs)
     cli::cli_alert_info("Starting parallel processing of {n_configs} models...")
@@ -175,7 +175,7 @@ evaluate_models_parallel <- function(configs,
       config <- configs_indexed[row_idx, ]
 
       # Log progress to file with cleaner format
-      config_desc <- sprintf("%s | %s | %s | %s", 
+      config_desc <- sprintf("%s | %s | %s | %s",
                             config$model,
                             config$preprocessing,
                             config$feature_selection,
@@ -184,7 +184,7 @@ evaluate_models_parallel <- function(configs,
                             } else {
                               "no_covs"
                             })
-      
+
       log_parallel_progress(
         sprintf("START [%3d/%d]: %s", row_idx, nrow(configs_indexed), config_desc),
         log_file = log_file,
@@ -230,7 +230,7 @@ evaluate_models_parallel <- function(configs,
         # Log successful completion with cleaner format
         # Extract metrics from tibble with proper validation
         metrics_str <- if(!is.null(result$metrics) && is.data.frame(result$metrics) && nrow(result$metrics) > 0) {
-          
+
           # Safely extract values from tibble columns
           rsq_val <- tryCatch({
             if("rsq" %in% names(result$metrics)) {
@@ -239,7 +239,7 @@ evaluate_models_parallel <- function(configs,
               NA
             }
           }, error = function(e) NA)
-          
+
           rmse_val <- tryCatch({
             if("rmse" %in% names(result$metrics)) {
               result$metrics$rmse[1]
@@ -247,7 +247,7 @@ evaluate_models_parallel <- function(configs,
               NA
             }
           }, error = function(e) NA)
-          
+
           # Create formatted string based on available metrics
           if(!is.na(rsq_val) && !is.na(rmse_val)) {
             sprintf("R²=%.3f, RMSE=%.2f", rsq_val, rmse_val)
@@ -267,10 +267,10 @@ evaluate_models_parallel <- function(configs,
             "⚠️ metrics empty tibble"
           }
         }
-        
+
         log_parallel_progress(
-          sprintf("✓ DONE [%3d/%d]: %s (%s) - %.1fs", 
-                  row_idx, 
+          sprintf("✓ DONE [%3d/%d]: %s (%s) - %.1fs",
+                  row_idx,
                   nrow(configs_indexed),
                   result$model_id,
                   metrics_str,
@@ -290,10 +290,10 @@ evaluate_models_parallel <- function(configs,
         } else {
           error_msg
         }
-        
+
         log_parallel_progress(
-          sprintf("✗ FAIL [%3d/%d]: %s | ERROR: %s", 
-                  row_idx, 
+          sprintf("✗ FAIL [%3d/%d]: %s | ERROR: %s",
+                  row_idx,
                   nrow(configs_indexed),
                   config_desc,  # Use same description as START
                   error_msg),
@@ -348,38 +348,38 @@ evaluate_models_parallel <- function(configs,
     !is.null(x$status) && x$status == "success", logical(1)))
   failed_count <- sum(vapply(all_results, function(x)
     !is.null(x$status) && x$status == "failed", logical(1)))
-  
+
   # Diagnostic: Count models with valid metrics
   if (verbose) {
     successful_results <- all_results[vapply(all_results, function(x) x$status == "success", logical(1))]
-    
+
     metrics_valid_count <- sum(vapply(successful_results, function(x) {
       !is.null(x$metrics) && is.data.frame(x$metrics) && nrow(x$metrics) > 0 &&
       "rsq" %in% names(x$metrics) && "rmse" %in% names(x$metrics)
     }, logical(1)))
-    
+
     metrics_issues <- success_count - metrics_valid_count
-    
+
     if (metrics_issues > 0) {
       cli::cli_alert_warning("⚠️ {metrics_issues} successful models have metrics extraction issues")
-      
+
       # Detailed diagnostics for problematic metrics
       problematic <- successful_results[sapply(successful_results, function(x) {
         is.null(x$metrics) || !is.data.frame(x$metrics) || nrow(x$metrics) == 0 ||
         !"rsq" %in% names(x$metrics) || !"rmse" %in% names(x$metrics)
       })]
-      
+
       if (length(problematic) > 0) {
         cli::cli_alert_info("Metrics diagnostic summary:")
-        
+
         null_metrics <- sum(sapply(problematic, function(x) is.null(x$metrics)))
         not_df <- sum(sapply(problematic, function(x) !is.null(x$metrics) && !is.data.frame(x$metrics)))
-        empty_df <- sum(sapply(problematic, function(x) 
+        empty_df <- sum(sapply(problematic, function(x)
           !is.null(x$metrics) && is.data.frame(x$metrics) && nrow(x$metrics) == 0))
-        missing_cols <- sum(sapply(problematic, function(x) 
+        missing_cols <- sum(sapply(problematic, function(x)
           !is.null(x$metrics) && is.data.frame(x$metrics) && nrow(x$metrics) > 0 &&
           (!"rsq" %in% names(x$metrics) || !"rmse" %in% names(x$metrics))))
-        
+
         if (null_metrics > 0) cli::cli_alert_info("  • {null_metrics} models: metrics is NULL")
         if (not_df > 0) cli::cli_alert_info("  • {not_df} models: metrics is not a data frame")
         if (empty_df > 0) cli::cli_alert_info("  • {empty_df} models: metrics tibble is empty")
@@ -397,7 +397,7 @@ evaluate_models_parallel <- function(configs,
     cli::cli_alert_success("Processed {n_configs} models in {round(total_elapsed, 1)} minutes")
     cli::cli_alert_info("Success: {success_count}, Failed: {failed_count}")
     cli::cli_alert_info("Average time per model: {round(as.numeric(total_elapsed) * 60 / n_configs, 1)} seconds")
-    
+
     # Summary of metrics extraction success
     if (success_count > 0) {
       successful_results <- all_results[vapply(all_results, function(x) x$status == "success", logical(1))]
@@ -405,7 +405,7 @@ evaluate_models_parallel <- function(configs,
         !is.null(x$metrics) && is.data.frame(x$metrics) && nrow(x$metrics) > 0 &&
         "rsq" %in% names(x$metrics) && "rmse" %in% names(x$metrics)
       }, logical(1)))
-      
+
       cli::cli_alert_info("Valid metrics extracted: {metrics_valid_count}/{success_count} successful models")
     }
   }
@@ -444,28 +444,28 @@ evaluate_models_parallel <- function(configs,
     if (length(successful_results) > 0) {
       # Convert to tibble with safe metrics extraction
       results_df <- dplyr::bind_rows(lapply(successful_results, function(res) {
-        
+
         # Safely extract metrics with validation
         safe_extract_metric <- function(metrics, column_name) {
           if(is.null(metrics) || !is.data.frame(metrics) || nrow(metrics) == 0) {
             return(NA_real_)
           }
-          
+
           if(!column_name %in% names(metrics)) {
             return(NA_real_)
           }
-          
+
           value <- tryCatch({
             metrics[[column_name]][1]
           }, error = function(e) NA_real_)
-          
+
           if(is.null(value) || length(value) == 0) {
             return(NA_real_)
           }
-          
+
           return(value)
         }
-        
+
         tibble::tibble(
           config_index      = res$config_index,
           model             = res$model,
