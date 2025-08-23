@@ -2,7 +2,7 @@
 % Please edit documentation in R/utils-parallel_monitoring.R
 \name{get_worker_statistics}
 \alias{get_worker_statistics}
-\title{Get Worker Statistics from Logs}
+\title{Get Worker Statistics from Logs (dir-aware)}
 \usage{
 get_worker_statistics(log_file)
 }
@@ -10,8 +10,8 @@ get_worker_statistics(log_file)
 \item{log_file}{Path to a single log file OR a directory of per-worker logs.}
 }
 \value{
-Data frame with columns: worker_id, n_started, n_complete, n_failed, avg_time
+Data frame with columns: \verb{worker_id, n_started, n_complete, n_failed, avg_time}
 }
 \description{
-Get Worker Statistics from Logs
+Summarize per-worker starts/completions/failures and average completion time.
 }
