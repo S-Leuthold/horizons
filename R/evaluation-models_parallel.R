@@ -147,7 +147,7 @@ evaluate_models_parallel <- function(configs,
   }
 
   # Increase memory limits for large spectral data
-  options(future.globals.maxSize = 2000 * 1024^2)  # 2GB limit
+  options(future.globals.maxSize = 10000 * 1024^2)  # 2GB limit
   if (verbose) cli::cli_alert_info("Set future.globals.maxSize to 2GB for large spectral matrices")
 
   ## ---------------------------------------------------------------------------
