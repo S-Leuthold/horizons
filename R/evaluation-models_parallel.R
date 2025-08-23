@@ -140,7 +140,7 @@ evaluate_models_parallel <- function(configs,
     # Use multisession for better stability across all platforms
     # Multicore can cause issues on some Linux systems with OpenBLAS
     future::plan(future::multicore, workers = n_workers)
-    if (verbose) cli::cli_alert_info("Using multisession with {n_workers} workers")
+    if (verbose) cli::cli_alert_info("Using multicore with {n_workers} workers")
   } else {
     future::plan(sequential)
     if(verbose) cli::cli_alert_info("Using sequential processing (parallel={parallel}, n_workers={n_workers})")
@@ -329,10 +329,10 @@ evaluate_models_parallel <- function(configs,
     },
     .options = furrr::furrr_options(
       seed       = NULL,     # Let individual models control their own seeds
-      stdout     = TRUE,     # Show console output (may be garbled with multiple workers)
+      stdout     = FALSE,     # Show console output (may be garbled with multiple workers)
       conditions = "message", # Capture messages but not warnings
-      chunk_size = 1,
-      scheduling = Inf      # Maximum dynamic scheduling (work-stealing)
+      chunk_size = 10,
+      scheduling = 1      # Maximum dynamic scheduling (work-stealing)
     ),
     .progress = FALSE  # We're handling progress ourselves
   )
