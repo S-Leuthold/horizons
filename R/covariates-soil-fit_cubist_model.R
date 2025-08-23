@@ -155,10 +155,10 @@ fit_cubist_model <- function(input_data,
       n_workers <- pmax(1, pmin(max_cores - 1, 10))  # Cap at 10 for safety
     }
 
-    # Check for nested parallelization
-    current_plan_class <- class(future::plan())[1]
-    if (!allow_nested && !identical(current_plan_class, "sequential")) {
-      if(verbose) cli::cli_alert_warning("Nested parallelization detected. Setting parallel=FALSE for safety")
+    # Check for nested parallelization using number of workers (simple and reliable)
+    current_workers <- future::nbrOfWorkers()
+    if (!allow_nested && current_workers > 1) {
+      if(verbose) cli::cli_alert_warning("Nested parallelization detected ({current_workers} workers active). Setting parallel=FALSE for safety")
       parallel <- FALSE
     }
 

@@ -125,10 +125,10 @@ evaluate_models_parallel <- function(configs,
 
   ## Setup parallel backend with safety controls -------------------------------
 
-  # Check for nested parallelization
-  current_plan_class <- class(future::plan())[1]
-  if (!allow_nested && !identical(current_plan_class, "sequential")) {
-    if(verbose) cli::cli_alert_warning("Nested parallelization detected. Setting parallel=FALSE for safety")
+  # Check for nested parallelization using number of workers (simple and reliable)
+  current_workers <- future::nbrOfWorkers()
+  if (!allow_nested && current_workers > 1) {
+    if(verbose) cli::cli_alert_warning("Nested parallelization detected ({current_workers} workers active). Setting parallel=FALSE for safety")
     parallel <- FALSE
   }
 
@@ -348,19 +348,19 @@ evaluate_models_parallel <- function(configs,
   ## ---------------------------------------------------------------------------
 
   # Count successes and failures
-  success_count <- sum(sapply(all_results, function(x)
-    !is.null(x$status) && x$status == "success"))
-  failed_count <- sum(sapply(all_results, function(x)
-    !is.null(x$status) && x$status == "failed"))
+  success_count <- sum(vapply(all_results, function(x)
+    !is.null(x$status) && x$status == "success", logical(1)))
+  failed_count <- sum(vapply(all_results, function(x)
+    !is.null(x$status) && x$status == "failed", logical(1)))
   
   # Diagnostic: Count models with valid metrics
   if (verbose) {
-    successful_results <- all_results[sapply(all_results, function(x) x$status == "success")]
+    successful_results <- all_results[vapply(all_results, function(x) x$status == "success", logical(1))]
     
-    metrics_valid_count <- sum(sapply(successful_results, function(x) {
+    metrics_valid_count <- sum(vapply(successful_results, function(x) {
       !is.null(x$metrics) && is.data.frame(x$metrics) && nrow(x$metrics) > 0 &&
       "rsq" %in% names(x$metrics) && "rmse" %in% names(x$metrics)
-    }))
+    }, logical(1)))
     
     metrics_issues <- success_count - metrics_valid_count
     
@@ -404,11 +404,11 @@ evaluate_models_parallel <- function(configs,
     
     # Summary of metrics extraction success
     if (success_count > 0) {
-      successful_results <- all_results[sapply(all_results, function(x) x$status == "success")]
-      metrics_valid_count <- sum(sapply(successful_results, function(x) {
+      successful_results <- all_results[vapply(all_results, function(x) x$status == "success", logical(1))]
+      metrics_valid_count <- sum(vapply(successful_results, function(x) {
         !is.null(x$metrics) && is.data.frame(x$metrics) && nrow(x$metrics) > 0 &&
         "rsq" %in% names(x$metrics) && "rmse" %in% names(x$metrics)
-      }))
+      }, logical(1)))
       
       cli::cli_alert_info("Valid metrics extracted: {metrics_valid_count}/{success_count} successful models")
     }
@@ -443,7 +443,7 @@ evaluate_models_parallel <- function(configs,
   results_tibble <- tryCatch({
 
     # Extract successful results
-    successful_results <- all_results[sapply(all_results, function(x) x$status == "success")]
+    successful_results <- all_results[vapply(all_results, function(x) x$status == "success", logical(1))]
 
     if (length(successful_results) > 0) {
       # Convert to tibble with safe metrics extraction
@@ -494,7 +494,7 @@ evaluate_models_parallel <- function(configs,
     }
 
     # Add failed results
-    failed_results <- all_results[sapply(all_results, function(x) x$status == "failed")]
+    failed_results <- all_results[vapply(all_results, function(x) x$status == "failed", logical(1))]
 
     if (length(failed_results) > 0) {
       failed_df <- dplyr::bind_rows(lapply(failed_results, function(res) {
