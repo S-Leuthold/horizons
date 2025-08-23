@@ -1,6 +1,6 @@
 Package: horizons
 Title: Spectral Ensemble Modeling and Covariate Prediction for Soil Data
-Version: 0.7.5
+Version: 0.7.6
 Author: Sam Leuthold [aut, cre]
 Maintainer: Sam Leuthold <sam.leuthold@colostate.edu>
 Authors@R: 
