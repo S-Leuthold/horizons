@@ -137,14 +137,10 @@ evaluate_models_parallel <- function(configs,
     old_plan <- future::plan()
     on.exit(future::plan(old_plan), add = TRUE)
     
-    # Use multicore for shared memory on Unix/Mac, fallback to multisession on Windows/RStudio
-    if (.Platform$OS.type == "windows" || Sys.getenv("RSTUDIO") == "1") {
-      future::plan(future::multisession, workers = n_workers)
-      if (verbose) cli::cli_alert_info("Using multisession with {n_workers} workers")
-    } else {
-      future::plan(future::multicore, workers = n_workers)
-      if (verbose) cli::cli_alert_info("Using multicore (shared memory) with {n_workers} workers")
-    }
+    # Use multisession for better stability across all platforms
+    # Multicore can cause issues on some Linux systems with OpenBLAS
+    future::plan(future::multisession, workers = n_workers)
+    if (verbose) cli::cli_alert_info("Using multisession with {n_workers} workers")
   } else {
     future::plan(sequential)
     if(verbose) cli::cli_alert_info("Using sequential processing (parallel={parallel}, n_workers={n_workers})")
