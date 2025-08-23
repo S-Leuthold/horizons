@@ -28,13 +28,14 @@ project_list("FFAR" = project_entry(spectra_path        = "~/Desktop/_brain/1_Cu
                                     file_name_format    = "project_sampleid_fraction_scanid_wellid",
                                     file_name_delimiter = "_")) %>%
   create_project_data(projects  = .,
-                      variables = "POM_C_g_kg")  -> proj_data_POM
+                      variables = "POM_C_g_kg",
+                      drop_na = FALSE)  -> proj_data_POM
 
 ## -----------------------------------------------------------------------------
 ## Step 3: Create project configurations
 ## -----------------------------------------------------------------------------
 
-create_project_configurations(project_data       = pom_proj_data,
+create_project_configurations(project_data       = test_data_full,
                               models             = c(
                                                      "random_forest",
                                                      "cubist",
@@ -84,7 +85,7 @@ sample_configs(configs         = configs$project_configurations,
                factorial_pairs = NULL,
                verbose         = TRUE)  -> downsampled_configs
 
-
+sessionInfo()['BLAS']
 ## -----------------------------------------------------------------------------
 ## Step 5: Run the model evaluation
 ## -----------------------------------------------------------------------------
@@ -208,3 +209,35 @@ build_ensemble_stack(results_dir    = "../../../../../../../Desktop/_brain/1_Cur
 plot_ensemble_biplot(stack_results)
 plot_ensemble_upset("../../../../../../../Desktop/_brain/1_Current_Projects/horizons/4_Results/MAOM_250729",
                     ensemble_results = stack_results)
+
+
+
+configs_output <- create_project_configurations(
+  project_data = test_data,
+  models = c(
+    "random_forest",
+    "cubist",
+    "plsr"
+  ),
+  transformations = c(
+    "No Transformation"  # Start with just one
+  ),
+  preprocessing = c(
+    "raw",
+    "snv"
+  ),
+  feature_selection = c(
+    "none",
+    "pca"
+  ),
+  soil_covariates = NULL,     # Start without covariates
+  climate_covariates = NULL,   # Start without covariates
+  spatial_covariates = NULL,
+  expand_covariate_grid = FALSE,
+  include_covariates = FALSE,  # Explicitly FALSE for now
+  refresh = FALSE,
+  verbose = TRUE,
+  parallel = FALSE,       # Safety parameters for covariate prediction
+  n_workers = 1,
+  allow_nested = FALSE
+)
