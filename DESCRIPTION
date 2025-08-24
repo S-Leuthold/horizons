@@ -103,6 +103,7 @@ VignetteBuilder: knitr
 Depends: 
     R (>= 2.10)
 Collate: 
+    'config-nested_parallel.R'
     'covariates-climate-orchestrator.R'
     'covariates-soil-cluster_spectral_data.R'
     'covariates-soil-create_clustered_subsets.R'
@@ -115,7 +116,9 @@ Collate:
     'evaluation-finalize_top_workflows.R'
     'evaluation-fit_parallel.R'
     'evaluation-hpc_orchestrator.R'
+    'evaluation-inner_worker.R'
     'evaluation-models_parallel.R'
+    'evaluation-nested_parallel_orchestrator.R'
     'evaluation-run_model_batches.R'
     'evaluation-run_single_evaluation.R'
     'evaluation-safely_run_single_evaluation.R'
@@ -132,6 +135,7 @@ Collate:
     'model_generate_workflow_ids.R'
     'models-define_model_specifications.R'
     'models-test_finalized_models.R'
+    'monitor-nested_performance.R'
     'stack-build_model_ensemble.R'
     'stack-tune_blend.R'
     'step-feature_selection_boruta.R'
@@ -143,10 +147,12 @@ Collate:
     'utils-checkpoint_management.R'
     'utils-cluster_predictors.R'
     'utils-create_expanded_parameter_grid.R'
+    'utils-error_recovery.R'
     'utils-hpc_monitoring.R'
     'utils-parallel_logging.R'
     'utils-parallel_monitoring.R'
     'utils-progress_reporting.R'
+    'utils-resource_management.R'
     'utils-sample_configs.R'
     'utils-thread_control.R'
     'utils-visualization_theme.R'

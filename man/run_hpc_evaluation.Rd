@@ -22,7 +22,10 @@ run_hpc_evaluation(
   pruning = FALSE,
   checkpoint_dir = NULL,
   resume = TRUE,
-  verbose = TRUE
+  verbose = TRUE,
+  nested_parallel = FALSE,
+  outer_workers = NULL,
+  inner_workers = NULL
 )
 }
 \arguments{
@@ -71,6 +74,12 @@ Required if \code{include_covariates = TRUE} in any row of \code{config}}
 \item{resume}{Logical. Whether to resume from existing checkpoints (default = TRUE)}
 
 \item{verbose}{Logical. Print detailed progress messages (default = TRUE)}
+
+\item{nested_parallel}{Logical. Use nested parallelization (default = FALSE)}
+
+\item{outer_workers}{Integer. Number of concurrent models for nested mode (optional)}
+
+\item{inner_workers}{Integer. Workers per model for nested mode (optional)}
 }
 \value{
 If \code{retrain_top_models = FALSE}, returns a tibble summarizing evaluation metrics
