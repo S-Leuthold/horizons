@@ -19,6 +19,7 @@
 #' @importFrom qs qread
 #' @importFrom stats median sd quantile
 #' @importFrom utils tail head
+#' @name hpc_monitoring
 NULL
 
 
