@@ -135,14 +135,36 @@ prep.step_select_boruta <- function(x, training, info = NULL, ...) {
   n_features <- ncol(reduced_mat)
   optimal_mtry <- min(max(5, round(sqrt(n_features) * 2)), n_features - 1)
 
+  ## Create custom ranger function with thread control for Boruta ----
+  
+  ranger_single_thread <- function(...) {
+    ranger::ranger(..., num.threads = 1)
+  }
+  
   boruta_fit <- tryCatch({
+    ## Run Boruta with thread-controlled ranger ----
+    
     Boruta::Boruta(x       = reduced_mat,
                    y       = outcome_vec,
                    doTrace = 0,
-                   maxRuns = 100,        # Increased from 40 for spectral data
-                   ntree   = 1000,       # More trees for stability
+                   maxRuns = 50,         # Reduced for faster execution
+                   ntree   = 500,        # Reduced for faster execution  
                    mtry    = optimal_mtry, # Optimized for correlated predictors
-                   holdHistory = FALSE)
+                   holdHistory = FALSE,
+                   getImp = function(x, y, ...) {
+                     ## Custom importance function with explicit thread control ----
+                     
+                     rf <- ranger::ranger(
+                       x = x,
+                       y = y,
+                       num.trees = 500,
+                       mtry = optimal_mtry,
+                       importance = "impurity",
+                       num.threads = 1,  # Force single thread
+                       verbose = FALSE
+                     )
+                     return(rf$variable.importance)
+                   })
   }, error = function(e) {
     cli::cli_alert_warning("Boruta failed: {e$message}")
     cli::cli_alert_info("Falling back to correlation-based selection")

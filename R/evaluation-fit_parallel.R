@@ -360,8 +360,15 @@ evaluate_model_fit_parallel <- function(config_row,
               save_workflow = TRUE,
               verbose       = FALSE,
               allow_par     = TRUE,  # Enable parallelization
-              parallel_over = "everything",
-              pkgs          = c("horizons", "tidymodels")
+              parallel_over = "everything",  # Safe with thread control
+              pkgs          = c("horizons", "tidymodels", "ranger", "xgboost"),
+              ## Ensure thread control in workers ----
+              extract       = function(x) {
+                ## Set thread controls in each worker ----
+                Sys.setenv(OMP_NUM_THREADS = "1", OPENBLAS_NUM_THREADS = "1")
+                options(ranger.num.threads = 1, xgboost.nthread = 1)
+                NULL
+              }
             )
           )
         },
@@ -494,8 +501,15 @@ evaluate_model_fit_parallel <- function(config_row,
               seed          = 307,
               no_improve    = 10L,
               allow_par     = TRUE,  # Enable parallelization
-              parallel_over = "everything",  # Parallelize everything possible
-              pkgs          = c("horizons", "tidymodels")
+              parallel_over = "everything",  # Safe with thread control
+              pkgs          = c("horizons", "tidymodels", "ranger", "xgboost"),
+              ## Ensure thread control in workers ----
+              extract       = function(x) {
+                ## Set thread controls in each worker ----
+                Sys.setenv(OMP_NUM_THREADS = "1", OPENBLAS_NUM_THREADS = "1")
+                options(ranger.num.threads = 1, xgboost.nthread = 1)
+                NULL
+              }
             )
           )
         },
