@@ -142,11 +142,12 @@ manage_worker_pool <- function(n_workers_requested,
     
   } else if (task_type == "bayesian") {
     
-    ## For Bayesian, parallelize only across CV folds per iteration
+    ## For Bayesian with 'everything' parallelization, we can use more workers
+    ## This allows parallel evaluation of multiple candidate points
     
     optimal_workers <- min(
       n_workers_requested,
-      cv_folds,  # Can't parallelize more than CV folds
+      max(cv_folds, n_tasks),  # Use n_tasks if provided, else cv_folds
       max_workers
     )
     

@@ -315,7 +315,7 @@ evaluate_model_fit_parallel <- function(config_row,
 
   ## Calculate optimal workers for grid search ---------------------------------
 
-  n_grid_tasks <- grid_size  # Each hyperparameter combo is a task
+  n_grid_tasks <- grid_size * cv_folds  # Total parallel tasks = grid × folds
 
   ## Auto-detect workers if not specified --------------------------------------
 
@@ -452,10 +452,14 @@ evaluate_model_fit_parallel <- function(config_row,
 
   ## Set up worker pool for Bayesian optimization -----------------------------
 
+  ## For Bayesian, we can use more workers with 'everything' parallelization
+  ## The actual parallelism is controlled by tune internally, but we want to
+  ## make all requested workers available for maximum speed
+  
   worker_config_bayes <- manage_worker_pool(
     n_workers_requested = n_workers,
     task_type           = "bayesian",
-    n_tasks             = cv_folds,  # Can only parallelize across CV folds
+    n_tasks             = n_workers,  # Let it use all requested workers
     cv_folds            = cv_folds,
     verbose             = FALSE
   )
@@ -484,7 +488,7 @@ evaluate_model_fit_parallel <- function(config_row,
               seed          = 307,
               no_improve    = 10L,
               allow_par     = TRUE,  # Enable parallelization
-              parallel_over = "resamples",  # Parallelize across CV folds
+              parallel_over = "everything",  # Parallelize everything possible
               pkgs          = c("horizons", "tidymodels")
             )
           )
