@@ -1,43 +1,84 @@
-## -----------------------------------------------------------------------------
-## zzz.R
-## Startup configuration for horizons
-## -----------------------------------------------------------------------------
+#' Package Startup Configuration
+#'
+#' @description
+#' Sets thread control and package options on package load to prevent
+#' uncontrolled threading in HPC environments.
+#'
+#' @keywords internal
 
 .onLoad <- function(libname, pkgname) {
-
-  # Startup message
-  packageStartupMessage("horizons v0.7.6 loaded. Please flag bugs on Github (www.github.com/S-Leuthold/horizons)")
-
-  # Optional: Register future plan if not already set
-  if (requireNamespace("future", quietly = TRUE) &&
-      is.null(future::plan("list"))) {
-    future::plan(sequential)
+  
+  ## -----------------------------------------------------------------------------
+  ## Thread Control on Package Load
+  ## -----------------------------------------------------------------------------
+  
+  ## Set comprehensive thread control environment variables ----
+  
+  Sys.setenv(
+    ## Standard threading controls ----
+    OMP_NUM_THREADS        = "1",
+    OPENBLAS_NUM_THREADS   = "1", 
+    MKL_NUM_THREADS        = "1",
+    VECLIB_MAXIMUM_THREADS = "1",
+    NUMEXPR_NUM_THREADS    = "1",
+    
+    ## Additional BLAS variants ----
+    GOTO_NUM_THREADS       = "1",
+    BLIS_NUM_THREADS       = "1"
+  )
+  
+  ## Set package-specific options ----
+  
+  options(
+    ## Ranger threading ----
+    ranger.num.threads = 1,
+    ranger.num.cores   = 1,
+    
+    ## XGBoost threading ----
+    xgboost.nthread    = 1,
+    
+    ## General R parallelization ----
+    mc.cores           = 1,
+    cores              = 1
+  )
+  
+  ## Use RhpcBLASctl if available ----
+  
+  if (requireNamespace("RhpcBLASctl", quietly = TRUE)) {
+    suppressMessages({
+      RhpcBLASctl::blas_set_num_threads(1)
+      RhpcBLASctl::omp_set_num_threads(1)
+    })
   }
-
-  # Optional: Silence verbose packages used internally
-  if (requireNamespace("tidymodels", quietly = TRUE)) {
-    options(tidymodels.dark = TRUE)
-  }
-
-  # Optional: Configure cli progress style
-  options(cli.progress_show_after = 0.2)
-
+  
+  invisible()
 }
 
-utils::globalVariables(c(
-  ".", ".metric", ".pred",
-  "3992", "4000", "600", "608",
-  "Absorbance", "Analyte_Base", "Cluster", "Covariate", "File_Name",
-  "Fraction", "Layer_ID", "Measured_Value", "Predicted_Values",
-  "Project", "Response", "SNV_SG0_Absorbance", "Sam_Include", "Sample_ID",
-  "Sample_Index", "Source", "Top_Depth", "Wavenumber", "analyte",
-  "baked_data", "best_model", "dataset.code_ascii_txt", "efferv_usda.a479_class",
-  "extract_preprocessor", "extract_spec_parsnip", "final_metrics",
-  "final_variable", "final_wf", "finalize_workflow", "finalized_models",
-  "fitted_wf", "id.layer_uuid_txt", "info", "metrics", "name", "passed",
-  "plan", "predict", "predictions", "quantile", "result", "rmse", "rmse_vec",
-  "rsq", "scan.mir.model.name_utf8_txt", "select_best", "sequential",
-  "step_add_covariates", "step_transform_spectra", "target_unit",
-  "testing", "training", "tune", "une", "value", "vfold_cv", "wflow_id",
-  "workflow", "workflow_map", "workflow_set"
-))
+.onAttach <- function(libname, pkgname) {
+  
+  ## Display version and thread control status ----
+  
+  packageStartupMessage(
+    "horizons v", utils::packageVersion("horizons"), " loaded. ",
+    "Please flag bugs on Github (www.github.com/S-Leuthold/horizons)"
+  )
+  
+  ## Check thread control in interactive sessions ----
+  
+  if (interactive()) {
+    omp_threads <- Sys.getenv("OMP_NUM_THREADS")
+    blas_threads <- Sys.getenv("OPENBLAS_NUM_THREADS")
+    
+    if (omp_threads == "1" && blas_threads == "1") {
+      packageStartupMessage("Thread control: ACTIVE (single-threaded mode)")
+    } else {
+      packageStartupMessage(
+        "Thread control: Check settings for HPC use\n",
+        "  OMP_NUM_THREADS = ", omp_threads, "\n",
+        "  OPENBLAS_NUM_THREADS = ", blas_threads
+      )
+    }
+  }
+  
+  invisible()
+}

@@ -58,7 +58,7 @@ define_model_specifications <- function(model_type) {
          "random_forest" = parsnip::rand_forest(mtry  = tune(),
                                                 trees = tune(),
                                                 min_n = tune()) %>%
-                            parsnip::set_engine("ranger") %>%
+                            parsnip::set_engine("ranger", num.threads = 1) %>%
                             parsnip::set_mode("regression"),
 
          ## -------------------------------------------------------------------------
@@ -90,7 +90,7 @@ define_model_specifications <- function(model_type) {
                                          loss_reduction = tune(),
                                          sample_size    = tune(),
                                          mtry           = tune()) %>%
-                       parsnip::set_engine("xgboost") %>%
+                       parsnip::set_engine("xgboost", nthread = 1) %>%
                        parsnip::set_mode("regression"),
 
          ## -------------------------------------------------------------------------
@@ -103,7 +103,7 @@ define_model_specifications <- function(model_type) {
                                           loss_reduction = tune(),
                                           sample_size    = tune(),
                                           mtry           = tune()) %>%
-                        parsnip::set_engine("lightgbm") %>%
+                        parsnip::set_engine("lightgbm", num_threads = 1) %>%
                         parsnip::set_mode("regression"),
 
          ## -------------------------------------------------------------------------
