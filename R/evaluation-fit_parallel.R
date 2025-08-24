@@ -89,7 +89,7 @@
 #' @importFrom tune tune_grid tune_bayes control_grid control_bayes select_best finalize_workflow
 #' @importFrom workflows workflow add_recipe add_model
 #' @importFrom rsample initial_split training testing vfold_cv
-#' @importFrom yardstick metric_set rrmse rsq
+#' @importFrom yardstick metric_set rsq rmse mae
 #' @importFrom parsnip fit
 #' @importFrom recipes prep bake
 #' @importFrom hardhat extract_parameter_set_dials

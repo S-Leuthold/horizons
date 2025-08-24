@@ -11,6 +11,7 @@
 #' @keywords checkpoint batch
 #' @importFrom fs path file_exists dir_create
 #' @importFrom qs qsave qread
+#' @name checkpoint_management
 NULL
 
 

@@ -25,6 +25,7 @@
 #' @importFrom stats aggregate median quantile
 #' @importFrom utils tail
 #' @importFrom cli cli_alert_info cli_alert_success cli_alert_warning cli_alert_danger cli_h3
+#' @name parallel_monitoring
 NULL
 
 
