@@ -121,14 +121,22 @@ monitor_system_resources <- function(output_dir,
       }
     }
     
-    # Read metrics file if it exists
+    # Read metrics file if it exists (with retry for race conditions)
     if (file.exists(metrics_file)) {
-      metrics <- jsonlite::read_json(metrics_file)
+      metrics <- tryCatch({
+        jsonlite::read_json(metrics_file)
+      }, error = function(e) {
+        # File might be mid-write, wait and retry once
+        Sys.sleep(0.1)
+        tryCatch(jsonlite::read_json(metrics_file), error = function(e2) NULL)
+      })
       
-      cli::cli_h2("Nested Parallel Status")
-      cli::cli_alert_info("Active Models: {metrics$active_models}")
-      cli::cli_alert_info("Cores In Use: {metrics$cores_in_use}/{metrics$total_cores}")
-      cli::cli_alert_info("Worker Utilization: {metrics$cpu_utilization}%")
+      if (!is.null(metrics)) {
+        cli::cli_h2("Nested Parallel Status")
+        cli::cli_alert_info("Active Models: {metrics$active_models}")
+        cli::cli_alert_info("Cores In Use: {metrics$cores_in_use}/{metrics$total_cores}")
+        cli::cli_alert_info("Worker Utilization: {metrics$cpu_utilization}%")
+      }
     }
     
     # Check for completion
@@ -401,52 +409,94 @@ monitor_nested_evaluation <- function(output_dir, refresh_seconds = 5) {
 get_current_system_stats <- function() {
   
   stats <- list(
-    hostname = Sys.info()["nodename"],
+    hostname  = Sys.info()["nodename"],
     cpu_cores = parallel::detectCores()
   )
   
-  if (.Platform$OS.type == "unix") {
-    
-    # Load average
-    uptime_output <- system("uptime", intern = TRUE)
-    load_match <- regexpr("load average[s]?: ([0-9.]+)[, ]+([0-9.]+)[, ]+([0-9.]+)", uptime_output)
-    
-    if (load_match > 0) {
-      loads <- regmatches(uptime_output, regexec("load average[s]?: ([0-9.]+)[, ]+([0-9.]+)[, ]+([0-9.]+)", uptime_output))[[1]]
-      stats$load_1m <- as.numeric(loads[2])
-      stats$load_5m <- as.numeric(loads[3])
-      stats$load_15m <- as.numeric(loads[4])
-    } else {
-      stats$load_1m <- stats$load_5m <- stats$load_15m <- NA
-    }
-    
-    # Memory (Linux)
-    if (Sys.info()["sysname"] == "Linux") {
-      mem_info <- system("free -m", intern = TRUE)
-      mem_line <- grep("^Mem:", mem_info, value = TRUE)
+  tryCatch({
+    if (.Platform$OS.type == "unix") {
       
-      if (length(mem_line) > 0) {
-        mem_values <- as.numeric(strsplit(gsub("\\s+", " ", mem_line), " ")[[1]][2:7])
-        stats$total_memory_gb <- mem_values[1] / 1024
-        stats$used_memory_gb <- mem_values[2] / 1024
-        stats$free_memory_gb <- mem_values[3] / 1024
-        stats$available_memory_gb <- mem_values[6] / 1024
+      # Load average - safer approach
+      if (Sys.info()["sysname"] == "Linux" && file.exists("/proc/loadavg")) {
+        loadavg_str      <- readLines("/proc/loadavg", n = 1)
+        loads            <- as.numeric(strsplit(loadavg_str, " ")[[1]][1:3])
+        stats$load_1m    <- loads[1]
+        stats$load_5m    <- loads[2]
+        stats$load_15m   <- loads[3]
+      } else {
+        # Fallback for macOS
+        uptime_output <- tryCatch(
+          system2("uptime", stdout = TRUE),
+          error = function(e) NULL
+        )
+        
+        if (!is.null(uptime_output)) {
+          load_match <- regexpr("load average[s]?: ([0-9.]+)[, ]+([0-9.]+)[, ]+([0-9.]+)", uptime_output)
+          if (load_match > 0) {
+            loads            <- regmatches(uptime_output, regexec("load average[s]?: ([0-9.]+)[, ]+([0-9.]+)[, ]+([0-9.]+)", uptime_output))[[1]]
+            stats$load_1m    <- as.numeric(loads[2])
+            stats$load_5m    <- as.numeric(loads[3])
+            stats$load_15m   <- as.numeric(loads[4])
+          } else {
+            stats$load_1m <- stats$load_5m <- stats$load_15m <- NA
+          }
+        } else {
+          stats$load_1m <- stats$load_5m <- stats$load_15m <- NA
+        }
+      }
+      
+      # Memory (Linux)
+      if (Sys.info()["sysname"] == "Linux" && file.exists("/proc/meminfo")) {
+        meminfo              <- readLines("/proc/meminfo", n = 10)
+        mem_total_line       <- grep("^MemTotal:", meminfo, value = TRUE)
+        mem_free_line        <- grep("^MemFree:", meminfo, value = TRUE)
+        mem_available_line   <- grep("^MemAvailable:", meminfo, value = TRUE)
+        
+        if (length(mem_total_line) > 0) {
+          mem_total_kb           <- as.numeric(gsub("^MemTotal:\\s+|\\s+kB$", "", mem_total_line))
+          stats$total_memory_gb  <- mem_total_kb / 1048576
+        }
+        
+        if (length(mem_free_line) > 0) {
+          mem_free_kb           <- as.numeric(gsub("^MemFree:\\s+|\\s+kB$", "", mem_free_line))
+          stats$free_memory_gb  <- mem_free_kb / 1048576
+        }
+        
+        if (length(mem_available_line) > 0) {
+          mem_available_kb           <- as.numeric(gsub("^MemAvailable:\\s+|\\s+kB$", "", mem_available_line))
+          stats$available_memory_gb  <- mem_available_kb / 1048576
+          stats$used_memory_gb        <- stats$total_memory_gb - stats$available_memory_gb
+        } else {
+          stats$available_memory_gb <- stats$free_memory_gb
+          stats$used_memory_gb       <- stats$total_memory_gb - stats$free_memory_gb
+        }
+      } else {
+        # macOS
+        mem_bytes <- tryCatch(
+          as.numeric(system2("sysctl", args = c("-n", "hw.memsize"), stdout = TRUE)),
+          error = function(e) NA
+        )
+        stats$total_memory_gb      <- if (!is.na(mem_bytes)) mem_bytes / 1073741824 else 755
+        stats$used_memory_gb       <- NA
+        stats$free_memory_gb       <- NA
+        stats$available_memory_gb  <- NA
       }
     } else {
-      # macOS
-      stats$total_memory_gb <- as.numeric(system("sysctl -n hw.memsize", intern = TRUE)) / 1073741824
-      stats$used_memory_gb <- NA
-      stats$free_memory_gb <- NA
-      stats$available_memory_gb <- NA
+      # Windows fallback
+      stats$load_1m <- stats$load_5m <- stats$load_15m <- NA
+      stats$total_memory_gb      <- 755  # Sybil default
+      stats$used_memory_gb       <- NA
+      stats$free_memory_gb       <- NA
+      stats$available_memory_gb  <- NA
     }
-  } else {
-    # Windows fallback
+  }, error = function(e) {
+    # If any error, return safe defaults
     stats$load_1m <- stats$load_5m <- stats$load_15m <- NA
-    stats$total_memory_gb <- 8
-    stats$used_memory_gb <- NA
-    stats$free_memory_gb <- NA
-    stats$available_memory_gb <- NA
-  }
+    stats$total_memory_gb      <- 755
+    stats$used_memory_gb       <- NA
+    stats$free_memory_gb       <- NA
+    stats$available_memory_gb  <- NA
+  })
   
   return(stats)
 }

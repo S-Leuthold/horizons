@@ -340,15 +340,50 @@ calculate_nested_workers <- function(total_cores,
 load_nested_checkpoint <- function(checkpoint_dir, resume = TRUE) {
   
   checkpoint_file <- file.path(checkpoint_dir, "checkpoint_state.qs")
+  progress_file   <- file.path(checkpoint_dir, ".progress")
   
-  if (resume && file.exists(checkpoint_file)) {
-    state <- qs::qread(checkpoint_file)
-    return(state)
+  if (resume) {
+    # Try to load main checkpoint file
+    if (file.exists(checkpoint_file)) {
+      state <- tryCatch(qs::qread(checkpoint_file), error = function(e) {
+        cli::cli_alert_warning("Main checkpoint corrupted, trying backup...")
+        NULL
+      })
+      
+      if (!is.null(state)) {
+        return(state)
+      }
+    }
+    
+    # Fallback to progress file
+    if (file.exists(progress_file)) {
+      progress_data    <- readLines(progress_file)
+      completed_models <- as.integer(progress_data)
+      
+      cli::cli_alert_info("Recovered {length(completed_models)} completed models from progress file")
+      return(list(
+        completed_models = completed_models,
+        timestamp        = Sys.time()
+      ))
+    }
+    
+    # Last resort: scan for individual model files
+    model_files <- list.files(checkpoint_dir, pattern = "^model_[0-9]{6}\\.qs$", full.names = FALSE)
+    if (length(model_files) > 0) {
+      model_idxs       <- as.integer(gsub("^model_|.qs$", "", model_files))
+      completed_models <- sort(model_idxs)
+      
+      cli::cli_alert_info("Recovered {length(completed_models)} models from checkpoint files")
+      return(list(
+        completed_models = completed_models,
+        timestamp        = Sys.time()
+      ))
+    }
   }
   
   return(list(
     completed_models = integer(0),
-    timestamp = Sys.time()
+    timestamp        = Sys.time()
   ))
 }
 
@@ -380,7 +415,39 @@ save_model_checkpoint <- function(result, model_idx, checkpoint_dir) {
     sprintf("model_%06d.qs", model_idx)
   )
   
-  qs::qsave(result, model_file)
+  # Atomic write: save to temp file first, then rename
+  temp_file <- paste0(model_file, ".tmp")
+  
+  tryCatch({
+    # Save to temporary file
+    qs::qsave(result, temp_file)
+    
+    # Verify the file was written correctly
+    test_read <- tryCatch(qs::qread(temp_file), error = function(e) NULL)
+    
+    if (!is.null(test_read)) {
+      # Atomic rename (on most filesystems)
+      file.rename(temp_file, model_file)
+      
+      # Also save a lightweight progress marker
+      progress_file <- file.path(checkpoint_dir, ".progress")
+      if (file.exists(progress_file)) {
+        progress_data        <- readLines(progress_file)
+        completed_model_idxs <- as.integer(progress_data)
+        completed_model_idxs <- unique(c(completed_model_idxs, model_idx))
+      } else {
+        completed_model_idxs <- model_idx
+      }
+      writeLines(as.character(sort(completed_model_idxs)), progress_file)
+      
+    } else {
+      cli::cli_alert_warning("Failed to verify checkpoint for model {model_idx}")
+      unlink(temp_file, force = TRUE)
+    }
+  }, error = function(e) {
+    cli::cli_alert_warning("Failed to save checkpoint for model {model_idx}: {e$message}")
+    unlink(temp_file, force = TRUE)
+  })
   
   invisible(model_file)
 }

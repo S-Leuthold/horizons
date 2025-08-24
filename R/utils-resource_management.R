@@ -158,40 +158,80 @@ check_resource_availability <- function(resource_manager, n_models) {
 #' @keywords internal
 acquire_resource_token <- function(resource_manager, model_id) {
   
-  # Find available token slot
-  token_id <- NULL
-  for (i in seq_along(resource_manager$memory_tokens)) {
-    if (!resource_manager$memory_tokens[[i]]$allocated) {
-      token_id <- i
-      break
+  # Use file-based locking for atomic operations
+  lock_file <- file.path(resource_manager$output_dir, ".resource_lock")
+  max_wait  <- 30  # Maximum wait time in seconds
+  wait_time <- 0
+  
+  while (wait_time < max_wait) {
+    # Try to create lock file atomically
+    lock_acquired <- tryCatch({
+      # Create lock with model_id as content
+      if (!file.exists(lock_file)) {
+        writeLines(as.character(model_id), lock_file)
+        TRUE
+      } else {
+        FALSE
+      }
+    }, error = function(e) FALSE)
+    
+    if (lock_acquired) {
+      # We have the lock, find available token
+      token_id <- NULL
+      
+      # Re-read token state file if it exists (for cross-process sync)
+      token_state_file <- file.path(resource_manager$output_dir, ".token_state.rds")
+      if (file.exists(token_state_file)) {
+        resource_manager$memory_tokens <- readRDS(token_state_file)
+      }
+      
+      for (i in seq_along(resource_manager$memory_tokens)) {
+        if (!resource_manager$memory_tokens[[i]]$allocated) {
+          token_id <- i
+          break
+        }
+      }
+      
+      if (!is.null(token_id)) {
+        # Allocate token
+        token <- list(
+          token_id        = token_id,
+          model_id        = model_id,
+          start_time      = Sys.time(),
+          start_memory_gb = get_current_memory_gb(),
+          peak_memory_gb  = 0
+        )
+        
+        # Update manager state
+        resource_manager$memory_tokens[[token_id]]$allocated  <- TRUE
+        resource_manager$memory_tokens[[token_id]]$model_id   <- model_id
+        resource_manager$memory_tokens[[token_id]]$start_time <- token$start_time
+        
+        # Save state for other processes
+        saveRDS(resource_manager$memory_tokens, token_state_file)
+        
+        # Track active model
+        resource_manager$active_models <- c(resource_manager$active_models, model_id)
+        resource_manager$model_start_times[[as.character(model_id)]] <- token$start_time
+        
+        # Release lock
+        unlink(lock_file, force = TRUE)
+        return(token)
+      }
+      
+      # No token available, release lock and wait
+      unlink(lock_file, force = TRUE)
     }
+    
+    # Wait before retry
+    Sys.sleep(0.5)
+    wait_time <- wait_time + 0.5
   }
   
-  if (is.null(token_id)) {
-    # Wait for a token to become available
-    Sys.sleep(1)
-    return(acquire_resource_token(resource_manager, model_id))
-  }
-  
-  # Allocate token
-  token <- list(
-    token_id = token_id,
-    model_id = model_id,
-    start_time = Sys.time(),
-    start_memory_gb = get_current_memory_gb(),
-    peak_memory_gb = 0
-  )
-  
-  # Update manager
-  resource_manager$memory_tokens[[token_id]]$allocated <- TRUE
-  resource_manager$memory_tokens[[token_id]]$model_id <- model_id
-  resource_manager$memory_tokens[[token_id]]$start_time <- token$start_time
-  
-  # Track active model
-  resource_manager$active_models <- c(resource_manager$active_models, model_id)
-  resource_manager$model_start_times[[as.character(model_id)]] <- token$start_time
-  
-  return(token)
+  # Timeout - recursively retry
+  cli::cli_alert_warning("Token acquisition timeout for model {model_id}, retrying...")
+  Sys.sleep(2)
+  return(acquire_resource_token(resource_manager, model_id))
 }
 
 
@@ -211,26 +251,60 @@ release_resource_token <- function(resource_manager, token) {
   }
   
   # Calculate memory usage
-  end_memory_gb <- get_current_memory_gb()
+  end_memory_gb  <- get_current_memory_gb()
   peak_memory_gb <- max(token$peak_memory_gb, end_memory_gb - token$start_memory_gb)
   
-  # Update token
-  resource_manager$memory_tokens[[token$token_id]]$allocated <- FALSE
-  resource_manager$memory_tokens[[token$token_id]]$model_id <- NA
-  resource_manager$memory_tokens[[token$token_id]]$peak_memory_gb <- peak_memory_gb
+  # Use file-based locking for atomic release
+  lock_file <- file.path(resource_manager$output_dir, ".resource_lock")
+  max_wait  <- 10  # Shorter wait for release
+  wait_time <- 0
   
-  # Update active models
-  resource_manager$active_models <- setdiff(
-    resource_manager$active_models,
-    token$model_id
-  )
-  
-  # Record end time
-  resource_manager$model_end_times[[as.character(token$model_id)]] <- Sys.time()
-  
-  # Update peak memory if needed
-  if (peak_memory_gb > resource_manager$peak_memory_gb) {
-    resource_manager$peak_memory_gb <- peak_memory_gb
+  while (wait_time < max_wait) {
+    lock_acquired <- tryCatch({
+      if (!file.exists(lock_file)) {
+        writeLines(as.character(token$model_id), lock_file)
+        TRUE
+      } else {
+        FALSE
+      }
+    }, error = function(e) FALSE)
+    
+    if (lock_acquired) {
+      # Re-read token state for sync
+      token_state_file <- file.path(resource_manager$output_dir, ".token_state.rds")
+      if (file.exists(token_state_file)) {
+        resource_manager$memory_tokens <- readRDS(token_state_file)
+      }
+      
+      # Update token
+      resource_manager$memory_tokens[[token$token_id]]$allocated     <- FALSE
+      resource_manager$memory_tokens[[token$token_id]]$model_id      <- NA
+      resource_manager$memory_tokens[[token$token_id]]$peak_memory_gb <- peak_memory_gb
+      
+      # Save state
+      saveRDS(resource_manager$memory_tokens, token_state_file)
+      
+      # Update active models
+      resource_manager$active_models <- setdiff(
+        resource_manager$active_models,
+        token$model_id
+      )
+      
+      # Record end time
+      resource_manager$model_end_times[[as.character(token$model_id)]] <- Sys.time()
+      
+      # Update peak memory if needed
+      if (peak_memory_gb > resource_manager$peak_memory_gb) {
+        resource_manager$peak_memory_gb <- peak_memory_gb
+      }
+      
+      # Release lock
+      unlink(lock_file, force = TRUE)
+      break
+    }
+    
+    Sys.sleep(0.2)
+    wait_time <- wait_time + 0.2
   }
   
   invisible(NULL)
@@ -371,20 +445,30 @@ cleanup_resource_manager <- function(resource_manager) {
 #' @keywords internal
 get_system_memory_gb <- function() {
   
-  if (.Platform$OS.type == "unix") {
-    # Linux/Mac
-    if (Sys.info()["sysname"] == "Linux") {
-      mem_kb <- as.numeric(system("awk '/MemTotal/ {print $2}' /proc/meminfo", intern = TRUE))
-      return(mem_kb / 1048576)  # Convert KB to GB
-    } else if (Sys.info()["sysname"] == "Darwin") {
-      # macOS
-      mem_bytes <- as.numeric(system("sysctl -n hw.memsize", intern = TRUE))
-      return(mem_bytes / 1073741824)  # Convert bytes to GB
+  tryCatch({
+    if (.Platform$OS.type == "unix") {
+      # Linux/Mac
+      if (Sys.info()["sysname"] == "Linux") {
+        # Read directly from /proc/meminfo - safer than system()
+        if (file.exists("/proc/meminfo")) {
+          meminfo     <- readLines("/proc/meminfo", n = 1)
+          mem_kb_str  <- gsub("^MemTotal:\\s+|\\s+kB$", "", meminfo)
+          mem_kb      <- as.numeric(mem_kb_str)
+          return(mem_kb / 1048576)  # Convert KB to GB
+        }
+      } else if (Sys.info()["sysname"] == "Darwin") {
+        # macOS - use system2 which is safer
+        mem_bytes_str <- system2("sysctl", args = c("-n", "hw.memsize"), stdout = TRUE)
+        mem_bytes     <- as.numeric(mem_bytes_str)
+        return(mem_bytes / 1073741824)  # Convert bytes to GB
+      }
     }
-  }
+  }, error = function(e) {
+    # Silent fail to fallback
+  })
   
-  # Fallback
-  return(8)  # Conservative default
+  # Conservative fallback for HPC systems
+  return(755)  # Sybil has 755GB
 }
 
 
@@ -410,11 +494,27 @@ get_current_memory_gb <- function() {
 #' @keywords internal
 get_load_average <- function() {
   
-  if (.Platform$OS.type == "unix") {
-    load_str <- system("uptime | awk -F'load average:' '{print $2}'", intern = TRUE)
-    loads <- as.numeric(strsplit(gsub(" ", "", load_str), ",")[[1]])
-    return(loads[1])  # 1-minute average
-  }
+  tryCatch({
+    if (.Platform$OS.type == "unix") {
+      if (Sys.info()["sysname"] == "Linux" && file.exists("/proc/loadavg")) {
+        # Read directly from /proc/loadavg - safer than system()
+        loadavg_str <- readLines("/proc/loadavg", n = 1)
+        loads       <- as.numeric(strsplit(loadavg_str, " ")[[1]][1:3])
+        return(loads[1])  # 1-minute average
+      } else {
+        # Fallback for macOS or other Unix
+        load_str <- system2("uptime", stdout = TRUE)
+        # Extract load average more safely
+        if (grepl("load average", load_str)) {
+          load_part <- sub(".*load average[s]?:\\s*", "", load_str)
+          loads     <- as.numeric(strsplit(gsub(" ", "", load_part), ",")[[1]])
+          return(loads[1])  # 1-minute average
+        }
+      }
+    }
+  }, error = function(e) {
+    # Silent fail
+  })
   
   return(NA_real_)
 }
@@ -425,17 +525,25 @@ get_load_average <- function() {
 #' @keywords internal
 check_zombie_processes <- function(resource_manager) {
   
-  if (.Platform$OS.type == "unix") {
-    # Check for zombie R processes
-    zombie_count <- as.integer(system(
-      "ps aux | grep '[Rr]' | grep '<defunct>' | wc -l",
-      intern = TRUE
-    ))
-    
-    if (zombie_count > 0) {
-      cli::cli_alert_warning("Found {zombie_count} zombie R processes")
+  tryCatch({
+    if (.Platform$OS.type == "unix") {
+      # Check for zombie R processes using system2 for safety
+      ps_output <- system2("ps", 
+                           args = c("aux"), 
+                           stdout = TRUE, 
+                           stderr = FALSE)
+      
+      # Count defunct R processes
+      zombie_lines <- grep("\\bR\\b.*<defunct>", ps_output, value = TRUE)
+      zombie_count <- length(zombie_lines)
+      
+      if (zombie_count > 0) {
+        cli::cli_alert_warning("Found {zombie_count} zombie R processes")
+      }
     }
-  }
+  }, error = function(e) {
+    # Don't let monitoring failures affect main process
+  })
   
   invisible(NULL)
 }
