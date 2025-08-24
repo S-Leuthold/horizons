@@ -227,12 +227,36 @@ manage_worker_pool <- function(n_workers_requested,
     
     ## Parallel processing ---------------------------------------------------
     
-    ## Set thread controls to prevent nested parallelism --------------------
+    ## Set comprehensive thread controls to prevent nested parallelism -------
     
     Sys.setenv(
+      ## Standard threading controls ----
       OMP_NUM_THREADS      = "1",
       OPENBLAS_NUM_THREADS = "1",
-      MKL_NUM_THREADS      = "1"
+      MKL_NUM_THREADS      = "1",
+      VECLIB_MAXIMUM_THREADS = "1",
+      NUMEXPR_NUM_THREADS  = "1",
+      
+      ## Additional BLAS variants ----
+      GOTO_NUM_THREADS     = "1",
+      BLIS_NUM_THREADS     = "1",
+      
+      ## Package-specific controls ----
+      RANGER_NUM_THREADS   = "1",
+      XGBOOST_NTHREAD      = "1",
+      
+      ## CPU affinity settings ----
+      OMP_PROC_BIND        = "TRUE",
+      OMP_PLACES           = "cores"
+    )
+    
+    ## Set R global options for package-specific threading -------------------
+    
+    options(
+      ranger.num.threads = 1,
+      xgboost.nthread    = 1,
+      mc.cores           = 1,
+      cores              = 1
     )
     
     ## Use RhpcBLASctl if available ------------------------------------------

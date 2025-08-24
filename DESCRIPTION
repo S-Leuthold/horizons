@@ -148,6 +148,7 @@ Collate:
     'utils-parallel_monitoring.R'
     'utils-progress_reporting.R'
     'utils-sample_configs.R'
+    'utils-thread_control.R'
     'utils-visualization_theme.R'
     'utils_download_horizons_data.R'
     'utils_error_handling.R'
