@@ -320,7 +320,13 @@ evaluate_model_fit_parallel <- function(config_row,
   ## Auto-detect workers if not specified --------------------------------------
 
   if (is.null(n_workers)) {
-    n_workers <- min(50, parallel::detectCores() - 2)
+    available_cores <- parallel::detectCores()
+    n_workers <- max(1, floor(available_cores * 0.1))  # Use 10% of cores by default
+    
+    if (verbose) {
+      cli::cli_alert_info("No worker count specified. Using {n_workers} workers (10% of {available_cores} available cores)")
+      cli::cli_alert_info("To use more workers, specify n_workers explicitly")
+    }
   }
 
   ## Set up worker pool for grid search ----------------------------------------
