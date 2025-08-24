@@ -41,6 +41,9 @@
 #' @param checkpoint_dir Character. Directory for checkpoint files. If NULL, uses `output_dir/checkpoints/`
 #' @param resume Logical. Whether to resume from existing checkpoints (default = TRUE)
 #' @param verbose Logical. Print detailed progress messages (default = TRUE)
+#' @param nested_parallel Logical. Use nested parallelization (default = FALSE)
+#' @param outer_workers Integer. Number of concurrent models for nested mode (optional)
+#' @param inner_workers Integer. Workers per model for nested mode (optional)
 #'
 #' @return If `retrain_top_models = FALSE`, returns a tibble summarizing evaluation metrics
 #'   for each configuration. If `TRUE`, returns a list with:
@@ -132,7 +135,39 @@ run_hpc_evaluation <- function(config,
                                pruning                    = FALSE,
                                checkpoint_dir             = NULL,
                                resume                     = TRUE,
-                               verbose                    = TRUE) {
+                               verbose                    = TRUE,
+                               nested_parallel            = FALSE,
+                               outer_workers              = NULL,
+                               inner_workers              = NULL) {
+  
+  ## ---------------------------------------------------------------------------
+  ## Route to nested implementation if requested
+  ## ---------------------------------------------------------------------------
+  
+  if (nested_parallel) {
+    if (verbose) {
+      cli::cli_alert_info("Using nested parallelization mode")
+    }
+    
+    # Call nested implementation with all parameters
+    return(run_nested_hpc_evaluation(
+      config = config,
+      input_data = input_data,
+      covariate_data = covariate_data,
+      variable = variable,
+      total_cores = n_workers,
+      outer_workers = outer_workers,
+      inner_workers = inner_workers,
+      memory_per_model_gb = 15,
+      output_dir = output_dir,
+      grid_size_eval = grid_size_eval,
+      bayesian_iter_eval = bayesian_iter_eval,
+      cv_folds_eval = cv_folds_eval,
+      checkpoint_dir = checkpoint_dir,
+      resume = resume,
+      verbose = verbose
+    ))
+  }
 
   ## ---------------------------------------------------------------------------
   ## Step 0: Validation and Setup
