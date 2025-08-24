@@ -15,27 +15,19 @@ devtools::load_all()
 
 
 
-project_list("FFAR" = project_entry(spectra_path        = "~/Desktop/_brain/1_Current_Projects/AI-CLIMATE/data/processed/FFAR/opus_files",
-                                    sample_obs          = "~/Desktop/_brain/1_Current_Projects/AI-CLIMATE/data/processed/FFAR/fraction_data.csv",
-                                    file_name_format    = "project_sampleid_fraction_scanid_wellid",
-                                    file_name_delimiter = "_"),
+project_list(
              "MOYS" = project_entry(spectra_path        = "~/Desktop/_brain/1_Current_Projects/AI-CLIMATE/data/processed/MOYS/opus_files",
                                     sample_obs          = "~/Desktop/_brain/1_Current_Projects/AI-CLIMATE/data/processed/MOYS/fraction_data.csv",
                                     file_name_format    = "project_sampleid_fraction_scanid_wellid",
-                                    file_name_delimiter = "_"),
-             "AONR" = project_entry(spectra_path        = "~/Desktop/_brain/1_Current_Projects/AI-CLIMATE/data/processed/AONR/opus_files",
-                                    sample_obs          = "~/Desktop/_brain/1_Current_Projects/AI-CLIMATE/data/processed/AONR/soils_data.csv",
-                                    file_name_format    = "project_sampleid_fraction_scanid_wellid",
                                     file_name_delimiter = "_")) %>%
   create_project_data(projects  = .,
-                      variables = "POM_C_g_kg",
-                      drop_na = FALSE)  -> proj_data_POM
+                      variables = "POM_C_g_kg")  -> proj_data_POM
 
 ## -----------------------------------------------------------------------------
 ## Step 3: Create project configurations
 ## -----------------------------------------------------------------------------
 
-create_project_configurations(project_data       = test_data_full,
+create_project_configurations(project_data       = proj_data_POM,
                               models             = c(
                                                      "random_forest",
                                                      "cubist",
@@ -83,12 +75,39 @@ sample_configs(configs         = configs$project_configurations,
                n_per_group     = 3,
                ensure_baseline = TRUE,
                factorial_pairs = NULL,
-               verbose         = TRUE)  -> downsampled_configs
+               verbose         = TRUE) %>%
+  slice_head(n = 5) -> downsampled_configs
 
-sessionInfo()['BLAS']
+
 ## -----------------------------------------------------------------------------
 ## Step 5: Run the model evaluation
 ## -----------------------------------------------------------------------------
+
+
+results <- tryCatch({
+
+  run_hpc_evaluation(
+    config              = downsampled_configs,
+    input_data          = proj_data_POM,
+    covariate_data      = configs$covariate_data,
+    variable            = "POM_C_g_kg",
+    output_dir          = tempdir(),
+    n_workers           = 2,        # Small number for testing
+    grid_size_eval      = 3,        # Minimal grid
+    bayesian_iter_eval  = 2,        # Minimal iterations
+    cv_folds_eval       = 3,        # Minimal folds
+    retrain_top_models  = FALSE,    # Skip refitting
+    pruning             = FALSE,
+    verbose             = TRUE
+  )
+
+}, error = function(e) {
+  cli::cli_alert_danger("Error in run_hpc_evaluation: {e$message}")
+  return(NULL)
+})
+
+
+
 
 run_model_evaluation(config                 = downsampled_configs,
                      input_data             = pom_proj_data,
@@ -241,3 +260,5 @@ configs_output <- create_project_configurations(
   n_workers = 1,
   allow_nested = FALSE
 )
+
+
