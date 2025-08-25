@@ -84,15 +84,40 @@ evaluate_model_with_inner_workers <- function(config_row,
       NULL
     }
     
-    # Rename response column to "Response" for recipe
+    # ---------------------------------------------------------------------------
+    # Prepare Data Splits (following stable version pattern)
+    # ---------------------------------------------------------------------------
+    
+    set.seed(row_index * 123)  # Reproducible splits
+    
+    # Rename response column to "Response" FIRST (like stable version)
     if (variable != "Response" && variable %in% names(input_data)) {
       input_data <- input_data %>%
         dplyr::rename(Response = !!sym(variable))
     }
     
-    # Build recipe using existing horizons function
+    # Filter to valid observations (now using "Response")
+    model_data <- input_data %>%
+      dplyr::filter(!is.na(Response)) %>%
+      dplyr::filter(is.finite(Response))
+    
+    # Create train/test split
+    split <- rsample::initial_split(model_data, prop = 0.8, strata = Response)
+    train_data <- rsample::training(split)
+    test_data <- rsample::testing(split)
+    
+    # Create CV folds
+    cv_folds_obj <- rsample::vfold_cv(train_data, v = cv_folds)
+    
+    cli::cli_alert_info("[Model {row_index}] Data: {nrow(train_data)} train, {nrow(test_data)} test")
+    
+    # ---------------------------------------------------------------------------
+    # Build Recipe and Workflow
+    # ---------------------------------------------------------------------------
+    
+    # Build recipe using training data (like stable version)
     recipe <- build_recipe(
-      input_data = input_data,
+      input_data = train_data,
       spectral_transformation = config_row$preprocessing,
       response_transformation = config_row$transformation,
       feature_selection_method = config_row$feature_selection,
@@ -109,27 +134,6 @@ evaluate_model_with_inner_workers <- function(config_row,
     workflow <- workflows::workflow() %>%
       workflows::add_recipe(recipe) %>%
       workflows::add_model(model_spec)
-    
-    # ---------------------------------------------------------------------------
-    # Prepare Data Splits
-    # ---------------------------------------------------------------------------
-    
-    set.seed(row_index * 123)  # Reproducible splits
-    
-    # Filter to valid observations
-    model_data <- input_data %>%
-      dplyr::filter(!is.na(!!sym(variable))) %>%
-      dplyr::filter(is.finite(!!sym(variable)))
-    
-    # Create train/test split
-    split <- rsample::initial_split(model_data, prop = 0.8, strata = NULL)
-    train_data <- rsample::training(split)
-    test_data <- rsample::testing(split)
-    
-    # Create CV folds
-    cv_folds_obj <- rsample::vfold_cv(train_data, v = cv_folds)
-    
-    cli::cli_alert_info("[Model {row_index}] Data: {nrow(train_data)} train, {nrow(test_data)} test")
     
     # ---------------------------------------------------------------------------
     # Grid Search with Inner Parallelization
