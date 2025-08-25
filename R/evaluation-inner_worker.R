@@ -97,8 +97,7 @@ evaluate_model_with_inner_workers <- function(config_row,
     
     # Define model specification
     model_spec <- define_model_specifications(
-      model_type = config_row$model,
-      mode = "regression"
+      model_type = config_row$model
     )
     
     # Create workflow
