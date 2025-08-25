@@ -84,12 +84,17 @@ evaluate_model_with_inner_workers <- function(config_row,
       NULL
     }
     
+    # Rename response column to "Response" for recipe
+    if (variable != "Response" && variable %in% names(input_data)) {
+      input_data <- input_data %>%
+        dplyr::rename(Response = !!sym(variable))
+    }
+    
     # Build recipe using existing horizons function
     recipe <- build_recipe(
       input_data = input_data,
-      response_column = variable,  # Changed from response_variable to response_column
-      response_transformation = config_row$transformation,
       spectral_transformation = config_row$preprocessing,
+      response_transformation = config_row$transformation,
       feature_selection_method = config_row$feature_selection,
       covariate_selection = covariate_selection,
       covariate_data = covariate_data

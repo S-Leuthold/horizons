@@ -96,8 +96,7 @@ build_recipe <- function(input_data,
                          response_transformation,
                          feature_selection_method,
                          covariate_selection = NULL,
-                         covariate_data      = NULL,
-                         response_column     = "Response") {
+                         covariate_data      = NULL) {
 
   ## ---------------------------------------------------------------------------
   ## Step 1: Input Validation and Data Preparation
