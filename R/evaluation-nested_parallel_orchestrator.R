@@ -186,7 +186,7 @@ run_nested_hpc_evaluation <- function(config,
         
         return(result)
       },
-      future.scheduling = 1,  # Static scheduling
+      future.scheduling = FALSE,  # Dynamic scheduling (work stealing)
       future.chunk.size = 1,  # One model per worker
       future.seed = TRUE
     )

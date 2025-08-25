@@ -37,22 +37,12 @@ evaluate_model_with_inner_workers <- function(config_row,
   # Mark as inner worker context
   Sys.setenv(HORIZONS_PARALLEL_LEVEL = "inner")
   
-  # Save current plan
-  original_inner_plan <- future::plan()
-  
-  # Setup inner parallelization
-  future::plan(
-    future::multicore,
-    workers = inner_workers
-  )
-  
   # Ensure cleanup on exit
   on.exit({
-    future::plan(original_inner_plan)
     Sys.setenv(HORIZONS_PARALLEL_LEVEL = "")
   }, add = TRUE)
   
-  # Configure thread control for inner context
+  # Configure thread control for inner context (sets mc.cores for tune)
   configure_inner_thread_control(inner_workers)
   
   # Acquire resource token
@@ -317,7 +307,7 @@ configure_inner_thread_control <- function(inner_workers) {
     ranger.num.threads = threads_per_operation,
     ranger.num.cores = threads_per_operation,
     xgboost.nthread = threads_per_operation,
-    mc.cores = 1  # Prevent nested forking
+    mc.cores = inner_workers  # Set to inner_workers for tune parallelization
   )
   
   # Use RhpcBLASctl if available
