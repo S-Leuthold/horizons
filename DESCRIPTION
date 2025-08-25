@@ -42,6 +42,8 @@ Imports:
     lubridate,
     opusreader2,
     parallel,
+    doParallel,
+    foreach,
     parsnip,
     patchwork,
     plsmod,
