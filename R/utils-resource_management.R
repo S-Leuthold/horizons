@@ -105,29 +105,23 @@ check_resource_availability <- function(resource_manager, n_models) {
   current_mem <- get_current_memory_gb()
   resource_manager$current_memory_gb <- current_mem
   
-  # Check memory availability
-  available_memory <- resource_manager$memory_limit_gb - current_mem
-  # With work stealing, we never have more than outer_workers running at once
-  models_to_check <- min(n_models, resource_manager$outer_workers)
-  required_memory <- models_to_check * (resource_manager$memory_limit_gb / resource_manager$outer_workers)
+  # Just provide informational warnings, don't abort
+  # The system will handle memory naturally with work stealing
   
-  if (required_memory > available_memory * 0.9) {
+  if (current_mem > resource_manager$memory_limit_gb * 0.9) {
     cli::cli_alert_warning(
-      "Memory pressure: {round(current_mem, 1)}/{round(resource_manager$memory_limit_gb, 1)} GB used"
+      "High memory usage: {round(current_mem, 1)}/{round(resource_manager$memory_limit_gb, 1)} GB ({round(100*current_mem/resource_manager$memory_limit_gb, 1)}%)"
     )
     
-    # Trigger garbage collection
+    # Trigger garbage collection to free memory
     gc(verbose = FALSE, full = TRUE, reset = TRUE)
     
-    # Recheck
-    current_mem <- get_current_memory_gb()
-    available_memory <- resource_manager$memory_limit_gb - current_mem
-    
-    if (required_memory > available_memory * 0.95) {
-      cli::cli_abort(
-        "Insufficient memory for batch. Need {round(required_memory, 1)} GB, have {round(available_memory, 1)} GB"
-      )
-    }
+    # Log the memory status but don't abort
+    cli::cli_alert_info("Triggered garbage collection to free memory")
+  } else if (current_mem > resource_manager$memory_limit_gb * 0.75) {
+    cli::cli_alert_info(
+      "Memory usage: {round(current_mem, 1)}/{round(resource_manager$memory_limit_gb, 1)} GB ({round(100*current_mem/resource_manager$memory_limit_gb, 1)}%)"
+    )
   }
   
   # Check CPU load
