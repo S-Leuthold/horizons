@@ -202,14 +202,14 @@ evaluate_model_with_inner_workers <- function(config_row,
     # Test Set Evaluation
     # ---------------------------------------------------------------------------
     
-    # Make predictions
+    # Make predictions (using "Response" since we renamed it earlier)
     test_pred <- predict(final_fit, test_data) %>%
-      dplyr::bind_cols(test_data %>% dplyr::select(all_of(variable)))
+      dplyr::bind_cols(test_data %>% dplyr::select(Response))
     
-    # Calculate metrics
+    # Calculate metrics (using "Response" column)
     test_metrics <- yardstick::metrics(
       test_pred,
-      truth = !!sym(variable),
+      truth = Response,
       estimate = .pred
     )
     
