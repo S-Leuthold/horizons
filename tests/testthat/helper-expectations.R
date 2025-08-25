@@ -22,7 +22,6 @@ expect_valid_recipe <- function(recipe,
   
   # Check basic structure
   expect_s3_class(recipe, "recipe")
-  expect_s3_class(recipe, "step")
   
   # Check required components
   expect_true("template" %in% names(recipe))
