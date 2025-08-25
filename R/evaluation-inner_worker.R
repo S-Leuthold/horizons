@@ -87,13 +87,12 @@ evaluate_model_with_inner_workers <- function(config_row,
     # Build recipe using existing horizons function
     recipe <- build_recipe(
       input_data = input_data,
-      response_variable = variable,
+      response_column = variable,  # Changed from response_variable to response_column
       response_transformation = config_row$transformation,
       spectral_transformation = config_row$preprocessing,
       feature_selection_method = config_row$feature_selection,
       covariate_selection = covariate_selection,
-      covariate_data = covariate_data,
-      verbose = FALSE
+      covariate_data = covariate_data
     )
     
     # Define model specification

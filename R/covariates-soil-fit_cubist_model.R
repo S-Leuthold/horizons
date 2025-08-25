@@ -117,7 +117,7 @@ fit_cubist_model <- function(input_data,
   Test_Data  <- rsample::testing(split_data)
 
 
-  safely_execute(expr          = {rsample::vfold_cv(Train_Data, v = 3)},
+  safely_execute(expr          = {rsample::vfold_cv(Train_Data, v = 10, strata = !!rlang::sym(covariate))},
                  default_value = NULL,
                  error_message = glue::glue("Failed to create CV folds for {covariate}")) -> CV_Folds_safe
 
