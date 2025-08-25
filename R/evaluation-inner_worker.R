@@ -37,9 +37,27 @@ evaluate_model_with_inner_workers <- function(config_row,
   # Mark as inner worker context
   Sys.setenv(HORIZONS_PARALLEL_LEVEL = "inner")
   
+  # Set up parallel backend for tune
+  # This is required for tune_grid to actually use parallelization
+  if (requireNamespace("doMC", quietly = TRUE)) {
+    doMC::registerDoMC(cores = inner_workers)
+    cli::cli_alert_info("[Model {row_index}] Registered doMC with {inner_workers} cores")
+  } else if (requireNamespace("doParallel", quietly = TRUE)) {
+    cl <- parallel::makeCluster(inner_workers, type = "FORK")
+    doParallel::registerDoParallel(cl)
+    on.exit({
+      parallel::stopCluster(cl)
+    }, add = TRUE)
+    cli::cli_alert_info("[Model {row_index}] Registered doParallel with {inner_workers} cores")
+  } else {
+    cli::cli_alert_warning("[Model {row_index}] No parallel backend available for tune")
+  }
+  
   # Ensure cleanup on exit
   on.exit({
     Sys.setenv(HORIZONS_PARALLEL_LEVEL = "")
+    # Also clean up foreach backend
+    foreach::registerDoSEQ()
   }, add = TRUE)
   
   # Configure thread control for inner context (sets mc.cores for tune)
