@@ -137,9 +137,10 @@ run_nested_hpc_evaluation <- function(config,
   # ---------------------------------------------------------------------------
   
   all_results <- list()
-  n_batches <- ceiling(length(pending_models) / outer_workers)
   
-  if (verbose && n_batches > 0) {
+  if (verbose && length(pending_models) > 0) {
+    cli::cli_alert_info("Processing {length(pending_models)} models with dynamic scheduling (work stealing)")
+    cli::cli_alert_info("Using {outer_workers} outer workers × {inner_workers} inner workers = {outer_workers * inner_workers} total cores")
     cli::cli_progress_bar(
       name = "Processing models",
       total = length(pending_models),
@@ -147,23 +148,14 @@ run_nested_hpc_evaluation <- function(config,
     )
   }
   
-  for (batch_idx in seq_len(n_batches)) {
+  if (length(pending_models) > 0) {
     
-    batch_start <- (batch_idx - 1) * outer_workers + 1
-    batch_end <- min(batch_idx * outer_workers, length(pending_models))
-    batch_models <- pending_models[batch_start:batch_end]
+    # Check resource availability for all models
+    check_resource_availability(resource_manager, length(pending_models))
     
-    if (verbose) {
-      cli::cli_h3("Batch {batch_idx}/{n_batches}")
-      cli::cli_alert_info("Processing models {min(batch_models)} to {max(batch_models)}")
-    }
-    
-    # Check resource availability
-    check_resource_availability(resource_manager, length(batch_models))
-    
-    # Process batch with outer parallelization
+    # Process ALL models with dynamic scheduling (no batching!)
     batch_results <- future.apply::future_lapply(
-      X = batch_models,
+      X = pending_models,
       FUN = function(model_idx) {
         
         # Set thread control for this outer worker
@@ -184,6 +176,20 @@ run_nested_hpc_evaluation <- function(config,
           resource_manager = resource_manager
         )
         
+        # Save checkpoint immediately after model completes
+        tryCatch({
+          save_model_checkpoint(
+            result = result,
+            model_idx = model_idx,
+            checkpoint_dir = checkpoint_dir
+          )
+          if (verbose) {
+            cli::cli_alert_success("[Worker] Model {model_idx} completed and checkpointed")
+          }
+        }, error = function(e) {
+          cli::cli_alert_warning("[Worker] Failed to checkpoint model {model_idx}: {e$message}")
+        })
+        
         return(result)
       },
       future.scheduling = FALSE,  # Dynamic scheduling (work stealing)
@@ -191,21 +197,13 @@ run_nested_hpc_evaluation <- function(config,
       future.seed = TRUE
     )
     
-    # Store results and checkpoint
-    for (i in seq_along(batch_results)) {
-      model_idx <- batch_models[i]
-      all_results[[as.character(model_idx)]] <- batch_results[[i]]
-      
-      # Save individual model checkpoint
-      save_model_checkpoint(
-        result = batch_results[[i]],
-        model_idx = model_idx,
-        checkpoint_dir = checkpoint_dir
-      )
-    }
+    # Store results with proper naming
+    all_results <- batch_results
+    names(all_results) <- as.character(pending_models)
     
-    # Update checkpoint state
-    completed_models <- c(completed_models, batch_models)
+    # Save all checkpoints (they were already saved in the worker function)
+    # Just update the overall checkpoint state
+    completed_models <- c(completed_models, pending_models)
     save_nested_checkpoint_state(
       completed_models = completed_models,
       checkpoint_dir = checkpoint_dir
@@ -217,9 +215,6 @@ run_nested_hpc_evaluation <- function(config,
       completed = length(completed_models),
       total = nrow(config)
     )
-    
-    # Memory cleanup between batches
-    gc(verbose = FALSE, full = TRUE)
     
     if (verbose) {
       cli::cli_progress_update(length(completed_models))

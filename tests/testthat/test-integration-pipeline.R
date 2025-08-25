@@ -20,38 +20,27 @@ test_that("complete modeling pipeline works end-to-end", {
   skip_if_not_installed("ranger")
   model_spec <- define_model_specifications("random_forest")
   
+  # Finalize the model spec with concrete values instead of tuning
+  model_spec_final <- model_spec %>%
+    parsnip::set_args(
+      mtry = 5,
+      trees = 100,
+      min_n = 10
+    )
+  
   # Create workflow
   wf <- workflows::workflow() %>%
     workflows::add_recipe(recipe) %>%
-    workflows::add_model(model_spec)
+    workflows::add_model(model_spec_final)
   
-  # Fit workflow (with minimal tuning for speed)
+  # Fit workflow
   set.seed(123)
   splits <- rsample::initial_split(test_data, prop = 0.7)
   train_data <- rsample::training(splits)
   test_data_split <- rsample::testing(splits)
   
-  # Mock tuning for speed
-  with_mocked_bindings(
-    tune_grid = function(object, resamples, grid = 10, ...) {
-      tibble::tibble(
-        .metrics = list(tibble::tibble(
-          .metric = c("rmse", "rsq"),
-          .estimator = c("standard", "standard"),
-          .estimate = c(0.5, 0.8)
-        )),
-        .config = "Preprocessor1_Model1",
-        mtry = 5,
-        trees = 100,
-        min_n = 10
-      )
-    },
-    .package = "tune",
-    {
-      # Fit with mock tuning
-      fitted_wf <- workflows::fit(wf, train_data)
-    }
-  )
+  # Fit directly without tuning
+  fitted_wf <- workflows::fit(wf, train_data)
   
   # Generate predictions
   predictions <- predict(fitted_wf, test_data_split)

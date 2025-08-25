@@ -107,7 +107,9 @@ check_resource_availability <- function(resource_manager, n_models) {
   
   # Check memory availability
   available_memory <- resource_manager$memory_limit_gb - current_mem
-  required_memory <- n_models * (resource_manager$memory_limit_gb / resource_manager$outer_workers)
+  # With work stealing, we never have more than outer_workers running at once
+  models_to_check <- min(n_models, resource_manager$outer_workers)
+  required_memory <- models_to_check * (resource_manager$memory_limit_gb / resource_manager$outer_workers)
   
   if (required_memory > available_memory * 0.9) {
     cli::cli_alert_warning(
