@@ -243,8 +243,9 @@ test_that("define_model_specifications can be used in workflows", {
     workflows::add_model(spec)
   
   expect_s3_class(wf, "workflow")
-  expect_false(workflows::is_empty_preprocessor(wf))
-  expect_false(workflows::is_empty_model(wf))
+  # Check that workflow has both recipe and model
+  expect_true(!is.null(wf$pre$actions$recipe))
+  expect_true(!is.null(wf$fit$actions$model))
 })
 
 test_that("define_model_specifications produces different specs for different models", {
@@ -275,8 +276,10 @@ test_that("define_model_specifications tune parameters work with tuning", {
   # Extract tune parameters
   tune_params <- tune::tune_args(spec)
   
-  expect_true(length(tune_params) > 0)
-  expect_true("mtry" %in% names(tune_params))
-  expect_true("trees" %in% names(tune_params))
-  expect_true("min_n" %in% names(tune_params))
+  expect_true(nrow(tune_params) > 0)
+  # Check parameter IDs (tune_args returns a tibble with columns: name, id, source, component, etc.)
+  param_ids <- tune_params$id
+  expect_true("mtry" %in% param_ids)
+  expect_true("trees" %in% param_ids)
+  expect_true("min_n" %in% param_ids)
 })
