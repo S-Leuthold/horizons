@@ -28,7 +28,6 @@
 #'   Use `"No Covariates"` or `NULL` to exclude.
 #' @param covariate_data Optional data frame of covariates (must include `Sample_ID`). Required
 #'   if any covariates are selected.
-#' @param response_column Character. Name of the response variable column. Default is "Response".
 #'
 #' @return A \code{recipes::recipe} object containing the full preprocessing pipeline.
 #'
@@ -60,36 +59,6 @@
 #' @keywords internal
 
 
-#' Prepare Data for Recipe Building
-#'
-#' Ensures the input data has a "Response" column for recipe compatibility.
-#' If the response column has a different name, it renames it to "Response".
-#'
-#' @param input_data A data frame containing the response variable and predictors.
-#' @param response_column Character. Name of the response variable column.
-#'
-#' @return The input data with response column renamed to "Response" if necessary.
-#'
-#' @keywords internal
-prepare_recipe_data <- function(input_data, response_column = "Response") {
-  
-  # If already named "Response", return as-is
-  if (response_column == "Response") {
-    return(input_data)
-  }
-  
-  # Check if response column exists
-  if (!response_column %in% names(input_data)) {
-    cli::cli_alert_danger("Response column '{response_column}' not found in data.")
-    cli::cli_alert_info("Available columns: {.val {names(input_data)}}")
-    stop("Aborting: Response column required.")
-  }
-  
-  # Rename response column to "Response" 
-  input_data %>%
-    dplyr::rename(Response = !!rlang::sym(response_column))
-}
-
 
 build_recipe <- function(input_data,
                          spectral_transformation,
@@ -112,8 +81,7 @@ build_recipe <- function(input_data,
     stop("Aborting: Sample_ID required.")
   }
 
-  # Prepare data with standardized "Response" column name
-  input_data <- prepare_recipe_data(input_data, response_column)
+  # Data already has "Response" column (renamed in calling function if needed)
 
   covariate_selection <- as.character(unlist(covariate_selection))
 
@@ -179,8 +147,7 @@ build_recipe <- function(input_data,
 
   model_recipe %>%
     step_transform_spectra(all_predictors(),
-                           preprocessing = spectral_transformation) %>%
-    recipes::update_role_requirements(role = "predictor") -> model_recipe
+                           preprocessing = spectral_transformation) -> model_recipe
 
   ## ---------------------------------------------------------------------------
   ## Step 5: Feature Selection
