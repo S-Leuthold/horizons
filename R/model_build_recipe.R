@@ -28,6 +28,7 @@
 #'   Use `"No Covariates"` or `NULL` to exclude.
 #' @param covariate_data Optional data frame of covariates (must include `Sample_ID`). Required
 #'   if any covariates are selected.
+#' @param response_column Character. Name of the response variable column. Default is "Response".
 #'
 #' @return A \code{recipes::recipe} object containing the full preprocessing pipeline.
 #'
@@ -40,7 +41,8 @@
 #' @seealso \code{\link{step_transform_spectra}}, \code{\link{step_add_covariates}}, \code{\link{build_model_grid}}
 #'
 #' @importFrom recipes recipe update_role update_role_requirements step_log step_sqrt step_BoxCox step_pca all_outcomes all_predictors
-#' @importFrom dplyr select any_of all_of
+#' @importFrom dplyr select any_of all_of rename
+#' @importFrom rlang sym
 #' @importFrom cli cli_alert_danger cli_alert_info cli_abort
 #' @importFrom glue glue
 #'
@@ -58,16 +60,47 @@
 #' @keywords internal
 
 
+#' Prepare Data for Recipe Building
+#'
+#' Ensures the input data has a "Response" column for recipe compatibility.
+#' If the response column has a different name, it renames it to "Response".
+#'
+#' @param input_data A data frame containing the response variable and predictors.
+#' @param response_column Character. Name of the response variable column.
+#'
+#' @return The input data with response column renamed to "Response" if necessary.
+#'
+#' @keywords internal
+prepare_recipe_data <- function(input_data, response_column = "Response") {
+  
+  # If already named "Response", return as-is
+  if (response_column == "Response") {
+    return(input_data)
+  }
+  
+  # Check if response column exists
+  if (!response_column %in% names(input_data)) {
+    cli::cli_alert_danger("Response column '{response_column}' not found in data.")
+    cli::cli_alert_info("Available columns: {.val {names(input_data)}}")
+    stop("Aborting: Response column required.")
+  }
+  
+  # Rename response column to "Response" 
+  input_data %>%
+    dplyr::rename(Response = !!rlang::sym(response_column))
+}
+
 
 build_recipe <- function(input_data,
                          spectral_transformation,
                          response_transformation,
                          feature_selection_method,
                          covariate_selection = NULL,
-                         covariate_data      = NULL) {
+                         covariate_data      = NULL,
+                         response_column     = "Response") {
 
   ## ---------------------------------------------------------------------------
-  ## Step 1: Input Validation
+  ## Step 1: Input Validation and Data Preparation
   ## ---------------------------------------------------------------------------
 
   if (!is.data.frame(input_data)) {
@@ -79,6 +112,9 @@ build_recipe <- function(input_data,
     cli::cli_alert_danger("▶ build_recipe: Sample_ID column is missing.")
     stop("Aborting: Sample_ID required.")
   }
+
+  # Prepare data with standardized "Response" column name
+  input_data <- prepare_recipe_data(input_data, response_column)
 
   covariate_selection <- as.character(unlist(covariate_selection))
 

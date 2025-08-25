@@ -196,7 +196,7 @@ create_project_configurations <- function(project_data,
 
   } else {
 
-  list(soil_covs[[1]],
+  list(if (!is.null(soil_covs)) soil_covs[[1]] else NULL,
        climate_covs,
        spatial_covs) %>%
     purrr::compact() %>%
@@ -205,8 +205,10 @@ create_project_configurations <- function(project_data,
 
     }
 
-  covariate_data %>%
-    tidyr::drop_na() -> covariate_data
+  if (!is.null(covariate_data)) {
+    covariate_data %>%
+      tidyr::drop_na() -> covariate_data
+  }
 
   ## ---------------------------------------------------------------------------
   ## Step 5: Create Covariate Combinations
@@ -243,7 +245,7 @@ create_project_configurations <- function(project_data,
                   feature_selection = feature_selection,
                   covariates        = covariate_combos) -> model_configs
 
-  if (verbose & !is.null(soil_covs)) {
+  if (verbose & !is.null(soil_covs) & length(soil_covs) >= 2) {
     cli::cli_h2("Prediction Statistics")
     print(soil_covs[[2]])
   }
