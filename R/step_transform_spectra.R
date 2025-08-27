@@ -2,7 +2,7 @@
 #'
 #' Adds a preprocessing step to a `recipes::recipe()` that transforms row-wise spectral data
 #' using common methods from the `prospectr` package. Supported transformations include
-#' Savitzky-Golay derivatives, Standard Normal Variate (SNV), and Multiplicative Scatter Correction (MSC).
+#' Savitzky-Golay derivatives and Standard Normal Variate (SNV).
 #' Intended for use in chemometric modeling workflows with spectra in wide format (columns = wavenumbers).
 #'
 #' @param recipe A `recipes::recipe()` object.
@@ -35,7 +35,7 @@
 #' @importFrom recipes add_step step prep bake rand_id names0 recipes_eval_select
 #' @importFrom rlang enquos
 #' @importFrom tibble as_tibble
-#' @importFrom prospectr savitzkyGolay standardNormalVariate msc
+#' @importFrom prospectr savitzkyGolay standardNormalVariate
 #'
 #' @export
 
@@ -94,13 +94,6 @@ process_spectra <- function(input_vector,
                     matrix(nrow = 1) %>%
                     prospectr::standardNormalVariate() %>%
                     prospectr::savitzkyGolay(m = 2, p = 3, w = window_size) %>%
-                    as.vector()
-                },
-                "msc_deriv1" = {
-                  input_vector %>%
-                    matrix(nrow = 1) %>%
-                    prospectr::msc() %>%
-                    prospectr::savitzkyGolay(m = 1, p = 1, w = window_size) %>%
                     as.vector()
                 },
                 stop(glue::glue("Unknown preprocessing type: {preprocessing}"))

@@ -35,7 +35,6 @@
 #'     \item{"deriv2"}
 #'     \item{"snv_deriv1"}
 #'     \item{"snv_deriv2"}
-#'     \item{"msc_deriv1"}
 #'   }
 #' @param covariates Character vector or list of character vectors naming covariates.
 #'        If `NULL`, `"NoCovs"` will be used.
@@ -81,7 +80,6 @@ clean_workflow_id <- function(model,
     preprocessing == "deriv2"      ~ "D2",
     preprocessing == "snv_deriv1"  ~ "SNVD1",
     preprocessing == "snv_deriv2"  ~ "SNVD2",
-    preprocessing == "msc_deriv1"  ~ "MSCD1",
     TRUE                           ~ stringr::str_replace_all(preprocessing, "\\s+", "_")
   )
 

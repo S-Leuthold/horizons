@@ -16,7 +16,6 @@
 #'     \item{"deriv2"}
 #'     \item{"snv_deriv1"}
 #'     \item{"snv_deriv2"}
-#'     \item{"msc_deriv1"}
 #'   }
 #' @param response_transformation Character. Transformation applied to response variable. One of:
 #'   \itemize{
@@ -166,9 +165,6 @@ build_recipe <- function(input_data,
          "boruta" = model_recipe %>%
                           step_select_boruta(all_predictors(),
                                              outcome = "Response"),
-         "shap"   = model_recipe %>%
-                          step_select_shap(all_predictors(),
-                                           outcome = "Response"),
          "cars"   = model_recipe %>%
                           step_select_cars(all_predictors(),
                                            outcome = "Response"),
