@@ -57,7 +57,6 @@ Imports:
     rlang,
     rsample,
     rules,
-    SHAPforxgboost,
     stacks,
     stats,
     stringr,
@@ -143,7 +142,6 @@ Collate:
     'step-feature_selection_boruta.R'
     'step-feature_selection_cars.R'
     'step-feature_selection_correlation.R'
-    'step-feature_selection_shap.R'
     'step_join_covariates.R'
     'step_transform_spectra.R'
     'utils-checkpoint_management.R'

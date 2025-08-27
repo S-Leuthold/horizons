@@ -56,4 +56,3 @@ safely_execute(log("oops"), default_value = NA, error_message = "Failed to take 
 \seealso{
 \code{\link[purrr]{safely}}, \code{\link[rlang]{trace_back}}, \code{\link[cli]{cli_warn}}
 }
-\keyword{internal}

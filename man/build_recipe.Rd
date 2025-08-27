@@ -26,7 +26,6 @@ build_recipe(
 \item{"deriv2"}
 \item{"snv_deriv1"}
 \item{"snv_deriv2"}
-\item{"msc_deriv1"}
 }}
 
 \item{response_transformation}{Character. Transformation applied to response variable. One of:

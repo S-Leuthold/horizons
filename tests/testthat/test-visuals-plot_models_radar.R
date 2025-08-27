@@ -14,7 +14,7 @@ create_test_data <- function(n = 50) {
   
   models <- c("cubist", "xgboost", "random_forest", "plsr")
   transformations <- c("NoTrans", "Log", "Sqrt")
-  preprocessing <- c("Raw", "SNV", "SNVD1", "MSCD1")
+  preprocessing <- c("Raw", "SNV", "SNVD1")
   feature_selection <- c("PCA", "SHAP", "Corr")
   covariates <- c("Clay-pH", "GDD-MAP", "")
   

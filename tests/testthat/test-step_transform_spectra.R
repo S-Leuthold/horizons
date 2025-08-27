@@ -16,7 +16,7 @@ test_that("step_transform_spectra handles all preprocessing methods", {
   # Create test data with fewer wavelengths for faster testing
   test_data <- make_test_spectra(n_samples = 3, wavelengths = seq(600, 800, by = 4))
   
-  preprocessing_methods <- c("raw", "sg", "snv", "deriv1", "deriv2", "snv_deriv1", "snv_deriv2", "msc_deriv1")
+  preprocessing_methods <- c("raw", "sg", "snv", "deriv1", "deriv2", "snv_deriv1", "snv_deriv2")
   
   for (method in preprocessing_methods) {
     recipe <- recipes::recipe(Response ~ ., data = test_data) %>%
@@ -108,7 +108,7 @@ test_that("process_spectra function works correctly", {
   expect_equal(result_raw, test_vector[3:9])
   
   # Test that other methods return vectors of appropriate length
-  methods <- c("sg", "snv", "deriv1", "deriv2", "snv_deriv1", "snv_deriv2", "msc_deriv1")
+  methods <- c("sg", "snv", "deriv1", "deriv2", "snv_deriv1", "snv_deriv2")
   
   for (method in methods) {
     result <- horizons:::process_spectra(test_vector, method, window_size = 5)
