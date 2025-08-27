@@ -33,12 +33,12 @@
 #' safely_execute(log("oops"), default_value = NA, error_message = "Failed to take log")
 #' }
 #'
-#' @importFrom rlang enquo caller_env eval_tidy trace_back last_trace
+#' @importFrom rlang enquo caller_env eval_tidy trace_back last_trace %||%
 #' @importFrom purrr safely
-#' @importFrom cli cli_warn
+#' @importFrom cli cli_alert_warning cli_alert_info
 #' @importFrom glue glue
 #'
-#' @keywords internal
+#' @export
 
 
 safely_execute <- function(expr,
@@ -53,16 +53,26 @@ safely_execute <- function(expr,
   ## ---------------------------------------------------------------------------
 
   expr_quo <- rlang::enquo(expr)
+  caller_env <- rlang::caller_env()
 
   ## ---------------------------------------------------------------------------
   ## Step 2: Create a safely-wrapped function to evaluate the code block.
   ## ---------------------------------------------------------------------------
 
+  error_trace <- NULL
+  
   safe_eval <- purrr::safely(function() {
-
-    rlang::eval_tidy(expr_quo, env = rlang::caller_env())
-
-    }, otherwise = default_value, quiet = TRUE)
+    
+    withCallingHandlers(
+      rlang::eval_tidy(expr_quo, env = caller_env),
+      error = function(cnd) {
+        # Capture trace at the moment of error
+        error_trace <<- rlang::trace_back()
+        # Let the original error propagate - safely() will catch it
+      }
+    )
+    
+  }, otherwise = default_value, quiet = TRUE)
 
   ## ---------------------------------------------------------------------------
   ## Step 3: Run wrapper and store results.
@@ -71,27 +81,21 @@ safely_execute <- function(expr,
   result_list <- safe_eval()
 
   ## ---------------------------------------------------------------------------
-  ## Step 4: Conditionally trace error back upstream.
+  ## Step 4: Handle trace if error occurred.
   ## ---------------------------------------------------------------------------
 
   trace <- NULL
 
   if (!is.null(result_list$error)) {
     if (capture_trace) {
-      trace <- tryCatch(
-        if (exists("last_trace", asNamespace("rlang"), inherits = FALSE)) {
-          rlang::last_trace()
-          } else {
-            rlang::trace_back()
-          },
-        error = function(e) NULL
-      )
+      # Use the trace we captured at error time, or extract from error object
+      trace <- error_trace %||% result_list$error$trace
 
       ## -----------------------------------------------------------------------
       ## Step 4.1: Conditionally write traceback to disk
       ## -----------------------------------------------------------------------
 
-      if (!is.null(trace_log_file)) {
+      if (!is.null(trace_log_file) && !is.null(trace)) {
         try({
           cat(capture.output(print(trace)),
               file  = trace_log_file,
@@ -109,14 +113,17 @@ safely_execute <- function(expr,
 
       msg <- if (!is.null(error_message)) {
         tryCatch(
-          glue::glue(error_message, .envir = rlang::caller_env()),
+          glue::glue(error_message, .envir = caller_env),
           error = function(e) paste0(error_message, " (error in message: ", e$message, ")")
         )
       } else {
         "An error occurred"
       }
 
-      cli::cli_warn("{msg}: {result_list$error$message}")
+      cli::cli_alert_warning("{msg}: {result_list$error$message}")
+      if (!is.null(trace)) {
+        cli::cli_alert_info("Run `rlang::last_error()` for full backtrace")
+      }
     }
   }
 

@@ -78,8 +78,6 @@ tune_blend <- function(model_stack,
 
   cli::cli_alert_success("Initialized parallel workflow with {.val {parallel::detectCores() - 2}} workers.")
 
-  safely_execute <- horizons:::safely_execute
-
   progressr::handlers(global = TRUE)
   progressr::handlers("cli")
 

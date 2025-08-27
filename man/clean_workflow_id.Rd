@@ -42,7 +42,6 @@ clean_workflow_id(
 \item{"deriv2"}
 \item{"snv_deriv1"}
 \item{"snv_deriv2"}
-\item{"msc_deriv1"}
 }}
 
 \item{covariates}{Character vector or list of character vectors naming covariates.

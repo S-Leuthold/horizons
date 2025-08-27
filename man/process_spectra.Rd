@@ -29,7 +29,7 @@ A \code{step_transform_spectra} object that can be added to a recipe.
 \description{
 Adds a preprocessing step to a \code{recipes::recipe()} that transforms row-wise spectral data
 using common methods from the \code{prospectr} package. Supported transformations include
-Savitzky-Golay derivatives, Standard Normal Variate (SNV), and Multiplicative Scatter Correction (MSC).
+Savitzky-Golay derivatives and Standard Normal Variate (SNV).
 Intended for use in chemometric modeling workflows with spectra in wide format (columns = wavenumbers).
 }
 \details{

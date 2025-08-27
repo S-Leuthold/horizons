@@ -22,7 +22,7 @@ test_that("build_recipe creates valid recipe with basic parameters", {
 test_that("build_recipe handles all spectral transformations", {
   test_data <- make_test_spectra(n_samples = 10, wavelengths = seq(600, 650, by = 10))
   
-  spectral_methods <- c("raw", "sg", "snv", "deriv1", "deriv2", "snv_deriv1", "snv_deriv2", "msc_deriv1")
+  spectral_methods <- c("raw", "sg", "snv", "deriv1", "deriv2", "snv_deriv1", "snv_deriv2")
   
   for (method in spectral_methods) {
     recipe <- build_recipe(

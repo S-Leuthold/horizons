@@ -13,7 +13,7 @@ safe_run_model(
   output_dir,
   grid_size = 10,
   bayesian_iter = 15,
-  cv_folds = 5,
+  cv_folds = 10,
   pruning = TRUE,
   save_output = FALSE,
   parallel_strategy = "cv_folds"

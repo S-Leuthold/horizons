@@ -13,7 +13,7 @@ run_hpc_evaluation(
   n_workers = 50,
   grid_size_eval = 10,
   bayesian_iter_eval = 15,
-  cv_folds_eval = 5,
+  cv_folds_eval = 10,
   retrain_top_models = TRUE,
   number_models_retained = 15,
   grid_size_final = 25,
