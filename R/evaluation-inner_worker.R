@@ -325,7 +325,7 @@ configure_inner_thread_control <- function(inner_workers) {
     ranger.num.threads = threads_per_operation,
     ranger.num.cores = threads_per_operation,
     xgboost.nthread = threads_per_operation,
-    mc.cores = inner_workers  # Set to inner_workers for tune parallelization
+    mc.cores = 1  # MUST be 1 inside workers to prevent thread explosion!
   )
   
   # Use RhpcBLASctl if available
