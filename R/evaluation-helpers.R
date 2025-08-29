@@ -38,6 +38,7 @@ create_failed_result <- function(config_id,
                         } else {
                           NA_character_
                         },
+    best_params       = list(NULL),  # No params for failed models
     rsq               = NA_real_,
     rmse              = NA_real_,
     rrmse             = NA_real_,

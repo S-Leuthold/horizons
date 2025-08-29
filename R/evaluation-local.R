@@ -26,31 +26,36 @@
 #' @export
 evaluate_models_local <- function(config,
                                   input_data,
-                                  covariate_data = NULL,
+                                  covariate_data  = NULL,
                                   variable,
-                                  output_dir     = NULL,
-                                  grid_size      = 10,
-                                  bayesian_iter  = 15,
-                                  cv_folds       = 10,
-                                  parallel_cv    = TRUE,
-                                  n_cv_cores     = NULL,
-                                  prune_models   = TRUE,
+                                  output_dir      = NULL,
+                                  grid_size       = 10,
+                                  bayesian_iter   = 15,
+                                  cv_folds        = 10,
+                                  parallel_cv     = TRUE,
+                                  n_cv_cores      = NULL,
+                                  prune_models    = TRUE,
                                   prune_threshold = 0.9,
-                                  seed           = 307,
-                                  resume         = TRUE,
-                                  verbose        = TRUE) {
+                                  seed            = 307,
+                                  resume          = TRUE,
+                                  verbose         = TRUE) {
   
-  ## Step 1: Input Validation ---------------------------------------------------
+  ## ---------------------------------------------------------------------------
+  ## Step 1: Input Validation
+  ## ---------------------------------------------------------------------------
   
   if (!is.data.frame(config)) {
     cli::cli_abort("config must be a data frame")
   }
   
+  ## ---------------------------------------------------------------------------
+  
   if (!variable %in% names(input_data)) {
     cli::cli_abort("Response variable '{variable}' not found in input_data")
   }
   
-  # Validate response variable has sufficient data
+  ## ---------------------------------------------------------------------------
+
   response_vals <- input_data[[variable]]
   n_valid <- sum(!is.na(response_vals))
   
@@ -62,27 +67,30 @@ evaluate_models_local <- function(config,
     cli::cli_abort("Response variable has no variation (all values are the same)")
   }
   
-  # Check required config columns
+  ## ---------------------------------------------------------------------------
+  
   required_cols <- c("model", "preprocessing", "transformation", "feature_selection")
   missing_cols <- setdiff(required_cols, names(config))
   if (length(missing_cols) > 0) {
     cli::cli_abort("config missing required columns: {missing_cols}")
   }
   
-  # Check for spectral columns (wavenumber columns)
+  ## ---------------------------------------------------------------------------
+  
   spectral_cols <- grep("^[0-9]{3,4}(\\.[0-9]+)?$", names(input_data), value = TRUE)
   if (length(spectral_cols) == 0) {
     cli::cli_abort("No spectral columns found in input_data (expected wavenumber column names)")
   }
   
-  # Validate covariate alignment if provided
+  ## ---------------------------------------------------------------------------
+  
   if (!is.null(covariate_data)) {
     if (!"Sample_ID" %in% names(input_data) || !"Sample_ID" %in% names(covariate_data)) {
       cli::cli_abort("Both input_data and covariate_data must have 'Sample_ID' column")
     }
     
-    # Check for sample alignment
     missing_samples <- setdiff(input_data$Sample_ID, covariate_data$Sample_ID)
+    
     if (length(missing_samples) > 0) {
       cli::cli_alert_warning("Warning: {length(missing_samples)} samples in input_data missing from covariate_data")
     }
@@ -90,127 +98,152 @@ evaluate_models_local <- function(config,
   
   n_models <- nrow(config)
   
-  ## Step 2: Setup Output Directory ---------------------------------------------
+  ## ---------------------------------------------------------------------------
+  ## Step 2: Setup Output Directory 
+  ## ---------------------------------------------------------------------------
   
   if (is.null(output_dir)) {
-    timestamp <- format(Sys.time(), "%Y%m%d_%H%M%S")
+    
+    timestamp  <- format(Sys.time(), "%Y%m%d_%H%M%S")
     output_dir <- fs::path(variable, paste0("local_eval_", timestamp))
+    
   }
   
-  # Create directory structure
+  ## ---------------------------------------------------------------------------
+  
   fs::dir_create(output_dir, recurse = TRUE)
   fs::dir_create(fs::path(output_dir, "results"))
   fs::dir_create(fs::path(output_dir, "errors"))
   fs::dir_create(fs::path(output_dir, "summary"))
   
+  ## ---------------------------------------------------------------------------
+  
   if (verbose) {
+    
     cli::cli_h1("Local Model Evaluation")
     cli::cli_alert_info("Evaluating {n_models} model configuration{?s}")
     cli::cli_alert_info("Output directory: {.path {output_dir}}")
     cli::cli_alert_info("Strategy: Sequential models, {ifelse(parallel_cv, 'parallel', 'sequential')} CV")
+    
     if (parallel_cv) {
+      
       actual_cores <- if(is.null(n_cv_cores)) parallel::detectCores() - 2 else n_cv_cores
       cli::cli_alert_info("Using {actual_cores} cores for cross-validation")
+    
+      }
     }
-  }
   
-  ## Step 3: Create Data Split -------------------------------------------------
+  ## ---------------------------------------------------------------------------
+  ## Step 3: Create Data Split 
+  ## ---------------------------------------------------------------------------
   
-  # Create train/test split for consistent evaluation across all models
-  # Using 80/20 split with stratification on response variable
-  set.seed(seed)  # For reproducibility
+  set.seed(seed)  
   
-  data_split <- rsample::initial_split(
-    data = input_data,
-    prop = 0.8,
-    strata = dplyr::all_of(variable)  # Stratify on response to maintain distribution
-  )
+  rsample::initial_split(data   = input_data,
+                         prop   = 0.8,
+                         strata = dplyr::all_of(variable)) -> data_split 
   
   if (verbose) {
+    
     train_n <- nrow(rsample::training(data_split))
-    test_n <- nrow(rsample::testing(data_split))
+    test_n  <- nrow(rsample::testing(data_split))
     cli::cli_alert_success("Data split created: {train_n} training, {test_n} testing samples")
+  
   }
   
-  ## Step 4: Initialize Progress Tracking ---------------------------------------
+  ## ---------------------------------------------------------------------------
+  ## Step 4: Initialize Progress Tracking and Checkpointing
+  ## ---------------------------------------------------------------------------
   
-  # Initialize results collector
   all_results <- list()
-  
-  # Timing tracker
-  start_time <- Sys.time()
+  start_time  <- Sys.time()
   model_times <- numeric(n_models)
   
-  # Check for existing results if resume enabled
+  ## ---------------------------------------------------------------------------
+  
   existing_results <- character()
+  
   if (resume) {
-    result_files <- fs::dir_ls(
-      fs::path(output_dir, "results"),
-      glob = "*.qs",
-      type = "file"
-    )
+    
+    fs::dir_ls(fs::path(output_dir, "results"),
+               glob = "*.qs",
+               type = "file") -> result_files
+    
     if (length(result_files) > 0) {
+      
       existing_results <- fs::path_file(result_files)
       existing_results <- gsub("\\.qs$", "", existing_results)
       
+      
       if (verbose && length(existing_results) > 0) {
         cli::cli_alert_info("Found {length(existing_results)} existing result{?s}, will skip")
+      
       }
     }
   }
   
-  ## Step 5: Model Iteration Loop -----------------------------------------------
+  ## ---------------------------------------------------------------------------
+  ## Step 5: Model Iteration Loop
+  ## ---------------------------------------------------------------------------
   
   if (verbose) {
+    
     cli::cli_h2("Model Evaluation Progress")
+  
   }
   
-  # Initialize best model tracking (using CCC as primary metric)
-  best_ccc <- NA_real_
+  
+  best_ccc   <- NA_real_
   best_model <- NA_character_
   
   for (i in seq_len(n_models)) {
     
-    ## Part 1: Loop Setup and Config ID -----------------------------------------
+    ## -------------------------------------------------------------------------
+    ## Step 5.1: Loop Setup and Config ID 
+    ## -------------------------------------------------------------------------
     
-    config_row <- config[i, , drop = FALSE]
+    config_row  <- config[i, , drop = FALSE]
     model_start <- Sys.time()
     
-    # Extract covariates if specified (for workflow ID)
     covariate_cols <- if ("covariates" %in% names(config_row) && !is.null(config_row$covariates[[1]])) {
-      config_row$covariates[[1]]  # Extract vector from list column
-    } else {
-      NULL
+      
+      config_row$covariates[[1]]
+    
+      } else {
+        
+        NULL
+    
     }
     
-    # Create standardized workflow ID using existing function
-    workflow_id <- clean_workflow_id(
-      model             = config_row$model,
-      transformation    = config_row$transformation,
-      preprocessing     = config_row$preprocessing,
-      feature_selection = config_row$feature_selection,
-      covariates        = covariate_cols
-    )
+    ## -------------------------------------------------------------------------
     
-    # Add index for uniqueness (in case of duplicate configs)
+    clean_workflow_id(model             = config_row$model,
+                      transformation    = config_row$transformation,
+                      preprocessing     = config_row$preprocessing,
+                      feature_selection = config_row$feature_selection,
+                      covariates        = covariate_cols)  -> workflow_id
+    
     config_id <- sprintf("%03d_%s", i, workflow_id)
     
-    ## Part 2: Checkpointing Logic ----------------------------------------------
+    ## -------------------------------------------------------------------------
+    ## Step 5.2: Checkpointing Logic 
+    ## -------------------------------------------------------------------------
     
-    # Define result file path
     result_file <- fs::path(output_dir, "results", paste0(config_id, ".qs"))
     
-    # Check if already completed (resume enabled and file exists)
     if (resume && fs::file_exists(result_file)) {
       
       if (verbose) {
+        
         cli::cli_alert_info("[{i}/{n_models}] Skipping {workflow_id} (already completed)")
+      
       }
       
-      # Try to load existing result with error handling
       existing_result <- tryCatch({
+        
         qs::qread(result_file)
-      }, error = function(e) {
+      
+        }, error = function(e) {
         cli::cli_alert_warning("Could not load existing result file {config_id}.qs: {conditionMessage(e)}")
         cli::cli_alert_info("Will re-run this configuration")
         NULL
