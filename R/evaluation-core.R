@@ -1,7 +1,7 @@
-#' Evaluate a Single Model Configuration (Local Execution)
+#' Evaluate a Single Model Configuration
 #'
 #' @description
-#' Core function for evaluating a single model configuration in local execution mode.
+#' Core function for evaluating a single model configuration.
 #' Implements a complete modeling pipeline: recipe building → model specification →
 #' hyperparameter tuning (grid + Bayesian) → final evaluation on test set.
 #' Designed for sequential model evaluation with optional parallel cross-validation.
@@ -120,7 +120,7 @@
 #' }
 #'
 #' @keywords internal
-evaluate_single_model_local <- function(config_row,
+evaluate_configuration <- function(config_row,
                                         input_data,
                                         data_split,
                                         config_id,
