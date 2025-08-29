@@ -262,7 +262,7 @@ evaluate_models_local <- function(config,
     
     result_safe <- safely_execute(
       expr = {
-        evaluate_single_model_local(
+        evaluate_configuration(
           config_row      = config_row,
           input_data      = input_data,
           data_split      = data_split,

@@ -263,7 +263,7 @@ evaluate_models_hpc <- function(config,
       
       # Call evaluate_single_model_local with parallel CV enabled
       result <- tryCatch({
-        evaluate_single_model_local(
+        evaluate_configuration(
           config_row = config[i, , drop = FALSE],
           input_data = input_data,
           data_split = data_split,
