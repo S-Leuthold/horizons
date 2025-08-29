@@ -681,6 +681,8 @@ evaluate_configuration <- function(config_row,
                         } else {
                           NA_character_
                         },
+    # Best parameters from tuning (stored as list column)
+    best_params       = list(best_params),
     # Metrics (now accessing from wide format)
     rsq               = test_metrics$rsq %||% NA_real_,
     rmse              = test_metrics$rmse %||% NA_real_,
