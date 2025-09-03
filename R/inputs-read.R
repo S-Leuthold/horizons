@@ -83,15 +83,6 @@ read_spectra <- function(source       = c("opus", "csv"),
 
   }
   
-  # Validate path is within working directory or subdirectories
-  normalized_path <- normalizePath(spectra_path, mustWork = TRUE)
-  working_dir <- normalizePath(getwd(), mustWork = TRUE)
-  
-  if (!startsWith(normalized_path, working_dir)) {
-    
-    cli::cli_abort("▶ read_spectra: Path must be within working directory")
-    
-  }
 
   ## ---------------------------------------------------------------------------
 
