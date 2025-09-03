@@ -58,8 +58,8 @@ finalize_dataset <- function(dataset,
       cli::cli_alert_info("Detecting spectral outliers using {.val {spectral_outlier_method}} method")
     }
     
-    # Extract spectral matrix (only wn_ columns)
-    spectral_cols <- names(dataset)[grepl("^wn_", names(dataset))]
+    # Extract spectral matrix (only numeric columns)
+    spectral_cols <- names(dataset)[grepl("^[0-9]+(\\.[0-9]+)?$", names(dataset))]
     spectral_matrix <- as.matrix(dataset[, spectral_cols])
     
     if (spectral_outlier_method == "mahalanobis") {
