@@ -227,14 +227,16 @@ create_dataset <- function(spectra_data,
   }
   
   # Identify other columns to preserve (not aggregation columns or wavenumbers)
-  other_cols <- names(spectra_data)[!names(spectra_data) %in% c(aggregate_by, names(spectra_data)[grepl("^wn_", names(spectra_data))])]
+  # Identify spectral columns (numeric names)
+  spectral_pattern <- "^[0-9]+(\\.[0-9]+)?$"
+  other_cols <- names(spectra_data)[!names(spectra_data) %in% c(aggregate_by, names(spectra_data)[grepl(spectral_pattern, names(spectra_data))])]
   
   # Aggregate by averaging spectral columns
   spectra_data <- spectra_data %>%
     dplyr::group_by(dplyr::across(dplyr::all_of(aggregate_by))) %>%
     dplyr::summarise(
-      # Average all wavenumber columns
-      dplyr::across(dplyr::starts_with("wn_"), ~mean(.x, na.rm = TRUE)),
+      # Average all spectral columns (numeric names)
+      dplyr::across(dplyr::matches(spectral_pattern), ~mean(.x, na.rm = TRUE)),
       # Count replicates
       n_replicates = dplyr::n(),
       # Keep first value of other columns if they exist

@@ -68,8 +68,8 @@ preprocess_spectra <- function(spectra_data,
   # Get all columns except Sample_ID
   spectral_cols <- setdiff(names(spectra_data), "Sample_ID")
   
-  # Extract wavenumbers from column names (remove "wn_" prefix if present)
-  wavenumbers <- as.numeric(gsub("^wn_", "", spectral_cols))
+  # Extract wavenumbers from column names (should already be numeric)
+  wavenumbers <- as.numeric(spectral_cols)
   
   if (any(is.na(wavenumbers))) {
     
@@ -232,8 +232,11 @@ preprocess_spectra <- function(spectra_data,
     
   } else if (spectra_type == "NIR") {
     
-    # NIR: To be determined when needed
-    cli::cli_abort("NIR preprocessing not yet implemented")
+    # NIR standard: 4000-10000 cm⁻¹ (or use actual data range)
+    actual_range <- range(wavenumbers)
+    target_wavenumbers <- seq(from = ceiling(actual_range[1]), 
+                             to = floor(actual_range[2]), 
+                             by = resample_interval)
     
   } else {
     
@@ -290,7 +293,7 @@ preprocess_spectra <- function(spectra_data,
   
   # Convert matrix to tibble efficiently
   resampled_data <- tibble::as_tibble(resampled_matrix) %>%
-    setNames(paste0("wn_", target_wavenumbers)) %>%
+    setNames(as.character(target_wavenumbers)) %>%
     tibble::add_column(Sample_ID = spectra_data$Sample_ID, .before = 1)
   
   if (verbose) {
