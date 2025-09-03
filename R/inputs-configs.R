@@ -38,20 +38,15 @@
 #'   transformations = c("none", "sqrt"),
 #'   preprocessing = c("raw", "snv"),
 #'   feature_selection = c("none"),
-#'   covariate_sets = list(
-#'     none = NULL,
-#'     climate = c("MAT", "MAP", "AI"),
-#'     soil = c("clay", "sand", "pH")
-#'   )
+#'   soil_covariates = c("clay", "sand", "pH"),
+#'   climate_covariates = c("MAT", "MAP", "AI")
 #' )
 #'
-#' # Expand all covariate combinations
+#' # All combinations of multiple covariate types
 #' configs_expanded <- create_configs(
 #'   models = c("plsr"),
-#'   covariate_sets = list(
-#'     all = c("MAT", "MAP", "clay", "sand")
-#'   ),
-#'   expand_covariates = TRUE
+#'   soil_covariates = c("clay", "sand"),
+#'   climate_covariates = c("MAT", "MAP")
 #' )
 #' }
 #'
