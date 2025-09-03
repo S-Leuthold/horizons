@@ -65,42 +65,103 @@ finalize_dataset <- function(dataset,
     if (spectral_outlier_method == "mahalanobis") {
       
       # PCA projection for dimensionality reduction
-      pca_result <- prcomp(spectral_matrix, center = TRUE, scale. = FALSE)
+      safely_execute(
+        expr = {
+          prcomp(spectral_matrix, center = TRUE, scale. = FALSE)
+        },
+        default_value = NULL,
+        error_message = "PCA computation failed"
+      ) -> pca_result_safe
       
-      # Use Kaiser criterion: keep components with eigenvalue > mean eigenvalue
-      # This is less aggressive than 95% variance and more appropriate for high-dim data
-      eigenvalues <- pca_result$sdev^2
-      n_components <- sum(eigenvalues > mean(eigenvalues))
-      
-      # Ensure we have at least 3 components for Mahalanobis distance
-      n_components <- max(n_components, 3)
-      
-      # But not more than n-1 (for numerical stability)
-      n_components <- min(n_components, nrow(spectral_matrix) - 1)
-      
-      if (verbose) {
-        var_explained <- sum(eigenvalues[1:n_components]) / sum(eigenvalues) * 100
-        cli::cli_alert_info("Using {.val {n_components}} PCs (Kaiser criterion, {.val {round(var_explained, 1)}}% variance)")
-      }
-      
-      # Use robust covariance estimation
-      pca_scores <- pca_result$x[, 1:n_components]
-      robust_cov <- robustbase::covMcd(pca_scores)
-      
-      # Calculate Mahalanobis distance
-      mahal_dist <- sqrt(mahalanobis(x = pca_scores,
-                                     center = robust_cov$center,
-                                     cov = robust_cov$cov))
-      
-      # Chi-square threshold
-      chi_threshold <- sqrt(qchisq(p = spectral_cutoff, df = n_components))
-      
-      # Identify outliers
-      spectral_outliers <- which(mahal_dist > chi_threshold)
-      
-      if (verbose && length(spectral_outliers) > 0) {
-        cli::cli_alert_warning("Found {.val {length(spectral_outliers)}} spectral outliers")
-      }
+      if (is.null(pca_result_safe$result)) {
+        
+        if (!is.null(pca_result_safe$error)) {
+          
+          cli::cli_alert_danger("PCA computation failed: {.emph {pca_result_safe$error$message}}")
+          cli::cli_alert_info("This may be due to:")
+          cli::cli_ul(c(
+            "Insufficient sample size (need at least {.val {ncol(spectral_matrix) + 1}} samples)",
+            "All-zero or constant spectral values",
+            "Memory issues with large spectral matrix",
+            "Numerical instability in covariance matrix"
+          ))
+          
+        }
+        
+        cli::cli_warn("▶ finalize_dataset: PCA failed - skipping spectral outlier detection")
+        spectral_outliers <- integer(0)  # No outliers detected
+        
+      } else {
+        
+        pca_result <- pca_result_safe$result
+        
+        # Use Kaiser criterion: keep components with eigenvalue > mean eigenvalue
+        # This is less aggressive than 95% variance and more appropriate for high-dim data
+        eigenvalues <- pca_result$sdev^2
+        n_components <- sum(eigenvalues > mean(eigenvalues))
+        
+        # Ensure we have at least 3 components for Mahalanobis distance
+        n_components <- max(n_components, 3)
+        
+        # But not more than n-1 (for numerical stability)
+        n_components <- min(n_components, nrow(spectral_matrix) - 1)
+        
+        if (verbose) {
+          var_explained <- sum(eigenvalues[1:n_components]) / sum(eigenvalues) * 100
+          cli::cli_alert_info("Using {.val {n_components}} PCs (Kaiser criterion, {.val {round(var_explained, 1)}}% variance)")
+        }
+        
+        # Use robust covariance estimation
+        pca_scores <- pca_result$x[, 1:n_components]
+        
+        safely_execute(
+          expr = {
+            robustbase::covMcd(pca_scores)
+          },
+          default_value = NULL,
+          error_message = "Robust covariance estimation failed"
+        ) -> robust_cov_result
+        
+        if (is.null(robust_cov_result$result)) {
+          
+          if (!is.null(robust_cov_result$error)) {
+            
+            cli::cli_alert_danger("Robust covariance estimation failed: {.emph {robust_cov_result$error$message}}")
+            cli::cli_alert_info("This may be due to:")
+            cli::cli_ul(c(
+              "Insufficient sample size for robust estimation",
+              "Perfect collinearity in PC scores",
+              "Numerical issues in MCD algorithm",
+              "All samples are identical"
+            ))
+            
+          }
+          
+          cli::cli_warn("▶ finalize_dataset: Robust covariance failed - skipping spectral outlier detection")
+          spectral_outliers <- integer(0)  # No outliers detected
+          
+        } else {
+          
+          robust_cov <- robust_cov_result$result
+          
+          # Calculate Mahalanobis distance
+          mahal_dist <- sqrt(mahalanobis(x = pca_scores,
+                                         center = robust_cov$center,
+                                         cov = robust_cov$cov))
+          
+          # Chi-square threshold
+          chi_threshold <- sqrt(qchisq(p = spectral_cutoff, df = n_components))
+          
+          # Identify outliers
+          spectral_outliers <- which(mahal_dist > chi_threshold)
+          
+          if (verbose && length(spectral_outliers) > 0) {
+            cli::cli_alert_warning("Found {.val {length(spectral_outliers)}} spectral outliers")
+          }
+          
+        }  # Close robust_cov if-else
+        
+      }  # Close PCA if-else
       
     }
   }

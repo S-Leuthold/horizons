@@ -65,7 +65,34 @@ create_dataset <- function(spectra_data,
       
     }
     
-    response_data <- readr::read_csv(response_data, show_col_types = FALSE)
+    safely_execute(
+      expr = {
+        readr::read_csv(response_data, show_col_types = FALSE)
+      },
+      default_value = NULL,
+      error_message = glue::glue("Failed to read response data file: {response_data}")
+    ) -> response_result
+    
+    if (is.null(response_result$result)) {
+      
+      if (!is.null(response_result$error)) {
+        
+        cli::cli_alert_danger("Response data reading failed: {.emph {response_result$error$message}}")
+        cli::cli_alert_info("Check that:")
+        cli::cli_ul(c(
+          "Response file exists and is readable: {.path {response_data}}",
+          "File is valid CSV format",
+          "File contains required {.val {id_column}} column",
+          "File encoding is correct (try UTF-8)"
+        ))
+        
+      }
+      
+      cli::cli_abort("▶ create_dataset: Failed to read response data - cannot continue")
+      
+    }
+    
+    response_data <- response_result$result
     
   } else if (!is.data.frame(response_data)) {
     
@@ -110,15 +137,43 @@ create_dataset <- function(spectra_data,
     spectra_data$Original_ID <- spectra_data[[id_column]]
     
     # Parse each ID and get all components
-    parsed_list <- purrr::map(spectra_data[[id_column]], function(id) {
-      parse_filename_metadata(file_name        = id,
-                             format_string    = id_format,
-                             delimiter        = id_delimiter,
-                             default_fraction = "bulk")
-    })
+    safely_execute(
+      expr = {
+        parsed_list <- purrr::map(spectra_data[[id_column]], function(id) {
+          parse_filename_metadata(file_name        = id,
+                                 format_string    = id_format,
+                                 delimiter        = id_delimiter,
+                                 default_fraction = "bulk")
+        })
+        
+        # Bind all parsed metadata as new columns
+        dplyr::bind_rows(parsed_list)
+      },
+      default_value = NULL,
+      error_message = "ID parsing failed"
+    ) -> parsing_result
     
-    # Bind all parsed metadata as new columns
-    parsed_df <- dplyr::bind_rows(parsed_list)
+    if (is.null(parsing_result$result)) {
+      
+      if (!is.null(parsing_result$error)) {
+        
+        cli::cli_alert_danger("ID parsing failed: {.emph {parsing_result$error$message}}")
+        cli::cli_alert_info("Check that:")
+        cli::cli_ul(c(
+          "ID format string matches actual ID structure: {.val {id_format}}",
+          "Delimiter is correct: {.val {id_delimiter}}",
+          "All IDs follow consistent naming pattern",
+          "Required tokens (e.g., sampleid) are present in format"
+        ))
+        cli::cli_alert_info("Example IDs: {.val {head(spectra_data[[id_column]], 3)}}")
+        
+      }
+      
+      cli::cli_abort("▶ create_dataset: ID parsing failed - cannot continue")
+      
+    }
+    
+    parsed_df <- parsing_result$result
     
     # Remove the original id_column to avoid conflicts (we have it in Original_ID)
     spectra_data <- spectra_data %>%
