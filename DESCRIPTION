@@ -1,6 +1,6 @@
 Package: horizons
 Title: Spectral Ensemble Modeling and Covariate Prediction for Soil Data
-Version: 0.7.6
+Version: 0.8.0
 Author: Sam Leuthold [aut, cre]
 Maintainer: Sam Leuthold <sam.leuthold@colostate.edu>
 Authors@R: 
@@ -42,8 +42,6 @@ Imports:
     lubridate,
     opusreader2,
     parallel,
-    doParallel,
-    foreach,
     parsnip,
     patchwork,
     plsmod,
@@ -55,6 +53,7 @@ Imports:
     readr,
     recipes,
     rlang,
+    robustbase,
     rsample,
     rules,
     stacks,
@@ -104,7 +103,6 @@ VignetteBuilder: knitr
 Depends: 
     R (>= 2.10)
 Collate: 
-    'config-hpc.R'
     'constants.R'
     'covariates-climate-orchestrator.R'
     'covariates-soil-cluster_spectral_data.R'
@@ -114,26 +112,18 @@ Collate:
     'covariates-soil-fit_cubist_model.R'
     'covariates-soil-orchestrator.R'
     'covariates-soil-reduce_dimensionality.R'
-    'evaluation-chunk_configurations.R'
+    'evaluation-core.R'
+    'evaluation-ensemble.R'
     'evaluation-finalize.R'
-    'evaluation-fit_parallel.R'
-    'evaluation-hpc_orchestrator.R'
-    'evaluation-inner_worker.R'
-    'evaluation-local-helpers.R'
-    'evaluation-local-single.R'
+    'evaluation-helpers.R'
+    'evaluation-hpc.R'
     'evaluation-local.R'
-    'evaluation-models_parallel.R'
-    'evaluation-nested_parallel_orchestrator.R'
-    'evaluation-run_model_batches.R'
-    'evaluation-run_single_evaluation.R'
-    'evaluation-safely_run_single_evaluation.R'
-    'evaluation-single_model_parallel.R'
-    'evaluation-worker_manager.R'
     'inputs-create_project_configs.R'
     'inputs-create_project_data.R'
     'inputs-define_project_entry.R'
     'inputs-define_projects_object.R'
     'inputs-parse_metadata.R'
+    'inputs-read.R'
     'inputs-read_opus_file.R'
     'metrics-ccc.R'
     'metrics-rpd.R'
@@ -143,25 +133,12 @@ Collate:
     'models-define_model_specifications.R'
     'models-test_finalized_models.R'
     'monitor-nested_performance.R'
-    'stack-build_model_ensemble.R'
-    'stack-tune_blend.R'
     'step-feature_selection_boruta.R'
     'step-feature_selection_cars.R'
     'step-feature_selection_correlation.R'
     'step_join_covariates.R'
     'step_transform_spectra.R'
-    'utils-checkpoint_management.R'
     'utils-cluster_predictors.R'
-    'utils-create_expanded_parameter_grid.R'
-    'utils-error_recovery.R'
-    'utils-hpc_monitoring.R'
-    'utils-parallel_logging.R'
-    'utils-parallel_monitoring.R'
-    'utils-progress_reporting.R'
-    'utils-resource_management.R'
-    'utils-sample_configs.R'
-    'utils-thread_control.R'
-    'utils-visualization_theme.R'
     'utils_download_horizons_data.R'
     'utils_error_handling.R'
     'utils_find_cache_path.R'
