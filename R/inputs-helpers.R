@@ -192,7 +192,7 @@ read_opus_internal <- function(path, spectra_type, verbose) {
   spectra_wide <- spectra_data %>%
     tidyr::pivot_wider(names_from  = Wavenumber,
                        values_from = Absorbance,
-                       names_prefix = "wn_")
+                       names_prefix = "")
   
   # Preserve the channel attribute
   attr(spectra_wide, "channel_used") <- unique_channels[1]
@@ -301,8 +301,8 @@ read_csv_internal <- function(path, spectra_type, verbose) {
   ## ---------------------------------------------------------------------------
   
   # Try to parse column names as numeric (wavenumbers/wavelengths)
-  # Handle "wn_" or "nm_" prefixes if present
-  cleaned_cols <- gsub("^(wn_|nm_)", "", spectral_cols)
+  # Extract numeric wavenumbers from column names
+  cleaned_cols <- spectral_cols  # Column names should already be numeric
   x_values <- suppressWarnings(as.numeric(cleaned_cols))
   
   if (all(is.na(x_values))) {
