@@ -112,15 +112,66 @@ preprocess_spectra <- function(spectra_data,
     if (baseline_method == "rubberband") {
       
       # Use prospectr's convex hull baseline method on original data
-      spectral_matrix <- prospectr::baseline(X = spectral_matrix, 
-                                             wav = wavenumbers)
+      safely_execute(
+        expr = {
+          prospectr::baseline(X = spectral_matrix, wav = wavenumbers)
+        },
+        default_value = NULL,
+        error_message = "Baseline correction (rubberband) failed"
+      ) -> baseline_result
+      
+      if (is.null(baseline_result$result)) {
+        
+        if (!is.null(baseline_result$error)) {
+          
+          cli::cli_alert_danger("Rubberband baseline correction failed: {.emph {baseline_result$error$message}}")
+          cli::cli_alert_info("This may be due to:")
+          cli::cli_ul(c(
+            "Irregular or discontinuous spectral data",
+            "All-zero or constant spectra",
+            "Insufficient wavelength range for convex hull",
+            "Memory issues with large spectral matrix"
+          ))
+          
+        }
+        
+        cli::cli_abort("▶ preprocess_spectra: Baseline correction failed - cannot continue")
+        
+      }
+      
+      spectral_matrix <- baseline_result$result
       
     } else if (baseline_method == "polynomial") {
       
       # Use prospectr's detrend (SNV + 2nd order polynomial) on original data
-      spectral_matrix <- prospectr::detrend(X   = spectral_matrix,
-                                            wav = wavenumbers,
-                                            p   = 2)
+      safely_execute(
+        expr = {
+          prospectr::detrend(X = spectral_matrix, wav = wavenumbers, p = 2)
+        },
+        default_value = NULL,
+        error_message = "Baseline correction (polynomial) failed"
+      ) -> detrend_result
+      
+      if (is.null(detrend_result$result)) {
+        
+        if (!is.null(detrend_result$error)) {
+          
+          cli::cli_alert_danger("Polynomial baseline correction failed: {.emph {detrend_result$error$message}}")
+          cli::cli_alert_info("This may be due to:")
+          cli::cli_ul(c(
+            "Insufficient wavelength points for 2nd order polynomial",
+            "All-zero or constant spectra",
+            "Collinear wavelength data",
+            "Memory issues with large spectral matrix"
+          ))
+          
+        }
+        
+        cli::cli_abort("▶ preprocess_spectra: Baseline correction failed - cannot continue")
+        
+      }
+      
+      spectral_matrix <- detrend_result$result
       
     }
     
@@ -198,10 +249,40 @@ preprocess_spectra <- function(spectra_data,
   
   # Use prospectr::resample to interpolate to new grid
   # Note: spectral_matrix may already be baseline corrected
-  resampled_matrix <- prospectr::resample(X          = spectral_matrix,
-                                          wav        = wavenumbers,
-                                          new.wav    = target_wavenumbers,
-                                          interpol   = "spline")
+  safely_execute(
+    expr = {
+      prospectr::resample(X          = spectral_matrix,
+                         wav        = wavenumbers,
+                         new.wav    = target_wavenumbers,
+                         interpol   = "spline")
+    },
+    default_value = NULL,
+    error_message = "Spectral resampling failed"
+  ) -> resample_result
+  
+  if (is.null(resample_result$result)) {
+    
+    if (!is.null(resample_result$error)) {
+      
+      cli::cli_alert_danger("Spectral resampling failed: {.emph {resample_result$error$message}}")
+      cli::cli_alert_info("This may be due to:")
+      cli::cli_ul(c(
+        "Wavelength grid mismatch between original and target",
+        "Non-monotonic or duplicate wavelengths",
+        "Insufficient wavelength overlap for interpolation",
+        "Target wavelength range outside original range",
+        "Memory issues with large spectral matrix"
+      ))
+      cli::cli_alert_info("Original range: {.val {round(min(wavenumbers))}}-{.val {round(max(wavenumbers))}} cm⁻¹")
+      cli::cli_alert_info("Target range: {.val {min(target_wavenumbers)}}-{.val {max(target_wavenumbers)}} cm⁻¹")
+      
+    }
+    
+    cli::cli_abort("▶ preprocess_spectra: Spectral resampling failed - cannot continue")
+    
+  }
+  
+  resampled_matrix <- resample_result$result
   
   ## ---------------------------------------------------------------------------
   ## Step 6: Reconstruct tibble with resampled data (memory efficient)
