@@ -293,3 +293,182 @@ with_comprehensive_mocks <- function(code,
   
   eval(mock_code)
 }
+
+#' Enhanced Mock OSSL for Covariate Testing
+#'
+#' Creates realistic mock OSSL data with proper structure for the
+#' refactored covariate prediction system.
+#'
+#' @param code Code to execute with mocked OSSL.
+#' @param n_samples Integer. Number of OSSL samples to generate.
+#' @param n_wavelengths Integer. Number of spectral wavelengths.
+#' @param seed Integer. Random seed for reproducibility.
+#'
+#' @return Result of executing code with enhanced OSSL mocking.
+with_mocked_ossl_covariates <- function(code, 
+                                       n_samples = 1000,
+                                       n_wavelengths = 200,
+                                       seed = NULL) {
+  
+  if (!is.null(seed)) set.seed(seed)
+  
+  # Generate wavelengths
+  wavelengths <- seq(600, 4000, length.out = n_wavelengths)
+  
+  # Create OSSL structure
+  mock_ossl <- tibble::tibble(
+    sample_id = paste0("OSSL_", sprintf("%05d", 1:n_samples))
+  )
+  
+  # Add realistic spectral data
+  for (i in seq_along(wavelengths)) {
+    wl <- wavelengths[i]
+    col_name <- paste0("scan_mir.", round(wl, 1))
+    
+    # Create realistic absorption patterns
+    base <- 0.5
+    if (wl > 1400 && wl < 1500) base <- 0.7  # OH
+    if (wl > 2800 && wl < 3000) base <- 0.8  # CH
+    
+    mock_ossl[[col_name]] <- base + rnorm(n_samples, 0, 0.1)
+  }
+  
+  # Add soil properties in OSSL format
+  mock_ossl$clay.tot_usda.c60_w.pct <- runif(n_samples, 5, 60)  # %
+  mock_ossl$sand.tot_usda.c60_w.pct <- runif(n_samples, 10, 80)  # %
+  mock_ossl$silt.tot_usda.c60_w.pct <- 100 - mock_ossl$clay.tot_usda.c60_w.pct - 
+                                        mock_ossl$sand.tot_usda.c60_w.pct
+  mock_ossl$ph.h2o_usda.a268_index <- runif(n_samples, 4, 9)
+  mock_ossl$oc_usda.c729_w.pct <- runif(n_samples, 0.1, 10)  # %
+  mock_ossl$cec_usda.a723_cmolc.kg <- runif(n_samples, 5, 50)
+  
+  # Mock the key functions
+  mock_get_processed_ossl <- function(properties, variance_threshold = 0.95) {
+    # Filter to requested properties
+    prop_cols <- character()
+    if ("clay" %in% properties) prop_cols <- c(prop_cols, "clay.tot_usda.c60_w.pct")
+    if ("ph" %in% properties) prop_cols <- c(prop_cols, "ph.h2o_usda.a268_index")
+    if ("oc" %in% properties) prop_cols <- c(prop_cols, "oc_usda.c729_w.pct")
+    
+    spec_cols <- grep("^scan_mir\\.", names(mock_ossl), value = TRUE)
+    
+    data <- mock_ossl[c("sample_id", spec_cols, prop_cols)]
+    
+    # Simple mock PCA
+    spec_matrix <- as.matrix(data[spec_cols])
+    n_components <- min(20, ncol(spec_matrix))
+    
+    pca_scores <- tibble::tibble(sample_id = data$sample_id)
+    for (i in 1:n_components) {
+      pca_scores[[paste0("Dim.", i)]] <- rnorm(n_samples, 0, 10/sqrt(i))
+    }
+    
+    # Add properties
+    for (prop in prop_cols) {
+      pca_scores[[prop]] <- data[[prop]]
+    }
+    
+    list(
+      data = pca_scores,
+      pca_model = list(
+        var = matrix(rnorm(length(spec_cols) * n_components), 
+                    nrow = length(spec_cols)),
+        eig = data.frame(
+          eigenvalue = seq(10, 0.1, length.out = n_components),
+          percentage = seq(30, 0.5, length.out = n_components),
+          cumulative = cumsum(seq(30, 0.5, length.out = n_components))
+        )
+      ),
+      pca_scores = pca_scores,
+      n_components = n_components,
+      preprocessing_params = list(smooth_window = 9, smooth_poly = 1)
+    )
+  }
+  
+  withr::with_mocked_bindings(
+    get_processed_ossl_training_data = mock_get_processed_ossl,
+    code,
+    .package = "horizons"
+  )
+}
+
+#' Mock Cubist Model Fitting
+#'
+#' Replaces Cubist model fitting with fast mock version for testing.
+#'
+#' @param code Code to execute with mocked Cubist.
+#' @param fixed_performance Logical. Use fixed performance metrics.
+#'
+#' @return Result of executing code with mocked Cubist fitting.
+with_mocked_cubist <- function(code, fixed_performance = FALSE) {
+  
+  mock_fit_cubist <- function(train_data, val_data, covariate, 
+                             bayesian_iter = 10, ...) {
+    
+    # Create mock model object
+    mock_model <- structure(
+      list(
+        call = match.call(),
+        covariate = covariate,
+        n_train = nrow(train_data),
+        n_val = nrow(val_data)
+      ),
+      class = "cubist"
+    )
+    
+    # Mock predict method
+    attr(mock_model, "predict") <- function(object, newdata) {
+      # Simple linear prediction based on first PC
+      if ("Dim.1" %in% names(newdata)) {
+        base_pred <- 300 + 20 * newdata$Dim.1 + rnorm(nrow(newdata), 0, 30)
+      } else {
+        base_pred <- rnorm(nrow(newdata), 300, 50)
+      }
+      pmax(0, pmin(1000, base_pred))
+    }
+    
+    # Performance metrics
+    if (fixed_performance) {
+      performance <- list(
+        train_rmse = 45.2,
+        val_rmse = 52.3,
+        train_r2 = 0.75,
+        val_r2 = 0.68
+      )
+    } else {
+      performance <- list(
+        train_rmse = runif(1, 30, 70),
+        val_rmse = runif(1, 40, 80),
+        train_r2 = runif(1, 0.6, 0.85),
+        val_r2 = runif(1, 0.5, 0.75)
+      )
+    }
+    
+    list(
+      model = mock_model,
+      best_params = list(
+        committees = sample(10:50, 1),
+        neighbors = sample(0:9, 1),
+        max_rules = sample(50:200, 1)
+      ),
+      optimization_history = tibble::tibble(
+        iteration = 1:bayesian_iter,
+        committees = sample(10:50, bayesian_iter),
+        neighbors = sample(0:9, bayesian_iter, replace = TRUE),
+        max_rules = sample(50:200, bayesian_iter),
+        score = cummax(runif(bayesian_iter, 0.5, 0.8))
+      ),
+      performance = performance,
+      predictions = list(
+        train = rnorm(nrow(train_data), 300, 50),
+        val = rnorm(nrow(val_data), 300, 50)
+      )
+    )
+  }
+  
+  withr::with_mocked_bindings(
+    fit_cubist_model = mock_fit_cubist,
+    code,
+    .package = "horizons"
+  )
+}
