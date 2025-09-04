@@ -2,8 +2,27 @@
 #'
 #' @description
 #' Combines preprocessed spectral data with response variables to create
-#' a dataset ready for modeling. Handles ID parsing, replicate averaging,
-#' and coordinate inclusion.
+#' a modeling-ready dataset. This function handles complex sample ID parsing,
+#' replicate aggregation, and spatial coordinate management. It serves as the
+#' final step in the data preparation pipeline before model evaluation.
+#' 
+#' @details
+#' The function provides flexible data integration with several key capabilities:
+#' \itemize{
+#'   \item Intelligent ID parsing using customizable format strings
+#'   \item Automatic replicate detection and averaging of spectral data
+#'   \item Flexible joining strategies (inner, left, right, full)
+#'   \item Automatic coordinate column detection and inclusion
+#'   \item Comprehensive data validation and quality control
+#' }
+#' 
+#' When \code{parse_ids = TRUE}, sample IDs are parsed according to the
+#' \code{id_format} pattern. Common patterns include:
+#' \itemize{
+#'   \item \code{"project_sampleid_fraction_scan"} for soil fractionation studies
+#'   \item \code{"site_plot_depth_replicate"} for field sampling designs
+#'   \item \code{"experiment_treatment_timepoint"} for time-series studies
+#' }
 #'
 #' @param spectra_data Tibble. Preprocessed spectral data from preprocess_spectra()
 #' @param response_data Character path or data.frame. Response variables with Sample_ID
@@ -22,7 +41,44 @@
 #' @param drop_na Logical. Drop rows with NA in response variables? Default: TRUE
 #' @param verbose Logical. Print progress messages. Default: TRUE
 #'
-#' @return A tibble with joined spectral and response data
+#' @return A tibble containing the merged spectral and response data with:
+#'   \describe{
+#'     \item{Sample_ID}{Character. Primary sample identifier (post-aggregation)}
+#'     \item{<spectral_cols>}{Numeric columns containing averaged spectral data}
+#'     \item{<response_vars>}{Selected response variables from response_data}
+#'     \item{<coord_cols>}{Spatial coordinates (if include_coords = TRUE)}
+#'     \item{n_replicates}{Integer. Number of spectral replicates averaged (if applicable)}
+#'     \item{<parsed_cols>}{Additional columns from ID parsing (if parse_ids = TRUE)}
+#'   }
+#'
+#' @examples
+#' \dontrun{
+#' # Basic dataset creation
+#' dataset <- create_dataset(
+#'   spectra_data = preprocessed_spectra,
+#'   response_data = "soil_properties.csv",
+#'   response_variables = c("SOC", "clay", "pH")
+#' )
+#' 
+#' # Advanced: ID parsing and coordinate inclusion
+#' dataset <- create_dataset(
+#'   spectra_data = spectra,
+#'   response_data = response_df,
+#'   parse_ids = TRUE,
+#'   id_format = "site_plot_depth_rep",
+#'   aggregate_by = c("site", "plot", "depth"),
+#'   include_coords = TRUE,
+#'   coord_columns = c("latitude", "longitude")
+#' )
+#' }
+#' 
+#' @seealso 
+#' \code{\link{preprocess_spectra}} for spectral preprocessing,
+#' \code{\link{create_configs}} for model configuration setup,
+#' \code{\link{finalize_dataset}} for outlier detection
+#' 
+#' @family inputs
+#' @keywords spectroscopy data-integration
 #'
 #' @export
 create_dataset <- function(spectra_data,
@@ -123,6 +179,17 @@ create_dataset <- function(spectra_data,
   # Validate join_type
   join_type <- match.arg(join_type, c("inner", "left", "right", "full"))
   
+  # Display configuration summary
+  config_info <- list(
+    "Input samples" = format_metric(nrow(spectra_data), "count"),
+    "Response source" = if (is.character(response_data)) "CSV file" else "Data frame",
+    "ID parsing" = if (parse_ids) paste0("Enabled (", id_format, ")") else "Disabled",
+    "Join strategy" = paste0(join_type, " join on ", id_column),
+    "Coordinate inclusion" = if (include_coords) "Enabled" else "Disabled"
+  )
+  
+  display_config_summary("Dataset Creation Pipeline", config_info, verbose)
+  
   ## ---------------------------------------------------------------------------
   ## Step 2: Parse IDs if requested
   ## ---------------------------------------------------------------------------
@@ -130,7 +197,10 @@ create_dataset <- function(spectra_data,
   if (parse_ids) {
     
     if (verbose) {
-      cli::cli_alert_info("Parsing Sample IDs using format: {.val {id_format}}")
+      cli::cli_text(format_header("ID Processing Pipeline", style = "single", center = FALSE))
+      cli::cli_text("")
+      cli::cli_text(format_tree_item("ID Parsing", level = 0, is_last = FALSE))
+      cli::cli_text(format_tree_item(paste0("Format: ", id_format), level = 1, is_last = FALSE))
     }
     
     # Preserve original IDs
@@ -189,7 +259,8 @@ create_dataset <- function(spectra_data,
       aggregate_by <- parsed_cols[parsed_cols != "Scan"]
       
       if (verbose) {
-        cli::cli_alert_info("Aggregating by: {.val {aggregate_by}}")
+        cli::cli_text(format_tree_item(paste0("Aggregating by: ", paste(aggregate_by, collapse = ", ")), 
+                                     level = 1, is_last = TRUE))
       }
     }
     
@@ -215,8 +286,10 @@ create_dataset <- function(spectra_data,
       dplyr::summarise(n = dplyr::n(), .groups = "drop") %>%
       dplyr::filter(n > 1)
     
+    cli::cli_text(format_tree_item("Data Aggregation", level = 0, is_last = FALSE))
     if (nrow(replicate_counts) > 0) {
-      cli::cli_alert_info("Found {.val {nrow(replicate_counts)}} sample groups with replicates to average")
+      cli::cli_text(format_tree_item(paste0("Found ", nrow(replicate_counts), " sample groups with replicates to average"), 
+                                   level = 1, is_last = FALSE))
     }
   }
   
@@ -246,7 +319,8 @@ create_dataset <- function(spectra_data,
   
   if (verbose) {
     n_after <- nrow(spectra_data)
-    cli::cli_alert_success("Aggregated {.val {n_before}} rows into {.val {n_after}} unique samples")
+    cli::cli_text(format_tree_item(paste0("✓ Aggregated ", n_before, " rows into ", n_after, " unique samples"), 
+                                 level = 1, is_last = TRUE))
   }
   
   ## ---------------------------------------------------------------------------
@@ -265,22 +339,8 @@ create_dataset <- function(spectra_data,
     cli::cli_abort("▶ create_dataset: Join column {.val {join_column}} not found in response data")
   }
   
-  # Select response variables if specified
-  if (!is.null(response_variables)) {
-    
-    # Check that requested variables exist
-    missing_vars <- response_variables[!response_variables %in% names(response_data)]
-    if (length(missing_vars) > 0) {
-      cli::cli_warn("Variables not found in response data: {.val {missing_vars}}")
-    }
-    
-    # Keep join column and requested variables
-    keep_cols <- unique(c(join_column, response_variables))
-    response_data <- response_data[, keep_cols[keep_cols %in% names(response_data)]]
-    
-  }
-  
-  # Handle coordinate columns if requested
+  # Handle coordinate columns FIRST (before subsetting)
+  coord_columns_to_keep <- character(0)
   if (include_coords) {
     
     if (is.null(coord_columns)) {
@@ -290,19 +350,54 @@ create_dataset <- function(spectra_data,
       coord_columns <- names(response_data)[names(response_data) %in% coord_patterns]
       
       if (length(coord_columns) > 0 && verbose) {
-        cli::cli_alert_info("Auto-detected coordinate columns: {.val {coord_columns}}")
+        cli::cli_text(format_tree_item(paste0("Auto-detected coordinate columns: ", paste(coord_columns, collapse = ", ")), 
+                                     level = 1, is_last = FALSE))
       }
     }
     
-    # Add coord columns to keep list if not already included
-    if (length(coord_columns) > 0 && !is.null(response_variables)) {
-      response_data <- response_data[, unique(c(join_column, response_variables, coord_columns))]
+    # Check which coordinate columns actually exist
+    coord_columns_to_keep <- coord_columns[coord_columns %in% names(response_data)]
+    
+    if (length(coord_columns_to_keep) == 0 && length(coord_columns) > 0) {
+      cli::cli_alert_warning("Coordinate columns {.val {coord_columns}} not found in response data")
+      cli::cli_alert_info("Coordinates will not be included in final dataset")
     }
+  }
+  
+  # Select response variables if specified
+  if (!is.null(response_variables)) {
+    
+    # Check that requested variables exist
+    missing_vars <- response_variables[!response_variables %in% names(response_data)]
+    if (length(missing_vars) > 0) {
+      cli::cli_warn("Variables not found in response data: {.val {missing_vars}}")
+      # Update response_variables to only include existing ones for downstream use
+      response_variables <- response_variables[response_variables %in% names(response_data)]
+      
+      if (length(response_variables) == 0) {
+        cli::cli_warn("No valid response variables found - setting to NULL")
+        response_variables <- NULL
+      }
+    }
+    
+    # Keep join column, requested variables, AND coordinate columns
+    if (!is.null(response_variables)) {
+      keep_cols <- unique(c(join_column, response_variables, coord_columns_to_keep))
+      response_data <- response_data[, keep_cols[keep_cols %in% names(response_data)]]
+    }
+    
+  }
+  
+  # Rest of coordinate handling (now simplified since we already checked)
+  if (FALSE) {  # This block is now redundant
+    # This block is now handled earlier - keeping empty block to maintain structure
   }
   
   # Perform the join
   if (verbose) {
-    cli::cli_alert_info("Joining spectra with response data using {.val {join_type}} join on {.val {join_column}}")
+    cli::cli_text(format_tree_item("Data Integration", level = 0, is_last = FALSE))
+    cli::cli_text(format_tree_item(paste0("Using ", join_type, " join on ", join_column), 
+                                 level = 1, is_last = FALSE))
   }
   
   result <- switch(join_type,
@@ -330,20 +425,34 @@ create_dataset <- function(spectra_data,
     
   }
   
-  # Final summary
+  # Display final results summary
   if (verbose) {
-    cli::cli_alert_success("Created dataset with {.val {nrow(result)}} samples and {.val {ncol(result)}} columns")
     
-    # Report on join results
+    # Calculate join statistics
     n_spectra_only <- sum(!spectra_data[[join_column]] %in% response_data[[join_column]])
     n_response_only <- sum(!response_data[[join_column]] %in% spectra_data[[join_column]])
     
+    # Count spectral and response columns
+    spectral_cols <- sum(suppressWarnings(!is.na(as.numeric(names(result)))))
+    response_cols <- ncol(result) - spectral_cols - 1  # Subtract Sample_ID
+    
+    results_info <- list(
+      "Final samples" = format_metric(nrow(result), "count"),
+      "Total columns" = format_metric(ncol(result), "count"),
+      "Spectral features" = format_metric(spectral_cols, "count"),
+      "Response variables" = format_metric(response_cols, "count")
+    )
+    
     if (n_spectra_only > 0) {
-      cli::cli_alert_info("{.val {n_spectra_only}} spectra samples had no matching response data")
+      results_info[["Spectra without response"]] <- format_metric(n_spectra_only, "count")
     }
+    
     if (n_response_only > 0) {
-      cli::cli_alert_info("{.val {n_response_only}} response samples had no matching spectra")
+      results_info[["Response without spectra"]] <- format_metric(n_response_only, "count")
     }
+    
+    display_operation_results("Dataset creation", results_info, timing = NULL, "complete", verbose)
+    
   }
   
   return(result)

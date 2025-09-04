@@ -8,8 +8,7 @@
 
 ## Model Types ----------------------------------------------------------------
 
-#' Valid model types supported by the package
-#' @keywords internal
+# Valid model types supported by the package
 VALID_MODELS <- c(
   "random_forest",
   "plsr", 
@@ -24,8 +23,7 @@ VALID_MODELS <- c(
 
 ## Transformations ------------------------------------------------------------
 
-#' Valid response transformations
-#' @keywords internal  
+# Valid response transformations
 VALID_TRANSFORMATIONS <- c(
   "No Transformation",
   "Log Transformation",
@@ -34,8 +32,7 @@ VALID_TRANSFORMATIONS <- c(
 
 ## Preprocessing Methods ------------------------------------------------------
 
-#' Valid spectral preprocessing methods
-#' @keywords internal
+# Valid spectral preprocessing methods
 VALID_PREPROCESSING <- c(
   "raw",
   "snv",
@@ -49,8 +46,7 @@ VALID_PREPROCESSING <- c(
 
 ## Feature Selection Methods --------------------------------------------------
 
-#' Valid feature selection methods
-#' @keywords internal
+# Valid feature selection methods
 VALID_FEATURE_SELECTION <- c(
   "none",
   "pca",
@@ -61,8 +57,7 @@ VALID_FEATURE_SELECTION <- c(
 
 ## Default Parameters ---------------------------------------------------------
 
-#' Default tuning parameters
-#' @keywords internal
+# Default tuning parameters
 DEFAULT_GRID_SIZE <- 10
 DEFAULT_BAYES_ITER <- 15
 DEFAULT_CV_FOLDS <- 5

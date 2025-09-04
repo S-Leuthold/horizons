@@ -1,9 +1,26 @@
 #' Create Model Configuration Grid
 #'
 #' @description
-#' Generates a structured grid of model configurations by combining model types,
-#' response transformations, spectral preprocessing methods, feature selection,
-#' and covariate sets. This creates the full experimental design for model evaluation.
+#' Generates a comprehensive grid of model configurations by creating all combinations
+#' of model types, response transformations, spectral preprocessing methods, feature
+#' selection techniques, and covariate sets. This function establishes the complete
+#' experimental design space for systematic model evaluation and comparison.
+#' 
+#' @details
+#' The function generates configurations through a multi-step process:
+#' \enumerate{
+#'   \item Creates all possible covariate combinations (including empty set)
+#'   \item Forms the Cartesian product of all experimental factors
+#'   \item Assigns unique identifiers to each configuration
+#'   \item Returns a structured tibble ready for model evaluation workflows
+#' }
+#' 
+#' The covariate combination logic generates all subsets of the provided covariates,
+#' including the empty set (no covariates). For example, with covariates c("clay", "sand"),
+#' the function creates: none, clay, sand, clay+sand.
+#' 
+#' This comprehensive approach ensures systematic evaluation across the full
+#' experimental space while maintaining clear traceability of model configurations.
 #'
 #' @param models Character vector. Model types to include.
 #'   Default: c("plsr", "random_forest", "cubist", "xgboost", "lightgbm")
@@ -21,14 +38,19 @@
 #'   (e.g., c("elevation", "slope", "aspect")). Use NULL for none. Default: NULL
 #' @param verbose Logical. Print summary statistics. Default: TRUE
 #'
-#' @return A tibble with columns:
-#'   - config_id: Unique identifier for each configuration
-#'   - model: Model type
-#'   - transformation: Response transformation
-#'   - preprocessing: Spectral preprocessing
-#'   - feature_selection: Feature selection method
-#'   - covariate_set: Name of covariate set
-#'   - covariates: List column with actual covariate names
+#' @return A tibble with the following columns:
+#'   \describe{
+#'     \item{config_id}{Character. Unique identifier (e.g., "config_0001")}
+#'     \item{model}{Character. Model algorithm (e.g., "plsr", "random_forest")}
+#'     \item{transformation}{Character. Response variable transformation}
+#'     \item{preprocessing}{Character. Spectral preprocessing method}
+#'     \item{feature_selection}{Character. Feature selection algorithm}
+#'     \item{covariate_set}{Character. Descriptive name of covariate combination}
+#'     \item{covariates}{List. Vector of covariate names (NULL if none)}
+#'   }
+#'   
+#'   The number of rows equals the product of all input vector lengths multiplied
+#'   by the number of covariate combinations (2^n where n = total covariates).
 #'
 #' @examples
 #' \dontrun{
@@ -49,6 +71,14 @@
 #'   climate_covariates = c("MAT", "MAP")
 #' )
 #' }
+#'
+#' @seealso 
+#' \code{\link{create_dataset}} for preparing modeling data,
+#' \code{\link{evaluate_models_local}} for running configurations,
+#' \code{\link{finalize_dataset}} for data quality control
+#' 
+#' @family inputs
+#' @keywords experimental-design model-configuration
 #'
 #' @export
 create_configs <- function(models                  = c("plsr", "random_forest", "cubist",
@@ -85,6 +115,19 @@ create_configs <- function(models                  = c("plsr", "random_forest", 
 
   }
 
+  # Display configuration summary
+  config_info <- list(
+    "Model types" = paste0(format_metric(length(models), "count"), " (", paste(head(models, 3), collapse = ", "), if (length(models) > 3) "..." else "", ")"),
+    "Transformations" = paste0(format_metric(length(transformations), "count"), " types"),
+    "Preprocessing" = paste0(format_metric(length(preprocessing), "count"), " methods"),
+    "Feature selection" = paste0(format_metric(length(feature_selection), "count"), " methods"),
+    "Covariate types" = if (length(c(soil_covariates, climate_covariates, spatial_covariates)) == 0) "None" else 
+                       paste(c(if (!is.null(soil_covariates)) "soil", if (!is.null(climate_covariates)) "climate", if (!is.null(spatial_covariates)) "spatial"), collapse = ", "),
+    "Total covariates" = format_metric(length(c(soil_covariates, climate_covariates, spatial_covariates)), "count")
+  )
+  
+  display_config_summary("Model Configuration Grid Generation", config_info, verbose)
+
   ## ---------------------------------------------------------------------------
   ## Step 2: Generate All Covariate Combinations
   ## ---------------------------------------------------------------------------
@@ -101,7 +144,8 @@ create_configs <- function(models                  = c("plsr", "random_forest", 
 
     if (verbose) {
 
-      cli::cli_alert_info("Generating all subsets of {.val {length(all_covariates)}} covariates")
+      cli::cli_text(format_tree_item(paste0("⟳ Generating all subsets of ", length(all_covariates), " covariates..."), 
+                                   level = 0, is_last = FALSE, symbol = NULL))
 
     }
 
@@ -123,7 +167,8 @@ create_configs <- function(models                  = c("plsr", "random_forest", 
 
     if (verbose) {
 
-      cli::cli_alert_info("Created {.val {length(covariate_sets)}} covariate combinations")
+      cli::cli_text(format_tree_item(paste0("✓ Created ", length(covariate_sets), " covariate combinations"), 
+                                   level = 0, is_last = TRUE))
 
     }
 
@@ -168,10 +213,24 @@ create_configs <- function(models                  = c("plsr", "random_forest", 
   ## Step 6: Summary and Return
   ## ---------------------------------------------------------------------------
 
+  # Display final results summary
   if (verbose) {
-
-    cli::cli_alert_success("Created {.val {nrow(config_grid)}} model configurations")
-
+    
+    # Calculate configuration space breakdown
+    n_covariate_sets <- length(unique(config_grid$covariate_set))
+    base_combinations <- length(models) * length(transformations) * length(preprocessing) * length(feature_selection)
+    
+    results_info <- list(
+      "Total configurations" = format_metric(nrow(config_grid), "count"),
+      "Base combinations" = format_metric(base_combinations, "count"),
+      "Covariate sets" = format_metric(n_covariate_sets, "count"),
+      "Grid structure" = paste0(length(models), "×", length(transformations), "×", 
+                               length(preprocessing), "×", length(feature_selection), 
+                               "×", n_covariate_sets)
+    )
+    
+    display_operation_results("Configuration grid", results_info, timing = NULL, "complete", verbose)
+    
   }
 
   return(config_grid)

@@ -113,7 +113,6 @@ prep.step_select_cars <- function(x, training, info = NULL, ...) {
   cluster_map   <- cluster_result$cluster_map
   cluster_vars  <- cluster_result$selected_vars
 
-  cli::cli_alert_info("CARS feature selection using {length(cluster_vars)} clustered predictors (from {length(col_names)} original wavenumbers)...")
 
   ## ---------------------------------------------------------------------------
   ## Stage 3: Run CARS
@@ -207,6 +206,13 @@ prep.step_select_cars <- function(x, training, info = NULL, ...) {
   
   # Find optimal subset based on minimum RMSECV
   optimal_iter <- which.min(rmsecv_values[1:iter])
+  
+  # Check if we found a valid optimal iteration
+  if (length(optimal_iter) == 0 || is.na(optimal_iter)) {
+    # No valid iteration found - likely all NAs due to invalid data
+    # Return original variables as fallback
+    return(predictor_names)
+  }
   
   # Rerun to optimal iteration to get final variable set
   selected_vars <- seq_len(n_vars)
