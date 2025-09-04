@@ -106,6 +106,8 @@ Depends:
 Collate: 
     'constants.R'
     'utils_error_handling.R'
+    'utils-cluster_predictors.R'
+    'utils-reporting.R'
     'covariates-climate.R'
     'covariates-cubist.R'
     'covariates-data.R'
@@ -137,7 +139,6 @@ Collate:
     'step-feature_selection_correlation.R'
     'step_join_covariates.R'
     'step_transform_spectra.R'
-    'utils-cluster_predictors.R'
     'utils_download_horizons_data.R'
     'utils_find_cache_path.R'
     'utils_get_processed_ossl_mir.R'

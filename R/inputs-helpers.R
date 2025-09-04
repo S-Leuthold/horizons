@@ -11,8 +11,6 @@
 ## OPUS Reading Functions
 ## ---------------------------------------------------------------------------
 
-#' Read OPUS Files (Internal)
-#'
 #' @description
 #' Internal function to read OPUS binary files. Handles both single files
 #' and directories of OPUS files. Automatically selects the best available
