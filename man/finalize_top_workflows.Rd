@@ -2,75 +2,56 @@
 % Please edit documentation in R/evaluation-finalize.R
 \name{finalize_top_workflows}
 \alias{finalize_top_workflows}
-\title{Finalize Top Workflows from Parallel Evaluation Results}
+\title{Finalize Top Models for Ensemble Stacking}
 \usage{
 finalize_top_workflows(
-  parallel_results,
+  evaluation_results,
   input_data,
   covariate_data = NULL,
   variable,
   n_best = 10,
+  metric = "rrmse",
   output_dir = NULL,
-  grid_size_final = 20,
-  bayesian_iter_final = 25,
-  cv_folds_final = 10,
+  train_prop = 0.8,
+  bayesian_iter = 15,
+  cv_folds = 10,
   seed = 123,
-  verbose = TRUE,
-  parallel = FALSE,
-  n_workers = NULL,
-  allow_nested = FALSE
+  parallel_cv = FALSE,
+  verbose = TRUE
 )
 }
 \arguments{
-\item{parallel_results}{A tibble returned by \code{evaluate_models_parallel()} containing
-model performance metrics and best parameters}
+\item{evaluation_results}{Tibble from evaluate_models_local() or evaluate_models_hpc()
+containing model metrics and best_params}
 
-\item{input_data}{A tibble containing spectral features and response variable}
+\item{input_data}{Tibble containing spectral features and response variable}
 
 \item{covariate_data}{Optional tibble containing external covariates}
 
-\item{variable}{Character. Name of the response variable to model}
+\item{variable}{Character. Name of the response variable}
 
 \item{n_best}{Integer. Number of top models to finalize (default: 10)}
 
+\item{metric}{Character. Metric to use for selecting top models: "rrmse", "ccc", "rsq" (default: "rrmse")}
+
 \item{output_dir}{Character. Directory to save finalized workflows (default: tempdir())}
 
-\item{grid_size_final}{Integer. Grid search size for refitting (default: 20)}
+\item{train_prop}{Numeric. Proportion of data for training (default: 0.8)}
 
-\item{bayesian_iter_final}{Integer. Bayesian optimization iterations (default: 25)}
+\item{bayesian_iter}{Integer. Additional Bayesian optimization iterations (default: 15)}
 
-\item{cv_folds_final}{Integer. Cross-validation folds for final tuning (default: 10)}
+\item{cv_folds}{Integer. Cross-validation folds for stacking predictions (default: 10)}
+
+\item{seed}{Integer. Random seed for reproducibility (default: 123)}
+
+\item{parallel_cv}{Logical. Enable parallel processing for CV (default: FALSE)}
 
 \item{verbose}{Logical. Print progress information (default: TRUE)}
-
-\item{parallel}{Logical. Enable parallel processing for model tuning. Defaults to \code{FALSE} (safe for nested contexts).}
-
-\item{n_workers}{Integer. Number of parallel workers for tuning. If \code{NULL}, uses \code{min(10, detectCores()-1)} for safety.}
-
-\item{allow_nested}{Logical. Allow parallel processing even when already in parallel context. Defaults to \code{FALSE} (recommended).}
 }
 \value{
-A tibble containing finalized model information with columns:
-\itemize{
-\item Configuration columns from input
-\item \strong{saved_path}: Path to saved .qs file containing workflow
-\item \strong{final_metrics}: Performance metrics from expanded tuning
-\item \strong{status}: "success" or "failed"
-}
+Tibble with finalized model information and saved paths
 }
 \description{
-Takes the top-performing models from parallel evaluation results and refits them
-with expanded hyperparameter tuning for ensemble stacking. Uses best parameters
-from parallel results as warm starts for Bayesian optimization, then saves
-workflows in the format expected by \code{build_ensemble_stack()}.
-}
-\details{
-This function bridges the gap between memory-efficient parallel evaluation and
-full workflow saving for ensemble building. It:
-\itemize{
-\item Selects top N models by RRMSE from parallel results
-\item Creates initial grids around the best parameters from parallel runs
-\item Performs expanded Bayesian tuning starting from these good parameter regions
-\item Saves complete workflows in .qs format for \code{build_ensemble_stack()}
-}
+Takes evaluation results and refits the top-performing models with additional
+Bayesian optimization iterations, then saves them with CV predictions for ensemble stacking.
 }

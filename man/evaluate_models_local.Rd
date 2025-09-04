@@ -12,10 +12,13 @@ evaluate_models_local(
   output_dir = NULL,
   grid_size = 10,
   bayesian_iter = 15,
-  cv_folds = 5,
+  cv_folds = 10,
   parallel_cv = TRUE,
   n_cv_cores = NULL,
-  checkpoint = TRUE,
+  prune_models = TRUE,
+  prune_threshold = 0.9,
+  seed = 307,
+  resume = TRUE,
   verbose = TRUE
 )
 }
@@ -34,13 +37,19 @@ evaluate_models_local(
 
 \item{bayesian_iter}{Integer. Bayesian optimization iterations (default: 15)}
 
-\item{cv_folds}{Integer. Cross-validation folds (default: 5)}
+\item{cv_folds}{Integer. Cross-validation folds (default: 10)}
 
 \item{parallel_cv}{Logical. Use parallel processing for CV (default: TRUE)}
 
 \item{n_cv_cores}{Integer. Cores for parallel CV (default: detectCores()-2)}
 
-\item{checkpoint}{Logical. Enable checkpointing (default: TRUE)}
+\item{prune_models}{Logical. Prune models that don't beat baseline (default: TRUE)}
+
+\item{prune_threshold}{Numeric. Performance threshold vs baseline (default: 0.9)}
+
+\item{seed}{Integer. Random seed for reproducibility (default: 307)}
+
+\item{resume}{Logical. Resume from existing checkpoint files (default: TRUE)}
 
 \item{verbose}{Logical. Print progress messages (default: TRUE)}
 }
