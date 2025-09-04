@@ -125,8 +125,6 @@ prep.step_select_boruta <- function(x, training, info = NULL, ...) {
   cluster_map   <- cluster_result$cluster_map
   cluster_vars  <- cluster_result$selected_vars
 
-  cli::cli_alert_info("Boruta feature selection using {length(cluster_vars)} clustered predictors (from {length(col_names_filtered)} variance-filtered wavenumbers)...")
-
   ## ---------------------------------------------------------------------------
   ## Stage 3: Run Boruta with optimized parameters
   ## ---------------------------------------------------------------------------

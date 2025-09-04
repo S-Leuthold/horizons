@@ -118,9 +118,7 @@ prep.step_select_correlation <- function(x, training, info = NULL, ...) {
   ## Stage 2: Vectorized correlation and rolling mean
   ## ---------------------------------------------------------------------------
 
-  cli::cli_alert_info("Calculating vectorized correlations...")
-
-  # 1. Calculate all correlations in one fast operation
+  # Calculate all correlations in one fast operation
   all_cor_scores <- stats::cor(spectra_mat, outcome_vec, method = "spearman")
 
   # 2. Use a highly efficient rolling mean function

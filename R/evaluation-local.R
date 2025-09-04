@@ -24,6 +24,7 @@
 #' @return Tibble with evaluation results for all configurations
 #'
 #' @export
+
 evaluate_models_local <- function(config,
                                   input_data,
                                   covariate_data  = NULL,
@@ -39,243 +40,266 @@ evaluate_models_local <- function(config,
                                   seed            = 307,
                                   resume          = TRUE,
                                   verbose         = TRUE) {
-  
+
   ## ---------------------------------------------------------------------------
   ## Step 1: Input Validation
   ## ---------------------------------------------------------------------------
-  
+
   if (!is.data.frame(config)) {
     cli::cli_abort("config must be a data frame")
   }
-  
+
   ## ---------------------------------------------------------------------------
-  
+
   if (!variable %in% names(input_data)) {
     cli::cli_abort("Response variable '{variable}' not found in input_data")
   }
-  
+
   ## ---------------------------------------------------------------------------
 
   response_vals <- input_data[[variable]]
   n_valid <- sum(!is.na(response_vals))
-  
+
   if (n_valid < 20) {
     cli::cli_abort("Response variable has only {n_valid} non-missing values (minimum 20 required)")
   }
-  
+
   if (var(response_vals, na.rm = TRUE) < .Machine$double.eps) {
     cli::cli_abort("Response variable has no variation (all values are the same)")
   }
-  
+
   ## ---------------------------------------------------------------------------
-  
+
   required_cols <- c("model", "preprocessing", "transformation", "feature_selection")
   missing_cols <- setdiff(required_cols, names(config))
   if (length(missing_cols) > 0) {
     cli::cli_abort("config missing required columns: {missing_cols}")
   }
-  
+
   ## ---------------------------------------------------------------------------
-  
+
   spectral_cols <- grep("^[0-9]{3,4}(\\.[0-9]+)?$", names(input_data), value = TRUE)
   if (length(spectral_cols) == 0) {
     cli::cli_abort("No spectral columns found in input_data (expected wavenumber column names)")
   }
-  
+
   ## ---------------------------------------------------------------------------
-  
+
   if (!is.null(covariate_data)) {
     if (!"Sample_ID" %in% names(input_data) || !"Sample_ID" %in% names(covariate_data)) {
       cli::cli_abort("Both input_data and covariate_data must have 'Sample_ID' column")
     }
-    
+
     missing_samples <- setdiff(input_data$Sample_ID, covariate_data$Sample_ID)
-    
+
     if (length(missing_samples) > 0) {
       cli::cli_alert_warning("Warning: {length(missing_samples)} samples in input_data missing from covariate_data")
     }
   }
-  
+
   n_models <- nrow(config)
-  
+
   ## ---------------------------------------------------------------------------
-  ## Step 2: Setup Output Directory 
+  ## Step 2: Setup Output Directory
   ## ---------------------------------------------------------------------------
-  
+
   if (is.null(output_dir)) {
-    
+
     timestamp  <- format(Sys.time(), "%Y%m%d_%H%M%S")
     output_dir <- fs::path(variable, paste0("local_eval_", timestamp))
-    
+
   }
-  
+
   ## ---------------------------------------------------------------------------
-  
+
   fs::dir_create(output_dir, recurse = TRUE)
   fs::dir_create(fs::path(output_dir, "results"))
   fs::dir_create(fs::path(output_dir, "errors"))
   fs::dir_create(fs::path(output_dir, "summary"))
-  
+
   ## ---------------------------------------------------------------------------
-  
+
   if (verbose) {
+
+    cli::cli_h1("Model Evaluation Setup")
+    cli::cli_div(theme = list(rule = list(`line-type` = "single")))
     
-    cli::cli_h1("Local Model Evaluation")
-    cli::cli_alert_info("Evaluating {n_models} model configuration{?s}")
-    cli::cli_alert_info("Output directory: {.path {output_dir}}")
-    cli::cli_alert_info("Strategy: Sequential models, {ifelse(parallel_cv, 'parallel', 'sequential')} CV")
-    
-    if (parallel_cv) {
-      
-      actual_cores <- if(is.null(n_cv_cores)) parallel::detectCores() - 2 else n_cv_cores
-      cli::cli_alert_info("Using {actual_cores} cores for cross-validation")
-    
-      }
+    cli::cli_h2("Configuration")
+    cli::cli_alert_success("Models: {n_models} configurations")
+    cli::cli_alert_info("Strategy: Sequential models, {ifelse(parallel_cv, 'parallel', 'sequential')} CV{ifelse(parallel_cv, paste0(' (', ifelse(is.null(n_cv_cores), parallel::detectCores() - 2, n_cv_cores), ' cores)'), '')}")
+    cli::cli_alert_info("Output: {.path {output_dir}}")
+
     }
-  
+
   ## ---------------------------------------------------------------------------
-  ## Step 3: Create Data Split 
+  ## Step 3: Create Data Split
   ## ---------------------------------------------------------------------------
-  
-  set.seed(seed)  
-  
+
+  # Rename response variable to "Response" for consistency throughout pipeline
+  input_data <- input_data %>%
+    dplyr::rename(Response = !!rlang::sym(variable))
+
+  # Update variable name for downstream use
+  variable <- "Response"
+
+  set.seed(seed)
+
   rsample::initial_split(data   = input_data,
                          prop   = 0.8,
-                         strata = dplyr::all_of(variable)) -> data_split 
-  
+                         strata = dplyr::all_of(variable)) -> data_split
+
   if (verbose) {
-    
+
     train_n <- nrow(rsample::training(data_split))
     test_n  <- nrow(rsample::testing(data_split))
-    cli::cli_alert_success("Data split created: {train_n} training, {test_n} testing samples")
-  
+    cli::cli_alert_success("Data: {train_n} training, {test_n} testing samples")
+    cli::cli_text("")
+    cli::cli_alert_info("Starting evaluation...")
+
   }
-  
+
   ## ---------------------------------------------------------------------------
   ## Step 4: Initialize Progress Tracking and Checkpointing
   ## ---------------------------------------------------------------------------
-  
+
   all_results <- list()
   start_time  <- Sys.time()
   model_times <- numeric(n_models)
-  
+
   ## ---------------------------------------------------------------------------
-  
+
   existing_results <- character()
-  
+
   if (resume) {
-    
+
     fs::dir_ls(fs::path(output_dir, "results"),
                glob = "*.qs",
                type = "file") -> result_files
-    
+
     if (length(result_files) > 0) {
-      
+
       existing_results <- fs::path_file(result_files)
       existing_results <- gsub("\\.qs$", "", existing_results)
-      
-      
+
+
       if (verbose && length(existing_results) > 0) {
         cli::cli_alert_info("Found {length(existing_results)} existing result{?s}, will skip")
-      
+
       }
     }
   }
-  
+
   ## ---------------------------------------------------------------------------
   ## Step 5: Model Iteration Loop
   ## ---------------------------------------------------------------------------
-  
+
   if (verbose) {
-    
-    cli::cli_h2("Model Evaluation Progress")
-  
+    cli::cli_text("")
   }
-  
-  
+
+
   best_ccc   <- NA_real_
   best_model <- NA_character_
-  
+
   for (i in seq_len(n_models)) {
-    
+
     ## -------------------------------------------------------------------------
-    ## Step 5.1: Loop Setup and Config ID 
+    ## Step 5.1: Loop Setup and Config ID
     ## -------------------------------------------------------------------------
-    
+
     config_row  <- config[i, , drop = FALSE]
     model_start <- Sys.time()
-    
+
     covariate_cols <- if ("covariates" %in% names(config_row) && !is.null(config_row$covariates[[1]])) {
-      
+
       config_row$covariates[[1]]
-    
+
       } else {
-        
+
         NULL
-    
+
     }
-    
+
     ## -------------------------------------------------------------------------
-    
+
     clean_workflow_id(model             = config_row$model,
                       transformation    = config_row$transformation,
                       preprocessing     = config_row$preprocessing,
                       feature_selection = config_row$feature_selection,
                       covariates        = covariate_cols)  -> workflow_id
-    
+
     config_id <- sprintf("%03d_%s", i, workflow_id)
-    
+
     ## -------------------------------------------------------------------------
-    ## Step 5.2: Checkpointing Logic 
+    ## Step 5.2: Checkpointing Logic
     ## -------------------------------------------------------------------------
-    
+
     result_file <- fs::path(output_dir, "results", paste0(config_id, ".qs"))
-    
+
     if (resume && fs::file_exists(result_file)) {
-      
+
       if (verbose) {
-        
+
         cli::cli_alert_info("[{i}/{n_models}] Skipping {workflow_id} (already completed)")
-      
+
       }
-      
+
       existing_result <- tryCatch({
-        
+
         qs::qread(result_file)
-      
+
         }, error = function(e) {
         cli::cli_alert_warning("Could not load existing result file {config_id}.qs: {conditionMessage(e)}")
         cli::cli_alert_info("Will re-run this configuration")
         NULL
       })
-      
+
       # If successfully loaded, store and continue to next iteration
       if (!is.null(existing_result)) {
         all_results[[i]] <- existing_result
-        
+
         # Update timing from saved result
         if (!is.null(existing_result$timing$elapsed)) {
           model_times[i] <- existing_result$timing$elapsed / 60  # Convert to minutes
         }
-        
+
         next  # Skip to next iteration
       }
     }
-    
+
     # If we get here, we need to run the model
     if (verbose) {
-      cli::cli_alert_info("[{i}/{n_models}] Evaluating: {workflow_id}")
+      cli::cli_text("")
+      cli::cli_rule(left = "[{i}/{n_models}]")
+      cli::cli_text("{.strong Configuration:}")
+      
+      # Parse workflow ID using centralized helper function
+      parsed_info <- parse_workflow_id(workflow_id)
+      
+      # Extract human-readable names
+      model_display <- parsed_info$model
+      transform_display <- parsed_info$transformation
+      preprocess_display <- parsed_info$preprocessing  
+      feature_display <- parsed_info$feature_selection
+      
+      # Display the components with human-readable names
+      cli::cli_text("├─ Model: {.field {model_display}}")
+      cli::cli_text("├─ Transformation: {.field {transform_display}}")
+      cli::cli_text("├─ Preprocessing: {.field {preprocess_display}}")
+      cli::cli_text("├─ Feature Selection: {.field {feature_display}}")
+      cli::cli_text("└─ Covariates: {.field {parsed_info$covariates}}")
+      cli::cli_text("")
     }
-    
+
     ## Part 3: Covariate Data Preparation ---------------------------------------
-    
+
     # Prepare covariate data subset if needed
     model_covariate_data <- NULL
-    
+
     if (!is.null(covariate_cols) && !is.null(covariate_data)) {
       # Check that requested covariates exist
       missing_covs <- setdiff(covariate_cols, names(covariate_data))
-      
+
       if (length(missing_covs) > 0) {
         cli::cli_alert_warning("Missing covariates for config {i}: {missing_covs}")
         cli::cli_alert_info("Available covariates: {names(covariate_data)}")
@@ -284,15 +308,12 @@ evaluate_models_local <- function(config,
       } else {
         # Subset to just the needed covariates plus Sample_ID
         model_covariate_data <- covariate_data[, c("Sample_ID", covariate_cols), drop = FALSE]
-        
-        if (verbose) {
-          cli::cli_alert_info("Using {length(covariate_cols)} covariate{?s}: {covariate_cols}")
-        }
+
       }
     }
-    
+
     ## Part 4: Call evaluate_single_model_local ---------------------------------
-    
+
     result_safe <- safely_execute(
       expr = {
         evaluate_configuration(
@@ -317,13 +338,13 @@ evaluate_models_local <- function(config,
       error_message = "Failed to evaluate config {config_id}: {workflow_id}",
       log_error = TRUE
     )
-    
+
     ## Part 5: Process Result and Save Checkpoint -------------------------------
-    
+
     # Extract result (should be a tibble with metrics and metadata)
     if (!is.null(result_safe$result)) {
       result <- result_safe$result
-      
+
       # Convert tibble result to list format expected by aggregation
       result <- list(
         config_id = result$config_id,
@@ -343,9 +364,10 @@ evaluate_models_local <- function(config,
           elapsed = result$total_seconds,
           timestamp = Sys.time()
         ),
+        best_params = result$best_params[[1]],  # Extract from list column
         status = result$status
       )
-      
+
     } else {
       # Create error result structure
       error_msg <- if (!is.null(result_safe$error)) {
@@ -353,7 +375,7 @@ evaluate_models_local <- function(config,
       } else {
         "Unknown error occurred"
       }
-      
+
       # Save error details to separate error file using atomic write
       error_file <- fs::path(output_dir, "errors", paste0("error_", config_id, ".json"))
       error_obj <- list(
@@ -363,14 +385,14 @@ evaluate_models_local <- function(config,
         error_message = error_msg,
         timestamp = as.character(Sys.time())
       )
-      
+
       # Atomic write for error file
       temp_error_file <- tempfile(tmpdir = dirname(error_file), fileext = ".json.tmp")
       tryCatch({
         jsonlite::write_json(
-          error_obj, 
-          temp_error_file, 
-          pretty = TRUE, 
+          error_obj,
+          temp_error_file,
+          pretty = TRUE,
           auto_unbox = TRUE
         )
         file.rename(temp_error_file, error_file)
@@ -378,7 +400,7 @@ evaluate_models_local <- function(config,
         if (file.exists(temp_error_file)) unlink(temp_error_file)
         # Don't warn here since we're already in error handling
       })
-      
+
       # Create standardized error result
       result <- list(
         config_id = config_id,
@@ -396,14 +418,14 @@ evaluate_models_local <- function(config,
         error_message = error_msg
       )
     }
-    
+
     # Store result in memory
     all_results[[i]] <- result
-    
+
     # Save result to disk using atomic write pattern
     result_file <- fs::path(output_dir, "results", paste0(config_id, ".qs"))
     temp_file <- tempfile(tmpdir = dirname(result_file), fileext = ".qs.tmp")
-    
+
     tryCatch({
       qs::qsave(result, temp_file)
       file.rename(temp_file, result_file)  # Atomic operation
@@ -412,12 +434,12 @@ evaluate_models_local <- function(config,
       if (file.exists(temp_file)) unlink(temp_file)
       cli::cli_alert_warning("Failed to save checkpoint for {config_id}: {e$message}")
     })
-    
+
     # Track timing
     model_times[i] <- as.numeric(difftime(Sys.time(), model_start, units = "mins"))
-    
+
     ## Part 6: Progress Reporting and Memory Cleanup ----------------------------
-    
+
     # Track best model so far using CCC (for progress reporting)
     if (result$status %in% c("completed", "success")) {
       current_ccc <- result$metrics$.estimate[result$metrics$.metric == "ccc"][1]
@@ -428,7 +450,7 @@ evaluate_models_local <- function(config,
         }
       }
     }
-    
+
     # Progress reporting (every model + ETA every 10 or first 5)
     if (verbose) {
       # Extract metrics for display
@@ -438,19 +460,30 @@ evaluate_models_local <- function(config,
         rsq_val <- metrics_df$.estimate[metrics_df$.metric == "rsq"][1]
         ccc_val <- metrics_df$.estimate[metrics_df$.metric == "ccc"][1]
         rpd_val <- metrics_df$.estimate[metrics_df$.metric == "rpd"][1]
-        
+
         # Success message with model details
-        cli::cli_alert_success("[{i}/{n_models}] {workflow_id}")
-        cli::cli_text("  └─ RRMSE: {round(rrmse_val, 1)}%, R²: {round(rsq_val, 3)}, CCC: {round(ccc_val, 3)}, RPD: {round(rpd_val, 2)} | Time: {round(model_times[i], 2)} min")
-        
+        cli::cli_text("")
+        cli::cli_text("{.strong Results:}")
+        cli::cli_text("├─ Status: {cli::col_green('✓ COMPLETE')}")
+        cli::cli_text("├─ RRMSE: {round(rrmse_val, 1)}% | R²: {round(rsq_val, 3)}")
+        cli::cli_text("├─ CCC: {round(ccc_val, 3)} | RPD: {round(rpd_val, 2)}")
+        cli::cli_text("└─ Total time: {round(model_times[i], 1)} min")
+        cli::cli_rule()
+
       } else if (result$status == "pruned") {
         # Get pruning reason if available
         metrics_df <- result$metrics
         rrmse_val <- metrics_df$.estimate[metrics_df$.metric == "rrmse"][1]
-        
-        cli::cli_alert_warning("[{i}/{n_models}] {workflow_id}")
-        cli::cli_text("  └─ Pruned: RRMSE {round(rrmse_val, 1)}% > {prune_threshold*100}% threshold | Time: {round(model_times[i], 2)} min")
-        
+
+        # Calculate actual threshold for clarity
+        actual_threshold <- round(prune_threshold * 100, 1)
+        cli::cli_text("")
+        cli::cli_text("{.strong Results:}")
+        cli::cli_text("├─ Status: {cli::col_yellow('⚠ PRUNED')}")
+        cli::cli_text("├─ RRMSE: {round(rrmse_val, 1)}% (threshold: {actual_threshold}%)")
+        cli::cli_text("└─ Total time: {round(model_times[i], 1)} min")
+        cli::cli_rule()
+
       } else {
         # Error message with reason
         error_msg <- result$error_message %||% "Unknown error"
@@ -459,57 +492,67 @@ evaluate_models_local <- function(config,
         } else {
           error_msg
         }
-        
-        cli::cli_alert_danger("[{i}/{n_models}] {workflow_id}")
-        cli::cli_text("  └─ Error: {error_preview} | Time: {round(model_times[i], 2)} min")
+
+        cli::cli_text("")
+        cli::cli_text("{.strong Results:}")
+        cli::cli_text("├─ Status: {cli::col_red('✗ FAILED')}")
+        cli::cli_text("├─ Error: {error_preview}")
+        cli::cli_text("└─ Total time: {round(model_times[i], 1)} min")
+        cli::cli_rule()
       }
-      
+
       # Progress summary (every 10 models or first 5)
       if (i %% 10 == 0 || i <= 5) {
-        cli::cli_rule(left = "Progress Summary", right = "{i}/{n_models}")
         
         # Count statuses
         statuses <- sapply(all_results[1:i], function(x) x$status %||% "unknown")
         n_success_so_far <- sum(statuses %in% c("completed", "success"))
         n_pruned_so_far <- sum(statuses == "pruned")
         n_failed_so_far <- sum(statuses %in% c("error", "failed"))
-        
-        # Status summary
-        cli::cli_alert_info("Status: ✔ {n_success_so_far} completed, ⚠ {n_pruned_so_far} pruned, ✖ {n_failed_so_far} failed")
-        
-        # Best model so far
-        if (!is.na(best_ccc)) {
-          cli::cli_alert_success("Best CCC so far: {round(best_ccc, 3)} ({best_model})")
-        }
+
+        # Create progress bar
+        pct_complete <- round(i / n_models * 100)
+        bar_width <- 20
+        filled <- round(bar_width * i / n_models)
+        empty <- bar_width - filled
+        progress_bar <- paste0(
+          strrep("█", filled),
+          strrep("░", empty)
+        )
         
         # ETA calculation
         completed_times <- model_times[1:i][!is.na(model_times[1:i]) & model_times[1:i] > 0]
+        eta_text <- ""
         if (length(completed_times) > 0) {
           avg_time <- mean(completed_times)
           remaining <- n_models - i
-          eta_mins <- remaining * avg_time
-          eta_time <- Sys.time() + (eta_mins * 60)
-          
-          cli::cli_alert_info("Average: {round(avg_time, 2)} min/model | ETA: {format(eta_time, '%H:%M')} ({round(eta_mins, 0)} min remaining)")
+          eta_mins <- round(remaining * avg_time, 0)
+          eta_text <- paste0(" | ~", eta_mins, " min remaining")
         }
         
-        cli::cli_rule()
+        cli::cli_text("")
+        cli::cli_text("Progress: {progress_bar} {pct_complete}% | {n_success_so_far} complete, {n_pruned_so_far} pruned, {n_failed_so_far} failed{eta_text}")
+        
+        # Best model info (only if exists)
+        if (!is.na(best_ccc)) {
+          cli::cli_text("          Best CCC: {round(best_ccc, 3)} ({best_model})")
+        }
       }
     }
-    
+
     # Memory cleanup after each model
     invisible(gc(verbose = FALSE, full = TRUE))
   }
-  
+
   ## Step 6: Result Aggregation -------------------------------------------------
-  
+
   if (verbose) {
     cli::cli_h2("Aggregating Results")
   }
-  
+
   # Convert list of results to tibble
   results_tbl <- purrr::map_dfr(all_results, function(res) {
-    
+
     # Extract metrics in wide format
     metrics_wide <- if (!is.null(res$metrics)) {
       res$metrics %>%
@@ -527,7 +570,7 @@ evaluate_models_local <- function(config,
         rrmse = NA_real_
       )
     }
-    
+
     # Combine all information
     tibble::tibble(
       config_id = res$config_id,
@@ -537,6 +580,7 @@ evaluate_models_local <- function(config,
       transformation = res$config$transformation,
       feature_selection = res$config$feature_selection,
       covariates = list(res$config$covariates),
+      best_params = list(res$best_params),  # Store as list column
       status = res$status %||% "unknown",
       error_message = res$error_message %||% NA_character_,
       elapsed_secs = res$timing$elapsed %||% NA_real_,
@@ -544,12 +588,12 @@ evaluate_models_local <- function(config,
     ) %>%
       dplyr::bind_cols(metrics_wide)
   })
-  
+
   # Calculate summary statistics
   n_completed <- sum(results_tbl$status == "completed", na.rm = TRUE)
   n_pruned <- sum(results_tbl$status == "pruned", na.rm = TRUE)
   n_errors <- sum(results_tbl$status == "error", na.rm = TRUE)
-  
+
   if (verbose) {
     cli::cli_alert_success("Completed: {n_completed} models")
     if (n_pruned > 0) {
@@ -559,18 +603,18 @@ evaluate_models_local <- function(config,
       cli::cli_alert_danger("Failed: {n_errors} models")
     }
   }
-  
+
   # Rank models by performance (using RRMSE as primary metric)
   results_tbl <- results_tbl %>%
     dplyr::arrange(rrmse) %>%
     dplyr::mutate(rank = dplyr::row_number())
-  
+
   ## Step 7: Output Generation --------------------------------------------------
-  
+
   if (verbose) {
     cli::cli_h2("Saving Outputs")
   }
-  
+
   # Save final aggregated results using atomic writes
   summary_file_qs <- fs::path(output_dir, "summary", "final_results.qs")
   temp_qs <- tempfile(tmpdir = dirname(summary_file_qs), fileext = ".qs.tmp")
@@ -581,7 +625,7 @@ evaluate_models_local <- function(config,
     if (file.exists(temp_qs)) unlink(temp_qs)
     cli::cli_alert_warning("Failed to save QS summary: {e$message}")
   })
-  
+
   # Also save as CSV for easy viewing (atomic)
   summary_file_csv <- fs::path(output_dir, "summary", "final_results.csv")
   temp_csv <- tempfile(tmpdir = dirname(summary_file_csv), fileext = ".csv.tmp")
@@ -592,7 +636,7 @@ evaluate_models_local <- function(config,
     if (file.exists(temp_csv)) unlink(temp_csv)
     cli::cli_alert_warning("Failed to save CSV summary: {e$message}")
   })
-  
+
   # Save metadata about the run
   metadata <- list(
     n_models = n_models,
@@ -613,7 +657,7 @@ evaluate_models_local <- function(config,
     ),
     timestamp = Sys.time()
   )
-  
+
   # Save metadata using atomic write
   metadata_file <- fs::path(output_dir, "summary", "run_metadata.json")
   temp_meta <- tempfile(tmpdir = dirname(metadata_file), fileext = ".json.tmp")
@@ -624,16 +668,16 @@ evaluate_models_local <- function(config,
     if (file.exists(temp_meta)) unlink(temp_meta)
     cli::cli_alert_warning("Failed to save metadata: {e$message}")
   })
-  
+
   if (verbose) {
     cli::cli_alert_success("Results saved to: {.path {output_dir}}")
     cli::cli_alert_info("Summary: {.path {summary_file_csv}}")
-    
+
     # Show top models
     top_models <- results_tbl %>%
       dplyr::filter(status == "completed") %>%
       dplyr::slice_head(n = 5)
-    
+
     if (nrow(top_models) > 0) {
       cli::cli_h3("Top 5 Models by RRMSE")
       for (i in 1:nrow(top_models)) {
@@ -643,12 +687,12 @@ evaluate_models_local <- function(config,
         )
       }
     }
-    
+
     cli::cli_alert_success(
       "Total evaluation time: {round(metadata$total_time_mins, 1)} minutes"
     )
   }
-  
+
   # Return the results tibble
   return(results_tbl)
 }
