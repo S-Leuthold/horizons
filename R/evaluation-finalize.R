@@ -20,6 +20,7 @@
 #' @param verbose Logical. Print progress information (default: TRUE)
 #'
 #' @return Tibble with finalized model information and saved paths
+#' @importFrom yardstick mae rmse rsq
 #' @export
 finalize_top_workflows <- function(evaluation_results,
                                   input_data,
@@ -97,54 +98,16 @@ finalize_top_workflows <- function(evaluation_results,
   }
   
   # Setup parallel backend for CV if requested
-  cluster_object <- NULL  # Track cluster for cleanup
-  
   if (parallel_cv) {
-    if (.Platform$OS.type == "unix") {
-      # Unix/macOS: Use doMC
-      if (requireNamespace("doMC", quietly = TRUE)) {
-        n_cores <- min(cv_folds, parallel::detectCores() - 1)
-        doMC::registerDoMC(cores = n_cores)
-        # Register cleanup for Unix/macOS
-        on.exit({
-          foreach::registerDoSEQ()  # Reset to sequential
-        }, add = TRUE)
-        if (verbose) {
-          cli::cli_alert_success("Parallel CV enabled with {n_cores} cores (doMC)")
-        }
-      } else {
-        cli::cli_alert_warning("doMC not available, falling back to sequential CV")
-        parallel_cv <- FALSE
-      }
-    } else {
-      # Windows: Use doParallel
-      if (requireNamespace("doParallel", quietly = TRUE)) {
-        n_cores <- min(cv_folds, parallel::detectCores() - 1)
-        tryCatch({
-          cluster_object <- parallel::makeCluster(n_cores)
-          doParallel::registerDoParallel(cluster_object)
-          # Register cleanup for Windows
-          on.exit({
-            if (!is.null(cluster_object)) {
-              try(parallel::stopCluster(cluster_object), silent = TRUE)
-            }
-            foreach::registerDoSEQ()  # Reset to sequential
-          }, add = TRUE)
-          if (verbose) {
-            cli::cli_alert_success("Parallel CV enabled with {n_cores} cores (doParallel)")
-          }
-        }, error = function(e) {
-          cli::cli_alert_warning("Failed to create parallel cluster: {conditionMessage(e)}")
-          cli::cli_alert_warning("Falling back to sequential CV")
-          parallel_cv <- FALSE
-          if (!is.null(cluster_object)) {
-            try(parallel::stopCluster(cluster_object), silent = TRUE)
-          }
-        })
-      } else {
-        cli::cli_alert_warning("doParallel not available, falling back to sequential CV")
-        parallel_cv <- FALSE
-      }
+    n_cores <- min(cv_folds, parallel::detectCores() - 1)
+    
+    # Store original plan and set up parallel
+    old_plan <- future::plan()
+    on.exit(future::plan(old_plan), add = TRUE)
+    future::plan(future::multisession, workers = n_cores)
+    
+    if (verbose) {
+      cli::cli_alert_success("Parallel CV enabled with {n_cores} workers")
     }
   }
   
@@ -152,13 +115,16 @@ finalize_top_workflows <- function(evaluation_results,
   start_time <- Sys.time()
   
   if (verbose) {
-    cli::cli_h1("Finalizing Top Models for Ensemble Stacking")
-    cli::cli_alert_info("Evaluation results: {nrow(evaluation_results)} models")
-    cli::cli_alert_info("Selection metric: {metric}")
-    cli::cli_alert_info("Target models: {n_best}")
-    cli::cli_alert_info("Additional Bayes iterations: {bayesian_iter}")
-    cli::cli_alert_info("CV folds for stacking: {cv_folds}")
-    cli::cli_alert_info("Output directory: {output_dir}")
+    cli::cli_h1("Model Finalization Setup")
+    cli::cli_div(theme = list(rule = list(`line-type` = "single")))
+    
+    cli::cli_h2("Configuration")
+    cli::cli_alert_info("Input: {nrow(evaluation_results)} evaluated models")
+    cli::cli_alert_info("Selection: Top {n_best} by {metric}")
+    cli::cli_alert_info("Optimization: {bayesian_iter} additional Bayesian iterations")
+    cli::cli_alert_info("Resampling: {cv_folds}-fold CV for stacking")
+    cli::cli_alert_info("Output: {.path {output_dir}}")
+    cli::cli_text("")
   }
   
   ## Step 1: Select Top Models -------------------------------------------------
@@ -196,15 +162,34 @@ finalize_top_workflows <- function(evaluation_results,
   }
   
   if (verbose) {
-    cli::cli_h2("Selected Top Models")
+    cli::cli_text("")
+    cli::cli_h2("Model Selection")
     cli::cli_alert_success("Selected {nrow(top_models)} models by {metric}")
     
     # Show metric range
     best_metric <- if (lower_is_better) min(top_models[[metric]]) else max(top_models[[metric]])
     worst_metric <- if (lower_is_better) max(top_models[[metric]]) else min(top_models[[metric]])
     
-    cli::cli_alert_info("Best {metric}: {round(best_metric, 3)}")
-    cli::cli_alert_info("Worst selected {metric}: {round(worst_metric, 3)}")
+    cli::cli_text("{.strong Performance Range:}")
+    cli::cli_text("├─ Best {metric}: {round(best_metric, 3)}")
+    cli::cli_text("└─ Cutoff {metric}: {round(worst_metric, 3)}")
+    cli::cli_text("")
+    
+    # Show selected models
+    cli::cli_text("{.strong Selected Models:}")
+    for (i in seq_len(min(5, nrow(top_models)))) {
+      model_name <- top_models$workflow_id[i]
+      model_metric <- round(top_models[[metric]][i], 3)
+      if (i < min(5, nrow(top_models))) {
+        cli::cli_text("├─ {model_name} ({metric}: {model_metric})")
+      } else {
+        cli::cli_text("└─ {model_name} ({metric}: {model_metric})")
+      }
+    }
+    if (nrow(top_models) > 5) {
+      cli::cli_text("   ... and {nrow(top_models) - 5} more")
+    }
+    cli::cli_text("")
   }
   
   ## Step 2: Data Preparation --------------------------------------------------
@@ -294,25 +279,24 @@ finalize_top_workflows <- function(evaluation_results,
   top_models <- top_models %>%
     dplyr::mutate(
       covariate_list = purrr::map(covariates, function(x) {
-        if (is.na(x) || x == "NA") {
+        # Handle single values or vectors properly
+        if (length(x) == 1 && (is.na(x) || x == "NA")) {
+          NULL
+        } else if (is.null(x)) {
           NULL
         } else {
-          strsplit(x, "-")[[1]]
+          # If x is already a vector, use it; if string, split it
+          if (length(x) > 1) {
+            x  # Already a vector
+          } else {
+            strsplit(x, "-")[[1]]
+          }
         }
       })
     )
   
   # Initialize results storage
   finalized_results <- vector("list", nrow(top_models))
-  
-  # Create progress bar
-  if (verbose) {
-    cli::cli_progress_bar(
-      "Finalizing models",
-      total = nrow(top_models),
-      clear = FALSE
-    )
-  }
   
   # Process each model sequentially
   for (i in seq_len(nrow(top_models))) {
@@ -321,13 +305,27 @@ finalize_top_workflows <- function(evaluation_results,
     current_model <- top_models[i, ]
     
     if (verbose) {
-      cli::cli_progress_update()
-      cli::cli_h3("Model {i}/{nrow(top_models)}: {current_model$workflow_id}")
-      cli::cli_alert_info("Type: {current_model$model} | Preprocessing: {current_model$preprocessing}")
-      cli::cli_alert_info("Current {metric}: {round(current_model[[metric]], 3)}")
+      # Parse workflow ID for readable display
+      parsed_info <- parse_workflow_id(current_model$workflow_id)
+      
+      cli::cli_text("")
+      cli::cli_rule(left = "[{i}/{nrow(top_models)}]")
+      cli::cli_text("{.strong Model:} {current_model$workflow_id}")
+      cli::cli_text("├─ Type: {.field {parsed_info$model}}")
+      cli::cli_text("├─ Transformation: {.field {parsed_info$transformation}}")
+      cli::cli_text("├─ Preprocessing: {.field {parsed_info$preprocessing}}")
+      cli::cli_text("├─ Feature Selection: {.field {parsed_info$feature_selection}}")
+      cli::cli_text("├─ Covariates: {.field {parsed_info$covariates}}")
+      cli::cli_text("└─ Current {metric}: {.field {round(current_model[[metric]], 3)}}")
+      cli::cli_text("")
+      cli::cli_text("{.strong Processing Steps:}")
     }
     
     ## Step 3.1: Rebuild Recipe ------------------------------------------------
+    
+    if (verbose) {
+      cli::cli_text("├─ Building recipe...")
+    }
     
     recipe_result <- safely_execute(
       expr = {
@@ -403,7 +401,7 @@ finalize_top_workflows <- function(evaluation_results,
     workflow <- workflow_result$result
     
     if (verbose) {
-      cli::cli_alert_success("Workflow rebuilt successfully")
+      cli::cli_text("│  └─ Workflow built: ✓")
     }
     
     ## Step 3.4: Extract and prepare parameters -------------------------------
@@ -444,18 +442,136 @@ finalize_top_workflows <- function(evaluation_results,
     best_params <- current_model$best_params[[1]]
     
     if (verbose) {
-      cli::cli_alert_info("Running Bayesian optimization ({bayesian_iter} iterations)")
+      cli::cli_text("├─ Preparing optimization...")
     }
     
-    # Run Bayesian optimization starting from best params
+    # Create a small grid around the best parameters to seed Bayesian optimization
+    initial_grid <- NULL
+    
+    if (!is.null(best_params) && nrow(best_params) > 0) {
+      # Remove any non-parameter columns (like .config)
+      param_info <- hardhat::extract_parameter_set_dials(workflow)
+      param_names <- param_info$name
+      
+      # Only keep actual tuning parameters from best_params
+      best_params <- best_params[, param_names, drop = FALSE]
+      
+      # Create grid around best parameters
+      grid_list <- list()
+      
+      for (param_name in param_names) {
+        best_value <- best_params[[param_name]]
+        
+        if (is.numeric(best_value)) {
+          # For numeric parameters, create a range around the best value
+          # Integer parameters for all models
+          integer_params <- c(
+            "num_comp",      # PLSR
+            "committees",    # Cubist
+            "neighbors",     # Cubist  
+            "max_rules",     # Cubist
+            "trees",         # Random Forest, XGBoost, LightGBM
+            "min_n",         # Random Forest
+            "tree_depth",    # XGBoost, LightGBM
+            "hidden_units",  # MLP Neural Network
+            "epochs",        # MLP Neural Network
+            "num_terms",     # MARS
+            "prod_degree"    # MARS
+          )
+          
+          if (param_name %in% integer_params) {
+            # For integer parameters, use integer steps
+            range_vals <- unique(round(c(
+              max(1, best_value - 2),
+              max(1, best_value - 1),
+              best_value,
+              best_value + 1,
+              best_value + 2
+            )))
+          } else if (param_name == "mtry") {
+            # mtry needs special handling
+            range_vals <- unique(round(c(
+              max(1, best_value * 0.8),
+              max(1, best_value * 0.9),
+              best_value,
+              best_value * 1.1,
+              best_value * 1.2
+            )))
+          } else if (param_name == "mixture") {
+            # mixture parameter must be between 0 and 1
+            range_vals <- c(
+              max(0, best_value * 0.8),
+              max(0, best_value * 0.9),
+              best_value,
+              min(1, best_value * 1.1),
+              min(1, best_value * 1.2)
+            )
+          } else {
+            # For continuous parameters
+            range_vals <- c(
+              best_value * 0.8,
+              best_value * 0.9,
+              best_value,
+              best_value * 1.1,
+              best_value * 1.2
+            )
+          }
+          grid_list[[param_name]] <- range_vals
+        } else {
+          # For non-numeric parameters, just use the best value
+          grid_list[[param_name]] <- best_value
+        }
+      }
+      
+      # Create the grid
+      initial_grid <- expand.grid(grid_list, stringsAsFactors = FALSE)
+      # Limit to reasonable size (max 25 combinations)
+      if (nrow(initial_grid) > 25) {
+        initial_grid <- initial_grid[sample(nrow(initial_grid), 25), ]
+      }
+    }
+    
+    # Run initial grid search if we have a grid
+    initial_results <- NULL
+    
+    if (!is.null(initial_grid) && nrow(initial_grid) > 0) {
+      if (verbose) {
+        cli::cli_alert_info("Running initial grid search with {nrow(initial_grid)} points")
+      }
+      
+      initial_results <- safely_execute(
+        expr = {
+          tune::tune_grid(
+            object = workflow,
+            resamples = cv_resamples,
+            grid = initial_grid,
+            metrics = yardstick::metric_set(rrmse, yardstick::rsq, yardstick::rmse, ccc, rpd, yardstick::mae),
+            control = tune::control_grid(
+              save_pred = FALSE,
+              save_workflow = FALSE,
+              verbose = FALSE,
+              allow_par = parallel_cv
+            )
+          )
+        },
+        default_value = NULL,
+        error_message = glue::glue("▶ finalize_top_workflows: Initial grid search failed for model {i}")
+      )
+    }
+    
+    if (verbose) {
+      cli::cli_text("├─ Bayesian optimization: Running {bayesian_iter} iterations...")
+    }
+    
+    # Run Bayesian optimization using initial grid results or starting fresh
     bayes_result <- safely_execute(
       expr = {
         tune::tune_bayes(
           object = workflow,
           resamples = cv_resamples,
-          initial = best_params,  # Use saved params as starting point
+          initial = if (!is.null(initial_results$result)) initial_results$result else 5,  # Use grid or 5 random points
           iter = bayesian_iter,
-          metrics = yardstick::metric_set(rrmse, rsq, rmse, ccc, rpd, mae),
+          metrics = yardstick::metric_set(rrmse, yardstick::rsq, yardstick::rmse, ccc, rpd, yardstick::mae),
           param_info = param_set,
           control = tune::control_bayes(
             save_pred = FALSE,
@@ -472,10 +588,15 @@ finalize_top_workflows <- function(evaluation_results,
     )
     
     if (is.null(bayes_result$result)) {
-      cli::cli_alert_danger("Bayesian optimization failed for model {i}")
-      cli::cli_alert_warning("Falling back to original parameters from evaluation")
-      # Fallback: just use the original best params
-      final_best_params <- best_params
+      # If Bayes failed, try to use initial grid results
+      if (!is.null(initial_results$result)) {
+        cli::cli_alert_warning("Bayesian optimization failed, using initial grid results")
+        final_best_params <- tune::select_best(initial_results$result, metric = metric)
+      } else {
+        cli::cli_alert_danger("Both Bayesian and grid search failed for model {i}")
+        cli::cli_alert_warning("Falling back to original parameters from evaluation")
+        final_best_params <- best_params
+      }
     } else {
       # Get the best parameters from additional tuning
       bayes_tuning <- bayes_result$result
@@ -494,7 +615,8 @@ finalize_top_workflows <- function(evaluation_results,
     ## Step 3.7: Generate CV predictions for stacking -------------------------
     
     if (verbose) {
-      cli::cli_alert_info("Generating CV predictions for stacking")
+      cli::cli_text("│  └─ Bayesian complete: ✓")
+      cli::cli_text("├─ Generating CV predictions for stacking...")
     }
     
     # Fit on CV folds to generate predictions for stacking
@@ -503,7 +625,7 @@ finalize_top_workflows <- function(evaluation_results,
         tune::fit_resamples(
           finalized_workflow,
           resamples = cv_resamples,
-          metrics = yardstick::metric_set(rrmse, rsq, rmse, ccc, rpd, mae),
+          metrics = yardstick::metric_set(rrmse, yardstick::rsq, yardstick::rmse, ccc, rpd, yardstick::mae),
           control = tune::control_resamples(
             save_pred = TRUE,      # Critical for stacking!
             save_workflow = TRUE,  # Need this for ensemble
@@ -535,19 +657,15 @@ finalize_top_workflows <- function(evaluation_results,
       workflow = finalized_workflow,
       cv_results = cv_fit,  # Contains the CV predictions for stacking
       final_params = final_best_params,
-      original_metric = current_model[[metric]],
       status = "success"
     )
     
     if (verbose) {
-      cli::cli_alert_success("Model {i} finalized with CV predictions")
-    }
-    
-    # Track timing
-    model_duration <- as.numeric(difftime(Sys.time(), model_start_time, units = "secs"))
-    
-    if (verbose) {
-      cli::cli_alert_info("Total processing time: {round(model_duration, 1)} seconds")
+      cli::cli_text("│  └─ CV predictions complete: ✓")
+      cli::cli_text("")
+      cli::cli_text("{.strong Results:}")
+      cli::cli_text("└─ Status: {cli::col_green('✓ FINALIZED')} | Time: {round(as.numeric(difftime(Sys.time(), model_start_time, units = 'secs')), 1)}s")
+      cli::cli_rule()
     }
     
     # Clean up memory after each model
@@ -556,11 +674,6 @@ finalize_top_workflows <- function(evaluation_results,
     if (exists("bayes_tuning")) rm(bayes_tuning)
     if (exists("cv_fit")) rm(cv_fit)
     gc(verbose = FALSE, full = TRUE)
-  }
-  
-  # Close progress bar
-  if (verbose) {
-    cli::cli_progress_done()
   }
   
   ## Step 4: Save and Return Results ------------------------------------------
@@ -573,16 +686,28 @@ finalize_top_workflows <- function(evaluation_results,
   }
   
   # Create summary tibble for return (in memory for immediate use)
+  # Extract CV predictions and metrics for ensemble compatibility
   results_tibble <- tibble::tibble(
-    workflow_id     = purrr::map_chr(successful_results, "workflow_id"),
+    wflow_id        = purrr::map_chr(successful_results, "workflow_id"),  # Changed to wflow_id
     workflow        = purrr::map(successful_results, "workflow"),
-    cv_results      = purrr::map(successful_results, "cv_results"),
-    final_params    = purrr::map(successful_results, "final_params"),
-    original_metric = purrr::map_dbl(successful_results, "original_metric")
-  )
+    cv_predictions  = purrr::map(successful_results, "cv_results"),       # Changed to cv_predictions
+    cv_results      = purrr::map(successful_results, "cv_results"),       # Keep for backward compat
+    final_params    = purrr::map(successful_results, "final_params")
+  ) %>%
+    # Add metrics column extracted from cv_results
+    dplyr::mutate(
+      metrics = purrr::map(cv_predictions, ~ tune::collect_metrics(.x))
+    )
+  
+  # Create finalized subdirectory
+  finalized_dir <- file.path(output_dir, "finalized")
+  
+  if (!fs::dir_exists(finalized_dir)) {
+    fs::dir_create(finalized_dir)
+  }
   
   # Also save to disk for persistence/sharing
-  save_path <- file.path(output_dir, 
+  save_path <- file.path(finalized_dir, 
                         paste0("finalized_models_", 
                                format(Sys.time(), "%Y%m%d_%H%M%S"), 
                                ".qs"))
@@ -602,29 +727,34 @@ finalize_top_workflows <- function(evaluation_results,
     ) %>%
     tidyr::unnest(cv_metrics) %>%
     dplyr::filter(.metric == metric) %>%
-    dplyr::select(workflow_id, mean, std_err)
+    dplyr::select(wflow_id, mean, std_err)
   
   # Final summary
   total_time <- difftime(Sys.time(), start_time, units = "mins")
   
   if (verbose) {
+    cli::cli_text("")
     cli::cli_h1("Finalization Complete")
-    cli::cli_alert_success("{nrow(results_tibble)} models successfully finalized")
-    cli::cli_alert_success("Total time: {round(total_time, 1)} minutes")
-    cli::cli_alert_success("Average per model: {round(total_time/nrow(results_tibble), 1)} minutes")
+    
+    cli::cli_text("{.strong Summary:}")
+    cli::cli_text("├─ Models finalized: {nrow(results_tibble)}")
+    cli::cli_text("├─ Total time: {round(total_time, 1)} minutes")
+    cli::cli_text("└─ Average per model: {round(total_time/nrow(results_tibble), 1)} minutes")
+    cli::cli_text("")
     
     # Show final performance
-    cli::cli_h2("Final Performance ({metric})")
+    cli::cli_text("{.strong Final Performance ({metric}):}")
     best_idx <- if (lower_is_better) which.min(final_metrics$mean) else which.max(final_metrics$mean)
     worst_idx <- if (lower_is_better) which.max(final_metrics$mean) else which.min(final_metrics$mean)
     
-    cli::cli_alert_info("Best model: {final_metrics$workflow_id[best_idx]}")
-    cli::cli_alert_info("  • {metric}: {round(final_metrics$mean[best_idx], 3)} ± {round(final_metrics$std_err[best_idx], 3)}")
-    cli::cli_alert_info("Worst model: {final_metrics$workflow_id[worst_idx]}")  
-    cli::cli_alert_info("  • {metric}: {round(final_metrics$mean[worst_idx], 3)} ± {round(final_metrics$std_err[worst_idx], 3)}")
+    cli::cli_text("├─ Best: {final_metrics$wflow_id[best_idx]}")
+    cli::cli_text("│  └─ {metric}: {round(final_metrics$mean[best_idx], 3)} ± {round(final_metrics$std_err[best_idx], 3)}")
+    cli::cli_text("└─ Worst: {final_metrics$wflow_id[worst_idx]}")
+    cli::cli_text("   └─ {metric}: {round(final_metrics$mean[worst_idx], 3)} ± {round(final_metrics$std_err[worst_idx], 3)}")
+    cli::cli_text("")
     
     cli::cli_alert_success("Saved to: {save_path}")
-    cli::cli_alert_info("Ready for ensemble stacking!")
+    cli::cli_alert_success("Ready for ensemble stacking!")
   }
   
   # Final cleanup

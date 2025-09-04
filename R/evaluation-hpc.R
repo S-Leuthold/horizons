@@ -182,6 +182,13 @@ evaluate_models_hpc <- function(config,
   
   ## Step 5: Create Data Split -------------------------------------------------
   
+  # Rename response variable to "Response" for consistency throughout pipeline
+  input_data <- input_data %>%
+    dplyr::rename(Response = !!rlang::sym(variable))
+  
+  # Update variable name for downstream use
+  variable <- "Response"
+  
   # Create train/test split (same for all models)
   set.seed(seed)
   data_split <- rsample::initial_split(

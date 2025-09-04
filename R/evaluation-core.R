@@ -32,7 +32,7 @@
 #' @param cv_folds Integer. Number of cross-validation folds for hyperparameter tuning.
 #'   Minimum 2, recommended 5-10. Uses stratified sampling on response. Default: 10.
 #' @param parallel_cv Logical. Enable parallel processing for cross-validation folds.
-#'   Uses doMC on Unix/macOS, doParallel on Windows. Default: TRUE.
+#'   Uses future package for cross-platform parallel processing. Default: TRUE.
 #' @param n_cv_cores Integer or NULL. Number of cores for parallel CV.
 #'   NULL auto-detects (total cores - 2). Ignored if parallel_cv = FALSE.
 #' @param prune_models Logical. Skip Bayesian optimization for models that don't beat
@@ -103,10 +103,10 @@
 #'   feature_selection = "pca",
 #'   covariates = list(c("clay", "sand"))
 #' )
-#' 
+#'
 #' # Create train/test split
 #' split <- rsample::initial_split(spectral_data, prop = 0.8)
-#' 
+#'
 #' # Evaluate single model
 #' result <- evaluate_single_model_local(
 #'   config_row = config[1, ],
@@ -119,163 +119,212 @@
 #' )
 #' }
 #'
+#' @importFrom yardstick mae rmse rsq
 #' @keywords internal
+
 evaluate_configuration <- function(config_row,
-                                        input_data,
-                                        data_split,
-                                        config_id,
-                                        covariate_data = NULL,
-                                        variable,
-                                        output_dir     = NULL,
-                                        grid_size      = 10,
-                                        bayesian_iter  = 15,
-                                        cv_folds       = 5,
-                                        parallel_cv    = TRUE,
-                                        n_cv_cores     = NULL,
-                                        prune_models   = FALSE,
-                                        prune_threshold = 0.9,
-                                        seed           = 123) {
-  
-  ## Setup ---------------------------------------------------------------------
-  
+                                   input_data,
+                                   data_split,
+                                   config_id,
+                                   covariate_data  = NULL,
+                                   variable,
+                                   output_dir      = NULL,
+                                   grid_size       = 10,
+                                   bayesian_iter   = 15,
+                                   cv_folds        = 10,
+                                   parallel_cv     = TRUE,
+                                   n_cv_cores      = NULL,
+                                   prune_models    = FALSE,
+                                   prune_threshold = 0.9,
+                                   seed            = 307) {
+
+  ## ---------------------------------------------------------------------------
+  ## Step 1: Setup
+  ## ---------------------------------------------------------------------------
+
   start_time <- Sys.time()
-  
-  ## Input Validation ----------------------------------------------------------
-  
+
+  ## ---------------------------------------------------------------------------
+  ## Step 2: Input Validation
+  ## ---------------------------------------------------------------------------
+
   if (!is.data.frame(config_row) || nrow(config_row) != 1) {
-    cli::cli_abort("▶ evaluate_single_model_local: config_row must be a single-row data frame")
+
+    cli::cli_abort("config_row must be a single-row data frame")
+
   }
-  
+
   if (!inherits(data_split, "rsplit")) {
-    cli::cli_abort("▶ evaluate_single_model_local: data_split must be an rsplit object from rsample")
+
+    cli::cli_abort("data_split must be an rsplit object from rsample")
+
   }
-  
+
   if (!is.character(variable) || length(variable) != 1) {
-    cli::cli_abort("▶ evaluate_single_model_local: variable must be a single character string")
+
+    cli::cli_abort("variable must be a single character string")
+
   }
-  
+
   if (!variable %in% names(input_data)) {
-    cli::cli_abort("▶ evaluate_single_model_local: variable '{variable}' not found in input_data")
+
+    cli::cli_abort("variable '{variable}' not found in input_data")
+
   }
-  
+
   if (!is.numeric(cv_folds) || cv_folds < 2) {
-    cli::cli_abort("▶ evaluate_single_model_local: cv_folds must be at least 2, got {cv_folds}")
+
+    cli::cli_abort("cv_folds must be at least 2, got {cv_folds}")
+
   }
-  
+
   if (!is.numeric(grid_size) || grid_size <= 0) {
-    cli::cli_abort("▶ evaluate_single_model_local: grid_size must be positive, got {grid_size}")
+
+    cli::cli_abort("grid_size must be positive, got {grid_size}")
+
   }
-  
+
   if (!is.numeric(bayesian_iter) || bayesian_iter < 0) {
-    cli::cli_abort("▶ evaluate_single_model_local: bayesian_iter must be non-negative, got {bayesian_iter}")
+
+    cli::cli_abort("bayesian_iter must be non-negative, got {bayesian_iter}")
+
   }
-  
+
   if (!is.numeric(prune_threshold) || prune_threshold <= 0 || prune_threshold > 1) {
-    cli::cli_abort("▶ evaluate_single_model_local: prune_threshold must be between 0 and 1, got {prune_threshold}")
+
+    cli::cli_abort("prune_threshold must be between 0 and 1, got {prune_threshold}")
+
   }
-  
+
   if (!is.null(n_cv_cores) && (!is.numeric(n_cv_cores) || n_cv_cores <= 0)) {
-    cli::cli_abort("▶ evaluate_single_model_local: n_cv_cores must be positive if specified, got {n_cv_cores}")
+
+    cli::cli_abort("n_cv_cores must be positive if specified, got {n_cv_cores}")
+
   }
-  
-  ## Extract Configuration -----------------------------------------------------
-  
-  config_row %>%
-    dplyr::mutate(
-      model             = as.character(model),
-      transformation    = as.character(transformation),
-      preprocessing     = as.character(preprocessing),
-      feature_selection = as.character(feature_selection %||% "none"),
-      covariates        = covariates %||% NULL  # NULL = no covariates
-    ) ->
+
+  ## ---------------------------------------------------------------------------
+  ## Step 3: Extract Configuration
+  ## ---------------------------------------------------------------------------
+
+  ## -------------------------------------------------------------------------
+  ## Step 3.1: Extract and Clean Configuration
+  ## -------------------------------------------------------------------------
+
+  list(model             = as.character(config_row$model),
+       transformation    = as.character(config_row$transformation),
+       preprocessing     = as.character(config_row$preprocessing),
+       feature_selection = as.character(config_row$feature_selection)) ->
   config_clean
-  
-  # Warn if using defaults
-  if (is.null(config_row$feature_selection)) {
-    cli::cli_alert_warning("▶ Model {config_id}: No feature_selection specified, using 'none'")
+
+  ## -------------------------------------------------------------------------
+  ## Step 3.2: Handle Covariates from List Column
+  ## -------------------------------------------------------------------------
+
+  if ("covariates" %in% names(config_row)) {
+
+    cov_value <- config_row$covariates[[1]]
+
+    if (is.null(cov_value) || length(cov_value) == 0) {
+
+      config_clean$covariates <- NULL
+
+    } else {
+
+      config_clean$covariates <- cov_value
+
+    }
+
+  } else {
+
+    config_clean$covariates <- NULL
+
   }
-  
-  # Validate against package constants (assumed to exist)
+
+  ## -------------------------------------------------------------------------
+  ## Step 3.3: Validate Against Package Constants
+  ## -------------------------------------------------------------------------
+
   if (!config_clean$model %in% VALID_MODELS) {
-    return(
-      create_failed_result(
-        config_id     = config_id,
-        config_clean  = config_clean,
-        error_message = glue::glue("Invalid model type '{config_clean$model}'")
-      )
-    )
+
+    return(create_failed_result(config_id     = config_id,
+                                config_clean  = config_clean,
+                                error_message = glue::glue("Invalid model type '{config_clean$model}'")))
+
   }
-  
+
   if (!config_clean$transformation %in% VALID_TRANSFORMATIONS) {
-    return(
-      create_failed_result(
-        config_id     = config_id,
-        config_clean  = config_clean,
-        error_message = glue::glue("Invalid transformation '{config_clean$transformation}'")
-      )
-    )
-  }
-  
-  ## Create Workflow ID --------------------------------------------------------
-  
-  workflow_id <- clean_workflow_id(
-    model             = config_clean$model,
-    transformation    = config_clean$transformation,
-    preprocessing     = config_clean$preprocessing,
-    feature_selection = config_clean$feature_selection,
-    covariates        = config_clean$covariates
-  )
-  
-  ## Build Recipe --------------------------------------------------------------
-  
-  recipe_result <- safely_execute(
+
+    return(create_failed_result(config_id     = config_id,
+                                config_clean  = config_clean,
+                                error_message = glue::glue("Invalid transformation '{config_clean$transformation}'")))
+
+    }
+
+  ## ---------------------------------------------------------------------------
+  ## Step 4: Create Workflow ID
+  ## ---------------------------------------------------------------------------
+
+  clean_workflow_id(model             = config_clean$model,
+                    transformation    = config_clean$transformation,
+                    preprocessing     = config_clean$preprocessing,
+                    feature_selection = config_clean$feature_selection,
+                    covariates        = config_clean$covariates) -> workflow_id
+
+  ## ---------------------------------------------------------------------------
+  ## Step 5: Build Recipe
+  ## ---------------------------------------------------------------------------
+
+  safely_execute(
     expr = {
-      build_recipe(
-        input_data               = input_data,  # Full data for preprocessing
-        spectral_transformation  = config_clean$preprocessing,
-        response_transformation  = config_clean$transformation,
-        feature_selection_method = config_clean$feature_selection,
-        covariate_selection      = config_clean$covariates,  # NULL = no covariates
-        covariate_data          = covariate_data
-      )
+      build_recipe(input_data               = input_data,
+                   spectral_transformation  = config_clean$preprocessing,
+                   response_transformation  = config_clean$transformation,
+                   feature_selection_method = config_clean$feature_selection,
+                   covariate_selection      = config_clean$covariates,
+                   covariate_data           = covariate_data)
     },
     default_value = NULL,
-    error_message = glue::glue("▶ evaluate_single_model_local: Failed to build recipe for {workflow_id}")
-  )
-  
+    error_message = glue::glue("Failed to build recipe for {workflow_id}")) -> recipe_result
+
+  ## ---------------------------------------------------------------------------
+
   if (is.null(recipe_result$result)) {
+
     actual_error <- recipe_result$error$message %||% "Unknown error"
-    
-    return(
-      create_failed_result(
-        config_id     = config_id,
-        config_clean  = config_clean,
-        error_message = glue::glue("Recipe building failed: {actual_error}"),
-        workflow_id   = workflow_id
-      )
-    )
+
+    return(create_failed_result(config_id     = config_id,
+                                config_clean  = config_clean,
+                                error_message = glue::glue("Recipe building failed: {actual_error}"),
+                                workflow_id   = workflow_id))
+
   }
-  
+
   recipe <- recipe_result$result
-  
-  ## Extract Training Data -----------------------------------------------------
-  
+
+  ## ---------------------------------------------------------------------------
+  ## Step 6: Extract Training Data
+  ## ---------------------------------------------------------------------------
+
   train_data <- rsample::training(data_split)
-  test_data <- rsample::testing(data_split)
-  
-  ## Define Model Specification ------------------------------------------------
-  
-  model_spec_result <- safely_execute(
+  test_data  <- rsample::testing(data_split)
+
+  ## ---------------------------------------------------------------------------
+  ## Step 7: Define Model Specification
+  ## ---------------------------------------------------------------------------
+
+  safely_execute(
     expr = {
       define_model_specifications(config_clean$model)
     },
     default_value = NULL,
-    error_message = glue::glue("▶ evaluate_single_model_local: Failed to define model spec for {config_clean$model}")
-  )
-  
+    error_message = glue::glue("Failed to define model spec for {config_clean$model}")) -> model_spec_result
+
+  ## ---------------------------------------------------------------------------
+
   if (is.null(model_spec_result$result)) {
+
     actual_error <- model_spec_result$error$message %||% "Unknown error"
-    
+
     return(
       create_failed_result(
         config_id     = config_id,
@@ -284,54 +333,56 @@ evaluate_configuration <- function(config_row,
         workflow_id   = workflow_id
       )
     )
+
   }
-  
+
   model_spec <- model_spec_result$result
-  
-  ## Create Workflow -----------------------------------------------------------
-  
-  wflow_result <- safely_execute(
+
+  ## ---------------------------------------------------------------------------
+  ## Step 8: Create Workflow
+  ## ---------------------------------------------------------------------------
+
+  safely_execute(
     expr = {
       workflows::workflow() %>%
         workflows::add_recipe(recipe) %>%
         workflows::add_model(model_spec)
     },
     default_value = NULL,
-    error_message = glue::glue("▶ evaluate_single_model_local: Failed to create workflow for {workflow_id}")
-  )
-  
+    error_message = glue::glue("Failed to create workflow for {workflow_id}")) -> wflow_result
+
   if (is.null(wflow_result$result)) {
+
     actual_error <- wflow_result$error$message %||% "Unknown error"
-    
-    return(
-      create_failed_result(
-        config_id     = config_id,
-        config_clean  = config_clean,
-        error_message = glue::glue("Workflow creation failed: {actual_error}"),
-        workflow_id   = workflow_id
-      )
-    )
-  }
-  
+
+    return(create_failed_result(config_id     = config_id,
+                                config_clean  = config_clean,
+                                error_message = glue::glue("Workflow creation failed: {actual_error}"),
+                                workflow_id   = workflow_id))
+
+    }
+
   wflow <- wflow_result$result
-  
-  ## Create CV Splits from Training Data ---------------------------------------
-  
+
+  ## ---------------------------------------------------------------------------
+  ## Step 9: Create CV Splits from Training Data
+  ## ---------------------------------------------------------------------------
+
   # Standard k-fold CV with stratification on response variable
   # Future enhancement: Support leave-one-site-out or spatial CV strategies
-  cv_splits_result <- safely_execute(
+
+  safely_execute(
     expr = {
-      # Try stratified CV first, fall back to random if it fails
       tryCatch(
         {
           rsample::vfold_cv(
             data   = train_data,
             v      = cv_folds,
-            strata = !!variable  # Stratify on response for balanced folds
+            strata = !!variable
           )
         },
         error = function(e) {
-          cli::cli_alert_warning("▶ Stratification failed, using random CV splits: {conditionMessage(e)}")
+          cli::cli_alert_warning("Stratification failed, using random CV splits: {conditionMessage(e)}")
           rsample::vfold_cv(
             data = train_data,
             v    = cv_folds
@@ -340,106 +391,74 @@ evaluate_configuration <- function(config_row,
       )
     },
     default_value = NULL,
-    error_message = glue::glue("▶ evaluate_single_model_local: Failed to create {cv_folds}-fold CV splits")
-  )
-  
+    error_message = glue::glue("Failed to create {cv_folds}-fold CV splits")) -> cv_splits_result
+
   if (is.null(cv_splits_result$result)) {
+
     actual_error <- cv_splits_result$error$message %||% "Unknown error"
-    
-    return(
-      create_failed_result(
-        config_id     = config_id,
-        config_clean  = config_clean,
-        error_message = glue::glue("CV split creation failed: {actual_error}"),
-        workflow_id   = workflow_id
-      )
-    )
+
+    return(create_failed_result(config_id     = config_id,
+                                config_clean  = config_clean,
+                                error_message = glue::glue("CV split creation failed: {actual_error}"),
+                                workflow_id   = workflow_id))
+
   }
-  
+
   cv_splits <- cv_splits_result$result
-  
-  ## Step 7: Setup Parallel Backend (if requested) ----------------------------
-  
-  cluster_object <- NULL  # Track cluster for cleanup
-  
-  if (parallel_cv) {
-    # Detect cores if not specified
-    if (is.null(n_cv_cores)) {
-      n_cv_cores <- max(1, parallel::detectCores() - DEFAULT_CORE_BUFFER)
-    }
-    
-    # Ensure cores request is reasonable
-    n_cv_cores <- min(n_cv_cores, parallel::detectCores())
-    
-    # OS-specific backend registration with proper checks
-    parallel_success <- FALSE
-    
-    if (Sys.info()["sysname"] == "Darwin" || .Platform$OS.type == "unix") {
-      # macOS and Linux - use doMC if available
-      if (requireNamespace("doMC", quietly = TRUE)) {
-        tryCatch({
-          doMC::registerDoMC(cores = n_cv_cores)
-          parallel_success <- TRUE
-          cli::cli_alert_info("▶ Parallel backend: doMC with {n_cv_cores} cores")
-        }, error = function(e) {
-          cli::cli_alert_warning("doMC registration failed: {e$message}")
-        })
-      } else {
-        cli::cli_alert_warning("doMC package not available")
-      }
-      
-      # Fallback to doParallel if doMC failed
-      if (!parallel_success && requireNamespace("doParallel", quietly = TRUE)) {
-        tryCatch({
-          cluster_object <- parallel::makeCluster(n_cv_cores, type = "FORK")
-          doParallel::registerDoParallel(cluster_object)
-          parallel_success <- TRUE
-          cli::cli_alert_info("▶ Parallel backend: doParallel (FORK) with {n_cv_cores} cores")
-        }, error = function(e) {
-          cli::cli_alert_warning("doParallel registration failed: {e$message}")
-        })
-      }
-    } else {  
-      # Windows - use doParallel with PSOCK cluster
-      if (requireNamespace("doParallel", quietly = TRUE)) {
-        tryCatch({
-          cluster_object <- parallel::makeCluster(n_cv_cores, type = "PSOCK")
-          doParallel::registerDoParallel(cluster_object)
-          parallel_success <- TRUE
-          cli::cli_alert_info("▶ Parallel backend: doParallel (PSOCK) with {n_cv_cores} cores")
-        }, error = function(e) {
-          cli::cli_alert_warning("doParallel registration failed: {e$message}")
-        })
-      }
-    }
-    
-    # Fall back to sequential if parallel setup failed
-    if (!parallel_success) {
-      cli::cli_alert_warning("Parallel setup failed, falling back to sequential processing")
-      foreach::registerDoSEQ()
-      parallel_cv <- FALSE  # Update flag to reflect actual state
-    }
-    
-    # Setup cleanup for any cluster objects
-    if (!is.null(cluster_object)) {
-      on.exit({
-        try(parallel::stopCluster(cluster_object), silent = TRUE)
-        try(foreach::registerDoSEQ(), silent = TRUE)
-      }, add = TRUE)
-    }
+
+  ## ---------------------------------------------------------------------------
+  ## Step 10: Setup Parallel Backend (if requested)
+  ## ---------------------------------------------------------------------------
+
+  if (parallel_cv && !is.null(n_cv_cores) && n_cv_cores > 1) {
+
+    # Store original plan to restore on exit
+    old_plan <- future::plan()
+    on.exit(future::plan(old_plan), add = TRUE)
+
+    # Set up parallel backend with specified workers
+    future::plan(future::multisession, workers = n_cv_cores)
+    cli::cli_text("{.strong Processing Steps:}")
+    cli::cli_text("├─ Cross-validation: {cv_folds}-fold parallel ({n_cv_cores} workers)")
+
   } else {
-    foreach::registerDoSEQ()
-    cli::cli_alert_info("▶ Sequential processing (no parallelization)")
+
+    # Sequential processing
+    cli::cli_text("{.strong Processing Steps:}")
+    cli::cli_text("├─ Cross-validation: {cv_folds}-fold sequential")
+
   }
-  
-  ## Step 8a: Grid Search ------------------------------------------------------
-  
+
+  ## ---------------------------------------------------------------------------
+  ## Step 11: Grid Search
+  ## ---------------------------------------------------------------------------
+
+  ## -------------------------------------------------------------------------
+  ## Step 11.1: Generate Latin Hypercube Grid
+  ## -------------------------------------------------------------------------
+
   # Generate Latin hypercube grid for better parameter space coverage
-  grid_result <- safely_execute(
+  grid_start_time <- Sys.time()
+  cli::cli_text("├─ Grid search: Generating Latin hypercube design...")
+
+  safely_execute(
     expr = {
       # Extract parameter set from workflow
       param_set <- workflows::extract_parameter_set_dials(wflow)
       
+      # Finalize any unknown parameters (especially mtry for Random Forest)
+      if (any(param_set$name == "mtry")) {
+        # Prepare data for finalization (following main branch approach)
+        recipe %>%
+          recipes::prep() %>%
+          recipes::bake(new_data = NULL) %>%
+          dplyr::select(-Response) -> eval_data
+        
+        # Finalize parameter set with processed data
+        param_set <- param_set %>%
+          dials::finalize(eval_data)
+      }
+
       # Generate Latin hypercube design
       dials::grid_latin_hypercube(
         param_set,
@@ -447,27 +466,37 @@ evaluate_configuration <- function(config_row,
       )
     },
     default_value = NULL,
-    error_message = glue::glue("▶ evaluate_single_model_local: Failed to generate parameter grid")
-  )
-  
+    error_message = glue::glue("Failed to generate parameter grid")
+  ) ->
+  grid_result
+
   if (is.null(grid_result$result)) {
+
     # Fall back to auto-grid if Latin hypercube fails
-    cli::cli_alert_warning("▶ Latin hypercube failed, using auto-grid")
+    cli::cli_alert_warning("Latin hypercube failed, using auto-grid")
     grid <- grid_size  # Let tune auto-generate
+
   } else {
+
     grid <- grid_result$result
+
   }
-  
+
+  ## -------------------------------------------------------------------------
+  ## Step 11.2: Run Grid Search
+  ## -------------------------------------------------------------------------
+
   # Run grid search with RRMSE as primary metric
+
   grid_start_time <- Sys.time()
-  
-  grid_tune_result <- safely_execute(
+
+  safely_execute(
     expr = {
       tune::tune_grid(
         object    = wflow,
         resamples = cv_splits,
         grid      = grid,
-        metrics   = yardstick::metric_set(rrmse, rmse, rsq, mae, rpd, ccc),
+        metrics   = yardstick::metric_set(rrmse, yardstick::rmse, yardstick::rsq, yardstick::mae, rpd, ccc),
         control   = tune::control_grid(
           save_pred     = FALSE,      # Save memory
           save_workflow = FALSE,      # Save memory
@@ -479,12 +508,14 @@ evaluate_configuration <- function(config_row,
       )
     },
     default_value = NULL,
-    error_message = glue::glue("▶ evaluate_single_model_local: Grid search failed for {workflow_id}")
-  )
-  
+    error_message = glue::glue("Grid search failed for {workflow_id}")
+  ) ->
+  grid_tune_result
+
   if (is.null(grid_tune_result$result)) {
+
     actual_error <- grid_tune_result$error$message %||% "Unknown error"
-    
+
     return(
       create_failed_result(
         config_id     = config_id,
@@ -493,63 +524,98 @@ evaluate_configuration <- function(config_row,
         workflow_id   = workflow_id
       )
     )
+
   }
-  
+
   grid_results <- grid_tune_result$result
   grid_seconds <- as.numeric(difftime(Sys.time(), grid_start_time, units = "secs"))
   
+  if (!is.null(grid_results)) {
+    cli::cli_text("│  └─ Grid search complete: {round(grid_seconds, 1)}s")
+  }
+
   # Aggressive memory cleanup after grid search
   invisible(gc(verbose = FALSE, full = TRUE))
-  
-  ## Step 8b: Prune Grid Results (Optional) -----------------------------------
-  
+
+  ## ---------------------------------------------------------------------------
+  ## Step 12: Prune Grid Results (Optional)
+  ## ---------------------------------------------------------------------------
+
   skip_bayesian <- FALSE
-  
+
   if (prune_models) {
-    # Calculate baseline RRMSE (if we always predicted the mean)
+
     baseline_rmse <- sd(train_data[[variable]], na.rm = TRUE)
     baseline_mean <- mean(train_data[[variable]], na.rm = TRUE)
-    
-    # Check for near-zero mean to avoid division issues
+
+
     if (abs(baseline_mean) < .Machine$double.eps) {
-      cli::cli_alert_warning("▶ Response mean too close to zero, skipping pruning")
+
+      cli::cli_alert_warning("Response mean too close to zero, skipping pruning")
       skip_bayesian <- FALSE
+
     } else {
+
       baseline_rrmse <- (baseline_rmse / abs(baseline_mean)) * 100
-    
-    # Extract best RRMSE from grid search
-    best_rrmse <- tune::collect_metrics(grid_results) %>%
-      dplyr::filter(.metric == "rrmse") %>%
-      dplyr::summarise(min_rrmse = min(mean, na.rm = TRUE)) %>%
-      dplyr::pull(min_rrmse)
-    
-      # Check if model beats baseline by required margin
+
+
+      tune::collect_metrics(grid_results) %>%
+        dplyr::filter(.metric == "rrmse") %>%
+        dplyr::summarise(min_rrmse = min(mean, na.rm = TRUE)) %>%
+        dplyr::pull(min_rrmse) ->
+      best_rrmse
+
+
       threshold_rrmse <- baseline_rrmse * prune_threshold
-      
+
       if (is.infinite(best_rrmse) || best_rrmse > threshold_rrmse) {
+
         skip_bayesian <- TRUE
-        cli::cli_alert_warning(
-          "▶ Skipping Bayesian: RRMSE ({round(best_rrmse, 1)}%) doesn't beat baseline ({round(baseline_rrmse, 1)}%) * {prune_threshold}"
-        )
+        cli::cli_text("├─ Pruning check: RRMSE {round(best_rrmse, 1)}% > {round(threshold_rrmse, 1)}% threshold")
+        cli::cli_text("│  └─ {.emph Skipping Bayesian optimization}")
+
       }
+
     }
+
   }
-  
-  ## Step 8c: Bayesian Optimization -------------------------------------------
-  
+
+  ## ---------------------------------------------------------------------------
+  ## Step 13: Bayesian Optimization
+  ## ---------------------------------------------------------------------------
+
   bayes_seconds <- 0
-  
+
   if (!skip_bayesian && bayesian_iter > 0) {
+
     bayes_start_time <- Sys.time()
-    
-    bayes_tune_result <- safely_execute(
+    cli::cli_text("├─ Bayesian optimization: Running {bayesian_iter} iterations...")
+
+    safely_execute(
       expr = {
+        # Get finalized parameter set for Bayesian optimization
+        param_set <- workflows::extract_parameter_set_dials(wflow)
+        
+        # Finalize any unknown parameters using the same logic as grid generation
+        if (any(param_set$name == "mtry")) {
+          # Prepare data for finalization (following main branch approach)
+          recipe %>%
+            recipes::prep() %>%
+            recipes::bake(new_data = NULL) %>%
+            dplyr::select(-Response) -> eval_data
+          
+          # Finalize parameter set with processed data
+          param_set <- param_set %>%
+            dials::finalize(eval_data)
+        }
+        
         tune::tune_bayes(
           object    = wflow,
           resamples = cv_splits,
           initial   = grid_results,  # Start from grid search results
           iter      = bayesian_iter,
-          metrics   = yardstick::metric_set(rrmse, rmse, rsq, mae, rpd, ccc),
+          param_info = param_set,    # Provide finalized parameter info
+          metrics   = yardstick::metric_set(rrmse, yardstick::rmse, yardstick::rsq, yardstick::mae, rpd, ccc),
           control   = tune::control_bayes(
             save_pred     = FALSE,
             save_workflow = FALSE,
@@ -561,27 +627,41 @@ evaluate_configuration <- function(config_row,
         )
       },
       default_value = NULL,
-      error_message = glue::glue("▶ evaluate_single_model_local: Bayesian optimization failed for {workflow_id}")
-    )
-    
+      error_message = glue::glue("Bayesian optimization failed for {workflow_id}")
+    ) ->
+    bayes_tune_result
+
     if (is.null(bayes_tune_result$result)) {
+
       # If Bayesian fails, keep grid results
-      cli::cli_alert_warning("▶ Bayesian optimization failed, using grid results")
+      cli::cli_alert_warning("Bayesian optimization failed, using grid results")
       final_tune_results <- grid_results
+
     } else {
+
       final_tune_results <- bayes_tune_result$result
+
     }
-    
+
     bayes_seconds <- as.numeric(difftime(Sys.time(), bayes_start_time, units = "secs"))
+    cli::cli_text("│  └─ Bayesian optimization complete: {round(bayes_seconds, 1)}s")
+
   } else {
+
     # Use grid results if Bayesian was skipped
     final_tune_results <- grid_results
+
   }
-  
-  ## Step 9: Final Model Fit ---------------------------------------------------
-  
-  # Select best hyperparameters based on RRMSE
-  best_params_result <- safely_execute(
+
+  ## ---------------------------------------------------------------------------
+  ## Step 14: Final Model Fit
+  ## ---------------------------------------------------------------------------
+
+  ## -------------------------------------------------------------------------
+  ## Step 14.1: Select Best Hyperparameters
+  ## -------------------------------------------------------------------------
+
+  safely_execute(
     expr = {
       tune::select_best(
         final_tune_results,
@@ -589,12 +669,14 @@ evaluate_configuration <- function(config_row,
       )
     },
     default_value = NULL,
-    error_message = glue::glue("▶ evaluate_single_model_local: Failed to select best parameters")
-  )
-  
+    error_message = glue::glue("Failed to select best parameters")
+  ) ->
+  best_params_result
+
   if (is.null(best_params_result$result)) {
+
     actual_error <- best_params_result$error$message %||% "Unknown error"
-    
+
     return(
       create_failed_result(
         config_id     = config_id,
@@ -603,22 +685,28 @@ evaluate_configuration <- function(config_row,
         workflow_id   = workflow_id
       )
     )
+
   }
-  
+
   best_params <- best_params_result$result
-  
-  # Finalize workflow with best parameters
-  final_wflow_result <- safely_execute(
+
+  ## -------------------------------------------------------------------------
+  ## Step 14.2: Finalize Workflow with Best Parameters
+  ## -------------------------------------------------------------------------
+
+  safely_execute(
     expr = {
       tune::finalize_workflow(wflow, best_params)
     },
     default_value = NULL,
-    error_message = glue::glue("▶ evaluate_single_model_local: Failed to finalize workflow")
-  )
-  
+    error_message = glue::glue("Failed to finalize workflow")
+  ) ->
+  final_wflow_result
+
   if (is.null(final_wflow_result$result)) {
+
     actual_error <- final_wflow_result$error$message %||% "Unknown error"
-    
+
     return(
       create_failed_result(
         config_id     = config_id,
@@ -627,28 +715,34 @@ evaluate_configuration <- function(config_row,
         workflow_id   = workflow_id
       )
     )
+
   }
-  
+
   final_wflow <- final_wflow_result$result
-  
-  ## Step 10: Test Set Evaluation ----------------------------------------------
-  
+
+  ## ---------------------------------------------------------------------------
+  ## Step 15: Test Set Evaluation
+  ## ---------------------------------------------------------------------------
+
   # Fit on full training set and evaluate on test set
-  final_fit_result <- safely_execute(
+
+  safely_execute(
     expr = {
       tune::last_fit(
         final_wflow,
         split   = data_split,
-        metrics = yardstick::metric_set(rrmse, rmse, rsq, mae, rpd, ccc)
+        metrics = yardstick::metric_set(rrmse, yardstick::rmse, yardstick::rsq, yardstick::mae, rpd, ccc)
       )
     },
     default_value = NULL,
-    error_message = glue::glue("▶ evaluate_single_model_local: Failed to fit final model")
-  )
-  
+    error_message = glue::glue("Failed to fit final model")
+  ) ->
+  final_fit_result
+
   if (is.null(final_fit_result$result)) {
+
     actual_error <- final_fit_result$error$message %||% "Unknown error"
-    
+
     return(
       create_failed_result(
         config_id     = config_id,
@@ -657,47 +751,52 @@ evaluate_configuration <- function(config_row,
         workflow_id   = workflow_id
       )
     )
+
   }
-  
+
   final_fit <- final_fit_result$result
-  
-  ## Step 11: Extract Metrics and Return Results ------------------------------
-  
+
+  ## ---------------------------------------------------------------------------
+  ## Step 16: Extract Metrics and Return Results
+  ## ---------------------------------------------------------------------------
+
   # Extract test set metrics and pivot to wide format for efficiency
-  test_metrics <- tune::collect_metrics(final_fit) %>%
+
+  tune::collect_metrics(final_fit) %>%
     dplyr::select(.metric, .estimate) %>%
-    tidyr::pivot_wider(names_from = .metric, values_from = .estimate)
-  
+    tidyr::pivot_wider(names_from = .metric, values_from = .estimate) ->
+  test_metrics
+
   # Create result row
-  tibble::tibble(
-    config_id         = config_id,
-    workflow_id       = workflow_id,
-    model             = config_clean$model,
-    transformation    = config_clean$transformation,
-    preprocessing     = config_clean$preprocessing,
-    feature_selection = config_clean$feature_selection,
-    covariates        = if (!is.null(config_clean$covariates)) {
-                          paste(config_clean$covariates, collapse = "-")
-                        } else {
-                          NA_character_
-                        },
-    # Best parameters from tuning (stored as list column)
-    best_params       = list(best_params),
-    # Metrics (now accessing from wide format)
-    rsq               = test_metrics$rsq %||% NA_real_,
-    rmse              = test_metrics$rmse %||% NA_real_,
-    rrmse             = test_metrics$rrmse %||% NA_real_,
-    rpd               = test_metrics$rpd %||% NA_real_,
-    ccc               = test_metrics$ccc %||% NA_real_,
-    mae               = test_metrics$mae %||% NA_real_,
-    # Timing
-    grid_seconds      = grid_seconds,
-    bayes_seconds     = bayes_seconds,
-    total_seconds     = as.numeric(difftime(Sys.time(), start_time, units = "secs")),
-    # Status
-    status            = if (skip_bayesian) "pruned" else "success",
-    error_message     = NA_character_
-    # Note: fitted_workflow removed to prevent memory leak
-    # Use fit_final_models() function separately for model stacking
+
+  tibble::tibble(config_id         = config_id,
+                 workflow_id       = workflow_id,
+                 model             = config_clean$model,
+                 transformation    = config_clean$transformation,
+                 preprocessing     = config_clean$preprocessing,
+                 feature_selection = config_clean$feature_selection,
+                 covariates        = if (!is.null(config_clean$covariates)) {
+                                       paste(config_clean$covariates, collapse = "-")
+                                     } else {
+                                       NA_character_
+                                     },
+                 # Best parameters from tuning (stored as list column)
+                 best_params       = list(best_params),
+                 # Metrics (now accessing from wide format)
+                 rsq               = test_metrics$rsq %||% NA_real_,
+                 rmse              = test_metrics$rmse %||% NA_real_,
+                 rrmse             = test_metrics$rrmse %||% NA_real_,
+                 rpd               = test_metrics$rpd %||% NA_real_,
+                 ccc               = test_metrics$ccc %||% NA_real_,
+                 mae               = test_metrics$mae %||% NA_real_,
+                 # Timing
+                 grid_seconds      = grid_seconds,
+                 bayes_seconds     = bayes_seconds,
+                 total_seconds     = as.numeric(difftime(Sys.time(), start_time, units = "secs")),
+                 # Status
+                 status            = if (skip_bayesian) "pruned" else "success",
+                 error_message     = NA_character_
+                 # Note: fitted_workflow removed to prevent memory leak
+                 # Use fit_final_models() function separately for model stacking
   )
 }
