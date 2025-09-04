@@ -26,6 +26,7 @@ Imports:
     cluster,
     daymetr,
     dials,
+    digest,
     dplyr,
     FactoMineR,
     forcats,
@@ -105,13 +106,12 @@ Depends:
 Collate: 
     'constants.R'
     'utils_error_handling.R'
-    'covariates-climate-orchestrator.R'
+    'covariates-climate.R'
+    'covariates-cubist.R'
     'covariates-data.R'
+    'covariates-orchestrator.R'
     'covariates-similarity.R'
     'covariates-soil.R'
-    'covariates-soil-download_ossl.R'
-    'covariates-soil-evaluate_predictions.R'
-    'covariates-soil-fit_cubist_model.R'
     'evaluation-core.R'
     'evaluation-ensemble.R'
     'evaluation-finalize.R'
