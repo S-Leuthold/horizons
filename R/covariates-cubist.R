@@ -189,24 +189,36 @@ fit_cubist_model <- function(train_data,
       parallel <- FALSE
     }
 
-    # Set parallel plan with proper cleanup
+    # Set parallel plan with context-aware backend
     if (parallel && n_workers > 1) {
-      old_plan <- future::plan()
+      # Use context-aware parallel setup
+      old_plan <- safely_execute(
+        expr = setup_parallel_backend(
+          n_workers = n_workers,
+          force_backend = NULL,  # Auto-detect
+          memory_limit_gb = 2,   # 2GB for spectroscopy
+          enable_work_stealing = FALSE,  # Not needed for grid tuning
+          verbose = FALSE
+        ),
+        default_value = future::plan(),  # Fallback to current plan
+        error_message = glue::glue("Failed to set parallel plan for {covariate} tuning")
+      )$result
+      
+      # Ensure cleanup on exit
       old_mc_cores <- getOption("mc.cores", 1L)
-      old_globals_size <- getOption("future.globals.maxSize", 1000 * 1024^2)
       on.exit({
-        future::plan(old_plan)
+        restore_parallel_settings(old_plan, verbose = FALSE)
         options(mc.cores = old_mc_cores)
-        options(future.globals.maxSize = old_globals_size)
+        optimize_parallel_memory(force_gc = TRUE, verbose = FALSE)
       }, add = TRUE)
       
-      # Temporarily override mc.cores to match n_workers and increase globals limit
+      # Temporarily override mc.cores to match n_workers
       options(mc.cores = n_workers)
-      options(future.globals.maxSize = 2 * 1024^3)  # 2 GB limit for spectroscopy data
       
-      safely_execute(expr          = {future::plan(future::multisession, workers = n_workers)},
-                     default_value = NULL,
-                     error_message = glue::glue("Failed to set parallel plan for {covariate} tuning"))
+      if(verbose) {
+        backend_display <- get_backend_display()
+        cli::cli_text(format_tree_item(paste0("ℹ Using ", backend_display, " processing for ", covariate, " (", n_workers, " workers)"), level = 1, is_last = FALSE))
+      }
     } else {
       if(verbose) cli::cli_text(format_tree_item(paste0("ℹ Using sequential processing for ", covariate, " (parallel=", parallel, ", n_workers=", n_workers, ")"), level = 1, is_last = FALSE))
     }

@@ -41,7 +41,7 @@
 #'   covariates = c("clay", "ph", "oc"),
 #'   allow_par = TRUE  # Enable parallel for faster execution
 #' )
-#' 
+#'
 #' # Maximum performance: Use more samples
 #' results <- predict_soil_covariates(
 #'   input_data = my_mir_spectra,
@@ -49,7 +49,7 @@
 #'   n_similar = 30000,
 #'   allow_par = TRUE  # Enable parallel
 #' )
-#' 
+#'
 #' # Faster with fewer samples and no Bayesian optimization
 #' results <- predict_soil_covariates(
 #'   input_data = my_mir_spectra,
@@ -65,8 +65,8 @@ predict_soil_covariates <- function(input_data,
                                    covariates,
                                    n_similar = 20000,
                                    prop = 0.85,
-                                   variance_threshold = 0.85,
-                                   bayesian_iter = 3,  # Reduced from 5 for faster execution
+                                   variance_threshold = 0.985,
+                                   bayesian_iter = 10,  # Reduced from 5 for faster execution
                                    allow_par = FALSE,
                                    n_workers = NULL,
                                    refresh = FALSE,

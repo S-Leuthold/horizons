@@ -412,14 +412,31 @@ evaluate_configuration <- function(config_row,
 
   if (parallel_cv && !is.null(n_cv_cores) && n_cv_cores > 1) {
 
-    # Store original plan to restore on exit
-    old_plan <- future::plan()
-    on.exit(future::plan(old_plan), add = TRUE)
-
-    # Set up parallel backend with specified workers
-    future::plan(future::multisession, workers = n_cv_cores)
+    # Use context-aware backend selection
+    old_plan <- setup_parallel_backend(
+      n_workers = n_cv_cores,
+      force_backend = NULL,  # Auto-detect optimal backend
+      memory_limit_gb = 2,   # Limit for spectral data
+      enable_work_stealing = TRUE,  # Dynamic load balancing
+      verbose = FALSE
+    )
+    
+    # Ensure restoration on exit
+    on.exit({
+      restore_parallel_settings(old_plan, verbose = FALSE)
+      optimize_parallel_memory(force_gc = TRUE, verbose = FALSE)
+    }, add = TRUE)
+    
+    # Initialize reproducible RNG for parallel CV
+    if (!is.null(seed)) {
+      setup_parallel_rng(seed, n_cv_cores, verbose = FALSE)
+    }
+    
+    # Get actual backend used for display
+    backend_display <- get_backend_display()
+    
     cli::cli_text("{.strong Processing Steps:}")
-    cli::cli_text("├─ Cross-validation: {cv_folds}-fold parallel ({n_cv_cores} workers)")
+    cli::cli_text("├─ Cross-validation: {cv_folds}-fold parallel ({n_cv_cores} {backend_display} workers)")
 
   } else {
 

@@ -106,7 +106,9 @@ Depends:
 Collate: 
     'constants.R'
     'utils-errors.R'
+    'utils-backtransform.R'
     'utils-clustering.R'
+    'utils-parallel.R'
     'utils-reporting.R'
     'covariates-climate.R'
     'covariates-cubist.R'
