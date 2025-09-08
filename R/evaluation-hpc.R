@@ -87,16 +87,38 @@ evaluate_models_hpc <- function(config,
   ## Step 3: Set Package Thread Controls ---------------------------------------
   
   # Control R package threading to prevent conflicts with nested parallelization
-  # Users should set system-level thread controls (OMP_NUM_THREADS, etc.) in their SLURM script
+  # Use context-aware settings for HPC environment
+  
+  # Detect we're in HPC context
+  context <- detect_parallel_context(verbose = FALSE)
   
   # Package-specific thread controls
   data.table::setDTthreads(1)
   
-  options(
-    mc.cores = 1,           # Prevent unintended forking
-    ranger.num.threads = 1,  # Random forest threading
-    xgboost.nthread = 1     # XGBoost threading
-  )
+  # Set mc.cores based on context
+  # In multicore (forking) context, allow inner workers
+  # In multisession context, keep restricted
+  if (context$use_forking) {
+    options(
+      mc.cores = inner_workers,      # Allow inner parallelization with forking
+      ranger.num.threads = 1,         # Still control package threads
+      xgboost.nthread = 1
+    )
+    # Set environment for child processes
+    Sys.setenv(MC_CORES = as.character(inner_workers))
+  } else {
+    # For multisession, need different strategy
+    options(
+      mc.cores = 1,                   # Restrict in parent
+      ranger.num.threads = 1,
+      xgboost.nthread = 1
+    )
+    # But set environment for child processes to bypass parallelly
+    Sys.setenv(
+      MC_CORES = as.character(inner_workers),
+      R_PARALLELLY_MAXWORKERS_LOCALHOST = "999999"  # Bypass parallelly limits
+    )
+  }
   
   # Warn about system thread settings if not configured
   if (verbose) {
@@ -105,6 +127,7 @@ evaluate_models_hpc <- function(config,
       cli::cli_alert_warning("OMP_NUM_THREADS not set to 1 - may cause thread oversubscription")
       cli::cli_alert_info("Recommend setting in SLURM script: export OMP_NUM_THREADS=1")
     }
+    cli::cli_alert_info("Parallel context: {context$context} ({context$recommended_backend})")
   }
   
   if (verbose) {
@@ -223,8 +246,14 @@ evaluate_models_hpc <- function(config,
     }
   }, add = TRUE)
   
-  # Set up outer parallel backend using future
-  future::plan(future::multicore, workers = outer_workers)
+  # Set up outer parallel backend with work stealing for load balancing
+  # Set scheduling option for work stealing
+  options(future.scheduling = 2L)  # Enable dynamic scheduling with work stealing
+  
+  future::plan(
+    future::multicore, 
+    workers = outer_workers
+  )
   
   if (verbose) {
     cli::cli_alert_info("Configured outer parallelization with {outer_workers} workers")

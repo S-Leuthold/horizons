@@ -101,13 +101,26 @@ finalize_top_workflows <- function(evaluation_results,
   if (parallel_cv) {
     n_cores <- min(cv_folds, parallel::detectCores() - 1)
     
-    # Store original plan and set up parallel
-    old_plan <- future::plan()
-    on.exit(future::plan(old_plan), add = TRUE)
-    future::plan(future::multisession, workers = n_cores)
+    # Use context-aware backend selection
+    old_plan <- setup_parallel_backend(
+      n_workers = n_cores,
+      force_backend = NULL,  # Auto-detect
+      memory_limit_gb = 2,
+      enable_work_stealing = TRUE,
+      verbose = FALSE
+    )
+    
+    # Ensure restoration on exit
+    on.exit({
+      restore_parallel_settings(old_plan, verbose = FALSE)
+      optimize_parallel_memory(force_gc = TRUE, verbose = FALSE)
+    }, add = TRUE)
+    
+    # Get backend info for display
+    backend_display <- get_backend_display()
     
     if (verbose) {
-      cli::cli_alert_success("Parallel CV enabled with {n_cores} workers")
+      cli::cli_alert_success("Parallel CV enabled with {n_cores} {backend_display} workers")
     }
   }
   
