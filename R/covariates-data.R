@@ -202,8 +202,8 @@ get_ossl_training_data <- function(properties,
   if (verbose) {
     cli::cli_text("")
     cli::cli_text(format_tree_item("Data Loading", level = 0))
-    
-    properties_text <- paste0("Properties requested: ", paste(properties, collapse = ", "), 
+
+    properties_text <- paste0("Properties requested: ", paste(properties, collapse = ", "),
                              " (", length(properties), " total)")
     cli::cli_text(format_tree_item(properties_text, level = 1, is_last = FALSE))
   }
@@ -417,7 +417,7 @@ get_ossl_training_data <- function(properties,
       spectral_matrix <- mir_clean %>%
         dplyr::select(dplyr::all_of(spectral_cols)) %>%
         as.matrix()
-      
+
       # Keep raw values - preprocessing happens later in the pipeline
       processed_spectra <- spectral_matrix
 
@@ -488,7 +488,7 @@ get_ossl_training_data <- function(properties,
 
   if (verbose) {
     cli::cli_text("")
-    completion_text <- paste0(get_status_symbol("complete"), " OSSL data prepared: ", 
+    completion_text <- paste0(get_status_symbol("complete"), " OSSL data prepared: ",
                              format_metric(nrow(final_data), "count"), " samples")
     cli::cli_text(format_tree_item(completion_text, level = 1, is_last = FALSE))
 
@@ -548,13 +548,13 @@ preprocess_mir_spectra <- function(spectral_data,
 
   # Extract spectral matrix
   spectra_matrix <- as.matrix(spectral_data[spectral_cols])
-  
+
   # Quality check: detect problematic spectra
   n_negative <- sum(spectra_matrix < 0, na.rm = TRUE)
   if (n_negative > 0) {
     cli::cli_warn("Found {n_negative} negative spectral values - may indicate measurement issues")
   }
-  
+
   # Check for all-zero or constant spectra
   row_sds <- apply(spectra_matrix, 1, sd, na.rm = TRUE)
   n_constant <- sum(row_sds < 1e-6, na.rm = TRUE)
@@ -612,7 +612,7 @@ preprocess_mir_spectra <- function(spectral_data,
 #'
 #' @description
 #' Performs Principal Component Analysis on preprocessed OSSL MIR spectra,
-#' retaining components based on variance threshold for downstream similarity 
+#' retaining components based on variance threshold for downstream similarity
 #' calculations. Uses stats::prcomp for better performance and memory efficiency.
 #'
 #' @param ossl_data Tibble containing preprocessed OSSL data with spectra and properties
@@ -643,15 +643,15 @@ perform_pca_on_ossl <- function(ossl_data,
   ossl_clean <- ossl_data %>%
     dplyr::select(Sample_ID, dplyr::all_of(spectral_cols)) %>%
     tidyr::drop_na(dplyr::all_of(spectral_cols))
-  
+
   spectral_matrix <- dplyr::select(ossl_clean, dplyr::all_of(spectral_cols))
 
   # Use prcomp for better performance and memory efficiency
   safely_execute(
     expr = {
       stats::prcomp(x = spectral_matrix,
-                   center = TRUE,
-                   scale. = TRUE)
+                   center = FALSE,
+                   scale. = FALSE)
     },
     default_value = NULL,
     error_message = "Failed to perform PCA on OSSL spectral data"
@@ -662,21 +662,21 @@ perform_pca_on_ossl <- function(ossl_data,
   }
 
   pca_model <- pca_safe$result
-  
+
   # Calculate variance explained
   variance_explained <- pca_model$sdev^2 / sum(pca_model$sdev^2)
   cum_variance <- cumsum(variance_explained)
   n_components <- which(cum_variance >= variance_threshold)[1]
 
   if (verbose) {
-    pca_text <- paste0(get_status_symbol("success"), " PCA: ", n_components, 
+    pca_text <- paste0(get_status_symbol("success"), " PCA: ", n_components,
                       " components (", round(variance_threshold * 100), "% variance)")
     cli::cli_text(format_tree_item(pca_text, level = 1, is_last = TRUE))
   }
 
   # Extract PCA scores (using only the required number of components)
   pca_scores <- pca_model$x[, 1:n_components]
-  
+
   # Convert to tibble and add proper column names
   pca_scores <- tibble::as_tibble(pca_scores)
   names(pca_scores) <- paste0("Dim.", 1:n_components)
@@ -687,7 +687,7 @@ perform_pca_on_ossl <- function(ossl_data,
     ossl_metadata <- ossl_data %>%
       dplyr::semi_join(ossl_clean, by = "Sample_ID") %>%
       dplyr::select(dplyr::all_of(metadata_cols))
-    
+
     ossl_pca_scores <- dplyr::bind_cols(ossl_metadata, pca_scores)
   } else {
     ossl_pca_scores <- pca_scores
@@ -726,8 +726,8 @@ perform_pca_on_ossl <- function(ossl_data,
 #' @return Tibble with PCA scores and preserved metadata
 #' @keywords internal
 project_spectra_to_pca <- function(new_data,
-                                  pca_model,
-                                  verbose = TRUE) {
+                                   pca_model,
+                                   verbose = TRUE) {
 
   if (verbose) {
     cli::cli_progress_step("Projecting new spectra to PCA space")
@@ -745,7 +745,7 @@ project_spectra_to_pca <- function(new_data,
   pca_cols <- rownames(pca_model$rotation)
   missing_cols <- setdiff(pca_cols, spectral_cols)
   extra_cols <- setdiff(spectral_cols, pca_cols)
-  
+
   if (length(missing_cols) > 0) {
     if (verbose) {
       cli::cli_alert_warning("Missing {length(missing_cols)} columns required by PCA model")
@@ -754,24 +754,24 @@ project_spectra_to_pca <- function(new_data,
       }
     }
   }
-  
+
   if (length(extra_cols) > 0) {
     if (verbose) {
       cli::cli_alert_warning("Found {length(extra_cols)} extra columns not in PCA model")
     }
   }
-  
+
   # Create data with matching columns, filling missing with zeros
   newdata_aligned <- matrix(0, nrow = nrow(new_data), ncol = length(pca_cols))
   colnames(newdata_aligned) <- pca_cols
   common_cols <- intersect(spectral_cols, pca_cols)
-  
+
   if (length(common_cols) == 0) {
     cli::cli_abort("No matching columns between new data and PCA model")
   }
-  
+
   newdata_aligned[, common_cols] <- as.matrix(new_data[, common_cols])
-  
+
   safely_execute(
     expr = {
       stats::predict(object = pca_model,
@@ -791,9 +791,9 @@ project_spectra_to_pca <- function(new_data,
     # Fallback if n_components wasn't stored
     n_components <- ncol(projection_safe$result)
   }
-  
+
   projected_scores <- projection_safe$result[, 1:min(n_components, ncol(projection_safe$result))]
-  
+
   # Convert to tibble with proper column names
   new_pca_scores <- tibble::as_tibble(projected_scores)
   names(new_pca_scores) <- paste0("Dim.", 1:ncol(new_pca_scores))
@@ -858,20 +858,20 @@ get_processed_ossl_training_data <- function(properties,
   ## ---------------------------------------------------------------------------
   ## Step 2: Convert OSSL column names to standard numeric format
   ## ---------------------------------------------------------------------------
-  
+
   # Convert scan_mir.608_abs -> 608 for consistent column naming
   ossl_standardized <- ossl_raw
   spectral_cols <- grep("^scan_mir\\.[0-9]{3,4}_abs$", names(ossl_standardized), value = TRUE)
-  
+
   if (length(spectral_cols) > 0) {
     # Extract wavenumbers and create new column names
     wavenumbers <- gsub("^scan_mir\\.([0-9]{3,4})_abs$", "\\1", spectral_cols)
-    
+
     # Rename spectral columns to pure numeric
     names(ossl_standardized)[names(ossl_standardized) %in% spectral_cols] <- wavenumbers
-    
+
     if (verbose) {
-      std_text <- paste0(get_status_symbol("success"), " Column standardization: ", 
+      std_text <- paste0(get_status_symbol("success"), " Column standardization: ",
                         format_metric(length(spectral_cols), "count"), " wavenumbers")
       cli::cli_text(format_tree_item(std_text, level = 1, is_last = FALSE))
     }
@@ -886,7 +886,7 @@ get_processed_ossl_training_data <- function(properties,
     spectral_data = ossl_standardized,
     verbose = verbose
   )
-  
+
   if (is.null(ossl_processed)) {
     return(NULL)
   }

@@ -71,7 +71,7 @@ fetch_climate_covariates <- function(input_data,
   cli::cli_progress_step("Starting to fetch climate covariate data.")
 
   required_cols <- c("Longitude", "Latitude")
-  missing_cols <- setdiff(required_cols, colnames(input_data))
+  missing_cols  <- setdiff(required_cols, colnames(input_data))
 
   if (length(missing_cols) > 0) {
     cli::cli_abort(glue::glue(
@@ -110,10 +110,10 @@ fetch_climate_covariates <- function(input_data,
   ## -----------------------------------------------------------------------------
   ## Constants
   ## -----------------------------------------------------------------------------
-  
-  DAYMET_RESOLUTION_DEG <- 1/24  # ~4km grid resolution
-  DAYMET_TIMEOUT <- 60  # seconds timeout for API calls
-  
+
+  DAYMET_RESOLUTION_DEG <- 1/24
+  DAYMET_TIMEOUT        <- 60
+
   ## -----------------------------------------------------------------------------
   ## Helper Function 1: Compute grid ID to minmize repeated downloads.
   ## -----------------------------------------------------------------------------
@@ -125,11 +125,14 @@ fetch_climate_covariates <- function(input_data,
     grid_lat <- round(lat / DAYMET_RESOLUTION_DEG) * DAYMET_RESOLUTION_DEG
 
     paste0(grid_lon, "_", grid_lat)
+
   }
 
   ## -----------------------------------------------------------------------------
   ## Helper Function 2: Calculate Hargreaves PET given Tmin/max, DOY, and Lat
   ## -----------------------------------------------------------------------------
+
+  ## TODO: I think the math here needs adaptation.
 
   compute_hargreaves_pet <- function(tmin, tmax, tmean, lat, doy) {
 
@@ -160,7 +163,6 @@ fetch_climate_covariates <- function(input_data,
   summarize_daymet <- function(daymet_df,
                                lat,
                                gdd_base = 10) {
-    ## ---------------------------------------------------------------------------
 
     suppressMessages({
       daymet_df %>%
@@ -236,12 +238,16 @@ fetch_climate_covariates <- function(input_data,
   ## ---------------------------------------------------------------------------
 
   cli::cli_progress_step("Processing Daymet data for {length(unique(processed_data$Daymet_GridID))} unique grid cells.")
-  
-  # Create cache directory if it doesn't exist
+
+
   if (!dir.exists(cache_dir)) {
+
     dir.create(cache_dir, recursive = TRUE)
+
   }
-  
+
+  ## ---------------------------------------------------------------------------
+
   failed_grids <- c()
 
   purrr::map(processed_data$Daymet_GridID,
@@ -250,14 +256,16 @@ fetch_climate_covariates <- function(input_data,
               ## ---------------------------------------------------------------
               ## Check cache first
               ## ---------------------------------------------------------------
-              
+
               cache_file <- file.path(cache_dir, paste0("daymet_", grid_id, "_", start_year, "_", end_year, ".qs"))
-              
+
               if (file.exists(cache_file) && !refresh) {
+
                 cli::cli_alert_info("Using cached data for grid ID {grid_id}")
                 return(qs::qread(cache_file))
+
               }
-              
+
               ## ---------------------------------------------------------------
               ## Download if not cached
               ## ---------------------------------------------------------------
@@ -265,35 +273,39 @@ fetch_climate_covariates <- function(input_data,
               processed_data %>%
                 filter(Daymet_GridID == grid_id) -> coords
 
-              safely_execute(expr          = {
-                                              # Add timeout using R.utils if available
-                                              if (requireNamespace("R.utils", quietly = TRUE)) {
-                                                R.utils::withTimeout({
-                                                  daymetr::download_daymet(lat      = coords$Latitude,
-                                                                          lon      = coords$Longitude,
-                                                                          start    = start_year,
-                                                                          end      = end_year,
-                                                                          silent   = TRUE,
-                                                                          internal = TRUE)
-                                                }, timeout = DAYMET_TIMEOUT)
-                                              } else {
-                                                daymetr::download_daymet(lat      = coords$Latitude,
-                                                                        lon      = coords$Longitude,
-                                                                        start    = start_year,
-                                                                        end      = end_year,
-                                                                        silent   = TRUE,
-                                                                        internal = TRUE)
-                                              }
-                                            },
+              safely_execute(expr = {if(requireNamespace("R.utils", quietly = TRUE)) {
+
+                                        R.utils::withTimeout({
+                                            daymetr::download_daymet(lat      = coords$Latitude,
+                                                                     lon      = coords$Longitude,
+                                                                     start    = start_year,
+                                                                     end      = end_year,
+                                                                     silent   = TRUE,
+                                                                     internal = TRUE)
+                                          }, timeout = DAYMET_TIMEOUT)
+
+                                        } else {
+
+                                            daymetr::download_daymet(lat      = coords$Latitude,
+                                                                     lon      = coords$Longitude,
+                                                                     start    = start_year,
+                                                                     end      = end_year,
+                                                                     silent   = TRUE,
+                                                                     internal = TRUE)
+                                        }
+                                      },
                              default_value = NULL,
                              error_message = "Daymet download for {grid_id} failed") -> daymet_data_safe
 
-              daymet_data <- daymet_data_safe$result %>% purrr::pluck(., "data")
+              daymet_data_safe$result %>%
+                purrr::pluck(., "data") -> daymet_data
 
               if(is.null(daymet_data)){
+
                 cli::cli_alert_danger("Failed to download Daymet data for grid ID {grid_id} (lat: {round(coords$Latitude, 2)}, lon: {round(coords$Longitude, 2)})")
                 failed_grids <<- c(failed_grids, grid_id)
                 return(NULL)
+
               }
 
               ## ---------------------------------------------------------------
@@ -314,7 +326,7 @@ fetch_climate_covariates <- function(input_data,
               ## ---------------------------------------------------------------
               ## Create result and cache it
               ## ---------------------------------------------------------------
-              
+
               result <- tibble::tibble(Daymet_GridID      = grid_id,
                                       MAT                = daymet_summary$MAT,
                                       MAP                = daymet_summary$MAP,
@@ -322,14 +334,13 @@ fetch_climate_covariates <- function(input_data,
                                       AI                 = daymet_summary$AI,
                                       GDD                = daymet_summary$GDD,
                                       Precip_Seasonality = daymet_summary$Precip_Seasonality)
-              
-              # Save to cache
-              safely_execute(
-                expr = qs::qsave(result, cache_file),
-                error_message = "Failed to cache climate data for grid {grid_id}"
-              )
-              
+
+
+              safely_execute(expr          = qs::qsave(result, cache_file),
+                             error_message = "Failed to cache climate data for grid {grid_id}")
+
               result
+
               }
             ) -> daymet_results
 
@@ -339,17 +350,17 @@ fetch_climate_covariates <- function(input_data,
   ## ---------------------------------------------------------------------------
 
   climate_summary <- dplyr::bind_rows(daymet_results)
-  
+
   # Report any failures
   if (length(failed_grids) > 0) {
     unique_failed <- unique(failed_grids)
     cli::cli_alert_warning("Failed to retrieve climate data for {length(unique_failed)} grid cell{?s}: {unique_failed}")
-    
+
     # Check how many samples are affected
     affected_samples <- input_data %>%
       filter(Daymet_GridID %in% unique_failed) %>%
       nrow()
-    
+
     if (affected_samples > 0) {
       cli::cli_alert_danger("{affected_samples} sample{?s} will have missing climate data")
     }
@@ -361,7 +372,7 @@ fetch_climate_covariates <- function(input_data,
                   dplyr::select(-Daymet_GridID)
 
   cli::cli_progress_done()
-  
+
   # Final success/warning message
   if (length(failed_grids) == 0) {
     cli::cli_alert_success("Climate data retrieved successfully for all {nrow(input_data)} samples.")
