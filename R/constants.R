@@ -25,9 +25,9 @@ VALID_MODELS <- c(
 
 # Valid response transformations
 VALID_TRANSFORMATIONS <- c(
-  "No Transformation",
-  "Log Transformation",
-  "Square Root Transformation"
+  "none",
+  "log",
+  "sqrt"
 )
 
 ## Preprocessing Methods ------------------------------------------------------
