@@ -649,13 +649,20 @@ finalize_top_workflows <- function(evaluation_results,
     
     cv_fit <- cv_fit_result$result
     
+    ## Step 3.7.5: Back-transform CV predictions for stacking -----------------
+    
+    # Critical: Back-transform predictions so all models are on same scale for stacking
+    if (current_model$transformation != "none") {
+      cv_fit <- back_transform_cv_predictions(cv_fit, current_model$transformation)
+    }
+    
     ## Step 3.8: Store results for stacking -----------------------------------
     
     # Store successful result with CV predictions
     finalized_results[[i]] <- list(
       workflow_id = current_model$workflow_id,
       workflow = finalized_workflow,
-      cv_results = cv_fit,  # Contains the CV predictions for stacking
+      cv_results = cv_fit,  # Contains the CV predictions for stacking (now on original scale)
       final_params = final_best_params,
       status = "success"
     )

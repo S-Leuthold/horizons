@@ -117,18 +117,16 @@ get_readable_preprocessing_name <- function(preprocessing_id) {
 get_readable_transformation_name <- function(transformation_id) {
   
   transformation_names <- c(
-    "NoTrans"       = "None",
-    "No Transformation" = "None",
     "none"          = "None",
-    "Sqrt"          = "Square Root",
     "sqrt"          = "Square Root",
-    "Square Root Transformation" = "Square Root",
-    "Log"           = "Logarithmic",
     "log"           = "Logarithmic",
-    "Log Transformation" = "Logarithmic"
+    # Legacy mappings for backward compatibility
+    "NoTrans"       = "None",
+    "Sqrt"          = "Square Root", 
+    "Log"           = "Logarithmic"
   )
   
-  transformation_names[transformation_id] %||% transformation_id
+  transformation_names[tolower(transformation_id)] %||% transformation_id
 }
 
 #' Get Human-Readable Feature Selection Name

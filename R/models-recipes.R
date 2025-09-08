@@ -133,11 +133,10 @@ build_recipe <- function(input_data,
   ## Step 3: Response Transformation
   ## ---------------------------------------------------------------------------
 
-  switch(as.character(response_transformation),
-         "No Transformation"          = model_recipe,
-         "Log Transformation"         = model_recipe %>% recipes::step_log(all_outcomes(), skip = TRUE),
-         "Square Root Transformation" = model_recipe %>% recipes::step_sqrt(all_outcomes(), skip = TRUE),
-         "Box-Cox Transformation"     = model_recipe %>% recipes::step_BoxCox(all_outcomes(), skip = TRUE),
+  switch(tolower(as.character(response_transformation)),
+         "none"          = model_recipe,
+         "log"           = model_recipe %>% recipes::step_log(all_outcomes(), skip = TRUE),
+         "sqrt"          = model_recipe %>% recipes::step_sqrt(all_outcomes(), skip = TRUE),
          cli::cli_abort("Unsupported {.field response transformation}: {.val {response_transformation}}")) -> model_recipe
 
   ## ---------------------------------------------------------------------------
