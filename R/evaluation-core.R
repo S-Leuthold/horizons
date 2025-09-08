@@ -760,10 +760,29 @@ evaluate_configuration <- function(config_row,
   ## Step 16: Extract Metrics and Return Results
   ## ---------------------------------------------------------------------------
 
-  # Extract test set metrics and pivot to wide format for efficiency
-
-  tune::collect_metrics(final_fit) %>%
-    dplyr::select(.metric, .estimate) %>%
+  # For transformed responses, we need to back-transform predictions and recalculate metrics
+  # Extract predictions first
+  
+  tune::collect_predictions(final_fit) ->
+  test_predictions
+  
+  # Back-transform if needed
+  if (config_clean$transformation != "none") {
+    
+    test_predictions$.pred <- back_transform_predictions(
+      test_predictions$.pred,
+      config_clean$transformation,
+      warn = FALSE
+    )
+    
+  }
+  
+  # Calculate metrics on original scale
+  compute_original_scale_metrics(
+    truth = test_predictions[[variable]],
+    estimate = test_predictions$.pred,
+    metrics = yardstick::metric_set(rrmse, yardstick::rmse, yardstick::rsq, yardstick::mae, rpd, ccc)
+  ) %>%
     tidyr::pivot_wider(names_from = .metric, values_from = .estimate) ->
   test_metrics
 
