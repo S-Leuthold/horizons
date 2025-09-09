@@ -141,6 +141,5 @@ Collate:
     'evaluation-core.R'
     'evaluation-local.R'
     'evaluation-hpc.R'
-    'evaluation-hpc-fixed.R'
     'evaluation-finalize.R'
     'evaluation-ensemble.R'
