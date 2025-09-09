@@ -165,6 +165,8 @@ evaluate_models_hpc <- function(config,
         cli::cli_alert_info("Recommend setting in HPC submission script: export OMP_NUM_THREADS=1")
 
       }
+      
+      # TODO: Add more comprehensive thread checking and advice for users
 
       cli::cli_alert_info("Parallel context: {context$context} ({context$recommended_backend})")
 
