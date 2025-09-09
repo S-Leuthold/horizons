@@ -213,8 +213,7 @@ evaluate_configuration <- function(config_row,
   list(model             = as.character(config_row$model),
        transformation    = as.character(config_row$transformation),
        preprocessing     = as.character(config_row$preprocessing),
-       feature_selection = as.character(config_row$feature_selection)) ->
-  config_clean
+       feature_selection = as.character(config_row$feature_selection)) -> config_clean
 
   ## -------------------------------------------------------------------------
   ## Step 3.2: Handle Covariates from List Column (with Closure Safety)
@@ -226,7 +225,7 @@ evaluate_configuration <- function(config_row,
 
     # CRITICAL FIX: Check for closure/function before processing
     if (is.function(cov_value) || "closure" %in% class(cov_value)) {
-      
+
       # Log the error with detailed information for debugging
       cli::cli_abort(paste0("▶ evaluate_configuration: Closure detected in covariates for config_id {config_id}.",
                            " This indicates a parallel processing variable scoping issue.",
@@ -234,7 +233,7 @@ evaluate_configuration <- function(config_row,
                            " This error occurs when list columns contain unevaluated expressions",
                            " that become closures in parallel worker environments.",
                            " Fix: Apply parallel-safe covariate processing before model evaluation."))
-      
+
     } else if (is.null(cov_value) || length(cov_value) == 0) {
 
       config_clean$covariates <- NULL
@@ -436,21 +435,21 @@ evaluate_configuration <- function(config_row,
       enable_work_stealing = TRUE,  # Dynamic load balancing
       verbose = FALSE
     )
-    
+
     # Ensure restoration on exit
     on.exit({
       restore_parallel_settings(old_plan, verbose = FALSE)
       optimize_parallel_memory(force_gc = TRUE, verbose = FALSE)
     }, add = TRUE)
-    
+
     # Initialize reproducible RNG for parallel CV
     if (!is.null(seed)) {
       setup_parallel_rng(seed, n_cv_cores, verbose = FALSE)
     }
-    
+
     # Get actual backend used for display
     backend_display <- get_backend_display()
-    
+
     cli::cli_text("{.strong Processing Steps:}")
     cli::cli_text("├─ Cross-validation: {cv_folds}-fold parallel ({n_cv_cores} {backend_display} workers)")
 
@@ -478,7 +477,7 @@ evaluate_configuration <- function(config_row,
     expr = {
       # Extract parameter set from workflow
       param_set <- workflows::extract_parameter_set_dials(wflow)
-      
+
       # Finalize any unknown parameters (especially mtry for Random Forest)
       if (any(param_set$name == "mtry")) {
         # Prepare data for finalization (following main branch approach)
@@ -486,7 +485,7 @@ evaluate_configuration <- function(config_row,
           recipes::prep() %>%
           recipes::bake(new_data = NULL) %>%
           dplyr::select(-Response) -> eval_data
-        
+
         # Finalize parameter set with processed data
         param_set <- param_set %>%
           dials::finalize(eval_data)
@@ -562,7 +561,7 @@ evaluate_configuration <- function(config_row,
 
   grid_results <- grid_tune_result$result
   grid_seconds <- as.numeric(difftime(Sys.time(), grid_start_time, units = "secs"))
-  
+
   if (!is.null(grid_results)) {
     cli::cli_text("│  └─ Grid search complete: {round(grid_seconds, 1)}s")
   }
@@ -628,7 +627,7 @@ evaluate_configuration <- function(config_row,
       expr = {
         # Get finalized parameter set for Bayesian optimization
         param_set <- workflows::extract_parameter_set_dials(wflow)
-        
+
         # Finalize any unknown parameters using the same logic as grid generation
         if (any(param_set$name == "mtry")) {
           # Prepare data for finalization (following main branch approach)
@@ -636,12 +635,12 @@ evaluate_configuration <- function(config_row,
             recipes::prep() %>%
             recipes::bake(new_data = NULL) %>%
             dplyr::select(-Response) -> eval_data
-          
+
           # Finalize parameter set with processed data
           param_set <- param_set %>%
             dials::finalize(eval_data)
         }
-        
+
         tune::tune_bayes(
           object    = wflow,
           resamples = cv_splits,
@@ -795,21 +794,21 @@ evaluate_configuration <- function(config_row,
 
   # For transformed responses, we need to back-transform predictions and recalculate metrics
   # Extract predictions first
-  
+
   tune::collect_predictions(final_fit) ->
   test_predictions
-  
+
   # Back-transform if needed
   if (config_clean$transformation != "none") {
-    
+
     test_predictions$.pred <- back_transform_predictions(
       test_predictions$.pred,
       config_clean$transformation,
       warn = FALSE
     )
-    
+
   }
-  
+
   # Calculate metrics on original scale
   compute_original_scale_metrics(
     truth = test_predictions[[variable]],

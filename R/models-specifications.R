@@ -345,26 +345,5 @@ evaluate_final_models <- function(finalized_wf_sets, holdout_data) {
 
 }
 
-#' Back-transform Predictions
-#'
-#' @description
-#' Utility function to back-transform predictions based on transformation type.
-#'
-#' @param predictions Numeric vector of predictions
-#' @param transformation Character. Type of transformation ("log", "sqrt", "none")
-#'
-#' @return Numeric vector of back-transformed predictions
-#'
-#' @keywords internal
-back_transform_predictions <- function(predictions, transformation) {
-  
-  trans_lower <- tolower(transformation)
-  
-  if (grepl("log", trans_lower)) {
-    return(exp(predictions))
-  } else if (grepl("sqrt", trans_lower)) {
-    return(predictions^2)
-  } else {
-    return(predictions)
-  }
-}
+# Note: back_transform_predictions is now defined in utils-backtransform.R
+# This duplicate definition has been removed to avoid conflicts with the warn parameter
