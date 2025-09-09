@@ -12,19 +12,29 @@
 #' 
 #' @description
 #' Creates a properly formatted result row for failed model evaluations.
-#' Returns a tibble row with NA metrics and error information.
+#' Returns a tibble row with NA metrics and detailed error information.
 #' 
 #' @param config_id Model configuration ID
 #' @param config_clean Cleaned configuration data
 #' @param error_message Descriptive error message
 #' @param workflow_id Optional workflow ID if already created
+#' @param error_detail Full error object from safely_execute
+#' @param error_stage Stage where error occurred (e.g., "recipe_building", "tuning")
+#' @param error_trace Optional trace object for debugging
+#' @param warnings List of warning messages captured during execution
+#' @param messages List of informational messages captured during execution
 #' 
-#' @return Tibble row with NA metrics and error information
+#' @return Tibble row with NA metrics and enriched error information
 #' @keywords internal
 create_failed_result <- function(config_id,
                                 config_clean,
                                 error_message,
-                                workflow_id = NULL) {
+                                workflow_id = NULL,
+                                error_detail = NULL,
+                                error_stage = NULL,
+                                error_trace = NULL,
+                                warnings = NULL,
+                                messages = NULL) {
   
   tibble::tibble(
     config_id         = config_id,
@@ -49,7 +59,20 @@ create_failed_result <- function(config_id,
     bayes_seconds     = NA_real_,
     total_seconds     = NA_real_,
     status            = "failed",
-    error_message     = error_message
+    error_message     = error_message,
+    error_stage       = error_stage %||% "unknown",
+    error_class       = if (!is.null(error_detail)) {
+                          class(error_detail)[1]
+                        } else {
+                          NA_character_
+                        },
+    has_trace         = !is.null(error_trace),
+    n_warnings        = length(warnings),
+    warning_summary   = if (length(warnings) > 0) {
+                          paste(head(warnings, 3), collapse = "; ")
+                        } else {
+                          NA_character_
+                        }
     # Note: fitted_workflow removed to prevent memory leak
   )
 }

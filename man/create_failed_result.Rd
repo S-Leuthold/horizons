@@ -8,7 +8,12 @@ create_failed_result(
   config_id,
   config_clean,
   error_message,
-  workflow_id = NULL
+  workflow_id = NULL,
+  error_detail = NULL,
+  error_stage = NULL,
+  error_trace = NULL,
+  warnings = NULL,
+  messages = NULL
 )
 }
 \arguments{
@@ -19,16 +24,26 @@ create_failed_result(
 \item{error_message}{Descriptive error message}
 
 \item{workflow_id}{Optional workflow ID if already created}
+
+\item{error_detail}{Full error object from safely_execute}
+
+\item{error_stage}{Stage where error occurred (e.g., "recipe_building", "tuning")}
+
+\item{error_trace}{Optional trace object for debugging}
+
+\item{warnings}{List of warning messages captured during execution}
+
+\item{messages}{List of informational messages captured during execution}
 }
 \value{
-Tibble row with NA metrics and error information
+Tibble row with NA metrics and enriched error information
 }
 \description{
 Collection of utility functions supporting local model evaluation.
 These functions handle error formatting for failed evaluations.
 
 Creates a properly formatted result row for failed model evaluations.
-Returns a tibble row with NA metrics and error information.
+Returns a tibble row with NA metrics and detailed error information.
 }
 \keyword{Create}
 \keyword{Failed}
