@@ -233,6 +233,63 @@ create_configs <- function(models                  = c("plsr", "random_forest", 
     
   }
 
+  ## ---------------------------------------------------------------------------
+  ## Step 7: Validate Parallel Safety (Closure Detection)
+  ## ---------------------------------------------------------------------------
+  
+  # PREVENTIVE: Check that all config values are parallel-safe (not closures)
+  # This prevents closure contamination from propagating to evaluation phase
+  validate_parallel_safety <- function(config_df) {
+    
+    # Check main config columns for closure contamination
+    main_cols <- c("model", "transformation", "preprocessing", "feature_selection")
+    
+    for (col_name in main_cols) {
+      if (col_name %in% names(config_df)) {
+        col_values <- config_df[[col_name]]
+        
+        # Check each value in the column
+        for (i in seq_along(col_values)) {
+          value <- col_values[i]
+          if (is.function(value) || "closure" %in% class(value)) {
+            cli::cli_abort("▶ create_configs: Closure detected in '{col_name}' column, row {i}. Configuration data is not parallel-safe.")
+          }
+        }
+      }
+    }
+    
+    # Check covariates list column if present
+    if ("covariates" %in% names(config_df)) {
+      cov_list <- config_df$covariates
+      
+      for (i in seq_along(cov_list)) {
+        cov_value <- cov_list[[i]]
+        if (!is.null(cov_value)) {
+          if (is.function(cov_value) || "closure" %in% class(cov_value)) {
+            cli::cli_abort("▶ create_configs: Closure detected in 'covariates' list column, row {i}. Configuration data is not parallel-safe.")
+          }
+          # Also check individual covariate elements if it's a vector
+          if (is.list(cov_value)) {
+            for (j in seq_along(cov_value)) {
+              if (is.function(cov_value[[j]]) || "closure" %in% class(cov_value[[j]])) {
+                cli::cli_abort("▶ create_configs: Closure detected in covariate element {j}, row {i}. Configuration data is not parallel-safe.")
+              }
+            }
+          }
+        }
+      }
+    }
+    
+    if (verbose) {
+      cli::cli_alert_success("Configuration data validated as parallel-safe (no closures detected)")
+    }
+    
+    return(config_df)
+  }
+  
+  # Apply validation
+  config_grid <- validate_parallel_safety(config_grid)
+
   return(config_grid)
 
 }
