@@ -493,8 +493,8 @@ evaluate_configuration <- function(config_row,
       # Extract parameter set from workflow
       param_set <- workflows::extract_parameter_set_dials(wflow)
 
-      # Finalize any unknown parameters (especially mtry for Random Forest)
-      if (any(param_set$name == "mtry")) {
+      # Finalize any unknown parameters (especially mtry for Random Forest and num_comp for PLSR)
+      if (any(param_set$name %in% c("mtry", "num_comp"))) {
         # Prepare data for finalization (following main branch approach)
         recipe %>%
           recipes::prep() %>%
@@ -649,7 +649,7 @@ evaluate_configuration <- function(config_row,
         param_set <- workflows::extract_parameter_set_dials(wflow)
 
         # Finalize any unknown parameters using the same logic as grid generation
-        if (any(param_set$name == "mtry")) {
+        if (any(param_set$name %in% c("mtry", "num_comp"))) {
           # Prepare data for finalization (following main branch approach)
           recipe %>%
             recipes::prep() %>%
