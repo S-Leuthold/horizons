@@ -175,6 +175,24 @@ clean_workflow_id <- function(model,
                              covariates = NULL) {
   
   ## ---------------------------------------------------------------------------
+  ## Input Validation (Closure Safety)
+  ## ---------------------------------------------------------------------------
+  
+  # DEFENSIVE: Check for closure contamination in all inputs
+  # This provides additional safety if closures somehow make it past upstream checks
+  check_for_closures <- function(value, param_name) {
+    if (is.function(value) || "closure" %in% class(value)) {
+      cli::cli_abort("▶ clean_workflow_id: Closure detected in parameter '{param_name}'. Cannot generate workflow ID.")
+    }
+  }
+  
+  check_for_closures(model, "model")
+  check_for_closures(transformation, "transformation")  
+  check_for_closures(preprocessing, "preprocessing")
+  check_for_closures(feature_selection, "feature_selection")
+  if (!is.null(covariates)) check_for_closures(covariates, "covariates")
+  
+  ## ---------------------------------------------------------------------------
   ## Clean transformation name
   ## ---------------------------------------------------------------------------
   

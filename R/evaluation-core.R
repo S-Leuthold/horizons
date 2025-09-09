@@ -207,13 +207,53 @@ evaluate_configuration <- function(config_row,
   ## ---------------------------------------------------------------------------
 
   ## -------------------------------------------------------------------------
-  ## Step 3.1: Extract and Clean Configuration
+  ## Step 3.1: Extract and Clean Configuration (with Parallel Safety)
   ## -------------------------------------------------------------------------
 
-  list(model             = as.character(config_row$model),
-       transformation    = as.character(config_row$transformation),
-       preprocessing     = as.character(config_row$preprocessing),
-       feature_selection = as.character(config_row$feature_selection)) -> config_clean
+  # CRITICAL FIX: Safe value extraction to prevent closure coercion errors
+  # In parallel environments (especially multisession), config_row fields can
+  # become closures instead of character values due to variable scoping issues
+  extract_safe_config_value <- function(value, field_name, config_id) {
+    
+    # Check for closure/function contamination first
+    if (is.function(value) || "closure" %in% class(value)) {
+      cli::cli_abort(paste0("▶ evaluate_configuration: Closure detected in '{field_name}' for config_id {config_id}.",
+                           " This indicates a parallel processing variable scoping issue.",
+                           " Field class: {paste(class(value), collapse = ', ')}.",
+                           " This error occurs when configuration data becomes contaminated with",
+                           " unevaluated expressions in parallel worker environments.",
+                           " Fix: Ensure config data is fully evaluated before parallel processing."))
+    }
+    
+    # Handle list columns (extract first element if needed)
+    if (is.list(value) && length(value) == 1) {
+      value <- value[[1]]
+    }
+    
+    # Final safety check after extraction
+    if (is.function(value) || "closure" %in% class(value)) {
+      cli::cli_abort("▶ evaluate_configuration: Closure found in list element for '{field_name}' config_id {config_id}")
+    }
+    
+    # Safe character conversion with error handling
+    tryCatch({
+      as.character(value)
+    }, error = function(e) {
+      # If we get a closure error, return a placeholder instead of aborting
+      if (grepl("closure", e$message, ignore.case = TRUE)) {
+        cli::cli_alert_warning("Closure coercion error in '{field_name}' for config_id {config_id}, using 'ERROR_CLOSURE'")
+        return("ERROR_CLOSURE")
+      }
+      # For other errors, still abort
+      cli::cli_abort("▶ evaluate_configuration: Cannot convert '{field_name}' to character for config_id {config_id}: {e$message}")
+    })
+  }
+
+  # Apply safe extraction to all config fields
+  list(model             = extract_safe_config_value(config_row$model, "model", config_id),
+       transformation    = extract_safe_config_value(config_row$transformation, "transformation", config_id),
+       preprocessing     = extract_safe_config_value(config_row$preprocessing, "preprocessing", config_id),
+       feature_selection = extract_safe_config_value(config_row$feature_selection, "feature_selection", config_id)) -> config_clean
 
   ## -------------------------------------------------------------------------
   ## Step 3.2: Handle Covariates from List Column (with Closure Safety)
@@ -861,7 +901,12 @@ evaluate_configuration <- function(config_row,
                  preprocessing     = config_clean$preprocessing,
                  feature_selection = config_clean$feature_selection,
                  covariates        = if (!is.null(config_clean$covariates)) {
-                                       paste(config_clean$covariates, collapse = "-")
+                                       # Additional safety: ensure covariates are character before paste
+                                       tryCatch({
+                                         paste(config_clean$covariates, collapse = "-")
+                                       }, error = function(e) {
+                                         cli::cli_abort("▶ evaluate_configuration: Failed to collapse covariates for config_id {config_id}: {e$message}")
+                                       })
                                      } else {
                                        NA_character_
                                      },

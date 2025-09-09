@@ -44,7 +44,12 @@ create_failed_result <- function(config_id,
     preprocessing     = config_clean$preprocessing,
     feature_selection = config_clean$feature_selection,
     covariates        = if (!is.null(config_clean$covariates)) {
-                          paste(config_clean$covariates, collapse = "-")
+                          # Additional safety: ensure covariates are character before paste
+                          tryCatch({
+                            paste(config_clean$covariates, collapse = "-")
+                          }, error = function(e) {
+                            cli::cli_abort("▶ create_error_result: Failed to collapse covariates for config_id {config_id}: {e$message}")
+                          })
                         } else {
                           NA_character_
                         },
