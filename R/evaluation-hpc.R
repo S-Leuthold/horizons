@@ -23,475 +23,677 @@
 #' @export
 
 evaluate_models_hpc <- function(config,
-                               input_data,
-                               covariate_data = NULL,
-                               variable,
-                               output_dir     = NULL,
-                               grid_size      = 10,
-                               bayesian_iter  = 15,
-                               cv_folds       = 10,
-                               outer_workers  = NULL,
-                               inner_workers  = NULL,
-                               seed           = 307,
-                               resume         = TRUE,
-                               verbose        = TRUE) {
+                                input_data,
+                                covariate_data = NULL,
+                                variable,
+                                output_dir     = NULL,
+                                grid_size      = 10,
+                                bayesian_iter  = 15,
+                                cv_folds       = 10,
+                                outer_workers  = NULL,
+                                inner_workers  = NULL,
+                                seed           = 307,
+                                resume         = TRUE,
+                                verbose        = TRUE) {
 
   ## ---------------------------------------------------------------------------
   ## Step 1: Input Validation
   ## ---------------------------------------------------------------------------
 
+  ## Make sure we're getting a dataframe in ------------------------------------
+
   if (!is.data.frame(config)) {
+
     cli::cli_abort("▶ evaluate_models_hpc: config must be a data frame")
+
   }
+
+  ## Check that variable is present --------------------------------------------
 
   if (!variable %in% names(input_data)) {
+
     cli::cli_abort("▶ evaluate_models_hpc: Response variable '{variable}' not found in input_data")
+
   }
 
-  # Validate response variable has sufficient data
+  ## Validate response variable has enough non-missing values -------------------
+
   response_vals <- input_data[[variable]]
-  n_valid <- sum(!is.na(response_vals))
+  n_valid       <- sum(!is.na(response_vals))
 
   if (n_valid < 20) {
+
     cli::cli_abort("▶ evaluate_models_hpc: Response variable has only {n_valid} non-missing values (minimum 20 required)")
+
   }
+
+  ## Check for variation in response variable ----------------------------------
 
   if (var(response_vals, na.rm = TRUE) < .Machine$double.eps) {
+
     cli::cli_abort("▶ evaluate_models_hpc: Response variable has no variation")
+
   }
 
-  # Check required config columns
+  ## Check required config columns ---------------------------------------------
+
   required_cols <- c("model", "preprocessing", "transformation", "feature_selection")
-  missing_cols <- setdiff(required_cols, names(config))
+  missing_cols  <- setdiff(required_cols, names(config))
+
   if (length(missing_cols) > 0) {
-    cli::cli_abort("▶ evaluate_models_hpc: config missing required columns: {missing_cols}")
+
+     cli::cli_abort("▶ evaluate_models_hpc: config missing required columns: {missing_cols}")
+
   }
 
-  ## Step 2: Validate Worker Specification -------------------------------------
+  ## ---------------------------------------------------------------------------
+  ## Step 2: Parallelization checks
+  ## ---------------------------------------------------------------------------
 
-  # CRITICAL: Require explicit worker specification for HPC
-  if (is.null(outer_workers) || is.null(inner_workers)) {
-    cli::cli_abort("▶ evaluate_models_hpc: Both outer_workers and inner_workers must be specified for HPC execution")
-  }
+    ## ---------------------------------------------------------------------------
+    ## Step 2.1: Validate worker parameters
+    ## ---------------------------------------------------------------------------
 
-  # Validate worker numbers
-  if (outer_workers < 1 || inner_workers < 1) {
-    cli::cli_abort("▶ evaluate_models_hpc: outer_workers and inner_workers must be >= 1")
-  }
+    ## Make sure the worker breakdown is specified -------------------------------
 
-  # Check total cores don't exceed available
-  total_requested <- outer_workers * inner_workers
-  cores_available <- parallel::detectCores()
+    if (is.null(outer_workers) || is.null(inner_workers)) {
 
-  if (total_requested > cores_available) {
-    cli::cli_abort("▶ evaluate_models_hpc: Requested {total_requested} cores ({outer_workers} × {inner_workers}) but only {cores_available} available")
-  }
+      cli::cli_abort("▶ evaluate_models_hpc: Both outer_workers and inner_workers must be specified for HPC execution")
 
-  ## Step 3: Set Package Thread Controls ---------------------------------------
-
-  # Control R package threading to prevent conflicts with nested parallelization
-  # Use context-aware settings for HPC environment
-
-  # Detect we're in HPC context
-  context <- detect_parallel_context(verbose = FALSE)
-
-  # Package-specific thread controls
-  data.table::setDTthreads(1)
-
-  # Set mc.cores based on context
-  # In multicore (forking) context, allow inner workers
-  # In multisession context, keep restricted
-  if (context$use_forking) {
-    options(
-      mc.cores = inner_workers,      # Allow inner parallelization with forking
-      ranger.num.threads = 1,         # Still control package threads
-      xgboost.nthread = 1
-    )
-    # Set environment for child processes
-    Sys.setenv(MC_CORES = as.character(inner_workers))
-  } else {
-    # For multisession, need different strategy
-    options(
-      mc.cores = 1,                   # Restrict in parent
-      ranger.num.threads = 1,
-      xgboost.nthread = 1
-    )
-    # But set environment for child processes to bypass parallelly
-    Sys.setenv(
-      MC_CORES = as.character(inner_workers),
-      R_PARALLELLY_MAXWORKERS_LOCALHOST = "999999"  # Bypass parallelly limits
-    )
-  }
-
-  # Warn about system thread settings if not configured
-  if (verbose) {
-    current_omp <- Sys.getenv("OMP_NUM_THREADS", unset = NA)
-    if (is.na(current_omp) || current_omp != "1") {
-      cli::cli_alert_warning("OMP_NUM_THREADS not set to 1 - may cause thread oversubscription")
-      cli::cli_alert_info("Recommend setting in SLURM script: export OMP_NUM_THREADS=1")
-    }
-    cli::cli_alert_info("Parallel context: {context$context} ({context$recommended_backend})")
-  }
-
-  if (verbose) {
-    cli::cli_h1("HPC Evaluation")
-    cli::cli_alert_info("Workers: {outer_workers} outer × {inner_workers} inner = {total_requested} cores")
-    cli::cli_alert_info("Models to evaluate: {nrow(config)}")
-    cli::cli_alert_success("Thread safety controls applied")
-  }
-
-  ## Step 4: Setup Output and Checkpoint Directories ---------------------------
-
-  # Use provided output_dir or create default
-  if (is.null(output_dir)) {
-    timestamp <- format(Sys.time(), "%Y%m%d_%H%M%S")
-    output_dir <- file.path("output", paste0(variable, "_hpc_", timestamp))
-  }
-
-  # Create directory structure
-  checkpoint_dir <- file.path(output_dir, "checkpoints")
-
-  if (!dir.exists(output_dir)) {
-    dir.create(output_dir, recursive = TRUE)
-  }
-
-  if (!dir.exists(checkpoint_dir)) {
-    dir.create(checkpoint_dir, recursive = TRUE)
-  }
-
-  # Also create subdirectories for organization
-  dir.create(file.path(output_dir, "results"), showWarnings = FALSE)
-  dir.create(file.path(output_dir, "errors"), showWarnings = FALSE)
-  dir.create(file.path(output_dir, "summary"), showWarnings = FALSE)
-
-  if (verbose) {
-    cli::cli_alert_info("Output directory: {output_dir}")
-  }
-
-  # Check for existing checkpoints if resume = TRUE
-  completed_models <- integer(0)
-  if (resume && dir.exists(checkpoint_dir)) {
-    # Check for batch files first
-    batch_files <- list.files(checkpoint_dir, pattern = "^batch_.*\\.qs$", full.names = FALSE)
-    if (length(batch_files) > 0) {
-      # Each batch contains 100 models
-      batch_nums <- as.integer(gsub("batch_|\\.qs", "", batch_files))
-      batch_nums <- batch_nums[!is.na(batch_nums)]
-
-      # Convert batch numbers to model indices
-      for (batch in batch_nums) {
-        start_idx <- (batch - 1) * 100 + 1
-        end_idx <- batch * 100
-        completed_models <- c(completed_models, start_idx:end_idx)
-      }
     }
 
-    # Then check for individual checkpoint files (not yet consolidated)
-    checkpoint_files <- list.files(checkpoint_dir, pattern = "^model_.*\\.qs$", full.names = FALSE)
-    if (length(checkpoint_files) > 0) {
-      # Extract model indices from filenames
-      individual_models <- as.integer(gsub("model_|\\.qs", "", checkpoint_files))
-      individual_models <- individual_models[!is.na(individual_models)]
-      completed_models <- c(completed_models, individual_models)
+    ## Validate worker values ----------------------------------------------------
+
+    if (outer_workers < 1 || inner_workers < 1) {
+
+      cli::cli_abort("▶ evaluate_models_hpc: outer_workers and inner_workers must be >= 1")
+
     }
 
-    # Remove duplicates and validate
-    completed_models <- unique(completed_models)
-    completed_models <- completed_models[completed_models >= 1 & completed_models <= nrow(config)]
-    completed_models <- sort(completed_models)
+    ## Check total requested cores against available --------------------------------
 
-    if (length(completed_models) > 0 && verbose) {
-      cli::cli_alert_info("Found {length(completed_models)} completed models to resume from")
-      cli::cli_alert_info("Batches: {length(batch_files)}, Individual: {length(checkpoint_files)}")
+    total_requested <- outer_workers * inner_workers
+    cores_available <- parallel::detectCores()
+
+    if (total_requested > cores_available) {
+
+      cli::cli_abort("▶ evaluate_models_hpc: Requested {total_requested} cores ({outer_workers} × {inner_workers}) but only {cores_available} available")
+
     }
-  }
 
-  ## Step 5: Create Data Split -------------------------------------------------
+    ## -------------------------------------------------------------------------
+    ## Step 2.2: Specify thread controls
+    ## -------------------------------------------------------------------------
 
-  # Rename response variable to "Response" for consistency throughout pipeline
-  input_data <- input_data %>%
-    dplyr::rename(Response = !!rlang::sym(variable))
+    ## Determine environment spectifications -----------------------------------
 
-  # Update variable name for downstream use
-  variable <- "Response"
+    context <- detect_parallel_context(verbose = FALSE)
 
-  # Create train/test split (same for all models)
-  set.seed(seed)
-  data_split <- rsample::initial_split(
-    data = input_data,
-    prop = 0.8,
-    strata = variable  # variable is already a character string
-  )
+    ## Set package specific threading options ----------------------------------
 
-  if (verbose) {
-    train_n <- nrow(rsample::training(data_split))
-    test_n <- nrow(rsample::testing(data_split))
-    cli::cli_alert_info("Data split: {train_n} training, {test_n} testing samples")
-  }
+    data.table::setDTthreads(1)
 
-  ## Step 6: Configure Nested Parallelization ----------------------------------
+    ## Set context specific options --------------------------------------------
 
-  # Track start time for execution summary
-  start_time <- Sys.time()
+    if (context$use_forking) {
 
-  # Set up cleanup on exit
-  on.exit({
-    # Reset future plan to sequential
-    tryCatch(
-      future::plan(future::sequential),
-      error = function(e) NULL
-    )
+      options(mc.cores           = inner_workers,
+              ranger.num.threads = 1,
+              xgboost.nthread    = 1)
 
-    # Clean up any temp files
-    temp_files <- list.files(checkpoint_dir, pattern = "\\.tmp$", full.names = TRUE)
-    if (length(temp_files) > 0) {
-      file.remove(temp_files)
-    }
-  }, add = TRUE)
+      Sys.setenv(MC_CORES = as.character(inner_workers))
 
-  # Set up outer parallel backend with work stealing for load balancing
-  # Set scheduling option for work stealing
-  options(future.scheduling = 2L)  # Enable dynamic scheduling with work stealing
-
-  future::plan(
-    future::multisession,
-    workers = outer_workers
-  )
-
-  if (verbose) {
-    cli::cli_alert_info("Configured outer parallelization with {outer_workers} workers")
-  }
-
-  ## Step 7: Process Models with Nested Parallelization ------------------------
-
-  # Determine which models to process (excluding completed ones)
-  models_to_process <- setdiff(seq_len(nrow(config)), completed_models)
-
-  if (length(models_to_process) == 0) {
-    cli::cli_alert_success("All models already completed! Loading results...")
-
-    # Load all completed checkpoint files
-    results <- lapply(seq_len(nrow(config)), function(i) {
-      checkpoint_file <- file.path(checkpoint_dir, sprintf("model_%06d.qs", i))
-      if (file.exists(checkpoint_file)) {
-        qs::qread(checkpoint_file)
       } else {
-        cli::cli_alert_warning("Missing checkpoint for model {i}")
-        NULL
-      }
-    })
 
-    # Filter out any NULL results
-    results <- results[!sapply(results, is.null)]
+        options(mc.cores           = 1,
+                ranger.num.threads = 1,
+                xgboost.nthread    = 1)
+
+        Sys.setenv(MC_CORES                          = as.character(inner_workers),
+                   R_PARALLELLY_MAXWORKERS_LOCALHOST = "999999")
+
+    }
+
+    ## Report results, warn if further config needed ---------------------------
 
     if (verbose) {
-      cli::cli_alert_success("Loaded {length(results)} completed models")
+      current_omp <- Sys.getenv("OMP_NUM_THREADS", unset = NA)
+
+      if (is.na(current_omp) || current_omp != "1") {
+
+        cli::cli_alert_warning("OMP_NUM_THREADS not set to 1 - may cause thread oversubscription")
+        cli::cli_alert_info("Recommend setting in HPC submission script: export OMP_NUM_THREADS=1")
+
+      }
+
+      cli::cli_alert_info("Parallel context: {context$context} ({context$recommended_backend})")
+
     }
 
-    return(results)
-  }
+    ## Update status before moving on ------------------------------------------
 
-  if (verbose) {
-    cli::cli_alert_info("Processing {length(models_to_process)} models...")
-  }
+    if (verbose) {
 
-  # Process models in parallel outer loop
-  results <- future.apply::future_lapply(
-    models_to_process,
-    function(i) {
+      cli::cli_h1("HPC Evaluation")
+      cli::cli_alert_info("Workers: {outer_workers} outer × {inner_workers} inner = {total_requested} cores")
+      cli::cli_alert_info("Models to evaluate: {nrow(config)}")
+      cli::cli_alert_success("Thread safety controls applied")
 
-      # Call evaluate_single_model_local with parallel CV enabled
-      result <- tryCatch({
-        evaluate_configuration(
-          config_row = config[i, , drop = FALSE],
-          input_data = input_data,
-          data_split = data_split,
-          config_id = i,
-          covariate_data = covariate_data,
-          variable = variable,
-          output_dir = output_dir,
-          grid_size = grid_size,
-          bayesian_iter = bayesian_iter,
-          cv_folds = cv_folds,
-          parallel_cv = TRUE,           # Enable parallel CV
-          n_cv_cores = inner_workers,   # Use inner workers for CV
-          prune_models = FALSE,         # Can make this configurable
-          seed = seed                   # Same seed for all models for fair comparison
-        )
-      }, error = function(e) {
-        cli::cli_alert_danger("Model {i} failed: {e$message}")
-        list(
-          config_id = i,
-          status = "failed",
-          error = e$message,
-          metrics = NULL
-        )
-      })
+    }
 
-      # Save checkpoint for this model with atomic write
-      if (!is.null(checkpoint_dir)) {
-        checkpoint_file <- file.path(checkpoint_dir, sprintf("model_%06d.qs", i))
+  ## ---------------------------------------------------------------------------
+  ## Step 3: Output and resumption setup
+  ## ---------------------------------------------------------------------------
 
-        # Atomic write: save to temp file first, then rename
-        temp_file <- paste0(checkpoint_file, ".tmp")
-        tryCatch({
-          qs::qsave(result, temp_file)
-          # Rename is atomic on most filesystems
-          file.rename(temp_file, checkpoint_file)
-        }, error = function(e) {
-          # Clean up temp file on error
-          if (file.exists(temp_file)) file.remove(temp_file)
-          cli::cli_alert_warning("Failed to save checkpoint for model {i}: {e$message}")
-        })
+    ## -------------------------------------------------------------------------
+    ## Step 3.1: Create output directories
+    ## -------------------------------------------------------------------------
 
-        # Consolidate every 100 models
-        if (i %% 100 == 0) {
-          batch_num <- i %/% 100
-          batch_file <- file.path(checkpoint_dir, sprintf("batch_%06d.qs", batch_num))
+    ## If no directory is specified, create one with timestamp -----------------
 
-          # Collect the last 100 individual checkpoints
-          start_idx <- (batch_num - 1) * 100 + 1
-          end_idx <- i
+    if (is.null(output_dir)) {
 
-          batch_results <- lapply(start_idx:end_idx, function(idx) {
-            ind_file <- file.path(checkpoint_dir, sprintf("model_%06d.qs", idx))
-            if (file.exists(ind_file)) {
-              qs::qread(ind_file)
-            } else {
-              NULL
-            }
-          })
+      timestamp  <- format(Sys.time(), "%Y%m%d_%H%M%S")
+      output_dir <- file.path("output", paste0(variable, "_hpc_", timestamp))
 
-          # Save batch file atomically
-          batch_temp <- paste0(batch_file, ".tmp")
-          tryCatch({
-            qs::qsave(batch_results, batch_temp)
-            file.rename(batch_temp, batch_file)
+    }
 
-            # Remove individual files after successful batch save
-            for (idx in start_idx:end_idx) {
-              ind_file <- file.path(checkpoint_dir, sprintf("model_%06d.qs", idx))
-              if (file.exists(ind_file)) file.remove(ind_file)
-            }
+    if (!dir.exists(output_dir)) {
 
-            if (verbose) {
-              cli::cli_alert_success("Consolidated models {start_idx}-{end_idx} into batch {batch_num}")
-            }
-          }, error = function(e) {
-            if (file.exists(batch_temp)) file.remove(batch_temp)
-            cli::cli_alert_warning("Failed to consolidate batch {batch_num}: {e$message}")
-          })
+      dir.create(output_dir, recursive = TRUE)
+
+    }
+
+    ## Create checkpoint directory ------------------------------------------------
+
+    checkpoint_dir <- file.path(output_dir, "checkpoints")
+
+    if (!dir.exists(checkpoint_dir)) {
+
+      dir.create(checkpoint_dir, recursive = TRUE)
+
+    }
+
+    ## Create subdirectories for organization -------------------------------------
+
+    dir.create(file.path(output_dir, "results"), showWarnings = FALSE)
+    dir.create(file.path(output_dir, "errors"), showWarnings = FALSE)
+    dir.create(file.path(output_dir, "summary"), showWarnings = FALSE)
+
+    ## Report successful creation ------------------------------------------------
+
+    if (verbose) {
+      cli::cli_alert_info("Output directory: {output_dir}")
+    }
+
+    ## ---------------------------------------------------------------------------
+    ## Step 3.2: Resume previous runs if requested
+    ## ---------------------------------------------------------------------------
+
+    completed_models <- integer(0)
+
+    ## Check for previously completed models -------------------------------------
+
+    if (resume && dir.exists(checkpoint_dir)) {
+
+      ## Look through the batch files (groups of 100) ----------------------------
+
+      batch_files <- list.files(checkpoint_dir, pattern = "^batch_.*\\.qs$", full.names = FALSE)
+
+      if (length(batch_files) > 0) {
+
+        batch_nums <- as.integer(gsub("batch_|\\.qs", "", batch_files))
+        batch_nums <- batch_nums[!is.na(batch_nums)]
+
+        ## Aggregate and report completed models -------------------------------
+
+        for (batch in batch_nums) {
+
+          start_idx        <- (batch - 1) * 100 + 1
+          end_idx          <- batch * 100
+          completed_models <- c(completed_models, start_idx:end_idx)
+
         }
       }
 
-      return(result)
-    },
-    future.seed = seed  # Base seed for reproducibility
-  )
+      ## Check for models not yet batched ----------------------------------------
 
-  ## Step 8: Compile Results and Create Summary --------------------------------
+      checkpoint_files <- list.files(checkpoint_dir, pattern = "^model_.*\\.qs$", full.names = FALSE)
 
-  # Load any previously completed models if resuming
-  if (resume && length(completed_models) > 0) {
-    previous_results <- list()
+      if (length(checkpoint_files) > 0) {
 
-    # Load from batch files first
-    batch_files <- list.files(checkpoint_dir, pattern = "^batch_.*\\.qs$", full.names = TRUE)
-    for (batch_file in batch_files) {
-      tryCatch({
-        batch_data <- qs::qread(batch_file)
-        previous_results <- c(previous_results, batch_data)
-      }, error = function(e) {
-        cli::cli_alert_warning("Failed to load batch file {basename(batch_file)}: {e$message}")
-      })
+        individual_models <- as.integer(gsub("model_|\\.qs", "", checkpoint_files))
+        individual_models <- individual_models[!is.na(individual_models)]
+        completed_models  <- c(completed_models, individual_models)
+
+      }
+
+      # Remove duplicates and validate -------------------------------------------
+      completed_models <- unique(completed_models)
+      completed_models <- completed_models[completed_models >= 1 & completed_models <= nrow(config)]
+      completed_models <- sort(completed_models)
+
+      ## Report resumption status ------------------------------------------------
+
+      if (length(completed_models) > 0 && verbose) {
+
+        cli::cli_alert_info("Found {length(completed_models)} completed models to resume from")
+        cli::cli_alert_info("Batches: {length(batch_files)}, Individual: {length(checkpoint_files)}")
+
+        }
+
     }
 
-    # Then load any remaining individual checkpoints
-    individual_files <- list.files(checkpoint_dir, pattern = "^model_.*\\.qs$", full.names = TRUE)
-    for (ind_file in individual_files) {
-      tryCatch({
-        ind_data <- qs::qread(ind_file)
-        previous_results <- c(previous_results, list(ind_data))
-      }, error = function(e) {
-        cli::cli_alert_warning("Failed to load checkpoint {basename(ind_file)}: {e$message}")
-      })
-    }
+  ## ---------------------------------------------------------------------------
+  ## Step 4: Data splitting
+  ## ---------------------------------------------------------------------------
 
-    # Combine with newly computed results
-    all_results <- c(previous_results[!sapply(previous_results, is.null)], results)
-  } else {
-    all_results <- results
+  ## Standardize response variable name ----------------------------------------
+
+  input_data %>%
+    dplyr::rename(Response = !!rlang::sym(variable)) -> input_data
+
+  ## Update variable name for downstream use -----------------------------------
+
+  variable <- "Response"
+
+  ## Create train/test split (same for all models) -----------------------------
+
+  set.seed(seed)
+
+  rsample::initial_split(data = input_data,
+                         prop = 0.8,
+                         strata = variable) -> data_split
+
+  ## Report split summary ------------------------------------------------------
+
+  if (verbose) {
+
+    train_n <- nrow(rsample::training(data_split))
+    test_n  <- nrow(rsample::testing(data_split))
+
+    cli::cli_alert_info("Data split: {train_n} training, {test_n} testing samples")
+
   }
 
-  # Separate successful and failed models
+  ## ---------------------------------------------------------------------------
+  ## Step 5: Nested parallelization configuration
+  ## ---------------------------------------------------------------------------
+
+  ## Log start time ------------------------------------------------------------
+
+  start_time <- Sys.time()
+
+  ## Enusre future plan is reset on exit --------------------------------------
+
+  on.exit({
+
+    tryCatch(future::plan(future::sequential),
+             error = function(e) NULL)
+
+    ## Clean up any leftover temp files --------------------------------------
+
+    temp_files <- list.files(checkpoint_dir, pattern = "\\.tmp$", full.names = TRUE)
+
+    if (length(temp_files) > 0) {
+
+      file.remove(temp_files)
+
+    }
+
+  }, add = TRUE)
+
+  ## Setup balanced parallel backend for outer loop ------------------------------
+
+  options(future.scheduling = 2L)
+
+  future::plan(future::multisession,
+               workers = outer_workers)
+
+  ## Report parallelization setup ----------------------------------------------
+
+  if (verbose) {
+
+    cli::cli_alert_info("Configured outer parallelization with {outer_workers} workers")
+
+  }
+
+
+  ## ---------------------------------------------------------------------------
+  ## Step 6: Process all the models using nested setup
+  ## ---------------------------------------------------------------------------
+
+    ## -------------------------------------------------------------------------
+    ## Step 6.1: Identify models to process
+    ## -------------------------------------------------------------------------
+
+    if(resume){
+
+      models_to_process <- setdiff(seq_len(nrow(config)), completed_models)
+
+      if (length(models_to_process) == 0) {
+
+        cli::cli_alert_success("All models already completed! Loading results...")
+
+        lapply(seq_len(nrow(config)), function(i) {
+
+           checkpoint_file <- file.path(checkpoint_dir, sprintf("model_%06d.qs", i))
+
+           if (file.exists(checkpoint_file)) {
+
+             qs::qread(checkpoint_file)
+
+           } else {
+
+             cli::cli_alert_warning("Missing checkpoint for model {i}")
+
+             NULL
+           }
+        }) -> results
+
+        results <- results[!sapply(results, is.null)]
+
+        ## Report loaded models ---------------------------------------------------
+
+        if (verbose) {
+
+          cli::cli_alert_success("Loaded {length(results)} completed models")
+
+        }
+
+        return(results)
+
+      }
+
+    } else {
+
+      models_to_process <- seq_len(nrow(config))
+
+  }
+
+  ## ---------------------------------------------------------------------------
+  ## Step 6.2: Evaluate models in parallel with nested CV
+  ## ---------------------------------------------------------------------------
+
+  ## Set furrr options -------------------------------------------------------
+
+  furrr_opts <- furrr::furrr_options(
+    seed       = NULL,
+    stdout     = FALSE,
+    conditions = NULL,
+    chunk_size = 1,
+    scheduling = Inf
+  )
+
+  ## Run the model evaluation ---------------------------------------------------
+
+  furrr::future_map(.x = models_to_process,
+                    .f = function(i) {
+
+                      ## Run the model in the error handling wrapper -----------
+
+                      safely_execute(expr = {evaluate_configuration(config_row     = config[i, , drop = FALSE],
+                                                                    input_data     = input_data,
+                                                                    data_split     = data_split,
+                                                                    config_id      = i,
+                                                                    covariate_data = covariate_data,
+                                                                    variable       = variable,
+                                                                    output_dir     = output_dir,
+                                                                    grid_size      = grid_size,
+                                                                    bayesian_iter  = bayesian_iter,
+                                                                    cv_folds       = cv_folds,
+                                                                    parallel_cv    = TRUE,
+                                                                    n_cv_cores     = inner_workers,
+                                                                    prune_models   = FALSE,
+                                                                    seed           = seed)},
+                                     default_value      = NULL,
+                                     error_message      = glue::glue("Model {i} failed during evaluation"),
+                                     log_error          = TRUE,
+                                     capture_trace      = FALSE,
+                                     capture_conditions = TRUE) -> result
+
+
+                      ## Store and evaluate the model results ------------------
+
+                      if (!is.null(result$error)) {
+
+                        list(config_id = i,
+                             status    = "failed",
+                             error     = result$error$message,
+                             warnings  = result$warnings,
+                             messages  = result$messages,
+                             metrics   = NULL)
+
+                        } else {
+
+                          result$result
+
+                      } -> final_result
+
+
+                      ## -------------------------------------------------------
+                      ## Step 6.3: Checkpointing and consolidation
+                      ## -------------------------------------------------------
+
+                      ## Save checkpoint for this model with atomic write ------
+
+                      if (!is.null(checkpoint_dir)) {
+
+                        checkpoint_file <- file.path(checkpoint_dir, sprintf("model_%06d.qs", i))
+                        temp_file       <- paste0(checkpoint_file, ".tmp")
+
+                        qs::qsave(final_result, temp_file)
+                        file.rename(temp_file, checkpoint_file)
+
+                      }
+
+                      ## Consolidate every 100 models --------------------------
+
+                      if (i %% 100 == 0) {
+
+                        batch_num  <- i %/% 100
+                        batch_file <- file.path(checkpoint_dir, sprintf("batch_%06d.qs", batch_num))
+
+                        ## Collect the last 100 individual checkpoints ---------
+
+                        start_idx <- (batch_num - 1) * 100 + 1
+                        end_idx   <- i
+
+
+                        lapply(start_idx:end_idx,
+                               function(idx) {
+
+                                 ind_file <- file.path(checkpoint_dir, sprintf("model_%06d.qs", idx))
+                                 if (file.exists(ind_file)) {
+
+                                   qs::qread(ind_file)
+
+                                   } else {
+
+                                     NULL
+                                  }
+                        }) -> batch_results
+
+                        # Save batch file atomically ---------------------------
+
+                        batch_temp <- paste0(batch_file, ".tmp")
+
+                        qs::qsave(batch_results, batch_temp)
+
+                        file.rename(batch_temp, batch_file)
+
+                        # Remove individual files after successful batch save --
+
+                        for (idx in start_idx:end_idx) {
+
+                          ind_file <- file.path(checkpoint_dir, sprintf("model_%06d.qs", idx))
+
+                          if (file.exists(ind_file)) file.remove(ind_file)
+
+                        }
+
+                        if (verbose) {
+
+                          cli::cli_alert_success("Consolidated models {start_idx}-{end_idx} into batch {batch_num}")
+                        }
+                      }
+
+                      ## Return the final results ------------------------------
+
+                      return(final_result)
+          },
+          .options = furrr_opts,
+          .progress = FALSE) -> results
+
+
+  ## ---------------------------------------------------------------------------
+  ## Step 7: Compile and summarize results
+  ## ---------------------------------------------------------------------------
+
+  ## Load resumption models ----------------------------------------------------
+
+  if (resume && length(completed_models) > 0) {
+
+    previous_results <- list()
+
+    ## Batch files -------------------------------------------------------------
+
+    batch_files <- list.files(checkpoint_dir, pattern = "^batch_.*\\.qs$", full.names = TRUE)
+
+    for (batch_file in batch_files) {
+
+      tryCatch({
+
+        batch_data       <- qs::qread(batch_file)
+        previous_results <- c(previous_results, batch_data)
+
+      }, error = function(e) {
+
+        cli::cli_alert_warning("Failed to load batch file {basename(batch_file)}: {e$message}")
+
+      })
+    }
+
+    ## Checkpoint files --------------------------------------------------------
+
+    individual_files <- list.files(checkpoint_dir, pattern = "^model_.*\\.qs$", full.names = TRUE)
+
+    for (ind_file in individual_files) {
+
+      tryCatch({
+
+        ind_data         <- qs::qread(ind_file)
+        previous_results <- c(previous_results, list(ind_data))
+
+      }, error = function(e) {
+
+        cli::cli_alert_warning("Failed to load checkpoint {basename(ind_file)}: {e$message}")
+
+      })
+    }
+
+    ## Combine with computed results -------------------------------------------
+
+    all_results <- c(previous_results[!sapply(previous_results, is.null)], results)
+
+    } else {
+
+      all_results <- results
+  }
+
+
+  ## Separate successful and failed models -------------------------------------
+
   successful_results <- all_results[sapply(all_results, function(x) {
+
     !is.null(x) && (!is.null(x$status) && x$status != "failed")
+
   })]
 
   failed_results <- all_results[sapply(all_results, function(x) {
+
     !is.null(x) && (!is.null(x$status) && x$status == "failed")
+
   })]
 
-  # Calculate execution time
+  ## Calculate execution time --------------------------------------------------
+
   execution_time <- difftime(Sys.time(), start_time, units = "mins")
 
-  # Extract top models if available
+  ## Extract top models --------------------------------------------------------
+
   top_models <- NULL
+
   if (length(successful_results) > 0) {
-    # Extract metrics from successful results
-    model_metrics <- purrr::map_dfr(successful_results, function(res) {
-      if (!is.null(res$metrics)) {
-        tibble::tibble(
-          config_id = res$config_id,
-          workflow_id = res$workflow_id,
-          model = res$config$model,
-          preprocessing = res$config$preprocessing,
-          transformation = res$config$transformation,
-          feature_selection = res$config$feature_selection,
-          rrmse = res$metrics$.estimate[res$metrics$.metric == "rrmse"][1],
-          rsq = res$metrics$.estimate[res$metrics$.metric == "rsq"][1],
-          ccc = res$metrics$.estimate[res$metrics$.metric == "ccc"][1],
-          rpd = res$metrics$.estimate[res$metrics$.metric == "rpd"][1]
-        )
-      }
-    })
+
+    purrr::map_dfr(successful_results,
+                   function(res) {
+
+                     if (!is.null(res$metrics)) {
+
+                       tibble::tibble(config_id         = res$config_id,
+                                      workflow_id       = res$workflow_id,
+                                      model             = res$config$model,
+                                      preprocessing     = res$config$preprocessing,
+                                      transformation    = res$config$transformation,
+                                      feature_selection = res$config$feature_selection,
+                                      rrmse             = res$metrics$.estimate[res$metrics$.metric == "rrmse"][1],
+                                      rsq               = res$metrics$.estimate[res$metrics$.metric == "rsq"][1],
+                                      ccc               = res$metrics$.estimate[res$metrics$.metric == "ccc"][1],
+                                      rpd               = res$metrics$.estimate[res$metrics$.metric == "rpd"][1])
+                     }
+                   }) -> model_metrics
+
 
     if (nrow(model_metrics) > 0) {
-      top_models <- model_metrics %>%
+
+      model_metrics %>%
         dplyr::arrange(rrmse) %>%
-        dplyr::slice_head(n = 5)
+        dplyr::slice_head(n = 5) -> top_models
+
     }
   }
 
-  # Print attractive summary
+  ## Print a nice summary ------------------------------------------------------
+
   if (verbose) {
+
     cli::cli_h1("HPC Evaluation Complete")
 
-    # Execution summary
     cli::cli_h2("Execution Summary")
     cli::cli_alert_success("Total models: {nrow(config)}")
     cli::cli_alert_info("Completed: {length(successful_results)}")
+
     if (length(failed_results) > 0) {
+
       cli::cli_alert_warning("Failed: {length(failed_results)}")
+
     }
+
     if (length(completed_models) > 0) {
+
       cli::cli_alert_info("Previously completed (resumed): {length(completed_models)}")
+
     }
+
     cli::cli_alert_info("Execution time: {round(as.numeric(execution_time), 1)} minutes")
     cli::cli_alert_info("Parallel configuration: {outer_workers} outer × {inner_workers} inner workers")
 
     # Top models
+
     if (!is.null(top_models) && nrow(top_models) > 0) {
+
       cli::cli_h2("Top 5 Models by RRMSE")
+
       for (i in 1:nrow(top_models)) {
+
         m <- top_models[i, ]
-        cli::cli_alert_info(
-          "{i}. {m$model} | {m$preprocessing} | {m$transformation} | RRMSE: {round(m$rrmse, 4)}"
-        )
+        cli::cli_alert_info("{i}. {m$model} | {m$preprocessing} | {m$transformation} | RRMSE: {round(m$rrmse, 4)}")
       }
     }
 
-    # Output directory structure
+    ## Output directory structure ----------------------------------------------
+
     cli::cli_h2("Output Directory Structure")
     cli::cli_text("{.path {output_dir}/}")
     cli::cli_text("├── {.file checkpoints/}")
@@ -500,43 +702,44 @@ evaluate_models_hpc <- function(config,
     cli::cli_text("└── {.file summary/}")
   }
 
-  # Return summary information
-  summary_output <- list(
-    execution = list(
-      n_total = nrow(config),
-      n_successful = length(successful_results),
-      n_failed = length(failed_results),
-      n_resumed = length(completed_models),
-      time_minutes = as.numeric(execution_time),
-      timestamp = Sys.time()
-    ),
-    configuration = list(
-      outer_workers = outer_workers,
-      inner_workers = inner_workers,
-      total_cores = outer_workers * inner_workers,
-      seed = seed
-    ),
-    paths = list(
-      output_dir = output_dir,
-      checkpoint_dir = checkpoint_dir,
-      results_dir = file.path(output_dir, "results"),
-      errors_dir = file.path(output_dir, "errors")
-    ),
-    top_models = top_models
-  )
+  ## Return summary information ------------------------------------------------
+
+  list(execution = list(n_total      = nrow(config),
+                        n_successful = length(successful_results),
+                        n_failed     = length(failed_results),
+                        n_resumed    = length(completed_models),
+                        time_minutes = as.numeric(execution_time),
+                        timestamp    = Sys.time()),
+
+       configuration = list(outer_workers = outer_workers,
+                            inner_workers = inner_workers,
+                            total_cores   = outer_workers * inner_workers,
+                            seed          = seed),
+
+       paths = list(output_dir     = output_dir,
+                    checkpoint_dir = checkpoint_dir,
+                    results_dir    = file.path(output_dir, "results"),
+                    errors_dir     = file.path(output_dir, "errors")),
+
+       top_models = top_models) -> summary_output
 
   class(summary_output) <- c("horizons_hpc_summary", "list")
 
-  # Save summary to file for later reference
+  ## Save summary to file for later reference ----------------------------------
+
   summary_file <- file.path(output_dir, "summary", "evaluation_summary.qs")
-  tryCatch({
-    qs::qsave(summary_output, summary_file)
-    if (verbose) {
-      cli::cli_alert_success("Summary saved to: {summary_file}")
-    }
-  }, error = function(e) {
-    cli::cli_alert_warning("Failed to save summary: {e$message}")
-  })
+
+  qs::qsave(summary_output, summary_file)
+
+  if (verbose) {
+
+    cli::cli_alert_success("Summary saved to: {summary_file}")
+
+  }
+
+  ## ---------------------------------------------------------------------------
+  ## Step 8: fin
+  ## ---------------------------------------------------------------------------
 
   return(invisible(summary_output))
 }

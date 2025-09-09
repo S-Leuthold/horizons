@@ -256,38 +256,14 @@ evaluate_configuration <- function(config_row,
        feature_selection = extract_safe_config_value(config_row$feature_selection, "feature_selection", config_id)) -> config_clean
 
   ## -------------------------------------------------------------------------
-  ## Step 3.2: Handle Covariates from List Column (with Closure Safety)
+  ## Step 3.2: Handle Covariates from List Column (Original Simple Approach)
   ## -------------------------------------------------------------------------
 
   if ("covariates" %in% names(config_row)) {
-
-    cov_value <- config_row$covariates[[1]]
-
-    # CRITICAL FIX: Check for closure/function before processing
-    if (is.function(cov_value) || "closure" %in% class(cov_value)) {
-
-      # Log the error with detailed information for debugging
-      cli::cli_abort(paste0("▶ evaluate_configuration: Closure detected in covariates for config_id {config_id}.",
-                           " This indicates a parallel processing variable scoping issue.",
-                           " Covariate class: {paste(class(cov_value), collapse = ', ')}.",
-                           " This error occurs when list columns contain unevaluated expressions",
-                           " that become closures in parallel worker environments.",
-                           " Fix: Apply parallel-safe covariate processing before model evaluation."))
-
-    } else if (is.null(cov_value) || length(cov_value) == 0) {
-
-      config_clean$covariates <- NULL
-
-    } else {
-
-      # Additional safety: Force character coercion
-      config_clean$covariates <- tryCatch({
-        as.character(cov_value)
-      }, error = function(e) {
-        cli::cli_abort("▶ evaluate_configuration: Cannot convert covariates to character for config_id {config_id}: {e$message}")
-      })
-
-    }
+    
+    # Simple extraction like in the original code
+    # config_row$covariates should be a list column with character vectors or NULL
+    config_clean$covariates <- config_row$covariates[[1]]
 
   } else {
 
