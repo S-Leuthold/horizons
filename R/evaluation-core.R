@@ -310,7 +310,12 @@ evaluate_configuration <- function(config_row,
     return(create_failed_result(config_id     = config_id,
                                 config_clean  = config_clean,
                                 error_message = glue::glue("Recipe building failed: {actual_error}"),
-                                workflow_id   = workflow_id))
+                                workflow_id   = workflow_id,
+                                error_detail  = recipe_result$error,
+                                error_stage   = "recipe_building",
+                                error_trace   = recipe_result$trace,
+                                warnings      = recipe_result$warnings,
+                                messages      = recipe_result$messages))
 
   }
 
@@ -345,7 +350,12 @@ evaluate_configuration <- function(config_row,
         config_id     = config_id,
         config_clean  = config_clean,
         error_message = glue::glue("Model specification failed: {actual_error}"),
-        workflow_id   = workflow_id
+        workflow_id   = workflow_id,
+        error_detail  = model_spec_result$error,
+        error_stage   = "model_specification",
+        error_trace   = model_spec_result$trace,
+        warnings      = model_spec_result$warnings,
+        messages      = model_spec_result$messages
       )
     )
 
@@ -373,7 +383,12 @@ evaluate_configuration <- function(config_row,
     return(create_failed_result(config_id     = config_id,
                                 config_clean  = config_clean,
                                 error_message = glue::glue("Workflow creation failed: {actual_error}"),
-                                workflow_id   = workflow_id))
+                                workflow_id   = workflow_id,
+                                error_detail  = wflow_result$error,
+                                error_stage   = "workflow_creation",
+                                error_trace   = wflow_result$trace,
+                                warnings      = wflow_result$warnings,
+                                messages      = wflow_result$messages))
 
     }
 
@@ -553,7 +568,12 @@ evaluate_configuration <- function(config_row,
         config_id     = config_id,
         config_clean  = config_clean,
         error_message = glue::glue("Grid tuning failed: {actual_error}"),
-        workflow_id   = workflow_id
+        workflow_id   = workflow_id,
+        error_detail  = grid_tune_result$error,
+        error_stage   = "grid_tuning",
+        error_trace   = grid_tune_result$trace,
+        warnings      = grid_tune_result$warnings,
+        messages      = grid_tune_result$messages
       )
     )
 
@@ -665,13 +685,22 @@ evaluate_configuration <- function(config_row,
 
     if (is.null(bayes_tune_result$result)) {
 
-      # If Bayesian fails, keep grid results
+      # If Bayesian fails, keep grid results but log the warning
       cli::cli_alert_warning("Bayesian optimization failed, using grid results")
+      if (bayes_tune_result$n_warnings > 0) {
+        cli::cli_alert_info("Warnings during Bayesian optimization: {bayes_tune_result$warnings[[1]]}")
+      }
       final_tune_results <- grid_results
+      # Store Bayesian failure info for potential logging later
+      bayes_error_info <- list(
+        error = bayes_tune_result$error,
+        warnings = bayes_tune_result$warnings
+      )
 
     } else {
 
       final_tune_results <- bayes_tune_result$result
+      bayes_error_info <- NULL
 
     }
 
@@ -780,7 +809,12 @@ evaluate_configuration <- function(config_row,
         config_id     = config_id,
         config_clean  = config_clean,
         error_message = glue::glue("Final model fitting failed: {actual_error}"),
-        workflow_id   = workflow_id
+        workflow_id   = workflow_id,
+        error_detail  = final_fit_result$error,
+        error_stage   = "final_fitting",
+        error_trace   = final_fit_result$trace,
+        warnings      = final_fit_result$warnings,
+        messages      = final_fit_result$messages
       )
     )
 
@@ -846,7 +880,14 @@ evaluate_configuration <- function(config_row,
                  total_seconds     = as.numeric(difftime(Sys.time(), start_time, units = "secs")),
                  # Status
                  status            = if (skip_bayesian) "pruned" else "success",
-                 error_message     = NA_character_
+                 error_message     = NA_character_,
+                 # Error tracking fields (NA for successful models)
+                 error_stage       = NA_character_,
+                 error_class       = NA_character_,
+                 has_trace         = FALSE,
+                 # Warning/message tracking (currently placeholders)
+                 n_warnings        = 0L,  # TODO: Aggregate warnings from all stages
+                 warning_summary   = NA_character_
                  # Note: fitted_workflow removed to prevent memory leak
                  # Use fit_final_models() function separately for model stacking
   )

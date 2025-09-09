@@ -116,7 +116,6 @@ Collate:
     'utils-ossl.R'
     'utils-cluster_predictors.R'
     'utils_download_horizons_data.R'
-    'utils_error_handling.R'
     'utils_find_cache_path.R'
     'utils_get_processed_ossl_mir.R'
     'metrics-ccc.R'

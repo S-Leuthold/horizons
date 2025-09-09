@@ -1,8 +1,8 @@
-#' Safely Evaluate an Expression with Optional Logging and Tracing
+#' Safely Evaluate an Expression with Optional Logging and Condition Capture
 #'
 #' Evaluates an expression using `purrr::safely()` to prevent errors from halting execution.
 #' If an error occurs, it returns a default value, optionally logs a custom message,
-#' and can capture the call trace for debugging.
+#' and can capture the call trace for debugging. Can also capture warnings and messages.
 #'
 #' @param expr An expression to evaluate, passed unquoted.
 #' @param default_value Value to return if the expression errors. Default is `NULL`.
@@ -10,12 +10,17 @@
 #' @param log_error Logical. If `TRUE` (default), logs the error using `cli::cli_warn()`.
 #' @param capture_trace Logical. If `TRUE`, captures a traceback using `rlang::trace_back()`.
 #' @param trace_log_file Optional file path to write the trace, if `capture_trace = TRUE`.
+#' @param capture_conditions Logical. If `TRUE`, captures warnings and messages. Default is `FALSE`.
 #'
 #' @return A named list with elements:
 #' \describe{
 #'   \item{`result`}{The evaluated result or `default_value` if an error occurred.}
 #'   \item{`error`}{The error object, or `NULL` if the evaluation succeeded.}
 #'   \item{`trace`}{A trace object from `rlang`, or `NULL` if not captured.}
+#'   \item{`warnings`}{List of warning conditions if `capture_conditions = TRUE`.}
+#'   \item{`messages`}{List of message conditions if `capture_conditions = TRUE`.}
+#'   \item{`n_warnings`}{Count of warnings captured.}
+#'   \item{`n_messages`}{Count of messages captured.}
 #' }
 #'
 #' @details
@@ -42,11 +47,12 @@
 
 
 safely_execute <- function(expr,
-                           default_value   = NULL,
-                           error_message   = NULL,
-                           log_error       = TRUE,
-                           capture_trace   = FALSE,
-                           trace_log_file  = NULL) {
+                           default_value      = NULL,
+                           error_message      = NULL,
+                           log_error          = TRUE,
+                           capture_trace      = FALSE,
+                           trace_log_file     = NULL,
+                           capture_conditions = FALSE) {
 
   ## ---------------------------------------------------------------------------
   ## Step 1: Capture the incoming code block.
@@ -56,21 +62,48 @@ safely_execute <- function(expr,
   caller_env <- rlang::caller_env()
 
   ## ---------------------------------------------------------------------------
-  ## Step 2: Create a safely-wrapped function to evaluate the code block.
+  ## Step 2: Create storage for conditions if requested.
   ## ---------------------------------------------------------------------------
 
   error_trace <- NULL
+  captured_warnings <- list()
+  captured_messages <- list()
+  
+  ## ---------------------------------------------------------------------------
+  ## Step 3: Create a safely-wrapped function to evaluate the code block.
+  ## ---------------------------------------------------------------------------
   
   safe_eval <- purrr::safely(function() {
     
-    withCallingHandlers(
-      rlang::eval_tidy(expr_quo, env = caller_env),
-      error = function(cnd) {
-        # Capture trace at the moment of error
-        error_trace <<- rlang::trace_back()
-        # Let the original error propagate - safely() will catch it
-      }
-    )
+    if (capture_conditions) {
+      # Capture warnings and messages in addition to errors
+      withCallingHandlers(
+        rlang::eval_tidy(expr_quo, env = caller_env),
+        warning = function(w) {
+          captured_warnings <<- append(captured_warnings, list(conditionMessage(w)))
+          invokeRestart("muffleWarning")
+        },
+        message = function(m) {
+          captured_messages <<- append(captured_messages, list(conditionMessage(m)))
+          invokeRestart("muffleMessage")
+        },
+        error = function(cnd) {
+          # Capture trace at the moment of error
+          error_trace <<- rlang::trace_back()
+          # Let the original error propagate - safely() will catch it
+        }
+      )
+    } else {
+      # Original behavior - just capture errors
+      withCallingHandlers(
+        rlang::eval_tidy(expr_quo, env = caller_env),
+        error = function(cnd) {
+          # Capture trace at the moment of error
+          error_trace <<- rlang::trace_back()
+          # Let the original error propagate - safely() will catch it
+        }
+      )
+    }
     
   }, otherwise = default_value, quiet = TRUE)
 
@@ -128,10 +161,42 @@ safely_execute <- function(expr,
   }
 
   ## ---------------------------------------------------------------------------
-  ## Step 5: Return result, error, and trace.
+  ## Step 5: Return result, error, trace, and captured conditions.
   ## ---------------------------------------------------------------------------
 
-  return(list(result = result_list$result,
-              error  = result_list$error,
-              trace  = trace))
+  return(list(result      = result_list$result,
+              error       = result_list$error,
+              trace       = trace,
+              warnings    = captured_warnings,
+              messages    = captured_messages,
+              n_warnings  = length(captured_warnings),
+              n_messages  = length(captured_messages)))
+}
+
+#' Safely Execute with Condition Capture
+#'
+#' @description
+#' Convenience wrapper for safely_execute that always captures warnings and messages.
+#' Useful for debugging and quality control where you need to track all conditions,
+#' not just errors.
+#'
+#' @inheritParams safely_execute
+#' 
+#' @return Same as safely_execute but with capture_conditions always TRUE
+#' 
+#' @export
+safely_execute_with_conditions <- function(expr,
+                                          default_value  = NULL,
+                                          error_message  = NULL,
+                                          log_error      = TRUE,
+                                          capture_trace  = FALSE,
+                                          trace_log_file = NULL) {
+  
+  safely_execute(expr            = expr,
+                default_value   = default_value,
+                error_message   = error_message,
+                log_error       = log_error,
+                capture_trace   = capture_trace,
+                trace_log_file  = trace_log_file,
+                capture_conditions = TRUE)
 }
