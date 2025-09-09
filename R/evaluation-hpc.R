@@ -122,55 +122,61 @@ evaluate_models_hpc <- function(config,
     }
 
     ## -------------------------------------------------------------------------
-    ## Step 2.2: Specify thread controls
+    ## Step 2.2: Thread control verification
     ## -------------------------------------------------------------------------
 
-    ## Determine environment spectifications -----------------------------------
+    ## Check critical thread environment variables ------------------------------
 
-    context <- detect_parallel_context(verbose = FALSE)
+    list(OMP_NUM_THREADS        = Sys.getenv("OMP_NUM_THREADS", unset = NA),
+         OPENBLAS_NUM_THREADS   = Sys.getenv("OPENBLAS_NUM_THREADS", unset = NA),
+         MKL_NUM_THREADS        = Sys.getenv("MKL_NUM_THREADS", unset = NA),
+         VECLIB_MAXIMUM_THREADS = Sys.getenv("VECLIB_MAXIMUM_THREADS", unset = NA)) -> thread_vars
 
-    ## Set package specific threading options ----------------------------------
+    ## Check if any are unset or not equal to 1 --------------------------------
+
+    unset_vars <- names(thread_vars)[is.na(thread_vars)]
+    bad_vars   <- names(thread_vars)[!is.na(thread_vars) & thread_vars != "1"]
+
+    ## Warn user if thread control is not properly configured ------------------
+
+    if (verbose && (length(unset_vars) > 0 || length(bad_vars) > 0)) {
+
+      cli::cli_alert_warning("Thread control not properly configured for HPC")
+
+      if (length(unset_vars) > 0) {
+
+        cli::cli_alert_danger("Unset variables: {paste(unset_vars, collapse = ', ')}")
+
+      }
+
+      if (length(bad_vars) > 0) {
+
+        cli::cli_alert_danger("Variables not set to 1: {paste(bad_vars, '=', thread_vars[bad_vars], collapse = ', ')}")
+
+      }
+
+      cli::cli_alert_info("Add to your HPC submission script:")
+
+      cli::cli_code(c("export OMP_NUM_THREADS=1",
+                      "export OPENBLAS_NUM_THREADS=1",
+                      "export MKL_NUM_THREADS=1",
+                      "export VECLIB_MAXIMUM_THREADS=1"))
+
+      cli::cli_alert_warning("Proceeding anyway - thread oversubscription may occur")
+
+    } else if (verbose) {
+
+      cli::cli_alert_success("Thread control properly configured (all set to 1)")
+
+    }
+
+    ## Set package-specific threading ------------------------------------------
 
     data.table::setDTthreads(1)
 
-    ## Set context specific options --------------------------------------------
-
-    if (context$use_forking) {
-
-      options(mc.cores           = inner_workers,
-              ranger.num.threads = 1,
-              xgboost.nthread    = 1)
-
-      Sys.setenv(MC_CORES = as.character(inner_workers))
-
-      } else {
-
-        options(mc.cores           = 1,
-                ranger.num.threads = 1,
-                xgboost.nthread    = 1)
-
-        Sys.setenv(MC_CORES                          = as.character(inner_workers),
-                   R_PARALLELLY_MAXWORKERS_LOCALHOST = "999999")
-
-    }
-
-    ## Report results, warn if further config needed ---------------------------
-
-    if (verbose) {
-      current_omp <- Sys.getenv("OMP_NUM_THREADS", unset = NA)
-
-      if (is.na(current_omp) || current_omp != "1") {
-
-        cli::cli_alert_warning("OMP_NUM_THREADS not set to 1 - may cause thread oversubscription")
-        cli::cli_alert_info("Recommend setting in HPC submission script: export OMP_NUM_THREADS=1")
-
-      }
-      
-      # TODO: Add more comprehensive thread checking and advice for users
-
-      cli::cli_alert_info("Parallel context: {context$context} ({context$recommended_backend})")
-
-    }
+    options(mc.cores           = inner_workers,
+            ranger.num.threads = 1,
+            xgboost.nthread    = 1)
 
     ## Update status before moving on ------------------------------------------
 
@@ -349,7 +355,8 @@ evaluate_models_hpc <- function(config,
 
   options(future.scheduling = 2L)
 
-  future::plan(future::multisession,
+  # HPC systems are always Unix/Linux - use multicore (FORK) for shared memory
+  future::plan(future::multicore,
                workers = outer_workers)
 
   ## Report parallelization setup ----------------------------------------------
