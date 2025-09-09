@@ -93,17 +93,27 @@ get_readable_preprocessing_name <- function(preprocessing_id) {
   
   preprocessing_names <- c(
     "raw"          = "Raw Spectra",
+    "Raw"          = "Raw Spectra",
     "sg"           = "Savitzky-Golay Smoothing",
+    "SG"           = "Savitzky-Golay Smoothing",
     "snv"          = "Standard Normal Variate",
+    "SNV"          = "Standard Normal Variate",
     "deriv1"       = "First Derivative",
+    "D1"           = "First Derivative",
     "deriv2"       = "Second Derivative",
+    "D2"           = "Second Derivative",
     "snv_deriv1"   = "SNV + First Derivative",
     "snv_deriv2"   = "SNV + Second Derivative",
     "SNVD1"        = "SNV + First Derivative",
     "SNVD2"        = "SNV + Second Derivative"
   )
   
-  preprocessing_names[preprocessing_id] %||% preprocessing_id
+  # First try exact match, then lowercase match
+  result <- preprocessing_names[preprocessing_id]
+  if (is.na(result)) {
+    result <- preprocessing_names[tolower(preprocessing_id)]
+  }
+  result %||% preprocessing_id
 }
 
 #' Get Human-Readable Transformation Name
@@ -118,6 +128,7 @@ get_readable_transformation_name <- function(transformation_id) {
   
   transformation_names <- c(
     "none"          = "None",
+    "notrans"       = "None",
     "sqrt"          = "Square Root",
     "log"           = "Logarithmic",
     # Legacy mappings for backward compatibility
@@ -126,7 +137,12 @@ get_readable_transformation_name <- function(transformation_id) {
     "Log"           = "Logarithmic"
   )
   
-  transformation_names[tolower(transformation_id)] %||% transformation_id
+  # First try exact match, then lowercase match
+  result <- transformation_names[transformation_id]
+  if (is.na(result)) {
+    result <- transformation_names[tolower(transformation_id)]
+  }
+  result %||% transformation_id
 }
 
 #' Get Human-Readable Feature Selection Name
@@ -222,12 +238,12 @@ get_readable_covariate_name <- function(covariate_id) {
 #' @keywords internal
 parse_workflow_id <- function(workflow_id) {
   
-  # Define patterns for each component
+  # Define patterns for each component (including NA as a valid value)
   model_pattern <- "^(plsr|random_forest|elastic_net|cubist|xgboost|lightgbm|svm_rbf|mars|mlp_nn)"
-  transformation_pattern <- "_(NoTrans|Log|Sqrt)"
-  preprocessing_pattern <- "_(raw|snv|SNVD1|SNVD2|sg|deriv1|deriv2|snv_deriv1|snv_deriv2)"
-  feature_selection_pattern <- "_(None|PCA|Boruta|CARS|Corr|remove_correlated|vip|rfe|boruta|cars)"
-  covariates_pattern <- "_([^_]+)$"  # Everything after the last underscore
+  transformation_pattern <- "_(NA|NoTrans|Log|Sqrt)"
+  preprocessing_pattern <- "_(NA|Raw|raw|SNV|snv|SNVD1|SNVD2|SG|sg|D1|D2|deriv1|deriv2|snv_deriv1|snv_deriv2)"
+  feature_selection_pattern <- "_(NA|NoFeatSel|None|PCA|Boruta|CARS|Corr|VIP|RFE|remove_correlated|vip|rfe|boruta|cars)"
+  covariates_pattern <- "_(NA|NoCovs|[^_]+)$"  # Everything after the last underscore including NA and NoCovs
   
   # Extract components using regex
   model <- stringr::str_extract(workflow_id, model_pattern)
@@ -253,21 +269,28 @@ parse_workflow_id <- function(workflow_id) {
   covariates <- if (nchar(remaining) > 0) remaining else NULL
   
   # Handle defaults for missing components
-  model <- model %||% "unknown"
-  transformation <- transformation %||% "NoTrans"
-  preprocessing <- preprocessing %||% "raw"
-  feature_selection <- feature_selection %||% "None"
+  # Use proper defaults when components are NA (either R's NA or the string "NA")
+  if (is.na(model) || model == "NA") model <- "unknown"
+  if (is.na(transformation) || transformation == "NA") transformation <- "NoTrans"
+  if (is.na(preprocessing) || preprocessing == "NA") preprocessing <- "raw"
+  if (is.na(feature_selection) || feature_selection == "NA") feature_selection <- "None"
   
   list(
     model             = get_readable_model_name(model),
     transformation    = get_readable_transformation_name(transformation),
     preprocessing     = get_readable_preprocessing_name(preprocessing),
     feature_selection = get_readable_feature_selection_name(feature_selection),
-    covariates        = if (!is.null(covariates)) {
+    covariates        = if (!is.null(covariates) && covariates != "NoCovs" && covariates != "NA") {
                           # Handle compound covariates with + signs
                           covariate_parts <- unlist(stringr::str_split(covariates, "\\+"))
-                          readable_parts <- sapply(covariate_parts, get_readable_covariate_name)
-                          paste(readable_parts, collapse = " + ")
+                          # Filter out "NA" strings from the parts
+                          covariate_parts <- covariate_parts[covariate_parts != "NA" & nzchar(covariate_parts)]
+                          if (length(covariate_parts) > 0) {
+                            readable_parts <- sapply(covariate_parts, get_readable_covariate_name)
+                            paste(readable_parts, collapse = " + ")
+                          } else {
+                            "None"
+                          }
                         } else {
                           "None"
                         }
