@@ -68,13 +68,13 @@ safely_execute <- function(expr,
   error_trace <- NULL
   captured_warnings <- list()
   captured_messages <- list()
-  
+
   ## ---------------------------------------------------------------------------
   ## Step 3: Create a safely-wrapped function to evaluate the code block.
   ## ---------------------------------------------------------------------------
-  
+
   safe_eval <- purrr::safely(function() {
-    
+
     if (capture_conditions) {
       # Capture warnings and messages in addition to errors
       withCallingHandlers(
@@ -104,7 +104,7 @@ safely_execute <- function(expr,
         }
       )
     }
-    
+
   }, otherwise = default_value, quiet = TRUE)
 
   ## ---------------------------------------------------------------------------
@@ -181,9 +181,9 @@ safely_execute <- function(expr,
 #' not just errors.
 #'
 #' @inheritParams safely_execute
-#' 
+#'
 #' @return Same as safely_execute but with capture_conditions always TRUE
-#' 
+#'
 #' @export
 safely_execute_with_conditions <- function(expr,
                                           default_value  = NULL,
@@ -191,7 +191,7 @@ safely_execute_with_conditions <- function(expr,
                                           log_error      = TRUE,
                                           capture_trace  = FALSE,
                                           trace_log_file = NULL) {
-  
+
   safely_execute(expr            = expr,
                 default_value   = default_value,
                 error_message   = error_message,
@@ -199,4 +199,167 @@ safely_execute_with_conditions <- function(expr,
                 capture_trace   = capture_trace,
                 trace_log_file  = trace_log_file,
                 capture_conditions = TRUE)
+}
+
+#' Handle results from safely_execute with detailed error reporting
+#'
+#' @description
+#' Processes the output from safely_execute, providing detailed error reporting
+#' when operations fail. Extracts and formats errors, warnings, and messages
+#' for clear user feedback.
+#'
+#' @param safe_result List from safely_execute containing result, error, warnings, messages
+#' @param error_title Character. Main error message to display
+#' @param error_hints Character vector. Troubleshooting suggestions (optional)
+#' @param abort_on_null Logical. Whether to abort if result is NULL (default: TRUE)
+#' @param silent Logical. Suppress non-error output (default: FALSE)
+#'
+#' @return The result from safe_result, or NULL if abort_on_null = FALSE
+#'
+#' @examples
+#' \dontrun{
+#' safe_result <- safely_execute(
+#'   expr = {some_risky_operation()},
+#'   default_value = NULL
+#' )
+#'
+#' result <- handle_safe_result(
+#'   safe_result,
+#'   error_title = "Operation failed",
+#'   error_hints = c(
+#'     "Check input data format",
+#'     "Ensure all dependencies are loaded"
+#'   )
+#' )
+#' }
+#'
+#' @export
+handle_results <- function(safe_result,
+                           error_title    = "Operation failed",
+                           error_hints    = NULL,
+                           abort_on_null  = TRUE,
+                           silent         = FALSE) {
+
+  ## ---------------------------------------------------------------------------
+  ## Validate input structure
+  ## ---------------------------------------------------------------------------
+
+  if (!is.list(safe_result) || !all(c("result", "error") %in% names(safe_result))) {
+
+    cli::cli_abort("Invalid safe_result structure. Expected output from safely_execute()")
+
+  }
+
+  result <- safe_result$result
+
+  ## ---------------------------------------------------------------------------
+  ## Success case - return result with optional warnings/messages
+  ## ---------------------------------------------------------------------------
+
+  if (!is.null(result)) {
+
+    # Show any warnings/messages even on success (unless silent)
+    if (!silent) {
+
+      if (!is.null(safe_result$warnings) && length(safe_result$warnings) > 0) {
+
+        for (w in safe_result$warnings) {
+          cli::cli_alert_warning(w)
+        }
+
+      }
+
+      if (!is.null(safe_result$messages) && length(safe_result$messages) > 0) {
+
+        for (m in safe_result$messages) {
+          cli::cli_alert_info(m)
+        }
+
+      }
+    }
+
+    return(result)
+  }
+
+  ## ---------------------------------------------------------------------------
+  ## Handle NULL result - either return NULL or abort
+  ## ---------------------------------------------------------------------------
+
+  if (!abort_on_null) {
+    return(NULL)
+  }
+
+  ## ---------------------------------------------------------------------------
+  ## Build comprehensive error message for cli_abort
+  ## ---------------------------------------------------------------------------
+
+  error_components <- list()
+
+  # Extract main error if present
+  if (!is.null(safe_result$error)) {
+
+    error_components$error <- paste("Error:", safe_result$error$message)
+
+  }
+
+  # Extract warnings if present
+  if (!is.null(safe_result$warnings) && length(safe_result$warnings) > 0) {
+
+    error_components$warnings <- paste("Warning:", safe_result$warnings)
+
+  }
+
+  # Extract messages if present
+  if (!is.null(safe_result$messages) && length(safe_result$messages) > 0) {
+
+    error_components$messages <- paste("Info:", safe_result$messages)
+
+  }
+
+  ## ---------------------------------------------------------------------------
+  ## Construct cli_abort message with proper formatting
+  ## ---------------------------------------------------------------------------
+
+  abort_msg <- error_title
+
+  # Add hints with proper naming for cli formatting
+  if (!is.null(error_hints) && length(error_hints) > 0) {
+
+    abort_msg <- c(abort_msg, setNames(error_hints, rep("i", length(error_hints))))
+
+  }
+
+  # Add error details if present
+  if (length(error_components) > 0) {
+
+    # Add spacing for readability
+    abort_msg <- c(abort_msg, " ")
+
+    # Add error with x bullet
+    if (!is.null(error_components$error)) {
+
+      abort_msg <- c(abort_msg, setNames(error_components$error, "x"))
+
+    }
+
+    # Add warnings with ! bullet
+    if (!is.null(error_components$warnings)) {
+
+      abort_msg <- c(abort_msg,
+                     setNames(error_components$warnings,
+                             rep("!", length(error_components$warnings))))
+
+    }
+
+    # Add messages with * bullet
+    if (!is.null(error_components$messages)) {
+
+      abort_msg <- c(abort_msg,
+                     setNames(error_components$messages,
+                             rep("*", length(error_components$messages))))
+
+    }
+  }
+
+  cli::cli_abort(abort_msg)
 }

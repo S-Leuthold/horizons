@@ -185,7 +185,6 @@ evaluate_models_hpc <- function(config,
       cli::cli_h1("HPC Evaluation")
       cli::cli_alert_info("Workers: {outer_workers} outer × {inner_workers} inner = {total_requested} cores")
       cli::cli_alert_info("Models to evaluate: {nrow(config)}")
-      cli::cli_alert_success("Thread safety controls applied")
 
     }
 
@@ -353,10 +352,7 @@ evaluate_models_hpc <- function(config,
 
   ## Setup balanced parallel backend for outer loop ------------------------------
 
-  options(future.scheduling = 2L)
-
-  # HPC systems are always Unix/Linux - use multicore (FORK) for shared memory
-  future::plan(future::multicore,
+  future::plan(future::multisession,
                workers = outer_workers)
 
   ## Report parallelization setup ----------------------------------------------
