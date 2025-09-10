@@ -18,7 +18,9 @@
 #' @importFrom glue glue
 #' @keywords internal
 
-## Property Mapping Functions ------------------------------------------------
+## -----------------------------------------------------------------------------
+## 1. Property Mapping Functions
+## -----------------------------------------------------------------------------
 
 #' Get OSSL Property Mapping
 #'
@@ -37,102 +39,91 @@
 get_ossl_property_mapping <- function() {
 
   tibble::tibble(
-    property = c(
-      "clay",
-      "sand",
-      "silt",
-      "ph",
-      "oc",
-      "cec",
-      "bulk_density",
-      "total_nitrogen",
-      "carbonate",
-      "phosphorus",
-      "potassium",
-      "calcium",
-      "magnesium",
-      "sodium",
-      "aluminum_crystalline",
-      "iron_amorphous"
-    ),
-
-    analyte = c(
-      "Clay, iso 11277",
-      "Sand, Total, iso 11277",
-      "Silt, Total, iso 11277",
-      "pH, 1:1 Soil-Water Suspension, iso 10390",
-      "Organic_Carbon, iso 10694",
-      "CEC, pH 7.0, iso 11260",
-      "Bulk Density, iso 11272",
-      "Nitrogen, Total NCS, iso 11261",
-      "Carbonate, iso 10693",
-      "Phosphorus, Extractable, Mehlich3",
-      "Potassium, Extractable, NH4OAc, 2M KCl displacement",
-      "Calcium, Extractable, NH4OAc",
-      "Magnesium, Extractable, NH4OAc, 2M KCl displacement",
-      "Sodium, Extractable, NH4OAc, 2M KCl displacement",
-      "Aluminum, Crystalline, Total Pedogenic Iron",
-      "Iron, Amorphous, Total Non-Crystalline Iron"
-    ),
-
-    description = c(
-      "Clay content by particle size analysis",
-      "Sand content by particle size analysis",
-      "Silt content by particle size analysis",
-      "Soil pH in water suspension",
-      "Organic carbon content",
-      "Cation exchange capacity at pH 7.0",
-      "Soil bulk density",
-      "Total nitrogen content",
-      "Carbonate content",
-      "Plant-available phosphorus (Mehlich-3)",
-      "Exchangeable potassium",
-      "Exchangeable calcium",
-      "Exchangeable magnesium",
-      "Exchangeable sodium",
-      "Crystalline aluminum content",
-      "Amorphous iron content"
-    ),
-
-    target_unit = c(
-      "g/kg",
-      "g/kg",
-      "g/kg",
-      "unitless",
-      "g/kg",
-      "cmolc/kg",
-      "g/cm³",
-      "g/kg",
-      "g/kg",
-      "mg/kg",
-      "cmolc/kg",
-      "cmolc/kg",
-      "cmolc/kg",
-      "cmolc/kg",
-      "% mass",
-      "% mass"
-    ),
-
-    # OSSL internal variable names (verified from sysdata)
-    ossl_name_level1 = c(
-      "clay.tot_usda.a334_w.pct",
-      "sand.tot_usda.c60_w.pct",
-      "silt.tot_usda.c62_w.pct",
-      "ph.h2o_usda.a268_index",
-      "oc_usda.c729_w.pct",
-      "cec_usda.a723_cmolc.kg",
-      "bd_usda.a4_g.cm3",
-      "n.tot_usda.a623_w.pct",
-      "caco3_usda.a54_w.pct",
-      "p.ext_usda.a1070_mg.kg",
-      "k.ext_usda.a725_cmolc.kg",
-      "ca.ext_usda.a722_cmolc.kg",
-      "mg.ext_usda.a724_cmolc.kg",
-      "na.ext_usda.a726_cmolc.kg",
-      "al.dith_usda.a65_w.pct",
-      "fe.ox_usda.a60_w.pct"
-    )
-  )
+                 ## horizons names ---------------------------------------------
+                 property = c("clay",
+                              "sand",
+                              "silt",
+                              "ph",
+                              "oc",
+                              "cec",
+                              "bulk_density",
+                              "total_nitrogen",
+                              "carbonate",
+                              "phosphorus",
+                              "potassium",
+                              "calcium",
+                              "magnesium",
+                              "sodium",
+                              "aluminum_crystalline",
+                              "iron_amorphous"),
+                 ## OSSL names -------------------------------------------------
+                 analyte = c("Clay, iso 11277",
+                             "Sand, Total, iso 11277",
+                             "Silt, Total, iso 11277",
+                             "pH, 1:1 Soil-Water Suspension, iso 10390",
+                             "Organic_Carbon, iso 10694",
+                             "CEC, pH 7.0, iso 11260",
+                             "Bulk Density, iso 11272",
+                             "Nitrogen, Total NCS, iso 11261",
+                             "Carbonate, iso 10693",
+                             "Phosphorus, Extractable, Mehlich3",
+                             "Potassium, Extractable, NH4OAc, 2M KCl displacement",
+                             "Calcium, Extractable, NH4OAc",
+                             "Magnesium, Extractable, NH4OAc, 2M KCl displacement",
+                             "Sodium, Extractable, NH4OAc, 2M KCl displacement",
+                             "Aluminum, Crystalline, Total Pedogenic Iron",
+                             "Iron, Amorphous, Total Non-Crystalline Iron"),
+                 ## Description ------------------------------------------------
+                 description = c("Clay content by particle size analysis",
+                                 "Sand content by particle size analysis",
+                                 "Silt content by particle size analysis",
+                                 "Soil pH in water suspension",
+                                 "Organic carbon content",
+                                 "Cation exchange capacity at pH 7.0",
+                                 "Soil bulk density",
+                                 "Total nitrogen content",
+                                 "Carbonate content",
+                                 "Plant-available phosphorus (Mehlich-3)",
+                                 "Exchangeable potassium",
+                                 "Exchangeable calcium",
+                                 "Exchangeable magnesium",
+                                 "Exchangeable sodium",
+                                 "Crystalline aluminum content",
+                                 "Amorphous iron content"),
+                 ## Units ------------------------------------------------------
+                 target_unit = c("g/kg",
+                                 "g/kg",
+                                 "g/kg",
+                                 "unitless",
+                                 "g/kg",
+                                 "cmolc/kg",
+                                 "g/cm³",
+                                 "g/kg",
+                                 "g/kg",
+                                 "mg/kg",
+                                 "cmolc/kg",
+                                 "cmolc/kg",
+                                 "cmolc/kg",
+                                 "cmolc/kg",
+                                 "% mass",
+                                 "% mass"),
+                 ## OSSL internal names ----------------------------------------
+                 ossl_name_level1 = c("clay.tot_usda.a334_w.pct",
+                                      "sand.tot_usda.c60_w.pct",
+                                      "silt.tot_usda.c62_w.pct",
+                                      "ph.h2o_usda.a268_index",
+                                      "oc_usda.c729_w.pct",
+                                      "cec_usda.a723_cmolc.kg",
+                                      "bd_usda.a4_g.cm3",
+                                      "n.tot_usda.a623_w.pct",
+                                      "caco3_usda.a54_w.pct",
+                                      "p.ext_usda.a1070_mg.kg",
+                                      "k.ext_usda.a725_cmolc.kg",
+                                      "ca.ext_usda.a722_cmolc.kg",
+                                      "mg.ext_usda.a724_cmolc.kg",
+                                      "na.ext_usda.a726_cmolc.kg",
+                                      "al.dith_usda.a65_w.pct",
+                                      "fe.ox_usda.a60_w.pct"))
 }
 
 #' Validate Soil Property Names
@@ -150,20 +141,22 @@ validate_soil_properties <- function(properties) {
 
   available_properties <- get_ossl_property_mapping()$property
 
-  valid_props <- properties %in% available_properties
+  valid_props   <- properties %in% available_properties
   invalid_props <- properties[!valid_props]
 
   if (length(invalid_props) > 0) {
-    cli::cli_abort(
-      "Invalid soil properties requested: {invalid_props}",
-      "i" = "Available properties: {paste(available_properties, collapse = ', ')}"
-    )
+
+      cli::cli_abort("Invalid soil properties requested: {invalid_props}",
+                   "i" = "Available properties: {paste(available_properties, collapse = ', ')}")
+
   }
 
   return(valid_props)
 }
 
-## OSSL Data Acquisition Functions -------------------------------------------
+## -----------------------------------------------------------------------------
+## 2.) Data aquisition functions
+## -----------------------------------------------------------------------------
 
 #' Get OSSL Training Data for Soil Properties
 #'
@@ -184,22 +177,24 @@ validate_soil_properties <- function(properties) {
 #'   - Property columns: One per requested property
 #'
 #' @keywords internal
+
 get_ossl_training_data <- function(properties,
-                                   max_samples = NULL,
+                                   max_samples              = NULL,
                                    min_samples_per_property = 500,
-                                   refresh = FALSE,
-                                   verbose = TRUE) {
+                                   refresh                  = FALSE,
+                                   verbose                  = TRUE) {
 
   ## ---------------------------------------------------------------------------
-  ## Step 1: Validate Input Properties
+  ## Step 1: Validate input properties
   ## ---------------------------------------------------------------------------
 
   validate_soil_properties(properties)
 
-  property_mapping <- get_ossl_property_mapping() %>%
-    dplyr::filter(property %in% properties)
+  get_ossl_property_mapping() %>%
+    dplyr::filter(property %in% properties) -> property_mapping
 
   if (verbose) {
+
     cli::cli_text("")
     cli::cli_text(format_tree_item("Data Loading", level = 0))
 
@@ -222,81 +217,81 @@ get_ossl_training_data <- function(properties,
   files_exist <- all(file.exists(c(location_file, lab_file, mir_file)))
 
   if (verbose) {
+
     cache_status <- if (files_exist) "found" else "missing"
     cache_symbol <- get_status_symbol(if (files_exist) "success" else "warning")
     cache_text <- paste0(cache_symbol, " Cache status: ", cache_status)
     cli::cli_text(format_tree_item(cache_text, level = 1, is_last = TRUE))
+
   }
 
   ## ---------------------------------------------------------------------------
-  ## Step 3: Download Data if Needed (with robust error handling)
+  ## Step 3: Download data if cache doesn't hit
   ## ---------------------------------------------------------------------------
+
+  ## Inform user about why we're downloading -----------------------------------
 
   if (!files_exist || refresh) {
 
     if (verbose && !refresh) {
+
       cli::cli_alert_warning("OSSL data not found in cache")
-    } else if (verbose && refresh) {
-      cli::cli_alert_info("Refreshing OSSL data (forced)")
+
+      } else if (verbose && refresh) {
+
+        cli::cli_alert_info("Refreshing OSSL data (forced)")
     }
 
-    # Ask user permission for large download
-    confirm_download <- utils::menu(
-      c("Yes, download OSSL data (~1-2GB)", "No, cancel"),
-      title = "OSSL data download required. Continue?"
-    )
+    ## Make it interactive -----------------------------------------------------
+
+    utils::menu(c("Yes, download OSSL data (~1-2GB)", "No, cancel"),
+                title = "OSSL data download required. Continue?") -> confirm_download
 
     if (confirm_download != 1) {
+
       cli::cli_abort("User cancelled OSSL data download")
+
     }
 
-    # Download each file with robust error handling
-    downloads <- list(
-      location = list(
-        url = "https://storage.googleapis.com/soilspec4gg-public/ossl_soilsite_L0_v1.2.qs",
-        file = location_file,
-        desc = "OSSL location metadata"
-      ),
-      lab = list(
-        url = "https://storage.googleapis.com/soilspec4gg-public/ossl_soillab_L1_v1.2.qs",
-        file = lab_file,
-        desc = "OSSL lab measurements"
-      ),
-      mir = list(
-        url = "https://storage.googleapis.com/soilspec4gg-public/ossl_mir_L0_v1.2.qs",
-        file = mir_file,
-        desc = "OSSL raw MIR spectra"
-      )
-    )
+    ## Download each file safely -----------------------------------------------
+
+    list(location = list(url  = "https://storage.googleapis.com/soilspec4gg-public/ossl_soilsite_L0_v1.2.qs",
+                         file = location_file,
+                         desc = "OSSL location metadata"),
+         lab      = list(url  = "https://storage.googleapis.com/soilspec4gg-public/ossl_soillab_L1_v1.2.qs",
+                         file = lab_file,
+                         desc = "OSSL lab measurements"),
+         mir      = list(url  = "https://storage.googleapis.com/soilspec4gg-public/ossl_mir_L0_v1.2.qs",
+                         file = mir_file,
+                         desc = "OSSL raw MIR spectra")) -> downloads
 
     for (download_info in downloads) {
 
-      if (verbose) {
-        cli::cli_progress_step("Downloading {download_info$desc}...")
-      }
+      if (verbose) cli::cli_progress_step("Downloading {download_info$desc}...")
 
-      download_result <- safely_execute(
-        expr = {
-          data <- qs::qread_url(download_info$url)
-          qs::qsave(data, download_info$file)
-          data
-        },
-        default_value = NULL,
-        error_message = "Failed to download {download_info$desc}"
-      )
+      safely_execute(expr = {data <- qs::qread_url(download_info$url)
+                             qs::qsave(data, download_info$file)
+                             data},
+                     default_value      = NULL,
+                     error_message      = "Failed to download {download_info$desc}",
+                     capture_conditions = TRUE) -> download_result
 
-      if (is.null(download_result$result)) {
-        cli::cli_abort("Failed to download {download_info$desc} from {download_info$url}")
-      }
+      ## -----------------------------------------------------------------------
 
-      if (verbose) {
-        cli::cli_alert_success("Cached {download_info$desc}")
-      }
+      handle_results(safe_result   = download_result,
+                     error_title   = "Failed to download {download_info$desc} from {download_info$url}",
+                     error_hints   = c("Check internet connection",
+                                       "Verify URL is accessible: {download_info$url}",
+                                       "OSSL server may be temporarily unavailable"),
+                     abort_on_null = TRUE,
+                     silent        = FALSE) -> download_result
+
+      if (verbose) cli::cli_alert_success("Cached {download_info$desc}")
+
     }
 
-    if (verbose) {
-      cli::cli_alert_success("All OSSL data downloaded and cached")
-    }
+    if (verbose) cli::cli_alert_success("All OSSL data downloaded and cached")
+
   }
 
   ## ---------------------------------------------------------------------------
@@ -304,215 +299,229 @@ get_ossl_training_data <- function(properties,
   ## ---------------------------------------------------------------------------
 
   if (verbose) {
+
     cli::cli_text(format_tree_item("Data Processing", level = 0))
     cli::cli_text(format_tree_item("⟳ Loading OSSL data from cache...", level = 1, is_last = FALSE, symbol = NULL))
+
   }
 
-  # Load the three OSSL components
-  location_data <- safely_execute(
-    expr = qs::qread(location_file),
-    default_value = NULL,
-    error_message = "Failed to load OSSL location data"
-  )$result
+  # Load the three OSSL components ---------------------------------------------
 
-  lab_data <- safely_execute(
-    expr = qs::qread(lab_file),
-    default_value = NULL,
-    error_message = "Failed to load OSSL lab data"
-  )$result
-
-  mir_data <- safely_execute(
-    expr = qs::qread(mir_file),
-    default_value = NULL,
-    error_message = "Failed to load OSSL MIR data"
-  )$result
+  location_data <- qs::qread(location_file)
+  lab_data.     <- qs::qread(lab_file)
+  mir_data      <- qs::qread(mir_file)
 
   if (is.null(location_data) || is.null(lab_data) || is.null(mir_data)) {
+
     cli::cli_abort("Failed to load OSSL data from cache")
+
   }
 
   ## ---------------------------------------------------------------------------
   ## Step 5: Process Lab Data for Requested Properties
   ## ---------------------------------------------------------------------------
 
-  if (verbose) {
-    cli::cli_text(format_tree_item(paste0("⟳ Processing lab data for ", length(properties), " properties..."), level = 1, is_last = FALSE, symbol = NULL))
-  }
+  if (verbose) cli::cli_text(format_tree_item(paste0("⟳ Processing lab data for ", length(properties), " properties..."),
+                                              level   = 1,
+                                              is_last = FALSE,
+                                              symbol  = NULL))
 
-  # Get OSSL variable names for requested properties
+
+  # Get OSSL variable names for requested properties ---------------------------
+
   ossl_variables <- property_mapping$ossl_name_level1
 
-  # Process lab data - clean version of the existing logic
-  processed_lab <- safely_execute(
-    expr = {
-      lab_data %>%
-        dplyr::distinct() %>%
-        dplyr::rename(Sample_ID = id.layer_uuid_txt) %>%
-        # Only keep samples that have location data
-        dplyr::filter(Sample_ID %in% location_data$id.layer_uuid_txt) %>%
-        # Select only the Sample_ID and the specific OSSL variables we need
-        dplyr::select(Sample_ID, dplyr::all_of(ossl_variables)) %>%
-        # Pivot only the measurement columns (all numeric)
-        tidyr::pivot_longer(
-          cols = -Sample_ID,
-          names_to = "ossl_variable",
-          values_to = "measured_value"
-        ) %>%
-        # Add our standard property names using the mapping
-        dplyr::left_join(
-          property_mapping %>%
-            dplyr::select(ossl_variable = ossl_name_level1, property),
-          by = "ossl_variable"
-        ) %>%
-        # Remove missing values and pivot back to wide
-        tidyr::drop_na(measured_value) %>%
-        dplyr::select(Sample_ID, property, measured_value) %>%
-        tidyr::pivot_wider(
-          names_from = property,
-          values_from = measured_value
-        ) %>%
-        # Convert clay from % to g/kg (multiply by 10) if present
-        {
-          if ("clay" %in% names(.)) {
-            dplyr::mutate(., clay = clay * 10)
-          } else {
-            .
-          }
-        }
-    },
-    default_value = NULL,
-    error_message = "Failed to process OSSL lab data"
-  )$result
+  # Process lab data -----------------------------------------------------------
 
-  if (is.null(processed_lab)) {
-    cli::cli_abort("Failed to process OSSL lab measurements")
-  }
+  safely_execute(expr = {lab_data %>%
+                          dplyr::distinct() %>%
+                          dplyr::rename(Sample_ID = id.layer_uuid_txt) %>%
+                          dplyr::filter(Sample_ID %in% location_data$id.layer_uuid_txt) %>%
+                          dplyr::select(Sample_ID, dplyr::all_of(ossl_variables)) %>%
+                          tidyr::pivot_longer(cols      = -Sample_ID,
+                                              names_to  = "ossl_variable",
+                                              values_to = "measured_value") %>%
+                          dplyr::left_join(property_mapping %>%
+                                             dplyr::select(ossl_variable = ossl_name_level1, property),
+                                           by = "ossl_variable") %>%
+                          tidyr::drop_na(measured_value) %>%
+                          dplyr::select(Sample_ID,
+                                        property,
+                                        measured_value) %>%
+                          tidyr::pivot_wider(names_from  = property,
+                                             values_from = measured_value)},
+                 default_value      = NULL,
+                 error_message      = "Lab data processing failed",
+                 capture_conditions = TRUE)  -> processed_lab_safe
 
   ## ---------------------------------------------------------------------------
-  ## Step 6: Process MIR Spectra
-  ## ---------------------------------------------------------------------------
 
-  if (verbose) {
-    cli::cli_text(format_tree_item("⟳ Processing MIR spectra...", level = 1, is_last = FALSE, symbol = NULL))
-  }
-
-  # Apply standard preprocessing: Savitzky-Golay + SNV
-  processed_mir <- safely_execute(
-    expr = {
-      # First, get the spectral data in the right format
-      mir_clean <- mir_data %>%
-        dplyr::rename(Sample_ID = id.layer_uuid_txt) %>%
-        # Only keep samples that have lab data
-        dplyr::filter(Sample_ID %in% processed_lab$Sample_ID)
-
-      # Identify spectral columns (OSSL format: scan_mir.XXX_abs)
-      spectral_cols <- names(mir_clean)[grepl("^scan_mir\\.[0-9]{3,4}_abs$", names(mir_clean))]
-
-      if (length(spectral_cols) == 0) {
-        stop("No spectral columns found in MIR data")
-      }
-
-      # Extract spectral columns without preprocessing
-      # Preprocessing will be applied later in the pipeline by preprocess_mir_spectra()
-      spectral_matrix <- mir_clean %>%
-        dplyr::select(dplyr::all_of(spectral_cols)) %>%
-        as.matrix()
-
-      # Keep raw values - preprocessing happens later in the pipeline
-      processed_spectra <- spectral_matrix
-
-      # Combine back with Sample_ID
-      tibble::tibble(
-        Sample_ID = mir_clean$Sample_ID
-      ) %>%
-        dplyr::bind_cols(
-          as.data.frame(processed_spectra)
-        )
-    },
-    default_value = NULL,
-    error_message = "Failed to process OSSL MIR spectra"
-  )$result
-
-  if (is.null(processed_mir)) {
-    cli::cli_abort("Failed to process OSSL MIR spectra")
-  }
+  handle_results(safe_result   = processed_lab_safe,
+                 error_title   = "Failed to process OSSL lab measurements",
+                 error_hints   = c("Check that required OSSL variables exist in lab_data",
+                                   "Verify property_mapping contains all necessary mappings",
+                                   "Ensure Sample_ID column exists in both datasets"),
+                 abort_on_null = TRUE,
+                 silent        = FALSE) -> processed_lab
 
   ## ---------------------------------------------------------------------------
-  ## Step 7: Join and Filter Final Dataset
+  ## Step 6: Clean up and standardize MIR Spectra
   ## ---------------------------------------------------------------------------
 
-  if (verbose) {
-    cli::cli_text(format_tree_item("⟳ Joining spectral and lab data...", level = 1, is_last = FALSE, symbol = NULL))
-  }
+  if (verbose) cli::cli_text(format_tree_item("⟳ Processing MIR spectra...",
+                                              level   = 1,
+                                              is_last = FALSE,
+                                              symbol  = NULL))
 
-  # Join lab and spectral data, filter to topsoils
-  final_data <- safely_execute(
-    expr = {
-      dplyr::inner_join(
-        processed_lab,
-        processed_mir,
-        by = "Sample_ID"
-      ) %>%
-        # Filter to topsoil samples only (0 cm top depth)
-        dplyr::inner_join(
-          location_data %>%
-            dplyr::rename(Sample_ID = id.layer_uuid_txt) %>%
-            dplyr::filter(layer.upper.depth_usda_cm == 0) %>%
-            dplyr::select(Sample_ID),
-          by = "Sample_ID"
-        ) %>%
-        # Remove samples with any missing property values
-        tidyr::drop_na(dplyr::all_of(properties)) %>%
-        # Apply sample size limits if specified
-        {if (!is.null(max_samples) && nrow(.) > max_samples) {
-          dplyr::slice_sample(., n = max_samples)
-        } else {
-          .
-        }}
-    },
-    default_value = NULL,
-    error_message = "Failed to join OSSL data components"
-  )$result
 
-  if (is.null(final_data)) {
-    cli::cli_abort("Failed to create joined OSSL dataset")
-  }
+  ## Apply a standardized preproccesing to match incoming data -----------------
 
-  # Check minimum sample requirements
+  safely_execute(expr = {mir_data %>%
+                          dplyr::rename(Sample_ID = id.layer_uuid_txt) %>%
+                          dplyr::filter(Sample_ID %in% processed_lab$Sample_ID) -> mir_clean
+
+                        ## Identify spectral columns (scan_mir.XXX_abs) --------
+
+                        names(mir_clean)[grepl("^scan_mir\\.[0-9]{3,4}_abs$", names(mir_clean))] -> spectral_cols
+
+                        ## Abort if no spectral columns found ------------------
+
+                        if (length(spectral_cols) == 0) cli::cli_abort("No spectral columns found in MIR data")
+
+                        ## Extract spectral columns ----------------------------
+
+                        mir_clean %>%
+                          dplyr::select(dplyr::all_of(spectral_cols)) %>%
+                          as.matrix() -> spectral_matrix
+
+                        ## Standardize column names: scan_mir.608_abs -> 608 ---
+
+                        wavenumbers <- gsub("^scan_mir\\.([0-9]{3,4})_abs$", "\\1", spectral_cols)
+                        colnames(spectral_matrix) <- wavenumbers
+
+                        ## Combine back with Sample_ID -------------------------
+
+                        tibble::tibble(Sample_ID = mir_clean$Sample_ID) %>%
+                          dplyr::bind_cols(as.data.frame(spectral_matrix))},
+
+                 default_value      = NULL,
+                 error_message      = "MIR spectra processing failed",
+                 capture_conditions = TRUE) -> processed_mir_safe
+
+  ## ---------------------------------------------------------------------------
+
+  handle_results(safe_result   = processed_mir_safe,
+                 error_title   = "Failed to process OSSL MIR spectra",
+                 error_hints   = c("Check MIR data contains scan_mir.XXX_abs columns",
+                                   "Verify Sample_ID matches between lab and MIR data",
+                                   "Ensure spectral columns contain numeric values only"),
+                 abort_on_null = TRUE,
+                 silent        = FALSE) -> processed_mir
+
+  ## ---------------------------------------------------------------------------
+  ## Step 7: Join MIR, lab, and location data, clean up
+  ## ---------------------------------------------------------------------------
+
+  if (verbose) cli::cli_text(format_tree_item("⟳ Joining spectral and lab data...",
+                                              level   = 1,
+                                              is_last = FALSE,
+                                              symbol  = NULL))
+
+  safely_execute(expr = {
+                         ## Join the MIR and the lab data ----------------------
+
+                         dplyr::inner_join(processed_lab,
+                                           processed_mir,
+                                           by = "Sample_ID") %>%
+
+                          ## Join the sample location data ---------------------
+
+                          dplyr::inner_join(location_data %>%
+                                              dplyr::rename(Sample_ID = id.layer_uuid_txt) %>%
+
+                                              ## Restrict to just topsoil ------
+
+                                              dplyr::filter(layer.upper.depth_usda_cm == 0) %>%
+                                              dplyr::select(Sample_ID),
+                                            by = "Sample_ID") %>%
+                          tidyr::drop_na(dplyr::all_of(properties)) %>%
+
+                          ## Limit to max_samples if specified --------------
+
+                          {if (!is.null(max_samples) && nrow(.) > max_samples) {
+
+                            dplyr::slice_sample(., n = max_samples)
+
+                          } else {
+
+                            .
+                          }}},
+      default_value      = NULL,
+      error_message      = "Data joining failed",
+      capture_conditions = TRUE) -> final_data_safe
+
+  ## ---------------------------------------------------------------------------
+
+  handle_results(safe_result   = final_data_safe,
+                 error_title   = "Failed to create joined OSSL dataset",
+                 error_hints   = c("Check that Sample_ID columns match across datasets",
+                                   "Verify location_data contains layer.upper.depth_usda_cm column",
+                                   "Ensure requested properties exist in processed_lab"),
+                 abort_on_null = TRUE,
+                 silent        = FALSE) -> final_data
+
+  ## Check minimum sample requirements -----------------------------------------
+
   for (prop in properties) {
+
     n_samples <- sum(!is.na(final_data[[prop]]))
+
     if (n_samples < min_samples_per_property) {
-      cli::cli_abort("Property '{prop}' has only {n_samples} samples (minimum {min_samples_per_property} required)")
+
+      cli::cli_warn("Property '{prop}' has only {n_samples} samples (minimum {min_samples_per_property} required)")
+
     }
   }
 
+  ## Inform user about completion stats ----------------------------------------
+
   if (verbose) {
+
     cli::cli_text("")
+
     completion_text <- paste0(get_status_symbol("complete"), " OSSL data prepared: ",
                              format_metric(nrow(final_data), "count"), " samples")
-    cli::cli_text(format_tree_item(completion_text, level = 1, is_last = FALSE))
 
-    # Show sample counts per property in tree format
+    cli::cli_text(format_tree_item(completion_text,
+                                   level = 1,
+                                   is_last = FALSE))
+
     for (i in seq_along(properties)) {
-      prop <- properties[i]
-      n_valid <- sum(!is.na(final_data[[prop]]))
+
+      prop      <- properties[i]
+      n_valid   <- sum(!is.na(final_data[[prop]]))
       prop_text <- paste0(prop, ": ", format_metric(n_valid, "count"), " samples")
-      is_last <- (i == length(properties))
+      is_last   <- (i == length(properties))
+
       cli::cli_text(format_tree_item(prop_text, level = 2, is_last = is_last))
+
     }
+
   }
 
   return(final_data)
 }
 
-## Spectral Preprocessing Functions ---------------------------------------------
+## -----------------------------------------------------------------------------
+## Spectral Preprocessing Functions
+## -----------------------------------------------------------------------------
 
 #' Preprocess MIR Spectra for Analysis
 #'
 #' @description
 #' Applies Savitzky-Golay smoothing and Standard Normal Variate normalization
 #' to MIR spectra. This preprocessing pipeline follows established conventions
-#' for soil spectroscopy analysis.
+#' from the ring trial paper from Sanfanelli et al.
 #'
 #' @param spectral_data Tibble containing numeric spectral columns
 #' @param smooth_window Integer. Window size for Savitzky-Golay filter (default: 9)
@@ -521,89 +530,104 @@ get_ossl_training_data <- function(properties,
 #'
 #' @return Tibble with preprocessed spectra (same column structure)
 #' @keywords internal
+
 preprocess_mir_spectra <- function(spectral_data,
-                                  smooth_window = 9,
-                                  smooth_poly = 1,
-                                  verbose = TRUE) {
+                                   smooth_window = 9,
+                                   smooth_poly   = 1,
+                                   verbose       = TRUE) {
 
-  if (verbose) {
-    cli::cli_progress_step("Preprocessing MIR spectra (SG smoothing + SNV)")
-  }
+  ## TODO: Might need to tree these messages as well.
 
-  # Standardize column names if they're in OSSL format
-  ossl_spectral_cols <- grep("^scan_mir\\.[0-9]{3,4}_abs$", names(spectral_data), value = TRUE)
-  if (length(ossl_spectral_cols) > 0) {
-    # Convert scan_mir.608_abs -> 608
-    wavenumbers <- gsub("^scan_mir\\.([0-9]{3,4})_abs$", "\\1", ossl_spectral_cols)
-    names(spectral_data)[names(spectral_data) %in% ossl_spectral_cols] <- wavenumbers
-  }
+  if (verbose) cli::cli_progress_step("Preprocessing MIR spectra (SG smoothing + SNV)")
 
-  # Extract spectral columns (numeric wavenumbers)
-  spectral_cols <- grep("^[0-9]{3,4}$", names(spectral_data), value = TRUE)
+  ## ---------------------------------------------------------------------------
+  ## Step 1: Validate and quality check input data
+  ## ---------------------------------------------------------------------------
+
+  # Extract spectral columns (numeric wavenumbers) -----------------------------
+
+  spectral_cols     <- grep("^[0-9]{3,4}$", names(spectral_data), value = TRUE)
   non_spectral_cols <- setdiff(names(spectral_data), spectral_cols)
 
-  if (length(spectral_cols) == 0) {
-    cli::cli_abort("No spectral columns found (expected numeric wavenumber columns)")
-  }
+  if (length(spectral_cols) == 0) cli::cli_abort("No spectral columns found (expected numeric wavenumber columns)")
 
-  # Extract spectral matrix
+  ## Extract spectral matrix ---------------------------------------------------
+
   spectra_matrix <- as.matrix(spectral_data[spectral_cols])
 
-  # Quality check: detect problematic spectra
+  ## QAQC: Check for negative spectra ------------------------------------------
+
   n_negative <- sum(spectra_matrix < 0, na.rm = TRUE)
-  if (n_negative > 0) {
-    cli::cli_warn("Found {n_negative} negative spectral values - may indicate measurement issues")
-  }
 
-  # Check for all-zero or constant spectra
-  row_sds <- apply(spectra_matrix, 1, sd, na.rm = TRUE)
+  if (n_negative > 0) cli::cli_warn("Found {n_negative} negative spectral values - may indicate measurement issues")
+
+  ## QAQC: Check for all 0 or constant spectra ---------------------------------
+
+  row_sds    <- apply(spectra_matrix, 1, sd, na.rm = TRUE)
   n_constant <- sum(row_sds < 1e-6, na.rm = TRUE)
-  if (n_constant > 0) {
-    cli::cli_warn("Found {n_constant} constant spectra - may indicate measurement failures")
-  }
 
-  # Apply Savitzky-Golay smoothing
-  safely_execute(
-    expr = {
-      prospectr::savitzkyGolay(X = spectra_matrix,
-                              m = 0,  # No derivative
-                              p = smooth_poly,
-                              w = smooth_window)
-    },
-    default_value = NULL,
-    error_message = "Failed to apply Savitzky-Golay smoothing"
-  ) -> smoothed_safe
+  if (n_constant > 0) cli::cli_warn("Found {n_constant} constant spectra - may indicate measurement failures")
 
-  if (is.null(smoothed_safe$result)) {
-    return(NULL)
-  }
+  ## ---------------------------------------------------------------------------
+  ## Step 2: Apply Savitzky-Golay smoothing and SNV normalization
+  ## ---------------------------------------------------------------------------
 
-  # Apply Standard Normal Variate normalization
-  safely_execute(
-    expr = {
-      prospectr::standardNormalVariate(X = smoothed_safe$result)
-    },
-    default_value = NULL,
-    error_message = "Failed to apply SNV normalization"
-  ) -> snv_safe
+  ## First, the SVG smoothing --------------------------------------------------
 
-  if (is.null(snv_safe$result)) {
-    return(NULL)
-  }
+  tryCatch({
 
-  # Reconstruct tibble
-  preprocessed_spectra <- tibble::as_tibble(snv_safe$result)
-  names(preprocessed_spectra) <- spectral_cols
+    prospectr::savitzkyGolay(X = spectra_matrix,
+                             m = 0,
+                             p = smooth_poly,
+                             w = smooth_window)
+    }, error = function(e) {
 
-  # Bind with non-spectral columns
+      cli::cli_warn("Failed to apply Savitzky-Golay smoothing: {e$message}")
+      return(NULL)
+
+    }
+  ) -> smoothed
+
+  if (is.null(smoothed)) return(NULL)
+
+  ## Then the SNV normalization ------------------------------------------------
+
+  tryCatch({
+
+    prospectr::standardNormalVariate(X = smoothed)
+
+    }, error = function(e) {
+
+      cli::cli_warn("Failed to apply SNV normalization: {e$message}")
+      return(NULL)
+
+    }
+  ) -> processed_spectra
+
+  if (is.null(processed_spectra)) return(NULL)
+
+  ## ---------------------------------------------------------------------------
+  ## Step 3: Reconstruct tibble with processed spectra
+  ## ---------------------------------------------------------------------------
+
+  ## Make the tibble -----------------------------------------------------------
+
+  processed_spectra           <- tibble::as_tibble(processed_spectra)
+  names(processed_spectra) <- spectral_cols
+
+  ## Bind with non-spectral columns --------------------------------------------
+
   if (length(non_spectral_cols) > 0) {
-    result <- dplyr::bind_cols(
-      spectral_data[non_spectral_cols],
-      preprocessed_spectra
-    )
-  } else {
-    result <- preprocessed_spectra
+
+    result <- dplyr::bind_cols(spectral_data[non_spectral_cols],
+                               processed_spectra)
+    } else {
+
+    result <- processed_spectra
+
   }
+
+  ## Return results ------------------------------------------------------------
 
   return(result)
 }
@@ -624,76 +648,119 @@ preprocess_mir_spectra <- function(spectral_data,
 #'   - ossl_pca_scores: Tibble with PCA scores and metadata
 #'   - variance_explained: Numeric vector showing variance explained by each component
 #' @keywords internal
+
 perform_pca_on_ossl <- function(ossl_data,
                                variance_threshold = 0.95,
-                               verbose = TRUE) {
+                               verbose            = TRUE) {
 
-  if (verbose) {
-    cli::cli_progress_step("Performing PCA on OSSL training data")
-  }
+  if (verbose) cli::cli_progress_step("Performing PCA on OSSL training data")
 
-  # Extract spectral columns (numeric wavenumbers)
+  ## ---------------------------------------------------------------------------
+  ## Step 0: Setup
+  ## ---------------------------------------------------------------------------
+
+  ## Extract spectral columns --------------------------------------------------
+
   spectral_cols <- grep("^[0-9]{3,4}$", names(ossl_data), value = TRUE)
 
-  if (length(spectral_cols) == 0) {
-    cli::cli_abort("No spectral columns found in OSSL data (expected numeric wavenumber columns)")
+  if (length(spectral_cols) == 0) cli::cli_abort("No spectral columns found in OSSL data (expected numeric wavenumber columns)")
+
+  ## Drop missing values and warn the user -------------------------------------
+
+  ossl_data %>%
+    dplyr::select(Sample_ID,
+                  dplyr::all_of(spectral_cols)) %>%
+    tidyr::drop_na(dplyr::all_of(spectral_cols)) -> ossl_clean
+
+  if(nrow(ossl_clean) < nrow(ossl_data)) {
+
+    n_dropped <- nrow(ossl_data) - nrow(ossl_clean)
+
+    cli::cli_warn("{n_dropped} samples with missing spectral data were dropped before PCA")
+
   }
 
-  # Remove rows with missing spectral values to avoid PCA imputation warnings
-  ossl_clean <- ossl_data %>%
-    dplyr::select(Sample_ID, dplyr::all_of(spectral_cols)) %>%
-    tidyr::drop_na(dplyr::all_of(spectral_cols))
+  ## Create a fully numeric matrix with no NAs ---------------------------------
 
   spectral_matrix <- dplyr::select(ossl_clean, dplyr::all_of(spectral_cols))
 
-  # Use prcomp for better performance and memory efficiency
-  safely_execute(
-    expr = {
-      stats::prcomp(x = spectral_matrix,
-                   center = FALSE,
-                   scale. = FALSE)
-    },
-    default_value = NULL,
-    error_message = "Failed to perform PCA on OSSL spectral data"
-  ) -> pca_safe
+  ## ---------------------------------------------------------------------------
+  ## Step 1: Perform PCA using prcomp
+  ## ---------------------------------------------------------------------------
 
-  if (is.null(pca_safe$result)) {
-    return(NULL)
-  }
+  ## Do the analysis -----------------------------------------------------------
 
-  pca_model <- pca_safe$result
+  safely_execute(expr = {stats::prcomp(x      = spectral_matrix,
+                                       center = FALSE,
+                                       scale. = FALSE)},
+                 default_value      = NULL,
+                 error_message      = "PCA computation failed",
+                 capture_conditions = TRUE) -> pca_safe
 
-  # Calculate variance explained
+  ## ---------------------------------------------------------------------------
+
+  handle_results(safe_result   = pca_safe,
+                 error_title   = "Failed to perform PCA on OSSL spectral data",
+                 error_hints   = c("Check that spectral matrix has sufficient variance",
+                                   "Ensure matrix has more rows than columns",
+                                   "Verify data contains no all-zero rows or columns",
+                                   "Consider reducing spectral resolution if memory issues"),
+                 abort_on_null = FALSE,
+                 silent        = FALSE) -> pca_model
+
+  ## ---------------------------------------------------------------------------
+
+  if (is.null(pca_model)) return(NULL)
+
+  ## Calculate variance explained ----------------------------------------------
+
   variance_explained <- pca_model$sdev^2 / sum(pca_model$sdev^2)
-  cum_variance <- cumsum(variance_explained)
-  n_components <- which(cum_variance >= variance_threshold)[1]
+  cum_variance       <- cumsum(variance_explained)
+  n_components       <- which(cum_variance >= variance_threshold)[1]
+
+  ## Report variance stats -----------------------------------------------------
 
   if (verbose) {
+
     pca_text <- paste0(get_status_symbol("success"), " PCA: ", n_components,
                       " components (", round(variance_threshold * 100), "% variance)")
-    cli::cli_text(format_tree_item(pca_text, level = 1, is_last = TRUE))
+
+    cli::cli_text(format_tree_item(text    = pca_text,
+                                   level   = 1,
+                                   is_last = TRUE))
+
   }
 
-  # Extract PCA scores (using only the required number of components)
+  ## ---------------------------------------------------------------------------
+  ## Step 2: Extract and return PC scores, along with model.
+  ## ---------------------------------------------------------------------------
+
   pca_scores <- pca_model$x[, 1:n_components]
 
-  # Convert to tibble and add proper column names
-  pca_scores <- tibble::as_tibble(pca_scores)
+  ## Convert to tibble and fix the colnames ------------------------------------
+
+  pca_scores        <- tibble::as_tibble(pca_scores)
   names(pca_scores) <- paste0("Dim.", 1:n_components)
 
-  # Add metadata columns (use cleaned data to maintain row alignment)
+  ## Add metadata columns (use cleaned data to maintain row alignment) ---------
+
   metadata_cols <- setdiff(names(ossl_data), spectral_cols)
+
   if (length(metadata_cols) > 0) {
-    ossl_metadata <- ossl_data %>%
+
+    ossl_data %>%
       dplyr::semi_join(ossl_clean, by = "Sample_ID") %>%
-      dplyr::select(dplyr::all_of(metadata_cols))
+      dplyr::select(dplyr::all_of(metadata_cols)) -> ossl_metadata
 
     ossl_pca_scores <- dplyr::bind_cols(ossl_metadata, pca_scores)
+
   } else {
+
     ossl_pca_scores <- pca_scores
+
   }
 
-  # Calculate total variance explained by selected components
+  ## Calculate total variance explained by selected components -----------------
   total_variance <- cum_variance[n_components]
 
   if (verbose) {
@@ -702,15 +769,15 @@ perform_pca_on_ossl <- function(ossl_data,
     )
   }
 
-  # Store the selected number of components in the model for later use
+  ## Store the selected number of components in the model for later use --------
   pca_model$n_components <- n_components
 
-  return(list(
-    pca_model = pca_model,
-    ossl_pca_scores = ossl_pca_scores,
-    variance_explained = variance_explained[1:n_components],
-    n_components = n_components
-  ))
+  ## Return results ------------------------------------------------------------
+
+  return(list(pca_model          = pca_model,
+              ossl_pca_scores    = ossl_pca_scores,
+              variance_explained = variance_explained[1:n_components],
+              n_components       = n_components))
 }
 
 #' Project New Spectra to PCA Space
@@ -855,35 +922,15 @@ get_processed_ossl_training_data <- function(properties,
     return(NULL)
   }
 
-  ## ---------------------------------------------------------------------------
-  ## Step 2: Convert OSSL column names to standard numeric format
-  ## ---------------------------------------------------------------------------
 
-  # Convert scan_mir.608_abs -> 608 for consistent column naming
-  ossl_standardized <- ossl_raw
-  spectral_cols <- grep("^scan_mir\\.[0-9]{3,4}_abs$", names(ossl_standardized), value = TRUE)
-
-  if (length(spectral_cols) > 0) {
-    # Extract wavenumbers and create new column names
-    wavenumbers <- gsub("^scan_mir\\.([0-9]{3,4})_abs$", "\\1", spectral_cols)
-
-    # Rename spectral columns to pure numeric
-    names(ossl_standardized)[names(ossl_standardized) %in% spectral_cols] <- wavenumbers
-
-    if (verbose) {
-      std_text <- paste0(get_status_symbol("success"), " Column standardization: ",
-                        format_metric(length(spectral_cols), "count"), " wavenumbers")
-      cli::cli_text(format_tree_item(std_text, level = 1, is_last = FALSE))
-    }
-  }
 
   ## ---------------------------------------------------------------------------
   ## Step 3: Preprocess spectra
   ## ---------------------------------------------------------------------------
 
-  # Apply preprocessing to OSSL data (raw data from get_ossl_training_data needs preprocessing)
+  # Apply preprocessing to OSSL data (columns already standardized to numeric)
   ossl_processed <- preprocess_mir_spectra(
-    spectral_data = ossl_standardized,
+    spectral_data = ossl_raw,
     verbose = verbose
   )
 

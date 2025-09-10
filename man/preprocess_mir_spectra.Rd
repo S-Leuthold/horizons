@@ -26,6 +26,6 @@ Tibble with preprocessed spectra (same column structure)
 \description{
 Applies Savitzky-Golay smoothing and Standard Normal Variate normalization
 to MIR spectra. This preprocessing pipeline follows established conventions
-for soil spectroscopy analysis.
+from the ring trial paper from Sanfanelli et al.
 }
 \keyword{internal}

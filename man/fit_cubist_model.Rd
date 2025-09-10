@@ -11,7 +11,6 @@ fit_cubist_model(
   verbose = FALSE,
   parallel = FALSE,
   n_workers = NULL,
-  allow_nested = FALSE,
   bayesian_iter = 10
 )
 }
@@ -30,9 +29,9 @@ for computing unbiased performance metrics.}
 
 \item{n_workers}{Integer. Number of parallel workers. If \code{NULL}, uses safe defaults.}
 
-\item{allow_nested}{Logical. Allow parallel processing in nested context. Defaults to \code{FALSE}.}
-
 \item{bayesian_iter}{Integer. Number of Bayesian optimization iterations (default: 10).}
+
+\item{allow_nested}{Logical. Allow parallel processing in nested context. Defaults to \code{FALSE}.}
 }
 \value{
 A named \code{list} with the following components:
@@ -40,7 +39,6 @@ A named \code{list} with the following components:
 \item \strong{fitted_workflow}: A fitted Cubist workflow trained on train_data.
 \item \strong{best_params}: A \code{tibble} with the best hyperparameter configuration.
 \item \strong{validation_metrics}: A \code{tibble} of metrics computed on val_data.
-\item \strong{train_metrics}: A \code{tibble} of metrics computed on train_data.
 }
 }
 \description{
@@ -57,7 +55,7 @@ The modeling pipeline follows three main stages:
 \item Bayesian optimization using \code{tune::tune_bayes()} for refinement.
 }
 The model is finalized with \code{tune::finalize_workflow()} and fitted to the training set.
-Performance metrics are computed on the hold-out set using \code{tune::last_fit()} and \code{soilspec::eval()}.
+Performance metrics are computed on the validation set using custom metric functions.
 
 Parallel tuning is enabled with \code{future::plan(multisession)} and automatically reset afterward.
 All error handling is wrapped with \code{safely_execute()} for fault-tolerant orchestration.

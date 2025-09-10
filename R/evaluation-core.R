@@ -139,141 +139,73 @@ evaluate_configuration <- function(config_row,
                                    seed            = 307) {
 
   ## ---------------------------------------------------------------------------
-  ## Step 1: Setup
+  ## Step 0: Setup
   ## ---------------------------------------------------------------------------
 
   start_time <- Sys.time()
 
-  ## ---------------------------------------------------------------------------
-  ## Step 2: Input Validation
-  ## ---------------------------------------------------------------------------
+    ## ---------------------------------------------------------------------------
+    ## Step 0.1: Input Validation
+    ## ---------------------------------------------------------------------------
 
-  if (!is.data.frame(config_row) || nrow(config_row) != 1) {
+    ## Check that input data is a dataframe --------------------------------------
 
-    cli::cli_abort("config_row must be a single-row data frame")
+    if (!is.data.frame(config_row) || nrow(config_row) != 1) cli::cli_abort("config_row must be a single-row data frame")
 
-  }
+    ## Check that we actually have a split data object ---------------------------
 
-  if (!inherits(data_split, "rsplit")) {
+    if (!inherits(data_split, "rsplit")) cli::cli_abort("data_split must be an rsplit object from rsample")
 
-    cli::cli_abort("data_split must be an rsplit object from rsample")
+    ## Check that the varaible is the right format and exists --------------------
 
-  }
+    if (!is.character(variable) || length(variable) != 1) cli::cli_abort("variable must be a single character string")
 
-  if (!is.character(variable) || length(variable) != 1) {
+    if (!variable %in% names(input_data)) cli::cli_abort("variable '{variable}' not found in input_data")
 
-    cli::cli_abort("variable must be a single character string")
+    ## Check that the cv_folds make sense ----------------------------------------
 
-  }
+    if (!is.numeric(cv_folds) || cv_folds < 2) cli::cli_abort("cv_folds must be at least 2, got {cv_folds}")
 
-  if (!variable %in% names(input_data)) {
+    ## Check that we have the right size for the grid ----------------------------
 
-    cli::cli_abort("variable '{variable}' not found in input_data")
+    if (!is.numeric(grid_size) || grid_size <= 0) cli::cli_abort("grid_size must be positive, got {grid_size}")
 
-  }
+    ## Check that bayesian_iter is valid -----------------------------------------
 
-  if (!is.numeric(cv_folds) || cv_folds < 2) {
+    if (!is.numeric(bayesian_iter) || bayesian_iter < 0) cli::cli_abort("bayesian_iter must be non-negative, got {bayesian_iter}")
 
-    cli::cli_abort("cv_folds must be at least 2, got {cv_folds}")
+    ## Check that prune_threshold is valid ---------------------------------------
 
-  }
+    if (!is.numeric(prune_threshold) || prune_threshold <= 0 || prune_threshold > 1) cli::cli_abort("prune_threshold must be between 0 and 1, got {prune_threshold}")
 
-  if (!is.numeric(grid_size) || grid_size <= 0) {
+    ## Check that n cores is valid -----------------------------------------------
 
-    cli::cli_abort("grid_size must be positive, got {grid_size}")
-
-  }
-
-  if (!is.numeric(bayesian_iter) || bayesian_iter < 0) {
-
-    cli::cli_abort("bayesian_iter must be non-negative, got {bayesian_iter}")
-
-  }
-
-  if (!is.numeric(prune_threshold) || prune_threshold <= 0 || prune_threshold > 1) {
-
-    cli::cli_abort("prune_threshold must be between 0 and 1, got {prune_threshold}")
-
-  }
-
-  if (!is.null(n_cv_cores) && (!is.numeric(n_cv_cores) || n_cv_cores <= 0)) {
-
-    cli::cli_abort("n_cv_cores must be positive if specified, got {n_cv_cores}")
-
-  }
+    if (!is.null(n_cv_cores) && (!is.numeric(n_cv_cores) || n_cv_cores <= 0)) cli::cli_abort("n_cv_cores must be positive if specified, got {n_cv_cores}")
 
   ## ---------------------------------------------------------------------------
-  ## Step 3: Extract Configuration
+  ## Step 1: Extract Configurations
   ## ---------------------------------------------------------------------------
 
-  ## -------------------------------------------------------------------------
-  ## Step 3.1: Extract and Clean Configuration (with Parallel Safety)
-  ## -------------------------------------------------------------------------
+  ## Pull the configs from normal columns --------------------------------------
 
-  # CRITICAL FIX: Safe value extraction to prevent closure coercion errors
-  # In parallel environments (especially multisession), config_row fields can
-  # become closures instead of character values due to variable scoping issues
-  extract_safe_config_value <- function(value, field_name, config_id) {
-    
-    # Check for closure/function contamination first
-    if (is.function(value) || "closure" %in% class(value)) {
-      cli::cli_abort(paste0("▶ evaluate_configuration: Closure detected in '{field_name}' for config_id {config_id}.",
-                           " This indicates a parallel processing variable scoping issue.",
-                           " Field class: {paste(class(value), collapse = ', ')}.",
-                           " This error occurs when configuration data becomes contaminated with",
-                           " unevaluated expressions in parallel worker environments.",
-                           " Fix: Ensure config data is fully evaluated before parallel processing."))
-    }
-    
-    # Handle list columns (extract first element if needed)
-    if (is.list(value) && length(value) == 1) {
-      value <- value[[1]]
-    }
-    
-    # Final safety check after extraction
-    if (is.function(value) || "closure" %in% class(value)) {
-      cli::cli_abort("▶ evaluate_configuration: Closure found in list element for '{field_name}' config_id {config_id}")
-    }
-    
-    # Safe character conversion with error handling
-    tryCatch({
-      as.character(value)
-    }, error = function(e) {
-      # If we get a closure error, return a placeholder instead of aborting
-      if (grepl("closure", e$message, ignore.case = TRUE)) {
-        cli::cli_alert_warning("Closure coercion error in '{field_name}' for config_id {config_id}, using 'ERROR_CLOSURE'")
-        return("ERROR_CLOSURE")
-      }
-      # For other errors, still abort
-      cli::cli_abort("▶ evaluate_configuration: Cannot convert '{field_name}' to character for config_id {config_id}: {e$message}")
-    })
-  }
+  list(model             = as.character(config_row$model),
+       transformation    = as.character(config_row$transformation),
+       preprocessing     = as.character(config_row$preprocessing),
+       feature_selection = as.character(config_row$feature_selection)) -> config_clean
 
-  # Apply safe extraction to all config fields
-  list(model             = extract_safe_config_value(config_row$model, "model", config_id),
-       transformation    = extract_safe_config_value(config_row$transformation, "transformation", config_id),
-       preprocessing     = extract_safe_config_value(config_row$preprocessing, "preprocessing", config_id),
-       feature_selection = extract_safe_config_value(config_row$feature_selection, "feature_selection", config_id)) -> config_clean
+  ## Pull the covariates from the list column ----------------------------------
 
-  ## -------------------------------------------------------------------------
-  ## Step 3.2: Handle Covariates from List Column (Original Simple Approach)
-  ## -------------------------------------------------------------------------
+  tryCatch({
 
-  if ("covariates" %in% names(config_row)) {
-    
-    # Simple extraction like in the original code
-    # config_row$covariates should be a list column with character vectors or NULL
-    config_clean$covariates <- config_row$covariates[[1]]
+    cov_val <- config_row$covariates[[1]]
 
-  } else {
+    if (length(cov_val) > 0) as.character(cov_val) else NULL
 
-    config_clean$covariates <- NULL
+    }, error = function(e) NULL) -> config_clean$covariates
 
-  }
 
-  ## -------------------------------------------------------------------------
-  ## Step 3.3: Validate Against Package Constants
-  ## -------------------------------------------------------------------------
+  ## Check against accepted constants ------------------------------------------
+
 
   if (!config_clean$model %in% VALID_MODELS) {
 
@@ -289,10 +221,26 @@ evaluate_configuration <- function(config_row,
                                 config_clean  = config_clean,
                                 error_message = glue::glue("Invalid transformation '{config_clean$transformation}'")))
 
-    }
+  }
+
+  if (!config_clean$preprocessing %in% VALID_PREPROCESSING) {
+
+    return(create_failed_result(config_id     = config_id,
+                                config_clean  = config_clean,
+                                error_message = glue::glue("Invalid preprocessing '{config_clean$preprocessing}'")))
+
+  }
+
+  if (!config_clean$feature_selection %in% VALID_FEATURE_SELECTION) {
+
+    return(create_failed_result(config_id     = config_id,
+                                config_clean  = config_clean,
+                                error_message = glue::glue("Invalid feature selection '{config_clean$feature_selection}'")))
+
+  }
 
   ## ---------------------------------------------------------------------------
-  ## Step 4: Create Workflow ID
+  ## Step 2: Create Workflow ID
   ## ---------------------------------------------------------------------------
 
   clean_workflow_id(model             = config_clean$model,
@@ -302,24 +250,32 @@ evaluate_configuration <- function(config_row,
                     covariates        = config_clean$covariates) -> workflow_id
 
   ## ---------------------------------------------------------------------------
-  ## Step 5: Build Recipe
+  ## Step 3: Build Recipe
   ## ---------------------------------------------------------------------------
 
-  safely_execute(
-    expr = {
-      build_recipe(input_data               = input_data,
-                   spectral_transformation  = config_clean$preprocessing,
-                   response_transformation  = config_clean$transformation,
-                   feature_selection_method = config_clean$feature_selection,
-                   covariate_selection      = config_clean$covariates,
-                   covariate_data           = covariate_data)
-    },
-    default_value = NULL,
-    error_message = glue::glue("Failed to build recipe for {workflow_id}")) -> recipe_result
+  safely_execute(expr = {build_recipe(input_data               = input_data,
+                                      spectral_transformation  = config_clean$preprocessing,
+                                      response_transformation  = config_clean$transformation,
+                                      feature_selection_method = config_clean$feature_selection,
+                                      covariate_selection      = config_clean$covariates,
+                                      covariate_data           = covariate_data)},
+                 default_value      = NULL,
+                 error_message      = "Recipe building failed",
+                 capture_conditions = TRUE) -> recipe_result
 
   ## ---------------------------------------------------------------------------
 
-  if (is.null(recipe_result$result)) {
+  handle_results(safe_result         = recipe_result,
+                 error_title   = "Recipe building failed for {workflow_id}",
+                 error_hints   = c("Check that input_data contains required columns",
+                                   "Verify transformation and preprocessing methods are valid",
+                                   "Ensure covariate_data matches input_data rows if provided"),
+                 abort_on_null = FALSE,
+                 silent        = FALSE) -> recipe
+
+  ## ---------------------------------------------------------------------------
+
+  if (is.null(recipe)) {
 
     actual_error <- recipe_result$error$message %||% "Unknown error"
 
@@ -332,10 +288,7 @@ evaluate_configuration <- function(config_row,
                                 error_trace   = recipe_result$trace,
                                 warnings      = recipe_result$warnings,
                                 messages      = recipe_result$messages))
-
   }
-
-  recipe <- recipe_result$result
 
   ## ---------------------------------------------------------------------------
   ## Step 6: Extract Training Data
