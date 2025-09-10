@@ -411,39 +411,22 @@ evaluate_configuration <- function(config_row,
 
   if (parallel_cv && !is.null(n_cv_cores) && n_cv_cores > 1) {
 
-    # Use context-aware backend selection
-    old_plan <- setup_parallel_backend(
-      n_workers = n_cv_cores,
-      force_backend = NULL,  # Auto-detect optimal backend
-      memory_limit_gb = 2,   # Limit for spectral data
-      enable_work_stealing = TRUE,  # Dynamic load balancing
-      verbose = FALSE
-    )
+    old_plan <- future::plan()
+    on.exit(future::plan(old_plan), add = TRUE)
 
-    # Ensure restoration on exit
-    on.exit({
-      restore_parallel_settings(old_plan, verbose = FALSE)
-      optimize_parallel_memory(force_gc = TRUE, verbose = FALSE)
-    }, add = TRUE)
 
-    # Initialize reproducible RNG for parallel CV
-    if (!is.null(seed)) {
-      setup_parallel_rng(seed, n_cv_cores, verbose = FALSE)
+    if (.Platform$OS.type == "unix") {
+
+       future::plan(future::multicore, workers = n_cv_cores)
+
+      } else {
+
+       future::plan(future::multisession, workers = n_cv_cores)
+
     }
 
-    # Get actual backend used for display
-    backend_display <- get_backend_display()
-
-    cli::cli_text("{.strong Processing Steps:}")
-    cli::cli_text("├─ Cross-validation: {cv_folds}-fold parallel ({n_cv_cores} {backend_display} workers)")
-
-  } else {
-
-    # Sequential processing
-    cli::cli_text("{.strong Processing Steps:}")
-    cli::cli_text("├─ Cross-validation: {cv_folds}-fold sequential")
-
   }
+
 
   ## ---------------------------------------------------------------------------
   ## Step 11: Grid Search
