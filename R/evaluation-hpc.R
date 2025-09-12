@@ -431,20 +431,20 @@ evaluate_models_hpc <- function(config,
                       # Check result status directly (result is now a tibble)
                       if (result$status == "failed") {
 
-                        list(config_id = i,
-                             status    = "failed",
-                             error     = result$error_message,
-                             error_stage = result$error_stage,
-                             warnings  = result$warnings %||% NULL,
-                             messages  = result$messages %||% NULL,
-                             metrics   = NULL)
+                        final_result <- list(config_id = i,
+                                             status    = "failed",
+                                             error     = result$error_message,
+                                             error_stage = result$error_stage,
+                                             warnings  = result$warnings %||% NULL,
+                                             messages  = result$messages %||% NULL,
+                                             metrics   = NULL)
 
                         } else {
 
                           # Success or pruned - use the result tibble directly
-                          result
+                          final_result <- result
 
-                      } -> final_result
+                      }
 
 
                       ## -------------------------------------------------------
