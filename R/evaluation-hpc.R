@@ -26,17 +26,17 @@ evaluate_models_hpc <- function(config,
                                 input_data,
                                 covariate_data = NULL,
                                 variable,
-                                output_dir     = NULL,
-                                grid_size      = 10,
-                                bayesian_iter  = 15,
-                                cv_folds       = 10,
-                                outer_workers  = NULL,
-                                inner_workers  = NULL,
-                                seed           = 307,
-                                prune_models   = FALSE,
+                                output_dir      = NULL,
+                                grid_size       = 10,
+                                bayesian_iter   = 15,
+                                cv_folds        = 10,
+                                outer_workers   = NULL,
+                                inner_workers   = NULL,
+                                seed            = 307,
+                                prune_models    = FALSE,
                                 prune_threshold = 0.8,
-                                resume         = TRUE,
-                                verbose        = TRUE) {
+                                resume          = TRUE,
+                                verbose         = TRUE) {
 
   ## ---------------------------------------------------------------------------
   ## Step 1: Input Validation
@@ -44,49 +44,30 @@ evaluate_models_hpc <- function(config,
 
   ## Make sure we're getting a dataframe in ------------------------------------
 
-  if (!is.data.frame(config)) {
+  if (!is.data.frame(config)) cli::cli_abort("▶ evaluate_models_hpc: config must be a data frame")
 
-    cli::cli_abort("▶ evaluate_models_hpc: config must be a data frame")
-
-  }
 
   ## Check that variable is present --------------------------------------------
 
-  if (!variable %in% names(input_data)) {
-
-    cli::cli_abort("▶ evaluate_models_hpc: Response variable '{variable}' not found in input_data")
-
-  }
+  if (!variable %in% names(input_data)) cli::cli_abort("▶ evaluate_models_hpc: Response variable '{variable}' not found in input_data")
 
   ## Validate response variable has enough non-missing values -------------------
 
   response_vals <- input_data[[variable]]
   n_valid       <- sum(!is.na(response_vals))
 
-  if (n_valid < 20) {
-
-    cli::cli_abort("▶ evaluate_models_hpc: Response variable has only {n_valid} non-missing values (minimum 20 required)")
-
-  }
+  if (n_valid < 20) cli::cli_abort("▶ evaluate_models_hpc: Response variable has only {n_valid} non-missing values (minimum 20 required)")
 
   ## Check for variation in response variable ----------------------------------
 
-  if (var(response_vals, na.rm = TRUE) < .Machine$double.eps) {
-
-    cli::cli_abort("▶ evaluate_models_hpc: Response variable has no variation")
-
-  }
+  if (var(response_vals, na.rm = TRUE) < .Machine$double.eps) cli::cli_abort("▶ evaluate_models_hpc: Response variable has no variation")
 
   ## Check required config columns ---------------------------------------------
 
   required_cols <- c("model", "preprocessing", "transformation", "feature_selection")
   missing_cols  <- setdiff(required_cols, names(config))
 
-  if (length(missing_cols) > 0) {
-
-     cli::cli_abort("▶ evaluate_models_hpc: config missing required columns: {missing_cols}")
-
-  }
+  if (length(missing_cols) > 0) cli::cli_abort("▶ evaluate_models_hpc: config missing required columns: {missing_cols}")
 
   ## ---------------------------------------------------------------------------
   ## Step 2: Parallelization checks
@@ -98,30 +79,18 @@ evaluate_models_hpc <- function(config,
 
     ## Make sure the worker breakdown is specified -------------------------------
 
-    if (is.null(outer_workers) || is.null(inner_workers)) {
-
-      cli::cli_abort("▶ evaluate_models_hpc: Both outer_workers and inner_workers must be specified for HPC execution")
-
-    }
+    if (is.null(outer_workers) || is.null(inner_workers)) cli::cli_abort("▶ evaluate_models_hpc: Both outer_workers and inner_workers must be specified for HPC execution")
 
     ## Validate worker values ----------------------------------------------------
 
-    if (outer_workers < 1 || inner_workers < 1) {
-
-      cli::cli_abort("▶ evaluate_models_hpc: outer_workers and inner_workers must be >= 1")
-
-    }
+    if (outer_workers < 1 || inner_workers < 1) cli::cli_abort("▶ evaluate_models_hpc: outer_workers and inner_workers must be >= 1")
 
     ## Check total requested cores against available --------------------------------
 
     total_requested <- outer_workers * inner_workers
     cores_available <- parallel::detectCores()
 
-    if (total_requested > cores_available) {
-
-      cli::cli_abort("▶ evaluate_models_hpc: Requested {total_requested} cores ({outer_workers} × {inner_workers}) but only {cores_available} available")
-
-    }
+    if (total_requested > cores_available) cli::cli_abort("▶ evaluate_models_hpc: Requested {total_requested} cores ({outer_workers} × {inner_workers}) but only {cores_available} available")
 
     ## -------------------------------------------------------------------------
     ## Step 2.2: Thread control verification
@@ -353,6 +322,8 @@ evaluate_models_hpc <- function(config,
   }, add = TRUE)
 
   ## Setup balanced parallel backend for outer loop ------------------------------
+
+  ##TODO: Create a nested setup with tweak(?)
 
   future::plan(future::multisession,
                workers = outer_workers)

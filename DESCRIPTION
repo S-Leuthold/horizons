@@ -114,6 +114,7 @@ Collate:
     'utils-parallel.R'
     'utils-reporting.R'
     'utils-download.R'
+    'utils-display.R'
     'utils-ossl.R'
     'metrics-ccc.R'
     'metrics-rpd.R'

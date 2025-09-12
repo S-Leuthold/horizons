@@ -15,11 +15,12 @@ evaluate_configuration(
   grid_size = 10,
   bayesian_iter = 15,
   cv_folds = 10,
-  parallel_cv = TRUE,
+  allow_par = TRUE,
   n_cv_cores = NULL,
   prune_models = FALSE,
   prune_threshold = 0.9,
-  seed = 307
+  seed = 307,
+  verbose = TRUE
 )
 }
 \arguments{
@@ -58,9 +59,6 @@ Set to 0 to skip Bayesian optimization. Default: 15.}
 \item{cv_folds}{Integer. Number of cross-validation folds for hyperparameter tuning.
 Minimum 2, recommended 5-10. Uses stratified sampling on response. Default: 10.}
 
-\item{parallel_cv}{Logical. Enable parallel processing for cross-validation folds.
-Uses future package for cross-platform parallel processing. Default: TRUE.}
-
 \item{n_cv_cores}{Integer or NULL. Number of cores for parallel CV.
 NULL auto-detects (total cores - 2). Ignored if parallel_cv = FALSE.}
 
@@ -72,6 +70,9 @@ Model must achieve RRMSE < baseline_RRMSE * threshold to proceed to Bayesian.
 Example: 0.9 = must beat baseline by 10\%. Default: 0.9.}
 
 \item{seed}{Integer. Random seed for reproducibility of CV splits and tuning. Default: 123.}
+
+\item{parallel_cv}{Logical. Enable parallel processing for cross-validation folds.
+Uses future package for cross-platform parallel processing. Default: TRUE.}
 }
 \value{
 A single-row tibble containing:
