@@ -406,13 +406,50 @@ evaluate_models_hpc <- function(config,
   furrr::future_map(.x = models_to_process,
                     .f = function(i) {
 
+                      ## Extract and validate covariates for this model --------
+
+                      config_row <- config[i, , drop = FALSE]
+                      
+                      covariate_cols <- if ("covariates" %in% names(config_row) && !is.null(config_row$covariates[[1]])) {
+                        config_row$covariates[[1]]
+                      } else {
+                        NULL
+                      }
+
+                      # Validate that requested covariates exist
+                      if (!is.null(covariate_cols) && !is.null(covariate_data)) {
+                        
+                        missing_covs <- setdiff(covariate_cols, names(covariate_data))
+                        
+                        if (length(missing_covs) > 0) {
+                          # Return failure immediately - don't call evaluate_configuration
+                          return(list(
+                            config_id = i,
+                            status = "failed",
+                            error = glue::glue("Missing required covariates: {paste(missing_covs, collapse = ', ')}. Available: {paste(names(covariate_data), collapse = ', ')}"),
+                            error_stage = "hpc_covariate_validation",
+                            warnings = NULL,
+                            messages = NULL,
+                            metrics = NULL
+                          ))
+                        }
+                        
+                        # Subset covariates to only what this model needs
+                        model_covariate_data <- covariate_data[, c("Sample_ID", covariate_cols), drop = FALSE]
+                        
+                      } else {
+                        
+                        model_covariate_data <- covariate_data
+                        
+                      }
+
                       ## Run model evaluation ----------------------------------
 
-                      evaluate_configuration(config_row      = config[i, , drop = FALSE],
-                                             input_data      = input_data,
-                                             data_split      = data_split,
-                                             config_id       = i,
-                                             covariate_data  = covariate_data,
+                      result <- evaluate_configuration(config_row      = config_row,
+                                                       input_data      = input_data,
+                                                       data_split      = data_split,
+                                                       config_id       = i,
+                                                       covariate_data  = model_covariate_data,
                                              variable        = variable,
                                              output_dir      = output_dir,
                                              grid_size       = grid_size,
