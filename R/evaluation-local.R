@@ -851,6 +851,7 @@ evaluate_models_local <- function(config,
 
   results %>%
     dplyr::filter(status == "success") %>%
+    dplyr::arrange(rrmse) %>%
     dplyr::slice_head(n = 5) -> top_models
 
   ## Do some final reporting ---------------------------------------------------

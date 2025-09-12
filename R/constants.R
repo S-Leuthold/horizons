@@ -50,7 +50,8 @@ VALID_FEATURE_SELECTION <- c(
   "pca",
   "pls",
   "correlation",
-  "boruta"
+  "boruta",
+  "cars"
 )
 
 ## Default Parameters ---------------------------------------------------------
