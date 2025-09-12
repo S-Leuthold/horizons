@@ -321,12 +321,10 @@ evaluate_models_hpc <- function(config,
 
   }, add = TRUE)
 
-  ## Setup balanced parallel backend for outer loop ------------------------------
+  ## Setup parallel backend ----------------------------------------------------
 
-  future::plan(list(
-    tweak(future::multisession, workers = outer_workers),
-    tweak(future::multicore, workers = I(inner_workers))
-  ))
+  future::plan(list(tweak(future::multisession, workers = outer_workers),
+                    tweak(future::multicore, workers = I(inner_workers))))
 
   ## Report parallelization setup ----------------------------------------------
 
@@ -425,7 +423,7 @@ evaluate_models_hpc <- function(config,
                                              prune_models    = prune_models,
                                              prune_threshold = prune_threshold,
                                              seed            = seed,
-                                             verbose         = FALSE)
+                                             verbose         = FALSE) -> result
 
 
                       ## Store and evaluate the model results ------------------
