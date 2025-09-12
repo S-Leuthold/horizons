@@ -323,10 +323,10 @@ evaluate_models_hpc <- function(config,
 
   ## Setup balanced parallel backend for outer loop ------------------------------
 
-  ##TODO: Create a nested setup with tweak(?)
-
-  future::plan(future::multisession,
-               workers = outer_workers)
+  future::plan(list(
+    tweak(future::multisession, workers = outer_workers),
+    tweak(future::multicore, workers = I(inner_workers))
+  ))
 
   ## Report parallelization setup ----------------------------------------------
 
@@ -408,44 +408,43 @@ evaluate_models_hpc <- function(config,
   furrr::future_map(.x = models_to_process,
                     .f = function(i) {
 
-                      ## Run the model in the error handling wrapper -----------
+                      ## Run model evaluation ----------------------------------
 
-                      safely_execute(expr = {evaluate_configuration(config_row      = config[i, , drop = FALSE],
-                                                                    input_data      = input_data,
-                                                                    data_split      = data_split,
-                                                                    config_id       = i,
-                                                                    covariate_data  = covariate_data,
-                                                                    variable        = variable,
-                                                                    output_dir      = output_dir,
-                                                                    grid_size       = grid_size,
-                                                                    bayesian_iter   = bayesian_iter,
-                                                                    cv_folds        = cv_folds,
-                                                                    parallel_cv     = TRUE,
-                                                                    n_cv_cores      = inner_workers,
-                                                                    prune_models    = prune_models,
-                                                                    prune_threshold = prune_threshold,
-                                                                    seed            = seed)},
-                                     default_value      = NULL,
-                                     error_message      = glue::glue("Model {i} failed during evaluation"),
-                                     log_error          = TRUE,
-                                     capture_trace      = FALSE,
-                                     capture_conditions = TRUE) -> result
+                      evaluate_configuration(config_row      = config[i, , drop = FALSE],
+                                             input_data      = input_data,
+                                             data_split      = data_split,
+                                             config_id       = i,
+                                             covariate_data  = covariate_data,
+                                             variable        = variable,
+                                             output_dir      = output_dir,
+                                             grid_size       = grid_size,
+                                             bayesian_iter   = bayesian_iter,
+                                             cv_folds        = cv_folds,
+                                             allow_par       = TRUE,
+                                             n_cv_cores      = inner_workers,
+                                             prune_models    = prune_models,
+                                             prune_threshold = prune_threshold,
+                                             seed            = seed,
+                                             verbose         = FALSE)
 
 
                       ## Store and evaluate the model results ------------------
 
-                      if (!is.null(result$error)) {
+                      # Check result status directly (result is now a tibble)
+                      if (result$status == "failed") {
 
                         list(config_id = i,
                              status    = "failed",
-                             error     = result$error$message,
-                             warnings  = result$warnings,
-                             messages  = result$messages,
+                             error     = result$error_message,
+                             error_stage = result$error_stage,
+                             warnings  = result$warnings %||% NULL,
+                             messages  = result$messages %||% NULL,
                              metrics   = NULL)
 
                         } else {
 
-                          result$result
+                          # Success or pruned - use the result tibble directly
+                          result
 
                       } -> final_result
 
@@ -658,7 +657,7 @@ evaluate_models_hpc <- function(config,
     cli::cli_alert_info("Execution time: {round(as.numeric(execution_time), 1)} minutes")
     cli::cli_alert_info("Parallel configuration: {outer_workers} outer × {inner_workers} inner workers")
 
-    # Top models
+    # Top models----------------------------------------------------------------
 
     if (!is.null(top_models) && nrow(top_models) > 0) {
 

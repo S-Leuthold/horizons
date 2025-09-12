@@ -806,7 +806,9 @@ evaluate_configuration <- function(config_row,
 
     ## Run the search across a Gaussian process model -----------------------------
 
-    safely_execute(expr = {suppressMessages({tune::tune_bayes(object     = wflow,
+    safely_execute(expr = {suppressMessages({
+                                             suppressWarnings({
+                                               tune::tune_bayes(object     = wflow,
                                                               resamples  = cv_splits,
                                                               initial    = grid_results,
                                                               iter       = bayesian_iter,
@@ -822,7 +824,9 @@ evaluate_configuration <- function(config_row,
                                                                                               verbose       = FALSE,
                                                                                               no_improve    = BAYES_NO_IMPROVE_LIMIT,
                                                                                               allow_par     = allow_par,
-                                                                                              parallel_over = "everything"))})},
+                                                                                              parallel_over = "everything"))
+                                             })
+                                           })},
                  default_value      = NULL,
                  error_message      = "Bayesian optimization failed",
                  capture_conditions = TRUE) -> bayes_tune_result
