@@ -324,7 +324,7 @@ evaluate_models_hpc <- function(config,
   ## Setup parallel backend ----------------------------------------------------
 
   future::plan(list(tweak(future::multisession, workers = outer_workers),
-                    tweak(future::multicore, workers = I(inner_workers))))
+                    tweak(future::multicore, workers = inner_workers)))
 
   ## Report parallelization setup ----------------------------------------------
 
@@ -409,7 +409,7 @@ evaluate_models_hpc <- function(config,
                       ## Extract and validate covariates for this model --------
 
                       config_row <- config[i, , drop = FALSE]
-                      
+
                       covariate_cols <- if ("covariates" %in% names(config_row) && !is.null(config_row$covariates[[1]])) {
                         config_row$covariates[[1]]
                       } else {
@@ -418,9 +418,9 @@ evaluate_models_hpc <- function(config,
 
                       # Validate that requested covariates exist
                       if (!is.null(covariate_cols) && !is.null(covariate_data)) {
-                        
+
                         missing_covs <- setdiff(covariate_cols, names(covariate_data))
-                        
+
                         if (length(missing_covs) > 0) {
                           # Return failure immediately - don't call evaluate_configuration
                           return(list(
@@ -433,14 +433,14 @@ evaluate_models_hpc <- function(config,
                             metrics = NULL
                           ))
                         }
-                        
+
                         # Subset covariates to only what this model needs
                         model_covariate_data <- covariate_data[, c("Sample_ID", covariate_cols), drop = FALSE]
-                        
+
                       } else {
-                        
+
                         model_covariate_data <- covariate_data
-                        
+
                       }
 
                       ## Run model evaluation ----------------------------------
