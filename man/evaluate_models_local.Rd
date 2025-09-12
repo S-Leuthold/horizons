@@ -2,7 +2,7 @@
 % Please edit documentation in R/evaluation-local.R
 \name{evaluate_models_local}
 \alias{evaluate_models_local}
-\title{Local Model Evaluation - Main Entry Point}
+\title{Evaluate Model Configurations on Local Machines}
 \usage{
 evaluate_models_local(
   config,
@@ -13,7 +13,7 @@ evaluate_models_local(
   grid_size = 10,
   bayesian_iter = 15,
   cv_folds = 10,
-  parallel_cv = TRUE,
+  allow_par = TRUE,
   n_cv_cores = NULL,
   prune_models = TRUE,
   prune_threshold = 0.9,
@@ -23,41 +23,137 @@ evaluate_models_local(
 )
 }
 \arguments{
-\item{config}{A tibble of model configurations to evaluate}
+\item{config}{\verb{[data.frame]} Configuration grid with required columns:
+\itemize{
+\item \code{model}: Model type (e.g., "random_forest", "cubist", "xgboost")
+\item \code{preprocessing}: Spectral preprocessing method
+\item \code{transformation}: Response transformation method
+\item \code{feature_selection}: Feature selection approach
+\item \code{covariates}: (Optional) List column of covariate names
+}}
 
-\item{input_data}{Tibble with preprocessed spectral data}
+\item{input_data}{\verb{[data.frame]} Preprocessed spectral data with columns:
+\itemize{
+\item \code{Sample_ID}: Unique sample identifiers
+\item \code{Response}: Target variable (will be renamed from variable param)
+\item Numeric columns: Wavenumbers (e.g., \code{"600"}, \code{"602"}, \code{"604"})
+}}
 
-\item{covariate_data}{Optional tibble of predicted covariates}
+\item{covariate_data}{\verb{[data.frame]} (Optional) Predicted covariate data with \code{Sample_ID}
+and covariate columns. Default: \code{NULL}.}
 
-\item{variable}{Character. Name of the response variable}
+\item{variable}{\verb{[character]} Name of response variable column in input_data.}
 
-\item{output_dir}{Path to output directory (auto-generated if NULL)}
+\item{output_dir}{\verb{[character]} (Optional) Output directory path.
+Default: Auto-generated with timestamp.}
 
-\item{grid_size}{Integer. Grid search combinations (default: 10)}
+\item{grid_size}{\verb{[integer]} Grid search combinations per model. Default: \code{10}.}
 
-\item{bayesian_iter}{Integer. Bayesian optimization iterations (default: 15)}
+\item{bayesian_iter}{\verb{[integer]} Bayesian optimization iterations. Default: \code{15}.}
 
-\item{cv_folds}{Integer. Cross-validation folds (default: 10)}
+\item{cv_folds}{\verb{[integer]} Cross-validation folds. Default: \code{10}.}
 
-\item{parallel_cv}{Logical. Use parallel processing for CV (default: TRUE)}
+\item{allow_par}{\verb{[logical]} Use parallel processing for CV? Default: \code{TRUE}. Uses future::plan(multisession) for local runs.}
 
-\item{n_cv_cores}{Integer. Cores for parallel CV (default: detectCores()-2)}
+\item{n_cv_cores}{\verb{[integer]} (Optional) Cores for parallel CV.
+Default: \code{parallel::detectCores() - 2}.}
 
-\item{prune_models}{Logical. Prune models that don't beat baseline (default: TRUE)}
+\item{prune_models}{\verb{[logical]} Prune models that don't beat baseline? Default: \code{TRUE}.}
 
-\item{prune_threshold}{Numeric. Performance threshold vs baseline (default: 0.9)}
+\item{prune_threshold}{\verb{[numeric]} Performance threshold vs baseline (0-1). Default: \code{0.9}.}
 
-\item{seed}{Integer. Random seed for reproducibility (default: 307)}
+\item{seed}{\verb{[integer]} Random seed for reproducibility. Default: \code{307}.}
 
-\item{resume}{Logical. Resume from existing checkpoint files (default: TRUE)}
+\item{resume}{\verb{[logical]} Resume from existing checkpoint files? Default: \code{TRUE}.}
 
-\item{verbose}{Logical. Print progress messages (default: TRUE)}
+\item{verbose}{\verb{[logical]} Print progress messages? Default: \code{TRUE}.}
 }
 \value{
-Tibble with evaluation results for all configurations
+A \verb{[tibble]} with evaluation results containing:
+\itemize{
+\item \code{config_id}: Configuration identifier (e.g., "001_rf_Log_SNV_PCA_ph")
+\item \code{workflow_id}: Human-readable model description
+\item \code{model}, \code{preprocessing}, \code{transformation}, \code{feature_selection}: Configuration details
+\item \code{covariates}: List column of covariate names used
+\item \code{rsq}, \code{rmse}, \code{rrmse}, \code{ccc}, \code{rpd}, \code{mae}: Performance metrics on test set
+\item \code{status}: Result status ("success", "failed", "pruned")
+\item \code{elapsed_secs}: Total computation time per model
+\item \code{best_params}: List column with optimal hyperparameters
+\item \code{error_message}: Error details for failed models
+}
 }
 \description{
-Executes model evaluation workflows on local machines with sequential model processing
-and optional parallel cross-validation. This is the main entry point for desktop/server
-execution outside of HPC environments.
+Executes comprehensive model evaluation workflows locally with sequential model processing
+and optional parallel cross-validation. This is the primary entry point for desktop and
+server-based model comparison outside of HPC environments, providing automated hyperparameter
+tuning, checkpointing, and performance tracking.
+}
+\section{Details}{
+
+The evaluation pipeline executes these stages for each configuration:
+\enumerate{
+\item \strong{Recipe building}: Applies spectral preprocessing and feature selection
+\item \strong{Model specification}: Defines model with tunable hyperparameters
+\item \strong{Grid search}: Latin hypercube sampling across parameter space
+\item \strong{Bayesian optimization}: Refines best grid search results
+\item \strong{Final fitting}: Trains on full training set, evaluates on test set
+\item \strong{Checkpointing}: Saves results for resume capability
+}
+
+Models are processed sequentially to avoid memory issues with large spectral datasets.
+Cross-validation within each model can be parallelized for faster tuning.
+}
+
+\section{Warning}{
+
+\itemize{
+\item Memory usage scales with spectral data size and number of features
+\item Large configuration grids (>100 models) may require hours to complete
+\item Parallel CV may conflict with system-level parallelization
+\item Results depend on random seed for reproducible comparisons
+}
+}
+
+\examples{
+# Basic evaluation workflow
+configs <- create_configs(models = c("random_forest", "cubist"))
+
+evaluate_models_local(config      = configs,
+                      input_data  = spectral_data,
+                      variable    = "SOC",
+                      grid_size   = 5,
+                      verbose     = TRUE) -> results
+
+# With covariates and custom settings
+evaluate_models_local(config           = extended_configs,
+                      input_data       = preprocessed_spectra,
+                      covariate_data   = climate_data,
+                      variable         = "clay",
+                      bayesian_iter    = 20,
+                      prune_threshold  = 0.8,
+                      n_cv_cores       = 4) -> detailed_results
+
+\dontrun{
+# Large-scale evaluation with error handling
+safely_execute(expr = {
+  evaluate_models_local(config      = full_config_grid,
+                        input_data  = large_dataset,
+                        variable    = "SOC",
+                        allow_par   = TRUE,
+                        verbose     = TRUE)
+},
+default_value = NULL,
+error_message = "Model evaluation failed") -> eval_safe
+
+results <- eval_safe$result
+}
+
+}
+\seealso{
+\itemize{
+\item \code{\link[=evaluate_models_hpc]{evaluate_models_hpc()}} for HPC cluster evaluation
+\item \code{\link[=create_configs]{create_configs()}} to generate configuration grids
+\item \code{\link[=finalize_top_workflows]{finalize_top_workflows()}} for ensemble model creation
+\item \code{vignette("model-evaluation")} for complete workflow guide
+}
 }

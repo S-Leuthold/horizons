@@ -11,7 +11,7 @@
 # Valid model types supported by the package
 VALID_MODELS <- c(
   "random_forest",
-  "plsr", 
+  "plsr",
   "cubist",
   "xgboost",
   "lightgbm",
@@ -35,14 +35,12 @@ VALID_TRANSFORMATIONS <- c(
 # Valid spectral preprocessing methods
 VALID_PREPROCESSING <- c(
   "raw",
+  "sg",
   "snv",
-  "snv_sg1",
-  "snv_sg2", 
-  "sg1",
-  "sg2",
   "deriv1",
-  "deriv2"
-)
+  "deriv2",
+  "snv_deriv1",
+  "snv_deriv2")
 
 ## Feature Selection Methods --------------------------------------------------
 
