@@ -772,7 +772,16 @@ evaluate_models_local <- function(config,
 
   ## Simple aggregation --------------------------------------------------------
 
-  results <- dplyr::bind_rows(all_results)
+  # Ensure all results have consistent column structure before binding
+  standardized_results <- lapply(all_results, function(result) {
+    # Add missing columns with NULL defaults if they don't exist
+    if (!"warnings" %in% names(result)) result$warnings <- list(NULL)
+    if (!"messages" %in% names(result)) result$messages <- list(NULL)
+    if (!"warning_summary" %in% names(result)) result$warning_summary <- NA_character_
+    result
+  })
+
+  results <- dplyr::bind_rows(standardized_results)
 
   ## Save final aggregated results using atomic writes -------------------------
 
