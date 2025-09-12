@@ -792,26 +792,28 @@ perform_pca_on_ossl <- function(ossl_data,
 #'
 #' @return Tibble with PCA scores and preserved metadata
 #' @keywords internal
+
+
 project_spectra_to_pca <- function(new_data,
                                    pca_model,
                                    verbose = TRUE) {
 
-  if (verbose) {
-    cli::cli_progress_step("Projecting new spectra to PCA space")
-  }
+  if (verbose) cli::cli_progress_step("Projecting new spectra to PCA space")
 
-  # Extract spectral columns (numeric wavenumbers)
+  ## ---------------------------------------------------------------------------
+  ## Step 1: Validate inputs
+  ## ---------------------------------------------------------------------------
+
+  ## Extract spectral columns (numeric wavenumbers) ----------------------------
+
   spectral_cols <- grep("^[0-9]{3,4}$", names(new_data), value = TRUE)
 
-  if (length(spectral_cols) == 0) {
-    cli::cli_abort("No spectral columns found in new data (expected numeric wavenumber columns)")
-  }
+  if (length(spectral_cols) == 0) cli::cli_abort("No spectral columns found in new data (expected numeric wavenumber columns)")
 
-  # Project to PCA space using prcomp predict
-  # Check for column compatibility
-  pca_cols <- rownames(pca_model$rotation)
+
+  pca_cols     <- rownames(pca_model$rotation)
   missing_cols <- setdiff(pca_cols, spectral_cols)
-  extra_cols <- setdiff(spectral_cols, pca_cols)
+  extra_cols   <- setdiff(spectral_cols, pca_cols)
 
   if (length(missing_cols) > 0) {
     if (verbose) {
@@ -829,9 +831,9 @@ project_spectra_to_pca <- function(new_data,
   }
 
   # Create data with matching columns, filling missing with zeros
-  newdata_aligned <- matrix(0, nrow = nrow(new_data), ncol = length(pca_cols))
+  newdata_aligned           <- matrix(0, nrow = nrow(new_data), ncol = length(pca_cols))
   colnames(newdata_aligned) <- pca_cols
-  common_cols <- intersect(spectral_cols, pca_cols)
+  common_cols               <- intersect(spectral_cols, pca_cols)
 
   if (length(common_cols) == 0) {
     cli::cli_abort("No matching columns between new data and PCA model")

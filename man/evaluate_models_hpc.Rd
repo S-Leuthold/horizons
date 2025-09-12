@@ -16,6 +16,8 @@ evaluate_models_hpc(
   outer_workers = NULL,
   inner_workers = NULL,
   seed = 307,
+  prune_models = FALSE,
+  prune_threshold = 0.8,
   resume = TRUE,
   verbose = TRUE
 )
