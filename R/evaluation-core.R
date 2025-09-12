@@ -627,6 +627,10 @@ evaluate_configuration <- function(config_row,
 
       param_set <- dials::finalize(param_set, eval_data)
 
+      # Explicit cleanup to prevent memory accumulation in long HPC runs
+      rm(eval_data)
+      invisible(gc(verbose = FALSE))
+
     }
 
     ## -------------------------------------------------------------------------
