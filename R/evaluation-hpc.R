@@ -281,7 +281,7 @@ evaluate_models_hpc <- function(config,
 
   rsample::initial_split(data = input_data,
                          prop = 0.8,
-                         strata = variable) -> data_split
+                         strata = !!sym(variable)) -> data_split
 
   ## Report split summary ------------------------------------------------------
 
@@ -396,7 +396,7 @@ evaluate_models_hpc <- function(config,
   furrr_opts <- furrr::furrr_options(
     seed       = NULL,
     stdout     = FALSE,
-    conditions = NULL,
+    conditions = "warning",  # Capture warnings but don't mask errors
     chunk_size = 1,
     scheduling = Inf
   )
@@ -433,7 +433,7 @@ evaluate_models_hpc <- function(config,
                           ## Create a failed result entry ----------------------------------------
 
                           create_failed_result(config_id     = i,
-                                               config_clean  = i,
+                                               config_clean  = NULL,
                                                error_message = glue::glue("Covariate data requested but not found for {missing_covs}"),
                                                workflow_id   = i,
                                                error_detail  = NULL,
@@ -730,10 +730,12 @@ evaluate_models_hpc <- function(config,
                                       preprocessing     = res$config$preprocessing,
                                       transformation    = res$config$transformation,
                                       feature_selection = res$config$feature_selection,
-                                      rrmse             = res$metrics$.estimate[res$metrics$.metric == "rrmse"][1],
-                                      rsq               = res$metrics$.estimate[res$metrics$.metric == "rsq"][1],
-                                      ccc               = res$metrics$.estimate[res$metrics$.metric == "ccc"][1],
-                                      rpd               = res$metrics$.estimate[res$metrics$.metric == "rpd"][1])
+                                      rrmse             = res$rrmse,
+                                      rsq               = res$rsq,
+                                      ccc               = res$ccc,
+                                      rpd               = res$rpd,
+                                      rmse              = res$rmse,
+                                      mae               = res$mae)
                      }
                    }) -> model_metrics
 
