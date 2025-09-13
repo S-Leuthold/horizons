@@ -634,6 +634,18 @@ evaluate_configuration <- function(config_row,
     }
 
     ## -------------------------------------------------------------------------
+    ## TEST: New parallel backend option for the resamples
+    ## -------------------------------------------------------------------------
+
+    RNGkind("L'Ecuyer-CMRG")
+    set.seed(seed)
+
+    doMC::registerDoMC(cores = n_cv_cores)
+
+    stopifnot(foreach::getDoParName() == "doMC")
+    stopifnot(foreach::getDoParWorkers() == n_cv_cores)
+
+    ## -------------------------------------------------------------------------
     ## Step 8.2: Run grid search and save results
     ## -------------------------------------------------------------------------
 

@@ -323,8 +323,7 @@ evaluate_models_hpc <- function(config,
 
   ## Setup parallel backend ----------------------------------------------------
 
-  future::plan(list(tweak(future::multisession, workers = outer_workers),
-                    tweak(future::multicore, workers = inner_workers)))
+  future::plan(future::multisession, workers = outer_workers)
 
   ## Report parallelization setup ----------------------------------------------
 
