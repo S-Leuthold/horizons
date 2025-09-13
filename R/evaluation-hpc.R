@@ -397,7 +397,7 @@ evaluate_models_hpc <- function(config,
     stdout     = FALSE,
     conditions = "warning",  # Capture warnings but don't mask errors
     chunk_size = 1,
-    scheduling = Inf
+    scheduling = 1
   )
 
   ## Run the model evaluation ---------------------------------------------------
