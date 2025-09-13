@@ -279,7 +279,7 @@ evaluate_models_local <- function(config,
   }
 
   ## ---------------------------------------------------------------------------
-  ## Step 8: Setup Parallel Backend (if requested)
+  ## Step ??: Setup Parallel Backend (if requested)
   ## ---------------------------------------------------------------------------
 
   if (allow_par && !is.null(n_cv_cores) && n_cv_cores > 1) {
