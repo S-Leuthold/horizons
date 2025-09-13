@@ -433,7 +433,7 @@ evaluate_models_hpc <- function(config,
                           ## Create a failed result entry ----------------------------------------
 
                           create_failed_result(config_id     = i,
-                                               config_clean  = config_clean,
+                                               config_clean  = i,
                                                error_message = glue::glue("Covariate data requested but not found for {missing_covs}"),
                                                workflow_id   = i,
                                                error_detail  = NULL,
