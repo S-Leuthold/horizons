@@ -416,25 +416,73 @@ evaluate_models_hpc <- function(config,
                         NULL
                       }
 
-                      # Validate that requested covariates exist
+                      ## -------------------------------------------------------
+                      ## Step X: Validate that requested covariates exist
+                      ## -------------------------------------------------------
+
                       if (!is.null(covariate_cols) && !is.null(covariate_data)) {
 
                         missing_covs <- setdiff(covariate_cols, names(covariate_data))
 
                         if (length(missing_covs) > 0) {
-                          # Return failure immediately - don't call evaluate_configuration
-                          return(list(
-                            config_id = i,
-                            status = "failed",
-                            error = glue::glue("Missing required covariates: {paste(missing_covs, collapse = ', ')}. Available: {paste(names(covariate_data), collapse = ', ')}"),
-                            error_stage = "hpc_covariate_validation",
-                            warnings = NULL,
-                            messages = NULL,
-                            metrics = NULL
-                          ))
+
+                          ## Create the json file path--------------------------
+
+                          error_file <-  fs::path(output_dir, "errors", paste0(i, ".json"))
+
+                          ## Create a failed result entry ----------------------------------------
+
+                          create_failed_result(config_id     = i,
+                                               config_clean  = config_clean,
+                                               error_message = glue::glue("Covariate data requested but not found for {missing_covs}"),
+                                               workflow_id   = i,
+                                               error_detail  = NULL,
+                                               error_stage   = "HPC - Covariate data assembly (Step X)",
+                                               error_trace   = NULL,
+                                               warnings      = NULL,
+                                               messages      = NULL) -> failed_result
+
+                          ## Create a structured error file --------------------------------------
+
+                          list(workflow_id   = i,
+                               config        = as.list(config_row),
+                               error_stage   = failed_result$error_stage,
+                               error_class   = failed_result$error_class,
+                               error_message = failed_result$error_message,
+                               has_trace     = failed_result$has_trace,
+                               n_warnings    = failed_result$n_warnings,
+                               warnings      = failed_result$warnings %||% NULL,
+                               messages      = failed_result$messages %||% NULL,
+                               total_seconds = failed_result$total_seconds,
+                               timestamp     = as.character(Sys.time())) -> error_object
+
+                          ## Save the error file using an atomic write ---------------------------
+
+                          temp_error <- tempfile(tmpdir = dirname(error_file), fileext = ".json.tmp")
+
+                          tryCatch({
+
+                            jsonlite::write_json(x          = error_object,
+                                                 path       = temp_error,
+                                                 pretty     = TRUE,
+                                                 auto_unbox = TRUE)
+
+                            file.rename(temp_error, error_file)
+
+                          }, error = function(e) {
+
+                            if (file.exists(temp_error)) unlink(temp_error)
+
+                          })
+
+                          cat(paste0("Model: ", i, " failed during covariate joining."))
+
+                          return(failed_result)
+
                         }
 
-                        # Subset covariates to only what this model needs
+                        # Subset covariates to only what this model needs ------
+
                         model_covariate_data <- covariate_data[, c("Sample_ID", covariate_cols), drop = FALSE]
 
                       } else {
@@ -443,13 +491,15 @@ evaluate_models_hpc <- function(config,
 
                       }
 
-                      ## Run model evaluation ----------------------------------
+                      ## -------------------------------------------------------
+                      ## Run model evaluation
+                      ## -------------------------------------------------------
 
-                      result <- evaluate_configuration(config_row      = config_row,
-                                                       input_data      = input_data,
-                                                       data_split      = data_split,
-                                                       config_id       = i,
-                                                       covariate_data  = model_covariate_data,
+                      evaluate_configuration(config_row      = config_row,
+                                             input_data      = input_data,
+                                             data_split      = data_split,
+                                             config_id       = i,
+                                             covariate_data  = model_covariate_data,
                                              variable        = variable,
                                              output_dir      = output_dir,
                                              grid_size       = grid_size,
@@ -462,25 +512,54 @@ evaluate_models_hpc <- function(config,
                                              seed            = seed,
                                              verbose         = FALSE) -> result
 
-
+                      ## -------------------------------------------------------
                       ## Store and evaluate the model results ------------------
+                      ## -------------------------------------------------------
 
-                      # Check result status directly (result is now a tibble)
                       if (result$status == "failed") {
 
-                        final_result <- list(config_id = i,
-                                             status    = "failed",
-                                             error     = result$error_message,
-                                             error_stage = result$error_stage,
-                                             warnings  = result$warnings %||% NULL,
-                                             messages  = result$messages %||% NULL,
-                                             metrics   = NULL)
+                        error_file <-  fs::path(output_dir, "errors", paste0(i, ".json"))
+
+                        ## Create a structured error file --------------------------------------
+
+                        list(workflow_id   = i,
+                             config        = as.list(config_row),
+                             error_stage   = result$error_stage,
+                             error_class   = result$error_class,
+                             error_message = result$error_message,
+                             has_trace     = result$has_trace,
+                             n_warnings    = result$n_warnings,
+                             warnings      = result$warnings %||% NULL,
+                             messages      = result$messages %||% NULL,
+                             total_seconds = result$total_seconds,
+                             timestamp     = as.character(Sys.time())) -> error_object
+
+                        ## Save the error file using an atomic write ---------------------------
+
+                        temp_error <- tempfile(tmpdir = dirname(error_file), fileext = ".json.tmp")
+
+                        tryCatch({
+
+                          jsonlite::write_json(x          = error_object,
+                                               path       = temp_error,
+                                               pretty     = TRUE,
+                                               auto_unbox = TRUE)
+
+                          file.rename(temp_error, error_file)
+
+                        }, error = function(e) {
+
+                          if (file.exists(temp_error)) unlink(temp_error)
+
+                        })
+
+                        cat(paste0("Model: ", i, " failed-- check error log."))
+
+                        return(result)
 
                         } else {
 
-                          # Success or pruned - use the result tibble directly
                           final_result <- result
-
                       }
 
 
@@ -494,6 +573,7 @@ evaluate_models_hpc <- function(config,
 
                         checkpoint_file <- file.path(checkpoint_dir, sprintf("model_%06d.qs", i))
                         temp_file       <- paste0(checkpoint_file, ".tmp")
+
 
                         qs::qsave(final_result, temp_file)
                         file.rename(temp_file, checkpoint_file)
