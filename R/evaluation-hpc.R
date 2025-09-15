@@ -664,6 +664,16 @@ evaluate_models_hpc <- function(config,
 
                       ## Return the final results ------------------------------
 
+                      ## ========== DEBUG: Model completion ==========
+                      if (!is.null(final_result) && final_result$status == "success") {
+                        cli::cli_alert_success("[DEBUG-COMPLETE-{i}] Model {i} completed successfully (RMSE: {round(final_result$rmse, 3)}, R²: {round(final_result$rsq, 3)})")
+                      } else if (!is.null(final_result) && final_result$status == "pruned") {
+                        cli::cli_alert_info("[DEBUG-COMPLETE-{i}] Model {i} was pruned (insufficient performance)")
+                      } else {
+                        cli::cli_alert_warning("[DEBUG-COMPLETE-{i}] Model {i} failed")
+                      }
+                      ## ========== END DEBUG ==========
+
                       return(final_result)
           },
           .options = furrr_opts,
