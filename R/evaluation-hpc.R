@@ -323,6 +323,15 @@ evaluate_models_hpc <- function(config,
 
   ## Setup parallel backend ----------------------------------------------------
 
+  ## Store and increase globals size limit for large spectral data
+  old_maxSize <- getOption("future.globals.maxSize")
+  options(future.globals.maxSize = 2 * 1024^3)  # Set to 2GB for spectral workflows
+
+  ## Restore original limit on exit
+  on.exit({
+    options(future.globals.maxSize = old_maxSize)
+  }, add = TRUE)
+
   future::plan(future::multisession, workers = outer_workers)
 
   ## Report parallelization setup ----------------------------------------------

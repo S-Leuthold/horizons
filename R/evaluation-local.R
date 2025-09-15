@@ -287,7 +287,15 @@ evaluate_models_local <- function(config,
     options(mc.cores = n_cv_cores)
 
     old_plan <- future::plan()
-    on.exit(future::plan(old_plan), add = TRUE)
+
+    ## Store and increase globals size limit for large spectral data
+    old_maxSize <- getOption("future.globals.maxSize")
+    options(future.globals.maxSize = 2 * 1024^3)  # Set to 2GB for spectral workflows
+
+    on.exit({
+      future::plan(old_plan)
+      options(future.globals.maxSize = old_maxSize)  # Restore original limit
+    }, add = TRUE)
 
     future::plan(future::multisession, workers = n_cv_cores)
 
