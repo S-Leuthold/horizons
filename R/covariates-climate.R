@@ -333,7 +333,14 @@ fetch_climate_covariates <- function(input_data,
 
               ## Summarize the data --------------------------------------------
 
-              safely_execute(expr = {summarize_daymet(daymet_df = daymet_data,
+              ## Extract the data frame from the daymetr object
+              daymet_df <- if (is.list(daymet_data) && "data" %in% names(daymet_data)) {
+                daymet_data$data
+              } else {
+                daymet_data  # Fallback if structure is different
+              }
+
+              safely_execute(expr = {summarize_daymet(daymet_df = daymet_df,
                                                       lat       = coords$Latitude,
                                                       gdd_base  = gdd_base)},
                              default_value      = NULL,
