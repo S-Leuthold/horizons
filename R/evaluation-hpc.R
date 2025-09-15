@@ -421,10 +421,10 @@ evaluate_models_hpc <- function(config,
                     .f = function(i) {
 
                       ## ========== DEBUG: Worker process info ==========
-                      cat(sprintf("[DEBUG-WORKER-%d] Model %d started on PID: %d\n", i, i, Sys.getpid()))
-                      cat(sprintf("[DEBUG-WORKER-%d] Inner workers setting: %d\n", i, inner_workers))
-                      cat(sprintf("[DEBUG-WORKER-%d] mc.cores option: %s\n", i, getOption('mc.cores')))
-                      cat(sprintf("[DEBUG-WORKER-%d] Current plan: %s\n", i, class(future::plan())[1]))
+                      message(sprintf("[DEBUG-WORKER-%d] Model %d started on PID: %d", i, i, Sys.getpid()))
+                      message(sprintf("[DEBUG-WORKER-%d] Inner workers setting: %d", i, inner_workers))
+                      message(sprintf("[DEBUG-WORKER-%d] mc.cores option: %s", i, getOption('mc.cores')))
+                      message(sprintf("[DEBUG-WORKER-%d] Current plan: %s", i, class(future::plan())[1]))
                       ## ========== END DEBUG ==========
 
                       ## Extract and validate covariates for this model --------
@@ -667,12 +667,12 @@ evaluate_models_hpc <- function(config,
 
                       ## ========== DEBUG: Model completion ==========
                       if (!is.null(final_result) && final_result$status == "success") {
-                        cat(sprintf("[DEBUG-COMPLETE-%d] Model %d completed successfully (RMSE: %.3f, R²: %.3f)\n",
-                                   i, i, final_result$rmse, final_result$rsq))
+                        message(sprintf("[DEBUG-COMPLETE-%d] Model %d completed successfully (RMSE: %.3f, R²: %.3f)",
+                                       i, i, final_result$rmse, final_result$rsq))
                       } else if (!is.null(final_result) && final_result$status == "pruned") {
-                        cat(sprintf("[DEBUG-COMPLETE-%d] Model %d was pruned (insufficient performance)\n", i, i))
+                        message(sprintf("[DEBUG-COMPLETE-%d] Model %d was pruned (insufficient performance)", i, i))
                       } else {
-                        cat(sprintf("[DEBUG-COMPLETE-%d] Model %d failed\n", i, i))
+                        message(sprintf("[DEBUG-COMPLETE-%d] Model %d failed", i, i))
                       }
                       ## ========== END DEBUG ==========
 
