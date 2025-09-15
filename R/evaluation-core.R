@@ -714,7 +714,7 @@ evaluate_configuration <- function(config_row,
                                                                                              verbose       = FALSE,
                                                                                              extract       = NULL,
                                                                                              allow_par     = allow_par,
-                                                                                             parallel_over = "resamples"))})},
+                                                                                             parallel_over = "everything"))})},
                    default_value      = NULL,
                    error_message      = "Grid search failed",
                    capture_conditions = TRUE) -> grid_tune_result
@@ -896,7 +896,7 @@ evaluate_configuration <- function(config_row,
                                                                                               verbose       = FALSE,
                                                                                               no_improve    = BAYES_NO_IMPROVE_LIMIT,
                                                                                               allow_par     = allow_par,
-                                                                                              parallel_over = "resamples"))
+                                                                                              parallel_over = "everything"))
                                              })
                                            })},
                  default_value      = NULL,
