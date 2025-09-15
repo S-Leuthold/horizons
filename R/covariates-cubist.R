@@ -365,13 +365,15 @@ fit_cubist_model <- function(train_data,
 
     tibble::tibble(observed  = Val_Data$Response,
                    predicted = val_predictions$.pred) %>%
-      tidyr::drop_na() %>%
+      tidyr::drop_na() -> val_data_clean
+
+    val_data_clean %>%
       dplyr::summarise(rmse  = sqrt(mean((observed - predicted)^2)),
                        mae   = mean(abs(observed - predicted)),
                        rsq   = cor(observed, predicted)^2,
                        ccc   = ccc_vec(observed, predicted),
                        rpd   = rpd_vec(observed, predicted),
-                       rrmse = rrmse_vec(observed, predicted)) -> val_metrics
+                       rrmse = rrmse_vec(val_data_clean, truth = observed, estimate = predicted)) -> val_metrics
     },
 
     default_value      = NULL,
