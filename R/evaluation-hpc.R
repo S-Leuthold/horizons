@@ -421,9 +421,10 @@ evaluate_models_hpc <- function(config,
                     .f = function(i) {
 
                       ## ========== DEBUG: Worker process info ==========
-                      cli::cli_alert_info("[DEBUG-WORKER-{i}] Model {i} started on PID: {Sys.getpid()}")
-                      cli::cli_alert_info("[DEBUG-WORKER-{i}] Inner workers setting: {inner_workers}")
-                      cli::cli_alert_info("[DEBUG-WORKER-{i}] mc.cores option: {getOption('mc.cores')}")
+                      cat(sprintf("[DEBUG-WORKER-%d] Model %d started on PID: %d\n", i, i, Sys.getpid()))
+                      cat(sprintf("[DEBUG-WORKER-%d] Inner workers setting: %d\n", i, inner_workers))
+                      cat(sprintf("[DEBUG-WORKER-%d] mc.cores option: %s\n", i, getOption('mc.cores')))
+                      cat(sprintf("[DEBUG-WORKER-%d] Current plan: %s\n", i, class(future::plan())[1]))
                       ## ========== END DEBUG ==========
 
                       ## Extract and validate covariates for this model --------
@@ -666,11 +667,12 @@ evaluate_models_hpc <- function(config,
 
                       ## ========== DEBUG: Model completion ==========
                       if (!is.null(final_result) && final_result$status == "success") {
-                        cli::cli_alert_success("[DEBUG-COMPLETE-{i}] Model {i} completed successfully (RMSE: {round(final_result$rmse, 3)}, R²: {round(final_result$rsq, 3)})")
+                        cat(sprintf("[DEBUG-COMPLETE-%d] Model %d completed successfully (RMSE: %.3f, R²: %.3f)\n",
+                                   i, i, final_result$rmse, final_result$rsq))
                       } else if (!is.null(final_result) && final_result$status == "pruned") {
-                        cli::cli_alert_info("[DEBUG-COMPLETE-{i}] Model {i} was pruned (insufficient performance)")
+                        cat(sprintf("[DEBUG-COMPLETE-%d] Model %d was pruned (insufficient performance)\n", i, i))
                       } else {
-                        cli::cli_alert_warning("[DEBUG-COMPLETE-{i}] Model {i} failed")
+                        cat(sprintf("[DEBUG-COMPLETE-%d] Model %d failed\n", i, i))
                       }
                       ## ========== END DEBUG ==========
 
