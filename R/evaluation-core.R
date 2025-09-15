@@ -637,6 +637,12 @@ evaluate_configuration <- function(config_row,
     ## TEST: New parallel backend option for the resamples
     ## -------------------------------------------------------------------------
 
+    ## Set multicore options for better performance
+    options(
+      mc.cores = n_cv_cores,
+      mc.preschedule = FALSE  # Dynamic scheduling better for uneven CV folds
+    )
+
     RNGkind("L'Ecuyer-CMRG")
     set.seed(seed)
 
