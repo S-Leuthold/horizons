@@ -152,6 +152,27 @@ evaluate_configuration <- function(config_row,
 
   start_time <- Sys.time()
 
+  ## ========== DEBUG: File-based logging setup ==========
+  debug_log_file <- if (!is.null(output_dir)) {
+    file.path(output_dir, "debug_worker_output.log")
+  } else {
+    NULL
+  }
+
+  debug_msg <- function(msg, ...) {
+    if (!is.null(debug_log_file)) {
+      formatted <- sprintf(msg, ...)
+      cat(sprintf("[%s] [CORE-%d] %s\n",
+                  format(Sys.time(), "%H:%M:%S"),
+                  config_id, formatted),
+          file = debug_log_file, append = TRUE)
+    }
+  }
+
+  debug_msg("evaluate_configuration started | n_cv_cores: %s | allow_par: %s",
+           n_cv_cores, allow_par)
+  ## ========== END DEBUG ==========
+
   set.seed(seed)
 
     ## ---------------------------------------------------------------------------
@@ -651,6 +672,14 @@ evaluate_configuration <- function(config_row,
     stopifnot(foreach::getDoParName() == "doMC")
     stopifnot(foreach::getDoParWorkers() == n_cv_cores)
 
+    ## ========== DEBUG: Parallel backend verification ==========
+    debug_msg("Parallel backend configured | Backend: %s | Workers: %d | mc.cores: %s | mc.preschedule: %s",
+             foreach::getDoParName(),
+             foreach::getDoParWorkers(),
+             getOption('mc.cores'),
+             getOption('mc.preschedule'))
+    ## ========== END DEBUG ==========
+
     ## -------------------------------------------------------------------------
     ## Step 8.2: Run grid search and save results
     ## -------------------------------------------------------------------------
@@ -660,10 +689,11 @@ evaluate_configuration <- function(config_row,
     if(verbose) cli::cli_text("├─ Starting grid search.")
 
     ## ========== DEBUG: Grid search parallelization ==========
-    cli::cli_alert_info("[DEBUG-GRID-{config_id}] Starting grid search with allow_par={allow_par}")
-    cli::cli_alert_info("[DEBUG-GRID-{config_id}] CV folds={cv_folds}, grid_size={grid_size}")
-    cli::cli_alert_info("[DEBUG-GRID-{config_id}] Current plan: {class(future::plan())[1]}")
-    cli::cli_alert_info("[DEBUG-GRID-{config_id}] R processes before grid: {system('ps aux | grep \"[R]\" | wc -l', intern = TRUE)}")
+    debug_msg("Starting grid search | allow_par: %s | CV folds: %d | grid_size: %d",
+             allow_par, cv_folds, grid_size)
+    debug_msg("Current plan: %s | R processes before grid: %s",
+             class(future::plan())[1],
+             system('ps aux | grep "[R]" | wc -l', intern = TRUE))
     ## ========== END DEBUG ==========
 
     ## Run the search, using rrmse as primary metric -----------------------------
@@ -748,6 +778,12 @@ evaluate_configuration <- function(config_row,
     ##TODO: Use the util-reporting.R functionality here.
 
     if (!is.null(grid_results) && verbose) cli::cli_text("│  └─ Grid search complete: {round(grid_seconds, 1)}s")
+
+    ## ========== DEBUG: Grid search complete ==========
+    debug_msg("Grid search complete | Duration: %.1f seconds | R processes after grid: %s",
+             grid_seconds,
+             system('ps aux | grep "[R]" | wc -l', intern = TRUE))
+    ## ========== END DEBUG ==========
 
     # Aggressive memory cleanup after grid search --------------------------------
 
@@ -834,9 +870,10 @@ evaluate_configuration <- function(config_row,
     if (verbose) cli::cli_text("├─ Starting Bayesian optimization")
 
     ## ========== DEBUG: Bayesian optimization parallelization ==========
-    cli::cli_alert_info("[DEBUG-BAYES-{config_id}] Starting Bayesian with allow_par={allow_par}")
-    cli::cli_alert_info("[DEBUG-BAYES-{config_id}] Bayesian iterations={bayesian_iter}")
-    cli::cli_alert_info("[DEBUG-BAYES-{config_id}] R processes before Bayes: {system('ps aux | grep \"[R]\" | wc -l', intern = TRUE)}")
+    debug_msg("Starting Bayesian optimization | allow_par: %s | Iterations: %d",
+             allow_par, bayesian_iter)
+    debug_msg("R processes before Bayes: %s",
+             system('ps aux | grep "[R]" | wc -l', intern = TRUE))
     ## ========== END DEBUG ==========
 
     ## Run the search across a Gaussian process model -----------------------------
@@ -913,6 +950,12 @@ evaluate_configuration <- function(config_row,
     if (!is.null(final_tune_results) && !identical(final_tune_results, grid_results)) {
 
         cli::cli_text("│  └─ Bayesian optimization complete: {round(bayes_seconds, 1)}s")
+
+        ## ========== DEBUG: Bayesian complete ==========
+        debug_msg("Bayesian optimization complete | Duration: %.1f seconds | R processes after Bayes: %s",
+                 bayes_seconds,
+                 system('ps aux | grep "[R]" | wc -l', intern = TRUE))
+        ## ========== END DEBUG ==========
 
       } else {
 
@@ -1177,5 +1220,18 @@ evaluate_configuration <- function(config_row,
                    error_class       = NA_character_,
                    has_trace         = FALSE,
                    n_warnings        = 0L,  # TODO: Aggregate warnings from all stages
-                   warning_summary   = NA_character_)
+                   warning_summary   = NA_character_) ->
+  result
+
+  ## ========== DEBUG: Configuration complete ==========
+  debug_msg("Configuration %d complete | Status: %s | Total time: %.1f seconds | Metrics: RMSE=%.3f, R2=%.3f, RPD=%.2f",
+           config_id,
+           if (skip_bayesian) "pruned" else "success",
+           as.numeric(difftime(Sys.time(), start_time, units = "secs")),
+           test_metrics$rmse %||% NA_real_,
+           test_metrics$rsq %||% NA_real_,
+           test_metrics$rpd %||% NA_real_)
+  ## ========== END DEBUG ==========
+
+  return(result)
 }
