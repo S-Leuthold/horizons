@@ -409,7 +409,7 @@ evaluate_models_hpc <- function(config,
 
   furrr_opts <- furrr::furrr_options(
     seed       = NULL,
-    stdout     = FALSE,
+    stdout     = TRUE,  # Enable to see debug output from workers
     conditions = "warning",  # Capture warnings but don't mask errors
     chunk_size = 1,
     scheduling = 1
