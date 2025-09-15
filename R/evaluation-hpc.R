@@ -427,6 +427,9 @@ evaluate_models_hpc <- function(config,
   furrr::future_map(.x = models_to_process,
                     .f = function(i) {
 
+                      ## Set mc.cores for this worker FIRST
+                      options(mc.cores = inner_workers)
+
                       ## ========== DEBUG: Worker process info ==========
                       ## Method 1: Direct file logging (most reliable)
                       debug_log_file <- file.path(output_dir, "debug_worker_output.log")
