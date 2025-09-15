@@ -656,6 +656,7 @@ evaluate_configuration <- function(config_row,
     ## ========== DEBUG: Grid search parallelization ==========
     cli::cli_alert_info("[DEBUG-GRID-{config_id}] Starting grid search with allow_par={allow_par}")
     cli::cli_alert_info("[DEBUG-GRID-{config_id}] CV folds={cv_folds}, grid_size={grid_size}")
+    cli::cli_alert_info("[DEBUG-GRID-{config_id}] Current plan: {class(future::plan())[1]}")
     cli::cli_alert_info("[DEBUG-GRID-{config_id}] R processes before grid: {system('ps aux | grep \"[R]\" | wc -l', intern = TRUE)}")
     ## ========== END DEBUG ==========
 
