@@ -346,6 +346,12 @@ evaluate_models_hpc <- function(config,
     cli::cli_alert_info("[DEBUG-OUTER] R processes before spawn: {system('ps aux | grep \"[R]\" | wc -l', intern = TRUE)}")
     ## ========== END DEBUG ==========
 
+    ## Initialize debug log file
+    debug_log_file <- file.path(output_dir, "debug_worker_output.log")
+    cat(sprintf("\n==== HPC Debug Log Started: %s ====\n", Sys.time()), file = debug_log_file)
+    cli::cli_alert_info("Debug log file: {debug_log_file}")
+    cli::cli_alert_info("Monitor with: tail -f {debug_log_file}")
+
   }
 
 
@@ -407,10 +413,11 @@ evaluate_models_hpc <- function(config,
 
   ## Set furrr options -------------------------------------------------------
 
+  ## Force output capture for debugging
   furrr_opts <- furrr::furrr_options(
     seed       = NULL,
     stdout     = TRUE,  # Enable to see debug output from workers
-    conditions = "warning",  # Capture warnings but don't mask errors
+    conditions = "message",  # Capture ALL conditions including messages
     chunk_size = 1,
     scheduling = 1
   )
@@ -421,10 +428,22 @@ evaluate_models_hpc <- function(config,
                     .f = function(i) {
 
                       ## ========== DEBUG: Worker process info ==========
-                      message(sprintf("[DEBUG-WORKER-%d] Model %d started on PID: %d", i, i, Sys.getpid()))
-                      message(sprintf("[DEBUG-WORKER-%d] Inner workers setting: %d", i, inner_workers))
-                      message(sprintf("[DEBUG-WORKER-%d] mc.cores option: %s", i, getOption('mc.cores')))
-                      message(sprintf("[DEBUG-WORKER-%d] Current plan: %s", i, class(future::plan())[1]))
+                      ## Method 1: Direct file logging (most reliable)
+                      debug_log_file <- file.path(output_dir, "debug_worker_output.log")
+                      debug_msg <- sprintf("[%s] [WORKER-%d] Model %d started on PID: %d | Inner: %d | mc.cores: %s | Plan: %s\n",
+                                          format(Sys.time(), "%H:%M:%S"),
+                                          i, i, Sys.getpid(),
+                                          inner_workers,
+                                          getOption('mc.cores'),
+                                          class(future::plan())[1])
+                      cat(debug_msg, file = debug_log_file, append = TRUE)
+
+                      ## Method 2: Write to stderr (often works better than message)
+                      cat(debug_msg, file = stderr())
+
+                      ## Method 3: Force immediate flush
+                      message(debug_msg)
+                      flush.console()
                       ## ========== END DEBUG ==========
 
                       ## Extract and validate covariates for this model --------
@@ -522,9 +541,12 @@ evaluate_models_hpc <- function(config,
                       ## -------------------------------------------------------
 
                       ## ========== DEBUG: Inner parallelization setup ==========
-                      cli::cli_alert_info("[DEBUG-EVAL-{i}] Starting evaluation with inner_workers={inner_workers}")
-                      cli::cli_alert_info("[DEBUG-EVAL-{i}] Grid size={grid_size}, Bayesian iter={bayesian_iter}")
-                      cli::cli_alert_info("[DEBUG-EVAL-{i}] CV folds={cv_folds}, allow_par=TRUE")
+                      ## File logging for inner setup
+                      inner_msg <- sprintf("[%s] [EVAL-%d] Starting evaluation | inner_workers: %d | grid: %d | bayesian: %d | CV: %d\n",
+                                          format(Sys.time(), "%H:%M:%S"),
+                                          i, inner_workers, grid_size, bayesian_iter, cv_folds)
+                      cat(inner_msg, file = debug_log_file, append = TRUE)
+                      cat(inner_msg, file = stderr())
                       ## ========== END DEBUG ==========
 
                       evaluate_configuration(config_row      = config_row,
@@ -667,13 +689,19 @@ evaluate_models_hpc <- function(config,
 
                       ## ========== DEBUG: Model completion ==========
                       if (!is.null(final_result) && final_result$status == "success") {
-                        message(sprintf("[DEBUG-COMPLETE-%d] Model %d completed successfully (RMSE: %.3f, R²: %.3f)",
-                                       i, i, final_result$rmse, final_result$rsq))
+                        completion_msg <- sprintf("[%s] [COMPLETE-%d] Model %d completed successfully (RMSE: %.3f, R²: %.3f)\n",
+                                                 format(Sys.time(), "%H:%M:%S"),
+                                                 i, i, final_result$rmse, final_result$rsq)
                       } else if (!is.null(final_result) && final_result$status == "pruned") {
-                        message(sprintf("[DEBUG-COMPLETE-%d] Model %d was pruned (insufficient performance)", i, i))
+                        completion_msg <- sprintf("[%s] [COMPLETE-%d] Model %d was pruned (insufficient performance)\n",
+                                                 format(Sys.time(), "%H:%M:%S"), i, i)
                       } else {
-                        message(sprintf("[DEBUG-COMPLETE-%d] Model %d failed", i, i))
+                        completion_msg <- sprintf("[%s] [COMPLETE-%d] Model %d failed\n",
+                                                 format(Sys.time(), "%H:%M:%S"), i, i)
                       }
+                      cat(completion_msg, file = debug_log_file, append = TRUE)
+                      cat(completion_msg, file = stderr())
+                      message(completion_msg)
                       ## ========== END DEBUG ==========
 
                       return(final_result)
