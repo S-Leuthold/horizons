@@ -445,7 +445,8 @@ evaluate_models_hpc <- function(config,
                       cat(debug_msg, file = stderr())
 
                       ## Method 3: Force immediate flush
-                      message(debug_msg)
+
+                                            message(debug_msg)
                       flush.console()
                       ## ========== END DEBUG ==========
 
