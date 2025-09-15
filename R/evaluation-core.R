@@ -653,6 +653,12 @@ evaluate_configuration <- function(config_row,
 
     if(verbose) cli::cli_text("├─ Starting grid search.")
 
+    ## ========== DEBUG: Grid search parallelization ==========
+    cli::cli_alert_info("[DEBUG-GRID-{config_id}] Starting grid search with allow_par={allow_par}")
+    cli::cli_alert_info("[DEBUG-GRID-{config_id}] CV folds={cv_folds}, grid_size={grid_size}")
+    cli::cli_alert_info("[DEBUG-GRID-{config_id}] R processes before grid: {system('ps aux | grep \"[R]\" | wc -l', intern = TRUE)}")
+    ## ========== END DEBUG ==========
+
     ## Run the search, using rrmse as primary metric -----------------------------
     ## This could be a debatable choice-- RPD might be better? -------------------
 
@@ -819,6 +825,12 @@ evaluate_configuration <- function(config_row,
     bayes_start_time <- Sys.time()
 
     if (verbose) cli::cli_text("├─ Starting Bayesian optimization")
+
+    ## ========== DEBUG: Bayesian optimization parallelization ==========
+    cli::cli_alert_info("[DEBUG-BAYES-{config_id}] Starting Bayesian with allow_par={allow_par}")
+    cli::cli_alert_info("[DEBUG-BAYES-{config_id}] Bayesian iterations={bayesian_iter}")
+    cli::cli_alert_info("[DEBUG-BAYES-{config_id}] R processes before Bayes: {system('ps aux | grep \"[R]\" | wc -l', intern = TRUE)}")
+    ## ========== END DEBUG ==========
 
     ## Run the search across a Gaussian process model -----------------------------
 

@@ -331,6 +331,12 @@ evaluate_models_hpc <- function(config,
 
     cli::cli_alert_info("Configured outer parallelization with {outer_workers} workers")
 
+    ## ========== DEBUG: Worker spawn verification ==========
+    cli::cli_alert_info("[DEBUG-OUTER] Backend type: {class(future::plan())[1]}")
+    cli::cli_alert_info("[DEBUG-OUTER] Workers available: {future::nbrOfWorkers()}")
+    cli::cli_alert_info("[DEBUG-OUTER] R processes before spawn: {system('ps aux | grep \"[R]\" | wc -l', intern = TRUE)}")
+    ## ========== END DEBUG ==========
+
   }
 
 
@@ -405,6 +411,12 @@ evaluate_models_hpc <- function(config,
   furrr::future_map(.x = models_to_process,
                     .f = function(i) {
 
+                      ## ========== DEBUG: Worker process info ==========
+                      cli::cli_alert_info("[DEBUG-WORKER-{i}] Model {i} started on PID: {Sys.getpid()}")
+                      cli::cli_alert_info("[DEBUG-WORKER-{i}] Inner workers setting: {inner_workers}")
+                      cli::cli_alert_info("[DEBUG-WORKER-{i}] mc.cores option: {getOption('mc.cores')}")
+                      ## ========== END DEBUG ==========
+
                       ## Extract and validate covariates for this model --------
 
                       config_row <- config[i, , drop = FALSE]
@@ -420,6 +432,11 @@ evaluate_models_hpc <- function(config,
                       ## -------------------------------------------------------
 
                       if (!is.null(covariate_cols) && !is.null(covariate_data)) {
+
+                        ## ========== DEBUG: Covariate validation ==========
+                        cli::cli_alert_info("[DEBUG-COV-{i}] Requested covariates: {paste(covariate_cols, collapse=', ')}")
+                        cli::cli_alert_info("[DEBUG-COV-{i}] Available columns: {paste(names(covariate_data), collapse=', ')}")
+                        ## ========== END DEBUG ==========
 
                         missing_covs <- setdiff(covariate_cols, names(covariate_data))
 
@@ -493,6 +510,12 @@ evaluate_models_hpc <- function(config,
                       ## -------------------------------------------------------
                       ## Run model evaluation
                       ## -------------------------------------------------------
+
+                      ## ========== DEBUG: Inner parallelization setup ==========
+                      cli::cli_alert_info("[DEBUG-EVAL-{i}] Starting evaluation with inner_workers={inner_workers}")
+                      cli::cli_alert_info("[DEBUG-EVAL-{i}] Grid size={grid_size}, Bayesian iter={bayesian_iter}")
+                      cli::cli_alert_info("[DEBUG-EVAL-{i}] CV folds={cv_folds}, allow_par=TRUE")
+                      ## ========== END DEBUG ==========
 
                       evaluate_configuration(config_row      = config_row,
                                              input_data      = input_data,
