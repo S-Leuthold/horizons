@@ -308,7 +308,7 @@ get_ossl_training_data <- function(properties,
   # Load the three OSSL components ---------------------------------------------
 
   location_data <- qs::qread(location_file)
-  lab_data.     <- qs::qread(lab_file)
+  lab_data      <- qs::qread(lab_file)
   mir_data      <- qs::qread(mir_file)
 
   if (is.null(location_data) || is.null(lab_data) || is.null(mir_data)) {
