@@ -62,3 +62,24 @@ DEFAULT_BAYES_ITER <- 15
 DEFAULT_CV_FOLDS <- 5
 BAYES_NO_IMPROVE_LIMIT <- 10
 DEFAULT_CORE_BUFFER <- 2  # Keep 2 cores free for system
+
+## Covariate Types ------------------------------------------------------------
+
+# Known soil covariate types
+KNOWN_SOIL_COVARIATES <- c(
+  "clay", "sand", "silt", "ph", "phh2o", "oc", "ocd",
+  "n", "nitrogen", "cec", "bdod", "ca", "mg", "k", "na",
+  "p", "fe", "al", "mn", "zn", "cu"
+)
+
+# Known climate covariate types
+KNOWN_CLIMATE_COVARIATES <- c(
+  "MAT", "MAP", "PET", "AI", "GDD", "Precip_Seasonality",
+  "Temperature_Range", "Frost_Days"
+)
+
+# Known spatial covariate types
+KNOWN_SPATIAL_COVARIATES <- c(
+  "elevation", "slope", "aspect", "twi", "curvature",
+  "hillshade", "roughness"
+)
