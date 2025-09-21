@@ -68,74 +68,8 @@ fetch_climate_covariates <- function(input_data,
   # TODO: Incoporate utils-reporting functionality.
 
   ## ---------------------------------------------------------------------------
-  ## Step 0: Setup
+  ## Step 0: Define helper functions
   ## ---------------------------------------------------------------------------
-
-    ## ---------------------------------------------------------------------------
-    ## Step 0.1: Input Validation
-    ## ---------------------------------------------------------------------------
-
-    ## Check that we actually have coordinate data -------------------------------
-
-    cli::cli_progress_step("Starting to fetch climate covariate data.")
-
-    required_cols <- c("Longitude", "Latitude")
-    missing_cols  <- setdiff(required_cols, colnames(input_data))
-
-    if (length(missing_cols) > 0) {
-
-      cli::cli_abort(glue::glue("Input data is missing required columns:\n  {paste(missing_cols, collapse = ', ')}"))
-
-    }
-
-    ## Check that we don't have insane coordinate data ---------------------------
-
-    if (any(input_data$Longitude < -180 | input_data$Longitude > 180, na.rm = TRUE)) {
-
-      cli::cli_abort("Longitude values must be between -180 and 180 degrees.")
-
-    }
-
-    if (any(input_data$Latitude < -90 | input_data$Latitude > 90, na.rm = TRUE)) {
-
-      cli::cli_abort("Latitude values must be between -90 and 90 degrees.")
-
-    }
-
-    ## Check that all the data is there ------------------------------------------
-
-    if (any(is.na(input_data$Longitude)) || any(is.na(input_data$Latitude))) {
-
-      cli::cli_abort("Longitude and Latitude columns must not have missing (NA) values.")
-
-    }
-
-    ## Check that coordinates are numeric ----------------------------------------
-
-    if (!is.numeric(input_data$Longitude) || !is.numeric(input_data$Latitude)) {
-
-      cli::cli_abort("Longitude and Latitude columns must be numeric.")
-
-    }
-
-    ## Make sure the years make sense --------------------------------------------
-
-    if (start_year > end_year) {
-
-      cli::cli_abort("start_year cannot be greater than end_year.")
-
-    }
-
-    ## -----------------------------------------------------------------------------
-    ## Step 0.2: Set constants
-    ## -----------------------------------------------------------------------------
-
-    DAYMET_RESOLUTION_DEG <- 1/24
-    DAYMET_TIMEOUT        <- 60
-
-    ## ---------------------------------------------------------------------------
-    ## Step 0.3: Define helper functions
-    ## ---------------------------------------------------------------------------
 
       ## -----------------------------------------------------------------------------
       ## Helper Function 1: Compute grid ID to minmize repeated downloads.
@@ -323,7 +257,7 @@ fetch_climate_covariates <- function(input_data,
                              capture_trace      = FALSE) -> daymet_data_safe
 
               handle_results(safe_result   = daymet_data_safe,
-                             error_title   = "Failed to download Daymet climate data for grid {grid_id}:",
+                             error_title   = glue::glue("Failed to download Daymet climate data for grid {grid_id}:"),
                              error_hints   = c("Check internet connection to Daymet servers",
                                                "Daymet coverage: Continental US, Canada, Mexico, Hawaii, Puerto Rico",
                                                "Check if year range {start_year}-{end_year} is available (1980-present)",
@@ -349,7 +283,7 @@ fetch_climate_covariates <- function(input_data,
 
 
               handle_results(safe_result   = daymet_summary_safe,
-                             error_title   = "Failed to summarize Daymet data for grid ID {grid_id}:",
+                             error_title   = glue::glue("Failed to summarize Daymet data for grid ID {grid_id}:"),
                              error_hints   = NULL,
                              abort_on_null = FALSE,
                              silent        = FALSE) -> daymet_summary

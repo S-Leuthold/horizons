@@ -279,7 +279,7 @@ get_ossl_training_data <- function(properties,
       ## -----------------------------------------------------------------------
 
       handle_results(safe_result   = download_result,
-                     error_title   = "Failed to download {download_info$desc} from {download_info$url}",
+                     error_title   = glue::glue("Failed to download {download_info$desc} from {download_info$url}"),
                      error_hints   = c("Check internet connection",
                                        "Verify URL is accessible: {download_info$url}",
                                        "OSSL server may be temporarily unavailable"),
@@ -386,6 +386,7 @@ get_ossl_training_data <- function(properties,
 
                         ## Abort if no spectral columns found ------------------
 
+                        # TODO: Move this validation to orchestrator level
                         if (length(spectral_cols) == 0) cli::cli_abort("No spectral columns found in MIR data")
 
                         ## Extract spectral columns ----------------------------
@@ -549,6 +550,7 @@ preprocess_mir_spectra <- function(spectral_data,
   spectral_cols     <- grep("^[0-9]{3,4}$", names(spectral_data), value = TRUE)
   non_spectral_cols <- setdiff(names(spectral_data), spectral_cols)
 
+  # TODO: Move this validation to orchestrator level
   if (length(spectral_cols) == 0) cli::cli_abort("No spectral columns found (expected numeric wavenumber columns)")
 
   ## Extract spectral matrix ---------------------------------------------------
@@ -663,6 +665,7 @@ perform_pca_on_ossl <- function(ossl_data,
 
   spectral_cols <- grep("^[0-9]{3,4}$", names(ossl_data), value = TRUE)
 
+  # TODO: Move this validation to orchestrator level
   if (length(spectral_cols) == 0) cli::cli_abort("No spectral columns found in OSSL data (expected numeric wavenumber columns)")
 
   ## Drop missing values and warn the user -------------------------------------
@@ -808,6 +811,7 @@ project_spectra_to_pca <- function(new_data,
 
   spectral_cols <- grep("^[0-9]{3,4}$", names(new_data), value = TRUE)
 
+  # TODO: Move this validation to orchestrator level
   if (length(spectral_cols) == 0) cli::cli_abort("No spectral columns found in new data (expected numeric wavenumber columns)")
 
 
@@ -836,6 +840,7 @@ project_spectra_to_pca <- function(new_data,
   common_cols               <- intersect(spectral_cols, pca_cols)
 
   if (length(common_cols) == 0) {
+    # TODO: Move this validation to orchestrator level
     cli::cli_abort("No matching columns between new data and PCA model")
   }
 

@@ -4,21 +4,34 @@
 \alias{cluster_unknown_samples}
 \title{Cluster Unknown Samples for Stratification}
 \usage{
-cluster_unknown_samples(unknown_pca_scores, max_clusters = 4, verbose = TRUE)
+cluster_unknown_samples(
+  unknown_pca_scores,
+  max_clusters = 10,
+  seed = 307,
+  verbose = TRUE
+)
 }
 \arguments{
 \item{unknown_pca_scores}{Tibble with unknown PCA scores}
 
-\item{max_clusters}{Integer. Maximum clusters to consider (default: 4)}
+\item{max_clusters}{Integer. Maximum clusters to consider (default: 10)}
 
-\item{verbose}{Logical. Print progress messages}
+\item{seed}{Integer. Random seed for reproducibility (default: 0307)}
+
+\item{verbose}{Logical. Print progress messages (default: TRUE)}
 }
 \value{
-Named list with cluster assignments and proportions
+Named list containing:
+\itemize{
+\item cluster_assignments: Integer vector of cluster assignments
+\item n_clusters: Number of clusters selected
+\item cluster_proportions: Numeric vector of cluster proportions
+\item silhouette_scores: Numeric vector of silhouette scores for each k tested
+}
 }
 \description{
 Clusters unknown samples in PCA space to identify spectral diversity
 for proportional OSSL selection. Uses silhouette analysis to determine
-optimal cluster count (2-4 clusters for soil applications).
+optimal cluster count for soil applications.
 }
 \keyword{internal}

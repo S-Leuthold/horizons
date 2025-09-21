@@ -66,7 +66,7 @@
 #' - Cache files can accumulate; periodic cleanup recommended
 #'
 #' @examples
-#' # Direct covariate specification with Sam's style
+#' # Direct covariate specification
 #' fetch_covariates(input_data         = spectral_data,
 #'                  soil_covariates    = c("clay", "sand", "ph"),
 #'                  climate_covariates = c("MAT", "MAP"),
@@ -86,7 +86,7 @@
 #' fetch_covariates(input_data         = large_dataset,
 #'                  soil_covariates    = c("clay", "sand", "silt", "oc", "n", "ph"),
 #'                  climate_covariates = c("MAT", "MAP", "PET", "AI"),
-#'                  n_similar          = 50000,
+#'                  n_similar          = 30000,
 #'                  bayesian_iter      = 20,
 #'                  allow_par          = TRUE,
 #'                  n_workers          = 10,
@@ -196,6 +196,65 @@ fetch_covariates <- function(input_data,
   if (climate_start_year > climate_end_year) cli::cli_abort("climate_start_year cannot be after climate_end_year")
 
 
+  ## Potential duplicates checks:
+
+  cli::cli_progress_step("Starting to fetch climate covariate data.")
+
+  required_cols <- c("Longitude", "Latitude")
+  missing_cols  <- setdiff(required_cols, colnames(input_data))
+
+  if (length(missing_cols) > 0) {
+
+    # TODO: Move this validation to orchestrator level (already done in fetch_covariates)
+    cli::cli_abort(glue::glue("Input data is missing required columns:\n  {paste(missing_cols, collapse = ', ')}"))
+
+  }
+
+  ## Check that we don't have insane coordinate data ---------------------------
+
+  if (any(input_data$Longitude < -180 | input_data$Longitude > 180, na.rm = TRUE)) {
+
+    # TODO: Move this validation to orchestrator level (already done in fetch_covariates)
+    cli::cli_abort("Longitude values must be between -180 and 180 degrees.")
+
+  }
+
+  if (any(input_data$Latitude < -90 | input_data$Latitude > 90, na.rm = TRUE)) {
+
+    # TODO: Move this validation to orchestrator level (already done in fetch_covariates)
+    cli::cli_abort("Latitude values must be between -90 and 90 degrees.")
+
+  }
+
+  ## Check that all the data is there ------------------------------------------
+
+  if (any(is.na(input_data$Longitude)) || any(is.na(input_data$Latitude))) {
+
+    # TODO: Move this validation to orchestrator level (already done in fetch_covariates)
+    cli::cli_abort("Longitude and Latitude columns must not have missing (NA) values.")
+
+  }
+
+  ## Check that coordinates are numeric ----------------------------------------
+
+  if (!is.numeric(input_data$Longitude) || !is.numeric(input_data$Latitude)) {
+
+    # TODO: Move this validation to orchestrator level (already done in fetch_covariates)
+    cli::cli_abort("Longitude and Latitude columns must be numeric.")
+
+  }
+
+  ## Make sure the years make sense --------------------------------------------
+
+  if (climate_start_year > climate_end_year) {
+
+    # TODO: Move this validation to orchestrator level (already done in fetch_covariates)
+    cli::cli_abort("climate_start_year cannot be greater than climate_end_year.")
+
+  }
+
+
+
   ## Report out the set up to the user -----------------------------------------
 
   if (verbose) {
@@ -252,7 +311,6 @@ fetch_covariates <- function(input_data,
         if(length(categorized$spatial) > 0) requested_spatial_covariates <- categorized$spatial
 
       }
-    }
 
     ## -------------------------------------------------------------------------
     ## Step 1.2: Pull configs directly from user input if configs don't exist
@@ -417,10 +475,15 @@ fetch_covariates <- function(input_data,
 
           perf <- soil_predictions$global_models[[i]]$performance
 
-          cli::cli_text("├─ {i}")
-          cli::cli_text("│   ├─ R²: {.val {round(perf$val_r2, 3)}}")
-          cli::cli_text("│   ├─ RMSE: {.val {round(perf$val_rmse, 2)}}")
-          cli::cli_text("│   └─ RPD: {.val {round(perf$val_rpd, 3)}}")
+          if (!is.null(perf)) {
+            cli::cli_text("├─ {i}")
+            cli::cli_text("│   ├─ R²: {.val {round(perf$val_r2, 3)}}")
+            cli::cli_text("│   ├─ RMSE: {.val {round(perf$val_rmse, 2)}}")
+            cli::cli_text("│   └─ RPD: {.val {round(perf$val_rpd, 3)}}")
+          } else {
+            cli::cli_text("├─ {i}")
+            cli::cli_text("│   └─ {cli::col_yellow('⚠')} Model fitting failed")
+          }
 
         }
 

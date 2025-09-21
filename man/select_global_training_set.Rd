@@ -18,21 +18,21 @@ select_global_training_set(
 
 \item{ossl_pca_scores}{Tibble with PCA scores for all OSSL samples}
 
-\item{n_select}{Integer. Total OSSL samples to select (default: 6000)}
+\item{n_select}{Integer. Total OSSL samples to select (default: 20000)}
 
-\item{prop}{Numeric. Proportion for training set (default: 0.8)}
+\item{prop}{Numeric. Proportion for training set (default: 0.85)}
 
 \item{relevance_threshold}{Numeric. Proportion of OSSL to consider (default: 0.6)}
 
-\item{verbose}{Logical. Print progress messages}
+\item{verbose}{Logical. Print progress messages (default: TRUE)}
 }
 \value{
 Named list containing:
 \itemize{
 \item train_data: Training subset of OSSL data
 \item val_data: Validation subset of OSSL data
-\item selection_quality: Metrics on selection quality
 \item cluster_info: Information about unknown clustering
+\item global_indices: Indices of selected samples in original OSSL
 }
 }
 \description{

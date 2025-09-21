@@ -2,7 +2,7 @@
 % Please edit documentation in R/covariates-orchestrator.R
 \name{fetch_covariates}
 \alias{fetch_covariates}
-\title{Orchestrate Soil and Climate Covariate Prediction}
+\title{Fetch Environmental Covariates from Spectra and Coordinates}
 \usage{
 fetch_covariates(
   input_data,
@@ -21,93 +21,131 @@ fetch_covariates(
   cache_dir = tools::R_user_dir("horizons", "cache"),
   refresh_soil = FALSE,
   refresh_climate = FALSE,
-  return_configs = FALSE,
   verbose = TRUE
 )
 }
 \arguments{
-\item{input_data}{Data frame or tibble with required columns:
+\item{input_data}{\verb{[data.frame]} Input dataset with required columns:
 \itemize{
-\item Sample_ID: Unique sample identifiers
-\item MIR spectral columns (wavenumbers as column names)
-\item Longitude: Decimal degrees (-180 to 180)
-\item Latitude: Decimal degrees (-90 to 90)
+\item \code{Sample_ID}: Unique sample identifiers
+\item Numeric columns: MIR wavenumbers (e.g., \code{"600"}, \code{"650"})
+\item \code{Longitude}: Decimal degrees (-180 to 180) if climate data needed
+\item \code{Latitude}: Decimal degrees (-90 to 90) if climate data needed
 }}
 
-\item{configurations}{Optional tibble from create_configs(). If provided, extracts
-unique covariates from all configuration rows. Takes precedence over individual
-covariate parameters.}
+\item{configurations}{\verb{[data.frame]} (Optional) Configuration table from
+\code{create_configs()}. Takes precedence over individual covariate parameters.
+Default: \code{NULL}.}
 
-\item{soil_covariates}{Character vector of soil properties to predict
-(e.g., c("clay", "sand", "ph", "oc", "n")). Ignored if configurations provided.}
+\item{soil_covariates}{\verb{[character]} (Optional) Soil properties to predict
+(e.g., \code{"clay"}, \code{"sand"}, \code{"ph"}, \code{"oc"}, \code{"n"}). Ignored if configurations
+provided. Default: \code{NULL}.}
 
-\item{climate_covariates}{Character vector of climate variables to fetch
-(e.g., c("MAT", "MAP", "AI", "PET", "GDD", "Precip_Seasonality")).
-Ignored if configurations provided.}
+\item{climate_covariates}{\verb{[character]} (Optional) Climate variables to fetch
+(e.g., \code{"MAT"}, \code{"MAP"}, \code{"AI"}, \code{"PET"}). Ignored if configurations
+provided. Default: \code{NULL}.}
 
-\item{spatial_covariates}{Character vector of spatial covariates (future implementation).
-Ignored if configurations provided.}
+\item{spatial_covariates}{\verb{[character]} (Optional) Spatial covariates - not yet
+implemented. Default: \code{NULL}.}
 
-\item{n_similar}{Integer. Number of OSSL samples for training soil models (default: 20000)}
+\item{n_similar}{\verb{[integer]} Number of OSSL samples for training soil models.
+Default: \code{35000}.}
 
-\item{variance_threshold}{Numeric. PCA variance to retain (0-1, default: 0.85)}
+\item{variance_threshold}{\verb{[numeric]} PCA variance to retain (0-1).
+Default: \code{0.99}.}
 
-\item{bayesian_iter}{Integer. Bayesian optimization iterations (default: 3, use 0 for grid only)}
+\item{bayesian_iter}{\verb{[integer]} Bayesian optimization iterations. Use 0 for
+grid search only. Default: \code{10}.}
 
-\item{prop_train}{Numeric. Proportion for training in train/val split (default: 0.85)}
+\item{prop_train}{\verb{[numeric]} Training proportion for train/val split (0-1).
+Default: \code{0.85}.}
 
-\item{climate_start_year}{Integer. Start year for Daymet climate data (default: 2003)}
+\item{climate_start_year}{\verb{[integer]} Start year for Daymet climate data.
+Default: \code{2003}.}
 
-\item{climate_end_year}{Integer. End year for Daymet climate data (default: 2024)}
+\item{climate_end_year}{\verb{[integer]} End year for Daymet climate data.
+Default: \code{2024}.}
 
-\item{allow_par}{Logical. Enable parallel processing (default: FALSE)}
+\item{allow_par}{\verb{[logical]} Enable parallel processing? Default: \code{FALSE}.}
 
-\item{n_workers}{Integer. Number of parallel workers. NULL for auto-detect (default: NULL)}
+\item{n_workers}{\verb{[integer]} (Optional) Number of parallel workers.
+Default: \code{NULL} (auto-detect).}
 
-\item{cache_dir}{Character. Directory for caching data (default: tools::R_user_dir("horizons", "cache"))}
+\item{cache_dir}{\verb{[character]} Directory for caching predictions.
+Default: \code{tools::R_user_dir("horizons", "cache")}.}
 
-\item{refresh_soil}{Logical. Force re-prediction of soil properties (default: FALSE)}
+\item{refresh_soil}{\verb{[logical]} Force re-prediction of soil properties?
+Default: \code{FALSE}.}
 
-\item{refresh_climate}{Logical. Force re-download of climate data (default: FALSE)}
+\item{refresh_climate}{\verb{[logical]} Force re-download of climate data?
+Default: \code{FALSE}.}
 
-\item{return_configs}{Logical. Include configurations in output if built internally (default: FALSE)}
-
-\item{verbose}{Logical. Print progress messages (default: TRUE)}
+\item{verbose}{\verb{[logical]} Print progress messages? Default: \code{TRUE}.}
 }
 \value{
-Named list containing:
+A \verb{[list]} containing:
 \itemize{
-\item covariate_data: Tibble with all predicted/fetched covariates joined to input data
-\item soil_predictions: List with prediction details (models, metrics) if soil covariates requested
-\item climate_summary: Tibble summarizing climate data fetching if climate covariates requested
-\item configurations: Tibble of configurations if return_configs = TRUE
-\item metadata: List with timing, cache usage, and other diagnostic information
+\item \code{covariate_data}: Data frame with Sample_ID and all fetched covariates
+\item \code{soil_predictions}: Full prediction results including models and metrics
+\item \code{metadata}: Execution time, cache info, and diagnostic information
 }
 }
 \description{
-Main orchestrator function that coordinates prediction of soil properties from MIR spectra
-and fetching of climate data from geographic coordinates. Accepts either pre-built
-configurations from create_configs() or individual covariate specifications.
+Orchestrates prediction of soil properties from MIR spectra and retrieval of
+climate data from geographic coordinates. This function serves as the central
+hub for augmenting spectral datasets with environmental covariates, either
+using pre-built configurations or direct specification.
 }
-\examples{
-\dontrun{
-# Using pre-built configurations
-configs <- create_configs(
-  soil_covariates = c("clay", "ph"),
-  climate_covariates = c("MAT", "MAP")
-)
-results <- horizons_orchestrator(
-  input_data = my_spectra_data,
-  configurations = configs
-)
+\section{Details}{
 
-# Using direct covariate specification
-results <- horizons_orchestrator(
-  input_data = my_spectra_data,
-  soil_covariates = c("clay", "sand", "ph"),
-  climate_covariates = c("MAT", "MAP", "AI"),
-  allow_par = TRUE
-)
+The orchestration process follows these steps:
+\enumerate{
+\item Validates input data structure and coordinates
+\item Extracts covariates from configurations or direct specification
+\item Predicts soil properties using MIR spectra and OSSL library
+\item Fetches climate data from Daymet for given coordinates
+\item Combines all covariates into single data frame
+}
+
+Soil predictions are cached based on spectral data and parameters. Climate
+data fetching uses internal caching at the API level.
+}
+
+\section{Warning}{
+
+\itemize{
+\item Soil prediction requires significant memory (scales with n_similar)
+\item Climate data requires valid US coordinates for Daymet coverage
+\item Cache files can accumulate; periodic cleanup recommended
+}
+}
+
+\examples{
+# Direct covariate specification
+fetch_covariates(input_data         = spectral_data,
+                 soil_covariates    = c("clay", "sand", "ph"),
+                 climate_covariates = c("MAT", "MAP"),
+                 n_similar          = 20000,
+                 allow_par          = TRUE) -> covariate_results
+
+# Using configurations
+create_configs(soil_covariates    = c("clay", "ph"),
+               climate_covariates = c("MAT", "MAP", "AI")) -> configs
+
+fetch_covariates(input_data     = spectral_data,
+                 configurations = configs,
+                 verbose        = TRUE) -> results
+
+\dontrun{
+# Large-scale processing with caching
+fetch_covariates(input_data         = large_dataset,
+                 soil_covariates    = c("clay", "sand", "silt", "oc", "n", "ph"),
+                 climate_covariates = c("MAT", "MAP", "PET", "AI"),
+                 n_similar          = 30000,
+                 bayesian_iter      = 20,
+                 allow_par          = TRUE,
+                 n_workers          = 10,
+                 cache_dir          = "~/horizons_cache") -> full_covariates
 }
 
 }
