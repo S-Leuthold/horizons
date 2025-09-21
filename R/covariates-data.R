@@ -14,7 +14,7 @@
 #' @importFrom stats predict
 #' @importFrom tools R_user_dir
 #' @importFrom utils menu
-#' @importFrom cli cli_h2 cli_alert_info cli_alert_success cli_alert_warning cli_progress_step cli_abort
+#' @importFrom cli cli_text cli_abort
 #' @importFrom glue glue
 #' @keywords internal
 
@@ -234,11 +234,11 @@ get_ossl_training_data <- function(properties,
 
     if (verbose && !refresh) {
 
-      cli::cli_alert_warning("OSSL data not found in cache")
+      cli::cli_text("├─ ⚠ OSSL data not found in cache")
 
       } else if (verbose && refresh) {
 
-        cli::cli_alert_info("Refreshing OSSL data (forced)")
+        cli::cli_text("├─ Refreshing OSSL data (forced)")
     }
 
     ## Make it interactive -----------------------------------------------------
@@ -285,11 +285,11 @@ get_ossl_training_data <- function(properties,
                      abort_on_null = TRUE,
                      silent        = FALSE) -> download_result
 
-      if (verbose) cli::cli_alert_success("Cached {download_info$desc}")
+      if (verbose) cli::cli_text("│  └─ ✓ Cached {download_info$desc}")
 
     }
 
-    if (verbose) cli::cli_alert_success("All OSSL data downloaded and cached")
+    if (verbose) cli::cli_text("├─ ✓ All OSSL data downloaded and cached")
 
   }
 
@@ -743,8 +743,8 @@ perform_pca_on_ossl <- function(ossl_data,
   total_variance <- cum_variance[n_components]
 
   if (verbose) {
-    cli::cli_alert_success(
-      "PCA complete: {n_components} components explain {round(total_variance * 100, 1)}% of variance"
+    cli::cli_text(
+      "├─ ✓ PCA complete: {n_components} components explain {round(total_variance * 100, 1)}% of variance"
     )
   }
 
@@ -796,16 +796,16 @@ project_spectra_to_pca <- function(new_data,
 
   if (length(missing_cols) > 0) {
     if (verbose) {
-      cli::cli_alert_warning("Missing {length(missing_cols)} columns required by PCA model")
+      cli::cli_text("│  ├─ ⚠ Missing {length(missing_cols)} columns required by PCA model")
       if (length(missing_cols) <= 10) {
-        cli::cli_alert_info("Missing columns: {paste(head(missing_cols, 10), collapse = ', ')}")
+        cli::cli_text("│  └─ Missing columns: {paste(head(missing_cols, 10), collapse = ', ')}")
       }
     }
   }
 
   if (length(extra_cols) > 0) {
     if (verbose) {
-      cli::cli_alert_warning("Found {length(extra_cols)} extra columns not in PCA model")
+      cli::cli_text("│  └─ ⚠ Found {length(extra_cols)} extra columns not in PCA model")
     }
   }
 

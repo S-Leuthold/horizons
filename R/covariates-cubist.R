@@ -66,7 +66,7 @@
 #' @importFrom tune tune_grid tune_bayes control_grid control_bayes select_best finalize_workflow last_fit collect_predictions
 #' @importFrom future plan multisession sequential
 #' @importFrom glue glue
-#' @importFrom cli cli_progress_step cli_alert_danger cli_alert_warning
+#' @importFrom cli cli_text
 #' @export
 
 
