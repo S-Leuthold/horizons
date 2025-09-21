@@ -96,26 +96,8 @@ fit_cubist_model <- function(train_data,
 
     }
 
-    ## Make sure the covariate requested is in the test data ---------------------
-
-    if (!covariate %in% names(train_data)) {
-
-      # TODO: Move this validation to orchestrator level
-      cli::cli_abort("Covariate '{covariate}' not found in train_data")
-
-    }
-
-    ## Make sure the covariate requested is in the validation data ---------------
-
-    if (!covariate %in% names(val_data)) {
-
-      # TODO: Move this validation to orchestrator level
-      cli::cli_abort("Covariate '{covariate}' not found in val_data")
-
-    }
-
     ## ---------------------------------------------------------------------------
-    ## Step 0.2: Prepare data for modeling
+    ## Step 0: Prepare data for modeling
     ## ---------------------------------------------------------------------------
 
     train_data %>%
@@ -127,22 +109,6 @@ fit_cubist_model <- function(train_data,
       dplyr::mutate(Response = .data[[covariate]]) %>%
       dplyr::select(Response, dplyr::starts_with("Dim.")) %>%
       tidyr::drop_na() -> Val_Data
-
-    ## Make sure there's enough data to actually model ---------------------------
-
-    if (nrow(Train_Data) < 20) {
-
-      # TODO: Move this validation to orchestrator level
-      cli::cli_abort("Insufficient training data for {covariate}: {nrow(Train_Data)} samples (minimum 20)")
-
-    }
-
-    if (nrow(Val_Data) < 10) {
-
-      # TODO: Move this validation to orchestrator level
-      cli::cli_abort("Insufficient validation data for {covariate}: {nrow(Val_Data)} samples (minimum 10)")
-
-    }
 
   ## ---------------------------------------------------------------------------
   ## Step 1: Cross-validation setup

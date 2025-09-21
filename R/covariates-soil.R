@@ -125,6 +125,8 @@ predict_soil_covariates <- function(input_data,
 
   if (is.null(ossl_result)) cli::cli_abort("Failed to acquire processed OSSL training data")
 
+  if (!all(c("pca_model", "pca_scores") %in% names(ossl_result))) cli::cli_abort("OSSL data missing required components (pca_model, pca_scores)")
+
 
 
   ## ---------------------------------------------------------------------------
@@ -139,6 +141,8 @@ predict_soil_covariates <- function(input_data,
                          verbose       = verbose) -> unknown_preprocessed
 
   if (is.null(unknown_preprocessed)) cli::cli_abort("Failed to preprocess unknown spectra")
+
+  if (length(grep("^[0-9]{3,4}$", names(unknown_preprocessed), value = TRUE)) == 0) cli::cli_abort("No spectral columns found after preprocessing")
 
 
 
@@ -182,6 +186,24 @@ predict_soil_covariates <- function(input_data,
       cli::cli_text("│  │  ├─ [{i}/{length(covariates)}] {toupper(covariate)}")
       cli::cli_text("│  │  │  ├─ Training: {format(nrow(global_selection$train_data), big.mark = ',')} samples | Validation: {format(nrow(global_selection$val_data), big.mark = ',')} samples")
     }
+
+    # Validate covariate exists in data
+    if (!covariate %in% names(global_selection$train_data)) cli::cli_abort("Covariate '{covariate}' not found in training data after OSSL processing")
+    if (!covariate %in% names(global_selection$val_data)) cli::cli_abort("Covariate '{covariate}' not found in validation data after OSSL processing")
+
+    # Check sufficient samples after NA removal
+    train_rows <- global_selection$train_data %>%
+      dplyr::select(dplyr::all_of(covariate), dplyr::starts_with("Dim.")) %>%
+      tidyr::drop_na() %>%
+      nrow()
+
+    val_rows <- global_selection$val_data %>%
+      dplyr::select(dplyr::all_of(covariate), dplyr::starts_with("Dim.")) %>%
+      tidyr::drop_na() %>%
+      nrow()
+
+    if (train_rows < 20) cli::cli_abort("Insufficient training samples for {covariate} after NA removal: {train_rows} (minimum 20)")
+    if (val_rows < 10) cli::cli_abort("Insufficient validation samples for {covariate} after NA removal: {val_rows} (minimum 10)")
 
     # Train single model for this covariate using global training set
     model_start <- Sys.time()
