@@ -198,8 +198,6 @@ fetch_covariates <- function(input_data,
 
   ## Potential duplicates checks:
 
-  cli::cli_progress_step("Starting to fetch climate covariate data.")
-
   required_cols <- c("Longitude", "Latitude")
   missing_cols  <- setdiff(required_cols, colnames(input_data))
 

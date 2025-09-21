@@ -173,7 +173,7 @@ fetch_climate_covariates <- function(input_data,
   ## Step 1: Get grid cell IDs
   ## ---------------------------------------------------------------------------
 
-  cli::cli_progress_step("Grouping input data to shared grid cells.")
+  cli::cli_text("├─ Grouping input data to shared grid cells")
 
   safely_execute(expr = {compute_daymet_grid_id(input_data$Longitude,
                                                 input_data$Latitude)},
@@ -200,7 +200,7 @@ fetch_climate_covariates <- function(input_data,
   ## Step 2: Download Daymet data for each grid cell (with caching)
   ## ---------------------------------------------------------------------------
 
-  cli::cli_progress_step("Processing Daymet data for {length(unique(processed_data$Daymet_GridID))} unique grid cells.")
+  cli::cli_text("├─ Processing Daymet data for {length(unique(processed_data$Daymet_GridID))} unique grid cells")
 
   ## Look for and optionally create a cache directory -----------------------------
 

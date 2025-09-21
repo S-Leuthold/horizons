@@ -92,7 +92,7 @@ fit_cubist_model <- function(train_data,
 
     if (verbose) {
 
-      cli::cli_progress_step("Preparing training data for covariate {.val {covariate}}")
+      cli::cli_text("│  │  │  ├─ Preparing training data...")
 
     }
 
@@ -235,7 +235,7 @@ fit_cubist_model <- function(train_data,
 
   ## Run grid search ---------------------------------------------------------
 
-  if(verbose) cli::cli_progress_step("Running grid search for {.val {covariate}}")
+  if(verbose) cli::cli_text("│  │  │  ├─ Running grid search...")
 
   safely_execute(expr = {tune::tune_grid(object    = wf,
                                          resamples = CV_Folds,
@@ -327,9 +327,7 @@ fit_cubist_model <- function(train_data,
   ## Step 6: Finalize the workflow
   ## ---------------------------------------------------------------------------
 
-  ## TODO: Tree structure message
-
-  if(verbose) cli::cli_progress_step("Finalizing workflow for {.val {covariate}}")
+  if(verbose) cli::cli_text("│  │  │  ├─ Finalizing workflow...")
 
   best_params <- tune::select_best(final_tune_result, metric = "rmse")
   final_wf    <- tune::finalize_workflow(wf, best_params)
@@ -338,9 +336,7 @@ fit_cubist_model <- function(train_data,
   ## Step 7: Fit the final model
   ## ---------------------------------------------------------------------------
 
-  ## TODO: Tree structure message
-
-  if (verbose) cli::cli_progress_step("Fitting final model for {.val {covariate}}")
+  if (verbose) cli::cli_text("│  │  │  ├─ Fitting final model...")
 
   safely_execute(expr               = {parsnip::fit(final_wf, Train_Data)},
                  default_value      = NULL,
@@ -370,7 +366,7 @@ fit_cubist_model <- function(train_data,
   ## Step 8: Test the fitted maodel on the validation set
   ## ---------------------------------------------------------------------------
 
-  if (verbose) cli::cli_progress_step("Computing validation metrics for {.val {covariate}}")
+  if (verbose) cli::cli_text("│  │  │  ├─ Computing validation metrics...")
 
   safely_execute(expr = {
 

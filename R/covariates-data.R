@@ -267,7 +267,7 @@ get_ossl_training_data <- function(properties,
 
     for (download_info in downloads) {
 
-      if (verbose) cli::cli_progress_step("Downloading {download_info$desc}...")
+      if (verbose) cli::cli_text("├─ ⟳ Downloading {download_info$desc}...")
 
       safely_execute(expr = {data <- qs::qread_url(download_info$url)
                              qs::qsave(data, download_info$file)
@@ -539,7 +539,7 @@ preprocess_mir_spectra <- function(spectral_data,
 
   ## TODO: Might need to tree these messages as well.
 
-  if (verbose) cli::cli_progress_step("Preprocessing MIR spectra (SG smoothing + SNV)")
+  if (verbose) cli::cli_text("├─ Preprocessing MIR spectra (SG smoothing + SNV)")
 
   ## ---------------------------------------------------------------------------
   ## Step 1: Validate and quality check input data
@@ -655,7 +655,7 @@ perform_pca_on_ossl <- function(ossl_data,
                                variance_threshold = 0.95,
                                verbose            = TRUE) {
 
-  if (verbose) cli::cli_progress_step("Performing PCA on OSSL training data")
+  if (verbose) cli::cli_text("├─ Performing PCA on OSSL training data")
 
   ## ---------------------------------------------------------------------------
   ## Step 0: Setup
@@ -801,7 +801,7 @@ project_spectra_to_pca <- function(new_data,
                                    pca_model,
                                    verbose = TRUE) {
 
-  if (verbose) cli::cli_progress_step("Projecting new spectra to PCA space")
+  if (verbose) cli::cli_text("├─ Projecting new spectra to PCA space")
 
   ## ---------------------------------------------------------------------------
   ## Step 1: Validate inputs
