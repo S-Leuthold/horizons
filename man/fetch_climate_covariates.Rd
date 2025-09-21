@@ -52,8 +52,8 @@ rounded coordinate matching. Climate data is then downloaded once per grid cell 
 annually over the specified date range. PET is calculated daily using the Hargreaves method.
 Precipitation seasonality is quantified as the coefficient of variation in monthly means.
 
-Progress is displayed using \code{cli::cli_progress_step()} and warnings are surfaced with
-\code{cli_alert_warning()}. Failures during download or summarization do not halt execution
+Progress is displayed using tree-style formatting and warnings are surfaced with
+tree structure indicators. Failures during download or summarization do not halt execution
 but may result in missing covariates for affected locations.
 }
 \examples{

@@ -96,7 +96,7 @@
 #' @importFrom dplyr select filter mutate bind_rows left_join distinct pull
 #' @importFrom purrr map_lgl compact
 #' @importFrom tibble tibble as_tibble
-#' @importFrom cli cli_abort cli_alert_warning cli_alert_info cli_alert_success cli_text
+#' @importFrom cli cli_abort cli_text
 #' @importFrom digest digest
 #' @importFrom qs qsave qread
 #' @export
@@ -144,7 +144,7 @@ fetch_covariates <- function(input_data,
 
   if (!is.null(configurations)) {
 
-    if (!is.null(soil_covariates) || !is.null(climate_covariates) || !is.null(spatial_covariates)) cli::cli_alert_warning("Ignoring individual covariate parameters since configurations were provided")
+    if (!is.null(soil_covariates) || !is.null(climate_covariates) || !is.null(spatial_covariates)) cli::cli_text("├─ ⚠ Ignoring individual covariate parameters since configurations were provided")
 
     if (!inherits(configurations, "data.frame")) cli::cli_abort("configurations must be a data.frame or tibble from create_configs()")
 
