@@ -31,8 +31,8 @@
 #' annually over the specified date range. PET is calculated daily using the Hargreaves method.
 #' Precipitation seasonality is quantified as the coefficient of variation in monthly means.
 #'
-#' Progress is displayed using `cli::cli_progress_step()` and warnings are surfaced with
-#' `cli_alert_warning()`. Failures during download or summarization do not halt execution
+#' Progress is displayed using tree-style formatting and warnings are surfaced with
+#' tree structure indicators. Failures during download or summarization do not halt execution
 #' but may result in missing covariates for affected locations.
 #'
 #' @examples
@@ -49,7 +49,7 @@
 #' @importFrom purrr map pluck
 #' @importFrom tibble tibble
 #' @importFrom lubridate month
-#' @importFrom cli cli_progress_step cli_alert_success cli_alert_warning cli_abort cli_progress_done
+#' @importFrom cli cli_text cli_abort
 #' @importFrom glue glue
 #' @importFrom daymetr download_daymet
 #' @importFrom qs qsave qread
@@ -219,7 +219,7 @@ fetch_climate_covariates <- function(input_data,
 
               if (file.exists(cache_file) && !refresh) {
 
-                cli::cli_alert_info("Using cached data for grid ID {grid_id}")
+                cli::cli_text("│  ├─ Using cached data for grid ID {grid_id}")
                 return(qs::qread(cache_file))
 
               }
@@ -316,11 +316,11 @@ fetch_climate_covariates <- function(input_data,
               tryCatch({
 
                 qs::qsave(result, cache_file)
-                cli::cli_alert_success("Cached climate data for grid {grid_id}")
+                cli::cli_text("│  ├─ ✓ Cached climate data for grid {grid_id}")
 
               }, error = function(e) {
 
-                cli::cli_alert_warning("Failed to cache climate data for grid {grid_id}: {e$message}")
+                cli::cli_text("│  ├─ ⚠ Failed to cache climate data for grid {grid_id}: {e$message}")
 
               })
 
@@ -341,8 +341,6 @@ fetch_climate_covariates <- function(input_data,
                      by = "Daymet_GridID") %>%
     dplyr::select(-Daymet_GridID) -> final_data
 
-  cli::cli_progress_done()
-
   ## Final summary message -----------------------------------------------------
 
   n_successful <- sum(!is.na(final_data$MAT))
@@ -350,14 +348,14 @@ fetch_climate_covariates <- function(input_data,
 
   if (n_successful == n_total) {
 
-    cli::cli_alert_success("Climate data retrieved successfully for all {n_total} samples.")
+    cli::cli_text("└─ ✓ Climate data retrieved successfully for all {n_total} samples.")
 
   } else {
 
     n_failed <- n_total - n_successful
 
-    cli::cli_alert_warning("Climate data retrieved for {n_successful}/{n_total} samples ({n_failed} failed).")
-    cli::cli_alert_info("Failed samples have NA values in climate columns.")
+    cli::cli_text("├─ ⚠ Climate data retrieved for {n_successful}/{n_total} samples ({n_failed} failed).")
+    cli::cli_text("└─ Failed samples have NA values in climate columns.")
 
   }
 
