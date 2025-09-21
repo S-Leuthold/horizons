@@ -203,14 +203,11 @@ fetch_covariates <- function(input_data,
   if (verbose) {
 
     cli::cli_text("")
-    cli::cli_text(format_header("Covariates", style = "double"))
+    cli::cli_text("{cli::style_bold('Configuration')}")
+    cli::cli_text("├─ Input samples: {nrow(input_data)}")
+    cli::cli_text("├─ Spectral columns: {length(spectral_cols)}")
+    cli::cli_text("└─ Configuration source: {if (!is.null(configurations)) 'Pre-built configurations' else 'Direct specification'}")
     cli::cli_text("")
-
-    list("Input samples"        = format_metric(nrow(input_data), "count"),
-         "Spectral columns"     = format_metric(length(spectral_cols), "count"),
-         "Configuration source" = if (!is.null(configurations)) "Pre-built configurations" else "Direct specification") -> config_info
-
-    display_config_summary("Orchestrator Configuration", config_info, verbose)
 
   }
 
@@ -277,11 +274,11 @@ fetch_covariates <- function(input_data,
 
       cli::cli_text("{cli::style_bold('Covariates to fetch')}")
       cli::cli_text("├─ Soil")
-      cli::cli_text("│  └─ {.val {requested_soil_covariates}}")
+      cli::cli_text("│  └─ {if(is.null(requested_soil_covariates) || length(requested_soil_covariates) == 0) cli::col_silver('None') else paste0('\"', paste(requested_soil_covariates, collapse = '\", \"'), '\"')}")
       cli::cli_text("├─ Climate")
-      cli::cli_text("│  └─ {.val {requested_climate_covariates}}")
+      cli::cli_text("│  └─ {if(is.null(requested_climate_covariates) || length(requested_climate_covariates) == 0) cli::col_silver('None') else paste0('\"', paste(requested_climate_covariates, collapse = '\", \"'), '\"')}")
       cli::cli_text("└─ Spatial")
-      cli::cli_text("   └─ {.val {requested_spatial_covariates}}")
+      cli::cli_text("   └─ {if(is.null(requested_spatial_covariates) || length(requested_spatial_covariates) == 0) cli::col_silver('None') else paste0('\"', paste(requested_spatial_covariates, collapse = '\", \"'), '\"')}")
 
     }
 
