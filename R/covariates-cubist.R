@@ -211,7 +211,7 @@ fit_cubist_model <- function(train_data,
                                                                         extract   = NULL))},
                  default_value      = NULL,
                  error_message      = glue::glue("Grid tuning failed for {covariate}"),
-                 log_error          = FALSE,  # We'll handle error reporting ourselves
+                 log_error          = TRUE,  # Enable logging to see the actual error
                  capture_conditions = TRUE) -> grid_res_safe
 
   handle_results(safe_result   = grid_res_safe,
