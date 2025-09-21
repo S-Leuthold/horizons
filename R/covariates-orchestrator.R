@@ -365,9 +365,14 @@ fetch_covariates <- function(input_data,
           perf <- soil_predictions$global_models[[i]]$performance
 
           cli::cli_text("├─ {i}")
-          cli::cli_text("│   ├─ R²: {.val {round(perf$val_r2, 3)}}")
-          cli::cli_text("│   ├─ RMSE: {.val {round(perf$val_rmse, 2)}}")
-          cli::cli_text("│   └─ RPD: {.val {round(perf$val_rpd, 3)}}")
+
+          if (!is.null(perf)) {
+            cli::cli_text("│   ├─ R²: {.val {round(perf$val_r2, 3)}}")
+            cli::cli_text("│   ├─ RMSE: {.val {round(perf$val_rmse, 2)}}")
+            cli::cli_text("│   └─ RPD: {.val {round(perf$val_rpd, 3)}}")
+          } else {
+            cli::cli_text("│   └─ ⚠ Model fitting failed")
+          }
 
         }
 
