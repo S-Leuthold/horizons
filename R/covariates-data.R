@@ -196,11 +196,11 @@ get_ossl_training_data <- function(properties,
   if (verbose) {
 
     cli::cli_text("")
-    cli::cli_text(format_tree_item("Data Loading", level = 0))
+    cli::cli_text("Data Loading")
 
     properties_text <- paste0("Properties requested: ", paste(properties, collapse = ", "),
                              " (", length(properties), " total)")
-    cli::cli_text(format_tree_item(properties_text, level = 1, is_last = FALSE))
+    cli::cli_text("├─ {properties_text}")
   }
 
   ## ---------------------------------------------------------------------------
@@ -219,9 +219,8 @@ get_ossl_training_data <- function(properties,
   if (verbose) {
 
     cache_status <- if (files_exist) "found" else "missing"
-    cache_symbol <- get_status_symbol(if (files_exist) "success" else "warning")
-    cache_text <- paste0(cache_symbol, " Cache status: ", cache_status)
-    cli::cli_text(format_tree_item(cache_text, level = 1, is_last = TRUE))
+    cache_symbol <- if (files_exist) "✓" else "⚠"
+    cli::cli_text("└─ {cache_symbol} Cache status: {cache_status}")
 
   }
 
@@ -300,8 +299,8 @@ get_ossl_training_data <- function(properties,
 
   if (verbose) {
 
-    cli::cli_text(format_tree_item("Data Processing", level = 0))
-    cli::cli_text(format_tree_item("⟳ Loading OSSL data from cache...", level = 1, is_last = FALSE, symbol = NULL))
+    cli::cli_text("Data Processing")
+    cli::cli_text("├─ ⟳ Loading OSSL data from cache...")
 
   }
 
@@ -321,10 +320,7 @@ get_ossl_training_data <- function(properties,
   ## Step 5: Process Lab Data for Requested Properties
   ## ---------------------------------------------------------------------------
 
-  if (verbose) cli::cli_text(format_tree_item(paste0("⟳ Processing lab data for ", length(properties), " properties..."),
-                                              level   = 1,
-                                              is_last = FALSE,
-                                              symbol  = NULL))
+  if (verbose) cli::cli_text("├─ ⟳ Processing lab data for {length(properties)} properties...")
 
 
   # Get OSSL variable names for requested properties ---------------------------
@@ -368,10 +364,7 @@ get_ossl_training_data <- function(properties,
   ## Step 6: Clean up and standardize MIR Spectra
   ## ---------------------------------------------------------------------------
 
-  if (verbose) cli::cli_text(format_tree_item("⟳ Processing MIR spectra...",
-                                              level   = 1,
-                                              is_last = FALSE,
-                                              symbol  = NULL))
+  if (verbose) cli::cli_text("├─ ⟳ Processing MIR spectra...")
 
 
   ## Apply a standardized preproccesing to match incoming data -----------------
@@ -422,10 +415,7 @@ get_ossl_training_data <- function(properties,
   ## Step 7: Join MIR, lab, and location data, clean up
   ## ---------------------------------------------------------------------------
 
-  if (verbose) cli::cli_text(format_tree_item("⟳ Joining spectral and lab data...",
-                                              level   = 1,
-                                              is_last = FALSE,
-                                              symbol  = NULL))
+  if (verbose) cli::cli_text("├─ ⟳ Joining spectral and lab data...")
 
   safely_execute(expr = {
                          ## Join the MIR and the lab data ----------------------
@@ -488,22 +478,16 @@ get_ossl_training_data <- function(properties,
   if (verbose) {
 
     cli::cli_text("")
-
-    completion_text <- paste0(get_status_symbol("complete"), " OSSL data prepared: ",
-                             format_metric(nrow(final_data), "count"), " samples")
-
-    cli::cli_text(format_tree_item(completion_text,
-                                   level = 1,
-                                   is_last = FALSE))
+    cli::cli_text("├─ ✔ OSSL data prepared: {nrow(final_data)} samples")
 
     for (i in seq_along(properties)) {
 
       prop      <- properties[i]
       n_valid   <- sum(!is.na(final_data[[prop]]))
-      prop_text <- paste0(prop, ": ", format_metric(n_valid, "count"), " samples")
       is_last   <- (i == length(properties))
+      connector <- if (is_last) "└─" else "├─"
 
-      cli::cli_text(format_tree_item(prop_text, level = 2, is_last = is_last))
+      cli::cli_text("│  {connector} {prop}: {n_valid} samples")
 
     }
 
@@ -722,12 +706,7 @@ perform_pca_on_ossl <- function(ossl_data,
 
   if (verbose) {
 
-    pca_text <- paste0(get_status_symbol("success"), " PCA: ", n_components,
-                      " components (", round(variance_threshold * 100), "% variance)")
-
-    cli::cli_text(format_tree_item(text    = pca_text,
-                                   level   = 1,
-                                   is_last = TRUE))
+    cli::cli_text("└─ ✓ PCA: {n_components} components ({round(variance_threshold * 100)}% variance)")
 
   }
 
@@ -959,8 +938,8 @@ get_processed_ossl_training_data <- function(properties,
   ## ---------------------------------------------------------------------------
 
   if (verbose) {
-    cli::cli_text(format_tree_item("✓ Enhanced OSSL pipeline complete", level = 1, is_last = FALSE))
-    cli::cli_text(format_tree_item("Ready for similarity-based local modeling", level = 1, is_last = TRUE))
+    cli::cli_text("├─ ✓ Enhanced OSSL pipeline complete")
+    cli::cli_text("└─ Ready for similarity-based local modeling")
   }
 
   return(list(
