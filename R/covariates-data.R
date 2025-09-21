@@ -219,8 +219,8 @@ get_ossl_training_data <- function(properties,
   if (verbose) {
 
     cache_status <- if (files_exist) "found" else "missing"
-    cache_symbol <- if (files_exist) "✓" else "⚠"
-    cli::cli_text("└─ {cache_symbol} Cache status: {cache_status}")
+    cache_symbol <- if (files_exist) "found" else "not found"
+    cli::cli_text("└─ Cache status: {cache_status}")
 
   }
 
@@ -234,7 +234,7 @@ get_ossl_training_data <- function(properties,
 
     if (verbose && !refresh) {
 
-      cli::cli_text("├─ ⚠ OSSL data not found in cache")
+      cli::cli_text("├─ OSSL data not found in cache.")
 
       } else if (verbose && refresh) {
 
@@ -266,7 +266,7 @@ get_ossl_training_data <- function(properties,
 
     for (download_info in downloads) {
 
-      if (verbose) cli::cli_text("├─ ⟳ Downloading {download_info$desc}...")
+      if (verbose) cli::cli_text("├─ Downloading {download_info$desc}.")
 
       safely_execute(expr = {data <- qs::qread_url(download_info$url)
                              qs::qsave(data, download_info$file)
@@ -285,11 +285,11 @@ get_ossl_training_data <- function(properties,
                      abort_on_null = TRUE,
                      silent        = FALSE) -> download_result
 
-      if (verbose) cli::cli_text("│  └─ ✓ Cached {download_info$desc}")
+      if (verbose) cli::cli_text("│  └─ Cached {download_info$desc}.")
 
     }
 
-    if (verbose) cli::cli_text("├─ ✓ All OSSL data downloaded and cached")
+    if (verbose) cli::cli_text("├─ All OSSL data downloaded and cached.")
 
   }
 
@@ -300,7 +300,7 @@ get_ossl_training_data <- function(properties,
   if (verbose) {
 
     cli::cli_text("Data Processing")
-    cli::cli_text("├─ ⟳ Loading OSSL data from cache...")
+    cli::cli_text("├─ Loading OSSL data from cache.")
 
   }
 
@@ -320,7 +320,7 @@ get_ossl_training_data <- function(properties,
   ## Step 5: Process Lab Data for Requested Properties
   ## ---------------------------------------------------------------------------
 
-  if (verbose) cli::cli_text("├─ ⟳ Processing lab data for {length(properties)} properties...")
+  if (verbose) cli::cli_text("├─ Processing lab data for {length(properties)} properties.")
 
 
   # Get OSSL variable names for requested properties ---------------------------
@@ -364,7 +364,7 @@ get_ossl_training_data <- function(properties,
   ## Step 6: Clean up and standardize MIR Spectra
   ## ---------------------------------------------------------------------------
 
-  if (verbose) cli::cli_text("├─ ⟳ Processing MIR spectra...")
+  if (verbose) cli::cli_text("├─ Processing MIR spectra.")
 
 
   ## Apply a standardized preproccesing to match incoming data -----------------
@@ -415,7 +415,7 @@ get_ossl_training_data <- function(properties,
   ## Step 7: Join MIR, lab, and location data, clean up
   ## ---------------------------------------------------------------------------
 
-  if (verbose) cli::cli_text("├─ ⟳ Joining spectral and lab data...")
+  if (verbose) cli::cli_text("├─ Joining spectral and lab data.")
 
   safely_execute(expr = {
                          ## Join the MIR and the lab data ----------------------
@@ -478,7 +478,7 @@ get_ossl_training_data <- function(properties,
   if (verbose) {
 
     cli::cli_text("")
-    cli::cli_text("├─ ✔ OSSL data prepared: {nrow(final_data)} samples")
+    cli::cli_text("├─ OSSL data prepared: {nrow(final_data)} samples.")
 
     for (i in seq_along(properties)) {
 
@@ -706,7 +706,7 @@ perform_pca_on_ossl <- function(ossl_data,
 
   if (verbose) {
 
-    cli::cli_text("└─ ✓ PCA: {n_components} components ({round(variance_threshold * 100)}% variance)")
+    cli::cli_text("└─ PCA: {n_components} components ({round(variance_threshold * 100)}% variance).")
 
   }
 
@@ -744,7 +744,7 @@ perform_pca_on_ossl <- function(ossl_data,
 
   if (verbose) {
     cli::cli_text(
-      "├─ ✓ PCA complete: {n_components} components explain {round(total_variance * 100, 1)}% of variance"
+      "├─ PCA complete: {n_components} components explain {round(total_variance * 100, 1)}% of variance."
     )
   }
 
@@ -796,7 +796,7 @@ project_spectra_to_pca <- function(new_data,
 
   if (length(missing_cols) > 0) {
     if (verbose) {
-      cli::cli_text("│  ├─ ⚠ Missing {length(missing_cols)} columns required by PCA model")
+      cli::cli_text("│  ├─ Missing {length(missing_cols)} columns required by PCA model.")
       if (length(missing_cols) <= 10) {
         cli::cli_text("│  └─ Missing columns: {paste(head(missing_cols, 10), collapse = ', ')}")
       }
@@ -805,7 +805,7 @@ project_spectra_to_pca <- function(new_data,
 
   if (length(extra_cols) > 0) {
     if (verbose) {
-      cli::cli_text("│  └─ ⚠ Found {length(extra_cols)} extra columns not in PCA model")
+      cli::cli_text("│  └─ Found {length(extra_cols)} extra columns not in PCA model.")
     }
   }
 
@@ -935,7 +935,6 @@ get_processed_ossl_training_data <- function(properties,
   ## ---------------------------------------------------------------------------
 
   if (verbose) {
-    cli::cli_text("├─ ✓ Enhanced OSSL pipeline complete")
     cli::cli_text("└─ Ready for similarity-based local modeling")
   }
 

@@ -116,7 +116,6 @@ predict_soil_covariates <- function(input_data,
   ## Step 1: Load and preprocess OSSL training data
   ## ---------------------------------------------------------------------------
 
-  if (verbose) cli::cli_text("│  ├─ Loading OSSL training data...")
 
   get_processed_ossl_training_data(properties         = covariates,
                                    variance_threshold = variance_threshold,
@@ -158,7 +157,6 @@ predict_soil_covariates <- function(input_data,
   ## Step 4: Global training set selection
   ## ---------------------------------------------------------------------------
 
-  if (verbose) cli::cli_text("│  ├─ Selecting global training set.")
 
   select_global_training_set(unknown_pca_scores  = unknown_pca,
                              ossl_pca_scores     = ossl_result$pca_scores,
@@ -172,7 +170,7 @@ predict_soil_covariates <- function(input_data,
   ## ---------------------------------------------------------------------------
 
   if (verbose) {
-    cli::cli_text("│  ├─ Training models for {length(covariates)} covariate{if(length(covariates) > 1) 's' else ''}")
+    cli::cli_text("│  ├─ {cli::style_bold('Training models for {length(covariates)} covariate{if(length(covariates) > 1) \"s\" else \"\"}')}")
   }
 
   global_models <- vector("list", length(covariates))
@@ -223,7 +221,7 @@ predict_soil_covariates <- function(input_data,
     # Show completion status
     if (verbose && !is.null(model_result$performance)) {
       perf <- model_result$performance
-      cli::cli_text("│  │  │  ├─ ✓ Validation R² = {round(perf$val_r2, 3)} | RMSE = {round(perf$val_rmse, 2)}")
+      cli::cli_text("│  │  │  ├─ Validation R² = {round(perf$val_r2, 3)} | RMSE = {round(perf$val_rmse, 2)}")
       cli::cli_text("│  │  │  └─ Training time: {round(model_time, 1)}s")
     }
   }
@@ -233,7 +231,7 @@ predict_soil_covariates <- function(input_data,
   ## ---------------------------------------------------------------------------
 
   if (verbose) {
-    cli::cli_text("│  ├─ Applying global models to {nrow(unknown_pca)} unknown samples...")
+    cli::cli_text("│  ├─ Applying global models to {nrow(unknown_pca)} unknown samples.")
   }
 
   # Prepare predictions tibble
@@ -284,7 +282,7 @@ predict_soil_covariates <- function(input_data,
   all_validation_metrics <- dplyr::bind_rows(validation_metrics)
 
   if (verbose) {
-    cli::cli_text("│  └─ ✓ Predictions complete for {nrow(predictions)} samples")
+    cli::cli_text("│  └─ Predictions complete for {nrow(predictions)} samples.")
   }
 
   return(list(
