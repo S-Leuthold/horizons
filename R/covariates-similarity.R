@@ -61,7 +61,6 @@ select_global_training_set <- function(unknown_pca_scores,
   if (verbose) {
 
     cli::cli_text("")
-    cli::cli_text("{cli::style_bold('Selecting a global training set.')}")
     cli::cli_text("├─ Method: Stratified Kennard-Stone sampling")
     cli::cli_text("├─ Pre-filtering: {relevance_threshold * 100}% most relevant samples")
 
@@ -113,7 +112,6 @@ select_global_training_set <- function(unknown_pca_scores,
                            n_select         = n_select,
                            verbose          = verbose) -> selected_indices
 
-  if (verbose) cli::cli_text("├─ Selected {length(selected_indices)} samples via Kennard-Stone")
 
   # Map back to original OSSL indices ------------------------------------------
 
@@ -430,7 +428,7 @@ stratified_kennard_stone <- function(unknown_clusters,
       cluster_selected <- cluster_ossl_indices
 
       if (verbose && length(cluster_ossl_indices) < n_to_select) {
-        cli::cli_text("│  │  └─ {cli::col_yellow('⚠')} Only {length(cluster_ossl_indices)} samples available")
+        cli::cli_text("│  │  └─ Only {length(cluster_ossl_indices)} samples available.")
       }
 
     } else {
@@ -469,7 +467,7 @@ stratified_kennard_stone <- function(unknown_clusters,
 
   if (n_selected < n_select) {
 
-    if (verbose) cli::cli_text("│  └─ {cli::col_yellow('⚠')} Selected {n_selected}/{n_select} samples (some clusters had insufficient OSSL coverage)")
+    if (verbose) cli::cli_text("│  └─ Selected {n_selected}/{n_select} samples (some clusters had insufficient OSSL coverage).")
 
   }
 

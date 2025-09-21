@@ -320,7 +320,7 @@ fetch_climate_covariates <- function(input_data,
 
               }, error = function(e) {
 
-                cli::cli_text("│  ├─ ⚠ Failed to cache climate data for grid {grid_id}: {e$message}")
+                cli::cli_text("│  ├─ Failed to cache climate data for grid {grid_id}: {e$message}.")
 
               })
 
@@ -354,7 +354,7 @@ fetch_climate_covariates <- function(input_data,
 
     n_failed <- n_total - n_successful
 
-    cli::cli_text("├─ ⚠ Climate data retrieved for {n_successful}/{n_total} samples ({n_failed} failed).")
+    cli::cli_text("├─ Climate data retrieved for {n_successful}/{n_total} samples ({n_failed} failed).")
     cli::cli_text("└─ Failed samples have NA values in climate columns.")
 
   }

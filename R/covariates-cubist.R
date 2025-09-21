@@ -92,7 +92,7 @@ fit_cubist_model <- function(train_data,
 
     if (verbose) {
 
-      cli::cli_text("│  │  │  ├─ Preparing training data...")
+      cli::cli_text("│  │  │  ├─ Preparing training data.")
 
     }
 
@@ -201,7 +201,7 @@ fit_cubist_model <- function(train_data,
 
   ## Run grid search ---------------------------------------------------------
 
-  if(verbose) cli::cli_text("│  │  │  ├─ Running grid search...")
+  if(verbose) cli::cli_text("│  │  │  ├─ Running grid search.")
 
   safely_execute(expr = {tune::tune_grid(object    = wf,
                                          resamples = CV_Folds,
@@ -211,7 +211,7 @@ fit_cubist_model <- function(train_data,
                                                                         extract   = NULL))},
                  default_value      = NULL,
                  error_message      = glue::glue("Grid tuning failed for {covariate}"),
-                 log_error          = TRUE,  # Enable logging to see the actual error
+                 log_error          = FALSE,  # We'll handle error reporting ourselves
                  capture_conditions = TRUE) -> grid_res_safe
 
   handle_results(safe_result   = grid_res_safe,
@@ -225,7 +225,7 @@ fit_cubist_model <- function(train_data,
   if (is.null(grid_res)) {
 
     if (verbose && !is.null(grid_res_safe$error)) {
-      cli::cli_text("│  │  │  └─ ✗ Grid search failed: {grid_res_safe$error$message}")
+      cli::cli_text("│  │  │  └─ Grid search failed: {grid_res_safe$error$message}")
     }
 
     return(NULL)
@@ -240,9 +240,7 @@ fit_cubist_model <- function(train_data,
 
     if(verbose) {
 
-      opt_text <- paste0("Bayesian optimization: ", bayesian_iter, " iterations")
-
-      cli::cli_text(format_tree_item(opt_text, level = 1, is_last = FALSE))
+      cli::cli_text("│  │  │  ├─ Bayesian optimization: {bayesian_iter} iterations.")
 
     }
 
@@ -271,7 +269,7 @@ fit_cubist_model <- function(train_data,
     if (is.null(bayes_res)) {
 
       if (verbose && !is.null(bayes_res_safe$error)) {
-        cli::cli_text("│  │  │  └─ {cli::col_yellow('⚠ Bayesian optimization failed, using grid results')}")
+        cli::cli_text("│  │  │  └─ Bayesian optimization failed, using grid results.")
       }
       bayes_res <- grid_res
 
@@ -282,7 +280,7 @@ fit_cubist_model <- function(train_data,
     } else {
 
       if(verbose) {
-        cli::cli_text(format_tree_item("Skipping Bayesian optimization (using grid search only)", level = 1, is_last = FALSE))
+        cli::cli_text("│  │  │  ├─ Skipping Bayesian optimization (using grid search only).")
       }
 
     final_tune_result <- grid_res
@@ -293,7 +291,7 @@ fit_cubist_model <- function(train_data,
   ## Step 6: Finalize the workflow
   ## ---------------------------------------------------------------------------
 
-  if(verbose) cli::cli_text("│  │  │  ├─ Finalizing workflow...")
+  if(verbose) cli::cli_text("│  │  │  ├─ Finalizing workflow.")
 
   best_params <- tune::select_best(final_tune_result, metric = "rmse")
   final_wf    <- tune::finalize_workflow(wf, best_params)
@@ -302,7 +300,7 @@ fit_cubist_model <- function(train_data,
   ## Step 7: Fit the final model
   ## ---------------------------------------------------------------------------
 
-  if (verbose) cli::cli_text("│  │  │  ├─ Fitting final model...")
+  if (verbose) cli::cli_text("│  │  │  ├─ Fitting final model.")
 
   safely_execute(expr               = {parsnip::fit(final_wf, Train_Data)},
                  default_value      = NULL,
@@ -321,7 +319,7 @@ fit_cubist_model <- function(train_data,
   if (is.null(fitted_model)) {
 
     if (verbose && !is.null(fitted_model_safe$error)) {
-      cli::cli_text("│  │  │  └─ ✗ Final model fitting failed: {fitted_model_safe$error$message}")
+      cli::cli_text("│  │  │  └─ Final model fitting failed: {fitted_model_safe$error$message}")
     }
 
     return(NULL)
@@ -332,7 +330,7 @@ fit_cubist_model <- function(train_data,
   ## Step 8: Test the fitted maodel on the validation set
   ## ---------------------------------------------------------------------------
 
-  if (verbose) cli::cli_text("│  │  │  ├─ Computing validation metrics...")
+  if (verbose) cli::cli_text("│  │  │  ├─ Computing validation metrics.")
 
   safely_execute(expr = {
 
@@ -372,7 +370,7 @@ fit_cubist_model <- function(train_data,
   if (is.null(val_metrics)) {
 
     if (verbose && !is.null(val_metrics_safe$error)) {
-      cli::cli_text("│  │  │  └─ ✗ Validation metrics computation failed: {val_metrics_safe$error$message}")
+      cli::cli_text("│  │  │  └─ Validation metrics computation failed: {val_metrics_safe$error$message}")
     }
 
     return(NULL)
@@ -387,11 +385,7 @@ fit_cubist_model <- function(train_data,
 
   if (verbose) {
 
-    best_params_text <- paste0("Best params: ",
-                               "committees=", round(best_params$committees),
-                               ", neighbors=", round(best_params$neighbors))
-
-    cli::cli_text(format_tree_item(best_params_text, level = 1, is_last = TRUE))
+    cli::cli_text("│  │  │  └─ Best params: committees={round(best_params$committees)}, neighbors={round(best_params$neighbors)}.")
   }
 
   ## Return results list -------------------------------------------------------

@@ -144,7 +144,7 @@ fetch_covariates <- function(input_data,
 
   if (!is.null(configurations)) {
 
-    if (!is.null(soil_covariates) || !is.null(climate_covariates) || !is.null(spatial_covariates)) cli::cli_text("├─ ⚠ Ignoring individual covariate parameters since configurations were provided")
+    if (!is.null(soil_covariates) || !is.null(climate_covariates) || !is.null(spatial_covariates)) cli::cli_text("├─ Ignoring individual covariate parameters since configurations were provided.")
 
     if (!inherits(configurations, "data.frame")) cli::cli_abort("configurations must be a data.frame or tibble from create_configs()")
 
@@ -371,7 +371,7 @@ fetch_covariates <- function(input_data,
             cli::cli_text("│   ├─ RMSE: {.val {round(perf$val_rmse, 2)}}")
             cli::cli_text("│   └─ RPD: {.val {round(perf$val_rpd, 3)}}")
           } else {
-            cli::cli_text("│   └─ ⚠ Model fitting failed")
+            cli::cli_text("│   └─ Model fitting failed.")
           }
 
         }
@@ -427,7 +427,7 @@ fetch_covariates <- function(input_data,
             cli::cli_text("│   └─ RPD: {.val {round(perf$val_rpd, 3)}}")
           } else {
             cli::cli_text("├─ {i}")
-            cli::cli_text("│   └─ {cli::col_yellow('⚠')} Model fitting failed")
+            cli::cli_text("│   └─ Model fitting failed.")
           }
 
         }
