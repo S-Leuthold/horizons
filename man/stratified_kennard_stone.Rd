@@ -14,7 +14,7 @@ stratified_kennard_stone(
 )
 }
 \arguments{
-\item{unknown_clusters}{Result from cluster_unknown_samples()}
+\item{unknown_clusters}{Named list result from cluster_unknown_samples()}
 
 \item{unknown_matrix}{Matrix of unknown PCA scores}
 
@@ -24,13 +24,24 @@ stratified_kennard_stone(
 
 \item{n_select}{Integer. Total samples to select}
 
-\item{verbose}{Logical. Print progress messages}
+\item{verbose}{Logical. Print progress messages (default: TRUE)}
 }
 \value{
-Vector of indices into relevant_ossl
+Integer vector of indices into relevant_matrix/relevant_ossl
 }
 \description{
 Performs Kennard-Stone selection within each unknown cluster to ensure
 representative OSSL sampling across different soil spectral types.
+First assigns OSSL samples to nearest unknown cluster, then performs
+Kennard-Stone selection within each cluster's OSSL subset.
+}
+\details{
+The function:
+\enumerate{
+\item Calculates proportional allocation based on unknown cluster sizes
+\item Assigns each OSSL sample to its nearest unknown cluster
+\item Runs Kennard-Stone within each cluster's OSSL subset
+\item Returns combined indices from all clusters
+}
 }
 \keyword{internal}

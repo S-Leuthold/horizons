@@ -61,111 +61,86 @@
 #' }
 #'
 #' @export
+
 predict_soil_covariates <- function(input_data,
-                                   covariates,
-                                   n_similar = 20000,
-                                   prop = 0.85,
-                                   variance_threshold = 0.985,
-                                   bayesian_iter = 10,  # Reduced from 5 for faster execution
-                                   allow_par = FALSE,
-                                   n_workers = NULL,
-                                   refresh = FALSE,
-                                   verbose = TRUE) {
+                                    covariates,
+                                    n_similar          = 20000,
+                                    prop               = 0.85,
+                                    variance_threshold = 0.985,
+                                    bayesian_iter      = 10,
+                                    allow_par          = FALSE,
+                                    n_workers          = NULL,
+                                    refresh            = FALSE,
+                                    verbose            = TRUE) {
 
   ## ---------------------------------------------------------------------------
-  ## Step 1: Input validation
+  ## Step 0: Input validation
   ## ---------------------------------------------------------------------------
 
   if (verbose) {
 
-    list("Unknown samples"         = nrow(input_data),
-         "Target properties"      = paste(covariates, collapse = ", "),
-         "Training strategy"      = paste0("Clustered Kennard-Stone (", format_metric(n_similar, "count"), " samples)"),
-         "Train/Val split"        = paste0(format_metric(prop * 100, "percentage"), "/", format_metric((1-prop) * 100, "percentage")),
-         "PCA variance threshold" = paste0(format_metric(variance_threshold * 100, "percentage")),
-         "Bayesian iterations"    = if(bayesian_iter > 0) bayesian_iter else "Grid search only",
-         "Parallel processing"    = if (allow_par) paste0("Enabled (", if (is.null(n_workers)) "auto" else n_workers, " workers)") else "Disabled",
-         "Model"                  = "Cubist") -> config_info
-
-    display_config_summary("Soil Covariate Prediction", config_info, verbose)
+    cli::cli_text("│  ├─ Configuration:")
+    cli::cli_text("│  │  ├─ Unknown samples: {nrow(input_data)}")
+    cli::cli_text("│  │  ├─ Target properties: {paste(covariates, collapse = ', ')}")
+    cli::cli_text("│  │  ├─ Training strategy: Clustered Kennard-Stone ({format(n_similar, big.mark = ',')} samples)")
+    cli::cli_text("│  │  ├─ Train/Val split: {round(prop * 100)}%/{round((1-prop) * 100)}%")
+    cli::cli_text("│  │  ├─ PCA variance threshold: {round(variance_threshold * 100, 1)}%")
+    cli::cli_text("│  │  ├─ Bayesian iterations: {if(bayesian_iter > 0) bayesian_iter else 'Grid search only'}")
+    cli::cli_text("│  │  ├─ Parallel processing: {if (allow_par) paste0('Enabled (', if (is.null(n_workers)) 'auto' else n_workers, ' workers)') else 'Disabled'}")
+    cli::cli_text("│  │  └─ Model: Cubist")
 
   }
 
-  ## ---------------------------------------------------------------------------
+  ## Validate properties -------------------------------------------------------
 
   validate_soil_properties(covariates)
 
-  ## ---------------------------------------------------------------------------
+  ## Make sure input data has sample_ids to join to ---------------------------
 
-  if (!"Sample_ID" %in% names(input_data)) {
+  if (!"Sample_ID" %in% names(input_data)) cli::cli_abort("{.val {input_data}} must contain a Sample_ID column")
 
-    cli::cli_abort("input_data must contain a Sample_ID column")
+  ## Make sure there's some spectra in the input data --------------------------
 
-  }
-
-  ## ---------------------------------------------------------------------------
+  ## TODO: I think this is maybe overly brittle... should update in the
+  ## inputs functions to allow for more incoming names?
 
   spectral_cols <- grep("^[0-9]{3,4}$", names(input_data), value = TRUE)
 
-  if (length(spectral_cols) == 0) {
+  if (length(spectral_cols) == 0) cli::cli_abort("No spectral columns found in input_data")
 
-    cli::cli_abort("No spectral columns found in input_data")
+  ## Make sure the proportion data makes sense ---------------------------------
 
-  }
-
-  ## ---------------------------------------------------------------------------
-
-  if (prop <= 0 || prop >= 1) {
-
-    cli::cli_abort("prop must be between 0 and 1")
-
-  }
+  if (prop <= 0 || prop >= 1) cli::cli_abort("prop must be between 0 and 1")
 
   ## ---------------------------------------------------------------------------
-  ## Step 2: Load and preprocess OSSL training data
+  ## Step 1: Load and preprocess OSSL training data
   ## ---------------------------------------------------------------------------
 
-  if (verbose) {
-
-    cli::cli_text("")
-    cli::cli_text(format_header("OSSL Training Data Pipeline", style = "single", center = FALSE))
-
-  }
-
-  ## ---------------------------------------------------------------------------
+  if (verbose) cli::cli_text("│  ├─ Loading OSSL training data...")
 
   get_processed_ossl_training_data(properties         = covariates,
                                    variance_threshold = variance_threshold,
                                    refresh            = refresh,
                                    verbose            = verbose) -> ossl_result
 
-  if (is.null(ossl_result)) {
+  if (is.null(ossl_result)) cli::cli_abort("Failed to acquire processed OSSL training data")
 
-    cli::cli_abort("Failed to acquire processed OSSL training data")
 
-  }
 
   ## ---------------------------------------------------------------------------
   ## Step 3: Preprocess and project unknown samples
   ## ---------------------------------------------------------------------------
 
-  if (verbose) {
+  if (verbose) cli::cli_text("│  ├─ Processing unknown samples.")
 
-    cli::cli_text("")
-    cli::cli_text(format_header("Unknown Sample Processing", style = "single", center = FALSE))
-
-  }
-
-  ## ---------------------------------------------------------------------------
+  ##
 
   preprocess_mir_spectra(spectral_data = input_data,
-                         verbose = verbose) -> unknown_preprocessed
+                         verbose       = verbose) -> unknown_preprocessed
 
-  if (is.null(unknown_preprocessed)) {
+  if (is.null(unknown_preprocessed)) cli::cli_abort("Failed to preprocess unknown spectra")
 
-    cli::cli_abort("Failed to preprocess unknown spectra")
 
-    }
 
   ## ---------------------------------------------------------------------------
 
@@ -173,24 +148,13 @@ predict_soil_covariates <- function(input_data,
                          pca_model = ossl_result$pca_model,
                          verbose   = verbose) -> unknown_pca
 
-  if (is.null(unknown_pca)) {
-
-    cli::cli_abort("Failed to project unknown samples to PCA space")
-
-  }
+  if (is.null(unknown_pca)) cli::cli_abort("Failed to project unknown samples to PCA space")
 
   ## ---------------------------------------------------------------------------
   ## Step 4: Global training set selection
   ## ---------------------------------------------------------------------------
 
-  if (verbose) {
-
-    cli::cli_text("")
-    cli::cli_text(format_header("Sample Selection Strategy", style = "single", center = FALSE))
-
-  }
-
-  ## ---------------------------------------------------------------------------
+  if (verbose) cli::cli_text("│  ├─ Selecting global training set.")
 
   select_global_training_set(unknown_pca_scores  = unknown_pca,
                              ossl_pca_scores     = ossl_result$pca_scores,
@@ -199,19 +163,12 @@ predict_soil_covariates <- function(input_data,
                              relevance_threshold = 0.6,
                              verbose             = verbose) -> global_selection
 
-  if (is.null(global_selection)) {
-
-    cli::cli_abort("Failed to select global training set")
-
-  }
-
   ## ---------------------------------------------------------------------------
   ## Step 5: Train global models (one per covariate)
   ## ---------------------------------------------------------------------------
 
   if (verbose) {
-    cli::cli_text("")
-    cli::cli_text(format_header("Model Training", style = "single", center = FALSE))
+    cli::cli_text("│  ├─ Training models for {length(covariates)} covariate{if(length(covariates) > 1) 's' else ''}")
   }
 
   global_models <- vector("list", length(covariates))
@@ -222,13 +179,8 @@ predict_soil_covariates <- function(input_data,
     covariate <- covariates[i]
 
     if (verbose) {
-      cli::cli_text("")
-      cli::cli_text(format_tree_item(paste0("[", i, "/", length(covariates), "] ", toupper(covariate), " Prediction"), level = 0))
-
-      # Show training configuration
-      train_info <- paste0("Training: ", format_metric(nrow(global_selection$train_data), "count"),
-                          " samples | Validation: ", format_metric(nrow(global_selection$val_data), "count"), " samples")
-      cli::cli_text(format_tree_item(train_info, level = 1, is_last = FALSE))
+      cli::cli_text("│  │  ├─ [{i}/{length(covariates)}] {toupper(covariate)}")
+      cli::cli_text("│  │  │  ├─ Training: {format(nrow(global_selection$train_data), big.mark = ',')} samples | Validation: {format(nrow(global_selection$val_data), big.mark = ',')} samples")
     }
 
     # Train single model for this covariate using global training set
@@ -249,13 +201,8 @@ predict_soil_covariates <- function(input_data,
     # Show completion status
     if (verbose && !is.null(model_result$performance)) {
       perf <- model_result$performance
-      completion_text <- paste0(get_status_symbol("complete"), " Validation R² = ",
-                               format_metric(perf$val_r2, "r2"),
-                               " | RMSE = ", format_metric(perf$val_rmse))
-      cli::cli_text(format_tree_item(completion_text, level = 1, is_last = FALSE))
-
-      timing_text <- paste0("Training time: ", format_time(model_time))
-      cli::cli_text(format_tree_item(timing_text, level = 1, is_last = TRUE))
+      cli::cli_text("│  │  │  ├─ ✓ Validation R² = {round(perf$val_r2, 3)} | RMSE = {round(perf$val_rmse, 2)}")
+      cli::cli_text("│  │  │  └─ Training time: {round(model_time, 1)}s")
     }
   }
 
@@ -264,7 +211,7 @@ predict_soil_covariates <- function(input_data,
   ## ---------------------------------------------------------------------------
 
   if (verbose) {
-    cli::cli_text(format_tree_item(paste0("⟳ Applying global models to ", nrow(unknown_pca), " unknown samples..."), level = 1, is_last = FALSE, symbol = NULL))
+    cli::cli_text("│  ├─ Applying global models to {nrow(unknown_pca)} unknown samples...")
   }
 
   # Prepare predictions tibble
@@ -279,13 +226,11 @@ predict_soil_covariates <- function(input_data,
     if (!is.null(model_result)) {
 
       # Predict all unknowns with this global model
-      covariate_predictions <- safely_execute(
-        expr = {
-          stats::predict(model_result$fitted_workflow, unknown_pca)$.pred
-        },
-        default_value = rep(NA_real_, nrow(unknown_pca)),
-        error_message = "Failed to predict {covariate} for unknown samples"
-      )$result
+      covariate_predictions <- tryCatch({
+        stats::predict(model_result$fitted_workflow, unknown_pca)$.pred
+      }, error = function(e) {
+        rep(NA_real_, nrow(unknown_pca))
+      })
 
       # Add to predictions tibble
       predictions[[covariate]] <- covariate_predictions
@@ -317,25 +262,7 @@ predict_soil_covariates <- function(input_data,
   all_validation_metrics <- dplyr::bind_rows(validation_metrics)
 
   if (verbose) {
-    cli::cli_text("")
-    cli::cli_text(format_header("Final Results", style = "single", center = FALSE))
-
-    # Show completion status
-    cli::cli_text("")
-    cli::cli_text(format_tree_item(paste0(get_status_symbol("complete"), " Predictions Complete"), level = 0))
-
-    # Show per-covariate results
-    for (covariate in covariates) {
-      if (!is.null(global_models[[covariate]]$performance)) {
-        perf <- global_models[[covariate]]$performance
-        metric_text <- paste0(covariate, ": ", format_metric(nrow(predictions), "count"),
-                             " predictions (R² = ", format_metric(perf$val_r2, "r2"),
-                             ", RMSE = ", format_metric(perf$val_rmse), ")")
-        cli::cli_text(format_tree_item(metric_text, level = 1, is_last = (covariate == tail(covariates, 1))))
-      }
-    }
-
-    cli::cli_text("")
+    cli::cli_text("│  └─ ✓ Predictions complete for {nrow(predictions)} samples")
   }
 
   return(list(
@@ -343,9 +270,10 @@ predict_soil_covariates <- function(input_data,
     validation_metrics = all_validation_metrics,
     global_models = global_models,
     selection_info = list(
-      quality = global_selection$selection_quality,
       clusters = global_selection$cluster_info,
-      indices = global_selection$global_indices
+      indices = global_selection$global_indices,
+      n_train = nrow(global_selection$train_data),
+      n_val = nrow(global_selection$val_data)
     )
   ))
 }

@@ -100,6 +100,7 @@ fit_cubist_model <- function(train_data,
 
     if (!covariate %in% names(train_data)) {
 
+      # TODO: Move this validation to orchestrator level
       cli::cli_abort("Covariate '{covariate}' not found in train_data")
 
     }
@@ -108,6 +109,7 @@ fit_cubist_model <- function(train_data,
 
     if (!covariate %in% names(val_data)) {
 
+      # TODO: Move this validation to orchestrator level
       cli::cli_abort("Covariate '{covariate}' not found in val_data")
 
     }
@@ -130,12 +132,14 @@ fit_cubist_model <- function(train_data,
 
     if (nrow(Train_Data) < 20) {
 
+      # TODO: Move this validation to orchestrator level
       cli::cli_abort("Insufficient training data for {covariate}: {nrow(Train_Data)} samples (minimum 20)")
 
     }
 
     if (nrow(Val_Data) < 10) {
 
+      # TODO: Move this validation to orchestrator level
       cli::cli_abort("Insufficient validation data for {covariate}: {nrow(Val_Data)} samples (minimum 10)")
 
     }
@@ -153,7 +157,7 @@ fit_cubist_model <- function(train_data,
 
 
   handle_results(safe_result   = CV_Folds_safe,
-                 error_title   = "Failed to create cross-validation folds for {covariate}:",
+                 error_title   = glue::glue("Failed to create cross-validation folds for {covariate}:"),
                  error_hints   = c("Check that 'Response' column exists in Train_Data",
                                    "Ensure Response has at least 10 unique values for stratification",
                                    "Verify Response is not all NA values",
@@ -244,7 +248,7 @@ fit_cubist_model <- function(train_data,
                  capture_conditions = TRUE) -> grid_res_safe
 
   handle_results(safe_result   = grid_res_safe,
-                 error_title   = "Grid tuning failed for {covariate}",
+                 error_title   = glue::glue("Grid tuning failed for {covariate}"),
                  error_hints   = NULL,
                  abort_on_null = FALSE,
                  silent        = FALSE) -> grid_res
@@ -285,7 +289,7 @@ fit_cubist_model <- function(train_data,
                    capture_conditions = TRUE) -> bayes_res_safe
 
     handle_results(safe_result   = bayes_res_safe,
-                   error_title   = "Bayesian optimization failed for {covariate}:",
+                   error_title   = glue::glue("Bayesian optimization failed for {covariate}:"),
                    error_hints   = NULL,
                    abort_on_null = FALSE,
                    silent        = FALSE) -> bayes_res
@@ -336,7 +340,7 @@ fit_cubist_model <- function(train_data,
                  capture_conditions = TRUE) -> fitted_model_safe
 
   handle_results(safe_result   = fitted_model_safe,
-                 error_title   = "Failed to fit final model for {covariate}:",
+                 error_title   = glue::glue("Failed to fit final model for {covariate}:"),
                  error_hints   = NULL,
                  abort_on_null = FALSE,
                  silent        = FALSE) -> fitted_model
@@ -381,7 +385,7 @@ fit_cubist_model <- function(train_data,
     capture_conditions = TRUE) -> val_metrics_safe
 
   handle_results(safe_result   = val_metrics_safe,
-                 error_title   = "Failed to compute validation metrics for {covariate}:",
+                 error_title   = glue::glue("Failed to compute validation metrics for {covariate}:"),
                  error_hints   = c("Check that validation data has 'Response' column",
                                    "Ensure validation set has sufficient samples (n > 2)"),
                  abort_on_null = FALSE,

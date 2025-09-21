@@ -6,13 +6,12 @@
 #' spectral diversity, then proportionally selects relevant OSSL samples to
 #' create one optimal training set for the entire project.
 #'
-#' @importFrom dplyr slice arrange mutate bind_rows
-#' @importFrom tibble tibble
+#' @importFrom dplyr slice
 #' @importFrom stats mahalanobis cov kmeans dist
 #' @importFrom cluster silhouette
 #' @importFrom rsample initial_split training testing
-#' @importFrom cli cli_progress_step cli_alert_info cli_alert_success cli_abort
-#' @importFrom purrr map_dbl
+#' @importFrom cli cli_text cli_abort cli_status cli_status_update cli_status_clear
+#' @importFrom prospectr kenStone
 #' @keywords internal
 
 ## Global Training Set Selection Functions ----------------------------------
@@ -27,150 +26,125 @@
 #'
 #' @param unknown_pca_scores Tibble with PCA scores for all unknown samples
 #' @param ossl_pca_scores Tibble with PCA scores for all OSSL samples
-#' @param n_select Integer. Total OSSL samples to select (default: 6000)
-#' @param prop Numeric. Proportion for training set (default: 0.8)
+#' @param n_select Integer. Total OSSL samples to select (default: 20000)
+#' @param prop Numeric. Proportion for training set (default: 0.85)
 #' @param relevance_threshold Numeric. Proportion of OSSL to consider (default: 0.6)
-#' @param verbose Logical. Print progress messages
+#' @param verbose Logical. Print progress messages (default: TRUE)
 #'
 #' @return Named list containing:
 #'   - train_data: Training subset of OSSL data
 #'   - val_data: Validation subset of OSSL data
-#'   - selection_quality: Metrics on selection quality
 #'   - cluster_info: Information about unknown clustering
+#'   - global_indices: Indices of selected samples in original OSSL
+#'
 #' @keywords internal
+
 select_global_training_set <- function(unknown_pca_scores,
-                                     ossl_pca_scores,
-                                     n_select = 20000,
-                                     prop = 0.85,
-                                     relevance_threshold = 0.6,
-                                     verbose = TRUE) {
-  
-  if (verbose) {
-    cli::cli_progress_step("Selecting global training set using stratified Kennard-Stone")
-  }
-  
-  # Validate parameters
-  if (prop <= 0 || prop >= 1) {
-    cli::cli_abort("prop must be between 0 and 1")
-  }
-  
+                                       ossl_pca_scores,
+                                       n_select            = 20000,
+                                       prop                = 0.85,
+                                       relevance_threshold = 0.6,
+                                       verbose             = TRUE) {
+
+  ## ---------------------------------------------------------------------------
+  ## Step 0: Setup
+  ## ---------------------------------------------------------------------------
+
+  ## Validate parameters -------------------------------------------------------
+
+  if (prop <= 0 || prop >= 1) cli::cli_abort("prop must be between 0 and 1")
+
   ## ---------------------------------------------------------------------------
   ## Step 1: Pre-filter OSSL to relevant samples
   ## ---------------------------------------------------------------------------
-  
+
   if (verbose) {
+
     cli::cli_text("")
-    cli::cli_text(format_tree_item("Similarity Analysis", level = 0))
-    
-    prefilter_text <- paste0("Pre-filtering: ", format_metric(relevance_threshold * 100, "percentage"), 
-                            " most relevant samples")
-    cli::cli_text(format_tree_item(prefilter_text, level = 1, is_last = FALSE))
+    cli::cli_text("{cli::style_bold('Selecting a global training set.')}")
+    cli::cli_text("├─ Method: Stratified Kennard-Stone sampling")
+    cli::cli_text("├─ Pre-filtering: {relevance_threshold * 100}% most relevant samples")
+
   }
-  
-  # Calculate unknown centroid and covariance
-  pca_cols <- grep("^Dim\\.", names(unknown_pca_scores), value = TRUE)
+
+  ## Calculate unknown samples centroid and covariance -------------------------
+
+  pca_cols       <- grep("^Dim\\.", names(unknown_pca_scores), value = TRUE)
   unknown_matrix <- as.matrix(unknown_pca_scores[pca_cols])
-  ossl_matrix <- as.matrix(ossl_pca_scores[pca_cols])
-  
+  ossl_matrix    <- as.matrix(ossl_pca_scores[pca_cols])
   unknown_center <- colMeans(unknown_matrix)
-  unknown_cov <- stats::cov(unknown_matrix)
-  
-  # Calculate distances from each OSSL sample to unknown centroid
-  distances_to_centroid <- stats::mahalanobis(
-    x = ossl_matrix,
-    center = unknown_center,
-    cov = unknown_cov
-  )
-  
-  # Keep only most relevant OSSL samples
-  n_relevant <- floor(nrow(ossl_pca_scores) * relevance_threshold)
+  unknown_cov    <- stats::cov(unknown_matrix)
+
+  ## Calculate Mahalanobis distances from each OSSL sample to unknown centroid -
+
+  stats::mahalanobis(x      = ossl_matrix,
+                     center = unknown_center,
+                     cov    = unknown_cov) -> distances_to_centroid
+
+  ## Keep only most relevant OSSL samples based on the threshold ---------------
+
+  n_relevant       <- floor(nrow(ossl_pca_scores) * relevance_threshold)
   relevant_indices <- order(distances_to_centroid)[1:n_relevant]
-  relevant_ossl <- dplyr::slice(ossl_pca_scores, relevant_indices)
-  relevant_matrix <- ossl_matrix[relevant_indices, ]
-  
-  if (verbose) {
-    filtered_text <- paste0(get_status_symbol("success"), " Filtered to ", 
-                           format_metric(nrow(relevant_ossl), "count"), " relevant samples")
-    cli::cli_text(format_tree_item(filtered_text, level = 1, is_last = TRUE))
-  }
-  
+  relevant_ossl    <- dplyr::slice(ossl_pca_scores, relevant_indices)
+  relevant_matrix  <- ossl_matrix[relevant_indices, ]
+
+  if (verbose) cli::cli_text("├─ Filtered OSSL library down to {nrow(relevant_ossl)} relevant samples.")
+
+
   ## ---------------------------------------------------------------------------
   ## Step 2: Cluster unknown samples
   ## ---------------------------------------------------------------------------
-  
-  cluster_result <- cluster_unknown_samples(
-    unknown_pca_scores = unknown_pca_scores,
-    verbose = verbose
-  )
-  
-  if (is.null(cluster_result)) {
-    cli::cli_abort("Failed to cluster unknown samples")
-  }
-  
+
+  cluster_unknown_samples(unknown_pca_scores = unknown_pca_scores,
+                          verbose            = verbose) -> cluster_result
+
+  if (verbose) cli::cli_text("├─ Clustered unknown samples into {cluster_result$n_clusters} clusters")
+
   ## ---------------------------------------------------------------------------
   ## Step 3: Stratified Kennard-Stone selection
   ## ---------------------------------------------------------------------------
-  
-  selected_indices <- stratified_kennard_stone(
-    unknown_clusters = cluster_result,
-    unknown_matrix = unknown_matrix,
-    relevant_ossl = relevant_ossl,
-    relevant_matrix = relevant_matrix,
-    n_select = n_select,
-    verbose = verbose
-  )
-  
-  if (is.null(selected_indices)) {
-    cli::cli_abort("Failed to perform Kennard-Stone selection")
-  }
-  
-  # Map back to original OSSL indices
+
+  if (verbose) cli::cli_text("├─ Running stratified Kennard-Stone selection")
+
+  stratified_kennard_stone(unknown_clusters = cluster_result,
+                           unknown_matrix   = unknown_matrix,
+                           relevant_ossl    = relevant_ossl,
+                           relevant_matrix  = relevant_matrix,
+                           n_select         = n_select,
+                           verbose          = verbose) -> selected_indices
+
+  if (verbose) cli::cli_text("├─ Selected {length(selected_indices)} samples via Kennard-Stone")
+
+  # Map back to original OSSL indices ------------------------------------------
+
   global_indices <- relevant_indices[selected_indices]
-  selected_ossl <- dplyr::slice(ossl_pca_scores, global_indices)
-  
+  selected_ossl  <- dplyr::slice(ossl_pca_scores, global_indices)
+
   ## ---------------------------------------------------------------------------
   ## Step 4: Split into training and validation
   ## ---------------------------------------------------------------------------
-  
-  if (verbose) {
-    cli::cli_text(format_tree_item("⟳ Splitting selected samples into train/validation...", level = 1, is_last = FALSE, symbol = NULL))
-  }
-  
-  safely_execute(
-    expr = {
-      rsample::initial_split(selected_ossl, prop = prop)
-    },
-    default_value = NULL,
-    error_message = "Failed to split selected samples"
-  ) -> split_safe
-  
-  if (is.null(split_safe$result)) {
-    return(NULL)
-  }
-  
-  split_obj <- split_safe$result
+
+  if (verbose) cli::cli_text("├─ Splitting selected samples into train/validation.")
+
+  split_obj <- rsample::initial_split(selected_ossl, prop = prop)
+
   train_data <- rsample::training(split_obj)
-  val_data <- rsample::testing(split_obj)
-  
+  val_data   <- rsample::testing(split_obj)
+
+  if (verbose) cli::cli_text("│  └─ Split into {nrow(train_data)} training and {nrow(val_data)} validation samples")
+
   ## ---------------------------------------------------------------------------
-  ## Step 5: Quality assessment
+  ## Step 5: Return results
   ## ---------------------------------------------------------------------------
-  
-  selection_quality <- assess_selection_quality(
-    selected_ossl = selected_ossl[pca_cols],
-    unknown_matrix = unknown_matrix,
-    verbose = verbose
-  )
-  
+
   if (verbose) {
-    cli::cli_text(format_tree_item("✓ Global training set selection complete", level = 1, is_last = FALSE))
-    cli::cli_text(format_tree_item(paste0("Training: ", nrow(train_data), " samples, Validation: ", nrow(val_data), " samples"), level = 1, is_last = TRUE))
+    cli::cli_text("├─ {cli::col_green('✓')} Global training set selection complete")
+    cli::cli_text("└─ Training: {nrow(train_data)} samples, Validation: {nrow(val_data)} samples")
   }
-  
+
   return(list(
     train_data = train_data,
     val_data = val_data,
-    selection_quality = selection_quality,
     cluster_info = cluster_result,
     global_indices = global_indices
   ))
@@ -181,90 +155,156 @@ select_global_training_set <- function(unknown_pca_scores,
 #' @description
 #' Clusters unknown samples in PCA space to identify spectral diversity
 #' for proportional OSSL selection. Uses silhouette analysis to determine
-#' optimal cluster count (2-4 clusters for soil applications).
+#' optimal cluster count for soil applications.
 #'
 #' @param unknown_pca_scores Tibble with unknown PCA scores
-#' @param max_clusters Integer. Maximum clusters to consider (default: 4)
-#' @param verbose Logical. Print progress messages
+#' @param max_clusters Integer. Maximum clusters to consider (default: 10)
+#' @param seed Integer. Random seed for reproducibility (default: 0307)
+#' @param verbose Logical. Print progress messages (default: TRUE)
 #'
-#' @return Named list with cluster assignments and proportions
+#' @return Named list containing:
+#'   - cluster_assignments: Integer vector of cluster assignments
+#'   - n_clusters: Number of clusters selected
+#'   - cluster_proportions: Numeric vector of cluster proportions
+#'   - silhouette_scores: Numeric vector of silhouette scores for each k tested
+#'
 #' @keywords internal
+
 cluster_unknown_samples <- function(unknown_pca_scores,
-                                   max_clusters = 4,
-                                   verbose = TRUE) {
-  
-  pca_cols <- grep("^Dim\\.", names(unknown_pca_scores), value = TRUE)
+                                    max_clusters = 10,
+                                    seed         = 0307,
+                                    verbose      = TRUE) {
+
+  ## ---------------------------------------------------------------------------
+  ## Step 1: Extract data from the PCA and format
+  ## ---------------------------------------------------------------------------
+
+  pca_cols       <- grep("^Dim\\.", names(unknown_pca_scores), value = TRUE)
   unknown_matrix <- as.matrix(unknown_pca_scores[pca_cols])
-  
-  n_samples <- nrow(unknown_matrix)
-  
-  # For small datasets, use fewer clusters
+  n_samples      <- nrow(unknown_matrix)
+
+
+  ## ---------------------------------------------------------------------------
+  ## Step 2: Early exit if there's too little data to cluster
+  ## ---------------------------------------------------------------------------
+
   max_k <- min(max_clusters, floor(n_samples / 3))
-  
+
   if (max_k < 2) {
-    # Too few samples for clustering
-    if (verbose) {
-      cli::cli_text(format_tree_item("ℹ Too few unknowns for clustering - using single group", level = 1, is_last = TRUE))
+
+    if (verbose) cli::cli_text("│  ├─ {cli::col_blue('ℹ')} Too few unknowns for clustering ({n_samples} samples) - using single group")
+
+    return(list(cluster_assignments = rep(1, n_samples),
+                n_clusters          = 1,
+                cluster_proportions = 1,
+                silhouette_scores   = NA))
+
+  }
+
+  ## ---------------------------------------------------------------------------
+  ## Step 3: Identify optimal k via silhouette analysis
+  ## ---------------------------------------------------------------------------
+
+  k_range           <- 2:max_k
+  silhouette_scores <- numeric(length(k_range))
+
+  ## Pre-calculate the distance matrix -----------------------------------------
+
+  dist_matrix <- stats::dist(unknown_matrix)
+
+  ## Set up reporting ----------------------------------------------------------
+
+  if (verbose){
+
+    cli::cli_text("│  ├─ Clustering {n_samples} unknowns into 2-{max_k} groups")
+    status_id <- cli::cli_status("│      └─ Testing k = 2/{max_k}")
+
+  }
+
+  ## Loop across possible k values ---------------------------------------------
+
+  for (i in seq_along(k_range)) {
+
+    set.seed(seed)
+    k <- k_range[i]
+
+    if (verbose) cli::cli_status_update(id = status_id, "│      └─ Testing k = {k}/{max_k}")
+
+    ## Run the k-mean algorithm ------------------------------------------------
+
+    tryCatch({
+
+      stats::kmeans(unknown_matrix,
+                    centers  = k,
+                    nstart   = 25,
+                    iter.max = 100)
+
+      }, error = function(e) NULL) -> kmeans_result
+
+    ## Skip if k-means fails :( -------------------------------------------------
+
+    if (is.null(kmeans_result)) {
+
+      silhouette_scores[i] <- -1
+      next
+
     }
-    
-    return(list(
-      cluster_assignments = rep(1, n_samples),
-      n_clusters = 1,
-      cluster_proportions = 1,
-      silhouette_scores = NA
-    ))
+
+    ## Run the silhouette analysis ----------------------------------------------
+
+    tryCatch({
+
+      cluster::silhouette(x    = kmeans_result$cluster,
+                          dist = dist_matrix) -> silhouette_result
+
+      mean(silhouette_result[, 3])
+
+    }, error = function(e) -1) -> silhouette_scores[i]
+
   }
-  
-  if (verbose) {
-    cluster_text <- paste0("Clustering ", format_metric(n_samples, "count"), " unknowns (testing ", max_k, " cluster options)")
-    cli::cli_text(format_tree_item(cluster_text, level = 1, is_last = FALSE))
-  }
-  
-  # Test different cluster counts
-  k_range <- 2:max_k
-  silhouette_scores <- purrr::map_dbl(k_range, function(k) {
-    
-    set.seed(0307)
-    kmeans_result <- stats::kmeans(unknown_matrix, centers = k, nstart = 25)
-    
-    silhouette_result <- cluster::silhouette(
-      x = kmeans_result$cluster,
-      dist = stats::dist(unknown_matrix)
-    )
-    
-    mean(silhouette_result[, 3])
-  })
-  
-  # Select optimal k
-  optimal_k <- k_range[which.max(silhouette_scores)]
-  
-  # Final clustering
-  set.seed(0307)
-  final_kmeans <- stats::kmeans(unknown_matrix, centers = optimal_k, nstart = 25)
-  
-  # Calculate cluster proportions
-  cluster_counts <- table(final_kmeans$cluster)
-  cluster_proportions <- cluster_counts / n_samples
-  
-  if (verbose) {
-    clustering_text <- paste0(get_status_symbol("success"), " Optimal clustering: ", optimal_k, " clusters")
-    cli::cli_text(format_tree_item(clustering_text, level = 1, is_last = FALSE))
-    
-    for (i in seq_along(cluster_counts)) {
-      cluster_text <- paste0("Cluster ", i, ": ", format_metric(cluster_counts[i], "count"), 
-                           " samples (", format_metric(cluster_proportions[i] * 100, "percentage"), ")")
-      is_last <- (i == length(cluster_counts))
-      cli::cli_text(format_tree_item(cluster_text, level = 2, is_last = is_last))
-    }
-  }
-  
-  return(list(
-    cluster_assignments = final_kmeans$cluster,
-    n_clusters = optimal_k,
-    cluster_proportions = as.numeric(cluster_proportions),
-    silhouette_scores = silhouette_scores,
-    cluster_centers = final_kmeans$centers
-  ))
+
+  ## ---------------------------------------------------------------------------
+  ## Step 4: Validate the scores
+  ## ---------------------------------------------------------------------------
+
+  if (verbose) cli::cli_status_clear(id = status_id)
+
+  valid_indices <- which(silhouette_scores > -1)
+
+  if (length(valid_indices) == 0) cli::cli_abort("Unable to cluster samples - all clustering attempts failed")
+
+  ## Select optimal number of clusters from valid attempts ---------------------
+
+  optimal_k <- k_range[valid_indices][which.max(silhouette_scores[valid_indices])]
+
+  if (verbose) cli::cli_text("│  ├─ Selected {optimal_k} clusters (silhouette = {round(max(silhouette_scores[valid_indices]), 3)})")
+
+
+  ## ---------------------------------------------------------------------------
+  ## Step 5: Perform the final clustering
+  ## ---------------------------------------------------------------------------
+
+  set.seed(seed)
+
+  ## Run kmeans one last time --------------------------------------------------
+
+  stats::kmeans(unknown_matrix,
+                centers  = optimal_k,
+                nstart   = 25,
+                iter.max = 100) -> final_kmeans
+
+  ## Calculate cluster proportions ---------------------------------------------
+
+  cluster_counts      <- table(final_kmeans$cluster)
+  cluster_proportions <- as.numeric(cluster_counts) / n_samples
+
+  ## Return clustering results -------------------------------------------------
+
+  return(list(cluster_assignments = final_kmeans$cluster,
+              n_clusters          = optimal_k,
+              cluster_proportions = cluster_proportions,
+              silhouette_scores   = silhouette_scores))
+
 }
 
 #' Stratified Kennard-Stone Sample Selection
@@ -272,252 +312,172 @@ cluster_unknown_samples <- function(unknown_pca_scores,
 #' @description
 #' Performs Kennard-Stone selection within each unknown cluster to ensure
 #' representative OSSL sampling across different soil spectral types.
+#' First assigns OSSL samples to nearest unknown cluster, then performs
+#' Kennard-Stone selection within each cluster's OSSL subset.
 #'
-#' @param unknown_clusters Result from cluster_unknown_samples()
+#' @param unknown_clusters Named list result from cluster_unknown_samples()
 #' @param unknown_matrix Matrix of unknown PCA scores
 #' @param relevant_ossl Tibble of pre-filtered OSSL samples
 #' @param relevant_matrix Matrix of relevant OSSL PCA scores
 #' @param n_select Integer. Total samples to select
-#' @param verbose Logical. Print progress messages
+#' @param verbose Logical. Print progress messages (default: TRUE)
 #'
-#' @return Vector of indices into relevant_ossl
+#' @return Integer vector of indices into relevant_matrix/relevant_ossl
+#'
+#' @details
+#' The function:
+#' 1. Calculates proportional allocation based on unknown cluster sizes
+#' 2. Assigns each OSSL sample to its nearest unknown cluster
+#' 3. Runs Kennard-Stone within each cluster's OSSL subset
+#' 4. Returns combined indices from all clusters
+#'
 #' @keywords internal
+
 stratified_kennard_stone <- function(unknown_clusters,
                                     unknown_matrix,
                                     relevant_ossl,
                                     relevant_matrix,
                                     n_select,
                                     verbose = TRUE) {
-  
-  # Calculate samples per cluster (proportional allocation)
+
+  ## ---------------------------------------------------------------------------
+  ## Step 1: Calculate proportional allocation per cluster
+  ## ---------------------------------------------------------------------------
+
   samples_per_cluster <- round(n_select * unknown_clusters$cluster_proportions)
-  
-  # Ensure we get exactly n_select samples
+
+  ## Adjust to get exactly n_select samples -----------------------------------
+
   while (sum(samples_per_cluster) != n_select) {
-    if (sum(samples_per_cluster) < n_select) {
-      # Add to largest cluster
-      largest_cluster <- which.max(samples_per_cluster)
-      samples_per_cluster[largest_cluster] <- samples_per_cluster[largest_cluster] + 1
+
+    diff <- n_select - sum(samples_per_cluster)
+
+    if (diff > 0) {
+      ## Add to largest cluster
+      largest <- which.max(samples_per_cluster)
+      samples_per_cluster[largest] <- samples_per_cluster[largest] + 1
     } else {
-      # Remove from largest cluster  
-      largest_cluster <- which.max(samples_per_cluster)
-      samples_per_cluster[largest_cluster] <- samples_per_cluster[largest_cluster] - 1
+      ## Remove from largest cluster
+      largest <- which.max(samples_per_cluster)
+      samples_per_cluster[largest] <- samples_per_cluster[largest] - 1
     }
+
   }
-  
+
   if (verbose) {
-    allocation_text <- paste0("Kennard-Stone allocation: ", paste(samples_per_cluster, collapse = ", "), " samples per cluster")
-    cli::cli_text(format_tree_item(allocation_text, level = 1, is_last = TRUE))
+    cli::cli_text("│  └─ Allocation: {paste(samples_per_cluster, collapse = '/')} samples per cluster")
   }
-  
+
+  ## ---------------------------------------------------------------------------
+  ## Step 2: Assign OSSL samples to nearest unknown cluster
+  ## ---------------------------------------------------------------------------
+
+  ## Calculate cluster centers -------------------------------------------------
+
+  cluster_centers <- matrix(nrow = unknown_clusters$n_clusters,
+                           ncol = ncol(unknown_matrix))
+
+  for (k in 1:unknown_clusters$n_clusters) {
+
+    cluster_mask     <- unknown_clusters$cluster_assignments == k
+    cluster_unknowns <- unknown_matrix[cluster_mask, , drop = FALSE]
+    cluster_centers[k, ] <- colMeans(cluster_unknowns)
+
+  }
+
+  ## Assign each OSSL sample to nearest cluster --------------------------------
+
+  ossl_cluster_assignments <- numeric(nrow(relevant_matrix))
+
+  for (i in 1:nrow(relevant_matrix)) {
+
+    ## Calculate distance to each cluster center
+    distances <- apply(cluster_centers, 1, function(center) {
+      sqrt(sum((relevant_matrix[i, ] - center)^2))
+    })
+
+    ossl_cluster_assignments[i] <- which.min(distances)
+
+  }
+
+  ## ---------------------------------------------------------------------------
+  ## Step 3: Perform Kennard-Stone within each cluster
+  ## ---------------------------------------------------------------------------
+
   all_selected <- c()
-  
-  # Perform Kennard-Stone within each cluster
-  for (cluster_id in seq_along(samples_per_cluster)) {
-    
-    n_cluster_samples <- samples_per_cluster[cluster_id]
-    if (n_cluster_samples == 0) next
-    
-    # Get unknown samples in this cluster
-    cluster_unknowns <- unknown_matrix[unknown_clusters$cluster_assignments == cluster_id, , drop = FALSE]
-    cluster_center <- colMeans(cluster_unknowns)
-    
+
+  for (cluster_id in 1:unknown_clusters$n_clusters) {
+
+    n_to_select <- samples_per_cluster[cluster_id]
+
+    if (n_to_select == 0) next
+
+    ## Get OSSL samples assigned to this cluster ------------------------------
+
+    cluster_ossl_mask    <- ossl_cluster_assignments == cluster_id
+    cluster_ossl_indices <- which(cluster_ossl_mask)
+    cluster_ossl_matrix  <- relevant_matrix[cluster_ossl_mask, , drop = FALSE]
+
     if (verbose) {
-      cli::cli_text(format_tree_item(paste0("⟳ Selecting ", n_cluster_samples, " samples for cluster ", cluster_id, "..."), level = 2, is_last = FALSE, symbol = NULL))
+      cli::cli_text("│  ├─ Cluster {cluster_id}: {length(cluster_ossl_indices)} OSSL samples available, selecting {n_to_select}")
     }
-    
-    # Kennard-Stone selection for this cluster using prospectr
-    # OPTIMIZATION: Use euclidean distance for large datasets to avoid expensive Mahalanobis calculations
-    use_euclidean <- nrow(relevant_matrix) > 5000
-    
-    ks_result <- safely_execute(
-      expr = {
-        if (use_euclidean) {
-          # Use faster Euclidean distance for large datasets
-          prospectr::kenStone(
-            X = relevant_matrix,
-            k = n_cluster_samples, 
-            metric = "euclid"  # Much faster than Mahalanobis
-          )
-        } else {
-          # Use Mahalanobis for smaller datasets where quality matters more
-          prospectr::kenStone(
-            X = relevant_matrix,
-            k = n_cluster_samples, 
-            metric = "mahal",
-            pc = min(ncol(relevant_matrix), 10)  # Limit PCA dimensions for speed
-          )
-        }
-      },
-      default_value = NULL,
-      error_message = "Kennard-Stone selection failed for cluster {cluster_id}"
-    )
-    
-    if (is.null(ks_result$result)) {
-      cli::cli_abort("Failed to select samples for cluster {cluster_id}")
-    }
-    
-    cluster_selected <- ks_result$result$model
-    
-    all_selected <- c(all_selected, cluster_selected)
-  }
-  
-  return(all_selected)
-}
 
-#' Kennard-Stone Selection for Single Cluster
-#'
-#' @description
-#' Core Kennard-Stone algorithm implementation for selecting OSSL samples
-#' most relevant to a specific unknown cluster.
-#'
-#' @param cluster_center Numeric vector of cluster centroid in PCA space
-#' @param cluster_unknowns Matrix of unknown samples in this cluster
-#' @param relevant_matrix Matrix of relevant OSSL PCA scores
-#' @param n_select Integer. Number of samples to select
-#'
-#' @return Vector of indices into relevant_matrix
-#' @keywords internal
-kennard_stone_cluster <- function(cluster_center,
-                                 cluster_unknowns,
-                                 relevant_matrix,
-                                 n_select) {
-  
-  n_ossl <- nrow(relevant_matrix)
-  selected <- integer(n_select)
-  
-  ## ---------------------------------------------------------------------------
-  ## Step 1: Initialize with sample closest to cluster center
-  ## ---------------------------------------------------------------------------
-  
-  # Regularize covariance matrix to prevent singular matrix errors
-  cluster_cov <- stats::cov(cluster_unknowns)
-  if (rcond(cluster_cov) < 1e-10) {
-    cluster_cov <- cluster_cov + diag(1e-6, ncol(cluster_cov))
-  }
-  
-  distances_to_center <- safely_execute(
-    expr = {
-      stats::mahalanobis(
-        x = relevant_matrix,
-        center = cluster_center,
-        cov = cluster_cov
-      )
-    },
-    default_value = NULL,
-    error_message = "Failed to calculate Mahalanobis distances to cluster center"
-  )$result
-  
-  if (is.null(distances_to_center)) {
-    # Fallback to Euclidean distance if Mahalanobis fails
-    distances_to_center <- apply(relevant_matrix, 1, function(x) {
-      sqrt(sum((x - cluster_center)^2))
-    })
-  }
-  
-  selected[1] <- which.min(distances_to_center)
-  
-  ## ---------------------------------------------------------------------------
-  ## Step 2: Iteratively add samples maximizing coverage + diversity
-  ## ---------------------------------------------------------------------------
-  
-  for (i in 2:n_select) {
-    
-    # Show progress every 10% or every 100 samples (whichever is less frequent)
-    progress_interval <- max(100, ceiling(n_select * 0.1))
-    if (i %% progress_interval == 0 && verbose) {
-      progress <- round(i / n_select * 100, 1)
-      cli::cli_text(format_tree_item(paste0("Selection progress: ", progress, "% (", i, "/", n_select, ")"), level = 2, is_last = TRUE))
-    }
-    
-    remaining_indices <- setdiff(1:n_ossl, selected[1:(i-1)])
-    scores <- numeric(length(remaining_indices))
-    
-    for (j in seq_along(remaining_indices)) {
-      
-      candidate_idx <- remaining_indices[j]
-      
-      # Similarity to unknown cluster (smaller = better)
-      dist_to_unknowns <- safely_execute(
-        expr = {
-          stats::mahalanobis(
-            x = matrix(relevant_matrix[candidate_idx, ], nrow = 1),
-            center = cluster_center,
-            cov = cluster_cov
-          )
-        },
-        default_value = sqrt(sum((relevant_matrix[candidate_idx, ] - cluster_center)^2)),
-        error_message = NULL  # Silent fallback to Euclidean
-      )$result
-      
-      # Diversity from already selected (larger = better)
-      if (i == 2) {
-        dist_to_selected <- sqrt(sum((relevant_matrix[selected[1], ] - relevant_matrix[candidate_idx, ])^2))
-      } else {
-        distances_to_selected <- apply(relevant_matrix[selected[1:(i-1)], , drop = FALSE], 1, function(sel_sample) {
-          sqrt(sum((relevant_matrix[candidate_idx, ] - sel_sample)^2))
-        })
-        dist_to_selected <- min(distances_to_selected)
+    ## Handle edge case: not enough OSSL samples in cluster -------------------
+
+    if (length(cluster_ossl_indices) <= n_to_select) {
+
+      ## Take all available samples
+      cluster_selected <- cluster_ossl_indices
+
+      if (verbose && length(cluster_ossl_indices) < n_to_select) {
+        cli::cli_text("│  │  └─ {cli::col_yellow('⚠')} Only {length(cluster_ossl_indices)} samples available")
       }
-      
-      # Combined score: prioritize diversity, penalize distance to unknowns
-      scores[j] <- dist_to_selected / (1 + dist_to_unknowns)
+
+    } else {
+
+      ## Run Kennard-Stone selection -------------------------------------------
+
+      ks_result <- tryCatch({
+
+        prospectr::kenStone(X      = cluster_ossl_matrix,
+                           k      = n_to_select,
+                           metric = "euclid",
+                           .center = TRUE,
+                           .scale  = TRUE)
+
+      }, error = function(e) NULL)
+
+      if (is.null(ks_result)) {
+        cli::cli_abort("Kennard-Stone failed for cluster {cluster_id}")
+      }
+
+      ## Map back to indices in relevant_matrix --------------------------------
+
+      cluster_selected <- cluster_ossl_indices[ks_result$model]
+
     }
-    
-    # Select sample with highest score
-    best_idx <- which.max(scores)
-    selected[i] <- remaining_indices[best_idx]
+
+    all_selected <- c(all_selected, cluster_selected)
+
   }
-  
-  return(selected)
+
+  ## ---------------------------------------------------------------------------
+  ## Step 4: Handle any shortfall from clusters with insufficient samples
+  ## ---------------------------------------------------------------------------
+
+  n_selected <- length(all_selected)
+
+  if (n_selected < n_select) {
+
+    if (verbose) cli::cli_text("│  └─ {cli::col_yellow('⚠')} Selected {n_selected}/{n_select} samples (some clusters had insufficient OSSL coverage)")
+
+  }
+
+  ## Return the clusters -------------------------------------------------------
+
+  return(unique(all_selected))
+
 }
 
-#' Assess Quality of Selected Training Set
-#'
-#' @description
-#' Computes quality metrics for the selected OSSL training subset,
-#' including coverage of unknown space and internal diversity.
-#'
-#' @param selected_ossl Matrix of selected OSSL PCA scores
-#' @param unknown_matrix Matrix of unknown PCA scores
-#' @param verbose Logical. Print progress messages
-#'
-#' @return Named list with quality metrics
-#' @keywords internal
-assess_selection_quality <- function(selected_ossl,
-                                    unknown_matrix,
-                                    verbose = TRUE) {
-  
-  # Coverage: How well do selected samples cover unknown space?
-  coverage_distances <- apply(unknown_matrix, 1, function(unknown_sample) {
-    distances <- apply(selected_ossl, 1, function(ossl_sample) {
-      sqrt(sum((unknown_sample - ossl_sample)^2))
-    })
-    min(distances)
-  })
-  
-  # Diversity: Internal diversity of selected samples
-  diversity_score <- mean(stats::dist(selected_ossl))
-  
-  # Representativeness: How similar is selected centroid to unknown centroid?
-  selected_center <- colMeans(selected_ossl)
-  unknown_center <- colMeans(unknown_matrix)
-  representativeness <- sqrt(sum((selected_center - unknown_center)^2))
-  
-  quality_metrics <- list(
-    mean_coverage_distance = mean(coverage_distances),
-    max_coverage_distance = max(coverage_distances),
-    diversity_score = diversity_score,
-    representativeness = representativeness,
-    coverage_uniformity = sd(coverage_distances) / mean(coverage_distances)
-  )
-  
-  if (verbose) {
-    cli::cli_text(format_tree_item("✓ Selection quality assessment complete", level = 1, is_last = FALSE))
-    cli::cli_text(format_tree_item(paste0("Mean coverage distance: ", round(quality_metrics$mean_coverage_distance, 3)), level = 2, is_last = FALSE))
-    cli::cli_text(format_tree_item(paste0("Diversity score: ", round(quality_metrics$diversity_score, 3)), level = 2, is_last = FALSE))
-    cli::cli_text(format_tree_item(paste0("Representativeness: ", round(quality_metrics$representativeness, 3)), level = 2, is_last = TRUE))
-  }
-  
-  return(quality_metrics)
-}
+
+
