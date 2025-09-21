@@ -436,9 +436,20 @@ fetch_covariates <- function(input_data,
 
       ## Cache the results -----------------------------------------------------
 
-      if (verbose) cli::cli_text("├─ Saving predictions to cache..")
+      # Check if any models actually succeeded
+      any_model_succeeded <- FALSE
+      if (!is.null(soil_predictions$global_models)) {
+        for (model in soil_predictions$global_models) {
+          if (!is.null(model) && !is.null(model$fitted_workflow)) {
+            any_model_succeeded <- TRUE
+            break
+          }
+        }
+      }
 
-      if (!is.null(soil_predictions)) {
+      if (any_model_succeeded) {
+
+        if (verbose) cli::cli_text("├─ Saving predictions to cache..")
 
         list(cache_key   = cache_key,
              predictions = soil_predictions,
@@ -457,6 +468,10 @@ fetch_covariates <- function(input_data,
         })
 
         if (verbose) cli::cli_text("├─ Successfully cached soil predictions for future use.")
+
+      } else {
+
+        if (verbose) cli::cli_text("├─ Skipping cache - all models failed")
 
       }
 
