@@ -83,3 +83,8 @@ KNOWN_SPATIAL_COVARIATES <- c(
   "elevation", "slope", "aspect", "twi", "curvature",
   "hillshade", "roughness"
 )
+
+## DAYMET Constants ------------------------------------------------------------
+
+DAYMET_RESOLUTION_DEG <- 1/24
+DAYMET_TIMEOUT        <- 60

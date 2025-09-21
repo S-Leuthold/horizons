@@ -31,31 +31,31 @@ format_tree_item <- function(text,
                              is_last = TRUE,
                              symbol = NULL,
                              connector = NULL) {
-  
+
   # Handle root level (no connectors)
   if (level == 0) {
     prefix <- ""
   } else {
-    
+
     # Build indentation for nested levels
     indent <- ""
     if (level > 1) {
       indent <- strrep("│  ", level - 1)
     }
-    
+
     # Choose connector
     if (is.null(connector)) {
       connector <- if (is_last) "└─" else "├─"
     }
-    
+
     prefix <- paste0(indent, connector, " ")
   }
-  
+
   # Add status symbol if provided
   if (!is.null(symbol)) {
     text <- paste(symbol, text)
   }
-  
+
   paste0(prefix, text)
 }
 
@@ -72,35 +72,35 @@ format_tree_item <- function(text,
 #' @return Character vector of formatted tree lines
 #' @keywords internal
 format_summary_tree <- function(data, level = 0, parent_last = TRUE) {
-  
+
   result <- character()
   items <- names(data)
   n_items <- length(items)
-  
+
   for (i in seq_along(items)) {
-    
+
     item_name <- items[i]
     item_value <- data[[i]]
     is_last <- (i == n_items)
-    
+
     if (is.list(item_value) && length(item_value) > 0) {
-      
+
       # Nested list - add header and recurse
       result <- c(result, format_tree_item(item_name, level, is_last))
-      
+
       # Recurse for nested items
       nested <- format_summary_tree(item_value, level + 1, is_last)
       result <- c(result, nested)
-      
+
     } else {
-      
+
       # Simple key-value pair
       display_text <- paste0(item_name, ": ", item_value)
       result <- c(result, format_tree_item(display_text, level, is_last))
-      
+
     }
   }
-  
+
   result
 }
 
@@ -131,31 +131,31 @@ format_progress_bar <- function(current,
                                 show_eta = FALSE,
                                 eta_mins = NULL,
                                 label = NULL) {
-  
+
   # Calculate progress
   pct <- min(100, max(0, round(current / total * 100)))
   filled <- round(width * current / total)
   empty <- width - filled
-  
+
   # Build bar
   bar <- paste0(strrep("█", filled), strrep("░", empty))
-  
+
   # Build components
   components <- character()
-  
+
   # Add label if provided
   if (!is.null(label)) {
     components <- c(components, label)
   }
-  
+
   # Add the bar itself
   components <- c(components, bar)
-  
+
   # Add percentage
   if (show_percent) {
     components <- c(components, paste0(pct, "%"))
   }
-  
+
   # Add ETA
   if (show_eta && !is.null(eta_mins)) {
     if (eta_mins < 1) {
@@ -165,7 +165,7 @@ format_progress_bar <- function(current,
     }
     components <- c(components, eta_text)
   }
-  
+
   paste(components, collapse = " | ")
 }
 
@@ -175,28 +175,28 @@ format_progress_bar <- function(current,
 #' Returns appropriate Unicode symbols for different status types.
 #' Ensures cross-platform compatibility by avoiding emojis.
 #'
-#' @param status Character. Status type ("success", "complete", "in_progress", 
+#' @param status Character. Status type ("success", "complete", "in_progress",
 #'   "error", "warning", "info")
 #'
 #' @return Character. Unicode symbol for the status
 #' @keywords internal
 get_status_symbol <- function(status) {
-  
+
   symbols <- list(
     "success" = "✓",      # Check mark
-    "complete" = "✔",     # Heavy check mark  
+    "complete" = "✔",     # Heavy check mark
     "in_progress" = "⟳",  # Clockwise gapped circle arrow
     "error" = "✗",        # X mark
     "warning" = "⚠",      # Warning sign
     "info" = "ℹ",         # Information
     "pending" = "○"       # White circle
   )
-  
+
   symbols[[status]] %||% "•"  # Default bullet if status not found
 }
 
 ## =============================================================================
-## Formatting Helper Functions  
+## Formatting Helper Functions
 ## =============================================================================
 
 #' Format Time Duration
@@ -211,11 +211,11 @@ get_status_symbol <- function(status) {
 #' @return Character string with formatted time
 #' @keywords internal
 format_time <- function(time_value, precision = 1) {
-  
+
   if (is.na(time_value) || time_value < 0) {
     return("--")
   }
-  
+
   if (time_value < 1) {
     # Milliseconds
     paste0(round(time_value * 1000, 0), "ms")
@@ -244,11 +244,11 @@ format_time <- function(time_value, precision = 1) {
 #' @return Character string with formatted metric
 #' @keywords internal
 format_metric <- function(value, metric_type = "auto", precision = NULL) {
-  
+
   if (is.na(value)) {
     return("--")
   }
-  
+
   # Auto-detect precision based on value range
   if (is.null(precision)) {
     if (abs(value) < 0.01) {
@@ -263,7 +263,7 @@ format_metric <- function(value, metric_type = "auto", precision = NULL) {
       precision <- 1
     }
   }
-  
+
   # Format based on metric type
   formatted <- switch(metric_type,
     "percentage" = paste0(round(value, precision), "%"),
@@ -273,7 +273,7 @@ format_metric <- function(value, metric_type = "auto", precision = NULL) {
     "count" = formatC(value, big.mark = ",", format = "f", digits = 0),
     round(value, precision)  # default
   )
-  
+
   as.character(formatted)
 }
 
@@ -291,15 +291,15 @@ format_metric <- function(value, metric_type = "auto", precision = NULL) {
 #' @return Character string with formatted header
 #' @keywords internal
 format_header <- function(text, style = "double", width = 79, center = TRUE) {
-  
+
   # Choose rule character
   rule_char <- switch(style,
     "single" = "─",
-    "double" = "═", 
+    "double" = "═",
     "thick" = "━",
     "─"  # default
   )
-  
+
   if (center) {
     # Calculate padding for centering
     text_width <- nchar(text)
@@ -318,7 +318,7 @@ format_header <- function(text, style = "double", width = 79, center = TRUE) {
     remaining <- width - nchar(text) - 1
     result <- paste0(text, " ", strrep(rule_char, remaining))
   }
-  
+
   result
 }
 
@@ -338,14 +338,14 @@ format_header <- function(text, style = "double", width = 79, center = TRUE) {
 #' @return NULL (side effect: prints to console)
 #' @keywords internal
 display_config_summary <- function(title, config, verbose = TRUE) {
-  
+
   if (!verbose) return(invisible(NULL))
-  
+
   # Main header
   cli::cli_text("")
   cli::cli_text(format_header(title, style = "double"))
   cli::cli_text("")
-  
+
   # Configuration tree
   if (length(config) > 0) {
     config_lines <- format_summary_tree(list("Configuration" = config))
@@ -369,21 +369,21 @@ display_config_summary <- function(title, config, verbose = TRUE) {
 #'
 #' @return NULL (side effect: prints to console)
 #' @keywords internal
-display_operation_results <- function(operation, metrics = NULL, timing = NULL, 
+display_operation_results <- function(operation, metrics = NULL, timing = NULL,
                                      status = "success", verbose = TRUE) {
-  
+
   if (!verbose) return(invisible(NULL))
-  
+
   # Status line
   symbol <- get_status_symbol(status)
   status_text <- paste(symbol, operation, "complete")
-  
+
   if (!is.null(timing)) {
     status_text <- paste0(status_text, " [", format_time(timing), "]")
   }
-  
+
   cli::cli_text(status_text)
-  
+
   # Metrics if provided
   if (!is.null(metrics) && length(metrics) > 0) {
     results_tree <- format_summary_tree(list("Results" = metrics))
@@ -391,6 +391,22 @@ display_operation_results <- function(operation, metrics = NULL, timing = NULL,
       cli::cli_text(line)
     }
   }
-  
+
   cli::cli_text("")
+}
+
+
+#' Stop quietyly
+#'
+#' @description
+#' Supress the error message from stop() without compromising downstream reporting
+#'
+
+#' @return NULL
+#' @keywords internal
+
+stop_quietly <- function() {
+  opt <- options(show.error.messages = FALSE)
+  on.exit(options(opt))
+  stop()
 }
