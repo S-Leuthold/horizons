@@ -245,6 +245,7 @@ fit_cubist_model <- function(train_data,
                                                                         extract   = NULL))},
                  default_value      = NULL,
                  error_message      = glue::glue("Grid tuning failed for {covariate}"),
+                 log_error          = FALSE,  # We'll handle error reporting ourselves
                  capture_conditions = TRUE) -> grid_res_safe
 
   handle_results(safe_result   = grid_res_safe,
@@ -256,6 +257,10 @@ fit_cubist_model <- function(train_data,
   ## If grid search failed, return NULL but don't kill whole run ---------------
 
   if (is.null(grid_res)) {
+
+    if (verbose && !is.null(grid_res_safe$error)) {
+      cli::cli_text("│  │  │  └─ {cli::col_red('✗ Grid search failed: {grid_res_safe$error$message}')}")
+    }
 
     return(NULL)
 
@@ -286,6 +291,7 @@ fit_cubist_model <- function(train_data,
                                                                             extract   = NULL))},
                    default_value      = NULL,
                    error_message      = glue::glue("Bayesian tuning failed for {covariate}"),
+                   log_error          = FALSE,  # We'll handle error reporting ourselves
                    capture_conditions = TRUE) -> bayes_res_safe
 
     handle_results(safe_result   = bayes_res_safe,
@@ -298,7 +304,9 @@ fit_cubist_model <- function(train_data,
 
     if (is.null(bayes_res)) {
 
-      cli::cli_alert_warning("Using grid search results for {covariate} (Bayesian optimization failed)")
+      if (verbose && !is.null(bayes_res_safe$error)) {
+        cli::cli_text("│  │  │  └─ {cli::col_yellow('⚠ Bayesian optimization failed, using grid results')}")
+      }
       bayes_res <- grid_res
 
     }
@@ -337,6 +345,7 @@ fit_cubist_model <- function(train_data,
   safely_execute(expr               = {parsnip::fit(final_wf, Train_Data)},
                  default_value      = NULL,
                  error_message      = "Failed to fit final workflow for {covariate}",
+                 log_error          = FALSE,  # We'll handle error reporting ourselves
                  capture_conditions = TRUE) -> fitted_model_safe
 
   handle_results(safe_result   = fitted_model_safe,
@@ -348,6 +357,10 @@ fit_cubist_model <- function(train_data,
   ## Return NULL if final model fitting failed -------------------------------
 
   if (is.null(fitted_model)) {
+
+    if (verbose && !is.null(fitted_model_safe$error)) {
+      cli::cli_text("│  │  │  └─ {cli::col_red('✗ Final model fitting failed: {fitted_model_safe$error$message}')}")
+    }
 
     return(NULL)
 
@@ -382,6 +395,7 @@ fit_cubist_model <- function(train_data,
 
     default_value      = NULL,
     error_message      = "Validation failed (Step 8)",
+    log_error          = FALSE,  # We'll handle error reporting ourselves
     capture_conditions = TRUE) -> val_metrics_safe
 
   handle_results(safe_result   = val_metrics_safe,
@@ -394,6 +408,10 @@ fit_cubist_model <- function(train_data,
   ## Return NULL if validation metrics computation failed ---------------------
 
   if (is.null(val_metrics)) {
+
+    if (verbose && !is.null(val_metrics_safe$error)) {
+      cli::cli_text("│  │  │  └─ {cli::col_red('✗ Validation metrics computation failed: {val_metrics_safe$error$message}')}")
+    }
 
     return(NULL)
 
