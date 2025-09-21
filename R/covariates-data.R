@@ -386,8 +386,7 @@ get_ossl_training_data <- function(properties,
 
                         ## Abort if no spectral columns found ------------------
 
-                        # TODO: Move this validation to orchestrator level
-                        if (length(spectral_cols) == 0) cli::cli_abort("No spectral columns found in MIR data")
+                        if (length(spectral_cols) == 0) return(NULL)
 
                         ## Extract spectral columns ----------------------------
 
@@ -550,8 +549,7 @@ preprocess_mir_spectra <- function(spectral_data,
   spectral_cols     <- grep("^[0-9]{3,4}$", names(spectral_data), value = TRUE)
   non_spectral_cols <- setdiff(names(spectral_data), spectral_cols)
 
-  # TODO: Move this validation to orchestrator level
-  if (length(spectral_cols) == 0) cli::cli_abort("No spectral columns found (expected numeric wavenumber columns)")
+  if (length(spectral_cols) == 0) return(NULL)
 
   ## Extract spectral matrix ---------------------------------------------------
 
@@ -665,8 +663,7 @@ perform_pca_on_ossl <- function(ossl_data,
 
   spectral_cols <- grep("^[0-9]{3,4}$", names(ossl_data), value = TRUE)
 
-  # TODO: Move this validation to orchestrator level
-  if (length(spectral_cols) == 0) cli::cli_abort("No spectral columns found in OSSL data (expected numeric wavenumber columns)")
+  if (length(spectral_cols) == 0) return(NULL)
 
   ## Drop missing values and warn the user -------------------------------------
 
@@ -811,8 +808,7 @@ project_spectra_to_pca <- function(new_data,
 
   spectral_cols <- grep("^[0-9]{3,4}$", names(new_data), value = TRUE)
 
-  # TODO: Move this validation to orchestrator level
-  if (length(spectral_cols) == 0) cli::cli_abort("No spectral columns found in new data (expected numeric wavenumber columns)")
+  if (length(spectral_cols) == 0) return(NULL)
 
 
   pca_cols     <- rownames(pca_model$rotation)
@@ -840,8 +836,7 @@ project_spectra_to_pca <- function(new_data,
   common_cols               <- intersect(spectral_cols, pca_cols)
 
   if (length(common_cols) == 0) {
-    # TODO: Move this validation to orchestrator level
-    cli::cli_abort("No matching columns between new data and PCA model")
+    return(NULL)
   }
 
   newdata_aligned[, common_cols] <- as.matrix(new_data[, common_cols])
