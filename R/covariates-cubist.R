@@ -225,7 +225,7 @@ fit_cubist_model <- function(train_data,
   if (is.null(grid_res)) {
 
     if (verbose && !is.null(grid_res_safe$error)) {
-      cli::cli_text("│  │  │  └─ {cli::col_red('✗ Grid search failed: {grid_res_safe$error$message}')}")
+      cli::cli_text("│  │  │  └─ ✗ Grid search failed: {grid_res_safe$error$message}")
     }
 
     return(NULL)
@@ -321,7 +321,7 @@ fit_cubist_model <- function(train_data,
   if (is.null(fitted_model)) {
 
     if (verbose && !is.null(fitted_model_safe$error)) {
-      cli::cli_text("│  │  │  └─ {cli::col_red('✗ Final model fitting failed: {fitted_model_safe$error$message}')}")
+      cli::cli_text("│  │  │  └─ ✗ Final model fitting failed: {fitted_model_safe$error$message}")
     }
 
     return(NULL)
@@ -372,7 +372,7 @@ fit_cubist_model <- function(train_data,
   if (is.null(val_metrics)) {
 
     if (verbose && !is.null(val_metrics_safe$error)) {
-      cli::cli_text("│  │  │  └─ {cli::col_red('✗ Validation metrics computation failed: {val_metrics_safe$error$message}')}")
+      cli::cli_text("│  │  │  └─ ✗ Validation metrics computation failed: {val_metrics_safe$error$message}")
     }
 
     return(NULL)
