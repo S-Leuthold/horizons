@@ -884,9 +884,6 @@ get_processed_ossl_training_data <- function(properties,
                                            refresh = FALSE,
                                            verbose = TRUE) {
 
-  if (verbose) {
-    cli::cli_h2("Enhanced OSSL Training Data Pipeline")
-  }
 
   ## ---------------------------------------------------------------------------
   ## Step 1: Get basic OSSL data
