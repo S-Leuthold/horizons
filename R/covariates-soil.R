@@ -219,9 +219,9 @@ predict_soil_covariates <- function(input_data,
     global_models[[covariate]] <- model_result
 
     # Show completion status
-    if (verbose && !is.null(model_result$performance)) {
-      perf <- model_result$performance
-      cli::cli_text("│  │  │  ├─ Validation R² = {round(perf$val_r2, 3)} | RMSE = {round(perf$val_rmse, 2)}")
+    if (verbose && !is.null(model_result$validation_metrics)) {
+      perf <- model_result$validation_metrics
+      cli::cli_text("│  │  │  ├─ Validation R² = {round(perf$rsq, 3)} | RMSE = {round(perf$rmse, 2)}")
       cli::cli_text("│  │  │  └─ Training time: {round(model_time, 1)}s")
     }
   }
