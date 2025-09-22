@@ -362,8 +362,16 @@ stratified_kennard_stone <- function(unknown_clusters,
 
   }
 
+  # Check if requested exceeds available
+  n_available <- nrow(relevant_ossl)
+
   if (verbose) {
-    cli::cli_text("│  └─ Allocation: {paste(samples_per_cluster, collapse = '/')} samples per cluster")
+    if (n_select > n_available) {
+      cli::cli_text("│  ├─ Requested: {n_select} samples (exceeds {n_available} available)")
+      cli::cli_text("│  └─ Target allocation: {paste(samples_per_cluster, collapse = '/')} samples per cluster")
+    } else {
+      cli::cli_text("│  └─ Allocation: {paste(samples_per_cluster, collapse = '/')} samples per cluster")
+    }
   }
 
   ## ---------------------------------------------------------------------------
@@ -416,10 +424,6 @@ stratified_kennard_stone <- function(unknown_clusters,
     cluster_ossl_indices <- which(cluster_ossl_mask)
     cluster_ossl_matrix  <- relevant_matrix[cluster_ossl_mask, , drop = FALSE]
 
-    if (verbose) {
-      cli::cli_text("│  ├─ Cluster {cluster_id}: {length(cluster_ossl_indices)} OSSL samples available, selecting {n_to_select}")
-    }
-
     ## Handle edge case: not enough OSSL samples in cluster -------------------
 
     if (length(cluster_ossl_indices) <= n_to_select) {
@@ -427,8 +431,12 @@ stratified_kennard_stone <- function(unknown_clusters,
       ## Take all available samples
       cluster_selected <- cluster_ossl_indices
 
-      if (verbose && length(cluster_ossl_indices) < n_to_select) {
-        cli::cli_text("│  │  └─ Only {length(cluster_ossl_indices)} samples available.")
+      if (verbose) {
+        if (length(cluster_ossl_indices) < n_to_select) {
+          cli::cli_text("│  ├─ Cluster {cluster_id}: Requested {n_to_select}, only {length(cluster_ossl_indices)} available - taking all.")
+        } else {
+          cli::cli_text("│  ├─ Cluster {cluster_id}: Taking all {length(cluster_ossl_indices)} available samples.")
+        }
       }
 
     } else {
@@ -453,6 +461,10 @@ stratified_kennard_stone <- function(unknown_clusters,
 
       cluster_selected <- cluster_ossl_indices[ks_result$model]
 
+      if (verbose) {
+        cli::cli_text("│  ├─ Cluster {cluster_id}: Selected {n_to_select} samples from {length(cluster_ossl_indices)} available.")
+      }
+
     }
 
     all_selected <- c(all_selected, cluster_selected)
@@ -465,10 +477,12 @@ stratified_kennard_stone <- function(unknown_clusters,
 
   n_selected <- length(all_selected)
 
-  if (n_selected < n_select) {
-
-    if (verbose) cli::cli_text("│  └─ Selected {n_selected}/{n_select} samples (some clusters had insufficient OSSL coverage).")
-
+  if (verbose) {
+    if (n_selected < n_select) {
+      cli::cli_text("│  └─ Total selected: {n_selected} samples (requested {n_select} but limited by availability).")
+    } else {
+      cli::cli_text("│  └─ Total selected: {n_selected} samples.")
+    }
   }
 
   ## Return the clusters -------------------------------------------------------
