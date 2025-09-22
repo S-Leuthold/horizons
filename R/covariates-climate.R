@@ -301,6 +301,10 @@ fetch_climate_covariates <- function(input_data,
                                AI                 = NA_real_,
                                GDD                = NA_real_,
                                Precip_Seasonality = NA_real_) -> result
+
+                # Don't cache failed attempts
+                cli::cli_text("│  ├─ Climate data unavailable for grid {grid_id}.")
+
               } else {
 
                 tibble::tibble(Daymet_GridID      = grid_id,
@@ -310,19 +314,19 @@ fetch_climate_covariates <- function(input_data,
                                AI                 = daymet_summary$AI,
                                GDD                = daymet_summary$GDD,
                                Precip_Seasonality = daymet_summary$Precip_Seasonality) -> result
+
+                # Only cache successful downloads
+                tryCatch({
+
+                  qs::qsave(result, cache_file)
+                  cli::cli_text("│  ├─ Cached climate data for grid {grid_id}.")
+
+                }, error = function(e) {
+
+                  cli::cli_text("│  ├─ Failed to cache climate data for grid {grid_id}: {e$message}.")
+
+                })
               }
-
-
-              tryCatch({
-
-                qs::qsave(result, cache_file)
-                cli::cli_text("│  ├─ ✓ Cached climate data for grid {grid_id}")
-
-              }, error = function(e) {
-
-                cli::cli_text("│  ├─ Failed to cache climate data for grid {grid_id}: {e$message}.")
-
-              })
 
               result
             }) -> daymet_results
