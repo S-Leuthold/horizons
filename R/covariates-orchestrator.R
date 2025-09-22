@@ -362,14 +362,14 @@ fetch_covariates <- function(input_data,
 
         for (i in requested_soil_covariates){
 
-          perf <- soil_predictions$global_models[[i]]$performance
+          perf <- soil_predictions$global_models[[i]]$validation_metrics
 
           cli::cli_text("├─ {i}")
 
           if (!is.null(perf)) {
-            cli::cli_text("│   ├─ R²: {.val {round(perf$val_r2, 3)}}")
-            cli::cli_text("│   ├─ RMSE: {.val {round(perf$val_rmse, 2)}}")
-            cli::cli_text("│   └─ RPD: {.val {round(perf$val_rpd, 3)}}")
+            cli::cli_text("│   ├─ R²: {.val {round(perf$rsq, 3)}}")
+            cli::cli_text("│   ├─ RMSE: {.val {round(perf$rmse, 2)}}")
+            cli::cli_text("│   └─ RPD: {.val {round(perf$rpd, 3)}}")
           } else {
             cli::cli_text("│   └─ Model fitting failed.")
           }
@@ -418,13 +418,13 @@ fetch_covariates <- function(input_data,
 
         for (i in requested_soil_covariates){
 
-          perf <- soil_predictions$global_models[[i]]$performance
+          perf <- soil_predictions$global_models[[i]]$validation_metrics
 
           if (!is.null(perf)) {
             cli::cli_text("├─ {i}")
-            cli::cli_text("│   ├─ R²: {.val {round(perf$val_r2, 3)}}")
-            cli::cli_text("│   ├─ RMSE: {.val {round(perf$val_rmse, 2)}}")
-            cli::cli_text("│   └─ RPD: {.val {round(perf$val_rpd, 3)}}")
+            cli::cli_text("│   ├─ R²: {.val {round(perf$rsq, 3)}}")
+            cli::cli_text("│   ├─ RMSE: {.val {round(perf$rmse, 2)}}")
+            cli::cli_text("│   └─ RPD: {.val {round(perf$rpd, 3)}}")
           } else {
             cli::cli_text("├─ {i}")
             cli::cli_text("│   └─ Model fitting failed.")
