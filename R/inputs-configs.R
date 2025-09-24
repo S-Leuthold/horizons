@@ -99,19 +99,19 @@ create_configs <- function(models                  = c("plsr", "random_forest", 
   # Validate covariate inputs
   if (!is.null(soil_covariates) && (!is.character(soil_covariates) || length(soil_covariates) == 0)) {
 
-    cli::cli_abort("▶ create_configs: soil_covariates must be a character vector or NULL")
+    cli::cli_abort("soil_covariates must be a character vector or NULL")
 
   }
 
   if (!is.null(climate_covariates) && (!is.character(climate_covariates) || length(climate_covariates) == 0)) {
 
-    cli::cli_abort("▶ create_configs: climate_covariates must be a character vector or NULL")
+    cli::cli_abort("climate_covariates must be a character vector or NULL")
 
   }
 
   if (!is.null(spatial_covariates) && (!is.character(spatial_covariates) || length(spatial_covariates) == 0)) {
 
-    cli::cli_abort("▶ create_configs: spatial_covariates must be a character vector or NULL")
+    cli::cli_abort("spatial_covariates must be a character vector or NULL")
 
   }
 
@@ -144,8 +144,7 @@ create_configs <- function(models                  = c("plsr", "random_forest", 
 
     if (verbose) {
 
-      cli::cli_text(format_tree_item(paste0("⟳ Generating all subsets of ", length(all_covariates), " covariates..."), 
-                                   level = 0, is_last = FALSE, symbol = NULL))
+      cli::cli_text("├─ Generating all subsets of {length(all_covariates)} covariates...")
 
     }
 
@@ -167,8 +166,7 @@ create_configs <- function(models                  = c("plsr", "random_forest", 
 
     if (verbose) {
 
-      cli::cli_text(format_tree_item(paste0("✓ Created ", length(covariate_sets), " covariate combinations"), 
-                                   level = 0, is_last = TRUE))
+      cli::cli_text("└─ {cli::col_green('✓')} Created {length(covariate_sets)} covariate combinations")
 
     }
 
@@ -252,7 +250,7 @@ create_configs <- function(models                  = c("plsr", "random_forest", 
         for (i in seq_along(col_values)) {
           value <- col_values[i]
           if (is.function(value) || "closure" %in% class(value)) {
-            cli::cli_abort("▶ create_configs: Closure detected in '{col_name}' column, row {i}. Configuration data is not parallel-safe.")
+            cli::cli_abort("Closure detected in {.field {col_name}} column, row {i}. Configuration data is not parallel-safe.")
           }
         }
       }
@@ -266,13 +264,13 @@ create_configs <- function(models                  = c("plsr", "random_forest", 
         cov_value <- cov_list[[i]]
         if (!is.null(cov_value)) {
           if (is.function(cov_value) || "closure" %in% class(cov_value)) {
-            cli::cli_abort("▶ create_configs: Closure detected in 'covariates' list column, row {i}. Configuration data is not parallel-safe.")
+            cli::cli_abort("Closure detected in {.field covariates} list column, row {i}. Configuration data is not parallel-safe.")
           }
           # Also check individual covariate elements if it's a vector
           if (is.list(cov_value)) {
             for (j in seq_along(cov_value)) {
               if (is.function(cov_value[[j]]) || "closure" %in% class(cov_value[[j]])) {
-                cli::cli_abort("▶ create_configs: Closure detected in covariate element {j}, row {i}. Configuration data is not parallel-safe.")
+                cli::cli_abort("Closure detected in covariate element {j}, row {i}. Configuration data is not parallel-safe.")
               }
             }
           }
