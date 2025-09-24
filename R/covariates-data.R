@@ -675,8 +675,8 @@ perform_pca_on_ossl <- function(ossl_data,
   ## Do the analysis -----------------------------------------------------------
 
   safely_execute(expr = {stats::prcomp(x      = spectral_matrix,
-                                       center = FALSE,
-                                       scale. = FALSE)},
+                                       center = TRUE,
+                                       scale. = TRUE)},
                  default_value      = NULL,
                  error_message      = "PCA computation failed",
                  capture_conditions = TRUE) -> pca_safe
@@ -706,7 +706,7 @@ perform_pca_on_ossl <- function(ossl_data,
 
   if (verbose) {
 
-    cli::cli_text("└─ PCA: {n_components} components ({round(variance_threshold * 100)}% variance).")
+    cli::cli_text("├─ PCA: {n_components} components ({round(variance_threshold * 100)}% variance).")
 
   }
 
@@ -744,7 +744,7 @@ perform_pca_on_ossl <- function(ossl_data,
 
   if (verbose) {
     cli::cli_text(
-      "├─ PCA complete: {n_components} components explain {round(total_variance * 100, 1)}% of variance."
+      "└─ PCA complete: {n_components} components explain {round(total_variance * 100, 1)}% of variance."
     )
   }
 

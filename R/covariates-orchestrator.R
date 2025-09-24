@@ -533,7 +533,6 @@ fetch_covariates <- function(input_data,
 
         if (n_success == nrow(input_data)) {
 
-          cli::cli_text("└─ Successfully fetched all climate variables")
 
         } else if (n_success > 0) {
 
