@@ -162,7 +162,7 @@ predict_soil_covariates <- function(input_data,
                              ossl_pca_scores     = ossl_result$pca_scores,
                              n_select            = n_similar,
                              prop                = prop,
-                             relevance_threshold = 0.6,
+                             relevance_threshold = 0.85,
                              verbose             = verbose) -> global_selection
 
   ## ---------------------------------------------------------------------------
