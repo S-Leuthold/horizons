@@ -93,7 +93,7 @@ fit_cubist_model <- function(train_data,
 
     if (verbose) {
 
-      cli::cli_text("│  │  │  ├─ Preparing training data.")
+      cli::cli_text("│  ├─ Preparing training data.")
 
     }
 
@@ -137,9 +137,6 @@ fit_cubist_model <- function(train_data,
   ## Step 2: Define recipe and model specifications
   ## -------------------------------------------------------------------------
 
-  formula_obj  <- stats::as.formula("Response ~ .")
-  model_recipe <- recipes::recipe(formula_obj, data = Train_Data[1, ])
-
   ## -------------------------------------------------------------------------
   ## Step 3: Define cubist model specifications
   ## -------------------------------------------------------------------------
@@ -157,7 +154,7 @@ fit_cubist_model <- function(train_data,
 
   workflows::workflow() %>%
     workflows::add_model(model_spec) %>%
-    workflows::add_recipe(model_recipe) -> wf
+    workflows::add_formula(Response ~ .) -> wf
 
   ## -------------------------------------------------------------------------
   ## Step 4: Initial Grid Search for Hyperparameter Tuning
@@ -202,7 +199,7 @@ fit_cubist_model <- function(train_data,
 
   ## Run grid search ---------------------------------------------------------
 
-  if(verbose) cli::cli_text("│  │  │  ├─ Running grid search.")
+  if(verbose) cli::cli_text("│  ├─ Running grid search.")
 
   safely_execute(expr = {tune::tune_grid(object    = wf,
                                          resamples = CV_Folds,
@@ -241,7 +238,7 @@ fit_cubist_model <- function(train_data,
 
     if(verbose) {
 
-      cli::cli_text("│  │  │  ├─ Bayesian optimization: {bayesian_iter} iterations.")
+      cli::cli_text("│  ├─ Bayesian optimization: {bayesian_iter} iterations.")
 
     }
 
@@ -292,7 +289,7 @@ fit_cubist_model <- function(train_data,
   ## Step 6: Finalize the workflow
   ## ---------------------------------------------------------------------------
 
-  if(verbose) cli::cli_text("│  │  │  ├─ Finalizing workflow.")
+  if(verbose) cli::cli_text("│  ├─ Finalizing workflow.")
 
   best_params <- tune::select_best(final_tune_result, metric = "rmse")
   final_wf    <- tune::finalize_workflow(wf, best_params)
@@ -301,7 +298,7 @@ fit_cubist_model <- function(train_data,
   ## Step 7: Fit the final model
   ## ---------------------------------------------------------------------------
 
-  if (verbose) cli::cli_text("│  │  │  ├─ Fitting final model.")
+  if (verbose) cli::cli_text("│  ├─ Fitting final model.")
 
   safely_execute(expr               = {parsnip::fit(final_wf, Train_Data)},
                  default_value      = NULL,
@@ -331,7 +328,7 @@ fit_cubist_model <- function(train_data,
   ## Step 8: Test the fitted maodel on the validation set
   ## ---------------------------------------------------------------------------
 
-  if (verbose) cli::cli_text("│  │  │  ├─ Computing validation metrics.")
+  if (verbose) cli::cli_text("│  ├─ Computing validation metrics.")
 
   safely_execute(expr = {
 
@@ -351,7 +348,7 @@ fit_cubist_model <- function(train_data,
                        rsq   = yardstick::rsq_vec(observed, predicted),
                        ccc   = ccc_vec(observed, predicted),
                        rpd   = rpd_vec(observed, predicted),
-                       rrmse = rrmse_vec(val_data_clean, truth = observed, estimate = predicted)) -> val_metrics
+                       rrmse = 100 * (yardstick::rmse_vec(observed, predicted) / mean(observed))) -> val_metrics
     },
 
     default_value      = NULL,
@@ -386,7 +383,7 @@ fit_cubist_model <- function(train_data,
 
   if (verbose) {
 
-    cli::cli_text("│  │  │  └─ Best params: committees={round(best_params$committees)}, neighbors={round(best_params$neighbors)}.")
+    cli::cli_text("│  ├─ Best params: committees={round(best_params$committees)}, neighbors={round(best_params$neighbors)}.")
   }
 
   ## Return results list -------------------------------------------------------
