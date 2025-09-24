@@ -65,7 +65,6 @@ fetch_climate_covariates <- function(input_data,
                                      refresh    = FALSE){
 
   # TODO: Add a verbose option to control progress output.
-  # TODO: Incoporate utils-reporting functionality.
 
   ## ---------------------------------------------------------------------------
   ## Step 0: Define helper functions
@@ -267,11 +266,10 @@ fetch_climate_covariates <- function(input_data,
 
               ## Summarize the data --------------------------------------------
 
-              ## Extract the data frame from the daymetr object
               daymet_df <- if (is.list(daymet_data) && "data" %in% names(daymet_data)) {
                 daymet_data$data
               } else {
-                daymet_data  # Fallback if structure is different
+                daymet_data
               }
 
               safely_execute(expr = {summarize_daymet(daymet_df = daymet_df,
@@ -302,7 +300,6 @@ fetch_climate_covariates <- function(input_data,
                                GDD                = NA_real_,
                                Precip_Seasonality = NA_real_) -> result
 
-                # Don't cache failed attempts
                 cli::cli_text("│  ├─ Climate data unavailable for grid {grid_id}.")
 
               } else {
@@ -315,7 +312,6 @@ fetch_climate_covariates <- function(input_data,
                                GDD                = daymet_summary$GDD,
                                Precip_Seasonality = daymet_summary$Precip_Seasonality) -> result
 
-                # Only cache successful downloads
                 tryCatch({
 
                   qs::qsave(result, cache_file)
