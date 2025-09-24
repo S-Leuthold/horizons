@@ -136,8 +136,7 @@ select_global_training_set <- function(unknown_pca_scores,
   ## ---------------------------------------------------------------------------
 
   if (verbose) {
-    cli::cli_text("├─ {cli::col_green('✓')} Global training set selection complete")
-    cli::cli_text("└─ Training: {nrow(train_data)} samples, Validation: {nrow(val_data)} samples")
+    cli::cli_text("└─ {cli::col_green('✓')} Global training set selection complete: {nrow(train_data)} training, {nrow(val_data)} validation samples")
   }
 
   return(list(
