@@ -67,6 +67,7 @@
 #' @importFrom future plan multisession sequential
 #' @importFrom glue glue
 #' @importFrom cli cli_text
+#' @importFrom yardstick rmse_vec mae_vec rsq_vec
 #' @export
 
 
@@ -345,9 +346,9 @@ fit_cubist_model <- function(train_data,
       tidyr::drop_na() -> val_data_clean
 
     val_data_clean %>%
-      dplyr::summarise(rmse  = sqrt(mean((observed - predicted)^2)),
-                       mae   = mean(abs(observed - predicted)),
-                       rsq   = cor(observed, predicted)^2,
+      dplyr::summarise(rmse  = yardstick::rmse_vec(observed, predicted),
+                       mae   = yardstick::mae_vec(observed, predicted),
+                       rsq   = yardstick::rsq_vec(observed, predicted),
                        ccc   = ccc_vec(observed, predicted),
                        rpd   = rpd_vec(observed, predicted),
                        rrmse = rrmse_vec(val_data_clean, truth = observed, estimate = predicted)) -> val_metrics
