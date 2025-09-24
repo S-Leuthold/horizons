@@ -6,7 +6,7 @@ test_that("build_recipe creates valid recipe with basic parameters", {
   recipe <- build_recipe(
     input_data = test_data,
     spectral_transformation = "raw",
-    response_transformation = "No Transformation",
+    response_transformation = "none",
     feature_selection_method = "none"
   )
   
@@ -28,7 +28,7 @@ test_that("build_recipe handles all spectral transformations", {
     recipe <- build_recipe(
       input_data = test_data,
       spectral_transformation = method,
-      response_transformation = "No Transformation",
+      response_transformation = "none",
       feature_selection_method = "none"
     )
     
@@ -44,7 +44,7 @@ test_that("build_recipe handles all spectral transformations", {
 test_that("build_recipe handles all response transformations", {
   test_data <- make_test_spectra(n_samples = 10, wavelengths = seq(600, 650, by = 10))
   
-  response_methods <- c("No Transformation", "Log Transformation", "Square Root Transformation")
+  response_methods <- c("none", "log", "sqrt")
   
   for (method in response_methods) {
     recipe <- build_recipe(
@@ -57,11 +57,11 @@ test_that("build_recipe handles all response transformations", {
     expect_valid_recipe(recipe)
     
     # Check for appropriate transformation step
-    if (method == "Log Transformation") {
+    if (method == "log") {
       log_steps <- purrr::keep(recipe$steps, ~ inherits(.x, "step_log"))
       expect_length(log_steps, 1)
       expect_true(log_steps[[1]]$skip)  # Should have skip = TRUE
-    } else if (method == "Square Root Transformation") {
+    } else if (method == "sqrt") {
       sqrt_steps <- purrr::keep(recipe$steps, ~ inherits(.x, "step_sqrt"))
       expect_length(sqrt_steps, 1)
       expect_true(sqrt_steps[[1]]$skip)  # Should have skip = TRUE
@@ -84,7 +84,7 @@ test_that("build_recipe handles feature selection methods", {
     recipe <- build_recipe(
       input_data = test_data,
       spectral_transformation = "raw",
-      response_transformation = "No Transformation",
+      response_transformation = "none",
       feature_selection_method = config$method
     )
     
@@ -108,7 +108,7 @@ test_that("build_recipe integrates covariates correctly", {
   recipe <- build_recipe(
     input_data = test_data,
     spectral_transformation = "snv",
-    response_transformation = "No Transformation",
+    response_transformation = "none",
     feature_selection_method = "none",
     covariate_selection = c("Clay", "pH"),
     covariate_data = covariate_data
@@ -138,7 +138,7 @@ test_that("build_recipe handles 'No Covariates' specification", {
     recipe <- build_recipe(
       input_data = test_data,
       spectral_transformation = "raw",
-      response_transformation = "No Transformation",
+      response_transformation = "none",
       feature_selection_method = "none",
       covariate_selection = spec,
       covariate_data = covariate_data
@@ -156,7 +156,7 @@ test_that("build_recipe includes PCA step", {
   recipe <- build_recipe(
     input_data = test_data,
     spectral_transformation = "snv",
-    response_transformation = "No Transformation",
+    response_transformation = "none",
     feature_selection_method = "pca"  # Changed from "none" to "pca" to actually get PCA step
   )
   
@@ -175,7 +175,7 @@ test_that("build_recipe validates input data", {
     build_recipe(
       input_data = matrix(1:10, ncol = 2),
       spectral_transformation = "raw",
-      response_transformation = "No Transformation",
+      response_transformation = "none",
       feature_selection_method = "none"
     ),
     regexp = "not a data frame"
@@ -189,7 +189,7 @@ test_that("build_recipe validates input data", {
     build_recipe(
       input_data = bad_data,
       spectral_transformation = "raw",
-      response_transformation = "No Transformation",
+      response_transformation = "none",
       feature_selection_method = "none"
     ),
     regexp = "Sample_ID.*missing"
@@ -205,7 +205,7 @@ test_that("build_recipe validates covariate parameters", {
     build_recipe(
       input_data = test_data,
       spectral_transformation = "raw",
-      response_transformation = "No Transformation",
+      response_transformation = "none",
       feature_selection_method = "none",
       covariate_selection = c("Clay", "pH"),
       covariate_data = NULL
@@ -223,7 +223,7 @@ test_that("build_recipe validates covariate parameters", {
     build_recipe(
       input_data = test_data,
       spectral_transformation = "raw",
-      response_transformation = "No Transformation",
+      response_transformation = "none",
       feature_selection_method = "none",
       covariate_selection = c("Clay", "pH"),
       covariate_data = covariate_data
@@ -245,7 +245,7 @@ test_that("build_recipe creates complete pipeline", {
   recipe <- build_recipe(
     input_data = test_data,
     spectral_transformation = "snv_deriv1",
-    response_transformation = "Log Transformation",
+    response_transformation = "log",
     feature_selection_method = "correlation",
     covariate_selection = c("Clay", "pH"),
     covariate_data = covariate_data
@@ -298,7 +298,7 @@ test_that("build_recipe works with real fixture data", {
   recipe <- build_recipe(
     input_data = test_data,
     spectral_transformation = "snv_deriv1",
-    response_transformation = "Square Root Transformation",
+    response_transformation = "sqrt",
     feature_selection_method = "none",
     covariate_selection = c("Clay", "SOC"),
     covariate_data = covariate_data
@@ -343,7 +343,7 @@ test_that("build_recipe handles edge cases", {
   recipe <- build_recipe(
     input_data = minimal_data,
     spectral_transformation = "raw",
-    response_transformation = "No Transformation",
+    response_transformation = "none",
     feature_selection_method = "none"
   )
   
@@ -371,7 +371,7 @@ test_that("build_recipe handles edge cases", {
   recipe_larger <- build_recipe(
     input_data = minimal_data_larger,
     spectral_transformation = "raw",
-    response_transformation = "No Transformation",
+    response_transformation = "none",
     feature_selection_method = "none"
   )
   
