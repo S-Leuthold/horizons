@@ -225,7 +225,17 @@ fetch_covariates <- function(input_data,
 
     if (!is.null(configurations)) {
 
-      all_covariates <- unique(unlist(purrr::compact(configurations$covariates)))
+      # Split concatenated covariate strings (e.g., "clay_AI" -> c("clay", "AI"))
+      split_covariates <- purrr::map(configurations$covariates, function(x) {
+        if (is.null(x) || is.na(x) || x == "none") {
+          NULL
+        } else {
+          # Split by underscore to get individual covariates
+          strsplit(x, "_")[[1]]
+        }
+      })
+
+      all_covariates <- unique(unlist(purrr::compact(split_covariates)))
 
       if (length(all_covariates) > 0){
 
@@ -240,8 +250,9 @@ fetch_covariates <- function(input_data,
 
         if (length(categorized$unknown) > 0 && verbose){
 
-          cli::cli_text("│  └─ {cli::col_red('!! Unknown covariates requested: {categorized$unknown}')}")
-          cli::cli_text("│  └─ {cli::col_red('!! Run horizons::list_covariates() to see accepted values}")
+          unknown_list <- paste(categorized$unknown, collapse = ", ")
+          cli::cli_text("│  └─ {cli::col_red('!! Unknown covariates requested: ')}{unknown_list}")
+          cli::cli_text("│  └─ {cli::col_red('!! Run horizons::list_covariates() to see accepted values')}")
           stop_quietly()
 
         }

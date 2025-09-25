@@ -410,6 +410,15 @@ evaluate_models_local <- function(config,
     ## Step 7: Set up config specific covariate data
     ## -------------------------------------------------------------------------
 
+    # Create config_clean for error reporting
+    config_clean <- list(
+      model             = as.character(config_row$model),
+      transformation    = as.character(config_row$transformation),
+      preprocessing     = as.character(config_row$preprocessing),
+      feature_selection = as.character(config_row$feature_selection),
+      covariates        = covariate_cols
+    )
+
     ## Make sure that all of the requested covariates for this config exist ----
 
     if (!is.null(covariate_cols) && !is.null(covariate_data)) {

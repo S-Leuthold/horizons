@@ -26,6 +26,261 @@ Each function should have test specifications in the following format:
 
 ---
 
+## test-inputs-configs.R
+
+### Function: `create_configs()`
+
+#### Test Group 1: Input Validation
+
+**Test 1.1: Required parameters must be provided**
+- **Setup**: None
+- **Input**: `create_configs()` (no arguments)
+- **Expected**: Error about missing required arguments
+- **Verify**: `expect_error(..., "missing")`
+
+**Test 1.2: Validates soil_covariates type**
+- **Setup**: None
+- **Input**: `create_configs(models = "plsr", transformations = "none", preprocessing = "raw", feature_selection = "none", soil_covariates = 123)`
+- **Expected**: Error with message "soil_covariates must be a character vector or NULL"
+- **Verify**: `expect_error(..., "character vector or NULL")`
+
+**Test 1.3: Empty character vectors not allowed for covariates**
+- **Setup**: None
+- **Input**: `create_configs(..., soil_covariates = character(0))`
+- **Expected**: Error about empty character vector
+- **Verify**: `expect_error(..., "character vector or NULL")`
+
+#### Test Group 2: Covariate Combination Generation
+
+**Test 2.1: No covariates produces single 'none' set**
+- **Setup**: Basic required params only
+- **Input**: `create_configs(models = "plsr", transformations = "none", preprocessing = "raw", feature_selection = "none")`
+- **Expected**: config_grid with single covariate_set = "none"
+- **Verify**:
+  - `expect_equal(unique(result$covariate_set), "none")`
+  - `expect_true(is.null(result$covariates[[1]]))`
+
+**Test 2.2: Power set generation for covariates**
+- **Setup**: None
+- **Input**: `create_configs(..., soil_covariates = c("clay", "sand"))`
+- **Expected**: 4 covariate sets: none, clay, sand, clay_sand
+- **Verify**:
+  - `expect_equal(length(unique(result$covariate_set)), 4)`
+  - Check each expected combination exists
+
+**Test 2.3: Multiple covariate types combine correctly**
+- **Setup**: None
+- **Input**:
+  ```r
+  create_configs(...,
+    soil_covariates = c("clay"),
+    climate_covariates = c("MAT"))
+  ```
+- **Expected**: 4 sets: none, clay, MAT, clay_MAT
+- **Verify**: Check all combinations present
+
+#### Test Group 3: Grid Creation
+
+**Test 3.1: Cartesian product calculation**
+- **Setup**: None
+- **Input**:
+  ```r
+  create_configs(
+    models = c("plsr", "rf"),
+    transformations = c("none", "log"),
+    preprocessing = c("raw", "snv"),
+    feature_selection = c("none"))
+  ```
+- **Expected**: 2×2×2×1 = 8 base combinations
+- **Verify**: `expect_equal(nrow(result), 8)`
+
+**Test 3.2: Config IDs are unique and sequential**
+- **Setup**: Create any config grid
+- **Input**: Standard function call
+- **Expected**: IDs like config_0001, config_0002, etc.
+- **Verify**:
+  - All IDs unique
+  - Properly formatted with 4 digits
+
+#### Test Group 4: Output Structure
+
+**Test 4.1: Column order is correct**
+- **Setup**: None
+- **Input**: Standard function call
+- **Expected**: First column is config_id
+- **Verify**: `expect_equal(names(result)[1], "config_id")`
+
+**Test 4.2: Covariates column is list type**
+- **Setup**: Create configs with covariates
+- **Input**: Standard function call
+- **Expected**: covariates column contains lists
+- **Verify**: `expect_true(is.list(result$covariates))`
+
+#### Test Group 5: Verbose Output
+
+**Test 5.1: Verbose messages appear correctly**
+- **Setup**: Capture cli output
+- **Input**: `create_configs(..., verbose = TRUE)`
+- **Expected**: Bold headers and tree structure
+- **Verify**: Check for "Model Configuration Grid Generation" and tree characters
+
+**Test 5.2: Silent mode produces no output**
+- **Setup**: Capture output
+- **Input**: `create_configs(..., verbose = FALSE)`
+- **Expected**: No cli messages
+- **Verify**: `expect_silent(...)`
+
+#### Test Group 6: Edge Cases
+
+**Test 6.1: Single value for each parameter**
+- **Setup**: None
+- **Input**: All parameters with single values
+- **Expected**: Single configuration row
+- **Verify**: `expect_equal(nrow(result), 1)`
+
+**Test 6.2: Large covariate sets**
+- **Setup**: None
+- **Input**: 5 covariates (32 combinations)
+- **Expected**: Handles 32 combinations without error
+- **Verify**: Check performance and memory usage
+
+---
+
+## test-inputs-create.R
+
+### Function: `create_dataset()`
+
+#### Test Group 1: Input Validation
+
+**Test 1.1: Validates spectra_data type**
+- **Setup**: None
+- **Input**: `create_dataset(spectra_data = "not_a_dataframe", response_data = valid_df)`
+- **Expected**: Error with message "spectra_data must be a data frame or tibble"
+- **Verify**: `expect_error(..., "data frame or tibble")`
+
+**Test 1.2: Requires id_column in spectra**
+- **Setup**: Create spectra without Sample_ID
+- **Input**: `create_dataset(spectra_data = missing_id_df, response_data = valid_df)`
+- **Expected**: Error about missing Sample_ID column
+- **Verify**: `expect_error(..., "not found in spectra_data")`
+
+**Test 1.3: Response file must exist**
+- **Setup**: None
+- **Input**: `create_dataset(spectra_data = valid_df, response_data = "nonexistent.csv")`
+- **Expected**: Error about file not found
+- **Verify**: `expect_error(..., "Response file not found")`
+
+**Test 1.4: Parse IDs requires format**
+- **Setup**: Valid data
+- **Input**: `create_dataset(..., parse_ids = TRUE, id_format = NULL)`
+- **Expected**: Error "id_format must be provided when parse_ids = TRUE"
+- **Verify**: `expect_error(..., "id_format must be provided")`
+
+#### Test Group 2: ID Parsing
+
+**Test 2.1: Successful ID parsing**
+- **Setup**:
+  ```r
+  spectra_data <- data.frame(
+    Sample_ID = c("P1_S001_bulk_1", "P1_S001_bulk_2"),
+    `600` = c(0.1, 0.2)
+  )
+  ```
+- **Input**: `create_dataset(..., parse_ids = TRUE, id_format = "project_sampleid_fraction_scan")`
+- **Expected**: Parsed columns added (project, sampleid, fraction, scan)
+- **Verify**: Check for presence of parsed columns
+
+**Test 2.2: Aggregation by parsed columns**
+- **Setup**: Multiple scans of same sample
+- **Input**: `create_dataset(..., parse_ids = TRUE, aggregate_by = c("project", "sampleid"))`
+- **Expected**: Scans averaged into single row per sample
+- **Verify**: `expect_equal(nrow(result), n_unique_samples)`
+
+#### Test Group 3: Replicate Aggregation
+
+**Test 3.1: Averaging spectral replicates**
+- **Setup**:
+  ```r
+  spectra_data <- data.frame(
+    Sample_ID = c("S1", "S1", "S2"),
+    `600` = c(0.1, 0.3, 0.5),
+    `650` = c(0.2, 0.4, 0.6)
+  )
+  ```
+- **Input**: `create_dataset(spectra_data, response_data)`
+- **Expected**: S1 values averaged: 600=0.2, 650=0.3
+- **Verify**: Check averaged values and n_replicates column
+
+**Test 3.2: Preserves non-spectral columns during aggregation**
+- **Setup**: Spectra with metadata columns
+- **Input**: Standard aggregation
+- **Expected**: First value of metadata preserved
+- **Verify**: Check metadata columns retained
+
+#### Test Group 4: Joining Data
+
+**Test 4.1: Inner join behavior**
+- **Setup**: Spectra with 5 samples, response with 3 (2 overlap)
+- **Input**: `create_dataset(..., join_type = "inner")`
+- **Expected**: Result has 2 rows (overlapping only)
+- **Verify**: `expect_equal(nrow(result), 2)`
+
+**Test 4.2: Left join preserves all spectra**
+- **Setup**: More spectra than response data
+- **Input**: `create_dataset(..., join_type = "left")`
+- **Expected**: All spectra retained, NAs for missing response
+- **Verify**: Check row count matches spectra
+
+**Test 4.3: Response variable selection**
+- **Setup**: Response with many columns
+- **Input**: `create_dataset(..., response_variables = c("SOC", "pH"))`
+- **Expected**: Only requested variables in output
+- **Verify**: Check column names
+
+#### Test Group 5: Coordinate Handling
+
+**Test 5.1: Auto-detect coordinate columns**
+- **Setup**: Response with Latitude, Longitude columns
+- **Input**: `create_dataset(..., include_coords = TRUE)`
+- **Expected**: Coordinates included in output
+- **Verify**: `expect_true(all(c("Latitude", "Longitude") %in% names(result)))`
+
+**Test 5.2: Explicit coordinate specification**
+- **Setup**: Response with custom coord names
+- **Input**: `create_dataset(..., coord_columns = c("x_coord", "y_coord"))`
+- **Expected**: Specified coords included
+- **Verify**: Check for custom column names
+
+#### Test Group 6: Missing Data Handling
+
+**Test 6.1: Drop NA in response variables**
+- **Setup**: Response with some NA values
+- **Input**: `create_dataset(..., drop_na = TRUE)`
+- **Expected**: Rows with NA in response removed
+- **Verify**: `expect_false(any(is.na(result[response_vars])))`
+
+**Test 6.2: Keep NA when requested**
+- **Setup**: Response with NA values
+- **Input**: `create_dataset(..., drop_na = FALSE)`
+- **Expected**: NA values retained
+- **Verify**: Check NA values present
+
+#### Test Group 7: Verbose Output
+
+**Test 7.1: Verbose messages appear**
+- **Setup**: Capture cli output
+- **Input**: `create_dataset(..., verbose = TRUE)`
+- **Expected**: Bold headers and tree structure
+- **Verify**: Check for "Dataset Creation Pipeline" header
+
+**Test 7.2: Silent mode**
+- **Setup**: Capture output
+- **Input**: `create_dataset(..., verbose = FALSE)`
+- **Expected**: No cli messages
+- **Verify**: `expect_silent(...)`
+
+---
+
 ## test-covariates-orchestrator.R
 
 ### Function: `fetch_covariates()`

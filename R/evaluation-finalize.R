@@ -1,26 +1,70 @@
-#' Finalize Top Models for Ensemble Stacking
+#' Finalize Top Models with Bayesian Optimization
 #'
 #' @description
-#' Takes evaluation results and refits the top-performing models with additional
-#' Bayesian optimization iterations, then saves them with CV predictions for ensemble stacking.
+#' Refines the top-performing models from evaluation results using Bayesian optimization
+#' with warm-start from initial grid search results. Generates cross-validation predictions
+#' needed for ensemble stacking.
 #'
-#' @param evaluation_results Tibble from evaluate_models_local() or evaluate_models_hpc()
-#'   Must contain columns: 'status', 'workflow_id', 'best_params', and the specified metric
-#' @param input_data Tibble containing spectral features and response variable
-#' @param covariate_data Optional tibble containing external covariates
-#' @param variable Character. Name of the response variable
-#' @param n_best Integer. Number of top models to finalize (default: 10)
-#' @param metric Character. Metric to use for selecting top models: "rrmse", "ccc", "rsq" (default: "rrmse")
-#' @param output_dir Character. Directory to save finalized workflows (default: tempdir())
-#' @param train_prop Numeric. Proportion of data for training (default: 0.8)
-#' @param bayesian_iter Integer. Additional Bayesian optimization iterations (default: 15)
-#' @param cv_folds Integer. Cross-validation folds for stacking predictions (default: 10)
-#' @param seed Integer. Random seed for reproducibility (default: 123)
-#' @param parallel_cv Logical. Enable parallel processing for CV (default: FALSE)
-#' @param verbose Logical. Print progress information (default: TRUE)
+#' The function:
+#' 1. Selects top N models based on the specified metric
+#' 2. Creates parameter search spaces around best parameters
+#' 3. Performs Bayesian optimization to refine hyperparameters
+#' 4. Generates CV predictions for ensemble stacking
+#' 5. Saves finalized workflows and results
 #'
-#' @return Tibble with finalized model information and saved paths
-#' @importFrom yardstick mae rmse rsq
+#' @param evaluation_results A tibble from `evaluate_models_local()` or `evaluate_models_hpc()`
+#'   containing columns: `status`, `workflow_id`, `best_params`, and the specified metric
+#' @param input_data Data frame with predictor features and response variable
+#' @param covariate_data Optional data frame with additional covariate predictors. Default: `NULL`
+#' @param variable Character string. Name of the response variable column in `input_data`
+#' @param n_best Integer. Number of top models to finalize. Default: `10`
+#' @param metric Character string. Metric for selecting top models:
+#'   - `"rrmse"`: Relative RMSE (default)
+#'   - `"rmse"`: Root mean squared error
+#'   - `"ccc"`: Concordance correlation coefficient
+#'   - `"rsq"`: R-squared
+#'   - `"rpd"`: Ratio of performance to deviation
+#'   - `"mae"`: Mean absolute error
+#' @param output_dir Character string or `NULL`. Directory to save finalized workflows.
+#'   If `NULL`, uses a temporary directory. Default: `NULL`
+#' @param train_prop Numeric between 0 and 1. Proportion of data for training. Default: `0.8`
+#' @param bayesian_iter Integer. Number of Bayesian optimization iterations. Default: `15`
+#' @param cv_folds Integer. Number of cross-validation folds for generating predictions. Default: `10`
+#' @param seed Integer. Random seed for reproducibility. Default: `0307`
+#' @param allow_par Logical. Enable parallel processing for cross-validation. Default: `FALSE`
+#' @param n_cores Integer or `NULL`. Number of cores for parallel processing.
+#'   If `NULL` and `allow_par = TRUE`, uses available cores minus 1. Default: `NULL`
+#' @param verbose Logical. Print detailed progress information. Default: `TRUE`
+#'
+#' @return
+#' A tibble containing finalized model information with columns:
+#' - `wflow_id`: Model identifier
+#' - `workflow`: Finalized workflow object
+#' - `cv_predictions`: Cross-validation predictions for stacking
+#' - `metrics`: Performance metrics from CV
+#' - `best_params`: Final optimized hyperparameters
+#' - `optimization_time`: Time taken for optimization (minutes)
+#' - `path`: Path to saved workflow file
+#' - Original columns from input (model type, preprocessing, etc.)
+#'
+#' @examples
+#' \dontrun{
+#' # Finalize top 5 models based on RMSE
+#' finalized <- finalize_top_workflows(
+#'   evaluation_results = model_results,
+#'   input_data = spectral_data,
+#'   variable = "SOC",
+#'   n_best = 5,
+#'   metric = "rmse",
+#'   bayesian_iter = 20,
+#'   verbose = TRUE
+#' )
+#'
+#' # Access finalized workflows
+#' finalized$workflow[[1]]  # First workflow
+#' finalized$cv_predictions[[1]]  # CV predictions for stacking
+#' }
+#'
 #' @export
 
 finalize_top_workflows <- function(evaluation_results,
