@@ -1220,8 +1220,7 @@ evaluate_configuration <- function(config_row,
                    error_class       = NA_character_,
                    has_trace         = FALSE,
                    n_warnings        = 0L,  # TODO: Aggregate warnings from all stages
-                   warning_summary   = NA_character_) ->
-  result
+                   warning_summary   = NA_character_) -> result
 
   ## ========== DEBUG: Configuration complete ==========
   debug_msg("Configuration %d complete | Status: %s | Total time: %.1f seconds | Metrics: RMSE=%.3f, R2=%.3f, RPD=%.2f",

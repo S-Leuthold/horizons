@@ -101,15 +101,11 @@ create_dataset <- function(spectra_data,
   ## ---------------------------------------------------------------------------
   
   if (!is.data.frame(spectra_data)) {
-    
-    cli::cli_abort("▶ create_dataset: spectra_data must be a data frame or tibble")
-    
+    cli::cli_abort("spectra_data must be a data frame or tibble")
   }
-  
+
   if (!id_column %in% names(spectra_data)) {
-    
-    cli::cli_abort("▶ create_dataset: Column {.val {id_column}} not found in spectra_data")
-    
+    cli::cli_abort("Column {.val {id_column}} not found in spectra_data")
   }
   
   # Handle response_data as either path or dataframe
@@ -117,62 +113,45 @@ create_dataset <- function(spectra_data,
     
     if (!file.exists(response_data)) {
       
-      cli::cli_abort("▶ create_dataset: Response file not found: {.path {response_data}}")
+      cli::cli_abort("Response file not found: {.path {response_data}}")
       
     }
     
-    safely_execute(
-      expr = {
-        readr::read_csv(response_data, show_col_types = FALSE)
-      },
-      default_value = NULL,
-      error_message = glue::glue("Failed to read response data file: {response_data}")
-    ) -> response_result
-    
-    if (is.null(response_result$result)) {
-      
-      if (!is.null(response_result$error)) {
-        
-        cli::cli_alert_danger("Response data reading failed: {.emph {response_result$error$message}}")
-        cli::cli_alert_info("Check that:")
-        cli::cli_ul(c(
-          "Response file exists and is readable: {.path {response_data}}",
-          "File is valid CSV format",
-          "File contains required {.val {id_column}} column",
-          "File encoding is correct (try UTF-8)"
-        ))
-        
-      }
-      
-      cli::cli_abort("▶ create_dataset: Failed to read response data - cannot continue")
-      
-    }
-    
-    response_data <- response_result$result
+    response_data <- tryCatch({
+      readr::read_csv(response_data, show_col_types = FALSE)
+    }, error = function(e) {
+      cli::cli_abort(c(
+        "Failed to read response data file: {.path {response_data}}",
+        "x" = e$message,
+        "i" = "Check that file exists and is valid CSV format",
+        "i" = "Ensure file contains {.val {id_column}} column",
+        "i" = "Try UTF-8 encoding if file appears corrupted"
+      ))
+    })
     
   } else if (!is.data.frame(response_data)) {
     
-    cli::cli_abort("▶ create_dataset: response_data must be a file path or data frame")
+    cli::cli_abort("response_data must be a file path or data frame")
     
   }
   
   if (!id_column %in% names(response_data)) {
     
-    cli::cli_abort("▶ create_dataset: Column {.val {id_column}} not found in response_data")
+    cli::cli_abort("Column {.val {id_column}} not found in response_data")
     
   }
   
   # Validate parse_ids parameters
   if (parse_ids && is.null(id_format)) {
     
-    cli::cli_abort("▶ create_dataset: id_format must be provided when parse_ids = TRUE")
+    cli::cli_abort("id_format must be provided when parse_ids = TRUE")
     
   }
   
   # Validate aggregate_by - only makes sense with parse_ids
   if (!is.null(aggregate_by) && !parse_ids) {
     
-    cli::cli_abort("▶ create_dataset: aggregate_by requires parse_ids = TRUE")
+    cli::cli_abort("aggregate_by requires parse_ids = TRUE")
     
   }
   
@@ -180,15 +159,15 @@ create_dataset <- function(spectra_data,
   join_type <- match.arg(join_type, c("inner", "left", "right", "full"))
   
   # Display configuration summary
-  config_info <- list(
-    "Input samples" = format_metric(nrow(spectra_data), "count"),
-    "Response source" = if (is.character(response_data)) "CSV file" else "Data frame",
-    "ID parsing" = if (parse_ids) paste0("Enabled (", id_format, ")") else "Disabled",
-    "Join strategy" = paste0(join_type, " join on ", id_column),
-    "Coordinate inclusion" = if (include_coords) "Enabled" else "Disabled"
-  )
-  
-  display_config_summary("Dataset Creation Pipeline", config_info, verbose)
+  if (verbose) {
+    cli::cli_text("{.strong Dataset Creation Pipeline}")
+    cli::cli_text("├─ Input samples: {nrow(spectra_data)}")
+    cli::cli_text("├─ Response source: {if (is.character(response_data)) 'CSV file' else 'Data frame'}")
+    cli::cli_text("├─ ID parsing: {if (parse_ids) paste0('Enabled (', id_format, ')') else 'Disabled'}")
+    cli::cli_text("├─ Join strategy: {join_type} join on {id_column}")
+    cli::cli_text("└─ Coordinate inclusion: {if (include_coords) 'Enabled' else 'Disabled'}")
+    cli::cli_text("")
+  }
   
   ## ---------------------------------------------------------------------------
   ## Step 2: Parse IDs if requested
@@ -197,53 +176,39 @@ create_dataset <- function(spectra_data,
   if (parse_ids) {
     
     if (verbose) {
-      cli::cli_text(format_header("ID Processing Pipeline", style = "single", center = FALSE))
-      cli::cli_text("")
-      cli::cli_text(format_tree_item("ID Parsing", level = 0, is_last = FALSE))
-      cli::cli_text(format_tree_item(paste0("Format: ", id_format), level = 1, is_last = FALSE))
+      cli::cli_text("{.strong ID Processing Pipeline}")
+      cli::cli_text("├─ ID Parsing")
+      cli::cli_text("│  ├─ Format: {id_format}")
     }
-    
+
     # Preserve original IDs
     spectra_data$Original_ID <- spectra_data[[id_column]]
     
     # Parse each ID and get all components
-    safely_execute(
-      expr = {
-        parsed_list <- purrr::map(spectra_data[[id_column]], function(id) {
-          parse_filename_metadata(file_name        = id,
-                                 format_string    = id_format,
-                                 delimiter        = id_delimiter,
-                                 default_fraction = "bulk")
-        })
-        
-        # Bind all parsed metadata as new columns
-        dplyr::bind_rows(parsed_list)
-      },
-      default_value = NULL,
-      error_message = "ID parsing failed"
-    ) -> parsing_result
-    
-    if (is.null(parsing_result$result)) {
-      
-      if (!is.null(parsing_result$error)) {
-        
-        cli::cli_alert_danger("ID parsing failed: {.emph {parsing_result$error$message}}")
-        cli::cli_alert_info("Check that:")
-        cli::cli_ul(c(
-          "ID format string matches actual ID structure: {.val {id_format}}",
-          "Delimiter is correct: {.val {id_delimiter}}",
-          "All IDs follow consistent naming pattern",
-          "Required tokens (e.g., sampleid) are present in format"
-        ))
-        cli::cli_alert_info("Example IDs: {.val {head(spectra_data[[id_column]], 3)}}")
-        
-      }
-      
-      cli::cli_abort("▶ create_dataset: ID parsing failed - cannot continue")
-      
+    # Note: parse_filename_metadata never errors, just returns defaults
+    parsed_list <- purrr::map(spectra_data[[id_column]], function(id) {
+      parse_filename_metadata(file_name        = id,
+                             format_string    = id_format,
+                             delimiter        = id_delimiter,
+                             default_fraction = "bulk")
+    })
+
+    # Bind all parsed metadata as new columns
+    parsed_df <- dplyr::bind_rows(parsed_list)
+
+    # Check if parsing actually worked (all unknowns means format mismatch)
+    if (all(parsed_df$Sample_ID == "UNKNOWN")) {
+      example_ids <- head(spectra_data[[id_column]], 3)
+
+      cli::cli_abort(c(
+        "ID parsing failed - all samples marked as UNKNOWN",
+        "x" = "Format string doesn't match ID structure",
+        "i" = "Format string: {.val {id_format}}",
+        "i" = "Delimiter: {.val {id_delimiter}}",
+        "i" = "Example IDs: {.val {example_ids}}",
+        "i" = "Ensure format tokens (e.g., 'sampleid') match your ID structure"
+      ))
     }
-    
-    parsed_df <- parsing_result$result
     
     # Remove the original id_column to avoid conflicts (we have it in Original_ID)
     spectra_data <- spectra_data %>%
@@ -259,8 +224,7 @@ create_dataset <- function(spectra_data,
       aggregate_by <- parsed_cols[parsed_cols != "Scan"]
       
       if (verbose) {
-        cli::cli_text(format_tree_item(paste0("Aggregating by: ", paste(aggregate_by, collapse = ", ")), 
-                                     level = 1, is_last = TRUE))
+        cli::cli_text("│  └─ Aggregating by: {paste(aggregate_by, collapse = ', ')}")
       }
     }
     
@@ -286,17 +250,16 @@ create_dataset <- function(spectra_data,
       dplyr::summarise(n = dplyr::n(), .groups = "drop") %>%
       dplyr::filter(n > 1)
     
-    cli::cli_text(format_tree_item("Data Aggregation", level = 0, is_last = FALSE))
+    cli::cli_text("├─ Data Aggregation")
     if (nrow(replicate_counts) > 0) {
-      cli::cli_text(format_tree_item(paste0("Found ", nrow(replicate_counts), " sample groups with replicates to average"), 
-                                   level = 1, is_last = FALSE))
+      cli::cli_text("│  ├─ Found {nrow(replicate_counts)} sample groups with replicates to average")
     }
   }
   
   # Check that aggregate_by columns exist in the data
   missing_agg_cols <- aggregate_by[!aggregate_by %in% names(spectra_data)]
   if (length(missing_agg_cols) > 0) {
-    cli::cli_abort("▶ create_dataset: Aggregation columns not found: {.val {missing_agg_cols}}")
+    cli::cli_abort("Aggregation columns not found: {.val {missing_agg_cols}}")
   }
   
   # Identify other columns to preserve (not aggregation columns or wavenumbers)
@@ -319,8 +282,7 @@ create_dataset <- function(spectra_data,
   
   if (verbose) {
     n_after <- nrow(spectra_data)
-    cli::cli_text(format_tree_item(paste0("✓ Aggregated ", n_before, " rows into ", n_after, " unique samples"), 
-                                 level = 1, is_last = TRUE))
+    cli::cli_text("│  └─ ✓ Aggregated {n_before} rows into {n_after} unique samples")
   }
   
   ## ---------------------------------------------------------------------------
@@ -332,11 +294,11 @@ create_dataset <- function(spectra_data,
   
   # Check that join column exists in both datasets
   if (!join_column %in% names(spectra_data)) {
-    cli::cli_abort("▶ create_dataset: Join column {.val {join_column}} not found in spectra data after processing")
+    cli::cli_abort("Join column {.val {join_column}} not found in spectra data after processing")
   }
   
   if (!join_column %in% names(response_data)) {
-    cli::cli_abort("▶ create_dataset: Join column {.val {join_column}} not found in response data")
+    cli::cli_abort("Join column {.val {join_column}} not found in response data")
   }
   
   # Handle coordinate columns FIRST (before subsetting)
@@ -350,8 +312,8 @@ create_dataset <- function(spectra_data,
       coord_columns <- names(response_data)[names(response_data) %in% coord_patterns]
       
       if (length(coord_columns) > 0 && verbose) {
-        cli::cli_text(format_tree_item(paste0("Auto-detected coordinate columns: ", paste(coord_columns, collapse = ", ")), 
-                                     level = 1, is_last = FALSE))
+        cli::cli_text("├─ Coordinate Detection")
+        cli::cli_text("│  └─ Auto-detected columns: {paste(coord_columns, collapse = ', ')}")
       }
     }
     
@@ -395,9 +357,8 @@ create_dataset <- function(spectra_data,
   
   # Perform the join
   if (verbose) {
-    cli::cli_text(format_tree_item("Data Integration", level = 0, is_last = FALSE))
-    cli::cli_text(format_tree_item(paste0("Using ", join_type, " join on ", join_column), 
-                                 level = 1, is_last = FALSE))
+    cli::cli_text("├─ Data Integration")
+    cli::cli_text("│  └─ Using {join_type} join on {join_column}")
   }
   
   result <- switch(join_type,
@@ -435,23 +396,21 @@ create_dataset <- function(spectra_data,
     # Count spectral and response columns
     spectral_cols <- sum(suppressWarnings(!is.na(as.numeric(names(result)))))
     response_cols <- ncol(result) - spectral_cols - 1  # Subtract Sample_ID
-    
-    results_info <- list(
-      "Final samples" = format_metric(nrow(result), "count"),
-      "Total columns" = format_metric(ncol(result), "count"),
-      "Spectral features" = format_metric(spectral_cols, "count"),
-      "Response variables" = format_metric(response_cols, "count")
-    )
-    
+
+    cli::cli_text("")
+    cli::cli_text("{.strong Dataset Creation Complete}")
+    cli::cli_text("├─ Final samples: {nrow(result)}")
+    cli::cli_text("├─ Total columns: {ncol(result)}")
+    cli::cli_text("├─ Spectral features: {spectral_cols}")
+    cli::cli_text("├─ Response variables: {response_cols}")
     if (n_spectra_only > 0) {
-      results_info[["Spectra without response"]] <- format_metric(n_spectra_only, "count")
+      cli::cli_text("├─ Spectra without response: {n_spectra_only}")
     }
-    
     if (n_response_only > 0) {
-      results_info[["Response without spectra"]] <- format_metric(n_response_only, "count")
+      cli::cli_text("├─ Response without spectra: {n_response_only}")
     }
-    
-    display_operation_results("Dataset creation", results_info, timing = NULL, "complete", verbose)
+    cli::cli_text("└─ Status: Complete")
+    cli::cli_text("")
     
   }
   

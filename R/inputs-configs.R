@@ -5,7 +5,7 @@
 #' of model types, response transformations, spectral preprocessing methods, feature
 #' selection techniques, and covariate sets. This function establishes the complete
 #' experimental design space for systematic model evaluation and comparison.
-#' 
+#'
 #' @details
 #' The function generates configurations through a multi-step process:
 #' \enumerate{
@@ -14,22 +14,22 @@
 #'   \item Assigns unique identifiers to each configuration
 #'   \item Returns a structured tibble ready for model evaluation workflows
 #' }
-#' 
+#'
 #' The covariate combination logic generates all subsets of the provided covariates,
 #' including the empty set (no covariates). For example, with covariates c("clay", "sand"),
 #' the function creates: none, clay, sand, clay+sand.
-#' 
+#'
 #' This comprehensive approach ensures systematic evaluation across the full
 #' experimental space while maintaining clear traceability of model configurations.
 #'
-#' @param models Character vector. Model types to include.
-#'   Default: c("plsr", "random_forest", "cubist", "xgboost", "lightgbm")
-#' @param transformations Character vector. Response variable transformations.
-#'   Default: c("none", "sqrt", "log")
-#' @param preprocessing Character vector. Spectral preprocessing methods.
-#'   Default: c("raw", "snv", "deriv1", "deriv2", "snv_deriv1", "snv_deriv2")
-#' @param feature_selection Character vector. Feature selection methods.
-#'   Default: c("none", "vip", "boruta", "rfe")
+#' @param models Character vector. Model types to include (required).
+#'   Common choices: c("plsr", "random_forest", "cubist", "xgboost", "svm-rbf")
+#' @param transformations Character vector. Response variable transformations (required).
+#'   Common choices: c("none", "sqrt", "log")
+#' @param preprocessing Character vector. Spectral preprocessing methods (required).
+#'   Common choices: c("raw", "snv", "deriv1", "deriv2", "snv_deriv1", "snv_deriv2")
+#' @param feature_selection Character vector. Feature selection methods (required).
+#'   Common choices: c("none", "vip", "boruta", "rfe")
 #' @param soil_covariates Character vector. Soil property covariates to include
 #'   (e.g., c("clay", "sand", "pH", "CEC")). Use NULL for none. Default: NULL
 #' @param climate_covariates Character vector. Climate covariates to include
@@ -48,7 +48,7 @@
 #'     \item{covariate_set}{Character. Descriptive name of covariate combination}
 #'     \item{covariates}{List. Vector of covariate names (NULL if none)}
 #'   }
-#'   
+#'
 #'   The number of rows equals the product of all input vector lengths multiplied
 #'   by the number of covariate combinations (2^n where n = total covariates).
 #'
@@ -72,221 +72,141 @@
 #' )
 #' }
 #'
-#' @seealso 
+#' @seealso
 #' \code{\link{create_dataset}} for preparing modeling data,
 #' \code{\link{evaluate_models_local}} for running configurations,
 #' \code{\link{finalize_dataset}} for data quality control
-#' 
+#'
 #' @family inputs
 #' @keywords experimental-design model-configuration
 #'
 #' @export
-create_configs <- function(models                  = c("plsr", "random_forest", "cubist",
-                                                       "xgboost", "lightgbm"),
-                          transformations         = c("none", "sqrt", "log"),
-                          preprocessing           = c("raw", "snv", "deriv1", "deriv2",
-                                                     "snv_deriv1", "snv_deriv2"),
-                          feature_selection       = c("none", "vip", "boruta", "rfe"),
-                          soil_covariates         = NULL,
-                          climate_covariates      = NULL,
-                          spatial_covariates      = NULL,
-                          verbose                 = TRUE) {
+
+create_configs <- function(models,
+                           transformations,
+                           preprocessing,
+                           feature_selection,
+                           soil_covariates         = NULL,
+                           climate_covariates      = NULL,
+                           spatial_covariates      = NULL,
+                           verbose                 = TRUE) {
 
   ## ---------------------------------------------------------------------------
-  ## Step 1: Input Validation
+  ## Step 0: Input Validation
   ## ---------------------------------------------------------------------------
 
-  # Validate covariate inputs
-  if (!is.null(soil_covariates) && (!is.character(soil_covariates) || length(soil_covariates) == 0)) {
+  ## First, validate the soil covariates input ---------------------------------
 
-    cli::cli_abort("soil_covariates must be a character vector or NULL")
+  if (!is.null(soil_covariates) && (!is.character(soil_covariates) || length(soil_covariates) == 0)) cli::cli_abort("soil_covariates must be a character vector or NULL")
 
+  ## Then, do the same for the climate -----------------------------------------
+
+  if (!is.null(climate_covariates) && (!is.character(climate_covariates) || length(climate_covariates) == 0)) cli::cli_abort("climate_covariates must be a character vector or NULL")
+
+  ## Finally, validate the spatial covariates ---------------------------------
+
+  if (!is.null(spatial_covariates) && (!is.character(spatial_covariates) || length(spatial_covariates) == 0)) cli::cli_abort("spatial_covariates must be a character vector or NULL")
+
+  ## Display configuration summary to the user ---------------------------------
+
+  if (verbose) {
+    cli::cli_text("{.strong Model Configuration Grid Generation}")
+    cli::cli_text("├─ Model types: {length(models)} ({paste(head(models, 3), collapse = ', ')}{if (length(models) > 3) '...' else ''})")
+    cli::cli_text("├─ Transformations: {length(transformations)} types")
+    cli::cli_text("├─ Preprocessing: {length(preprocessing)} methods")
+    cli::cli_text("├─ Feature selection: {length(feature_selection)} methods")
+    cli::cli_text("├─ Covariate types: {if (length(c(soil_covariates, climate_covariates, spatial_covariates)) == 0) 'None' else paste(c(if (!is.null(soil_covariates)) 'soil', if (!is.null(climate_covariates)) 'climate', if (!is.null(spatial_covariates)) 'spatial'), collapse = ', ')}")
+    cli::cli_text("└─ Total covariates: {length(c(soil_covariates, climate_covariates, spatial_covariates))}")
+    cli::cli_text("")
   }
 
-  if (!is.null(climate_covariates) && (!is.character(climate_covariates) || length(climate_covariates) == 0)) {
-
-    cli::cli_abort("climate_covariates must be a character vector or NULL")
-
-  }
-
-  if (!is.null(spatial_covariates) && (!is.character(spatial_covariates) || length(spatial_covariates) == 0)) {
-
-    cli::cli_abort("spatial_covariates must be a character vector or NULL")
-
-  }
-
-  # Display configuration summary
-  config_info <- list(
-    "Model types" = paste0(format_metric(length(models), "count"), " (", paste(head(models, 3), collapse = ", "), if (length(models) > 3) "..." else "", ")"),
-    "Transformations" = paste0(format_metric(length(transformations), "count"), " types"),
-    "Preprocessing" = paste0(format_metric(length(preprocessing), "count"), " methods"),
-    "Feature selection" = paste0(format_metric(length(feature_selection), "count"), " methods"),
-    "Covariate types" = if (length(c(soil_covariates, climate_covariates, spatial_covariates)) == 0) "None" else 
-                       paste(c(if (!is.null(soil_covariates)) "soil", if (!is.null(climate_covariates)) "climate", if (!is.null(spatial_covariates)) "spatial"), collapse = ", "),
-    "Total covariates" = format_metric(length(c(soil_covariates, climate_covariates, spatial_covariates)), "count")
-  )
-  
-  display_config_summary("Model Configuration Grid Generation", config_info, verbose)
-
   ## ---------------------------------------------------------------------------
-  ## Step 2: Generate All Covariate Combinations
+  ## Step 1: Generate All Covariate Combinations
   ## ---------------------------------------------------------------------------
 
-  # Combine all covariates into single pool
+  ## Combine all covariates into single pool -----------------------------------
+
   all_covariates <- c(soil_covariates, climate_covariates, spatial_covariates)
 
   if (length(all_covariates) == 0) {
 
-    # No covariates specified - just use empty set
+    ## If no covariates, easy peasy, return null -------------------------------
+
     covariate_sets <- list(none = NULL)
 
   } else {
 
-    if (verbose) {
+    if (verbose) cli::cli_text("├─ Generating all subsets of {length(all_covariates)} covariates...")
 
-      cli::cli_text("├─ Generating all subsets of {length(all_covariates)} covariates...")
+    ## Start with empty set ---------------------------------------------------
 
-    }
-
-    # Generate all possible subsets (including empty set)
     covariate_sets <- list(none = NULL)
 
-    # Generate all non-empty subsets
+    ## Loop through and generate all non-empty subsets -------------------------
+
     for (n_covariates in 1:length(all_covariates)) {
 
-      subsets <- utils::combn(all_covariates, n_covariates, simplify = FALSE)
+      utils::combn(all_covariates,
+                   n_covariates,
+                   simplify = FALSE) -> subsets
 
-      # Name each subset by concatenating covariate names
-      subset_names <- sapply(subsets, function(x) paste(x, collapse = "_"))
+      ## Name each subset by concatenating covariate names ---------------------
+
+      subset_names   <- sapply(subsets, function(x) paste(x, collapse = "_"))
       names(subsets) <- subset_names
-
       covariate_sets <- c(covariate_sets, subsets)
 
     }
 
-    if (verbose) {
+    ## Report out --------------------------------------------------------------
 
-      cli::cli_text("└─ {cli::col_green('✓')} Created {length(covariate_sets)} covariate combinations")
-
-    }
+    if (verbose) cli::cli_text("└─ Created {length(covariate_sets)} covariate combinations")
 
   }
 
   ## ---------------------------------------------------------------------------
-  ## Step 3: Create Base Configuration Grid
+  ## Step 2: Create Base Configuration Grid
   ## ---------------------------------------------------------------------------
 
-  base_grid <- tidyr::crossing(
-    model             = models,
-    transformation    = transformations,
-    preprocessing     = preprocessing,
-    feature_selection = feature_selection
-  )
+  tidyr::crossing(model             = models,
+                  transformation    = transformations,
+                  preprocessing     = preprocessing,
+                  feature_selection = feature_selection) -> base_grid
 
   ## ---------------------------------------------------------------------------
-  ## Step 4: Add Covariate Sets
+  ## Step 3: Add Covariate Sets
   ## ---------------------------------------------------------------------------
 
-  # Create a tibble from covariate_sets
-  covariate_df <- tibble::tibble(
-    covariate_set = names(covariate_sets),
-    covariates = covariate_sets
-  )
-
-  # Cross with base grid
-  config_grid <- tidyr::crossing(base_grid, covariate_df)
-
+  tibble::tibble(covariate_set = names(covariate_sets),
+                 covariates    = covariate_set) %>%
+    tidyr::crossing(base_grid, .) -> config_grid
 
   ## ---------------------------------------------------------------------------
-  ## Step 5: Add Configuration IDs
+  ## Step 4: Add Configuration IDs
   ## ---------------------------------------------------------------------------
 
-  config_grid <- config_grid %>%
-    dplyr::mutate(
-      config_id = paste0("config_", sprintf("%04d", dplyr::row_number()))
-    ) %>%
-    dplyr::select(config_id, dplyr::everything())
+  config_grid %>%
+    dplyr::mutate(config_id = paste0("config_", sprintf("%04d", dplyr::row_number()))) %>%
+    dplyr::select(config_id, dplyr::everything()) -> config_grid
 
   ## ---------------------------------------------------------------------------
-  ## Step 6: Summary and Return
+  ## Step 5: Summary and Return
   ## ---------------------------------------------------------------------------
 
-  # Display final results summary
   if (verbose) {
-    
-    # Calculate configuration space breakdown
-    n_covariate_sets <- length(unique(config_grid$covariate_set))
-    base_combinations <- length(models) * length(transformations) * length(preprocessing) * length(feature_selection)
-    
-    results_info <- list(
-      "Total configurations" = format_metric(nrow(config_grid), "count"),
-      "Base combinations" = format_metric(base_combinations, "count"),
-      "Covariate sets" = format_metric(n_covariate_sets, "count"),
-      "Grid structure" = paste0(length(models), "×", length(transformations), "×", 
-                               length(preprocessing), "×", length(feature_selection), 
-                               "×", n_covariate_sets)
-    )
-    
-    display_operation_results("Configuration grid", results_info, timing = NULL, "complete", verbose)
-    
-  }
 
-  ## ---------------------------------------------------------------------------
-  ## Step 7: Validate Parallel Safety (Closure Detection)
-  ## ---------------------------------------------------------------------------
-  
-  # PREVENTIVE: Check that all config values are parallel-safe (not closures)
-  # This prevents closure contamination from propagating to evaluation phase
-  validate_parallel_safety <- function(config_df) {
-    
-    # Check main config columns for closure contamination
-    main_cols <- c("model", "transformation", "preprocessing", "feature_selection")
-    
-    for (col_name in main_cols) {
-      if (col_name %in% names(config_df)) {
-        col_values <- config_df[[col_name]]
-        
-        # Check each value in the column
-        for (i in seq_along(col_values)) {
-          value <- col_values[i]
-          if (is.function(value) || "closure" %in% class(value)) {
-            cli::cli_abort("Closure detected in {.field {col_name}} column, row {i}. Configuration data is not parallel-safe.")
-          }
-        }
-      }
-    }
-    
-    # Check covariates list column if present
-    if ("covariates" %in% names(config_df)) {
-      cov_list <- config_df$covariates
-      
-      for (i in seq_along(cov_list)) {
-        cov_value <- cov_list[[i]]
-        if (!is.null(cov_value)) {
-          if (is.function(cov_value) || "closure" %in% class(cov_value)) {
-            cli::cli_abort("Closure detected in {.field covariates} list column, row {i}. Configuration data is not parallel-safe.")
-          }
-          # Also check individual covariate elements if it's a vector
-          if (is.list(cov_value)) {
-            for (j in seq_along(cov_value)) {
-              if (is.function(cov_value[[j]]) || "closure" %in% class(cov_value[[j]])) {
-                cli::cli_abort("Closure detected in covariate element {j}, row {i}. Configuration data is not parallel-safe.")
-              }
-            }
-          }
-        }
-      }
-    }
-    
-    if (verbose) {
-      cli::cli_alert_success("Configuration data validated as parallel-safe (no closures detected)")
-    }
-    
-    return(config_df)
+    n_covariate_sets  <- length(unique(config_grid$covariate_set))
+    base_combinations <- length(models) * length(transformations) * length(preprocessing) * length(feature_selection)
+
+    cli::cli_text("")
+    cli::cli_text("{.strong Configuration Grid Complete}")
+    cli::cli_text("├─ Total configurations: {nrow(config_grid)}")
+    cli::cli_text("├─ Base combinations: {base_combinations}")
+    cli::cli_text("├─ Covariate sets: {n_covariate_sets}")
+    cli::cli_text("└─ Grid structure: {length(models)}×{length(transformations)}×{length(preprocessing)}×{length(feature_selection)}×{n_covariate_sets}")
+    cli::cli_text("")
+
   }
-  
-  # Apply validation
-  config_grid <- validate_parallel_safety(config_grid)
 
   return(config_grid)
 
