@@ -410,7 +410,7 @@ evaluate_models_local <- function(config,
     ## Step 7: Set up config specific covariate data
     ## -------------------------------------------------------------------------
 
-    # Create config_clean for error reporting
+    ## Create config_clean for error reporting
     config_clean <- list(
       model             = as.character(config_row$model),
       transformation    = as.character(config_row$transformation),
@@ -476,8 +476,8 @@ evaluate_models_local <- function(config,
              error_message = failed_result$error_message,
              has_trace     = failed_result$has_trace,
              n_warnings    = failed_result$n_warnings,
-             warnings      = failed_result$warnings %||% NULL,
-             messages      = failed_result$messages %||% NULL,
+             warnings      = NULL,  # failed_result doesn't have warnings field
+             messages      = NULL,  # failed_result doesn't have messages field
              total_seconds = failed_result$total_seconds,
              timestamp     = as.character(Sys.time())) -> error_object
 
@@ -581,8 +581,8 @@ evaluate_models_local <- function(config,
              error_message = result$error_message,
              has_trace     = result$has_trace,
              n_warnings    = result$n_warnings,
-             warnings      = result$warnings %||% NULL,
-             messages      = result$messages %||% NULL,
+             warnings      = if ("warnings" %in% names(result)) result$warnings else NULL,
+             messages      = if ("messages" %in% names(result)) result$messages else NULL,
              total_seconds = result$total_seconds,
              timestamp     = as.character(Sys.time())) -> error_object
 
@@ -715,11 +715,10 @@ evaluate_models_local <- function(config,
 
         if (verbose) {
 
-          actual_threshold <- round(prune_threshold * 100, 1)
           cli::cli_text("")
           cli::cli_text("{.strong Results:}")
           cli::cli_text("├─ Status: {cli::col_yellow('⚠ PRUNED')}")
-          cli::cli_text("├─ RRMSE: {round(result$rrmse, 1)}% (threshold: {actual_threshold}%)")
+          cli::cli_text("├─ RRMSE: {round(result$rrmse, 1)}% (exceeded threshold during grid search)")
           cli::cli_text("└─ Total time: {round(model_times[i], 1)} min")
           cli::cli_rule()
 

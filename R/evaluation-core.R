@@ -162,7 +162,7 @@ evaluate_configuration <- function(config_row,
   debug_msg <- function(msg, ...) {
     if (!is.null(debug_log_file)) {
       formatted <- sprintf(msg, ...)
-      cat(sprintf("[%s] [CORE-%d] %s\n",
+      cat(sprintf("[%s] [CORE-%s] %s\n",
                   format(Sys.time(), "%H:%M:%S"),
                   config_id, formatted),
           file = debug_log_file, append = TRUE)
@@ -1223,7 +1223,7 @@ evaluate_configuration <- function(config_row,
                    warning_summary   = NA_character_) -> result
 
   ## ========== DEBUG: Configuration complete ==========
-  debug_msg("Configuration %d complete | Status: %s | Total time: %.1f seconds | Metrics: RMSE=%.3f, R2=%.3f, RPD=%.2f",
+  debug_msg("Configuration %s complete | Status: %s | Total time: %.1f seconds | Metrics: RMSE=%.3f, R2=%.3f, RPD=%.2f",
            config_id,
            if (skip_bayesian) "pruned" else "success",
            as.numeric(difftime(Sys.time(), start_time, units = "secs")),

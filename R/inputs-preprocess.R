@@ -246,18 +246,27 @@ preprocess_spectra <- function(spectra_data,
   ## ---------------------------------------------------------------------------
   ## Step 4: Validate spectral data (warn only, don't stop)
   ## ---------------------------------------------------------------------------
-  
+
+  # TODO: This warning is misleading when the NAs are in response variables, not spectra
+  # Should check if NAs are actually in the spectral columns vs other columns
+  # Maybe only warn if spectral_matrix itself has NAs (not the full dataset)
   if (any(!is.finite(spectral_matrix))) {
-    
+
     n_inf <- sum(is.infinite(spectral_matrix))
     n_nan <- sum(is.nan(spectral_matrix))
     n_na  <- sum(is.na(spectral_matrix))
-    
-    cli::cli_warn(c(
-      "!" = "Non-finite values detected in spectral data",
-      "i" = "Infinite: {.val {n_inf}}, NaN: {.val {n_nan}}, NA: {.val {n_na}}",
-      "i" = "These may cause issues in modeling"
-    ))
+
+    # Only warn if there are actual issues in the spectral data
+    if (n_inf > 0 || n_nan > 0) {
+      cli::cli_warn(c(
+        "!" = "Non-finite values detected in spectral data",
+        "i" = "Infinite: {.val {n_inf}}, NaN: {.val {n_nan}}",
+        "i" = "These may cause issues in modeling"
+      ))
+    } else if (n_na > 0 && verbose) {
+      # TODO: Consider if we even need this warning - NAs might be legitimate
+      cli::cli_alert_info("Note: {.val {n_na}} NA values in spectral matrix")
+    }
     
   }
   

@@ -225,13 +225,16 @@ fetch_covariates <- function(input_data,
 
     if (!is.null(configurations)) {
 
-      # Split concatenated covariate strings (e.g., "clay_AI" -> c("clay", "AI"))
+      # Handle covariates column - should already be a list of vectors
       split_covariates <- purrr::map(configurations$covariates, function(x) {
-        if (is.null(x) || is.na(x) || x == "none") {
+        if (is.null(x)) {
+          NULL
+        } else if (is.character(x) && length(x) == 1 && x == "none") {
+          # Legacy handling for "none" string
           NULL
         } else {
-          # Split by underscore to get individual covariates
-          strsplit(x, "_")[[1]]
+          # Already a vector of covariate names, just return it
+          x
         }
       })
 
