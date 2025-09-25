@@ -1,25 +1,66 @@
 #' Build Ensemble from Finalized Models
 #'
 #' @description
-#' Creates an ensemble model from the output of \code{finalize_top_workflows()}.
-#' Supports both stacked ensembles using tidymodels/stacks and simple weighted
-#' averaging based on cross-validation performance.
+#' Creates an ensemble model from the output of `finalize_top_workflows()`.
+#' Supports three ensemble methods:
+#' - **Stacked ensembles**: Uses penalized regression meta-learner via tidymodels/stacks
+#' - **Weighted average**: Weights models by inverse RMSE from cross-validation
+#' - **XGBoost meta-learner**: Non-linear blending that can learn complex model interactions
 #'
-#' @param finalized_models A tibble output from \code{finalize_top_workflows()}
-#' @param input_data A data frame containing the full dataset
-#' @param variable Character. Name of the response variable to predict
-#' @param covariate_data Optional data frame containing covariate predictors
-#' @param ensemble_method Character. Method for ensemble: "stacks" or "weighted_average"
-#' @param optimize_blending Logical. Whether to optimize blending parameters (slower)
-#' @param blend_metric Character. Metric to optimize during blending: "rmse", "mae", "rsq", etc.
-#' @param test_prop Numeric. Proportion of data to hold out for testing
-#' @param seed Integer. Random seed for reproducibility
-#' @param parallel_cv Logical. Use parallel processing for cross-validation
-#' @param n_cores Integer. Number of cores to use if parallel_cv is TRUE
-#' @param verbose Logical. Print progress messages
-#' @param output_dir Character. Optional directory path to save ensemble results
+#' **Coming soon**: Additional meta-learner options including:
+#' - `"rf_meta"`: Random forest meta-learner for robust non-parametric blending
+#' - `"nn_meta"`: Neural network meta-learner for deep interaction modeling
 #'
-#' @return A list with class "horizons_ensemble"
+#' @param finalized_models A tibble output from `finalize_top_workflows()` containing
+#'   columns: `wflow_id`, `workflow`, `cv_predictions`, and `metrics`
+#' @param input_data A data frame containing the full dataset with predictors and response
+#' @param variable Character string. Name of the response variable column in `input_data`
+#' @param covariate_data Optional data frame containing additional covariate predictors.
+#'   Currently not used but reserved for future functionality. Default: `NULL`
+#' @param ensemble_method Character string. Ensemble method to use:
+#'   - `"stacks"`: Penalized regression meta-learner (default)
+#'   - `"weighted_average"`: Simple weighted average by inverse RMSE
+#'   - `"xgb_meta"`: XGBoost meta-learner for non-linear model blending
+#' @param optimize_blending Logical. For stacks method, whether to optimize penalty
+#'   and mixture parameters via grid search. Default: `FALSE` (uses penalty = 0.01, mixture = 1)
+#' @param blend_metric Character string. Metric to optimize during blending.
+#'   Options: `"rmse"` (default), `"mae"`, `"rsq"`, or any yardstick metric function name
+#' @param test_prop Numeric between 0 and 1. Proportion of data to hold out for testing.
+#'   Default: `0.2` (20% test set)
+#' @param seed Integer. Random seed for train/test split reproducibility. Default: `123`
+#' @param allow_par Logical. Enable parallel processing for model fitting. Default: `FALSE`
+#' @param n_cores Integer or `NULL`. Number of cores for parallel processing.
+#'   If `NULL` and `allow_par = TRUE`, uses `detectCores() - 1`. Default: `NULL`
+#' @param verbose Logical. Print progress messages and results summary. Default: `TRUE`
+#' @param output_dir Character string or `NULL`. Directory path to save ensemble results.
+#'   Creates `ensemble/` subdirectory with model and prediction files. Default: `NULL` (no saving)
+#'
+#' @return
+#' A list of class `"horizons_ensemble"` containing:
+#' - `ensemble_model`: The fitted ensemble model object (stacks or list with predict function)
+#' - `predictions`: Tibble with test set predictions (columns: `Observed`, `Predicted`)
+#' - `metrics`: Tibble with test set performance metrics
+#' - `model_weights`: Data frame with model names and weights/coefficients
+#' - `individual_performance`: Tibble with individual model CV performance
+#' - `metadata`: List with ensemble configuration and performance summary
+#'
+#' @examples
+#' \dontrun{
+#' # Build ensemble from finalized models
+#' ensemble <- build_ensemble(
+#'   finalized_models = top_models,
+#'   input_data = spectral_data,
+#'   variable = "SOC",
+#'   ensemble_method = "stacks",
+#'   optimize_blending = TRUE,
+#'   verbose = TRUE
+#' )
+#'
+#' # Access results
+#' ensemble$metrics           # Test set performance
+#' ensemble$model_weights     # Contributing models and weights
+#' ensemble$metadata$improvement  # Improvement over best individual
+#' }
 #'
 #' @export
 
@@ -32,7 +73,7 @@ build_ensemble <- function(finalized_models,
                            blend_metric       = "rmse",
                            test_prop          = 0.2,
                            seed               = 123,
-                           parallel_cv        = FALSE,
+                           allow_par          = FALSE,
                            n_cores            = NULL,
                            verbose            = TRUE,
                            output_dir         = NULL) {
@@ -41,78 +82,70 @@ build_ensemble <- function(finalized_models,
   ## Step 1: Input Validation and Setup
   ## ---------------------------------------------------------------------------
 
-  if (!ensemble_method %in% c("stacks", "weighted_average")) {
-
-    cli::cli_abort("ensemble_method must be 'stacks' or 'weighted_average', got '{ensemble_method}'")
-
-  }
-
-  ## ---------------------------------------------------------------------------
+  ## Essential column validation -----------------------------------------------
 
   required_cols <- c("wflow_id", "workflow", "cv_predictions", "metrics")
   missing_cols <- setdiff(required_cols, names(finalized_models))
 
-  if (length(missing_cols) > 0) {
+  if (length(missing_cols) > 0) cli::cli_abort("finalized_models missing required columns: {missing_cols}")
 
-    cli::cli_abort("finalized_models missing required columns: {missing_cols}")
+  ## Validate response variable exists -----------------------------------------
 
+  if (!variable %in% names(input_data)) cli::cli_abort("Variable '{variable}' not found in input_data")
+
+  ## Method-specific validation ------------------------------------------------
+
+  if (!ensemble_method %in% c("stacks", "weighted_average", "xgb_meta")) {
+    cli::cli_abort("ensemble_method must be 'stacks', 'weighted_average', or 'xgb_meta', got '{ensemble_method}'")
   }
 
-  ## ---------------------------------------------------------------------------
+  ## Stacks requires CV predictions --------------------------------------------
 
   if (ensemble_method == "stacks") {
 
-    null_cv <- finalized_models %>%
-      dplyr::filter(purrr::map_lgl(cv_predictions, is.null))
+    finalized_models %>%
+      dplyr::filter(purrr::map_lgl(cv_predictions, is.null)) ->  models_without_cv
 
-    if (nrow(null_cv) > 0) {
+    if (nrow(models_without_cv) > 0) {
 
-      cli::cli_abort("Models missing cv_predictions (required for stacking): {null_cv$wflow_id}")
+      cli::cli_abort(c("Stacking requires CV predictions from all models",
+                       "x" = "Missing CV predictions: {models_without_cv$wflow_id}"))
 
     }
+  }
+
+  ## Set up parallel backend if requested --------------------------------------
+
+  if (allow_par) {
+
+    ## Determine cores ---------------------------------------------------------
+
+    n_cores <- min(n_cores, parallel::detectCores() - 1)
+
+    ## Set up the plan ---------------------------------------------------------
+
+    future::plan(future::multisession, workers = n_cores)
+
+    # Ensure restoration on exit -----------------------------------------------
+
+    on.exit({
+
+      future::plan(future::sequential)
+      gc(verbose = FALSE, full = TRUE)
+
+    }, add = TRUE)
 
   }
 
-  ## ---------------------------------------------------------------------------
-
-  if (!variable %in% names(input_data)) {
-
-    cli::cli_abort("Variable '{variable}' not found in input_data")
-
-  }
-
-  ## ---------------------------------------------------------------------------
-
-  if (test_prop <= 0 || test_prop >= 1) {
-
-    cli::cli_abort("test_prop must be between 0 and 1, got {test_prop}")
-
-  }
-
-  ## ---------------------------------------------------------------------------
-
-  if (parallel_cv && is.null(n_cores)) {
-
-    n_cores <- min(parallel::detectCores() - 1, 10)
-
-  }
+  ## Verbose output ------------------------------------------------------------
 
   if (verbose) {
 
-    cli::cli_h1("Ensemble Model Setup")
-    
-    cli::cli_text("{.strong Configuration:}")
-    cli::cli_text("├─ Method: {.field {ensemble_method}}")
-    cli::cli_text("├─ Input Models: {.field {nrow(finalized_models)}}")
-    cli::cli_text("├─ Test Proportion: {.field {test_prop * 100}%}")
-    
-    if (parallel_cv) {
-      cli::cli_text("└─ Parallel Processing: {.field {n_cores} cores}")
-    } else {
-      cli::cli_text("└─ Parallel Processing: {.field Disabled}")
-    }
-    
-    cli::cli_text("")
+    cli::cli_text("{.strong Building {ensemble_method} ensemble}")
+    cli::cli_text("├─ Models: {.val {nrow(finalized_models)}}")
+    cli::cli_text("├─ Variable: {.field {variable}}")
+    cli::cli_text("├─ Test split: {.val {round(test_prop * 100)}%}")
+    cli::cli_text("└─ Parallel processing: {.field {ifelse(allow_par, paste0('enabled (',n_cores, ' workers)'), 'disabled')}}")
 
   }
 
@@ -120,72 +153,36 @@ build_ensemble <- function(finalized_models,
   ## Step 2: Data Preparation
   ## ---------------------------------------------------------------------------
 
-  if (verbose) {
-    cli::cli_text("{.strong Data Preparation:}")
-  }
+  ## Rename response variable for consistency ---------------------------------
 
-  # Rename response variable to match what the workflows expect
   input_data %>%
-    dplyr::rename(Response = !!dplyr::all_of(variable)) ->
-  input_data
+    dplyr::rename(Response = !!dplyr::all_of(variable)) -> input_data
 
-  # Create train/test split with same seed as finalize to get matching split
+  ## Create train/test split ---------------------------------------------------
+
   set.seed(seed)
 
-  # Try stratified split first, fall back to random if it fails
-  safely_execute(
-    expr = {
-      rsample::initial_split(
-        input_data,
-        prop = 1 - test_prop,
-        strata = Response
-      )
-    },
-    default_value = NULL,
-    error_message = "Stratified split failed, using random split"
-  ) ->
-  split_result
+  rsample::initial_split(input_data,
+                        prop   = 1 - test_prop,
+                        strata = Response) -> data_split
 
-  if (is.null(split_result$result)) {
+  train_data <- rsample::training(data_split)
+  test_data  <- rsample::testing(data_split)
 
-    rsample::initial_split(
-      input_data,
-      prop = 1 - test_prop
-    ) ->
-    data_split
-
-    if (verbose) {
-      cli::cli_alert_warning("Using random train/test split (stratification failed)")
-    }
-
-  } else {
-
-    data_split <- split_result$result
-
-  }
-
-  rsample::training(data_split) ->
-  train_data
-
-  rsample::testing(data_split) ->
-  test_data
+  ## Verbose output ------------------------------------------------------------
 
   if (verbose) {
-    cli::cli_text("{.strong Data Split:}")
-    cli::cli_text("├─ Training: {nrow(train_data)} samples")
-    cli::cli_text("└─ Testing: {nrow(test_data)} samples")
-    
-    range(train_data$Response, na.rm = TRUE) ->
-    response_range
 
-    sd(train_data$Response, na.rm = TRUE) ->
-    response_sd
+    response_range <- range(train_data$Response, na.rm = TRUE)
+    response_sd    <- sd(train_data$Response, na.rm = TRUE)
 
-    cli::cli_text("")
-    cli::cli_text("{.strong Response Variable:}")
-    cli::cli_text("├─ Range: [{round(response_range[1], 2)}, {round(response_range[2], 2)}]")
-    cli::cli_text("└─ SD: {round(response_sd, 2)}")
-    cli::cli_text("")
+    cli::cli_text("{.strong Data preparation complete}")
+    cli::cli_text("├─ Training samples: {.val {nrow(train_data)}}")
+    cli::cli_text("├─ Test samples: {.val {nrow(test_data)}}")
+    cli::cli_text("├─ Response range: [{.val {round(response_range[1], 2)}}, {.val {round(response_range[2], 2)}}]")
+    cli::cli_text("└─ Response SD: {.val {round(response_sd, 2)}}")
+
+
   }
 
   ## ---------------------------------------------------------------------------
@@ -198,711 +195,492 @@ build_ensemble <- function(finalized_models,
     ## Step 3.1: Initialize Stack and Add Models
     ## -------------------------------------------------------------------------
 
+    ## Initialize the stack --------------------------------------------------
+
+    model_stack <- stacks::stacks()
+
+    ## Add models to stack ---------------------------------------------------
+
     if (verbose) {
-      cli::cli_text("{.strong Building Stacked Ensemble:}")
-      cli::cli_text("└─ Method: {.field Penalized regression meta-learner}")
-      cli::cli_text("")
+
+      cli::cli_text("{.strong |Building stacked ensemble}")
+      cli::cli_text("├─ Method: {.field penalized regression}")
+      cli::cli_text("└─ Adding {.val {nrow(finalized_models)}} models:")
+
     }
 
-    # Initialize stack with the training data
-    # The stack needs the data to properly blend predictions
-    stacks::stacks() ->
-    model_stack
-
-    # Track which models successfully added
-    n_added <- 0
-    failed_models <- character()
-
-    # Check resampling consistency
-    resampling_ids <- list()
-    for (i in seq_len(nrow(finalized_models))) {
-      cv_obj <- finalized_models$cv_predictions[[i]]
-      if (!is.null(cv_obj$splits)) {
-        resampling_ids[[i]] <- vapply(cv_obj$splits, function(x) x$id$id, character(1))
-      }
-    }
-    
-    # Check if all models have the same resampling structure
-    if (length(resampling_ids) > 1) {
-      all_same <- all(sapply(resampling_ids[-1], function(x) identical(x, resampling_ids[[1]])))
-      if (!all_same) {
-        cli::cli_alert_warning("Models may have different CV fold structures - stacking might fail")
-      } else if (verbose) {
-        cli::cli_alert_success("All models use consistent CV fold structure")
-      }
-    }
-    
-    # Add each model's CV predictions to the stack
     for (i in seq_len(nrow(finalized_models))) {
 
-      current_model <- finalized_models[i, ]
-
-      if (verbose) {
-        prefix <- if (i < nrow(finalized_models)) "├─" else "└─"
-        cli::cli_text("{prefix} Adding model {i}/{nrow(finalized_models)}: {.field {current_model$wflow_id}}")
-      }
-
-      # Debug: Check the structure of cv_predictions (only for first model)  
-      if (i == 1 && verbose && FALSE) {  # Set to TRUE to enable debug output
-        cv_obj <- current_model$cv_predictions[[1]]
-        cli::cli_text("│  └─ Debug: CV class: {paste(class(cv_obj), collapse = ', ')}")
-        
-        # Check for required attributes
-        has_pred <- !is.null(cv_obj$.predictions)
-        has_workflow <- !is.null(cv_obj$.workflow)
-        cli::cli_text("│     └─ Has .predictions: {has_pred}, .workflow: {has_workflow}")
-      }
-      
-      # Try to add to stack - pass the resampling results object directly
-      # Sanitize workflow ID to replace + with . for valid column names
+      current_model  <- finalized_models[i, ]
       sanitized_name <- gsub("\\+", ".", current_model$wflow_id)
-      
-      # Suppress warnings about missing columns and invalid names
-      safely_execute(
-        expr = {
-          suppressWarnings({
-            stacks::add_candidates(
-              model_stack,
-              candidates = current_model$cv_predictions[[1]],
-              name = sanitized_name
-            )
-          })
-        },
-        default_value = NULL,
-        error_message = glue::glue("Failed to add {current_model$wflow_id} to stack")
-      ) ->
-      add_result
 
-      if (!is.null(add_result$result)) {
-
-        model_stack <- add_result$result
-        n_added <- n_added + 1
-
-      } else {
-
-        failed_models <- c(failed_models, current_model$wflow_id)
-
-        if (verbose) {
-          cli::cli_alert_warning("Failed to add {current_model$wflow_id}")
-        }
-
-      }
-
-    }
-
-    # Check we have enough models
-    if (n_added == 0) {
-
-      cli::cli_abort("No models could be added to the stack")
-
-    }
-
-    if (verbose) {
-      cli::cli_alert_success(
-        "Successfully added {n_added}/{nrow(finalized_models)} models to stack"
-      )
-
-      if (length(failed_models) > 0) {
-        cli::cli_alert_warning(
-          "Failed models: {paste(failed_models, collapse = ', ')}"
-        )
-      }
-      
-      # Validate stack structure (stacks objects have complex internal structure)
-      # Don't try to modify the stack object - let stacks package handle it
       if (verbose) {
-        cli::cli_alert_success("Stack structure validated - ready for blending")
+
+        prefix <- if (i < nrow(finalized_models)) "   ├─" else "   └─"
+
+        cli::cli_text("{prefix} {.val {current_model$wflow_id}}")
+
       }
+
+      stacks::add_candidates(model_stack,
+                             candidates = current_model$cv_predictions[[1]],
+                             name       = sanitized_name) -> model_stack
+
     }
+
+    ## Ensure we have a valid stack object -------------------------------------
+
+    if (length(model_stack$model_defs) == 0) cli::cli_abort("No models could be added to the stack - check CV predictions compatibility")
 
     ## -------------------------------------------------------------------------
     ## Step 3.2: Blend Predictions with Penalized Regression
     ## -------------------------------------------------------------------------
 
+    ## Define blending parameters based on optimization choice ---------------
+
+    blend_params <- if (optimize_blending) {
+      list(penalty = 10^seq(-6, -1, length.out = 20),
+           mixture = seq(0, 1, length.out = 10))
+
+    } else {
+
+      list(penalty = 0.01, mixture = 1)
+
+    }
+
+    ## Set up metric for blending --------------------------------------------
+
+    metric_fns <- list(rmse = yardstick::rmse,
+                       mae  = yardstick::mae,
+                       rsq  = yardstick::rsq)
+
+    blend_metric_set <- yardstick::metric_set(
+      metric_fns[[blend_metric]] %||% get(blend_metric)
+    )
+
+    ## Blend the stack -------------------------------------------------------
+
     if (verbose) {
-      cli::cli_alert_info("Blending predictions (metric: {blend_metric})")
-    }
 
-    # Set up metric for blending
-    if (blend_metric == "rmse") {
+      if (optimize_blending) {
 
-      yardstick::metric_set(yardstick::rmse) ->
-      blend_metric_set
+        n_combos <- length(blend_params$penalty) * length(blend_params$mixture)
+        cli::cli_text("├─ Optimizing over {.val {n_combos}} penalty/mixture combinations")
+        cli::cli_text("├─ Blend metric: {.field {blend_metric}}")
 
-    } else if (blend_metric == "mae") {
+      } else {
 
-      yardstick::metric_set(yardstick::mae) ->
-      blend_metric_set
+        cli::cli_text("├─ Using default penalty ({.val 0.01}) and mixture ({.val 1})")
+        cli::cli_text("├─ Blend metric: {.field {blend_metric}}")
 
-    } else if (blend_metric == "rsq") {
-
-      yardstick::metric_set(yardstick::rsq) ->
-      blend_metric_set
-
-    } else {
-
-      # Try to use the metric directly - assumes it exists as a function
-      tryCatch({
-        get(blend_metric, mode = "function") ->
-        blend_metric_fn
-
-        yardstick::metric_set(blend_metric_fn) ->
-        blend_metric_set
-
-      }, error = function(e) {
-        cli::cli_abort("Unknown blend_metric: '{blend_metric}'")
-      })
-
-    }
-
-    # Set penalty and mixture based on optimize_blending
-    if (optimize_blending) {
-
-      10^seq(-6, -1, length.out = 20) ->
-      blend_penalty
-
-      seq(0, 1, length.out = 10) ->
-      blend_mixture
-
-      if (verbose) {
-        cli::cli_text("├─ Optimizing over {.field {length(blend_penalty)} penalties × {length(blend_mixture)} mixtures = {length(blend_penalty) * length(blend_mixture)} combinations}")
-      }
-
-    } else {
-
-      # Simple defaults for quick blending
-      10^(-2) ->
-      blend_penalty
-
-      1 ->  # Pure lasso
-      blend_mixture
-
-      if (verbose) {
-        cli::cli_alert_info("Using default blending parameters (penalty = 0.01, mixture = 1)")
       }
 
     }
 
-    # Blend the stack
-    safely_execute(
-      expr = {
-        suppressWarnings({
-          stacks::blend_predictions(
-            model_stack,
-            penalty = blend_penalty,
-            mixture = blend_mixture,
-            metric = blend_metric_set,
-            control = tune::control_grid(
-              save_pred = TRUE,
-              save_workflow = TRUE,
-              allow_par = parallel_cv
-            )
-          )
-        })
-      },
-      default_value = NULL,
-      error_message = "Failed to blend predictions"
-    ) ->
-    blend_result
-
-    if (is.null(blend_result$result)) {
-
-      cli::cli_abort("Failed to blend ensemble predictions")
-
-    }
-
-    blend_result$result ->
-    model_stack
+    stacks::blend_predictions(model_stack,
+                              penalty = blend_params$penalty,
+                              mixture = blend_params$mixture,
+                              metric  = blend_metric_set,
+                              control = tune::control_grid(save_pred     = TRUE,
+                                                           save_workflow = TRUE,
+                                                           allow_par     = allow_par)) -> model_stack
 
     ## -------------------------------------------------------------------------
     ## Step 3.3: Fit Member Models and Extract Weights
     ## -------------------------------------------------------------------------
 
-    if (verbose) {
-      cli::cli_alert_info("Fitting member models...")
+    ## Fit the ensemble members ----------------------------------------------
+
+    if (verbose) cli::cli_text("├─ Fitting member models...")
+
+    ensemble_model <- stacks::fit_members(model_stack)
+
+    ## Extract model weights -------------------------------------------------
+
+    model_weights <- if (!is.null(ensemble_model$coefs) && is.data.frame(ensemble_model$coefs)) {
+
+      ensemble_model$coefs %>%
+        dplyr::filter(coef > 0) %>%
+        dplyr::arrange(dplyr::desc(coef)) %>%
+        dplyr::rename(member = terms)
+
+    } else {
+
+      if (verbose) cli::cli_text("!! {col_yellow('Could not extract model weights - unexpected format')}")
+      data.frame(member = character(), coef = numeric())
+
     }
 
-    safely_execute(
-      expr = {
-        suppressWarnings({
-          stacks::fit_members(model_stack)
-        })
-      },
-      default_value = NULL,
-      error_message = "Failed to fit ensemble members"
-    ) ->
-    fit_result
-
-    if (is.null(fit_result$result)) {
-
-      cli::cli_abort("Failed to fit ensemble members")
-
-    }
-
-    fit_result$result ->
-    ensemble_model
-
-    # Extract model weights - try multiple methods
-    # Method 1: Try to get weights directly from the model_stack object
-    model_weights <- NULL
-    
-    # First, try to access the coefficients directly
-    if (!is.null(ensemble_model$coefs)) {
-      safely_execute(
-        expr = {
-          # Check if coefs is an _elnet object (from glmnet)
-          if (inherits(ensemble_model$coefs, "_elnet") || inherits(ensemble_model$coefs, "model_fit")) {
-            # For elnet objects, we need to extract coefficients differently
-            # Try to get the coefficients from the fitted model
-            coef_matrix <- coef(ensemble_model$coefs$fit, s = ensemble_model$penalty$penalty)
-            
-            # Convert to data frame
-            coef_df <- data.frame(
-              member = rownames(coef_matrix)[-1],  # Exclude intercept
-              coef = as.numeric(coef_matrix[-1, 1])
-            ) %>%
-              dplyr::filter(coef > 0) %>%
-              dplyr::arrange(dplyr::desc(coef))
-            
-            coef_df
-          } else if (is.data.frame(ensemble_model$coefs)) {
-            # Original method for data frame
-            ensemble_model$coefs %>%
-              dplyr::filter(coef > 0) %>%
-              dplyr::arrange(dplyr::desc(coef)) %>%
-              dplyr::rename(member = terms)
-          } else {
-            NULL
-          }
-        },
-        default_value = NULL,
-        error_message = "Failed to extract weights from coefs"
-      ) ->
-      weights_result
-      
-      model_weights <- weights_result$result
-    }
-    
-    # If that didn't work, try to extract from the printed output
-    if (is.null(model_weights)) {
-      safely_execute(
-        expr = {
-          # Capture the print output which contains weights
-          output <- capture.output(print(ensemble_model))
-          
-          # Look for lines with weights
-          weight_lines <- grep("^#\\s+\\d+\\s+", output, value = TRUE)
-          
-          if (length(weight_lines) > 0) {
-            # Parse the weight information
-            weights_df <- data.frame(member = character(), coef = numeric())
-            
-            for (line in weight_lines) {
-              # Extract member name and weight
-              parts <- strsplit(trimws(line), "\\s+")[[1]]
-              if (length(parts) >= 4) {
-                member_name <- parts[2]
-                weight_val <- as.numeric(parts[length(parts)])
-                if (!is.na(weight_val)) {
-                  weights_df <- rbind(weights_df, 
-                                     data.frame(member = member_name, 
-                                              coef = weight_val))
-                }
-              }
-            }
-            weights_df
-          } else {
-            NULL
-          }
-        },
-        default_value = NULL,
-        error_message = "Failed to parse weights from print output"
-      ) ->
-      parse_result
-      
-      model_weights <- parse_result$result
-    }
-    
-    # If we still don't have weights, create empty dataframe
-    if (is.null(model_weights)) {
-      cli::cli_text("⚠ Could not extract model weights from stacks ensemble")
-      cli::cli_text("│  The ensemble was fitted but weight extraction failed")
-      model_weights <- data.frame(member = character(), coef = numeric())
-    }
+    ## Display results -------------------------------------------------------
 
     if (verbose) {
-      cli::cli_text("✓ Ensemble fitted with {nrow(model_weights)} active models}")
 
-      # Show top contributors
-      if (nrow(model_weights) > 0) {
+      n_active <- nrow(model_weights)
+      cli::cli_text("└─ Fitted ensemble with {.val {n_active}} active models")
 
-        head(model_weights, 5) ->
-        top_models
+      if (n_active > 0) {
 
         cli::cli_text("")
-        cli::cli_text("{.strong Top Contributing Models:}")
+        cli::cli_text("{.strong Top contributing models:}")
+
+        model_weights %>%
+          head(5) -> top_models
 
         for (i in seq_len(nrow(top_models))) {
           prefix <- if (i < nrow(top_models)) "├─" else "└─"
-          cli::cli_text("{prefix} {top_models$member[i]}: weight = {.field {round(top_models$coef[i], 4)}}")
+          cli::cli_text("{prefix} {.val {top_models$member[i]}}: weight = {.val {round(top_models$coef[i], 4)}}")
         }
 
       }
+
+      cli::cli_text("")
+
     }
 
-  } else {
+    } else if (ensemble_method == "weighted_average") {
 
     ## -------------------------------------------------------------------------
     ## Step 3B: Weighted Average Ensemble
     ## -------------------------------------------------------------------------
 
+    ## Extract metrics and calculate weights --------------------------------
+
     if (verbose) {
-      cli::cli_h2("Building Weighted Average Ensemble")
-      cli::cli_text("├─ Weighting by cross-validation performance")
+
+      cli::cli_text("{.strong Building weighted average ensemble}")
+      cli::cli_text("└─ Weighting by cross-validation RMSE")
+
     }
 
-    # Extract performance metrics for weighting
     finalized_models %>%
-      dplyr::mutate(
-        # Extract RMSE from metrics (lower is better)
-        rmse = purrr::map_dbl(metrics, ~ {
-          .x %>%
-            dplyr::filter(.metric == "rmse") %>%
-            dplyr::pull(mean) %>%  # Use 'mean' instead of '.estimate'
-            .[1]
-        })
-      ) ->
-    models_with_rmse
-
-    # Check we have valid RMSE values
-    if (any(is.na(models_with_rmse$rmse)) || any(models_with_rmse$rmse <= 0)) {
-
-      cli::cli_abort("Invalid or missing RMSE values in model metrics")
-
-    }
-
-    # Calculate weights (inverse of RMSE)
-    models_with_rmse %>%
-      dplyr::mutate(
+      dplyr::mutate(rmse = purrr::map_dbl(metrics, ~ {.x %>%
+                                                        dplyr::filter(.metric == "rmse") %>%
+                                                        dplyr::pull(mean) %>%
+                                                        .[1]
+                                                      }
+                                          ),
         weight = 1 / rmse,
-        # Normalize weights to sum to 1
-        weight = weight / sum(weight)
-      ) %>%
-      dplyr::select(wflow_id, workflow, weight, rmse) ->
-    weighted_models
+        weight = weight / sum(weight)) %>%
+      dplyr::select(wflow_id,
+                    workflow,
+                    weight,
+                    rmse) -> weighted_models
 
-    if (verbose) {
-      cli::cli_text("✓ Calculated weights for {nrow(weighted_models)} models}")
+    ## Fit models on training data ------------------------------------------
 
-      # Show top weighted models
-      weighted_models %>%
-        dplyr::arrange(dplyr::desc(weight)) %>%
-        head(5) ->
-      top_weighted
+    weighted_models %>%
+      dplyr::mutate(fitted_workflow = purrr::map2(workflow, wflow_id, ~ {
 
-      cli::cli_text("")
-      cli::cli_text("{.strong Model Weights (Top 5):}")
+        if (verbose) cli::cli_text("   ├─ Fitting {.val {.y}}")
 
-      for (i in seq_len(nrow(top_weighted))) {
-        prefix <- if (i < nrow(top_weighted)) "├─" else "└─"
-        cli::cli_text("{prefix} {top_weighted$wflow_id[i]}: weight = {.field {round(top_weighted$weight[i], 4)}} (RMSE: {round(top_weighted$rmse[i], 3)})")
-      }
-    }
-
-    # Fit workflows on training data for prediction
-    weighted_models_fitted <- weighted_models %>%
-      dplyr::mutate(
-        fitted_workflow = purrr::map2(workflow, wflow_id, ~ {
-          safely_execute(
-            expr = {
-              fit(.x, data = train_data)
-            },
-            default_value = NULL,
-            error_message = glue::glue("Failed to fit {.y} for weighted ensemble")
-          )$result
-        })
-      ) %>%
-      # Remove models that failed to fit
-      dplyr::filter(!purrr::map_lgl(fitted_workflow, is.null))
-    
-    # Renormalize weights after removing failed models
-    if (nrow(weighted_models_fitted) > 0) {
-      weighted_models_fitted <- weighted_models_fitted %>%
-        dplyr::mutate(weight = weight / sum(weight))
-    }
-
-    # Create ensemble model object
-    list(
-      method = "weighted_average",
-      models = weighted_models_fitted,
-      predict = function(new_data) {
-
-        # Generate predictions from each fitted model
-        predictions_list <- vector("list", nrow(weighted_models_fitted))
-
-        for (i in seq_len(nrow(weighted_models_fitted))) {
-
-          safely_execute(
-            expr = {
-              predict(weighted_models_fitted$fitted_workflow[[i]], new_data)$.pred
-            },
-            default_value = rep(NA_real_, nrow(new_data)),
-            error_message = glue::glue("Prediction failed for {weighted_models_fitted$wflow_id[i]}")
-          ) ->
-          pred_result
-
-          pred_result$result * weighted_models_fitted$weight[i] ->
-          predictions_list[[i]]
+        fit(.x, data = train_data)
 
         }
+      )) ->weighted_models_fitted
 
-        # Sum weighted predictions
-        do.call(cbind, predictions_list) ->
-        predictions_matrix
+    ## Display weight information -------------------------------------------
 
-        rowSums(predictions_matrix, na.rm = TRUE) ->
-        final_predictions
+    if (verbose) {
 
-        tibble::tibble(.pred = final_predictions)
+      weighted_models_fitted %>%
+        dplyr::arrange(dplyr::desc(weight)) %>%
+        head(5) -> top_weighted
+
+      cli::cli_text("{.strong Top weighted models:}")
+
+      for (i in seq_len(nrow(top_weighted))) {
+
+        prefix <- if (i < nrow(top_weighted)) "├─" else "└─"
+        cli::cli_text("{prefix} {.val {top_weighted$wflow_id[i]}}: weight = {.val {round(top_weighted$weight[i], 3)}} (RMSE: {.val {round(top_weighted$rmse[i], 3)}})")
+
       }
-    ) ->
-    ensemble_model
+    }
 
-    # Store weights for output (match stacks format)
+    ## Create ensemble model object -----------------------------------------
+
+    list(method = "weighted_average",
+         models = weighted_models_fitted,
+         predict = function(new_data) {
+
+           predictions <- purrr::map2_dbl(weighted_models_fitted$fitted_workflow,
+                                          weighted_models_fitted$weight,
+                                          ~ predict(.x, new_data)$.pred * .y)
+
+        ## Sum weighted predictions --------------------------------------------
+
+        tibble::tibble(.pred = rowSums(matrix(predictions, nrow = nrow(new_data))))
+
+        }) -> ensemble_model
+
+    ## Store weights for consistency with stacks format ------------------------
+
     weighted_models_fitted %>%
-      dplyr::select(member = wflow_id, coef = weight) %>%
-      dplyr::arrange(dplyr::desc(coef)) ->
-    model_weights
+      dplyr::select(member = wflow_id,
+                    coef   = weight) %>%
+      dplyr::arrange(dplyr::desc(coef)) -> model_weights
+
+  } else if (ensemble_method == "xgb_meta") {
+
+    ## -------------------------------------------------------------------------
+    ## Step 3C: XGBoost Meta-learner Ensemble
+    ## -------------------------------------------------------------------------
+
+    ## Extract CV predictions as meta-features -------------------------------
+
+    if (verbose) {
+
+      cli::cli_text("")
+      cli::cli_text("{.strong Building XGBoost meta-learner ensemble}")
+      cli::cli_text("├─ Extracting CV predictions as meta-features")
+
+    }
+
+    ## Collect all CV predictions and align by row number ----------------------
+     finalized_models %>%
+      dplyr::mutate(cv_preds = purrr::map(cv_predictions, ~ {tune::collect_predictions(.x) %>%
+                                                              dplyr::select(.row, .pred) %>%
+                                                              dplyr::arrange(.row)})
+      ) -> meta_data
+
+    ## Create feature matrix from predictions ----------------------------------
+
+    meta_data %>%
+      dplyr::select(wflow_id, cv_preds) %>%
+      dplyr::mutate(wflow_id = paste0("pred_", wflow_id)) %>%
+      tidyr::pivot_wider(names_from = wflow_id,
+                         values_from = cv_preds,
+                         values_fn = ~ .x[[1]]$.pred) %>%
+      dplyr::select(-1) %>%
+      as.matrix() -> meta_features
+
+    ## Get true response values for meta-training ------------------------------
+
+    finalized_models$cv_predictions[[1]] %>%
+      tune::collect_predictions() %>%
+      dplyr::arrange(.row) %>%
+      dplyr::pull(Response) -> meta_response
+
+    ## Train XGBoost meta-learner -------------------------------------------
+
+    if (verbose) cli::cli_text("├─ Training XGBoost on {.val {nrow(meta_features)}} meta-samples")
+
+    # Set up XGBoost parameters (could be tuned in future)
+    list(objective        = "reg:squarederror",
+         max_depth        = 4,
+         eta              = 0.1,
+         subsample        = 0.8,
+         colsample_bytree = 0.8) -> xgb_params
+
+    xgboost::xgboost(data    = meta_features,
+                     label   = meta_response,
+                     params  = xgb_params,
+                     nrounds = 100,
+                     verbose = 0) -> xgb_meta_model
+
+    ## Fit base models on full training data --------------------------------
+
+    if (verbose) cli::cli_text("├─ Fitting {.val {nrow(finalized_models)}} base models on training data")
+
+    finalized_models %>%
+      dplyr::mutate(fitted_workflow = purrr::map(workflow,
+                                                 ~ {fit(.x, data = train_data)})) -> base_models_fitted
+
+    ## Create ensemble model object --------------------------------------------
+
+    list(method       = "xgb_meta",
+         meta_learner = xgb_meta_model,
+         base_models  = base_models_fitted,
+         predict      = function(new_data) {
+
+        ## Get predictions from each base model --------------------------------
+
+           base_models_fitted %>%
+             dplyr::mutate(pred = purrr::map(fitted_workflow,
+                                             ~ predict(.x, new_data)$.pred)) %>%
+          dplyr::select(wflow_id, pred) %>%
+          dplyr::mutate(wflow_id = paste0("pred_", wflow_id)) %>%
+          tidyr::pivot_wider(names_from  = wflow_id,
+                             values_from = pred) %>%
+          as.matrix() -> base_preds
+
+        ## Use XGBoost to blend predictions ------------------------------------
+
+        final_pred <- predict(xgb_meta_model, base_preds)
+
+        tibble::tibble(.pred = final_pred)
+      }
+    ) -> ensemble_model
+
+    ## Extract feature importance as weights --------------------------------
+
+    importance <- xgboost::xgb.importance(model = xgb_meta_model)
+
+    if (nrow(importance) > 0) {
+
+       data.frame(member = gsub("pred_", "", importance$Feature),
+                  coef = importance$Gain) %>%
+        dplyr::arrange(dplyr::desc(coef)) -> model_weights
+
+    } else {
+
+      model_weights <- data.frame(member = character(), coef = numeric())
+
+    }
+
+    if (verbose) {
+
+      cli::cli_text("└─ XGBoost ensemble fitted")
+
+      if (nrow(model_weights) > 0) {
+
+        cli::cli_text("{.strong Top contributing models (by gain):}")
+
+        model_weights %>%
+          head(5) -> top_models
+
+        for (i in seq_len(nrow(top_models))) {
+          prefix <- if (i < nrow(top_models)) "├─" else "└─"
+          cli::cli_text("{prefix} {.val {top_models$member[i]}}: importance = {.val {round(top_models$coef[i], 4)}}")
+        }
+
+      }
+
+      cli::cli_text("")
+
+    }
 
   }
-
-  # TODO: Add additional ensemble methods
-  # - "rf_meta": Random forest meta-learner using ranger
-  # - "xgb_meta": XGBoost meta-learner
-  # - "nn_meta": Neural network meta-learner
-  #
-  # Implementation approach:
-  # 1. Extract CV predictions via tune::collect_predictions()
-  # 2. Create meta-training data where each model's predictions are features
-  # 3. Train meta-learner to predict Response from model predictions
-  # 4. For prediction: get base model predictions, feed to meta-learner
-  #
-  # Key advantage: Can capture non-linear interactions between models
-  # Example: RF might learn "trust model A in low range, model B in high range"
 
   ## ---------------------------------------------------------------------------
   ## Step 4: Generate Predictions and Evaluate
   ## ---------------------------------------------------------------------------
 
-  if (verbose) {
-    cli::cli_text("")
-    cli::cli_text("{.strong Evaluating Ensemble Performance:}")
-  }
+    ## -------------------------------------------------------------------------
+    ## Step 4.1: Generate Ensemble Predictions and Calculate Metrics
+    ## -------------------------------------------------------------------------
 
-  # Generate ensemble predictions on test set
-  ensemble_model$predict(test_data) %>%
-    dplyr::bind_cols(
-      test_data %>%
-        dplyr::select(Observed = Response)
-    ) %>%
-    dplyr::rename(Predicted = .pred) ->
-  ensemble_predictions
+    ## Generate predictions on test set --------------------------------------
 
-  # Calculate standard metrics
-  yardstick::metrics(
-    ensemble_predictions,
-    truth = Observed,
-    estimate = Predicted
-  ) ->
-  ensemble_metrics
+    ensemble_model$predict(test_data) %>%
+      dplyr::bind_cols(test_data %>% dplyr::select(Observed = Response)) %>%
+      dplyr::rename(Predicted = .pred) -> ensemble_predictions
 
-  # Add custom metrics if functions exist
-  if (exists("ccc", mode = "function")) {
+    ## Calculate metrics -----------------------------------------------------
 
-    ccc(
-      ensemble_predictions,
-      truth = Observed,
-      estimate = Predicted
-    )$.estimate ->
-    ccc_value
+    yardstick::metrics(ensemble_predictions,
+                      truth    = Observed,
+                      estimate = Predicted) -> ensemble_metrics
 
-    dplyr::bind_rows(
-      ensemble_metrics,
-      tibble::tibble(
-        .metric = "ccc",
-        .estimator = "standard",
-        .estimate = ccc_value
-      )
-    ) ->
-    ensemble_metrics
+    # Add custom metrics if available --------------------------------------------
 
-  }
+    if (exists("ccc", mode = "function")) {
 
-  if (exists("rpd", mode = "function")) {
+      ccc_result <- ccc(ensemble_predictions, truth = Observed, estimate = Predicted)
 
-    rpd(
-      ensemble_predictions,
-      truth = Observed,
-      estimate = Predicted
-    )$.estimate ->
-    rpd_value
+      dplyr::bind_rows(ensemble_metrics,
+                       tibble::tibble(.metric.   = "ccc",
+                                      .estimator = "standard",
+                                      .estimate  = ccc_result$.estimate)) -> ensemble_metrics
 
-    dplyr::bind_rows(
-      ensemble_metrics,
-      tibble::tibble(
-        .metric = "rpd",
-        .estimator = "standard",
-        .estimate = rpd_value
-      )
-    ) ->
-    ensemble_metrics
+    }
 
-  }
+    if (exists("rpd", mode = "function")) {
 
-  # Display key metrics
-  if (verbose) {
+      rpd_result <- rpd(ensemble_predictions, truth = Observed, estimate = Predicted)
+
+      dplyr::bind_rows(ensemble_metrics,
+                       tibble::tibble(.metric    = "rpd",
+                                      .estimator = "standard",
+                                      .estimate  = rpd_result$.estimate)) -> ensemble_metrics
+
+    }
+
+    ## Display ensemble performance ------------------------------------------
+
+    display_metrics <- c("rmse", "rsq", "mae", "ccc", "rpd")
+
+    if (verbose) {
+
+      cli::cli_text("{.strong Ensemble test performance}")
+
+      ensemble_metrics %>%
+        dplyr::filter(.metric %in% display_metrics) -> metrics_to_show
+
+      for (i in seq_len(nrow(metrics_to_show))) {
+
+        metric_name  <- toupper(metrics_to_show$.metric[i])
+        metric_value <- round(metrics_to_show$.estimate[i], 4)
+        prefix       <- if (i < nrow(metrics_to_show)) "├─" else "└─"
+
+        cli::cli_text("{prefix} {metric_name}: {.val {metric_value}}")
+
+      }
+    }
+
+    ## -------------------------------------------------------------------------
+    ## Step 4.2: Compare to Individual Models
+    ## -------------------------------------------------------------------------
+
+    ## Extract individual model performance from CV metrics ------------------
+
+    finalized_models %>%
+      dplyr::mutate(rmse = purrr::map_dbl(metrics, ~ {
+                                            .x %>%
+                                              dplyr::filter(.metric == "rmse") %>%
+                                              dplyr::pull(mean) %>%
+                                              .[1]
+        })) %>%
+      dplyr::select(wflow_id, metrics, rmse) %>%
+      dplyr::arrange(rmse) -> individual_performance
+
+    ## Calculate ensemble improvement ----------------------------------------
+
+    best_individual_rmse <- individual_performance$rmse[1]
+    best_individual_id   <- individual_performance$wflow_id[1]
 
     ensemble_metrics %>%
-      dplyr::filter(.metric %in% c("rmse", "rsq", "mae")) %>%
-      dplyr::mutate(.estimate = round(.estimate, 4)) ->
-    metrics_display
+      dplyr::filter(.metric == "rmse") %>%
+      dplyr::pull(.estimate) -> ensemble_rmse
 
-    cli::cli_text("{.strong Ensemble Test Performance:}")
-    
-    for (i in seq_len(nrow(metrics_display))) {
+    improvement <- round((best_individual_rmse - ensemble_rmse) / best_individual_rmse * 100, 2)
 
-      toupper(metrics_display$.metric[i]) ->
-      metric_name
+    ## Display comparison if verbose -----------------------------------------
 
-      round(metrics_display$.estimate[i], 4) ->
-      metric_value
-      
-      if (i < nrow(metrics_display)) {
-        cli::cli_text("├─ {metric_name}: {metric_value}")
+    if (verbose && nrow(individual_performance) > 0) {
+
+      cli::cli_text("{.strong Ensemble comparison}")
+
+      ## Show improvement status -------------------------------------------------
+
+      if (improvement > 0) {
+
+        cli::cli_text("├─ {col_green('✓')} Improves over best individual by {.val {improvement}%}")
+
+      } else if (improvement < 0) {
+
+        cli::cli_text("├─ {col_yellow('!')} Performs {.val {abs(improvement)}%} worse than best individual")
+
       } else {
-        cli::cli_text("└─ {metric_name}: {metric_value}")
+
+        cli::cli_text("├─ {col_blue('=')} Performs equally to best individual")
+
       }
 
-    }
-    cli::cli_text("")
+      ## Show top 3 individual models --------------------------------------------
 
-  }
+      cli::cli_text("├─ Top individuals (CV RMSE):")
 
-  ## ---------------------------------------------------------------------------
-  ## Step 4.1: Compare to Individual Models
-  ## ---------------------------------------------------------------------------
+      individual_performance %>% head(3) -> top_individuals
 
-  if (verbose) {
-    cli::cli_text("├─ Evaluating individual model performance...")
-  }
+      for (i in seq_len(nrow(top_individuals))) {
 
-  # Generate predictions for each individual model
-  # First need to fit workflows on training data
-  finalized_models %>%
-    dplyr::mutate(
-      # Fit each workflow on the full training data
-      fitted_workflow = purrr::map2(workflow, wflow_id, ~ {
-        if (verbose) {
-          cli::cli_text("│  ├─ Fitting {.y} on training data...")
-        }
-        safely_execute(
-          expr = {
-            fit(.x, data = train_data)
-          },
-          default_value = NULL,
-          error_message = glue::glue("Failed to fit {.y}")
-        )$result
-      }),
-      # Make predictions with fitted workflows
-      test_predictions = purrr::map(fitted_workflow, ~ {
-        if (is.null(.x)) {
-          return(rep(NA_real_, nrow(test_data)))
-        }
-        safely_execute(
-          expr = {
-            predict(.x, test_data)$.pred
-          },
-          default_value = rep(NA_real_, nrow(test_data)),
-          error_message = "Individual prediction failed"
-        )$result
-      }),
-      test_metrics = purrr::map(test_predictions, ~ {
-        if (all(is.na(.x))) {
-          return(NULL)
-        }
+        cli::cli_text("│  ├─ {.val {top_individuals$wflow_id[i]}}: {.val {round(top_individuals$rmse[i], 4)}}")
 
-        tibble::tibble(
-          Observed = test_data$Response,
-          Predicted = .x
-        ) ->
-        pred_df
+      }
 
-        yardstick::metrics(
-          pred_df,
-          truth = Observed,
-          estimate = Predicted
-        )
-      })
-    ) %>%
-    dplyr::select(wflow_id, test_metrics) %>%
-    dplyr::filter(!purrr::map_lgl(test_metrics, is.null)) ->
-  individual_performance
-
-  # Extract RMSE for comparison
-  individual_performance %>%
-    dplyr::mutate(
-      rmse = purrr::map_dbl(test_metrics, ~ {
-        .x %>%
-          dplyr::filter(.metric == "rmse") %>%
-          dplyr::pull(.estimate) %>%
-          .[1]
-      })
-    ) %>%
-    dplyr::arrange(rmse) ->
-  individual_rmse
-
-  ensemble_metrics %>%
-    dplyr::filter(.metric == "rmse") %>%
-    dplyr::pull(.estimate) ->
-  ensemble_rmse
-
-  if (verbose && nrow(individual_rmse) > 0) {
-
-    # Compare to best individual model
-    individual_rmse$rmse[1] ->
-    best_individual
-
-    round((best_individual - ensemble_rmse) / best_individual * 100, 2) ->
-    improvement
-
-    if (improvement > 0) {
-
-      cli::cli_text("✓ Ensemble improves over best individual model by {improvement}%")
-
-    } else if (improvement < 0) {
-
-      cli::cli_text("⚠ Ensemble performs {abs(improvement)}% worse than best individual model")
-
-    } else {
-
-      cli::cli_text("─ Ensemble performs equally to best individual model")
+      cli::cli_text("└─ Ensemble (test RMSE): {.val {round(ensemble_rmse, 4)}}")
 
     }
-
-    # Show top individual models for comparison
-    cli::cli_text("")
-    cli::cli_text("{.strong Top Individual Models (Test RMSE):}")
-
-    head(individual_rmse, 3) ->
-    top_individuals
-
-    for (i in seq_len(nrow(top_individuals))) {
-      cli::cli_text("├─ {top_individuals$wflow_id[i]}: {.field {round(top_individuals$rmse[i], 4)}}")
-    }
-
-    cli::cli_text("└─ Ensemble: {.field {round(ensemble_rmse, 4)}}")
-
-  }
 
   ## ---------------------------------------------------------------------------
   ## Step 5: Save Results if Requested
@@ -910,128 +688,33 @@ build_ensemble <- function(finalized_models,
 
   if (!is.null(output_dir)) {
 
+    ## Create directories ----------------------------------------------------
+
+    ensemble_dir <- file.path(output_dir, "ensemble")
+    fs::dir_create(ensemble_dir, recurse = TRUE)
+
+    ## Save essential files --------------------------------------------------
+
+    qs::qsave(ensemble_model, file.path(ensemble_dir, "fitted_ensemble.qs"))
+
+    list(predictions            = ensemble_predictions,
+         metrics                = ensemble_metrics,
+         model_weights          = model_weights,
+         individual_performance = individual_performance) -> results
+
+    qs::qsave(results, file.path(ensemble_dir, "ensemble_results.qs"))
+
+    ## CSVs for easy access ----------------------------------------------------
+
+    readr::write_csv(ensemble_predictions, file.path(ensemble_dir, "predictions.csv"))
+    readr::write_csv(model_weights, file.path(ensemble_dir, "weights.csv"))
+
     if (verbose) {
+
       cli::cli_text("")
-      cli::cli_text("{.strong Saving Results:}")
-    }
+      cli::cli_text("{.strong Results saved}")
+      cli::cli_text("└─ {.path {ensemble_dir}}")
 
-    # Check if output_dir has evaluation structure, if not create it
-    if (!fs::dir_exists(output_dir)) {
-      fs::dir_create(output_dir, recurse = TRUE)
-    }
-
-    # Create ensemble subdirectory within the evaluation structure
-    # This allows it to integrate with existing evaluation results
-    file.path(output_dir, "ensemble") ->
-    ensemble_dir
-
-    fs::dir_create(ensemble_dir)
-
-    # Also ensure summary directory exists for aggregate results
-    file.path(output_dir, "summary") ->
-    summary_dir
-
-    if (!fs::dir_exists(summary_dir)) {
-      fs::dir_create(summary_dir)
-    }
-
-    # Save ensemble model
-    file.path(ensemble_dir, "fitted_ensemble.qs") ->
-    model_path
-
-    qs::qsave(ensemble_model, model_path)
-
-    if (verbose) {
-      cli::cli_text("├─ Ensemble model saved to {.path {model_path}}")
-    }
-
-    # Save results
-    file.path(ensemble_dir, "ensemble_results.qs") ->
-    results_path
-
-    list(
-      predictions = ensemble_predictions,
-      metrics = ensemble_metrics,
-      model_weights = model_weights,
-      individual_performance = individual_performance,
-      metadata = list(
-        method = ensemble_method,
-        n_models = nrow(finalized_models),
-        n_active = if (ensemble_method == "stacks") {
-          nrow(model_weights)
-        } else {
-          sum(model_weights$coef > 0.01)  # Models with >1% weight
-        },
-        test_prop = test_prop,
-        seed = seed,
-        blend_metric = blend_metric,
-        optimize_blending = optimize_blending,
-        timestamp = Sys.time()
-      )
-    ) ->
-    results_to_save
-
-    qs::qsave(results_to_save, results_path)
-
-    if (verbose) {
-      cli::cli_text("├─ Results saved to {.path {results_path}}")
-    }
-
-    # Save predictions as CSV for easy access
-    file.path(ensemble_dir, "ensemble_predictions.csv") ->
-    csv_path
-
-    readr::write_csv(ensemble_predictions, csv_path)
-
-    if (verbose) {
-      cli::cli_text("├─ Predictions saved to {.path {csv_path}}")
-    }
-
-    # Save model weights as CSV
-    file.path(ensemble_dir, "model_weights.csv") ->
-    weights_path
-
-    readr::write_csv(model_weights, weights_path)
-
-    if (verbose) {
-      cli::cli_text("├─ Model weights saved to {.path {weights_path}}")
-    }
-
-    # Save ensemble summary to summary directory
-    file.path(summary_dir, "ensemble_summary.csv") ->
-    summary_path
-
-    tibble::tibble(
-      method = ensemble_method,
-      n_models = nrow(finalized_models),
-      n_active = if (ensemble_method == "stacks") {
-        nrow(model_weights)
-      } else {
-        sum(model_weights$coef > 0.01)
-      },
-      ensemble_rmse = ensemble_rmse,
-      best_individual_rmse = if (nrow(individual_rmse) > 0) {
-        individual_rmse$rmse[1]
-      } else {
-        NA_real_
-      },
-      improvement_pct = if (nrow(individual_rmse) > 0) {
-        round((individual_rmse$rmse[1] - ensemble_rmse) / individual_rmse$rmse[1] * 100, 2)
-      } else {
-        NA_real_
-      },
-      blend_metric = blend_metric,
-      optimize_blending = optimize_blending,
-      test_prop = test_prop,
-      seed = seed,
-      timestamp = Sys.time()
-    ) ->
-    ensemble_summary
-
-    readr::write_csv(ensemble_summary, summary_path)
-
-    if (verbose) {
-      cli::cli_text("└─ Ensemble summary saved to {.path {summary_path}}")
     }
 
   }
@@ -1040,180 +723,72 @@ build_ensemble <- function(finalized_models,
   ## Step 6: Create Return Object
   ## ---------------------------------------------------------------------------
 
-  # Create return object with class
-  structure(
-    list(
-      ensemble_model = ensemble_model,
-      predictions = ensemble_predictions,
-      metrics = ensemble_metrics,
-      model_weights = model_weights,
-      individual_performance = individual_performance,
-      metadata = list(
-        method = ensemble_method,
-        n_models = nrow(finalized_models),
-        n_active = if (ensemble_method == "stacks") {
-          nrow(model_weights)
-        } else {
-          sum(model_weights$coef > 0.01)  # Models with >1% weight
-        },
-        test_prop = test_prop,
-        seed = seed,
-        blend_metric = blend_metric,
-        optimize_blending = optimize_blending,
-        ensemble_rmse = ensemble_rmse,
-        best_individual_rmse = if (nrow(individual_rmse) > 0) {
-          individual_rmse$rmse[1]
-        } else {
-          NA_real_
-        },
-        timestamp = Sys.time()
-      )
-    ),
-    class = "horizons_ensemble"
-  ) ->
-  result
+  ## Build metadata ------------------------------------------------------------
 
-  if (verbose) {
-    cli::cli_text("")
-    cli::cli_rule(left = "Ensemble Complete")
-    
-    # Extract key metrics for display
-    ensemble_metrics %>%
-      dplyr::filter(.metric %in% c("rmse", "rsq", "mae")) %>%
-      dplyr::mutate(.estimate = round(.estimate, 4)) ->
-    final_metrics_display
-    
-    rsq_val <- final_metrics_display %>% 
-      dplyr::filter(.metric == "rsq") %>% 
-      dplyr::pull(.estimate)
-    
-    mae_val <- final_metrics_display %>% 
-      dplyr::filter(.metric == "mae") %>% 
-      dplyr::pull(.estimate)
-    
-    cli::cli_text("{.strong Summary:}")
-    cli::cli_text("├─ Method: {.field {ensemble_method}}")
-    cli::cli_text("├─ Active models: {.field {result$metadata$n_active}/{result$metadata$n_models}}")
-    cli::cli_text("├─ Test RMSE: {.field {round(ensemble_rmse, 4)}}")
-    cli::cli_text("├─ Test R²: {.field {rsq_val}}")
-    cli::cli_text("└─ Test MAE: {.field {mae_val}}")
-    cli::cli_text("")
+  n_active <- if (ensemble_method == "stacks") {
 
-    if (!is.na(result$metadata$best_individual_rmse)) {
+    nrow(model_weights)
 
-      round((result$metadata$best_individual_rmse - ensemble_rmse) /
-            result$metadata$best_individual_rmse * 100, 2) ->
-      final_improvement
+    } else {
 
-      if (final_improvement > 0) {
-        cli::cli_text("{.strong Performance:}")
-        cli::cli_text("└─ {cli::col_green('✓')} Improved over best individual by {final_improvement}%")
-        cli::cli_text("")
-      }
+      sum(model_weights$coef > 0.01)
 
     }
-    
-    cli::cli_text("✓ Ensemble model created successfully")
+
+  list(method               = ensemble_method,
+       n_models             = nrow(finalized_models),
+       n_active             = n_active,
+       test_prop            = test_prop,
+       seed                 = seed,
+       blend_metric         = blend_metric,
+       optimize_blending    = optimize_blending,
+       ensemble_rmse        = ensemble_rmse,
+       best_individual_rmse = best_individual_rmse,
+       improvement          = improvement,
+       timestamp           = Sys.time()) -> metadata
+
+  ## Create return object --------------------------------------------------
+
+  structure(list(ensemble_model         = ensemble_model,
+                 predictions            = ensemble_predictions,
+                 metrics                = ensemble_metrics,
+                 model_weights          = model_weights,
+                 individual_performance = individual_performance,
+                 metadata               = metadata),
+            class = "horizons_ensemble") -> result
+
+  ## Final summary if verbose ----------------------------------------------
+
+  if (verbose) {
+
+    cli::cli_text("")
+    cli::cli_rule(left = "Ensemble Complete")
+    cli::cli_text("")
+
+    # Extract key metrics
+    rsq_val <- ensemble_metrics %>%
+      dplyr::filter(.metric == "rsq") %>%
+      dplyr::pull(.estimate) %>%
+      round(4)
+
+    cli::cli_text("{.strong Summary}")
+    cli::cli_text("├─ Method: {.field {ensemble_method}}")
+    cli::cli_text("├─ Active models: {.val {n_active}}/{.val {nrow(finalized_models)}}")
+    cli::cli_text("├─ Test RMSE: {.val {round(ensemble_rmse, 4)}}")
+    cli::cli_text("├─ Test R²: {.val {rsq_val}}")
+
+    if (improvement > 0) {
+
+      cli::cli_text("└─ {col_green('✓')} Improved {.val {improvement}%} over best individual")
+
+    } else {
+
+      cli::cli_text("└─ Performance vs best: {.val {improvement}%}")
+
+    }
   }
 
   return(result)
 
 }
 
-#' Print Method for Horizons Ensemble
-#'
-#' @description
-#' Provides a clean summary when printing a horizons_ensemble object.
-#'
-#' @param x A horizons_ensemble object
-#' @param ... Additional arguments (unused)
-#'
-#' @return Invisibly returns the input object
-#'
-#' @export
-print.horizons_ensemble <- function(x, ...) {
-
-  cat("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
-  cat("Horizons Ensemble Model\n")
-  cat("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
-
-  cat("Method:", x$metadata$method, "\n")
-  cat("Models:", x$metadata$n_models, "(", x$metadata$n_active, "active )\n")
-
-  if (!is.null(x$metadata$optimize_blending)) {
-    cat("Blending:", ifelse(x$metadata$optimize_blending, "Optimized", "Default"),
-        "(metric:", x$metadata$blend_metric, ")\n")
-  }
-
-  cat("\n")
-  cat("Test Performance:\n")
-  cat("  RMSE:", round(x$metadata$ensemble_rmse, 4), "\n")
-
-  # Add other key metrics if available
-  if (!is.null(x$metrics)) {
-    rsq_metric <- x$metrics %>%
-      dplyr::filter(.metric == "rsq") %>%
-      dplyr::pull(.estimate)
-
-    if (length(rsq_metric) > 0) {
-      cat("  R²:  ", round(rsq_metric[1], 4), "\n")
-    }
-
-    # Check for custom metrics
-    ccc_metric <- x$metrics %>%
-      dplyr::filter(.metric == "ccc") %>%
-      dplyr::pull(.estimate)
-
-    if (length(ccc_metric) > 0) {
-      cat("  CCC: ", round(ccc_metric[1], 4), "\n")
-    }
-
-    rpd_metric <- x$metrics %>%
-      dplyr::filter(.metric == "rpd") %>%
-      dplyr::pull(.estimate)
-
-    if (length(rpd_metric) > 0) {
-      cat("  RPD: ", round(rpd_metric[1], 4), "\n")
-    }
-  }
-
-  # Show improvement over best individual
-  if (!is.na(x$metadata$best_individual_rmse)) {
-
-    (x$metadata$best_individual_rmse - x$metadata$ensemble_rmse) /
-      x$metadata$best_individual_rmse * 100 ->
-    improvement
-
-    cat("\n")
-    cat("Best Individual RMSE:", round(x$metadata$best_individual_rmse, 4), "\n")
-
-    if (improvement > 0) {
-      cat("Improvement: ↑", round(improvement, 1), "%\n")
-    } else if (improvement < 0) {
-      cat("Improvement: ↓", round(abs(improvement), 1), "%\n")
-    } else {
-      cat("Improvement: No change\n")
-    }
-  }
-
-  # Show top contributing models
-  if (!is.null(x$model_weights) && nrow(x$model_weights) > 0) {
-    cat("\n")
-    cat("Top Contributing Models:\n")
-
-    head(x$model_weights, 3) ->
-    top_3
-
-    for (i in seq_len(nrow(top_3))) {
-      cat("  ", i, ". ", top_3$member[i], ": ",
-          round(top_3$coef[i], 4), "\n", sep = "")
-    }
-  }
-
-  cat("\n")
-  cat("Created:", format(x$metadata$timestamp, "%Y-%m-%d %H:%M:%S"), "\n")
-
-  cat("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
-
-  invisible(x)
-}

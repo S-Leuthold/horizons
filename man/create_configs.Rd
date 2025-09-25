@@ -5,10 +5,10 @@
 \title{Create Model Configuration Grid}
 \usage{
 create_configs(
-  models = c("plsr", "random_forest", "cubist", "xgboost", "lightgbm"),
-  transformations = c("none", "sqrt", "log"),
-  preprocessing = c("raw", "snv", "deriv1", "deriv2", "snv_deriv1", "snv_deriv2"),
-  feature_selection = c("none", "vip", "boruta", "rfe"),
+  models,
+  transformations,
+  preprocessing,
+  feature_selection,
   soil_covariates = NULL,
   climate_covariates = NULL,
   spatial_covariates = NULL,
@@ -16,17 +16,17 @@ create_configs(
 )
 }
 \arguments{
-\item{models}{Character vector. Model types to include.
-Default: c("plsr", "random_forest", "cubist", "xgboost", "lightgbm")}
+\item{models}{Character vector. Model types to include (required).
+Common choices: c("plsr", "random_forest", "cubist", "xgboost", "svm-rbf")}
 
-\item{transformations}{Character vector. Response variable transformations.
-Default: c("none", "sqrt", "log")}
+\item{transformations}{Character vector. Response variable transformations (required).
+Common choices: c("none", "sqrt", "log")}
 
-\item{preprocessing}{Character vector. Spectral preprocessing methods.
-Default: c("raw", "snv", "deriv1", "deriv2", "snv_deriv1", "snv_deriv2")}
+\item{preprocessing}{Character vector. Spectral preprocessing methods (required).
+Common choices: c("raw", "snv", "deriv1", "deriv2", "snv_deriv1", "snv_deriv2")}
 
-\item{feature_selection}{Character vector. Feature selection methods.
-Default: c("none", "vip", "boruta", "rfe")}
+\item{feature_selection}{Character vector. Feature selection methods (required).
+Common choices: c("none", "vip", "boruta", "rfe")}
 
 \item{soil_covariates}{Character vector. Soil property covariates to include
 (e.g., c("clay", "sand", "pH", "CEC")). Use NULL for none. Default: NULL}
