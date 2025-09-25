@@ -14,44 +14,93 @@ build_ensemble(
   blend_metric = "rmse",
   test_prop = 0.2,
   seed = 123,
-  parallel_cv = FALSE,
+  allow_par = FALSE,
   n_cores = NULL,
   verbose = TRUE,
   output_dir = NULL
 )
 }
 \arguments{
-\item{finalized_models}{A tibble output from \code{finalize_top_workflows()}}
+\item{finalized_models}{A tibble output from \code{finalize_top_workflows()} containing
+columns: \code{wflow_id}, \code{workflow}, \code{cv_predictions}, and \code{metrics}}
 
-\item{input_data}{A data frame containing the full dataset}
+\item{input_data}{A data frame containing the full dataset with predictors and response}
 
-\item{variable}{Character. Name of the response variable to predict}
+\item{variable}{Character string. Name of the response variable column in \code{input_data}}
 
-\item{covariate_data}{Optional data frame containing covariate predictors}
+\item{covariate_data}{Optional data frame containing additional covariate predictors.
+Currently not used but reserved for future functionality. Default: \code{NULL}}
 
-\item{ensemble_method}{Character. Method for ensemble: "stacks" or "weighted_average"}
+\item{ensemble_method}{Character string. Ensemble method to use:
+\itemize{
+\item \code{"stacks"}: Penalized regression meta-learner (default)
+\item \code{"weighted_average"}: Simple weighted average by inverse RMSE
+\item \code{"xgb_meta"}: XGBoost meta-learner for non-linear model blending
+}}
 
-\item{optimize_blending}{Logical. Whether to optimize blending parameters (slower)}
+\item{optimize_blending}{Logical. For stacks method, whether to optimize penalty
+and mixture parameters via grid search. Default: \code{FALSE} (uses penalty = 0.01, mixture = 1)}
 
-\item{blend_metric}{Character. Metric to optimize during blending: "rmse", "mae", "rsq", etc.}
+\item{blend_metric}{Character string. Metric to optimize during blending.
+Options: \code{"rmse"} (default), \code{"mae"}, \code{"rsq"}, or any yardstick metric function name}
 
-\item{test_prop}{Numeric. Proportion of data to hold out for testing}
+\item{test_prop}{Numeric between 0 and 1. Proportion of data to hold out for testing.
+Default: \code{0.2} (20\% test set)}
 
-\item{seed}{Integer. Random seed for reproducibility}
+\item{seed}{Integer. Random seed for train/test split reproducibility. Default: \code{123}}
 
-\item{parallel_cv}{Logical. Use parallel processing for cross-validation}
+\item{allow_par}{Logical. Enable parallel processing for model fitting. Default: \code{FALSE}}
 
-\item{n_cores}{Integer. Number of cores to use if parallel_cv is TRUE}
+\item{n_cores}{Integer or \code{NULL}. Number of cores for parallel processing.
+If \code{NULL} and \code{allow_par = TRUE}, uses \code{detectCores() - 1}. Default: \code{NULL}}
 
-\item{verbose}{Logical. Print progress messages}
+\item{verbose}{Logical. Print progress messages and results summary. Default: \code{TRUE}}
 
-\item{output_dir}{Character. Optional directory path to save ensemble results}
+\item{output_dir}{Character string or \code{NULL}. Directory path to save ensemble results.
+Creates \verb{ensemble/} subdirectory with model and prediction files. Default: \code{NULL} (no saving)}
 }
 \value{
-A list with class "horizons_ensemble"
+A list of class \code{"horizons_ensemble"} containing:
+\itemize{
+\item \code{ensemble_model}: The fitted ensemble model object (stacks or list with predict function)
+\item \code{predictions}: Tibble with test set predictions (columns: \code{Observed}, \code{Predicted})
+\item \code{metrics}: Tibble with test set performance metrics
+\item \code{model_weights}: Data frame with model names and weights/coefficients
+\item \code{individual_performance}: Tibble with individual model CV performance
+\item \code{metadata}: List with ensemble configuration and performance summary
+}
 }
 \description{
 Creates an ensemble model from the output of \code{finalize_top_workflows()}.
-Supports both stacked ensembles using tidymodels/stacks and simple weighted
-averaging based on cross-validation performance.
+Supports three ensemble methods:
+\itemize{
+\item \strong{Stacked ensembles}: Uses penalized regression meta-learner via tidymodels/stacks
+\item \strong{Weighted average}: Weights models by inverse RMSE from cross-validation
+\item \strong{XGBoost meta-learner}: Non-linear blending that can learn complex model interactions
+}
+
+\strong{Coming soon}: Additional meta-learner options including:
+\itemize{
+\item \code{"rf_meta"}: Random forest meta-learner for robust non-parametric blending
+\item \code{"nn_meta"}: Neural network meta-learner for deep interaction modeling
+}
+}
+\examples{
+\dontrun{
+# Build ensemble from finalized models
+ensemble <- build_ensemble(
+  finalized_models = top_models,
+  input_data = spectral_data,
+  variable = "SOC",
+  ensemble_method = "stacks",
+  optimize_blending = TRUE,
+  verbose = TRUE
+)
+
+# Access results
+ensemble$metrics           # Test set performance
+ensemble$model_weights     # Contributing models and weights
+ensemble$metadata$improvement  # Improvement over best individual
+}
+
 }

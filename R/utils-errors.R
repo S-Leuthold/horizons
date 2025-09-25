@@ -167,8 +167,8 @@ safely_execute <- function(expr,
   return(list(result      = result_list$result,
               error       = result_list$error,
               trace       = trace,
-              warnings    = captured_warnings,
-              messages    = captured_messages,
+              warnings    = if (length(captured_warnings) > 0) captured_warnings else NULL,
+              messages    = if (length(captured_messages) > 0) captured_messages else NULL,
               n_warnings  = length(captured_warnings),
               n_messages  = length(captured_messages)))
 }

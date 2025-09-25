@@ -47,7 +47,6 @@ A tibble with the following columns:
 \item{transformation}{Character. Response variable transformation}
 \item{preprocessing}{Character. Spectral preprocessing method}
 \item{feature_selection}{Character. Feature selection algorithm}
-\item{covariate_set}{Character. Descriptive name of covariate combination}
 \item{covariates}{List. Vector of covariate names (NULL if none)}
 }
 
