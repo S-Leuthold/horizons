@@ -79,7 +79,7 @@ finalize_top_workflows <- function(evaluation_results,
                                    cv_folds       = 10,
                                    seed           = 0307,
                                    allow_par      = FALSE,
-                                   n_cores        = NULL,
+                                   n_workers      = NULL,
                                    verbose        = TRUE) {
 
   ## ---------------------------------------------------------------------------
@@ -157,7 +157,7 @@ finalize_top_workflows <- function(evaluation_results,
 
       ## Determine cores -------------------------------------------------------
 
-      n_cores <- min(n_cores, parallel::detectCores() - 1)
+      n_cores <- min(n_workers, parallel::detectCores() - 1)
 
       ## Set up the plan -------------------------------------------------------
 
@@ -368,11 +368,21 @@ finalize_top_workflows <- function(evaluation_results,
     ## Step 3.1: Build workflow recipe
     ## -------------------------------------------------------------------------
 
+    # Parse covariate string: evaluation results store as "ph-MAP-AI"
+    # but build_recipe expects c("ph", "MAP", "AI")
+    if (!is.null(current_model$covariates) &&
+        current_model$covariates != "" &&
+        !current_model$covariates %in% c("NA", "No Covariates")) {
+      covariate_list <- strsplit(current_model$covariates, "-")[[1]]
+    } else {
+      covariate_list <- NULL
+    }
+
     build_recipe(input_data               = train_data,
                  response_transformation  = current_model$transformation,
                  spectral_transformation  = current_model$preprocessing,
                  feature_selection_method = current_model$feature_selection,
-                 covariate_selection      = current_model$covariates,
+                 covariate_selection      = covariate_list,
                  covariate_data           = covariate_data) -> recipe
 
     ## -------------------------------------------------------------------------

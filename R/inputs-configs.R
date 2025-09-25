@@ -45,7 +45,6 @@
 #'     \item{transformation}{Character. Response variable transformation}
 #'     \item{preprocessing}{Character. Spectral preprocessing method}
 #'     \item{feature_selection}{Character. Feature selection algorithm}
-#'     \item{covariate_set}{Character. Descriptive name of covariate combination}
 #'     \item{covariates}{List. Vector of covariate names (NULL if none)}
 #'   }
 #'
@@ -177,9 +176,13 @@ create_configs <- function(models,
   ## Step 3: Add Covariate Sets
   ## ---------------------------------------------------------------------------
 
-  tibble::tibble(covariate_set = names(covariate_sets),
-                 covariates    = covariate_set) %>%
-    tidyr::crossing(base_grid, .) -> config_grid
+  # Create tibble with just the covariates as a list column
+  covariate_df <- tibble::tibble(
+    covariates = unname(covariate_sets)  # Remove names to avoid confusion
+  )
+
+  # Cross with base grid
+  tidyr::crossing(base_grid, covariate_df) -> config_grid
 
   ## ---------------------------------------------------------------------------
   ## Step 4: Add Configuration IDs
@@ -195,7 +198,7 @@ create_configs <- function(models,
 
   if (verbose) {
 
-    n_covariate_sets  <- length(unique(config_grid$covariate_set))
+    n_covariate_sets  <- length(unique(lapply(config_grid$covariates, function(x) paste(x, collapse="_"))))
     base_combinations <- length(models) * length(transformations) * length(preprocessing) * length(feature_selection)
 
     cli::cli_text("")
