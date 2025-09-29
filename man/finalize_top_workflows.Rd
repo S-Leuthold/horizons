@@ -52,7 +52,7 @@ If \code{NULL}, uses a temporary directory. Default: \code{NULL}}
 
 \item{cv_folds}{Integer. Number of cross-validation folds for generating predictions. Default: \code{10}}
 
-\item{seed}{Integer. Random seed for reproducibility. Default: \code{0307}}
+\item{seed}{Integer. Random seed for reproducibility. Default: \code{307}}
 
 \item{allow_par}{Logical. Enable parallel processing for cross-validation. Default: \code{FALSE}}
 
