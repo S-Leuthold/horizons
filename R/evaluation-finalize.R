@@ -686,11 +686,34 @@ finalize_top_workflows <- function(evaluation_results,
 
   ## Create summary tibble for return -----------------------------------------
 
+  # Extract transformation info from successful results (already have workflow_id)
+  transformations <- sapply(successful_results, function(res) {
+    top_models$transformation[top_models$workflow_id == res$workflow_id]
+  })
+
   tibble::tibble(wflow_id       = purrr::map_chr(successful_results, "workflow_id"),
                  workflow       = purrr::map(successful_results, "workflow"),
                  cv_predictions = purrr::map(successful_results, "cv_results"),
                  final_params   = purrr::map(successful_results, "final_params")) %>%
-    dplyr::mutate(metrics = purrr::map(cv_predictions, ~ tune::collect_metrics(.x))) -> results_tibble
+    dplyr::mutate(
+      transformation = transformations,
+      metrics = purrr::map2(cv_predictions, transformation, function(cv_res, trans) {
+        # CRITICAL FIX: Recalculate metrics on original scale after back-transformation
+        if (!is.na(trans) && tolower(trans) != "none") {
+          # Extract all predictions across folds (already back-transformed)
+          all_preds <- purrr::map_dfr(cv_res$.predictions, ~ .x)
+
+          # Compute metrics on original scale
+          compute_original_scale_metrics(
+            truth = all_preds$Response,
+            estimate = all_preds$.pred
+          )
+        } else {
+          # No transformation, use standard metrics
+          tune::collect_metrics(cv_res)
+        }
+      })
+    ) -> results_tibble
 
   ## Save to disk for persistence ---------------------------------------------
 
