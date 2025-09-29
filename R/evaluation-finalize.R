@@ -486,6 +486,20 @@ finalize_top_workflows <- function(evaluation_results,
 
       expand.grid(grid_values, stringsAsFactors = FALSE) -> initial_grid
 
+      # PLSR protection: num_comp must be >= 2 to avoid dimension issues --------
+
+      if (current_model$model == "plsr" && "num_comp" %in% names(initial_grid)) {
+
+        initial_grid %>%
+          dplyr::filter(num_comp >= 2) -> initial_grid
+
+        # If filtering removes all rows, create a safe default grid
+        if (nrow(initial_grid) == 0) {
+          initial_grid <- data.frame(num_comp = c(2, 3, 4, 5))
+        }
+
+      }
+
       # Limit to 25 points max -------------------------------------------------
 
       if (nrow(initial_grid) > 25) {

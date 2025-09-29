@@ -131,7 +131,7 @@ define_model_specifications <- function(model_type) {
       penalty      = tune::tune(),      # Tunable: weight decay
       epochs       = tune::tune()       # Tunable: training epochs
     ) %>%
-      parsnip::set_engine("nnet") %>%
+      parsnip::set_engine("nnet", MaxNWts = 10000) %>%  # Increased limit for high-dimensional spectral data
       parsnip::set_mode("regression"),
     
     cli::cli_abort("Unknown model type: {model_type}")
