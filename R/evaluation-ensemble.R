@@ -338,24 +338,6 @@ build_ensemble <- function(finalized_models,
 
     # TODO: Wrap in safely_execute - critical for final ensemble
     # On failure: abort with cli::cli_abort("Ensemble fitting failed")
-
-    ## CRITICAL: Disable parallel for fit_members to avoid namespace issues --
-    ## fit_members refits workflows which need engine packages (Cubist, etc.)
-    ## These aren't available in worker processes, causing "implementation not found" errors
-
-    if (allow_par) {
-
-      ## Temporarily switch to sequential for member fitting -----------------
-
-      old_plan <- future::plan()
-      future::plan(future::sequential)
-
-      on.exit({
-        future::plan(old_plan)
-      }, add = TRUE, after = FALSE)  # Execute before the main on.exit
-
-    }
-
     ensemble_model <- stacks::fit_members(model_stack)
 
     ## Extract model weights -------------------------------------------------
