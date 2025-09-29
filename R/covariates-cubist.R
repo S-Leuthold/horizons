@@ -115,7 +115,7 @@ fit_cubist_model <- function(train_data,
   ## Step 1: Cross-validation setup
   ## ---------------------------------------------------------------------------
 
-  set.seed(0307)
+  set.seed(307)  # Fixed: was 0307 (octal = 199)
 
   safely_execute(expr = {rsample::vfold_cv(Train_Data, v = 10, strata = "Response")},
                  default_value      = NULL,

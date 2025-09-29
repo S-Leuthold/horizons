@@ -30,7 +30,7 @@
 #' @param train_prop Numeric between 0 and 1. Proportion of data for training. Default: `0.8`
 #' @param bayesian_iter Integer. Number of Bayesian optimization iterations. Default: `15`
 #' @param cv_folds Integer. Number of cross-validation folds for generating predictions. Default: `10`
-#' @param seed Integer. Random seed for reproducibility. Default: `0307`
+#' @param seed Integer. Random seed for reproducibility. Default: `307`
 #' @param allow_par Logical. Enable parallel processing for cross-validation. Default: `FALSE`
 #' @param n_cores Integer or `NULL`. Number of cores for parallel processing.
 #'   If `NULL` and `allow_par = TRUE`, uses available cores minus 1. Default: `NULL`
@@ -77,7 +77,7 @@ finalize_top_workflows <- function(evaluation_results,
                                    train_prop     = 0.8,
                                    bayesian_iter  = 15,
                                    cv_folds       = 10,
-                                   seed           = 0307,
+                                   seed           = 307,
                                    allow_par      = FALSE,
                                    n_workers      = NULL,
                                    use_exact_params = FALSE,  # NEW: Skip optimization, use HPC params exactly
@@ -700,14 +700,26 @@ finalize_top_workflows <- function(evaluation_results,
       metrics = purrr::map2(cv_predictions, transformation, function(cv_res, trans) {
         # CRITICAL FIX: Recalculate metrics on original scale after back-transformation
         if (!is.na(trans) && tolower(trans) != "none") {
-          # Extract all predictions across folds (already back-transformed)
-          all_preds <- purrr::map_dfr(cv_res$.predictions, ~ .x)
+          # Calculate metrics by fold, then summarize with mean and std_err
+          fold_metrics <- purrr::map_dfr(cv_res$.predictions, function(fold_preds) {
+            if (nrow(fold_preds) > 0) {
+              compute_original_scale_metrics(
+                truth = fold_preds$Response,
+                estimate = fold_preds$.pred
+              )
+            } else {
+              tibble::tibble()
+            }
+          }, .id = "fold")
 
-          # Compute metrics on original scale
-          compute_original_scale_metrics(
-            truth = all_preds$Response,
-            estimate = all_preds$.pred
-          )
+          # Summarize across folds to match collect_metrics structure
+          fold_metrics %>%
+            dplyr::group_by(.metric) %>%
+            dplyr::summarize(
+              mean = mean(.estimate, na.rm = TRUE),
+              std_err = sd(.estimate, na.rm = TRUE) / sqrt(dplyr::n()),
+              .groups = "drop"
+            )
         } else {
           # No transformation, use standard metrics
           tune::collect_metrics(cv_res)
