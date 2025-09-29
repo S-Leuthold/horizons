@@ -159,13 +159,13 @@ build_recipe <- function(input_data,
                                     options   = list(scale. = TRUE,
                                                      center = TRUE)),
          "correlation" = model_recipe %>%
-                          step_select_correlation(all_predictors(),
+                          step_select_correlation(recipes::all_predictors(),
                                                   outcome = "Response"),
          "boruta" = model_recipe %>%
-                          step_select_boruta(all_predictors(),
+                          step_select_boruta(recipes::all_predictors(),
                                              outcome = "Response"),
          "cars"   = model_recipe %>%
-                          step_select_cars(all_predictors(),
+                          step_select_cars(recipes::all_predictors(),
                                            outcome = "Response"),
          "none"   = model_recipe,
 
