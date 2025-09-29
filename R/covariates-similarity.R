@@ -156,7 +156,7 @@ select_global_training_set <- function(unknown_pca_scores,
 #'
 #' @param unknown_pca_scores Tibble with unknown PCA scores
 #' @param max_clusters Integer. Maximum clusters to consider (default: 10)
-#' @param seed Integer. Random seed for reproducibility (default: 0307)
+#' @param seed Integer. Random seed for reproducibility (default: 307)
 #' @param verbose Logical. Print progress messages (default: TRUE)
 #'
 #' @return Named list containing:
@@ -169,7 +169,7 @@ select_global_training_set <- function(unknown_pca_scores,
 
 cluster_unknown_samples <- function(unknown_pca_scores,
                                     max_clusters = 10,
-                                    seed         = 0307,
+                                    seed         = 307,
                                     verbose      = TRUE) {
 
   ## ---------------------------------------------------------------------------
