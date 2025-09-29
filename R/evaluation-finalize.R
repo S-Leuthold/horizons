@@ -351,6 +351,11 @@ finalize_top_workflows <- function(evaluation_results,
 
   ## Process each model -------------------------------------------------------
 
+  # TODO: Add try-catch error handling around each model's processing so that
+  # individual model failures don't kill the entire finalization pipeline.
+  # Should catch errors, log them, and continue with remaining models.
+  # Failed models should return status = "failed" with error message.
+
   for (i in seq_len(nrow(top_models))) {
 
     model_start_time <- Sys.time()
@@ -476,9 +481,56 @@ finalize_top_workflows <- function(evaluation_results,
 
         } else {
 
-          c(0.8, 0.9, 1.0, 1.1, 1.2) %>%
-            purrr::map_dbl(~ best_value * .x) %>%
-            purrr::keep(~ .x >= lower & .x <= upper)
+          # Check if parameter is log-transformed
+          if (!is.null(param_obj$trans) &&
+              grepl("log", class(param_obj$trans)[1])) {
+
+            # Work in transformed (log) space for smooth grid
+            if (grepl("log-10", class(param_obj$trans)[1])) {
+              log_best <- log10(best_value)
+              log_lower <- log10(max(lower, 1e-10))  # Avoid log(0)
+              log_upper <- log10(upper)
+
+              # Create 5 points in log space
+              log_grid <- seq(
+                max(log_lower, log_best - 0.5),
+                min(log_upper, log_best + 0.5),
+                length.out = 5
+              )
+              10^log_grid
+
+            } else if (grepl("log-2", class(param_obj$trans)[1])) {
+              # Log base 2 transformation
+              log_best <- log2(best_value)
+              log_lower <- log2(max(lower, 1e-10))
+              log_upper <- log2(upper)
+
+              log_grid <- seq(
+                max(log_lower, log_best - 0.5),
+                min(log_upper, log_best + 0.5),
+                length.out = 5
+              )
+              2^log_grid
+
+            } else {  # Natural log
+              log_best <- log(best_value)
+              log_lower <- log(max(lower, 1e-10))
+              log_upper <- log(upper)
+
+              log_grid <- seq(
+                max(log_lower, log_best - 0.5),
+                min(log_upper, log_best + 0.5),
+                length.out = 5
+              )
+              exp(log_grid)
+            }
+
+          } else {
+            # Non-transformed parameters - use original multiplicative approach
+            c(0.8, 0.9, 1.0, 1.1, 1.2) %>%
+              purrr::map_dbl(~ best_value * .x) %>%
+              purrr::keep(~ .x >= lower & .x <= upper)
+          }
 
         }
 
@@ -533,7 +585,7 @@ finalize_top_workflows <- function(evaluation_results,
 
     } else {
 
-      initial_results <- 5
+      initial_results <- 10  # Use 10 initial points for all models
 
     }
 
