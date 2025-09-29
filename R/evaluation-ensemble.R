@@ -727,7 +727,15 @@ build_ensemble <- function(finalized_models,
         test_preds = purrr::map(fitted_workflow, ~ {
           predict(.x, test_data)$.pred
         }),
-        # Calculate test RMSE for each model
+        # Back-transform predictions if needed (must match ensemble back-transformation)
+        test_preds = purrr::map2(test_preds, transformation, ~ {
+          if (!is.na(.y) && has_transformation && tolower(.y) != "none") {
+            back_transform_predictions(.x, .y, warn = FALSE)
+          } else {
+            .x
+          }
+        }),
+        # Calculate test RMSE for each model (now on original scale)
         test_rmse = purrr::map_dbl(test_preds, ~ {
           sqrt(mean((test_data$Response - .x)^2))
         }),
