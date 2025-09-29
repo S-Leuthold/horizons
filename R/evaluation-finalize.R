@@ -80,6 +80,7 @@ finalize_top_workflows <- function(evaluation_results,
                                    seed           = 0307,
                                    allow_par      = FALSE,
                                    n_workers      = NULL,
+                                   use_exact_params = FALSE,  # NEW: Skip optimization, use HPC params exactly
                                    verbose        = TRUE) {
 
   ## ---------------------------------------------------------------------------
@@ -383,10 +384,13 @@ finalize_top_workflows <- function(evaluation_results,
       covariate_list <- NULL
     }
 
+    # CRITICAL FIX: Convert to lowercase to match what build_recipe expects
+    # The evaluation results store these as "No Transformation", "None", etc.
+    # but build_recipe expects lowercase values
     build_recipe(input_data               = train_data,
-                 response_transformation  = current_model$transformation,
-                 spectral_transformation  = current_model$preprocessing,
-                 feature_selection_method = current_model$feature_selection,
+                 response_transformation  = tolower(current_model$transformation),
+                 spectral_transformation  = tolower(current_model$preprocessing),
+                 feature_selection_method = tolower(current_model$feature_selection),
                  covariate_selection      = covariate_list,
                  covariate_data           = covariate_data) -> recipe
 
@@ -634,7 +638,8 @@ finalize_top_workflows <- function(evaluation_results,
 
     ## Back-transform CV predictions if needed --------------------------------
 
-    if (current_model$transformation != "none" && current_model$transformation != "No Transformation") {
+    # Check using lowercase for consistency
+    if (tolower(current_model$transformation) != "none") {
 
       back_transform_cv_predictions(cv_fit, current_model$transformation) -> cv_fit
 
