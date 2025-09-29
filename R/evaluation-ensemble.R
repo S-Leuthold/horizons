@@ -12,7 +12,7 @@
 #' - `"nn_meta"`: Neural network meta-learner for deep interaction modeling
 #'
 #' @param finalized_models A tibble output from `finalize_top_workflows()` containing
-#'   columns: `wflow_id`, `workflow`, `cv_predictions`, and `metrics`
+#'   columns: `wflow_id`, `workflow`, `cv_predictions`, and `cv_metrics` (or `metrics` for backward compatibility)
 #' @param input_data A data frame containing the full dataset with predictors and response
 #' @param variable Character string. Name of the response variable column in `input_data`
 #' @param covariate_data Optional data frame containing additional covariate predictors.
@@ -84,10 +84,37 @@ build_ensemble <- function(finalized_models,
 
   ## Essential column validation -----------------------------------------------
 
-  required_cols <- c("wflow_id", "workflow", "cv_predictions", "metrics")
-  missing_cols <- setdiff(required_cols, names(finalized_models))
+  ## Check for either new format (cv_metrics) or old format (metrics) ---------
 
-  if (length(missing_cols) > 0) cli::cli_abort("finalized_models missing required columns: {missing_cols}")
+  has_cv_metrics  <- "cv_metrics" %in% names(finalized_models)
+  has_old_metrics <- "metrics" %in% names(finalized_models)
+
+  if (!has_cv_metrics && !has_old_metrics) {
+
+    cli::cli_abort("finalized_models must have either 'cv_metrics' (new format) or 'metrics' (old format)")
+
+  }
+
+  ## Check other required columns ---------------------------------------------
+
+  required_cols <- c("wflow_id", "workflow", "cv_predictions")
+  missing_cols  <- setdiff(required_cols, names(finalized_models))
+
+  if (length(missing_cols) > 0) {
+
+    cli::cli_abort("finalized_models missing required columns: {missing_cols}")
+
+  }
+
+  ## Standardize to cv_metrics for internal use -------------------------------
+
+  if (!has_cv_metrics && has_old_metrics) {
+
+    ## Backward compatibility: rename metrics to cv_metrics -------------------
+
+    finalized_models <- finalized_models %>% dplyr::mutate(cv_metrics = metrics)
+
+  }
 
   ## Validate response variable exists -----------------------------------------
 
@@ -364,11 +391,11 @@ build_ensemble <- function(finalized_models,
     }
 
     finalized_models %>%
-      dplyr::mutate(rmse = purrr::map_dbl(metrics, ~ {.x %>%
-                                                        dplyr::filter(.metric == "rmse") %>%
-                                                        dplyr::pull(mean) %>%
-                                                        .[1]
-                                                      }
+      dplyr::mutate(rmse = purrr::map_dbl(cv_metrics, ~ {.x %>%
+                                                           dplyr::filter(.metric == "rmse") %>%
+                                                           dplyr::pull(mean) %>%
+                                                           .[1]
+                                                         }
                                           ),
         weight = 1 / rmse,
         weight = weight / sum(weight)) %>%
@@ -594,6 +621,42 @@ build_ensemble <- function(finalized_models,
         dplyr::rename(Predicted = .pred) -> ensemble_predictions
     }
 
+    ## CRITICAL FIX: Back-transform ensemble predictions if models used transformations
+
+    # Check if any models used response transformations
+    has_transformation <- FALSE
+    transformation_type <- "none"
+
+    if ("transformation" %in% names(finalized_models)) {
+
+      transformations <- unique(tolower(finalized_models$transformation))
+      transformations <- transformations[!transformations %in% c("none", "na", "")]
+
+      if (length(transformations) > 0) {
+
+        has_transformation <- TRUE
+        transformation_type <- transformations[1]
+
+        if (length(unique(transformations)) > 1) {
+          cli::cli_alert_warning("Models use different transformations - using {transformation_type} for back-transformation")
+        }
+
+      }
+    }
+
+    # Back-transform ensemble predictions if needed
+    if (has_transformation) {
+
+      if (verbose) {
+        cli::cli_alert_info("Back-transforming ensemble predictions from {transformation_type} scale")
+      }
+
+      ensemble_predictions$Predicted <- back_transform_predictions(ensemble_predictions$Predicted,
+                                                                   transformation_type,
+                                                                   warn = FALSE)
+
+    }
+
     ## Calculate metrics -----------------------------------------------------
 
     yardstick::metrics(ensemble_predictions,
@@ -669,14 +732,14 @@ build_ensemble <- function(finalized_models,
           sqrt(mean((test_data$Response - .x)^2))
         }),
         # Also keep CV RMSE for reference
-        cv_rmse = purrr::map_dbl(metrics, ~ {
+        cv_rmse = purrr::map_dbl(cv_metrics, ~ {
           .x %>%
             dplyr::filter(.metric == "rmse") %>%
             dplyr::pull(mean) %>%
             .[1]
         })
       ) %>%
-      dplyr::select(wflow_id, metrics, cv_rmse, test_rmse) %>%
+      dplyr::select(wflow_id, cv_metrics, cv_rmse, test_rmse) %>%
       dplyr::arrange(test_rmse) -> individual_performance
 
     ## Calculate ensemble improvement ----------------------------------------

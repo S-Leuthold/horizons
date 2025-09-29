@@ -22,7 +22,7 @@ build_ensemble(
 }
 \arguments{
 \item{finalized_models}{A tibble output from \code{finalize_top_workflows()} containing
-columns: \code{wflow_id}, \code{workflow}, \code{cv_predictions}, and \code{metrics}}
+columns: \code{wflow_id}, \code{workflow}, \code{cv_predictions}, and \code{cv_metrics} (or \code{metrics} for backward compatibility)}
 
 \item{input_data}{A data frame containing the full dataset with predictors and response}
 

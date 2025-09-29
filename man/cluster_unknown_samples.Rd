@@ -16,7 +16,7 @@ cluster_unknown_samples(
 
 \item{max_clusters}{Integer. Maximum clusters to consider (default: 10)}
 
-\item{seed}{Integer. Random seed for reproducibility (default: 0307)}
+\item{seed}{Integer. Random seed for reproducibility (default: 307)}
 
 \item{verbose}{Logical. Print progress messages (default: TRUE)}
 }
