@@ -80,7 +80,6 @@ finalize_top_workflows <- function(evaluation_results,
                                    seed           = 307,
                                    allow_par      = FALSE,
                                    n_workers      = NULL,
-                                   use_exact_params = FALSE,  # NEW: Skip optimization, use HPC params exactly
                                    verbose        = TRUE) {
 
   ## ---------------------------------------------------------------------------
@@ -645,13 +644,51 @@ finalize_top_workflows <- function(evaluation_results,
 
     }
 
-    ## Store results for stacking ----------------------------------------------
+    ## -------------------------------------------------------------------------
+    ## Step 3.9: Evaluate on held-out test set (for comparison to evaluation)
+    ## -------------------------------------------------------------------------
 
-    list(workflow_id  = current_model$workflow_id,
-         workflow     = finalized_workflow,
-         cv_results   = cv_fit,
-         final_params = final_best_params,
-         status       = "success") -> finalized_results[[i]]
+    if (verbose) cli::cli_text("├─ Evaluating on held-out test set...")
+
+    # Use last_fit to train on full training set and test on held-out test set
+    tune::last_fit(finalized_workflow,
+                   split   = data_split,
+                   metrics = yardstick::metric_set(rrmse,
+                                                  yardstick::rsq,
+                                                  yardstick::rmse,
+                                                  ccc,
+                                                  rpd,
+                                                  yardstick::mae)) -> test_fit
+
+    # Extract test predictions for back-transformation
+    test_predictions <- tune::collect_predictions(test_fit)
+
+    # Back-transform test predictions if transformation was applied
+    if (tolower(current_model$transformation) != "none") {
+
+      test_predictions$.pred <- back_transform_predictions(test_predictions$.pred,
+                                                           current_model$transformation,
+                                                           warn = FALSE)
+
+    }
+
+    # Recalculate metrics on original scale (matching evaluation-core approach)
+    test_metrics <- compute_original_scale_metrics(truth    = test_predictions$Response,
+                                                   estimate = test_predictions$.pred) %>%
+      tidyr::pivot_wider(names_from  = .metric,
+                        values_from = .estimate)
+
+    if (verbose) cli::cli_text("│  └─ Test set evaluation complete")
+
+    ## Store results for stacking and comparison ------------------------------
+
+    list(workflow_id   = current_model$workflow_id,
+         workflow      = finalized_workflow,
+         cv_results    = cv_fit,
+         test_results  = test_fit,
+         test_metrics  = test_metrics,
+         final_params  = final_best_params,
+         status        = "success") -> finalized_results[[i]]
 
     if (verbose) {
 
@@ -665,7 +702,8 @@ finalize_top_workflows <- function(evaluation_results,
 
     ## Clean up memory after each model ---------------------------------------
 
-    rm(recipe, model_spec, workflow, param_set, finalized_workflow, cv_fit, bayes_results, final_best_params)
+    rm(recipe, model_spec, workflow, param_set, finalized_workflow, cv_fit,
+       test_fit, test_predictions, test_metrics, bayes_results, final_best_params)
 
     if (exists("initial_grid")) rm(initial_grid)
     if (exists("initial_results")) rm(initial_results)
@@ -694,10 +732,11 @@ finalize_top_workflows <- function(evaluation_results,
   tibble::tibble(wflow_id       = purrr::map_chr(successful_results, "workflow_id"),
                  workflow       = purrr::map(successful_results, "workflow"),
                  cv_predictions = purrr::map(successful_results, "cv_results"),
+                 test_results   = purrr::map(successful_results, "test_results"),
                  final_params   = purrr::map(successful_results, "final_params")) %>%
     dplyr::mutate(
       transformation = transformations,
-      metrics = purrr::map2(cv_predictions, transformation, function(cv_res, trans) {
+      cv_metrics = purrr::map2(cv_predictions, transformation, function(cv_res, trans) {
         # CRITICAL FIX: Recalculate metrics on original scale after back-transformation
         if (!is.na(trans) && tolower(trans) != "none") {
           # Calculate metrics by fold, then summarize with mean and std_err
@@ -724,7 +763,8 @@ finalize_top_workflows <- function(evaluation_results,
           # No transformation, use standard metrics
           tune::collect_metrics(cv_res)
         }
-      })
+      }),
+      test_metrics = purrr::map(successful_results, "test_metrics")
     ) -> results_tibble
 
   ## Save to disk for persistence ---------------------------------------------
@@ -742,10 +782,16 @@ finalize_top_workflows <- function(evaluation_results,
 
   ## Calculate final metrics --------------------------------------------------
 
+  # Extract CV metrics for summary
   results_tibble %>%
-    tidyr::unnest(metrics) %>%
+    tidyr::unnest(cv_metrics) %>%
     dplyr::filter(.metric == metric) %>%
-    dplyr::select(wflow_id, mean, std_err) -> final_metrics
+    dplyr::select(wflow_id, mean, std_err) -> final_cv_metrics
+
+  # Extract test metrics for comparison to evaluation
+  results_tibble %>%
+    tidyr::unnest(test_metrics) %>%
+    dplyr::select(wflow_id, rsq, rmse, rrmse, ccc, rpd, mae) -> final_test_metrics
 
   ## Final summary ------------------------------------------------------------
 
@@ -759,19 +805,29 @@ finalize_top_workflows <- function(evaluation_results,
     cli::cli_text("├─ Average per model: {.val {round(total_time/nrow(results_tibble), 1)}} minutes")
     cli::cli_text("└─ Saved to: {.path {save_path}}")
 
-    ## Show final performance --------------------------------------------------
+    ## Show final CV performance -----------------------------------------------
 
     if (lower_is_better) {
-      which.min(final_metrics$mean) -> best_idx
-      which.max(final_metrics$mean) -> worst_idx
+      which.min(final_cv_metrics$mean) -> best_idx
+      which.max(final_cv_metrics$mean) -> worst_idx
     } else {
-      which.max(final_metrics$mean) -> best_idx
-      which.min(final_metrics$mean) -> worst_idx
+      which.max(final_cv_metrics$mean) -> best_idx
+      which.min(final_cv_metrics$mean) -> worst_idx
     }
 
-    cli::cli_text("{.strong Final {.field {metric}} performance:}")
-    cli::cli_text("├─ Best: {.val {final_metrics$wflow_id[best_idx]}} = {.val {round(final_metrics$mean[best_idx], 3)}} ± {.val {round(final_metrics$std_err[best_idx], 3)}}")
-    cli::cli_text("└─ Worst: {.val {final_metrics$wflow_id[worst_idx]}} = {.val {round(final_metrics$mean[worst_idx], 3)}} ± {.val {round(final_metrics$std_err[worst_idx], 3)}}")
+    cli::cli_text("{.strong Final CV {.field {metric}} performance:}")
+    cli::cli_text("├─ Best: {.val {final_cv_metrics$wflow_id[best_idx]}} = {.val {round(final_cv_metrics$mean[best_idx], 3)}} ± {.val {round(final_cv_metrics$std_err[best_idx], 3)}}")
+    cli::cli_text("└─ Worst: {.val {final_cv_metrics$wflow_id[worst_idx]}} = {.val {round(final_cv_metrics$mean[worst_idx], 3)}} ± {.val {round(final_cv_metrics$std_err[worst_idx], 3)}}")
+    cli::cli_text("")
+
+    ## Show test set performance (for comparison to evaluation) ---------------
+
+    best_test_idx <- which.max(final_test_metrics$rsq)
+    worst_test_idx <- which.min(final_test_metrics$rsq)
+
+    cli::cli_text("{.strong Test Set R² (compare to evaluation):}")
+    cli::cli_text("├─ Best: {.val {final_test_metrics$wflow_id[best_test_idx]}} = {.val {round(final_test_metrics$rsq[best_test_idx], 3)}}")
+    cli::cli_text("└─ Worst: {.val {final_test_metrics$wflow_id[worst_test_idx]}} = {.val {round(final_test_metrics$rsq[worst_test_idx], 3)}}")
     cli::cli_text("")
 
   }
