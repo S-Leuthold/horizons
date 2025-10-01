@@ -22,54 +22,55 @@ create_dataset(
 )
 }
 \arguments{
-\item{spectra_data}{Tibble. Preprocessed spectral data from preprocess_spectra()}
+\item{spectra_data}{\verb{[tibble]} Preprocessed spectral data from preprocess_spectra()}
 
-\item{response_data}{Character path or data.frame. Response variables with Sample_ID}
+\item{response_data}{\verb{[character|data.frame]} Response variables with Sample_ID (file path or data frame)}
 
-\item{response_variables}{Character vector. Which response columns to keep (NULL = all)}
+\item{response_variables}{\verb{[character]} (Optional) Which response columns to keep. Default: \code{NULL} (all)}
 
-\item{id_column}{Character. Column containing IDs to parse or join on. Default: "Sample_ID"}
+\item{id_column}{\verb{[character]} Column containing IDs to parse or join on. Default: \code{"Sample_ID"}}
 
-\item{parse_ids}{Logical. Parse complex Sample_IDs into components? Default: FALSE}
+\item{parse_ids}{\verb{[logical]} Parse complex Sample_IDs into components? Default: \code{FALSE}}
 
-\item{id_format}{Character. Format string like "project_sampleid_fraction_scan"}
+\item{id_format}{\verb{[character]} (Optional) Format string like \code{"project_sampleid_fraction_scan"}}
 
-\item{id_delimiter}{Character. Delimiter in IDs. Default: "_"}
+\item{id_delimiter}{\verb{[character]} Delimiter in IDs. Default: \code{"_"}}
 
-\item{aggregate_by}{Character vector. Which parsed columns define unique samples for averaging.
-Default: NULL (uses all parsed columns except 'scan' if present)}
+\item{aggregate_by}{\verb{[character]} (Optional) Which parsed columns define unique samples for averaging.
+Default: \code{NULL} (uses all parsed columns except 'scan' if present)}
 
-\item{join_by}{Character vector. Column(s) to join with response data.
-Default: NULL (auto-determined from aggregate_by or id_column)}
+\item{join_by}{\verb{[character]} (Optional) Column(s) to join with response data.
+Default: \code{NULL} (auto-determined from aggregate_by or id_column)}
 
-\item{include_coords}{Logical. Include coordinate columns? Default: TRUE}
+\item{include_coords}{\verb{[logical]} Include coordinate columns? Default: \code{TRUE}}
 
-\item{coord_columns}{Character vector. Explicit coord column names (NULL = auto-detect)}
+\item{coord_columns}{\verb{[character]} (Optional) Explicit coord column names. Default: \code{NULL} (auto-detect)}
 
-\item{join_type}{Character. Join strategy for combining spectra and response data.
-Default: "inner" (recommended for modeling - only samples with both spectra and response).
+\item{join_type}{\verb{[character]} Join strategy for combining spectra and response data.
+Default: \code{"inner"} (recommended for modeling - only samples with both spectra and response).
 \itemize{
 \item \code{"inner"}: Keep only samples with both spectra AND response (safe for modeling)
 \item \code{"left"}: Keep all spectra, even without response (creates NAs - may cause downstream failures)
 \item \code{"right"}: Keep all response samples, even without spectra (creates NAs in predictors)
 \item \code{"full"}: Keep everything (creates NAs - use only for data auditing, not modeling)
 }
+
 Note: Non-inner joins may introduce NA values that will cause model evaluation to fail
 unless \code{drop_na = TRUE} or data is filtered manually.}
 
-\item{drop_na}{Logical. Drop rows with NA in response variables? Default: TRUE}
+\item{drop_na}{\verb{[logical]} Drop rows with NA in response variables? Default: \code{TRUE}}
 
-\item{verbose}{Logical. Print progress messages. Default: TRUE}
+\item{verbose}{\verb{[logical]} Print progress messages. Default: \code{TRUE}}
 }
 \value{
-A tibble containing the merged spectral and response data with:
-\describe{
-\item{Sample_ID}{Character. Primary sample identifier (post-aggregation)}
-\item{<spectral_cols>}{Numeric columns containing averaged spectral data}
-\item{<response_vars>}{Selected response variables from response_data}
-\item{<coord_cols>}{Spatial coordinates (if include_coords = TRUE)}
-\item{n_replicates}{Integer. Number of spectral replicates averaged (if applicable)}
-\item{<parsed_cols>}{Additional columns from ID parsing (if parse_ids = TRUE)}
+A \verb{[tibble]} containing:
+\itemize{
+\item \code{Sample_ID}: Character. Primary sample identifier (post-aggregation)
+\item \verb{<spectral_cols>}: Numeric columns containing averaged spectral data
+\item \verb{<response_vars>}: Selected response variables from response_data
+\item \verb{<coord_cols>}: Spatial coordinates (if include_coords = TRUE)
+\item \code{n_replicates}: Integer. Number of spectral replicates averaged (if applicable)
+\item \verb{<parsed_cols>}: Additional columns from ID parsing (if parse_ids = TRUE)
 }
 }
 \description{
@@ -119,9 +120,9 @@ dataset <- create_dataset(
 
 }
 \seealso{
-\code{\link{preprocess_spectra}} for spectral preprocessing,
-\code{\link{create_configs}} for model configuration setup,
-\code{\link{finalize_dataset}} for outlier detection
+\code{\link[=preprocess_spectra]{preprocess_spectra()}} for spectral preprocessing,
+\code{\link[=create_configs]{create_configs()}} for model configuration setup,
+\code{\link[=finalize_dataset]{finalize_dataset()}} for outlier detection
 
 Other inputs: 
 \code{\link{create_configs}()},
