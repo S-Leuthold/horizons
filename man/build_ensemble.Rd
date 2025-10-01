@@ -85,6 +85,32 @@ Supports three ensemble methods:
 \item \code{"nn_meta"}: Neural network meta-learner for deep interaction modeling
 }
 }
+\details{
+\subsection{Error Handling}{
+
+The function implements robust error handling for ensemble operations:
+
+\strong{Critical operations (abort on failure)}:
+\itemize{
+\item Stack blending (\code{stacks::blend_predictions}) - Provides hints about CV predictions,
+penalty/mixture grid size, and metric compatibility
+\item Ensemble member fitting (\code{stacks::fit_members}) - Suggests checking training data,
+workflow finalization, and parallel processing settings
+\item XGBoost meta-learner training - Validates meta-features for missing/infinite values,
+response variable type, and hyperparameter settings
+}
+
+\strong{Individual model fitting (graceful degradation)}:
+\itemize{
+\item Weighted average model fitting: Failed models are skipped, ensemble continues with N-1 models
+\item XGBoost base model fitting: Failed models are skipped, meta-learner trains on remaining models
+\item Minimum 2 models required for ensemble after filtering failures
+\item Failed model attempts are logged with warnings, successful count reported
+}
+
+All error messages include actionable troubleshooting hints to help diagnose failures.
+}
+}
 \examples{
 \dontrun{
 # Build ensemble from finalized models
