@@ -46,7 +46,16 @@ Default: NULL (auto-determined from aggregate_by or id_column)}
 
 \item{coord_columns}{Character vector. Explicit coord column names (NULL = auto-detect)}
 
-\item{join_type}{Character. Type of join: "inner", "left", "right", "full". Default: "inner"}
+\item{join_type}{Character. Join strategy for combining spectra and response data.
+Default: "inner" (recommended for modeling - only samples with both spectra and response).
+\itemize{
+\item \code{"inner"}: Keep only samples with both spectra AND response (safe for modeling)
+\item \code{"left"}: Keep all spectra, even without response (creates NAs - may cause downstream failures)
+\item \code{"right"}: Keep all response samples, even without spectra (creates NAs in predictors)
+\item \code{"full"}: Keep everything (creates NAs - use only for data auditing, not modeling)
+}
+Note: Non-inner joins may introduce NA values that will cause model evaluation to fail
+unless \code{drop_na = TRUE} or data is filtered manually.}
 
 \item{drop_na}{Logical. Drop rows with NA in response variables? Default: TRUE}
 
