@@ -255,12 +255,13 @@ build_ensemble <- function(finalized_models,
 
       cv_preds <- current_model$cv_predictions[[1]]
 
-      if ("transformation" %in% names(current_model)) {
+      if ("transformation" %in% names(current_model) &&
+          needs_back_transformation(current_model$transformation)) {
+
         trans <- tolower(current_model$transformation)
-        if (!trans %in% c("none", "notrans", "na", "")) {
-          # Back-transform the .pred column
-          cv_preds$.pred <- back_transform_predictions(cv_preds$.pred, trans, warn = FALSE)
-        }
+
+        cv_preds$.pred <- back_transform_predictions(cv_preds$.pred, trans, warn = FALSE)
+
       }
 
       stacks::add_candidates(model_stack,
@@ -416,7 +417,8 @@ build_ensemble <- function(finalized_models,
       dplyr::select(wflow_id,
                     workflow,
                     weight,
-                    rmse) -> weighted_models
+                    rmse,
+                    transformation) -> weighted_models
 
     ## Fit models on training data ------------------------------------------
 
@@ -456,15 +458,19 @@ build_ensemble <- function(finalized_models,
          models = weighted_models_fitted,
          predict = function(new_data) {
 
-           # Get weighted predictions from each model (returns list of vectors)
-           predictions <- purrr::map2(weighted_models_fitted$fitted_workflow,
-                                      weighted_models_fitted$weight,
-                                      ~ predict(.x, new_data)$.pred * .y)
+           ## Get original-scale predictions from each model, weighted ----------
 
-           ## Sum weighted predictions across models ---------------------------
+           predictions <- purrr::map2(
+             weighted_models_fitted$fitted_workflow,
+             weighted_models_fitted$transformation,
+             ~ get_original_scale_predictions(.x, new_data, .y, warn = FALSE) *
+               weighted_models_fitted$weight[which(weighted_models_fitted$fitted_workflow == list(.x))]
+           )
 
-           # Combine predictions into matrix and sum across columns
+           ## Sum weighted predictions -----------------------------------------
+
            predictions_matrix <- do.call(cbind, predictions)
+
            tibble::tibble(.pred = rowSums(predictions_matrix))
 
         }) -> ensemble_model
@@ -492,11 +498,31 @@ build_ensemble <- function(finalized_models,
 
     }
 
-    ## Collect all CV predictions and align by row number ----------------------
-     finalized_models %>%
-      dplyr::mutate(cv_preds = purrr::map(cv_predictions, ~ {tune::collect_predictions(.x) %>%
-                                                              dplyr::select(.row, .pred) %>%
-                                                              dplyr::arrange(.row)})
+    ## Collect CV predictions and back-transform to original scale -------------
+
+    finalized_models %>%
+      dplyr::mutate(
+        cv_preds = purrr::map2(cv_predictions, transformation, ~ {
+
+          ## Extract CV predictions ----------------------------------------------
+
+          preds <- tune::collect_predictions(.x) %>%
+            dplyr::select(.row, .pred) %>%
+            dplyr::arrange(.row)
+
+          ## Back-transform to original scale -----------------------------------
+
+          if (needs_back_transformation(.y)) {
+
+            trans_lower <- tolower(as.character(.y))
+
+            preds$.pred <- back_transform_predictions(preds$.pred, trans_lower, warn = FALSE)
+
+          }
+
+          preds
+
+        })
       ) -> meta_data
 
     ## Create feature matrix from predictions ----------------------------------
@@ -544,6 +570,7 @@ build_ensemble <- function(finalized_models,
     # On failure: could return NULL and filter out failed models
 
     finalized_models %>%
+      dplyr::select(wflow_id, workflow, transformation) %>%
       dplyr::mutate(fitted_workflow = purrr::map(workflow,
                                                  ~ {fit(.x, data = train_data)})) -> base_models_fitted
 
@@ -554,19 +581,22 @@ build_ensemble <- function(finalized_models,
          base_models  = base_models_fitted,
          predict      = function(new_data) {
 
-        ## Get predictions from each base model --------------------------------
+        ## Get original-scale predictions from each base model ----------------
 
-           # Extract predictions from each model
-           base_models_fitted %>%
-             dplyr::pull(fitted_workflow) %>%
-             purrr::map(~ predict(.x, new_data)$.pred) %>%
-             purrr::set_names(paste0("pred_", base_models_fitted$wflow_id)) %>%
-             dplyr::bind_cols() %>%
-             as.matrix() -> base_preds
+           base_preds <- purrr::map2(
+             base_models_fitted$fitted_workflow,
+             base_models_fitted$transformation,
+             ~ get_original_scale_predictions(.x, new_data, .y, warn = FALSE)
+           )
 
-        ## Use XGBoost to blend predictions ------------------------------------
+        ## Convert to matrix with proper column names -------------------------
 
-        final_pred <- predict(xgb_meta_model, base_preds)
+           base_preds_matrix <- do.call(cbind, base_preds)
+           colnames(base_preds_matrix) <- paste0("pred_", base_models_fitted$wflow_id)
+
+        ## Use XGBoost to blend predictions -----------------------------------
+
+        final_pred <- predict(xgb_meta_model, base_preds_matrix)
 
         tibble::tibble(.pred = final_pred)
       }
@@ -736,9 +766,9 @@ build_ensemble <- function(finalized_models,
         # Back-transform each model's test predictions to original scale
         test_preds = purrr::map2(test_preds, transformation, ~ {
 
-          trans_lower <- tolower(as.character(.y))
+          if (needs_back_transformation(.y)) {
 
-          if (!is.na(trans_lower) && !trans_lower %in% c("none", "notrans", "na", "")) {
+            trans_lower <- tolower(as.character(.y))
 
             back_transform_predictions(.x, trans_lower, warn = FALSE)
 

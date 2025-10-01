@@ -123,6 +123,85 @@ back_transform_cv_predictions <- function(cv_results, transformation) {
   return(cv_results)
 }
 
+#' Check if Transformation Requires Back-transformation
+#'
+#' @description
+#' Determines whether a transformation type requires back-transformation.
+#' Handles NULL, NA, empty strings, and "none" consistently.
+#'
+#' @param transformation Character string indicating transformation type
+#' @return Logical. TRUE if back-transformation needed, FALSE otherwise
+#' @keywords internal
+#' @examples
+#' \dontrun{
+#' needs_back_transformation("log")      # TRUE
+#' needs_back_transformation("sqrt")     # TRUE
+#' needs_back_transformation("none")     # FALSE
+#' needs_back_transformation(NA)         # FALSE
+#' needs_back_transformation(NULL)       # FALSE
+#' }
+needs_back_transformation <- function(transformation) {
+
+  if (is.null(transformation) || is.na(transformation)) return(FALSE)
+
+  trans_lower <- tolower(as.character(transformation))
+
+  !trans_lower %in% c("none", "notrans", "na", "")
+
+}
+
+#' Get Predictions from Workflow with Automatic Back-transformation
+#'
+#' @description
+#' Extracts predictions from a fitted workflow and automatically back-transforms
+#' them based on the transformation type. This ensures predictions are always
+#' returned on the original scale, regardless of what transformation was used
+#' during model training.
+#'
+#' This helper centralizes the "predict + back-transform" pattern used across
+#' all ensemble methods (stacks, weighted_average, xgb_meta).
+#'
+#' @param fitted_workflow A fitted workflow object
+#' @param new_data Data frame to predict on
+#' @param transformation Character string indicating transformation type
+#'   ("log", "sqrt", "none", etc.)
+#' @param warn Logical. Issue warnings for edge cases in back-transformation?
+#'   Default: FALSE (suppressed for batch operations)
+#'
+#' @return Numeric vector of predictions on original scale
+#' @keywords internal
+#' @examples
+#' \dontrun{
+#' # Get predictions already on original scale
+#' preds <- get_original_scale_predictions(
+#'   fitted_wf,
+#'   test_data,
+#'   transformation = "log"
+#' )
+#' }
+get_original_scale_predictions <- function(fitted_workflow,
+                                          new_data,
+                                          transformation,
+                                          warn = FALSE) {
+
+  ## Get predictions from workflow -------------------------------------------
+
+  predictions <- predict(fitted_workflow, new_data)$.pred
+
+  ## Back-transform if needed -----------------------------------------------
+
+  if (needs_back_transformation(transformation)) {
+
+    trans_lower <- tolower(as.character(transformation))
+
+    predictions <- back_transform_predictions(predictions, trans_lower, warn = warn)
+
+  }
+
+  return(predictions)
+
+}
+
 #' Compute Metrics on Original Scale
 #'
 #' @description
@@ -135,29 +214,29 @@ back_transform_cv_predictions <- function(cv_results, transformation) {
 #'
 #' @return Tibble with computed metrics
 #' @keywords internal
-compute_original_scale_metrics <- function(truth, estimate, 
+compute_original_scale_metrics <- function(truth, estimate,
                                           metrics = yardstick::metric_set(
-                                            rrmse, 
-                                            yardstick::rmse, 
-                                            yardstick::rsq, 
-                                            yardstick::mae, 
-                                            rpd, 
+                                            rrmse,
+                                            yardstick::rmse,
+                                            yardstick::rsq,
+                                            yardstick::mae,
+                                            rpd,
                                             ccc
                                           )) {
-  
+
   # Create data frame for metric calculation
   metric_data <- tibble::tibble(
     truth = truth,
     estimate = estimate
   ) %>%
     tidyr::drop_na()  # Remove any NA values
-  
+
   # Check if we have enough data
   if (nrow(metric_data) < 2) {
     cli::cli_alert_warning("Insufficient data for metric calculation after removing NAs")
     return(tibble::tibble())
   }
-  
+
   # Calculate metrics
   metrics(metric_data, truth = truth, estimate = estimate)
 }
