@@ -62,6 +62,27 @@
 #' ensemble$metadata$improvement  # Improvement over best individual
 #' }
 #'
+#' @details
+#' ## Error Handling
+#'
+#' The function implements robust error handling for ensemble operations:
+#'
+#' **Critical operations (abort on failure)**:
+#' - Stack blending (`stacks::blend_predictions`) - Provides hints about CV predictions,
+#'   penalty/mixture grid size, and metric compatibility
+#' - Ensemble member fitting (`stacks::fit_members`) - Suggests checking training data,
+#'   workflow finalization, and parallel processing settings
+#' - XGBoost meta-learner training - Validates meta-features for missing/infinite values,
+#'   response variable type, and hyperparameter settings
+#'
+#' **Individual model fitting (graceful degradation)**:
+#' - Weighted average model fitting: Failed models are skipped, ensemble continues with N-1 models
+#' - XGBoost base model fitting: Failed models are skipped, meta-learner trains on remaining models
+#' - Minimum 2 models required for ensemble after filtering failures
+#' - Failed model attempts are logged with warnings, successful count reported
+#'
+#' All error messages include actionable troubleshooting hints to help diagnose failures.
+#'
 #' @export
 
 build_ensemble <- function(finalized_models,
@@ -330,18 +351,34 @@ build_ensemble <- function(finalized_models,
 
     }
 
-    # TODO: Wrap in safely_execute - critical stacks operation
-    # On failure: abort with cli::cli_abort("Stack blending failed")
+    ## Safely blend predictions - CRITICAL OPERATION ----------------------------
+    ## Abort on failure with informative error and hints
 
     # Note: blend_predictions requires standard yardstick metrics
     # Using rmse as default regardless of blend_metric parameter
-    stacks::blend_predictions(model_stack,
-                              penalty = blend_params$penalty,
-                              mixture = blend_params$mixture,
-                              metric  = yardstick::metric_set(yardstick::rmse),
-                              control = tune::control_grid(save_pred     = TRUE,
-                                                           save_workflow = TRUE,
-                                                           allow_par     = allow_par)) -> model_stack
+
+    safely_execute(
+      expr = {
+
+        stacks::blend_predictions(model_stack,
+                                  penalty = blend_params$penalty,
+                                  mixture = blend_params$mixture,
+                                  metric  = yardstick::metric_set(yardstick::rmse),
+                                  control = tune::control_grid(save_pred     = TRUE,
+                                                               save_workflow = TRUE,
+                                                               allow_par     = allow_par))
+
+      },
+      default_value = NULL,
+      error_message = "Stacking blend optimization failed with {length(blend_params$penalty)} penalty values and {length(blend_params$mixture)} mixture values"
+    ) -> safe_blend
+
+    handle_results(safe_blend,
+                   error_title = "Stacked ensemble blending failed",
+                   error_hints = c("Check that all models have valid CV predictions",
+                                   "Try reducing penalty/mixture grid size if optimizing",
+                                   "Verify models use compatible metrics"),
+                   abort_on_null = TRUE) -> model_stack
 
     ## -------------------------------------------------------------------------
     ## Step 3.3: Fit Member Models and Extract Weights
@@ -351,9 +388,25 @@ build_ensemble <- function(finalized_models,
 
     if (verbose) cli::cli_text("├─ Fitting member models...")
 
-    # TODO: Wrap in safely_execute - critical for final ensemble
-    # On failure: abort with cli::cli_abort("Ensemble fitting failed")
-    ensemble_model <- stacks::fit_members(model_stack)
+    ## Safely fit members - CRITICAL OPERATION ---------------------------------
+    ## Abort on failure with informative error and hints
+
+    safely_execute(
+      expr = {
+
+        stacks::fit_members(model_stack)
+
+      },
+      default_value = NULL,
+      error_message = "Fitting {length(model_stack$cols_map)} ensemble member workflows failed"
+    ) -> safe_fit
+
+    handle_results(safe_fit,
+                   error_title = "Ensemble member fitting failed",
+                   error_hints = c("Check training data has no missing values",
+                                   "Verify all workflows are properly finalized",
+                                   "Try setting allow_par = FALSE to debug"),
+                   abort_on_null = TRUE) -> ensemble_model
 
     ## Extract model weights -------------------------------------------------
 
@@ -421,18 +474,59 @@ build_ensemble <- function(finalized_models,
                     transformation) -> weighted_models
 
     ## Fit models on training data ------------------------------------------
+    ## Safely fit individual models - GRACEFUL DEGRADATION ------------------
+    ## Skip failed models, continue with N-1 models if >= 2 remain
+
+    n_models_initial <- nrow(weighted_models)
 
     weighted_models %>%
       dplyr::mutate(fitted_workflow = purrr::map2(workflow, wflow_id, ~ {
 
         if (verbose) cli::cli_text("   ├─ Fitting {.val {.y}}")
 
-        # TODO: Wrap fit() in safely_execute
-        # On failure: could either skip model or abort ensemble
-        fit(.x, data = train_data)
+        safe_fit <- safely_execute(
+          expr = {
+
+            fit(.x, data = train_data)
+
+          },
+          default_value = NULL,
+          error_message = "Failed to fit {.y}",
+          log_error = TRUE
+        )
+
+        safe_fit$result
 
         }
-      )) ->weighted_models_fitted
+      )) -> weighted_models_fitted
+
+    ## Filter out failed models ---------------------------------------------
+
+    weighted_models_fitted %>%
+      dplyr::filter(!purrr::map_lgl(fitted_workflow, is.null)) -> weighted_models_fitted
+
+    n_models_success <- nrow(weighted_models_fitted)
+    n_models_failed  <- n_models_initial - n_models_success
+
+    ## Validate minimum models for ensemble ---------------------------------
+
+    if (n_models_success < 2) {
+
+      cli::cli_abort(c(
+        "Insufficient models for weighted average ensemble",
+        "x" = "Successfully fitted {n_models_success} of {n_models_initial} models",
+        "i" = "Need at least 2 models, but only {n_models_success} succeeded"
+      ))
+
+    }
+
+    ## Report success/failure if failures occurred --------------------------
+
+    if (verbose && n_models_failed > 0) {
+
+      cli::cli_alert_warning("Fitted {n_models_success}/{n_models_initial} models successfully (skipped {n_models_failed} failures)")
+
+    }
 
     ## Display weight information -------------------------------------------
 
@@ -553,26 +647,84 @@ build_ensemble <- function(finalized_models,
          subsample        = 0.8,
          colsample_bytree = 0.8) -> xgb_params
 
-    # TODO: Wrap in safely_execute - XGBoost can fail on convergence
-    # On failure: abort with cli::cli_abort("XGBoost meta-learner failed")
+    ## Safely train XGBoost - CRITICAL OPERATION -------------------------------
+    ## Abort on failure with informative error and hints
 
-    xgboost::xgboost(data    = meta_features,
-                     label   = meta_response,
-                     params  = xgb_params,
-                     nrounds = 100,
-                     verbose = 0) -> xgb_meta_model
+    safely_execute(
+      expr = {
+
+        xgboost::xgboost(data    = meta_features,
+                         label   = meta_response,
+                         params  = xgb_params,
+                         nrounds = 100,
+                         verbose = 0)
+
+      },
+      default_value = NULL,
+      error_message = "XGBoost meta-learner training failed with {nrow(meta_features)} samples and {ncol(meta_features)} base models"
+    ) -> safe_xgb
+
+    handle_results(safe_xgb,
+                   error_title = "XGBoost meta-learner training failed",
+                   error_hints = c("Check that meta-features have no missing/infinite values",
+                                   "Verify response variable is numeric",
+                                   "Try reducing nrounds or adjusting max_depth"),
+                   abort_on_null = TRUE) -> xgb_meta_model
 
     ## Fit base models on full training data --------------------------------
+    ## Safely fit individual models - GRACEFUL DEGRADATION ------------------
+    ## Skip failed models, continue with N-1 models if >= 2 remain
 
     if (verbose) cli::cli_text("├─ Fitting {.val {nrow(finalized_models)}} base models on training data")
 
-    # TODO: Each fit() in the map should be wrapped in safely_execute
-    # On failure: could return NULL and filter out failed models
+    n_base_initial <- nrow(finalized_models)
 
     finalized_models %>%
       dplyr::select(wflow_id, workflow, transformation) %>%
-      dplyr::mutate(fitted_workflow = purrr::map(workflow,
-                                                 ~ {fit(.x, data = train_data)})) -> base_models_fitted
+      dplyr::mutate(fitted_workflow = purrr::map2(workflow, wflow_id, ~ {
+
+        safe_fit <- safely_execute(
+          expr = {
+
+            fit(.x, data = train_data)
+
+          },
+          default_value = NULL,
+          error_message = "Failed to fit base model {.y}",
+          log_error = TRUE
+        )
+
+        safe_fit$result
+
+      })) -> base_models_fitted
+
+    ## Filter out failed models ---------------------------------------------
+
+    base_models_fitted %>%
+      dplyr::filter(!purrr::map_lgl(fitted_workflow, is.null)) -> base_models_fitted
+
+    n_base_success <- nrow(base_models_fitted)
+    n_base_failed  <- n_base_initial - n_base_success
+
+    ## Validate minimum models for ensemble ---------------------------------
+
+    if (n_base_success < 2) {
+
+      cli::cli_abort(c(
+        "Insufficient base models for XGBoost meta-learner",
+        "x" = "Successfully fitted {n_base_success} of {n_base_initial} base models",
+        "i" = "Need at least 2 models, but only {n_base_success} succeeded"
+      ))
+
+    }
+
+    ## Report success/failure if failures occurred --------------------------
+
+    if (verbose && n_base_failed > 0) {
+
+      cli::cli_alert_warning("Fitted {n_base_success}/{n_base_initial} base models successfully (skipped {n_base_failed} failures)")
+
+    }
 
     ## Create ensemble model object --------------------------------------------
 
