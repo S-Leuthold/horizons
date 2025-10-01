@@ -249,8 +249,20 @@ build_ensemble <- function(finalized_models,
 
       }
 
+      # CRITICAL FIX: Back-transform CV predictions BEFORE adding to stack
+      # This ensures all models are on the same (original) scale for blending
+      cv_preds <- current_model$cv_predictions[[1]]
+
+      if ("transformation" %in% names(current_model)) {
+        trans <- tolower(current_model$transformation)
+        if (!trans %in% c("none", "notrans", "na", "")) {
+          # Back-transform the .pred column
+          cv_preds$.pred <- back_transform_predictions(cv_preds$.pred, trans, warn = FALSE)
+        }
+      }
+
       stacks::add_candidates(model_stack,
-                             candidates = current_model$cv_predictions[[1]],
+                             candidates = cv_preds,
                              name       = sanitized_name) -> model_stack
 
     }
@@ -894,7 +906,7 @@ build_ensemble <- function(finalized_models,
     cli::cli_text("├─ Test RMSE: {.val {round(ensemble_rmse, 4)}}")
     cli::cli_text("├─ Test R²: {.val {rsq_val}}")
 
-    if (improvement > 0) {
+    if (improvement > 0) {Hmmm
 
       cli::cli_text("└─ {col_green('✓')} Improved {.val {improvement}%} over best individual")
 
