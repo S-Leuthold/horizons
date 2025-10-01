@@ -249,8 +249,10 @@ build_ensemble <- function(finalized_models,
 
       }
 
-      # CRITICAL FIX: Back-transform CV predictions BEFORE adding to stack
-      # This ensures all models are on the same (original) scale for blending
+      ## Back-transform CV predictions to original scale before stacking ----------
+      ## This ensures the meta-learner trains on original-scale predictions
+      ## regardless of what transformation each individual model used
+
       cv_preds <- current_model$cv_predictions[[1]]
 
       if ("transformation" %in% names(current_model)) {
@@ -633,39 +635,31 @@ build_ensemble <- function(finalized_models,
         dplyr::rename(Predicted = .pred) -> ensemble_predictions
     }
 
-    ## CRITICAL FIX: Back-transform ensemble predictions if models used transformations
+    ## Scale consistency check ---------------------------------------------------
+    ##
+    ## IMPORTANT: Ensemble predictions are already on the ORIGINAL SCALE
+    ##
+    ## Transformation flow:
+    ## 1. Individual models trained with response transformations (log, sqrt, etc.)
+    ## 2. CV predictions generated on TRANSFORMED scale during finalization
+    ## 3. CV predictions BACK-TRANSFORMED before add_candidates() (lines 252-262)
+    ## 4. Stacks meta-learner trains on ORIGINAL SCALE predictions
+    ## 5. Therefore: ensemble predictions are ALREADY on original scale
+    ##
+    ## No additional back-transformation needed or allowed here
 
-    # Check if any models used response transformations
-    has_transformation <- FALSE
-    transformation_type <- "none"
-
+    # Verify transformation consistency across models
     if ("transformation" %in% names(finalized_models)) {
 
-      transformations <- unique(tolower(finalized_models$transformation))
-      transformations <- transformations[!transformations %in% c("none", "na", "")]
+      unique(tolower(finalized_models$transformation)) %>%
+        setdiff(c("none", "notrans", "na", "")) -> active_transformations
 
-      if (length(transformations) > 0) {
+      if (length(active_transformations) > 1 && verbose) {
 
-        has_transformation <- TRUE
-        transformation_type <- transformations[1]
-
-        if (length(unique(transformations)) > 1) {
-          cli::cli_alert_warning("Models use different transformations - using {transformation_type} for back-transformation")
-        }
+        cli::cli_alert_info("Models use mixed transformations: {paste(active_transformations, collapse = ', ')}")
+        cli::cli_alert_info("All CV predictions were back-transformed to original scale before stacking")
 
       }
-    }
-
-    # Back-transform ensemble predictions if needed
-    if (has_transformation) {
-
-      if (verbose) {
-        cli::cli_alert_info("Back-transforming ensemble predictions from {transformation_type} scale")
-      }
-
-      ensemble_predictions$Predicted <- back_transform_predictions(ensemble_predictions$Predicted,
-                                                                   transformation_type,
-                                                                   warn = FALSE)
 
     }
 
@@ -739,13 +733,21 @@ build_ensemble <- function(finalized_models,
         test_preds = purrr::map(fitted_workflow, ~ {
           predict(.x, test_data)$.pred
         }),
-        # Back-transform predictions if needed (must match ensemble back-transformation)
+        # Back-transform each model's test predictions to original scale
         test_preds = purrr::map2(test_preds, transformation, ~ {
-          if (!is.na(.y) && has_transformation && tolower(.y) != "none") {
-            back_transform_predictions(.x, .y, warn = FALSE)
+
+          trans_lower <- tolower(as.character(.y))
+
+          if (!is.na(trans_lower) && !trans_lower %in% c("none", "notrans", "na", "")) {
+
+            back_transform_predictions(.x, trans_lower, warn = FALSE)
+
           } else {
+
             .x
+
           }
+
         }),
         # Calculate test RMSE for each model (now on original scale)
         test_rmse = purrr::map_dbl(test_preds, ~ {
@@ -783,7 +785,7 @@ build_ensemble <- function(finalized_models,
 
       if (improvement > 0) {
 
-        cli::cli_text("├─ {col_green('✓')} Improves over best individual by {.val {improvement}%}")
+        cli::cli_text("├─ {cli::col_green('✓')} Improves over best individual by {.val {improvement}%}")
 
       } else if (improvement < 0) {
 
@@ -791,7 +793,7 @@ build_ensemble <- function(finalized_models,
 
       } else {
 
-        cli::cli_text("├─ {col_blue('=')} Performs equally to best individual")
+        cli::cli_text("├─ {cli::col_blue('=')} Performs equally to best individual")
 
       }
 
@@ -906,9 +908,9 @@ build_ensemble <- function(finalized_models,
     cli::cli_text("├─ Test RMSE: {.val {round(ensemble_rmse, 4)}}")
     cli::cli_text("├─ Test R²: {.val {rsq_val}}")
 
-    if (improvement > 0) {Hmmm
+    if (improvement > 0) {
 
-      cli::cli_text("└─ {col_green('✓')} Improved {.val {improvement}%} over best individual")
+      cli::cli_text("└─ {cli::col_green('✓')} Improved {.val {improvement}%} over best individual")
 
     } else {
 
