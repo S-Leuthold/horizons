@@ -1294,3 +1294,433 @@ mock_climate_fetcher <- function(input_data, ...) {
   )
 }
 ```
+---
+
+## test-inputs-preprocess.R
+
+### Function: `preprocess_spectra()`
+
+#### Test Group 1: Input Validation
+
+**Test 1.1: spectra_data must be a data frame**
+- **Setup**: None
+- **Input**: `preprocess_spectra(spectra_data = "not a dataframe")`
+- **Expected**: Error with message "spectra_data must be a data frame or tibble"
+- **Verify**: `expect_error(..., "data frame or tibble")`
+
+**Test 1.2: spectra_data must have Sample_ID column**
+- **Setup**: Create tibble without Sample_ID
+  ```r
+  bad_data <- tibble(`600` = c(0.1, 0.2), `602` = c(0.15, 0.25))
+  ```
+- **Input**: `preprocess_spectra(spectra_data = bad_data)`
+- **Expected**: Error with message "spectra_data must have a Sample_ID column"
+- **Verify**: `expect_error(..., "Sample_ID column")`
+
+**Test 1.3: spectra_data must have at least one spectral column**
+- **Setup**: Create tibble with only Sample_ID
+  ```r
+  bad_data <- tibble(Sample_ID = c("S1", "S2"))
+  ```
+- **Input**: `preprocess_spectra(spectra_data = bad_data)`
+- **Expected**: Error with message "spectra_data must have at least one spectral column"
+- **Verify**: `expect_error(..., "at least one spectral column")`
+
+**Test 1.4: resample_interval must be positive numeric**
+- **Setup**: Valid spectra data
+- **Input**: `preprocess_spectra(spectra_data = valid_data, resample_interval = -2)`
+- **Expected**: Error with message "resample_interval must be a positive number"
+- **Verify**: `expect_error(..., "positive number")`
+
+**Test 1.5: baseline_method must be valid choice**
+- **Setup**: Valid spectra data
+- **Input**: `preprocess_spectra(spectra_data = valid_data, baseline_method = "invalid")`
+- **Expected**: Error about baseline_method argument matching
+- **Verify**: `expect_error(..., "should be one of")`
+
+#### Test Group 2: Wavenumber Extraction and Validation
+
+**Test 2.1: Numeric column names are extracted correctly**
+- **Setup**: Create tibble with numeric column names
+  ```r
+  test_data <- tibble(
+    Sample_ID = c("S1", "S2"),
+    `600` = c(0.1, 0.2),
+    `602` = c(0.15, 0.25),
+    `604` = c(0.12, 0.22)
+  )
+  ```
+- **Input**: `preprocess_spectra(test_data, baseline_method = "none", verbose = FALSE)`
+- **Expected**: Function processes without error
+- **Verify**: Successful execution and correct wavenumber range in output
+
+**Test 2.2: Non-numeric column names cause error**
+- **Setup**: Create tibble with non-numeric spectral columns
+  ```r
+  bad_data <- tibble(
+    Sample_ID = c("S1", "S2"),
+    wave_A = c(0.1, 0.2),
+    wave_B = c(0.15, 0.25)
+  )
+  ```
+- **Input**: `preprocess_spectra(bad_data, verbose = FALSE)`
+- **Expected**: Error with message "Non-numeric column names found in spectral data"
+- **Verify**: `expect_error(..., "Non-numeric column names")`
+
+#### Test Group 3: Baseline Correction
+
+**Test 3.1: baseline_method = "none" skips baseline correction**
+- **Setup**: Valid MIR spectra (600-4000 cm⁻¹ range)
+- **Input**: `preprocess_spectra(spectra, baseline_method = "none", verbose = FALSE)`
+- **Expected**: Data is resampled but not baseline-corrected
+- **Verify**: Output dimensions match expected resampled grid
+
+**Test 3.2: baseline_method = "rubberband" applies convex hull baseline**
+- **Setup**: Valid MIR spectra with baseline drift
+- **Input**: `preprocess_spectra(spectra, baseline_method = "rubberband", verbose = FALSE)`
+- **Expected**: Baseline correction applied, then resampling
+- **Verify**: 
+  - Output has expected dimensions
+  - Spectral values differ from input (baseline removed)
+
+**Test 3.3: baseline_method = "polynomial" applies SNV + detrending**
+- **Setup**: Valid MIR spectra
+- **Input**: `preprocess_spectra(spectra, baseline_method = "polynomial", verbose = FALSE)`
+- **Expected**: Polynomial detrending applied, then resampling
+- **Verify**: 
+  - Output has expected dimensions
+  - Mean of each spectrum approximately zero (SNV effect)
+
+**Test 3.4: Rubberband handles errors gracefully**
+- **Setup**: Mock `prospectr::baseline()` to fail
+- **Input**: `preprocess_spectra(spectra, baseline_method = "rubberband")`
+- **Expected**: Informative error with diagnostic hints
+- **Verify**: Error message includes hints about irregular data, zero spectra, wavelength range
+
+**Test 3.5: Polynomial handles errors gracefully**
+- **Setup**: Mock `prospectr::detrend()` to fail
+- **Input**: `preprocess_spectra(spectra, baseline_method = "polynomial")`
+- **Expected**: Informative error with diagnostic hints
+- **Verify**: Error message includes hints about wavelength points, collinear data
+
+#### Test Group 4: Spectral Data Validation
+
+**Test 4.1: Warns about infinite values in spectral matrix**
+- **Setup**: Create spectra with Inf values
+  ```r
+  bad_spectra <- tibble(
+    Sample_ID = c("S1", "S2"),
+    `600` = c(Inf, 0.2),
+    `602` = c(0.15, -Inf)
+  )
+  ```
+- **Input**: `preprocess_spectra(bad_spectra, baseline_method = "none", verbose = FALSE)`
+- **Expected**: Warning about non-finite values
+- **Verify**: `expect_warning(..., "Non-finite values detected")`
+
+**Test 4.2: Warns about NaN values in spectral matrix**
+- **Setup**: Create spectra with NaN values
+  ```r
+  bad_spectra <- tibble(
+    Sample_ID = c("S1", "S2"),
+    `600` = c(NaN, 0.2),
+    `602` = c(0.15, 0.25)
+  )
+  ```
+- **Input**: `preprocess_spectra(bad_spectra, baseline_method = "none", verbose = FALSE)`
+- **Expected**: Warning about non-finite values
+- **Verify**: `expect_warning(..., "NaN")`
+
+**Test 4.3: Info message for NA values when verbose = TRUE**
+- **Setup**: Create spectra with NA values
+  ```r
+  spectra_with_na <- tibble(
+    Sample_ID = c("S1", "S2"),
+    `600` = c(NA, 0.2),
+    `602` = c(0.15, 0.25)
+  )
+  ```
+- **Input**: `preprocess_spectra(spectra_with_na, baseline_method = "none", verbose = TRUE)`
+- **Expected**: Info message about NA values (not error or warning)
+- **Verify**: `expect_message(..., "NA values")`
+
+**Test 4.4: Warns about all-zero spectra**
+- **Setup**: Create spectra with one all-zero row
+  ```r
+  zero_spectra <- tibble(
+    Sample_ID = c("S1", "S2", "S3"),
+    `600` = c(0.1, 0, 0.2),
+    `602` = c(0.15, 0, 0.25),
+    `604` = c(0.12, 0, 0.22)
+  )
+  ```
+- **Input**: `preprocess_spectra(zero_spectra, baseline_method = "none", verbose = FALSE)`
+- **Expected**: Warning identifying zero spectra with Sample_IDs
+- **Verify**: 
+  - `expect_warning(..., "all zero values")`
+  - Warning message includes "S2"
+
+#### Test Group 5: Resampling to Regular Grid
+
+**Test 5.1: MIR spectra resampled to 600-4000 cm⁻¹ grid**
+- **Setup**: Create MIR spectra (650-3900 cm⁻¹, irregular spacing)
+  ```r
+  attr(mir_spectra, "spectra_type") <- "MIR"
+  ```
+- **Input**: `preprocess_spectra(mir_spectra, resample_interval = 2, verbose = FALSE)`
+- **Expected**: Output has columns from 600 to 4000 in 2 cm⁻¹ steps
+- **Verify**: 
+  - `expect_equal(min(as.numeric(names(result)[-1])), 600)`
+  - `expect_equal(max(as.numeric(names(result)[-1])), 4000)`
+  - Column spacing = 2 cm⁻¹
+
+**Test 5.2: NIR spectra resampled to actual data range**
+- **Setup**: Create NIR spectra (4500-9500 cm⁻¹)
+  ```r
+  attr(nir_spectra, "spectra_type") <- "NIR"
+  ```
+- **Input**: `preprocess_spectra(nir_spectra, resample_interval = 4, verbose = FALSE)`
+- **Expected**: Output grid covers 4500-9500 range with 4 cm⁻¹ spacing
+- **Verify**: 
+  - Min/max wavenumbers approximately match input range (ceiling/floor)
+  - Column spacing = 4 cm⁻¹
+
+**Test 5.3: Missing spectra_type attribute defaults to MIR with warning**
+- **Setup**: Create spectra without spectra_type attribute
+- **Input**: `preprocess_spectra(no_attr_spectra, verbose = FALSE)`
+- **Expected**: Warning about missing attribute, assumes MIR
+- **Verify**: 
+  - `expect_warning(..., "No spectra_type attribute")`
+  - Output uses MIR range (600-4000)
+
+**Test 5.4: Unknown spectra_type causes error**
+- **Setup**: Create spectra with invalid type
+  ```r
+  attr(bad_spectra, "spectra_type") <- "INVALID"
+  ```
+- **Input**: `preprocess_spectra(bad_spectra, verbose = FALSE)`
+- **Expected**: Error about unknown spectra_type
+- **Verify**: `expect_error(..., "Unknown spectra_type")`
+
+**Test 5.5: Resampling handles errors with diagnostic hints**
+- **Setup**: Mock `prospectr::resample()` to fail
+- **Input**: `preprocess_spectra(spectra, verbose = FALSE)`
+- **Expected**: Error with hints about wavelength mismatch, range issues
+- **Verify**: 
+  - Error message includes original and target wavelength ranges
+  - Hints mention grid mismatch, non-monotonic wavelengths
+
+**Test 5.6: resample_interval affects output grid density**
+- **Setup**: Valid MIR spectra
+- **Input**: 
+  - `result_2 <- preprocess_spectra(spectra, resample_interval = 2, verbose = FALSE)`
+  - `result_4 <- preprocess_spectra(spectra, resample_interval = 4, verbose = FALSE)`
+- **Expected**: result_2 has approximately 2× more columns than result_4
+- **Verify**: 
+  - `expect_equal(ncol(result_2), 2 * ncol(result_4), tolerance = 0.1)`
+
+#### Test Group 6: Attribute Preservation
+
+**Test 6.1: Input attributes preserved in output**
+- **Setup**: Create spectra with custom attributes
+  ```r
+  test_spectra <- tibble(Sample_ID = c("S1", "S2"), `600` = c(0.1, 0.2), `602` = c(0.15, 0.25))
+  attr(test_spectra, "spectra_type") <- "MIR"
+  attr(test_spectra, "source") <- "opus"
+  attr(test_spectra, "source_path") <- "/path/to/data"
+  attr(test_spectra, "custom_metadata") <- list(instrument = "Bruker")
+  ```
+- **Input**: `result <- preprocess_spectra(test_spectra, verbose = FALSE)`
+- **Expected**: All attributes preserved except class, names, row.names
+- **Verify**: 
+  - `expect_equal(attr(result, "spectra_type"), "MIR")`
+  - `expect_equal(attr(result, "source"), "opus")`
+  - `expect_equal(attr(result, "source_path"), "/path/to/data")`
+  - `expect_equal(attr(result, "custom_metadata"), list(instrument = "Bruker"))`
+
+**Test 6.2: Tibble structure attributes not overwritten**
+- **Setup**: Valid spectra
+- **Input**: `result <- preprocess_spectra(spectra, verbose = FALSE)`
+- **Expected**: Result is still a tibble with proper class
+- **Verify**: 
+  - `expect_s3_class(result, "tbl_df")`
+  - `expect_true("data.frame" %in% class(result))`
+
+#### Test Group 7: Output Structure and Integrity
+
+**Test 7.1: Output has correct structure**
+- **Setup**: Create 3 samples with MIR spectra
+- **Input**: `result <- preprocess_spectra(spectra, resample_interval = 2, verbose = FALSE)`
+- **Expected**: Tibble with Sample_ID + numeric wavenumber columns
+- **Verify**: 
+  - `expect_s3_class(result, "tbl_df")`
+  - `expect_equal(nrow(result), 3)`
+  - `expect_true("Sample_ID" %in% names(result))`
+  - All other columns are numeric wavenumbers
+
+**Test 7.2: Sample_ID preserved and in same order**
+- **Setup**: Create spectra with specific Sample_IDs
+  ```r
+  test_spectra <- tibble(
+    Sample_ID = c("SAMPLE_C", "SAMPLE_A", "SAMPLE_B"),
+    `600` = c(0.1, 0.2, 0.3),
+    `602` = c(0.15, 0.25, 0.35)
+  )
+  ```
+- **Input**: `result <- preprocess_spectra(test_spectra, verbose = FALSE)`
+- **Expected**: Sample_IDs in same order as input
+- **Verify**: 
+  - `expect_equal(result$Sample_ID, c("SAMPLE_C", "SAMPLE_A", "SAMPLE_B"))`
+
+**Test 7.3: No missing values introduced by resampling (unless in input)**
+- **Setup**: Valid spectra without NAs
+- **Input**: `result <- preprocess_spectra(clean_spectra, verbose = FALSE)`
+- **Expected**: Output has no NAs in spectral data
+- **Verify**: 
+  - `spectral_cols <- setdiff(names(result), "Sample_ID")`
+  - `expect_false(any(is.na(result[, spectral_cols])))`
+
+**Test 7.4: Memory efficiency with large datasets**
+- **Setup**: Create large spectra matrix (e.g., 5000 samples × 3500 wavenumbers)
+- **Input**: `result <- preprocess_spectra(large_spectra, verbose = FALSE)`
+- **Expected**: Function completes without memory errors
+- **Verify**: 
+  - Successful completion
+  - Output dimensions correct
+  - (Optional: monitor memory usage if >2GB warning shown)
+
+#### Test Group 8: Verbose Output
+
+**Test 8.1: verbose = TRUE shows configuration summary**
+- **Setup**: Valid spectra
+- **Input**: `preprocess_spectra(spectra, verbose = TRUE)`
+- **Expected**: Output shows pipeline configuration
+- **Verify**: `expect_output(..., "Spectral Preprocessing Pipeline")`
+
+**Test 8.2: verbose = TRUE shows processing steps**
+- **Setup**: Valid spectra
+- **Input**: `preprocess_spectra(spectra, baseline_method = "rubberband", verbose = TRUE)`
+- **Expected**: Output shows "Processing Steps", "Baseline correction", "Resampling"
+- **Verify**: 
+  - `expect_output(..., "Processing Steps")`
+  - `expect_output(..., "Baseline correction")`
+  - `expect_output(..., "Resampling")`
+
+**Test 8.3: verbose = TRUE shows summary with timing**
+- **Setup**: Valid spectra
+- **Input**: `preprocess_spectra(spectra, verbose = TRUE)`
+- **Expected**: Output shows summary with samples processed and total time
+- **Verify**: 
+  - `expect_output(..., "Summary")`
+  - `expect_output(..., "Samples processed")`
+  - `expect_output(..., "Total time")`
+
+**Test 8.4: verbose = FALSE suppresses all output**
+- **Setup**: Valid spectra
+- **Input**: `result <- preprocess_spectra(spectra, verbose = FALSE)`
+- **Expected**: No output to console
+- **Verify**: `expect_silent(preprocess_spectra(spectra, verbose = FALSE))`
+
+**Test 8.5: High memory warning shows when appropriate**
+- **Setup**: Create large spectra triggering >2GB threshold
+- **Input**: `preprocess_spectra(large_spectra, verbose = TRUE)`
+- **Expected**: Warning about high memory usage
+- **Verify**: `expect_output(..., "High memory usage")`
+
+#### Test Group 9: Integration Tests
+
+**Test 9.1: Complete workflow with all preprocessing options**
+- **Setup**: Valid MIR spectra from read_spectra()
+- **Input**: 
+  ```r
+  raw_spectra <- read_spectra("opus", test_path, "MIR", verbose = FALSE)
+  result <- preprocess_spectra(raw_spectra, 
+                                resample_interval = 2, 
+                                baseline_method = "rubberband",
+                                verbose = FALSE)
+  ```
+- **Expected**: Successfully preprocessed spectra ready for modeling
+- **Verify**: 
+  - Output is tibble with correct structure
+  - Attributes preserved from read_spectra()
+  - Wavenumbers on regular 2 cm⁻¹ grid
+
+**Test 9.2: Preprocessing maintains compatibility with create_dataset()**
+- **Setup**: Preprocessed spectra + response data
+- **Input**: 
+  ```r
+  preprocessed <- preprocess_spectra(spectra, verbose = FALSE)
+  dataset <- create_dataset(preprocessed, response_data, "SOC")
+  ```
+- **Expected**: create_dataset() accepts preprocessed output without errors
+- **Verify**: Successful dataset creation
+
+**Test 9.3: Multiple baseline methods give different results**
+- **Setup**: Same input spectra
+- **Input**: 
+  - `result_none <- preprocess_spectra(spectra, baseline_method = "none", verbose = FALSE)`
+  - `result_rubber <- preprocess_spectra(spectra, baseline_method = "rubberband", verbose = FALSE)`
+  - `result_poly <- preprocess_spectra(spectra, baseline_method = "polynomial", verbose = FALSE)`
+- **Expected**: All three produce different spectral values
+- **Verify**: 
+  - Same output dimensions
+  - Different spectral values (correlation < 1.0)
+  - All preserve Sample_ID order
+
+---
+
+### Helper Functions for test-inputs-preprocess.R
+
+```r
+# Create minimal valid MIR spectra for testing
+create_test_mir_spectra <- function(n_samples = 3, wn_range = c(650, 3900), n_points = 100) {
+  wavenumbers <- seq(wn_range[1], wn_range[2], length.out = n_points)
+  spectra_matrix <- matrix(runif(n_samples * n_points, 0.1, 0.5), 
+                          nrow = n_samples, 
+                          ncol = n_points)
+  
+  spectra <- tibble::as_tibble(spectra_matrix) %>%
+    stats::setNames(as.character(round(wavenumbers))) %>%
+    tibble::add_column(Sample_ID = paste0("S", seq_len(n_samples)), .before = 1)
+  
+  attr(spectra, "spectra_type") <- "MIR"
+  attr(spectra, "source") <- "opus"
+  return(spectra)
+}
+
+# Create NIR spectra for testing
+create_test_nir_spectra <- function(n_samples = 3, wn_range = c(4500, 9500), n_points = 100) {
+  wavenumbers <- seq(wn_range[1], wn_range[2], length.out = n_points)
+  spectra_matrix <- matrix(runif(n_samples * n_points, 0.1, 0.5), 
+                          nrow = n_samples, 
+                          ncol = n_points)
+  
+  spectra <- tibble::as_tibble(spectra_matrix) %>%
+    stats::setNames(as.character(round(wavenumbers))) %>%
+    tibble::add_column(Sample_ID = paste0("S", seq_len(n_samples)), .before = 1)
+  
+  attr(spectra, "spectra_type") <- "NIR"
+  attr(spectra, "source") <- "csv"
+  return(spectra)
+}
+
+# Create spectra with baseline drift for testing baseline correction
+create_spectra_with_baseline <- function(n_samples = 3) {
+  wavenumbers <- seq(650, 3900, length.out = 100)
+  
+  # Create spectra with linear baseline drift
+  spectra_matrix <- matrix(0, nrow = n_samples, ncol = length(wavenumbers))
+  for (i in seq_len(n_samples)) {
+    baseline <- seq(0.1, 0.3, length.out = length(wavenumbers))
+    signal <- 0.1 * sin(wavenumbers / 200) + runif(length(wavenumbers), 0, 0.05)
+    spectra_matrix[i, ] <- baseline + signal
+  }
+  
+  spectra <- tibble::as_tibble(spectra_matrix) %>%
+    stats::setNames(as.character(round(wavenumbers))) %>%
+    tibble::add_column(Sample_ID = paste0("S", seq_len(n_samples)), .before = 1)
+  
+  attr(spectra, "spectra_type") <- "MIR"
+  return(spectra)
+}
+```
