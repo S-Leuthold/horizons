@@ -19,20 +19,29 @@ build_recipe(
 
 \item{spectral_transformation}{Character. Spectral preprocessing pipeline. One of:
 \itemize{
-\item{"raw"}
-\item{"sg"}
-\item{"snv"}
-\item{"deriv1"}
-\item{"deriv2"}
-\item{"snv_deriv1"}
-\item{"snv_deriv2"}
+\item \code{"raw"}
+\item \code{"sg"}
+\item \code{"snv"}
+\item \code{"deriv1"}
+\item \code{"deriv2"}
+\item \code{"snv_deriv1"}
+\item \code{"snv_deriv2"}
 }}
 
 \item{response_transformation}{Character. Transformation applied to response variable. One of:
 \itemize{
-\item{"No Transformation"}
-\item{"Log Transformation"}
-\item{"Square Root Transformation"}
+\item \code{"No Transformation"}
+\item \code{"Log Transformation"}
+\item \code{"Square Root Transformation"}
+}}
+
+\item{feature_selection_method}{Character. Feature selection approach. One of:
+\itemize{
+\item \code{"pca"} - Principal component analysis (99.5\% variance threshold)
+\item \code{"correlation"} - Correlation-based selection
+\item \code{"boruta"} - Boruta algorithm for feature importance
+\item \code{"cars"} - Competitive Adaptive Reweighted Sampling
+\item \code{"none"} - No feature selection
 }}
 
 \item{covariate_selection}{Optional character vector of covariates to include (e.g., \code{"Clay"}, \code{"pH"}).
@@ -45,7 +54,7 @@ if any covariates are selected.}
 A \code{recipes::recipe} object containing the full preprocessing pipeline.
 }
 \description{
-Constructs a preprocessing pipeline using the \pkg{recipes} framework. Applies user-specified
+Constructs a preprocessing pipeline using the recipes framework. Applies user-specified
 transformations to the response and spectra, optionally adds covariates, and includes PCA
 dimensionality reduction. This function supports stacking workflows and harmonized modeling
 across different preprocessing combinations.
@@ -54,7 +63,7 @@ across different preprocessing combinations.
 Roles for \code{Sample_ID} and \code{Project} (if present) are set to \code{"id"} and
 \code{"metadata"}, respectively. Response transformation steps are marked \code{skip = TRUE}
 to preserve inverse-transform compatibility. Spectral preprocessing is handled by
-\code{\link{step_transform_spectra}}; covariates are injected using \code{\link{step_add_covariates}}.
+\code{\link[=step_transform_spectra]{step_transform_spectra()}}; covariates are injected using \code{\link[=step_add_covariates]{step_add_covariates()}}.
 }
 \examples{
 \dontrun{
@@ -69,6 +78,6 @@ build_recipe(
 
 }
 \seealso{
-\code{\link{step_transform_spectra}}, \code{\link{step_add_covariates}}, \code{\link{build_model_grid}}
+\code{\link[=step_transform_spectra]{step_transform_spectra()}}, \code{\link[=step_add_covariates]{step_add_covariates()}}, \code{\link[=build_model_grid]{build_model_grid()}}
 }
 \keyword{internal}
