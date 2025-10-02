@@ -163,6 +163,7 @@ create_dataset <- function(spectra_data,
     cli::cli_text("├─ ID parsing: {if (parse_ids) paste0('Enabled (', id_format, ')') else 'Disabled'}")
     cli::cli_text("├─ Join strategy: {join_type} join on {id_column}")
     cli::cli_text("└─ Coordinate inclusion: {if (include_coords) 'Enabled' else 'Disabled'}")
+    cli::cli_text("")
   }
 
   ## ---------------------------------------------------------------------------
@@ -175,7 +176,7 @@ create_dataset <- function(spectra_data,
 
       cli::cli_text("{.strong ID Processing Pipeline}")
       cli::cli_text("├─ ID Parsing")
-      cli::cli_text("│  ├─ Format: {id_format}")
+      cli::cli_text("│  └─ Format: {id_format}")
 
     }
 
@@ -389,7 +390,8 @@ create_dataset <- function(spectra_data,
 
     if (verbose) {
 
-      cli::cli_text("├─ Data Integration")
+      join_prefix <- if (drop_na && !is.null(response_variables)) "├─" else "└─"
+      cli::cli_text("{join_prefix} Data Integration")
       cli::cli_text("│  └─ Using {join_type} join on {join_column}")
 
     }
@@ -409,7 +411,7 @@ create_dataset <- function(spectra_data,
   if (drop_na && !is.null(response_variables)) {
 
     if (verbose) {
-      cli::cli_text("├─ Data cleaning")
+      cli::cli_text("└─ Data cleaning")
     }
 
     n_before_na <- nrow(result)
@@ -441,6 +443,7 @@ create_dataset <- function(spectra_data,
     spectral_cols    <- sum(is_numeric_name)
     response_cols    <- ncol(result) - spectral_cols - 1
 
+    cli::cli_text("")
     cli::cli_text("{.strong Dataset Creation Complete}")
     cli::cli_text("├─ Final samples: {nrow(result)}")
     cli::cli_text("├─ Total columns: {ncol(result)}")

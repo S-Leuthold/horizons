@@ -168,6 +168,7 @@ finalize_dataset <- function(dataset,
     cli::cli_text("├─ Spectral outlier method: {spectral_outlier_method}")
     cli::cli_text("├─ Response outlier detection: {if (detect_response_outliers) 'Enabled' else 'Disabled'}")
     cli::cli_text("└─ Action: {if (remove_outliers) 'Remove outliers' else 'Flag only'}")
+    cli::cli_text("")
 
   }
 
@@ -423,7 +424,8 @@ finalize_dataset <- function(dataset,
       final_samples <- nrow(dataset)
 
       if (verbose) {
-        cli::cli_text("│  ├─ Removed {n_nonpositive} non-positive value{?s}")
+        pos_prefix <- if (drop_na) "│  ├─" else "│  └─"
+        cli::cli_text("{pos_prefix} Removed {n_nonpositive} non-positive value{?s}")
       }
 
     }
@@ -451,19 +453,20 @@ finalize_dataset <- function(dataset,
 
     total_time <- as.numeric(difftime(Sys.time(), total_start_time, units = "secs"))
 
-    cli::cli_text("└─ {.strong Summary}")
-    cli::cli_text("   ├─ Total outliers detected: {length(all_outliers)}")
-    cli::cli_text("   ├─ Spectral outliers: {if (length(spectral_outliers) > 0) length(spectral_outliers) else 0}")
-    cli::cli_text("   ├─ Response outliers: {if (length(response_outliers) > 0) length(response_outliers) else 0}")
+    cli::cli_text("")
+    cli::cli_text("{.strong Summary}")
+    cli::cli_text("├─ Total outliers detected: {length(all_outliers)}")
+    cli::cli_text("├─ Spectral outliers: {if (length(spectral_outliers) > 0) length(spectral_outliers) else 0}")
+    cli::cli_text("├─ Response outliers: {if (length(response_outliers) > 0) length(response_outliers) else 0}")
     if (enforce_positive && n_nonpositive > 0) {
-      cli::cli_text("   ├─ Non-positive values removed: {n_nonpositive}")
+      cli::cli_text("├─ Non-positive values removed: {n_nonpositive}")
     }
     if (drop_na && n_na_removed > 0) {
-      cli::cli_text("   ├─ NA values removed: {n_na_removed}")
+      cli::cli_text("├─ NA values removed: {n_na_removed}")
     }
-    cli::cli_text("   ├─ Final samples: {final_samples}")
-    cli::cli_text("   ├─ Action: {if (remove_outliers && length(all_outliers) > 0) 'Removed' else 'Flagged only'}")
-    cli::cli_text("   └─ Time: {round(total_time, 2)}s")
+    cli::cli_text("├─ Final samples: {final_samples}")
+    cli::cli_text("├─ Action: {if (remove_outliers && length(all_outliers) > 0) 'Removed' else 'Flagged only'}")
+    cli::cli_text("└─ Time: {round(total_time, 2)}s")
 
   }
 
