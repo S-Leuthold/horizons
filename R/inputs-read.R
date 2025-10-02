@@ -136,13 +136,11 @@ read_spectra <- function(source       = c("opus", "csv"),
 
     ## Display configuration ----------------------------------------------------
 
-    cli::cli_text("")
     cli::cli_text("{.strong Spectral Data Reading Pipeline}")
     cli::cli_text("├─ Source: {source_desc}")
     cli::cli_text("├─ Spectra type: {spectra_type}")
     cli::cli_text("├─ Input path: {.path {spectra_path}}")
     cli::cli_text("└─ Output format: Raw tibble")
-    cli::cli_text("")
 
   }
 
@@ -224,7 +222,6 @@ read_spectra <- function(source       = c("opus", "csv"),
     cli::cli_text("   ├─ Wavenumbers: {n_wavenumber} ({wn_range})")
     cli::cli_text("   ├─ Format: Tibble with Sample_ID + numeric columns")
     cli::cli_text("   └─ Processing time: {round(processing_time, 2)}s")
-    cli::cli_text("")
 
   }
 

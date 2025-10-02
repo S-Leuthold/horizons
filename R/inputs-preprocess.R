@@ -109,13 +109,11 @@ preprocess_spectra <- function(spectra_data,
 
     wn_range <- paste0(round(min(wavenumbers)), "-", round(max(wavenumbers)), " cm⁻¹")
 
-    cli::cli_text("")
     cli::cli_text("{.strong Spectral Preprocessing Pipeline}")
     cli::cli_text("├─ Input samples: {nrow(spectra_data)}")
     cli::cli_text("├─ Processing method: {processing_desc}")
     cli::cli_text("├─ Original range: {wn_range}")
     cli::cli_text("└─ Resample interval: {resample_interval} cm⁻¹")
-    cli::cli_text("")
 
   }
 
@@ -124,7 +122,6 @@ preprocess_spectra <- function(spectra_data,
   ## ---------------------------------------------------------------------------
 
   if (verbose) {
-    cli::cli_text("")
     cli::cli_text("{.strong Processing Steps}")
   }
 
@@ -292,11 +289,9 @@ preprocess_spectra <- function(spectra_data,
 
   ## Build dynamic error hint with actual wavelength ranges ----------------
 
-  range_hint <- glue::glue(
-    "Check for target wavelength range outside original range: ",
-    "Original {round(min(wavenumbers))}-{round(max(wavenumbers))} cm⁻¹, ",
-    "Target {min(target_wavenumbers)}-{max(target_wavenumbers)} cm⁻¹"
-  )
+  range_hint <- glue::glue("Check for target wavelength range outside original range: ",
+                           "Original {round(min(wavenumbers))}-{round(max(wavenumbers))} cm⁻¹, ",
+                           "Target {min(target_wavenumbers)}-{max(target_wavenumbers)} cm⁻¹")
 
   handle_results(safe_result   = resample_safe,
                  error_title   = "Spectral resampling failed",
@@ -338,12 +333,10 @@ preprocess_spectra <- function(spectra_data,
 
   if (verbose) {
 
-    cli::cli_text("")
     cli::cli_text("{.strong Summary}")
     cli::cli_text("├─ Samples processed: {nrow(resampled_data)}")
     cli::cli_text("├─ Output wavenumbers: {length(target_wavenumbers)} standardized")
     cli::cli_text("└─ Total time: {round(total_time, 2)}s")
-    cli::cli_text("")
 
   }
 
