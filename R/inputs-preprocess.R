@@ -114,6 +114,7 @@ preprocess_spectra <- function(spectra_data,
     cli::cli_text("├─ Processing method: {processing_desc}")
     cli::cli_text("├─ Original range: {wn_range}")
     cli::cli_text("└─ Resample interval: {resample_interval} cm⁻¹")
+    cli::cli_text("")
 
   }
 
@@ -214,8 +215,6 @@ preprocess_spectra <- function(spectra_data,
         "i" = "Infinite: {.val {n_inf}}, NaN: {.val {n_nan}}",
         "i" = "These may cause issues in modeling"
       ))
-    } else if (n_na > 0 && verbose) {
-      cli::cli_alert_info("Note: {.val {n_na}} NA values in spectral matrix")
     }
 
   }
@@ -274,10 +273,6 @@ preprocess_spectra <- function(spectra_data,
 
   resample_start_time <- Sys.time()
 
-  if (verbose) {
-    cli::cli_text("└─ Resampling to {resample_interval} cm⁻¹ grid")
-  }
-
   safely_execute(expr = {
                           prospectr::resample(X        = spectral_matrix,
                                              wav      = wavenumbers,
@@ -304,7 +299,7 @@ preprocess_spectra <- function(spectra_data,
   resample_time <- as.numeric(difftime(Sys.time(), resample_start_time, units = "secs"))
 
   if (verbose) {
-    cli::cli_text("   └─ Complete ({round(resample_time, 2)}s)")
+    cli::cli_text("└─ Resampling to {resample_interval} cm⁻¹ grid ({round(resample_time, 2)}s)")
   }
 
   ## ---------------------------------------------------------------------------
@@ -333,6 +328,7 @@ preprocess_spectra <- function(spectra_data,
 
   if (verbose) {
 
+    cli::cli_text("")
     cli::cli_text("{.strong Summary}")
     cli::cli_text("├─ Samples processed: {nrow(resampled_data)}")
     cli::cli_text("├─ Output wavenumbers: {length(target_wavenumbers)} standardized")
