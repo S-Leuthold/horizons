@@ -45,7 +45,11 @@ step_add_covariates <- function(recipe,
                                 id               = recipes::rand_id("add_covariates"),
                                 sample_id_column = NULL) {
 
-  sample_id_column <- rlang::as_string(rlang::ensym(sample_id_column))
+  ## Convert sample_id_column to string if provided ------------------------------
+
+  if (!is.null(sample_id_column)) {
+    sample_id_column <- rlang::as_string(rlang::ensym(sample_id_column))
+  }
 
   recipes::add_step(
     recipe,
@@ -113,6 +117,9 @@ prep.step_add_covariates <- function(x, training, info = NULL, ...) {
   if (!sid %in% names(x$covariate_data)) {
     cli::cli_abort("ID column `{sid}` not found in covariate data.")
   }
+
+  ## Standardize covariates (mean = 0, SD = 1) for modeling -----------------------
+  ## Excludes ID column, then re-adds it at the front after scaling
 
   scaled_covs <- x$covariate_data %>%
     dplyr::select(-dplyr::all_of(sid)) %>%
