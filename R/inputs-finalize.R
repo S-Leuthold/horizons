@@ -40,6 +40,8 @@
 #'   Default: `FALSE` (flag only)
 #' @param enforce_positive `[logical]` Remove samples with zero or negative response values?
 #'   Useful when using log transformations. Default: `FALSE`
+#' @param drop_na `[logical]` Remove samples with NA values in response variable?
+#'   Required for some modeling algorithms. Default: `FALSE`
 #' @param verbose `[logical]` Print progress messages and diagnostic warnings. Default: `TRUE`
 #'
 #' @return A `[tibble]` with the same structure as input plus quality control information:
@@ -81,6 +83,15 @@
 #'   enforce_positive = TRUE,  # Required for log(SOC)
 #'   remove_outliers = TRUE
 #' )
+#'
+#' # Complete data cleaning for modeling
+#' clean_data <- finalize_dataset(
+#'   dataset = model_dataset,
+#'   response_variable = "SOC",
+#'   enforce_positive = TRUE,  # Remove zeros/negatives
+#'   drop_na = TRUE,           # Remove NAs
+#'   remove_outliers = TRUE
+#' )
 #' }
 #'
 #' @seealso
@@ -103,6 +114,7 @@ finalize_dataset <- function(dataset,
                             response_cutoff = 1.5,
                             remove_outliers = FALSE,
                             enforce_positive = FALSE,
+                            drop_na = FALSE,
                             verbose = TRUE) {
 
   ## ---------------------------------------------------------------------------
@@ -407,6 +419,23 @@ finalize_dataset <- function(dataset,
 
   }
 
+  ## Remove NA values if requested ---------------------------------------------
+
+  n_na_removed <- 0
+
+  if (drop_na) {
+
+    n_before     <- nrow(dataset)
+    dataset      <- dataset[!is.na(dataset[[response_variable]]), ]
+    n_na_removed <- n_before - nrow(dataset)
+    final_samples <- nrow(dataset)
+
+    if (n_na_removed > 0 && verbose) {
+      cli::cli_alert_warning("Removed {n_na_removed} sample{?s} with NA {response_variable} values")
+    }
+
+  }
+
   ## Display final summary -----------------------------------------------------
 
   if (verbose) {
@@ -420,6 +449,9 @@ finalize_dataset <- function(dataset,
     cli::cli_text("   ├─ Response outliers: {if (length(response_outliers) > 0) length(response_outliers) else 0}")
     if (enforce_positive && n_nonpositive > 0) {
       cli::cli_text("   ├─ Non-positive values removed: {n_nonpositive}")
+    }
+    if (drop_na && n_na_removed > 0) {
+      cli::cli_text("   ├─ NA values removed: {n_na_removed}")
     }
     cli::cli_text("   ├─ Final samples: {final_samples}")
     cli::cli_text("   ├─ Action: {if (remove_outliers && length(all_outliers) > 0) 'Removed' else 'Flagged only'}")
