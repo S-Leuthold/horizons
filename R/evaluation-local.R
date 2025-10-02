@@ -395,7 +395,14 @@ evaluate_models_local <- function(config,
       transform_display  <- get_readable_transformation_name(config_row$transformation)
       preprocess_display <- get_readable_preprocessing_name(config_row$preprocessing)
       feature_display    <- get_readable_feature_selection_name(config_row$feature_selection)
-      covariates_display <- create_readable_covariates_string(covariate_cols)
+
+      # Format covariates for display
+      covariates_display <- if (is.null(covariate_cols) || length(covariate_cols) == 0) {
+        "None"
+      } else {
+        readable_names <- sapply(covariate_cols, get_readable_covariate_name, USE.NAMES = FALSE)
+        paste(readable_names, collapse = " + ")
+      }
 
       # Display the components with human-readable names
       cli::cli_text("├─ Model: {.field {model_display}}")
