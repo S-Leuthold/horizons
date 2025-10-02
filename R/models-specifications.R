@@ -18,17 +18,15 @@
 #' and is intended for use in `workflow()` objects or within model grids.
 #'
 #' @param model_type Character. One of the following canonical model slugs:
-#'   \itemize{
-#'     \item{\code{"random_forest"}}
-#'     \item{\code{"cubist"}}
-#'     \item{\code{"xgboost"}}
-#'     \item{\code{"lightgbm"}}
-#'     \item{\code{"elastic_net"}}
-#'     \item{\code{"svm_rbf"}}
-#'     \item{\code{"mars"}}
-#'     \item{\code{"plsr"}}
-#'     \item{\code{"mlp_nn"}}
-#'   }
+#' * `"random_forest"`
+#' * `"cubist"`
+#' * `"xgboost"`
+#' * `"lightgbm"`
+#' * `"elastic_net"`
+#' * `"svm_rbf"`
+#' * `"mars"`
+#' * `"plsr"`
+#' * `"mlp_nn"`
 #'
 #' @return A `parsnip` model specification object with tunable hyperparameters.
 #'
@@ -39,9 +37,9 @@
 #' `workflowsets::workflow_set()`, and `stacks::stacks()`.
 #'
 #' @seealso
-#'   \code{\link[parsnip]{set_engine}},
-#'   \code{\link[tune]{tune}},
-#'   \code{\link{build_model_grid}}
+#'   [parsnip::set_engine()],
+#'   [tune::tune()],
+#'   [build_model_grid()]
 #'
 #' @examples
 #' \dontrun{
@@ -182,7 +180,7 @@ clean_workflow_id <- function(model,
   # This provides additional safety if closures somehow make it past upstream checks
   check_for_closures <- function(value, param_name) {
     if (is.function(value) || "closure" %in% class(value)) {
-      cli::cli_abort("▶ clean_workflow_id: Closure detected in parameter '{param_name}'. Cannot generate workflow ID.")
+      cli::cli_abort("Closure detected in parameter '{param_name}' - cannot generate workflow ID")
     }
   }
   
