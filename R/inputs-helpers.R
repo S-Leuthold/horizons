@@ -33,6 +33,7 @@
 #' @importFrom dplyr bind_rows
 #' @importFrom tidyr pivot_wider
 #'
+#' @name read_opus_internal
 #' @keywords internal
 read_opus_internal <- function(path, spectra_type, verbose) {
 
@@ -210,6 +211,7 @@ read_opus_internal <- function(path, spectra_type, verbose) {
 #' @importFrom readr read_csv
 #' @importFrom dplyr mutate across all_of
 #'
+#' @name read_csv_internal
 #' @keywords internal
 read_csv_internal <- function(path, spectra_type, verbose) {
 
@@ -322,6 +324,7 @@ read_csv_internal <- function(path, spectra_type, verbose) {
 #' @importFrom cli cli_warn cli_alert cli_alert_danger
 #' @importFrom rlang %||%
 #'
+#' @name parse_filename_metadata
 #' @keywords internal
 
 parse_filename_metadata <- function(file_name,
