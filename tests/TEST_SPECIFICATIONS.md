@@ -1724,3 +1724,307 @@ create_spectra_with_baseline <- function(n_samples = 3) {
   return(spectra)
 }
 ```
+
+---
+
+## test-join-covariates.R
+
+### Function: `step_add_covariates()`
+
+#### Test Group 1: Input Validation
+
+**Test 1.1: sample_id_column NULL handling (default case)**
+- **Setup**: Create recipe with Sample_ID role = "id"
+  ```r
+  rec <- recipe(~., data = test_data) %>%
+    update_role(Sample_ID, new_role = "id")
+  covs <- tibble(Sample_ID = c("S1", "S2"), clay = c(20, 30))
+  ```
+- **Input**: `step_add_covariates(rec, covariate_data = covs)`
+- **Expected**: Step created without error, sample_id_column remains NULL
+- **Verify**:
+  - `expect_no_error()`
+  - `expect_null(step$sample_id_column)`
+
+**Test 1.2: sample_id_column specified as bare name**
+- **Setup**: Same as above
+- **Input**: `step_add_covariates(rec, covs, sample_id_column = Sample_ID)`
+- **Expected**: Bare name converted to string "Sample_ID"
+- **Verify**: `expect_equal(step$sample_id_column, "Sample_ID")`
+
+**Test 1.3: sample_id_column specified as string**
+- **Setup**: Same as above
+- **Input**: `step_add_covariates(rec, covs, sample_id_column = "Sample_ID")`
+- **Expected**: String accepted and stored
+- **Verify**: `expect_equal(step$sample_id_column, "Sample_ID")`
+
+#### Test Group 2: prep() Method - ID Column Detection
+
+**Test 2.1: Auto-detects ID column from role = "id"**
+- **Setup**: Recipe with one variable having role = "id"
+  ```r
+  rec <- recipe(~., data = test_data) %>%
+    update_role(Sample_ID, new_role = "id") %>%
+    step_add_covariates(covariate_data = covs)
+  ```
+- **Input**: `prep(rec)`
+- **Expected**: Automatically uses Sample_ID as join column
+- **Verify**: Prepped step has `sample_id_column = "Sample_ID"`
+
+**Test 2.2: Multiple ID variables causes error**
+- **Setup**: Recipe with two variables having role = "id"
+  ```r
+  rec <- recipe(~., data = test_data) %>%
+    update_role(Sample_ID, new_role = "id") %>%
+    update_role(Plot_ID, new_role = "id") %>%
+    step_add_covariates(covariate_data = covs)
+  ```
+- **Input**: `prep(rec)`
+- **Expected**: Error about specifying sample_id_column
+- **Verify**: `expect_error(..., "exactly one variable has role = 'id'")`
+
+**Test 2.3: No ID variables and no sample_id_column causes error**
+- **Setup**: Recipe with no ID roles and NULL sample_id_column
+- **Input**: `prep(rec)`
+- **Expected**: Error about specifying sample_id_column
+- **Verify**: `expect_error(..., "exactly one variable")`
+
+**Test 2.4: ID column not in training data causes error**
+- **Setup**: Specify sample_id_column that doesn't exist
+  ```r
+  rec <- recipe(~., data = test_data) %>%
+    step_add_covariates(covs, sample_id_column = "NonExistent")
+  ```
+- **Input**: `prep(rec)`
+- **Expected**: Error with message "ID column `NonExistent` not found in training data"
+- **Verify**: `expect_error(..., "not found in training data")`
+
+**Test 2.5: ID column not in covariate_data causes error**
+- **Setup**: Covariate data missing the ID column
+  ```r
+  bad_covs <- tibble(clay = c(20, 30))  # No Sample_ID
+  rec <- recipe(~., data = test_data) %>%
+    update_role(Sample_ID, new_role = "id") %>%
+    step_add_covariates(bad_covs)
+  ```
+- **Input**: `prep(rec)`
+- **Expected**: Error with message "ID column `Sample_ID` not found in covariate data"
+- **Verify**: `expect_error(..., "not found in covariate data")`
+
+#### Test Group 3: Covariate Scaling
+
+**Test 3.1: Covariates are standardized during prep()**
+- **Setup**: Covariate data with known mean and SD
+  ```r
+  covs <- tibble(
+    Sample_ID = c("S1", "S2", "S3"),
+    clay = c(10, 20, 30),  # mean=20, sd≈10
+    sand = c(30, 40, 50)   # mean=40, sd≈10
+  )
+  rec <- recipe(~., data = test_data) %>%
+    update_role(Sample_ID, new_role = "id") %>%
+    step_add_covariates(covs)
+  ```
+- **Input**: `prepped <- prep(rec)`
+- **Expected**: Scaled covariates have mean≈0, sd≈1
+- **Verify**:
+  - `expect_equal(mean(prepped$steps[[1]]$covariate_data$clay), 0, tolerance = 1e-10)`
+  - `expect_equal(sd(prepped$steps[[1]]$covariate_data$clay), 1, tolerance = 1e-10)`
+
+**Test 3.2: ID column excluded from scaling**
+- **Setup**: Covariate data with Sample_ID
+- **Input**: `prepped <- prep(rec)`
+- **Expected**: Sample_ID values unchanged after prep
+- **Verify**: `expect_equal(prepped$steps[[1]]$covariate_data$Sample_ID, covs$Sample_ID)`
+
+**Test 3.3: ID column moved to first position after scaling**
+- **Setup**: Covariates with ID not in first position
+  ```r
+  covs <- tibble(clay = c(20, 30), Sample_ID = c("S1", "S2"))
+  ```
+- **Input**: `prepped <- prep(rec)`
+- **Expected**: Sample_ID is first column in scaled data
+- **Verify**: `expect_equal(names(prepped$steps[[1]]$covariate_data)[1], "Sample_ID")`
+
+**Test 3.4: All numeric covariates are converted and scaled**
+- **Setup**: Mixed covariate types
+  ```r
+  covs <- tibble(
+    Sample_ID = c("S1", "S2"),
+    clay = c(20, 30),
+    sand = c(40, 50)
+  )
+  ```
+- **Input**: `prepped <- prep(rec)`
+- **Expected**: Both clay and sand are numeric and scaled
+- **Verify**:
+  - All non-ID columns are numeric
+  - Each has mean≈0, sd≈1
+
+#### Test Group 4: bake() Method - Joining Covariates
+
+**Test 4.1: Left join adds covariates to new_data**
+- **Setup**:
+  ```r
+  prepped <- prep(rec)
+  new_data <- tibble(Sample_ID = c("S1", "S2"), x = c(1, 2))
+  ```
+- **Input**: `bake(prepped, new_data)`
+- **Expected**: new_data with added covariate columns
+- **Verify**:
+  - Output has columns: Sample_ID, x, clay, sand
+  - Sample_ID values match input
+
+**Test 4.2: Handles samples present in new_data but not covariates (NA)**
+- **Setup**: new_data has Sample_ID not in covariate_data
+  ```r
+  new_data <- tibble(Sample_ID = c("S1", "S3"), x = c(1, 3))  # S3 not in covs
+  ```
+- **Input**: `bake(prepped, new_data)`
+- **Expected**: S3 gets NA values for covariates (left join behavior)
+- **Verify**:
+  - `expect_true(is.na(result$clay[2]))`
+  - `expect_equal(nrow(result), 2)`
+
+**Test 4.3: ID column missing in new_data causes error**
+- **Setup**: new_data without Sample_ID
+  ```r
+  bad_new_data <- tibble(x = c(1, 2))
+  ```
+- **Input**: `bake(prepped, bad_new_data)`
+- **Expected**: Error with message about ID column not found
+- **Verify**: `expect_error(..., "ID column.*not found")`
+
+**Test 4.4: Uses scaled covariate values from prep()**
+- **Setup**: Prepare recipe, bake with known data
+- **Input**: `bake(prepped, new_data)`
+- **Expected**: Covariate values are scaled (from prep), not raw
+- **Verify**: Covariate values are standardized (≈0 mean, 1 SD)
+
+#### Test Group 5: print() Method
+
+**Test 5.1: Displays join column name**
+- **Setup**: Step with known sample_id_column
+  ```r
+  step <- step_add_covariates_new(
+    covariate_data = covs,
+    role = "predictor",
+    trained = FALSE,
+    skip = FALSE,
+    id = "test",
+    sample_id_column = "Sample_ID"
+  )
+  ```
+- **Input**: `print(step)`
+- **Expected**: Output shows "Covariate join via `Sample_ID`"
+- **Verify**: Output contains "Sample_ID"
+
+**Test 5.2: Displays number of covariate columns**
+- **Setup**: Covariates with 3 columns: Sample_ID, clay, sand
+- **Input**: `print(step)`
+- **Expected**: Output shows "2 columns" (excludes Sample_ID)
+- **Verify**: Output contains "2 columns"
+
+**Test 5.3: Handles unknown ID column gracefully**
+- **Setup**: Step with NULL sample_id_column
+  ```r
+  step <- step_add_covariates_new(
+    covariate_data = covs,
+    sample_id_column = NULL,
+    ...
+  )
+  ```
+- **Input**: `print(step)`
+- **Expected**: Output shows "unknown" for ID column
+- **Verify**: Output contains "unknown"
+
+#### Test Group 6: Integration Tests
+
+**Test 6.1: Full workflow with auto-detected ID**
+- **Setup**: Complete recipe pipeline
+  ```r
+  train_data <- tibble(Sample_ID = c("S1", "S2"), y = c(10, 20), x = c(1, 2))
+  covs <- tibble(Sample_ID = c("S1", "S2"), clay = c(20, 30))
+
+  rec <- recipe(y ~ ., data = train_data) %>%
+    update_role(Sample_ID, new_role = "id") %>%
+    step_add_covariates(covariate_data = covs)
+  ```
+- **Input**:
+  ```r
+  prepped <- prep(rec)
+  result <- bake(prepped, new_data = NULL)
+  ```
+- **Expected**: Training data with scaled clay covariate added
+- **Verify**:
+  - Result has columns: Sample_ID, y, x, clay
+  - clay is scaled
+  - No errors throughout
+
+**Test 6.2: Full workflow with explicit sample_id_column**
+- **Setup**: Recipe with explicit ID specification
+  ```r
+  rec <- recipe(y ~ ., data = train_data) %>%
+    step_add_covariates(covs, sample_id_column = Sample_ID)
+  ```
+- **Input**: `prep(rec) %>% bake(new_data = NULL)`
+- **Expected**: Same as Test 6.1
+- **Verify**: Successful execution with correct output
+
+**Test 6.3: Multiple covariates join correctly**
+- **Setup**: Covariates with multiple columns
+  ```r
+  covs <- tibble(
+    Sample_ID = c("S1", "S2"),
+    clay = c(20, 30),
+    sand = c(40, 50),
+    pH = c(6.5, 7.0)
+  )
+  ```
+- **Input**: Full prep/bake workflow
+- **Expected**: All covariates added and scaled
+- **Verify**:
+  - Output has all covariate columns
+  - Each is scaled independently
+
+**Test 6.4: Predictor role assigned correctly**
+- **Setup**: Recipe with step_add_covariates
+- **Input**: `prepped <- prep(rec)`
+- **Expected**: Covariate columns have role = "predictor"
+- **Verify**:
+  ```r
+  info <- summary(prepped)
+  cov_roles <- info$role[info$variable %in% c("clay", "sand")]
+  expect_true(all(cov_roles == "predictor"))
+  ```
+
+### Helper Functions for test-join-covariates.R
+
+```r
+# Create simple test dataset with ID column
+create_test_data_with_id <- function() {
+  tibble(
+    Sample_ID = paste0("S", 1:5),
+    y = rnorm(5),
+    x1 = rnorm(5),
+    x2 = rnorm(5)
+  )
+}
+
+# Create covariate data for joining
+create_test_covariates <- function(n_samples = 5, n_covariates = 2) {
+  cov_data <- tibble(Sample_ID = paste0("S", seq_len(n_samples)))
+
+  for (i in seq_len(n_covariates)) {
+    cov_data[[paste0("cov", i)]] <- rnorm(n_samples, mean = 50, sd = 10)
+  }
+
+  return(cov_data)
+}
+
+# Create recipe with ID role set
+create_recipe_with_id_role <- function(data) {
+  recipe(y ~ ., data = data) %>%
+    update_role(Sample_ID, new_role = "id")
+}
+```
