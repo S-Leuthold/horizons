@@ -279,7 +279,7 @@ read_csv_internal <- function(path, spectra_type, verbose) {
 
   if (all(is.na(x_values))) {
 
-    cli::cli_text("│  └─ {cli::col_yellow('⚠ Column names aren't numeric wavenumbers - may cause downstream issues')}")
+    cli::cli_text("│  └─ {cli::col_yellow('⚠ Column names are not numeric wavenumbers - may cause downstream issues')}")
 
   }
 
@@ -323,6 +323,7 @@ read_csv_internal <- function(path, spectra_type, verbose) {
 #' @importFrom rlang %||%
 #'
 #' @keywords internal
+
 parse_filename_metadata <- function(file_name,
                                     format_string,
                                     delimiter = "_",
