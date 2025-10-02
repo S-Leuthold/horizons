@@ -1,6 +1,6 @@
 #' Build Tidymodels Recipe for Spectral + Covariate Modeling
 #'
-#' Constructs a preprocessing pipeline using the \pkg{recipes} framework. Applies user-specified
+#' Constructs a preprocessing pipeline using the recipes framework. Applies user-specified
 #' transformations to the response and spectra, optionally adds covariates, and includes PCA
 #' dimensionality reduction. This function supports stacking workflows and harmonized modeling
 #' across different preprocessing combinations.
@@ -8,40 +8,42 @@
 #' @param input_data A data frame containing a `Response` column, spectral predictors
 #'   (named as wavenumbers, e.g., `600`, `602`, ...), and a `Sample_ID` column.
 #' @param spectral_transformation Character. Spectral preprocessing pipeline. One of:
-#'   \itemize{
-#'     \item{"raw"}
-#'     \item{"sg"}
-#'     \item{"snv"}
-#'     \item{"deriv1"}
-#'     \item{"deriv2"}
-#'     \item{"snv_deriv1"}
-#'     \item{"snv_deriv2"}
-#'   }
+#' * `"raw"`
+#' * `"sg"`
+#' * `"snv"`
+#' * `"deriv1"`
+#' * `"deriv2"`
+#' * `"snv_deriv1"`
+#' * `"snv_deriv2"`
 #' @param response_transformation Character. Transformation applied to response variable. One of:
-#'   \itemize{
-#'     \item{"No Transformation"}
-#'     \item{"Log Transformation"}
-#'     \item{"Square Root Transformation"}
-#'   }
+#' * `"No Transformation"`
+#' * `"Log Transformation"`
+#' * `"Square Root Transformation"`
 #' @param covariate_selection Optional character vector of covariates to include (e.g., `"Clay"`, `"pH"`).
 #'   Use `"No Covariates"` or `NULL` to exclude.
 #' @param covariate_data Optional data frame of covariates (must include `Sample_ID`). Required
 #'   if any covariates are selected.
+#' @param feature_selection_method Character. Feature selection approach. One of:
+#' * `"pca"` - Principal component analysis (99.5% variance threshold)
+#' * `"correlation"` - Correlation-based selection
+#' * `"boruta"` - Boruta algorithm for feature importance
+#' * `"cars"` - Competitive Adaptive Reweighted Sampling
+#' * `"none"` - No feature selection
 #'
-#' @return A \code{recipes::recipe} object containing the full preprocessing pipeline.
+#' @return A `recipes::recipe` object containing the full preprocessing pipeline.
 #'
 #' @details
-#' Roles for \code{Sample_ID} and \code{Project} (if present) are set to \code{"id"} and
-#' \code{"metadata"}, respectively. Response transformation steps are marked \code{skip = TRUE}
+#' Roles for `Sample_ID` and `Project` (if present) are set to `"id"` and
+#' `"metadata"`, respectively. Response transformation steps are marked `skip = TRUE`
 #' to preserve inverse-transform compatibility. Spectral preprocessing is handled by
-#' \code{\link{step_transform_spectra}}; covariates are injected using \code{\link{step_add_covariates}}.
+#' [step_transform_spectra()]; covariates are injected using [step_add_covariates()].
 #'
-#' @seealso \code{\link{step_transform_spectra}}, \code{\link{step_add_covariates}}, \code{\link{build_model_grid}}
+#' @seealso [step_transform_spectra()], [step_add_covariates()], [build_model_grid()]
 #'
 #' @importFrom recipes recipe update_role update_role_requirements step_log step_sqrt step_BoxCox step_pca all_outcomes all_predictors
 #' @importFrom dplyr select any_of all_of rename
 #' @importFrom rlang sym
-#' @importFrom cli cli_alert_danger cli_alert_info cli_abort
+#' @importFrom cli cli_abort
 #' @importFrom glue glue
 #'
 #' @examples
@@ -71,13 +73,11 @@ build_recipe <- function(input_data,
   ## ---------------------------------------------------------------------------
 
   if (!is.data.frame(input_data)) {
-    cli::cli_alert_danger("▶ build_recipe: Input is not a data frame.")
-    stop("Aborting: Invalid input_data.")
+    cli::cli_abort("Input must be a data frame")
   }
 
   if (!"Sample_ID" %in% names(input_data)) {
-    cli::cli_alert_danger("▶ build_recipe: Sample_ID column is missing.")
-    stop("Aborting: Sample_ID required.")
+    cli::cli_abort("Sample_ID column not found in input_data")
   }
 
   # Data already has "Response" column (renamed in calling function if needed)
@@ -94,21 +94,21 @@ build_recipe <- function(input_data,
   if (!is.null(covariate_selection)) {
 
     if (is.null(covariate_data)) {
-      cli::cli_alert_danger("▶ build_recipe: Covariates requested, but no covariate_data supplied.")
-      stop("Aborting: Missing covariate_data.")
+      cli::cli_abort("Covariates requested but covariate_data is NULL")
     }
 
     missing_covars <- setdiff(covariate_selection, names(covariate_data))
 
     if (length(missing_covars) > 0) {
-      cli::cli_alert_danger("▶ build_recipe: Missing covariates: {.val {missing_covars}}")
-      cli::cli_alert_info("▶ build_recipe: Available: {.val {names(covariate_data)}}")
-      stop("Aborting: Covariate mismatch.")
+      cli::cli_abort(c(
+        "Requested covariates not found in covariate_data",
+        "x" = "Missing: {.val {missing_covars}}",
+        "i" = "Available: {.val {setdiff(names(covariate_data), 'Sample_ID')}}"
+      ))
     }
 
     if (!"Sample_ID" %in% names(covariate_data)) {
-      cli::cli_alert_danger("▶ build_recipe: Sample_ID column missing in covariate_data.")
-      stop("Aborting: Invalid covariate_data.")
+      cli::cli_abort("Sample_ID column not found in covariate_data")
     }
   }
 
