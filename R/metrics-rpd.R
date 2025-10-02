@@ -5,31 +5,29 @@
 #' RPD is the ratio of the standard deviation of observed values to the root mean
 #' squared error (RMSE). Higher values indicate better model performance.
 #'
-#' @param truth For \code{rpd_vec()}, a numeric vector of observed values. 
-#'   For \code{rpd()}, the column identifier for observed values (quoted or unquoted).
-#' @param estimate For \code{rpd_vec()}, a numeric vector of predicted values.
-#'   For \code{rpd()}, the column identifier for predicted values (quoted or unquoted).
-#' @param data (Only for \code{rpd()}) A data frame containing columns for observed and predicted values.
-#' @param na_rm Logical. Should missing values be removed before computation? Default is \code{TRUE}.
-#' @param ... Additional arguments passed to \code{rmse_vec()}.
+#' @param truth For `rpd_vec()`, a numeric vector of observed values.
+#'   For `rpd()`, the column identifier for observed values (quoted or unquoted).
+#' @param estimate For `rpd_vec()`, a numeric vector of predicted values.
+#'   For `rpd()`, the column identifier for predicted values (quoted or unquoted).
+#' @param data (Only for `rpd()`) A data frame containing columns for observed and predicted values.
+#' @param na_rm Logical. Should missing values be removed before computation? Default is `TRUE`.
+#' @param ... Additional arguments passed to `rmse_vec()`.
 #'
 #' @return
-#' \code{rpd_vec()} returns a numeric value.
-#' \code{rpd} is a yardstick metric usable in \code{metric_set()} pipelines.
+#' `rpd_vec()` returns a numeric value.
+#' `rpd` is a yardstick metric usable in `metric_set()` pipelines.
 #'
 #' @details
 #' RPD is widely used in spectroscopy for model quality assessment:
-#' \itemize{
-#'   \item RPD < 1.5: Poor model, not recommended for prediction
-#'   \item RPD 1.5-2.0: Fair model, may distinguish between high and low values
-#'   \item RPD 2.0-2.5: Good model, suitable for quantitative predictions
-#'   \item RPD > 2.5: Excellent model, suitable for quality control
-#' }
+#' * RPD < 1.5: Poor model, not recommended for prediction
+#' * RPD 1.5-2.0: Fair model, may distinguish between high and low values
+#' * RPD 2.0-2.5: Good model, suitable for quantitative predictions
+#' * RPD > 2.5: Excellent model, suitable for quality control
 #'
 #' The formula is: RPD = SD(observed) / RMSE(observed, predicted)
 #'
 #' @seealso
-#' \code{\link[yardstick]{rmse_vec}}, \code{\link[yardstick]{metric_set}}, \code{\link{rrmse}}
+#' [yardstick::rmse_vec()], [yardstick::metric_set()], [rrmse()]
 #'
 #' @examples
 #' \dontrun{
@@ -48,6 +46,10 @@
 #' @name rpd_vec
 #' @aliases rpd
 #' @export
+
+## -----------------------------------------------------------------------------
+## rpd_vec - Core Vector Function
+## -----------------------------------------------------------------------------
 
 rpd_vec <- function(truth,
                     estimate,
@@ -73,6 +75,10 @@ rpd_vec <- function(truth,
   sd_val / rmse_val
 }
 
+## -----------------------------------------------------------------------------
+## rpd_impl - Yardstick Wrapper Implementation
+## -----------------------------------------------------------------------------
+
 rpd_impl <- function(data,
                      truth,
                      estimate,
@@ -89,6 +95,10 @@ rpd_impl <- function(data,
     ...
   )
 }
+
+## -----------------------------------------------------------------------------
+## rpd - Metric Constructor
+## -----------------------------------------------------------------------------
 
 #' @rdname rpd_vec
 #' @export

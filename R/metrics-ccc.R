@@ -5,34 +5,30 @@
 #' measures of both precision (correlation) and accuracy (deviation from the 45-degree line).
 #' CCC is particularly useful in spectroscopy and soil science for evaluating model predictions.
 #'
-#' @param truth For \code{ccc_vec()}, a numeric vector of observed values. 
-#'   For \code{ccc()}, the column identifier for observed values (quoted or unquoted).
-#' @param estimate For \code{ccc_vec()}, a numeric vector of predicted values.
-#'   For \code{ccc()}, the column identifier for predicted values (quoted or unquoted).
-#' @param data (Only for \code{ccc()}) A data frame containing columns for observed and predicted values.
-#' @param na_rm Logical. Should missing values be removed before computation? Default is \code{TRUE}.
+#' @param truth For `ccc_vec()`, a numeric vector of observed values.
+#'   For `ccc()`, the column identifier for observed values (quoted or unquoted).
+#' @param estimate For `ccc_vec()`, a numeric vector of predicted values.
+#'   For `ccc()`, the column identifier for predicted values (quoted or unquoted).
+#' @param data (Only for `ccc()`) A data frame containing columns for observed and predicted values.
+#' @param na_rm Logical. Should missing values be removed before computation? Default is `TRUE`.
 #' @param ... Additional arguments (currently unused).
 #'
 #' @return
-#' \code{ccc_vec()} returns a numeric value between -1 and 1.
-#' \code{ccc} is a yardstick metric usable in \code{metric_set()} pipelines.
+#' `ccc_vec()` returns a numeric value between -1 and 1.
+#' `ccc` is a yardstick metric usable in `metric_set()` pipelines.
 #'
 #' @details
 #' Lin's CCC combines measures of precision and accuracy:
-#' \itemize{
-#'   \item CCC = ρ × C_b
-#'   \item ρ (rho) = Pearson correlation coefficient (precision)
-#'   \item C_b = Bias correction factor (accuracy)
-#' }
+#' * CCC = ρ × C_b
+#' * ρ (rho) = Pearson correlation coefficient (precision)
+#' * C_b = Bias correction factor (accuracy)
 #'
 #' Interpretation:
-#' \itemize{
-#'   \item CCC = 1: Perfect agreement
-#'   \item CCC > 0.90: Excellent agreement
-#'   \item CCC 0.80-0.90: Good agreement
-#'   \item CCC 0.65-0.80: Moderate agreement
-#'   \item CCC < 0.65: Poor agreement
-#' }
+#' * CCC = 1: Perfect agreement
+#' * CCC > 0.90: Excellent agreement
+#' * CCC 0.80-0.90: Good agreement
+#' * CCC 0.65-0.80: Moderate agreement
+#' * CCC < 0.65: Poor agreement
 #'
 #' The bias correction factor is calculated as:
 #' C_b = 2 / ((v + 1/v + u²))
@@ -43,7 +39,7 @@
 #' Biometrics, 45(1), 255-268.
 #'
 #' @seealso
-#' \code{\link[yardstick]{metric_set}}, \code{\link{rpd}}, \code{\link{rrmse}}
+#' [yardstick::metric_set()], [rpd()], [rrmse()]
 #'
 #' @examples
 #' \dontrun{
@@ -62,6 +58,10 @@
 #' @name ccc_vec
 #' @aliases ccc
 #' @export
+
+## -----------------------------------------------------------------------------
+## ccc_vec - Core Vector Function
+## -----------------------------------------------------------------------------
 
 ccc_vec <- function(truth,
                     estimate,
@@ -110,6 +110,10 @@ ccc_vec <- function(truth,
   return(ccc_value)
 }
 
+## -----------------------------------------------------------------------------
+## ccc_impl - Yardstick Wrapper Implementation
+## -----------------------------------------------------------------------------
+
 ccc_impl <- function(data,
                      truth,
                      estimate,
@@ -126,6 +130,10 @@ ccc_impl <- function(data,
     ...
   )
 }
+
+## -----------------------------------------------------------------------------
+## ccc - Metric Constructor
+## -----------------------------------------------------------------------------
 
 #' @rdname ccc_vec
 #' @export
