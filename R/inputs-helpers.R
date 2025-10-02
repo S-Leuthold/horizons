@@ -6,6 +6,7 @@
 #'
 #' @keywords internal
 #' @name inputs-helpers
+NULL
 
 ## ---------------------------------------------------------------------------
 ## OPUS Reading Functions
