@@ -163,7 +163,6 @@ create_dataset <- function(spectra_data,
     cli::cli_text("├─ ID parsing: {if (parse_ids) paste0('Enabled (', id_format, ')') else 'Disabled'}")
     cli::cli_text("├─ Join strategy: {join_type} join on {id_column}")
     cli::cli_text("└─ Coordinate inclusion: {if (include_coords) 'Enabled' else 'Disabled'}")
-    cli::cli_text("")
   }
 
   ## ---------------------------------------------------------------------------
@@ -402,22 +401,26 @@ create_dataset <- function(spectra_data,
            full  = dplyr::full_join(spectra_data, response_data, by = join_column)) -> result
 
   ## ---------------------------------------------------------------------------
-  ## Step 5: Handle NAs and finalize
+  ## Step 5: Data Cleaning
   ## ---------------------------------------------------------------------------
 
-  ## Drop rows with NA in response variables ----------------------------------
+  n_na_removed <- 0
 
   if (drop_na && !is.null(response_variables)) {
+
+    if (verbose) {
+      cli::cli_text("├─ Data cleaning")
+    }
 
     n_before_na <- nrow(result)
 
     result %>%
       dplyr::filter(dplyr::if_all(dplyr::all_of(response_variables), ~!is.na(.x))) -> result
 
-    n_after_na <- nrow(result)
+    n_na_removed <- n_before_na - nrow(result)
 
-    if (verbose && n_before_na > n_after_na) {
-      cli::cli_alert_warning("Dropped {.val {n_before_na - n_after_na}} rows with NA in response variables")
+    if (verbose && n_na_removed > 0) {
+      cli::cli_text("│  └─ Removed {n_na_removed} row{?s} with NA in response variables")
     }
 
   }
@@ -428,8 +431,8 @@ create_dataset <- function(spectra_data,
 
     ## Calculate join statistics ----------------------------------------------
 
-    n_spectra_only  <- sum(!spectra_data[[join_column]] %in% response_data[[join_column]])
-    n_response_only <- sum(!response_data[[join_column]] %in% spectra_data[[join_column]])
+    n_spectra_dropped  <- sum(!spectra_data[[join_column]] %in% response_data[[join_column]])
+    n_response_dropped <- sum(!response_data[[join_column]] %in% spectra_data[[join_column]])
 
     ## Count column types -----------------------------------------------------
 
@@ -438,18 +441,23 @@ create_dataset <- function(spectra_data,
     spectral_cols    <- sum(is_numeric_name)
     response_cols    <- ncol(result) - spectral_cols - 1
 
-    cli::cli_text("")
     cli::cli_text("{.strong Dataset Creation Complete}")
     cli::cli_text("├─ Final samples: {nrow(result)}")
     cli::cli_text("├─ Total columns: {ncol(result)}")
     cli::cli_text("├─ Spectral features: {spectral_cols}")
     cli::cli_text("├─ Response variables: {response_cols}")
 
-    if (n_spectra_only > 0) cli::cli_text("├─ Spectra without response: {n_spectra_only}")
-    if (n_response_only > 0) cli::cli_text("├─ Response without spectra: {n_response_only}")
+    if (join_type != "inner" && n_spectra_dropped > 0) {
+      cli::cli_text("├─ Spectra dropped (no response match): {n_spectra_dropped}")
+    }
+    if (join_type != "inner" && n_response_dropped > 0) {
+      cli::cli_text("├─ Response dropped (no spectra match): {n_response_dropped}")
+    }
+    if (n_na_removed > 0) {
+      cli::cli_text("├─ Rows with NA removed: {n_na_removed}")
+    }
 
     cli::cli_text("└─ Status: Complete")
-    cli::cli_text("")
 
   }
 

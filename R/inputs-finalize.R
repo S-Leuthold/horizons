@@ -161,7 +161,6 @@ finalize_dataset <- function(dataset,
 
   if (verbose) {
 
-    cli::cli_text("")
     cli::cli_text("{.strong Dataset Finalization Configuration}")
     cli::cli_text("├─ Input samples: {nrow(dataset)}")
     cli::cli_text("├─ Spectral features: {length(spectral_cols)}")
@@ -169,7 +168,6 @@ finalize_dataset <- function(dataset,
     cli::cli_text("├─ Spectral outlier method: {spectral_outlier_method}")
     cli::cli_text("├─ Response outlier detection: {if (detect_response_outliers) 'Enabled' else 'Disabled'}")
     cli::cli_text("└─ Action: {if (remove_outliers) 'Remove outliers' else 'Flag only'}")
-    cli::cli_text("")
 
   }
 
@@ -184,7 +182,6 @@ finalize_dataset <- function(dataset,
 
     if (verbose) {
 
-      cli::cli_text("")
       cli::cli_text("{.strong Outlier Detection Pipeline}")
       cli::cli_text("├─ Spectral outliers")
       cli::cli_text("│  └─ Method: {spectral_outlier_method}")
@@ -268,7 +265,7 @@ finalize_dataset <- function(dataset,
 
           if (verbose && length(spectral_outliers) > 0) {
 
-            cli::cli_text("│  └─ ⚠ Found {length(spectral_outliers)} spectral outliers")
+            cli::cli_text("│  └─ ⚠ Found {length(spectral_outliers)} spectral outlier{?s}")
 
           } else if (verbose) {
 
@@ -298,7 +295,6 @@ finalize_dataset <- function(dataset,
 
       if (spectral_outlier_method == "none") {
 
-        cli::cli_text("")
         cli::cli_text("{.strong Outlier Detection Pipeline}")
 
       }
@@ -361,7 +357,7 @@ finalize_dataset <- function(dataset,
 
       if (length(response_outliers) > 0) {
 
-        cli::cli_text("│  └─ ⚠ Found {length(response_outliers)} response outliers")
+        cli::cli_text("│  └─ ⚠ Found {length(response_outliers)} response outlier{?s}")
 
       } else {
 
@@ -402,36 +398,49 @@ finalize_dataset <- function(dataset,
 
   }
 
-  ## Remove zero or negative values if requested -------------------------------
+  ## ---------------------------------------------------------------------------
+  ## Step 5: Additional Data Cleaning
+  ## ---------------------------------------------------------------------------
 
   n_nonpositive <- 0
+  n_na_removed  <- 0
 
-  if (enforce_positive) {
+  if (enforce_positive || drop_na) {
 
-    n_before      <- nrow(dataset)
-    dataset       <- dataset[dataset[[response_variable]] > 0, ]
-    n_nonpositive <- n_before - nrow(dataset)
-    final_samples <- nrow(dataset)
+    if (verbose) {
 
-    if (n_nonpositive > 0 && verbose) {
-      cli::cli_alert_warning("Removed {n_nonpositive} sample{?s} with zero or negative {response_variable} (required for log transformations)")
+      cli::cli_text("├─ Data cleaning")
+
     }
 
-  }
+    ## Remove zero or negative values if requested ---------------------------
 
-  ## Remove NA values if requested ---------------------------------------------
+    if (enforce_positive) {
 
-  n_na_removed <- 0
+      n_before      <- nrow(dataset)
+      dataset       <- dataset[dataset[[response_variable]] > 0, ]
+      n_nonpositive <- n_before - nrow(dataset)
+      final_samples <- nrow(dataset)
 
-  if (drop_na) {
+      if (verbose) {
+        cli::cli_text("│  ├─ Removed {n_nonpositive} non-positive value{?s}")
+      }
 
-    n_before     <- nrow(dataset)
-    dataset      <- dataset[!is.na(dataset[[response_variable]]), ]
-    n_na_removed <- n_before - nrow(dataset)
-    final_samples <- nrow(dataset)
+    }
 
-    if (n_na_removed > 0 && verbose) {
-      cli::cli_alert_warning("Removed {n_na_removed} sample{?s} with NA {response_variable} values")
+    ## Remove NA values if requested -----------------------------------------
+
+    if (drop_na) {
+
+      n_before     <- nrow(dataset)
+      dataset      <- dataset[!is.na(dataset[[response_variable]]), ]
+      n_na_removed <- n_before - nrow(dataset)
+      final_samples <- nrow(dataset)
+
+      if (verbose) {
+        cli::cli_text("│  └─ Removed {n_na_removed} NA value{?s}")
+      }
+
     }
 
   }
@@ -442,7 +451,6 @@ finalize_dataset <- function(dataset,
 
     total_time <- as.numeric(difftime(Sys.time(), total_start_time, units = "secs"))
 
-    cli::cli_text("")
     cli::cli_text("└─ {.strong Summary}")
     cli::cli_text("   ├─ Total outliers detected: {length(all_outliers)}")
     cli::cli_text("   ├─ Spectral outliers: {if (length(spectral_outliers) > 0) length(spectral_outliers) else 0}")
@@ -456,7 +464,6 @@ finalize_dataset <- function(dataset,
     cli::cli_text("   ├─ Final samples: {final_samples}")
     cli::cli_text("   ├─ Action: {if (remove_outliers && length(all_outliers) > 0) 'Removed' else 'Flagged only'}")
     cli::cli_text("   └─ Time: {round(total_time, 2)}s")
-    cli::cli_text("")
 
   }
 
