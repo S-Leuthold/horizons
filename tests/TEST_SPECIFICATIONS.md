@@ -281,6 +281,538 @@ Each function should have test specifications in the following format:
 
 ---
 
+## test-inputs-finalize.R
+
+### Function: `finalize_dataset()`
+
+#### Test Group 1: Input Validation
+
+**Test 1.1: Validates dataset is data frame**
+- **Setup**: None
+- **Input**: `finalize_dataset(dataset = "not_a_dataframe", response_variable = "SOC")`
+- **Expected**: Error with message "dataset must be a data frame or tibble"
+- **Verify**: `expect_error(..., "data frame or tibble")`
+
+**Test 1.2: Response variable must exist in dataset**
+- **Setup**: Create dataset without requested response variable
+- **Input**: `finalize_dataset(dataset = test_data, response_variable = "missing_var")`
+- **Expected**: Error with message "Response variable 'missing_var' not found in dataset"
+- **Verify**: `expect_error(..., "not found in dataset")`
+
+**Test 1.3: Response variable must be numeric**
+- **Setup**:
+  ```r
+  test_data <- data.frame(
+    Sample_ID = c("S1", "S2"),
+    `600` = c(0.1, 0.2),
+    SOC = c("high", "low")  # Character instead of numeric
+  )
+  ```
+- **Input**: `finalize_dataset(dataset = test_data, response_variable = "SOC")`
+- **Expected**: Error with message "Response variable must be numeric for outlier detection"
+- **Verify**: `expect_error(..., "must be numeric")`
+
+**Test 1.4: Dataset must contain spectral columns**
+- **Setup**: Create dataset with no spectral columns (no numeric column names)
+  ```r
+  test_data <- data.frame(
+    Sample_ID = c("S1", "S2"),
+    SOC = c(1.5, 2.3)
+  )
+  ```
+- **Input**: `finalize_dataset(dataset = test_data, response_variable = "SOC")`
+- **Expected**: Error with message "No spectral columns detected in dataset"
+- **Verify**: `expect_error(..., "No spectral columns")`
+
+**Test 1.5: Spectral cutoff must be in (0, 1) range**
+- **Setup**: Valid dataset
+- **Input**: `finalize_dataset(..., spectral_cutoff = 1.5)`
+- **Expected**: Error with message "spectral_cutoff must be between 0 and 1 (you provided 1.5)"
+- **Verify**: `expect_error(..., "between 0 and 1")`
+
+**Test 1.6: Response cutoff must be positive**
+- **Setup**: Valid dataset
+- **Input**: `finalize_dataset(..., response_cutoff = -1)`
+- **Expected**: Error with message "response_cutoff must be positive (you provided -1)"
+- **Verify**: `expect_error(..., "must be positive")`
+
+**Test 1.7: Minimum sample size requirement**
+- **Setup**: Dataset with only 5 samples
+- **Input**: `finalize_dataset(dataset = small_data, response_variable = "SOC")`
+- **Expected**: Error with message "Need at least 10 samples for reliable outlier detection (dataset has 5)"
+- **Verify**: `expect_error(..., "at least 10 samples")`
+
+#### Test Group 2: Spectral Outlier Detection (Mahalanobis)
+
+**Test 2.1: PCA retains 99% variance**
+- **Setup**: Create dataset with known variance structure
+- **Input**: `finalize_dataset(..., spectral_outlier_method = "mahalanobis", verbose = FALSE)`
+- **Expected**: PCA component selection reaches ~99% variance
+- **Verify**: Check that n_components is reasonable for dataset dimensionality
+
+**Test 2.2: Identifies extreme spectral outliers**
+- **Setup**:
+  ```r
+  # Create dataset with one obvious outlier (all zeros)
+  test_data <- data.frame(
+    Sample_ID = paste0("S", 1:50),
+    matrix(rnorm(50 * 100, mean = 0.5, sd = 0.1), ncol = 100)
+  )
+  colnames(test_data)[-1] <- paste0("", 600:699)
+  # Add outlier
+  test_data[1, -1] <- 0  # All-zero spectrum
+  test_data$SOC <- rnorm(50, mean = 2, sd = 0.5)
+  ```
+- **Input**: `finalize_dataset(test_data, response_variable = "SOC", spectral_cutoff = 0.975)`
+- **Expected**: Sample S1 flagged as outlier
+- **Verify**:
+  - `expect_equal(result$outlier_flag[1], "outlier")`
+  - Check Mahalanobis distance for S1 is extreme
+
+**Test 2.3: Graceful degradation when PCA fails**
+- **Setup**: Mock prcomp to fail
+  ```r
+  with_mocked_bindings(
+    prcomp = function(...) stop("Singular matrix"),
+    {
+      result <- finalize_dataset(test_data, response_variable = "SOC")
+    }
+  )
+  ```
+- **Expected**: Function continues without spectral outlier detection
+- **Verify**:
+  - No error thrown
+  - Warning about PCA failure
+  - Error hints displayed
+  - result has outlier_flag column
+
+**Test 2.4: Handles singular covariance matrix**
+- **Setup**: Create data where PC scores have perfect collinearity
+- **Input**: `finalize_dataset(..., spectral_outlier_method = "mahalanobis")`
+- **Expected**: Graceful degradation with warning
+- **Verify**:
+  - Warning about Mahalanobis calculation failure
+  - Function continues
+  - No crash
+
+**Test 2.5: Skip spectral detection when method = "none"**
+- **Setup**: Valid dataset
+- **Input**: `finalize_dataset(..., spectral_outlier_method = "none")`
+- **Expected**: Only response outliers detected
+- **Verify**: Check that spectral outlier code path not executed
+
+#### Test Group 3: Response Outlier Detection (IQR)
+
+**Test 3.1: IQR method identifies extreme values**
+- **Setup**:
+  ```r
+  test_data <- data.frame(
+    Sample_ID = paste0("S", 1:50),
+    `600` = rnorm(50),
+    SOC = c(rnorm(49, mean = 2, sd = 0.5), 20)  # Last value is extreme
+  )
+  ```
+- **Input**: `finalize_dataset(test_data, response_variable = "SOC", response_cutoff = 1.5)`
+- **Expected**: Sample S50 flagged as outlier
+- **Verify**:
+  - `expect_equal(result$outlier_flag[50], "outlier")`
+  - Check calculated bounds
+
+**Test 3.2: Warns for heavily skewed distributions**
+- **Setup**:
+  ```r
+  # Create heavily right-skewed data
+  test_data <- data.frame(
+    Sample_ID = paste0("S", 1:50),
+    `600` = rnorm(50),
+    SOC = rexp(50, rate = 0.5)  # Exponential distribution (skewed)
+  )
+  ```
+- **Input**: `finalize_dataset(test_data, response_variable = "SOC", verbose = TRUE)`
+- **Expected**: Warning about heavy skewness with skewness value
+- **Verify**:
+  - `expect_warning(..., "heavily skewed")`
+  - Suggestion to consider log-transformation appears
+
+**Test 3.3: Warns for small sample size**
+- **Setup**: Dataset with 25 samples (< 30)
+- **Input**: `finalize_dataset(small_data, response_variable = "SOC", verbose = TRUE)`
+- **Expected**: Warning "Small sample size (n = 25) may reduce outlier detection reliability"
+- **Verify**: `expect_warning(..., "Small sample size")`
+
+**Test 3.4: Reports outlier bounds in verbose mode**
+- **Setup**: Valid dataset
+- **Input**: `finalize_dataset(..., verbose = TRUE)`, capture output
+- **Expected**: Output contains "Outlier bounds: [lower, upper]" message
+- **Verify**: Check cli output contains bounds
+
+**Test 3.5: Skip response detection when disabled**
+- **Setup**: Valid dataset
+- **Input**: `finalize_dataset(..., detect_response_outliers = FALSE)`
+- **Expected**: Only spectral outliers detected
+- **Verify**: Response outlier code path not executed
+
+#### Test Group 4: Combined Outlier Handling
+
+**Test 4.1: Combines spectral and response outliers**
+- **Setup**: Dataset with one spectral outlier and one response outlier (different samples)
+- **Input**: `finalize_dataset(test_data, response_variable = "SOC")`
+- **Expected**: Both samples flagged as outliers
+- **Verify**: Check outlier_flag for both samples = "outlier"
+
+**Test 4.2: Sample can be flagged by both methods**
+- **Setup**: Create sample that is outlier in both spectral and response
+- **Input**: `finalize_dataset(...)`
+- **Expected**: Sample flagged once (unique combination)
+- **Verify**: outlier_flag = "outlier", count verified
+
+**Test 4.3: Outlier removal when requested**
+- **Setup**: Dataset with 50 samples, 3 outliers
+- **Input**: `finalize_dataset(..., remove_outliers = TRUE)`
+- **Expected**: Returned dataset has 47 rows, outliers removed
+- **Verify**:
+  - `expect_equal(nrow(result), 47)`
+  - Removed samples not present
+
+**Test 4.4: Outlier flagging when removal disabled**
+- **Setup**: Dataset with outliers
+- **Input**: `finalize_dataset(..., remove_outliers = FALSE)`
+- **Expected**: All samples retained, outlier_flag column added
+- **Verify**:
+  - `expect_equal(nrow(result), nrow(test_data))`
+  - `expect_true("outlier_flag" %in% names(result))`
+  - Check specific flag values
+
+#### Test Group 5: Output Structure
+
+**Test 5.1: outlier_flag column added**
+- **Setup**: Any valid dataset
+- **Input**: `finalize_dataset(...)`
+- **Expected**: Result has outlier_flag column with values "good" or "outlier"
+- **Verify**:
+  - `expect_true("outlier_flag" %in% names(result))`
+  - `expect_true(all(result$outlier_flag %in% c("good", "outlier")))`
+
+**Test 5.2: All original columns preserved (when not removing)**
+- **Setup**: Dataset with specific columns
+- **Input**: `finalize_dataset(..., remove_outliers = FALSE)`
+- **Expected**: All original columns plus outlier_flag
+- **Verify**:
+  - `expect_true(all(names(test_data) %in% names(result)))`
+  - Only new column is outlier_flag
+
+**Test 5.3: Returns tibble**
+- **Setup**: Any valid dataset
+- **Input**: `finalize_dataset(...)`
+- **Expected**: Result is a tibble
+- **Verify**: `expect_s3_class(result, "tbl_df")`
+
+#### Test Group 6: Verbose Output
+
+**Test 6.1: Configuration summary displays correctly**
+- **Setup**: Capture cli output
+- **Input**: `finalize_dataset(..., verbose = TRUE)`
+- **Expected**: Shows input samples, spectral features, response variable, method settings
+- **Verify**: Check for "Dataset Finalization Configuration" header and all config lines
+
+**Test 6.2: Outlier detection pipeline header**
+- **Setup**: Capture cli output
+- **Input**: `finalize_dataset(..., verbose = TRUE)`
+- **Expected**: Shows "Outlier Detection Pipeline" with tree structure
+- **Verify**: Check for pipeline header and ├─ └─ characters
+
+**Test 6.3: Final summary shows all metrics**
+- **Setup**: Dataset with known outliers
+- **Input**: `finalize_dataset(..., verbose = TRUE)`, capture output
+- **Expected**: Summary shows total outliers, spectral count, response count, final samples, action, time
+- **Verify**: Check all summary lines present
+
+**Test 6.4: Silent mode produces no output**
+- **Setup**: Capture output
+- **Input**: `finalize_dataset(..., verbose = FALSE)`
+- **Expected**: No cli messages
+- **Verify**: `expect_silent(...)` or output length = 0
+
+#### Test Group 7: Edge Cases
+
+**Test 7.1: No outliers detected (clean data)**
+- **Setup**: Well-behaved dataset with no extreme values
+- **Input**: `finalize_dataset(clean_data, response_variable = "SOC")`
+- **Expected**: All samples have outlier_flag = "good"
+- **Verify**:
+  - `expect_true(all(result$outlier_flag == "good"))`
+  - Summary shows 0 outliers
+
+**Test 7.2: All samples are outliers (edge case)**
+- **Setup**: Extreme data where all might be flagged
+- **Input**: `finalize_dataset(...)`
+- **Expected**: Handles gracefully
+- **Verify**: Function doesn't crash, reasonable output
+
+**Test 7.3: NA values in response variable**
+- **Setup**:
+  ```r
+  test_data <- data.frame(
+    Sample_ID = paste0("S", 1:50),
+    `600` = rnorm(50),
+    SOC = c(rnorm(45), rep(NA, 5))
+  )
+  ```
+- **Input**: `finalize_dataset(test_data, response_variable = "SOC")`
+- **Expected**: NAs handled in IQR calculation (removed for stats)
+- **Verify**: Function completes, only non-NA values used for bounds
+
+**Test 7.4: Minimum viable dataset (n = 10)**
+- **Setup**: Exactly 10 samples
+- **Input**: `finalize_dataset(minimal_data, response_variable = "SOC")`
+- **Expected**: Passes validation, completes outlier detection
+- **Verify**: No errors, reasonable output
+
+#### Test Group 8: Error Hint Display
+
+**Test 8.1: PCA failure shows actionable hints**
+- **Setup**: Mock PCA to fail
+- **Input**: `finalize_dataset(..., verbose = TRUE)`
+- **Expected**: Error hints start with "Check if..." or "Check for..."
+- **Verify**: Check cli output contains diagnostic suggestions
+
+**Test 8.2: Mahalanobis failure shows correct hints**
+- **Setup**: Mock Mahalanobis to fail
+- **Input**: `finalize_dataset(..., verbose = TRUE)`
+- **Expected**: Hints about singular covariance, insufficient variance
+- **Verify**: Check specific hint text
+
+---
+
+## test-inputs-helpers.R
+
+### Function: `read_opus_internal()`
+
+#### Test Group 1: File Input Handling
+
+**Test 1.1: Reads single OPUS file successfully**
+- **Setup**: Create test OPUS file with known spectral data
+- **Input**: `read_opus_internal(path = "test.0", spectra_type = "MIR", verbose = FALSE)`
+- **Expected**: Tibble with Sample_ID and spectral columns
+- **Verify**: Check column names include Sample_ID and numeric wavenumbers
+
+**Test 1.2: Reads directory of OPUS files**
+- **Setup**: Create directory with multiple OPUS files
+- **Input**: `read_opus_internal(path = "test_dir/", spectra_type = "MIR", verbose = FALSE)`
+- **Expected**: Tibble with all samples combined
+- **Verify**: `nrow(result) == number_of_files`
+
+**Test 1.3: Aborts when directory has no OPUS files**
+- **Setup**: Empty directory
+- **Input**: `read_opus_internal(path = "empty_dir/", spectra_type = "MIR", verbose = FALSE)`
+- **Expected**: Error "No OPUS files found in directory"
+- **Verify**: `expect_error(..., "No OPUS files")`
+
+#### Test Group 2: Channel Selection Logic
+
+**Test 2.1: Selects preferred channel (ab_no_atm_comp)**
+- **Setup**: OPUS file with multiple channels including ab_no_atm_comp
+- **Input**: `read_opus_internal(...)`
+- **Expected**: Uses ab_no_atm_comp channel
+- **Verify**: `attr(result, "channel_used") == "ab_no_atm_comp"`
+
+**Test 2.2: Falls back to next available channel**
+- **Setup**: OPUS file with only sc_sample channel
+- **Input**: `read_opus_internal(...)`
+- **Expected**: Uses sc_sample channel
+- **Verify**: `attr(result, "channel_used") == "sc_sample"`
+
+**Test 2.3: Warns when multiple channels used across files**
+- **Setup**: Directory where different files have different channels
+- **Input**: `read_opus_internal(..., verbose = TRUE)`
+- **Expected**: Verbose output shows warning about multiple channels
+- **Verify**: Check cli output contains "Multiple channels used"
+
+#### Test Group 3: Error Handling
+
+**Test 3.1: Handles opusreader2 failure gracefully**
+- **Setup**: Mock opusreader2::read_opus to fail
+- **Input**: `read_opus_internal(...)`
+- **Expected**: Returns NULL with error hints
+- **Verify**: Check error hints mention file path, format, package installation
+
+**Test 3.2: Returns NULL when no valid spectral data found**
+- **Setup**: OPUS files with no parseable channels
+- **Input**: `read_opus_internal(...)`
+- **Expected**: Error "No valid spectral data found in any files"
+- **Verify**: `expect_error(..., "No valid spectral data")`
+
+---
+
+### Function: `read_csv_internal()`
+
+#### Test Group 1: CSV Reading and Validation
+
+**Test 1.1: Reads valid CSV with numeric wavenumbers**
+- **Setup**: CSV with Sample_ID column and numeric wavenumber columns
+- **Input**: `read_csv_internal(path = "test.csv", spectra_type = "MIR", verbose = FALSE)`
+- **Expected**: Tibble with standardized column names
+- **Verify**: `expect_true("Sample_ID" %in% names(result))`
+
+**Test 1.2: Converts first column to Sample_ID**
+- **Setup**: CSV where first column is named "sample_name"
+- **Input**: `read_csv_internal(...)`
+- **Expected**: First column renamed to Sample_ID
+- **Verify**: `names(result)[1] == "Sample_ID"`
+
+**Test 1.3: Converts spectral values to numeric**
+- **Setup**: CSV with character-encoded numeric values
+- **Input**: `read_csv_internal(...)`
+- **Expected**: All spectral columns are numeric
+- **Verify**: `all(sapply(result[,-1], is.numeric))`
+
+**Test 1.4: Aborts when CSV has fewer than 2 columns**
+- **Setup**: CSV with only one column
+- **Input**: `read_csv_internal(...)`
+- **Expected**: Error "CSV must have at least 2 columns"
+- **Verify**: `expect_error(..., "at least 2 columns")`
+
+#### Test Group 2: Column Name Validation
+
+**Test 2.1: Warns when column names aren't numeric**
+- **Setup**: CSV with text column names like "peak1", "peak2"
+- **Input**: `read_csv_internal(...)`
+- **Expected**: Yellow warning about non-numeric column names
+- **Verify**: Check cli output contains warning, but function still returns data
+
+**Test 2.2: Accepts numeric column names**
+- **Setup**: CSV with column names like "600.5", "601.0"
+- **Input**: `read_csv_internal(...)`
+- **Expected**: No warnings, data returned successfully
+- **Verify**: `expect_silent(...)`
+
+#### Test Group 3: Error Handling
+
+**Test 3.1: Handles readr::read_csv failure gracefully**
+- **Setup**: Mock readr::read_csv to fail
+- **Input**: `read_csv_internal(...)`
+- **Expected**: Returns NULL with error hints about file path, format, encoding
+- **Verify**: Check error hints are informative
+
+**Test 3.2: Returns data despite column name warning**
+- **Setup**: CSV with non-numeric but valid column names
+- **Input**: `read_csv_internal(...)`
+- **Expected**: Data returned successfully despite warning
+- **Verify**: `expect_s3_class(result, "data.frame")`
+
+---
+
+### Function: `parse_filename_metadata()`
+
+#### Test Group 1: Basic Filename Parsing
+
+**Test 1.1: Parses simple format correctly**
+- **Setup**: None
+- **Input**: `parse_filename_metadata("PROJ_001_Bulk.0", "project_sampleid_fraction", "_")`
+- **Expected**: Tibble with Project, Sample_ID, Fraction columns
+- **Verify**:
+  - `result$Project == "PROJ"`
+  - `result$Sample_ID == "001"`
+  - `result$Fraction == "Bulk"`
+
+**Test 1.2: Handles complex format with all tokens**
+- **Setup**: None
+- **Input**: `parse_filename_metadata("P1_S01_F2_W3_SC4.0", "project_sampleid_fraction_wellid_scanid", "_")`
+- **Expected**: Tibble with all parsed metadata
+- **Verify**: All token values correctly mapped
+
+**Test 1.3: Removes file extension correctly**
+- **Setup**: None
+- **Input**: `parse_filename_metadata("sample.0", "sampleid", "_")`
+- **Expected**: Sample_ID is "sample" not "sample.0"
+- **Verify**: `result$Sample_ID == "sample"`
+
+#### Test Group 2: Delimiter Handling
+
+**Test 2.1: Works with hyphen delimiter**
+- **Setup**: None
+- **Input**: `parse_filename_metadata("PROJ-001-Bulk", "project_sampleid_fraction", "-")`
+- **Expected**: Correct parsing with hyphen
+- **Verify**: All fields parsed correctly
+
+**Test 2.2: Works with dot delimiter**
+- **Setup**: None
+- **Input**: `parse_filename_metadata("PROJ.001.Bulk", "project_sampleid_fraction", ".")`
+- **Expected**: Correct parsing with dot
+- **Verify**: All fields parsed correctly
+
+#### Test Group 3: Missing and Default Values
+
+**Test 3.1: Uses default fraction when not in filename**
+- **Setup**: None
+- **Input**: `parse_filename_metadata("PROJ_001", "project_sampleid", "_")`
+- **Expected**: Fraction defaults to "GroundBulk"
+- **Verify**: `result$Fraction == "GroundBulk"`
+
+**Test 3.2: Allows custom default fraction**
+- **Setup**: None
+- **Input**: `parse_filename_metadata("PROJ_001", "project_sampleid", "_", default_fraction = "Custom")`
+- **Expected**: Fraction is "Custom"
+- **Verify**: `result$Fraction == "Custom"`
+
+**Test 3.3: Returns UNKNOWN for missing Sample_ID**
+- **Setup**: None
+- **Input**: `parse_filename_metadata("PROJ_F1", "project_fraction", "_")`
+- **Expected**: Warning and Sample_ID = "UNKNOWN"
+- **Verify**:
+  - `expect_warning(...)`
+  - `result$Sample_ID == "UNKNOWN"`
+
+**Test 3.4: Handles insufficient filename parts**
+- **Setup**: None
+- **Input**: `parse_filename_metadata("PROJ", "project_sampleid_fraction", "_")`
+- **Expected**: Warning about fewer parts than expected, returns defaults
+- **Verify**:
+  - `expect_warning(..., "fewer parts")`
+  - `result$Sample_ID == "UNKNOWN"`
+
+#### Test Group 4: Token Mapping
+
+**Test 4.1: Maps all standard tokens correctly**
+- **Setup**: None
+- **Input**: `parse_filename_metadata("p_s_f_w_sc", "project_sampleid_fraction_wellid_scanid", "_")`
+- **Expected**: Column names are Project, Sample_ID, Fraction, Well_ID, Scan
+- **Verify**: Check all standardized column names present
+
+**Test 4.2: Preserves unknown tokens as-is**
+- **Setup**: None
+- **Input**: `parse_filename_metadata("p_s_custom", "project_sampleid_customtoken", "_")`
+- **Expected**: "customtoken" kept as column name
+- **Verify**: `"customtoken" %in% names(result)`
+
+**Test 4.3: Handles 'ignore' token**
+- **Setup**: None
+- **Input**: `parse_filename_metadata("p_skip_s", "project_ignore_sampleid", "_")`
+- **Expected**: Ignore token still parsed but can be dropped later
+- **Verify**: Check that Sample_ID is correctly identified
+
+#### Test Group 5: Edge Cases
+
+**Test 5.1: Handles empty filename**
+- **Setup**: None
+- **Input**: `parse_filename_metadata("", "project_sampleid", "_")`
+- **Expected**: Warning and default values
+- **Verify**: Returns tibble with UNKNOWN Sample_ID
+
+**Test 5.2: Handles filename with extra parts**
+- **Setup**: None
+- **Input**: `parse_filename_metadata("p_s_f_extra_parts", "project_sampleid_fraction", "_")`
+- **Expected**: Parses first 3 parts, ignores rest
+- **Verify**: Only requested tokens are parsed
+
+**Test 5.3: Case-insensitive token matching**
+- **Setup**: None
+- **Input**: `parse_filename_metadata("P_S", "PROJECT_SAMPLEID", "_")`
+- **Expected**: Tokens recognized despite case
+- **Verify**: Correct parsing with uppercase format string
+
+---
+
 ## test-covariates-orchestrator.R
 
 ### Function: `fetch_covariates()`
