@@ -9,15 +9,15 @@ define_model_specifications(model_type)
 \arguments{
 \item{model_type}{Character. One of the following canonical model slugs:
 \itemize{
-\item{\code{"random_forest"}}
-\item{\code{"cubist"}}
-\item{\code{"xgboost"}}
-\item{\code{"lightgbm"}}
-\item{\code{"elastic_net"}}
-\item{\code{"svm_rbf"}}
-\item{\code{"mars"}}
-\item{\code{"plsr"}}
-\item{\code{"mlp_nn"}}
+\item \code{"random_forest"}
+\item \code{"cubist"}
+\item \code{"xgboost"}
+\item \code{"lightgbm"}
+\item \code{"elastic_net"}
+\item \code{"svm_rbf"}
+\item \code{"mars"}
+\item \code{"plsr"}
+\item \code{"mlp_nn"}
 }}
 }
 \value{
@@ -42,9 +42,9 @@ define_model_specifications("mlp_nn")
 
 }
 \seealso{
-\code{\link[parsnip]{set_engine}},
-\code{\link[tune]{tune}},
-\code{\link{build_model_grid}}
+\code{\link[parsnip:set_engine]{parsnip::set_engine()}},
+\code{\link[tune:reexports]{tune::tune()}},
+\code{\link[=build_model_grid]{build_model_grid()}}
 }
 \keyword{Constructs}
 \keyword{Define}
