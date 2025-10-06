@@ -1,6 +1,6 @@
 Package: horizons
 Title: Spectral Ensemble Modeling and Covariate Prediction for Soil Data
-Version: 0.8.2
+Version: 0.9.0
 Author: Sam Leuthold [aut, cre]
 Maintainer: Sam Leuthold <sam.leuthold@colostate.edu>
 Authors@R: 
@@ -104,7 +104,7 @@ Config/testthat/edition: 3
 VignetteBuilder: knitr
 Depends: 
     R (>= 2.10)
-Collate: 
+Collate:
     'zzz.R'
     'constants.R'
     'utils-errors.R'
@@ -112,9 +112,7 @@ Collate:
     'utils-backtransform.R'
     'utils-clustering.R'
     'utils-parallel.R'
-    'utils-reporting.R'
     'utils-download.R'
-    'utils-display.R'
     'utils-ossl.R'
     'metrics-ccc.R'
     'metrics-rpd.R'
@@ -128,7 +126,7 @@ Collate:
     'models-recipes.R'
     'covariates-data.R'
     'covariates-climate.R'
-    'covariates-similarity.R'
+    'covariates-clustering.R'
     'covariates-soil.R'
     'covariates-cubist.R'
     'covariates-orchestrator.R'
