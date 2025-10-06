@@ -68,5 +68,5 @@ Lin, L. I. (1989). A concordance correlation coefficient to evaluate reproducibi
 Biometrics, 45(1), 255-268.
 }
 \seealso{
-\code{\link[yardstick]{metric_set}}, \code{\link{rpd}}, \code{\link{rrmse}}
+\code{\link[yardstick:metric_set]{yardstick::metric_set()}}, \code{\link[=rpd]{rpd()}}, \code{\link[=rrmse]{rrmse()}}
 }

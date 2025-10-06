@@ -8,6 +8,7 @@ preprocess_mir_spectra(
   spectral_data,
   smooth_window = 9,
   smooth_poly = 1,
+  derivative_order = 0,
   verbose = TRUE
 )
 }
