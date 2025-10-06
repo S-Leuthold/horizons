@@ -280,7 +280,7 @@ get_ossl_training_data <- function(properties,
       handle_results(safe_result   = download_result,
                      error_title   = glue::glue("Failed to download {download_info$desc} from {download_info$url}"),
                      error_hints   = c("Check internet connection",
-                                       "Verify URL is accessible: {download_info$url}",
+                                       glue::glue("Verify URL is accessible: {download_info$url}"),
                                        "OSSL server may be temporarily unavailable"),
                      abort_on_null = TRUE,
                      silent        = FALSE) -> download_result
