@@ -12,27 +12,24 @@ preprocess_spectra(
 )
 }
 \arguments{
-\item{spectra_data}{Tibble. Spectral data from read_spectra() in wide format}
+\item{spectra_data}{\verb{[tibble]} Spectral data from \code{read_spectra()} in wide format}
 
-\item{resample_interval}{Numeric. Interval for resampling spectra.
-Default: 2 (every 2 cm⁻¹)}
+\item{resample_interval}{\verb{[numeric]} Interval for resampling spectra (cm⁻¹). Default: \code{2}}
 
-\item{baseline_method}{Character. Baseline correction method:
-\itemize{
-\item "none": No baseline correction (default)
-\item "rubberband": Convex hull baseline removal
-\item "polynomial": SNV + 2nd order polynomial detrending
-Default: "none"
-}}
+\item{baseline_method}{\verb{[character]} Baseline correction method: \code{"none"} (default),
+\code{"rubberband"} (convex hull baseline removal), or \code{"polynomial"} (SNV + 2nd order
+polynomial detrending)}
 
-\item{verbose}{Logical. Print progress messages. Default: TRUE}
+\item{verbose}{\verb{[logical]} Print progress messages. Default: \code{TRUE}}
 }
 \value{
-A tibble with preprocessed spectral data in wide format containing:
-\describe{
-\item{Sample_ID}{Character. Unique sample identifier (preserved from input)}
-\item{<wavenumber_cols>}{Numeric columns with standardized wavenumber grid values containing processed absorbance data}
+A \verb{[tibble]} with preprocessed spectral data in wide format containing:
+\itemize{
+\item \code{Sample_ID}: Character. Unique sample identifier (preserved from input)
+\item \verb{<wavenumber_cols>}: Numeric columns with standardized wavenumber grid values
+containing processed absorbance data
 }
+
 The returned tibble maintains the same attributes as the input data.
 }
 \description{
@@ -43,7 +40,7 @@ by ensuring consistent data structure and removing instrument-specific artifacts
 }
 \details{
 This function performs data preparation only. Advanced spectral transformations
-(SNV, derivatives, smoothing) are handled by \code{\link{step_transform_spectra}}
+(SNV, derivatives, smoothing) are handled by \code{\link[=step_transform_spectra]{step_transform_spectra()}}
 in the modeling workflow.
 
 The preprocessing pipeline includes:
@@ -66,9 +63,9 @@ spectra <- read_spectra("opus", "data/spectra/", "MIR") \%>\%
 
 }
 \seealso{
-\code{\link{read_spectra}} for reading raw spectral data,
-\code{\link{step_transform_spectra}} for advanced transformations,
-\code{\link{create_dataset}} for combining with response variables
+\code{\link[=read_spectra]{read_spectra()}} for reading raw spectral data,
+\code{\link[=step_transform_spectra]{step_transform_spectra()}} for advanced transformations,
+\code{\link[=create_dataset]{create_dataset()}} for combining with response variables
 
 Other inputs: 
 \code{\link{create_configs}()},
