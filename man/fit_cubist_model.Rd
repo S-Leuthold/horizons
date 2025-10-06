@@ -2,7 +2,7 @@
 % Please edit documentation in R/covariates-cubist.R
 \name{fit_cubist_model}
 \alias{fit_cubist_model}
-\title{Fit a Cubist Model Using Similarity-Selected Training Data}
+\title{Fit a Cubist Model for Cluster-Specific Covariate Prediction}
 \usage{
 fit_cubist_model(
   train_data,
@@ -16,7 +16,7 @@ fit_cubist_model(
 }
 \arguments{
 \item{train_data}{A \code{tibble} containing PCA-transformed predictors (\code{Dim.1}, \code{Dim.2}, etc.)
-and the target covariate column. Should be pre-selected similar samples.}
+and the target covariate column. Should be cluster-specific training samples.}
 
 \item{val_data}{A \code{tibble} with validation data (same structure as train_data)
 for computing unbiased performance metrics.}
@@ -43,7 +43,7 @@ A named \code{list} with the following components:
 }
 \description{
 Builds, tunes, and evaluates a Cubist model to predict a single soil covariate
-using similarity-selected OSSL training data. The function applies a max entropy
+using cluster-specific OSSL training data. The function applies a max entropy
 grid search followed by Bayesian optimization to tune hyperparameters, then fits
 the final model and returns both performance metrics and workflow objects.
 }
