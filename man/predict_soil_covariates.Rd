@@ -2,19 +2,25 @@
 % Please edit documentation in R/covariates-soil.R
 \name{predict_soil_covariates}
 \alias{predict_soil_covariates}
-\title{Soil Covariate Prediction from MIR Spectra}
+\title{Predict Soil Covariates Using Clustered Local Models (OSSL-Centric PCA)}
 \usage{
 predict_soil_covariates(
   input_data,
   covariates,
-  n_similar = 20000,
+  n_similar = NULL,
   prop = 0.85,
   variance_threshold = 0.985,
+  coverage = 0.8,
+  max_clusters = 10,
   bayesian_iter = 10,
   allow_par = FALSE,
   n_workers = NULL,
   refresh = FALSE,
-  verbose = TRUE
+  verbose = TRUE,
+  derivative_order = 1,
+  clustering_method = "kmeans",
+  use_mahalanobis = FALSE,
+  distance_percentile = 0.6
 )
 }
 \arguments{
@@ -22,72 +28,57 @@ predict_soil_covariates(
 
 \item{covariates}{Character vector of soil properties to predict}
 
-\item{n_similar}{Integer. Total OSSL samples to select via Kennard-Stone (default: 20000)}
+\item{n_similar}{Deprecated. Ignored in v0.9.0+. V2 uses all available OSSL samples.}
 
 \item{prop}{Numeric. Proportion for training set (default: 0.85)}
 
-\item{variance_threshold}{Numeric. Proportion of variance to capture with PCA (default: 0.85)}
+\item{variance_threshold}{Numeric. PCA variance to capture (default: 0.985)}
 
-\item{bayesian_iter}{Integer. Bayesian optimization iterations (default: 3, use 0 for grid search only)}
+\item{coverage}{Numeric. Proportion of OSSL to keep per cluster (default: 0.8)}
 
-\item{allow_par}{Logical. Enable parallel processing for hyperparameter tuning (default: FALSE, set TRUE for faster execution)}
+\item{max_clusters}{Integer. Maximum clusters to test (default: 10)}
 
-\item{n_workers}{Integer. Number of parallel workers (default: NULL, auto-detect)}
+\item{bayesian_iter}{Integer. Bayesian optimization iterations (default: 10)}
 
-\item{refresh}{Logical. Force refresh of OSSL training data (default: FALSE)}
+\item{allow_par}{Logical. Enable parallel processing (default: FALSE)}
+
+\item{n_workers}{Integer. Number of parallel workers (default: NULL)}
+
+\item{refresh}{Logical. Force refresh of OSSL data (default: FALSE)}
 
 \item{verbose}{Logical. Print progress messages (default: TRUE)}
+
+\item{derivative_order}{Integer. SG derivative order: 0 = smoothing only,
+1 = 1st derivative, 2 = 2nd derivative (default: 0, EXPERIMENTAL)}
+
+\item{clustering_method}{Character. "kmeans" or "ward" (default: "kmeans", EXPERIMENTAL)}
+
+\item{use_mahalanobis}{Logical. Use Mahalanobis distance for OSSL selection
+instead of Euclidean (default: TRUE, EXPERIMENTAL)}
+
+\item{distance_percentile}{Numeric. Percentile threshold for OSSL inclusion
+per cluster (0-1). Lower = more selective. (default: 0.6, EXPERIMENTAL)}
 }
 \value{
 Named list with:
 \itemize{
 \item predictions: Tibble with Sample_ID and predicted covariate columns
-\item validation_metrics: Tibble with accuracy metrics per sample/covariate
-\item global_models: List of fitted models for each covariate
-\item selection_info: Information about training set selection
+\item validation_metrics: Tibble with accuracy metrics per cluster/covariate
+\item local_models: Nested list of fitted models (cluster × covariate)
+\item cluster_info: Clustering details
 }
 }
 \description{
-Predicts soil properties from mid-infrared (MIR) spectroscopy using a Mahalanobis
-distance-based local modeling approach with OSSL training data.
+Predicts soil properties from MIR spectra using OSSL-centric clustering
+and locally-trained Cubist models. Trains PCA on OSSL (global spectral space),
+projects unknowns into that space, clusters unknowns, selects relevant
+OSSL training data for each cluster, and trains specialized models.
 
-Predicts soil covariate values from MIR spectra using OSSL training data and
-Cubist models. By default, uses ALL available OSSL samples (~36,000) for best
-performance. Simpler selection methods outperform complex algorithms like
-Kennard-Stone when sufficient training data is used.
+Changed in v0.9.0: Now uses OSSL-centric PCA (trains PCA on 12K+ OSSL samples)
+instead of unknown-centric PCA. Achieves 8-10\% R² improvement over previous
+global approach. Defaults to 1st derivative preprocessing and Euclidean distance.
 }
-\examples{
-\dontrun{
-# Default: Use 20,000 OSSL samples with clustered Kennard-Stone
-results <- predict_soil_covariates(
-  input_data = my_mir_spectra,
-  covariates = c("clay", "ph", "oc"),
-  allow_par = TRUE  # Enable parallel for faster execution
-)
+\section{Experimental Parameters (not for production)}{
 
-# Maximum performance: Use more samples
-results <- predict_soil_covariates(
-  input_data = my_mir_spectra,
-  covariates = "clay",
-  n_similar = 30000,
-  allow_par = TRUE  # Enable parallel
-)
-
-# Faster with fewer samples and no Bayesian optimization
-results <- predict_soil_covariates(
-  input_data = my_mir_spectra,
-  covariates = c("clay", "sand"),
-  n_similar = 10000,
-  bayesian_iter = 0,  # Skip Bayesian for speed
-  allow_par = TRUE
-)
 }
 
-}
-\keyword{Covariates}
-\keyword{MIR}
-\keyword{Predict}
-\keyword{Soil}
-\keyword{Spectra}
-\keyword{from}
-\keyword{internal}

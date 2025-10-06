@@ -1,12 +1,12 @@
-#' Fit a Cubist Model Using Similarity-Selected Training Data
+#' Fit a Cubist Model for Cluster-Specific Covariate Prediction
 #'
 #' Builds, tunes, and evaluates a Cubist model to predict a single soil covariate
-#' using similarity-selected OSSL training data. The function applies a max entropy
+#' using cluster-specific OSSL training data. The function applies a max entropy
 #' grid search followed by Bayesian optimization to tune hyperparameters, then fits
 #' the final model and returns both performance metrics and workflow objects.
 #'
 #' @param train_data A `tibble` containing PCA-transformed predictors (`Dim.1`, `Dim.2`, etc.)
-#'   and the target covariate column. Should be pre-selected similar samples.
+#'   and the target covariate column. Should be cluster-specific training samples.
 #' @param val_data A `tibble` with validation data (same structure as train_data)
 #'   for computing unbiased performance metrics.
 #' @param covariate A character string. Name of the target covariate (e.g., `"clay"`, `"ph"`).
@@ -93,7 +93,7 @@ fit_cubist_model <- function(train_data,
 
     if (verbose) {
 
-      cli::cli_text("│  ├─ Preparing training data.")
+      cli::cli_text("│  │  ├─ Preparing training data.")
 
     }
 
@@ -176,7 +176,7 @@ fit_cubist_model <- function(train_data,
 
     ## Store and increase globals size limit for large spectral data
     old_maxSize <- getOption("future.globals.maxSize")
-    options(future.globals.maxSize = 2 * 1024^3)  # Set to 2GB for spectral workflows
+    options(future.globals.maxSize = 8 * 1024^3)  # Set to 8GB for spectral workflows (pH has 15K samples)
 
     on.exit({
       future::plan(old_plan)
@@ -199,7 +199,7 @@ fit_cubist_model <- function(train_data,
 
   ## Run grid search ---------------------------------------------------------
 
-  if(verbose) cli::cli_text("│  ├─ Running grid search.")
+  if(verbose) cli::cli_text("│  │  ├─ Running grid search.")
 
   safely_execute(expr = {tune::tune_grid(object    = wf,
                                          resamples = CV_Folds,
@@ -238,7 +238,7 @@ fit_cubist_model <- function(train_data,
 
     if(verbose) {
 
-      cli::cli_text("│  ├─ Bayesian optimization: {bayesian_iter} iterations.")
+      cli::cli_text("│  │  ├─ Bayesian optimization: {bayesian_iter} iterations.")
 
     }
 
@@ -289,7 +289,7 @@ fit_cubist_model <- function(train_data,
   ## Step 6: Finalize the workflow
   ## ---------------------------------------------------------------------------
 
-  if(verbose) cli::cli_text("│  ├─ Finalizing workflow.")
+  if(verbose) cli::cli_text("│  │  ├─ Finalizing workflow.")
 
   best_params <- tune::select_best(final_tune_result, metric = "rmse")
   final_wf    <- tune::finalize_workflow(wf, best_params)
@@ -298,7 +298,7 @@ fit_cubist_model <- function(train_data,
   ## Step 7: Fit the final model
   ## ---------------------------------------------------------------------------
 
-  if (verbose) cli::cli_text("│  ├─ Fitting final model.")
+  if (verbose) cli::cli_text("│  │  ├─ Fitting final model.")
 
   safely_execute(expr               = {parsnip::fit(final_wf, Train_Data)},
                  default_value      = NULL,
@@ -328,7 +328,7 @@ fit_cubist_model <- function(train_data,
   ## Step 8: Test the fitted maodel on the validation set
   ## ---------------------------------------------------------------------------
 
-  if (verbose) cli::cli_text("│  ├─ Computing validation metrics.")
+  if (verbose) cli::cli_text("│  │  ├─ Computing validation metrics.")
 
   safely_execute(expr = {
 
@@ -383,7 +383,7 @@ fit_cubist_model <- function(train_data,
 
   if (verbose) {
 
-    cli::cli_text("│  ├─ Best params: committees={round(best_params$committees)}, neighbors={round(best_params$neighbors)}.")
+    cli::cli_text("│  │  └─ Best params: committees={round(best_params$committees)}, neighbors={round(best_params$neighbors)}.")
   }
 
   ## Return results list -------------------------------------------------------

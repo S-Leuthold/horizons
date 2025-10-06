@@ -2,27 +2,9 @@
 % Please edit documentation in R/inputs-helpers.R
 \name{inputs-helpers}
 \alias{inputs-helpers}
-\alias{read_opus_internal}
 \title{Internal Helper Functions for Reading Spectral Data}
-\usage{
-read_opus_internal(path, spectra_type, verbose)
-}
-\arguments{
-\item{path}{Character. Path to OPUS file or directory}
-
-\item{spectra_type}{Character. "MIR" or "NIR"}
-
-\item{verbose}{Logical. Print progress messages}
-}
-\value{
-Tibble with spectral data
-}
 \description{
 Collection of internal functions supporting the main read_spectra() function.
 These handle format-specific reading of OPUS and CSV files.
-
-Internal function to read OPUS binary files. Handles both single files
-and directories of OPUS files. Automatically selects the best available
-channel.
 }
 \keyword{internal}

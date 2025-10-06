@@ -195,12 +195,12 @@ get_ossl_training_data <- function(properties,
 
   if (verbose) {
 
-    cli::cli_text("")
-    cli::cli_text("Data Loading")
+    cli::cli_text("│")
+    cli::cli_text("├─ {cli::style_bold('Data Loading')}")
 
     properties_text <- paste0("Properties requested: ", paste(properties, collapse = ", "),
                              " (", length(properties), " total)")
-    cli::cli_text("├─ {properties_text}")
+    cli::cli_text("│  ├─ {properties_text}")
   }
 
   ## ---------------------------------------------------------------------------
@@ -220,7 +220,7 @@ get_ossl_training_data <- function(properties,
 
     cache_status <- if (files_exist) "found" else "missing"
     cache_symbol <- if (files_exist) "found" else "not found"
-    cli::cli_text("└─ Cache status: {cache_status}")
+    cli::cli_text("│  └─ Cache status: {cache_status}")
 
   }
 
@@ -299,8 +299,9 @@ get_ossl_training_data <- function(properties,
 
   if (verbose) {
 
-    cli::cli_text("Data Processing")
-    cli::cli_text("├─ Loading OSSL data from cache.")
+    cli::cli_text("│")
+    cli::cli_text("├─ {cli::style_bold('Data Processing')}")
+    cli::cli_text("│  ├─ Loading OSSL data from cache.")
 
   }
 
@@ -320,7 +321,7 @@ get_ossl_training_data <- function(properties,
   ## Step 5: Process Lab Data for Requested Properties
   ## ---------------------------------------------------------------------------
 
-  if (verbose) cli::cli_text("├─ Processing lab data for {length(properties)} properties.")
+  if (verbose) cli::cli_text("│  ├─ Processing lab data for {length(properties)} properties.")
 
 
   # Get OSSL variable names for requested properties ---------------------------
@@ -364,7 +365,7 @@ get_ossl_training_data <- function(properties,
   ## Step 6: Clean up and standardize MIR Spectra
   ## ---------------------------------------------------------------------------
 
-  if (verbose) cli::cli_text("├─ Processing MIR spectra.")
+  if (verbose) cli::cli_text("│  ├─ Processing MIR spectra.")
 
 
   ## Apply a standardized preproccesing to match incoming data -----------------
@@ -415,7 +416,7 @@ get_ossl_training_data <- function(properties,
   ## Step 7: Join MIR, lab, and location data, clean up
   ## ---------------------------------------------------------------------------
 
-  if (verbose) cli::cli_text("├─ Joining spectral and lab data.")
+  if (verbose) cli::cli_text("│  ├─ Joining spectral and lab data.")
 
   safely_execute(expr = {
                          ## Join the MIR and the lab data ----------------------
@@ -516,13 +517,26 @@ get_ossl_training_data <- function(properties,
 #' @keywords internal
 
 preprocess_mir_spectra <- function(spectral_data,
-                                   smooth_window = 9,
-                                   smooth_poly   = 1,
-                                   verbose       = TRUE) {
+                                   smooth_window    = 9,
+                                   smooth_poly      = 1,
+                                   derivative_order = 0,
+                                   verbose          = TRUE) {
 
   ## TODO: Might need to tree these messages as well.
 
-  if (verbose) cli::cli_text("├─ Preprocessing MIR spectra (SG smoothing + SNV)")
+  ## Adjust polynomial order if needed for higher derivatives ----------------
+
+  if (derivative_order > smooth_poly) {
+    smooth_poly <- derivative_order
+  }
+
+  derivative_label <- switch(as.character(derivative_order),
+                             "0" = "SG smoothing",
+                             "1" = "SG 1st derivative",
+                             "2" = "SG 2nd derivative",
+                             paste0("SG ", derivative_order, "th derivative"))
+
+  if (verbose) cli::cli_text("├─ Preprocessing MIR spectra ({derivative_label} + SNV)")
 
   ## ---------------------------------------------------------------------------
   ## Step 1: Validate and quality check input data
@@ -538,12 +552,6 @@ preprocess_mir_spectra <- function(spectral_data,
   ## Extract spectral matrix ---------------------------------------------------
 
   spectra_matrix <- as.matrix(spectral_data[spectral_cols])
-
-  ## QAQC: Check for negative spectra ------------------------------------------
-
-  n_negative <- sum(spectra_matrix < 0, na.rm = TRUE)
-
-  if (n_negative > 0) cli::cli_warn("Found {n_negative} negative spectral values - may indicate measurement issues")
 
   ## QAQC: Check for all 0 or constant spectra ---------------------------------
 
@@ -561,7 +569,7 @@ preprocess_mir_spectra <- function(spectral_data,
   tryCatch({
 
     prospectr::savitzkyGolay(X = spectra_matrix,
-                             m = 0,
+                             m = derivative_order,
                              p = smooth_poly,
                              w = smooth_window)
     }, error = function(e) {

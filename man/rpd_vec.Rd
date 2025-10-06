@@ -54,5 +54,5 @@ metric_set(rpd, rsq, rmse)(data, truth = obs, estimate = pred)
 
 }
 \seealso{
-\code{\link[yardstick]{rmse_vec}}, \code{\link[yardstick]{metric_set}}, \code{\link{rrmse}}
+\code{\link[yardstick:rmse]{yardstick::rmse_vec()}}, \code{\link[yardstick:metric_set]{yardstick::metric_set()}}, \code{\link[=rrmse]{rrmse()}}
 }

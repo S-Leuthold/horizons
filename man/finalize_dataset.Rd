@@ -12,36 +12,44 @@ finalize_dataset(
   spectral_cutoff = 0.975,
   response_cutoff = 1.5,
   remove_outliers = FALSE,
+  enforce_positive = FALSE,
+  drop_na = FALSE,
   verbose = TRUE
 )
 }
 \arguments{
-\item{dataset}{Tibble. Output from create_dataset() with spectra and response data}
+\item{dataset}{\verb{[tibble]} Output from create_dataset() with spectra and response data}
 
-\item{response_variable}{Character. Name of response variable to check for outliers}
+\item{response_variable}{\verb{[character]} Name of response variable to check for outliers}
 
-\item{spectral_outlier_method}{Character. Method for spectral outlier detection:
-"mahalanobis" (default), "pca", or "none"}
+\item{spectral_outlier_method}{\verb{[character]} Method for spectral outlier detection.
+Options: \code{"mahalanobis"} (default), \code{"pca"}, or \code{"none"}}
 
-\item{detect_response_outliers}{Logical. Detect outliers in response variable using IQR?
-Default: TRUE}
+\item{detect_response_outliers}{\verb{[logical]} Detect outliers in response variable using IQR?
+Default: \code{TRUE}}
 
-\item{spectral_cutoff}{Numeric. Percentile threshold for spectral outliers (0-1).
-Default: 0.975}
+\item{spectral_cutoff}{\verb{[numeric]} Percentile threshold for spectral outliers (0-1).
+Default: \code{0.975} (97.5th percentile)}
 
-\item{response_cutoff}{Numeric. IQR multiplier for response outliers.
-Default: 1.5}
+\item{response_cutoff}{\verb{[numeric]} IQR multiplier for response outliers.
+Default: \code{1.5} (Tukey's standard)}
 
-\item{remove_outliers}{Logical. Remove outliers (TRUE) or just flag them (FALSE)?
-Default: FALSE}
+\item{remove_outliers}{\verb{[logical]} Remove outliers (TRUE) or just flag them (FALSE)?
+Default: \code{FALSE} (flag only)}
 
-\item{verbose}{Logical. Print progress messages. Default: TRUE}
+\item{enforce_positive}{\verb{[logical]} Remove samples with zero or negative response values?
+Useful when using log transformations. Default: \code{FALSE}}
+
+\item{drop_na}{\verb{[logical]} Remove samples with NA values in response variable?
+Required for some modeling algorithms. Default: \code{FALSE}}
+
+\item{verbose}{\verb{[logical]} Print progress messages and diagnostic warnings. Default: \code{TRUE}}
 }
 \value{
-A tibble with the same structure as input plus quality control information:
-\describe{
-\item{<original_cols>}{All original columns from input dataset}
-\item{outlier_flag}{Character. "good" for normal samples, "outlier" for flagged samples}
+A \verb{[tibble]} with the same structure as input plus quality control information:
+\itemize{
+\item \verb{<original_cols>}: All original columns from input dataset
+\item \code{outlier_flag}: Character. \code{"good"} for normal samples, \code{"outlier"} for flagged samples
 }
 
 If \code{remove_outliers = TRUE}, flagged samples are removed from the tibble.
@@ -58,21 +66,24 @@ The outlier detection pipeline employs a two-pronged approach:
 
 \strong{Spectral Outlier Detection:}
 \itemize{
-\item PCA projection using Kaiser criterion for dimensionality reduction
-\item Robust covariance estimation (MCD) to handle existing outliers
-\item Mahalanobis distance calculation in PC space
-\item Chi-square threshold testing at specified percentile
+\item PCA projection retaining 99\% of variance (more information than Kaiser criterion)
+\item Standard covariance estimation in PC space for simplicity and stability
+\item Mahalanobis distance calculation to identify extreme spectra
+\item Chi-square threshold testing at user-specified percentile
 }
 
 \strong{Response Outlier Detection:}
 \itemize{
 \item Interquartile Range (IQR) method with configurable multiplier
-\item Identification of values beyond Q1 - k\emph{IQR or Q3 + k}IQR
-\item Suitable for both normal and moderately skewed distributions
+\item Identification of values beyond Q1 - k×IQR or Q3 + k×IQR
+\item Automatic skewness detection with warnings for heavily skewed distributions
+\item Sample size warnings when n < 30
 }
 
 The function provides flexible handling through flagging vs. removal options,
-allowing users to inspect outliers before making final decisions.
+allowing users to inspect outliers before making final decisions. Diagnostic
+warnings help users understand when outlier detection may struggle with their
+specific data characteristics.
 }
 \examples{
 \dontrun{
@@ -98,13 +109,30 @@ clean_data <- finalize_dataset(
   response_variable = "pH",
   spectral_outlier_method = "none"
 )
+
+# Remove zero/negative values (important for log transformations)
+clean_data <- finalize_dataset(
+  dataset = model_dataset,
+  response_variable = "SOC",
+  enforce_positive = TRUE,  # Required for log(SOC)
+  remove_outliers = TRUE
+)
+
+# Complete data cleaning for modeling
+clean_data <- finalize_dataset(
+  dataset = model_dataset,
+  response_variable = "SOC",
+  enforce_positive = TRUE,  # Remove zeros/negatives
+  drop_na = TRUE,           # Remove NAs
+  remove_outliers = TRUE
+)
 }
 
 }
 \seealso{
-\code{\link{create_dataset}} for dataset preparation,
-\code{\link{evaluate_models_local}} for model evaluation,
-\code{\link{create_configs}} for configuration setup
+\code{\link[=create_dataset]{create_dataset()}} for dataset preparation,
+\code{\link[=evaluate_models_local]{evaluate_models_local()}} for model evaluation,
+\code{\link[=create_configs]{create_configs()}} for configuration setup
 
 Other inputs: 
 \code{\link{create_configs}()},

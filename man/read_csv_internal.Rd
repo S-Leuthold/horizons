@@ -7,14 +7,14 @@
 read_csv_internal(path, spectra_type, verbose)
 }
 \arguments{
-\item{path}{Character. Path to CSV file}
+\item{path}{\verb{[character]} Path to CSV file}
 
-\item{spectra_type}{Character. "MIR" or "NIR"}
+\item{spectra_type}{\verb{[character]} "MIR" or "NIR" (reserved for future use)}
 
-\item{verbose}{Logical. Print progress messages}
+\item{verbose}{\verb{[logical]} Print progress messages}
 }
 \value{
-Tibble with spectral data in wide format
+\verb{[tibble]} with spectral data in wide format
 }
 \description{
 Internal function to read CSV files containing spectral data.

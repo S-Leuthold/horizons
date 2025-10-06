@@ -49,6 +49,6 @@ metric_set(rrmse, rsq)(data, truth = obs, estimate = pred)
 
 }
 \seealso{
-\code{\link[yardstick]{rmse_vec}}, \code{\link[yardstick]{metric_set}}
+\code{\link[yardstick:rmse]{yardstick::rmse_vec()}}, \code{\link[yardstick:metric_set]{yardstick::metric_set()}}
 }
 \keyword{internal}
