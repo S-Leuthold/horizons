@@ -12,28 +12,32 @@ read_spectra(
 )
 }
 \arguments{
-\item{source}{Character. Type of file to read: "opus" or "csv"}
+\item{source}{\verb{[character]} Type of file to read: \code{"opus"} or \code{"csv"}. Default: \code{"opus"}}
 
-\item{spectra_path}{Character. Path to spectral data file(s).
-For OPUS: path to .0 file or directory containing .0 files
-For CSV: path to CSV file}
+\item{spectra_path}{\verb{[character]} Path to spectral data file(s).
+\itemize{
+\item For OPUS: path to \code{.0} file or directory containing \code{.0} files
+\item For CSV: path to CSV file
+}}
 
-\item{spectra_type}{Character. Type of spectroscopy: "MIR" or "NIR".
-Affects expected wavelength/wavenumber ranges. Default: "MIR"}
+\item{spectra_type}{\verb{[character]} Type of spectroscopy: \code{"MIR"} or \code{"NIR"}.
+Affects expected wavelength/wavenumber ranges. Default: \code{"MIR"}}
 
-\item{verbose}{Logical. Print informative messages about processing. Default: TRUE}
+\item{verbose}{\verb{[logical]} Print informative messages about processing. Default: \code{TRUE}}
 }
 \value{
-A tibble with spectral data in wide format containing:
-\describe{
-\item{Sample_ID}{Character. Unique sample identifier}
-\item{<wavenumber_cols>}{Numeric columns named with wavenumber values (e.g., "600", "602", "604") containing absorbance values}
+A \verb{[tibble]} with spectral data in wide format containing:
+\itemize{
+\item \code{Sample_ID}: Character. Unique sample identifier
+\item \verb{<wavenumber_cols>}: Numeric columns named with wavenumber values (e.g., \code{"600"}, \code{"602"}, \code{"604"})
+containing absorbance values
 }
+
 With attributes:
-\describe{
-\item{source}{Character. Source type ("opus" or "csv")}
-\item{spectra_type}{Character. Spectroscopy type ("MIR" or "NIR")}
-\item{source_path}{Character. Original file path}
+\itemize{
+\item \code{source}: Character. Source type (\code{"opus"} or \code{"csv"})
+\item \code{spectra_type}: Character. Spectroscopy type (\code{"MIR"} or \code{"NIR"})
+\item \code{source_path}: Character. Original file path
 }
 }
 \description{
@@ -73,8 +77,8 @@ spectra <- read_spectra(
 
 }
 \seealso{
-\code{\link{preprocess_spectra}} for spectral preprocessing,
-\code{\link{create_dataset}} for combining with response data
+\code{\link[=preprocess_spectra]{preprocess_spectra()}} for spectral preprocessing,
+\code{\link[=create_dataset]{create_dataset()}} for combining with response data
 
 Other inputs: 
 \code{\link{create_configs}()},

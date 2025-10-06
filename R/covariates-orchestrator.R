@@ -286,6 +286,7 @@ fetch_covariates <- function(input_data,
 
     if(verbose){
 
+      cli::cli_text("")
       cli::cli_text("{cli::style_bold('Covariates to fetch')}")
       cli::cli_text("├─ Soil")
       cli::cli_text("│  └─ {if(is.null(requested_soil_covariates) || length(requested_soil_covariates) == 0) cli::col_silver('None') else paste0('\"', paste(requested_soil_covariates, collapse = '\", \"'), '\"')}")
@@ -372,20 +373,32 @@ fetch_covariates <- function(input_data,
 
       ## Optionally report out the evaluation metrics --------------------------
 
-      if (!is.null(soil_predictions$global_models) && verbose) {
+      if (!is.null(soil_predictions$local_models) && verbose) {
+
+        cli::cli_text("├─ Performance summary ({soil_predictions$cluster_info$n_clusters} clusters):")
 
         for (i in requested_soil_covariates){
 
-          perf <- soil_predictions$global_models[[i]]$validation_metrics
+          ## Calculate average metrics across all clusters for this covariate
+          covariate_metrics <- soil_predictions$validation_metrics %>%
+            dplyr::filter(covariate == i)
 
-          cli::cli_text("├─ {i}")
+          if (nrow(covariate_metrics) > 0) {
 
-          if (!is.null(perf)) {
-            cli::cli_text("│   ├─ R²: {.val {round(perf$rsq, 3)}}")
-            cli::cli_text("│   ├─ RMSE: {.val {round(perf$rmse, 2)}}")
-            cli::cli_text("│   └─ RPD: {.val {round(perf$rpd, 3)}}")
+            avg_rsq  <- mean(covariate_metrics$rsq, na.rm = TRUE)
+            avg_rmse <- mean(covariate_metrics$rmse, na.rm = TRUE)
+            avg_rpd  <- mean(covariate_metrics$rpd, na.rm = TRUE)
+
+            cli::cli_text("│   ├─ {i}")
+            cli::cli_text("│   │   ├─ Avg R²: {.val {round(avg_rsq, 3)}}")
+            cli::cli_text("│   │   ├─ Avg RMSE: {.val {round(avg_rmse, 2)}}")
+            cli::cli_text("│   │   └─ Avg RPD: {.val {round(avg_rpd, 3)}}")
+
           } else {
-            cli::cli_text("│   └─ Model fitting failed.")
+
+            cli::cli_text("│   ├─ {i}")
+            cli::cli_text("│   │   └─ Model fitting failed.")
+
           }
 
         }
@@ -428,20 +441,32 @@ fetch_covariates <- function(input_data,
 
       ## Report out the evaluation metrics -------------------------------------
 
-      if (!is.null(soil_predictions$global_models) && verbose) {
+      if (!is.null(soil_predictions$local_models) && verbose) {
+
+        cli::cli_text("├─ Performance summary ({soil_predictions$cluster_info$n_clusters} clusters):")
 
         for (i in requested_soil_covariates){
 
-          perf <- soil_predictions$global_models[[i]]$validation_metrics
+          ## Calculate average metrics across all clusters for this covariate
+          covariate_metrics <- soil_predictions$validation_metrics %>%
+            dplyr::filter(covariate == i)
 
-          if (!is.null(perf)) {
-            cli::cli_text("├─ {i}")
-            cli::cli_text("│   ├─ R²: {.val {round(perf$rsq, 3)}}")
-            cli::cli_text("│   ├─ RMSE: {.val {round(perf$rmse, 2)}}")
-            cli::cli_text("│   └─ RPD: {.val {round(perf$rpd, 3)}}")
+          if (nrow(covariate_metrics) > 0) {
+
+            avg_rsq  <- mean(covariate_metrics$rsq, na.rm = TRUE)
+            avg_rmse <- mean(covariate_metrics$rmse, na.rm = TRUE)
+            avg_rpd  <- mean(covariate_metrics$rpd, na.rm = TRUE)
+
+            cli::cli_text("│   ├─ {i}")
+            cli::cli_text("│   │   ├─ Avg R²: {.val {round(avg_rsq, 3)}}")
+            cli::cli_text("│   │   ├─ Avg RMSE: {.val {round(avg_rmse, 2)}}")
+            cli::cli_text("│   │   └─ Avg RPD: {.val {round(avg_rpd, 3)}}")
+
           } else {
-            cli::cli_text("├─ {i}")
-            cli::cli_text("│   └─ Model fitting failed.")
+
+            cli::cli_text("│   ├─ {i}")
+            cli::cli_text("│   │   └─ Model fitting failed.")
+
           }
 
         }
@@ -452,12 +477,15 @@ fetch_covariates <- function(input_data,
 
       # Check if any models actually succeeded
       any_model_succeeded <- FALSE
-      if (!is.null(soil_predictions$global_models)) {
-        for (model in soil_predictions$global_models) {
-          if (!is.null(model) && !is.null(model$fitted_workflow)) {
-            any_model_succeeded <- TRUE
-            break
+      if (!is.null(soil_predictions$local_models)) {
+        for (cluster in soil_predictions$local_models) {
+          for (model in cluster) {
+            if (!is.null(model) && !is.null(model$fitted_workflow)) {
+              any_model_succeeded <- TRUE
+              break
+            }
           }
+          if (any_model_succeeded) break
         }
       }
 
