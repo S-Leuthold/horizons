@@ -352,10 +352,6 @@ build_ensemble <- function(finalized_models,
     }
 
     ## Safely blend predictions - CRITICAL OPERATION ----------------------------
-    ## Abort on failure with informative error and hints
-
-    # Note: blend_predictions requires standard yardstick metrics
-    # Using rmse as default regardless of blend_metric parameter
 
     safely_execute(
       expr = {
@@ -554,11 +550,13 @@ build_ensemble <- function(finalized_models,
 
            ## Get original-scale predictions from each model, weighted ----------
 
-           predictions <- purrr::map2(
-             weighted_models_fitted$fitted_workflow,
-             weighted_models_fitted$transformation,
-             ~ get_original_scale_predictions(.x, new_data, .y, warn = FALSE) *
-               weighted_models_fitted$weight[which(weighted_models_fitted$fitted_workflow == list(.x))]
+           predictions <- purrr::pmap(
+             list(workflow       = weighted_models_fitted$fitted_workflow,
+                  transformation = weighted_models_fitted$transformation,
+                  weight         = weighted_models_fitted$weight),
+             function(workflow, transformation, weight) {
+               get_original_scale_predictions(workflow, new_data, transformation, warn = FALSE) * weight
+             }
            )
 
            ## Sum weighted predictions -----------------------------------------
@@ -858,7 +856,7 @@ build_ensemble <- function(finalized_models,
       ccc_result <- ccc(ensemble_predictions, truth = Observed, estimate = Predicted)
 
       dplyr::bind_rows(ensemble_metrics,
-                       tibble::tibble(.metric.   = "ccc",
+                       tibble::tibble(.metric    = "ccc",
                                       .estimator = "standard",
                                       .estimate  = ccc_result$.estimate)) -> ensemble_metrics
 
