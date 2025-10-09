@@ -657,7 +657,7 @@ fetch_covariates <- function(input_data,
 
   list(
     execution_time           = total_time,
-    execution_time_formatted = format_time(total_time),
+    execution_time_formatted = sprintf("%.1f seconds", total_time),
     n_samples                = nrow(input_data),
     n_covariates_requested   = length(c(requested_soil_covariates, requested_climate_covariates, requested_spatial_covariates)),
     n_covariates_returned    = ncol(covariate_data) - 1,  # Minus Sample_ID
