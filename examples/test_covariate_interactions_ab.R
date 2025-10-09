@@ -158,18 +158,31 @@ evaluate_models_local(
 
 cli::cli_h1("A/B Test Results Analysis")
 
-# Calculate improvement metrics
+# First, check if covariate_interactions column exists
+if (!"covariate_interactions" %in% names(ab_results)) {
+  cli::cli_abort(c(
+    "x" = "Results missing {.field covariate_interactions} column",
+    "i" = "This column should be preserved from configs",
+    "i" = "Check that evaluation functions pass through this column"
+  ))
+}
+
+# Calculate improvement metrics using covariate_interactions column
 ab_comparison <- ab_results %>%
   filter(!is.na(rmse)) %>%
+  # Add a grouping variable for clarity
+  mutate(test_group = ifelse(covariate_interactions %||% FALSE,
+                              "B_interactions",
+                              "A_main_effects")) %>%
   group_by(model, transformation, preprocessing) %>%
   summarise(
-    # Test A: Main effects only
-    main_rmse = rmse[test_group == "A_main_effects"][1],
-    main_rsq  = rsq[test_group == "A_main_effects"][1],
+    # Test A: Main effects only (covariate_interactions = FALSE)
+    main_rmse = rmse[!covariate_interactions | is.na(covariate_interactions)][1],
+    main_rsq  = rsq[!covariate_interactions | is.na(covariate_interactions)][1],
 
-    # Test B: With interactions
-    interact_rmse = rmse[test_group == "B_interactions"][1],
-    interact_rsq  = rsq[test_group == "B_interactions"][1],
+    # Test B: With interactions (covariate_interactions = TRUE)
+    interact_rmse = rmse[covariate_interactions][1],
+    interact_rsq  = rsq[covariate_interactions][1],
 
     .groups = "drop"
   ) %>%
@@ -219,6 +232,9 @@ library(ggplot2)
 # Plot 1: RMSE comparison
 p1 <- ab_results %>%
   filter(!is.na(rmse)) %>%
+  mutate(test_group = ifelse(covariate_interactions %||% FALSE,
+                              "B_interactions",
+                              "A_main_effects")) %>%
   ggplot(aes(x = test_group, y = rmse, fill = test_group)) +
   geom_boxplot() +
   geom_line(aes(group = paste(model, transformation, preprocessing)),
