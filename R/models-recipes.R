@@ -29,6 +29,11 @@
 #' * `"boruta"` - Boruta algorithm for feature importance
 #' * `"cars"` - Competitive Adaptive Reweighted Sampling
 #' * `"none"` - No feature selection
+#' @param covariate_interactions Logical. If `TRUE`, creates interaction terms between
+#'   covariates and feature-selected predictors to model context-dependent spectral signatures.
+#'   Interaction terms are created AFTER feature selection to maintain manageable dimensionality.
+#'   When `feature_selection_method = "none"`, a warning is issued as this creates many terms
+#'   (recommended only for regularized models like elastic net). Default: `FALSE`.
 #'
 #' @return A `recipes::recipe` object containing the full preprocessing pipeline.
 #'
@@ -48,12 +53,25 @@
 #'
 #' @examples
 #' \dontrun{
+#' # Without interactions
 #' build_recipe(
 #'   input_data              = df,
 #'   spectral_transformation = "snv_deriv1",
 #'   response_transformation = "Log Transformation",
+#'   feature_selection_method = "pca",
 #'   covariate_selection     = c("Clay", "pH"),
 #'   covariate_data          = covariates
+#' )
+#'
+#' # With covariate × spectral interactions (for edge case refinement)
+#' build_recipe(
+#'   input_data               = df,
+#'   spectral_transformation  = "snv_deriv1",
+#'   response_transformation  = "Log Transformation",
+#'   feature_selection_method = "pca",
+#'   covariate_selection      = c("Clay", "pH"),
+#'   covariate_data           = covariates,
+#'   covariate_interactions   = TRUE
 #' )
 #' }
 #'
@@ -65,8 +83,9 @@ build_recipe <- function(input_data,
                          spectral_transformation,
                          response_transformation,
                          feature_selection_method,
-                         covariate_selection = NULL,
-                         covariate_data      = NULL) {
+                         covariate_selection      = NULL,
+                         covariate_data           = NULL,
+                         covariate_interactions   = FALSE) {
 
   ## ---------------------------------------------------------------------------
   ## Step 1: Input Validation and Data Preparation
@@ -183,6 +202,43 @@ build_recipe <- function(input_data,
     model_recipe %>%
       step_add_covariates(covariate_data   = filtered_covariate_data,
                           sample_id_column = "Sample_ID") -> model_recipe
+  }
+
+  ## ---------------------------------------------------------------------------
+  ## Step 6.5: Covariate × Spectral Interactions (Optional)
+  ## ---------------------------------------------------------------------------
+  ## Creates interaction terms between covariates and feature-selected predictors.
+  ## This allows modeling of context-dependent spectral signatures (e.g., clay
+  ## content modifying how certain wavenumbers are interpreted).
+  ## Interactions are created AFTER feature selection to maintain manageable
+  ## dimensionality (e.g., 10 PCs × 3 covariates = 30 terms vs 700 features × 3
+  ## covariates = 2100 terms).
+
+  if (!is.null(covariate_selection) && covariate_interactions) {
+
+    ## Warn if using "none" feature selection (creates many interaction terms)
+    if (feature_selection_method == "none") {
+
+      n_spectral_features <- sum(stringr::str_detect(names(input_data), "^\\d+$"))
+      n_interaction_terms <- n_spectral_features * length(covariate_selection)
+
+      cli::cli_warn(c(
+        "!" = "Creating interactions with {.field feature_selection_method = 'none'}",
+        "i" = "This will create {n_interaction_terms} interaction terms ({n_spectral_features} spectral features × {length(covariate_selection)} covariates)",
+        "i" = "Recommended only for regularized models (elastic_net) that can handle high dimensionality",
+        "i" = "Consider using {.code feature_selection_method = 'pca'} or {.code 'cars'} to reduce interaction terms"
+      ))
+
+    }
+
+    ## Create interaction terms between covariates and all predictors
+    ## After feature selection, predictors are: PCs, or selected wavenumbers, or all wavenumbers
+    model_recipe <- model_recipe %>%
+      recipes::step_interact(
+        terms = ~ all_of(covariate_selection):recipes::all_predictors(),
+        sep   = "_x_"
+      )
+
   }
 
   ## ---------------------------------------------------------------------------
