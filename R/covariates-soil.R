@@ -777,9 +777,18 @@ predict_soil_covariates <- function(input_data,
       }
 
       ## Free memory from model training objects ----------------------------
+      if (exists("cluster_data")) rm(cluster_data)
+      if (exists("model_result")) rm(model_result)
       gc(verbose = FALSE)
     }
+
+    ## Free memory after each covariate completes ---------------------------
+    gc(verbose = FALSE)
   }
+
+  ## Final cleanup after all model training ---------------------------------
+  rm(training_subsets, ossl_pools)
+  gc(verbose = FALSE)
 
   ## ---------------------------------------------------------------------------
   ## Step 8: Generate predictions with cluster routing

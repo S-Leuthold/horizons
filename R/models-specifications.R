@@ -170,7 +170,8 @@ clean_workflow_id <- function(model,
                              transformation,
                              preprocessing,
                              feature_selection,
-                             covariates = NULL) {
+                             covariates             = NULL,
+                             covariate_interactions = FALSE) {
   
   ## ---------------------------------------------------------------------------
   ## Input Validation (Closure Safety)
@@ -251,11 +252,11 @@ clean_workflow_id <- function(model,
   ## ---------------------------------------------------------------------------
   ## Handle covariates
   ## ---------------------------------------------------------------------------
-  
+
   if (!is.null(covariates) && length(covariates) > 0) {
     # Remove any NA or empty strings
     covariates <- covariates[!is.na(covariates) & nzchar(covariates)]
-    
+
     if (length(covariates) > 0) {
       # Join with plus signs for multiple covariates
       cov_string <- paste(covariates, collapse = "+")
@@ -265,11 +266,17 @@ clean_workflow_id <- function(model,
   } else {
     cov_string <- "NoCovs"
   }
-  
+
+  ## ---------------------------------------------------------------------------
+  ## Handle covariate interactions
+  ## ---------------------------------------------------------------------------
+
+  interact_string <- if (covariate_interactions) "Interact" else "NoInteract"
+
   ## ---------------------------------------------------------------------------
   ## Build workflow ID
   ## ---------------------------------------------------------------------------
-  
+
   # Join all components with underscores
   workflow_id <- paste(
     model,
@@ -277,6 +284,7 @@ clean_workflow_id <- function(model,
     preproc_clean,
     feat_clean,
     cov_string,
+    interact_string,
     sep = "_"
   )
   
