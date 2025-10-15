@@ -37,7 +37,6 @@ for computing unbiased performance metrics.}
 A named \code{list} with the following components:
 \itemize{
 \item \strong{fitted_workflow}: A fitted Cubist workflow trained on train_data.
-\item \strong{best_params}: A \code{tibble} with the best hyperparameter configuration.
 \item \strong{validation_metrics}: A \code{tibble} of metrics computed on val_data.
 }
 }

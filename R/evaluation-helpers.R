@@ -93,7 +93,10 @@ create_failed_result <- function(config_id,
 #' @return Character string with human-readable model name
 #' @keywords internal
 get_readable_model_name <- function(model_id) {
-  
+
+  ## Handle NA/NULL input
+  if (is.null(model_id) || is.na(model_id)) return("Unknown")
+
   model_names <- c(
     "plsr"           = "Partial Least Squares",
     "random_forest"  = "Random Forest",
@@ -105,8 +108,8 @@ get_readable_model_name <- function(model_id) {
     "mars"           = "MARS",
     "mlp_nn"         = "Neural Network (MLP)"
   )
-  
-  model_names[model_id] %||% model_id
+
+  model_names[model_id] %||% as.character(model_id)
 }
 
 #' Get Human-Readable Preprocessing Name
@@ -118,7 +121,10 @@ get_readable_model_name <- function(model_id) {
 #' @return Character string with human-readable preprocessing name
 #' @keywords internal
 get_readable_preprocessing_name <- function(preprocessing_id) {
-  
+
+  ## Handle NA/NULL input
+  if (is.null(preprocessing_id) || is.na(preprocessing_id)) return("Unknown")
+
   preprocessing_names <- c(
     "raw"          = "Raw Spectra",
     "Raw"          = "Raw Spectra",
@@ -135,13 +141,13 @@ get_readable_preprocessing_name <- function(preprocessing_id) {
     "SNVD1"        = "SNV + First Derivative",
     "SNVD2"        = "SNV + Second Derivative"
   )
-  
+
   # First try exact match, then lowercase match
   result <- preprocessing_names[preprocessing_id]
   if (is.na(result)) {
     result <- preprocessing_names[tolower(preprocessing_id)]
   }
-  result %||% preprocessing_id
+  result %||% as.character(preprocessing_id)
 }
 
 #' Get Human-Readable Transformation Name
@@ -153,7 +159,10 @@ get_readable_preprocessing_name <- function(preprocessing_id) {
 #' @return Character string with human-readable transformation name
 #' @keywords internal
 get_readable_transformation_name <- function(transformation_id) {
-  
+
+  ## Handle NA/NULL input
+  if (is.null(transformation_id) || is.na(transformation_id)) return("Unknown")
+
   transformation_names <- c(
     "none"          = "None",
     "notrans"       = "None",
@@ -161,16 +170,16 @@ get_readable_transformation_name <- function(transformation_id) {
     "log"           = "Logarithmic",
     # Legacy mappings for backward compatibility
     "NoTrans"       = "None",
-    "Sqrt"          = "Square Root", 
+    "Sqrt"          = "Square Root",
     "Log"           = "Logarithmic"
   )
-  
+
   # First try exact match, then lowercase match
   result <- transformation_names[transformation_id]
   if (is.na(result)) {
     result <- transformation_names[tolower(transformation_id)]
   }
-  result %||% transformation_id
+  result %||% as.character(transformation_id)
 }
 
 #' Get Human-Readable Feature Selection Name
@@ -182,7 +191,10 @@ get_readable_transformation_name <- function(transformation_id) {
 #' @return Character string with human-readable feature selection name
 #' @keywords internal
 get_readable_feature_selection_name <- function(feature_selection_id) {
-  
+
+  ## Handle NA/NULL input
+  if (is.null(feature_selection_id) || is.na(feature_selection_id)) return("Unknown")
+
   feature_selection_names <- c(
     "none"                = "No Selection",
     "None"                = "No Selection",
@@ -200,8 +212,8 @@ get_readable_feature_selection_name <- function(feature_selection_id) {
     "pca"                 = "Principal Component Analysis",
     "PCA"                 = "Principal Component Analysis"
   )
-  
-  feature_selection_names[feature_selection_id] %||% feature_selection_id
+
+  feature_selection_names[feature_selection_id] %||% as.character(feature_selection_id)
 }
 
 #' Get Human-Readable Covariate Name

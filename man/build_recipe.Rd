@@ -10,7 +10,8 @@ build_recipe(
   response_transformation,
   feature_selection_method,
   covariate_selection = NULL,
-  covariate_data = NULL
+  covariate_data = NULL,
+  covariate_interactions = FALSE
 )
 }
 \arguments{
@@ -49,6 +50,12 @@ Use \code{"No Covariates"} or \code{NULL} to exclude.}
 
 \item{covariate_data}{Optional data frame of covariates (must include \code{Sample_ID}). Required
 if any covariates are selected.}
+
+\item{covariate_interactions}{Logical. If \code{TRUE}, creates interaction terms between
+covariates and feature-selected predictors to model context-dependent spectral signatures.
+Interaction terms are created AFTER feature selection to maintain manageable dimensionality.
+When \code{feature_selection_method = "none"}, a warning is issued as this creates many terms
+(recommended only for regularized models like elastic net). Default: \code{FALSE}.}
 }
 \value{
 A \code{recipes::recipe} object containing the full preprocessing pipeline.
@@ -67,12 +74,25 @@ to preserve inverse-transform compatibility. Spectral preprocessing is handled b
 }
 \examples{
 \dontrun{
+# Without interactions
 build_recipe(
   input_data              = df,
   spectral_transformation = "snv_deriv1",
   response_transformation = "Log Transformation",
+  feature_selection_method = "pca",
   covariate_selection     = c("Clay", "pH"),
   covariate_data          = covariates
+)
+
+# With covariate × spectral interactions (for edge case refinement)
+build_recipe(
+  input_data               = df,
+  spectral_transformation  = "snv_deriv1",
+  response_transformation  = "Log Transformation",
+  feature_selection_method = "pca",
+  covariate_selection      = c("Clay", "pH"),
+  covariate_data           = covariates,
+  covariate_interactions   = TRUE
 )
 }
 
