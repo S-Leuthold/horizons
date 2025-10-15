@@ -383,6 +383,10 @@ evaluate_configuration <- function(config_row,
 
     }, error = function(e) NULL) -> config_clean$covariates
 
+  ## Pull covariate_interactions flag (defaults to FALSE) ---------------------
+
+  config_clean$covariate_interactions <- config_row$covariate_interactions %||% FALSE
+
   ## Check against accepted constants ------------------------------------------
 
   ##TODO: Figure out how to deal with user extendability here
@@ -423,11 +427,12 @@ evaluate_configuration <- function(config_row,
   ## Step 2: Create Workflow ID
   ## ---------------------------------------------------------------------------
 
-  clean_workflow_id(model             = config_clean$model,
-                    transformation    = config_clean$transformation,
-                    preprocessing     = config_clean$preprocessing,
-                    feature_selection = config_clean$feature_selection,
-                    covariates        = config_clean$covariates) -> workflow_id
+  clean_workflow_id(model                  = config_clean$model,
+                    transformation         = config_clean$transformation,
+                    preprocessing          = config_clean$preprocessing,
+                    feature_selection      = config_clean$feature_selection,
+                    covariates             = config_clean$covariates,
+                    covariate_interactions = config_clean$covariate_interactions) -> workflow_id
 
   ## ---------------------------------------------------------------------------
   ## Step 3: Build Recipe
@@ -656,30 +661,46 @@ evaluate_configuration <- function(config_row,
     }
 
     ## -------------------------------------------------------------------------
-    ## TEST: New parallel backend option for the resamples
+    ## Step 8.0: Platform-specific parallel backend configuration
     ## -------------------------------------------------------------------------
 
-    ## Set multicore options for better performance
-    options(
-      mc.cores = n_cv_cores,
-      mc.preschedule = FALSE  # Dynamic scheduling better for uneven CV folds
-    )
+    ## Conditional backend setup based on operating system
+    ## - Linux/HPC: Use doMC (fork-based, high performance for nested parallelization)
+    ## - macOS/Windows: Use future backend from outer context (PSOCK-based, compatible with security restrictions)
 
-    RNGkind("L'Ecuyer-CMRG")
-    set.seed(seed)
+    if (allow_par && n_cv_cores > 1) {
 
-    doMC::registerDoMC(cores = n_cv_cores)
+      is_linux <- .Platform$OS.type == "unix" && Sys.info()["sysname"] == "Linux"
 
-    stopifnot(foreach::getDoParName() == "doMC")
-    stopifnot(foreach::getDoParWorkers() == n_cv_cores)
+      if (is_linux) {
 
-    ## ========== DEBUG: Parallel backend verification ==========
-    debug_msg("Parallel backend configured | Backend: %s | Workers: %d | mc.cores: %s | mc.preschedule: %s",
-             foreach::getDoParName(),
-             foreach::getDoParWorkers(),
-             getOption('mc.cores'),
-             getOption('mc.preschedule'))
-    ## ========== END DEBUG ==========
+        ## Linux: Register doMC for fork-based parallelization -------------------
+
+        options(mc.cores       = n_cv_cores,
+                mc.preschedule = FALSE)  # Dynamic scheduling for uneven CV folds
+
+        RNGkind("L'Ecuyer-CMRG")
+        set.seed(seed)
+
+        doMC::registerDoMC(cores = n_cv_cores)
+
+        stopifnot(foreach::getDoParName() == "doMC")
+        stopifnot(foreach::getDoParWorkers() == n_cv_cores)
+
+        debug_msg("Parallel backend configured | Backend: doMC (Linux) | Workers: %d | mc.cores: %s",
+                 n_cv_cores, getOption('mc.cores'))
+
+      } else {
+
+        ## macOS/Windows: Use future backend from outer context ------------------
+        ## (future::multisession set in evaluation-local.R)
+
+        debug_msg("Parallel backend: Using future from outer context (macOS/Windows) | Plan: %s | Workers: %d",
+                 class(future::plan())[1],
+                 future::nbrOfWorkers())
+
+      }
+    }
 
     ## -------------------------------------------------------------------------
     ## Step 8.2: Run grid search and save results
@@ -1198,30 +1219,31 @@ evaluate_configuration <- function(config_row,
     ## Step 14: Compile and return results
     ## -------------------------------------------------------------------------
 
-    tibble::tibble(config_id         = config_id,
-                   workflow_id       = workflow_id,
-                   model             = config_clean$model,
-                   transformation    = config_clean$transformation,
-                   preprocessing     = config_clean$preprocessing,
-                   feature_selection = config_clean$feature_selection,
-                   covariates        = paste(config_clean$covariates %||% "", collapse = "-"),
-                   best_params       = list(best_params),
-                   rsq               = test_metrics$rsq %||% NA_real_,
-                   rmse              = test_metrics$rmse %||% NA_real_,
-                   rrmse             = test_metrics$rrmse %||% NA_real_,
-                   rpd               = test_metrics$rpd %||% NA_real_,
-                   ccc               = test_metrics$ccc %||% NA_real_,
-                   mae               = test_metrics$mae %||% NA_real_,
-                   grid_seconds      = grid_seconds,
-                   bayes_seconds     = bayes_seconds,
-                   total_seconds     = as.numeric(difftime(Sys.time(), start_time, units = "secs")),
-                   status            = if (skip_bayesian) "pruned" else "success",
-                   error_message     = NA_character_,
-                   error_stage       = NA_character_,
-                   error_class       = NA_character_,
-                   has_trace         = FALSE,
-                   n_warnings        = 0L,  # TODO: Aggregate warnings from all stages
-                   warning_summary   = NA_character_) -> result
+    tibble::tibble(config_id              = config_id,
+                   workflow_id            = workflow_id,
+                   model                  = config_clean$model,
+                   transformation         = config_clean$transformation,
+                   preprocessing          = config_clean$preprocessing,
+                   feature_selection      = config_clean$feature_selection,
+                   covariates             = paste(config_clean$covariates %||% "", collapse = "-"),
+                   covariate_interactions = config_clean$covariate_interactions %||% FALSE,
+                   best_params            = list(best_params),
+                   rsq                    = test_metrics$rsq %||% NA_real_,
+                   rmse                   = test_metrics$rmse %||% NA_real_,
+                   rrmse                  = test_metrics$rrmse %||% NA_real_,
+                   rpd                    = test_metrics$rpd %||% NA_real_,
+                   ccc                    = test_metrics$ccc %||% NA_real_,
+                   mae                    = test_metrics$mae %||% NA_real_,
+                   grid_seconds           = grid_seconds,
+                   bayes_seconds          = bayes_seconds,
+                   total_seconds          = as.numeric(difftime(Sys.time(), start_time, units = "secs")),
+                   status                 = if (skip_bayesian) "pruned" else "success",
+                   error_message          = NA_character_,
+                   error_stage            = NA_character_,
+                   error_class            = NA_character_,
+                   has_trace              = FALSE,
+                   n_warnings             = 0L,  # TODO: Aggregate warnings from all stages
+                   warning_summary        = NA_character_) -> result
 
   ## ========== DEBUG: Configuration complete ==========
   debug_msg("Configuration %s complete | Status: %s | Total time: %.1f seconds | Metrics: RMSE=%.3f, R2=%.3f, RPD=%.2f",

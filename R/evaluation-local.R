@@ -331,11 +331,12 @@ evaluate_models_local <- function(config,
 
     ## Create a clean workflow id ----------------------------------------------
 
-    clean_workflow_id(model             = config_row$model,
-                      transformation    = config_row$transformation,
-                      preprocessing     = config_row$preprocessing,
-                      feature_selection = config_row$feature_selection,
-                      covariates        = covariate_cols)  -> workflow_id
+    clean_workflow_id(model                  = config_row$model,
+                      transformation         = config_row$transformation,
+                      preprocessing          = config_row$preprocessing,
+                      feature_selection      = config_row$feature_selection,
+                      covariates             = covariate_cols,
+                      covariate_interactions = config_row$covariate_interactions %||% FALSE)  -> workflow_id
 
     ## -------------------------------------------------------------------------
     ## Step 5: Check for existing results
