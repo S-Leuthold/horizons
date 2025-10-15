@@ -9,7 +9,8 @@ clean_workflow_id(
   transformation,
   preprocessing,
   feature_selection,
-  covariates = NULL
+  covariates = NULL,
+  covariate_interactions = FALSE
 )
 }
 \arguments{

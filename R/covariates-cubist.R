@@ -19,7 +19,6 @@
 #' @return A named `list` with the following components:
 #' \itemize{
 #'   \item \strong{fitted_workflow}: A fitted Cubist workflow trained on train_data.
-#'   \item \strong{best_params}: A `tibble` with the best hyperparameter configuration.
 #'   \item \strong{validation_metrics}: A `tibble` of metrics computed on val_data.
 #' }
 #'
@@ -325,7 +324,16 @@ fit_cubist_model <- function(train_data,
   }
 
   ## ---------------------------------------------------------------------------
-  ## Step 8: Test the fitted maodel on the validation set
+  ## Step 7.1: Clean up tuning objects to free memory
+  ## ---------------------------------------------------------------------------
+
+  ## Clear large tuning objects that are no longer needed
+  rm(grid_res, final_tune_result, CV_Folds, Train_Data, wf, model_spec)
+  if (exists("bayes_res")) rm(bayes_res)
+  gc(verbose = FALSE)
+
+  ## ---------------------------------------------------------------------------
+  ## Step 8: Test the fitted model on the validation set
   ## ---------------------------------------------------------------------------
 
   if (verbose) cli::cli_text("│  │  ├─ Computing validation metrics.")
@@ -386,10 +394,14 @@ fit_cubist_model <- function(train_data,
     cli::cli_text("│  │  └─ Best params: committees={round(best_params$committees)}, neighbors={round(best_params$neighbors)}.")
   }
 
+  ## Clean up validation data before return -----------------------------------
+
+  rm(Val_Data, val_predictions, val_data_clean)
+  gc(verbose = FALSE)
+
   ## Return results list -------------------------------------------------------
 
   return(list(fitted_workflow    = fitted_model,
-              best_params        = best_params,
               validation_metrics = val_metrics))
 
 }
