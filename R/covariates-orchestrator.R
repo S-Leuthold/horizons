@@ -43,6 +43,8 @@
 #' @param refresh_climate `[logical]` Force re-download of climate data?
 #'   Default: `FALSE`.
 #' @param verbose `[logical]` Print progress messages? Default: `TRUE`.
+#' @param return_models `[logical]` Return fitted models in soil_predictions?
+#'   Default: `FALSE` to save memory (~90% reduction in return value).
 #'
 #' @return A `[list]` containing:
 #'   * `covariate_data`: Data frame with Sample_ID and all fetched covariates
@@ -118,7 +120,8 @@ fetch_covariates <- function(input_data,
                              cache_dir          = tools::R_user_dir("horizons", "cache"),
                              refresh_soil       = FALSE,
                              refresh_climate    = FALSE,
-                             verbose            = TRUE) {
+                             verbose            = TRUE,
+                             return_models      = FALSE) {
 
   ## ---------------------------------------------------------------------------
   ## Step 0: Input validation
@@ -433,7 +436,8 @@ fetch_covariates <- function(input_data,
                               allow_par          = allow_par,
                               n_workers          = n_workers,
                               refresh            = refresh_soil,
-                              verbose            = verbose) -> soil_predictions
+                              verbose            = verbose,
+                              return_models      = return_models) -> soil_predictions
 
       soil_data <- soil_predictions$predictions
 
