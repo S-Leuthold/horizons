@@ -427,11 +427,11 @@ finalize_top_workflows <- function(evaluation_results,
 
     }
 
-    ## Extract parameter set and finalize if needed (just mtry tbh) ------------
+    ## Extract parameter set and finalize if needed (mtry + num_comp) ----------
 
     param_set <- hardhat::extract_parameter_set_dials(workflow)
 
-    if ("mtry" %in% param_set$name) {
+    if (any(param_set$name %in% c("mtry", "num_comp"))) {
 
       recipe %>%
         recipes::prep() %>%
