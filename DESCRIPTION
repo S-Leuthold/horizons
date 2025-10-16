@@ -22,6 +22,7 @@ LazyData: false
 Remotes:
     spectral-cockpit/opusreader2
 Imports:
+    butcher,
     cli,
     cluster,
     data.table,
