@@ -24,8 +24,9 @@
 #' @param verbose Logical. Print progress messages (default: TRUE)
 #' @param return_models Logical. Return fitted models in output? (default: FALSE)
 #'   Setting to FALSE saves ~90% memory in return value by discarding models after
-#'   prediction. Only predictions and validation metrics are returned. Set TRUE if
-#'   you need to inspect models or make additional predictions.
+#'   prediction. Predictions and validation metrics are still returned - only the
+#'   fitted workflow objects are discarded. Set TRUE if you need to inspect model
+#'   internals or make additional predictions without re-training.
 #'
 #' @section Experimental Parameters (not for production):
 #' @param derivative_order Integer. SG derivative order: 0 = smoothing only,
@@ -115,14 +116,18 @@ predict_soil_covariates <- function(input_data,
                                                     max_samples = NULL,
                                                     refresh     = refresh,
                                                     verbose     = if (cov == covariates[1]) verbose else FALSE)
+
+    if (is.null(ossl_raw_list[[cov]]) && verbose) {
+      cli::cli_warn("No OSSL training data available for {cov} - will skip this covariate")
+    }
   }
 
   ## Combine all covariate-specific OSSL datasets (union for PCA training)
-  ossl_raw <- dplyr::bind_rows(ossl_raw_list) %>%
+  ossl_raw <- dplyr::bind_rows(purrr::compact(ossl_raw_list)) %>%
     dplyr::distinct(Sample_ID, .keep_all = TRUE)
 
-  if (is.null(ossl_raw)) {
-    cli::cli_abort("Failed to acquire OSSL training data")
+  if (is.null(ossl_raw) || nrow(ossl_raw) == 0) {
+    cli::cli_abort("Failed to acquire OSSL training data for any requested covariates")
   }
 
   ## Preprocess OSSL spectra (SG + SNV) --------------------------------------
