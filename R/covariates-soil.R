@@ -100,13 +100,21 @@ predict_soil_covariates <- function(input_data,
     cli::cli_text("├─ {cli::style_bold('Loading OSSL training data...')}")
   }
 
-  ## Load OSSL with all covariates for PCA reference space -------------------
-  ## Note: Per-covariate pools reloaded later for maximum coverage
+  ## Load OSSL - load once per covariate for maximum coverage ----------------
+  ## This avoids redundant disk reads while maximizing training pool size
 
-  ossl_raw <- get_ossl_training_data(properties  = covariates,
-                                      max_samples = NULL,
-                                      refresh     = refresh,
-                                      verbose     = verbose)
+  ossl_raw_list <- list()
+
+  for (cov in covariates) {
+    ossl_raw_list[[cov]] <- get_ossl_training_data(properties  = cov,
+                                                    max_samples = NULL,
+                                                    refresh     = refresh,
+                                                    verbose     = if (cov == covariates[1]) verbose else FALSE)
+  }
+
+  ## Combine all covariate-specific OSSL datasets (union for PCA training)
+  ossl_raw <- dplyr::bind_rows(ossl_raw_list) %>%
+    dplyr::distinct(Sample_ID, .keep_all = TRUE)
 
   if (is.null(ossl_raw)) {
     cli::cli_abort("Failed to acquire OSSL training data")
@@ -132,7 +140,8 @@ predict_soil_covariates <- function(input_data,
     cli::cli_text("│  └─ OSSL samples (complete): {format(nrow(ossl_processed), big.mark = ',')}")
   }
 
-  ## Free memory from raw OSSL data -------------------------------------------
+  ## Free memory from raw OSSL data and loading list --------------------------
+  rm(ossl_raw, ossl_raw_list)
   gc(verbose = FALSE)
 
   ## ---------------------------------------------------------------------------
@@ -161,6 +170,7 @@ predict_soil_covariates <- function(input_data,
   }
 
   ## Free memory from PCA intermediate objects --------------------------------
+  rm(ossl_processed, ossl_pca_result)
   gc(verbose = FALSE)
 
   ## ---------------------------------------------------------------------------
@@ -335,55 +345,13 @@ predict_soil_covariates <- function(input_data,
   for (covariate in covariates) {
 
     if (verbose) {
-      cli::cli_text("│  ├─ [{covariate}] Loading covariate-specific OSSL...")
+      cli::cli_text("│  ├─ [{covariate}] Filtering OSSL pool for {covariate}...")
     }
 
-    ## RELOAD OSSL for this specific covariate (maximizes training pool) ---
+    ## Filter already-projected OSSL PCA scores for this covariate ----------
+    ## This avoids redundant disk reads and preprocessing
 
-    ossl_raw_cov <- get_ossl_training_data(properties  = covariate,
-                                            max_samples = NULL,
-                                            refresh     = refresh,
-                                            verbose     = FALSE)
-
-    if (is.null(ossl_raw_cov)) {
-      cli::cli_warn("Failed to load OSSL for {covariate} - skipping")
-      ossl_pools[[covariate]] <- NULL
-      next
-    }
-
-    ## Preprocess this covariate's OSSL -------------------------------------
-
-    ossl_processed_cov <- preprocess_mir_spectra(spectral_data    = ossl_raw_cov,
-                                                  derivative_order = derivative_order,
-                                                  verbose          = FALSE)
-
-    if (is.null(ossl_processed_cov)) {
-      cli::cli_warn("Failed to preprocess OSSL for {covariate} - skipping")
-      ossl_pools[[covariate]] <- NULL
-      next
-    }
-
-    ## Filter for complete spectral data ------------------------------------
-
-    spectral_cols_cov <- grep("^[0-9]{3,4}$", names(ossl_processed_cov), value = TRUE)
-    ossl_spectral_complete_cov <- complete.cases(ossl_processed_cov[, spectral_cols_cov])
-    ossl_processed_cov <- ossl_processed_cov[ossl_spectral_complete_cov, ]
-
-    ## Project to OSSL PCA space (using global PCA model) ------------------
-
-    ossl_pca_for_covariate <- project_spectra_to_pca(new_data  = ossl_processed_cov,
-                                                      pca_model = ossl_pca_model,
-                                                      verbose   = FALSE)
-
-    if (is.null(ossl_pca_for_covariate)) {
-      cli::cli_warn("Failed to project OSSL for {covariate} - skipping")
-      ossl_pools[[covariate]] <- NULL
-      next
-    }
-
-    ## Filter for covariate availability ------------------------------------
-
-    ossl_for_covariate <- ossl_pca_for_covariate %>%
+    ossl_for_covariate <- ossl_pca_scores %>%
       tidyr::drop_na(dplyr::all_of(covariate))
 
     if (nrow(ossl_for_covariate) == 0) {
@@ -502,6 +470,7 @@ predict_soil_covariates <- function(input_data,
     ossl_pools[[covariate]] <- dplyr::bind_rows(ossl_expanded)
 
     ## Free memory from this covariate's intermediate objects ---------------
+    rm(ossl_for_covariate, ossl_pca_dims_cov, ossl_expanded, cluster_assignments_list)
     gc(verbose = FALSE)
   }
 
@@ -609,6 +578,10 @@ predict_soil_covariates <- function(input_data,
       total_retained <- sum(cluster_sizes_after)
       cli::cli_text("│  │  └─ Total retained: {format(total_retained, big.mark = ',')} samples")
     }
+
+    ## Free coverage filtering intermediate objects --------------------------
+    rm(ossl_pool, filtered_samples, cluster_sizes_before, cluster_sizes_after)
+    gc(verbose = FALSE)
   }
 
   ## ---------------------------------------------------------------------------
@@ -786,8 +759,8 @@ predict_soil_covariates <- function(input_data,
     gc(verbose = FALSE)
   }
 
-  ## Final cleanup after all model training ---------------------------------
-  rm(training_subsets, ossl_pools)
+  ## Free ossl_pools (training_subsets needed for validation in Step 9) ------
+  rm(ossl_pools)
   gc(verbose = FALSE)
 
   ## ---------------------------------------------------------------------------
@@ -970,6 +943,10 @@ predict_soil_covariates <- function(input_data,
   ## Combine into single tibble ---------------------------------------------
 
   validation_metrics <- dplyr::bind_rows(all_validation_metrics)
+
+  ## Free training_subsets now that validation is complete -------------------
+  rm(training_subsets)
+  gc(verbose = FALSE)
 
   ## ---------------------------------------------------------------------------
   ## Return results

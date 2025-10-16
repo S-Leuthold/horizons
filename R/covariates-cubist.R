@@ -51,6 +51,7 @@
 #' @seealso
 #' \code{\link{predict_soil_covariates}}, \code{\link{perform_pca_on_ossl}}
 #'
+#' @importFrom butcher butcher
 #' @importFrom dplyr select rename mutate bind_rows starts_with
 #' @importFrom purrr map
 #' @importFrom tidyr drop_na
@@ -324,8 +325,12 @@ fit_cubist_model <- function(train_data,
   }
 
   ## ---------------------------------------------------------------------------
-  ## Step 7.1: Clean up tuning objects to free memory
+  ## Step 7.1: Strip workflow and clean up tuning objects to free memory
   ## ---------------------------------------------------------------------------
+
+  ## Use butcher to remove training data from fitted workflow
+  ## This keeps model rules/coefficients but discards training data (60-80% memory reduction)
+  fitted_model <- butcher::butcher(fitted_model)
 
   ## Clear large tuning objects that are no longer needed
   rm(grid_res, final_tune_result, CV_Folds, Train_Data, wf, model_spec)
