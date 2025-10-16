@@ -401,7 +401,9 @@ fit_cubist_model <- function(train_data,
 
   ## Clean up validation data before return -----------------------------------
 
-  rm(Val_Data, val_predictions, val_data_clean)
+  rm(Val_Data)
+  if (exists("val_predictions")) rm(val_predictions)
+  if (exists("val_data_clean")) rm(val_data_clean)
   gc(verbose = FALSE)
 
   ## Return results list -------------------------------------------------------
