@@ -479,21 +479,20 @@ fetch_covariates <- function(input_data,
 
       ## Cache the results -----------------------------------------------------
 
-      # Check if any models actually succeeded
-      any_model_succeeded <- FALSE
-      if (!is.null(soil_predictions$local_models)) {
-        for (cluster in soil_predictions$local_models) {
-          for (model in cluster) {
-            if (!is.null(model) && !is.null(model$fitted_workflow)) {
-              any_model_succeeded <- TRUE
-              break
-            }
+      # Check if any predictions were generated (works regardless of return_models setting)
+      any_predictions_generated <- FALSE
+      if (!is.null(soil_predictions$predictions)) {
+        # Check if any covariate has non-NA predictions
+        pred_cols <- setdiff(names(soil_predictions$predictions), "Sample_ID")
+        for (col in pred_cols) {
+          if (any(!is.na(soil_predictions$predictions[[col]]))) {
+            any_predictions_generated <- TRUE
+            break
           }
-          if (any_model_succeeded) break
         }
       }
 
-      if (any_model_succeeded) {
+      if (any_predictions_generated) {
 
         if (verbose) cli::cli_text("├─ Saving predictions to cache..")
 
