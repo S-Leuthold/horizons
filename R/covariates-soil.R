@@ -22,6 +22,10 @@
 #' @param n_workers Integer. Number of parallel workers (default: NULL)
 #' @param refresh Logical. Force refresh of OSSL data (default: FALSE)
 #' @param verbose Logical. Print progress messages (default: TRUE)
+#' @param return_models Logical. Return fitted models in output? (default: FALSE)
+#'   Setting to FALSE saves ~90% memory in return value by discarding models after
+#'   prediction. Only predictions and validation metrics are returned. Set TRUE if
+#'   you need to inspect models or make additional predictions.
 #'
 #' @section Experimental Parameters (not for production):
 #' @param derivative_order Integer. SG derivative order: 0 = smoothing only,
@@ -52,6 +56,7 @@ predict_soil_covariates <- function(input_data,
                                                n_workers           = NULL,
                                                refresh             = FALSE,
                                                verbose             = TRUE,
+                                               return_models       = FALSE,  # Memory optimization: FALSE = discard models after prediction
                                                ## Experimental parameters -----
                                                derivative_order    = 1,
                                                clustering_method   = "kmeans",
@@ -949,7 +954,7 @@ predict_soil_covariates <- function(input_data,
   gc(verbose = FALSE)
 
   ## ---------------------------------------------------------------------------
-  ## Return results
+  ## Return results (conditionally include models based on return_models)
   ## ---------------------------------------------------------------------------
 
   if (verbose) {
@@ -957,10 +962,11 @@ predict_soil_covariates <- function(input_data,
     cli::cli_text("└─ {cli::style_bold('Clustered prediction complete!')}")
   }
 
-  return(list(
+  ## Build base return list --------------------------------------------------
+
+  result <- list(
     predictions        = predictions,
     validation_metrics = validation_metrics,
-    local_models       = local_models,
     cluster_info       = list(
       n_clusters          = optimal_k,
       cluster_assignments = unknown_pca_scores$Cluster,
@@ -975,5 +981,25 @@ predict_soil_covariates <- function(input_data,
       distance_percentile = distance_percentile,
       coverage            = coverage
     )
-  ))
+  )
+
+  ## Conditionally add models (memory-intensive) -----------------------------
+
+  if (return_models) {
+
+    result$local_models <- local_models
+
+  } else {
+
+    ## Free models immediately if not returning (saves ~90% of return value memory)
+    rm(local_models)
+    gc(verbose = FALSE)
+
+    if (verbose) {
+      cli::cli_text("│  └─ Models discarded (return_models=FALSE) to save memory")
+    }
+
+  }
+
+  return(result)
 }
