@@ -21,7 +21,8 @@ fetch_covariates(
   cache_dir = tools::R_user_dir("horizons", "cache"),
   refresh_soil = FALSE,
   refresh_climate = FALSE,
-  verbose = TRUE
+  verbose = TRUE,
+  return_models = FALSE
 )
 }
 \arguments{
@@ -81,6 +82,9 @@ Default: \code{FALSE}.}
 Default: \code{FALSE}.}
 
 \item{verbose}{\verb{[logical]} Print progress messages? Default: \code{TRUE}.}
+
+\item{return_models}{\verb{[logical]} Return fitted models in soil_predictions?
+Default: \code{FALSE} to save memory (~90\% reduction in return value).}
 }
 \value{
 A \verb{[list]} containing:
