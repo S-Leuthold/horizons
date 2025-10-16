@@ -17,6 +17,7 @@ predict_soil_covariates(
   n_workers = NULL,
   refresh = FALSE,
   verbose = TRUE,
+  return_models = FALSE,
   derivative_order = 1,
   clustering_method = "kmeans",
   use_mahalanobis = FALSE,
@@ -47,6 +48,12 @@ predict_soil_covariates(
 \item{refresh}{Logical. Force refresh of OSSL data (default: FALSE)}
 
 \item{verbose}{Logical. Print progress messages (default: TRUE)}
+
+\item{return_models}{Logical. Return fitted models in output? (default: FALSE)
+Setting to FALSE saves ~90\% memory in return value by discarding models after
+prediction. Predictions and validation metrics are still returned - only the
+fitted workflow objects are discarded. Set TRUE if you need to inspect model
+internals or make additional predictions without re-training.}
 
 \item{derivative_order}{Integer. SG derivative order: 0 = smoothing only,
 1 = 1st derivative, 2 = 2nd derivative (default: 0, EXPERIMENTAL)}
