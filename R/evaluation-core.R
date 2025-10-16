@@ -781,9 +781,9 @@ evaluate_configuration <- function(config_row,
 
       return(create_failed_result(config_id     = config_id,
                                   config_clean  = config_clean,
-                                  error_message = glue::glue("All models failed!"),
+                                  error_message = actual_error,  # Use detailed error message
                                   workflow_id   = workflow_id,
-                                  error_detail  = grid_tune_result$actual_error,
+                                  error_detail  = grid_tune_result$error,
                                   error_stage   = "grid_tuning",
                                   error_trace   = grid_tune_result$trace,
                                   warnings      = grid_tune_result$warnings %||% NULL,
