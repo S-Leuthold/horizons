@@ -441,6 +441,18 @@ finalize_top_workflows <- function(evaluation_results,
       param_set %>%
         dials::finalize(finalize_data) -> param_set
 
+      ## CRITICAL FIX: num_comp finalize() doesn't work properly in dials
+      ## Manually update num_comp range based on n_predictors
+      if ("num_comp" %in% param_set$name) {
+
+        n_pred <- ncol(finalize_data)
+        max_comp <- min(n_pred, nrow(train_data) - 1)
+
+        num_comp_idx <- which(param_set$name == "num_comp")
+        param_set$object[[num_comp_idx]]$range$upper <- max_comp
+
+      }
+
       rm(finalize_data)
       gc(verbose = FALSE, full = TRUE)
 
