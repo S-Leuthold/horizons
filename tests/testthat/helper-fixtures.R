@@ -179,7 +179,7 @@ create_eval_test_config <- function() {
 }
 
 #' Create Evaluation Test Data (wrapper for create_small_spectra)
-create_eval_test_data <- function(n_samples = 25, n_wavelengths = 100, seed = 123) {
+create_eval_test_data <- function(n_samples = 50, n_wavelengths = 100, seed = 123) {
   if (!is.null(seed)) set.seed(seed)
 
   # Use create_small_spectra if n_samples = 20, otherwise generate
