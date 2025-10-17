@@ -17,8 +17,8 @@ library(horizons)
 ## TEMPLATE: Happy Path Integration Test
 ## ---------------------------------------------------------------------------
 
-test_that("TEMPLATE: minimal workflow executes end-to-end", {
-  skip("TEMPLATE for next session - demonstrates integration test pattern")
+test_that("minimal workflow executes end-to-end", {
+  # Integration test - actual execution of evaluate_models_local
 
   # ARRANGE
   config <- create_eval_test_config()
@@ -51,8 +51,8 @@ test_that("TEMPLATE: minimal workflow executes end-to-end", {
 ## TEMPLATE: Multi-Model Integration Test
 ## ---------------------------------------------------------------------------
 
-test_that("TEMPLATE: two-model workflow executes sequentially", {
-  skip("TEMPLATE for next session")
+test_that("two-model workflow executes sequentially", {
+  # Integration test - multi-model evaluation
 
   config <- data.frame(
     config_id = c("test_001", "test_002"),
@@ -88,8 +88,8 @@ test_that("TEMPLATE: two-model workflow executes sequentially", {
 ## TEMPLATE: Transformation Integration Test
 ## ---------------------------------------------------------------------------
 
-test_that("TEMPLATE: log transformation workflow executes", {
-  skip("TEMPLATE for next session")
+test_that("log transformation workflow executes", {
+  # Integration test - transformation workflow
 
   config <- create_eval_test_config()
   config$transformation <- "log"
