@@ -1,0 +1,2 @@
+config_id,workflow_id,model,transformation,preprocessing,feature_selection,covariates,covariate_interactions,best_params,rsq,rmse,rrmse,rpd,ccc,mae,grid_seconds,bayes_seconds,total_seconds,status,error_message,error_stage,error_class,has_trace,n_warnings,warning_summary,warnings,messages
+xgboost_NoTrans_Raw_NoFeatSel_NoCovs_NoInteract,xgboost_NoTrans_Raw_NoFeatSel_NoCovs_NoInteract,xgboost,none,raw,none,,FALSE,,NA,0.9009949452776084,34.98531891046243,1.0412738625995726,NA,0.7761704670584181,0.6953330039978027,0,1.1547579765319824,pruned,NA,NA,NA,FALSE,0,NA,,
