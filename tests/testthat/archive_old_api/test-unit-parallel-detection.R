@@ -45,7 +45,7 @@ test_that("detect_parallel_context handles nested parallel contexts", {
     expect_true(context$in_nested)
     # Should recommend safe approach for nested context
   })
-}
+})
 
 test_that("detect_parallel_context respects minimum cores setting", {
   # Test with high minimum cores requirement
