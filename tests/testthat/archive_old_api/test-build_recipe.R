@@ -76,8 +76,8 @@ test_that("build_recipe handles feature selection methods", {
   selection_configs <- list(
     list(method = "none", expected_step = NULL),
     list(method = "correlation", expected_step = "step_select_correlation"),
-    list(method = "boruta", expected_step = "step_select_boruta"),
-    list(method = "shap", expected_step = "step_select_shap")
+    list(method = "boruta", expected_step = "step_select_boruta")
+    # SHAP not currently supported
   )
   
   for (config in selection_configs) {

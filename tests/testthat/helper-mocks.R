@@ -60,7 +60,7 @@ with_mocked_ossl <- function(code, n_samples = 100, covariates = c("Clay", "pH",
     return(tempfile(fileext = ".qs"))
   }
   
-  withr::with_mocked_bindings(
+  testthat::with_mocked_bindings(
     download_ossl_data = mock_download_ossl,
     get_ossl_data_path = mock_get_ossl_path,
     code,
@@ -113,7 +113,7 @@ with_mocked_climate <- function(code, n_samples = 50) {
     return(result)
   }
   
-  withr::with_mocked_bindings(
+  testthat::with_mocked_bindings(
     fetch_climate_covariates = mock_fetch_climate,
     code,
     .package = "horizons"
@@ -171,7 +171,7 @@ with_sequential_processing <- function(code) {
     purrr::map_dfr(.x, .f, ...)
   }
   
-  withr::with_mocked_bindings(
+  testthat::with_mocked_bindings(
     list(
       "future_map" = mock_future_map,
       "future_map_dfr" = mock_future_map_dfr
@@ -221,7 +221,7 @@ with_mocked_computations <- function(code) {
     )
   }
   
-  withr::with_mocked_bindings(
+  testthat::with_mocked_bindings(
     list(
       "reduce_dimensions_pca" = mock_reduce_dimensions
     ),
@@ -251,7 +251,7 @@ with_error_injection <- function(code,
     error_functions
   )
   
-  do.call(withr::with_mocked_bindings, c(error_makers, list(code)))
+  do.call(testthat::with_mocked_bindings, c(error_makers, list(code)))
 }
 
 #' Create test environment with multiple mocks
@@ -385,7 +385,7 @@ with_mocked_ossl_covariates <- function(code,
     )
   }
   
-  withr::with_mocked_bindings(
+  testthat::with_mocked_bindings(
     get_processed_ossl_training_data = mock_get_processed_ossl,
     code,
     .package = "horizons"
@@ -466,7 +466,7 @@ with_mocked_cubist <- function(code, fixed_performance = FALSE) {
     )
   }
   
-  withr::with_mocked_bindings(
+  testthat::with_mocked_bindings(
     fit_cubist_model = mock_fit_cubist,
     code,
     .package = "horizons"
