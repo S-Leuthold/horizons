@@ -158,11 +158,57 @@ create_test_configs <- function(n_configs = 3) {
 create_minimal_config <- function() {
   data.frame(
     model = "linear_reg",
-    transformation = "none", 
+    transformation = "none",
     preprocessing = "raw",
     feature_selection = "none",
     stringsAsFactors = FALSE
   )
+}
+
+#' Create Evaluation Test Configuration (for evaluation module tests)
+create_eval_test_config <- function() {
+  data.frame(
+    config_id = "eval_test_001",
+    model = "plsr",  # Fast for testing
+    transformation = "none",
+    preprocessing = "raw",
+    feature_selection = "none",
+    covariates = I(list(NULL)),  # No covariates for simplicity
+    stringsAsFactors = FALSE
+  )
+}
+
+#' Create Evaluation Test Data (wrapper for create_small_spectra)
+create_eval_test_data <- function(n_samples = 25, n_wavelengths = 100, seed = 123) {
+  if (!is.null(seed)) set.seed(seed)
+
+  # Use create_small_spectra if n_samples = 20, otherwise generate
+  if (n_samples == 20 && n_wavelengths == 100) {
+    data <- create_small_spectra(seed = seed)
+  } else {
+    # Generate custom size
+    wavelengths <- seq(600, 4000, length.out = n_wavelengths)
+
+    data <- tibble(
+      Sample_ID = paste0("EVAL_", sprintf("%03d", 1:n_samples)),
+      Project = rep("TestProject", n_samples)
+    )
+
+    for (wl in wavelengths) {
+      col_name <- as.character(round(wl))
+      base_abs <- 0.5
+      if (wl > 2800 & wl < 3000) base_abs <- 0.7
+      noise <- rnorm(n_samples, 0, 0.05)
+      data[[col_name]] <- pmax(0.1, base_abs + noise)
+    }
+
+    data$SOC <- abs(rnorm(n_samples, 2.5, 1.0))
+  }
+
+  # Add Response variable for evaluation
+  data$Response <- data$SOC
+
+  data
 }
 
 ## ---------------------------------------------------------------------------
