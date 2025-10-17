@@ -1,0 +1,19 @@
+{
+  "n_models": 1,
+  "n_completed": 0,
+  "n_pruned": 0,
+  "n_errors": 1,
+  "total_time_mins": 0.0092,
+  "avg_time_per_model": 0.0072,
+  "parameters": {
+    "variable": "Response",
+    "grid_size": 2,
+    "bayesian_iter": 0,
+    "cv_folds": 3,
+    "allow_par": false,
+    "prune_models": true,
+    "prune_threshold": 0.9,
+    "seed": 307
+  },
+  "timestamp": "2025-10-17 11:43:57"
+}
