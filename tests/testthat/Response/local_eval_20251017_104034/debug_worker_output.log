@@ -1,0 +1,6 @@
+[10:40:34] [CORE-plsr_NoTrans_Raw_NoFeatSel_NoCovs_NoInteract] Starting grid search | allow_par: FALSE | CV folds: 3 | grid_size: 2
+[10:40:34] [CORE-plsr_NoTrans_Raw_NoFeatSel_NoCovs_NoInteract] Current plan: FutureStrategy | R processes before grid:      124
+[10:40:35] [CORE-random_forest_NoTrans_Raw_NoFeatSel_NoCovs_NoInteract] Starting grid search | allow_par: FALSE | CV folds: 3 | grid_size: 2
+[10:40:35] [CORE-random_forest_NoTrans_Raw_NoFeatSel_NoCovs_NoInteract] Current plan: FutureStrategy | R processes before grid:      128
+[10:40:35] [CORE-random_forest_NoTrans_Raw_NoFeatSel_NoCovs_NoInteract] Grid search complete | Duration: 0.8 seconds | R processes after grid:      125
+[10:40:36] [CORE-random_forest_NoTrans_Raw_NoFeatSel_NoCovs_NoInteract] Configuration random_forest_NoTrans_Raw_NoFeatSel_NoCovs_NoInteract complete | Status: pruned | Total time: 1.2 seconds | Metrics: RMSE=0.869, R2=0.004, RPD=0.99
