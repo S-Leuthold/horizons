@@ -1,4 +1,0 @@
-[11:09:57] [CORE-plsr_NoTrans_SNVD2_NoFeatSel_NoCovs_NoInteract] Starting grid search | allow_par: FALSE | CV folds: 3 | grid_size: 2
-[11:09:57] [CORE-plsr_NoTrans_SNVD2_NoFeatSel_NoCovs_NoInteract] Current plan: FutureStrategy | R processes before grid:      126
-[11:09:57] [CORE-plsr_NoTrans_Raw_NoFeatSel_NoCovs_NoInteract] Starting grid search | allow_par: FALSE | CV folds: 3 | grid_size: 2
-[11:09:58] [CORE-plsr_NoTrans_Raw_NoFeatSel_NoCovs_NoInteract] Current plan: FutureStrategy | R processes before grid:      128

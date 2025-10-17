@@ -1,4 +1,0 @@
-[11:24:16] [CORE-cubist_NoTrans_Raw_NoFeatSel_NoCovs_NoInteract] Starting grid search | allow_par: FALSE | CV folds: 3 | grid_size: 2
-[11:24:16] [CORE-cubist_NoTrans_Raw_NoFeatSel_NoCovs_NoInteract] Current plan: FutureStrategy | R processes before grid:      132
-[11:24:17] [CORE-cubist_NoTrans_Raw_NoFeatSel_NoCovs_NoInteract] Grid search complete | Duration: 0.9 seconds | R processes after grid:      132
-[11:24:18] [CORE-cubist_NoTrans_Raw_NoFeatSel_NoCovs_NoInteract] Configuration cubist_NoTrans_Raw_NoFeatSel_NoCovs_NoInteract complete | Status: pruned | Total time: 1.3 seconds | Metrics: RMSE=0.936, R2=0.046, RPD=1.00

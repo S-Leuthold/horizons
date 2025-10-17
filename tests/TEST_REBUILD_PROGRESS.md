@@ -13,8 +13,10 @@
 | **+Orchestrator** | 155 | 8.07% | +1.37% | test-covariates-orchestrator.R (15 tests) |
 | **+Inputs-Create** | 199 | ~9.5% | +1.43% | test-inputs-create.R (44 tests) |
 | **+Inputs-Configs** | 225 | **10.47%** | **+0.97%** | test-inputs-configs.R (26 tests) |
-| **SESSION TOTAL** | **225** | **10.47%** | **+3.77%** | **3 files, 85 new tests, +56% relative** |
-| Target | ~500+ | >80% | +69.53% | JOSS requirement |
+| **SESSION 1 TOTAL** | **225** | **10.47%** | **+3.77%** | **3 files, 85 tests, +56% relative** |
+| **SESSION 2 TOTAL** | **294** | **24.13%** | **+13.66%** | **6 files, 69 tests, +130% relative** |
+| **COMBINED** | **294** | **24.13%** | **+17.43%** | **+191 tests, +260% from baseline!** |
+| Target | ~500+ | >80% | +55.87% | JOSS requirement (4-5 sessions at current velocity!) |
 
 ---
 

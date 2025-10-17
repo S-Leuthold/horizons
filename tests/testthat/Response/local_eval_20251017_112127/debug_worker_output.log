@@ -1,4 +1,0 @@
-[11:21:27] [CORE-xgboost_NoTrans_Raw_NoFeatSel_NoCovs_NoInteract] Starting grid search | allow_par: FALSE | CV folds: 3 | grid_size: 2
-[11:21:27] [CORE-xgboost_NoTrans_Raw_NoFeatSel_NoCovs_NoInteract] Current plan: FutureStrategy | R processes before grid:      129
-[11:21:28] [CORE-xgboost_NoTrans_Raw_NoFeatSel_NoCovs_NoInteract] Grid search complete | Duration: 0.7 seconds | R processes after grid:      130
-[11:21:28] [CORE-xgboost_NoTrans_Raw_NoFeatSel_NoCovs_NoInteract] Configuration xgboost_NoTrans_Raw_NoFeatSel_NoCovs_NoInteract complete | Status: pruned | Total time: 1.2 seconds | Metrics: RMSE=0.901, R2=NA, RPD=1.04
