@@ -347,6 +347,95 @@ expect_valid_config <- function(config) {
   required_cols <- c("model", "transformation", "preprocessing", "feature_selection")
   testthat::expect_true(all(required_cols %in% names(config)),
                        info = "Config missing required columns")
-  
+
   invisible(TRUE)
+}
+
+## ---------------------------------------------------------------------------
+## Evaluation Results Fixtures (for finalize/ensemble tests)
+## ---------------------------------------------------------------------------
+
+#' Create Mock Evaluation Results
+#' Simulates output from evaluate_models_local() for testing finalize/ensemble
+create_mock_evaluation_results <- function(n_models = 3, seed = 555) {
+  if (!is.null(seed)) set.seed(seed)
+
+  # Create mock best_params for different model types
+  models <- c("plsr", "linear_reg", "rand_forest")[1:n_models]
+
+  results <- tibble::tibble(
+    workflow_id = paste0("config_", sprintf("%03d", 1:n_models)),
+    model = models,
+    transformation = sample(c("none", "log", "sqrt"), n_models, replace = TRUE),
+    preprocessing = sample(c("raw", "snv", "derivative"), n_models, replace = TRUE),
+    feature_selection = sample(c("none", "correlation", "pca"), n_models, replace = TRUE),
+    covariates = "",
+    status = "success",
+    # Add realistic performance metrics
+    rmse = runif(n_models, 0.5, 2.0),
+    rsq = runif(n_models, 0.6, 0.9),
+    rrmse = runif(n_models, 10, 30),
+    ccc = runif(n_models, 0.7, 0.95),
+    rpd = runif(n_models, 1.5, 3.0),
+    mae = runif(n_models, 0.4, 1.5)
+  )
+
+  # Add best_params list column (required for finalization)
+  results$best_params <- lapply(1:n_models, function(i) {
+    if (models[i] == "plsr") {
+      data.frame(num_comp = sample(2:10, 1))
+    } else if (models[i] == "rand_forest") {
+      data.frame(mtry = sample(5:50, 1), min_n = sample(2:20, 1))
+    } else {
+      data.frame(penalty = 10^runif(1, -3, 0), mixture = runif(1, 0, 1))
+    }
+  })
+
+  results
+}
+
+#' Create Finalized Models Fixture
+#' Simulates output from finalize_top_workflows() for ensemble testing
+#' This is a FAST version that skips actual fitting
+create_mock_finalized_models <- function(n_models = 2, input_data = NULL, seed = 666) {
+  if (!is.null(seed)) set.seed(seed)
+
+  if (is.null(input_data)) {
+    input_data <- create_eval_test_data(n_samples = 50, seed = seed)
+  }
+
+  # Create minimal mock workflows and CV predictions
+  results <- tibble::tibble(
+    wflow_id = paste0("config_", sprintf("%03d", 1:n_models)),
+    workflow = replicate(n_models, list(NULL), simplify = FALSE),  # Placeholder
+    cv_predictions = replicate(n_models, list(NULL), simplify = FALSE),  # Placeholder
+    transformation = sample(c("none", "log"), n_models, replace = TRUE)
+  )
+
+  # Create mock CV metrics
+  results$cv_metrics <- lapply(1:n_models, function(i) {
+    tibble::tibble(
+      .metric = c("rmse", "rsq", "rrmse", "ccc", "rpd", "mae"),
+      mean = c(runif(1, 0.5, 1.5), runif(1, 0.7, 0.9), runif(1, 15, 25),
+               runif(1, 0.75, 0.95), runif(1, 2, 3), runif(1, 0.4, 1.2)),
+      std_err = abs(rnorm(6, 0.05, 0.02))
+    )
+  })
+
+  # Create mock CV predictions (needed for stacking)
+  n_samples <- nrow(input_data)
+  results$cv_predictions <- lapply(1:n_models, function(i) {
+    # Create mock predictions for all samples
+    mock_preds <- tibble::tibble(
+      .pred = input_data$Response + rnorm(n_samples, 0, 1),
+      Response = input_data$Response,
+      .row = 1:n_samples,
+      id = paste0("Fold", sample(1:5, n_samples, replace = TRUE))
+    )
+
+    # Wrap in list format that stacks expects
+    list(.predictions = split(mock_preds, mock_preds$id))
+  })
+
+  results
 }
