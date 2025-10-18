@@ -101,6 +101,20 @@ test_that("create_configs handles NULL covariates", {
   expect_gte(nrow(result), 1)
 })
 
+test_that("no covariates produces single 'none' set", {
+  result <- create_configs(
+    models = "plsr",
+    transformations = "none",
+    preprocessing = "raw",
+    feature_selection = "none",
+    verbose = FALSE
+  )
+  expect_true("covariates" %in% names(result))
+  expect_equal(length(unique(result$covariates)), 1)
+  # Expect NULL list entry for covariates
+  expect_true(is.null(result$covariates[[1]]))
+})
+
 test_that("create_configs handles climate covariates", {
   result <- create_configs(
     models = "plsr",
@@ -113,6 +127,35 @@ test_that("create_configs handles climate covariates", {
 
   expect_s3_class(result, "data.frame")
   expect_true("covariates" %in% names(result))
+})
+
+test_that("power set generation for soil covariates (2 -> 4 sets)", {
+  result <- create_configs(
+    models = "plsr",
+    transformations = "none",
+    preprocessing = "raw",
+    feature_selection = "none",
+    soil_covariates = c("clay", "sand"),
+    verbose = FALSE
+  )
+  # Expect four distinct combinations across covariate sets
+  combos <- unique(vapply(result$covariates, function(x) paste(sort(x), collapse = ","), character(1)))
+  expect_equal(length(combos), 4)
+})
+
+test_that("multiple covariate types combine correctly (soil + climate)", {
+  result <- create_configs(
+    models = "plsr",
+    transformations = "none",
+    preprocessing = "raw",
+    feature_selection = "none",
+    soil_covariates = c("clay"),
+    climate_covariates = c("MAT"),
+    verbose = FALSE
+  )
+  combos <- unique(vapply(result$covariates, function(x) paste(sort(x), collapse = ","), character(1)))
+  # none, clay, MAT, clay+MAT
+  expect_true(length(combos) >= 4)
 })
 
 ## ---------------------------------------------------------------------------
