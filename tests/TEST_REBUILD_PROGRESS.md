@@ -282,6 +282,14 @@ Changes Implemented:
   - Temp output dirs wrapper in evaluation tests remains in use
   - `.gitignore` includes `tests/testthat/Response/`
 
+Additional Coverage (Validation-heavy, fast):
+- New tests: `tests/testthat/test-evaluation-core-validation.R`
+  - Covers early validation branches in `evaluate_configuration()` for:
+    - `config_row` structure, `data_split` type
+    - `cv_folds`, `grid_size`, `bayesian_iter`, `prune_threshold`, `n_cv_cores`
+    - Invalid `model`/`transformation`/`preprocessing`/`feature_selection`
+  - Strategy: Keep inputs minimal and valid up to each branch; no heavy tuning executed
+
 Impact (expected):
 - Coverage gains focus on `R/evaluation-local.R` (resume/pruned/failed branches)
 - No changes to implementation code; tests-only expansion maintains safety
