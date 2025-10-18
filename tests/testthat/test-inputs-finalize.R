@@ -18,6 +18,29 @@ test_that("finalize_dataset adds outlier_flag column", {
   expect_true(all(result$outlier_flag %in% c("good", "outlier")))
 })
 
+test_that("finalize_dataset validates cutoff parameters and sample size", {
+  data <- create_eval_test_data(n_samples = 12)
+
+  # spectral_cutoff must be (0,1)
+  expect_error(
+    finalize_dataset(data, "Response", spectral_cutoff = 1.5, verbose = FALSE),
+    "between 0 and 1"
+  )
+
+  # response_cutoff must be positive
+  expect_error(
+    finalize_dataset(data, "Response", response_cutoff = 0, verbose = FALSE),
+    "must be positive"
+  )
+
+  # Minimum sample size = 10; set to 8 to trigger
+  small <- create_eval_test_data(n_samples = 8)
+  expect_error(
+    finalize_dataset(small, "Response", verbose = FALSE),
+    "at least 10 samples"
+  )
+})
+
 test_that("finalize_dataset preserves row count with remove_outliers=FALSE", {
   data <- create_eval_test_data()
 
@@ -99,6 +122,20 @@ test_that("finalize_dataset can disable response outlier detection", {
   expect_true(all(result$outlier_flag == "good"))
 })
 
+test_that("finalize_dataset verbose output includes bounds and summary", {
+  data <- create_eval_test_data(n_samples = 40)
+  expect_output(
+    finalize_dataset(data, "Response", verbose = TRUE),
+    "Outlier bounds: \[",
+    fixed = FALSE
+  )
+  expect_output(
+    finalize_dataset(data, "Response", verbose = TRUE),
+    "Summary",
+    fixed = TRUE
+  )
+})
+
 test_that("finalize_dataset preserves all columns", {
   data <- create_eval_test_data()
 
@@ -123,6 +160,46 @@ test_that("finalize_dataset handles NA in response", {
   )
 
   expect_s3_class(result, "data.frame")
+})
+
+test_that("finalize_dataset combines spectral and response outliers", {
+  set.seed(42)
+  data <- create_eval_test_data(n_samples = 60)
+  # Create one clear response outlier
+  data$Response[2] <- max(data$Response, na.rm = TRUE) + 100
+  # Create a spectral outlier by zeroing a row's spectrum
+  spectral_cols <- grep("^[0-9]+(\\.[0-9]+)?$", names(data), value = TRUE)
+  data[1, spectral_cols] <- 0
+
+  result <- finalize_dataset(
+    data, "Response",
+    spectral_outlier_method = "mahalanobis",
+    response_cutoff = 1.5,
+    verbose = FALSE
+  )
+
+  flagged <- which(result$outlier_flag == "outlier")
+  expect_true(length(flagged) >= 2)
+})
+
+test_that("finalize_dataset enforce_positive and drop_na remove rows", {
+  data <- create_eval_test_data(n_samples = 30)
+  # Set some non-positive and NA values
+  data$Response[1] <- 0
+  data$Response[2] <- -1
+  data$Response[3] <- NA
+
+  res <- finalize_dataset(
+    data, "Response",
+    enforce_positive = TRUE,
+    drop_na = TRUE,
+    remove_outliers = FALSE,
+    verbose = FALSE
+  )
+
+  expect_false(any(res$Response <= 0, na.rm = TRUE))
+  expect_false(any(is.na(res$Response)))
+  expect_lt(nrow(res), nrow(data))
 })
 
 test_that("finalize_dataset validates dataset type", {
