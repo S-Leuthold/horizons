@@ -305,5 +305,17 @@ Milestone: Behavior coverage via mocks (added)
   - Success path (bayes skipped) by mocking workflows/recipes/dials/tune/metrics
   - Pruning path by forcing high RRMSE from `tune::collect_metrics`
 
+Milestone: Additional coverage (no R/ changes)
+- evaluation-core: back-transform path and metrics-fallback (`test-evaluation-core-transform-and-metrics.R`)
+- evaluation-local: summary and status counts with mocked configurations (`test-evaluation-local-pruning-summary.R`)
+- inputs-finalize: PCA failure path (mahalanobis) handled gracefully (`test-inputs-finalize-pca-mahalanobis.R`)
+- inputs-helpers: CLI warning on non-numeric spectral column names (`test-inputs-helpers-cli.R`)
+
+Next Targets:
+- evaluation-core: expand last_fit metrics extraction fallbacks and back-transform warning branches
+- evaluation-local: verify resume across multiple configs with mixed statuses (cached + new)
+- inputs-helpers: add snapshot-style stable output checks where feasible
+- integration: tiny end-to-end smoke with minimal grid to validate cross-module wiring
+
 Notes:
 - CLAUDE.md mentioned ~31% coverage in later sessions; this tracker is now canonical. We’ll record measured coverage here after the next CI run.
