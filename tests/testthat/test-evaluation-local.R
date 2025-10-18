@@ -5,11 +5,18 @@
 library(testthat)
 library(horizons)
 
+# Use a temp output directory for all evaluation runs to avoid repo artifacts
+eval_local_temp <- function(...) {
+  od <- tempfile("eval_", tmpdir = tempdir())
+  dir.create(od, recursive = TRUE, showWarnings = FALSE)
+  evaluate_models_local(..., output_dir = od)
+}
+
 test_that("minimal workflow executes successfully", {
   config <- create_eval_test_config()
   data <- create_eval_test_data()  # Now 50 samples
 
-  result <- evaluate_models_local(
+  result <- eval_local_temp(
     config = config,
     input_data = data,
     variable = "Response",
@@ -46,7 +53,7 @@ test_that("plsr model can succeed with good data", {
 
   data <- create_eval_test_data(n_samples = 50)
 
-  result <- evaluate_models_local(
+  result <- eval_local_temp(
     config = config,
     input_data = data,
     variable = "Response",
@@ -63,7 +70,7 @@ test_that("plsr model can succeed with good data", {
 })
 
 test_that("evaluate_models_local returns correct columns", {
-  result <- evaluate_models_local(
+  result <- eval_local_temp(
     config = create_eval_test_config(),
     input_data = create_eval_test_data(),
     variable = "Response",
@@ -95,7 +102,7 @@ test_that("multiple configs process sequentially", {
   data <- create_eval_test_data()
   data$Response <- abs(data$Response) + 0.1  # Positive for log
 
-  result <- evaluate_models_local(
+  result <- eval_local_temp(
     config = config,
     input_data = data,
     variable = "Response",
@@ -114,7 +121,7 @@ test_that("SNV preprocessing executes", {
   config <- create_eval_test_config()
   config$preprocessing <- "snv"
 
-  result <- evaluate_models_local(
+  result <- eval_local_temp(
     config = config,
     input_data = create_eval_test_data(),
     variable = "Response",
@@ -133,7 +140,7 @@ test_that("PCA feature selection executes", {
   config <- create_eval_test_config()
   config$feature_selection <- "pca"
 
-  result <- evaluate_models_local(
+  result <- eval_local_temp(
     config = config,
     input_data = create_eval_test_data(),
     variable = "Response",
@@ -152,7 +159,7 @@ test_that("correlation feature selection executes", {
   config <- create_eval_test_config()
   config$feature_selection <- "correlation"
 
-  result <- evaluate_models_local(
+  result <- eval_local_temp(
     config = config,
     input_data = create_eval_test_data(),
     variable = "Response",
@@ -193,7 +200,7 @@ test_that("sqrt transformation executes", {
   data <- create_eval_test_data()
   data$Response <- abs(data$Response)  # Positive for sqrt
 
-  result <- evaluate_models_local(
+  result <- eval_local_temp(
     config = config,
     input_data = data,
     variable = "Response",
@@ -209,7 +216,7 @@ test_that("sqrt transformation executes", {
 })
 
 test_that("timing metrics are recorded", {
-  result <- evaluate_models_local(
+  result <- eval_local_temp(
     config = create_eval_test_config(),
     input_data = create_eval_test_data(),
     variable = "Response",
@@ -229,7 +236,7 @@ test_that("snv_deriv1 preprocessing executes", {
   config <- create_eval_test_config()
   config$preprocessing <- "snv_deriv1"
 
-  result <- evaluate_models_local(
+  result <- eval_local_temp(
     config = config,
     input_data = create_eval_test_data(),
     variable = "Response",
@@ -265,7 +272,7 @@ test_that("boruta feature selection executes", {
 })
 
 test_that("evaluation with minimal grid_size works", {
-  result <- evaluate_models_local(
+  result <- eval_local_temp(
     config = create_eval_test_config(),
     input_data = create_eval_test_data(),
     variable = "Response",
@@ -280,7 +287,7 @@ test_that("evaluation with minimal grid_size works", {
 })
 
 test_that("evaluation with minimal cv_folds works", {
-  result <- evaluate_models_local(
+  result <- eval_local_temp(
     config = create_eval_test_config(),
     input_data = create_eval_test_data(),
     variable = "Response",
@@ -295,7 +302,7 @@ test_that("evaluation with minimal cv_folds works", {
 })
 
 test_that("Bayesian optimization can be skipped", {
-  result <- evaluate_models_local(
+  result <- eval_local_temp(
     config = create_eval_test_config(),
     input_data = create_eval_test_data(),
     variable = "Response",
@@ -314,7 +321,7 @@ test_that("evaluation returns error info on failure", {
   config <- create_eval_test_config()
   data <- create_eval_test_data()
 
-  result <- evaluate_models_local(
+  result <- eval_local_temp(
     config = config,
     input_data = data,
     variable = "Response",
@@ -331,7 +338,7 @@ test_that("evaluation returns error info on failure", {
 })
 
 test_that("workflow_id is generated", {
-  result <- evaluate_models_local(
+  result <- eval_local_temp(
     config = create_eval_test_config(),
     input_data = create_eval_test_data(),
     variable = "Response",
@@ -347,7 +354,7 @@ test_that("workflow_id is generated", {
 })
 
 test_that("best_params is a list column", {
-  result <- evaluate_models_local(
+  result <- eval_local_temp(
     config = create_eval_test_config(),
     input_data = create_eval_test_data(),
     variable = "Response",
@@ -381,7 +388,7 @@ test_that("deriv2 preprocessing executes", {
   config <- create_eval_test_config()
   config$preprocessing <- "deriv2"
 
-  result <- evaluate_models_local(
+  result <- eval_local_temp(
     config = config,
     input_data = create_eval_test_data(),
     variable = "Response",
@@ -399,7 +406,7 @@ test_that("snv_deriv2 preprocessing executes", {
   config <- create_eval_test_config()
   config$preprocessing <- "snv_deriv2"
 
-  result <- evaluate_models_local(
+  result <- eval_local_temp(
     config = config,
     input_data = create_eval_test_data(),
     variable = "Response",
@@ -419,7 +426,7 @@ test_that("cars feature selection executes", {
   config <- create_eval_test_config()
   config$feature_selection <- "cars"
 
-  result <- evaluate_models_local(
+  result <- eval_local_temp(
     config = config,
     input_data = create_eval_test_data(),
     variable = "Response",
@@ -511,7 +518,7 @@ test_that("xgboost model executes", {
 })
 
 test_that("evaluation handles large grid_size", {
-  result <- evaluate_models_local(
+  result <- eval_local_temp(
     config = create_eval_test_config(),
     input_data = create_eval_test_data(),
     variable = "Response",
@@ -526,7 +533,7 @@ test_that("evaluation handles large grid_size", {
 })
 
 test_that("evaluation with more CV folds executes", {
-  result <- evaluate_models_local(
+  result <- eval_local_temp(
     config = create_eval_test_config(),
     input_data = create_eval_test_data(),
     variable = "Response",
@@ -618,7 +625,7 @@ test_that("feature_selection parameter is preserved", {
 })
 
 test_that("single row result for single config", {
-  result <- evaluate_models_local(
+  result <- eval_local_temp(
     config = create_eval_test_config(),
     input_data = create_eval_test_data(),
     variable = "Response",

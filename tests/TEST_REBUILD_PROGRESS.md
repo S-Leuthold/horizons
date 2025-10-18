@@ -261,3 +261,36 @@ Agent provided critical feedback on strategy:
 
 *Last Updated: 2025-10-17 15:00 UTC*
 *Session 2 Ready: Template created, fixtures ready, API verified*
+
+---
+
+## Session 7: Evaluation-Local Behaviors (In Progress)
+
+Date: 2025-10-18
+
+Goals:
+- Exercise key branches in evaluation-local: resume, pruning, failure handling
+- Maintain zero changes to R/ code — tests-only approach
+- Continue using this file as canonical tracker
+
+Changes Implemented:
+- New tests file: `tests/testthat/test-evaluation-local-behavior.R`
+  - Resume: verifies skip behavior with existing checkpoints (expects "will skip"/"Skipping" output)
+  - Pruned: mocks `horizons::evaluate_configuration()` to return `status = 'pruned'`
+  - Failed: mocks `horizons::evaluate_configuration()` to return `status = 'failed'` with error details
+- Reinforced hygiene from earlier session:
+  - Temp output dirs wrapper in evaluation tests remains in use
+  - `.gitignore` includes `tests/testthat/Response/`
+
+Impact (expected):
+- Coverage gains focus on `R/evaluation-local.R` (resume/pruned/failed branches)
+- No changes to implementation code; tests-only expansion maintains safety
+
+Next Up (Planned):
+1. Add finalize edge-path tests (as feasible) per TEST_SPECIFICATIONS (no R/ changes)
+2. Broaden evaluation-local coverage: pruning thresholds and timing/summary emissions
+3. Add inputs-helpers snapshot tests for stable CLI output where appropriate
+4. Target `R/evaluation-core.R` behaviors with deterministic fixtures and mocking
+
+Notes:
+- CLAUDE.md mentioned ~31% coverage in later sessions; this tracker is now canonical. We’ll record measured coverage here after the next CI run.
