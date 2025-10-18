@@ -298,7 +298,12 @@ Next Up (Planned):
 1. Add finalize edge-path tests (as feasible) per TEST_SPECIFICATIONS (no R/ changes)
 2. Broaden evaluation-local coverage: pruning thresholds and timing/summary emissions
 3. Add inputs-helpers snapshot tests for stable CLI output where appropriate
-4. Target `R/evaluation-core.R` behaviors with deterministic fixtures and mocking
+4. Target `R/evaluation-core.R` behaviors with deterministic fixtures and mocking (in progress)
+
+Milestone: Behavior coverage via mocks (added)
+- `tests/testthat/test-evaluation-core-behavior.R`
+  - Success path (bayes skipped) by mocking workflows/recipes/dials/tune/metrics
+  - Pruning path by forcing high RRMSE from `tune::collect_metrics`
 
 Notes:
 - CLAUDE.md mentioned ~31% coverage in later sessions; this tracker is now canonical. We’ll record measured coverage here after the next CI run.
