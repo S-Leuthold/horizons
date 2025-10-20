@@ -202,6 +202,48 @@ test_that("CCC agrees with known implementations", {
   expect_true(result < 0.5)
 })
 
+test_that("RRMSE metric calculates correctly", {
+  data <- tibble::tibble(
+    truth = c(90, 110, 130, 150),
+    estimate = c(95, 105, 125, 155)
+  )
+
+  rmse_manual <- sqrt(mean((data$truth - data$estimate)^2))
+  mean_truth <- mean(data$truth)
+  expected_rrmse <- 100 * (rmse_manual / mean_truth)
+
+  result <- horizons::rrmse_vec(data = data, truth = truth, estimate = estimate)
+
+  expect_s3_class(result, "tbl_df")
+  expect_equal(result$.estimate, expected_rrmse, tolerance = 1e-6)
+  expect_equal(attr(horizons::rrmse, "direction"), "minimize")
+})
+
+test_that("RRMSE handles missing values and zero mean gracefully", {
+  data <- tibble::tibble(
+    truth = c(100, NA, 140, 160, NA),
+    estimate = c(95, 130, 150, NA, 180)
+  )
+
+  result_drop <- horizons::rrmse_vec(data = data, truth = truth, estimate = estimate, na_rm = TRUE)
+  rmse_drop <- yardstick::rmse_vec(data$truth, data$estimate, na_rm = TRUE)
+  mean_drop <- mean(data$truth, na.rm = TRUE)
+  expected_drop <- 100 * (rmse_drop / mean_drop)
+
+  expect_equal(result_drop$.estimate, expected_drop, tolerance = 1e-6)
+
+  result_keep <- horizons::rrmse_vec(data = data, truth = truth, estimate = estimate, na_rm = FALSE)
+  expect_true(is.na(result_keep$.estimate))
+
+  zero_mean <- tibble::tibble(
+    truth = c(-1, 1, -1, 1),
+    estimate = c(-0.8, 1.2, -0.7, 1.1)
+  )
+
+  result_zero_mean <- horizons::rrmse_vec(data = zero_mean, truth = truth, estimate = estimate)
+  expect_true(is.infinite(result_zero_mean$.estimate))
+})
+
 test_that("Metrics work with tune functions", {
   skip_if_not_installed("recipes")
   skip_if_not_installed("parsnip")

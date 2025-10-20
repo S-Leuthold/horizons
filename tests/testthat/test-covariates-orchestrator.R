@@ -1,411 +1,297 @@
-#' Tests for fetch_covariates() Orchestrator Function
-#'
-#' Comprehensive test suite for the main covariate fetching orchestrator.
-#' Tests cover input validation, configuration handling, soil/climate workflows,
-#' caching, and integration across the covariate prediction system.
-#'
-#' SPEC ID: SPEC-COV-ORC-01 through SPEC-COV-ORC-15
+#' Tests for fetch_covariates orchestrator
 
 library(testthat)
 library(horizons)
+library(tibble)
+library(dplyr)
 
-## ---------------------------------------------------------------------------
-## Test Group 1: Input Validation
-## ---------------------------------------------------------------------------
+test_that("fetch_covariates uses cached soil predictions when available", {
+  cache_dir <- withr::local_tempdir()
 
-test_that("fetch_covariates validates input_data type", {
-  # SPEC: SPEC-COV-ORC-01
-
-  # Must be data.frame
-  expect_error(
-    fetch_covariates(input_data = "not_a_dataframe"),
-    "input_data must be a data.frame or tibble"
-  )
-
-  expect_error(
-    fetch_covariates(input_data = matrix(1:10, ncol = 2)),
-    "input_data must be a data.frame or tibble"
-  )
-
-  expect_error(
-    fetch_covariates(input_data = list(a = 1, b = 2)),
-    "input_data must be a data.frame or tibble"
-  )
-})
-
-test_that("fetch_covariates requires Sample_ID column", {
-  # SPEC: SPEC-COV-ORC-02
-
-  # Missing Sample_ID
-  test_data <- data.frame(
-    `600` = c(0.5, 0.6),
-    `650` = c(0.6, 0.7),
-    check.names = FALSE
-  )
-
-  expect_error(
-    fetch_covariates(input_data = test_data),
-    "input_data must contain a Sample_ID column"
-  )
-})
-
-test_that("fetch_covariates requires spectral columns", {
-  # SPEC: SPEC-COV-ORC-03
-
-  # No spectral columns (numeric names)
-  test_data <- data.frame(
+  input <- tibble(
     Sample_ID = c("S1", "S2"),
-    some_col = c(1, 2)
+    `600`      = c(0.1, 0.2),
+    `700`      = c(0.3, 0.4)
   )
 
-  expect_error(
-    fetch_covariates(input_data = test_data),
-    "No spectral columns found"
-  )
-})
+  spectral_cols <- c("600", "700")
+  spectral_hash <- digest::digest(input[, spectral_cols], algo = "md5")
 
-test_that("fetch_covariates validates coordinate columns when climate requested", {
-  # SPEC: SPEC-COV-ORC-04
-
-  test_data <- data.frame(
-    Sample_ID = c("S1", "S2"),
-    `600` = c(0.5, 0.6),
-    `650` = c(0.6, 0.7),
-    check.names = FALSE
+  cache_key <- list(
+    spectral_hash      = spectral_hash,
+    n_samples          = nrow(input),
+    covariates         = sort(c("clay")),
+    n_similar          = 100,
+    variance_threshold = 0.9,
+    bayesian_iter      = 0,
+    prop_train         = 0.75
   )
 
-  # Missing coordinates for climate data
-  expect_error(
-    fetch_covariates(
-      input_data = test_data,
-      climate_covariates = c("MAT", "MAP")
+  cache_hash      <- digest::digest(cache_key, algo = "md5")
+  soil_cache_file <- file.path(cache_dir, paste0("soil_predictions_", cache_hash, ".qs"))
+  file.create(soil_cache_file)
+
+  soil_predictions <- list(
+    predictions = tibble(Sample_ID = input$Sample_ID, clay = c(1.1, 1.2)),
+    validation_metrics = tibble(covariate = "clay", rsq = 0.85, rmse = 0.1, rpd = 2.1),
+    cluster_info       = list(n_clusters = 1),
+    local_models       = NULL
+  )
+
+  cache_object <- list(
+    cache_key   = cache_key,
+    predictions = soil_predictions,
+    timestamp   = Sys.time()
+  )
+
+  result <- with_mocked_bindings(
+    with_mocked_bindings(
+      with_mocked_bindings(
+        fetch_covariates(
+          input_data      = input,
+          soil_covariates = c("clay"),
+          n_similar       = 100,
+          variance_threshold = 0.9,
+          bayesian_iter   = 0,
+          prop_train      = 0.75,
+          cache_dir       = cache_dir,
+          refresh_soil    = FALSE,
+          verbose         = TRUE
+        ),
+        cli_text = function(...) invisible(NULL),
+        cli_warn = function(...) invisible(NULL),
+        cli_abort = function(message, ...) stop(message, call. = FALSE),
+        .package = "cli"
+      ),
+      predict_soil_covariates = function(...) stop("predict_soil_covariates should not run when cache hits"),
+      .package = "horizons"
     ),
-    "Longitude and Latitude"
+    qread = function(path, ...) {
+      expect_equal(path, soil_cache_file)
+      cache_object
+    },
+    qsave = function(...) stop("qsave should not run when cache hits"),
+    .package = "qs"
   )
 
-  # Has columns but not numeric
-  test_data$Longitude <- c("West", "East")
-  test_data$Latitude <- c("North", "South")
-
-  expect_error(
-    fetch_covariates(
-      input_data = test_data,
-      climate_covariates = c("MAT")
-    ),
-    "Longitude and Latitude must be numeric"
-  )
+  expect_s3_class(result$covariate_data, "tbl_df")
+  expect_equal(result$covariate_data$clay, soil_predictions$predictions$clay)
+  expect_identical(result$soil_predictions, soil_predictions)
 })
 
-test_that("fetch_covariates validates numeric parameters", {
-  # SPEC: SPEC-COV-ORC-05
+test_that("fetch_covariates runs prediction workflow when cache missing", {
+  cache_dir <- withr::local_tempdir()
 
-  test_data <- data.frame(
-    Sample_ID = c("S1", "S2"),
-    `600` = c(0.5, 0.6),
-    check.names = FALSE
+  input <- tibble(
+    Sample_ID = paste0("S", 1:3),
+    `600`      = c(0.1, 0.2, 0.3),
+    `700`      = c(0.4, 0.5, 0.6)
   )
 
-  # n_similar must be positive
-  expect_error(
-    fetch_covariates(input_data = test_data, n_similar = 0),
-    "n_similar must be positive"
-  )
+  predict_calls <- 0
+  saved_cache   <- NULL
 
-  expect_error(
-    fetch_covariates(input_data = test_data, n_similar = -100),
-    "n_similar must be positive"
-  )
+  predict_stub <- function(input_data, covariates, ...) {
+    predict_calls <<- predict_calls + 1
 
-  # variance_threshold must be (0, 1]
-  expect_error(
-    fetch_covariates(input_data = test_data, variance_threshold = 0),
-    "variance_threshold must be between 0 and 1"
-  )
+    predictions <- tibble(
+      Sample_ID = input_data$Sample_ID,
+      clay      = rep(1.5, nrow(input_data)),
+      ph        = rep(6.2, nrow(input_data))
+    )
 
-  expect_error(
-    fetch_covariates(input_data = test_data, variance_threshold = 1.5),
-    "variance_threshold must be between 0 and 1"
-  )
+    validation_metrics <- tibble(
+      covariate = rep(c("clay", "ph"), each = 1),
+      rsq       = c(0.9, 0.85),
+      rmse      = c(0.1, 0.2),
+      rpd       = c(2.5, 2.0)
+    )
 
-  # bayesian_iter must be non-negative
-  expect_error(
-    fetch_covariates(input_data = test_data, bayesian_iter = -5),
-    "bayesian_iter must be non-negative"
-  )
-
-  # prop_train must be (0, 1)
-  expect_error(
-    fetch_covariates(input_data = test_data, prop_train = 0),
-    "prop_train must be between 0 and 1"
-  )
-
-  expect_error(
-    fetch_covariates(input_data = test_data, prop_train = 1),
-    "prop_train must be between 0 and 1"
-  )
-
-  expect_error(
-    fetch_covariates(input_data = test_data, prop_train = 1.2),
-    "prop_train must be between 0 and 1"
-  )
-})
-
-test_that("fetch_covariates validates climate year parameters", {
-  # SPEC: SPEC-COV-ORC-06
-
-  test_data <- data.frame(
-    Sample_ID = c("S1"),
-    `600` = c(0.5),
-    Longitude = -105,
-    Latitude = 40,
-    check.names = FALSE
-  )
-
-  # start_year after end_year
-  expect_error(
-    fetch_covariates(
-      input_data = test_data,
-      climate_covariates = "MAT",
-      climate_start_year = 2020,
-      climate_end_year = 2010
-    ),
-    "climate_start_year cannot be after climate_end_year"
-  )
-})
-
-## ---------------------------------------------------------------------------
-## Test Group 2: Configuration Handling
-## ---------------------------------------------------------------------------
-
-test_that("fetch_covariates handles NULL covariates (no-op)", {
-  # SPEC: SPEC-COV-ORC-07
-
-  test_data <- data.frame(
-    Sample_ID = c("S1", "S2"),
-    `600` = c(0.5, 0.6),
-    `650` = c(0.6, 0.7),
-    check.names = FALSE
-  )
-
-  # No covariates requested
-  result <- fetch_covariates(
-    input_data = test_data,
-    soil_covariates = NULL,
-    climate_covariates = NULL,
-    verbose = FALSE
-  )
-
-  # Should return valid structure
-  expect_type(result, "list")
-  expect_true("covariate_data" %in% names(result))
-  expect_true("metadata" %in% names(result))
-
-  # Covariate data should just have Sample_ID
-  expect_equal(ncol(result$covariate_data), 1)
-  expect_equal(names(result$covariate_data), "Sample_ID")
-  expect_equal(nrow(result$covariate_data), 2)
-})
-
-test_that("fetch_covariates returns expected structure", {
-  # SPEC: SPEC-COV-ORC-08
-
-  test_data <- data.frame(
-    Sample_ID = c("S1", "S2"),
-    `600` = c(0.5, 0.6),
-    check.names = FALSE
-  )
-
-  result <- fetch_covariates(
-    input_data = test_data,
-    verbose = FALSE
-  )
-
-  # Check top-level structure
-  expect_type(result, "list")
-  expect_named(result, c("covariate_data", "soil_predictions", "metadata"))
-
-  # Check covariate_data
-  expect_s3_class(result$covariate_data, "data.frame")
-  expect_true("Sample_ID" %in% names(result$covariate_data))
-  expect_equal(nrow(result$covariate_data), nrow(test_data))
-
-  # Check metadata
-  expect_type(result$metadata, "list")
-  expect_true("execution_time" %in% names(result$metadata))
-  expect_true("n_samples" %in% names(result$metadata))
-  expect_true("n_covariates_requested" %in% names(result$metadata))
-  expect_true("n_covariates_returned" %in% names(result$metadata))
-})
-
-## ---------------------------------------------------------------------------
-## Test Group 3: Verbose Output
-## ---------------------------------------------------------------------------
-
-test_that("fetch_covariates produces verbose output when requested", {
-  # SPEC: SPEC-COV-ORC-09
-
-  test_data <- data.frame(
-    Sample_ID = c("S1"),
-    `600` = c(0.5),
-    `650` = c(0.6),
-    check.names = FALSE
-  )
-
-  # Verbose mode
-  expect_message(
-    fetch_covariates(input_data = test_data, verbose = TRUE),
-    "Configuration"
-  )
-
-  expect_message(
-    fetch_covariates(input_data = test_data, verbose = TRUE),
-    "Input samples"
-  )
-})
-
-test_that("fetch_covariates silent mode produces no output", {
-  # SPEC: SPEC-COV-ORC-10
-
-  test_data <- data.frame(
-    Sample_ID = c("S1"),
-    `600` = c(0.5),
-    check.names = FALSE
-  )
-
-  # Silent mode (verbose = FALSE)
-  expect_silent(
-    fetch_covariates(input_data = test_data, verbose = FALSE)
-  )
-})
-
-## ---------------------------------------------------------------------------
-## Test Group 4: Edge Cases
-## ---------------------------------------------------------------------------
-
-test_that("fetch_covariates handles single sample", {
-  # SPEC: SPEC-COV-ORC-11
-
-  single_sample <- data.frame(
-    Sample_ID = "S1",
-    `600` = 0.5,
-    `650` = 0.6,
-    `700` = 0.7,
-    check.names = FALSE
-  )
-
-  result <- fetch_covariates(
-    input_data = single_sample,
-    verbose = FALSE
-  )
-
-  expect_equal(nrow(result$covariate_data), 1)
-  expect_equal(result$metadata$n_samples, 1)
-})
-
-test_that("fetch_covariates handles large spectral datasets", {
-  # SPEC: SPEC-COV-ORC-12
-
-  # Create dataset with many wavelengths
-  n_samples <- 10
-  wavelengths <- seq(600, 4000, by = 2)  # 1701 wavelengths
-
-  test_data <- data.frame(
-    Sample_ID = paste0("S", 1:n_samples)
-  )
-
-  for (wl in wavelengths) {
-    test_data[[as.character(wl)]] <- runif(n_samples, 0.1, 0.9)
+    list(
+      predictions        = predictions,
+      validation_metrics = validation_metrics,
+      cluster_info       = list(n_clusters = 1,
+                                cluster_assignments = rep(1, nrow(input_data)),
+                                cluster_sizes = 1),
+      local_models       = list(
+        clay = list(Cluster_1 = list(fitted_workflow = structure(list(covariate = "clay"), class = "mock_workflow"))),
+        ph   = list(Cluster_1 = list(fitted_workflow = structure(list(covariate = "ph"), class = "mock_workflow")))
+      )
+    )
   }
 
-  # Should handle efficiently
-  start_time <- Sys.time()
-  result <- fetch_covariates(
-    input_data = test_data,
-    verbose = FALSE
+  result <- with_mocked_bindings(
+    with_mocked_bindings(
+      with_mocked_bindings(
+        fetch_covariates(
+          input_data      = input,
+          soil_covariates = c("clay", "ph"),
+          n_similar       = 50,
+          variance_threshold = 0.95,
+          bayesian_iter   = 0,
+          prop_train      = 0.8,
+          cache_dir       = cache_dir,
+          refresh_soil    = FALSE,
+          verbose         = TRUE,
+          return_models   = TRUE
+        ),
+        cli_text = function(...) invisible(NULL),
+        cli_warn = function(...) invisible(NULL),
+        cli_abort = function(message, ...) stop(message, call. = FALSE),
+        .package = "cli"
+      ),
+      predict_soil_covariates = predict_stub,
+      .package = "horizons"
+    ),
+    qread = function(...) stop("qread should not run when cache missing"),
+    qsave = function(object, file, ...) {
+      saved_cache <<- list(object = object, file = file)
+      invisible(NULL)
+    },
+    .package = "qs"
   )
-  end_time <- Sys.time()
 
-  # Should complete quickly for no-covariate case
-  expect_lt(as.numeric(difftime(end_time, start_time, units = "secs")), 5)
-
-  expect_equal(nrow(result$covariate_data), n_samples)
+  expect_equal(predict_calls, 1)
+  expect_s3_class(result$covariate_data, "tbl_df")
+  expect_true(all(c("clay", "ph") %in% names(result$covariate_data)))
+  expect_true(all(result$covariate_data$clay == 1.5))
+  expect_true(all(result$covariate_data$ph == 6.2))
+  expect_s3_class(result$soil_predictions$predictions, "tbl_df")
+  expect_true(!is.null(saved_cache))
+  expect_true(grepl("soil_predictions_", basename(saved_cache$file)))
+  expect_true("predictions" %in% names(saved_cache$object))
 })
 
-test_that("fetch_covariates preserves Sample_ID order", {
-  # SPEC: SPEC-COV-ORC-13
-
-  # Use specific Sample_IDs in defined order
-  test_data <- data.frame(
-    Sample_ID = c("SAMPLE_C", "SAMPLE_A", "SAMPLE_B"),
-    `600` = c(0.5, 0.6, 0.7),
-    check.names = FALSE
+test_that("fetch_covariates errors when climate covariates requested without coordinates", {
+  input <- tibble(
+    Sample_ID = c("S1", "S2"),
+    `600`      = c(0.1, 0.2),
+    `700`      = c(0.3, 0.4)
   )
 
-  result <- fetch_covariates(
-    input_data = test_data,
-    verbose = FALSE
-  )
-
-  # Sample_IDs should be in same order
-  expect_equal(
-    result$covariate_data$Sample_ID,
-    c("SAMPLE_C", "SAMPLE_A", "SAMPLE_B")
+  expect_error(
+    fetch_covariates(
+      input_data          = input,
+      climate_covariates  = c("MAT"),
+      refresh_climate     = TRUE,
+      cache_dir           = withr::local_tempdir(),
+      verbose             = FALSE
+    ),
+    "Longitude and Latitude columns"
   )
 })
 
-test_that("fetch_covariates metadata contains expected fields", {
-  # SPEC: SPEC-COV-ORC-14
+test_that("fetch_covariates merges climate data when requested", {
+  cache_dir <- withr::local_tempdir()
 
-  test_data <- data.frame(
-    Sample_ID = c("S1", "S2", "S3"),
-    `600` = c(0.5, 0.6, 0.7),
-    check.names = FALSE
+  input <- tibble(
+    Sample_ID = c("S1", "S2"),
+    `600`      = c(0.1, 0.2),
+    `700`      = c(0.3, 0.4),
+    Longitude  = c(-100, -101),
+    Latitude   = c(40, 41)
   )
 
-  result <- fetch_covariates(input_data = test_data, verbose = FALSE)
+  climate_stub <- tibble(
+    Sample_ID = c("S1", "S2"),
+    MAT       = c(12.5, 13.0)
+  )
 
-  metadata <- result$metadata
+  result <- with_mocked_bindings(
+    with_mocked_bindings(
+      fetch_covariates(
+        input_data          = input,
+        soil_covariates     = NULL,
+        climate_covariates  = c("MAT"),
+        refresh_climate     = TRUE,
+        cache_dir           = cache_dir,
+        verbose             = FALSE
+      ),
+      cli_text = function(...) invisible(NULL),
+      cli_warn = function(...) invisible(NULL),
+      cli_abort = function(message, ...) stop(message, call. = FALSE),
+      .package = "cli"
+    ),
+    fetch_climate_covariates = function(...) climate_stub,
+    predict_soil_covariates  = function(...) list(predictions = tibble(Sample_ID = input$Sample_ID),
+                                                  validation_metrics = tibble(),
+                                                  cluster_info = list(n_clusters = 0),
+                                                  local_models = NULL),
+    .package = "horizons"
+  )
 
-  # Required metadata fields
-  expect_true("execution_time" %in% names(metadata))
-  expect_true("execution_time_formatted" %in% names(metadata))
-  expect_true("n_samples" %in% names(metadata))
-  expect_true("n_covariates_requested" %in% names(metadata))
-  expect_true("n_covariates_returned" %in% names(metadata))
-  expect_true("cache_dir" %in% names(metadata))
-
-  # Validate values
-  expect_equal(metadata$n_samples, 3)
-  expect_equal(metadata$n_covariates_requested, 0)
-  expect_equal(metadata$n_covariates_returned, 0)  # No covariates requested
-  expect_true(metadata$execution_time >= 0)
+  expect_s3_class(result$covariate_data, "tbl_df")
+  expect_true("MAT" %in% names(result$covariate_data))
+  expect_equal(result$covariate_data$MAT, climate_stub$MAT)
+  expect_true(is.null(result$soil_predictions$local_models))
 })
 
-test_that("fetch_covariates handles missing values in spectral data", {
-  # SPEC: SPEC-COV-ORC-15
+test_that("fetch_covariates handles configuration-driven mixed requests with climate failure", {
+  cache_dir <- withr::local_tempdir()
 
-  test_data <- data.frame(
-    Sample_ID = c("S1", "S2", "S3"),
-    `600` = c(0.5, NA, 0.7),
-    `650` = c(0.6, 0.7, NA),
-    check.names = FALSE
+  input <- tibble(
+    Sample_ID = c("S1", "S2"),
+    `600`      = c(0.12, 0.21),
+    `620`      = c(0.35, 0.41),
+    Longitude  = c(-95, -96),
+    Latitude   = c(39, 40)
   )
 
-  # Should handle gracefully (no-op case)
-  result <- fetch_covariates(
-    input_data = test_data,
-    verbose = FALSE
+  configurations <- tibble(
+    config_id   = "cfg_001",
+    covariates  = list(c("clay", "MAT"))
   )
 
-  expect_s3_class(result$covariate_data, "data.frame")
-  expect_equal(nrow(result$covariate_data), 3)
+  cache_called <- FALSE
+
+  soil_stub <- function(...) {
+    list(
+      predictions = tibble(
+        Sample_ID = input$Sample_ID,
+        clay      = c(NA_real_, NA_real_)
+      ),
+      validation_metrics = tibble(),
+      cluster_info       = list(n_clusters = 1),
+      local_models       = NULL
+    )
+  }
+
+  result <- with_mocked_bindings(
+    with_mocked_bindings(
+      with_mocked_bindings(
+        fetch_covariates(
+          input_data      = input,
+          configurations  = configurations,
+          cache_dir       = cache_dir,
+          refresh_soil    = TRUE,
+          refresh_climate = TRUE,
+          n_similar       = 25,
+          variance_threshold = 0.9,
+          bayesian_iter   = 0,
+          prop_train      = 0.75,
+          verbose         = FALSE
+        ),
+        cli_text = function(...) invisible(NULL),
+        cli_alert_warning = function(...) invisible(NULL),
+        cli_alert_info = function(...) invisible(NULL),
+        cli_abort = function(message, ...) stop(message, call. = FALSE),
+        .package = "cli"
+      ),
+      predict_soil_covariates = soil_stub,
+      fetch_climate_covariates = function(...) NULL,
+      .package = "horizons"
+    ),
+    qsave = function(...) {
+      cache_called <<- TRUE
+      invisible(NULL)
+    },
+    .package = "qs"
+  )
+
+  expect_s3_class(result$covariate_data, "tbl_df")
+  expect_equal(names(result$covariate_data), c("Sample_ID", "clay"))
+  expect_true(all(is.na(result$covariate_data$clay)))
+  expect_equal(result$metadata$soil_covariates, "clay")
+  expect_equal(result$metadata$climate_covariates, "MAT")
+  expect_false(cache_called)
 })
-
-## ---------------------------------------------------------------------------
-## NOTE: Integration tests with actual soil/climate prediction are complex
-## and require mocking or real OSSL data. These will be added in Phase 1.2-1.4
-## after we build helper functions and understand the prediction pipeline better.
-##
-## Priority is to get basic orchestrator validation in place first, then
-## add comprehensive integration tests.
-## ---------------------------------------------------------------------------

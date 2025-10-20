@@ -394,6 +394,65 @@ create_mock_evaluation_results <- function(n_models = 3, seed = 555) {
   results
 }
 
+
+generate_mock_finalized_models <- function(n_models = 2, seed = 777) {
+  if (!is.null(seed)) set.seed(seed)
+
+  create_mock_workflow <- function(id, position) {
+    structure(list(id = id, position = position), class = "horizons_mock_workflow")
+  }
+
+  create_mock_cv_predictions <- function(n_rows = 5) {
+    tibble::tibble(
+      .predictions = list(tibble::tibble(
+        Response = runif(n_rows, 8, 12),
+        .pred    = runif(n_rows, 8, 12),
+        .row     = seq_len(n_rows),
+        id       = "Fold1"
+      ))
+    )
+  }
+
+  create_mock_cv_metrics <- function() {
+    tibble::tibble(
+      .metric = c("rmse", "rsq", "rrmse", "ccc", "rpd", "mae"),
+      mean    = c(runif(1, 0.5, 1.5),
+                  runif(1, 0.7, 0.9),
+                  runif(1, 12, 22),
+                  runif(1, 0.75, 0.95),
+                  runif(1, 2, 3),
+                  runif(1, 0.4, 1.1)),
+      std_err = rep(0.05, 6)
+    )
+  }
+
+  create_mock_test_metrics <- function() {
+    tibble::tibble(
+      rsq  = runif(1, 0.7, 0.9),
+      rmse = runif(1, 0.5, 1.5),
+      rrmse = runif(1, 12, 22),
+      ccc  = runif(1, 0.75, 0.95),
+      rpd  = runif(1, 2, 3),
+      mae  = runif(1, 0.4, 1.1)
+    )
+  }
+
+  ids <- paste0("wf_", sprintf("%03d", seq_len(n_models)))
+  transformations <- sample(c("none", "log", "sqrt"), n_models, replace = TRUE)
+
+  tibble::tibble(
+    wflow_id       = ids,
+    workflow       = purrr::map2(ids, seq_along(ids), create_mock_workflow),
+    cv_predictions = replicate(n_models, create_mock_cv_predictions(), simplify = FALSE),
+    test_results   = replicate(n_models, list(NULL), simplify = FALSE),
+    final_params   = replicate(n_models, tibble::tibble(parameter = "penalty", value = 0.001), simplify = FALSE),
+    transformation = transformations,
+    cv_metrics     = replicate(n_models, create_mock_cv_metrics(), simplify = FALSE),
+    test_metrics   = replicate(n_models, create_mock_test_metrics(), simplify = FALSE)
+  )
+}
+
+
 #' Create Finalized Models Fixture
 #' Simulates output from finalize_top_workflows() for ensemble testing
 #' This is a FAST version that skips actual fitting

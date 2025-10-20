@@ -1,3 +1,9 @@
+library(testthat)
+library(horizons)
+
+build_recipe                <- horizons:::build_recipe
+define_model_specifications <- horizons:::define_model_specifications
+
 test_that("complete modeling pipeline works end-to-end", {
   # Create comprehensive test data
   test_data <- make_test_spectra(n_samples = 30, wavelengths = seq(600, 800, by = 10))
