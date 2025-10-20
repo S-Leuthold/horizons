@@ -23,17 +23,34 @@ make_test_spectra <- function(n_samples = 10,
                               add_noise = TRUE,
                               add_project = TRUE,
                               seed = 123) {
-  
+
   set.seed(seed)
-  
+
+  # Handle edge case of zero samples
+  if (n_samples == 0) {
+    result <- data.frame(
+      Sample_ID = character(0),
+      Response = numeric(0),
+      stringsAsFactors = FALSE
+    )
+    if (add_project) {
+      result$Project <- character(0)
+    }
+    # Add empty spectral columns
+    for (wl in wavelengths) {
+      result[[as.character(wl)]] <- numeric(0)
+    }
+    return(result)
+  }
+
   # Create sample IDs
   sample_ids <- paste0("TEST_", sprintf("%03d", seq_len(n_samples)))
-  
+
   # Generate response values
-  responses <- stats::runif(n_samples, 
-                           min = response_range[1], 
+  responses <- stats::runif(n_samples,
+                           min = response_range[1],
                            max = response_range[2])
-  
+
   # Generate synthetic spectra (simple gaussian peaks with noise)
   n_wavelengths <- length(wavelengths)
   spectra_matrix <- matrix(0, nrow = n_samples, ncol = n_wavelengths)

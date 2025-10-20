@@ -77,7 +77,7 @@ if (!exists("covariates")) {
 ## Step 1: Create Full A/B Test Configurations
 ## ---------------------------------------------------------------------------
 
-create_configs(models             = c("random_forest", "cubist", "xgboost", "elastic_net"),
+create_configs(models             = c("random_forest", "cubist", "elastic_net", "svm_rbf"),
                transformations    = c("none", "log"),
                preprocessing      = c("snv", "snv_deriv1"),
                feature_selection  = c("pca", "cars", "correlation"),
@@ -149,11 +149,11 @@ evaluate_models_local(config          = configs_test,
                       covariate_data  = covariates$covariate_data,
                       variable        = "POM_C_g_kg",
                       output_dir      = "../results/ab_test_interactions",
-                      grid_size       = 10,
-                      bayesian_iter   = 15,
+                      grid_size       = 5,
+                      bayesian_iter   = 10,
                       cv_folds        = 5,
                       allow_par       = TRUE,
-                      n_cv_cores      = 10,
+                      n_cv_cores      = 5,
                       prune_models    = FALSE,
                       prune_threshold = 0.9,
                       seed            = 0307,
@@ -287,7 +287,7 @@ if (nrow(ab_comparison) > 2) {
   p_value <- NA
 
 }
-
+{
 cli::cli_text("")
 cli::cli_rule("Paper Text")
 cli::cli_text("")
@@ -312,4 +312,5 @@ cli::cli_text("{ifelse(summary_stats$mean_benefit > 2,
               'with limited evidence for context-dependent spectral modification.')}")
 cli::cli_text("")
 cli::cli_rule()
+}
 
