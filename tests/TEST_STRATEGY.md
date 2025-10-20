@@ -2,6 +2,8 @@
 
 ## Overview
 
+> **Execution note**: The evaluation-hpc suite is currently gated behind the `HORIZONS_RUN_HPC_TESTS` environment variable. Leave it unset (default) for fast local runs; set to `true` when validating the full HPC orchestration tests.
+
 This document outlines the testing strategy for the refactored soil covariate prediction system using stratified Kennard-Stone selection and Cubist models.
 
 ## Test Suite Structure

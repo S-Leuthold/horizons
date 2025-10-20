@@ -168,3 +168,147 @@ test_that("build_ensemble requires metrics column", {
     class = "rlang_error"
   )
 })
+
+test_that("weighted_average ensemble blends models by inverse RMSE", {
+  skip_if_not_installed("rsample")
+  skip_if_not_installed("yardstick")
+
+  data <- create_eval_test_data(n_samples = 120, n_wavelengths = 6, seed = 42)
+
+  offsets <- c(wf_low = 1, wf_high = -1)
+
+  finalized <- tibble::tibble(
+    wflow_id = c("wf_low", "wf_high"),
+    workflow = purrr::map(c("wf_low", "wf_high"), ~ structure(list(id = .x), class = "mock_workflow")),
+    cv_metrics = list(
+      tibble::tibble(.metric = "rmse", mean = 0.5),
+      tibble::tibble(.metric = "rmse", mean = 1.0)
+    ),
+    cv_predictions = replicate(2, list(dummy = TRUE), simplify = FALSE),
+    transformation = c("none", "log")
+  )
+
+  tracking <- new.env(parent = emptyenv())
+  tracking$get_calls <- character(0)
+
+  withr::defer(rm("fit.mock_workflow", envir = .GlobalEnv), envir = environment())
+  assign(
+    "fit.mock_workflow",
+    function(object, data, ...) {
+      structure(
+        list(id = object$id, offset = offsets[[object$id]]),
+        class = "mock_fit"
+      )
+    },
+    envir = .GlobalEnv
+  )
+
+  withr::defer(rm("predict.mock_fit", envir = .GlobalEnv), envir = environment())
+  assign(
+    "predict.mock_fit",
+    function(object, new_data, ...) {
+      tibble::tibble(.pred = new_data$Response + object$offset)
+    },
+    envir = .GlobalEnv
+  )
+
+  ensemble <- with_mocked_bindings(
+    build_ensemble(
+      finalized_models = finalized,
+      input_data       = data,
+      variable         = "Response",
+      ensemble_method  = "weighted_average",
+      verbose          = FALSE,
+      seed             = 2024
+    ),
+    get_original_scale_predictions = function(fitted_workflow, new_data, transformation, warn = FALSE) {
+      tracking$get_calls <- c(tracking$get_calls, fitted_workflow$id)
+      new_data$Response + fitted_workflow$offset
+    },
+    back_transform_predictions = function(predictions, transformation, warn = FALSE) predictions,
+    .package = "horizons"
+  )
+
+  expect_s3_class(ensemble, "horizons_ensemble")
+  expect_equal(sort(ensemble$model_weights$member), c("wf_high", "wf_low"))
+
+  weights <- setNames(ensemble$model_weights$coef, ensemble$model_weights$member)
+  expect_equal(sum(weights), 1, tolerance = 1e-8)
+  expect_equal(unname(weights["wf_low"]), 2 / 3, tolerance = 1e-6)
+  expect_equal(unname(weights["wf_high"]), 1 / 3, tolerance = 1e-6)
+
+  expect_true(all(tracking$get_calls %in% c("wf_low", "wf_high")))
+  expect_equal(length(tracking$get_calls), 2L)
+
+  preds <- ensemble$predictions
+  expect_equal(preds$Predicted - preds$Observed, rep(1 / 3, nrow(preds)), tolerance = 1e-6)
+
+  rmse_estimate <- ensemble$metrics %>%
+    dplyr::filter(.metric == "rmse") %>%
+    dplyr::pull(.estimate)
+  expect_equal(rmse_estimate, 1 / 3, tolerance = 1e-6)
+
+  expect_equal(ensemble$ensemble_model$method, "weighted_average")
+  expect_true(ensemble$metadata$improvement > 0)
+  expect_equal(nrow(ensemble$individual_performance), 2)
+})
+
+test_that("weighted_average ensemble aborts when fewer than two models succeed", {
+  skip_if_not_installed("rsample")
+
+  data <- create_eval_test_data(n_samples = 80, n_wavelengths = 5, seed = 24)
+
+  finalized <- tibble::tibble(
+    wflow_id = c("wf_ok", "wf_fail"),
+    workflow = purrr::map(c("wf_ok", "wf_fail"), ~ structure(list(id = .x), class = "mock_workflow")),
+    cv_metrics = list(
+      tibble::tibble(.metric = "rmse", mean = 0.7),
+      tibble::tibble(.metric = "rmse", mean = 0.9)
+    ),
+    cv_predictions = replicate(2, list(dummy = TRUE), simplify = FALSE),
+    transformation = c("none", "none")
+  )
+
+  withr::defer(rm("fit.mock_workflow", envir = .GlobalEnv), envir = environment())
+  assign(
+    "fit.mock_workflow",
+    function(object, data, ...) {
+      if (object$id == "wf_fail") {
+        return(NULL)
+      }
+      structure(
+        list(id = object$id, offset = 0),
+        class = "mock_fit"
+      )
+    },
+    envir = .GlobalEnv
+  )
+
+  withr::defer(rm("predict.mock_fit", envir = .GlobalEnv), envir = environment())
+  assign(
+    "predict.mock_fit",
+    function(object, new_data, ...) {
+      tibble::tibble(.pred = new_data$Response)
+    },
+    envir = .GlobalEnv
+  )
+
+  expect_error(
+    with_mocked_bindings(
+      build_ensemble(
+        finalized_models = finalized,
+        input_data       = data,
+        variable         = "Response",
+        ensemble_method  = "weighted_average",
+        verbose          = FALSE
+      ),
+      get_original_scale_predictions = function(fitted_workflow, new_data, transformation, warn = FALSE) {
+        new_data$Response
+      },
+      back_transform_predictions = function(predictions, transformation, warn = FALSE) predictions,
+      .package = "horizons"
+    ),
+    "Insufficient models for weighted average ensemble",
+    class = "rlang_error"
+  )
+})
