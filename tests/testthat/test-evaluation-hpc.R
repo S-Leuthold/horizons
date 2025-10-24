@@ -143,6 +143,255 @@ test_that('evaluate_models_hpc smoke test runs with mocked future_map', {
   expect_true(all(c('model', 'preprocessing', 'transformation', 'feature_selection') %in% names(checkpoint_config)))
 })
 
+test_that("evaluate_models_hpc validates worker parameters and oversubscription", {
+  input_data <- create_eval_test_data(n_samples = 30, seed = 777)
+
+  config <- data.frame(
+    model             = c("rf", "xgb"),
+    preprocessing     = c("raw", "raw"),
+    transformation    = c("none", "none"),
+    feature_selection = c("none", "none"),
+    stringsAsFactors  = FALSE
+  )
+
+  expect_error(
+    horizons::evaluate_models_hpc(
+      config         = config,
+      input_data     = input_data,
+      variable       = "Response",
+      outer_workers  = NULL,
+      inner_workers  = 2,
+      resume         = FALSE,
+      verbose        = FALSE
+    ),
+    "Both outer_workers and inner_workers must be specified"
+  )
+
+  expect_error(
+    testthat::with_mocked_bindings(
+      detectCores = function() 4,
+      horizons::evaluate_models_hpc(
+        config         = config,
+        input_data     = input_data,
+        variable       = "Response",
+        outer_workers  = 3,
+        inner_workers  = 2,
+        resume         = FALSE,
+        verbose        = FALSE
+      ),
+      .package = "parallel"
+    ),
+    "Requested 6 cores"
+  )
+})
+
+test_that("evaluate_models_hpc emits thread warnings and resumes from checkpoints", {
+  input_data <- create_eval_test_data(n_samples = 35, seed = 888)
+
+  config <- data.frame(
+    model             = c("rf", "xgb"),
+    preprocessing     = c("raw", "raw"),
+    transformation    = c("none", "none"),
+    feature_selection = c("none", "none"),
+    stringsAsFactors  = FALSE
+  )
+
+  output_dir <- withr::local_tempdir(pattern = "hpc_resume_")
+  checkpoint_dir <- file.path(output_dir, "checkpoints")
+  dir.create(checkpoint_dir, recursive = TRUE)
+
+  saveRDS(list(config = list(list(model = "rf"))), file.path(checkpoint_dir, "model_000001.qs"))
+  saveRDS(list(config = list(list(model = "xgb"))), file.path(checkpoint_dir, "model_000002.qs"))
+
+  plan_calls <- list()
+
+  mock_plan <- function(strategy, ...) {
+    if (missing(strategy)) {
+      return(structure(list(current = TRUE), class = "mock_strategy_state"))
+    }
+    entry <- list(strategy = strategy, args = list(...))
+    plan_calls <<- append(plan_calls, list(entry))
+    invisible(structure(list(name = if (is.list(strategy) && !is.null(strategy$name)) strategy$name else "set"),
+                        class = "mock_strategy"))
+  }
+
+  mock_multisession <- function(..., workers = NULL) {
+    structure(list(name = "multisession", workers = workers), class = "mock_strategy")
+  }
+
+  mock_sequential <- function(...) {
+    structure(list(name = "sequential"), class = "mock_strategy")
+  }
+
+  withr::local_envvar(c(
+    OMP_NUM_THREADS = NA_character_,
+    OPENBLAS_NUM_THREADS = "4",
+    MKL_NUM_THREADS = "1",
+    VECLIB_MAXIMUM_THREADS = "1"
+  ))
+
+  result <- testthat::with_mocked_bindings(
+    detectCores = function() 4,
+    .package = "parallel",
+    testthat::with_mocked_bindings(
+      setDTthreads = function(...) invisible(NULL),
+      .package = "data.table",
+      testthat::with_mocked_bindings(
+      plan = mock_plan,
+      multisession = mock_multisession,
+      sequential = mock_sequential,
+      nbrOfWorkers = function(...) 1,
+      .package = "future",
+        testthat::with_mocked_bindings(
+          qread = function(file, ...) readRDS(file),
+          .package = "qs",
+          capture_output <- capture.output(
+            resume_result <- horizons::evaluate_models_hpc(
+              config         = config,
+              input_data     = input_data,
+              variable       = "Response",
+              output_dir     = output_dir,
+              outer_workers  = 1,
+              inner_workers  = 1,
+              resume         = TRUE,
+              verbose        = TRUE
+            )
+          )
+        )
+      )
+    )
+  )
+
+  expect_gte(length(plan_calls), 1)
+  expect_true(all(vapply(resume_result, function(x) is.list(x), logical(1))))
+  expect_true(all(file.exists(file.path(checkpoint_dir, sprintf("model_%06d.qs", 1:2)))))
+})
+
+test_that("evaluate_models_hpc records failed models and writes error logs", {
+  skip_if_not_installed("furrr")
+  skip_if_not_installed("future")
+
+  config <- data.frame(
+    model             = "rf",
+    preprocessing     = "raw",
+    transformation    = "none",
+    feature_selection = "none",
+    stringsAsFactors  = FALSE
+  )
+
+  input_data <- create_eval_test_data(n_samples = 25, seed = 4242)
+  output_dir <- withr::local_tempdir(pattern = "hpc_fail_")
+
+  summary <- testthat::with_mocked_bindings(
+    future_map = function(.x, .f, ..., .options = NULL, .progress = FALSE) {
+      lapply(.x, function(idx) .f(idx))
+    },
+    .package = "furrr",
+    testthat::with_mocked_bindings(
+      evaluate_configuration = function(config_row, config_id, ...) {
+        list(
+          status         = "failed",
+          config_id      = config_id,
+          workflow_id    = paste0("wf_", sprintf("%03d", config_id)),
+          config         = list(model = config_row$model,
+                                preprocessing = config_row$preprocessing,
+                                transformation = config_row$transformation,
+                                feature_selection = config_row$feature_selection),
+          error_stage    = "evaluation",
+          error_class    = "runtime",
+          error_message  = "Synthetic failure for test",
+          has_trace      = FALSE,
+          n_warnings     = 0,
+          warnings       = NULL,
+          total_seconds  = 0
+        )
+      },
+      .package = "horizons",
+      testthat::with_mocked_bindings(
+        qsave = function(object, file, ...) saveRDS(object, file),
+        .package = "qs",
+        horizons::evaluate_models_hpc(
+          config         = config,
+          input_data     = input_data,
+          variable       = "Response",
+          output_dir     = output_dir,
+          grid_size      = 1,
+          bayesian_iter  = 0,
+          cv_folds       = 2,
+          outer_workers  = 1,
+          inner_workers  = 1,
+          seed           = 123,
+          resume         = FALSE,
+          verbose        = FALSE
+        )
+      )
+    )
+  )
+
+  expect_s3_class(summary, "horizons_hpc_summary")
+  expect_equal(summary$execution$n_failed, 1)
+  expect_equal(summary$execution$n_successful, 0)
+  error_files <- list.files(summary$paths$errors_dir, pattern = "\\.json$", full.names = TRUE)
+  expect_true(length(error_files) >= 1)
+})
+
+test_that("evaluate_models_hpc returns cached results when all models completed", {
+  skip_if_not_installed("furrr")
+  skip_if_not_installed("future")
+
+  config <- data.frame(
+    model             = "rf",
+    preprocessing     = "raw",
+    transformation    = "none",
+    feature_selection = "none",
+    stringsAsFactors  = FALSE
+  )
+
+  input_data <- create_eval_test_data(n_samples = 20, seed = 5151)
+  output_dir <- withr::local_tempdir(pattern = "hpc_cached_")
+  checkpoint_dir <- file.path(output_dir, "checkpoints")
+  dir.create(checkpoint_dir, recursive = TRUE)
+
+  cached_result <- list(
+    status      = "success",
+    config_id   = 1,
+    workflow_id = "wf_001",
+    config      = list(model = "rf",
+                       preprocessing = "raw",
+                       transformation = "none",
+                       feature_selection = "none"),
+    rmse        = 1,
+    rsq         = 0.8,
+    rrmse       = 12,
+    ccc         = 0.75,
+    rpd         = 1.9,
+    mae         = 0.5
+  )
+
+  saveRDS(cached_result, file.path(checkpoint_dir, "model_000001.qs"))
+
+  cached <- testthat::with_mocked_bindings(
+    qread = function(file, ...) readRDS(file),
+    qsave = function(object, file, ...) saveRDS(object, file),
+    .package = "qs",
+    horizons::evaluate_models_hpc(
+      config         = config,
+      input_data     = input_data,
+      variable       = "Response",
+      output_dir     = output_dir,
+      outer_workers  = 1,
+      inner_workers  = 1,
+      seed           = 999,
+      resume         = TRUE,
+      verbose        = FALSE
+    )
+  )
+
+  expect_type(cached, "list")
+  expect_equal(length(cached), 1)
+  expect_equal(cached[[1]]$status, "success")
+})
+
 evaluate_models_hpc <- horizons::evaluate_models_hpc
 run_hpc_tests <- identical(Sys.getenv("HORIZONS_RUN_HPC_TESTS"), "true")
 

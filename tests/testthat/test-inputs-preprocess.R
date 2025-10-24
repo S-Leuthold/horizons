@@ -13,12 +13,23 @@ test_that("preprocess_spectra performs basic preprocessing", {
     `1000` = c(0.7, 0.8, 0.9),
     check.names = FALSE
   )
+  attr(data, "spectra_type") <- "MIR"
 
-  result <- preprocess_spectra(
-    data,
-    resample_interval = 4,
-    baseline_method = "none",
-    verbose = FALSE
+  mock_resample <- function(X, wav, new.wav, interpol = "spline") {
+    matrix(rep(seq_along(new.wav), each = nrow(X)),
+           nrow = nrow(X),
+           ncol = length(new.wav))
+  }
+
+  result <- with_mocked_bindings(
+    resample = mock_resample,
+    preprocess_spectra(
+      data,
+      resample_interval = 4,
+      baseline_method = "none",
+      verbose = FALSE
+    ),
+    .package = "prospectr"
   )
 
   expect_s3_class(result, "data.frame")
@@ -27,34 +38,90 @@ test_that("preprocess_spectra performs basic preprocessing", {
 })
 
 test_that("preprocess_spectra preserves Sample_ID", {
-  skip("Sample_ID preservation needs investigation - skip for velocity")
-
   data <- create_tiny_spectra()
+  data <- data[, c("Sample_ID", grep("^[0-9]", names(data), value = TRUE))]
+  attr(data, "spectra_type") <- "MIR"
 
-  result <- preprocess_spectra(data, verbose = FALSE)
+  mock_resample <- function(X, wav, new.wav, interpol = "spline") {
+    matrix(rep(seq_along(new.wav), each = nrow(X)),
+           nrow = nrow(X),
+           ncol = length(new.wav))
+  }
+
+  result <- with_mocked_bindings(
+    resample = mock_resample,
+    preprocess_spectra(data, verbose = FALSE),
+    .package = "prospectr"
+  )
 
   expect_true(all(data$Sample_ID %in% result$Sample_ID))
 })
 
 test_that("preprocess_spectra handles different baseline methods", {
-  skip("Baseline methods need investigation - skip for velocity")
-
   data <- create_tiny_spectra()
+  data <- data[, c("Sample_ID", grep("^[0-9]", names(data), value = TRUE))]
+  attr(data, "spectra_type") <- "MIR"
 
-  result_none <- preprocess_spectra(data, baseline_method = "none", verbose = FALSE)
-  result_rubber <- preprocess_spectra(data, baseline_method = "rubberband", verbose = FALSE)
+  calls <- new.env(parent = emptyenv())
+  calls$baseline <- character()
 
-  expect_s3_class(result_none, "data.frame")
+  mock_baseline <- function(X, wav) {
+    calls$baseline <- c(calls$baseline, "rubberband")
+    X + 0.01
+  }
+
+  mock_detrend <- function(X, wav, p = 2) {
+    calls$baseline <- c(calls$baseline, paste0("poly-", p))
+    X - 0.01
+  }
+
+  mock_resample <- function(X, wav, new.wav, interpol = "spline") {
+    matrix(rep(seq_along(new.wav), each = nrow(X)),
+           nrow = nrow(X),
+           ncol = length(new.wav))
+  }
+
+  result_rubber <- with_mocked_bindings(
+    baseline = mock_baseline,
+    resample = mock_resample,
+    preprocess_spectra(data, baseline_method = "rubberband", verbose = FALSE),
+    .package = "prospectr"
+  )
+
+  result_poly <- with_mocked_bindings(
+    detrend = mock_detrend,
+    resample = mock_resample,
+    preprocess_spectra(data, baseline_method = "polynomial", verbose = FALSE),
+    .package = "prospectr"
+  )
+
   expect_s3_class(result_rubber, "data.frame")
+  expect_s3_class(result_poly, "data.frame")
+  expect_true(all(c("rubberband", "poly-2") %in% calls$baseline))
 })
 
 test_that("preprocess_spectra handles different resample intervals", {
-  skip("Resample interval behavior needs investigation - skip for velocity")
-
   data <- create_tiny_spectra()
+  data <- data[, c("Sample_ID", grep("^[0-9]", names(data), value = TRUE))]
+  attr(data, "spectra_type") <- "MIR"
 
-  result_2 <- preprocess_spectra(data, resample_interval = 2, baseline_method = "none", verbose = FALSE)
-  result_8 <- preprocess_spectra(data, resample_interval = 8, baseline_method = "none", verbose = FALSE)
+  mock_resample <- function(X, wav, new.wav, interpol = "spline") {
+    matrix(rep(seq_along(new.wav), each = nrow(X)),
+           nrow = nrow(X),
+           ncol = length(new.wav))
+  }
+
+  result_2 <- with_mocked_bindings(
+    resample = mock_resample,
+    preprocess_spectra(data, resample_interval = 2, baseline_method = "none", verbose = FALSE),
+    .package = "prospectr"
+  )
+
+  result_8 <- with_mocked_bindings(
+    resample = mock_resample,
+    preprocess_spectra(data, resample_interval = 8, baseline_method = "none", verbose = FALSE),
+    .package = "prospectr"
+  )
 
   # Smaller interval = more columns
   expect_gt(ncol(result_2), ncol(result_8))
@@ -99,5 +166,47 @@ test_that("preprocess_spectra validates baseline_method", {
   expect_error(
     preprocess_spectra(data, baseline_method = "invalid"),
     "should be one of"
+  )
+})
+
+test_that("preprocess_spectra warns when spectra_type attribute missing", {
+  data <- create_tiny_spectra()
+  data <- data[, c("Sample_ID", grep("^[0-9]", names(data), value = TRUE))]
+  attr(data, "source") <- "unit-test"
+
+  mock_resample <- function(X, wav, new.wav, interpol = "spline") {
+    matrix(rep(seq_along(new.wav), each = nrow(X)),
+           nrow = nrow(X),
+           ncol = length(new.wav))
+  }
+
+  expect_warning(
+    with_mocked_bindings(
+      resample = mock_resample,
+      preprocess_spectra(data, verbose = FALSE),
+      .package = "prospectr"
+    ),
+    "assuming MIR"
+  )
+})
+
+test_that("preprocess_spectra errors on unknown spectra_type", {
+  data <- create_tiny_spectra()
+  data <- data[, c("Sample_ID", grep("^[0-9]", names(data), value = TRUE))]
+  attr(data, "spectra_type") <- "SWIR"
+
+  mock_resample <- function(X, wav, new.wav, interpol = "spline") {
+    matrix(rep(seq_along(new.wav), each = nrow(X)),
+           nrow = nrow(X),
+           ncol = length(new.wav))
+  }
+
+  expect_error(
+    with_mocked_bindings(
+      resample = mock_resample,
+      preprocess_spectra(data, verbose = FALSE),
+      .package = "prospectr"
+    ),
+    "Unknown spectra_type"
   )
 })
