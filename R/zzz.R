@@ -1,84 +1,59 @@
 #' Package Startup Configuration
 #'
 #' @description
-#' Sets thread control and package options on package load to prevent
-#' uncontrolled threading in HPC environments.
+#' Minimal package initialization. Thread control is the user's responsibility.
 #'
 #' @keywords internal
 
 .onLoad <- function(libname, pkgname) {
-  
-  ## -----------------------------------------------------------------------------
-  ## Thread Control on Package Load
-  ## -----------------------------------------------------------------------------
-  
-  ## Set comprehensive thread control environment variables ----
-  
-  Sys.setenv(
-    ## Standard threading controls ----
-    OMP_NUM_THREADS        = "1",
-    OPENBLAS_NUM_THREADS   = "1", 
-    MKL_NUM_THREADS        = "1",
-    VECLIB_MAXIMUM_THREADS = "1",
-    NUMEXPR_NUM_THREADS    = "1",
-    
-    ## Additional BLAS variants ----
-    GOTO_NUM_THREADS       = "1",
-    BLIS_NUM_THREADS       = "1"
-  )
-  
-  ## Set package-specific options ----
-  
-  options(
-    ## Ranger threading ----
-    ranger.num.threads = 1,
-    ranger.num.cores   = 1,
-    
-    ## XGBoost threading ----
-    xgboost.nthread    = 1,
-    
-    ## General R parallelization ----
-    mc.cores           = 1,
-    cores              = 1
-  )
-  
-  ## Use RhpcBLASctl if available ----
-  
-  if (requireNamespace("RhpcBLASctl", quietly = TRUE)) {
-    suppressMessages({
-      RhpcBLASctl::blas_set_num_threads(1)
-      RhpcBLASctl::omp_set_num_threads(1)
-    })
+
+  ## ---------------------------------------------------------------------------
+  ## Load tidymodels to ensure recipes selectors work
+  ## ---------------------------------------------------------------------------
+
+  ## CRITICAL: Load tidymodels to put recipes in search path
+  ## This ensures all_outcomes() and all_predictors() quosures can resolve
+  ## See INVESTIGATION_namespace_issue.md for technical details
+
+  requireNamespace("tidymodels", quietly = TRUE)
+
+  ## ---------------------------------------------------------------------------
+  ## Trust the user - no automatic thread control
+  ## ---------------------------------------------------------------------------
+
+  # The user is responsible for setting their own parallel configuration
+  # We don't enforce any thread limits or parallel settings
+
+  # Optional: Check if user explicitly wants thread control help
+  if (Sys.getenv("HORIZONS_THREAD_CONTROL", "FALSE") == "TRUE") {
+
+    # Only if explicitly requested, set conservative defaults
+    Sys.setenv(
+      OMP_NUM_THREADS        = "1",
+      OPENBLAS_NUM_THREADS   = "1",
+      MKL_NUM_THREADS        = "1"
+    )
+
+    options(
+      ranger.num.threads = 1,
+      xgboost.nthread    = 1
+    )
+
+    message("horizons: Thread control enabled (set HORIZONS_THREAD_CONTROL=FALSE to disable)")
   }
-  
+
   invisible()
 }
 
 .onAttach <- function(libname, pkgname) {
-  
+
   ## Display version and thread control status ----
-  
+
   packageStartupMessage(
     "horizons v", utils::packageVersion("horizons"), " loaded. ",
     "Please flag bugs on Github (www.github.com/S-Leuthold/horizons)"
   )
-  
-  ## Check thread control in interactive sessions ----
-  
-  if (interactive()) {
-    omp_threads <- Sys.getenv("OMP_NUM_THREADS")
-    blas_threads <- Sys.getenv("OPENBLAS_NUM_THREADS")
-    
-    if (omp_threads == "1" && blas_threads == "1") {
-      packageStartupMessage("Thread control: ACTIVE (single-threaded mode)")
-    } else {
-      packageStartupMessage(
-        "Thread control: Check settings for HPC use\n",
-        "  OMP_NUM_THREADS = ", omp_threads, "\n",
-        "  OPENBLAS_NUM_THREADS = ", blas_threads
-      )
-    }
-  }
-  
+
+
   invisible()
 }
