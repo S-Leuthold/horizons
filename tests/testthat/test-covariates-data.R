@@ -410,6 +410,135 @@ test_that("project_spectra_to_pca preserves metadata columns", {
   expect_setequal(projected$Sample_ID, new_data$Sample_ID)
 })
 
+test_that("get_processed_ossl_training_data returns full pipeline results with mocks", {
+  fake_raw <- tibble::tibble(
+    Sample_ID = c("S1", "S2"),
+    `600` = c(0.1, 0.2),
+    clay = c(5, 6)
+  )
+
+  fake_processed <- fake_raw
+
+  fake_pca <- list(
+    pca_model = list(dummy = TRUE),
+    ossl_pca_scores = tibble::tibble(
+      Sample_ID = c("S1", "S2"),
+      Dim.1 = c(1, 2)
+    ),
+    variance_explained = c(0.7, 0.3),
+    n_components = 1
+  )
+
+  result <- with_mocked_bindings(
+    get_ossl_training_data = function(...) fake_raw,
+    preprocess_mir_spectra = function(...) fake_processed,
+    perform_pca_on_ossl    = function(...) fake_pca,
+    horizons:::get_processed_ossl_training_data(
+      properties = c("clay"),
+      variance_threshold = 0.9,
+      verbose = FALSE
+    ),
+    .package = "horizons"
+  )
+
+  expect_type(result, "list")
+  expect_true(all(c("raw_data", "processed_data", "pca_model", "pca_scores", "variance_explained") %in% names(result)))
+  expect_equal(nrow(result$pca_scores), 2)
+})
+
+test_that("get_processed_ossl_training_data returns NULL when preprocessing fails", {
+  fake_raw <- tibble::tibble(
+    Sample_ID = c("S1", "S2"),
+    `600` = c(0.1, 0.2),
+    clay = c(5, 6)
+  )
+
+  result <- with_mocked_bindings(
+    get_ossl_training_data = function(...) fake_raw,
+    preprocess_mir_spectra = function(...) NULL,
+    horizons:::get_processed_ossl_training_data(
+      properties = c("clay"),
+      verbose = FALSE
+    ),
+    .package = "horizons"
+  )
+
+  expect_null(result)
+})
+
+test_that("get_processed_ossl_training_data returns NULL when base data missing", {
+  result <- with_mocked_bindings(
+    get_ossl_training_data = function(...) NULL,
+    horizons:::get_processed_ossl_training_data(
+      properties = c("clay"),
+      verbose = FALSE
+    ),
+    .package = "horizons"
+  )
+
+  expect_null(result)
+})
+
+test_that("get_ossl_training_data loads cached data without download", {
+  cache_dir <- withr::local_tempdir(pattern = "ossl_cache_")
+
+  location_data <- tibble::tibble(
+    id.layer_uuid_txt = c("S1", "S2"),
+    layer.upper.depth_usda_cm = c(0, 0)
+  )
+
+  lab_data <- tibble::tibble(
+    id.layer_uuid_txt = c("S1", "S2"),
+    clay.tot_usda.a334_w.pct = c(5, 6)
+  )
+
+  mir_data <- tibble::tibble(
+    id.layer_uuid_txt = c("S1", "S2"),
+    `scan_mir.600_abs` = c(0.1, 0.2),
+    `scan_mir.700_abs` = c(0.2, 0.3)
+  )
+
+  qs::qsave(location_data, file.path(cache_dir, "ossl_location_data.qs"))
+  qs::qsave(lab_data,      file.path(cache_dir, "ossl_lab_data.qs"))
+  qs::qsave(mir_data,      file.path(cache_dir, "ossl_mir_raw.qs"))
+
+  result <- with_mocked_bindings(
+    R_user_dir = function(...) cache_dir,
+    horizons:::get_ossl_training_data(
+      properties  = c("clay"),
+      max_samples = 1,
+      refresh     = FALSE,
+      verbose     = FALSE
+    ),
+    .package = "tools"
+  )
+
+  expect_s3_class(result, "tbl_df")
+  expect_equal(nrow(result), 1)
+  expect_true("clay" %in% names(result))
+  expect_true(all(c("600", "700") %in% names(result)))
+})
+
+test_that("get_ossl_training_data aborts when download is cancelled", {
+  cache_dir <- withr::local_tempdir(pattern = "ossl_empty_")
+
+  expect_error(
+    with_mocked_bindings(
+      menu = function(...) 2,
+      .package = "utils",
+      with_mocked_bindings(
+        R_user_dir = function(...) cache_dir,
+        horizons:::get_ossl_training_data(
+          properties = c("clay"),
+          verbose = FALSE
+        ),
+        .package = "tools"
+      )
+    ),
+    "User cancelled OSSL data download"
+  )
+})
+
 ## ===========================================================================
 ## VALIDATION TESTS - Property Mapping
 ## ===========================================================================

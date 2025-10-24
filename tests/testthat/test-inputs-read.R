@@ -226,6 +226,109 @@ test_that("CSV reading non-verbose mode suppresses output", {
   unlink(temp_csv)
 })
 
+test_that("read_spectra validates OPUS directories without .0 files", {
+  temp_dir <- withr::local_tempdir(pattern = "opus_empty_")
+
+  expect_error(
+    read_spectra(
+      source = "opus",
+      spectra_path = temp_dir,
+      verbose = FALSE
+    ),
+    "No OPUS files found"
+  )
+})
+
+test_that("read_spectra warns when CSV file lacks extension", {
+  temp_file <- tempfile(fileext = ".txt")
+  write.csv(data.frame(Sample_ID = "S1", `600` = 0.4, check.names = FALSE), temp_file, row.names = FALSE)
+
+  mock_read_csv <- function(path, spectra_type, verbose) {
+    tibble::tibble(Sample_ID = "S1", `600` = 0.4)
+  }
+
+  expect_warning(
+    result <- with_mocked_bindings(
+      read_csv_internal = mock_read_csv,
+      read_spectra(
+        source = "csv",
+        spectra_path = temp_file,
+        spectra_type = "MIR",
+        verbose = FALSE
+      ),
+      .package = "horizons"
+    ),
+    "does not have .csv extension"
+  )
+
+  expect_equal(attr(result, "source"), "csv")
+  expect_equal(attr(result, "source_path"), temp_file)
+})
+
+test_that("read_spectra rejects directory paths for CSV source", {
+  temp_dir <- withr::local_tempdir(pattern = "csv_dir_")
+
+  expect_error(
+    read_spectra(
+      source = "csv",
+      spectra_path = temp_dir,
+      verbose = FALSE
+    ),
+    "requires a file path"
+  )
+})
+
+test_that("read_spectra errors when internal reader returns NULL", {
+  temp_file <- tempfile(fileext = ".0")
+  writeLines("binary stub", temp_file)
+
+  mock_read_opus <- function(path, spectra_type, verbose) {
+    NULL
+  }
+
+  expect_error(
+    with_mocked_bindings(
+      read_opus_internal = mock_read_opus,
+      read_spectra(
+        source = "opus",
+        spectra_path = temp_file,
+        verbose = FALSE
+      ),
+      .package = "horizons"
+    ),
+    "Failed to read spectral data"
+  )
+})
+
+test_that("read_spectra reads OPUS directories with mocked internal reader", {
+  temp_dir <- withr::local_tempdir(pattern = "opus_dir_")
+  file.create(file.path(temp_dir, "sample.0"))
+
+  mock_opus <- tibble::tibble(
+    Sample_ID = c("OPUS_1", "OPUS_2"),
+    `600`      = c(0.12, 0.15),
+    `700`      = c(0.21, 0.25)
+  )
+
+  result <- with_mocked_bindings(
+    read_opus_internal = function(path, spectra_type, verbose) mock_opus,
+    read_spectra(
+      source       = "opus",
+      spectra_path = temp_dir,
+      spectra_type = "MIR",
+      verbose      = FALSE
+    ),
+    .package = "horizons"
+  )
+
+  expect_s3_class(result, "tbl_df")
+  expect_equal(nrow(result), nrow(mock_opus))
+  expect_equal(attr(result, "source"), "opus")
+  expect_equal(attr(result, "spectra_type"), "MIR")
+  expect_equal(attr(result, "source_path"), temp_dir)
+  expect_true(all(names(mock_opus) %in% names(result)))
+})
+
 test_that("CSV reading returns tibble with correct column types", {
   # SPEC-READ-INT-009: Output data types are correct
 

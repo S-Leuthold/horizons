@@ -82,6 +82,241 @@ test_that("build_ensemble validates finalized_models type", {
   )
 })
 
+test_that("stacks ensemble uses mocked stacks infrastructure and saves output", {
+  skip_if_not_installed("stacks")
+  skip_if_not_installed("future")
+  skip_if_not_installed("qs")
+  skip_if_not_installed("readr")
+
+  data <- create_eval_test_data(n_samples = 50, seed = 321)
+
+  finalized <- create_mock_finalized_models(n_models = 3, input_data = data)
+
+  workflow_offsets <- setNames(c(0.4, 0.25, 0.35), finalized$wflow_id)
+
+  finalized$workflow <- purrr::map(finalized$wflow_id, ~ structure(list(id = .x), class = "mock_workflow"))
+  finalized$transformation <- c("none", "log", "sqrt")
+
+  transforms <- setNames(finalized$transformation, finalized$wflow_id)
+
+  finalized$cv_predictions <- purrr::map2(
+    finalized$wflow_id,
+    seq_along(finalized$wflow_id),
+    function(id, idx) {
+      base_vals <- pmax(data$Response + workflow_offsets[[id]], 1e-3)
+
+      pred_values <- switch(
+        transforms[[id]],
+        log  = log(base_vals),
+        sqrt = sqrt(pmax(base_vals, 0)),
+        base_vals
+      )
+
+      tibble::tibble(
+        .pred    = pred_values,
+        Response = data$Response,
+        .row     = seq_len(nrow(data)),
+        id       = paste0("Fold", idx)
+      )
+    }
+  )
+
+  base::registerS3method("predict", "mock_stacks_model", predict.mock_stacks_model)
+
+  withr::defer(rm("fit.mock_workflow", envir = .GlobalEnv), envir = environment())
+  assign(
+    "fit.mock_workflow",
+    function(object, data, ...) {
+      structure(
+        list(id = object$id, offset = workflow_offsets[[object$id]]),
+        class = "mock_fit"
+      )
+    },
+    envir = .GlobalEnv
+  )
+
+  withr::defer(rm("predict.mock_fit", envir = .GlobalEnv), envir = environment())
+  assign(
+    "predict.mock_fit",
+    function(object, new_data, ...) {
+      tibble::tibble(.pred = new_data$Response + object$offset)
+    },
+    envir = .GlobalEnv
+  )
+
+  plan_log <- list()
+
+  mock_plan <- function(strategy, ...) {
+    plan_log <<- append(plan_log, list(list(strategy = strategy, args = list(...))))
+    invisible(structure(list(strategy = strategy), class = "mock_plan"))
+  }
+
+  mock_multisession <- function(..., workers = NULL) {
+    structure(list(name = "multisession", workers = workers), class = "mock_strategy")
+  }
+
+  mock_sequential <- function(...) {
+    structure(list(name = "sequential"), class = "mock_strategy")
+  }
+
+  temp_output <- withr::local_tempdir(pattern = "ensemble_stack_")
+
+  stats_predict <- stats::predict
+  mock_stats_predict <- function(object, newdata = NULL, ...) {
+    if (inherits(object, "mock_stacks_model") && !is.null(object$predict_fun)) {
+      object$predict_fun(newdata)
+    } else {
+      stats_predict(object, newdata, ...)
+    }
+  }
+
+  ensemble <- testthat::with_mocked_bindings(
+    predict = mock_stats_predict,
+    with_mocked_stacks(
+      with_mocked_bindings(
+        detectCores = function() 4,
+        .package = "parallel",
+        with_mocked_bindings(
+          plan = mock_plan,
+          multisession = mock_multisession,
+          sequential = mock_sequential,
+          .package = "future",
+          with_mocked_bindings(
+            qsave = function(object, file, ...) saveRDS(object, file = file),
+            .package = "qs",
+            with_mocked_bindings(
+              write_csv = function(x, file, ...) utils::write.csv(x, file, row.names = FALSE),
+              .package = "readr",
+              build_ensemble(
+                finalized_models   = finalized,
+                input_data         = data,
+                variable           = "Response",
+                ensemble_method    = "stacks",
+                optimize_blending  = TRUE,
+                allow_par          = TRUE,
+                n_cores            = 3,
+                output_dir         = temp_output,
+                verbose            = FALSE,
+                seed               = 999
+              )
+            )
+          )
+        )
+      ),
+      weights = c(0.6, 0.3, 0.1),
+      predict_offset = -0.1
+    ),
+    .package = "stats"
+  )
+
+  expect_s3_class(ensemble, "horizons_ensemble")
+  expect_equal(ensemble$metadata$method, "stacks")
+  expect_equal(nrow(ensemble$model_weights), 3)
+  expect_true(all(c("Predicted", "Observed") %in% names(ensemble$predictions)))
+  expect_true(file.exists(file.path(temp_output, "ensemble", "predictions.csv")))
+  expect_true(file.exists(file.path(temp_output, "ensemble", "weights.csv")))
+  expect_true(file.exists(file.path(temp_output, "ensemble", "ensemble_results.qs")))
+  expect_gte(length(plan_log), 1)
+  expect_true(ensemble$metadata$improvement > 0)
+})
+
+test_that("xgb_meta ensemble integrates mocked XGBoost and reports degradation", {
+  skip_if_not_installed("xgboost")
+  skip_if_not_installed("tune")
+
+  data <- create_eval_test_data(n_samples = 45, seed = 404)
+  finalized <- create_mock_finalized_models(n_models = 3, input_data = data)
+
+  workflow_offsets <- setNames(c(0.05, 0.02, 0.08), finalized$wflow_id)
+  cv_offsets <- c(0.1, -0.05, 0.2)
+
+  finalized$workflow <- purrr::map(finalized$wflow_id, ~ structure(list(id = .x), class = "mock_workflow"))
+  finalized$transformation <- c("none", "log", "log")
+
+  transforms <- setNames(finalized$transformation, finalized$wflow_id)
+
+  finalized$cv_predictions <- purrr::map2(
+    finalized$wflow_id,
+    cv_offsets,
+    function(id, offset) {
+      base_vals <- pmax(data$Response + offset, 1e-3)
+
+      pred_values <- switch(
+        transforms[[id]],
+        log  = log(base_vals),
+        sqrt = sqrt(pmax(base_vals, 0)),
+        base_vals
+      )
+
+      tibble::tibble(
+        .pred    = pred_values,
+        Response = data$Response,
+        .row     = seq_len(nrow(data)),
+        id       = "FoldA"
+      )
+    }
+  )
+
+  base::registerS3method("predict", "mock_xgb_booster", predict.mock_xgb_booster)
+
+  withr::defer(rm("fit.mock_workflow", envir = .GlobalEnv), envir = environment())
+  assign(
+    "fit.mock_workflow",
+    function(object, data, ...) {
+      structure(
+        list(id = object$id, offset = workflow_offsets[[object$id]]),
+        class = "mock_fit"
+      )
+    },
+    envir = .GlobalEnv
+  )
+
+  withr::defer(rm("predict.mock_fit", envir = .GlobalEnv), envir = environment())
+  assign(
+    "predict.mock_fit",
+    function(object, new_data, ...) {
+      tibble::tibble(.pred = new_data$Response + object$offset)
+    },
+    envir = .GlobalEnv
+  )
+
+  stats_predict <- stats::predict
+  mock_stats_predict <- function(object, newdata = NULL, ...) {
+    if (inherits(object, "mock_xgb_booster")) {
+      predict.mock_xgb_booster(object, if (is.null(newdata)) matrix(numeric(), nrow = 0) else newdata, ...)
+    } else {
+      stats_predict(object, newdata, ...)
+    }
+  }
+
+  ensemble <- testthat::with_mocked_bindings(
+    predict = mock_stats_predict,
+    with_mocked_collect_predictions(
+      with_mocked_xgboost(
+        build_ensemble(
+          finalized_models  = finalized,
+          input_data        = data,
+          variable          = "Response",
+          ensemble_method   = "xgb_meta",
+          verbose           = FALSE,
+          seed              = 2025
+        ),
+        gain_values = c(0.5, 0.3, 0.2),
+        predict_offset = 0.4
+      )
+    ),
+    .package = "stats"
+  )
+
+  expect_s3_class(ensemble, "horizons_ensemble")
+  expect_equal(ensemble$ensemble_model$method, "xgb_meta")
+  expect_equal(nrow(ensemble$model_weights), 3)
+  expect_true(all(grepl("^config_", ensemble$model_weights$member)))
+  expect_true(ensemble$metadata$improvement < 0)
+  expect_true(any(ensemble$metrics$.metric == "rmse"))
+  expect_gt(nrow(ensemble$individual_performance), 0)
+})
+
 test_that("build_ensemble validates input_data type", {
   # SPEC-ENSEMBLE-VAL-002: Data validation
   finalized <- create_mock_finalized_models(n_models = 2)

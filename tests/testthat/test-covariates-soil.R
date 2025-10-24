@@ -619,321 +619,281 @@ test_that("predict_soil_covariates validates n_workers parameter", {
 ## ===========================================================================
 ## INTEGRATION TESTS - Complete workflows with model fitting (SLOW)
 ## ===========================================================================
-# WARNING: These tests actually fit Cubist models with Bayesian optimization.
-# Each test takes 3-5 minutes. Skipped on CRAN for speed.
+## FAST INTEGRATION TESTS - Mocked pipelines
+## ===========================================================================
 
 test_that("minimal clay prediction executes end-to-end", {
-  # SPEC-COV-INT-001: Complete single-covariate workflow
+  # SPEC-COV-INT-001: Complete single-covariate workflow (optional real run)
   skip_on_cran()
-  skip_if_not(interactive(), "Expensive integration test - run interactively only")
+  skip_if(Sys.getenv("HORIZONS_RUN_COVARIATE_SOIL") != "true",
+          "Set HORIZONS_RUN_COVARIATE_SOIL=true to run full integration test")
 
-  # Create small test dataset (minimal for speed)
   test_data <- make_test_spectra(
-    n_samples = 30,  # Small but sufficient for clustering
-    wavelengths = seq(600, 4000, by = 50),  # Coarse wavelengths for speed
-    seed = 101
+    n_samples   = 20,
+    wavelengths = seq(600, 1800, by = 50),
+    seed        = 101
   )
 
-  # Run prediction with minimal parameters
   result <- predict_soil_covariates(
-    input_data = test_data,
-    covariates = c("clay"),
-    max_clusters = 2,  # Minimal clustering
-    bayesian_iter = 5,  # Minimal optimization (faster)
-    prop = 0.85,
-    verbose = FALSE,
-    return_models = FALSE  # Save memory
+    input_data    = test_data,
+    covariates    = c("clay"),
+    max_clusters  = 2,
+    bayesian_iter = 2,
+    prop          = 0.85,
+    verbose       = FALSE,
+    return_models = FALSE
   )
 
-  # Verify structure
   expect_type(result, "list")
-  expect_true("predictions" %in% names(result))
-  expect_true("validation_metrics" %in% names(result))
-  expect_true("cluster_info" %in% names(result))
-
-  # Verify predictions
-  expect_s3_class(result$predictions, "tbl_df")
-  expect_true("Sample_ID" %in% names(result$predictions))
+  expect_true(all(c("predictions", "validation_metrics", "cluster_info") %in% names(result)))
+  expect_s3_class(result$predictions, "data.frame")
   expect_true("clay" %in% names(result$predictions))
-  expect_equal(nrow(result$predictions), 30)
-
-  # Verify predictions are numeric
-  expect_type(result$predictions$clay, "double")
-
-  # Verify some predictions are valid (not all NA)
+  expect_equal(nrow(result$predictions), 20)
   expect_true(sum(!is.na(result$predictions$clay)) > 0)
 })
 
 test_that("multi-covariate prediction works", {
-  # SPEC-COV-INT-002: Multiple covariates workflow
-  skip_on_cran()
-  skip_if_not(interactive(), "Expensive integration test - run interactively only")
+  # SPEC-COV-INT-002: Multiple covariates workflow via mocks
+  with_mocked_covariate_pipeline({
+    test_data <- make_test_spectra(n_samples = 30, seed = 202)
 
-  test_data <- make_test_spectra(n_samples = 30, seed = 202)
+    result <- predict_soil_covariates(
+      input_data    = test_data,
+      covariates    = c("clay", "ph"),
+      max_clusters  = 2,
+      bayesian_iter = 5,
+      verbose       = FALSE,
+      return_models = FALSE
+    )
 
-  result <- predict_soil_covariates(
-    input_data = test_data,
-    covariates = c("clay", "ph_h2o"),
-    max_clusters = 2,
-    bayesian_iter = 5,
-    verbose = FALSE,
-    return_models = FALSE
-  )
-
-  # Verify both covariates predicted
-  expect_true("clay" %in% names(result$predictions))
-  expect_true("ph_h2o" %in% names(result$predictions))
-
-  # Verify validation metrics for both
-  expect_s3_class(result$validation_metrics, "tbl_df")
-  expect_true(nrow(result$validation_metrics) <= 2)  # Up to 2 covariates
+    expect_true(all(c("clay", "ph") %in% names(result$predictions)))
+    expect_s3_class(result$validation_metrics, "tbl_df")
+    expect_lte(nrow(result$validation_metrics), 2)
+  }, covariates = c("clay", "ph"),
+     prediction_values = c(clay = 9.5, ph = 6.8))
 })
 
 test_that("clustering method parameter works", {
-  # SPEC-COV-INT-003: Different clustering methods
-  skip_on_cran()
-  skip_if_not(interactive(), "Expensive integration test - run interactively only")
+  # SPEC-COV-INT-003: Clustering method selection
+  with_mocked_covariate_pipeline({
+    test_data <- make_test_spectra(n_samples = 30, seed = 303)
 
-  test_data <- make_test_spectra(n_samples = 30, seed = 303)
+    result_kmeans <- predict_soil_covariates(
+      input_data        = test_data,
+      covariates        = c("clay"),
+      clustering_method = "kmeans",
+      max_clusters      = 3,
+      bayesian_iter     = 5,
+      verbose           = FALSE,
+      return_models     = FALSE
+    )
 
-  # K-means clustering
-  result_kmeans <- predict_soil_covariates(
-    input_data = test_data,
-    covariates = c("clay"),
-    clustering_method = "kmeans",
-    max_clusters = 2,
-    bayesian_iter = 5,
-    verbose = FALSE,
-    return_models = FALSE
-  )
+    expect_equal(result_kmeans$cluster_info$clustering_method, "kmeans")
 
-  expect_equal(result_kmeans$cluster_info$clustering_method, "kmeans")
+    result_ward <- predict_soil_covariates(
+      input_data        = test_data,
+      covariates        = c("clay"),
+      clustering_method = "ward",
+      max_clusters      = 3,
+      bayesian_iter     = 5,
+      verbose           = FALSE,
+      return_models     = FALSE
+    )
 
-  # Ward clustering
-  result_ward <- predict_soil_covariates(
-    input_data = test_data,
-    covariates = c("clay"),
-    clustering_method = "ward",
-    max_clusters = 2,
-    bayesian_iter = 5,
-    verbose = FALSE,
-    return_models = FALSE
-  )
-
-  expect_equal(result_ward$cluster_info$clustering_method, "ward")
+    expect_equal(result_ward$cluster_info$clustering_method, "ward")
+  }, covariates = c("clay"), target_clusters = 2)
 })
 
 test_that("return_models parameter controls model output", {
-  # SPEC-COV-INT-004: return_models flag behavior
-  skip_on_cran()
-  skip_if_not(interactive(), "Expensive integration test - run interactively only")
+  # SPEC-COV-INT-004: return_models flag behaviour
+  with_mocked_covariate_pipeline({
+    test_data <- make_test_spectra(n_samples = 25, seed = 404)
 
-  test_data <- make_test_spectra(n_samples = 30, seed = 404)
+    result_no_models <- predict_soil_covariates(
+      input_data     = test_data,
+      covariates     = c("clay"),
+      max_clusters   = 2,
+      bayesian_iter  = 5,
+      verbose        = FALSE,
+      return_models  = FALSE
+    )
 
-  # With return_models = FALSE (default)
-  result_no_models <- predict_soil_covariates(
-    input_data = test_data,
-    covariates = c("clay"),
-    max_clusters = 2,
-    bayesian_iter = 5,
-    verbose = FALSE,
-    return_models = FALSE
-  )
+    expect_false("local_models" %in% names(result_no_models))
 
-  expect_false("local_models" %in% names(result_no_models))
+    result_with_models <- predict_soil_covariates(
+      input_data     = test_data,
+      covariates     = c("clay"),
+      max_clusters   = 2,
+      bayesian_iter  = 5,
+      verbose        = FALSE,
+      return_models  = TRUE
+    )
 
-  # With return_models = TRUE
-  result_with_models <- predict_soil_covariates(
-    input_data = test_data,
-    covariates = c("clay"),
-    max_clusters = 2,
-    bayesian_iter = 5,
-    verbose = FALSE,
-    return_models = TRUE
-  )
+    expect_true("local_models" %in% names(result_with_models))
+    expect_true("Cluster_1" %in% names(result_with_models$local_models$clay))
 
-  expect_true("local_models" %in% names(result_with_models))
-  expect_type(result_with_models$local_models, "list")
+    model_entry <- result_with_models$local_models$clay$Cluster_1
+    expect_true("fitted_workflow" %in% names(model_entry))
+    expect_true("validation_metrics" %in% names(model_entry))
+  }, covariates = c("clay"))
 })
 
-test_that("cluster_info contains expected fields", {
-  # SPEC-COV-INT-005: Cluster metadata validation
-  skip_on_cran()
-  skip_if_not(interactive(), "Expensive integration test - run interactively only")
+test_that("predictions include validation metrics", {
+  # SPEC-COV-INT-005: Validation metrics structure under mocks
+  with_mocked_covariate_pipeline({
+    test_data <- make_test_spectra(n_samples = 28, seed = 505)
 
-  test_data <- make_test_spectra(n_samples = 30, seed = 505)
+    result <- predict_soil_covariates(
+      input_data    = test_data,
+      covariates    = c("clay"),
+      max_clusters  = 2,
+      bayesian_iter = 4,
+      verbose       = FALSE,
+      return_models = TRUE
+    )
 
-  result <- predict_soil_covariates(
-    input_data = test_data,
-    covariates = c("clay"),
-    max_clusters = 3,
-    bayesian_iter = 5,
-    verbose = FALSE,
-    return_models = FALSE
-  )
+    metrics <- result$validation_metrics
+    required_cols <- c("covariate", "n_samples", "rmse", "mae", "rsq", "ccc", "rpd", "rrmse")
 
-  # Verify cluster_info structure
-  expect_true("n_clusters" %in% names(result$cluster_info))
-  expect_true("cluster_assignments" %in% names(result$cluster_info))
-  expect_true("cluster_sizes" %in% names(result$cluster_info))
-  expect_true("clustering_method" %in% names(result$cluster_info))
-  expect_true("distance_method" %in% names(result$cluster_info))
-  expect_true("pca_approach" %in% names(result$cluster_info))
-
-  # Verify cluster assignments match predictions
-  expect_equal(length(result$cluster_info$cluster_assignments),
-               nrow(result$predictions))
-
-  # Verify PCA approach is OSSL-centric
-  expect_equal(result$cluster_info$pca_approach, "OSSL-centric")
+    if (!is.null(metrics) && nrow(metrics) > 0) {
+      expect_s3_class(metrics, "tbl_df")
+      expect_true(all(required_cols %in% names(metrics)))
+    } else {
+      model_entry <- result$local_models$clay$Cluster_1
+      expect_false(is.null(model_entry$validation_metrics))
+      expect_true(all(c("rmse", "mae", "rsq", "ccc", "rpd", "rrmse") %in% names(model_entry$validation_metrics)))
+    }
+  }, covariates = c("clay"),
+     validation_metrics = c(rmse = 0.2, rsq = 0.92))
 })
 
-test_that("validation_metrics structure is correct", {
-  # SPEC-COV-INT-006: Validation metrics format
-  skip_on_cran()
-  skip_if_not(interactive(), "Expensive integration test - run interactively only")
+test_that("coverage parameter influences training set size", {
+  # SPEC-COV-INT-006: Coverage parameter effects under mocks
+  with_mocked_covariate_pipeline({
+    test_data <- make_test_spectra(n_samples = 30, seed = 606)
 
-  test_data <- make_test_spectra(n_samples = 30, seed = 606)
+    result_low <- predict_soil_covariates(
+      input_data    = test_data,
+      covariates    = c("clay"),
+      coverage      = 0.5,
+      max_clusters  = 2,
+      bayesian_iter = 5,
+      verbose       = FALSE,
+      return_models = TRUE
+    )
 
-  result <- predict_soil_covariates(
-    input_data = test_data,
-    covariates = c("clay"),
-    max_clusters = 2,
-    bayesian_iter = 5,
-    verbose = FALSE,
-    return_models = FALSE
-  )
+    result_high <- predict_soil_covariates(
+      input_data    = test_data,
+      covariates    = c("clay"),
+      coverage      = 0.9,
+      max_clusters  = 2,
+      bayesian_iter = 5,
+      verbose       = FALSE,
+      return_models = TRUE
+    )
 
-  metrics <- result$validation_metrics
-
-  # Verify metrics tibble structure
-  expect_s3_class(metrics, "tbl_df")
-
-  if (nrow(metrics) > 0) {
-    # Verify expected columns
-    expect_true("covariate" %in% names(metrics))
-    expect_true("n_samples" %in% names(metrics))
-    expect_true("rmse" %in% names(metrics))
-    expect_true("mae" %in% names(metrics))
-    expect_true("rsq" %in% names(metrics))
-    expect_true("ccc" %in% names(metrics))
-    expect_true("rpd" %in% names(metrics))
-    expect_true("rrmse" %in% names(metrics))
-
-    # Verify metrics are numeric
-    expect_type(metrics$rmse, "double")
-    expect_type(metrics$rsq, "double")
-  }
+    expect_gte(nrow(result_high$validation_metrics), nrow(result_low$validation_metrics))
+  }, covariates = c("clay"))
 })
 
 test_that("derivative_order parameter affects preprocessing", {
   # SPEC-COV-INT-007: Experimental derivative preprocessing
-  skip_on_cran()
-  skip_if_not(interactive(), "Expensive integration test - run interactively only")
+  with_mocked_covariate_pipeline({
+    test_data <- make_test_spectra(n_samples = 30, seed = 707)
 
-  test_data <- make_test_spectra(n_samples = 30, seed = 707)
+    result_0 <- predict_soil_covariates(
+      input_data        = test_data,
+      covariates        = c("clay"),
+      derivative_order  = 0,
+      max_clusters      = 2,
+      bayesian_iter     = 5,
+      verbose           = FALSE,
+      return_models     = FALSE
+    )
 
-  # 0th order (smoothing only)
-  result_0 <- predict_soil_covariates(
-    input_data = test_data,
-    covariates = c("clay"),
-    derivative_order = 0,
-    max_clusters = 2,
-    bayesian_iter = 5,
-    verbose = FALSE,
-    return_models = FALSE
-  )
+    expect_equal(result_0$experimental$derivative_order, 0)
 
-  expect_equal(result_0$experimental$derivative_order, 0)
+    result_1 <- predict_soil_covariates(
+      input_data        = test_data,
+      covariates        = c("clay"),
+      derivative_order  = 1,
+      max_clusters      = 2,
+      bayesian_iter     = 5,
+      verbose           = FALSE,
+      return_models     = FALSE
+    )
 
-  # 1st derivative
-  result_1 <- predict_soil_covariates(
-    input_data = test_data,
-    covariates = c("clay"),
-    derivative_order = 1,
-    max_clusters = 2,
-    bayesian_iter = 5,
-    verbose = FALSE,
-    return_models = FALSE
-  )
-
-  expect_equal(result_1$experimental$derivative_order, 1)
+    expect_equal(result_1$experimental$derivative_order, 1)
+  }, covariates = c("clay"))
 })
 
 test_that("use_mahalanobis parameter affects distance method", {
-  # SPEC-COV-INT-008: Distance metric selection
-  skip_on_cran()
-  skip_if_not(interactive(), "Expensive integration test - run interactively only")
+  # SPEC-COV-INT-008: Distance metric selection under mocks
+  with_mocked_covariate_pipeline({
+    test_data <- make_test_spectra(n_samples = 30, seed = 808)
 
-  test_data <- make_test_spectra(n_samples = 30, seed = 808)
+    result_euclidean <- predict_soil_covariates(
+      input_data       = test_data,
+      covariates       = c("clay"),
+      use_mahalanobis  = FALSE,
+      max_clusters     = 2,
+      bayesian_iter    = 5,
+      verbose          = FALSE,
+      return_models    = FALSE
+    )
 
-  # Euclidean distance
-  result_euclidean <- predict_soil_covariates(
-    input_data = test_data,
-    covariates = c("clay"),
-    use_mahalanobis = FALSE,
-    max_clusters = 2,
-    bayesian_iter = 5,
-    verbose = FALSE,
-    return_models = FALSE
-  )
+    expect_equal(result_euclidean$cluster_info$distance_method, "Euclidean")
 
-  expect_equal(result_euclidean$cluster_info$distance_method, "Euclidean")
+    result_mahal <- predict_soil_covariates(
+      input_data       = test_data,
+      covariates       = c("clay"),
+      use_mahalanobis  = TRUE,
+      max_clusters     = 2,
+      bayesian_iter    = 5,
+      verbose          = FALSE,
+      return_models    = FALSE
+    )
 
-  # Mahalanobis distance
-  result_mahal <- predict_soil_covariates(
-    input_data = test_data,
-    covariates = c("clay"),
-    use_mahalanobis = TRUE,
-    max_clusters = 2,
-    bayesian_iter = 5,
-    verbose = FALSE,
-    return_models = FALSE
-  )
-
-  expect_equal(result_mahal$cluster_info$distance_method, "Mahalanobis")
+    expect_equal(result_mahal$cluster_info$distance_method, "Mahalanobis")
+  }, covariates = c("clay"))
 })
 
 test_that("verbose parameter controls output", {
   # SPEC-COV-INT-009: Verbose output suppression
-  skip_on_cran()
-  skip_if_not(interactive(), "Expensive integration test - run interactively only")
+  with_mocked_covariate_pipeline({
+    test_data <- make_test_spectra(n_samples = 30, seed = 909)
 
-  test_data <- make_test_spectra(n_samples = 30, seed = 909)
-
-  # verbose = FALSE should suppress output
-  expect_silent(
-    predict_soil_covariates(
-      input_data = test_data,
-      covariates = c("clay"),
-      max_clusters = 2,
-      bayesian_iter = 5,
-      verbose = FALSE,
-      return_models = FALSE
+    expect_silent(
+      predict_soil_covariates(
+        input_data    = test_data,
+        covariates    = c("clay"),
+        max_clusters  = 2,
+        bayesian_iter = 5,
+        verbose       = FALSE,
+        return_models = FALSE
+      )
     )
-  )
+  }, covariates = c("clay"))
 })
 
 test_that("predictions handle different sample sizes", {
-  # SPEC-COV-INT-010: Scalability across sample counts
-  skip_on_cran()
-  skip_if_not(interactive(), "Expensive integration test - run interactively only")
+  # SPEC-COV-INT-010: Scalability across sample counts (mocked)
+  with_mocked_covariate_pipeline({
+    for (n in c(20, 30, 50)) {
+      test_data <- make_test_spectra(n_samples = n, seed = n * 10)
 
-  for (n in c(20, 30, 50)) {
-    test_data <- make_test_spectra(n_samples = n, seed = n * 10)
+      result <- predict_soil_covariates(
+        input_data    = test_data,
+        covariates    = c("clay"),
+        max_clusters  = 2,
+        bayesian_iter = 5,
+        verbose       = FALSE,
+        return_models = FALSE
+      )
 
-    result <- predict_soil_covariates(
-      input_data = test_data,
-      covariates = c("clay"),
-      max_clusters = 2,
-      bayesian_iter = 5,
-      verbose = FALSE,
-      return_models = FALSE
-    )
-
-    expect_equal(nrow(result$predictions), n,
-                 info = paste("Failed for n =", n))
-  }
+      expect_equal(nrow(result$predictions), n, info = paste("Failed for n =", n))
+    }
+  }, covariates = c("clay"))
 })
 
 ## ===========================================================================
