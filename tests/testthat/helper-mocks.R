@@ -472,3 +472,455 @@ with_mocked_cubist <- function(code, fixed_performance = FALSE) {
     .package = "horizons"
   )
 }
+
+#' Mock covariate prediction pipeline components
+#'
+#' Provides a fast path through `predict_soil_covariates()` by mocking the heavy
+#' OSSL, PCA, clustering, and Cubist training steps. Allows tests to exercise the
+#' orchestration logic without spending minutes fitting models.
+#'
+#' @param code Code block that calls `predict_soil_covariates()`.
+#' @param covariates Character vector of covariates to include in mock OSSL data.
+#' @param target_clusters Integer target number of clusters to emulate.
+#' @param prediction_values Named numeric vector giving default predictions per covariate.
+#' @param validation_metrics Named numeric vector giving validation metric defaults.
+#' @param n_ossl_samples Integer number of mock OSSL samples.
+#' @param n_components Integer number of PCA components to expose.
+#' @param seed Optional seed for reproducibility.
+#'
+#' @return Result of executing `code` with mocks active.
+with_mocked_covariate_pipeline <- function(code,
+                                           covariates = c("clay"),
+                                           target_clusters = 2,
+                                           prediction_values = NULL,
+                                           validation_metrics = NULL,
+                                           n_ossl_samples = 80,
+                                           n_components = 3,
+                                           seed = 123) {
+
+  if (!is.null(seed)) set.seed(seed)
+
+  spectral_cols <- as.character(seq(600, 780, by = 30))
+  all_covariates <- unique(c("clay", "ph", covariates))
+
+  make_mock_ossl <- function(n_samples, props) {
+    base <- tibble::tibble(
+      Sample_ID = paste0("OSSL_", sprintf("%04d", seq_len(n_samples))),
+      Project   = "MockProject"
+    )
+
+    spectral_matrix <- matrix(
+      runif(n_samples * length(spectral_cols), min = 0.2, max = 0.8),
+      nrow = n_samples,
+      ncol = length(spectral_cols)
+    )
+
+    for (i in seq_along(spectral_cols)) {
+      base[[spectral_cols[i]]] <- spectral_matrix[, i]
+    }
+
+    for (prop in props) {
+      base[[prop]] <- runif(n_samples, min = 5, max = 15)
+    }
+
+    base
+  }
+
+  ossl_full <- make_mock_ossl(n_ossl_samples, all_covariates)
+
+  default_predictions <- stats::setNames(rep(10, length(all_covariates)), all_covariates)
+  if (!is.null(prediction_values)) {
+    default_predictions[names(prediction_values)] <- prediction_values
+  }
+
+  default_metrics <- c(
+    rmse  = 0.25,
+    mae   = 0.15,
+    rsq   = 0.85,
+    ccc   = 0.9,
+    rpd   = 2.2,
+    rrmse = 6.0
+  )
+  if (!is.null(validation_metrics)) {
+    default_metrics[names(validation_metrics)] <- validation_metrics
+  }
+
+  cov_env <- new.env(parent = emptyenv())
+  cov_env$target_k <- target_clusters
+
+  mock_get_ossl <- function(properties, ...) {
+    props <- intersect(properties, names(ossl_full))
+    missing_props <- setdiff(properties, props)
+    mock_data <- ossl_full
+    for (prop in missing_props) {
+      mock_data[[prop]] <- runif(nrow(mock_data), min = 5, max = 15)
+    }
+    mock_data
+  }
+
+  mock_preprocess <- function(spectral_data, ...) spectral_data
+
+  mock_perform_pca <- function(ossl_data, variance_threshold = 0.985, verbose = TRUE, ...) {
+    n <- nrow(ossl_data)
+    scores <- tibble::tibble(Sample_ID = ossl_data$Sample_ID)
+    for (i in seq_len(n_components)) {
+      scores[[paste0("Dim.", i)]] <- seq_len(n) / (i + 5)
+    }
+    for (prop in all_covariates) {
+      if (prop %in% names(ossl_data)) {
+        scores[[prop]] <- ossl_data[[prop]]
+      }
+    }
+    list(
+      pca_model       = list(n_components = n_components),
+      ossl_pca_scores = scores,
+      n_components    = n_components
+    )
+  }
+
+  mock_project_pca <- function(new_data, pca_model, verbose = TRUE, ...) {
+    n <- nrow(new_data)
+    scores <- tibble::tibble(Sample_ID = new_data$Sample_ID)
+    for (i in seq_len(n_components)) {
+      scores[[paste0("Dim.", i)]] <- seq_len(n) / (i + 10)
+    }
+    for (prop in all_covariates) {
+      scores[[prop]] <- if (prop %in% names(new_data)) new_data[[prop]] else rep(NA_real_, n)
+    }
+    scores
+  }
+
+  mock_fit_cubist <- function(train_data, val_data, covariate, ..., bayesian_iter = 10) {
+    pred_value <- default_predictions[[covariate]]
+    metrics_tbl <- tibble::tibble(
+      rmse  = default_metrics[["rmse"]],
+      mae   = default_metrics[["mae"]],
+      rsq   = default_metrics[["rsq"]],
+      ccc   = default_metrics[["ccc"]],
+      rpd   = default_metrics[["rpd"]],
+      rrmse = default_metrics[["rrmse"]]
+    )
+    workflow <- structure(
+      list(covariate = covariate, prediction = pred_value),
+      class = "mock_covariate_workflow"
+    )
+    list(
+      fitted_workflow    = workflow,
+      validation_metrics = metrics_tbl,
+      best_params        = list(committees = 5, neighbors = 2),
+      optimization_history = tibble::tibble(
+        iteration  = seq_len(max(1, bayesian_iter)),
+        committees = 5,
+        neighbors  = 2,
+        score      = seq_len(max(1, bayesian_iter)) / max(1, bayesian_iter)
+      )
+    )
+  }
+
+  mock_kmeans <- function(x, centers, ...) {
+    cluster <- rep(seq_len(centers), length.out = nrow(x))
+    cov_env$last_cluster <- cluster
+    list(
+      cluster = cluster,
+      centers = matrix(seq_len(centers), nrow = centers, ncol = ncol(x))
+    )
+  }
+
+  mock_silhouette <- function(x, dist, ...) {
+    cluster <- as.integer(x)
+    k <- length(unique(cluster))
+    value <- if (k == cov_env$target_k) 0.9 else 0.5
+    matrix(
+      c(cluster, cluster, rep(value, length(cluster))),
+      ncol = 3,
+      dimnames = list(NULL, c("cluster", "neighbor", "sil_width"))
+    )
+  }
+
+  mock_hclust <- function(d, method = "ward.D2", ...) {
+    structure(list(n = attr(d, "Size")), class = "mock_hclust")
+  }
+
+  mock_cutree <- function(tree, k) {
+    n <- if (!is.null(tree$n)) tree$n else 1
+    rep(seq_len(k), length.out = n)
+  }
+
+  cli_silence <- list(
+    cli_text          = function(...) invisible(NULL),
+    cli_warn          = function(...) invisible(NULL),
+    cli_alert_info    = function(...) invisible(NULL),
+    cli_alert_warning = function(...) invisible(NULL),
+    cli_alert_success = function(...) invisible(NULL)
+  )
+
+  testthat::with_mocked_bindings({
+    testthat::with_mocked_bindings({
+      testthat::with_mocked_bindings({
+        testthat::with_mocked_bindings({
+          code
+        },
+        cli_text          = cli_silence$cli_text,
+        cli_warn          = cli_silence$cli_warn,
+        cli_alert_info    = cli_silence$cli_alert_info,
+        cli_alert_warning = cli_silence$cli_alert_warning,
+        cli_alert_success = cli_silence$cli_alert_success,
+        .package = "cli")
+      },
+      silhouette = mock_silhouette,
+      .package = "cluster")
+    },
+    kmeans = mock_kmeans,
+    hclust = mock_hclust,
+    cutree = mock_cutree,
+    .package = "stats")
+  },
+  get_ossl_training_data = mock_get_ossl,
+  preprocess_mir_spectra = mock_preprocess,
+  perform_pca_on_ossl    = mock_perform_pca,
+  project_spectra_to_pca = mock_project_pca,
+  fit_cubist_model       = mock_fit_cubist,
+  .package = "horizons")
+}
+
+#' Predict method for mocked covariate workflows
+#'
+#' Ensures mocked Cubist workflows return deterministic predictions.
+predict.mock_covariate_workflow <- function(object, new_data, ...) {
+  if (!is.null(object$covariate) && object$covariate %in% names(new_data)) {
+    preds <- new_data[[object$covariate]]
+    preds[is.na(preds)] <- object$prediction
+  } else {
+    preds <- rep(object$prediction, nrow(new_data))
+  }
+  tibble::tibble(.pred = preds)
+}
+
+#' Mock stacks (tidymodels) infrastructure for ensemble testing
+#'
+#' Provides lightweight replacements for stacks functions so that ensemble
+#' tests can exercise control flow without requiring real model objects.
+#'
+#' @param code Code to execute with mocked stacks functions.
+#' @param weights Numeric vector of weights to attach to mocked members.
+#' @param predict_offset Numeric offset added to predictions for determinism.
+#'
+#' @return Result of executing code with stacks mocks active.
+with_mocked_stacks <- function(code,
+                               weights = c(0.7, 0.3),
+                               predict_offset = 0.15) {
+
+  base_predict <- stats::predict
+
+  mock_stacks_constructor <- function() {
+    structure(list(candidates = list(),
+                   blended   = FALSE),
+              class = "mock_stacks_state")
+  }
+
+  mock_add_candidates <- function(stack, candidates, name, ...) {
+    stack$candidates[[name]] <- candidates
+    stack
+  }
+
+  mock_blend_predictions <- function(stack, penalty, mixture, metric, control, ...) {
+    stack$blended <- list(penalty = penalty, mixture = mixture, metric = metric)
+    stack
+  }
+
+  mock_fit_members <- function(stack, ...) {
+    predict_fun <- function(newdata) {
+      baseline <- if (!is.null(newdata) && "Response" %in% names(newdata)) {
+        newdata$Response
+      } else if (!is.null(newdata) && nrow(newdata) > 0) {
+        rep(0, nrow(newdata))
+      } else {
+        numeric()
+      }
+
+      tibble::tibble(.pred = baseline + predict_offset)
+    }
+
+    structure(list(
+      cols_map        = stack$candidates,
+      predict_offset  = predict_offset,
+      blended         = stack$blended,
+      predict_fun     = predict_fun
+    ),
+    class = c("mock_stacks_model", "stacks_model"))
+  }
+
+  mock_autoplot <- function(object, type = "weights", ...) {
+    members <- names(object$cols_map)
+    if (length(members) == 0) {
+      members <- character()
+    }
+
+    raw_weights <- rep_len(weights, length(members))
+    normalized  <- if (length(raw_weights) > 0) raw_weights / sum(raw_weights) else numeric()
+
+    weight_data <- tibble::tibble(
+      member = members,
+      weight = normalized
+    )
+
+    structure(
+      list(data = weight_data),
+      class = c("mock_stacks_autoplot", "ggplot")
+    )
+  }
+  mock_stats_predict <- function(object, newdata = NULL, ...) {
+    if (inherits(object, "mock_stacks_model") && !is.null(object$predict_fun)) {
+      object$predict_fun(newdata)
+    } else {
+      base_predict(object, newdata, ...)
+    }
+  }
+
+  testthat::with_mocked_bindings(
+    stacks            = mock_stacks_constructor,
+    add_candidates    = mock_add_candidates,
+    blend_predictions = mock_blend_predictions,
+    fit_members       = mock_fit_members,
+    autoplot          = mock_autoplot,
+    code = code,
+    .package = "stacks"
+  )
+}
+
+#' Predict method for mocked stacks models
+#'
+#' @param object Mock stacks model created by with_mocked_stacks().
+#' @param new_data New data frame containing Response column.
+#'
+#' @return Tibble with `.pred` column.
+predict.mock_stacks_model <- function(object, new_data, ...) {
+  offset <- object$predict_offset
+  if (is.null(offset)) offset <- 0
+
+  baseline <- if ("Response" %in% names(new_data)) {
+    new_data$Response
+  } else if (nrow(new_data) > 0) {
+    rep(0, nrow(new_data))
+  } else {
+    numeric()
+  }
+
+  tibble::tibble(.pred = baseline + offset)
+}
+
+#' Mock XGBoost training for ensemble meta-learner tests
+#'
+#' Replaces xgboost::xgboost with a deterministic stub that records feature
+#' names and returns predictable predictions.
+#'
+#' @param code Code to execute with mocked XGBoost functions.
+#' @param gain_values Optional named numeric vector of feature gains.
+#' @param predict_offset Numeric offset applied to predictions.
+#'
+#' @return Result of executing code with XGBoost mocks active.
+with_mocked_xgboost <- function(code,
+                                gain_values = NULL,
+                                predict_offset = 0.2) {
+
+  mock_xgboost <- function(data,
+                           label,
+                           params,
+                           nrounds,
+                           verbose = 0,
+                           ...) {
+    feature_names <- colnames(data)
+    if (is.null(feature_names)) {
+      feature_names <- character()
+    }
+
+    structure(
+      list(
+        feature_names = feature_names,
+        gain_values   = gain_values,
+        predict_offset = predict_offset
+      ),
+      class = c("mock_xgb_booster", "xgb.Booster")
+    )
+  }
+
+  mock_importance <- function(model, ...) {
+    features <- model$feature_names
+    if (length(features) == 0 && !is.null(model$gain_values)) {
+      features <- names(model$gain_values)
+    }
+
+    if (length(features) == 0) {
+      return(tibble::tibble(Feature = character(), Gain = numeric()))
+    }
+
+    gains <- model$gain_values
+    if (is.null(gains) || length(gains) == 0) {
+      gains <- rep(1 / length(features), length(features))
+    } else {
+      gains <- rep_len(gains, length(features))
+      if (abs(sum(gains) - 1) > 1e-8) {
+        gains <- gains / sum(gains)
+      }
+    }
+
+    tibble::tibble(
+      Feature = features,
+      Gain    = gains
+    )
+  }
+
+  testthat::with_mocked_bindings(
+    xgboost             = mock_xgboost,
+    xgb.importance      = mock_importance,
+    code,
+    .package = "xgboost"
+  )
+}
+
+#' Predict method for mocked xgboost booster
+#'
+#' @param object Mock booster produced by with_mocked_xgboost().
+#' @param new_data Numeric matrix of meta-features.
+#'
+#' @return Numeric vector of predictions.
+predict.mock_xgb_booster <- function(object, newdata, ...) {
+  offset <- object$predict_offset
+  if (is.null(offset)) offset <- 0
+
+  if (is.matrix(newdata) && nrow(newdata) > 0) {
+    base <- rowMeans(newdata)
+  } else if (is.vector(newdata)) {
+    base <- rep(mean(newdata), length(newdata))
+  } else {
+    base <- 0
+  }
+
+  as.numeric(base + offset)
+}
+
+#' Mock tune::collect_predictions for list-backed CV results
+#'
+#' Converts the list structure produced by create_mock_finalized_models() into
+#' a tibble so that ensemble tests can reuse the same fixtures.
+#'
+#' @param code Code to execute with mocked collect_predictions().
+#'
+#' @return Result of executing code with mocked tuning helpers.
+with_mocked_collect_predictions <- function(code) {
+  mock_collect <- function(x, ...) {
+    if (inherits(x, "data.frame")) {
+      tibble::as_tibble(x)
+    } else if (is.list(x) && !is.null(x$.predictions)) {
+      dplyr::bind_rows(x$.predictions)
+    } else {
+      stop("Unsupported object for collect_predictions mock", call. = FALSE)
+    }
+  }
+
+  testthat::with_mocked_bindings(
+    collect_predictions = mock_collect,
+    code,
+    .package = "tune"
+  )
+}
