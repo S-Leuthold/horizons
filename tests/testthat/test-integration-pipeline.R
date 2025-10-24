@@ -1,3 +1,9 @@
+library(testthat)
+library(horizons)
+
+build_recipe                <- horizons:::build_recipe
+define_model_specifications <- horizons:::define_model_specifications
+
 test_that("complete modeling pipeline works end-to-end", {
   # Create comprehensive test data
   test_data <- make_test_spectra(n_samples = 30, wavelengths = seq(600, 800, by = 10))
@@ -10,7 +16,7 @@ test_that("complete modeling pipeline works end-to-end", {
   recipe <- build_recipe(
     input_data = test_data,
     spectral_transformation = "snv_deriv1",
-    response_transformation = "Log Transformation",
+    response_transformation = "log",
     feature_selection_method = "correlation",
     covariate_selection = c("Clay", "pH"),
     covariate_data = covariate_data
@@ -55,9 +61,9 @@ test_that("pipeline handles different preprocessing combinations", {
   
   # Test different combinations
   combinations <- list(
-    list(spectral = "raw", response = "No Transformation", selection = "none"),
-    list(spectral = "snv", response = "Log Transformation", selection = "correlation"),
-    list(spectral = "deriv1", response = "Square Root Transformation", selection = "none")
+    list(spectral = "raw", response = "none", selection = "none"),
+    list(spectral = "snv", response = "log", selection = "correlation"),
+    list(spectral = "deriv1", response = "sqrt", selection = "none")
   )
   
   for (combo in combinations) {
@@ -99,7 +105,7 @@ test_that("pipeline works with real fixture data", {
   recipe <- build_recipe(
     input_data = test_data_subset,
     spectral_transformation = "snv",
-    response_transformation = "No Transformation",
+    response_transformation = "none",
     feature_selection_method = "none",
     covariate_selection = c("Clay"),
     covariate_data = covariate_data
@@ -153,7 +159,7 @@ test_that("pipeline handles edge cases gracefully", {
   recipe <- build_recipe(
     input_data = minimal_data,
     spectral_transformation = "raw",
-    response_transformation = "No Transformation", 
+    response_transformation = "none", 
     feature_selection_method = "none"
   )
   
@@ -206,7 +212,7 @@ test_that("pipeline handles missing values appropriately", {
   recipe <- build_recipe(
     input_data = test_data,
     spectral_transformation = "raw",
-    response_transformation = "No Transformation",
+    response_transformation = "none",
     feature_selection_method = "none"
   )
   
@@ -229,7 +235,7 @@ test_that("pipeline works with multiple models", {
   recipe <- build_recipe(
     input_data = test_data,
     spectral_transformation = "snv",
-    response_transformation = "No Transformation",
+    response_transformation = "none",
     feature_selection_method = "none"
   )
   
@@ -327,7 +333,7 @@ test_that("pipeline handles train/test split correctly", {
   recipe <- build_recipe(
     input_data = train_data,  # Use only training data for recipe prep
     spectral_transformation = "snv",
-    response_transformation = "No Transformation",
+    response_transformation = "none",
     feature_selection_method = "none"
   )
   

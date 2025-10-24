@@ -18,3 +18,20 @@
 # Other stuff you don't want tracked
 evaluation_results.qs
 CLAUDE.md
+tests/testthat/Response/
+
+# Temporary output directories
+output/
+scripts/
+tests/testthat/output/
+
+# Debug scripts (keep in archive/)
+debug_*.R
+
+# Session documentation (keep in archive/)
+SESSION_*.md
+NEXT_SESSION_*.md
+*_SUMMARY.md
+
+# Archive directory for development artifacts
+archive/

@@ -7,7 +7,6 @@
 .onLoad(libname, pkgname)
 }
 \description{
-Sets thread control and package options on package load to prevent
-uncontrolled threading in HPC environments.
+Minimal package initialization. Thread control is the user's responsibility.
 }
 \keyword{internal}

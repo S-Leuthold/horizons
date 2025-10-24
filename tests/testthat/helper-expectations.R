@@ -43,7 +43,7 @@ expect_valid_recipe <- function(recipe,
   }
   
   if (has_selection_step) {
-    selection_steps <- c("step_select_boruta", "step_select_correlation", "step_select_shap")
+    selection_steps <- c("step_select_boruta", "step_select_correlation")
     expect_true(any(selection_steps %in% step_classes),
                 info = paste("Recipe should include one of:", paste(selection_steps, collapse = ", ")))
   }
@@ -230,7 +230,7 @@ expect_valid_model_config <- function(config,
   
   # Check transformation values are valid
   if ("spectral_transformation" %in% config_names) {
-    valid_spectral <- c("raw", "sg", "snv", "deriv1", "deriv2", "snv_deriv1", "snv_deriv2", "msc_deriv1")
+    valid_spectral <- c("raw", "sg", "snv", "deriv1", "deriv2", "snv_deriv1", "snv_deriv2")
     if (is.data.frame(config)) {
       spectral_vals <- unique(config$spectral_transformation)
     } else {

@@ -7,12 +7,12 @@
 #' @param data A data frame containing columns for observed and predicted values.
 #' @param truth The column identifier for observed values (quoted or unquoted).
 #' @param estimate The column identifier for predicted values (quoted or unquoted).
-#' @param na_rm Logical. Should missing values be removed before computation? Default is \code{TRUE}.
-#' @param ... Additional arguments passed to \code{rmse_vec()}.
+#' @param na_rm Logical. Should missing values be removed before computation? Default is `TRUE`.
+#' @param ... Additional arguments passed to `rmse_vec()`.
 #'
 #' @return
-#' \code{rrmse_vec()} returns a numeric value (percentage).
-#' \code{rrmse} is a yardstick metric usable in \code{metric_set()} pipelines.
+#' `rrmse_vec()` returns a numeric value (percentage).
+#' `rrmse` is a yardstick metric usable in `metric_set()` pipelines.
 #'
 #' @details
 #' RRMSE is especially appropriate in spectral modeling contexts where different soil properties
@@ -20,7 +20,7 @@
 #' true values, it facilitates fairer performance comparisons across models and targets.
 #'
 #' @seealso
-#' \code{\link[yardstick]{rmse_vec}}, \code{\link[yardstick]{metric_set}}
+#' [yardstick::rmse_vec()], [yardstick::metric_set()]
 #'
 #' @examples
 #' rrmse_vec(
@@ -43,6 +43,9 @@
 #' @keywords internal
 #' @export
 
+## -----------------------------------------------------------------------------
+## rrmse_vec - Core Vector Function with Inline Implementation
+## -----------------------------------------------------------------------------
 
 rrmse_vec <- function(data,
                       truth,
@@ -64,6 +67,10 @@ rrmse_vec <- function(data,
     ...
   )
 }
+
+## -----------------------------------------------------------------------------
+## rrmse - Metric Constructor
+## -----------------------------------------------------------------------------
 
 #' @rdname rrmse_vec
 #' @export
