@@ -1,0 +1,1038 @@
+#' Library-Based Prediction Data Infrastructure
+#'
+#' @description
+#' Functions for loading, preprocessing, and transforming reference spectral libraries
+#' (OSSL/KSSL) for library-based prediction mode. Provides standardized property mappings,
+#' method harmonization, and PCA-based dimensionality reduction for clustering and modeling.
+#'
+#' @details
+#' This module supports the Library Prediction Service, enabling predictions for standard
+#' soil properties without requiring user-provided training data. The library is preprocessed
+#' once, clustered, and used to train property-specific models at prediction time.
+#'
+#' @importFrom cli cli_text cli_alert_info cli_alert_success cli_alert_warning cli_abort style_bold
+#' @importFrom dplyr filter select mutate rename bind_cols slice_sample
+#' @importFrom tibble tibble as_tibble
+#' @importFrom qs qread qread_url qsave
+#' @importFrom prospectr savitzkyGolay standardNormalVariate
+#' @importFrom FactoMineR PCA
+#' @importFrom stats predict
+#' @importFrom tools R_user_dir
+#' @keywords internal
+
+## -----------------------------------------------------------------------------
+## Section 1: Property Mapping and Validation
+## -----------------------------------------------------------------------------
+
+#' Get Library Property Mapping
+#'
+#' @description
+#' Returns standardized mapping from horizons property names to OSSL variable names
+#' for the 15 properties supported in library-based prediction mode. Includes
+#' laboratory method metadata for method harmonization.
+#'
+#' @return A tibble with columns:
+#' \describe{
+#'   \item{property}{Horizons standard name (e.g., "clay", "ph", "total_carbon")}
+#'   \item{analyte}{Full OSSL analyte description with ISO method}
+#'   \item{ossl_name}{OSSL internal variable name}
+#'   \item{lab_method}{Laboratory method/extraction used}
+#'   \item{target_unit}{Expected units for the property}
+#'   \item{description}{Human-readable description}
+#' }
+#'
+#' @section Properties Supported:
+#' - Texture: clay, sand, silt
+#' - Carbon: total_carbon, oc (organic C), carbonate (inorganic C)
+#' - Nitrogen: total_nitrogen
+#' - Chemistry: ph, cec
+#' - Base cations: calcium, magnesium, potassium, sodium
+#' - Major elements: iron_total, aluminum_total
+#'
+#' @keywords internal
+get_library_property_mapping <- function() {
+
+  tibble::tibble(
+    ## Horizons names ---------------------------------------------------------
+    property = c(
+      ## Texture
+      "clay",
+      "sand",
+      "silt",
+
+      ## Carbon forms
+      "total_carbon",
+      "oc",
+      "carbonate",
+
+      ## Nitrogen
+      "total_nitrogen",
+
+      ## pH and CEC
+      "ph",
+      "cec",
+
+      ## Base cations (NH4OAc extractable)
+      "calcium",
+      "magnesium",
+      "potassium",
+      "sodium",
+
+      ## Major elements (dithionite extractable)
+      "iron_total",
+      "aluminum_total"
+    ),
+
+    ## OSSL analyte descriptions ---------------------------------------------
+    analyte = c(
+      ## Texture
+      "Clay, iso 11277",
+      "Sand, Total, iso 11277",
+      "Silt, Total, iso 11277",
+
+      ## Carbon
+      "Carbon, Total, usda a622",
+      "Organic Carbon, iso 10694",
+      "Carbonate, iso 10693",
+
+      ## Nitrogen
+      "Nitrogen, Total NCS, iso 11261",
+
+      ## pH and CEC
+      "pH, 1:1 Soil-Water Suspension, iso 10390",
+      "CEC, pH 7.0, iso 11260",
+
+      ## Base cations
+      "Calcium, Extractable, NH4OAc",
+      "Magnesium, Extractable, NH4OAc, 2M KCl displacement",
+      "Potassium, Extractable, NH4OAc, 2M KCl displacement",
+      "Sodium, Extractable, NH4OAc, 2M KCl displacement",
+
+      ## Major elements
+      "Iron, Dithionite Extractable (Pedogenic), usda a66",
+      "Aluminum, Dithionite Extractable (Pedogenic), usda a65"
+    ),
+
+    ## OSSL internal variable names ------------------------------------------
+    ossl_name = c(
+      ## Texture
+      "clay.tot_usda.a334_w.pct",
+      "sand.tot_usda.c60_w.pct",
+      "silt.tot_usda.c62_w.pct",
+
+      ## Carbon
+      "c.tot_usda.a622_w.pct",
+      "oc_usda.c729_w.pct",
+      "caco3_usda.a54_w.pct",
+
+      ## Nitrogen
+      "n.tot_usda.a623_w.pct",
+
+      ## pH and CEC
+      "ph.h2o_usda.a268_index",
+      "cec_usda.a723_cmolc.kg",
+
+      ## Base cations
+      "ca.ext_usda.a722_cmolc.kg",
+      "mg.ext_usda.a724_cmolc.kg",
+      "k.ext_usda.a725_cmolc.kg",
+      "na.ext_usda.a726_cmolc.kg",
+
+      ## Major elements
+      "fe.dith_usda.a66_w.pct",
+      "al.dith_usda.a65_w.pct"
+    ),
+
+    ## Laboratory methods ----------------------------------------------------
+    lab_method = c(
+      ## Texture
+      "Pipette method (iso 11277)",
+      "Pipette method (iso 11277)",
+      "Pipette method (iso 11277)",
+
+      ## Carbon
+      "Dry combustion (usda a622)",
+      "Walkley-Black / Dry combustion (iso 10694)",
+      "Acid neutralization (iso 10693)",
+
+      ## Nitrogen
+      "Dry combustion NCS (iso 11261)",
+
+      ## pH and CEC
+      "1:1 H2O suspension (iso 10390)",
+      "NH4OAc pH 7.0 (iso 11260)",
+
+      ## Base cations (all same method)
+      "NH4OAc extraction",
+      "NH4OAc extraction with KCl",
+      "NH4OAc extraction with KCl",
+      "NH4OAc extraction with KCl",
+
+      ## Major elements
+      "Dithionite-citrate extraction (usda a66)",
+      "Dithionite-citrate extraction (usda a65)"
+    ),
+
+    ## Target units ----------------------------------------------------------
+    target_unit = c(
+      ## Texture
+      "g/kg",
+      "g/kg",
+      "g/kg",
+
+      ## Carbon
+      "% wt",
+      "g/kg",
+      "g/kg",
+
+      ## Nitrogen
+      "g/kg",
+
+      ## pH and CEC
+      "unitless",
+      "cmolc/kg",
+
+      ## Base cations
+      "cmolc/kg",
+      "cmolc/kg",
+      "cmolc/kg",
+      "cmolc/kg",
+
+      ## Major elements
+      "% wt",
+      "% wt"
+    ),
+
+    ## Descriptions ----------------------------------------------------------
+    description = c(
+      ## Texture
+      "Clay content by particle size analysis",
+      "Sand content by particle size analysis",
+      "Silt content by particle size analysis",
+
+      ## Carbon
+      "Total carbon content (organic + inorganic)",
+      "Organic carbon content",
+      "Carbonate content (inorganic C)",
+
+      ## Nitrogen
+      "Total nitrogen content",
+
+      ## pH and CEC
+      "Soil pH in 1:1 water suspension",
+      "Cation exchange capacity at pH 7.0",
+
+      ## Base cations
+      "Exchangeable calcium",
+      "Exchangeable magnesium",
+      "Exchangeable potassium",
+      "Exchangeable sodium",
+
+      ## Major elements
+      "Total pedogenic iron (dithionite extractable)",
+      "Total pedogenic aluminum (dithionite extractable)"
+    )
+  )
+}
+
+## -----------------------------------------------------------------------------
+## Section 2: Raw OSSL Data Loading
+## -----------------------------------------------------------------------------
+
+#' Load Raw OSSL Data for Property
+#'
+#' @description
+#' Downloads (if needed) and loads OSSL lab measurements and MIR spectra from cache,
+#' joins them, and extracts data for the requested property. Raw files are cached
+#' globally and reused across properties for efficiency.
+#'
+#' @param property Character. Property name from LIBRARY_PROPERTIES
+#' @param cache_dir Character. Cache directory path. Default: NULL (uses R_user_dir)
+#' @param max_samples Integer. Maximum samples to return (for testing). Default: NULL (all)
+#' @param verbose Logical. Print progress messages? Default: TRUE
+#'
+#' @return Tibble with columns:
+#' \describe{
+#'   \item{sample_id}{OSSL sample identifier}
+#'   \item{<property_column>}{Property measurement (name from ossl_name)}
+#'   \item{X<wavenumber>}{Spectral absorbance columns (e.g., X600, X602, ...)}
+#' }
+#' Returns NULL if loading fails.
+#'
+#' @keywords internal
+load_ossl_raw <- function(property,
+                          cache_dir   = NULL,
+                          max_samples = NULL,
+                          verbose     = TRUE) {
+
+  ## ---------------------------------------------------------------------------
+  ## Step 2.1: Validate property
+  ## ---------------------------------------------------------------------------
+
+  if (!property %in% LIBRARY_PROPERTIES) {
+    cli::cli_abort("Property '{property}' not in LIBRARY_PROPERTIES",
+                   "i" = "Supported: {paste(LIBRARY_PROPERTIES, collapse = ', ')}")
+  }
+
+  ## Get property metadata -------------------------------------------------
+
+  get_library_property_mapping() %>%
+    dplyr::filter(property == !!property) -> prop_mapping
+
+  if (nrow(prop_mapping) != 1) cli::cli_abort("Property '{property}' not found in mapping")
+
+  ossl_column <- prop_mapping$ossl_name
+
+  ## ---------------------------------------------------------------------------
+  ## Step 2.2: Setup cache directory
+  ## ---------------------------------------------------------------------------
+
+  if (is.null(cache_dir)) {
+
+    cache_dir <- tools::R_user_dir("horizons", "cache")
+
+  }
+
+  ## Create cache directory if needed ------------------------------------------
+
+  dir.create(cache_dir, recursive = TRUE, showWarnings = FALSE)
+
+  ## Define cache file paths ---------------------------------------------------
+
+  lab_file <- file.path(cache_dir, "ossl_lab_data.qs")
+  mir_file <- file.path(cache_dir, "ossl_mir_raw.qs")
+
+  ## ---------------------------------------------------------------------------
+  ## Step 2.3: Download/load OSSL lab data
+  ## ---------------------------------------------------------------------------
+
+  if (verbose) cli::cli_text("│")
+  if (verbose) cli::cli_text("├─ {cli::style_bold('Loading OSSL lab measurements')}...")
+
+  ## Check if cached -----------------------------------------------------------
+
+  if (file.exists(lab_file)) {
+
+    if (verbose) cli::cli_text("│  ├─ Found cached lab data")
+
+    safely_execute(
+      qs::qread(lab_file),
+      error_message = "Failed to read cached lab data"
+    ) %>%
+      handle_results(
+        error_title = "Cache read failed",
+        error_hints = c("Cache may be corrupted", "Try deleting cache and re-downloading"),
+        abort_on_null = FALSE
+      ) -> lab_data
+
+    if (is.null(lab_data)) return(NULL)
+
+  } else {
+
+    if (verbose) cli::cli_text("│  ├─ Downloading from OSSL server...")
+
+    safely_execute(
+      qs::qread_url("https://storage.googleapis.com/soilspec4gg-public/ossl_soillab_L1_v1.2.qs"),
+      error_message = "Failed to download OSSL lab data"
+    ) %>%
+      handle_results(
+        error_title = "OSSL download failed",
+        error_hints = c("Check internet connection", "OSSL server may be down"),
+        abort_on_null = FALSE
+      ) -> lab_data
+
+    if (is.null(lab_data)) return(NULL)
+
+    ## Cache for future use ---------------------------------------------------
+
+    qs::qsave(lab_data, lab_file)
+    if (verbose) cli::cli_text("│  ├─ Cached to {basename(lab_file)}")
+
+  }
+
+  if (verbose) cli::cli_text("│  └─ Lab data: {nrow(lab_data)} samples")
+
+  ## ---------------------------------------------------------------------------
+  ## Step 2.4: Download/load OSSL MIR spectra
+  ## ---------------------------------------------------------------------------
+
+  if (verbose) cli::cli_text("│")
+  if (verbose) cli::cli_text("├─ {cli::style_bold('Loading OSSL MIR spectra')}...")
+
+  if (file.exists(mir_file)) {
+
+    if (verbose) cli::cli_text("│  ├─ Found cached MIR data")
+
+    safely_execute(
+      qs::qread(mir_file),
+      error_message = "Failed to read cached MIR data"
+    ) %>%
+      handle_results(
+        error_title = "MIR cache read failed",
+        error_hints = c("Cache may be corrupted", "Delete cache and re-download"),
+        abort_on_null = FALSE
+      ) -> mir_data
+
+    if (is.null(mir_data)) return(NULL)
+
+  } else {
+
+    if (verbose) cli::cli_text("│  ├─ Downloading from OSSL server...")
+
+    safely_execute(
+      qs::qread_url("https://storage.googleapis.com/soilspec4gg-public/ossl_mir_L0_v1.2.qs"),
+      error_message = "Failed to download OSSL MIR data"
+    ) %>%
+      handle_results(
+        error_title = "OSSL MIR download failed",
+        error_hints = c("Check internet connection", "OSSL server may be down"),
+        abort_on_null = FALSE
+      ) -> mir_data
+
+    if (is.null(mir_data)) return(NULL)
+
+    ## Cache for future use ---------------------------------------------------
+
+    qs::qsave(mir_data, mir_file)
+    if (verbose) cli::cli_text("│  ├─ Cached to {basename(mir_file)}")
+
+  }
+
+  if (verbose) cli::cli_text("│  └─ MIR spectra: {nrow(mir_data)} samples")
+
+  ## ---------------------------------------------------------------------------
+  ## Step 2.5: Extract property column and join with spectra
+  ## ---------------------------------------------------------------------------
+
+  if (verbose) cli::cli_text("│")
+  if (verbose) cli::cli_text("├─ {cli::style_bold('Joining lab data with spectra')}...")
+
+  ## Check if property column exists ---------------------------------------
+
+  if (!ossl_column %in% names(lab_data)) {
+    cli::cli_abort("OSSL column '{ossl_column}' not found in lab data",
+                   "i" = "Check property mapping or OSSL version compatibility")
+  }
+
+  ## Select property column + sample ID ----------------------------------------
+
+  lab_data %>%
+    dplyr::select(id.layer_uuid_txt, !!ossl_column) %>%
+    dplyr::filter(!is.na(!!rlang::sym(ossl_column))) -> lab_subset
+
+  if (verbose) cli::cli_text("│  ├─ {nrow(lab_subset)} samples with {property} measurements")
+
+  ## Join with MIR spectra -----------------------------------------------------
+
+  mir_data %>%
+    dplyr::inner_join(lab_subset, by = "id.layer_uuid_txt") %>%
+    dplyr::rename(sample_id = id.layer_uuid_txt) -> joined_data
+
+  if (verbose) cli::cli_text("│  ├─ Joined data: {nrow(joined_data)} samples")
+
+  ## Rename MIR columns to X<wavenumber> format --------------------------------
+
+  spectral_cols <- grep("^scan_mir\\.[0-9]+_abs$", names(joined_data), value = TRUE)
+
+  if (length(spectral_cols) > 0) {
+
+    new_names <- gsub("scan_mir\\.", "X", spectral_cols)
+    new_names <- gsub("_abs$", "", new_names)
+
+    names(joined_data)[names(joined_data) %in% spectral_cols] <- new_names
+
+    if (verbose) cli::cli_text("│  └─ Renamed {length(spectral_cols)} spectral columns to X<wn> format")
+
+  }
+
+  ## Free memory from large intermediate objects -------------------------------
+
+  rm(lab_data, mir_data, lab_subset)
+  gc(verbose = FALSE)
+
+  ## ---------------------------------------------------------------------------
+  ## Step 2.6: Apply max_samples limit if specified (for testing)
+  ## ---------------------------------------------------------------------------
+
+  if (!is.null(max_samples) && max_samples < nrow(joined_data)) {
+
+    if (verbose) cli::cli_text("│")
+    if (verbose) cli::cli_text("├─ {cli::style_bold('Sampling subset for testing')}...")
+
+    joined_data %>%
+      dplyr::slice_sample(n = max_samples) -> joined_data
+
+    if (verbose) cli::cli_text("│  └─ Sampled {max_samples} samples")
+
+  }
+
+  ## ---------------------------------------------------------------------------
+  ## Step 2.7: Return result
+  ## ---------------------------------------------------------------------------
+
+  return(joined_data)
+
+}
+
+## -----------------------------------------------------------------------------
+## Section 3: Spectral Preprocessing for Clustering
+## -----------------------------------------------------------------------------
+
+#' Preprocess Library MIR Spectra for Clustering
+#'
+#' @description
+#' Applies Standard Normal Variate (SNV) transformation to library spectra for
+#' clustering space preparation. Optionally removes water interference bands.
+#' This preprocessing creates the stable clustering space - model-specific
+#' preprocessing happens separately during training.
+#'
+#' @param spectral_data Data frame or tibble with spectral columns (X<wavenumber>)
+#' @param remove_water_bands Logical. Remove H2O interference regions? Default: FALSE
+#' @param water_regions List. Wavenumber ranges to exclude. Default: list(c(3600, 3000), c(1650, 1600))
+#' @param verbose Logical. Print progress? Default: TRUE
+#'
+#' @return Tibble with preprocessed spectra (SNV-transformed, water bands optionally removed)
+#' Returns NULL if preprocessing fails.
+#'
+#' @details
+#' Preprocessing pipeline for clustering space:
+#' 1. Remove water bands (if enabled) - regions where H2O absorbs strongly
+#' 2. Apply SNV transformation - normalize to mean=0, sd=1 per spectrum
+#'
+#' SNV removes multiplicative scatter effects while preserving spectral shape,
+#' making it ideal for creating stable clusters. Derivatives and other transforms
+#' are applied per-model during training.
+#'
+#' @keywords internal
+preprocess_library_spectra <- function(spectral_data,
+                                       remove_water_bands = FALSE,
+                                       water_regions      = list(c(3600, 3000), c(1650, 1600)),
+                                       verbose            = TRUE) {
+
+  ## ---------------------------------------------------------------------------
+  ## Step 3.1: Identify spectral columns
+  ## ---------------------------------------------------------------------------
+
+  ## Extract wavenumber columns (start with X followed by numbers) -------------
+
+  spectral_cols <- grep("^X[0-9]", names(spectral_data), value = TRUE)
+
+  if (length(spectral_cols) == 0) {
+
+    cli::cli_warn("No spectral columns found (expected X<wavenumber> format)")
+    return(NULL)
+
+  }
+
+  ## Extract non-spectral columns (sample_id, property columns, etc.) ----------
+
+  non_spectral_cols <- setdiff(names(spectral_data), spectral_cols)
+
+  ## Extract spectra as matrix -------------------------------------------------
+
+  spectra_matrix <- as.matrix(spectral_data[, spectral_cols])
+
+  ## ---------------------------------------------------------------------------
+  ## Step 3.2: Remove water interference bands (optional)
+  ## ---------------------------------------------------------------------------
+
+  if (remove_water_bands) {
+
+    if (verbose) cli::cli_text("│")
+    if (verbose) cli::cli_text("├─ {cli::style_bold('Removing water bands')} [EXPERIMENTAL]...")
+
+    ## Extract wavenumbers from column names -----------------------------------
+
+    wavenumbers <- as.numeric(gsub("X", "", spectral_cols))
+
+    ## Identify columns to keep (outside water regions) ------------------------
+
+    keep_cols <- rep(TRUE, length(wavenumbers))
+
+    for (region in water_regions) {
+
+      in_region <- wavenumbers >= region[2] & wavenumbers <= region[1]
+      keep_cols <- keep_cols & !in_region
+
+    }
+
+    n_removed <- sum(!keep_cols)
+
+    if (verbose) cli::cli_text("│  ├─ Removing {n_removed} wavenumbers in H2O regions")
+
+    ## Filter spectra matrix and column names ----------------------------------
+
+    spectra_matrix <- spectra_matrix[, keep_cols, drop = FALSE]
+    spectral_cols  <- spectral_cols[keep_cols]
+
+    if (verbose) cli::cli_text("│  └─ Retained {ncol(spectra_matrix)} wavenumbers")
+
+  }
+
+  ## ---------------------------------------------------------------------------
+  ## Step 3.3: Apply SNV transformation
+  ## ---------------------------------------------------------------------------
+
+  if (verbose) cli::cli_text("│")
+  if (verbose) cli::cli_text("├─ {cli::style_bold('Applying SNV transformation')}...")
+
+  ## Apply SNV to each spectrum (row-wise normalization) ----------------------
+
+  safely_execute(
+    prospectr::standardNormalVariate(spectra_matrix),
+    error_message = "SNV transformation failed"
+  ) %>%
+    handle_results(
+      error_title = "SNV transformation failed",
+      error_hints = c("Check for NaN/Inf in spectra", "Verify spectra have variance"),
+      abort_on_null = FALSE
+    ) -> spectra_snv
+
+  if (is.null(spectra_snv)) return(NULL)
+
+  ## Handle edge case: zero variance creates NaN --------------------------------
+
+  if (any(is.nan(spectra_snv)) || any(is.infinite(spectra_snv))) {
+
+    cli::cli_warn("NaN/Inf detected after SNV - replacing with zeros")
+    spectra_snv[is.nan(spectra_snv) | is.infinite(spectra_snv)] <- 0
+
+  }
+
+  if (verbose) cli::cli_text("│  └─ SNV complete: {nrow(spectra_snv)} spectra normalized")
+
+  ## ---------------------------------------------------------------------------
+  ## Step 3.4: Reconstruct tibble with preprocessed spectra
+  ## ---------------------------------------------------------------------------
+
+  ## Convert back to data frame ------------------------------------------------
+
+  spectra_df <- as.data.frame(spectra_snv)
+  colnames(spectra_df) <- spectral_cols
+
+  ## Add back non-spectral columns ---------------------------------------------
+
+  if (length(non_spectral_cols) > 0) {
+
+    dplyr::bind_cols(
+      spectral_data[, non_spectral_cols, drop = FALSE],
+      spectra_df
+    ) -> result
+
+  } else {
+
+    result <- tibble::as_tibble(spectra_df)
+
+  }
+
+  ## ---------------------------------------------------------------------------
+  ## Step 3.5: Return result
+  ## ---------------------------------------------------------------------------
+
+  return(result)
+
+}
+
+## -----------------------------------------------------------------------------
+
+## -----------------------------------------------------------------------------
+## Section 4: PCA Transformation for Clustering Space  
+## -----------------------------------------------------------------------------
+## Section 4: PCA Transformation for Clustering Space
+## -----------------------------------------------------------------------------
+
+#' Perform PCA on Library Spectra
+#'
+#' @description
+#' Applies Principal Component Analysis to preprocessed library spectra to create
+#' the clustering space. Retains components explaining specified variance threshold
+#' (default 99%). This PCA model is used to project unknowns into the same space.
+#'
+#' @param library_data Tibble with preprocessed spectral columns
+#' @param variance_threshold Numeric. Cumulative variance to retain (0-1). Default: 0.99
+#' @param verbose Logical. Print progress? Default: TRUE
+#'
+#' @return List with components:
+#' \describe{
+#'   \item{pca_model}{FactoMineR::PCA object for projecting new samples}
+#'   \item{pca_scores}{Matrix of PCA scores (n_samples × n_components)}
+#'   \item{n_components}{Integer, number of components retained}
+#'   \item{variance_explained}{Numeric, actual cumulative variance of retained components}
+#' }
+#' Returns NULL if PCA fails.
+#'
+#' @keywords internal
+perform_pca_on_library <- function(library_data,
+                                   variance_threshold = 0.99,
+                                   verbose            = TRUE) {
+
+  ## ---------------------------------------------------------------------------
+  ## Step 4.1: Extract spectral matrix
+  ## ---------------------------------------------------------------------------
+
+  ## Identify spectral columns -------------------------------------------------
+
+  spectral_cols <- grep("^X[0-9]", names(library_data), value = TRUE)
+
+  if (length(spectral_cols) == 0) {
+
+    cli::cli_warn("No spectral columns found for PCA")
+    return(NULL)
+
+  }
+
+  ## Extract as matrix ---------------------------------------------------------
+
+  spectra_matrix <- as.matrix(library_data[, spectral_cols])
+
+  ## ---------------------------------------------------------------------------
+  ## Step 4.2: Perform PCA
+  ## ---------------------------------------------------------------------------
+
+  if (verbose) cli::cli_text("│")
+  if (verbose) cli::cli_text("├─ {cli::style_bold('Training PCA on library')}...")
+
+  ## Run PCA with FactoMineR ---------------------------------------------------
+
+  safely_execute(
+    FactoMineR::PCA(spectra_matrix,
+                    ncp    = min(100, ncol(spectra_matrix) - 1),  # Max components
+                    scale  = FALSE,  # Already SNV-normalized
+                    graph  = FALSE),
+    error_message = "PCA training failed"
+  ) %>%
+    handle_results(
+      error_title = "PCA training failed",
+      error_hints = c("Check for constant/zero variance columns", "Verify sufficient samples"),
+      abort_on_null = FALSE
+    ) -> pca_model
+
+  if (is.null(pca_model)) return(NULL)
+
+  ## ---------------------------------------------------------------------------
+  ## Step 4.3: Determine number of components for variance threshold
+  ## ---------------------------------------------------------------------------
+
+  ## Calculate cumulative variance explained -----------------------------------
+
+  eigenvalues <- pca_model$eig[, 1]
+  cum_var     <- cumsum(eigenvalues) / sum(eigenvalues)
+
+  ## Find number of components to reach threshold ------------------------------
+
+  n_components <- which(cum_var >= variance_threshold)[1]
+
+  if (is.na(n_components)) {
+
+    cli::cli_warn("Could not reach {variance_threshold*100}% variance threshold")
+    n_components <- length(cum_var)
+
+  }
+
+  variance_explained <- cum_var[n_components]
+
+  if (verbose) {
+    cli::cli_text("│  ├─ Variance threshold: {variance_threshold*100}%")
+    cli::cli_text("│  ├─ Components selected: {n_components}")
+    cli::cli_text("│  └─ Variance explained: {round(variance_explained*100, 2)}%")
+  }
+
+  ## ---------------------------------------------------------------------------
+  ## Step 4.4: Extract PCA scores
+  ## ---------------------------------------------------------------------------
+
+  ## Get scores for selected components ----------------------------------------
+
+  n_components_available <- ncol(pca_model$ind$coord)
+  n_components_final     <- min(n_components, n_components_available)
+
+  pca_scores <- pca_model$ind$coord[, 1:n_components_final, drop = FALSE]
+
+  ## ---------------------------------------------------------------------------
+  ## Step 4.5: Return result
+  ## ---------------------------------------------------------------------------
+
+  list(pca_model          = pca_model,
+       pca_scores         = pca_scores,
+       n_components       = n_components_final,
+       variance_explained = variance_explained) -> result
+
+  return(result)
+
+}
+
+#' Project Unknowns to Library PCA Space
+#'
+#' @description
+#' Projects new (unknown) spectra into the library PCA space using a trained
+#' PCA model. Unknowns must have same preprocessing and wavenumber grid as
+#' the library data used to train the PCA.
+#'
+#' @param new_data Tibble with preprocessed spectral columns (same grid as library)
+#' @param pca_model FactoMineR::PCA object from perform_pca_on_library()
+#' @param verbose Logical. Print progress? Default: TRUE
+#'
+#' @return Matrix of PCA scores for unknown samples (n_samples × n_components)
+#' Returns NULL if projection fails.
+#'
+#' @keywords internal
+project_to_library_pca <- function(new_data,
+                                   pca_model,
+                                   verbose = TRUE) {
+
+  ## ---------------------------------------------------------------------------
+  ## Step 4.6: Extract spectral matrix from unknowns
+  ## ---------------------------------------------------------------------------
+
+  ## Identify spectral columns -------------------------------------------------
+
+  spectral_cols <- grep("^X[0-9]", names(new_data), value = TRUE)
+
+  if (length(spectral_cols) == 0) {
+
+    cli::cli_warn("No spectral columns found in unknown data")
+    return(NULL)
+
+  }
+
+  ## Extract as matrix ---------------------------------------------------------
+
+  spectra_matrix <- as.matrix(new_data[, spectral_cols])
+
+  ## ---------------------------------------------------------------------------
+  ## Step 4.7: Project to PCA space
+  ## ---------------------------------------------------------------------------
+
+  if (verbose) cli::cli_text("│")
+  if (verbose) cli::cli_text("├─ {cli::style_bold('Projecting unknowns to PCA space')}...")
+
+  ## Use predict method from FactoMineR ----------------------------------------
+
+  safely_execute(
+    stats::predict(pca_model, newdata = spectra_matrix),
+    error_message = "PCA projection failed"
+  ) %>%
+    handle_results(
+      error_title = "PCA projection failed",
+      error_hints = c("Check wavenumber grid matches library", "Verify preprocessing matches library"),
+      abort_on_null = FALSE
+    ) -> pca_projected
+
+  if (is.null(pca_projected)) return(NULL)
+
+  ## Extract coordinate matrix -------------------------------------------------
+
+  pca_scores <- pca_projected$coord
+
+  if (verbose) cli::cli_text("│  └─ Projected {nrow(pca_scores)} samples to {ncol(pca_scores)} components")
+
+  ## ---------------------------------------------------------------------------
+  ## Step 4.8: Return result
+  ## ---------------------------------------------------------------------------
+
+  return(pca_scores)
+
+}
+
+## -----------------------------------------------------------------------------
+## Section 5: Main Orchestrator - Complete Pipeline
+## -----------------------------------------------------------------------------
+
+#' Load and Process Spectral Library Data
+#'
+#' @description  
+#' Loads reference spectral library data (OSSL/KSSL) for a given soil property,
+#' applies method harmonization, preprocessing, and PCA transformation. This is the
+#' primary data preparation function for library-based prediction mode.
+#'
+#' @details
+#' The function executes the following pipeline:
+#' 1. Load raw OSSL data for the specified property
+#' 2. Preprocess MIR spectra (optional water band removal + SNV)
+#' 3. Perform PCA to create clustering space
+#' 4. Clean up memory after each stage
+#'
+#' All intermediate objects are aggressively cleaned to maintain <500MB overhead.
+#'
+#' Clustering space uses minimal preprocessing (SNV only) to preserve flexibility.
+#' Model-specific preprocessing (derivatives, etc.) happens during training.
+#'
+#' @param property Character. Property name from LIBRARY_PROPERTIES
+#' @param variance_threshold Numeric. Cumulative variance to retain in PCA (0-1). Default: 0.99
+#' @param remove_water_bands Logical. Remove H2O interference regions? Default: FALSE.
+#'   Experimental feature - validate impact before production use.
+#' @param water_regions List. Wavenumber ranges to remove if remove_water_bands = TRUE.
+#'   Default: list(c(3600, 3000), c(1650, 1600))
+#' @param max_samples Integer. Maximum samples to load (for testing). Default: NULL (all).
+#' @param cache_dir Character. Cache directory for OSSL downloads. Default: NULL (user dir).
+#' @param verbose Logical. Print tree-style progress messages? Default: TRUE
+#'
+#' @return A list with components:
+#' \describe{
+#'   \item{library_data}{Tibble with preprocessed spectral data and property measurements}
+#'   \item{pca_model}{PCA transformation object for projecting new samples}
+#'   \item{pca_scores}{Matrix of PCA scores for library samples}
+#'   \item{n_components}{Integer, number of PCA components retained}
+#'   \item{n_samples}{Integer, number of library samples}
+#'   \item{property}{Character, property name}
+#'   \item{variance_explained}{Numeric, cumulative variance in retained components}
+#' }
+#' Returns NULL if any stage fails.
+#'
+#' @section Memory Management:
+#' The function uses aggressive cleanup:
+#' - rm() + gc() after raw loading
+#' - rm() + gc() after preprocessing
+#' - rm() + gc() after PCA
+#' Target: <500MB overhead regardless of library size
+#'
+#' @examples
+#' \dontrun{
+#' # Load and process clay data
+#' clay_lib <- get_processed_library_data("clay")
+#'
+#' # With custom settings
+#' oc_lib <- get_processed_library_data(
+#'   property = "oc",
+#'   variance_threshold = 0.95,
+#'   remove_water_bands = TRUE,
+#'   verbose = TRUE
+#' )
+#' }
+#'
+#' @keywords internal
+get_processed_library_data <- function(property,
+                                       variance_threshold = 0.99,
+                                       remove_water_bands = FALSE,
+                                       water_regions      = list(c(3600, 3000), c(1650, 1600)),
+                                       max_samples        = NULL,
+                                       cache_dir          = NULL,
+                                       verbose            = TRUE) {
+
+  if (verbose) {
+    cli::cli_text("")
+    cli::cli_text("{cli::style_bold('Processing library data for:')} {property}")
+  }
+
+  ## ---------------------------------------------------------------------------
+  ## Step 5.1: Load raw OSSL data
+  ## ---------------------------------------------------------------------------
+
+  ## Load with orchestrator-level error handling -------------------------------
+
+  load_ossl_raw(property    = property,
+                cache_dir   = cache_dir,
+                max_samples = max_samples,
+                verbose     = verbose) -> raw_data
+
+  ## Orchestrator aborts on NULL (not recoverable) -----------------------------
+
+  if (is.null(raw_data)) {
+    cli::cli_abort("Failed to load OSSL data for {property}",
+                   "i" = "Check logs above for details")
+  }
+
+  n_samples_raw <- nrow(raw_data)
+
+  ## ---------------------------------------------------------------------------
+  ## Step 5.2: Preprocess spectra for clustering
+  ## ---------------------------------------------------------------------------
+
+  preprocess_library_spectra(spectral_data      = raw_data,
+                             remove_water_bands = remove_water_bands,
+                             water_regions      = water_regions,
+                             verbose            = verbose) -> preprocessed_data
+
+  if (is.null(preprocessed_data)) {
+    cli::cli_abort("Failed to preprocess spectra for {property}",
+                   "i" = "Check logs above for details")
+  }
+
+  ## Free memory from raw data -------------------------------------------------
+
+  rm(raw_data)
+  gc(verbose = FALSE)
+
+  if (verbose) {
+    cli::cli_text("│")
+    cli::cli_text("├─ {cli::style_bold('Memory freed')}: raw data")
+  }
+
+  ## ---------------------------------------------------------------------------
+  ## Step 5.3: Perform PCA
+  ## ---------------------------------------------------------------------------
+
+  perform_pca_on_library(library_data       = preprocessed_data,
+                        variance_threshold = variance_threshold,
+                        verbose            = verbose) -> pca_result
+
+  if (is.null(pca_result)) {
+    cli::cli_abort("Failed to perform PCA on {property} library",
+                   "i" = "Check logs above for details")
+  }
+
+  ## Free memory from preprocessed data (keep only PCA) ------------------------
+
+  rm(preprocessed_data)
+  gc(verbose = FALSE)
+
+  if (verbose) {
+    cli::cli_text("│")
+    cli::cli_text("├─ {cli::style_bold('Memory freed')}: preprocessed spectra")
+  }
+
+  ## ---------------------------------------------------------------------------
+  ## Step 5.4: Assemble final result
+  ## ---------------------------------------------------------------------------
+
+  list(library_data        = NULL,  # Raw data not returned (memory optimization)
+       pca_model           = pca_result$pca_model,
+       pca_scores          = pca_result$pca_scores,
+       n_components        = pca_result$n_components,
+       n_samples           = n_samples_raw,
+       property            = property,
+       variance_explained  = pca_result$variance_explained) -> result
+
+  if (verbose) {
+    cli::cli_text("│")
+    cli::cli_text("└─ {cli::style_bold('Pipeline complete')}")
+    cli::cli_text("")
+    cli::cli_text("   Property: {property}")
+    cli::cli_text("   Samples: {n_samples_raw}")
+    cli::cli_text("   Components: {pca_result$n_components}")
+    cli::cli_text("   Variance: {round(pca_result$variance_explained*100, 2)}%")
+  }
+
+  ## ---------------------------------------------------------------------------
+  ## Step 5.5: Return result
+  ## ---------------------------------------------------------------------------
+
+  return(result)
+
+}
+## Section 2.5: Method Harmonization (Stub for v1.0)
+## -----------------------------------------------------------------------------
+
+#' Filter Library Data by Laboratory Method
+#'
+#' @description
+#' Filters OSSL library data to samples measured with a specific laboratory method.
+#' Method harmonization reduces variance from different measurement protocols.
+#'
+#' @param data Tibble with OSSL data
+#' @param property Character. Property name
+#' @param target_method Character. Method to filter for. Default: "default"
+#'
+#' @return Filtered tibble (currently returns all data - full implementation in Phase 1.2)
+#'
+#' @keywords internal
+filter_by_method <- function(data,
+                             property,
+                             target_method = "default") {
+
+  ## TODO: Implement method filtering in Phase 1, Milestone 1.2
+  ## For now, return all data (no filtering)
+
+  return(data)
+
+}

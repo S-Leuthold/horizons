@@ -128,6 +128,7 @@ Collate:
     'models-specifications.R'
     'models-recipes.R'
     'covariates-data.R'
+    'library-data.R'
     'covariates-climate.R'
     'covariates-clustering.R'
     'covariates-soil.R'
