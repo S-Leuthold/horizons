@@ -531,12 +531,26 @@ for (cluster_id in unique(assignments)) {
   - Expert intuition (5-10 configs per property for: clay, sand, pH, SOC, N)
 - **Acceptance**: Config registry exists and is queryable
 
-**Milestone 1.4: Model Training Infrastructure**
-- Refactor model training from `covariates-soil.R`
-- Support flexible configs (not hardcoded to cubist)
-- Implement memory stripping pattern
-- Train point models only (no quantiles yet)
-- **Acceptance**: Can train ANY config on ANY property, memory-optimized
+**Milestone 1.4: Model Training Infrastructure** 🚧 NEXT
+- Create `library-train.R` with two-stage training:
+  - **Stage 1 (Fast Config Selection)**: Test top 10 OPTIMAL_CONFIGS on 20% subset
+    - Quick tune: 5 grid points, 3-fold CV
+    - Rank by composite score (0.35*RPD + 0.25*CCC + 0.25*R² + 0.15*(1-RMSE))
+    - Select winner
+  - **Stage 2 (Thorough Hyperparameter Tuning)**: Train winner on full 80% pool
+    - Full tune: 10 grid points, 10-fold CV
+    - Fit final model with best hyperparameters
+- Data splits per cluster:
+  - 80% training pool (for config selection + final training)
+  - 20% external test (PRESERVED for UQ calibration - never touched)
+- Reuse existing `build_recipe()` and `define_model_specifications()`
+- Implement memory stripping (butcher after training, rm intermediate models)
+- Train point models only (no quantiles yet - Phase 3)
+- **Acceptance**:
+  - Can train ANY config from OPTIMAL_CONFIGS on ANY property
+  - Composite score ranking works correctly
+  - Memory-optimized (<500MB overhead per cluster)
+  - External test set preserved (never seen during training)
 
 **Milestone 1.5: Target Handling Implementation**
 - Implement ILR transformation for texture properties
