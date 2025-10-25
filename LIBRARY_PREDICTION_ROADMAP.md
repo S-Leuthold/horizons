@@ -793,7 +793,38 @@ Production-ready library predictions with distance-aware UQ, abstention policy, 
 **Validation**: Monitor memory usage, ensure <500MB overhead
 **Status**: Approved (critical for production deployment)
 
-### ADR-007: Optional Spiking of User Data into Library Training
+### ADR-007: Hard Cluster Boundaries (v1.0 Simplification)
+**Context**: Should clusters have hard boundaries (GMM assignment only) or soft boundaries (distance-weighted borrowing)?
+**Decision**: Use hard GMM cluster assignments for v1.0
+**Rationale**:
+- Cluster sizes are sufficient (min = 988, median = 2,412 samples)
+- Simpler to implement and test
+- Each sample used in exactly one model (clean provenance)
+- GMM probabilities already capture assignment uncertainty
+**Performance Lever for Future**:
+- If cluster-specific models underperform, implement soft boundaries:
+  - Core samples: Assigned to cluster (weight = 1.0)
+  - Neighbor samples: Within distance threshold from adjacent clusters
+  - Sample weighting: weight = exp(-mahalanobis_distance)
+  - Smooth transitions between cluster models
+**Implementation Note**:
+```r
+# v1.0: Hard assignment
+train_data_cluster_k <- library_data[gmm_assignments == k, ]
+
+# v1.1: Soft boundaries (if needed)
+train_data_cluster_k <- {
+  core = library_data[gmm_assignments == k, ]
+  neighbors = library_data[distance_to_centroid_k < threshold, ]
+  bind_rows(
+    core %>% mutate(weight = 1.0),
+    neighbors %>% mutate(weight = exp(-distance))
+  )
+}
+```
+**Status**: Hard boundaries approved for v1.0, soft boundaries deferred to v1.1+ if performance indicates need
+
+### ADR-008: Optional Spiking of User Data into Library Training
 **Context**: What if user has SOME labeled data for a standard property but not enough for full Custom mode?
 **Decision**: Allow optional spiking of user's labeled samples into library training data
 **Use Case**:
@@ -823,7 +854,30 @@ predict_library(
 - Validate: Does 50 spiked samples improve predictions for that site?
 **Status**: Approved for Phase 2+ (deferred from initial implementation)
 
-### ADR-008: Texture as Compositional Data (ILR Transformation)
+### ADR-009: Composite Metric for Config Ranking
+**Context**: How to rank model configs during auto-optimization?
+**Decision**: Use weighted composite score combining spectroscopy-appropriate metrics
+**Formula**:
+```r
+composite_score = 0.35 * RPD_normalized +
+                  0.25 * CCC_normalized +
+                  0.25 * R²_normalized +
+                  0.15 * (1 - RMSE_normalized)
+```
+**Rationale**:
+- **RPD (35%)**: Primary spectroscopy metric (>2.5 excellent, 2.0-2.5 good, 1.5-2.0 fair)
+- **CCC (25%)**: Lin's concordance - measures agreement with 1:1 line (critical for calibration)
+- **R² (25%)**: Variance explained (standard metric, still informative)
+- **RMSE (15%)**: Absolute error (less weight - scale-dependent across properties)
+**Normalization**: Scale each metric to [0, 1] within tested configs per cluster
+**Tie-Breaking**: If scores within 0.01, prefer simpler model (fewer features, faster)
+**Alternatives Considered**:
+- RPD only: Rejected (ignores concordance quality)
+- R² only: Rejected (not spectroscopy-specific)
+- Equal weighting: Rejected (RPD should dominate for spectroscopy)
+**Status**: Approved
+
+### ADR-010: Texture as Compositional Data (ILR Transformation)
 **Context**: Sand + silt + clay must sum to 100%, but independent models don't guarantee this
 **Decision**: Use Isometric Log-Ratio (ILR) transformation for texture properties
 **Problem**:
