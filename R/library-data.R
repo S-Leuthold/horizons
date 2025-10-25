@@ -1192,7 +1192,10 @@ get_processed_library_data <- function(property,
                    "i" = "Check logs above for details")
   }
 
-  n_samples_raw <- nrow(raw_data)
+  ## Save reference to raw data (needed for training) --------------------------
+
+  raw_library_data <- raw_data
+  n_samples_raw    <- nrow(raw_data)
 
   ## ---------------------------------------------------------------------------
   ## Step 5.2: Preprocess spectra for clustering
@@ -1208,15 +1211,9 @@ get_processed_library_data <- function(property,
                    "i" = "Check logs above for details")
   }
 
-  ## Free memory from raw data -------------------------------------------------
-
-  rm(raw_data)
-  gc(verbose = FALSE)
-
-  if (verbose) {
-    cli::cli_text("│")
-    cli::cli_text("├─ {cli::style_bold('Memory freed')}: raw data")
-  }
+  ## Note: Keeping raw_library_data for training (no rm here) ------------------
+  ## Preprocessed space is for clustering only
+  ## Training will use raw data with config-specific preprocessing
 
   ## ---------------------------------------------------------------------------
   ## Step 5.3: Perform PCA
@@ -1245,7 +1242,7 @@ get_processed_library_data <- function(property,
   ## Step 5.4: Assemble final result
   ## ---------------------------------------------------------------------------
 
-  list(library_data        = NULL,  # Raw data not returned (memory optimization)
+  list(library_data_raw    = raw_library_data,  # RAW for training (preprocessing flexibility)
        pca_model           = pca_result$pca_model,
        pca_scores          = pca_result$pca_scores,
        n_components        = pca_result$n_components,

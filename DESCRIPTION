@@ -132,6 +132,7 @@ Collate:
     'covariates-data.R'
     'library-data.R'
     'library-clustering.R'
+    'library-core.R'
     'library-train.R'
     'covariates-climate.R'
     'covariates-clustering.R'

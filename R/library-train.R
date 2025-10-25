@@ -558,8 +558,6 @@ train_and_score_config <- function(config,
       spectral_transformation  = config$preprocessing,
       response_transformation  = config$transformation,
       feature_selection_method = config$feature_selection,
-      response_variable        = property_col,
-      id_variable              = "sample_id",
       covariate_selection      = NULL,  # No covariates in library mode
       covariate_data           = NULL,
       covariate_interactions   = FALSE
