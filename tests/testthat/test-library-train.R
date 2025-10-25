@@ -14,6 +14,30 @@ library(testthat)
 library(horizons)
 
 ## =============================================================================
+## Helper: Create synthetic cluster data (defined first for use in tests)
+## =============================================================================
+
+make_synthetic_cluster_data <- function(n = 100, n_wavelengths = 50, seed = 123) {
+
+  set.seed(seed)
+
+  ## Property measurements
+  data <- tibble::tibble(
+    Sample_ID = paste0("S", 1:n),  # build_recipe compatibility
+    Project = "test",                # build_recipe compatibility
+    clay.tot_usda.a334_w.pct = rnorm(n, mean = 250, sd = 50),
+    Response = rnorm(n, mean = 250, sd = 50)  # build_recipe compatibility
+  )
+
+  ## Spectral columns
+  spectra <- matrix(rnorm(n * n_wavelengths, mean = 0.5, sd = 0.1), nrow = n)
+  colnames(spectra) <- paste0("X", seq(600, 1200, length.out = n_wavelengths))
+
+  dplyr::bind_cols(data, tibble::as_tibble(spectra))
+
+}
+
+## =============================================================================
 ## TEST GROUP 1: Data Preparation and Splits
 ## =============================================================================
 
@@ -206,12 +230,10 @@ test_that("build_recipe works with library cluster data", {
   ## Should not error
   expect_no_error({
     recipe <- build_recipe(
-      project_data = cluster_data,
-      preprocessing = "snv",
-      transformation = "none",
-      feature_selection = "pca",
-      response_variable = "clay.tot_usda.a334_w.pct",
-      id_variable = "sample_id"
+      input_data = cluster_data,
+      spectral_transformation = "snv",
+      response_transformation = "none",
+      feature_selection_method = "pca"
     )
   })
 
@@ -235,24 +257,4 @@ test_that("define_model_specifications works with library configs", {
 
 })
 
-## =============================================================================
-## Helper: Create synthetic cluster data
-## =============================================================================
-
-make_synthetic_cluster_data <- function(n = 100, n_wavelengths = 50, seed = 123) {
-
-  set.seed(seed)
-
-  ## Property measurements
-  data <- tibble::tibble(
-    sample_id = paste0("S", 1:n),
-    clay.tot_usda.a334_w.pct = rnorm(n, mean = 250, sd = 50)
-  )
-
-  ## Spectral columns
-  spectra <- matrix(rnorm(n * n_wavelengths, mean = 0.5, sd = 0.1), nrow = n)
-  colnames(spectra) <- paste0("X", seq(600, 1200, length.out = n_wavelengths))
-
-  dplyr::bind_cols(data, tibble::as_tibble(spectra))
-
-}
+## Helper function moved to top of file for availability

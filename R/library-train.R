@@ -520,12 +520,20 @@ train_and_score_config <- function(config,
   set.seed(seed)
 
   ## ---------------------------------------------------------------------------
+  ## Step 0.5: Rename property column to Response (build_recipe expects this)
+  ## ---------------------------------------------------------------------------
+
+  train_data_renamed <- train_data %>%
+    dplyr::rename(Response = !!rlang::sym(property_col)) %>%
+    dplyr::mutate(Project = "library")  # Dummy project for build_recipe
+
+  ## ---------------------------------------------------------------------------
   ## Step 1: Build recipe
   ## ---------------------------------------------------------------------------
 
   safely_execute(
     build_recipe(
-      input_data               = train_data,
+      input_data               = train_data_renamed,
       spectral_transformation  = config$preprocessing,
       response_transformation  = config$transformation,
       feature_selection_method = config$feature_selection,
