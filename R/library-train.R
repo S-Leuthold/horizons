@@ -343,19 +343,74 @@ optimize_config_for_cluster <- function(cluster_splits,
   ## Step 3.3: Test each config and score
   ## ---------------------------------------------------------------------------
 
-  ## TODO: Implement config testing loop
-  ## For now, placeholder that returns first config as winner
+  ## Get property column name --------------------------------------------------
 
-  if (verbose) cli::cli_text("│  ├─ Testing configs...")
-  if (verbose) cli::cli_text("│  └─ [Config testing not yet implemented - using rank 1 config]")
+  property_col <- get_library_property_mapping() %>%
+    dplyr::filter(property == !!property) %>%
+    dplyr::pull(ossl_name)
 
-  winning_config <- candidate_configs[1, ]
+  if (verbose) cli::cli_text("│  ├─ Testing {nrow(candidate_configs)} configs...")
 
-  config_scores <- candidate_configs %>%
-    dplyr::mutate(
-      composite_score = NA_real_,
-      rank_tested = dplyr::row_number()
+  ## Test each config ----------------------------------------------------------
+
+  config_results <- list()
+
+  for (i in 1:nrow(candidate_configs)) {
+
+    config <- candidate_configs[i, ]
+
+    if (verbose) {
+      config_name <- paste0(config$model, " | ", config$preprocessing, " | ", config$feature_selection)
+      cli::cli_text("│  │  ├─ [{i}/{nrow(candidate_configs)}] {config_name}...")
+    }
+
+    ## Train and score (quick, no workflow) ------------------------------------
+
+    result <- train_and_score_config(
+      config = config,
+      train_data = config_test_data,
+      property_col = property_col,
+      grid_size = quick_grid_size,
+      cv_folds = quick_cv_folds,
+      return_workflow = FALSE,
+      seed = seed,
+      verbose = FALSE
     )
+
+    config_results[[i]] <- result$metrics %>%
+      dplyr::mutate(
+        config_id = paste(config$model, config$preprocessing, config$feature_selection, sep = "_"),
+        model = config$model,
+        preprocessing = config$preprocessing,
+        feature_selection = config$feature_selection
+      )
+
+    if (verbose && result$status == "success") {
+      cli::cli_text("│  │  │  └─ RPD={round(result$metrics$rpd, 2)} CCC={round(result$metrics$ccc, 3)}")
+    }
+
+    ## Clean up ------------------------------------------------------------------
+
+    rm(result)
+    gc(verbose = FALSE)
+
+  }
+
+  ## Combine results and calculate composite scores ----------------------------
+
+  config_metrics <- dplyr::bind_rows(config_results)
+  config_scores  <- calculate_composite_score(config_metrics)
+
+  ## Select winner -------------------------------------------------------------
+
+  winning_config <- config_scores %>%
+    dplyr::arrange(dplyr::desc(composite_score)) %>%
+    dplyr::slice(1)
+
+  if (verbose) {
+    cli::cli_text("│  │")
+    cli::cli_text("│  └─ Winner: {winning_config$model} (score={round(winning_config$composite_score, 3)})")
+  }
 
   ## ---------------------------------------------------------------------------
   ## Step 3.4: Stage 2 - Train winning config on full training pool
@@ -363,12 +418,29 @@ optimize_config_for_cluster <- function(cluster_splits,
 
   if (verbose) cli::cli_text("│")
   if (verbose) cli::cli_text("├─ {cli::style_bold('Stage 2: Final Training')}...")
-  if (verbose) cli::cli_text("│  ├─ Winner: {winning_config$model} + {winning_config$preprocessing} + {winning_config$feature_selection}")
+  if (verbose) {
+    cli::cli_text("│  ├─ Config: {winning_config$model} | {winning_config$preprocessing} | {winning_config$feature_selection}")
+    cli::cli_text("│  ├─ Training on {cluster_splits$n_train} samples")
+    cli::cli_text("│  ├─ {final_grid_size} grid points, {final_cv_folds}-fold CV")
+  }
 
-  ## TODO: Implement full training
-  ## For now, return structure
+  ## Train with full tuning on complete training pool --------------------------
 
-  if (verbose) cli::cli_text("│  └─ [Full training not yet implemented]")
+  final_result <- train_and_score_config(
+    config = winning_config,
+    train_data = training_pool,
+    property_col = property_col,
+    grid_size = final_grid_size,
+    cv_folds = final_cv_folds,
+    return_workflow = TRUE,  # Keep the workflow!
+    seed = seed,
+    verbose = FALSE
+  )
+
+  if (verbose && final_result$status == "success") {
+    cli::cli_text("│  ├─ Final metrics: RPD={round(final_result$metrics$rpd, 2)}, CCC={round(final_result$metrics$ccc, 3)}")
+    cli::cli_text("│  └─ Model ready")
+  }
 
   ## Calculate total time ------------------------------------------------------
 
@@ -380,12 +452,232 @@ optimize_config_for_cluster <- function(cluster_splits,
   ## ---------------------------------------------------------------------------
 
   list(
-    final_workflow    = NULL,  # TODO: Actual trained workflow
+    final_workflow    = final_result$workflow,
     winning_config    = winning_config,
     config_scores     = config_scores,
-    best_params       = list(),  # TODO: Actual hyperparameters
+    final_metrics     = final_result$metrics,
+    best_params       = final_result$best_params,
     external_test     = cluster_splits$external_test,
     training_time_sec = training_time_sec
+  ) -> result
+
+  return(result)
+
+}
+
+## -----------------------------------------------------------------------------
+## Section 3.5: Core Training Function (Library-Specific)
+## -----------------------------------------------------------------------------
+
+#' Train and Score Single Config
+#'
+#' @description
+#' Trains a single model configuration and extracts performance metrics.
+#' Simplified for library mode - no checkpointing, pruning, or output management.
+#'
+#' @details
+#' Core training steps:
+#' 1. Build recipe (preprocessing + feature selection)
+#' 2. Define model specification
+#' 3. Create workflow
+#' 4. Hyperparameter tuning with tune_grid (CV)
+#' 5. Select best parameters
+#' 6. Extract validation metrics (RPD, CCC, R², RMSE)
+#' 7. Optional: Fit final workflow if return_workflow = TRUE
+#'
+#' For quick config testing: return_workflow = FALSE (discard model, keep metrics)
+#' For final training: return_workflow = TRUE (keep butchered workflow)
+#'
+#' @param config Config row from OPTIMAL_CONFIGS_V1
+#' @param train_data Tibble with training data
+#' @param property_col Character. OSSL property column name (e.g., "clay.tot_usda.a334_w.pct")
+#' @param grid_size Integer. Hyperparameter grid points. Default: 5
+#' @param cv_folds Integer. Cross-validation folds. Default: 3
+#' @param return_workflow Logical. Return trained workflow? Default: FALSE
+#' @param seed Integer. Random seed. Default: 123
+#' @param verbose Logical. Print progress? Default: FALSE
+#'
+#' @return List with:
+#' \describe{
+#'   \item{metrics}{Tibble with rpd, ccc, rsq, rmse from CV}
+#'   \item{workflow}{Trained workflow (if return_workflow = TRUE) or NULL}
+#'   \item{best_params}{List with optimal hyperparameters}
+#'   \item{status}{Character: "success" or "failed"}
+#' }
+#'
+#' @keywords internal
+train_and_score_config <- function(config,
+                                   train_data,
+                                   property_col,
+                                   grid_size       = 5,
+                                   cv_folds        = 3,
+                                   return_workflow = FALSE,
+                                   seed            = 123,
+                                   verbose         = FALSE) {
+
+  ## Set seed for reproducibility ----------------------------------------------
+
+  set.seed(seed)
+
+  ## ---------------------------------------------------------------------------
+  ## Step 1: Build recipe
+  ## ---------------------------------------------------------------------------
+
+  safely_execute(
+    build_recipe(
+      input_data               = train_data,
+      spectral_transformation  = config$preprocessing,
+      response_transformation  = config$transformation,
+      feature_selection_method = config$feature_selection,
+      response_variable        = property_col,
+      id_variable              = "sample_id",
+      covariate_selection      = NULL,  # No covariates in library mode
+      covariate_data           = NULL,
+      covariate_interactions   = FALSE
+    ),
+    error_message = "Recipe build failed"
+  ) %>%
+    handle_results(abort_on_null = FALSE) -> recipe_obj
+
+  if (is.null(recipe_obj)) {
+    return(list(
+      metrics = tibble::tibble(rpd = 0, ccc = 0, rsq = 0, rmse = 999),
+      workflow = NULL,
+      best_params = list(),
+      status = "recipe_failed"
+    ))
+  }
+
+  ## ---------------------------------------------------------------------------
+  ## Step 2: Define model specification
+  ## ---------------------------------------------------------------------------
+
+  model_spec <- define_model_specifications(config$model)
+
+  ## ---------------------------------------------------------------------------
+  ## Step 3: Create workflow
+  ## ---------------------------------------------------------------------------
+
+  wf <- workflows::workflow() %>%
+    workflows::add_recipe(recipe_obj) %>%
+    workflows::add_model(model_spec)
+
+  ## ---------------------------------------------------------------------------
+  ## Step 4: Create CV folds
+  ## ---------------------------------------------------------------------------
+
+  safely_execute(
+    rsample::vfold_cv(train_data, v = cv_folds, strata = !!rlang::sym(property_col)),
+    error_message = "CV fold creation failed"
+  ) %>%
+    handle_results(abort_on_null = FALSE) -> cv_folds_obj
+
+  if (is.null(cv_folds_obj)) {
+    return(list(
+      metrics = tibble::tibble(rpd = 0, ccc = 0, rsq = 0, rmse = 999),
+      workflow = NULL,
+      best_params = list(),
+      status = "cv_failed"
+    ))
+  }
+
+  ## ---------------------------------------------------------------------------
+  ## Step 5: Hyperparameter tuning with tune_grid
+  ## ---------------------------------------------------------------------------
+
+  ## Create metric set with custom spectroscopy metrics ------------------------
+
+  metric_set_custom <- yardstick::metric_set(
+    yardstick::rsq,
+    yardstick::rmse,
+    rpd,
+    ccc,
+    rrmse
+  )
+
+  ## Tune grid ------------------------------------------------------------------
+
+  safely_execute(
+    tune::tune_grid(
+      wf,
+      resamples = cv_folds_obj,
+      grid      = grid_size,
+      metrics   = metric_set_custom,
+      control   = tune::control_grid(allow_par = TRUE, save_pred = FALSE)
+    ),
+    error_message = "tune_grid failed"
+  ) %>%
+    handle_results(abort_on_null = FALSE) -> tune_results
+
+  if (is.null(tune_results)) {
+    return(list(
+      metrics = tibble::tibble(rpd = 0, ccc = 0, rsq = 0, rmse = 999),
+      workflow = NULL,
+      best_params = list(),
+      status = "tuning_failed"
+    ))
+  }
+
+  ## ---------------------------------------------------------------------------
+  ## Step 6: Select best parameters and extract metrics
+  ## ---------------------------------------------------------------------------
+
+  ## Select best by RPD (primary spectroscopy metric) --------------------------
+
+  best_params <- tune::select_best(tune_results, metric = "rpd")
+
+  ## Get CV metrics for best parameters ----------------------------------------
+
+  best_metrics <- tune::show_best(tune_results, metric = "rpd", n = 1)
+
+  ## Extract our metrics -------------------------------------------------------
+
+  metrics_out <- tibble::tibble(
+    rpd  = best_metrics$mean[best_metrics$.metric == "rpd"],
+    ccc  = best_metrics$mean[best_metrics$.metric == "ccc"],
+    rsq  = best_metrics$mean[best_metrics$.metric == "rsq"],
+    rmse = best_metrics$mean[best_metrics$.metric == "rmse"]
+  )
+
+  ## ---------------------------------------------------------------------------
+  ## Step 7: Optionally fit final workflow
+  ## ---------------------------------------------------------------------------
+
+  final_workflow <- NULL
+
+  if (return_workflow) {
+
+    ## Finalize workflow with best params --------------------------------------
+
+    final_wf <- tune::finalize_workflow(wf, best_params)
+
+    ## Fit on full training data -----------------------------------------------
+
+    safely_execute(
+      workflows::fit(final_wf, data = train_data),
+      error_message = "Final fit failed"
+    ) %>%
+      handle_results(abort_on_null = FALSE) -> fitted_wf
+
+    if (!is.null(fitted_wf)) {
+
+      ## Butcher for memory ----------------------------------------------------
+
+      final_workflow <- butcher::butcher(fitted_wf)
+
+    }
+
+  }
+
+  ## ---------------------------------------------------------------------------
+  ## Step 8: Return result
+  ## ---------------------------------------------------------------------------
+
+  list(
+    metrics      = metrics_out,
+    workflow     = final_workflow,
+    best_params  = best_params,
+    status       = "success"
   ) -> result
 
   return(result)
