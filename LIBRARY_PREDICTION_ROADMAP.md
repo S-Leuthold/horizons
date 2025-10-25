@@ -580,10 +580,15 @@ Working library prediction for 5 properties (clay, sand, silt, pH, SOC) with poi
   - Subset sample distribution matches full cluster (KS-test p > 0.05)
 
 **Milestone 2.2: Config Selection Logic**
-- Rank tested configs by performance
-- Select winner
-- Log selection decision (which configs tested, why winner chosen)
-- **Acceptance**: Auto-select returns best config with justification
+- Rank tested configs by composite score:
+  ```r
+  score = 0.35*RPD + 0.25*CCC + 0.25*R² + 0.15*(1-RMSE)
+  # All metrics normalized to [0,1] within cluster
+  ```
+- Select winner (highest composite score)
+- Tie-breaker: If within 0.01, prefer simpler model
+- Log selection decision (configs tested, scores, winner, rationale)
+- **Acceptance**: Auto-select returns best config with composite score justification
 
 **Milestone 2.3: Full Training on Winner**
 - Train winning config on full cluster data
