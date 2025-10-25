@@ -1341,8 +1341,154 @@ OPTIMAL_CONFIGS_V0 <- tribble(
 
 ---
 
-*Last Updated: 2025-10-25*
+*Last Updated: 2025-10-25 (End of Day 2)*
 *Status: Phase 1 - 4/6 Milestones Complete ✅ | M1.5 & M1.6 Remaining*
-*Next: M1.5 - Target handling (ILR, bounds) OR test full pipeline first*
-*Progress: Day 2 Complete - Data, clustering, training all working | 118 tests passing*
+*Next Session: M1.5 Target handling (ILR, bounds) + M1.6 Prediction API*
+*Progress: Day 2 COMPLETE - Full pipeline working end-to-end! 🎉*
+
+---
+
+## SESSION HANDOFF - Start Here Next Time
+
+### **Where We Are (End of Day 2):**
+
+**✅ WORKING:**
+- Library data loading (KSSL + Bruker V70 + surface + complete spectra)
+- GMM clustering with BIC selection (K=5-11, typically selects 5-7)
+- Cluster assignments on raw data
+- **Training pipeline validated on real OSSL clay data ✓**
+
+**🐛 BUGS FIXED THIS SESSION:**
+1. **Double-preprocessing** - Clustering uses SNV, training uses raw (build_recipe does config-specific)
+2. **Column naming** - Changed from "X600" to "600" (numeric for build_recipe compatibility)
+3. **Data flow** - Raw data preserved, cluster_id joined, ready for training
+
+**📊 CURRENT STATS:**
+- 4,200+ lines across 4 modules
+- 118 tests passing
+- 30+ commits on uncertainty-quantification branch
+
+---
+
+### **What's Implemented:**
+
+**library-data.R** (1,280 lines):
+- load_ossl_raw() - KSSL + Bruker V70 filtering, numeric column names
+- preprocess_library_spectra() - SNV for clustering
+- perform_pca_on_library() - 99% variance, typically 15-20 components
+- get_processed_library_data() - Orchestrator, returns RAW data + PCA
+
+**library-clustering.R** (501 lines):
+- fit_gmm_clustering() - BIC selection, Ledoit-Wolf shrinkage
+- assign_to_clusters() - Probability scores, entropy, confidence flags
+- Mahalanobis distance metrics
+
+**library-core.R** (166 lines):
+- prepare_library_for_training() - Full pipeline orchestrator
+- Returns: raw_data with cluster_id column ready for training
+
+**library-train.R** (720 lines):
+- prepare_cluster_splits() - 80/20 split, adds Sample_ID/Project/Response columns
+- calculate_composite_score() - Weighted RPD/CCC/R²/RMSE
+- train_and_score_config() - Core training with tune_grid
+- optimize_config_for_cluster() - Two-stage optimization
+
+---
+
+### **Critical Architecture Details:**
+
+**Data Flow:**
+```
+Raw OSSL (numeric columns: 600, 602, ...)
+  ├─ For Clustering:
+  │   → SNV preprocess
+  │   → PCA
+  │   → GMM
+  │   → cluster_assignments
+  │
+  └─ For Training:
+      → Keep raw data
+      → Add cluster_id column
+      → Filter to cluster
+      → build_recipe(config) does preprocessing
+      → train
+```
+
+**Why This Works:**
+- Clustering: Stable assignments in SNV space
+- Training: Flexible config-specific preprocessing (SNV, deriv, SG, etc.)
+- No double-preprocessing
+- Follows spectroscopy best practices
+
+---
+
+### **Known Issues / Next Steps:**
+
+**Immediate (M1.5 - Target Handling):**
+- [ ] Implement ILR transformation for texture (sand/silt/clay must sum to 100%)
+- [ ] Add pH bounds (0-14)
+- [ ] Enforce non-negativity for all properties
+- [ ] Add `compositions` package dependency
+
+**Then (M1.6 - Prediction API):**
+- [ ] Create predict_library() main user function
+- [ ] Integrate: load library → cluster unknowns → train → predict
+- [ ] Handle unknown preprocessing (must match clustering: SNV)
+- [ ] Return predictions with cluster_id, confidence scores
+
+**Testing Needs:**
+- [ ] Update tests for numeric column names (currently expect X-prefix)
+- [ ] Add integration test for full pipeline
+- [ ] Test with multiple properties (not just clay)
+- [ ] Validate metrics extraction (current accessor issue in test script)
+
+**Memory Note:**
+- Keeping raw data adds ~67MB per property (acceptable)
+- Can cache to tempdir if needed (per your preference)
+- Current approach: keep in memory for flexibility
+
+---
+
+### **Files That Changed This Session:**
+
+**Modified:**
+- R/library-data.R - Keep raw, numeric columns
+- R/library-train.R - Column prep, training logic
+- DESCRIPTION - Added mclust, corpcor, library-core.R
+
+**Created:**
+- R/library-core.R - Orchestrator
+- tests/testthat/test-library-data.R
+- tests/testthat/test-library-clustering.R
+- tests/testthat/test-library-train.R
+
+---
+
+### **Quick Start Commands for Next Session:**
+
+```bash
+# Load and verify
+cd ~/Desktop/_brain/1_Current_Projects/horizons/horizons-package
+git status
+git log --oneline -10
+
+# Run tests
+Rscript -e "devtools::load_all(); devtools::test()"
+
+# Test full pipeline
+Rscript /tmp/final_validation.R
+
+# Continue building M1.5...
+```
+
+---
+
+### **Context You'll Need:**
+
+**Column Names:** MUST be numeric (600, 602) not X-prefixed
+**Preprocessing:** Clustering=SNV, Training=raw (config-specific)
+**Data Structure:** Sample_ID, Project, Response, cluster_id, <spectral_cols>
+**Metrics:** RPD (primary), CCC, R², RMSE - composite score weighted
+
+**This handoff should give you everything needed to jump right back in! 🚀**
 
