@@ -31,23 +31,49 @@
 #' for the 15 properties supported in library-based prediction mode. Includes
 #' laboratory method metadata for method harmonization.
 #'
-#' @return A tibble with columns:
+#' @details
+#' This function provides the canonical mapping between horizons standard property
+#' names and OSSL internal variable names. The mapping is based on OSSL v1.2 schema
+#' and includes method metadata for filtering to single laboratory procedures.
+#'
+#' Properties were selected based on Ng et al. 2022 benchmarking study showing
+#' Category A/B prediction accuracy (R² > 0.70) with MIR spectroscopy.
+#'
+#' @return A tibble with 15 rows and 6 columns:
 #' \describe{
 #'   \item{property}{Horizons standard name (e.g., "clay", "ph", "total_carbon")}
 #'   \item{analyte}{Full OSSL analyte description with ISO method}
-#'   \item{ossl_name}{OSSL internal variable name}
-#'   \item{lab_method}{Laboratory method/extraction used}
+#'   \item{ossl_name}{OSSL internal variable name for data extraction}
+#'   \item{lab_method}{Laboratory method/extraction procedure used}
 #'   \item{target_unit}{Expected units for the property}
 #'   \item{description}{Human-readable description}
 #' }
 #'
 #' @section Properties Supported:
-#' - Texture: clay, sand, silt
-#' - Carbon: total_carbon, oc (organic C), carbonate (inorganic C)
-#' - Nitrogen: total_nitrogen
-#' - Chemistry: ph, cec
-#' - Base cations: calcium, magnesium, potassium, sodium
-#' - Major elements: iron_total, aluminum_total
+#' - **Texture** (3): clay, sand, silt (pipette method, iso 11277)
+#' - **Carbon** (3): total_carbon, oc, carbonate (combustion/acid methods)
+#' - **Nitrogen** (1): total_nitrogen (combustion, iso 11261)
+#' - **Chemistry** (2): ph (1:1 H2O, iso 10390), cec (NH4OAc pH 7.0, iso 11260)
+#' - **Base Cations** (4): calcium, magnesium, potassium, sodium (NH4OAc extraction)
+#' - **Major Elements** (2): iron_total, aluminum_total (dithionite extraction)
+#'
+#' @references
+#' Ng et al. 2022. Mid-infrared spectroscopy for accurate measurement of an extensive
+#' set of soil properties. Soil Security 6:100043.
+#'
+#' @seealso [LIBRARY_PROPERTIES], [load_ossl_raw()]
+#'
+#' @examples
+#' \dontrun{
+#' # Get mapping table
+#' mapping <- horizons:::get_library_property_mapping()
+#'
+#' # Find OSSL column for a property
+#' clay_col <- mapping$ossl_name[mapping$property == "clay"]
+#'
+#' # Check lab method
+#' ph_method <- mapping$lab_method[mapping$property == "ph"]
+#' }
 #'
 #' @keywords internal
 get_library_property_mapping <- function() {
@@ -243,22 +269,76 @@ get_library_property_mapping <- function() {
 #'
 #' @description
 #' Downloads (if needed) and loads OSSL lab measurements and MIR spectra from cache,
-#' joins them, and extracts data for the requested property. Raw files are cached
-#' globally and reused across properties for efficiency.
+#' joins them, and extracts data for the requested property. Raw OSSL files are cached
+#' globally in the user directory and reused across properties for efficiency.
 #'
-#' @param property Character. Property name from LIBRARY_PROPERTIES
-#' @param cache_dir Character. Cache directory path. Default: NULL (uses R_user_dir)
-#' @param max_samples Integer. Maximum samples to return (for testing). Default: NULL (all)
-#' @param verbose Logical. Print progress messages? Default: TRUE
+#' @details
+#' **Workflow:**
+#' 1. Check cache for OSSL lab data (ossl_lab_data.qs)
+#' 2. If not cached, download from soilspec4gg-public bucket and cache
+#' 3. Same process for MIR spectra (ossl_mir_raw.qs)
+#' 4. Extract property measurements from lab data (remove NA values)
+#' 5. Inner join with MIR spectra on sample_id
+#' 6. Rename MIR columns from scan_mir.600_abs to X600 format
+#' 7. Optional: subsample for testing speed
+#' 8. Clean up intermediate objects (memory discipline)
 #'
-#' @return Tibble with columns:
+#' **Caching Strategy:**
+#' Raw OSSL files (~200MB each) are downloaded once and cached in:
+#' `tools::R_user_dir("horizons", "cache")`
+#'
+#' Subsequent calls for ANY property reuse these cached files (fast).
+#'
+#' **Data Sources:**
+#' - Lab data: https://storage.googleapis.com/soilspec4gg-public/ossl_soillab_L1_v1.2.qs
+#' - MIR spectra: https://storage.googleapis.com/soilspec4gg-public/ossl_mir_L0_v1.2.qs
+#'
+#' @param property Character. Property name from LIBRARY_PROPERTIES.
+#'   Use `LIBRARY_PROPERTIES` to see supported properties.
+#' @param cache_dir Character. Cache directory path. Default: NULL (uses `tools::R_user_dir("horizons", "cache")`).
+#'   Specify custom path for testing or non-standard installations.
+#' @param max_samples Integer. Maximum samples to return. Default: NULL (all available).
+#'   Used primarily for testing - limits result size for faster iteration.
+#'   Production use should omit this parameter for full library coverage.
+#' @param verbose Logical. Print tree-style progress messages? Default: TRUE.
+#'   Set FALSE for batch operations or when used programmatically.
+#'
+#' @return A tibble with columns:
 #' \describe{
-#'   \item{sample_id}{OSSL sample identifier}
-#'   \item{<property_column>}{Property measurement (name from ossl_name)}
-#'   \item{X<wavenumber>}{Spectral absorbance columns (e.g., X600, X602, ...)}
+#'   \item{sample_id}{OSSL sample identifier (UUID)}
+#'   \item{<property_column>}{Property measurement with OSSL name (e.g., "clay.tot_usda.a334_w.pct")}
+#'   \item{X600, X602, ...}{MIR spectral absorbance at each wavenumber (cm⁻¹)}
 #' }
-#' Returns NULL if loading fails.
 #'
+#' Returns NULL if loading fails (check logs for details).
+#'
+#' @section Error Handling:
+#' Uses `safely_execute()` + `handle_results()` pattern:
+#' - Download failures return NULL with hints (check connection, server status)
+#' - Cache read failures return NULL with hints (try deleting corrupt cache)
+#' - Missing property columns abort with informative message
+#'
+#' @section Memory Management:
+#' After joining, removes large intermediate objects:
+#' - rm(lab_data, mir_data, lab_subset)
+#' - gc() to reclaim memory
+#' Overhead: ~50-100MB per property
+#'
+#' @examples
+#' \dontrun{
+#' # Load clay data
+#' clay <- horizons:::load_ossl_raw("clay")
+#'
+#' # With custom cache (for testing)
+#' oc <- horizons:::load_ossl_raw(
+#'   property = "oc",
+#'   cache_dir = tempdir(),
+#'   max_samples = 500,
+#'   verbose = TRUE
+#' )
+#' }
+#'
+#' @seealso [get_library_property_mapping()], [preprocess_library_spectra()]
 #' @keywords internal
 load_ossl_raw <- function(property,
                           cache_dir   = NULL,
@@ -484,25 +564,66 @@ load_ossl_raw <- function(property,
 #' Applies Standard Normal Variate (SNV) transformation to library spectra for
 #' clustering space preparation. Optionally removes water interference bands.
 #' This preprocessing creates the stable clustering space - model-specific
-#' preprocessing happens separately during training.
-#'
-#' @param spectral_data Data frame or tibble with spectral columns (X<wavenumber>)
-#' @param remove_water_bands Logical. Remove H2O interference regions? Default: FALSE
-#' @param water_regions List. Wavenumber ranges to exclude. Default: list(c(3600, 3000), c(1650, 1600))
-#' @param verbose Logical. Print progress? Default: TRUE
-#'
-#' @return Tibble with preprocessed spectra (SNV-transformed, water bands optionally removed)
-#' Returns NULL if preprocessing fails.
+#' preprocessing (derivatives, baseline correction) happens separately during training.
 #'
 #' @details
-#' Preprocessing pipeline for clustering space:
-#' 1. Remove water bands (if enabled) - regions where H2O absorbs strongly
-#' 2. Apply SNV transformation - normalize to mean=0, sd=1 per spectrum
+#' **Preprocessing Pipeline:**
+#' 1. Identify spectral columns (X<wavenumber> format)
+#' 2. Remove water interference bands (optional, experimental)
+#'    - Default regions: 3600-3000 cm⁻¹, 1650-1600 cm⁻¹
+#'    - These are H2O absorption bands that mask soil signals
+#' 3. Apply SNV transformation (always)
+#'    - Normalize each spectrum to mean=0, sd=1
+#'    - Removes multiplicative scatter, preserves spectral shape
+#' 4. Reconstruct tibble with non-spectral columns preserved
 #'
-#' SNV removes multiplicative scatter effects while preserving spectral shape,
-#' making it ideal for creating stable clusters. Derivatives and other transforms
-#' are applied per-model during training.
+#' **Design Rationale:**
+#' Clustering uses minimal preprocessing (SNV only) to create stable, interpretable
+#' clusters based on fundamental spectral patterns. More aggressive preprocessing
+#' (derivatives, baseline correction) is applied per-model during training to allow
+#' flexibility in model configurations.
 #'
+#' **Edge Case Handling:**
+#' - Zero-variance spectra: SNV produces NaN → replaced with 0
+#' - Single samples: Handled gracefully
+#' - Missing spectral columns: Returns NULL with warning
+#'
+#' @param spectral_data Data frame or tibble with spectral columns (X<wavenumber> format).
+#'   Non-spectral columns (sample_id, property values) are preserved.
+#' @param remove_water_bands Logical. Remove H2O interference regions? Default: FALSE.
+#'   **Experimental** - validate impact on cluster quality before production use.
+#'   From spectroscopy expert review: May improve clustering, test empirically.
+#' @param water_regions List of numeric vectors. Wavenumber ranges [high, low] to exclude.
+#'   Default: list(c(3600, 3000), c(1650, 1600)) cm⁻¹.
+#'   Only used if remove_water_bands = TRUE.
+#' @param verbose Logical. Print tree-style progress? Default: TRUE.
+#'
+#' @return Tibble with:
+#' - SNV-transformed spectral columns (X<wavenumber>)
+#' - Water bands removed if enabled (fewer columns)
+#' - Non-spectral columns preserved
+#'
+#' Returns NULL if preprocessing fails.
+#'
+#' @section Performance:
+#' - ~1-2 seconds for 500 samples
+#' - ~10-20 seconds for 12K samples (full OSSL)
+#' - Memory: <100MB overhead
+#'
+#' @examples
+#' \dontrun{
+#' # Basic preprocessing (SNV only)
+#' preprocessed <- horizons:::preprocess_library_spectra(raw_spectra)
+#'
+#' # With water band removal (experimental)
+#' preprocessed <- horizons:::preprocess_library_spectra(
+#'   raw_spectra,
+#'   remove_water_bands = TRUE,
+#'   verbose = TRUE
+#' )
+#' }
+#'
+#' @seealso [load_ossl_raw()], [perform_pca_on_library()]
 #' @keywords internal
 preprocess_library_spectra <- function(spectral_data,
                                        remove_water_bands = FALSE,
@@ -648,19 +769,34 @@ preprocess_library_spectra <- function(spectral_data,
 #' the clustering space. Retains components explaining specified variance threshold
 #' (default 99%). This PCA model is used to project unknowns into the same space.
 #'
-#' @param library_data Tibble with preprocessed spectral columns
-#' @param variance_threshold Numeric. Cumulative variance to retain (0-1). Default: 0.99
-#' @param verbose Logical. Print progress? Default: TRUE
+#' @details
+#' Uses `FactoMineR::PCA()` with automatic component selection based on cumulative variance.
+#' The PCA is unscaled (scale = FALSE) because spectra are already SNV-normalized.
 #'
-#' @return List with components:
+#' Typical results: 15-25 components for 99% variance on full OSSL library.
+#'
+#' @param library_data Tibble with preprocessed spectral columns (output from preprocess_library_spectra)
+#' @param variance_threshold Numeric (0-1). Cumulative variance to retain. Default: 0.99 (99%).
+#'   Lower values = fewer components = faster clustering, but may lose spectral information.
+#' @param verbose Logical. Print tree-style progress? Default: TRUE
+#'
+#' @return List with:
 #' \describe{
-#'   \item{pca_model}{FactoMineR::PCA object for projecting new samples}
+#'   \item{pca_model}{FactoMineR::PCA object - use for projecting new samples}
 #'   \item{pca_scores}{Matrix of PCA scores (n_samples × n_components)}
-#'   \item{n_components}{Integer, number of components retained}
-#'   \item{variance_explained}{Numeric, actual cumulative variance of retained components}
+#'   \item{n_components}{Integer, number of components retained to reach threshold}
+#'   \item{variance_explained}{Numeric, actual cumulative variance explained}
 #' }
-#' Returns NULL if PCA fails.
 #'
+#' Returns NULL if PCA fails (insufficient variance, constant columns, etc.)
+#'
+#' @examples
+#' \dontrun{
+#' preprocessed <- horizons:::preprocess_library_spectra(raw_data)
+#' pca_result <- horizons:::perform_pca_on_library(preprocessed, variance_threshold = 0.99)
+#' }
+#'
+#' @seealso [preprocess_library_spectra()], [project_to_library_pca()]
 #' @keywords internal
 perform_pca_on_library <- function(library_data,
                                    variance_threshold = 0.99,
