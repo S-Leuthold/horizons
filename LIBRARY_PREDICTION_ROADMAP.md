@@ -490,19 +490,27 @@ for (cluster_id in unique(assignments)) {
 **Duration**: 2-3 weeks
 **Goal**: Establish working library prediction WITHOUT uncertainty quantification
 
-**Milestone 1.1: Library Data Layer**
-- Extract and refactor `covariates-data.R` → `library-data.R`
-- Generalize OSSL loading (not hardcoded to specific properties)
-- Implement memory-efficient loading and preprocessing
-- Add experimental water band removal flag
-- **Acceptance**: Can load OSSL, preprocess, and cache efficiently
+**Milestone 1.1: Library Data Layer** ✅ COMPLETE (2025-10-24)
+- ✅ Created `library-data.R` (1,026 lines, 7 functions)
+- ✅ Created `test-library-data.R` (488 lines, 62 tests passing)
+- ✅ Generalized OSSL loading for all 15 LIBRARY_PROPERTIES
+- ✅ Memory-efficient loading with global caching (lab + MIR files)
+- ✅ Column renaming (scan_mir.600_abs → X600 format)
+- ✅ Water band removal flag (experimental)
+- ✅ SNV preprocessing for clustering space
+- ✅ PCA training (99% variance threshold) and projection
+- ✅ Comprehensive error handling (safely_execute + handle_results)
+- ✅ Tree-style verbose output
+- **Acceptance**: ✅ All 15 properties load successfully (79K-132K samples each)
+- **Commit**: e9363f2
 
-**Milestone 1.2: Clustering System**
-- Build GMM clustering on OSSL
+**Milestone 1.2: Clustering System** 🚧 NEXT
+- Build GMM clustering on OSSL (BIC-based K selection, Ledoit-Wolf shrinkage)
 - Implement unknown assignment with probability scores
 - Calculate Mahalanobis thresholds per cluster
-- Save clustering artifacts (PCA loadings, GMM params, centroids)
+- Save clustering artifacts (PCA loadings, GMM params, centroids, covariances)
 - **Acceptance**: Unknowns assigned to clusters with confidence scores
+- **Status**: Ready to begin
 
 **Milestone 1.3: Initial Optimal Configs**
 - Create `OPTIMAL_CONFIGS_V1` in `constants.R` based on:
@@ -1240,7 +1248,8 @@ OPTIMAL_CONFIGS_V0 <- tribble(
 
 ---
 
-*Last Updated: 2025-10-24 (Post-Review)*
-*Status: Planning Complete with Technical Enhancements - Ready for Implementation*
-*Next: Begin Phase 1, Milestone 1.1*
+*Last Updated: 2025-10-24*
+*Status: Phase 1 In Progress - Milestone 1.1 Complete ✅*
+*Next: Milestone 1.2 - GMM Clustering System*
+*Progress: Week 1, Day 1 complete - Library data infrastructure working*
 
