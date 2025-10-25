@@ -119,13 +119,42 @@ prepare_cluster_splits <- function(cluster_data,
   external_test <- rsample::testing(split_obj)
 
   ## ---------------------------------------------------------------------------
+  ## Step 1.3.5: Prepare for tidymodels (rename columns, add required fields)
+  ## ---------------------------------------------------------------------------
+
+  ## Add Sample_ID and Project if not present ----------------------------------
+
+  if (!"Sample_ID" %in% names(training_pool)) {
+    if ("sample_id" %in% names(training_pool)) {
+      training_pool <- training_pool %>% dplyr::rename(Sample_ID = sample_id)
+      external_test <- external_test %>% dplyr::rename(Sample_ID = sample_id)
+    } else {
+      cli::cli_warn("No sample_id column found - build_recipe may fail")
+    }
+  }
+
+  if (!"Project" %in% names(training_pool)) {
+    training_pool <- training_pool %>% dplyr::mutate(Project = "library")
+    external_test <- external_test %>% dplyr::mutate(Project = "library")
+  }
+
+  ## Rename property column to Response (build_recipe expects this) ------------
+
+  training_pool <- training_pool %>%
+    dplyr::rename(Response = !!rlang::sym(property_col))
+
+  external_test <- external_test %>%
+    dplyr::rename(Response = !!rlang::sym(property_col))
+
+  ## ---------------------------------------------------------------------------
   ## Step 1.4: Assemble result
   ## ---------------------------------------------------------------------------
 
   list(training_pool = training_pool,
        external_test = external_test,
        n_train       = nrow(training_pool),
-       n_test        = nrow(external_test)) -> result
+       n_test        = nrow(external_test),
+       property_col  = "Response") -> result  # Now always Response
 
   return(result)
 
@@ -520,20 +549,12 @@ train_and_score_config <- function(config,
   set.seed(seed)
 
   ## ---------------------------------------------------------------------------
-  ## Step 0.5: Rename property column to Response (build_recipe expects this)
-  ## ---------------------------------------------------------------------------
-
-  train_data_renamed <- train_data %>%
-    dplyr::rename(Response = !!rlang::sym(property_col)) %>%
-    dplyr::mutate(Project = "library")  # Dummy project for build_recipe
-
-  ## ---------------------------------------------------------------------------
-  ## Step 1: Build recipe
+  ## Step 1: Build recipe (data already prepared with Response column)
   ## ---------------------------------------------------------------------------
 
   safely_execute(
     build_recipe(
-      input_data               = train_data_renamed,
+      input_data               = train_data,
       spectral_transformation  = config$preprocessing,
       response_transformation  = config$transformation,
       feature_selection_method = config$feature_selection,
