@@ -108,25 +108,27 @@ test_that("fit_gmm_clustering is deterministic with seed", {
 
 test_that("assign_to_clusters assigns unknowns to nearest cluster", {
 
-  ## Create mock GMM result (simplified)
-  gmm_model <- list(
-    parameters = list(
-      mean = matrix(c(0, 0, 5, 5, -5, -5), nrow = 3, ncol = 2, byrow = TRUE),
-      variance = list(Sigma = array(diag(2), dim = c(2, 2, 3)))
-    ),
-    G = 3
+  ## Fit real GMM on synthetic data (can't mock predict.Mclust easily)
+  library_pca <- matrix(c(
+    rnorm(50, mean = 0, sd = 0.5),   # Cluster 1 data
+    rnorm(50, mean = 5, sd = 0.5),   # Cluster 2 data
+    rnorm(50, mean = -5, sd = 0.5)   # Cluster 3 data
+  ), nrow = 150, ncol = 2)
+
+  gmm_result <- horizons:::fit_gmm_clustering(
+    pca_scores = library_pca,
+    k_range = 3,  # Force 3 clusters
+    min_cluster_size = 10,
+    verbose = FALSE
   )
 
-  ## Create unknowns near each centroid
-  unknowns <- matrix(c(0.1, 0.1,   # Near cluster 1
-                       5.1, 5.1,   # Near cluster 2
-                       -5.1, -5.1), # Near cluster 3
-                     nrow = 3, ncol = 2, byrow = TRUE)
+  ## Create unknowns near each centroid (based on actual centroids)
+  unknowns <- gmm_result$centroids + matrix(rnorm(6, sd = 0.1), nrow = 3, ncol = 2)
 
   ## Assign
   assignments <- horizons:::assign_to_clusters(
     unknown_pca_scores = unknowns,
-    gmm_model = gmm_model,
+    gmm_model = gmm_result,
     verbose = FALSE
   )
 

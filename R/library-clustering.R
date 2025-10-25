@@ -18,7 +18,7 @@
 #' - Handles elliptical clusters (realistic for spectral data)
 #'
 #' @importFrom cli cli_text cli_alert_info cli_alert_warning cli_abort style_bold
-#' @importFrom mclust Mclust
+#' @importFrom mclust Mclust mclustBIC
 #' @importFrom tibble tibble as_tibble
 #' @importFrom dplyr mutate group_by summarise n
 #' @importFrom stats cov mahalanobis quantile
@@ -433,12 +433,15 @@ assign_to_clusters <- function(unknown_pca_scores,
 calculate_mahalanobis_distance <- function(point, centroid, covariance) {
 
   ## Use stats::mahalanobis for robust calculation -----------------------------
+  ## Note: stats::mahalanobis returns SQUARED distance, so we take sqrt
 
-  distance <- stats::mahalanobis(x      = matrix(point, nrow = 1),
-                                center = centroid,
-                                cov    = covariance)
+  distance_squared <- stats::mahalanobis(x      = matrix(point, nrow = 1),
+                                        center = centroid,
+                                        cov    = covariance)
 
-  return(as.numeric(distance))
+  distance <- sqrt(as.numeric(distance_squared))
+
+  return(distance)
 
 }
 
