@@ -247,12 +247,16 @@ fit_gmm_clustering <- function(pca_scores,
   ## Step 1.5: Assemble result
   ## ---------------------------------------------------------------------------
 
+  ## Transpose centroids to n_clusters × n_dims for easier use ------------------
+
+  centroids_transposed <- t(gmm_model$parameters$mean)
+
   list(model               = gmm_model,
        n_clusters          = optimal_k,
        bic_values          = gmm_model$BIC,
        cluster_assignments = gmm_model$classification,
        cluster_sizes       = as.integer(cluster_sizes),
-       centroids           = gmm_model$parameters$mean,
+       centroids           = centroids_transposed,  # Now n_clusters × n_dims
        covariances         = regularized_covs) -> result
 
   return(result)
