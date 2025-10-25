@@ -504,13 +504,18 @@ for (cluster_id in unique(assignments)) {
 - **Acceptance**: ✅ All 15 properties load successfully (79K-132K samples each)
 - **Commit**: e9363f2
 
-**Milestone 1.2: Clustering System** 🚧 NEXT
-- Build GMM clustering on OSSL (BIC-based K selection, Ledoit-Wolf shrinkage)
-- Implement unknown assignment with probability scores
-- Calculate Mahalanobis thresholds per cluster
-- Save clustering artifacts (PCA loadings, GMM params, centroids, covariances)
-- **Acceptance**: Unknowns assigned to clusters with confidence scores
-- **Status**: Ready to begin
+**Milestone 1.2: Clustering System** ✅ COMPLETE (2025-10-24)
+- ✅ Created `library-clustering.R` (501 lines, 3 functions)
+- ✅ Created `test-library-clustering.R` (382 lines, 38 tests passing)
+- ✅ GMM clustering with BIC model selection (K ∈ {5, 7, 9, 11})
+- ✅ Ledoit-Wolf covariance shrinkage for stability
+- ✅ Unknown assignment with probability scores and entropy
+- ✅ Mahalanobis distance calculation for AD metrics
+- ✅ Per-cluster percentile thresholds (p95, p99.5)
+- ✅ Confidence flagging (high/moderate/low/ambiguous)
+- ✅ Centroids in n_clusters × n_dims format
+- **Acceptance**: ✅ Unknowns assigned to clusters with valid probabilities
+- **Commit**: 287f76f + fixes
 
 **Milestone 1.3: Initial Optimal Configs**
 - Create `OPTIMAL_CONFIGS_V1` in `constants.R` based on:
@@ -1249,7 +1254,7 @@ OPTIMAL_CONFIGS_V0 <- tribble(
 ---
 
 *Last Updated: 2025-10-24*
-*Status: Phase 1 In Progress - Milestone 1.1 Complete ✅*
-*Next: Milestone 1.2 - GMM Clustering System*
-*Progress: Week 1, Day 1 complete - Library data infrastructure working*
+*Status: Phase 1 In Progress - Milestones 1.1 ✅ 1.2 ✅ Complete*
+*Next: Milestone 1.3 - OPTIMAL_CONFIGS (already done!) → M1.4 Model Training*
+*Progress: Week 1, Day 1 complete - Library data + clustering infrastructure working*
 
