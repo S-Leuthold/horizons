@@ -597,18 +597,21 @@ load_ossl_raw <- function(property,
 
   if (verbose) cli::cli_text("│  ├─ Final joined data: {nrow(joined_data)} samples")
 
-  ## Rename MIR columns to X<wavenumber> format --------------------------------
+  ## Rename MIR columns to numeric wavenumber format ---------------------------
+  ## (build_recipe/step_transform_spectra expect numeric names, not X-prefix)
 
   spectral_cols <- grep("^scan_mir\\.[0-9]+_abs$", names(joined_data), value = TRUE)
 
   if (length(spectral_cols) > 0) {
 
-    new_names <- gsub("scan_mir\\.", "X", spectral_cols)
+    ## Extract just the wavenumber (600, 602, etc.) ------------------------------
+
+    new_names <- gsub("scan_mir\\.", "", spectral_cols)
     new_names <- gsub("_abs$", "", new_names)
 
     names(joined_data)[names(joined_data) %in% spectral_cols] <- new_names
 
-    if (verbose) cli::cli_text("│  └─ Renamed {length(spectral_cols)} spectral columns to X<wn> format")
+    if (verbose) cli::cli_text("│  └─ Renamed {length(spectral_cols)} spectral columns to numeric format")
 
   }
 
@@ -758,9 +761,9 @@ preprocess_library_spectra <- function(spectral_data,
   ## Step 3.1: Identify spectral columns
   ## ---------------------------------------------------------------------------
 
-  ## Extract wavenumber columns (start with X followed by numbers) -------------
+  ## Extract wavenumber columns (numeric: 600, 602, or X600, X602) -------------
 
-  spectral_cols <- grep("^X[0-9]", names(spectral_data), value = TRUE)
+  spectral_cols <- grep("^X?[0-9]{3,4}$", names(spectral_data), value = TRUE)
 
   if (length(spectral_cols) == 0) {
 
@@ -930,9 +933,9 @@ perform_pca_on_library <- function(library_data,
   ## Step 4.1: Extract spectral matrix
   ## ---------------------------------------------------------------------------
 
-  ## Identify spectral columns -------------------------------------------------
+  ## Identify spectral columns (numeric or X-prefixed) -------------------------
 
-  spectral_cols <- grep("^X[0-9]", names(library_data), value = TRUE)
+  spectral_cols <- grep("^X?[0-9]{3,4}$", names(library_data), value = TRUE)
 
   if (length(spectral_cols) == 0) {
 
@@ -1044,9 +1047,9 @@ project_to_library_pca <- function(new_data,
   ## Step 4.6: Extract spectral matrix from unknowns
   ## ---------------------------------------------------------------------------
 
-  ## Identify spectral columns -------------------------------------------------
+  ## Identify spectral columns (numeric or X-prefixed) -------------------------
 
-  spectral_cols <- grep("^X[0-9]", names(new_data), value = TRUE)
+  spectral_cols <- grep("^X?[0-9]{3,4}$", names(new_data), value = TRUE)
 
   if (length(spectral_cols) == 0) {
 
