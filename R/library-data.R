@@ -379,8 +379,9 @@ load_ossl_raw <- function(property,
 
   ## Define cache file paths ---------------------------------------------------
 
-  lab_file <- file.path(cache_dir, "ossl_lab_data.qs")
-  mir_file <- file.path(cache_dir, "ossl_mir_raw.qs")
+  lab_file      <- file.path(cache_dir, "ossl_lab_data.qs")
+  mir_file      <- file.path(cache_dir, "ossl_mir_raw.qs")
+  location_file <- file.path(cache_dir, "ossl_location_data.qs")
 
   ## ---------------------------------------------------------------------------
   ## Step 2.3: Download/load OSSL lab data
@@ -481,6 +482,50 @@ load_ossl_raw <- function(property,
   if (verbose) cli::cli_text("│  └─ MIR spectra: {nrow(mir_data)} samples")
 
   ## ---------------------------------------------------------------------------
+  ## Step 2.4.5: Load location data for depth filtering
+  ## ---------------------------------------------------------------------------
+
+  if (verbose) cli::cli_text("│")
+  if (verbose) cli::cli_text("├─ {cli::style_bold('Loading OSSL location metadata')}...")
+
+  if (file.exists(location_file)) {
+
+    if (verbose) cli::cli_text("│  ├─ Found cached location data")
+
+    safely_execute(
+      qs::qread(location_file),
+      error_message = "Failed to read cached location data"
+    ) %>%
+      handle_results(
+        error_title = "Location cache read failed",
+        abort_on_null = FALSE
+      ) -> location_data
+
+  } else {
+
+    if (verbose) cli::cli_text("│  ├─ Downloading from OSSL server...")
+
+    safely_execute(
+      qs::qread_url("https://storage.googleapis.com/soilspec4gg-public/ossl_soilsite_L0_v1.2.qs"),
+      error_message = "Failed to download OSSL location data"
+    ) %>%
+      handle_results(
+        error_title = "OSSL location download failed",
+        abort_on_null = FALSE
+      ) -> location_data
+
+    if (!is.null(location_data)) {
+      qs::qsave(location_data, location_file)
+      if (verbose) cli::cli_text("│  ├─ Cached to {basename(location_file)}")
+    }
+
+  }
+
+  if (!is.null(location_data)) {
+    if (verbose) cli::cli_text("│  └─ Location data: {nrow(location_data)} samples")
+  }
+
+  ## ---------------------------------------------------------------------------
   ## Step 2.5: Extract property column and join with spectra
   ## ---------------------------------------------------------------------------
 
@@ -502,13 +547,55 @@ load_ossl_raw <- function(property,
 
   if (verbose) cli::cli_text("│  ├─ {nrow(lab_subset)} samples with {property} measurements")
 
-  ## Join with MIR spectra -----------------------------------------------------
+  ## Filter MIR to KSSL + Bruker Vertex 70 (Ng et al. 2022 dataset) ------------
+
+  if (verbose) cli::cli_text("│  ├─ Filtering to KSSL + Bruker Vertex 70...")
+
+  n_before_filter <- nrow(mir_data)
 
   mir_data %>%
+    dplyr::filter(
+      dataset.code_ascii_txt == "KSSL.SSL",
+      scan.mir.model.name_utf8_txt == "Bruker Vertex 70 with HTS-XT accessory"
+    ) -> mir_filtered
+
+  n_after_filter <- nrow(mir_filtered)
+
+  if (verbose) {
+    cli::cli_text("│  ├─ KSSL + Bruker V70: {n_after_filter}/{n_before_filter} ({round(100*n_after_filter/n_before_filter)}%)")
+  }
+
+  ## Join with location data for depth filtering -------------------------------
+
+  if (!is.null(location_data) && "layer.upper.depth_usda_cm" %in% names(location_data)) {
+
+    if (verbose) cli::cli_text("│  ├─ Filtering to surface samples (depth < 30 cm)...")
+
+    location_data %>%
+      dplyr::select(id.layer_uuid_txt, layer.upper.depth_usda_cm) %>%
+      dplyr::filter(!is.na(layer.upper.depth_usda_cm),
+                   layer.upper.depth_usda_cm < 30) -> location_surface
+
+    n_before_depth <- nrow(mir_filtered)
+
+    mir_filtered %>%
+      dplyr::inner_join(location_surface, by = "id.layer_uuid_txt") -> mir_filtered
+
+    n_after_depth <- nrow(mir_filtered)
+
+    if (verbose) {
+      cli::cli_text("│  ├─ Surface samples: {n_after_depth}/{n_before_depth} ({round(100*n_after_depth/n_before_depth)}%)")
+    }
+
+  }
+
+  ## Join with lab property measurements ---------------------------------------
+
+  mir_filtered %>%
     dplyr::inner_join(lab_subset, by = "id.layer_uuid_txt") %>%
     dplyr::rename(sample_id = id.layer_uuid_txt) -> joined_data
 
-  if (verbose) cli::cli_text("│  ├─ Joined data: {nrow(joined_data)} samples")
+  if (verbose) cli::cli_text("│  ├─ Final joined data: {nrow(joined_data)} samples")
 
   ## Rename MIR columns to X<wavenumber> format --------------------------------
 
@@ -525,9 +612,46 @@ load_ossl_raw <- function(property,
 
   }
 
+  ## ---------------------------------------------------------------------------
+  ## Step 2.5.5: Remove samples with missing spectra
+  ## ---------------------------------------------------------------------------
+
+  if (verbose) cli::cli_text("│")
+  if (verbose) cli::cli_text("├─ {cli::style_bold('Filtering incomplete spectra')}...")
+
+  ## Get spectral columns ------------------------------------------------------
+
+  spectral_cols <- grep("^X[0-9]", names(joined_data), value = TRUE)
+
+  if (length(spectral_cols) > 0) {
+
+    ## Count NAs per sample ----------------------------------------------------
+
+    spectral_matrix <- as.matrix(joined_data[, spectral_cols])
+    sample_na_count <- rowSums(is.na(spectral_matrix))
+
+    ## Filter to complete spectra ----------------------------------------------
+
+    n_before <- nrow(joined_data)
+    joined_data <- joined_data[sample_na_count == 0, ]
+    n_after <- nrow(joined_data)
+    n_removed <- n_before - n_after
+
+    if (verbose) {
+      cli::cli_text("│  ├─ Removed {n_removed} samples with missing spectra")
+      cli::cli_text("│  └─ Retained {n_after} complete samples ({round(100*n_after/n_before)}%)")
+    }
+
+  }
+
   ## Free memory from large intermediate objects -------------------------------
 
-  rm(lab_data, mir_data, lab_subset)
+  if (exists("location_data")) {
+    rm(lab_data, mir_data, mir_filtered, lab_subset, location_data, location_surface)
+  } else {
+    rm(lab_data, mir_data, mir_filtered, lab_subset)
+  }
+
   gc(verbose = FALSE)
 
   ## ---------------------------------------------------------------------------
