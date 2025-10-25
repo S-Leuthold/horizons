@@ -504,18 +504,25 @@ for (cluster_id in unique(assignments)) {
 - **Acceptance**: ✅ All 15 properties load successfully (79K-132K samples each)
 - **Commit**: e9363f2
 
-**Milestone 1.2: Clustering System** ✅ COMPLETE (2025-10-24)
+**Milestone 1.2: Clustering System** ✅ COMPLETE (2025-10-24/25)
 - ✅ Created `library-clustering.R` (501 lines, 3 functions)
 - ✅ Created `test-library-clustering.R` (382 lines, 38 tests passing)
 - ✅ GMM clustering with BIC model selection (K ∈ {5, 7, 9, 11})
 - ✅ Ledoit-Wolf covariance shrinkage for stability
 - ✅ Unknown assignment with probability scores and entropy
-- ✅ Mahalanobis distance calculation for AD metrics
+- ✅ Mahalanobis distance calculation for AD metrics (corrected sqrt)
 - ✅ Per-cluster percentile thresholds (p95, p99.5)
 - ✅ Confidence flagging (high/moderate/low/ambiguous)
-- ✅ Centroids in n_clusters × n_dims format
+- ✅ Centroids transposed to n_clusters × n_dims format
+- ✅ **Smart OSSL Filtering Added**:
+  - Dataset: KSSL only (Kellogg Soil Survey Lab)
+  - Instrument: Bruker Vertex 70 with HTS-XT accessory
+  - Depth: Surface samples (< 30 cm)
+  - Completeness: Removed samples with missing spectra
+  - Result: 135K → ~26K high-quality samples (zero NAs!)
 - **Acceptance**: ✅ Unknowns assigned to clusters with valid probabilities
-- **Commit**: 287f76f + fixes
+- **Validation**: ✅ Tested on real clay data - K=7, sensible cluster sizes
+- **Commits**: 67a7cf5, 287f76f, 37265a6
 
 **Milestone 1.3: Initial Optimal Configs**
 - Create `OPTIMAL_CONFIGS_V1` in `constants.R` based on:
