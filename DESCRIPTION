@@ -25,6 +25,7 @@ Imports:
     butcher,
     cli,
     cluster,
+    corpcor,
     data.table,
     daymetr,
     dials,
@@ -43,6 +44,7 @@ Imports:
     janitor,
     jsonlite,
     lubridate,
+    mclust,
     opusreader2,
     parallel,
     doParallel,
@@ -129,6 +131,7 @@ Collate:
     'models-recipes.R'
     'covariates-data.R'
     'library-data.R'
+    'library-clustering.R'
     'covariates-climate.R'
     'covariates-clustering.R'
     'covariates-soil.R'
