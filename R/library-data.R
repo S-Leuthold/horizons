@@ -526,26 +526,64 @@ load_ossl_raw <- function(property,
   }
 
   ## ---------------------------------------------------------------------------
-  ## Step 2.5: Extract property column and join with spectra
+  ## Step 2.5: Extract property column(s) and join with spectra
   ## ---------------------------------------------------------------------------
 
   if (verbose) cli::cli_text("│")
   if (verbose) cli::cli_text("├─ {cli::style_bold('Joining lab data with spectra')}...")
 
-  ## Check if property column exists ---------------------------------------
+  ## Check if texture property (requires all 3 components) --------------------
 
-  if (!ossl_column %in% names(lab_data)) {
-    cli::cli_abort("OSSL column '{ossl_column}' not found in lab data",
-                   "i" = "Check property mapping or OSSL version compatibility")
+  if (is_texture_property(property)) {
+
+    ## For texture: get ALL three texture columns ------------------------------
+
+    texture_mapping <- get_library_property_mapping() %>%
+      dplyr::filter(property %in% c("sand", "silt", "clay"))
+
+    texture_cols <- texture_mapping$ossl_name
+
+    ## Verify all columns exist ------------------------------------------------
+
+    missing_cols <- setdiff(texture_cols, names(lab_data))
+
+    if (length(missing_cols) > 0) {
+      cli::cli_abort(
+        "Missing texture column{?s}: {paste(missing_cols, collapse = ', ')}",
+        "i" = "Check OSSL version compatibility"
+      )
+    }
+
+    ## Select all three texture columns ----------------------------------------
+
+    lab_data %>%
+      dplyr::select(id.layer_uuid_txt, dplyr::all_of(texture_cols)) %>%
+      dplyr::filter(!is.na(sand.tot_usda.c60_w.pct),
+                   !is.na(silt.tot_usda.c62_w.pct),
+                   !is.na(clay.tot_usda.a334_w.pct)) -> lab_subset
+
+    if (verbose) {
+      cli::cli_text("│  ├─ {nrow(lab_subset)} samples with complete texture measurements")
+    }
+
+  } else {
+
+    ## Standard property: single column ----------------------------------------
+
+    if (!ossl_column %in% names(lab_data)) {
+      cli::cli_abort("OSSL column '{ossl_column}' not found in lab data",
+                     "i" = "Check property mapping or OSSL version compatibility")
+    }
+
+    lab_data %>%
+      dplyr::select(id.layer_uuid_txt, !!ossl_column) %>%
+      dplyr::filter(!is.na(!!rlang::sym(ossl_column))) -> lab_subset
+
+    if (verbose) {
+      cli::cli_text("│  ├─ {nrow(lab_subset)} samples with {property} measurements")
+    }
+
   }
-
-  ## Select property column + sample ID ----------------------------------------
-
-  lab_data %>%
-    dplyr::select(id.layer_uuid_txt, !!ossl_column) %>%
-    dplyr::filter(!is.na(!!rlang::sym(ossl_column))) -> lab_subset
-
-  if (verbose) cli::cli_text("│  ├─ {nrow(lab_subset)} samples with {property} measurements")
 
   ## Filter MIR to KSSL + Bruker Vertex 70 (Ng et al. 2022 dataset) ------------
 

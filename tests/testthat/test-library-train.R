@@ -43,10 +43,10 @@ make_synthetic_cluster_data <- function(n = 100, n_wavelengths = 50, seed = 123)
 
 test_that("prepare_cluster_splits creates 80/20 split correctly", {
 
-  ## Create synthetic cluster data
+  ## Create synthetic cluster data (use pH to avoid texture complexity)
   cluster_data <- tibble::tibble(
     sample_id = paste0("S", 1:1000),
-    clay.tot_usda.a334_w.pct = rnorm(1000, mean = 250, sd = 50)
+    ph.h2o_usda.a268_index = rnorm(1000, mean = 6.5, sd = 1.2)
   )
 
   ## Add spectral columns
@@ -57,7 +57,7 @@ test_that("prepare_cluster_splits creates 80/20 split correctly", {
   ## Create split
   splits <- horizons:::prepare_cluster_splits(
     cluster_data = cluster_data,
-    property = "clay",
+    property = "ph",
     train_prop = 0.8,
     seed = 123
   )
@@ -79,15 +79,93 @@ test_that("prepare_cluster_splits creates 80/20 split correctly", {
 
 test_that("prepare_cluster_splits is deterministic with seed", {
 
+  ## Use non-texture property for this test (testing split determinism, not ILR)
+  ## make_synthetic_cluster_data has clay column, so change to use oc instead
   cluster_data <- make_synthetic_cluster_data(n = 500)
 
-  split1 <- horizons:::prepare_cluster_splits(cluster_data, "clay", seed = 456)
-  split2 <- horizons:::prepare_cluster_splits(cluster_data, "clay", seed = 456)
+  ## Rename clay column to oc for non-texture test
+  cluster_data <- cluster_data %>%
+    dplyr::select(-clay.tot_usda.a334_w.pct) %>%
+    dplyr::mutate(oc_usda.c729_w.pct = Response)
+
+  split1 <- horizons:::prepare_cluster_splits(cluster_data, "oc", seed = 456)
+  split2 <- horizons:::prepare_cluster_splits(cluster_data, "oc", seed = 456)
 
   ## Should get identical splits (use Sample_ID - standardized naming)
   expect_equal(split1$training_pool$Sample_ID, split2$training_pool$Sample_ID)
   expect_equal(split1$external_test$Sample_ID, split2$external_test$Sample_ID)
 
+})
+
+test_that("prepare_cluster_splits handles texture with ILR transformation", {
+
+  ## Create synthetic texture data with all 3 components
+  texture_data <- tibble::tibble(
+    sample_id = paste0("S", 1:500),
+    sand.tot_usda.c60_w.pct = rnorm(500, mean = 350, sd = 80),
+    silt.tot_usda.c62_w.pct = rnorm(500, mean = 380, sd = 70),
+    clay.tot_usda.a334_w.pct = rnorm(500, mean = 270, sd = 60)
+  )
+
+  ## Ensure mass balance (sum to 1000)
+  total <- texture_data$sand.tot_usda.c60_w.pct +
+           texture_data$silt.tot_usda.c62_w.pct +
+           texture_data$clay.tot_usda.a334_w.pct
+
+  texture_data$sand.tot_usda.c60_w.pct <- texture_data$sand.tot_usda.c60_w.pct / total * 1000
+  texture_data$silt.tot_usda.c62_w.pct <- texture_data$silt.tot_usda.c62_w.pct / total * 1000
+  texture_data$clay.tot_usda.a334_w.pct <- texture_data$clay.tot_usda.a334_w.pct / total * 1000
+
+  ## Add spectral columns
+  spectra <- matrix(rnorm(500 * 50), nrow = 500)
+  colnames(spectra) <- paste0(seq(600, 1000, length.out = 50))
+  texture_data <- dplyr::bind_cols(texture_data, tibble::as_tibble(spectra))
+
+  ## Split with ilr_coordinate = 1
+  splits <- horizons:::prepare_cluster_splits(
+    cluster_data = texture_data,
+    property = "clay",
+    ilr_coordinate = 1,
+    seed = 123
+  )
+
+  ## Should have ILR coordinates in data
+  expect_true("ilr_2" %in% names(splits$training_pool))  # ilr_1 was renamed to Response
+  expect_true("Response" %in% names(splits$training_pool))
+
+  ## Response should be ILR values (unbounded, can be negative)
+  expect_true(any(splits$training_pool$Response < 0) || any(splits$training_pool$Response > 5))
+
+  ## ilr_coordinate should be tracked
+  expect_equal(splits$ilr_coordinate, 1)
+
+  ## Original texture columns should still be present
+  expect_true("sand.tot_usda.c60_w.pct" %in% names(splits$training_pool))
+  expect_true("silt.tot_usda.c62_w.pct" %in% names(splits$training_pool))
+  expect_true("clay.tot_usda.a334_w.pct" %in% names(splits$training_pool))
+})
+
+test_that("prepare_cluster_splits requires ilr_coordinate for texture", {
+
+  ## Create minimal texture data
+  texture_data <- tibble::tibble(
+    sample_id = paste0("S", 1:100),
+    sand.tot_usda.c60_w.pct = rnorm(100, 350, 50),
+    silt.tot_usda.c62_w.pct = rnorm(100, 380, 50),
+    clay.tot_usda.a334_w.pct = rnorm(100, 270, 50)
+  )
+
+  ## Should error if ilr_coordinate not specified
+  expect_error(
+    horizons:::prepare_cluster_splits(texture_data, "sand"),
+    "require ilr_coordinate"
+  )
+
+  ## Should error if ilr_coordinate invalid
+  expect_error(
+    horizons:::prepare_cluster_splits(texture_data, "clay", ilr_coordinate = 3),
+    "ilr_coordinate = 1 or 2"
+  )
 })
 
 ## =============================================================================

@@ -49,6 +49,11 @@
 #'
 #' @param cluster_data Tibble with cluster samples (spectra + property measurements)
 #' @param property Character. Property name (e.g., "clay")
+#' @param ilr_coordinate Integer. For texture properties, which ILR coordinate to use as Response (1 or 2).
+#'   NULL for non-texture properties. When texture property requested, function will:
+#'   - Apply ILR transformation to all 3 texture components
+#'   - Use ilr_coordinate to select which coordinate becomes Response column
+#'   - Both coordinates will be present in data for potential dual training
 #' @param train_prop Numeric (0-1). Proportion for training pool. Default: 0.8
 #' @param seed Integer. Random seed for reproducibility. Default: 123
 #'
@@ -58,13 +63,15 @@
 #'   \item{external_test}{Tibble, 20% of samples for UQ calibration (never used in training)}
 #'   \item{n_train}{Integer, number of training samples}
 #'   \item{n_test}{Integer, number of test samples}
+#'   \item{ilr_coordinate}{Integer or NULL, tracks which ILR coordinate if texture}
 #' }
 #'
 #' @keywords internal
 prepare_cluster_splits <- function(cluster_data,
                                    property,
-                                   train_prop = 0.8,
-                                   seed       = 123) {
+                                   ilr_coordinate = NULL,
+                                   train_prop     = 0.8,
+                                   seed           = 123) {
 
   ## ---------------------------------------------------------------------------
   ## Step 1.1: Set seed for reproducibility
@@ -73,24 +80,82 @@ prepare_cluster_splits <- function(cluster_data,
   set.seed(seed)
 
   ## ---------------------------------------------------------------------------
-  ## Step 1.2: Find property column
+  ## Step 1.2: Handle texture properties (ILR transformation)
   ## ---------------------------------------------------------------------------
 
-  ## Get OSSL column name from mapping ----------------------------------------
+  if (is_texture_property(property)) {
 
-  mapping <- get_library_property_mapping()
-  prop_row <- mapping[mapping$property == property, ]
+    ## Texture requires ILR transformation --------------------------------------
 
-  if (nrow(prop_row) != 1) {
-    cli::cli_abort("Property '{property}' not found in mapping")
-  }
+    ## Validate ilr_coordinate parameter ----------------------------------------
 
-  property_col <- prop_row$ossl_name
+    if (is.null(ilr_coordinate) || !ilr_coordinate %in% c(1, 2)) {
+      cli::cli_abort(
+        "Texture properties require ilr_coordinate = 1 or 2",
+        "i" = "Must specify which ILR coordinate to use as Response"
+      )
+    }
 
-  ## Check if column exists in data -------------------------------------------
+    ## Get all three texture column names ---------------------------------------
 
-  if (!property_col %in% names(cluster_data)) {
-    cli::cli_abort("Property column '{property_col}' not found in cluster data")
+    texture_mapping <- get_library_property_mapping() %>%
+      dplyr::filter(property %in% c("sand", "silt", "clay"))
+
+    sand_col <- texture_mapping$ossl_name[texture_mapping$property == "sand"]
+    silt_col <- texture_mapping$ossl_name[texture_mapping$property == "silt"]
+    clay_col <- texture_mapping$ossl_name[texture_mapping$property == "clay"]
+
+    ## Verify all columns exist -------------------------------------------------
+
+    required_cols <- c(sand_col, silt_col, clay_col)
+    missing_cols  <- setdiff(required_cols, names(cluster_data))
+
+    if (length(missing_cols) > 0) {
+      cli::cli_abort(
+        "Missing texture column{?s}: {paste(missing_cols, collapse = ', ')}",
+        "i" = "load_ossl_raw() should fetch all texture columns for texture properties"
+      )
+    }
+
+    ## Apply ILR transformation -------------------------------------------------
+
+    ilr_coords <- texture_to_ilr(
+      sand = cluster_data[[sand_col]],
+      silt = cluster_data[[silt_col]],
+      clay = cluster_data[[clay_col]],
+      as_proportions = FALSE  # OSSL data in g/kg
+    )
+
+    ## Add ILR coordinates to cluster data --------------------------------------
+
+    cluster_data$ilr_1 <- ilr_coords[, 1]
+    cluster_data$ilr_2 <- ilr_coords[, 2]
+
+    ## Response will be the specified ILR coordinate ----------------------------
+
+    property_col <- paste0("ilr_", ilr_coordinate)
+
+  } else {
+
+    ## Non-texture: standard property column handling ---------------------------
+
+    ## Get OSSL column name from mapping ----------------------------------------
+
+    mapping <- get_library_property_mapping()
+    prop_row <- mapping[mapping$property == property, ]
+
+    if (nrow(prop_row) != 1) {
+      cli::cli_abort("Property '{property}' not found in mapping")
+    }
+
+    property_col <- prop_row$ossl_name
+
+    ## Check if column exists in data -------------------------------------------
+
+    if (!property_col %in% names(cluster_data)) {
+      cli::cli_abort("Property column '{property_col}' not found in cluster data")
+    }
+
   }
 
   ## ---------------------------------------------------------------------------
@@ -161,11 +226,12 @@ prepare_cluster_splits <- function(cluster_data,
   ## Step 1.4: Assemble result
   ## ---------------------------------------------------------------------------
 
-  list(training_pool = training_pool,
-       external_test = external_test,
-       n_train       = nrow(training_pool),
-       n_test        = nrow(external_test),
-       property_col  = "Response") -> result  # Now always Response
+  list(training_pool  = training_pool,
+       external_test  = external_test,
+       n_train        = nrow(training_pool),
+       n_test         = nrow(external_test),
+       property_col   = "Response",          # Always Response after renaming
+       ilr_coordinate = ilr_coordinate) -> result  # Track ILR coord if texture
 
   return(result)
 

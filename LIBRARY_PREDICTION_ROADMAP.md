@@ -560,17 +560,30 @@ for (cluster_id in unique(assignments)) {
 - **Acceptance**: ✅ All tests passing, validated on real OSSL clay data
 - **Commits**: 2ac6d06, 31d0699, 7e005d8
 
-**Milestone 1.5: Target Handling Implementation**
-- Implement ILR transformation for texture properties
-  - Add `compositions` dependency
-  - Create wrapper functions for ilr ↔ texture conversion
-  - Test: texture predictions always sum to 100%
-- Implement bounds enforcement:
-  - pH: clip to [0, 14]
-  - All properties: enforce non-negativity where applicable
-- **Acceptance**:
-  - Texture predictions respect mass balance
-  - No impossible values (negative SOC, pH > 14, etc.)
+**Milestone 1.5: Target Handling Implementation** ✅ COMPLETE (2025-10-27)
+- ✅ Created `library-targets.R` (357 lines, 3 core functions)
+- ✅ Created `test-library-targets.R` (400 lines, 62 tests passing)
+- ✅ ILR transformation for texture:
+  - `texture_to_ilr()`: 3 components → 2 ILR coordinates
+  - `ilr_to_texture()`: Guarantees mass balance (sum = 100%)
+  - Perfect invertibility tested
+  - Handles edge cases (single samples, extremes, equal proportions)
+- ✅ Property classification helpers:
+  - `is_compositional_property()`
+  - `is_texture_property()`
+- ✅ Bounds enforcement via `apply_bounds()`:
+  - pH: clips to [0, 14]
+  - Carbon/nitrogen/elements: non-negativity (≥ 0)
+  - NA-safe handling
+- ✅ Integration with training pipeline:
+  - Modified `prepare_cluster_splits()` to accept `ilr_coordinate` parameter
+  - Texture properties: applies ILR, uses ilr_N as Response
+  - Non-texture: standard property column handling
+  - Updated `load_ossl_raw()` to fetch all 3 texture columns when texture requested
+- ✅ Added `compositions` dependency to DESCRIPTION
+- ✅ Added property classifications to constants.R
+- **Acceptance**: ✅ All tests passing (189 library tests, 0 failures)
+- **Commits**: ccf0ff4
 
 **Milestone 1.6: Basic Prediction API**
 - Create `predict_library()` stub
@@ -934,6 +947,12 @@ texture <- compositions::ilrInv(cbind(ilr_1_pred, ilr_2_pred))
 - **v1.1+**: Joint interval sampling in ILR space for compositional coherence
 **Benefit**: Prevents embarrassing mass-balance violations
 **Cost**: Requires `compositions` package dependency, slightly more complex workflow
+**Efficiency**: Trains only 2 models (ilr_1, ilr_2) instead of 3 (sand, silt, clay) - 33% reduction
+**Implementation Location** (2025-10-27):
+- ILR transformation applied in `prepare_cluster_splits()` (per-cluster, before training)
+- `load_ossl_raw()` fetches all 3 texture columns when any texture property requested
+- Back-transformation in prediction function (after model inference)
+**Rationale**: Per-cluster transformation is faster than global, keeps transformation close to model training
 **Status**: Approved (scientifically necessary for texture)
 
 **Future Investigation: Smart Caching**
@@ -1341,32 +1360,37 @@ OPTIMAL_CONFIGS_V0 <- tribble(
 
 ---
 
-*Last Updated: 2025-10-25 (End of Day 2)*
-*Status: Phase 1 - 4/6 Milestones Complete ✅ | M1.5 & M1.6 Remaining*
-*Next Session: M1.5 Target handling (ILR, bounds) + M1.6 Prediction API*
-*Progress: Day 2 COMPLETE - Full pipeline working end-to-end! 🎉*
+*Last Updated: 2025-10-27 (Session 3)*
+*Status: Phase 1 - 5/6 Milestones Complete ✅ | M1.6 Remaining*
+*Next Session: M1.6 Prediction API (orchestrate full workflow)*
+*Progress: M1.5 COMPLETE - ILR transformation system operational! 🎉*
 
 ---
 
 ## SESSION HANDOFF - Start Here Next Time
 
-### **Where We Are (End of Day 2):**
+### **Where We Are (End of Session 3):**
 
 **✅ WORKING:**
 - Library data loading (KSSL + Bruker V70 + surface + complete spectra)
+  - Texture properties: fetches all 3 columns (sand, silt, clay)
+  - Non-texture: fetches single property column
 - GMM clustering with BIC selection (K=5-11, typically selects 5-7)
 - Cluster assignments on raw data
-- **Training pipeline validated on real OSSL clay data ✓**
+- **ILR transformation system fully operational ✓**
+- Training pipeline integrated with ILR (texture uses ilr_coordinate parameter)
 
-**🐛 BUGS FIXED THIS SESSION:**
-1. **Double-preprocessing** - Clustering uses SNV, training uses raw (build_recipe does config-specific)
-2. **Column naming** - Changed from "X600" to "600" (numeric for build_recipe compatibility)
-3. **Data flow** - Raw data preserved, cluster_id joined, ready for training
+**✅ M1.5 COMPLETE (2025-10-27):**
+1. **ILR Transformations** - texture_to_ilr(), ilr_to_texture()
+2. **Bounds Enforcement** - apply_bounds() for pH and non-negativity
+3. **Pipeline Integration** - prepare_cluster_splits() handles texture via ilr_coordinate
+4. **Data Loading** - load_ossl_raw() fetches all texture columns when needed
 
 **📊 CURRENT STATS:**
-- 4,200+ lines across 4 modules
-- 118 tests passing
-- 30+ commits on uncertainty-quantification branch
+- 5,200+ lines across 5 modules
+- 189 tests passing (62 new for M1.5)
+- 0 failures
+- ~35 commits on uncertainty-quantification branch
 
 ---
 
