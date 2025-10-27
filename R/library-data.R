@@ -923,7 +923,7 @@ preprocess_library_spectra <- function(spectral_data,
 ## -----------------------------------------------------------------------------
 
 ## -----------------------------------------------------------------------------
-## Section 4: PCA Transformation for Clustering Space  
+## Section 4: PCA Transformation for Clustering Space
 ## -----------------------------------------------------------------------------
 ## Section 4: PCA Transformation for Clustering Space
 ## -----------------------------------------------------------------------------
@@ -1142,7 +1142,7 @@ project_to_library_pca <- function(new_data,
 
 #' Load and Process Spectral Library Data
 #'
-#' @description  
+#' @description
 #' Loads reference spectral library data (OSSL/KSSL) for a given soil property,
 #' applies method harmonization, preprocessing, and PCA transformation. This is the
 #' primary data preparation function for library-based prediction mode.

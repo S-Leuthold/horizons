@@ -117,6 +117,47 @@ prepare_cluster_splits <- function(cluster_data,
       )
     }
 
+    ## Validate texture measurements --------------------------------------------
+
+    sand_vals <- cluster_data[[sand_col]]
+    silt_vals <- cluster_data[[silt_col]]
+    clay_vals <- cluster_data[[clay_col]]
+
+    ## Check non-negativity -----------------------------------------------------
+
+    if (any(sand_vals < 0, na.rm = TRUE) ||
+        any(silt_vals < 0, na.rm = TRUE) ||
+        any(clay_vals < 0, na.rm = TRUE)) {
+      cli::cli_abort("Texture values contain negative numbers - check OSSL data quality")
+    }
+
+    ## Check mass balance (OSSL stores as % not g/kg, so sum should be ~100) ----
+
+    total <- sand_vals + silt_vals + clay_vals
+    mean_total <- mean(total, na.rm = TRUE)
+    max_dev <- max(abs(total - mean_total), na.rm = TRUE)
+
+    ## Detect units: if mean ~100, it's %, if mean ~1000, it's g/kg -------------
+
+    if (mean_total > 500) {
+      ## g/kg units (sum should be ~1000)
+      expected_sum <- 1000
+      severe_threshold <- 50
+    } else {
+      ## Percentage units (sum should be ~100)
+      expected_sum <- 100
+      severe_threshold <- 5
+    }
+
+    max_dev_from_expected <- max(abs(total - expected_sum), na.rm = TRUE)
+
+    if (max_dev_from_expected > severe_threshold) {
+      cli::cli_abort(
+        "Texture components don't sum to expected total ({expected_sum})",
+        "i" = "Max deviation: {round(max_dev_from_expected, 2)}. Check OSSL data quality"
+      )
+    }
+
     ## Apply ILR transformation -------------------------------------------------
 
     ilr_coords <- texture_to_ilr(
@@ -220,6 +261,19 @@ prepare_cluster_splits <- function(cluster_data,
 
     external_test <- external_test %>%
       dplyr::rename(Response = !!rlang::sym(property_col))
+  }
+
+  ## Remove unused ILR coordinate to prevent data leakage ---------------------
+
+  if (is_texture_property(property) && !is.null(ilr_coordinate)) {
+
+    ## Remove the OTHER coordinate (keep only the one being trained)
+    other_coord <- if (ilr_coordinate == 1) "ilr_2" else "ilr_1"
+
+    if (other_coord %in% names(training_pool)) {
+      training_pool <- training_pool %>% dplyr::select(-!!other_coord)
+      external_test <- external_test %>% dplyr::select(-!!other_coord)
+    }
   }
 
   ## ---------------------------------------------------------------------------
@@ -486,9 +540,10 @@ optimize_config_for_cluster <- function(cluster_splits,
     config_results[[i]] <- result$metrics %>%
       dplyr::mutate(
         config_id = paste(config$model, config$preprocessing, config$feature_selection, sep = "_"),
-        model = config$model,
-        preprocessing = config$preprocessing,
-        feature_selection = config$feature_selection
+        model = as.character(config$model),
+        preprocessing = as.character(config$preprocessing),
+        transformation = as.character(config$transformation),
+        feature_selection = as.character(config$feature_selection)
       )
 
     if (verbose && result$status == "success") {
@@ -543,7 +598,25 @@ optimize_config_for_cluster <- function(cluster_splits,
     verbose = FALSE
   )
 
-  if (verbose && final_result$status == "success") {
+  ## Validate training succeeded -----------------------------------------------
+
+  if (final_result$status != "success") {
+    cli::cli_abort(
+      "Final model training failed for winning config",
+      "i" = "Config: {winning_config$model} | {winning_config$preprocessing}",
+      "i" = "Status: {final_result$status}",
+      "i" = "Check if cluster has sufficient samples or try different configs"
+    )
+  }
+
+  if (is.null(final_result$workflow)) {
+    cli::cli_abort(
+      "Training succeeded but workflow is NULL",
+      "i" = "This is a bug - report to maintainer"
+    )
+  }
+
+  if (verbose) {
     cli::cli_text("│  ├─ Final metrics: RPD={round(final_result$metrics$rpd, 2)}, CCC={round(final_result$metrics$ccc, 3)}")
     cli::cli_text("│  └─ Model ready")
   }
@@ -632,16 +705,23 @@ train_and_score_config <- function(config,
   safely_execute(
     build_recipe(
       input_data               = train_data,
-      spectral_transformation  = config$preprocessing,
-      response_transformation  = config$transformation,
-      feature_selection_method = config$feature_selection,
+      spectral_transformation  = as.character(config$preprocessing),
+      response_transformation  = as.character(config$transformation),
+      feature_selection_method = as.character(config$feature_selection),
       covariate_selection      = NULL,  # No covariates in library mode
       covariate_data           = NULL,
       covariate_interactions   = FALSE
     ),
     error_message = "Recipe build failed"
   ) %>%
-    handle_results(abort_on_null = FALSE) -> recipe_obj
+    handle_results(
+      error_title = "Recipe build failed",
+      error_hints = c(
+        "Config: {as.character(config$model)} | {as.character(config$preprocessing)}",
+        "Data structure issue - check Sample_ID, Project, Response columns"
+      ),
+      abort_on_null = FALSE
+    ) -> recipe_obj
 
   if (is.null(recipe_obj)) {
     return(list(
@@ -656,7 +736,7 @@ train_and_score_config <- function(config,
   ## Step 2: Define model specification
   ## ---------------------------------------------------------------------------
 
-  model_spec <- define_model_specifications(config$model)
+  model_spec <- define_model_specifications(as.character(config$model))
 
   ## ---------------------------------------------------------------------------
   ## Step 3: Create workflow
@@ -671,10 +751,17 @@ train_and_score_config <- function(config,
   ## ---------------------------------------------------------------------------
 
   safely_execute(
-    rsample::vfold_cv(train_data, v = cv_folds, strata = !!rlang::sym(property_col)),
+    rsample::vfold_cv(train_data, v = cv_folds, strata = Response),
     error_message = "CV fold creation failed"
   ) %>%
-    handle_results(abort_on_null = FALSE) -> cv_folds_obj
+    handle_results(
+      error_title = "CV fold creation failed",
+      error_hints = c(
+        "May need more samples ({nrow(train_data)} for {cv_folds}-fold CV)",
+        "Try reducing cv_folds or increasing cluster size"
+      ),
+      abort_on_null = FALSE
+    ) -> cv_folds_obj
 
   if (is.null(cv_folds_obj)) {
     return(list(
@@ -686,7 +773,32 @@ train_and_score_config <- function(config,
   }
 
   ## ---------------------------------------------------------------------------
-  ## Step 5: Hyperparameter tuning with tune_grid
+  ## Step 5: Finalize mtry if needed (random forest hyperparameter)
+  ## ---------------------------------------------------------------------------
+
+  ## Check if mtry is part of the parameter set --------------------------------
+
+  param_set <- workflows::extract_parameter_set_dials(wf)
+
+  ## Bake the data to get the final dataset, then finalize the param set ------
+
+  if ("mtry" %in% param_set$name) {
+
+    recipe_obj %>%
+      recipes::prep() %>%
+      recipes::bake(new_data = NULL) %>%
+      dplyr::select(-Response) -> eval_data
+
+    param_set <- dials::finalize(param_set, eval_data)
+
+    # Explicit cleanup to prevent memory accumulation
+    rm(eval_data)
+    invisible(gc(verbose = FALSE))
+
+  }
+
+  ## ---------------------------------------------------------------------------
+  ## Step 6: Hyperparameter tuning with tune_grid
   ## ---------------------------------------------------------------------------
 
   ## Create metric set with custom spectroscopy metrics ------------------------
@@ -703,11 +815,12 @@ train_and_score_config <- function(config,
 
   safely_execute(
     tune::tune_grid(
-      wf,
-      resamples = cv_folds_obj,
-      grid      = grid_size,
-      metrics   = metric_set_custom,
-      control   = tune::control_grid(allow_par = TRUE, save_pred = FALSE)
+      object     = wf,
+      resamples  = cv_folds_obj,
+      grid       = grid_size,
+      metrics    = metric_set_custom,
+      param_info = param_set,  # Pass finalized params
+      control    = tune::control_grid(allow_par = TRUE, save_pred = FALSE)
     ),
     error_message = "tune_grid failed"
   ) %>%
@@ -730,18 +843,24 @@ train_and_score_config <- function(config,
 
   best_params <- tune::select_best(tune_results, metric = "rpd")
 
-  ## Get CV metrics for best parameters ----------------------------------------
+  ## Get CV metrics using collect_metrics (long format) ------------------------
 
-  best_metrics <- tune::show_best(tune_results, metric = "rpd", n = 1)
+  all_metrics <- tune::collect_metrics(tune_results)
 
-  ## Extract our metrics -------------------------------------------------------
+  ## Filter to best params and extract each metric -----------------------------
 
   metrics_out <- tibble::tibble(
-    rpd  = best_metrics$mean[best_metrics$.metric == "rpd"],
-    ccc  = best_metrics$mean[best_metrics$.metric == "ccc"],
-    rsq  = best_metrics$mean[best_metrics$.metric == "rsq"],
-    rmse = best_metrics$mean[best_metrics$.metric == "rmse"]
+    rpd  = all_metrics %>% dplyr::filter(.metric == "rpd") %>% dplyr::slice(1) %>% dplyr::pull(mean),
+    ccc  = all_metrics %>% dplyr::filter(.metric == "ccc") %>% dplyr::slice(1) %>% dplyr::pull(mean),
+    rsq  = all_metrics %>% dplyr::filter(.metric == "rsq") %>% dplyr::slice(1) %>% dplyr::pull(mean),
+    rmse = all_metrics %>% dplyr::filter(.metric == "rmse") %>% dplyr::slice(1) %>% dplyr::pull(mean)
   )
+
+  ## Handle case where metrics are missing (failed CV) -------------------------
+
+  if (nrow(metrics_out) == 0 || all(is.na(metrics_out))) {
+    metrics_out <- tibble::tibble(rpd = NA_real_, ccc = NA_real_, rsq = NA_real_, rmse = NA_real_)
+  }
 
   ## ---------------------------------------------------------------------------
   ## Step 7: Optionally fit final workflow

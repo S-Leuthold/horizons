@@ -156,8 +156,9 @@ prepare_library_for_training <- function(property,
 
   list(
     library_data_raw = lib_result$library_data_raw,  # With cluster_id column
-    gmm_model        = gmm_result$model,
+    gmm_result       = gmm_result,                   # Full GMM result structure
     pca_model        = lib_result$pca_model,
+    n_samples        = nrow(lib_result$library_data_raw),
     n_clusters       = gmm_result$n_clusters,
     cluster_sizes    = gmm_result$cluster_sizes,
     property         = property
