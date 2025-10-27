@@ -25,6 +25,7 @@ Imports:
     butcher,
     cli,
     cluster,
+    compositions,
     corpcor,
     data.table,
     daymetr,

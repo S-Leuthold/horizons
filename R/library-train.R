@@ -140,11 +140,22 @@ prepare_cluster_splits <- function(cluster_data,
 
   ## Rename property column to Response (build_recipe expects this) ------------
 
-  training_pool <- training_pool %>%
-    dplyr::rename(Response = !!rlang::sym(property_col))
+  ## If Response already exists, remove it first (avoid duplicate column) ------
 
-  external_test <- external_test %>%
-    dplyr::rename(Response = !!rlang::sym(property_col))
+  if ("Response" %in% names(training_pool) && property_col != "Response") {
+    training_pool <- training_pool %>% dplyr::select(-Response)
+    external_test <- external_test %>% dplyr::select(-Response)
+  }
+
+  ## Now safely rename property column → Response ------------------------------
+
+  if (property_col != "Response") {
+    training_pool <- training_pool %>%
+      dplyr::rename(Response = !!rlang::sym(property_col))
+
+    external_test <- external_test %>%
+      dplyr::rename(Response = !!rlang::sym(property_col))
+  }
 
   ## ---------------------------------------------------------------------------
   ## Step 1.4: Assemble result

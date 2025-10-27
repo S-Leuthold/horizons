@@ -177,7 +177,7 @@ test_that("preprocess_library_spectra applies SNV correctly", {
 
   ## Create synthetic spectra
   test_spectra <- matrix(rnorm(100 * 700, mean = 0.5, sd = 0.1), nrow = 100)
-  colnames(test_spectra) <- paste0("X", 600:1299)
+  colnames(test_spectra) <- paste0(600:1299)
   test_df <- tibble::as_tibble(test_spectra)
 
   ## Preprocess with SNV (always applied)
@@ -197,8 +197,15 @@ test_that("preprocess_library_spectra applies SNV correctly", {
 
 test_that("preprocess_library_spectra removes water bands when enabled", {
 
-  test_spectra <- matrix(rnorm(50 * 700), nrow = 50)
-  colnames(test_spectra) <- paste0("X", seq(600, 4000, length.out = 700))
+  ## Create test data with integer wavenumbers (like real OSSL)
+  ## Include wavenumbers in water bands (3000-3600, 1600-1650) for testing removal
+  wavenumbers <- c(seq(600, 1599, by = 5),    # Below water bands
+                   seq(1610, 1640, by = 5),    # Inside second water band (should be removed)
+                   seq(1660, 2999, by = 5),    # Between water bands
+                   seq(3100, 3500, by = 5))    # Inside first water band (should be removed)
+
+  test_spectra <- matrix(rnorm(50 * length(wavenumbers)), nrow = 50)
+  colnames(test_spectra) <- paste0(wavenumbers)
   test_df <- tibble::as_tibble(test_spectra)
 
   ## With water band removal
@@ -212,16 +219,16 @@ test_that("preprocess_library_spectra removes water bands when enabled", {
   expect_lt(ncol(processed), ncol(test_df))
 
   ## Water band wavelengths should be absent
-  wn <- as.numeric(gsub("X", "", names(processed)))
-  expect_false(any(wn >= 3000 & wn <= 3600))
-  expect_false(any(wn >= 1600 & wn <= 1650))
+  wn <- as.numeric(gsub("^X", "", names(processed)))  # Handle numeric or X-prefixed
+  expect_false(any(wn >= 3000 & wn <= 3600, na.rm = TRUE))
+  expect_false(any(wn >= 1600 & wn <= 1650, na.rm = TRUE))
 
 })
 
 test_that("preprocess_library_spectra applies SNV consistently", {
 
   test_spectra <- matrix(rnorm(50 * 700), nrow = 50)
-  colnames(test_spectra) <- paste0("X", 600:1299)
+  colnames(test_spectra) <- paste0(600:1299)
   test_df <- tibble::as_tibble(test_spectra)
 
   ## Apply preprocessing (SNV)
@@ -282,7 +289,7 @@ test_that("project_to_library_pca projects unknowns correctly", {
 
   ## Create library PCA
   library_data <- matrix(rnorm(1000 * 700), nrow = 1000)
-  colnames(library_data) <- paste0("X", 600:1299)
+  colnames(library_data) <- paste0(600:1299)
   pca_result <- horizons:::perform_pca_on_library(
     tibble::as_tibble(library_data),
     variance_threshold = 0.99,
@@ -291,7 +298,7 @@ test_that("project_to_library_pca projects unknowns correctly", {
 
   ## Create unknowns (same wavelength grid)
   unknowns <- matrix(rnorm(50 * 700), nrow = 50)
-  colnames(unknowns) <- paste0("X", 600:1299)
+  colnames(unknowns) <- paste0(600:1299)
 
   ## Project to PCA space
   projected <- horizons:::project_to_library_pca(
@@ -433,7 +440,7 @@ test_that("preprocessing handles edge cases", {
 
   ## Single sample
   single <- matrix(rnorm(700), nrow = 1)
-  colnames(single) <- paste0("X", 600:1299)
+  colnames(single) <- paste0(600:1299)
 
   expect_no_error({
     horizons:::preprocess_library_spectra(
@@ -445,7 +452,7 @@ test_that("preprocessing handles edge cases", {
 
   ## All zeros (degenerate case)
   zeros <- matrix(0, nrow = 10, ncol = 700)
-  colnames(zeros) <- paste0("X", 600:1299)
+  colnames(zeros) <- paste0(600:1299)
 
   ## SNV on zeros should handle gracefully (avoid division by zero)
   result <- horizons:::preprocess_library_spectra(
@@ -464,7 +471,7 @@ test_that("PCA handles low-variance data", {
 
   ## Create data with very low variance
   low_var <- matrix(rnorm(100 * 700, sd = 0.001), nrow = 100)
-  colnames(low_var) <- paste0("X", 600:1299)
+  colnames(low_var) <- paste0(600:1299)
 
   ## PCA should still work (might use fewer components)
   pca_result <- horizons:::perform_pca_on_library(

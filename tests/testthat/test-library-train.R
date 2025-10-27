@@ -31,7 +31,7 @@ make_synthetic_cluster_data <- function(n = 100, n_wavelengths = 50, seed = 123)
 
   ## Spectral columns
   spectra <- matrix(rnorm(n * n_wavelengths, mean = 0.5, sd = 0.1), nrow = n)
-  colnames(spectra) <- paste0("X", seq(600, 1200, length.out = n_wavelengths))
+  colnames(spectra) <- paste0(seq(600, 1200, length.out = n_wavelengths))
 
   dplyr::bind_cols(data, tibble::as_tibble(spectra))
 
@@ -51,7 +51,7 @@ test_that("prepare_cluster_splits creates 80/20 split correctly", {
 
   ## Add spectral columns
   spectra <- matrix(rnorm(1000 * 50), nrow = 1000)
-  colnames(spectra) <- paste0("X", seq(600, 1000, length.out = 50))
+  colnames(spectra) <- paste0(seq(600, 1000, length.out = 50))
   cluster_data <- dplyr::bind_cols(cluster_data, tibble::as_tibble(spectra))
 
   ## Create split
@@ -70,9 +70,9 @@ test_that("prepare_cluster_splits creates 80/20 split correctly", {
   expect_equal(nrow(splits$training_pool), 800)
   expect_equal(nrow(splits$external_test), 200)
 
-  ## No overlap between sets
-  train_ids <- splits$training_pool$sample_id
-  test_ids  <- splits$external_test$sample_id
+  ## No overlap between sets (use Sample_ID - standardized naming)
+  train_ids <- splits$training_pool$Sample_ID
+  test_ids  <- splits$external_test$Sample_ID
   expect_length(intersect(train_ids, test_ids), 0)
 
 })
@@ -84,9 +84,9 @@ test_that("prepare_cluster_splits is deterministic with seed", {
   split1 <- horizons:::prepare_cluster_splits(cluster_data, "clay", seed = 456)
   split2 <- horizons:::prepare_cluster_splits(cluster_data, "clay", seed = 456)
 
-  ## Should get identical splits
-  expect_equal(split1$training_pool$sample_id, split2$training_pool$sample_id)
-  expect_equal(split1$external_test$sample_id, split2$external_test$sample_id)
+  ## Should get identical splits (use Sample_ID - standardized naming)
+  expect_equal(split1$training_pool$Sample_ID, split2$training_pool$Sample_ID)
+  expect_equal(split1$external_test$Sample_ID, split2$external_test$Sample_ID)
 
 })
 

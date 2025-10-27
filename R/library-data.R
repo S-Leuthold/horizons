@@ -790,8 +790,9 @@ preprocess_library_spectra <- function(spectral_data,
     if (verbose) cli::cli_text("├─ {cli::style_bold('Removing water bands')} [EXPERIMENTAL]...")
 
     ## Extract wavenumbers from column names -----------------------------------
+    ## Handle both numeric (600) and X-prefixed (X600) formats ----------------
 
-    wavenumbers <- as.numeric(gsub("X", "", spectral_cols))
+    wavenumbers <- as.numeric(gsub("^X", "", spectral_cols))
 
     ## Identify columns to keep (outside water regions) ------------------------
 

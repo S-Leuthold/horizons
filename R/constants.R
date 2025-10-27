@@ -219,3 +219,19 @@ OPTIMAL_CONFIGS_V1 <- tibble::tribble(
   "aluminum_total", 3,     "xgboost",       "snv_deriv1",   "none",         "cars",           0.85,        "Boosting",
   "aluminum_total", 4,     "plsr",          "sg",           "none",         "none",           0.82,        "Linear"
 )
+
+## Property Classifications --------------------------------------------------
+
+# Texture properties (compositional - require ILR transformation)
+TEXTURE_PROPERTIES <- c("sand", "silt", "clay")
+
+# Properties requiring non-negativity constraints
+NONNEGATIVE_PROPERTIES <- c(
+  "oc", "soc", "total_carbon", "carbonate",
+  "total_nitrogen", "iron_total", "aluminum_total"
+)
+
+# Properties with bounded ranges (list: property = c(min, max))
+BOUNDED_PROPERTIES <- list(
+  ph = c(0, 14)
+)
