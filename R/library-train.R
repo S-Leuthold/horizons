@@ -152,9 +152,9 @@ prepare_cluster_splits <- function(cluster_data,
     max_dev_from_expected <- max(abs(total - expected_sum), na.rm = TRUE)
 
     if (max_dev_from_expected > severe_threshold) {
-      cli::cli_abort(
-        "Texture components don't sum to expected total ({expected_sum})",
-        "i" = "Max deviation: {round(max_dev_from_expected, 2)}. Check OSSL data quality"
+      cli::cli_warn(
+        "Texture sum deviation: {round(max_dev_from_expected, 2)} from expected {expected_sum}",
+        "i" = "ILR will normalize - continuing anyway"
       )
     }
 
@@ -456,6 +456,8 @@ optimize_config_for_cluster <- function(cluster_splits,
                                         final_grid_size     = 10,
                                         quick_cv_folds      = 3,
                                         final_cv_folds      = 10,
+                                        allow_par           = TRUE,
+                                        n_workers           = 4,
                                         seed                = 123,
                                         verbose             = TRUE) {
 
@@ -520,8 +522,10 @@ optimize_config_for_cluster <- function(cluster_splits,
     config <- candidate_configs[i, ]
 
     if (verbose) {
-      config_name <- paste0(config$model, " | ", config$preprocessing, " | ", config$feature_selection)
-      cli::cli_text("│  │  ├─ [{i}/{nrow(candidate_configs)}] {config_name}...")
+      model_name <- get_readable_model_name(as.character(config$model))
+      preproc_name <- get_readable_preprocessing_name(as.character(config$preprocessing))
+      feature_name <- get_readable_feature_selection_name(as.character(config$feature_selection))
+      cli::cli_text("│  │  ├─ [{i}/{nrow(candidate_configs)}] {model_name} + {preproc_name} + {feature_name}...")
     }
 
     ## Train and score (quick, no workflow) ------------------------------------
@@ -533,6 +537,8 @@ optimize_config_for_cluster <- function(cluster_splits,
       grid_size = quick_grid_size,
       cv_folds = quick_cv_folds,
       return_workflow = FALSE,
+      allow_par = allow_par,
+      n_workers = n_workers,
       seed = seed,
       verbose = FALSE
     )
@@ -570,7 +576,23 @@ optimize_config_for_cluster <- function(cluster_splits,
 
   if (verbose) {
     cli::cli_text("│  │")
-    cli::cli_text("│  └─ Winner: {winning_config$model} (score={round(winning_config$composite_score, 3)})")
+    cli::cli_text("│  ├─ {cli::style_bold('Config rankings')} (top {min(5, nrow(config_scores))}):")
+
+    top_configs <- config_scores %>%
+      dplyr::arrange(dplyr::desc(composite_score)) %>%
+      dplyr::slice(1:min(5, dplyr::n()))
+
+    for (i in 1:nrow(top_configs)) {
+      cfg <- top_configs[i, ]
+      model_name <- get_readable_model_name(as.character(cfg$model))
+      preproc_name <- get_readable_preprocessing_name(as.character(cfg$preprocessing))
+      cli::cli_text("│  │  #{i}: {model_name} + {preproc_name} (RPD={round(cfg$rpd, 2)}, score={round(cfg$composite_score, 2)})")
+    }
+
+    winner_name <- get_readable_model_name(as.character(winning_config$model))
+
+    cli::cli_text("│  │")
+    cli::cli_text("│  └─ Winner: {winner_name}")
   }
 
   ## ---------------------------------------------------------------------------
@@ -594,6 +616,8 @@ optimize_config_for_cluster <- function(cluster_splits,
     grid_size = final_grid_size,
     cv_folds = final_cv_folds,
     return_workflow = TRUE,  # Keep the workflow!
+    allow_par = allow_par,
+    n_workers = n_workers,
     seed = seed,
     verbose = FALSE
   )
@@ -691,6 +715,8 @@ train_and_score_config <- function(config,
                                    grid_size       = 5,
                                    cv_folds        = 3,
                                    return_workflow = FALSE,
+                                   allow_par       = TRUE,
+                                   n_workers       = 4,
                                    seed            = 123,
                                    verbose         = FALSE) {
 
@@ -798,7 +824,36 @@ train_and_score_config <- function(config,
   }
 
   ## ---------------------------------------------------------------------------
-  ## Step 6: Hyperparameter tuning with tune_grid
+  ## Step 6: Setup parallel backend (if requested)
+  ## ---------------------------------------------------------------------------
+
+  if (allow_par && n_workers > 1) {
+
+    is_linux <- .Platform$OS.type == "unix" && Sys.info()["sysname"] == "Linux"
+
+    if (is_linux) {
+
+      ## Linux: Use doMC (fork-based) -------------------------------------------
+
+      options(mc.cores = n_workers, mc.preschedule = FALSE)
+      RNGkind("L'Ecuyer-CMRG")
+      set.seed(seed)
+
+    } else {
+
+      ## macOS/Windows: Use future (PSOCK-based) --------------------------------
+
+      if (!inherits(future::plan(), "sequential")) {
+        ## User already set up parallel - respect it
+      } else {
+        future::plan(future::multisession, workers = n_workers)
+        on.exit(future::plan(future::sequential), add = TRUE)
+      }
+    }
+  }
+
+  ## ---------------------------------------------------------------------------
+  ## Step 7: Hyperparameter tuning with tune_grid
   ## ---------------------------------------------------------------------------
 
   ## Create metric set with custom spectroscopy metrics ------------------------
@@ -814,14 +869,16 @@ train_and_score_config <- function(config,
   ## Tune grid ------------------------------------------------------------------
 
   safely_execute(
-    tune::tune_grid(
-      object     = wf,
-      resamples  = cv_folds_obj,
-      grid       = grid_size,
-      metrics    = metric_set_custom,
-      param_info = param_set,  # Pass finalized params
-      control    = tune::control_grid(allow_par = TRUE, save_pred = FALSE)
-    ),
+    suppressMessages(suppressWarnings(
+      tune::tune_grid(
+        object     = wf,
+        resamples  = cv_folds_obj,
+        grid       = grid_size,
+        metrics    = metric_set_custom,
+        param_info = param_set,  # Pass finalized params
+        control    = tune::control_grid(allow_par = TRUE, save_pred = FALSE, verbose = FALSE)
+      )
+    )),
     error_message = "tune_grid failed"
   ) %>%
     handle_results(abort_on_null = FALSE) -> tune_results

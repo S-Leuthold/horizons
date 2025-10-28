@@ -62,7 +62,9 @@
 predict_library <- function(spectra,
                            property,
                            debug_mode = FALSE,
-                           verbose = TRUE) {
+                           allow_par  = TRUE,
+                           n_workers  = 4,
+                           verbose    = TRUE) {
 
   ## ---------------------------------------------------------------------------
   ## Step 1: Input Validation
@@ -117,21 +119,30 @@ predict_library <- function(spectra,
 
   ## Auto-expand texture properties -------------------------------------------
 
+  properties_requested <- property  # Save original request for output filtering
+
   if (any(property %in% c("sand", "silt", "clay"))) {
 
-    ## Check if user requested all 3 or just some
     texture_requested <- property[property %in% c("sand", "silt", "clay")]
     texture_complete  <- c("sand", "silt", "clay")
 
     if (!all(texture_complete %in% property)) {
 
-      ## Expand to all 3 components
+      ## Partial request - expand to all 3 (needed for ILR)
       property <- unique(c(setdiff(property, texture_requested), texture_complete))
 
       if (verbose) {
         cli::cli_text("│")
-        cli::cli_text("├─ Texture is compositional - expanding to all 3 components:")
-        cli::cli_text("│  └─ Predicting: sand, silt, clay (mass balance guaranteed)")
+        cli::cli_text("├─ Texture: ILR requires all 3 components (sand, silt, clay)")
+        cli::cli_text("│  └─ Will return: {paste(texture_requested, collapse = ', ')}")
+      }
+
+    } else {
+
+      ## All 3 requested - inform about compositional handling
+      if (verbose) {
+        cli::cli_text("│")
+        cli::cli_text("├─ Texture: Using ILR transformation for mass balance")
       }
     }
   }
@@ -143,42 +154,79 @@ predict_library <- function(spectra,
   }
 
   ## ---------------------------------------------------------------------------
-  ## Step 2: Process each property
+  ## Step 2: Deduplicate properties (texture as single unit)
+  ## ---------------------------------------------------------------------------
+
+  ## Group texture properties into single processing unit ----------------------
+
+  properties_to_process <- property
+
+  if (any(property %in% c("sand", "silt", "clay"))) {
+    ## Remove individual texture props, add "texture" marker
+    properties_to_process <- c(
+      setdiff(property, c("sand", "silt", "clay")),
+      "texture"
+    )
+  }
+
+  ## ---------------------------------------------------------------------------
+  ## Step 3: Process each property (or texture group)
   ## ---------------------------------------------------------------------------
 
   all_predictions <- list()
 
-  for (prop in property) {
+  for (prop in properties_to_process) {
+
+    ## Determine display name for verbose output --------------------------------
+
+    if (prop == "texture") {
+      texture_requested <- properties_requested[properties_requested %in% c("sand", "silt", "clay")]
+      texture_list <- paste(texture_requested, collapse = ", ")
+      display_msg <- glue::glue("Texture (requested: {texture_list})")
+      prop_for_library <- "sand"  # Any texture component works (all share library)
+    } else {
+      display_msg <- prop
+      prop_for_library <- prop
+    }
 
     if (verbose) {
       cli::cli_text("│")
-      cli::cli_text("├─ {cli::style_bold('Processing:')} {prop}")
+      cli::cli_text("├─ {cli::style_bold('Processing:')} {display_msg}")
     }
 
     ## -------------------------------------------------------------------------
     ## Step 2.1: Load and prepare library for this property
     ## -------------------------------------------------------------------------
 
-    ## Let prepare_library_for_training() output naturally (same tree level) ----
+    if (verbose) {
+      cli::cli_text("│  │")
+      cli::cli_text("│  ├─ Loading library...")
+    }
 
     library_prep <- prepare_library_for_training(
-      property           = prop,
-      k_range            = if (debug_mode) c(5) else c(5, 7, 9, 11),  # Single K for speed
+      property           = prop_for_library,
+      k_range            = if (debug_mode) c(5) else c(5, 7, 9, 11),
       variance_threshold = 0.99,
       remove_water_bands = FALSE,
-      max_samples        = if (debug_mode) 2000 else NULL,  # Larger for valid training
+      max_samples        = if (debug_mode) 2000 else NULL,
       seed               = 123,
-      verbose            = verbose
+      verbose            = FALSE  # Suppress nested trees
     )
 
+    if (verbose) {
+      cli::cli_text("│  │  └─ {library_prep$n_samples} samples, {library_prep$n_clusters} clusters")
+    }
+
     ## -------------------------------------------------------------------------
-    ## Step 2.2: Preprocess unknowns (same pipeline as library for clustering)
+    ## Step 2.2: Preprocess and assign unknowns
     ## -------------------------------------------------------------------------
 
-    if (verbose) cli::cli_text("│  │")
-    if (verbose) cli::cli_text("│  ├─ {cli::style_bold('Preprocessing unknowns')}...")
+    if (verbose) {
+      cli::cli_text("│  │")
+      cli::cli_text("│  ├─ Preprocessing unknowns...")
+    }
 
-    ## Extract spectral columns only (no Sample_ID in preprocessing) -----------
+    ## Extract spectral columns only -------------------------------------------
 
     unknown_spectral <- spectra[, spectral_cols, drop = FALSE]
 
@@ -191,19 +239,10 @@ predict_library <- function(spectra,
     )
 
     if (is.null(unknown_preprocessed)) {
-      cli::cli_abort("Failed to preprocess unknown spectra for {prop}")
+      cli::cli_abort("Failed to preprocess unknown spectra")
     }
 
-    if (verbose) {
-      cli::cli_text("│  │  └─ {nrow(unknown_preprocessed)} spectra preprocessed")
-    }
-
-    ## -------------------------------------------------------------------------
-    ## Step 2.3: Project unknowns into library PCA space
-    ## -------------------------------------------------------------------------
-
-    if (verbose) cli::cli_text("│  │")
-    if (verbose) cli::cli_text("│  ├─ {cli::style_bold('Projecting to PCA space')}...")
+    ## Project to PCA space ----------------------------------------------------
 
     unknown_pca_scores <- project_to_library_pca(
       new_data  = unknown_preprocessed,
@@ -211,11 +250,9 @@ predict_library <- function(spectra,
       verbose   = FALSE
     )
 
-    ## Subset to n_components used for clustering (GMM trained on subset) -------
-    ## GMM was trained on the first n_components from PCA
-    ## We need to match that dimension
+    ## Subset to match GMM dimensions ------------------------------------------
 
-    n_components_for_clustering <- library_prep$gmm_result$model$d  # d = dimensions in mclust
+    n_components_for_clustering <- library_prep$gmm_result$model$d
 
     if (!is.null(n_components_for_clustering) &&
         !is.na(n_components_for_clustering) &&
@@ -224,41 +261,34 @@ predict_library <- function(spectra,
     }
 
     if (is.null(unknown_pca_scores)) {
-      cli::cli_abort("Failed to project unknowns to PCA space for {prop}")
+      cli::cli_abort("Failed to project unknowns to PCA space")
     }
 
-    if (verbose) {
-      cli::cli_text("│  │  └─ {nrow(unknown_pca_scores)} samples × {ncol(unknown_pca_scores)} components")
-    }
-
-    ## -------------------------------------------------------------------------
-    ## Step 2.4: Assign unknowns to clusters
-    ## -------------------------------------------------------------------------
-
-    if (verbose) cli::cli_text("│  │")
-    if (verbose) cli::cli_text("│  ├─ {cli::style_bold('Assigning to clusters')}...")
+    ## Assign to clusters ------------------------------------------------------
 
     unknown_assignments <- assign_to_clusters(
       unknown_pca_scores = unknown_pca_scores,
-      gmm_model          = library_prep$gmm_result,  # Pass full GMM result structure
+      gmm_model          = library_prep$gmm_result,
       verbose            = FALSE
     )
 
     if (is.null(unknown_assignments)) {
-      cli::cli_abort("Failed to assign unknowns to clusters for {prop}")
+      cli::cli_abort("Failed to assign unknowns to clusters")
     }
 
     if (verbose) {
-      cluster_counts <- table(unknown_assignments$cluster_id)
-      cli::cli_text("│  │  └─ Assigned to {length(cluster_counts)} cluster{?s}")
+      n_clusters_assigned <- length(unique(unknown_assignments$cluster_id))
+      cli::cli_text("│  │  └─ Preprocessed → PCA → assigned to {n_clusters_assigned} cluster{?s}")
     }
 
     ## -------------------------------------------------------------------------
     ## Step 2.5: Train models and predict per cluster
     ## -------------------------------------------------------------------------
 
-    if (verbose) cli::cli_text("│  │")
-    if (verbose) cli::cli_text("│  ├─ {cli::style_bold('Training and prediction')}")
+    if (verbose) {
+      cli::cli_text("│  │")
+      cli::cli_text("│  └─ Training & prediction")
+    }
 
     cluster_predictions <- list()
     unique_clusters     <- unique(unknown_assignments$cluster_id)
@@ -267,38 +297,32 @@ predict_library <- function(spectra,
 
       n_unknowns_in_cluster <- sum(unknown_assignments$cluster_id == clust_id)
 
-      if (verbose) {
-        cli::cli_text("│  │  │")
-        cli::cli_text("│  │  ├─ {cli::style_bold('Cluster {clust_id}')} ({n_unknowns_in_cluster} unknown{?s})")
-      }
-
-      ## Get library data for this cluster -------------------------------------
-
       cluster_data <- library_prep$library_data_raw %>%
         dplyr::filter(cluster_id == clust_id)
 
       if (verbose) {
-        cli::cli_text("│  │  │  ├─ Training data: {nrow(cluster_data)} samples")
+        cli::cli_text("│     │")
+        cli::cli_text("│     ├─ Cluster {clust_id}: {n_unknowns_in_cluster} unknown{?s}, {nrow(cluster_data)} training")
       }
 
       ## ---------------------------------------------------------------------
       ## Step 2.5a: Prepare splits (with ILR if texture)
       ## ---------------------------------------------------------------------
 
-      if (is_texture_property(prop)) {
+      if (prop == "texture") {
 
         ## Texture: prepare splits for BOTH ILR coordinates ------------------
 
         splits_ilr1 <- prepare_cluster_splits(
           cluster_data   = cluster_data,
-          property       = prop,
+          property       = prop_for_library,  # Use "sand" not "texture"
           ilr_coordinate = 1,
           seed           = 123
         )
 
         splits_ilr2 <- prepare_cluster_splits(
           cluster_data   = cluster_data,
-          property       = prop,
+          property       = prop_for_library,  # Use "sand" not "texture"
           ilr_coordinate = 2,
           seed           = 123
         )
@@ -309,7 +333,7 @@ predict_library <- function(spectra,
 
         splits <- prepare_cluster_splits(
           cluster_data = cluster_data,
-          property     = prop,
+          property     = prop_for_library,
           seed         = 123
         )
 
@@ -319,40 +343,31 @@ predict_library <- function(spectra,
       ## Step 2.5b: OPTIMIZE and TRAIN - Select best config and train final model
       ## ---------------------------------------------------------------------
 
-      if (is_texture_property(prop)) {
+      if (prop == "texture") {
 
         ## TEXTURE: Optimize and train BOTH ILR coordinates ------------------
 
-        if (verbose) {
-          cli::cli_text("│  │  │  │")
-          cli::cli_text("│  │  │  ├─ {cli::style_bold('Training ilr_1 model')}...")
-        }
-
         optimal_ilr1 <- optimize_config_for_cluster(
           cluster_splits     = splits_ilr1,
-          property           = prop,
+          property           = prop_for_library,
           n_configs_test     = if (debug_mode) 3 else 10,
           config_subset_prop = if (debug_mode) 0.5 else 0.2,
           quick_cv_folds     = if (debug_mode) 3 else 3,
           final_cv_folds     = if (debug_mode) 5 else 10,
+          allow_par          = allow_par,
+          n_workers          = n_workers,
           verbose            = verbose
         )
 
-        if (verbose) {
-          cli::cli_text("│  │  │  │")
-          cli::cli_text("│  │  │  ├─ {cli::style_bold('Training ilr_2 model')}...")
-        }
-
-        ## Use same config for ilr_2 (for simplicity in v1.0) ----------------
-        ## TODO Phase 2: Could optimize separately if needed
-
         optimal_ilr2 <- optimize_config_for_cluster(
           cluster_splits     = splits_ilr2,
-          property           = prop,
+          property           = prop_for_library,
           n_configs_test     = if (debug_mode) 3 else 10,
           config_subset_prop = if (debug_mode) 0.5 else 0.2,
           quick_cv_folds     = if (debug_mode) 3 else 3,
           final_cv_folds     = if (debug_mode) 5 else 10,
+          allow_par          = allow_par,
+          n_workers          = n_workers,
           verbose            = verbose
         )
 
@@ -371,18 +386,15 @@ predict_library <- function(spectra,
 
         ## NON-TEXTURE: Optimize and train single model ----------------------
 
-        if (verbose) {
-          cli::cli_text("│  │  │  │")
-          cli::cli_text("│  │  │  ├─ {cli::style_bold('Optimizing and training')}...")
-        }
-
         optimal_result <- optimize_config_for_cluster(
           cluster_splits     = splits,
-          property           = prop,
-          n_configs_test     = if (debug_mode) 3 else 10,  # Fewer configs in debug
-          config_subset_prop = if (debug_mode) 0.5 else 0.2,  # Larger subset
+          property           = prop_for_library,
+          n_configs_test     = if (debug_mode) 3 else 10,
+          config_subset_prop = if (debug_mode) 0.5 else 0.2,
           quick_cv_folds     = if (debug_mode) 3 else 3,
-          final_cv_folds     = if (debug_mode) 5 else 10,  # Fewer folds
+          final_cv_folds     = if (debug_mode) 5 else 10,
+          allow_par          = allow_par,
+          n_workers          = n_workers,
           verbose            = verbose
         )
 
@@ -391,12 +403,7 @@ predict_library <- function(spectra,
 
       }
 
-      if (verbose) {
-        config_desc <- paste0(winning_config$model, " | ",
-                             winning_config$preprocessing, " | ",
-                             winning_config$feature_selection)
-        cli::cli_text("│  │  │  │  └─ Config: {config_desc}")
-      }
+      ## Optimization output shows model details, no need for duplicate summary
 
       ## ---------------------------------------------------------------------
       ## Step 2.5c: PREDICT on unknowns in this cluster
@@ -411,12 +418,12 @@ predict_library <- function(spectra,
 
       ## Generate predictions -------------------------------------------------
 
-      if (is_texture_property(prop)) {
+      if (prop == "texture") {
 
         predictions <- predict_texture_from_models(
           unknowns   = unknowns_in_cluster,
           models     = models,
-          property   = prop,
+          property   = prop_for_library,  # Not used, but pass actual prop
           cluster_id = clust_id,
           config     = winning_config,
           verbose    = verbose
@@ -427,7 +434,7 @@ predict_library <- function(spectra,
         predictions <- predict_standard_from_model(
           unknowns   = unknowns_in_cluster,
           model      = model,
-          property   = prop,
+          property   = prop_for_library,
           cluster_id = clust_id,
           config     = winning_config,
           verbose    = verbose
@@ -435,7 +442,11 @@ predict_library <- function(spectra,
 
       }
 
-      ## Store cluster predictions --------------------------------------------
+      ## Summary for this cluster ----------------------------------------------
+
+      if (verbose) {
+        cli::cli_text("│     │  └─ Predicted {nrow(predictions)} sample{?s}")
+      }
 
       cluster_predictions[[paste0("cluster_", clust_id)]] <- predictions
 
@@ -445,6 +456,10 @@ predict_library <- function(spectra,
 
     prop_predictions <- dplyr::bind_rows(cluster_predictions)
 
+    if (verbose) {
+      cli::cli_text("│     └─ Total: {nrow(prop_predictions)} prediction{?s}")
+    }
+
     ## Store results for this property ----------------------------------------
 
     all_predictions[[prop]] <- prop_predictions
@@ -452,10 +467,15 @@ predict_library <- function(spectra,
   }
 
   ## ---------------------------------------------------------------------------
-  ## Step 3: Combine and return results
+  ## Step 3: Combine and filter to requested properties
   ## ---------------------------------------------------------------------------
 
-  dplyr::bind_rows(all_predictions)
+  all_results <- dplyr::bind_rows(all_predictions)
+
+  ## Filter to originally requested properties (texture auto-expansion) ---------
+
+  all_results %>%
+    dplyr::filter(property %in% properties_requested)
 
 }
 

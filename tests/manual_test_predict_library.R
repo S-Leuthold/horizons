@@ -57,7 +57,7 @@ cat("  - Unknown spectra: ", nrow(unknown_spectra), "samples ×", length(spectra
 
 ## Save true pH values for validation ------------------------------------------
 
-true_ph <- unknown_samples$clay.tot_usda.a334_w.pct
+true_ph <- unknown_samples$clay.tot_usda.a334_w.pct*10
 names(true_ph) <- unknown_spectra$Sample_ID
 
 cat("  - True pH values (for validation):\n")
@@ -77,6 +77,8 @@ predictions <- horizons:::predict_library(
   spectra    = unknown_spectra,
   property   = "clay",
   debug_mode = TRUE,  # Fast: 500 samples, K ∈ {5,7} only
+  allow_par  = TRUE,
+  n_workers  = 8,
   verbose    = TRUE
 )
 

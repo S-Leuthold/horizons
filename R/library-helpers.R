@@ -37,10 +37,7 @@ predict_texture_from_models <- function(unknowns,
                                        config,
                                        verbose = TRUE) {
 
-  if (verbose) {
-    cli::cli_text("│  │  │  │")
-    cli::cli_text("│  │  │  ├─ {cli::style_bold('Predicting texture')}...")
-  }
+  ## Verbose output handled by orchestrator
 
   ## ---------------------------------------------------------------------------
   ## Step 1: Prepare unknowns data (add Project if missing)
@@ -64,9 +61,7 @@ predict_texture_from_models <- function(unknowns,
 
   ilr2_pred <- predict(models$ilr_2, new_data = unknowns)$.pred
 
-  if (verbose) {
-    cli::cli_text("│  │  │  │  ├─ ILR predictions generated")
-  }
+  ## Verbose output handled by orchestrator
 
   ## ---------------------------------------------------------------------------
   ## Step 2: Back-transform to texture space
@@ -78,9 +73,7 @@ predict_texture_from_models <- function(unknowns,
     as_gkg = TRUE
   )
 
-  if (verbose) {
-    cli::cli_text("│  │  │  │  ├─ Back-transformed to texture")
-  }
+  ## Verbose output handled by orchestrator
 
   ## ---------------------------------------------------------------------------
   ## Step 3: Validate mass balance
@@ -90,11 +83,7 @@ predict_texture_from_models <- function(unknowns,
   max_deviation <- max(abs(total - 1000))
 
   if (max_deviation > 1) {
-    cli::cli_alert_warning("Mass balance deviation: {round(max_deviation, 2)} g/kg")
-  }
-
-  if (verbose) {
-    cli::cli_text("│  │  │  │  └─ Mass balance: max deviation = {round(max_deviation, 2)} g/kg")
+    cli::cli_alert_warning("Texture mass balance deviation: {round(max_deviation, 2)} g/kg")
   }
 
   ## ---------------------------------------------------------------------------
@@ -137,16 +126,11 @@ predict_standard_from_model <- function(unknowns,
                                        config,
                                        verbose = TRUE) {
 
-  if (verbose) {
-    cli::cli_text("│  │  │  │")
-    cli::cli_text("│  │  │  ├─ {cli::style_bold('Predicting {property}')}...")
-  }
+  ## Verbose output handled by orchestrator
 
   ## ---------------------------------------------------------------------------
   ## Step 1: Prepare unknowns data (add Project if missing)
   ## ---------------------------------------------------------------------------
-
-  ## Recipe expects Project column (build_recipe adds it to training data) -----
 
   if (!"Project" %in% names(unknowns)) {
     unknowns <- unknowns %>%
@@ -159,10 +143,6 @@ predict_standard_from_model <- function(unknowns,
 
   predictions <- predict(model, new_data = unknowns)$.pred
 
-  if (verbose) {
-    cli::cli_text("│  │  │  │  ├─ Predictions generated")
-  }
-
   ## ---------------------------------------------------------------------------
   ## Step 2: Apply bounds enforcement
   ## ---------------------------------------------------------------------------
@@ -172,16 +152,6 @@ predict_standard_from_model <- function(unknowns,
     property = property,
     verbose  = FALSE
   )
-
-  n_bounded <- sum(predictions != predictions_bounded, na.rm = TRUE)
-
-  if (verbose && n_bounded > 0) {
-    cli::cli_text("│  │  │  │  ├─ {n_bounded} prediction{?s} bounded")
-  }
-
-  if (verbose) {
-    cli::cli_text("│  │  │  │  └─ Range: [{round(min(predictions_bounded, na.rm=TRUE), 2)}, {round(max(predictions_bounded, na.rm=TRUE), 2)}]")
-  }
 
   ## ---------------------------------------------------------------------------
   ## Step 3: Format results

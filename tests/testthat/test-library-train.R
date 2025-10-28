@@ -129,9 +129,12 @@ test_that("prepare_cluster_splits handles texture with ILR transformation", {
     seed = 123
   )
 
-  ## Should have ILR coordinates in data
-  expect_true("ilr_2" %in% names(splits$training_pool))  # ilr_1 was renamed to Response
+  ## Should have Response column (ilr_1 renamed)
   expect_true("Response" %in% names(splits$training_pool))
+
+  ## ilr_2 should be REMOVED (prevents data leakage)
+  expect_false("ilr_2" %in% names(splits$training_pool))
+  expect_false("ilr_1" %in% names(splits$training_pool))  # Renamed to Response
 
   ## Response should be ILR values (unbounded, can be negative)
   expect_true(any(splits$training_pool$Response < 0) || any(splits$training_pool$Response > 5))
