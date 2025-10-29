@@ -279,7 +279,25 @@ predict_library <- function(spectra,
 
     if (verbose) {
       n_clusters_assigned <- length(unique(unknown_assignments$cluster_id))
-      cli::cli_text("│  │  └─ Preprocessed → PCA → assigned to {n_clusters_assigned} cluster{?s}")
+      cli::cli_text("│  │  ├─ SNV → PCA ({ncol(unknown_pca_scores)} components)")
+      cli::cli_text("│  │  └─ Cluster assignments:")
+
+      ## Show distribution and confidence for each cluster
+      cluster_summary <- unknown_assignments %>%
+        dplyr::group_by(cluster_id) %>%
+        dplyr::summarise(
+          n = dplyr::n(),
+          avg_prob = mean(probability, na.rm = TRUE),
+          .groups = "drop"
+        ) %>%
+        dplyr::arrange(dplyr::desc(n))
+
+      for (i in 1:nrow(cluster_summary)) {
+        cs <- cluster_summary[i, ]
+        pct <- round(100 * cs$n / nrow(unknown_assignments))
+        conf_flag <- if (cs$avg_prob < 0.7) " ⚠" else ""
+        cli::cli_text("│  │     • Cluster {cs$cluster_id}: {cs$n} sample{?s} ({pct}%) - confidence: {round(cs$avg_prob, 2)}{conf_flag}")
+      }
     }
 
     ## -------------------------------------------------------------------------

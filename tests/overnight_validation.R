@@ -186,7 +186,7 @@ for (prop in ALL_PROPERTIES) {
         r2 = cor(pred, true_value, use = "complete.obs")^2,
         ## Spectroscopy metrics
         rpd = sd(true_value, na.rm = TRUE) / rmse,
-        ccc = NA_real_,  # Would need yardstick::ccc_vec
+        ccc = horizons::ccc_vec(truth = true_value, estimate = pred)[1],
         .groups = "drop"
       )
 
