@@ -1398,22 +1398,30 @@ OPTIMAL_CONFIGS_V0 <- tribble(
 - **Prediction generation** with bounds enforcement
 - **End-to-end validated** with real OSSL data
 
-**✅ TESTED & VERIFIED (2025-10-27):**
-- Property: pH
-- Unknowns: 5 OSSL samples (held out from library)
-- Results:
-  - True pH: [4.79, 9.04, 7.16, 5.60, 4.62]
-  - Predicted: [4.93, 9.00, 7.82, 5.63, 4.67]
-  - **MAE: 0.18 pH units** (excellent!)
-  - Clustered into 2 groups (cluster 2 and 3)
-  - Winning config: cubist with snv_deriv1 + correlation
+**✅ TESTED & VERIFIED (2025-10-27 - Session 3):**
+
+**pH Predictions:**
+- 5 OSSL samples (held out from library)
+- True: [4.79, 9.04, 7.16, 5.60, 4.62]
+- Predicted: [4.93, 9.00, 7.82, 5.63, 4.67]
+- **MAE: 0.18 pH units**
+- Clusters: 2 and 3, winner: Cubist
+
+**Clay Predictions (Texture via ILR):**
+- 5 OSSL samples
+- True: [212, 142, 109, 233, 144] g/kg
+- Predicted: [230, 151, 111, 227, 145] g/kg
+- **MAE: 6.75 g/kg (0.675%)**
+- Clusters: 1 and 4, winner: Cubist (both)
+- Returns only requested property (5 rows, not 15)
+- Mass balance working correctly
 
 **📊 FINAL STATS:**
-- 6,000+ lines across 7 modules
-- 193+ tests passing
-- 0 failures
-- Full workflow: ~2-3 minutes in debug mode
-- Phase 1: **COMPLETE** (all 6 milestones)
+- 6,200+ lines across 7 modules
+- 193+ tests passing, 0 failures
+- Full workflow: ~2-3 min (debug), ~10-15 min (full OSSL)
+- Parallel support: 4 workers (macOS: future, Linux: doMC)
+- Phase 1: **COMPLETE** (all 6 milestones) 🎉
 
 ---
 

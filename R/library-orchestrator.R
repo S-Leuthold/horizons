@@ -61,10 +61,11 @@
 #' @keywords internal
 predict_library <- function(spectra,
                            property,
-                           debug_mode = FALSE,
-                           allow_par  = TRUE,
-                           n_workers  = 4,
-                           verbose    = TRUE) {
+                           remove_water_bands = TRUE,
+                           debug_mode         = FALSE,
+                           allow_par          = TRUE,
+                           n_workers          = 4,
+                           verbose            = TRUE) {
 
   ## ---------------------------------------------------------------------------
   ## Step 1: Input Validation
@@ -207,7 +208,7 @@ predict_library <- function(spectra,
       property           = prop_for_library,
       k_range            = if (debug_mode) c(5) else c(5, 7, 9, 11),
       variance_threshold = 0.99,
-      remove_water_bands = FALSE,
+      remove_water_bands = remove_water_bands,  # User-controlled
       max_samples        = if (debug_mode) 2000 else NULL,
       seed               = 123,
       verbose            = FALSE  # Suppress nested trees
