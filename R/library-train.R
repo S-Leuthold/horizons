@@ -476,6 +476,7 @@ optimize_config_for_cluster <- function(cluster_splits,
 
   candidate_configs <- OPTIMAL_CONFIGS_V1 %>%
     dplyr::filter(property == !!property) %>%
+    dplyr::filter(model != "plsr") %>%  # TEMPORARY: Exclude PLSR (upstream bug)
     dplyr::arrange(rank) %>%
     dplyr::slice(1:min(n_configs_test, dplyr::n()))
 
