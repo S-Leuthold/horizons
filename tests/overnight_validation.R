@@ -11,6 +11,7 @@
 ## Estimated time: 8-12 hours (full OSSL, all properties, larger sample sizes)
 ##
 
+devtools::load_all()
 library(horizons)
 library(dplyr)
 library(tidyr)
@@ -156,7 +157,7 @@ for (prop in ALL_PROPERTIES) {
       debug_mode = FALSE,  # Use full OSSL
       allow_par = TRUE,
       n_workers = N_WORKERS,
-      verbose = FALSE  # Suppress output for cleaner logs
+      verbose = TRUE  # Suppress output for cleaner logs
     )
 
     cat("  Completed!\n\n")

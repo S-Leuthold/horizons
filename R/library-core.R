@@ -140,11 +140,7 @@ prepare_library_for_training <- function(property,
   ## Step 4: Clean up and assemble result
   ## ---------------------------------------------------------------------------
 
-  ## Free PCA scores (only needed for clustering) -------------------------------
-
-  pca_scores_temp <- lib_result$pca_scores
-  rm(pca_scores_temp)
-  gc(verbose = FALSE)
+  ## (PCA scores cleanup happens below - exclude from return) -------------------
 
   if (verbose) {
     cli::cli_text("")
@@ -152,17 +148,23 @@ prepare_library_for_training <- function(property,
     cli::cli_text("")
   }
 
-  ## Assemble final result -----------------------------------------------------
+  ## Assemble final result (exclude pca_scores - not needed after clustering) ---
 
   list(
     library_data_raw = lib_result$library_data_raw,  # With cluster_id column
     gmm_result       = gmm_result,                   # Full GMM result structure
-    pca_model        = lib_result$pca_model,
+    pca_model        = lib_result$pca_model,         # For projecting unknowns
+    # pca_scores NOT included - only needed during clustering (~100 MB saved)
     n_samples        = nrow(lib_result$library_data_raw),
     n_clusters       = gmm_result$n_clusters,
     cluster_sizes    = gmm_result$cluster_sizes,
     property         = property
   ) -> result
+
+  ## Free original lib_result with pca_scores ----------------------------------
+
+  rm(lib_result, gmm_result)
+  gc(verbose = FALSE)
 
   return(result)
 

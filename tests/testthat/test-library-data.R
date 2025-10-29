@@ -78,15 +78,17 @@ test_that("load_ossl_raw loads data for valid property", {
 
   ## Should succeed
   expect_null(safe_result$error)
-  expect_s3_class(safe_result$result, "data.frame")
+  expect_s3_class(safe_result$result, "tbl_df")  # Returns tibble
 
   result <- safe_result$result
 
-  ## Should have spectral columns
-  expect_gt(ncol(result), 100)  # ~700 wavenumbers
+  ## Should have spectral columns (1701 wavenumbers)
+  expect_true(ncol(result) > 100)
 
-  ## Should have clay measurements
+  ## Should have texture measurements (clay returns all 3: sand, silt, clay)
   expect_true(any(grepl("clay", names(result), ignore.case = TRUE)))
+  expect_true(any(grepl("sand", names(result), ignore.case = TRUE)))
+  expect_true(any(grepl("silt", names(result), ignore.case = TRUE)))
 
   ## Should have requested sample size (or less if OSSL is smaller)
   expect_lte(nrow(result), 500)

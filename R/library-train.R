@@ -556,7 +556,11 @@ optimize_config_for_cluster <- function(cluster_splits,
       cli::cli_text("│  │  │  └─ RPD={round(result$metrics$rpd, 2)} CCC={round(result$metrics$ccc, 3)}")
     }
 
-    ## Clean up ------------------------------------------------------------------
+    ## Aggressive cleanup after each config test --------------------------------
+
+    if (exists("result") && !is.null(result$workflow)) {
+      result$workflow <- butcher::butcher(result$workflow)
+    }
 
     rm(result)
     gc(verbose = FALSE)
@@ -598,6 +602,11 @@ optimize_config_for_cluster <- function(cluster_splits,
   ## ---------------------------------------------------------------------------
   ## Step 3.4: Stage 2 - Train winning config on full training pool
   ## ---------------------------------------------------------------------------
+
+  ## Free Stage 1 intermediate results before Stage 2 --------------------------
+
+  rm(config_results, config_metrics, config_test_data)
+  gc(verbose = FALSE)
 
   if (verbose) cli::cli_text("│")
   if (verbose) cli::cli_text("├─ {cli::style_bold('Stage 2: Final Training')}...")
@@ -842,6 +851,9 @@ train_and_score_config <- function(config,
     } else {
 
       ## macOS/Windows: Use future (PSOCK-based) --------------------------------
+
+      ## Increase globals size limit for large spectral datasets
+      options(future.globals.maxSize = 8 * 1024^3)  # 8 GB
 
       if (!inherits(future::plan(), "sequential")) {
         ## User already set up parallel - respect it
