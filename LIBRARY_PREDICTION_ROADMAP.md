@@ -1387,6 +1387,24 @@ OPTIMAL_CONFIGS_V0 <- tribble(
 
 ## SESSION HANDOFF - Start Here Next Time
 
+### **Quick Start Commands:**
+
+```bash
+cd ~/Desktop/_brain/1_Current_Projects/horizons/horizons-package
+
+# Check what's running
+ps aux | grep overnight
+
+# View progress
+tail -f validation_results.txt
+
+# Load package
+Rscript -e "devtools::load_all()"
+
+# Quick test
+Rscript tests/manual_test_predict_library.R
+```
+
 ### **Where We Are (End of Session 3 - PHASE 1 COMPLETE!):**
 
 **✅ FULL PIPELINE WORKING:**
@@ -1418,10 +1436,72 @@ OPTIMAL_CONFIGS_V0 <- tribble(
 
 **📊 FINAL STATS:**
 - 6,200+ lines across 7 modules
-- 193+ tests passing, 0 failures
+- 195 tests passing, 0 failures
 - Full workflow: ~2-3 min (debug), ~10-15 min (full OSSL)
-- Parallel support: 4 workers (macOS: future, Linux: doMC)
+- Parallel support: 8 GB limit, 4-8 workers
 - Phase 1: **COMPLETE** (all 6 milestones) 🎉
+
+### **CRITICAL: Next Session Priorities**
+
+**MUST INVESTIGATE:**
+1. **Texture prediction issue**
+   - MAE too high despite decent R²
+   - Compare: independent models vs ILR approach
+   - Test different ILR bases
+   - Check if units are causing bias
+
+2. **Run overnight validation** (corrected script ready)
+   - Launch: `nohup Rscript tests/overnight_validation.R > validation_results.txt 2>&1 &`
+   - Review results tomorrow
+   - Compare to Ng 2022 benchmarks
+
+3. **PLSR fix** (Sam working on upstream)
+   - Re-enable when plsmod patched
+   - Critical for carbon properties
+
+**NICE TO HAVE:**
+4. Tree output hierarchy cleanup
+5. Cluster-specific metrics
+6. Water band removal A/B test
+
+---
+
+### **Session 3 Final Commits (10 total):**
+1. M1.5 ILR transformations + bounds (ccf0ff4)
+2. M1.5 pipeline integration (05f8230)
+3. M1.6 orchestrator complete (efeabb5, 5578e23)
+4. Polish: verbose output, deduplication, readable configs (5b5eeab)
+5. Water bands lever + overnight script (054e9f7)
+6. Memory fixes: 8 GB limit, cleanup (44fb17a)
+7. Cluster assignment info (d1682a1)
+8. PLSR exclusion (239180f)
+9. Texture units fix (2c7fc4c)
+
+### **Known Issues for Next Session:**
+
+**HIGH PRIORITY:**
+1. **Texture prediction poor performance**
+   - Sand: R² = 0.82, but MAE = 296 g/kg (29.6% error!)
+   - Clay: R² = 0.76, MAE = 178 g/kg (17.8% error!)
+   - Silt: R² = 0.64, MAE = 373 g/kg (37.3% error!)
+   - **Issue:** ILR transformation may not preserve variance well
+   - **Next:** Investigate ILR basis, try alternative approaches
+
+2. **PLSR upstream bug**
+   - Blocked from using gold standard for carbon properties
+   - Sam investigating fix in plsmod package
+   - Temporarily excluded from testing
+
+**MEDIUM:**
+3. Tree output hierarchy still messy (nested functions break tree)
+4. Need cluster-specific metric reporting
+
+**COMPLETED THIS SESSION:**
+- ✅ Full prediction pipeline operational
+- ✅ Auto-optimization working
+- ✅ Parallel support (8 GB limit)
+- ✅ Memory leaks fixed
+- ✅ 195 tests passing
 
 ---
 
