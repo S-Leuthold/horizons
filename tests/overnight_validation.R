@@ -129,6 +129,12 @@ for (prop in ALL_PROPERTIES) {
                      sand = !!sand_col,
                      silt = !!silt_col,
                      clay = !!clay_col) %>%
+        dplyr::mutate(
+          ## OSSL stores as % (0-100), convert to g/kg to match predictions
+          sand = sand * 10,
+          silt = silt * 10,
+          clay = clay * 10
+        ) %>%
         tidyr::pivot_longer(cols = c(sand, silt, clay),
                            names_to = "property",
                            values_to = "true_value")
