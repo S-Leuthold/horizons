@@ -531,21 +531,6 @@ calculate_conformal_margin <- function(point_cv_preds,
   ## Step 2: Match OOF point predictions with OOF quantile predictions by .row
   ## ---------------------------------------------------------------------------
 
-  ## DEBUG: Check input data ---------------------------------------------------
-
-  if (verbose) {
-    cli::cli_text("│  │  │  │  ├─ DEBUG: Point predictions")
-    cli::cli_text("│  │  │  │  │  ├─ .row range: [{min(point_cv_preds$.row)}, {max(point_cv_preds$.row)}]")
-    cli::cli_text("│  │  │  │  │  ├─ .pred range: [{round(min(point_cv_preds$.pred),2)}, {round(max(point_cv_preds$.pred),2)}]")
-    cli::cli_text("│  │  │  │  │  └─ n = {nrow(point_cv_preds)}")
-
-    cli::cli_text("│  │  │  │  ├─ DEBUG: Quantile predictions")
-    cli::cli_text("│  │  │  │  │  ├─ .row range: [{min(quantile_cv_preds$.row)}, {max(quantile_cv_preds$.row)}]")
-    cli::cli_text("│  │  │  │  │  ├─ .pred_lower range: [{round(min(quantile_cv_preds$.pred_lower),2)}, {round(max(quantile_cv_preds$.pred_lower),2)}]")
-    cli::cli_text("│  │  │  │  │  ├─ .pred_upper range: [{round(min(quantile_cv_preds$.pred_upper),2)}, {round(max(quantile_cv_preds$.pred_upper),2)}]")
-    cli::cli_text("│  │  │  │  │  └─ n = {nrow(quantile_cv_preds)}")
-  }
-
   calibration_data <- point_cv_preds %>%
     dplyr::inner_join(quantile_cv_preds, by = ".row", suffix = c("_point", "_quantile"))
 
@@ -561,10 +546,6 @@ calculate_conformal_margin <- function(point_cv_preds,
       "Only {nrow(calibration_data)}/{expected_n} samples matched between point and quantile predictions",
       "i" = "Check .row indices in CV predictions"
     )
-  }
-
-  if (verbose) {
-    cli::cli_text("│  │  │  │  └─ DEBUG: Matched {nrow(calibration_data)} rows")
   }
 
   ## ---------------------------------------------------------------------------
@@ -1114,15 +1095,6 @@ train_cluster_models_with_uq <- function(cluster_data,
   if (sum(!valid_idx) > 0) {
     cli::cli_warn("{sum(!valid_idx)} samples have NA residuals - excluding from quantile training")
     residual_train_data <- residual_train_data[valid_idx, ]
-  }
-
-  ## DEBUG: Verify residuals are actually in Response column -------------------
-
-  if (verbose) {
-    cli::cli_text("│  │  ├─ DEBUG: Residual training data")
-    cli::cli_text("│  │  │  ├─ Response (residual) range: [{round(min(residual_train_data$Response),2)}, {round(max(residual_train_data$Response),2)}]")
-    cli::cli_text("│  │  │  ├─ Response (residual) mean: {round(mean(residual_train_data$Response),4)}")
-    cli::cli_text("│  │  │  └─ Response (residual) SD: {round(sd(residual_train_data$Response),3)}")
   }
 
   ## Apply butcher to point workflow now that we're done with it ----------------
