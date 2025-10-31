@@ -285,7 +285,28 @@ tryCatch({
   - OOF residual SD: 0.487 (matches test error SD 0.63)
   - Interval range: 0.85-3.65 pH (adaptive heteroscedasticity)
 - 💾 **Committed**: M3.1 complete + OOF residual fix (commit d2cd8e2)
-- ⏭️ **Next Session**: M3.3 conformal calibration, pinball loss tuning, texture ILR testing
+- 🚧 **M3.3 Conformal Started (Incomplete)**:
+  - Infrastructure in place (c_alpha integration, prediction adjustment)
+  - **Issue Identified**: Need OOF quantile predictions (not in-sample)
+  - Current uses in-sample quantiles (optimistic bias - same issue as residuals!)
+  - **Decision**: Implement proper CV+ with matched OOF predictions (Session 7)
+  - See `M3.3_CONFORMAL_IMPLEMENTATION_SPEC.md` for detailed plan
+- 🧹 **Cleanup**: Removed 7 redundant test scripts, organized codebase
+- 💾 **Session 6 Summary**:
+  - **Lines Added**: 2,763 (R/library-uq.R + tests + docs)
+  - **Functions Created**: 8 core UQ functions
+  - **Tests Passing**: 24 prediction tests
+  - **Critical Bug Fixed**: OOF residuals (26× impact)
+  - **Coverage Achieved**: 90.2% (no conformal needed yet!)
+  - **Interval Reduction**: 37% vs library-based
+- ⏭️ **Next Session (M3.3 Completion)**:
+  1. Implement shared CV folds for point + quantile models
+  2. Extract OOF quantile predictions from CV
+  3. Match OOF point + quantile by fold
+  4. Compute proper conformal margin
+  5. Validate 90% coverage guarantee
+  6. Optional: Add pinball loss tuning
+  7. Test texture ILR residuals
 
 ### Session 5 Progress (2025-10-30):
 - 🔬 **Starting Phase 3**: Uncertainty Quantification

@@ -112,20 +112,23 @@ uq_result <- train_cluster_models_with_uq(
 cli::cli_alert_success("✓ UQ training complete")
 cli::cli_text("Result components: {paste(names(uq_result), collapse = ', ')}")
 
-## Test residual-based predictions
+## Test residual-based predictions WITH conformal calibration
 uq_preds <- predict_with_uq(
   point_workflow = uq_result$point_model,
   quantile_workflow = uq_result$quantile_model,
-  new_data = test_data
+  new_data = test_data,
+  c_alpha = uq_result$c_alpha  # Apply conformal margin
 )
 
 cli::cli_alert_success("✓ Residual-based predictions generated")
 
 ## Residual diagnostics
-cli::cli_h2("Residual Diagnostics")
+cli::cli_h2("Residual & Conformal Diagnostics")
 cli::cli_alert_info("Residual stats from training:")
 cli::cli_text("  Mean: {round(uq_result$residual_stats$mean, 4)} (should be ~0)")
 cli::cli_text("  SD: {round(uq_result$residual_stats$sd, 3)}")
+cli::cli_alert_info("Conformal calibration:")
+cli::cli_text("  c_alpha: {round(uq_result$c_alpha, 4)} (margin added to intervals)")
 
 ## Combined output
 combined <- bind_cols(

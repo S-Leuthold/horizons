@@ -20,7 +20,8 @@ License: MIT + file LICENSE
 Encoding: UTF-8
 LazyData: false
 Remotes:
-    spectral-cockpit/opusreader2
+    spectral-cockpit/opusreader2,
+    S-Leuthold/plsmod-fork@fix/plsr-tune-grid-dimension
 Imports:
     butcher,
     cli,

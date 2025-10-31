@@ -137,7 +137,7 @@ for (prop in ALL_PROPERTIES) {
         ) %>%
         tidyr::pivot_longer(cols = c(sand, silt, clay),
                            names_to = "property",
-                           values_to = "true_value")
+                           values_to = "true_value")1
     } else {
       ## Standard property
       mapping <- horizons:::get_library_property_mapping()

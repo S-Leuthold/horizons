@@ -720,12 +720,7 @@ Auto-optimized predictions that test multiple configs and select best performer 
 - ✅ **Code Review**: Used code-review agent to identify root cause
 - **Acceptance**: ✅ Unbiased residuals, 90% coverage achieved
 
-**Milestone 3.3: CV+ Conformal Calibration**
-  - Test for heteroscedasticity (Breusch-Pagan test)
-  - Document findings: Do we NEED quantile models?
-- **Acceptance**: Evidence documented that quantile models capture conditional uncertainty
-
-**Milestone 3.3: CV+ Conformal Calibration**
+**Milestone 3.3: CV+ Conformal Calibration** 🚧 IN PROGRESS (2025-10-31)
 - Implement cross-conformal prediction (CV+ approach):
   ```r
   # Workflow:
