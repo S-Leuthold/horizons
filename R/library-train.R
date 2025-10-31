@@ -889,7 +889,7 @@ train_and_score_config <- function(config,
         grid       = grid_size,
         metrics    = metric_set_custom,
         param_info = param_set,  # Pass finalized params
-        control    = tune::control_grid(allow_par = TRUE, save_pred = FALSE, verbose = FALSE)
+        control    = tune::control_grid(allow_par = TRUE, save_pred = TRUE, verbose = FALSE)  # Save for residual UQ
       )
     )),
     error_message = "tune_grid failed"
@@ -912,6 +912,13 @@ train_and_score_config <- function(config,
   ## Select best by RPD (primary spectroscopy metric) --------------------------
 
   best_params <- tune::select_best(tune_results, metric = "rpd")
+
+  ## Extract out-of-fold predictions for residual UQ ---------------------------
+
+  cv_predictions <- tune::collect_predictions(tune_results) %>%
+    dplyr::inner_join(best_params, by = names(best_params)) %>%
+    dplyr::select(.row, Response, .pred) %>%
+    dplyr::arrange(.row)
 
   ## Get CV metrics using collect_metrics (long format) ------------------------
 
@@ -967,10 +974,11 @@ train_and_score_config <- function(config,
   ## ---------------------------------------------------------------------------
 
   list(
-    metrics      = metrics_out,
-    workflow     = final_workflow,
-    best_params  = best_params,
-    status       = "success"
+    metrics        = metrics_out,
+    workflow       = final_workflow,
+    best_params    = best_params,
+    cv_predictions = cv_predictions,  # OOF predictions for unbiased residuals
+    status         = "success"
   ) -> result
 
   return(result)
