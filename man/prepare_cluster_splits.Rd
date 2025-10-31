@@ -4,12 +4,26 @@
 \alias{prepare_cluster_splits}
 \title{Library Model Training and Optimization}
 \usage{
-prepare_cluster_splits(cluster_data, property, train_prop = 0.8, seed = 123)
+prepare_cluster_splits(
+  cluster_data,
+  property,
+  ilr_coordinate = NULL,
+  train_prop = 0.8,
+  seed = 123
+)
 }
 \arguments{
 \item{cluster_data}{Tibble with cluster samples (spectra + property measurements)}
 
 \item{property}{Character. Property name (e.g., "clay")}
+
+\item{ilr_coordinate}{Integer. For texture properties, which ILR coordinate to use as Response (1 or 2).
+NULL for non-texture properties. When texture property requested, function will:
+\itemize{
+\item Apply ILR transformation to all 3 texture components
+\item Use ilr_coordinate to select which coordinate becomes Response column
+\item Both coordinates will be present in data for potential dual training
+}}
 
 \item{train_prop}{Numeric (0-1). Proportion for training pool. Default: 0.8}
 
@@ -22,6 +36,7 @@ List with:
 \item{external_test}{Tibble, 20\% of samples for UQ calibration (never used in training)}
 \item{n_train}{Integer, number of training samples}
 \item{n_test}{Integer, number of test samples}
+\item{ilr_coordinate}{Integer or NULL, tracks which ILR coordinate if texture}
 }
 }
 \description{

@@ -10,7 +10,10 @@ train_and_score_config(
   property_col,
   grid_size = 5,
   cv_folds = 3,
+  resamples = NULL,
   return_workflow = FALSE,
+  allow_par = TRUE,
+  n_workers = 4,
   seed = 123,
   verbose = FALSE
 )

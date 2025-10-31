@@ -724,6 +724,7 @@ train_and_score_config <- function(config,
                                    property_col,
                                    grid_size       = 5,
                                    cv_folds        = 3,
+                                   resamples       = NULL,  # NEW: Accept pre-made CV folds for shared training
                                    return_workflow = FALSE,
                                    allow_par       = TRUE,
                                    n_workers       = 4,
@@ -783,29 +784,41 @@ train_and_score_config <- function(config,
     workflows::add_model(model_spec)
 
   ## ---------------------------------------------------------------------------
-  ## Step 4: Create CV folds
+  ## Step 4: Create CV folds (or use provided folds for shared training)
   ## ---------------------------------------------------------------------------
 
-  safely_execute(
-    rsample::vfold_cv(train_data, v = cv_folds, strata = Response),
-    error_message = "CV fold creation failed"
-  ) %>%
-    handle_results(
-      error_title = "CV fold creation failed",
-      error_hints = c(
-        "May need more samples ({nrow(train_data)} for {cv_folds}-fold CV)",
-        "Try reducing cv_folds or increasing cluster size"
-      ),
-      abort_on_null = FALSE
-    ) -> cv_folds_obj
+  if (is.null(resamples)) {
 
-  if (is.null(cv_folds_obj)) {
-    return(list(
-      metrics = tibble::tibble(rpd = 0, ccc = 0, rsq = 0, rmse = 999),
-      workflow = NULL,
-      best_params = list(),
-      status = "cv_failed"
-    ))
+    ## Create new CV folds if not provided ---------------------------------------
+
+    safely_execute(
+      rsample::vfold_cv(train_data, v = cv_folds, strata = Response),
+      error_message = "CV fold creation failed"
+    ) %>%
+      handle_results(
+        error_title = "CV fold creation failed",
+        error_hints = c(
+          "May need more samples ({nrow(train_data)} for {cv_folds}-fold CV)",
+          "Try reducing cv_folds or increasing cluster size"
+        ),
+        abort_on_null = FALSE
+      ) -> cv_folds_obj
+
+    if (is.null(cv_folds_obj)) {
+      return(list(
+        metrics = tibble::tibble(rpd = 0, ccc = 0, rsq = 0, rmse = 999),
+        workflow = NULL,
+        best_params = list(),
+        status = "cv_failed"
+      ))
+    }
+
+  } else {
+
+    ## Use provided CV folds (for shared training with quantile models) ----------
+
+    cv_folds_obj <- resamples
+
   }
 
   ## ---------------------------------------------------------------------------

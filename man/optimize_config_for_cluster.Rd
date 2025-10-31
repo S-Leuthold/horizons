@@ -13,6 +13,8 @@ optimize_config_for_cluster(
   final_grid_size = 10,
   quick_cv_folds = 3,
   final_cv_folds = 10,
+  allow_par = TRUE,
+  n_workers = 4,
   seed = 123,
   verbose = TRUE
 )

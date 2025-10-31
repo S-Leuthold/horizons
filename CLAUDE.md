@@ -246,11 +246,51 @@ tryCatch({
 
 ---
 
-## CURRENT OBJECTIVES (2025-10-30)
+## CURRENT OBJECTIVES (2025-10-31)
 
-**Active Work**: Phase 3 - Uncertainty Quantification (Decoupled Quantile + Conformal)
+**Active Work**: Phase 3 - Uncertainty Quantification (CV+ Conformal Calibration)
 **Branch**: `uncertainty-quantification` (feature branch from main)
 **Roadmap**: `LIBRARY_PREDICTION_ROADMAP.md` (comprehensive - **UPDATE THIS AS WE BUILD**)
+
+### Session 7 Progress (2025-10-31):
+- 🎉 **M3.3 CV+ CONFORMAL COMPLETE**: Statistically valid coverage guarantee achieved!
+- ✅ **Shared CV Folds Architecture**:
+  - Modified `train_and_score_config()` to accept optional `resamples` parameter
+  - Modified `train_quantile_model()` to accept optional `resamples` parameter
+  - Updated `train_cluster_models_with_uq()` to create folds ONCE and share between models
+- ✅ **OOF Quantile Extraction**:
+  - Implemented fold loop to extract q05/q95 predictions from assessment sets
+  - Uses `rsample::complement()` to track `.row` indices for alignment
+  - Returns `list(workflow, cv_quantiles)` instead of just workflow (breaking change)
+- ✅ **Proper Conformal Calibration**:
+  - Rewrote `calculate_conformal_margin()` to use matched OOF predictions from BOTH models
+  - Joins by `.row` to ensure point and quantile predictions aligned by sample
+  - Fixes optimistic bias from in-sample quantile predictions (same issue as M3.1 residuals!)
+- 🐛 **Critical Bug Fixed**: OOF loop was predicting on wrong data
+  - **Issue**: Used `rsample::assessment(split)` which has original Response values (pH)
+  - **Impact**: Quantile predictions were pH values (3-10 range) not residuals (-3 to +3)
+  - **Fix**: Extract indices and subset `train_data` with residuals as Response
+  - **Result**: Quantiles now correctly predict residuals!
+- ✅ **Validation Results** (n=1000, 80/20 split):
+  - **Base coverage**: 89.4% (OOF intervals before conformal)
+  - **c_alpha**: 0.0177 pH (tiny margin - base model well-calibrated!)
+  - **Test coverage**: 92% on n=200 independent samples ✓ (target 88-92%)
+  - **Mean width**: 2.17 pH (adaptive heteroscedasticity)
+  - **Width range**: 1.15-6.05 pH (varies by sample uncertainty)
+- 📊 **Coverage Guarantee Achieved**: CV+ conformal delivers statistical validity
+- 💾 **Files Modified**:
+  - `R/library-train.R`: Added `resamples` parameter to `train_and_score_config()`
+  - `R/library-uq.R`: Added shared folds + OOF extraction + proper conformal
+  - `DESCRIPTION`: Updated Collate field for new library-*.R files
+- 📋 **Test Scripts Created**:
+  - `tests/debug_m3.3_cv_plus_conformal.R`: Debug validation (n=500)
+  - `tests/manual_test_cv_plus_conformal.R`: Manual REPL test (n=1000, 80/20 split)
+- ⏭️ **Next Steps**:
+  1. Add pinball loss tuning (optimize quantile accuracy)
+  2. Test edge cases (small clusters, other properties)
+  3. Remove debug output (production-ready)
+  4. Update documentation
+  5. Mark M3.3 complete in roadmap
 
 ### Session 6 Progress (2025-10-31):
 - 🔬 **Phase 3 Implementation Started**: UQ infrastructure with TDD approach

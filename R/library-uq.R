@@ -469,21 +469,18 @@ repair_quantile_crossings <- function(predictions,
 ## Conformal Calibration
 ## -----------------------------------------------------------------------------
 
-#' Calculate Conformal Calibration Margin
+#' Calculate Conformal Calibration Margin with CV+
 #'
 #' @description
-#' Computes the conformal calibration margin (c_alpha) using the fitted quantile
-#' model and training data. Since ranger quantile models can extract multiple
-#' quantiles at prediction time, we can compute proper nonconformity scores
-#' by predicting q05/q95 on the training data and measuring violations.
+#' Computes the conformal calibration margin (c_alpha) using matched out-of-fold
+#' predictions from both point and quantile models. This is the PROPER CV+
+#' approach that avoids optimistic bias from in-sample quantile predictions.
 #'
-#' @param train_data Tibble with training data (must have Response column).
+#' @param point_cv_preds Tibble with OOF point predictions.
+#'   Must have columns: `.row`, `Response`, `.pred`
 #'
-#' @param point_workflow Fitted point prediction workflow.
-#'
-#' @param quantile_workflow Fitted quantile (residual) prediction workflow.
-#'
-#' @param point_cv_preds Tibble with OOF point predictions (for reference/validation).
+#' @param quantile_cv_preds Tibble with OOF quantile predictions.
+#'   Must have columns: `.row`, `.pred_lower`, `.pred_upper`
 #'
 #' @param alpha Numeric. Miscoverage rate (default: 0.10 for 90% intervals).
 #'
@@ -492,89 +489,131 @@ repair_quantile_crossings <- function(predictions,
 #' @return Numeric scalar: the conformal calibration margin c_alpha.
 #'
 #' @details
-#' ## Conformal Calibration Approach
+#' ## CV+ Conformal Calibration Approach
 #'
-#' Since we can't easily extract q05/q95 from tune_grid CV folds, we use
-#' a hybrid approach:
+#' This function implements PROPER conformal calibration with out-of-fold
+#' predictions from BOTH models:
 #'
-#' 1. Use the FITTED quantile model to predict q05/q95 residuals on training data
-#' 2. Add these to OOF point predictions to construct intervals
-#' 3. Compute nonconformity scores
+#' 1. Match OOF point predictions with OOF quantile predictions by `.row`
+#' 2. Construct intervals: point_OOF + quantile_residuals_OOF
+#' 3. Compute nonconformity scores on all training samples
 #' 4. Find c_alpha as (1-alpha) quantile of scores
 #'
-#' This is slightly optimistic (quantile model sees full training data) but:
-#' - More stable than pure holdout
-#' - Practical compromise for production
-#' - Base coverage already at 90.2% suggests well-calibrated
+#' **Why This Works:**
+#' - Point predictions are OOF (unbiased) ✓
+#' - Quantile predictions are OOF (unbiased) ✓
+#' - Both use SAME CV folds (aligned by sample) ✓
+#' - Result: Statistically valid coverage guarantee ✓
+#'
+#' **Previous Issue (FIXED in M3.3):**
+#' - Old version used in-sample quantile predictions (optimistic bias)
+#' - New version uses OOF quantiles from shared CV folds
+#' - Fixes the same issue we fixed for residuals in M3.1!
 #'
 #' @keywords internal
-calculate_conformal_margin <- function(train_data,
-                                      point_workflow,
-                                      quantile_workflow,
-                                      point_cv_preds,
+calculate_conformal_margin <- function(point_cv_preds,
+                                      quantile_cv_preds,
                                       alpha = 0.10,
                                       verbose = FALSE) {
 
   ## ---------------------------------------------------------------------------
-  ## Step 1: Get residual quantiles on training data
+  ## Step 1: Validate inputs
   ## ---------------------------------------------------------------------------
 
-  residual_quantiles <- predict_quantiles(
-    workflow  = quantile_workflow,
-    new_data  = train_data,
-    quantiles = c(0.05, 0.95)
-  )
+  if (is.null(quantile_cv_preds)) {
+    cli::cli_abort(
+      "OOF quantile predictions required for proper CV+ conformal calibration",
+      "i" = "This is a bug - train_quantile_model() should return cv_quantiles when resamples provided"
+    )
+  }
 
   ## ---------------------------------------------------------------------------
-  ## Step 2: Construct intervals using OOF point predictions + fitted quantiles
+  ## Step 2: Match OOF point predictions with OOF quantile predictions by .row
   ## ---------------------------------------------------------------------------
 
-  # Join OOF point predictions with quantile predictions (aligned by .row)
-  train_data_indexed <- train_data %>%
-    dplyr::mutate(.row = dplyr::row_number())
+  ## DEBUG: Check input data ---------------------------------------------------
 
-  calibration_data <- train_data_indexed %>%
-    dplyr::left_join(point_cv_preds, by = ".row", suffix = c("", "_oof")) %>%
-    dplyr::bind_cols(residual_quantiles)
+  if (verbose) {
+    cli::cli_text("│  │  │  │  ├─ DEBUG: Point predictions")
+    cli::cli_text("│  │  │  │  │  ├─ .row range: [{min(point_cv_preds$.row)}, {max(point_cv_preds$.row)}]")
+    cli::cli_text("│  │  │  │  │  ├─ .pred range: [{round(min(point_cv_preds$.pred),2)}, {round(max(point_cv_preds$.pred),2)}]")
+    cli::cli_text("│  │  │  │  │  └─ n = {nrow(point_cv_preds)}")
 
-  # Construct intervals: point_oof + residual_quantiles
+    cli::cli_text("│  │  │  │  ├─ DEBUG: Quantile predictions")
+    cli::cli_text("│  │  │  │  │  ├─ .row range: [{min(quantile_cv_preds$.row)}, {max(quantile_cv_preds$.row)}]")
+    cli::cli_text("│  │  │  │  │  ├─ .pred_lower range: [{round(min(quantile_cv_preds$.pred_lower),2)}, {round(max(quantile_cv_preds$.pred_lower),2)}]")
+    cli::cli_text("│  │  │  │  │  ├─ .pred_upper range: [{round(min(quantile_cv_preds$.pred_upper),2)}, {round(max(quantile_cv_preds$.pred_upper),2)}]")
+    cli::cli_text("│  │  │  │  │  └─ n = {nrow(quantile_cv_preds)}")
+  }
+
+  calibration_data <- point_cv_preds %>%
+    dplyr::inner_join(quantile_cv_preds, by = ".row", suffix = c("_point", "_quantile"))
+
+  ## Validate match -------------------------------------------------------------
+
+  if (nrow(calibration_data) == 0) {
+    cli::cli_abort("No matching rows between point and quantile OOF predictions")
+  }
+
+  expected_n <- nrow(point_cv_preds)
+  if (nrow(calibration_data) < expected_n) {
+    cli::cli_warn(
+      "Only {nrow(calibration_data)}/{expected_n} samples matched between point and quantile predictions",
+      "i" = "Check .row indices in CV predictions"
+    )
+  }
+
+  if (verbose) {
+    cli::cli_text("│  │  │  │  └─ DEBUG: Matched {nrow(calibration_data)} rows")
+  }
+
+  ## ---------------------------------------------------------------------------
+  ## Step 3: Construct intervals (point_OOF + residual_quantiles_OOF)
+  ## ---------------------------------------------------------------------------
+
   calibration_data <- calibration_data %>%
     dplyr::mutate(
-      interval_lower = .pred + .pred_lower,  # point_oof + resid_q05
-      interval_upper = .pred + .pred_upper   # point_oof + resid_q95
+      # Both predictions are OOF!
+      interval_lower = .pred + .pred_lower,  # point_OOF + resid_q05_OOF
+      interval_upper = .pred + .pred_upper   # point_OOF + resid_q95_OOF
     )
 
   ## ---------------------------------------------------------------------------
-  ## Step 3: Compute nonconformity scores
+  ## Step 4: Compute nonconformity scores
   ## ---------------------------------------------------------------------------
 
   calibration_data <- calibration_data %>%
     dplyr::mutate(
       score = pmax(
-        interval_lower - Response,  # Lower bound violation (negative if inside)
-        Response - interval_upper   # Upper bound violation (negative if inside)
+        interval_lower - Response,  # Violation below (negative if inside)
+        Response - interval_upper   # Violation above (negative if inside)
       )
     )
 
   ## ---------------------------------------------------------------------------
-  ## Step 4: Calculate c_alpha (1-alpha quantile of scores)
+  ## Step 5: Calculate c_alpha (1-alpha quantile of scores)
   ## ---------------------------------------------------------------------------
 
   c_alpha <- quantile(calibration_data$score, probs = 1 - alpha, na.rm = TRUE)
 
   ## ---------------------------------------------------------------------------
-  ## Step 5: Diagnostics
+  ## Step 6: Diagnostics
   ## ---------------------------------------------------------------------------
 
   if (verbose) {
-    coverage_before <- mean(calibration_data$score <= 0, na.rm = TRUE)
-    cli::cli_text("│  │  │  ├─ Base coverage (before conformal): {round(100*coverage_before, 1)}%")
+    base_coverage <- mean(calibration_data$score <= 0, na.rm = TRUE)
+    cli::cli_text("│  │  │  ├─ Base coverage (OOF intervals): {round(100*base_coverage, 1)}%")
     cli::cli_text("│  │  │  ├─ c_alpha = {round(c_alpha, 4)}")
+
+    # Estimate post-conformal coverage
+    post_conformal_coverage <- mean(calibration_data$score <= c_alpha, na.rm = TRUE)
+    cli::cli_text("│  │  │  └─ Expected coverage (after conformal): {round(100*post_conformal_coverage, 1)}%")
   }
 
-  ## Memory cleanup --------------------------------------------------------------
+  ## Memory cleanup -------------------------------------------------------------
 
-  rm(residual_quantiles, train_data_indexed, calibration_data)
+  rm(calibration_data)
+  gc(verbose = FALSE)
 
   return(c_alpha)
 }
@@ -642,6 +681,7 @@ train_quantile_model <- function(train_data,
                                  transformation,
                                  grid_size = 5,
                                  cv_folds  = 5,
+                                 resamples = NULL,  # NEW: Accept pre-made CV folds for CV+ conformal
                                  verbose   = FALSE) {
 
   ## ---------------------------------------------------------------------------
@@ -687,15 +727,27 @@ train_quantile_model <- function(train_data,
   ## Step 4: Tune hyperparameters
   ## ---------------------------------------------------------------------------
 
-  # Create CV folds
-  safely_execute(
-    rsample::vfold_cv(train_data, v = cv_folds, strata = Response),
-    error_message = "CV fold creation failed"
-  ) %>%
-    handle_results(
-      error_title = "Quantile CV folds failed",
-      abort_on_null = TRUE
-    ) -> cv_folds_obj
+  # Create CV folds (or use provided folds for shared training)
+  if (is.null(resamples)) {
+
+    ## Create new CV folds if not provided -------------------------------------
+
+    safely_execute(
+      rsample::vfold_cv(train_data, v = cv_folds, strata = Response),
+      error_message = "CV fold creation failed"
+    ) %>%
+      handle_results(
+        error_title = "Quantile CV folds failed",
+        abort_on_null = TRUE
+      ) -> cv_folds_obj
+
+  } else {
+
+    ## Use provided CV folds (for CV+ conformal with point model) --------------
+
+    cv_folds_obj <- resamples
+
+  }
 
   # Finalize mtry based on actual features
   param_set <- workflows::extract_parameter_set_dials(wf)
@@ -725,19 +777,95 @@ train_quantile_model <- function(train_data,
   # Select best by RMSE
   best_params <- tune::select_best(tune_results, metric = "rmse")
 
-  # Extract out-of-fold quantile predictions for conformal calibration
-  cv_quantile_predictions <- tune::collect_predictions(tune_results) %>%
-    dplyr::inner_join(best_params, by = names(best_params)) %>%
-    dplyr::select(.row, Response, .pred) %>%
-    dplyr::arrange(.row)
-
-  # Finalize workflow
-  wf_final <- tune::finalize_workflow(wf, best_params)
-
   ## ---------------------------------------------------------------------------
-  ## Step 5: Fit on full training data
+  ## Step 4.5: Extract OOF quantile predictions (if shared folds provided)
   ## ---------------------------------------------------------------------------
 
+  ## This is the KEY step for proper CV+ conformal calibration!
+  ## We need OOF quantile predictions (not in-sample) to avoid optimistic bias
+
+  if (!is.null(resamples)) {
+
+    ## Only extract OOF quantiles when shared folds provided (CV+ mode) ---------
+
+    if (verbose) {
+      cli::cli_text("│  │  │  ├─ Extracting OOF quantile predictions...")
+    }
+
+    ## Finalize workflow with best hyperparameters ------------------------------
+
+    wf_finalized <- tune::finalize_workflow(wf, best_params)
+
+    ## Loop through CV folds ----------------------------------------------------
+
+    oof_quantile_list <- list()
+
+    for (fold_id in seq_len(nrow(resamples))) {
+
+      ## Get fold INDICES (not data - we need to subset residual_train_data!) ---
+
+      assess_indices <- rsample::complement(resamples$splits[[fold_id]])
+      train_indices  <- setdiff(seq_len(nrow(train_data)), assess_indices)
+
+      ## Get fold data from RESIDUAL training data (not original data!) ---------
+
+      fold_train  <- train_data[train_indices, ]  # From original splits
+      fold_assess <- train_data[assess_indices, ] # From original splits
+
+      ## Fit finalized model on this fold's training data -----------------------
+
+      fold_model <- parsnip::fit(wf_finalized, data = fold_train)
+
+      ## Predict quantiles (q05, q95) on this fold's assessment set (OOF!) ------
+
+      fold_quantiles <- predict_quantiles(
+        workflow  = fold_model,
+        new_data  = fold_assess,
+        quantiles = c(0.05, 0.95)
+      )
+
+      ## Add .row indices to match with point model CV predictions --------------
+      ## Use complement() to get assessment row indices (original data row numbers)
+
+      fold_quantiles$.row <- as.integer(rsample::complement(resamples$splits[[fold_id]]))
+
+      ## Store this fold's quantiles --------------------------------------------
+
+      oof_quantile_list[[fold_id]] <- fold_quantiles
+
+      ## Memory cleanup ---------------------------------------------------------
+
+      rm(fold_model, fold_train, fold_assess, fold_quantiles)
+
+    }
+
+    ## Combine all OOF quantile predictions ------------------------------------
+
+    cv_quantile_predictions <- dplyr::bind_rows(oof_quantile_list) %>%
+      dplyr::arrange(.row)
+
+    if (verbose) {
+      cli::cli_text("│  │  │  │  └─ Extracted {nrow(cv_quantile_predictions)} OOF quantile predictions")
+    }
+
+    ## Cleanup ----------------------------------------------------------------
+
+    rm(oof_quantile_list, wf_finalized)
+    gc(verbose = FALSE)
+
+  } else {
+
+    ## No shared folds - can't extract OOF quantiles (standalone mode) ---------
+
+    cv_quantile_predictions <- NULL
+
+  }
+
+  ## ---------------------------------------------------------------------------
+  ## Step 5: Finalize workflow and fit on full training data
+  ## ---------------------------------------------------------------------------
+
+  wf_final  <- tune::finalize_workflow(wf, best_params)
   fitted_wf <- parsnip::fit(wf_final, data = train_data)
 
   ## ---------------------------------------------------------------------------
@@ -747,14 +875,16 @@ train_quantile_model <- function(train_data,
   fitted_wf <- butcher::butcher(fitted_wf)
 
   ## ---------------------------------------------------------------------------
-  ## Step 7: Return workflow with CV predictions
+  ## Step 7: Return workflow + OOF quantiles
   ## ---------------------------------------------------------------------------
 
-  ## Note: Return just workflow for backward compatibility
-  ## CV predictions stored but not returned (used internally for conformal)
-  ## This keeps the API simple for callers
+  ## BREAKING CHANGE: Now returns list instead of just workflow
+  ## Callers need to extract $workflow and $cv_quantiles
 
-  return(fitted_wf)
+  return(list(
+    workflow     = fitted_wf,
+    cv_quantiles = cv_quantile_predictions  # NULL if resamples not provided
+  ))
 }
 
 ## -----------------------------------------------------------------------------
@@ -865,6 +995,31 @@ train_cluster_models_with_uq <- function(cluster_data,
   }
 
   ## ---------------------------------------------------------------------------
+  ## Step 0.5: Create CV folds ONCE (shared between point and quantile models)
+  ## ---------------------------------------------------------------------------
+
+  ## This is CRITICAL for proper CV+ conformal calibration!
+  ## Both models must use the SAME fold assignments so we can match their
+  ## out-of-fold predictions by sample index
+
+  if (verbose) {
+    cli::cli_text("│  │  ├─ Creating shared CV folds ({cv_folds}-fold)...")
+  }
+
+  safely_execute(
+    rsample::vfold_cv(cluster_data, v = cv_folds, strata = Response),
+    error_message = "Shared CV fold creation failed"
+  ) %>%
+    handle_results(
+      error_title = "Shared CV fold creation failed",
+      error_hints = c(
+        "May need more samples ({n_train} for {cv_folds}-fold CV)",
+        "Try reducing cv_folds"
+      ),
+      abort_on_null = TRUE
+    ) -> shared_cv_folds
+
+  ## ---------------------------------------------------------------------------
   ## Step 1: Train POINT prediction model (uses config's model type)
   ## ---------------------------------------------------------------------------
 
@@ -878,6 +1033,7 @@ train_cluster_models_with_uq <- function(cluster_data,
     property_col    = "Response",
     grid_size       = grid_size,
     cv_folds        = cv_folds,
+    resamples       = shared_cv_folds,  # NEW: Pass shared folds!
     return_workflow = TRUE,
     verbose         = FALSE
   )
@@ -960,6 +1116,15 @@ train_cluster_models_with_uq <- function(cluster_data,
     residual_train_data <- residual_train_data[valid_idx, ]
   }
 
+  ## DEBUG: Verify residuals are actually in Response column -------------------
+
+  if (verbose) {
+    cli::cli_text("│  │  ├─ DEBUG: Residual training data")
+    cli::cli_text("│  │  │  ├─ Response (residual) range: [{round(min(residual_train_data$Response),2)}, {round(max(residual_train_data$Response),2)}]")
+    cli::cli_text("│  │  │  ├─ Response (residual) mean: {round(mean(residual_train_data$Response),4)}")
+    cli::cli_text("│  │  │  └─ Response (residual) SD: {round(sd(residual_train_data$Response),3)}")
+  }
+
   ## Apply butcher to point workflow now that we're done with it ----------------
 
   if (!is.null(point_workflow)) {
@@ -980,11 +1145,14 @@ train_cluster_models_with_uq <- function(cluster_data,
     transformation  = "none",  # CRITICAL: Never transform residuals!
     grid_size       = grid_size,
     cv_folds        = cv_folds,
-    verbose         = FALSE
+    resamples       = shared_cv_folds,  # NEW: Pass SAME folds as point model!
+    verbose         = verbose
   )
 
-  quantile_workflow      <- quantile_result$workflow
-  quantile_cv_predictions <- quantile_result$cv_predictions
+  ## Extract components (now returns list instead of just workflow) -------------
+
+  quantile_workflow       <- quantile_result$workflow
+  quantile_cv_predictions <- quantile_result$cv_quantiles  # OOF quantiles!
 
   if (verbose) {
     cli::cli_text("│  │  │  └─ Trained (quantiles extracted at prediction time)")
@@ -999,11 +1167,9 @@ train_cluster_models_with_uq <- function(cluster_data,
   }
 
   c_alpha <- calculate_conformal_margin(
-    train_data        = cluster_data,       # Original data (Response = true values!)
-    point_workflow    = point_workflow,
-    quantile_workflow = quantile_workflow,
-    point_cv_preds    = cv_preds,           # OOF point predictions
-    alpha             = 0.10,               # For 90% coverage
+    point_cv_preds    = cv_preds,                 # OOF point predictions
+    quantile_cv_preds = quantile_cv_predictions,  # OOF quantile predictions
+    alpha             = 0.10,                     # For 90% coverage
     verbose           = verbose
   )
 
