@@ -735,6 +735,23 @@ Auto-optimized predictions that test multiple configs and select best performer 
 - **Test Scripts**: `tests/debug_m3.3_cv_plus_conformal.R`, `tests/manual_test_cv_plus_conformal.R`
 - **Commit**: c8f76ee (+2000 lines)
 
+**Milestone 3.3.1: Pinball Loss Tuning** 🚧 IN PROGRESS (2025-10-31)
+- **Decision**: Implement pinball loss for theoretically correct quantile optimization
+- **Consensus**: Gemini (9/10) + GPT-5 (8/10) recommend for JOSS publication rigor
+- **Approach**: Quick-win re-ranking (not full custom tuning loop)
+  1. Keep `tune_grid()` with RMSE (fast, finds good hyperparameter space)
+  2. Take top-3 configs by RMSE
+  3. Re-evaluate each config with pinball loss (manual quantile extraction)
+  4. Select winner by average pinball loss across q05 and q95
+- **Pinball Loss Formula**: `L(tau) = max(tau * error, (tau - 1) * error)`
+- **Benefits**:
+  - Optimizes correct objective (quantile accuracy not mean)
+  - Better conditional coverage (reliable across soil types)
+  - Publishable methodology (industry best practice)
+  - Likely smaller c_alpha and narrower intervals
+- **Estimated effort**: 30-60 min (vs 2-3 hrs for full custom loop)
+- **Acceptance**: Winner selected by pinball loss, coverage remains 88-92%
+
 **Milestone 3.4: Width Floor from Replicates**
 - Estimate measurement noise from replicate scans (if available in OSSL)
 - Set minimum interval width = 2 × noise_sd
@@ -742,7 +759,7 @@ Auto-optimized predictions that test multiple configs and select best performer 
 - **Acceptance**: No intervals narrower than measurement precision
 
 **Phase 3 Deliverable**:
-Library predictions with calibrated 90% prediction intervals (global conformal, no AD stratification yet)
+Library predictions with calibrated 90% prediction intervals (pinball-loss-tuned quantiles, CV+ conformal, global calibration)
 
 ---
 
