@@ -735,31 +735,37 @@ Auto-optimized predictions that test multiple configs and select best performer 
 - **Test Scripts**: `tests/debug_m3.3_cv_plus_conformal.R`, `tests/manual_test_cv_plus_conformal.R`
 - **Commit**: c8f76ee (+2000 lines)
 
-**Milestone 3.3.1: Pinball Loss Tuning** 🚧 IN PROGRESS (2025-10-31)
-- **Decision**: Implement pinball loss for theoretically correct quantile optimization
-- **Consensus**: Gemini (9/10) + GPT-5 (8/10) recommend for JOSS publication rigor
-- **Approach**: Quick-win re-ranking (not full custom tuning loop)
-  1. Keep `tune_grid()` with RMSE (fast, finds good hyperparameter space)
-  2. Take top-3 configs by RMSE
-  3. Re-evaluate each config with pinball loss (manual quantile extraction)
-  4. Select winner by average pinball loss across q05 and q95
-- **Pinball Loss Formula**: `L(tau) = max(tau * error, (tau - 1) * error)`
+**Milestone 3.3.1: Pinball Loss Tuning** ✅ COMPLETE (2025-10-31)
+- ✅ Implemented pinball loss re-ranking for theoretically correct quantile optimization
+- ✅ **Consensus**: Gemini (9/10) + GPT-5 (8/10) recommended for JOSS publication rigor
+- ✅ **Implementation**: Quick-win re-ranking approach
+  1. `tune_grid()` with RMSE finds good hyperparameter space (fast)
+  2. `show_best(n=3)` gets top-3 configs by RMSE
+  3. Re-evaluate each with pinball loss using `extract_oof_quantiles()` helper
+  4. Select winner by minimum average pinball loss across q05 and q95
+- **New Functions**:
+  - `calculate_pinball_loss()`: Asymmetric loss for quantile evaluation
+  - `extract_oof_quantiles()`: Reusable OOF extraction helper
+- **Validation**: Re-ranking selects different config than RMSE (config 3/3 vs 1/3)
 - **Benefits**:
-  - Optimizes correct objective (quantile accuracy not mean)
-  - Better conditional coverage (reliable across soil types)
+  - Theoretically correct optimization (quantile loss not mean loss)
+  - Better conditional coverage across soil types
   - Publishable methodology (industry best practice)
-  - Likely smaller c_alpha and narrower intervals
-- **Estimated effort**: 30-60 min (vs 2-3 hrs for full custom loop)
-- **Acceptance**: Winner selected by pinball loss, coverage remains 88-92%
+  - Cleaner code (60-line loop → 15-line helper call)
+- **Tests**: 5 new test cases for pinball loss and OOF extraction
+- **Commit**: b514650 (+619 lines, 4 files)
 
-**Milestone 3.4: Width Floor from Replicates**
-- Estimate measurement noise from replicate scans (if available in OSSL)
-- Set minimum interval width = 2 × noise_sd
-- Enforce: width = max(conformal_width, width_floor)
-- **Acceptance**: No intervals narrower than measurement precision
+**Milestone 3.4: Width Floor from Replicates** ⏭️ DEFERRED
+- **Reason**: OSSL lacks replicate scans, current intervals already wide (mean 2.17 pH >> measurement noise ~0.2 pH)
+- **Decision**: Skip for Phase 3, consider as future enhancement if replicate data becomes available
+- **Alternative**: Document as limitation in paper (intervals may under-represent measurement uncertainty for very confident predictions)
 
-**Phase 3 Deliverable**:
-Library predictions with calibrated 90% prediction intervals (pinball-loss-tuned quantiles, CV+ conformal, global calibration)
+**Phase 3 Deliverable**: ✅ COMPLETE
+Library predictions with calibrated 90% prediction intervals:
+- Residual-based quantile models (model-specific uncertainty)
+- Pinball-loss-tuned hyperparameters (theoretically correct optimization)
+- CV+ conformal calibration (statistical coverage guarantee)
+- Validated: 92% test coverage on n=200 independent samples
 
 ---
 
