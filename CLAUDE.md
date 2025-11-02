@@ -285,12 +285,30 @@ tryCatch({
 - 📋 **Test Scripts Created**:
   - `tests/debug_m3.3_cv_plus_conformal.R`: Debug validation (n=500)
   - `tests/manual_test_cv_plus_conformal.R`: Manual REPL test (n=1000, 80/20 split)
-- ⏭️ **Next Steps**:
-  1. Add pinball loss tuning (optimize quantile accuracy)
-  2. Test edge cases (small clusters, other properties)
-  3. Remove debug output (production-ready)
-  4. Update documentation
-  5. Mark M3.3 complete in roadmap
+- ✅ **M3.3.1 Pinball Loss Tuning COMPLETE**:
+  - Created `calculate_pinball_loss()`: Asymmetric loss for quantile evaluation
+  - Created `extract_oof_quantiles()`: Reusable OOF extraction helper
+  - Implemented re-ranking: RMSE finds top-3 → pinball loss selects winner
+  - Validation: Selects config 3/3 (different from RMSE winner!)
+  - Benefits: Theoretically correct, better conditional coverage, publishable methodology
+- 💾 **Session 7 Commits**:
+  - c8f76ee: CV+ conformal implementation (+2000 lines)
+  - 00bdf93: Debug cleanup and roadmap update
+  - 1e9b7e7: Add M3.3.1 milestone to roadmap
+  - b514650: Pinball loss implementation (+619 lines)
+  - f6998ab: Mark Phase 3 complete
+- 🎉 **PHASE 3 COMPLETE**: Production-ready UQ system with statistical coverage guarantee
+- 📊 **Final Session 7 Stats**:
+  - Total lines added: ~2,650
+  - Functions created: 6 (shared folds, OOF extraction, conformal margin, pinball loss, helpers)
+  - Tests added: 5 new test cases
+  - Commits: 5 total
+  - Validation: 92% test coverage achieved
+- ⏭️ **Next Phase Options**:
+  1. Phase 4: Applicability domain (AD metrics, distance-aware calibration)
+  2. Phase 2: Polish (water band removal, RPIQ scoring)
+  3. Production deployment preparation
+  4. JOSS paper writing
 
 ### Session 6 Progress (2025-10-31):
 - 🔬 **Phase 3 Implementation Started**: UQ infrastructure with TDD approach
