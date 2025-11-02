@@ -466,6 +466,229 @@ repair_quantile_crossings <- function(predictions,
 }
 
 ## -----------------------------------------------------------------------------
+## Pinball Loss for Quantile Tuning
+## -----------------------------------------------------------------------------
+
+#' Calculate Pinball Loss for Quantile Predictions
+#'
+#' @description
+#' Computes pinball loss (quantile loss) for evaluating quantile regression
+#' predictions. This is the theoretically correct loss function for quantile
+#' models, providing asymmetric penalties that align with the quantile objective.
+#'
+#' @param truth Numeric vector of true values.
+#'
+#' @param pred_lower Numeric vector of lower quantile predictions (e.g., q05).
+#'
+#' @param pred_upper Numeric vector of upper quantile predictions (e.g., q95).
+#'
+#' @param tau_lower Numeric. Lower quantile level (default: 0.05).
+#'
+#' @param tau_upper Numeric. Upper quantile level (default: 0.95).
+#'
+#' @return Numeric scalar: mean pinball loss averaged across both quantiles.
+#'
+#' @details
+#' ## Pinball Loss Formula
+#'
+#' For a single quantile prediction at level tau:
+#' ```
+#' error = truth - prediction
+#' loss  = max(tau * error, (tau - 1) * error)
+#' ```
+#'
+#' This creates an asymmetric penalty:
+#' * For q05 (tau=0.05): Over-prediction penalized 19× more than under-prediction
+#' * For q95 (tau=0.95): Under-prediction penalized 19× more than over-prediction
+#'
+#' ## Why Pinball Loss?
+#'
+#' **RMSE (wrong)**: Optimizes for conditional mean
+#' * Treats over/under-prediction symmetrically
+#' * Pushes quantiles toward mean(residuals) ≈ 0
+#' * Not aligned with quantile objective
+#'
+#' **Pinball Loss (correct)**: Optimizes for conditional quantiles
+#' * Asymmetric penalties guide predictions to true quantile locations
+#' * For residuals: q05 ≈ -1.2, q95 ≈ +1.2 (not both → 0)
+#' * Better conditional coverage across feature space
+#'
+#' ## Multi-Quantile Tuning
+#'
+#' This function averages pinball loss across q05 and q95 to produce a single
+#' optimization objective for `tune_grid()` or custom tuning loops. This ensures:
+#' * Both quantiles optimized simultaneously
+#' * No quantile crossing (same model produces both)
+#' * Single set of optimal hyperparameters
+#'
+#' @examples
+#' \dontrun{
+#' # True residuals
+#' truth <- c(-1.5, -0.5, 0.2, 1.0, 2.1)
+#'
+#' # Quantile predictions
+#' pred_lower <- c(-1.8, -0.7, -0.1, 0.8, 1.9)  # q05
+#' pred_upper <- c(1.2, 1.5, 1.8, 2.2, 3.5)     # q95
+#'
+#' # Calculate average pinball loss
+#' loss <- calculate_pinball_loss(truth, pred_lower, pred_upper)
+#'
+#' # Lower loss = better quantile predictions
+#' }
+#'
+#' @seealso
+#'   [train_quantile_model()] for quantile model tuning,
+#'   [extract_oof_quantiles()] for obtaining OOF predictions
+#'
+#' @keywords internal
+calculate_pinball_loss <- function(truth,
+                                   pred_lower,
+                                   pred_upper,
+                                   tau_lower = 0.05,
+                                   tau_upper = 0.95) {
+
+  ## ---------------------------------------------------------------------------
+  ## Step 1: Validate inputs
+  ## ---------------------------------------------------------------------------
+
+  if (length(truth) != length(pred_lower) || length(truth) != length(pred_upper)) {
+    cli::cli_abort("truth, pred_lower, and pred_upper must have same length")
+  }
+
+  ## ---------------------------------------------------------------------------
+  ## Step 2: Calculate pinball loss for q05 (lower quantile)
+  ## ---------------------------------------------------------------------------
+
+  error_lower <- truth - pred_lower
+  loss_lower  <- pmax(tau_lower * error_lower, (tau_lower - 1) * error_lower)
+
+  ## ---------------------------------------------------------------------------
+  ## Step 3: Calculate pinball loss for q95 (upper quantile)
+  ## ---------------------------------------------------------------------------
+
+  error_upper <- truth - pred_upper
+  loss_upper  <- pmax(tau_upper * error_upper, (tau_upper - 1) * error_upper)
+
+  ## ---------------------------------------------------------------------------
+  ## Step 4: Average across both quantiles
+  ## ---------------------------------------------------------------------------
+
+  mean_loss <- mean(c(loss_lower, loss_upper), na.rm = TRUE)
+
+  return(mean_loss)
+}
+
+#' Extract Out-of-Fold Quantile Predictions
+#'
+#' @description
+#' Helper function that extracts out-of-fold quantile predictions by looping
+#' through CV folds. Used for both pinball loss re-ranking and conformal
+#' calibration. Ensures predictions are truly OOF (not in-sample).
+#'
+#' @param workflow A finalized workflow object (not tuned, must have fixed hyperparameters).
+#'   Should contain a ranger quantile model created with [define_quantile_specification()].
+#'
+#' @param train_data Tibble with training data. Must have `Response` column.
+#'   For residual-based UQ, this should have residuals as Response.
+#'
+#' @param resamples An `rset` object from rsample (e.g., from `vfold_cv()`).
+#'   Must use the SAME folds as the point model for proper alignment.
+#'
+#' @param quantiles Numeric vector of quantiles to extract (default: c(0.05, 0.95)).
+#'
+#' @return Tibble with out-of-fold quantile predictions:
+#'   * `.row`: Original row indices from train_data
+#'   * `.pred_lower`: Lower quantile (q05)
+#'   * `.pred_upper`: Upper quantile (q95)
+#'   * Additional columns for other quantiles if requested
+#'
+#' @details
+#' ## How It Works
+#'
+#' For each CV fold:
+#' 1. Extract fold indices using `rsample::complement()`
+#' 2. Get training subset (analysis) and assessment subset
+#' 3. Fit finalized workflow on training subset
+#' 4. Predict quantiles on assessment subset (OOF!)
+#' 5. Track `.row` indices for alignment with point model predictions
+#'
+#' The result contains predictions for ALL samples in train_data, where each
+#' sample's prediction comes from a model that did NOT see that sample during
+#' training (true out-of-fold).
+#'
+#' ## Use Cases
+#'
+#' 1. **Pinball Loss Re-Ranking**: Extract OOF quantiles for each candidate
+#'    hyperparameter configuration to calculate validation loss
+#' 2. **Conformal Calibration**: Extract OOF quantiles from final model to
+#'    compute conformal margin with matched point predictions
+#'
+#' @seealso
+#'   [predict_quantiles()] for extracting quantiles from a single model,
+#'   [calculate_pinball_loss()] for evaluating quantile quality,
+#'   [train_quantile_model()] where this helper is used
+#'
+#' @keywords internal
+extract_oof_quantiles <- function(workflow,
+                                  train_data,
+                                  resamples,
+                                  quantiles = c(0.05, 0.95)) {
+
+  ## ---------------------------------------------------------------------------
+  ## Step 1: Loop through CV folds
+  ## ---------------------------------------------------------------------------
+
+  oof_quantile_list <- list()
+
+  for (fold_id in seq_len(nrow(resamples))) {
+
+    ## Get fold indices --------------------------------------------------------
+
+    assess_indices <- rsample::complement(resamples$splits[[fold_id]])
+    train_indices  <- setdiff(seq_len(nrow(train_data)), assess_indices)
+
+    ## Get fold data -----------------------------------------------------------
+
+    fold_train  <- train_data[train_indices, ]
+    fold_assess <- train_data[assess_indices, ]
+
+    ## Fit workflow on this fold's training data -------------------------------
+
+    fold_model <- parsnip::fit(workflow, data = fold_train)
+
+    ## Predict quantiles on this fold's assessment data (OOF!) -----------------
+
+    fold_quantiles <- predict_quantiles(
+      workflow  = fold_model,
+      new_data  = fold_assess,
+      quantiles = quantiles
+    )
+
+    ## Add .row indices for alignment with point model -------------------------
+
+    fold_quantiles$.row <- assess_indices
+
+    ## Store this fold's results -----------------------------------------------
+
+    oof_quantile_list[[fold_id]] <- fold_quantiles
+
+    ## Memory cleanup ----------------------------------------------------------
+
+    rm(fold_model, fold_train, fold_assess, fold_quantiles)
+
+  }
+
+  ## ---------------------------------------------------------------------------
+  ## Step 2: Combine all folds and return
+  ## ---------------------------------------------------------------------------
+
+  oof_quantiles <- dplyr::bind_rows(oof_quantile_list) %>%
+    dplyr::arrange(.row)
+
+  return(oof_quantiles)
+}
+
+## -----------------------------------------------------------------------------
 ## Conformal Calibration
 ## -----------------------------------------------------------------------------
 
@@ -755,11 +978,83 @@ train_quantile_model <- function(train_data,
     control   = tune::control_grid(save_pred = TRUE, verbose = FALSE)  # Save for conformal
   )
 
-  # Select best by RMSE
-  best_params <- tune::select_best(tune_results, metric = "rmse")
+  ## ---------------------------------------------------------------------------
+  ## Step 4.5: Re-rank top configs by pinball loss (if resamples provided)
+  ## ---------------------------------------------------------------------------
+
+  ## When shared folds are provided, we can evaluate candidates using the
+  ## theoretically correct pinball loss instead of RMSE
+
+  if (!is.null(resamples)) {
+
+    ## Get top-k configs by RMSE (fast initial screening) ----------------------
+
+    top_k <- 3  # Re-evaluate top 3 to balance thoroughness vs speed
+    top_configs <- tune::show_best(tune_results, metric = "rmse", n = top_k)
+
+    if (verbose) {
+      cli::cli_text("│  │  │  ├─ Re-ranking top-{nrow(top_configs)} configs by pinball loss...")
+    }
+
+    ## For each config, calculate pinball loss ---------------------------------
+
+    pinball_losses <- numeric(nrow(top_configs))
+
+    for (i in seq_len(nrow(top_configs))) {
+
+      config_i <- top_configs[i, ]
+
+      ## Finalize workflow with this config's params ---------------------------
+
+      wf_i <- tune::finalize_workflow(wf, config_i)
+
+      ## Extract OOF quantiles for this config ---------------------------------
+
+      oof_quantiles <- extract_oof_quantiles(
+        workflow   = wf_i,
+        train_data = train_data,  # Has residuals as Response
+        resamples  = resamples,
+        quantiles  = c(0.05, 0.95)
+      )
+
+      ## Calculate pinball loss ------------------------------------------------
+
+      pinball_losses[i] <- calculate_pinball_loss(
+        truth      = train_data$Response,
+        pred_lower = oof_quantiles$.pred_lower,
+        pred_upper = oof_quantiles$.pred_upper
+      )
+
+      ## Cleanup ---------------------------------------------------------------
+
+      rm(wf_i, oof_quantiles)
+      gc(verbose = FALSE)
+    }
+
+    ## Select best by pinball loss ---------------------------------------------
+
+    best_idx    <- which.min(pinball_losses)
+    best_params <- top_configs[best_idx, ]
+
+    if (verbose) {
+      cli::cli_text("│  │  │  │  ├─ Config {best_idx}/{nrow(top_configs)} selected")
+      cli::cli_text("│  │  │  │  └─ Pinball loss: {round(pinball_losses[best_idx], 4)} (lower = better)")
+    }
+
+    ## Cleanup -----------------------------------------------------------------
+
+    rm(top_configs, pinball_losses)
+
+  } else {
+
+    ## No resamples - use standard RMSE selection (original behavior) ----------
+
+    best_params <- tune::select_best(tune_results, metric = "rmse")
+
+  }
 
   ## ---------------------------------------------------------------------------
-  ## Step 4.5: Extract OOF quantile predictions (if shared folds provided)
+  ## Step 4.6: Extract OOF quantile predictions with final best_params
   ## ---------------------------------------------------------------------------
 
   ## This is the KEY step for proper CV+ conformal calibration!
@@ -777,61 +1072,22 @@ train_quantile_model <- function(train_data,
 
     wf_finalized <- tune::finalize_workflow(wf, best_params)
 
-    ## Loop through CV folds ----------------------------------------------------
+    ## Extract OOF quantiles using helper function ------------------------------
 
-    oof_quantile_list <- list()
-
-    for (fold_id in seq_len(nrow(resamples))) {
-
-      ## Get fold INDICES (not data - we need to subset residual_train_data!) ---
-
-      assess_indices <- rsample::complement(resamples$splits[[fold_id]])
-      train_indices  <- setdiff(seq_len(nrow(train_data)), assess_indices)
-
-      ## Get fold data from RESIDUAL training data (not original data!) ---------
-
-      fold_train  <- train_data[train_indices, ]  # From original splits
-      fold_assess <- train_data[assess_indices, ] # From original splits
-
-      ## Fit finalized model on this fold's training data -----------------------
-
-      fold_model <- parsnip::fit(wf_finalized, data = fold_train)
-
-      ## Predict quantiles (q05, q95) on this fold's assessment set (OOF!) ------
-
-      fold_quantiles <- predict_quantiles(
-        workflow  = fold_model,
-        new_data  = fold_assess,
-        quantiles = c(0.05, 0.95)
-      )
-
-      ## Add .row indices to match with point model CV predictions --------------
-      ## Use complement() to get assessment row indices (original data row numbers)
-
-      fold_quantiles$.row <- as.integer(rsample::complement(resamples$splits[[fold_id]]))
-
-      ## Store this fold's quantiles --------------------------------------------
-
-      oof_quantile_list[[fold_id]] <- fold_quantiles
-
-      ## Memory cleanup ---------------------------------------------------------
-
-      rm(fold_model, fold_train, fold_assess, fold_quantiles)
-
-    }
-
-    ## Combine all OOF quantile predictions ------------------------------------
-
-    cv_quantile_predictions <- dplyr::bind_rows(oof_quantile_list) %>%
-      dplyr::arrange(.row)
+    cv_quantile_predictions <- extract_oof_quantiles(
+      workflow   = wf_finalized,
+      train_data = train_data,  # Has residuals as Response
+      resamples  = resamples,
+      quantiles  = c(0.05, 0.95)
+    )
 
     if (verbose) {
       cli::cli_text("│  │  │  │  └─ Extracted {nrow(cv_quantile_predictions)} OOF quantile predictions")
     }
 
-    ## Cleanup ----------------------------------------------------------------
+    ## Cleanup ------------------------------------------------------------------
 
-    rm(oof_quantile_list, wf_finalized)
+    rm(wf_finalized)
     gc(verbose = FALSE)
 
   } else {

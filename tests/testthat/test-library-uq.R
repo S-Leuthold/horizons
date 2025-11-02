@@ -347,3 +347,158 @@ test_that("UQ fails gracefully with insufficient calibration data", {
 
   # TODO: Test calibration set size validation
 })
+
+## -----------------------------------------------------------------------------
+## Test Group 6: Pinball Loss Helpers (M3.3.1)
+## -----------------------------------------------------------------------------
+
+test_that("calculate_pinball_loss() computes correct loss for q05", {
+
+  ## Test data ----------------------------------------------------------------
+
+  truth      <- c(0, 0, 0, 0)
+  pred_lower <- c(-1, 0, 1, -0.5)  # q05 predictions
+  pred_upper <- c(1, 2, 3, 1.5)    # q95 predictions (ignored for q05)
+
+  ## Calculate loss -----------------------------------------------------------
+
+  loss <- horizons:::calculate_pinball_loss(
+    truth      = truth,
+    pred_lower = pred_lower,
+    pred_upper = pred_upper,
+    tau_lower  = 0.05,
+    tau_upper  = 0.95
+  )
+
+  ## Manual calculation -------------------------------------------------------
+  ## For q05 (tau=0.05):
+  ## Sample 1: error = 0 - (-1) = 1  → loss = max(0.05*1, -0.95*1) = 0.05
+  ## Sample 2: error = 0 - 0 = 0     → loss = 0
+  ## Sample 3: error = 0 - 1 = -1    → loss = max(0.05*(-1), -0.95*(-1)) = 0.95
+  ## Sample 4: error = 0 - (-0.5) = 0.5 → loss = max(0.05*0.5, -0.95*0.5) = 0.025
+  ##
+  ## For q95 (tau=0.95):
+  ## Sample 1: error = 0 - 1 = -1    → loss = max(0.95*(-1), -0.05*(-1)) = 0.05
+  ## Sample 2: error = 0 - 2 = -2    → loss = max(0.95*(-2), -0.05*(-2)) = 0.10
+  ## Sample 3: error = 0 - 3 = -3    → loss = max(0.95*(-3), -0.05*(-3)) = 0.15
+  ## Sample 4: error = 0 - 1.5 = -1.5 → loss = max(0.95*(-1.5), -0.05*(-1.5)) = 0.075
+  ##
+  ## Average: (0.05 + 0 + 0.95 + 0.025 + 0.05 + 0.10 + 0.15 + 0.075) / 8 = 0.175
+
+  expect_type(loss, "double")
+  expect_length(loss, 1)
+  expect_equal(loss, 0.175, tolerance = 0.001)
+})
+
+test_that("calculate_pinball_loss() penalizes q05 over-prediction heavily", {
+
+  ## For q05, over-prediction (pred > truth) should have high penalty
+  ## For q95, under-prediction (pred < truth) should have high penalty
+
+  ## Test q05 asymmetry -------------------------------------------------------
+
+  truth_q05 <- rep(0, 10)
+  under_pred <- rep(-1, 10)  # Under-predict by 1 unit
+  over_pred  <- rep(1, 10)   # Over-predict by 1 unit
+  dummy_upper <- rep(2, 10)
+
+  loss_under <- horizons:::calculate_pinball_loss(truth_q05, under_pred, dummy_upper, 0.05, 0.95)
+  loss_over  <- horizons:::calculate_pinball_loss(truth_q05, over_pred, dummy_upper, 0.05, 0.95)
+
+  ## Over-prediction should be penalized ~19× more for q05
+  ## (Averaged with q95 which has opposite asymmetry, so factor is smaller)
+
+  expect_gt(loss_over, loss_under)  # Over-prediction is worse
+})
+
+test_that("calculate_pinball_loss() handles NA values", {
+
+  truth      <- c(0, 0, NA, 0)
+  pred_lower <- c(-1, 0, 1, -0.5)
+  pred_upper <- c(1, 2, 3, 1.5)
+
+  loss <- horizons:::calculate_pinball_loss(truth, pred_lower, pred_upper)
+
+  ## Should handle NAs gracefully (na.rm = TRUE in mean())
+
+  expect_type(loss, "double")
+  expect_false(is.na(loss))
+})
+
+test_that("extract_oof_quantiles() returns correct structure", {
+
+  skip_if_not_installed("rsample")
+  skip_if_not_installed("workflows")
+
+  ## Create test data ---------------------------------------------------------
+
+  set.seed(123)
+  test_data <- tibble::tibble(
+    Response  = rnorm(100, mean = 0, sd = 1),
+    Sample_ID = paste0("S", 1:100),
+    Project   = "test",
+    x1 = rnorm(100),
+    x2 = rnorm(100)
+  )
+
+  ## Create CV folds ----------------------------------------------------------
+
+  cv_folds <- rsample::vfold_cv(test_data, v = 3, strata = Response)
+
+  ## Create simple quantile workflow -----------------------------------------
+
+  spec <- define_quantile_specification()
+  spec$args$mtry  <- 2
+  spec$args$min_n <- 5
+
+  rec <- recipes::recipe(Response ~ x1 + x2, data = test_data)
+  wf  <- workflows::workflow() %>%
+    workflows::add_recipe(rec) %>%
+    workflows::add_model(spec)
+
+  wf_fitted <- parsnip::fit(wf, data = test_data)
+
+  ## Extract OOF quantiles ----------------------------------------------------
+
+  oof_quantiles <- horizons:::extract_oof_quantiles(
+    workflow   = wf_fitted,
+    train_data = test_data,
+    resamples  = cv_folds,
+    quantiles  = c(0.05, 0.95)
+  )
+
+  ## Validate structure -------------------------------------------------------
+
+  expect_s3_class(oof_quantiles, "data.frame")
+  expect_true(".row" %in% names(oof_quantiles))
+  expect_true(".pred_lower" %in% names(oof_quantiles))
+  expect_true(".pred_upper" %in% names(oof_quantiles))
+
+  ## Should have predictions for all samples ----------------------------------
+
+  expect_equal(nrow(oof_quantiles), 100)
+
+  ## .row should match original indices ---------------------------------------
+
+  expect_equal(sort(oof_quantiles$.row), 1:100)
+
+  ## Quantiles should be ordered (no crossings) -------------------------------
+
+  expect_true(all(oof_quantiles$.pred_lower <= oof_quantiles$.pred_upper))
+})
+
+test_that("extract_oof_quantiles() predictions are out-of-fold", {
+
+  skip("Integration test - requires careful validation")
+
+  ## This test verifies that predictions for each fold come from a model
+  ## that was NOT trained on those samples (true OOF)
+  ##
+  ## Strategy:
+  ## 1. Use a perfectly predictable dataset (y = x)
+  ## 2. Extract OOF quantiles
+  ## 3. Verify OOF predictions are less accurate than in-sample
+  ##    (OOF error > in-sample error)
+
+  # TODO: Implement careful OOF validation
+})
