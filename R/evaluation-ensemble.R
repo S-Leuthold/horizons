@@ -933,23 +933,32 @@ build_ensemble <- function(finalized_models,
       member_names <- names(member_workflows)
 
       # Match transformations using the lookup table
-      # Member names should match wflow_ids (with sanitization)
+      # Member names from stacks have format: "workflow_name" + "pre#_mod#_post#" suffix
       transformations <- purrr::map_chr(member_names, function(name) {
-        # Stacks sanitizes names (e.g., "+" becomes ".")
-        # Try direct lookup first
-        if (name %in% names(transformation_lookup)) {
-          return(transformation_lookup[[name]])
+
+        # Remove stacks suffix pattern (pre#_mod#_post#)
+        clean_name <- gsub("pre[0-9]+_mod[0-9]+_post[0-9]+$", "", name)
+
+        # Try direct lookup with cleaned name
+        if (clean_name %in% names(transformation_lookup)) {
+          return(transformation_lookup[[clean_name]])
         }
 
-        # Try unsanitized name (reverse: "." becomes "+")
-        unsanitized <- gsub("\\.", "+", name)
+        # Stacks also sanitizes names ("+" becomes ".")
+        # Try reversing sanitization
+        unsanitized <- gsub("\\.", "+", clean_name)
         if (unsanitized %in% names(transformation_lookup)) {
           return(transformation_lookup[[unsanitized]])
         }
 
         # Fallback: no transformation
         if (verbose) {
-          cli::cli_warn("Could not find transformation for member {.val {name}}, using 'none'")
+          cli::cli_warn(c(
+            "Could not find transformation for member {.val {name}}",
+            "i" = "Cleaned to: {.val {clean_name}}",
+            "i" = "Available: {paste(head(names(transformation_lookup), 3), collapse = ', ')}...",
+            "i" = "Using 'none'"
+          ))
         }
         "none"
       })
