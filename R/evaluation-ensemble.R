@@ -274,40 +274,15 @@ build_ensemble <- function(finalized_models,
       ## This ensures the meta-learner trains on original-scale predictions
       ## regardless of what transformation each individual model used
 
-      # TODO: CRITICAL BUG - DOUBLE BACK-TRANSFORMATION ISSUE
-      # =========================================================================
-      # PROBLEM: When finalized_models come from finalize_top_workflows(), the
-      #          CV predictions are ALREADY back-transformed (see line 655 in
-      #          evaluation-finalize.R: back_transform_cv_predictions()).
-      #
-      #          This code then back-transforms AGAIN, causing:
-      #          - For log models: exp(exp(log(x))) = exp(x) = astronomical values
-      #          - For stacks: Meta-learner trains on wrong scale → bad predictions
-      #          - For xgb_meta: NaN/Inf values → XGBoost crashes
-      #
-      # OBSERVED SYMPTOMS:
-      #          - POM stacks RMSE: 6.6 vs expected 2.4 (174% worse!)
-      #          - POM xgb_meta: fails with "Input data contains `inf` or `nan`"
-      #          - Max CV prediction: 46.99 → exp(46.99) = 2.5×10^20 (should be ~50)
-      #
-      # FIX: Add a check to detect if predictions are already on original scale:
-      #      - Option 1: Add metadata flag in finalize_top_workflows() output
-      #      - Option 2: Check if .pred values are reasonable (e.g., within 100x response range)
-      #      - Option 3: Accept a parameter `cv_already_backtransformed = FALSE`
-      #
-      # SAME BUG ALSO EXISTS: Lines 607-612 (xgb_meta method) - needs identical fix
-      # =========================================================================
+      ## NOTE: CV predictions from finalize_top_workflows() are ALREADY
+      ## back-transformed to original scale (evaluation-finalize.R:655).
+      ## Do NOT back-transform again or we get exp(exp(log(x))) = astronomical values.
+      ##
+      ## The meta-learner will train on original-scale predictions as intended.
 
       cv_preds <- current_model$cv_predictions[[1]]
 
-      if ("transformation" %in% names(current_model) &&
-          needs_back_transformation(current_model$transformation)) {
-
-        trans <- tolower(current_model$transformation)
-
-        cv_preds$.pred <- back_transform_predictions(cv_preds$.pred, trans, warn = FALSE)
-
-      }
+      ## Back-transformation block removed - predictions already on original scale
 
       stacks::add_candidates(model_stack,
                              candidates = cv_preds,
@@ -614,40 +589,27 @@ build_ensemble <- function(finalized_models,
 
     }
 
-    ## Collect CV predictions and back-transform to original scale -------------
+    ## Collect CV predictions (already on original scale) ---------------------
 
-    # TODO: CRITICAL BUG - DOUBLE BACK-TRANSFORMATION ISSUE (SAME AS STACKS)
-    # =========================================================================
-    # PROBLEM: CV predictions from finalize_top_workflows() are ALREADY
-    #          back-transformed. This code back-transforms AGAIN, causing:
-    #          - exp(46.99) = 2.5×10^20 → NaN/Inf → XGBoost crashes
-    #
-    # WHY WEIGHTED_AVERAGE WORKS: It doesn't use pre-computed CV predictions.
-    #          Instead, it calls predict() on NEW data → gets transformed
-    #          predictions → back-transforms ONCE (correct).
-    #
-    # FIX: Same as stacks method (lines 277-299) - detect if already back-transformed
-    # =========================================================================
+    ## NOTE: CV predictions from finalize_top_workflows() are ALREADY
+    ## back-transformed to original scale (evaluation-finalize.R:655).
+    ## Do NOT back-transform again.
+    ##
+    ## WHY WEIGHTED_AVERAGE WORKS: It doesn't use pre-computed CV predictions.
+    ## Instead, it calls predict() on NEW data → gets transformed predictions
+    ## → back-transforms ONCE (correct).
 
     finalized_models %>%
       dplyr::mutate(
-        cv_preds = purrr::map2(cv_predictions, transformation, ~ {
+        cv_preds = purrr::map(cv_predictions, ~ {
 
-          ## Extract CV predictions ----------------------------------------------
+          ## Extract CV predictions (already on original scale) ----------------
 
           preds <- tune::collect_predictions(.x) %>%
             dplyr::select(.row, .pred) %>%
             dplyr::arrange(.row)
 
-          ## Back-transform to original scale -----------------------------------
-
-          if (needs_back_transformation(.y)) {
-
-            trans_lower <- tolower(as.character(.y))
-
-            preds$.pred <- back_transform_predictions(preds$.pred, trans_lower, warn = FALSE)
-
-          }
+          ## Back-transformation block removed - already on original scale ------
 
           preds
 
