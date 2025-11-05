@@ -212,6 +212,11 @@ predict_quantiles <- function(workflow,
 #'   applicability domain metadata (centroid, covariance, thresholds).
 #'   If NULL, AD columns will contain NA. Default: NULL.
 #'
+#' @param abstain_ood Logical. Should predictions be withheld for OOD samples?
+#'   Default: TRUE. Samples beyond 99th percentile distance get NA predictions
+#'   (moderate abstention policy, ~1% rejection rate). Set FALSE to predict
+#'   all samples regardless of domain. Requires `ad_metadata` to be non-NULL.
+#'
 #' @param repair_crossings Logical. Should quantile crossings be repaired?
 #'   Default: TRUE. Enforces `.pred_lower <= .pred_upper`.
 #'
@@ -301,6 +306,7 @@ predict_with_uq <- function(point_workflow,
                             quantiles = c(0.05, 0.95),
                             c_alpha = 0,
                             ad_metadata = NULL,
+                            abstain_ood = TRUE,
                             repair_crossings = TRUE) {
 
   ## Validate inputs -------------------------------------------------------------
@@ -402,6 +408,31 @@ predict_with_uq <- function(point_workflow,
     ## No AD metadata provided - add NA columns
     result$ad_distance <- NA_real_
     result$ad_bin      <- factor(NA, levels = c("Q1", "Q2", "Q3", "Q4", "OOD"))
+
+  }
+
+  ## ---------------------------------------------------------------------------
+  ## Step 3.6: Apply abstention policy for OOD samples (M4.3)
+  ## ---------------------------------------------------------------------------
+
+  if (!is.null(ad_metadata) && abstain_ood) {
+
+    n_ood <- sum(result$ad_bin == "OOD", na.rm = TRUE)
+
+    if (n_ood > 0) {
+
+      cli::cli_warn(
+        "{n_ood} sample{?s} beyond 99th percentile distance (OOD) - predictions abstained"
+      )
+
+      ## Set predictions to NA for OOD samples
+      ## Keep ad_distance values for diagnostics
+      ood_idx <- which(result$ad_bin == "OOD")
+      result$.pred[ood_idx]       <- NA_real_
+      result$.pred_lower[ood_idx] <- NA_real_
+      result$.pred_upper[ood_idx] <- NA_real_
+
+    }
 
   }
 

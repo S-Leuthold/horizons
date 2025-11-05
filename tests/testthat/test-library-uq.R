@@ -502,3 +502,376 @@ test_that("extract_oof_quantiles() predictions are out-of-fold", {
 
   # TODO: Implement careful OOF validation
 })
+
+## -----------------------------------------------------------------------------
+## Test Group 7: Abstention Policy (M4.3)
+## -----------------------------------------------------------------------------
+
+test_that("predict_with_uq() abstains for OOD samples when enabled", {
+
+  skip_if_not_installed("rsample")
+  skip_if_not_installed("workflows")
+
+  ## Create training data -----------------------------------------------------
+
+  set.seed(456)
+  train_data <- tibble::tibble(
+    Response  = rnorm(100, mean = 0, sd = 1),
+    Sample_ID = paste0("S", 1:100),
+    Project   = "train",
+    x1 = rnorm(100, mean = 0, sd = 1),
+    x2 = rnorm(100, mean = 0, sd = 1)
+  )
+
+  ## Train minimal models -----------------------------------------------------
+
+  point_spec <- parsnip::rand_forest(mode = "regression") %>%
+    parsnip::set_engine("ranger")
+
+  quantile_spec <- define_quantile_specification()
+  quantile_spec$args$mtry  <- 2
+  quantile_spec$args$min_n <- 5
+
+  rec <- recipes::recipe(Response ~ x1 + x2, data = train_data)
+
+  point_wf <- workflows::workflow() %>%
+    workflows::add_recipe(rec) %>%
+    workflows::add_model(point_spec) %>%
+    parsnip::fit(data = train_data)
+
+  quantile_wf <- workflows::workflow() %>%
+    workflows::add_recipe(rec) %>%
+    workflows::add_model(quantile_spec) %>%
+    parsnip::fit(data = train_data)
+
+  ## Compute AD metadata ------------------------------------------------------
+
+  feature_matrix <- train_data %>%
+    dplyr::select(x1, x2) %>%
+    as.matrix()
+
+  ad_metadata <- horizons:::compute_ad_metadata(feature_matrix)
+
+  ## Create test data with OOD samples ---------------------------------------
+
+  test_data <- tibble::tibble(
+    Sample_ID = c("T1", "T2", "T3"),
+    Project   = "test",
+    x1 = c(0, 0, 10),   # T3 is far from training (OOD)
+    x2 = c(0, 0, 10)
+  )
+
+  ## Predict with abstention enabled -----------------------------------------
+
+  suppressWarnings({
+    result_abstain <- horizons:::predict_with_uq(
+      point_workflow    = point_wf,
+      quantile_workflow = quantile_wf,
+      new_data          = test_data,
+      ad_metadata       = ad_metadata,
+      abstain_ood       = TRUE  # Enable abstention
+    )
+  })
+
+  ## Verify OOD sample has NA predictions ------------------------------------
+
+  expect_equal(result_abstain$ad_bin[3], factor("OOD", levels = c("Q1", "Q2", "Q3", "Q4", "OOD")))
+  expect_true(is.na(result_abstain$.pred[3]))
+  expect_true(is.na(result_abstain$.pred_lower[3]))
+  expect_true(is.na(result_abstain$.pred_upper[3]))
+
+  ## But ad_distance should be preserved -------------------------------------
+
+  expect_false(is.na(result_abstain$ad_distance[3]))
+  expect_gt(result_abstain$ad_distance[3], ad_metadata$ad_thresholds[4])  # Beyond p99
+
+  ## Non-OOD samples should have predictions ---------------------------------
+
+  expect_false(is.na(result_abstain$.pred[1]))
+  expect_false(is.na(result_abstain$.pred[2]))
+})
+
+test_that("predict_with_uq() does NOT abstain when disabled", {
+
+  skip_if_not_installed("rsample")
+  skip_if_not_installed("workflows")
+
+  ## Create training data -----------------------------------------------------
+
+  set.seed(789)
+  train_data <- tibble::tibble(
+    Response  = rnorm(100, mean = 0, sd = 1),
+    Sample_ID = paste0("S", 1:100),
+    Project   = "train",
+    x1 = rnorm(100, mean = 0, sd = 1),
+    x2 = rnorm(100, mean = 0, sd = 1)
+  )
+
+  ## Train minimal models -----------------------------------------------------
+
+  point_spec <- parsnip::rand_forest(mode = "regression") %>%
+    parsnip::set_engine("ranger")
+
+  quantile_spec <- define_quantile_specification()
+  quantile_spec$args$mtry  <- 2
+  quantile_spec$args$min_n <- 5
+
+  rec <- recipes::recipe(Response ~ x1 + x2, data = train_data)
+
+  point_wf <- workflows::workflow() %>%
+    workflows::add_recipe(rec) %>%
+    workflows::add_model(point_spec) %>%
+    parsnip::fit(data = train_data)
+
+  quantile_wf <- workflows::workflow() %>%
+    workflows::add_recipe(rec) %>%
+    workflows::add_model(quantile_spec) %>%
+    parsnip::fit(data = train_data)
+
+  ## Compute AD metadata ------------------------------------------------------
+
+  feature_matrix <- train_data %>%
+    dplyr::select(x1, x2) %>%
+    as.matrix()
+
+  ad_metadata <- horizons:::compute_ad_metadata(feature_matrix)
+
+  ## Create test data with OOD sample ----------------------------------------
+
+  test_data <- tibble::tibble(
+    Sample_ID = c("T1", "T2", "T3"),
+    Project   = "test",
+    x1 = c(0, 0, 10),   # T3 is far from training (OOD)
+    x2 = c(0, 0, 10)
+  )
+
+  ## Predict with abstention DISABLED ----------------------------------------
+
+  result_no_abstain <- horizons:::predict_with_uq(
+    point_workflow    = point_wf,
+    quantile_workflow = quantile_wf,
+    new_data          = test_data,
+    ad_metadata       = ad_metadata,
+    abstain_ood       = FALSE  # Disable abstention
+  )
+
+  ## OOD sample should still get predictions ---------------------------------
+
+  expect_equal(result_no_abstain$ad_bin[3], factor("OOD", levels = c("Q1", "Q2", "Q3", "Q4", "OOD")))
+  expect_false(is.na(result_no_abstain$.pred[3]))   # Prediction made despite OOD
+  expect_false(is.na(result_no_abstain$.pred_lower[3]))
+  expect_false(is.na(result_no_abstain$.pred_upper[3]))
+})
+
+test_that("predict_with_uq() warns about abstained samples", {
+
+  skip_if_not_installed("rsample")
+  skip_if_not_installed("workflows")
+
+  ## Create training data -----------------------------------------------------
+
+  set.seed(101)
+  train_data <- tibble::tibble(
+    Response  = rnorm(50, mean = 0, sd = 1),
+    Sample_ID = paste0("S", 1:50),
+    Project   = "train",
+    x1 = rnorm(50, mean = 0, sd = 1),
+    x2 = rnorm(50, mean = 0, sd = 1)
+  )
+
+  ## Train minimal models -----------------------------------------------------
+
+  point_spec <- parsnip::rand_forest(mode = "regression") %>%
+    parsnip::set_engine("ranger")
+
+  quantile_spec <- define_quantile_specification()
+  quantile_spec$args$mtry  <- 2
+  quantile_spec$args$min_n <- 5
+
+  rec <- recipes::recipe(Response ~ x1 + x2, data = train_data)
+
+  point_wf <- workflows::workflow() %>%
+    workflows::add_recipe(rec) %>%
+    workflows::add_model(point_spec) %>%
+    parsnip::fit(data = train_data)
+
+  quantile_wf <- workflows::workflow() %>%
+    workflows::add_recipe(rec) %>%
+    workflows::add_model(quantile_spec) %>%
+    parsnip::fit(data = train_data)
+
+  ## Compute AD metadata ------------------------------------------------------
+
+  feature_matrix <- train_data %>%
+    dplyr::select(x1, x2) %>%
+    as.matrix()
+
+  ad_metadata <- horizons:::compute_ad_metadata(feature_matrix)
+
+  ## Create test data with 2 OOD samples -------------------------------------
+
+  test_data <- tibble::tibble(
+    Sample_ID = c("T1", "T2", "T3", "T4"),
+    Project   = "test",
+    x1 = c(0, 10, 0, 10),   # T2, T4 are OOD
+    x2 = c(0, 10, 0, 10)
+  )
+
+  ## Should warn about 2 samples abstained -----------------------------------
+
+  expect_warning(
+    horizons:::predict_with_uq(
+      point_workflow    = point_wf,
+      quantile_workflow = quantile_wf,
+      new_data          = test_data,
+      ad_metadata       = ad_metadata,
+      abstain_ood       = TRUE
+    ),
+    "2 samples beyond 99th percentile"
+  )
+})
+
+test_that("predict_with_uq() handles all-OOD edge case", {
+
+  skip_if_not_installed("rsample")
+  skip_if_not_installed("workflows")
+
+  ## Create training data -----------------------------------------------------
+
+  set.seed(202)
+  train_data <- tibble::tibble(
+    Response  = rnorm(50, mean = 0, sd = 1),
+    Sample_ID = paste0("S", 1:50),
+    Project   = "train",
+    x1 = rnorm(50, mean = 0, sd = 1),
+    x2 = rnorm(50, mean = 0, sd = 1)
+  )
+
+  ## Train minimal models -----------------------------------------------------
+
+  point_spec <- parsnip::rand_forest(mode = "regression") %>%
+    parsnip::set_engine("ranger")
+
+  quantile_spec <- define_quantile_specification()
+  quantile_spec$args$mtry  <- 2
+  quantile_spec$args$min_n <- 5
+
+  rec <- recipes::recipe(Response ~ x1 + x2, data = train_data)
+
+  point_wf <- workflows::workflow() %>%
+    workflows::add_recipe(rec) %>%
+    workflows::add_model(point_spec) %>%
+    parsnip::fit(data = train_data)
+
+  quantile_wf <- workflows::workflow() %>%
+    workflows::add_recipe(rec) %>%
+    workflows::add_model(quantile_spec) %>%
+    parsnip::fit(data = train_data)
+
+  ## Compute AD metadata ------------------------------------------------------
+
+  feature_matrix <- train_data %>%
+    dplyr::select(x1, x2) %>%
+    as.matrix()
+
+  ad_metadata <- horizons:::compute_ad_metadata(feature_matrix)
+
+  ## Create test data where ALL are OOD --------------------------------------
+
+  test_data <- tibble::tibble(
+    Sample_ID = c("T1", "T2"),
+    Project   = "test",
+    x1 = c(20, 20),   # Both far from training
+    x2 = c(20, 20)
+  )
+
+  ## Should handle gracefully -------------------------------------------------
+
+  suppressWarnings({
+    result <- horizons:::predict_with_uq(
+      point_workflow    = point_wf,
+      quantile_workflow = quantile_wf,
+      new_data          = test_data,
+      ad_metadata       = ad_metadata,
+      abstain_ood       = TRUE
+    )
+  })
+
+  expect_true(all(is.na(result$.pred)))
+  expect_true(all(is.na(result$.pred_lower)))
+  expect_true(all(is.na(result$.pred_upper)))
+  expect_true(all(result$ad_bin == "OOD"))
+})
+
+test_that("predict_with_uq() handles no-OOD edge case", {
+
+  skip_if_not_installed("rsample")
+  skip_if_not_installed("workflows")
+
+  ## Create training data -----------------------------------------------------
+
+  set.seed(303)
+  train_data <- tibble::tibble(
+    Response  = rnorm(50, mean = 0, sd = 1),
+    Sample_ID = paste0("S", 1:50),
+    Project   = "train",
+    x1 = rnorm(50, mean = 0, sd = 1),
+    x2 = rnorm(50, mean = 0, sd = 1)
+  )
+
+  ## Train minimal models -----------------------------------------------------
+
+  point_spec <- parsnip::rand_forest(mode = "regression") %>%
+    parsnip::set_engine("ranger")
+
+  quantile_spec <- define_quantile_specification()
+  quantile_spec$args$mtry  <- 2
+  quantile_spec$args$min_n <- 5
+
+  rec <- recipes::recipe(Response ~ x1 + x2, data = train_data)
+
+  point_wf <- workflows::workflow() %>%
+    workflows::add_recipe(rec) %>%
+    workflows::add_model(point_spec) %>%
+    parsnip::fit(data = train_data)
+
+  quantile_wf <- workflows::workflow() %>%
+    workflows::add_recipe(rec) %>%
+    workflows::add_model(quantile_spec) %>%
+    parsnip::fit(data = train_data)
+
+  ## Compute AD metadata ------------------------------------------------------
+
+  feature_matrix <- train_data %>%
+    dplyr::select(x1, x2) %>%
+    as.matrix()
+
+  ad_metadata <- horizons:::compute_ad_metadata(feature_matrix)
+
+  ## Create test data where NONE are OOD -------------------------------------
+
+  test_data <- tibble::tibble(
+    Sample_ID = c("T1", "T2"),
+    Project   = "test",
+    x1 = c(0, 0.5),   # Both within training domain
+    x2 = c(0, 0.5)
+  )
+
+  ## Should NOT warn ----------------------------------------------------------
+
+  expect_no_warning({
+    result <- horizons:::predict_with_uq(
+      point_workflow    = point_wf,
+      quantile_workflow = quantile_wf,
+      new_data          = test_data,
+      ad_metadata       = ad_metadata,
+      abstain_ood       = TRUE
+    )
+  })
+
+  ## All predictions should be valid -----------------------------------------
+
+  expect_true(all(!is.na(result$.pred)))
+  expect_true(all(!is.na(result$.pred_lower)))
+  expect_true(all(!is.na(result$.pred_upper)))
+})
