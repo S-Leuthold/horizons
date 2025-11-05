@@ -10,7 +10,7 @@ build_ensemble(
   variable,
   covariate_data = NULL,
   ensemble_method = "stacks",
-  optimize_blending = FALSE,
+  optimize_ensemble = FALSE,
   blend_metric = "rmse",
   test_prop = 0.2,
   seed = 123,
@@ -38,8 +38,9 @@ Currently not used but reserved for future functionality. Default: \code{NULL}}
 \item \code{"xgb_meta"}: XGBoost meta-learner for non-linear model blending
 }}
 
-\item{optimize_blending}{Logical. For stacks method, whether to optimize penalty
-and mixture parameters via grid search. Default: \code{FALSE} (uses penalty = 0.01, mixture = 1)}
+\item{optimize_ensemble}{Logical. Whether to optimize ensemble hyperparameters.
+For stacks: grid search over penalty/mixture. For xgb_meta: CV-based early stopping.
+Default: \code{FALSE} (uses fixed defaults for faster execution)}
 
 \item{blend_metric}{Character string. Metric to optimize during blending.
 Options: \code{"rmse"} (default), \code{"mae"}, \code{"rsq"}, or any yardstick metric function name}
@@ -86,6 +87,34 @@ Supports three ensemble methods:
 }
 }
 \details{
+\subsection{XGBoost Meta-Learner Tuning}{
+
+The \code{xgb_meta} method uses optimized defaults for meta-learning with few base models:
+
+\strong{Default hyperparameters}:
+\itemize{
+\item \code{max_depth = 2}: Shallow trees prevent overfitting when blending ~6 base models
+\item \code{eta = 0.05}: Conservative learning rate for stable convergence
+\item \code{lambda = 1.0}, \code{alpha = 0.1}: Strong regularization to avoid memorizing CV fold patterns
+}
+
+\strong{When \code{optimize_ensemble = TRUE}}:
+\itemize{
+\item Runs 5-fold cross-validation with early stopping (max 500 rounds, stops after 20 no-improvement rounds)
+\item Automatically finds optimal \code{nrounds} to prevent overfitting
+\item Stores CV RMSE and optimal rounds in \code{metadata$xgb_cv_rmse} and \code{metadata$xgb_nrounds}
+}
+
+\strong{When \code{optimize_ensemble = FALSE}}:
+\itemize{
+\item Uses fixed \code{nrounds = 50} for faster execution
+\item Suitable for quick prototyping or when model count is very small
+}
+
+The key insight: Meta-learning with few base models requires aggressive regularization.
+Shallow trees and L1/L2 penalties prevent the meta-learner from overfitting to training quirks.
+}
+
 \subsection{Error Handling}{
 
 The function implements robust error handling for ensemble operations:
@@ -98,6 +127,7 @@ penalty/mixture grid size, and metric compatibility
 workflow finalization, and parallel processing settings
 \item XGBoost meta-learner training - Validates meta-features for missing/infinite values,
 response variable type, and hyperparameter settings
+\item XGBoost CV (\code{xgb.cv}) - Checks for sufficient samples (need >= 25 for 5-fold CV)
 }
 
 \strong{Individual model fitting (graceful degradation)}:
@@ -113,20 +143,31 @@ All error messages include actionable troubleshooting hints to help diagnose fai
 }
 \examples{
 \dontrun{
-# Build ensemble from finalized models
-ensemble <- build_ensemble(
+# Build stacked ensemble with optimization
+ensemble_stacks <- build_ensemble(
   finalized_models = top_models,
   input_data = spectral_data,
   variable = "SOC",
   ensemble_method = "stacks",
-  optimize_blending = TRUE,
+  optimize_ensemble = TRUE,
+  verbose = TRUE
+)
+
+# Build XGBoost meta-learner with CV tuning
+ensemble_xgb <- build_ensemble(
+  finalized_models = top_models,
+  input_data = spectral_data,
+  variable = "SOC",
+  ensemble_method = "xgb_meta",
+  optimize_ensemble = TRUE,  # Uses CV early stopping
   verbose = TRUE
 )
 
 # Access results
-ensemble$metrics           # Test set performance
-ensemble$model_weights     # Contributing models and weights
-ensemble$metadata$improvement  # Improvement over best individual
+ensemble_xgb$metrics           # Test set performance
+ensemble_xgb$model_weights     # Contributing models and importance
+ensemble_xgb$metadata$xgb_nrounds  # Optimal number of boosting rounds
+ensemble_xgb$metadata$improvement  # Improvement over best individual
 }
 
 }
