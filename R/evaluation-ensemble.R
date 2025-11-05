@@ -277,6 +277,16 @@ build_ensemble <- function(finalized_models,
     ## Step 3.1: Initialize Stack and Add Models
     ## -------------------------------------------------------------------------
 
+    ## Create transformation lookup for later use -------------------------------
+    ## Store mapping of model IDs to transformations for prediction phase
+    ## This is needed because stacks may rename or filter members
+    ## We'll attach this to the ensemble model for use during prediction
+
+    transformation_lookup <- setNames(
+      finalized_models$transformation,
+      finalized_models$wflow_id
+    )
+
     ## Initialize the stack --------------------------------------------------
 
     model_stack <- stacks::stacks()
@@ -308,40 +318,15 @@ build_ensemble <- function(finalized_models,
       ## This ensures the meta-learner trains on original-scale predictions
       ## regardless of what transformation each individual model used
 
-      # TODO: CRITICAL BUG - DOUBLE BACK-TRANSFORMATION ISSUE
-      # =========================================================================
-      # PROBLEM: When finalized_models come from finalize_top_workflows(), the
-      #          CV predictions are ALREADY back-transformed (see line 655 in
-      #          evaluation-finalize.R: back_transform_cv_predictions()).
-      #
-      #          This code then back-transforms AGAIN, causing:
-      #          - For log models: exp(exp(log(x))) = exp(x) = astronomical values
-      #          - For stacks: Meta-learner trains on wrong scale → bad predictions
-      #          - For xgb_meta: NaN/Inf values → XGBoost crashes
-      #
-      # OBSERVED SYMPTOMS:
-      #          - POM stacks RMSE: 6.6 vs expected 2.4 (174% worse!)
-      #          - POM xgb_meta: fails with "Input data contains `inf` or `nan`"
-      #          - Max CV prediction: 46.99 → exp(46.99) = 2.5×10^20 (should be ~50)
-      #
-      # FIX: Add a check to detect if predictions are already on original scale:
-      #      - Option 1: Add metadata flag in finalize_top_workflows() output
-      #      - Option 2: Check if .pred values are reasonable (e.g., within 100x response range)
-      #      - Option 3: Accept a parameter `cv_already_backtransformed = FALSE`
-      #
-      # SAME BUG ALSO EXISTS: Lines 607-612 (xgb_meta method) - needs identical fix
-      # =========================================================================
+      ## NOTE: CV predictions from finalize_top_workflows() are ALREADY
+      ## back-transformed to original scale (evaluation-finalize.R:655).
+      ## Do NOT back-transform again or we get exp(exp(log(x))) = astronomical values.
+      ##
+      ## The meta-learner will train on original-scale predictions as intended.
 
       cv_preds <- current_model$cv_predictions[[1]]
 
-      if ("transformation" %in% names(current_model) &&
-          needs_back_transformation(current_model$transformation)) {
-
-        trans <- tolower(current_model$transformation)
-
-        cv_preds$.pred <- back_transform_predictions(cv_preds$.pred, trans, warn = FALSE)
-
-      }
+      ## Back-transformation block removed - predictions already on original scale
 
       stacks::add_candidates(model_stack,
                              candidates = cv_preds,
@@ -438,6 +423,11 @@ build_ensemble <- function(finalized_models,
     ## Step 3.3: Fit Member Models and Extract Weights
     ## -------------------------------------------------------------------------
 
+    ## Attach transformation metadata to stack before fitting ------------------
+    ## This allows it to be preserved through fit_members() for later use
+
+    model_stack$transformation_lookup <- transformation_lookup
+
     ## Fit the ensemble members ----------------------------------------------
 
     if (verbose) cli::cli_text("├─ Fitting member models...")
@@ -461,6 +451,8 @@ build_ensemble <- function(finalized_models,
                                    "Verify all workflows are properly finalized",
                                    "Try setting allow_par = FALSE to debug"),
                    abort_on_null = TRUE) -> ensemble_model
+
+    ## Transformation lookup is already attached (preserved through fit_members)
 
     ## Extract model weights -------------------------------------------------
 
@@ -648,40 +640,27 @@ build_ensemble <- function(finalized_models,
 
     }
 
-    ## Collect CV predictions and back-transform to original scale -------------
+    ## Collect CV predictions (already on original scale) ---------------------
 
-    # TODO: CRITICAL BUG - DOUBLE BACK-TRANSFORMATION ISSUE (SAME AS STACKS)
-    # =========================================================================
-    # PROBLEM: CV predictions from finalize_top_workflows() are ALREADY
-    #          back-transformed. This code back-transforms AGAIN, causing:
-    #          - exp(46.99) = 2.5×10^20 → NaN/Inf → XGBoost crashes
-    #
-    # WHY WEIGHTED_AVERAGE WORKS: It doesn't use pre-computed CV predictions.
-    #          Instead, it calls predict() on NEW data → gets transformed
-    #          predictions → back-transforms ONCE (correct).
-    #
-    # FIX: Same as stacks method (lines 277-299) - detect if already back-transformed
-    # =========================================================================
+    ## NOTE: CV predictions from finalize_top_workflows() are ALREADY
+    ## back-transformed to original scale (evaluation-finalize.R:655).
+    ## Do NOT back-transform again.
+    ##
+    ## WHY WEIGHTED_AVERAGE WORKS: It doesn't use pre-computed CV predictions.
+    ## Instead, it calls predict() on NEW data → gets transformed predictions
+    ## → back-transforms ONCE (correct).
 
     finalized_models %>%
       dplyr::mutate(
-        cv_preds = purrr::map2(cv_predictions, transformation, ~ {
+        cv_preds = purrr::map(cv_predictions, ~ {
 
-          ## Extract CV predictions ----------------------------------------------
+          ## Extract CV predictions (already on original scale) ----------------
 
           preds <- tune::collect_predictions(.x) %>%
             dplyr::select(.row, .pred) %>%
             dplyr::arrange(.row)
 
-          ## Back-transform to original scale -----------------------------------
-
-          if (needs_back_transformation(.y)) {
-
-            trans_lower <- tolower(as.character(.y))
-
-            preds$.pred <- back_transform_predictions(preds$.pred, trans_lower, warn = FALSE)
-
-          }
+          ## Back-transformation block removed - already on original scale ------
 
           preds
 
@@ -935,10 +914,72 @@ build_ensemble <- function(finalized_models,
 
     # Different prediction methods for different ensemble types
     if (ensemble_method == "stacks") {
-      # Stacks uses standard predict() function
-      predict(ensemble_model, test_data) %>%
-        dplyr::bind_cols(test_data %>% dplyr::select(Observed = Response)) %>%
-        dplyr::rename(Predicted = .pred) -> ensemble_predictions
+
+      ## Custom prediction with individual back-transformation ----------------
+      ## Stacks predict() would return mixed scales (log for log models, original
+      ## for none models). We need to back-transform each member individually
+      ## before applying stacks weights to handle mixed transformations correctly.
+
+      # Extract member workflows from fitted stacks model
+      member_workflows <- extract_stacks_members(ensemble_model)
+
+      # Extract stacks coefficients (LASSO weights)
+      coefficients <- extract_stacks_coefficients(ensemble_model)
+
+      # Get transformation lookup from ensemble model
+      transformation_lookup <- ensemble_model$transformation_lookup
+
+      # Get member names to match with transformations
+      member_names <- names(member_workflows)
+
+      # Match transformations using the lookup table
+      # Member names should match wflow_ids (with sanitization)
+      transformations <- purrr::map_chr(member_names, function(name) {
+        # Stacks sanitizes names (e.g., "+" becomes ".")
+        # Try direct lookup first
+        if (name %in% names(transformation_lookup)) {
+          return(transformation_lookup[[name]])
+        }
+
+        # Try unsanitized name (reverse: "." becomes "+")
+        unsanitized <- gsub("\\.", "+", name)
+        if (unsanitized %in% names(transformation_lookup)) {
+          return(transformation_lookup[[unsanitized]])
+        }
+
+        # Fallback: no transformation
+        if (verbose) {
+          cli::cli_warn("Could not find transformation for member {.val {name}}, using 'none'")
+        }
+        "none"
+      })
+
+      # Debug output to verify transformation mapping
+      if (verbose) {
+        cli::cli_text("")
+        cli::cli_text("{.strong Transformation mapping for prediction:}")
+        for (i in seq_along(member_names)) {
+          cli::cli_text("├─ {.val {member_names[i]}}: {.field {transformations[i]}}")
+        }
+        cli::cli_text("")
+      }
+
+      # Get predictions with individual back-transformation for each member
+      base_predictions <- predict_stacks_members_backtransformed(
+        member_workflows = member_workflows,
+        transformations = transformations,
+        new_data = test_data
+      )
+
+      # Apply stacks weights to get ensemble prediction
+      ensemble_pred <- apply_stacks_weights(base_predictions, coefficients)
+
+      # Create predictions tibble
+      ensemble_predictions <- tibble::tibble(
+        Predicted = ensemble_pred,
+        Observed = test_data$Response
+      )
+
     } else {
       # Weighted and xgb_meta use custom predict functions
       ensemble_model$predict(test_data) %>%
