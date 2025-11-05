@@ -21,8 +21,9 @@
 #'   - `"stacks"`: Penalized regression meta-learner (default)
 #'   - `"weighted_average"`: Simple weighted average by inverse RMSE
 #'   - `"xgb_meta"`: XGBoost meta-learner for non-linear model blending
-#' @param optimize_blending Logical. For stacks method, whether to optimize penalty
-#'   and mixture parameters via grid search. Default: `FALSE` (uses penalty = 0.01, mixture = 1)
+#' @param optimize_ensemble Logical. Whether to optimize ensemble hyperparameters.
+#'   For stacks: grid search over penalty/mixture. For xgb_meta: CV-based early stopping.
+#'   Default: `FALSE` (uses fixed defaults for faster execution)
 #' @param blend_metric Character string. Metric to optimize during blending.
 #'   Options: `"rmse"` (default), `"mae"`, `"rsq"`, or any yardstick metric function name
 #' @param test_prop Numeric between 0 and 1. Proportion of data to hold out for testing.
@@ -46,23 +47,55 @@
 #'
 #' @examples
 #' \dontrun{
-#' # Build ensemble from finalized models
-#' ensemble <- build_ensemble(
+#' # Build stacked ensemble with optimization
+#' ensemble_stacks <- build_ensemble(
 #'   finalized_models = top_models,
 #'   input_data = spectral_data,
 #'   variable = "SOC",
 #'   ensemble_method = "stacks",
-#'   optimize_blending = TRUE,
+#'   optimize_ensemble = TRUE,
+#'   verbose = TRUE
+#' )
+#'
+#' # Build XGBoost meta-learner with CV tuning
+#' ensemble_xgb <- build_ensemble(
+#'   finalized_models = top_models,
+#'   input_data = spectral_data,
+#'   variable = "SOC",
+#'   ensemble_method = "xgb_meta",
+#'   optimize_ensemble = TRUE,  # Uses CV early stopping
 #'   verbose = TRUE
 #' )
 #'
 #' # Access results
-#' ensemble$metrics           # Test set performance
-#' ensemble$model_weights     # Contributing models and weights
-#' ensemble$metadata$improvement  # Improvement over best individual
+#' ensemble_xgb$metrics           # Test set performance
+#' ensemble_xgb$model_weights     # Contributing models and importance
+#' ensemble_xgb$metadata$xgb_nrounds  # Optimal number of boosting rounds
+#' ensemble_xgb$metadata$improvement  # Improvement over best individual
 #' }
 #'
 #' @details
+#' ## XGBoost Meta-Learner Tuning
+#'
+#' The `xgb_meta` method uses optimized defaults for meta-learning with few base models:
+#'
+#' **Default hyperparameters**:
+#' - `max_depth = 2`: Shallow trees prevent overfitting when blending ~6 base models
+#' - `eta = 0.05`: Conservative learning rate for stable convergence
+#' - `lambda = 1.0`, `alpha = 0.1`: Strong regularization to avoid memorizing CV fold patterns
+#'
+#' **When `optimize_ensemble = TRUE`**:
+#' - Runs 5-fold cross-validation with early stopping (max 500 rounds, stops after 20 no-improvement rounds)
+#' - Automatically finds optimal `nrounds` to prevent overfitting
+#' - Stores CV RMSE and optimal rounds in `metadata$xgb_cv_rmse` and `metadata$xgb_nrounds`
+#'
+#' **When `optimize_ensemble = FALSE`**:
+#' - Uses fixed `nrounds = 50` for faster execution
+#' - Suitable for quick prototyping or when model count is very small
+#'
+#' The key insight: Meta-learning with few base models requires aggressive regularization.
+#' Shallow trees and L1/L2 penalties prevent the meta-learner from overfitting to training quirks.
+#'
 #' ## Error Handling
 #'
 #' The function implements robust error handling for ensemble operations:
@@ -74,6 +107,7 @@
 #'   workflow finalization, and parallel processing settings
 #' - XGBoost meta-learner training - Validates meta-features for missing/infinite values,
 #'   response variable type, and hyperparameter settings
+#' - XGBoost CV (`xgb.cv`) - Checks for sufficient samples (need >= 25 for 5-fold CV)
 #'
 #' **Individual model fitting (graceful degradation)**:
 #' - Weighted average model fitting: Failed models are skipped, ensemble continues with N-1 models
@@ -90,7 +124,7 @@ build_ensemble <- function(finalized_models,
                            variable,
                            covariate_data     = NULL,
                            ensemble_method    = "stacks",
-                           optimize_blending  = FALSE,
+                           optimize_ensemble  = FALSE,
                            blend_metric       = "rmse",
                            test_prop          = 0.2,
                            seed               = 123,
@@ -321,7 +355,7 @@ build_ensemble <- function(finalized_models,
 
     ## Define blending parameters based on optimization choice ---------------
 
-    blend_params <- if (optimize_blending) {
+    blend_params <- if (optimize_ensemble) {
       list(penalty = 10^seq(-6, -1, length.out = 20),
            mixture = seq(0, 1, length.out = 10))
 
@@ -360,7 +394,7 @@ build_ensemble <- function(finalized_models,
 
     if (verbose) {
 
-      if (optimize_blending) {
+      if (optimize_ensemble) {
 
         n_combos <- length(blend_params$penalty) * length(blend_params$mixture)
         cli::cli_text("├─ Optimizing over {.val {n_combos}} penalty/mixture combinations")
@@ -672,18 +706,72 @@ build_ensemble <- function(finalized_models,
 
     ## Train XGBoost meta-learner -------------------------------------------
 
-    if (verbose) cli::cli_text("├─ Training XGBoost on {.val {nrow(meta_features)}} meta-samples")
+    if (verbose) cli::cli_text("├─ Training XGBoost meta-learner")
 
-    # Set up XGBoost parameters (could be tuned in future) ---------------------
+    ## Meta-learning specific defaults ------------------------------------------
+    ## Shallow trees and strong regularization for few base model features
+    ## See: https://github.com/dmlc/xgboost/issues/1686 for meta-learning best practices
 
     list(objective        = "reg:squarederror",
-         max_depth        = 4,
-         eta              = 0.1,
-         subsample        = 0.8,
-         colsample_bytree = 0.8) -> xgb_params
+         max_depth        = 2,              # Shallow for few features (~6 base models)
+         eta              = 0.05,            # Conservative learning rate
+         subsample        = 0.8,             # Row subsampling
+         colsample_bytree = 1.0,             # Use all features (only ~6 models)
+         lambda           = 1.0,             # L2 regularization
+         alpha            = 0.1) -> xgb_params  # L1 regularization
 
-    ## Safely train XGBoost - CRITICAL OPERATION -------------------------------
-    ## Abort on failure with informative error and hints
+    ## Determine optimal nrounds via CV or use fixed default -----------------
+
+    if (optimize_ensemble) {
+
+      ## Use CV with early stopping to find optimal nrounds --------------------
+
+      if (verbose) cli::cli_text("│  ├─ Running 5-fold CV with early stopping")
+
+      safely_execute(
+        expr = {
+
+          xgboost::xgb.cv(data      = meta_features,
+                          label     = meta_response,
+                          params    = xgb_params,
+                          nrounds   = 500,
+                          nfold     = 5,
+                          early_stopping_rounds = 20,
+                          verbose   = 0)
+
+        },
+        default_value = NULL,
+        error_message = "XGBoost CV failed with {nrow(meta_features)} samples across 5 folds"
+      ) -> safe_cv
+
+      handle_results(safe_cv,
+                     error_title = "XGBoost cross-validation failed",
+                     error_hints = c("Check meta-features have no missing/infinite values",
+                                     "Verify sufficient samples for 5-fold CV (need >= 25 samples)",
+                                     "Try setting optimize_ensemble = FALSE to skip CV"),
+                     abort_on_null = TRUE) -> cv_result
+
+      best_nrounds <- cv_result$best_iteration
+      cv_rmse      <- cv_result$evaluation_log$test_rmse_mean[best_nrounds]
+
+      if (verbose) {
+        cli::cli_text("│  ├─ Best iteration: {.val {best_nrounds}} (CV RMSE: {.val {round(cv_rmse, 4)}})")
+      }
+
+    } else {
+
+      ## Use fixed nrounds for faster execution -------------------------------
+
+      best_nrounds <- 50
+      cv_rmse      <- NA_real_
+
+      if (verbose) cli::cli_text("│  ├─ Using fixed nrounds = {.val {best_nrounds}}")
+
+    }
+
+    ## Train final meta-learner with optimal/fixed nrounds --------------------
+
+    if (verbose) cli::cli_text("│  └─ Training final meta-learner with {.val {best_nrounds}} rounds")
 
     safely_execute(
       expr = {
@@ -691,12 +779,12 @@ build_ensemble <- function(finalized_models,
         xgboost::xgboost(data    = meta_features,
                          label   = meta_response,
                          params  = xgb_params,
-                         nrounds = 100,
+                         nrounds = best_nrounds,
                          verbose = 0)
 
       },
       default_value = NULL,
-      error_message = "XGBoost meta-learner training failed with {nrow(meta_features)} samples and {ncol(meta_features)} base models"
+      error_message = "XGBoost meta-learner training failed with {best_nrounds} rounds"
     ) -> safe_xgb
 
     handle_results(safe_xgb,
@@ -705,6 +793,12 @@ build_ensemble <- function(finalized_models,
                                    "Verify response variable is numeric",
                                    "Try reducing nrounds or adjusting max_depth"),
                    abort_on_null = TRUE) -> xgb_meta_model
+
+    ## Store tuning information as attributes for metadata ----------------------
+
+    attr(xgb_meta_model, "nrounds_used") <- best_nrounds
+    attr(xgb_meta_model, "cv_rmse") <- cv_rmse
+    attr(xgb_meta_model, "tuned") <- optimize_ensemble
 
     ## Fit base models on full training data --------------------------------
     ## Safely fit individual models - GRACEFUL DEGRADATION ------------------
@@ -1083,17 +1177,31 @@ build_ensemble <- function(finalized_models,
 
     }
 
+  ## Base metadata for all ensemble types -------------------------------------
+
   list(method               = ensemble_method,
        n_models             = nrow(finalized_models),
        n_active             = n_active,
        test_prop            = test_prop,
        seed                 = seed,
        blend_metric         = blend_metric,
-       optimize_blending    = optimize_blending,
+       optimize_ensemble    = optimize_ensemble,
        ensemble_rmse        = ensemble_rmse,
        best_individual_rmse = best_individual_rmse,
        improvement          = improvement,
-       timestamp           = Sys.time()) -> metadata
+       timestamp            = Sys.time()) -> metadata
+
+  ## Add XGBoost-specific metadata if applicable -------------------------------
+
+  if (ensemble_method == "xgb_meta") {
+
+    metadata$xgb_nrounds   <- attr(ensemble_model$meta_learner, "nrounds_used")
+    metadata$xgb_cv_rmse   <- attr(ensemble_model$meta_learner, "cv_rmse")
+    metadata$xgb_tuned     <- attr(ensemble_model$meta_learner, "tuned")
+    metadata$xgb_max_depth <- xgb_params$max_depth
+    metadata$xgb_eta       <- xgb_params$eta
+
+  }
 
   ## Create return object --------------------------------------------------
 
