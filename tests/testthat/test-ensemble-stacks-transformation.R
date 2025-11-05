@@ -80,48 +80,21 @@ test_that("predicts with individual back-transformation for each member", {
     X1 = c(1, 2, 3, 4)
   )
 
-  # Create mock workflows with different transformations
-  # Mock workflows that return predictable values
+  # Create mock workflows that work with predict.mock_workflow
   log_workflow <- structure(
-    list(
-      id = "log_model",
-      transformation = "log",
-      predict_fn = function(new_data) {
-        # Return log-scale predictions
-        tibble::tibble(.pred = log(new_data$Response + 0.5))
-      }
-    ),
+    list(id = "log_model"),
     class = "mock_workflow"
   )
 
   none_workflow <- structure(
-    list(
-      id = "none_model",
-      transformation = "none",
-      predict_fn = function(new_data) {
-        # Return original-scale predictions
-        tibble::tibble(.pred = new_data$Response - 0.2)
-      }
-    ),
+    list(id = "none_model"),
     class = "mock_workflow"
   )
 
   workflows <- list(log_model = log_workflow, none_model = none_workflow)
   transformations <- c("log", "none")
 
-  # Mock get_original_scale_predictions to work with our mock workflows
-  withr::local_envvar(TEST_MODE = "true")
-
   # Execute: Get predictions with back-transformation
-  # This will use the actual get_original_scale_predictions function
-  # but we need to make sure our mock workflows work with it
-
-  # For now, test that the function exists and has correct signature
-  expect_true(exists("get_original_scale_predictions",
-                     where = asNamespace("horizons"),
-                     mode = "function"))
-
-  # Test helper function signature
   base_preds <- predict_stacks_members_backtransformed(
     member_workflows = workflows,
     transformations = transformations,
@@ -131,10 +104,19 @@ test_that("predicts with individual back-transformation for each member", {
   # Assert: Both should be on original scale
   expect_s3_class(base_preds, "data.frame")
   expect_equal(ncol(base_preds), 2)
+  expect_named(base_preds, c("log_model", "none_model"))
 
   # Predictions should be in reasonable range (not log scale)
-  expect_true(all(base_preds[[1]] > 0))
-  expect_true(all(base_preds[[1]] < 100))
+  # predict.mock_workflow returns Response + hash-based offset
+  expect_true(all(base_preds$log_model > 0))
+  expect_true(all(base_preds$log_model < 100))
+  expect_true(all(base_preds$none_model > 0))
+  expect_true(all(base_preds$none_model < 100))
+
+  # Verify predictions are roughly near Response values
+  # (mock adds small offset based on id hash)
+  expect_true(cor(base_preds$log_model, test_data$Response) > 0.9)
+  expect_true(cor(base_preds$none_model, test_data$Response) > 0.9)
 })
 
 ## ===========================================================================
