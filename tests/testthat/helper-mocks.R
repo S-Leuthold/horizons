@@ -904,7 +904,10 @@ fit.mock_workflow <- function(object, data, ...) {
 }
 
 # Register the fit S3 method
-base::registerS3method("fit", "mock_workflow", fit.mock_workflow)
+# TODO: Revisit S3 method registration - causing 'object fit not found' error
+# The mock workflow fit method is defined above but registerS3method fails
+# during helper loading. Consider alternative mocking approach.
+# base::registerS3method("fit", "mock_workflow", fit.mock_workflow)
 
 #' Mock XGBoost training for ensemble meta-learner tests
 #'
