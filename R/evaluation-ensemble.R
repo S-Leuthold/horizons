@@ -803,10 +803,49 @@ build_ensemble <- function(finalized_models,
 
     # Different prediction methods for different ensemble types
     if (ensemble_method == "stacks") {
-      # Stacks uses standard predict() function
-      predict(ensemble_model, test_data) %>%
-        dplyr::bind_cols(test_data %>% dplyr::select(Observed = Response)) %>%
-        dplyr::rename(Predicted = .pred) -> ensemble_predictions
+
+      ## Custom prediction with individual back-transformation ----------------
+      ## Stacks predict() would return mixed scales (log for log models, original
+      ## for none models). We need to back-transform each member individually
+      ## before applying stacks weights to handle mixed transformations correctly.
+
+      # Extract member workflows from fitted stacks model
+      member_workflows <- extract_stacks_members(ensemble_model)
+
+      # Extract stacks coefficients (LASSO weights)
+      coefficients <- extract_stacks_coefficients(ensemble_model)
+
+      # Get member names to match with transformations
+      member_names <- names(member_workflows)
+
+      # Match transformations to member workflows
+      # Stacks may rename members, so we need to map back to original wflow_ids
+      transformations <- purrr::map_chr(seq_along(member_names), function(i) {
+        # Member names typically preserve order from finalized_models
+        # If we have transformation info for this index, use it
+        if (i <= nrow(finalized_models)) {
+          finalized_models$transformation[i]
+        } else {
+          "none"  # Fallback if somehow mismatched
+        }
+      })
+
+      # Get predictions with individual back-transformation for each member
+      base_predictions <- predict_stacks_members_backtransformed(
+        member_workflows = member_workflows,
+        transformations = transformations,
+        new_data = test_data
+      )
+
+      # Apply stacks weights to get ensemble prediction
+      ensemble_pred <- apply_stacks_weights(base_predictions, coefficients)
+
+      # Create predictions tibble
+      ensemble_predictions <- tibble::tibble(
+        Predicted = ensemble_pred,
+        Observed = test_data$Response
+      )
+
     } else {
       # Weighted and xgb_meta use custom predict functions
       ensemble_model$predict(test_data) %>%

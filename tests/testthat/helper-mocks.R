@@ -741,8 +741,21 @@ with_mocked_stacks <- function(code,
       tibble::tibble(.pred = baseline + predict_offset)
     }
 
+    ## Create mock member_fits (fitted workflows) for each candidate ----------
+    ## This allows extract_stacks_members() to work correctly
+
+    member_names <- names(stack$candidates)
+    member_fits <- purrr::map(member_names, function(name) {
+      structure(
+        list(id = name, mock = TRUE),
+        class = c("mock_workflow", "workflow")
+      )
+    })
+    names(member_fits) <- member_names
+
     structure(list(
       cols_map        = stack$candidates,
+      member_fits     = member_fits,  # Added for extract_stacks_members()
       predict_offset  = predict_offset,
       blended         = stack$blended,
       predict_fun     = predict_fun
@@ -808,6 +821,37 @@ predict.mock_stacks_model <- function(object, new_data, ...) {
 
   tibble::tibble(.pred = baseline + offset)
 }
+
+#' Predict method for mock workflows in stacks tests
+#'
+#' @param object Mock workflow created by with_mocked_stacks().
+#' @param new_data New data frame for predictions.
+#'
+#' @return Tibble with `.pred` column.
+predict.mock_workflow <- function(object, new_data, ...) {
+  # Mock workflows return Response with small noise
+  # This simulates predictions from fitted models
+
+  if ("Response" %in% names(new_data)) {
+    baseline <- new_data$Response
+  } else {
+    baseline <- rep(5, nrow(new_data))
+  }
+
+  # Add small random offset to simulate different models
+  offset <- if (!is.null(object$id)) {
+    # Use hash of id to get consistent but different offsets
+    hash_val <- sum(utf8ToInt(object$id))
+    (hash_val %% 100) / 100 - 0.5  # Range: -0.5 to 0.5
+  } else {
+    0
+  }
+
+  tibble::tibble(.pred = baseline + offset)
+}
+
+# Register the S3 method
+base::registerS3method("predict", "mock_workflow", predict.mock_workflow)
 
 #' Mock XGBoost training for ensemble meta-learner tests
 #'
