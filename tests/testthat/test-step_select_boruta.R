@@ -134,39 +134,41 @@ test_that("step_select_boruta works in combination with other steps", {
       recipes::update_role(Sample_ID, new_role = "id") %>%
       step_transform_spectra(recipes::all_predictors(), preprocessing = "snv") %>%
       step_select_boruta(recipes::all_predictors(), max_runs = 5)
-    
+
     # Mock Boruta to select first few spectral features
-    with_mocked_bindings(
+    prepped <- with_mocked_bindings(
       with_mocked_bindings(
         with_mocked_bindings(
-          recipes::prep(recipe, training = data, retain = TRUE),
-          Boruta = function(...) boruta_object,
-          getSelectedAttributes = function(...) c("cluster_A"),
-          .package = "Boruta"
+          with_mocked_bindings(
+            recipes::prep(recipe, training = data, retain = TRUE),
+            Boruta = function(...) boruta_object,
+            getSelectedAttributes = function(...) c("cluster_A"),
+            .package = "Boruta"
+          ),
+          ranger = function(...) stop("ranger should not run in mock", call. = FALSE),
+          .package = "ranger"
         ),
-        ranger = function(...) stop("ranger should not run in mock", call. = FALSE),
-        .package = "ranger"
+        cluster_spectral_predictors = function(...) cluster_stub,
+        .package = "horizons"
       ),
-      cluster_spectral_predictors = function(...) cluster_stub,
-      .package = "horizons"
-    ),
-    cli_alert_info   = function(...) invisible(NULL),
-    cli_alert_warning = function(...) invisible(NULL),
-    cli_abort        = function(message, ...) stop(message, call. = FALSE),
-    cli_text         = function(...) invisible(NULL),
-    .package = "cli"
-  )
+      cli_alert_info   = function(...) invisible(NULL),
+      cli_alert_warning = function(...) invisible(NULL),
+      cli_abort        = function(message, ...) stop(message, call. = FALSE),
+      cli_text         = function(...) invisible(NULL),
+      .package = "cli"
+    )
 
-  step <- prepped$steps[[1]]
+    step <- prepped$steps[[1]]
 
-  expect_true(step$trained)
-  expect_equal(step$selected_vars, c("600", "602"))
+    expect_true(step$trained)
+    expect_equal(step$selected_vars, c("600", "602"))
 
-  baked <- recipes::bake(prepped, new_data = data)
+    baked <- recipes::bake(prepped, new_data = data)
 
-  expect_true(all(c("600", "602") %in% names(baked)))
-  expect_false("604" %in% names(baked))
-  expect_equal(nrow(baked), nrow(data))
+    expect_true(all(c("600", "602") %in% names(baked)))
+    expect_false("604" %in% names(baked))
+    expect_equal(nrow(baked), nrow(data))
+  })
 })
 
 test_that("step_select_boruta print method works", {

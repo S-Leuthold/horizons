@@ -135,6 +135,7 @@ Collate:
     'library-data.R'
     'library-clustering.R'
     'library-helpers.R'
+    'library-ad.R'
     'library-core.R'
     'library-targets.R'
     'library-uq.R'

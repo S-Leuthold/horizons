@@ -205,13 +205,22 @@ predict_quantiles <- function(workflow,
 #' @param quantiles Numeric vector of length 2 specifying quantile levels.
 #'   Default: `c(0.05, 0.95)` for 90% prediction intervals.
 #'
+#' @param c_alpha Numeric. Conformal calibration margin to add/subtract from
+#'   intervals for coverage guarantee. Default: 0 (no adjustment).
+#'
+#' @param ad_metadata List from `train_cluster_models_with_uq()` containing
+#'   applicability domain metadata (centroid, covariance, thresholds).
+#'   If NULL, AD columns will contain NA. Default: NULL.
+#'
 #' @param repair_crossings Logical. Should quantile crossings be repaired?
 #'   Default: TRUE. Enforces `.pred_lower <= .pred_upper`.
 #'
 #' @return A tibble with one row per sample in `new_data` and columns:
 #'   * `.pred`: Point prediction from best model
-#'   * `.pred_lower`: Lower prediction bound (point + residual_q05)
-#'   * `.pred_upper`: Upper prediction bound (point + residual_q95)
+#'   * `.pred_lower`: Lower prediction bound (point + residual_q05 - c_alpha)
+#'   * `.pred_upper`: Upper prediction bound (point + residual_q95 + c_alpha)
+#'   * `ad_distance`: Mahalanobis distance from training centroid (NA if no metadata)
+#'   * `ad_bin`: Applicability domain bin ("Q1", "Q2", "Q3", "Q4", or "OOD"; NA if no metadata)
 #'
 #' @details
 #' ## Residual-Based Approach
@@ -291,6 +300,7 @@ predict_with_uq <- function(point_workflow,
                             new_data,
                             quantiles = c(0.05, 0.95),
                             c_alpha = 0,
+                            ad_metadata = NULL,
                             repair_crossings = TRUE) {
 
   ## Validate inputs -------------------------------------------------------------
@@ -342,6 +352,58 @@ predict_with_uq <- function(point_workflow,
     .pred_lower = point_preds$.pred + residual_quantiles$.pred_lower - c_alpha,  # Conformal adjustment
     .pred_upper = point_preds$.pred + residual_quantiles$.pred_upper + c_alpha   # Conformal adjustment
   )
+
+  ## ---------------------------------------------------------------------------
+  ## Step 3.5: Compute Applicability Domain (AD) distance and bin
+  ## ---------------------------------------------------------------------------
+
+  if (!is.null(ad_metadata)) {
+
+    ad_distance <- tryCatch(
+      {
+        ## Extract feature matrix in MODEL SPACE (same preprocessing as training)
+        prepped_recipe <- workflows::extract_recipe(point_workflow)
+        feature_data   <- recipes::bake(prepped_recipe, new_data = new_data)
+
+        ## Get predictor columns
+        non_predictor_cols <- c("Sample_ID", "Response", "Project")
+        predictor_cols     <- setdiff(names(feature_data), non_predictor_cols)
+
+        ## Extract feature matrix
+        feature_matrix <- feature_data %>%
+          dplyr::select(dplyr::all_of(predictor_cols)) %>%
+          as.matrix()
+
+        ## Compute distances
+        calculate_ad_distance(feature_matrix, ad_metadata)
+      },
+      error = function(e) {
+        cli::cli_warn("AD distance calculation failed: {e$message}")
+        rep(NA_real_, nrow(new_data))  ## Return NAs if calculation fails
+      }
+    )
+
+    ad_bin <- tryCatch(
+      {
+        assign_ad_bin(ad_distance, ad_metadata$ad_thresholds)
+      },
+      error = function(e) {
+        cli::cli_warn("AD bin assignment failed: {e$message}")
+        factor(rep(NA, length(ad_distance)), levels = c("Q1", "Q2", "Q3", "Q4", "OOD"))
+      }
+    )
+
+    ## Add to result
+    result$ad_distance <- ad_distance
+    result$ad_bin      <- ad_bin
+
+  } else {
+
+    ## No AD metadata provided - add NA columns
+    result$ad_distance <- NA_real_
+    result$ad_bin      <- factor(NA, levels = c("Q1", "Q2", "Q3", "Q4", "OOD"))
+
+  }
 
   ## ---------------------------------------------------------------------------
   ## Step 4: Optional crossing repair
@@ -754,10 +816,54 @@ calculate_conformal_margin <- function(point_cv_preds,
   ## Step 2: Match OOF point predictions with OOF quantile predictions by .row
   ## ---------------------------------------------------------------------------
 
+  ## HIGH-2 FIX: Validate .row alignment BEFORE join ---------------------------
+
+  point_rows    <- sort(unique(point_cv_preds$.row))
+  quantile_rows <- sort(unique(quantile_cv_preds$.row))
+
+  if (!identical(point_rows, quantile_rows)) {
+
+    missing_in_point    <- setdiff(quantile_rows, point_rows)
+    missing_in_quantile <- setdiff(point_rows, quantile_rows)
+
+    cli::cli_abort(
+      c(
+        ".row indices don't match between point and quantile predictions",
+        "i" = "Point model: {length(point_rows)} unique .row values",
+        "i" = "Quantile model: {length(quantile_rows)} unique .row values",
+        if (length(missing_in_point) > 0) {
+          paste0("i" = "Missing in point: ", paste(head(missing_in_point, 10), collapse = ", "))
+        },
+        if (length(missing_in_quantile) > 0) {
+          paste0("i" = "Missing in quantile: ", paste(head(missing_in_quantile, 10), collapse = ", "))
+        },
+        "x" = "Both models must use identical fold splits (same resamples object)"
+      )
+    )
+  }
+
+  ## Check for duplicate .row values (would cause join explosion) -------------
+
+  if (any(duplicated(point_cv_preds$.row))) {
+
+    n_dupes <- sum(duplicated(point_cv_preds$.row))
+    cli::cli_abort("Duplicate .row values in point predictions ({n_dupes} duplicates)")
+
+  }
+
+  if (any(duplicated(quantile_cv_preds$.row))) {
+
+    n_dupes <- sum(duplicated(quantile_cv_preds$.row))
+    cli::cli_abort("Duplicate .row values in quantile predictions ({n_dupes} duplicates)")
+
+  }
+
+  ## Now safe to join ----------------------------------------------------------
+
   calibration_data <- point_cv_preds %>%
     dplyr::inner_join(quantile_cv_preds, by = ".row", suffix = c("_point", "_quantile"))
 
-  ## Validate match -------------------------------------------------------------
+  ## Validate match (should never fail if alignment check passed) -------------
 
   if (nrow(calibration_data) == 0) {
     cli::cli_abort("No matching rows between point and quantile OOF predictions")
@@ -793,6 +899,39 @@ calculate_conformal_margin <- function(point_cv_preds,
         Response - interval_upper   # Violation above (negative if inside)
       )
     )
+
+  ## HIGH-1 FIX: Validate NA scores before conformal margin calculation -------
+
+  n_valid   <- sum(!is.na(calibration_data$score))
+  n_total   <- nrow(calibration_data)
+  pct_valid <- 100 * n_valid / n_total
+
+  if (n_valid == 0) {
+
+    cli::cli_abort(
+      c(
+        "All nonconformity scores are NA - cannot compute conformal margin",
+        "i" = "Check for NAs in Response column or OOF predictions",
+        "i" = "Response NAs: {sum(is.na(calibration_data$Response))}",
+        "i" = "Interval lower NAs: {sum(is.na(calibration_data$interval_lower))}",
+        "i" = "Interval upper NAs: {sum(is.na(calibration_data$interval_upper))}"
+      )
+    )
+
+  }
+
+  if (n_valid < 0.9 * n_total) {
+
+    n_na <- n_total - n_valid
+    cli::cli_warn(
+      c(
+        "{n_na}/{n_total} samples have NA scores ({round(100 - pct_valid, 1)}% missing)",
+        "i" = "Conformal margin may be unreliable with >10% missing scores",
+        "i" = "Proceeding with {n_valid} valid scores"
+      )
+    )
+
+  }
 
   ## ---------------------------------------------------------------------------
   ## Step 5: Calculate c_alpha (1-alpha quantile of scores)
@@ -1165,6 +1304,10 @@ train_quantile_model <- function(train_data,
 #'   * `config_used`: Configuration used for point model
 #'   * `property`: Property name
 #'   * `n_train`: Number of training samples
+#'   * `is_residual_based`: Logical flag (always TRUE)
+#'   * `residual_stats`: List with mean and SD of training residuals
+#'   * `c_alpha`: Conformal calibration margin for 90% coverage
+#'   * `ad_metadata`: Applicability domain metadata (centroid, covariance, thresholds); NULL if computation failed
 #'
 #' @details
 #' ## Training Strategy
@@ -1414,7 +1557,50 @@ train_cluster_models_with_uq <- function(cluster_data,
   gc(verbose = FALSE)
 
   ## ---------------------------------------------------------------------------
-  ## Step 3: Return both models + conformal margin
+  ## Step 2.75: Compute Applicability Domain (AD) Metadata
+  ## ---------------------------------------------------------------------------
+
+  if (verbose) {
+    cli::cli_text("│  │  ├─ Computing AD metadata (Mahalanobis)...")
+  }
+
+  ## Extract feature matrix in MODEL SPACE (after preprocessing, same as training)
+  ## We use the point workflow's recipe since it defines the feature space
+
+  ad_metadata <- tryCatch(
+    {
+      ## Extract prepped recipe from point workflow
+      prepped_recipe <- workflows::extract_recipe(point_workflow)
+
+      ## Bake on training data to get feature matrix
+      feature_data <- recipes::bake(prepped_recipe, new_data = cluster_data)
+
+      ## Get predictor column names (exclude Sample_ID, Response, Project)
+      non_predictor_cols <- c("Sample_ID", "Response", "Project")
+      predictor_cols     <- setdiff(names(feature_data), non_predictor_cols)
+
+      ## Extract feature matrix
+      feature_matrix <- feature_data %>%
+        dplyr::select(dplyr::all_of(predictor_cols)) %>%
+        as.matrix()
+
+      ## Compute AD metadata
+      compute_ad_metadata(feature_matrix)
+    },
+    error = function(e) {
+      if (verbose) {
+        cli::cli_warn("AD metadata computation failed: {e$message}")
+      }
+      NULL  ## Return NULL if AD computation fails (non-fatal)
+    }
+  )
+
+  if (verbose && !is.null(ad_metadata)) {
+    cli::cli_text("│  │  │  └─ AD thresholds: Q1={round(ad_metadata$ad_thresholds[1], 1)}, Q4={round(ad_metadata$ad_thresholds[3], 1)}, p99={round(ad_metadata$ad_thresholds[4], 1)}")
+  }
+
+  ## ---------------------------------------------------------------------------
+  ## Step 3: Return both models + conformal margin + AD metadata
   ## ---------------------------------------------------------------------------
 
   list(
@@ -1426,6 +1612,7 @@ train_cluster_models_with_uq <- function(cluster_data,
     n_train           = n_train,
     is_residual_based = TRUE,  # Flag for prediction logic
     residual_stats    = list(mean = mean_residual, sd = sd_residual),
-    c_alpha           = c_alpha  # Conformal calibration margin
+    c_alpha           = c_alpha,    # Conformal calibration margin
+    ad_metadata       = ad_metadata # Applicability domain metadata (NULL if failed)
   )
 }
