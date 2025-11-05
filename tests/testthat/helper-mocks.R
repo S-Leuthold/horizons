@@ -741,13 +741,42 @@ with_mocked_stacks <- function(code,
       tibble::tibble(.pred = baseline + predict_offset)
     }
 
-    structure(list(
+    ## Create mock member_fits (fitted workflows) for each candidate ----------
+    ## This allows extract_stacks_members() to work correctly
+    ## IMPORTANT: Store transformation metadata with each member for proper back-transform
+
+    member_names <- names(stack$candidates)
+    member_fits <- purrr::map(member_names, function(name) {
+      # Extract transformation from candidate if available
+      # Candidates are the CV predictions added via add_candidates()
+      trans <- attr(stack$candidates[[name]], "transformation")
+      if (is.null(trans)) trans <- "none"
+
+      structure(
+        list(id = name, transformation = trans, mock = TRUE),
+        class = c("mock_workflow", "workflow")
+      )
+    })
+    names(member_fits) <- member_names
+
+    ## Build mock stacks model ------------------------------------------------
+    ## Preserve transformation_lookup if attached by build_ensemble()
+
+    mock_model <- structure(list(
       cols_map        = stack$candidates,
+      member_fits     = member_fits,  # Added for extract_stacks_members()
       predict_offset  = predict_offset,
       blended         = stack$blended,
       predict_fun     = predict_fun
     ),
     class = c("mock_stacks_model", "stacks_model"))
+
+    ## If stack has transformation_lookup (attached by build_ensemble), preserve it
+    if (!is.null(stack$transformation_lookup)) {
+      mock_model$transformation_lookup <- stack$transformation_lookup
+    }
+
+    return(mock_model)
   }
 
   mock_autoplot <- function(object, type = "weights", ...) {
@@ -808,6 +837,77 @@ predict.mock_stacks_model <- function(object, new_data, ...) {
 
   tibble::tibble(.pred = baseline + offset)
 }
+
+#' Predict method for mock workflows in stacks tests
+#'
+#' @param object Mock workflow created by with_mocked_stacks().
+#' @param new_data New data frame for predictions.
+#'
+#' @return Tibble with `.pred` column.
+#'
+#' @details
+#' IMPORTANT: This mock returns predictions on TRANSFORMED scale if the workflow
+#' has a transformation. This matches real workflow behavior where predict()
+#' returns transformed predictions that need to be back-transformed.
+predict.mock_workflow <- function(object, new_data, ...) {
+  # Mock workflows return Response with small noise
+  # This simulates predictions from fitted models
+
+  if ("Response" %in% names(new_data)) {
+    baseline <- new_data$Response
+  } else {
+    baseline <- rep(5, nrow(new_data))
+  }
+
+  # Add small random offset to simulate different models
+  offset <- if (!is.null(object$id)) {
+    # Use hash of id to get consistent but different offsets
+    hash_val <- sum(utf8ToInt(object$id))
+    (hash_val %% 100) / 100 - 0.5  # Range: -0.5 to 0.5
+  } else {
+    0
+  }
+
+  predictions <- baseline + offset
+
+  # If workflow has transformation info, return TRANSFORMED predictions
+  # This matches real workflow behavior where predict() returns transformed scale
+  if (!is.null(object$transformation)) {
+    trans <- tolower(as.character(object$transformation))
+    if (trans == "log") {
+      predictions <- log(pmax(predictions, 1e-6))
+    } else if (trans == "sqrt") {
+      predictions <- sqrt(pmax(predictions, 0))
+    }
+    # "none" keeps original scale
+  }
+
+  tibble::tibble(.pred = predictions)
+}
+
+# Register the S3 method
+base::registerS3method("predict", "mock_workflow", predict.mock_workflow)
+
+#' Fit method for mock workflows in stacks tests
+#'
+#' @param object Mock workflow
+#' @param data Training data
+#'
+#' @return Fitted mock workflow (just returns itself)
+fit.mock_workflow <- function(object, data, ...) {
+  # Mock workflows don't need actual fitting
+  # Just return the workflow itself as if it were fitted
+  structure(
+    c(object, list(fitted = TRUE)),
+    class = class(object)
+  )
+}
+
+# Register the fit S3 method
+# TODO: Revisit S3 method registration - causing 'object fit not found' error
+# The mock workflow fit method is defined above but registerS3method fails
+# during helper loading. Consider alternative mocking approach.
+# base::registerS3method("fit", "mock_workflow", fit.mock_workflow)
 
 #' Mock XGBoost training for ensemble meta-learner tests
 #'
