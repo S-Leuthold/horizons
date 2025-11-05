@@ -854,8 +854,21 @@ build_ensemble <- function(finalized_models,
         }
 
         # Fallback: no transformation
+        if (verbose) {
+          cli::cli_warn("Could not find transformation for member {.val {name}}, using 'none'")
+        }
         "none"
       })
+
+      # Debug output to verify transformation mapping
+      if (verbose) {
+        cli::cli_text("")
+        cli::cli_text("{.strong Transformation mapping for prediction:}")
+        for (i in seq_along(member_names)) {
+          cli::cli_text("├─ {.val {member_names[i]}}: {.field {transformations[i]}}")
+        }
+        cli::cli_text("")
+      }
 
       # Get predictions with individual back-transformation for each member
       base_predictions <- predict_stacks_members_backtransformed(
