@@ -243,6 +243,16 @@ build_ensemble <- function(finalized_models,
     ## Step 3.1: Initialize Stack and Add Models
     ## -------------------------------------------------------------------------
 
+    ## Create transformation lookup for later use -------------------------------
+    ## Store mapping of model IDs to transformations for prediction phase
+    ## This is needed because stacks may rename or filter members
+    ## We'll attach this to the ensemble model for use during prediction
+
+    transformation_lookup <- setNames(
+      finalized_models$transformation,
+      finalized_models$wflow_id
+    )
+
     ## Initialize the stack --------------------------------------------------
 
     model_stack <- stacks::stacks()
@@ -379,6 +389,11 @@ build_ensemble <- function(finalized_models,
     ## Step 3.3: Fit Member Models and Extract Weights
     ## -------------------------------------------------------------------------
 
+    ## Attach transformation metadata to stack before fitting ------------------
+    ## This allows it to be preserved through fit_members() for later use
+
+    model_stack$transformation_lookup <- transformation_lookup
+
     ## Fit the ensemble members ----------------------------------------------
 
     if (verbose) cli::cli_text("├─ Fitting member models...")
@@ -402,6 +417,8 @@ build_ensemble <- function(finalized_models,
                                    "Verify all workflows are properly finalized",
                                    "Try setting allow_par = FALSE to debug"),
                    abort_on_null = TRUE) -> ensemble_model
+
+    ## Transformation lookup is already attached (preserved through fit_members)
 
     ## Extract model weights -------------------------------------------------
 
@@ -815,19 +832,29 @@ build_ensemble <- function(finalized_models,
       # Extract stacks coefficients (LASSO weights)
       coefficients <- extract_stacks_coefficients(ensemble_model)
 
+      # Get transformation lookup from ensemble model
+      transformation_lookup <- ensemble_model$transformation_lookup
+
       # Get member names to match with transformations
       member_names <- names(member_workflows)
 
-      # Match transformations to member workflows
-      # Stacks may rename members, so we need to map back to original wflow_ids
-      transformations <- purrr::map_chr(seq_along(member_names), function(i) {
-        # Member names typically preserve order from finalized_models
-        # If we have transformation info for this index, use it
-        if (i <= nrow(finalized_models)) {
-          finalized_models$transformation[i]
-        } else {
-          "none"  # Fallback if somehow mismatched
+      # Match transformations using the lookup table
+      # Member names should match wflow_ids (with sanitization)
+      transformations <- purrr::map_chr(member_names, function(name) {
+        # Stacks sanitizes names (e.g., "+" becomes ".")
+        # Try direct lookup first
+        if (name %in% names(transformation_lookup)) {
+          return(transformation_lookup[[name]])
         }
+
+        # Try unsanitized name (reverse: "." becomes "+")
+        unsanitized <- gsub("\\.", "+", name)
+        if (unsanitized %in% names(transformation_lookup)) {
+          return(transformation_lookup[[unsanitized]])
+        }
+
+        # Fallback: no transformation
+        "none"
       })
 
       # Get predictions with individual back-transformation for each member
