@@ -144,8 +144,8 @@ predict_stacks_members_backtransformed <- function(member_workflows,
 #'
 #' @param base_predictions Data frame of base model predictions. One column
 #'   per model, all on the same scale (original scale after back-transformation).
-#' @param coefficients Named numeric vector of weights. Names must match
-#'   column names in `base_predictions`.
+#' @param coefficients Named numeric vector of weights. Names may be numeric
+#'   indices ("1", "2", "3") from stacks or actual member names.
 #'
 #' @return Numeric vector of ensemble predictions, one per row in `base_predictions`.
 #'
@@ -160,22 +160,44 @@ predict_stacks_members_backtransformed <- function(member_workflows,
 #' }
 apply_stacks_weights <- function(base_predictions, coefficients) {
 
-  ## Validate inputs --------------------------------------------------------
+  ## Handle stacks numeric member names ------------------------------------
+  ## Stacks uses numeric indices ("1", "2", "3") for member names
+  ## but base_predictions has actual workflow names as columns
+  ## We need to align them by position
 
   pred_names <- names(base_predictions)
   coef_names <- names(coefficients)
 
-  if (!all(coef_names %in% pred_names)) {
-    missing_cols <- setdiff(coef_names, pred_names)
-    cli::cli_abort(
-      c("Coefficient names do not match prediction columns",
-        "i" = "Missing columns: {paste(missing_cols, collapse = ', ')}")
-    )
+  ## Check if coefficients have numeric names (from stacks)
+  if (all(grepl("^[0-9]+$", coef_names))) {
+    # Numeric names - map by position
+    # Coefficient "1" -> first prediction column, etc.
+
+    # Convert coefficient names to numeric indices
+    coef_indices <- as.integer(coef_names)
+
+    # Reorder base_predictions to match coefficient order
+    base_predictions <- base_predictions[, coef_indices, drop = FALSE]
+
+    # Rename columns to match coefficients for matrix multiplication
+    names(base_predictions) <- coef_names
+
+  } else {
+    # Named coefficients - validate they match prediction columns
+
+    if (!all(coef_names %in% pred_names)) {
+      missing_cols <- setdiff(coef_names, pred_names)
+      cli::cli_abort(
+        c("Coefficient names do not match prediction columns",
+          "i" = "Coefficient names: {paste(coef_names, collapse = ', ')}",
+          "i" = "Prediction columns: {paste(pred_names, collapse = ', ')}",
+          "i" = "Missing columns: {paste(missing_cols, collapse = ', ')}")
+      )
+    }
+
+    # Ensure column order matches coefficient order
+    base_predictions <- base_predictions[, names(coefficients), drop = FALSE]
   }
-
-  ## Ensure column order matches coefficient order --------------------------
-
-  base_predictions <- base_predictions[, names(coefficients), drop = FALSE]
 
   ## Convert to matrix ------------------------------------------------------
 
