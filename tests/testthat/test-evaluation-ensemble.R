@@ -99,18 +99,17 @@ test_that("stacks ensemble uses mocked stacks infrastructure and saves output", 
 
   transforms <- setNames(finalized$transformation, finalized$wflow_id)
 
+  ## NOTE: CV predictions from finalize_top_workflows() are ALREADY back-transformed
+  ## to original scale. Mock data must match this behavior.
   finalized$cv_predictions <- purrr::map2(
     finalized$wflow_id,
     seq_along(finalized$wflow_id),
     function(id, idx) {
       base_vals <- pmax(data$Response + workflow_offsets[[id]], 1e-3)
 
-      pred_values <- switch(
-        transforms[[id]],
-        log  = log(base_vals),
-        sqrt = sqrt(pmax(base_vals, 0)),
-        base_vals
-      )
+      ## Predictions are on ORIGINAL scale (already back-transformed)
+      ## regardless of transformation type
+      pred_values <- base_vals
 
       tibble::tibble(
         .pred    = pred_values,
@@ -235,18 +234,17 @@ test_that("xgb_meta ensemble integrates mocked XGBoost and reports degradation",
 
   transforms <- setNames(finalized$transformation, finalized$wflow_id)
 
+  ## NOTE: CV predictions from finalize_top_workflows() are ALREADY back-transformed
+  ## to original scale. Mock data must match this behavior.
   finalized$cv_predictions <- purrr::map2(
     finalized$wflow_id,
     cv_offsets,
     function(id, offset) {
       base_vals <- pmax(data$Response + offset, 1e-3)
 
-      pred_values <- switch(
-        transforms[[id]],
-        log  = log(base_vals),
-        sqrt = sqrt(pmax(base_vals, 0)),
-        base_vals
-      )
+      ## Predictions are on ORIGINAL scale (already back-transformed)
+      ## regardless of transformation type
+      pred_values <- base_vals
 
       tibble::tibble(
         .pred    = pred_values,
