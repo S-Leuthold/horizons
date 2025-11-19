@@ -61,6 +61,8 @@
 #' @keywords internal
 predict_library <- function(spectra,
                            property,
+                           with_uq            = TRUE,
+                           abstain_ood        = FALSE,
                            remove_water_bands = TRUE,
                            debug_mode         = FALSE,
                            allow_par          = TRUE,
@@ -417,8 +419,26 @@ predict_library <- function(spectra,
           verbose            = verbose
         )
 
-        model          <- optimal_result$final_workflow
         winning_config <- optimal_result$winning_config
+
+        ## Train with UQ if requested -------------------------------------------
+
+        if (with_uq) {
+
+          uq_models <- train_cluster_models_with_uq(
+            cluster_data = splits$training_pool,
+            property     = prop_for_library,
+            config       = winning_config,
+            cv_folds     = if (debug_mode) 5 else 10,
+            verbose      = verbose
+          )
+
+        } else {
+
+          ## No UQ: just use optimized workflow (backward compatibility)
+          model <- optimal_result$final_workflow
+
+        }
 
       }
 
@@ -450,14 +470,49 @@ predict_library <- function(spectra,
 
       } else {
 
-        predictions <- predict_standard_from_model(
-          unknowns   = unknowns_in_cluster,
-          model      = model,
-          property   = prop_for_library,
-          cluster_id = clust_id,
-          config     = winning_config,
-          verbose    = verbose
-        )
+        ## Non-texture prediction -----------------------------------------------
+
+        if (with_uq) {
+
+          ## Add Project column if missing (required by workflows)
+          unknowns_prepared <- unknowns_in_cluster
+          if (!"Project" %in% names(unknowns_prepared)) {
+            unknowns_prepared <- unknowns_prepared %>%
+              dplyr::mutate(Project = "library")
+          }
+
+          ## UQ prediction: use trained UQ models
+          predictions <- predict_with_uq(
+            point_workflow    = uq_models$point_model,
+            quantile_workflow = uq_models$quantile_model,
+            new_data          = unknowns_prepared,
+            quantiles         = c(0.05, 0.95),
+            c_alpha           = uq_models$c_alpha,
+            ad_metadata       = uq_models$ad_metadata,
+            abstain_ood       = abstain_ood,
+            repair_crossings  = TRUE
+          ) %>%
+            dplyr::mutate(
+              property   = prop_for_library,
+              cluster_id = clust_id,
+              config_id  = paste0(winning_config$model, "_",
+                                 winning_config$preprocessing, "_",
+                                 winning_config$feature_selection)
+            )
+
+        } else {
+
+          ## No UQ: simple point prediction
+          predictions <- predict_standard_from_model(
+            unknowns   = unknowns_in_cluster,
+            model      = model,
+            property   = prop_for_library,
+            cluster_id = clust_id,
+            config     = winning_config,
+            verbose    = verbose
+          )
+
+        }
 
       }
 

@@ -130,11 +130,11 @@ OPTIMAL_CONFIGS_V1 <- tibble::tribble(
   ~property,        ~rank, ~model,          ~preprocessing, ~transformation, ~feature_selection, ~expected_r2, ~notes,
 
   ## CLAY (mineralogy-driven, strong spectral features)
-  "clay",           1,     "random_forest", "snv_deriv1",   "none",         "pca",            0.84,        "Ng2022: Cat A, mineral peaks clear",
-  "clay",           2,     "cubist",        "snv",          "none",         "correlation",    0.82,        "Current default, rule-based",
-  "clay",           3,     "xgboost",       "snv_deriv1",   "none",         "cars",           0.82,        "Gradient boosting alternative",
-  "clay",           4,     "plsr",          "sg",           "none",         "none",           0.78,        "Baseline comparison",
-  "clay",           5,     "svm_rbf",       "snv",          "none",         "pca",            0.80,        "Kernel method",
+  "clay",           1,     "cubist",        "snv_deriv1",   "none",         "correlation",    0.85,        "Derivative + correlation for mineral peaks",
+  "clay",           2,     "cubist",        "snv",          "none",         "correlation",    0.84,        "SNV only variant",
+  "clay",           3,     "random_forest", "snv_deriv1",   "none",         "pca",            0.84,        "RF + derivative + PCA",
+  "clay",           4,     "xgboost",       "snv_deriv1",   "none",         "cars",           0.83,        "Gradient boosting + CARS",
+  "clay",           5,     "svm_rbf",       "snv_deriv1",   "none",         "pca",            0.82,        "Kernel method + derivative",
 
   ## SAND (negatively correlated with clay, similar spectral basis)
   "sand",           1,     "random_forest", "snv_deriv1",   "none",         "pca",            0.80,        "Ng2022: Cat A",
@@ -156,8 +156,10 @@ OPTIMAL_CONFIGS_V1 <- tibble::tribble(
 
   ## ORGANIC CARBON (validated Nov 2024 - real data testing)
   "oc",             1,     "cubist",        "snv_deriv1",   "none",         "correlation",    0.97,        "Validated: RPD=4.13, CCC=0.969 (Nov 2024)",
-  "oc",             2,     "svm_rbf",       "snv_deriv1",   "log",          "pca",            0.93,        "SVM with log transform",
-  "oc",             3,     "elastic_net",   "snv_deriv1",   "log",          "pca",            0.89,        "Regularized with log transform",
+  "oc",             2,     "cubist",        "snv_deriv1",   "none",         "cars",           0.96,        "Cubist + CARS variant",
+  "oc",             3,     "xgboost",       "snv_deriv1",   "none",         "pca",            0.94,        "Gradient boosting + derivative",
+  "oc",             4,     "random_forest", "snv_deriv1",   "none",         "pca",            0.92,        "RF + derivative",
+  "oc",             5,     "svm_rbf",       "snv_deriv1",   "none",         "correlation",    0.91,        "SVM + derivative + correlation",
 
   ## CARBONATE (SIC - HIGHEST accuracy, strong peaks at 1450, 880, 700 cm-1)
   "carbonate",      1,     "plsr",          "sg",           "none",         "none",           0.97,        "Ng2022: HIGHEST! Direct peaks",
