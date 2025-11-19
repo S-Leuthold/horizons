@@ -354,6 +354,7 @@ predict_with_uq <- function(point_workflow,
   # So: lower bound = point - |residual_q05|, upper bound = point + residual_q95
 
   result <- tibble::tibble(
+    Sample_ID   = new_data$Sample_ID,
     .pred       = point_preds$.pred,
     .pred_lower = point_preds$.pred + residual_quantiles$.pred_lower - c_alpha,  # Conformal adjustment
     .pred_upper = point_preds$.pred + residual_quantiles$.pred_upper + c_alpha   # Conformal adjustment

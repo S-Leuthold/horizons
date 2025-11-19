@@ -213,7 +213,7 @@ predict_library <- function(spectra,
       remove_water_bands = remove_water_bands,  # User-controlled
       max_samples        = if (debug_mode) 2000 else NULL,
       seed               = 123,
-      verbose            = FALSE  # Suppress nested trees
+      verbose            = verbose  # Show library loading progress
     )
 
     if (verbose) {
@@ -237,7 +237,7 @@ predict_library <- function(spectra,
 
     unknown_preprocessed <- preprocess_library_spectra(
       spectral_data      = unknown_spectral,
-      remove_water_bands = FALSE,
+      remove_water_bands = remove_water_bands,  # Match library preprocessing!
       verbose            = FALSE
     )
 
@@ -300,6 +300,79 @@ predict_library <- function(spectra,
         conf_flag <- if (cs$avg_prob < 0.7) " ⚠" else ""
         cli::cli_text("│  │     • Cluster {cs$cluster_id}: {cs$n} sample{?s} ({pct}%) - confidence: {round(cs$avg_prob, 2)}{conf_flag}")
       }
+    }
+
+    ## -------------------------------------------------------------------------
+    ## Step 2.4.5: Reassign unknowns from sparse clusters to nearest neighbors
+    ## -------------------------------------------------------------------------
+
+    min_unknown_size <- 20  # Don't train a model for < 20 unknowns (inefficient)
+
+    ## Get unknown counts per cluster
+    cluster_unknown_counts <- unknown_assignments %>%
+      dplyr::group_by(cluster_id) %>%
+      dplyr::summarise(n_unknowns = dplyr::n(), .groups = "drop")
+
+    small_clusters <- cluster_unknown_counts %>%
+      dplyr::filter(n_unknowns < min_unknown_size) %>%
+      dplyr::pull(cluster_id)
+
+    if (length(small_clusters) > 0) {
+
+      if (verbose) {
+        cli::cli_text("│  │")
+        cli::cli_text("│  ├─ Reassigning unknowns from small clusters...")
+      }
+
+      for (small_clust in small_clusters) {
+
+        ## Find unknowns in this small cluster
+        unknowns_in_small <- which(unknown_assignments$cluster_id == small_clust)
+
+        if (length(unknowns_in_small) == 0) next
+
+        ## Find nearest large cluster for each unknown
+        for (idx in unknowns_in_small) {
+
+          ## Get PCA coords for this unknown
+          unknown_coords <- unknown_pca_scores[idx, , drop = FALSE]
+
+          ## Calculate distances to all LARGE cluster centroids
+          large_clusters <- setdiff(unique(unknown_assignments$cluster_id), small_clusters)
+
+          min_dist <- Inf
+          nearest_cluster <- NA
+
+          for (large_clust in large_clusters) {
+
+            ## Get centroid of large cluster
+            large_clust_samples <- which(unknown_assignments$cluster_id == large_clust)
+            centroid <- colMeans(unknown_pca_scores[large_clust_samples, , drop = FALSE])
+
+            ## Euclidean distance
+            dist <- sqrt(sum((unknown_coords - centroid)^2))
+
+            if (dist < min_dist) {
+              min_dist <- dist
+              nearest_cluster <- large_clust
+            }
+          }
+
+          ## Reassign to nearest large cluster
+          unknown_assignments$cluster_id[idx] <- nearest_cluster
+
+        }
+
+        if (verbose) {
+          cli::cli_text("│  │  ├─ Cluster {small_clust}: {length(unknowns_in_small)} unknown{?s} → nearest large cluster")
+        }
+
+      }
+
+      if (verbose) {
+        cli::cli_text("│  │  └─ Reassignment complete")
+      }
+
     }
 
     ## -------------------------------------------------------------------------
