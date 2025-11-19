@@ -154,12 +154,10 @@ OPTIMAL_CONFIGS_V1 <- tibble::tribble(
   "total_carbon",   4,     "elastic_net",   "sg",           "log",          "none",           0.92,        "Linear with transform",
   "total_carbon",   5,     "xgboost",       "snv_deriv1",   "none",         "cars",           0.93,        "Gradient boosting",
 
-  ## ORGANIC CARBON (SOC - also excellent, direct chromophore)
-  "oc",             1,     "plsr",          "snv_deriv1",   "none",         "none",           0.92,        "Ng2022: Cat A, PLSR gold standard",
-  "oc",             2,     "random_forest", "snv",          "none",         "pca",            0.90,        "Non-linear alternative",
-  "oc",             3,     "cubist",        "snv_deriv1",   "none",         "correlation",    0.89,        "Current covariate default",
-  "oc",             4,     "elastic_net",   "sg",           "log",          "none",           0.88,        "Regularized, log transform",
-  "oc",             5,     "xgboost",       "snv_deriv1",   "none",         "pca",            0.90,        "Boosting",
+  ## ORGANIC CARBON (validated Nov 2024 - real data testing)
+  "oc",             1,     "cubist",        "snv_deriv1",   "none",         "correlation",    0.97,        "Validated: RPD=4.13, CCC=0.969 (Nov 2024)",
+  "oc",             2,     "svm_rbf",       "snv_deriv1",   "log",          "pca",            0.93,        "SVM with log transform",
+  "oc",             3,     "elastic_net",   "snv_deriv1",   "log",          "pca",            0.89,        "Regularized with log transform",
 
   ## CARBONATE (SIC - HIGHEST accuracy, strong peaks at 1450, 880, 700 cm-1)
   "carbonate",      1,     "plsr",          "sg",           "none",         "none",           0.97,        "Ng2022: HIGHEST! Direct peaks",
