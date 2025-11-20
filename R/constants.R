@@ -129,26 +129,26 @@ LIBRARY_PROPERTIES <- c(
 OPTIMAL_CONFIGS_V1 <- tibble::tribble(
   ~property,        ~rank, ~model,          ~preprocessing, ~transformation, ~feature_selection, ~expected_r2, ~notes,
 
-  ## CLAY (Testing SVM with larger grid + algorithmic diversity)
-  "clay",           1,     "svm_rbf",       "snv_deriv1",   "none",         "pca",            0.90,        "SVM + PCA (testing grid=15/25)",
-  "clay",           2,     "svm_rbf",       "snv_deriv1",   "none",         "cars",           0.89,        "SVM + CARS",
-  "clay",           3,     "cubist",        "snv_deriv1",   "none",         "pca",            0.85,        "Cubist + PCA (reliable fallback)",
-  "clay",           4,     "xgboost",       "snv_deriv1",   "none",         "pca",            0.84,        "XGBoost + PCA (boosting alternative)",
-  "clay",           5,     "random_forest", "snv_deriv1",   "none",         "pca",            0.83,        "RF baseline",
+  ## CLAY (Final - SVM doesn't work for texture)
+  "clay",           1,     "cubist",        "snv_deriv1",   "none",         "pca",            0.85,        "Cubist + PCA (winner)",
+  "clay",           2,     "cubist",        "snv_deriv1",   "none",         "cars",           0.84,        "Cubist + CARS",
+  "clay",           3,     "cubist",        "snv_deriv1",   "none",         "correlation",    0.84,        "Cubist + correlation",
+  "clay",           4,     "elastic_net",   "snv_deriv1",   "none",         "cars",           0.83,        "Elastic Net + CARS",
+  "clay",           5,     "xgboost",       "snv_deriv1",   "none",         "pca",            0.82,        "XGBoost + PCA",
 
-  ## SAND (Cubist-focused, mirrors clay)
-  "sand",           1,     "cubist",        "snv_deriv1",   "none",         "pca",            0.83,        "Cubist + PCA (reliable)",
-  "sand",           2,     "cubist",        "snv_deriv1",   "none",         "correlation",    0.82,        "Cubist + correlation",
-  "sand",           3,     "cubist",        "snv_deriv1",   "none",         "cars",           0.82,        "Cubist + CARS",
-  "sand",           4,     "random_forest", "snv_deriv1",   "none",         "pca",            0.81,        "RF baseline",
-  "sand",           5,     "xgboost",       "snv_deriv1",   "none",         "pca",            0.80,        "XGBoost alternative",
+  ## SAND (Matches clay)
+  "sand",           1,     "cubist",        "snv_deriv1",   "none",         "pca",            0.83,        "Cubist + PCA (winner)",
+  "sand",           2,     "cubist",        "snv_deriv1",   "none",         "cars",           0.82,        "Cubist + CARS",
+  "sand",           3,     "cubist",        "snv_deriv1",   "none",         "correlation",    0.82,        "Cubist + correlation",
+  "sand",           4,     "elastic_net",   "snv_deriv1",   "none",         "cars",           0.81,        "Elastic Net + CARS",
+  "sand",           5,     "xgboost",       "snv_deriv1",   "none",         "pca",            0.80,        "XGBoost + PCA",
 
-  ## SILT (Cubist-focused, mirrors clay)
-  "silt",           1,     "cubist",        "snv_deriv1",   "none",         "pca",            0.72,        "Cubist + PCA (reliable)",
-  "silt",           2,     "cubist",        "snv_deriv1",   "none",         "correlation",    0.71,        "Cubist + correlation",
-  "silt",           3,     "cubist",        "snv_deriv1",   "none",         "cars",           0.70,        "Cubist + CARS",
-  "silt",           4,     "random_forest", "snv_deriv1",   "none",         "pca",            0.69,        "RF baseline",
-  "silt",           5,     "xgboost",       "snv_deriv1",   "none",         "pca",            0.68,        "XGBoost alternative",
+  ## SILT (Matches clay)
+  "silt",           1,     "cubist",        "snv_deriv1",   "none",         "pca",            0.72,        "Cubist + PCA (winner)",
+  "silt",           2,     "cubist",        "snv_deriv1",   "none",         "cars",           0.71,        "Cubist + CARS",
+  "silt",           3,     "cubist",        "snv_deriv1",   "none",         "correlation",    0.70,        "Cubist + correlation",
+  "silt",           4,     "elastic_net",   "snv_deriv1",   "none",         "cars",           0.69,        "Elastic Net + CARS",
+  "silt",           5,     "xgboost",       "snv_deriv1",   "none",         "pca",            0.68,        "XGBoost + PCA",
 
   ## TOTAL CARBON (BEST overall predictor, direct chromophore)
   "total_carbon",   1,     "plsr",          "snv_deriv1",   "none",         "none",           0.95,        "Ng2022: BEST! PLSR standard for C",

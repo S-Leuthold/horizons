@@ -54,7 +54,6 @@ Imports:
     parsnip,
     patchwork,
     plsmod,
-    progressr,
     prospectr,
     pryr,
     purrr,
