@@ -129,12 +129,12 @@ LIBRARY_PROPERTIES <- c(
 OPTIMAL_CONFIGS_V1 <- tibble::tribble(
   ~property,        ~rank, ~model,          ~preprocessing, ~transformation, ~feature_selection, ~expected_r2, ~notes,
 
-  ## CLAY (Cubist-focused after SVM failures)
-  "clay",           1,     "cubist",        "snv_deriv1",   "none",         "pca",            0.85,        "Cubist + PCA (reliable)",
-  "clay",           2,     "cubist",        "snv_deriv1",   "none",         "correlation",    0.84,        "Cubist + correlation",
-  "clay",           3,     "cubist",        "snv_deriv1",   "none",         "cars",           0.84,        "Cubist + CARS",
-  "clay",           4,     "random_forest", "snv_deriv1",   "none",         "pca",            0.83,        "RF baseline",
-  "clay",           5,     "xgboost",       "snv_deriv1",   "none",         "pca",            0.82,        "XGBoost alternative",
+  ## CLAY (Testing SVM with larger grid + algorithmic diversity)
+  "clay",           1,     "svm_rbf",       "snv_deriv1",   "none",         "pca",            0.90,        "SVM + PCA (testing grid=15/25)",
+  "clay",           2,     "svm_rbf",       "snv_deriv1",   "none",         "cars",           0.89,        "SVM + CARS",
+  "clay",           3,     "cubist",        "snv_deriv1",   "none",         "pca",            0.85,        "Cubist + PCA (reliable fallback)",
+  "clay",           4,     "xgboost",       "snv_deriv1",   "none",         "pca",            0.84,        "XGBoost + PCA (boosting alternative)",
+  "clay",           5,     "random_forest", "snv_deriv1",   "none",         "pca",            0.83,        "RF baseline",
 
   ## SAND (Cubist-focused, mirrors clay)
   "sand",           1,     "cubist",        "snv_deriv1",   "none",         "pca",            0.83,        "Cubist + PCA (reliable)",
