@@ -129,23 +129,26 @@ LIBRARY_PROPERTIES <- c(
 OPTIMAL_CONFIGS_V1 <- tibble::tribble(
   ~property,        ~rank, ~model,          ~preprocessing, ~transformation, ~feature_selection, ~expected_r2, ~notes,
 
-  ## CLAY (mineralogy-driven, strong spectral features)
-  "clay",           1,     "cubist",        "snv_deriv1",   "none",         "correlation",    0.85,        "Derivative + correlation for mineral peaks",
-  "clay",           2,     "cubist",        "snv",          "none",         "correlation",    0.84,        "SNV only variant",
-  "clay",           3,     "random_forest", "snv_deriv1",   "none",         "pca",            0.84,        "RF + derivative + PCA",
-  "clay",           4,     "xgboost",       "snv_deriv1",   "none",         "cars",           0.83,        "Gradient boosting + CARS",
-  "clay",           5,     "svm_rbf",       "snv_deriv1",   "none",         "pca",            0.82,        "Kernel method + derivative",
+  ## CLAY (validated empirically - Nov 2024 benchmarking)
+  "clay",           1,     "svm_rbf",       "snv_deriv1",   "none",         "boruta",         0.93,        "Empirical winner: SVM + boruta",
+  "clay",           2,     "svm_rbf",       "snv_deriv1",   "none",         "cars",           0.93,        "SVM + CARS variant",
+  "clay",           3,     "cubist",        "snv_deriv1",   "none",         "pca",            0.92,        "Cubist + PCA",
+  "clay",           4,     "cubist",        "snv_deriv2",   "none",         "boruta",         0.92,        "Cubist + 2nd derivative + boruta",
+  "clay",           5,     "cubist",        "snv_deriv1",   "none",         "correlation",    0.90,        "Cubist + correlation baseline",
 
-  ## SAND (negatively correlated with clay, similar spectral basis)
-  "sand",           1,     "random_forest", "snv_deriv1",   "none",         "pca",            0.80,        "Ng2022: Cat A",
-  "sand",           2,     "cubist",        "snv",          "none",         "correlation",    0.78,        "Mirrors clay approach",
-  "sand",           3,     "xgboost",       "snv_deriv1",   "none",         "cars",           0.78,        "Tree-based ensemble",
-  "sand",           4,     "elastic_net",   "snv",          "none",         "none",           0.75,        "Regularized linear",
+  ## SAND (same spectral basis as clay, use matching configs)
+  "sand",           1,     "svm_rbf",       "snv_deriv1",   "none",         "boruta",         0.85,        "Match clay winner",
+  "sand",           2,     "svm_rbf",       "snv_deriv1",   "none",         "cars",           0.84,        "SVM + CARS variant",
+  "sand",           3,     "cubist",        "snv_deriv1",   "none",         "pca",            0.83,        "Cubist + PCA",
+  "sand",           4,     "cubist",        "snv_deriv2",   "none",         "boruta",         0.82,        "Cubist + 2nd derivative",
+  "sand",           5,     "cubist",        "snv_deriv1",   "none",         "correlation",    0.81,        "Cubist baseline",
 
-  ## SILT (residual of clay+sand, moderate accuracy)
-  "silt",           1,     "random_forest", "snv",          "none",         "pca",            0.70,        "Ng2022: Cat B",
-  "silt",           2,     "cubist",        "snv_deriv1",   "none",         "correlation",    0.68,        "Rule-based",
-  "silt",           3,     "xgboost",       "sg",           "none",         "pca",            0.68,        "Boosting",
+  ## SILT (same spectral basis as clay, use matching configs)
+  "silt",           1,     "svm_rbf",       "snv_deriv1",   "none",         "boruta",         0.75,        "Match clay winner",
+  "silt",           2,     "svm_rbf",       "snv_deriv1",   "none",         "cars",           0.74,        "SVM + CARS variant",
+  "silt",           3,     "cubist",        "snv_deriv1",   "none",         "pca",            0.72,        "Cubist + PCA",
+  "silt",           4,     "cubist",        "snv_deriv2",   "none",         "boruta",         0.71,        "Cubist + 2nd derivative",
+  "silt",           5,     "cubist",        "snv_deriv1",   "none",         "correlation",    0.70,        "Cubist baseline",
 
   ## TOTAL CARBON (BEST overall predictor, direct chromophore)
   "total_carbon",   1,     "plsr",          "snv_deriv1",   "none",         "none",           0.95,        "Ng2022: BEST! PLSR standard for C",

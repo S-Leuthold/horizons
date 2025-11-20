@@ -889,13 +889,64 @@ preprocess_library_spectra <- function(spectral_data,
   if (verbose) cli::cli_text("│  └─ SNV complete: {nrow(spectra_snv)} spectra normalized")
 
   ## ---------------------------------------------------------------------------
+  ## Step 3.3.5: Apply 1st Derivative (removes instrument baseline artifacts)
+  ## ---------------------------------------------------------------------------
+
+  if (verbose) cli::cli_text("│")
+  if (verbose) cli::cli_text("├─ {cli::style_bold('Applying 1st derivative')}...")
+
+  ## Apply Savitzky-Golay 1st derivative (instrument-robust clustering) --------
+
+  safely_execute(
+    prospectr::savitzkyGolay(spectra_snv, m = 1, p = 2, w = 11),
+    error_message = "1st derivative transformation failed"
+  ) %>%
+    handle_results(
+      error_title = "Derivative transformation failed",
+      error_hints = c("Check for edge effects", "Verify sufficient wavenumbers"),
+      abort_on_null = FALSE
+    ) -> spectra_deriv
+
+  if (is.null(spectra_deriv)) return(NULL)
+
+  ## Handle NaN/Inf if derivative creates any ----------------------------------
+
+  if (any(is.nan(spectra_deriv)) || any(is.infinite(spectra_deriv))) {
+    cli::cli_warn("NaN/Inf detected after derivative - replacing with zeros")
+    spectra_deriv[is.nan(spectra_deriv) | is.infinite(spectra_deriv)] <- 0
+  }
+
+  if (verbose) cli::cli_text("│  └─ 1st derivative complete (removes instrument baseline)")
+
+  ## ---------------------------------------------------------------------------
   ## Step 3.4: Reconstruct tibble with preprocessed spectra
   ## ---------------------------------------------------------------------------
 
   ## Convert back to data frame ------------------------------------------------
 
-  spectra_df <- as.data.frame(spectra_snv)
-  colnames(spectra_df) <- spectral_cols
+  spectra_df <- as.data.frame(spectra_deriv)
+
+  ## Update column names to match trimmed spectra (derivative removes edge wavenumbers)
+
+  n_cols_after_deriv <- ncol(spectra_deriv)
+  n_cols_lost <- length(spectral_cols) - n_cols_after_deriv
+
+  if (n_cols_lost > 0) {
+    ## Trim equal number from both ends (SG is symmetric)
+    trim_each_side <- floor(n_cols_lost / 2)
+    spectral_cols_trimmed <- spectral_cols[(trim_each_side + 1):(length(spectral_cols) - trim_each_side)]
+
+    ## Handle odd number of lost columns (trim extra from end)
+    if (length(spectral_cols_trimmed) > n_cols_after_deriv) {
+      spectral_cols_trimmed <- spectral_cols_trimmed[1:n_cols_after_deriv]
+    }
+
+    colnames(spectra_df) <- spectral_cols_trimmed
+
+    if (verbose) cli::cli_text("│  └─ Trimmed {n_cols_lost} edge wavenumbers (derivative window effect)")
+  } else {
+    colnames(spectra_df) <- spectral_cols
+  }
 
   ## Add back non-spectral columns ---------------------------------------------
 

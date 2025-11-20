@@ -303,6 +303,36 @@ predict_library <- function(spectra,
     }
 
     ## -------------------------------------------------------------------------
+    ## Step 2.4: Calculate AD in PCA/Clustering Space (not model space!)
+    ## -------------------------------------------------------------------------
+
+    ## Extract GMM centroids and covariances (already in PCA space)
+    gmm_centroids <- library_prep$gmm_result$centroids  # (n_clusters × n_components)
+    gmm_covs      <- library_prep$gmm_result$covariances  # (n_components × n_components × n_clusters)
+
+    ## Calculate Mahalanobis distance for each unknown to its assigned cluster
+    unknown_ad_distances <- sapply(1:nrow(unknown_pca_scores), function(i) {
+
+      clust_id <- unknown_assignments$cluster_id[i]
+      unknown_coords <- unknown_pca_scores[i, ]
+      cluster_centroid <- gmm_centroids[clust_id, ]
+      cluster_cov <- gmm_covs[, , clust_id]
+
+      ## Mahalanobis distance in PCA space
+      stats::mahalanobis(unknown_coords, center = cluster_centroid, cov = cluster_cov)
+
+    })
+
+    ## Add to unknown_assignments
+    unknown_assignments$ad_distance_pca <- unknown_ad_distances
+
+    if (verbose) {
+      cli::cli_text("│  │")
+      cli::cli_text("│  ├─ AD distances calculated in clustering space (PCA)")
+      cli::cli_text("│  │  └─ Median distance: {round(median(unknown_ad_distances), 1)}")
+    }
+
+    ## -------------------------------------------------------------------------
     ## Step 2.4.5: Reassign unknowns from sparse clusters to nearest neighbors
     ## -------------------------------------------------------------------------
 
@@ -702,6 +732,25 @@ predict_library <- function(spectra,
     ## Combine predictions from all clusters ----------------------------------
 
     prop_predictions <- dplyr::bind_rows(cluster_predictions)
+
+    ## Replace model-space AD with PCA-space AD (more accurate for clustering-based assignment)
+    if ("ad_distance_pca" %in% names(unknown_assignments) && "ad_distance" %in% names(prop_predictions)) {
+
+      ad_lookup <- unknown_assignments %>%
+        select(sample_index = dplyr::row_number(), ad_distance_pca)
+
+      ## Match by Sample_ID order (unknowns maintain same order)
+      prop_predictions <- prop_predictions %>%
+        mutate(sample_index = match(Sample_ID, spectra$Sample_ID)) %>%
+        left_join(ad_lookup, by = "sample_index") %>%
+        mutate(ad_distance = ad_distance_pca) %>%  # Override model-space distance
+        select(-sample_index, -ad_distance_pca)
+
+      if (verbose) {
+        cli::cli_text("│     └─ AD distances replaced with PCA-space values")
+      }
+
+    }
 
     if (verbose) {
       cli::cli_text("│     └─ Total: {nrow(prop_predictions)} prediction{?s}")
