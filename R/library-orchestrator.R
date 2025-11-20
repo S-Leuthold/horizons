@@ -465,16 +465,41 @@ predict_library <- function(spectra,
           verbose            = verbose
         )
 
-        ## Bundle both trained models ----------------------------------------
-
-        models <- list(
-          ilr_1  = optimal_ilr1$final_workflow,
-          ilr_2  = optimal_ilr2$final_workflow,
-          config = optimal_ilr1$winning_config,
-          type   = "texture"
-        )
-
         winning_config <- optimal_ilr1$winning_config
+
+        ## Train with UQ if requested -------------------------------------------
+
+        if (with_uq) {
+
+          ## Train UQ models for ILR coordinate 1
+          uq_models_ilr1 <- train_cluster_models_with_uq(
+            cluster_data = splits_ilr1$training_pool,
+            property     = prop_for_library,
+            config       = optimal_ilr1$winning_config,
+            cv_folds     = if (debug_mode) 5 else 10,
+            verbose      = verbose
+          )
+
+          ## Train UQ models for ILR coordinate 2
+          uq_models_ilr2 <- train_cluster_models_with_uq(
+            cluster_data = splits_ilr2$training_pool,
+            property     = prop_for_library,
+            config       = optimal_ilr2$winning_config,
+            cv_folds     = if (debug_mode) 5 else 10,
+            verbose      = verbose
+          )
+
+        } else {
+
+          ## No UQ: bundle optimized workflows (backward compatibility)
+          models <- list(
+            ilr_1  = optimal_ilr1$final_workflow,
+            ilr_2  = optimal_ilr2$final_workflow,
+            config = optimal_ilr1$winning_config,
+            type   = "texture"
+          )
+
+        }
 
       } else {
 
@@ -532,14 +557,89 @@ predict_library <- function(spectra,
 
       if (prop == "texture") {
 
-        predictions <- predict_texture_from_models(
-          unknowns   = unknowns_in_cluster,
-          models     = models,
-          property   = prop_for_library,  # Not used, but pass actual prop
-          cluster_id = clust_id,
-          config     = winning_config,
-          verbose    = verbose
-        )
+        ## Texture prediction ---------------------------------------------------
+
+        if (with_uq) {
+
+          ## Add Project column if missing
+          unknowns_prepared <- unknowns_in_cluster
+          if (!"Project" %in% names(unknowns_prepared)) {
+            unknowns_prepared <- unknowns_prepared %>%
+              dplyr::mutate(Project = "library")
+          }
+
+          ## Predict ILR coordinate 1 with UQ
+          ilr1_preds <- predict_with_uq(
+            point_workflow    = uq_models_ilr1$point_model,
+            quantile_workflow = uq_models_ilr1$quantile_model,
+            new_data          = unknowns_prepared,
+            quantiles         = c(0.05, 0.95),
+            c_alpha           = uq_models_ilr1$c_alpha,
+            ad_metadata       = uq_models_ilr1$ad_metadata,
+            abstain_ood       = abstain_ood,
+            repair_crossings  = TRUE
+          )
+
+          ## Predict ILR coordinate 2 with UQ
+          ilr2_preds <- predict_with_uq(
+            point_workflow    = uq_models_ilr2$point_model,
+            quantile_workflow = uq_models_ilr2$quantile_model,
+            new_data          = unknowns_prepared,
+            quantiles         = c(0.05, 0.95),
+            c_alpha           = uq_models_ilr2$c_alpha,
+            ad_metadata       = uq_models_ilr2$ad_metadata,
+            abstain_ood       = abstain_ood,
+            repair_crossings  = TRUE
+          )
+
+          ## Back-transform ILR to texture with intervals
+          texture_preds <- ilr_to_texture(
+            ilr_1 = ilr1_preds$.pred,
+            ilr_2 = ilr2_preds$.pred,
+            as_gkg = TRUE
+          )
+
+          ## For intervals: back-transform lower and upper bounds separately
+          texture_lower <- ilr_to_texture(
+            ilr_1 = ilr1_preds$.pred_lower,
+            ilr_2 = ilr2_preds$.pred_lower,
+            as_gkg = TRUE
+          )
+
+          texture_upper <- ilr_to_texture(
+            ilr_1 = ilr1_preds$.pred_upper,
+            ilr_2 = ilr2_preds$.pred_upper,
+            as_gkg = TRUE
+          )
+
+          ## Format as long-format predictions (3 rows per sample)
+          predictions <- tibble::tibble(
+            Sample_ID   = rep(unknowns_prepared$Sample_ID, 3),
+            property    = rep(c("sand", "silt", "clay"), each = nrow(texture_preds)),
+            .pred       = c(texture_preds$sand, texture_preds$silt, texture_preds$clay),
+            .pred_lower = c(texture_lower$sand, texture_lower$silt, texture_lower$clay),
+            .pred_upper = c(texture_upper$sand, texture_upper$silt, texture_upper$clay),
+            ad_distance = rep(ilr1_preds$ad_distance, 3),  # Use ILR1 distance
+            ad_bin      = rep(ilr1_preds$ad_bin, 3),
+            cluster_id  = clust_id,
+            config_id   = paste0(winning_config$model, "_",
+                                winning_config$preprocessing, "_",
+                                winning_config$feature_selection)
+          )
+
+        } else {
+
+          ## No UQ: use simple texture prediction
+          predictions <- predict_texture_from_models(
+            unknowns   = unknowns_in_cluster,
+            models     = models,
+            property   = prop_for_library,
+            cluster_id = clust_id,
+            config     = winning_config,
+            verbose    = verbose
+          )
+
+        }
 
       } else {
 
