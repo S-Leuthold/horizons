@@ -129,26 +129,26 @@ LIBRARY_PROPERTIES <- c(
 OPTIMAL_CONFIGS_V1 <- tibble::tribble(
   ~property,        ~rank, ~model,          ~preprocessing, ~transformation, ~feature_selection, ~expected_r2, ~notes,
 
-  ## CLAY (validated empirically - Nov 2024 benchmarking)
-  "clay",           1,     "svm_rbf",       "snv_deriv1",   "none",         "boruta",         0.93,        "Empirical winner: SVM + boruta",
-  "clay",           2,     "svm_rbf",       "snv_deriv1",   "none",         "cars",           0.93,        "SVM + CARS variant",
-  "clay",           3,     "cubist",        "snv_deriv1",   "none",         "pca",            0.92,        "Cubist + PCA",
-  "clay",           4,     "cubist",        "snv_deriv2",   "none",         "boruta",         0.92,        "Cubist + 2nd derivative + boruta",
-  "clay",           5,     "cubist",        "snv_deriv1",   "none",         "correlation",    0.90,        "Cubist + correlation baseline",
+  ## CLAY (Cubist-focused after SVM failures)
+  "clay",           1,     "cubist",        "snv_deriv1",   "none",         "pca",            0.85,        "Cubist + PCA (reliable)",
+  "clay",           2,     "cubist",        "snv_deriv1",   "none",         "correlation",    0.84,        "Cubist + correlation",
+  "clay",           3,     "cubist",        "snv_deriv1",   "none",         "cars",           0.84,        "Cubist + CARS",
+  "clay",           4,     "random_forest", "snv_deriv1",   "none",         "pca",            0.83,        "RF baseline",
+  "clay",           5,     "xgboost",       "snv_deriv1",   "none",         "pca",            0.82,        "XGBoost alternative",
 
-  ## SAND (same spectral basis as clay, use matching configs)
-  "sand",           1,     "svm_rbf",       "snv_deriv1",   "none",         "boruta",         0.85,        "Match clay winner",
-  "sand",           2,     "svm_rbf",       "snv_deriv1",   "none",         "cars",           0.84,        "SVM + CARS variant",
-  "sand",           3,     "cubist",        "snv_deriv1",   "none",         "pca",            0.83,        "Cubist + PCA",
-  "sand",           4,     "cubist",        "snv_deriv2",   "none",         "boruta",         0.82,        "Cubist + 2nd derivative",
-  "sand",           5,     "cubist",        "snv_deriv1",   "none",         "correlation",    0.81,        "Cubist baseline",
+  ## SAND (Cubist-focused, mirrors clay)
+  "sand",           1,     "cubist",        "snv_deriv1",   "none",         "pca",            0.83,        "Cubist + PCA (reliable)",
+  "sand",           2,     "cubist",        "snv_deriv1",   "none",         "correlation",    0.82,        "Cubist + correlation",
+  "sand",           3,     "cubist",        "snv_deriv1",   "none",         "cars",           0.82,        "Cubist + CARS",
+  "sand",           4,     "random_forest", "snv_deriv1",   "none",         "pca",            0.81,        "RF baseline",
+  "sand",           5,     "xgboost",       "snv_deriv1",   "none",         "pca",            0.80,        "XGBoost alternative",
 
-  ## SILT (same spectral basis as clay, use matching configs)
-  "silt",           1,     "svm_rbf",       "snv_deriv1",   "none",         "boruta",         0.75,        "Match clay winner",
-  "silt",           2,     "svm_rbf",       "snv_deriv1",   "none",         "cars",           0.74,        "SVM + CARS variant",
-  "silt",           3,     "cubist",        "snv_deriv1",   "none",         "pca",            0.72,        "Cubist + PCA",
-  "silt",           4,     "cubist",        "snv_deriv2",   "none",         "boruta",         0.71,        "Cubist + 2nd derivative",
-  "silt",           5,     "cubist",        "snv_deriv1",   "none",         "correlation",    0.70,        "Cubist baseline",
+  ## SILT (Cubist-focused, mirrors clay)
+  "silt",           1,     "cubist",        "snv_deriv1",   "none",         "pca",            0.72,        "Cubist + PCA (reliable)",
+  "silt",           2,     "cubist",        "snv_deriv1",   "none",         "correlation",    0.71,        "Cubist + correlation",
+  "silt",           3,     "cubist",        "snv_deriv1",   "none",         "cars",           0.70,        "Cubist + CARS",
+  "silt",           4,     "random_forest", "snv_deriv1",   "none",         "pca",            0.69,        "RF baseline",
+  "silt",           5,     "xgboost",       "snv_deriv1",   "none",         "pca",            0.68,        "XGBoost alternative",
 
   ## TOTAL CARBON (BEST overall predictor, direct chromophore)
   "total_carbon",   1,     "plsr",          "snv_deriv1",   "none",         "none",           0.95,        "Ng2022: BEST! PLSR standard for C",
