@@ -5,6 +5,7 @@
 .RDataTmp*
 .Rhistory
 .Rproj.user
+*.Rproj
 
 # R build ignores
 .Rbuildignore
@@ -35,3 +36,12 @@ NEXT_SESSION_*.md
 
 # Archive directory for development artifacts
 archive/
+
+# Examples directory (dev test scripts)
+examples/
+
+# Test clutter (outside testthat/)
+tests/archive/
+tests/spike_results/
+tests/test_*.R
+tests/SESSION_*.txt
