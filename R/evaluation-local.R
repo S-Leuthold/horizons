@@ -127,6 +127,14 @@ evaluate_models_local <- function(config,
 
   set.seed(seed)
 
+  ## Initialize n_cv_cores if not specified ------------------------------------
+
+  if (is.null(n_cv_cores)) {
+
+    n_cv_cores <- 1
+
+  }
+
    ## ---------------------------------------------------------------------------
    ## Step 0.1: Input validation
    ## ---------------------------------------------------------------------------
