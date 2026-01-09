@@ -7,7 +7,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE.md)
 [![R-CMD-check](https://github.com/S-Leuthold/horizons/actions/workflows/R-CMD-check.yaml/badge.svg)](https://github.com/S-Leuthold/horizons/actions/workflows/R-CMD-check.yaml)
 [![Codecov](https://codecov.io/gh/S-Leuthold/horizons/branch/main/graph/badge.svg)](https://codecov.io/gh/S-Leuthold/horizons)
-[![Lifecycle: maturing](https://img.shields.io/badge/lifecycle-maturing-blue.svg)](https://lifecycle.r-lib.org/articles/stages.html)
+[![Lifecycle: experimental](https://img.shields.io/badge/lifecycle-experimental-orange.svg)](https://lifecycle.r-lib.org/articles/stages.html)
 
 ---
 
