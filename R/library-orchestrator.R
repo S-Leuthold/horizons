@@ -746,7 +746,8 @@ predict_library <- function(spectra,
     if ("ad_distance_pca" %in% names(unknown_assignments) && "ad_distance" %in% names(prop_predictions)) {
 
       ad_lookup <- unknown_assignments %>%
-        select(sample_index = dplyr::row_number(), ad_distance_pca)
+        dplyr::mutate(sample_index = dplyr::row_number()) %>%
+        dplyr::select(sample_index, ad_distance_pca)
 
       ## Match by Sample_ID order (unknowns maintain same order)
       prop_predictions <- prop_predictions %>%
