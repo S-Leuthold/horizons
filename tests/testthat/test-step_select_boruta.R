@@ -125,9 +125,9 @@ test_that("step_select_boruta works with spectral data subset", {
 test_that("step_select_boruta works in combination with other steps", {
   skip("Skipping due to mocking infrastructure issues")
   test_data <- make_test_spectra(n_samples = 20, wavelengths = seq(600, 620, by = 5))
-  
+
   skip_if_not_installed("Boruta")
-  
+
   with_mocked_computations({
     # Create recipe with multiple steps
     recipe <- recipes::recipe(Response ~ ., data = test_data) %>%
@@ -135,14 +135,22 @@ test_that("step_select_boruta works in combination with other steps", {
       step_transform_spectra(recipes::all_predictors(), preprocessing = "snv") %>%
       step_select_boruta(recipes::all_predictors(), max_runs = 5)
 
-    # Mock Boruta to select first few spectral features
+    # Define mock objects
+    boruta_object <- structure(list(finalDecision = factor(c("Confirmed", "Confirmed"),
+                                                           levels = c("Confirmed", "Rejected", "Tentative"))),
+                               class = "Boruta")
+    cluster_stub <- list(cluster_assignments = c("600" = "cluster_A", "605" = "cluster_A",
+                                                  "610" = "cluster_B", "615" = "cluster_B",
+                                                  "620" = "cluster_B"))
+
+    # Mock Boruta to select first few spectral features (return actual wavelength names)
     prepped <- with_mocked_bindings(
       with_mocked_bindings(
         with_mocked_bindings(
           with_mocked_bindings(
-            recipes::prep(recipe, training = data, retain = TRUE),
+            recipes::prep(recipe, training = test_data, retain = TRUE),
             Boruta = function(...) boruta_object,
-            getSelectedAttributes = function(...) c("cluster_A"),
+            getSelectedAttributes = function(...) c("600", "605"),
             .package = "Boruta"
           ),
           ranger = function(...) stop("ranger should not run in mock", call. = FALSE),
@@ -158,16 +166,16 @@ test_that("step_select_boruta works in combination with other steps", {
       .package = "cli"
     )
 
-    step <- prepped$steps[[1]]
+    step <- prepped$steps[[2]]  # step_select_boruta is the second step
 
     expect_true(step$trained)
-    expect_equal(step$selected_vars, c("600", "602"))
+    expect_equal(step$selected_vars, c("600", "605"))
 
-    baked <- recipes::bake(prepped, new_data = data)
+    baked <- recipes::bake(prepped, new_data = test_data)
 
-    expect_true(all(c("600", "602") %in% names(baked)))
-    expect_false("604" %in% names(baked))
-    expect_equal(nrow(baked), nrow(data))
+    expect_true(all(c("600", "605") %in% names(baked)))
+    expect_false("610" %in% names(baked))
+    expect_equal(nrow(baked), nrow(test_data))
   })
 })
 

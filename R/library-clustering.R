@@ -194,9 +194,12 @@ fit_gmm_clustering <- function(pca_scores,
 
       } else {
 
-        ## Fallback to sample covariance ------------------------------------------
+        ## Fallback to sample covariance with ridge regularization ----------------
+        ## Add small ridge to ensure positive definiteness
 
-        regularized_covs[,,k] <- cov(cluster_data)
+        sample_cov <- cov(cluster_data)
+        ridge_eps  <- 1e-6 * max(diag(sample_cov), 1e-10)
+        regularized_covs[,,k] <- sample_cov + diag(ridge_eps, nrow(sample_cov))
 
       }
 
@@ -206,9 +209,68 @@ fit_gmm_clustering <- function(pca_scores,
 
   } else {
 
-    ## Use mclust covariances as-is ----------------------------------------------
+    ## Use mclust covariances - convert to consistent 3D array format ------------
+    ## mclust returns different Sigma structures depending on model type:
+    ## - VVV/EVV/VVE: 3D array (p × p × G)
+    ## - EEE: single p × p matrix (same cov for all clusters)
+    ## - EII: scalar (σ² * I for all clusters)
+    ## - VII: length-G vector (σ²_k * I per cluster)
 
-    regularized_covs <- gmm_model$parameters$variance$Sigma
+    sigma_raw   <- gmm_model$parameters$variance$Sigma
+    sigma_scale <- gmm_model$parameters$variance$scale  # used for some models
+
+    regularized_covs <- array(NA, dim = c(n_dims, n_dims, optimal_k))
+
+    if (is.array(sigma_raw) && length(dim(sigma_raw)) == 3) {
+
+      ## Already 3D array (VVV, EVV, VVE, etc.) ----------------------------------
+      regularized_covs <- sigma_raw
+
+    } else if (is.matrix(sigma_raw)) {
+
+      ## Single matrix shared across clusters (EEE, etc.) ------------------------
+      for (k in 1:optimal_k) {
+        regularized_covs[,,k] <- sigma_raw
+      }
+
+    } else if (is.null(sigma_raw) && !is.null(sigma_scale)) {
+
+      ## Spherical models - scale gives variance ---------------------------------
+      ## EII: single scalar, VII: length-G vector
+
+      if (length(sigma_scale) == 1) {
+        ## EII: same spherical covariance for all clusters
+        for (k in 1:optimal_k) {
+          regularized_covs[,,k] <- diag(sigma_scale, n_dims)
+        }
+      } else if (length(sigma_scale) == optimal_k) {
+        ## VII: different spherical covariance per cluster
+        for (k in 1:optimal_k) {
+          regularized_covs[,,k] <- diag(sigma_scale[k], n_dims)
+        }
+      }
+
+    } else if (is.numeric(sigma_raw) && length(sigma_raw) == 1) {
+
+      ## Single scalar (rare edge case) ------------------------------------------
+      for (k in 1:optimal_k) {
+        regularized_covs[,,k] <- diag(sigma_raw, n_dims)
+      }
+
+    } else if (is.numeric(sigma_raw) && length(sigma_raw) == n_dims) {
+
+      ## Diagonal vector (diagonal models) ---------------------------------------
+      for (k in 1:optimal_k) {
+        regularized_covs[,,k] <- diag(sigma_raw)
+      }
+
+    } else {
+
+      ## Fallback: try to use as-is, may fail downstream -------------------------
+      cli::cli_warn("Unknown mclust Sigma structure; covariance extraction may fail")
+      regularized_covs <- sigma_raw
+
+    }
 
   }
 
@@ -485,8 +547,8 @@ compute_ad_thresholds <- function(cluster_data,
     dplyr::group_by(cluster_id) %>%
     dplyr::summarise(
       n_samples = dplyr::n(),
-      p95       = quantile(mahalanobis_dist, 0.95, na.rm = TRUE),
-      p995      = quantile(mahalanobis_dist, 0.995, na.rm = TRUE),
+      p95       = quantile(mahalanobis_dist, percentiles[1], na.rm = TRUE),
+      p995      = quantile(mahalanobis_dist, percentiles[2], na.rm = TRUE),
       .groups   = "drop"
     ) -> thresholds
 

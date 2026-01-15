@@ -48,6 +48,10 @@ A list with components:
 \item \code{config_used}: Configuration used for point model
 \item \code{property}: Property name
 \item \code{n_train}: Number of training samples
+\item \code{is_residual_based}: Logical flag (always TRUE)
+\item \code{residual_stats}: List with mean and SD of training residuals
+\item \code{c_alpha}: Conformal calibration margin for 90\% coverage
+\item \code{ad_metadata}: Applicability domain metadata (centroid, covariance, thresholds); NULL if computation failed
 }
 }
 \description{

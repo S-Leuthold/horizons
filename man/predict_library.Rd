@@ -7,6 +7,8 @@
 predict_library(
   spectra,
   property,
+  with_uq = TRUE,
+  abstain_ood = FALSE,
   remove_water_bands = TRUE,
   debug_mode = FALSE,
   allow_par = TRUE,
@@ -24,6 +26,14 @@ Required columns:
 
 \item{property}{Character vector. One or more properties from LIBRARY_PROPERTIES.
 Texture properties (sand, silt, clay) are automatically expanded to all 3 components.}
+
+\item{remove_water_bands}{Logical. Remove water absorption bands from spectra? Default: TRUE.}
+
+\item{debug_mode}{Logical. Enable debug output for troubleshooting? Default: FALSE.}
+
+\item{allow_par}{Logical. Allow parallel processing? Default: TRUE.}
+
+\item{n_workers}{Integer. Number of parallel workers. Default: 4.}
 
 \item{verbose}{Logical. Print tree-style progress? Default: TRUE.}
 }

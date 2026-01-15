@@ -10,6 +10,8 @@ predict_with_uq(
   new_data,
   quantiles = c(0.05, 0.95),
   c_alpha = 0,
+  ad_metadata = NULL,
+  abstain_ood = TRUE,
   repair_crossings = TRUE
 )
 }
@@ -27,6 +29,18 @@ Must have same predictor structure as training data.}
 \item{quantiles}{Numeric vector of length 2 specifying quantile levels.
 Default: \code{c(0.05, 0.95)} for 90\% prediction intervals.}
 
+\item{c_alpha}{Numeric. Conformal calibration margin to add/subtract from
+intervals for coverage guarantee. Default: 0 (no adjustment).}
+
+\item{ad_metadata}{List from \code{train_cluster_models_with_uq()} containing
+applicability domain metadata (centroid, covariance, thresholds).
+If NULL, AD columns will contain NA. Default: NULL.}
+
+\item{abstain_ood}{Logical. Should predictions be withheld for OOD samples?
+Default: TRUE. Samples beyond 99th percentile distance get NA predictions
+(moderate abstention policy, ~1\% rejection rate). Set FALSE to predict
+all samples regardless of domain. Requires \code{ad_metadata} to be non-NULL.}
+
 \item{repair_crossings}{Logical. Should quantile crossings be repaired?
 Default: TRUE. Enforces \code{.pred_lower <= .pred_upper}.}
 }
@@ -34,8 +48,10 @@ Default: TRUE. Enforces \code{.pred_lower <= .pred_upper}.}
 A tibble with one row per sample in \code{new_data} and columns:
 \itemize{
 \item \code{.pred}: Point prediction from best model
-\item \code{.pred_lower}: Lower prediction bound (point + residual_q05)
-\item \code{.pred_upper}: Upper prediction bound (point + residual_q95)
+\item \code{.pred_lower}: Lower prediction bound (point + residual_q05 - c_alpha)
+\item \code{.pred_upper}: Upper prediction bound (point + residual_q95 + c_alpha)
+\item \code{ad_distance}: Mahalanobis distance from training centroid (NA if no metadata)
+\item \code{ad_bin}: Applicability domain bin ("Q1", "Q2", "Q3", "Q4", or "OOD"; NA if no metadata)
 }
 }
 \description{

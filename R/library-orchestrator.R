@@ -27,6 +27,10 @@
 #'   - Spectral columns: Numeric column names (600, 602, 604, ...)
 #' @param property Character vector. One or more properties from LIBRARY_PROPERTIES.
 #'   Texture properties (sand, silt, clay) are automatically expanded to all 3 components.
+#' @param remove_water_bands Logical. Remove water absorption bands from spectra? Default: TRUE.
+#' @param debug_mode Logical. Enable debug output for troubleshooting? Default: FALSE.
+#' @param allow_par Logical. Allow parallel processing? Default: TRUE.
+#' @param n_workers Integer. Number of parallel workers. Default: 4.
 #' @param verbose Logical. Print tree-style progress? Default: TRUE.
 #'
 #' @return Tibble with predictions in long format (one row per sample-property):
