@@ -1,0 +1,125 @@
+{
+  "generated": "2025-10-31",
+  "branch": "uncertainty-quantification",
+  "commit": "f38581b",
+  "tldr": "R package for soil property prediction via MIR spectroscopy; dual-mode system (custom training + library-based prediction); currently implementing Phase 3 uncertainty quantification with residual-based intervals",
+  "architecture": {
+    "language": "R",
+    "total_files": 419,
+    "r_source_files": 45,
+    "loc": 15254,
+    "components": {
+      "library_prediction": {
+        "files": ["library-*.R"],
+        "count": 8,
+        "size_kb": 200,
+        "status": "in_development",
+        "key_functions": ["predict_library", "load_ossl_raw", "cluster_unknown_spectra", "train_cluster_models_with_uq", "predict_with_uq"]
+      },
+      "custom_evaluation": {
+        "files": ["evaluation-*.R"],
+        "count": 5,
+        "size_kb": 210,
+        "status": "stable",
+        "key_functions": ["evaluate_models_local", "evaluate_models_hpc"]
+      },
+      "covariate_integration": {
+        "files": ["covariates-*.R"],
+        "count": 7,
+        "size_kb": 180
+      },
+      "feature_engineering": {
+        "files": ["feature-*.R", "transform-*.R"],
+        "count": 4
+      },
+      "infrastructure": {
+        "files": ["utils-*.R", "inputs-*.R", "models-*.R", "metrics-*.R"],
+        "count": 18
+      }
+    },
+    "test_coverage": "80.22%",
+    "test_files": 82,
+    "library_tests": 189
+  },
+  "active_work": {
+    "phase": "Phase 3 - Uncertainty Quantification",
+    "week": "5-7",
+    "milestones": {
+      "M3.1": {
+        "name": "Residual-Based UQ",
+        "status": "complete",
+        "file": "R/library-uq.R",
+        "size_kb": 38,
+        "functions": 8,
+        "validation": {
+          "coverage": "90.2%",
+          "mean_width_ph": 1.43,
+          "improvement_vs_library": "37%"
+        }
+      },
+      "M3.2": {
+        "name": "Heteroscedasticity Validation",
+        "status": "complete"
+      },
+      "M3.3": {
+        "name": "Conformal Calibration",
+        "status": "incomplete",
+        "issue": "needs OOF quantile extraction",
+        "spec": "M3.3_CONFORMAL_IMPLEMENTATION_SPEC.md"
+      }
+    },
+    "recent_commits": [
+      {
+        "sha": "f38581b",
+        "age": "2 hours ago",
+        "message": "feat: Add conformal calibration infrastructure and Session 6 cleanup"
+      },
+      {
+        "sha": "7ce50e9",
+        "age": "3 hours ago",
+        "message": "feat: Implement residual-based uncertainty quantification (M3.1)"
+      },
+      {
+        "sha": "475a49c",
+        "age": "30 hours ago",
+        "message": "docs: Session 3 handoff - Phase 1 complete, texture issue flagged"
+      }
+    ]
+  },
+  "gaps": {
+    "technical_debt": [
+      "PLSR upstream bug (using fork S-Leuthold/plsmod-fork)",
+      "M3.3 conformal needs CV+ implementation (OOF quantiles currently in-sample)",
+      "Mixed error handling patterns (3-layer architecture defined but not fully applied)",
+      "57 dependencies (target <30 for JOSS)"
+    ],
+    "coverage_gaps": [
+      "M3.3 incomplete (OOF quantile issue identified)",
+      "Phase 4 applicability domain not started",
+      "Water band removal not default-on"
+    ],
+    "documentation": [
+      "R CMD check: 1 ERROR, 6 WARNINGS, 7 NOTES",
+      "JOSS submission pending"
+    ]
+  },
+  "questions": [
+    "M3.3 Strategy: Proceed with CV+ conformal or validate 90.2% coverage across properties first?",
+    "Phase Sequencing: Continue Phase 3 UQ or pivot to Phase 2 polish?",
+    "Texture Testing: Validate ILR residuals before proceeding?",
+    "Conformal Necessity: 90.2% pH coverage suggests good calibration - still need belt-and-suspenders?",
+    "Test Coverage Goal: Maintain 80% or push higher for UQ functions?",
+    "Memory Discipline: Concerns with 3 models/cluster (point + q05 + q95)?",
+    "Pinball Loss: Priority or defer?"
+  ],
+  "sources": {
+    "claude_context": {
+      "global": "~/.claude/CLAUDE.md (3 lines)",
+      "project": "CLAUDE.md (689 lines)",
+      "worktree": "none"
+    },
+    "roadmap": "LIBRARY_PREDICTION_ROADMAP.md (1212 lines)",
+    "commits_scanned": 30,
+    "map_build": "manual"
+  }
+}
