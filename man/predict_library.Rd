@@ -2,7 +2,7 @@
 % Please edit documentation in R/library-orchestrator.R
 \name{predict_library}
 \alias{predict_library}
-\title{Library-Based Prediction Orchestrator}
+\title{Predict Soil Properties Using Reference Library}
 \usage{
 predict_library(
   spectra,
@@ -48,10 +48,6 @@ Tibble with predictions in long format (one row per sample-property):
 }
 }
 \description{
-Main user-facing API for library-based prediction. Orchestrates the complete
-workflow: load OSSL library, cluster unknowns, optimize configs per cluster,
-train models, generate predictions with proper target handling.
-
 Training-data-free prediction of standard soil properties using OSSL/KSSL
 reference libraries. Automatically clusters unknowns, optimizes model configs,
 and generates predictions with proper compositional handling for texture.
@@ -79,10 +75,4 @@ texture_pred <- predict_library(unknown_spectra, property = "sand")
 }
 
 }
-\keyword{Library}
-\keyword{Predict}
-\keyword{Properties}
-\keyword{Reference}
-\keyword{Soil}
-\keyword{Using}
 \keyword{internal}

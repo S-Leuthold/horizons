@@ -29,7 +29,14 @@ train_and_score_config(
 
 \item{cv_folds}{Integer. Cross-validation folds. Default: 3}
 
+\item{resamples}{Optional rsample object. Pre-computed CV folds for shared training.
+If NULL (default), folds are created internally using cv_folds.}
+
 \item{return_workflow}{Logical. Return trained workflow? Default: FALSE}
+
+\item{allow_par}{Logical. Allow parallel processing during tuning? Default: TRUE.}
+
+\item{n_workers}{Integer. Number of parallel workers. Default: 4.}
 
 \item{seed}{Integer. Random seed. Default: 123}
 

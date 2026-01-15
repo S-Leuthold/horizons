@@ -1,22 +1,20 @@
-#' Library Clustering with Gaussian Mixture Models
-#'
-#' @description
-#' Functions for clustering reference spectral libraries using Gaussian Mixture Models (GMM)
-#' with BIC-based model selection. Provides unknown sample assignment with probability scores,
-#' applicability domain metrics, and cluster-specific statistics for library-based prediction.
-#'
-#' @details
-#' This module implements the clustering component of the Library Prediction Service.
-#' Clusters are formed on library PCA scores and used to:
-#' 1. Assign unknown samples to training groups
-#' 2. Enable cluster-specific model training
-#' 3. Provide applicability domain awareness (Mahalanobis distance)
-#'
-#' GMM is preferred over k-means because it:
-#' - Captures within-cluster covariance (needed for Mahalanobis AD metrics)
-#' - Provides probability scores for soft assignments
-#' - Handles elliptical clusters (realistic for spectral data)
-#'
+# Library Clustering with Gaussian Mixture Models
+#
+# Functions for clustering reference spectral libraries using Gaussian Mixture Models (GMM)
+# with BIC-based model selection. Provides unknown sample assignment with probability scores,
+# applicability domain metrics, and cluster-specific statistics for library-based prediction.
+#
+# This module implements the clustering component of the Library Prediction Service.
+# Clusters are formed on library PCA scores and used to:
+# 1. Assign unknown samples to training groups
+# 2. Enable cluster-specific model training
+# 3. Provide applicability domain awareness (Mahalanobis distance)
+#
+# GMM is preferred over k-means because it:
+# - Captures within-cluster covariance (needed for Mahalanobis AD metrics)
+# - Provides probability scores for soft assignments
+# - Handles elliptical clusters (realistic for spectral data)
+
 #' @importFrom cli cli_text cli_alert_info cli_alert_warning cli_abort style_bold
 #' @importFrom mclust Mclust mclustBIC
 #' @importFrom tibble tibble as_tibble
@@ -24,7 +22,7 @@
 #' @importFrom stats cov mahalanobis quantile
 #' @importFrom corpcor cov.shrink
 #' @importFrom rlang %||%
-#' @keywords internal
+NULL
 
 ## -----------------------------------------------------------------------------
 ## Section 1: GMM Clustering with BIC Model Selection
@@ -317,7 +315,7 @@ fit_gmm_clustering <- function(pca_scores,
        n_clusters          = optimal_k,
        bic_values          = gmm_model$BIC,
        cluster_assignments = gmm_model$classification,
-       cluster_sizes       = as.integer(cluster_sizes),
+       cluster_sizes       = setNames(as.integer(cluster_sizes), names(cluster_sizes)),
        centroids           = centroids_transposed,  # Now n_clusters × n_dims
        covariances         = regularized_covs) -> result
 

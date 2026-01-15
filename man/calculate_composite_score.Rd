@@ -31,7 +31,7 @@ model configurations. Uses spectroscopy-appropriate weighting with RPD as primar
             0.15 * (1 - RMSE_norm)
 }\if{html}{\out{</div>}}
 
-\strong{Normalization:} Each metric scaled to \link{0, 1} within the tested configs:
+\strong{Normalization:} Each metric scaled to [0, 1] within the tested configs:
 
 \if{html}{\out{<div class="sourceCode">}}\preformatted{metric_norm = (metric - min(metric)) / (max(metric) - min(metric))
 }\if{html}{\out{</div>}}

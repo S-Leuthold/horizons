@@ -1,18 +1,16 @@
-#' Library Prediction Core Orchestrator
-#'
-#' @description
-#' High-level orchestration functions that integrate library data loading, clustering,
-#' and preparation for training. Connects the library-data, library-clustering, and
-#' library-train modules into complete workflows.
-#'
-#' @details
-#' This module provides the end-to-end pipeline for library-based prediction,
-#' handling the critical architectural detail: clustering uses preprocessed data
-#' (SNV for stability) while training uses raw data (for config-specific preprocessing).
-#'
+# Library Prediction Core Orchestrator
+#
+# High-level orchestration functions that integrate library data loading, clustering,
+# and preparation for training. Connects the library-data, library-clustering, and
+# library-train modules into complete workflows.
+#
+# This module provides the end-to-end pipeline for library-based prediction,
+# handling the critical architectural detail: clustering uses preprocessed data
+# (SNV for stability) while training uses raw data (for config-specific preprocessing).
+
 #' @importFrom cli cli_text cli_alert_info cli_abort style_bold
 #' @importFrom dplyr mutate filter
-#' @keywords internal
+NULL
 
 ## -----------------------------------------------------------------------------
 ## Main Orchestrator: Prepare Library for Training

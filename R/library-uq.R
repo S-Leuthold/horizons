@@ -1008,7 +1008,7 @@ calculate_conformal_margin <- function(point_cv_preds,
 #' @param train_data Tibble with training data. Must contain:
 #'   * `Response` column (target variable)
 #'   * `Sample_ID` and `Project` columns
-#'   * Spectral columns (numeric column names like "X600", "X602", etc.)
+#'   * Spectral columns (numeric wavenumber names like "600", "602", etc.)
 #'
 #' @param preprocessing Character. Spectral preprocessing method (e.g., "snv", "snv_deriv1").
 #'   Will be applied via `build_recipe()` if not "raw".
@@ -1020,6 +1020,9 @@ calculate_conformal_margin <- function(point_cv_preds,
 #'
 #' @param cv_folds Integer. Number of cross-validation folds (default: 5).
 #'   Kept small since we're using this for UQ, not point prediction accuracy.
+#'
+#' @param resamples Optional rsample object. Pre-computed CV folds for CV+ conformal
+#'   calibration. If NULL (default), folds are created internally using cv_folds.
 #'
 #' @param verbose Logical. Print progress messages?
 #'

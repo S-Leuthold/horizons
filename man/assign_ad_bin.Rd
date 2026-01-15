@@ -36,8 +36,8 @@ Predictions with OOD flag will abstain (return NA) in M4.3.
 
 \subsection{Boundary Handling}{
 
-Uses \code{right = FALSE} in \code{cut()} → intervals are [a, b). Sample exactly
-at threshold is assigned to lower bin (conservative).
+Uses \code{right = TRUE} in \code{cut()} → intervals are (a, b]. Sample exactly
+at threshold is assigned to current bin.
 }
 }
 \examples{

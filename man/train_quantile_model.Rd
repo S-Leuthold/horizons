@@ -19,7 +19,7 @@ train_quantile_model(
 \itemize{
 \item \code{Response} column (target variable)
 \item \code{Sample_ID} and \code{Project} columns
-\item Spectral columns (numeric column names like "X600", "X602", etc.)
+\item Spectral columns (numeric wavenumber names like "600", "602", etc.)
 }}
 
 \item{preprocessing}{Character. Spectral preprocessing method (e.g., "snv", "snv_deriv1").
@@ -32,6 +32,9 @@ Kept small since ranger is robust to hyperparameters.}
 
 \item{cv_folds}{Integer. Number of cross-validation folds (default: 5).
 Kept small since we're using this for UQ, not point prediction accuracy.}
+
+\item{resamples}{Optional rsample object. Pre-computed CV folds for CV+ conformal
+calibration. If NULL (default), folds are created internally using cv_folds.}
 
 \item{verbose}{Logical. Print progress messages?}
 }

@@ -1,14 +1,13 @@
-#' Library-Based Prediction Orchestrator
-#'
-#' @description
-#' Main user-facing API for library-based prediction. Orchestrates the complete
-#' workflow: load OSSL library, cluster unknowns, optimize configs per cluster,
-#' train models, generate predictions with proper target handling.
-#'
+# Library-Based Prediction Orchestrator
+#
+# Main user-facing API for library-based prediction. Orchestrates the complete
+# workflow: load OSSL library, cluster unknowns, optimize configs per cluster,
+# train models, generate predictions with proper target handling.
+
 #' @importFrom cli cli_text cli_alert_info cli_alert_success cli_abort style_bold
 #' @importFrom dplyr filter bind_rows mutate left_join
 #' @importFrom tibble tibble
-#' @keywords internal
+NULL
 
 ## -----------------------------------------------------------------------------
 ## Main API: predict_library()

@@ -38,9 +38,8 @@ test_that("quantile spec can be used in workflow", {
 
   spec <- define_quantile_specification()
 
-  # Finalize hyperparameters to avoid tuning
-  spec$args$mtry <- 2
-  spec$args$min_n <- 5
+  # Finalize hyperparameters to avoid tuning (use public API, not internal assignment)
+  spec <- parsnip::set_args(spec, mtry = 2, min_n = 5)
 
   recipe <- recipes::recipe(y ~ ., data = test_data)
 

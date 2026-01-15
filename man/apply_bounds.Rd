@@ -23,7 +23,7 @@ and non-negativity requirements. Ensures predictions are physically valid.
 \details{
 Different properties have different constraints:
 
-\strong{pH}: Bounded to \link{0, 14}
+\strong{pH}: Bounded to [0, 14]
 \itemize{
 \item Theoretical range of pH scale
 \item Values clipped to this range
@@ -43,7 +43,7 @@ Different properties have different constraints:
 \section{Properties with Constraints}{
 
 \itemize{
-\item \strong{pH}: \link{0, 14}
+\item \strong{pH}: [0, 14]
 \item \strong{oc, soc, total_carbon, carbonate}: ≥ 0
 \item \strong{total_nitrogen}: ≥ 0
 \item \strong{iron_total, aluminum_total}: ≥ 0

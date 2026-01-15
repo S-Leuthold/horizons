@@ -2,7 +2,7 @@
 % Please edit documentation in R/library-clustering.R
 \name{fit_gmm_clustering}
 \alias{fit_gmm_clustering}
-\title{Library Clustering with Gaussian Mixture Models}
+\title{Fit GMM Clustering on Library PCA Scores}
 \usage{
 fit_gmm_clustering(
   pca_scores,
@@ -41,30 +41,11 @@ List with:
 Returns NULL if fitting fails.
 }
 \description{
-Functions for clustering reference spectral libraries using Gaussian Mixture Models (GMM)
-with BIC-based model selection. Provides unknown sample assignment with probability scores,
-applicability domain metrics, and cluster-specific statistics for library-based prediction.
-
 Trains Gaussian Mixture Model on library PCA scores with automatic K selection
 via BIC. Applies covariance regularization (Ledoit-Wolf shrinkage) to prevent
 singularity and enforces minimum cluster sizes for robust model training.
 }
 \details{
-This module implements the clustering component of the Library Prediction Service.
-Clusters are formed on library PCA scores and used to:
-\enumerate{
-\item Assign unknown samples to training groups
-\item Enable cluster-specific model training
-\item Provide applicability domain awareness (Mahalanobis distance)
-}
-
-GMM is preferred over k-means because it:
-\itemize{
-\item Captures within-cluster covariance (needed for Mahalanobis AD metrics)
-\item Provides probability scores for soft assignments
-\item Handles elliptical clusters (realistic for spectral data)
-}
-
 \strong{Algorithm:}
 \enumerate{
 \item Test K ∈ k_range using mclust::Mclust()
@@ -110,11 +91,4 @@ gmm_result <- horizons:::fit_gmm_clustering(
 \seealso{
 \code{\link[=assign_to_clusters]{assign_to_clusters()}}, \code{\link[=compute_ad_thresholds]{compute_ad_thresholds()}}
 }
-\keyword{Clustering}
-\keyword{Fit}
-\keyword{GMM}
-\keyword{Library}
-\keyword{PCA}
-\keyword{Scores}
 \keyword{internal}
-\keyword{on}

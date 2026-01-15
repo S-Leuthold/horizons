@@ -280,7 +280,7 @@ ilr_to_texture <- function(ilr_1, ilr_2, as_gkg = TRUE) {
 #' @details
 #' Different properties have different constraints:
 #'
-#' **pH**: Bounded to [0, 14]
+#' **pH**: Bounded to \[0, 14\]
 #' - Theoretical range of pH scale
 #' - Values clipped to this range
 #'
@@ -298,7 +298,7 @@ ilr_to_texture <- function(ilr_1, ilr_2, as_gkg = TRUE) {
 #' @return Numeric vector with bounds enforced. Same length as input.
 #'
 #' @section Properties with Constraints:
-#' - **pH**: [0, 14]
+#' - **pH**: \[0, 14\]
 #' - **oc, soc, total_carbon, carbonate**: ≥ 0
 #' - **total_nitrogen**: ≥ 0
 #' - **iron_total, aluminum_total**: ≥ 0

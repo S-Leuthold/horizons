@@ -310,7 +310,7 @@ prepare_cluster_splits <- function(cluster_data,
 #'             0.15 * (1 - RMSE_norm)
 #' ```
 #'
-#' **Normalization:** Each metric scaled to [0, 1] within the tested configs:
+#' **Normalization:** Each metric scaled to \[0, 1\] within the tested configs:
 #' ```
 #' metric_norm = (metric - min(metric)) / (max(metric) - min(metric))
 #' ```
@@ -706,7 +706,11 @@ optimize_config_for_cluster <- function(cluster_splits,
 #' @param property_col Character. OSSL property column name (e.g., "clay.tot_usda.a334_w.pct")
 #' @param grid_size Integer. Hyperparameter grid points. Default: 5
 #' @param cv_folds Integer. Cross-validation folds. Default: 3
+#' @param resamples Optional rsample object. Pre-computed CV folds for shared training.
+#'   If NULL (default), folds are created internally using cv_folds.
 #' @param return_workflow Logical. Return trained workflow? Default: FALSE
+#' @param allow_par Logical. Allow parallel processing during tuning? Default: TRUE.
+#' @param n_workers Integer. Number of parallel workers. Default: 4.
 #' @param seed Integer. Random seed. Default: 123
 #' @param verbose Logical. Print progress? Default: FALSE
 #'

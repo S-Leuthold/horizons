@@ -2,7 +2,7 @@
 % Please edit documentation in R/library-core.R
 \name{prepare_library_for_training}
 \alias{prepare_library_for_training}
-\title{Library Prediction Core Orchestrator}
+\title{Prepare Library Data for Training}
 \usage{
 prepare_library_for_training(
   property,
@@ -47,19 +47,11 @@ List with:
 }
 }
 \description{
-High-level orchestration functions that integrate library data loading, clustering,
-and preparation for training. Connects the library-data, library-clustering, and
-library-train modules into complete workflows.
-
 Complete pipeline: load OSSL → preprocess for clustering → PCA → GMM clustering
 → add cluster assignments to RAW data. Returns everything needed for training
 cluster-specific models.
 }
 \details{
-This module provides the end-to-end pipeline for library-based prediction,
-handling the critical architectural detail: clustering uses preprocessed data
-(SNV for stability) while training uses raw data (for config-specific preprocessing).
-
 \strong{Critical Architecture:}
 \itemize{
 \item Clustering: Uses SNV-preprocessed data for stable assignments
@@ -77,9 +69,4 @@ library_result <- horizons:::prepare_library_for_training("clay", max_samples = 
 }
 
 }
-\keyword{Data}
-\keyword{Library}
-\keyword{Prepare}
-\keyword{Training}
-\keyword{for}
 \keyword{internal}

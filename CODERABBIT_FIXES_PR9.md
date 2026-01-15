@@ -154,6 +154,27 @@ Line 161 accesses `prepped$steps[[1]]`, but the recipe has two steps: `step_tran
 
 ---
 
-## Minor Issues (14 total)
+## Minor Issues (14 total) - ALL FIXED
 
-Not addressed in this session. Can be tackled in a follow-up if desired.
+| # | Comment ID | Issue | Status |
+|---|------------|-------|--------|
+| 9 | 2695601016 | BRIEF metadata inconsistencies | [x] Fixed |
+| 10 | 2695601046 | ROADMAP stale timestamp | [x] Fixed |
+| 11 | 2695601082 | apply_bounds.Rd wrong interval syntax | [x] Fixed |
+| 12 | 2695601091 | calculate_composite_score.Rd wrong interval syntax | [x] Fixed |
+| 13 | 2695601095 | fit_gmm_clustering.Rd malformed keywords | [x] Fixed |
+| 14 | 2695601120 | predict_library.Rd malformed keywords | [x] Fixed |
+| 15 | 2695601136 | predict_with_uq.Rd missing c_alpha docs | Already documented |
+| 16 | 2695601146 | prepare_library_for_training.Rd malformed keywords | [x] Fixed |
+| 17 | 2695601150 | train_and_score_config.Rd missing params | [x] Fixed |
+| 18 | 2695601164 | train_quantile_model.Rd missing resamples | [x] Fixed |
+| 19 | 2695601166 | train_quantile_model.Rd X600 vs 600 naming | [x] Fixed |
+| 20 | 2695601186 | library-ad.R right=TRUE doc mismatch | [x] Fixed |
+| 21 | 2695601207 | library-clustering.R cluster_sizes names | [x] Fixed |
+| 22 | 2695601224 | test-models-quantile.R parsnip API | [x] Fixed |
+
+**Resolution Notes:**
+- Interval syntax: Escaped brackets in roxygen comments to prevent link parsing
+- Malformed keywords: Converted file-level roxygen blocks to regular comments
+- Missing params: Added documentation for resamples, allow_par, n_workers
+- Code fixes: Preserved names in cluster_sizes, used parsnip::set_args() API

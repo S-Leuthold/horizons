@@ -250,8 +250,8 @@ calculate_ad_distance <- function(new_matrix, ad_metadata) {
 #'
 #' ## Boundary Handling
 #'
-#' Uses `right = FALSE` in `cut()` → intervals are [a, b). Sample exactly
-#' at threshold is assigned to lower bin (conservative).
+#' Uses `right = TRUE` in `cut()` → intervals are (a, b]. Sample exactly
+#' at threshold is assigned to current bin.
 #'
 #' @examples
 #' \dontrun{
