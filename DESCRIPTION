@@ -20,11 +20,14 @@ License: MIT + file LICENSE
 Encoding: UTF-8
 LazyData: false
 Remotes:
-    spectral-cockpit/opusreader2
+    spectral-cockpit/opusreader2,
+    S-Leuthold/plsmod-fork@fix/plsr-tune-grid-dimension
 Imports:
     butcher,
     cli,
     cluster,
+    compositions,
+    corpcor,
     data.table,
     daymetr,
     dials,
@@ -43,6 +46,7 @@ Imports:
     janitor,
     jsonlite,
     lubridate,
+    mclust,
     opusreader2,
     parallel,
     doParallel,
@@ -50,7 +54,6 @@ Imports:
     parsnip,
     patchwork,
     plsmod,
-    progressr,
     prospectr,
     pryr,
     purrr,
@@ -129,6 +132,15 @@ Collate:
     'models-specifications.R'
     'models-recipes.R'
     'covariates-data.R'
+    'library-data.R'
+    'library-clustering.R'
+    'library-helpers.R'
+    'library-ad.R'
+    'library-core.R'
+    'library-targets.R'
+    'library-uq.R'
+    'library-train.R'
+    'library-orchestrator.R'
     'covariates-climate.R'
     'covariates-clustering.R'
     'covariates-soil.R'

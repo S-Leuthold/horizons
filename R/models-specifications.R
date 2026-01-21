@@ -137,6 +137,124 @@ define_model_specifications <- function(model_type) {
 }
 
 ## -----------------------------------------------------------------------------
+## Quantile Model Specifications
+## -----------------------------------------------------------------------------
+
+#' Define Quantile Regression Specification
+#'
+#' @description
+#' Creates a ranger model specification configured for quantile regression.
+#' Used exclusively for uncertainty quantification in library prediction mode.
+#' This function supports the decoupled UQ architecture where point predictions
+#' come from the best-performing model (any of the 9 model types), while
+#' uncertainty quantification always uses ranger quantile regression.
+#'
+#' @return A `parsnip` model specification object configured for quantile regression.
+#'   The returned specification has tunable hyperparameters (`mtry`, `min_n`) and
+#'   is ready for use in `workflow()` objects. Trains a single model that can
+#'   predict multiple quantiles at prediction time.
+#'
+#' @details
+#' ## How Ranger Quantile Regression Works
+#'
+#' Unlike some quantile regression methods, ranger trains a SINGLE model with
+#' `quantreg = TRUE`, then allows you to extract ANY quantile at prediction time:
+#'
+#' ```r
+#' # Training: One model
+#' quantile_model <- train(define_quantile_specification())
+#'
+#' # Prediction: Get multiple quantiles from same model
+#' predict(quantile_model, new_data,
+#'         type = "quantiles",
+#'         quantiles = c(0.05, 0.95))
+#' ```
+#'
+#' This is more efficient than training separate models for each quantile.
+#'
+#' ## Why Ranger for Quantile Regression?
+#'
+#' Ranger is selected for all quantile models because it:
+#' * Fits multiple quantiles jointly from one model (efficient!)
+#' * Reduces crossing issues (q05 > q95) since quantiles come from same forest
+#' * Handles high-dimensional spectral data (1000+ features) efficiently
+#' * Provides stable quantile estimates via conditional inference trees
+#' * Has proven performance in soil spectroscopy literature
+#'
+#' ## Decoupled UQ Architecture
+#'
+#' The horizons UQ system separates point prediction from uncertainty estimation:
+#' 1. **Point prediction**: Use winning model from config optimization
+#'    (could be cubist, PLSR, xgboost, etc.)
+#' 2. **Quantile model**: Always use ranger (this function) - ONE model
+#' 3. **Conformal calibration**: Applied to ranger quantiles for coverage guarantee
+#'
+#' This decoupling allows:
+#' * UQ support for ALL 9 model types (not just those with native quantile support)
+#' * Consistent UQ behavior across different winning point models
+#' * Flexibility to swap quantile model implementation in future versions
+#'
+#' ## Texture Properties
+#'
+#' For texture properties (sand, silt, clay), quantile models are trained on
+#' ILR-transformed coordinates (ilr_1, ilr_2), requiring 4 models per cluster:
+#' * ilr_1: point model + quantile model
+#' * ilr_2: point model + quantile model
+#'
+#' Total: 4 models per cluster for texture (not 6!)
+#'
+#' ## Belt-and-Suspenders Protection
+#'
+#' Even if ranger's quantiles are imperfect, the conformal calibration layer
+#' ensures 90% coverage by computing a calibration margin (c_alpha) on held-out
+#' data. Final intervals: `[q05 - c_alpha, q95 + c_alpha]`
+#'
+#' @seealso
+#'   [define_model_specifications()] for point prediction models,
+#'   [parsnip::rand_forest()],
+#'   [ranger::ranger()] documentation for `quantreg` parameter
+#'
+#' @examples
+#' \dontrun{
+#' # Create quantile specification (gets both q05 and q95 at prediction)
+#' spec_quantile <- define_quantile_specification()
+#'
+#' # Use in workflow
+#' wf <- workflows::workflow() %>%
+#'   workflows::add_model(spec_quantile) %>%
+#'   workflows::add_recipe(my_recipe)
+#'
+#' # Fit
+#' fitted_wf <- fit(wf, data = training_data)
+#'
+#' # Predict quantiles
+#' preds <- predict(fitted_wf, new_data = test_data,
+#'                  type = "quantiles",
+#'                  quantiles = c(0.05, 0.95))
+#' }
+#'
+#' @importFrom parsnip rand_forest set_engine set_mode
+#' @importFrom tune tune
+#'
+#' @keywords internal
+define_quantile_specification <- function() {
+
+  ## Build ranger quantile specification -----------------------------------------
+  ## Quantiles specified at PREDICTION time, not training time
+
+  parsnip::rand_forest(
+    trees  = 500,               # Fixed: sufficient for stable quantiles
+    mtry   = tune::tune(),      # Tunable: number of predictors to sample
+    min_n  = tune::tune()       # Tunable: minimum node size
+  ) %>%
+    parsnip::set_engine("ranger",
+                       quantreg = TRUE,         # Enable quantile regression
+                       keep.inbag = TRUE,       # Required for quantile prediction
+                       importance = "none") %>% # Skip importance (saves memory)
+    parsnip::set_mode("regression")
+}
+
+## -----------------------------------------------------------------------------
 ## Workflow ID Generation
 ## -----------------------------------------------------------------------------
 
