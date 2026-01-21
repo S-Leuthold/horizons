@@ -110,6 +110,7 @@ Depends:
 Collate:
     'zzz.R'
     'constants.R'
+    'class-core.R'
     'utils-errors.R'
     'utils-cache.R'
     'utils-backtransform.R'
