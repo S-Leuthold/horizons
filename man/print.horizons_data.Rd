@@ -7,12 +7,12 @@
 \method{print}{horizons_data}(x, ...)
 }
 \arguments{
-\item{x}{\link{horizons_data.} The object to print.}
+\item{x}{\link{horizons_data}. The object to print.}
 
 \item{...}{Additional arguments (ignored, for S3 compatibility).}
 }
 \value{
-\link{horizons_data.} The input object, returned invisibly.
+\link{horizons_data}. The input object, returned invisibly.
 }
 \description{
 Displays a concise, tree-style summary of a horizons_data object. Shows

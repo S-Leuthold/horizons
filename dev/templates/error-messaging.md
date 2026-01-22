@@ -4,7 +4,7 @@ Standard pattern for tree-style error output in horizons.
 
 ## Structure
 
-```
+```text
 ! [Header message in sentence case]
    ├─ [Error 1]
    ├─ [Error 2]

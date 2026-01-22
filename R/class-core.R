@@ -54,7 +54,7 @@
 #' @param ossl_properties [character vector or NULL.] Properties requested from
 #'   OSSL library predictions. Default: `NULL`.
 #'
-#' @return [horizons_data.] An unvalidated horizons_data object with class
+#' @return [horizons_data]. An unvalidated horizons_data object with class
 #'   `c("horizons_data", "list")`.
 #'
 #' @seealso [validate_horizons_data()] for structural validation,
@@ -238,9 +238,9 @@ new_horizons_data <- function(analysis        = NULL,
 #' Empty objects (both analysis and role_map NULL) pass validation — this
 #' allows for incremental object construction.
 #'
-#' @param x [horizons_data.] The object to validate.
+#' @param x [horizons_data]. The object to validate.
 #'
-#' @return [horizons_data.] The input object, unchanged, if validation passes.
+#' @return [horizons_data]. The input object, unchanged, if validation passes.
 #'   Aborts with class `horizons_validation_error` if validation fails.
 #'
 #' @seealso [new_horizons_data()] for object construction.
@@ -305,6 +305,19 @@ validate_horizons_data <- function(x) {
   ## Wavelength column checks --------------------------------------------------
 
   predictor_vars <- role_map$variable[role_map$role == "predictor"]
+
+  # Guard against role_map columns missing from analysis -----------------------
+
+  missing_predictors <- setdiff(predictor_vars, names(analysis))
+
+  if (length(missing_predictors) > 0) {
+
+    col_list <- paste(missing_predictors[1:min(5, length(missing_predictors))], collapse = ", ")
+    errors   <- c(errors, cli::format_inline("Predictors in {.field role_map} missing from {.field analysis}: {col_list}"))
+    predictor_vars <- intersect(predictor_vars, names(analysis))
+
+  }
+
   predictor_cols <- analysis[, predictor_vars, drop = FALSE]
 
   # Check for NA ---------------------------------------------------------------
@@ -347,12 +360,24 @@ validate_horizons_data <- function(x) {
 
   ## role_map completeness checks ----------------------------------------------
 
+  # Columns in analysis but not in role_map
   missing_from_role_map <- setdiff(names(analysis), role_map$variable)
 
   if (length(missing_from_role_map) > 0) {
 
     col_list <- paste(missing_from_role_map, collapse = ", ")
     errors   <- c(errors, cli::format_inline("Columns missing from {.field role_map}: {col_list}"))
+
+  }
+
+  # Columns in role_map but not in analysis (non-predictors already handled above)
+  non_predictor_vars     <- role_map$variable[role_map$role != "predictor"]
+  missing_from_analysis  <- setdiff(non_predictor_vars, names(analysis))
+
+  if (length(missing_from_analysis) > 0) {
+
+    col_list <- paste(missing_from_analysis, collapse = ", ")
+    errors   <- c(errors, cli::format_inline("Non-predictor columns in {.field role_map} missing from {.field analysis}: {col_list}"))
 
   }
 
@@ -415,10 +440,10 @@ validate_horizons_data <- function(x) {
 #' The output uses tree-style formatting consistent with error messages
 #' throughout the package.
 #'
-#' @param x [horizons_data.] The object to print.
+#' @param x [horizons_data]. The object to print.
 #' @param ... Additional arguments (ignored, for S3 compatibility).
 #'
-#' @return [horizons_data.] The input object, returned invisibly.
+#' @return [horizons_data]. The input object, returned invisibly.
 #'
 #' @export
 print.horizons_data <- function(x, ...) {
@@ -547,10 +572,10 @@ print.horizons_data <- function(x, ...) {
 #'
 #' Uses tree-style formatting consistent with the rest of the package.
 #'
-#' @param object [horizons_data.] The object to summarize.
+#' @param object [horizons_data]. The object to summarize.
 #' @param ... Additional arguments (ignored, for S3 compatibility).
 #'
-#' @return [horizons_data.] The input object, returned invisibly.
+#' @return [horizons_data]. The input object, returned invisibly.
 #'
 #' @export
 summary.horizons_data <- function(object, ...) {

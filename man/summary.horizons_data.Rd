@@ -7,12 +7,12 @@
 \method{summary}{horizons_data}(object, ...)
 }
 \arguments{
-\item{object}{\link{horizons_data.} The object to summarize.}
+\item{object}{\link{horizons_data}. The object to summarize.}
 
 \item{...}{Additional arguments (ignored, for S3 compatibility).}
 }
 \value{
-\link{horizons_data.} The input object, returned invisibly.
+\link{horizons_data}. The input object, returned invisibly.
 }
 \description{
 Displays a comprehensive, detailed summary of a horizons_data object. Shows
