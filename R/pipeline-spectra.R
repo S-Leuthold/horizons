@@ -52,6 +52,18 @@ detect_input_type <- function(source, type = NULL) {
   if (!is.null(type)) {
 
     type <- match.arg(type, c("opus", "csv"))
+
+    ## Still validate path exists for file-based types -------------------------
+
+    if (!file.exists(source)) {
+
+      cat(cli::col_red(cli::style_bold("! Path not found:\n")))
+      cat(cli::col_red(paste0("   \u2514\u2500 ", source, " does not exist\n")))
+      cat("\n")
+      rlang::abort("Path not found", class = "horizons_input_error")
+
+    }
+
     return(type)
 
   }
@@ -416,6 +428,20 @@ read_opus_files <- function(path, recursive = TRUE) {
       if (channel %in% names(file_content) && !is.null(file_content[[channel]]$data)) {
 
         spectral_data <- file_content[[channel]]$data
+
+        ## Validate spectral data structure --------------------------------------
+        ## Must be a matrix with exactly one row (one spectrum per file)
+
+        if (!is.matrix(spectral_data) || nrow(spectral_data) != 1) {
+
+          cli::cli_warn(c(
+            "Unexpected data structure in {.file {basename(file_path)}}",
+            "i" = "Channel '{channel}' has {nrow(spectral_data)} rows, expected 1",
+            "i" = "Skipping this file"
+          ))
+          next
+
+        }
 
         spectra_list[[i]] <- tibble::tibble(
           sample_id  = tools::file_path_sans_ext(basename(file_path)),
@@ -866,8 +892,8 @@ report_spectra_summary <- function(obj, detected_id, detected_wn, input_type, so
 
   wn_cols   <- obj$data$role_map$variable[obj$data$role_map$role == "predictor"]
   wn_values <- as.numeric(gsub("^wn_", "", wn_cols))
-  wn_min    <- min(wn_values)
-  wn_max    <- max(wn_values)
+  wn_min    <- if (length(wn_values) > 0) min(wn_values) else NA
+  wn_max    <- if (length(wn_values) > 0) max(wn_values) else NA
 
   ## Print summary --------------------------------------------------------------
 
