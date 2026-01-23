@@ -96,9 +96,12 @@ spectra <- function(source,
   ## Step 1: Input validation
   ## -------------------------------------------------------------------------
 
+  errors <- character()
+
   if (missing(source) || is.null(source)) {
 
-    cli::cli_abort("{.arg source} must be provided")
+    errors <- c(errors,
+                cli::format_inline("{.arg source} is required"))
 
   }
 
@@ -107,14 +110,16 @@ spectra <- function(source,
   is_path   <- is.character(source) && length(source) >= 1
   is_tibble <- inherits(source, "data.frame")
 
-  if (!is_path && !is_tibble) {
+  if (!missing(source) && !is.null(source) && !is_path && !is_tibble) {
 
-    cli::cli_abort(c(
-      "{.arg source} must be a path or data frame",
-      "x" = "Got {.cls {class(source)}}"
-    ))
+    errors <- c(errors,
+                cli::format_inline("{.arg source} must be a path or data frame, got {.cls {class(source)}}"))
 
   }
+
+  ## Report validation errors with tree style --------------------------------
+
+  abort_tree(errors)
 
   ## -------------------------------------------------------------------------
   ## Step 2: Dispatch based on input type
@@ -168,32 +173,47 @@ spectra_from_tibble <- function(data,
                                 wavelength_cols = NULL) {
 
   ## -------------------------------------------------------------------------
-  ## Step 1: Detect ID column
+  ## Step 1: Input validation (collected errors)
   ## -------------------------------------------------------------------------
+
+  errors     <- character()
+  id_column  <- NULL
+  wn_cols    <- NULL
+
+  ## Validate id_col if provided ---------------------------------------------
 
   if (!is.null(id_col)) {
 
     if (!id_col %in% names(data)) {
 
-      cli::cli_abort(c(
-        "Specified {.arg id_col} not found in data",
-        "x" = "Column {.val {id_col}} does not exist",
-        "i" = "Available columns: {.val {names(data)}}"
-      ))
+      errors <- c(errors,
+                  cli::format_inline("{.arg id_col} {.val {id_col}} not found in data (available: {.val {head(names(data), 5)}})"))
+
+    } else {
+
+      id_column <- id_col
 
     }
 
-    id_column <- id_col
-
   } else {
 
-    id_column <- detect_id_column(names(data))
+    ## Try auto-detection (may fail) -----------------------------------------
+
+    id_column <- tryCatch(
+      detect_id_column(names(data)),
+      error = function(e) NULL
+    )
+
+    if (is.null(id_column)) {
+
+      errors <- c(errors,
+                  cli::format_inline("Could not auto-detect ID column (specify with {.arg id_col})"))
+
+    }
 
   }
 
-  ## -------------------------------------------------------------------------
-  ## Step 2: Detect wavelength columns
-  ## -------------------------------------------------------------------------
+  ## Validate wavelength_cols if provided ------------------------------------
 
   if (!is.null(wavelength_cols)) {
 
@@ -201,46 +221,61 @@ spectra_from_tibble <- function(data,
 
     if (length(missing_cols) > 0) {
 
-      cli::cli_abort(c(
-        "Specified wavelength columns not found in data",
-        "x" = "Missing: {.val {missing_cols}}"
-      ))
+      errors <- c(errors,
+                  cli::format_inline("Wavelength columns not found: {.val {missing_cols}}"))
+
+    } else {
+
+      wn_cols <- wavelength_cols
 
     }
-
-    wn_cols <- wavelength_cols
 
   } else {
 
-    wn_cols <- detect_wavelength_columns(names(data))
+    ## Try auto-detection (may fail) -----------------------------------------
 
-  }
+    wn_cols <- tryCatch(
+      detect_wavelength_columns(names(data)),
+      error = function(e) NULL
+    )
 
-  ## -------------------------------------------------------------------------
-  ## Step 3: Validate wavelength columns contain numeric data
-  ## -------------------------------------------------------------------------
+    if (is.null(wn_cols)) {
 
-  non_numeric_wn <- character()
-
-  for (col in wn_cols) {
-
-    if (!is.numeric(data[[col]])) {
-
-      non_numeric_wn <- c(non_numeric_wn, col)
+      errors <- c(errors,
+                  cli::format_inline("Could not auto-detect wavelength columns (specify with {.arg wavelength_cols})"))
 
     }
 
   }
 
-  if (length(non_numeric_wn) > 0) {
+  ## Validate wavelength columns are numeric ---------------------------------
 
-    cli::cli_abort(c(
-      "Wavelength columns must contain numeric data",
-      "x" = "Non-numeric columns: {.val {non_numeric_wn}}",
-      "i" = "Check that spectral data columns contain absorbance/reflectance values"
-    ))
+  if (!is.null(wn_cols)) {
+
+    non_numeric_wn <- character()
+
+    for (col in wn_cols) {
+
+      if (!is.numeric(data[[col]])) {
+
+        non_numeric_wn <- c(non_numeric_wn, col)
+
+      }
+
+    }
+
+    if (length(non_numeric_wn) > 0) {
+
+      errors <- c(errors,
+                  cli::format_inline("Wavelength columns must be numeric: {.val {non_numeric_wn}}"))
+
+    }
 
   }
+
+  ## Report validation errors with tree style --------------------------------
+
+  abort_tree(errors)
 
   ## -------------------------------------------------------------------------
   ## Step 4: Build analysis tibble
@@ -338,10 +373,9 @@ spectra_from_path <- function(source,
 
   if (!type %in% c("opus", "csv")) {
 
-    cli::cli_abort(c(
-      "{.arg type} must be 'opus' or 'csv'",
-      "x" = "Got {.val {type}}"
-    ))
+    abort_tree(
+      cli::format_inline("{.arg type} must be 'opus' or 'csv', got {.val {type}}")
+    )
 
   }
 
@@ -399,6 +433,8 @@ load_opus_files <- function(source,
   ## Step 1: Find OPUS files
   ## -------------------------------------------------------------------------
 
+  file_paths <- NULL
+
   if (dir.exists(source)) {
 
     file_paths <- list.files(
@@ -410,11 +446,13 @@ load_opus_files <- function(source,
 
     if (length(file_paths) == 0) {
 
-      cli::cli_abort(c(
-        "No OPUS files found in directory",
-        "i" = "Path: {.path {source}}",
-        "i" = "OPUS files end with .0, .1, etc."
-      ))
+      abort_tree(
+        c(cli::format_inline("No OPUS files found in directory"),
+          cli::format_inline("Path: {.path {source}}"),
+          cli::format_inline("OPUS files end with .0, .1, etc.")),
+        title = "File error",
+        class = "horizons_file_error"
+      )
 
     }
 
@@ -424,10 +462,11 @@ load_opus_files <- function(source,
 
   } else {
 
-    cli::cli_abort(c(
-      "Path does not exist",
-      "x" = "{.path {source}}"
-    ))
+    abort_tree(
+      cli::format_inline("Path does not exist: {.path {source}}"),
+      title = "File error",
+      class = "horizons_file_error"
+    )
 
   }
 
@@ -439,10 +478,12 @@ load_opus_files <- function(source,
 
   if (!requireNamespace("opusreader2", quietly = TRUE)) {
 
-    cli::cli_abort(c(
-      "Package {.pkg opusreader2} required for OPUS files",
-      "i" = "Install with: {.code install.packages('opusreader2')}"
-    ))
+    abort_tree(
+      c(cli::format_inline("Package {.pkg opusreader2} required for OPUS files"),
+        cli::format_inline("Install with: {.code install.packages('opusreader2')}")),
+      title = "Dependency error",
+      class = "horizons_dependency_error"
+    )
 
   }
 
@@ -471,7 +512,11 @@ load_opus_files <- function(source,
 
   if (length(spectra_list) == 0) {
 
-    cli::cli_abort("No OPUS files could be read successfully")
+    abort_tree(
+      cli::format_inline("No OPUS files could be read successfully"),
+      title = "Data error",
+      class = "horizons_data_error"
+    )
 
   }
 
@@ -548,7 +593,11 @@ load_opus_files <- function(source,
 
   if (length(spectra_data) == 0) {
 
-    cli::cli_abort("No valid spectral data could be extracted")
+    abort_tree(
+      cli::format_inline("No valid spectral data could be extracted"),
+      title = "Data error",
+      class = "horizons_data_error"
+    )
 
   }
 
@@ -625,20 +674,22 @@ load_csv_files <- function(source,
 
   if (!file.exists(source)) {
 
-    cli::cli_abort(c(
-      "CSV file not found",
-      "x" = "{.path {source}}"
-    ))
+    abort_tree(
+      cli::format_inline("CSV file not found: {.path {source}}"),
+      title = "File error",
+      class = "horizons_file_error"
+    )
 
   }
 
   if (dir.exists(source)) {
 
-    cli::cli_abort(c(
-      "Expected CSV file, got directory",
-      "x" = "{.path {source}}",
-      "i" = "Provide path to a single CSV file"
-    ))
+    abort_tree(
+      c(cli::format_inline("Expected CSV file, got directory"),
+        cli::format_inline("Path: {.path {source}}")),
+      title = "File error",
+      class = "horizons_file_error"
+    )
 
   }
 
@@ -649,32 +700,47 @@ load_csv_files <- function(source,
   data <- readr::read_csv(source, show_col_types = FALSE)
 
   ## -------------------------------------------------------------------------
-  ## Step 3: Detect ID column
+  ## Step 3: Input validation (collected errors)
   ## -------------------------------------------------------------------------
+
+  errors     <- character()
+  id_column  <- NULL
+  wn_cols    <- NULL
+
+  ## Validate id_col if provided ---------------------------------------------
 
   if (!is.null(id_col)) {
 
     if (!id_col %in% names(data)) {
 
-      cli::cli_abort(c(
-        "Specified {.arg id_col} not found in data",
-        "x" = "Column {.val {id_col}} does not exist",
-        "i" = "Available: {.val {names(data)}}"
-      ))
+      errors <- c(errors,
+                  cli::format_inline("{.arg id_col} {.val {id_col}} not found in data (available: {.val {head(names(data), 5)}})"))
+
+    } else {
+
+      id_column <- id_col
 
     }
 
-    id_column <- id_col
-
   } else {
 
-    id_column <- detect_id_column(names(data))
+    ## Try auto-detection (may fail) -----------------------------------------
+
+    id_column <- tryCatch(
+      detect_id_column(names(data)),
+      error = function(e) NULL
+    )
+
+    if (is.null(id_column)) {
+
+      errors <- c(errors,
+                  cli::format_inline("Could not auto-detect ID column (specify with {.arg id_col})"))
+
+    }
 
   }
 
-  ## -------------------------------------------------------------------------
-  ## Step 4: Detect wavelength columns
-  ## -------------------------------------------------------------------------
+  ## Validate wavelength_cols if provided ------------------------------------
 
   if (!is.null(wavelength_cols)) {
 
@@ -682,46 +748,61 @@ load_csv_files <- function(source,
 
     if (length(missing_cols) > 0) {
 
-      cli::cli_abort(c(
-        "Specified wavelength columns not found",
-        "x" = "Missing: {.val {missing_cols}}"
-      ))
+      errors <- c(errors,
+                  cli::format_inline("Wavelength columns not found: {.val {missing_cols}}"))
+
+    } else {
+
+      wn_cols <- wavelength_cols
 
     }
-
-    wn_cols <- wavelength_cols
 
   } else {
 
-    wn_cols <- detect_wavelength_columns(names(data))
+    ## Try auto-detection (may fail) -----------------------------------------
 
-  }
+    wn_cols <- tryCatch(
+      detect_wavelength_columns(names(data)),
+      error = function(e) NULL
+    )
 
-  ## -------------------------------------------------------------------------
-  ## Step 5: Validate wavelength columns contain numeric data
-  ## -------------------------------------------------------------------------
+    if (is.null(wn_cols)) {
 
-  non_numeric_wn <- character()
-
-  for (col in wn_cols) {
-
-    if (!is.numeric(data[[col]])) {
-
-      non_numeric_wn <- c(non_numeric_wn, col)
+      errors <- c(errors,
+                  cli::format_inline("Could not auto-detect wavelength columns (specify with {.arg wavelength_cols})"))
 
     }
 
   }
 
-  if (length(non_numeric_wn) > 0) {
+  ## Validate wavelength columns are numeric ---------------------------------
 
-    cli::cli_abort(c(
-      "Wavelength columns must contain numeric data",
-      "x" = "Non-numeric columns: {.val {non_numeric_wn}}",
-      "i" = "Check that spectral data columns contain absorbance/reflectance values"
-    ))
+  if (!is.null(wn_cols)) {
+
+    non_numeric_wn <- character()
+
+    for (col in wn_cols) {
+
+      if (!is.numeric(data[[col]])) {
+
+        non_numeric_wn <- c(non_numeric_wn, col)
+
+      }
+
+    }
+
+    if (length(non_numeric_wn) > 0) {
+
+      errors <- c(errors,
+                  cli::format_inline("Wavelength columns must be numeric: {.val {non_numeric_wn}}"))
+
+    }
 
   }
+
+  ## Report validation errors with tree style --------------------------------
+
+  abort_tree(errors)
 
   ## -------------------------------------------------------------------------
   ## Step 6: Build analysis tibble
@@ -813,11 +894,13 @@ detect_file_type <- function(source) {
 
     } else {
 
-      cli::cli_abort(c(
-        "Could not detect file type in directory",
-        "i" = "No OPUS (.0, .1, ...) or CSV files found",
-        "i" = "Specify {.arg type} explicitly"
-      ))
+      abort_tree(
+        c(cli::format_inline("Could not detect file type in directory"),
+          cli::format_inline("No OPUS (.0, .1, ...) or CSV files found"),
+          cli::format_inline("Specify {.arg type} explicitly")),
+        title = "Detection error",
+        class = "horizons_detection_error"
+      )
 
     }
 
@@ -833,17 +916,22 @@ detect_file_type <- function(source) {
 
     } else {
 
-      cli::cli_abort(c(
-        "Could not detect file type",
-        "i" = "File: {.path {source}}",
-        "i" = "Specify {.arg type} explicitly"
-      ))
+      abort_tree(
+        c(cli::format_inline("Could not detect file type for: {.path {source}}"),
+          cli::format_inline("Specify {.arg type} explicitly")),
+        title = "Detection error",
+        class = "horizons_detection_error"
+      )
 
     }
 
   } else {
 
-    cli::cli_abort("Path does not exist: {.path {source}}")
+    abort_tree(
+      cli::format_inline("Path does not exist: {.path {source}}"),
+      title = "File error",
+      class = "horizons_file_error"
+    )
 
   }
 
@@ -873,12 +961,14 @@ detect_id_column <- function(col_names) {
 
   }
 
-  cli::cli_abort(c(
-    "Could not identify sample ID column",
-    "i" = "Checked aliases: {.val {ID_ALIASES}}",
-    "i" = "Available columns: {.val {col_names}}",
-    "i" = "Specify explicitly with {.arg id_col}"
-  ))
+  abort_tree(
+    c(cli::format_inline("Could not identify sample ID column"),
+      cli::format_inline("Checked aliases: {.val {ID_ALIASES}}"),
+      cli::format_inline("Available columns: {.val {head(col_names, 10)}}"),
+      cli::format_inline("Specify explicitly with {.arg id_col}")),
+    title = "Detection error",
+    class = "horizons_detection_error"
+  )
 
 }
 
@@ -918,12 +1008,14 @@ detect_wavelength_columns <- function(col_names) {
 
   }
 
-  cli::cli_abort(c(
-    "Could not identify wavelength columns",
-    "i" = "Expected: columns starting with 'wn_' or numeric names (e.g., '4000', '3998')",
-    "i" = "Found columns: {.val {col_names}}",
-    "i" = "Specify explicitly with {.arg wavelength_cols}"
-  ))
+  abort_tree(
+    c(cli::format_inline("Could not identify wavelength columns"),
+      cli::format_inline("Expected: columns with 'wn_' prefix or numeric names (e.g., '4000')"),
+      cli::format_inline("Found columns: {.val {head(col_names, 10)}}"),
+      cli::format_inline("Specify explicitly with {.arg wavelength_cols}")),
+    title = "Detection error",
+    class = "horizons_detection_error"
+  )
 
 }
 

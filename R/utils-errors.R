@@ -363,3 +363,93 @@ handle_results <- function(safe_result,
 
   cli::cli_abort(abort_msg)
 }
+
+
+## =============================================================================
+## Section 2: Tree-Style Error Reporting
+## =============================================================================
+
+
+## ---------------------------------------------------------------------------
+## abort_tree() — Report errors with tree-style formatting
+## ---------------------------------------------------------------------------
+
+#' Report errors with tree-style formatting
+#'
+#' @description
+#' Displays one or more error messages in a tree structure with box-drawing
+#' characters, then aborts with an informative error. Supports both collected
+#' validation errors and single runtime errors.
+#'
+#' @details
+#' This function provides consistent error formatting across pipeline functions.
+#' The tree structure makes it easy to see multiple related errors at once:
+#'
+#' ```
+#' ! Input validation failed:
+#'    ├─ `source` is required
+#'    └─ `type` must be 'opus' or 'csv'
+#' ```
+#'
+#' For single errors, pass a single-element character vector.
+#'
+#' @param errors Character vector. Error messages to display. Each message
+#'   should be pre-formatted with `cli::format_inline()` for styling.
+#' @param title Character. Error category title. Default: `"Input validation failed"`.
+#' @param class Character. Error class for programmatic handling.
+#'   Default: `"horizons_validation_error"`.
+#'
+#' @return Never returns; always aborts.
+#'
+#' @examples
+#' \dontrun{
+#' # Collected validation errors
+#' errors <- character()
+#' if (is.null(x)) {
+#'   errors <- c(errors, cli::format_inline("{.arg x} is required"))
+#' }
+#' if (bad_type) {
+#'   errors <- c(errors, cli::format_inline("{.arg type} must be 'a' or 'b'"))
+#' }
+#' abort_tree(errors)
+#'
+#' # Single runtime error
+#' abort_tree(
+#'   cli::format_inline("File not found: {.path {path}}"),
+#'   title = "File error",
+#'   class = "horizons_file_error"
+#' )
+#' }
+#'
+#' @noRd
+abort_tree <- function(errors,
+                       title = "Input validation failed",
+                       class = "horizons_validation_error") {
+
+  if (length(errors) == 0) {
+
+    return(invisible(NULL))
+
+  }
+
+  ## Print tree-style output -------------------------------------------------
+
+ cat(cli::col_red(cli::style_bold(paste0("! ", title, ":\n"))))
+
+  for (i in seq_along(errors)) {
+
+    branch <- if (i < length(errors)) "\u251C\u2500" else "\u2514\u2500"
+    cat(cli::col_red(paste0("   ", branch, " ", errors[i], "\n")))
+
+  }
+
+  cat("\n")
+
+  ## Abort with structured error ---------------------------------------------
+
+  rlang::abort(
+    paste(c(paste0(title, ":"), errors), collapse = "\n"),
+    class = class
+  )
+
+}

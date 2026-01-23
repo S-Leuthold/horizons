@@ -101,32 +101,36 @@ parse_ids <- function(x,
                       too_few  = "keep_original") {
 
   ## -------------------------------------------------------------------------
-  ## Step 1: Input validation
+  ## Step 1: Input validation (collected errors)
   ## -------------------------------------------------------------------------
+
+  errors <- character()
 
   ## Validate horizons_data object -------------------------------------------
 
   if (!inherits(x, "horizons_data")) {
 
-    cli::cli_abort(c(
-      "{.arg x} must be a horizons_data object",
-      "x" = "Got {.cls {class(x)}}"
-    ))
+    errors <- c(errors,
+                cli::format_inline("{.arg x} must be a horizons_data object, got {.cls {class(x)}}"))
 
   }
 
   ## Warn if not OPUS source -------------------------------------------------
 
-  source_type <- x$provenance$spectra_type
+  if (inherits(x, "horizons_data")) {
 
-  if (!is.null(source_type) && source_type %in% c("csv", "tibble")) {
+    source_type <- x$provenance$spectra_type
 
-    cli::cli_warn(c(
-      "{.fn parse_ids} is designed for OPUS file workflows",
-      "i" = "Data source: {.val {source_type}}",
-      "i" = "For CSV/tibble data, sample IDs are typically already in separate columns",
-      "i" = "If you need to parse IDs, ensure a {.field filename} column exists"
-    ))
+    if (!is.null(source_type) && source_type %in% c("csv", "tibble")) {
+
+      cli::cli_warn(c(
+        "{.fn parse_ids} is designed for OPUS file workflows",
+        "i" = "Data source: {.val {source_type}}",
+        "i" = "For CSV/tibble data, sample IDs are typically already in separate columns",
+        "i" = "If you need to parse IDs, ensure a {.field filename} column exists"
+      ))
+
+    }
 
   }
 
@@ -137,20 +141,15 @@ parse_ids <- function(x,
 
   if (!has_format && !has_patterns) {
 
-    cli::cli_abort(c(
-      "Must provide either {.arg format} or {.arg patterns}",
-      "i" = "Use {.arg format} for simple token-based parsing",
-      "i" = "Use {.arg patterns} for complex regex matching"
-    ))
+    errors <- c(errors,
+                cli::format_inline("Must provide either {.arg format} or {.arg patterns}"))
 
   }
 
   if (has_format && has_patterns) {
 
-    cli::cli_abort(c(
-      "Cannot provide both {.arg format} and {.arg patterns}",
-      "i" = "Choose one parsing method"
-    ))
+    errors <- c(errors,
+                cli::format_inline("Cannot provide both {.arg format} and {.arg patterns}"))
 
   }
 
@@ -160,13 +159,13 @@ parse_ids <- function(x,
 
     if (!is.character(format) || length(format) != 1) {
 
-      cli::cli_abort("{.arg format} must be a single character string")
+      errors <- c(errors,
+                  cli::format_inline("{.arg format} must be a single character string"))
 
-    }
+    } else if (nchar(format) == 0) {
 
-    if (nchar(format) == 0) {
-
-      cli::cli_abort("{.arg format} cannot be empty")
+      errors <- c(errors,
+                  cli::format_inline("{.arg format} cannot be empty"))
 
     }
 
@@ -178,7 +177,8 @@ parse_ids <- function(x,
 
     if (!is.character(patterns)) {
 
-      cli::cli_abort("{.arg patterns} must be a character vector")
+      errors <- c(errors,
+                  cli::format_inline("{.arg patterns} must be a character vector"))
 
     }
 
@@ -188,21 +188,22 @@ parse_ids <- function(x,
 
   too_few <- match.arg(too_few, c("keep_original", "error", "na"))
 
+  ## Check filename column exists (only if x is valid) -----------------------
+
+  if (inherits(x, "horizons_data") && !"filename" %in% names(x$data$analysis)) {
+
+    errors <- c(errors,
+                cli::format_inline("No {.field filename} column found in data"))
+
+  }
+
+  ## Report validation errors with tree style --------------------------------
+
+  abort_tree(errors)
+
   ## -------------------------------------------------------------------------
   ## Step 2: Get filenames from analysis tibble
   ## -------------------------------------------------------------------------
-
-  ## Check filename column exists --------------------------------------------
-
-  if (!"filename" %in% names(x$data$analysis)) {
-
-    cli::cli_abort(c(
-      "No {.field filename} column found in data",
-      "i" = "The {.fn spectra} function should create this column",
-      "i" = "Check that you're using a horizons_data object from {.fn spectra}"
-    ))
-
-  }
 
   filenames <- x$data$analysis$filename
 
@@ -240,12 +241,24 @@ parse_ids <- function(x,
 
     if (too_few == "error") {
 
-      cli::cli_abort(c(
-        "Pattern did not match {n_unmatched} filename{?s}",
-        "i" = "Non-matching files:",
-        "i" = "{.val {head(non_match_names, 10)}}",
-        if (n_unmatched > 10) "i" = "... and {n_unmatched - 10} more"
-      ))
+      error_msgs <- c(
+        cli::format_inline("Pattern did not match {n_unmatched} filename{?s}"),
+        cli::format_inline("Non-matching: {.val {head(non_match_names, 5)}}")
+      )
+
+      if (n_unmatched > 5) {
+
+        error_msgs <- c(error_msgs,
+                        cli::format_inline("... and {n_unmatched - 5} more"))
+
+      } else {
+
+        error_msgs <- c(error_msgs,
+                        cli::format_inline("Check format string matches your filenames"))
+
+      }
+
+      abort_tree(error_msgs, title = "Parse error", class = "horizons_parse_error")
 
     } else if (too_few == "keep_original") {
 
@@ -437,11 +450,13 @@ format_to_patterns <- function(format) {
 
   if (token_starts[1] == -1) {
 
-    cli::cli_abort(c(
-      "No tokens found in format string",
-      "i" = "Format: {.val {format}}",
-      "i" = "Tokens should be in curly brackets, e.g., {{sampleid}}"
-    ))
+    abort_tree(
+      c(cli::format_inline("No tokens found in format string"),
+        cli::format_inline("Format: {.val {format}}"),
+        cli::format_inline("Tokens should be in curly brackets, e.g., {{sampleid}}")),
+      title = "Parse error",
+      class = "horizons_parse_error"
+    )
 
   }
 

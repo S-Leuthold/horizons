@@ -276,7 +276,7 @@ test_that("spectra() errors on NULL source", {
 
   expect_error(
     spectra(NULL),
-    "must be provided"
+    "is required"
   )
 
 })
@@ -299,7 +299,7 @@ test_that("spectra() errors when ID column not found", {
 
   expect_error(
     spectra(test_data),
-    "Could not identify sample ID column"
+    "Could not auto-detect ID column"
   )
 
 })
@@ -314,7 +314,7 @@ test_that("spectra() errors when wavelength columns not found", {
 
   expect_error(
     spectra(test_data),
-    "Could not identify wavelength columns"
+    "Could not auto-detect wavelength columns"
   )
 
 })
@@ -347,7 +347,7 @@ test_that("spectra() errors when wavelength columns contain non-numeric data", {
 
   expect_error(
     spectra(test_data),
-    "Wavelength columns must contain numeric data"
+    "Wavelength columns must be numeric"
   )
 
 })
