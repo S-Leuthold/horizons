@@ -147,3 +147,5 @@ Collate:
     'evaluation-hpc.R'
     'evaluation-finalize.R'
     'evaluation-ensemble.R'
+    'pipeline-spectra.R'
+    'pipeline-parse-ids.R'
