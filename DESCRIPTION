@@ -110,9 +110,11 @@ Depends:
 Collate:
     'zzz.R'
     'constants.R'
+    'class-core.R'
     'utils-errors.R'
     'utils-cache.R'
     'utils-backtransform.R'
+    'utils-ensemble-stacks.R'
     'utils-clustering.R'
     'utils-parallel.R'
     'utils-download.R'
