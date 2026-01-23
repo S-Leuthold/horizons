@@ -14,8 +14,8 @@
 #' @noRd
 WATER_BANDS <- list(
 
-  oh_bending   = c(1600, 1700),
-  oh_stretching = c(3200, 3600)
+  oh_bending    = c(1580, 1720),
+  oh_stretching = c(3100, 3700)
 
 )
 
@@ -27,7 +27,7 @@ WATER_BANDS <- list(
 #' Resample spectral matrix to target resolution
 #'
 #' @description
-#' Resamples spectra to a new wavenumber grid using linear interpolation.
+#' Resamples spectra to a new wavenumber grid using spline interpolation.
 #' Wraps `prospectr::resample()` with horizons conventions.
 #'
 #' @param spectra_matrix [matrix.] Numeric matrix with samples as rows,
@@ -125,6 +125,18 @@ trim_spectra <- function(spectra_matrix, wavelengths, range) {
 
   keep_idx <- which(wavelengths >= wn_min & wavelengths <= wn_max)
 
+  ## Validate result --------------------------------------------------------------
+
+  if (length(keep_idx) == 0) {
+
+    cli::cli_abort(c(
+      "Trim range does not overlap with wavelength data",
+      "i" = "Requested: {wn_min}-{wn_max} cm^-1",
+      "i" = "Available: {min(wavelengths)}-{max(wavelengths)} cm^-1"
+    ))
+
+  }
+
   ## ---------------------------------------------------------------------------
   ## Step 2: Subset matrix and wavelengths
   ## ---------------------------------------------------------------------------
@@ -188,6 +200,17 @@ remove_water_bands <- function(spectra_matrix, wavelengths) {
 
   keep_idx <- which(!in_water_band)
 
+  ## Validate result --------------------------------------------------------------
+
+  if (length(keep_idx) == 0) {
+
+    cli::cli_abort(c(
+      "Water band removal would delete all wavelength data",
+      "i" = "Data range falls entirely within water absorption regions"
+    ))
+
+  }
+
   filtered_matrix <- spectra_matrix[, keep_idx, drop = FALSE]
   filtered_wav    <- wavelengths[keep_idx]
 
@@ -234,9 +257,20 @@ apply_baseline_correction <- function(spectra_matrix, wavelengths) {
   wav_sorted     <- sort(wavelengths)
   spectra_sorted <- spectra_matrix[, order(wavelengths), drop = FALSE]
 
-  corrected <- prospectr::baseline(
-    X   = spectra_sorted,
-    wav = wav_sorted
+  corrected <- tryCatch(
+    prospectr::baseline(
+      X   = spectra_sorted,
+      wav = wav_sorted
+    ),
+    error = function(e) {
+
+      cli::cli_abort(c(
+        "Baseline correction failed",
+        "i" = "This can happen with constant or near-constant spectra",
+        "x" = "Original error: {e$message}"
+      ))
+
+    }
   )
 
   ## Restore decreasing order --------------------------------------------------
@@ -493,6 +527,28 @@ standardize <- function(x,
   }
 
   ## ---------------------------------------------------------------------------
+  ## Step 1b: Early exit if no operations requested
+  ## ---------------------------------------------------------------------------
+
+  if (is.null(resample) && is.null(trim) && !remove_water && !baseline) {
+
+    cli::cli_alert_info("No standardization operations requested")
+
+    ## Still mark as standardized so downstream steps know it was evaluated -----
+
+    x$provenance$standardization <- list(
+      resample     = NULL,
+      trim         = NULL,
+      remove_water = FALSE,
+      baseline     = FALSE,
+      applied_at   = Sys.time()
+    )
+
+    return(x)
+
+  }
+
+  ## ---------------------------------------------------------------------------
   ## Step 2: Extract spectral matrix
   ## ---------------------------------------------------------------------------
 
@@ -513,8 +569,43 @@ standardize <- function(x,
   operations <- list()
 
   ## ---------------------------------------------------------------------------
-  ## Step 3: Apply resample (if requested)
+  ## Step 3: Apply trim (if requested)
   ## ---------------------------------------------------------------------------
+  ## Trim first to reduce data volume for subsequent operations
+
+  if (!is.null(trim)) {
+
+    result <- trim_spectra(spectra_matrix, wavelengths, trim)
+
+    spectra_matrix <- result$matrix
+    wavelengths    <- result$wavelengths
+
+    operations$trim <- list(
+      range    = trim,
+      n_before = result$n_before,
+      n_after  = result$n_after
+    )
+
+  }
+
+  ## ---------------------------------------------------------------------------
+  ## Step 4: Apply baseline correction (if requested)
+  ## ---------------------------------------------------------------------------
+  ## Baseline before water removal — algorithm needs continuous spectral range
+
+  if (baseline) {
+
+    spectra_matrix <- apply_baseline_correction(spectra_matrix, wavelengths)
+
+    operations$baseline <- list(applied = TRUE)
+
+  }
+
+  ## ---------------------------------------------------------------------------
+  ## Step 5: Apply resample (if requested)
+  ## ---------------------------------------------------------------------------
+  ## Resample before water removal — creates continuous grid for baseline
+  ## Water bands removed last to avoid gaps being filled by interpolation
 
   if (!is.null(resample)) {
 
@@ -544,27 +635,9 @@ standardize <- function(x,
   }
 
   ## ---------------------------------------------------------------------------
-  ## Step 4: Apply trim (if requested)
+  ## Step 6: Remove water bands (if requested)
   ## ---------------------------------------------------------------------------
-
-  if (!is.null(trim)) {
-
-    result <- trim_spectra(spectra_matrix, wavelengths, trim)
-
-    spectra_matrix <- result$matrix
-    wavelengths    <- result$wavelengths
-
-    operations$trim <- list(
-      range    = trim,
-      n_before = result$n_before,
-      n_after  = result$n_after
-    )
-
-  }
-
-  ## ---------------------------------------------------------------------------
-  ## Step 5: Remove water bands (if requested)
-  ## ---------------------------------------------------------------------------
+  ## Water bands last — resampling would fill gaps if done before
 
   if (remove_water) {
 
@@ -582,14 +655,13 @@ standardize <- function(x,
   }
 
   ## ---------------------------------------------------------------------------
-  ## Step 6: Apply baseline correction (if requested)
+  ## Step 6b: Sanity check for non-finite values
   ## ---------------------------------------------------------------------------
 
-  if (baseline) {
+  if (any(!is.finite(spectra_matrix))) {
 
-    spectra_matrix <- apply_baseline_correction(spectra_matrix, wavelengths)
-
-    operations$baseline <- list(applied = TRUE)
+    n_bad <- sum(!is.finite(spectra_matrix))
+    cli::cli_abort("Standardization produced {n_bad} non-finite values")
 
   }
 
@@ -635,11 +707,13 @@ standardize <- function(x,
   ## Update provenance ---------------------------------------------------------
 
   x$provenance$standardization <- list(
-    resample     = resample,
-    trim         = trim,
-    remove_water = remove_water,
-    baseline     = baseline,
-    applied_at   = Sys.time()
+    resample         = resample,
+    trim             = trim,
+    remove_water     = remove_water,
+    baseline         = baseline,
+    applied_at       = Sys.time(),
+    n_wavelengths    = length(new_predictor_names),
+    wavelength_range = c(min(wavelengths), max(wavelengths))
   )
 
   ## ---------------------------------------------------------------------------

@@ -253,14 +253,14 @@ test_that("remove_water_bands() removes water absorption regions", {
   ]
   wavelengths <- as.numeric(gsub("^wn_", "", predictor_cols))
 
-  ## OH bending: 1600-1700 -----------------------------------------------------
+  ## OH bending: 1580-1720 (OSSL standard) -------------------------------------
 
-  in_oh_bending <- wavelengths >= 1600 & wavelengths <= 1700
+  in_oh_bending <- wavelengths >= 1580 & wavelengths <= 1720
   expect_false(any(in_oh_bending))
 
-  ## OH stretching: 3200-3600 --------------------------------------------------
+  ## OH stretching: 3100-3700 (OSSL standard) ----------------------------------
 
-  in_oh_stretching <- wavelengths >= 3200 & wavelengths <= 3600
+  in_oh_stretching <- wavelengths >= 3100 & wavelengths <= 3700
   expect_false(any(in_oh_stretching))
 
 })
@@ -425,9 +425,10 @@ test_that("standardize() applies operations in correct order", {
   expect_true(all(wavelengths <= 4000))
 
   ## Check water bands are removed ---------------------------------------------
+  ## Note: Uses OSSL standard ranges (1580-1720, 3100-3700)
 
-  in_water <- (wavelengths >= 1600 & wavelengths <= 1700) |
-              (wavelengths >= 3200 & wavelengths <= 3600)
+  in_water <- (wavelengths >= 1580 & wavelengths <= 1720) |
+              (wavelengths >= 3100 & wavelengths <= 3700)
   expect_false(any(in_water))
 
   ## Check resolution is approximately 2 cm⁻¹ ----------------------------------
@@ -475,15 +476,18 @@ test_that("standardize() handles all parameters as NULL/FALSE", {
 
   hd <- create_test_spectra()
 
-  ## This should be a no-op but still valid ------------------------------------
+  ## This should be a no-op but still mark as standardized ---------------------
 
-  expect_message(
-    hd_result <- standardize(hd, resample = NULL, trim = NULL,
-                             remove_water = FALSE, baseline = FALSE),
-    "No standardization operations applied"
-  )
+  hd_result <- standardize(hd, resample = NULL, trim = NULL,
+                           remove_water = FALSE, baseline = FALSE)
+
+  ## Data unchanged ------------------------------------------------------------
 
   expect_equal(hd$data$n_predictors, hd_result$data$n_predictors)
+
+  ## Provenance still set (marks as evaluated) ---------------------------------
+
+  expect_false(is.null(hd_result$provenance$standardization))
 
 })
 
