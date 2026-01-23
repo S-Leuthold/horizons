@@ -516,22 +516,12 @@ read_opus_files <- function(path, recursive = TRUE) {
     dplyr::select(sample_id, directory, dplyr::all_of(wn_sorted))
 
   ## ---------------------------------------------------------------------------
-  ## Step 5: Report channel usage and return
+  ## Step 5: Attach channel info and return
   ## ---------------------------------------------------------------------------
 
   unique_channels <- unique(channels_used[channels_used != ""])
 
-  if (length(unique_channels) == 1) {
-
-    cli::cli_alert_info("Channel used: {.val {unique_channels}}")
-
-  } else if (length(unique_channels) > 1) {
-
-    cli::cli_alert_warning("Multiple channels used across files: {.val {unique_channels}}")
-
-  }
-
-  ## Attach channel info as attribute for provenance -----------------------------
+  ## Channel info displayed in spectra() tree output, not here ------------------
 
   attr(spectra_wide, "channels_used") <- unique_channels
 
@@ -878,11 +868,13 @@ build_role_map <- function(data) {
 #' @param detected_wn [list.] Output from detect_wavelength_columns().
 #' @param input_type [character.] The input type ("tibble", "csv", "opus").
 #' @param source_path [character.] The source path or "tibble".
+#' @param channels_used [character or NULL.] OPUS channel(s) used, or NULL.
 #'
 #' @return NULL (called for side effects).
 #'
 #' @noRd
-report_spectra_summary <- function(obj, detected_id, detected_wn, input_type, source_path) {
+report_spectra_summary <- function(obj, detected_id, detected_wn, input_type, source_path,
+                                   channels_used = NULL) {
 
   n_samples    <- obj$data$n_rows
   n_predictors <- obj$data$n_predictors
@@ -913,7 +905,22 @@ report_spectra_summary <- function(obj, detected_id, detected_wn, input_type, so
   } else if (input_type == "opus") {
 
     cat(paste0("\u2502  \u251C\u2500 Type: OPUS files\n"))
-    cat(paste0("\u2502  \u2514\u2500 Path: ", source_path, "\n"))
+    cat(paste0("\u2502  \u251C\u2500 Path: ", source_path, "\n"))
+
+    if (!is.null(channels_used) && length(channels_used) == 1) {
+
+      cat(paste0("\u2502  \u2514\u2500 Channel: ", cli::col_cyan(channels_used), "\n"))
+
+    } else if (!is.null(channels_used) && length(channels_used) > 1) {
+
+      cat(paste0("\u2502  \u2514\u2500 Channels: ",
+                 cli::col_yellow(paste(channels_used, collapse = ", ")), " (mixed)\n"))
+
+    } else {
+
+      cat(paste0("\u2502  \u2514\u2500 Channel: ", cli::col_silver("unknown"), "\n"))
+
+    }
 
   }
 
@@ -1098,6 +1105,8 @@ spectra <- function(source,
   ## Step 2: Load data based on type
   ## ---------------------------------------------------------------------------
 
+  channels_used <- NULL
+
   if (input_type == "tibble") {
 
     data        <- source
@@ -1110,8 +1119,9 @@ spectra <- function(source,
 
   } else if (input_type == "opus") {
 
-    data        <- read_opus_files(source, recursive = recursive)
-    source_path <- source
+    data          <- read_opus_files(source, recursive = recursive)
+    source_path   <- source
+    channels_used <- attr(data, "channels_used")
 
   }
 
@@ -1198,7 +1208,7 @@ spectra <- function(source,
   ## Step 10: CLI output (informed consent)
   ## ---------------------------------------------------------------------------
 
-  report_spectra_summary(obj, detected_id, detected_wn, input_type, source_path)
+  report_spectra_summary(obj, detected_id, detected_wn, input_type, source_path, channels_used)
 
   obj
 

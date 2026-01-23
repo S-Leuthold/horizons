@@ -383,8 +383,8 @@ report_standardize_summary <- function(operations, n_samples, final_n_wavelength
 #' @param x [horizons_data.] Object from `spectra()`.
 #' @param resample [numeric or NULL.] Target resolution in cm⁻¹. Default `2`
 #'   matches OSSL library resolution. Use `NULL` to skip resampling.
-#' @param trim [numeric(2) or NULL.] Wavenumber range to keep, e.g.,
-#'   `c(600, 4000)`. Default `NULL` skips trimming.
+#' @param trim [numeric(2) or NULL.] Wavenumber range to keep. Default
+#'   `c(600, 4000)` is the standard MIR range. Use `NULL` to skip trimming.
 #' @param remove_water [logical.] Remove water absorption bands
 #'   (~1600-1700, ~3200-3600 cm⁻¹)? Default `FALSE`.
 #' @param baseline [logical.] Apply convex hull baseline correction?
@@ -410,7 +410,7 @@ report_standardize_summary <- function(operations, n_samples, final_n_wavelength
 #' @export
 standardize <- function(x,
                         resample     = 2,
-                        trim         = NULL,
+                        trim         = c(600, 4000),
                         remove_water = FALSE,
                         baseline     = FALSE,
                         force        = FALSE) {
