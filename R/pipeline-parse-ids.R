@@ -273,20 +273,9 @@ parse_ids <- function(x,
 
   ## Find sampleid column (case-insensitive) ---------------------------------
 
-  extracted_cols <- setdiff(names(extracted), ".matched")
-  sampleid_col   <- NULL
-
-  for (variant in SAMPLEID_VARIANTS) {
-
-    if (tolower(variant) %in% tolower(extracted_cols)) {
-
-      idx <- which(tolower(extracted_cols) == tolower(variant))
-      sampleid_col <- extracted_cols[idx[1]]
-      break
-
-    }
-
-  }
+  extracted_cols    <- setdiff(names(extracted), ".matched")
+  sampleid_matches  <- which(tolower(extracted_cols) %in% tolower(SAMPLEID_VARIANTS))
+  sampleid_col      <- if (length(sampleid_matches) > 0) extracted_cols[sampleid_matches[1]] else NULL
 
   ## Update sample_id from sampleid token ------------------------------------
 

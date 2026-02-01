@@ -412,6 +412,7 @@ test_that("spectra() loads CSV file", {
   )
 
   temp_csv <- tempfile(fileext = ".csv")
+  on.exit(unlink(temp_csv), add = TRUE)
   readr::write_csv(test_data, temp_csv)
 
   ## Act -------------------------------------------------------------------
@@ -423,10 +424,6 @@ test_that("spectra() loads CSV file", {
   expect_s3_class(result, "horizons_data")
   expect_equal(result$data$n_rows, 3)
   expect_equal(result$provenance$spectra_type, "csv")
-
-  ## Cleanup ---------------------------------------------------------------
-
-  unlink(temp_csv)
 
 })
 
@@ -440,6 +437,7 @@ test_that("spectra() CSV does NOT add filename column", {
   )
 
   temp_csv <- tempfile(fileext = ".csv")
+  on.exit(unlink(temp_csv), add = TRUE)
   readr::write_csv(test_data, temp_csv)
 
   ## Act -------------------------------------------------------------------
@@ -451,9 +449,5 @@ test_that("spectra() CSV does NOT add filename column", {
   ## No filename column for CSV (no per-sample files) ----------------------
 
   expect_false("filename" %in% names(result$data$analysis))
-
-  ## Cleanup ---------------------------------------------------------------
-
-  unlink(temp_csv)
 
 })

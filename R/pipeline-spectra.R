@@ -465,7 +465,7 @@ load_opus_files <- function(source,
 
   ## Filter out failures -----------------------------------------------------
 
-  valid_idx    <- !sapply(spectra_list, is.null)
+  valid_idx    <- !vapply(spectra_list, is.null, logical(1))
   spectra_list <- spectra_list[valid_idx]
   file_paths   <- file_paths[valid_idx]
 
@@ -544,7 +544,7 @@ load_opus_files <- function(source,
 
   ## Filter NULLs and combine ------------------------------------------------
 
-  spectra_data <- spectra_data[!sapply(spectra_data, is.null)]
+  spectra_data <- spectra_data[!vapply(spectra_data, is.null, logical(1))]
 
   if (length(spectra_data) == 0) {
 
