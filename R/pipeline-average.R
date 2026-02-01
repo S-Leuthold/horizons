@@ -45,10 +45,10 @@
 #' offsets can correlate ~1.0 but shouldn't be averaged without correction.
 #'
 #' **Handling All-Outlier Groups:**
-#' If QC reduces a group to a single replicate (all others removed):
-#' * `"warn"` (default): Keep the single replicate, emit warning
+#' If QC flags all replicates as outliers:
+#' * `"warn"` (default): Keep all replicates and average, emit warning
 #' * `"drop"`: Remove the entire sample from results
-#' * `"keep_best"`: Same as warn (already kept the best one)
+#' * `"keep_best"`: Keep only the replicate with highest mean correlation
 #'
 #' **Metadata Handling:**
 #' Metadata columns are checked for uniformity within groups:
@@ -624,10 +624,17 @@ average_group <- function(group_data,
         } else if (on_all_outliers == "keep_best") {
 
           ## Keep only the best replicate ------------------------------------
+          ## When all_fail is TRUE, mean_cors is all NA (single survivor).
+          ## which.max(all-NA) returns integer(0), so use the survivor index.
 
-          best_idx <- which.max(qc$mean_cors)
+          remaining_idx <- setdiff(seq_len(n_reps), qc$outliers)
+          best_idx <- if (length(remaining_idx) == 1L) {
+            remaining_idx
+          } else {
+            which.max(qc$mean_cors)
+          }
           rows_to_average <- best_idx
-          n_dropped <- n_reps - 1
+          n_dropped <- n_reps - length(rows_to_average)
 
         } else {
 

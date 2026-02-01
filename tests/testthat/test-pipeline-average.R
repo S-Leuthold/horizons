@@ -340,6 +340,11 @@ test_that("average() on_all_outliers='keep_best' keeps highest correlation repli
   ## Should have dropped 2 replicates from S1
   expect_equal(result$provenance$average$n_replicates_dropped, 2)
 
+  ## Verify keep_best retained the QC survivor (not an all-NA artifact)
+  s1_result <- result$data$analysis[result$data$analysis$sample_id == "S1", ]
+  wn_cols   <- grep("^wn_", names(s1_result), value = TRUE)
+  expect_true(all(!is.na(s1_result[, wn_cols])))
+
 })
 
 test_that("average() errors when all samples dropped", {
