@@ -214,6 +214,34 @@ add_response <- function(x,
 
   ## 1.7 Parse `by` and validate join columns exist in both datasets -----------
 
+  ## Only single-column joins supported
+  if (length(by) > 1) {
+
+    abort_nested(
+      "Multi-column joins not supported",
+      c(paste0("Got ", length(by), " columns: ", paste(by, collapse = ", ")),
+        "Create a composite key first, then join on that single column")
+    )
+
+  }
+
+  ## Reject partially-named vectors (all or nothing)
+  if (!is.null(names(by))) {
+
+    has_name <- names(by) != ""
+
+    if (any(has_name) && !all(has_name)) {
+
+      abort_nested(
+        "Join key 'by' is partially named",
+        c("Use a named vector: c(\"horizons_col\" = \"source_col\")",
+          "Or an unnamed string: \"same_col_name\"")
+      )
+
+    }
+
+  }
+
   if (!is.null(names(by)) && any(names(by) != "")) {
 
     ## Named vector: c("horizons_col" = "source_col")
@@ -337,7 +365,7 @@ add_response <- function(x,
     ## Check for whitespace differences
     n_ws_match <- sum(trimws(horizons_ids) %in% trimws(source_ids))
 
-    if (n_ws_match > 0 && n_case_match == 0) {
+    if (n_ws_match > 0) {
 
       details <- c(details,
                    "This looks like a whitespace issue",
@@ -375,7 +403,7 @@ add_response <- function(x,
     ## Check for whitespace
     n_ws_match <- sum(trimws(horizons_ids) %in% trimws(source_ids))
 
-    if (n_ws_match > n_matched && n_case_match <= n_matched) {
+    if (n_ws_match > n_matched) {
 
       warn_details <- c(warn_details,
                         "This looks like a whitespace issue",

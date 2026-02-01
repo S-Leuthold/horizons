@@ -149,3 +149,5 @@ Collate:
     'evaluation-ensemble.R'
     'pipeline-spectra.R'
     'pipeline-parse-ids.R'
+    'pipeline-standardize.R'
+    'pipeline-add-response.R'

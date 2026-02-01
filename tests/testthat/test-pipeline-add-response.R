@@ -646,6 +646,43 @@ test_that("add_response() errors on non-existent CSV path", {
 
 })
 
+test_that("add_response() errors on multi-column by", {
+
+  hd  <- make_test_hd()
+  lab <- tibble::tibble(sample_id = c("S001", "S002", "S003"),
+                        site      = c("A", "B", "C"),
+                        SOC       = c(1.2, 2.3, 3.4))
+
+  expect_error(
+    add_response(hd, lab, variable = "SOC",
+                 by = c("sample_id" = "sample_id", "site" = "site")),
+    "Multi-column joins not supported"
+  )
+
+})
+
+test_that("add_response() errors on partially named by", {
+
+  ## Partial naming only possible with length > 1, which hits the
+
+  ## multi-column guard first. So we check the guard order is correct:
+  ## length > 1 → multi-column error (not partial naming error).
+  ## The partial-naming check exists for defensive completeness if
+  ## multi-column joins are ever supported.
+
+  hd  <- make_test_hd()
+  lab <- tibble::tibble(sample_id = c("S001", "S002", "S003"),
+                        SOC       = c(1.2, 2.3, 3.4))
+
+  ## Length-2 partially-named by hits multi-column guard first
+  expect_error(
+    add_response(hd, lab, variable = "SOC",
+                 by = c("sample_id" = "sample_id", "extra")),
+    "Multi-column joins not supported"
+  )
+
+})
+
 test_that("add_response() errors on invalid source type", {
 
   hd <- make_test_hd()
