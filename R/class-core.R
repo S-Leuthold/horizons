@@ -76,11 +76,13 @@ new_horizons_data <- function(analysis        = NULL,
 
     n_predictors <- sum(role_map$role == "predictor", na.rm = TRUE)
     n_covariates <- sum(role_map$role == "covariate", na.rm = TRUE)
+    n_responses  <- sum(role_map$role == "response", na.rm = TRUE)
 
   } else {
 
     n_predictors <- NULL
     n_covariates <- NULL
+    n_responses  <- NULL
 
   }
 
@@ -101,7 +103,8 @@ new_horizons_data <- function(analysis        = NULL,
                 role_map     = role_map,
                 n_rows       = n_rows,
                 n_predictors = n_predictors,
-                n_covariates = n_covariates),
+                n_covariates = n_covariates,
+                n_responses  = n_responses),
 
     ## -------------------------------------------------------------------------
     ## Section 2: PROVENANCE — Source and transform history
@@ -481,6 +484,10 @@ print.horizons_data <- function(x, ...) {
     # Samples
     cat(paste0("   \u251C\u2500 Samples: ", x$data$n_rows, "\n"))
 
+    # Determine which optional sections follow Samples
+    has_responses <- !is.null(x$data$n_responses) && x$data$n_responses > 0
+    has_covars    <- !is.null(x$data$n_covariates) && x$data$n_covariates > 0
+
     # Predictors with wavenumber range
     if (!is.null(x$data$n_predictors) && x$data$n_predictors > 0) {
 
@@ -488,8 +495,8 @@ print.horizons_data <- function(x, ...) {
       wn_candidates  <- predictor_vars[grepl("^(wn_)?[0-9.]+$", predictor_vars)]
       wn_values      <- as.numeric(gsub("^wn_", "", wn_candidates))
 
-      has_covars <- !is.null(x$data$n_covariates) && x$data$n_covariates > 0
-      branch     <- if (has_covars) "\u251C\u2500" else "\u2514\u2500"
+      has_more <- has_responses || has_covars
+      branch   <- if (has_more) "\u251C\u2500" else "\u2514\u2500"
 
       if (length(wn_values) > 0) {
 
@@ -504,8 +511,17 @@ print.horizons_data <- function(x, ...) {
       }
     }
 
+    # Responses
+    if (has_responses) {
+
+      response_vars <- x$data$role_map$variable[x$data$role_map$role == "response"]
+      branch        <- if (has_covars) "\u251C\u2500" else "\u2514\u2500"
+      cat(paste0("   ", branch, " Responses: ", paste(response_vars, collapse = ", "), "\n"))
+
+    }
+
     # Covariates
-    if (!is.null(x$data$n_covariates) && x$data$n_covariates > 0) {
+    if (has_covars) {
 
       cat(paste0("   \u2514\u2500 Covariates: ", x$data$n_covariates, "\n"))
 
@@ -610,6 +626,12 @@ summary.horizons_data <- function(object, ...) {
     cat(paste0("   \u251C\u2500 Samples: ", x$data$n_rows, "\n"))
     cat(paste0("   \u2502     \u2514\u2500 First: ", preview, "\n"))
 
+    ## Determine which optional sections exist ----
+
+    has_responses  <- !is.null(x$data$n_responses) && x$data$n_responses > 0
+    has_covariates <- !is.null(x$data$n_covariates) && x$data$n_covariates > 0
+    has_outcome    <- any(x$data$role_map$role == "outcome")
+
     ## Predictors with range and step ----
 
     if (!is.null(x$data$n_predictors) && x$data$n_predictors > 0) {
@@ -618,10 +640,8 @@ summary.horizons_data <- function(object, ...) {
       wn_candidates  <- predictor_vars[grepl("^(wn_)?[0-9.]+$", predictor_vars)]
       wn_values      <- as.numeric(gsub("^wn_", "", wn_candidates))
 
-      has_covariates <- !is.null(x$data$n_covariates) && x$data$n_covariates > 0
-      has_outcome    <- any(x$data$role_map$role == "outcome")
-      has_more       <- has_covariates || has_outcome
-      branch         <- if (has_more) "\u251C\u2500" else "\u2514\u2500"
+      has_more <- has_responses || has_covariates || has_outcome
+      branch   <- if (has_more) "\u251C\u2500" else "\u2514\u2500"
 
       cat(paste0("   ", branch, " Predictors: ", x$data$n_predictors, "\n"))
 
@@ -637,13 +657,25 @@ summary.horizons_data <- function(object, ...) {
       }
     }
 
+    ## Responses with names ----
+
+    if (has_responses) {
+
+      response_vars <- x$data$role_map$variable[x$data$role_map$role == "response"]
+      resp_list     <- paste(response_vars, collapse = ", ")
+      has_more      <- has_covariates || has_outcome
+      branch        <- if (has_more) "\u251C\u2500" else "\u2514\u2500"
+
+      cat(paste0("   ", branch, " Responses: ", resp_list, "\n"))
+
+    }
+
     ## Covariates with names ----
 
-    if (!is.null(x$data$n_covariates) && x$data$n_covariates > 0) {
+    if (has_covariates) {
 
       covariate_vars <- x$data$role_map$variable[x$data$role_map$role == "covariate"]
       covar_list     <- paste(covariate_vars, collapse = ", ")
-      has_outcome    <- any(x$data$role_map$role == "outcome")
       branch         <- if (has_outcome) "\u251C\u2500" else "\u2514\u2500"
 
       cat(paste0("   ", branch, " Covariates: ", x$data$n_covariates, "\n"))
@@ -653,7 +685,7 @@ summary.horizons_data <- function(object, ...) {
 
     ## Outcome ----
 
-    if (any(x$data$role_map$role == "outcome")) {
+    if (has_outcome) {
 
       outcome_vars <- x$data$role_map$variable[x$data$role_map$role == "outcome"]
       outcome_list <- paste(outcome_vars, collapse = ", ")
