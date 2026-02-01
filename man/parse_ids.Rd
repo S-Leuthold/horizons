@@ -32,11 +32,15 @@ The input \code{horizons_data} object with:
 }
 }
 \description{
-Extracts structured metadata from filenames and updates \code{sample_id} accordingly.
-Useful when instrument-generated filenames encode project, sample ID, fraction,
-replicate, or position information.
+Extracts structured metadata from OPUS filenames and updates \code{sample_id} accordingly.
+This function is designed for OPUS file workflows where instrument-generated filenames
+encode project, sample ID, fraction, replicate, or position information.
 }
 \details{
+\strong{Note:} This function is intended for OPUS file workflows. For CSV or tibble data,
+sample IDs and metadata are typically already in separate columns and do not require
+parsing. A warning is issued if \code{parse_ids()} is called on non-OPUS data.
+
 The function supports two modes:
 
 \strong{Format string mode} (\code{format} parameter):
