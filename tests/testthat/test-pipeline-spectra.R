@@ -367,13 +367,13 @@ test_that("print.horizons_data produces output", {
 
   result <- spectra(test_data)
 
-  ## Use capture.output since cli doesn't go to standard output ---------------
+  ## print method uses cat() — capture stdout --------------------------------
 
-  output <- capture.output(print(result), type = "message")
+  output <- capture.output(print(result))
 
   expect_true(any(grepl("horizons_data", output)))
-  expect_true(any(grepl("2 samples", output)))
-  expect_true(any(grepl("2 wavelengths", output)))
+  expect_true(any(grepl("Samples", output)))
+  expect_true(any(grepl("Predictors", output)))
 
 })
 
@@ -386,13 +386,13 @@ test_that("summary.horizons_data produces output", {
 
   result <- spectra(test_data)
 
-  ## Use capture.output since cli doesn't go to standard output ---------------
+  ## summary method uses cat() — capture stdout ------------------------------
 
-  output <- capture.output(summary(result), type = "message")
+  output <- capture.output(summary(result))
 
   expect_true(any(grepl("horizons_data", output)))
   expect_true(any(grepl("Samples", output)))
-  expect_true(any(grepl("Wavelengths", output)))
+  expect_true(any(grepl("Predictors", output)))
 
 })
 

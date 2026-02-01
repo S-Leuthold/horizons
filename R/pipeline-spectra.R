@@ -1104,76 +1104,8 @@ create_horizons_data <- function(analysis,
 ## =============================================================================
 ## Section 6: S3 Methods
 ## =============================================================================
-
-
-## ---------------------------------------------------------------------------
-## print.horizons_data() — One-line summary
-## ---------------------------------------------------------------------------
-
-#' Print method for horizons_data
-#'
-#' @param x A horizons_data object.
-#' @param ... Additional arguments (unused).
-#'
-#' @return Invisibly returns x.
-#'
-#' @export
-print.horizons_data <- function(x, ...) {
-
-  n_samples <- x$data$n_rows
-  n_wn      <- x$data$n_predictors
-  source    <- x$provenance$spectra_type
-
-  cli::cli_text(
-    "<horizons_data> {n_samples} samples x {n_wn} wavelengths (source: {source})"
-  )
-
-  invisible(x)
-
-}
-
-
-## ---------------------------------------------------------------------------
-## summary.horizons_data() — Detailed summary
-## ---------------------------------------------------------------------------
-
-#' Summary method for horizons_data
-#'
-#' @param object A horizons_data object.
-#' @param ... Additional arguments (unused).
-#'
-#' @return Invisibly returns object.
-#'
-#' @export
-summary.horizons_data <- function(object, ...) {
-
-  cli::cli_text("")
-  cli::cli_text("{.strong horizons_data object}")
-  cli::cli_text("")
-  cli::cli_text("{.strong Data}")
-  cli::cli_text("  Samples: {object$data$n_rows}")
-  cli::cli_text("  Wavelengths: {object$data$n_predictors}")
-  cli::cli_text("  Covariates: {object$data$n_covariates}")
-  cli::cli_text("")
-  cli::cli_text("{.strong Provenance}")
-  cli::cli_text("  Source: {object$provenance$spectra_source}")
-  cli::cli_text("  Type: {object$provenance$spectra_type}")
-  cli::cli_text("  Created: {object$provenance$created}")
-  cli::cli_text("")
-
-  ## Show role summary -------------------------------------------------------
-
-  role_counts <- table(object$data$role_map$role)
-  cli::cli_text("{.strong Columns by Role}")
-
-  for (role in names(role_counts)) {
-
-    cli::cli_text("  {role}: {role_counts[role]}")
-
-  }
-
-  cli::cli_text("")
-
-  invisible(object)
-
-}
+##
+## NOTE: print.horizons_data() and summary.horizons_data() live in class-core.R
+## (the canonical location for all S3 methods on horizons_data).
+## Do NOT define them here — duplicate definitions cause collation-dependent
+## dispatch bugs.
