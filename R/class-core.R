@@ -485,20 +485,20 @@ print.horizons_data <- function(x, ...) {
     if (!is.null(x$data$n_predictors) && x$data$n_predictors > 0) {
 
       predictor_vars <- x$data$role_map$variable[x$data$role_map$role == "predictor"]
-      numeric_wn     <- predictor_vars[grepl("^[0-9.]+$", predictor_vars)]
+      wn_candidates  <- predictor_vars[grepl("^(wn_)?[0-9.]+$", predictor_vars)]
+      wn_values      <- as.numeric(gsub("^wn_", "", wn_candidates))
 
-      if (length(numeric_wn) > 0) {
+      has_covars <- !is.null(x$data$n_covariates) && x$data$n_covariates > 0
+      branch     <- if (has_covars) "\u251C\u2500" else "\u2514\u2500"
 
-        wn_range    <- range(as.numeric(numeric_wn))
-        range_str   <- paste0(" (", wn_range[2], "\u2013", wn_range[1], " cm\u207B\u00B9)")
-        has_covars  <- !is.null(x$data$n_covariates) && x$data$n_covariates > 0
-        branch      <- if (has_covars) "\u251C\u2500" else "\u2514\u2500"
+      if (length(wn_values) > 0) {
+
+        wn_range  <- range(wn_values)
+        range_str <- paste0(" (", wn_range[2], "\u2013", wn_range[1], " cm\u207B\u00B9)")
         cat(paste0("   ", branch, " Predictors: ", x$data$n_predictors, range_str, "\n"))
 
       } else {
 
-        has_covars <- !is.null(x$data$n_covariates) && x$data$n_covariates > 0
-        branch     <- if (has_covars) "\u251C\u2500" else "\u2514\u2500"
         cat(paste0("   ", branch, " Predictors: ", x$data$n_predictors, "\n"))
 
       }
@@ -615,18 +615,19 @@ summary.horizons_data <- function(object, ...) {
     if (!is.null(x$data$n_predictors) && x$data$n_predictors > 0) {
 
       predictor_vars <- x$data$role_map$variable[x$data$role_map$role == "predictor"]
-      numeric_wn     <- predictor_vars[grepl("^[0-9.]+$", predictor_vars)]
+      wn_candidates  <- predictor_vars[grepl("^(wn_)?[0-9.]+$", predictor_vars)]
+      wn_values      <- as.numeric(gsub("^wn_", "", wn_candidates))
 
       has_covariates <- !is.null(x$data$n_covariates) && x$data$n_covariates > 0
       has_outcome    <- any(x$data$role_map$role == "outcome")
       has_more       <- has_covariates || has_outcome
-      branch         <- if (has_more) "\u251C\u2500" else "\u251C\u2500"
+      branch         <- if (has_more) "\u251C\u2500" else "\u2514\u2500"
 
       cat(paste0("   ", branch, " Predictors: ", x$data$n_predictors, "\n"))
 
-      if (length(numeric_wn) > 1) {
+      if (length(wn_values) > 1) {
 
-        wn_values <- sort(as.numeric(numeric_wn), decreasing = TRUE)
+        wn_values <- sort(wn_values, decreasing = TRUE)
         wn_range  <- range(wn_values)
         wn_step   <- abs(diff(wn_values[1:2]))
 
@@ -643,7 +644,7 @@ summary.horizons_data <- function(object, ...) {
       covariate_vars <- x$data$role_map$variable[x$data$role_map$role == "covariate"]
       covar_list     <- paste(covariate_vars, collapse = ", ")
       has_outcome    <- any(x$data$role_map$role == "outcome")
-      branch         <- if (has_outcome) "\u251C\u2500" else "\u251C\u2500"
+      branch         <- if (has_outcome) "\u251C\u2500" else "\u2514\u2500"
 
       cat(paste0("   ", branch, " Covariates: ", x$data$n_covariates, "\n"))
       cat(paste0("   \u2502     \u2514\u2500 Names: ", covar_list, "\n"))
