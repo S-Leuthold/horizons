@@ -7,7 +7,7 @@
 standardize(
   x,
   resample = 2,
-  trim = NULL,
+  trim = c(600, 4000),
   remove_water = FALSE,
   baseline = FALSE,
   force = FALSE
@@ -19,11 +19,11 @@ standardize(
 \item{resample}{\link{numeric or NULL.} Target resolution in cm⁻¹. Default \code{2}
 matches OSSL library resolution. Use \code{NULL} to skip resampling.}
 
-\item{trim}{\link{numeric(2) or NULL.} Wavenumber range to keep, e.g.,
-\code{c(600, 4000)}. Default \code{NULL} skips trimming.}
+\item{trim}{\link{numeric(2) or NULL.} Wavenumber range to keep. Default
+\code{c(600, 4000)} is the standard MIR range. Use \code{NULL} to skip trimming.}
 
 \item{remove_water}{\link{logical.} Remove water absorption bands
-(~1600-1700, ~3200-3600 cm⁻¹)? Default \code{FALSE}.}
+(1580-1720, 3100-3700 cm⁻¹)? Default \code{FALSE}.}
 
 \item{baseline}{\link{logical.} Apply convex hull baseline correction?
 Default \code{FALSE}.}

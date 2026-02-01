@@ -386,7 +386,7 @@ report_standardize_summary <- function(operations, n_samples, final_n_wavelength
 #' @param trim [numeric(2) or NULL.] Wavenumber range to keep. Default
 #'   `c(600, 4000)` is the standard MIR range. Use `NULL` to skip trimming.
 #' @param remove_water [logical.] Remove water absorption bands
-#'   (~1600-1700, ~3200-3600 cm⁻¹)? Default `FALSE`.
+#'   (1580-1720, 3100-3700 cm⁻¹)? Default `FALSE`.
 #' @param baseline [logical.] Apply convex hull baseline correction?
 #'   Default `FALSE`.
 #' @param force [logical.] Re-standardize even if already standardized?
