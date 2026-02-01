@@ -2,7 +2,7 @@
 % Please edit documentation in R/pipeline-spectra.R
 \name{spectra}
 \alias{spectra}
-\title{Load spectral data into a horizons_data object}
+\title{Load spectral data from files or tibble}
 \usage{
 spectra(
   source,
@@ -13,61 +13,57 @@ spectra(
 )
 }
 \arguments{
-\item{source}{\link{character or data.frame.} Path to OPUS directory, CSV file,
-or a pre-loaded tibble/data.frame.}
+\item{source}{Path to directory, file(s), or a tibble/data.frame.}
 
-\item{type}{\link{character or NULL.} Explicit type override: \code{"opus"}, \code{"csv"},
-or \code{NULL} for auto-detection. Default: \code{NULL}.}
+\item{type}{Character. One of \code{"opus"}, \code{"csv"}, or \code{NULL} for auto-detect.
+Default: \code{NULL}.}
 
-\item{id_col}{\link{character or NULL.} Name of the sample ID column. If \code{NULL},
+\item{id_col}{Character. Column name to use as sample ID. If \code{NULL},
 auto-detects from common aliases. Default: \code{NULL}.}
 
-\item{wavelength_cols}{\link{character vector or NULL.} Names of wavelength
-columns. If \code{NULL}, auto-detects columns with \code{wn_} prefix or numeric
-names. Default: \code{NULL}.}
+\item{wavelength_cols}{Character vector. Column names containing spectral data.
+If \code{NULL}, auto-detects numeric column names or \verb{wn_*} prefix. Default: \code{NULL}.}
 
-\item{recursive}{\link{logical.} For OPUS directories, search subdirectories.
+\item{recursive}{Logical. For directory paths, search subdirectories.
 Default: \code{FALSE}.}
 }
 \value{
-A \code{horizons_data} object with:
-\describe{
-\item{data$analysis}{Tibble with \code{sample_id} and \verb{wn_*} columns}
-\item{data$role_map}{Tibble mapping columns to roles (id, predictor, meta)}
-\item{provenance}{Source path, type, timestamps, version info}
+A \code{horizons_data} S3 object with:
+\itemize{
+\item \code{data$analysis}: tibble with \code{sample_id}, \code{filename}, \verb{wn_*} columns, and
+any additional columns
+\item \code{data$role_map}: tibble mapping columns to roles
+\item \code{provenance}: source and creation metadata
 }
 }
 \description{
 Entry point for the horizons pipeline. Loads spectral data from OPUS files,
-CSV files, or an in-memory tibble and returns a standardized \code{horizons_data}
-object ready for preprocessing and modeling.
+CSV files, or accepts a pre-loaded tibble/data.frame. Returns a \code{horizons_data}
+object ready for downstream processing.
 }
 \details{
-The function automatically detects the input type and routes to the
-appropriate reader:
+This function handles three input types:
 \itemize{
-\item \strong{OPUS files}: Binary files from Bruker spectrometers. Provide a directory
-path containing \code{.0}, \code{.1}, etc. files. Sample IDs are extracted from
-filenames.
-\item \strong{CSV files}: Comma-delimited files with samples as rows and wavelengths
-as columns. The function auto-detects ID and wavelength columns.
-\item \strong{Tibble/data.frame}: Pre-loaded data with the same structure as CSV.
+\item \strong{OPUS files} (\code{type = "opus"}): Read via \code{opusreader2::read_opus()}.
+Filenames become \code{sample_id}, wavenumber columns get \code{wn_} prefix.
+\item \strong{CSV files} (\code{type = "csv"}): Read via \code{readr::read_csv()}.
+Auto-detects ID and wavelength columns.
+\item \strong{Tibble/data.frame}: Same detection logic as CSV.
 }
 
-Column detection uses a priority-based alias system for ID columns and
-pattern matching for wavelength columns. Override with explicit parameters
-if auto-detection fails.
+The \code{filename} column (role: meta) preserves original filenames for traceability
+and later ID parsing via \code{parse_ids()}.
 }
 \examples{
 \dontrun{
-# From OPUS files
-hd <- spectra("path/to/opus/")
+# OPUS files
+spectra("path/to/opus/")
 
-# From CSV
-hd <- spectra("data.csv")
+# CSV with auto-detection
+spectra("data.csv")
 
-# From tibble with explicit ID column
-hd <- spectra(my_data, id_col = "SampleName")
+# Tibble with explicit columns
+spectra(my_data, id_col = "SampleName")
 }
 
 }
