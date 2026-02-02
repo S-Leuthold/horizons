@@ -146,9 +146,11 @@ new_horizons_data <- function(analysis        = NULL,
                       checks    = NULL,
                       timestamp = NULL,
 
-                      outliers = list(spectral_idx = NULL,
-                                      response_idx = NULL,
-                                      removed      = FALSE)),
+                      outliers = list(spectral_ids   = NULL,
+                                      response_ids   = NULL,
+                                      removed_ids    = NULL,
+                                      removal_detail = NULL,
+                                      removed        = FALSE)),
 
     ## -------------------------------------------------------------------------
     ## Section 5: EVALUATION — Model comparison results (horizons_eval+)

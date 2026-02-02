@@ -270,9 +270,14 @@ configure <- function(x,
     warning("Overwriting previous configuration", call. = FALSE)
 
     ## Clear stale downstream state
-    x$validation$passed    <- NULL
-    x$validation$checks    <- NULL
-    x$validation$timestamp <- NULL
+    x$validation$passed              <- NULL
+    x$validation$checks              <- NULL
+    x$validation$timestamp           <- NULL
+    x$validation$outliers$spectral_ids   <- NULL
+    x$validation$outliers$response_ids   <- NULL
+    x$validation$outliers$removed_ids    <- NULL
+    x$validation$outliers$removal_detail <- NULL
+    x$validation$outliers$removed        <- FALSE
     x$evaluation$results     <- NULL
     x$evaluation$best_config <- NULL
     x$models$workflows       <- NULL

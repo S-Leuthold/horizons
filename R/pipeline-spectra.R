@@ -1067,9 +1067,11 @@ create_horizons_data <- function(analysis,
       passed    = NULL,
       checks    = NULL,
       outliers  = list(
-        spectral_idx = NULL,
-        response_idx = NULL,
-        removed      = FALSE
+        spectral_ids   = NULL,
+        response_ids   = NULL,
+        removed_ids    = NULL,
+        removal_detail = NULL,
+        removed        = FALSE
       ),
       timestamp = NULL
     ),

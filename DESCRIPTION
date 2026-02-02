@@ -117,3 +117,4 @@ Collate:
     'pipeline-average.R'
     'pipeline-add-response.R'
     'pipeline-configure.R'
+    'pipeline-validate.R'
