@@ -1,16 +1,6 @@
-#' Pipeline Entry Point: Load Spectral Data
-#'
-#' @description
-#' Functions for loading spectral data from files or tibbles and creating
-#' horizons_data objects for the modeling pipeline.
-#'
-#' @details
-#' This module provides `spectra()`, the entry point for the horizons pipeline.
-#' It handles OPUS binary files, CSV files, and pre-loaded tibbles, returning
-#' a standardized `horizons_data` object.
-#'
-#' @keywords internal
-#' @name pipeline-spectra
+# R/pipeline-spectra.R
+# Entry point for the horizons pipeline. Loads spectral data from OPUS files,
+# CSV files, or pre-loaded tibbles into a horizons_data object.
 
 ## =============================================================================
 ## Section 1: Constants and ID Aliases

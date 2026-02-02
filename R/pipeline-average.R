@@ -1,16 +1,6 @@
-#' Average Replicate Spectra
-#'
-#' @description
-#' Functions for aggregating replicate spectra by sample ID with optional
-#' correlation-based quality control to detect outlier replicates.
-#'
-#' @details
-#' This module provides `average()`, which collapses replicate spectra into
-#' single mean spectra per sample. Quality control uses pairwise correlations
-#' to identify replicates that don't match their siblings.
-#'
-#' @keywords internal
-#' @name pipeline-average
+# R/pipeline-average.R
+# Aggregate replicate spectra by sample ID with optional correlation-based
+# quality control to detect outlier replicates.
 
 
 ## =============================================================================
