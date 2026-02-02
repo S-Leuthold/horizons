@@ -394,6 +394,22 @@ parse_ids <- function(x,
 
   x$provenance$id_pattern <- format
 
+  ## -------------------------------------------------------------------------
+  ## Step 9: CLI output
+  ## -------------------------------------------------------------------------
+
+  cat(paste0("\u251C\u2500 ", cli::style_bold("Parsing sample IDs"), "...\n"))
+
+  id_str <- paste0(n_matched, " IDs extracted")
+  if (n_unmatched > 0) {
+
+    id_str <- paste0(id_str, " (", n_unmatched, " unmatched)")
+
+  }
+
+  cat(paste0("\u2502  \u2514\u2500 ", id_str, "\n"))
+  cat("\u2502\n")
+
   x
 
 }

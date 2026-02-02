@@ -301,48 +301,44 @@ apply_baseline_correction <- function(spectra_matrix, wavelengths) {
 #' @noRd
 report_standardize_summary <- function(operations, n_samples, final_n_wavelengths) {
 
-  cat("\n")
-  cat(cli::style_bold("\u2139 Standardizing spectra\n"))
+  cat(paste0("\u251C\u2500 ", cli::style_bold("Standardizing"), "...\n"))
 
   op_names <- names(operations)
-  n_ops    <- length(op_names)
 
   for (i in seq_along(op_names)) {
 
     op_name <- op_names[i]
     op      <- operations[[op_name]]
 
-    branch <- if (i < n_ops) "\u251C\u2500" else "\u2514\u2500"
+    if (op_name == "trim") {
 
-    if (op_name == "resample") {
+      msg <- paste0("Trimming: ", op$range[1], "-", op$range[2],
+                    " cm\u207B\u00B9 (", op$n_before, " \u2192 ", op$n_after, ")")
 
-      msg <- paste0("Resampling: ", op$resolution_before, " cm\u207B\u00B9 \u2192 ",
+    } else if (op_name == "resample") {
+
+      msg <- paste0("Resampling: ", op$resolution_before, " \u2192 ",
                     op$resolution_after, " cm\u207B\u00B9 (",
-                    op$n_before, " \u2192 ", op$n_after, " wavelengths)")
-
-    } else if (op_name == "trim") {
-
-      msg <- paste0("Trimming: ", op$range[1], "-", op$range[2], " cm\u207B\u00B9 (",
-                    op$n_before, " \u2192 ", op$n_after, " wavelengths)")
+                    op$n_before, " \u2192 ", op$n_after, ")")
 
     } else if (op_name == "remove_water") {
 
-      msg <- paste0("Water bands removed: ", op$n_removed, " wavelengths (",
+      msg <- paste0("Water bands: ", op$n_removed, " removed (",
                     op$n_before, " \u2192 ", op$n_after, ")")
 
     } else if (op_name == "baseline") {
 
-      msg <- "Baseline correction applied (convex hull)"
+      msg <- "Baseline correction (convex hull)"
 
     }
 
-    cat(paste0(branch, " ", msg, "\n"))
+    cat(paste0("\u2502  \u251C\u2500 ", msg, "\n"))
 
   }
 
-  cat(paste0("\u2514\u2500 Complete: ", n_samples, " samples \u00D7 ",
-             final_n_wavelengths, " wavelengths\n"))
-  cat("\n")
+  cat(paste0("\u2502  \u2514\u2500 ", n_samples, " samples \u00D7 ",
+             final_n_wavelengths, " predictors\n"))
+  cat("\u2502\n")
 
 }
 
@@ -532,7 +528,9 @@ standardize <- function(x,
 
   if (is.null(resample) && is.null(trim) && !remove_water && !baseline) {
 
-    cli::cli_alert_info("No standardization operations requested")
+    cat(paste0("\u251C\u2500 ", cli::style_bold("Standardizing"), "...\n"))
+    cat(paste0("\u2502  \u2514\u2500 No operations requested\n"))
+    cat("\u2502\n")
 
     ## Still mark as standardized so downstream steps know it was evaluated -----
 
@@ -742,7 +740,9 @@ standardize <- function(x,
 
   } else {
 
-    cli::cli_alert_info("No standardization operations applied (all parameters NULL/FALSE)")
+    cat(paste0("\u251C\u2500 ", cli::style_bold("Standardizing"), "...\n"))
+    cat(paste0("\u2502  \u2514\u2500 No operations requested\n"))
+    cat("\u2502\n")
 
   }
 
