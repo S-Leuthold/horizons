@@ -269,19 +269,11 @@ evaluate <- function(x,
 
     cfg <- configs[i, ]
 
-    ## Pretty config description
-    model_name <- MODEL_DISPLAY_NAMES[cfg$model] %||% cfg$model
-    desc_parts <- c(model_name)
+    ## Pretty config description — always show full pipeline
+    model_name  <- MODEL_DISPLAY_NAMES[cfg$model] %||% cfg$model
+    desc_parts  <- c(model_name, cfg$transformation, cfg$preprocessing,
+                     cfg$feature_selection)
 
-    if (cfg$transformation != "none") {
-      desc_parts <- c(desc_parts, cfg$transformation)
-    }
-    if (cfg$preprocessing != "raw") {
-      desc_parts <- c(desc_parts, toupper(cfg$preprocessing))
-    }
-    if (cfg$feature_selection != "none") {
-      desc_parts <- c(desc_parts, toupper(cfg$feature_selection))
-    }
     if (!is.na(cfg$covariates)) {
       desc_parts <- c(desc_parts, paste0("+", cfg$covariates))
     }
@@ -296,7 +288,6 @@ evaluate <- function(x,
 
       if (verbose) {
 
-        cat(paste0("\u2502\n"))
         cat(paste0(
           "\u2502  ", branch, " [", i, "/", n_total, "] ", config_desc, "\n"
         ))
@@ -313,7 +304,6 @@ evaluate <- function(x,
     ## Render config start
     if (verbose) {
 
-      cat(paste0("\u2502\n"))
       cat(paste0(
         "\u2502  ", branch, " [", i, "/", n_total, "] ", config_desc, "\n"
       ))
