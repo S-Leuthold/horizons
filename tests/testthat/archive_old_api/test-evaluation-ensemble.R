@@ -44,7 +44,7 @@ test_that("ensemble with different test_prop values", {
   skip("Requires real finalized models - too expensive for test suite")
 })
 
-test_that("stacks ensemble with optimize_blending", {
+test_that("stacks ensemble with optimize_ensemble", {
   skip("Requires real finalized models - too expensive for test suite")
 })
 
@@ -191,7 +191,7 @@ test_that("stacks ensemble uses mocked stacks infrastructure and saves output", 
                 input_data         = data,
                 variable           = "Response",
                 ensemble_method    = "stacks",
-                optimize_blending  = TRUE,
+                optimize_ensemble  = TRUE,
                 allow_par          = TRUE,
                 n_cores            = 3,
                 output_dir         = temp_output,

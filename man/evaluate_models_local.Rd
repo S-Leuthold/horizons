@@ -56,7 +56,7 @@ Default: Auto-generated with timestamp.}
 \item{allow_par}{\verb{[logical]} Use parallel processing for CV? Default: \code{TRUE}. Uses future::plan(multisession) for local runs.}
 
 \item{n_cv_cores}{\verb{[integer]} (Optional) Cores for parallel CV.
-Default: \code{parallel::detectCores() - 2}.}
+Default: \code{1} (sequential). Set to \code{parallel::detectCores() - 2} for parallel.}
 
 \item{prune_models}{\verb{[logical]} Prune models that don't beat baseline? Default: \code{TRUE}.}
 

@@ -8,17 +8,31 @@
 
 ## Model Types ----------------------------------------------------------------
 
-# Valid model types supported by the package
+# Valid model types — short names used in configure() and config grids
 VALID_MODELS <- c(
-  "random_forest",
-  "plsr",
+  "rf",
   "cubist",
   "xgboost",
-  "lightgbm",
+  "plsr",
   "elastic_net",
   "svm_rbf",
-  "mars",
-  "mlp_nn"
+  "mlp",
+  "lightgbm",
+  "mars"
+)
+
+# Model specifications lookup — maps short names to tidymodels constructors
+# Used by evaluate() to instantiate parsnip model specs
+MODEL_SPECS <- list(
+  rf          = list(fn = "rand_forest",  engine = "ranger"),
+  cubist      = list(fn = "cubist_rules", engine = "Cubist"),
+  xgboost     = list(fn = "boost_tree",   engine = "xgboost"),
+  plsr        = list(fn = "pls",          engine = "mixOmics"),
+  elastic_net = list(fn = "linear_reg",   engine = "glmnet"),
+  svm_rbf     = list(fn = "svm_rbf",      engine = "kernlab"),
+  mlp         = list(fn = "mlp",          engine = "nnet"),
+  lightgbm    = list(fn = "boost_tree",   engine = "lightgbm"),
+  mars        = list(fn = "mars",         engine = "earth")
 )
 
 ## Transformations ------------------------------------------------------------
@@ -27,6 +41,7 @@ VALID_MODELS <- c(
 VALID_TRANSFORMATIONS <- c(
   "none",
   "log",
+  "log10",
   "sqrt"
 )
 

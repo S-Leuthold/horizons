@@ -25,7 +25,7 @@
 #' @param cv_folds `[integer]` Cross-validation folds. Default: `10`.
 #' @param allow_par `[logical]` Use parallel processing for CV? Default: `TRUE`. Uses future::plan(multisession) for local runs.
 #' @param n_cv_cores `[integer]` (Optional) Cores for parallel CV.
-#'   Default: `parallel::detectCores() - 2`.
+#'   Default: `1` (sequential). Set to `parallel::detectCores() - 2` for parallel.
 #' @param prune_models `[logical]` Prune models that don't beat baseline? Default: `TRUE`.
 #' @param prune_threshold `[numeric]` Performance threshold vs baseline (0-1). Default: `0.9`.
 #' @param seed `[integer]` Random seed for reproducibility. Default: `307`.

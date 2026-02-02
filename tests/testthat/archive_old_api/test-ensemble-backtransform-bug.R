@@ -154,7 +154,7 @@ test_that("stacks ensemble does not double back-transform CV predictions", {
       input_data        = data,
       variable          = "Response",
       ensemble_method   = "stacks",
-      optimize_blending = FALSE,
+      optimize_ensemble = FALSE,
       verbose           = FALSE,
       seed              = 999
     ),
