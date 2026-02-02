@@ -116,6 +116,18 @@ spectra <- function(source,
 
   }
 
+  ## Reject multi-element character vectors -----------------------------------
+  ## spectra() expects a single path (file or directory), not a vector of paths
+
+  if (is_path && length(source) > 1) {
+
+    cli::cli_abort(c(
+      "{.arg source} must be a single path, not a vector of length {length(source)}",
+      "i" = "Provide a directory path, or a single file path"
+    ))
+
+  }
+
   ## -------------------------------------------------------------------------
   ## Step 2: Dispatch based on input type
   ## -------------------------------------------------------------------------
@@ -539,6 +551,18 @@ load_opus_files <- function(source,
     if (is.list(ab_block) && "data" %in% names(ab_block)) {
 
       row_data <- tibble::as_tibble(ab_block$data)
+
+      ## Assign wavenumber names if matrix was unnamed or auto-named (V1, V2...)
+      if (!is.null(ab_block$wavenumbers)) {
+
+        unnamed <- is.null(names(row_data)) ||
+          all(grepl("^V\\d+$", names(row_data)))
+
+        if (unnamed && length(ab_block$wavenumbers) == ncol(row_data)) {
+          names(row_data) <- as.character(ab_block$wavenumbers)
+        }
+
+      }
 
     } else if (inherits(ab_block, "data.frame")) {
 

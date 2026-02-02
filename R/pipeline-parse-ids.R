@@ -240,12 +240,15 @@ parse_ids <- function(x,
 
     if (too_few == "error") {
 
-      cli::cli_abort(c(
+      err <- c(
         "Pattern did not match {n_unmatched} filename{?s}",
         "i" = "Non-matching files:",
-        "i" = "{.val {head(non_match_names, 10)}}",
-        if (n_unmatched > 10) "i" = "... and {n_unmatched - 10} more"
-      ))
+        "i" = "{.val {head(non_match_names, 10)}}"
+      )
+      if (n_unmatched > 10) {
+        err <- c(err, "i" = "... and {n_unmatched - 10} more")
+      }
+      cli::cli_abort(err)
 
     } else if (too_few == "keep_original") {
 
@@ -348,10 +351,19 @@ parse_ids <- function(x,
     ## Using column index selection is more memory-efficient than copying ----
 
     before_cols <- names(x$data$analysis)[seq_len(filename_pos)]
-    after_cols  <- setdiff(
-      names(x$data$analysis)[(filename_pos + 1):ncol(x$data$analysis)],
-      cols_to_add
-    )
+
+    if (filename_pos < ncol(x$data$analysis)) {
+
+      after_cols <- setdiff(
+        names(x$data$analysis)[(filename_pos + 1):ncol(x$data$analysis)],
+        cols_to_add
+      )
+
+    } else {
+
+      after_cols <- character(0)
+
+    }
 
     col_order       <- c(before_cols, cols_to_add, after_cols)
     x$data$analysis <- x$data$analysis[, col_order, drop = FALSE]

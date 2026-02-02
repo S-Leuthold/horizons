@@ -609,6 +609,12 @@ standardize <- function(x,
 
   if (!is.null(resample)) {
 
+    if (length(wavelengths) < 2) {
+
+      cli::cli_abort("Resampling requires at least two wavelength columns")
+
+    }
+
     ## Estimate current resolution from wavelength spacing ---------------------
 
     wn_diff  <- abs(diff(sort(wavelengths)))

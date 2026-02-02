@@ -186,7 +186,7 @@ average <- function(x,
 
   ## Meta columns (excluding by column and filename) -------------------------
 
-  meta_cols <- role_map$variable[role_map$role == "meta"]
+  meta_cols <- role_map$variable[role_map$role %in% c("meta", "covariate")]
   meta_cols <- setdiff(meta_cols, c(by, "filename"))
 
   ## -------------------------------------------------------------------------
@@ -198,6 +198,16 @@ average <- function(x,
   ## Get grouping vector -----------------------------------------------------
 
   group_values <- analysis[[by]]
+
+  if (anyNA(group_values)) {
+
+    rlang::abort(
+      paste0("Grouping column '", by, "' contains NA values; resolve before averaging"),
+      class = "horizons_data_error"
+    )
+
+  }
+
   unique_groups <- unique(group_values)
   n_groups <- length(unique_groups)
 
@@ -333,9 +343,10 @@ average <- function(x,
   ## Step 9: Update horizons_data object
   ## -------------------------------------------------------------------------
 
-  x$data$analysis <- averaged
-  x$data$role_map <- new_role_map
-  x$data$n_rows <- nrow(averaged)
+  x$data$analysis    <- averaged
+  x$data$role_map    <- new_role_map
+  x$data$n_rows      <- nrow(averaged)
+  x$data$n_covariates <- sum(new_role_map$role == "covariate")
 
   ## -------------------------------------------------------------------------
   ## Step 10: Update provenance

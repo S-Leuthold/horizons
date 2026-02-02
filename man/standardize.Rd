@@ -14,25 +14,25 @@ standardize(
 )
 }
 \arguments{
-\item{x}{\link{horizons_data.} Object from \code{spectra()}.}
+\item{x}{\link{horizons_data} Object from \code{spectra()}.}
 
-\item{resample}{\link{numeric or NULL.} Target resolution in cm⁻¹. Default \code{2}
+\item{resample}{\code{numeric} or \code{NULL}. Target resolution in cm⁻¹. Default \code{2}
 matches OSSL library resolution. Use \code{NULL} to skip resampling.}
 
-\item{trim}{\link{numeric(2) or NULL.} Wavenumber range to keep. Default
+\item{trim}{\code{numeric(2)} or \code{NULL}. Wavenumber range to keep. Default
 \code{c(600, 4000)} is the standard MIR range. Use \code{NULL} to skip trimming.}
 
-\item{remove_water}{\link{logical.} Remove water absorption bands
+\item{remove_water}{\code{logical}. Remove water absorption bands
 (1580-1720, 3100-3700 cm⁻¹)? Default \code{FALSE}.}
 
-\item{baseline}{\link{logical.} Apply convex hull baseline correction?
+\item{baseline}{\code{logical}. Apply convex hull baseline correction?
 Default \code{FALSE}.}
 
-\item{force}{\link{logical.} Re-standardize even if already standardized?
+\item{force}{\code{logical}. Re-standardize even if already standardized?
 Default \code{FALSE}. Not recommended — may cause data quality issues.}
 }
 \value{
-\link{horizons_data.} The input object with standardized spectra.
+\link{horizons_data} The input object with standardized spectra.
 Provenance is updated to record what operations were applied.
 }
 \description{

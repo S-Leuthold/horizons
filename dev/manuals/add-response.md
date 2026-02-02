@@ -88,9 +88,9 @@ check).
 
 ## Known limitations
 
-1. **No `remove_response()` yet** — error messages reference it but the
-   function doesn't exist. Users who need to replace a response variable
-   must manually modify the object.
+1. **No `remove_response()` yet** — users who need to replace a response
+   variable must manually modify the object or call `configure()` with a
+   different `outcome` argument (which reverts the previous outcome role).
 
 2. **CSV-only path convenience** — the string source path only supports CSV
    via `readr::read_csv()`. Excel, TSV, and other formats require the user

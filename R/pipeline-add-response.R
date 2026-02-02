@@ -164,7 +164,28 @@ add_response <- function(x,
 
   }
 
-  ## 1.4 variable columns exist in source --------------------------------------
+  ## 1.4 variable is non-empty and unique ----------------------------------------
+
+  if (!is.character(variable) || length(variable) == 0) {
+
+    abort_nested(
+      "variable must be a non-empty character vector",
+      c("Provide at least one response column name")
+    )
+
+  }
+
+  if (anyDuplicated(variable)) {
+
+    dup_vars <- unique(variable[duplicated(variable)])
+    abort_nested(
+      "variable contains duplicate column names",
+      c(paste0("Duplicates: ", paste(dup_vars, collapse = ", ")))
+    )
+
+  }
+
+  ## 1.5 variable columns exist in source --------------------------------------
 
   missing_vars <- setdiff(variable, names(source))
 
