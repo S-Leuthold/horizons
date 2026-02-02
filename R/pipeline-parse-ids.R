@@ -1,16 +1,6 @@
-#' Parse Sample IDs from Filenames
-#'
-#' @description
-#' Functions for extracting structured metadata from filenames and updating
-#' sample IDs in horizons_data objects.
-#'
-#' @details
-#' This module provides `parse_ids()`, which parses filenames to extract
-#' sample IDs and metadata columns. It supports format strings with tokens
-#' (e.g., `"{project}_{sampleid}_{fraction}"`) or explicit regex patterns.
-#'
-#' @keywords internal
-#' @name pipeline-parse-ids
+# R/pipeline-parse-ids.R
+# Extract structured metadata from filenames and update sample IDs in
+# horizons_data objects. Supports format strings and explicit regex patterns.
 
 ## =============================================================================
 ## Section 1: Constants
