@@ -116,3 +116,4 @@ Collate:
     'pipeline-parse-ids.R'
     'pipeline-average.R'
     'pipeline-add-response.R'
+    'pipeline-configure.R'
