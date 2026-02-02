@@ -222,6 +222,7 @@ average <- function(x,
   results_list        <- vector("list", n_groups)
   n_dropped           <- 0
   n_groups_with_drops <- 0L
+  groups_with_drops   <- character()
   all_outlier_samples <- character()
   dropped_samples     <- character()
   qc_details          <- list()
@@ -253,6 +254,7 @@ average <- function(x,
       dropped_samples     <- c(dropped_samples, as.character(group_id))
       n_dropped           <- n_dropped + n_reps
       n_groups_with_drops <- n_groups_with_drops + 1L
+      groups_with_drops   <- c(groups_with_drops, as.character(group_id))
 
     } else {
 
@@ -260,6 +262,7 @@ average <- function(x,
 
       if (group_result$n_dropped > 0) {
         n_groups_with_drops <- n_groups_with_drops + 1L
+        groups_with_drops   <- c(groups_with_drops, as.character(group_id))
       }
 
       n_dropped <- n_dropped + group_result$n_dropped
@@ -399,6 +402,17 @@ average <- function(x,
         cat(paste0("\u2502  \u251C\u2500 QC: ", n_dropped, " replicates dropped from ",
                    n_groups_with_drops, " groups\n"))
 
+        ## Show affected group IDs (truncate to 8)
+        preview <- head(groups_with_drops, 8)
+        suffix  <- if (length(groups_with_drops) > 8) {
+          paste0(" (+", length(groups_with_drops) - 8, " more)")
+        } else {
+          ""
+        }
+
+        cat(paste0("\u2502  \u251C\u2500 Affected: ",
+                   paste(preview, collapse = ", "), suffix, "\n"))
+
         if (length(dropped_samples) > 0) {
 
           cat(paste0("\u2502  \u251C\u2500 Dropped entirely: ",
@@ -406,16 +420,6 @@ average <- function(x,
                      if (length(dropped_samples) > 5)
                        paste0(" (+", length(dropped_samples) - 5, " more)") else "",
                      "\n"))
-
-        }
-
-        if (length(all_outlier_samples) > 0) {
-
-          cat(paste0("\u2502  \u251C\u2500 All-outlier groups: ",
-                     paste(head(all_outlier_samples, 5), collapse = ", "),
-                     if (length(all_outlier_samples) > 5)
-                       paste0(" (+", length(all_outlier_samples) - 5, " more)") else "",
-                     " (averaged anyway)\n"))
 
         }
 
