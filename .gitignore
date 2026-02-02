@@ -5,7 +5,6 @@
 .RDataTmp*
 .Rhistory
 .Rproj.user
-*.Rproj
 
 # R build ignores
 .Rbuildignore
@@ -36,6 +35,9 @@ NEXT_SESSION_*.md
 
 # Archive directory for development artifacts
 archive/
+
+# Developer manuals (local reference, not shipped)
+dev/manuals/
 
 # Examples directory (dev test scripts)
 examples/

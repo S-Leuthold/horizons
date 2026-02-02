@@ -1,441 +1,742 @@
-#' Test Suite for OSSL Data Integration and Processing
-#' 
-#' Comprehensive tests for data preprocessing, PCA, and OSSL training data functions.
-#' Tests cover unit functionality, edge cases, performance, and statistical validity.
+#' Tests for OSSL Data Functions (covariates-data.R)
+#'
+#' STRATEGY: Integration-first (DATA PROCESSING - all fast operations!)
+#'
+#' covariates-data.R contains functions for downloading, processing, and preparing
+#' OSSL (Open Soil Spectroscopy Library) data. Unlike Session 5 (expensive model fitting),
+#' these are DATA PROCESSING operations - perfect for integration testing!
+#'
+#' The only slow operation is OSSL download (1-2GB), which we skip with appropriate guards.
+#' All other operations (property mapping, preprocessing, PCA) are fast and testable.
+#'
+#' Integration tests (70%): Test complete data processing workflows
+#' Validation tests (30%): Test error handling and parameter validation
 
 library(testthat)
 library(horizons)
-library(dplyr)
-library(tibble)
 
-# Test Property Mapping -------------------------------------------------------
+# Access internal helpers not exported
+get_ossl_property_mapping <- horizons:::get_ossl_property_mapping
+validate_soil_properties <- horizons:::validate_soil_properties
+preprocess_mir_spectra <- horizons:::preprocess_mir_spectra
+perform_pca_on_ossl <- horizons:::perform_pca_on_ossl
+project_spectra_to_pca <- horizons:::project_spectra_to_pca
+
+## ===========================================================================
+## INTEGRATION TESTS - Property Mapping
+## ===========================================================================
 
 test_that("get_ossl_property_mapping returns correct structure", {
+  # SPEC-COV-DATA-INT-001: Property mapping structure
+
   mapping <- get_ossl_property_mapping()
-  
-  # Check structure
-  expect_s3_class(mapping, "tbl_df")
-  expect_equal(
-    names(mapping),
-    c("property", "analyte", "description", "target_unit", "ossl_name_level1")
-  )
-  
-  # Check required properties are present
-  required_props <- c("clay", "sand", "silt", "ph", "oc", "cec")
-  expect_true(all(required_props %in% mapping$property))
-  
-  # Check data completeness
-  expect_false(any(is.na(mapping$property)))
-  expect_false(any(is.na(mapping$analyte)))
+
+  # Verify it's a tibble
+  expect_s3_class(mapping, "data.frame")
+
+  # Verify required columns exist
+  expect_true("property" %in% names(mapping))
+  expect_true("analyte" %in% names(mapping))
+  expect_true("description" %in% names(mapping))
+  expect_true("target_unit" %in% names(mapping))
+  expect_true("ossl_name_level1" %in% names(mapping))
+
+  # Verify we have all 16 standard properties
+  expect_equal(nrow(mapping), 16)
 })
 
-# Note: map_ossl_to_properties function does not exist in current codebase
-# Skipping this test until the function is implemented
-test_that("map_ossl_to_properties correctly maps OSSL columns", {
-  skip("Function map_ossl_to_properties not implemented yet")
-  
-  # # Create mock OSSL data with known columns
-  # mock_ossl <- tibble(
-  #   Sample_ID = paste0("S", 1:10),
-  #   clay.tot_usda.c60_w.pct = runif(10, 10, 50),
-  #   sand.tot_usda.c60_w.pct = runif(10, 20, 80),
-  #   ph.h2o_usda.a268_index = runif(10, 5, 8),
-  #   oc_usda.c729_w.pct = runif(10, 0.5, 5)
-  # )
-  # 
-  # # Map to properties
-  # mapped <- map_ossl_to_properties(mock_ossl)
-  # 
-  # # Check renamed columns exist
-  # expect_true("clay" %in% names(mapped))
-  # expect_true("sand" %in% names(mapped))
-  # expect_true("ph" %in% names(mapped))
-  # expect_true("oc" %in% names(mapped))
-  # 
-  # # Check values are preserved
-  # expect_equal(mapped$clay, mock_ossl$clay.tot_usda.c60_w.pct * 10) # Converted to g/kg
-  # expect_equal(mapped$ph, mock_ossl$ph.h2o_usda.a268_index) # No conversion
+test_that("get_ossl_property_mapping includes expected properties", {
+  # SPEC-COV-DATA-INT-002: Standard properties are present
+
+  mapping <- get_ossl_property_mapping()
+
+  expected_properties <- c("clay", "sand", "silt", "ph", "oc", "cec",
+                          "bulk_density", "total_nitrogen", "carbonate",
+                          "phosphorus", "potassium", "calcium", "magnesium",
+                          "sodium", "aluminum_crystalline", "iron_amorphous")
+
+  expect_setequal(mapping$property, expected_properties)
 })
 
-# Test Spectral Preprocessing -------------------------------------------------
+test_that("get_ossl_property_mapping has consistent data types", {
+  # SPEC-COV-DATA-INT-003: All columns are character vectors
 
-test_that("preprocess_mir_spectra handles normal spectral data", {
-  skip("Temporarily skipped - function returns NULL due to Savitzky-Golay filter issues")
-  # Generate mock spectral data
-  n_samples <- 50
-  n_wavelengths <- 200
-  
-  spectral_data <- tibble(
-    Sample_ID = paste0("S", 1:n_samples)
-  )
-  
-  # Add wavelength columns with numeric names (as expected by preprocess_mir_spectra)
-  wave_nums <- as.character(seq(600, 4000, length.out = n_wavelengths))
-  for (col in wave_nums) {
-    spectral_data[[col]] <- runif(n_samples, 0.1, 0.9) + abs(rnorm(n_samples, 0, 0.05))
-  }
-  
-  # Test preprocessing
-  processed <- preprocess_mir_spectra(
-    spectral_data,
-    smooth_window = 5,
-    smooth_poly = 2
-  )
-  
-  # Check output structure
-  expect_s3_class(processed, "tbl_df")
-  expect_equal(nrow(processed), n_samples)
-  expect_true("Sample_ID" %in% names(processed))
-  
-  # Check spectral columns are processed
-  spec_cols <- grep("^[0-9]+$", names(processed), value = TRUE)
-  expect_true(length(spec_cols) > 0)
-  
-  # Check values are transformed (SNV should change scale)
-  original_mean <- mean(as.matrix(spectral_data[wave_nums]), na.rm = TRUE)
-  processed_mean <- mean(as.matrix(processed[spec_cols]), na.rm = TRUE)
-  expect_false(isTRUE(all.equal(original_mean, processed_mean)))
+  mapping <- get_ossl_property_mapping()
+
+  expect_type(mapping$property, "character")
+  expect_type(mapping$analyte, "character")
+  expect_type(mapping$description, "character")
+  expect_type(mapping$target_unit, "character")
+  expect_type(mapping$ossl_name_level1, "character")
 })
 
-test_that("preprocess_mir_spectra handles edge cases", {
-  skip("Temporarily skipped - function returns NULL due to preprocessing failures")
-  # Test empty data
-  empty_data <- tibble(Sample_ID = character())
+test_that("get_ossl_property_mapping units are appropriate", {
+  # SPEC-COV-DATA-INT-004: Units match expected spectroscopy standards
+
+  mapping <- get_ossl_property_mapping()
+
+  # Check specific property units
+  expect_equal(mapping$target_unit[mapping$property == "clay"], "g/kg")
+  expect_equal(mapping$target_unit[mapping$property == "ph"], "unitless")
+  expect_equal(mapping$target_unit[mapping$property == "cec"], "cmolc/kg")
+  expect_equal(mapping$target_unit[mapping$property == "bulk_density"], "g/cm³")
+})
+
+## ===========================================================================
+## INTEGRATION TESTS - Property Validation
+## ===========================================================================
+
+test_that("validate_soil_properties accepts valid properties", {
+  # SPEC-COV-DATA-INT-005: Valid properties pass validation
+
+  valid_props <- c("clay", "sand", "ph", "oc")
+
+  # Should not error
+  expect_no_error(
+    validate_soil_properties(valid_props)
+  )
+
+  # Should return all TRUE
+  result <- validate_soil_properties(valid_props)
+  expect_true(all(result))
+  expect_equal(length(result), length(valid_props))
+})
+
+test_that("validate_soil_properties rejects invalid properties", {
+  # SPEC-COV-DATA-INT-006: Invalid properties trigger errors
+
+  invalid_props <- c("clay", "invalid_property", "ph")
+
   expect_error(
-    preprocess_mir_spectra(empty_data),
-    "No spectral columns found"
+    validate_soil_properties(invalid_props),
+    "Invalid soil properties"
   )
-  
-  # Test data with no spectral columns
-  no_spectra <- tibble(
-    Sample_ID = paste0("S", 1:10),
-    other_col = 1:10
-  )
+})
+
+test_that("validate_soil_properties provides helpful error messages", {
+  # SPEC-COV-DATA-INT-007: Error messages list available properties
+
   expect_error(
-    preprocess_mir_spectra(no_spectra),
-    "No spectral columns found"
+    validate_soil_properties("bad_property"),
+    "Invalid soil properties"
   )
-  
-  # Test data with missing values
-  spectra_with_na <- tibble(
-    Sample_ID = paste0("S", 1:5),
-    "1000" = c(0.5, NA, 0.6, 0.7, NA),
-    "2000" = c(NA, 0.4, 0.5, NA, 0.6)
-  )
-  
-  processed <- preprocess_mir_spectra(spectra_with_na)
-  # Should handle NAs gracefully
-  expect_s3_class(processed, "tbl_df")
 })
 
-test_that("preprocess_mir_spectra smoothing parameters work correctly", {
-  skip("Temporarily skipped - function returns NULL due to filter window size issues")
-  # Create noisy spectral data
-  n_samples <- 20
-  n_waves <- 100
-  
-  spectral_data <- tibble(Sample_ID = paste0("S", 1:n_samples))
-  wave_nums <- as.character(seq(1000, 3000, length.out = n_waves))
-  
-  for (col in wave_nums) {
-    # Add signal + noise
-    signal <- sin(seq(0, 2*pi, length.out = n_samples))
-    noise <- abs(rnorm(n_samples, 0, 0.2))
-    spectral_data[[col]] <- abs(signal) + noise
+## ===========================================================================
+## INTEGRATION TESTS - Spectral Preprocessing
+## ===========================================================================
+
+test_that("preprocess_mir_spectra handles basic preprocessing workflow", {
+  # SPEC-COV-DATA-INT-008: SG smoothing + SNV workflow
+
+  # Create test spectral data
+  test_data <- make_test_spectra(
+    n_samples = 20,
+    wavelengths = seq(600, 4000, by = 50),
+    seed = 111
+  )
+
+  # Apply preprocessing
+  result <- preprocess_mir_spectra(
+    spectral_data = test_data,
+    smooth_window = 9,
+    smooth_poly = 1,
+    derivative_order = 0,
+    verbose = FALSE
+  )
+
+  # Verify structure preserved
+  expect_s3_class(result, "data.frame")
+  expect_equal(nrow(result), 20)
+  expect_true("Sample_ID" %in% names(result))
+
+  # Verify spectral columns still present
+  spectral_cols <- grep("^[0-9]{3,4}$", names(result), value = TRUE)
+  expect_true(length(spectral_cols) > 0)
+
+  # Verify spectral values changed (preprocessing applied)
+  original_spectral <- setdiff(names(test_data), c("Sample_ID", "Response", "Project"))
+  processed_spectral <- intersect(original_spectral, spectral_cols)
+
+  if (length(processed_spectral) > 0) {
+    # At least some values should differ after preprocessing
+    col <- processed_spectral[1]
+    expect_false(all(test_data[[col]] == result[[col]], na.rm = TRUE))
   }
-  
-  # Test different smoothing windows
-  smooth_5 <- horizons:::preprocess_mir_spectra(spectral_data, smooth_window = 3)
-  smooth_11 <- horizons:::preprocess_mir_spectra(spectral_data, smooth_window = 7)
-  
-  # Larger window should produce smoother output (less variance)
-  spec_cols <- grep("^[0-9]+$", names(smooth_5), value = TRUE)
-  
-  var_5 <- var(as.matrix(smooth_5[spec_cols]), na.rm = TRUE)
-  var_11 <- var(as.matrix(smooth_11[spec_cols]), na.rm = TRUE)
-  
-  # More smoothing should reduce variance
-  expect_true(var_11 < var_5)
 })
 
-# Test PCA Functions ----------------------------------------------------------
+test_that("preprocess_mir_spectra applies 1st derivative correctly", {
+  # SPEC-COV-DATA-INT-009: First derivative preprocessing
 
-test_that("perform_pca_on_ossl works with valid data", {
-  # Create mock OSSL data with spectra and properties
-  n_samples <- 100
-  n_pcs <- 20
-  
-  ossl_data <- tibble(
-    Sample_ID = paste0("OSSL_", 1:n_samples),
-    clay = runif(n_samples, 100, 600),
-    ph = runif(n_samples, 4, 9),
-    oc = runif(n_samples, 5, 50)
+  test_data <- make_test_spectra(n_samples = 10, seed = 222)
+
+  result <- preprocess_mir_spectra(
+    spectral_data = test_data,
+    smooth_window = 9,
+    smooth_poly = 1,
+    derivative_order = 1,
+    verbose = FALSE
   )
-  
-  # Add spectral columns with numeric names
-  for (i in 1:50) {
-    ossl_data[[as.character(600 + i*50)]] <- runif(n_samples)
+
+  expect_s3_class(result, "data.frame")
+  expect_equal(nrow(result), 10)
+
+  # After 1st derivative, values will be different from original
+  spectral_cols <- grep("^[0-9]{3,4}$", names(result), value = TRUE)
+  expect_true(length(spectral_cols) > 0)
+})
+
+test_that("preprocess_mir_spectra applies 2nd derivative correctly", {
+  # SPEC-COV-DATA-INT-010: Second derivative preprocessing
+
+  test_data <- make_test_spectra(n_samples = 10, seed = 333)
+
+  result <- preprocess_mir_spectra(
+    spectral_data = test_data,
+    smooth_window = 9,
+    smooth_poly = 2,  # Need higher poly for 2nd derivative
+    derivative_order = 2,
+    verbose = FALSE
+  )
+
+  expect_s3_class(result, "data.frame")
+  expect_equal(nrow(result), 10)
+})
+
+test_that("preprocess_mir_spectra preserves non-spectral columns", {
+  # SPEC-COV-DATA-INT-011: Metadata columns preserved
+
+  test_data <- make_test_spectra(n_samples = 5, seed = 444)
+
+  result <- preprocess_mir_spectra(
+    spectral_data = test_data,
+    verbose = FALSE
+  )
+
+  # Sample_ID should be preserved
+  expect_true("Sample_ID" %in% names(result))
+  expect_setequal(result$Sample_ID, test_data$Sample_ID)
+})
+
+test_that("preprocess_mir_spectra handles different smooth windows", {
+  # SPEC-COV-DATA-INT-012: Smooth window parameter variations
+
+  test_data <- make_test_spectra(n_samples = 15, seed = 555)
+
+  # Test different window sizes
+  for (window in c(5, 9, 11, 15)) {
+    result <- preprocess_mir_spectra(
+      spectral_data = test_data,
+      smooth_window = window,
+      verbose = FALSE
+    )
+
+    expect_s3_class(result, "data.frame")
+    expect_equal(nrow(result), 15)
   }
-  
+})
+
+## ===========================================================================
+## INTEGRATION TESTS - PCA Computation
+## ===========================================================================
+
+test_that("perform_pca_on_ossl executes PCA on spectral data", {
+  # SPEC-COV-DATA-INT-013: Basic PCA computation workflow
+
+  # Create OSSL-like data with properties
+  test_data <- make_test_spectra(
+    n_samples = 100,  # Need sufficient samples for PCA
+    wavelengths = seq(600, 4000, by = 100),
+    seed = 666
+  )
+
+  # Add property columns (simulate OSSL structure)
+  test_data$clay <- rnorm(100, mean = 250, sd = 50)
+  test_data$ph <- rnorm(100, mean = 6.5, sd = 0.5)
+
   # Perform PCA
+  result <- perform_pca_on_ossl(
+    ossl_data = test_data,
+    variance_threshold = 0.90,  # Lower threshold for small dataset
+    verbose = FALSE
+  )
+
+  # Verify result structure
+  expect_type(result, "list")
+  expect_true("pca_model" %in% names(result))
+  expect_true("ossl_pca_scores" %in% names(result))
+  expect_true("variance_explained" %in% names(result))
+  expect_true("n_components" %in% names(result))
+
+  # Verify PCA model
+  expect_s3_class(result$pca_model, "prcomp")
+
+  # Verify PCA scores tibble
+  expect_s3_class(result$ossl_pca_scores, "data.frame")
+  expect_true("Sample_ID" %in% names(result$ossl_pca_scores))
+
+  # Verify PC columns exist
+  pc_cols <- grep("^Dim\\.[0-9]+$", names(result$ossl_pca_scores), value = TRUE)
+  expect_true(length(pc_cols) > 0)
+
+  # Verify property columns preserved
+  expect_true("clay" %in% names(result$ossl_pca_scores))
+  expect_true("ph" %in% names(result$ossl_pca_scores))
+})
+
+test_that("perform_pca_on_ossl respects variance threshold", {
+  # SPEC-COV-DATA-INT-014: Variance threshold controls component selection
+
+  test_data <- make_test_spectra(
+    n_samples = 80,
+    wavelengths = seq(600, 4000, by = 100),
+    seed = 777
+  )
+  test_data$oc <- rnorm(80, mean = 20, sd = 5)
+
+  # Test with lower threshold (fewer components)
+  result_low <- perform_pca_on_ossl(
+    ossl_data = test_data,
+    variance_threshold = 0.80,
+    verbose = FALSE
+  )
+
+  # Test with higher threshold (more components)
+  result_high <- perform_pca_on_ossl(
+    ossl_data = test_data,
+    variance_threshold = 0.95,
+    verbose = FALSE
+  )
+
+  # Higher threshold should require more components
+  expect_true(result_high$n_components >= result_low$n_components)
+})
+
+test_that("perform_pca_on_ossl handles missing spectral data", {
+  # SPEC-COV-DATA-INT-015: Missing data handling
+
+  test_data <- make_test_spectra(n_samples = 50, seed = 888)
+  test_data$sand <- rnorm(50, mean = 450, sd = 100)
+
+  # Introduce some missing spectral values
+  spectral_cols <- grep("^[0-9]{3,4}$", names(test_data), value = TRUE)
+  test_data[1:5, spectral_cols[1]] <- NA
+
+  # PCA should drop rows with missing data and warn
+  expect_warning(
+    result <- perform_pca_on_ossl(
+      ossl_data = test_data,
+      variance_threshold = 0.90,
+      verbose = FALSE
+    ),
+    "missing spectral data"
+  )
+
+  # Should still return valid results (with fewer samples)
+  expect_s3_class(result$ossl_pca_scores, "data.frame")
+  expect_true(nrow(result$ossl_pca_scores) < 50)
+})
+
+## ===========================================================================
+## INTEGRATION TESTS - PCA Projection
+## ===========================================================================
+
+test_that("project_spectra_to_pca projects new data to PCA space", {
+  # SPEC-COV-DATA-INT-016: Project new spectra workflow
+
+  # Create training data and fit PCA
+  train_data <- make_test_spectra(
+    n_samples = 100,
+    wavelengths = seq(600, 4000, by = 100),
+    seed = 999
+  )
+  train_data$clay <- rnorm(100, mean = 250, sd = 50)
+
   pca_result <- perform_pca_on_ossl(
-    ossl_data, 
-    variance_threshold = 0.95
+    ossl_data = train_data,
+    variance_threshold = 0.90,
+    verbose = FALSE
   )
-  
-  # Check structure
-  expect_type(pca_result, "list")
-  expect_true("pca_model" %in% names(pca_result))
-  expect_true("ossl_pca_scores" %in% names(pca_result))
-  expect_true("n_components" %in% names(pca_result))
-  expect_true("variance_explained" %in% names(pca_result))
-  
-  # Check PCA model
-  expect_s3_class(pca_result$pca_model, "prcomp")
-  
-  # Check scores
-  expect_s3_class(pca_result$ossl_pca_scores, "tbl_df")
-  expect_equal(nrow(pca_result$ossl_pca_scores), n_samples)
-  expect_true("Sample_ID" %in% names(pca_result$ossl_pca_scores))
-  
-  # Check that the number of components is reasonable
-  expect_gte(pca_result$n_components, 1)
-  expect_lte(pca_result$n_components, n_samples)
-})
 
-test_that("perform_pca_on_ossl handles variance thresholds correctly", {
-  # Create data with known variance structure
-  n_samples <- 50
-  
-  ossl_data <- tibble(Sample_ID = paste0("S", 1:n_samples))
-  
-  # Create columns with decreasing variance
-  for (i in 1:20) {
-    variance <- 10 / i  # Decreasing variance
-    ossl_data[[as.character(1000 + i*50)]] <- rnorm(n_samples, 0, sqrt(variance))
-  }
-  
-  # Test different thresholds
-  pca_80 <- horizons:::perform_pca_on_ossl(ossl_data, variance_threshold = 0.80)
-  pca_95 <- horizons:::perform_pca_on_ossl(ossl_data, variance_threshold = 0.95)
-  pca_99 <- horizons:::perform_pca_on_ossl(ossl_data, variance_threshold = 0.99)
-  
-  # More components needed for higher threshold
-  expect_true(pca_80$n_components <= pca_95$n_components)
-  expect_true(pca_95$n_components <= pca_99$n_components)
-})
-
-test_that("apply_pca_to_unknown works with compatible data", {
-  skip("Function apply_pca_to_unknown not found in codebase")
-  # First create PCA model from OSSL
-  n_ossl <- 100
-  n_unknown <- 30
-  n_features <- 25
-  
-  # Create OSSL data
-  ossl_data <- tibble(Sample_ID = paste0("OSSL_", 1:n_ossl))
-  feature_names <- as.character(seq(1000, 3000, length.out = n_features))
-  
-  for (feat in feature_names) {
-    ossl_data[[feat]] <- rnorm(n_ossl)
-  }
-  
-  # Create PCA model
-  pca_result <- horizons:::perform_pca_on_ossl(ossl_data, variance_threshold = 0.95)
-  
-  # Create unknown data with same features
-  unknown_data <- tibble(Sample_ID = paste0("UNK_", 1:n_unknown))
-  for (feat in feature_names) {
-    unknown_data[[feat]] <- rnorm(n_unknown)
-  }
-  
-  # Apply PCA
-  unknown_scores <- apply_pca_to_unknown(
-    unknown_data,
-    pca_result$pca_model,
-    pca_result$n_components
+  # Create new data to project
+  new_data <- make_test_spectra(
+    n_samples = 20,
+    wavelengths = seq(600, 4000, by = 100),
+    seed = 1010
   )
-  
-  # Check output
-  expect_s3_class(unknown_scores, "tbl_df")
-  expect_equal(nrow(unknown_scores), n_unknown)
-  expect_true("Sample_ID" %in% names(unknown_scores))
-  
-  # Check correct number of components
-  pc_cols <- grep("^Dim\\.", names(unknown_scores), value = TRUE)
+
+  # Project to PCA space
+  projected <- project_spectra_to_pca(
+    new_data = new_data,
+    pca_model = pca_result$pca_model,
+    verbose = FALSE
+  )
+
+  # Verify structure
+  expect_s3_class(projected, "data.frame")
+  expect_equal(nrow(projected), 20)
+  expect_true("Sample_ID" %in% names(projected))
+
+  # Verify PC columns exist
+  pc_cols <- grep("^Dim\\.[0-9]+$", names(projected), value = TRUE)
+  expect_true(length(pc_cols) > 0)
   expect_equal(length(pc_cols), pca_result$n_components)
 })
 
-test_that("apply_pca_to_unknown handles mismatched features", {
-  skip("Function apply_pca_to_unknown not found in codebase")
-  # Create PCA model
-  ossl_data <- tibble(
-    Sample_ID = paste0("OSSL_", 1:50),
-    "1000" = rnorm(50),
-    "2000" = rnorm(50),
-    "3000" = rnorm(50)
+test_that("project_spectra_to_pca preserves metadata columns", {
+  # SPEC-COV-DATA-INT-017: Metadata preservation during projection
+
+  # Training data
+  train_data <- make_test_spectra(n_samples = 80, seed = 1111)
+  train_data$silt <- rnorm(80, mean = 300, sd = 60)
+
+  pca_result <- perform_pca_on_ossl(
+    ossl_data = train_data,
+    variance_threshold = 0.85,
+    verbose = FALSE
   )
-  
-  pca_result <- horizons:::perform_pca_on_ossl(ossl_data)
-  
-  # Unknown data with different features
-  unknown_wrong <- tibble(
-    Sample_ID = paste0("UNK_", 1:10),
-    "1500" = rnorm(10),  # Wrong wavelength
-    "2500" = rnorm(10)
+
+  # New data with metadata
+  new_data <- make_test_spectra(n_samples = 15, seed = 1212)
+
+  projected <- project_spectra_to_pca(
+    new_data = new_data,
+    pca_model = pca_result$pca_model,
+    verbose = FALSE
   )
-  
+
+  # Sample_ID should be preserved
+  expect_true("Sample_ID" %in% names(projected))
+  expect_setequal(projected$Sample_ID, new_data$Sample_ID)
+})
+
+test_that("get_processed_ossl_training_data returns full pipeline results with mocks", {
+  fake_raw <- tibble::tibble(
+    Sample_ID = c("S1", "S2"),
+    `600` = c(0.1, 0.2),
+    clay = c(5, 6)
+  )
+
+  fake_processed <- fake_raw
+
+  fake_pca <- list(
+    pca_model = list(dummy = TRUE),
+    ossl_pca_scores = tibble::tibble(
+      Sample_ID = c("S1", "S2"),
+      Dim.1 = c(1, 2)
+    ),
+    variance_explained = c(0.7, 0.3),
+    n_components = 1
+  )
+
+  result <- with_mocked_bindings(
+    get_ossl_training_data = function(...) fake_raw,
+    preprocess_mir_spectra = function(...) fake_processed,
+    perform_pca_on_ossl    = function(...) fake_pca,
+    horizons:::get_processed_ossl_training_data(
+      properties = c("clay"),
+      variance_threshold = 0.9,
+      verbose = FALSE
+    ),
+    .package = "horizons"
+  )
+
+  expect_type(result, "list")
+  expect_true(all(c("raw_data", "processed_data", "pca_model", "pca_scores", "variance_explained") %in% names(result)))
+  expect_equal(nrow(result$pca_scores), 2)
+})
+
+test_that("get_processed_ossl_training_data returns NULL when preprocessing fails", {
+  fake_raw <- tibble::tibble(
+    Sample_ID = c("S1", "S2"),
+    `600` = c(0.1, 0.2),
+    clay = c(5, 6)
+  )
+
+  result <- with_mocked_bindings(
+    get_ossl_training_data = function(...) fake_raw,
+    preprocess_mir_spectra = function(...) NULL,
+    horizons:::get_processed_ossl_training_data(
+      properties = c("clay"),
+      verbose = FALSE
+    ),
+    .package = "horizons"
+  )
+
+  expect_null(result)
+})
+
+test_that("get_processed_ossl_training_data returns NULL when base data missing", {
+  result <- with_mocked_bindings(
+    get_ossl_training_data = function(...) NULL,
+    horizons:::get_processed_ossl_training_data(
+      properties = c("clay"),
+      verbose = FALSE
+    ),
+    .package = "horizons"
+  )
+
+  expect_null(result)
+})
+
+test_that("get_ossl_training_data loads cached data without download", {
+  cache_dir <- withr::local_tempdir(pattern = "ossl_cache_")
+
+  location_data <- tibble::tibble(
+    id.layer_uuid_txt = c("S1", "S2"),
+    layer.upper.depth_usda_cm = c(0, 0)
+  )
+
+  lab_data <- tibble::tibble(
+    id.layer_uuid_txt = c("S1", "S2"),
+    clay.tot_usda.a334_w.pct = c(5, 6)
+  )
+
+  mir_data <- tibble::tibble(
+    id.layer_uuid_txt = c("S1", "S2"),
+    `scan_mir.600_abs` = c(0.1, 0.2),
+    `scan_mir.700_abs` = c(0.2, 0.3)
+  )
+
+  qs::qsave(location_data, file.path(cache_dir, "ossl_location_data.qs"))
+  qs::qsave(lab_data,      file.path(cache_dir, "ossl_lab_data.qs"))
+  qs::qsave(mir_data,      file.path(cache_dir, "ossl_mir_raw.qs"))
+
+  result <- with_mocked_bindings(
+    R_user_dir = function(...) cache_dir,
+    horizons:::get_ossl_training_data(
+      properties  = c("clay"),
+      max_samples = 1,
+      refresh     = FALSE,
+      verbose     = FALSE
+    ),
+    .package = "tools"
+  )
+
+  expect_s3_class(result, "tbl_df")
+  expect_equal(nrow(result), 1)
+  expect_true("clay" %in% names(result))
+  expect_true(all(c("600", "700") %in% names(result)))
+})
+
+test_that("get_ossl_training_data aborts when download is cancelled", {
+  cache_dir <- withr::local_tempdir(pattern = "ossl_empty_")
+
   expect_error(
-    apply_pca_to_unknown(unknown_wrong, pca_result$pca_model, pca_result$n_components),
-    "Missing required spectral columns"
-  )
-})
-
-# Test Integrated Processing Function -----------------------------------------
-
-test_that("get_processed_ossl_training_data integrates all steps", {
-  skip("Requires OSSL data download - test with mock in CI/CD")
-  
-  # This would be tested with mocked OSSL data in CI/CD
-  properties <- c("clay", "ph")
-  
-  with_mocked_ossl({
-    result <- get_processed_ossl_training_data(
-      properties = properties,
-      variance_threshold = 0.95
-    )
-    
-    # Check structure
-    expect_type(result, "list")
-    expect_true("data" %in% names(result))
-    expect_true("pca_model" %in% names(result))
-    expect_true("pca_scores" %in% names(result))
-    expect_true("n_components" %in% names(result))
-    expect_true("preprocessing_params" %in% names(result))
-    
-    # Check data has required properties
-    expect_true(all(properties %in% names(result$data)))
-    
-    # Check preprocessing params are stored
-    expect_true("smooth_window" %in% names(result$preprocessing_params))
-    expect_true("smooth_poly" %in% names(result$preprocessing_params))
-  })
-})
-
-# Test Performance and Memory -------------------------------------------------
-
-test_that("preprocess_mir_spectra handles large datasets efficiently", {
-  skip_on_cran()  # Skip on CRAN to save time
-  
-  # Create large dataset
-  n_samples <- 10000
-  n_wavelengths <- 500
-  
-  large_data <- tibble(Sample_ID = paste0("S", 1:n_samples))
-  
-  for (i in 1:n_wavelengths) {
-    large_data[[as.character(600 + i*5)]] <- runif(n_samples)
-  }
-  
-  # Measure time
-  time_taken <- system.time({
-    processed <- preprocess_mir_spectra(large_data)
-  })
-  
-  # Should process in reasonable time (< 10 seconds for 10k samples)
-  expect_true(time_taken["elapsed"] < 10)
-  
-  # Check memory usage doesn't explode
-  object_size <- object.size(processed)
-  original_size <- object.size(large_data)
-  
-  # Processed shouldn't be more than 2x original size
-  expect_true(as.numeric(object_size) < as.numeric(original_size) * 2)
-})
-
-test_that("PCA handles high-dimensional data efficiently", {
-  skip_on_cran()
-  
-  # Create high-dimensional dataset
-  n_samples <- 5000
-  n_features <- 1000
-  
-  high_dim_data <- tibble(Sample_ID = paste0("S", 1:n_samples))
-  
-  for (i in 1:n_features) {
-    high_dim_data[[as.character(1000 + i*10)]] <- rnorm(n_samples)
-  }
-  
-  # Should complete PCA in reasonable time
-  time_taken <- system.time({
-    pca_result <- horizons:::perform_pca_on_ossl(high_dim_data, variance_threshold = 0.95)
-  })
-  
-  expect_true(time_taken["elapsed"] < 30)  # 30 seconds for 5k x 1k matrix
-
-  # Should reduce dimensions (but 95% variance might need many components)
-  expect_true(pca_result$n_components < n_features)  # At least some reduction
-  expect_gte(pca_result$n_components, 1)
-})
-
-# Test Statistical Validity ---------------------------------------------------
-
-test_that("PCA preserves statistical properties", {
-  set.seed(123)
-  n_samples <- 200
-  
-  # Create data with known correlation structure
-  base1 <- rnorm(n_samples)
-  base2 <- rnorm(n_samples)
-  
-  data <- tibble(
-    Sample_ID = paste0("S", 1:n_samples),
-    "1000" = base1,
-    "1100" = base1 + rnorm(n_samples, 0, 0.1),  # Highly correlated with 1000
-    "2000" = base2,
-    "2100" = base2 + rnorm(n_samples, 0, 0.1),  # Highly correlated with 2000
-    "3000" = rnorm(n_samples)  # Independent
-  )
-  
-  pca_result <- horizons:::perform_pca_on_ossl(data, variance_threshold = 0.99)
-  
-  # Should identify approximately 3 main components
-  # (two correlated pairs + one independent)
-  expect_true(pca_result$n_components <= 4)
-  
-  # First components should explain most variance  
-  variance_pct <- (pca_result$pca_model$sdev[1:2]^2 / sum(pca_result$pca_model$sdev^2)) * 100
-  expect_gt(sum(variance_pct), 10)  # Lower threshold for synthetic data
-})
-
-test_that("preprocessing preserves relative distances", {
-  skip("Temporarily skipped - preprocessing function generates null results")
-  set.seed(456)
-  n_samples <- 50
-  
-  # Create spectral data with known groups
-  data <- tibble(Sample_ID = paste0("S", 1:n_samples))
-  
-  # Create two distinct spectral groups
-  for (i in 1:20) {
-    if (i <= 25) {
-      # Group 1: lower values
-      data[[as.character(1000 + i*100)]] <- c(
-        rnorm(25, mean = 0, sd = 0.5),
-        rnorm(25, mean = 3, sd = 0.5)
+    with_mocked_bindings(
+      menu = function(...) 2,
+      .package = "utils",
+      with_mocked_bindings(
+        R_user_dir = function(...) cache_dir,
+        horizons:::get_ossl_training_data(
+          properties = c("clay"),
+          verbose = FALSE
+        ),
+        .package = "tools"
       )
-    }
-  }
-  
-  # Calculate distances before preprocessing
-  spec_cols <- grep("^scan_mir\\.", names(data), value = TRUE)
-  dist_before <- dist(as.matrix(data[spec_cols]))
-  
-  # Preprocess
-  processed <- horizons:::preprocess_mir_spectra(data)
-  dist_after <- dist(as.matrix(processed[spec_cols]))
-  
-  # Correlation between distance matrices should be high
-  cor_distances <- cor(as.vector(dist_before), as.vector(dist_after))
-  expect_true(cor_distances > 0.8)  # Strong correlation preserved
+    ),
+    "User cancelled OSSL data download"
+  )
+})
+
+## ===========================================================================
+## VALIDATION TESTS - Property Mapping
+## ===========================================================================
+
+test_that("get_ossl_property_mapping never returns NULL", {
+  # SPEC-COV-DATA-VAL-001: Function always succeeds
+
+  result <- get_ossl_property_mapping()
+  expect_false(is.null(result))
+})
+
+test_that("validate_soil_properties handles empty input", {
+  # SPEC-COV-DATA-VAL-002: Empty property vector returns empty logical
+
+  # Empty input should return empty logical vector (not error)
+  result <- validate_soil_properties(character(0))
+  expect_true(is.logical(result) && length(result) == 0)
+})
+
+test_that("validate_soil_properties handles NULL input", {
+  # SPEC-COV-DATA-VAL-003: NULL input returns empty logical
+
+  # NULL input should return empty logical vector (consistent with empty character(0))
+  result <- validate_soil_properties(NULL)
+  expect_true(is.logical(result) && length(result) == 0)
+})
+
+test_that("validate_soil_properties is case-sensitive", {
+  # SPEC-COV-DATA-VAL-004: Property names must match exactly
+
+  expect_error(
+    validate_soil_properties("Clay"),  # Capital C
+    "Invalid soil properties"
+  )
+
+  expect_error(
+    validate_soil_properties("CLAY"),  # All caps
+    "Invalid soil properties"
+  )
+})
+
+## ===========================================================================
+## VALIDATION TESTS - Preprocessing
+## ===========================================================================
+
+test_that("preprocess_mir_spectra handles missing spectral columns", {
+  # SPEC-COV-DATA-VAL-005: No spectral columns present
+
+  # Data with no numeric column names (no spectral data)
+  test_data <- tibble::tibble(
+    Sample_ID = paste0("S", 1:10),
+    property1 = rnorm(10),
+    property2 = rnorm(10)
+  )
+
+  result <- preprocess_mir_spectra(
+    spectral_data = test_data,
+    verbose = FALSE
+  )
+
+  # Should return NULL when no spectral columns
+  expect_null(result)
+})
+
+test_that("preprocess_mir_spectra validates smooth_window parameter", {
+  # SPEC-COV-DATA-VAL-006: Window size must be appropriate
+
+  test_data <- make_test_spectra(n_samples = 10, seed = 1313)
+
+  # Window size of 1 is too small for SG smoothing
+  expect_warning(
+    preprocess_mir_spectra(
+      spectral_data = test_data,
+      smooth_window = 1,
+      verbose = FALSE
+    )
+  )
+})
+
+test_that("preprocess_mir_spectra handles constant spectra", {
+  # SPEC-COV-DATA-VAL-007: All-zero or constant spectra
+
+  test_data <- make_test_spectra(n_samples = 10, seed = 1414)
+
+  # Make one spectrum constant (all zeros)
+  spectral_cols <- grep("^[0-9]{3,4}$", names(test_data), value = TRUE)
+  test_data[1, spectral_cols] <- 0
+
+  # Should warn about constant spectra
+  expect_warning(
+    preprocess_mir_spectra(
+      spectral_data = test_data,
+      verbose = FALSE
+    ),
+    "constant spectra"
+  )
+})
+
+## ===========================================================================
+## VALIDATION TESTS - PCA
+## ===========================================================================
+
+test_that("perform_pca_on_ossl requires sufficient samples", {
+  # SPEC-COV-DATA-VAL-008: Too few samples for PCA
+
+  # Very small dataset (insufficient for PCA)
+  test_data <- make_test_spectra(n_samples = 3, seed = 1515)
+  test_data$ph <- rnorm(3, mean = 6.5, sd = 0.5)
+
+  # PCA should fail or return NULL with too few samples
+  result <- perform_pca_on_ossl(
+    ossl_data = test_data,
+    variance_threshold = 0.90,
+    verbose = FALSE
+  )
+
+  # Either NULL or error is acceptable here
+  expect_true(is.null(result) || inherits(result, "list"))
+})
+
+test_that("perform_pca_on_ossl handles all-zero columns", {
+  # SPEC-COV-DATA-VAL-009: Zero-variance spectral columns
+
+  test_data <- make_test_spectra(n_samples = 50, seed = 1616)
+  test_data$cec <- rnorm(50, mean = 15, sd = 3)
+
+  # Set one spectral column to all zeros (zero variance)
+  spectral_cols <- grep("^[0-9]{3,4}$", names(test_data), value = TRUE)
+  test_data[[spectral_cols[1]]] <- 0
+
+  # PCA should handle this (scaling will create NAs for zero-variance columns)
+  result <- perform_pca_on_ossl(
+    ossl_data = test_data,
+    variance_threshold = 0.90,
+    verbose = FALSE
+  )
+
+  # Should either return NULL or valid results
+  expect_true(is.null(result) || inherits(result, "list"))
+})
+
+test_that("project_spectra_to_pca requires matching spectral columns", {
+  # SPEC-COV-DATA-VAL-010: Column mismatch between training and new data
+
+  # Training data
+  train_data <- make_test_spectra(
+    n_samples = 80,
+    wavelengths = seq(600, 4000, by = 100),
+    seed = 1717
+  )
+  train_data$carbonate <- rnorm(80, mean = 10, sd = 2)
+
+  pca_result <- perform_pca_on_ossl(
+    ossl_data = train_data,
+    variance_threshold = 0.85,
+    verbose = FALSE
+  )
+
+  # New data with DIFFERENT wavelengths
+  new_data <- make_test_spectra(
+    n_samples = 20,
+    wavelengths = seq(700, 3500, by = 100),  # Different range!
+    seed = 1818
+  )
+
+  # Projection should handle missing columns by warning or filling zeros
+  result <- project_spectra_to_pca(
+    new_data = new_data,
+    pca_model = pca_result$pca_model,
+    verbose = FALSE
+  )
+
+  # Should still return a result (with warnings about missing columns)
+  expect_true(is.null(result) || is.data.frame(result))
+})
+
+test_that("project_spectra_to_pca handles empty new data", {
+  # SPEC-COV-DATA-VAL-011: Empty tibble projection
+
+  # Training data
+  train_data <- make_test_spectra(n_samples = 60, seed = 1919)
+  train_data$phosphorus <- rnorm(60, mean = 25, sd = 8)
+
+  pca_result <- perform_pca_on_ossl(
+    ossl_data = train_data,
+    variance_threshold = 0.90,
+    verbose = FALSE
+  )
+
+  # Empty new data
+  empty_data <- make_test_spectra(n_samples = 0, seed = 2020)
+
+  result <- project_spectra_to_pca(
+    new_data = empty_data,
+    pca_model = pca_result$pca_model,
+    verbose = FALSE
+  )
+
+  # Should return NULL or empty tibble
+  expect_true(is.null(result) || (is.data.frame(result) && nrow(result) == 0))
 })

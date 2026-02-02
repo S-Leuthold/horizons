@@ -2,7 +2,7 @@
 
 > Spectral Ensemble Modeling for Soil Property Prediction
 
-<img src="man/figures/logo.png" align="right" width="140"/>
+<img src="man/figures/logo.png" alt="horizons logo" align="right" width="140"/>
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE.md)
 [![R-CMD-check](https://github.com/S-Leuthold/horizons/actions/workflows/R-CMD-check.yaml/badge.svg)](https://github.com/S-Leuthold/horizons/actions/workflows/R-CMD-check.yaml)
@@ -36,33 +36,39 @@ remotes::install_github("S-Leuthold/horizons")
 ## Key Features
 
 ### Data Ingestion
+
 - Read OPUS files directly with automatic metadata extraction
 - Flexible filename parsing for sample identification
 - Merge spectral data with laboratory measurements
 
 ### Spectral Preprocessing
+
 - Standard Normal Variate (SNV) normalization
 - Savitzky-Golay smoothing and derivatives
 - Multiplicative Scatter Correction (MSC)
 - Baseline correction methods
 
 ### Model Training
+
 - Nine supported algorithms: Random Forest, Cubist, XGBoost, PLSR, Elastic Net, SVM, MARS, MLP, LightGBM
 - Two-stage hyperparameter tuning (grid search + Bayesian optimization)
 - Cross-validation with stratified or grouped folds
 - Parallel execution (local multi-core or HPC clusters)
 
 ### Ensemble Methods
+
 - Stacked ensemble models using `stacks`
 - Weighted model averaging
 - Automatic model selection based on performance metrics
 
 ### Covariate Integration
+
 - Predict soil covariates (pH, clay, sand) from spectra using OSSL-trained models
 - Fetch climate data (MAT, MAP, GDD) from Daymet API
 - Incorporate covariates into prediction models
 
 ### Performance Metrics
+
 - Standard metrics: RMSE, R², MAE
 - Spectroscopy-specific: RPD (Ratio of Performance to Deviation), RPIQ
 - Agreement metrics: Concordance Correlation Coefficient (CCC)
@@ -119,16 +125,19 @@ ensemble <- build_ensemble_stack(
 ## Roadmap
 
 ### Current (v0.9.0)
+
 - Custom training mode with full ensemble pipeline
 - Local and HPC execution backends
 - 80%+ test coverage
 
 ### In Development
+
 - **Library Prediction Mode**: Pre-trained models for 15 standard soil properties
 - **Uncertainty Quantification**: Per-sample prediction intervals with conformal calibration
 - **Applicability Domain**: Distance-based reliability metrics for new samples
 
 ### Planned
+
 - JOSS publication
 - Vignettes with reproducible examples
 - Instrument calibration transfer methods
@@ -139,7 +148,7 @@ ensemble <- build_ensemble_stack(
 
 If you use `horizons` in your research, please cite:
 
-```
+```text
 Leuthold, S. (2025). horizons: Spectral Ensemble Modeling for Soil Property
 Prediction. R package version 0.9.0. https://github.com/S-Leuthold/horizons
 ```
