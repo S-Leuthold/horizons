@@ -5,7 +5,6 @@
 .RDataTmp*
 .Rhistory
 .Rproj.user
-*.Rproj
 
 # R build ignores
 .Rbuildignore

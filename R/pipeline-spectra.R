@@ -489,21 +489,38 @@ load_opus_files <- function(source,
 
     opus_obj <- spectra_list[[i]]
 
+    ## Unwrap filename-level nesting from opusreader2 -------------------------
+    ## read_opus() returns list keyed by filename, then blocks within each file
+
+    if (length(opus_obj) == 1 && is.list(opus_obj[[1]])) {
+
+      opus_obj <- opus_obj[[1]]
+
+    }
+
     ## Get AB block (absorbance) ---------------------------------------------
+
+    ab_block <- NULL
 
     if ("ab" %in% names(opus_obj)) {
 
-      ab_data <- opus_obj$ab
+      ab_block <- opus_obj$ab
 
     } else if ("AB" %in% names(opus_obj)) {
 
-      ab_data <- opus_obj$AB
+      ab_block <- opus_obj$AB
 
     } else {
 
-      ## Try first available data block
-      data_blocks <- names(opus_obj)[!names(opus_obj) %in%
-        c("basic_metadata", "instrument_ref", "optik_ref", "acquisition_ref")]
+      ## Try first block that looks like spectral data
+      metadata_names <- c("basic_metadata", "instrument_ref", "optik_ref",
+                          "acquisition_ref")
+      param_pattern  <- "_data_param$"
+
+      data_blocks <- names(opus_obj)[
+        !names(opus_obj) %in% metadata_names &
+        !grepl(param_pattern, names(opus_obj))
+      ]
 
       if (length(data_blocks) == 0) {
 
@@ -512,19 +529,24 @@ load_opus_files <- function(source,
 
       }
 
-      ab_data <- opus_obj[[data_blocks[1]]]
+      ab_block <- opus_obj[[data_blocks[1]]]
 
     }
 
-    ## Convert to tibble row -------------------------------------------------
+    ## Extract spectral matrix from block ------------------------------------
+    ## opusreader2 blocks are lists with $data (1-row matrix) and $wavenumbers
 
-    if (inherits(ab_data, "data.frame")) {
+    if (is.list(ab_block) && "data" %in% names(ab_block)) {
 
-      row_data <- ab_data
+      row_data <- tibble::as_tibble(ab_block$data)
 
-    } else if (is.numeric(ab_data)) {
+    } else if (inherits(ab_block, "data.frame")) {
 
-      row_data <- tibble::as_tibble(t(ab_data))
+      row_data <- tibble::as_tibble(ab_block)
+
+    } else if (is.numeric(ab_block)) {
+
+      row_data <- tibble::as_tibble(t(ab_block))
 
     } else {
 
