@@ -87,19 +87,12 @@ evaluate <- function(x,
 
   }
 
+  n_dropped <- 0L
+
   if (any(na_mask)) {
 
     n_dropped <- sum(na_mask)
     analysis  <- analysis[!na_mask, , drop = FALSE]
-
-    if (verbose) {
-
-      cat(paste0(
-        "\u2502  ", cli::col_yellow("Dropped ", n_dropped,
-                                     " rows with NA outcome"), "\n"
-      ))
-
-    }
 
   }
 
@@ -245,6 +238,14 @@ evaluate <- function(x,
     cat(paste0("\u250C Evaluation ",
                paste(rep("\u2500", 50), collapse = ""), "\n"))
     cat("\u2502\n")
+    if (n_dropped > 0) {
+
+      cat(paste0("\u2502  ",
+                 cli::col_yellow("Dropped ", n_dropped,
+                                  " rows with NA outcome"), "\n"))
+
+    }
+
     cat(paste0("\u2502  Split: ", n_train, " train / ", n_test,
                " test (80/20, stratified)\n"))
     cat(paste0("\u2502  Tuning: ", cv_folds, "-fold CV, grid = ",
