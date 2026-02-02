@@ -115,3 +115,4 @@ Collate:
     'pipeline-standardize.R'
     'pipeline-parse-ids.R'
     'pipeline-average.R'
+    'pipeline-add-response.R'
