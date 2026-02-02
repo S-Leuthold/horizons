@@ -1,10 +1,6 @@
-#' Package Constants
-#'
-#' @description
-#' Central location for package-wide constants used in validation and configuration.
-#'
-#' @keywords internal
-#' @name constants
+# R/constants.R
+# Central location for package-wide constants used in validation and
+# configuration.
 
 ## Model Types ----------------------------------------------------------------
 

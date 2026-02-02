@@ -1,19 +1,6 @@
-#' Custom Yardstick Metrics for Spectroscopic Modeling
-#'
-#' @description
-#' Three custom regression metrics used throughout horizons for model evaluation.
-#' All follow the yardstick three-layer pattern: `_vec` (vector computation),
-#' `_impl` (data-frame wrapper), and metric constructor.
-#'
-#' * **RPD** (Ratio of Performance to Deviation): `SD(truth) / RMSE`.
-#'   Scale-independent, standard in spectroscopy (Williams & Norris).
-#' * **RRMSE** (Relative RMSE): `100 * RMSE / mean(truth)`.
-#'   Unitless percentage, useful for cross-property comparison.
-#' * **CCC** (Lin's Concordance Correlation Coefficient): Measures agreement
-#'   (precision + accuracy). Range [-1, 1].
-#'
-#' @name horizons_metrics
-#' @seealso [yardstick::metric_set()]
+# R/metrics.R
+# Custom yardstick metrics for spectroscopic modeling: RPD, RRMSE, CCC.
+# All follow the yardstick three-layer pattern: _vec, _impl, constructor.
 
 ## ===========================================================================
 ## RPD — Ratio of Performance to Deviation
