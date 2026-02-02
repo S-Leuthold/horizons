@@ -221,6 +221,7 @@ average <- function(x,
 
   results_list        <- vector("list", n_groups)
   n_dropped           <- 0
+  n_groups_with_drops <- 0L
   all_outlier_samples <- character()
   dropped_samples     <- character()
   qc_details          <- list()
@@ -249,12 +250,18 @@ average <- function(x,
 
       ## Group was dropped (all outliers + drop mode) ------------------------
 
-      dropped_samples <- c(dropped_samples, as.character(group_id))
-      n_dropped <- n_dropped + n_reps
+      dropped_samples     <- c(dropped_samples, as.character(group_id))
+      n_dropped           <- n_dropped + n_reps
+      n_groups_with_drops <- n_groups_with_drops + 1L
 
     } else {
 
       results_list[[i]] <- group_result$averaged
+
+      if (group_result$n_dropped > 0) {
+        n_groups_with_drops <- n_groups_with_drops + 1L
+      }
+
       n_dropped <- n_dropped + group_result$n_dropped
 
       if (group_result$all_outliers) {
@@ -383,15 +390,40 @@ average <- function(x,
 
     cat(paste0("\u251C\u2500 ", cli::style_bold("Averaging replicates"), "...\n"))
     cat(paste0("\u2502  \u251C\u2500 ", n_groups, " groups from ",
-               n_replicates, " replicates\n"))
+               n_replicates, " scans\n"))
 
-    if (n_dropped > 0) {
+    if (quality_check) {
 
-      cat(paste0("\u2502  \u251C\u2500 QC: ", n_dropped, " replicates dropped\n"))
+      if (n_dropped > 0) {
 
-    } else {
+        cat(paste0("\u2502  \u251C\u2500 QC: ", n_dropped, " replicates dropped from ",
+                   n_groups_with_drops, " groups\n"))
 
-      cat(paste0("\u2502  \u251C\u2500 QC: all groups clean\n"))
+        if (length(dropped_samples) > 0) {
+
+          cat(paste0("\u2502  \u251C\u2500 Dropped entirely: ",
+                     paste(head(dropped_samples, 5), collapse = ", "),
+                     if (length(dropped_samples) > 5)
+                       paste0(" (+", length(dropped_samples) - 5, " more)") else "",
+                     "\n"))
+
+        }
+
+        if (length(all_outlier_samples) > 0) {
+
+          cat(paste0("\u2502  \u251C\u2500 All-outlier groups: ",
+                     paste(head(all_outlier_samples, 5), collapse = ", "),
+                     if (length(all_outlier_samples) > 5)
+                       paste0(" (+", length(all_outlier_samples) - 5, " more)") else "",
+                     " (averaged anyway)\n"))
+
+        }
+
+      } else {
+
+        cat(paste0("\u2502  \u251C\u2500 QC: all ", n_groups, " groups clean\n"))
+
+      }
 
     }
 
