@@ -487,6 +487,7 @@ print.horizons_data <- function(x, ...) {
     # Determine which optional sections follow Samples
     has_responses <- !is.null(x$data$n_responses) && x$data$n_responses > 0
     has_covars    <- !is.null(x$data$n_covariates) && x$data$n_covariates > 0
+    has_outcome   <- any(x$data$role_map$role == "outcome")
 
     # Predictors with wavenumber range
     if (!is.null(x$data$n_predictors) && x$data$n_predictors > 0) {
@@ -495,7 +496,7 @@ print.horizons_data <- function(x, ...) {
       wn_candidates  <- predictor_vars[grepl("^(wn_)?[0-9.]+$", predictor_vars)]
       wn_values      <- as.numeric(gsub("^wn_", "", wn_candidates))
 
-      has_more <- has_responses || has_covars
+      has_more <- has_outcome || has_responses || has_covars
       branch   <- if (has_more) "\u251C\u2500" else "\u2514\u2500"
 
       if (length(wn_values) > 0) {
@@ -509,6 +510,16 @@ print.horizons_data <- function(x, ...) {
         cat(paste0("   ", branch, " Predictors: ", x$data$n_predictors, "\n"))
 
       }
+    }
+
+    # Outcome (promoted response)
+    if (has_outcome) {
+
+      outcome_var <- x$data$role_map$variable[x$data$role_map$role == "outcome"]
+      has_more    <- has_responses || has_covars
+      branch      <- if (has_more) "\u251C\u2500" else "\u2514\u2500"
+      cat(paste0("   ", branch, " Outcome: ", outcome_var, "\n"))
+
     }
 
     # Responses
@@ -774,12 +785,38 @@ summary.horizons_data <- function(object, ...) {
   cat(cli::style_bold("Configuration\n"))
 
   n_configs <- if (!is.null(x$config$n_configs)) x$config$n_configs else 0
-  cat(paste0("   \u251C\u2500 Configs defined: ", n_configs, "\n"))
 
-  cat(paste0("   \u2514\u2500 Tuning defaults:\n"))
-  cat(paste0("         \u251C\u2500 Grid size: ", x$config$tuning$grid_size, "\n"))
-  cat(paste0("         \u251C\u2500 Bayesian iterations: ", x$config$tuning$bayesian_iter, "\n"))
-  cat(paste0("         \u2514\u2500 CV folds: ", x$config$tuning$cv_folds, "\n"))
+  if (n_configs > 0 && !is.null(x$config$expansion)) {
+
+    ## Configured — show expansion axes
+    exp <- x$config$expansion
+
+    cat(paste0("   \u251C\u2500 Configs defined: ", n_configs, "\n"))
+    cat(paste0("   \u251C\u2500 Outcome: ", exp$outcome, "\n"))
+    cat(paste0("   \u251C\u2500 Models: ", paste(exp$models, collapse = ", "), "\n"))
+    cat(paste0("   \u251C\u2500 Preprocessing: ", paste(exp$preprocessing, collapse = ", "), "\n"))
+    cat(paste0("   \u251C\u2500 Transformations: ", paste(exp$transformations, collapse = ", "), "\n"))
+    cat(paste0("   \u251C\u2500 Feature selection: ", paste(exp$feature_selection, collapse = ", "), "\n"))
+
+    if (!is.null(exp$cov_fusion)) {
+      cat(paste0("   \u251C\u2500 Covariate fusion: ", exp$cov_fusion, "\n"))
+    }
+
+    cat(paste0("   \u2514\u2500 Tuning:\n"))
+    cat(paste0("         \u251C\u2500 Grid size: ", x$config$tuning$grid_size, "\n"))
+    cat(paste0("         \u251C\u2500 Bayesian iterations: ", x$config$tuning$bayesian_iter, "\n"))
+    cat(paste0("         \u2514\u2500 CV folds: ", x$config$tuning$cv_folds, "\n"))
+
+  } else {
+
+    ## Not configured yet
+    cat(paste0("   \u251C\u2500 Configs defined: ", n_configs, "\n"))
+    cat(paste0("   \u2514\u2500 Tuning defaults:\n"))
+    cat(paste0("         \u251C\u2500 Grid size: ", x$config$tuning$grid_size, "\n"))
+    cat(paste0("         \u251C\u2500 Bayesian iterations: ", x$config$tuning$bayesian_iter, "\n"))
+    cat(paste0("         \u2514\u2500 CV folds: ", x$config$tuning$cv_folds, "\n"))
+
+  }
 
   cat("\n")
 
@@ -819,6 +856,10 @@ summary.horizons_data <- function(object, ...) {
   } else if (is.null(x$config$configs) || x$config$n_configs == 0) {
 
     next_step <- "configure()"
+
+  } else if (is.null(x$validation$passed)) {
+
+    next_step <- "validate()"
 
   } else if (is.null(x$evaluation$results)) {
 
