@@ -152,6 +152,15 @@ spectra <- function(source,
 
   }
 
+  ## -------------------------------------------------------------------------
+  ## Step 3: CLI output
+  ## -------------------------------------------------------------------------
+
+  cat(paste0("\u251C\u2500 ", cli::style_bold("Loading spectra"), "...\n"))
+  cat(paste0("\u2502  \u2514\u2500 ", result$data$n_rows, " samples \u00D7 ",
+             result$data$n_predictors, " predictors\n"))
+  cat("\u2502\n")
+
   result
 
 }

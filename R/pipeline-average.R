@@ -211,16 +211,7 @@ average <- function(x,
   unique_groups <- unique(group_values)
   n_groups <- length(unique_groups)
 
-  if (verbose) {
-
-    cli::cli_text("")
-    cli::cli_text("\u2502")
-    cli::cli_text("\u251c\u2500 {cli::style_bold('Averaging replicates')}...")
-    cli::cli_text("\u2502  \u251c\u2500 Groups: {n_groups}")
-    cli::cli_text("\u2502  \u251c\u2500 Replicates: {nrow(analysis)}")
-    cli::cli_text("\u2502  \u2514\u2500 Quality check: {ifelse(quality_check, 'enabled', 'disabled')}")
-
-  }
+  n_replicates <- nrow(analysis)
 
   ## -------------------------------------------------------------------------
   ## Step 4: Process each group
@@ -390,33 +381,23 @@ average <- function(x,
 
   if (verbose) {
 
-    cli::cli_text("\u2502")
-    cli::cli_text("\u2514\u2500 {cli::style_bold('Complete')}")
-    cli::cli_text("   \u251c\u2500 Samples: {nrow(averaged)}")
+    cat(paste0("\u251C\u2500 ", cli::style_bold("Averaging replicates"), "...\n"))
+    cat(paste0("\u2502  \u251C\u2500 ", n_groups, " groups from ",
+               n_replicates, " replicates\n"))
 
     if (n_dropped > 0) {
 
-      cli::cli_text("   \u251c\u2500 Replicates dropped: {n_dropped}")
-
-    }
-
-    if (length(dropped_meta) > 0) {
-
-      cli::cli_text("   \u251c\u2500 Meta columns dropped: {length(dropped_meta)}")
-
-    }
-
-    if (length(all_outlier_samples) > 0) {
-
-      cli::cli_text("   \u2514\u2500 All-outlier samples: {length(all_outlier_samples)}")
+      cat(paste0("\u2502  \u251C\u2500 QC: ", n_dropped, " replicates dropped\n"))
 
     } else {
 
-      cli::cli_text("   \u2514\u2500 QC: all groups clean")
+      cat(paste0("\u2502  \u251C\u2500 QC: all groups clean\n"))
 
     }
 
-    cli::cli_text("")
+    cat(paste0("\u2502  \u2514\u2500 ", nrow(averaged), " samples \u00D7 ",
+               x$data$n_predictors, " predictors\n"))
+    cat("\u2502\n")
 
   }
 
