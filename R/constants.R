@@ -35,6 +35,19 @@ MODEL_SPECS <- list(
   mars        = list(fn = "mars",         engine = "earth")
 )
 
+# Human-readable model names for CLI tree output
+MODEL_DISPLAY_NAMES <- c(
+  rf          = "Random Forest",
+  cubist      = "Cubist",
+  xgboost     = "XGBoost",
+  plsr        = "PLS",
+  elastic_net = "Elastic Net",
+  svm_rbf     = "SVM-RBF",
+  mlp         = "Neural Network",
+  lightgbm    = "LightGBM",
+  mars        = "MARS"
+)
+
 ## Transformations ------------------------------------------------------------
 
 # Valid response transformations
@@ -63,7 +76,6 @@ VALID_PREPROCESSING <- c(
 VALID_FEATURE_SELECTION <- c(
   "none",
   "pca",
-  "pls",
   "correlation",
   "boruta",
   "cars"

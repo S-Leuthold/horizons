@@ -2,7 +2,7 @@
 % Please edit documentation in R/utils-errors.R
 \name{handle_results}
 \alias{handle_results}
-\title{Handle results from safely_execute with detailed error reporting}
+\title{Handle Results from safely_execute}
 \usage{
 handle_results(
   safe_result,
@@ -13,39 +13,24 @@ handle_results(
 )
 }
 \arguments{
-\item{safe_result}{List from safely_execute containing result, error, warnings, messages}
+\item{safe_result}{List from \code{safely_execute()} with \code{result} and \code{error}.}
 
-\item{error_title}{Character. Main error message to display}
+\item{error_title}{Character. Main error message for abort. Default
+"Operation failed".}
 
-\item{error_hints}{Character vector. Troubleshooting suggestions (optional)}
+\item{error_hints}{Character vector. Troubleshooting suggestions appended
+to the error message.}
 
-\item{abort_on_null}{Logical. Whether to abort if result is NULL (default: TRUE)}
+\item{abort_on_null}{Logical. Abort if result is NULL? Default TRUE.}
 
-\item{silent}{Logical. Suppress non-error output (default: FALSE)}
+\item{silent}{Logical. Suppress re-emitted warnings/messages? Default FALSE.}
 }
 \value{
-The result from safe_result, or NULL if abort_on_null = FALSE
+The result from \code{safe_result}, or NULL if \code{abort_on_null = FALSE}.
 }
 \description{
-Processes the output from safely_execute, providing detailed error reporting
-when operations fail. Extracts and formats errors, warnings, and messages
-for clear user feedback.
-}
-\examples{
-\dontrun{
-safe_result <- safely_execute(
-  expr = {some_risky_operation()},
-  default_value = NULL
-)
-
-result <- handle_safe_result(
-  safe_result,
-  error_title = "Operation failed",
-  error_hints = c(
-    "Check input data format",
-    "Ensure all dependencies are loaded"
-  )
-)
-}
-
+Processes the output from \code{safely_execute()}. On success, returns the
+result (optionally re-emitting captured warnings). On failure, either
+returns NULL or aborts with a structured error message, depending on
+\code{abort_on_null}.
 }

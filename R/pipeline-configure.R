@@ -126,8 +126,9 @@ configure <- function(x,
     }
     cat("\n")
     rlang::abort(
-      paste(c(header, details), collapse = "\n"),
-      class = error_class
+      header,
+      class = error_class,
+      call  = NULL
     )
 
   }

@@ -72,3 +72,63 @@ if (length(errors) > 0) {
 - Use `{.field name}` for: column names, slot names, argument names
 - Keep messages concise - details can go in the listed values
 - When listing values (e.g., duplicate IDs), limit to first few with "..." if many
+
+## Messaging Contract (capture vs render)
+
+**The tree IS the messaging system.** Every warning, error, and info message
+that fires during a pipeline verb appears *inside* the tree, not as bare R
+warnings floating in the console.
+
+### Two layers
+
+1. **Capture layer** (internal utilities: `safely_execute()`,
+   `back_transform_predictions()`, metric functions):
+   - Run silently
+   - Capture errors/warnings/messages as structured data
+   - Return them — never print to console
+   - Use `warning(..., call. = FALSE)` for edge-case alerts (catchable,
+     quiet, no styling)
+
+2. **Render layer** (pipeline verbs: `evaluate()`, `validate()`,
+   `configure()`, `fit()`):
+   - Owns ALL console output via `cat()` + box-drawing characters
+   - Reads structured data from capture layer
+   - Renders warnings/errors/progress *within* the tree
+   - Uses `abort_nested()` for fatal errors (tree + `rlang::abort()`)
+
+### Example: evaluate() config loop
+
+```
+│
+├─ Config 1/24: rf + log + snv + pca
+│  ├─ Tuning: 10-fold CV, grid = 10...
+│  │  └─ Best RRMSE: 12.3 (mtry = 15, min_n = 5)
+│  ├─ Refit on full training set...
+│  │  ⚠ Very large values in log-scale predictions (>50)
+│  └─ Test-set metrics: RPD = 2.1, R² = 0.89
+│
+├─ Config 2/24: cubist + sqrt + raw + none
+│  ├─ Tuning: 10-fold CV, grid = 10...
+│  └─ ✗ FAILED: convergence failure
+│
+└─ Complete: 22/24 configs succeeded
+```
+
+### safely_execute() calling convention
+
+```r
+# In evaluate() config loop — SILENT capture:
+safe_result <- safely_execute(
+  fit_and_tune(workflow, folds, grid),
+  default_value      = NULL,
+  log_error          = FALSE,          # tree handles all output
+  capture_conditions = TRUE            # capture warnings for tree
+)
+
+# In standalone/debugging context — self-logging OK:
+safe_result <- safely_execute(
+  risky_op(data),
+  error_message = "Failed to process {property}",
+  log_error     = TRUE                 # emit warning for interactive use
+)
+```
