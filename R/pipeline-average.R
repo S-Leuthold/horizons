@@ -213,6 +213,12 @@ average <- function(x,
 
   n_replicates <- nrow(analysis)
 
+  ## Compute replicate counts per group for output ---------------------------
+
+  reps_per_group <- table(group_values)
+  min_reps       <- min(reps_per_group)
+  max_reps       <- max(reps_per_group)
+
   ## -------------------------------------------------------------------------
   ## Step 4: Process each group
   ## -------------------------------------------------------------------------
@@ -392,40 +398,46 @@ average <- function(x,
   if (verbose) {
 
     cat(paste0("\u251C\u2500 ", cli::style_bold("Averaging replicates"), "...\n"))
+
+    ## Replicate structure line ------------------------------------------------
+
+    reps_str <- if (min_reps == max_reps) {
+      paste0(min_reps, " reps/group")
+    } else {
+      paste0(min_reps, "-", max_reps, " reps/group")
+    }
+
     cat(paste0("\u2502  \u251C\u2500 ", n_groups, " groups from ",
-               n_replicates, " scans\n"))
+               n_replicates, " scans (", reps_str, ")\n"))
+
+    ## QC sub-tree -------------------------------------------------------------
 
     if (quality_check) {
 
+      n_clean <- n_groups - n_groups_with_drops - length(dropped_samples)
+
       if (n_dropped > 0) {
 
-        cat(paste0("\u2502  \u251C\u2500 QC: ", n_dropped, " replicates dropped from ",
-                   n_groups_with_drops, " groups\n"))
-
-        ## Show affected group IDs (truncate to 8)
-        preview <- head(groups_with_drops, 8)
-        suffix  <- if (length(groups_with_drops) > 8) {
-          paste0(" (+", length(groups_with_drops) - 8, " more)")
-        } else {
-          ""
-        }
-
-        cat(paste0("\u2502  \u251C\u2500 Affected: ",
-                   paste(preview, collapse = ", "), suffix, "\n"))
+        cat(paste0("\u2502  \u251C\u2500 QC (r > ", correlation_threshold, ")\n"))
+        cat(paste0("\u2502  \u2502  \u251C\u2500 ", n_clean, "/", n_groups,
+                   " groups clean\n"))
+        cat(paste0("\u2502  \u2502  \u251C\u2500 ", n_groups_with_drops,
+                   " groups \u2192 ", n_dropped, " replicates removed\n"))
 
         if (length(dropped_samples) > 0) {
 
-          cat(paste0("\u2502  \u251C\u2500 Dropped entirely: ",
-                     paste(head(dropped_samples, 5), collapse = ", "),
-                     if (length(dropped_samples) > 5)
-                       paste0(" (+", length(dropped_samples) - 5, " more)") else "",
-                     "\n"))
+          cat(paste0("\u2502  \u2502  \u251C\u2500 ", length(dropped_samples),
+                     " groups dropped entirely\n"))
 
         }
 
+        cat(paste0("\u2502  \u2502  \u2514\u2500 ",
+                   nrow(averaged), " samples retained\n"))
+
       } else {
 
-        cat(paste0("\u2502  \u251C\u2500 QC: all ", n_groups, " groups clean\n"))
+        cat(paste0("\u2502  \u251C\u2500 QC (r > ", correlation_threshold,
+                   "): all ", n_groups, " groups clean\n"))
 
       }
 
