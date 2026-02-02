@@ -487,6 +487,7 @@ print.horizons_data <- function(x, ...) {
     # Determine which optional sections follow Samples
     has_responses <- !is.null(x$data$n_responses) && x$data$n_responses > 0
     has_covars    <- !is.null(x$data$n_covariates) && x$data$n_covariates > 0
+    has_outcome   <- any(x$data$role_map$role == "outcome")
 
     # Predictors with wavenumber range
     if (!is.null(x$data$n_predictors) && x$data$n_predictors > 0) {
@@ -495,7 +496,7 @@ print.horizons_data <- function(x, ...) {
       wn_candidates  <- predictor_vars[grepl("^(wn_)?[0-9.]+$", predictor_vars)]
       wn_values      <- as.numeric(gsub("^wn_", "", wn_candidates))
 
-      has_more <- has_responses || has_covars
+      has_more <- has_outcome || has_responses || has_covars
       branch   <- if (has_more) "\u251C\u2500" else "\u2514\u2500"
 
       if (length(wn_values) > 0) {
@@ -512,8 +513,6 @@ print.horizons_data <- function(x, ...) {
     }
 
     # Outcome (promoted response)
-    has_outcome <- any(x$data$role_map$role == "outcome")
-
     if (has_outcome) {
 
       outcome_var <- x$data$role_map$variable[x$data$role_map$role == "outcome"]

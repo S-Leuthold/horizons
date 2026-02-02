@@ -229,29 +229,32 @@ configure <- function(x,
 
   ## 1.5 Validate tuning parameters --------------------------------------------
 
-  if (!is.numeric(cv_folds) || cv_folds != as.integer(cv_folds) || cv_folds < 2) {
+  if (!is.numeric(cv_folds) || length(cv_folds) != 1 || is.na(cv_folds) ||
+      cv_folds != as.integer(cv_folds) || cv_folds < 2) {
 
     abort_nested(
       "`cv_folds` must be an integer >= 2",
-      c(paste0("Got: ", cv_folds))
+      c(paste0("Got: ", deparse(cv_folds)))
     )
 
   }
 
-  if (!is.numeric(grid_size) || grid_size != as.integer(grid_size) || grid_size < 1) {
+  if (!is.numeric(grid_size) || length(grid_size) != 1 || is.na(grid_size) ||
+      grid_size != as.integer(grid_size) || grid_size < 1) {
 
     abort_nested(
       "`grid_size` must be an integer >= 1",
-      c(paste0("Got: ", grid_size))
+      c(paste0("Got: ", deparse(grid_size)))
     )
 
   }
 
-  if (!is.numeric(bayesian_iter) || bayesian_iter != as.integer(bayesian_iter) || bayesian_iter < 0) {
+  if (!is.numeric(bayesian_iter) || length(bayesian_iter) != 1 || is.na(bayesian_iter) ||
+      bayesian_iter != as.integer(bayesian_iter) || bayesian_iter < 0) {
 
     abort_nested(
       "`bayesian_iter` must be a non-negative integer",
-      c(paste0("Got: ", bayesian_iter))
+      c(paste0("Got: ", deparse(bayesian_iter)))
     )
 
   }
@@ -265,6 +268,17 @@ configure <- function(x,
   if (!is.null(x$config$configs)) {
 
     warning("Overwriting previous configuration", call. = FALSE)
+
+    ## Clear stale downstream state
+    x$validation$passed    <- NULL
+    x$validation$checks    <- NULL
+    x$validation$timestamp <- NULL
+    x$evaluation$results     <- NULL
+    x$evaluation$best_config <- NULL
+    x$models$workflows       <- NULL
+    x$models$n_models        <- NULL
+    x$ensemble$stack         <- NULL
+    x$ensemble$metrics       <- NULL
 
   }
 
