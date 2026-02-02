@@ -91,8 +91,9 @@ validate <- function(x,
     }
     cat("\n")
     rlang::abort(
-      paste(c(header, details), collapse = "\n"),
-      class = error_class
+      header,
+      class = error_class,
+      call  = NULL
     )
 
   }
@@ -481,8 +482,12 @@ validate <- function(x,
   ## ---------------------------------------------------------------------------
 
   x$validation$passed    <- passed
-  x$validation$checks    <- checks
   x$validation$timestamp <- Sys.time()
+
+  ## Reorder for cleaner display; blank severity on passing checks
+  checks <- checks[, c("description", "status", "severity", "value", "check_id")]
+  checks$severity[checks$status == "pass"] <- ""
+  x$validation$checks <- checks
 
   x$validation$outliers$spectral_ids   <- spectral_outlier_ids
   x$validation$outliers$response_ids   <- response_outlier_ids

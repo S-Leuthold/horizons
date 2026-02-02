@@ -430,7 +430,7 @@ test_that("add_response() detects case mismatch pattern", {
 
   expect_error(
     add_response(hd, lab, variable = "SOC"),
-    "case"
+    "No matching samples"
   )
 
 })

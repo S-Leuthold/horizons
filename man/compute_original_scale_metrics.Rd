@@ -2,27 +2,22 @@
 % Please edit documentation in R/utils-backtransform.R
 \name{compute_original_scale_metrics}
 \alias{compute_original_scale_metrics}
-\title{Compute Metrics on Original Scale}
+\title{Compute All Six Metrics on the Original Response Scale}
 \usage{
-compute_original_scale_metrics(
-  truth,
-  estimate,
-  metrics = yardstick::metric_set(rrmse, yardstick::rmse, yardstick::rsq, yardstick::mae,
-    rpd, ccc)
-)
+compute_original_scale_metrics(truth, estimate)
 }
 \arguments{
-\item{truth}{Numeric vector of true values (original scale)}
+\item{truth}{Numeric vector of observed values (original scale).}
 
-\item{estimate}{Numeric vector of predicted values (after back-transformation)}
-
-\item{metrics}{A yardstick metric_set object}
+\item{estimate}{Numeric vector of predicted values (back-transformed).}
 }
 \value{
-Tibble with computed metrics
+Tibble with \code{.metric}, \code{.estimator}, \code{.estimate} columns (6 rows).
+Returns empty tibble if fewer than 2 complete cases.
 }
 \description{
-Helper function to compute metrics after back-transformation.
-Used when we need to recalculate metrics on the original scale.
+After back-transforming predictions, compute the full metric set used in
+\code{evaluation$results}. This is the canonical metric computation point —
+called once per config after last_fit + back-transform.
 }
 \keyword{internal}

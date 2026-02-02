@@ -2,64 +2,44 @@
 % Please edit documentation in R/utils-errors.R
 \name{safely_execute}
 \alias{safely_execute}
-\title{Safely Evaluate an Expression with Optional Logging and Condition Capture}
+\title{Safely Evaluate an Expression}
 \usage{
 safely_execute(
   expr,
   default_value = NULL,
   error_message = NULL,
   log_error = TRUE,
-  capture_trace = FALSE,
-  trace_log_file = NULL,
   capture_conditions = FALSE
 )
 }
 \arguments{
-\item{expr}{An expression to evaluate, passed unquoted.}
+\item{expr}{An expression to evaluate (unquoted).}
 
-\item{default_value}{Value to return if the expression errors. Default is \code{NULL}.}
+\item{default_value}{Value returned if the expression errors. Default NULL.}
 
-\item{error_message}{Optional string interpolated via \code{glue::glue()}, used as the log message.}
+\item{error_message}{Optional character string logged on error. Supports
+glue-style interpolation from the caller's environment.}
 
-\item{log_error}{Logical. If \code{TRUE} (default), logs the error using \code{cli::cli_warn()}.}
+\item{log_error}{Logical. If TRUE (default), logs error via \code{warning()}.}
 
-\item{capture_trace}{Logical. If \code{TRUE}, captures a traceback using \code{rlang::trace_back()}.}
-
-\item{trace_log_file}{Optional file path to write the trace, if \code{capture_trace = TRUE}.}
-
-\item{capture_conditions}{Logical. If \code{TRUE}, captures warnings and messages. Default is \code{FALSE}.}
+\item{capture_conditions}{Logical. If TRUE, captures warnings and messages
+emitted during evaluation. Default FALSE.}
 }
 \value{
-A named list with elements:
-\describe{
-\item{\code{result}}{The evaluated result or \code{default_value} if an error occurred.}
-\item{\code{error}}{The error object, or \code{NULL} if the evaluation succeeded.}
-\item{\code{trace}}{A trace object from \code{rlang}, or \code{NULL} if not captured.}
-\item{\code{warnings}}{List of warning conditions if \code{capture_conditions = TRUE}.}
-\item{\code{messages}}{List of message conditions if \code{capture_conditions = TRUE}.}
-\item{\code{n_warnings}}{Count of warnings captured.}
-\item{\code{n_messages}}{Count of messages captured.}
+Named list:
+\itemize{
+\item \code{result}: Evaluated result, or \code{default_value} on error.
+\item \code{error}: Error condition object, or NULL on success.
+\item \code{warnings}: List of warning strings (if captured), else NULL.
+\item \code{messages}: List of message strings (if captured), else NULL.
+\item \code{n_warnings}: Integer count of captured warnings.
+\item \code{n_messages}: Integer count of captured messages.
 }
 }
 \description{
-Evaluates an expression using \code{purrr::safely()} to prevent errors from halting execution.
-If an error occurs, it returns a default value, optionally logs a custom message,
-and can capture the call trace for debugging. Can also capture warnings and messages.
-}
-\details{
-This function is useful when running potentially fragile code inside mapping,
-parallelization, or ensemble modeling workflows. By capturing and optionally logging
-errors without interrupting the overall workflow, it supports robust batch execution.
-
-If \code{capture_trace = TRUE}, the call stack is stored and optionally written to disk.
-This is helpful when debugging complex pipelines.
-}
-\examples{
-\dontrun{
-safely_execute(log("oops"), default_value = NA, error_message = "Failed to take log")
-}
-
-}
-\seealso{
-\code{\link[purrr]{safely}}, \code{\link[rlang]{trace_back}}, \code{\link[cli]{cli_warn}}
+Evaluates an expression using \code{purrr::safely()} to prevent errors from
+halting execution. Returns a structured list with result, error, and
+optionally captured warnings/messages. This is the workhorse for
+evaluate()'s config loop — each model fit is wrapped in safely_execute()
+so one failure doesn't kill the batch.
 }

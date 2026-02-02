@@ -464,7 +464,7 @@ load_opus_files <- function(source,
 
     tryCatch({
 
-      opusreader2::read_opus(fp)
+      suppressWarnings(opusreader2::read_opus(fp))
 
     }, error = function(e) {
 
