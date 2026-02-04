@@ -72,7 +72,25 @@ fit <- function(x,
   }
 
   ## Rank successes by metric
+  if (!rank_metric %in% names(successes)) {
+
+    rlang::abort(paste0(
+      "Rank metric '", rank_metric,
+      "' not found in evaluation results. ",
+      "Available: ", paste(names(successes), collapse = ", ")
+    ))
+
+  }
+
   metric_vals <- successes[[rank_metric]]
+
+  if (all(is.na(metric_vals))) {
+
+    rlang::abort(paste0(
+      "All values for rank metric '", rank_metric, "' are NA. Cannot rank."
+    ))
+
+  }
 
   if (rank_metric %in% higher_better) {
 
@@ -301,6 +319,7 @@ fit <- function(x,
       split_F             = split_F,
       cv_resamples        = cv_resamples,
       calib_data          = calib_data,
+      train_data          = train_Fit,
       role_map            = role_map,
       best_params_eval    = best_params_eval,
       final_bayesian_iter = tuning$bayesian_iter,
@@ -467,10 +486,22 @@ fit <- function(x,
 
   })
 
-  ## Build row_index: .row → sample_id mapping from train_Fit
+  ## Build row_index: .row → id mapping from train_Fit
+  id_col <- role_map$variable[role_map$role == "id"]
+
+  if (length(id_col) == 0) {
+
+    id_col <- "sample_id"
+
+  } else {
+
+    id_col <- id_col[1]
+
+  }
+
   row_index <- tibble::tibble(
     .row      = seq_len(nrow(train_Fit)),
-    sample_id = train_Fit[["sample_id"]]
+    sample_id = train_Fit[[id_col]]
   )
 
   ## Collect UQ bundles (named by config_id)
