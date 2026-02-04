@@ -41,10 +41,10 @@ make_eval_object <- function(n = 40, n_wn = 10, n_configs = 2,
   }
 
   ## Build configs
-  models <- c("rf", "cubist")
+  models <- rep(c("rf", "cubist"), length.out = n_configs)
   configs <- tibble::tibble(
     config_id         = paste0("cfg_", sprintf("%03d", seq_len(n_configs))),
-    model             = models[seq_len(n_configs)],
+    model             = models,
     transformation    = "none",
     preprocessing     = "raw",
     feature_selection = "none",
