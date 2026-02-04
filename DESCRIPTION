@@ -130,3 +130,4 @@ Collate:
     'pipeline-validate.R'
     'evaluate-single-config.R'
     'pipeline-evaluate.R'
+    'monitor-evaluate.R'
