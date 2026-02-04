@@ -101,8 +101,9 @@ make_fit_object <- function(n = 60, n_wn = 10, n_configs = 2, seed = 42) {
   class(obj) <- c("horizons_data", "list")
 
   ## Run evaluate() to populate evaluation slot
+  ## prune = FALSE ensures configs get status "success" even with weak signal
   suppressWarnings(
-    evaluate(obj, verbose = FALSE, seed = seed)
+    evaluate(obj, prune = FALSE, verbose = FALSE, seed = seed)
   )
 
 }

@@ -15,7 +15,8 @@ configure(
   cov_fusion = NULL,
   cv_folds = 5L,
   grid_size = 10L,
-  bayesian_iter = 15L
+  bayesian_iter = 15L,
+  final_bayesian_iter = 25L
 )
 }
 \arguments{
