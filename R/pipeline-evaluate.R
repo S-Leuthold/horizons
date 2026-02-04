@@ -682,6 +682,7 @@ evaluate <- function(x,
     split        = split,
     n_train      = n_train,
     n_test       = n_test,
+    workers      = workers,
     runtime_secs = total_runtime,
     timestamp    = Sys.time()
   )
