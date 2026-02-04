@@ -156,6 +156,14 @@ handle_results <- function(safe_result,
 
       }
 
+      if (!is.null(safe_result$messages) && length(safe_result$messages) > 0) {
+
+        for (m in safe_result$messages) {
+          message(m)
+        }
+
+      }
+
     }
 
     return(result)

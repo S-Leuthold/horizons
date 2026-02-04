@@ -22,5 +22,5 @@ Inverts response transformations applied by \code{step_log(offset = 1)} or
 truth for back-transformation logic in horizons.
 
 \strong{Important:} \code{step_log(offset = 1)} computes \code{log(x + 1)}, so the correct
-inverse is \code{exp(x) - 1}, NOT \code{exp(x)}. The legacy code had this wrong.
+inverse is \code{exp(x) - 1}, NOT \code{exp(x)}. Similarly, \code{step_log(base = 10, offset = 1)} computes \code{log10(x + 1)}, so the inverse is \code{10^x - 1}.
 }

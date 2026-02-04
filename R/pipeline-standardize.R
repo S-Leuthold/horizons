@@ -529,7 +529,7 @@ standardize <- function(x,
   if (is.null(resample) && is.null(trim) && !remove_water && !baseline) {
 
     cat(paste0("\u251C\u2500 ", cli::style_bold("Standardizing"), "...\n"))
-    cat(paste0("\u2502  \u2514\u2500 No operations requested\n"))
+    cat(paste0("\u2502  \u2514\u2500 No operations applied\n"))
     cat("\u2502\n")
 
     ## Still mark as standardized so downstream steps know it was evaluated -----
@@ -741,7 +741,7 @@ standardize <- function(x,
   } else {
 
     cat(paste0("\u251C\u2500 ", cli::style_bold("Standardizing"), "...\n"))
-    cat(paste0("\u2502  \u2514\u2500 No operations requested\n"))
+    cat(paste0("\u2502  \u2514\u2500 No operations applied\n"))
     cat("\u2502\n")
 
   }

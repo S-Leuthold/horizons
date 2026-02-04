@@ -404,7 +404,7 @@ average <- function(x,
 
     if (quality_check) {
 
-      n_clean <- n_groups - n_groups_with_drops - length(dropped_samples)
+      n_clean <- n_groups - n_groups_with_drops
 
       if (n_dropped > 0) {
 

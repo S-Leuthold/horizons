@@ -6,7 +6,8 @@
 #' truth for back-transformation logic in horizons.
 #'
 #' **Important:** `step_log(offset = 1)` computes `log(x + 1)`, so the correct
-#' inverse is `exp(x) - 1`, NOT `exp(x)`. The legacy code had this wrong.
+#' inverse is `exp(x) - 1`, NOT `exp(x)`. Similarly, `step_log(base = 10,
+#' offset = 1)` computes `log10(x + 1)`, so the inverse is `10^x - 1`.
 #'
 #' @param predictions Numeric vector of predictions on the transformed scale.
 #' @param transformation Character: "none", "log", "sqrt", or "log10".
