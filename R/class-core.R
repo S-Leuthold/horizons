@@ -29,7 +29,7 @@
 #' 3. **config**: Model configurations and tuning parameters
 #' 4. **validation**: Pre-flight check results and outlier tracking
 #' 5. **evaluation**: Model comparison results (populated by evaluate())
-#' 6. **models**: Fitted workflows and UQ models (populated by finalize())
+#' 6. **models**: Fitted workflows and UQ models (populated by fit())
 #' 7. **ensemble**: Optional stacked ensemble (populated by ensemble())
 #' 8. **artifacts**: Paths to disk-backed storage for large objects
 #'
@@ -167,12 +167,15 @@ new_horizons_data <- function(analysis        = NULL,
     ## Section 6: MODELS — Finalized models + UQ (horizons_fit+)
     ## -------------------------------------------------------------------------
 
-    models = list(workflows = NULL,
-                  n_models  = NULL,
-                  uq = list(enabled         = FALSE,
-                            quantile_models = NULL,
-                            conformal       = NULL,
-                            ad_metadata     = NULL)),
+    models = list(workflows      = NULL,    ## list of butchered fitted workflows
+                  n_models       = NULL,    ## integer
+                  cv_predictions = NULL,    ## tibble: .row, .fold, config_id, .pred, .pred_trans, truth
+                  results        = NULL,    ## tibble: config_id, status, degraded, metrics, etc.
+                  split          = NULL,    ## rsplit: Split F (train_F / test_F)
+                  row_index      = NULL,    ## tibble: .row → sample_id mapping
+                  uq             = NULL,    ## list of UQ bundles (one per config), or NULL
+                  timestamp      = NULL,    ## POSIXct
+                  runtime_secs   = NULL),   ## numeric
 
     ## -------------------------------------------------------------------------
     ## Section 7: ENSEMBLE — Optional ensemble (horizons_fit only)
@@ -869,7 +872,7 @@ summary.horizons_data <- function(object, ...) {
 
   } else if (is.null(x$models$workflows)) {
 
-    next_step <- "finalize()"
+    next_step <- "fit()"
   } else {
 
     next_step <- "predict()"
