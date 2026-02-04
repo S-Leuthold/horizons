@@ -189,7 +189,16 @@ point_in_grid <- function(point, grid) {
 
   for (col in cols) {
 
-    matches <- matches & (grid[[col]] == point[[col]])
+    if (is.numeric(point[[col]])) {
+
+      matches <- matches &
+        (abs(grid[[col]] - point[[col]]) < .Machine$double.eps^0.5)
+
+    } else {
+
+      matches <- matches & (grid[[col]] == point[[col]])
+
+    }
 
   }
 
@@ -266,6 +275,7 @@ tune_warmstart_bayes <- function(workflow,
   }
 
   tune_results <- grid_result$result
+  bayes_failed <- FALSE
 
   ## --- Phase 2: Bayesian optimization (if requested) ----------------------
 
@@ -293,8 +303,11 @@ tune_warmstart_bayes <- function(workflow,
 
       tune_results <- bayes_result$result
 
+    } else {
+
+      bayes_failed <- TRUE
+
     }
-    ## else: silently keep grid results as tune_results
 
   }
 
@@ -305,7 +318,8 @@ tune_warmstart_bayes <- function(workflow,
   list(
     tune_results  = tune_results,
     best_params   = final_best,
-    fallback_used = fallback_used
+    fallback_used = fallback_used,
+    bayes_failed  = bayes_failed
   )
 
 }
