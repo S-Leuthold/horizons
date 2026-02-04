@@ -457,7 +457,38 @@ fit_single_config <- function(config_row,
   }
 
   ## -----------------------------------------------------------------------
-  ## Step 13: Butcher the final fit for storage
+  ## Step 13: UQ (must run BEFORE butchering — needs extract_mold())
+  ## -----------------------------------------------------------------------
+
+  uq_result <- NULL
+
+  if (compute_uq && !is.null(calib_data)) {
+
+    uq_safe <- safely_execute(
+      fit_uq(
+        fitted_workflow = final_fit,
+        oof_predictions = cv_predictions,
+        calib_data      = calib_data,
+        role_map        = role_map,
+        transformation  = transformation,
+        level_default   = DEFAULT_UQ_LEVEL
+      ),
+      log_error          = FALSE,
+      capture_conditions = TRUE
+    )
+
+    if (is.null(uq_safe$error)) {
+
+      uq_result <- uq_safe$result
+
+    }
+
+    collect_from(uq_safe)
+
+  }
+
+  ## -----------------------------------------------------------------------
+  ## Step 14: Butcher the final fit for storage
   ## -----------------------------------------------------------------------
 
   butchered <- safely_execute(
@@ -478,12 +509,6 @@ fit_single_config <- function(config_row,
     final_fit  ## fall back to unbutchered if butcher fails
 
   }
-
-  ## -----------------------------------------------------------------------
-  ## Step 14: UQ (deferred — placeholder for fit-uq.R)
-  ## -----------------------------------------------------------------------
-
-  uq_result <- NULL
 
   ## -----------------------------------------------------------------------
   ## Step 15: Return structured result
