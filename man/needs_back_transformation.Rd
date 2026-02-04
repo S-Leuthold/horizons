@@ -2,27 +2,17 @@
 % Please edit documentation in R/utils-backtransform.R
 \name{needs_back_transformation}
 \alias{needs_back_transformation}
-\title{Check if Transformation Requires Back-transformation}
+\title{Check Whether a Transformation Requires Back-transformation}
 \usage{
 needs_back_transformation(transformation)
 }
 \arguments{
-\item{transformation}{Character string indicating transformation type}
+\item{transformation}{Character string indicating transformation type.}
 }
 \value{
-Logical. TRUE if back-transformation needed, FALSE otherwise
+Logical.
 }
 \description{
-Determines whether a transformation type requires back-transformation.
-Handles NULL, NA, empty strings, and "none" consistently.
-}
-\examples{
-\dontrun{
-needs_back_transformation("log")      # TRUE
-needs_back_transformation("sqrt")     # TRUE
-needs_back_transformation("none")     # FALSE
-needs_back_transformation(NA)         # FALSE
-needs_back_transformation(NULL)       # FALSE
-}
+Check Whether a Transformation Requires Back-transformation
 }
 \keyword{internal}

@@ -85,8 +85,7 @@ add_response <- function(x,
   ## Step 0: Print header
   ## ---------------------------------------------------------------------------
 
-  cat("\u2502\n")
-  cat(paste0("\u251C\u2500 ", cli::style_bold("Adding response data"), "...\n"))
+  ## (tree output moved to end of function)
 
   ## ---------------------------------------------------------------------------
   ## Helper: abort with tree-nested error
@@ -101,8 +100,9 @@ add_response <- function(x,
     }
     cat("\n")
     rlang::abort(
-      paste(c(header, details), collapse = "\n"),
-      class = error_class
+      header,
+      class = error_class,
+      call  = NULL
     )
 
   }
@@ -500,12 +500,13 @@ add_response <- function(x,
   ## Step 6: Progress output
   ## ---------------------------------------------------------------------------
 
+  cat(paste0("\u251C\u2500 ", cli::style_bold("Adding response data"), "...\n"))
   cat(paste0("\u2502  \u251C\u2500 Source: ", source_label, "\n"))
-  cat(paste0("\u2502  \u251C\u2500 Matched: ", n_matched, "/", n_horizons, " samples"))
 
+  matched_str <- paste0(n_matched, "/", n_horizons, " samples")
   if (n_unmatched > 0 && match_rate >= 0.5) {
 
-    cat(paste0(" (", n_unmatched, " unmatched \u2192 NA)"))
+    matched_str <- paste0(matched_str, " (", n_unmatched, " unmatched \u2192 NA)")
 
     warning(
       paste0(n_unmatched, "/", n_horizons,
@@ -515,9 +516,10 @@ add_response <- function(x,
 
   }
 
-  cat("\n")
-  cat(paste0("\u2502  \u2514\u2500 Variables added: ",
+  cat(paste0("\u2502  \u251C\u2500 Matched: ", matched_str, "\n"))
+  cat(paste0("\u2502  \u2514\u2500 Variables: ",
              paste(variable, collapse = ", "), "\n"))
+  cat("\u2502\n")
 
   ## ---------------------------------------------------------------------------
   ## Step 7: Return

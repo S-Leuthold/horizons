@@ -1,16 +1,6 @@
-#' Parse Sample IDs from Filenames
-#'
-#' @description
-#' Functions for extracting structured metadata from filenames and updating
-#' sample IDs in horizons_data objects.
-#'
-#' @details
-#' This module provides `parse_ids()`, which parses filenames to extract
-#' sample IDs and metadata columns. It supports format strings with tokens
-#' (e.g., `"{project}_{sampleid}_{fraction}"`) or explicit regex patterns.
-#'
-#' @keywords internal
-#' @name pipeline-parse-ids
+# R/pipeline-parse-ids.R
+# Extract structured metadata from filenames and update sample IDs in
+# horizons_data objects. Supports format strings and explicit regex patterns.
 
 ## =============================================================================
 ## Section 1: Constants
@@ -393,6 +383,22 @@ parse_ids <- function(x,
   )
 
   x$provenance$id_pattern <- format
+
+  ## -------------------------------------------------------------------------
+  ## Step 9: CLI output
+  ## -------------------------------------------------------------------------
+
+  cat(paste0("\u251C\u2500 ", cli::style_bold("Parsing sample IDs"), "...\n"))
+
+  id_str <- paste0(n_matched, " IDs extracted")
+  if (n_unmatched > 0) {
+
+    id_str <- paste0(id_str, " (", n_unmatched, " unmatched)")
+
+  }
+
+  cat(paste0("\u2502  \u2514\u2500 ", id_str, "\n"))
+  cat("\u2502\n")
 
   x
 
