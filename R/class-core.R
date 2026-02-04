@@ -592,7 +592,7 @@ print.horizons_data <- function(x, ...) {
     cat(cli::style_bold("Evaluation\n"))
 
     eval_res  <- x$evaluation$results
-    n_success <- sum(eval_res$status == "success")
+    n_success <- sum(eval_res$status == "success", na.rm = TRUE)
     n_total   <- nrow(eval_res)
 
     has_models <- !is.null(x$models$workflows)
@@ -971,9 +971,9 @@ summary.horizons_data <- function(object, ...) {
     cat(cli::style_bold("Evaluation\n"))
 
     eval_res  <- x$evaluation$results
-    n_success <- sum(eval_res$status == "success")
-    n_pruned  <- sum(eval_res$status == "pruned")
-    n_failed  <- sum(eval_res$status == "failed")
+    n_success <- sum(eval_res$status == "success", na.rm = TRUE)
+    n_pruned  <- sum(eval_res$status == "pruned", na.rm = TRUE)
+    n_failed  <- sum(eval_res$status == "failed", na.rm = TRUE)
     n_total   <- nrow(eval_res)
 
     cat(paste0("   \u251C\u2500 Configs evaluated: ", n_total, "\n"))
@@ -996,7 +996,8 @@ summary.horizons_data <- function(object, ...) {
         ## Look up model display name from configs
         cfg_row    <- x$config$configs[x$config$configs$config_id == best_id, ]
         model_name <- if (nrow(cfg_row) > 0) {
-          MODEL_DISPLAY_NAMES[cfg_row$model] %||% cfg_row$model
+          dn <- MODEL_DISPLAY_NAMES[cfg_row$model]
+          if (is.na(dn)) cfg_row$model else dn
         } else {
           best_id
         }
@@ -1052,9 +1053,9 @@ summary.horizons_data <- function(object, ...) {
 
     if (!is.null(fit_res)) {
 
-      n_success  <- sum(fit_res$status == "success")
+      n_success  <- sum(fit_res$status == "success", na.rm = TRUE)
       n_degraded <- sum(fit_res$degraded, na.rm = TRUE)
-      n_failed   <- sum(fit_res$status == "failed")
+      n_failed   <- sum(fit_res$status == "failed", na.rm = TRUE)
 
       cat(paste0("   \u251C\u2500 Results: ",
                  cli::col_green(paste0(n_success, " success")),

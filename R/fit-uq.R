@@ -1,17 +1,3 @@
-#' Uncertainty Quantification via Conformalized Residual Quantiles (CQR)
-#'
-#' @description
-#' Two functions for the UQ component of `fit()`:
-#'
-#' 1. `compute_c_alpha()` — Conformal finite-sample correction for a given
-#'    coverage level. Pure math, no data dependencies.
-#' 2. `fit_uq()` — Full UQ training pipeline: trains a quantile ranger on
-#'    OOF residuals, then computes conformal nonconformity scores on
-#'    calibration data.
-#'
-#' @keywords internal
-
-
 ## ===========================================================================
 ## compute_c_alpha() — conformal finite-sample correction
 ## ===========================================================================
@@ -23,7 +9,7 @@
 #' finite-sample correction.
 #'
 #' @param scores Numeric vector of nonconformity scores from calibration.
-#' @param level Numeric in [0, 1]. Desired coverage level (e.g. 0.90).
+#' @param level Numeric in (0, 1). Desired coverage level (e.g. 0.90).
 #'
 #' @return Single numeric value: the c_alpha correction factor.
 #'
@@ -36,8 +22,22 @@
 #' @export
 compute_c_alpha <- function(scores, level) {
 
-  alpha  <- 1 - level
+  if (!is.numeric(level) || length(level) != 1 || level <= 0 || level >= 1) {
+
+    rlang::abort("level must be a single numeric value in (0, 1).")
+
+  }
+
+  scores <- scores[is.finite(scores)]
   n      <- length(scores)
+
+  if (n == 0) {
+
+    rlang::abort("No finite scores available for conformal calibration.")
+
+  }
+
+  alpha  <- 1 - level
 
   ## Finite-sample correction: ceiling to be conservative
   q_prob <- min(1, ceiling((1 - alpha) * (n + 1)) / n)
@@ -86,9 +86,9 @@ fit_uq <- function(fitted_workflow,
 
   outcome_col <- role_map$variable[role_map$role == "outcome"]
 
-  ## --- Guard: minimum calibration size -------------------------------------
+  ## --- Guard: NULL or insufficient calibration data -------------------------
 
-  if (nrow(calib_data) < N_CALIB_MIN) {
+  if (is.null(calib_data) || nrow(calib_data) < N_CALIB_MIN) {
 
     return(NULL)
 

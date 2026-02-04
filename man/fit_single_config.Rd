@@ -9,6 +9,7 @@ fit_single_config(
   split_F,
   cv_resamples,
   calib_data = NULL,
+  train_data = NULL,
   role_map,
   best_params_eval,
   final_bayesian_iter = DEFAULT_FINAL_BAYES_ITER,
@@ -26,6 +27,10 @@ fit_single_config(
 \item{cv_resamples}{A \code{vfold_cv} object created from train_Fit (or train_F).}
 
 \item{calib_data}{Data frame for UQ calibration (NULL if compute_uq = FALSE).}
+
+\item{train_data}{Data frame for training. If NULL, defaults to
+\code{training(split_F)}. Pass \code{train_Fit} when \code{compute_uq = TRUE} to avoid
+calibration leakage.}
 
 \item{role_map}{Tibble with \code{variable} and \code{role} columns.}
 

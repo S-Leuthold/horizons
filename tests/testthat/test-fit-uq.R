@@ -30,12 +30,21 @@ describe("compute_c_alpha() - basic contract", {
 
   })
 
-  it("returns 0 for level = 0 (no coverage requested)", {
+  it("rejects level = 0 (outside valid range)", {
 
-    ## At level = 0, alpha = 1, q_prob = ceiling(0 * (n+1)) / n = 0
-    ## This is a degenerate case but should not error
-    result <- compute_c_alpha(scores, level = 0)
-    expect_true(is.numeric(result))
+    expect_error(
+      compute_c_alpha(scores, level = 0),
+      "level must be"
+    )
+
+  })
+
+  it("rejects level = 1 (outside valid range)", {
+
+    expect_error(
+      compute_c_alpha(scores, level = 1),
+      "level must be"
+    )
 
   })
 
