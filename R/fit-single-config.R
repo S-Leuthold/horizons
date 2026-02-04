@@ -303,19 +303,9 @@ fit_single_config <- function(config_row,
 
     cv_predictions$.pred <- bt_result$result
 
-    ## Also back-transform truth from transformed scale
-    bt_truth <- safely_execute(
-      back_transform_predictions(cv_predictions$truth, transformation,
-                                 warn = FALSE),
-      log_error          = FALSE,
-      capture_conditions = TRUE
-    )
-
-    if (is.null(bt_truth$error)) {
-
-      cv_predictions$truth <- bt_truth$result
-
-    }
+    ## Note: truth from collect_predictions() is already on original scale.
+    ## The recipe uses step_log/step_sqrt with skip = TRUE, so the outcome
+    ## transformation is skipped during assessment baking.
 
   } else {
 
@@ -409,21 +399,8 @@ fit_single_config <- function(config_row,
 
   test_truth <- test_data[[outcome_col]]
 
-  ## Back-transform truth if response was transformed
-  if (needs_back_transformation(transformation)) {
-
-    bt_test_truth <- safely_execute(
-      back_transform_predictions(test_truth, transformation, warn = FALSE),
-      log_error = FALSE, capture_conditions = TRUE
-    )
-
-    if (is.null(bt_test_truth$error)) {
-
-      test_truth <- bt_test_truth$result
-
-    }
-
-  }
+  ## Note: test_truth is already on original scale — test_data is raw
+  ## (never passed through the recipe), so no back-transformation needed.
 
   test_metrics_raw <- safely_execute(
     compute_original_scale_metrics(test_truth, test_preds) %>%
@@ -491,7 +468,10 @@ fit_single_config <- function(config_row,
 
   fitted_workflow <- if (is.null(butchered$error)) {
 
-    butchered$result
+    result <- butchered$result
+    rm(final_fit, butchered)
+    invisible(gc(verbose = FALSE))
+    result
 
   } else {
 
