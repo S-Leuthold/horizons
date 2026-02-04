@@ -461,20 +461,34 @@ load_opus_files <- function(source,
 
   ## Read all files ----------------------------------------------------------
 
-  spectra_list <- lapply(file_paths, function(fp) {
+  n_files      <- length(file_paths)
+  n_failed     <- 0L
+  spectra_list <- vector("list", n_files)
 
-    tryCatch({
+  cli::cli_progress_bar(
+    format = "Reading {n_files} OPUS files {cli::pb_bar} {cli::pb_current}/{n_files} ({cli::pb_percent})",
+    total  = n_files
+  )
 
-      suppressWarnings(opusreader2::read_opus(fp))
+  for (i in seq_along(file_paths)) {
+
+    spectra_list[[i]] <- tryCatch({
+
+      suppressWarnings(opusreader2::read_opus(file_paths[[i]]))
 
     }, error = function(e) {
 
-      cli::cli_warn("Failed to read {.path {fp}}: {e$message}")
+      n_failed <<- n_failed + 1L
+      cli::cli_warn("Failed to read {.path {file_paths[[i]]}}: {e$message}")
       return(NULL)
 
     })
 
-  })
+    cli::cli_progress_update()
+
+  }
+
+  cli::cli_progress_done()
 
   ## Filter out failures -----------------------------------------------------
 
