@@ -1,16 +1,6 @@
-#' Average Replicate Spectra
-#'
-#' @description
-#' Functions for aggregating replicate spectra by sample ID with optional
-#' correlation-based quality control to detect outlier replicates.
-#'
-#' @details
-#' This module provides `average()`, which collapses replicate spectra into
-#' single mean spectra per sample. Quality control uses pairwise correlations
-#' to identify replicates that don't match their siblings.
-#'
-#' @keywords internal
-#' @name pipeline-average
+# R/pipeline-average.R
+# Aggregate replicate spectra by sample ID with optional correlation-based
+# quality control to detect outlier replicates.
 
 
 ## =============================================================================
@@ -211,16 +201,13 @@ average <- function(x,
   unique_groups <- unique(group_values)
   n_groups <- length(unique_groups)
 
-  if (verbose) {
+  n_replicates <- nrow(analysis)
 
-    cli::cli_text("")
-    cli::cli_text("\u2502")
-    cli::cli_text("\u251c\u2500 {cli::style_bold('Averaging replicates')}...")
-    cli::cli_text("\u2502  \u251c\u2500 Groups: {n_groups}")
-    cli::cli_text("\u2502  \u251c\u2500 Replicates: {nrow(analysis)}")
-    cli::cli_text("\u2502  \u2514\u2500 Quality check: {ifelse(quality_check, 'enabled', 'disabled')}")
+  ## Compute replicate counts per group for output ---------------------------
 
-  }
+  reps_per_group <- table(group_values)
+  min_reps       <- min(reps_per_group)
+  max_reps       <- max(reps_per_group)
 
   ## -------------------------------------------------------------------------
   ## Step 4: Process each group
@@ -230,6 +217,8 @@ average <- function(x,
 
   results_list        <- vector("list", n_groups)
   n_dropped           <- 0
+  n_groups_with_drops <- 0L
+  groups_with_drops   <- character()
   all_outlier_samples <- character()
   dropped_samples     <- character()
   qc_details          <- list()
@@ -258,12 +247,20 @@ average <- function(x,
 
       ## Group was dropped (all outliers + drop mode) ------------------------
 
-      dropped_samples <- c(dropped_samples, as.character(group_id))
-      n_dropped <- n_dropped + n_reps
+      dropped_samples     <- c(dropped_samples, as.character(group_id))
+      n_dropped           <- n_dropped + n_reps
+      n_groups_with_drops <- n_groups_with_drops + 1L
+      groups_with_drops   <- c(groups_with_drops, as.character(group_id))
 
     } else {
 
       results_list[[i]] <- group_result$averaged
+
+      if (group_result$n_dropped > 0) {
+        n_groups_with_drops <- n_groups_with_drops + 1L
+        groups_with_drops   <- c(groups_with_drops, as.character(group_id))
+      }
+
       n_dropped <- n_dropped + group_result$n_dropped
 
       if (group_result$all_outliers) {
@@ -390,33 +387,55 @@ average <- function(x,
 
   if (verbose) {
 
-    cli::cli_text("\u2502")
-    cli::cli_text("\u2514\u2500 {cli::style_bold('Complete')}")
-    cli::cli_text("   \u251c\u2500 Samples: {nrow(averaged)}")
+    cat(paste0("\u251C\u2500 ", cli::style_bold("Averaging replicates"), "...\n"))
 
-    if (n_dropped > 0) {
+    ## Replicate structure line ------------------------------------------------
 
-      cli::cli_text("   \u251c\u2500 Replicates dropped: {n_dropped}")
-
-    }
-
-    if (length(dropped_meta) > 0) {
-
-      cli::cli_text("   \u251c\u2500 Meta columns dropped: {length(dropped_meta)}")
-
-    }
-
-    if (length(all_outlier_samples) > 0) {
-
-      cli::cli_text("   \u2514\u2500 All-outlier samples: {length(all_outlier_samples)}")
-
+    reps_str <- if (min_reps == max_reps) {
+      paste0(min_reps, " reps/group")
     } else {
+      paste0(min_reps, "-", max_reps, " reps/group")
+    }
 
-      cli::cli_text("   \u2514\u2500 QC: all groups clean")
+    cat(paste0("\u2502  \u251C\u2500 ", n_groups, " groups from ",
+               n_replicates, " scans (", reps_str, ")\n"))
+
+    ## QC sub-tree -------------------------------------------------------------
+
+    if (quality_check) {
+
+      n_clean <- n_groups - n_groups_with_drops
+
+      if (n_dropped > 0) {
+
+        cat(paste0("\u2502  \u251C\u2500 QC (r > ", correlation_threshold, ")\n"))
+        cat(paste0("\u2502  \u2502  \u251C\u2500 ", n_clean, "/", n_groups,
+                   " groups clean\n"))
+        cat(paste0("\u2502  \u2502  \u251C\u2500 ", n_groups_with_drops,
+                   " groups \u2192 ", n_dropped, " replicates removed\n"))
+
+        if (length(dropped_samples) > 0) {
+
+          cat(paste0("\u2502  \u2502  \u251C\u2500 ", length(dropped_samples),
+                     " groups dropped entirely\n"))
+
+        }
+
+        cat(paste0("\u2502  \u2502  \u2514\u2500 ",
+                   nrow(averaged), " samples retained\n"))
+
+      } else {
+
+        cat(paste0("\u2502  \u251C\u2500 QC (r > ", correlation_threshold,
+                   "): all ", n_groups, " groups clean\n"))
+
+      }
 
     }
 
-    cli::cli_text("")
+    cat(paste0("\u2502  \u2514\u2500 ", nrow(averaged), " samples \u00D7 ",
+               x$data$n_predictors, " predictors\n"))
+    cat("\u2502\n")
 
   }
 

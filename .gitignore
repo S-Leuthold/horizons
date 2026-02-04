@@ -36,8 +36,17 @@ NEXT_SESSION_*.md
 # Archive directory for development artifacts
 archive/
 
+# Legacy API files (moved out of R/ during v1 refactor)
+R-legacy/
+
+# Old API tests (archived during v1 refactor)
+tests/testthat/archive_old_api/
+
 # Developer manuals (local reference, not shipped)
 dev/manuals/
+
+# Test data (binary OPUS files + real lab data)
+dev/test-data/
 
 # Examples directory (dev test scripts)
 examples/

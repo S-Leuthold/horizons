@@ -110,8 +110,7 @@ configure <- function(x,
   ## Step 0: Print header
   ## ---------------------------------------------------------------------------
 
-  cat("\u2502\n")
-  cat(paste0("\u251C\u2500 ", cli::style_bold("Configuring model pipelines"), "...\n"))
+  ## (tree output moved to end of function)
 
   ## ---------------------------------------------------------------------------
   ## Helper: abort with tree-nested error
@@ -126,8 +125,9 @@ configure <- function(x,
     }
     cat("\n")
     rlang::abort(
-      paste(c(header, details), collapse = "\n"),
-      class = error_class
+      header,
+      class = error_class,
+      call  = NULL
     )
 
   }
@@ -518,41 +518,21 @@ configure <- function(x,
   ## Step 7: CLI output
   ## ---------------------------------------------------------------------------
 
+  cat(paste0("\u251C\u2500 ", cli::style_bold("Configuring pipelines"), "...\n"))
   cat(paste0("\u2502  \u251C\u2500 Outcome: ", outcome_var, "\n"))
   cat(paste0("\u2502  \u251C\u2500 Models: ", paste(models, collapse = ", "), "\n"))
-  cat(paste0("\u2502  \u251C\u2500 Transformations: ",
-             paste(transformations, collapse = ", "), "\n"))
-  cat(paste0("\u2502  \u251C\u2500 Preprocessing: ",
-             paste(preprocessing, collapse = ", "), "\n"))
-  cat(paste0("\u2502  \u251C\u2500 Feature selection: ",
-             paste(feature_selection, collapse = ", "), "\n"))
+  cat(paste0("\u2502  \u251C\u2500 Tuning: ", cv_folds, "-fold CV, grid = ",
+             grid_size, "\n"))
 
-  if (length(covariate_cols) > 0 && !all(is.na(covariate_sets))) {
+  if (length(covariate_cols) > 0) {
 
     cat(paste0("\u2502  \u251C\u2500 Covariates: ",
-               length(covariate_cols), " (",
-               paste(covariate_cols, collapse = ", "), ")\n"))
-
-    if (!is.null(expand_covariates) && !isFALSE(expand_covariates)) {
-
-      n_sets <- sum(!is.na(covariate_sets))
-      cat(paste0("\u2502  \u2502  \u2514\u2500 Expansion: ",
-                 n_sets, " covariate sets (power set)\n"))
-
-    }
-
-    cat(paste0("\u2502  \u251C\u2500 Fusion: ", cov_fusion, "\n"))
-
-  } else {
-
-    cat(paste0("\u2502  \u251C\u2500 Covariates: none\n"))
+               paste(covariate_cols, collapse = ", "), "\n"))
 
   }
 
-  cat(paste0("\u2502  \u251C\u2500 CV folds: ", cv_folds,
-             " | Grid size: ", grid_size,
-             " | Bayesian iter: ", bayesian_iter, "\n"))
-  cat(paste0("\u2502  \u2514\u2500 Total configurations: ", nrow(config_grid), "\n"))
+  cat(paste0("\u2502  \u2514\u2500 Configs: ", nrow(config_grid), " total\n"))
+  cat("\u2502\n")
 
   ## ---------------------------------------------------------------------------
   ## Step 8: Return

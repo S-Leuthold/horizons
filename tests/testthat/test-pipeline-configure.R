@@ -230,7 +230,7 @@ describe("configure() validation", {
 
     expect_error(
       capture.output(configure(hd)),
-      "add_response",
+      "No response data found",
       class = "horizons_configure_error"
     )
 
@@ -242,7 +242,7 @@ describe("configure() validation", {
 
     expect_error(
       capture.output(configure(hd)),
-      "Multiple",
+      "Multiple response variables",
       class = "horizons_configure_error"
     )
 
@@ -254,7 +254,7 @@ describe("configure() validation", {
 
     expect_error(
       capture.output(configure(hd)),
-      "SOC.*pH|pH.*SOC",
+      "Multiple response variables",
       class = "horizons_configure_error"
     )
 
@@ -278,7 +278,7 @@ describe("configure() validation", {
 
     expect_error(
       capture.output(configure(hd, models = c("rf", "fake_model"))),
-      "fake_model",
+      "Invalid model",
       class = "horizons_configure_error"
     )
 
@@ -290,7 +290,7 @@ describe("configure() validation", {
 
     expect_error(
       capture.output(configure(hd, transformations = "box_cox")),
-      "box_cox",
+      "Invalid transformation",
       class = "horizons_configure_error"
     )
 
@@ -302,7 +302,7 @@ describe("configure() validation", {
 
     expect_error(
       capture.output(configure(hd, preprocessing = "msc")),
-      "msc",
+      "Invalid preprocessing",
       class = "horizons_configure_error"
     )
 
@@ -314,7 +314,7 @@ describe("configure() validation", {
 
     expect_error(
       capture.output(configure(hd, feature_selection = "rfe")),
-      "rfe",
+      "Invalid feature selection",
       class = "horizons_configure_error"
     )
 
@@ -326,7 +326,7 @@ describe("configure() validation", {
 
     expect_error(
       capture.output(configure(hd, models = "bogus")),
-      "rf",
+      "Invalid model",
       class = "horizons_configure_error"
     )
 
@@ -399,7 +399,7 @@ describe("configure() validation", {
     expect_error(
       capture.output(configure(hd, cov_fusion = "early",
                                expand_covariates = c("clay", "sand"))),
-      "sand",
+      "Covariate.*not found",
       class = "horizons_configure_error"
     )
 

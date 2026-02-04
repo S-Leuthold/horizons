@@ -7,25 +7,20 @@
 back_transform_predictions(predictions, transformation, warn = TRUE)
 }
 \arguments{
-\item{predictions}{Numeric vector of predictions to back-transform}
+\item{predictions}{Numeric vector of predictions on the transformed scale.}
 
-\item{transformation}{Character string: "none", "log", or "sqrt"}
+\item{transformation}{Character: "none", "log", "sqrt", or "log10".}
 
-\item{warn}{Logical. Should warnings be issued for edge cases?}
+\item{warn}{Logical. Warn on edge cases (very large values, negatives)?}
 }
 \value{
-Numeric vector of back-transformed predictions
+Numeric vector on the original response scale.
 }
 \description{
-Simple utility to back-transform predictions from log or sqrt scale to original scale.
-Handles NA values gracefully and provides clear warnings for edge cases.
-}
-\examples{
-# Log transformation
-pred_log <- c(1, 2, 3, NA)
-back_transform_predictions(pred_log, "log")
+Inverts response transformations applied by \code{step_log(offset = 1)} or
+\code{step_sqrt()} during recipe preprocessing. This is the single source of
+truth for back-transformation logic in horizons.
 
-# Square root transformation
-pred_sqrt <- c(1, 4, 9, NA)
-back_transform_predictions(pred_sqrt, "sqrt")
+\strong{Important:} \code{step_log(offset = 1)} computes \code{log(x + 1)}, so the correct
+inverse is \code{exp(x) - 1}, NOT \code{exp(x)}. Similarly, \code{step_log(base = 10, offset = 1)} computes \code{log10(x + 1)}, so the inverse is \code{10^x - 1}.
 }

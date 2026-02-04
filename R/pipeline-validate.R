@@ -72,11 +72,8 @@ validate <- function(x,
                      response_threshold = 1.5) {
 
   ## ---------------------------------------------------------------------------
-  ## Step 0: Print header
+  ## Step 0: (header moved to Step 15 — output after computation)
   ## ---------------------------------------------------------------------------
-
-  cat("\u2502\n")
-  cat(paste0("\u251C\u2500 ", cli::style_bold("Validating horizons object"), "...\n"))
 
   ## ---------------------------------------------------------------------------
   ## Helper: abort with tree-nested error
@@ -91,8 +88,9 @@ validate <- function(x,
     }
     cat("\n")
     rlang::abort(
-      paste(c(header, details), collapse = "\n"),
-      class = error_class
+      header,
+      class = error_class,
+      call  = NULL
     )
 
   }
@@ -481,8 +479,12 @@ validate <- function(x,
   ## ---------------------------------------------------------------------------
 
   x$validation$passed    <- passed
-  x$validation$checks    <- checks
   x$validation$timestamp <- Sys.time()
+
+  ## Reorder for cleaner display; blank severity on passing checks
+  checks <- checks[, c("description", "status", "severity", "value", "check_id")]
+  checks$severity[checks$status == "pass"] <- ""
+  x$validation$checks <- checks
 
   x$validation$outliers$spectral_ids   <- spectral_outlier_ids
   x$validation$outliers$response_ids   <- response_outlier_ids
@@ -494,75 +496,53 @@ validate <- function(x,
   ## Step 15: CLI output
   ## ---------------------------------------------------------------------------
 
-  cat("\u2502\n")
+  cat(paste0("\u251C\u2500 ", cli::style_bold("Validating"), "...\n"))
 
   ## Sample checks --------------------------------------------------------------
 
-  cat(paste0("\u251C\u2500 ", cli::style_bold("Sample checks"), "\n"))
-
   p001 <- checks[checks$check_id == "P001", ]
   sym  <- if (p001$status == "pass") cli::col_green("\u2713") else cli::col_yellow("\u26A0")
-  cat(paste0("\u2502  \u251C\u2500 ", sym, " Sample count: ", n_total, " (recommended \u2265 50)\n"))
+  cat(paste0("\u2502  \u251C\u2500 ", sym, " Samples: ", n_total, " (\u2265 50)\n"))
 
   p001b <- checks[checks$check_id == "P001b", ]
   sym   <- if (p001b$status == "pass") cli::col_green("\u2713") else cli::col_red("\u2717")
   cat(paste0("\u2502  \u251C\u2500 ", sym, " CV feasibility: ", n_model,
-             " complete cases \u2265 ", cv_folds * 2, " (", cv_folds, " folds \u00D7 2)\n"))
-
-  p002 <- checks[checks$check_id == "P002", ]
-  sym  <- if (p002$status == "pass") cli::col_green("\u2713") else cli::col_yellow("\u26A0")
-  cat(paste0("\u2502  \u2514\u2500 ", sym, " Samples per fold: ~", samples_per_fold,
-             " (recommended \u2265 10)\n"))
+             " \u2265 ", cv_folds * 2, "\n"))
 
   ## Outcome checks (gated) ----------------------------------------------------
 
   if (has_outcome) {
 
-    cat(paste0("\u2502\n"))
-    cat(paste0("\u251C\u2500 ", cli::style_bold("Outcome checks"), " (", outcome_col, ")\n"))
-
     p003 <- checks[checks$check_id == "P003", ]
     sym  <- if (p003$status == "pass") cli::col_green("\u2713") else cli::col_red("\u2717")
-    cat(paste0("\u2502  \u251C\u2500 ", sym, " Variance: ",
-               format(outcome_var, digits = 4), " (> 0)\n"))
+    cat(paste0("\u2502  \u251C\u2500 ", sym, " Outcome variance: ",
+               format(outcome_var, digits = 4), "\n"))
 
     p004 <- checks[checks$check_id == "P004", ]
     sym  <- if (p004$status == "pass") cli::col_green("\u2713") else cli::col_yellow("\u26A0")
-    cat(paste0("\u2502  \u2514\u2500 ", sym, " Missing: ", n_na, "/", n_total,
+    cat(paste0("\u2502  \u251C\u2500 ", sym, " Missing: ", n_na, "/", n_total,
                " (", pct_na, "%)\n"))
 
   }
 
   ## Predictor checks -----------------------------------------------------------
 
-  cat(paste0("\u2502\n"))
-  cat(paste0("\u251C\u2500 ", cli::style_bold("Predictor checks"), "\n"))
-
   p007 <- checks[checks$check_id == "P007", ]
   sym  <- if (p007$status == "pass") cli::col_green("\u2713") else cli::col_yellow("\u26A0")
-  cat(paste0("\u2502  \u2514\u2500 ", sym, " Near-zero variance: ",
-             length(nzv_cols), " predictors flagged\n"))
+  cat(paste0("\u2502  \u251C\u2500 ", sym, " Near-zero variance: ",
+             length(nzv_cols), "\n"))
 
   ## Outlier detection ----------------------------------------------------------
 
-  cat(paste0("\u2502\n"))
-  cat(paste0("\u251C\u2500 ", cli::style_bold("Outlier detection"), "\n"))
-
   cat(paste0("\u2502  \u251C\u2500 ",
-             cli::col_cyan("\u2139"), " Spectral: ",
-             length(spectral_outlier_ids), " flagged",
-             " (Mahalanobis, threshold = qchisq(", spectral_threshold, ", df=k))\n"))
+             cli::col_cyan("\u2139"), " Spectral outliers: ",
+             length(spectral_outlier_ids), "\n"))
 
   if (has_outcome) {
 
-    cat(paste0("\u2502  \u2514\u2500 ",
-               cli::col_cyan("\u2139"), " Response: ",
-               length(response_outlier_ids), " flagged",
-               " (IQR \u00D7 ", response_threshold, ")\n"))
-
-  } else {
-
-    cat(paste0("\u2502  \u2514\u2500 ", cli::col_grey("Response: skipped (no outcome)"), "\n"))
+    cat(paste0("\u2502  \u251C\u2500 ",
+               cli::col_cyan("\u2139"), " Response outliers: ",
+               length(response_outlier_ids), "\n"))
 
   }
 
@@ -574,60 +554,26 @@ validate <- function(x,
     n_response_only <- sum(removal_detail$reason == "response")
     n_both          <- sum(removal_detail$reason == "both")
 
-    cat(paste0("\u2502\n"))
-    cat(paste0("\u251C\u2500 ", cli::style_bold("Outlier removal"), "\n"))
-    cat(paste0("\u2502  \u251C\u2500 Removed ", length(removed_ids), " unique samples",
+    cat(paste0("\u2502  \u251C\u2500 Removed ", length(removed_ids), " outliers",
                " (", n_spectral_only, " spectral, ",
                n_response_only, " response, ",
                n_both, " both)\n"))
-    cat(paste0("\u2502  \u2514\u2500 ", x$data$n_rows, " samples remaining\n"))
+    cat(paste0("\u2502  \u251C\u2500 ", x$data$n_rows, " samples remaining\n"))
 
   }
 
   ## Status line ----------------------------------------------------------------
 
-  cat(paste0("\u2502\n"))
-
-  if (!passed) {
-
-    cat(paste0("\u2514\u2500 ", cli::style_bold(cli::col_red("Status: FAILED")), "\n"))
-
-    for (i in seq_len(nrow(error_checks))) {
-      branch <- if (i < nrow(error_checks)) "\u251C\u2500" else "\u2514\u2500"
-      cat(paste0("   ", branch, " ", error_checks$description[i],
-                  " (", error_checks$value[i], ")\n"))
-    }
-    cat(paste0("   \u2514\u2500 Fix data or use skip_validation = TRUE in evaluate()\n"))
-
+  status_str <- if (!passed) {
+    cli::style_bold(cli::col_red("FAILED"))
   } else if (has_warnings) {
-
-    cat(paste0("\u2514\u2500 ", cli::style_bold(cli::col_yellow("Status: PASSED with warnings")), "\n"))
-
-    if (!isFALSE(remove_outliers) && length(spectral_outlier_ids) + length(response_outlier_ids) == 0) {
-
-      cat(paste0("   \u2514\u2500 No outliers to remove\n"))
-
-    } else if (isFALSE(remove_outliers) &&
-               (length(spectral_outlier_ids) > 0 || length(response_outlier_ids) > 0)) {
-
-      cat(paste0("   \u2514\u2500 To remove outliers: validate(x, remove_outliers = TRUE)\n"))
-
-    }
-
+    cli::style_bold(cli::col_yellow("PASSED with warnings"))
   } else {
-
-    cat(paste0("\u2514\u2500 ", cli::style_bold(cli::col_green("Status: PASSED")), "\n"))
-
-    if (isFALSE(remove_outliers) &&
-        (length(spectral_outlier_ids) > 0 || length(response_outlier_ids) > 0)) {
-
-      cat(paste0("   \u2514\u2500 To remove outliers: validate(x, remove_outliers = TRUE)\n"))
-
-    }
-
+    cli::style_bold(cli::col_green("PASSED"))
   }
 
-  cat("\n")
+  cat(paste0("\u2502  \u2514\u2500 Status: ", status_str, "\n"))
+  cat("\u2502\n")
 
   ## ---------------------------------------------------------------------------
   ## Return
