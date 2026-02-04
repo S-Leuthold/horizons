@@ -109,7 +109,7 @@ KNOWN_SPATIAL_COVARIATES <- c(
 
 ## fit() Parameters ------------------------------------------------------------
 
-DEFAULT_FINAL_BAYES_ITER <- 25
+DEFAULT_FINAL_BAYES_ITER <- 25L
 N_CALIB_MIN              <- 30L
 DEFAULT_UQ_LEVEL         <- 0.90
 UQ_QUANTILE_TREES        <- 500L

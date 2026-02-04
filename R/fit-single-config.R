@@ -14,6 +14,9 @@
 #' @param split_F An `rsplit` object (Split F: train_F / test_F).
 #' @param cv_resamples A `vfold_cv` object created from train_Fit (or train_F).
 #' @param calib_data Data frame for UQ calibration (NULL if compute_uq = FALSE).
+#' @param train_data Data frame for training. If NULL, defaults to
+#'   `training(split_F)`. Pass `train_Fit` when `compute_uq = TRUE` to avoid
+#'   calibration leakage.
 #' @param role_map Tibble with `variable` and `role` columns.
 #' @param best_params_eval Single-row tibble of best params from evaluate().
 #' @param final_bayesian_iter Integer. Bayesian iterations for re-tuning.
@@ -32,6 +35,7 @@ fit_single_config <- function(config_row,
                               split_F,
                               cv_resamples,
                               calib_data       = NULL,
+                              train_data       = NULL,
                               role_map,
                               best_params_eval,
                               final_bayesian_iter = DEFAULT_FINAL_BAYES_ITER,
@@ -46,7 +50,7 @@ fit_single_config <- function(config_row,
   config_id      <- config_row$config_id
   outcome_col    <- role_map$variable[role_map$role == "outcome"]
   transformation <- tolower(as.character(config_row$transformation))
-  train_data     <- rsample::training(split_F)
+  train_data     <- train_data %||% rsample::training(split_F)
   test_data      <- rsample::testing(split_F)
 
   ## Accumulate warnings from all steps
@@ -208,6 +212,7 @@ fit_single_config <- function(config_row,
       best_params   = best_params_eval,
       param_set     = param_set,
       bayesian_iter = final_bayesian_iter,
+      grid_size     = grid_size,
       metric_set    = tune_metrics,
       allow_par     = allow_par
     ),
