@@ -102,9 +102,10 @@ configure <- function(x,
                       feature_selection  = "none",
                       expand_covariates  = NULL,
                       cov_fusion         = NULL,
-                      cv_folds           = 5L,
-                      grid_size          = 10L,
-                      bayesian_iter      = 15L) {
+                      cv_folds              = 5L,
+                      grid_size             = 10L,
+                      bayesian_iter         = 15L,
+                      final_bayesian_iter   = 25L) {
 
   ## ---------------------------------------------------------------------------
   ## Step 0: Print header
@@ -255,6 +256,18 @@ configure <- function(x,
     abort_nested(
       "`bayesian_iter` must be a non-negative integer",
       c(paste0("Got: ", deparse(bayesian_iter)))
+    )
+
+  }
+
+  if (!is.numeric(final_bayesian_iter) || length(final_bayesian_iter) != 1 ||
+      is.na(final_bayesian_iter) ||
+      final_bayesian_iter != as.integer(final_bayesian_iter) ||
+      final_bayesian_iter < 0) {
+
+    abort_nested(
+      "`final_bayesian_iter` must be a non-negative integer",
+      c(paste0("Got: ", deparse(final_bayesian_iter)))
     )
 
   }
@@ -493,9 +506,10 @@ configure <- function(x,
   x$config$n_configs <- nrow(config_grid)
 
   x$config$tuning <- list(
-    cv_folds      = as.integer(cv_folds),
-    grid_size     = as.integer(grid_size),
-    bayesian_iter = as.integer(bayesian_iter)
+    cv_folds            = as.integer(cv_folds),
+    grid_size           = as.integer(grid_size),
+    bayesian_iter       = as.integer(bayesian_iter),
+    final_bayesian_iter = as.integer(final_bayesian_iter)
   )
 
   x$config$expansion <- list(
