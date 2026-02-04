@@ -10,6 +10,7 @@ tune_warmstart_bayes(
   best_params,
   param_set,
   bayesian_iter,
+  grid_size = WARMSTART_GRID_SIZE,
   metric_set,
   allow_par = FALSE
 )
