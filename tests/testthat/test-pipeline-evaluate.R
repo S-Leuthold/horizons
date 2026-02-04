@@ -1,113 +1,7 @@
 ## ---------------------------------------------------------------------------
 ## Tests: evaluate()
 ## ---------------------------------------------------------------------------
-
-## Helper: build a minimal horizons_data object ready for evaluate()
-make_eval_object <- function(n = 40, n_wn = 10, n_configs = 2,
-                             covariates = NULL,
-                             add_validation = TRUE) {
-
-  set.seed(42)
-
-  ## Spectral data
-  wn_names <- paste0("wn_", seq(4000, by = -2, length.out = n_wn))
-  spec_mat <- matrix(rnorm(n * n_wn), nrow = n)
-  colnames(spec_mat) <- wn_names
-
-  df <- tibble::as_tibble(spec_mat)
-  df$sample_id <- paste0("S", sprintf("%03d", seq_len(n)))
-
-  ## Outcome with weak signal
-  df$SOC <- 2 + rowMeans(spec_mat[, 1:min(3, n_wn)]) * 0.5 + rnorm(n, sd = 0.5)
-
-  ## Role map
-  roles <- tibble::tibble(
-    variable = c("sample_id", wn_names, "SOC"),
-    role     = c("id", rep("predictor", n_wn), "outcome")
-  )
-
-  ## Optionally add covariates
-  if (!is.null(covariates)) {
-
-    for (cov in covariates) {
-      df[[cov]] <- runif(n, 0, 100)
-      roles <- rbind(roles, tibble::tibble(variable = cov, role = "covariate"))
-    }
-
-  }
-
-  ## Build configs
-  models <- c("rf", "cubist")
-  configs <- tibble::tibble(
-    config_id         = paste0("cfg_", sprintf("%03d", seq_len(n_configs))),
-    model             = models[seq_len(n_configs)],
-    transformation    = "none",
-    preprocessing     = "raw",
-    feature_selection = "none",
-    covariates        = NA_character_
-  )
-
-  ## Build horizons_data-like structure
-  obj <- list(
-
-    data = list(
-      analysis     = df,
-      role_map     = roles,
-      n_rows       = nrow(df),
-      n_predictors = n_wn,
-      n_covariates = 0L,
-      n_responses  = 1L
-    ),
-
-    provenance = list(
-      spectra_source = "test",
-      spectra_type   = "mir",
-      schema_version = 1L
-    ),
-
-    config = list(
-      configs   = configs,
-      n_configs = n_configs,
-      tuning    = list(
-        cv_folds      = 3L,
-        grid_size     = 2L,
-        bayesian_iter = 0L
-      )
-    ),
-
-    validation = list(
-      passed    = if (add_validation) TRUE else NULL,
-      checks    = NULL,
-      timestamp = if (add_validation) Sys.time() else NULL,
-      outliers  = list(
-        spectral_ids   = NULL,
-        response_ids   = NULL,
-        removed_ids    = NULL,
-        removal_detail = NULL,
-        removed        = FALSE
-      )
-    ),
-
-    evaluation = list(
-      results     = NULL,
-      best_config = NULL,
-      rank_metric = NULL,
-      backend     = NULL,
-      runtime     = NULL,
-      timestamp   = NULL
-    ),
-
-    models   = list(workflows = NULL, n_models = NULL,
-                    uq = list(enabled = FALSE)),
-    ensemble = list(stack = NULL),
-    artifacts = list(cache_dir = NULL)
-
-  )
-
-  class(obj) <- c("horizons_data", "list")
-  obj
-
-}
+## make_eval_object() is defined in helper-fixtures.R
 
 ## Expected columns in evaluation$results
 EXPECTED_EVAL_COLS <- c(
@@ -327,26 +221,30 @@ describe("evaluate() - checkpointing", {
   it("writes checkpoint file when output_dir is provided", {
 
     obj <- make_eval_object(n_configs = 2)
-    tmpdir <- tempdir()
+    tmpdir <- tempfile("eval_ckpt_write_")
+    dir.create(tmpdir)
+    on.exit(unlink(tmpdir, recursive = TRUE))
+
     checkpoint_path <- file.path(tmpdir, "eval_checkpoint.rds")
-    if (file.exists(checkpoint_path)) file.remove(checkpoint_path)
+    checkpoint_dir  <- file.path(tmpdir, "checkpoints")
 
     result <- suppressWarnings(evaluate(obj, output_dir = tmpdir, verbose = FALSE, seed = 42L))
 
     ## Checkpoint file should exist after completion
     expect_true(file.exists(checkpoint_path))
 
-    ## Clean up
-    file.remove(checkpoint_path)
+    ## Per-config checkpoint files should also exist
+    expect_true(dir.exists(checkpoint_dir))
+    expect_gt(length(list.files(checkpoint_dir, pattern = "\\.rds$")), 0)
 
   })
 
   it("resumes from checkpoint on re-run", {
 
     obj <- make_eval_object(n_configs = 2)
-    tmpdir <- tempdir()
-    checkpoint_path <- file.path(tmpdir, "eval_checkpoint.rds")
-    if (file.exists(checkpoint_path)) file.remove(checkpoint_path)
+    tmpdir <- tempfile("eval_ckpt_resume_")
+    dir.create(tmpdir)
+    on.exit(unlink(tmpdir, recursive = TRUE))
 
     ## First run
     result1 <- suppressWarnings(evaluate(obj, output_dir = tmpdir, verbose = FALSE, seed = 42L))
@@ -358,9 +256,6 @@ describe("evaluate() - checkpointing", {
                  result2$evaluation$results$config_id)
     expect_equal(result1$evaluation$best_config,
                  result2$evaluation$best_config)
-
-    ## Clean up
-    file.remove(checkpoint_path)
 
   })
 

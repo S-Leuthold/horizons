@@ -9,7 +9,7 @@ evaluate(
   metric = "rpd",
   prune = TRUE,
   prune_threshold = 1,
-  allow_par = FALSE,
+  workers = 1L,
   output_dir = NULL,
   seed = 307L,
   verbose = TRUE
@@ -31,8 +31,11 @@ grid-search RPD below this value skip Bayesian optimization but still
 receive test-set metrics from grid-search best. Default 1.0 (the
 "no better than the mean" line).}
 
-\item{allow_par}{Logical. Pass to \code{tune::control_grid()} and
-\code{tune::control_bayes()} to enable parallel CV folds. Default FALSE.}
+\item{workers}{Integer. Total number of cores to use. Default 1L
+(sequential). When \code{workers > 1}, evaluate() automatically splits cores
+between outer parallelism (across configs) and inner parallelism (CV
+folds). The split is: \code{inner = min(workers, cv_folds)}, \code{outer = floor(workers / inner)}. evaluate() manages its own \code{future::plan()} and
+restores the previous plan on exit.}
 
 \item{output_dir}{Character or NULL. If provided, checkpoint results to
 disk after each config. Enables resuming interrupted runs. Default NULL
