@@ -461,9 +461,11 @@ evaluate <- function(x,
 
         checkpoint_results[[ cfg$config_id ]] <- result_row
 
-        ## Single-file checkpoint (backward compatible)
+        ## Single-file checkpoint (atomic write, backward compatible)
         checkpoint_tibble <- dplyr::bind_rows(checkpoint_results)
-        saveRDS(checkpoint_tibble, checkpoint_path)
+        tmp_ckpt <- tempfile(tmpdir = dirname(checkpoint_path), fileext = ".rds")
+        saveRDS(checkpoint_tibble, tmp_ckpt)
+        file.rename(tmp_ckpt, checkpoint_path)
         rm(checkpoint_tibble)
 
         ## Per-config checkpoint (atomic write for parallel safety)
