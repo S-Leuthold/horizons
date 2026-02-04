@@ -221,11 +221,12 @@ describe("evaluate() - checkpointing", {
   it("writes checkpoint file when output_dir is provided", {
 
     obj <- make_eval_object(n_configs = 2)
-    tmpdir <- tempdir()
+    tmpdir <- tempfile("eval_ckpt_write_")
+    dir.create(tmpdir)
+    on.exit(unlink(tmpdir, recursive = TRUE))
+
     checkpoint_path <- file.path(tmpdir, "eval_checkpoint.rds")
     checkpoint_dir  <- file.path(tmpdir, "checkpoints")
-    if (file.exists(checkpoint_path)) file.remove(checkpoint_path)
-    if (dir.exists(checkpoint_dir)) unlink(checkpoint_dir, recursive = TRUE)
 
     result <- suppressWarnings(evaluate(obj, output_dir = tmpdir, verbose = FALSE, seed = 42L))
 
@@ -236,20 +237,14 @@ describe("evaluate() - checkpointing", {
     expect_true(dir.exists(checkpoint_dir))
     expect_gt(length(list.files(checkpoint_dir, pattern = "\\.rds$")), 0)
 
-    ## Clean up
-    if (file.exists(checkpoint_path)) file.remove(checkpoint_path)
-    if (dir.exists(checkpoint_dir)) unlink(checkpoint_dir, recursive = TRUE)
-
   })
 
   it("resumes from checkpoint on re-run", {
 
     obj <- make_eval_object(n_configs = 2)
-    tmpdir <- tempdir()
-    checkpoint_path <- file.path(tmpdir, "eval_checkpoint.rds")
-    checkpoint_dir  <- file.path(tmpdir, "checkpoints")
-    if (file.exists(checkpoint_path)) file.remove(checkpoint_path)
-    if (dir.exists(checkpoint_dir)) unlink(checkpoint_dir, recursive = TRUE)
+    tmpdir <- tempfile("eval_ckpt_resume_")
+    dir.create(tmpdir)
+    on.exit(unlink(tmpdir, recursive = TRUE))
 
     ## First run
     result1 <- suppressWarnings(evaluate(obj, output_dir = tmpdir, verbose = FALSE, seed = 42L))
@@ -261,10 +256,6 @@ describe("evaluate() - checkpointing", {
                  result2$evaluation$results$config_id)
     expect_equal(result1$evaluation$best_config,
                  result2$evaluation$best_config)
-
-    ## Clean up
-    if (file.exists(checkpoint_path)) file.remove(checkpoint_path)
-    if (dir.exists(checkpoint_dir)) unlink(checkpoint_dir, recursive = TRUE)
 
   })
 

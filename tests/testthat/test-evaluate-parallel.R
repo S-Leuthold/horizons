@@ -116,6 +116,11 @@ describe("evaluate() - parallel execution", {
     expect_true(all(result$evaluation$results$config_id %in%
                       c("cfg_001", "cfg_002", "cfg_003", "cfg_004")))
 
+    ## Every config should have a valid status (no silent NA failures)
+    expect_true(all(result$evaluation$results$status %in%
+                      c("success", "pruned", "failed")))
+    expect_false(any(is.na(result$evaluation$results$status)))
+
     ## Per-config checkpoint files should exist
     checkpoint_dir <- file.path(tmpdir, "checkpoints")
     expect_true(dir.exists(checkpoint_dir))
