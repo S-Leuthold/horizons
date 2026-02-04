@@ -188,7 +188,8 @@ evaluate <- function(x,
   ## Step 6: Load checkpoints (if any)
   ## -----------------------------------------------------------------------
 
-  checkpoint_path   <- NULL
+  checkpoint_path    <- NULL
+  checkpoint_dir     <- NULL
   checkpoint_results <- list()
 
   if (!is.null(output_dir)) {
@@ -196,7 +197,11 @@ evaluate <- function(x,
     if (!dir.exists(output_dir)) dir.create(output_dir, recursive = TRUE)
 
     checkpoint_path <- file.path(output_dir, "eval_checkpoint.rds")
+    checkpoint_dir  <- file.path(output_dir, "checkpoints")
 
+    if (!dir.exists(checkpoint_dir)) dir.create(checkpoint_dir)
+
+    ## Load from single-file checkpoint (legacy / sequential)
     if (file.exists(checkpoint_path)) {
 
       loaded <- readRDS(checkpoint_path)
@@ -222,20 +227,42 @@ evaluate <- function(x,
 
       if (nrow(loaded) > 0) {
 
-        ## Index by config_id for fast lookup
         for (j in seq_len(nrow(loaded))) {
           checkpoint_results[[ loaded$config_id[j] ]] <- loaded[j, ]
         }
 
-        if (verbose) {
+      }
 
-          cat(paste0(
-            "\u2502  Loaded ", nrow(loaded), " checkpointed results\n"
-          ))
+    }
+
+    ## Load from per-config checkpoint files (parallel-safe)
+    per_config_files <- list.files(checkpoint_dir, pattern = "\\.rds$",
+                                   full.names = TRUE)
+
+    if (length(per_config_files) > 0) {
+
+      for (f in per_config_files) {
+
+        row <- tryCatch(readRDS(f), error = function(e) NULL)
+
+        if (!is.null(row) && row$config_id %in% configs$config_id &&
+            !row$config_id %in% names(checkpoint_results)) {
+
+          checkpoint_results[[ row$config_id ]] <- row
 
         }
 
       }
+
+    }
+
+    n_loaded <- length(checkpoint_results)
+
+    if (n_loaded > 0 && verbose) {
+
+      cat(paste0(
+        "\u2502  Loaded ", n_loaded, " checkpointed results\n"
+      ))
 
     }
 
@@ -404,13 +431,25 @@ evaluate <- function(x,
 
     }
 
-    ## Checkpoint
+    ## Checkpoint — dual write (single-file + per-config)
     if (!is.null(checkpoint_path)) {
 
       checkpoint_results[[ cfg$config_id ]] <- result_row
+
+      ## Single-file checkpoint (backward compatible)
       checkpoint_tibble <- dplyr::bind_rows(checkpoint_results)
       saveRDS(checkpoint_tibble, checkpoint_path)
       rm(checkpoint_tibble)
+
+      ## Per-config checkpoint (atomic write for parallel safety)
+      if (!is.null(checkpoint_dir)) {
+
+        tmp <- tempfile(tmpdir = checkpoint_dir, fileext = ".rds")
+        saveRDS(result_row, tmp)
+        file.rename(tmp, file.path(checkpoint_dir,
+                                   paste0(cfg$config_id, ".rds")))
+
+      }
 
     }
 
