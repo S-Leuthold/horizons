@@ -129,17 +129,18 @@ prep.step_select_cars <- function(x, training, info = NULL, ...) {
   selected_vars  <- seq_len(n_vars)
   weights        <- rep(1, n_vars)
   rmsecv_values  <- numeric(n_iterations)
-  
+  decay          <- exp(log(2 / n_vars) / (n_iterations - 1))
+
   for (iter in 1:n_iterations) {
-    
+
     # Safety check - need at least 2 variables for meaningful PLS
     if(length(selected_vars) < 2) {
       break
     }
-    
-    # Exponentially decreasing retention rate
-    retention_rate <- (n_vars / length(selected_vars))^(iter / n_iterations)
-    n_keep         <- max(1, floor(length(selected_vars) * retention_rate))
+
+    # Exponentially decreasing retention: n_vars → 2 over n_iterations
+    n_keep         <- max(2, floor(n_vars * decay^(iter - 1)))
+    n_keep         <- min(n_keep, length(selected_vars))
     
     # Monte Carlo sampling
     mc_samples     <- sample(n_samples, floor(n_samples * mc_ratio))
@@ -209,9 +210,18 @@ prep.step_select_cars <- function(x, training, info = NULL, ...) {
   
   # Check if we found a valid optimal iteration
   if (length(optimal_iter) == 0 || is.na(optimal_iter)) {
-    # No valid iteration found - likely all NAs due to invalid data
-    # Return original variables as fallback
-    return(predictor_names)
+
+    # No valid iteration found — keep all predictors as safe fallback
+    return(step_select_cars_new(
+      columns       = col_names,
+      outcome       = x$outcome,
+      role          = x$role,
+      trained       = TRUE,
+      selected_vars = col_names,
+      skip          = x$skip,
+      id            = x$id
+    ))
+
   }
   
   # Rerun to optimal iteration to get final variable set
@@ -224,8 +234,8 @@ prep.step_select_cars <- function(x, training, info = NULL, ...) {
       break
     }
     
-    retention_rate <- (n_vars / length(selected_vars))^(i / n_iterations)
-    n_keep        <- max(1, floor(length(selected_vars) * retention_rate))
+    n_keep        <- max(2, floor(n_vars * decay^(i - 1)))
+    n_keep        <- min(n_keep, length(selected_vars))
     mc_samples    <- sample(n_samples, floor(n_samples * mc_ratio))
     
     X_subset      <- reduced_mat[mc_samples, selected_vars, drop = FALSE]

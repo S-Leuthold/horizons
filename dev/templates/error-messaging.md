@@ -98,7 +98,7 @@ warnings floating in the console.
 
 ### Example: evaluate() config loop
 
-```
+```text
 │
 ├─ Config 1/24: rf + log + snv + pca
 │  ├─ Tuning: 10-fold CV, grid = 10...

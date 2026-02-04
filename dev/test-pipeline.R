@@ -57,7 +57,7 @@ hd_avg <- hd_parsed |>
   average(by = "sample_id")
 
 hd_avg
-hd_avg$data$analysis$sample_id  # 4 unique samples after averaging
+hd_avg$data$analysis$sample_id  # 66 unique samples after averaging
 
 
 ## =============================================================================
