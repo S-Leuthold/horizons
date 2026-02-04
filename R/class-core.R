@@ -460,7 +460,15 @@ print.horizons_data <- function(x, ...) {
   ## Header
   ## ---------------------------------------------------------------------------
 
-  cat(cli::style_bold("\u2500\u2500 horizons_data \u2500\u2500\n\n"))
+  class_label <- if (inherits(x, "horizons_fit")) {
+    "horizons_fit"
+  } else if (inherits(x, "horizons_eval")) {
+    "horizons_eval"
+  } else {
+    "horizons_data"
+  }
+
+  cat(cli::style_bold(paste0("\u2500\u2500 ", class_label, " \u2500\u2500\n\n")))
 
   ## ---------------------------------------------------------------------------
   ## Check if truly empty (no data AND no provenance)
@@ -574,6 +582,101 @@ print.horizons_data <- function(x, ...) {
   }
 
   ## ---------------------------------------------------------------------------
+  ## Evaluation section (horizons_eval and beyond)
+  ## ---------------------------------------------------------------------------
+
+  has_eval <- !is.null(x$evaluation$results)
+
+  if (has_eval) {
+
+    cat(cli::style_bold("Evaluation\n"))
+
+    eval_res  <- x$evaluation$results
+    n_success <- sum(eval_res$status == "success")
+    n_total   <- nrow(eval_res)
+
+    has_models <- !is.null(x$models$workflows)
+
+    cat(paste0("   \u251C\u2500 Configs evaluated: ", n_total, "\n"))
+    cat(paste0("   \u251C\u2500 Successful: ", n_success, "\n"))
+
+    ## Best config
+    if (n_success > 0 && !is.null(x$evaluation$best_config)) {
+
+      best_id  <- x$evaluation$best_config
+      metric   <- x$evaluation$rank_metric %||% "rmse"
+      best_row <- eval_res[eval_res$config_id == best_id, ]
+
+      if (nrow(best_row) > 0 && metric %in% names(best_row)) {
+
+        branch <- if (has_models) "\u251C\u2500" else "\u2514\u2500"
+        cat(paste0(
+          "   ", branch, " Best: ", best_id,
+          " \u2014 ", toupper(metric), " = ",
+          round(best_row[[metric]], 3), "\n"
+        ))
+
+      }
+
+    }
+
+    cat("\n")
+
+  }
+
+  ## ---------------------------------------------------------------------------
+  ## Models section (horizons_fit)
+  ## ---------------------------------------------------------------------------
+
+  has_models <- !is.null(x$models$workflows)
+
+  if (has_models) {
+
+    cat(cli::style_bold("Models\n"))
+
+    n_models <- x$models$n_models %||% length(x$models$workflows)
+    cat(paste0("   \u251C\u2500 Fitted: ", n_models, "\n"))
+
+    ## Best test performance
+    if (!is.null(x$models$results)) {
+
+      fit_res   <- x$models$results
+      successes <- fit_res[fit_res$status == "success", ]
+
+      if (nrow(successes) > 0) {
+
+        best_idx <- which.min(successes$rmse)
+        best     <- successes[best_idx, ]
+        cat(paste0(
+          "   \u251C\u2500 Best test: ", best$config_id,
+          " \u2014 RMSE = ", round(best$rmse, 3),
+          ", RPD = ", round(best$rpd, 2), "\n"
+        ))
+
+      }
+
+    }
+
+    ## UQ status
+    has_uq <- !is.null(x$models$uq) && length(x$models$uq) > 0
+    branch <- "\u2514\u2500"
+
+    if (has_uq) {
+
+      cat(paste0("   ", branch, " UQ: ", cli::col_green("enabled"),
+                 " (", length(x$models$uq), " configs)\n"))
+
+    } else {
+
+      cat(paste0("   ", branch, " UQ: ", cli::col_silver("disabled"), "\n"))
+
+    }
+
+    cat("\n")
+
+  }
+
+  ## ---------------------------------------------------------------------------
   ## Status hint
   ## ---------------------------------------------------------------------------
 
@@ -619,8 +722,18 @@ summary.horizons_data <- function(object, ...) {
   ## ---------------------------------------------------------------------------
 
   header_line <- paste0(rep("\u2500", 79), collapse = "")
-  cat(cli::style_bold(paste0("\u2500\u2500 horizons_data summary ",
-      paste0(rep("\u2500", 55), collapse = ""), "\n\n")))
+  class_label <- if (inherits(x, "horizons_fit")) {
+    "horizons_fit"
+  } else if (inherits(x, "horizons_eval")) {
+    "horizons_eval"
+  } else {
+    "horizons_data"
+  }
+
+  header_text <- paste0("\u2500\u2500 ", class_label, " summary ")
+  pad_len     <- max(0, 80 - nchar(header_text))
+  cat(cli::style_bold(paste0(header_text,
+      paste0(rep("\u2500", pad_len), collapse = ""), "\n\n")))
 
   ## ---------------------------------------------------------------------------
   ## Data section
@@ -846,6 +959,180 @@ summary.horizons_data <- function(object, ...) {
   }
 
   cat("\n")
+
+  ## ---------------------------------------------------------------------------
+  ## Evaluation section (horizons_eval and beyond)
+  ## ---------------------------------------------------------------------------
+
+  has_eval <- !is.null(x$evaluation$results)
+
+  if (has_eval) {
+
+    cat(cli::style_bold("Evaluation\n"))
+
+    eval_res  <- x$evaluation$results
+    n_success <- sum(eval_res$status == "success")
+    n_pruned  <- sum(eval_res$status == "pruned")
+    n_failed  <- sum(eval_res$status == "failed")
+    n_total   <- nrow(eval_res)
+
+    cat(paste0("   \u251C\u2500 Configs evaluated: ", n_total, "\n"))
+    cat(paste0("   \u251C\u2500 Results: ",
+               cli::col_green(paste0(n_success, " success")), ", ",
+               n_pruned, " pruned, ",
+               cli::col_red(paste0(n_failed, " failed")), "\n"))
+
+    metric <- x$evaluation$rank_metric %||% "rmse"
+    cat(paste0("   \u251C\u2500 Rank metric: ", toupper(metric), "\n"))
+
+    ## Best config with metrics
+    if (n_success > 0 && !is.null(x$evaluation$best_config)) {
+
+      best_id  <- x$evaluation$best_config
+      best_row <- eval_res[eval_res$config_id == best_id, ]
+
+      if (nrow(best_row) > 0) {
+
+        ## Look up model display name from configs
+        cfg_row    <- x$config$configs[x$config$configs$config_id == best_id, ]
+        model_name <- if (nrow(cfg_row) > 0) {
+          MODEL_DISPLAY_NAMES[cfg_row$model] %||% cfg_row$model
+        } else {
+          best_id
+        }
+
+        cat(paste0("   \u251C\u2500 Best: ", best_id, " (", model_name, ")\n"))
+
+        ## Show key metrics for the best config
+        metric_cols <- intersect(c("rmse", "rpd", "rsq", "ccc"), names(best_row))
+        if (length(metric_cols) > 0) {
+
+          metric_strs <- vapply(metric_cols, function(m) {
+            paste0(toupper(m), " = ", round(best_row[[m]], 3))
+          }, character(1))
+
+          cat(paste0("   \u2502     \u2514\u2500 ", paste(metric_strs, collapse = ", "), "\n"))
+
+        }
+
+      }
+
+    }
+
+    ## Runtime
+    if (!is.null(x$evaluation$runtime)) {
+
+      cat(paste0("   \u2514\u2500 Runtime: ", round(x$evaluation$runtime, 1), " sec\n"))
+
+    } else {
+
+      cat(paste0("   \u2514\u2500 Timestamp: ",
+                 format(x$evaluation$timestamp, "%Y-%m-%d %H:%M:%S"), "\n"))
+
+    }
+
+    cat("\n")
+
+  }
+
+  ## ---------------------------------------------------------------------------
+  ## Models section (horizons_fit)
+  ## ---------------------------------------------------------------------------
+
+  has_models <- !is.null(x$models$workflows)
+
+  if (has_models) {
+
+    cat(cli::style_bold("Models (fit)\n"))
+
+    n_models  <- x$models$n_models %||% length(x$models$workflows)
+    fit_res   <- x$models$results
+
+    cat(paste0("   \u251C\u2500 Fitted models: ", n_models, "\n"))
+
+    if (!is.null(fit_res)) {
+
+      n_success  <- sum(fit_res$status == "success")
+      n_degraded <- sum(fit_res$degraded, na.rm = TRUE)
+      n_failed   <- sum(fit_res$status == "failed")
+
+      cat(paste0("   \u251C\u2500 Results: ",
+                 cli::col_green(paste0(n_success, " success")),
+                 if (n_degraded > 0) paste0(" (", cli::col_yellow(paste0(n_degraded, " degraded")), ")") else "",
+                 if (n_failed > 0) paste0(", ", cli::col_red(paste0(n_failed, " failed"))) else "",
+                 "\n"))
+
+      ## Best test performance
+      successes <- fit_res[fit_res$status == "success", ]
+
+      if (nrow(successes) > 0) {
+
+        best_idx <- which.min(successes$rmse)
+        best     <- successes[best_idx, ]
+
+        cat(paste0("   \u251C\u2500 Best test: ", best$config_id, "\n"))
+        cat(paste0("   \u2502     \u251C\u2500 RMSE = ", round(best$rmse, 3),
+                   ", RPD = ", round(best$rpd, 2),
+                   ", R\u00B2 = ", round(best$rsq, 3), "\n"))
+        cat(paste0("   \u2502     \u2514\u2500 CV RMSE = ",
+                   round(best$cv_rmse_mean, 3), " \u00B1 ",
+                   round(best$cv_rmse_se, 3), "\n"))
+
+      }
+
+    }
+
+    ## Split info
+    if (!is.null(x$models$split)) {
+
+      n_train <- nrow(rsample::training(x$models$split))
+      n_test  <- nrow(rsample::testing(x$models$split))
+      cat(paste0("   \u251C\u2500 Split: ", n_train, " train / ", n_test, " test\n"))
+
+    }
+
+    ## UQ status
+    has_uq <- !is.null(x$models$uq) && length(x$models$uq) > 0
+
+    if (has_uq) {
+
+      uq_bundle  <- x$models$uq[[1]]
+      coverage   <- if (!is.null(uq_bundle$oof_coverage)) {
+        paste0(", OOF coverage = ", round(uq_bundle$oof_coverage * 100, 1), "%")
+      } else {
+        ""
+      }
+
+      cat(paste0("   \u251C\u2500 UQ: ", cli::col_green("enabled"),
+                 " (", length(x$models$uq), " configs", coverage, ")\n"))
+
+    } else {
+
+      cat(paste0("   \u251C\u2500 UQ: ", cli::col_silver("disabled"), "\n"))
+
+    }
+
+    ## Runtime
+    if (!is.null(x$models$runtime_secs)) {
+
+      runtime_str <- if (x$models$runtime_secs > 60) {
+        paste0(round(x$models$runtime_secs / 60, 1), " min")
+      } else {
+        paste0(round(x$models$runtime_secs, 1), " sec")
+      }
+
+      cat(paste0("   \u2514\u2500 Runtime: ", runtime_str, "\n"))
+
+    } else {
+
+      cat(paste0("   \u2514\u2500 Timestamp: ",
+                 format(x$models$timestamp, "%Y-%m-%d %H:%M:%S"), "\n"))
+
+    }
+
+    cat("\n")
+
+  }
 
   ## ---------------------------------------------------------------------------
   ## Pipeline status
