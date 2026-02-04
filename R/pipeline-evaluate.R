@@ -18,8 +18,12 @@
 #'   grid-search RPD below this value skip Bayesian optimization but still
 #'   receive test-set metrics from grid-search best. Default 1.0 (the
 #'   "no better than the mean" line).
-#' @param allow_par Logical. Pass to `tune::control_grid()` and
-#'   `tune::control_bayes()` to enable parallel CV folds. Default FALSE.
+#' @param workers Integer. Total number of cores to use. Default 1L
+#'   (sequential). When `workers > 1`, evaluate() automatically splits cores
+#'   between outer parallelism (across configs) and inner parallelism (CV
+#'   folds). The split is: `inner = min(workers, cv_folds)`, `outer =
+#'   floor(workers / inner)`. evaluate() manages its own `future::plan()` and
+#'   restores the previous plan on exit.
 #' @param output_dir Character or NULL. If provided, checkpoint results to
 #'   disk after each config. Enables resuming interrupted runs. Default NULL
 #'   (no checkpointing).
@@ -36,7 +40,7 @@ evaluate <- function(x,
                      metric          = "rpd",
                      prune           = TRUE,
                      prune_threshold = 1.0,
-                     allow_par       = FALSE,
+                     workers         = 1L,
                      output_dir      = NULL,
                      seed            = 307L,
                      verbose         = TRUE) {
@@ -113,6 +117,21 @@ evaluate <- function(x,
     ))
 
   }
+
+  ## -----------------------------------------------------------------------
+  ## Step 3b: Validate workers + compute parallelism split
+  ## -----------------------------------------------------------------------
+
+  if (!is.numeric(workers) || length(workers) != 1 || workers < 1 ||
+      workers != as.integer(workers)) {
+
+    rlang::abort("`workers` must be a positive integer.")
+
+  }
+
+  workers <- as.integer(workers)
+  inner   <- min(workers, cv_folds)
+  outer   <- max(1L, as.integer(floor(workers / inner)))
 
   ## -----------------------------------------------------------------------
   ## Step 4: Create train/test split
@@ -320,7 +339,7 @@ evaluate <- function(x,
       bayesian_iter   = tuning$bayesian_iter,
       prune           = prune,
       prune_threshold = prune_threshold,
-      allow_par       = allow_par,
+      allow_par       = (inner > 1L),
       seed            = seed
     )
 
