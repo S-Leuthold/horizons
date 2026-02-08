@@ -107,6 +107,14 @@ KNOWN_SPATIAL_COVARIATES <- c(
   "hillshade", "roughness"
 )
 
+## fit() Parameters ------------------------------------------------------------
+
+DEFAULT_FINAL_BAYES_ITER <- 25L
+N_CALIB_MIN              <- 30L
+DEFAULT_UQ_LEVEL         <- 0.90
+UQ_QUANTILE_TREES        <- 500L
+WARMSTART_GRID_SIZE      <- 25L
+
 ## DAYMET Constants ------------------------------------------------------------
 
 DAYMET_RESOLUTION_DEG <- 1/24
