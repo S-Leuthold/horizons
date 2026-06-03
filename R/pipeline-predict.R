@@ -42,6 +42,9 @@ NULL
 #'   level stored during `fit()` (`uq$level_default`, typically 0.90).
 #'   Supplying a different level recomputes the conformal margin from the
 #'   stored calibration scores.
+#' @param clamp_nonneg Logical. Floor predictions and interval bounds at 0?
+#'   Default `TRUE` — nearly all soil properties are non-negative. Set `FALSE`
+#'   for outcomes that can legitimately be negative (e.g. some ratios).
 #' @param ... Unused; present for S3 method consistency.
 #'
 #' @return A tibble in long format, one row per sample (per config when
@@ -85,9 +88,10 @@ NULL
 #' @exportS3Method stats::predict horizons_fit
 predict.horizons_fit <- function(object,
                                  new_data,
-                                 config   = "best",
-                                 interval = TRUE,
-                                 level    = NULL,
+                                 config      = "best",
+                                 interval    = TRUE,
+                                 level       = NULL,
+                                 clamp_nonneg = TRUE,
                                  ...) {
 
   ## -------------------------------------------------------------------------
@@ -112,10 +116,15 @@ predict.horizons_fit <- function(object,
   }
 
   ## -------------------------------------------------------------------------
-  ## Step 0b: Resolve and validate new_data → predictor matrix
+  ## Step 0b: Resolve new_data, then validate it carries the training axis
   ## -------------------------------------------------------------------------
 
   new_spectra <- resolve_new_data(new_data)
+
+  ## All configs share the same training predictor axis (they differ only in
+  ## per-config recipe steps applied downstream of a common input schema).
+  ## Validate new_data against the first workflow's expected predictors.
+  check_predictor_schema(workflows_list[[1]], new_spectra)
 
   ## -------------------------------------------------------------------------
   ## Step 1: Resolve `config` → one or more config_ids
@@ -132,11 +141,12 @@ predict.horizons_fit <- function(object,
     function(cid) {
 
       predict_one_config(
-        object      = object,
-        config_id   = cid,
-        new_spectra = new_spectra,
-        interval    = interval,
-        level       = level
+        object       = object,
+        config_id    = cid,
+        new_spectra  = new_spectra,
+        interval     = interval,
+        level        = level,
+        clamp_nonneg = clamp_nonneg
       )
 
     }
@@ -216,6 +226,62 @@ resolve_new_data <- function(new_data) {
     ))
 
   }
+
+}
+
+## ---------------------------------------------------------------------------
+## check_predictor_schema() — axis-alignment gate
+## ---------------------------------------------------------------------------
+
+#' Validate that new_data carries the model's training predictor axis
+#'
+#' The fitted workflow's recipe replays per-config steps but NOT object-level
+#' `standardize()` (resampling, trimming, water-band removal). So `new_data`
+#' must already be on the training wavenumber axis. This compares the predictor
+#' columns the recipe expects against what `new_data` supplies and aborts with
+#' an actionable message on mismatch.
+#'
+#' @param workflow A fitted workflow (any config — all share the input axis).
+#' @param new_spectra Tibble from [resolve_new_data()].
+#' @return Invisibly TRUE; aborts on mismatch.
+#' @keywords internal
+#' @noRd
+check_predictor_schema <- function(workflow, new_spectra) {
+
+  recipe_obj <- safely_execute(
+    workflows::extract_recipe(workflow, estimated = TRUE),
+    log_error          = FALSE,
+    capture_conditions = TRUE
+  )
+
+  ## If we can't introspect the recipe (e.g. butchered beyond recovery), skip
+  ## the gate rather than block prediction — bake() will surface its own error.
+  if (!is.null(recipe_obj$error) || is.null(recipe_obj$result)) {
+
+    return(invisible(TRUE))
+
+  }
+
+  expected <- recipe_obj$result$var_info$variable[
+    recipe_obj$result$var_info$role == "predictor"
+  ]
+
+  supplied <- setdiff(names(new_spectra), "sample_id")
+
+  missing <- setdiff(expected, supplied)
+
+  if (length(missing) > 0) {
+
+    cli::cli_abort(c(
+      "{.arg new_data} is missing {length(missing)} predictor column{?s} the model expects.",
+      "x" = "Missing (first few): {.val {utils::head(missing, 5)}}",
+      "i" = "new_data must be on the training wavenumber axis. Run {.fn standardize} \\
+             to the same grid the model was trained on (e.g. 600-4000 at 2 cm^-1) before predicting."
+    ))
+
+  }
+
+  invisible(TRUE)
 
 }
 
@@ -336,10 +402,12 @@ rank_best_config <- function(object) {
 #' @param new_spectra Tibble from [resolve_new_data()] (sample_id + predictors).
 #' @param interval Logical; return intervals when UQ is available.
 #' @param level Coverage level or NULL.
+#' @param clamp_nonneg Logical; floor predictions and interval bounds at 0.
 #' @return A tibble: sample_id, config_id, .pred (+ interval columns).
 #' @keywords internal
 #' @noRd
-predict_one_config <- function(object, config_id, new_spectra, interval, level) {
+predict_one_config <- function(object, config_id, new_spectra, interval, level,
+                               clamp_nonneg = TRUE) {
 
   workflow <- object$models$workflows[[config_id]]
 
@@ -371,13 +439,141 @@ predict_one_config <- function(object, config_id, new_spectra, interval, level) 
 
   }
 
+  ## Non-negativity floor: nearly all soil properties are non-negative. Opt out
+  ## via clamp_nonneg = FALSE for outcomes that can legitimately go negative.
+  if (clamp_nonneg) {
+
+    point_pred[!is.na(point_pred) & point_pred < 0] <- 0
+
+  }
+
   out <- tibble::tibble(
     sample_id = new_spectra$sample_id,
     config_id = config_id,
     .pred     = point_pred
   )
 
-  ## Intervals are added in Part 2 (interval path). Point path returns here.
-  out
+  ## -------------------------------------------------------------------------
+  ## Intervals (conformal CQR) — only if requested and a UQ bundle exists
+  ## -------------------------------------------------------------------------
+
+  uq <- object$models$uq[[config_id]]
+
+  if (!interval || is.null(uq)) {
+
+    return(out)
+
+  }
+
+  interval_cols <- predict_intervals(
+    uq           = uq,
+    point_pred   = point_pred,
+    new_spectra  = new_spectra,
+    level        = level,
+    clamp_nonneg = clamp_nonneg
+  )
+
+  ## predict_intervals() returns NULL if quantile prediction fails — degrade
+  ## gracefully to point-only rather than erroring.
+  if (is.null(interval_cols)) {
+
+    return(out)
+
+  }
+
+  dplyr::bind_cols(out, interval_cols)
+
+}
+
+## ---------------------------------------------------------------------------
+## predict_intervals() — conformal prediction intervals for one config
+## ---------------------------------------------------------------------------
+
+#' Assemble conformal prediction intervals
+#'
+#' SCALE INVARIANT: the quantile forest was trained on original-scale OOF
+#' residuals (see `fit_uq()`), so `q_low`/`q_high` and `c_alpha` are already on
+#' the original response scale. `point_pred` is also already back-transformed.
+#' The bounds are therefore assembled directly and **never back-transformed
+#' again** — re-transforming here would be the classic "applied twice" bug.
+#'
+#' @param uq A UQ bundle from `models$uq[[config_id]]`.
+#' @param point_pred Numeric point predictions, original scale.
+#' @param new_spectra Tibble of new data (sample_id + predictors).
+#' @param level Coverage level or NULL (-> `uq$level_default`).
+#' @param clamp_nonneg Logical; floor interval bounds at 0.
+#' @return Tibble of interval columns, or NULL if quantile prediction fails.
+#' @keywords internal
+#' @noRd
+predict_intervals <- function(uq, point_pred, new_spectra, level,
+                              clamp_nonneg = TRUE) {
+
+  level <- level %||% uq$level_default
+  alpha <- 1 - level
+
+  ## Bake new_data through the UQ recipe (predictors only — the same feature
+  ## space the quantile forest was trained on).
+  bake_result <- safely_execute(
+    recipes::bake(uq$prepped_recipe, new_data = new_spectra,
+                  recipes::all_predictors()),
+    log_error          = FALSE,
+    capture_conditions = TRUE
+  )
+
+  if (!is.null(bake_result$error) || is.null(bake_result$result)) {
+
+    return(NULL)
+
+  }
+
+  new_features <- as.data.frame(bake_result$result)
+
+  ## Residual quantiles from the quantile forest (original scale).
+  q_result <- safely_execute(
+    stats::predict(
+      uq$quantile_model,
+      data      = new_features,
+      type      = "quantiles",
+      quantiles = c(alpha / 2, 1 - alpha / 2)
+    ),
+    log_error          = FALSE,
+    capture_conditions = TRUE
+  )
+
+  if (!is.null(q_result$error) || is.null(q_result$result)) {
+
+    return(NULL)
+
+  }
+
+  q_low  <- q_result$result$predictions[, 1]
+  q_high <- q_result$result$predictions[, 2]
+
+  ## Conformal margin from the (signed) calibration scores at the requested
+  ## level. May be negative — that is the point of signed CQR.
+  c_alpha <- compute_c_alpha(uq$scores, level)
+
+  ## Assemble bounds. Every term is original-scale; do NOT back-transform.
+  lower <- point_pred + q_low  - c_alpha
+  upper <- point_pred + q_high + c_alpha
+
+  ## Crossing / negative-width repair (signed c_alpha makes this necessary).
+  lo <- pmin(lower, upper)
+  hi <- pmax(lower, upper)
+
+  ## Non-negativity floor on the bounds (same opt-out as the point prediction).
+  ## Applied after crossing-repair so ordering is preserved.
+  if (clamp_nonneg) {
+
+    lo[!is.na(lo) & lo < 0] <- 0
+    hi[!is.na(hi) & hi < 0] <- 0
+
+  }
+
+  tibble::tibble(
+    .pred_lower     = lo,
+    .pred_upper     = hi,
+    .interval_width = hi - lo
+  )
 
 }
