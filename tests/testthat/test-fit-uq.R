@@ -210,9 +210,12 @@ describe("fit_uq() - return contract", {
 
   })
 
-  it("scores are non-negative (CQR convention)", {
+  it("scores are signed and finite (true CQR convention)", {
 
-    expect_true(all(result$scores >= 0))
+    ## Signed nonconformity scores (Romano et al. 2019): may be negative
+    ## where the predicted quantile band already brackets the residual.
+    ## They must be finite (NA scores are dropped upstream).
+    expect_true(all(is.finite(result$scores)))
 
   })
 
