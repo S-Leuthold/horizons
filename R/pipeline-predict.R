@@ -112,10 +112,8 @@ predict.horizons_fit <- function(object,
 
   new_spectra <- resolve_new_data(new_data)
 
-  ## All configs share the same training predictor axis (they differ only in
-  ## per-config recipe steps applied downstream of a common input schema).
-  ## Validate new_data against the first workflow's expected predictors.
-  check_predictor_schema(workflows_list[[1]], new_spectra)
+  ## Validate new_data carries the training-axis predictor columns fit() stored.
+  check_predictor_schema(object, new_spectra)
 
   ## -------------------------------------------------------------------------
   ## Step 1: Resolve `config` → one or more config_ids
@@ -229,33 +227,27 @@ resolve_new_data <- function(new_data) {
 #' The fitted workflow's recipe replays per-config steps but NOT object-level
 #' `standardize()` (resampling, trimming, water-band removal). So `new_data`
 #' must already be on the training wavenumber axis. This compares the predictor
-#' columns the recipe expects against what `new_data` supplies and aborts with
-#' an actionable message on mismatch.
+#' columns `fit()` recorded (`models$predictor_schema`) against what `new_data`
+#' supplies and aborts with an actionable message on mismatch.
 #'
-#' @param workflow A fitted workflow (any config — all share the input axis).
+#' @param object A `horizons_fit` carrying `models$predictor_schema`.
 #' @param new_spectra Tibble from [resolve_new_data()].
 #' @return Invisibly TRUE; aborts on mismatch.
 #' @keywords internal
 #' @noRd
-check_predictor_schema <- function(workflow, new_spectra) {
+check_predictor_schema <- function(object, new_spectra) {
 
-  recipe_obj <- safely_execute(
-    workflows::extract_recipe(workflow, estimated = TRUE),
-    log_error          = FALSE,
-    capture_conditions = TRUE
-  )
+  ## fit() stored the training-axis predictor columns; validate against them
+  ## directly (no recipe re-introspection, which a butchered workflow can break).
+  expected <- object$models$predictor_schema
 
-  ## If we can't introspect the recipe (e.g. butchered beyond recovery), skip
-  ## the gate rather than block prediction — bake() will surface its own error.
-  if (!is.null(recipe_obj$error) || is.null(recipe_obj$result)) {
+  ## Objects written before predictor_schema existed: skip the gate, let bake()
+  ## surface any mismatch.
+  if (is.null(expected)) {
 
     return(invisible(TRUE))
 
   }
-
-  expected <- recipe_obj$result$var_info$variable[
-    recipe_obj$result$var_info$role == "predictor"
-  ]
 
   supplied <- setdiff(names(new_spectra), "sample_id")
 
