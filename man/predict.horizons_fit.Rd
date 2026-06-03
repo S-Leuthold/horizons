@@ -4,7 +4,15 @@
 \alias{predict.horizons_fit}
 \title{Predict Soil Properties from a Fitted Horizons Object}
 \usage{
-\method{predict}{horizons_fit}(object, new_data, config = "best", interval = TRUE, level = NULL, ...)
+\method{predict}{horizons_fit}(
+  object,
+  new_data,
+  config = "best",
+  interval = TRUE,
+  level = NULL,
+  clamp_nonneg = TRUE,
+  ...
+)
 }
 \arguments{
 \item{object}{A \code{horizons_fit} object (the output of \code{\link[=fit]{fit()}}).}
@@ -32,6 +40,10 @@ UQ bundle.}
 level stored during \code{fit()} (\code{uq$level_default}, typically 0.90).
 Supplying a different level recomputes the conformal margin from the
 stored calibration scores.}
+
+\item{clamp_nonneg}{Logical. Floor predictions and interval bounds at 0?
+Default \code{TRUE} — nearly all soil properties are non-negative. Set \code{FALSE}
+for outcomes that can legitimately be negative (e.g. some ratios).}
 
 \item{...}{Unused; present for S3 method consistency.}
 }
