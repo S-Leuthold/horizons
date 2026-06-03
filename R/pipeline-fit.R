@@ -531,23 +531,27 @@ fit <- function(x,
 
   total_runtime <- as.numeric(difftime(Sys.time(), start_time, units = "secs"))
 
-  ## Persist the ranking facts fit() computed so predict() reads them rather
-  ## than re-deriving "best" from a possibly-different metric. workflows_list is
-  ## named in best-first order, so its first name is the top fitted config.
-  best_config <- if (length(workflows_list) > 0) names(workflows_list)[1] else NA_character_
+  ## Persist the facts fit() computed so predict() reads them rather than
+  ## re-deriving. workflows_list is named in best-first order, so its first name
+  ## is the top fitted config. predictor_schema is the training-axis predictor
+  ## column set predict() validates new_data against (no need to re-introspect a
+  ## butchered recipe at predict time).
+  best_config      <- if (length(workflows_list) > 0) names(workflows_list)[1] else NA_character_
+  predictor_schema <- role_map$variable[role_map$role == "predictor"]
 
   x$models <- list(
-    workflows      = workflows_list,
-    n_models       = length(workflows_list),
-    best_config    = best_config,
-    rank_metric    = rank_metric,
-    cv_predictions = all_cv_predictions,
-    results        = results_tibble,
-    split          = split_F,
-    row_index      = row_index,
-    uq             = uq_list,
-    timestamp      = Sys.time(),
-    runtime_secs   = total_runtime
+    workflows        = workflows_list,
+    n_models         = length(workflows_list),
+    best_config      = best_config,
+    rank_metric      = rank_metric,
+    predictor_schema = predictor_schema,
+    cv_predictions   = all_cv_predictions,
+    results          = results_tibble,
+    split            = split_F,
+    row_index        = row_index,
+    uq               = uq_list,
+    timestamp        = Sys.time(),
+    runtime_secs     = total_runtime
   )
 
   class(x) <- c("horizons_fit", "horizons_eval", "horizons_data", "list")
