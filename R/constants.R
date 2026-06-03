@@ -77,6 +77,12 @@ VALID_FEATURE_SELECTION <- c(
   "cars"
 )
 
+## Metrics --------------------------------------------------------------------
+
+# Metrics where a higher value is better (used for ranking configs). All other
+# metrics (rmse, rrmse, mae, ...) are lower-is-better.
+HIGHER_BETTER_METRICS <- c("rpd", "rsq", "ccc")
+
 ## Default Parameters ---------------------------------------------------------
 
 # Default tuning parameters

@@ -643,7 +643,7 @@ evaluate <- function(x,
   }
 
   ## Rank by metric (higher is better for rpd, rsq, ccc; lower for rmse, rrmse, mae)
-  higher_better <- c("rpd", "rsq", "ccc")
+  higher_better <- HIGHER_BETTER_METRICS
   metric_vals   <- successes[[metric]]
 
   if (all(is.na(metric_vals))) {
