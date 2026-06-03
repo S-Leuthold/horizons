@@ -124,8 +124,9 @@ EXPECTED_FIT_CV_PRED_COLS <- c(
 
 ## Expected slots in models$
 EXPECTED_MODEL_SLOTS <- c(
-  "workflows", "n_models", "best_config", "rank_metric", "cv_predictions",
-  "results", "split", "row_index", "uq", "timestamp", "runtime_secs"
+  "workflows", "n_models", "best_config", "rank_metric", "predictor_schema",
+  "cv_predictions", "results", "split", "row_index", "uq", "timestamp",
+  "runtime_secs"
 )
 
 
