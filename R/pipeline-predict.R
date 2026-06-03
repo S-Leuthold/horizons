@@ -299,7 +299,11 @@ resolve_config_ids <- function(object, config) {
 
   if (identical(config, "best")) {
 
-    return(rank_best_config(object))
+    ## fit() recorded the top config (by the metric it actually ranked on) in
+    ## best-first order; read it rather than re-deriving. Fall back to the first
+    ## fitted workflow for objects written before this field existed.
+    best <- object$models$best_config %||% available[1]
+    return(best)
 
   }
 
@@ -320,62 +324,6 @@ resolve_config_ids <- function(object, config) {
   }
 
   config
-
-}
-
-## ---------------------------------------------------------------------------
-## rank_best_config() — top config by the object's rank metric
-## ---------------------------------------------------------------------------
-
-#' Identify the best config_id by the stored rank metric
-#'
-#' Mirrors `fit()`'s ranking: rank metric defaults to the value stored by
-#' `evaluate()` (or "rpd"); rpd/rsq/ccc are higher-better, the rest
-#' lower-better. Restricted to successfully fitted configs.
-#'
-#' @param object A `horizons_fit`.
-#' @return A length-1 character config_id.
-#' @keywords internal
-#' @noRd
-rank_best_config <- function(object) {
-
-  results       <- object$models$results
-  rank_metric   <- object$evaluation$rank_metric %||% "rpd"
-  higher_better <- c("rpd", "rsq", "ccc")
-
-  available <- names(object$models$workflows)
-
-  ## Only rank among configs that have a fitted workflow and a usable metric.
-  candidates <- results[results$config_id %in% available, , drop = FALSE]
-
-  if (!rank_metric %in% names(candidates)) {
-
-    cli::cli_abort(c(
-      "Rank metric {.val {rank_metric}} is not present in the fit results.",
-      "i" = "Available metric columns: {.val {names(candidates)}}."
-    ))
-
-  }
-
-  metric_vals <- candidates[[rank_metric]]
-
-  if (all(is.na(metric_vals))) {
-
-    cli::cli_abort("All values for rank metric {.val {rank_metric}} are NA; cannot pick a best config.")
-
-  }
-
-  best_idx <- if (rank_metric %in% higher_better) {
-
-    which.max(metric_vals)
-
-  } else {
-
-    which.min(metric_vals)
-
-  }
-
-  candidates$config_id[best_idx]
 
 }
 

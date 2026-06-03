@@ -124,8 +124,8 @@ EXPECTED_FIT_CV_PRED_COLS <- c(
 
 ## Expected slots in models$
 EXPECTED_MODEL_SLOTS <- c(
-  "workflows", "n_models", "cv_predictions", "results",
-  "split", "row_index", "uq", "timestamp", "runtime_secs"
+  "workflows", "n_models", "best_config", "rank_metric", "cv_predictions",
+  "results", "split", "row_index", "uq", "timestamp", "runtime_secs"
 )
 
 
@@ -200,6 +200,16 @@ describe("fit() - success path", {
   it("has all expected models$ slots", {
 
     expect_true(all(EXPECTED_MODEL_SLOTS %in% names(result$models)))
+
+  })
+
+  it("records best_config as the top fitted config and the rank metric used", {
+
+    ## best_config is the durable ranking fact predict() reads; it must be the
+    ## first config in best-first workflow order, and a real fitted config.
+    expect_equal(result$models$best_config, names(result$models$workflows)[1])
+    expect_true(result$models$best_config %in% names(result$models$workflows))
+    expect_true(is.character(result$models$rank_metric))
 
   })
 
