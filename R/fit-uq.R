@@ -208,10 +208,15 @@ fit_uq <- function(fitted_workflow,
   calib_truth     <- calib_data[[outcome_col]]
   calib_residuals <- calib_truth - calib_point_preds
 
-  ## Nonconformity scores: how far does the actual residual fall outside
-  ## the predicted residual interval? Zero means the interval covers it.
-  scores <- pmax(0, pmax(q_low - calib_residuals,
-                          calib_residuals - q_high))
+  ## Nonconformity scores (signed, true CQR per Romano et al. 2019): the
+  ## signed distance of the actual residual from the predicted residual
+  ## interval. Positive means the residual falls outside the band; negative
+  ## means the band already brackets it with room to spare. Keeping the sign
+  ## (rather than flooring at 0) lets c_alpha be negative and tighten the
+  ## interval where the quantile model is well-calibrated, instead of only
+  ## ever widening it.
+  scores <- pmax(q_low - calib_residuals,
+                 calib_residuals - q_high)
 
   ## Remove NA scores (from NA truth values in calib_data)
   scores  <- scores[!is.na(scores)]
