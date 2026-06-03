@@ -127,6 +127,32 @@ describe("back_transform_predictions()", {
 
   })
 
+  it("clamps negative sqrt predictions even when warn = FALSE", {
+
+    ## Regression guard: the clamp is correctness, not a warning. Production
+    ## callers pass warn = FALSE; a negative sqrt-scale value must still be
+    ## floored to 0 (not squared into a wrong positive, e.g. -0.5 -> 0.25).
+    result <- back_transform_predictions(c(1, -0.5, 3), "sqrt", warn = FALSE)
+
+    expect_equal(result[2], 0)        # clamped, NOT 0.25
+    expect_equal(result, c(1, 0, 9))  # 1^2, clamp, 3^2
+
+  })
+
+  it("is an exact round-trip: inverse(forward(y)) == y for every transform", {
+
+    ## Property test that would have caught the original exp(x) vs exp(x)-1
+    ## bug. Forward transforms mirror the recipe steps:
+    ##   log   -> log(y + 1)     sqrt  -> sqrt(y)     log10 -> log10(y + 1)
+    y <- c(0.1, 1, 5, 42, 100)
+
+    expect_equal(back_transform_predictions(log(y + 1),   "log"),   y, tolerance = 1e-10)
+    expect_equal(back_transform_predictions(sqrt(y),      "sqrt"),  y, tolerance = 1e-10)
+    expect_equal(back_transform_predictions(log10(y + 1), "log10"), y, tolerance = 1e-10)
+    expect_equal(back_transform_predictions(y,            "none"),  y, tolerance = 1e-10)
+
+  })
+
 })
 
 describe("needs_back_transformation()", {
