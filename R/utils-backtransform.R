@@ -40,13 +40,22 @@ back_transform_predictions <- function(predictions, transformation, warn = TRUE)
 
     "sqrt" = {
 
-      if (warn && any(predictions < 0, na.rm = TRUE)) {
+      ## A negative value on the sqrt scale back-transforms to an impossible
+      ## negative original value once squared would flip its sign (e.g. -3 ->
+      ## +9). Clamp to 0 ALWAYS — this is correctness, not a warning. The
+      ## warning about it is what's gated by `warn`. (Previously the clamp
+      ## itself sat inside `if (warn)`, so production callers passing
+      ## warn = FALSE silently squared negatives into wrong positives.)
+      neg <- predictions < 0 & !is.na(predictions)
+
+      if (warn && any(neg)) {
 
         warning("Negative values detected in sqrt-scale predictions. Setting to 0.",
                 call. = FALSE)
-        predictions[predictions < 0 & !is.na(predictions)] <- 0
 
       }
+
+      predictions[neg] <- 0
 
       predictions^2
 
