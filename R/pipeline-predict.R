@@ -38,13 +38,6 @@ NULL
 #' @param interval Logical. Return conformal prediction intervals when UQ is
 #'   available? Default `TRUE`. Ignored (with a note) for configs that have no
 #'   UQ bundle.
-#' @param level Numeric coverage level in (0, 1). If `NULL` (default), uses the
-#'   level stored during `fit()` (`uq$level_default`, typically 0.90).
-#'   Supplying a different level recomputes the conformal margin from the
-#'   stored calibration scores.
-#' @param clamp_nonneg Logical. Floor predictions and interval bounds at 0?
-#'   Default `TRUE` — nearly all soil properties are non-negative. Set `FALSE`
-#'   for outcomes that can legitimately be negative (e.g. some ratios).
 #' @param ... Unused; present for S3 method consistency.
 #'
 #' @return A tibble in long format, one row per sample (per config when
@@ -88,10 +81,8 @@ NULL
 #' @exportS3Method stats::predict horizons_fit
 predict.horizons_fit <- function(object,
                                  new_data,
-                                 config       = "best",
-                                 interval     = TRUE,
-                                 level        = NULL,
-                                 clamp_nonneg = TRUE,
+                                 config   = "best",
+                                 interval = TRUE,
                                  ...) {
 
   ## -------------------------------------------------------------------------
@@ -137,16 +128,16 @@ predict.horizons_fit <- function(object,
   ## -------------------------------------------------------------------------
 
   preds <- purrr::map(
+
     config_ids,
+
     function(cid) {
 
       predict_one_config(
-        object       = object,
-        config_id    = cid,
-        new_spectra  = new_spectra,
-        interval     = interval,
-        level        = level,
-        clamp_nonneg = clamp_nonneg
+        object      = object,
+        config_id   = cid,
+        new_spectra = new_spectra,
+        interval    = interval
       )
 
     }
@@ -401,13 +392,10 @@ rank_best_config <- function(object) {
 #' @param config_id The config to predict from.
 #' @param new_spectra Tibble from [resolve_new_data()] (sample_id + predictors).
 #' @param interval Logical; return intervals when UQ is available.
-#' @param level Coverage level or NULL.
-#' @param clamp_nonneg Logical; floor predictions and interval bounds at 0.
 #' @return A tibble: sample_id, config_id, .pred (+ interval columns).
 #' @keywords internal
 #' @noRd
-predict_one_config <- function(object, config_id, new_spectra, interval, level,
-                               clamp_nonneg = TRUE) {
+predict_one_config <- function(object, config_id, new_spectra, interval) {
 
   workflow <- object$models$workflows[[config_id]]
 
@@ -439,13 +427,8 @@ predict_one_config <- function(object, config_id, new_spectra, interval, level,
 
   }
 
-  ## Non-negativity floor: nearly all soil properties are non-negative. Opt out
-  ## via clamp_nonneg = FALSE for outcomes that can legitimately go negative.
-  if (clamp_nonneg) {
-
-    point_pred[!is.na(point_pred) & point_pred < 0] <- 0
-
-  }
+  ## Soil properties predicted from MIR are non-negative; floor at 0.
+  point_pred <- floor_at_zero(point_pred)
 
   out <- tibble::tibble(
     sample_id = new_spectra$sample_id,
@@ -466,11 +449,9 @@ predict_one_config <- function(object, config_id, new_spectra, interval, level,
   }
 
   interval_cols <- predict_intervals(
-    uq           = uq,
-    point_pred   = point_pred,
-    new_spectra  = new_spectra,
-    level        = level,
-    clamp_nonneg = clamp_nonneg
+    uq          = uq,
+    point_pred  = point_pred,
+    new_spectra = new_spectra
   )
 
   ## predict_intervals() returns NULL if quantile prediction fails — degrade
@@ -501,14 +482,13 @@ predict_one_config <- function(object, config_id, new_spectra, interval, level,
 #' @param point_pred Numeric point predictions, original scale.
 #' @param new_spectra Tibble of new data (sample_id + predictors).
 #' @param level Coverage level or NULL (-> `uq$level_default`).
-#' @param clamp_nonneg Logical; floor interval bounds at 0.
 #' @return Tibble of interval columns, or NULL if quantile prediction fails.
 #' @keywords internal
 #' @noRd
-predict_intervals <- function(uq, point_pred, new_spectra, level,
-                              clamp_nonneg = TRUE) {
+predict_intervals <- function(uq, point_pred, new_spectra) {
 
-  level <- level %||% uq$level_default
+  ## Intervals are returned at the coverage level the UQ was calibrated for.
+  level <- uq$level_default
   alpha <- 1 - level
 
   ## Bake new_data through the UQ recipe (predictors only — the same feature
@@ -549,31 +529,43 @@ predict_intervals <- function(uq, point_pred, new_spectra, level,
   q_low  <- q_result$result$predictions[, 1]
   q_high <- q_result$result$predictions[, 2]
 
-  ## Conformal margin from the (signed) calibration scores at the requested
-  ## level. May be negative — that is the point of signed CQR.
+  ## Conformal margin from the (signed) calibration scores. May be negative —
+  ## that is the point of signed CQR.
   c_alpha <- compute_c_alpha(uq$scores, level)
 
   ## Assemble bounds. Every term is original-scale; do NOT back-transform.
   lower <- point_pred + q_low  - c_alpha
   upper <- point_pred + q_high + c_alpha
 
-  ## Crossing / negative-width repair (signed c_alpha makes this necessary).
-  lo <- pmin(lower, upper)
-  hi <- pmax(lower, upper)
-
-  ## Non-negativity floor on the bounds (same opt-out as the point prediction).
-  ## Applied after crossing-repair so ordering is preserved.
-  if (clamp_nonneg) {
-
-    lo[!is.na(lo) & lo < 0] <- 0
-    hi[!is.na(hi) & hi < 0] <- 0
-
-  }
+  ## Crossing / negative-width repair (signed c_alpha makes this necessary),
+  ## then floor at 0 — applied after repair so ordering is preserved.
+  lo <- floor_at_zero(pmin(lower, upper))
+  hi <- floor_at_zero(pmax(lower, upper))
 
   tibble::tibble(
     .pred_lower     = lo,
     .pred_upper     = hi,
     .interval_width = hi - lo
   )
+
+}
+
+## ---------------------------------------------------------------------------
+## floor_at_zero() — non-negativity floor for predictions and bounds
+## ---------------------------------------------------------------------------
+
+#' Floor a numeric vector at zero, preserving NAs
+#'
+#' Soil properties predicted from MIR spectra are non-negative, so predictions
+#' and interval bounds are floored at 0. NAs pass through untouched.
+#'
+#' @param x Numeric vector.
+#' @return `x` with negative (non-NA) entries set to 0.
+#' @keywords internal
+#' @noRd
+floor_at_zero <- function(x) {
+
+  x[!is.na(x) & x < 0] <- 0
+  x
 
 }
