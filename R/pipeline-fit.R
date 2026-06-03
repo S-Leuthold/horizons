@@ -531,9 +531,16 @@ fit <- function(x,
 
   total_runtime <- as.numeric(difftime(Sys.time(), start_time, units = "secs"))
 
+  ## Persist the ranking facts fit() computed so predict() reads them rather
+  ## than re-deriving "best" from a possibly-different metric. workflows_list is
+  ## named in best-first order, so its first name is the top fitted config.
+  best_config <- if (length(workflows_list) > 0) names(workflows_list)[1] else NA_character_
+
   x$models <- list(
     workflows      = workflows_list,
     n_models       = length(workflows_list),
+    best_config    = best_config,
+    rank_metric    = rank_metric,
     cv_predictions = all_cv_predictions,
     results        = results_tibble,
     split          = split_F,
