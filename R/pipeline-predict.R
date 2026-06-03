@@ -88,9 +88,9 @@ NULL
 #' @exportS3Method stats::predict horizons_fit
 predict.horizons_fit <- function(object,
                                  new_data,
-                                 config      = "best",
-                                 interval    = TRUE,
-                                 level       = NULL,
+                                 config       = "best",
+                                 interval     = TRUE,
+                                 level        = NULL,
                                  clamp_nonneg = TRUE,
                                  ...) {
 
