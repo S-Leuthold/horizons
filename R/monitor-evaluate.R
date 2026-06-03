@@ -115,7 +115,7 @@ monitor_evaluate <- function(output_dir, watch = FALSE, interval = 10) {
   best_config <- NA_character_
   best_metric <- NA_real_
   metric_name <- manifest$metric
-  higher_better <- metric_name %in% c("rpd", "rsq", "ccc")
+  higher_better <- metric_name %in% HIGHER_BETTER_METRICS
 
   recent_files <- checkpoint_files[order(file.mtime(checkpoint_files),
                                           decreasing = TRUE)]
