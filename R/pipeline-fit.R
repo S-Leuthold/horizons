@@ -58,7 +58,7 @@ fit <- function(x,
 
   ## Determine ranking metric
   rank_metric <- metric %||% x$evaluation$rank_metric %||% "rpd"
-  higher_better <- c("rpd", "rsq", "ccc")
+  higher_better <- HIGHER_BETTER_METRICS
 
   ## Extract successful configs and rank
   successes <- eval_results[eval_results$status == "success", ]
