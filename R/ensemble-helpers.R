@@ -214,10 +214,15 @@ build_oof_matrix <- function(object, members) {
 #' @param rank_metric Character. The metric the object was ranked by; the
 #'   axis on which improvement is measured.
 #' @param runtime_secs Numeric. Engine wall-clock, for the record.
+#' @param oof_pred Tibble or NULL. The ensemble's combined out-of-fold
+#'   predictions (`.row`, `.pred`, `truth`, original scale) — the by-product
+#'   each engine already computes to derive its weights. Carried for Phase-2
+#'   ensemble UQ (stacked conformal calibrates on these residuals); unused in
+#'   Phase 1. Default NULL.
 #'
 #' @return A list matching the `ensemble` slot contract: `method`, `model`,
 #'   `weights`, `predictions`, `metrics`, `member_metrics`, `improvement`,
-#'   `uq` (NULL in Phase 1), `timestamp`, `runtime_secs`.
+#'   `oof_predictions`, `uq` (NULL in Phase 1), `timestamp`, `runtime_secs`.
 #'
 #' @keywords internal
 build_ensemble_contract <- function(method,
@@ -226,7 +231,8 @@ build_ensemble_contract <- function(method,
                                     ensemble_pred,
                                     member_pred,
                                     rank_metric,
-                                    runtime_secs) {
+                                    runtime_secs,
+                                    oof_pred = NULL) {
 
   ## Ensemble performance on test_F (original scale, shared metric computer) --
 
@@ -268,16 +274,17 @@ build_ensemble_contract <- function(method,
   }
 
   list(
-    method         = method,
-    model          = model,
-    weights        = weights,
-    predictions    = ensemble_pred,
-    metrics        = metrics,
-    member_metrics = member_metrics,
-    improvement    = improvement,
-    uq             = NULL,
-    timestamp      = Sys.time(),
-    runtime_secs   = runtime_secs
+    method          = method,
+    model           = model,
+    weights         = weights,
+    predictions     = ensemble_pred,
+    metrics         = metrics,
+    member_metrics  = member_metrics,
+    improvement     = improvement,
+    oof_predictions = oof_pred,
+    uq              = NULL,
+    timestamp       = Sys.time(),
+    runtime_secs    = runtime_secs
   )
 
 }
