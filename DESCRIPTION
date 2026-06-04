@@ -140,3 +140,4 @@ Collate:
     'ensemble-helpers.R'
     'ensemble-weighted.R'
     'ensemble-penalized.R'
+    'ensemble-xgb.R'
