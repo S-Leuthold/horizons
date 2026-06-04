@@ -145,9 +145,12 @@ build_oof_matrix <- function(object, members) {
   ## fails (silently building list-columns) on duplicate .row/config_id pairs,
   ## which the completeness guard above does not catch.
 
+  ## Carry truth through the pivot — it is constant per .row, so it rides as an
+  ## id column and comes out aligned, avoiding a separate dedup-and-reorder.
+
   wide_safe <- safely_execute(
     tidyr::pivot_wider(
-      cv[, c(".row", "config_id", ".pred")],
+      cv[, c(".row", "truth", "config_id", ".pred")],
       names_from   = "config_id",
       values_from  = ".pred",
       names_prefix = "member_"
@@ -164,20 +167,223 @@ build_oof_matrix <- function(object, members) {
 
   wide <- wide[order(wide$.row), ]
 
-  ## truth is one value per .row; recover it from the (deduplicated) long table
-  ## in the same .row order as the wide matrix.
-
-  truth_tbl <- unique(cv[, c(".row", "truth")])
-  truth_tbl <- truth_tbl[order(truth_tbl$.row), ]
-
   ## Column order follows the members argument (stable, caller-controlled).
   member_cols <- paste0("member_", members)
 
   list(
     predictors = wide[, member_cols, drop = FALSE],
-    truth      = truth_tbl$truth,
+    truth      = wide$truth,
     row        = wide$.row,
     members    = members
+  )
+
+}
+
+## ---------------------------------------------------------------------------
+## horizons_metric_set()
+## ---------------------------------------------------------------------------
+
+#' The Package Regression Metric Set
+#'
+#' @description
+#' The canonical six-metric panel (rmse, rrmse, rsq, ccc, rpd, mae) used for
+#' regression scoring throughout the package. Returned as a `yardstick`
+#' `metric_set` so it can drive `tune_grid()`; the data-consuming scorer
+#' [compute_original_scale_metrics()] uses the same six metrics.
+#'
+#' @return A `yardstick` metric set.
+#' @keywords internal
+horizons_metric_set <- function() {
+
+  yardstick::metric_set(yardstick::rmse, rrmse, yardstick::rsq, ccc, rpd,
+                        yardstick::mae)
+
+}
+
+## ---------------------------------------------------------------------------
+## predict_members_on_test()
+## ---------------------------------------------------------------------------
+
+#' Predict Each Member on the Held-Out Test Set
+#'
+#' @description
+#' Has every ensemble member predict the Split-F assessment set (the held-out
+#' evaluation data `fit()` reserved), via [predict_one_config()] — predict once,
+#' back-transform once. Shared by all engines so the meaning of "test_F" and the
+#' per-member prediction contract live in one place.
+#'
+#' @param object A `horizons_fit` object.
+#' @param members Character vector of member `config_id`s.
+#'
+#' @return A long tibble: `config_id`, `sample_id`, `.pred`, `truth` (original
+#'   scale), one block per member.
+#'
+#' @keywords internal
+predict_members_on_test <- function(object, members) {
+
+  test_data   <- rsample::assessment(object$models$split)
+  role_map    <- object$data$role_map
+  outcome_col <- role_map$variable[role_map$role == "outcome"]
+
+  dplyr::bind_rows(lapply(members, function(m) {
+
+    pc <- predict_one_config(object, config_id = m, new_spectra = test_data,
+                             interval = FALSE)
+
+    tibble::tibble(
+      config_id = m,
+      sample_id = pc$sample_id,
+      .pred     = pc$.pred,
+      truth     = test_data[[outcome_col]]
+    )
+
+  }))
+
+}
+
+## ---------------------------------------------------------------------------
+## fit_tuned_meta_learner()
+## ---------------------------------------------------------------------------
+
+#' Fit a Tuned Meta-Learner Over the Out-of-Fold Matrix
+#'
+#' @description
+#' The shared scaffold behind the `penalized` and `xgb` engines: build the
+#' meta-training frame from the OOF matrix, optionally tune the meta-learner's
+#' hyperparameters by CV on that matrix (the tuning resamples come only from the
+#' OOF matrix — `test_F` never enters the tuning path, so the reported
+#' performance is honest), refit the winner on the full matrix, then have the
+#' members predict `test_F` and combine those predictions *through* the fitted
+#' meta-model. The engine supplies the model spec, the tuning grid, and a
+#' closure that extracts member weights from the fitted model.
+#'
+#' @param object A `horizons_fit` object.
+#' @param members Character vector of member `config_id`s.
+#' @param oof The out-of-fold matrix list from [build_oof_matrix()].
+#' @param rank_metric Character. Metric to tune and rank on.
+#' @param optimize Logical. Tune hyperparameters (`TRUE`) or fit the spec as-is
+#'   (`FALSE`, spec carries fixed values).
+#' @param method Character. Method label for the contract and error messages.
+#' @param spec A `parsnip` model spec (with `tune()` placeholders when
+#'   `optimize = TRUE`, fixed values otherwise).
+#' @param grid The tuning grid (ignored when `optimize = FALSE`).
+#' @param extract_weights A function `(meta_fit, members) -> tibble(member,
+#'   coef)` that reads the member weighting from the fitted model.
+#'
+#' @return The ensemble contract list from [build_ensemble_contract()].
+#'
+#' @keywords internal
+#' @importFrom rlang .data
+fit_tuned_meta_learner <- function(object,
+                                   members,
+                                   oof,
+                                   rank_metric,
+                                   optimize,
+                                   method,
+                                   spec,
+                                   grid,
+                                   extract_weights) {
+
+  started <- Sys.time()
+
+  member_cols <- paste0("member_", oof$members)
+
+  meta_frame        <- oof$predictors
+  meta_frame$.truth <- oof$truth
+
+  meta_wflow <- workflows::workflow() %>%
+    workflows::add_model(spec) %>%
+    workflows::add_formula(.truth ~ .)
+
+  ## Tune (CV on the OOF matrix only) then refit, or refit the fixed spec ----
+
+  if (optimize) {
+
+    folds <- rsample::vfold_cv(meta_frame, v = 5)
+
+    tune_safe <- safely_execute(
+      tune::tune_grid(meta_wflow,
+                      resamples = folds,
+                      grid      = grid,
+                      metrics   = horizons_metric_set(),
+                      control   = tune::control_grid(save_pred = FALSE)),
+      log_error          = FALSE,
+      capture_conditions = TRUE
+    )
+
+    tune_res <- handle_results(
+      tune_safe,
+      error_title = paste0("Meta-learner tuning failed for the ", method,
+                           " ensemble.")
+    )
+
+    best        <- tune::select_best(tune_res, metric = rank_metric)
+    final_wflow <- tune::finalize_workflow(meta_wflow, best)
+
+  } else {
+
+    final_wflow <- meta_wflow
+
+  }
+
+  fit_safe <- safely_execute(
+    parsnip::fit(final_wflow, data = meta_frame),
+    log_error          = FALSE,
+    capture_conditions = TRUE
+  )
+
+  meta_fit <- handle_results(
+    fit_safe,
+    error_title = paste0("Meta-learner refit failed for the ", method,
+                         " ensemble.")
+  )
+
+  ## Member weights (engine-specific extraction) ---------------------------
+
+  weights <- extract_weights(meta_fit, oof$members)
+
+  ## Combined out-of-fold predictions (Phase-2 UQ by-product) --------------
+
+  oof_combined <- stats::predict(meta_fit, new_data = meta_frame)$.pred
+
+  oof_pred <- tibble::tibble(
+    .row  = oof$row,
+    .pred = floor_at_zero(oof_combined),
+    truth = oof$truth
+  )
+
+  ## Members predict test_F; combine THROUGH the fitted meta-model ----------
+
+  member_pred <- predict_members_on_test(object, members)
+
+  ## Wide member-prediction matrix with the SAME column names the meta-model
+  ## trained on; truth rides through the pivot (constant per sample).
+  test_wide <- member_pred %>%
+    dplyr::select("sample_id", "truth", "config_id", ".pred") %>%
+    tidyr::pivot_wider(names_from   = "config_id",
+                       values_from  = ".pred",
+                       names_prefix = "member_")
+
+  combined <- stats::predict(
+    meta_fit,
+    new_data = test_wide[, member_cols, drop = FALSE]
+  )$.pred
+
+  ensemble_pred <- tibble::tibble(
+    sample_id = test_wide$sample_id,
+    .pred     = floor_at_zero(combined),
+    truth     = test_wide$truth
+  )
+
+  build_ensemble_contract(
+    method        = method,
+    model         = meta_fit,
+    weights       = weights,
+    ensemble_pred = ensemble_pred,
+    member_pred   = member_pred,
+    rank_metric   = rank_metric,
+    runtime_secs  = as.numeric(difftime(Sys.time(), started, units = "secs")),
+    oof_pred      = oof_pred
   )
 
 }
