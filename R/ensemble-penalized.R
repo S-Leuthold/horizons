@@ -4,12 +4,11 @@
 # out-of-fold matrix (members as predictors, truth as outcome). Where the
 # weighted engine combines members by a fixed weight vector, this one learns
 # the combination — an intercept plus regularized coefficients — and combines
-# new predictions by running them THROUGH the fitted model, not a manual sum.
+# new predictions by running them THROUGH the fitted model.
 #
-# Tuning follows Option 1 (see ensemble-design.md): penalty/mixture are tuned
-# by CV on the OOF matrix and the winner is refit on the full matrix. The
-# tuning resamples come only from the OOF matrix; test_F is never in the
-# tuning path, so the reported performance is honest.
+# The shared tune -> refit -> combine-through-model scaffold lives in
+# fit_tuned_meta_learner(); this file supplies only the glmnet spec, the
+# penalty/mixture grid, and the coefficient-to-weights extractor.
 
 ## ---------------------------------------------------------------------------
 ## fit_ensemble_penalized()
@@ -25,8 +24,7 @@
 #'
 #' Combination of new predictions runs through the fitted meta-model, so the
 #' `model` slot (the fitted workflow) and the `weights` slot (the glmnet
-#' coefficients, for interpretation) are distinct — unlike the weighted engine,
-#' where they coincide.
+#' coefficients, for interpretation) are distinct.
 #'
 #' @param object A `horizons_fit` object.
 #' @param members Character vector of member `config_id`s.
@@ -45,96 +43,58 @@ fit_ensemble_penalized <- function(object,
                                    rank_metric,
                                    optimize = TRUE) {
 
-  started <- Sys.time()
-
-  member_cols <- paste0("member_", oof$members)
-
-  ## -------------------------------------------------------------------------
-  ## Step 1: Meta-training frame (the canonical OOF matrix + truth)
-  ## -------------------------------------------------------------------------
-
-  meta_frame <- tibble::as_tibble(oof$predictors[, member_cols, drop = FALSE])
-  meta_frame$.truth <- oof$truth
-
-  meta_spec <- parsnip::linear_reg(
+  spec <- parsnip::linear_reg(
     penalty = if (optimize) tune::tune() else 0.01,
     mixture = if (optimize) tune::tune() else 1
   ) %>%
     parsnip::set_engine("glmnet")
 
-  meta_wflow <- workflows::workflow() %>%
-    workflows::add_model(meta_spec) %>%
-    workflows::add_formula(.truth ~ .)
-
-  ## -------------------------------------------------------------------------
-  ## Step 2: Tune penalty/mixture by CV on the OOF matrix (leakage-clean)
-  ## -------------------------------------------------------------------------
-
-  ## The resamples are drawn ONLY from the OOF matrix. test_F never enters the
-  ## tuning path — each member's OOF prediction was already produced without
-  ## seeing its own assessment fold, so tuning on these is honest.
-
-  if (optimize) {
-
-    folds <- rsample::vfold_cv(meta_frame, v = 5)
-
-    grid <- tidyr::expand_grid(
-      penalty = 10^seq(-6, -1, length.out = 20),
-      mixture = seq(0, 1, length.out = 10)
-    )
-
-    metric_set <- yardstick::metric_set(yardstick::rmse, rrmse, yardstick::rsq,
-                                        ccc, rpd, yardstick::mae)
-
-    tune_safe <- safely_execute(
-      tune::tune_grid(meta_wflow,
-                      resamples = folds,
-                      grid      = grid,
-                      metrics   = metric_set,
-                      control   = tune::control_grid(save_pred = TRUE)),
-      log_error          = FALSE,
-      capture_conditions = TRUE
-    )
-
-    tune_res <- handle_results(
-      tune_safe,
-      error_title = "Meta-learner tuning failed for the penalized ensemble."
-    )
-
-    best <- tune::select_best(tune_res, metric = rank_metric)
-
-    final_wflow <- tune::finalize_workflow(meta_wflow, best)
-
-  } else {
-
-    final_wflow <- meta_wflow
-
-  }
-
-  ## -------------------------------------------------------------------------
-  ## Step 3: Refit the meta-model on the full OOF matrix
-  ## -------------------------------------------------------------------------
-
-  fit_safe <- safely_execute(
-    parsnip::fit(final_wflow, data = meta_frame),
-    log_error          = FALSE,
-    capture_conditions = TRUE
+  grid <- tidyr::expand_grid(
+    penalty = 10^seq(-6, -1, length.out = 20),
+    mixture = seq(0, 1, length.out = 10)
   )
 
-  meta_fit <- handle_results(
-    fit_safe,
-    error_title = "Meta-learner refit failed for the penalized ensemble."
+  fit_tuned_meta_learner(
+    object          = object,
+    members         = members,
+    oof             = oof,
+    rank_metric     = rank_metric,
+    optimize        = optimize,
+    method          = "penalized",
+    spec            = spec,
+    grid            = grid,
+    extract_weights = extract_weights_penalized
   )
 
-  ## Coefficients (for interpretation/reporting) — map glmnet terms back to
-  ## config_ids, drop the intercept. Members glmnet zeroed out keep coef 0.
-  coefs <- tibble::as_tibble(hardhat::extract_fit_engine(meta_fit) %>%
-                               stats::coef(s = best_penalty(final_wflow)) %>%
-                               as.matrix(),
-                             rownames = "term")
+}
+
+## ---------------------------------------------------------------------------
+## extract_weights_penalized()
+## ---------------------------------------------------------------------------
+
+#' Extract Member Weights from a Fitted glmnet Meta-Learner
+#'
+#' @description
+#' Reads the glmnet coefficients at the chosen penalty and maps them back to
+#' member `config_id`s, dropping the intercept. Members glmnet zeroed out keep
+#' a coefficient of 0.
+#'
+#' @param meta_fit The fitted meta-learner workflow.
+#' @param members Character vector of member `config_id`s, in matrix-column
+#'   order.
+#' @return Tibble with `member` and `coef`.
+#' @keywords internal
+extract_weights_penalized <- function(meta_fit, members) {
+
+  penalty <- best_penalty(workflows::extract_spec_parsnip(meta_fit))
+
+  coefs <- tibble::as_tibble(
+    as.matrix(stats::coef(hardhat::extract_fit_engine(meta_fit), s = penalty)),
+    rownames = "term"
+  )
   names(coefs)[2] <- "coef"
 
-  weights <- tibble::tibble(member = oof$members) %>%
+  weights <- tibble::tibble(member = members) %>%
     dplyr::left_join(
       dplyr::transmute(coefs,
                        member = sub("^member_", "", .data$term),
@@ -143,77 +103,7 @@ fit_ensemble_penalized <- function(object,
     )
   weights$coef[is.na(weights$coef)] <- 0
 
-  ## -------------------------------------------------------------------------
-  ## Step 4: Combined out-of-fold predictions (Phase-2 UQ by-product)
-  ## -------------------------------------------------------------------------
-
-  oof_combined <- stats::predict(meta_fit, new_data = meta_frame)$.pred
-
-  oof_pred <- tibble::tibble(
-    .row  = oof$row,
-    .pred = floor_at_zero(oof_combined),
-    truth = oof$truth
-  )
-
-  ## -------------------------------------------------------------------------
-  ## Step 5: Members predict test_F; combine THROUGH the fitted meta-model
-  ## -------------------------------------------------------------------------
-
-  test_data   <- rsample::assessment(object$models$split)
-  role_map    <- object$data$role_map
-  outcome_col <- role_map$variable[role_map$role == "outcome"]
-
-  member_pred <- dplyr::bind_rows(lapply(members, function(m) {
-
-    pc <- predict_one_config(object, config_id = m, new_spectra = test_data,
-                             interval = FALSE)
-
-    tibble::tibble(
-      config_id = m,
-      sample_id = pc$sample_id,
-      .pred     = pc$.pred,
-      truth     = test_data[[outcome_col]]
-    )
-
-  }))
-
-  ## Assemble the wide member-prediction matrix with the SAME column names the
-  ## meta-model trained on, so the fitted workflow recognizes the features.
-  test_wide <- member_pred %>%
-    dplyr::select("config_id", "sample_id", ".pred") %>%
-    tidyr::pivot_wider(names_from   = "config_id",
-                       values_from  = ".pred",
-                       names_prefix = "member_")
-
-  ## One truth value per sample (members share it).
-  truth_lookup <- dplyr::distinct(member_pred, .data$sample_id, .data$truth)
-
-  combined <- stats::predict(
-    meta_fit,
-    new_data = test_wide[, member_cols, drop = FALSE]
-  )$.pred
-
-  ensemble_pred <- tibble::tibble(
-    sample_id = test_wide$sample_id,
-    .pred     = floor_at_zero(combined),
-    truth     = truth_lookup$truth[match(test_wide$sample_id,
-                                         truth_lookup$sample_id)]
-  )
-
-  ## -------------------------------------------------------------------------
-  ## Step 6: Pack the contract (scoring centralized in the builder)
-  ## -------------------------------------------------------------------------
-
-  build_ensemble_contract(
-    method        = "penalized",
-    model         = meta_fit,
-    weights       = weights,
-    ensemble_pred = ensemble_pred,
-    member_pred   = member_pred,
-    rank_metric   = rank_metric,
-    runtime_secs  = as.numeric(difftime(Sys.time(), started, units = "secs")),
-    oof_pred      = oof_pred
-  )
+  weights
 
 }
 
@@ -221,20 +111,17 @@ fit_ensemble_penalized <- function(object,
 ## best_penalty()
 ## ---------------------------------------------------------------------------
 
-#' Extract the Chosen Penalty from a Finalized Workflow
+#' Extract the Chosen Penalty from a Finalized Model Spec
 #'
 #' @description
 #' glmnet's `coef()` needs the `s` (penalty) at which to read coefficients.
-#' Pull it from the finalized workflow's model spec.
+#' Pull it from the (finalized) model spec.
 #'
-#' @param wflow A finalized `workflow`.
+#' @param spec A `parsnip` model spec with a resolved `penalty`.
 #' @return Numeric penalty value.
 #' @keywords internal
-best_penalty <- function(wflow) {
+best_penalty <- function(spec) {
 
-  spec    <- workflows::extract_spec_parsnip(wflow)
-  penalty <- spec$args$penalty
-
-  rlang::eval_tidy(penalty)
+  rlang::eval_tidy(spec$args$penalty)
 
 }

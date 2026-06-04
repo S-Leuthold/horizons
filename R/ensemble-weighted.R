@@ -103,24 +103,8 @@ fit_ensemble_weighted <- function(object,
   ## Step 3: Members predict the held-out test set, then combine
   ## -------------------------------------------------------------------------
 
-  ## Split F's assessment set is the held-out evaluation data fit() reserved.
-  test_data   <- rsample::assessment(object$models$split)
-  role_map    <- object$data$role_map
-  outcome_col <- role_map$variable[role_map$role == "outcome"]
-
-  member_pred <- dplyr::bind_rows(lapply(members, function(m) {
-
-    pc <- predict_one_config(object, config_id = m, new_spectra = test_data,
-                             interval = FALSE)
-
-    tibble::tibble(
-      config_id = m,
-      sample_id = pc$sample_id,
-      .pred     = pc$.pred,
-      truth     = test_data[[outcome_col]]
-    )
-
-  }))
+  ## Each member predicts the held-out Split-F test set (shared helper).
+  member_pred <- predict_members_on_test(object, members)
 
   ## Combine per-member test_F predictions by the weights, sample-aligned.
   ensemble_pred <- member_pred %>%
