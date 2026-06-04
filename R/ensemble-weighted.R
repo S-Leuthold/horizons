@@ -38,6 +38,7 @@
 #' @return The ensemble contract list from [build_ensemble_contract()].
 #'
 #' @keywords internal
+#' @importFrom rlang .data
 fit_ensemble_weighted <- function(object,
                                   members,
                                   oof,

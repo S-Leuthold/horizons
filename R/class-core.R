@@ -178,13 +178,21 @@ new_horizons_data <- function(analysis        = NULL,
                   runtime_secs   = NULL),   ## numeric
 
     ## -------------------------------------------------------------------------
-    ## Section 7: ENSEMBLE — Optional ensemble (horizons_fit only)
+    ## Section 7: ENSEMBLE — Optional ensemble (horizons_ensemble)
     ## -------------------------------------------------------------------------
 
-    ensemble = list(stack   = NULL,
-                    method  = NULL,
-                    weights = NULL,
-                    metrics = NULL),
+    ## Populated by ensemble(); shape mirrors build_ensemble_contract().
+    ensemble = list(method          = NULL,
+                    model           = NULL,
+                    weights         = NULL,
+                    predictions     = NULL,
+                    metrics         = NULL,
+                    member_metrics  = NULL,
+                    improvement     = NULL,
+                    oof_predictions = NULL,
+                    uq              = NULL,
+                    timestamp       = NULL,
+                    runtime_secs    = NULL),
 
     ## -------------------------------------------------------------------------
     ## Section 8: ARTIFACTS — Disk-backed storage paths
