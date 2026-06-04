@@ -34,6 +34,7 @@ Imports:
     FactoMineR,
     forcats,
     fs,
+    glmnet,
     furrr,
     future,
     ggplot2,
@@ -88,7 +89,6 @@ Suggests:
     Cubist,
     earth,
     ggraph,
-    glmnet,
     igraph,
     kernlab,
     lightgbm,
@@ -137,3 +137,6 @@ Collate:
     'fit-single-config.R'
     'pipeline-fit.R'
     'pipeline-predict.R'
+    'ensemble-helpers.R'
+    'ensemble-weighted.R'
+    'ensemble-penalized.R'
