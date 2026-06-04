@@ -55,6 +55,7 @@ Imports:
     prospectr,
     purrr,
     qs,
+    ranger,
     readr,
     recipes,
     rlang,
@@ -131,3 +132,8 @@ Collate:
     'evaluate-single-config.R'
     'pipeline-evaluate.R'
     'monitor-evaluate.R'
+    'fit-uq.R'
+    'fit-warmstart.R'
+    'fit-single-config.R'
+    'pipeline-fit.R'
+    'pipeline-predict.R'
