@@ -355,7 +355,20 @@ predict_one_config <- function(object, config_id, new_spectra, interval) {
   ## Point prediction (transformed scale → back-transform ONCE to original)
   ## -------------------------------------------------------------------------
 
-  point_trans <- stats::predict(workflow, new_data = new_spectra)$.pred
+  ## Routed through the safely_execute -> handle_results cascade: a butchered
+  ## workflow can fail at predict time (e.g. recipe re-introspection), and the
+  ## raw parsnip/workflows error carries no horizons context. Wrap so the
+  ## failure names the offending config.
+  pred_safe <- safely_execute(
+    stats::predict(workflow, new_data = new_spectra),
+    log_error          = FALSE,
+    capture_conditions = TRUE
+  )
+
+  point_trans <- handle_results(
+    pred_safe,
+    error_title = paste0("Prediction failed for config '", config_id, "'.")
+  )$.pred
 
   point_pred <- if (needs_back_transformation(transformation)) {
 
