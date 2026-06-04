@@ -225,16 +225,23 @@ predict_members_on_test <- function(object, members) {
   role_map    <- object$data$role_map
   outcome_col <- role_map$variable[role_map$role == "outcome"]
 
+  ## Carry truth keyed by sample_id and join it on, rather than pairing it
+  ## positionally — predict_one_config()'s output is keyed to sample_id, and
+  ## recipes::bake() does not contract row-order preservation.
+  truth_df <- tibble::tibble(
+    sample_id = test_data$sample_id,
+    truth     = test_data[[outcome_col]]
+  )
+
   dplyr::bind_rows(lapply(members, function(m) {
 
     pc <- predict_one_config(object, config_id = m, new_spectra = test_data,
                              interval = FALSE)
 
-    tibble::tibble(
-      config_id = m,
-      sample_id = pc$sample_id,
-      .pred     = pc$.pred,
-      truth     = test_data[[outcome_col]]
+    dplyr::left_join(
+      tibble::tibble(config_id = m, sample_id = pc$sample_id, .pred = pc$.pred),
+      truth_df,
+      by = "sample_id"
     )
 
   }))
@@ -342,7 +349,11 @@ fit_tuned_meta_learner <- function(object,
 
   weights <- extract_weights(meta_fit, oof$members)
 
-  ## Combined out-of-fold predictions (Phase-2 UQ by-product) --------------
+  ## Combined out-of-fold predictions (Phase-2 UQ by-product). NOTE: this is
+  ## the IN-SAMPLE meta combination (meta_fit predicting its own training
+  ## frame), NOT a genuine meta-OOF. It is NOT valid for conformal calibration
+  ## as-is — see FIT_REVIEW_FINDINGS I1 / the diagnostic task. Phase-2 UQ must
+  ## replace this with held-out-fold meta predictions before calibrating.
 
   oof_combined <- stats::predict(meta_fit, new_data = meta_frame)$.pred
 
