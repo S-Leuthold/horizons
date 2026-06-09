@@ -45,13 +45,35 @@ fit_ensemble_xgb <- function(object,
                              rank_metric,
                              optimize = TRUE) {
 
-  spec <- parsnip::boost_tree(
-    trees      = if (optimize) tune::tune() else 500,
-    tree_depth = if (optimize) tune::tune() else 3,
-    learn_rate = if (optimize) tune::tune() else 0.05
-  ) %>%
-    parsnip::set_engine("xgboost") %>%
-    parsnip::set_mode("regression")
+  ## Build the spec per branch, not with an inline `if` inside boost_tree().
+  ## parsnip stores model args as lazy quosures it never forces, so an
+  ## `trees = if (optimize) tune() else 500` argument keeps the unevaluated
+  ## quosure `^if (...) tune() else 500`; tune_args() reads `tune()` from the
+  ## expression text and flags the arg tunable even when optimize = FALSE,
+  ## tripping fit_resamples with "arguments have been tagged for tuning".
+  ## Branching keeps each spec's args literal. (See ensemble-penalized.R.)
+
+  spec <- if (optimize) {
+
+    parsnip::boost_tree(
+      trees      = tune::tune(),
+      tree_depth = tune::tune(),
+      learn_rate = tune::tune()
+    ) %>%
+      parsnip::set_engine("xgboost") %>%
+      parsnip::set_mode("regression")
+
+  } else {
+
+    parsnip::boost_tree(
+      trees      = 500,
+      tree_depth = 3,
+      learn_rate = 0.05
+    ) %>%
+      parsnip::set_engine("xgboost") %>%
+      parsnip::set_mode("regression")
+
+  }
 
   grid <- tidyr::expand_grid(
     trees      = c(300, 500, 800),

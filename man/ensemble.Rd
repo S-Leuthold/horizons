@@ -4,7 +4,7 @@
 \alias{ensemble}
 \title{Combine Fitted Models into a Stacked Ensemble}
 \usage{
-ensemble(x, method = "penalized", optimize = TRUE, verbose = TRUE)
+ensemble(x, method = "penalized", optimize = TRUE, seed = 307L, verbose = TRUE)
 }
 \arguments{
 \item{x}{A \code{horizons_fit} object (output of \code{\link[=fit]{fit()}}).}
@@ -15,6 +15,12 @@ ensemble(x, method = "penalized", optimize = TRUE, verbose = TRUE)
 \item{optimize}{Logical. Tune the meta-learner's hyperparameters by CV on
 the out-of-fold matrix (\code{TRUE}), or use fixed defaults (\code{FALSE}).
 Default \code{TRUE}.}
+
+\item{seed}{Integer. Random seed for the meta-learner's CV folds (used by
+the \code{penalized} and \code{xgb} engines for both tuning and the genuine
+out-of-fold meta predictions). Fixed so the \code{oof_predictions} that seed
+Phase-2 conformal calibration are reproducible run-to-run. Mirrors the
+\code{seed} argument of \code{\link[=fit]{fit()}} and \code{\link[=evaluate]{evaluate()}}. Default \code{307L}.}
 
 \item{verbose}{Logical. Print the progress tree to the console. Default
 \code{TRUE}.}

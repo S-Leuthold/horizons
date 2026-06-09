@@ -34,6 +34,11 @@
 #' @param optimize Logical. Tune the meta-learner's hyperparameters by CV on
 #'   the out-of-fold matrix (`TRUE`), or use fixed defaults (`FALSE`).
 #'   Default `TRUE`.
+#' @param seed Integer. Random seed for the meta-learner's CV folds (used by
+#'   the `penalized` and `xgb` engines for both tuning and the genuine
+#'   out-of-fold meta predictions). Fixed so the `oof_predictions` that seed
+#'   Phase-2 conformal calibration are reproducible run-to-run. Mirrors the
+#'   `seed` argument of [fit()] and [evaluate()]. Default `307L`.
 #' @param verbose Logical. Print the progress tree to the console. Default
 #'   `TRUE`.
 #'
@@ -55,6 +60,7 @@
 ensemble <- function(x,
                      method   = "penalized",
                      optimize = TRUE,
+                     seed     = 307L,
                      verbose  = TRUE) {
 
   ## -------------------------------------------------------------------------
@@ -110,6 +116,13 @@ ensemble <- function(x,
   ## -------------------------------------------------------------------------
   ## Step 2: Dispatch to the meta-learner engine
   ## -------------------------------------------------------------------------
+
+  ## Seed the meta-learner's CV folds before dispatch. The penalized and xgb
+  ## engines draw vfold_cv(meta_frame) for tuning AND for the genuine
+  ## out-of-fold meta predictions; fixing the seed here makes those OOF
+  ## predictions — the Phase-2 conformal-calibration seed — reproducible.
+  ## (The weighted engine is deterministic and unaffected.)
+  set.seed(seed)
 
   contract <- switch(
     method,
