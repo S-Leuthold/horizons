@@ -32,6 +32,8 @@
 #' @param rank_metric Character. Metric the object was ranked by.
 #' @param optimize Logical. Tune penalty/mixture (`TRUE`) or use fixed
 #'   defaults (`FALSE`). Default `TRUE`.
+#' @param seed Integer. Seed for the CV folds (passed through to
+#'   [fit_tuned_meta_learner()] so the meta-OOF is reproducible).
 #'
 #' @return The ensemble contract list from [build_ensemble_contract()].
 #'
@@ -41,7 +43,8 @@ fit_ensemble_penalized <- function(object,
                                    members,
                                    oof,
                                    rank_metric,
-                                   optimize = TRUE) {
+                                   optimize = TRUE,
+                                   seed     = 307L) {
 
   ## Build the spec per branch rather than with an inline `if` inside the
   ## linear_reg() call. parsnip captures model args as lazy quosures and never
@@ -78,7 +81,8 @@ fit_ensemble_penalized <- function(object,
     method          = "penalized",
     spec            = spec,
     grid            = grid,
-    extract_weights = extract_weights_penalized
+    extract_weights = extract_weights_penalized,
+    seed            = seed
   )
 
 }

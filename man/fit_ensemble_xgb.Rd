@@ -4,7 +4,14 @@
 \alias{fit_ensemble_xgb}
 \title{Fit an XGBoost Meta-Learner Ensemble}
 \usage{
-fit_ensemble_xgb(object, members, oof, rank_metric, optimize = TRUE)
+fit_ensemble_xgb(
+  object,
+  members,
+  oof,
+  rank_metric,
+  optimize = TRUE,
+  seed = 307L
+)
 }
 \arguments{
 \item{object}{A \code{horizons_fit} object.}
@@ -17,6 +24,9 @@ fit_ensemble_xgb(object, members, oof, rank_metric, optimize = TRUE)
 
 \item{optimize}{Logical. Tune the xgboost hyperparameters (\code{TRUE}) or use
 conservative fixed defaults (\code{FALSE}). Default \code{TRUE}.}
+
+\item{seed}{Integer. Seed for the CV folds (passed through to
+\code{\link[=fit_tuned_meta_learner]{fit_tuned_meta_learner()}} so the meta-OOF is reproducible).}
 }
 \value{
 The ensemble contract list from \code{\link[=build_ensemble_contract]{build_ensemble_contract()}}.

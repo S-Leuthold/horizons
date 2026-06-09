@@ -208,7 +208,7 @@ horizons_metric_set <- function() {
 #'
 #' @description
 #' Has every ensemble member predict the Split-F assessment set (the held-out
-#' evaluation data `fit()` reserved), via [predict_one_config()] — predict once,
+#' evaluation data `fit()` reserved), via `predict_one_config()` — predict once,
 #' back-transform once. Shared by all engines so the meaning of "test_F" and the
 #' per-member prediction contract live in one place.
 #'
@@ -232,6 +232,20 @@ predict_members_on_test <- function(object, members) {
     sample_id = test_data$sample_id,
     truth     = test_data[[outcome_col]]
   )
+
+  ## The sample_id-keyed join below is load-bearing: a duplicate key would
+  ## silently fan out each member's predictions and corrupt every downstream
+  ## metric. average() guarantees uniqueness upstream; assert it here so a
+  ## violation fails loudly at the join rather than inflating scores quietly.
+  if (anyDuplicated(truth_df$sample_id)) {
+
+    cli::cli_abort(c(
+      "Test-set {.field sample_id}s are not unique.",
+      "x" = "Duplicate keys would fan out the member-prediction join.",
+      "i" = "Expected one row per sample after {.fn average}."
+    ))
+
+  }
 
   dplyr::bind_rows(lapply(members, function(m) {
 
@@ -276,11 +290,12 @@ predict_members_on_test <- function(object, members) {
 #' @param grid The tuning grid (ignored when `optimize = FALSE`).
 #' @param extract_weights A function `(meta_fit, members) -> tibble(member,
 #'   coef)` that reads the member weighting from the fitted model.
+#' @param seed Integer. Seed set immediately before the CV folds are drawn, so
+#'   the tuning resamples and the genuine meta-OOF are reproducible.
 #'
 #' @return The ensemble contract list from [build_ensemble_contract()].
 #'
 #' @keywords internal
-#' @importFrom rlang .data
 fit_tuned_meta_learner <- function(object,
                                    members,
                                    oof,
@@ -289,7 +304,8 @@ fit_tuned_meta_learner <- function(object,
                                    method,
                                    spec,
                                    grid,
-                                   extract_weights) {
+                                   extract_weights,
+                                   seed = 307L) {
 
   started <- Sys.time()
 
@@ -305,8 +321,16 @@ fit_tuned_meta_learner <- function(object,
   ## CV folds on the OOF matrix. Built once: the same resamples drive both
   ## hyperparameter tuning (when optimize) and the genuine meta-OOF below, so
   ## the held-out-fold meta predictions are produced on the identical splits.
+  ## Stratify on the (original-scale) outcome so folds stay balanced on skewed
+  ## soil properties; rsample gracefully reduces breaks (with a warning) when
+  ## the meta_frame is too small to stratify finely.
+  ## Seed set here (not via a side-effect in the caller) so the folds — which
+  ## seed the Phase-2 conformal calibration — are reproducible regardless of
+  ## any RNG use upstream of this point.
 
-  folds <- rsample::vfold_cv(meta_frame, v = 5)
+  set.seed(seed)
+
+  folds <- rsample::vfold_cv(meta_frame, v = 5, strata = ".truth")
 
   ## Tune (CV on the OOF matrix only) then refit, or refit the fixed spec ----
 
@@ -378,6 +402,17 @@ fit_tuned_meta_learner <- function(object,
   ## overconfident and invalid for conformal calibration (FIT_REVIEW_FINDINGS
   ## I1). collect_predictions' .row indexes into meta_frame (1..n); we map it
   ## back to the object's true .row ids and reorder to oof$row.
+  ##
+  ## PHASE-2 CAVEAT (read before calibrating coverage on these residuals): the
+  ## OOF predictions are out-of-fold w.r.t. the meta-model COEFFICIENTS, but in
+  ## the optimize = TRUE path the hyperparameters were selected by tune_grid on
+  ## these same folds, so the residuals carry mild hyperparameter-selection
+  ## bias. They are also CV-fold predictions, not split-conformal holdout
+  ## predictions against the deployed full-data meta_fit (CV+/jackknife+
+  ## semantics, weaker than the split-conformal compute_c_alpha() in fit-uq.R).
+  ## Phase-2 ensemble UQ must NOT feed these straight into compute_c_alpha() and
+  ## claim split-conformal coverage; calibrate on a partition disjoint from
+  ## tuning (e.g. the held-out calib_Fit, or the optimize = FALSE path).
 
   oof_safe <- safely_execute(
     tune::fit_resamples(
@@ -561,7 +596,7 @@ build_ensemble_contract <- function(method,
 #' @description
 #' Predicts new spectra from a fitted ensemble. Each member predicts via the
 #' same per-config primitive `predict.horizons_fit()` uses
-#' ([predict_one_config()] — predict once, back-transform once), and the
+#' (`predict_one_config()` — predict once, back-transform once), and the
 #' member predictions are combined by the meta-learner stored in
 #' `object$ensemble`. The combination differs by method: `penalized`/`weighted`
 #' take a (weighted) linear combination of member predictions; `xgb` feeds the

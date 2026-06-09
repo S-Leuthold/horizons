@@ -13,7 +13,8 @@ fit_tuned_meta_learner(
   method,
   spec,
   grid,
-  extract_weights
+  extract_weights,
+  seed = 307L
 )
 }
 \arguments{
@@ -36,6 +37,9 @@ fit_tuned_meta_learner(
 \item{grid}{The tuning grid (ignored when \code{optimize = FALSE}).}
 
 \item{extract_weights}{A function \verb{(meta_fit, members) -> tibble(member, coef)} that reads the member weighting from the fitted model.}
+
+\item{seed}{Integer. Seed set immediately before the CV folds are drawn, so
+the tuning resamples and the genuine meta-OOF are reproducible.}
 }
 \value{
 The ensemble contract list from \code{\link[=build_ensemble_contract]{build_ensemble_contract()}}.
