@@ -23,7 +23,7 @@ A tibble of ensemble predictions (skeleton: not yet implemented).
 \description{
 Predicts new spectra from a fitted ensemble. Each member predicts via the
 same per-config primitive \code{predict.horizons_fit()} uses
-(\code{\link[=predict_one_config]{predict_one_config()}} — predict once, back-transform once), and the
+(\code{predict_one_config()} — predict once, back-transform once), and the
 member predictions are combined by the meta-learner stored in
 \code{object$ensemble}. The combination differs by method: \code{penalized}/\code{weighted}
 take a (weighted) linear combination of member predictions; \code{xgb} feeds the

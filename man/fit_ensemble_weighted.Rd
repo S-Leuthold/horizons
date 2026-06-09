@@ -32,7 +32,7 @@ baseline).
 
 The weights come from the out-of-fold matrix, but the reported \code{test_F}
 predictions come from each member predicting the held-out set fresh (via
-\code{\link[=predict_one_config]{predict_one_config()}}, which predicts once and back-transforms once) and
+\code{predict_one_config()}, which predicts once and back-transforms once) and
 then being combined. This keeps the evaluation honest: weights are learned
 on OOF data, performance is measured on data no member saw.
 }

@@ -117,18 +117,17 @@ ensemble <- function(x,
   ## Step 2: Dispatch to the meta-learner engine
   ## -------------------------------------------------------------------------
 
-  ## Seed the meta-learner's CV folds before dispatch. The penalized and xgb
-  ## engines draw vfold_cv(meta_frame) for tuning AND for the genuine
-  ## out-of-fold meta predictions; fixing the seed here makes those OOF
-  ## predictions — the Phase-2 conformal-calibration seed — reproducible.
-  ## (The weighted engine is deterministic and unaffected.)
-  set.seed(seed)
+  ## `seed` is threaded explicitly into each engine (rather than a set.seed()
+  ## side-effect here) so the meta-learner's CV folds — which seed the Phase-2
+  ## conformal calibration — are reproducible regardless of any RNG use between
+  ## here and the vfold_cv() call. The tuned engines set the seed immediately
+  ## before drawing folds; the weighted engine is deterministic and ignores it.
 
   contract <- switch(
     method,
-    penalized = fit_ensemble_penalized(x, members, oof, rank_metric, optimize),
+    penalized = fit_ensemble_penalized(x, members, oof, rank_metric, optimize, seed),
     weighted  = fit_ensemble_weighted(x, members, oof, rank_metric, optimize),
-    xgb       = fit_ensemble_xgb(x, members, oof, rank_metric, optimize)
+    xgb       = fit_ensemble_xgb(x, members, oof, rank_metric, optimize, seed)
   )
 
   ## -------------------------------------------------------------------------

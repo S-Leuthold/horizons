@@ -1,3 +1,14 @@
+# horizons (development version)
+
+## New Features
+
+* `ensemble()` — combine the models from `fit()` into a stacked predictor via a
+  meta-learner over the members' out-of-fold predictions. Three engines:
+  `penalized` (glmnet, the default), `weighted` (inverse-RMSE average), and
+  `xgb` (xgboost). Ensemble performance is reported on the held-out test set and
+  is directly comparable to the single-model metrics from `fit()`, including an
+  honest improvement-over-best-member comparison.
+
 # horizons 0.9.0
 
 ## Major Changes
