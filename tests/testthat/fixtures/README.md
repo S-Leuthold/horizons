@@ -9,6 +9,19 @@ This directory contains test data fixtures used throughout the horizons package 
   - Includes Project, Sample_ID, Response, and spectral columns
   - Use for testing spectral preprocessing and recipe building
 
+- `ensemble_fit.rds`: A small fitted `horizons_fit` used by `test-pipeline-ensemble.R`.
+  - Built from **real (anonymized) AONR MIR spectra predicting Bulk_C** — sample
+    IDs are generic (`sample_001…`), provenance/coordinates stripped. Real signal
+    matters: members predict (R² ≈ 0.25–0.40) so the ensemble's "did the
+    meta-learner learn anything" assertions are not vacuous.
+  - 3 members (cubist/rf) spanning **log and none** transforms, so the
+    double-back-transform regression test is exercisable (identity-only would
+    make it vacuous).
+  - Rebuild with `dev/build-ensemble-fixture.R` if the object model changes
+    (requires local ai-leaf AONR OPUS data; see the paths at the top of that
+    script). Tracked despite the repo-wide `*.rds` ignore via a `.gitignore`
+    negation for `tests/testthat/fixtures/*.rds`.
+
 ## Usage
 
 Load fixtures in tests using:

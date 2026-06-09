@@ -43,11 +43,26 @@ fit_ensemble_penalized <- function(object,
                                    rank_metric,
                                    optimize = TRUE) {
 
-  spec <- parsnip::linear_reg(
-    penalty = if (optimize) tune::tune() else 0.01,
-    mixture = if (optimize) tune::tune() else 1
-  ) %>%
-    parsnip::set_engine("glmnet")
+  ## Build the spec per branch rather than with an inline `if` inside the
+  ## linear_reg() call. parsnip captures model args as lazy quosures and never
+  ## forces them, so a `penalty = if (optimize) tune() else 0.01` argument
+  ## stores the unevaluated quosure `^if (...) tune() else 0.01`; tune_args()
+  ## then sees `tune()` in the expression text and flags the arg as tunable
+  ## even when optimize = FALSE, which makes fit_resamples abort with
+  ## "arguments have been tagged for tuning". Branching keeps each spec's args
+  ## literal (a real tune() marker or a real value).
+
+  spec <- if (optimize) {
+
+    parsnip::linear_reg(penalty = tune::tune(), mixture = tune::tune()) %>%
+      parsnip::set_engine("glmnet")
+
+  } else {
+
+    parsnip::linear_reg(penalty = 0.01, mixture = 1) %>%
+      parsnip::set_engine("glmnet")
+
+  }
 
   grid <- tidyr::expand_grid(
     penalty = 10^seq(-6, -1, length.out = 20),

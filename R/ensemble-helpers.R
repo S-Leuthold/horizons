@@ -302,11 +302,15 @@ fit_tuned_meta_learner <- function(object,
     workflows::add_model(spec) %>%
     workflows::add_formula(.truth ~ .)
 
+  ## CV folds on the OOF matrix. Built once: the same resamples drive both
+  ## hyperparameter tuning (when optimize) and the genuine meta-OOF below, so
+  ## the held-out-fold meta predictions are produced on the identical splits.
+
+  folds <- rsample::vfold_cv(meta_frame, v = 5)
+
   ## Tune (CV on the OOF matrix only) then refit, or refit the fixed spec ----
 
   if (optimize) {
-
-    folds <- rsample::vfold_cv(meta_frame, v = 5)
 
     tune_safe <- safely_execute(
       tune::tune_grid(meta_wflow,
@@ -323,6 +327,22 @@ fit_tuned_meta_learner <- function(object,
       error_title = paste0("Meta-learner tuning failed for the ", method,
                            " ensemble.")
     )
+
+    ## Guard rank_metric before select_best(): if it is not one of the metrics
+    ## actually collected during tuning, select_best() aborts with an opaque
+    ## "no results with metric X" error. Fail with a clear, actionable message
+    ## naming the available metrics instead.
+    available_metrics <- unique(tune::collect_metrics(tune_res)$.metric)
+
+    if (!rank_metric %in% available_metrics) {
+
+      cli::cli_abort(c(
+        "Cannot rank the {method} ensemble by {.val {rank_metric}}.",
+        "x" = "{.val {rank_metric}} is not among the tuned metrics.",
+        "i" = "Available: {.val {available_metrics}}."
+      ))
+
+    }
 
     best        <- tune::select_best(tune_res, metric = rank_metric)
     final_wflow <- tune::finalize_workflow(meta_wflow, best)
@@ -349,17 +369,43 @@ fit_tuned_meta_learner <- function(object,
 
   weights <- extract_weights(meta_fit, oof$members)
 
-  ## Combined out-of-fold predictions (Phase-2 UQ by-product). NOTE: this is
-  ## the IN-SAMPLE meta combination (meta_fit predicting its own training
-  ## frame), NOT a genuine meta-OOF. It is NOT valid for conformal calibration
-  ## as-is — see FIT_REVIEW_FINDINGS I1 / the diagnostic task. Phase-2 UQ must
-  ## replace this with held-out-fold meta predictions before calibrating.
+  ## Genuine meta out-of-fold predictions (the Phase-2 conformal-calibration
+  ## seed). Each row is predicted by a meta-model that never saw it in training:
+  ## fit_resamples refits final_wflow on every fold's analysis set and predicts
+  ## its held-out assessment set, so collect_predictions returns one honest OOF
+  ## prediction per training row. This replaces the earlier in-sample
+  ## combination (meta_fit predicting its own training frame), which was 26x
+  ## overconfident and invalid for conformal calibration (FIT_REVIEW_FINDINGS
+  ## I1). collect_predictions' .row indexes into meta_frame (1..n); we map it
+  ## back to the object's true .row ids and reorder to oof$row.
 
-  oof_combined <- stats::predict(meta_fit, new_data = meta_frame)$.pred
+  oof_safe <- safely_execute(
+    tune::fit_resamples(
+      final_wflow,
+      resamples = folds,
+      metrics   = horizons_metric_set(),
+      control   = tune::control_resamples(save_pred = TRUE)
+    ),
+    log_error          = FALSE,
+    capture_conditions = TRUE
+  )
+
+  oof_res <- handle_results(
+    oof_safe,
+    error_title = paste0("Meta out-of-fold prediction failed for the ", method,
+                         " ensemble.")
+  )
+
+  oof_collected <- tune::collect_predictions(oof_res)
+
+  ## Map fold-held-out predictions onto the object's true .row, in oof$row
+  ## order. collect_predictions$.row is the meta_frame position; oof$row[pos]
+  ## recovers the real id, and a position-keyed lookup reorders to oof$row.
+  oof_by_pos <- oof_collected$.pred[order(oof_collected$.row)]
 
   oof_pred <- tibble::tibble(
     .row  = oof$row,
-    .pred = floor_at_zero(oof_combined),
+    .pred = floor_at_zero(oof_by_pos),
     truth = oof$truth
   )
 

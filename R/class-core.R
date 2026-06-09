@@ -468,7 +468,11 @@ print.horizons_data <- function(x, ...) {
   ## Header
   ## ---------------------------------------------------------------------------
 
-  class_label <- if (inherits(x, "horizons_fit")) {
+  ## Most-derived class first: horizons_ensemble inherits horizons_fit, so the
+  ## ensemble check must precede the fit check or an ensemble mislabels as a fit.
+  class_label <- if (inherits(x, "horizons_ensemble")) {
+    "horizons_ensemble"
+  } else if (inherits(x, "horizons_fit")) {
     "horizons_fit"
   } else if (inherits(x, "horizons_eval")) {
     "horizons_eval"
@@ -730,7 +734,11 @@ summary.horizons_data <- function(object, ...) {
   ## ---------------------------------------------------------------------------
 
   header_line <- paste0(rep("\u2500", 79), collapse = "")
-  class_label <- if (inherits(x, "horizons_fit")) {
+  ## Most-derived class first: horizons_ensemble inherits horizons_fit, so the
+  ## ensemble check must precede the fit check or an ensemble mislabels as a fit.
+  class_label <- if (inherits(x, "horizons_ensemble")) {
+    "horizons_ensemble"
+  } else if (inherits(x, "horizons_fit")) {
     "horizons_fit"
   } else if (inherits(x, "horizons_eval")) {
     "horizons_eval"
