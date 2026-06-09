@@ -15,6 +15,9 @@
 *.RData
 *.tmp
 
+# ...but committed test fixtures are tracked (small, needed by the suite in CI)
+!tests/testthat/fixtures/*.rds
+
 # Other stuff you don't want tracked
 evaluation_results.qs
 CLAUDE.md
