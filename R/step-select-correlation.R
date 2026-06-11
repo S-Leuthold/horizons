@@ -16,7 +16,7 @@
 #' @return A `step_select_correlation` object that can be added to a recipe.
 #'
 #' @details
-#' The selection algorithm slides a 3-wavenumber window (6 cm⁻¹ at 2 cm⁻¹ resolution) across
+#' The selection algorithm slides a 3-wavenumber window (6 cm-1 at 2 cm-1 resolution) across
 #' the spectrum, computes the mean absolute Spearman correlation between each window and
 #' the outcome, and retains all wavenumbers from windows where the score exceeds
 #' `mean + 1 SD`. Duplicate selections are collapsed. If no windows meet the threshold,
@@ -182,12 +182,12 @@ print.step_select_correlation <- function(x,
                                           ...) {
 
   cat("Correlation-based spectral feature selection step\n")
-  cat(glue::glue("• Outcome column: {x$outcome}\n"))
+  cat(glue::glue("\u2022 Outcome column: {x$outcome}\n"))
 
   if (x$trained) {
-    cat(glue::glue("• {length(x$selected_vars)} wavenumbers retained after windowed scoring\n"))
+    cat(glue::glue("\u2022 {length(x$selected_vars)} wavenumbers retained after windowed scoring\n"))
   } else {
-    cat("• Step not yet trained\n")
+    cat("\u2022 Step not yet trained\n")
   }
 
 
