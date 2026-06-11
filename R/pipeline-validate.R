@@ -30,20 +30,20 @@
 #' outliers were removed in a prior call, those rows are gone; re-validation
 #' operates on the reduced dataset.
 #'
-#' @param x [horizons_data]. Configured object (must have `config$configs`).
-#' @param remove_outliers [logical(1) or character(1)]. `FALSE` to detect
+#' @param x `horizons_data`. Configured object (must have `config$configs`).
+#' @param remove_outliers `logical(1) or character(1)`. `FALSE` to detect
 #'   only (default), `TRUE` to remove all flagged outliers, `"spectral"` or
 #'   `"response"` for selective removal.
-#' @param spectral_method [character(1)]. Spectral outlier detection method.
+#' @param spectral_method `character(1)`. Spectral outlier detection method.
 #'   Currently only `"mahalanobis"`. Default: `"mahalanobis"`.
-#' @param spectral_threshold [numeric(1)]. Chi-squared quantile for
+#' @param spectral_threshold `numeric(1)`. Chi-squared quantile for
 #'   Mahalanobis distance cutoff. Default: `0.975`.
-#' @param response_method [character(1)]. Response outlier detection method.
+#' @param response_method `character(1)`. Response outlier detection method.
 #'   Currently only `"iqr"`. Default: `"iqr"`.
-#' @param response_threshold [numeric(1)]. IQR multiplier for Tukey fences.
+#' @param response_threshold `numeric(1)`. IQR multiplier for Tukey fences.
 #'   Default: `1.5`.
 #'
-#' @return [horizons_data]. Same object with `validation` section populated:
+#' @return `horizons_data`. Same object with `validation` section populated:
 #'   - `validation$passed`: `TRUE` if no ERROR checks failed
 #'   - `validation$checks`: tibble of check results
 #'   - `validation$outliers`: detected and optionally removed outlier IDs
@@ -597,12 +597,12 @@ validate <- function(x,
 #' samples whose squared Mahalanobis distance exceeds the chi-squared
 #' quantile threshold.
 #'
-#' @param analysis [tibble]. The analysis table.
-#' @param predictor_cols [character]. Predictor column names.
-#' @param nzv_cols [character]. Near-zero variance columns to exclude.
-#' @param threshold [numeric(1)]. Chi-squared quantile (0-1).
+#' @param analysis `tibble`. The analysis table.
+#' @param predictor_cols `character`. Predictor column names.
+#' @param nzv_cols `character`. Near-zero variance columns to exclude.
+#' @param threshold `numeric(1)`. Chi-squared quantile (0-1).
 #'
-#' @return [character]. sample_id values of flagged outliers.
+#' @return `character`. sample_id values of flagged outliers.
 #'
 #' @noRd
 detect_spectral_outliers <- function(analysis, predictor_cols, nzv_cols, threshold) {
@@ -691,11 +691,11 @@ detect_spectral_outliers <- function(analysis, predictor_cols, nzv_cols, thresho
 #' Flags outcome values outside `[Q1 - threshold*IQR, Q3 + threshold*IQR]`.
 #' Only non-NA outcome values are considered for fence computation.
 #'
-#' @param analysis [tibble]. The analysis table.
-#' @param outcome_col [character(1)]. Name of the outcome column.
-#' @param threshold [numeric(1)]. IQR multiplier.
+#' @param analysis `tibble`. The analysis table.
+#' @param outcome_col `character(1)`. Name of the outcome column.
+#' @param threshold `numeric(1)`. IQR multiplier.
 #'
-#' @return [character]. sample_id values of flagged outliers.
+#' @return `character`. sample_id values of flagged outliers.
 #'
 #' @noRd
 detect_response_outliers <- function(analysis, outcome_col, threshold) {

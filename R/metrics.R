@@ -6,6 +6,32 @@
 ## RPD — Ratio of Performance to Deviation
 ## ===========================================================================
 
+#' Custom yardstick metrics for spectroscopic modeling
+#'
+#' @description
+#' Regression metrics commonly used to evaluate spectroscopic calibrations,
+#' implemented as `yardstick` metrics so they compose with the rest of the
+#' tidymodels evaluation stack. Each metric provides the standard three-layer
+#' interface: a vectorized `*_vec()` function, a data-frame method, and a
+#' `yardstick` metric object.
+#'
+#' * **RPD** (ratio of performance to deviation): the standard deviation of
+#'   the observed values divided by the RMSE of prediction. Higher is better.
+#' * **RRMSE** (relative root mean squared error): the RMSE expressed relative
+#'   to the mean of the observed values. Lower is better.
+#' * **CCC** (Lin's concordance correlation coefficient): agreement between
+#'   observed and predicted values, combining precision and accuracy. Ranges
+#'   from -1 to 1, with 1 indicating perfect concordance.
+#'
+#' @return
+#' The `*_vec()` functions return a single numeric value. The metric objects
+#' (`rpd`, `rrmse`, `ccc`) and their data-frame methods return a one-row
+#' tibble in the standard `yardstick` format (`.metric`, `.estimator`,
+#' `.estimate`).
+#'
+#' @name horizons_metrics
+NULL
+
 #' @rdname horizons_metrics
 #' @param truth Numeric vector of observed values.
 #' @param estimate Numeric vector of predicted values.

@@ -20,40 +20,43 @@ configure(
 )
 }
 \arguments{
-\item{x}{\link{horizons_data}. Object with response data attached via
+\item{x}{\code{horizons_data}. Object with response data attached via
 \code{add_response()}.}
 
-\item{outcome}{\link{character(1) or NULL}. Which response variable to model.
+\item{outcome}{\verb{character(1) or NULL}. Which response variable to model.
 Auto-selects if exactly one response exists.}
 
-\item{models}{\link{character}. Model algorithms to benchmark. Default
+\item{models}{\code{character}. Model algorithms to benchmark. Default
 \code{c("rf", "cubist", "plsr")}. See \code{VALID_MODELS} for options.}
 
-\item{transformations}{\link{character}. Response transformations to test.
+\item{transformations}{\code{character}. Response transformations to test.
 Default \code{"none"}.}
 
-\item{preprocessing}{\link{character}. Per-config spectral preprocessing methods.
+\item{preprocessing}{\code{character}. Per-config spectral preprocessing methods.
 Default \code{"raw"}.}
 
-\item{feature_selection}{\link{character}. Feature selection methods to test.
+\item{feature_selection}{\code{character}. Feature selection methods to test.
 Default \code{"none"}.}
 
-\item{expand_covariates}{\link{logical(1), character, or NULL}. Covariate
+\item{expand_covariates}{\verb{logical(1), character, or NULL}. Covariate
 expansion strategy. NULL = all covariates in every config (no expansion).
 TRUE = power set of all covariate columns. Character vector = power set
 of named covariates only. FALSE = exclude all covariates.}
 
-\item{cov_fusion}{\link{character(1) or NULL}. Covariate fusion strategy:
+\item{cov_fusion}{\verb{character(1) or NULL}. Covariate fusion strategy:
 NULL (no covariates), \code{"early"}, or \code{"late"}.}
 
-\item{cv_folds}{\link{integer}. Number of cross-validation folds. Default 5.
+\item{cv_folds}{\code{integer}. Number of cross-validation folds. Default 5.
 Minimum 2.}
 
-\item{grid_size}{\link{integer}. Hyperparameter grid size (Latin hypercube).
+\item{grid_size}{\code{integer}. Hyperparameter grid size (Latin hypercube).
 Default 10. Minimum 1.}
 
-\item{bayesian_iter}{\link{integer}. Bayesian optimization iterations.
+\item{bayesian_iter}{\code{integer}. Bayesian optimization iterations.
 Default 15. Minimum 0.}
+
+\item{final_bayesian_iter}{\code{integer}. Bayesian optimization iterations for
+the final fit on the selected configuration. Default 25. Minimum 0.}
 }
 \value{
 A modified \code{horizons_data} object with:
