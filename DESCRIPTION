@@ -95,8 +95,6 @@ Suggests:
     nnet,
     pls,
     spectrolab,
-    knitr,
-    rmarkdown,
     RhpcBLASctl,
     RColorBrewer,
     car,
@@ -104,7 +102,6 @@ Suggests:
     plotly,
     tidygraph
 Config/testthat/edition: 3
-VignetteBuilder: knitr
 Depends:
     R (>= 4.1.0)
 Collate:
