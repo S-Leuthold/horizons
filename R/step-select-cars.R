@@ -55,7 +55,8 @@ step_select_cars <- function(recipe,
 ## Step 2: Constructor
 ## -----------------------------------------------------------------------------
 
-#' @export
+#' @keywords internal
+#' @noRd
 step_select_cars_new <- function(columns,
                                  outcome,
                                  role,

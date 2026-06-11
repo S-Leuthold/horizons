@@ -54,7 +54,8 @@ step_select_boruta <- function(recipe,
 ## Step 2: Constructor
 ## -----------------------------------------------------------------------------
 
-#' @export
+#' @keywords internal
+#' @noRd
 step_select_boruta_new <- function(columns,
                                    outcome,
                                    role,

@@ -14,26 +14,26 @@ validate(
 )
 }
 \arguments{
-\item{x}{\link{horizons_data}. Configured object (must have \code{config$configs}).}
+\item{x}{\code{horizons_data}. Configured object (must have \code{config$configs}).}
 
-\item{remove_outliers}{\link{logical(1) or character(1)}. \code{FALSE} to detect
+\item{remove_outliers}{\verb{logical(1) or character(1)}. \code{FALSE} to detect
 only (default), \code{TRUE} to remove all flagged outliers, \code{"spectral"} or
 \code{"response"} for selective removal.}
 
-\item{spectral_method}{\link{character(1)}. Spectral outlier detection method.
+\item{spectral_method}{\code{character(1)}. Spectral outlier detection method.
 Currently only \code{"mahalanobis"}. Default: \code{"mahalanobis"}.}
 
-\item{spectral_threshold}{\link{numeric(1)}. Chi-squared quantile for
+\item{spectral_threshold}{\code{numeric(1)}. Chi-squared quantile for
 Mahalanobis distance cutoff. Default: \code{0.975}.}
 
-\item{response_method}{\link{character(1)}. Response outlier detection method.
+\item{response_method}{\code{character(1)}. Response outlier detection method.
 Currently only \code{"iqr"}. Default: \code{"iqr"}.}
 
-\item{response_threshold}{\link{numeric(1)}. IQR multiplier for Tukey fences.
+\item{response_threshold}{\code{numeric(1)}. IQR multiplier for Tukey fences.
 Default: \code{1.5}.}
 }
 \value{
-\link{horizons_data}. Same object with \code{validation} section populated:
+\code{horizons_data}. Same object with \code{validation} section populated:
 \itemize{
 \item \code{validation$passed}: \code{TRUE} if no ERROR checks failed
 \item \code{validation$checks}: tibble of check results

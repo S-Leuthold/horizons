@@ -7,16 +7,16 @@
 add_response(x, source, variable, by = "sample_id")
 }
 \arguments{
-\item{x}{\link{horizons_data}. Object from pipeline (post-\code{average()}, unique
+\item{x}{\code{horizons_data}. Object from pipeline (post-\code{average()}, unique
 \code{sample_id} required).}
 
-\item{source}{\link{tibble, data.frame, or character path}. Response data source.
+\item{source}{\verb{tibble, data.frame, or character path}. Response data source.
 If a path, read via \code{readr::read_csv()}.}
 
-\item{variable}{\link{character vector}. Column name(s) in the source to join as
-response variables. Required — no default. Must be numeric columns.}
+\item{variable}{\verb{character vector}. Column name(s) in the source to join as
+response variables. Required - no default. Must be numeric columns.}
 
-\item{by}{\link{character}. Join key. Default \code{"sample_id"}. Use a named vector
+\item{by}{\code{character}. Join key. Default \code{"sample_id"}. Use a named vector
 for mismatched column names: \code{c("sample_id" = "Lab_ID")} where the name
 is the horizons-side column and the value is the source-side column.}
 }
@@ -31,7 +31,7 @@ A modified \code{horizons_data} object with:
 }
 \description{
 Joins lab-measured response data to a \code{horizons_data} object. This is the
-bridge between spectral preprocessing and modeling — everything downstream
+bridge between spectral preprocessing and modeling - everything downstream
 (\code{configure()}, \code{evaluate()}, etc.) requires response data.
 }
 \details{
@@ -44,14 +44,14 @@ joined; all other source columns are ignored.
 \item \strong{tibble/data.frame} (canonical): Joined directly. User controls all
 preprocessing.
 \item \strong{character path} (convenience): Read via \code{readr::read_csv()}, then
-joined. CSV only — for other formats, read the data yourself and pass
+joined. CSV only - for other formats, read the data yourself and pass
 the tibble.
 }
 
 \strong{Join behavior:}
 
 Left-join semantics matching \code{dplyr::left_join()} conventions. Strict exact
-matching — no case-folding or fuzzy matching. When match quality is poor,
+matching - no case-folding or fuzzy matching. When match quality is poor,
 diagnostic messages detect common patterns (case mismatch, whitespace,
 prefix/suffix) and suggest fixes.
 
@@ -59,7 +59,7 @@ prefix/suffix) and suggest fixes.
 
 Aborts if duplicates exist in either the source join key (would multiply
 spectral rows) or the horizons join key (indicates replicates haven't been
-averaged — suggests \code{average()} first).
+averaged - suggests \code{average()} first).
 
 \strong{Repeated calls:}
 

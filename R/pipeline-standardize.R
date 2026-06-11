@@ -30,12 +30,12 @@ WATER_BANDS <- list(
 #' Resamples spectra to a new wavenumber grid using spline interpolation.
 #' Wraps `prospectr::resample()` with horizons conventions.
 #'
-#' @param spectra_matrix [matrix.] Numeric matrix with samples as rows,
+#' @param spectra_matrix `matrix.` Numeric matrix with samples as rows,
 #'   wavelengths as columns.
-#' @param current_wav [numeric.] Current wavenumber positions (column names).
-#' @param target_resolution [numeric.] Target resolution in cm⁻¹ (e.g., 2).
+#' @param current_wav `numeric.` Current wavenumber positions (column names).
+#' @param target_resolution `numeric.` Target resolution in cm⁻¹ (e.g., 2).
 #'
-#' @return [list.] With elements:
+#' @return `list.` With elements:
 #'   - `matrix`: Resampled spectral matrix
 #'   - `wavelengths`: New wavenumber positions
 #'   - `n_before`: Number of wavelengths before resampling
@@ -102,12 +102,12 @@ resample_spectra <- function(spectra_matrix, current_wav, target_resolution) {
 #' @description
 #' Subsets spectral matrix to keep only wavelengths within specified range.
 #'
-#' @param spectra_matrix [matrix.] Numeric matrix with samples as rows,
+#' @param spectra_matrix `matrix.` Numeric matrix with samples as rows,
 #'   wavelengths as columns.
-#' @param wavelengths [numeric.] Current wavenumber positions (column names).
-#' @param range [numeric(2).] Min and max wavenumbers to keep, e.g., `c(600, 4000)`.
+#' @param wavelengths `numeric.` Current wavenumber positions (column names).
+#' @param range `numeric(2).` Min and max wavenumbers to keep, e.g., `c(600, 4000)`.
 #'
-#' @return [list.] With elements:
+#' @return `list.` With elements:
 #'   - `matrix`: Trimmed spectral matrix
 #'   - `wavelengths`: Retained wavenumber positions
 #'   - `n_before`: Number of wavelengths before trimming
@@ -167,11 +167,11 @@ trim_spectra <- function(spectra_matrix, wavelengths, range) {
 #' Removes wavelength columns that fall within water absorption regions.
 #' No interpolation is performed — columns are simply dropped.
 #'
-#' @param spectra_matrix [matrix.] Numeric matrix with samples as rows,
+#' @param spectra_matrix `matrix.` Numeric matrix with samples as rows,
 #'   wavelengths as columns.
-#' @param wavelengths [numeric.] Current wavenumber positions (column names).
+#' @param wavelengths `numeric.` Current wavenumber positions (column names).
 #'
-#' @return [list.] With elements:
+#' @return `list.` With elements:
 #'   - `matrix`: Spectral matrix with water bands removed
 #'   - `wavelengths`: Retained wavenumber positions
 #'   - `n_before`: Number of wavelengths before removal
@@ -239,11 +239,11 @@ remove_water_bands <- function(spectra_matrix, wavelengths) {
 #' Fits a baseline to each spectrum using convex hull method and subtracts it.
 #' Wraps `prospectr::baseline()`.
 #'
-#' @param spectra_matrix [matrix.] Numeric matrix with samples as rows,
+#' @param spectra_matrix `matrix.` Numeric matrix with samples as rows,
 #'   wavelengths as columns.
-#' @param wavelengths [numeric.] Wavenumber positions (column names).
+#' @param wavelengths `numeric.` Wavenumber positions (column names).
 #'
-#' @return [matrix.] Baseline-corrected spectral matrix.
+#' @return `matrix.` Baseline-corrected spectral matrix.
 #'
 #' @noRd
 apply_baseline_correction <- function(spectra_matrix, wavelengths) {
@@ -291,10 +291,10 @@ apply_baseline_correction <- function(spectra_matrix, wavelengths) {
 #' @description
 #' Prints a tree-style summary of what standardization operations were applied.
 #'
-#' @param operations [list.] Named list of operation results, each containing
+#' @param operations `list.` Named list of operation results, each containing
 #'   before/after counts and parameters.
-#' @param n_samples [integer.] Number of samples in the data.
-#' @param final_n_wavelengths [integer.] Final number of wavelengths.
+#' @param n_samples `integer.` Number of samples in the data.
+#' @param final_n_wavelengths `integer.` Final number of wavelengths.
 #'
 #' @return NULL (called for side effects).
 #'
@@ -376,19 +376,19 @@ report_standardize_summary <- function(operations, n_samples, final_n_wavelength
 #' `standardize()` again will warn and return the object unchanged. Use
 #' `force = TRUE` to override (not recommended).
 #'
-#' @param x [horizons_data.] Object from `spectra()`.
-#' @param resample [numeric or NULL.] Target resolution in cm⁻¹. Default `2`
+#' @param x `horizons_data.` Object from `spectra()`.
+#' @param resample `numeric or NULL.` Target resolution in cm⁻¹. Default `2`
 #'   matches OSSL library resolution. Use `NULL` to skip resampling.
-#' @param trim [numeric(2) or NULL.] Wavenumber range to keep. Default
+#' @param trim `numeric(2) or NULL.` Wavenumber range to keep. Default
 #'   `c(600, 4000)` is the standard MIR range. Use `NULL` to skip trimming.
-#' @param remove_water [logical.] Remove water absorption bands
+#' @param remove_water `logical.` Remove water absorption bands
 #'   (1580-1720, 3100-3700 cm⁻¹)? Default `FALSE`.
-#' @param baseline [logical.] Apply convex hull baseline correction?
+#' @param baseline `logical.` Apply convex hull baseline correction?
 #'   Default `FALSE`.
-#' @param force [logical.] Re-standardize even if already standardized?
+#' @param force `logical.` Re-standardize even if already standardized?
 #'   Default `FALSE`. Not recommended — may cause data quality issues.
 #'
-#' @return [horizons_data.] The input object with standardized spectra.
+#' @return `horizons_data.` The input object with standardized spectra.
 #'   Provenance is updated to record what operations were applied.
 #'
 #' @examples
