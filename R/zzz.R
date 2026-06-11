@@ -8,14 +8,13 @@
 .onLoad <- function(libname, pkgname) {
 
   ## ---------------------------------------------------------------------------
-  ## Load tidymodels to ensure recipes selectors work
+  ## Ensure recipes selectors resolve
   ## ---------------------------------------------------------------------------
 
-  ## CRITICAL: Load tidymodels to put recipes in search path
-  ## This ensures all_outcomes() and all_predictors() quosures can resolve
-  ## See INVESTIGATION_namespace_issue.md for technical details
+  ## all_outcomes() / all_predictors() quosures resolve against recipes, which
+  ## is a declared Import. Loading it here keeps those selectors available.
 
-  requireNamespace("tidymodels", quietly = TRUE)
+  requireNamespace("recipes", quietly = TRUE)
 
   ## ---------------------------------------------------------------------------
   ## Trust the user - no automatic thread control
@@ -39,7 +38,7 @@
       xgboost.nthread    = 1
     )
 
-    message("horizons: Thread control enabled (set HORIZONS_THREAD_CONTROL=FALSE to disable)")
+    packageStartupMessage("horizons: Thread control enabled (set HORIZONS_THREAD_CONTROL=FALSE to disable)")
   }
 
   invisible()
