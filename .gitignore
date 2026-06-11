@@ -6,9 +6,6 @@
 .Rhistory
 .Rproj.user
 
-# R build ignores
-.Rbuildignore
-
 # Evaluation results and other large binary artifacts
 *.qs
 *.rds
