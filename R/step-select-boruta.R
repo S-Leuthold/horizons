@@ -239,12 +239,12 @@ print.step_select_boruta <- function(x,
                                      ...) {
 
   cat("Boruta-based spectral feature selection step\n")
-  cat(glue::glue("• Outcome column: {x$outcome}\n"))
+  cat(glue::glue("\u2022 Outcome column: {x$outcome}\n"))
 
   if (x$trained) {
-    cat(glue::glue("• {length(x$selected_vars)} wavenumbers retained after Boruta\n"))
+    cat(glue::glue("\u2022 {length(x$selected_vars)} wavenumbers retained after Boruta\n"))
   } else {
-    cat("• Step not yet trained\n")
+    cat("\u2022 Step not yet trained\n")
   }
 
   invisible(x)

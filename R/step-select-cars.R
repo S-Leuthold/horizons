@@ -138,7 +138,7 @@ prep.step_select_cars <- function(x, training, info = NULL, ...) {
       break
     }
 
-    # Exponentially decreasing retention: n_vars → 2 over n_iterations
+    # Exponentially decreasing retention: n_vars \u2192 2 over n_iterations
     n_keep         <- max(2, floor(n_vars * decay^(iter - 1)))
     n_keep         <- min(n_keep, length(selected_vars))
     
@@ -211,7 +211,7 @@ prep.step_select_cars <- function(x, training, info = NULL, ...) {
   # Check if we found a valid optimal iteration
   if (length(optimal_iter) == 0 || is.na(optimal_iter)) {
 
-    # No valid iteration found — keep all predictors as safe fallback
+    # No valid iteration found \u2014 keep all predictors as safe fallback
     return(step_select_cars_new(
       columns       = col_names,
       outcome       = x$outcome,
@@ -339,12 +339,12 @@ print.step_select_cars <- function(x,
                                    ...) {
 
   cat("CARS-based spectral feature selection step\n")
-  cat(glue::glue("• Outcome column: {x$outcome}\n"))
+  cat(glue::glue("\u2022 Outcome column: {x$outcome}\n"))
 
   if (x$trained) {
-    cat(glue::glue("• {length(x$selected_vars)} wavenumbers retained after CARS\n"))
+    cat(glue::glue("\u2022 {length(x$selected_vars)} wavenumbers retained after CARS\n"))
   } else {
-    cat("• Step not yet trained\n")
+    cat("\u2022 Step not yet trained\n")
   }
 
   invisible(x)

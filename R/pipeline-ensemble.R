@@ -100,16 +100,16 @@ ensemble <- function(x,
   if (verbose) {
 
     cat("\n")
-    cat(paste0("┌ ensemble ",
-               paste(rep("─", 53), collapse = ""), "\n"))
-    cat("│\n")
-    cat(paste0("│  Method: ", method, "\n"))
-    cat(paste0("│  Members: ", length(members), "\n"))
+    cat(paste0("\u250c ensemble ",
+               paste(rep("\u2500", 53), collapse = ""), "\n"))
+    cat("\u2502\n")
+    cat(paste0("\u2502  Method: ", method, "\n"))
+    cat(paste0("\u2502  Members: ", length(members), "\n"))
     cat(paste0(
-      "│  Tuning: ",
+      "\u2502  Tuning: ",
       if (optimize) "CV on out-of-fold matrix" else "fixed defaults", "\n"
     ))
-    cat("│\n")
+    cat("\u2502\n")
 
   }
 
@@ -118,8 +118,8 @@ ensemble <- function(x,
   ## -------------------------------------------------------------------------
 
   ## `seed` is threaded explicitly into each engine (rather than a set.seed()
-  ## side-effect here) so the meta-learner's CV folds — which seed the Phase-2
-  ## conformal calibration — are reproducible regardless of any RNG use between
+  ## side-effect here) so the meta-learner's CV folds - which seed the Phase-2
+  ## conformal calibration - are reproducible regardless of any RNG use between
   ## here and the vfold_cv() call. The tuned engines set the seed immediately
   ## before drawing folds; the weighted engine is deterministic and ignores it.
 
@@ -163,7 +163,7 @@ ensemble <- function(x,
 #' Render layer for [ensemble()]: prints member weights, the ensemble's
 #' performance on the rank metric, and the improvement over the best single
 #' member. A non-positive improvement is surfaced in yellow rather than hidden
-#' — an ensemble that does not beat its best member is a real outcome.
+#' - an ensemble that does not beat its best member is a real outcome.
 #'
 #' @param contract The ensemble contract list.
 #' @param rank_metric Character. The metric improvement is measured on.
@@ -177,29 +177,29 @@ render_ensemble_summary <- function(contract, rank_metric) {
   w       <- w[order(-abs(w$coef)), ]
   top     <- utils::head(w, 5)
 
-  cat(paste0("│  Top members (by weight)\n"))
+  cat(paste0("\u2502  Top members (by weight)\n"))
 
   for (i in seq_len(nrow(top))) {
 
     is_last <- i == nrow(top)
-    branch  <- if (is_last) "└─" else "├─"
+    branch  <- if (is_last) "\u2514\u2500" else "\u251c\u2500"
 
     cat(paste0(
-      "│  ", branch, " ", top$member[i],
+      "\u2502  ", branch, " ", top$member[i],
       ": ", round(top$coef[i], 4), "\n"
     ))
 
   }
 
-  cat("│\n")
+  cat("\u2502\n")
 
   ## Performance + improvement ----------------------------------------------
 
   ens_val <- contract$metrics$.estimate[contract$metrics$.metric == rank_metric]
 
-  cat(paste0("│  Summary\n"))
+  cat(paste0("\u2502  Summary\n"))
   cat(paste0(
-    "│  ├─ Ensemble ", rank_metric, ": ", round(ens_val, 3), "\n"
+    "\u2502  \u251c\u2500 Ensemble ", rank_metric, ": ", round(ens_val, 3), "\n"
   ))
 
   imp <- contract$improvement
@@ -208,7 +208,7 @@ render_ensemble_summary <- function(contract, rank_metric) {
                      ifelse(imp >= 0, "+", ""), round(imp, 4))
 
   cat(paste0(
-    "│  ├─ ",
+    "\u2502  \u251c\u2500 ",
     if (imp > 0) imp_line else cli::col_yellow(imp_line),
     "\n"
   ))
@@ -223,10 +223,10 @@ render_ensemble_summary <- function(contract, rank_metric) {
     paste0(round(rt / 60, 1), " min")
   }
 
-  cat(paste0("│  └─ Runtime: ", time_str, "\n"))
-  cat("│\n")
+  cat(paste0("\u2502  \u2514\u2500 Runtime: ", time_str, "\n"))
+  cat("\u2502\n")
   cat(paste0(
-    "└─ Class: horizons_fit → horizons_ensemble\n"
+    "\u2514\u2500 Class: horizons_fit \u2192 horizons_ensemble\n"
   ))
 
   invisible(NULL)
