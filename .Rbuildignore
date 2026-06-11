@@ -1,3 +1,7 @@
 ^.*\.Rproj$
 ^\.Rproj\.user$
 ^tests/testthat/Response$
+^\.github$
+^LICENSE\.md$
+^R-legacy$
+^dev$
