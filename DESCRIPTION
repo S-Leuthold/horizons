@@ -21,7 +21,7 @@ Encoding: UTF-8
 LazyData: false
 Remotes:
     spectral-cockpit/opusreader2,
-    S-Leuthold/plsmod-fork@fix/plsr-tune-grid-dimension
+    plsmod=S-Leuthold/plsmod-fork@fix/plsr-tune-grid-dimension
 Imports:
     butcher,
     cli,
