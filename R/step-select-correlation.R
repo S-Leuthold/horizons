@@ -74,7 +74,8 @@ step_select_correlation <- function(recipe,
 ## Step 2: Constructor
 ## -----------------------------------------------------------------------------
 
-#' @export
+#' @keywords internal
+#' @noRd
 step_select_correlation_new <- function(columns,
                                         outcome,
                                         role,

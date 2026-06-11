@@ -40,21 +40,21 @@
 #' This function does NOT validate inputs. Call [validate_horizons_data()]
 #' after construction to verify structural integrity.
 #'
-#' @param analysis [tibble or NULL.] The analysis data in wide format with
+#' @param analysis `tibble or NULL.` The analysis data in wide format with
 #'   sample_id column and wavelength columns as predictors. Default: `NULL`.
-#' @param role_map [tibble or NULL.] Maps variable names to roles (id, predictor,
+#' @param role_map `tibble or NULL.` Maps variable names to roles (id, predictor,
 #'   covariate, outcome, meta). Must have columns `variable` and `role`.
 #'   Default: `NULL`.
-#' @param spectra_source [character or NULL.] Path to source spectra files.
+#' @param spectra_source `character or NULL.` Path to source spectra files.
 #'   Default: `NULL`.
-#' @param spectra_type [character or NULL.] Type of spectra source (e.g., "opus",
+#' @param spectra_type `character or NULL.` Type of spectra source (e.g., "opus",
 #'   "csv", "asd"). Default: `NULL`.
-#' @param response_source [character or NULL.] Path to response data file.
+#' @param response_source `character or NULL.` Path to response data file.
 #'   Default: `NULL`.
-#' @param ossl_properties [character vector or NULL.] Properties requested from
+#' @param ossl_properties `character vector or NULL.` Properties requested from
 #'   OSSL library predictions. Default: `NULL`.
 #'
-#' @return [horizons_data]. An unvalidated horizons_data object with class
+#' @return `horizons_data`. An unvalidated horizons_data object with class
 #'   `c("horizons_data", "list")`.
 #'
 #' @seealso [validate_horizons_data()] for structural validation,
@@ -254,9 +254,9 @@ new_horizons_data <- function(analysis        = NULL,
 #' Empty objects (both analysis and role_map NULL) pass validation — this
 #' allows for incremental object construction.
 #'
-#' @param x [horizons_data]. The object to validate.
+#' @param x `horizons_data`. The object to validate.
 #'
-#' @return [horizons_data]. The input object, unchanged, if validation passes.
+#' @return `horizons_data`. The input object, unchanged, if validation passes.
 #'   Aborts with class `horizons_validation_error` if validation fails.
 #'
 #' @seealso [new_horizons_data()] for object construction.
@@ -456,10 +456,10 @@ validate_horizons_data <- function(x) {
 #' The output uses tree-style formatting consistent with error messages
 #' throughout the package.
 #'
-#' @param x [horizons_data]. The object to print.
+#' @param x `horizons_data`. The object to print.
 #' @param ... Additional arguments (ignored, for S3 compatibility).
 #'
-#' @return [horizons_data]. The input object, returned invisibly.
+#' @return `horizons_data`. The input object, returned invisibly.
 #'
 #' @export
 print.horizons_data <- function(x, ...) {
@@ -719,10 +719,10 @@ print.horizons_data <- function(x, ...) {
 #'
 #' Uses tree-style formatting consistent with the rest of the package.
 #'
-#' @param object [horizons_data]. The object to summarize.
+#' @param object `horizons_data`. The object to summarize.
 #' @param ... Additional arguments (ignored, for S3 compatibility).
 #'
-#' @return [horizons_data]. The input object, returned invisibly.
+#' @return `horizons_data`. The input object, returned invisibly.
 #'
 #' @export
 summary.horizons_data <- function(object, ...) {

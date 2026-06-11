@@ -40,13 +40,13 @@
 #' Joined variables receive `role = "response"` in the role map. Use
 #' `configure()` to promote one response to `role = "outcome"` for modeling.
 #'
-#' @param x [horizons_data]. Object from pipeline (post-`average()`, unique
+#' @param x `horizons_data`. Object from pipeline (post-`average()`, unique
 #'   `sample_id` required).
-#' @param source [tibble, data.frame, or character path]. Response data source.
+#' @param source `tibble, data.frame, or character path`. Response data source.
 #'   If a path, read via `readr::read_csv()`.
-#' @param variable [character vector]. Column name(s) in the source to join as
+#' @param variable `character vector`. Column name(s) in the source to join as
 #'   response variables. Required - no default. Must be numeric columns.
-#' @param by [character]. Join key. Default `"sample_id"`. Use a named vector
+#' @param by `character`. Join key. Default `"sample_id"`. Use a named vector
 #'   for mismatched column names: `c("sample_id" = "Lab_ID")` where the name
 #'   is the horizons-side column and the value is the source-side column.
 #'

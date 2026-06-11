@@ -56,7 +56,8 @@ step_transform_spectra <- function(recipe,
 ## Constructor
 ## ---------------------------------------------------------------------------
 
-#' @export
+#' @keywords internal
+#' @noRd
 step_transform_spectra_new <- function(columns,
                                        preprocessing,
                                        window_size,

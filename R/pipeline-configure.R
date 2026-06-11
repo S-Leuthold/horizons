@@ -36,30 +36,32 @@
 #'   purrr::map(~base |> configure(outcome = .x) |> evaluate() |> fit())
 #' ```
 #'
-#' @param x [horizons_data]. Object with response data attached via
+#' @param x `horizons_data`. Object with response data attached via
 #'   `add_response()`.
-#' @param outcome [character(1) or NULL]. Which response variable to model.
+#' @param outcome `character(1) or NULL`. Which response variable to model.
 #'   Auto-selects if exactly one response exists.
-#' @param models [character]. Model algorithms to benchmark. Default
+#' @param models `character`. Model algorithms to benchmark. Default
 #'   `c("rf", "cubist", "plsr")`. See `VALID_MODELS` for options.
-#' @param transformations [character]. Response transformations to test.
+#' @param transformations `character`. Response transformations to test.
 #'   Default `"none"`.
-#' @param preprocessing [character]. Per-config spectral preprocessing methods.
+#' @param preprocessing `character`. Per-config spectral preprocessing methods.
 #'   Default `"raw"`.
-#' @param feature_selection [character]. Feature selection methods to test.
+#' @param feature_selection `character`. Feature selection methods to test.
 #'   Default `"none"`.
-#' @param expand_covariates [logical(1), character, or NULL]. Covariate
+#' @param expand_covariates `logical(1), character, or NULL`. Covariate
 #'   expansion strategy. NULL = all covariates in every config (no expansion).
 #'   TRUE = power set of all covariate columns. Character vector = power set
 #'   of named covariates only. FALSE = exclude all covariates.
-#' @param cov_fusion [character(1) or NULL]. Covariate fusion strategy:
+#' @param cov_fusion `character(1) or NULL`. Covariate fusion strategy:
 #'   NULL (no covariates), `"early"`, or `"late"`.
-#' @param cv_folds [integer]. Number of cross-validation folds. Default 5.
+#' @param cv_folds `integer`. Number of cross-validation folds. Default 5.
 #'   Minimum 2.
-#' @param grid_size [integer]. Hyperparameter grid size (Latin hypercube).
+#' @param grid_size `integer`. Hyperparameter grid size (Latin hypercube).
 #'   Default 10. Minimum 1.
-#' @param bayesian_iter [integer]. Bayesian optimization iterations.
+#' @param bayesian_iter `integer`. Bayesian optimization iterations.
 #'   Default 15. Minimum 0.
+#' @param final_bayesian_iter `integer`. Bayesian optimization iterations for
+#'   the final fit on the selected configuration. Default 25. Minimum 0.
 #'
 #' @return A modified `horizons_data` object with:
 #'   * Outcome variable promoted to `role = "outcome"` in `data$role_map`

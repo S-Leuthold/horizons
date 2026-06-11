@@ -39,7 +39,7 @@ correlation with the outcome exceeds an adaptive threshold (mean + 1 standard de
 Designed for use with high-resolution MIR spectra in wide format (columns = wavenumbers).
 }
 \details{
-The selection algorithm slides a 3-wavenumber window (6 cm⁻¹ at 2 cm⁻¹ resolution) across
+The selection algorithm slides a 3-wavenumber window (6 cm-1 at 2 cm-1 resolution) across
 the spectrum, computes the mean absolute Spearman correlation between each window and
 the outcome, and retains all wavenumbers from windows where the score exceeds
 \verb{mean + 1 SD}. Duplicate selections are collapsed. If no windows meet the threshold,
