@@ -420,6 +420,58 @@ predict_one_config <- function(object, config_id, new_spectra, interval) {
 }
 
 ## ---------------------------------------------------------------------------
+## predict_members() — every ensemble member predicts new_data (silent helper)
+## ---------------------------------------------------------------------------
+
+#' Predict new spectra from each ensemble member
+#'
+#' Runs every member config through the same per-config primitive the single
+#' fit path uses ([predict_one_config()] — predict once, back-transform once)
+#' and stacks the results into one long frame. This is the predict-time analog
+#' of the train-time `predict_members_on_test()`: same structure, minus the
+#' truth column (new data carries no outcome).
+#'
+#' Members are predicted point-only (`interval = FALSE`); the ensemble's own
+#' uncertainty is conformalized on the meta-learner's residuals downstream, not
+#' assembled from member intervals.
+#'
+#' @param object A `horizons_ensemble` (or any object carrying
+#'   `models$workflows`).
+#' @param members Character vector of member `config_id`s to predict.
+#' @param new_spectra Tibble from [resolve_new_data()] (sample_id + predictors).
+#' @return A long tibble: `config_id`, `sample_id`, `.pred` (original scale),
+#'   one block per member.
+#' @keywords internal
+#' @noRd
+predict_members <- function(object, members, new_spectra) {
+
+  ## sample_id is the join key for every downstream combine (weighted average
+  ## groups on it; the wide pivot keys rows on it). A duplicate would silently
+  ## fan out each member's predictions and corrupt the combination, so assert
+  ## uniqueness loudly here — the predict-time mirror of the train-time gate in
+  ## predict_members_on_test().
+  if (anyDuplicated(new_spectra$sample_id)) {
+
+    cli::cli_abort(c(
+      "{.field sample_id}s in {.arg new_data} are not unique.",
+      "x" = "Duplicate keys would fan out the member-prediction combine.",
+      "i" = "Expected one row per sample."
+    ))
+
+  }
+
+  dplyr::bind_rows(lapply(members, function(m) {
+
+    pc <- predict_one_config(object, config_id = m, new_spectra = new_spectra,
+                             interval = FALSE)
+
+    tibble::tibble(config_id = m, sample_id = pc$sample_id, .pred = pc$.pred)
+
+  }))
+
+}
+
+## ---------------------------------------------------------------------------
 ## predict_intervals() — conformal prediction intervals for one config
 ## ---------------------------------------------------------------------------
 
