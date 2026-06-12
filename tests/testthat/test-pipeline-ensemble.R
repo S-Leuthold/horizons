@@ -277,10 +277,13 @@ describe("predict.horizons_ensemble() - output contract", {
 ## =========================================================================
 ## predict.horizons_ensemble() — round-trip reproduces stored predictions
 ## =========================================================================
-## The strongest correctness teeth: predicting test_F is the identical data
-## path the engine used to build $ensemble$predictions, so the predictions must
-## match to numerical precision. A double back-transform, a member-order bug, or
-## a wrong combine would all break this. optimize = FALSE keeps the meta-model
+## A round-trip consistency check: predicting test_F is the identical data path
+## the engine used to build $ensemble$predictions, so the two must match to
+## numerical precision. This catches a double back-transform, a member-order
+## bug, a scale mismatch between predict() and the stored combine, or a wrong
+## combine. It does NOT validate original-scale accuracy or interval coverage —
+## both predict() and the stored values share the same machinery, so an error
+## common to both would survive. optimize = FALSE keeps the meta-model
 ## deterministic across the fit and the predict path.
 
 describe("predict.horizons_ensemble() - round-trips the stored predictions", {
@@ -336,7 +339,7 @@ describe("predict.horizons_ensemble() - weighted combine is the documented sum",
       dplyr::summarise(by_hand = sum(.data$.pred * .data$coef),
                        .groups = "drop")
 
-    by_hand$by_hand[by_hand$by_hand < 0] <- 0
+    by_hand$by_hand <- floor_at_zero(by_hand$by_hand)
 
     p <- predict(ens, test_set, interval = FALSE)
 
