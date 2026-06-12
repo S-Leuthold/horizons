@@ -770,12 +770,31 @@ predict.horizons_ensemble <- function(object,
 #'   `sample_id`, `.pred`).
 #' @param weights The ensemble weights tibble (`member`, `coef`).
 #' @return A tibble: `sample_id`, `.pred` (ensemble point prediction).
-#' @keywords internal
 #' @noRd
 combine_ensemble_weighted <- function(member_pred, weights) {
 
-  out <- member_pred %>%
-    dplyr::left_join(weights, by = c("config_id" = "member")) %>%
+  joined <- member_pred %>%
+    dplyr::left_join(weights, by = c("config_id" = "member"))
+
+  ## A member with predictions but no matching weight leaves `coef` NA, which
+  ## would propagate through sum() to an NA ensemble prediction returned as a
+  ## valid tibble. predict_members() guarantees the member set matches, so this
+  ## is unreachable on the normal path — but the join is the one spot a future
+  ## member-set drift could corrupt silently, so fail loud here. This mirrors the
+  ## explicit member-presence gate in combine_ensemble_metamodel().
+  if (anyNA(joined$coef)) {
+
+    unmatched <- unique(joined$config_id[is.na(joined$coef)])
+
+    cli::cli_abort(c(
+      "Weighted combine has no weight for {length(unmatched)} member{?s}.",
+      "x" = "Unweighted: {.val {unmatched}}",
+      "i" = "The member set must match the ensemble weights."
+    ))
+
+  }
+
+  out <- joined %>%
     dplyr::group_by(.data$sample_id) %>%
     dplyr::summarise(.pred = sum(.data$.pred * .data$coef),
                      .groups = "drop")
@@ -807,7 +826,6 @@ combine_ensemble_weighted <- function(member_pred, weights) {
 #' @param members Character vector of the trained-on member `config_id`s.
 #' @param model The fitted meta-workflow (`object$ensemble$model`).
 #' @return A tibble: `sample_id`, `.pred` (ensemble point prediction).
-#' @keywords internal
 #' @noRd
 combine_ensemble_metamodel <- function(member_pred, members, model) {
 
