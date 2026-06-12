@@ -588,40 +588,62 @@ build_ensemble_contract <- function(method,
 }
 
 ## ---------------------------------------------------------------------------
-## predict.horizons_ensemble() — skeleton
+## predict.horizons_ensemble()
 ## ---------------------------------------------------------------------------
 
-#' Predict from a Fitted Ensemble (skeleton)
+#' Predict Soil Properties from a Fitted Ensemble
 #'
 #' @description
-#' Predicts new spectra from a fitted ensemble. Each member predicts via the
-#' same per-config primitive `predict.horizons_fit()` uses
-#' (`predict_one_config()` — predict once, back-transform once), and the
-#' member predictions are combined by the meta-learner stored in
-#' `object$ensemble`. The combination differs by method: `penalized`/`weighted`
-#' take a (weighted) linear combination of member predictions; `xgb` feeds the
-#' member predictions through the boosted meta-model.
+#' Generates stacked-ensemble predictions for new spectra. Every member predicts
+#' via the same per-config primitive [predict.horizons_fit()] uses
+#' (`predict_one_config()` — predict once, back-transform once), and the member
+#' predictions are combined by the meta-learner stored in `object$ensemble`. The
+#' combination differs by method: `weighted` takes a fixed weighted average of
+#' member predictions; `penalized` and `xgb` feed the member predictions through
+#' the fitted meta-model.
 #'
-#' This is a Phase-1 skeleton: the combination logic lands with the engines,
-#' which populate `object$ensemble$model` and `$weights`. It establishes the
-#' method signature and the contract reference, and errors clearly until an
-#' ensemble has actually been built.
-#'
-#' @param object A `horizons_ensemble` object.
-#' @param new_data Spectra to predict, on the training axis (same requirement
-#'   as [predict.horizons_fit()]).
-#' @param interval Logical. Return ensemble prediction intervals when Phase-2
-#'   UQ is present (`object$ensemble$uq`). Default `TRUE`.
+#' @param object A `horizons_ensemble` object (the output of [ensemble()]).
+#' @param new_data Spectra to predict. Either a `horizons_data` object or a
+#'   tibble/data.frame whose predictor (wavelength) columns match the training
+#'   schema. **The spectra must already be on the training axis** — the same
+#'   requirement as [predict.horizons_fit()]; see its Details for the axis-
+#'   alignment limitation.
+#' @param interval Logical. Return ensemble prediction intervals when ensemble
+#'   uncertainty quantification is available (`object$ensemble$uq`). Default
+#'   `TRUE`. Ensemble UQ is not computed in this release, so `interval = TRUE`
+#'   currently returns point predictions with a one-time note.
 #' @param ... Unused; present for S3 method consistency.
 #'
-#' @return A tibble of ensemble predictions (skeleton: not yet implemented).
+#' @return A tibble, one row per sample:
+#'   \describe{
+#'     \item{sample_id}{Sample identifier from `new_data`.}
+#'     \item{.pred}{Ensemble point prediction, original response scale.}
+#'   }
+#'   Interval columns (`.pred_lower`, `.pred_upper`, `.interval_width`) are
+#'   appended when ensemble UQ is present and `interval = TRUE`.
 #'
-#' @keywords internal
+#' @details
+#' All ensemble members must predict successfully. A member that fails to
+#' predict on `new_data` aborts the call naming the offending config — the
+#' meta-learner's combination is only valid over the exact member set it was
+#' trained on, so dropping a member would silently change what is being
+#' predicted.
+#'
+#' @examples
+#' \dontrun{
+#' ens <- ensemble(fit(evaluated, n_best = 5))
+#' predict(ens, new_spectra)
+#' }
+#'
 #' @exportS3Method stats::predict horizons_ensemble
 predict.horizons_ensemble <- function(object,
                                       new_data,
                                       interval = TRUE,
                                       ...) {
+
+  ## -------------------------------------------------------------------------
+  ## Step 0: Preflight
+  ## -------------------------------------------------------------------------
 
   if (!inherits(object, "horizons_ensemble")) {
 
@@ -638,9 +660,185 @@ predict.horizons_ensemble <- function(object,
 
   }
 
-  cli::cli_abort(c(
-    "{.fn predict.horizons_ensemble} is not implemented yet.",
-    "i" = "The combination logic lands with the meta-learner engines."
-  ))
+  ## -------------------------------------------------------------------------
+  ## Step 1: Resolve new_data, then validate it carries the training axis
+  ## -------------------------------------------------------------------------
+
+  new_spectra <- resolve_new_data(new_data)
+
+  check_predictor_schema(object, new_spectra)
+
+  ## -------------------------------------------------------------------------
+  ## Step 2: Resolve the authoritative member set
+  ## -------------------------------------------------------------------------
+
+  ## The members the meta-learner actually trained on are exactly the rows of
+  ## the weights tibble. Read them directly rather than re-deriving via
+  ## gather_members(), which intersects train-time slots (cv_predictions) and
+  ## could disagree with what the fitted meta-model saw.
+  members <- object$ensemble$weights$member
+
+  if (is.null(members) || length(members) < 2) {
+
+    cli::cli_abort(c(
+      "The fitted ensemble carries no member set.",
+      "i" = "{.fn ensemble} should record at least two members in its weights."
+    ))
+
+  }
+
+  ## -------------------------------------------------------------------------
+  ## Step 3: Every member predicts new_data (long frame, original scale)
+  ## -------------------------------------------------------------------------
+
+  member_pred <- predict_members(object, members, new_spectra)
+
+  ## -------------------------------------------------------------------------
+  ## Step 4: Combine member predictions by the meta-learner (per method)
+  ## -------------------------------------------------------------------------
+
+  method <- object$ensemble$method
+
+  point <- switch(
+    method,
+
+    weighted = combine_ensemble_weighted(member_pred, object$ensemble$weights),
+
+    penalized = ,
+    xgb       = combine_ensemble_metamodel(member_pred, members,
+                                           object$ensemble$model),
+
+    cli::cli_abort(c(
+      "Unknown ensemble method {.val {method}}.",
+      "i" = "Expected one of {.val {c('weighted', 'penalized', 'xgb')}}."
+    ))
+  )
+
+  ## -------------------------------------------------------------------------
+  ## Step 5: Intervals (only when ensemble UQ is available) + assemble output
+  ## -------------------------------------------------------------------------
+
+  ## Mirror the single-model seam (predict_one_config): point predictions are
+  ## complete here; intervals are a pure append when a UQ bundle exists. Ensemble
+  ## UQ is not computed in this release, so the bundle is absent and we degrade
+  ## to point-only with a one-time note.
+  uq <- object$ensemble$uq
+
+  if (!isTRUE(interval) || is.null(uq)) {
+
+    if (isTRUE(interval) && is.null(uq)) {
+
+      cli::cli_inform(c(
+        "i" = "Ensemble prediction intervals are not available; \\
+               returning point predictions."
+      ))
+
+    }
+
+    return(point)
+
+  }
+
+  interval_cols <- predict_intervals(
+    uq          = uq,
+    point_pred  = point$.pred,
+    new_spectra = new_spectra
+  )
+
+  if (is.null(interval_cols)) {
+
+    return(point)
+
+  }
+
+  dplyr::bind_cols(point, interval_cols)
+
+}
+
+## ---------------------------------------------------------------------------
+## combine_ensemble_weighted() — weighted-average combine (silent helper)
+## ---------------------------------------------------------------------------
+
+#' Combine member predictions by the ensemble weights
+#'
+#' The predict-time generalization of the `weighted` engine's train-time
+#' combine (`fit_ensemble_weighted()`): join the per-member weights, then take
+#' the weighted sum per sample. Floored at zero — soil properties are
+#' non-negative.
+#'
+#' @param member_pred Long tibble from [predict_members()] (`config_id`,
+#'   `sample_id`, `.pred`).
+#' @param weights The ensemble weights tibble (`member`, `coef`).
+#' @return A tibble: `sample_id`, `.pred` (ensemble point prediction).
+#' @keywords internal
+#' @noRd
+combine_ensemble_weighted <- function(member_pred, weights) {
+
+  out <- member_pred %>%
+    dplyr::left_join(weights, by = c("config_id" = "member")) %>%
+    dplyr::group_by(.data$sample_id) %>%
+    dplyr::summarise(.pred = sum(.data$.pred * .data$coef),
+                     .groups = "drop")
+
+  out$.pred <- floor_at_zero(out$.pred)
+
+  out
+
+}
+
+## ---------------------------------------------------------------------------
+## combine_ensemble_metamodel() — meta-model combine (silent helper)
+## ---------------------------------------------------------------------------
+
+#' Combine member predictions through a fitted meta-model
+#'
+#' The predict-time generalization of the `penalized`/`xgb` engines' train-time
+#' combine: widen the member predictions into the `member_<config_id>` matrix
+#' the meta-model trained on, then run them THROUGH the fitted meta-workflow.
+#' Floored at zero.
+#'
+#' The wide-frame columns are selected explicitly from the trained-on member
+#' set (not from whatever the pivot happens to produce), and a missing member
+#' column aborts — the meta-model's combination is only valid over the exact
+#' member set it saw, so an incomplete frame must fail loudly rather than
+#' silently mispredict.
+#'
+#' @param member_pred Long tibble from [predict_members()].
+#' @param members Character vector of the trained-on member `config_id`s.
+#' @param model The fitted meta-workflow (`object$ensemble$model`).
+#' @return A tibble: `sample_id`, `.pred` (ensemble point prediction).
+#' @keywords internal
+#' @noRd
+combine_ensemble_metamodel <- function(member_pred, members, model) {
+
+  member_cols <- paste0("member_", members)
+
+  wide <- member_pred %>%
+    dplyr::select("sample_id", "config_id", ".pred") %>%
+    tidyr::pivot_wider(names_from   = "config_id",
+                       values_from  = ".pred",
+                       names_prefix = "member_")
+
+  missing <- setdiff(member_cols, names(wide))
+
+  if (length(missing) > 0) {
+
+    cli::cli_abort(c(
+      "Member prediction{?s} missing for {length(missing)} ensemble member{?s}.",
+      "x" = "Absent: {.val {sub('^member_', '', missing)}}",
+      "i" = "Every ensemble member must predict {.arg new_data}."
+    ))
+
+  }
+
+  combined <- stats::predict(
+    model,
+    new_data = wide[, member_cols, drop = FALSE]
+  )$.pred
+
+  tibble::tibble(
+    sample_id = wide$sample_id,
+    .pred     = floor_at_zero(combined)
+  )
 
 }

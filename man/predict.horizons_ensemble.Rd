@@ -2,36 +2,55 @@
 % Please edit documentation in R/ensemble-helpers.R
 \name{predict.horizons_ensemble}
 \alias{predict.horizons_ensemble}
-\title{Predict from a Fitted Ensemble (skeleton)}
+\title{Predict Soil Properties from a Fitted Ensemble}
 \usage{
 \method{predict}{horizons_ensemble}(object, new_data, interval = TRUE, ...)
 }
 \arguments{
-\item{object}{A \code{horizons_ensemble} object.}
+\item{object}{A \code{horizons_ensemble} object (the output of \code{\link[=ensemble]{ensemble()}}).}
 
-\item{new_data}{Spectra to predict, on the training axis (same requirement
-as \code{\link[=predict.horizons_fit]{predict.horizons_fit()}}).}
+\item{new_data}{Spectra to predict. Either a \code{horizons_data} object or a
+tibble/data.frame whose predictor (wavelength) columns match the training
+schema. \strong{The spectra must already be on the training axis} — the same
+requirement as \code{\link[=predict.horizons_fit]{predict.horizons_fit()}}; see its Details for the axis-
+alignment limitation.}
 
-\item{interval}{Logical. Return ensemble prediction intervals when Phase-2
-UQ is present (\code{object$ensemble$uq}). Default \code{TRUE}.}
+\item{interval}{Logical. Return ensemble prediction intervals when ensemble
+uncertainty quantification is available (\code{object$ensemble$uq}). Default
+\code{TRUE}. Ensemble UQ is not computed in this release, so \code{interval = TRUE}
+currently returns point predictions with a one-time note.}
 
 \item{...}{Unused; present for S3 method consistency.}
 }
 \value{
-A tibble of ensemble predictions (skeleton: not yet implemented).
+A tibble, one row per sample:
+\describe{
+\item{sample_id}{Sample identifier from \code{new_data}.}
+\item{.pred}{Ensemble point prediction, original response scale.}
+}
+Interval columns (\code{.pred_lower}, \code{.pred_upper}, \code{.interval_width}) are
+appended when ensemble UQ is present and \code{interval = TRUE}.
 }
 \description{
-Predicts new spectra from a fitted ensemble. Each member predicts via the
-same per-config primitive \code{predict.horizons_fit()} uses
-(\code{predict_one_config()} — predict once, back-transform once), and the
-member predictions are combined by the meta-learner stored in
-\code{object$ensemble}. The combination differs by method: \code{penalized}/\code{weighted}
-take a (weighted) linear combination of member predictions; \code{xgb} feeds the
-member predictions through the boosted meta-model.
-
-This is a Phase-1 skeleton: the combination logic lands with the engines,
-which populate \code{object$ensemble$model} and \verb{$weights}. It establishes the
-method signature and the contract reference, and errors clearly until an
-ensemble has actually been built.
+Generates stacked-ensemble predictions for new spectra. Every member predicts
+via the same per-config primitive \code{\link[=predict.horizons_fit]{predict.horizons_fit()}} uses
+(\code{predict_one_config()} — predict once, back-transform once), and the member
+predictions are combined by the meta-learner stored in \code{object$ensemble}. The
+combination differs by method: \code{weighted} takes a fixed weighted average of
+member predictions; \code{penalized} and \code{xgb} feed the member predictions through
+the fitted meta-model.
 }
-\keyword{internal}
+\details{
+All ensemble members must predict successfully. A member that fails to
+predict on \code{new_data} aborts the call naming the offending config — the
+meta-learner's combination is only valid over the exact member set it was
+trained on, so dropping a member would silently change what is being
+predicted.
+}
+\examples{
+\dontrun{
+ens <- ensemble(fit(evaluated, n_best = 5))
+predict(ens, new_spectra)
+}
+
+}

@@ -239,3 +239,206 @@ describe("ensemble() - preflight validation", {
   })
 
 })
+
+## =========================================================================
+## predict.horizons_ensemble() — output contract
+## =========================================================================
+## Predicting the held-out Split-F test set is the natural round-trip: it is
+## the same data the train-time combine scored, so predict() should reproduce
+## the stored ensemble predictions. test_F also carries truth, but predict()
+## must IGNORE it and return only sample_id + .pred (no config_id, no truth).
+
+test_set <- rsample::assessment(fitted$models$split)
+
+describe("predict.horizons_ensemble() - output contract", {
+
+  it("returns sample_id + .pred only, one row per sample, for every method", {
+
+    for (m in c("weighted", "penalized", "xgb")) {
+
+      ens <- suppressWarnings(
+        ensemble(fitted, method = m, optimize = FALSE, verbose = FALSE)
+      )
+
+      p <- predict(ens, test_set, interval = FALSE)
+
+      expect_setequal(names(p), c("sample_id", ".pred"))
+      expect_equal(nrow(p), dplyr::n_distinct(test_set$sample_id))
+      expect_false("config_id" %in% names(p))
+      expect_false(".pred_lower" %in% names(p))
+      expect_type(p$.pred, "double")
+
+    }
+
+  })
+
+})
+
+## =========================================================================
+## predict.horizons_ensemble() — round-trip reproduces stored predictions
+## =========================================================================
+## The strongest correctness teeth: predicting test_F is the identical data
+## path the engine used to build $ensemble$predictions, so the predictions must
+## match to numerical precision. A double back-transform, a member-order bug, or
+## a wrong combine would all break this. optimize = FALSE keeps the meta-model
+## deterministic across the fit and the predict path.
+
+describe("predict.horizons_ensemble() - round-trips the stored predictions", {
+
+  for (m in c("weighted", "penalized", "xgb")) {
+
+    it(paste0("method = '", m, "' reproduces $ensemble$predictions on test_F"), {
+
+      ens <- suppressWarnings(
+        ensemble(fitted, method = m, optimize = FALSE, verbose = FALSE)
+      )
+
+      p      <- predict(ens, test_set, interval = FALSE)
+      stored <- ens$ensemble$predictions
+
+      joined <- dplyr::inner_join(
+        p, stored[, c("sample_id", ".pred")],
+        by = "sample_id", suffix = c("_new", "_stored")
+      )
+
+      expect_equal(nrow(joined), nrow(stored))
+      expect_equal(joined$.pred_new, joined$.pred_stored, tolerance = 1e-8)
+
+    })
+
+  }
+
+})
+
+## =========================================================================
+## predict.horizons_ensemble() — weighted combine equals the documented math
+## =========================================================================
+## Pin the weighted method to its definition (sum of member .pred * coef),
+## computed independently of the function under test, so the assertion fails if
+## the implementation drifts from the documented combination.
+
+describe("predict.horizons_ensemble() - weighted combine is the documented sum", {
+
+  it("equals sum(member .pred * coef) per sample, floored at 0", {
+
+    ens <- suppressWarnings(
+      ensemble(fitted, method = "weighted", optimize = FALSE, verbose = FALSE)
+    )
+
+    members  <- ens$ensemble$weights$member
+    new_spec <- resolve_new_data(test_set)
+    mp       <- predict_members(ens, members, new_spec)
+
+    by_hand <- mp %>%
+      dplyr::left_join(ens$ensemble$weights,
+                       by = c("config_id" = "member")) %>%
+      dplyr::group_by(.data$sample_id) %>%
+      dplyr::summarise(by_hand = sum(.data$.pred * .data$coef),
+                       .groups = "drop")
+
+    by_hand$by_hand[by_hand$by_hand < 0] <- 0
+
+    p <- predict(ens, test_set, interval = FALSE)
+
+    joined <- dplyr::inner_join(p, by_hand, by = "sample_id")
+
+    expect_equal(joined$.pred, joined$by_hand, tolerance = 1e-10)
+
+  })
+
+})
+
+## =========================================================================
+## predict.horizons_ensemble() — reuses the training-axis schema gate
+## =========================================================================
+
+describe("predict.horizons_ensemble() - schema gate", {
+
+  it("aborts when new_data is missing training-axis predictor columns", {
+
+    ens <- suppressWarnings(
+      ensemble(fitted, method = "weighted", optimize = FALSE, verbose = FALSE)
+    )
+
+    pred_cols <- fitted$models$predictor_schema
+    broken    <- test_set[, setdiff(names(test_set), pred_cols[1]),
+                          drop = FALSE]
+
+    expect_error(predict(ens, broken, interval = FALSE),
+                 class = "rlang_error")
+
+  })
+
+})
+
+## =========================================================================
+## predict.horizons_ensemble() — interval degrades gracefully (no ensemble UQ)
+## =========================================================================
+## Ensemble UQ is not computed in this release, so interval = TRUE must return
+## point predictions with a one-time note rather than erroring. This is the hook
+## ensemble conformal UQ fills later; the point path must not change when it does.
+
+describe("predict.horizons_ensemble() - graceful interval degradation", {
+
+  ens <- suppressWarnings(
+    ensemble(fitted, method = "weighted", optimize = FALSE, verbose = FALSE)
+  )
+
+  it("interval = TRUE returns point-only with an informative message", {
+
+    expect_message(
+      p <- predict(ens, test_set, interval = TRUE),
+      regexp = "intervals are not available"
+    )
+    expect_false(".pred_lower" %in% names(p))
+
+  })
+
+  it("interval = FALSE returns point-only with no message", {
+
+    expect_no_message(predict(ens, test_set, interval = FALSE))
+
+  })
+
+})
+
+## =========================================================================
+## predict.horizons_ensemble() — aborts when a member cannot predict
+## =========================================================================
+## The meta-learner's combine is only valid over the exact member set it was
+## trained on. If a member's workflow cannot predict, the call must abort naming
+## the failure rather than dropping the member and silently changing the
+## estimand. Corrupt one member's stored workflow to force the failure.
+
+describe("predict.horizons_ensemble() - aborts on a failing member", {
+
+  it("does not renormalize; aborts when a member workflow cannot predict", {
+
+    ens <- suppressWarnings(
+      ensemble(fitted, method = "weighted", optimize = FALSE, verbose = FALSE)
+    )
+
+    broken_member <- ens$ensemble$weights$member[1]
+    ens$models$workflows[[broken_member]] <- "not a workflow"
+
+    expect_error(predict(ens, test_set, interval = FALSE),
+                 class = "rlang_error")
+
+  })
+
+})
+
+## =========================================================================
+## predict.horizons_ensemble() — preflight
+## =========================================================================
+
+describe("predict.horizons_ensemble() - preflight", {
+
+  it("aborts on a non-ensemble object", {
+
+    expect_error(predict.horizons_ensemble(fitted, test_set),
+                 class = "rlang_error")
+
+  })
+
+})
