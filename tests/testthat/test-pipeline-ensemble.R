@@ -520,3 +520,40 @@ describe("predict.horizons_ensemble() - response bound guardrail", {
   })
 
 })
+
+## =========================================================================
+## validate_horizons_ensemble() — real contracts from all three engines pass
+## =========================================================================
+## The validator is wired into ensemble() itself, so these builds double as
+## wire-up proof; the explicit calls assert idempotent re-validation of a
+## real contract (including a populated CV+ uq bundle).
+
+describe("validate_horizons_ensemble() - real fixture contracts", {
+
+  for (m in c("weighted", "penalized", "xgb")) {
+
+    it(paste0("method = '", m, "' contract validates (uq populated)"), {
+
+      ens <- suppressWarnings(
+        ensemble(fitted, method = m, optimize = FALSE, verbose = FALSE)
+      )
+
+      expect_identical(validate_horizons_ensemble(ens), ens)
+      expect_false(is.null(ens$ensemble$uq))
+
+    })
+
+  }
+
+  it("a compute_uq = FALSE contract validates (uq NULL)", {
+
+    ens0 <- suppressWarnings(
+      ensemble(fitted, method = "weighted", optimize = FALSE,
+               compute_uq = FALSE, verbose = FALSE)
+    )
+
+    expect_identical(validate_horizons_ensemble(ens0), ens0)
+
+  })
+
+})

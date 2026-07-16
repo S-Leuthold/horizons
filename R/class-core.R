@@ -187,14 +187,16 @@ new_horizons_data <- function(analysis        = NULL,
 
     ## Populated by ensemble(); shape mirrors build_ensemble_contract().
     ensemble = list(method          = NULL,
-                    model           = NULL,
+                    model           = NULL,   ## weights tibble (weighted) or trained workflow (penalized/xgb)
                     weights         = NULL,
                     predictions     = NULL,
                     metrics         = NULL,
                     member_metrics  = NULL,
                     improvement     = NULL,
                     oof_predictions = NULL,
-                    uq              = NULL,
+                    optimize        = NULL,   ## build-time optimize flag (for UQ fold re-derivation)
+                    seed            = NULL,   ## build-time seed (UQ partitions at seed + 1000)
+                    uq              = NULL,   ## CV+ conformal bundle from fit_ensemble_uq(), or NULL
                     timestamp       = NULL,
                     runtime_secs    = NULL),
 
@@ -422,6 +424,319 @@ validate_horizons_data <- function(x) {
   if (length(errors) > 0) {
 
     cat(cli::col_red(cli::style_bold("! The horizons_data object failed validation:\n")))
+
+    for (i in seq_along(errors)) {
+
+      branch <- if (i < length(errors)) "\u251C\u2500" else "\u2514\u2500"
+      cat(cli::col_red(paste0("   ", branch, " ", errors[i], "\n")))
+
+    }
+
+    cat("\n")
+    rlang::abort(
+      paste(c("Validation failed:", errors), collapse = "\n"),
+      class = "horizons_validation_error"
+    )
+
+  }
+
+  x
+
+}
+
+
+#' Validate a horizons_ensemble object's contract
+#'
+#' @description
+#' Structural validation of the `$ensemble` slot against the contract
+#' [build_ensemble_contract()] packs (see its docs for the authoritative
+#' field list and the per-method `$model` table). Called once at the end of
+#' [ensemble()] so every returned object is certified; all checks are
+#' structural (types, columns, key sets) — nothing predicts, so the cost is
+#' microseconds.
+#'
+#' @details
+#' Gate checks (abort immediately): the object inherits `horizons_ensemble`,
+#' `$ensemble` is a list, and `$ensemble$method` is present.
+#'
+#' Accumulated checks (reported together, tree-style):
+#'
+#' 1. **Slot completeness**: all 13 contract keys present (`method`, `model`,
+#'    `weights`, `predictions`, `metrics`, `member_metrics`, `improvement`,
+#'    `oof_predictions`, `optimize`, `seed`, `uq`, `timestamp`,
+#'    `runtime_secs`). Extra keys are tolerated.
+#' 2. **method**: one of `weighted`, `penalized`, `xgb`.
+#' 3. **weights**: data frame with character `member` + numeric `coef`,
+#'    at least 2 rows, unique members, no NA coefficients.
+#' 4. **model, per method**: `weighted` carries the weights tibble
+#'    (`member` + `coef` columns); `penalized`/`xgb` carry a trained
+#'    `workflow`.
+#' 5. **predictions**: data frame with `sample_id`, numeric `.pred`, numeric
+#'    `truth`.
+#' 6. **metrics**: data frame with `.metric`, `.estimator`, `.estimate`.
+#' 7. **member_metrics**: data frame with `.metric`, `.estimate`,
+#'    `config_id`; every `config_id` must be a known member.
+#' 8. **improvement**: single non-NA numeric.
+#' 9. **oof_predictions**: NULL, or data frame with `.row`, `.pred`, `truth`.
+#' 10. **optimize / seed**: NULL (pre-UQ objects), or a logical / numeric
+#'     scalar respectively.
+#' 11. **uq**: NULL, or a CV+ bundle — a list with `method == "cv_plus"` and
+#'     the core fields `fold_models`, `calib`, `n_calib`, `level_default`
+#'     (see [fit_ensemble_uq()]).
+#' 12. **timestamp**: POSIXct. **runtime_secs**: single non-negative numeric.
+#'
+#' @param x `horizons_ensemble`. The object to validate.
+#'
+#' @return `horizons_ensemble`. The input object, unchanged, if validation
+#'   passes. Aborts with class `horizons_validation_error` on failure.
+#'
+#' @seealso [build_ensemble_contract()] for contract assembly,
+#'   [fit_ensemble_uq()] for the uq bundle.
+#'
+#' @noRd
+validate_horizons_ensemble <- function(x) {
+
+  ## ---------------------------------------------------------------------------
+  ## Gate checks
+  ## ---------------------------------------------------------------------------
+
+  if (!inherits(x, "horizons_ensemble")) {
+
+    cli::cli_abort("{.arg x} must be a {.cls horizons_ensemble} object")
+
+  }
+
+  if (!is.list(x$ensemble)) {
+
+    cli::cli_abort("Object has no {.field ensemble} slot to validate")
+
+  }
+
+  if (is.null(x$ensemble$method)) {
+
+    cli::cli_abort("The {.field ensemble} slot carries no {.field method}")
+
+  }
+
+  ## ---------------------------------------------------------------------------
+  ## Collect errors for remaining checks
+  ## ---------------------------------------------------------------------------
+
+  errors <- character()
+  ens    <- x$ensemble
+
+  ## Slot completeness ----------------------------------------------------------
+
+  contract_keys <- c("method", "model", "weights", "predictions", "metrics",
+                     "member_metrics", "improvement", "oof_predictions",
+                     "optimize", "seed", "uq", "timestamp", "runtime_secs")
+
+  missing_keys <- setdiff(contract_keys, names(ens))
+
+  if (length(missing_keys) > 0) {
+
+    key_list <- paste(missing_keys, collapse = ", ")
+    errors   <- c(errors, cli::format_inline("Contract keys missing from {.field ensemble}: {key_list}"))
+
+  }
+
+  ## method ---------------------------------------------------------------------
+
+  valid_methods <- c("weighted", "penalized", "xgb")
+
+  if (!is.character(ens$method) || length(ens$method) != 1 ||
+      !ens$method %in% valid_methods) {
+
+    errors <- c(errors, cli::format_inline("{.field method} must be one of: {paste(valid_methods, collapse = ', ')}"))
+
+  }
+
+  ## weights ---------------------------------------------------------------------
+
+  w       <- ens$weights
+  w_valid <- is.data.frame(w) && all(c("member", "coef") %in% names(w))
+
+  if (!w_valid) {
+
+    errors <- c(errors, cli::format_inline("{.field weights} must be a data frame with {.field member} and {.field coef} columns"))
+
+  } else {
+
+    if (nrow(w) < 2) {
+
+      errors <- c(errors, cli::format_inline("{.field weights} needs at least 2 members; found {nrow(w)}"))
+
+    }
+
+    if (!is.character(w$member)) {
+
+      errors <- c(errors, cli::format_inline("{.field weights$member} must be character"))
+
+    }
+
+    if (anyDuplicated(w$member) > 0) {
+
+      errors <- c(errors, cli::format_inline("Duplicate members in {.field weights}"))
+
+    }
+
+    if (!is.numeric(w$coef) || anyNA(w$coef)) {
+
+      errors <- c(errors, cli::format_inline("{.field weights$coef} must be numeric with no NAs"))
+
+    }
+
+  }
+
+  ## model, typed per method ------------------------------------------------------
+
+  if (identical(ens$method, "weighted")) {
+
+    if (!is.data.frame(ens$model) ||
+        !all(c("member", "coef") %in% names(ens$model))) {
+
+      errors <- c(errors, cli::format_inline("{.field model} for method {.val weighted} must be the weights tibble ({.field member} + {.field coef})"))
+
+    }
+
+  } else if (ens$method %in% c("penalized", "xgb")) {
+
+    if (!inherits(ens$model, "workflow") ||
+        !workflows::is_trained_workflow(ens$model)) {
+
+      errors <- c(errors, cli::format_inline("{.field model} for method {.val {ens$method}} must be a trained {.cls workflow}"))
+
+    }
+
+  }
+
+  ## predictions -------------------------------------------------------------------
+
+  p <- ens$predictions
+
+  if (!is.data.frame(p) ||
+      !all(c("sample_id", ".pred", "truth") %in% names(p))) {
+
+    errors <- c(errors, cli::format_inline("{.field predictions} must be a data frame with {.field sample_id}, {.field .pred}, {.field truth}"))
+
+  } else if (!is.numeric(p$.pred) || !is.numeric(p$truth)) {
+
+    errors <- c(errors, cli::format_inline("{.field predictions} columns {.field .pred} and {.field truth} must be numeric"))
+
+  }
+
+  ## metrics -------------------------------------------------------------------------
+
+  m <- ens$metrics
+
+  if (!is.data.frame(m) ||
+      !all(c(".metric", ".estimator", ".estimate") %in% names(m))) {
+
+    errors <- c(errors, cli::format_inline("{.field metrics} must be a data frame with {.field .metric}, {.field .estimator}, {.field .estimate}"))
+
+  }
+
+  ## member_metrics -----------------------------------------------------------------
+
+  mm <- ens$member_metrics
+
+  if (!is.data.frame(mm) ||
+      !all(c(".metric", ".estimate", "config_id") %in% names(mm))) {
+
+    errors <- c(errors, cli::format_inline("{.field member_metrics} must be a data frame with {.field .metric}, {.field .estimate}, {.field config_id}"))
+
+  } else if (w_valid) {
+
+    unknown <- setdiff(unique(mm$config_id), w$member)
+
+    if (length(unknown) > 0) {
+
+      id_list <- paste(unknown, collapse = ", ")
+      errors  <- c(errors, cli::format_inline("{.field member_metrics} references non-member config_ids: {id_list}"))
+
+    }
+
+  }
+
+  ## improvement ---------------------------------------------------------------------
+
+  if (!is.numeric(ens$improvement) || length(ens$improvement) != 1 ||
+      is.na(ens$improvement)) {
+
+    errors <- c(errors, cli::format_inline("{.field improvement} must be a single non-NA numeric"))
+
+  }
+
+  ## oof_predictions -----------------------------------------------------------------
+
+  oof <- ens$oof_predictions
+
+  if (!is.null(oof)) {
+
+    if (!is.data.frame(oof) ||
+        !all(c(".row", ".pred", "truth") %in% names(oof))) {
+
+      errors <- c(errors, cli::format_inline("{.field oof_predictions} must be NULL or a data frame with {.field .row}, {.field .pred}, {.field truth}"))
+
+    }
+
+  }
+
+  ## optimize / seed (NULL tolerated: objects predating ensemble UQ) ------------------
+
+  if (!is.null(ens$optimize) &&
+      (!is.logical(ens$optimize) || length(ens$optimize) != 1)) {
+
+    errors <- c(errors, cli::format_inline("{.field optimize} must be NULL or a single logical"))
+
+  }
+
+  if (!is.null(ens$seed) &&
+      (!is.numeric(ens$seed) || length(ens$seed) != 1)) {
+
+    errors <- c(errors, cli::format_inline("{.field seed} must be NULL or a single numeric"))
+
+  }
+
+  ## uq: NULL or a CV+ bundle ----------------------------------------------------------
+
+  uq <- ens$uq
+
+  if (!is.null(uq)) {
+
+    uq_core <- c("fold_models", "calib", "n_calib", "level_default")
+
+    if (!is.list(uq) || !identical(uq$method, "cv_plus") ||
+        !all(uq_core %in% names(uq))) {
+
+      errors <- c(errors, cli::format_inline("{.field uq} must be NULL or a CV+ bundle ({.field method} = {.val cv_plus} with {paste(uq_core, collapse = ', ')})"))
+
+    }
+
+  }
+
+  ## timestamp / runtime ---------------------------------------------------------------
+
+  if (!inherits(ens$timestamp, "POSIXct")) {
+
+    errors <- c(errors, cli::format_inline("{.field timestamp} must be POSIXct"))
+
+  }
+
+  if (!is.numeric(ens$runtime_secs) || length(ens$runtime_secs) != 1 ||
+      is.na(ens$runtime_secs) || ens$runtime_secs < 0) {
+
+    errors <- c(errors, cli::format_inline("{.field runtime_secs} must be a single non-negative numeric"))
+
+  }
+
+  ## ---------------------------------------------------------------------------
+  ## Report errors or return
+  ## ---------------------------------------------------------------------------
+
+  if (length(errors) > 0) {
+
+    cat(cli::col_red(cli::style_bold("! The horizons_ensemble object failed validation:\n")))
 
     for (i in seq_along(errors)) {
 

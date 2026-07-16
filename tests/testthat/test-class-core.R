@@ -927,3 +927,263 @@ test_that("summary.horizons_data shows pipeline status", {
   expect_true(any(grepl("(?i)status|next|step", output)))
 
 })
+
+
+## ----------------------------------------------------------------------------
+## validate_horizons_ensemble()
+## ----------------------------------------------------------------------------
+
+## Minimal valid weighted contract, built inline (the test-class-core idiom).
+## A tiny trained workflow for the metamodel checks is fit once below.
+make_valid_ensemble <- function() {
+
+  weights <- tibble::tibble(
+    member = c("cfg_a", "cfg_b"),
+    coef   = c(0.6, 0.4)
+  )
+
+  obj <- list(
+    ensemble = list(
+      method          = "weighted",
+      model           = weights,
+      weights         = weights,
+      predictions     = tibble::tibble(sample_id = c("S1", "S2"),
+                                       .pred     = c(1.1, 2.2),
+                                       truth     = c(1.0, 2.0)),
+      metrics         = tibble::tibble(.metric    = "rmse",
+                                       .estimator = "standard",
+                                       .estimate  = 0.15),
+      member_metrics  = tibble::tibble(.metric   = c("rmse", "rmse"),
+                                       .estimate = c(0.2, 0.3),
+                                       config_id = c("cfg_a", "cfg_b")),
+      improvement     = 0.05,
+      oof_predictions = tibble::tibble(.row  = 1:2,
+                                       .pred = c(1.2, 2.1),
+                                       truth = c(1.0, 2.0)),
+      optimize        = TRUE,
+      seed            = 307L,
+      uq              = NULL,
+      timestamp       = Sys.time(),
+      runtime_secs    = 1.5
+    )
+  )
+
+  class(obj) <- c("horizons_ensemble", "horizons_fit", "horizons_eval",
+                  "horizons_data", "list")
+  obj
+
+}
+
+## One tiny trained workflow, reused by the metamodel-typed checks.
+make_tiny_workflow <- function() {
+
+  df <- tibble::tibble(.truth   = c(1, 2, 3, 4),
+                       member_a = c(1.1, 1.9, 3.2, 3.8))
+
+  parsnip::fit(
+    workflows::workflow() %>%
+      workflows::add_model(parsnip::linear_reg() %>%
+                             parsnip::set_engine("lm")) %>%
+      workflows::add_formula(.truth ~ .),
+    data = df
+  )
+
+}
+
+test_that("validate_horizons_ensemble passes a well-formed weighted contract", {
+
+  ## Arrange
+  obj <- make_valid_ensemble()
+
+  ## Act & Assert
+  expect_identical(validate_horizons_ensemble(obj), obj)
+
+})
+
+test_that("validate_horizons_ensemble passes a trained workflow for penalized", {
+
+  ## Arrange
+  obj                  <- make_valid_ensemble()
+  obj$ensemble$method  <- "penalized"
+  obj$ensemble$model   <- make_tiny_workflow()
+
+  ## Act & Assert
+  expect_identical(validate_horizons_ensemble(obj)$ensemble$method, "penalized")
+
+})
+
+test_that("validate_horizons_ensemble tolerates NULL oof_predictions, uq, optimize, seed", {
+
+  ## Arrange. `[<-` with list(NULL) sets the value to NULL while KEEPING the
+  ## key ($<- NULL would remove it and trip the completeness check) — this is
+  ## exactly how build_ensemble_contract() constructs NULL-valued keys.
+  obj <- make_valid_ensemble()
+  obj$ensemble["oof_predictions"] <- list(NULL)
+  obj$ensemble["uq"]              <- list(NULL)
+  obj$ensemble["optimize"]        <- list(NULL)
+  obj$ensemble["seed"]            <- list(NULL)
+
+  ## Act & Assert
+  expect_identical(validate_horizons_ensemble(obj), obj)
+
+})
+
+test_that("validate_horizons_ensemble accepts a well-formed CV+ uq bundle", {
+
+  ## Arrange
+  obj <- make_valid_ensemble()
+  obj$ensemble$uq <- list(
+    method        = "cv_plus",
+    fold_models   = list(tibble::tibble(member = "cfg_a", coef = 1)),
+    calib         = tibble::tibble(.row = 1L, fold = 1L, .pred_oof = 1,
+                                   truth = 1, residual = 0),
+    n_calib       = 1L,
+    level_default = 0.90
+  )
+
+  ## Act & Assert
+  expect_identical(validate_horizons_ensemble(obj), obj)
+
+})
+
+test_that("validate_horizons_ensemble gates on class and slot presence", {
+
+  ## Not a horizons_ensemble
+  expect_error(validate_horizons_ensemble(list()), "horizons_ensemble")
+
+  ## Classed but no ensemble slot
+  hollow <- structure(list(), class = c("horizons_ensemble", "list"))
+  expect_error(validate_horizons_ensemble(hollow), "ensemble")
+
+  ## Slot without a method
+  no_method <- make_valid_ensemble()
+  no_method$ensemble$method <- NULL
+  expect_error(validate_horizons_ensemble(no_method), "method")
+
+})
+
+test_that("validate_horizons_ensemble names a missing contract key", {
+
+  ## Arrange
+  obj <- make_valid_ensemble()
+  obj$ensemble$weights <- NULL   # NULL removes the key from the list
+
+  ## Act & Assert
+  expect_error(
+    suppressMessages(validate_horizons_ensemble(obj)),
+    "weights",
+    class = "horizons_validation_error"
+  )
+
+})
+
+test_that("validate_horizons_ensemble rejects an unknown method", {
+
+  obj <- make_valid_ensemble()
+  obj$ensemble$method <- "bogus"
+
+  expect_error(validate_horizons_ensemble(obj),
+               class = "horizons_validation_error")
+
+})
+
+test_that("validate_horizons_ensemble enforces per-method model typing", {
+
+  ## weighted carrying a workflow
+  wrong_weighted <- make_valid_ensemble()
+  wrong_weighted$ensemble$model <- make_tiny_workflow()
+  expect_error(validate_horizons_ensemble(wrong_weighted),
+               class = "horizons_validation_error")
+
+  ## penalized carrying a tibble
+  wrong_penalized <- make_valid_ensemble()
+  wrong_penalized$ensemble$method <- "penalized"
+  expect_error(validate_horizons_ensemble(wrong_penalized),
+               class = "horizons_validation_error")
+
+  ## penalized carrying an untrained workflow
+  untrained <- make_valid_ensemble()
+  untrained$ensemble$method <- "penalized"
+  untrained$ensemble$model  <- workflows::workflow() %>%
+    workflows::add_model(parsnip::linear_reg() %>%
+                           parsnip::set_engine("lm")) %>%
+    workflows::add_formula(.truth ~ .)
+  expect_error(validate_horizons_ensemble(untrained),
+               class = "horizons_validation_error")
+
+})
+
+test_that("validate_horizons_ensemble rejects malformed weights", {
+
+  ## Missing coef column
+  no_coef <- make_valid_ensemble()
+  no_coef$ensemble$weights <- tibble::tibble(member = c("a", "b"))
+  expect_error(validate_horizons_ensemble(no_coef),
+               class = "horizons_validation_error")
+
+  ## Single member
+  one_row <- make_valid_ensemble()
+  one_row$ensemble$weights <- tibble::tibble(member = "a", coef = 1)
+  expect_error(validate_horizons_ensemble(one_row),
+               class = "horizons_validation_error")
+
+  ## NA coefficient
+  na_coef <- make_valid_ensemble()
+  na_coef$ensemble$weights$coef[1] <- NA_real_
+  expect_error(validate_horizons_ensemble(na_coef),
+               class = "horizons_validation_error")
+
+  ## Duplicate members
+  dup <- make_valid_ensemble()
+  dup$ensemble$weights$member <- c("a", "a")
+  dup$ensemble$member_metrics$config_id <- c("a", "a")
+  expect_error(validate_horizons_ensemble(dup),
+               class = "horizons_validation_error")
+
+})
+
+test_that("validate_horizons_ensemble rejects malformed data-frame slots", {
+
+  ## predictions missing truth
+  no_truth <- make_valid_ensemble()
+  no_truth$ensemble$predictions <- tibble::tibble(sample_id = "S1", .pred = 1)
+  expect_error(validate_horizons_ensemble(no_truth),
+               class = "horizons_validation_error")
+
+  ## oof_predictions missing .row
+  no_row <- make_valid_ensemble()
+  no_row$ensemble$oof_predictions <- tibble::tibble(.pred = 1, truth = 1)
+  expect_error(validate_horizons_ensemble(no_row),
+               class = "horizons_validation_error")
+
+  ## member_metrics referencing a non-member
+  stranger <- make_valid_ensemble()
+  stranger$ensemble$member_metrics$config_id[1] <- "cfg_zz"
+  expect_error(validate_horizons_ensemble(stranger),
+               class = "horizons_validation_error")
+
+})
+
+test_that("validate_horizons_ensemble rejects a malformed uq bundle", {
+
+  ## Not a list
+  not_list <- make_valid_ensemble()
+  not_list$ensemble$uq <- "not a list"
+  expect_error(validate_horizons_ensemble(not_list),
+               class = "horizons_validation_error")
+
+  ## Wrong discriminator
+  wrong_method <- make_valid_ensemble()
+  wrong_method$ensemble$uq <- list(method = "split_conformal",
+                                   fold_models = list(), calib = NULL,
+                                   n_calib = 0L, level_default = 0.9)
+  expect_error(validate_horizons_ensemble(wrong_method),
+               class = "horizons_validation_error")
+
+  ## Missing core fields
+  hollow_uq <- make_valid_ensemble()
+  hollow_uq$ensemble$uq <- list(method = "cv_plus")
+  expect_error(validate_horizons_ensemble(hollow_uq),
+               class = "horizons_validation_error")
+
+})

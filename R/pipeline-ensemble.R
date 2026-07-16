@@ -157,6 +157,11 @@ ensemble <- function(x,
 
   }
 
+  ## Certify the contract before returning: structural checks only (see
+  ## validate_horizons_ensemble), so every ensemble() return is guaranteed to
+  ## match what predict.horizons_ensemble() and downstream consumers read.
+  x <- validate_horizons_ensemble(x)
+
   ## -------------------------------------------------------------------------
   ## Step 5: Render summary
   ## -------------------------------------------------------------------------
