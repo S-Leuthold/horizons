@@ -36,7 +36,7 @@
 #'   (`FALSE`). Default `TRUE`.
 #' @param seed Integer. Recorded on the contract (the engine itself is
 #'   deterministic); ensemble UQ derives its calibration partition from it.
-#'   Default `307L`.
+#'   Default `DEFAULT_ENSEMBLE_SEED` (307).
 #'
 #' @return The ensemble contract list from [build_ensemble_contract()].
 #'
@@ -47,7 +47,7 @@ fit_ensemble_weighted <- function(object,
                                   oof,
                                   rank_metric,
                                   optimize = TRUE,
-                                  seed     = 307L) {
+                                  seed     = DEFAULT_ENSEMBLE_SEED) {
 
   started <- Sys.time()
 

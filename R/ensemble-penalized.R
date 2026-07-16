@@ -44,7 +44,7 @@ fit_ensemble_penalized <- function(object,
                                    oof,
                                    rank_metric,
                                    optimize = TRUE,
-                                   seed     = 307L) {
+                                   seed     = DEFAULT_ENSEMBLE_SEED) {
 
   ## Build the spec per branch rather than with an inline `if` inside the
   ## linear_reg() call. parsnip captures model args as lazy quosures and never

@@ -34,16 +34,17 @@
 #' @param optimize Logical. Tune the meta-learner's hyperparameters by CV on
 #'   the out-of-fold matrix (`TRUE`), or use fixed defaults (`FALSE`).
 #'   Default `TRUE`.
-#' @param compute_uq Logical. Calibrate CV+ conformal prediction intervals for
-#'   the ensemble (see [fit_ensemble_uq()]), stored in `$ensemble$uq` and
-#'   consumed by `predict(..., interval = TRUE)`. Mirrors the `compute_uq`
-#'   argument of [fit()]. Default `TRUE`.
 #' @param seed Integer. Random seed for the meta-learner's CV folds (used by
 #'   the `penalized` and `xgb` engines for both tuning and the genuine
 #'   out-of-fold meta predictions; recorded on the contract for all methods).
 #'   Ensemble UQ draws its calibration partition at `seed + 1000`, disjoint
 #'   from the tuning folds. Mirrors the `seed` argument of [fit()] and
-#'   [evaluate()]. Default `307L`.
+#'   [evaluate()]. Default `DEFAULT_ENSEMBLE_SEED` (307).
+#' @param compute_uq Logical. Calibrate CV+ conformal prediction intervals for
+#'   the ensemble (see [fit_ensemble_uq()]), stored in `$ensemble$uq` and
+#'   consumed by `predict(..., interval = TRUE)`. Mirrors the `compute_uq`
+#'   argument of [fit()]. Placed after `seed` so pre-existing positional
+#'   callers (`method`, `optimize`, `seed`) are unaffected. Default `TRUE`.
 #' @param verbose Logical. Print the progress tree to the console. Default
 #'   `TRUE`.
 #'
@@ -54,19 +55,22 @@
 #' \dontrun{
 #' fitted <- fit(evaluated, n_best = 5)
 #'
-#' # Default penalized meta-learner
+#' # Default penalized meta-learner (CV+ intervals calibrated by default)
 #' ens <- ensemble(fitted)
 #'
 #' # Weighted average, no tuning
 #' ens <- ensemble(fitted, method = "weighted", optimize = FALSE)
+#'
+#' # Skip interval calibration (point predictions only)
+#' ens <- ensemble(fitted, compute_uq = FALSE)
 #' }
 #'
 #' @export
 ensemble <- function(x,
                      method     = "penalized",
                      optimize   = TRUE,
+                     seed       = DEFAULT_ENSEMBLE_SEED,
                      compute_uq = TRUE,
-                     seed       = 307L,
                      verbose    = TRUE) {
 
   ## -------------------------------------------------------------------------

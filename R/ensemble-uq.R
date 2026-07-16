@@ -6,15 +6,98 @@
 # folds (Route B) — retaining the per-fold models and the signed out-of-fold
 # residuals in the $ensemble$uq bundle. The predict side
 # (predict_ensemble_intervals -> predict_ensemble_uq_matrix -> cv_plus_bounds)
-# aggregates fold-model predictions and calibration residuals into genuine CV+
-# interval bounds (Barber et al. 2021) with a CQR-style signed score (Romano
-# et al. 2019), joined to point predictions by sample_id.
+# aggregates fold-model predictions and calibration residuals into CV+-style
+# interval bounds — signed-score aggregation motivated by jackknife+/CV+
+# (Barber et al. 2021) with a CQR-style signed residual (Romano et al. 2019)
+# — joined to point predictions by sample_id. See cv_plus_bounds() for the
+# honest statement of what is and is not guaranteed.
 #
 # This is deliberately NOT the single-model split-conformal machinery in
 # fit-uq.R: a CV+ bound cannot be expressed as point +/- (quantile + scalar
 # c_alpha), and pooling the OOF residuals into compute_c_alpha() would be
 # split-conformal dressed up in CV clothing — the exact construction the
-# PHASE-2 caveat in ensemble-helpers.R forbids.
+# CALIBRATION CAVEAT in ensemble-helpers.R forbids.
+
+## ---------------------------------------------------------------------------
+## cv_plus_indices()
+## ---------------------------------------------------------------------------
+
+#' Finite-Sample Order-Statistic Indices for the CV+ Aggregation
+#'
+#' @description
+#' The single source of the index formula, shared by `cv_plus_bounds()` (the
+#' aggregator), `compute_ensemble_uq()`'s calibration-size gate, and the
+#' leave-self-out diagnostic (which calls it with `n - 1`). Centralized so the
+#' gate and the aggregator cannot silently disagree about validity if the
+#' formula ever changes.
+#'
+#' @param n Integer. Number of calibration samples in the augmented set.
+#' @param level Numeric in (0, 1). Target two-sided coverage.
+#' @return `list(l, u)` — the lower/upper order-statistic indices — or `NULL`
+#'   when n is too small for valid indices at `level` (needs
+#'   \eqn{n \ge 2/\alpha - 1}).
+#' @noRd
+cv_plus_indices <- function(n, level) {
+
+  alpha <- 1 - level
+
+  ## Epsilon guard: the formula is exact rational arithmetic, but alpha
+  ## carries floating-point error (1 - 0.9 = 0.09999...), so at exact-integer
+  ## boundaries floor((alpha/2)(n+1)) lands one BELOW the intended index
+  ## (e.g. 0.05 * 40 computes as 1.9999... -> 1, not 2). Nudge toward the
+  ## intended integer; non-boundary values are unaffected.
+  eps <- 1e-9
+
+  l <- floor((alpha / 2) * (n + 1) + eps)
+  u <- ceiling((1 - alpha / 2) * (n + 1) - eps)
+
+  if (l < 1 || u > n) {
+
+    return(NULL)
+
+  }
+
+  list(l = l, u = u)
+
+}
+
+## ---------------------------------------------------------------------------
+## predict_fold_model()
+## ---------------------------------------------------------------------------
+
+#' Predict a Member Matrix Through One Retained Fold Model
+#'
+#' @description
+#' The single fold-prediction primitive: a weighted fold model (weights
+#' tibble) combines by matrix product; a penalized/xgb fold model (trained
+#' workflow) predicts through [stats::predict()]. Floored at zero to match
+#' deployed-combine semantics. Shared by `fit_uq_fold_models()` (assessment
+#' predictions), `compute_ensemble_uq()` (leave-self-out diagnostics), and
+#' `predict_ensemble_uq_matrix()` (new-data intervals) so the dispatch and
+#' floor semantics cannot drift across the three call sites.
+#'
+#' @param fold_model A weights tibble (`member`, `coef`) or a trained workflow.
+#' @param method Character. The ensemble method (`"weighted"` combines by
+#'   product; anything else predicts through the workflow).
+#' @param member_mat Tibble/data.frame of `member_<config_id>` columns, in the
+#'   fold model's training column order.
+#' @return Numeric vector of floored fold predictions, one per row.
+#' @noRd
+predict_fold_model <- function(fold_model, method, member_mat) {
+
+  pred <- if (method == "weighted") {
+
+    as.numeric(as.matrix(member_mat) %*% fold_model$coef)
+
+  } else {
+
+    stats::predict(fold_model, new_data = member_mat)$.pred
+
+  }
+
+  floor_at_zero(pred)
+
+}
 
 ## ---------------------------------------------------------------------------
 ## cv_plus_bounds()
@@ -40,11 +123,20 @@
 #' samples. Raw sorted-vector indexing, not [stats::quantile()] — the
 #' finite-sample indices are the guarantee.
 #'
-#' This is CV+ (Barber et al. 2021) with the sign of the residual kept
-#' (CQR-style signed score, Romano et al. 2019) and alpha split per tail on
-#' the single augmented set, giving asymmetric bounds under skewed residuals.
-#' Worst-case distribution-free two-sided coverage is \eqn{\ge 1 - 2\alpha}
-#' (plus small K-fold slack); empirically coverage sits near \eqn{1 - \alpha}.
+#' **What is and is not guaranteed.** This construction keeps the sign of the
+#' residual (CQR-style signed score, Romano et al. 2019) and reads BOTH tails
+#' off the single augmented set \eqn{\{V_i(x)\}}, giving asymmetric bounds
+#' under skewed residuals. It is *motivated by* the jackknife+/CV+ rank
+#' argument (Barber et al. 2021), applied per tail — but Barber's
+#' \eqn{\ge 1 - 2\alpha} theorem is proven for the two-set construction with
+#' unsigned nonconformity scores, not for this signed single-set variant. No
+#' finite-sample distribution-free guarantee is claimed here. Coverage is
+#' validated empirically instead: the leave-self-out diagnostic
+#' (`oof_coverage`, computed at build time) and the coverage regression tests
+#' in `test-ensemble-uq.R` are the operative evidence, and both sit near
+#' \eqn{1 - \alpha} on the reference data. The signed variant is a deliberate
+#' choice — the symmetric two-set construction cannot produce asymmetric
+#' intervals under skewed soil-property residuals.
 #'
 #' @param fold_matrix Numeric matrix, `n_new x K`: column k is fold model k's
 #'   prediction for each new point (original response scale).
@@ -69,17 +161,31 @@
 #' @noRd
 cv_plus_bounds <- function(fold_matrix, fold_id, residuals, level) {
 
-  n     <- length(residuals)
-  alpha <- 1 - level
+  n <- length(residuals)
 
-  ## Finite-sample order-statistic indices. Invalid indices (l < 1 or u > n)
-  ## mean n is too small to support the requested coverage — no bound exists.
-  l <- floor((alpha / 2) * (n + 1))
-  u <- ceiling((1 - alpha / 2) * (n + 1))
+  ## Finite-sample order-statistic indices (shared source: cv_plus_indices).
+  ## NULL means n is too small to support the requested coverage.
+  idx <- cv_plus_indices(n, level)
 
-  if (l < 1 || u > n) {
+  if (is.null(idx)) {
 
     return(NULL)
+
+  }
+
+  l <- idx$l
+  u <- idx$u
+
+  ## Fail clearly on a corrupted fold vector: out-of-range matrix indexing in
+  ## R returns NA columns rather than erroring, which would silently degrade
+  ## every bound to NA instead of surfacing the corruption.
+  if (max(fold_id) > ncol(fold_matrix) || min(fold_id) < 1) {
+
+    cli::cli_abort(c(
+      "Calibration fold ids exceed the retained fold models.",
+      "x" = "fold_id range: {min(fold_id)}..{max(fold_id)}; fold models: {ncol(fold_matrix)}.",
+      "i" = "The uq bundle's calib$fold and fold_models are out of sync."
+    ))
 
   }
 
@@ -182,39 +288,32 @@ fit_uq_fold_models <- function(meta_frame, oof_row, folds, contract, optimize) {
     assessment <- rsample::assessment(split)
     assess_idx <- as.integer(split, data = "assessment")
 
-    if (method == "weighted") {
+    fold_models[[k]] <- if (method == "weighted") {
 
       ## Fold model = weights re-derived inside the fold's analysis set.
-      fold_weights <- derive_member_weights(
+      derive_member_weights(
         predictors = analysis[, member_cols, drop = FALSE],
         truth      = analysis$.truth,
         members    = members,
         optimize   = optimize
       )
 
-      fold_models[[k]] <- fold_weights
-
-      fold_pred <- as.numeric(
-        as.matrix(assessment[, member_cols, drop = FALSE]) %*% fold_weights$coef
-      )
-
     } else {
 
-      fold_fit <- parsnip::fit(base_wflow, data = analysis)
-
-      fold_models[[k]] <- fold_fit
-
-      fold_pred <- stats::predict(
-        fold_fit,
-        new_data = assessment[, member_cols, drop = FALSE]
-      )$.pred
+      parsnip::fit(base_wflow, data = analysis)
 
     }
 
-    ## Floor fold predictions at zero to match deployed-combine semantics —
-    ## residuals must be measured against the same prediction the deployed
-    ## path would produce.
-    fold_pred <- floor_at_zero(fold_pred)
+    ## Shared fold-prediction primitive: dispatch + floor semantics live in
+    ## one place. Flooring before the residual is deliberate — the deployed
+    ## prediction rule floors, and conformal validity requires the calibration
+    ## score function to match the deployed one (residuals must be measured
+    ## against the prediction the deployed path would produce).
+    fold_pred <- predict_fold_model(
+      fold_models[[k]],
+      method,
+      assessment[, member_cols, drop = FALSE]
+    )
 
     calib_rows[[k]] <- tibble::tibble(
       .row      = oof_row[assess_idx],
@@ -308,15 +407,13 @@ compute_ensemble_uq <- function(oof,
   calib       <- fold_safe$result$calib
 
   ## Drop rows whose residual is not finite, then re-gate: both the size
-  ## minimum and the order-statistic indices must survive the drop.
+  ## minimum and the order-statistic indices must survive the drop. The index
+  ## validity check shares its formula with cv_plus_bounds() via
+  ## cv_plus_indices() — gate and aggregator cannot disagree.
   calib   <- calib[is.finite(calib$residual), ]
   n_calib <- nrow(calib)
 
-  alpha <- 1 - level
-  l     <- floor((alpha / 2) * (n_calib + 1))
-  u     <- ceiling((1 - alpha / 2) * (n_calib + 1))
-
-  if (n_calib < N_CALIB_MIN || l < 1 || u > n_calib) {
+  if (n_calib < N_CALIB_MIN || is.null(cv_plus_indices(n_calib, level))) {
 
     return(NULL)
 
@@ -324,31 +421,17 @@ compute_ensemble_uq <- function(oof,
 
   ## Leave-self-out diagnostics: for each calibration row i, form the CV+
   ## bound over the other n-1 rows and check whether i's truth is covered.
-  ## Every fold model predicts the full meta frame once (n x K); row lookups
-  ## then index into that matrix by meta-frame position.
-  meta_pos <- match(calib$.row, oof$row)
+  ## Every fold model predicts the full meta frame once (n x K, shared
+  ## fold-prediction primitive); row lookups then index into that matrix by
+  ## meta-frame position.
+  meta_pos    <- match(calib$.row, oof$row)
+  member_cols <- paste0("member_", contract$weights$member)
 
   P_full <- vapply(
     fold_models,
     function(fm) {
-
-      if (contract$method == "weighted") {
-
-        floor_at_zero(as.numeric(
-          as.matrix(meta_frame[, paste0("member_", contract$weights$member),
-                               drop = FALSE]) %*% fm$coef
-        ))
-
-      } else {
-
-        floor_at_zero(stats::predict(
-          fm,
-          new_data = meta_frame[, paste0("member_", contract$weights$member),
-                                drop = FALSE]
-        )$.pred)
-
-      }
-
+      predict_fold_model(fm, contract$method,
+                         meta_frame[, member_cols, drop = FALSE])
     },
     numeric(nrow(meta_frame))
   )
@@ -356,11 +439,12 @@ compute_ensemble_uq <- function(oof,
   covered <- rep(NA, n_calib)
   widths  <- rep(NA_real_, n_calib)
 
-  ## Indices for the leave-self-out set (size n_calib - 1).
-  l_loo <- floor((alpha / 2) * n_calib)
-  u_loo <- ceiling((1 - alpha / 2) * n_calib)
+  ## Indices for the leave-self-out set: row i stands in for the new point, so
+  ## the augmented set has n_calib - 1 members and the shared formula applies
+  ## with n = n_calib - 1 (its (n+1) adjustment then reads n_calib).
+  idx_loo <- cv_plus_indices(n_calib - 1L, level)
 
-  if (l_loo >= 1 && u_loo <= n_calib - 1) {
+  if (!is.null(idx_loo)) {
 
     for (i in seq_len(n_calib)) {
 
@@ -373,8 +457,8 @@ compute_ensemble_uq <- function(oof,
       }
 
       s          <- sort(v)
-      covered[i] <- calib$truth[i] >= s[l_loo] && calib$truth[i] <= s[u_loo]
-      widths[i]  <- s[u_loo] - s[l_loo]
+      covered[i] <- calib$truth[i] >= s[idx_loo$l] && calib$truth[i] <= s[idx_loo$u]
+      widths[i]  <- s[idx_loo$u] - s[idx_loo$l]
 
     }
 
@@ -418,6 +502,18 @@ compute_ensemble_uq <- function(oof,
 #' `N_CALIB_MIN` rows, invalid order-statistic indices, or a fold refit
 #' failure), the bundle stays `NULL`, a one-line note is emitted, and the
 #' ensemble continues to predict point-only.
+#'
+#' @details
+#' **Route B honesty caveat.** The fresh calibration partition guarantees that
+#' no calibration residual is scored on the exact fold split the meta-learner's
+#' hyperparameters were optimized against — the direct selection-bias
+#' mechanism is broken. It does NOT restore full independence: under
+#' `optimize = TRUE` the hyperparameter *values* were selected using all
+#' meta-frame rows, including those now in the calibration folds, so
+#' exchangeability is approximate. Full purity would require nested CV, which
+#' the architecture does not provide. Interpret the intervals accordingly, and
+#' see `cv_plus_bounds()` for what the aggregation itself does and does not
+#' guarantee.
 #'
 #' @param x A `horizons_ensemble` object (output of [ensemble()]).
 #' @param level Numeric in (0, 1). Target two-sided coverage. Default
@@ -468,14 +564,27 @@ fit_ensemble_uq <- function(x,
 
   oof <- build_oof_matrix(x, members)
 
-  base_seed      <- seed %||% x$ensemble$seed %||% 307L
+  base_seed      <- seed %||% x$ensemble$seed %||% DEFAULT_ENSEMBLE_SEED
   conformal_seed <- base_seed + 1000L
+
+  ## Legacy retrofit: ensembles built before optimize was recorded on the
+  ## contract carry optimize = NULL. Defaulting blindly to TRUE would
+  ## re-derive fold weights under the WRONG rule for an equal-weights
+  ## (optimize = FALSE) weighted ensemble — a silent deployed-vs-fold-model
+  ## mismatch. Infer from the stored weights instead: all-equal coefficients
+  ## can only come from the equal-weights rule. For penalized/xgb the flag is
+  ## unused by the fold refit (the finalized spec already encodes tuning), so
+  ## the inference is only load-bearing for weighted.
+  optimize <- x$ensemble$optimize %||% {
+    coefs <- x$ensemble$weights$coef
+    !all(abs(coefs - coefs[1]) < 1e-12)
+  }
 
   uq_safe <- safely_execute(
     compute_ensemble_uq(
       oof            = oof,
       contract       = x$ensemble,
-      optimize       = x$ensemble$optimize %||% TRUE,
+      optimize       = optimize,
       conformal_seed = conformal_seed,
       level          = level
     ),
@@ -495,6 +604,22 @@ fit_ensemble_uq <- function(x,
     }
 
     return(x)
+
+  }
+
+  ## Guardrail on the diagnostic itself: a bundle whose leave-self-out
+  ## coverage sits far from the target is exactly the look-correct-but-wrong
+  ## failure the 7%-coverage bug taught us to surface. Warn (not abort) —
+  ## the bundle still ships, but never silently.
+  oof_cov <- uq_safe$result$oof_coverage
+
+  if (is.finite(oof_cov) && abs(oof_cov - level) > 0.15) {
+
+    cli::cli_warn(c(
+      "!" = "Ensemble UQ leave-self-out coverage ({round(oof_cov, 3)}) is far \\
+             from the target level ({level}).",
+      "i" = "Inspect $ensemble$uq$calib before trusting these intervals."
+    ))
 
   }
 
@@ -531,19 +656,7 @@ predict_ensemble_uq_matrix <- function(uq, wide) {
 
   vapply(
     uq$fold_models,
-    function(fm) {
-
-      if (uq$ensemble_method == "weighted") {
-
-        floor_at_zero(as.numeric(as.matrix(member_mat) %*% fm$coef))
-
-      } else {
-
-        floor_at_zero(stats::predict(fm, new_data = member_mat)$.pred)
-
-      }
-
-    },
+    function(fm) predict_fold_model(fm, uq$ensemble_method, member_mat),
     numeric(nrow(wide))
   )
 

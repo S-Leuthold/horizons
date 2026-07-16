@@ -43,4 +43,16 @@ Degrades gracefully: when calibration is impossible (fewer than
 failure), the bundle stays \code{NULL}, a one-line note is emitted, and the
 ensemble continues to predict point-only.
 }
+\details{
+\strong{Route B honesty caveat.} The fresh calibration partition guarantees that
+no calibration residual is scored on the exact fold split the meta-learner's
+hyperparameters were optimized against — the direct selection-bias
+mechanism is broken. It does NOT restore full independence: under
+\code{optimize = TRUE} the hyperparameter \emph{values} were selected using all
+meta-frame rows, including those now in the calibration folds, so
+exchangeability is approximate. Full purity would require nested CV, which
+the architecture does not provide. Interpret the intervals accordingly, and
+see \code{cv_plus_bounds()} for what the aggregation itself does and does not
+guarantee.
+}
 \keyword{internal}

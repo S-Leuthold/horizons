@@ -597,6 +597,12 @@ validate_horizons_ensemble <- function(x) {
 
       errors <- c(errors, cli::format_inline("{.field model} for method {.val weighted} must be the weights tibble ({.field member} + {.field coef})"))
 
+    } else if (!identical(ens$model, ens$weights)) {
+
+      ## The contract documents model and weights as the SAME object for the
+      ## weighted method; a decoupling means an engine refactor broke it.
+      errors <- c(errors, cli::format_inline("{.field model} and {.field weights} must be identical for method {.val weighted}"))
+
     }
 
   } else if (ens$method %in% c("penalized", "xgb")) {
@@ -710,6 +716,33 @@ validate_horizons_ensemble <- function(x) {
         !all(uq_core %in% names(uq))) {
 
       errors <- c(errors, cli::format_inline("{.field uq} must be NULL or a CV+ bundle ({.field method} = {.val cv_plus} with {paste(uq_core, collapse = ', ')})"))
+
+    } else {
+
+      ## Cross-checks: the bundle's internal references must stay consistent
+      ## with the contract and with each other. A stale members list predicts
+      ## against the wrong columns; an out-of-range fold id degrades to NA
+      ## bounds via R's NA-on-out-of-range matrix indexing — both are silent
+      ## at predict time, so catch them here.
+      if (!is.null(uq$members) && w_valid &&
+          !setequal(uq$members, w$member)) {
+
+        errors <- c(errors, cli::format_inline("{.field uq$members} does not match {.field weights$member} — stale or foreign uq bundle"))
+
+      }
+
+      calib_cols <- c(".row", "fold", ".pred_oof", "truth", "residual")
+
+      if (!is.data.frame(uq$calib) ||
+          !all(calib_cols %in% names(uq$calib))) {
+
+        errors <- c(errors, cli::format_inline("{.field uq$calib} must be a data frame with {paste(calib_cols, collapse = ', ')}"))
+
+      } else if (!all(uq$calib$fold %in% seq_along(uq$fold_models))) {
+
+        errors <- c(errors, cli::format_inline("{.field uq$calib$fold} references fold models that do not exist ({length(uq$fold_models)} retained)"))
+
+      }
 
     }
 

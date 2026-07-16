@@ -121,6 +121,14 @@ DEFAULT_UQ_LEVEL         <- 0.90
 UQ_QUANTILE_TREES        <- 500L
 WARMSTART_GRID_SIZE      <- 25L
 
+## Ensemble ----------------------------------------------------------------------
+
+### Default seed for ensemble() — the meta-learner's tuning/OOF folds. Ensemble
+### UQ draws its calibration partition at this seed + 1000. Centralized so the
+### verb default, the weighted-engine default, and fit_ensemble_uq()'s legacy
+### fallback cannot drift independently.
+DEFAULT_ENSEMBLE_SEED <- 307L
+
 ## Prediction Guardrails --------------------------------------------------------
 
 ### Winsorization margin for the deploy-time response upper bound: predictions
