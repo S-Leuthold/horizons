@@ -15,10 +15,11 @@ schema. \strong{The spectra must already be on the training axis} — the same
 requirement as \code{\link[=predict.horizons_fit]{predict.horizons_fit()}}; see its Details for the axis-
 alignment limitation.}
 
-\item{interval}{Logical. Return ensemble prediction intervals when ensemble
-uncertainty quantification is available (\code{object$ensemble$uq}). Default
-\code{TRUE}. Ensemble UQ is not computed in this release, so \code{interval = TRUE}
-currently returns point predictions with a one-time note.}
+\item{interval}{Logical. Return CV+ conformal prediction intervals when
+ensemble uncertainty quantification is available (\code{object$ensemble$uq},
+calibrated by \code{\link[=fit_ensemble_uq]{fit_ensemble_uq()}} — on by default in \code{\link[=ensemble]{ensemble()}}).
+Default \code{TRUE}. When no UQ bundle is present, point predictions are
+returned with a one-time note.}
 
 \item{...}{Unused; present for S3 method consistency.}
 }
@@ -29,7 +30,8 @@ A tibble, one row per sample:
 \item{.pred}{Ensemble point prediction, original response scale.}
 }
 Interval columns (\code{.pred_lower}, \code{.pred_upper}, \code{.interval_width}) are
-appended when ensemble UQ is present and \code{interval = TRUE}.
+joined on by \code{sample_id} when ensemble UQ is present and
+\code{interval = TRUE}.
 }
 \description{
 Generates stacked-ensemble predictions for new spectra. Every member predicts
@@ -46,6 +48,13 @@ predict on \code{new_data} aborts the call naming the offending config — the
 meta-learner's combination is only valid over the exact member set it was
 trained on, so dropping a member would silently change what is being
 predicted.
+
+\strong{Interval semantics.} Bounds are genuine CV+ aggregates (Barber et al.
+2021) over the retained fold models and signed calibration residuals — not
+\verb{point +/- margin}. The deployed point prediction can therefore
+occasionally fall outside its own interval (a known property of
+jackknife+/CV+; the bounds come from fold-model predictions, not the
+full-data refit). This is deliberate and not repaired.
 }
 \examples{
 \dontrun{

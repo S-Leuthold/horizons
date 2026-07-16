@@ -12,7 +12,9 @@ build_ensemble_contract(
   member_pred,
   rank_metric,
   runtime_secs,
-  oof_pred = NULL
+  oof_pred = NULL,
+  optimize = NULL,
+  seed = NULL
 )
 }
 \arguments{
@@ -39,14 +41,24 @@ axis on which improvement is measured.}
 
 \item{oof_pred}{Tibble or NULL. The ensemble's combined out-of-fold
 predictions (\code{.row}, \code{.pred}, \code{truth}, original scale) — the by-product
-each engine already computes to derive its weights. Carried for Phase-2
-ensemble UQ (stacked conformal calibrates on these residuals); unused in
-Phase 1. Default NULL.}
+each engine already computes to derive its weights. Carried for
+diagnostics and the fold-honesty regression tests; ensemble UQ calibrates
+on its own fresh-partition residuals (see \code{\link[=fit_ensemble_uq]{fit_ensemble_uq()}}), not on
+these. Default NULL.}
+
+\item{optimize}{Logical or NULL. The build-time optimize flag, recorded so
+ensemble UQ can re-derive fold weights (weighted method) by the same
+rule. Default NULL.}
+
+\item{seed}{Integer or NULL. The build-time seed, recorded so ensemble UQ
+can derive a calibration partition disjoint from the tuning folds.
+Default NULL.}
 }
 \value{
 A list matching the \code{ensemble} slot contract: \code{method}, \code{model},
 \code{weights}, \code{predictions}, \code{metrics}, \code{member_metrics}, \code{improvement},
-\code{oof_predictions}, \code{uq} (NULL in Phase 1), \code{timestamp}, \code{runtime_secs}.
+\code{oof_predictions}, \code{optimize}, \code{seed}, \code{uq} (populated by
+\code{\link[=fit_ensemble_uq]{fit_ensemble_uq()}}), \code{timestamp}, \code{runtime_secs}.
 }
 \description{
 Packs an engine's outputs into the canonical \code{ensemble} slot that every
@@ -59,5 +71,18 @@ improvement comparison are computed the same way for every method.
 Scoring reuses \code{\link[=compute_original_scale_metrics]{compute_original_scale_metrics()}} — the same six-metric
 computer the single-model path uses — so an ensemble's metrics are directly
 comparable to its members' metrics.
+}
+\details{
+\strong{The \code{model} slot is typed per method:}\tabular{ll}{
+   method \tab \verb{$model} contains \cr
+   \code{weighted} \tab the weights tibble (\code{member}, \code{coef}) — same object as \verb{$weights} \cr
+   \code{penalized} \tab the trained meta \code{workflow} (glmnet) \cr
+   \code{xgb} \tab the trained meta \code{workflow} (xgboost) \cr
+}
+
+
+Both metamodel methods store the \emph{workflow}, not an extracted engine —
+\code{combine_ensemble_metamodel()} and ensemble UQ's fold refits
+(\code{workflows::extract_spec_parsnip()}) depend on this.
 }
 \keyword{internal}
