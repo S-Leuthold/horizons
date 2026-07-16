@@ -4,7 +4,14 @@
 \alias{ensemble}
 \title{Combine Fitted Models into a Stacked Ensemble}
 \usage{
-ensemble(x, method = "penalized", optimize = TRUE, seed = 307L, verbose = TRUE)
+ensemble(
+  x,
+  method = "penalized",
+  optimize = TRUE,
+  compute_uq = TRUE,
+  seed = 307L,
+  verbose = TRUE
+)
 }
 \arguments{
 \item{x}{A \code{horizons_fit} object (output of \code{\link[=fit]{fit()}}).}
@@ -16,11 +23,17 @@ ensemble(x, method = "penalized", optimize = TRUE, seed = 307L, verbose = TRUE)
 the out-of-fold matrix (\code{TRUE}), or use fixed defaults (\code{FALSE}).
 Default \code{TRUE}.}
 
+\item{compute_uq}{Logical. Calibrate CV+ conformal prediction intervals for
+the ensemble (see \code{\link[=fit_ensemble_uq]{fit_ensemble_uq()}}), stored in \verb{$ensemble$uq} and
+consumed by \code{predict(..., interval = TRUE)}. Mirrors the \code{compute_uq}
+argument of \code{\link[=fit]{fit()}}. Default \code{TRUE}.}
+
 \item{seed}{Integer. Random seed for the meta-learner's CV folds (used by
 the \code{penalized} and \code{xgb} engines for both tuning and the genuine
-out-of-fold meta predictions). Fixed so the \code{oof_predictions} that seed
-Phase-2 conformal calibration are reproducible run-to-run. Mirrors the
-\code{seed} argument of \code{\link[=fit]{fit()}} and \code{\link[=evaluate]{evaluate()}}. Default \code{307L}.}
+out-of-fold meta predictions; recorded on the contract for all methods).
+Ensemble UQ draws its calibration partition at \code{seed + 1000}, disjoint
+from the tuning folds. Mirrors the \code{seed} argument of \code{\link[=fit]{fit()}} and
+\code{\link[=evaluate]{evaluate()}}. Default \code{307L}.}
 
 \item{verbose}{Logical. Print the progress tree to the console. Default
 \code{TRUE}.}

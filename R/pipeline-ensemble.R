@@ -34,11 +34,16 @@
 #' @param optimize Logical. Tune the meta-learner's hyperparameters by CV on
 #'   the out-of-fold matrix (`TRUE`), or use fixed defaults (`FALSE`).
 #'   Default `TRUE`.
+#' @param compute_uq Logical. Calibrate CV+ conformal prediction intervals for
+#'   the ensemble (see [fit_ensemble_uq()]), stored in `$ensemble$uq` and
+#'   consumed by `predict(..., interval = TRUE)`. Mirrors the `compute_uq`
+#'   argument of [fit()]. Default `TRUE`.
 #' @param seed Integer. Random seed for the meta-learner's CV folds (used by
 #'   the `penalized` and `xgb` engines for both tuning and the genuine
-#'   out-of-fold meta predictions). Fixed so the `oof_predictions` that seed
-#'   Phase-2 conformal calibration are reproducible run-to-run. Mirrors the
-#'   `seed` argument of [fit()] and [evaluate()]. Default `307L`.
+#'   out-of-fold meta predictions; recorded on the contract for all methods).
+#'   Ensemble UQ draws its calibration partition at `seed + 1000`, disjoint
+#'   from the tuning folds. Mirrors the `seed` argument of [fit()] and
+#'   [evaluate()]. Default `307L`.
 #' @param verbose Logical. Print the progress tree to the console. Default
 #'   `TRUE`.
 #'
@@ -58,10 +63,11 @@
 #'
 #' @export
 ensemble <- function(x,
-                     method   = "penalized",
-                     optimize = TRUE,
-                     seed     = 307L,
-                     verbose  = TRUE) {
+                     method     = "penalized",
+                     optimize   = TRUE,
+                     compute_uq = TRUE,
+                     seed       = 307L,
+                     verbose    = TRUE) {
 
   ## -------------------------------------------------------------------------
   ## Step 0: Preflight
@@ -126,7 +132,7 @@ ensemble <- function(x,
   contract <- switch(
     method,
     penalized = fit_ensemble_penalized(x, members, oof, rank_metric, optimize, seed),
-    weighted  = fit_ensemble_weighted(x, members, oof, rank_metric, optimize),
+    weighted  = fit_ensemble_weighted(x, members, oof, rank_metric, optimize, seed),
     xgb       = fit_ensemble_xgb(x, members, oof, rank_metric, optimize, seed)
   )
 
@@ -140,12 +146,24 @@ ensemble <- function(x,
                 "horizons_data", "list")
 
   ## -------------------------------------------------------------------------
-  ## Step 4: Render summary
+  ## Step 4: Calibrate ensemble UQ (CV+ conformal) on the promoted object
+  ## -------------------------------------------------------------------------
+
+  ## Gate/failure inside fit_ensemble_uq degrades to a NULL bundle plus a
+  ## one-line note — UQ never fails the ensemble.
+  if (compute_uq) {
+
+    x <- fit_ensemble_uq(x, verbose = verbose)
+
+  }
+
+  ## -------------------------------------------------------------------------
+  ## Step 5: Render summary
   ## -------------------------------------------------------------------------
 
   if (verbose) {
 
-    render_ensemble_summary(contract, rank_metric)
+    render_ensemble_summary(x$ensemble, rank_metric)
 
   }
 
@@ -212,6 +230,23 @@ render_ensemble_summary <- function(contract, rank_metric) {
     if (imp > 0) imp_line else cli::col_yellow(imp_line),
     "\n"
   ))
+
+  ## UQ status ---------------------------------------------------------------
+
+  uq <- contract$uq
+
+  uq_line <- if (!is.null(uq)) {
+
+    paste0("UQ: CV+ conformal (level ", uq$level_default,
+           ", n_calib = ", uq$n_calib, ")")
+
+  } else {
+
+    "UQ: not computed"
+
+  }
+
+  cat(paste0("\u2502  \u251c\u2500 ", uq_line, "\n"))
 
   ## Runtime -----------------------------------------------------------------
 

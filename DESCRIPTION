@@ -116,4 +116,5 @@ Collate:
     'ensemble-weighted.R'
     'ensemble-penalized.R'
     'ensemble-xgb.R'
+    'ensemble-uq.R'
     'pipeline-ensemble.R'

@@ -4,7 +4,14 @@
 \alias{fit_ensemble_weighted}
 \title{Fit a Weighted-Average Ensemble}
 \usage{
-fit_ensemble_weighted(object, members, oof, rank_metric, optimize = TRUE)
+fit_ensemble_weighted(
+  object,
+  members,
+  oof,
+  rank_metric,
+  optimize = TRUE,
+  seed = 307L
+)
 }
 \arguments{
 \item{object}{A \code{horizons_fit} object.}
@@ -19,6 +26,10 @@ improvement comparison).}
 
 \item{optimize}{Logical. Inverse-RMSE weighting (\code{TRUE}) or equal weights
 (\code{FALSE}). Default \code{TRUE}.}
+
+\item{seed}{Integer. Recorded on the contract (the engine itself is
+deterministic); ensemble UQ derives its calibration partition from it.
+Default \code{307L}.}
 }
 \value{
 The ensemble contract list from \code{\link[=build_ensemble_contract]{build_ensemble_contract()}}.

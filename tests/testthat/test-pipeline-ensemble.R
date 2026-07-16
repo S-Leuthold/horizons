@@ -375,29 +375,64 @@ describe("predict.horizons_ensemble() - schema gate", {
 })
 
 ## =========================================================================
-## predict.horizons_ensemble() — interval degrades gracefully (no ensemble UQ)
+## predict.horizons_ensemble() — intervals present by default, degrade cleanly
 ## =========================================================================
-## Ensemble UQ is not computed in this release, so interval = TRUE must return
-## point predictions with a one-time note rather than erroring. This is the hook
-## ensemble conformal UQ fills later; the point path must not change when it does.
+## ensemble() calibrates CV+ UQ by default, so interval = TRUE returns interval
+## columns. The graceful-degradation path (point-only + one-time note) now
+## belongs to compute_uq = FALSE builds and corrupt bundles.
 
-describe("predict.horizons_ensemble() - graceful interval degradation", {
+describe("predict.horizons_ensemble() - intervals and degradation", {
 
-  ens <- suppressWarnings(
-    ensemble(fitted, method = "weighted", optimize = FALSE, verbose = FALSE)
-  )
+  it("default build returns interval columns with no note", {
 
-  it("interval = TRUE returns point-only with an informative message", {
+    ens <- suppressWarnings(
+      ensemble(fitted, method = "weighted", optimize = FALSE, verbose = FALSE)
+    )
+
+    expect_no_message(p <- predict(ens, test_set, interval = TRUE))
+
+    expect_true(all(c(".pred_lower", ".pred_upper", ".interval_width") %in%
+                      names(p)))
+    expect_true(all(p$.pred_upper >= p$.pred_lower))
+    expect_true(all(p$.pred_lower >= 0))
+
+  })
+
+  it("compute_uq = FALSE returns point-only with an informative message", {
+
+    ens0 <- suppressWarnings(
+      ensemble(fitted, method = "weighted", optimize = FALSE,
+               compute_uq = FALSE, verbose = FALSE)
+    )
 
     expect_message(
-      p <- predict(ens, test_set, interval = TRUE),
+      p <- predict(ens0, test_set, interval = TRUE),
       regexp = "intervals are not available"
     )
     expect_false(".pred_lower" %in% names(p))
 
   })
 
+  it("a corrupt uq bundle degrades to point-only without erroring", {
+
+    ens <- suppressWarnings(
+      ensemble(fitted, method = "weighted", optimize = FALSE, verbose = FALSE)
+    )
+
+    ens$ensemble$uq$method <- "bogus"
+
+    p <- predict(ens, test_set, interval = TRUE)
+
+    expect_false(".pred_lower" %in% names(p))
+    expect_true(".pred" %in% names(p))
+
+  })
+
   it("interval = FALSE returns point-only with no message", {
+
+    ens <- suppressWarnings(
+      ensemble(fitted, method = "weighted", optimize = FALSE, verbose = FALSE)
+    )
 
     expect_no_message(predict(ens, test_set, interval = FALSE))
 

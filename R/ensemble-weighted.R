@@ -34,6 +34,9 @@
 #'   improvement comparison).
 #' @param optimize Logical. Inverse-RMSE weighting (`TRUE`) or equal weights
 #'   (`FALSE`). Default `TRUE`.
+#' @param seed Integer. Recorded on the contract (the engine itself is
+#'   deterministic); ensemble UQ derives its calibration partition from it.
+#'   Default `307L`.
 #'
 #' @return The ensemble contract list from [build_ensemble_contract()].
 #'
@@ -43,7 +46,8 @@ fit_ensemble_weighted <- function(object,
                                   members,
                                   oof,
                                   rank_metric,
-                                  optimize = TRUE) {
+                                  optimize = TRUE,
+                                  seed     = 307L) {
 
   started <- Sys.time()
 
@@ -51,37 +55,16 @@ fit_ensemble_weighted <- function(object,
   ## Step 1: Derive weights from the out-of-fold matrix
   ## -------------------------------------------------------------------------
 
-  ## Per-member OOF RMSE against truth. Column order follows oof$members, so
-  ## the weight vector lines up with the member columns by position.
-
-  member_rmse <- vapply(
-    oof$members,
-    function(m) {
-      yardstick::rmse_vec(oof$truth, oof$predictors[[paste0("member_", m)]],
-                          na_rm = TRUE)
-    },
-    numeric(1)
+  ## Shared with ensemble UQ's per-fold calibration pass, which re-derives
+  ## weights inside each fold's analysis set by the same rule.
+  weights <- derive_member_weights(
+    predictors = oof$predictors,
+    truth      = oof$truth,
+    members    = oof$members,
+    optimize   = optimize
   )
 
-  raw_weights <- if (optimize) {
-
-    ## Inverse RMSE: better members weighted higher. Guard a zero RMSE (a
-    ## member that fit the OOF data perfectly) against division by zero.
-    inv <- 1 / pmax(member_rmse, .Machine$double.eps)
-    inv / sum(inv)
-
-  } else {
-
-    rep(1 / length(members), length(members))
-
-  }
-
-  names(raw_weights) <- oof$members
-
-  weights <- tibble::tibble(
-    member = oof$members,
-    coef   = as.numeric(raw_weights)
-  )
+  raw_weights <- weights$coef
 
   ## -------------------------------------------------------------------------
   ## Step 2: Combined out-of-fold predictions (the Phase-2 UQ by-product)
@@ -131,7 +114,66 @@ fit_ensemble_weighted <- function(object,
     member_pred   = member_pred,
     rank_metric   = rank_metric,
     runtime_secs  = as.numeric(difftime(Sys.time(), started, units = "secs")),
-    oof_pred      = oof_pred
+    oof_pred      = oof_pred,
+    optimize      = optimize,
+    seed          = seed
+  )
+
+}
+
+## ---------------------------------------------------------------------------
+## derive_member_weights()
+## ---------------------------------------------------------------------------
+
+#' Derive Member Weights from OOF Predictions (the Weighted-Engine Rule)
+#'
+#' @description
+#' The weighted engine's weighting rule as a pure function: inverse
+#' out-of-fold RMSE (`optimize = TRUE`) or equal weights (`FALSE`), normalized
+#' to sum to 1. Extracted so ensemble UQ's per-fold calibration pass can
+#' re-derive weights inside each fold's analysis set by the identical rule —
+#' the CV+ fold algorithm must match the deployed one.
+#'
+#' @param predictors Tibble with `member_<config_id>` columns of original-scale
+#'   OOF predictions.
+#' @param truth Numeric vector of observed values, aligned to `predictors`
+#'   rows.
+#' @param members Character vector of member `config_id`s, in column order.
+#' @param optimize Logical. Inverse-RMSE weighting (`TRUE`) or equal weights
+#'   (`FALSE`).
+#'
+#' @return Tibble with `member` and `coef` (normalized, sums to 1).
+#'
+#' @noRd
+derive_member_weights <- function(predictors, truth, members, optimize) {
+
+  ## Per-member OOF RMSE against truth. Column order follows members, so the
+  ## weight vector lines up with the member columns by position.
+  member_rmse <- vapply(
+    members,
+    function(m) {
+      yardstick::rmse_vec(truth, predictors[[paste0("member_", m)]],
+                          na_rm = TRUE)
+    },
+    numeric(1)
+  )
+
+  raw_weights <- if (optimize) {
+
+    ## Inverse RMSE: better members weighted higher. Guard a zero RMSE (a
+    ## member that fit the OOF data perfectly) against division by zero.
+    inv <- 1 / pmax(member_rmse, .Machine$double.eps)
+    inv / sum(inv)
+
+  } else {
+
+    rep(1 / length(members), length(members))
+
+  }
+
+  tibble::tibble(
+    member = members,
+    coef   = as.numeric(raw_weights)
   )
 
 }

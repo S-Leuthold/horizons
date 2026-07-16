@@ -403,16 +403,16 @@ fit_tuned_meta_learner <- function(object,
   ## I1). collect_predictions' .row indexes into meta_frame (1..n); we map it
   ## back to the object's true .row ids and reorder to oof$row.
   ##
-  ## PHASE-2 CAVEAT (read before calibrating coverage on these residuals): the
+  ## CALIBRATION CAVEAT (why ensemble UQ does NOT use these residuals): the
   ## OOF predictions are out-of-fold w.r.t. the meta-model COEFFICIENTS, but in
   ## the optimize = TRUE path the hyperparameters were selected by tune_grid on
-  ## these same folds, so the residuals carry mild hyperparameter-selection
-  ## bias. They are also CV-fold predictions, not split-conformal holdout
-  ## predictions against the deployed full-data meta_fit (CV+/jackknife+
-  ## semantics, weaker than the split-conformal compute_c_alpha() in fit-uq.R).
-  ## Phase-2 ensemble UQ must NOT feed these straight into compute_c_alpha() and
-  ## claim split-conformal coverage; calibrate on a partition disjoint from
-  ## tuning (e.g. the held-out calib_Fit, or the optimize = FALSE path).
+  ## these same folds, so the residuals carry hyperparameter-selection bias.
+  ## Route B (implemented in ensemble-uq.R): fit_ensemble_uq() draws a FRESH
+  ## fold partition at seed + 1000, refits the finalized workflow per fold with
+  ## the fold models retained, and aggregates via genuine CV+ order statistics
+  ## (cv_plus_bounds()) — never through compute_c_alpha(). These contract
+  ## oof_predictions remain for diagnostics and the fold-honesty regression
+  ## tests, not for calibration.
 
   oof_safe <- safely_execute(
     tune::fit_resamples(
@@ -475,7 +475,9 @@ fit_tuned_meta_learner <- function(object,
     member_pred   = member_pred,
     rank_metric   = rank_metric,
     runtime_secs  = as.numeric(difftime(Sys.time(), started, units = "secs")),
-    oof_pred      = oof_pred
+    oof_pred      = oof_pred,
+    optimize      = optimize,
+    seed          = seed
   )
 
 }
@@ -514,13 +516,34 @@ fit_tuned_meta_learner <- function(object,
 #' @param runtime_secs Numeric. Engine wall-clock, for the record.
 #' @param oof_pred Tibble or NULL. The ensemble's combined out-of-fold
 #'   predictions (`.row`, `.pred`, `truth`, original scale) — the by-product
-#'   each engine already computes to derive its weights. Carried for Phase-2
-#'   ensemble UQ (stacked conformal calibrates on these residuals); unused in
-#'   Phase 1. Default NULL.
+#'   each engine already computes to derive its weights. Carried for
+#'   diagnostics and the fold-honesty regression tests; ensemble UQ calibrates
+#'   on its own fresh-partition residuals (see [fit_ensemble_uq()]), not on
+#'   these. Default NULL.
+#' @param optimize Logical or NULL. The build-time optimize flag, recorded so
+#'   ensemble UQ can re-derive fold weights (weighted method) by the same
+#'   rule. Default NULL.
+#' @param seed Integer or NULL. The build-time seed, recorded so ensemble UQ
+#'   can derive a calibration partition disjoint from the tuning folds.
+#'   Default NULL.
 #'
 #' @return A list matching the `ensemble` slot contract: `method`, `model`,
 #'   `weights`, `predictions`, `metrics`, `member_metrics`, `improvement`,
-#'   `oof_predictions`, `uq` (NULL in Phase 1), `timestamp`, `runtime_secs`.
+#'   `oof_predictions`, `optimize`, `seed`, `uq` (populated by
+#'   [fit_ensemble_uq()]), `timestamp`, `runtime_secs`.
+#'
+#' @details
+#' **The `model` slot is typed per method:**
+#'
+#' | method      | `$model` contains                                          |
+#' |-------------|------------------------------------------------------------|
+#' | `weighted`  | the weights tibble (`member`, `coef`) — same object as `$weights` |
+#' | `penalized` | the trained meta `workflow` (glmnet)                       |
+#' | `xgb`       | the trained meta `workflow` (xgboost)                      |
+#'
+#' Both metamodel methods store the *workflow*, not an extracted engine —
+#' `combine_ensemble_metamodel()` and ensemble UQ's fold refits
+#' (`workflows::extract_spec_parsnip()`) depend on this.
 #'
 #' @keywords internal
 build_ensemble_contract <- function(method,
@@ -530,7 +553,9 @@ build_ensemble_contract <- function(method,
                                     member_pred,
                                     rank_metric,
                                     runtime_secs,
-                                    oof_pred = NULL) {
+                                    oof_pred = NULL,
+                                    optimize = NULL,
+                                    seed     = NULL) {
 
   ## Ensemble performance on test_F (original scale, shared metric computer) --
 
@@ -580,6 +605,8 @@ build_ensemble_contract <- function(method,
     member_metrics  = member_metrics,
     improvement     = improvement,
     oof_predictions = oof_pred,
+    optimize        = optimize,
+    seed            = seed,
     uq              = NULL,
     timestamp       = Sys.time(),
     runtime_secs    = runtime_secs
@@ -608,10 +635,11 @@ build_ensemble_contract <- function(method,
 #'   schema. **The spectra must already be on the training axis** — the same
 #'   requirement as [predict.horizons_fit()]; see its Details for the axis-
 #'   alignment limitation.
-#' @param interval Logical. Return ensemble prediction intervals when ensemble
-#'   uncertainty quantification is available (`object$ensemble$uq`). Default
-#'   `TRUE`. Ensemble UQ is not computed in this release, so `interval = TRUE`
-#'   currently returns point predictions with a one-time note.
+#' @param interval Logical. Return CV+ conformal prediction intervals when
+#'   ensemble uncertainty quantification is available (`object$ensemble$uq`,
+#'   calibrated by [fit_ensemble_uq()] — on by default in [ensemble()]).
+#'   Default `TRUE`. When no UQ bundle is present, point predictions are
+#'   returned with a one-time note.
 #' @param ... Unused; present for S3 method consistency.
 #'
 #' @return A tibble, one row per sample:
@@ -620,7 +648,8 @@ build_ensemble_contract <- function(method,
 #'     \item{.pred}{Ensemble point prediction, original response scale.}
 #'   }
 #'   Interval columns (`.pred_lower`, `.pred_upper`, `.interval_width`) are
-#'   appended when ensemble UQ is present and `interval = TRUE`.
+#'   joined on by `sample_id` when ensemble UQ is present and
+#'   `interval = TRUE`.
 #'
 #' @details
 #' All ensemble members must predict successfully. A member that fails to
@@ -628,6 +657,13 @@ build_ensemble_contract <- function(method,
 #' meta-learner's combination is only valid over the exact member set it was
 #' trained on, so dropping a member would silently change what is being
 #' predicted.
+#'
+#' **Interval semantics.** Bounds are genuine CV+ aggregates (Barber et al.
+#' 2021) over the retained fold models and signed calibration residuals — not
+#' `point +/- margin`. The deployed point prediction can therefore
+#' occasionally fall outside its own interval (a known property of
+#' jackknife+/CV+; the bounds come from fold-model predictions, not the
+#' full-data refit). This is deliberate and not repaired.
 #'
 #' @examples
 #' \dontrun{
@@ -719,9 +755,10 @@ predict.horizons_ensemble <- function(object,
   ## -------------------------------------------------------------------------
 
   ## Mirror the single-model seam (predict_one_config): point predictions are
-  ## complete here; intervals are a pure append when a UQ bundle exists. Ensemble
-  ## UQ is not computed in this release, so the bundle is absent and we degrade
-  ## to point-only with a one-time note.
+  ## complete here; intervals are a pure append when a UQ bundle exists. The
+  ## CV+ assembler reuses the Step-3 member predictions (members are never
+  ## re-predicted) and returns sample_id-keyed interval columns — joined, not
+  ## positionally bound, so row-order drift cannot silently misalign them.
   uq <- object$ensemble$uq
 
   if (!isTRUE(interval) || is.null(uq)) {
@@ -739,10 +776,9 @@ predict.horizons_ensemble <- function(object,
 
   }
 
-  interval_cols <- predict_intervals(
+  interval_cols <- predict_ensemble_intervals(
     uq          = uq,
-    point_pred  = point$.pred,
-    new_spectra = new_spectra
+    member_pred = member_pred
   )
 
   if (is.null(interval_cols)) {
@@ -751,7 +787,7 @@ predict.horizons_ensemble <- function(object,
 
   }
 
-  dplyr::bind_cols(point, interval_cols)
+  dplyr::left_join(point, interval_cols, by = "sample_id")
 
 }
 
