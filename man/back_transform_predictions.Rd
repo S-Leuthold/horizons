@@ -16,7 +16,10 @@ back_transform_predictions(
 
 \item{transformation}{Character: "none", "log", "sqrt", or "log10".}
 
-\item{warn}{Logical. Warn on edge cases (very large values, negatives)?}
+\item{warn}{Logical. Warn on edge cases (very large values, negatives)?
+Note: \code{warn = FALSE} suppresses these diagnostic warnings only — the
+\code{upper_bound} winsorization warning is a guardrail and always fires. All
+conditions signal via \code{cli} (uniform \code{rlang_warning} class).}
 
 \item{upper_bound}{Optional single positive finite numeric. When supplied,
 the back-transformed (original-scale) predictions are winsorized to this

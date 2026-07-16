@@ -12,6 +12,9 @@
 #' @param predictions Numeric vector of predictions on the transformed scale.
 #' @param transformation Character: "none", "log", "sqrt", or "log10".
 #' @param warn Logical. Warn on edge cases (very large values, negatives)?
+#'   Note: `warn = FALSE` suppresses these diagnostic warnings only — the
+#'   `upper_bound` winsorization warning is a guardrail and always fires. All
+#'   conditions signal via `cli` (uniform `rlang_warning` class).
 #' @param upper_bound Optional single positive finite numeric. When supplied,
 #'   the back-transformed (original-scale) predictions are winsorized to this
 #'   bound, uniformly across all transformations. `NULL` (the default) applies
@@ -50,8 +53,7 @@ back_transform_predictions <- function(predictions, transformation, warn = TRUE,
 
       if (warn && any(predictions > 50, na.rm = TRUE)) {
 
-        warning("Very large values detected in log-scale predictions (>50). Check for outliers.",
-                call. = FALSE)
+        cli::cli_warn("Very large values detected in log-scale predictions (>50). Check for outliers.")
 
       }
 
@@ -71,8 +73,7 @@ back_transform_predictions <- function(predictions, transformation, warn = TRUE,
 
       if (warn && any(neg)) {
 
-        warning("Negative values detected in sqrt-scale predictions. Setting to 0.",
-                call. = FALSE)
+        cli::cli_warn("Negative values detected in sqrt-scale predictions. Setting to 0.")
 
       }
 
@@ -86,8 +87,7 @@ back_transform_predictions <- function(predictions, transformation, warn = TRUE,
 
       if (warn && any(predictions > 50, na.rm = TRUE)) {
 
-        warning("Very large values detected in log10-scale predictions (>50). Check for outliers.",
-                call. = FALSE)
+        cli::cli_warn("Very large values detected in log10-scale predictions (>50). Check for outliers.")
 
       }
 
@@ -100,9 +100,7 @@ back_transform_predictions <- function(predictions, transformation, warn = TRUE,
 
       if (warn && transformation != "") {
 
-        warning(paste0("Unknown transformation '", transformation,
-                       "'. Returning predictions unchanged."),
-                call. = FALSE)
+        cli::cli_warn("Unknown transformation {.val {transformation}}. Returning predictions unchanged.")
 
       }
 
@@ -114,29 +112,52 @@ back_transform_predictions <- function(predictions, transformation, warn = TRUE,
 
   ## Deploy-time guardrail: winsorize the original-scale output to the caller's
   ## bound. Applied uniformly after the switch so every transform (including
-  ## "none" and the unknown-transform passthrough) is covered. The warning is
-  ## deliberately NOT gated by `warn` — same reasoning as the sqrt clamp above:
-  ## a guardrail that fires silently in production (warn = FALSE callers)
-  ## defeats its purpose.
-  if (!is.null(upper_bound)) {
+  ## "none" and the unknown-transform passthrough) is covered.
+  apply_response_bound(out, upper_bound)
 
-    over <- !is.na(out) & out > upper_bound
+}
 
-    if (any(over)) {
+## ---------------------------------------------------------------------------
+## apply_response_bound
+## ---------------------------------------------------------------------------
 
-      cli::cli_warn(c(
-        "!" = "{sum(over)} prediction{?s} exceeded the response upper bound and {?was/were} winsorized.",
-        "i" = "Max pre-clamp value: {round(max(out[over]), 2)}; bound: {round(upper_bound, 2)}.",
-        "i" = "Large overshoots usually indicate extrapolation beyond the training domain."
-      ))
+#' Winsorize Predictions to the Deploy-Time Response Upper Bound
+#'
+#' @description
+#' The guardrail primitive shared by [back_transform_predictions()] (single-
+#' model deploy path) and `predict.horizons_ensemble()` (the combined ensemble
+#' output). Values above `upper_bound` are clamped to it with a visible
+#' warning; `upper_bound = NULL` is a no-op. The warning is deliberately
+#' unconditional — a guardrail that fires silently defeats its purpose — so
+#' callers that suppress diagnostic warnings still surface this one.
+#'
+#' @param values Numeric vector, original response scale.
+#' @param upper_bound Single positive finite numeric, or NULL (no clamp).
+#' @return `values`, winsorized to `upper_bound` where it was exceeded.
+#' @keywords internal
+apply_response_bound <- function(values, upper_bound) {
 
-      out[over] <- upper_bound
+  if (is.null(upper_bound)) {
 
-    }
+    return(values)
 
   }
 
-  out
+  over <- !is.na(values) & values > upper_bound
+
+  if (any(over)) {
+
+    cli::cli_warn(c(
+      "!" = "{sum(over)} prediction{?s} exceeded the response upper bound and {?was/were} winsorized.",
+      "i" = "Max pre-clamp value: {round(max(values[over]), 2)}; bound: {round(upper_bound, 2)}.",
+      "i" = "Large overshoots usually indicate extrapolation beyond the training domain."
+    ))
+
+    values[over] <- upper_bound
+
+  }
+
+  values
 
 }
 

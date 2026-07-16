@@ -341,10 +341,16 @@ resolve_config_ids <- function(object, config) {
 #' @param config_id The config to predict from.
 #' @param new_spectra Tibble from [resolve_new_data()] (sample_id + predictors).
 #' @param interval Logical; return intervals when UQ is available.
+#' @param clamp Logical; apply the deploy-time response-bound winsorization
+#'   (`models$response_bound`). `TRUE` for user-facing single-model predictions;
+#'   `FALSE` inside ensemble machinery, where member predictions are features —
+#'   they must match the raw member OOF the meta-learner trained and calibrated
+#'   on, and the guardrail is applied once at the ensemble output instead.
 #' @return A tibble: sample_id, config_id, .pred (+ interval columns).
 #' @keywords internal
 #' @noRd
-predict_one_config <- function(object, config_id, new_spectra, interval) {
+predict_one_config <- function(object, config_id, new_spectra, interval,
+                               clamp = TRUE) {
 
   workflow <- object$models$workflows[[config_id]]
 
@@ -383,12 +389,15 @@ predict_one_config <- function(object, config_id, new_spectra, interval) {
   ## deploy-time winsorization guardrail applies after the switch regardless of
   ## transform. Old objects without response_bound degrade gracefully (NULL →
   ## no clamp), mirroring the predictor_schema NULL-skip above. Fit-time paths
-  ## deliberately do NOT pass a bound — ranking must see raw model behavior.
+  ## deliberately do NOT pass a bound — ranking must see raw model behavior —
+  ## and ensemble machinery passes clamp = FALSE (guardrail applies once at
+  ## the ensemble output, keeping member features consistent with the raw
+  ## member OOF the meta-learner trained and calibrated on).
   point_pred <- back_transform_predictions(
     point_trans,
     transformation,
     warn        = FALSE,
-    upper_bound = object$models$response_bound %||% NULL
+    upper_bound = if (clamp) object$models$response_bound else NULL
   )
 
   ## Soil properties predicted from MIR are non-negative; floor at 0.
@@ -473,8 +482,12 @@ predict_members <- function(object, members, new_spectra) {
 
   dplyr::bind_rows(lapply(members, function(m) {
 
+    ## clamp = FALSE: member predictions are meta-learner FEATURES here, and
+    ## must match the raw (unclamped) member OOF the meta-learner trained and
+    ## the UQ fold models calibrated on. The response-bound guardrail applies
+    ## once, at the combined ensemble output in predict.horizons_ensemble().
     pc <- predict_one_config(object, config_id = m, new_spectra = new_spectra,
-                             interval = FALSE)
+                             interval = FALSE, clamp = FALSE)
 
     tibble::tibble(config_id = m, sample_id = pc$sample_id, .pred = pc$.pred)
 
