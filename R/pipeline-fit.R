@@ -21,7 +21,10 @@
 #' @param verbose Logical. Print progress tree to console. Default TRUE.
 #'
 #' @return A `horizons_fit` object (inherits from `horizons_eval`,
-#'   `horizons_data`) with `models$` slot populated.
+#'   `horizons_data`) with `models$` slot populated. The slot includes
+#'   `response_bound` (max training outcome times `RESPONSE_BOUND_MARGIN`),
+#'   the deploy-time winsorization guardrail `predict()` applies to
+#'   back-transformed point predictions.
 #'
 #' @export
 fit <- function(x,
@@ -539,12 +542,18 @@ fit <- function(x,
   best_config      <- if (length(workflows_list) > 0) names(workflows_list)[1] else NA_character_
   predictor_schema <- role_map$variable[role_map$role == "predictor"]
 
+  ## Deploy-time guardrail bound: predictions are winsorized to this value in
+  ## predict_one_config(). max-times-margin (not a quantile) — the bound should
+  ## permit modest extrapolation and catch only the physically absurd.
+  response_bound <- max(analysis[[outcome_col]], na.rm = TRUE) * RESPONSE_BOUND_MARGIN
+
   x$models <- list(
     workflows        = workflows_list,
     n_models         = length(workflows_list),
     best_config      = best_config,
     rank_metric      = rank_metric,
     predictor_schema = predictor_schema,
+    response_bound   = response_bound,
     cv_predictions   = all_cv_predictions,
     results          = results_tibble,
     split            = split_F,

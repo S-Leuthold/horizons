@@ -4,7 +4,12 @@
 \alias{back_transform_predictions}
 \title{Back-transform Predictions to Original Scale}
 \usage{
-back_transform_predictions(predictions, transformation, warn = TRUE)
+back_transform_predictions(
+  predictions,
+  transformation,
+  warn = TRUE,
+  upper_bound = NULL
+)
 }
 \arguments{
 \item{predictions}{Numeric vector of predictions on the transformed scale.}
@@ -12,6 +17,13 @@ back_transform_predictions(predictions, transformation, warn = TRUE)
 \item{transformation}{Character: "none", "log", "sqrt", or "log10".}
 
 \item{warn}{Logical. Warn on edge cases (very large values, negatives)?}
+
+\item{upper_bound}{Optional single positive finite numeric. When supplied,
+the back-transformed (original-scale) predictions are winsorized to this
+bound, uniformly across all transformations. \code{NULL} (the default) applies
+no upper clamp. The winsorization warning is NOT gated by \code{warn} — a
+caller that passes a bound has opted into the guardrail and must see it
+trip (visible recoverable failure over silent drift).}
 }
 \value{
 Numeric vector on the original response scale.

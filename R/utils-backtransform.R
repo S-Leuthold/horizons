@@ -12,16 +12,37 @@
 #' @param predictions Numeric vector of predictions on the transformed scale.
 #' @param transformation Character: "none", "log", "sqrt", or "log10".
 #' @param warn Logical. Warn on edge cases (very large values, negatives)?
+#' @param upper_bound Optional single positive finite numeric. When supplied,
+#'   the back-transformed (original-scale) predictions are winsorized to this
+#'   bound, uniformly across all transformations. `NULL` (the default) applies
+#'   no upper clamp. The winsorization warning is NOT gated by `warn` — a
+#'   caller that passes a bound has opted into the guardrail and must see it
+#'   trip (visible recoverable failure over silent drift).
 #'
 #' @return Numeric vector on the original response scale.
 #' @export
-back_transform_predictions <- function(predictions, transformation, warn = TRUE) {
+back_transform_predictions <- function(predictions, transformation, warn = TRUE,
+                                       upper_bound = NULL) {
 
   if (is.null(predictions) || length(predictions) == 0) return(predictions)
 
+  if (!is.null(upper_bound)) {
+
+    if (!is.numeric(upper_bound) || length(upper_bound) != 1 ||
+        !is.finite(upper_bound) || upper_bound <= 0) {
+
+      cli::cli_abort(c(
+        "{.arg upper_bound} must be a single positive finite numeric.",
+        "x" = "Got {.val {upper_bound}}."
+      ))
+
+    }
+
+  }
+
   transformation <- tolower(as.character(transformation))
 
-  switch(transformation,
+  out <- switch(transformation,
 
     "none" = predictions,
 
@@ -90,6 +111,32 @@ back_transform_predictions <- function(predictions, transformation, warn = TRUE)
     }
 
   )
+
+  ## Deploy-time guardrail: winsorize the original-scale output to the caller's
+  ## bound. Applied uniformly after the switch so every transform (including
+  ## "none" and the unknown-transform passthrough) is covered. The warning is
+  ## deliberately NOT gated by `warn` — same reasoning as the sqrt clamp above:
+  ## a guardrail that fires silently in production (warn = FALSE callers)
+  ## defeats its purpose.
+  if (!is.null(upper_bound)) {
+
+    over <- !is.na(out) & out > upper_bound
+
+    if (any(over)) {
+
+      cli::cli_warn(c(
+        "!" = "{sum(over)} prediction{?s} exceeded the response upper bound and {?was/were} winsorized.",
+        "i" = "Max pre-clamp value: {round(max(out[over]), 2)}; bound: {round(upper_bound, 2)}.",
+        "i" = "Large overshoots usually indicate extrapolation beyond the training domain."
+      ))
+
+      out[over] <- upper_bound
+
+    }
+
+  }
+
+  out
 
 }
 

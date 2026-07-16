@@ -328,3 +328,74 @@ describe("predict.horizons_fit() - empirical coverage", {
   })
 
 })
+
+
+## ---------------------------------------------------------------------------
+## Response upper bound (deploy-time winsorization guardrail)
+## ---------------------------------------------------------------------------
+
+describe("predict.horizons_fit() - response bound guardrail", {
+
+  new_df <- make_new_spectra()
+
+  it("fit() stores models$response_bound = max(outcome) * RESPONSE_BOUND_MARGIN", {
+
+    eval_obj <- make_predict_eval()
+    expected <- max(eval_obj$data$analysis$SOC, na.rm = TRUE) * RESPONSE_BOUND_MARGIN
+
+    expect_equal(fitted_fixture$models$response_bound, expected)
+
+  })
+
+  it("winsorizes predictions to an injected low bound with a visible warning", {
+
+    ## Force the clamp by injecting a bound below the known prediction range.
+    p_raw <- predict(fitted_fixture, new_df, interval = FALSE)
+    bound <- stats::median(p_raw$.pred)   # guaranteed to clip ~half the values
+
+    clamped_fixture <- fitted_fixture
+    clamped_fixture$models$response_bound <- bound
+
+    expect_warning(
+      p <- predict(clamped_fixture, new_df, interval = FALSE),
+      "winsorized"
+    )
+
+    expect_true(all(p$.pred <= bound))
+    expect_equal(nrow(p), nrow(new_df))
+
+  })
+
+  it("objects without response_bound predict silently and identically (backward compat)", {
+
+    legacy_fixture <- fitted_fixture
+    legacy_fixture$models$response_bound <- NULL
+
+    expect_no_warning(p_legacy <- predict(legacy_fixture, new_df, interval = FALSE))
+
+    p_current <- predict(fitted_fixture, new_df, interval = FALSE)
+
+    expect_identical(p_legacy$.pred, p_current$.pred)
+
+  })
+
+  it("does not clamp interval bounds (only the point prediction)", {
+
+    ## .pred_upper deliberately stays unclamped: truncating the interval
+    ## would overstate confidence exactly where the model is least
+    ## trustworthy. Inject a bound just below the max point prediction and
+    ## confirm intervals still extend past it.
+    p_raw <- predict(fitted_fixture, new_df)
+    bound <- max(p_raw$.pred) * 0.99
+
+    clamped_fixture <- fitted_fixture
+    clamped_fixture$models$response_bound <- bound
+
+    p <- suppressWarnings(predict(clamped_fixture, new_df))
+
+    expect_true(all(p$.pred <= bound))
+    expect_true(any(p$.pred_upper > bound))
+
+  })
+
+})

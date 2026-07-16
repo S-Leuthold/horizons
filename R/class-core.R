@@ -167,15 +167,19 @@ new_horizons_data <- function(analysis        = NULL,
     ## Section 6: MODELS — Finalized models + UQ (horizons_fit+)
     ## -------------------------------------------------------------------------
 
-    models = list(workflows      = NULL,    ## list of butchered fitted workflows
-                  n_models       = NULL,    ## integer
-                  cv_predictions = NULL,    ## tibble: .row, .fold, config_id, .pred, .pred_trans, truth
-                  results        = NULL,    ## tibble: config_id, status, degraded, metrics, etc.
-                  split          = NULL,    ## rsplit: Split F (train_F / test_F)
-                  row_index      = NULL,    ## tibble: .row → sample_id mapping
-                  uq             = NULL,    ## list of UQ bundles (one per config), or NULL
-                  timestamp      = NULL,    ## POSIXct
-                  runtime_secs   = NULL),   ## numeric
+    models = list(workflows        = NULL,  ## list of butchered fitted workflows
+                  n_models         = NULL,  ## integer
+                  best_config      = NULL,  ## character: top config_id (best-first order)
+                  rank_metric      = NULL,  ## character: metric configs were ranked by
+                  predictor_schema = NULL,  ## character: training-axis predictor columns
+                  response_bound   = NULL,  ## numeric: deploy-time winsorization bound (max truth * margin)
+                  cv_predictions   = NULL,  ## tibble: .row, .fold, config_id, .pred, .pred_trans, truth
+                  results          = NULL,  ## tibble: config_id, status, degraded, metrics, etc.
+                  split            = NULL,  ## rsplit: Split F (train_F / test_F)
+                  row_index        = NULL,  ## tibble: .row → sample_id mapping
+                  uq               = NULL,  ## list of UQ bundles (one per config), or NULL
+                  timestamp        = NULL,  ## POSIXct
+                  runtime_secs     = NULL), ## numeric
 
     ## -------------------------------------------------------------------------
     ## Section 7: ENSEMBLE — Optional ensemble (horizons_ensemble)
