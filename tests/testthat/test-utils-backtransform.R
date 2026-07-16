@@ -153,6 +153,107 @@ describe("back_transform_predictions()", {
 
   })
 
+  it("winsorizes log-scale blow-ups to upper_bound with an informative warning", {
+
+    ## The 257 g/kg escape: an unconstrained log-scale prediction inflates
+    ## through exp() to a physically impossible value. With a bound supplied,
+    ## the output is clamped to exactly the bound and the warning names the
+    ## count and the pre-clamp max.
+    preds <- c(1, 2, 7)  # exp(7) - 1 = 1095.6
+
+    expect_warning(
+      result <- back_transform_predictions(preds, "log", warn = FALSE,
+                                           upper_bound = 100),
+      "winsorized"
+    )
+
+    expect_equal(result[3], 100)
+    expect_equal(result[1:2], exp(c(1, 2)) - 1, tolerance = 1e-10)
+
+    ## Warning content: count and pre-clamp max
+    w <- tryCatch(
+      back_transform_predictions(preds, "log", warn = FALSE, upper_bound = 100),
+      warning = function(w) conditionMessage(w)
+    )
+    expect_match(w, "1 prediction")
+    expect_match(w, "1095.6")
+
+  })
+
+  it("applies the bound uniformly across all transforms", {
+
+    expect_warning(r_none  <- back_transform_predictions(c(1, 500),  "none",  upper_bound = 100), "winsorized")
+    expect_warning(r_sqrt  <- back_transform_predictions(c(1, 30),   "sqrt",  upper_bound = 100), "winsorized")
+    expect_warning(r_log10 <- back_transform_predictions(c(1, 4),    "log10", upper_bound = 100), "winsorized")
+
+    expect_equal(r_none[2],  100)
+    expect_equal(r_sqrt[2],  100)   # 30^2 = 900 -> clamped
+    expect_equal(r_log10[2], 100)   # 10^4 - 1 = 9999 -> clamped
+
+  })
+
+  it("upper_bound = NULL preserves current behavior exactly (regression)", {
+
+    preds <- c(1, 2, 7)
+
+    for (trans in c("none", "log", "sqrt", "log10")) {
+
+      expect_identical(
+        back_transform_predictions(preds, trans, warn = FALSE),
+        back_transform_predictions(preds, trans, warn = FALSE, upper_bound = NULL)
+      )
+
+    }
+
+    expect_silent(back_transform_predictions(preds, "log", warn = FALSE))
+
+  })
+
+  it("round-trip stays exact when nothing exceeds a generous bound", {
+
+    y <- c(0.1, 1, 5, 42, 100)
+
+    expect_equal(
+      back_transform_predictions(log(y + 1), "log", upper_bound = 1e6),
+      y, tolerance = 1e-10
+    )
+
+  })
+
+  it("clamp warning fires even with warn = FALSE (guardrail is ungated)", {
+
+    ## warn gates the edge-case messages; the winsorization warning is the
+    ## guardrail itself and must be visible to production callers.
+    expect_warning(
+      back_transform_predictions(c(1, 7), "log", warn = FALSE, upper_bound = 100),
+      "winsorized"
+    )
+
+  })
+
+  it("passes NA values through unclamped when a bound is supplied", {
+
+    result <- suppressWarnings(
+      back_transform_predictions(c(1, NA, 7), "log", warn = FALSE,
+                                 upper_bound = 100)
+    )
+
+    expect_true(is.na(result[2]))
+    expect_equal(result[3], 100)
+
+  })
+
+  it("aborts on invalid upper_bound values", {
+
+    preds <- c(1, 2)
+
+    expect_error(back_transform_predictions(preds, "log", upper_bound = -5))
+    expect_error(back_transform_predictions(preds, "log", upper_bound = Inf))
+    expect_error(back_transform_predictions(preds, "log", upper_bound = c(1, 2)))
+    expect_error(back_transform_predictions(preds, "log", upper_bound = "100"))
+
+  })
+
 })
 
 describe("needs_back_transformation()", {

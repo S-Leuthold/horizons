@@ -121,6 +121,14 @@ DEFAULT_UQ_LEVEL         <- 0.90
 UQ_QUANTILE_TREES        <- 500L
 WARMSTART_GRID_SIZE      <- 25L
 
+## Prediction Guardrails --------------------------------------------------------
+
+### Winsorization margin for the deploy-time response upper bound: predictions
+### are clamped to max(training outcome) * margin. Permits modest extrapolation
+### beyond the observed range while catching physically impossible blow-ups
+### (e.g. an unconstrained log-scale prediction exp()-inflating to 257 g/kg).
+RESPONSE_BOUND_MARGIN <- 1.5
+
 ## DAYMET Constants ------------------------------------------------------------
 
 DAYMET_RESOLUTION_DEG <- 1/24

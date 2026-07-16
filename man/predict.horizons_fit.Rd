@@ -61,6 +61,15 @@ therefore arrive on the same wavenumber axis the model was trained on.
 Applicability-domain flags (\code{.ad_flag}, \code{.ad_distance}) are not yet emitted;
 applicability domain is deferred in v1 \code{fit()}, so the object stores nothing
 to populate them.
+
+\strong{Response upper bound (guardrail).} Point predictions are winsorized to
+\code{models$response_bound} (max training outcome times 1.5, stored by \code{\link[=fit]{fit()}})
+with a visible warning when any value is clamped. This catches physically
+impossible back-transform blow-ups (e.g. an unconstrained log-scale
+prediction inflating through \code{exp()}) while permitting modest extrapolation.
+Interval bounds are deliberately NOT clamped — truncating the interval would
+overstate confidence exactly where the model is least trustworthy. Objects
+fitted before this field existed predict without a clamp.
 }
 \examples{
 \dontrun{

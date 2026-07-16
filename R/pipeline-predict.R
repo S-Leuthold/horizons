@@ -64,6 +64,15 @@ NULL
 #' applicability domain is deferred in v1 `fit()`, so the object stores nothing
 #' to populate them.
 #'
+#' **Response upper bound (guardrail).** Point predictions are winsorized to
+#' `models$response_bound` (max training outcome times 1.5, stored by [fit()])
+#' with a visible warning when any value is clamped. This catches physically
+#' impossible back-transform blow-ups (e.g. an unconstrained log-scale
+#' prediction inflating through `exp()`) while permitting modest extrapolation.
+#' Interval bounds are deliberately NOT clamped — truncating the interval would
+#' overstate confidence exactly where the model is least trustworthy. Objects
+#' fitted before this field existed predict without a clamp.
+#'
 #' @examples
 #' \dontrun{
 #' fitted <- fit(evaluated, n_best = 5, compute_uq = TRUE)
@@ -370,15 +379,17 @@ predict_one_config <- function(object, config_id, new_spectra, interval) {
     error_title = paste0("Prediction failed for config '", config_id, "'.")
   )$.pred
 
-  point_pred <- if (needs_back_transformation(transformation)) {
-
-    back_transform_predictions(point_trans, transformation, warn = FALSE)
-
-  } else {
-
-    point_trans
-
-  }
+  ## Unconditional funnel call: the "none" branch is a passthrough, and the
+  ## deploy-time winsorization guardrail applies after the switch regardless of
+  ## transform. Old objects without response_bound degrade gracefully (NULL →
+  ## no clamp), mirroring the predictor_schema NULL-skip above. Fit-time paths
+  ## deliberately do NOT pass a bound — ranking must see raw model behavior.
+  point_pred <- back_transform_predictions(
+    point_trans,
+    transformation,
+    warn        = FALSE,
+    upper_bound = object$models$response_bound %||% NULL
+  )
 
   ## Soil properties predicted from MIR are non-negative; floor at 0.
   point_pred <- floor_at_zero(point_pred)

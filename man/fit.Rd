@@ -33,7 +33,10 @@ conformal calibration). Default TRUE.}
 }
 \value{
 A \code{horizons_fit} object (inherits from \code{horizons_eval},
-\code{horizons_data}) with \verb{models$} slot populated.
+\code{horizons_data}) with \verb{models$} slot populated. The slot includes
+\code{response_bound} (max training outcome times \code{RESPONSE_BOUND_MARGIN}),
+the deploy-time winsorization guardrail \code{predict()} applies to
+back-transformed point predictions.
 }
 \description{
 Re-tunes the top N configurations from \code{evaluate()} with warm-start

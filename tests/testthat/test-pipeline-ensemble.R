@@ -445,3 +445,43 @@ describe("predict.horizons_ensemble() - preflight", {
   })
 
 })
+
+## =========================================================================
+## predict.horizons_ensemble() — response bound guardrail reaches members
+## =========================================================================
+## Members predict through predict_one_config(), which winsorizes to
+## models$response_bound. The combine then operates on clamped member
+## predictions, so the ensemble output is bounded too (weighted combine of
+## values <= bound with non-negative normalized weights cannot exceed it).
+
+describe("predict.horizons_ensemble() - response bound guardrail", {
+
+  it("clamps member predictions and returns one row per sample", {
+
+    ens <- suppressWarnings(
+      ensemble(fitted, method = "weighted", optimize = FALSE, verbose = FALSE)
+    )
+
+    p_raw <- predict(ens, test_set, interval = FALSE)
+    bound <- stats::median(p_raw$.pred)   # force the clamp
+
+    ens$models$response_bound <- bound
+
+    ## The clamp fires once per member, so capture ALL warnings rather than
+    ## expect_warning (which consumes only the first and leaks the rest).
+    warns <- character()
+    p <- withCallingHandlers(
+      predict(ens, test_set, interval = FALSE),
+      warning = function(w) {
+        warns <<- c(warns, conditionMessage(w))
+        invokeRestart("muffleWarning")
+      }
+    )
+
+    expect_true(any(grepl("winsorized", warns)))
+    expect_true(all(p$.pred <= bound + 1e-10))
+    expect_equal(nrow(p), dplyr::n_distinct(test_set$sample_id))
+
+  })
+
+})
