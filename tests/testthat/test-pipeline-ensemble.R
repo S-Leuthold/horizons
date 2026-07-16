@@ -482,16 +482,17 @@ describe("predict.horizons_ensemble() - preflight", {
 })
 
 ## =========================================================================
-## predict.horizons_ensemble() — response bound guardrail reaches members
+## predict.horizons_ensemble() — response bound guardrail at the OUTPUT
 ## =========================================================================
-## Members predict through predict_one_config(), which winsorizes to
-## models$response_bound. The combine then operates on clamped member
-## predictions, so the ensemble output is bounded too (weighted combine of
-## values <= bound with non-negative normalized weights cannot exceed it).
+## Members predict UNCLAMPED (their predictions are meta-learner features and
+## must match the raw member OOF the meta trained/calibrated on); the
+## guardrail applies exactly once, to the combined ensemble output. Build-time
+## test_F scoring (metrics/member_metrics/improvement) is also unclamped, so
+## ranking sees raw model behavior.
 
 describe("predict.horizons_ensemble() - response bound guardrail", {
 
-  it("clamps member predictions and returns one row per sample", {
+  it("clamps the combined output exactly once, one row per sample", {
 
     ens <- suppressWarnings(
       ensemble(fitted, method = "weighted", optimize = FALSE, verbose = FALSE)
@@ -502,8 +503,9 @@ describe("predict.horizons_ensemble() - response bound guardrail", {
 
     ens$models$response_bound <- bound
 
-    ## The clamp fires once per member, so capture ALL warnings rather than
-    ## expect_warning (which consumes only the first and leaks the rest).
+    ## Output-level clamp: exactly ONE winsorization warning (not one per
+    ## member) — the single-warning count is the regression assertion that
+    ## members stayed raw.
     warns <- character()
     p <- withCallingHandlers(
       predict(ens, test_set, interval = FALSE),
@@ -513,9 +515,28 @@ describe("predict.horizons_ensemble() - response bound guardrail", {
       }
     )
 
-    expect_true(any(grepl("winsorized", warns)))
+    expect_equal(sum(grepl("winsorized", warns)), 1)
     expect_true(all(p$.pred <= bound + 1e-10))
     expect_equal(nrow(p), dplyr::n_distinct(test_set$sample_id))
+
+  })
+
+  it("member features and build-time scoring stay unclamped", {
+
+    ## Inject a bound BEFORE building the ensemble: build-time member scoring
+    ## must not warn (raw path), and the stored member_metrics must equal the
+    ## metrics of raw member predictions.
+    low_fit <- fitted
+    low_fit$models$response_bound <- 1e-3   # would clamp everything if applied
+
+    expect_no_warning(
+      ens <- ensemble(low_fit, method = "weighted", optimize = FALSE,
+                      compute_uq = FALSE, verbose = FALSE)
+    )
+
+    ## Stored test_F predictions are raw combine output (values far above the
+    ## injected bound prove no member was clamped during the build).
+    expect_true(any(ens$ensemble$predictions$.pred > 1e-3))
 
   })
 

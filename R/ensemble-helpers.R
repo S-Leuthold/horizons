@@ -249,8 +249,13 @@ predict_members_on_test <- function(object, members) {
 
   dplyr::bind_rows(lapply(members, function(m) {
 
+    ## clamp = FALSE: these predictions feed the ensemble's own test_F scoring
+    ## (metrics, member_metrics, improvement) and the meta-combine. Ranking and
+    ## comparison must see raw model behavior — a blow-up member must score
+    ## terribly, not be laundered by the deploy guardrail — mirroring the
+    ## unclamped fit-time paths in fit-single-config.R.
     pc <- predict_one_config(object, config_id = m, new_spectra = test_data,
-                             interval = FALSE)
+                             interval = FALSE, clamp = FALSE)
 
     dplyr::left_join(
       tibble::tibble(config_id = m, sample_id = pc$sample_id, .pred = pc$.pred),
@@ -305,7 +310,7 @@ fit_tuned_meta_learner <- function(object,
                                    spec,
                                    grid,
                                    extract_weights,
-                                   seed = 307L) {
+                                   seed = DEFAULT_ENSEMBLE_SEED) {
 
   started <- Sys.time()
 
@@ -749,6 +754,17 @@ predict.horizons_ensemble <- function(object,
       "i" = "Expected one of {.val {c('weighted', 'penalized', 'xgb')}}."
     ))
   )
+
+  ## Deploy-time response-bound guardrail, applied ONCE at the combined output.
+  ## Members predict unclamped above (their predictions are meta-learner
+  ## features and must match the raw member OOF the meta-learner trained and
+  ## the UQ fold models calibrated on); the physically-impossible-blow-up
+  ## protection lands here, on the value a user actually receives. The 257 g/kg
+  ## escape this guards against was an ensemble output. Interval bounds are
+  ## deliberately not clamped (uncertainty must not be truncated), so a clamped
+  ## point can sit below an unclamped upper bound — coherent, and documented.
+  point$.pred <- apply_response_bound(point$.pred,
+                                      object$models$response_bound)
 
   ## -------------------------------------------------------------------------
   ## Step 5: Intervals (only when ensemble UQ is available) + assemble output
