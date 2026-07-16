@@ -2,6 +2,36 @@
 
 ## New Features
 
+* `ensemble()` now calibrates CV+ conformal prediction intervals by default
+  (`compute_uq = TRUE`). `predict()` on a `horizons_ensemble` returns
+  `.pred_lower` / `.pred_upper` / `.interval_width` alongside `.pred`;
+  previously `interval = TRUE` degraded to point predictions with a note.
+  Pass `compute_uq = FALSE` to skip calibration. Bounds are aggregated from
+  retained per-fold meta-learner refits on a calibration partition disjoint
+  from the tuning folds; see `?fit_ensemble_uq` for the methodology and its
+  honesty caveats. The `compute_uq` argument is placed after `seed`, so
+  existing positional calls (`method`, `optimize`, `seed`) are unaffected.
+
+* Deploy-time predictions are winsorized to a training-derived response upper
+  bound (`max(training outcome) * 1.5`, stored as `models$response_bound` by
+  `fit()`), with a visible warning when the clamp fires — guarding against
+  physically impossible back-transform blow-ups (e.g. an unconstrained
+  log-scale prediction inflating through `exp()`). Single-model predictions
+  clamp per config; ensemble predictions clamp once at the combined output
+  (member predictions are meta-learner features and stay raw). Fit-time
+  ranking, evaluation, and UQ-calibration paths are never clamped; interval
+  bounds are never clamped. Objects fitted before this version predict
+  without a clamp. `back_transform_predictions()` gains an `upper_bound`
+  argument (default `NULL` = previous behavior).
+
+* `ensemble()` contracts now record `optimize` and `seed`, and every
+  `ensemble()` return is structurally validated (condition class
+  `horizons_validation_error` on a malformed contract).
+
+* All warnings from `back_transform_predictions()` now signal via `cli`
+  (condition class `rlang_warning` rather than `simpleWarning`); message text
+  is unchanged.
+
 * `ensemble()` — combine the models from `fit()` into a stacked predictor via a
   meta-learner over the members' out-of-fold predictions. Three engines:
   `penalized` (glmnet, the default), `weighted` (inverse-RMSE average), and

@@ -42,10 +42,12 @@ describe("cv_plus_bounds()", {
     fold_pred <- c(10, 12)                      # fold model predictions at x
     fold_mat  <- matrix(fold_pred, nrow = 1)
 
+    ## Explicit integer indices (exact rational math: .05 * 40 = 2,
+    ## .95 * 40 = 38) — deliberately NOT recomputed with the fp formula,
+    ## which lands one low at exact boundaries (the epsilon-guard regression).
     level <- 0.90
-    alpha <- 1 - level
-    l     <- floor((alpha / 2) * (n_calib + 1))    # 2
-    u     <- ceiling((1 - alpha / 2) * (n_calib + 1))  # 38
+    l     <- 2L
+    u     <- 38L
 
     v_hand <- sort(fold_pred[fold_id] + residuals)
 
@@ -411,6 +413,110 @@ describe("ensemble UQ - degradation and gates", {
 
     expect_error(fit_ensemble_uq(fitted), class = "rlang_error")
     expect_error(fit_ensemble_uq(ens_ref, level = 1.5), class = "rlang_error")
+
+  })
+
+})
+
+
+## ---------------------------------------------------------------------------
+## Review-fix regressions: shared indices, floor semantics, legacy retrofit
+## ---------------------------------------------------------------------------
+
+describe("cv_plus_indices()", {
+
+  it("pins the finite-sample index formula for known (n, level) pairs", {
+
+    ## n = 43 at level .90: l = floor(.05 * 44) = 2, u = ceiling(.95 * 44) = 42
+    idx <- cv_plus_indices(43L, 0.90)
+    expect_equal(idx$l, 2)
+    expect_equal(idx$u, 42)
+
+    ## n = 39: l = floor(.05 * 40) = 2, u = ceiling(.95 * 40) = 38
+    idx <- cv_plus_indices(39L, 0.90)
+    expect_equal(idx$l, 2)
+    expect_equal(idx$u, 38)
+
+    ## The leave-self-out path calls with n - 1; at n_calib = 43 that is
+    ## n = 42: l = floor(.05 * 43) = 2, u = ceiling(.95 * 43) = 41.
+    idx <- cv_plus_indices(42L, 0.90)
+    expect_equal(idx$l, 2)
+    expect_equal(idx$u, 41)
+
+  })
+
+  it("returns NULL below the validity threshold", {
+
+    expect_null(cv_plus_indices(10L, 0.90))   # l = floor(.05 * 11) = 0
+    expect_null(cv_plus_indices(5L, 0.95))
+
+  })
+
+})
+
+describe("predict_fold_model()", {
+
+  it("floors negative fold predictions to zero (deploy-consistency semantics)", {
+
+    ## A weights tibble with a negative coefficient can produce negative
+    ## combos; the deployed combine floors, so the fold primitive must too —
+    ## conformal validity requires the calibration score function to match
+    ## the deployed prediction rule.
+    fm <- tibble::tibble(member = c("a", "b"), coef = c(1, -2))
+    member_mat <- tibble::tibble(member_a = c(1, 5), member_b = c(2, 1))
+
+    pred <- predict_fold_model(fm, "weighted", member_mat)
+
+    expect_equal(pred, c(0, 3))   # 1 - 4 = -3 -> floored; 5 - 2 = 3
+
+  })
+
+})
+
+describe("cv_plus_bounds() - corrupted fold ids fail loudly", {
+
+  it("aborts when fold ids exceed the retained fold models", {
+
+    expect_error(
+      cv_plus_bounds(
+        matrix(rnorm(10), nrow = 2),          # 5 fold-model columns
+        rep(c(1, 7), length.out = 39),        # fold 7 does not exist
+        rnorm(39),
+        level = 0.90
+      ),
+      "out of sync"
+    )
+
+  })
+
+})
+
+describe("fit_ensemble_uq() - legacy retrofit", {
+
+  it("infers optimize = FALSE from equal weights when the contract predates the field", {
+
+    ## Simulate a pre-contract object: equal-weights ensemble with the
+    ## optimize/seed keys removed entirely (the legacy serialized shape).
+    ens <- suppressWarnings(
+      ensemble(fitted, method = "weighted", optimize = FALSE,
+               compute_uq = FALSE, verbose = FALSE)
+    )
+
+    ens$ensemble$optimize <- NULL   # $<- NULL removes the key
+    ens$ensemble$seed     <- NULL
+
+    retro <- suppressWarnings(fit_ensemble_uq(ens, verbose = FALSE))
+
+    expect_false(is.null(retro$ensemble$uq))
+
+    ## The inference must have re-derived EQUAL fold weights — a blind
+    ## optimize = TRUE default would produce inverse-RMSE (unequal) weights,
+    ## a silent deployed-vs-fold-model rule mismatch.
+    for (fm in retro$ensemble$uq$fold_models) {
+
+      expect_true(all(abs(fm$coef - fm$coef[1]) < 1e-12))
+
+    }
 
   })
 

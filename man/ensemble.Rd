@@ -8,8 +8,8 @@ ensemble(
   x,
   method = "penalized",
   optimize = TRUE,
+  seed = DEFAULT_ENSEMBLE_SEED,
   compute_uq = TRUE,
-  seed = 307L,
   verbose = TRUE
 )
 }
@@ -23,17 +23,18 @@ ensemble(
 the out-of-fold matrix (\code{TRUE}), or use fixed defaults (\code{FALSE}).
 Default \code{TRUE}.}
 
-\item{compute_uq}{Logical. Calibrate CV+ conformal prediction intervals for
-the ensemble (see \code{\link[=fit_ensemble_uq]{fit_ensemble_uq()}}), stored in \verb{$ensemble$uq} and
-consumed by \code{predict(..., interval = TRUE)}. Mirrors the \code{compute_uq}
-argument of \code{\link[=fit]{fit()}}. Default \code{TRUE}.}
-
 \item{seed}{Integer. Random seed for the meta-learner's CV folds (used by
 the \code{penalized} and \code{xgb} engines for both tuning and the genuine
 out-of-fold meta predictions; recorded on the contract for all methods).
 Ensemble UQ draws its calibration partition at \code{seed + 1000}, disjoint
 from the tuning folds. Mirrors the \code{seed} argument of \code{\link[=fit]{fit()}} and
-\code{\link[=evaluate]{evaluate()}}. Default \code{307L}.}
+\code{\link[=evaluate]{evaluate()}}. Default \code{DEFAULT_ENSEMBLE_SEED} (307).}
+
+\item{compute_uq}{Logical. Calibrate CV+ conformal prediction intervals for
+the ensemble (see \code{\link[=fit_ensemble_uq]{fit_ensemble_uq()}}), stored in \verb{$ensemble$uq} and
+consumed by \code{predict(..., interval = TRUE)}. Mirrors the \code{compute_uq}
+argument of \code{\link[=fit]{fit()}}. Placed after \code{seed} so pre-existing positional
+callers (\code{method}, \code{optimize}, \code{seed}) are unaffected. Default \code{TRUE}.}
 
 \item{verbose}{Logical. Print the progress tree to the console. Default
 \code{TRUE}.}
@@ -63,11 +64,14 @@ comparable to the single-model metrics from \code{fit()}.
 \dontrun{
 fitted <- fit(evaluated, n_best = 5)
 
-# Default penalized meta-learner
+# Default penalized meta-learner (CV+ intervals calibrated by default)
 ens <- ensemble(fitted)
 
 # Weighted average, no tuning
 ens <- ensemble(fitted, method = "weighted", optimize = FALSE)
+
+# Skip interval calibration (point predictions only)
+ens <- ensemble(fitted, compute_uq = FALSE)
 }
 
 }

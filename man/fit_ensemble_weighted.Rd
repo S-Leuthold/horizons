@@ -10,7 +10,7 @@ fit_ensemble_weighted(
   oof,
   rank_metric,
   optimize = TRUE,
-  seed = 307L
+  seed = DEFAULT_ENSEMBLE_SEED
 )
 }
 \arguments{
@@ -29,7 +29,7 @@ improvement comparison).}
 
 \item{seed}{Integer. Recorded on the contract (the engine itself is
 deterministic); ensemble UQ derives its calibration partition from it.
-Default \code{307L}.}
+Default \code{DEFAULT_ENSEMBLE_SEED} (307).}
 }
 \value{
 The ensemble contract list from \code{\link[=build_ensemble_contract]{build_ensemble_contract()}}.
