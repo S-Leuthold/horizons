@@ -28,9 +28,10 @@
   `ensemble()` return is structurally validated (condition class
   `horizons_validation_error` on a malformed contract).
 
-* All warnings from `back_transform_predictions()` now signal via `cli`
-  (condition class `rlang_warning` rather than `simpleWarning`); message text
-  is unchanged.
+* All warnings from `back_transform_predictions()` now signal via
+  `cli::cli_warn()` rather than base `warning()` (callers matching on the
+  `simpleWarning` condition class should match on `warning` instead); message
+  text is unchanged.
 
 * `ensemble()` — combine the models from `fit()` into a stacked predictor via a
   meta-learner over the members' out-of-fold predictions. Three engines:
