@@ -727,7 +727,7 @@ validate_horizons_ensemble <- function(x) {
       if (!is.null(uq$members) && w_valid &&
           !setequal(uq$members, w$member)) {
 
-        errors <- c(errors, cli::format_inline("{.field uq$members} does not match {.field weights$member} — stale or foreign uq bundle"))
+        errors <- c(errors, cli::format_inline("{.field uq$members} does not match {.field weights$member} (stale or foreign uq bundle)"))
 
       }
 
