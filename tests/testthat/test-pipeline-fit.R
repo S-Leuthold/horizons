@@ -125,8 +125,8 @@ EXPECTED_FIT_CV_PRED_COLS <- c(
 ## Expected slots in models$
 EXPECTED_MODEL_SLOTS <- c(
   "workflows", "n_models", "best_config", "rank_metric", "predictor_schema",
-  "cv_predictions", "results", "split", "row_index", "uq", "timestamp",
-  "runtime_secs"
+  "response_bound", "cv_predictions", "results", "split", "row_index", "uq",
+  "ad", "timestamp", "runtime_secs"
 )
 
 
@@ -480,6 +480,76 @@ describe("fit() - UQ enabled", {
       }
 
     }
+
+  })
+
+})
+
+
+describe("fit() - AD disabled", {
+
+  ## n = 60 -> calib split below N_CALIB_MIN, so AD is disabled even if asked.
+  obj <- make_fit_object(n = 60, n_configs = 2)
+
+  result <- suppressWarnings(
+    fit(obj, n_best = 2L, compute_uq = FALSE, compute_ad = FALSE,
+        verbose = FALSE, seed = 42L)
+  )
+
+  it("models$ad is NULL when compute_ad = FALSE", {
+
+    expect_null(result$models$ad)
+
+  })
+
+})
+
+
+describe("fit() - AD enabled", {
+
+  ## n = 250 so the shared calibration split clears N_CALIB_MIN = 30
+  ## (calib = 0.2 * 0.8 * n = 40). AD must ACTUALLY compute here, not just be
+  ## NULL-tolerated — the assertions below require a populated bundle.
+  obj <- make_fit_object(n = 250, n_configs = 1)
+
+  result <- suppressWarnings(
+    fit(obj, n_best = 1L, compute_uq = FALSE, compute_ad = TRUE,
+        verbose = FALSE, seed = 42L)
+  )
+
+  it("models$ad populates as a named list keyed by config_id", {
+
+    expect_false(is.null(result$models$ad))
+    expect_true(is.list(result$models$ad))
+    expect_true(length(result$models$ad) > 0)
+    expect_true(!is.null(names(result$models$ad)))
+    expect_true(all(names(result$models$ad) %in% names(result$models$workflows)))
+
+  })
+
+  it("AD bundles carry centroid, covariance, increasing thresholds, n_calib", {
+
+    bundle <- result$models$ad[[1]]
+
+    expect_true(all(c("centroid", "cov_matrix", "ad_thresholds", "n_calib")
+                    %in% names(bundle)))
+    expect_length(bundle$ad_thresholds, 4)
+    expect_true(all(diff(bundle$ad_thresholds) > 0))
+    expect_equal(length(bundle$centroid), nrow(bundle$cov_matrix))
+    expect_true(bundle$n_calib >= N_CALIB_MIN)
+
+  })
+
+  it("AD and UQ are independent (AD on, UQ off)", {
+
+    expect_null(result$models$uq)     # compute_uq = FALSE
+    expect_true(has_ad(result))       # ... but AD present
+
+  })
+
+  it("the fitted object passes its own validator with AD populated", {
+
+    expect_identical(validate_horizons_fit(result), result)
 
   })
 

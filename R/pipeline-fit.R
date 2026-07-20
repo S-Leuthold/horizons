@@ -16,6 +16,10 @@
 #'   rank_metric from `evaluate()`. Default NULL.
 #' @param compute_uq Logical. Train UQ components (quantile model +
 #'   conformal calibration). Default TRUE.
+#' @param compute_ad Logical. Compute applicability-domain metadata (centroid +
+#'   shrinkage covariance + held-out OOD thresholds) per config, so `predict()`
+#'   can emit `.ad_distance` / `.ad_flag`. Shares the UQ calibration split.
+#'   Default TRUE.
 #' @param allow_par Logical. Enable parallel CV folds. Default FALSE.
 #' @param seed Integer. Random seed for Split F and CV folds. Default 307L.
 #' @param verbose Logical. Print progress tree to console. Default TRUE.
@@ -31,6 +35,7 @@ fit <- function(x,
                 n_best     = 5L,
                 metric     = NULL,
                 compute_uq = TRUE,
+                compute_ad = TRUE,
                 allow_par  = FALSE,
                 seed       = 307L,
                 verbose    = TRUE) {
@@ -169,10 +174,12 @@ fit <- function(x,
   n_train <- nrow(train_F)
   n_test  <- nrow(test_F)
 
-  ## UQ partitioning: split train_F into train_Fit / calib_Fit
+  ## Calibration partitioning: split train_F into train_Fit / calib_Fit.
+  ## UQ and AD share this one held-out split (D7) \u2014 both calibrate on calib_Fit
+  ## and never train on it. Built whenever either capability is requested.
   calib_data <- NULL
 
-  if (compute_uq) {
+  if (compute_uq || compute_ad) {
 
     split_C <- tryCatch(
       rsample::initial_split(train_F, prop = 0.8, strata = outcome_col),
@@ -186,21 +193,26 @@ fit <- function(x,
     train_Fit <- rsample::training(split_C)
     calib_data <- rsample::testing(split_C)
 
-    ## Guard: minimum calibration size
+    ## Guard: minimum calibration size. Too small disables BOTH capabilities
+    ## that needed it \u2014 neither UQ nor AD can calibrate on an undersized set.
     if (nrow(calib_data) < N_CALIB_MIN) {
 
       if (verbose) {
 
+        disabled <- paste(c(if (compute_uq) "UQ", if (compute_ad) "AD"),
+                          collapse = " and ")
+
         cat(paste0(
           "\u2502  ", cli::col_yellow(
             "Calibration set too small (", nrow(calib_data),
-            " < ", N_CALIB_MIN, "). Disabling UQ."
+            " < ", N_CALIB_MIN, "). Disabling ", disabled, "."
           ), "\n"
         ))
 
       }
 
       compute_uq <- FALSE
+      compute_ad <- FALSE
       train_Fit  <- train_F
       calib_data <- NULL
 
@@ -328,6 +340,7 @@ fit <- function(x,
       final_bayesian_iter = tuning$bayesian_iter,
       grid_size           = tuning$grid_size,
       compute_uq          = compute_uq,
+      compute_ad          = compute_ad,
       allow_par           = allow_par,
       seed                = seed
     )
@@ -528,6 +541,27 @@ fit <- function(x,
 
   }
 
+  ## Collect AD bundles (named by config_id) — same shape as uq_list
+  ad_list <- NULL
+
+  if (compute_ad) {
+
+    ad_list <- list()
+
+    for (res in results_list) {
+
+      if (res$status == "success" && !is.null(res$ad)) {
+
+        ad_list[[ res$config_id ]] <- res$ad
+
+      }
+
+    }
+
+    if (length(ad_list) == 0) ad_list <- NULL
+
+  }
+
   ## -----------------------------------------------------------------------
   ## Step 6: Populate models$ slot and promote class
   ## -----------------------------------------------------------------------
@@ -559,6 +593,7 @@ fit <- function(x,
     split            = split_F,
     row_index        = row_index,
     uq               = uq_list,
+    ad               = ad_list,
     timestamp        = Sys.time(),
     runtime_secs     = total_runtime
   )
