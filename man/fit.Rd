@@ -9,6 +9,7 @@ fit(
   n_best = 5L,
   metric = NULL,
   compute_uq = TRUE,
+  compute_ad = TRUE,
   allow_par = FALSE,
   seed = 307L,
   verbose = TRUE
@@ -24,6 +25,11 @@ rank_metric from \code{evaluate()}. Default NULL.}
 
 \item{compute_uq}{Logical. Train UQ components (quantile model +
 conformal calibration). Default TRUE.}
+
+\item{compute_ad}{Logical. Compute applicability-domain metadata (centroid +
+shrinkage covariance + held-out OOD thresholds) per config, so \code{predict()}
+can emit \code{.ad_distance} / \code{.ad_flag}. Shares the UQ calibration split.
+Default TRUE.}
 
 \item{allow_par}{Logical. Enable parallel CV folds. Default FALSE.}
 
