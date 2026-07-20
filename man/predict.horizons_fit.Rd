@@ -4,7 +4,14 @@
 \alias{predict.horizons_fit}
 \title{Predict Soil Properties from a Fitted Horizons Object}
 \usage{
-\method{predict}{horizons_fit}(object, new_data, config = "best", interval = TRUE, ...)
+\method{predict}{horizons_fit}(
+  object,
+  new_data,
+  config = "best",
+  interval = TRUE,
+  abstain_ood = FALSE,
+  ...
+)
 }
 \arguments{
 \item{object}{A \code{horizons_fit} object (the output of \code{\link[=fit]{fit()}}).}
@@ -28,6 +35,12 @@ config, with a \code{config_id} column).
 available? Default \code{TRUE}. Ignored (with a note) for configs that have no
 UQ bundle.}
 
+\item{abstain_ood}{Logical. When \code{TRUE}, \code{.pred} (and any interval bounds)
+are set to \code{NA} for samples flagged out-of-domain (\code{.ad_flag == "OOD"}),
+while \code{.ad_distance}/\code{.ad_flag} are preserved so the caller can see how far
+out each sample was. Default \code{FALSE} (report AD, predict for all samples).
+Has no effect on configs without an AD bundle.}
+
 \item{...}{Unused; present for S3 method consistency.}
 }
 \value{
@@ -41,6 +54,10 @@ A tibble in long format, one row per sample (per config when
 available), original scale.}
 \item{.pred_upper}{Upper interval bound.}
 \item{.interval_width}{\code{.pred_upper - .pred_lower}.}
+\item{.ad_distance}{Squared Mahalanobis distance to the training centroid
+in model feature space (if the config has an AD bundle).}
+\item{.ad_flag}{Applicability-domain bin: \code{Q1}-\code{Q4} (within domain,
+increasing distance) or \code{OOD} (out-of-domain).}
 }
 }
 \description{
@@ -58,9 +75,11 @@ wavenumber grid, range trimming, water-band removal). \code{new_data} must
 therefore arrive on the same wavenumber axis the model was trained on.
 \code{predict()} validates the predictor schema and errors if it does not match.
 
-Applicability-domain flags (\code{.ad_flag}, \code{.ad_distance}) are not yet emitted;
-applicability domain is deferred in v1 \code{fit()}, so the object stores nothing
-to populate them.
+Applicability-domain columns (\code{.ad_distance}, \code{.ad_flag}) are emitted per
+config when the object carries an AD bundle (\code{fit(compute_ad = TRUE)}). The
+distance is a squared Mahalanobis distance in the model's feature space; the
+flag bins it against held-out-calibrated thresholds. Set \code{abstain_ood = TRUE}
+to \code{NA} predictions for out-of-domain samples while keeping the AD columns.
 
 \strong{Response upper bound (guardrail).} Point predictions are winsorized to
 \code{models$response_bound} (max training outcome times 1.5, stored by \code{\link[=fit]{fit()}})

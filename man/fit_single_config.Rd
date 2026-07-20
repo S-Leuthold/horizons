@@ -15,6 +15,7 @@ fit_single_config(
   final_bayesian_iter = DEFAULT_FINAL_BAYES_ITER,
   grid_size = DEFAULT_GRID_SIZE,
   compute_uq = FALSE,
+  compute_ad = FALSE,
   allow_par = FALSE,
   seed = 42L
 )

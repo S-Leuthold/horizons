@@ -25,6 +25,7 @@ Remotes:
 Imports:
     butcher,
     cli,
+    corpcor,
     data.table,
     dials,
     digest,
@@ -57,7 +58,6 @@ Imports:
     yardstick,
     zoo
 Roxygen: list(markdown = TRUE)
-RoxygenNote: 7.3.2
 Suggests: 
     testthat (>= 3.0.0),
     withr,
@@ -107,6 +107,7 @@ Collate:
     'evaluate-single-config.R'
     'pipeline-evaluate.R'
     'monitor-evaluate.R'
+    'ad.R'
     'fit-uq.R'
     'fit-warmstart.R'
     'fit-single-config.R'
@@ -118,3 +119,4 @@ Collate:
     'ensemble-xgb.R'
     'ensemble-uq.R'
     'pipeline-ensemble.R'
+Config/roxygen2/version: 8.0.0
