@@ -472,7 +472,10 @@ predict_one_config <- function(object, config_id, new_spectra, interval,
     ## meaningless. .ad_distance / .ad_flag are deliberately preserved.
     if (abstain_ood) {
 
-      ood <- out$.ad_flag == "OOD"
+      ## Guard against an NA flag: assign_ad_bin() never produces one today
+      ## (every finite distance bins, Inf -> OOD), but an NA in the mask would
+      ## silently leave that row un-abstained, so exclude it explicitly.
+      ood <- !is.na(out$.ad_flag) & out$.ad_flag == "OOD"
 
       if (any(ood)) {
 
