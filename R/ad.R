@@ -325,6 +325,11 @@ assign_ad_bin <- function(distances, thresholds) {
 #' the held-out distances are commensurate with the training ones. Both must run
 #' before the workflow is butchered (the mold is stripped by `butcher()`).
 #'
+#' Returns `NULL` (no bundle) when any of these hold: `calib_data` is `NULL` or
+#' under `N_CALIB_MIN` rows; the training feature matrix has fewer than
+#' `N_AD_TRAIN_MIN` rows or any NA; or the covariance / bake / threshold steps
+#' error. NULL degrades the config to no-AD rather than aborting the fit.
+#'
 #' @param fitted_workflow A trained `workflows::workflow` (pre-butcher).
 #' @param calib_data Data frame for threshold calibration — the same held-out
 #'   `calib_Fit` split UQ uses. `NULL` or under `N_CALIB_MIN` rows returns
