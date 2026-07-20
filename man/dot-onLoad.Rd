@@ -2,7 +2,7 @@
 % Please edit documentation in R/zzz.R
 \name{.onLoad}
 \alias{.onLoad}
-\title{Package Startup Configuration}
+\title{Package startup configuration}
 \usage{
 .onLoad(libname, pkgname)
 }
