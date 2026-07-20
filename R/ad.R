@@ -305,3 +305,117 @@ assign_ad_bin <- function(distances, thresholds) {
   )
 
 }
+
+
+#' Fit the applicability-domain bundle for one config (training phase)
+#'
+#' @description
+#' Assembles a config's AD bundle from its fitted workflow: centroid + shrinkage
+#' covariance on the model's own training feature space, and OOD/quartile
+#' thresholds calibrated on a held-out set. Called once per config by
+#' [fit_single_config()] when `compute_ad = TRUE`, alongside [fit_uq()] and
+#' sharing its calibration partition. Returns `NULL` on any failure or
+#' insufficient data, so one config's AD failure never aborts the fit.
+#'
+#' @details
+#' The training feature matrix is `extract_mold(fitted_workflow)$predictors` —
+#' the baked predictors the model actually sees (D1) — matching what [fit_uq()]
+#' uses, so AD and UQ live in the identical feature space. The calibration
+#' features are baked from `calib_data` through the same prepped recipe (D4), so
+#' the held-out distances are commensurate with the training ones. Both must run
+#' before the workflow is butchered (the mold is stripped by `butcher()`).
+#'
+#' @param fitted_workflow A trained `workflows::workflow` (pre-butcher).
+#' @param calib_data Data frame for threshold calibration — the same held-out
+#'   `calib_Fit` split UQ uses. `NULL` or under `N_CALIB_MIN` rows returns
+#'   `NULL`.
+#' @param level Numeric in (0, 1). OOD coverage level. Default `DEFAULT_AD_LEVEL`.
+#'
+#' @return List `list(centroid, cov_matrix, ad_thresholds, n_calib)`, or `NULL`.
+#'
+#' @seealso [compute_ad_metadata()], [compute_ad_thresholds()], [fit_uq()].
+#'
+#' @keywords internal
+#' @noRd
+fit_ad <- function(fitted_workflow,
+                   calib_data,
+                   level = DEFAULT_AD_LEVEL) {
+
+  ## Guard: NULL or insufficient calibration data -------------------------------
+
+  if (is.null(calib_data) || nrow(calib_data) < N_CALIB_MIN) {
+
+    return(NULL)
+
+  }
+
+  ## Training feature matrix — the baked predictors the model sees --------------
+
+  train_matrix <- as.matrix(workflows::extract_mold(fitted_workflow)$predictors)
+
+  if (nrow(train_matrix) < N_AD_TRAIN_MIN || anyNA(train_matrix)) {
+
+    return(NULL)
+
+  }
+
+  ## Centroid + shrinkage covariance (safely — degenerate matrices return NULL) -
+
+  md_safe <- safely_execute(
+    suppressWarnings(compute_ad_metadata(train_matrix)),
+    log_error          = FALSE,
+    capture_conditions = TRUE
+  )
+
+  if (!is.null(md_safe$error)) {
+
+    return(NULL)
+
+  }
+
+  ad_metadata <- md_safe$result
+
+  ## Calibration features — baked through the SAME prepped recipe ---------------
+
+  prepped_recipe <- workflows::extract_recipe(fitted_workflow, estimated = TRUE)
+
+  calib_safe <- safely_execute(
+    as.matrix(recipes::bake(
+      prepped_recipe,
+      new_data = calib_data,
+      recipes::all_predictors()
+    )),
+    log_error          = FALSE,
+    capture_conditions = TRUE
+  )
+
+  if (!is.null(calib_safe$error) || anyNA(calib_safe$result)) {
+
+    return(NULL)
+
+  }
+
+  calib_matrix <- calib_safe$result
+
+  ## Held-out conformal thresholds (D6) -----------------------------------------
+
+  thr_safe <- safely_execute(
+    compute_ad_thresholds(calib_matrix, ad_metadata, level = level),
+    log_error          = FALSE,
+    capture_conditions = TRUE
+  )
+
+  if (!is.null(thr_safe$error)) {
+
+    return(NULL)
+
+  }
+
+  list(
+    centroid      = ad_metadata$centroid,
+    cov_matrix    = ad_metadata$cov_matrix,
+    ad_thresholds = thr_safe$result,
+    n_calib       = nrow(calib_matrix)
+  )
+
+}

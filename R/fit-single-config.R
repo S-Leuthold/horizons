@@ -41,6 +41,7 @@ fit_single_config <- function(config_row,
                               final_bayesian_iter = DEFAULT_FINAL_BAYES_ITER,
                               grid_size           = DEFAULT_GRID_SIZE,
                               compute_uq          = FALSE,
+                              compute_ad          = FALSE,
                               allow_par           = FALSE,
                               seed                = 42L) {
 
@@ -81,6 +82,7 @@ fit_single_config <- function(config_row,
       test_metrics     = NULL,
       cv_metrics       = NULL,
       uq               = NULL,
+      ad               = NULL,
       warnings         = if (length(collected_warnings) > 0) collected_warnings else NULL,
       error_message    = error_msg,
       runtime_secs     = as.numeric(difftime(Sys.time(), start_time, units = "secs"))
@@ -493,6 +495,36 @@ fit_single_config <- function(config_row,
   }
 
   ## -----------------------------------------------------------------------
+  ## Step 13b: AD (must also run BEFORE butchering — needs extract_mold())
+  ## -----------------------------------------------------------------------
+  ## Shares the UQ calibration split (D7). Independent of UQ: fit_ad() returns
+  ## NULL on any failure, so AD degrades without touching the config's fit.
+
+  ad_result <- NULL
+
+  if (compute_ad && !is.null(calib_data)) {
+
+    ad_safe <- safely_execute(
+      fit_ad(
+        fitted_workflow = final_fit,
+        calib_data      = calib_data,
+        level           = DEFAULT_AD_LEVEL
+      ),
+      log_error          = FALSE,
+      capture_conditions = TRUE
+    )
+
+    if (is.null(ad_safe$error)) {
+
+      ad_result <- ad_safe$result
+
+    }
+
+    collect_from(ad_safe)
+
+  }
+
+  ## -----------------------------------------------------------------------
   ## Step 14: Butcher the final fit for storage
   ## -----------------------------------------------------------------------
 
@@ -532,6 +564,7 @@ fit_single_config <- function(config_row,
     test_metrics     = test_metrics,
     cv_metrics       = cv_metrics,
     uq               = uq_result,
+    ad               = ad_result,
     warnings         = if (length(collected_warnings) > 0) collected_warnings else NULL,
     error_message    = NA_character_,
     runtime_secs     = runtime
