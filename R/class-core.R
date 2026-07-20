@@ -791,6 +791,620 @@ validate_horizons_ensemble <- function(x) {
 }
 
 
+#' Validate a horizons_eval object's contract
+#'
+#' @description
+#' Structural validation of the `$evaluation` slot written by [evaluate()]
+#' (see `pipeline-evaluate.R`, "Store evaluation metadata"). Called once at
+#' the end of [evaluate()] so every promoted `horizons_eval` is certified
+#' against invariant I5 (`evaluation$results` complete; `best_config` is a
+#' real config). All checks are structural (types, columns, key membership) —
+#' nothing refits, so the cost is microseconds.
+#'
+#' @details
+#' Gate checks (abort immediately): the object inherits `horizons_eval` and
+#' `$evaluation` is a list.
+#'
+#' Accumulated checks (reported together, tree-style):
+#'
+#' 1. **Slot completeness**: the metadata keys `evaluate()` writes are present
+#'    (`results`, `best_config`, `rank_metric`, `split`, `n_train`, `n_test`,
+#'    `runtime_secs`, `timestamp`). Extra keys (e.g. `workers`) are tolerated.
+#' 2. **results**: data frame carrying `config_id`, `status`, and the six
+#'    metric columns (`rmse`, `rrmse`, `rsq`, `ccc`, `rpd`, `mae`); at least
+#'    one row; `config_id` values unique.
+#' 3. **best_config** (I5): a length-1 character present in
+#'    `results$config_id` — and, when the config table is reachable at
+#'    `x$config$configs$config_id`, present there too.
+#' 4. **rank_metric**: a length-1 character naming one of the six metrics.
+#' 5. **split**: an `rsplit` (the train/test partition `fit()` reuses).
+#' 6. **n_train / n_test**: single non-negative whole numbers.
+#' 7. **runtime_secs**: single non-negative numeric. **timestamp**: POSIXct.
+#'
+#' @param x `horizons_eval`. The object to validate.
+#'
+#' @return `horizons_eval`. The input object, unchanged, if validation passes.
+#'   Aborts with class `horizons_validation_error` on failure.
+#'
+#' @seealso [validate_horizons_fit()] for the finalized-model contract,
+#'   [validate_horizons_data()] for the base contract.
+#'
+#' @noRd
+validate_horizons_eval <- function(x) {
+
+  ## ---------------------------------------------------------------------------
+  ## Gate checks
+  ## ---------------------------------------------------------------------------
+
+  if (!inherits(x, "horizons_eval")) {
+
+    cli::cli_abort("{.arg x} must be a {.cls horizons_eval} object")
+
+  }
+
+  if (!is.list(x$evaluation)) {
+
+    cli::cli_abort("Object has no {.field evaluation} slot to validate")
+
+  }
+
+  ## ---------------------------------------------------------------------------
+  ## Collect errors for remaining checks
+  ## ---------------------------------------------------------------------------
+
+  errors <- character()
+  ev     <- x$evaluation
+
+  ## Slot completeness ----------------------------------------------------------
+
+  required_keys <- c("results", "best_config", "rank_metric", "split",
+                     "n_train", "n_test", "runtime_secs", "timestamp")
+
+  missing_keys <- setdiff(required_keys, names(ev))
+
+  if (length(missing_keys) > 0) {
+
+    key_list <- paste(missing_keys, collapse = ", ")
+    errors   <- c(errors, cli::format_inline("Metadata keys missing from {.field evaluation}: {key_list}"))
+
+  }
+
+  ## results (I5: complete metric table) ----------------------------------------
+
+  metric_cols  <- c("rmse", "rrmse", "rsq", "ccc", "rpd", "mae")
+  res          <- ev$results
+  res_valid    <- is.data.frame(res) &&
+                    all(c("config_id", "status", metric_cols) %in% names(res))
+
+  if (!res_valid) {
+
+    errors <- c(errors, cli::format_inline("{.field results} must be a data frame with {.field config_id}, {.field status}, and the six metric columns ({paste(metric_cols, collapse = ', ')})"))
+
+  } else {
+
+    if (nrow(res) == 0) {
+
+      errors <- c(errors, cli::format_inline("{.field results} has no rows; {.fn evaluate} must record at least one config"))
+
+    }
+
+    if (anyDuplicated(res$config_id) > 0) {
+
+      errors <- c(errors, cli::format_inline("Duplicate {.field config_id} values in {.field results}"))
+
+    }
+
+  }
+
+  ## best_config (I5: names a real config) --------------------------------------
+
+  bc <- ev$best_config
+
+  if (!is.character(bc) || length(bc) != 1 || is.na(bc)) {
+
+    errors <- c(errors, cli::format_inline("{.field best_config} must be a single {.cls character} config_id"))
+
+  } else {
+
+    if (res_valid && !bc %in% res$config_id) {
+
+      errors <- c(errors, cli::format_inline("{.field best_config} ({bc}) is not present in {.field results$config_id}"))
+
+    }
+
+    ## Cross-check against the config catalog when it is reachable — a
+    ## best_config that names no defined config means the ranking pointed at a
+    ## row that the config table never held.
+    cfg_ids <- x$config$configs$config_id
+
+    if (!is.null(cfg_ids) && !bc %in% cfg_ids) {
+
+      errors <- c(errors, cli::format_inline("{.field best_config} ({bc}) is not present in {.field config$configs$config_id}"))
+
+    }
+
+  }
+
+  ## rank_metric ----------------------------------------------------------------
+
+  rm <- ev$rank_metric
+
+  if (!is.character(rm) || length(rm) != 1 || !rm %in% metric_cols) {
+
+    errors <- c(errors, cli::format_inline("{.field rank_metric} must be one of: {paste(metric_cols, collapse = ', ')}"))
+
+  }
+
+  ## split ----------------------------------------------------------------------
+
+  if (!inherits(ev$split, "rsplit")) {
+
+    errors <- c(errors, cli::format_inline("{.field split} must be an {.cls rsplit} object"))
+
+  }
+
+  ## n_train / n_test -----------------------------------------------------------
+
+  for (nm in c("n_train", "n_test")) {
+
+    val <- ev[[nm]]
+
+    if (!is.numeric(val) || length(val) != 1 || is.na(val) ||
+        val < 0 || val != round(val)) {
+
+      errors <- c(errors, cli::format_inline("{.field {nm}} must be a single non-negative whole number"))
+
+    }
+
+  }
+
+  ## runtime / timestamp --------------------------------------------------------
+
+  if (!is.numeric(ev$runtime_secs) || length(ev$runtime_secs) != 1 ||
+      is.na(ev$runtime_secs) || ev$runtime_secs < 0) {
+
+    errors <- c(errors, cli::format_inline("{.field runtime_secs} must be a single non-negative numeric"))
+
+  }
+
+  if (!inherits(ev$timestamp, "POSIXct")) {
+
+    errors <- c(errors, cli::format_inline("{.field timestamp} must be POSIXct"))
+
+  }
+
+  ## ---------------------------------------------------------------------------
+  ## Report errors or return
+  ## ---------------------------------------------------------------------------
+
+  if (length(errors) > 0) {
+
+    cat(cli::col_red(cli::style_bold("! The horizons_eval object failed validation:\n")))
+
+    for (i in seq_along(errors)) {
+
+      branch <- if (i < length(errors)) "\u251C\u2500" else "\u2514\u2500"
+      cat(cli::col_red(paste0("   ", branch, " ", errors[i], "\n")))
+
+    }
+
+    cat("\n")
+    rlang::abort(
+      paste(c("Validation failed:", errors), collapse = "\n"),
+      class = "horizons_validation_error"
+    )
+
+  }
+
+  x
+
+}
+
+
+#' Validate a horizons_fit object's contract
+#'
+#' @description
+#' Structural validation of the `$models` slot written by [fit()] (see
+#' `pipeline-fit.R`, Step 6). Called once at the end of [fit()] so every
+#' promoted `horizons_fit` is certified against invariants I6 (workflow keys
+#' are a subset of config ids) and I7 (UQ keys are a subset of workflow
+#' keys), plus the `response_bound` guardrail contract the winsorization work
+#' introduced. All checks are structural — nothing predicts — so the cost is
+#' microseconds.
+#'
+#' @details
+#' A `horizons_fit` is also a `horizons_eval`, so this first delegates to
+#' [validate_horizons_eval()]; the evaluation slot must still hold.
+#'
+#' Gate checks (abort immediately): the object inherits `horizons_fit` and
+#' `$models` is a list.
+#'
+#' Accumulated checks (reported together, tree-style):
+#'
+#' 1. **Slot completeness**: all 13 contract keys present (`workflows`,
+#'    `n_models`, `best_config`, `rank_metric`, `predictor_schema`,
+#'    `response_bound`, `cv_predictions`, `results`, `split`, `row_index`,
+#'    `uq`, `timestamp`, `runtime_secs`). Extra keys are tolerated.
+#' 2. **workflows**: a non-empty named list; `n_models` equals its length.
+#' 3. **best_config**: a length-1 character that is one of the workflow keys.
+#' 4. **rank_metric**: a length-1 character.
+#' 5. **predictor_schema**: a non-empty character vector (the training-axis
+#'    columns the predict() schema gate reads).
+#' 6. **response_bound** (the winsorization guardrail): NULL — tolerated,
+#'    since objects fitted before the guardrail shipped legitimately lack it
+#'    and predict without a clamp — or a single positive finite numeric.
+#' 7. **I6 — workflow ⊆ config**: when `x$config$configs$config_id` is
+#'    reachable, every workflow key is a defined config id.
+#' 8. **I7 — uq ⊆ workflows**: `uq` is NULL, or a named list whose keys are a
+#'    subset of the workflow keys (not every fitted config earns a UQ bundle —
+#'    only successful ones with sufficient calibration data).
+#' 9. **row_index**: NULL, or a data frame with `.row` and `sample_id` columns.
+#' 10. **runtime_secs**: single non-negative numeric. **timestamp**: POSIXct.
+#'
+#' @param x `horizons_fit`. The object to validate.
+#'
+#' @return `horizons_fit`. The input object, unchanged, if validation passes.
+#'   Aborts with class `horizons_validation_error` on failure.
+#'
+#' @seealso [validate_horizons_eval()] for the parent contract,
+#'   [validate_horizons_ensemble()] for the ensemble contract.
+#'
+#' @noRd
+validate_horizons_fit <- function(x) {
+
+  ## ---------------------------------------------------------------------------
+  ## Gate checks
+  ## ---------------------------------------------------------------------------
+
+  if (!inherits(x, "horizons_fit")) {
+
+    cli::cli_abort("{.arg x} must be a {.cls horizons_fit} object")
+
+  }
+
+  if (!is.list(x$models)) {
+
+    cli::cli_abort("Object has no {.field models} slot to validate")
+
+  }
+
+  ## The evaluation contract is inherited — enforce it first. It aborts with
+  ## the same condition class on failure, so a bad parent slot surfaces here.
+  x <- validate_horizons_eval(x)
+
+  ## ---------------------------------------------------------------------------
+  ## Collect errors for remaining checks
+  ## ---------------------------------------------------------------------------
+
+  errors <- character()
+  md     <- x$models
+
+  ## Slot completeness ----------------------------------------------------------
+
+  contract_keys <- c("workflows", "n_models", "best_config", "rank_metric",
+                     "predictor_schema", "response_bound", "cv_predictions",
+                     "results", "split", "row_index", "uq", "timestamp",
+                     "runtime_secs")
+
+  missing_keys <- setdiff(contract_keys, names(md))
+
+  if (length(missing_keys) > 0) {
+
+    key_list <- paste(missing_keys, collapse = ", ")
+    errors   <- c(errors, cli::format_inline("Contract keys missing from {.field models}: {key_list}"))
+
+  }
+
+  ## workflows + n_models -------------------------------------------------------
+
+  wf        <- md$workflows
+  wf_keys   <- names(wf)
+  wf_valid  <- is.list(wf) && length(wf) > 0 && !is.null(wf_keys) &&
+                 all(nzchar(wf_keys))
+
+  if (!wf_valid) {
+
+    errors <- c(errors, cli::format_inline("{.field workflows} must be a non-empty named list of fitted workflows"))
+
+  }
+
+  if (!is.numeric(md$n_models) || length(md$n_models) != 1 ||
+      is.na(md$n_models) || md$n_models != length(wf)) {
+
+    errors <- c(errors, cli::format_inline("{.field n_models} must equal {.code length(workflows)} ({length(wf)})"))
+
+  }
+
+  ## best_config ----------------------------------------------------------------
+
+  bc <- md$best_config
+
+  if (!is.character(bc) || length(bc) != 1 || is.na(bc)) {
+
+    errors <- c(errors, cli::format_inline("{.field best_config} must be a single {.cls character} config_id"))
+
+  } else if (wf_valid && !bc %in% wf_keys) {
+
+    errors <- c(errors, cli::format_inline("{.field best_config} ({bc}) is not among the fitted {.field workflows}"))
+
+  }
+
+  ## rank_metric ----------------------------------------------------------------
+
+  if (!is.character(md$rank_metric) || length(md$rank_metric) != 1 ||
+      is.na(md$rank_metric)) {
+
+    errors <- c(errors, cli::format_inline("{.field rank_metric} must be a single {.cls character}"))
+
+  }
+
+  ## predictor_schema -----------------------------------------------------------
+
+  ps <- md$predictor_schema
+
+  if (!is.character(ps) || length(ps) == 0 || anyNA(ps)) {
+
+    errors <- c(errors, cli::format_inline("{.field predictor_schema} must be a non-empty character vector of training-axis columns"))
+
+  }
+
+  ## response_bound (the winsorization guardrail) -------------------------------
+  ## NULL is tolerated: objects fitted before the guardrail shipped carry no
+  ## bound and predict without a clamp (documented pre-clamp behavior). When
+  ## present it must be a single positive finite numeric — the clamp compares
+  ## predictions against it, so a non-positive or non-finite bound would
+  ## silently clamp everything or nothing.
+
+  rb <- md$response_bound
+
+  if (!is.null(rb)) {
+
+    if (!is.numeric(rb) || length(rb) != 1 || is.na(rb) ||
+        !is.finite(rb) || rb <= 0) {
+
+      errors <- c(errors, cli::format_inline("{.field response_bound} must be NULL or a single positive finite numeric"))
+
+    }
+
+  }
+
+  ## split ----------------------------------------------------------------------
+  ## Split F (train_F / test_F), the same partition the eval slot carries. The
+  ## eval validator shape-checks evaluation$split; the fit slot holds its own
+  ## copy, so shape-check it too (a corrupted models$split would otherwise pass
+  ## while evaluation$split stayed clean).
+
+  if (!inherits(md$split, "rsplit")) {
+
+    errors <- c(errors, cli::format_inline("{.field split} must be an {.cls rsplit} object"))
+
+  }
+
+  ## results --------------------------------------------------------------------
+  ## The fit-time per-config metric table (print/summary and downstream code
+  ## read it). Carries config_id + status + the six metrics, plus degraded/cv_*
+  ## columns; require the load-bearing subset.
+
+  fit_res       <- md$results
+  metric_cols   <- c("rmse", "rrmse", "rsq", "ccc", "rpd", "mae")
+
+  if (!is.data.frame(fit_res) ||
+      !all(c("config_id", "status", metric_cols) %in% names(fit_res))) {
+
+    errors <- c(errors, cli::format_inline("{.field results} must be a data frame with {.field config_id}, {.field status}, and the six metric columns ({paste(metric_cols, collapse = ', ')})"))
+
+  }
+
+  ## I6: workflow keys are a subset of config ids -------------------------------
+
+  cfg_ids <- x$config$configs$config_id
+
+  if (wf_valid && !is.null(cfg_ids)) {
+
+    unknown <- setdiff(wf_keys, cfg_ids)
+
+    if (length(unknown) > 0) {
+
+      id_list <- paste(unknown, collapse = ", ")
+      errors  <- c(errors, cli::format_inline("{.field workflows} keys not present in {.field config$configs$config_id}: {id_list}"))
+
+    }
+
+  }
+
+  ## I7: uq keys are a subset of workflow keys ----------------------------------
+  ## uq is NULL when compute_uq = FALSE or no config earned a bundle. When
+  ## present it is a per-config-keyed named list; its keys must be a subset of
+  ## the fitted workflows (a UQ bundle for a config with no fitted model would
+  ## never be reachable at predict time).
+
+  uq <- md$uq
+
+  if (!is.null(uq)) {
+
+    uq_keys <- names(uq)
+
+    if (!is.list(uq) || is.null(uq_keys) || !all(nzchar(uq_keys))) {
+
+      errors <- c(errors, cli::format_inline("{.field uq} must be NULL or a named list keyed by config_id"))
+
+    } else if (wf_valid) {
+
+      orphan <- setdiff(uq_keys, wf_keys)
+
+      if (length(orphan) > 0) {
+
+        id_list <- paste(orphan, collapse = ", ")
+        errors  <- c(errors, cli::format_inline("{.field uq} keys not present in {.field workflows}: {id_list}"))
+
+      }
+
+    }
+
+  }
+
+  ## row_index ------------------------------------------------------------------
+  ## The .row -> sample_id join-back map. Both columns are load-bearing: .row is
+  ## the rsample alignment key, sample_id is what predictions re-attach to. fit()
+  ## always writes both (pipeline-fit.R), so require both — a row_index that lost
+  ## sample_id can no longer map integer rows back to sample identifiers.
+
+  ri <- md$row_index
+
+  if (!is.null(ri) &&
+      (!is.data.frame(ri) || !all(c(".row", "sample_id") %in% names(ri)))) {
+
+    errors <- c(errors, cli::format_inline("{.field row_index} must be NULL or a data frame with {.field .row} and {.field sample_id} columns"))
+
+  }
+
+  ## runtime / timestamp --------------------------------------------------------
+
+  if (!is.numeric(md$runtime_secs) || length(md$runtime_secs) != 1 ||
+      is.na(md$runtime_secs) || md$runtime_secs < 0) {
+
+    errors <- c(errors, cli::format_inline("{.field runtime_secs} must be a single non-negative numeric"))
+
+  }
+
+  if (!inherits(md$timestamp, "POSIXct")) {
+
+    errors <- c(errors, cli::format_inline("{.field timestamp} must be POSIXct"))
+
+  }
+
+  ## ---------------------------------------------------------------------------
+  ## Report errors or return
+  ## ---------------------------------------------------------------------------
+
+  if (length(errors) > 0) {
+
+    cat(cli::col_red(cli::style_bold("! The horizons_fit object failed validation:\n")))
+
+    for (i in seq_along(errors)) {
+
+      branch <- if (i < length(errors)) "\u251C\u2500" else "\u2514\u2500"
+      cat(cli::col_red(paste0("   ", branch, " ", errors[i], "\n")))
+
+    }
+
+    cat("\n")
+    rlang::abort(
+      paste(c("Validation failed:", errors), collapse = "\n"),
+      class = "horizons_validation_error"
+    )
+
+  }
+
+  x
+
+}
+
+
+## -----------------------------------------------------------------------------
+## Stage predicates + capability checks
+## -----------------------------------------------------------------------------
+##
+## Lightweight, side-effect-free tests of an object's pipeline stage and
+## capabilities. Stage predicates are pure `inherits()` checks against the
+## class hierarchy (horizons_data -> horizons_eval -> horizons_fit ->
+## horizons_ensemble); has_uq() inspects the fitted UQ slot. All are safe to
+## call on any object (including non-horizons ones) — they answer FALSE rather
+## than erroring.
+##
+## -----------------------------------------------------------------------------
+
+
+#' Has the object been evaluated?
+#'
+#' @description
+#' `TRUE` if `x` has passed through [evaluate()] — i.e. it carries the
+#' `horizons_eval` class (and, by the hierarchy, so does every `horizons_fit`
+#' and `horizons_ensemble`).
+#'
+#' @param x Any object.
+#'
+#' @return `logical(1)`.
+#'
+#' @seealso [is_fitted()], [is_ensembled()].
+#'
+#' @noRd
+is_evaluated <- function(x) {
+
+  inherits(x, "horizons_eval")
+
+}
+
+
+#' Has the object been fitted?
+#'
+#' @description
+#' `TRUE` if `x` has passed through [fit()] — i.e. it carries the
+#' `horizons_fit` class (and, by the hierarchy, so does every
+#' `horizons_ensemble`).
+#'
+#' @param x Any object.
+#'
+#' @return `logical(1)`.
+#'
+#' @seealso [is_evaluated()], [is_ensembled()].
+#'
+#' @noRd
+is_fitted <- function(x) {
+
+  inherits(x, "horizons_fit")
+
+}
+
+
+#' Has an ensemble been built on the object?
+#'
+#' @description
+#' `TRUE` if `x` has passed through [ensemble()] — i.e. it carries the
+#' `horizons_ensemble` class.
+#'
+#' @param x Any object.
+#'
+#' @return `logical(1)`.
+#'
+#' @seealso [is_evaluated()], [is_fitted()].
+#'
+#' @noRd
+is_ensembled <- function(x) {
+
+  inherits(x, "horizons_ensemble")
+
+}
+
+
+#' Does the fitted object carry uncertainty quantification?
+#'
+#' @description
+#' `TRUE` if [fit()] calibrated conformal UQ bundles that survive on the
+#' object — i.e. `x$models$uq` is a non-empty list. Formalizes the inline
+#' `!is.null(x$models$uq) && length(x$models$uq) > 0` test used by the print
+#' and summary methods. Safe on any object: a missing `models` slot answers
+#' `FALSE`.
+#'
+#' @details
+#' This checks the single-model UQ slot populated by [fit()] (per-config CQR
+#' bundles). It does NOT inspect the ensemble UQ slot (`x$ensemble$uq`),
+#' which is a separate CV+ bundle written by [ensemble()].
+#'
+#' @param x Any object (typically `horizons_fit`).
+#'
+#' @return `logical(1)`.
+#'
+#' @seealso [is_fitted()], [validate_horizons_fit()].
+#'
+#' @noRd
+has_uq <- function(x) {
+
+  is.list(x) && !is.null(x$models$uq) && length(x$models$uq) > 0
+
+}
+
+
 #' Print method for horizons_data objects
 #'
 #' @description
@@ -1022,10 +1636,10 @@ print.horizons_data <- function(x, ...) {
     }
 
     ## UQ status
-    has_uq <- !is.null(x$models$uq) && length(x$models$uq) > 0
-    branch <- "\u2514\u2500"
+    uq_present <- has_uq(x)
+    branch     <- "\u2514\u2500"
 
-    if (has_uq) {
+    if (uq_present) {
 
       cat(paste0("   ", branch, " UQ: ", cli::col_green("enabled"),
                  " (", length(x$models$uq), " configs)\n"))
@@ -1461,9 +2075,9 @@ summary.horizons_data <- function(object, ...) {
     }
 
     ## UQ status
-    has_uq <- !is.null(x$models$uq) && length(x$models$uq) > 0
+    uq_present <- has_uq(x)
 
-    if (has_uq) {
+    if (uq_present) {
 
       uq_bundle  <- x$models$uq[[1]]
       coverage   <- if (!is.null(uq_bundle$oof_coverage)) {
