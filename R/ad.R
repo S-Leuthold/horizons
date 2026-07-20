@@ -419,3 +419,86 @@ fit_ad <- function(fitted_workflow,
   )
 
 }
+
+
+#' Compute AD distance + flag for new samples (prediction phase)
+#'
+#' @description
+#' Bakes `new_spectra` through the fitted workflow's recipe to reach the
+#' model's feature space, then computes each sample's squared Mahalanobis
+#' distance to the training centroid and its AD bin. Returns the two predict-time
+#' AD columns, or `NULL` on any failure (so predict degrades to no-AD rather
+#' than erroring).
+#'
+#' @details
+#' The recipe is re-extracted from the (butchered) stored `workflow` rather than
+#' cached in the AD bundle — the same recipe the model was fit with, so new
+#' samples land in the identical feature space the centroid/covariance were
+#' estimated in (D4). Column-name alignment is re-checked inside
+#' [calculate_ad_distance()].
+#'
+#' @param workflow The config's stored (butchered) fitted workflow.
+#' @param ad_bundle The config's AD bundle from `models$ad[[config_id]]`
+#'   (`centroid`, `cov_matrix`, `ad_thresholds`).
+#' @param new_spectra Tibble from `resolve_new_data()` (sample_id + predictors).
+#'
+#' @return Tibble with `.ad_distance` (numeric, squared) and `.ad_flag`
+#'   (factor Q1-Q4/OOD), one row per sample; or `NULL` on failure.
+#'
+#' @seealso [fit_ad()], [calculate_ad_distance()], [assign_ad_bin()].
+#'
+#' @keywords internal
+#' @noRd
+predict_ad <- function(workflow, ad_bundle, new_spectra) {
+
+  if (is.null(ad_bundle)) {
+
+    return(NULL)
+
+  }
+
+  ## Bake new_data through the SAME recipe the model was fit with ---------------
+
+  bake_safe <- safely_execute(
+    {
+      prepped_recipe <- workflows::extract_recipe(workflow, estimated = TRUE)
+      as.matrix(recipes::bake(
+        prepped_recipe,
+        new_data = new_spectra,
+        recipes::all_predictors()
+      ))
+    },
+    log_error          = FALSE,
+    capture_conditions = TRUE
+  )
+
+  if (!is.null(bake_safe$error) || is.null(bake_safe$result) ||
+      anyNA(bake_safe$result)) {
+
+    return(NULL)
+
+  }
+
+  ## Distance + bin (safely — a covariance/alignment mismatch returns NULL) -----
+
+  ad_safe <- safely_execute(
+    {
+      metadata  <- list(centroid   = ad_bundle$centroid,
+                        cov_matrix = ad_bundle$cov_matrix)
+      distances <- calculate_ad_distance(bake_safe$result, metadata)
+      flags     <- assign_ad_bin(distances, ad_bundle$ad_thresholds)
+      tibble::tibble(.ad_distance = distances, .ad_flag = flags)
+    },
+    log_error          = FALSE,
+    capture_conditions = TRUE
+  )
+
+  if (!is.null(ad_safe$error)) {
+
+    return(NULL)
+
+  }
+
+  ad_safe$result
+
+}

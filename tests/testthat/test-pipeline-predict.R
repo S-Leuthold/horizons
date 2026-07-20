@@ -51,9 +51,15 @@ make_predict_eval <- function(n = 300, n_wn = 10, transformation = "none", seed 
     validation = list(passed = TRUE, outliers = list(removed = FALSE)),
     evaluation = list(
       results     = tibble::tibble(config_id = "cfg_001", status = "success",
-                                   rpd = 1.5),
+                                   rmse = 0.4, rrmse = 0.1, rsq = 0.8,
+                                   ccc = 0.85, rpd = 1.5, mae = 0.3),
       best_config = "cfg_001",
-      rank_metric = "rpd"
+      rank_metric = "rpd",
+      split        = rsample::initial_split(df, prop = 0.8),
+      n_train      = as.integer(round(nrow(df) * 0.8)),
+      n_test       = nrow(df) - as.integer(round(nrow(df) * 0.8)),
+      runtime_secs = 1,
+      timestamp    = Sys.time()
     ),
     models = NULL, ensemble = NULL, artifacts = NULL
   )
@@ -395,6 +401,71 @@ describe("predict.horizons_fit() - response bound guardrail", {
 
     expect_true(all(p$.pred <= bound))
     expect_true(any(p$.pred_upper > bound))
+
+  })
+
+})
+
+
+## ---------------------------------------------------------------------------
+## Applicability domain columns
+## ---------------------------------------------------------------------------
+
+describe("predict.horizons_fit() - applicability domain", {
+
+  ## fitted_fixture is fit with compute_ad = TRUE by default (n = 300 → the
+  ## calibration split clears N_CALIB_MIN), so it carries an AD bundle.
+  new_df <- make_new_spectra(n = 12)
+
+  it("emits .ad_distance and .ad_flag when the object has an AD bundle", {
+
+    skip_if_not(has_ad(fitted_fixture))
+
+    p <- predict(fitted_fixture, new_df, interval = FALSE)
+
+    expect_true(all(c(".ad_distance", ".ad_flag") %in% names(p)))
+    expect_type(p$.ad_distance, "double")
+    expect_true(all(p$.ad_distance >= 0))
+    expect_s3_class(p$.ad_flag, "factor")
+    expect_true(all(levels(p$.ad_flag) == c("Q1", "Q2", "Q3", "Q4", "OOD")))
+
+  })
+
+  it("flags far-shifted spectra as OOD", {
+
+    skip_if_not(has_ad(fitted_fixture))
+
+    ood_df <- new_df
+    wn     <- grep("^wn_", names(ood_df))
+    ood_df[, wn] <- ood_df[, wn] + 10        # shift far off the training axis
+
+    p <- predict(fitted_fixture, ood_df, interval = FALSE)
+    expect_true(mean(p$.ad_flag == "OOD") > 0.5)
+
+  })
+
+  it("abstain_ood = TRUE NAs the prediction but preserves .ad_distance", {
+
+    skip_if_not(has_ad(fitted_fixture))
+
+    ood_df <- new_df
+    wn     <- grep("^wn_", names(ood_df))
+    ood_df[, wn] <- ood_df[, wn] + 10
+
+    p <- predict(fitted_fixture, ood_df, interval = FALSE, abstain_ood = TRUE)
+
+    ood <- p$.ad_flag == "OOD"
+    expect_true(all(is.na(p$.pred[ood])))          # abstained
+    expect_true(all(!is.na(p$.ad_distance)))       # distance always preserved
+
+  })
+
+  it("abstain_ood = FALSE (default) leaves predictions intact", {
+
+    skip_if_not(has_ad(fitted_fixture))
+
+    p <- predict(fitted_fixture, new_df, interval = FALSE)
+    expect_true(all(!is.na(p$.pred)))
 
   })
 
