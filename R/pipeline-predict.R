@@ -38,6 +38,11 @@ NULL
 #' @param interval Logical. Return conformal prediction intervals when UQ is
 #'   available? Default `TRUE`. Ignored (with a note) for configs that have no
 #'   UQ bundle.
+#' @param abstain_ood Logical. When `TRUE`, `.pred` (and any interval bounds)
+#'   are set to `NA` for samples flagged out-of-domain (`.ad_flag == "OOD"`),
+#'   while `.ad_distance`/`.ad_flag` are preserved so the caller can see how far
+#'   out each sample was. Default `FALSE` (report AD, predict for all samples).
+#'   Has no effect on configs without an AD bundle.
 #' @param ... Unused; present for S3 method consistency.
 #'
 #' @return A tibble in long format, one row per sample (per config when
@@ -50,6 +55,10 @@ NULL
 #'       available), original scale.}
 #'     \item{.pred_upper}{Upper interval bound.}
 #'     \item{.interval_width}{`.pred_upper - .pred_lower`.}
+#'     \item{.ad_distance}{Squared Mahalanobis distance to the training centroid
+#'       in model feature space (if the config has an AD bundle).}
+#'     \item{.ad_flag}{Applicability-domain bin: `Q1`-`Q4` (within domain,
+#'       increasing distance) or `OOD` (out-of-domain).}
 #'   }
 #'
 #' @details
@@ -60,9 +69,11 @@ NULL
 #' therefore arrive on the same wavenumber axis the model was trained on.
 #' `predict()` validates the predictor schema and errors if it does not match.
 #'
-#' Applicability-domain flags (`.ad_flag`, `.ad_distance`) are not yet emitted;
-#' applicability domain is deferred in v1 `fit()`, so the object stores nothing
-#' to populate them.
+#' Applicability-domain columns (`.ad_distance`, `.ad_flag`) are emitted per
+#' config when the object carries an AD bundle (`fit(compute_ad = TRUE)`). The
+#' distance is a squared Mahalanobis distance in the model's feature space; the
+#' flag bins it against held-out-calibrated thresholds. Set `abstain_ood = TRUE`
+#' to `NA` predictions for out-of-domain samples while keeping the AD columns.
 #'
 #' **Response upper bound (guardrail).** Point predictions are winsorized to
 #' `models$response_bound` (max training outcome times 1.5, stored by [fit()])
@@ -90,8 +101,9 @@ NULL
 #' @exportS3Method stats::predict horizons_fit
 predict.horizons_fit <- function(object,
                                  new_data,
-                                 config   = "best",
-                                 interval = TRUE,
+                                 config      = "best",
+                                 interval    = TRUE,
+                                 abstain_ood = FALSE,
                                  ...) {
 
   ## -------------------------------------------------------------------------
@@ -144,7 +156,8 @@ predict.horizons_fit <- function(object,
         object      = object,
         config_id   = cid,
         new_spectra = new_spectra,
-        interval    = interval
+        interval    = interval,
+        abstain_ood = abstain_ood
       )
 
     }
@@ -346,11 +359,15 @@ resolve_config_ids <- function(object, config) {
 #'   `FALSE` inside ensemble machinery, where member predictions are features —
 #'   they must match the raw member OOF the meta-learner trained and calibrated
 #'   on, and the guardrail is applied once at the ensemble output instead.
-#' @return A tibble: sample_id, config_id, .pred (+ interval columns).
+#' @param abstain_ood Logical; when `TRUE`, `.pred` and interval bounds are set
+#'   to `NA` for samples flagged out-of-domain (`.ad_flag == "OOD"`), while
+#'   `.ad_distance`/`.ad_flag` are preserved. `FALSE` (default) leaves
+#'   predictions untouched and only reports the AD columns.
+#' @return A tibble: sample_id, config_id, .pred (+ interval + AD columns).
 #' @keywords internal
 #' @noRd
 predict_one_config <- function(object, config_id, new_spectra, interval,
-                               clamp = TRUE) {
+                               clamp = TRUE, abstain_ood = FALSE) {
 
   workflow <- object$models$workflows[[config_id]]
 
@@ -415,27 +432,64 @@ predict_one_config <- function(object, config_id, new_spectra, interval,
 
   uq <- object$models$uq[[config_id]]
 
-  if (!interval || is.null(uq)) {
+  if (interval && !is.null(uq)) {
 
-    return(out)
+    interval_cols <- predict_intervals(
+      uq          = uq,
+      point_pred  = point_pred,
+      new_spectra = new_spectra
+    )
+
+    ## predict_intervals() returns NULL if quantile prediction fails — degrade
+    ## gracefully to point-only rather than erroring.
+    if (!is.null(interval_cols)) {
+
+      out <- dplyr::bind_cols(out, interval_cols)
+
+    }
 
   }
 
-  interval_cols <- predict_intervals(
-    uq          = uq,
-    point_pred  = point_pred,
+  ## -------------------------------------------------------------------------
+  ## Applicability domain — .ad_distance / .ad_flag when a bundle exists
+  ## -------------------------------------------------------------------------
+  ## Independent of intervals: AD reports even for point-only predictions. Old
+  ## objects without an AD bundle (or a failed bake) degrade to no AD columns.
+
+  ad_cols <- predict_ad(
+    workflow    = workflow,
+    ad_bundle   = object$models$ad[[config_id]],
     new_spectra = new_spectra
   )
 
-  ## predict_intervals() returns NULL if quantile prediction fails — degrade
-  ## gracefully to point-only rather than erroring.
-  if (is.null(interval_cols)) {
+  if (!is.null(ad_cols)) {
 
-    return(out)
+    out <- dplyr::bind_cols(out, ad_cols)
+
+    ## Abstention: NA out predictions for out-of-domain samples, keeping the AD
+    ## columns so the caller can see how far out each sample was. Interval
+    ## bounds are NA'd too — an interval on an abstained prediction is
+    ## meaningless. .ad_distance / .ad_flag are deliberately preserved.
+    if (abstain_ood) {
+
+      ood <- out$.ad_flag == "OOD"
+
+      if (any(ood)) {
+
+        pred_cols <- intersect(
+          c(".pred", ".pred_lower", ".pred_upper", ".interval_width"),
+          names(out)
+        )
+
+        for (col in pred_cols) out[[col]][ood] <- NA_real_
+
+      }
+
+    }
 
   }
 
-  dplyr::bind_cols(out, interval_cols)
+  out
 
 }
 
