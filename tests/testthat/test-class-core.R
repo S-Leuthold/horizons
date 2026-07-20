@@ -1187,3 +1187,391 @@ test_that("validate_horizons_ensemble rejects a malformed uq bundle", {
                class = "horizons_validation_error")
 
 })
+
+
+## ----------------------------------------------------------------------------
+## validate_horizons_eval()
+## ----------------------------------------------------------------------------
+
+## A minimal valid horizons_eval, built inline (the test-class-core idiom). The
+## split slot only needs to satisfy inherits(., "rsplit"); the validator does
+## not inspect its contents, so a classed empty list stands in for a real one.
+make_valid_eval <- function() {
+
+  results <- tibble::tibble(
+    config_id = c("cfg_a", "cfg_b"),
+    status    = c("success", "success"),
+    rmse      = c(1.0, 2.0),  rrmse = c(0.1, 0.2),
+    rsq       = c(0.9, 0.8),  ccc   = c(0.9, 0.8),
+    rpd       = c(2.0, 1.5),  mae   = c(0.8, 1.1)
+  )
+
+  obj <- list(
+    config = list(configs = tibble::tibble(config_id = c("cfg_a", "cfg_b"))),
+    evaluation = list(
+      results      = results,
+      best_config  = "cfg_a",
+      rank_metric  = "rpd",
+      split        = structure(list(), class = c("rsplit", "list")),
+      n_train      = 80L,
+      n_test       = 20L,
+      workers      = 4L,
+      runtime_secs = 12.3,
+      timestamp    = Sys.time()
+    )
+  )
+
+  class(obj) <- c("horizons_eval", "horizons_data", "list")
+  obj
+
+}
+
+test_that("validate_horizons_eval passes a well-formed evaluation slot", {
+
+  ## Arrange
+  obj <- make_valid_eval()
+
+  ## Act & Assert
+  expect_identical(validate_horizons_eval(obj), obj)
+
+})
+
+test_that("validate_horizons_eval tolerates the optional workers key being absent", {
+
+  ## `workers` is not a required contract key — its absence must not fail.
+  obj <- make_valid_eval()
+  obj$evaluation$workers <- NULL
+
+  expect_identical(validate_horizons_eval(obj), obj)
+
+})
+
+test_that("validate_horizons_eval gates on class and slot presence", {
+
+  ## Not a horizons_eval
+  expect_error(validate_horizons_eval(list()), "horizons_eval")
+
+  ## Classed but no evaluation slot
+  hollow <- structure(list(), class = c("horizons_eval", "list"))
+  expect_error(validate_horizons_eval(hollow), "evaluation")
+
+})
+
+test_that("validate_horizons_eval enforces I5: best_config names a real config", {
+
+  ## best_config absent from results
+  ghost_result <- make_valid_eval()
+  ghost_result$evaluation$best_config <- "cfg_ghost"
+  expect_error(
+    suppressMessages(validate_horizons_eval(ghost_result)),
+    class = "horizons_validation_error"
+  )
+
+  ## best_config present in results but not in the config catalog
+  ghost_config <- make_valid_eval()
+  ghost_config$evaluation$results$config_id <- c("cfg_x", "cfg_b")
+  ghost_config$evaluation$best_config       <- "cfg_x"
+  expect_error(
+    suppressMessages(validate_horizons_eval(ghost_config)),
+    class = "horizons_validation_error"
+  )
+
+})
+
+test_that("validate_horizons_eval rejects a malformed results table", {
+
+  ## Missing a metric column
+  no_rpd <- make_valid_eval()
+  no_rpd$evaluation$results$rpd <- NULL
+  expect_error(suppressMessages(validate_horizons_eval(no_rpd)),
+               class = "horizons_validation_error")
+
+  ## Zero rows
+  empty <- make_valid_eval()
+  empty$evaluation$results <- empty$evaluation$results[0, ]
+  empty$evaluation$best_config <- "cfg_a"
+  expect_error(suppressMessages(validate_horizons_eval(empty)),
+               class = "horizons_validation_error")
+
+  ## Duplicate config_id
+  dup <- make_valid_eval()
+  dup$evaluation$results$config_id <- c("cfg_a", "cfg_a")
+  expect_error(suppressMessages(validate_horizons_eval(dup)),
+               class = "horizons_validation_error")
+
+})
+
+test_that("validate_horizons_eval rejects an unknown rank_metric", {
+
+  obj <- make_valid_eval()
+  obj$evaluation$rank_metric <- "banana"
+  expect_error(suppressMessages(validate_horizons_eval(obj)),
+               class = "horizons_validation_error")
+
+})
+
+test_that("validate_horizons_eval rejects a non-rsplit split", {
+
+  obj <- make_valid_eval()
+  obj$evaluation$split <- list()
+  expect_error(suppressMessages(validate_horizons_eval(obj)),
+               class = "horizons_validation_error")
+
+})
+
+test_that("validate_horizons_eval rejects fractional or negative sample counts", {
+
+  frac <- make_valid_eval()
+  frac$evaluation$n_train <- 80.5
+  expect_error(suppressMessages(validate_horizons_eval(frac)),
+               class = "horizons_validation_error")
+
+  neg <- make_valid_eval()
+  neg$evaluation$n_test <- -1L
+  expect_error(suppressMessages(validate_horizons_eval(neg)),
+               class = "horizons_validation_error")
+
+})
+
+
+## ----------------------------------------------------------------------------
+## validate_horizons_fit()
+## ----------------------------------------------------------------------------
+
+## A minimal valid horizons_fit built on top of make_valid_eval() — a fit is
+## also an eval, so it carries a valid evaluation slot (the validator delegates
+## to validate_horizons_eval first). Workflows are structural stubs: the fit
+## validator checks names + list-ness, not workflow-trained-ness.
+make_valid_fit <- function() {
+
+  obj <- make_valid_eval()
+
+  results <- obj$evaluation$results
+
+  obj$models <- list(
+    workflows        = list(cfg_a = structure(list(), class = "workflow"),
+                            cfg_b = structure(list(), class = "workflow")),
+    n_models         = 2L,
+    best_config      = "cfg_a",
+    rank_metric      = "rpd",
+    predictor_schema = c("4000", "3999", "3998"),
+    response_bound   = 45.2,
+    cv_predictions   = tibble::tibble(),
+    results          = results,
+    split            = obj$evaluation$split,
+    row_index        = tibble::tibble(.row = 1:80,
+                                      sample_id = paste0("S", 1:80)),
+    uq               = list(cfg_a = list(quantile_model = 1)),
+    timestamp        = Sys.time(),
+    runtime_secs     = 30.1
+  )
+
+  class(obj) <- c("horizons_fit", "horizons_eval", "horizons_data", "list")
+  obj
+
+}
+
+test_that("validate_horizons_fit passes a well-formed models slot", {
+
+  obj <- make_valid_fit()
+  expect_identical(validate_horizons_fit(obj), obj)
+
+})
+
+test_that("validate_horizons_fit tolerates a NULL response_bound (pre-clamp objects)", {
+
+  ## Objects fitted before the winsorization guardrail shipped carry no bound
+  ## and predict without a clamp — the validator must accept that. `[<-` with
+  ## list(NULL) sets NULL while KEEPING the key (so the completeness check still
+  ## sees it).
+  obj <- make_valid_fit()
+  obj$models["response_bound"] <- list(NULL)
+
+  expect_identical(validate_horizons_fit(obj), obj)
+
+})
+
+test_that("validate_horizons_fit tolerates a NULL uq slot (compute_uq = FALSE)", {
+
+  obj <- make_valid_fit()
+  obj$models["uq"] <- list(NULL)
+
+  expect_identical(validate_horizons_fit(obj), obj)
+
+})
+
+test_that("validate_horizons_fit gates on class and slot presence", {
+
+  ## Not a horizons_fit
+  expect_error(validate_horizons_fit(list()), "horizons_fit")
+
+  ## Classed but no models slot
+  hollow <- structure(list(), class = c("horizons_fit", "list"))
+  expect_error(validate_horizons_fit(hollow), "models")
+
+})
+
+test_that("validate_horizons_fit delegates to the evaluation contract", {
+
+  ## A broken parent evaluation slot must surface through the fit validator.
+  obj <- make_valid_fit()
+  obj$evaluation$best_config <- "cfg_ghost"
+  expect_error(suppressMessages(validate_horizons_fit(obj)),
+               class = "horizons_validation_error")
+
+})
+
+test_that("validate_horizons_fit enforces the response_bound guardrail contract", {
+
+  ## Negative bound: the clamp would compare predictions against a nonsense
+  ## threshold, silently winsorizing everything.
+  neg <- make_valid_fit()
+  neg$models$response_bound <- -5
+  expect_error(suppressMessages(validate_horizons_fit(neg)),
+               class = "horizons_validation_error")
+
+  ## Non-finite bound
+  inf <- make_valid_fit()
+  inf$models$response_bound <- Inf
+  expect_error(suppressMessages(validate_horizons_fit(inf)),
+               class = "horizons_validation_error")
+
+  ## Length > 1
+  vec <- make_valid_fit()
+  vec$models$response_bound <- c(45.2, 90.4)
+  expect_error(suppressMessages(validate_horizons_fit(vec)),
+               class = "horizons_validation_error")
+
+})
+
+test_that("validate_horizons_fit enforces I6: workflow keys are a subset of config ids", {
+
+  obj <- make_valid_fit()
+  names(obj$models$workflows) <- c("cfg_a", "cfg_ghost")
+  obj$models$n_models <- 2L
+  expect_error(suppressMessages(validate_horizons_fit(obj)),
+               class = "horizons_validation_error")
+
+})
+
+test_that("validate_horizons_fit enforces I7: uq keys are a subset of workflow keys", {
+
+  ## A UQ bundle keyed by a config with no fitted workflow would be unreachable
+  ## at predict time.
+  obj <- make_valid_fit()
+  obj$models$uq <- list(cfg_ghost = list(quantile_model = 1))
+  expect_error(suppressMessages(validate_horizons_fit(obj)),
+               class = "horizons_validation_error")
+
+})
+
+test_that("validate_horizons_fit rejects an n_models / workflows mismatch", {
+
+  obj <- make_valid_fit()
+  obj$models$n_models <- 5L
+  expect_error(suppressMessages(validate_horizons_fit(obj)),
+               class = "horizons_validation_error")
+
+})
+
+test_that("validate_horizons_fit rejects an empty predictor_schema", {
+
+  obj <- make_valid_fit()
+  obj$models$predictor_schema <- character(0)
+  expect_error(suppressMessages(validate_horizons_fit(obj)),
+               class = "horizons_validation_error")
+
+})
+
+test_that("validate_horizons_fit rejects a best_config not among workflows", {
+
+  obj <- make_valid_fit()
+  obj$models$best_config <- "cfg_b"
+  names(obj$models$workflows) <- c("cfg_a", "cfg_c")   # cfg_b now absent
+  obj$models$uq <- NULL                                # avoid an unrelated I7 hit
+  expect_error(suppressMessages(validate_horizons_fit(obj)),
+               class = "horizons_validation_error")
+
+})
+
+
+## ----------------------------------------------------------------------------
+## Stage predicates + has_uq()
+## ----------------------------------------------------------------------------
+
+test_that("stage predicates track the class hierarchy", {
+
+  data <- structure(list(),
+                    class = c("horizons_data", "list"))
+  eval <- structure(list(),
+                    class = c("horizons_eval", "horizons_data", "list"))
+  fit  <- structure(list(),
+                    class = c("horizons_fit", "horizons_eval",
+                              "horizons_data", "list"))
+  ens  <- structure(list(),
+                    class = c("horizons_ensemble", "horizons_fit",
+                              "horizons_eval", "horizons_data", "list"))
+
+  ## is_evaluated: TRUE from horizons_eval down
+  expect_false(is_evaluated(data))
+  expect_true(is_evaluated(eval))
+  expect_true(is_evaluated(fit))
+  expect_true(is_evaluated(ens))
+
+  ## is_fitted: TRUE from horizons_fit down
+  expect_false(is_fitted(eval))
+  expect_true(is_fitted(fit))
+  expect_true(is_fitted(ens))
+
+  ## is_ensembled: TRUE only for horizons_ensemble
+  expect_false(is_ensembled(fit))
+  expect_true(is_ensembled(ens))
+
+})
+
+test_that("stage predicates are safe on non-horizons objects", {
+
+  expect_false(is_evaluated(42))
+  expect_false(is_fitted("x"))
+  expect_false(is_ensembled(list()))
+
+})
+
+test_that("has_uq reflects the fitted UQ slot", {
+
+  with_uq <- structure(list(models = list(uq = list(cfg_a = 1))),
+                       class = c("horizons_fit", "horizons_eval",
+                                 "horizons_data", "list"))
+  expect_true(has_uq(with_uq))
+
+  ## NULL uq (compute_uq = FALSE)
+  no_uq <- structure(list(models = list(uq = NULL)),
+                     class = c("horizons_fit", "horizons_eval",
+                               "horizons_data", "list"))
+  expect_false(has_uq(no_uq))
+
+  ## empty-list uq
+  empty_uq <- structure(list(models = list(uq = list())),
+                        class = c("horizons_fit", "horizons_eval",
+                                  "horizons_data", "list"))
+  expect_false(has_uq(empty_uq))
+
+})
+
+test_that("has_uq is safe on objects without a models slot", {
+
+  expect_false(has_uq(list()))
+  expect_false(has_uq(structure(list(), class = c("horizons_data", "list"))))
+
+})
+
+test_that("has_uq is safe on atomic (non-list) inputs", {
+
+  ## `$` errors on atomic vectors, so the is.list() guard is what keeps the
+  ## "safe on any object" contract honest.
+  expect_false(has_uq(42))
+  expect_false(has_uq("x"))
+  expect_false(has_uq(TRUE))
+  expect_false(has_uq(NULL))
+
+})

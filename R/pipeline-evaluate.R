@@ -695,6 +695,11 @@ evaluate <- function(x,
 
   class(x) <- c("horizons_eval", "horizons_data", "list")
 
+  ## Certify the contract before returning: structural checks only (see
+  ## validate_horizons_eval), so every evaluate() return matches invariant I5
+  ## (results complete; best_config names a real config).
+  x <- validate_horizons_eval(x)
+
   ## -----------------------------------------------------------------------
   ## Step 13: Render tree footer
   ## -----------------------------------------------------------------------

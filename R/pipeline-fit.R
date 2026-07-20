@@ -565,6 +565,12 @@ fit <- function(x,
 
   class(x) <- c("horizons_fit", "horizons_eval", "horizons_data", "list")
 
+  ## Certify the contract before returning: structural checks only (see
+  ## validate_horizons_fit), so every fit() return matches invariants I6/I7
+  ## (workflow keys subset config ids; uq keys subset workflow keys) and the
+  ## response_bound guardrail contract.
+  x <- validate_horizons_fit(x)
+
   ## -----------------------------------------------------------------------
   ## Step 7: Tree footer / summary
   ## -----------------------------------------------------------------------
