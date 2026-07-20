@@ -1362,6 +1362,8 @@ make_valid_fit <- function() {
     row_index        = tibble::tibble(.row = 1:80,
                                       sample_id = paste0("S", 1:80)),
     uq               = list(cfg_a = list(quantile_model = 1)),
+    ad               = list(cfg_a = list(centroid = 1, cov_matrix = 1,
+                                         ad_thresholds = 1:4)),
     timestamp        = Sys.time(),
     runtime_secs     = 30.1
   )
@@ -1460,6 +1462,36 @@ test_that("validate_horizons_fit enforces I7: uq keys are a subset of workflow k
   ## at predict time.
   obj <- make_valid_fit()
   obj$models$uq <- list(cfg_ghost = list(quantile_model = 1))
+  expect_error(suppressMessages(validate_horizons_fit(obj)),
+               class = "horizons_validation_error")
+
+})
+
+test_that("validate_horizons_fit tolerates a NULL ad slot (compute_ad = FALSE)", {
+
+  obj <- make_valid_fit()
+  obj$models["ad"] <- list(NULL)
+
+  expect_identical(validate_horizons_fit(obj), obj)
+
+})
+
+test_that("validate_horizons_fit enforces the AD-subset invariant", {
+
+  ## AD metadata keyed by a config with no fitted workflow is unreachable at
+  ## predict time — same contract as uq.
+  obj <- make_valid_fit()
+  obj$models$ad <- list(cfg_ghost = list(centroid = 1, cov_matrix = 1,
+                                         ad_thresholds = 1:4))
+  expect_error(suppressMessages(validate_horizons_fit(obj)),
+               class = "horizons_validation_error")
+
+})
+
+test_that("validate_horizons_fit rejects a non-list ad slot", {
+
+  obj <- make_valid_fit()
+  obj$models$ad <- "not a list"
   expect_error(suppressMessages(validate_horizons_fit(obj)),
                class = "horizons_validation_error")
 
@@ -1573,5 +1605,46 @@ test_that("has_uq is safe on atomic (non-list) inputs", {
   expect_false(has_uq("x"))
   expect_false(has_uq(TRUE))
   expect_false(has_uq(NULL))
+
+})
+
+test_that("has_ad reflects the fitted AD slot", {
+
+  with_ad <- structure(list(models = list(ad = list(cfg_a = 1))),
+                       class = c("horizons_fit", "horizons_eval",
+                                 "horizons_data", "list"))
+  expect_true(has_ad(with_ad))
+
+  ## NULL ad (compute_ad = FALSE)
+  no_ad <- structure(list(models = list(ad = NULL)),
+                     class = c("horizons_fit", "horizons_eval",
+                               "horizons_data", "list"))
+  expect_false(has_ad(no_ad))
+
+  ## empty-list ad
+  empty_ad <- structure(list(models = list(ad = list())),
+                        class = c("horizons_fit", "horizons_eval",
+                                  "horizons_data", "list"))
+  expect_false(has_ad(empty_ad))
+
+})
+
+test_that("has_ad is safe on atomic and model-less inputs", {
+
+  expect_false(has_ad(42))
+  expect_false(has_ad(NULL))
+  expect_false(has_ad(list()))
+  expect_false(has_ad(structure(list(), class = c("horizons_data", "list"))))
+
+})
+
+test_that("has_ad and has_uq are independent", {
+
+  ## AD present, UQ absent
+  ad_only <- structure(list(models = list(ad = list(cfg_a = 1), uq = NULL)),
+                       class = c("horizons_fit", "horizons_eval",
+                                 "horizons_data", "list"))
+  expect_true(has_ad(ad_only))
+  expect_false(has_uq(ad_only))
 
 })
