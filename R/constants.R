@@ -121,6 +121,18 @@ DEFAULT_UQ_LEVEL         <- 0.90
 UQ_QUANTILE_TREES        <- 500L
 WARMSTART_GRID_SIZE      <- 25L
 
+## Applicability Domain (AD) ----------------------------------------------------
+
+### Coverage level for the out-of-domain (OOD) cutoff: a sample is flagged OOD
+### when its (squared) Mahalanobis distance exceeds the level-th quantile of the
+### held-out calibration distances. 0.99 = flag the most extreme ~1% as OOD.
+DEFAULT_AD_LEVEL <- 0.99
+
+### Minimum training rows to estimate AD centroid + shrinkage covariance. Below
+### this the covariance is dominated by the shrinkage target regardless of data;
+### AD is disabled rather than returning a meaningless domain.
+N_AD_TRAIN_MIN <- 10L
+
 ## Ensemble ----------------------------------------------------------------------
 
 ### Default seed for ensemble() — the meta-learner's tuning/OOF folds. Ensemble

@@ -1083,7 +1083,7 @@ validate_horizons_fit <- function(x) {
 
   contract_keys <- c("workflows", "n_models", "best_config", "rank_metric",
                      "predictor_schema", "response_bound", "cv_predictions",
-                     "results", "split", "row_index", "uq", "timestamp",
+                     "results", "split", "row_index", "uq", "ad", "timestamp",
                      "runtime_secs")
 
   missing_keys <- setdiff(contract_keys, names(md))
@@ -1236,6 +1236,37 @@ validate_horizons_fit <- function(x) {
 
         id_list <- paste(orphan, collapse = ", ")
         errors  <- c(errors, cli::format_inline("{.field uq} keys not present in {.field workflows}: {id_list}"))
+
+      }
+
+    }
+
+  }
+
+  ## AD keys are a subset of workflow keys --------------------------------------
+  ## ad is NULL when compute_ad = FALSE or no config earned metadata. Same
+  ## contract as uq: a per-config-keyed named list whose keys must be a subset
+  ## of the fitted workflows (AD metadata for an unfitted config is unreachable
+  ## at predict time). AD and uq are independent — either can be present alone.
+
+  ad <- md$ad
+
+  if (!is.null(ad)) {
+
+    ad_keys <- names(ad)
+
+    if (!is.list(ad) || is.null(ad_keys) || !all(nzchar(ad_keys))) {
+
+      errors <- c(errors, cli::format_inline("{.field ad} must be NULL or a named list keyed by config_id"))
+
+    } else if (wf_valid) {
+
+      orphan <- setdiff(ad_keys, wf_keys)
+
+      if (length(orphan) > 0) {
+
+        id_list <- paste(orphan, collapse = ", ")
+        errors  <- c(errors, cli::format_inline("{.field ad} keys not present in {.field workflows}: {id_list}"))
 
       }
 
@@ -1401,6 +1432,33 @@ is_ensembled <- function(x) {
 has_uq <- function(x) {
 
   is.list(x) && !is.null(x$models$uq) && length(x$models$uq) > 0
+
+}
+
+
+#' Does the fitted object carry applicability-domain metadata?
+#'
+#' @description
+#' `TRUE` if [fit()] computed AD metadata that survives on the object — i.e.
+#' `x$models$ad` is a non-empty list. Parallels [has_uq()]; AD and UQ are
+#' independent capabilities (either can be present without the other). Safe on
+#' any object: a missing `models` slot answers `FALSE`.
+#'
+#' @details
+#' Checks the per-config AD slot populated by [fit()] (each entry a
+#' `centroid` / `cov_matrix` / `ad_thresholds` bundle). Whether a given config
+#' earned a bundle depends on `compute_ad` and a sufficient calibration set.
+#'
+#' @param x Any object (typically `horizons_fit`).
+#'
+#' @return `logical(1)`.
+#'
+#' @seealso [has_uq()], [is_fitted()], [validate_horizons_fit()].
+#'
+#' @noRd
+has_ad <- function(x) {
+
+  is.list(x) && !is.null(x$models$ad) && length(x$models$ad) > 0
 
 }
 
