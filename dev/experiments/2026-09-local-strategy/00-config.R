@@ -106,10 +106,29 @@ EXP_PROPERTIES <- data.frame(
 
 ## Fixed, small config set shared by every strategy. Grid-only tuning: this
 ## is a comparison of STRATEGIES, not of tuned models.
+##
+## AMENDED 2026-09-11 16:50 (see README changelog): EVERY config carries
+## feature selection, held constant at PCA. Two reasons. (1) Necessity:
+## Cubist fits a linear model in every rule terminal and did not complete one
+## of 25 tuning tasks in 29.5 min on the raw 14,228 x 851 matrix (DOGFOOD
+## #14); OSSL's own pipeline is SNV -> PCA -> Cubist for this reason.
+## (2) Design: feature selection is part of how anyone models MIR spectra, so
+## holding it CONSTANT across the four configs keeps it from confounding the
+## strategy comparison. Which feature-selection method is best (pca vs cars vs
+## correlation vs boruta) is a separate question this experiment does not ask.
+## configure() builds the cross-product; `select_configs()` in helpers.R keeps
+## these four rows.
+EXP_CONFIG_SET <- data.frame(
+  model             = c("cubist", "cubist",     "rf",  "rf"),
+  preprocessing     = c("snv",    "snv_deriv1", "snv", "snv_deriv1"),
+  feature_selection = c("pca",    "pca",        "pca", "pca"),
+  stringsAsFactors  = FALSE
+)
+
 EXP_CONFIG <- list(
-  models              = c("cubist", "rf"),
-  preprocessing       = c("snv", "snv_deriv1"),
-  feature_selection   = "none",
+  models              = unique(EXP_CONFIG_SET$model),
+  preprocessing       = unique(EXP_CONFIG_SET$preprocessing),
+  feature_selection   = unique(EXP_CONFIG_SET$feature_selection),
   cv_folds            = 5L,
   grid_size           = 5L,
   bayesian_iter       = 0L,
@@ -140,9 +159,16 @@ UQ_LEVEL   <- 0.90
 STRATEGIES <- c("A_global", "B_gmm_oneconfig", "C_gmm_perconfig", "D_mbl",
                 "E_soft")
 
-## Pre-registered fallback if the pilot shows a Cubist fold > ~10 min at
-## 2 cm-1: resample every strategy's input to this step (cm-1). NULL = off.
-EXPERIMENT_RESAMPLE <- NULL
+## Pre-registered fallback: resample every strategy's input to this step
+## (cm-1). NULL = off. SET TO 4 on 2026-09-11 16:08 for MEMORY, not time: at
+## 2 cm-1 each multisession worker holds ~2-3 GB (its own copy of the split
+## plus the baked 1,701-column design and the model); a 20-worker plan took
+## the whole 62 GB box down. Halving the columns halves the footprint.
+EXPERIMENT_RESAMPLE <- 4
+
+## Hard cap on multisession workers for this experiment, set by memory on a
+## box that also runs Steve: ~2.5 GB/worker at 2 cm-1, ~1.3 GB at 4 cm-1.
+MAX_WORKERS <- 8L
 
 ## ---------------------------------------------------------------------------
 ## Helpers

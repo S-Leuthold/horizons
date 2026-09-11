@@ -56,3 +56,6 @@ tests/archive/
 tests/spike_results/
 tests/test_*.R
 tests/SESSION_*.txt
+
+# Local-strategy experiment outputs (checkpoints, logs, figures; large)
+dev/experiments/*/results/

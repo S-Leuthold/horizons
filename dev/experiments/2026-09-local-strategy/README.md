@@ -29,7 +29,7 @@ Row-id sets are saved to `results/splits/<property>.qs2` with a SHA of each set;
 
 ## Shared settings
 
-- Config set (all strategies): cubist × {snv, snv_deriv1}, rf × {snv, snv_deriv1}; feature selection none; transformation per property.
+- Config set (all strategies), four configs: {cubist, rf} × {snv, snv_deriv1}, **every one with `feature_selection = "pca"`**; transformation per property. PCA is `step_pca(threshold = 0.995)` inside the recipe, so it is fitted per fold and carries no leakage. Feature selection is held constant deliberately: it is part of how anyone models MIR spectra, and holding it fixed keeps it from confounding the strategy comparison. Which feature-selection method is best (PCA vs CARS vs correlation vs Boruta) is a separate question this experiment does not ask. See the 16:50 changelog entry.
 - Tuning (all horizons chains): `cv_folds = 5, grid_size = 5, bayesian_iter = 0`. Grid only. This is a comparison of strategies, not of tuned models.
 - `HORIZONS_THREAD_CONTROL=TRUE` so ranger is single-threaded under multisession.
 - Conformal wrapper (all strategies, `helpers.R::conformalize()`): scores `pmax(lower − y, y − upper)` on calib_ext, `c = compute_c_alpha(scores, 0.90)`, reported interval `[lower − c, upper + c]`. For B/C/E the margin is per cluster on calib_ext rows assigned to that cluster, pooled to the global margin below 200 rows (`n_k` and `pooled` recorded). For D the base interval is `[ŷ, ŷ]` (absolute-residual conformal).
@@ -68,7 +68,14 @@ Row-id sets are saved to `results/splits/<property>.qs2` with a SHA of each set;
 
 ## Compute
 
-30 cores, 62 GB. A(property) on ~20 cores (`evaluate()` needs `output_dir` when `workers > cv_folds`); when A finishes, B/C/E for that property run alongside A for the next; D on the spare cores. Everything runs as background `Rscript` processes, never in the shared kernel, with a checkpoint per (property × strategy) in `results/checkpoints/`. Expected critical path ≈ 8 h.
+30 cores, 62 GB, shared with Steve. **The binding constraint is memory per worker, not cores.** Under a multisession plan each tune task worker holds its own copy of the split plus the baked design matrix and the model: ≈ 2–3 GB per worker at 2 cm⁻¹, ≈ 1.3 GB at 4 cm⁻¹. A 20-worker plan at 2 cm⁻¹ exhausted the box on 2026-09-11 (see changelog). Rules from that point:
+
+- `MAX_WORKERS = 8` (`00-config.R`), enforced by every strategy script.
+- `EXPERIMENT_RESAMPLE = 4` (851 predictors) for every strategy — the pre-registered fallback, invoked for memory.
+- `watchdog.sh` runs alongside every launch and kills the experiment if MemAvailable drops below 15 GB (`results/logs/watchdog.log`).
+- Parallelism is registered by the scripts (`future::plan(multisession, MAX_WORKERS)`) and `evaluate()` is called with `workers = cv_folds`, because horizons' own parallel paths do not work at this scale (DOGFOOD #10, #12, #13). Configs run sequentially; tune parallelises folds × grid.
+
+Everything runs as background `Rscript` processes, never in the shared kernel, with a checkpoint per (property × strategy) in `results/checkpoints/`. With eight workers the critical path is longer than the plan's 8 h estimate; the pilot timing sets the real number.
 
 ## Files
 
@@ -77,3 +84,5 @@ Row-id sets are saved to `results/splits/<property>.qs2` with a SHA of each set;
 ## Changelog
 
 - 2026-09-11 — protocol and decision rule written; snapshot built (45,957 × 1,701).
+- 2026-09-11 16:08 — **`EXPERIMENT_RESAMPLE` set to 4 and `MAX_WORKERS = 8`, before any strategy produced a result.** Reason: memory, not time. The first pilot attempts failed on three horizons parallelism bugs (DOGFOOD #10, #12, #13); the fourth, with a 20-worker plan at 2 cm⁻¹, consumed all 62 GB and was killed. No results were affected because none existed. The decision rule is unchanged.
+- 2026-09-11 16:50 — **Config set amended: every config carries `feature_selection = "pca"`.** Still before any strategy produced a result. Two reasons. Necessity: the pilot showed Cubist on the full-resolution matrix (14,228 × 851 at 4 cm⁻¹) did not complete a single one of 25 tuning tasks in 29.5 minutes with 8 workers at 99 % CPU, because it fits a linear model in every rule terminal (DOGFOOD #14); OSSL's own published pipeline is SNV → PCA (120 components) → Cubist for this exact reason, so the amendment moves the experiment *toward* the literature baseline. Design (Sam, 16:49): feature selection belongs in every spectral config, not just the one that forces it, and holding it constant stops it confounding the strategy comparison. Approved by Sam. The decision rule, the splits, and the metrics are unchanged.
