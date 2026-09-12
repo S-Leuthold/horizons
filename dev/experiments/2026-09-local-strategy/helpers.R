@@ -143,6 +143,42 @@ config_set_of <- function(win) {
              feature_selection = win$feature_selection, stringsAsFactors = FALSE)
 }
 
+## evaluate() with the experiment's settings.
+##
+## prune = FALSE is deliberate and load-bearing (DOGFOOD #15). evaluate()
+## defaults to prune = TRUE with prune_threshold = 1.0, and the check is
+## `show_best(metric = "rpd")$mean < 1.0` on the TRANSFORMED scale. For a
+## log-transformed outcome that fires on healthy models, and a pruned config
+## is stamped `status = "pruned"`, which fit() then refuses. It killed A-oc
+## after 90 minutes of tuning even though all four configs scored RPD 7.0-9.8
+## on the original scale. With bayesian_iter = 0 there is nothing for pruning
+## to skip anyway, so it can only mislabel.
+eval_exp <- function(hz, output_dir, workers = EXP_CONFIG$cv_folds, verbose = TRUE) {
+  evaluate(hz, metric = "rpd", prune = FALSE, workers = workers,
+           output_dir = output_dir, seed = SEED, verbose = verbose)
+}
+
+## Run one cluster's chain, returning NULL (not aborting) if it fails.
+##
+## A single degenerate cluster must not take down the property: B-clay got
+## through nine of eleven clusters and then aborted the whole run on cluster
+## 10. Failures are recorded and the caller falls back to the global model,
+## which is the same treatment too-small clusters already get.
+try_cluster_fit <- function(snap, ids_k, property, transformation, set,
+                            output_dir, workers, label = "") {
+  out <- tryCatch({
+    hz_k <- build_hz(snap, ids_k, property, transformation, set = set)
+    hz_k <- eval_exp(hz_k, output_dir, verbose = FALSE)
+    list(fit = fit(hz_k, n_best = 1L, compute_uq = TRUE, compute_ad = TRUE,
+                   allow_par = workers > 1L, seed = SEED, verbose = FALSE),
+         winner = winning_config(hz_k), error = NA_character_)
+  }, error = function(e) {
+    list(fit = NULL, winner = NULL, error = conditionMessage(e))
+  })
+  if (!is.na(out$error)) msg("  !! %s failed, falling back to global: %s", label, substr(out$error, 1, 160))
+  out
+}
+
 ## Winning config of an evaluated object, as a one-row tibble.
 winning_config <- function(hz_eval) {
   cfg <- hz_eval$config$configs
