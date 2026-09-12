@@ -105,6 +105,8 @@ for (property in props) {
   fallback     <- integer(0)
   t_fits       <- numeric(K)
 
+  cluster_errors <- rep(NA_character_, K)
+
   for (k in seq_len(K)) {
     ids_k <- sp$train_core[clust$train_assign == k]
     if (length(ids_k) < EXP_LOCAL$min_cluster_n) {
@@ -115,20 +117,21 @@ for (property in props) {
     }
     msg("[B] %s: cluster %d/%d — %d rows, %s + %s", property, k, K, length(ids_k),
         win$model, win$preprocessing)
-    t_k <- system.time({
-      hz_k <- build_hz(snap, ids_k, property, spec$transformation,
-                       set = config_set_of(win))
-      hz_k <- evaluate(hz_k, metric = "rpd", workers = EVAL_WORKERS,
-                       output_dir = file.path(CHECKPOINT_DIR, sprintf("%s-B-eval-k%02d", property, k)),
-                       seed = SEED, verbose = FALSE)
-      fit_k <- fit(hz_k, n_best = 1L, compute_uq = TRUE, compute_ad = TRUE,
-                   allow_par = workers > 1L, seed = SEED, verbose = FALSE)
-    })
+    t_k <- system.time(
+      res <- try_cluster_fit(snap, ids_k, property, spec$transformation,
+                             set = config_set_of(win),
+                             output_dir = file.path(CHECKPOINT_DIR, sprintf("%s-B-eval-k%02d", property, k)),
+                             workers = workers, label = sprintf("[B] %s cluster %d", property, k))
+    )
     t_fits[k] <- t_k[["elapsed"]]
-    cluster_fits[[k]] <- fit_k
+    if (is.null(res$fit)) {
+      fallback <- c(fallback, k); cluster_errors[k] <- res$error
+      next
+    }
+    cluster_fits[[k]] <- res$fit
     msg("[B] %s: cluster %d done in %.1f min (UQ %s, AD %s)", property, k,
-        t_fits[k] / 60, !is.null(fit_k$models$uq), !is.null(fit_k$models$ad))
-    rm(hz_k); invisible(gc())
+        t_fits[k] / 60, !is.null(res$fit$models$uq), !is.null(res$fit$models$ad))
+    invisible(gc())
   }
 
   ## -------------------------------------------------------------------------
@@ -203,7 +206,8 @@ for (property in props) {
     tibble(property = property, cluster_id = k,
            n_train = sum(clust$train_assign == k),
            n_calib = sum(calib_a$assign$cluster_id == k), n_test = nrow(bk),
-           fallback = k %in% fallback, pooled = attr(test_b, "margins")$pooled[match(k, attr(test_b, "margins")$cluster_id)],
+           fallback = k %in% fallback, error = cluster_errors[k],
+           pooled = attr(test_b, "margins")$pooled[match(k, attr(test_b, "margins")$cluster_id)],
            rpd_B = mb$rpd, rmse_B = mb$rmse, ccc_B = mb$ccc, cov_B = mb$coverage, width_B = mb$mean_width,
            rpd_A = ma$rpd, rmse_A = ma$rmse, ccc_A = ma$ccc, cov_A = ma$coverage, width_A = ma$mean_width,
            mean_entropy = mean(bk$entropy), mean_posterior = mean(bk$posterior))

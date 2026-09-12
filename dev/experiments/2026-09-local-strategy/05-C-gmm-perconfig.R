@@ -62,25 +62,29 @@ for (property in props) {
   ## -------------------------------------------------------------------------
 
   cluster_fits <- vector("list", K); winners <- vector("list", K); t_fits <- numeric(K)
+  cluster_errors <- rep(NA_character_, K)
+  fallback_c <- fallback
   for (k in setdiff(seq_len(K), fallback)) {
     ids_k <- sp$train_core[clust$train_assign == k]
     msg("[C] %s: cluster %d/%d — %d rows, screening %d configs", property, k, K, length(ids_k),
-        length(EXP_CONFIG$models) * length(EXP_CONFIG$preprocessing))
-    t_k <- system.time({
-      hz_k <- build_hz(snap, ids_k, property, spec$transformation)
-      hz_k <- evaluate(hz_k, metric = "rpd", workers = EVAL_WORKERS,
-                       output_dir = file.path(CHECKPOINT_DIR, sprintf("%s-C-eval-k%02d", property, k)),
-                       seed = SEED, verbose = FALSE)
-      winners[[k]] <- winning_config(hz_k)
-      fit_k <- fit(hz_k, n_best = 1L, compute_uq = TRUE, compute_ad = TRUE,
-                   allow_par = workers > 1L, seed = SEED, verbose = FALSE)
-    })
+        nrow(EXP_CONFIG_SET))
+    t_k <- system.time(
+      res <- try_cluster_fit(snap, ids_k, property, spec$transformation,
+                             set = EXP_CONFIG_SET,
+                             output_dir = file.path(CHECKPOINT_DIR, sprintf("%s-C-eval-k%02d", property, k)),
+                             workers = workers, label = sprintf("[C] %s cluster %d", property, k))
+    )
     t_fits[k] <- t_k[["elapsed"]]
-    cluster_fits[[k]] <- fit_k
+    if (is.null(res$fit)) {
+      fallback_c <- c(fallback_c, k); cluster_errors[k] <- res$error
+      next
+    }
+    cluster_fits[[k]] <- res$fit; winners[[k]] <- res$winner
     msg("[C] %s: cluster %d winner %s + %s; done in %.1f min", property, k,
         winners[[k]]$model, winners[[k]]$preprocessing, t_fits[k] / 60)
-    rm(hz_k); invisible(gc())
+    invisible(gc())
   }
+  fallback <- sort(unique(fallback_c))
 
   ## -------------------------------------------------------------------------
   ## Predictions (hard assignment, B's assignments)

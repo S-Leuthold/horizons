@@ -80,7 +80,7 @@ for (property in props) {
   msg("[%s] %s: evaluate() over %d configs; plan = multisession(%d), evaluate(workers = %d)",
       strategy, property, nrow(hz$config$configs), workers, EVAL_WORKERS)
   t_eval <- system.time(
-    hz <- evaluate(hz, metric = "rpd", workers = EVAL_WORKERS, output_dir = eval_dir, seed = SEED)
+    hz <- eval_exp(hz, eval_dir, workers = EVAL_WORKERS)   # prune = FALSE, see helpers.R
   )
   win <- winning_config(hz)
   msg("[%s] %s: evaluate() done in %.1f min; winner %s (%s + %s)", strategy, property,
