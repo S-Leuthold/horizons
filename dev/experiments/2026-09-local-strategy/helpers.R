@@ -15,6 +15,12 @@ suppressPackageStartupMessages({
   library(arrow)
   library(dplyr)
   library(tibble)
+  ## mclust MUST be attached, not namespaced: Mclust() dispatches to
+  ## mclustBIC() by name through the calling environment, so
+  ## `mclust::Mclust()` fails with "could not find function mclustBIC"
+  ## (DOGFOOD-adjacent; it is an mclust design quirk, not a horizons bug).
+  ## This killed B-clay and B-ph on the 2026-09-11 overnight run.
+  if (requireNamespace("mclust", quietly = TRUE)) library(mclust)
 })
 
 `%||%` <- function(a, b) if (is.null(a)) b else a
@@ -311,7 +317,7 @@ fit_clustering <- function(train_mat, seed = SEED) {
   cum    <- cumsum(pca$sdev^2) / sum(pca$sdev^2)
   n_comp <- min(which(cum >= EXP_LOCAL$variance_threshold)[1], EXP_LOCAL$pca_max_comp)
   scores <- pca$x[, seq_len(n_comp), drop = FALSE]
-  gmm    <- mclust::Mclust(scores, G = EXP_LOCAL$k_range, verbose = FALSE)
+  gmm    <- Mclust(scores, G = EXP_LOCAL$k_range, verbose = FALSE)   # attached, see above
   if (is.null(gmm)) stop("mclust::Mclust returned NULL — no model could be fitted.")
   ## Keep only what assignment needs (drop the full score matrix to save space).
   pca$x <- NULL
@@ -322,7 +328,7 @@ fit_clustering <- function(train_mat, seed = SEED) {
 
 assign_clusters <- function(clust, new_mat) {
   scores <- stats::predict(clust$pca, new_mat)[, seq_len(clust$n_comp), drop = FALSE]
-  pr     <- stats::predict(clust$gmm, newdata = scores)
+  pr     <- predict(clust$gmm, newdata = scores)   # mclust:::predict.Mclust
   z      <- pr$z
   K      <- ncol(z)
   zz     <- ifelse(z > 0, z * log(z), 0)
