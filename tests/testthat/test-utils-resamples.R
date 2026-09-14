@@ -17,6 +17,11 @@
 ## Helper: a stratified split + folds, the shape evaluate() builds
 make_resample_fixture <- function(n = 400, n_wn = 750, v = 5, strata = TRUE) {
 
+  ## Seed first: the outcome values drive the stratification quantiles, so
+  ## seeding only the split would leave the fixture data varying run to run and
+  ## the measured footprint ratios computed on a different matrix each time.
+  set.seed(307)
+
   wn_names <- paste0("wn_", seq(4000, by = -2, length.out = n_wn))
   spec_mat <- matrix(rnorm(n * n_wn), nrow = n)
   colnames(spec_mat) <- wn_names
@@ -25,7 +30,6 @@ make_resample_fixture <- function(n = 400, n_wn = 750, v = 5, strata = TRUE) {
   df$sample_id <- paste0("S", sprintf("%04d", seq_len(n)))
   df$SOC       <- runif(n, 0.5, 10)
 
-  set.seed(307)
   split <- if (strata) {
     rsample::initial_split(df, prop = 0.8, strata = "SOC")
   } else {
@@ -42,7 +46,6 @@ make_resample_fixture <- function(n = 400, n_wn = 750, v = 5, strata = TRUE) {
 
 }
 
-serialized_size <- function(x) length(serialize(x, NULL))
 
 
 ## =========================================================================
@@ -105,6 +108,21 @@ describe("resample_indices() / rebuild_resamples()", {
 
   })
 
+  it("preserves the SPLIT subclasses, not just the rset's", {
+
+    ## make_splits() returns a bare rsplit unless told otherwise, and
+    ## rsample::internal_calibration_split() — the function split_args is
+    ## transported for — dispatches on the split subclass with a hard-aborting
+    ## default method. A bare rsplit makes the transported attributes unusable.
+    fx  <- make_resample_fixture()
+    idx <- resample_indices(fx$split, fx$folds)
+    rb  <- rebuild_resamples(fx$split$data, idx)
+
+    expect_equal(class(rb$split), class(fx$split))
+    expect_equal(class(rb$cv_folds$splits[[1]]), class(fx$folds$splits[[1]]))
+
+  })
+
   it("round-trips without strata", {
 
     fx  <- make_resample_fixture(strata = FALSE)
@@ -125,6 +143,124 @@ describe("resample_indices() / rebuild_resamples()", {
 
     expect_equal(length(rb$cv_folds$splits), 3)
     expect_equal(rsample::.get_split_args(rb$cv_folds)$v, 3)
+
+  })
+
+})
+
+
+## =========================================================================
+## Partition invariants — absolute, not relative to the original
+## =========================================================================
+##
+## Every test above compares the rebuilt objects to `fx$folds`, so they inherit
+## whatever the original does. These assert the properties that must hold of the
+## rebuilt objects on their own terms. An index bug in `rebuild_resamples()`
+## would produce analysis/assessment contamination — silent, metric-inflating,
+## and invisible to an equality test if the original were ever also wrong.
+
+describe("rebuilt resamples satisfy the partition invariants", {
+
+  it("keeps analysis and assessment disjoint at both levels", {
+
+    fx <- make_resample_fixture()
+    rb <- rebuild_resamples(fx$split$data,
+                            resample_indices(fx$split, fx$folds))
+
+    expect_length(intersect(rb$split$in_id,
+                            setdiff(seq_len(nrow(fx$data)), rb$split$in_id)), 0)
+
+    n_train <- nrow(rsample::training(rb$split))
+
+    for (s in rb$cv_folds$splits) {
+
+      expect_length(intersect(s$in_id, setdiff(seq_len(n_train), s$in_id)), 0)
+
+    }
+
+  })
+
+  it("never puts an outer test row inside a fold", {
+
+    ## The load-bearing invariant: the held-out test set must not reach the
+    ## tuning resamples through the reconstruction.
+    fx <- make_resample_fixture()
+    rb <- rebuild_resamples(fx$split$data,
+                            resample_indices(fx$split, fx$folds))
+
+    test_ids  <- rsample::testing(rb$split)$sample_id
+    train_ids <- rsample::training(rb$split)$sample_id
+
+    for (s in rb$cv_folds$splits) {
+
+      fold_ids <- train_ids[s$in_id]
+      expect_length(intersect(fold_ids, test_ids), 0)
+
+    }
+
+  })
+
+  it("covers every training row exactly once across fold assessment sets", {
+
+    fx <- make_resample_fixture()
+    rb <- rebuild_resamples(fx$split$data,
+                            resample_indices(fx$split, fx$folds))
+
+    n_train  <- nrow(rsample::training(rb$split))
+    assessed <- unlist(lapply(rb$cv_folds$splits, function(s) {
+      setdiff(seq_len(n_train), s$in_id)
+    }))
+
+    expect_equal(sort(assessed), seq_len(n_train))
+
+  })
+
+})
+
+
+## =========================================================================
+## Guards on the assumptions the transport rests on
+## =========================================================================
+
+describe("resample_indices() refuses what it cannot round-trip", {
+
+  it("rejects repeated CV rather than dropping id2", {
+
+    ## manual_rset() takes one `ids` vector, so a repeated rset's id2 would be
+    ## lost and v * repeats resamples would collapse onto v identifiers.
+    fx    <- make_resample_fixture()
+    folds <- rsample::vfold_cv(rsample::training(fx$split), v = 3, repeats = 2)
+
+    expect_error(resample_indices(fx$split, folds), "single-id")
+
+  })
+
+  it("rejects a split whose assessment set is not its complement", {
+
+    ## The rebuild derives assessment as setdiff(all, analysis), which would
+    ## silently re-partition a gap-carrying rset and hand the model rows it
+    ## trained on.
+    skip_if_not_installed("rsample")
+
+    sw <- rsample::sliding_window(data.frame(y = rnorm(60)),
+                                  lookback = 5, assess_start = 3, assess_stop = 4)
+
+    expect_error(resample_indices(sw$splits[[1]], sw), "complement")
+
+  })
+
+})
+
+describe("rebuild_resamples() fails at the boundary", {
+
+  it("rejects data whose row count disagrees with the indices", {
+
+    ## Otherwise an out-of-range index surfaces as "Grid search failed" for
+    ## every config, from inside a worker, with the cause unrecoverable.
+    fx  <- make_resample_fixture()
+    idx <- resample_indices(fx$split, fx$folds)
+
+    expect_error(rebuild_resamples(fx$data[1:100, ], idx), "same split")
 
   })
 

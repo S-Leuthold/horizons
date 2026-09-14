@@ -560,9 +560,26 @@ evaluate <- function(x,
     ##
     ## Do not inline this back into an anonymous function.
 
+    ## Workers resolve the horizons namespace by NAME, which finds the INSTALLED
+    ## library — not this source tree. Under pkgload the installed copy may not
+    ## have these helpers at all; worse, a compatible-but-stale install runs old
+    ## helper code while the worker body is new, silently, and the worker
+    ## computes every metric. Refuse rather than produce quiet wrong numbers.
+    if (exists(".__DEVTOOLS__", envir = asNamespace("horizons"),
+               inherits = FALSE)) {
+
+      rlang::abort(paste0(
+        "Parallel `evaluate()` cannot run under `devtools::load_all()`. ",
+        "Workers load the installed `horizons`, not this source tree, so they ",
+        "would run stale code. Install the package first (`R CMD INSTALL`), ",
+        "or call `evaluate()` without parallelism."
+      ))
+
+    }
+
     shared_args <- list(
       data            = split$data,
-      idx             = resample_indices(split, cv_fold_obj),
+      resample_idx    = resample_indices(split, cv_fold_obj),
       configs         = pending_configs,
       role_map        = role_map,
       grid_size       = tuning$grid_size,
@@ -571,8 +588,11 @@ evaluate <- function(x,
       prune_threshold = prune_threshold,
       allow_par       = (inner > 1L),
       seed            = seed,
-      checkpoint_dir  = checkpoint_dir
+      checkpoint_dir  = checkpoint_dir,
+      pkg_version     = as.character(utils::packageVersion("horizons"))
     )
+
+    stopifnot(setequal(names(shared_args), SHARED_ARG_NAMES))
 
     parallel_results <- furrr::future_map(
       seq_len(nrow(pending_configs)),
@@ -799,17 +819,57 @@ rank_configs_by_cv <- function(results, metric) {
 #' Because this function lives in the package namespace, `future` resolves it by
 #' name rather than serializing it, so the payload is exactly `shared`.
 #'
-#' @param idx Integer row index into `shared$configs`.
-#' @param shared List of worker inputs assembled by `evaluate()`: `data`, `idx`
-#'   (from `resample_indices()`), `configs`, `role_map`, `grid_size`,
-#'   `bayesian_iter`, `prune`, `prune_threshold`, `allow_par`, `seed`, and
-#'   `checkpoint_dir`.
+#' Resolving by name has one cost, and it is the reason `evaluate()` refuses to
+#' dispatch under `pkgload`: the worker loads the **installed** horizons, not the
+#' source tree. A compatible-but-stale install would run old helper code behind a
+#' new worker body, silently, and the worker computes every metric.
+#'
+#' @param config_i Integer row index into `shared$configs`. Named to avoid
+#'   colliding with `shared$resample_idx`.
+#' @param shared List of worker inputs assembled by `evaluate()`, whose keys are
+#'   fixed by `SHARED_ARG_NAMES` in `R/constants.R` and asserted on entry:
+#'   `data`, `resample_idx` (from `resample_indices()`), `configs`, `role_map`,
+#'   `grid_size`, `bayesian_iter`, `prune`, `prune_threshold`, `allow_par`,
+#'   `seed`, `checkpoint_dir`, and `pkg_version`.
 #'
 #' @return A one-row result tibble from [evaluate_single_config()].
 #' @keywords internal
 #' @noRd
 
-evaluate_config_worker <- function(idx, shared) {
+evaluate_config_worker <- function(config_i, shared) {
+
+  ## -------------------------------------------------------------------------
+  ## Validate the cross-process contract
+  ## -------------------------------------------------------------------------
+  ## A mis-keyed entry arrives as NULL. Most then error, but `seed` and
+  ## `grid_size` do not: set.seed(NULL) reseeds from the clock and
+  ## tune_grid(grid = NULL) invents its own grid, so the run would succeed
+  ## while being unreproducible or tuned over the wrong space.
+
+  if (!setequal(names(shared), SHARED_ARG_NAMES)) {
+
+    rlang::abort(paste0(
+      "Malformed worker payload. Missing: ",
+      paste(setdiff(SHARED_ARG_NAMES, names(shared)), collapse = ", ") %||% "-",
+      "; unexpected: ",
+      paste(setdiff(names(shared), SHARED_ARG_NAMES), collapse = ", ") %||% "-"
+    ))
+
+  }
+
+  ## Partial guard on the installed-vs-source hazard: catches a worker loading a
+  ## different horizons VERSION than the parent. It cannot catch same-version
+  ## source edits, which is why evaluate() also refuses to dispatch under pkgload.
+  worker_version <- as.character(utils::packageVersion("horizons"))
+
+  if (!identical(worker_version, shared$pkg_version)) {
+
+    rlang::abort(paste0(
+      "Worker loaded horizons ", worker_version, " but the parent is ",
+      shared$pkg_version, ". Reinstall the package so workers run matching code."
+    ))
+
+  }
 
   ## Pin all threading libraries to 1 thread inside each worker
   Sys.setenv(
@@ -826,11 +886,11 @@ evaluate_config_worker <- function(idx, shared) {
     data.table::setDTthreads(1)
   }
 
-  cfg <- shared$configs[idx, ]
+  cfg <- shared$configs[config_i, ]
 
   ## Reconstruct the split and folds from indices. Fold membership is
   ## reproduced by construction, not by replaying the RNG.
-  resamples <- rebuild_resamples(shared$data, shared$idx)
+  resamples <- rebuild_resamples(shared$data, shared$resample_idx)
 
   result_row <- evaluate_single_config(
     config_row      = cfg,
