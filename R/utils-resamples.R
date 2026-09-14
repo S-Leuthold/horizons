@@ -25,7 +25,7 @@
 #' `rsample::.get_split_args()` and passes it to
 #' `rsample::internal_calibration_split()`. `manual_rset()` does not reproduce
 #' those attributes on its own, so they are transported explicitly and restored
-#' by [rebuild_resamples()].
+#' by `rebuild_resamples()`.
 #'
 #' @param split An `rsplit` (typically from `rsample::initial_split()`).
 #' @param cv_folds An `rset` (typically from `rsample::vfold_cv()`) built from
@@ -53,7 +53,7 @@ resample_indices <- function(split, cv_folds) {
 #' Rebuild a Split and Resample Set From Indices
 #'
 #' @description
-#' Inverse of [resample_indices()]. Reconstructs the `rsplit` and `rset` from
+#' Inverse of `resample_indices()`. Reconstructs the `rsplit` and `rset` from
 #' one copy of the data plus the transported indices, then restores the original
 #' class and attributes so `rsample::.get_split_args()` reports what it did
 #' before the round trip.
@@ -63,7 +63,7 @@ resample_indices <- function(split, cv_folds) {
 #' worker.
 #'
 #' @param data The analysis data frame — the same table `split` was built from.
-#' @param idx The list returned by [resample_indices()].
+#' @param idx The list returned by `resample_indices()`.
 #'
 #' @return A list with `split` (an `rsplit`) and `cv_folds` (an `rset`),
 #'   equivalent to the originals.
