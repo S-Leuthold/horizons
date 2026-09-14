@@ -422,3 +422,115 @@ describe("build_recipe()", {
   })
 
 })
+
+## =========================================================================
+## Serialization footprint — regression guard
+## =========================================================================
+##
+## A recipe holds references to its training data: the template, and whatever
+## the step selectors captured from build_recipe()'s calling frame. Those cost
+## nothing in memory, because R shares the underlying object — but R's
+## serializer does NOT deduplicate data frames, so every reference becomes a
+## full copy the moment the recipe is sent to a parallel worker or written to
+## disk.
+##
+## On 2026-09-14 this was measured at 5.01x on a 14,228 x 1,701 spectral
+## matrix: a 186 MB recipe serialized to 928 MB, which exhausted memory during
+## parallel tuning and tripped R's 2 GB long-vector limit. Two magrittr pipes
+## and two enquos()-captured frame references. Neither object.size() nor
+## lobstr::obj_size() reports it, which is why it survived undetected.
+##
+## The ratio is scale-invariant, so a small fixture catches it. Test at a size
+## where the data dominates fixed recipe overhead.
+
+serialized_size <- function(x) length(serialize(x, NULL))
+
+describe("build_recipe() serialization footprint", {
+
+  it("serializes within a small multiple of its training data", {
+
+    ## ~2.4 MB of predictors: large enough that data dominates overhead.
+    td     <- make_test_data(n = 400, n_wn = 750)
+    config <- make_config_row(preprocessing = "snv", feature_selection = "pca")
+
+    rec <- build_recipe(config, td$data, td$role_map)
+
+    data_bytes <- serialized_size(td$data)
+    rec_bytes  <- serialized_size(rec)
+    ratio      <- rec_bytes / data_bytes
+
+    ## One copy is expected and legitimate: the recipe's own template.
+    ## Anything approaching two means a reference leaked back in.
+    expect_lt(ratio, 1.5)
+
+  })
+
+  it("does not retain the training data in step selector environments", {
+
+    td     <- make_test_data(n = 400, n_wn = 750)
+    config <- make_config_row(preprocessing = "snv", feature_selection = "pca")
+
+    rec <- build_recipe(config, td$data, td$role_map)
+
+    data_bytes <- serialized_size(td$data)
+
+    ## Each step, serialized on its own, should be negligible against the
+    ## training data. Before the fix, a single step carried 2x the table.
+    for (step in rec$steps) {
+
+      expect_lt(serialized_size(step) / data_bytes, 0.1)
+
+    }
+
+  })
+
+  it("keeps covariate steps free of captured data", {
+
+    ## step_rm() paths take their column names from build_recipe()'s frame too,
+    ## so exercise a config that triggers them.
+    td     <- make_test_data(n = 400, n_wn = 750, covariates = c("clay", "ph"))
+    config <- make_config_row(feature_selection = "pca", covariates = "clay")
+
+    rec <- build_recipe(config, td$data, td$role_map)
+
+    ratio <- serialized_size(rec) / serialized_size(td$data)
+    expect_lt(ratio, 1.5)
+
+  })
+
+  it("still resolves its selectors after the environments are stripped", {
+
+    ## The footprint fix re-points selector quosures at a minimal environment.
+    ## The risk it introduces is that a selector can no longer find the names it
+    ## references, so prep() must still succeed and the spectral columns must
+    ## still have been consumed by the steps.
+    td     <- make_test_data(n = 100, n_wn = 60)
+    config <- make_config_row(preprocessing = "snv", feature_selection = "pca")
+
+    rec   <- build_recipe(config, td$data, td$role_map)
+    baked <- recipes::bake(recipes::prep(rec), new_data = NULL)
+
+    ## PCA ran: raw wavenumber columns are gone, components took their place.
+    expect_false(any(grepl("^wn_", names(baked))))
+    expect_true(any(grepl("^PC", names(baked))))
+    expect_true("SOC" %in% names(baked))
+    expect_equal(nrow(baked), nrow(td$data))
+
+  })
+
+  it("resolves covariate selectors after stripping", {
+
+    ## step_rm() on covariates reads its column names from the same stripped
+    ## environment, so a config that drops one must still drop exactly that one.
+    td     <- make_test_data(n = 100, n_wn = 60, covariates = c("clay", "ph"))
+    config <- make_config_row(feature_selection = "none", covariates = "clay")
+
+    rec   <- build_recipe(config, td$data, td$role_map)
+    baked <- recipes::bake(recipes::prep(rec), new_data = NULL)
+
+    expect_true("clay" %in% names(baked))
+    expect_false("ph" %in% names(baked))
+
+  })
+
+})
