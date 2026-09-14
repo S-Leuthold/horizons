@@ -93,6 +93,7 @@ Collate:
     'utils-clustering.R'
     'utils-models.R'
     'utils-recipes.R'
+    'utils-resamples.R'
     'step-transform-spectra.R'
     'step-select-boruta.R'
     'step-select-cars.R'

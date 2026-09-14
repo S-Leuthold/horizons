@@ -2,6 +2,63 @@
 ## Tests: evaluate() parallel execution
 ## ---------------------------------------------------------------------------
 
+## =========================================================================
+## Worker closure footprint — regression guard
+## =========================================================================
+##
+## R serializes a closure together with its enclosing environment. When the
+## worker body was an anonymous function defined inside evaluate(), every local
+## in that frame went to every worker — including the split and the resample
+## object, regardless of what was passed explicitly. Measured on the KSSL clay
+## training set at 2 cm-1 (17,788 x 1,701): a 2.26 GiB payload per future
+## against 232 MB of genuinely needed inputs, which exceeded
+## future.globals.maxSize (1e9, installed by tune at load) and aborted the run.
+##
+## A synthetic reproduction of the two shapes: a closure referencing only a
+## 4-byte integer carried 30.5 MB because its frame held two 15 MB tables, while
+## a top-level function serialized 0.0001 MB. A 271,226x difference.
+##
+## The fix is structural — the worker lives at top level and takes its inputs as
+## an argument — so the guard has to be structural too. These assertions fail if
+## the body is ever inlined back into evaluate().
+
+describe("evaluate() parallel worker footprint", {
+
+  it("keeps the worker body out of evaluate()'s frame", {
+
+    worker <- horizons:::evaluate_config_worker
+
+    ## This is the invariant. future resolves a function whose environment is a
+    ## namespace by name, and serializes the environment of one that is not. A
+    ## closure defined inside evaluate() would carry that frame — every local,
+    ## including the split and the resamples.
+    expect_true(isNamespace(environment(worker)))
+    expect_match(environmentName(environment(worker)), "horizons")
+
+  })
+
+  it("serializes the worker function without dragging data", {
+
+    worker <- horizons:::evaluate_config_worker
+
+    ## Bytecode and srcrefs put this in the low hundreds of KB; the point is
+    ## that it does not scale with the dataset. A captured frame at library
+    ## scale measured 2.26 GiB, so a 1 MB ceiling is loose and still decisive.
+    expect_lt(length(serialize(worker, NULL)), 1e6)
+
+  })
+
+  it("takes its inputs as an argument rather than by capture", {
+
+    ## The signature is the contract: everything the worker needs arrives in
+    ## `shared`, so nothing has to be reachable through the enclosing frame.
+    expect_named(formals(horizons:::evaluate_config_worker),
+                 c("idx", "shared"))
+
+  })
+
+})
+
 ## Reuse make_eval_object from test-pipeline-evaluate.R (loaded by testthat)
 ## These tests are separated because they require skip_on_cran() and are
 ## inherently slower due to worker startup.
