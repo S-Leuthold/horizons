@@ -38,13 +38,52 @@
 
 resample_indices <- function(split, cv_folds) {
 
+  ## -------------------------------------------------------------------------
+  ## Guard the two assumptions the reconstruction rests on
+  ## -------------------------------------------------------------------------
+  ## 1. Complement semantics. rebuild_resamples() derives the assessment set as
+  ##    setdiff(all rows, analysis rows), which is only correct when a split's
+  ##    out_id is NA. initial_split() and vfold_cv() both store NA, but a
+  ##    gap-carrying rset (sliding_window(), rolling_origin()) stores explicit
+  ##    indices, and silently re-partitioning one of those would put rows the
+  ##    model trained on into the assessment set.
+  ## 2. A single id column. manual_rset() takes one `ids` vector, so a repeated
+  ##    rset's id2 would be dropped and v * repeats resamples would collapse
+  ##    onto v identifiers.
+
+  all_splits <- c(list(split), cv_folds$splits)
+
+  if (!all(vapply(all_splits, function(s) all(is.na(s$out_id)), logical(1)))) {
+
+    rlang::abort(paste0(
+      "`resample_indices()` supports only resamples whose assessment set is ",
+      "the complement of its analysis set (`out_id` is NA). Got a split with ",
+      "explicit `out_id`, which this transport would silently re-partition."
+    ))
+
+  }
+
+  id_cols <- grep("^id", names(cv_folds), value = TRUE)
+
+  if (length(id_cols) != 1L) {
+
+    rlang::abort(paste0(
+      "`resample_indices()` supports only single-id resamples. Got ",
+      length(id_cols), " id columns (", paste(id_cols, collapse = ", "),
+      "), which indicates repeats > 1; the extra identifiers would be lost."
+    ))
+
+  }
+
   list(
-    train_idx  = split$in_id,
-    n_rows     = nrow(split$data),
-    fold_idx   = lapply(cv_folds$splits, function(s) s$in_id),
-    fold_ids   = cv_folds$id,
-    fold_class = class(cv_folds),
-    split_args = rsample::.get_split_args(cv_folds)
+    train_idx   = split$in_id,
+    n_rows      = nrow(split$data),
+    split_class = class(split),
+    fold_idx    = lapply(cv_folds$splits, function(s) s$in_id),
+    fold_ids    = cv_folds$id,
+    fold_class  = class(cv_folds),
+    fold_split_class = class(cv_folds$splits[[1]]),
+    split_args  = rsample::.get_split_args(cv_folds)
   )
 
 }
@@ -72,10 +111,32 @@ resample_indices <- function(split, cv_folds) {
 
 rebuild_resamples <- function(data, idx) {
 
+  ## Fail at the boundary rather than deep inside tune, where an out-of-range
+  ## index surfaces as "Grid search failed" for every config, from a worker.
+  if (nrow(data) != idx$n_rows) {
+
+    rlang::abort(paste0(
+      "`rebuild_resamples()` got ", nrow(data), " rows but the indices were ",
+      "computed against ", idx$n_rows, ". The data and indices must come from ",
+      "the same split."
+    ))
+
+  }
+
+  stopifnot(
+    max(idx$train_idx) <= idx$n_rows,
+    max(unlist(idx$fold_idx)) <= length(idx$train_idx)
+  )
+
+  ## `class` is passed so the rebuilt splits keep their subclass. Without it
+  ## make_splits() returns a bare rsplit, and rsample::internal_calibration_split()
+  ## — the very function split_args is transported for — dispatches on the split
+  ## subclass with a hard-aborting default method.
   split <- rsample::make_splits(
-    x = list(analysis   = idx$train_idx,
-             assessment = setdiff(seq_len(idx$n_rows), idx$train_idx)),
-    data = data
+    x     = list(analysis   = idx$train_idx,
+                 assessment = setdiff(seq_len(idx$n_rows), idx$train_idx)),
+    data  = data,
+    class = setdiff(idx$split_class, "rsplit")
   )
 
   train_data <- rsample::training(split)
@@ -84,9 +145,10 @@ rebuild_resamples <- function(data, idx) {
   fold_splits <- lapply(idx$fold_idx, function(i) {
 
     rsample::make_splits(
-      x = list(analysis   = i,
-               assessment = setdiff(seq_len(n_train), i)),
-      data = train_data
+      x     = list(analysis   = i,
+                   assessment = setdiff(seq_len(n_train), i)),
+      data  = train_data,
+      class = setdiff(idx$fold_split_class, "rsplit")
     )
 
   })

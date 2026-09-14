@@ -153,3 +153,26 @@ RESPONSE_BOUND_MARGIN <- 1.5
 
 DAYMET_RESOLUTION_DEG <- 1/24
 DAYMET_TIMEOUT        <- 60
+
+## Parallel Worker Contract ----------------------------------------------------
+
+# The keys evaluate()'s parallel branch sends to evaluate_config_worker().
+# Assembled in one place and asserted in the worker, because a mis-keyed entry
+# arrives as NULL and two of them fail SILENTLY rather than erroring: a NULL
+# `seed` makes set.seed(NULL) reseed from the clock (the run succeeds and is not
+# reproducible), and a NULL `grid_size` makes tune_grid() invent its own grid.
+
+SHARED_ARG_NAMES <- c(
+  "data",
+  "resample_idx",
+  "configs",
+  "role_map",
+  "grid_size",
+  "bayesian_iter",
+  "prune",
+  "prune_threshold",
+  "allow_par",
+  "seed",
+  "checkpoint_dir",
+  "pkg_version"
+)
