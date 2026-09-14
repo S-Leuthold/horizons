@@ -91,9 +91,9 @@ fit_ensemble_weighted <- function(object,
   member_pred <- predict_members_on_test(object, members)
 
   ## Combine per-member test_F predictions by the weights, sample-aligned.
-  ensemble_pred <- member_pred %>%
-    dplyr::left_join(weights, by = c("config_id" = "member")) %>%
-    dplyr::group_by(.data$sample_id) %>%
+  ensemble_pred <- member_pred |>
+    dplyr::left_join(weights, by = c("config_id" = "member")) |>
+    dplyr::group_by(.data$sample_id) |>
     dplyr::summarise(
       .pred = sum(.data$.pred * .data$coef),
       truth = dplyr::first(.data$truth),

@@ -207,48 +207,48 @@ process_spectra_row <- function(input_vector, preprocessing, window_size = 9) {
     },
 
     "sg" = {
-      input_vector %>%
-        matrix(nrow = 1) %>%
-        prospectr::savitzkyGolay(m = 0, p = 1, w = window_size) %>%
+      input_vector |>
+        matrix(nrow = 1) |>
+        prospectr::savitzkyGolay(m = 0, p = 1, w = window_size) |>
         as.vector()
     },
 
     "snv" = {
-      input_vector %>%
-        matrix(nrow = 1) %>%
-        prospectr::standardNormalVariate() %>%
+      input_vector |>
+        matrix(nrow = 1) |>
+        prospectr::standardNormalVariate() |>
         as.vector() ->
       processed
       processed[start:end]
     },
 
     "deriv1" = {
-      input_vector %>%
-        matrix(nrow = 1) %>%
-        prospectr::savitzkyGolay(m = 1, p = 1, w = window_size) %>%
+      input_vector |>
+        matrix(nrow = 1) |>
+        prospectr::savitzkyGolay(m = 1, p = 1, w = window_size) |>
         as.vector()
     },
 
     "deriv2" = {
-      input_vector %>%
-        matrix(nrow = 1) %>%
-        prospectr::savitzkyGolay(m = 2, p = 3, w = window_size) %>%
+      input_vector |>
+        matrix(nrow = 1) |>
+        prospectr::savitzkyGolay(m = 2, p = 3, w = window_size) |>
         as.vector()
     },
 
     "snv_deriv1" = {
-      input_vector %>%
-        matrix(nrow = 1) %>%
-        prospectr::standardNormalVariate() %>%
-        prospectr::savitzkyGolay(m = 1, p = 1, w = window_size) %>%
+      input_vector |>
+        matrix(nrow = 1) |>
+        prospectr::standardNormalVariate() |>
+        prospectr::savitzkyGolay(m = 1, p = 1, w = window_size) |>
         as.vector()
     },
 
     "snv_deriv2" = {
-      input_vector %>%
-        matrix(nrow = 1) %>%
-        prospectr::standardNormalVariate() %>%
-        prospectr::savitzkyGolay(m = 2, p = 3, w = window_size) %>%
+      input_vector |>
+        matrix(nrow = 1) |>
+        prospectr::standardNormalVariate() |>
+        prospectr::savitzkyGolay(m = 2, p = 3, w = window_size) |>
         as.vector()
     },
 

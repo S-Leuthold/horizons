@@ -73,7 +73,7 @@ build_warmstart_grid <- function(best_params, param_set, max_points = 25L) {
     ## Sample (max_points - 1) rows, then bind the best point
     set.seed(1)
     sampled <- dplyr::slice_sample(full_grid, n = max_points - 1L)
-    full_grid <- dplyr::bind_rows(best_row, sampled) %>%
+    full_grid <- dplyr::bind_rows(best_row, sampled) |>
       dplyr::distinct()
 
   }
