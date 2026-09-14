@@ -11,6 +11,10 @@
 #' 3. Feature selection (pca/boruta/cars/correlation/none)
 #' 4. Covariate inclusion (append requested covariates, remove others)
 #'
+#' A final pass re-points the step selector quosures away from this function's
+#' frame, which would otherwise be serialized to every parallel worker. See
+#' `strip_selector_envs()`.
+#'
 #' @param config_row Single-row tibble from `config$configs`.
 #' @param train_data Data frame. Training split containing all columns.
 #' @param role_map Tibble with `variable` and `role` columns from the
@@ -218,18 +222,13 @@ build_recipe <- function(config_row, train_data, role_map) {
   }
 
   ## -----------------------------------------------------------------------
-  ## Step 5: Drop the heavy environment captured by the step selectors
+  ## Step 6: Drop the heavy environment captured by the step selectors
   ## -----------------------------------------------------------------------
+  ## This frame holds `train_data` and the recipe under construction, both of
+  ## which every step's selector quosure would otherwise carry to a parallel
+  ## worker. Passing environment() explicitly keeps that dependency visible.
 
-  strip_selector_envs(rec, list(
-    predictor_cols     = predictor_cols,
-    outcome_col        = outcome_col,
-    id_col             = id_col,
-    meta_cols          = meta_cols,
-    all_covariate_cols = all_covariate_cols,
-    config_covariates  = config_covariates,
-    unused_covariates  = setdiff(all_covariate_cols, config_covariates)
-  ))
+  strip_selector_envs(rec, environment())
 
 }
 
@@ -239,52 +238,119 @@ build_recipe <- function(config_row, train_data, role_map) {
 #' @description
 #' `recipes` step constructors capture their calling frame via
 #' `rlang::enquos()`. `build_recipe()`'s frame holds both `train_data` and the
-#' recipe under construction, so every step ends up retaining two references to
-#' the training table.
+#' recipe under construction, so every step retains references to the training
+#' table.
 #'
 #' Those references cost nothing in memory — R shares the underlying object —
-#' but R's serializer does not deduplicate data frames, so each reference
-#' becomes a full copy whenever the recipe crosses to a parallel worker. At
-#' library scale (14,228 x 1,701) that turned a 186 MB recipe into 928 MB on
-#' the wire, which is what exhausted memory and tripped R's 2 GB long-vector
-#' limit during parallel tuning.
+#' but R's serializer does not deduplicate data frames, so each one becomes a
+#' full copy whenever the recipe crosses to a parallel worker. Measured on the
+#' KSSL clay training split (14,228 x 1,701), an unstripped recipe serialized to
+#' **5.26x** its training data; stripped, **1.07x** (the residual is
+#' `rec$template`, which is inherent to `recipes`). Neither `object.size()` nor
+#' `lobstr::obj_size()` shows the problem, because the duplication exists only
+#' at serialization time.
 #'
-#' The selectors only ever need the role-derived column-name vectors, so this
-#' re-points their environments at one holding exactly those. Neither
-#' `object.size()` nor `lobstr::obj_size()` shows the problem, because the
-#' duplication exists only at serialization time.
+#' Two design points, both learned from review:
+#'
+#' The bindings are **derived from the selectors**, not enumerated by hand. An
+#' earlier version listed `build_recipe()`'s locals, which meant a future step
+#' referencing a new local would produce a quosure pointing at a name absent
+#' from the replacement environment. Harvesting `all.vars()` off the quosures
+#' themselves removes that failure mode rather than documenting it.
+#'
+#' Every slot is walked recursively rather than the `terms`/`columns` pair.
+#' Stock steps keep selectors in `terms` and this package's custom steps keep
+#' them in `columns`, but others use `impute_with`, `denom`, `inputs`,
+#' `outcome`, or `lon`/`lat`, and a slot holding a *single* quosure is not a
+#' list. Both would have been silently missed, restoring the leak.
+#'
+#' Residual caveat: the replacement environment is parented on the `horizons`
+#' namespace, because bare `recipes::all_predictors()` / `all_outcomes()` are
+#' imported there (see `R/zzz.R`) and a `dplyr` parent does not reach them.
+#' That chain still ends at the global environment, so a selector referencing a
+#' name this function failed to harvest could in principle resolve against a
+#' same-named global rather than erroring. Deriving the bindings is what makes
+#' that unreachable in practice.
 #'
 #' @param rec A `recipes::recipe` object.
-#' @param bindings Named list of the (small) objects the step selectors
-#'   reference — typically the role-derived character vectors.
+#' @param frame The environment the step selectors were created in — normally
+#'   `build_recipe()`'s frame, passed explicitly rather than via
+#'   `parent.frame()` so the dependency is visible at the call site.
 #'
 #' @return The recipe, with every step selector quosure re-pointed. The prepped
 #'   and baked output is unchanged.
 #' @keywords internal
 #' @noRd
 
-strip_selector_envs <- function(rec, bindings) {
+strip_selector_envs <- function(rec, frame) {
 
-  env <- rlang::new_environment(data   = bindings,
-                                parent = rlang::ns_env("dplyr"))
+  ## -------------------------------------------------------------------------
+  ## Pass 1: harvest every quosure, wherever it lives in the step
+  ## -------------------------------------------------------------------------
 
-  rec$steps <- lapply(rec$steps, function(step) {
+  harvest <- function(x, acc = list()) {
 
-    for (slot in c("terms", "columns")) {
+    if (rlang::is_quosure(x)) return(c(acc, list(x)))
 
-      if (!is.null(step[[slot]]) && is.list(step[[slot]])) {
+    if (is.list(x)) {
 
-        step[[slot]] <- lapply(step[[slot]], function(q) {
-
-          if (rlang::is_quosure(q)) rlang::quo_set_env(q, env) else q
-
-        })
-
-      }
+      for (el in x) acc <- harvest(el, acc)
 
     }
 
-    step
+    acc
+
+  }
+
+  quos <- harvest(lapply(rec$steps, unclass))
+
+  if (length(quos) == 0) return(rec)
+
+  ## -------------------------------------------------------------------------
+  ## The names those selectors actually reference
+  ## -------------------------------------------------------------------------
+  ## all.vars() excludes namespace operands, so `dplyr::all_of(predictor_cols)`
+  ## yields "predictor_cols" and `recipes::all_predictors()` yields nothing.
+  ## Names that resolve against the data mask rather than the environment (a
+  ## bare column name) simply won't be found in `frame`, which is correct.
+
+  needed <- unique(unlist(lapply(quos, function(q) {
+    all.vars(rlang::quo_get_expr(q))
+  })))
+
+  keep <- intersect(needed, ls(frame, all.names = TRUE))
+
+  env <- rlang::new_environment(data   = mget(keep, envir = frame),
+                                parent = rlang::ns_env("horizons"))
+
+  ## -------------------------------------------------------------------------
+  ## Pass 2: re-point, preserving every slot's class and attributes
+  ## -------------------------------------------------------------------------
+  ## Attributes are restored after lapply() because a step slot may hold a
+  ## data frame, and rebuilding one as a bare list would corrupt it.
+
+  repoint <- function(x) {
+
+    if (rlang::is_quosure(x)) return(rlang::quo_set_env(x, env))
+
+    if (is.list(x)) {
+
+      out             <- lapply(x, repoint)
+      attributes(out) <- attributes(x)
+      return(out)
+
+    }
+
+    x
+
+  }
+
+  rec$steps <- lapply(rec$steps, function(step) {
+
+    cls             <- class(step)
+    out             <- repoint(unclass(step))
+    class(out)      <- cls
+    out
 
   })
 
