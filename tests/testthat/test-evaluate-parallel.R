@@ -53,7 +53,56 @@ describe("evaluate() parallel worker footprint", {
     ## The signature is the contract: everything the worker needs arrives in
     ## `shared`, so nothing has to be reachable through the enclosing frame.
     expect_named(formals(horizons:::evaluate_config_worker),
-                 c("idx", "shared"))
+                 c("config_i", "shared"))
+
+  })
+
+  it("rejects a malformed payload instead of silently defaulting", {
+
+    ## A mis-keyed entry arrives as NULL. Most then error, but two do not:
+    ## set.seed(NULL) reseeds from the clock, so the run succeeds and is not
+    ## reproducible; tune_grid(grid = NULL) invents its own grid, so every
+    ## config is tuned over a space nobody configured. Both would pass CI.
+    good <- setNames(vector("list", length(horizons:::SHARED_ARG_NAMES)),
+                     horizons:::SHARED_ARG_NAMES)
+
+    ## Missing key
+    expect_error(
+      horizons:::evaluate_config_worker(1L, good[setdiff(names(good), "seed")]),
+      "Malformed worker payload"
+    )
+
+    ## Misspelled key — the realistic failure, and the silent one
+    typo        <- good
+    names(typo)[names(typo) == "grid_size"] <- "gridsize"
+    expect_error(horizons:::evaluate_config_worker(1L, typo),
+                 "Malformed worker payload")
+
+  })
+
+  it("refuses to dispatch in parallel under devtools::load_all()", {
+
+    ## Workers resolve the horizons namespace by NAME, so they load the
+    ## INSTALLED package, not the source tree. A compatible-but-stale install
+    ## would run old helper code behind a new worker body, silently, and the
+    ## worker computes every metric. Under pkgload this is always wrong, so
+    ## evaluate() must refuse rather than produce quiet wrong numbers.
+    skip_if_not(exists(".__DEVTOOLS__", envir = asNamespace("horizons"),
+                       inherits = FALSE),
+                "only meaningful under load_all()")
+
+    obj    <- make_eval_object(n_configs = 2)
+    tmpdir <- withr::local_tempdir()
+
+    ## suppressWarnings matches this file's existing pattern — the small
+    ## fixture trips rsample's stratification warnings, which are not the
+    ## subject of the test.
+    expect_error(
+      suppressWarnings(
+        evaluate(obj, workers = 10L, output_dir = tmpdir, verbose = FALSE)
+      ),
+      "load_all"
+    )
 
   })
 
