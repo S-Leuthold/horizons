@@ -29,5 +29,9 @@ Recipe step order (early fusion):
 \item Feature selection (pca/boruta/cars/correlation/none)
 \item Covariate inclusion (append requested covariates, remove others)
 }
+
+A final pass re-points the step selector quosures away from this function's
+frame, which would otherwise be serialized to every parallel worker. See
+\code{strip_selector_envs()}.
 }
 \keyword{internal}
