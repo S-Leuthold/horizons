@@ -38,84 +38,6 @@
 #'   `evaluation$results`, `evaluation$best_config`, `evaluation$split`, and
 #'   associated metadata populated.
 #'
-#' Evaluate One Configuration Inside a Parallel Worker
-#'
-#' @description
-#' The body `evaluate()`'s parallel branch dispatches, kept at top level on
-#' purpose.
-#'
-#' R serializes a closure together with its enclosing environment. A function
-#' defined inside `evaluate()` therefore carries every local in that frame to
-#' every worker — including the split and the resample object — regardless of
-#' what is passed explicitly. Measured on the KSSL clay training set at 2 cm-1
-#' (17,788 x 1,701), that was a 2.26 GiB payload per future against 232 MB of
-#' genuinely needed inputs, and it was what tripped
-#' `future.globals.maxSize` (1e9, installed by `tune` at load).
-#'
-#' Because this function lives in the package namespace, `future` resolves it by
-#' name rather than serializing it, so the payload is exactly `shared`.
-#'
-#' @param idx Integer row index into `shared$configs`.
-#' @param shared List of worker inputs assembled by `evaluate()`: `data`, `idx`
-#'   (from [resample_indices()]), `configs`, `role_map`, `grid_size`,
-#'   `bayesian_iter`, `prune`, `prune_threshold`, `allow_par`, `seed`, and
-#'   `checkpoint_dir`.
-#'
-#' @return A one-row result tibble from [evaluate_single_config()].
-#' @keywords internal
-#' @noRd
-
-evaluate_config_worker <- function(idx, shared) {
-
-  ## Pin all threading libraries to 1 thread inside each worker
-  Sys.setenv(
-    OMP_NUM_THREADS        = 1,
-    OPENBLAS_NUM_THREADS   = 1,
-    MKL_NUM_THREADS        = 1,
-    VECLIB_MAXIMUM_THREADS = 1,
-    BLAS_NUM_THREADS       = 1,
-    LAPACK_NUM_THREADS     = 1
-  )
-  options(mc.cores = 1L)
-
-  if (requireNamespace("data.table", quietly = TRUE)) {
-    data.table::setDTthreads(1)
-  }
-
-  cfg <- shared$configs[idx, ]
-
-  ## Reconstruct the split and folds from indices. Fold membership is
-  ## reproduced by construction, not by replaying the RNG.
-  resamples <- rebuild_resamples(shared$data, shared$idx)
-
-  result_row <- evaluate_single_config(
-    config_row      = cfg,
-    split           = resamples$split,
-    cv_folds        = resamples$cv_folds,
-    role_map        = shared$role_map,
-    grid_size       = shared$grid_size,
-    bayesian_iter   = shared$bayesian_iter,
-    prune           = shared$prune,
-    prune_threshold = shared$prune_threshold,
-    allow_par       = shared$allow_par,
-    seed            = shared$seed
-  )
-
-  ## Atomic per-config checkpoint
-  if (!is.null(shared$checkpoint_dir)) {
-
-    tmp <- tempfile(tmpdir = shared$checkpoint_dir, fileext = ".rds")
-    saveRDS(result_row, tmp)
-    file.rename(tmp, file.path(shared$checkpoint_dir,
-                               paste0(cfg$config_id, ".rds")))
-
-  }
-
-  result_row
-
-}
-
-
 #' @export
 evaluate <- function(x,
                      metric          = "rpd",
@@ -853,5 +775,86 @@ rank_configs_by_cv <- function(results, metric) {
   }
 
   results[order(vals, decreasing = metric %in% HIGHER_BETTER_METRICS), , drop = FALSE]
+
+}
+
+## -------------------------------------------------------------------------
+## Parallel worker
+## -------------------------------------------------------------------------
+
+#' Evaluate One Configuration Inside a Parallel Worker
+#'
+#' @description
+#' The body `evaluate()`'s parallel branch dispatches, kept at top level on
+#' purpose.
+#'
+#' R serializes a closure together with its enclosing environment. A function
+#' defined inside `evaluate()` therefore carries every local in that frame to
+#' every worker — including the split and the resample object — regardless of
+#' what is passed explicitly. Measured on the KSSL clay training set at 2 cm-1
+#' (17,788 x 1,701), that was a 2.26 GiB payload per future against 232 MB of
+#' genuinely needed inputs, and it was what tripped
+#' `future.globals.maxSize` (1e9, installed by `tune` at load).
+#'
+#' Because this function lives in the package namespace, `future` resolves it by
+#' name rather than serializing it, so the payload is exactly `shared`.
+#'
+#' @param idx Integer row index into `shared$configs`.
+#' @param shared List of worker inputs assembled by `evaluate()`: `data`, `idx`
+#'   (from `resample_indices()`), `configs`, `role_map`, `grid_size`,
+#'   `bayesian_iter`, `prune`, `prune_threshold`, `allow_par`, `seed`, and
+#'   `checkpoint_dir`.
+#'
+#' @return A one-row result tibble from [evaluate_single_config()].
+#' @keywords internal
+#' @noRd
+
+evaluate_config_worker <- function(idx, shared) {
+
+  ## Pin all threading libraries to 1 thread inside each worker
+  Sys.setenv(
+    OMP_NUM_THREADS        = 1,
+    OPENBLAS_NUM_THREADS   = 1,
+    MKL_NUM_THREADS        = 1,
+    VECLIB_MAXIMUM_THREADS = 1,
+    BLAS_NUM_THREADS       = 1,
+    LAPACK_NUM_THREADS     = 1
+  )
+  options(mc.cores = 1L)
+
+  if (requireNamespace("data.table", quietly = TRUE)) {
+    data.table::setDTthreads(1)
+  }
+
+  cfg <- shared$configs[idx, ]
+
+  ## Reconstruct the split and folds from indices. Fold membership is
+  ## reproduced by construction, not by replaying the RNG.
+  resamples <- rebuild_resamples(shared$data, shared$idx)
+
+  result_row <- evaluate_single_config(
+    config_row      = cfg,
+    split           = resamples$split,
+    cv_folds        = resamples$cv_folds,
+    role_map        = shared$role_map,
+    grid_size       = shared$grid_size,
+    bayesian_iter   = shared$bayesian_iter,
+    prune           = shared$prune,
+    prune_threshold = shared$prune_threshold,
+    allow_par       = shared$allow_par,
+    seed            = shared$seed
+  )
+
+  ## Atomic per-config checkpoint
+  if (!is.null(shared$checkpoint_dir)) {
+
+    tmp <- tempfile(tmpdir = shared$checkpoint_dir, fileext = ".rds")
+    saveRDS(result_row, tmp)
+    file.rename(tmp, file.path(shared$checkpoint_dir,
+                               paste0(cfg$config_id, ".rds")))
+
+  }
+
+  result_row
 
 }
