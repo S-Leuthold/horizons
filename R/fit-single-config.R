@@ -137,8 +137,8 @@ fit_single_config <- function(config_row,
   ## -----------------------------------------------------------------------
 
   wflow_result <- safely_execute(
-    workflows::workflow() %>%
-      workflows::add_recipe(recipe) %>%
+    workflows::workflow() |>
+      workflows::add_recipe(recipe) |>
       workflows::add_model(model_spec),
     log_error          = FALSE,
     capture_conditions = TRUE
@@ -324,15 +324,14 @@ fit_single_config <- function(config_row,
   ## Step 9: Compute fold-wise CV metrics (original scale)
   ## -----------------------------------------------------------------------
 
-  fold_metrics <- cv_predictions %>%
-    split(.$`.fold`) %>%
+  fold_metrics <- split(cv_predictions, cv_predictions$`.fold`) |>
     purrr::map_dfr(
       ~ compute_original_scale_metrics(.x$truth, .x$.pred),
       .id = "fold"
     )
 
-  cv_metrics <- fold_metrics %>%
-    dplyr::group_by(.metric) %>%
+  cv_metrics <- fold_metrics |>
+    dplyr::group_by(.metric) |>
     dplyr::summarize(
       mean    = mean(.estimate, na.rm = TRUE),
       std_err = stats::sd(.estimate, na.rm = TRUE) / sqrt(dplyr::n()),
@@ -403,7 +402,7 @@ fit_single_config <- function(config_row,
   ## (never passed through the recipe), so no back-transformation needed.
 
   test_metrics_raw <- safely_execute(
-    compute_original_scale_metrics(test_truth, test_preds) %>%
+    compute_original_scale_metrics(test_truth, test_preds) |>
       tidyr::pivot_wider(names_from = .metric, values_from = .estimate),
     log_error          = FALSE,
     capture_conditions = TRUE
@@ -437,7 +436,7 @@ fit_single_config <- function(config_row,
   degraded        <- FALSE
   degraded_reason <- NA_character_
 
-  rpd_cv <- cv_metrics %>% dplyr::filter(.metric == "rpd")
+  rpd_cv <- cv_metrics |> dplyr::filter(.metric == "rpd")
 
   if (nrow(rpd_cv) == 1 && is.finite(rpd_cv$mean) &&
       is.finite(rpd_cv$std_err) && is.finite(test_metrics$rpd)) {
