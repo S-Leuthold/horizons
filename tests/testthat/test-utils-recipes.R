@@ -443,7 +443,6 @@ describe("build_recipe()", {
 ## The ratio is scale-invariant, so a small fixture catches it. Test at a size
 ## where the data dominates fixed recipe overhead.
 
-serialized_size <- function(x) length(serialize(x, NULL))
 
 describe("build_recipe() serialization footprint", {
 
@@ -474,11 +473,56 @@ describe("build_recipe() serialization footprint", {
 
     data_bytes <- serialized_size(td$data)
 
+    ## Guard against a vacuous pass if the recipe ever has no steps.
+    expect_gt(length(rec$steps), 0)
+
     ## Each step, serialized on its own, should be negligible against the
     ## training data. Before the fix, a single step carried 2x the table.
     for (step in rec$steps) {
 
       expect_lt(serialized_size(step) / data_bytes, 0.1)
+
+    }
+
+  })
+
+  it("selects the same columns as an unstripped build, across the grid", {
+
+    ## The footprint tests prove the recipe is small and the functional tests
+    ## prove it preps — but neither proves it selects the RIGHT columns. PCA
+    ## hides a wrong `wn_` set entirely. Comparing baked output against a build
+    ## whose selector environments were left heavy is the assertion that would
+    ## catch a binding this function failed to harvest.
+    strip <- horizons:::strip_selector_envs
+
+    for (fs in c("none", "pca")) {
+
+      for (cov in list(NA_character_, "clay")) {
+
+        td     <- make_test_data(n = 60, n_wn = 40, covariates = c("clay", "ph"))
+        config <- make_config_row(preprocessing     = "snv",
+                                  feature_selection = fs,
+                                  covariates        = cov)
+
+        stripped <- build_recipe(config, td$data, td$role_map)
+
+        ## Rebuild with the strip neutered, by re-pointing every selector at an
+        ## environment that still holds the caller's frame.
+        unstripped <- local({
+          on.exit(assignInNamespace("strip_selector_envs", strip,
+                                    ns = "horizons"), add = TRUE)
+          assignInNamespace("strip_selector_envs",
+                            function(rec, frame) rec, ns = "horizons")
+          build_recipe(config, td$data, td$role_map)
+        })
+
+        baked_stripped   <- recipes::bake(recipes::prep(stripped),   NULL)
+        baked_unstripped <- recipes::bake(recipes::prep(unstripped), NULL)
+
+        expect_equal(baked_stripped, baked_unstripped,
+                     info = paste("fs =", fs, "cov =", as.character(cov)))
+
+      }
 
     }
 
