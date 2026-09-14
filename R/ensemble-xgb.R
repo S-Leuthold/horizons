@@ -62,8 +62,8 @@ fit_ensemble_xgb <- function(object,
       trees      = tune::tune(),
       tree_depth = tune::tune(),
       learn_rate = tune::tune()
-    ) %>%
-      parsnip::set_engine("xgboost") %>%
+    ) |>
+      parsnip::set_engine("xgboost") |>
       parsnip::set_mode("regression")
 
   } else {
@@ -72,8 +72,8 @@ fit_ensemble_xgb <- function(object,
       trees      = 500,
       tree_depth = 3,
       learn_rate = 0.05
-    ) %>%
-      parsnip::set_engine("xgboost") %>%
+    ) |>
+      parsnip::set_engine("xgboost") |>
       parsnip::set_mode("regression")
 
   }
@@ -121,7 +121,7 @@ extract_weights_xgb <- function(meta_fit, members) {
     model = hardhat::extract_fit_engine(meta_fit)
   )
 
-  weights <- tibble::tibble(member = members) %>%
+  weights <- tibble::tibble(member = members) |>
     dplyr::left_join(
       tibble::tibble(
         member = sub("^member_", "", imp$Feature),

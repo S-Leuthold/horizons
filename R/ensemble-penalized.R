@@ -57,12 +57,12 @@ fit_ensemble_penalized <- function(object,
 
   spec <- if (optimize) {
 
-    parsnip::linear_reg(penalty = tune::tune(), mixture = tune::tune()) %>%
+    parsnip::linear_reg(penalty = tune::tune(), mixture = tune::tune()) |>
       parsnip::set_engine("glmnet")
 
   } else {
 
-    parsnip::linear_reg(penalty = 0.01, mixture = 1) %>%
+    parsnip::linear_reg(penalty = 0.01, mixture = 1) |>
       parsnip::set_engine("glmnet")
 
   }
@@ -113,7 +113,7 @@ extract_weights_penalized <- function(meta_fit, members) {
   )
   names(coefs)[2] <- "coef"
 
-  weights <- tibble::tibble(member = members) %>%
+  weights <- tibble::tibble(member = members) |>
     dplyr::left_join(
       dplyr::transmute(coefs,
                        member = sub("^member_", "", .data$term),

@@ -319,8 +319,8 @@ fit_tuned_meta_learner <- function(object,
   meta_frame        <- oof$predictors
   meta_frame$.truth <- oof$truth
 
-  meta_wflow <- workflows::workflow() %>%
-    workflows::add_model(spec) %>%
+  meta_wflow <- workflows::workflow() |>
+    workflows::add_model(spec) |>
     workflows::add_formula(.truth ~ .)
 
   ## CV folds on the OOF matrix. Built once: the same resamples drive both
@@ -455,8 +455,8 @@ fit_tuned_meta_learner <- function(object,
 
   ## Wide member-prediction matrix with the SAME column names the meta-model
   ## trained on; truth rides through the pivot (constant per sample).
-  test_wide <- member_pred %>%
-    dplyr::select("sample_id", "truth", "config_id", ".pred") %>%
+  test_wide <- member_pred |>
+    dplyr::select("sample_id", "truth", "config_id", ".pred") |>
     tidyr::pivot_wider(names_from   = "config_id",
                        values_from  = ".pred",
                        names_prefix = "member_")
@@ -825,7 +825,7 @@ predict.horizons_ensemble <- function(object,
 #' @noRd
 combine_ensemble_weighted <- function(member_pred, weights) {
 
-  joined <- member_pred %>%
+  joined <- member_pred |>
     dplyr::left_join(weights, by = c("config_id" = "member"))
 
   ## A member with predictions but no matching weight leaves `coef` NA, which
@@ -846,8 +846,8 @@ combine_ensemble_weighted <- function(member_pred, weights) {
 
   }
 
-  out <- joined %>%
-    dplyr::group_by(.data$sample_id) %>%
+  out <- joined |>
+    dplyr::group_by(.data$sample_id) |>
     dplyr::summarise(.pred = sum(.data$.pred * .data$coef),
                      .groups = "drop")
 
@@ -883,8 +883,8 @@ combine_ensemble_metamodel <- function(member_pred, members, model) {
 
   member_cols <- paste0("member_", members)
 
-  wide <- member_pred %>%
-    dplyr::select("sample_id", "config_id", ".pred") %>%
+  wide <- member_pred |>
+    dplyr::select("sample_id", "config_id", ".pred") |>
     tidyr::pivot_wider(names_from   = "config_id",
                        values_from  = ".pred",
                        names_prefix = "member_")

@@ -110,8 +110,8 @@ evaluate_single_config <- function(config_row,
   ## -----------------------------------------------------------------------
 
   wflow_result <- safely_execute(
-    workflows::workflow() %>%
-      workflows::add_recipe(recipe) %>%
+    workflows::workflow() |>
+      workflows::add_recipe(recipe) |>
       workflows::add_model(model_spec),
     log_error          = FALSE,
     capture_conditions = TRUE
@@ -418,7 +418,7 @@ evaluate_single_config <- function(config_row,
     compute_original_scale_metrics(
       truth    = test_predictions[[outcome_col]],
       estimate = test_predictions$.pred
-    ) %>%
+    ) |>
       tidyr::pivot_wider(names_from = .metric, values_from = .estimate),
     log_error          = FALSE,
     capture_conditions = TRUE

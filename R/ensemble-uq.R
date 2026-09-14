@@ -268,8 +268,8 @@ fit_uq_fold_models <- function(meta_frame, oof_row, folds, contract, optimize) {
   ## finalize_workflow() substituted them before the full-data refit.
   base_wflow <- if (method != "weighted") {
 
-    workflows::workflow() %>%
-      workflows::add_model(workflows::extract_spec_parsnip(contract$model)) %>%
+    workflows::workflow() |>
+      workflows::add_model(workflows::extract_spec_parsnip(contract$model)) |>
       workflows::add_formula(.truth ~ .)
 
   } else {
@@ -706,8 +706,8 @@ predict_ensemble_intervals <- function(uq, member_pred) {
   }
 
   ## Widen member predictions by sample_id into the canonical member order.
-  wide <- member_pred %>%
-    dplyr::select("sample_id", "config_id", ".pred") %>%
+  wide <- member_pred |>
+    dplyr::select("sample_id", "config_id", ".pred") |>
     tidyr::pivot_wider(names_from   = "config_id",
                        values_from  = ".pred",
                        names_prefix = "member_")
