@@ -96,17 +96,17 @@ build_recipe <- function(config_row, train_data, role_map) {
 
   if (transformation == "log") {
 
-    rec <- rec %>%
+    rec <- rec |>
       recipes::step_log(recipes::all_outcomes(), offset = 1, skip = TRUE)
 
   } else if (transformation == "log10") {
 
-    rec <- rec %>%
+    rec <- rec |>
       recipes::step_log(recipes::all_outcomes(), offset = 1, base = 10, skip = TRUE)
 
   } else if (transformation == "sqrt") {
 
-    rec <- rec %>%
+    rec <- rec |>
       recipes::step_sqrt(recipes::all_outcomes(), skip = TRUE)
 
   }
@@ -121,7 +121,7 @@ build_recipe <- function(config_row, train_data, role_map) {
 
   preprocessing <- tolower(as.character(config_row$preprocessing))
 
-  rec <- rec %>%
+  rec <- rec |>
     step_transform_spectra(
       dplyr::all_of(predictor_cols),
       preprocessing = preprocessing
@@ -138,26 +138,26 @@ build_recipe <- function(config_row, train_data, role_map) {
 
     "none" = rec,
 
-    "pca" = rec %>%
+    "pca" = rec |>
       recipes::step_pca(
         recipes::all_predictors(),
         threshold = 0.995,
         options   = list(scale. = TRUE, center = TRUE)
       ),
 
-    "correlation" = rec %>%
+    "correlation" = rec |>
       step_select_correlation(
         recipes::all_predictors(),
         outcome = outcome_col
       ),
 
-    "boruta" = rec %>%
+    "boruta" = rec |>
       step_select_boruta(
         recipes::all_predictors(),
         outcome = outcome_col
       ),
 
-    "cars" = rec %>%
+    "cars" = rec |>
       step_select_cars(
         recipes::all_predictors(),
         outcome = outcome_col
@@ -202,7 +202,7 @@ build_recipe <- function(config_row, train_data, role_map) {
 
       if (length(unused_covariates) > 0) {
 
-        rec <- rec %>%
+        rec <- rec |>
           recipes::step_rm(dplyr::all_of(unused_covariates))
 
       }
@@ -210,12 +210,83 @@ build_recipe <- function(config_row, train_data, role_map) {
     } else {
 
       ## No covariates for this config — remove all
-      rec <- rec %>%
+      rec <- rec |>
         recipes::step_rm(dplyr::all_of(all_covariate_cols))
 
     }
 
   }
+
+  ## -----------------------------------------------------------------------
+  ## Step 5: Drop the heavy environment captured by the step selectors
+  ## -----------------------------------------------------------------------
+
+  strip_selector_envs(rec, list(
+    predictor_cols     = predictor_cols,
+    outcome_col        = outcome_col,
+    id_col             = id_col,
+    meta_cols          = meta_cols,
+    all_covariate_cols = all_covariate_cols,
+    config_covariates  = config_covariates,
+    unused_covariates  = setdiff(all_covariate_cols, config_covariates)
+  ))
+
+}
+
+
+#' Re-point Recipe Selector Quosures at a Minimal Environment
+#'
+#' @description
+#' `recipes` step constructors capture their calling frame via
+#' `rlang::enquos()`. `build_recipe()`'s frame holds both `train_data` and the
+#' recipe under construction, so every step ends up retaining two references to
+#' the training table.
+#'
+#' Those references cost nothing in memory — R shares the underlying object —
+#' but R's serializer does not deduplicate data frames, so each reference
+#' becomes a full copy whenever the recipe crosses to a parallel worker. At
+#' library scale (14,228 x 1,701) that turned a 186 MB recipe into 928 MB on
+#' the wire, which is what exhausted memory and tripped R's 2 GB long-vector
+#' limit during parallel tuning.
+#'
+#' The selectors only ever need the role-derived column-name vectors, so this
+#' re-points their environments at one holding exactly those. Neither
+#' `object.size()` nor `lobstr::obj_size()` shows the problem, because the
+#' duplication exists only at serialization time.
+#'
+#' @param rec A `recipes::recipe` object.
+#' @param bindings Named list of the (small) objects the step selectors
+#'   reference — typically the role-derived character vectors.
+#'
+#' @return The recipe, with every step selector quosure re-pointed. The prepped
+#'   and baked output is unchanged.
+#' @keywords internal
+#' @noRd
+
+strip_selector_envs <- function(rec, bindings) {
+
+  env <- rlang::new_environment(data   = bindings,
+                                parent = rlang::ns_env("dplyr"))
+
+  rec$steps <- lapply(rec$steps, function(step) {
+
+    for (slot in c("terms", "columns")) {
+
+      if (!is.null(step[[slot]]) && is.list(step[[slot]])) {
+
+        step[[slot]] <- lapply(step[[slot]], function(q) {
+
+          if (rlang::is_quosure(q)) rlang::quo_set_env(q, env) else q
+
+        })
+
+      }
+
+    }
+
+    step
+
+  })
 
   rec
 
