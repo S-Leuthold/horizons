@@ -617,3 +617,73 @@ describe("fit() - seed reproducibility", {
   })
 
 })
+
+
+## =========================================================================
+## Split F is independent of evaluate()'s split (#50)
+## =========================================================================
+## evaluate() and fit() share the default seed and the same initial_split()
+## call on the same frame, so before fit_split_seed() the two partitions were
+## bit-identical and fit()'s test metrics were measured on the rows the
+## configs were selected on.
+
+describe("fit() - split independence from evaluate()", {
+
+  obj <- make_fit_object(n = 60, n_configs = 1, seed = 42)   # evaluate(seed = 42)
+
+  it("does not reproduce evaluate()'s partition at the same seed", {
+
+    r <- suppressWarnings(
+      fit(obj, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE,
+          verbose = FALSE, seed = 42L)
+    )
+
+    expect_false(identical(sort(as.integer(r$models$split$in_id)),
+                           sort(as.integer(obj$evaluation$split$in_id))))
+
+  })
+
+  it("warns visibly when a caller makes the partitions coincide", {
+
+    ## fit(seed = s) seeds Split F with s + 1; evaluate used 42, so 41 collides
+    expect_warning(
+      fit(obj, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE,
+          verbose = FALSE, seed = 41L),
+      "identical to evaluate"
+    )
+
+  })
+
+  it("fit_split_seed() is a documented offset of the user's seed", {
+
+    expect_identical(fit_split_seed(307L), 308L)
+    expect_identical(fit_split_seed(42), 43L)
+
+  })
+
+})
+
+
+## =========================================================================
+## Members are ranked on the cross-validated metric (#50)
+## =========================================================================
+
+describe("fit() - member ranking on cv_<metric>", {
+
+  obj <- make_fit_object(n = 60, n_configs = 2)
+
+  r <- suppressWarnings(
+    fit(obj, n_best = 2L, compute_uq = FALSE, compute_ad = FALSE,
+        verbose = FALSE, seed = 123L)
+  )
+
+  it("orders members by cv_<rank_metric> from evaluation$results", {
+
+    successes <- obj$evaluation$results[obj$evaluation$results$status == "success", ]
+    expected  <- rank_configs_by_cv(successes, obj$evaluation$rank_metric)$config_id
+
+    expect_equal(r$models$results$config_id, expected[seq_len(nrow(r$models$results))])
+
+  })
+
+})

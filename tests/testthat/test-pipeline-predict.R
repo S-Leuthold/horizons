@@ -52,7 +52,10 @@ make_predict_eval <- function(n = 300, n_wn = 10, transformation = "none", seed 
     evaluation = list(
       results     = tibble::tibble(config_id = "cfg_001", status = "success",
                                    rmse = 0.4, rrmse = 0.1, rsq = 0.8,
-                                   ccc = 0.85, rpd = 1.5, mae = 0.3),
+                                   ccc = 0.85, rpd = 1.5, mae = 0.3,
+                                   ## fit() ranks on the CV panel (#50)
+                                   cv_rmse = 0.45, cv_rrmse = 0.11, cv_rsq = 0.78,
+                                   cv_ccc = 0.83, cv_rpd = 1.4, cv_mae = 0.33),
       best_config = "cfg_001",
       rank_metric = "rpd",
       split        = rsample::initial_split(df, prop = 0.8),

@@ -12,8 +12,12 @@
 #'
 #' @param x A `horizons_eval` object (output of `evaluate()`).
 #' @param n_best Integer. Number of top configurations to re-tune. Default 5.
-#' @param metric Character or NULL. Metric for ranking. If NULL, uses the
-#'   rank_metric from `evaluate()`. Default NULL.
+#' @param metric Character or NULL. Metric for ranking the candidate
+#'   configs, by bare name (`"rpd"`, `"rmse"`, ...). If NULL, uses the
+#'   rank_metric from `evaluate()`. Ranking reads the cross-validated value
+#'   at each config's selected hyperparameters (`evaluation$results$cv_<metric>`),
+#'   never the test-set column, so the test sets stay held out from
+#'   selection. Default NULL.
 #' @param compute_uq Logical. Train UQ components (quantile model +
 #'   conformal calibration). Default TRUE.
 #' @param compute_ad Logical. Compute applicability-domain metadata (centroid +
@@ -21,7 +25,10 @@
 #'   can emit `.ad_distance` / `.ad_flag`. Shares the UQ calibration split.
 #'   Default TRUE.
 #' @param allow_par Logical. Enable parallel CV folds. Default FALSE.
-#' @param seed Integer. Random seed for Split F and CV folds. Default 307L.
+#' @param seed Integer. Random seed for CV folds and, through
+#'   `fit_split_seed()` (`seed + 1L`), for Split F. The offset keeps Split F
+#'   independent of `evaluate()`'s split when both are called with the same
+#'   `seed`, which is the default. Default 307L.
 #' @param verbose Logical. Print progress tree to console. Default TRUE.
 #'
 #' @return A `horizons_fit` object (inherits from `horizons_eval`,
@@ -64,9 +71,11 @@ fit <- function(x,
 
   }
 
-  ## Determine ranking metric
+  ## Determine ranking metric. The name stays bare ("rpd"); ranking reads the
+  ## cross-validated column cv_rpd, so members are chosen without touching
+  ## either test set (#50). The test-set metrics on the leaderboard remain
+  ## reported, and are honest precisely because they are not used here.
   rank_metric <- metric %||% x$evaluation$rank_metric %||% "rpd"
-  higher_better <- HIGHER_BETTER_METRICS
 
   ## Extract successful configs and rank
   successes <- eval_results[eval_results$status == "success", ]
@@ -79,38 +88,7 @@ fit <- function(x,
 
   }
 
-  ## Rank successes by metric
-  if (!rank_metric %in% names(successes)) {
-
-    rlang::abort(paste0(
-      "Rank metric '", rank_metric,
-      "' not found in evaluation results. ",
-      "Available: ", paste(names(successes), collapse = ", ")
-    ))
-
-  }
-
-  metric_vals <- successes[[rank_metric]]
-
-  if (all(is.na(metric_vals))) {
-
-    rlang::abort(paste0(
-      "All values for rank metric '", rank_metric, "' are NA. Cannot rank."
-    ))
-
-  }
-
-  if (rank_metric %in% higher_better) {
-
-    rank_order <- order(metric_vals, decreasing = TRUE)
-
-  } else {
-
-    rank_order <- order(metric_vals, decreasing = FALSE)
-
-  }
-
-  successes <- successes[rank_order, ]
+  successes <- rank_configs_by_cv(successes, rank_metric)
 
   ## Cap n_best at available successes
   n_available <- nrow(successes)
@@ -147,8 +125,11 @@ fit <- function(x,
   ## -----------------------------------------------------------------------
   ## Step 1: Data partitioning — Split F (new, independent from evaluate)
   ## -----------------------------------------------------------------------
+  ## evaluate() seeds its split with `seed` and this call shape on the same
+  ## frame, so seeding Split F with `seed` too made the two partitions
+  ## bit-identical at the shared default (#50). Derive F's seed instead.
 
-  set.seed(seed)
+  set.seed(fit_split_seed(seed))
 
   split_F <- tryCatch(
     rsample::initial_split(analysis, prop = 0.8, strata = outcome_col),
@@ -173,6 +154,23 @@ fit <- function(x,
   test_F  <- rsample::testing(split_F)
   n_train <- nrow(train_F)
   n_test  <- nrow(test_F)
+
+  ## Visible guard: a caller can still make the partitions coincide (for
+  ## example fit(seed = evaluate_seed - 1L)). Warn rather than abort; the
+  ## test metrics are then post-selection and the user should know.
+  eval_split <- x$evaluation$split
+
+  if (!is.null(eval_split) && !is.null(eval_split$in_id) &&
+      identical(sort(as.integer(split_F$in_id)),
+                sort(as.integer(eval_split$in_id)))) {
+
+    cli::cli_warn(c(
+      "!" = "fit()'s train/test partition is identical to evaluate()'s.",
+      "i" = "Reported test metrics are then measured on the rows the configs were selected on.",
+      "i" = "Pass a different {.arg seed} to fit() to get an independent partition."
+    ))
+
+  }
 
   ## Calibration partitioning: split train_F into train_Fit / calib_Fit.
   ## UQ and AD share this one held-out split (D7) \u2014 both calibrate on calib_Fit
@@ -683,5 +681,27 @@ fit <- function(x,
   }
 
   x
+
+}
+
+## ---------------------------------------------------------------------------
+## fit_split_seed \u2014 Split F's seed, derived from the user's seed
+## ---------------------------------------------------------------------------
+
+#' Seed for fit()'s train/test partition
+#'
+#' @description
+#' `evaluate()` seeds its train/test split with `seed`. `fit()` builds its own
+#' split with the same `rsample::initial_split()` call on the same frame, so
+#' seeding it with `seed` too reproduced `evaluate()`'s partition exactly
+#' (#50). Split F is seeded with `seed + 1L` instead. The offset is documented
+#' rather than hidden so a caller who needs to reproduce the partition can.
+#'
+#' @param seed Integer seed passed to `fit()`.
+#' @return Integer seed for Split F.
+#' @keywords internal
+fit_split_seed <- function(seed) {
+
+  as.integer(seed) + 1L
 
 }

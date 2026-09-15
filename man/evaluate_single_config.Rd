@@ -46,9 +46,12 @@ response scale (tuning metrics are scored there via
 \item{seed}{Integer. Random seed for reproducibility.}
 }
 \value{
-Single-row tibble with columns: \code{config_id}, \code{status}, \code{rmse},
-\code{rrmse}, \code{rsq}, \code{ccc}, \code{rpd}, \code{mae}, \code{best_params} (list-column),
-\code{error_message}, \code{runtime_secs}.
+Single-row tibble with columns: \code{config_id}, \code{status}, the six
+test-set metrics \code{rmse}, \code{rrmse}, \code{rsq}, \code{ccc}, \code{rpd}, \code{mae}, the six
+cross-validated means at the selected hyperparameters \code{cv_rmse},
+\code{cv_rrmse}, \code{cv_rsq}, \code{cv_ccc}, \code{cv_rpd}, \code{cv_mae} (what \code{evaluate()} and
+\code{fit()} rank on), \code{best_params} (list-column), \code{error_message},
+\code{warnings}, \code{runtime_secs}.
 }
 \description{
 Inner-loop function for \code{evaluate()}. Takes a single config row, builds a

@@ -20,8 +20,11 @@ evaluate(
 \code{configure()}.}
 
 \item{metric}{Character. Metric for ranking configurations. One of
-\code{"rpd"}, \code{"rsq"}, \code{"rmse"}, \code{"rrmse"}, \code{"ccc"}, \code{"mae"}. Default
-\code{"rpd"}.}
+\code{"rpd"}, \code{"rsq"}, \code{"rmse"}, \code{"rrmse"}, \code{"ccc"}, \code{"mae"}. Ranking uses
+the cross-validated value of that metric at each config's selected
+hyperparameters (\verb{evaluation$results$cv_<metric>}); the test-set columns
+are reported but never used for selection, so they remain honest
+held-out estimates. Default \code{"rpd"}.}
 
 \item{prune}{Logical. If TRUE, skip Bayesian optimization for configs
 whose grid-search RPD falls below \code{prune_threshold}. Default TRUE.}
