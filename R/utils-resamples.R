@@ -2,16 +2,41 @@
 ## Resample transfer helpers
 ## ---------------------------------------------------------------------------
 ##
-## `rsample` objects share their underlying data frame by reference: an
-## `initial_split` and the five `vfold_cv` splits derived from it all point at
-## one table, so in memory they cost one copy. R's serializer does not
-## deduplicate data frames, though, so each reference becomes a full copy the
-## moment the objects are sent to a parallel worker.
+## CANONICAL ACCOUNT of the serialization problem this package had. Other sites
+## reference this header rather than restating it, so there is one place to
+## correct if the figures are ever re-measured.
 ##
-## Measured on the KSSL clay training set at 2 cm-1 (17,788 x 1,701), the pair
-## evaluate() exported was 418 MB resident but 1,158.7 MB serialized against
-## 231.7 MB of unique data — a 5x tax paid once per future. Sending the data
-## once with integer indices and rebuilding worker-side pays it once.
+## The mechanism. R's serializer does not deduplicate plain data frames. Objects
+## that share one table by reference therefore cost one copy in memory and N
+## copies on the wire, where N is the number of references. `rsample` is built
+## this way: an `initial_split` and the `vfold_cv` splits derived from it all
+## point at the same table. Critically, neither `object.size()` nor
+## `lobstr::obj_size()` shows this — both report the honest in-memory figure —
+## so the only way to see it is `length(serialize(x, NULL))`. That is why it
+## went undetected for months.
+##
+## The measurements, all on the KSSL clay data at native 2 cm-1. Two row counts
+## appear because they are different frames: 17,788 x 1,701 is the full analysis
+## table, and 14,228 x 1,701 is its 80% training split.
+##
+##   object                          resident   serialized
+##   analysis table (17,788 rows)     231.7 MB     231.7 MB
+##   split + vfold_cv pair            418.2 MB   1,158.7 MB   (5.0x)
+##   recipe, selectors unstripped     186.5 MB     928.0 MB   (5.0x)
+##   recipe, selectors stripped       186.5 MB     185.7 MB   (1.0x)
+##   baked design the model fits        4.5 MB       3.6 MB
+##
+## The worker payload before any of this was 2,086.6 MB, against R's 2,048 MB
+## long-vector ceiling — 38 MB over, which is exactly the "long vectors not
+## supported yet" failure. After: 417.6 MB. Halving the spectral resolution
+## brought the old payload to roughly 1,043 MB, just under the ceiling, which is
+## why the 4 cm-1 resample in the experiment harness appeared to fix it and was
+## never a modelling decision.
+##
+## Three fixes, in the order they matter: strip the recipe's selector
+## environments (R/utils-recipes.R), send the table once with indices and rebuild
+## worker-side (this file), and keep the worker body out of evaluate()'s frame
+## (R/pipeline-evaluate.R).
 
 
 #' Extract Resample Indices for Worker Transfer

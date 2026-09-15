@@ -1,5 +1,51 @@
 # horizons (development version)
 
+## Performance
+
+* `evaluate(workers > 1)` now works at library scale. It previously aborted
+  with `future.globals.maxSize` or R's `long vectors not supported yet` on
+  datasets above a few thousand rows, because R's serializer does not
+  deduplicate data frames: every *reference* to the training table became a
+  full *copy* when an object crossed to a parallel worker. Neither
+  `object.size()` nor `lobstr::obj_size()` reports this, since the duplication
+  exists only at serialization time.
+
+  Three sources are fixed. Recipe step selectors no longer retain the frame
+  they were built in (~5x smaller recipes). `evaluate()` sends the analysis
+  table once with integer indices and rebuilds the resamples worker-side,
+  rather than sending an `rsplit` and a `vfold_cv` that shared one table in
+  memory and serialized as one plus `v` copies. And the parallel worker body
+  moved to a top-level function, so it no longer carries `evaluate()`'s entire
+  frame to every worker.
+
+  Measured on a 17,788 x 1,701 spectral matrix, the per-worker payload went
+  from 2,086.6 MB to 417.6 MB. The old figure sat above R's 2,048 MB
+  long-vector limit, which is what the failures were.
+
+* `evaluate_single_config()` and `fit_single_config()` now pin the RNG kind as
+  well as the seed. A worker started under `furrr_options(seed = TRUE)` runs
+  L'Ecuyer-CMRG, and `set.seed()` alone does not reset it, so sequential and
+  parallel runs previously drew different streams from the same seed.
+
+## Breaking / behavioural
+
+* Parallel `evaluate()` now refuses to run under `devtools::load_all()`.
+  Workers resolve the package namespace by name and therefore load the
+  *installed* `horizons`, not the source tree — so a stale install would have
+  run old code behind a new worker body without saying so. Install the package
+  (`R CMD INSTALL`) before using parallelism in development.
+
+* `magrittr` is no longer a dependency; the package uses the base pipe (`|>`)
+  throughout. `%>%` was imported but never exported, so nothing user-facing
+  changes.
+
+## Internal
+
+* `build_recipe()` returns a recipe whose step selector quosures point at a
+  minimal environment rather than the calling frame. Code reaching into
+  `rec$steps[[i]]$terms` environments will see this; the prepped and baked
+  output is unchanged.
+
 ## New Features
 
 * `ensemble()` now calibrates CV+ conformal prediction intervals by default

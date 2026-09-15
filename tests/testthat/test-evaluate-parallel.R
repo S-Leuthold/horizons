@@ -256,9 +256,15 @@ describe("evaluate() - parallel execution", {
                seed = 42L)
     )
 
-    ## Both runs should produce valid results with the same structure
-    ## (RNG streams differ between sequential set.seed() and parallel
-    ## L'Ecuyer-CMRG, so exact metric values may not match)
+    ## Asserts structure rather than exact values. The reason is narrower than
+    ## this comment used to claim: furrr_options(seed = TRUE) does put a worker
+    ## on L'Ecuyer-CMRG, but evaluate_single_config() now calls
+    ## set.seed(seed, kind = "Mersenne-Twister"), so the tuning streams do
+    ## match. What remains is engine-level nondeterminism — cubist returns
+    ## different metrics across identical calls on identical resamples — so a
+    ## bitwise comparison here would be flaky for reasons unrelated to
+    ## parallelism. A deterministic-engine equality test belongs in
+    ## test-evaluate-single-config.R.
     expect_s3_class(par_result, "horizons_eval")
 
     ## Same config IDs evaluated

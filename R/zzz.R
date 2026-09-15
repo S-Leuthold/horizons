@@ -5,7 +5,6 @@
 #' that quiets R CMD check for non-standard-evaluation column names. Not a
 #' user-facing object.
 #'
-#' @importFrom magrittr %>%
 #' @importFrom rlang :=
 #' @importFrom stats coef dist median var
 #' @importFrom utils head object.size
@@ -15,10 +14,11 @@
 NULL
 
 ## Quiet the R CMD check "no visible binding for global variable" NOTEs for the
-## non-standard-evaluation names used inside dplyr/tidyr/magrittr pipelines.
-## These are pipeline references (. = the magrittr dot; .metric/.estimate =
-## yardstick output columns), not real globals.
-utils::globalVariables(c(".", ".metric", ".estimate"))
+## non-standard-evaluation names used inside dplyr/tidyr pipelines. These are
+## pipeline references (.metric/.estimate = yardstick output columns), not real
+## globals. The magrittr dot is gone along with magrittr itself — the package
+## uses the base pipe throughout, per .claude/rules/r-analysis.md.
+utils::globalVariables(c(".metric", ".estimate"))
 
 
 #' Package startup configuration
@@ -45,15 +45,18 @@ utils::globalVariables(c(".", ".metric", ".estimate"))
   ## These register parsnip engines the pipeline selects by string
   ## (`set_engine("glmnet")`, the `pls` model via plsmod, `cubist_rules()` via
   ## rules). They are never called through `::`, so they must be loaded here for
-  ## the engines to resolve at fit time — and this keeps them honestly "used"
-  ## Imports rather than R CMD check NOTEs. Soft-loaded: a missing extension
-  ## means that engine is unavailable, not a package load failure.
+  ## the engines to resolve at fit time. Soft-loaded: a missing extension means
+  ## that engine is unavailable, not a package load failure.
+  ##
+  ## Written out literally rather than looped. R CMD check's "unused Imports"
+  ## test is static and only recognises a *literal* string argument, so the
+  ## previous for-loop was invisible to it and the
+  ## "Namespaces in Imports field not imported from" NOTE kept firing even
+  ## though the packages are genuinely used.
 
-  for (pkg in c("glmnet", "plsmod", "rules")) {
-
-    requireNamespace(pkg, quietly = TRUE)
-
-  }
+  requireNamespace("glmnet", quietly = TRUE)
+  requireNamespace("plsmod", quietly = TRUE)
+  requireNamespace("rules",  quietly = TRUE)
 
   ## ---------------------------------------------------------------------------
   ## Trust the user - no automatic thread control
@@ -77,7 +80,6 @@ utils::globalVariables(c(".", ".metric", ".estimate"))
       xgboost.nthread    = 1
     )
 
-    packageStartupMessage("horizons: Thread control enabled (set HORIZONS_THREAD_CONTROL=FALSE to disable)")
   }
 
   invisible()
@@ -92,6 +94,18 @@ utils::globalVariables(c(".", ".metric", ".estimate"))
     "Please flag bugs on Github (www.github.com/S-Leuthold/horizons)"
   )
 
+  ## Reported here rather than in .onLoad, where R CMD check flags
+  ## packageStartupMessage() as a NOTE. The thread pinning itself stays in
+  ## .onLoad, because it has to happen before any engine loads.
+
+  if (Sys.getenv("HORIZONS_THREAD_CONTROL", "FALSE") == "TRUE") {
+
+    packageStartupMessage(
+      "horizons: thread control enabled via HORIZONS_THREAD_CONTROL; ",
+      "unset it to leave threading to you."
+    )
+
+  }
 
   invisible()
 }
