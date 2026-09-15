@@ -260,6 +260,10 @@ fit_single_config <- function(config_row,
   ## Step 8: Generate OOF predictions via fit_resamples
   ## -----------------------------------------------------------------------
 
+  ## Re-pin before every stochastic stage so results do not depend on which
+  ## axis the previous stage ran on (see evaluate_single_config(), Step 8).
+  set.seed(seed, kind = "Mersenne-Twister")
+
   resample_result <- safely_execute(
     tune::fit_resamples(
       finalized_wf,
@@ -347,6 +351,8 @@ fit_single_config <- function(config_row,
   ## -----------------------------------------------------------------------
   ## Step 10: Fit final model on full training data
   ## -----------------------------------------------------------------------
+
+  set.seed(seed, kind = "Mersenne-Twister")
 
   final_fit_result <- safely_execute(
     workflows::fit(finalized_wf, data = train_data),
@@ -476,7 +482,8 @@ fit_single_config <- function(config_row,
         calib_data      = calib_data,
         role_map        = role_map,
         transformation  = transformation,
-        level_default   = DEFAULT_UQ_LEVEL
+        level_default   = DEFAULT_UQ_LEVEL,
+        seed            = seed
       ),
       log_error          = FALSE,
       capture_conditions = TRUE

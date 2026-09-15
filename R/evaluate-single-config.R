@@ -281,6 +281,13 @@ evaluate_single_config <- function(config_row,
 
   if (!skip_bayesian && bayesian_iter > 0) {
 
+    ## Re-pin before every stochastic stage. tune's future path advances the
+    ## parent stream past where the sequential loop leaves it (future_lapply()
+    ## draws worker seeds from it), so a stage seeded only by what came before
+    ## would differ between allow_par = TRUE and FALSE. Pinning here makes
+    ## the axis a pure performance choice (review finding, 2026-09-15).
+    set.seed(seed, kind = "Mersenne-Twister")
+
     bayes_result <- safely_execute(
       suppressMessages(suppressWarnings(
         tune::tune_bayes(
@@ -387,6 +394,10 @@ evaluate_single_config <- function(config_row,
   ## Step 11: Last fit on the held-out test set
   ## -----------------------------------------------------------------------
 
+  ## Re-pin: last_fit() draws the engine seed from the parent stream, whose
+  ## position now depends on which axis the tuning ran on (see Step 8).
+  set.seed(seed, kind = "Mersenne-Twister")
+
   lastfit_result <- safely_execute(
     tune::last_fit(final_wflow, split = split),
     log_error          = FALSE,
@@ -484,6 +495,7 @@ evaluate_single_config <- function(config_row,
     cv_ccc        = cv_panel$cv_ccc,
     cv_rpd        = cv_panel$cv_rpd,
     cv_mae        = cv_panel$cv_mae,
+    scoring_schema = SCORING_SCHEMA,
     best_params   = list(best_params),
     error_message = NA_character_,
     warnings      = list(if (length(collected_warnings) > 0) collected_warnings else NULL),

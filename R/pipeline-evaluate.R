@@ -302,6 +302,12 @@ evaluate <- function(x,
 
       }
 
+      ## Drop rows scored under a different regime (SCORING_SCHEMA): their
+      ## cv_* panel is not comparable to what this run will produce, and
+      ## ranking them together would make best_config an artifact of which
+      ## regime scored each config.
+      loaded <- drop_foreign_schema_rows(loaded, verbose = verbose)
+
       if (nrow(loaded) > 0) {
 
         for (j in seq_len(nrow(loaded))) {
@@ -318,16 +324,39 @@ evaluate <- function(x,
 
     if (length(per_config_files) > 0) {
 
+      n_foreign <- 0L
+
       for (f in per_config_files) {
 
         row <- tryCatch(readRDS(f), error = function(e) NULL)
 
-        if (!is.null(row) && row$config_id %in% configs$config_id &&
+        if (is.null(row)) next
+
+        if (!identical(checkpoint_row_schema(row), SCORING_SCHEMA)) {
+
+          n_foreign <- n_foreign + 1L
+          next
+
+        }
+
+        if (row$config_id %in% configs$config_id &&
             !row$config_id %in% names(checkpoint_results)) {
 
           checkpoint_results[[ row$config_id ]] <- row
 
         }
+
+      }
+
+      if (n_foreign > 0 && verbose) {
+
+        cat(paste0(
+          "│  ", cli::col_yellow(
+            "Dropped ", n_foreign, " per-config checkpoint",
+            if (n_foreign > 1) "s" else "",
+            " scored under an earlier scoring schema (will be re-evaluated)"
+          ), "\n"
+        ))
 
       }
 
@@ -381,13 +410,46 @@ evaluate <- function(x,
 
     if (axis$axis != "sequential") {
 
+      workers_label <- if (is.na(plan_workers)) "unbounded" else {
+        paste0(plan_workers, " worker", if (plan_workers != 1) "s" else "")
+      }
+
       cat(paste0("\u2502  Parallel: over ", axis$axis, " on ", plan_label,
-                 " (", plan_workers, " worker", if (plan_workers != 1) "s" else "",
-                 ")\n"))
+                 " (", workers_label, ")\n"))
 
     }
 
     cat("\u2502\n")
+
+  }
+
+  ## -----------------------------------------------------------------------
+  ## Step 7b: Manifest for monitor_evaluate()
+  ## -----------------------------------------------------------------------
+  ## Written on EVERY run with an output_dir, whichever axis, and refreshed
+  ## each time, so the monitor can watch a resamples-axis or sequential run
+  ## and never reports a stale axis from an earlier run in the same
+  ## directory. Schema 2 (2026-09-15) records the axis and the user's plan.
+
+  if (!is.null(output_dir)) {
+
+    manifest <- list(
+      schema_version               = 2L,
+      n_total                      = n_total,
+      n_pending                    = n_pending,
+      config_ids                   = configs$config_id,
+      start_time                   = start_time,
+      metric                       = metric,
+      cv_folds                     = cv_folds,
+      allow_par                    = allow_par,
+      parallelize_over_requested   = parallelize_over,
+      axis                         = axis$axis,
+      tune_parallel_over_requested = axis$tune_parallel_over,
+      plan                         = plan_label,
+      workers                      = plan_workers,
+      scoring_schema               = SCORING_SCHEMA
+    )
+    saveRDS(manifest, file.path(output_dir, "eval_manifest.rds"))
 
   }
 
@@ -560,25 +622,6 @@ evaluate <- function(x,
     ## -------------------------------------------------------------------
     ## Parallel path — furrr::future_map() across configs
     ## -------------------------------------------------------------------
-
-    ## Write manifest for monitor_evaluate(). Schema 2 (2026-09-15): records
-    ## the axis and the plan the user registered rather than an auto-split.
-    manifest <- list(
-      schema_version             = 2L,
-      n_total                    = n_total,
-      n_pending                  = n_pending,
-      config_ids                 = configs$config_id,
-      start_time                 = start_time,
-      metric                     = metric,
-      cv_folds                   = cv_folds,
-      allow_par                  = allow_par,
-      parallelize_over_requested = parallelize_over,
-      axis                       = axis$axis,
-      tune_parallel_over_requested = axis$tune_parallel_over,
-      plan                       = plan_label,
-      workers                    = plan_workers
-    )
-    saveRDS(manifest, file.path(output_dir, "eval_manifest.rds"))
 
     ## The plan is the user's: evaluate() neither sets nor restores one.
     ## The globals ceiling is declared (EVAL_WORKER_PAYLOAD_LIMIT, from the
@@ -784,6 +827,64 @@ evaluate <- function(x,
 }
 
 ## ---------------------------------------------------------------------------
+## Checkpoint scoring schema
+## ---------------------------------------------------------------------------
+
+#' Scoring schema of a checkpoint row
+#'
+#' Rows written before the column existed are schema 1 (see `SCORING_SCHEMA`
+#' in `R/constants.R`).
+#' @param row One-row result tibble.
+#' @return Integer schema.
+#' @keywords internal
+#' @noRd
+checkpoint_row_schema <- function(row) {
+
+  s <- row$scoring_schema
+
+  if (is.null(s) || length(s) != 1 || is.na(s)) return(1L)
+
+  as.integer(s)
+
+}
+
+#' Drop result rows scored under a different regime
+#'
+#' @param results Result rows (possibly from an older checkpoint).
+#' @param verbose Print the drop count in the tree.
+#' @return `results` restricted to the current `SCORING_SCHEMA`.
+#' @keywords internal
+#' @noRd
+drop_foreign_schema_rows <- function(results, verbose = TRUE) {
+
+  if (nrow(results) == 0) return(results)
+
+  schemas <- if ("scoring_schema" %in% names(results)) {
+    ifelse(is.na(results$scoring_schema), 1L, as.integer(results$scoring_schema))
+  } else {
+    rep(1L, nrow(results))
+  }
+
+  keep      <- schemas == SCORING_SCHEMA
+  n_foreign <- sum(!keep)
+
+  if (n_foreign > 0 && verbose) {
+
+    cat(paste0(
+      "\u2502  ", cli::col_yellow(
+        "Dropped ", n_foreign, " checkpoint row",
+        if (n_foreign > 1) "s" else "",
+        " scored under an earlier scoring schema (will be re-evaluated)"
+      ), "\n"
+    ))
+
+  }
+
+  results[keep, , drop = FALSE]
+
+}
+
+## ---------------------------------------------------------------------------
 ## rank_configs_by_cv \u2014 the one ranking rule evaluate() and fit() share
 ## ---------------------------------------------------------------------------
 
@@ -847,7 +948,12 @@ rank_configs_by_cv <- function(results, metric) {
 
   }
 
-  results[order(vals, decreasing = metric %in% HIGHER_BETTER_METRICS), , drop = FALSE]
+  ## Explicit tie-break on config_id so a fresh run, a resumed run (whose row
+  ## order follows the checkpoint directory) and monitor_evaluate() all name
+  ## the same winner when two configs tie.
+  key <- if (metric %in% HIGHER_BETTER_METRICS) -vals else vals
+
+  results[order(key, results$config_id), , drop = FALSE]
 
 }
 
@@ -882,8 +988,9 @@ rank_configs_by_cv <- function(results, metric) {
 #' @param shared List of worker inputs assembled by `evaluate()`, whose keys are
 #'   fixed by `SHARED_ARG_NAMES` in `R/constants.R` and asserted on entry:
 #'   `data`, `resample_idx` (from `resample_indices()`), `configs`, `role_map`,
-#'   `grid_size`, `bayesian_iter`, `prune`, `prune_threshold`, `allow_par`,
-#'   `seed`, `checkpoint_dir`, and `pkg_version`.
+#'   `grid_size`, `bayesian_iter`, `prune`, `prune_threshold`, `seed`,
+#'   `checkpoint_dir`, and `pkg_version`. There is no `allow_par`: on the
+#'   configs axis tune always runs sequentially inside the worker.
 #'
 #' @return A one-row result tibble from [evaluate_single_config()].
 #' @keywords internal

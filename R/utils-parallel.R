@@ -27,9 +27,11 @@
 #' rule is `n_configs >= cv_folds`.
 #'
 #' `"both"` (a nested plan, configs across the outer level and folds across
-#' the inner) is not in the vocabulary for v1. A user who wants nesting
-#' registers a nested plan and uses `"configs"`; the package does not build
-#' or endorse one until the topology bake-off (S1) shows it is worth it.
+#' the inner) is not in the vocabulary for v1, and a nested plan registered
+#' by the caller does not enable it either: on the configs axis the worker
+#' runs tune sequentially, so a second plan level is never used. The package
+#' does not build or endorse nesting until the topology bake-off (S1) shows
+#' it is worth it.
 #'
 #' @param parallelize_over One of `"auto"`, `"configs"`, `"resamples"`.
 #' @param allow_par Logical. `FALSE` short-circuits to sequential.
@@ -63,22 +65,26 @@ resolve_parallel_axis <- function(parallelize_over, allow_par, n_configs, cv_fol
 
   }
 
-  for (nm in c("n_configs", "cv_folds")) {
+  if (!is.numeric(n_configs) || length(n_configs) != 1 || is.na(n_configs) || n_configs < 1) {
 
-    v <- get(nm)
+    cli::cli_abort("{.arg n_configs} must be a single positive number, not {.val {n_configs}}.")
 
-    if (!is.numeric(v) || length(v) != 1 || is.na(v) || v < 1) {
+  }
 
-      cli::cli_abort("{.arg {nm}} must be a single positive number, not {.val {v}}.")
+  if (!is.numeric(cv_folds) || length(cv_folds) != 1 || is.na(cv_folds) || cv_folds < 1) {
 
-    }
+    cli::cli_abort("{.arg cv_folds} must be a single positive number, not {.val {cv_folds}}.")
 
   }
 
   if (!allow_par) {
 
-    return(list(axis = "sequential", dispatch_configs = FALSE,
-                tune_allow_par = FALSE, tune_parallel_over = NULL))
+    return(list(
+      axis               = "sequential",
+      dispatch_configs   = FALSE,
+      tune_allow_par     = FALSE,
+      tune_parallel_over = NULL
+    ))
 
   }
 
@@ -94,13 +100,21 @@ resolve_parallel_axis <- function(parallelize_over, allow_par, n_configs, cv_fol
 
   if (axis == "configs") {
 
-    list(axis = "configs", dispatch_configs = TRUE,
-         tune_allow_par = FALSE, tune_parallel_over = NULL)
+    list(
+      axis               = "configs",
+      dispatch_configs   = TRUE,
+      tune_allow_par     = FALSE,
+      tune_parallel_over = NULL
+    )
 
   } else {
 
-    list(axis = "resamples", dispatch_configs = FALSE,
-         tune_allow_par = TRUE, tune_parallel_over = "resamples")
+    list(
+      axis               = "resamples",
+      dispatch_configs   = FALSE,
+      tune_allow_par     = TRUE,
+      tune_parallel_over = "resamples"
+    )
 
   }
 
@@ -147,7 +161,14 @@ registered_plan_label <- function() {
 #' @keywords internal
 registered_workers <- function() {
 
-  as.integer(future::nbrOfWorkers())
+  n <- future::nbrOfWorkers()
+
+  ## Some backends (batchtools-style HPC schedulers) report +Inf. Treat an
+  ## unbounded plan as usable and record it as NA rather than letting
+  ## as.integer(Inf) produce a warning and an NA that trips `>=`.
+  if (!is.finite(n)) return(NA_integer_)
+
+  as.integer(n)
 
 }
 
@@ -172,7 +193,8 @@ check_parallel_backend <- function(where = "evaluate()") {
   n     <- registered_workers()
   label <- registered_plan_label()
 
-  if (n >= 2L) {
+  ## NA means the backend reported an unbounded worker count; that is usable.
+  if (is.na(n) || n >= 2L) {
 
     ## tune's future path calls future.apply::future_lapply() and checks only
     ## that `future` is installed (tune 2.1.0, loop_call()). horizons declares
@@ -225,7 +247,9 @@ warn_if_mirai_preferred <- function() {
 
   }
 
-  if (registered_workers() < 2L) return(invisible(FALSE))
+  n_future <- registered_workers()
+
+  if (!is.na(n_future) && n_future < 2L) return(invisible(FALSE))
 
   cli::cli_warn(c(
     "!" = "A mirai daemon pool ({connections} connections) and a future plan ({.val {registered_plan_label()}}) are both registered.",
@@ -315,9 +339,9 @@ pin_parent_threads <- function() {
 #' @description
 #' `evaluate(workers = )` took a core count and split it into an outer and
 #' inner level while managing its own nested plan. Deprecated outright on
-#' 2026-09-14: the argument warns and is ignored. `rlang::warn()` with a
-#' condition class so tests can match on the class rather than the text; it
-#' fires every time, so a scripted loop cannot hide it.
+#' 2026-09-14: the argument warns and is ignored. The warning carries a
+#' condition class so tests can match on the class rather than the text, and
+#' it fires every time, so a scripted loop cannot hide it.
 #'
 #' @param workers The value passed, or `NULL`.
 #' @return Invisibly, `TRUE` if a warning fired.
@@ -326,10 +350,10 @@ deprecate_workers_arg <- function(workers) {
 
   if (is.null(workers)) return(invisible(FALSE))
 
-  rlang::warn(
+  cli::cli_warn(
     c(
-      "`workers` is deprecated and ignored.",
-      "i" = "Register a backend with `future::plan()` before calling, then use `allow_par = TRUE` and `parallelize_over`."
+      "!" = "{.arg workers} is deprecated and ignored.",
+      "i" = "Register a backend with {.fn future::plan} before calling, then use {.code allow_par = TRUE} and {.arg parallelize_over}."
     ),
     class = "horizons_deprecated_workers"
   )

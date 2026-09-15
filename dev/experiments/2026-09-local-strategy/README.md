@@ -64,7 +64,7 @@ Row-id sets are saved to `results/splits/<property>.qs2` with a SHA of each set;
 - **Mondrian condition.** The reported intervals satisfy it (calib_ext is carved before clustering and never seen by the GMM or any model). horizons' *native* intervals for B/C do not, because `fit()` carves its own calibration inside train_core after the GMM has seen those rows (`pipeline-fit.R:184-191`; DOGFOOD #3). That is why the native coverage is a secondary column.
 - **D's library size.** D uses 100 % of train_core as its library; a horizons final model trains on ~64 % of it (split F then split C). The 0.10 threshold absorbs part of this. A 64 %-library sensitivity run for D is optional.
 - **Tuning budget.** Grid-only, five points. Absolute RPDs are below what a tuned model would reach; the comparison is between strategies under one budget.
-- **Pre-registered fallback.** A pilot (clay × rf+snv, `evaluate(workers = 5)`, 45-min cap) times one fold at 2 cm⁻¹. If a Cubist fold exceeds ~10 min, `EXPERIMENT_RESAMPLE <- 4` in `00-config.R` resamples every strategy's input to 4 cm⁻¹ (851 predictors) before the run. If used, it is recorded here.
+- **Pre-registered fallback.** A pilot (clay × rf+snv, `plan(multisession, 5)` + `evaluate(allow_par = TRUE)`, 45-min cap) times one fold at 2 cm⁻¹. If a Cubist fold exceeds ~10 min, `EXPERIMENT_RESAMPLE <- 4` in `00-config.R` resamples every strategy's input to 4 cm⁻¹ (851 predictors) before the run. If used, it is recorded here.
 
 ## Compute
 
@@ -73,7 +73,7 @@ Row-id sets are saved to `results/splits/<property>.qs2` with a SHA of each set;
 - `MAX_WORKERS = 8` (`00-config.R`), enforced by every strategy script.
 - `EXPERIMENT_RESAMPLE = 4` (851 predictors) for every strategy — the pre-registered fallback, invoked for memory.
 - `watchdog.sh` runs alongside every launch and kills the experiment if MemAvailable drops below 15 GB (`results/logs/watchdog.log`).
-- Parallelism is registered by the scripts (`future::plan(multisession, MAX_WORKERS)`) and `evaluate()` is called with `workers = cv_folds`, because horizons' own parallel paths do not work at this scale (DOGFOOD #10, #12, #13). Configs run sequentially; tune parallelises folds × grid.
+- Parallelism is registered by the scripts (`future::plan(multisession, MAX_WORKERS)`) and `evaluate()` is called with `allow_par = TRUE, parallelize_over = "auto"` (2026-09-15, M2/M3): one config per worker for a property run, folds inside each config for a small cluster. The scripts run the *installed* package, guarded by `require_fresh_install()`. The earlier `workers = cv_folds` workaround (DOGFOOD #10, #12, #13) is gone.
 
 Everything runs as background `Rscript` processes, never in the shared kernel, with a checkpoint per (property × strategy) in `results/checkpoints/`. With eight workers the critical path is longer than the plan's 8 h estimate; the pilot timing sets the real number.
 

@@ -15,8 +15,8 @@ Invisibly, \code{TRUE} if a warning fired.
 \description{
 \code{evaluate(workers = )} took a core count and split it into an outer and
 inner level while managing its own nested plan. Deprecated outright on
-2026-09-14: the argument warns and is ignored. \code{rlang::warn()} with a
-condition class so tests can match on the class rather than the text; it
-fires every time, so a scripted loop cannot hide it.
+2026-09-14: the argument warns and is ignored. The warning carries a
+condition class so tests can match on the class rather than the text, and
+it fires every time, so a scripted loop cannot hide it.
 }
 \keyword{internal}

@@ -332,6 +332,10 @@ predict_members_on_test <- function(object, members) {
 #' @param grid The tuning grid (ignored when `optimize = FALSE`).
 #' @param extract_weights A function `(meta_fit, members) -> tibble(member,
 #'   coef)` that reads the member weighting from the fitted model.
+#' @param allow_par Logical. From `ensemble(allow_par = )`; both tune calls
+#'   build their control through `meta_tune_control()` with it, so the
+#'   meta-learner never dispatches onto a registered plan unless asked.
+#'   Default `FALSE`.
 #' @param seed Integer. Seed set immediately before the CV folds are drawn, so
 #'   the tuning resamples and the genuine meta-OOF are reproducible.
 #'
@@ -349,6 +353,9 @@ fit_tuned_meta_learner <- function(object,
                                    extract_weights,
                                    seed      = DEFAULT_ENSEMBLE_SEED,
                                    allow_par = FALSE) {
+
+  ## `allow_par` (from `ensemble(allow_par = )`) reaches both tune calls via
+  ## meta_tune_control(); documented on the roxygen block above.
 
   started <- Sys.time()
 

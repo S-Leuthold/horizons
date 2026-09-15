@@ -28,6 +28,10 @@ defaults (\code{FALSE}). Default \code{TRUE}.}
 
 \item{seed}{Integer. Seed for the CV folds (passed through to
 \code{\link[=fit_tuned_meta_learner]{fit_tuned_meta_learner()}} so the meta-OOF is reproducible).}
+
+\item{allow_par}{Logical. Passed through from \code{ensemble(allow_par = )} to
+the meta-learner's tune controls; folds parallelise on the registered
+plan when \code{TRUE}. Default \code{FALSE}.}
 }
 \value{
 The ensemble contract list from \code{\link[=build_ensemble_contract]{build_ensemble_contract()}}.

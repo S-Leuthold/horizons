@@ -37,8 +37,10 @@ n_configs * T / k with k the effective inner speedup, which is capped at
 rule is \code{n_configs >= cv_folds}.
 
 \code{"both"} (a nested plan, configs across the outer level and folds across
-the inner) is not in the vocabulary for v1. A user who wants nesting
-registers a nested plan and uses \code{"configs"}; the package does not build
-or endorse one until the topology bake-off (S1) shows it is worth it.
+the inner) is not in the vocabulary for v1, and a nested plan registered
+by the caller does not enable it either: on the configs axis the worker
+runs tune sequentially, so a second plan level is never used. The package
+does not build or endorse nesting until the topology bake-off (S1) shows
+it is worth it.
 }
 \keyword{internal}

@@ -180,6 +180,17 @@ SHARED_ARG_NAMES <- c(
 # deliberately absent for v1; see resolve_parallel_axis().
 PARALLELIZE_OVER_VALUES <- c("auto", "configs", "resamples")
 
+# Scoring schema stamped into every evaluate() result row and checked when
+# checkpoints are resumed. Bump it whenever anything that moves the cv_*
+# panel changes, so rows scored under different regimes are never ranked
+# against each other. History:
+#   1  pre-2026-09-15: tune parallel_over = "everything" (recipe re-prepped
+#      per candidate x fold, so each candidate drew its own feature selection).
+#   2  2026-09-15: parallel_over = "resamples" (one prep per fold shared by
+#      all candidates); seed re-pinned before every stochastic stage.
+# Rows without the column are schema 1.
+SCORING_SCHEMA <- 2L
+
 # future.globals.maxSize for the configs-axis dispatch, set by evaluate() for
 # the duration of the call. Declared rather than inherited so a payload
 # regression fails loudly with future's "size of the globals ... exceeds"

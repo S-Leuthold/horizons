@@ -365,3 +365,97 @@ describe("evaluate() - reproducibility", {
   })
 
 })
+
+
+## =========================================================================
+## Ranking tie-break and checkpoint scoring schema (review, 2026-09-15)
+## =========================================================================
+
+describe("rank_configs_by_cv() - tie-break", {
+
+  it("breaks ties on config_id so row order cannot change the winner", {
+
+    rows <- tibble::tibble(
+      config_id = c("cfg_003", "cfg_001", "cfg_002"),
+      status    = "success",
+      cv_rpd    = c(1.029, 1.029, 0.955),
+      cv_rmse   = c(0.50, 0.50, 0.70)
+    )
+
+    expect_equal(rank_configs_by_cv(rows, "rpd")$config_id[1],  "cfg_001")
+    expect_equal(rank_configs_by_cv(rows, "rmse")$config_id[1], "cfg_001")
+
+    ## same rows, different order -> same winner
+    expect_equal(rank_configs_by_cv(rows[c(2, 3, 1), ], "rpd")$config_id[1], "cfg_001")
+
+  })
+
+})
+
+describe("checkpoint scoring schema", {
+
+  it("treats rows without the column as schema 1", {
+
+    expect_identical(checkpoint_row_schema(tibble::tibble(config_id = "a")), 1L)
+    expect_identical(checkpoint_row_schema(tibble::tibble(config_id = "a", scoring_schema = NA)), 1L)
+    expect_identical(checkpoint_row_schema(tibble::tibble(config_id = "a", scoring_schema = 2L)), 2L)
+
+  })
+
+  it("drops rows scored under a different schema and keeps the current ones", {
+
+    rows <- tibble::tibble(
+      config_id      = c("a", "b", "c"),
+      scoring_schema = c(1L, SCORING_SCHEMA, NA)
+    )
+
+    kept <- suppressMessages(capture.output(out <- drop_foreign_schema_rows(rows, verbose = TRUE)))
+
+    expect_equal(out$config_id, "b")
+    expect_true(any(grepl("earlier scoring schema", kept)))
+
+    legacy <- tibble::tibble(config_id = c("a", "b"))
+    expect_equal(nrow(drop_foreign_schema_rows(legacy, verbose = FALSE)), 0)
+
+  })
+
+  it("stamps every result row with the current schema", {
+
+    obj <- make_eval_object(n_configs = 2)
+    res <- suppressWarnings(evaluate(obj, verbose = FALSE, seed = 42L))
+
+    expect_true(all(res$evaluation$results$scoring_schema == SCORING_SCHEMA))
+
+  })
+
+  it("on resume, re-evaluates configs whose checkpoint was written under schema 1", {
+
+    obj    <- make_eval_object(n_configs = 2)
+    tmpdir <- withr::local_tempdir()
+
+    first <- suppressWarnings(evaluate(obj, output_dir = tmpdir, verbose = FALSE, seed = 42L))
+
+    ## Rewrite one per-config checkpoint as a legacy (schema-1) row
+    f   <- file.path(tmpdir, "checkpoints", "cfg_001.rds")
+    row <- readRDS(f)
+    row$scoring_schema <- NULL
+    row$cv_rpd <- 999          # a value that would win if it were trusted
+    saveRDS(row, f)
+    ## and the single-file checkpoint, which the sequential path also writes
+    single <- file.path(tmpdir, "eval_checkpoint.rds")
+    if (file.exists(single)) {
+      s <- readRDS(single); s$scoring_schema <- NULL; s$cv_rpd[s$config_id == "cfg_001"] <- 999
+      saveRDS(s, single)
+    }
+
+    out <- capture.output(
+      second <- suppressWarnings(evaluate(obj, output_dir = tmpdir, verbose = TRUE, seed = 42L))
+    )
+
+    expect_true(any(grepl("earlier scoring schema", out)))
+    expect_false(any(second$evaluation$results$cv_rpd == 999))
+    expect_equal(second$evaluation$best_config, first$evaluation$best_config)
+
+  })
+
+})

@@ -517,3 +517,93 @@ describe("monitor_evaluate()", {
   })
 
 })
+
+
+## =========================================================================
+## Results do not depend on the axis (review finding, 2026-09-15)
+## =========================================================================
+## tune's future path advances the parent RNG stream differently from the
+## sequential loop, so before the per-stage re-pinning the Bayesian stage and
+## last_fit() drew from a different position on the resamples axis. This
+## fixture uses rf (deterministic given a seed) with Bayesian iterations ON,
+## which is exactly where the axes used to diverge, and asserts the whole
+## result row is identical.
+
+describe("evaluate() - results are identical across axes", {
+
+  obj <- make_eval_object(n = 60, n_configs = 1)      # rf only
+  obj$config$tuning$bayesian_iter <- 2L
+
+  row_cols <- c("rmse", "rrmse", "rsq", "ccc", "rpd", "mae",
+                "cv_rmse", "cv_rrmse", "cv_rsq", "cv_ccc", "cv_rpd", "cv_mae")
+
+  seq_result <- suppressWarnings(
+    evaluate(obj, allow_par = FALSE, verbose = FALSE, seed = 42L)
+  )
+
+  it("resamples axis on a real two-worker plan matches the sequential run exactly", {
+
+    skip_on_cran()
+    local_plan(future::multisession, workers = 2)
+
+    par_result <- suppressWarnings(
+      evaluate(obj, allow_par = TRUE, parallelize_over = "resamples",
+               verbose = FALSE, seed = 42L)
+    )
+
+    expect_equal(par_result$evaluation$parallelize_over, "resamples")
+    expect_equal(par_result$evaluation$results[row_cols],
+                 seq_result$evaluation$results[row_cols])
+    expect_equal(par_result$evaluation$results$best_params,
+                 seq_result$evaluation$results$best_params)
+
+  })
+
+  it("configs axis matches the sequential run exactly (installed build)", {
+
+    skip_on_cran()
+    skip_if_dev_package()
+    local_plan(future::multisession, workers = 2)
+    tmpdir <- withr::local_tempdir()
+
+    par_result <- suppressWarnings(
+      evaluate(obj, allow_par = TRUE, parallelize_over = "configs",
+               output_dir = tmpdir, verbose = FALSE, seed = 42L)
+    )
+
+    expect_equal(par_result$evaluation$results[row_cols],
+                 seq_result$evaluation$results[row_cols])
+    expect_equal(par_result$evaluation$results$best_params,
+                 seq_result$evaluation$results$best_params)
+
+  })
+
+})
+
+
+## =========================================================================
+## monitor_evaluate() names the same best config evaluate() does
+## =========================================================================
+
+describe("monitor_evaluate() - agrees with evaluate()", {
+
+  it("reports evaluate()'s best_config from the same checkpoints", {
+
+    skip_on_cran()
+    obj    <- make_eval_object(n = 60, n_configs = 4)
+    tmpdir <- withr::local_tempdir()
+
+    result <- suppressWarnings(
+      evaluate(obj, output_dir = tmpdir, verbose = FALSE, seed = 42L)
+    )
+
+    ## The manifest is written on every run with an output_dir now
+    expect_true(file.exists(file.path(tmpdir, "eval_manifest.rds")))
+
+    invisible(capture.output(stats <- monitor_evaluate(tmpdir)))
+
+    expect_equal(stats$best_config, result$evaluation$best_config)
+
+  })
+
+})

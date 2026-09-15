@@ -70,6 +70,10 @@ compute_c_alpha <- function(scores, level) {
 #' @param transformation Character. Transformation applied to the response
 #'   (e.g. "none", "log", "log10", "sqrt").
 #' @param level_default Numeric. Default coverage level. Default 0.90.
+#' @param seed Integer or NULL. Seed for the quantile forest. `fit()` passes
+#'   its own seed so the forest is reproducible regardless of how the
+#'   preceding stages consumed the parent RNG stream; NULL keeps ranger's
+#'   default of drawing a seed from that stream.
 #'
 #' @return Named list with fields: `quantile_model`, `scores`, `n_calib`,
 #'   `level_default`, `oof_coverage`, `mean_width`, `prepped_recipe`.
@@ -82,7 +86,8 @@ fit_uq <- function(fitted_workflow,
                    calib_data,
                    role_map,
                    transformation  = "none",
-                   level_default   = DEFAULT_UQ_LEVEL) {
+                   level_default   = DEFAULT_UQ_LEVEL,
+                   seed            = NULL) {
 
   outcome_col <- role_map$variable[role_map$role == "outcome"]
 
@@ -125,7 +130,12 @@ fit_uq <- function(fitted_workflow,
       ## Pinned at the call site. Unset, ranger falls back to
       ## getOption("ranger.num.threads", detectCores()), i.e. every core,
       ## which oversubscribes under any parallel dispatch (M6, 2026-09-15).
-      num.threads = 1L
+      num.threads = 1L,
+      ## Explicit seed: ranger's default draws from the parent R stream, whose
+      ## position depends on how the preceding stages ran, so the quantile
+      ## forest was not reproducible in its own right. NULL keeps ranger's
+      ## default for callers that manage the stream themselves.
+      seed        = seed
     ),
     log_error          = FALSE,
     capture_conditions = TRUE

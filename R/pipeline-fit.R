@@ -56,22 +56,6 @@ fit <- function(x,
 
   start_time <- Sys.time()
 
-  ## The user owns the backend. Confirm there is one to run on, pin threads
-  ## in this process before tune spawns anything, and never touch the plan.
-  if (isTRUE(allow_par)) {
-
-    allow_par <- check_parallel_backend("fit()")
-
-    if (allow_par) {
-
-      warn_if_mirai_preferred()
-      unpin_threads <- pin_parent_threads()
-      on.exit(unpin_threads(), add = TRUE)
-
-    }
-
-  }
-
   ## -----------------------------------------------------------------------
   ## Step 0: Preflight validation
   ## -----------------------------------------------------------------------
@@ -91,6 +75,32 @@ fit <- function(x,
     rlang::abort(
       "No evaluation results found. Run `evaluate()` before `fit()`."
     )
+
+  }
+
+  ## -----------------------------------------------------------------------
+  ## Step 0b: Parallel backend
+  ## -----------------------------------------------------------------------
+  ## The user owns the backend. Confirm there is one to run on, pin threads
+  ## in this process before tune spawns anything, and never touch the plan.
+
+  if (!rlang::is_bool(allow_par)) {
+
+    rlang::abort("`allow_par` must be TRUE or FALSE.")
+
+  }
+
+  if (allow_par) {
+
+    allow_par <- check_parallel_backend("fit()")
+
+    if (allow_par) {
+
+      warn_if_mirai_preferred()
+      unpin_threads <- pin_parent_threads()
+      on.exit(unpin_threads(), add = TRUE)
+
+    }
 
   }
 

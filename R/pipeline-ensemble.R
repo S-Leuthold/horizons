@@ -84,22 +84,6 @@ ensemble <- function(x,
   ## Step 0: Preflight
   ## -------------------------------------------------------------------------
 
-  ## The user owns the backend; confirm there is one and pin threads here
-  ## before tune spawns anything. Never touch the plan.
-  if (isTRUE(allow_par)) {
-
-    allow_par <- check_parallel_backend("ensemble()")
-
-    if (allow_par) {
-
-      warn_if_mirai_preferred()
-      unpin_threads <- pin_parent_threads()
-      on.exit(unpin_threads(), add = TRUE)
-
-    }
-
-  }
-
   if (!inherits(x, "horizons_fit")) {
 
     cli::cli_abort(c(
@@ -117,6 +101,32 @@ ensemble <- function(x,
       "{.arg method} must be one of {.val {valid_methods}}.",
       "x" = "Got {.val {method}}."
     ))
+
+  }
+
+  ## -------------------------------------------------------------------------
+  ## Step 0b: Parallel backend
+  ## -------------------------------------------------------------------------
+  ## The user owns the backend; confirm there is one and pin threads here
+  ## before tune spawns anything. Never touch the plan.
+
+  if (!rlang::is_bool(allow_par)) {
+
+    cli::cli_abort("{.arg allow_par} must be TRUE or FALSE, not {.val {allow_par}}.")
+
+  }
+
+  if (allow_par) {
+
+    allow_par <- check_parallel_backend("ensemble()")
+
+    if (allow_par) {
+
+      warn_if_mirai_preferred()
+      unpin_threads <- pin_parent_threads()
+      on.exit(unpin_threads(), add = TRUE)
+
+    }
 
   }
 

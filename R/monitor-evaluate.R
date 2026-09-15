@@ -30,7 +30,7 @@ monitor_evaluate <- function(output_dir, watch = FALSE, interval = 10) {
 
     rlang::abort(paste0(
       "No eval_manifest.rds found in '", output_dir, "'. ",
-      "Is evaluate() running with workers > 1?"
+      "evaluate() writes it when called with output_dir; has the run started?"
     ))
 
   }
@@ -117,32 +117,55 @@ monitor_evaluate <- function(output_dir, watch = FALSE, interval = 10) {
 
   pct <- round(100 * n_complete / manifest$n_total, 1)
 
-  ## Find best so far
-  best_config <- NA_character_
-  best_metric <- NA_real_
-  metric_name <- manifest$metric
+  ## Find best so far, by the SAME rule evaluate() will use: successes only
+  ## (pruned rows only if there is no success at all), ranked on cv_<metric>
+  ## through rank_configs_by_cv() with its config_id tie-break, falling back
+  ## to the test-set column for checkpoint rows written before cv_* existed.
+  best_config   <- NA_character_
+  best_metric   <- NA_real_
+  metric_name   <- manifest$metric
   higher_better <- metric_name %in% HIGHER_BETTER_METRICS
 
   recent_files <- checkpoint_files[order(file.mtime(checkpoint_files),
                                           decreasing = TRUE)]
 
-  for (f in recent_files) {
+  rows <- lapply(checkpoint_files, function(f) {
+    tryCatch(readRDS(f), error = function(e) NULL)
+  })
+  rows <- rows[!vapply(rows, is.null, logical(1))]
 
-    row <- tryCatch(readRDS(f), error = function(e) NULL)
+  if (length(rows) > 0) {
 
-    if (!is.null(row) && row$status %in% c("success", "pruned") &&
-        !is.na(.monitor_metric_value(row, metric_name))) {
+    all_rows   <- dplyr::bind_rows(rows)
+    candidates <- all_rows[all_rows$status == "success", , drop = FALSE]
 
-      val <- .monitor_metric_value(row, metric_name)
+    if (nrow(candidates) == 0) {
 
-      if (is.na(best_metric) ||
-          (higher_better && val > best_metric) ||
-          (!higher_better && val < best_metric)) {
+      candidates <- all_rows[all_rows$status == "pruned", , drop = FALSE]
 
-        best_metric <- val
-        best_config <- row$config_id
+    }
 
-      }
+    cv_col <- paste0("cv_", metric_name)
+
+    if (nrow(candidates) > 0 && cv_col %in% names(candidates) &&
+        any(!is.na(candidates[[cv_col]]))) {
+
+      ranked      <- suppressWarnings(rank_configs_by_cv(candidates, metric_name))
+      best_config <- ranked$config_id[1]
+      best_metric <- ranked[[cv_col]][1]
+
+    } else if (nrow(candidates) > 0 && metric_name %in% names(candidates) &&
+               any(!is.na(candidates[[metric_name]]))) {
+
+      ## Legacy rows: same ordering rule on the test-set column
+      vals        <- candidates[[metric_name]]
+      keep        <- !is.na(vals)
+      candidates  <- candidates[keep, , drop = FALSE]
+      vals        <- vals[keep]
+      key         <- if (higher_better) -vals else vals
+      ord         <- order(key, candidates$config_id)
+      best_config <- candidates$config_id[ord[1]]
+      best_metric <- vals[ord[1]]
 
     }
 

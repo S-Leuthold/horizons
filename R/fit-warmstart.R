@@ -304,7 +304,7 @@ tune_warmstart_bayes <- function(workflow,
       control   = tune::control_grid(
         save_pred     = FALSE,
         allow_par     = allow_par,
-        parallel_over = "resamples"   # one rsplit per task; explicit, not tune's default
+        parallel_over = "resamples"   # what tune resolves NULL to here; explicit for visibility, no behaviour change
       )
     ),
     log_error          = FALSE,
