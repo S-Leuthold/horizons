@@ -118,10 +118,14 @@ fit_uq <- function(fitted_workflow,
   ## Train quantile forest
   qrf_result <- safely_execute(
     ranger::ranger(
-      x         = as.data.frame(oof_features),
-      y         = oof_residuals,
-      quantreg  = TRUE,
-      num.trees = UQ_QUANTILE_TREES
+      x           = as.data.frame(oof_features),
+      y           = oof_residuals,
+      quantreg    = TRUE,
+      num.trees   = UQ_QUANTILE_TREES,
+      ## Pinned at the call site. Unset, ranger falls back to
+      ## getOption("ranger.num.threads", detectCores()), i.e. every core,
+      ## which oversubscribes under any parallel dispatch (M6, 2026-09-15).
+      num.threads = 1L
     ),
     log_error          = FALSE,
     capture_conditions = TRUE

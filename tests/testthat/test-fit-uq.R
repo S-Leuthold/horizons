@@ -332,3 +332,37 @@ describe("fit_uq() - prepped recipe can bake new data", {
   })
 
 })
+
+
+## =========================================================================
+## Thread pinning at the call site (M6, 2026-09-15)
+## =========================================================================
+
+describe("fit_uq() - quantile forest thread pinning", {
+
+  it("calls ranger with num.threads = 1", {
+
+    setup    <- make_uq_setup()
+    captured <- NULL
+
+    ## Capture ranger's arguments without fitting: fit_uq() wraps the call in
+    ## safely_execute(), so the mocked error is absorbed and returns NULL.
+    testthat::with_mocked_bindings(
+      ranger = function(...) { captured <<- list(...); stop("captured") },
+      suppressWarnings(fit_uq(
+        fitted_workflow = setup$fitted_wf,
+        oof_predictions = setup$oof_predictions,
+        calib_data      = setup$calib_data,
+        role_map        = setup$role_map,
+        transformation  = "none",
+        level_default   = 0.90
+      )),
+      .package = "ranger"
+    )
+
+    expect_false(is.null(captured))
+    expect_identical(captured$num.threads, 1L)
+
+  })
+
+})
