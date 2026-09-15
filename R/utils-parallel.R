@@ -172,7 +172,25 @@ check_parallel_backend <- function(where = "evaluate()") {
   n     <- registered_workers()
   label <- registered_plan_label()
 
-  if (n >= 2L) return(TRUE)
+  if (n >= 2L) {
+
+    ## tune's future path calls future.apply::future_lapply() and checks only
+    ## that `future` is installed (tune 2.1.0, loop_call()). horizons declares
+    ## future.apply in Imports for exactly this reason; the literal check here
+    ## is what R CMD check's static "declared Imports should be used" test
+    ## recognises, and it is a real guard for a broken library.
+    if (!requireNamespace("future.apply", quietly = TRUE)) {
+
+      cli::cli_abort(c(
+        "{.pkg future.apply} is not installed, but tune's future backend calls it.",
+        "i" = "Install it with {.code install.packages(\"future.apply\")}."
+      ))
+
+    }
+
+    return(TRUE)
+
+  }
 
   cli::cli_warn(c(
     "!" = "{where} was asked to run in parallel ({.code allow_par = TRUE}) but the registered future plan offers {n} worker{?s} ({.val {label}}).",
