@@ -70,9 +70,29 @@ build_warmstart_grid <- function(best_params, param_set, max_points = 25L) {
 
   if (nrow(full_grid) > max_points) {
 
-    ## Sample (max_points - 1) rows, then bind the best point
-    set.seed(1)
-    sampled <- dplyr::slice_sample(full_grid, n = max_points - 1L)
+    ## Sample (max_points - 1) rows, then bind the best point.
+    ##
+    ## The seed is scoped and the caller's stream restored. A bare set.seed(1)
+    ## here clobbered it partway through fit_single_config(), so everything
+    ## downstream — tune_grid()'s sampling, tune_bayes()'s GP initialisation —
+    ## became independent of the user's `seed` when the grid overflowed
+    ## max_points and dependent on it when it didn't. Written out rather than
+    ## using withr::with_seed() because withr is only a Suggests. See #51.
+
+    sampled <- local({
+
+      if (exists(".Random.seed", envir = globalenv())) {
+
+        old_seed <- get(".Random.seed", envir = globalenv())
+        on.exit(assign(".Random.seed", old_seed, envir = globalenv()),
+                add = TRUE)
+
+      }
+
+      set.seed(1, kind = "Mersenne-Twister")
+      dplyr::slice_sample(full_grid, n = max_points - 1L)
+
+    })
     full_grid <- dplyr::bind_rows(best_row, sampled) |>
       dplyr::distinct()
 

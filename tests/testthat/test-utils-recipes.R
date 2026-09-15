@@ -578,3 +578,54 @@ describe("build_recipe() serialization footprint", {
   })
 
 })
+
+## =========================================================================
+## step_transform_spectra: failures are visible, not silent
+## =========================================================================
+##
+## bake() substitutes an all-NA row when a spectrum cannot be processed, and the
+## fallback is built to the expected length — so the length-consistency check
+## below it cannot detect one. Without an explicit warning a malformed sample
+## returns NA predictions at predict time, or injects NA rows into the model
+## matrix at train time, with no signal either way. See #52.
+
+describe("step_transform_spectra() surfaces unusable spectra", {
+
+  it("warns, naming the rows, when a spectrum cannot be processed", {
+
+    td     <- make_test_data(n = 30, n_wn = 40)
+    config <- make_config_row(preprocessing = "snv", feature_selection = "none")
+
+    rec <- build_recipe(config, td$data, td$role_map)
+    prepped <- recipes::prep(rec)
+
+    ## A wholly non-finite spectrum is the case the length check is blind to:
+    ## the fallback row is built to the expected width, so lengths agree and
+    ## nothing downstream can tell it apart from a real result. Note a *single*
+    ## NA does not reach this path — prospectr's SNV tolerates it.
+    bad <- td$data
+    wn  <- grep("^wn_", names(bad), value = TRUE)
+    bad[3,  wn] <- NA_real_
+    bad[11, wn] <- NA_real_
+
+    expect_warning(recipes::bake(prepped, new_data = bad),
+                   "produced no usable output")
+
+    ## The message has to name the rows to be actionable.
+    expect_warning(recipes::bake(prepped, new_data = bad), "3, 11")
+
+  })
+
+  it("stays quiet when every spectrum processes", {
+
+    td     <- make_test_data(n = 30, n_wn = 40)
+    config <- make_config_row(preprocessing = "snv", feature_selection = "none")
+
+    rec     <- build_recipe(config, td$data, td$role_map)
+    prepped <- recipes::prep(rec)
+
+    expect_no_warning(recipes::bake(prepped, new_data = td$data))
+
+  })
+
+})
