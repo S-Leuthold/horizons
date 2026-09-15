@@ -29,7 +29,7 @@ caller that passes a bound has opted into the guardrail and must see it
 trip (visible recoverable failure over silent drift).}
 }
 \value{
-Numeric vector on the original response scale.
+Numeric vector on the original response scale, floored at zero.
 }
 \description{
 Inverts response transformations applied by \code{step_log(offset = 1)} or
@@ -38,4 +38,13 @@ truth for back-transformation logic in horizons.
 
 \strong{Important:} \code{step_log(offset = 1)} computes \code{log(x + 1)}, so the correct
 inverse is \code{exp(x) - 1}, NOT \code{exp(x)}. Similarly, \code{step_log(base = 10, offset = 1)} computes \code{log10(x + 1)}, so the inverse is \code{10^x - 1}.
+
+Original-scale output is floored at zero for every transformation,
+including \code{"none"}: the soil properties this package targets are
+non-negative by physical constraint, and \code{predict()} has always enforced
+that. Flooring here means the evaluation, OOF and calibration paths score
+the same predictions a deployed model would serve, rather than a vector
+that differs from it wherever a model extrapolated below zero. The
+\code{upper_bound} guardrail is deliberately not applied the same way, because
+fit-time ranking must see raw upper-tail behaviour.
 }

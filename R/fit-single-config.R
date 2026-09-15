@@ -291,35 +291,31 @@ fit_single_config <- function(config_row,
     truth       = oof_raw[[outcome_col]]
   )
 
-  ## Back-transform .pred to original scale
-  if (needs_back_transformation(transformation)) {
+  ## Back-transform .pred to original scale. Unconditional, like predict():
+  ## "none" is a passthrough, and the zero floor inside
+  ## back_transform_predictions() must reach these OOF predictions because
+  ## they are the meta-learner's training features, and predict() floors the
+  ## same members at serve time (#53).
+  bt_result <- safely_execute(
+    back_transform_predictions(cv_predictions$.pred_trans, transformation,
+                               warn = FALSE),
+    log_error          = FALSE,
+    capture_conditions = TRUE
+  )
 
-    bt_result <- safely_execute(
-      back_transform_predictions(cv_predictions$.pred_trans, transformation,
-                                 warn = FALSE),
-      log_error          = FALSE,
-      capture_conditions = TRUE
-    )
+  if (!is.null(bt_result$error)) {
 
-    if (!is.null(bt_result$error)) {
-
-      return(make_failed(
-        paste0("OOF back-transformation failed: ", bt_result$error$message)
-      ))
-
-    }
-
-    cv_predictions$.pred <- bt_result$result
-
-    ## Note: truth from collect_predictions() is already on original scale.
-    ## The recipe uses step_log/step_sqrt with skip = TRUE, so the outcome
-    ## transformation is skipped during assessment baking.
-
-  } else {
-
-    cv_predictions$.pred <- cv_predictions$.pred_trans
+    return(make_failed(
+      paste0("OOF back-transformation failed: ", bt_result$error$message)
+    ))
 
   }
+
+  cv_predictions$.pred <- bt_result$result
+
+  ## Note: truth from collect_predictions() is already on original scale.
+  ## The recipe uses step_log/step_sqrt with skip = TRUE, so the outcome
+  ## transformation is skipped during assessment baking.
 
   ## Ensure .row is integer
   cv_predictions$.row <- as.integer(cv_predictions$.row)
@@ -384,26 +380,22 @@ fit_single_config <- function(config_row,
 
   test_preds <- test_pred_result$result$.pred
 
-  ## Back-transform if needed
-  if (needs_back_transformation(transformation)) {
+  ## Back-transform, unconditionally (see the OOF block above and #53)
+  bt_test <- safely_execute(
+    back_transform_predictions(test_preds, transformation, warn = FALSE),
+    log_error          = FALSE,
+    capture_conditions = TRUE
+  )
 
-    bt_test <- safely_execute(
-      back_transform_predictions(test_preds, transformation, warn = FALSE),
-      log_error          = FALSE,
-      capture_conditions = TRUE
-    )
+  if (!is.null(bt_test$error)) {
 
-    if (!is.null(bt_test$error)) {
-
-      return(make_failed(
-        paste0("Test back-transformation failed: ", bt_test$error$message)
-      ))
-
-    }
-
-    test_preds <- bt_test$result
+    return(make_failed(
+      paste0("Test back-transformation failed: ", bt_test$error$message)
+    ))
 
   }
+
+  test_preds <- bt_test$result
 
   test_truth <- test_data[[outcome_col]]
 
