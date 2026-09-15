@@ -2,6 +2,17 @@
 ## Tests: evaluate() parallel execution
 ## ---------------------------------------------------------------------------
 
+## Parallel dispatch resolves the worker by name in the INSTALLED horizons, so
+## evaluate() refuses to dispatch under devtools::load_all() (see the guard
+## test below). The dispatching tests therefore run only against an installed
+## build: R CMD check, or devtools::test() after devtools::install().
+skip_if_dev_package <- function() {
+  testthat::skip_if(
+    exists(".__DEVTOOLS__", envir = asNamespace("horizons"), inherits = FALSE),
+    "parallel dispatch refuses under load_all(); run via R CMD check or an installed build"
+  )
+}
+
 ## =========================================================================
 ## Worker closure footprint — regression guard
 ## =========================================================================
@@ -177,6 +188,7 @@ describe("evaluate() - auto-split computation", {
     on.exit(unlink(tmpdir, recursive = TRUE))
 
     skip_on_cran()
+    skip_if_dev_package()
 
     ## workers = 9, cv_folds = 3 → inner = 3, outer = 3
     result <- suppressWarnings(
@@ -204,6 +216,7 @@ describe("evaluate() - parallel execution", {
   it("produces results with workers > cv_folds", {
 
     skip_on_cran()
+    skip_if_dev_package()
 
     obj    <- make_eval_object(n_configs = 4)
     tmpdir <- tempfile("eval_par_")
@@ -238,6 +251,7 @@ describe("evaluate() - parallel execution", {
   it("parallel results match sequential results", {
 
     skip_on_cran()
+    skip_if_dev_package()
 
     obj <- make_eval_object(n_configs = 2)
 
@@ -293,6 +307,7 @@ describe("evaluate() - cross-mode checkpoint resume", {
   it("resumes parallel run from sequential checkpoints", {
 
     skip_on_cran()
+    skip_if_dev_package()
 
     obj    <- make_eval_object(n_configs = 4)
     tmpdir <- tempfile("eval_xmode_")
