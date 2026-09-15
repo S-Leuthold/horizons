@@ -142,6 +142,77 @@ describe("evaluate_single_config() - success path", {
 
   })
 
+  it("records the six cross-validated means at the selected hyperparameters (#50)", {
+
+    cv_cols <- paste0("cv_", c("rmse", "rrmse", "rsq", "ccc", "rpd", "mae"))
+
+    expect_true(all(cv_cols %in% names(result)))
+
+    ## rmse / rpd are always defined; rsq / ccc may be NA on a degenerate fold
+    expect_true(is.finite(result$cv_rmse))
+    expect_true(is.finite(result$cv_rpd))
+
+    ## The CV panel and the test panel are different quantities; if they were
+    ## ever identical the lookup would be reading the wrong thing.
+    expect_false(isTRUE(all.equal(result$cv_rmse, result$rmse)))
+
+  })
+
+  it("keeps .config on best_params so the CV panel can be looked up", {
+
+    expect_true(".config" %in% names(result$best_params[[1]]))
+
+  })
+
+})
+
+## =========================================================================
+## cv_panel_at()
+## =========================================================================
+
+describe("cv_panel_at()", {
+
+  ## A real tune_grid() result on a tiny workflow, so the panel lookup is
+  ## checked against tune's own collect_metrics() rather than a mock.
+  set.seed(4903)
+  d <- tibble::tibble(x1 = stats::rnorm(40), x2 = stats::rnorm(40))
+  d$y <- 1 + 2 * d$x1 + stats::rnorm(40, sd = 0.3)
+  folds <- rsample::vfold_cv(d, v = 3)
+
+  wf <- workflows::workflow() |>
+    workflows::add_recipe(recipes::recipe(y ~ ., d)) |>
+    workflows::add_model(parsnip::rand_forest(mtry = tune::tune(), trees = 50) |>
+                           parsnip::set_engine("ranger") |>
+                           parsnip::set_mode("regression"))
+
+  ps <- dials::finalize(workflows::extract_parameter_set_dials(wf), d[, 1:2])
+
+  set.seed(4904)
+  tr <- tune::tune_grid(wf, folds, grid = 2, param_info = ps,
+                        metrics = tuning_metric_set("none"))
+  best <- tune::select_best(tr, metric = "rmse")
+
+  it("returns the collect_metrics() means at best_params$.config", {
+
+    panel <- cv_panel_at(tr, best)
+    cm    <- tune::collect_metrics(tr)
+    cm    <- cm[cm$.config == best$.config, ]
+
+    for (m in c("rmse", "rrmse", "rsq", "ccc", "rpd", "mae")) {
+      expect_equal(panel[[paste0("cv_", m)]], cm$mean[cm$.metric == m],
+                   info = m)
+    }
+
+  })
+
+  it("returns all-NA rather than erroring when the lookup is impossible", {
+
+    expect_true(all(is.na(unlist(cv_panel_at(NULL, best)))))
+    expect_true(all(is.na(unlist(cv_panel_at(tr, best[, setdiff(names(best), ".config")])))))
+    expect_true(all(is.na(unlist(cv_panel_at(tr, NULL)))))
+
+  })
+
 })
 
 ## =========================================================================
@@ -221,6 +292,11 @@ describe("evaluate_single_config() - failure paths", {
     )
 
     expect_true(all(EXPECTED_RESULT_COLS %in% names(result)))
+
+    ## cv_* columns exist on failure too, as NA, so bind_rows() is clean
+    cv_cols <- paste0("cv_", c("rmse", "rrmse", "rsq", "ccc", "rpd", "mae"))
+    expect_true(all(cv_cols %in% names(result)))
+    expect_true(all(is.na(unlist(result[cv_cols]))))
 
   })
 

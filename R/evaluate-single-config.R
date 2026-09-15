@@ -28,9 +28,12 @@
 #'   `tune::control_bayes()` to enable parallel CV folds.
 #' @param seed Integer. Random seed for reproducibility.
 #'
-#' @return Single-row tibble with columns: `config_id`, `status`, `rmse`,
-#'   `rrmse`, `rsq`, `ccc`, `rpd`, `mae`, `best_params` (list-column),
-#'   `error_message`, `runtime_secs`.
+#' @return Single-row tibble with columns: `config_id`, `status`, the six
+#'   test-set metrics `rmse`, `rrmse`, `rsq`, `ccc`, `rpd`, `mae`, the six
+#'   cross-validated means at the selected hyperparameters `cv_rmse`,
+#'   `cv_rrmse`, `cv_rsq`, `cv_ccc`, `cv_rpd`, `cv_mae` (what `evaluate()` and
+#'   `fit()` rank on), `best_params` (list-column), `error_message`,
+#'   `warnings`, `runtime_secs`.
 #'
 #' @keywords internal
 #' @export
@@ -325,6 +328,25 @@ evaluate_single_config <- function(config_row,
   best_params <- best_result$result
 
   ## -----------------------------------------------------------------------
+  ## Step 9b: Record the CV panel at the selected hyperparameters
+  ## -----------------------------------------------------------------------
+  ## The cross-validated means tune scored for the chosen config, on the
+  ## original scale via tuning_metric_set(). evaluate() and fit() rank on
+  ## these rather than on the test-set metrics computed below, so the test
+  ## set stays held out from selection and its metrics are honest (#50).
+
+  cv_panel <- cv_panel_at(final_tune_results, best_params)
+
+  if (all(is.na(unlist(cv_panel)))) {
+
+    collected_warnings <- c(
+      collected_warnings,
+      "CV metrics at the selected hyperparameters could not be recovered; cv_* columns are NA."
+    )
+
+  }
+
+  ## -----------------------------------------------------------------------
   ## Step 10: Finalize workflow and evaluate on test set
   ## -----------------------------------------------------------------------
 
@@ -438,10 +460,70 @@ evaluate_single_config <- function(config_row,
     ccc           = test_metrics$ccc    %||% NA_real_,
     rpd           = test_metrics$rpd    %||% NA_real_,
     mae           = test_metrics$mae    %||% NA_real_,
+    cv_rmse       = cv_panel$cv_rmse,
+    cv_rrmse      = cv_panel$cv_rrmse,
+    cv_rsq        = cv_panel$cv_rsq,
+    cv_ccc        = cv_panel$cv_ccc,
+    cv_rpd        = cv_panel$cv_rpd,
+    cv_mae        = cv_panel$cv_mae,
     best_params   = list(best_params),
     error_message = NA_character_,
     warnings      = list(if (length(collected_warnings) > 0) collected_warnings else NULL),
     runtime_secs  = runtime
   )
+
+}
+
+## ---------------------------------------------------------------------------
+## cv_panel_at — the six CV means at one set of hyperparameters
+## ---------------------------------------------------------------------------
+
+#' Cross-validated metric means at the selected hyperparameters
+#'
+#' @description
+#' Reads `tune::collect_metrics()` for the tuning result and returns the mean
+#' of each metric at the `.config` that `tune::select_best()` chose. These are
+#' the `cv_*` columns of `evaluation$results`, the quantities `evaluate()` and
+#' `fit()` rank on. Missing or unrecoverable values are `NA_real_`; the
+#' function never errors, so a bookkeeping failure cannot fail a config whose
+#' fit succeeded.
+#'
+#' @param tune_results A `tune_results` object (grid or Bayesian).
+#' @param best_params One-row tibble from `tune::select_best()`, carrying
+#'   `.config`.
+#' @param metrics Metric names to look up, in order.
+#' @return One-row tibble with columns `cv_<metric>`.
+#' @keywords internal
+#' @noRd
+cv_panel_at <- function(tune_results, best_params,
+                        metrics = c("rmse", "rrmse", "rsq", "ccc", "rpd", "mae")) {
+
+  out <- stats::setNames(as.list(rep(NA_real_, length(metrics))),
+                         paste0("cv_", metrics))
+
+  usable <- !is.null(tune_results) && !is.null(best_params) &&
+    ".config" %in% names(best_params) && nrow(best_params) >= 1
+
+  if (!usable) return(tibble::as_tibble(out))
+
+  panel <- tryCatch(tune::collect_metrics(tune_results), error = function(e) NULL)
+
+  if (is.null(panel) || !all(c(".config", ".metric", "mean") %in% names(panel))) {
+
+    return(tibble::as_tibble(out))
+
+  }
+
+  panel <- panel[panel$.config == best_params$.config[[1]], , drop = FALSE]
+
+  for (m in metrics) {
+
+    v <- panel$mean[panel$.metric == m]
+
+    if (length(v) == 1 && is.finite(v)) out[[paste0("cv_", m)]] <- v
+
+  }
+
+  tibble::as_tibble(out)
 
 }

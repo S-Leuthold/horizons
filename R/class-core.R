@@ -1646,11 +1646,30 @@ print.horizons_data <- function(x, ...) {
       if (nrow(best_row) > 0 && metric %in% names(best_row)) {
 
         branch <- if (has_models) "\u251C\u2500" else "\u2514\u2500"
-        cat(paste0(
-          "   ", branch, " Best: ", best_id,
-          " \u2014 ", toupper(metric), " = ",
-          round(best_row[[metric]], 3), "\n"
-        ))
+        cv_col <- paste0("cv_", metric)
+
+        ## Ranking is on the CV metric (#50); show it first when present,
+        ## with the held-out test value beside it. Objects evaluated before
+        ## the cv_* columns existed print the test value alone.
+        if (cv_col %in% names(best_row) && !is.na(best_row[[cv_col]])) {
+
+          cat(paste0(
+            "   ", branch, " Best: ", best_id,
+            " \u2014 CV ", toupper(metric), " = ",
+            round(best_row[[cv_col]], 3),
+            " (test ", toupper(metric), " = ",
+            round(best_row[[metric]], 3), ")\n"
+          ))
+
+        } else {
+
+          cat(paste0(
+            "   ", branch, " Best: ", best_id,
+            " \u2014 ", toupper(metric), " = ",
+            round(best_row[[metric]], 3), "\n"
+          ))
+
+        }
 
       }
 

@@ -125,9 +125,9 @@ monitor_evaluate <- function(output_dir, watch = FALSE, interval = 10) {
     row <- tryCatch(readRDS(f), error = function(e) NULL)
 
     if (!is.null(row) && row$status %in% c("success", "pruned") &&
-        !is.na(row[[metric_name]])) {
+        !is.na(.monitor_metric_value(row, metric_name))) {
 
-      val <- row[[metric_name]]
+      val <- .monitor_metric_value(row, metric_name)
 
       if (is.na(best_metric) ||
           (higher_better && val > best_metric) ||
@@ -152,8 +152,9 @@ monitor_evaluate <- function(output_dir, watch = FALSE, interval = 10) {
     if (!is.null(row)) {
 
       model_name <- MODEL_DISPLAY_NAMES[row$model] %||% row$model
-      metric_val <- if (!is.na(row[[metric_name]])) {
-        paste0(toupper(metric_name), " = ", round(row[[metric_name]], 3))
+      metric_val <- if (!is.na(.monitor_metric_value(row, metric_name))) {
+        paste0(toupper(metric_name), " = ",
+               round(.monitor_metric_value(row, metric_name), 3))
       } else {
         row$status
       }
@@ -174,6 +175,28 @@ monitor_evaluate <- function(output_dir, watch = FALSE, interval = 10) {
     best_metric = best_metric,
     recent      = recent
   )
+
+}
+
+
+#' The value the monitor ranks a checkpoint row on
+#'
+#' evaluate() ranks on the cross-validated metric (`cv_<metric>`, #50), so
+#' the monitor's "best so far" reads the same column. Checkpoint rows written
+#' before that column existed fall back to the test-set metric, so an old run
+#' can still be monitored.
+#' @noRd
+.monitor_metric_value <- function(row, metric_name) {
+
+  cv_col <- paste0("cv_", metric_name)
+
+  if (cv_col %in% names(row) && !is.na(row[[cv_col]])) {
+
+    return(row[[cv_col]])
+
+  }
+
+  if (metric_name %in% names(row)) row[[metric_name]] else NA_real_
 
 }
 

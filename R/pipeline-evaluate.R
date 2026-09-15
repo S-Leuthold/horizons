@@ -10,8 +10,11 @@
 #' @param x A `horizons_data` object with `config$configs` populated by
 #'   `configure()`.
 #' @param metric Character. Metric for ranking configurations. One of
-#'   `"rpd"`, `"rsq"`, `"rmse"`, `"rrmse"`, `"ccc"`, `"mae"`. Default
-#'   `"rpd"`.
+#'   `"rpd"`, `"rsq"`, `"rmse"`, `"rrmse"`, `"ccc"`, `"mae"`. Ranking uses
+#'   the cross-validated value of that metric at each config's selected
+#'   hyperparameters (`evaluation$results$cv_<metric>`); the test-set columns
+#'   are reported but never used for selection, so they remain honest
+#'   held-out estimates. Default `"rpd"`.
 #' @param prune Logical. If TRUE, skip Bayesian optimization for configs
 #'   whose grid-search RPD falls below `prune_threshold`. Default TRUE.
 #' @param prune_threshold Numeric. RPD threshold for pruning. Configs with
@@ -612,9 +615,25 @@ evaluate <- function(x,
 
   all_results <- dplyr::bind_rows(results_list)
 
+  ## Checkpoint rows written before the cv_* columns existed bind without
+  ## them. Materialise the columns as NA so ranking can name what it skips
+  ## rather than failing on a missing column.
+  for (cv_col in paste0("cv_", c("rmse", "rrmse", "rsq", "ccc", "rpd", "mae"))) {
+
+    if (!cv_col %in% names(all_results)) all_results[[cv_col]] <- NA_real_
+
+  }
+
   ## -----------------------------------------------------------------------
   ## Step 10: Determine best config
   ## -----------------------------------------------------------------------
+  ## Ranking uses the cross-validated metric at each config's selected
+  ## hyperparameters (cv_<metric>), not the test-set metric. Selecting on the
+  ## test set would make the reported test metric of the winner a maximum
+  ## over N configs on the same rows rather than a held-out estimate (#50).
+  ## `metric` and `rank_metric` keep the bare name; the column is derived.
+
+  rank_column <- paste0("cv_", metric)
 
   successes <- all_results[all_results$status == "success", ]
 
@@ -622,7 +641,7 @@ evaluate <- function(x,
 
     ## Check if there are pruned configs with metrics for the ranking metric
     pruned <- all_results[all_results$status == "pruned" &
-                            !is.na(all_results[[metric]]), ]
+                            !is.na(all_results[[rank_column]]), ]
 
     if (nrow(pruned) == 0) {
 
@@ -642,34 +661,9 @@ evaluate <- function(x,
 
   }
 
-  ## Rank by metric (higher is better for rpd, rsq, ccc; lower for rmse, rrmse, mae)
-  higher_better <- HIGHER_BETTER_METRICS
-  metric_vals   <- successes[[metric]]
+  ranked <- rank_configs_by_cv(successes, metric)
 
-  if (all(is.na(metric_vals))) {
-
-    rlang::abort(paste0(
-      "All configs have NA values for metric '", metric, "'. ",
-      "Cannot rank configurations."
-    ))
-
-  }
-
-  ## Filter to configs with non-NA ranking metric
-  valid_mask      <- !is.na(metric_vals)
-  valid_successes <- successes[valid_mask, ]
-
-  if (metric %in% higher_better) {
-
-    best_idx <- which.max(valid_successes[[metric]])
-
-  } else {
-
-    best_idx <- which.min(valid_successes[[metric]])
-
-  }
-
-  best_config_id <- valid_successes$config_id[best_idx]
+  best_config_id <- ranked$config_id[1]
 
   ## -----------------------------------------------------------------------
   ## Step 11: Store evaluation metadata
@@ -722,8 +716,9 @@ evaluate <- function(x,
     ))
     cat(paste0(
       "\u2514\u2500 Best: ", best_config_id, " (", best_model, ")",
-      " \u2014 ", toupper(metric), " = ",
-      round(best_row[[metric]], 3), "\n"
+      " \u2014 CV ", toupper(metric), " = ",
+      round(best_row[[rank_column]], 3),
+      " (test ", toupper(metric), " = ", round(best_row[[metric]], 3), ")\n"
     ))
     cat(paste0(
       paste(rep("\u2500", 62), collapse = ""), "\n"
@@ -732,5 +727,73 @@ evaluate <- function(x,
   }
 
   x
+
+}
+
+## ---------------------------------------------------------------------------
+## rank_configs_by_cv \u2014 the one ranking rule evaluate() and fit() share
+## ---------------------------------------------------------------------------
+
+#' Rank evaluation result rows on the cross-validated metric
+#'
+#' @description
+#' Orders result rows best-first by `cv_<metric>`, the cross-validated mean at
+#' each config's selected hyperparameters. This is the single ranking rule for
+#' `evaluate()`'s `best_config` and `fit()`'s member selection, so the two can
+#' never disagree, and neither touches a test-set column (#50).
+#'
+#' Rows whose `cv_<metric>` is `NA` (checkpoints written before the column
+#' existed, or a config whose CV panel could not be recovered) are dropped
+#' with a warning naming them. If no row can be ranked, aborts with the
+#' remedy: re-run `evaluate()`.
+#'
+#' @param results Tibble of evaluation result rows (`evaluation$results`
+#'   shape).
+#' @param metric Bare metric name, e.g. `"rpd"`. Direction comes from
+#'   `HIGHER_BETTER_METRICS`.
+#' @return `results` with unrankable rows removed, ordered best-first.
+#' @keywords internal
+rank_configs_by_cv <- function(results, metric) {
+
+  rank_column <- paste0("cv_", metric)
+
+  if (!rank_column %in% names(results)) {
+
+    rlang::abort(paste0(
+      "Evaluation results carry no `", rank_column, "` column. ",
+      "Ranking uses the cross-validated metric; re-run evaluate() to record it."
+    ))
+
+  }
+
+  vals <- results[[rank_column]]
+
+  if (all(is.na(vals))) {
+
+    rlang::abort(paste0(
+      "All values of `", rank_column, "` are NA, so no config can be ranked. ",
+      "Re-run evaluate() to record cross-validated metrics."
+    ))
+
+  }
+
+  if (any(is.na(vals))) {
+
+    skipped <- results$config_id[is.na(vals)]
+
+    n_skipped <- length(skipped)
+
+    cli::cli_warn(c(
+      "!" = "{n_skipped} config{?s} skipped in ranking: `{rank_column}` is NA.",
+      "i" = "Skipped: {.val {skipped}}.",
+      "i" = "Usually a checkpoint from before cv_* columns existed; re-run evaluate() to include those configs."
+    ))
+
+    results <- results[!is.na(vals), , drop = FALSE]
+    vals    <- results[[rank_column]]
+
+  }
+
+  results[order(vals, decreasing = metric %in% HIGHER_BETTER_METRICS), , drop = FALSE]
 
 }

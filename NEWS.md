@@ -42,6 +42,29 @@
 
 ## Bug Fixes
 
+* `evaluate()` and `fit()` now rank configurations on the cross-validated
+  metric, not the test-set metric (#50). `evaluation$results` gains six
+  columns, `cv_rmse`, `cv_rrmse`, `cv_rsq`, `cv_ccc`, `cv_rpd` and `cv_mae`:
+  the CV means at each config's selected hyperparameters, on the original
+  scale. `best_config` and `fit()`'s member set are chosen on
+  `cv_<rank_metric>`; `metric` / `rank_metric` keep the bare name. The
+  test-set columns are still reported for every config, and are honest
+  held-out estimates precisely because selection no longer touches them.
+  Previously the winner's reported test metric was a maximum over all
+  configs on the same rows. `best_config` and the members `fit()` picks can
+  change for an existing object re-run through `evaluate()`; objects
+  evaluated before this version have no `cv_*` columns and `fit()` asks for
+  a re-run. `monitor_evaluate()`'s "best so far" reads the same column.
+
+* `fit()`'s train/test partition (Split F) is now seeded with
+  `fit_split_seed(seed)` (`seed + 1L`) rather than `seed` (#50). It was built
+  with the same `initial_split()` call as `evaluate()`'s on the same frame,
+  so at the shared default seed the two partitions were bit-identical and
+  `fit()`'s test metrics, and its degradation check, were measured on the rows
+  the configs had been selected on. `fit()` now warns if the two partitions
+  coincide anyway. Every `fit()` result changes test rows as a consequence,
+  by design.
+
 * Tuning metrics are now scored on the original response scale (#49). The
   response transform is a `skip = TRUE` recipe step, so tune never applied it
   to an assessment set: every CV metric for a `log`, `log10` or `sqrt` config

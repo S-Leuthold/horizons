@@ -157,12 +157,76 @@ describe("evaluate() - metric ranking", {
 
     expect_equal(result$evaluation$rank_metric, "rsq")
 
-    ## Best config should have highest rsq among successes
+    ## Best config is the highest CROSS-VALIDATED rsq among successes (#50).
+    ## rank_metric keeps the bare name; the ranking column is cv_rsq.
     successes <- result$evaluation$results %>%
       dplyr::filter(status == "success")
-    best_row <- successes[which.max(successes$rsq), ]
+    best_row <- successes[which.max(successes$cv_rsq), ]
 
     expect_equal(result$evaluation$best_config, best_row$config_id)
+
+  })
+
+  it("records the cv_* columns on every result row", {
+
+    obj <- make_eval_object(n_configs = 2)
+    result <- suppressWarnings(evaluate(obj, verbose = FALSE, seed = 42L))
+
+    cv_cols <- paste0("cv_", c("rmse", "rrmse", "rsq", "ccc", "rpd", "mae"))
+    res     <- result$evaluation$results
+
+    expect_true(all(cv_cols %in% names(res)))
+
+    ## rmse and rpd are always defined; rsq / ccc can be NA when a fold's
+    ## predictions are near-constant, and tune's mean carries that NA.
+    ok <- res[res$status == "success", ]
+    expect_true(all(is.finite(ok$cv_rmse)))
+    expect_true(all(is.finite(ok$cv_rpd)))
+
+  })
+
+})
+
+## =========================================================================
+## rank_configs_by_cv() — the shared ranking rule
+## =========================================================================
+
+describe("rank_configs_by_cv()", {
+
+  rows <- tibble::tibble(
+    config_id = c("a", "b", "c"),
+    status    = "success",
+    rpd       = c(3.0, 1.0, 2.0),    # test-set: a would win
+    rmse      = c(0.5, 2.0, 1.0),
+    cv_rpd    = c(1.5, 2.5, 2.0),    # CV: b wins
+    cv_rmse   = c(1.2, 0.6, 0.9)
+  )
+
+  it("orders best-first by cv_<metric>, never by the test-set column", {
+
+    expect_equal(rank_configs_by_cv(rows, "rpd")$config_id,  c("b", "c", "a"))
+    expect_equal(rank_configs_by_cv(rows, "rmse")$config_id, c("b", "c", "a"))
+
+  })
+
+  it("drops rows with NA cv_<metric> with a warning naming them", {
+
+    legacy <- rows
+    legacy$cv_rpd[1] <- NA_real_
+
+    expect_warning(ranked <- rank_configs_by_cv(legacy, "rpd"), "skipped")
+    expect_equal(ranked$config_id, c("b", "c"))
+
+  })
+
+  it("aborts with a re-run remedy when nothing can be ranked", {
+
+    all_na <- rows
+    all_na$cv_rpd <- NA_real_
+
+    expect_error(rank_configs_by_cv(all_na, "rpd"), "[Rr]e-run evaluate")
+    expect_error(rank_configs_by_cv(rows[, c("config_id", "status", "rpd")], "rpd"),
+                 "[Rr]e-run evaluate")
 
   })
 

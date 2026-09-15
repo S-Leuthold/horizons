@@ -1203,7 +1203,11 @@ make_valid_eval <- function() {
     status    = c("success", "success"),
     rmse      = c(1.0, 2.0),  rrmse = c(0.1, 0.2),
     rsq       = c(0.9, 0.8),  ccc   = c(0.9, 0.8),
-    rpd       = c(2.0, 1.5),  mae   = c(0.8, 1.1)
+    rpd       = c(2.0, 1.5),  mae   = c(0.8, 1.1),
+    ## cross-validated means at the selected hyperparameters (#50)
+    cv_rmse   = c(1.1, 2.1),  cv_rrmse = c(0.11, 0.21),
+    cv_rsq    = c(0.88, 0.78), cv_ccc  = c(0.88, 0.78),
+    cv_rpd    = c(1.9, 1.4),  cv_mae   = c(0.9, 1.2)
   )
 
   obj <- list(
