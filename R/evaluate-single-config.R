@@ -25,7 +25,15 @@
 #'   response scale (tuning metrics are scored there via
 #'   `tuning_metric_set()`). Only used when `prune = TRUE`.
 #' @param allow_par Logical. Passed to `tune::control_grid()` and
-#'   `tune::control_bayes()` to enable parallel CV folds.
+#'   `tune::control_bayes()` to enable parallel CV folds on the registered
+#'   `future::plan()`. `evaluate()` sets this from the resolved axis: `FALSE`
+#'   on the configs axis (tune ships nothing inward), `TRUE` on the
+#'   resamples axis.
+#' @param parallel_over Character. tune's `parallel_over`, passed through to
+#'   the control objects. `"resamples"` (default) ships one rsplit per task;
+#'   `"everything"` ships the whole rset to every task. tune may rewrite the
+#'   value before dispatch (parameter-free configs become `"resamples"`;
+#'   single-split rsets become `"everything"`).
 #' @param seed Integer. Random seed for reproducibility.
 #'
 #' @return Single-row tibble with columns: `config_id`, `status`, the six
@@ -46,9 +54,13 @@ evaluate_single_config <- function(config_row,
                                    prune           = FALSE,
                                    prune_threshold = 100,
                                    allow_par       = FALSE,
+                                   parallel_over   = "resamples",
                                    seed            = 42L) {
 
   start_time <- Sys.time()
+
+  parallel_over <- rlang::arg_match0(parallel_over, c("resamples", "everything"),
+                                     arg_nm = "parallel_over")
 
   ## The RNG kind is pinned, not just the seed. furrr_options(seed = TRUE)
   ## switches a worker to L'Ecuyer-CMRG, and set.seed() with kind = NULL leaves
@@ -204,7 +216,7 @@ evaluate_single_config <- function(config_row,
           save_workflow = FALSE,
           verbose       = FALSE,
           allow_par     = allow_par,
-          parallel_over = "everything"
+          parallel_over = parallel_over
         )
       )
     ),
@@ -284,7 +296,7 @@ evaluate_single_config <- function(config_row,
             verbose       = FALSE,
             no_improve    = BAYES_NO_IMPROVE_LIMIT,
             allow_par     = allow_par,
-            parallel_over = "everything"
+            parallel_over = parallel_over
           )
         )
       )),

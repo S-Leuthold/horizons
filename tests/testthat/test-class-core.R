@@ -1220,6 +1220,7 @@ make_valid_eval <- function() {
       n_train      = 80L,
       n_test       = 20L,
       workers      = 4L,
+      parallelize_over = "configs",
       runtime_secs = 12.3,
       timestamp    = Sys.time()
     )

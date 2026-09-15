@@ -13,6 +13,26 @@ skip_if_dev_package <- function() {
   )
 }
 
+## Register a plan for the duration of the calling test and restore the
+## previous one. Two workers is the CRAN-conformant maximum under
+## _R_CHECK_LIMIT_CORES_. There is no withr::local_plan(); plan() returns the
+## previous strategy when setting a new one.
+local_plan <- function(..., .env = parent.frame()) {
+  old <- future::plan(...)
+  withr::defer(future::plan(old), envir = .env)
+  invisible(old)
+}
+
+## Evaluate `expr` letting only warnings that match `keep` (a condition class
+## or a message regex) propagate; the small fixture's rsample stratification
+## warnings are muffled so expect_warning() sees the one under test.
+keep_only_warning <- function(expr, keep) {
+  withCallingHandlers(expr, warning = function(w) {
+    matches <- inherits(w, keep) || grepl(keep, conditionMessage(w))
+    if (!matches) invokeRestart("muffleWarning")
+  })
+}
+
 ## =========================================================================
 ## Worker closure footprint — regression guard
 ## =========================================================================
@@ -39,10 +59,6 @@ describe("evaluate() parallel worker footprint", {
 
     worker <- horizons:::evaluate_config_worker
 
-    ## This is the invariant. future resolves a function whose environment is a
-    ## namespace by name, and serializes the environment of one that is not. A
-    ## closure defined inside evaluate() would carry that frame — every local,
-    ## including the split and the resamples.
     expect_true(isNamespace(environment(worker)))
     expect_match(environmentName(environment(worker)), "horizons")
 
@@ -52,17 +68,12 @@ describe("evaluate() parallel worker footprint", {
 
     worker <- horizons:::evaluate_config_worker
 
-    ## Bytecode and srcrefs put this in the low hundreds of KB; the point is
-    ## that it does not scale with the dataset. A captured frame at library
-    ## scale measured 2.26 GiB, so a 1 MB ceiling is loose and still decisive.
     expect_lt(length(serialize(worker, NULL)), 1e6)
 
   })
 
   it("takes its inputs as an argument rather than by capture", {
 
-    ## The signature is the contract: everything the worker needs arrives in
-    ## `shared`, so nothing has to be reachable through the enclosing frame.
     expect_named(formals(horizons:::evaluate_config_worker),
                  c("config_i", "shared"))
 
@@ -70,20 +81,14 @@ describe("evaluate() parallel worker footprint", {
 
   it("rejects a malformed payload instead of silently defaulting", {
 
-    ## A mis-keyed entry arrives as NULL. Most then error, but two do not:
-    ## set.seed(NULL) reseeds from the clock, so the run succeeds and is not
-    ## reproducible; tune_grid(grid = NULL) invents its own grid, so every
-    ## config is tuned over a space nobody configured. Both would pass CI.
     good <- setNames(vector("list", length(horizons:::SHARED_ARG_NAMES)),
                      horizons:::SHARED_ARG_NAMES)
 
-    ## Missing key
     expect_error(
       horizons:::evaluate_config_worker(1L, good[setdiff(names(good), "seed")]),
       "Malformed worker payload"
     )
 
-    ## Misspelled key — the realistic failure, and the silent one
     typo        <- good
     names(typo)[names(typo) == "grid_size"] <- "gridsize"
     expect_error(horizons:::evaluate_config_worker(1L, typo),
@@ -91,26 +96,27 @@ describe("evaluate() parallel worker footprint", {
 
   })
 
+  it("does not carry allow_par in the payload: tune is sequential on the configs axis", {
+
+    expect_false("allow_par" %in% horizons:::SHARED_ARG_NAMES)
+
+  })
+
   it("refuses to dispatch in parallel under devtools::load_all()", {
 
-    ## Workers resolve the horizons namespace by NAME, so they load the
-    ## INSTALLED package, not the source tree. A compatible-but-stale install
-    ## would run old helper code behind a new worker body, silently, and the
-    ## worker computes every metric. Under pkgload this is always wrong, so
-    ## evaluate() must refuse rather than produce quiet wrong numbers.
     skip_if_not(exists(".__DEVTOOLS__", envir = asNamespace("horizons"),
                        inherits = FALSE),
                 "only meaningful under load_all()")
+    skip_on_cran()
 
-    obj    <- make_eval_object(n_configs = 2)
+    local_plan(future::multisession, workers = 2)
+
+    obj    <- make_eval_object(n_configs = 4)   # 4 >= cv_folds (3) -> configs
     tmpdir <- withr::local_tempdir()
 
-    ## suppressWarnings matches this file's existing pattern — the small
-    ## fixture trips rsample's stratification warnings, which are not the
-    ## subject of the test.
     expect_error(
       suppressWarnings(
-        evaluate(obj, workers = 10L, output_dir = tmpdir, verbose = FALSE)
+        evaluate(obj, allow_par = TRUE, output_dir = tmpdir, verbose = FALSE)
       ),
       "load_all"
     )
@@ -119,52 +125,135 @@ describe("evaluate() parallel worker footprint", {
 
 })
 
-## Reuse make_eval_object from test-pipeline-evaluate.R (loaded by testthat)
-## These tests are separated because they require skip_on_cran() and are
-## inherently slower due to worker startup.
-
 
 ## =========================================================================
-## Parameter validation
+## Argument handling: deprecation, backend check, output_dir requirement
 ## =========================================================================
 
-describe("evaluate() - workers parameter validation", {
+describe("evaluate() - workers is deprecated", {
 
-  it("rejects non-integer workers", {
+  it("warns with a stable class and runs sequentially regardless of the value", {
 
     obj <- make_eval_object(n_configs = 2)
 
-    expect_error(evaluate(obj, workers = 1.5, verbose = FALSE),
-                 "positive integer")
-    expect_error(evaluate(obj, workers = -1, verbose = FALSE),
-                 "positive integer")
-    expect_error(evaluate(obj, workers = "two", verbose = FALSE),
-                 "positive integer")
+    expect_warning(
+      result <- keep_only_warning(
+        evaluate(obj, workers = 10L, verbose = FALSE, seed = 42L),
+        "horizons_deprecated_workers"
+      ),
+      class = "horizons_deprecated_workers"
+    )
+
+    ## The old value is ignored: the run is sequential and the object valid.
+    expect_s3_class(result, "horizons_eval")
+    expect_equal(result$evaluation$parallelize_over, "sequential")
+    expect_identical(result$evaluation$workers, 1L)
 
   })
 
-  it("requires output_dir when outer > 1", {
+  it("no longer validates workers as a core count", {
 
     obj <- make_eval_object(n_configs = 2)
 
-    ## workers = 10 with cv_folds = 3 → inner = 3, outer = 3, needs output_dir
+    ## Previously an error ("positive integer"); now only the deprecation.
+    expect_warning(
+      keep_only_warning(
+        evaluate(obj, workers = "two", verbose = FALSE, seed = 42L),
+        "horizons_deprecated_workers"
+      ),
+      class = "horizons_deprecated_workers"
+    )
+
+  })
+
+})
+
+describe("evaluate() - allow_par without a usable backend", {
+
+  it("warns naming the plan and runs sequentially", {
+
+    local_plan(future::sequential)
+    obj <- make_eval_object(n_configs = 2)
+
+    expect_warning(
+      result <- keep_only_warning(
+        evaluate(obj, allow_par = TRUE, verbose = FALSE, seed = 42L),
+        "offers 1 worker"
+      ),
+      "offers 1 worker"
+    )
+
+    expect_s3_class(result, "horizons_eval")
+    expect_equal(result$evaluation$parallelize_over, "sequential")
+    expect_identical(result$evaluation$workers, 1L)
+
+  })
+
+  it("gives the same results as allow_par = FALSE", {
+
+    local_plan(future::sequential)
+    obj <- make_eval_object(n_configs = 2)
+
+    seq_result <- suppressWarnings(
+      evaluate(obj, allow_par = FALSE, verbose = FALSE, seed = 42L)
+    )
+    par_result <- suppressWarnings(
+      evaluate(obj, allow_par = TRUE, verbose = FALSE, seed = 42L)
+    )
+
+    expect_equal(par_result$evaluation$results$rmse,
+                 seq_result$evaluation$results$rmse)
+    expect_equal(par_result$evaluation$best_config,
+                 seq_result$evaluation$best_config)
+
+  })
+
+  it("never registers or alters the plan", {
+
+    local_plan(future::sequential)
+    before <- future::plan("list")
+    obj <- make_eval_object(n_configs = 2)
+
+    suppressWarnings(evaluate(obj, allow_par = TRUE, verbose = FALSE, seed = 42L))
+
+    expect_identical(future::plan("list"), before)
+
+  })
+
+})
+
+describe("evaluate() - output_dir requirement", {
+
+  it("is required when configs are dispatched to workers", {
+
+    skip_on_cran()
+    local_plan(future::multisession, workers = 2)
+    obj <- make_eval_object(n_configs = 4)   # auto -> configs
+
     expect_error(
-      evaluate(obj, workers = 10L, output_dir = NULL, verbose = FALSE),
+      suppressWarnings(
+        evaluate(obj, allow_par = TRUE, parallelize_over = "configs",
+                 output_dir = NULL, verbose = FALSE)
+      ),
       "output_dir"
     )
 
   })
 
-  it("allows workers > 1 without output_dir when outer == 1", {
+  it("is not required on the resamples axis", {
 
+    skip_on_cran()
+    local_plan(future::multisession, workers = 2)
     obj <- make_eval_object(n_configs = 2)
 
-    ## workers = 2 with cv_folds = 3 → inner = 2, outer = 1 → no output_dir needed
     result <- suppressWarnings(
-      evaluate(obj, workers = 2L, verbose = FALSE, seed = 42L)
+      evaluate(obj, allow_par = TRUE, parallelize_over = "resamples",
+               verbose = FALSE, seed = 42L)
     )
 
     expect_s3_class(result, "horizons_eval")
+    expect_equal(result$evaluation$parallelize_over, "resamples")
+    expect_identical(result$evaluation$workers, 2L)
 
   })
 
@@ -172,126 +261,135 @@ describe("evaluate() - workers parameter validation", {
 
 
 ## =========================================================================
-## Auto-split logic
+## Resamples axis runs under load_all(): tune dispatches by value
 ## =========================================================================
 
-describe("evaluate() - auto-split computation", {
+describe("evaluate() - resamples axis", {
 
-  it("correctly splits workers across outer and inner", {
+  it("runs on the registered plan and records the axis", {
 
-    ## We can test this indirectly through the manifest written during
-    ## parallel runs, or directly by checking the tree output
+    skip_on_cran()
+    local_plan(future::multisession, workers = 2)
+    obj <- make_eval_object(n_configs = 2)   # 2 < cv_folds (3) -> auto = resamples
 
-    obj    <- make_eval_object(n_configs = 4)
-    tmpdir <- tempfile("eval_par_")
-    dir.create(tmpdir)
-    on.exit(unlink(tmpdir, recursive = TRUE))
+    result <- suppressWarnings(
+      evaluate(obj, allow_par = TRUE, verbose = FALSE, seed = 42L)
+    )
+
+    expect_equal(result$evaluation$parallelize_over, "resamples")
+    expect_equal(nrow(result$evaluation$results), 2)
+    expect_true(all(result$evaluation$results$status %in% c("success", "pruned", "failed")))
+
+  })
+
+})
+
+
+## =========================================================================
+## Configs axis (installed build only)
+## =========================================================================
+
+describe("evaluate() - configs axis", {
+
+  it("writes a schema-2 manifest describing the plan and the axis", {
 
     skip_on_cran()
     skip_if_dev_package()
+    local_plan(future::multisession, workers = 2)
 
-    ## workers = 9, cv_folds = 3 → inner = 3, outer = 3
+    obj    <- make_eval_object(n_configs = 4)
+    tmpdir <- withr::local_tempdir()
+
     result <- suppressWarnings(
-      evaluate(obj, workers = 9L, output_dir = tmpdir, verbose = FALSE,
+      evaluate(obj, allow_par = TRUE, output_dir = tmpdir, verbose = FALSE,
                seed = 42L)
     )
 
-    ## Check manifest was written with correct split
     manifest <- readRDS(file.path(tmpdir, "eval_manifest.rds"))
-    expect_equal(manifest$inner, 3L)
-    expect_equal(manifest$outer, 3L)
-    expect_equal(manifest$workers, 9L)
+    expect_identical(manifest$schema_version, 2L)
+    expect_equal(manifest$axis, "configs")
+    expect_equal(manifest$parallelize_over_requested, "auto")
+    expect_equal(manifest$plan, "multisession")
+    expect_identical(manifest$workers, 2L)
+    expect_null(manifest$outer)
+    expect_null(manifest$inner)
+
+    expect_equal(result$evaluation$parallelize_over, "configs")
+    expect_identical(result$evaluation$workers, 2L)
 
   })
 
-})
-
-
-## =========================================================================
-## Parallel smoke test
-## =========================================================================
-
-describe("evaluate() - parallel execution", {
-
-  it("produces results with workers > cv_folds", {
+  it("produces one result and one checkpoint per config", {
 
     skip_on_cran()
     skip_if_dev_package()
+    local_plan(future::multisession, workers = 2)
 
     obj    <- make_eval_object(n_configs = 4)
-    tmpdir <- tempfile("eval_par_")
-    dir.create(tmpdir)
-    on.exit(unlink(tmpdir, recursive = TRUE))
+    tmpdir <- withr::local_tempdir()
 
     result <- suppressWarnings(
-      evaluate(obj, workers = 10L, output_dir = tmpdir, verbose = FALSE,
-               seed = 42L)
+      evaluate(obj, allow_par = TRUE, parallelize_over = "configs",
+               output_dir = tmpdir, verbose = FALSE, seed = 42L)
     )
 
     expect_s3_class(result, "horizons_eval")
     expect_equal(nrow(result$evaluation$results), 4)
-
-    ## All configs should have been evaluated
     expect_true(all(result$evaluation$results$config_id %in%
                       c("cfg_001", "cfg_002", "cfg_003", "cfg_004")))
-
-    ## Every config should have a valid status (no silent NA failures)
-    expect_true(all(result$evaluation$results$status %in%
-                      c("success", "pruned", "failed")))
     expect_false(any(is.na(result$evaluation$results$status)))
 
-    ## Per-config checkpoint files should exist
-    checkpoint_dir <- file.path(tmpdir, "checkpoints")
-    expect_true(dir.exists(checkpoint_dir))
-    checkpoint_files <- list.files(checkpoint_dir, pattern = "\\.rds$")
+    checkpoint_files <- list.files(file.path(tmpdir, "checkpoints"), pattern = "\\.rds$")
     expect_equal(length(checkpoint_files), 4)
 
   })
 
-  it("parallel results match sequential results", {
+  it("matches the sequential run in structure", {
 
     skip_on_cran()
     skip_if_dev_package()
 
     obj <- make_eval_object(n_configs = 2)
 
-    ## Sequential
     seq_result <- suppressWarnings(
-      evaluate(obj, workers = 1L, verbose = FALSE, seed = 42L)
+      evaluate(obj, verbose = FALSE, seed = 42L)
     )
 
-    ## Parallel
-    tmpdir <- tempfile("eval_par_")
-    dir.create(tmpdir)
-    on.exit(unlink(tmpdir, recursive = TRUE))
+    local_plan(future::multisession, workers = 2)
+    tmpdir <- withr::local_tempdir()
 
     par_result <- suppressWarnings(
-      evaluate(obj, workers = 10L, output_dir = tmpdir, verbose = FALSE,
-               seed = 42L)
+      evaluate(obj, allow_par = TRUE, parallelize_over = "configs",
+               output_dir = tmpdir, verbose = FALSE, seed = 42L)
     )
 
-    ## Asserts structure rather than exact values. The reason is narrower than
-    ## this comment used to claim: furrr_options(seed = TRUE) does put a worker
-    ## on L'Ecuyer-CMRG, but evaluate_single_config() now calls
-    ## set.seed(seed, kind = "Mersenne-Twister"), so the tuning streams do
-    ## match. What remains is engine-level nondeterminism — cubist returns
-    ## different metrics across identical calls on identical resamples — so a
-    ## bitwise comparison here would be flaky for reasons unrelated to
-    ## parallelism. A deterministic-engine equality test belongs in
-    ## test-evaluate-single-config.R.
-    expect_s3_class(par_result, "horizons_eval")
-
-    ## Same config IDs evaluated
+    ## Structure rather than exact values: engine-level nondeterminism
+    ## (cubist, #51) would make a bitwise comparison flaky for reasons
+    ## unrelated to parallelism.
     expect_setequal(seq_result$evaluation$results$config_id,
                     par_result$evaluation$results$config_id)
-
-    ## Best config should be one of the evaluated configs
     expect_true(par_result$evaluation$best_config %in%
                   par_result$evaluation$results$config_id)
 
-    ## Same number of results
-    expect_equal(nrow(seq_result$evaluation$results),
-                 nrow(par_result$evaluation$results))
+  })
+
+  it("leaves the user's plan exactly as it found it", {
+
+    skip_on_cran()
+    skip_if_dev_package()
+    local_plan(future::multisession, workers = 2)
+    before <- future::plan("list")
+
+    obj    <- make_eval_object(n_configs = 4)
+    tmpdir <- withr::local_tempdir()
+
+    suppressWarnings(
+      evaluate(obj, allow_par = TRUE, output_dir = tmpdir, verbose = FALSE,
+               seed = 42L)
+    )
+
+    expect_identical(future::plan("list"), before)
+    expect_identical(future::nbrOfWorkers(), 2L)
 
   })
 
@@ -304,25 +402,22 @@ describe("evaluate() - parallel execution", {
 
 describe("evaluate() - cross-mode checkpoint resume", {
 
-  it("resumes parallel run from sequential checkpoints", {
+  it("resumes a configs-axis run from sequential checkpoints", {
 
     skip_on_cran()
     skip_if_dev_package()
 
     obj    <- make_eval_object(n_configs = 4)
-    tmpdir <- tempfile("eval_xmode_")
-    dir.create(tmpdir)
-    on.exit(unlink(tmpdir, recursive = TRUE))
+    tmpdir <- withr::local_tempdir()
 
-    ## Run sequentially first (creates both single-file + per-config)
     seq_result <- suppressWarnings(
-      evaluate(obj, workers = 1L, output_dir = tmpdir, verbose = FALSE,
-               seed = 42L)
+      evaluate(obj, output_dir = tmpdir, verbose = FALSE, seed = 42L)
     )
 
-    ## Now run in parallel — should load all 4 from checkpoint
+    local_plan(future::multisession, workers = 2)
+
     par_result <- suppressWarnings(
-      evaluate(obj, workers = 10L, output_dir = tmpdir, verbose = FALSE,
+      evaluate(obj, allow_par = TRUE, output_dir = tmpdir, verbose = FALSE,
                seed = 42L)
     )
 
@@ -339,37 +434,85 @@ describe("evaluate() - cross-mode checkpoint resume", {
 ## monitor_evaluate()
 ## =========================================================================
 
+write_mock_checkpoints <- function(checkpoint_dir, n = 3) {
+
+  for (i in seq_len(n)) {
+
+    row <- tibble::tibble(
+      config_id    = paste0("cfg_", sprintf("%03d", i)),
+      model        = "rf",
+      status       = "success",
+      rpd          = runif(1, 1, 3),
+      rsq          = runif(1, 0.5, 0.9),
+      rmse         = runif(1, 0.1, 0.5),
+      cv_rpd       = runif(1, 1, 3),
+      runtime_secs = runif(1, 10, 60)
+    )
+    saveRDS(row, file.path(checkpoint_dir, paste0(row$config_id, ".rds")))
+
+  }
+
+}
+
 describe("monitor_evaluate()", {
 
   it("errors on missing directory", {
 
-    expect_error(monitor_evaluate("/nonexistent/path"),
-                 "not found")
+    expect_error(monitor_evaluate("/nonexistent/path"), "not found")
 
   })
 
   it("errors on missing manifest", {
 
-    tmpdir <- tempfile("eval_mon_")
-    dir.create(tmpdir)
-    on.exit(unlink(tmpdir, recursive = TRUE))
-
+    tmpdir <- withr::local_tempdir()
     expect_error(monitor_evaluate(tmpdir), "eval_manifest")
 
   })
 
-  it("reads progress from checkpoint directory", {
+  it("reads progress from a schema-2 manifest", {
 
     skip_on_cran()
 
-    ## Create a mock checkpoint directory
-    tmpdir <- tempfile("eval_mon_")
-    dir.create(tmpdir)
+    tmpdir         <- withr::local_tempdir()
     checkpoint_dir <- file.path(tmpdir, "checkpoints")
     dir.create(checkpoint_dir)
-    on.exit(unlink(tmpdir, recursive = TRUE))
 
-    ## Write a manifest
+    manifest <- list(
+      schema_version             = 2L,
+      n_total                    = 10,
+      n_pending                  = 10,
+      config_ids                 = paste0("cfg_", sprintf("%03d", 1:10)),
+      start_time                 = Sys.time() - 3600,
+      metric                     = "rpd",
+      cv_folds                   = 5L,
+      allow_par                  = TRUE,
+      parallelize_over_requested = "auto",
+      axis                       = "configs",
+      tune_parallel_over_requested = NULL,
+      plan                       = "multisession",
+      workers                    = 10L
+    )
+    saveRDS(manifest, file.path(tmpdir, "eval_manifest.rds"))
+    write_mock_checkpoints(checkpoint_dir, 3)
+
+    output <- capture.output(result <- monitor_evaluate(tmpdir))
+
+    expect_equal(result$n_complete, 3)
+    expect_equal(result$n_total, 10)
+    expect_false(is.na(result$best_config))
+    expect_true(any(grepl("configs", output)))
+    expect_true(any(grepl("multisession", output)))
+
+  })
+
+  it("still reads a legacy (schema-1) manifest from a pre-M2 run", {
+
+    skip_on_cran()
+
+    tmpdir         <- withr::local_tempdir()
+    checkpoint_dir <- file.path(tmpdir, "checkpoints")
+    dir.create(checkpoint_dir)
+
     manifest <- list(
       n_total    = 10,
       n_pending  = 10,
@@ -382,32 +525,12 @@ describe("monitor_evaluate()", {
       cv_folds   = 5L
     )
     saveRDS(manifest, file.path(tmpdir, "eval_manifest.rds"))
+    write_mock_checkpoints(checkpoint_dir, 3)
 
-    ## Write 3 mock checkpoint files
-    for (i in 1:3) {
-
-      row <- tibble::tibble(
-        config_id     = paste0("cfg_", sprintf("%03d", i)),
-        model         = "rf",
-        status        = "success",
-        rpd           = runif(1, 1, 3),
-        rsq           = runif(1, 0.5, 0.9),
-        rmse          = runif(1, 0.1, 0.5),
-        runtime_secs  = runif(1, 10, 60)
-      )
-      saveRDS(row, file.path(checkpoint_dir, paste0(row$config_id, ".rds")))
-
-    }
-
-    ## monitor should report 3/10 complete
-    stats <- suppressMessages(
-      capture.output(result <- monitor_evaluate(tmpdir), type = "message")
-    )
-    output <- capture.output(monitor_evaluate(tmpdir))
+    output <- capture.output(result <- monitor_evaluate(tmpdir))
 
     expect_equal(result$n_complete, 3)
-    expect_equal(result$n_total, 10)
-    expect_false(is.na(result$best_config))
+    expect_true(any(grepl("legacy", output)))
 
   })
 

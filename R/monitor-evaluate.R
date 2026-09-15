@@ -36,6 +36,12 @@ monitor_evaluate <- function(output_dir, watch = FALSE, interval = 10) {
   }
 
   manifest      <- readRDS(manifest_path)
+
+  ## Schema 1 (pre-2026-09-15) manifests carry workers/outer/inner from the
+  ## auto-split design; schema 2 carries the axis and the user's plan. Both
+  ## are read: the monitor needs only n_total, metric and start_time to
+  ## work, so a run started before M2 can still be watched.
+  manifest$schema_version <- manifest$schema_version %||% 1L
   checkpoint_dir <- file.path(output_dir, "checkpoints")
 
   if (watch) {
@@ -208,6 +214,19 @@ monitor_evaluate <- function(output_dir, watch = FALSE, interval = 10) {
   cat("\014")
   cat(paste0(paste(rep("\u2500", 50), collapse = ""), "\n"))
   cat(paste0("  evaluate() monitor \u2014 ", format(Sys.time(), "%H:%M:%S"), "\n"))
+
+  if (identical(manifest$schema_version %||% 1L, 2L)) {
+
+    cat(paste0("  Parallel:  over ", manifest$axis, " on ", manifest$plan,
+               " (", manifest$workers, " worker",
+               if (!identical(manifest$workers, 1L)) "s" else "", ")\n"))
+
+  } else {
+
+    cat(paste0("  Parallel:  legacy manifest (workers = ",
+               manifest$workers %||% "?", ")\n"))
+
+  }
   cat(paste0(paste(rep("\u2500", 50), collapse = ""), "\n\n"))
 
   cat(paste0("  Progress:  ", stats$n_complete, " / ", stats$n_total,

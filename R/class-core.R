@@ -858,7 +858,8 @@ validate_horizons_eval <- function(x) {
   ## Slot completeness ----------------------------------------------------------
 
   required_keys <- c("results", "best_config", "rank_metric", "split",
-                     "n_train", "n_test", "runtime_secs", "timestamp")
+                     "n_train", "n_test", "runtime_secs", "timestamp",
+                     "parallelize_over")
 
   missing_keys <- setdiff(required_keys, names(ev))
 
@@ -866,6 +867,18 @@ validate_horizons_eval <- function(x) {
 
     key_list <- paste(missing_keys, collapse = ", ")
     errors   <- c(errors, cli::format_inline("Metadata keys missing from {.field evaluation}: {key_list}"))
+
+  }
+
+  ## parallelize_over (the axis actually used; "sequential" when none) -------
+
+  if (!is.null(ev$parallelize_over) &&
+      (!is.character(ev$parallelize_over) || length(ev$parallelize_over) != 1 ||
+       !ev$parallelize_over %in% c("sequential", "configs", "resamples"))) {
+
+    errors <- c(errors, cli::format_inline(
+      "{.field parallelize_over} must be one of {.val {c('sequential', 'configs', 'resamples')}}"
+    ))
 
   }
 
