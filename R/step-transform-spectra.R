@@ -131,6 +131,15 @@ bake.step_transform_spectra <- function(object, new_data, ...) {
 
   spectral_matrix <- as.matrix(new_data[, object$columns])
 
+  ## Failures are recorded, not swallowed. The fallback below is an all-NA row
+  ## built to `length(object$trained_columns)`, which means the length check
+  ## further down cannot detect it — so without this accounting a malformed
+  ## spectrum returns NA predictions at predict time, or injects NA rows into
+  ## the model matrix at train time, with no signal either way. See #52.
+
+  failed_rows <- integer(0)
+  failure_msg <- NULL
+
   transformed_list <- lapply(seq_len(nrow(spectral_matrix)), function(i) {
 
     tryCatch(
@@ -140,11 +149,40 @@ bake.step_transform_spectra <- function(object, new_data, ...) {
         window_size   = object$window_size
       ),
       error = function(e) {
+
+        failed_rows <<- c(failed_rows, i)
+        if (is.null(failure_msg)) failure_msg <<- conditionMessage(e)
         rep(NA_real_, length(object$trained_columns))
+
       }
     )
 
   })
+
+  ## A non-finite input produces no error but an all-NA output, so check the
+  ## results rather than trusting that a failure raised a condition.
+
+  na_rows <- which(vapply(transformed_list,
+                          function(x) all(is.na(x)),
+                          logical(1)))
+
+  bad_rows <- sort(unique(c(failed_rows, na_rows)))
+
+  if (length(bad_rows) > 0) {
+
+    shown <- paste(utils::head(bad_rows, 10), collapse = ", ")
+    if (length(bad_rows) > 10) shown <- paste0(shown, ", ...")
+
+    rlang::warn(paste0(
+      "step_transform_spectra: ", length(bad_rows), " of ",
+      nrow(spectral_matrix), " spectra produced no usable output and were ",
+      "returned as NA (rows: ", shown, ").",
+      if (!is.null(failure_msg)) paste0(" First error: ", failure_msg) else
+        " No error was raised, so the input was likely non-finite.",
+      " Downstream predictions for these rows are NA."
+    ))
+
+  }
 
   ## Verify all rows produced same length -----------------------------------
 
