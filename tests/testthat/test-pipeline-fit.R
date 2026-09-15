@@ -596,6 +596,61 @@ describe("fit() - n_best exceeds available successes", {
 })
 
 
+## =========================================================================
+## final_bayesian_iter reaches the re-tune (#46)
+## =========================================================================
+
+describe("fit() - final_bayesian_iter", {
+
+  ## Capture what fit() hands to fit_single_config() without running a fit.
+  capture_final_iter <- function(obj) {
+
+    captured <- NULL
+
+    testthat::with_mocked_bindings(
+      fit_single_config = function(...) {
+        captured <<- list(...)$final_bayesian_iter
+        list(config_id = list(...)$config_row$config_id, status = "failed",
+             degraded = NA, degraded_reason = NA_character_,
+             fitted_workflow = NULL, best_params = NULL,
+             cv_predictions = NULL, test_metrics = NULL, cv_metrics = NULL,
+             uq = NULL, ad = NULL, warnings = NULL,
+             error_message = "mocked", runtime_secs = 0)
+      },
+      tryCatch(
+        fit(obj, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE,
+            verbose = FALSE),
+        error = function(e) NULL
+      ),
+      .package = "horizons"
+    )
+
+    captured
+
+  }
+
+  obj <- make_fit_object(n = 60, n_configs = 1)
+
+  it("passes configure()'s final_bayesian_iter, not the screening bayesian_iter", {
+
+    obj$config$tuning$bayesian_iter       <- 0L
+    obj$config$tuning$final_bayesian_iter <- 7L
+
+    expect_identical(capture_final_iter(obj), 7L)
+
+  })
+
+  it("falls back to the package default when the field is absent (older objects)", {
+
+    obj$config$tuning$final_bayesian_iter <- NULL
+
+    expect_identical(capture_final_iter(obj), DEFAULT_FINAL_BAYES_ITER)
+
+  })
+
+})
+
+
 describe("fit() - seed reproducibility", {
 
   obj <- make_fit_object(n = 60, n_configs = 1)
