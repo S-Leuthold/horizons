@@ -21,34 +21,84 @@
 #'   grid-search RPD below this value skip Bayesian optimization but still
 #'   receive test-set metrics from grid-search best. Default 1.0 (the
 #'   "no better than the mean" line).
-#' @param workers Integer. Total number of cores to use. Default 1L
-#'   (sequential). When `workers > 1`, evaluate() automatically splits cores
-#'   between outer parallelism (across configs) and inner parallelism (CV
-#'   folds). The split is: `inner = min(workers, cv_folds)`, `outer =
-#'   floor(workers / inner)`. evaluate() manages its own `future::plan()` and
-#'   restores the previous plan on exit.
+#' @param allow_par Logical. If `TRUE`, dispatch onto whatever
+#'   `future::plan()` the caller has registered. If no usable backend is
+#'   registered (fewer than two workers), warns naming the plan it found and
+#'   runs sequentially. `FALSE` (the default) runs in the calling process and
+#'   never inspects the plan. `evaluate()` never registers or alters a plan.
+#' @param parallelize_over Character. Which axis of the work the registered
+#'   plan is applied to; ignored when `allow_par = FALSE`. See the
+#'   Parallelism section. Default `"auto"`.
 #' @param output_dir Character or NULL. If provided, checkpoint results to
-#'   disk after each config. Enables resuming interrupted runs. Default NULL
-#'   (no checkpointing).
+#'   disk after each config. Enables resuming interrupted runs. Required when
+#'   configs are dispatched to workers. Default NULL (no checkpointing).
 #' @param seed Integer. Random seed for train/test split and CV folds.
 #'   Default 307L.
 #' @param verbose Logical. Print progress tree to console. Default TRUE.
+#' @param workers Deprecated (2026-09-14) and ignored, with a warning. The
+#'   earlier design took a core count and auto-split it into outer and inner
+#'   levels while managing its own nested plan. Register a plan and use
+#'   `allow_par` with `parallelize_over` instead.
+#'
+#' @section Parallelism:
+#' The user owns the backend and the topology; `evaluate()` owns only which
+#' axis the plan is applied to.
+#'
+#' * `"configs"`: one future per config on the registered plan, with tune
+#'   running sequentially inside each. The per-worker payload is one config's
+#'   worth and tune ships nothing to inner workers. The mode for a large
+#'   config grid on a many-core machine.
+#' * `"resamples"`: configs run sequentially; inside each, tune parallelises
+#'   the CV folds on the registered plan. Useful width is capped at
+#'   `cv_folds`. The mode for a few cores and a short grid.
+#' * `"auto"` (default): `"configs"` when the number of configs is at least
+#'   `cv_folds`, otherwise `"resamples"`. Derived from the measured cost
+#'   model: configs wins whenever `n_configs` exceeds the effective inner
+#'   speedup, which is bounded by `cv_folds`, and always once it exceeds the
+#'   worker count, so the worker count cancels.
+#'
+#' A nested plan (configs across an outer level, folds across an inner one)
+#' is not built or endorsed by the package in this version. A caller who
+#' wants one registers it with `future::plan(list(...))` and uses
+#' `"configs"`.
+#'
+#' ```
+#' # Laptop: four cores, parallelise the folds inside each config.
+#' future::plan(future::multisession, workers = 4)
+#' hd |> evaluate(allow_par = TRUE, parallelize_over = "resamples")
+#'
+#' # Thirty cores, one config per worker, checkpointed.
+#' future::plan(future::multisession, workers = 30)
+#' hd |> evaluate(allow_par = TRUE, output_dir = "output/run")
+#' ```
+#'
+#' Before dispatch, BLAS, OpenMP, data.table and ranger threads are pinned to
+#' one in the calling process (via `RhpcBLASctl` when installed) and restored
+#' on exit. Configs are dispatched to a top-level worker that loads the
+#' *installed* package, so parallel dispatch refuses to run under
+#' `devtools::load_all()`.
 #'
 #' @return A `horizons_eval` object (inherits from `horizons_data`) with
 #'   `evaluation$results`, `evaluation$best_config`, `evaluation$split`, and
-#'   associated metadata populated.
+#'   associated metadata populated, including `evaluation$parallelize_over`
+#'   (the axis actually used) and `evaluation$workers` (the worker count the
+#'   registered plan offered; 1 when sequential).
 #'
 #' @export
 evaluate <- function(x,
-                     metric          = "rpd",
-                     prune           = TRUE,
-                     prune_threshold = 1.0,
-                     workers         = 1L,
-                     output_dir      = NULL,
-                     seed            = 307L,
-                     verbose         = TRUE) {
+                     metric           = "rpd",
+                     prune            = TRUE,
+                     prune_threshold  = 1.0,
+                     allow_par        = FALSE,
+                     parallelize_over = "auto",
+                     output_dir       = NULL,
+                     seed             = 307L,
+                     verbose          = TRUE,
+                     workers          = NULL) {
 
   start_time <- Sys.time()
+
+  deprecate_workers_arg(workers)
 
   ## -----------------------------------------------------------------------
   ## Step 1: Gate checks
@@ -122,25 +172,40 @@ evaluate <- function(x,
   }
 
   ## -----------------------------------------------------------------------
-  ## Step 3b: Validate workers + compute parallelism split
+  ## Step 3b: Resolve the parallel axis against the registered plan
   ## -----------------------------------------------------------------------
+  ## The user owns the backend; evaluate() only chooses the axis. The
+  ## resolver is pure; the backend check reads the plan and downgrades to
+  ## sequential, with a warning, when there is nothing to run on.
 
-  if (!is.numeric(workers) || length(workers) != 1 || workers < 1 ||
-      workers != as.integer(workers)) {
+  axis <- resolve_parallel_axis(parallelize_over, allow_par,
+                                n_configs = nrow(configs), cv_folds = cv_folds)
 
-    rlang::abort("`workers` must be a positive integer.")
+  if (allow_par && !check_parallel_backend("evaluate()")) {
+
+    axis <- resolve_parallel_axis(parallelize_over, allow_par = FALSE,
+                                  n_configs = nrow(configs), cv_folds = cv_folds)
 
   }
 
-  workers <- as.integer(workers)
-  inner   <- min(workers, cv_folds)
-  outer   <- max(1L, as.integer(floor(workers / inner)))
+  plan_label    <- if (axis$axis == "sequential") "sequential" else registered_plan_label()
+  plan_workers  <- if (axis$axis == "sequential") 1L else registered_workers()
 
-  if (outer > 1L && is.null(output_dir)) {
+  if (axis$axis != "sequential") {
+
+    warn_if_mirai_preferred()
+
+    unpin_threads <- pin_parent_threads()
+    on.exit(unpin_threads(), add = TRUE)
+
+  }
+
+  if (axis$dispatch_configs && is.null(output_dir)) {
 
     rlang::abort(paste0(
-      "Parallel evaluation (workers > cv_folds) requires `output_dir` ",
-      "for checkpoint safety. Provide an output directory or reduce workers."
+      "Dispatching configs to workers (parallelize_over = \"", axis$axis,
+      "\") requires `output_dir` for checkpoint safety. ",
+      "Provide an output directory or use parallelize_over = \"resamples\"."
     ))
 
   }
@@ -237,6 +302,12 @@ evaluate <- function(x,
 
       }
 
+      ## Drop rows scored under a different regime (SCORING_SCHEMA): their
+      ## cv_* panel is not comparable to what this run will produce, and
+      ## ranking them together would make best_config an artifact of which
+      ## regime scored each config.
+      loaded <- drop_foreign_schema_rows(loaded, verbose = verbose)
+
       if (nrow(loaded) > 0) {
 
         for (j in seq_len(nrow(loaded))) {
@@ -253,16 +324,39 @@ evaluate <- function(x,
 
     if (length(per_config_files) > 0) {
 
+      n_foreign <- 0L
+
       for (f in per_config_files) {
 
         row <- tryCatch(readRDS(f), error = function(e) NULL)
 
-        if (!is.null(row) && row$config_id %in% configs$config_id &&
+        if (is.null(row)) next
+
+        if (!identical(checkpoint_row_schema(row), SCORING_SCHEMA)) {
+
+          n_foreign <- n_foreign + 1L
+          next
+
+        }
+
+        if (row$config_id %in% configs$config_id &&
             !row$config_id %in% names(checkpoint_results)) {
 
           checkpoint_results[[ row$config_id ]] <- row
 
         }
+
+      }
+
+      if (n_foreign > 0 && verbose) {
+
+        cat(paste0(
+          "\u2502  ", cli::col_yellow(
+            "Dropped ", n_foreign, " per-config checkpoint",
+            if (n_foreign > 1) "s" else "",
+            " scored under an earlier scoring schema (will be re-evaluated)"
+          ), "\n"
+        ))
 
       }
 
@@ -314,10 +408,14 @@ evaluate <- function(x,
                                                 " from checkpoint)") else "",
                "\n"))
 
-    if (outer > 1L) {
+    if (axis$axis != "sequential") {
 
-      cat(paste0("\u2502  Workers: ", workers,
-                 " (", outer, " outer \u00D7 ", inner, " inner)\n"))
+      workers_label <- if (is.na(plan_workers)) "unbounded" else {
+        paste0(plan_workers, " worker", if (plan_workers != 1) "s" else "")
+      }
+
+      cat(paste0("\u2502  Parallel: over ", axis$axis, " on ", plan_label,
+                 " (", workers_label, ")\n"))
 
     }
 
@@ -326,10 +424,40 @@ evaluate <- function(x,
   }
 
   ## -----------------------------------------------------------------------
+  ## Step 7b: Manifest for monitor_evaluate()
+  ## -----------------------------------------------------------------------
+  ## Written on EVERY run with an output_dir, whichever axis, and refreshed
+  ## each time, so the monitor can watch a resamples-axis or sequential run
+  ## and never reports a stale axis from an earlier run in the same
+  ## directory. Schema 2 (2026-09-15) records the axis and the user's plan.
+
+  if (!is.null(output_dir)) {
+
+    manifest <- list(
+      schema_version               = 2L,
+      n_total                      = n_total,
+      n_pending                    = n_pending,
+      config_ids                   = configs$config_id,
+      start_time                   = start_time,
+      metric                       = metric,
+      cv_folds                     = cv_folds,
+      allow_par                    = allow_par,
+      parallelize_over_requested   = parallelize_over,
+      axis                         = axis$axis,
+      tune_parallel_over_requested = axis$tune_parallel_over,
+      plan                         = plan_label,
+      workers                      = plan_workers,
+      scoring_schema               = SCORING_SCHEMA
+    )
+    saveRDS(manifest, file.path(output_dir, "eval_manifest.rds"))
+
+  }
+
+  ## -----------------------------------------------------------------------
   ## Step 8: Config loop (sequential or parallel)
   ## -----------------------------------------------------------------------
 
-  if (outer <= 1L) {
+  if (!axis$dispatch_configs) {
 
     ## -------------------------------------------------------------------
     ## Sequential path — identical to pre-workers behavior
@@ -394,7 +522,8 @@ evaluate <- function(x,
         bayesian_iter   = tuning$bayesian_iter,
         prune           = prune,
         prune_threshold = prune_threshold,
-        allow_par       = (inner > 1L),
+        allow_par       = axis$tune_allow_par,
+        parallel_over   = axis$tune_parallel_over %||% "resamples",
         seed            = seed
       )
 
@@ -494,33 +623,12 @@ evaluate <- function(x,
     ## Parallel path — furrr::future_map() across configs
     ## -------------------------------------------------------------------
 
-    ## Write manifest for monitor_evaluate()
-    manifest <- list(
-      n_total     = n_total,
-      n_pending   = n_pending,
-      config_ids  = configs$config_id,
-      start_time  = start_time,
-      workers     = workers,
-      outer       = outer,
-      inner       = inner,
-      metric      = metric,
-      cv_folds    = cv_folds
-    )
-    saveRDS(manifest, file.path(output_dir, "eval_manifest.rds"))
-
-    ## Save and restore future plan on exit
-    old_plan <- future::plan()
-    on.exit(future::plan(old_plan), add = TRUE)
-
-    ## Set up nested plan: outer (configs) × inner (CV folds)
-    future::plan(list(
-      future::tweak(future::multisession, workers = outer),
-      future::tweak(future::multisession, workers = inner)
-    ))
-
-    ## Increase globals size limit for serialized data (restore on exit)
+    ## The plan is the user's: evaluate() neither sets nor restores one.
+    ## The globals ceiling is declared (EVAL_WORKER_PAYLOAD_LIMIT, from the
+    ## measured payload) so a payload regression aborts with future's clear
+    ## "size of the globals" error rather than R's long-vector message.
     old_max_size <- getOption("future.globals.maxSize")
-    options(future.globals.maxSize = 4 * 1024^3)
+    options(future.globals.maxSize = EVAL_WORKER_PAYLOAD_LIMIT)
     on.exit(options(future.globals.maxSize = old_max_size), add = TRUE)
 
     if (verbose) {
@@ -574,7 +682,6 @@ evaluate <- function(x,
       bayesian_iter   = tuning$bayesian_iter,
       prune           = prune,
       prune_threshold = prune_threshold,
-      allow_par       = (inner > 1L),
       seed            = seed,
       checkpoint_dir  = checkpoint_dir,
       pkg_version     = as.character(utils::packageVersion("horizons"))
@@ -666,7 +773,8 @@ evaluate <- function(x,
     split        = split,
     n_train      = n_train,
     n_test       = n_test,
-    workers      = workers,
+    workers      = plan_workers,
+    parallelize_over = axis$axis,
     runtime_secs = total_runtime,
     timestamp    = Sys.time()
   )
@@ -715,6 +823,64 @@ evaluate <- function(x,
   }
 
   x
+
+}
+
+## ---------------------------------------------------------------------------
+## Checkpoint scoring schema
+## ---------------------------------------------------------------------------
+
+#' Scoring schema of a checkpoint row
+#'
+#' Rows written before the column existed are schema 1 (see `SCORING_SCHEMA`
+#' in `R/constants.R`).
+#' @param row One-row result tibble.
+#' @return Integer schema.
+#' @keywords internal
+#' @noRd
+checkpoint_row_schema <- function(row) {
+
+  s <- row$scoring_schema
+
+  if (is.null(s) || length(s) != 1 || is.na(s)) return(1L)
+
+  as.integer(s)
+
+}
+
+#' Drop result rows scored under a different regime
+#'
+#' @param results Result rows (possibly from an older checkpoint).
+#' @param verbose Print the drop count in the tree.
+#' @return `results` restricted to the current `SCORING_SCHEMA`.
+#' @keywords internal
+#' @noRd
+drop_foreign_schema_rows <- function(results, verbose = TRUE) {
+
+  if (nrow(results) == 0) return(results)
+
+  schemas <- if ("scoring_schema" %in% names(results)) {
+    ifelse(is.na(results$scoring_schema), 1L, as.integer(results$scoring_schema))
+  } else {
+    rep(1L, nrow(results))
+  }
+
+  keep      <- schemas == SCORING_SCHEMA
+  n_foreign <- sum(!keep)
+
+  if (n_foreign > 0 && verbose) {
+
+    cat(paste0(
+      "\u2502  ", cli::col_yellow(
+        "Dropped ", n_foreign, " checkpoint row",
+        if (n_foreign > 1) "s" else "",
+        " scored under an earlier scoring schema (will be re-evaluated)"
+      ), "\n"
+    ))
+
+  }
+
+  results[keep, , drop = FALSE]
 
 }
 
@@ -782,7 +948,12 @@ rank_configs_by_cv <- function(results, metric) {
 
   }
 
-  results[order(vals, decreasing = metric %in% HIGHER_BETTER_METRICS), , drop = FALSE]
+  ## Explicit tie-break on config_id so a fresh run, a resumed run (whose row
+  ## order follows the checkpoint directory) and monitor_evaluate() all name
+  ## the same winner when two configs tie.
+  key <- if (metric %in% HIGHER_BETTER_METRICS) -vals else vals
+
+  results[order(key, results$config_id), , drop = FALSE]
 
 }
 
@@ -817,8 +988,9 @@ rank_configs_by_cv <- function(results, metric) {
 #' @param shared List of worker inputs assembled by `evaluate()`, whose keys are
 #'   fixed by `SHARED_ARG_NAMES` in `R/constants.R` and asserted on entry:
 #'   `data`, `resample_idx` (from `resample_indices()`), `configs`, `role_map`,
-#'   `grid_size`, `bayesian_iter`, `prune`, `prune_threshold`, `allow_par`,
-#'   `seed`, `checkpoint_dir`, and `pkg_version`.
+#'   `grid_size`, `bayesian_iter`, `prune`, `prune_threshold`, `seed`,
+#'   `checkpoint_dir`, and `pkg_version`. There is no `allow_par`: on the
+#'   configs axis tune always runs sequentially inside the worker.
 #'
 #' @return A one-row result tibble from [evaluate_single_config()].
 #' @keywords internal
@@ -859,20 +1031,16 @@ evaluate_config_worker <- function(config_i, shared) {
 
   }
 
-  ## Pin all threading libraries to 1 thread inside each worker
-  Sys.setenv(
-    OMP_NUM_THREADS        = 1,
-    OPENBLAS_NUM_THREADS   = 1,
-    MKL_NUM_THREADS        = 1,
-    VECLIB_MAXIMUM_THREADS = 1,
-    BLAS_NUM_THREADS       = 1,
-    LAPACK_NUM_THREADS     = 1
-  )
-  options(mc.cores = 1L)
-
+  ## Thread pinning that works happens in the PARENT before dispatch
+  ## (pin_parent_threads()): OpenBLAS reads its thread count when it loads,
+  ## so setting OPENBLAS_NUM_THREADS here, after the library is loaded in
+  ## this worker, changed nothing when measured (2026-09-15). What can be
+  ## set at runtime in the worker is set here. future already sets
+  ## mc.cores = 1 in every multisession worker.
   if (requireNamespace("data.table", quietly = TRUE)) {
-    data.table::setDTthreads(1)
+    data.table::setDTthreads(1L)
   }
+  options(ranger.num.threads = 1L)
 
   cfg <- shared$configs[config_i, ]
 
@@ -889,7 +1057,7 @@ evaluate_config_worker <- function(config_i, shared) {
     bayesian_iter   = shared$bayesian_iter,
     prune           = shared$prune,
     prune_threshold = shared$prune_threshold,
-    allow_par       = shared$allow_par,
+    allow_par       = FALSE,     # configs axis: tune runs sequentially inside
     seed            = shared$seed
   )
 

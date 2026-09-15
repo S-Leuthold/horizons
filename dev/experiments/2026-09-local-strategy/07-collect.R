@@ -18,8 +18,9 @@ file_arg <- grep("^--file=", commandArgs(), value = TRUE)
 exp_dir  <- if (length(file_arg)) dirname(normalizePath(sub("^--file=", "", file_arg[1]))) else getwd()
 
 source(file.path(exp_dir, "00-config.R"))
-suppressPackageStartupMessages(devtools::load_all(PKG_DIR, quiet = TRUE))
+suppressPackageStartupMessages(library(horizons))
 source(file.path(exp_dir, "helpers.R"))
+require_fresh_install(PKG_DIR)
 exp_dirs()
 
 A_name <- if (length(from_arg)) from_arg else "A_global"

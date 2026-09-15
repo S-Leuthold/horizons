@@ -27,10 +27,11 @@ exp_dir  <- if (length(file_arg)) dirname(normalizePath(sub("^--file=", "", file
 
 source(file.path(exp_dir, "00-config.R"))
 suppressPackageStartupMessages({
-  devtools::load_all(PKG_DIR, quiet = TRUE)
+  library(horizons)
   library(resemble)
 })
 source(file.path(exp_dir, "helpers.R"))
+require_fresh_install(PKG_DIR)
 exp_dirs()
 
 if (!length(props)) props <- EXP_PROPERTIES$property

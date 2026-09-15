@@ -33,6 +33,7 @@ Imports:
     glmnet,
     furrr,
     future,
+    future.apply,
     glue,
     hardhat,
     opusreader2,
@@ -74,6 +75,7 @@ Suggests:
     pls,
     spectrolab,
     RhpcBLASctl,
+    mirai,
     RColorBrewer,
     car,
     shapr,
@@ -93,6 +95,7 @@ Collate:
     'utils-models.R'
     'utils-recipes.R'
     'utils-resamples.R'
+    'utils-parallel.R'
     'step-transform-spectra.R'
     'step-select-boruta.R'
     'step-select-cars.R'

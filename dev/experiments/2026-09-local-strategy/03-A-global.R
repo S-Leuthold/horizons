@@ -13,13 +13,9 @@
 ##               the "A_pilot" checkpoint. Used to time one fold before launch.
 
 Sys.setenv(HORIZONS_THREAD_CONTROL = "TRUE")   # must precede horizons loading
-## evaluate()'s nested multisession plan (outer configs x inner folds) trips
-## parallelly's maxWorkers.localhost hard limit, because future sets
-## mc.cores = 1 inside each outer worker (DOGFOOD #10). The env var form is
-## inherited by the workers; the option covers this process.
-Sys.setenv(R_PARALLELLY_MAXWORKERS_LOCALHOST = "Inf")
-options(parallelly.maxWorkers.localhost = Inf,
-        future.globals.maxSize = 8 * 1024^3)
+## 2026-09-15: evaluate() no longer builds a nested plan or needs the
+## parallelly / future.globals.maxSize overrides that the old design required.
+## The plan registered below is the whole parallel configuration.
 
 args     <- commandArgs(trailingOnly = TRUE)
 flags    <- args[startsWith(args, "--")]
@@ -31,24 +27,22 @@ file_arg <- grep("^--file=", commandArgs(), value = TRUE)
 exp_dir  <- if (length(file_arg)) dirname(normalizePath(sub("^--file=", "", file_arg[1]))) else getwd()
 
 source(file.path(exp_dir, "00-config.R"))
-suppressPackageStartupMessages(devtools::load_all(PKG_DIR, quiet = TRUE))
+suppressPackageStartupMessages(library(horizons))
 source(file.path(exp_dir, "helpers.R"))
+require_fresh_install(PKG_DIR)
 exp_dirs()
 
 if (!length(props)) props <- EXP_PROPERTIES$property
 workers  <- min(if (length(w_arg)) as.integer(w_arg) else MAX_WORKERS, MAX_WORKERS)
 strategy <- if (pilot) "A_pilot" else "A_global"
 
-## Parallelism (DOGFOOD #10, #12, #13): evaluate()'s own nested plan breaks at
-## this scale, and its workers <= cv_folds branch never registers a plan, so
-## we register one here and call evaluate(workers = cv_folds). That takes the
-## sequential-over-configs branch with allow_par = TRUE, and tune then runs
-## folds x grid (25 tasks) on our plan. fit(allow_par = TRUE) uses the same
-## plan. Per-task globals are one rsplit + workflow, well under the 2 GB
-## serialization limit.
+## Parallelism (M2/M3, 2026-09-15): the user owns the backend. This plan is
+## the whole parallel configuration; evaluate(allow_par = TRUE) dispatches one
+## config per worker (parallelize_over = "auto" -> "configs" for a property
+## run) and fit(allow_par = TRUE) parallelises folds on the same plan.
+## --workers=N is the plan size, capped by MAX_WORKERS for memory.
 future::plan(future::multisession, workers = workers)
 on.exit(future::plan(future::sequential), add = TRUE)
-EVAL_WORKERS <- EXP_CONFIG$cv_folds
 
 snap <- load_snapshot()
 msg("[%s] snapshot %d samples; properties: %s; workers %d",
@@ -77,11 +71,13 @@ for (property in props) {
   )
 
   eval_dir <- file.path(CHECKPOINT_DIR, paste0(property, "-", strategy, "-eval"))
-  msg("[%s] %s: evaluate() over %d configs; plan = multisession(%d), evaluate(workers = %d)",
-      strategy, property, nrow(hz$config$configs), workers, EVAL_WORKERS)
+  msg("[%s] %s: evaluate() over %d configs; plan = multisession(%d), parallelize_over = auto",
+      strategy, property, nrow(hz$config$configs), workers)
   t_eval <- system.time(
-    hz <- eval_exp(hz, eval_dir, workers = EVAL_WORKERS)   # prune = FALSE, see helpers.R
+    hz <- eval_exp(hz, eval_dir)   # prune = FALSE, see helpers.R
   )
+  msg("[%s] %s: axis used = %s on %d worker(s)", strategy, property,
+      hz$evaluation$parallelize_over, hz$evaluation$workers)
   win <- winning_config(hz)
   msg("[%s] %s: evaluate() done in %.1f min; winner %s (%s + %s)", strategy, property,
       t_eval[["elapsed"]] / 60, win$config_id, win$model, win$preprocessing)

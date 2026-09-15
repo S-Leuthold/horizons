@@ -24,7 +24,14 @@
 #'   shrinkage covariance + held-out OOD thresholds) per config, so `predict()`
 #'   can emit `.ad_distance` / `.ad_flag`. Shares the UQ calibration split.
 #'   Default TRUE.
-#' @param allow_par Logical. Enable parallel CV folds. Default FALSE.
+#' @param allow_par Logical. If `TRUE`, tune parallelises the CV folds
+#'   inside each member's re-tune and OOF pass on whatever `future::plan()`
+#'   the caller has registered; `fit()` never registers a plan. If the plan
+#'   offers fewer than two workers, warns naming it and runs sequentially.
+#'   `fit()` parallelises folds only in this version; a configs axis across
+#'   the `n_best` members is gated on the fitted-object memory contract (a
+#'   fitted object is hundreds of MB and would cross to workers). Default
+#'   FALSE.
 #' @param seed Integer. Random seed for CV folds and, through
 #'   `fit_split_seed()` (`seed + 1L`), for Split F. The offset keeps Split F
 #'   independent of `evaluate()`'s split when both are called with the same
@@ -68,6 +75,32 @@ fit <- function(x,
     rlang::abort(
       "No evaluation results found. Run `evaluate()` before `fit()`."
     )
+
+  }
+
+  ## -----------------------------------------------------------------------
+  ## Step 0b: Parallel backend
+  ## -----------------------------------------------------------------------
+  ## The user owns the backend. Confirm there is one to run on, pin threads
+  ## in this process before tune spawns anything, and never touch the plan.
+
+  if (!rlang::is_bool(allow_par)) {
+
+    rlang::abort("`allow_par` must be TRUE or FALSE.")
+
+  }
+
+  if (allow_par) {
+
+    allow_par <- check_parallel_backend("fit()")
+
+    if (allow_par) {
+
+      warn_if_mirai_preferred()
+      unpin_threads <- pin_parent_threads()
+      on.exit(unpin_threads(), add = TRUE)
+
+    }
 
   }
 

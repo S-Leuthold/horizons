@@ -14,7 +14,8 @@ fit_tuned_meta_learner(
   spec,
   grid,
   extract_weights,
-  seed = DEFAULT_ENSEMBLE_SEED
+  seed = DEFAULT_ENSEMBLE_SEED,
+  allow_par = FALSE
 )
 }
 \arguments{
@@ -40,6 +41,11 @@ fit_tuned_meta_learner(
 
 \item{seed}{Integer. Seed set immediately before the CV folds are drawn, so
 the tuning resamples and the genuine meta-OOF are reproducible.}
+
+\item{allow_par}{Logical. From \code{ensemble(allow_par = )}; both tune calls
+build their control through \code{meta_tune_control()} with it, so the
+meta-learner never dispatches onto a registered plan unless asked.
+Default \code{FALSE}.}
 }
 \value{
 The ensemble contract list from \code{\link[=build_ensemble_contract]{build_ensemble_contract()}}.

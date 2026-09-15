@@ -4,7 +4,8 @@
 ##
 ## Source order in every strategy script:
 ##   Sys.setenv(HORIZONS_THREAD_CONTROL = "TRUE")   # before horizons loads
-##   source("00-config.R"); devtools::load_all(PKG_DIR); source("helpers.R")
+##   source("00-config.R"); library(horizons); source("helpers.R"); require_fresh_install(PKG_DIR)
+##   (the INSTALLED package: evaluate()'s configs axis refuses to dispatch under load_all())
 ##
 ## Everything horizons can do, horizons does (see README.md, "Dogfooding").
 ## The functions here are glue: snapshot access, split bookkeeping, the
@@ -153,9 +154,31 @@ config_set_of <- function(win) {
 ## after 90 minutes of tuning even though all four configs scored RPD 7.0-9.8
 ## on the original scale. With bayesian_iter = 0 there is nothing for pruning
 ## to skip anyway, so it can only mislabel.
-eval_exp <- function(hz, output_dir, workers = EXP_CONFIG$cv_folds, verbose = TRUE) {
-  evaluate(hz, metric = "rpd", prune = FALSE, workers = workers,
+## Parallelism (2026-09-15, M2/M3): the scripts register the plan; evaluate()
+## only chooses the axis. "auto" is configs when there are at least cv_folds
+## configs (the property-level runs), resamples otherwise (small clusters).
+eval_exp <- function(hz, output_dir, parallelize_over = "auto", verbose = TRUE) {
+  evaluate(hz, metric = "rpd", prune = FALSE,
+           allow_par = future::nbrOfWorkers() > 1, parallelize_over = parallelize_over,
            output_dir = output_dir, seed = SEED, verbose = verbose)
+}
+
+## The scripts run the INSTALLED horizons, because evaluate()'s configs axis
+## dispatches to workers that load the installed package and refuses to run
+## under devtools::load_all(). This guard stops a script from silently using
+## a build older than the source tree it sits next to.
+require_fresh_install <- function(pkg_dir) {
+  desc <- system.file("DESCRIPTION", package = "horizons")
+  if (!nzchar(desc)) stop("horizons is not installed; run R CMD INSTALL ", pkg_dir)
+  built    <- file.mtime(desc)
+  src      <- list.files(file.path(pkg_dir, "R"), full.names = TRUE)
+  newest   <- max(file.mtime(src))
+  if (newest > built) {
+    stop(sprintf(paste0("Installed horizons (built %s) is older than %s (modified %s). ",
+                        "Reinstall before running: R CMD INSTALL %s"),
+                 format(built), file.path(pkg_dir, "R"), format(newest), pkg_dir))
+  }
+  invisible(TRUE)
 }
 
 ## Run one cluster's chain, returning NULL (not aborting) if it fails.

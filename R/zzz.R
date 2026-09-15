@@ -65,7 +65,12 @@ utils::globalVariables(c(".metric", ".estimate"))
   # The user is responsible for setting their own parallel configuration
   # We don't enforce any thread limits or parallel settings
 
-  # Optional: Check if user explicitly wants thread control help
+  # Optional: Check if user explicitly wants thread control help.
+  # The environment variables are effective here because .onLoad runs
+  # before any engine loads OpenBLAS. During a parallel run the mechanism
+  # that matters is pin_parent_threads() (R/utils-parallel.R), which
+  # evaluate() and fit() call before dispatch and which works at runtime
+  # via RhpcBLASctl.
   if (Sys.getenv("HORIZONS_THREAD_CONTROL", "FALSE") == "TRUE") {
 
     # Only if explicitly requested, set conservative defaults
@@ -75,10 +80,10 @@ utils::globalVariables(c(".metric", ".estimate"))
       MKL_NUM_THREADS        = "1"
     )
 
-    options(
-      ranger.num.threads = 1,
-      xgboost.nthread    = 1
-    )
+    # ranger reads this option; xgboost has no such option (the former
+    # `xgboost.nthread` entry here was dead) and parsnip's translate() emits
+    # nthread = 1 for the xgboost engine.
+    options(ranger.num.threads = 1)
 
   }
 

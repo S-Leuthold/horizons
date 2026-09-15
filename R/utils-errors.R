@@ -251,6 +251,7 @@ create_failed_result <- function(config_id, error = NULL) {
     cv_ccc        = NA_real_,
     cv_rpd        = NA_real_,
     cv_mae        = NA_real_,
+    scoring_schema = SCORING_SCHEMA,
     best_params   = list(NULL),
     error_message = error_msg,
     warnings      = list(NULL),
