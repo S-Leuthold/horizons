@@ -335,7 +335,11 @@ fit <- function(x,
       train_data          = train_Fit,
       role_map            = role_map,
       best_params_eval    = best_params_eval,
-      final_bayesian_iter = tuning$bayesian_iter,
+      ## configure() stores the screening and the final re-tune budgets
+      ## separately; fit() used to pass the screening one here, so the
+      ## user-facing `final_bayesian_iter` did nothing (#46). Objects
+      ## configured before that field existed fall back to the constant.
+      final_bayesian_iter = tuning$final_bayesian_iter %||% DEFAULT_FINAL_BAYES_ITER,
       grid_size           = tuning$grid_size,
       compute_uq          = compute_uq,
       compute_ad          = compute_ad,

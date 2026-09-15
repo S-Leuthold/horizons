@@ -96,6 +96,12 @@
 
 ## Bug Fixes
 
+* `fit()` now honours `configure(final_bayesian_iter = )` (#46). It passed
+  the screening budget `bayesian_iter` to the final re-tune instead, so the
+  user-facing knob did nothing; `configure(bayesian_iter = 0,
+  final_bayesian_iter = 25)` re-tuned with zero iterations. Objects
+  configured before the field existed fall back to the package default.
+
 * `evaluate()` and `fit()` now rank configurations on the cross-validated
   metric, not the test-set metric (#50). `evaluation$results` gains six
   columns, `cv_rmse`, `cv_rrmse`, `cv_rsq`, `cv_ccc`, `cv_rpd` and `cv_mae`:
