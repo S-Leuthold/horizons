@@ -208,3 +208,184 @@ ccc <- yardstick::new_numeric_metric(
   fn        = ccc_impl,
   direction = "maximize"
 )
+
+## ===========================================================================
+## tuning_metric_set — the metric set handed to tune, scored on the original
+## response scale
+## ===========================================================================
+
+#' Build the Metric Set Used During Hyperparameter Tuning
+#'
+#' @description
+#' Returns the `yardstick::metric_set()` that `evaluate_single_config()` and
+#' `fit_single_config()` hand to `tune::tune_grid()` and `tune::tune_bayes()`.
+#' For `transformation = "none"` it is the plain set of the requested metrics.
+#' For `"log"`, `"log10"` and `"sqrt"` every metric is wrapped so that the
+#' estimate is back-transformed with [back_transform_predictions()] before it
+#' is compared to the truth, and the whole set is therefore scored on the
+#' original response scale.
+#'
+#' @details
+#' **Why this exists.** `build_recipe()` applies the response transformation
+#' as a recipe step with `skip = TRUE`, which is the correct setting for a
+#' transformation that must not run at predict time. But `skip = TRUE` also
+#' means the step never runs when tune bakes an assessment set, so the
+#' `truth` column tune scores against stays on the original scale while the
+#' model's predictions are on the transformed scale. Without this wrapper every
+#' tuning metric is a cross-scale comparison: `select_best()`, the
+#' `tune_bayes()` acquisition target, and the prune gate all optimise a number
+#' dominated by the scale offset rather than by model quality (issue #49).
+#'
+#' Scoring on the original scale, rather than forward-transforming `truth` to
+#' score on the transformed scale, is a deliberate choice: the leaderboard, the
+#' prune threshold and the reported test metrics are all original-scale, so
+#' hyperparameters are selected on the same quantity that is reported. It also
+#' means selection sees retransformation bias, which a transformed-scale score
+#' never would.
+#'
+#' The structural alternative, transforming the outcome column before the
+#' recipe so tune sees one scale by construction, is the tidymodels-canonical
+#' shape and is deferred until after the JOSS submission because it changes
+#' every reader of `collect_predictions()`, including the conformal residuals.
+#' This factory compensates for the seam; it does not remove it.
+#'
+#' Metric names and directions are preserved exactly (`.metric == "rmse"`
+#' stays `"rmse"`, `rpd` stays `"maximize"`), so callers that select or rank
+#' by name need no change. The first metric in `metrics` is the one
+#' `tune_bayes()` optimises; keep `"rmse"` first where that matters.
+#'
+#' @param transformation Character scalar: `"none"`, `"log"`, `"log10"` or
+#'   `"sqrt"`. The same vocabulary as [back_transform_predictions()]. Unknown
+#'   values abort rather than silently scoring cross-scale.
+#' @param metrics Character vector naming the metrics to include, in order.
+#'   Any of `"rmse"`, `"rrmse"`, `"rsq"`, `"mae"`, `"rpd"`, `"ccc"`.
+#'
+#' @return A `yardstick` metric set.
+#' @seealso [back_transform_predictions()], [compute_original_scale_metrics()]
+#' @keywords internal
+tuning_metric_set <- function(transformation,
+                              metrics = c("rmse", "rrmse", "rsq", "mae", "rpd", "ccc")) {
+
+  ## -------------------------------------------------------------------------
+  ## Validate inputs
+  ## -------------------------------------------------------------------------
+
+  if (length(transformation) != 1 || is.na(transformation)) {
+
+    cli::cli_abort(
+      "{.arg transformation} must be a single non-missing string, not {.val {transformation}}."
+    )
+
+  }
+
+  transformation <- tolower(as.character(transformation))
+  valid_transformations <- c("none", "log", "log10", "sqrt")
+
+  if (!transformation %in% valid_transformations) {
+
+    cli::cli_abort(c(
+      "Unknown {.arg transformation} {.val {transformation}}.",
+      "i" = "Expected one of {.val {valid_transformations}}."
+    ))
+
+  }
+
+  registry <- list(
+    rmse  = list(vec = yardstick::rmse_vec, direction = "minimize", plain = yardstick::rmse),
+    rrmse = list(vec = rrmse_vec,           direction = "minimize", plain = rrmse),
+    rsq   = list(vec = yardstick::rsq_vec,  direction = "maximize", plain = yardstick::rsq),
+    mae   = list(vec = yardstick::mae_vec,  direction = "minimize", plain = yardstick::mae),
+    rpd   = list(vec = rpd_vec,             direction = "maximize", plain = rpd),
+    ccc   = list(vec = ccc_vec,             direction = "maximize", plain = ccc)
+  )
+
+  unknown_metrics <- setdiff(metrics, names(registry))
+
+  if (length(unknown_metrics) > 0) {
+
+    cli::cli_abort(c(
+      "Unknown metric{?s} {.val {unknown_metrics}} in {.arg metrics}.",
+      "i" = "Available: {.val {names(registry)}}."
+    ))
+
+  }
+
+  if (length(metrics) == 0) {
+
+    cli::cli_abort("{.arg metrics} must name at least one metric.")
+
+  }
+
+  ## -------------------------------------------------------------------------
+  ## No transformation: the plain metric set, exactly as before
+  ## -------------------------------------------------------------------------
+
+  if (!needs_back_transformation(transformation)) {
+
+    plain <- lapply(registry[metrics], function(entry) entry$plain)
+    names(plain) <- metrics
+
+    return(do.call(yardstick::metric_set, plain))
+
+  }
+
+  ## -------------------------------------------------------------------------
+  ## Transformed response: wrap each metric to back-transform the estimate
+  ## -------------------------------------------------------------------------
+
+  wrapped <- lapply(metrics, function(name) {
+
+    make_original_scale_metric(
+      name           = name,
+      vec_fn         = registry[[name]]$vec,
+      direction      = registry[[name]]$direction,
+      transformation = transformation
+    )
+
+  })
+
+  names(wrapped) <- metrics
+
+  do.call(yardstick::metric_set, wrapped)
+
+}
+
+## -------------------------------------------------------------------------
+
+#' Wrap a *_vec metric so it scores a back-transformed estimate
+#'
+#' @param name Metric name, used verbatim as `.metric` in the output.
+#' @param vec_fn The `*_vec()` implementation to score with.
+#' @param direction `"minimize"` or `"maximize"`, as `tune` expects.
+#' @param transformation Transformation to invert on the estimate.
+#' @return A `yardstick` numeric metric.
+#' @keywords internal
+#' @noRd
+make_original_scale_metric <- function(name, vec_fn, direction, transformation) {
+
+  ### The estimate arrives on the transformed scale; the truth does not.
+  ### Back-transform the estimate only, then score as usual.
+  scaled_vec <- function(truth, estimate, na_rm = TRUE, ...) {
+
+    estimate <- back_transform_predictions(estimate, transformation, warn = FALSE)
+    vec_fn(truth, estimate, na_rm = na_rm, ...)
+
+  }
+
+  impl <- function(data, truth, estimate, na_rm = TRUE, ...) {
+
+    yardstick::numeric_metric_summarizer(
+      name     = name,
+      fn       = scaled_vec,
+      data     = data,
+      truth    = !!rlang::enquo(truth),
+      estimate = !!rlang::enquo(estimate),
+      na_rm    = na_rm,
+      ...
+    )
+
+  }
+
+  yardstick::new_numeric_metric(fn = impl, direction = direction)
+
+}

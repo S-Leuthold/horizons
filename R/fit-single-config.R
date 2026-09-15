@@ -198,10 +198,11 @@ fit_single_config <- function(config_row,
   ## Step 5: Define tuning metric set
   ## -----------------------------------------------------------------------
 
-  tune_metrics <- yardstick::metric_set(
-    yardstick::rmse,
-    yardstick::rsq
-  )
+  ## Scored on the original response scale, for the same reason as in
+  ## evaluate_single_config(): the skip = TRUE transform never reaches tune's
+  ## assessment set. tune_warmstart_bayes() selects on "rmse" by name, which
+  ## the factory preserves. See #49.
+  tune_metrics <- tuning_metric_set(transformation, metrics = c("rmse", "rsq"))
 
   ## -----------------------------------------------------------------------
   ## Step 6: Warm-start Bayesian re-tuning
