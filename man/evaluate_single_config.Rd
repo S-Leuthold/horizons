@@ -14,6 +14,7 @@ evaluate_single_config(
   prune = FALSE,
   prune_threshold = 100,
   allow_par = FALSE,
+  parallel_over = "resamples",
   seed = 42L
 )
 }
@@ -41,7 +42,16 @@ response scale (tuning metrics are scored there via
 \code{tuning_metric_set()}). Only used when \code{prune = TRUE}.}
 
 \item{allow_par}{Logical. Passed to \code{tune::control_grid()} and
-\code{tune::control_bayes()} to enable parallel CV folds.}
+\code{tune::control_bayes()} to enable parallel CV folds on the registered
+\code{future::plan()}. \code{evaluate()} sets this from the resolved axis: \code{FALSE}
+on the configs axis (tune ships nothing inward), \code{TRUE} on the
+resamples axis.}
+
+\item{parallel_over}{Character. tune's \code{parallel_over}, passed through to
+the control objects. \code{"resamples"} (default) ships one rsplit per task;
+\code{"everything"} ships the whole rset to every task. tune may rewrite the
+value before dispatch (parameter-free configs become \code{"resamples"};
+single-split rsets become \code{"everything"}).}
 
 \item{seed}{Integer. Random seed for reproducibility.}
 }

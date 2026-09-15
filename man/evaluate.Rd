@@ -9,10 +9,12 @@ evaluate(
   metric = "rpd",
   prune = TRUE,
   prune_threshold = 1,
-  workers = 1L,
+  allow_par = FALSE,
+  parallelize_over = "auto",
   output_dir = NULL,
   seed = 307L,
-  verbose = TRUE
+  verbose = TRUE,
+  workers = NULL
 )
 }
 \arguments{
@@ -34,25 +36,36 @@ grid-search RPD below this value skip Bayesian optimization but still
 receive test-set metrics from grid-search best. Default 1.0 (the
 "no better than the mean" line).}
 
-\item{workers}{Integer. Total number of cores to use. Default 1L
-(sequential). When \code{workers > 1}, evaluate() automatically splits cores
-between outer parallelism (across configs) and inner parallelism (CV
-folds). The split is: \code{inner = min(workers, cv_folds)}, \code{outer = floor(workers / inner)}. evaluate() manages its own \code{future::plan()} and
-restores the previous plan on exit.}
+\item{allow_par}{Logical. If \code{TRUE}, dispatch onto whatever
+\code{future::plan()} the caller has registered. If no usable backend is
+registered (fewer than two workers), warns naming the plan it found and
+runs sequentially. \code{FALSE} (the default) runs in the calling process and
+never inspects the plan. \code{evaluate()} never registers or alters a plan.}
+
+\item{parallelize_over}{Character. Which axis of the work the registered
+plan is applied to; ignored when \code{allow_par = FALSE}. See the
+Parallelism section. Default \code{"auto"}.}
 
 \item{output_dir}{Character or NULL. If provided, checkpoint results to
-disk after each config. Enables resuming interrupted runs. Default NULL
-(no checkpointing).}
+disk after each config. Enables resuming interrupted runs. Required when
+configs are dispatched to workers. Default NULL (no checkpointing).}
 
 \item{seed}{Integer. Random seed for train/test split and CV folds.
 Default 307L.}
 
 \item{verbose}{Logical. Print progress tree to console. Default TRUE.}
+
+\item{workers}{Deprecated (2026-09-14) and ignored, with a warning. The
+earlier design took a core count and auto-split it into outer and inner
+levels while managing its own nested plan. Register a plan and use
+\code{allow_par} with \code{parallelize_over} instead.}
 }
 \value{
 A \code{horizons_eval} object (inherits from \code{horizons_data}) with
 \code{evaluation$results}, \code{evaluation$best_config}, \code{evaluation$split}, and
-associated metadata populated.
+associated metadata populated, including \code{evaluation$parallelize_over}
+(the axis actually used) and \code{evaluation$workers} (the worker count the
+registered plan offered; 1 when sequential).
 }
 \description{
 Evaluates all model configurations from \code{configure()} against held-out test
@@ -61,3 +74,43 @@ Bayesian optimization), evaluated on the test set, and ranked by the
 specified metric. The best configuration is stored for downstream use by
 \code{fit()}.
 }
+\section{Parallelism}{
+
+The user owns the backend and the topology; \code{evaluate()} owns only which
+axis the plan is applied to.
+\itemize{
+\item \code{"configs"}: one future per config on the registered plan, with tune
+running sequentially inside each. The per-worker payload is one config's
+worth and tune ships nothing to inner workers. The mode for a large
+config grid on a many-core machine.
+\item \code{"resamples"}: configs run sequentially; inside each, tune parallelises
+the CV folds on the registered plan. Useful width is capped at
+\code{cv_folds}. The mode for a few cores and a short grid.
+\item \code{"auto"} (default): \code{"configs"} when the number of configs is at least
+\code{cv_folds}, otherwise \code{"resamples"}. Derived from the measured cost
+model: configs wins whenever \code{n_configs} exceeds the effective inner
+speedup, which is bounded by \code{cv_folds}, and always once it exceeds the
+worker count, so the worker count cancels.
+}
+
+A nested plan (configs across an outer level, folds across an inner one)
+is not built or endorsed by the package in this version. A caller who
+wants one registers it with \code{future::plan(list(...))} and uses
+\code{"configs"}.
+
+\if{html}{\out{<div class="sourceCode">}}\preformatted{# Laptop: four cores, parallelise the folds inside each config.
+future::plan(future::multisession, workers = 4)
+hd |> evaluate(allow_par = TRUE, parallelize_over = "resamples")
+
+# Thirty cores, one config per worker, checkpointed.
+future::plan(future::multisession, workers = 30)
+hd |> evaluate(allow_par = TRUE, output_dir = "output/run")
+}\if{html}{\out{</div>}}
+
+Before dispatch, BLAS, OpenMP, data.table and ranger threads are pinned to
+one in the calling process (via \code{RhpcBLASctl} when installed) and restored
+on exit. Configs are dispatched to a top-level worker that loads the
+\emph{installed} package, so parallel dispatch refuses to run under
+\code{devtools::load_all()}.
+}
+

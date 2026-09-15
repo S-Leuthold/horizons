@@ -10,7 +10,8 @@ fit_uq(
   calib_data,
   role_map,
   transformation = "none",
-  level_default = DEFAULT_UQ_LEVEL
+  level_default = DEFAULT_UQ_LEVEL,
+  seed = NULL
 )
 }
 \arguments{
@@ -28,6 +29,11 @@ train_Fit).}
 (e.g. "none", "log", "log10", "sqrt").}
 
 \item{level_default}{Numeric. Default coverage level. Default 0.90.}
+
+\item{seed}{Integer or NULL. Seed for the quantile forest. \code{fit()} passes
+its own seed so the forest is reproducible regardless of how the
+preceding stages consumed the parent RNG stream; NULL keeps ranger's
+default of drawing a seed from that stream.}
 }
 \value{
 Named list with fields: \code{quantile_model}, \code{scores}, \code{n_calib},

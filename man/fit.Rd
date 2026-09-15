@@ -35,7 +35,14 @@ shrinkage covariance + held-out OOD thresholds) per config, so \code{predict()}
 can emit \code{.ad_distance} / \code{.ad_flag}. Shares the UQ calibration split.
 Default TRUE.}
 
-\item{allow_par}{Logical. Enable parallel CV folds. Default FALSE.}
+\item{allow_par}{Logical. If \code{TRUE}, tune parallelises the CV folds
+inside each member's re-tune and OOF pass on whatever \code{future::plan()}
+the caller has registered; \code{fit()} never registers a plan. If the plan
+offers fewer than two workers, warns naming it and runs sequentially.
+\code{fit()} parallelises folds only in this version; a configs axis across
+the \code{n_best} members is gated on the fitted-object memory contract (a
+fitted object is hundreds of MB and would cross to workers). Default
+FALSE.}
 
 \item{seed}{Integer. Random seed for CV folds and, through
 \code{fit_split_seed()} (\code{seed + 1L}), for Split F. The offset keeps Split F

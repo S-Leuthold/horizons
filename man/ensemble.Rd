@@ -10,6 +10,7 @@ ensemble(
   optimize = TRUE,
   seed = DEFAULT_ENSEMBLE_SEED,
   compute_uq = TRUE,
+  allow_par = FALSE,
   verbose = TRUE
 )
 }
@@ -35,6 +36,13 @@ the ensemble (see \code{\link[=fit_ensemble_uq]{fit_ensemble_uq()}}), stored in 
 consumed by \code{predict(..., interval = TRUE)}. Mirrors the \code{compute_uq}
 argument of \code{\link[=fit]{fit()}}. Placed after \code{seed} so pre-existing positional
 callers (\code{method}, \code{optimize}, \code{seed}) are unaffected. Default \code{TRUE}.}
+
+\item{allow_par}{Logical. If \code{TRUE}, the meta-learner's CV tuning and its
+out-of-fold pass parallelise over folds on whatever \code{future::plan()} the
+caller has registered; \code{ensemble()} never registers a plan, and warns and
+runs sequentially if the plan offers fewer than two workers. Default
+\code{FALSE}. Before 2026-09-15 these calls took tune's own default of
+\code{allow_par = TRUE} and dispatched onto any registered plan silently.}
 
 \item{verbose}{Logical. Print the progress tree to the console. Default
 \code{TRUE}.}

@@ -1220,6 +1220,7 @@ make_valid_eval <- function() {
       n_train      = 80L,
       n_test       = 20L,
       workers      = 4L,
+      parallelize_over = "configs",
       runtime_secs = 12.3,
       timestamp    = Sys.time()
     )
@@ -1650,5 +1651,66 @@ test_that("has_ad and has_uq are independent", {
                                  "horizons_data", "list"))
   expect_true(has_ad(ad_only))
   expect_false(has_uq(ad_only))
+
+})
+
+
+## =========================================================================
+## Run-provenance slots: tolerated when absent, validated when present
+## (I7c, 2026-09-15)
+## =========================================================================
+
+test_that("validate_horizons_eval tolerates parallelize_over being absent (pre-2026-09-15 objects)", {
+
+  obj <- make_valid_eval()
+  obj$evaluation$parallelize_over <- NULL
+  obj$evaluation$workers          <- 4L      # the OLD meaning: requested count
+
+  expect_identical(validate_horizons_eval(obj), obj)
+
+})
+
+test_that("validate_horizons_eval rejects a present-but-NULL parallelize_over", {
+
+  obj <- make_valid_eval()
+  obj$evaluation["parallelize_over"] <- list(NULL)
+
+  expect_error(validate_horizons_eval(obj), "parallelize_over")
+
+})
+
+test_that("validate_horizons_eval rejects an unknown parallelize_over value", {
+
+  obj <- make_valid_eval()
+  obj$evaluation$parallelize_over <- "both"
+
+  expect_error(validate_horizons_eval(obj), "parallelize_over")
+
+})
+
+test_that("validate_horizons_eval validates workers under the new meaning when parallelize_over is present", {
+
+  obj <- make_valid_eval()
+
+  obj$evaluation$workers <- 0L
+  expect_error(validate_horizons_eval(obj), "workers")
+
+  obj$evaluation$workers <- 2.5
+  expect_error(validate_horizons_eval(obj), "workers")
+
+  obj$evaluation$workers <- NA_integer_     # unbounded backend
+  expect_identical(validate_horizons_eval(obj), obj)
+
+})
+
+test_that("the committed ensemble fixture (evaluated before the slot existed) still validates", {
+
+  ## The fixture also predates the response_bound / ad model slots, so the
+  ## fit-level validator rejects it for reasons unrelated to this contract;
+  ## the eval-level validator is what the tolerance rule governs.
+  fx <- readRDS(test_path("fixtures", "ensemble_fit.rds"))
+
+  expect_false("parallelize_over" %in% names(fx$evaluation))
+  expect_identical(validate_horizons_eval(fx), fx)
 
 })

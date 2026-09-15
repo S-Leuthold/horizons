@@ -58,6 +58,7 @@ make_predict_eval <- function(n = 300, n_wn = 10, transformation = "none", seed 
                                    cv_ccc = 0.83, cv_rpd = 1.4, cv_mae = 0.33),
       best_config = "cfg_001",
       rank_metric = "rpd",
+      parallelize_over = "sequential",
       split        = rsample::initial_split(df, prop = 0.8),
       n_train      = as.integer(round(nrow(df) * 0.8)),
       n_test       = nrow(df) - as.integer(round(nrow(df) * 0.8)),

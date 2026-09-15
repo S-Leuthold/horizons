@@ -809,7 +809,11 @@ validate_horizons_ensemble <- function(x) {
 #'
 #' 1. **Slot completeness**: the metadata keys `evaluate()` writes are present
 #'    (`results`, `best_config`, `rank_metric`, `split`, `n_train`, `n_test`,
-#'    `runtime_secs`, `timestamp`). Extra keys (e.g. `workers`) are tolerated.
+#'    `runtime_secs`, `timestamp`). The run-provenance keys added 2026-09-15,
+#'    `parallelize_over` and `workers`, are tolerated when absent (objects
+#'    evaluated earlier still fit) and validated when present:
+#'    `parallelize_over` one of `"sequential"`, `"configs"`, `"resamples"`;
+#'    `workers` a single positive whole number or NA.
 #' 2. **results**: data frame carrying `config_id`, `status`, and the six
 #'    metric columns (`rmse`, `rrmse`, `rsq`, `ccc`, `rpd`, `mae`); at least
 #'    one row; `config_id` values unique.
@@ -866,6 +870,44 @@ validate_horizons_eval <- function(x) {
 
     key_list <- paste(missing_keys, collapse = ", ")
     errors   <- c(errors, cli::format_inline("Metadata keys missing from {.field evaluation}: {key_list}"))
+
+  }
+
+  ## parallelize_over / workers (run provenance, 2026-09-15) ------------------
+  ## Tolerated when ABSENT, so objects evaluated before these slots existed
+  ## still fit (the same rule I7b applies to response_bound). When the key is
+  ## present it must be valid: a present-but-NULL parallelize_over fails.
+
+  if ("parallelize_over" %in% names(ev)) {
+
+    po <- ev$parallelize_over
+
+    if (!is.character(po) || length(po) != 1 || is.na(po) ||
+        !po %in% c("sequential", "configs", "resamples")) {
+
+      errors <- c(errors, cli::format_inline(
+        "{.field parallelize_over} must be one of {.val {c('sequential', 'configs', 'resamples')}}"
+      ))
+
+    }
+
+    ## Under the new contract `workers` is the count the registered plan
+    ## offered (observed): a single positive whole number, or NA when the
+    ## backend reported an unbounded count.
+    if ("workers" %in% names(ev)) {
+
+      w <- ev$workers
+
+      if (!is.numeric(w) || length(w) != 1 ||
+          (!is.na(w) && (w < 1 || w != as.integer(w)))) {
+
+        errors <- c(errors, cli::format_inline(
+          "{.field workers} must be a single positive whole number (or NA for an unbounded backend)"
+        ))
+
+      }
+
+    }
 
   }
 

@@ -29,6 +29,77 @@
 
 ## Breaking / behavioural
 
+* **`evaluate()` no longer manages a parallel backend.** The caller
+  registers a `future::plan()`; `evaluate(allow_par = TRUE)` dispatches
+  onto it along the axis chosen by the new `parallelize_over` argument
+  (`"auto"`, `"configs"`, `"resamples"`), and if the registered plan offers
+  fewer than two workers it warns, naming the plan, and runs sequentially.
+  `evaluate()` never registers, alters or restores a plan. `workers` is
+  deprecated outright: it warns (condition class
+  `horizons_deprecated_workers`) and is ignored. The old design took a core
+  count, auto-split it into outer and inner levels, and built a nested
+  multisession plan inside `evaluate()`; that construction is what #35 (the
+  nested plan tripping parallelly's localhost limit) and #37 (the silent
+  no-plan path) lived in, and both close with its removal. `"auto"` picks
+  `"configs"` when there are at least `cv_folds` configs and `"resamples"`
+  otherwise, from the measured cost model. A nested plan is not built or
+  endorsed in this version; register one yourself and use `"configs"`.
+
+* `ensemble()` gains `allow_par = FALSE`. Its meta-learner tuning and
+  out-of-fold pass previously took tune's own default of `allow_par = TRUE`
+  and dispatched onto any registered plan silently, with no argument to say
+  otherwise. `fit(allow_par = TRUE)` and `ensemble(allow_par = TRUE)` now
+  check for a usable backend the same way `evaluate()` does. `fit()`
+  parallelises CV folds only; a configs axis across members is gated on the
+  fitted-object memory contract.
+
+* The evaluation manifest (`eval_manifest.rds`) is schema 2: it records the
+  axis used, the requested axis, the registered plan's label and the worker
+  count it offered, in place of `workers`/`outer`/`inner`.
+  `monitor_evaluate()` reads both schemas. `evaluation$parallelize_over`
+  records the axis actually used and is required by the validator;
+  `evaluation$workers` is now the count the plan offered (1 when sequential),
+  observed rather than requested.
+
+* **tune's inner setting is now `parallel_over = "resamples"`** in
+  `evaluate_single_config()`'s grid and Bayesian stages (it was
+  `"everything"`), and the cross-validated numbers change as a result. Under
+  `"everything"` each grid candidate re-prepped the recipe per fold, so
+  `step_select_cars()` and `step_select_boruta()` drew a fresh, unseeded
+  feature selection for every candidate and `select_best()` was partly
+  choosing the luckiest draw; under `"resamples"` one prep per fold is
+  shared by all candidates, so between-candidate differences are
+  hyperparameters plus engine noise. `"everything"` also shipped the whole
+  rset to every task. Every result row now carries `scoring_schema` (2), and
+  resuming an `output_dir` drops checkpoint rows from schema 1 with a
+  message so the two regimes are never ranked together.
+
+* **Results no longer depend on which axis ran.** tune's future path
+  advances the parent RNG stream past where the sequential loop leaves it,
+  so the Bayesian stage and `last_fit()` drew from a different position on
+  the resamples axis and could return different hyperparameters and test
+  metrics for the same seed. The seed is now re-pinned before every
+  stochastic stage in `evaluate_single_config()` and `fit_single_config()`,
+  and `fit_uq()`'s quantile forest takes an explicit seed, so `allow_par` is
+  a pure performance choice. Ties in the ranking are broken on `config_id`,
+  and `monitor_evaluate()` names the best config by the same rule
+  `evaluate()` uses (successes only, `cv_<metric>`, same tie-break).
+
+* Objects evaluated before this version have no `evaluation$parallelize_over`
+  slot; that is tolerated (they still `fit()`), and the slot is validated
+  when present. The manifest is written on every run with an `output_dir`,
+  whichever axis, so the monitor can watch any run.
+
+* Thread pinning moved to the parent: before dispatch `evaluate()`,
+  `fit()` and `ensemble()` pin BLAS/OpenMP (via `RhpcBLASctl` when
+  installed), data.table and ranger threads in the calling process and
+  restore them on exit. The worker-side `Sys.setenv()` block was dead code:
+  OpenBLAS reads its thread count when it loads. `fit_uq()`'s quantile
+  forest is pinned at the call site; it previously ran on every core.
+  `future.apply` is declared (tune's future path calls it and never checks
+  it); `mirai` is suggested so a live daemon pool can be detected and
+  warned about, since tune prefers it silently.
+
 * Parallel `evaluate()` now refuses to run under `devtools::load_all()`.
   Workers resolve the package namespace by name and therefore load the
   *installed* `horizons`, not the source tree — so a stale install would have

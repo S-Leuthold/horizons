@@ -35,6 +35,9 @@
 #' @param rank_metric Character. Metric the object was ranked by.
 #' @param optimize Logical. Tune the xgboost hyperparameters (`TRUE`) or use
 #'   conservative fixed defaults (`FALSE`). Default `TRUE`.
+#' @param allow_par Logical. Passed through from `ensemble(allow_par = )` to
+#'   the meta-learner's tune controls; folds parallelise on the registered
+#'   plan when `TRUE`. Default `FALSE`.
 #' @param seed Integer. Seed for the CV folds (passed through to
 #'   [fit_tuned_meta_learner()] so the meta-OOF is reproducible).
 #'
@@ -45,8 +48,9 @@ fit_ensemble_xgb <- function(object,
                              members,
                              oof,
                              rank_metric,
-                             optimize = TRUE,
-                             seed     = DEFAULT_ENSEMBLE_SEED) {
+                             optimize  = TRUE,
+                             seed      = DEFAULT_ENSEMBLE_SEED,
+                             allow_par = FALSE) {
 
   ## Build the spec per branch, not with an inline `if` inside boost_tree().
   ## parsnip stores model args as lazy quosures it never forces, so an
@@ -94,7 +98,8 @@ fit_ensemble_xgb <- function(object,
     spec            = spec,
     grid            = grid,
     extract_weights = extract_weights_xgb,
-    seed            = seed
+    seed            = seed,
+    allow_par       = allow_par
   )
 
 }

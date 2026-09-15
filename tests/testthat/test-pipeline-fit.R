@@ -742,3 +742,30 @@ describe("fit() - member ranking on cv_<metric>", {
   })
 
 })
+
+
+## =========================================================================
+## allow_par with no backend (M2e, 2026-09-15)
+## =========================================================================
+
+describe("fit() - allow_par without a usable backend", {
+
+  it("warns naming fit() and the plan, then runs sequentially", {
+
+    local_plan(future::sequential)
+    obj <- make_fit_object(n = 60, n_configs = 1)
+
+    expect_warning(
+      r <- keep_only_warning(
+        fit(obj, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE,
+            allow_par = TRUE, verbose = FALSE, seed = 123L),
+        "offers 1 worker"
+      ),
+      "fit\\(\\).*offers 1 worker"
+    )
+
+    expect_s3_class(r, "horizons_fit")
+
+  })
+
+})
