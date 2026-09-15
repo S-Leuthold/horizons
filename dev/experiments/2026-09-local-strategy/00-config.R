@@ -166,8 +166,10 @@ STRATEGIES <- c("A_global", "B_gmm_oneconfig", "C_gmm_perconfig", "D_mbl",
 ## the whole 62 GB box down. Halving the columns halves the footprint.
 EXPERIMENT_RESAMPLE <- 4
 
-## Hard cap on multisession workers for this experiment, set by memory on a
-## box that also runs Steve: ~2.5 GB/worker at 2 cm-1, ~1.3 GB at 4 cm-1.
+## Hard cap on the multisession plan the scripts register, set by memory on a
+## box that also runs Steve. The figures were ~2.5 GB/worker at 2 cm-1 and
+## ~1.3 GB at 4 cm-1 before the serialization fixes of 2026-09-14 (per-worker
+## payload 2,086.6 MB -> 417.6 MB); re-measure before raising this.
 MAX_WORKERS <- 8L
 
 ## ---------------------------------------------------------------------------

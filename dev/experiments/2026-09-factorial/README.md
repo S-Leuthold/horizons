@@ -47,15 +47,19 @@ Rough shape at 80 configurations per property × 3 properties, from experiment-1
 
 ---
 
-## Prerequisite: fix the parallelism bugs first
+## Prerequisite: the parallelism fixes (done 2026-09-14/15)
 
-Experiment 1 ran 8 workers on a 30-core box through a script-level workaround, because horizons' own parallelism is broken in three independent ways:
+Experiment 1 ran 8 workers on a 30-core box through a script-level workaround, because horizons' own parallelism was broken in three independent ways (#35 nested plan, #36 serialization payload, #37 silent no-plan path). All three are fixed on `development`:
 
-- **#35** — the nested plan (`workers > cv_folds`) trips `parallelly`'s localhost limit; every config dies in ~15 s.
-- **#36** — the parallel branch exports ~6 copies of the training table; >2 GB of globals kills the socket transfer above ~3-4k rows.
-- **#37** — at or below `cv_folds`, no `future::plan()` is ever registered, so the documented inner parallelism silently does not exist and the run is single-threaded.
+- #36 by the serialization fixes (per-worker payload 2,086.6 MB → 417.6 MB);
+- #35 and #37 by the user-managed design: `evaluate()` no longer builds a plan. Register one and opt in:
 
-Together: **no value of `workers` gives working parallelism at library scale.** Fixing them is maybe half a day and is the difference between this experiment being an overnight run and a multi-day one. Do it first. Tracking issue **#48**.
+```r
+future::plan(future::multisession, workers = 30)
+hz |> evaluate(allow_par = TRUE, output_dir = "output/run")   # parallelize_over = "auto" -> "configs"
+```
+
+The scripts must run the **installed** package (`R CMD INSTALL`), not `devtools::load_all()`: the configs axis dispatches to workers that load the installed horizons and refuses to run under pkgload. `helpers.R::require_fresh_install()` guards this. Tracking issue **#48**.
 
 Two more from experiment 1 that will bite this run specifically:
 

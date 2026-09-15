@@ -19,10 +19,9 @@
 ##
 ## Run: Rscript dev/experiments/2026-09-local-strategy/04-B-gmm-local.R [clay oc ph] [--workers=N] [--from=A_global|A_pilot] [--force]
 
-Sys.setenv(HORIZONS_THREAD_CONTROL = "TRUE",
-           R_PARALLELLY_MAXWORKERS_LOCALHOST = "Inf")
-options(parallelly.maxWorkers.localhost = Inf,
-        future.globals.maxSize = 8 * 1024^3)
+Sys.setenv(HORIZONS_THREAD_CONTROL = "TRUE")
+## 2026-09-15: the parallelly / future.globals.maxSize overrides are gone
+## with the nested plan; the plan registered below is the configuration.
 
 args     <- commandArgs(trailingOnly = TRUE)
 flags    <- args[startsWith(args, "--")]
@@ -34,8 +33,9 @@ file_arg <- grep("^--file=", commandArgs(), value = TRUE)
 exp_dir  <- if (length(file_arg)) dirname(normalizePath(sub("^--file=", "", file_arg[1]))) else getwd()
 
 source(file.path(exp_dir, "00-config.R"))
-suppressPackageStartupMessages(devtools::load_all(PKG_DIR, quiet = TRUE))
+suppressPackageStartupMessages(library(horizons))
 source(file.path(exp_dir, "helpers.R"))
+require_fresh_install(PKG_DIR)
 exp_dirs()
 
 if (!length(props)) props <- EXP_PROPERTIES$property
@@ -44,7 +44,6 @@ from    <- if (length(from_arg)) from_arg else "A_global"
 
 future::plan(future::multisession, workers = workers)
 on.exit(future::plan(future::sequential), add = TRUE)
-EVAL_WORKERS <- EXP_CONFIG$cv_folds
 
 snap <- load_snapshot()
 msg("[B/E] snapshot %d samples; properties: %s; workers %d; A source: %s",
