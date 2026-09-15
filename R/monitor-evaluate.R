@@ -157,15 +157,20 @@ monitor_evaluate <- function(output_dir, watch = FALSE, interval = 10) {
 
     if (!is.null(row)) {
 
-      model_name <- MODEL_DISPLAY_NAMES[row$model] %||% row$model
+      ## Checkpoint rows are evaluate_single_config() result rows, which carry
+      ## no `model` column; only show the model when something wrote one.
+      model_label <- if (!is.null(row$model) && !is.na(row$model)) {
+        paste0(" (", MODEL_DISPLAY_NAMES[row$model] %||% row$model, ")")
+      } else {
+        ""
+      }
       metric_val <- if (!is.na(.monitor_metric_value(row, metric_name))) {
         paste0(toupper(metric_name), " = ",
                round(.monitor_metric_value(row, metric_name), 3))
       } else {
         row$status
       }
-      recent <- c(recent, paste0(row$config_id, " (", model_name, ") ",
-                                  metric_val))
+      recent <- c(recent, paste0(row$config_id, model_label, " ", metric_val))
 
     }
 
