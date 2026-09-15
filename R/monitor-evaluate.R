@@ -182,7 +182,7 @@ monitor_evaluate <- function(output_dir, watch = FALSE, interval = 10) {
 
       ## Checkpoint rows are evaluate_single_config() result rows, which carry
       ## no `model` column; only show the model when something wrote one.
-      model_label <- if (!is.null(row$model) && !is.na(row$model)) {
+      model_label <- if ("model" %in% names(row) && !is.na(row$model)) {
         paste0(" (", MODEL_DISPLAY_NAMES[row$model] %||% row$model, ")")
       } else {
         ""
