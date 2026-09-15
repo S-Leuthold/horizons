@@ -40,6 +40,20 @@
   is directly comparable to the single-model metrics from `fit()`, including an
   honest improvement-over-best-member comparison.
 
+## Bug Fixes
+
+* Tuning metrics are now scored on the original response scale (#49). The
+  response transform is a `skip = TRUE` recipe step, so tune never applied it
+  to an assessment set: every CV metric for a `log`, `log10` or `sqrt` config
+  compared original-scale truth to transformed-scale predictions. The number
+  `select_best()` and `tune_bayes()` optimised was dominated by the scale
+  offset, and the prune gate discarded healthy transformed models (the second
+  half of #38). `evaluate_single_config()` and `fit_single_config()` now build
+  their tuning metrics with `tuning_metric_set()`, which back-transforms the
+  estimate inside each metric while preserving metric names and directions.
+  Hyperparameter selection and pruning for transformed configs change as a
+  result; `transformation = "none"` results are bit-identical.
+
 # horizons 0.9.0
 
 ## Major Changes
