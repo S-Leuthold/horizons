@@ -40,6 +40,14 @@
   is directly comparable to the single-model metrics from `fit()`, including an
   honest improvement-over-best-member comparison.
 
+## Documentation
+
+* `?configure` now documents that `cubist` is not bit-reproducible under a
+  fixed seed when `committees > 1` (#51). This is inside the Cubist C
+  implementation: it persists with an explicit `cubistControl(seed = )`,
+  and `committees = 1` is stable. The other engines are deterministic given
+  `seed`. Equality tests in the package use `rf` for that reason.
+
 ## Bug Fixes
 
 * `evaluate()` and `fit()` now rank configurations on the cross-validated
