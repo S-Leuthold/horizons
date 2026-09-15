@@ -438,6 +438,16 @@ describe("fit_single_config() - log transformation", {
 
   })
 
+  it("selects best_params through the original-scale tuning metric set (#49)", {
+
+    ## tune_warmstart_bayes() selects on metric = "rmse" by name. The
+    ## transformed-config metric set comes from tuning_metric_set(), which must
+    ## keep that name for selection to succeed at all.
+    expect_s3_class(result$best_params, "data.frame")
+    expect_equal(nrow(result$best_params), 1L)
+
+  })
+
 })
 
 

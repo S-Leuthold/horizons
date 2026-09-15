@@ -33,11 +33,12 @@ evaluate_single_config(
 \item{bayesian_iter}{Integer. Iterations for \code{tune_bayes()}. Set to 0 to
 skip Bayesian optimization entirely.}
 
-\item{prune}{Logical. If TRUE, skip Bayesian optimization when grid search
-RMSE exceeds \code{prune_threshold}.}
+\item{prune}{Logical. If TRUE, skip Bayesian optimization when the best
+grid-search RPD falls below \code{prune_threshold}.}
 
-\item{prune_threshold}{Numeric. RMSE threshold for pruning (on transformed
-scale). Only used when \code{prune = TRUE}.}
+\item{prune_threshold}{Numeric. RPD threshold for pruning, on the original
+response scale (tuning metrics are scored there via
+\code{tuning_metric_set()}). Only used when \code{prune = TRUE}.}
 
 \item{allow_par}{Logical. Passed to \code{tune::control_grid()} and
 \code{tune::control_bayes()} to enable parallel CV folds.}

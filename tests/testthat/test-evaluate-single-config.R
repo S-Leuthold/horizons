@@ -299,6 +299,62 @@ describe("evaluate_single_config() - back-transformation", {
 })
 
 ## =========================================================================
+## Tuning metrics are on the original scale (#49 / #38)
+## =========================================================================
+## The response transform is a skip = TRUE recipe step, so tune never applies
+## it to the assessment set. Before tuning_metric_set() the prune gate
+## compared original-scale truth to log-scale predictions and stamped healthy
+## log models "pruned". This fixture has a strong log-linear signal, so a
+## correctly scored grid search must clear prune_threshold = 1.0 comfortably.
+
+describe("evaluate_single_config() - tuning on the original scale", {
+
+  setup <- make_eval_setup(n = 100, n_wn = 30)
+
+  ## Overwrite the weak-signal outcome with a strong log-linear one, keeping
+  ## the split/fold row membership from make_eval_setup(). The signal sits in
+  ## interior wavenumbers so the SG window (9) does not trim it away. plsr is
+  ## linear in log space, so original-scale test RPD lands around 6 when the
+  ## grid is scored honestly; scored cross-scale the same grid reads below 1
+  ## and the config is pruned.
+  set.seed(4902)
+  wn_names <- paste0("wn_", seq(4000, by = -2, length.out = 30))
+  signal   <- rowMeans(as.matrix(setup$data[, wn_names[10:15]]))
+  setup$data$SOC <- expm1(1.5 + 1.2 * signal + stats::rnorm(nrow(setup$data), sd = 0.05))
+  setup$split$data <- setup$data
+  setup$folds <- suppressWarnings(
+    rsample::vfold_cv(rsample::training(setup$split), v = 3, strata = "SOC")
+  )
+
+  config <- make_eval_config(model = "plsr", transformation = "log")
+
+  result <- evaluate_single_config(
+    config_row      = config,
+    split           = setup$split,
+    cv_folds        = setup$folds,
+    role_map        = setup$role_map,
+    grid_size       = 3,
+    bayesian_iter   = 0,
+    prune           = TRUE,
+    prune_threshold = 1.0,
+    seed            = 42L
+  )
+
+  it("does not prune a healthy log-transformed config at prune_threshold = 1.0", {
+
+    expect_equal(result$status, "success")
+
+  })
+
+  it("reports an original-scale test RPD consistent with the strong signal", {
+
+    expect_gt(result$rpd, 1.5)
+
+  })
+
+})
+
+## =========================================================================
 ## Bayesian optimization skipped (bayesian_iter = 0)
 ## =========================================================================
 

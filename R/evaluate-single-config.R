@@ -19,10 +19,11 @@
 #' @param grid_size Integer. Number of grid points for `tune_grid()`.
 #' @param bayesian_iter Integer. Iterations for `tune_bayes()`. Set to 0 to
 #'   skip Bayesian optimization entirely.
-#' @param prune Logical. If TRUE, skip Bayesian optimization when grid search
-#'   RMSE exceeds `prune_threshold`.
-#' @param prune_threshold Numeric. RMSE threshold for pruning (on transformed
-#'   scale). Only used when `prune = TRUE`.
+#' @param prune Logical. If TRUE, skip Bayesian optimization when the best
+#'   grid-search RPD falls below `prune_threshold`.
+#' @param prune_threshold Numeric. RPD threshold for pruning, on the original
+#'   response scale (tuning metrics are scored there via
+#'   `tuning_metric_set()`). Only used when `prune = TRUE`.
 #' @param allow_par Logical. Passed to `tune::control_grid()` and
 #'   `tune::control_bayes()` to enable parallel CV folds.
 #' @param seed Integer. Random seed for reproducibility.
@@ -169,14 +170,13 @@ evaluate_single_config <- function(config_row,
   ## Step 5: Define tuning metric set
   ## -----------------------------------------------------------------------
 
-  tune_metrics <- yardstick::metric_set(
-    yardstick::rmse,
-    rrmse,
-    yardstick::rsq,
-    yardstick::mae,
-    rpd,
-    ccc
-  )
+  ## Scored on the original response scale. The response transform is a
+  ## skip = TRUE recipe step, so tune never applies it to the assessment set;
+  ## tuning_metric_set() back-transforms the estimate inside each metric so
+  ## select_best(), tune_bayes() and the prune gate all see the same scale the
+  ## leaderboard reports. rmse stays first: tune_bayes() optimises the first
+  ## metric in the set. See #49.
+  tune_metrics <- tuning_metric_set(transformation)
 
   ## -----------------------------------------------------------------------
   ## Step 6: Grid search
@@ -232,7 +232,9 @@ evaluate_single_config <- function(config_row,
   ## -----------------------------------------------------------------------
   ## If the best grid-search RPD is below threshold, skip Bayesian
   ## optimization. RPD < 1.0 means the model is no better than the mean
-  ## predictor — no point spending Bayesian iterations on it.
+  ## predictor — no point spending Bayesian iterations on it. This RPD is on
+  ## the original response scale (tuning_metric_set()), so the threshold means
+  ## the same thing for every transformation.
   ## The config still gets last_fit metrics from grid-search best.
 
   skip_bayesian <- FALSE

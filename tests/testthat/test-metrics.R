@@ -237,3 +237,132 @@ describe("yardstick metric_set integration", {
   })
 
 })
+
+## ===========================================================================
+## tuning_metric_set()
+## ===========================================================================
+
+describe("tuning_metric_set()", {
+
+  all_metric_names <- c("rmse", "rrmse", "rsq", "mae", "rpd", "ccc")
+
+  ## Original-scale truth, with predictions that live on each transformed scale
+  set.seed(4901)
+  truth <- stats::rgamma(60, shape = 3)
+  noise <- stats::rnorm(60, sd = 0.05)
+
+  transformed_estimates <- list(
+    log   = log(truth + 1) + noise,
+    log10 = log10(truth + 1) + noise,
+    sqrt  = sqrt(truth) + noise
+  )
+
+  directions <- function(ms) {
+    vapply(attributes(ms)$metrics, function(m) attr(m, "direction"), character(1))
+  }
+
+  it("returns the plain metric set for transformation = 'none'", {
+
+    ms   <- tuning_metric_set("none")
+    df   <- tibble::tibble(truth = truth, estimate = truth + noise)
+    got  <- ms(df, truth = truth, estimate = estimate)
+    want <- yardstick::metric_set(yardstick::rmse, rrmse, yardstick::rsq,
+                                  yardstick::mae, rpd, ccc)(df, truth = truth,
+                                                            estimate = estimate)
+
+    expect_equal(got, want)
+    expect_equal(got$.metric, all_metric_names)
+
+  })
+
+  it("scores every metric on the original scale for each transformation", {
+
+    for (trans in names(transformed_estimates)) {
+
+      est <- transformed_estimates[[trans]]
+      df  <- tibble::tibble(truth = truth, estimate = est)
+
+      got  <- tuning_metric_set(trans)(df, truth = truth, estimate = estimate)
+      want <- compute_original_scale_metrics(
+        truth    = truth,
+        estimate = back_transform_predictions(est, trans, warn = FALSE)
+      )
+
+      expect_equal(got$.metric, all_metric_names, info = trans)
+
+      for (m in all_metric_names) {
+        expect_equal(
+          got$.estimate[got$.metric == m],
+          want$.estimate[want$.metric == m],
+          tolerance = 1e-12,
+          info      = paste(trans, m)
+        )
+      }
+
+    }
+
+  })
+
+  it("preserves metric names and directions so select_best()/show_best() keep working", {
+
+    for (trans in c("none", "log", "log10", "sqrt")) {
+
+      ms <- tuning_metric_set(trans)
+
+      expect_equal(names(attributes(ms)$metrics), all_metric_names, info = trans)
+      expect_equal(
+        unname(directions(ms)),
+        c("minimize", "minimize", "maximize", "minimize", "maximize", "maximize"),
+        info = trans
+      )
+
+    }
+
+  })
+
+  it("honours the metrics argument and its order", {
+
+    ms  <- tuning_metric_set("log", metrics = c("rpd", "rmse"))
+    df  <- tibble::tibble(truth = truth, estimate = transformed_estimates$log)
+    got <- ms(df, truth = truth, estimate = estimate)
+
+    expect_equal(got$.metric, c("rpd", "rmse"))
+
+  })
+
+  it("is not a cross-scale comparison (the #49 regression)", {
+
+    ## A near-perfect log-scale prediction. Scored cross-scale it looks poor,
+    ## because original-scale truth is being compared to log-scale estimates.
+    df <- tibble::tibble(truth = truth, estimate = transformed_estimates$log)
+
+    naive <- tuning_metric_set("none")(df, truth = truth, estimate = estimate)
+    fixed <- tuning_metric_set("log")(df,  truth = truth, estimate = estimate)
+
+    naive_rmse <- naive$.estimate[naive$.metric == "rmse"]
+    fixed_rmse <- fixed$.estimate[fixed$.metric == "rmse"]
+    naive_rpd  <- naive$.estimate[naive$.metric == "rpd"]
+    fixed_rpd  <- fixed$.estimate[fixed$.metric == "rpd"]
+
+    expect_lt(fixed_rmse, naive_rmse / 5)
+    expect_gt(fixed_rpd, 5)
+    expect_lt(naive_rpd, 2)
+
+  })
+
+  it("aborts on an unknown transformation instead of scoring cross-scale", {
+
+    expect_error(tuning_metric_set("boxcox"), "Unknown")
+    expect_error(tuning_metric_set(NA_character_), "single non-missing")
+    expect_error(tuning_metric_set(c("log", "sqrt")), "single non-missing")
+
+  })
+
+  it("aborts on an unknown metric name", {
+
+    expect_error(tuning_metric_set("log", metrics = c("rmse", "mape")), "mape")
+    expect_error(tuning_metric_set("log", metrics = character(0)), "at least one")
+
+  })
+
+})
