@@ -351,7 +351,7 @@ evaluate <- function(x,
       if (n_foreign > 0 && verbose) {
 
         cat(paste0(
-          "│  ", cli::col_yellow(
+          "\u2502  ", cli::col_yellow(
             "Dropped ", n_foreign, " per-config checkpoint",
             if (n_foreign > 1) "s" else "",
             " scored under an earlier scoring schema (will be re-evaluated)"
