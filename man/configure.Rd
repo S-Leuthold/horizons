@@ -103,6 +103,20 @@ This enables the \code{purrr::map()} multi-outcome pattern:
 \if{html}{\out{<div class="sourceCode">}}\preformatted{c("SOC", "POM_C", "pH") |>
   purrr::map(~base |> configure(outcome = .x) |> evaluate() |> fit())
 }\if{html}{\out{</div>}}
+
+\strong{Reproducibility:}
+
+\code{evaluate()} and \code{fit()} pin the RNG seed and kind, so a run is
+repeatable from its recorded \code{seed} for every model except \code{cubist}.
+The Cubist C implementation is not bit-reproducible when
+\code{committees > 1}: repeated fits on identical data under an identical
+\code{set.seed()}, or under an explicit \code{cubistControl(seed = )}, can differ in
+the fourth significant figure of a fold metric (measured on Cubist
+0.6.0). \code{committees = 1} is stable. The effect is small, but it can flip
+\code{select_best()} between near-tied grid points and move a reported test
+metric by a few percent, so a \code{cubist} result should be read as
+reproducible to that tolerance rather than exactly. \code{rf} and the other
+engines are deterministic given \code{seed}. See GitHub issue #51.
 }
 \examples{
 \dontrun{
