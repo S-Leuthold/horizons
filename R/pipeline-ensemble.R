@@ -45,6 +45,12 @@
 #'   consumed by `predict(..., interval = TRUE)`. Mirrors the `compute_uq`
 #'   argument of [fit()]. Placed after `seed` so pre-existing positional
 #'   callers (`method`, `optimize`, `seed`) are unaffected. Default `TRUE`.
+#' @param allow_par Logical. If `TRUE`, the meta-learner's CV tuning and its
+#'   out-of-fold pass parallelise over folds on whatever `future::plan()` the
+#'   caller has registered; `ensemble()` never registers a plan, and warns and
+#'   runs sequentially if the plan offers fewer than two workers. Default
+#'   `FALSE`. Before 2026-09-15 these calls took tune's own default of
+#'   `allow_par = TRUE` and dispatched onto any registered plan silently.
 #' @param verbose Logical. Print the progress tree to the console. Default
 #'   `TRUE`.
 #'
@@ -71,11 +77,28 @@ ensemble <- function(x,
                      optimize   = TRUE,
                      seed       = DEFAULT_ENSEMBLE_SEED,
                      compute_uq = TRUE,
+                     allow_par  = FALSE,
                      verbose    = TRUE) {
 
   ## -------------------------------------------------------------------------
   ## Step 0: Preflight
   ## -------------------------------------------------------------------------
+
+  ## The user owns the backend; confirm there is one and pin threads here
+  ## before tune spawns anything. Never touch the plan.
+  if (isTRUE(allow_par)) {
+
+    allow_par <- check_parallel_backend("ensemble()")
+
+    if (allow_par) {
+
+      warn_if_mirai_preferred()
+      unpin_threads <- pin_parent_threads()
+      on.exit(unpin_threads(), add = TRUE)
+
+    }
+
+  }
 
   if (!inherits(x, "horizons_fit")) {
 
@@ -135,9 +158,11 @@ ensemble <- function(x,
 
   contract <- switch(
     method,
-    penalized = fit_ensemble_penalized(x, members, oof, rank_metric, optimize, seed),
+    penalized = fit_ensemble_penalized(x, members, oof, rank_metric, optimize, seed,
+                                       allow_par = allow_par),
     weighted  = fit_ensemble_weighted(x, members, oof, rank_metric, optimize, seed),
-    xgb       = fit_ensemble_xgb(x, members, oof, rank_metric, optimize, seed)
+    xgb       = fit_ensemble_xgb(x, members, oof, rank_metric, optimize, seed,
+                                 allow_par = allow_par)
   )
 
   ## -------------------------------------------------------------------------

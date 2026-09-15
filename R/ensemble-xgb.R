@@ -45,8 +45,9 @@ fit_ensemble_xgb <- function(object,
                              members,
                              oof,
                              rank_metric,
-                             optimize = TRUE,
-                             seed     = DEFAULT_ENSEMBLE_SEED) {
+                             optimize  = TRUE,
+                             seed      = DEFAULT_ENSEMBLE_SEED,
+                             allow_par = FALSE) {
 
   ## Build the spec per branch, not with an inline `if` inside boost_tree().
   ## parsnip stores model args as lazy quosures it never forces, so an
@@ -94,7 +95,8 @@ fit_ensemble_xgb <- function(object,
     spec            = spec,
     grid            = grid,
     extract_weights = extract_weights_xgb,
-    seed            = seed
+    seed            = seed,
+    allow_par       = allow_par
   )
 
 }

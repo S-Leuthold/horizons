@@ -265,8 +265,9 @@ fit_single_config <- function(config_row,
       finalized_wf,
       resamples = cv_resamples,
       control   = tune::control_resamples(
-        save_pred = TRUE,
-        allow_par = allow_par
+        save_pred     = TRUE,
+        allow_par     = allow_par,
+        parallel_over = "resamples"
       )
     ),
     log_error          = FALSE,

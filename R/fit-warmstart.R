@@ -302,8 +302,9 @@ tune_warmstart_bayes <- function(workflow,
       grid      = initial_grid,
       metrics   = metric_set,
       control   = tune::control_grid(
-        save_pred = FALSE,
-        allow_par = allow_par
+        save_pred     = FALSE,
+        allow_par     = allow_par,
+        parallel_over = "resamples"   # one rsplit per task; explicit, not tune's default
       )
     ),
     log_error          = FALSE,
@@ -337,8 +338,9 @@ tune_warmstart_bayes <- function(workflow,
         metrics    = metric_set,
         param_info = param_set,
         control    = tune::control_bayes(
-          no_improve = BAYES_NO_IMPROVE_LIMIT,
-          allow_par  = allow_par
+          no_improve    = BAYES_NO_IMPROVE_LIMIT,
+          allow_par     = allow_par,
+          parallel_over = "resamples"
         )
       ),
       log_error          = FALSE,

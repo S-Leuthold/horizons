@@ -5,11 +5,7 @@
 ## resolver is a pure function, and the plan helpers only read the plan.
 ## Tests that register a plan restore the previous one with withr::defer().
 
-local_plan <- function(..., .env = parent.frame()) {
-  old <- future::plan(...)
-  withr::defer(future::plan(old), envir = .env)
-  invisible(old)
-}
+## local_plan() comes from helper-parallel.R.
 
 ## =========================================================================
 ## resolve_parallel_axis()

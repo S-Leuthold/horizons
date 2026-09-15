@@ -578,3 +578,58 @@ describe("validate_horizons_ensemble() - real fixture contracts", {
   })
 
 })
+
+
+## =========================================================================
+## allow_par is explicit and off by default (M2e, 2026-09-15)
+## =========================================================================
+## tune's control constructors default to allow_par = TRUE, so before this
+## the meta-learner tuning and OOF pass dispatched onto any registered
+## future::plan() with no argument to say otherwise.
+
+describe("ensemble() - allow_par", {
+
+  it("builds both tune controls with allow_par = FALSE by default", {
+
+    grid <- horizons:::meta_tune_control("grid")
+    oof  <- horizons:::meta_tune_control("resamples")
+
+    expect_false(grid$allow_par)
+    expect_false(oof$allow_par)
+    expect_equal(grid$parallel_over, "resamples")
+    expect_equal(oof$parallel_over, "resamples")
+
+  })
+
+  it("does not dispatch onto a registered plan unless asked", {
+
+    skip_on_cran()
+    local_plan(future::multisession, workers = 2)
+
+    ## tune's own framework choice for the control ensemble() builds: with
+    ## allow_par = FALSE it is sequential even though a plan is registered.
+    expect_equal(tune:::choose_framework(control = horizons:::meta_tune_control("grid")),
+                 "sequential")
+    expect_equal(tune:::choose_framework(control = horizons:::meta_tune_control("grid", TRUE)),
+                 "future")
+
+  })
+
+  it("warns and runs sequentially when allow_par = TRUE has no backend", {
+
+    local_plan(future::sequential)
+
+    expect_warning(
+      ens <- keep_only_warning(
+        ensemble(fitted, method = "penalized", optimize = FALSE,
+                 allow_par = TRUE, compute_uq = FALSE, verbose = FALSE),
+        "offers 1 worker"
+      ),
+      "ensemble\\(\\).*offers 1 worker"
+    )
+
+    expect_true(inherits(ens, "horizons_ensemble"))
+
+  })
+
+})

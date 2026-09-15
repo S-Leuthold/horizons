@@ -180,6 +180,43 @@ build_oof_matrix <- function(object, members) {
 }
 
 ## ---------------------------------------------------------------------------
+## meta_tune_control()
+## ---------------------------------------------------------------------------
+
+#' tune control objects for the meta-learner, with allow_par explicit
+#'
+#' @description
+#' tune's control constructors default to `allow_par = TRUE`, so before
+#' 2026-09-15 the meta-learner tuning and OOF pass dispatched onto any
+#' registered `future::plan()` with no argument to say otherwise. Both calls
+#' now build their control here, from `ensemble(allow_par = )`, and the
+#' result is what the tests assert on.
+#'
+#' @param kind `"grid"` (for `tune_grid()`) or `"resamples"` (for
+#'   `fit_resamples()`).
+#' @param allow_par Logical, from `ensemble()`.
+#' @return A `control_grid` or `control_resamples` object.
+#' @keywords internal
+#' @noRd
+meta_tune_control <- function(kind = c("grid", "resamples"), allow_par = FALSE) {
+
+  kind <- match.arg(kind)
+
+  if (kind == "grid") {
+
+    tune::control_grid(save_pred = FALSE, allow_par = allow_par,
+                       parallel_over = "resamples")
+
+  } else {
+
+    tune::control_resamples(save_pred = TRUE, allow_par = allow_par,
+                            parallel_over = "resamples")
+
+  }
+
+}
+
+## ---------------------------------------------------------------------------
 ## horizons_metric_set()
 ## ---------------------------------------------------------------------------
 
@@ -310,7 +347,8 @@ fit_tuned_meta_learner <- function(object,
                                    spec,
                                    grid,
                                    extract_weights,
-                                   seed = DEFAULT_ENSEMBLE_SEED) {
+                                   seed      = DEFAULT_ENSEMBLE_SEED,
+                                   allow_par = FALSE) {
 
   started <- Sys.time()
 
@@ -346,7 +384,7 @@ fit_tuned_meta_learner <- function(object,
                       resamples = folds,
                       grid      = grid,
                       metrics   = horizons_metric_set(),
-                      control   = tune::control_grid(save_pred = FALSE)),
+                      control   = meta_tune_control("grid", allow_par)),
       log_error          = FALSE,
       capture_conditions = TRUE
     )
@@ -424,7 +462,7 @@ fit_tuned_meta_learner <- function(object,
       final_wflow,
       resamples = folds,
       metrics   = horizons_metric_set(),
-      control   = tune::control_resamples(save_pred = TRUE)
+      control   = meta_tune_control("resamples", allow_par)
     ),
     log_error          = FALSE,
     capture_conditions = TRUE
