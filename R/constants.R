@@ -171,8 +171,20 @@ SHARED_ARG_NAMES <- c(
   "bayesian_iter",
   "prune",
   "prune_threshold",
-  "allow_par",
   "seed",
   "checkpoint_dir",
   "pkg_version"
 )
+
+# Vocabulary of evaluate(parallelize_over = ). "both" (a nested plan) is
+# deliberately absent for v1; see resolve_parallel_axis().
+PARALLELIZE_OVER_VALUES <- c("auto", "configs", "resamples")
+
+# future.globals.maxSize for the configs-axis dispatch, set by evaluate() for
+# the duration of the call. Declared rather than inherited so a payload
+# regression fails loudly with future's "size of the globals ... exceeds"
+# error instead of R's opaque "long vectors not supported yet". Measured
+# 2026-09-14 on 17,788 x 1,701 (KSSL clay at 2 cm-1): 417.6 MB per worker
+# after the three serialization fixes. 1 GiB is ~2.4x headroom. The footprint
+# tests in test-evaluate-parallel.R are the upstream guard.
+EVAL_WORKER_PAYLOAD_LIMIT <- 1 * 1024^3
