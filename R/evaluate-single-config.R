@@ -49,7 +49,13 @@ evaluate_single_config <- function(config_row,
                                    seed            = 42L) {
 
   start_time <- Sys.time()
-  set.seed(seed)
+
+  ## The RNG kind is pinned, not just the seed. furrr_options(seed = TRUE)
+  ## switches a worker to L'Ecuyer-CMRG, and set.seed() with kind = NULL leaves
+  ## that in place — so the same seed produced different streams in the parent
+  ## (Mersenne-Twister) and in a worker, and sequential and parallel runs were
+  ## not numerically equal. Naming the kind makes them agree.
+  set.seed(seed, kind = "Mersenne-Twister")
 
   config_id      <- config_row$config_id
   outcome_col    <- role_map$variable[role_map$role == "outcome"]

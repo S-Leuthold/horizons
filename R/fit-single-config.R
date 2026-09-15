@@ -46,7 +46,12 @@ fit_single_config <- function(config_row,
                               seed                = 42L) {
 
   start_time <- Sys.time()
-  set.seed(seed)
+
+  ## Pin the RNG kind as well as the seed, for the same reason as
+  ## evaluate_single_config(): a worker started under
+  ## furrr_options(seed = TRUE) is on L'Ecuyer-CMRG, and set.seed() alone
+  ## would not reset it.
+  set.seed(seed, kind = "Mersenne-Twister")
 
   config_id      <- config_row$config_id
   outcome_col    <- role_map$variable[role_map$role == "outcome"]

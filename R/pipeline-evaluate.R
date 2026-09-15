@@ -539,26 +539,14 @@ evaluate <- function(x,
     ## Filter to pending configs only
     pending_configs <- configs[configs$config_id %in% pending_ids, ]
 
-    ## Assemble everything a worker needs into one value.
+    ## Assemble everything a worker needs into one value. Two serialization
+    ## traps are avoided here; R/utils-resamples.R's header has the mechanism
+    ## and the measurements.
     ##
-    ## Two separate serialization traps are avoided here, and both were measured
-    ## on the KSSL clay training set at 2 cm-1 (17,788 x 1,701).
-    ##
-    ## 1. The split and the CV folds share one data frame by reference, so
-    ##    sending them directly costs one + v serialized copies of the table:
-    ##    1,158.7 MB against 231.7 MB of unique data. Send the table once with
-    ##    integer indices and rebuild worker-side (R/utils-resamples.R).
-    ##
-    ## 2. A function defined here would close over THIS frame, and R serializes
-    ##    a closure together with its enclosing environment. That shipped every
-    ##    local in evaluate() — including `split` and `cv_fold_obj` again —
-    ##    for a real payload of 2.26 GiB no matter what was passed explicitly.
-    ##    So the worker body lives at top level (evaluate_config_worker), is
-    ##    passed to future_map() by name, and receives its inputs as an
-    ##    argument. Its environment is the package namespace, which future
-    ##    resolves by name instead of serializing.
-    ##
-    ## Do not inline this back into an anonymous function.
+    ## Do not inline the worker back into an anonymous function. A closure
+    ## defined in this frame is serialized together with it, so every local —
+    ## `split` and `cv_fold_obj` included — would ship to every worker no matter
+    ## what is passed explicitly.
 
     ## Workers resolve the horizons namespace by NAME, which finds the INSTALLED
     ## library — not this source tree. Under pkgload the installed copy may not
