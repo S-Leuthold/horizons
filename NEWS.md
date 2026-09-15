@@ -54,6 +54,18 @@
   Hyperparameter selection and pruning for transformed configs change as a
   result; `transformation = "none"` results are bit-identical.
 
+* Back-transformed predictions are now floored at zero on every path, not
+  only in `predict()` (#53). `back_transform_predictions()` applies the floor
+  for every transformation, including `"none"`, and the evaluation, OOF and
+  UQ-calibration paths call it unconditionally, so leaderboard metrics are
+  scored on the same predictions a deployed model serves. Previously only the
+  `sqrt` branch clamped, so a `log`/`log10`/`none` model that extrapolated
+  below zero was scored on values it would never emit, and the ensemble's
+  meta-learner trained on unfloored member OOF predictions while receiving
+  floored member predictions at serve time. Metrics move only for configs
+  that produced negative original-scale predictions. The deploy-time
+  `upper_bound` guardrail is unchanged and still opt-in.
+
 # horizons 0.9.0
 
 ## Major Changes

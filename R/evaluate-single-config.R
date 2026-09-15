@@ -369,25 +369,24 @@ evaluate_single_config <- function(config_row,
 
   test_predictions <- tune::collect_predictions(last_fit_obj)
 
-  if (needs_back_transformation(transformation)) {
+  ## Unconditional, like predict(): the "none" branch is a passthrough, and
+  ## the zero floor inside back_transform_predictions() must apply to every
+  ## transformation so evaluation scores what deploy serves (#53).
+  bt_result <- safely_execute(
+    back_transform_predictions(test_predictions$.pred, transformation,
+                               warn = FALSE),
+    log_error          = FALSE,
+    capture_conditions = TRUE
+  )
 
-    bt_result <- safely_execute(
-      back_transform_predictions(test_predictions$.pred, transformation,
-                                 warn = FALSE),
-      log_error          = FALSE,
-      capture_conditions = TRUE
-    )
+  if (!is.null(bt_result$error)) {
 
-    if (!is.null(bt_result$error)) {
-
-      return(create_failed_result(config_id,
-        paste0("Back-transformation failed: ", bt_result$error$message)))
-
-    }
-
-    test_predictions$.pred <- bt_result$result
+    return(create_failed_result(config_id,
+      paste0("Back-transformation failed: ", bt_result$error$message)))
 
   }
+
+  test_predictions$.pred <- bt_result$result
 
   ## -----------------------------------------------------------------------
   ## Step 13: Compute original-scale metrics

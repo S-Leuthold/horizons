@@ -154,24 +154,22 @@ fit_uq <- function(fitted_workflow,
 
   calib_point_preds <- calib_point_result$result$.pred
 
-  ## Back-transform if response was transformed
-  if (needs_back_transformation(transformation)) {
+  ## Back-transform, unconditionally: the zero floor inside
+  ## back_transform_predictions() must reach the calibration residuals too,
+  ## since the intervals are served around floored point predictions (#53).
+  bt_result <- safely_execute(
+    back_transform_predictions(calib_point_preds, transformation, warn = FALSE),
+    log_error          = FALSE,
+    capture_conditions = TRUE
+  )
 
-    bt_result <- safely_execute(
-      back_transform_predictions(calib_point_preds, transformation, warn = FALSE),
-      log_error          = FALSE,
-      capture_conditions = TRUE
-    )
+  if (!is.null(bt_result$error)) {
 
-    if (!is.null(bt_result$error)) {
-
-      return(NULL)
-
-    }
-
-    calib_point_preds <- bt_result$result
+    return(NULL)
 
   }
+
+  calib_point_preds <- bt_result$result
 
   ## Bake calibration features through the same prepped recipe
   calib_features <- recipes::bake(

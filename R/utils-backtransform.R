@@ -9,6 +9,15 @@
 #' inverse is `exp(x) - 1`, NOT `exp(x)`. Similarly, `step_log(base = 10,
 #' offset = 1)` computes `log10(x + 1)`, so the inverse is `10^x - 1`.
 #'
+#' Original-scale output is floored at zero for every transformation,
+#' including `"none"`: the soil properties this package targets are
+#' non-negative by physical constraint, and `predict()` has always enforced
+#' that. Flooring here means the evaluation, OOF and calibration paths score
+#' the same predictions a deployed model would serve, rather than a vector
+#' that differs from it wherever a model extrapolated below zero. The
+#' `upper_bound` guardrail is deliberately not applied the same way, because
+#' fit-time ranking must see raw upper-tail behaviour.
+#'
 #' @param predictions Numeric vector of predictions on the transformed scale.
 #' @param transformation Character: "none", "log", "sqrt", or "log10".
 #' @param warn Logical. Warn on edge cases (very large values, negatives)?
@@ -22,7 +31,7 @@
 #'   caller that passes a bound has opted into the guardrail and must see it
 #'   trip (visible recoverable failure over silent drift).
 #'
-#' @return Numeric vector on the original response scale.
+#' @return Numeric vector on the original response scale, floored at zero.
 #' @export
 back_transform_predictions <- function(predictions, transformation, warn = TRUE,
                                        upper_bound = NULL) {
@@ -110,9 +119,18 @@ back_transform_predictions <- function(predictions, transformation, warn = TRUE,
 
   )
 
+  ## Physical floor: every response this package targets is non-negative, so a
+  ## negative original-scale value is not a model behaviour worth scoring or
+  ## serving. Applied uniformly after the switch so every transform (including
+  ## "none" and the unknown-transform passthrough) is covered, and applied here
+  ## rather than at each caller so evaluation scores exactly what predict()
+  ## serves (#53). The sqrt clamp above is a different thing: it prevents a
+  ## negative sqrt-scale value from squaring into a wrong positive.
+  out <- floor_at_zero(out)
+
   ## Deploy-time guardrail: winsorize the original-scale output to the caller's
-  ## bound. Applied uniformly after the switch so every transform (including
-  ## "none" and the unknown-transform passthrough) is covered.
+  ## bound. Unlike the floor this is opt-in, because fit-time ranking must see
+  ## raw upper-tail behaviour.
   apply_response_bound(out, upper_bound)
 
 }

@@ -139,6 +139,35 @@ describe("back_transform_predictions()", {
 
   })
 
+  it("floors negative original-scale output at zero for every transformation (#53)", {
+
+    ## log / log10: a transformed-scale value below 0 back-transforms below 0
+    ## (exp(-2) - 1 = -0.86). Deploy floors it; evaluation must score the same
+    ## vector. "none": a model can predict a negative clay percent directly.
+    expect_equal(back_transform_predictions(c(-2, 0, 1),   "log",   warn = FALSE),
+                 c(0, 0, exp(1) - 1))
+    expect_equal(back_transform_predictions(c(-2, 0, 1),   "log10", warn = FALSE),
+                 c(0, 0, 9))
+    expect_equal(back_transform_predictions(c(-1, 0, 2.5), "none",  warn = FALSE),
+                 c(0, 0, 2.5))
+
+    ## NAs survive the floor
+    expect_equal(back_transform_predictions(c(-1, NA), "none"), c(0, NA))
+
+  })
+
+  it("applies the floor before the upper bound, so both hold at once", {
+
+    expect_warning(
+      r <- back_transform_predictions(c(-3, 0.5, 10), "log", warn = FALSE,
+                                      upper_bound = 5),
+      "winsorized"
+    )
+
+    expect_equal(r, c(0, exp(0.5) - 1, 5))
+
+  })
+
   it("is an exact round-trip: inverse(forward(y)) == y for every transform", {
 
     ## Property test that would have caught the original exp(x) vs exp(x)-1
