@@ -20,8 +20,12 @@ fit(
 
 \item{n_best}{Integer. Number of top configurations to re-tune. Default 5.}
 
-\item{metric}{Character or NULL. Metric for ranking. If NULL, uses the
-rank_metric from \code{evaluate()}. Default NULL.}
+\item{metric}{Character or NULL. Metric for ranking the candidate
+configs, by bare name (\code{"rpd"}, \code{"rmse"}, ...). If NULL, uses the
+rank_metric from \code{evaluate()}. Ranking reads the cross-validated value
+at each config's selected hyperparameters (\verb{evaluation$results$cv_<metric>}),
+never the test-set column, so the test sets stay held out from
+selection. Default NULL.}
 
 \item{compute_uq}{Logical. Train UQ components (quantile model +
 conformal calibration). Default TRUE.}
@@ -33,7 +37,10 @@ Default TRUE.}
 
 \item{allow_par}{Logical. Enable parallel CV folds. Default FALSE.}
 
-\item{seed}{Integer. Random seed for Split F and CV folds. Default 307L.}
+\item{seed}{Integer. Random seed for CV folds and, through
+\code{fit_split_seed()} (\code{seed + 1L}), for Split F. The offset keeps Split F
+independent of \code{evaluate()}'s split when both are called with the same
+\code{seed}, which is the default. Default 307L.}
 
 \item{verbose}{Logical. Print progress tree to console. Default TRUE.}
 }
