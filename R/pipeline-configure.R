@@ -36,6 +36,20 @@
 #'   purrr::map(~base |> configure(outcome = .x) |> evaluate() |> fit())
 #' ```
 #'
+#' **Reproducibility:**
+#'
+#' `evaluate()` and `fit()` pin the RNG seed and kind, so a run is
+#' repeatable from its recorded `seed` for every model except `cubist`.
+#' The Cubist C implementation is not bit-reproducible when
+#' `committees > 1`: repeated fits on identical data under an identical
+#' `set.seed()`, or under an explicit `cubistControl(seed = )`, can differ in
+#' the fourth significant figure of a fold metric (measured on Cubist
+#' 0.6.0). `committees = 1` is stable. The effect is small, but it can flip
+#' `select_best()` between near-tied grid points and move a reported test
+#' metric by a few percent, so a `cubist` result should be read as
+#' reproducible to that tolerance rather than exactly. `rf` and the other
+#' engines are deterministic given `seed`. See GitHub issue #51.
+#'
 #' @param x `horizons_data`. Object with response data attached via
 #'   `add_response()`.
 #' @param outcome `character(1) or NULL`. Which response variable to model.
