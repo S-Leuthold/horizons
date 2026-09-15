@@ -14,7 +14,8 @@ fit_tuned_meta_learner(
   spec,
   grid,
   extract_weights,
-  seed = DEFAULT_ENSEMBLE_SEED
+  seed = DEFAULT_ENSEMBLE_SEED,
+  allow_par = FALSE
 )
 }
 \arguments{

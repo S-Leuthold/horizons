@@ -10,7 +10,8 @@ fit_ensemble_xgb(
   oof,
   rank_metric,
   optimize = TRUE,
-  seed = DEFAULT_ENSEMBLE_SEED
+  seed = DEFAULT_ENSEMBLE_SEED,
+  allow_par = FALSE
 )
 }
 \arguments{
