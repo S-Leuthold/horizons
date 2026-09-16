@@ -629,3 +629,90 @@ describe("step_transform_spectra() surfaces unusable spectra", {
   })
 
 })
+
+## =========================================================================
+## transform_spectra_matrix: the matrix path equals the row-wise reference
+## =========================================================================
+##
+## bake() used to loop process_spectra_row() over rows. The matrix call must
+## give the same numbers for every method, the width prep() promises, and
+## keep each row's fate independent of the others (2026-09-16).
+
+describe("transform_spectra_matrix()", {
+
+  methods <- c("raw", "sg", "snv", "deriv1", "deriv2", "snv_deriv1", "snv_deriv2")
+
+  it("matches process_spectra_row() for every method", {
+
+    set.seed(11)
+    X <- matrix(rnorm(25 * 41), nrow = 25)
+
+    for (m in methods) {
+
+      ref <- do.call(rbind, lapply(seq_len(nrow(X)), function(i) {
+        horizons:::process_spectra_row(X[i, ], preprocessing = m, window_size = 9)
+      }))
+      got <- horizons:::transform_spectra_matrix(X, preprocessing = m, window_size = 9)
+
+      expect_equal(unname(got), unname(ref), tolerance = 1e-12, label = m)
+      expect_equal(ncol(got), ncol(X) - 8, label = m)
+      expect_null(dimnames(got))
+
+    }
+
+  })
+
+  it("honours window_size in the output width for every method", {
+
+    X <- matrix(rnorm(5 * 41), nrow = 5)
+
+    for (w in c(5, 7, 11)) {
+      for (m in methods) {
+        got <- horizons:::transform_spectra_matrix(X, preprocessing = m, window_size = w)
+        expect_equal(ncol(got), ncol(X) - (w - 1), label = paste(m, w))
+      }
+    }
+
+  })
+
+  it("keeps rows independent: an all-NA row is NA, its neighbours are not", {
+
+    set.seed(12)
+    X      <- matrix(rnorm(10 * 41), nrow = 10)
+    clean  <- horizons:::transform_spectra_matrix(X, "snv_deriv1")
+    X[4, ] <- NA_real_
+    got    <- horizons:::transform_spectra_matrix(X, "snv_deriv1")
+
+    expect_true(all(is.na(got[4, ])))
+    expect_equal(got[-4, ], clean[-4, ], tolerance = 1e-12)
+
+  })
+
+  it("confines a single NA to that row's convolution window", {
+
+    set.seed(13)
+    X        <- matrix(rnorm(6 * 41), nrow = 6)
+    X[2, 20] <- NA_real_
+    got      <- horizons:::transform_spectra_matrix(X, "deriv1", window_size = 9)
+
+    na_per_row <- rowSums(is.na(got))
+    expect_equal(na_per_row[-2], rep(0, 5))
+    expect_equal(na_per_row[2], 9)              # 2 * half_window + 1
+
+  })
+
+  it("returns the right shape for zero rows", {
+
+    got <- horizons:::transform_spectra_matrix(matrix(numeric(0), 0, 41), "snv")
+    expect_equal(dim(got), c(0L, 33L))
+
+  })
+
+  it("rejects an unknown method", {
+
+    expect_error(horizons:::transform_spectra_matrix(matrix(rnorm(41), 1), "nope"),
+                 "Unknown preprocessing type")
+
+  })
+
+})
