@@ -22,6 +22,11 @@ while true; do
     for p in $(pgrep -f '[-]-file=dev/experiments|[R]script dev/experiments'); do kill -9 "$p" 2>/dev/null; done
     for p in $(pgrep -f '[w]orkRSOCK'); do kill -9 "$p" 2>/dev/null; done
     sleep 2
+    ## callr workers (future.callr) do not match the patterns above and survive
+    ## their parent's death as orphans holding their full footprint (2026-09-16:
+    ## ten of them kept 53 GB after the kill). An orphan has PPID 1; a live R
+    ## console or Steve's R kernel does not, so this only reaps the leftovers.
+    for p in $(ps -o pid=,ppid=,args= -C R | awk '$2 == 1 && /--slave --no-save --no-restore/ {print $1}'); do kill -9 "$p" 2>/dev/null; done
     echo "$(date -Iseconds) WATCHDOG: killed; MemAvailable now $(awk '/MemAvailable/{printf "%d", $2/1024/1024}' /proc/meminfo) GB" >> "$LOG"
     exit 1
   fi
