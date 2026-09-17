@@ -1,11 +1,70 @@
 # Experiment 2 — the configuration × structure factorial
 
-**Status:** designed, not built. Written 2026-09-14 to be picked up in a later session.
+**Status:** superseded on 2026-09-16. The five-arm factorial below was designed on 2026-09-14 and never run. What ran instead was a shakedown, a learning curve, the arm-P-versus-arm-M pivot, and a locality curve, and their results ended the factorial: locality is real, larger than the learner effect, and the design moved to a training-set selection verb, specified in `../../specs/v1-refactor/select-training-design.md`. The design section is kept as the record of what was planned and why it was dropped.
 **Predecessor:** `../2026-09-local-strategy/` — read its README and `results/verdict.md` first.
 
 ---
 
-## Why there is a second experiment
+## What ran (2026-09-15 to 16)
+
+Every script runs from `package/` against the installed package, reuses experiment 1's snapshot, splits and helpers, and writes only under this directory's `results/` (gitignored, so the summary tables are reproduced here). All at 2 cm⁻¹ on the KSSL snapshot; `test` is experiment 1's fixed held-out split (clay 5,239 rows, oc 9,162, pH 5,686).
+
+| script | question | result dir |
+|---|---|---|
+| `00-shakedown.R` (`run_shakedown.sh`) | what the M2/M3 parallelism costs on the real library | `results/shakedown*/` |
+| `01-learning-curve.R` (`run_learning_curve.sh`), `02-learning-curve-figure.R` | does accuracy need all 17,788 clay rows | `results/learning-curve/` |
+| `03-pivot-pm.R` (`run_pivot.sh`) | global PLS against memory-based learning, learner held to PLS | `results/pivot/` |
+| `04-locality-curve.R` (`run_locality.sh`) | how coarse can the neighbourhood be | `results/locality-curve/` |
+| `pm-helpers.R` | shared by 03 and 04; first block verbatim from experiment 1's `06-D-mbl.R` | |
+
+### Shakedown
+
+The 9/15 multisession run was killed by the watchdog: persistent workers never return memory to the OS (glibc keeps the fold's sub-mmap-threshold allocations resident), so finished plsr workers sat at 3 to 4 GB and oc dispatched onto memory already spent. `00-shakedown.R` now defaults to `future.callr`, one fresh process per config, which reproduced the multisession numbers exactly and released 7 GB within two minutes of the plsr configs finishing. Evaluate's peak is the startup spike when every worker preps the full table at once (clay 18.5 GB at startup, 10 to 11 GB steady, `fit()` with UQ and AD 23.3 GB), not steady state. Vectorizing `step_transform_spectra` (branch `feat/vectorize-transform-spectra`) is bit-identical and 3 to 5× faster per bake but does not move the peak. A tuning-only hoist of SNV and the derivative out of the folds was built, proved equivalent, made the startup spike worse (24.7 GB), and was deleted when the pivot showed the memory work was serving the arms that lose on accuracy. Its measurements survive in the 2026-09-16 session log and horizons #62.
+
+### Learning curve (clay, nested subsamples, fixed test rows)
+
+| n_train | cubist_snv_pca RPD | RMSE | plsr_snv_deriv1_pca RPD | RMSE |
+|---|---|---|---|---|
+| 556 | 2.40 | 6.32 | 2.47 | 6.16 |
+| 1,112 | 2.65 | 5.74 | 2.54 | 5.99 |
+| 2,224 | 2.86 | 5.31 | 2.69 | 5.65 |
+| 4,447 | 3.15 | 4.82 | 2.75 | 5.53 |
+| 8,894 | 3.50 | 4.35 | 2.80 | 5.42 |
+| 17,788 | 3.87 | 3.93 | 2.83 | 5.37 |
+
+No plateau for Cubist: each doubling still buys 0.3 to 0.4 RPD and the last doubling is the largest step. plsr saturates by a quarter of the rows, but plsr is not the winning learner. So thinning the library does not dissolve the memory problem. Full-n cubist on the resamples axis: evaluate 341 s, fit 539 s; the whole curve ran in 31 min on 5 callr workers.
+
+### Pivot (learner held to PLS on both sides)
+
+| property | M: mbl, wapls 5-20, k by NNv | best global PLS (120 comps) | exp. 1 global Cubist, 4 cm⁻¹ | exp. 1 mbl, 4 cm⁻¹ |
+|---|---|---|---|---|
+| clay (RPD / RMSE) | **4.63** / 3.29 (snv_deriv1, k = 400) | 3.38 / 4.49 (snv) | 4.28 | 4.70 |
+| oc | **11.27** / 1.38 (snv, k = 200) | 7.08 / 2.20 (snv, wapls) | 8.70 / 1.79 | 11.42 / 1.36 |
+| pH | **3.67** / 0.338 (snv_deriv1, k = 400) | 2.75 / 0.451 (snv_deriv1) | 3.41 / 0.363 | 3.69 / 0.336 |
+
+Global PLS was still improving at 60 components on clay and flat by 90 to 120. Coverage at the 90 % level held between 0.897 and 0.908 on every arm. Locality beats the best global PLS on every property by more than a full RPD unit, and beats the global Cubist too, so the effect is locality and not supervised dimension reduction. Full resolution buys nothing over experiment 1's 4 cm⁻¹ runs for the local model.
+
+### Locality curve (clay, 1,000 held-out unknowns, wapls 5-20 fixed)
+
+| k | 50 | 100 | 200 | 400 | 800 | 1,600 | 3,200 | 6,400 | 12,800 |
+|---|---|---|---|---|---|---|---|---|---|
+| RPD | 4.56 | 4.77 | 4.82 | 4.84 | 4.62 | 4.41 | 4.14 | 3.76 | 3.31 |
+| RMSE | 3.26 | 3.12 | 3.09 | 3.08 | 3.22 | 3.37 | 3.59 | 3.95 | 4.50 |
+
+The peak is at k = 200 to 400, about 2 % of the library, and the curve decays monotonically to the global value (3.38 at 120 components) by k = 12,800. Experiment 1's GMM library clusters, 1,600 to 3,500 rows under Cubist, sit on this curve at 4.04 to 4.09: coarse locality gives most of the gain back. Neighbour validation (NNv) was optimistic at large k.
+
+### Where this leaves the design
+
+- Arms G, L-fixed and L-select are dropped. Clustering the *library* is measured (experiment 1 arms B, C, E; the curve above) and loses to tight neighbourhoods for structural reasons.
+- Arm M becomes a model in the configuration grid (`mbl`, resemble engine, k a tuning parameter), not a structural mode. Separate design, not yet written.
+- The product problem is a user with a batch of spectra and a laptop, not maximum accuracy on a 30-core box. The design is a selection verb that draws a training set from the pool as the union of per-target k-nearest neighbourhoods and hands it to the unchanged grid: `../../specs/v1-refactor/select-training-design.md`, with `mbl-prior-art.md` and `selection-prior-art.md` beside it.
+- Owed before the verb is implemented, in the spec's order: the coherent-batch experiment (about 100 spectrally coherent targets, k = 400 union pool, ordinary grid on the pool, against per-sample mbl on the same targets, coverage reported), the metric swap (Mahalanobis-on-PCA against Euclidean and a kNN-average floor), and the similarity-versus-search comparison against `resemble::gesearch()` and an RS-LOCAL-style subset.
+
+Operational notes from the run: the `mbl` stage exceeds R's 2 GB serialization limit as a future global, so the dissimilarity is computed once in the parent and sliced per chunk (bit-identical to mbl's own path), and it runs on forked multicore rather than callr. Ten mbl workers at full resolution pushed MemAvailable under 15 GB; `watchdog.sh` now also reaps orphaned callr workers by PPID, because the first kill left about 53 GB of orphans behind.
+
+---
+
+## Why there was going to be a second experiment (written 2026-09-14)
 
 Experiment 1 compared five modelling *structures* (global, clustered, clustered with per-cluster config selection, memory-based learning, soft assignment) on three properties, using a deliberately small configuration grid. It produced a verdict — global models ship, locality deferred — but three things about that verdict do not survive scrutiny.
 
@@ -19,7 +78,7 @@ Experiment 1 compared five modelling *structures* (global, clustered, clustered 
 
 ---
 
-## The design
+## The design as written on 2026-09-14 (not run)
 
 Two crossed grids, plus one structure that does not decompose into them.
 
@@ -61,6 +120,8 @@ hz |> evaluate(allow_par = TRUE, output_dir = "output/run")   # parallelize_over
 
 The scripts must run the **installed** package (`R CMD INSTALL`), not `devtools::load_all()`: the configs axis dispatches to workers that load the installed horizons and refuses to run under pkgload. `helpers.R::require_fresh_install()` guards this. Tracking issue **#48**.
 
+**Shakedown (2026-09-15).** `00-shakedown.R` runs the merged design once on the real library at 2 cm⁻¹ before anything here is built on it: six configs (cubist, rf, plsr × snv, snv_deriv1, all PCA), six workers, three properties, `parallelize_over = "auto"` resolving to the configs loop. It records the loop used, seconds per config, `fit()` time, fitted-object size, and memory from the watchdog and RSS logs, all under `results/shakedown/`. It touches nothing in experiment 1. Those numbers, not experiment 1's eight-worker timings, are the cost model for the grid decisions below. Launch with `run_shakedown.sh`.
+
 Two more from experiment 1 that will bite this run specifically:
 
 - **#38** (pruned configs unusable + scale-blind prune test) — cost 90 minutes of discarded tuning on the log-transformed property. Workaround in the experiment-1 scripts is `prune = FALSE`; the real fix is better.
@@ -68,7 +129,7 @@ Two more from experiment 1 that will bite this run specifically:
 
 ---
 
-## Open decisions — Sam's calls before this can be built
+## Open decisions as of 2026-09-14 (overtaken by the pivot)
 
 **1. The configuration grid.** Horizons offers 9 models × 7 preprocessings × 5 feature-selection methods = 315 per property, which is not sensible. The assistant's instinct is ~5 models spanning families, 4 preprocessings, 4 feature-selection methods = 80 per property. Specifically to decide:
 
