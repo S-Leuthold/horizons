@@ -53,12 +53,41 @@ Global PLS was still improving at 60 components on clay and flat by 90 to 120. C
 
 The peak is at k = 200 to 400, about 2 % of the library, and the curve decays monotonically to the global value (3.38 at 120 components) by k = 12,800. Experiment 1's GMM library clusters, 1,600 to 3,500 rows under Cubist, sit on this curve at 4.04 to 4.09: coarse locality gives most of the gain back. Neighbour validation (NNv) was optimistic at large k.
 
+### Coherent batch (2026-09-17): does one pool drawn around a real batch keep the per-sample gain?
+
+`05-coherent-batch.R` (`run_coherent.sh`) and `06-mbl-sweep.R` (`run_mbl_sweep.sh`); results under `results/coherent-batch/`. Pool: oc `train_core`, 31,130 rows, at 4 cm⁻¹. Two batches, each scored on its own rows only. **moys**: 99 MOYS samples (Michigan, 10 farms, 0-10 cm, bulk C 0.44 to 3.6 %, scanned at CSU, so an instrument transfer on top of locality; replicate scans averaged, interpolated onto the pool grid). **kssl**: the within-library control, 101 oc test rows nearest a seeded sample at 40.57 N 99.69 W (Nebraska, 201 km radius, C 0.11 to 5.56 %). Nearest-pool distance, median: moys 3.4, kssl 1.1 scaled-score units. Arms: **G** experiment 1's global Cubist (loaded from its checkpoint); **B** the union of every target's k nearest pool rows, then an eight-config grid (cubist, rf, plsr × snv, snv_deriv1 on PCA, plus plsr on the full width), evaluate() picks, fit() refits; **C** the targets clustered first (k-means, silhouette, floor 30), one pool and model per cluster; **M** per-sample `resemble::mbl` on the full pool, wapls 5-20. Headline metric RMSE (% C) with bias; RPD for continuity only, the MOYS range is narrow.
+
+| batch | arm | k | pool rows | RMSE | bias | CCC |
+|---|---|---|---|---|---|---|
+| moys | G global | | 31,130 | 0.354 | +0.104 | 0.877 |
+| moys | B batch | 100 / 200 / 400 / 800 | 1,891 / 2,999 / 4,660 / 6,830 | 0.343 / 0.343 / 0.345 / 0.477 | -0.004 / +0.036 / +0.063 / +0.282 | 0.885 / 0.877 / 0.877 / 0.811 |
+| moys | C cluster (2) | 100 / 200 / 400 / 800 | 2,174 / 3,585 / 5,850 / 9,168 | **0.321** / 0.337 / 0.344 / 0.339 | -0.003 / +0.055 / +0.081 / +0.033 | 0.894 / 0.882 / 0.879 / 0.877 |
+| moys | M mbl, snv | 50 … 1,600 | 31,130 | 0.528 → 0.398 monotone | +0.34 → +0.19 | |
+| moys | M mbl, snv_deriv1 | 50 … 1,600 | 31,130 | 0.482 → 0.395 monotone | +0.23 → +0.14 | |
+| kssl | G global | | 31,130 | 0.120 | -0.009 | 0.993 |
+| kssl | B batch | 100 / 200 / 400 / 800 | 3,426 / 5,130 / 7,336 / 9,960 | 0.118 / 0.123 / 0.117 / 0.119 | ≤ +0.02 | 0.993 |
+| kssl | C cluster (collapsed to 1) | 400 | 7,336 | **0.113** | +0.002 | 0.994 |
+| kssl | M mbl, snv | 50 … 1,600 | 31,130 | 0.138 (k 100) to 0.168 | ≤ +0.02 | |
+| kssl | M mbl, snv_deriv1 | 50 … 1,600 | 31,130 | 0.130 (k 100, 1,600) to 0.159 | ≤ +0.02 | |
+
+Cross-check on the kssl batch, scored on exactly its 101 rows: yesterday's pivot M (2 cm⁻¹, snv, k 200, full library) 0.159; experiment 1's D (snv_deriv1, k 400) 0.153; experiment 1's A global Cubist 0.120. So MBL's loss on this batch is the batch, not today's setup, and its errors are spread across the C range rather than in a tail.
+
+Findings:
+
+- **The union pool does not keep the per-sample gain on-library; it is coarse locality.** On the Nebraska batch the pool equals global (0.113 to 0.123 against 0.120), which is what the locality curve predicted for pools of thousands of rows. Clustering the targets first added nothing on either batch (C ≈ B; kssl collapsed to one cluster).
+- **Per-sample MBL is not reliably better than global.** It beat global Cubist by a wide margin on the full 9,162-row oc test set (pivot, 2026-09-16) and loses to it by a third on this coherent regional batch at every k and both preprocessings. The pivot's locality gain is an average over a heterogeneous library. Distance does not predict it: this batch is close to the library.
+- **Off-library, per-sample locality hurts and the pool wins.** On MOYS, MBL's RMSE and bias fall monotonically as k grows and are still falling at 1,600, the reverse of the within-library curve: a tight neighbourhood around an off-library sample is a one-sided slice of the library's edge. The derivative does not fix it. The pool with one model beats global by about 10 % RMSE and removes a +0.10 bias.
+- **Pool-internal CV can choose the wrong model for the targets.** moys B at k 800 switched its winner from snv_deriv1 Cubist to snv Cubist and took a +0.28 bias; the same preprocessing that failed for MBL. CV inside the pool answers "which model predicts library rows like these", not "which predicts this batch". Off-library, honest model choice needs the user's references (`spike()`).
+- **The union pool at k contains every target's k nearest by construction**, so `mbl` run on the pool is `mbl` on the library at a twentieth of the size. The selection verb is not where accuracy comes from; it is what makes both a single model and per-sample fits affordable on a laptop, with validation on the batch choosing between them.
+
+Two horizons defects surfaced by the MOYS transfer, filed as #64 (`standardize()` anchors its resampling grid at the data's own max wavenumber, so two sources never share an axis) and #65 (`predict()` on a deserialized fit fails unless the `workflows` namespace is loaded). The verb spec was revised the same evening to own the reconciliation of pool and targets.
+
 ### Where this leaves the design
 
 - Arms G, L-fixed and L-select are dropped. Clustering the *library* is measured (experiment 1 arms B, C, E; the curve above) and loses to tight neighbourhoods for structural reasons.
 - Arm M becomes a model in the configuration grid (`mbl`, resemble engine, k a tuning parameter), not a structural mode. Separate design, not yet written.
 - The product problem is a user with a batch of spectra and a laptop, not maximum accuracy on a 30-core box. The design is a selection verb that draws a training set from the pool as the union of per-target k-nearest neighbourhoods and hands it to the unchanged grid: `../../specs/v1-refactor/select-training-design.md`, with `mbl-prior-art.md` and `selection-prior-art.md` beside it.
-- Owed before the verb is implemented, in the spec's order: the coherent-batch experiment (about 100 spectrally coherent targets, k = 400 union pool, ordinary grid on the pool, against per-sample mbl on the same targets, coverage reported), the metric swap (Mahalanobis-on-PCA against Euclidean and a kNN-average floor), and the similarity-versus-search comparison against `resemble::gesearch()` and an RS-LOCAL-style subset.
+- The coherent-batch experiment ran 2026-09-17 (section above) and overturned the verb's accuracy premise while keeping its purpose: the pool is the affordable substrate, and a grid on it with `mbl` as a model, validated on the batch, is the shape. Still owed: the metric swap (Mahalanobis-on-PCA against Euclidean and a kNN-average floor), the similarity-versus-search comparison against `resemble::gesearch()` and an RS-LOCAL-style subset, and now the `spike()` validation design, since pool-internal CV cannot choose honestly for off-library targets.
 
 Operational notes from the run: the `mbl` stage exceeds R's 2 GB serialization limit as a future global, so the dissimilarity is computed once in the parent and sliced per chunk (bit-identical to mbl's own path), and it runs on forked multicore rather than callr. Ten mbl workers at full resolution pushed MemAvailable under 15 GB; `watchdog.sh` now also reaps orphaned callr workers by PPID, because the first kill left about 53 GB of orphans behind.
 
