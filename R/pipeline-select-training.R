@@ -40,34 +40,89 @@
 #'
 #' For `"cluster"` and `"sample"` the return is still the single union, and
 #' fitting one model per group is the caller's loop over
-#' `x$selection$groups` for now.
+#' `x$selection$groups` for now. Because nothing downstream reads those
+#' groups yet, the twin subtraction is applied to the union under every scope
+#' but `"global"`: an ordinary `configure() |> evaluate() |> fit()` on a
+#' `"sample"` return would otherwise train on every target's own replicates.
+#' Each group's `pool_ids` are still that target's or cluster's own draw,
+#' after the subtraction.
 #'
 #' **The similarity space.** Distances are measured in a space built for
 #' "similar soil", not "similar baseline", and it never reaches the model:
 #' a user who configures `preprocessing = "raw"` still gets neighbours
 #' chosen on derivative spectra. The default chain is SNV, a Savitzky-Golay
 #' first derivative (window 11, order 2), PCA of the pool to 99 % of
-#' variance, and Mahalanobis distance on the scores. Every step is an
-#' argument. A PCA space and its Mahalanobis scaling are defined by the
-#' population they were fit on; `space_rows` chooses whether that is the
-#' whole pool or, per property, only the rows that have it measured.
+#' variance with a standard-deviation floor on the components retained, and
+#' Mahalanobis distance on the scores. Every step is an argument. A PCA
+#' space and its Mahalanobis scaling are defined by the population they were
+#' fit on; `space_rows` chooses whether that is the whole pool or, per
+#' property, only the rows that have it measured. Under
+#' `space_rows = "measured"` with more than one property the distances in
+#' the record come from different spaces and are not comparable across them,
+#' which is what the `space` column on the distance tables records and why
+#' `.min_distance` is `NA` in that case.
 #'
 #' **Reconciliation.** The targets' wavenumbers are the grid. The pool is
 #' resampled onto them through the same routine `standardize()` uses, so
-#' the training set and the targets share one axis end to end. A pool that
-#' does not cover the targets' range stops the verb; targets finer than the
-#' pool warn.
+#' the training set and the targets share one axis end to end. Either axis
+#' carrying a hole — a spacing more than three times its own median and more
+#' than 30 cm-1 — stops the verb before anything interpolates, because a
+#' resampling spline and a Savitzky-Golay window both run straight across a
+#' gap and invent absorbance at its edges without erroring; a deleted water
+#' band belongs in `mask`, which is applied after the derivative. A pool that
+#' does not cover the targets' range also stops the verb, except within half
+#' the pool's spacing, where the overshooting column is taken at the pool's
+#' endpoint rather than extrapolated and the clamp is recorded and warned
+#' about. Targets finer than the pool warn. Because the grid is the targets',
+#' `window` is a different physical filter in every batch; the width it works
+#' out to in cm-1 is recorded in `settings$window_cm` and printed in the
+#' report.
 #'
-#' **Self-leakage.** A pool row whose spectrum is a target's twin (nearest
-#' distance zero, or below `twin_ratio` times the second-nearest) is
-#' excluded from that target's neighbourhood and reported.
+#' **Self-leakage.** A pool row that sits far closer to a target than that
+#' target's surroundings do — distance zero, or below `twin_ratio` times the
+#' reference distance — is the target's twin: the same sample, present in
+#' both sets or scanned twice. The reference is the 75th percentile of the
+#' target's 50 nearest measured rows, a fixed width rather than the `k` being
+#' drawn, so a cluster of replicate scans cannot set the very number it is
+#' measured against. Every flagged row is dropped from that target's
+#' neighbourhood, spares are fetched so the target still reaches `k`, and the
+#' exclusion is recorded with its target, property, distance and reason.
+#' Except under `scope = "global"`, the flagged rows are also subtracted from
+#' the returned object, since a row excluded from one neighbourhood would
+#' otherwise walk back in through any other target that drew it. Under
+#' `scope = "global"` the check runs and is reported, but the rows stay,
+#' because global returns the whole pool by definition. The membership table
+#' keeps the subtracted rows with `retained = FALSE` rather than dropping
+#' them, so the record still says what each neighbourhood was.
+#'
+#' **Units.** The pool and the targets are compared on raw absorbance
+#' magnitude before the similarity space is built. The comparison is of
+#' spread, the interquartile range, because a unit or gain change multiplies
+#' it: a more-than-twofold difference in IQR warns. The medians are compared
+#' the same way, but only when each dominates its own spread, since a
+#' baseline-offset set has a median near zero whose sign is a coin flip. Two
+#' fold rather than three because natural-log against base-10 absorbance is
+#' 2.303, which is the mismatch most likely to go unnoticed; an instrument
+#' gain difference of about 1.5x stays silent on purpose.
+#'
+#' A pure additive offset is deliberately not flagged. The similarity space
+#' begins with SNV and takes a derivative, and both remove a constant offset,
+#' so it cannot change which neighbours are drawn. It can still matter
+#' downstream: a model preprocessing that preserves offset (`"raw"`, or a
+#' baseline method that does not centre) sees it, and that is the caller's
+#' check to make, not this one. The resemblance check below cannot do this
+#' job either, for the same reason: its space begins with SNV, so a pure unit
+#' difference leaves the scores identical.
 #'
 #' **What the record holds** (`x$selection`): the settings as resolved, the
 #' reconciliation, the pool's identity, the membership table (target by
-#' property by pool row, with distance and rank), the groups, pool sizes
-#' per property against those available, every target's nearest and
-#' mean-of-k distance (the applicability signal at selection time), the
-#' twins excluded, and the clustering when `scope = "cluster"`.
+#' property by pool row, with the space it was measured in, distance, rank,
+#' and whether the row was `retained` in the object after the twin
+#' subtraction), the groups, pool sizes per property against those available, every
+#' target's nearest and mean-of-k distance (the applicability signal at
+#' selection time), the unit comparison, the twins excluded and how many of
+#' them left the union, any target that could not reach `k`, and the
+#' clustering when `scope = "cluster"`.
 #'
 #' @param x `horizons_data.` The targets: the samples to be predicted.
 #' @param pool `horizons_data.` The reference pool, with one or more
@@ -91,6 +146,12 @@
 #'   Default: `"pca"`.
 #' @param ncomp `numeric.` Components: a proportion of variance in (0, 1)
 #'   (PCA only, capped at 100) or an integer count. Default: `0.99`.
+#' @param sdev_floor `numeric.` Components whose standard deviation is below
+#'   this fraction of PC1's leave the distance. Mahalanobis divides each
+#'   component by its standard deviation, so a variance-chosen tail orders of
+#'   magnitude below PC1 would otherwise weigh as much as the dominant
+#'   chemical axes, and those trailing eigenvectors are the least stable part
+#'   of the decomposition. In [0, 1); `0` disables the floor. Default: `0.1`.
 #' @param metric `character.` `"mahalanobis"`, `"euclidean"` or
 #'   `"cosine"`, on the scores. Default: `"mahalanobis"`.
 #' @param space_rows `character.` Which pool rows define the space the
@@ -105,11 +166,17 @@
 #'   count, or `NULL` to choose by silhouette. Default: `NULL`.
 #' @param cluster_min `integer.` `scope = "cluster"` only: the floor on
 #'   cluster size. Default: `30`.
-#' @param twin_ratio `numeric.` The nearest-to-second-nearest ratio below
-#'   which a pool row is a target's twin. Default: an internal constant to
-#'   be calibrated on replicate scans.
+#' @param twin_ratio `numeric.` A pool row is a target's twin when its
+#'   distance to that target is below this fraction of the median distance
+#'   across the target's `k` neighbours. An exact match is always a twin.
+#'   Currently `0.05`, an internal constant still to be calibrated on
+#'   replicate scans, so treat the value as conservative rather than settled.
 #' @param chunk_size `integer.` Targets per distance chunk. Default: `500`.
-#' @param seed `integer.` Seed for the clustering. Default: `1`.
+#' @param seed `integer.` Seed for every stochastic step of the verb: the
+#'   target clustering under `scope = "cluster"`, and the pool sample the
+#'   resemblance check draws its reference distribution from. The caller's
+#'   RNG state is saved and restored, so the verb does not advance it.
+#'   Default: `1`.
 #' @param verbose `logical.` Print the report. Default: `TRUE`.
 #'
 #' @return `horizons_data.` Rows drawn from `pool`, on the targets'
@@ -144,6 +211,7 @@ select_training <- function(x, pool,
                             mask        = NULL,
                             space       = c("pca", "pls"),
                             ncomp       = 0.99,
+                            sdev_floor  = SELECT_SDEV_FLOOR,
                             metric      = c("mahalanobis", "euclidean", "cosine"),
                             space_rows  = c("all", "measured"),
                             clusters    = NULL,
@@ -160,11 +228,19 @@ select_training <- function(x, pool,
   errors <- character()
 
   if (!inherits(x, "horizons_data")) {
+
     errors <- c(errors, cli::format_inline("{.arg x} must be a horizons_data object"))
+
   }
 
   if (!inherits(pool, "horizons_data")) {
+
     errors <- c(errors, cli::format_inline("{.arg pool} must be a horizons_data object"))
+
+  } else {
+
+    errors <- c(errors, check_pool_unpromoted(pool))
+
   }
 
   scope_ok  <- is.character(scope)  && all(scope  %in% c("batch", "cluster", "sample", "global"))
@@ -185,11 +261,24 @@ select_training <- function(x, pool,
   k_ok <- is.numeric(k) && length(k) >= 1L && all(is.finite(k)) && all(k >= 1) && all(k == round(k))
 
   if (!k_ok) {
+
     errors <- c(errors, cli::format_inline("{.arg k} must be a positive integer, or a named vector of them"))
+
+  }
+
+  floor_ok <- is.numeric(sdev_floor) && length(sdev_floor) == 1L &&
+              is.finite(sdev_floor)  && sdev_floor >= 0 && sdev_floor < 1
+
+  if (!floor_ok) {
+
+    errors <- c(errors, cli::format_inline("{.arg sdev_floor} must be a single number in [0, 1); 0 disables the floor"))
+
   }
 
   if (!is.logical(verbose) || length(verbose) != 1L || is.na(verbose)) {
+
     errors <- c(errors, cli::format_inline("{.arg verbose} must be TRUE or FALSE"))
+
   }
 
   ## Properties: the pool's responses ---------------------------------------
@@ -211,23 +300,40 @@ select_training <- function(x, pool,
       unknown <- setdiff(properties, responses)
 
       if (length(unknown)) {
+
         errors <- c(errors, cli::format_inline("{.arg properties} not in the pool's responses: {.val {unknown}} (available: {.val {responses}})"))
+
       }
 
     }
 
-    if (k_ok && length(k) > 1L || (k_ok && !is.null(names(k)))) {
+    if (k_ok && (length(k) > 1L || !is.null(names(k)))) {
 
       missing_k <- setdiff(properties, names(k))
 
       if (length(missing_k)) {
+
         errors <- c(errors, cli::format_inline("A named {.arg k} needs an entry for every property; missing {.val {missing_k}}"))
+
       }
 
     }
 
     if (identical(space, "pls") && length(properties) != 1L) {
+
       errors <- c(errors, cli::format_inline("{.arg space = \"pls\"} selects against one property; name exactly one in {.arg properties}"))
+
+    }
+
+    ## A prior selection's provenance columns would collide on bind_cols ------
+
+    prior <- intersect(c(".drawn_by", ".min_distance", ".group"), names(pool$data$analysis))
+
+    if (length(prior)) {
+
+      errors <- c(errors, cli::format_inline(
+        "{.arg pool} already carries the provenance column{?s} {.val {prior}}, so it is itself a selection; pass the library as it comes from standardize()"))
+
     }
 
   }
@@ -237,8 +343,10 @@ select_training <- function(x, pool,
     cat(cli::col_red(cli::style_bold("! Input validation failed:\n")))
 
     for (i in seq_along(errors)) {
+
       branch <- if (i < length(errors)) "\u251C\u2500" else "\u2514\u2500"
       cat(cli::col_red(paste0("   ", branch, " ", errors[i], "\n")))
+
     }
 
     cat("\n")
@@ -247,11 +355,7 @@ select_training <- function(x, pool,
 
   }
 
-  k_by <- if (is.null(names(k))) {
-    stats::setNames(rep(as.integer(k), length(properties)), properties)
-  } else {
-    stats::setNames(as.integer(k[properties]), properties)
-  }
+  k_by <- resolve_k(k, properties)
 
   if (verbose) cat(paste0("\u251C\u2500 ", cli::style_bold("Selecting training set"), "...\n"))
 
@@ -287,11 +391,30 @@ select_training <- function(x, pool,
   pool_ids <- pool_rc$data$analysis$sample_id
   resp_tbl <- pool_rc$data$analysis[, c("sample_id", properties), drop = FALSE]
 
+  ## Units, before SNV erases the evidence ----------------------------------
+
+  units <- check_photometric_units(rc$matrix, tm$matrix)
+
+  if (units$mismatch) {
+
+    cli::cli_warn(c(
+      "The pool and the targets look like different photometric units or modes",
+      "i" = "Pool absorbance: median {signif(units$pool_median, 3)}, IQR {signif(units$pool_iqr, 3)}",
+      "i" = "Targets: median {signif(units$target_median, 3)}, IQR {signif(units$target_iqr, 3)}",
+      "i" = "Selection proceeds, but a model trained on one unit cannot predict the other"
+    ), class = "horizons_select_warning")
+
+  }
+
   build_space_on <- function(rows) {
+
     y <- if (space == "pls") pool_rc$data$analysis[[properties]][rows] else NULL
+
     build_similarity_space(rc$matrix[rows, , drop = FALSE], rc$wavenumbers,
                            snv = snv, derivative = derivative, window = window,
-                           poly = poly, mask = mask, space = space, ncomp = ncomp, y = y)
+                           poly = poly, mask = mask, space = space, ncomp = ncomp,
+                           sdev_floor = sdev_floor, y = y)
+
   }
 
   sp <- build_space_on(seq_along(pool_ids))
@@ -302,27 +425,75 @@ select_training <- function(x, pool,
   if (space_rows == "measured" && scope != "global") {
 
     spaces_by_property <- lapply(properties, function(p) {
+
       rows <- which(!is.na(resp_tbl[[p]]))
       s    <- build_space_on(rows)
+
       list(space = s, St = project_similarity(s, tm$matrix, tm$wavenumbers), n_rows = length(rows))
+
     })
+
     names(spaces_by_property) <- properties
 
   }
 
+  ## The SG window is in points and the grid is the targets', so the filter's
+  ## physical width follows a choice made two verbs earlier. Record it.
+
+  window_cm <- if (derivative > 0) {
+    as.integer(window) * rc$record$target_grid$resolution
+  } else {
+    NA_real_
+  }
+
+  ## A PLS space is fit against the pool's own responses, so which rows land
+  ## in the training set was decided by their y. No target leakage, but the
+  ## pool-internal CV downstream is optimistic. Stated, not fixed here.
+
+  space_note <- if (space == "pls") {
+    paste0("The similarity space is PLS against ", properties,
+           ", so rows were selected using their own measured values; ",
+           "pool-internal CV is optimistic and the honest score is against the targets")
+  } else {
+    NULL
+  }
+
   if (verbose) {
 
-    chain <- c(if (snv) "SNV", if (derivative > 0) paste0("SG d", derivative, " w", window, " p", poly),
+    sg <- if (derivative > 0) {
+      paste0("SG d", derivative, " w", window, " (", signif(window_cm, 3), " cm\u207B\u00B9) p", poly)
+    } else {
+      NULL
+    }
+
+    chain <- c(if (snv) "SNV", sg,
                if (!is.null(mask)) paste0(nrow(mask), " masked range", if (nrow(mask) > 1) "s"),
                toupper(space))
+    floored <- if (!is.null(sp$ncomp_variance) && sp$ncomp_variance > sp$ncomp) {
+      paste0(" (", sp$ncomp_variance, " by variance, floored at ", sdev_floor, " of PC1 sd)")
+    } else {
+      ""
+    }
+
     cat(paste0("\u2502  \u251C\u2500 Space: ", paste(chain, collapse = " \u2192 "), ", ",
-               sp$ncomp, " components on all ", length(pool_ids), " rows, ", metric, "\n"))
+               sp$ncomp, " components", floored, " on all ", length(pool_ids),
+               " rows, ", metric, "\n"))
 
     if (!is.null(spaces_by_property)) {
+
       for (p in properties) {
+
         cat(paste0("\u2502  \u251C\u2500 Space for ", p, ": ", spaces_by_property[[p]]$space$ncomp,
                    " components on its ", spaces_by_property[[p]]$n_rows, " measured rows\n"))
+
       }
+
+    }
+
+    if (!is.null(space_note)) {
+
+      cat(paste0("\u2502  \u251C\u2500 ", space_note, "\n"))
+
     }
 
   }
@@ -333,16 +504,40 @@ select_training <- function(x, pool,
 
   if (scope == "global") {
 
-    nn <- nearest_neighbours(St, sp$scores, k = min(2L, nrow(sp$scores)), metric = metric,
+    ## No draw, but the twin check still runs: global is the control arm of
+    ## the batch-versus-global comparison, and a control arm whose leakage
+    ## was never measured biases that comparison in a fixed direction. The
+    ## rows stay, because global returns the whole pool by definition.
+
+    ## The twin reference is a fixed width, wider than any replicate cluster
+    ## and independent of k, the same rule draw_neighbours() applies. The
+    ## distances reported are still over k columns: that is the neighbourhood
+    ## a batch-scope run would have drawn, and the number the comparison
+    ## against it rests on.
+
+    k_twin <- min(max(k_by), nrow(sp$scores))
+    n_ref  <- min(max(max(k_by), SELECT_TWIN_REF), nrow(sp$scores))
+
+    nn <- nearest_neighbours(St, sp$scores, k = n_ref, metric = metric,
                              sdev = sp$sdev, chunk_size = chunk_size)
+
+    twins <- find_twins(nn, ratio = twin_ratio, k_ref = n_ref)
 
     draw <- list(
       membership       = tibble::tibble(target_id = character(), property = character(),
-                                        pool_id = character(), distance = numeric(), rank = integer()),
+                                        space = character(), pool_id = character(),
+                                        distance = numeric(), rank = integer(),
+                                        retained = logical()),
       target_distances = tibble::tibble(target_id = rownames(St), property = NA_character_,
-                                        nearest = unname(nn$dist[, 1]), mean_k = unname(nn$dist[, 1])),
-      exclusions       = tibble::tibble(property = character(), target_id = character(),
-                                        pool_id = character(), distance = numeric(), second_distance = numeric()),
+                                        space = "all",
+                                        nearest = unname(nn$dist[, 1]),
+                                        mean_k  = unname(rowMeans(nn$dist[, seq_len(k_twin), drop = FALSE]))),
+      exclusions       = if (nrow(twins)) {
+        dplyr::bind_cols(tibble::tibble(property = NA_character_), twins)
+      } else {
+        empty_exclusions()
+      },
+      short_draws      = empty_short_draws(),
       k                = k_by
     )
 
@@ -350,22 +545,30 @@ select_training <- function(x, pool,
 
     draw <- draw_neighbours(St, sp$scores, responses = resp_tbl, k = k_by,
                             properties = properties, metric = metric, sdev = sp$sdev,
-                            chunk_size = chunk_size, twin_ratio = twin_ratio)
+                            chunk_size = chunk_size, twin_ratio = twin_ratio,
+                            space_label = "all")
 
   } else {
 
-    ## One draw per property, each in its own space, bound together
+    ## One draw per property, each in its own space, bound together. The
+    ## space column is what marks the distances as within-property only.
+
     per_property <- lapply(properties, function(p) {
+
       s <- spaces_by_property[[p]]
+
       draw_neighbours(s$St, s$space$scores, responses = resp_tbl, k = k_by[p],
                       properties = p, metric = metric, sdev = s$space$sdev,
-                      chunk_size = chunk_size, twin_ratio = twin_ratio)
+                      chunk_size = chunk_size, twin_ratio = twin_ratio,
+                      space_label = p)
+
     })
 
     draw <- list(
       membership       = dplyr::bind_rows(lapply(per_property, `[[`, "membership")),
       target_distances = dplyr::bind_rows(lapply(per_property, `[[`, "target_distances")),
       exclusions       = dplyr::bind_rows(lapply(per_property, `[[`, "exclusions")),
+      short_draws      = dplyr::bind_rows(lapply(per_property, `[[`, "short_draws")),
       k                = k_by
     )
 
@@ -386,23 +589,75 @@ select_training <- function(x, pool,
     batch   = stats::setNames(rep(1L, length(target_ids)), target_ids),
     sample  = stats::setNames(seq_along(target_ids), target_ids),
     cluster = {
+
       clustering <- cluster_targets(St, clusters = clusters, cluster_min = cluster_min, seed = seed)
-      if (clustering$k == 1L) {
-        cli::cli_inform("scope = \"cluster\": {clustering$reason}; returning one group")
+
+      if (clustering$k == 1L && verbose) {
+
+        ## Through the tree, not cli, so verbose = FALSE is actually silent.
+        cat(paste0("\u2502  \u251C\u2500 scope = \"cluster\": ", clustering$reason,
+                   "; returning one group\n"))
+
       }
+
       clustering$assignment
+
     }
   )
-
-  groups <- build_groups(group_of_target, membership, pool_ids, scope)
 
   ## ---------------------------------------------------------------------------
   ## Step 5: Assemble the return
   ## ---------------------------------------------------------------------------
 
-  union_ids <- if (scope == "global") pool_ids else pool_ids[pool_ids %in% membership$pool_id]
+  ## A twin excluded from one target's neighbourhood is still drawn by every
+  ## other target whose neighbourhood it falls in, so it walks straight back
+  ## into the union unless it is subtracted here. That holds under sample
+  ## too: the return is one object, nothing downstream consumes
+  ## selection$groups yet, and the ordinary configure |> evaluate |> fit on a
+  ## sample-scope return would otherwise train on every target's own
+  ## replicates. Only global keeps them, because global returns the whole
+  ## pool by definition and says so. membership keeps the pre-subtraction
+  ## draw, which is the record of what each neighbourhood was, and marks the
+  ## subtracted rows retained = FALSE rather than dropping them.
+
+  excluded_ids <- unique(draw$exclusions$pool_id)
+  union_ids    <- if (scope == "global") pool_ids else pool_ids[pool_ids %in% membership$pool_id]
+
+  n_excluded_union <- 0L
+
+  if (scope != "global" && length(excluded_ids)) {
+
+    left             <- setdiff(union_ids, excluded_ids)
+    n_excluded_union <- length(union_ids) - length(left)
+    union_ids        <- left
+
+  }
+
+  ## The record of which drawn rows survived the subtraction. Without it the
+  ## first validate(remove_outliers = TRUE) filters membership to the rows
+  ## still in the object and the excluded twins vanish from the record
+  ## entirely, which is the one thing the record exists to hold.
+
+  membership$retained <- if (scope == "global") {
+    rep(TRUE, nrow(membership))
+  } else {
+    !(membership$pool_id %in% excluded_ids)
+  }
+
+  groups <- build_groups(group_of_target, membership,
+                         if (scope == "global") pool_ids else union_ids, scope)
 
   out <- subset_rows(pool_rc, union_ids, record = FALSE)
+
+  ## Under space_rows = "measured" with more than one property, every
+  ## property's distances come from its own PCA or PLS space, with its own
+  ## rotation, component count and sdev. A minimum taken across them is a
+  ## number with no defined scale, and the "nearest drawing target" it would
+  ## name could be decided by which property happened to get the tighter
+  ## space. Both columns are written NA in that case; the per-property
+  ## distances are in selection$membership, marked by their space column.
+
+  mixed_spaces <- !is.null(spaces_by_property) && length(properties) > 1L
 
   if (scope == "global") {
 
@@ -413,7 +668,12 @@ select_training <- function(x, pool,
 
     by_row   <- split(membership, membership$pool_id)
     drawn_by <- vapply(by_row[union_ids], function(d) length(unique(d$target_id)), integer(1))
-    min_dist <- vapply(by_row[union_ids], function(d) min(d$distance), numeric(1))
+
+    min_dist <- if (mixed_spaces) {
+      rep(NA_real_, length(union_ids))
+    } else {
+      vapply(by_row[union_ids], function(d) min(d$distance), numeric(1))
+    }
 
   }
 
@@ -421,14 +681,23 @@ select_training <- function(x, pool,
 
   if (scope != "sample") {
 
-    meta$.group <- if (scope == "global") {
+    meta$.group <- if (scope != "cluster") {
+
+      ## batch and global are one group, so no distance comparison is made.
       rep(1L, length(union_ids))
+
+    } else if (mixed_spaces) {
+
+      rep(NA_integer_, length(union_ids))
+
     } else {
+
       ## The group of the nearest drawing target; a row drawn by two
       ## clusters is in both groups' pool_ids and this column names one.
       nearest_target <- vapply(by_row[union_ids],
                                function(d) d$target_id[which.min(d$distance)], character(1))
       unname(group_of_target[nearest_target])
+
     }
 
   }
@@ -441,17 +710,26 @@ select_training <- function(x, pool,
 
   ## Pool sizes per property ------------------------------------------------
 
+  ## drawn counts the rows that survived into the return, not the rows the
+  ## neighbourhoods named, so it agrees with n_rows after the twin subtraction.
+
   pool_sizes <- tibble::tibble(
     property  = properties,
     available = vapply(properties, function(p) sum(!is.na(resp_tbl[[p]])), integer(1), USE.NAMES = FALSE),
     drawn     = vapply(properties, function(p) {
-      if (scope == "global") length(union_ids) else length(unique(membership$pool_id[membership$property == p]))
+
+      if (scope == "global") {
+        length(union_ids)
+      } else {
+        length(intersect(unique(membership$pool_id[membership$property == p]), union_ids))
+      }
+
     }, integer(1), USE.NAMES = FALSE)
   )
 
   ## Resemblance: targets beyond the pool's own nearest-neighbour spread ----
 
-  resemblance <- check_resemblance(sp, St, metric = metric, chunk_size = chunk_size)
+  resemblance <- check_resemblance(sp, St, metric = metric, chunk_size = chunk_size, seed = seed)
 
   ## The record -------------------------------------------------------------
 
@@ -459,14 +737,18 @@ select_training <- function(x, pool,
     settings = list(
       k = k_by, scope = scope, properties = properties,
       snv = snv, derivative = as.integer(derivative), window = as.integer(window),
-      poly = as.integer(poly), mask = mask, space = space, ncomp = ncomp,
-      ncomp_retained = sp$ncomp, space_rows = space_rows,
+      poly = as.integer(poly), window_cm = window_cm, mask = mask,
+      space = space, ncomp = ncomp, sdev_floor = sdev_floor,
+      ncomp_retained = sp$ncomp, ncomp_variance = sp$ncomp_variance,
+      sdev_ratio = sp$sdev_ratio, variance_retained = sp$variance_retained,
+      space_rows = space_rows,
       ncomp_by_property = if (is.null(spaces_by_property)) NULL else
         vapply(spaces_by_property, function(s) s$space$ncomp, integer(1)),
       space_n_rows = if (is.null(spaces_by_property)) NULL else
         vapply(spaces_by_property, function(s) s$n_rows, integer(1)),
       metric = metric, clusters = clusters,
-      cluster_min = as.integer(cluster_min), twin_ratio = twin_ratio, seed = as.integer(seed)
+      cluster_min = as.integer(cluster_min), twin_ratio = twin_ratio, seed = as.integer(seed),
+      space_note = space_note
     ),
     reconciliation   = rc$record,
     pool             = list(n_rows = length(pool_ids), id_hash = digest::digest(sort(pool_ids))),
@@ -475,7 +757,10 @@ select_training <- function(x, pool,
     pool_sizes       = pool_sizes,
     target_distances = draw$target_distances,
     resemblance      = resemblance,
+    units            = units,
     exclusions       = draw$exclusions,
+    n_excluded_union = n_excluded_union,
+    short_draws      = draw$short_draws,
     clustering       = clustering,
     timestamp        = Sys.time()
   )
@@ -486,12 +771,24 @@ select_training <- function(x, pool,
 
   if (verbose) report_selection(out$selection, n_targets = length(target_ids))
 
+  if (nrow(draw$short_draws)) {
+
+    sd_tbl <- draw$short_draws
+
+    cli::cli_warn(c(
+      "{nrow(sd_tbl)} target-property draw{?s} could not reach k after twin exclusions",
+      "i" = "Smallest: {min(sd_tbl$k_drawn)} of {max(sd_tbl$k_requested)} rows, on {.field {unique(sd_tbl$property)}}",
+      "i" = "The pool has too few measured rows left for those properties; see {.code x$selection$short_draws}"
+    ), class = "horizons_select_warning")
+
+  }
+
   if (nrow(resemblance$beyond)) {
 
     cli::cli_warn(c(
       "{nrow(resemblance$beyond)} target{?s} sit{?s/} beyond the pool's own nearest-neighbour spread",
       "i" = "{.val {utils::head(resemblance$beyond$target_id, 5)}}{if (nrow(resemblance$beyond) > 5) ', ...' else ''}",
-      "i" = "Selection proceeds; treat their predictions with care and check units and mode"
+      "i" = "Selection proceeds; treat their predictions with care. The check is made after SNV, so it cannot see a unit mismatch; that is reported separately"
     ), class = "horizons_select_warning")
 
   }
@@ -510,6 +807,130 @@ select_training <- function(x, pool,
 ## =============================================================================
 ## Internal helpers
 ## =============================================================================
+
+## ---------------------------------------------------------------------------
+## check_pool_unpromoted() — The pool must be data, not a fitted object
+## ---------------------------------------------------------------------------
+
+#' Refuse a pool that carries state from later in the pipeline
+#'
+#' @description
+#' `select_training()` builds its return by subsetting the pool, and a subset
+#' keeps the pool's class and every section the pool was carrying. A promoted
+#' pool would come out the other side still claiming to be validated,
+#' evaluated or fitted, with `models$row_index` and `evaluation$split` keyed
+#' to a row order the subset just destroyed. Promotion is meant to be earned,
+#' so this refuses rather than silently clearing.
+#'
+#' @param pool [horizons_data.] The candidate pool.
+#'
+#' @return [Character.] Zero or more validation messages.
+#' @noRd
+check_pool_unpromoted <- function(pool) {
+
+  msgs <- character()
+
+  if (!identical(class(pool), c("horizons_data", "list"))) {
+
+    msgs <- c(msgs, cli::format_inline(
+      "{.arg pool} is a {.cls {class(pool)[1]}}; it must be a plain horizons_data, as it comes from standardize() or add_response()"))
+
+  }
+
+  carried <- c(
+    if (isTRUE(pool$validation$passed))      "validation$passed",
+    if (!is.null(pool$evaluation$results))   "evaluation$results",
+    if (!is.null(pool$models$workflows))     "models$workflows",
+    if (!is.null(pool$models$row_index))     "models$row_index"
+  )
+
+  if (length(carried)) {
+
+    msgs <- c(msgs, cli::format_inline(
+      "{.arg pool} already carries {.val {carried}} from later in the pipeline; selection subsets its rows, which would leave that state describing rows the training set no longer has"))
+
+  }
+
+  msgs
+
+}
+
+
+## ---------------------------------------------------------------------------
+## check_photometric_units() — Pool and targets on the same scale
+## ---------------------------------------------------------------------------
+
+#' Compare the raw absorbance magnitude of pool and targets
+#'
+#' @description
+#' Run before the similarity space is built, because the space begins with
+#' SNV, which removes per-spectrum offset and scale and so makes a pure unit
+#' or gain difference invisible to every check downstream of it.
+#'
+#' @details
+#' The load-bearing comparison is of scale, the interquartile range, because
+#' a unit or gain change multiplies it: fractional against percent
+#' absorbance is a hundredfold difference in IQR and nothing else can produce
+#' one. The medians are compared too, but only when they carry scale
+#' information. Spectra carrying a per-sample baseline offset that straddles
+#' zero have a pooled median near zero, and its sign is then a coin flip
+#' between two sample sets in identical units. The bar for trusting a median
+#' is therefore that it dominates its own spread: `|median| >= IQR`, which
+#' ordinary absorbance clears easily and a centred set does not.
+#'
+#' A mismatch is flagged when the IQRs differ by more than `ratio` fold, or
+#' when both medians dominate their spread and differ by more than `ratio`
+#' fold or in sign.
+#'
+#' `ratio` is 2 rather than 3 because of the one mismatch that is neither
+#' gross nor rare: natural-log against base-10 absorbance is a factor of
+#' 2.303, and two libraries that disagree about it look like one library
+#' until something notices the scale. A threefold bar misses it. Two still
+#' leaves an instrument gain difference of around 1.5x silent, which is the
+#' band this check is not for.
+#'
+#' @param pool_m [Matrix.] Pool spectra on the reconciled grid, raw.
+#' @param target_m [Matrix.] Target spectra on the same grid, raw.
+#' @param ratio [Numeric.] Fold difference that counts as a mismatch.
+#'   Default: `2`.
+#'
+#' @return [List.] `pool_median`, `target_median`, `pool_iqr`, `target_iqr`,
+#'   `basis` (`"iqr"`, or `"median and iqr"` when the locations were
+#'   informative) and `mismatch`.
+#' @noRd
+check_photometric_units <- function(pool_m, target_m, ratio = 2) {
+
+  p_med <- stats::median(pool_m,   na.rm = TRUE)
+  t_med <- stats::median(target_m, na.rm = TRUE)
+  p_iqr <- stats::IQR(pool_m,      na.rm = TRUE)
+  t_iqr <- stats::IQR(target_m,    na.rm = TRUE)
+
+  fold <- function(a, b) {
+
+    lo <- min(abs(a), abs(b))
+    hi <- max(abs(a), abs(b))
+
+    if (lo < .Machine$double.eps) Inf else hi / lo
+
+  }
+
+  located <- is.finite(p_iqr) && is.finite(t_iqr) &&
+             abs(p_med) >= p_iqr && abs(t_med) >= t_iqr
+
+  scale_off <- is.finite(p_iqr) && is.finite(t_iqr) && fold(p_iqr, t_iqr) > ratio
+  loc_off   <- located && (sign(p_med) != sign(t_med) || fold(p_med, t_med) > ratio)
+
+  list(
+    pool_median   = p_med,
+    target_median = t_med,
+    pool_iqr      = p_iqr,
+    target_iqr    = t_iqr,
+    basis         = if (located) "median and iqr" else "iqr",
+    mismatch      = isTRUE(scale_off || loc_off)
+  )
+
+}
+
 
 ## ---------------------------------------------------------------------------
 ## rebuild_predictors() — Replace the predictor block of a horizons_data
@@ -599,18 +1020,46 @@ build_groups <- function(group_of_target, membership, pool_ids, scope) {
 #' distribution; targets whose nearest-pool distance exceeds its 99th
 #' percentile are named. A warning, never a stop.
 #'
+#' @details
+#' The sample is seeded from the verb's `seed` and the caller's RNG state is
+#' saved and restored around it, the way `cluster_targets()` does. Without
+#' that, the threshold and the list of targets beyond it differ between two
+#' identical calls on any pool over 2,000 rows — which is every real library
+#' run — and the number a user would cite when defending a prediction cannot
+#' be re-derived from the record.
+#'
 #' @param sp [horizons_similarity_space.] The space, with pool scores.
 #' @param St [Matrix.] Target scores.
 #' @param metric,chunk_size Passed to `nearest_neighbours()`.
+#' @param seed [Integer.] Seed for the reference sample. Default: `1L`.
 #'
 #' @return [List.] `threshold` (the 99th percentile), `n_reference`,
 #'   `beyond` (tibble: `target_id`, `nearest`).
 #' @noRd
-check_resemblance <- function(sp, St, metric, chunk_size) {
+check_resemblance <- function(sp, St, metric, chunk_size, seed = 1L) {
 
   Sp  <- sp$scores
   n   <- nrow(Sp)
-  ref <- if (n > 2000L) Sp[sort(sample.int(n, 2000L)), , drop = FALSE] else Sp
+
+  ## Preserve the caller's RNG state -----------------------------------------
+
+  had_seed <- exists(".Random.seed", envir = globalenv(), inherits = FALSE)
+  old_seed <- if (had_seed) get(".Random.seed", envir = globalenv()) else NULL
+  on.exit({
+    if (had_seed) assign(".Random.seed", old_seed, envir = globalenv())
+    else if (exists(".Random.seed", envir = globalenv(), inherits = FALSE)) rm(".Random.seed", envir = globalenv())
+  }, add = TRUE)
+
+  ref <- if (n > 2000L) {
+
+    set.seed(seed)
+    Sp[sort(sample.int(n, 2000L)), , drop = FALSE]
+
+  } else {
+
+    Sp
+
+  }
 
   nn_pool <- nearest_neighbours(ref, Sp, k = 2L, metric = metric, sdev = sp$sdev, chunk_size = chunk_size)
   ## Column 1 is the row itself (distance 0); column 2 its nearest other row
@@ -638,6 +1087,13 @@ check_resemblance <- function(sp, St, metric, chunk_size) {
 
 #' Print the selection report
 #'
+#' @details
+#' Every dereference is guarded the way `describe_selection()` guards its
+#' own: a record built by hand, or one a future field is missing from, has to
+#' print rather than error inside a report. `nrow(NULL)` is `NULL`, and
+#' `if (NULL)` is an error with a message that names neither the field nor
+#' the verb.
+#'
 #' @param sel [List.] `x$selection`.
 #' @param n_targets [Integer.] Targets in the batch.
 #'
@@ -648,11 +1104,15 @@ report_selection <- function(sel, n_targets) {
   s  <- sel$settings
   ps <- sel$pool_sizes
 
-  for (i in seq_len(nrow(ps))) {
+  n_rows_of <- function(value) if (is.data.frame(value)) nrow(value) else 0L
 
-    k_p <- s$k[[ps$property[i]]]
-    msg <- if (s$scope == "global") {
-      paste0(ps$property[i], ": ", ps$available, " measured rows, no draw (scope = global)")
+  scope <- if (is.null(s$scope) || !length(s$scope)) "unknown" else s$scope
+
+  for (i in seq_len(n_rows_of(ps))) {
+
+    k_p <- if (is.null(s$k)) "unknown" else s$k[[ps$property[i]]]
+    msg <- if (identical(scope, "global")) {
+      paste0(ps$property[i], ": ", ps$available[i], " measured rows, no draw (scope = global)")
     } else {
       paste0(ps$property[i], ": k = ", k_p, " \u00D7 ", n_targets, " targets \u2192 ",
              ps$drawn[i], " of ", ps$available[i], " measured rows")
@@ -661,24 +1121,62 @@ report_selection <- function(sel, n_targets) {
 
   }
 
-  if (s$scope == "cluster" && !is.null(sel$clustering)) {
+  if (identical(scope, "cluster") && !is.null(sel$clustering)) {
 
     cat(paste0("\u2502  \u251C\u2500 Clusters: ", sel$clustering$k, " (", sel$clustering$reason, ")\n"))
 
   }
 
-  n_tw <- nrow(sel$exclusions)
-  cat(paste0("\u2502  \u251C\u2500 Twins excluded: ", n_tw,
-             if (n_tw) paste0(" (", paste(utils::head(unique(sel$exclusions$target_id), 3), collapse = ", "),
-                             if (n_tw > 3) ", ..." else "", ")") else "", "\n"))
+  ## Two counts, because they answer different questions: how many
+  ## neighbourhood slots a twin was removed from, and how many rows that
+  ## actually kept out of the training set.
 
-  n_far <- nrow(sel$resemblance$beyond)
-  cat(paste0("\u2502  \u251C\u2500 Targets beyond the pool's spread: ", n_far, "\n"))
+  n_tw <- n_rows_of(sel$exclusions)
+  tail <- if (n_tw) {
+    paste0(" (", paste(utils::head(unique(sel$exclusions$target_id), 3), collapse = ", "),
+           if (length(unique(sel$exclusions$target_id)) > 3) ", ..." else "", ")")
+  } else {
+    ""
+  }
 
-  n_groups <- nrow(sel$groups)
+  cat(paste0("\u2502  \u251C\u2500 Twins flagged: ", n_tw, tail, "\n"))
+
+  n_un <- sel$n_excluded_union
+
+  union_note <- if (identical(scope, "global")) {
+    "0 (scope = global keeps the whole pool; the check is reported, not applied)"
+  } else if (is.null(n_un) || !length(n_un)) {
+    "unknown"
+  } else {
+    paste0(n_un, " removed from the union")
+  }
+
+  cat(paste0("\u2502  \u251C\u2500 Twin rows: ", union_note, "\n"))
+
+  n_short <- n_rows_of(sel$short_draws)
+
+  if (n_short) {
+
+    cat(paste0("\u2502  \u251C\u2500 Draws short of k: ", n_short,
+               " (smallest ", min(sel$short_draws$k_drawn), ")\n"))
+
+  }
+
+  if (isTRUE(sel$units$mismatch)) {
+
+    cat(paste0("\u2502  \u251C\u2500 Units: pool median ", signif(sel$units$pool_median, 3),
+               ", targets ", signif(sel$units$target_median, 3), " \u2014 check the photometric unit\n"))
+
+  }
+
+  n_far <- if (is.data.frame(sel$resemblance$beyond)) nrow(sel$resemblance$beyond) else NA_integer_
+  cat(paste0("\u2502  \u251C\u2500 Targets beyond the pool's spread: ",
+             if (is.na(n_far)) "unknown" else n_far, "\n"))
+
+  n_groups <- n_rows_of(sel$groups)
   n_rows   <- length(unique(unlist(sel$groups$pool_ids)))
   cat(paste0("\u2502  \u2514\u2500 ", n_rows, " rows in ", n_groups, " group", if (n_groups != 1) "s",
-             " (scope = ", s$scope, ")\n"))
+             " (scope = ", scope, ")\n"))
   cat("\u2502\n")
 
   invisible(NULL)

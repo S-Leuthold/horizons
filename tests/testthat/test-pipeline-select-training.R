@@ -85,6 +85,161 @@ test_that("select_training(space = 'pls') needs exactly one property and an inte
 })
 
 
+test_that("select_training() refuses a pool that carries state from later verbs", {
+
+  fx <- make_select_fixture(n_pool = 60)
+
+  ## Selection subsets the pool's rows, and a subset keeps the pool's class
+  ## and sections. A promoted pool would come out still claiming to be
+  ## validated or fitted, with row_index and split keyed to a row order that
+  ## no longer exists.
+  fitted <- fx$pool
+  class(fitted) <- c("horizons_fit", "horizons_eval", "horizons_data", "list")
+
+  expect_error(select_training(fx$targets, fitted, k = 5, verbose = FALSE),
+               regexp = "horizons_fit", class = "horizons_input_error")
+
+  validated <- fx$pool
+  validated$validation$passed <- TRUE
+
+  expect_error(select_training(fx$targets, validated, k = 5, verbose = FALSE),
+               regexp = "validation\\$passed", class = "horizons_input_error")
+
+})
+
+
+test_that("select_training() refuses a pool that is itself a selection", {
+
+  fx    <- make_select_fixture(n_pool = 60)
+  prior <- quiet_select(fx, k = 5, properties = "clay")
+
+  ## The provenance columns would collide under bind_cols and then surface as
+  ## a confusing role-map abort. Say what is actually wrong instead.
+  expect_error(select_training(fx$targets, prior, k = 5, verbose = FALSE),
+               regexp = "\\.drawn_by", class = "horizons_input_error")
+
+})
+
+
+test_that("select_training() warns when pool and targets are in different units", {
+
+  ## Arrange: the same targets scaled by 100, the fractional-against-percent
+  ## absorbance mismatch. SNV removes exactly this, so the resemblance check
+  ## downstream is structurally blind to it.
+  fx <- make_select_fixture(n_pool = 60, target_scale = 100)
+
+  expect_warning(out <- select_training(fx$targets, fx$pool, k = 5, verbose = FALSE),
+                 regexp = "photometric units", class = "horizons_select_warning")
+
+  u <- out$selection$units
+  expect_true(u$mismatch)
+  expect_gt(u$target_iqr / u$pool_iqr, 30)
+
+  ## The same fixture in its own units does not warn. Its spectra carry a
+  ## per-sample baseline offset straddling zero, so the pooled median's sign
+  ## is a coin flip; only the scale is load-bearing here.
+  same <- make_select_fixture(n_pool = 60)
+  u_ok <- suppressWarnings(select_training(same$targets, same$pool, k = 5,
+                                           verbose = FALSE))$selection$units
+
+  expect_false(u_ok$mismatch)
+  expect_identical(u_ok$basis, "iqr")
+
+})
+
+
+test_that("the unit check catches a log-base difference and lets an instrument gain pass", {
+
+  ## The threshold is 2, not 3, for one reason: natural-log against base-10
+  ## absorbance is 2.303, and two libraries that disagree about it look like
+  ## one library. A 1.5x gain difference is the band this check is not for,
+  ## and it has to stay silent or the warning stops meaning anything.
+
+  ## One matrix against a scaled copy of itself, so the fold difference is
+  ## the scale factor and nothing else.
+  fx <- make_select_fixture(n_pool = 30)
+  M  <- predictor_matrix(fx$pool)$matrix
+
+  expect_true(check_photometric_units(M,  M * 100)$mismatch)
+  expect_true(check_photometric_units(M,  M * 2.303)$mismatch)
+  expect_false(check_photometric_units(M, M * 1.5)$mismatch)
+
+  ## The ratio is the lever, and 2 is where it sits by default: a threefold
+  ## bar is what missed the log-base case.
+  expect_false(check_photometric_units(M, M * 2.303, ratio = 3)$mismatch)
+  expect_true(check_photometric_units(M,  M * 1.5, ratio = 1.2)$mismatch)
+
+  ## And the verb warns on a log-base mismatch end to end
+  log_base <- make_select_fixture(n_pool = 30, target_scale = 2.303)
+
+  expect_warning(select_training(log_base$targets, log_base$pool, k = 5, verbose = FALSE),
+                 regexp = "photometric units", class = "horizons_select_warning")
+
+})
+
+
+test_that("the resemblance check is seeded and leaves the caller's RNG alone", {
+
+  ## Arrange: a pool over the 2,000-row reference cap would be slow to build,
+  ## so exercise the helper directly on a pool that is over it.
+  fx <- make_select_fixture(n_pool = 60)
+  rc <- reconcile_axes(fx$pool, fx$targets)
+  tm <- predictor_matrix(fx$targets)
+  sp <- build_similarity_space(rc$matrix, rc$wavenumbers, ncomp = 4L)
+  st <- project_similarity(sp, tm$matrix, tm$wavenumbers)
+
+  set.seed(5)
+  big        <- sp
+  idx        <- sample(nrow(sp$scores), 2500, replace = TRUE)
+  big$scores <- sp$scores[idx, , drop = FALSE] +
+                matrix(stats::rnorm(2500 * ncol(sp$scores), sd = 0.3),
+                       nrow = 2500)
+  rownames(big$scores) <- sprintf("B%04d", seq_len(2500))
+
+  ## Act: two identical calls, with the caller's stream checkpointed
+  set.seed(99)
+  invisible(stats::runif(1))
+  state <- get(".Random.seed", envir = globalenv())
+
+  a <- check_resemblance(big, st, metric = "euclidean", chunk_size = 500L, seed = 1L)
+  b <- check_resemblance(big, st, metric = "euclidean", chunk_size = 500L, seed = 1L)
+
+  ## Assert: reproducible, and the caller's stream is exactly where it was
+  expect_equal(a$threshold, b$threshold)
+  expect_identical(a$beyond, b$beyond)
+  expect_identical(get(".Random.seed", envir = globalenv()), state)
+
+  ## And the seed is a real lever
+  c2 <- check_resemblance(big, st, metric = "euclidean", chunk_size = 500L, seed = 7L)
+  expect_false(isTRUE(all.equal(a$threshold, c2$threshold)))
+
+})
+
+
+test_that("a draw that cannot reach k is recorded and warned about once", {
+
+  ## Arrange: k equal to the measured rows leaves no spare to replace a twin.
+  fx <- make_select_fixture(n_pool = 60)
+  k  <- 60L
+
+  expect_warning(out <- select_training(fx$targets, fx$pool, k = k, properties = "clay",
+                                        verbose = FALSE),
+                 regexp = "could not reach k", class = "horizons_select_warning")
+
+  sd_tbl <- out$selection$short_draws
+  expect_named(sd_tbl, c("target_id", "property", "k_requested", "k_drawn", "reason"))
+  expect_gte(nrow(sd_tbl), 1L)
+  expect_true(fx$twin_id %in% sd_tbl$target_id)
+  expect_true(all(sd_tbl$k_requested == k))
+  expect_true(all(sd_tbl$k_drawn < k))
+
+  ## An ordinary draw records nothing and warns not at all
+  ok <- quiet_select(fx, k = 10, properties = "clay")
+  expect_identical(nrow(ok$selection$short_draws), 0L)
+
+})
+
+
 ## =============================================================================
 ## scope = "global"
 ## =============================================================================
@@ -206,7 +361,7 @@ test_that("a named k is honoured per property", {
 })
 
 
-test_that("the twin is excluded from its target's rows and reported", {
+test_that("the twin is excluded from its target's rows, reported, and out of the union", {
 
   fx  <- make_select_fixture(n_pool = 100)
   out <- quiet_select(fx, k = 10, properties = "clay")
@@ -218,6 +373,180 @@ test_that("the twin is excluded from its target's rows and reported", {
   ex <- out$selection$exclusions
   expect_identical(ex$target_id, fx$twin_id)
   expect_identical(ex$pool_id,   fx$twin_pool_id)
+
+  ## The union, not just the neighbourhood: a row excluded from one target's
+  ## draw must not walk back in through another target that drew it. Here no
+  ## other target drew it, so nothing had to be subtracted, and the count
+  ## says so rather than overstating the work.
+  expect_false(fx$twin_pool_id %in% out$data$analysis$sample_id)
+  expect_identical(out$selection$n_excluded_union,
+                   length(intersect(fx$twin_pool_id, unique(m$pool_id))))
+
+  ## membership still records the pre-subtraction draw, so the two differ by
+  ## exactly the excluded rows.
+  expect_setequal(out$data$analysis$sample_id,
+                  setdiff(unique(m$pool_id), fx$twin_pool_id))
+
+})
+
+
+test_that("a replicate cluster is excluded entirely and absent from the union", {
+
+  ## Arrange: three replicate scans of the twinned pool row. Under the old
+  ## first-to-second-nearest gap rule none of these was flagged, because
+  ## every replicate distance is tiny and no gap opens.
+  fx  <- make_select_fixture(n_pool = 100, seed = 3, n_replicates = 3)
+  out <- quiet_select(fx, k = 10, properties = "clay")
+
+  self <- c(fx$twin_pool_id, fx$replicate_pool_ids)
+
+  ## Act / Assert: all four flagged, none in the twin's neighbourhood, none
+  ## in the returned training set, and the target still drew its full k.
+  ex <- out$selection$exclusions
+  expect_setequal(ex$pool_id[ex$target_id == fx$twin_id], self)
+
+  m <- out$selection$membership
+  expect_false(any(self %in% m$pool_id[m$target_id == fx$twin_id]))
+  expect_identical(sum(m$target_id == fx$twin_id), 10L)
+
+  expect_false(any(self %in% out$data$analysis$sample_id))
+  expect_identical(out$selection$n_excluded_union, length(self))
+  expect_identical(nrow(out$selection$short_draws), 0L)
+
+})
+
+
+test_that("scope = 'cluster' subtracts twins from the union too", {
+
+  fx  <- make_select_fixture(n_pool = 100, seed = 3, n_replicates = 3)
+  out <- quiet_select(fx, k = 10, scope = "cluster", cluster_min = 2, properties = "clay")
+
+  self <- c(fx$twin_pool_id, fx$replicate_pool_ids)
+
+  expect_false(any(self %in% out$data$analysis$sample_id))
+  expect_identical(out$selection$n_excluded_union, length(self))
+
+  ## And out of every group's pool_ids, not just the analysis table
+  expect_false(any(self %in% unlist(out$selection$groups$pool_ids)))
+
+})
+
+
+test_that("scope = 'sample' subtracts the twins from the returned object too", {
+
+  ## Nothing downstream consumes selection$groups yet, so the object a user
+  ## pipes into configure() is the union whatever the scope. Leaving the
+  ## twins in it under sample would train the default pipeline on every
+  ## target's own replicates.
+
+  fx  <- make_select_fixture(n_pool = 100, seed = 3, n_replicates = 3)
+  out <- quiet_select(fx, k = 10, scope = "sample", properties = "clay")
+
+  self <- c(fx$twin_pool_id, fx$replicate_pool_ids)
+
+  expect_identical(out$selection$n_excluded_union, length(self))
+  expect_false(any(self %in% out$data$analysis$sample_id))
+
+  ## Each group is still that target's own draw, after the subtraction
+  g    <- out$selection$groups
+  mine <- g$pool_ids[[which(vapply(g$target_ids, function(t) fx$twin_id %in% t, logical(1)))]]
+  expect_false(any(self %in% mine))
+  expect_false(any(self %in% unlist(g$pool_ids)))
+
+})
+
+
+test_that("membership keeps the subtracted twins, marked retained = FALSE", {
+
+  ## The record is the only place the exclusion survives: membership is the
+  ## statement of what each neighbourhood was, and a row dropped from it
+  ## rather than marked would take the evidence with it the first time
+  ## anything filters the object's rows.
+
+  fx  <- make_select_fixture(n_pool = 100, seed = 3, n_replicates = 3)
+  out <- quiet_select(fx, k = 10, properties = "clay")
+
+  m    <- out$selection$membership
+  self <- c(fx$twin_pool_id, fx$replicate_pool_ids)
+
+  expect_true("retained" %in% names(m))
+  expect_type(m$retained, "logical")
+
+  ## Every subtracted row is still in the table, and marked
+  expect_true(any(m$pool_id %in% self))
+  expect_true(all(!m$retained[m$pool_id %in% self]))
+
+  ## retained is exactly membership against the object's own rows
+  expect_setequal(unique(m$pool_id[m$retained]),
+                  intersect(unique(m$pool_id), out$data$analysis$sample_id))
+
+})
+
+
+test_that("scope = 'global' runs the twin check, reports it, and keeps the rows", {
+
+  fx  <- make_select_fixture(n_pool = 60, seed = 3, n_replicates = 3)
+  out <- quiet_select(fx, k = 10, scope = "global")
+
+  self <- c(fx$twin_pool_id, fx$replicate_pool_ids)
+
+  ## The control arm of the batch-versus-global comparison has to have its
+  ## leakage measured, or the comparison is biased in a fixed direction.
+  ex <- out$selection$exclusions
+  expect_gt(nrow(ex), 0L)
+  expect_true(all(self %in% ex$pool_id[ex$target_id == fx$twin_id]))
+
+  ## Reported, but global returns the whole pool, so nothing is removed.
+  expect_identical(out$selection$n_excluded_union, 0L)
+  expect_true(all(self %in% out$data$analysis$sample_id))
+  expect_identical(out$data$n_rows, 63L)
+
+  txt <- utils::capture.output(select_training(fx$targets, fx$pool, k = 10, scope = "global"))
+  expect_true(any(grepl("Twins flagged", txt)))
+  expect_true(any(grepl("scope = global", txt)))
+
+})
+
+
+test_that("scope = 'global' records mean_k as the mean of k, not the nearest again", {
+
+  ## The column has to mean the same thing in every branch: global set it to
+  ## the first column, so mean_k equalled nearest and the applicability
+  ## signal the control arm reports was not the one batch reports.
+
+  fx <- make_select_fixture(n_pool = 60, seed = 3)
+
+  g <- quiet_select(fx, k = 10, scope = "global", properties = "clay")$selection$target_distances
+  b <- quiet_select(fx, k = 10, scope = "batch",  properties = "clay")$selection$target_distances
+
+  expect_named(g, c("target_id", "property", "space", "nearest", "mean_k"))
+  expect_true(all(g$mean_k >= g$nearest))
+  expect_false(isTRUE(all.equal(g$mean_k, g$nearest)))
+
+  ## The twin target aside, whose neighbourhood batch subtracts, the two
+  ## branches measure the same thing over the same k rows.
+  keep <- g$target_id != fx$twin_id
+  expect_equal(g$mean_k[keep], b$mean_k[match(g$target_id[keep], b$target_id)],
+               tolerance = 1e-10)
+
+})
+
+
+test_that("report_selection() prints a record with missing tables rather than erroring", {
+
+  ## A record built by hand, or one a future field has not been added to,
+  ## has to print. nrow(NULL) is NULL and if (NULL) is an error naming
+  ## neither the field nor the verb.
+
+  sel <- list(settings = list(scope = "batch", k = c(clay = 10L)))
+
+  expect_silent(txt <- utils::capture.output(report_selection(sel, n_targets = 8L)))
+  expect_true(any(grepl("Twins flagged: 0", txt)))
+  expect_true(any(grepl("unknown", txt)))
+  expect_true(any(grepl("scope = batch", txt)))
+
+  ## And an entirely empty one
+  expect_silent(utils::capture.output(report_selection(list(), n_targets = 0L)))
 
 })
 
@@ -235,9 +564,67 @@ test_that("the record carries settings, reconciliation, pool identity and distan
   expect_identical(s$reconciliation$operation, "resampled")
   expect_identical(s$pool$n_rows, 100L)
   expect_match(s$pool$id_hash, "^[0-9a-f]+$")
-  expect_named(s$target_distances, c("target_id", "property", "nearest", "mean_k"))
+  expect_named(s$target_distances, c("target_id", "property", "space", "nearest", "mean_k"))
   expect_identical(nrow(s$target_distances), 16L)
+  expect_true(all(s$target_distances$space == "all"))
   expect_s3_class(s$timestamp, "POSIXct")
+
+})
+
+
+test_that("the record carries the SG window in cm-1 and the space's floor", {
+
+  fx  <- make_select_fixture(n_pool = 100)
+  out <- suppressWarnings(quiet_select(fx, k = 10))
+
+  s <- out$selection$settings
+
+  ## window is in points and the grid is the targets', so the physical width
+  ## is the product. The fixture's targets are on an 8 cm-1 grid.
+  expect_identical(s$window, 11L)
+  expect_equal(s$window_cm, 11 * out$selection$reconciliation$target_grid$resolution)
+  expect_equal(s$window_cm, 88)
+
+  ## derivative = 0 means no filter and so no width
+  flat <- suppressWarnings(quiet_select(fx, k = 10, derivative = 0L))
+  expect_true(is.na(flat$selection$settings$window_cm))
+
+  ## The similarity space's noise floor, as applied
+  expect_equal(s$sdev_floor, SELECT_SDEV_FLOOR)
+  expect_true(s$ncomp_retained <= s$ncomp_variance)
+  ## The decay is recorded over the variance rule's set, not the floored one,
+  ## so the record can be asked what the floor cut
+  expect_length(s$sdev_ratio, s$ncomp_variance)
+  expect_true(all(s$sdev_ratio[seq_len(s$ncomp_retained)] >= SELECT_SDEV_FLOOR))
+  expect_true(all(s$sdev_ratio[-seq_len(s$ncomp_retained)] < SELECT_SDEV_FLOOR))
+
+  ## And it is a lever, not a constant
+  off <- suppressWarnings(quiet_select(fx, k = 10, sdev_floor = 0))
+  expect_equal(off$selection$settings$sdev_floor, 0)
+  expect_gt(off$selection$settings$ncomp_retained, s$ncomp_retained)
+
+  expect_error(quiet_select(fx, k = 10, sdev_floor = 1),   class = "horizons_input_error")
+  expect_error(quiet_select(fx, k = 10, sdev_floor = -0.1), class = "horizons_input_error")
+
+})
+
+
+test_that("a PLS space records and prints that it selected on the pool's own responses", {
+
+  fx  <- make_select_fixture(n_pool = 100)
+  out <- quiet_select(fx, k = 10, properties = "clay", space = "pls", ncomp = 3L)
+
+  note <- out$selection$settings$space_note
+  expect_true(is.character(note))
+  expect_match(note, "optimistic")
+  expect_match(note, "clay")
+
+  ## A PCA run carries no such note
+  expect_null(quiet_select(fx, k = 10, properties = "clay")$selection$settings$space_note)
+
+  txt <- utils::capture.output(select_training(fx$targets, fx$pool, k = 10, properties = "clay",
+                                               space = "pls", ncomp = 3L))
+  expect_true(any(grepl("optimistic", txt)))
 
 })
 
@@ -259,9 +646,24 @@ test_that("the return validates and runs through the ordinary chain", {
   expect_s3_class(cfg, "horizons_data")
   expect_true(any(cfg$data$role_map$role == "outcome"))
 
-  ev <- suppressWarnings(evaluate(cfg, verbose = FALSE))
+  ## prune = FALSE: on the synthetic fixture the one config can be pruned,
+  ## leaving fit() nothing to fit; the chain is what is under test, not the
+  ## pruning rule.
+  ev <- suppressWarnings(evaluate(cfg, prune = FALSE, verbose = FALSE))
   expect_s3_class(ev, "horizons_eval")
   expect_true(nrow(ev$evaluation$results) >= 1L)
+  expect_true(any(ev$evaluation$results$status == "success"))
+
+  ## The targets carry none of the provenance columns (.drawn_by,
+  ## .min_distance, .group) the training set does. predict() must not
+  ## require them: the recipe's meta role is not baked (2026-09-21).
+  f <- suppressWarnings(fit(ev, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE, verbose = FALSE))
+  expect_s3_class(f, "horizons_fit")
+  expect_false(any(c(".drawn_by", ".min_distance", ".group") %in% names(fx$targets$data$analysis)))
+
+  p <- predict(f, fx$targets, interval = FALSE)
+  expect_identical(nrow(p), fx$targets$data$n_rows)
+  expect_true(all(is.finite(p$.pred)))
 
 })
 
@@ -298,15 +700,23 @@ test_that("scope = 'cluster' yields one group per target cluster", {
 })
 
 
-test_that("scope = 'cluster' falls back to one group below the floor, with a message", {
+test_that("scope = 'cluster' falls back to one group below the floor, through the tree", {
 
   fx <- make_select_fixture(n_pool = 100)
 
-  expect_message(out <- quiet_select(fx, k = 10, scope = "cluster", cluster_min = 5),
-                 regexp = "one group")
+  ## The fallback goes through the verb's own console layer, so it obeys
+  ## verbose. Routing it through cli made select_training(verbose = FALSE)
+  ## print regardless.
+  txt <- utils::capture.output(
+    out <- select_training(fx$targets, fx$pool, k = 10, scope = "cluster", cluster_min = 5)
+  )
 
+  expect_true(any(grepl("one group", txt)))
   expect_identical(nrow(out$selection$groups), 1L)
   expect_identical(out$selection$clustering$k, 1L)
+
+  expect_silent(select_training(fx$targets, fx$pool, k = 10, scope = "cluster",
+                                cluster_min = 5, verbose = FALSE))
 
 })
 
@@ -389,6 +799,40 @@ test_that("space_rows = 'measured' fits a space per property on its measured row
 })
 
 
+test_that("space_rows = 'measured' marks the space and refuses to pool distances across them", {
+
+  fx  <- make_select_fixture(n_pool = 100)
+  mea <- quiet_select(fx, k = 10, space_rows = "measured")
+
+  ## Each property's distances come from its own PCA, with its own rotation
+  ## and sdev, so the space column is what says they are not comparable.
+  m <- mea$selection$membership
+  expect_setequal(unique(m$space), c("clay", "oc"))
+  expect_true(all(m$space == m$property))
+  expect_true(all(mea$selection$target_distances$space ==
+                  mea$selection$target_distances$property))
+
+  ## A minimum over two incommensurable scales is a number with no meaning,
+  ## so it is not written at all.
+  expect_true(all(is.na(mea$data$analysis$.min_distance)))
+  expect_true(all(mea$data$analysis$.drawn_by >= 1L))
+
+  ## And .group, which picks the nearest drawing target, is NA under cluster
+  ## for the same reason. Under batch every target is group 1, so no
+  ## comparison is made and the value stands.
+  expect_true(all(mea$data$analysis$.group == 1L))
+
+  cl <- quiet_select(fx, k = 10, space_rows = "measured", scope = "cluster", cluster_min = 2)
+  expect_true(all(is.na(cl$data$analysis$.group)))
+
+  ## One property is one space, so the distances stay comparable
+  one <- quiet_select(fx, k = 10, space_rows = "measured", properties = "clay")
+  expect_true(all(one$selection$membership$space == "clay"))
+  expect_false(any(is.na(one$data$analysis$.min_distance)))
+
+})
+
+
 test_that("space_rows = 'measured' is ignored under scope = 'global' and rejected when invalid", {
 
   fx  <- make_select_fixture(n_pool = 60)
@@ -422,6 +866,54 @@ test_that("verbose = TRUE reports the pool, the space and the draw", {
   expect_true(any(grepl("clay", txt)))
   expect_true(any(grepl("components", txt)))
   expect_true(any(grepl("twin", txt, ignore.case = TRUE)))
+
+})
+
+
+## =============================================================================
+## Leakage detector
+## =============================================================================
+
+test_that("permuting the pool's responses collapses the evaluated CV", {
+
+  ## The single highest-leverage leakage detector on this path: if the
+  ## selection or the recipe were carrying any information about the outcome
+  ## that it should not, a model trained on shuffled labels would still
+  ## score. It must not. RPD near 1 is the honest answer for noise.
+
+  skip_on_cran()
+
+  fx <- make_select_fixture(n_pool = 300)
+
+  cv_rpd <- function(pool) {
+
+    out <- select_training(fx$targets, pool, k = 40, properties = "clay", verbose = FALSE)
+
+    utils::capture.output({
+      cfg <- configure(out, outcome = "clay", models = "rf", cv_folds = 3L)
+      cfg <- validate(cfg)
+    })
+
+    ev  <- suppressWarnings(evaluate(cfg, prune = FALSE, verbose = FALSE))
+    res <- ev$evaluation$results
+    res <- res[res$status == "success", , drop = FALSE]
+
+    if (!nrow(res) || !"rpd" %in% names(res)) skip("evaluate() did not return an rpd column")
+
+    max(res$rpd, na.rm = TRUE)
+
+  }
+
+  set.seed(4)
+  shuffled <- fx$pool
+  shuffled$data$analysis$clay <- sample(shuffled$data$analysis$clay)
+
+  permuted <- cv_rpd(shuffled)
+
+  ## Tolerant on the upper side: this is a synthetic fixture and a small
+  ## forest, so the point is that the permuted model has no signal at all,
+  ## not where exactly the real one lands.
+  expect_lt(permuted, 1.3)
 
 })
 

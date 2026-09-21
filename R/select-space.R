@@ -2,7 +2,8 @@
 # The similarity space select_training() measures distances in. Built for
 # "similar soil", not "similar baseline": SNV, a Savitzky-Golay derivative,
 # optional masking, then a score space (PCA of the pool, or PLS against one
-# property). Separate from the model's preprocessing and never in the output.
+# property), trimmed at a noise floor. Separate from the model's
+# preprocessing and never in the output.
 
 
 ## ---------------------------------------------------------------------------
@@ -27,12 +28,24 @@
 #' @param poly [Integer.] Filter polynomial order. Default: `2L`.
 #' @param mask [Matrix or NULL.] Two columns, one range per row, low then
 #'   high; columns with a wavenumber inside any range are dropped after the
-#'   derivative. Default: `NULL`.
+#'   derivative. Default: `NULL`. Masking is a lever, not a default: the
+#'   water regions usually cited (1580-1720 and 3100-3700 cm-1) also carry
+#'   the clay-OH structural stretch near 3620-3700 cm-1, so masking them
+#'   removes one of the most texture-diagnostic regions from the space that
+#'   chooses a texture model's neighbours.
+#' @param min_cols [Integer.] Fewest columns the transform may leave, so the
+#'   decomposition is not reached with too little to decompose. Default:
+#'   `1L`; `build_similarity_space()` passes what its component count
+#'   actually needs, never the cap on it. A mask that removes more than 90 %
+#'   of the columns aborts separately, whatever `min_cols` is, because that
+#'   is a mask argument that did not mean what it said.
 #'
 #' @return [List.] `matrix` (transformed, row names kept) and `wavenumbers`
 #'   (the columns that survive the filter's edge trim and the mask).
-#'   Errors of class `horizons_input_error` on a bad mask or when a row goes
-#'   non-finite (a constant spectrum under SNV, for instance).
+#'   Errors of class `horizons_input_error` on a bad mask, on filter
+#'   arguments the window cannot honour, when the mask leaves too few
+#'   columns, or when a row goes non-finite (a constant spectrum under SNV,
+#'   for instance).
 #'
 #' @seealso [build_similarity_space()]
 #' @noRd
@@ -41,7 +54,8 @@ transform_similarity <- function(M, wn,
                                  derivative = 1L,
                                  window     = 11L,
                                  poly       = 2L,
-                                 mask       = NULL) {
+                                 mask       = NULL,
+                                 min_cols   = 1L) {
 
   if (!is.null(mask)) {
 
@@ -52,8 +66,49 @@ transform_similarity <- function(M, wn,
 
       cli::cli_abort(c(
         "{.arg mask} must be a numeric matrix with two columns, low then high",
-        "i" = "One wavenumber range per row, e.g. {.code rbind(c(1580, 1720), c(3100, 3700))}"
+        "i" = "One wavenumber range per row, e.g. {.code rbind(c(2200, 2400))}"
       ), class = "horizons_input_error")
+
+    }
+
+  }
+
+  ## -------------------------------------------------------------------------
+  ## Filter arguments — the window bookkeeping below assumes all of this
+  ## -------------------------------------------------------------------------
+
+  if (derivative > 0L) {
+
+    window <- as.integer(window)
+    poly   <- as.integer(poly)
+
+    if (window %% 2L != 1L) {
+
+      cli::cli_abort(c(
+        "{.arg window} must be odd, got {window}",
+        "i" = "A Savitzky-Golay window is centred on a point, so it loses {.code (window - 1) / 2} columns at each end"
+      ), class = "horizons_input_error")
+
+    }
+
+    if (poly >= window) {
+
+      cli::cli_abort("{.arg poly} ({poly}) must be smaller than {.arg window} ({window})",
+                     class = "horizons_input_error")
+
+    }
+
+    if (poly < derivative) {
+
+      cli::cli_abort("{.arg poly} ({poly}) must be at least {.arg derivative} ({derivative}); a lower-order polynomial has no such derivative",
+                     class = "horizons_input_error")
+
+    }
+
+    if (window > ncol(M)) {
+
+      cli::cli_abort("{.arg window} ({window}) is wider than the {ncol(M)} column{?s} of the spectra",
+                     class = "horizons_input_error")
 
     }
 
@@ -79,9 +134,32 @@ transform_similarity <- function(M, wn,
     m  <- m[, !drop, drop = FALSE]
     wn <- wn[!drop]
 
+    ### Separate from min_cols and checked first, because it is a different
+    ### fault with a different fix: a mask that takes almost everything is a
+    ### mask argument that did not mean what it said, and saying so is more
+    ### use than reporting the column count it happened to leave.
+
+    if (sum(drop) > 0.9 * length(drop)) {
+
+      cli::cli_abort(c(
+        "{nrow(mask)} masked range{?s} removed {sum(drop)} of the {length(drop)} columns of the similarity space",
+        "i" = "Masking more than 90 % of the spectrum leaves nothing to measure similarity on; check the ranges are in cm-1, low then high"
+      ), class = "horizons_input_error")
+
+    }
+
   }
 
-  bad <- which(!apply(is.finite(m), 1, all))
+  if (ncol(m) < min_cols) {
+
+    cli::cli_abort(c(
+      "The similarity space is left with {ncol(m)} column{?s}, fewer than the {min_cols} the decomposition needs",
+      "i" = "Standardize to a finer resolution, widen the wavenumber range, or ask for fewer components"
+    ), class = "horizons_input_error")
+
+  }
+
+  bad <- which(rowSums(!is.finite(m)) > 0)
 
   if (length(bad)) {
 
@@ -122,6 +200,20 @@ transform_similarity <- function(M, wn,
 #' scored by projection. `mixOmics::pls()` is used because it is already
 #' the package's PLS engine.
 #'
+#' `sdev_floor` is the noise floor on the retained set. Cumulative variance
+#' alone keeps a long tail of components whose standard deviation is one to
+#' three orders below the first, and the default Mahalanobis metric divides
+#' by that standard deviation, so the tail ends up carrying as much of the
+#' distance as the dominant chemical axes while being mostly detector and
+#' spline-ringing noise. After the variance rule has chosen its components,
+#' every retained component whose sd is below `sdev_floor * sdev[1]` is
+#' dropped; `sdev_floor = 0` disables the rule and restores selection by
+#' variance alone. The decay is recorded either way (`sdev_ratio`), over the
+#' variance rule's set rather than the floored one, so it still shows what
+#' the floor removed. For `space = "pls"` the floor is recorded but never
+#' applied: PLS components are chosen by count against a response, not by
+#' spread.
+#'
 #' Scores are stored unscaled with the per-component standard deviation
 #' alongside; `nearest_neighbours()` scales them when the metric asks for
 #' Mahalanobis, which on these scores is Euclidean distance after dividing
@@ -137,12 +229,21 @@ transform_similarity <- function(M, wn,
 #'   per pool row, `NA` where unmeasured. Default: `NULL`.
 #' @param max_comp [Integer.] Cap on components when `ncomp` is a
 #'   proportion. Default: `SELECT_PCA_MAX_COMP`.
+#' @param sdev_floor [Numeric.] Noise floor as a fraction of the first
+#'   component's standard deviation; retained components below it are
+#'   dropped. `0` disables. PCA only. Default: `0.10`.
 #'
 #' @return [horizons_similarity_space.] A list with `settings`,
 #'   `input_wavenumbers` (what `project_similarity()` expects),
-#'   `wavenumbers` (after transform), `ncomp`, `sdev`, `scores` (pool,
-#'   unscaled), `variance_retained` (PCA only), `n_fit` (PLS only), and
-#'   the fitted `center` + `rotation` (PCA) or `fit` (PLS).
+#'   `wavenumbers` (after transform), `ncomp` (retained, after the floor),
+#'   `sdev` (the retained set, after the floor), `sdev_ratio`
+#'   (`sdev / sdev[1]` over the *pre-floor* set, so the entries past
+#'   `ncomp` are what the floor cut and how far below it they were),
+#'   `sdev_floor` (the floor actually applied, so `0` for PLS; the argument
+#'   as given is in `settings`), `scores` (pool, unscaled), `ncomp_variance` and
+#'   `variance_retained` (PCA only; the count the variance rule chose before
+#'   the floor, and the variance the final set carries), `n_fit` (PLS only),
+#'   and the fitted `center` + `rotation` (PCA) or `fit` (PLS).
 #'
 #' @seealso [transform_similarity()], [project_similarity()]
 #' @noRd
@@ -155,7 +256,8 @@ build_similarity_space <- function(M, wn,
                                    space      = c("pca", "pls"),
                                    ncomp      = 0.99,
                                    y          = NULL,
-                                   max_comp   = SELECT_PCA_MAX_COMP) {
+                                   max_comp   = SELECT_PCA_MAX_COMP,
+                                   sdev_floor = 0.10) {
 
   space <- match.arg(space)
 
@@ -165,6 +267,14 @@ build_similarity_space <- function(M, wn,
   if (!is_prop && !is_int) {
 
     cli::cli_abort("{.arg ncomp} must be a proportion in (0, 1) or a positive integer",
+                   class = "horizons_input_error")
+
+  }
+
+  if (!is.numeric(sdev_floor) || length(sdev_floor) != 1L || is.na(sdev_floor) ||
+      sdev_floor < 0 || sdev_floor >= 1) {
+
+    cli::cli_abort("{.arg sdev_floor} must be a single number in [0, 1); {.val 0} disables the floor",
                    class = "horizons_input_error")
 
   }
@@ -196,28 +306,58 @@ build_similarity_space <- function(M, wn,
 
   }
 
+  ### The most components either rule could ask for; it bounds what prcomp()
+  ### has to compute. It is not a floor on the columns: under a variance
+  ### proportion the cap is 100 by default and the rule usually retains a
+  ### tenth of that, so requiring columns against the cap would refuse a
+  ### perfectly ordinary 24 cm-1 pool (132 columns after the filter's edge
+  ### trim) for a cap the user never set. The floor is what the decomposition
+  ### actually needs: the components asked for when that is a count, and two
+  ### when it is a proportion.
+  comp_cap <- as.integer(if (is_prop) max_comp else ncomp)
+  min_cols <- if (is_prop) 2L else max(2L, as.integer(ncomp))
+
   tr <- transform_similarity(M, wn, snv = snv, derivative = derivative,
-                             window = window, poly = poly, mask = mask)
+                             window = window, poly = poly, mask = mask,
+                             min_cols = min_cols)
 
   out <- list(
     settings = list(snv = snv, derivative = as.integer(derivative),
                     window = as.integer(window), poly = as.integer(poly),
-                    mask = mask, space = space, ncomp = ncomp),
+                    mask = mask, space = space, ncomp = ncomp,
+                    sdev_floor = sdev_floor),
     input_wavenumbers = wn,
     wavenumbers       = tr$wavenumbers
   )
 
   if (space == "pca") {
 
-    pca <- stats::prcomp(tr$matrix, center = TRUE, scale. = FALSE)
+    ### rank. bounds the scores and loadings returned, not sdev, so the
+    ### variance denominator below is still the full decomposition.
+    pca <- stats::prcomp(tr$matrix, center = TRUE, scale. = FALSE, rank. = comp_cap)
     var <- pca$sdev^2 / sum(pca$sdev^2)
     cum <- cumsum(var)
 
     k <- if (is_prop) min(which(cum >= ncomp)[1], max_comp, length(cum)) else min(as.integer(ncomp), length(cum))
     k <- as.integer(k)
 
+    ## Noise floor on the retained set ----------------------------------------
+
+    k_var <- k
+    ratio <- if (pca$sdev[1] > 0) pca$sdev / pca$sdev[1] else rep(1, length(pca$sdev))
+
+    if (sdev_floor > 0) k <- max(1L, sum(ratio[seq_len(k_var)] >= sdev_floor))
+
     out$ncomp             <- k
+    out$ncomp_variance    <- k_var
     out$sdev              <- pca$sdev[seq_len(k)]
+
+    ### The ratio is recorded over the variance rule's set, not the floored
+    ### one. Stored post-floor it is a tautology — every entry is above the
+    ### floor by construction — and the one question it exists to answer,
+    ### what the floor cut and by how far, cannot be asked of it.
+    out$sdev_ratio        <- ratio[seq_len(k_var)]
+    out$sdev_floor        <- sdev_floor
     out$scores            <- pca$x[, seq_len(k), drop = FALSE]
     out$variance_retained <- cum[k]
     out$center            <- pca$center
@@ -235,11 +375,17 @@ build_similarity_space <- function(M, wn,
 
     scores <- stats::predict(fit, newdata = X)$variates[, seq_len(k), drop = FALSE]
 
-    out$ncomp  <- k
-    out$n_fit  <- sum(keep)
-    out$sdev   <- apply(scores, 2, stats::sd)
-    out$scores <- scores
-    out$fit    <- fit
+    sdev <- apply(scores, 2, stats::sd)
+
+    ### The decay is recorded for audit, never applied: a PLS component is
+    ### chosen by its relation to the response, not by its spread.
+    out$ncomp      <- k
+    out$n_fit      <- sum(keep)
+    out$sdev       <- sdev
+    out$sdev_ratio <- if (sdev[1] > 0) sdev / sdev[1] else rep(NA_real_, length(sdev))
+    out$sdev_floor <- 0
+    out$scores     <- scores
+    out$fit        <- fit
 
   }
 

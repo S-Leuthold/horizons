@@ -17,6 +17,7 @@ select_training(
   mask = NULL,
   space = c("pca", "pls"),
   ncomp = 0.99,
+  sdev_floor = SELECT_SDEV_FLOOR,
   metric = c("mahalanobis", "euclidean", "cosine"),
   space_rows = c("all", "measured"),
   clusters = NULL,
@@ -61,6 +62,13 @@ Default: \code{"pca"}.}
 \item{ncomp}{\code{numeric.} Components: a proportion of variance in (0, 1)
 (PCA only, capped at 100) or an integer count. Default: \code{0.99}.}
 
+\item{sdev_floor}{\code{numeric.} Components whose standard deviation is below
+this fraction of PC1's leave the distance. Mahalanobis divides each
+component by its standard deviation, so a variance-chosen tail orders of
+magnitude below PC1 would otherwise weigh as much as the dominant
+chemical axes, and those trailing eigenvectors are the least stable part
+of the decomposition. In [0, 1); \code{0} disables the floor. Default: \code{0.1}.}
+
 \item{metric}{\code{character.} \code{"mahalanobis"}, \code{"euclidean"} or
 \code{"cosine"}, on the scores. Default: \code{"mahalanobis"}.}
 
@@ -79,13 +87,19 @@ count, or \code{NULL} to choose by silhouette. Default: \code{NULL}.}
 \item{cluster_min}{\code{integer.} \code{scope = "cluster"} only: the floor on
 cluster size. Default: \code{30}.}
 
-\item{twin_ratio}{\code{numeric.} The nearest-to-second-nearest ratio below
-which a pool row is a target's twin. Default: an internal constant to
-be calibrated on replicate scans.}
+\item{twin_ratio}{\code{numeric.} A pool row is a target's twin when its
+distance to that target is below this fraction of the median distance
+across the target's \code{k} neighbours. An exact match is always a twin.
+Currently \code{0.05}, an internal constant still to be calibrated on
+replicate scans, so treat the value as conservative rather than settled.}
 
 \item{chunk_size}{\code{integer.} Targets per distance chunk. Default: \code{500}.}
 
-\item{seed}{\code{integer.} Seed for the clustering. Default: \code{1}.}
+\item{seed}{\code{integer.} Seed for every stochastic step of the verb: the
+target clustering under \code{scope = "cluster"}, and the pool sample the
+resemblance check draws its reference distribution from. The caller's
+RNG state is saved and restored, so the verb does not advance it.
+Default: \code{1}.}
 
 \item{verbose}{\code{logical.} Print the report. Default: \code{TRUE}.}
 }
@@ -126,34 +140,89 @@ argument away.
 
 For \code{"cluster"} and \code{"sample"} the return is still the single union, and
 fitting one model per group is the caller's loop over
-\code{x$selection$groups} for now.
+\code{x$selection$groups} for now. Because nothing downstream reads those
+groups yet, the twin subtraction is applied to the union under every scope
+but \code{"global"}: an ordinary \code{configure() |> evaluate() |> fit()} on a
+\code{"sample"} return would otherwise train on every target's own replicates.
+Each group's \code{pool_ids} are still that target's or cluster's own draw,
+after the subtraction.
 
 \strong{The similarity space.} Distances are measured in a space built for
 "similar soil", not "similar baseline", and it never reaches the model:
 a user who configures \code{preprocessing = "raw"} still gets neighbours
 chosen on derivative spectra. The default chain is SNV, a Savitzky-Golay
 first derivative (window 11, order 2), PCA of the pool to 99 \% of
-variance, and Mahalanobis distance on the scores. Every step is an
-argument. A PCA space and its Mahalanobis scaling are defined by the
-population they were fit on; \code{space_rows} chooses whether that is the
-whole pool or, per property, only the rows that have it measured.
+variance with a standard-deviation floor on the components retained, and
+Mahalanobis distance on the scores. Every step is an argument. A PCA
+space and its Mahalanobis scaling are defined by the population they were
+fit on; \code{space_rows} chooses whether that is the whole pool or, per
+property, only the rows that have it measured. Under
+\code{space_rows = "measured"} with more than one property the distances in
+the record come from different spaces and are not comparable across them,
+which is what the \code{space} column on the distance tables records and why
+\code{.min_distance} is \code{NA} in that case.
 
 \strong{Reconciliation.} The targets' wavenumbers are the grid. The pool is
 resampled onto them through the same routine \code{standardize()} uses, so
-the training set and the targets share one axis end to end. A pool that
-does not cover the targets' range stops the verb; targets finer than the
-pool warn.
+the training set and the targets share one axis end to end. Either axis
+carrying a hole — a spacing more than three times its own median and more
+than 30 cm-1 — stops the verb before anything interpolates, because a
+resampling spline and a Savitzky-Golay window both run straight across a
+gap and invent absorbance at its edges without erroring; a deleted water
+band belongs in \code{mask}, which is applied after the derivative. A pool that
+does not cover the targets' range also stops the verb, except within half
+the pool's spacing, where the overshooting column is taken at the pool's
+endpoint rather than extrapolated and the clamp is recorded and warned
+about. Targets finer than the pool warn. Because the grid is the targets',
+\code{window} is a different physical filter in every batch; the width it works
+out to in cm-1 is recorded in \code{settings$window_cm} and printed in the
+report.
 
-\strong{Self-leakage.} A pool row whose spectrum is a target's twin (nearest
-distance zero, or below \code{twin_ratio} times the second-nearest) is
-excluded from that target's neighbourhood and reported.
+\strong{Self-leakage.} A pool row that sits far closer to a target than that
+target's surroundings do — distance zero, or below \code{twin_ratio} times the
+reference distance — is the target's twin: the same sample, present in
+both sets or scanned twice. The reference is the 75th percentile of the
+target's 50 nearest measured rows, a fixed width rather than the \code{k} being
+drawn, so a cluster of replicate scans cannot set the very number it is
+measured against. Every flagged row is dropped from that target's
+neighbourhood, spares are fetched so the target still reaches \code{k}, and the
+exclusion is recorded with its target, property, distance and reason.
+Except under \code{scope = "global"}, the flagged rows are also subtracted from
+the returned object, since a row excluded from one neighbourhood would
+otherwise walk back in through any other target that drew it. Under
+\code{scope = "global"} the check runs and is reported, but the rows stay,
+because global returns the whole pool by definition. The membership table
+keeps the subtracted rows with \code{retained = FALSE} rather than dropping
+them, so the record still says what each neighbourhood was.
+
+\strong{Units.} The pool and the targets are compared on raw absorbance
+magnitude before the similarity space is built. The comparison is of
+spread, the interquartile range, because a unit or gain change multiplies
+it: a more-than-twofold difference in IQR warns. The medians are compared
+the same way, but only when each dominates its own spread, since a
+baseline-offset set has a median near zero whose sign is a coin flip. Two
+fold rather than three because natural-log against base-10 absorbance is
+2.303, which is the mismatch most likely to go unnoticed; an instrument
+gain difference of about 1.5x stays silent on purpose.
+
+A pure additive offset is deliberately not flagged. The similarity space
+begins with SNV and takes a derivative, and both remove a constant offset,
+so it cannot change which neighbours are drawn. It can still matter
+downstream: a model preprocessing that preserves offset (\code{"raw"}, or a
+baseline method that does not centre) sees it, and that is the caller's
+check to make, not this one. The resemblance check below cannot do this
+job either, for the same reason: its space begins with SNV, so a pure unit
+difference leaves the scores identical.
 
 \strong{What the record holds} (\code{x$selection}): the settings as resolved, the
 reconciliation, the pool's identity, the membership table (target by
-property by pool row, with distance and rank), the groups, pool sizes
-per property against those available, every target's nearest and
-mean-of-k distance (the applicability signal at selection time), the
-twins excluded, and the clustering when \code{scope = "cluster"}.
+property by pool row, with the space it was measured in, distance, rank,
+and whether the row was \code{retained} in the object after the twin
+subtraction), the groups, pool sizes per property against those available, every
+target's nearest and mean-of-k distance (the applicability signal at
+selection time), the unit comparison, the twins excluded and how many of
+them left the union, any target that could not reach \code{k}, and the
+clustering when \code{scope = "cluster"}.
 }
 \examples{
 \dontrun{
