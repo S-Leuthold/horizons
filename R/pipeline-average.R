@@ -336,14 +336,22 @@ average <- function(x,
 
   new_role_map <- role_map[!role_map$variable %in% dropped_meta, , drop = FALSE]
 
+  ## With a custom `by`, sample_id is not carried into the averaged table
+  ## (only `by`, retained meta and predictors are), so its id role would
+  ## dangle. The grouping column is the identifier of the averaged rows.
+
+  if (by != "sample_id") {
+
+    new_role_map <- new_role_map[new_role_map$variable %in% names(averaged), , drop = FALSE]
+    new_role_map$role[new_role_map$variable == by] <- "id"
+
+  }
+
   ## -------------------------------------------------------------------------
   ## Step 9: Update horizons_data object
   ## -------------------------------------------------------------------------
 
-  x$data$analysis    <- averaged
-  x$data$role_map    <- new_role_map
-  x$data$n_rows      <- nrow(averaged)
-  x$data$n_covariates <- sum(new_role_map$role == "covariate")
+  x <- set_analysis(x, averaged, new_role_map)
 
   ## -------------------------------------------------------------------------
   ## Step 10: Update provenance
