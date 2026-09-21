@@ -22,9 +22,10 @@
 * **`subset_rows()` and `set_analysis()`** (internal) give `horizons_data`
   a row-subset operation (#43). `validate()`'s outlier removal and
   `average()`'s collapse now go through them, so the derived counts have
-  one source of truth. `average()` with a custom `by` used to leave
-  `sample_id`'s id role dangling after dropping the column; the grouping
-  column now carries the id role.
+  one source of truth. `average()` with a custom `by` used to return an
+  object with no `sample_id` column and a dangling id role, which nothing
+  downstream could use; the grouping values are now the averaged rows'
+  `sample_id`, with the column name kept in `provenance$aggregation_by`.
 
 * `resample_spectra()` accepts an explicit `new_wav` grid and refuses to
   extrapolate, so the package has one resampling routine for both

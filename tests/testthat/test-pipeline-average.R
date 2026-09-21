@@ -493,8 +493,16 @@ test_that("average() works with custom by column", {
   ## Assert ----------------------------------------------------------------
 
   expect_equal(nrow(result$data$analysis), 2)
-  expect_true("project" %in% names(result$data$analysis))
   expect_equal(result$provenance$average$by, "project")
+
+  ## The grouping values are the new sample ids; the object is whole
+  expect_true("sample_id" %in% names(result$data$analysis))
+  expect_false("project" %in% names(result$data$analysis))
+  expect_setequal(result$data$analysis$sample_id, unique(hd$data$analysis$project))
+  expect_identical(result$data$role_map$role[result$data$role_map$variable == "sample_id"], "id")
+  expect_identical(sum(result$data$role_map$role == "id"), 1L)
+  expect_no_error(validate_horizons_data(result))
+  expect_equal(result$provenance$aggregation_by, "project")
 
 })
 
