@@ -199,3 +199,16 @@ SCORING_SCHEMA <- 2L
 # after the three serialization fixes. 1 GiB is ~2.4x headroom. The footprint
 # tests in test-evaluate-parallel.R are the upstream guard.
 EVAL_WORKER_PAYLOAD_LIMIT <- 1 * 1024^3
+
+# select_training(): cap on the components retained when ncomp is given as
+# a proportion of variance. 100 was the experiments' cap (EXP_LOCAL in
+# dev/experiments/2026-09-local-strategy/00-config.R); the KSSL pool at 99 %
+# retains far fewer.
+SELECT_PCA_MAX_COMP <- 100L
+
+# select_training(): a pool row is a target's twin when the target's nearest
+# distance is below this fraction of its second-nearest. An exact match
+# (distance 0) is always a twin. PLACEHOLDER: the spec says to set this on
+# the KSSL replicate scans; until that is done the value is conservative and
+# catches only near-exact copies.
+SELECT_TWIN_RATIO <- 0.05
