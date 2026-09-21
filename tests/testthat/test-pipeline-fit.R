@@ -126,7 +126,7 @@ EXPECTED_FIT_CV_PRED_COLS <- c(
 EXPECTED_MODEL_SLOTS <- c(
   "workflows", "n_models", "best_config", "rank_metric", "predictor_schema",
   "response_bound", "cv_predictions", "results", "split", "row_index", "uq",
-  "ad", "timestamp", "runtime_secs"
+  "ad", "selection_present", "timestamp", "runtime_secs"
 )
 
 
@@ -765,6 +765,62 @@ describe("fit() - allow_par without a usable backend", {
     )
 
     expect_s3_class(r, "horizons_fit")
+
+  })
+
+})
+
+
+## =========================================================================
+## Selection provenance (2026-09-21)
+## =========================================================================
+## fit()'s calibration rows come from the training object. When that object
+## came from select_training(), predict() needs to know, because conformal
+## coverage does not transfer to a selected training set.
+
+## A shape-complete stand-in for a real $selection, so this does not depend on
+## running select_training() (and survives a validator that checks the shape).
+make_selection_stub <- function() {
+
+  list(
+    settings         = list(method = "neighbours", n_target = 10L),
+    membership       = tibble::tibble(sample_id = character(0),
+                                      group     = character(0)),
+    groups           = tibble::tibble(group = character(0), n = integer(0)),
+    pool_sizes       = tibble::tibble(group = character(0), n_pool = integer(0)),
+    target_distances = tibble::tibble(sample_id = character(0),
+                                      distance  = numeric(0)),
+    exclusions       = tibble::tibble(sample_id = character(0),
+                                      reason    = character(0))
+  )
+
+}
+
+describe("fit() - selection provenance", {
+
+  it("records FALSE when the training object carried no selection", {
+
+    obj    <- make_fit_object(n_configs = 1)
+    result <- suppressWarnings(
+      fit(obj, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE,
+          verbose = FALSE, seed = 42L)
+    )
+
+    expect_false(result$models$selection_present)
+
+  })
+
+  it("records TRUE when the training object carried a selection", {
+
+    obj           <- make_fit_object(n_configs = 1)
+    obj$selection <- make_selection_stub()
+
+    result <- suppressWarnings(
+      fit(obj, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE,
+          verbose = FALSE, seed = 42L)
+    )
+
+    expect_true(result$models$selection_present)
 
   })
 

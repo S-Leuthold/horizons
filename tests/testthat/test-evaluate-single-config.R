@@ -457,3 +457,78 @@ describe("evaluate_single_config() - bayesian_iter = 0", {
   })
 
 })
+
+
+## =========================================================================
+## mtry ceiling — the predictor count comes from the recipe's roles
+## =========================================================================
+
+describe("the mtry upper bound", {
+
+  ## A sibling lab measurement is held at role `response_hold`: it is in the
+  ## baked frame and it is not a predictor. Subtracting outcome, id and meta
+  ## off the baked frame therefore counted it, and tune_grid() could sample
+  ## an mtry one larger than the model matrix is wide.
+
+  make_setup_with_sibling <- function(n = 40, n_wn = 20) {
+
+    setup <- make_eval_setup(n = n, n_wn = n_wn)
+
+    setup$train_data$clay <- stats::runif(nrow(setup$train_data), 5, 60)
+    setup$role_map        <- rbind(setup$role_map,
+                                   tibble::tibble(variable = "clay", role = "response"))
+
+    setup
+
+  }
+
+  ## The frame the old subtraction would have handed dials::finalize()
+  subtracted_width <- function(baked) {
+
+    length(setdiff(names(baked), c("SOC", "sample_id")))
+
+  }
+
+  it("counts only the predictor-role columns of the prepped recipe", {
+
+    setup   <- make_setup_with_sibling()
+    recipe  <- build_recipe(make_eval_config(), setup$train_data, setup$role_map)
+    prepped <- recipes::prep(recipe)
+    baked   <- recipes::bake(prepped, new_data = NULL)
+
+    pred_vars <- prepped_predictors(prepped, baked)
+
+    ## The sibling survives into the baked frame, and is not a predictor
+    expect_true("clay" %in% names(baked))
+    expect_false("clay" %in% pred_vars)
+    expect_identical(length(pred_vars), subtracted_width(baked) - 1L)
+
+  })
+
+  it("finalizes mtry at the true predictor count, not the baked width", {
+
+    setup   <- make_setup_with_sibling()
+    recipe  <- build_recipe(make_eval_config(), setup$train_data, setup$role_map)
+    prepped <- recipes::prep(recipe)
+    baked   <- recipes::bake(prepped, new_data = NULL)
+
+    pred_vars <- prepped_predictors(prepped, baked)
+
+    wflow <- workflows::workflow() |>
+      workflows::add_recipe(recipe) |>
+      workflows::add_model(parsnip::rand_forest(mtry = hardhat::tune()) |>
+                             parsnip::set_engine("ranger") |>
+                             parsnip::set_mode("regression"))
+
+    param_set <- workflows::extract_parameter_set_dials(wflow)
+
+    finalized <- dials::finalize(param_set, baked[, pred_vars, drop = FALSE])
+
+    mtry_range <- dials::range_get(finalized$object[[which(finalized$name == "mtry")]])
+
+    expect_identical(as.integer(mtry_range$upper), length(pred_vars))
+    expect_lt(as.integer(mtry_range$upper), subtracted_width(baked))
+
+  })
+
+})
