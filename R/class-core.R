@@ -1660,6 +1660,31 @@ print.horizons_data <- function(x, ...) {
   }
 
   ## ---------------------------------------------------------------------------
+  ## Selection section (rows drawn from a pool by select_training())
+  ## ---------------------------------------------------------------------------
+
+  if (!is.null(x$selection)) {
+
+    s  <- x$selection$settings
+    ps <- x$selection$pool_sizes
+    ng <- nrow(x$selection$groups)
+
+    cat(cli::style_bold("Selection\n"))
+    cat(paste0("   \u251c\u2500 Scope: ", s$scope, " (", ng, " group", if (ng != 1) "s", ")\n"))
+
+    k_str <- if (length(unique(s$k)) == 1L) s$k[[1]] else paste(paste0(names(s$k), " = ", s$k), collapse = ", ")
+    cat(paste0("   \u251c\u2500 k: ", k_str, "\n"))
+
+    cat(paste0("   \u251c\u2500 Pool: ", x$selection$pool$n_rows, " rows; drawn per property: ",
+               paste(paste0(ps$property, " ", ps$drawn, "/", ps$available), collapse = ", "), "\n"))
+
+    cat(paste0("   \u2514\u2500 Space: ", toupper(s$space), " ", s$ncomp_retained, " components, ",
+               s$metric, "; twins excluded: ", nrow(x$selection$exclusions), "\n"))
+    cat("\n")
+
+  }
+
+  ## ---------------------------------------------------------------------------
   ## Evaluation section (horizons_eval and beyond)
   ## ---------------------------------------------------------------------------
 
