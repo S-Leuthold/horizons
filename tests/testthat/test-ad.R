@@ -177,3 +177,130 @@ test_that("far-out-of-distribution samples are flagged OOD", {
   expect_gt(mean(bins == "OOD"), 0.95)
 
 })
+
+
+## ---------------------------------------------------------------------------
+## predict_ad() — one bad spectrum degrades one row, not the batch
+## ---------------------------------------------------------------------------
+## A spectrum that bakes to all-NA is step_transform_spectra's documented
+## failure path. The earlier whole-matrix anyNA() check turned that single row
+## into a NULL AD result for the whole call, which also silently disabled
+## abstention. A bake that ABORTS is a different thing — a bug or a schema
+## problem — and is warned about rather than degraded.
+## ---------------------------------------------------------------------------
+
+## A fitted workflow whose recipe carries the real transform step, so the NA
+## path under test is the production one rather than a hand-built matrix.
+ad_fitted_workflow <- function(n = 60, n_wn = 12, seed = 41) {
+
+  set.seed(seed)
+
+  wn  <- paste0("wn_", seq(4000, by = -2, length.out = n_wn))
+  mat <- matrix(stats::rnorm(n * n_wn), nrow = n)
+  colnames(mat) <- wn
+
+  df   <- tibble::as_tibble(mat)
+  df$y <- 5 + rowMeans(mat[, 1:3]) + stats::rnorm(n, sd = 0.2)
+
+  rec <- recipes::recipe(y ~ ., data = df) |>
+    step_transform_spectra(dplyr::all_of(wn), preprocessing = "raw")
+
+  wf <- workflows::workflow() |>
+    workflows::add_recipe(rec) |>
+    workflows::add_model(parsnip::linear_reg()) |>
+    generics::fit(data = df)
+
+  list(workflow = wf, data = df, wn = wn)
+
+}
+
+ad_new_spectra <- function(wn, n = 5, shift = 0, seed = 42) {
+
+  set.seed(seed)
+  m <- matrix(stats::rnorm(n * length(wn)) + shift, nrow = n)
+  colnames(m) <- wn
+  df <- tibble::as_tibble(m)
+  df$sample_id <- paste0("NEW", seq_len(n))
+  df
+
+}
+
+test_that("predict_ad returns per-row NA for one bad spectrum and scores the rest", {
+
+  fx     <- ad_fitted_workflow()
+  bundle <- fit_ad(fx$workflow, calib_data = fx$data)
+
+  skip_if(is.null(bundle), "AD bundle could not be fit on the tiny fixture")
+
+  new_df           <- ad_new_spectra(fx$wn, n = 5)
+  new_df[3, fx$wn] <- NA_real_                   # one malformed spectrum
+
+  ad <- suppressWarnings(
+    predict_ad(fx$workflow, bundle, new_df)
+  )
+
+  expect_s3_class(ad, "tbl_df")
+  expect_equal(nrow(ad), 5L)
+
+  expect_true(is.na(ad$.ad_distance[3]))
+  expect_true(is.na(ad$.ad_flag[3]))
+
+  ## The other four are scored normally — the whole batch is not lost.
+  expect_equal(sum(!is.na(ad$.ad_distance)), 4L)
+  expect_true(all(ad$.ad_distance[-3] >= 0))
+  expect_true(all(!is.na(ad$.ad_flag[-3])))
+
+})
+
+test_that("predict_ad warns about the degraded rows rather than dropping AD", {
+
+  fx     <- ad_fitted_workflow()
+  bundle <- fit_ad(fx$workflow, calib_data = fx$data)
+
+  skip_if(is.null(bundle), "AD bundle could not be fit on the tiny fixture")
+
+  new_df           <- ad_new_spectra(fx$wn, n = 5)
+  new_df[3, fx$wn] <- NA_real_
+
+  warns <- testthat::capture_warnings(ad <- predict_ad(fx$workflow, bundle, new_df))
+
+  expect_true(any(grepl("Applicability domain is NA for 1 of 5", warns)))
+  expect_false(is.null(ad))
+
+})
+
+test_that("predict_ad warns and returns NULL when the bake aborts", {
+
+  fx     <- ad_fitted_workflow()
+  bundle <- fit_ad(fx$workflow, calib_data = fx$data)
+
+  skip_if(is.null(bundle), "AD bundle could not be fit on the tiny fixture")
+
+  new_df <- ad_new_spectra(fx$wn, n = 5)
+
+  ## Not a workflow: extract_recipe() aborts, which is the bug / schema case.
+  expect_warning(
+    ad <- predict_ad(list(), bundle, new_df),
+    "baking"
+  )
+
+  expect_null(ad)
+
+})
+
+test_that("predict_ad returns NULL, with a warning, when every spectrum is bad", {
+
+  fx     <- ad_fitted_workflow()
+  bundle <- fit_ad(fx$workflow, calib_data = fx$data)
+
+  skip_if(is.null(bundle), "AD bundle could not be fit on the tiny fixture")
+
+  new_df         <- ad_new_spectra(fx$wn, n = 5)
+  new_df[, fx$wn] <- NA_real_
+
+  warns <- testthat::capture_warnings(ad <- predict_ad(fx$workflow, bundle, new_df))
+
+  expect_true(any(grepl("unavailable for all 5", warns)))
+  expect_null(ad)
+
+})

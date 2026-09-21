@@ -107,7 +107,32 @@ prep.step_transform_spectra <- function(x, training, info = NULL, ...) {
   input_len    <- length(col_names)
   half_window  <- (x$window_size - 1) / 2
   out_len      <- input_len - 2 * half_window
+
+  ## A window wider than the spectrum trims everything away. Downstream this
+  ## surfaces as a `names0()` of a non-positive length or an empty predictor
+  ## matrix, neither of which names the cause, so check it here with both
+  ## numbers in the message.
+
+  if (out_len < 1) {
+
+    cli::cli_abort(c(
+      "{.fn step_transform_spectra} would trim every spectral column away.",
+      "x" = "{input_len} spectral column{?s} with {.code window_size = {x$window_size}} leaves {out_len} after Savitzky-Golay edge trimming.",
+      "i" = "Savitzky-Golay drops {half_window} column{?s} from each end, so {.arg window_size} must be smaller than the number of spectral columns."
+    ), class = "horizons_input_error")
+
+  }
+
   new_colnames <- recipes::names0(out_len, prefix = "spec")
+
+  ## The generated names must not collide with a column this step passes
+  ## through (a covariate literally named `spec01`, say). bake() binds the two
+  ## blocks side by side, so a collision is repaired positionally: at training
+  ## a spectral band is silently displaced from everything downstream, and at
+  ## predict time the bind dies inside vctrs with no mention of the column at
+  ## fault. Named here, at prep, where the recipe is still fixable.
+
+  check_transform_name_collision(new_colnames, setdiff(names(training), col_names))
 
   step_transform_spectra_new(
     columns         = col_names,
@@ -197,10 +222,53 @@ bake.step_transform_spectra <- function(object, new_data, ...) {
   transformed_matrix <- do.call(rbind, transformed_list)
   metadata <- new_data[, !names(new_data) %in% object$columns, drop = FALSE]
 
+  ## Re-checked at bake as well as prep: `new_data` can carry a column the
+  ## training table did not, and default name repair would resolve the clash
+  ## positionally instead of reporting it. `.name_repair = "check_unique"`
+  ## makes the bind itself refuse to repair silently; the check above is what
+  ## names the offending column.
+
+  check_transform_name_collision(object$trained_columns, names(metadata))
+
   dplyr::bind_cols(
     metadata,
-    tibble::as_tibble(transformed_matrix, .name_repair = ~ object$trained_columns)
+    tibble::as_tibble(transformed_matrix, .name_repair = ~ object$trained_columns),
+    .name_repair = "check_unique"
   )
+
+}
+
+
+## ---------------------------------------------------------------------------
+## Name-collision check (shared by prep and bake)
+## ---------------------------------------------------------------------------
+
+#' Abort when a generated spectral name collides with a pass-through column
+#'
+#' @param generated Character vector of the step's generated column names
+#'   (`spec1`, `spec01`, ... from `recipes::names0()`).
+#' @param passthrough Character vector of the column names the step carries
+#'   through untransformed (everything that is not a spectral column).
+#'
+#' @return Invisibly `TRUE`; aborts naming the colliding columns.
+#' @keywords internal
+#' @noRd
+check_transform_name_collision <- function(generated, passthrough) {
+
+  collisions <- intersect(generated, passthrough)
+
+  if (length(collisions) > 0) {
+
+    cli::cli_abort(c(
+      "{.fn step_transform_spectra} would generate {length(collisions)} column name{?s} that {?is/are} already in the data.",
+      "x" = "Colliding: {.val {collisions}}",
+      "i" = "The step names its output {.code spec1}, {.code spec2}, ... , so a non-spectral column using that pattern (a covariate, an id, a meta column) cannot be carried through alongside it.",
+      "i" = "{cli::qty(length(collisions))}Rename the offending column{?s} before building the recipe."
+    ), class = "horizons_input_error")
+
+  }
+
+  invisible(TRUE)
 
 }
 

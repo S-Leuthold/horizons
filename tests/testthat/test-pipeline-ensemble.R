@@ -482,6 +482,103 @@ describe("predict.horizons_ensemble() - preflight", {
 })
 
 ## =========================================================================
+## predict.horizons_ensemble() — conformal coverage on a selected training set
+## =========================================================================
+## Same warning, same conditions, same wording as predict.horizons_fit(): the
+## ensemble's CV+ intervals inherit the calibration rows' non-exchangeability
+## exactly as the member intervals do. Both paths call
+## warn_selection_intervals(), so the two cannot drift apart.
+
+describe("predict.horizons_ensemble() - selected training set", {
+
+  ens_selected <- function(uq = TRUE) {
+
+    ens <- suppressWarnings(
+      ensemble(fitted, method = "weighted", optimize = FALSE,
+               compute_uq = uq, verbose = FALSE)
+    )
+
+    ens$models$selection_present <- TRUE
+    ens
+
+  }
+
+  it("warns once when intervals are requested on a selected ensemble", {
+
+    ens <- ens_selected()
+
+    warns <- testthat::capture_warnings(
+      p <- suppressMessages(predict(ens, test_set, interval = TRUE))
+    )
+
+    expect_equal(sum(grepl("Conformal coverage is not guaranteed", warns)), 1L)
+    expect_true(any(grepl("target_distances", warns)))
+    expect_equal(nrow(p), dplyr::n_distinct(test_set$sample_id))
+
+  })
+
+  it("is silent when intervals are not requested", {
+
+    warns <- testthat::capture_warnings(
+      predict(ens_selected(), test_set, interval = FALSE)
+    )
+
+    expect_false(any(grepl("Conformal coverage", warns)))
+
+  })
+
+  it("is silent with no ensemble UQ, where no intervals are returned", {
+
+    warns <- testthat::capture_warnings(
+      suppressMessages(predict(ens_selected(uq = FALSE), test_set,
+                               interval = TRUE))
+    )
+
+    expect_false(any(grepl("Conformal coverage", warns)))
+
+  })
+
+  it("is silent on an unselected ensemble", {
+
+    ens <- suppressWarnings(
+      ensemble(fitted, method = "weighted", optimize = FALSE, verbose = FALSE)
+    )
+
+    warns <- testthat::capture_warnings(
+      suppressMessages(predict(ens, test_set, interval = TRUE))
+    )
+
+    expect_false(any(grepl("Conformal coverage", warns)))
+
+  })
+
+})
+
+## =========================================================================
+## predict.horizons_ensemble() — a malformed ensemble is diagnosed as such
+## =========================================================================
+## The member-set gate runs before the covariate resolution, so an ensemble
+## with no members reports the missing member set rather than something about
+## covariates derived from that same empty set.
+
+describe("predict.horizons_ensemble() - member-set gate order", {
+
+  it("reports the missing member set, not a covariate problem", {
+
+    ens <- suppressWarnings(
+      ensemble(fitted, method = "weighted", optimize = FALSE, verbose = FALSE)
+    )
+
+    ens$ensemble$weights <- ens$ensemble$weights[0, ]
+
+    expect_error(predict(ens, test_set, interval = FALSE),
+                 "carries no member set")
+
+  })
+
+})
+
+## =========================================================================
 ## predict.horizons_ensemble() — response bound guardrail at the OUTPUT
 ## =========================================================================
 ## Members predict UNCLAMPED (their predictions are meta-learner features and

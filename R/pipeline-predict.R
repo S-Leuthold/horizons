@@ -37,7 +37,11 @@ NULL
 #'     config, with a `config_id` column).
 #' @param interval Logical. Return conformal prediction intervals when UQ is
 #'   available? Default `TRUE`. Ignored (with a note) for configs that have no
-#'   UQ bundle.
+#'   UQ bundle. When intervals are actually available and the model was fit on
+#'   a training object carrying a `$selection` (from `select_training()`), this
+#'   warns once that conformal coverage is not guaranteed: the calibration rows
+#'   were chosen for proximity to the targets, so they are not exchangeable
+#'   with arbitrary prediction data.
 #' @param abstain_ood Logical. When `TRUE`, `.pred` (and any interval bounds)
 #'   are set to `NA` for samples flagged out-of-domain (`.ad_flag == "OOD"`),
 #'   while `.ad_distance`/`.ad_flag` are preserved so the caller can see how far
@@ -131,16 +135,31 @@ predict.horizons_fit <- function(object,
   ## Step 0b: Resolve new_data, then validate it carries the training axis
   ## -------------------------------------------------------------------------
 
-  new_spectra <- resolve_new_data(new_data)
-
-  ## Validate new_data carries the training-axis predictor columns fit() stored.
-  check_predictor_schema(object, new_spectra)
-
-  ## -------------------------------------------------------------------------
-  ## Step 1: Resolve `config` → one or more config_ids
-  ## -------------------------------------------------------------------------
-
+  ## Which configs are being predicted decides which covariates are required:
+  ## a covariate a config uses is a genuine predictor in that workflow's
+  ## blueprint, so it must survive into new_spectra and be validated. Resolved
+  ## here, ahead of the data gate, rather than in Step 1.
   config_ids <- resolve_config_ids(object, config)
+
+  keep_extra <- fitted_extra_predictors(object, config_ids)
+
+  new_spectra <- resolve_new_data(new_data, keep_extra = keep_extra)
+
+  ## Validate new_data carries the training-axis predictor columns fit() stored,
+  ## plus any covariate those configs promoted to predictor. What is *required*
+  ## comes from the config rows only; see fitted_extra_predictors().
+  check_predictor_schema(
+    object,
+    new_spectra,
+    required_extra = fitted_extra_predictors(object, config_ids,
+                                             include_blueprint = FALSE)
+  )
+
+  ## -------------------------------------------------------------------------
+  ## Step 0c: Conformal coverage on a selected training set
+  ## -------------------------------------------------------------------------
+
+  warn_selection_intervals(object, interval)
 
   ## -------------------------------------------------------------------------
   ## Step 2-3: Predict per config (point + optional intervals)
@@ -193,11 +212,22 @@ predict.horizons_fit <- function(object,
 #' predictor columns by role (the accessor API does not exist yet, so this is
 #' done inline via the role map).
 #'
+#' Columns named in `keep_extra` are carried through even when their role in
+#' `new_data` is `covariate`. A covariate a config requested is promoted to
+#' `predictor` inside that config's recipe, so it is a genuine predictor in the
+#' workflow's blueprint and is required at forge time; stripping it here on the
+#' strength of its role in the *new* object aborted `predict()` for every
+#' config that used one. Covariates the fitted configs do not use are still
+#' dropped.
+#'
 #' @param new_data A `horizons_data` or tibble/data.frame.
-#' @return A tibble with `sample_id` and predictor columns.
+#' @param keep_extra Character vector of non-`predictor` columns the fitted
+#'   models need. Default none, which is the historical behaviour.
+#' @return A tibble with `sample_id`, the predictor columns, and any
+#'   `keep_extra` columns present in `new_data`.
 #' @keywords internal
 #' @noRd
-resolve_new_data <- function(new_data) {
+resolve_new_data <- function(new_data, keep_extra = character(0)) {
 
   if (inherits(new_data, "horizons_data")) {
 
@@ -213,7 +243,13 @@ resolve_new_data <- function(new_data) {
 
     }
 
-    tibble::as_tibble(analysis[, c(id_col, pred_cols), drop = FALSE]) |>
+    ## Missing ones are not backfilled here; check_predictor_schema() names
+    ## them, which is a better error than hardhat's forge failure.
+    extra_cols <- intersect(setdiff(keep_extra, pred_cols), names(analysis))
+
+    tibble::as_tibble(
+      analysis[, c(id_col, pred_cols, extra_cols), drop = FALSE]
+    ) |>
       dplyr::rename(sample_id = dplyr::all_of(id_col))
 
   } else if (is.data.frame(new_data)) {
@@ -241,6 +277,60 @@ resolve_new_data <- function(new_data) {
 }
 
 ## ---------------------------------------------------------------------------
+## warn_selection_intervals() — conformal coverage on a selected training set
+## ---------------------------------------------------------------------------
+
+#' Warn that conformal coverage does not transfer from a selected training set
+#'
+#' `fit()`'s calibration rows are drawn from the training object. When that
+#' object came from [select_training()], those rows were chosen for proximity
+#' to the targets, so they are not exchangeable with arbitrary prediction data
+#' and the conformal guarantee does not transfer. Warned once per `predict()`
+#' call, before any per-config or per-member loop, so a `config = "all"`
+#' prediction (or an ensemble over many members) says it once rather than once
+#' per model. Nothing about the computation changes.
+#'
+#' Gated on intervals actually being produced. With no UQ bundle no intervals
+#' are returned at all and `interval` defaults to `TRUE`, so warning there
+#' would fire on every point prediction from a selected fit. Which slot decides
+#' that differs by class: a `horizons_fit` returns intervals from its per-config
+#' bundles (`models$uq`, via [has_uq()]), while an ensemble returns them only
+#' from its own conformal slot (`ensemble$uq`) — member UQ bundles are not used
+#' at the ensemble output.
+#'
+#' @param object A `horizons_fit` or `horizons_ensemble`.
+#' @param interval The call's `interval` argument.
+#' @return Invisibly `NULL`. Called for the warning.
+#' @keywords internal
+#' @noRd
+warn_selection_intervals <- function(object, interval) {
+
+  has_intervals <- if (inherits(object, "horizons_ensemble")) {
+
+    !is.null(object$ensemble$uq)
+
+  } else {
+
+    has_uq(object)
+
+  }
+
+  if (isTRUE(interval) && isTRUE(object$models$selection_present) &&
+      has_intervals) {
+
+    cli::cli_warn(c(
+      "!" = "Conformal coverage is not guaranteed: this model was fit on a selected training set.",
+      "i" = "{.fn select_training} chose the calibration rows for proximity to the targets, so exchangeability with {.arg new_data} does not hold.",
+      "i" = "Use {.code $selection$target_distances} as the applicability signal for these predictions."
+    ), class = "horizons_select_warning")
+
+  }
+
+  invisible(NULL)
+
+}
+
+## ---------------------------------------------------------------------------
 ## check_predictor_schema() — axis-alignment gate
 ## ---------------------------------------------------------------------------
 
@@ -254,24 +344,48 @@ resolve_new_data <- function(new_data) {
 #'
 #' @param object A `horizons_fit` carrying `models$predictor_schema`.
 #' @param new_spectra Tibble from [resolve_new_data()].
+#' @param required_extra Character vector of non-spectral columns the configs
+#'   being predicted need (covariates promoted to predictor). Default none.
 #' @return Invisibly TRUE; aborts on mismatch.
 #' @keywords internal
 #' @noRd
-check_predictor_schema <- function(object, new_spectra) {
+check_predictor_schema <- function(object, new_spectra,
+                                   required_extra = character(0)) {
 
   ## fit() stored the training-axis predictor columns; validate against them
   ## directly (no recipe re-introspection, which a butchered workflow can break).
   expected <- object$models$predictor_schema
 
-  ## Objects written before predictor_schema existed: skip the gate, let bake()
-  ## surface any mismatch.
+  supplied <- setdiff(names(new_spectra), "sample_id")
+
+  ## Covariates a config promoted to predictor are required at forge time but
+  ## are not in predictor_schema, which records the spectral axis only. Name
+  ## them here rather than letting hardhat's forge error surface instead.
+  ##
+  ## Checked BEFORE the predictor_schema NULL escape below: the covariate
+  ## requirement comes from the config rows, not from the schema, so it holds
+  ## for objects written before predictor_schema existed too. Behind the escape
+  ## it silently did not run on exactly those objects.
+  missing_extra <- setdiff(required_extra, supplied)
+
+  if (length(missing_extra) > 0) {
+
+    cli::cli_abort(c(
+      "{.arg new_data} is missing {length(missing_extra)} covariate column{?s} the fitted model uses as a predictor.",
+      "x" = "Missing: {.val {missing_extra}}",
+      "i" = "{cli::qty(length(missing_extra))}The config being predicted was trained with {?this covariate/these covariates}, so {?it is/they are} part of its predictor set.",
+      "i" = "{cli::qty(length(missing_extra))}Supply {?it/them} in {.arg new_data} (see {.fn add_covariates}), or predict with a config that does not use {?it/them}."
+    ))
+
+  }
+
+  ## Objects written before predictor_schema existed: skip the axis gate, let
+  ## bake() surface any mismatch.
   if (is.null(expected)) {
 
     return(invisible(TRUE))
 
   }
-
-  supplied <- setdiff(names(new_spectra), "sample_id")
 
   missing <- setdiff(expected, supplied)
 
@@ -287,6 +401,85 @@ check_predictor_schema <- function(object, new_spectra) {
   }
 
   invisible(TRUE)
+
+}
+
+## ---------------------------------------------------------------------------
+## fitted_extra_predictors() — covariates a fitted config needs at predict time
+## ---------------------------------------------------------------------------
+
+#' Non-spectral predictor columns the fitted configs require
+#'
+#' `fit()` records `models$predictor_schema` from the role map's `predictor`
+#' role, which is the spectral axis; a covariate this config requested carries
+#' the `covariate` role there and is promoted to `predictor` only inside
+#' `build_recipe()`. It is nonetheless in the workflow blueprint's predictor
+#' ptype and required at forge time, so `predict()` has to know about it.
+#'
+#' Two sources, unioned. The blueprint is authoritative but often unavailable:
+#' `butcher()` strips the mold from a stored workflow. The config row's
+#' `covariates` field is what `build_recipe()` promoted in the first place, and
+#' survives butchering, so it is the dependable one.
+#'
+#' @param object A `horizons_fit`.
+#' @param config_ids Configs being predicted. Default all fitted workflows.
+#' @param include_blueprint Read the blueprint too? `TRUE` when deciding which
+#'   columns to keep, where being generous costs nothing. `FALSE` when deciding
+#'   what to *require*, so a blueprint listing something unexpected cannot
+#'   abort a prediction that would have worked.
+#' @return Character vector of required columns outside `predictor_schema`.
+#' @keywords internal
+#' @noRd
+fitted_extra_predictors <- function(object, config_ids = NULL,
+                                    include_blueprint = TRUE) {
+
+  ids    <- config_ids %||% names(object$models$workflows)
+  schema <- object$models$predictor_schema
+
+  from_blueprint <- if (include_blueprint) {
+
+    unlist(
+      lapply(object$models$workflows[ids], function(wf) {
+
+        tryCatch(
+          names(hardhat::extract_mold(wf)$blueprint$ptypes$predictors),
+          error = function(e) character(0)
+        )
+
+      }),
+      use.names = FALSE
+    )
+
+  } else {
+
+    character(0)
+
+  }
+
+  configs <- object$config$configs
+
+  from_configs <- if (!is.null(configs) && "covariates" %in% names(configs)) {
+
+    rows <- configs[configs$config_id %in% ids, , drop = FALSE]
+
+    unlist(
+      lapply(rows$covariates, function(v) {
+
+        tryCatch(parse_config_covariates(v), error = function(e) NULL)
+
+      }),
+      use.names = FALSE
+    )
+
+  } else {
+
+    character(0)
+
+  }
+
+  extra <- setdiff(unique(c(from_blueprint, from_configs)), schema)
+
+  extra[!is.na(extra)]
 
 }
 
@@ -489,6 +682,18 @@ predict_one_config <- function(object, config_id, new_spectra, interval,
       }
 
     }
+
+  } else if (isTRUE(abstain_ood)) {
+
+    ## Abstention was asked for and cannot happen: no AD bundle on this config,
+    ## or predict_ad() could not score the batch. Saying so is the point — a
+    ## silent pass-through returns exactly the unabstained predictions the
+    ## caller asked not to get.
+    cli::cli_warn(c(
+      "!" = "{.arg abstain_ood} was requested but no applicability-domain information is available for config {.val {config_id}}.",
+      "i" = "Either {.fn fit} was run with {.code compute_ad = FALSE} (or without enough calibration data), or the AD computation failed; see any warning above.",
+      "i" = "Predictions are returned unabstained."
+    ), class = "horizons_ad_warning")
 
   }
 

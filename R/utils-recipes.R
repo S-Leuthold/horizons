@@ -8,8 +8,16 @@
 #' Recipe step order (early fusion):
 #' 1. Response transformation (step_log/step_sqrt with skip = TRUE)
 #' 2. Spectral preprocessing (step_transform_spectra on predictor_cols only)
-#' 3. Feature selection (pca/boruta/cars/correlation/none)
-#' 4. Covariate inclusion (append requested covariates, remove others)
+#' 3. Feature selection (pca/boruta/cars/correlation/none), on spectral
+#'    columns only
+#' 4. Covariate inclusion (promote requested covariates to predictor; the rest
+#'    stay in a non-predictor hold role)
+#'
+#' Columns that are neither the outcome nor spectral predictors are given an
+#' explicit non-predictor role — `id`, `meta`, `response_hold` (sibling lab
+#' responses) and `covariate_hold`. Nothing is left to the `outcome ~ .`
+#' default, which would make a predictor of any column the role map did not
+#' name.
 #'
 #' A final pass re-points the step selector quosures away from this function's
 #' frame, which would otherwise be serialized to every parallel worker. See
@@ -31,6 +39,14 @@ build_recipe <- function(config_row, train_data, role_map) {
   predictor_cols <- role_map$variable[role_map$role == "predictor"]
   id_col         <- role_map$variable[role_map$role == "id"]
   meta_cols      <- role_map$variable[role_map$role == "meta"]
+
+  ## Sibling responses: every lab-measured property joined by add_response()
+  ## that configure() did not promote to outcome. They are in the analysis
+  ## table but must never be modelled.
+  response_cols  <- setdiff(
+    role_map$variable[role_map$role == "response"],
+    outcome_col
+  )
 
   ## Covariate columns: all covariates available in the data
   all_covariate_cols <- role_map$variable[role_map$role == "covariate"]
@@ -73,22 +89,54 @@ build_recipe <- function(config_row, train_data, role_map) {
 
   ## Assign roles -----------------------------------------------------------
 
+  ## `id` is the one non-predictor role that stays required at bake. It is the
+  ## key `predict()` joins its output back on, so a batch arriving without it is
+  ## a caller error worth aborting on. The hold roles below are the opposite
+  ## case: they exist only in the training table, so requiring them would make
+  ## every legitimate prediction batch fail.
   rec <- recipes::update_role(rec, dplyr::all_of(id_col), new_role = "id")
   rec <- recipes::update_role_requirements(rec, role = "id", bake = TRUE)
 
   if (length(meta_cols) > 0) {
 
+    ## Every meta column is relaxed here, not just select_training()'s
+    ## provenance columns (.drawn_by, .min_distance, .group) — those are the
+    ## motivating case, but user-supplied meta from spectra() is treated the
+    ## same way, since no step consumes a meta column at bake time. On the
+    ## workflow path the relaxation also means meta columns are dropped before
+    ## bake() even when new data carries them: hardhat builds its extra-role
+    ## ptypes from the bake requirements, so a role at FALSE is excluded from
+    ## what forge() passes through. A future step that needs a meta column at
+    ## bake time would therefore see it silently absent rather than error.
     rec <- recipes::update_role(rec, dplyr::all_of(meta_cols), new_role = "meta")
-    rec <- recipes::update_role_requirements(rec, role = "meta", bake = TRUE)
+    rec <- recipes::update_role_requirements(rec, role = "meta", bake = FALSE)
+
+  }
+
+  if (length(response_cols) > 0) {
+
+    ## Without an explicit role these fall through `outcome ~ .` to predictor,
+    ## which puts a lab measurement of the same sample into the model matrix —
+    ## target leakage that the pool-internal CV cannot see. They are also never
+    ## present at predict time, so the role is relaxed at bake like meta.
+    rec <- recipes::update_role(rec, dplyr::all_of(response_cols),
+                                new_role = "response_hold")
+    rec <- recipes::update_role_requirements(rec, role = "response_hold",
+                                             bake = FALSE)
 
   }
 
   ## Mark covariates with a non-predictor role initially
-  ## They'll be added back as predictors in Step 4 if this config uses them
+  ## They'll be added back as predictors in Step 5 if this config uses them.
+  ## Relaxed at bake for the same reason as meta: resolve_new_data() strips
+  ## covariates from new data unconditionally, so requiring them would break
+  ## predict() for any object that carries covariate columns at all.
   if (length(all_covariate_cols) > 0) {
 
     rec <- recipes::update_role(rec, dplyr::all_of(all_covariate_cols),
                                 new_role = "covariate_hold")
+    rec <- recipes::update_role_requirements(rec, role = "covariate_hold",
+                                             bake = FALSE)
 
   }
 
@@ -135,6 +183,27 @@ build_recipe <- function(config_row, train_data, role_map) {
   ## Step 4: Feature selection
   ## -----------------------------------------------------------------------
   ## Operates on spectral features only. Covariates bypass this step.
+  ##
+  ## Selection is by name pattern, not `all_predictors()`. `update_role()` is
+  ## not sequenced with the steps — it rewrites `var_info` for the whole
+  ## recipe — so a covariate promoted to predictor in Step 5 would be inside
+  ## `all_predictors()` when these steps prep, folding a non-spectral column
+  ## into the PCA rotation or into step_select_correlation()'s 3-wide
+  ## contiguity window. Selecting by name is the same approach
+  ## step_transform_spectra takes, and it makes the bypass true regardless of
+  ## the order roles happen to be assigned in.
+  ##
+  ## The pattern is "spec" + digits because that is what the transform step's
+  ## prep() renames its output to (`recipes::names0(prefix = "spec")`), so by
+  ## the time these steps see the data the wavenumber names are gone.
+  ##
+  ## A zero match therefore means that naming changed, and every branch below
+  ## aborts at prep() when it happens rather than quietly selecting nothing.
+  ## The three custom steps check it themselves (`check_selection_columns()`).
+  ## `recipes::step_pca()` does not — an empty selection there preps and bakes
+  ## as a pass-through no-op, which would train the model on the untransformed
+  ## spectral columns while the config still claimed PCA — so its branch selects
+  ## through `select_generated_spectra()`, which aborts in the selector itself.
 
   feature_selection <- tolower(as.character(config_row$feature_selection))
 
@@ -144,26 +213,26 @@ build_recipe <- function(config_row, train_data, role_map) {
 
     "pca" = rec |>
       recipes::step_pca(
-        recipes::all_predictors(),
+        select_generated_spectra(),
         threshold = 0.995,
         options   = list(scale. = TRUE, center = TRUE)
       ),
 
     "correlation" = rec |>
       step_select_correlation(
-        recipes::all_predictors(),
+        dplyr::matches("^spec[0-9]+$"),
         outcome = outcome_col
       ),
 
     "boruta" = rec |>
       step_select_boruta(
-        recipes::all_predictors(),
+        dplyr::matches("^spec[0-9]+$"),
         outcome = outcome_col
       ),
 
     "cars" = rec |>
       step_select_cars(
-        recipes::all_predictors(),
+        dplyr::matches("^spec[0-9]+$"),
         outcome = outcome_col
       ),
 
@@ -179,45 +248,35 @@ build_recipe <- function(config_row, train_data, role_map) {
   ## -----------------------------------------------------------------------
   ## Covariates are already in the data (from add_covariates()). Per-config
   ## handling decides which ones to include as predictors.
+  ##
+  ## Unrequested covariates are left in `covariate_hold` rather than removed by
+  ## a step. The role alone is sufficient — a held column is outside
+  ## `all_predictors()`, outside the spectral selectors above, and outside the
+  ## workflow blueprint's predictor ptype, so it never reaches a model. A
+  ## step_rm() would additionally require those columns at bake time
+  ## (`recipes::step_rm`'s bake calls `check_new_data()` on its removals), and
+  ## `resolve_new_data()` strips covariates from new data unconditionally, so
+  ## the step aborted predict() for covariates the config did not even use.
 
-  if (length(all_covariate_cols) > 0) {
+  if (length(all_covariate_cols) > 0 &&
+      !is.null(config_covariates) && length(config_covariates) > 0) {
 
-    if (!is.null(config_covariates) && length(config_covariates) > 0) {
+    ## Validate requested covariates exist in the data
+    missing_covs <- setdiff(config_covariates, all_covariate_cols)
 
-      ## Validate requested covariates exist in the data
-      missing_covs <- setdiff(config_covariates, all_covariate_cols)
+    if (length(missing_covs) > 0) {
 
-      if (length(missing_covs) > 0) {
-
-        rlang::abort(paste0(
-          "Config requests covariates not available in data: ",
-          paste(missing_covs, collapse = ", "),
-          ". Available: ", paste(all_covariate_cols, collapse = ", ")
-        ))
-
-      }
-
-      ## Promote requested covariates to predictor role
-      rec <- recipes::update_role(rec, dplyr::all_of(config_covariates),
-                                  new_role = "predictor")
-
-      ## Remove unrequested covariates
-      unused_covariates <- setdiff(all_covariate_cols, config_covariates)
-
-      if (length(unused_covariates) > 0) {
-
-        rec <- rec |>
-          recipes::step_rm(dplyr::all_of(unused_covariates))
-
-      }
-
-    } else {
-
-      ## No covariates for this config — remove all
-      rec <- rec |>
-        recipes::step_rm(dplyr::all_of(all_covariate_cols))
+      rlang::abort(paste0(
+        "Config requests covariates not available in data: ",
+        paste(missing_covs, collapse = ", "),
+        ". Available: ", paste(all_covariate_cols, collapse = ", ")
+      ))
 
     }
+
+    ## Promote requested covariates to predictor role
+    rec <- recipes::update_role(rec, dplyr::all_of(config_covariates),
+                                new_role = "predictor")
 
   }
 
@@ -355,6 +414,91 @@ strip_selector_envs <- function(rec, frame) {
   })
 
   rec
+
+}
+
+## ---------------------------------------------------------------------------
+## select_generated_spectra
+## ---------------------------------------------------------------------------
+
+#' Select the Transform Step's Generated Spectral Columns, Loudly
+#'
+#' @description
+#' A tidyselect helper for use inside a recipe step's `...`. Matches the
+#' columns `step_transform_spectra()` generates (`spec1`, `spec2`, ...) and
+#' aborts when the match is empty.
+#'
+#' The abort is the reason it exists. This package's own selection steps check
+#' their resolved columns in `prep()` (`check_selection_columns()`), but
+#' `recipes::step_pca()` treats an empty selection as a no-op: it preps, bakes,
+#' and passes the untransformed columns straight through, so a config asking
+#' for PCA would train on raw spectra with nothing said. Aborting inside the
+#' selector puts the same gate in front of a step whose `prep()` this package
+#' does not own.
+#'
+#' @param pattern Regular expression for the generated names. Default is the
+#'   `recipes::names0(prefix = "spec")` pattern.
+#'
+#' @return Integer column positions, as tidyselect helpers return. Aborts on an
+#'   empty match. Must be called inside a selection context.
+#' @keywords internal
+#' @noRd
+select_generated_spectra <- function(pattern = "^spec[0-9]+$") {
+
+  matched <- dplyr::matches(pattern)
+
+  if (length(matched) == 0) {
+
+    cli::cli_abort(c(
+      "No column matches {.val {pattern}}, so the selection step has nothing to select.",
+      "i" = "That pattern is the naming {.fn step_transform_spectra} gives its output; a zero match means the naming changed or the transform step did not run.",
+      "i" = "Aborting rather than letting the step prep as a silent pass-through."
+    ), class = "horizons_input_error")
+
+  }
+
+  matched
+
+}
+
+## ---------------------------------------------------------------------------
+## check_selection_columns
+## ---------------------------------------------------------------------------
+
+#' Abort When a Selection Step Resolves to Zero Columns
+#'
+#' @description
+#' Shared `prep()`-time gate for the feature-selection steps. A selection step
+#' whose selector matches nothing has nothing to select, which is a
+#' configuration error rather than a degenerate-but-valid case: with no columns
+#' the step trains on an empty matrix and, depending on the algorithm, either
+#' errors deep inside a modelling package or falls through its
+#' "retain everything" branch and silently becomes a no-op.
+#'
+#' In `build_recipe()` the selector is the name pattern the transform step's
+#' output uses (`^spec[0-9]+$`), so a zero match means that naming changed and
+#' the whole selection stage would otherwise be skipped without a word.
+#'
+#' @param col_names Character vector from `recipes::recipes_eval_select()`.
+#' @param step Character. The step's user-facing name, for the message.
+#'
+#' @return Invisibly `TRUE`; aborts when `col_names` is empty.
+#' @keywords internal
+#' @noRd
+check_selection_columns <- function(col_names, step) {
+
+  if (length(col_names) == 0) {
+
+    cli::cli_abort(c(
+      "{.fn {step}} selected zero columns.",
+      "x" = "The step's selector matched no column in the training data.",
+      "i" = "Inside {.fn build_recipe} the selector is {.code dplyr::matches(\"^spec[0-9]+$\")}, the names {.fn step_transform_spectra} gives its output. A zero match means that naming changed.",
+      "i" = "A selection step with nothing to select cannot train; fix the selector rather than letting the step become a silent no-op."
+    ), class = "horizons_input_error")
+
+  }
+
+  invisible(TRUE)
 
 }
 

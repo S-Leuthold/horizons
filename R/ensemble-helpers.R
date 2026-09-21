@@ -747,21 +747,18 @@ predict.horizons_ensemble <- function(object,
   }
 
   ## -------------------------------------------------------------------------
-  ## Step 1: Resolve new_data, then validate it carries the training axis
-  ## -------------------------------------------------------------------------
-
-  new_spectra <- resolve_new_data(new_data)
-
-  check_predictor_schema(object, new_spectra)
-
-  ## -------------------------------------------------------------------------
-  ## Step 2: Resolve the authoritative member set
+  ## Step 1: Resolve the authoritative member set
   ## -------------------------------------------------------------------------
 
   ## The members the meta-learner actually trained on are exactly the rows of
   ## the weights tibble. Read them directly rather than re-deriving via
   ## gather_members(), which intersects train-time slots (cv_predictions) and
   ## could disagree with what the fitted meta-model saw.
+  ##
+  ## Gated before the covariate resolution below, not after: every downstream
+  ## step reads this member set, and fitted_extra_predictors() on a malformed
+  ## ensemble reports a covariate problem for what is really a missing member
+  ## set. Diagnose the object first.
   members <- object$ensemble$weights$member
 
   if (is.null(members) || length(members) < 2) {
@@ -772,6 +769,28 @@ predict.horizons_ensemble <- function(object,
     ))
 
   }
+
+  ## -------------------------------------------------------------------------
+  ## Step 2: Resolve new_data, then validate it carries the training axis
+  ## -------------------------------------------------------------------------
+
+  ## Members that use covariates need them on new data; keep exactly those
+  ## (same rule as predict.horizons_fit()).
+  extra_keep  <- fitted_extra_predictors(object, members)
+  extra_need  <- fitted_extra_predictors(object, members, include_blueprint = FALSE)
+
+  new_spectra <- resolve_new_data(new_data, keep_extra = extra_keep)
+
+  check_predictor_schema(object, new_spectra, required_extra = extra_need)
+
+  ## -------------------------------------------------------------------------
+  ## Step 2b: Conformal coverage on a selected training set
+  ## -------------------------------------------------------------------------
+  ## Same condition and same wording as the single-fit path — the ensemble's
+  ## CV+ intervals inherit the calibration rows' non-exchangeability exactly as
+  ## the member intervals do. Warned once per call, ahead of the member loop.
+
+  warn_selection_intervals(object, interval)
 
   ## -------------------------------------------------------------------------
   ## Step 3: Every member predicts new_data (long frame, original scale)
