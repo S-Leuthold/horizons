@@ -442,13 +442,25 @@ fit_ad <- function(fitted_workflow,
 #' estimated in (D4). Column-name alignment is re-checked inside
 #' [calculate_ad_distance()].
 #'
+#' Two failure modes are kept distinct, because they mean different things. A
+#' bake that *aborts* is a bug or a schema problem — no sample gets an AD
+#' column, and the function warns rather than degrading quietly. A bake that
+#' *succeeds* but returns NA for some rows is the documented
+#' `step_transform_spectra()` path for a malformed spectrum: those rows alone
+#' get `NA` distance and flag, and every other row is scored normally. The
+#' earlier whole-matrix `anyNA()` check conflated the two, so one bad spectrum
+#' in a batch silently removed AD (and therefore abstention) from the entire
+#' batch.
+#'
 #' @param workflow The config's stored (butchered) fitted workflow.
 #' @param ad_bundle The config's AD bundle from `models$ad[[config_id]]`
 #'   (`centroid`, `cov_matrix`, `ad_thresholds`).
 #' @param new_spectra Tibble from `resolve_new_data()` (sample_id + predictors).
 #'
 #' @return Tibble with `.ad_distance` (numeric, squared) and `.ad_flag`
-#'   (factor Q1-Q4/OOD), one row per sample; or `NULL` on failure.
+#'   (factor Q1-Q4/OOD), one row per sample — `NA` in both columns for rows
+#'   that baked to NA; or `NULL` when the bake aborted or the distance could
+#'   not be computed at all.
 #'
 #' @seealso [fit_ad()], [calculate_ad_distance()], [assign_ad_bin()].
 #'
@@ -477,10 +489,54 @@ predict_ad <- function(workflow, ad_bundle, new_spectra) {
     capture_conditions = TRUE
   )
 
-  if (!is.null(bake_safe$error) || is.null(bake_safe$result) ||
-      anyNA(bake_safe$result)) {
+  if (!is.null(bake_safe$error) || is.null(bake_safe$result)) {
+
+    ## Interpolated as a value, not as part of the template — an error message
+    ## carrying braces would otherwise be re-evaluated by cli.
+    bake_msg <- if (is.null(bake_safe$error)) {
+      "The recipe returned nothing."
+    } else {
+      conditionMessage(bake_safe$error)
+    }
+
+    cli::cli_warn(c(
+      "!" = "Applicability domain could not be computed: baking {.arg new_data} through the fitted recipe failed.",
+      "x" = "{bake_msg}",
+      "i" = "This is a bug or a schema mismatch between {.arg new_data} and the training axis, not a property of one sample.",
+      "i" = "No AD columns are returned, so out-of-domain abstention cannot be applied to this batch."
+    ), class = "horizons_ad_warning")
 
     return(NULL)
+
+  }
+
+  new_matrix <- bake_safe$result
+
+  ## Per-row NA: degrade those rows, score the rest ----------------------------
+  ## A row that baked to NA (step_transform_spectra's documented failure path
+  ## for a malformed spectrum) has no position in feature space, so it gets no
+  ## distance. mahalanobis() would propagate that NA across the whole call, so
+  ## the bad rows are held out of the computation and re-inserted as NA.
+
+  bad_rows <- !stats::complete.cases(new_matrix)
+
+  if (all(bad_rows)) {
+
+    cli::cli_warn(c(
+      "!" = "Applicability domain is unavailable for all {nrow(new_matrix)} sample{?s}: every spectrum baked to NA.",
+      "i" = "See the {.fn step_transform_spectra} warning above for the cause."
+    ), class = "horizons_ad_warning")
+
+    return(NULL)
+
+  }
+
+  if (any(bad_rows)) {
+
+    cli::cli_warn(c(
+      "!" = "Applicability domain is NA for {sum(bad_rows)} of {nrow(new_matrix)} sample{?s} whose spectra baked to NA.",
+      "i" = "The remaining samples are scored normally; the NA rows are neither binned nor abstained on."
+    ), class = "horizons_ad_warning")
 
   }
 
@@ -490,8 +546,15 @@ predict_ad <- function(workflow, ad_bundle, new_spectra) {
     {
       metadata  <- list(centroid   = ad_bundle$centroid,
                         cov_matrix = ad_bundle$cov_matrix)
-      distances <- calculate_ad_distance(bake_safe$result, metadata)
-      flags     <- assign_ad_bin(distances, ad_bundle$ad_thresholds)
+
+      distances            <- rep(NA_real_, nrow(new_matrix))
+      distances[!bad_rows] <- calculate_ad_distance(
+        new_matrix[!bad_rows, , drop = FALSE],
+        metadata
+      )
+
+      flags <- assign_ad_bin(distances, ad_bundle$ad_thresholds)
+
       tibble::tibble(.ad_distance = distances, .ad_flag = flags)
     },
     log_error          = FALSE,
