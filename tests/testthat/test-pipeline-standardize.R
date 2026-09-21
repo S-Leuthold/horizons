@@ -165,6 +165,87 @@ test_that("resample_spectra() changes wavelength count", {
 })
 
 
+test_that("resample_spectra(new_wav =) matches the resolution path bit for bit", {
+
+  ## Arrange
+  set.seed(7)
+  wn  <- seq(4000, 600, by = -4)
+  m   <- matrix(stats::runif(5 * length(wn)), nrow = 5)
+  grid <- seq(4000, 600, by = -2)
+
+  ## Act
+  by_res  <- resample_spectra(m, wn, target_resolution = 2)
+  by_grid <- resample_spectra(m, wn, new_wav = grid)
+
+  ## Assert
+  expect_identical(by_grid$matrix,      by_res$matrix)
+  expect_identical(by_grid$wavelengths, by_res$wavelengths)
+  expect_identical(by_grid$n_after,     by_res$n_after)
+
+})
+
+
+test_that("resample_spectra(new_wav =) returns exactly the grid given, decreasing", {
+
+  set.seed(7)
+  wn   <- seq(4000, 600, by = -4)
+  m    <- matrix(stats::runif(3 * length(wn)), nrow = 3)
+  grid <- c(3990, 3500, 2222, 1000.5, 604)
+
+  out <- resample_spectra(m, wn, new_wav = grid)
+
+  expect_identical(out$wavelengths, grid)
+  expect_identical(ncol(out$matrix), length(grid))
+  expect_true(all(diff(out$wavelengths) < 0))
+
+  ## An increasing grid is accepted and returned decreasing
+  out2 <- resample_spectra(m, wn, new_wav = rev(grid))
+  expect_identical(out2$matrix, out$matrix)
+  expect_identical(out2$wavelengths, grid)
+
+})
+
+
+test_that("resample_spectra(new_wav =) reproduces the input at its own knots", {
+
+  set.seed(7)
+  wn <- seq(4000, 600, by = -4)
+  m  <- matrix(stats::runif(3 * length(wn)), nrow = 3)
+
+  ## Every other column of the source grid
+  grid <- wn[seq(1, length(wn), by = 2)]
+  out  <- resample_spectra(m, wn, new_wav = grid)
+
+  expect_equal(unname(out$matrix), m[, seq(1, length(wn), by = 2)], tolerance = 1e-12)
+
+})
+
+
+test_that("resample_spectra(new_wav =) refuses to extrapolate", {
+
+  wn <- seq(4000, 600, by = -4)
+  m  <- matrix(stats::runif(2 * length(wn)), nrow = 2)
+
+  expect_error(resample_spectra(m, wn, new_wav = seq(4100, 600, by = -4)),
+               regexp = "4100", class = "horizons_input_error")
+  expect_error(resample_spectra(m, wn, new_wav = seq(4000, 500, by = -4)),
+               regexp = "500", class = "horizons_input_error")
+
+})
+
+
+test_that("resample_spectra() needs exactly one of target_resolution and new_wav", {
+
+  wn <- seq(4000, 600, by = -4)
+  m  <- matrix(stats::runif(2 * length(wn)), nrow = 2)
+
+  expect_error(resample_spectra(m, wn), class = "horizons_input_error")
+  expect_error(resample_spectra(m, wn, target_resolution = 2, new_wav = wn),
+               class = "horizons_input_error")
+
+})
+
+
 test_that("standardize() with resample = NULL skips resampling", {
 
   hd <- create_test_spectra(n_wavelengths = 100)
