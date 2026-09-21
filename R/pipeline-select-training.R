@@ -48,7 +48,9 @@
 #' chosen on derivative spectra. The default chain is SNV, a Savitzky-Golay
 #' first derivative (window 11, order 2), PCA of the pool to 99 % of
 #' variance, and Mahalanobis distance on the scores. Every step is an
-#' argument.
+#' argument. A PCA space and its Mahalanobis scaling are defined by the
+#' population they were fit on; `space_rows` chooses whether that is the
+#' whole pool or, per property, only the rows that have it measured.
 #'
 #' **Reconciliation.** The targets' wavenumbers are the grid. The pool is
 #' resampled onto them through the same routine `standardize()` uses, so
@@ -91,6 +93,14 @@
 #'   (PCA only, capped at 100) or an integer count. Default: `0.99`.
 #' @param metric `character.` `"mahalanobis"`, `"euclidean"` or
 #'   `"cosine"`, on the scores. Default: `"mahalanobis"`.
+#' @param space_rows `character.` Which pool rows define the space the
+#'   draw for a property happens in. `"all"`: one space fit on every pool
+#'   row, the draw for each property restricted to the rows that have it.
+#'   `"measured"`: a space fit per property on only the rows that have it,
+#'   so the axes and the Mahalanobis scaling come from that population. The
+#'   all-rows space is built in either case and is what the target
+#'   clustering and the resemblance check use. `space = "pls"` already fits
+#'   on measured rows. Default: `"all"`.
 #' @param clusters `integer or NULL.` `scope = "cluster"` only: the cluster
 #'   count, or `NULL` to choose by silhouette. Default: `NULL`.
 #' @param cluster_min `integer.` `scope = "cluster"` only: the floor on
@@ -135,6 +145,7 @@ select_training <- function(x, pool,
                             space       = c("pca", "pls"),
                             ncomp       = 0.99,
                             metric      = c("mahalanobis", "euclidean", "cosine"),
+                            space_rows  = c("all", "measured"),
                             clusters    = NULL,
                             cluster_min = 30L,
                             twin_ratio  = SELECT_TWIN_RATIO,
@@ -159,14 +170,17 @@ select_training <- function(x, pool,
   scope_ok  <- is.character(scope)  && all(scope  %in% c("batch", "cluster", "sample", "global"))
   space_ok  <- is.character(space)  && all(space  %in% c("pca", "pls"))
   metric_ok <- is.character(metric) && all(metric %in% c("mahalanobis", "euclidean", "cosine"))
+  rows_ok   <- is.character(space_rows) && all(space_rows %in% c("all", "measured"))
 
   if (!scope_ok)  errors <- c(errors, cli::format_inline("{.arg scope} must be one of batch, cluster, sample, global"))
   if (!space_ok)  errors <- c(errors, cli::format_inline("{.arg space} must be pca or pls"))
   if (!metric_ok) errors <- c(errors, cli::format_inline("{.arg metric} must be mahalanobis, euclidean or cosine"))
+  if (!rows_ok)   errors <- c(errors, cli::format_inline("{.arg space_rows} must be all or measured"))
 
-  scope  <- if (scope_ok)  scope[1]  else NA_character_
-  space  <- if (space_ok)  space[1]  else NA_character_
-  metric <- if (metric_ok) metric[1] else NA_character_
+  scope      <- if (scope_ok)  scope[1]      else NA_character_
+  space      <- if (space_ok)  space[1]      else NA_character_
+  metric     <- if (metric_ok) metric[1]     else NA_character_
+  space_rows <- if (rows_ok)   space_rows[1] else NA_character_
 
   k_ok <- is.numeric(k) && length(k) >= 1L && all(is.finite(k)) && all(k >= 1) && all(k == round(k))
 
@@ -263,13 +277,38 @@ select_training <- function(x, pool,
   ## Step 2: Build the similarity space on the pool, project the targets
   ## ---------------------------------------------------------------------------
 
-  y <- if (space == "pls") pool_rc$data$analysis[[properties]] else NULL
+  ## The all-rows space is always built: it is the draw's space under
+  ## space_rows = "all", and the space clustering and the resemblance check
+  ## use in either mode, so that neither depends on which property is
+  ## being drawn. Under space_rows = "measured" a further space is fit per
+  ## property on the rows that have it, and the draw for that property
+  ## happens there.
 
-  sp <- build_similarity_space(rc$matrix, rc$wavenumbers,
-                               snv = snv, derivative = derivative, window = window,
-                               poly = poly, mask = mask, space = space, ncomp = ncomp, y = y)
+  pool_ids <- pool_rc$data$analysis$sample_id
+  resp_tbl <- pool_rc$data$analysis[, c("sample_id", properties), drop = FALSE]
 
+  build_space_on <- function(rows) {
+    y <- if (space == "pls") pool_rc$data$analysis[[properties]][rows] else NULL
+    build_similarity_space(rc$matrix[rows, , drop = FALSE], rc$wavenumbers,
+                           snv = snv, derivative = derivative, window = window,
+                           poly = poly, mask = mask, space = space, ncomp = ncomp, y = y)
+  }
+
+  sp <- build_space_on(seq_along(pool_ids))
   St <- project_similarity(sp, tm$matrix, tm$wavenumbers)
+
+  spaces_by_property <- NULL
+
+  if (space_rows == "measured" && scope != "global") {
+
+    spaces_by_property <- lapply(properties, function(p) {
+      rows <- which(!is.na(resp_tbl[[p]]))
+      s    <- build_space_on(rows)
+      list(space = s, St = project_similarity(s, tm$matrix, tm$wavenumbers), n_rows = length(rows))
+    })
+    names(spaces_by_property) <- properties
+
+  }
 
   if (verbose) {
 
@@ -277,16 +316,20 @@ select_training <- function(x, pool,
                if (!is.null(mask)) paste0(nrow(mask), " masked range", if (nrow(mask) > 1) "s"),
                toupper(space))
     cat(paste0("\u2502  \u251C\u2500 Space: ", paste(chain, collapse = " \u2192 "), ", ",
-               sp$ncomp, " components, ", metric, "\n"))
+               sp$ncomp, " components on all ", length(pool_ids), " rows, ", metric, "\n"))
+
+    if (!is.null(spaces_by_property)) {
+      for (p in properties) {
+        cat(paste0("\u2502  \u251C\u2500 Space for ", p, ": ", spaces_by_property[[p]]$space$ncomp,
+                   " components on its ", spaces_by_property[[p]]$n_rows, " measured rows\n"))
+      }
+    }
 
   }
 
   ## ---------------------------------------------------------------------------
   ## Step 3: Draw
   ## ---------------------------------------------------------------------------
-
-  pool_ids  <- pool_rc$data$analysis$sample_id
-  resp_tbl  <- pool_rc$data$analysis[, c("sample_id", properties), drop = FALSE]
 
   if (scope == "global") {
 
@@ -303,11 +346,28 @@ select_training <- function(x, pool,
       k                = k_by
     )
 
-  } else {
+  } else if (is.null(spaces_by_property)) {
 
     draw <- draw_neighbours(St, sp$scores, responses = resp_tbl, k = k_by,
                             properties = properties, metric = metric, sdev = sp$sdev,
                             chunk_size = chunk_size, twin_ratio = twin_ratio)
+
+  } else {
+
+    ## One draw per property, each in its own space, bound together
+    per_property <- lapply(properties, function(p) {
+      s <- spaces_by_property[[p]]
+      draw_neighbours(s$St, s$space$scores, responses = resp_tbl, k = k_by[p],
+                      properties = p, metric = metric, sdev = s$space$sdev,
+                      chunk_size = chunk_size, twin_ratio = twin_ratio)
+    })
+
+    draw <- list(
+      membership       = dplyr::bind_rows(lapply(per_property, `[[`, "membership")),
+      target_distances = dplyr::bind_rows(lapply(per_property, `[[`, "target_distances")),
+      exclusions       = dplyr::bind_rows(lapply(per_property, `[[`, "exclusions")),
+      k                = k_by
+    )
 
   }
 
@@ -400,7 +460,12 @@ select_training <- function(x, pool,
       k = k_by, scope = scope, properties = properties,
       snv = snv, derivative = as.integer(derivative), window = as.integer(window),
       poly = as.integer(poly), mask = mask, space = space, ncomp = ncomp,
-      ncomp_retained = sp$ncomp, metric = metric, clusters = clusters,
+      ncomp_retained = sp$ncomp, space_rows = space_rows,
+      ncomp_by_property = if (is.null(spaces_by_property)) NULL else
+        vapply(spaces_by_property, function(s) s$space$ncomp, integer(1)),
+      space_n_rows = if (is.null(spaces_by_property)) NULL else
+        vapply(spaces_by_property, function(s) s$n_rows, integer(1)),
+      metric = metric, clusters = clusters,
       cluster_min = as.integer(cluster_min), twin_ratio = twin_ratio, seed = as.integer(seed)
     ),
     reconciliation   = rc$record,

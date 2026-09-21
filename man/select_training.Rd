@@ -18,6 +18,7 @@ select_training(
   space = c("pca", "pls"),
   ncomp = 0.99,
   metric = c("mahalanobis", "euclidean", "cosine"),
+  space_rows = c("all", "measured"),
   clusters = NULL,
   cluster_min = 30L,
   twin_ratio = SELECT_TWIN_RATIO,
@@ -62,6 +63,15 @@ Default: \code{"pca"}.}
 
 \item{metric}{\code{character.} \code{"mahalanobis"}, \code{"euclidean"} or
 \code{"cosine"}, on the scores. Default: \code{"mahalanobis"}.}
+
+\item{space_rows}{\code{character.} Which pool rows define the space the
+draw for a property happens in. \code{"all"}: one space fit on every pool
+row, the draw for each property restricted to the rows that have it.
+\code{"measured"}: a space fit per property on only the rows that have it,
+so the axes and the Mahalanobis scaling come from that population. The
+all-rows space is built in either case and is what the target
+clustering and the resemblance check use. \code{space = "pls"} already fits
+on measured rows. Default: \code{"all"}.}
 
 \item{clusters}{\verb{integer or NULL.} \code{scope = "cluster"} only: the cluster
 count, or \code{NULL} to choose by silhouette. Default: \code{NULL}.}
@@ -124,7 +134,9 @@ a user who configures \code{preprocessing = "raw"} still gets neighbours
 chosen on derivative spectra. The default chain is SNV, a Savitzky-Golay
 first derivative (window 11, order 2), PCA of the pool to 99 \% of
 variance, and Mahalanobis distance on the scores. Every step is an
-argument.
+argument. A PCA space and its Mahalanobis scaling are defined by the
+population they were fit on; \code{space_rows} chooses whether that is the
+whole pool or, per property, only the rows that have it measured.
 
 \strong{Reconciliation.} The targets' wavenumbers are the grid. The pool is
 resampled onto them through the same routine \code{standardize()} uses, so

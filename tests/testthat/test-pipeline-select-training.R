@@ -361,6 +361,45 @@ test_that("metric and space levers change which rows are drawn", {
 })
 
 
+test_that("space_rows = 'measured' fits a space per property on its measured rows", {
+
+  fx  <- make_select_fixture(n_pool = 100)
+  all <- quiet_select(fx, k = 10)
+  mea <- quiet_select(fx, k = 10, space_rows = "measured")
+
+  s <- mea$selection$settings
+  expect_identical(s$space_rows, "measured")
+  expect_named(s$ncomp_by_property, c("clay", "oc"))
+  expect_named(s$space_n_rows,      c("clay", "oc"))
+  expect_identical(unname(s$space_n_rows["clay"]), 100L)
+  expect_identical(unname(s$space_n_rows["oc"]),   sum(!is.na(fx$pool$data$analysis$oc)))
+  expect_null(all$selection$settings$ncomp_by_property)
+
+  ## clay is measured on every row, so its space is the all-rows space and
+  ## the draw agrees; oc's space is fit on half the rows and can differ
+  ids <- function(o, p) { m <- o$selection$membership; m$pool_id[m$property == p] }
+  expect_identical(ids(mea, "clay"), ids(all, "clay"))
+
+  ## Still k per target per property, every oc row measured
+  m <- mea$selection$membership
+  expect_true(all(table(m$target_id, m$property) == 10L))
+  oc <- fx$pool$data$analysis$oc[match(m$pool_id[m$property == "oc"], fx$pool$data$analysis$sample_id)]
+  expect_false(any(is.na(oc)))
+
+})
+
+
+test_that("space_rows = 'measured' is ignored under scope = 'global' and rejected when invalid", {
+
+  fx  <- make_select_fixture(n_pool = 60)
+  out <- quiet_select(fx, scope = "global", space_rows = "measured")
+
+  expect_null(out$selection$settings$ncomp_by_property)
+  expect_error(quiet_select(fx, k = 5, space_rows = "some"), class = "horizons_input_error")
+
+})
+
+
 ## =============================================================================
 ## Output
 ## =============================================================================
