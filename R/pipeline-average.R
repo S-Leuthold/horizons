@@ -48,6 +48,9 @@
 #'
 #' @param x A `horizons_data` object from the pipeline.
 #' @param by Character. Column name to group replicates by. Default: `"sample_id"`.
+#'   With any other column, the grouping values become the new `sample_id`
+#'   of the averaged rows and the original ids are not kept; the column
+#'   name is recorded in `provenance$aggregation_by`.
 #' @param quality_check Logical. Enable correlation-based outlier detection.
 #'   Default: `TRUE`.
 #' @param correlation_threshold Numeric. Minimum mean pairwise correlation for
@@ -336,14 +339,19 @@ average <- function(x,
 
   new_role_map <- role_map[!role_map$variable %in% dropped_meta, , drop = FALSE]
 
-  ## With a custom `by`, sample_id is not carried into the averaged table
-  ## (only `by`, retained meta and predictors are), so its id role would
-  ## dangle. The grouping column is the identifier of the averaged rows.
+  ## With a custom `by`, the averaged rows ARE the samples now and the
+  ## grouping value is their identity, so the `by` column becomes
+  ## `sample_id`: every downstream verb, and validate_horizons_data(), reads
+  ## that column by name. The original sample_id column was not carried
+  ## into the averaged table (only `by`, retained meta and predictors are),
+  ## so its role row is dropped. `provenance$aggregation_by` keeps the name.
 
   if (by != "sample_id") {
 
-    new_role_map <- new_role_map[new_role_map$variable %in% names(averaged), , drop = FALSE]
-    new_role_map$role[new_role_map$variable == by] <- "id"
+    names(averaged)[names(averaged) == by] <- "sample_id"
+    new_role_map <- new_role_map[new_role_map$variable != "sample_id", , drop = FALSE]
+    new_role_map$variable[new_role_map$variable == by] <- "sample_id"
+    new_role_map$role[new_role_map$variable == "sample_id"] <- "id"
 
   }
 

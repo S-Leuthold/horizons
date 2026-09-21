@@ -16,7 +16,10 @@ average(
 \arguments{
 \item{x}{A \code{horizons_data} object from the pipeline.}
 
-\item{by}{Character. Column name to group replicates by. Default: \code{"sample_id"}.}
+\item{by}{Character. Column name to group replicates by. Default: \code{"sample_id"}.
+With any other column, the grouping values become the new \code{sample_id}
+of the averaged rows and the original ids are not kept; the column
+name is recorded in \code{provenance$aggregation_by}.}
 
 \item{quality_check}{Logical. Enable correlation-based outlier detection.
 Default: \code{TRUE}.}
