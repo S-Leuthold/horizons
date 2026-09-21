@@ -206,9 +206,39 @@ EVAL_WORKER_PAYLOAD_LIMIT <- 1 * 1024^3
 # retains far fewer.
 SELECT_PCA_MAX_COMP <- 100L
 
-# select_training(): a pool row is a target's twin when the target's nearest
-# distance is below this fraction of its second-nearest. An exact match
-# (distance 0) is always a twin. PLACEHOLDER: the spec says to set this on
-# the KSSL replicate scans; until that is done the value is conservative and
-# catches only near-exact copies.
+# select_training(): a pool row is a target's twin when its distance to that
+# target is below this fraction of the median distance across the target's k
+# neighbours. An exact match (distance 0) is always a twin. The rule is
+# neighbourhood-relative rather than first-to-second-nearest so that a pool
+# holding two or three replicate scans of the same sample is caught: with a
+# gap rule every replicate distance is tiny, the gap never opens, and nothing
+# is flagged (2026-09-21 review, leakage critical 1). PLACEHOLDER: the spec
+# says to set this on the KSSL replicate scans; until that is done the value
+# is conservative and catches only near-exact copies.
 SELECT_TWIN_RATIO <- 0.05
+
+# select_training(): columns of the distance matrix that define the twin
+# rule's reference distance. The reference has to be wider than any plausible
+# replicate cluster, or the replicates set the very number they are being
+# measured against: with four self-rows in a neighbourhood of five, the 75th
+# percentile of those five distances is itself a replicate distance and one
+# row is flagged instead of four. A dozen scans of one sample is the most a
+# real library holds, so 50 leaves the reference untouched by them at any k
+# a caller would ask for (2026-09-21 re-review, leakage). The reference also
+# has to stay local: the twin threshold is a fraction of it, so a reference
+# taken over most of the pool is a pool-wide spread and 5 % of that flags
+# ordinary nearest neighbours. draw_neighbours() therefore caps it at a
+# quarter of the measured rows, which binds only on pools under 200.
+SELECT_TWIN_REF <- 50L
+
+# select_training(): components whose standard deviation falls below this
+# fraction of PC1's leave the similarity space before distances are measured.
+# Mahalanobis whitening divides each component by its sd, so a variance-chosen
+# tail one to three orders below PC1 carries the same weight in the distance
+# as the dominant chemical axes, and its eigenvectors are themselves unstable
+# under small changes in the row set (2026-09-21 review, spectroscopy
+# critical). Measured on a 20,000-row KSSL sample at 4 cm-1 with the water
+# mask: the 0.99 variance rule retained 33 components, sd/PC1 at PC33 = 0.038,
+# a 26x amplification; a floor of 0.10 keeps 13 components, 0.05 keeps 27.
+# Set to 0 to disable the floor and recover the pre-2026-09-21 behaviour.
+SELECT_SDEV_FLOOR <- 0.10
