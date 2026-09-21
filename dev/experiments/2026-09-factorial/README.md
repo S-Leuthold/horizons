@@ -16,6 +16,9 @@ Every script runs from `package/` against the installed package, reuses experime
 | `03-pivot-pm.R` (`run_pivot.sh`) | global PLS against memory-based learning, learner held to PLS | `results/pivot/` |
 | `04-locality-curve.R` (`run_locality.sh`) | how coarse can the neighbourhood be | `results/locality-curve/` |
 | `pm-helpers.R` | shared by 03 and 04; first block verbatim from experiment 1's `06-D-mbl.R` | |
+| `08-verify-verb.R` (2026-09-21) | does `select_training()` reproduce 05's hand-built KSSL selection | prints PASS/FAIL; no result dir |
+
+`08-verify-verb.R` ran 2026-09-21 against the 9/17 checkpoint: the verb's k = 100 union on the KSSL control batch is exactly 3,426 rows, the space retains 33 components, every one of the 101 targets' neighbour sets and their order match `kssl-targets.qs2`, and the nearest distances agree to 4e-15. 8 s for the draw on the 31,130-row pool. The MOYS batch is not reproduced by construction: 05 interpolated MOYS onto the pool's grid, the verb resamples the pool onto the targets'.
 
 ### Shakedown
 

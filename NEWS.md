@@ -1,5 +1,35 @@
 # horizons (development version)
 
+## New features
+
+* **`select_training()`**, the training-set selection verb for library
+  mode. Targets and a reference pool in, a `horizons_data` drawn from the
+  pool out, on the targets' wavenumber grid, and the rest of the pipeline
+  runs on it unchanged. The rule is each target's `k` nearest pool rows
+  that have the property measured, drawn per property, rows entering once.
+  Four scopes over one return shape (`batch`, `cluster`, `sample`,
+  `global`): the return is always the union, and the grouping into training
+  sets lives in `x$selection$groups` alongside the full membership table.
+  Every lever of the similarity space is an argument (`snv`, `derivative`,
+  `window`, `poly`, `mask`, `space = "pca"|"pls"`, `ncomp`, `metric`), with
+  the design the 2026-09 experiments ran as the defaults, so the open
+  questions (k on a pool, the metric, tail batches) run as loops over the
+  verb. The verb reconciles the pool onto the targets' axis itself (#64 is
+  why), excludes and reports twins by the gap between first and second
+  nearest, and warns about targets beyond the pool's own nearest-neighbour
+  spread. Design: `dev/specs/v1-refactor/select-training-design.md`.
+
+* **`subset_rows()` and `set_analysis()`** (internal) give `horizons_data`
+  a row-subset operation (#43). `validate()`'s outlier removal and
+  `average()`'s collapse now go through them, so the derived counts have
+  one source of truth. `average()` with a custom `by` used to leave
+  `sample_id`'s id role dangling after dropping the column; the grouping
+  column now carries the id role.
+
+* `resample_spectra()` accepts an explicit `new_wav` grid and refuses to
+  extrapolate, so the package has one resampling routine for both
+  `standardize()` and `select_training()`.
+
 ## Performance
 
 * `evaluate(workers > 1)` now works at library scale. It previously aborted
