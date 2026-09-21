@@ -97,7 +97,11 @@ use all covariates in every configuration.
 \strong{Reconfiguration:}
 
 Can be called multiple times on the same object. Previous configuration
-is overwritten, and any prior outcome role is reverted to "response".
+is overwritten, any prior outcome role is reverted to "response", and
+everything a previous \code{evaluate()} or \code{fit()} earned is dropped: the
+results, the splits, the row index, the cached CV predictions, the
+predictor schema, the ensemble, and the \code{horizons_eval} or \code{horizons_fit}
+class itself. All of it is keyed to the outcome that is being replaced.
 This enables the \code{purrr::map()} multi-outcome pattern:
 
 \if{html}{\out{<div class="sourceCode">}}\preformatted{c("SOC", "POM_C", "pH") |>

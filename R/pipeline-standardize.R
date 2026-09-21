@@ -735,9 +735,10 @@ standardize <- function(x,
   ## Step 9: Update object
   ## ---------------------------------------------------------------------------
 
-  x$data$analysis     <- new_analysis
-  x$data$role_map     <- new_role_map
-  x$data$n_predictors <- length(new_predictor_names)
+  ## set_analysis() is the one place that recomputes the stored counts, so
+  ## the predictor count is never written by hand here.
+
+  x <- set_analysis(x, new_analysis, new_role_map)
 
   ## Update provenance ---------------------------------------------------------
 
