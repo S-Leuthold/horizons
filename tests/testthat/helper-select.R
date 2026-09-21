@@ -24,13 +24,23 @@
 #' @noRd
 gaussian_family <- function(n, wn, centres, noise = 0.01) {
 
-  base <- vapply(centres, function(cc) exp(-((wn - cc) / 60)^2), numeric(length(wn)))
-  base <- rowSums(base)
+  ## Each peak gets its own per-sample height and width, so the family
+  ## spans as many real components as it has peaks rather than one
+  ## amplitude axis (SNV would collapse a single shared shape).
 
-  amp  <- stats::runif(n, 0.6, 1.4)
-  off  <- stats::runif(n, -0.05, 0.05)
+  m <- matrix(0, nrow = n, ncol = length(wn))
 
-  m <- outer(amp, base) + off
+  for (cc in centres) {
+
+    height <- stats::runif(n, 0.3, 1.2)
+    width  <- stats::runif(n, 40, 90)
+    shift  <- stats::rnorm(n, sd = 4)
+
+    m <- m + height * exp(-((outer(rep(1, n), wn) - (cc + shift)) / width)^2)
+
+  }
+
+  m <- m + stats::runif(n, -0.05, 0.05)
   m + matrix(stats::rnorm(n * length(wn), sd = noise), nrow = n)
 
 }
