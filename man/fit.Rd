@@ -56,7 +56,9 @@ A \code{horizons_fit} object (inherits from \code{horizons_eval},
 \code{horizons_data}) with \verb{models$} slot populated. The slot includes
 \code{response_bound} (max training outcome times \code{RESPONSE_BOUND_MARGIN}),
 the deploy-time winsorization guardrail \code{predict()} applies to
-back-transformed point predictions.
+back-transformed point predictions, and \code{selection_present} (whether the
+training object carried a \verb{$selection} from \code{select_training()}, which
+\code{predict()} reads when asked for conformal intervals).
 }
 \description{
 Re-tunes the top N configurations from \code{evaluate()} with warm-start

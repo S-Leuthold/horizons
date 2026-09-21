@@ -42,7 +42,9 @@
 #'   `horizons_data`) with `models$` slot populated. The slot includes
 #'   `response_bound` (max training outcome times `RESPONSE_BOUND_MARGIN`),
 #'   the deploy-time winsorization guardrail `predict()` applies to
-#'   back-transformed point predictions.
+#'   back-transformed point predictions, and `selection_present` (whether the
+#'   training object carried a `$selection` from `select_training()`, which
+#'   `predict()` reads when asked for conformal intervals).
 #'
 #' @export
 fit <- function(x,
@@ -616,21 +618,28 @@ fit <- function(x,
   ## permit modest extrapolation and catch only the physically absurd.
   response_bound <- max(analysis[[outcome_col]], na.rm = TRUE) * RESPONSE_BOUND_MARGIN
 
+  ## Did the training rows come from select_training()? If so the calibration
+  ## split below was drawn from rows chosen for proximity to the targets, so
+  ## conformal exchangeability with arbitrary prediction data does not hold.
+  ## predict() reads this flag to say so; nothing else changes.
+  selection_present <- !is.null(x$selection)
+
   x$models <- list(
-    workflows        = workflows_list,
-    n_models         = length(workflows_list),
-    best_config      = best_config,
-    rank_metric      = rank_metric,
-    predictor_schema = predictor_schema,
-    response_bound   = response_bound,
-    cv_predictions   = all_cv_predictions,
-    results          = results_tibble,
-    split            = split_F,
-    row_index        = row_index,
-    uq               = uq_list,
-    ad               = ad_list,
-    timestamp        = Sys.time(),
-    runtime_secs     = total_runtime
+    workflows         = workflows_list,
+    n_models          = length(workflows_list),
+    best_config       = best_config,
+    rank_metric       = rank_metric,
+    predictor_schema  = predictor_schema,
+    response_bound    = response_bound,
+    cv_predictions    = all_cv_predictions,
+    results           = results_tibble,
+    split             = split_F,
+    row_index         = row_index,
+    uq                = uq_list,
+    ad                = ad_list,
+    selection_present = selection_present,
+    timestamp         = Sys.time(),
+    runtime_secs      = total_runtime
   )
 
   class(x) <- c("horizons_fit", "horizons_eval", "horizons_data", "list")

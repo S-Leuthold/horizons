@@ -459,3 +459,207 @@ describe("checkpoint scoring schema", {
   })
 
 })
+
+## =========================================================================
+## Checkpoint data provenance (2026-09-21)
+## =========================================================================
+## A dry run and a real run sharing one output_dir used to resume each
+## other's results, because checkpoints are keyed by config_id alone.
+
+describe("eval_data_fingerprint()", {
+
+  it("hashes the id column, invariant to row order", {
+
+    df <- tibble::tibble(sample_id = c("c", "a", "b"), x = 1:3)
+    rm <- tibble::tibble(variable = c("sample_id", "x"),
+                         role     = c("id", "predictor"))
+
+    fp1 <- eval_data_fingerprint(df, rm)
+    fp2 <- eval_data_fingerprint(df[c(3, 1, 2), ], rm)
+
+    expect_identical(fp1$data_hash, fp2$data_hash)
+    expect_identical(fp1$data_n_rows, 3L)
+
+  })
+
+  it("changes when the row set changes", {
+
+    rm <- tibble::tibble(variable = "sample_id", role = "id")
+
+    a <- eval_data_fingerprint(tibble::tibble(sample_id = c("a", "b")), rm)
+    b <- eval_data_fingerprint(tibble::tibble(sample_id = c("a", "c")), rm)
+
+    expect_false(identical(a$data_hash, b$data_hash))
+
+  })
+
+  it("changes when the outcome changes on the same rows", {
+
+    df <- tibble::tibble(sample_id = c("a", "b"), clay = c(1, 2), oc = c(3, 4))
+
+    clay <- eval_data_fingerprint(
+      df,
+      tibble::tibble(variable = c("sample_id", "clay", "oc"),
+                     role     = c("id", "outcome", "response"))
+    )
+
+    oc <- eval_data_fingerprint(
+      df,
+      tibble::tibble(variable = c("sample_id", "clay", "oc"),
+                     role     = c("id", "response", "outcome"))
+    )
+
+    ## generate_config_id() does not hash the outcome, so without this the two
+    ## runs share config ids AND a fingerprint.
+    expect_false(identical(clay$data_hash, oc$data_hash))
+
+  })
+
+  it("returns NA when no identifier column is available", {
+
+    fp <- eval_data_fingerprint(tibble::tibble(x = 1:3), NULL)
+
+    expect_true(is.na(fp$data_hash))
+    expect_identical(fp$data_n_rows, 3L)
+
+  })
+
+})
+
+describe("evaluate() - checkpoint data provenance", {
+
+  it("stamps the fingerprint on results, checkpoints and the manifest", {
+
+    obj    <- make_eval_object(n_configs = 2)
+    tmpdir <- withr::local_tempdir()
+
+    res <- suppressWarnings(evaluate(obj, output_dir = tmpdir, prune = FALSE,
+                                     verbose = FALSE, seed = 42L))
+
+    expect_true(all(!is.na(res$evaluation$results$data_hash)))
+    expect_true(all(res$evaluation$results$data_n_rows ==
+                      res$evaluation$n_train))
+
+    manifest <- readRDS(file.path(tmpdir, "eval_manifest.rds"))
+    expect_identical(manifest$schema_version, 3L)
+    expect_identical(manifest$data_hash, res$evaluation$results$data_hash[1])
+    expect_identical(manifest$data_n_rows, res$evaluation$n_train)
+
+    row <- readRDS(file.path(tmpdir, "checkpoints", "cfg_001.rds"))
+    expect_identical(row$data_hash, manifest$data_hash)
+
+    single <- readRDS(file.path(tmpdir, "eval_checkpoint.rds"))
+    expect_identical(attr(single, "data_hash"), manifest$data_hash)
+
+  })
+
+  it("resumes silently when the training rows are unchanged", {
+
+    obj    <- make_eval_object(n_configs = 2)
+    tmpdir <- withr::local_tempdir()
+
+    first  <- suppressWarnings(evaluate(obj, output_dir = tmpdir, prune = FALSE,
+                                        verbose = FALSE, seed = 42L))
+    second <- suppressWarnings(evaluate(obj, output_dir = tmpdir, prune = FALSE,
+                                        verbose = FALSE, seed = 42L))
+
+    expect_equal(first$evaluation$best_config, second$evaluation$best_config)
+    expect_equal(sort(first$evaluation$results$config_id),
+                 sort(second$evaluation$results$config_id))
+
+  })
+
+  it("aborts when the same output_dir is resumed on a different row set", {
+
+    tmpdir <- withr::local_tempdir()
+
+    suppressWarnings(evaluate(make_eval_object(n = 40, n_configs = 2),
+                              output_dir = tmpdir, prune = FALSE,
+                              verbose = FALSE, seed = 42L))
+
+    expect_error(
+      suppressWarnings(evaluate(make_eval_object(n = 60, n_configs = 2),
+                                output_dir = tmpdir, prune = FALSE,
+                                verbose = FALSE, seed = 42L)),
+      class = "horizons_input_error"
+    )
+
+    err <- tryCatch(
+      suppressWarnings(evaluate(make_eval_object(n = 60, n_configs = 2),
+                                output_dir = tmpdir, prune = FALSE,
+                                verbose = FALSE, seed = 42L)),
+      horizons_input_error = function(e) e
+    )
+
+    msg <- paste(conditionMessage(err), collapse = " ")
+
+    expect_match(msg, "different training data")
+    expect_match(msg, basename(tmpdir), fixed = TRUE)
+    expect_match(msg, "training row")
+    expect_match(msg, "output_dir")
+
+  })
+
+  it("aborts when the same rows are re-run under a different outcome", {
+
+    tmpdir <- withr::local_tempdir()
+
+    ## Same rows, same config ids, different response. Only the outcome name
+    ## differs, which is the collision generate_config_id() cannot see.
+    obj_soc <- make_eval_object(n_configs = 2)
+
+    obj_clay <- obj_soc
+    names(obj_clay$data$analysis)[names(obj_clay$data$analysis) == "SOC"] <- "clay"
+    obj_clay$data$role_map$variable[obj_clay$data$role_map$variable == "SOC"] <- "clay"
+
+    suppressWarnings(evaluate(obj_soc, output_dir = tmpdir, prune = FALSE,
+                              verbose = FALSE, seed = 42L))
+
+    expect_error(
+      suppressWarnings(evaluate(obj_clay, output_dir = tmpdir, prune = FALSE,
+                                verbose = FALSE, seed = 42L)),
+      class = "horizons_input_error"
+    )
+
+  })
+
+  it("warns once and proceeds for legacy checkpoints with no fingerprint", {
+
+    obj    <- make_eval_object(n_configs = 2)
+    tmpdir <- withr::local_tempdir()
+
+    first <- suppressWarnings(evaluate(obj, output_dir = tmpdir, prune = FALSE,
+                                       verbose = FALSE, seed = 42L))
+
+    ## Hand-write the pre-provenance shape: no columns, no attributes.
+    for (f in list.files(file.path(tmpdir, "checkpoints"), full.names = TRUE)) {
+
+      row <- readRDS(f)
+      row$data_hash   <- NULL
+      row$data_n_rows <- NULL
+      saveRDS(row, f)
+
+    }
+
+    single <- file.path(tmpdir, "eval_checkpoint.rds")
+    s      <- readRDS(single)
+    s$data_hash   <- NULL
+    s$data_n_rows <- NULL
+    attr(s, "data_hash")   <- NULL
+    attr(s, "data_n_rows") <- NULL
+    saveRDS(s, single)
+
+    warns <- testthat::capture_warnings(
+      second <- evaluate(obj, output_dir = tmpdir, prune = FALSE,
+                         verbose = FALSE, seed = 42L)
+    )
+
+    ## Once per run, not once per unverifiable file.
+    expect_equal(sum(grepl("no training-data fingerprint", warns)), 1L)
+
+    expect_s3_class(second, "horizons_eval")
+    expect_equal(first$evaluation$best_config, second$evaluation$best_config)
+
+  })
+
+})

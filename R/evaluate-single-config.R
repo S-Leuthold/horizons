@@ -160,11 +160,7 @@ evaluate_single_config <- function(config_row,
       prepped <- recipes::prep(recipe)
       baked   <- recipes::bake(prepped, new_data = NULL)
 
-      ## Keep only predictor columns (remove outcome, id, meta)
-      non_pred <- c(outcome_col,
-                    role_map$variable[role_map$role %in% c("id", "meta")])
-      drop     <- intersect(non_pred, names(baked))
-      eval_data <- baked[, setdiff(names(baked), drop), drop = FALSE]
+      eval_data <- baked[, prepped_predictors(prepped, baked), drop = FALSE]
 
       result <- dials::finalize(param_set, eval_data)
 
@@ -503,6 +499,43 @@ evaluate_single_config <- function(config_row,
   )
 
 }
+
+## ---------------------------------------------------------------------------
+## prepped_predictors — the columns dials::finalize() may count
+## ---------------------------------------------------------------------------
+
+#' Name the predictor columns of a prepped recipe
+#'
+#' @description
+#' Returns the columns of `baked` that the prepped recipe gives the
+#' `predictor` role. This is the frame `dials::finalize()` should see when it
+#' sets the `mtry` or `num_comp` upper bound, because that bound has to be
+#' the number of columns the model will actually be handed.
+#'
+#' @details
+#' The roles come from the recipe rather than from subtracting the known
+#' non-predictors off the baked frame. `build_recipe()` holds sibling lab
+#' measurements at role `response_hold` and unused covariates at
+#' `covariate_hold`; both survive into the baked frame and neither is a
+#' predictor, so subtraction counts them and the ceiling lands above the real
+#' predictor count. `tune_grid()` can then sample an `mtry` larger than the
+#' model matrix is wide, which fails the config for a reason that has nothing
+#' to do with the config.
+#'
+#' @param prepped A prepped `recipe`.
+#' @param baked The frame from `recipes::bake(prepped, new_data = NULL)`.
+#'
+#' @return Character. Predictor column names, in baked order.
+#' @keywords internal
+#' @noRd
+prepped_predictors <- function(prepped, baked) {
+
+  roles <- summary(prepped)
+
+  intersect(names(baked), roles$variable[roles$role %in% "predictor"])
+
+}
+
 
 ## ---------------------------------------------------------------------------
 ## cv_panel_at — the six CV means at one set of hyperparameters

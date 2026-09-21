@@ -38,9 +38,10 @@ monitor_evaluate <- function(output_dir, watch = FALSE, interval = 10) {
   manifest      <- readRDS(manifest_path)
 
   ## Schema 1 (pre-2026-09-15) manifests carry workers/outer/inner from the
-  ## auto-split design; schema 2 carries the axis and the user's plan. Both
-  ## are read: the monitor needs only n_total, metric and start_time to
-  ## work, so a run started before M2 can still be watched.
+  ## auto-split design; schema 2 carries the axis and the user's plan; schema
+  ## 3 (2026-09-21) adds the training-data fingerprint. All are read: the
+  ## monitor needs only n_total, metric and start_time to work, so a run
+  ## started before M2 can still be watched.
   manifest$schema_version <- manifest$schema_version %||% 1L
   checkpoint_dir <- file.path(output_dir, "checkpoints")
 
@@ -243,7 +244,7 @@ monitor_evaluate <- function(output_dir, watch = FALSE, interval = 10) {
   cat(paste0(paste(rep("\u2500", 50), collapse = ""), "\n"))
   cat(paste0("  evaluate() monitor \u2014 ", format(Sys.time(), "%H:%M:%S"), "\n"))
 
-  if (identical(manifest$schema_version %||% 1L, 2L)) {
+  if ((manifest$schema_version %||% 1L) >= 2L) {
 
     cat(paste0("  Parallel:  over ", manifest$axis, " on ", manifest$plan,
                " (", manifest$workers, " worker",
@@ -253,6 +254,16 @@ monitor_evaluate <- function(output_dir, watch = FALSE, interval = 10) {
 
     cat(paste0("  Parallel:  legacy manifest (workers = ",
                manifest$workers %||% "?", ")\n"))
+
+  }
+
+  ## Which rows this directory is scoring. Without it, two runs pointed at
+  ## one output_dir are indistinguishable in the monitor.
+  if (!is.null(manifest$data_hash) && !is.na(manifest$data_hash)) {
+
+    cat(paste0("  Data:      ", manifest$data_n_rows %||% "?",
+               " training rows, hash ",
+               substr(manifest$data_hash, 1, 12), "\n"))
 
   }
   cat(paste0(paste(rep("\u2500", 50), collapse = ""), "\n\n"))

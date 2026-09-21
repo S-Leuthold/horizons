@@ -172,10 +172,7 @@ fit_single_config <- function(config_row,
       prepped <- recipes::prep(recipe)
       baked   <- recipes::bake(prepped, new_data = NULL)
 
-      non_pred <- c(outcome_col,
-                    role_map$variable[role_map$role %in% c("id", "meta")])
-      drop     <- intersect(non_pred, names(baked))
-      eval_data <- baked[, setdiff(names(baked), drop), drop = FALSE]
+      eval_data <- baked[, prepped_predictors(prepped, baked), drop = FALSE]
 
       result <- dials::finalize(param_set, eval_data)
 

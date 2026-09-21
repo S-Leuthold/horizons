@@ -273,7 +273,7 @@ describe("evaluate() - resamples axis", {
 
 describe("evaluate() - configs axis", {
 
-  it("writes a schema-2 manifest describing the plan and the axis", {
+  it("writes a schema-3 manifest describing the plan, the axis and the data", {
 
     skip_on_cran()
     skip_if_dev_package()
@@ -288,7 +288,9 @@ describe("evaluate() - configs axis", {
     )
 
     manifest <- readRDS(file.path(tmpdir, "eval_manifest.rds"))
-    expect_identical(manifest$schema_version, 2L)
+    expect_identical(manifest$schema_version, 3L)
+    expect_identical(manifest$data_hash, result$evaluation$results$data_hash[1])
+    expect_identical(manifest$data_n_rows, result$evaluation$n_train)
     expect_equal(manifest$axis, "configs")
     expect_equal(manifest$parallelize_over_requested, "auto")
     expect_equal(manifest$plan, "multisession")
@@ -483,6 +485,42 @@ describe("monitor_evaluate()", {
     expect_equal(result$n_total, 10)
     expect_false(is.na(result$best_config))
     expect_true(any(grepl("configs", output)))
+    expect_true(any(grepl("multisession", output)))
+
+  })
+
+  it("surfaces the training-data fingerprint from a schema-3 manifest", {
+
+    skip_on_cran()
+
+    tmpdir         <- withr::local_tempdir()
+    checkpoint_dir <- file.path(tmpdir, "checkpoints")
+    dir.create(checkpoint_dir)
+
+    manifest <- list(
+      schema_version             = 3L,
+      n_total                    = 10,
+      n_pending                  = 10,
+      config_ids                 = paste0("cfg_", sprintf("%03d", 1:10)),
+      start_time                 = Sys.time() - 3600,
+      metric                     = "rpd",
+      cv_folds                   = 5L,
+      allow_par                  = TRUE,
+      parallelize_over_requested = "auto",
+      axis                       = "configs",
+      plan                       = "multisession",
+      workers                    = 10L,
+      data_hash                  = "abc123def456789",
+      data_n_rows                = 1234L
+    )
+    saveRDS(manifest, file.path(tmpdir, "eval_manifest.rds"))
+    write_mock_checkpoints(checkpoint_dir, 3)
+
+    output <- capture.output(monitor_evaluate(tmpdir))
+
+    ## Two runs sharing one output_dir are otherwise indistinguishable here.
+    expect_true(any(grepl("1234 training rows", output)))
+    expect_true(any(grepl("abc123def456", output)))
     expect_true(any(grepl("multisession", output)))
 
   })

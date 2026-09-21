@@ -262,12 +262,26 @@ evaluate <- function(x,
   )
 
   ## -----------------------------------------------------------------------
+  ## Step 5b: Fingerprint the training rows
+  ## -----------------------------------------------------------------------
+  ## Checkpoints are keyed by config_id alone, which says nothing about the
+  ## rows a result was computed on. A dry run and a real run pointed at the
+  ## same output_dir therefore used to resume each other's CV results and
+  ## warm-start fit() from hyperparameters tuned on the wrong data, silently
+  ## (2026-09-21). The fingerprint is what makes that visible. It covers the
+  ## response as well as the rows: the config id does not hash the outcome, so
+  ## two responses on one row set collide by id alone.
+
+  data_fp <- eval_data_fingerprint(train_data, role_map)
+
+  ## -----------------------------------------------------------------------
   ## Step 6: Load checkpoints (if any)
   ## -----------------------------------------------------------------------
 
   checkpoint_path    <- NULL
   checkpoint_dir     <- NULL
   checkpoint_results <- list()
+  n_unverified       <- 0L
 
   if (!is.null(output_dir)) {
 
@@ -282,6 +296,31 @@ evaluate <- function(x,
     if (file.exists(checkpoint_path)) {
 
       loaded <- readRDS(checkpoint_path)
+
+      ## Provenance gate: refuse to resume results computed on other rows.
+      ## Rows carry the fingerprint in columns; the tibble also carries it in
+      ## attributes, which is the fallback for rows that predate the columns.
+      ## A legacy checkpoint has neither, and is counted as unverified rather
+      ## than trusted.
+      stored_fps <- checkpoint_tibble_fingerprints(loaded)
+      mismatched <- which(!is.na(stored_fps$data_hash) &
+                            stored_fps$data_hash != data_fp$data_hash)
+
+      if (length(mismatched) > 0) {
+
+        abort_checkpoint_data_mismatch(
+          stored     = list(
+            data_hash   = stored_fps$data_hash[mismatched[1]],
+            data_n_rows = stored_fps$data_n_rows[mismatched[1]]
+          ),
+          current    = data_fp,
+          output_dir = output_dir,
+          source     = "eval_checkpoint.rds"
+        )
+
+      }
+
+      n_unverified <- n_unverified + sum(is.na(stored_fps$data_hash))
 
       ## Drop any config_ids not in current configs
       valid_mask <- loaded$config_id %in% configs$config_id
@@ -339,6 +378,24 @@ evaluate <- function(x,
 
         }
 
+        ## Provenance gate, same rule as the single-file checkpoint.
+        row_fp <- checkpoint_row_fingerprint(row)
+
+        if (is.na(row_fp$data_hash)) {
+
+          n_unverified <- n_unverified + 1L
+
+        } else if (!identical(row_fp$data_hash, data_fp$data_hash)) {
+
+          abort_checkpoint_data_mismatch(
+            stored     = row_fp,
+            current    = data_fp,
+            output_dir = output_dir,
+            source     = file.path("checkpoints", basename(f))
+          )
+
+        }
+
         if (row$config_id %in% configs$config_id &&
             !row$config_id %in% names(checkpoint_results)) {
 
@@ -359,6 +416,18 @@ evaluate <- function(x,
         ))
 
       }
+
+    }
+
+    ## One warning per run, whatever the mix of legacy files: old runs keep
+    ## resuming, but never silently.
+    if (n_unverified > 0) {
+
+      cli::cli_warn(c(
+        "!" = "{n_unverified} checkpoint{?s} in {.path {output_dir}} carry no training-data fingerprint.",
+        "i" = "They were written before provenance was recorded, so it cannot be confirmed they came from these {data_fp$data_n_rows} training rows.",
+        "i" = "Resuming anyway. Delete them, or use a fresh {.arg output_dir}, if the rows may differ."
+      ), class = "horizons_checkpoint_warning")
 
     }
 
@@ -429,12 +498,14 @@ evaluate <- function(x,
   ## Written on EVERY run with an output_dir, whichever axis, and refreshed
   ## each time, so the monitor can watch a resamples-axis or sequential run
   ## and never reports a stale axis from an earlier run in the same
-  ## directory. Schema 2 (2026-09-15) records the axis and the user's plan.
+  ## directory. Schema 2 (2026-09-15) records the axis and the user's plan;
+  ## schema 3 (2026-09-21) records the training-data fingerprint, so the
+  ## monitor can say which rows the run in this directory is scoring.
 
   if (!is.null(output_dir)) {
 
     manifest <- list(
-      schema_version               = 2L,
+      schema_version               = 3L,
       n_total                      = n_total,
       n_pending                    = n_pending,
       config_ids                   = configs$config_id,
@@ -447,7 +518,9 @@ evaluate <- function(x,
       tune_parallel_over_requested = axis$tune_parallel_over,
       plan                         = plan_label,
       workers                      = plan_workers,
-      scoring_schema               = SCORING_SCHEMA
+      scoring_schema               = SCORING_SCHEMA,
+      data_hash                    = data_fp$data_hash,
+      data_n_rows                  = data_fp$data_n_rows
     )
     saveRDS(manifest, file.path(output_dir, "eval_manifest.rds"))
 
@@ -527,6 +600,9 @@ evaluate <- function(x,
         seed            = seed
       )
 
+      ## Stamp before anything else sees the row, so the in-memory results and
+      ## the checkpointed copy carry the same provenance.
+      result_row        <- stamp_data_fingerprint(result_row, data_fp)
       results_list[[i]] <- result_row
 
       ## Render result
@@ -595,6 +671,8 @@ evaluate <- function(x,
 
         ## Single-file checkpoint (atomic write, backward compatible)
         checkpoint_tibble <- dplyr::bind_rows(checkpoint_results)
+        attr(checkpoint_tibble, "data_hash")   <- data_fp$data_hash
+        attr(checkpoint_tibble, "data_n_rows") <- data_fp$data_n_rows
         tmp_ckpt <- tempfile(tmpdir = dirname(checkpoint_path), fileext = ".rds")
         saveRDS(checkpoint_tibble, tmp_ckpt)
         file.rename(tmp_ckpt, checkpoint_path)
@@ -885,6 +963,183 @@ drop_foreign_schema_rows <- function(results, verbose = TRUE) {
 }
 
 ## ---------------------------------------------------------------------------
+## Checkpoint data provenance
+## ---------------------------------------------------------------------------
+## A checkpoint is keyed by config_id, which identifies the pipeline but not
+## the rows it was scored on. These helpers attach the identity of the
+## training rows to every checkpoint write and check it on every read.
+
+#' Fingerprint the training data a run is scoring
+#'
+#' The hash is over the sorted identifier column plus the name of the outcome
+#' column, so it is invariant to row order and to the split's RNG but changes
+#' the moment either the row set or the response changes.
+#'
+#' The outcome is in the hash because `generate_config_id()` does not hash it:
+#' `configure(outcome = "clay")` and `configure(outcome = "oc")` on the same
+#' rows produce the same config ids, so without this the two runs would resume
+#' each other's CV results in a shared `output_dir`. That became reachable when
+#' `select_training()` started returning every pool response on one object. The
+#' per-config transformation needs no such treatment — it is already part of
+#' the config id, so it cannot collide.
+#'
+#' Both inputs are read from arguments the parallel worker also has, so the
+#' worker recomputes an identical hash without being sent one.
+#'
+#' @param train_data Training rows (the analysis half of the split).
+#' @param role_map The object's role map; the `"id"` role names the identifier
+#'   column (falling back to `sample_id`) and the `"outcome"` role names the
+#'   response.
+#' @return List with `data_hash` (character, `NA` when no identifier column is
+#'   available) and `data_n_rows` (integer).
+#' @keywords internal
+#' @noRd
+eval_data_fingerprint <- function(train_data, role_map = NULL) {
+
+  has_roles <- !is.null(role_map) && "role" %in% names(role_map)
+
+  id_col <- if (has_roles) {
+    role_map$variable[role_map$role == "id"]
+  } else {
+    character(0)
+  }
+
+  id_col <- if (length(id_col) > 0) id_col[1] else "sample_id"
+
+  outcome_col <- if (has_roles) {
+    role_map$variable[role_map$role == "outcome"]
+  } else {
+    character(0)
+  }
+
+  outcome_col <- if (length(outcome_col) > 0) {
+    sort(as.character(outcome_col))
+  } else {
+    NA_character_
+  }
+
+  ## No identifier column: the run is unverifiable rather than wrongly
+  ## verified. Resume then behaves as it does for a legacy checkpoint.
+  data_hash <- if (id_col %in% names(train_data)) {
+    digest::digest(list(
+      ids     = sort(as.character(train_data[[id_col]])),
+      outcome = outcome_col
+    ))
+  } else {
+    NA_character_
+  }
+
+  list(
+    data_hash   = data_hash,
+    data_n_rows = as.integer(nrow(train_data))
+  )
+
+}
+
+#' Attach a fingerprint to a result row
+#'
+#' @param row One-row result tibble.
+#' @param fp Fingerprint from [eval_data_fingerprint()].
+#' @return `row` with `data_hash` and `data_n_rows` columns.
+#' @keywords internal
+#' @noRd
+stamp_data_fingerprint <- function(row, fp) {
+
+  row$data_hash   <- fp$data_hash
+  row$data_n_rows <- fp$data_n_rows
+  row
+
+}
+
+#' Fingerprint carried by one checkpoint row
+#'
+#' @param row One-row result tibble read back from a checkpoint.
+#' @return List with `data_hash` and `data_n_rows`, both `NA` for rows written
+#'   before the fingerprint existed.
+#' @keywords internal
+#' @noRd
+checkpoint_row_fingerprint <- function(row) {
+
+  h <- row$data_hash
+  n <- row$data_n_rows
+
+  list(
+    data_hash   = if (is.null(h) || length(h) != 1 || is.na(h)) {
+      NA_character_
+    } else {
+      as.character(h)
+    },
+    data_n_rows = if (is.null(n) || length(n) != 1 || is.na(n)) {
+      NA_integer_
+    } else {
+      as.integer(n)
+    }
+  )
+
+}
+
+#' Per-row fingerprints carried by a single-file checkpoint
+#'
+#' Reads the per-row columns when present, and falls back to the tibble's
+#' attributes, which is how a checkpoint written wholesale (rather than row by
+#' row) carries its provenance. Rows with neither are `NA`.
+#'
+#' @param results Checkpoint tibble.
+#' @return List of two vectors, `data_hash` and `data_n_rows`, each of length
+#'   `nrow(results)`.
+#' @keywords internal
+#' @noRd
+checkpoint_tibble_fingerprints <- function(results) {
+
+  n <- nrow(results)
+
+  hashes <- if ("data_hash" %in% names(results)) {
+    as.character(results$data_hash)
+  } else {
+    rep(attr(results, "data_hash") %||% NA_character_, n)
+  }
+
+  rows <- if ("data_n_rows" %in% names(results)) {
+    as.integer(results$data_n_rows)
+  } else {
+    rep(as.integer(attr(results, "data_n_rows") %||% NA_integer_), n)
+  }
+
+  ## Rows written before the columns existed bind in as NA; the tibble-level
+  ## attribute is the only provenance they can have.
+  attr_hash <- attr(results, "data_hash")
+
+  if (!is.null(attr_hash) && any(is.na(hashes))) {
+
+    hashes[is.na(hashes)] <- attr_hash
+
+  }
+
+  list(data_hash = hashes, data_n_rows = rows)
+
+}
+
+#' Abort on a checkpoint written against different training data
+#'
+#' @param stored,current Fingerprints (`data_hash`, `data_n_rows`).
+#' @param output_dir The checkpoint directory being resumed.
+#' @param source Which file carried the mismatching fingerprint.
+#' @return Never returns; aborts with class `horizons_input_error`.
+#' @keywords internal
+#' @noRd
+abort_checkpoint_data_mismatch <- function(stored, current, output_dir, source) {
+
+  cli::cli_abort(c(
+    "Checkpoints in {.path {output_dir}} were written on different training data.",
+    "x" = "{.file {source}} carries hash {.val {stored$data_hash}} over {stored$data_n_rows} training row{?s}.",
+    "i" = "This run's training rows hash to {.val {current$data_hash}} over {current$data_n_rows} row{?s}.",
+    "i" = "Resuming would reuse cross-validated results, and warm-start {.fn fit}, from hyperparameters tuned on the wrong rows.",
+    "i" = "Use a different {.arg output_dir}, or delete the stale checkpoints in {.path {output_dir}}."
+  ), class = "horizons_input_error")
+
+}
+
+## ---------------------------------------------------------------------------
 ## rank_configs_by_cv \u2014 the one ranking rule evaluate() and fit() share
 ## ---------------------------------------------------------------------------
 
@@ -1059,6 +1314,15 @@ evaluate_config_worker <- function(config_i, shared) {
     prune_threshold = shared$prune_threshold,
     allow_par       = FALSE,     # configs axis: tune runs sequentially inside
     seed            = shared$seed
+  )
+
+  ## Stamp the training-row fingerprint. The worker recomputes it from the
+  ## rebuilt split rather than receiving it, so the cross-process contract
+  ## (SHARED_ARG_NAMES) is unchanged; the indices came from the parent's
+  ## split, so the value is identical by construction.
+  result_row <- stamp_data_fingerprint(
+    result_row,
+    eval_data_fingerprint(rsample::training(resamples$split), shared$role_map)
   )
 
   ## Atomic per-config checkpoint
