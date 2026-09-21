@@ -223,7 +223,7 @@ select_training <- function(x, pool,
     cat(cli::col_red(cli::style_bold("! Input validation failed:\n")))
 
     for (i in seq_along(errors)) {
-      branch <- if (i < length(errors)) "├─" else "└─"
+      branch <- if (i < length(errors)) "\u251C\u2500" else "\u2514\u2500"
       cat(cli::col_red(paste0("   ", branch, " ", errors[i], "\n")))
     }
 
@@ -239,7 +239,7 @@ select_training <- function(x, pool,
     stats::setNames(as.integer(k[properties]), properties)
   }
 
-  if (verbose) cat(paste0("├─ ", cli::style_bold("Selecting training set"), "...\n"))
+  if (verbose) cat(paste0("\u251C\u2500 ", cli::style_bold("Selecting training set"), "...\n"))
 
   ## ---------------------------------------------------------------------------
   ## Step 1: Reconcile the axes
@@ -253,9 +253,9 @@ select_training <- function(x, pool,
   if (verbose) {
 
     op <- if (rc$record$operation == "none") "already on the targets' grid" else
-      paste0("resampled ", rc$record$pool_grid$resolution, " → ",
-             rc$record$target_grid$resolution, " cm⁻¹")
-    cat(paste0("│  ├─ Pool: ", nrow(rc$matrix), " rows, ", op, "\n"))
+      paste0("resampled ", rc$record$pool_grid$resolution, " \u2192 ",
+             rc$record$target_grid$resolution, " cm\u207B\u00B9")
+    cat(paste0("\u2502  \u251C\u2500 Pool: ", nrow(rc$matrix), " rows, ", op, "\n"))
 
   }
 
@@ -276,7 +276,7 @@ select_training <- function(x, pool,
     chain <- c(if (snv) "SNV", if (derivative > 0) paste0("SG d", derivative, " w", window, " p", poly),
                if (!is.null(mask)) paste0(nrow(mask), " masked range", if (nrow(mask) > 1) "s"),
                toupper(space))
-    cat(paste0("│  ├─ Space: ", paste(chain, collapse = " → "), ", ",
+    cat(paste0("\u2502  \u251C\u2500 Space: ", paste(chain, collapse = " \u2192 "), ", ",
                sp$ncomp, " components, ", metric, "\n"))
 
   }
@@ -589,32 +589,32 @@ report_selection <- function(sel, n_targets) {
     msg <- if (s$scope == "global") {
       paste0(ps$property[i], ": ", ps$available, " measured rows, no draw (scope = global)")
     } else {
-      paste0(ps$property[i], ": k = ", k_p, " × ", n_targets, " targets → ",
+      paste0(ps$property[i], ": k = ", k_p, " \u00D7 ", n_targets, " targets \u2192 ",
              ps$drawn[i], " of ", ps$available[i], " measured rows")
     }
-    cat(paste0("│  ├─ ", msg, "\n"))
+    cat(paste0("\u2502  \u251C\u2500 ", msg, "\n"))
 
   }
 
   if (s$scope == "cluster" && !is.null(sel$clustering)) {
 
-    cat(paste0("│  ├─ Clusters: ", sel$clustering$k, " (", sel$clustering$reason, ")\n"))
+    cat(paste0("\u2502  \u251C\u2500 Clusters: ", sel$clustering$k, " (", sel$clustering$reason, ")\n"))
 
   }
 
   n_tw <- nrow(sel$exclusions)
-  cat(paste0("│  ├─ Twins excluded: ", n_tw,
+  cat(paste0("\u2502  \u251C\u2500 Twins excluded: ", n_tw,
              if (n_tw) paste0(" (", paste(utils::head(unique(sel$exclusions$target_id), 3), collapse = ", "),
                              if (n_tw > 3) ", ..." else "", ")") else "", "\n"))
 
   n_far <- nrow(sel$resemblance$beyond)
-  cat(paste0("│  ├─ Targets beyond the pool's spread: ", n_far, "\n"))
+  cat(paste0("\u2502  \u251C\u2500 Targets beyond the pool's spread: ", n_far, "\n"))
 
   n_groups <- nrow(sel$groups)
   n_rows   <- length(unique(unlist(sel$groups$pool_ids)))
-  cat(paste0("│  └─ ", n_rows, " rows in ", n_groups, " group", if (n_groups != 1) "s",
+  cat(paste0("\u2502  \u2514\u2500 ", n_rows, " rows in ", n_groups, " group", if (n_groups != 1) "s",
              " (scope = ", s$scope, ")\n"))
-  cat("│\n")
+  cat("\u2502\n")
 
   invisible(NULL)
 
