@@ -18,7 +18,7 @@
 The package supports two prediction modes:
 
 - **Custom Training**: Build and evaluate models on your own calibration data with systematic hyperparameter optimization and ensemble stacking
-- **Library Prediction** *(in development)*: Leverage pre-trained models built on the Open Soil Spectral Library (OSSL) for rapid prediction of common soil properties with uncertainty quantification
+- **Library Prediction** *(in development)*: Predict a batch of unknowns against a reference library without holding lab values of your own. `select_training()` draws a training set out of the library around the batch, and the ordinary fitting pipeline runs on it, with uncertainty quantification. The first registered library is the USDA KSSL soil characterization database
 
 Designed for soil scientists and environmental researchers, `horizons` emphasizes reproducibility, modularity, and scalability from desktop to HPC environments.
 
@@ -30,6 +30,21 @@ Designed for soil scientists and environmental researchers, `horizons` emphasize
 # Install from GitHub
 remotes::install_github("S-Leuthold/horizons")
 ```
+
+### Dependencies
+
+Two dependencies are not on CRAN and are pinned in the `Remotes` field of `DESCRIPTION`, so `remotes::install_github()` picks them up automatically:
+
+- **`spectral-cockpit/opusreader2`** — reads Bruker OPUS binary files, which is how `spectra()` ingests raw spectra.
+- **`S-Leuthold/plsmod-fork@fix/plsr-tune-grid-dimension`** — a fork of `plsmod`. The CRAN version drops a dimension when `tune::tune_grid()` passes a single-column matrix, which makes the `plsr` model type fail during tuning; the fork carries the `drop = FALSE` fix.
+
+One further dependency comes from Bioconductor rather than CRAN, and `install.packages()` cannot find it. The PLS similarity space in `select_training(space = "pls")` and the `plsr` model type both route through the `mixOmics` engine, so install it first if you plan to use either:
+
+```r
+BiocManager::install("mixOmics")
+```
+
+Everything else installs from CRAN as an ordinary dependency.
 
 ---
 
@@ -47,6 +62,11 @@ remotes::install_github("S-Leuthold/horizons")
 - Savitzky-Golay smoothing and derivatives
 - Multiplicative Scatter Correction (MSC)
 - Baseline correction methods
+
+### Training Set Selection
+
+- `select_training()` draws a training set from a reference pool around the batch you actually want to predict, taking each target's nearest pool rows in a spectral similarity space
+- The result is an ordinary `horizons_data`, so `configure()`, `validate()`, `evaluate()`, `fit()` and `predict()` run on it unchanged
 
 ### Model Training
 
@@ -132,7 +152,7 @@ ensemble <- build_ensemble_stack(
 
 ### In Development
 
-- **Library Prediction Mode**: Pre-trained models for 15 standard soil properties
+- **Library Prediction Mode**: Training-set selection is built (`select_training()`); the packaged library it draws from (`build_library()`) is the next piece
 - **Uncertainty Quantification**: Per-sample prediction intervals with conformal calibration
 - **Applicability Domain**: Distance-based reliability metrics for new samples
 
@@ -158,6 +178,10 @@ Prediction. R package version 0.9.0. https://github.com/S-Leuthold/horizons
 ## Contributing
 
 Contributions are welcome. Please open an issue to discuss proposed changes or submit a pull request.
+
+### Getting help
+
+If something is broken or unclear, open an issue at https://github.com/S-Leuthold/horizons/issues — that is the fastest route and it leaves a record other users can find. For questions that do not fit an issue, email the maintainer, Sam Leuthold, at sam.leuthold@colostate.edu.
 
 ---
 
