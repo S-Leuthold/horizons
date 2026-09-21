@@ -96,6 +96,7 @@ Collate:
     'utils-recipes.R'
     'utils-resamples.R'
     'utils-parallel.R'
+    'utils-subset.R'
     'step-transform-spectra.R'
     'step-select-boruta.R'
     'step-select-cars.R'
