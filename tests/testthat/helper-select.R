@@ -112,26 +112,32 @@ make_select_fixture <- function(n_pool       = 300,
 
   utils::capture.output(pool <- add_response(pool, lab, variable = c("clay", "oc")))
 
-  ## Targets: pool rows resampled onto a coarser grid ----------------------
+  ## Targets: fresh draws from the two families, plus one exact pool copy --
+  ## Fresh draws (not pool rows plus noise) so that only the twin is a
+  ## replicate; a pool row with small noise is exactly what the twin check
+  ## is meant to catch.
 
-  n_each     <- n_targets %/% 2
-  pick       <- c(sample(seq_len(n_half), n_each),
-                  sample(n_half + seq_len(n_pool - n_half), n_targets - n_each))
-  target_wn  <- seq(target_range[1], target_range[2], by = -8)
+  n_fresh    <- n_targets - 1L
+  n_fresh1   <- n_fresh %/% 2
+  n_fresh2   <- n_fresh - n_fresh1
+  twin_pick  <- sample(seq_len(n_half), 1)
+
+  src <- rbind(
+    pool_mat[twin_pick, , drop = FALSE],
+    gaussian_family(n_fresh1, pool_wn, centres = c(3400, 2920, 1630, 1030)),
+    gaussian_family(n_fresh2, pool_wn, centres = c(3620, 2515, 1420, 870))
+  )
+  target_family <- c(1L, rep(1L, n_fresh1), rep(2L, n_fresh2))
+
+  target_wn <- seq(target_range[1], target_range[2], by = -8)
 
   ## prospectr wants increasing axes; flip back after
-  src <- pool_mat[pick, order(pool_wn), drop = FALSE]
-  tgt <- prospectr::resample(X = src, wav = sort(pool_wn),
+  tgt <- prospectr::resample(X = src[, order(pool_wn), drop = FALSE], wav = sort(pool_wn),
                              new.wav = sort(target_wn), interpol = "spline")
   tgt <- tgt[, rev(seq_len(ncol(tgt))), drop = FALSE]
   colnames(tgt) <- paste0("wn_", target_wn)
 
-  ## Noise on every target but the twin
-  twin_row <- 1L
-  noise    <- matrix(stats::rnorm(length(tgt), sd = 0.01), nrow = nrow(tgt))
-  noise[twin_row, ] <- 0
-  tgt <- tgt + noise
-
+  twin_row   <- 1L
   target_ids <- sprintf("T%02d", seq_len(n_targets))
 
   targets_tbl <- dplyr::bind_cols(
@@ -141,7 +147,8 @@ make_select_fixture <- function(n_pool       = 300,
 
   utils::capture.output(targets <- spectra(targets_tbl))
 
-  family_of_target <- stats::setNames(family[pick], target_ids)
+  family_of_target <- stats::setNames(target_family, target_ids)
+  pick             <- twin_pick
 
   list(
     pool             = pool,

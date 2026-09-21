@@ -25,6 +25,7 @@ Remotes:
 Imports:
     butcher,
     cli,
+    cluster,
     corpcor,
     data.table,
     dials,
