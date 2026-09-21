@@ -76,7 +76,12 @@ msg("[verify] targets: %d rows on %d predictors", targets$data$n_rows, targets$d
 ## ---------------------------------------------------------------------------
 
 t_sel <- system.time(
-  out <- select_training(targets, pool, k = K, properties = PROPERTY, mask = MASK)
+  ## sdev_floor = 0: the 9/17 chain kept every variance-chosen component
+  ## (33). The verb's default floor (0.1 of PC1 sd, added 2026-09-21) keeps
+  ## fewer, so the exact reproduction is only defined with the floor off.
+  ## The twin rule also changed that day (neighbourhood-relative); the KSSL
+  ## control batch had no twins under either rule, so the union is unchanged.
+  out <- select_training(targets, pool, k = K, properties = PROPERTY, mask = MASK, sdev_floor = 0)
 )
 msg("[verify] select_training() in %.0f s", t_sel[["elapsed"]])
 
@@ -127,3 +132,21 @@ if (!all(r1, r2a, r2b, r3, r4)) {
 }
 
 msg("[verify] all checks passed")
+
+## ---------------------------------------------------------------------------
+## The default floor, recorded rather than checked (2026-09-21)
+## ---------------------------------------------------------------------------
+## Not a reproduction: the number to compare future runs against once the
+## floored space is the one that ships.
+
+t_def <- system.time(
+  def <- select_training(targets, pool, k = K, properties = PROPERTY, mask = MASK)
+)
+s_def <- def$selection
+msg("[verify] default floor (%.2f): %d components (%d by variance), union %d rows, twins flagged %d, removed %d, %.0f s",
+    s_def$settings$sdev_floor, s_def$settings$ncomp_retained, s_def$settings$ncomp_variance %||% NA_integer_,
+    def$data$n_rows, nrow(s_def$exclusions), s_def$n_excluded_union %||% 0L, t_def[["elapsed"]])
+m_def <- s_def$membership |> arrange(target_id, rank)
+ids_def <- split(m_def$pool_id, m_def$target_id)
+overlap <- vapply(names(ids_ref), function(t) length(intersect(ids_def[[t]], ids_ref[[t]])) / K, numeric(1))
+msg("[verify] default floor vs 9/17 sets: median Jaccard-ish overlap %.2f, min %.2f", median(overlap), min(overlap))
