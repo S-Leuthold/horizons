@@ -1228,3 +1228,109 @@ describe("validate() edge cases", {
   })
 
 })
+
+
+## ===========================================================================
+## 12. Outlier removal maintains the selection record
+## ===========================================================================
+
+describe("validate() and the selection record", {
+
+  ## Helper: a configured object with spectral outliers and a selection record
+  make_selected_hd <- function() {
+
+    hd <- make_configured_hd(n_samples = 40L, n_predictors = 20L)
+
+    ## Inject 5 spectral outliers
+    for (col in names(hd$data$analysis)[2:21]) {
+
+      hd$data$analysis[[col]][1:5] <- 100
+
+    }
+
+    hd$selection <- make_selection_record(pool_ids = hd$data$analysis$sample_id)
+
+    hd
+
+  }
+
+  test_that("removing outliers refilters selection membership", {
+
+    ## Arrange
+    hd <- make_selected_hd()
+
+    ## Act
+    result <- quiet_validate(hd, remove_outliers = "spectral")
+
+    ## Assert
+    removed  <- result$validation$outliers$removed_ids
+    surviving <- result$data$analysis$sample_id
+
+    expect_true(length(removed) > 0)
+    expect_false(any(result$selection$membership$pool_id %in% removed))
+    expect_true(all(result$selection$membership$pool_id %in% surviving))
+
+  })
+
+
+  test_that("removing outliers refilters each group and recounts n_rows", {
+
+    hd     <- make_selected_hd()
+    result <- quiet_validate(hd, remove_outliers = "spectral")
+
+    surviving <- result$data$analysis$sample_id
+
+    for (i in seq_len(nrow(result$selection$groups))) {
+
+      ids <- result$selection$groups$pool_ids[[i]]
+
+      expect_true(all(ids %in% surviving))
+      expect_identical(result$selection$groups$n_rows[i], length(ids))
+
+    }
+
+    expect_identical(sum(result$selection$groups$n_rows), length(surviving))
+
+  })
+
+
+  test_that("removing outliers recounts drawn and records rows_removed", {
+
+    hd     <- make_selected_hd()
+    result <- quiet_validate(hd, remove_outliers = "spectral")
+
+    n_removed <- length(result$validation$outliers$removed_ids)
+
+    expect_identical(result$selection$rows_removed, as.integer(n_removed))
+    expect_true(all(result$selection$pool_sizes$drawn == result$data$n_rows))
+    expect_identical(result$selection$pool_sizes$available,
+                     hd$selection$pool_sizes$available)
+
+  })
+
+
+  test_that("removing nothing leaves the record untouched", {
+
+    hd     <- make_selected_hd()
+    result <- quiet_validate(hd, remove_outliers = FALSE)
+
+    expect_identical(result$selection, hd$selection)
+
+  })
+
+
+  test_that("validate() aborts when asked to remove outliers from a fitted object", {
+
+    ## Arrange — the row operation would strand the split and the row index
+    hd <- make_selected_hd()
+    hd$models$workflows <- list(cfg_a = "a fitted workflow")
+
+    ## Act & Assert
+    expect_error(
+      suppressWarnings(capture.output(validate(hd, remove_outliers = "spectral"))),
+      class = "horizons_input_error"
+    )
+
+  })
+
+})

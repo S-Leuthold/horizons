@@ -26,9 +26,14 @@ The summary output provides significantly more detail than \code{print()}:
 covariate names (not just count), outcome variable, memory footprint
 \item \strong{Provenance section}: Full source paths, timestamps, version info,
 preprocessing history, aggregation settings
+\item \strong{Selection section}: Scope and groups, properties, k, pool size, rows
+drawn per property, similarity space and metric, twins excluded, and any
+rows removed since the draw (present only for objects from
+\code{select_training()})
 \item \strong{Configuration section}: Tuning parameter defaults, config count
 \item \strong{Validation section}: Whether validation has run, pass/fail status
-\item \strong{Pipeline status}: Current stage and next step guidance
+\item \strong{Pipeline status}: Current stage and next step guidance, noting when
+the rows were drawn from a pool
 }
 
 Uses tree-style formatting consistent with the rest of the package.

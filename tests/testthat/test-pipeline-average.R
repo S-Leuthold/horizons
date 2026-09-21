@@ -27,7 +27,9 @@ make_test_hd_average <- function(n_samples      = 3,
                                  add_outlier    = FALSE,
                                  all_outliers   = FALSE,
                                  add_meta       = FALSE,
-                                 uniform_meta   = TRUE) {
+                                 uniform_meta   = TRUE,
+                                 add_responses  = FALSE,
+                                 conflict_texture = FALSE) {
 
   set.seed(42)
 
@@ -39,7 +41,9 @@ make_test_hd_average <- function(n_samples      = 3,
 
   ## Build spectral data (correlated within samples) -------------------------
 
-  wn_cols <- paste0("wn_", seq_len(n_wavelengths) * 100)
+  ## Decreasing, per invariant I2 (MIR convention: 4000 -> 400). The validator
+  ## enforces this now, so the fixture has to honour it.
+  wn_cols <- paste0("wn_", rev(seq_len(n_wavelengths)) * 100)
 
   ## Base spectra per sample (rows = samples)
   base_spectra <- matrix(
@@ -110,6 +114,26 @@ make_test_hd_average <- function(n_samples      = 3,
 
   }
 
+  ## Add response and outcome columns if requested ---------------------------
+
+  if (add_responses) {
+
+    ## clay varies a little between replicates of a sample, so the collapse
+    ## has to be a mean rather than a first-value pick; texture is a
+    ## non-numeric lab call that should be uniform within a sample.
+    analysis$clay    <- rep(seq_len(n_samples) * 10, each = n_reps) +
+                        rep(seq_len(n_reps) - 1, n_samples)
+    analysis$soc     <- rep(seq_len(n_samples), each = n_reps) + 0.5
+    analysis$texture <- rep(c("silt", "loam", "clay")[seq_len(n_samples)], each = n_reps)
+
+    if (conflict_texture) {
+
+      analysis$texture[1] <- "sand"
+
+    }
+
+  }
+
   ## Add spectral columns ----------------------------------------------------
 
   for (i in seq_len(n_wavelengths)) {
@@ -120,11 +144,17 @@ make_test_hd_average <- function(n_samples      = 3,
 
   ## Build role_map ----------------------------------------------------------
 
-  meta_vars <- intersect(c("filename", "project", "site", "rep_num"), names(analysis))
+  meta_vars     <- intersect(c("filename", "project", "site", "rep_num"), names(analysis))
+  response_vars <- intersect(c("clay", "texture"), names(analysis))
+  outcome_vars  <- intersect("soc", names(analysis))
 
   role_map <- tibble::tibble(
-    variable = c("sample_id", meta_vars, wn_cols),
-    role     = c("id", rep("meta", length(meta_vars)), rep("predictor", n_wavelengths))
+    variable = c("sample_id", meta_vars, response_vars, outcome_vars, wn_cols),
+    role     = c("id",
+                 rep("meta",      length(meta_vars)),
+                 rep("response",  length(response_vars)),
+                 rep("outcome",   length(outcome_vars)),
+                 rep("predictor", n_wavelengths))
   )
 
   ## Build horizons_data -----------------------------------------------------
@@ -669,5 +699,257 @@ test_that("check_uniformity() correctly identifies uniform values", {
 
   ## Single value
   expect_true(horizons:::check_uniformity("A"))
+
+})
+
+
+## ---------------------------------------------------------------------------
+## average() — Response and outcome columns
+## ---------------------------------------------------------------------------
+
+test_that("average() carries numeric responses through as within-group means", {
+
+  ## Arrange
+  hd <- make_test_hd_average(n_samples = 2, n_reps = 3, add_responses = TRUE)
+
+  ## Act
+  result <- average(hd, quality_check = FALSE, verbose = FALSE)
+
+  ## Assert — clay is 10, 11, 12 for S1 and 20, 21, 22 for S2
+  averaged <- result$data$analysis
+  expect_true(all(c("clay", "soc", "texture") %in% names(averaged)))
+  expect_equal(averaged$clay[averaged$sample_id == "S1"], 11)
+  expect_equal(averaged$clay[averaged$sample_id == "S2"], 21)
+  expect_equal(averaged$soc[averaged$sample_id == "S1"], 1.5)
+
+})
+
+
+test_that("average() keeps a uniform non-numeric response", {
+
+  hd     <- make_test_hd_average(n_samples = 2, n_reps = 3, add_responses = TRUE)
+  result <- average(hd, quality_check = FALSE, verbose = FALSE)
+
+  averaged <- result$data$analysis
+
+  expect_identical(averaged$texture[averaged$sample_id == "S1"], "silt")
+  expect_identical(averaged$texture[averaged$sample_id == "S2"], "loam")
+
+})
+
+
+test_that("average() aborts on a non-numeric response that disagrees within a group", {
+
+  ## Arrange — one replicate of S1 was called sand, the others silt
+  hd <- make_test_hd_average(n_samples = 2, n_reps = 3,
+                             add_responses = TRUE, conflict_texture = TRUE)
+
+  ## Act & Assert
+  expect_error(average(hd, quality_check = FALSE, verbose = FALSE),
+               regexp = "texture",
+               class  = "horizons_data_error")
+
+})
+
+
+test_that("average() with responses leaves a whole object", {
+
+  hd     <- make_test_hd_average(n_samples = 3, n_reps = 3, add_responses = TRUE)
+  result <- average(hd, quality_check = FALSE, verbose = FALSE)
+
+  expect_no_error(validate_horizons_data(result))
+  expect_identical(result$data$n_responses, 2L)
+  expect_identical(sum(result$data$role_map$role == "outcome"), 1L)
+
+})
+
+
+test_that("average() averages responses over the QC-surviving replicates only", {
+
+  ## Arrange — the first replicate of S1 is a spectral outlier and is dropped,
+  ## so clay should be the mean of 11 and 12, not of 10, 11 and 12
+  hd <- make_test_hd_average(n_samples = 2, n_reps = 3,
+                             add_outlier = TRUE, add_responses = TRUE)
+
+  ## Act
+  result <- average(hd, quality_check = TRUE, verbose = FALSE)
+
+  ## Assert
+  averaged <- result$data$analysis
+  expect_equal(averaged$clay[averaged$sample_id == "S1"], 11.5)
+
+})
+
+
+## ---------------------------------------------------------------------------
+## average() — Promoting a custom `by` to sample_id
+## ---------------------------------------------------------------------------
+
+test_that("average() coerces a numeric by column to a character sample_id", {
+
+  ## Arrange
+  hd <- make_test_hd_average(n_samples = 2, n_reps = 3)
+
+  hd$data$analysis$plot_number <- rep(c(101L, 202L), each = 3)
+  hd$data$role_map <- dplyr::bind_rows(
+    hd$data$role_map,
+    tibble::tibble(variable = "plot_number", role = "meta")
+  )
+
+  ## Act
+  result <- average(hd, by = "plot_number", quality_check = FALSE, verbose = FALSE)
+
+  ## Assert — I2 says sample_id is character
+  expect_type(result$data$analysis$sample_id, "character")
+  expect_setequal(result$data$analysis$sample_id, c("101", "202"))
+  expect_no_error(validate_horizons_data(result))
+
+})
+
+
+test_that("average() aborts when promoting `by` would produce duplicate ids", {
+
+  ## Arrange — two distinct doubles that print to the same string, which is
+  ## exactly how a numeric `by` can mint a duplicate id
+  hd <- make_test_hd_average(n_samples = 2, n_reps = 3)
+
+  hd$data$analysis$plot_number <- rep(c(0.1 + 0.2, 0.3), each = 3)
+  hd$data$role_map <- dplyr::bind_rows(
+    hd$data$role_map,
+    tibble::tibble(variable = "plot_number", role = "meta")
+  )
+
+  ## Act & Assert
+  expect_error(average(hd, by = "plot_number", quality_check = FALSE, verbose = FALSE),
+               regexp = "duplicate",
+               class  = "horizons_data_error")
+
+})
+
+
+test_that("average() refuses to promote `by` over an existing sample_id column", {
+
+  ## Arrange — force the condition the rename previously assumed away
+  hd <- make_test_hd_average(n_samples = 2, n_reps = 3, add_meta = TRUE)
+
+  ## sample_id survives the collapse only if something carries it through;
+  ## give it the meta role so it does.
+  hd$data$role_map$role[hd$data$role_map$variable == "sample_id"] <- "meta"
+  hd$data$role_map <- dplyr::bind_rows(
+    hd$data$role_map,
+    tibble::tibble(variable = "row_id", role = "id")
+  )
+  hd$data$analysis$row_id <- paste0("R", seq_len(nrow(hd$data$analysis)))
+
+  ## Act & Assert
+  expect_error(average(hd, by = "project", quality_check = FALSE, verbose = FALSE),
+               regexp = "sample_id",
+               class  = "horizons_data_error")
+
+})
+
+
+## ---------------------------------------------------------------------------
+## average() — Source id provenance
+## ---------------------------------------------------------------------------
+
+test_that("average() records which scans each averaged row came from", {
+
+  ## Arrange
+  hd <- make_test_hd_average(n_samples = 2, n_reps = 3)
+
+  ## Act
+  result <- average(hd, quality_check = FALSE, verbose = FALSE)
+
+  ## Assert
+  src <- result$provenance$average$source_ids
+
+  expect_s3_class(src, "tbl_df")
+  expect_identical(names(src), c("sample_id", "source_sample_id"))
+  expect_identical(nrow(src), 6L)
+  expect_setequal(src$sample_id[src$source_sample_id == "S1"], "S1")
+
+})
+
+
+test_that("average() maps a custom by value back to its source scans", {
+
+  ## Arrange
+  hd <- make_test_hd_average(n_samples = 2, n_reps = 3, add_meta = TRUE)
+
+  ## Act
+  result <- average(hd, by = "project", quality_check = FALSE, verbose = FALSE)
+
+  ## Assert — the original ids are gone from the table but not from the record
+  src <- result$provenance$average$source_ids
+
+  expect_false("S1" %in% result$data$analysis$sample_id)
+  expect_setequal(src$source_sample_id[src$sample_id == "PROJ1"], "S1")
+  expect_setequal(unique(src$sample_id), c("PROJ1", "PROJ2"))
+
+})
+
+
+test_that("average() writes aggregation_by on every call", {
+
+  hd <- make_test_hd_average(n_samples = 2, n_reps = 2)
+
+  result <- average(hd, quality_check = FALSE, verbose = FALSE)
+
+  expect_identical(result$provenance$aggregation_by, "sample_id")
+
+})
+
+
+## ---------------------------------------------------------------------------
+## The selection record across an average
+## ---------------------------------------------------------------------------
+
+test_that("average() refilters the selection record when a sample is dropped", {
+
+  ## Arrange — one sample's replicates all fail QC, so it leaves the object
+  hd <- make_test_hd_average(n_samples = 3, n_reps = 3, all_outliers = TRUE)
+  hd$selection <- make_selection_record(pool_ids = unique(hd$data$analysis$sample_id))
+
+  ## Act
+  result <- average(hd, quality_check = TRUE, on_all_outliers = "drop", verbose = FALSE)
+
+  ## Assert — the record describes the rows that are actually there
+  expect_setequal(unique(result$selection$membership$pool_id),
+                  result$data$analysis$sample_id)
+  expect_identical(result$selection$pool_sizes$drawn,
+                   rep(length(result$data$analysis$sample_id), 2L))
+  expect_identical(result$selection$rows_removed, 1L)
+
+  for (ids in result$selection$groups$pool_ids) {
+
+    expect_true(all(ids %in% result$data$analysis$sample_id))
+
+  }
+
+})
+
+
+test_that("average() refuses a custom by on an object carrying a record", {
+
+  ## Arrange — promoting `project` renames the rows the draw is keyed to,
+  ## and a renamed row cannot be matched back to the record
+  hd <- make_test_hd_average(n_samples = 2, n_reps = 3, add_meta = TRUE)
+  hd$selection <- make_selection_record(pool_ids = unique(hd$data$analysis$sample_id))
+
+  ## Act & Assert
+  expect_error(average(hd, by = "project", quality_check = FALSE, verbose = FALSE),
+               regexp = "selection record",
+               class  = "horizons_validation_error")
+
+})
+
+
+test_that("average() leaves an object without a record alone", {
+
+  hd     <- make_test_hd_average(n_samples = 2, n_reps = 3, add_meta = TRUE)
+  result <- average(hd, by = "project", quality_check = FALSE, verbose = FALSE)
+
+  expect_null(result$selection)
 
 })

@@ -1002,3 +1002,92 @@ describe("configure() edge cases", {
   })
 
 })
+
+
+## ---------------------------------------------------------------------------
+## Stored counts and the promotion the reconfigure gives back
+## ---------------------------------------------------------------------------
+
+describe("configure() and the object contract", {
+
+  test_that("configure() recounts n_responses after promoting the outcome", {
+
+    ## Arrange — two responses, one of which is about to become the outcome
+    fx <- make_select_fixture(n_pool = 40)
+
+    expect_identical(fx$pool$data$n_responses, 2L)
+
+    ## Act
+    result <- quiet_configure(fx$pool, outcome = "clay")
+
+    ## Assert — the stored count follows the role map, so the next verb's
+    ## validator does not abort on a legal chain
+    expect_identical(result$data$n_responses, 1L)
+    expect_identical(
+      result$data$n_responses,
+      sum(result$data$role_map$role == "response")
+    )
+    expect_no_error(validate_horizons_data(result))
+
+  })
+
+
+  test_that("a configured object survives the validator the next verb runs", {
+
+    ## configure() |> standardize() is the chain that used to abort
+    fx     <- make_select_fixture(n_pool = 40)
+    result <- quiet_configure(fx$pool, outcome = "clay")
+
+    expect_no_error(validate_horizons_data(result))
+
+    ## And again after the outcome moves
+    again <- quiet_configure(result, outcome = "oc")
+
+    expect_identical(again$data$n_responses, 1L)
+    expect_no_error(validate_horizons_data(again))
+
+  })
+
+
+  test_that("reconfiguring drops every promotion the object had earned", {
+
+    ## Arrange — a configured object dressed as a fitted one
+    fx  <- make_select_fixture(n_pool = 40)
+    obj <- quiet_configure(fx$pool, outcome = "clay")
+
+    obj$evaluation$results      <- tibble::tibble(config_id = "cfg_a")
+    obj$evaluation$best_config  <- "cfg_a"
+    obj$evaluation$split        <- "an rsplit"
+    obj$models$workflows        <- list(cfg_a = "a fitted workflow")
+    obj$models$n_models         <- 1L
+    obj$models$split            <- "an rsplit"
+    obj$models$row_index        <- tibble::tibble(.row = 1L, sample_id = "P001")
+    obj$models$cv_predictions   <- tibble::tibble(.row = 1L, .pred = 1)
+    obj$models$predictor_schema <- c("wn_4000")
+    obj$ensemble$method         <- "weighted"
+
+    class(obj) <- c("horizons_fit", "horizons_eval", "horizons_data", "list")
+
+    ## Act
+    result <- quiet_configure(obj, outcome = "oc")
+
+    ## Assert — the slots and the class are both claims about state that the
+    ## new outcome has invalidated
+    expect_null(result$evaluation$results)
+    expect_null(result$evaluation$best_config)
+    expect_null(result$evaluation$split)
+    expect_null(result$models$workflows)
+    expect_null(result$models$n_models)
+    expect_null(result$models$split)
+    expect_null(result$models$row_index)
+    expect_null(result$models$cv_predictions)
+    expect_null(result$models$predictor_schema)
+    expect_null(result$ensemble$method)
+
+    expect_identical(class(result), c("horizons_data", "list"))
+    expect_identical(promoted_state(result), character())
+    expect_no_error(validate_horizons_data(result))
+
+  })
+
+})
