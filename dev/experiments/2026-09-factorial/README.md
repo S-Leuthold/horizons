@@ -202,3 +202,85 @@ Two harness bugs fixed late in experiment 1 and worth not reintroducing: `mclust
 ## Decision rule
 
 To be written **before** the run, as in experiment 1, and with the latency gate removed. Predict time and artifact size become descriptive columns reported for every arm; accuracy decides, with artifact size as the tiebreak. Coverage eligibility (90 ± 3 on the held-out set) should stay — it held across all fifteen cells in experiment 1 and is what makes the intervals comparable between arms.
+
+---
+
+## Overnight run (2026-09-21 → 22): is the library really unthinnable, and does the laptop really need selection?
+
+Pre-registered before the run. Parameters live in `overnight-config.R`; the verdict tables read them, so a budget or margin can be changed tomorrow without refitting. Chain: `run_overnight.sh` runs 12, 13, 14 in order after `11-metric-followup.R` exits, each under `/usr/bin/time -v` and the memory watchdog, logs under `results/overnight-logs/`.
+
+**Why.** Today's metric experiments (10, 11) put a global random forest ahead of every selection arm on-library (Iowa clay: 3.02 against 3.10 at best), while off-library (MOYS oc) selection beat the global forest by 30%. Two outside reads (Gemini 3.1 Pro, GPT-6 Astra, `/outside-opinion`, 18:04) agreed the earlier conclusion that the library cannot be thinned or partitioned rests on random subsampling plus one hard GMM partition, and that the memory premise under library mode was never measured sequentially. The follow-up (11) added that larger k hurts on-library and that the PLS learner is where selection's literature gains live.
+
+**12 — the memory premise.** Sequential `configure → validate → evaluate → fit(UQ, AD) → predict` on the full clay train core (17,788 rows) with the 9/17 four-config set; peak RSS from `/proc` and `time -v`; fit and pool artifact sizes. Reading rule: peak under 16 GB means "the laptop cannot run the library" is inference, not fact, and library mode's argument becomes size and speed; over 32 GB and the premise stands.
+
+**13 — the thinning competition.** Pool = clay train core minus the Iowa fixture. Sizes 2,000 / 6,000 / 12,000 against the full core. Selectors from the pool only: random (three seeds), Kennard-Stone and DUPLEX on the 13-component similarity space, k-means medoids, and clay-decile × spectral-cluster stratification with a per-cell floor. Learners rf and Cubist, snv + PCA, experiment-1 tuning. Scored on the fixed 5,239-row test split, the Iowa batch, and the tail bins (clay < 10, > 50). Reading rule: a subset passes when its test RMSE is within 5% of the full-core reference for that learner and every tail bin within 10%; the smallest passing size is the shippable library at that learner. Artifact sizes as qs2 recorded against the 50 MB budget. Random seeds report the spread so a diversity selector must beat random's mean, not its luckiest draw.
+
+**14 — global plus local bias correction.** For Iowa (clay) and MOYS (oc): a global rf on the pool with out-of-fold residuals kept; each target corrected by the mean OOF residual over its 100 nearest pool rows (offset, inverse-distance weighted, and a local slope variant); scored against the uncorrected global and the best selection arm from 10. Reading rule: if correction recovers most of selection's off-library gain, selection's accuracy contribution is bias correction and the product should ship the correction with or without selection.
+
+Not run tonight, pending these results: response-driven or soft partitions (PLS-space clusters, property strata, mixtures of experts), transfer-aware CV, applicability-domain routing, instrument standardization before selection.
+
+### Results (read 2026-09-22)
+
+The chain ran 19:22 to 22:44 and every script exited 0. The watchdog never fired: MemAvailable never dropped below 28 GB, peak RSS was 12.6 GB for 13 (8 callr workers), 6.1 GB for 14 and 4.9 GB for 12. The one skipped arm is by construction, DUPLEX at 12,000 needs 2k ≤ pool rows and 24,000 > 17,590. 42 thinning arms, 8 correction rows and the single full memory-premise row are all present. Results are gitignored, so the tables below are the record; the CSVs are `results/memory-premise/memory-premise.csv`, `results/thinning/{thinning,verdict,sizes}.csv` and `results/bias-correction/bias-correction.csv`.
+
+| experiment | pre-registered rule | result | clears |
+|---|---|---|---|
+| 12 memory premise | peak under 16 GB: the laptop claim is inference, not fact; over 32 GB: it stands | peak RSS 4.66 GB (`/proc`), 4.88 GB (`time -v`), sequential and single-threaded; wall 3 h 22 min for four configs on clay (evaluate 2 h 13 min, fit 1 h 09 min, predict 14 s on 5,239 rows); fit artifact 227 MB, pool 53 MB | yes, by three times; the premise falls |
+| 13 thinning | pass = test RMSE ≤ 1.05 × the full core for that learner and both tail bins ≤ 1.10 ×; smallest passing size ships; a diversity selector must beat random's mean | 3 of 28 cells pass, all at 12,000: cubist k-medoids 1.029 (tails 1.03 / 0.95), cubist Kennard-Stone 1.048 (0.99 / 1.04), rf k-medoids 1.042 (1.08 / 1.04); random at 12,000 fails on both learners (1.085 and 1.063, max 1.099); best at 6,000 is 1.12, at 2,000 is 1.32 | yes, at 12,000 only |
+| 14 bias correction | if correction recovers most of selection's off-library gain, selection's contribution is bias correction and the product ships the correction | MOYS oc: global rf 0.526, best selection arm from 10 (Euclidean batch) 0.348, offset 0.565, weighted 0.565, slope 0.571; bias +0.35 → +0.37. Iowa clay: global 3.131, best selection (cosine batch) 3.140, offset 2.827, weighted 2.820, slope 2.960; bias −0.52 → −0.10 | no; off-library the correction recovers none of the gain and makes it worse. On-library it beats global and selection by 10 %, which the rule did not anticipate |
+
+**12, the memory premise.** The full sequential pipeline on the 17,788-row clay core (`configure → validate → evaluate → fit(UQ, AD) → predict`, four configs, 4 cm⁻¹, ranger on one thread) peaks at 4.7 GB. Memory is not what keeps the library off a laptop. Time is: three and a half hours for one property and four configs on the box's CPU, of which evaluate is two-thirds. Artifact is the other half of the argument: the fit with UQ and AD is 227 MB, the pool it was built from is 53 MB, just over the 50 MB budget. The cost model in `select-training-design.md` should be rewritten in those terms: the verb exists so a batch does not cost a multi-hour fit per property, and so the shipped object can be the pool rather than the fit. The RAM argument is gone.
+
+**13, thinning.** Full thinning table, test RMSE (clay %) with the ratio to the full-core reference for that learner; random rows are the mean of three seeds with the range in brackets.
+
+| size | selector | cubist RMSE (ratio) | cubist Iowa | rf RMSE (ratio) | rf Iowa | MB |
+|---|---|---|---|---|---|---|
+| 17,590 | full | 3.872 (1.000) | 2.587 | 5.428 (1.000) | 3.131 | 52.6 |
+| 12,000 | k-medoids | **3.983 (1.029)** | 2.664 | **5.657 (1.042)** | 3.105 | 36.1 |
+| 12,000 | Kennard-Stone | **4.058 (1.048)** | 2.736 | 5.742 (1.058) | 3.240 | 36.2 |
+| 12,000 | random | 4.199 (1.085) [4.124 to 4.254] | 2.579 | 5.768 (1.063) [5.740 to 5.805] | 3.229 | 36.0 |
+| 12,000 | stratified | 4.389 (1.134) | 2.560 | 5.804 (1.069) | 3.193 | 36.0 |
+| 6,000 | Kennard-Stone | 4.483 (1.158) | 3.357 | 6.077 (1.120) | 3.738 | 18.4 |
+| 6,000 | DUPLEX | 4.567 (1.179) | 2.815 | 6.308 (1.162) | 3.764 | 18.2 |
+| 6,000 | k-medoids | 4.587 (1.185) | 2.680 | 6.235 (1.149) | 3.479 | 18.2 |
+| 6,000 | stratified | 4.619 (1.193) | 2.429 | 6.426 (1.184) | 3.294 | 18.2 |
+| 6,000 | random | 4.676 (1.208) [4.620 to 4.786] | 2.618 | 6.304 (1.161) [6.270 to 6.374] | 3.597 | 18.2 |
+| 2,000 | Kennard-Stone | 5.199 (1.343) | 3.726 | 7.149 (1.317) | 5.171 | 6.2 |
+| 2,000 | stratified | 5.214 (1.347) | 2.851 | 7.327 (1.350) | 3.972 | 6.1 |
+| 2,000 | DUPLEX | 5.233 (1.352) | 3.516 | 7.232 (1.332) | 5.093 | 6.2 |
+| 2,000 | k-medoids | 5.299 (1.369) | 2.698 | 7.145 (1.316) | 3.977 | 6.1 |
+| 2,000 | random | 5.425 (1.401) [5.345 to 5.515] | 3.045 | 7.389 (1.361) [7.276 to 7.516] | 4.000 | 6.1 |
+
+Bold cells pass. The library thins by about a third: 12,000 k-medoids rows of 17,590 pass on both learners, at 36 MB against the 50 MB budget where the full core is 53 MB. Nothing at 6,000 or 2,000 is within reach of the margin with any selector, which is the learning curve of 9/16 again (random 8,894 rows scored 4.35 there; random 12,000 scores 4.20 here). The diversity selectors do beat random, and by more than random's spread: k-medoids is 0.22 RMSE under random's mean at 12,000 for Cubist against a random range of 0.13, so the selector effect is real but it is worth a few percent, not a factor. Stratification by clay decile is the worst selector at 12,000 and no better than random below it. Kennard-Stone and DUPLEX have the worst Iowa and high-tail errors at 2,000, the coverage-by-extremes design pulling the fit toward the hull. The Iowa column is not gated and is noisy at 300 rows: random 12,000 beats the full core there under Cubist. Timing: the 12,000 k-medoids Cubist arm took 538 s against 852 s for the full core. Caveats before building on the pass: one property, one split, and one seed for every selector except random.
+
+**14, bias correction.** Off-library the hypothesis is rejected outright. On MOYS the global random forest on the 31,130-row oc pool scores 0.526 with a +0.35 bias, and every correction variant makes it worse (0.565 to 0.571) while moving the bias the wrong way, to +0.37. Selection's 0.348 is untouched. The mechanism is legible from the numbers: the pool's own out-of-fold residuals in MOYS's neighbourhood carry the wrong sign for an instrument transfer, because a library-internal misfit and an off-library offset are different quantities, and only references from the batch can see the second one. That is the `spike()` argument from 9/17 restated from the other side. On-library the picture inverts. On the Iowa fixture, offset and inverse-distance corrections take the global forest from 3.131 to 2.82 (10 % RMSE, bias −0.52 → −0.10), and beat the best selection arm from 10 (cosine batch, 3.140) that had been the on-library argument for cosine. The local-slope variant is weaker (2.960) with no fallbacks triggered. Two notes on the setup: the correction's neighbours are drawn from the 80 % of pool rows that `fit()` cross-validated, because `fit()` holds the other 20 % out as its own test split (Split F; UQ and AD were off, or a further 20 % would have gone to calibration), so this is consistent across blocks but not the whole pool; and the on-library result is one fixture of 300 rows, not the 5,239-row test split, so it is a finding to test, not a product decision.
+
+**What this settles, and what it moves.**
+
+- The library can be thinned, by a third and no further, with k-medoids. The packaged-pool design reopens in exactly that form, a two-thirds core under the size budget, and not as a small pool.
+- The laptop premise was wrong on memory and right on cost. The verb's cost model becomes time per batch and the size of the shipped object.
+- Off-library, selection's gain is not bias correction; it stands as locality plus, when references exist, spiking. On-library, selection is dominated by global plus local residual correction. The morning read of this was that it removed cosine's only win and left Euclidean, which won off-library (0.348 against cosine 0.372), as the natural single default; the afternoon's 15 (below) overturned that, because without a global fit the on-library base is the pool and there cosine is worth 11 %. The `sdev_floor` question is untouched: no PLSR arm ran.
+- Owed before any of it becomes design: the on-library correction on the full clay test split and the other two properties. The k-medoids replication is not owed: Sam's call the same afternoon (below) was that the library ships whole, which closes thinning as a design input.
+
+### Same afternoon (2026-09-22): the library ships whole, and the correction from the pool fit
+
+Sam's call after reading the results: the library always ships in full; the only question is what enters the model per batch, optimized for the batch's accuracy and the fit's runtime. That closes thinning as a design question (the 12,000 k-medoids pass stands as a finding nothing hangs on), drops the 50 MB budget as a library budget, and makes the residual correction's dependence on a global fit the one open coupling: 14's on-library gain came from a global fit's out-of-fold residuals, and under this design there is no global fit at predict time.
+
+**15 — the correction from the pool fit** (`15-pool-correction.R`, `run_pool_correction.sh`, `results/pool-correction/`). Pool as 10 built it (every snapshot row but the fixture, the property attached). `select_training()` at k = 100 and 400, scope batch; the one rf config on the drawn pool; fit()'s out-of-fold residuals on the pool rows it cross-validated (80 %, as in 14: the rest is fit()'s held-out Split F); 14's three corrections from each target's 100 nearest OOF rows, Euclidean. Euclidean draws on both blocks, then a cosine draw on Iowa at k = 100 because the Euclidean result reopened the metric. 16 minutes for all five draws at 8 workers, peak RSS 6.3 GB. Every k = 100 pool fit reproduces 10's arm to three decimals (3.541, 3.140, 0.348), so the harness is sound. RMSE:
+
+| block | draw | pool rows | pool fit | + offset | + weighted | + slope | bars from 10 and 14 |
+|---|---|---|---|---|---|---|---|
+| Iowa clay | Euclidean k 100 | 6,606 | 3.541 | 3.177 | 3.165 | 3.297 | global 3.131; global + offset 2.827; best selection (cosine) 3.140 |
+| Iowa clay | Euclidean k 400 | 11,290 | 3.875 | 3.453 | 3.445 | 3.553 | |
+| Iowa clay | **cosine k 100** | 7,027 | 3.140 | **2.827** | **2.817** | 2.904 | |
+| MOYS oc | Euclidean k 100 | 2,627 | **0.348** | 0.403 | 0.402 | 0.402 | global 0.526; global + offset 0.565; best selection 0.348 |
+| MOYS oc | Euclidean k 400 | 6,244 | **0.329** | 0.376 | 0.376 | 0.375 | |
+
+Findings:
+
+- **The correction's sign is a property of the batch, not of the fit that produced the residuals.** From a pool fit it is a 10 to 11 % gain on-library at every draw and a 14 to 16 % loss off-library at every draw, the same as from the global fit in 14. The nearest-pool distance separates the two batches (1.1 against 3.4 scaled-score units on 9/17), so the correction can be gated by the applicability signal the verb already computes.
+- **On-library the product path reaches the global-fit number, but only with cosine.** The cosine pool at k = 100 plus the offset correction is 2.827, identical to 14's global fit plus correction, from a fit on 7,027 rows instead of 17,590. The Euclidean pool starts 13 % worse (3.541 against 3.140) and the correction closes a proportional slice of whatever it is handed, so it lands at 3.17.
+- **The metric split is real and the correction does not dissolve it.** Cosine on-library (3.14 against 3.54), Euclidean off-library (0.348 against 0.372 in 10). The 9/22 morning recommendation of Euclidean as a single default rested on the on-library path being served by a global fit; without one, cosine is worth 11 % on-library and Euclidean 7 % off-library. Since the same distance that gates the correction separates the regimes, routing the metric by it is the natural design; two batches is thin evidence for the threshold.
+- **k stays small on-library and is unsettled off-library.** 400 was worse than 100 on Iowa again (3.875 against 3.541, bias −0.41). On MOYS 400 edged 100 (0.329 against 0.348), against 9/17's flat curve under Cubist. One batch each.
+
+**What this settles for the design** (recorded in `../../specs/v1-refactor/select-training-design.md` the same day): the library ships whole and `build_library()` is not a user verb; `select_training()` takes one routing argument, `library =`, resolving a registered name, a path or a `horizons_data`; the residual correction is a designed step gated by the applicability signal; the metric defaults are cosine on-library and Euclidean off-library, routed by the same signal, pending more batches.
