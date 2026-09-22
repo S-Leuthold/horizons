@@ -152,7 +152,7 @@ ensemble <- build_ensemble_stack(
 
 ### In Development
 
-- **Library Prediction Mode**: Training-set selection is built (`select_training()`); the packaged library it draws from (`build_library()`) is the next piece
+- **Library Prediction Mode**: Training-set selection is built (`select_training()`); the packaged library it draws from, resolved by name, path or object through one `library =` argument, is the next piece. The build recipe is internal, not a user verb (`dev/specs/v1-refactor/select-training-design.md`, 2026-09-22)
 - **Uncertainty Quantification**: Per-sample prediction intervals with conformal calibration
 - **Applicability Domain**: Distance-based reliability metrics for new samples
 
