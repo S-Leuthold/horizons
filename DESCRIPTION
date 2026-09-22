@@ -83,7 +83,12 @@ Suggests:
     car,
     shapr,
     plotly,
-    tidygraph
+    tidygraph,
+    knitr,
+    rmarkdown,
+    jsonlite,
+    yaml
+VignetteBuilder: knitr
 Config/testthat/edition: 3
 Depends:
     R (>= 4.1.0)

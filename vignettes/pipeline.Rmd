@@ -1,0 +1,123 @@
+---
+title: "The pipeline, verb by verb"
+output:
+  rmarkdown::html_vignette:
+    toc: true
+vignette: >
+  %\VignetteIndexEntry{The pipeline, verb by verb}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+```
+
+horizons has two ways to train a model. In local mode the training set is your own samples with their lab values, and the model is asked about samples it has never seen. In library mode the samples to be predicted are known first, and the training set is drawn around them from a reference library that ships whole. The two paths share every verb but one, and the board below shows where they part.
+
+Click a verb to open its card. Dashed nodes are optional. Argument names, defaults and parameter text are generated from the package at build time; everything else on a card carries a pointer to the code or the design note it describes, and a test fails if any pointer stops resolving or any argument drifts from the function.
+
+```{r board, results = "asis"}
+htmltools::includeHTML("board/board.html")
+```
+
+## How to read a card
+
+Each card has the same parts. The one-line summary says what comes in, what goes out, and what changes on the object. The signature is the function as it stands. The arguments table is generated, name and default from the function itself and the description from its help page, with one hand-written column, when to touch it, that says whether an argument is for everyday use, for a specific situation, or best left alone. Behind the scenes is the numbered mechanics, in the order the code runs them. What it records names the slots the verb writes, so you know where to look afterwards. What it refuses lists the aborts and warnings with the condition that triggers each. Where an experiment set a default, an evidence line says which and gives the number. Where the design is ahead of the code, a flag says so and lists what is pending, because the board documents what is built and never describes the future as if it existed.
+
+## The object that flows through
+
+Every verb takes a `horizons_data` and returns one, and the class grows as the object earns it. `spectra()` builds it, with the spectra in an analysis table and a role map that says what every column is: the id, the predictors, metadata, responses, and later the one outcome. `standardize()`, `average()` and `add_response()` change the table and keep the class. `evaluate()` promotes it to `horizons_eval`, `fit()` to `horizons_fit`, and `ensemble()` to `horizons_ensemble`, each adding a section and keeping every earlier one. `configure()` is the one verb that demotes: it strips what a previous evaluation or fit had earned, because those were keyed to an outcome that is about to change. Promotion is checked on the way in, so `fit()` refuses anything that is not a `horizons_eval`, and certified on the way out against a validator for that class.
+
+## Where the two paths part
+
+The first split is what the model is trained on. On the local path `add_response()` joins lab values to the user's own spectra by sample id, and those rows are the training set. On the library path `select_training()` takes the batch and a library, brings the library onto the batch's grid, and draws each target's nearest library rows. The union is returned as an ordinary `horizons_data`, so `configure()`, `validate()`, `evaluate()` and `fit()` never learn which path built their rows. What the library path adds is a record on the object: every neighbourhood, every target's distance to the library, and every twin it excluded.
+
+The second split is what a prediction can lean on. On the local path the applicability domain is measured against the training set. On the library path the better signal is the distance each target had to the library at selection time, which the record already holds, and that same distance decides whether a residual correction from the fit's own out-of-fold errors can be trusted. On the two batches measured so far the correction is worth about ten percent on-library and costs more than that off-library, where only the batch's own reference samples can see an instrument offset. The correction and its gate are designed and not yet built; the card for `predict()` says so.
+
+## The verbs, one by one
+
+Everything below is the cards' content laid out in full, in pipeline order, generated at build time from the same data the board reads, so the two cannot disagree. Each line that came from a person carries its source pointer in brackets; the argument names, defaults and descriptions come from the package.
+
+```{r verbs, results = "asis"}
+board <- jsonlite::fromJSON("board/board-data.json", simplifyVector = FALSE)
+verbs <- board$verbs[order(vapply(board$verbs, function(v) v$order, numeric(1)))]
+divergences <- board$divergences
+
+src <- function(p) if (is.null(p) || is.na(p)) "" else sprintf(" <span class=\"hz-src\">[%s]</span>", p)
+md  <- function(s) gsub("`", "`", s, fixed = TRUE)
+
+emit_divergence <- function(d) {
+  cat(sprintf("\n### Where the paths part: %s\n\n", d$title))
+  cat(sprintf("After `%s()`.\n\n", d$after))
+  cat(sprintf("**Local, through `%s()`.** Trained on %s. Targets: %s.\n\n", d$local$verb, d$local$training_set, d$local$targets))
+  cat(sprintf("**Library, through `%s()`.** Trained on %s. Targets: %s.\n\n", d$library$verb, d$library$training_set, d$library$targets))
+  cat(sprintf("%s%s\n\n", d$differs, src(d$source)))
+}
+
+for (v in verbs) {
+  cat(sprintf("\n### `%s()`\n\n", v$display))
+  lanes <- paste(unlist(v$lanes), collapse = " and ")
+  cat(sprintf("*%s. %s path%s. %s → %s.*\n\n", v$label, if (lanes == "local and library") "Both" else tools::toTitleCase(lanes), if (grepl("and", lanes)) "s" else "", v$class_in, v$class_out))
+  if (v$display != v$verb) cat(sprintf("The method is `%s`.\n\n", v$verb))
+  cat(v$summary, "\n\n")
+
+  if (length(v$design_ahead)) {
+    cat("**Design ahead of code.** This section describes what is built. Pending:\n\n")
+    for (d in v$design_ahead) cat(sprintf("- %s%s\n", d$text, src(d$source)))
+    cat("\n")
+  }
+
+  cat("**Signature.**\n\n```r\n", v$signature, "\n```\n\n", sep = "")
+
+  cat("**Arguments.**\n\n")
+  cat("| argument | default | what it is | when to touch it |\n|---|---|---|---|\n")
+  for (a in v$args) {
+    cat(sprintf("| `%s` | %s | %s | %s%s |\n", a$name,
+                if (is.null(a$default) || is.na(a$default)) "*required*" else paste0("`", a$default, "`"),
+                gsub("\\|", "\\\\|", a$text), gsub("\\|", "\\\\|", a$touch), src(a$source)))
+  }
+  cat("\n")
+
+  if (length(v$mechanics)) {
+    cat("**Behind the scenes.**\n\n")
+    for (i in seq_along(v$mechanics)) cat(sprintf("%d. %s%s\n", i, v$mechanics[[i]]$step, src(v$mechanics[[i]]$source)))
+    cat("\n")
+  }
+  if (length(v$records)) {
+    cat("**What it records.**\n\n")
+    for (r in v$records) cat(sprintf("- `%s`: %s%s\n", r$field, r$text, src(r$source)))
+    cat("\n")
+  }
+  if (length(v$refuses)) {
+    cat("**What it refuses or warns about.**\n\n")
+    for (r in v$refuses) cat(sprintf("- When %s, it %s.%s\n", r$when, r$does, src(r$source)))
+    cat("\n")
+  }
+  if (length(v$evidence)) {
+    cat("**Evidence behind the defaults.**\n\n")
+    for (e in v$evidence) cat(sprintf("- %s%s%s\n", e$claim, if (!is.null(e$value)) sprintf(" (%s)", e$value) else "", src(e$where)))
+    cat("\n")
+  }
+  if (length(v$issues)) {
+    cat("**Open issues.**\n\n")
+    for (i in v$issues) cat(sprintf("- #%s: %s%s\n", i$id, i$text, src(i$source)))
+    cat("\n")
+  }
+  if (length(v$notes)) {
+    cat("**Notes.**\n\n")
+    for (n in v$notes) cat(sprintf("- %s%s\n", n$text, src(n$source)))
+    cat("\n")
+  }
+
+  for (d in divergences) if (identical(d$after, v$verb)) emit_divergence(d)
+}
+```
+
+<style>
+.hz-src { color: #534b52; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.78em; }
+</style>
+
+## What is generated and what is checked
+
+The board is built by a script in the package's development tree from two inputs: the installed package, for every argument name, default and help-page description, and a content file, for everything a person wrote. A test reads the generated data and fails when a pipeline verb has no card, when an argument's name or default differs from the function, when an argument has no "when to touch it" sentence, when a source pointer names a line past the end of its file or a heading that is not in its document, or when a design-ahead entry names something the code has since built. So the board can be wrong in the way any prose can be wrong, but it cannot silently fall behind the code.

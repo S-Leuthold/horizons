@@ -59,3 +59,8 @@ tests/SESSION_*.txt
 
 # Local-strategy experiment outputs (checkpoints, logs, figures; large)
 dev/experiments/*/results/
+
+# Knitted vignette outputs (the board's generated files under vignettes/board/ ARE tracked)
+vignettes/*.html
+vignettes/*.R
+inst/doc/
