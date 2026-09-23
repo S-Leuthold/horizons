@@ -463,6 +463,23 @@ consequences; the review itself is in
 
 ## Bug Fixes
 
+* `select_training(scope = "global")` now runs the same twin rule as the
+  other scopes (#72). The control arm took its reference over the nearest
+  `max(k, 50)` of all pool rows, 400 at the default `k`, with no cap at a
+  quarter of the measured rows. A wider reference raises the threshold, so
+  global ran a looser rule than the arms it is compared against and could
+  flag rows batch does not. Global now runs the check through the same code
+  as batch, per property on that property's measured rows, with the width
+  from one helper. Under global, `x$selection$exclusions` carries the
+  property rather than `NA`, and a twin appears once per property it is
+  measured for, as under batch. `x$selection$target_distances` has one row
+  per target per property, and `nearest` and `mean_k` are now measured after
+  the twins rather than including them. For the same targets and pool under
+  `space_rows = "all"`, both tables equal the batch record. Twin counts,
+  reference distances and target distances from earlier global runs are not
+  comparable with new ones. The `twin_ratio` documentation, which still
+  described the retired median-of-`k` rule, is corrected.
+
 * `fit()` now honours `configure(final_bayesian_iter = )` (#46). It passed
   the screening budget `bayesian_iter` to the final re-tune instead, so the
   user-facing knob did nothing; `configure(bayesian_iter = 0,

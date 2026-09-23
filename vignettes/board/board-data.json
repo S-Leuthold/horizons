@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-09-22T15:50:31-0500",
+  "generated_at": "2026-09-23T17:05:51-0500",
   "horizons": "0.9.0",
   "lanes": [
     {
@@ -636,56 +636,56 @@
           "default": null,
           "text": "`horizons_data.` The targets: the samples to be predicted.",
           "touch": "Always; the batch, standardized. Its grid is the reference the library is resampled onto.",
-          "source": "R/pipeline-select-training.R#L230"
+          "source": "R/pipeline-select-training.R#L237"
         },
         {
           "name": "pool",
           "default": null,
           "text": "`horizons_data.` The reference pool, with one or more response columns.",
           "touch": "Always; a plain horizons_data with response columns, as it comes from standardize() and add_response(). The verb refuses one that has been validated, evaluated or fitted, or that is itself a prior selection; a merely configured pool is not caught, and its grid and outcome role ride along. To become the one routing argument, library, taking a registered name, a path, or an object.",
-          "source": "R/pipeline-select-training.R#L829"
+          "source": "R/pipeline-select-training.R#L854"
         },
         {
           "name": "k",
           "default": "400L",
           "text": "`integer.` Neighbours per target per property; a scalar, or a named vector with one entry per property. Default: `400`.",
           "touch": "The main lever. 100 is what every recent experiment ran; larger hurts on-library and the evidence off-library is mixed. A named vector sets it per property.",
-          "source": "R/pipeline-select-training.R#L261"
+          "source": "R/pipeline-select-training.R#L268"
         },
         {
           "name": "scope",
           "default": "c(\"batch\", \"cluster\", \"sample\", \"global\")",
           "text": "`character.` `\"batch\"`, `\"cluster\"`, `\"sample\"` or `\"global\"`. Default: `\"batch\"`.",
           "touch": "Leave \"batch\" for one model on the union. \"cluster\" and \"sample\" return the same union but record groups for a caller's loop; \"global\" is the no-selection control.",
-          "source": "R/pipeline-select-training.R#L586"
+          "source": "R/pipeline-select-training.R#L611"
         },
         {
           "name": "properties",
           "default": "NULL",
           "text": "character or NULL. Response columns of the pool to draw for. `NULL` means all of them. Default: `NULL`.",
           "touch": "Name the properties you will model; every library response is drawn for by default, and each draw keeps k measured rows per target.",
-          "source": "R/pipeline-select-training.R#L294"
+          "source": "R/pipeline-select-training.R#L301"
         },
         {
           "name": "snv",
           "default": "TRUE",
           "text": "`logical.` SNV in the similarity space. Default: `TRUE`.",
           "touch": "Rarely; SNV in the similarity space only, never in the model.",
-          "source": "R/pipeline-select-training.R#L413"
+          "source": "R/pipeline-select-training.R#L420"
         },
         {
           "name": "derivative",
           "default": "1L",
           "text": "`integer.` Savitzky-Golay derivative order in the similarity space; `0` disables the filter. Default: `1`.",
           "touch": "Rarely; 0 turns the Savitzky-Golay filter off in the similarity space.",
-          "source": "R/pipeline-select-training.R#L413"
+          "source": "R/pipeline-select-training.R#L420"
         },
         {
           "name": "window",
           "default": "11L",
           "text": "`integer.` Savitzky-Golay window and polynomial order. Default: `11`, `2`.",
           "touch": "Rarely. The window is in grid points, so its physical width depends on the batch's resolution; the width in cm⁻¹ is recorded and printed.",
-          "source": "R/pipeline-select-training.R#L443"
+          "source": "R/pipeline-select-training.R#L450"
         },
         {
           "name": "poly",
@@ -706,7 +706,7 @@
           "default": "c(\"pca\", \"pls\")",
           "text": "`character.` `\"pca\"` (unsupervised, of the pool) or `\"pls\"` (against one property; `properties` must name exactly one). Default: `\"pca\"`.",
           "touch": "\"pls\" for a response-driven space against one property; it selects rows using their own measured values, so pool-internal CV becomes optimistic and the verb says so.",
-          "source": "R/pipeline-select-training.R#L449"
+          "source": "R/pipeline-select-training.R#L456"
         },
         {
           "name": "ncomp",
@@ -734,26 +734,26 @@
           "default": "c(\"all\", \"measured\")",
           "text": "`character.` Which pool rows define the space the draw for a property happens in. `\"all\"`: one space fit on every pool row, the draw for each property restricted to the rows that have it. `\"measured\"`: a space fit per property on only the rows that have it, so the axes and the Mahalanobis scaling come from that population. The all-rows space is built in either case and is what the target clustering and the resemblance check use. `space = \"pls\"` already fits on measured rows. Default: `\"all\"`.",
           "touch": "Leave \"all\". Under Euclidean the two choices rank neighbours almost identically; the difference that appeared under Mahalanobis was the whitening, not the population.",
-          "source": "R/pipeline-select-training.R#L425"
+          "source": "R/pipeline-select-training.R#L432"
         },
         {
           "name": "clusters",
           "default": "NULL",
           "text": "integer or NULL. `scope = \"cluster\"` only: the cluster count, or `NULL` to choose by silhouette. Default: `NULL`.",
           "touch": "scope = \"cluster\" only; NULL picks the count by silhouette over 2 to 10.",
-          "source": "R/select-neighbours.R#L640"
+          "source": "R/select-neighbours.R#L671"
         },
         {
           "name": "cluster_min",
           "default": "30L",
           "text": "`integer.` `scope = \"cluster\"` only: the floor on cluster size. Default: `30`.",
           "touch": "scope = \"cluster\" only; clusters under this size are merged into the nearest, and a batch that cannot form two falls back to one group.",
-          "source": "R/select-neighbours.R#L706"
+          "source": "R/select-neighbours.R#L737"
         },
         {
           "name": "twin_ratio",
           "default": "SELECT_TWIN_RATIO",
-          "text": "`numeric.` A pool row is a target's twin when its distance to that target is below this fraction of the median distance across the target's `k` neighbours. An exact match is always a twin. Currently `0.05`, an internal constant still to be calibrated on replicate scans, so treat the value as conservative rather than settled.",
+          "text": "`numeric.` A pool row is a target's twin when its distance to that target is below this fraction of the reference distance, the 75th percentile of the target's 50 nearest measured rows (a quarter of the measured rows when fewer than 200 have the property), under every scope. An exact match is always a twin. Currently `0.05`, an internal constant carried over from an earlier rule and still to be calibrated on replicate scans, so treat the value as provisional rather than settled.",
           "touch": "Leave it until it is calibrated on the KSSL replicate scans; 0.05 was carried over from an earlier rule with a different reference distance.",
           "source": "R/select-neighbours.R#L197"
         },
@@ -769,20 +769,20 @@
           "default": "1L",
           "text": "`integer.` Seed for every stochastic step of the verb: the target clustering under `scope = \"cluster\"`, and the pool sample the resemblance check draws its reference distribution from. The caller's RNG state is saved and restored, so the verb does not advance it. Default: `1`.",
           "touch": "For the target clustering and the resemblance check's reference sample; the caller's RNG state is restored afterwards.",
-          "source": "R/pipeline-select-training.R#L1044"
+          "source": "R/pipeline-select-training.R#L1069"
         },
         {
           "name": "verbose",
           "default": "TRUE",
           "text": "`logical.` Print the report. Default: `TRUE`.",
           "touch": "Set FALSE inside loops.",
-          "source": "R/pipeline-select-training.R#L772"
+          "source": "R/pipeline-select-training.R#L797"
         }
       ],
       "mechanics": [
         {
           "step": "Validates everything together; refuses a pool that carries validation, evaluation or fitted state, or that is itself a prior selection, because subsetting it would leave that state describing rows it no longer has.",
-          "source": "R/pipeline-select-training.R#L829"
+          "source": "R/pipeline-select-training.R#L854"
         },
         {
           "step": "Reconciles the axes. Either grid with a hole (a spacing over three times its median and over 30 cm⁻¹) stops the verb before anything interpolates; a pool that does not cover the targets' range stops it, except within half a pool spacing, where the column is clamped with a warning; finer targets warn. The pool is resampled onto the targets' grid through the same spline standardize() uses.",
@@ -790,7 +790,7 @@
         },
         {
           "step": "Compares raw absorbance spread before SNV can hide it, warning when the interquartile ranges differ more than twofold, the size of a natural-log against base-10 mismatch.",
-          "source": "R/pipeline-select-training.R#L901"
+          "source": "R/pipeline-select-training.R#L926"
         },
         {
           "step": "Builds the similarity space on every pool row, SNV then Savitzky-Golay derivative then optional mask then PCA to the variance target, drops components under the sdev floor, and projects the targets with the pool's loadings.",
@@ -798,61 +798,61 @@
         },
         {
           "step": "Per target and per property, finds the k nearest library rows that have the property measured, by the chosen metric, screening with the squared-norm identity and recomputing the kept distances directly so near-identical rows are ranked accurately.",
-          "source": "R/select-neighbours.R#L426"
+          "source": "R/select-neighbours.R#L461"
         },
         {
-          "step": "Flags twins, rows at distance zero or below twin_ratio times the 75th percentile of a fixed-width reference set, the target's 50 nearest measured rows, capped at a quarter of the measured rows on a small pool; drops them from the neighbourhood, fetches spares to reach k, and records each exclusion. Under every scope but global the flagged rows are also subtracted from the union, since another target would otherwise draw them back in. Under global the reference width is max(k, 50) instead, so the control arm's twin rule is not quite the same rule; see the note below.",
-          "source": "R/select-neighbours.R#L469"
+          "step": "Flags twins, rows at distance zero or below twin_ratio times the 75th percentile of a fixed-width reference set, the target's 50 nearest measured rows, capped at a quarter of the measured rows on a small pool; drops them from the neighbourhood, fetches spares to reach k, and records each exclusion with its property. Under every scope but global the flagged rows are also subtracted from the union, since another target would otherwise draw them back in. Under global the same check runs, per property with the same width, and is reported, but the rows stay; its exclusions and target distances are the ones batch records for the same targets and pool under space_rows = \"all\".",
+          "source": "R/select-neighbours.R#L500"
         },
         {
           "step": "Groups targets by scope, clustering them by k-means when asked, and builds one groups row per training set.",
-          "source": "R/pipeline-select-training.R#L586"
+          "source": "R/pipeline-select-training.R#L611"
         },
         {
           "step": "Subsets the reconciled pool to the union, adds .drawn_by and .min_distance as meta columns, plus .group under every scope but sample, and counts rows drawn against rows available per property. Both distance columns are NA under global, and .min_distance is NA when space_rows is \"measured\" with more than one property, because distances from different spaces have no shared scale.",
-          "source": "R/pipeline-select-training.R#L650"
+          "source": "R/pipeline-select-training.R#L675"
         },
         {
           "step": "Runs the resemblance check, naming targets whose nearest-library distance exceeds the 99th percentile of the library's own nearest-neighbour distances on a seeded sample of 2,000 rows; a warning, never a stop.",
-          "source": "R/pipeline-select-training.R#L1039"
+          "source": "R/pipeline-select-training.R#L1064"
         },
         {
           "step": "Writes the record, prints the report, and re-validates the object.",
-          "source": "R/pipeline-select-training.R#L736"
+          "source": "R/pipeline-select-training.R#L761"
         }
       ],
       "records": [
         {
           "field": ".drawn_by, .min_distance, .group",
           "text": "the first two on every returned row, .group under every scope but sample; role meta, so recipes ignore them",
-          "source": "R/pipeline-select-training.R#L680"
+          "source": "R/pipeline-select-training.R#L705"
         },
         {
           "field": "selection$settings, selection$reconciliation, selection$pool",
           "text": "every lever as resolved including the component count and the window width in cm⁻¹; the grids and the operation applied; the pool's row count and id hash",
-          "source": "R/pipeline-select-training.R#L737"
+          "source": "R/pipeline-select-training.R#L762"
         },
         {
           "field": "selection$membership, selection$groups, selection$pool_sizes",
           "text": "one row per target, property and pool row with distance, rank, space and whether it was retained; one row per training set; drawn against available per property",
-          "source": "R/pipeline-select-training.R#L755"
+          "source": "R/pipeline-select-training.R#L780"
         },
         {
           "field": "selection$target_distances, selection$resemblance",
           "text": "each target's nearest and mean-of-k distance, the applicability signal at selection time, and the targets beyond the library's spread",
-          "source": "R/pipeline-select-training.R#L758"
+          "source": "R/pipeline-select-training.R#L783"
         },
         {
           "field": "selection$exclusions, selection$n_excluded_union, selection$short_draws, selection$units, selection$clustering",
           "text": "the twins by target and reason, how many left the union, draws that could not reach k, the unit comparison, and the clustering when scope is cluster",
-          "source": "R/pipeline-select-training.R#L761"
+          "source": "R/pipeline-select-training.R#L786"
         }
       ],
       "refuses": [
         {
           "when": "either input is not a horizons_data, the pool is promoted or already a selection, the pool has no responses, a property or a named k is missing, or pls is asked for with more than one property",
           "does": "aborts with every failure listed, class horizons_input_error",
-          "source": "R/pipeline-select-training.R#L341"
+          "source": "R/pipeline-select-training.R#L348"
         },
         {
           "when": "either grid has a hole, or the pool does not cover the targets' range",
@@ -862,12 +862,12 @@
         {
           "when": "a property has fewer measured pool rows than its k",
           "does": "aborts before any draw, naming the property and its count",
-          "source": "R/select-neighbours.R#L447"
+          "source": "R/select-neighbours.R#L482"
         },
         {
           "when": "the pool and targets look like different photometric units, targets are finer than the pool, a target overshoots the pool by under half a spacing, a draw cannot reach k after twin exclusion, or targets sit beyond the pool's spread",
           "does": "warns and proceeds",
-          "source": "R/pipeline-select-training.R#L398"
+          "source": "R/pipeline-select-training.R#L405"
         }
       ],
       "evidence": [
@@ -891,23 +891,9 @@
           "id": 66,
           "text": "the twin rule handles a target's own row in the pool but not replicate scans of each other inside the pool; a selected training set is enriched in sibling pairs and the ungrouped folds downstream are optimistic",
           "source": "../dev/specs/v1-refactor/select-training-design.md#open-questions"
-        },
-        {
-          "id": 72,
-          "text": "the twin reference width is the 50 nearest measured rows, capped at a quarter of them, in the draw, but max(k, 50) uncapped under scope = \"global\" (400 at the default k); a wider reference raises the 75th percentile and flags more rows, so the control arm runs a looser twin rule than the arms it is compared against, and the in-code comment asserting the same rule is wrong",
-          "source": "R/pipeline-select-training.R#L519"
         }
       ],
-      "notes": [
-        {
-          "text": "the roxygen for twin_ratio still describes the old rule, a fraction of the median across the target's k neighbours; the code and the details section use the 75th percentile of the 50 nearest. The parameter text above is the roxygen as it stands.",
-          "source": "R/pipeline-select-training.R#L169"
-        },
-        {
-          "text": "the twin reference width differs by scope, see",
-          "source": "R/pipeline-select-training.R#L519"
-        }
-      ],
+      "notes": [],
       "design_ahead": [
         {
           "text": "one routing argument, library, taking a registered name, a path to a packaged artifact, or a horizons_data; pool goes away and the build recipe is internal",

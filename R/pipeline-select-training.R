@@ -82,18 +82,22 @@
 #' target's surroundings do — distance zero, or below `twin_ratio` times the
 #' reference distance — is the target's twin: the same sample, present in
 #' both sets or scanned twice. The reference is the 75th percentile of the
-#' target's 50 nearest measured rows, a fixed width rather than the `k` being
-#' drawn, so a cluster of replicate scans cannot set the very number it is
-#' measured against. Every flagged row is dropped from that target's
-#' neighbourhood, spares are fetched so the target still reaches `k`, and the
-#' exclusion is recorded with its target, property, distance and reason.
-#' Except under `scope = "global"`, the flagged rows are also subtracted from
-#' the returned object, since a row excluded from one neighbourhood would
-#' otherwise walk back in through any other target that drew it. Under
-#' `scope = "global"` the check runs and is reported, but the rows stay,
-#' because global returns the whole pool by definition. The membership table
-#' keeps the subtracted rows with `retained = FALSE` rather than dropping
-#' them, so the record still says what each neighbourhood was.
+#' target's 50 nearest rows with the property measured, or of a quarter of
+#' the measured rows when fewer than 200 have it: a fixed width rather than
+#' the `k` being drawn, so a cluster of replicate scans cannot set the very
+#' number it is measured against. Every flagged row is dropped from that
+#' target's neighbourhood, spares are fetched so the target still reaches
+#' `k`, and the exclusion is recorded with its target, property, distance and
+#' reason. Except under `scope = "global"`, the flagged rows are also
+#' subtracted from the returned object, since a row excluded from one
+#' neighbourhood would otherwise walk back in through any other target that
+#' drew it. Under `scope = "global"` the same check runs, per property and
+#' with the same width, and is reported, but the rows stay, because global
+#' returns the whole pool by definition; its exclusions and target distances
+#' are the ones a batch-scope call on the same targets and pool records under
+#' `space_rows = "all"`. The membership table keeps the subtracted rows with
+#' `retained = FALSE` rather than dropping them, so the record still says
+#' what each neighbourhood was.
 #'
 #' **Units.** The pool and the targets are compared on raw absorbance
 #' magnitude before the similarity space is built. The comparison is of
@@ -167,10 +171,13 @@
 #' @param cluster_min `integer.` `scope = "cluster"` only: the floor on
 #'   cluster size. Default: `30`.
 #' @param twin_ratio `numeric.` A pool row is a target's twin when its
-#'   distance to that target is below this fraction of the median distance
-#'   across the target's `k` neighbours. An exact match is always a twin.
-#'   Currently `0.05`, an internal constant still to be calibrated on
-#'   replicate scans, so treat the value as conservative rather than settled.
+#'   distance to that target is below this fraction of the reference
+#'   distance, the 75th percentile of the target's 50 nearest measured rows
+#'   (a quarter of the measured rows when fewer than 200 have the property),
+#'   under every scope. An exact match is always a twin. Currently `0.05`,
+#'   an internal constant carried over from an earlier rule and still to be
+#'   calibrated on replicate scans, so treat the value as provisional rather
+#'   than settled.
 #' @param chunk_size `integer.` Targets per distance chunk. Default: `500`.
 #' @param seed `integer.` Seed for every stochastic step of the verb: the
 #'   target clustering under `scope = "cluster"`, and the pool sample the
@@ -509,34 +516,52 @@ select_training <- function(x, pool,
     ## was never measured biases that comparison in a fixed direction. The
     ## rows stay, because global returns the whole pool by definition.
 
-    ## The twin reference is a fixed width, wider than any replicate cluster
-    ## and independent of k, the same rule draw_neighbours() applies. The
-    ## distances reported are still over k columns: that is the neighbourhood
-    ## a batch-scope run would have drawn, and the number the comparison
-    ## against it rests on.
+    ## The check is draw_neighbours() itself, run for its record and not its
+    ## draw: per property, on that property's measured rows, with the same
+    ## reference width, reference and flags as every other scope. An exclusion
+    ## here is the one batch records for the same target and pool in the
+    ## all-rows space, so selection$exclusions compares row for row by scope.
+    ## target_distances come from the same call, after the twins and over
+    ## the k rows a batch-scope run would have drawn. The membership is
+    ## discarded: global has no neighbourhoods.
+    ##
+    ## Global trains on every measured row, so it needs every twin in the
+    ## pool, not only those before a k-th kept row. draw_neighbours() records
+    ## every flagged column it fetched. A flag is a distance threshold on a
+    ## sorted row, so the flagged columns are always the leading run and its
+    ## k-th-row cutoff never cuts one. And with twin_ratio below 1 the
+    ## threshold sits below the reference's 75th percentile, so no row past
+    ## the reference width can be flagged: the fetch holds every twin there is.
+    ##
+    ## k is capped at each property's measured rows, because global draws
+    ## nothing and a k beyond them is not an error here. A property with no
+    ## measured row has nothing to check against and is skipped.
 
-    k_twin <- min(max(k_by), nrow(sp$scores))
-    n_ref  <- min(max(max(k_by), SELECT_TWIN_REF), nrow(sp$scores))
+    n_measured <- vapply(properties, function(p) sum(!is.na(resp_tbl[[p]])), integer(1))
+    checked    <- properties[n_measured > 0L]
 
-    nn <- nearest_neighbours(St, sp$scores, k = n_ref, metric = metric,
-                             sdev = sp$sdev, chunk_size = chunk_size)
-
-    twins <- find_twins(nn, ratio = twin_ratio, k_ref = n_ref)
+    check <- if (length(checked)) {
+      draw_neighbours(St, sp$scores, responses = resp_tbl,
+                      k = pmin(k_by[checked], n_measured[checked]),
+                      properties = checked, metric = metric, sdev = sp$sdev,
+                      chunk_size = chunk_size, twin_ratio = twin_ratio,
+                      space_label = "all")
+    } else {
+      NULL
+    }
 
     draw <- list(
       membership       = tibble::tibble(target_id = character(), property = character(),
                                         space = character(), pool_id = character(),
                                         distance = numeric(), rank = integer(),
                                         retained = logical()),
-      target_distances = tibble::tibble(target_id = rownames(St), property = NA_character_,
-                                        space = "all",
-                                        nearest = unname(nn$dist[, 1]),
-                                        mean_k  = unname(rowMeans(nn$dist[, seq_len(k_twin), drop = FALSE]))),
-      exclusions       = if (nrow(twins)) {
-        dplyr::bind_cols(tibble::tibble(property = NA_character_), twins)
+      target_distances = if (is.null(check)) {
+        tibble::tibble(target_id = character(), property = character(), space = character(),
+                       nearest = numeric(), mean_k = numeric())
       } else {
-        empty_exclusions()
+        check$target_distances
       },
+      exclusions       = if (is.null(check)) empty_exclusions() else check$exclusions,
       short_draws      = empty_short_draws(),
       k                = k_by
     )

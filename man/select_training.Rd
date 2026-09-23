@@ -88,10 +88,13 @@ count, or \code{NULL} to choose by silhouette. Default: \code{NULL}.}
 cluster size. Default: \code{30}.}
 
 \item{twin_ratio}{\code{numeric.} A pool row is a target's twin when its
-distance to that target is below this fraction of the median distance
-across the target's \code{k} neighbours. An exact match is always a twin.
-Currently \code{0.05}, an internal constant still to be calibrated on
-replicate scans, so treat the value as conservative rather than settled.}
+distance to that target is below this fraction of the reference
+distance, the 75th percentile of the target's 50 nearest measured rows
+(a quarter of the measured rows when fewer than 200 have the property),
+under every scope. An exact match is always a twin. Currently \code{0.05},
+an internal constant carried over from an earlier rule and still to be
+calibrated on replicate scans, so treat the value as provisional rather
+than settled.}
 
 \item{chunk_size}{\code{integer.} Targets per distance chunk. Default: \code{500}.}
 
@@ -182,18 +185,22 @@ report.
 target's surroundings do — distance zero, or below \code{twin_ratio} times the
 reference distance — is the target's twin: the same sample, present in
 both sets or scanned twice. The reference is the 75th percentile of the
-target's 50 nearest measured rows, a fixed width rather than the \code{k} being
-drawn, so a cluster of replicate scans cannot set the very number it is
-measured against. Every flagged row is dropped from that target's
-neighbourhood, spares are fetched so the target still reaches \code{k}, and the
-exclusion is recorded with its target, property, distance and reason.
-Except under \code{scope = "global"}, the flagged rows are also subtracted from
-the returned object, since a row excluded from one neighbourhood would
-otherwise walk back in through any other target that drew it. Under
-\code{scope = "global"} the check runs and is reported, but the rows stay,
-because global returns the whole pool by definition. The membership table
-keeps the subtracted rows with \code{retained = FALSE} rather than dropping
-them, so the record still says what each neighbourhood was.
+target's 50 nearest rows with the property measured, or of a quarter of
+the measured rows when fewer than 200 have it: a fixed width rather than
+the \code{k} being drawn, so a cluster of replicate scans cannot set the very
+number it is measured against. Every flagged row is dropped from that
+target's neighbourhood, spares are fetched so the target still reaches
+\code{k}, and the exclusion is recorded with its target, property, distance and
+reason. Except under \code{scope = "global"}, the flagged rows are also
+subtracted from the returned object, since a row excluded from one
+neighbourhood would otherwise walk back in through any other target that
+drew it. Under \code{scope = "global"} the same check runs, per property and
+with the same width, and is reported, but the rows stay, because global
+returns the whole pool by definition; its exclusions and target distances
+are the ones a batch-scope call on the same targets and pool records under
+\code{space_rows = "all"}. The membership table keeps the subtracted rows with
+\code{retained = FALSE} rather than dropping them, so the record still says
+what each neighbourhood was.
 
 \strong{Units.} The pool and the targets are compared on raw absorbance
 magnitude before the similarity space is built. The comparison is of

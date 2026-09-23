@@ -309,6 +309,33 @@ test_that("find_twins() does not flag an NA distance", {
 
 
 ## =============================================================================
+## twin_reference_width()
+## =============================================================================
+
+test_that("twin_reference_width() is the fixed width, capped at a quarter of the measured rows", {
+
+  ## A real library: the fixed width binds, whatever its size
+  expect_identical(twin_reference_width(17590L), SELECT_TWIN_REF)
+  expect_identical(twin_reference_width(200L),   50L)
+
+  ## Under 200 measured rows the cap binds, so the reference stays local.
+  ## 63 is the replicate fixture, where scope = "global" used to take 50.
+  expect_identical(twin_reference_width(199L), 49L)
+  expect_identical(twin_reference_width(63L),  15L)
+
+  ## The floor keeps a percentile meaningful on a tiny pool, and the width
+  ## never exceeds the rows there are
+  expect_identical(twin_reference_width(12L), 4L)
+  expect_identical(twin_reference_width(3L),  3L)
+
+  ## twin_ref is the width before the cap
+  expect_identical(twin_reference_width(10000L, twin_ref = 20L), 20L)
+  expect_identical(twin_reference_width(40L,    twin_ref = 20L), 10L)
+
+})
+
+
+## =============================================================================
 ## resolve_k()
 ## =============================================================================
 

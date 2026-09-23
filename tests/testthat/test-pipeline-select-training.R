@@ -523,11 +523,70 @@ test_that("scope = 'global' records mean_k as the mean of k, not the nearest aga
   expect_true(all(g$mean_k >= g$nearest))
   expect_false(isTRUE(all.equal(g$mean_k, g$nearest)))
 
-  ## The twin target aside, whose neighbourhood batch subtracts, the two
-  ## branches measure the same thing over the same k rows.
-  keep <- g$target_id != fx$twin_id
-  expect_equal(g$mean_k[keep], b$mean_k[match(g$target_id[keep], b$target_id)],
-               tolerance = 1e-10)
+  ## The two branches measure the same thing over the same k rows, the twin
+  ## target included: global drops its twins from the distances as batch does.
+  expect_equal(g$mean_k, b$mean_k[match(g$target_id, b$target_id)], tolerance = 1e-10)
+
+})
+
+
+test_that("scope = 'global' records the exclusions batch records, under the same rule", {
+
+  ## The control arm's twin rule has to be the rule the other arms run, or a
+  ## scope sweep measures the rule as well as the scope. On these 63 rows
+  ## batch takes its reference over a quarter of them, 15; global used to
+  ## take max(k, 50) with no cap, a wider reference and so a looser rule,
+  ## which at twin_ratio = 0.4 flagged three rows batch does not (#72).
+
+  fx <- make_select_fixture(n_pool = 60, seed = 3, n_replicates = 3)
+
+  for (ratio in c(SELECT_TWIN_RATIO, 0.4)) {
+
+    b <- quiet_select(fx, k = 10, properties = "clay", twin_ratio = ratio)$selection
+    g <- quiet_select(fx, k = 10, properties = "clay", twin_ratio = ratio, scope = "global")$selection
+
+    ## The twins fall inside k, so batch recorded every row it flagged
+    expect_gt(nrow(b$exclusions), 0L)
+    expect_true(all(b$exclusions$rank <= 10L))
+
+    ## Same rows, same reference distance, same property, row for row
+    expect_identical(g$exclusions, b$exclusions)
+
+    ## And the applicability signal is the one batch reports
+    expect_identical(g$target_distances, b$target_distances)
+
+  }
+
+})
+
+
+test_that("scope = 'global' records each exclusion with its property, on that property's rows", {
+
+  fx  <- make_select_fixture(n_pool = 60, seed = 3, n_replicates = 3)
+  out <- quiet_select(fx, k = 10, scope = "global")
+
+  ex   <- out$selection$exclusions
+  a    <- fx$pool$data$analysis
+  self <- c(fx$twin_pool_id, fx$replicate_pool_ids)
+
+  expect_false(anyNA(ex$property))
+  expect_setequal(unique(ex$property), c("clay", "oc"))
+
+  ## Clay is measured on every row, so the whole cluster is the twin
+  ## target's exclusion for clay; for oc only the members that have oc
+  ## measured are, because the check runs on each property's own rows.
+  oc_self <- self[!is.na(a$oc[match(self, a$sample_id)])]
+  expect_lt(length(oc_self), length(self))
+  expect_gt(length(oc_self), 0L)
+
+  mine <- ex[ex$target_id == fx$twin_id, ]
+  expect_setequal(mine$pool_id[mine$property == "clay"], self)
+  expect_setequal(mine$pool_id[mine$property == "oc"],   oc_self)
+
+  ## One distance row per target per property, as batch writes them
+  td <- out$selection$target_distances
+  expect_false(anyNA(td$property))
+  expect_identical(nrow(td), 2L * fx$targets$data$n_rows)
 
 })
 
