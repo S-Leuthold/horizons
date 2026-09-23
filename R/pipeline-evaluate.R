@@ -203,7 +203,7 @@ evaluate <- function(x,
   set.seed(seed)
 
   split <- tryCatch(
-    rsample::initial_split(analysis, prop = SPLIT_PROP, strata = outcome_col),
+    rsample::initial_split(analysis, prop = SPLIT_PROP, strata = dplyr::all_of(outcome_col)),
     error = function(e) {
 
       if (verbose) {
@@ -230,7 +230,7 @@ evaluate <- function(x,
   ## -----------------------------------------------------------------------
 
   cv_fold_obj <- tryCatch(
-    rsample::vfold_cv(train_data, v = cv_folds, strata = outcome_col),
+    rsample::vfold_cv(train_data, v = cv_folds, strata = dplyr::all_of(outcome_col)),
     error = function(e) {
 
       if (verbose) {

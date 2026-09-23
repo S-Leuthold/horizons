@@ -192,7 +192,7 @@ fit <- function(x,
   set.seed(fit_split_seed(seed))
 
   split_F <- tryCatch(
-    rsample::initial_split(analysis, prop = SPLIT_PROP, strata = outcome_col),
+    rsample::initial_split(analysis, prop = SPLIT_PROP, strata = dplyr::all_of(outcome_col)),
     error = function(e) {
 
       if (verbose) {
@@ -242,7 +242,7 @@ fit <- function(x,
   if (compute_uq || compute_ad) {
 
     split_C <- tryCatch(
-      rsample::initial_split(train_F, prop = CALIB_PROP, strata = outcome_col),
+      rsample::initial_split(train_F, prop = CALIB_PROP, strata = dplyr::all_of(outcome_col)),
       error = function(e) {
 
         rsample::initial_split(train_F, prop = CALIB_PROP)
@@ -289,7 +289,7 @@ fit <- function(x,
   ## -----------------------------------------------------------------------
 
   cv_resamples <- tryCatch(
-    rsample::vfold_cv(train_Fit, v = cv_folds, strata = outcome_col),
+    rsample::vfold_cv(train_Fit, v = cv_folds, strata = dplyr::all_of(outcome_col)),
     error = function(e) {
 
       if (verbose) {
