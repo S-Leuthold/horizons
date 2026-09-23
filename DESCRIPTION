@@ -87,6 +87,7 @@ Suggests:
     tidygraph,
     knitr,
     rmarkdown,
+    htmltools,
     jsonlite,
     yaml
 VignetteBuilder: knitr
