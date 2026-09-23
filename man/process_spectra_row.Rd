@@ -19,5 +19,10 @@ Numeric vector (shorter than input due to SG edge trimming).
 \description{
 Applies one of the supported preprocessing methods to a single spectrum
 (numeric vector). Uses prospectr for Savitzky-Golay and SNV operations.
+
+This was the per-row implementation \code{bake.step_transform_spectra()} looped
+over until 2026-09-16. It is kept as the reference that
+\code{transform_spectra_matrix()} is tested against, and is not called by the
+package otherwise.
 }
 \keyword{internal}
