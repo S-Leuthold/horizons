@@ -116,10 +116,12 @@ test_that("design-ahead entries still name something the code lacks", {
   if (n == 0L) succeed("no design-ahead entries carry an `absent` symbol")
 })
 
-test_that("the generated data is newer than the content and the verbs' sources", {
+test_that("the generated data was built from the current content.yml", {
   skip_if_no_board()
   b <- read_board()
-  gen <- as.POSIXct(b$generated_at, format = "%Y-%m-%dT%H:%M:%S%z")
   content <- file.path(pkg_root, "vignettes", "board", "content.yml")
-  expect_true(file.mtime(content) <= gen + 1, info = "content.yml changed after the last build; run dev/board/build-board.R")
+  ## A content hash, not an mtime: git stamps every file's mtime at checkout,
+  ## so the mtime comparison failed on any fresh clone or worktree (2026-09-23).
+  expect_identical(b$content_md5, unname(tools::md5sum(content)),
+                   info = "content.yml changed after the last build; run dev/board/build-board.R")
 })

@@ -208,7 +208,7 @@ ad_fitted_workflow <- function(n = 60, n_wn = 12, seed = 41) {
   wf <- workflows::workflow() |>
     workflows::add_recipe(rec) |>
     workflows::add_model(parsnip::linear_reg()) |>
-    generics::fit(data = df)
+    parsnip::fit(data = df)
 
   list(workflow = wf, data = df, wn = wn)
 
