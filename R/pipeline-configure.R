@@ -75,7 +75,9 @@
 #'   TRUE = power set of all covariate columns. Character vector = power set
 #'   of named covariates only. FALSE = exclude all covariates.
 #' @param cov_fusion `character(1) or NULL`. Covariate fusion strategy:
-#'   NULL (no covariates), `"early"`, or `"late"`.
+#'   NULL (no covariates) or `"early"`, which adds the covariates as
+#'   predictors beside the spectral features. Required when covariates are
+#'   present. `"late"` aborts: late fusion is designed but not built.
 #' @param cv_folds `integer`. Number of cross-validation folds. Default 5.
 #'   Minimum 2.
 #' @param grid_size `integer`. Hyperparameter grid size (Latin hypercube).
@@ -241,11 +243,36 @@ configure <- function(x,
 
   if (!is.null(cov_fusion)) {
 
-    if (!cov_fusion %in% c("early", "late")) {
+    if (!is.character(cov_fusion) || length(cov_fusion) != 1 || is.na(cov_fusion)) {
+
+      abort_nested(
+        "`cov_fusion` must be NULL or a single string",
+        c(paste0("Got: ", paste(deparse(cov_fusion), collapse = " ")),
+          "Use 'early'")
+      )
+
+    }
+
+    ## Late fusion is designed (two models per config, the second fitted to
+    ## the first's residuals) but not built; build_recipe() only fuses early.
+    ## Accepting "late" would run early fusion under the other name.
+
+    if (cov_fusion == "late") {
+
+      abort_nested(
+        "Late covariate fusion (`cov_fusion = 'late'`) is not built",
+        c("Only early fusion is implemented: covariates join the spectral features as predictors",
+          "Use `cov_fusion = 'early'`"),
+        error_class = "horizons_input_error"
+      )
+
+    }
+
+    if (cov_fusion != "early") {
 
       abort_nested(
         paste0("Invalid `cov_fusion` value: '", cov_fusion, "'"),
-        c("Use 'early' or 'late'")
+        c("Use 'early'")
       )
 
     }
@@ -400,7 +427,7 @@ configure <- function(x,
       abort_nested(
         "Covariates detected but no fusion strategy specified",
         c(paste0("Covariates: ", paste(covariate_cols, collapse = ", ")),
-          "Use `cov_fusion = 'early'` or `cov_fusion = 'late'`")
+          "Use `cov_fusion = 'early'`")
       )
 
     }

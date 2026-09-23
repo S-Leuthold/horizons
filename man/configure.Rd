@@ -44,7 +44,9 @@ TRUE = power set of all covariate columns. Character vector = power set
 of named covariates only. FALSE = exclude all covariates.}
 
 \item{cov_fusion}{\verb{character(1) or NULL}. Covariate fusion strategy:
-NULL (no covariates), \code{"early"}, or \code{"late"}.}
+NULL (no covariates) or \code{"early"}, which adds the covariates as
+predictors beside the spectral features. Required when covariates are
+present. \code{"late"} aborts: late fusion is designed but not built.}
 
 \item{cv_folds}{\code{integer}. Number of cross-validation folds. Default 5.
 Minimum 2.}

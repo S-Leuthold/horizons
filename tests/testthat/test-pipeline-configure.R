@@ -830,9 +830,50 @@ describe("configure() covariate fusion", {
   test_that("cov_fusion stored correctly when covariates present", {
 
     hd     <- make_covariate_hd()
-    result <- quiet_configure(hd, cov_fusion = "late")
+    result <- quiet_configure(hd, cov_fusion = "early")
 
-    expect_equal(result$config$expansion$cov_fusion, "late")
+    expect_equal(result$config$expansion$cov_fusion, "early")
+
+  })
+
+  test_that("cov_fusion = 'late' aborts: late fusion is not built (#69)", {
+
+    ## build_recipe() only fuses early, so accepting "late" ran early fusion
+    ## under the other name. Refused with or without covariates present.
+    expect_error(
+      capture.output(configure(make_covariate_hd(), cov_fusion = "late")),
+      "not built",
+      class = "horizons_input_error"
+    )
+
+    expect_error(
+      capture.output(configure(make_single_response_hd(), cov_fusion = "late")),
+      class = "horizons_input_error"
+    )
+
+  })
+
+  test_that("cov_fusion must be NULL or a single string (#69)", {
+
+    hd <- make_covariate_hd()
+
+    expect_error(
+      capture.output(configure(hd, cov_fusion = c("early", "late"))),
+      "single string",
+      class = "horizons_configure_error"
+    )
+
+    expect_error(
+      capture.output(configure(hd, cov_fusion = NA_character_)),
+      "single string",
+      class = "horizons_configure_error"
+    )
+
+    expect_error(
+      capture.output(configure(hd, cov_fusion = TRUE)),
+      "single string",
+      class = "horizons_configure_error"
+    )
 
   })
 
