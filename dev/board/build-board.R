@@ -152,6 +152,7 @@ verbs <- verbs[order(vapply(verbs, function(v) v$order, numeric(1)))]
 
 data <- list(
   generated_at = format(Sys.time(), "%Y-%m-%dT%H:%M:%S%z"),
+  content_md5  = unname(tools::md5sum(file.path(board_dir, "content.yml"))),
   horizons     = as.character(utils::packageVersion("horizons")),
   lanes        = content$lanes,
   divergences  = content$divergences,

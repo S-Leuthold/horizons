@@ -26,6 +26,18 @@
 
 ## Performance
 
+* `step_transform_spectra()` bakes the whole spectral matrix in one prospectr
+  call instead of looping `process_spectra_row()` over rows. Every supported
+  method (SNV, Savitzky-Golay smoothing and derivatives, and their
+  combinations) is row-wise, so the numbers are identical; the new internal
+  `transform_spectra_matrix()` is tested against the row loop for all seven
+  methods and matches to the bit. On a 14,228 x 1,701 matrix a bake goes from
+  2.9 s to 0.6 s (`snv`) and 3.4 s to 1.2 s (`snv_deriv1`), and the 14k
+  small per-row allocations disappear. The peak R heap of one bake is
+  unchanged (about two full-width copies either way); the win is time and
+  allocator churn, not the transient's high-water mark. `process_spectra_row()`
+  stays as the reference implementation the test compares against.
+
 * `evaluate(workers > 1)` now works at library scale. It previously aborted
   with `future.globals.maxSize` or R's `long vectors not supported yet` on
   datasets above a few thousand rows, because R's serializer does not
