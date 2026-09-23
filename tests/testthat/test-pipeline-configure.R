@@ -839,16 +839,22 @@ describe("configure() covariate fusion", {
   test_that("cov_fusion = 'late' aborts: late fusion is not built (#69)", {
 
     ## build_recipe() only fuses early, so accepting "late" ran early fusion
-    ## under the other name. Refused with or without covariates present.
+    ## under the other name. Refused with or without covariates present, and
+    ## caught by a handler for either class.
     expect_error(
       capture.output(configure(make_covariate_hd(), cov_fusion = "late")),
       "not built",
+      class = "horizons_configure_error"
+    )
+
+    expect_error(
+      capture.output(configure(make_covariate_hd(), cov_fusion = "late")),
       class = "horizons_input_error"
     )
 
     expect_error(
       capture.output(configure(make_single_response_hd(), cov_fusion = "late")),
-      class = "horizons_input_error"
+      class = "horizons_configure_error"
     )
 
   })
@@ -1233,6 +1239,87 @@ describe("configure() and the object contract", {
     expect_null(result$validation$passed)
 
     expect_no_error(validate_horizons_data(result))
+
+  })
+
+
+  test_that("evaluating a re-configured fit matches evaluating the plain object (#70)", {
+
+    ## What the reset promises: nothing the clay fit earned leaks into the oc
+    ## evaluation. rf, because cubist is not bit-reproducible (#51).
+    fx    <- make_select_fixture(n_pool = 60)
+    plain <- fx$pool
+    args  <- list(models = "rf", grid_size = 2L, bayesian_iter = 0L,
+                  final_bayesian_iter = 0L, cv_folds = 3L)
+
+    run_configure <- function(x, outcome) do.call(quiet_configure, c(list(x, outcome = outcome), args))
+    run_evaluate  <- function(x) suppressWarnings(evaluate(x, prune = FALSE, verbose = FALSE, seed = 7L))
+
+    fit_clay <- suppressWarnings(
+      fit(run_evaluate(run_configure(plain, "clay")),
+          n_best = 1L, compute_uq = FALSE, verbose = FALSE, seed = 7L)
+    )
+
+    via_fit   <- run_evaluate(run_configure(fit_clay, "oc"))
+    via_plain <- run_evaluate(run_configure(plain, "oc"))
+
+    ## Timing columns are the only thing allowed to differ
+    untimed <- function(results) results[, setdiff(names(results), "runtime_secs")]
+
+    expect_identical(via_fit$evaluation$split$in_id, via_plain$evaluation$split$in_id)
+    expect_equal(untimed(via_fit$evaluation$results), untimed(via_plain$evaluation$results))
+    expect_identical(via_fit$evaluation$best_config, via_plain$evaluation$best_config)
+    expect_identical(via_fit$models, via_plain$models)
+
+  })
+
+
+  test_that("configure() warns when rows were removed as response outliers of another outcome", {
+
+    ## Arrange — a clay configuration after validate() removed one row as a
+    ## clay response outlier, one as both, and one as a spectral outlier
+    fx  <- make_select_fixture(n_pool = 40)
+    obj <- quiet_configure(fx$pool, outcome = "clay")
+
+    obj$validation$outliers["removed_ids"]    <- list(c("P097", "P098", "P099"))
+    obj$validation$outliers["removed"]        <- list(TRUE)
+    obj$validation$outliers["removal_detail"] <- list(tibble::tibble(
+      sample_id          = c("P097", "P098", "P099"),
+      reason             = c("response", "both", "spectral"),
+      outcome            = c("clay", "clay", NA_character_),
+      spectral_threshold = c(NA, 0.975, 0.975),
+      response_threshold = c(1.5, 1.5, NA)
+    ))
+
+    ## Act
+    to_oc   <- testthat::capture_warnings(utils::capture.output(configure(obj, outcome = "oc")))
+    to_clay <- testthat::capture_warnings(utils::capture.output(configure(obj, outcome = "clay")))
+
+    ## Assert — the spectral removal does not count; the same outcome is silent
+    expect_true(any(grepl("2 row\\(s\\) were removed .*'clay' \\(2\\).*'oc'", to_oc)))
+    expect_false(any(grepl("response outliers", to_clay)))
+
+  })
+
+
+  test_that("configure() warns when a selection was drawn for other properties", {
+
+    ## Arrange — a select_training() record drawn for clay only
+    obj <- make_selected_object()
+    obj$selection$settings$properties <- "clay"
+
+    global <- obj
+    global$selection$settings$scope <- "global"
+
+    ## Act
+    to_oc     <- testthat::capture_warnings(utils::capture.output(configure(obj, outcome = "oc")))
+    to_clay   <- testthat::capture_warnings(utils::capture.output(configure(obj, outcome = "clay")))
+    global_oc <- testthat::capture_warnings(utils::capture.output(configure(global, outcome = "oc")))
+
+    ## Assert — a global draw takes the whole pool, so there is nothing to lose
+    expect_true(any(grepl("drawn by select_training\\(\\) for 'clay'; 'oc' is not one of them", to_oc)))
+    expect_false(any(grepl("select_training", to_clay)))
+    expect_false(any(grepl("select_training", global_oc)))
 
   })
 

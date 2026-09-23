@@ -36,7 +36,11 @@
 #' outcome that is being replaced. The validation verdict is cleared too,
 #' but the record of outliers `validate()` already removed is kept, since
 #' those rows stay removed, and so is a `select_training()` record, which
-#' describes the rows rather than the outcome.
+#' describes the rows rather than the outcome. Because neither was chosen for
+#' the new outcome, `configure()` warns when rows were removed as response
+#' outliers of a different outcome, and when a `select_training()` record
+#' (other than `scope = "global"`) was drawn for properties that do not
+#' include it.
 #' This enables the `purrr::map()` multi-outcome pattern:
 #'
 #' ```
@@ -263,7 +267,7 @@ configure <- function(x,
         "Late covariate fusion (`cov_fusion = 'late'`) is not built",
         c("Only early fusion is implemented: covariates join the spectral features as predictors",
           "Use `cov_fusion = 'early'`"),
-        error_class = "horizons_input_error"
+        error_class = c("horizons_configure_error", "horizons_input_error")
       )
 
     }
@@ -391,6 +395,15 @@ configure <- function(x,
   ## role map and validate_horizons_data() aborts on the next verb.
 
   x <- set_analysis(x, x$data$analysis, role_map)
+
+  ## 2.4 Name what the rows carry from an earlier outcome ----------------------
+
+  ## Both describe rows, so both survive a re-configure; neither was chosen
+  ## with this outcome in mind. Warn rather than abort: the object is usable,
+  ## and starting again from an earlier object is the user's call.
+
+  warn_stale_removals(x, outcome_var)
+  warn_selection_properties(x, outcome_var)
 
   ## ---------------------------------------------------------------------------
   ## Step 3: Handle covariates
@@ -640,6 +653,94 @@ generate_config_id <- function(model, preprocessing, transformation,
 
   hash <- substr(digest::digest(hash_input), 1, 6)
   paste(base, hash, sep = "_")
+
+}
+
+
+#' Warn when rows were removed as response outliers of another outcome
+#'
+#' @description
+#' `validate(remove_outliers = )` records, per removed row, the outcome whose
+#' Tukey fences flagged it. Those rows stay removed across a re-configure, so
+#' an outcome configured afterwards is modelled without rows that were judged
+#' against a different variable. Spectral-only removals do not depend on the
+#' outcome and are not counted; rows recorded before the `outcome` column
+#' existed cannot be attributed and are not counted either.
+#'
+#' @param x `horizons_data`. The object being configured.
+#' @param outcome_var `character(1)`. The outcome being configured.
+#'
+#' @return `NULL`, invisibly. Called for its warning.
+#' @noRd
+
+warn_stale_removals <- function(x, outcome_var) {
+
+  detail <- x$validation$outliers$removal_detail
+
+  if (is.null(detail) || !"outcome" %in% names(detail)) {
+
+    return(invisible(NULL))
+
+  }
+
+  stale <- detail$outcome[detail$reason %in% c("response", "both") &
+                          !is.na(detail$outcome) &
+                          detail$outcome != outcome_var]
+
+  if (length(stale) == 0) {
+
+    return(invisible(NULL))
+
+  }
+
+  counts <- table(stale)
+
+  warning(paste0(
+    length(stale), " row(s) were removed by validate() as response outliers of ",
+    paste0("'", names(counts), "' (", as.integer(counts), ")", collapse = ", "),
+    " and stay removed while modelling '", outcome_var, "'. ",
+    "Start from the object before validate() to model them."
+  ), call. = FALSE)
+
+  invisible(NULL)
+
+}
+
+
+#' Warn when the training rows were drawn for other properties
+#'
+#' @description
+#' `select_training()` draws each target's `k` nearest pool rows per
+#' property, among the rows that have that property measured. An outcome
+#' outside `settings$properties` inherits rows drawn for something else, so
+#' the per-target guarantee does not hold for it. `scope = "global"` draws
+#' the whole pool, so there is no guarantee to lose.
+#'
+#' @param x `horizons_data`. The object being configured.
+#' @param outcome_var `character(1)`. The outcome being configured.
+#'
+#' @return `NULL`, invisibly. Called for its warning.
+#' @noRd
+
+warn_selection_properties <- function(x, outcome_var) {
+
+  settings <- x$selection$settings
+
+  if (is.null(settings$properties) || identical(settings$scope, "global") ||
+      outcome_var %in% settings$properties) {
+
+    return(invisible(NULL))
+
+  }
+
+  warning(paste0(
+    "The training rows were drawn by select_training() for ",
+    paste0("'", settings$properties, "'", collapse = ", "), "; '",
+    outcome_var, "' is not one of them, so each target's k nearest rows ",
+    "were not drawn for it."
+  ), call. = FALSE)
+
+  invisible(NULL)
 
 }
 

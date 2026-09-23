@@ -107,7 +107,11 @@ empty state, and the \code{horizons_eval}, \code{horizons_fit} or
 outcome that is being replaced. The validation verdict is cleared too,
 but the record of outliers \code{validate()} already removed is kept, since
 those rows stay removed, and so is a \code{select_training()} record, which
-describes the rows rather than the outcome.
+describes the rows rather than the outcome. Because neither was chosen for
+the new outcome, \code{configure()} warns when rows were removed as response
+outliers of a different outcome, and when a \code{select_training()} record
+(other than \code{scope = "global"}) was drawn for properties that do not
+include it.
 This enables the \code{purrr::map()} multi-outcome pattern:
 
 \if{html}{\out{<div class="sourceCode">}}\preformatted{c("SOC", "POM_C", "pH") |>
