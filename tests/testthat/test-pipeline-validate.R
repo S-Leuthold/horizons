@@ -1035,6 +1035,112 @@ describe("validate() outlier removal", {
 
   })
 
+  test_that("removal_detail records the outcome and threshold behind each removal", {
+
+    ## Rows 1-3 are spectral only, 4-5 both, 6 response only
+    hd     <- make_outlier_hd()
+    result <- quiet_validate(hd, remove_outliers = TRUE,
+                             spectral_threshold = 0.99, response_threshold = 2)
+
+    detail        <- result$validation$outliers$removal_detail
+    spectral_only <- detail[detail$reason == "spectral", ]
+    response_side <- detail[detail$reason %in% c("response", "both"), ]
+
+    expect_true(all(c("outcome", "spectral_threshold", "response_threshold") %in% names(detail)))
+    expect_gt(nrow(spectral_only), 0)
+    expect_gt(nrow(response_side), 0)
+
+    ## A spectral removal does not depend on the outcome
+    expect_true(all(is.na(spectral_only$outcome)))
+    expect_true(all(is.na(spectral_only$response_threshold)))
+    expect_true(all(spectral_only$spectral_threshold == 0.99))
+
+    expect_true(all(response_side$outcome == "SOC"))
+    expect_true(all(response_side$response_threshold == 2))
+
+  })
+
+})
+
+
+## ===========================================================================
+## 7b. The removal record across re-configure and re-validate
+## ===========================================================================
+
+describe("validate() keeps the removal record", {
+
+  ## The outlier fixture plus a second response, pH, whose only outliers are
+  ## rows 50 and 51 (so it can be configured after SOC's removals)
+  make_two_response_hd <- function() {
+
+    hd <- make_configured_hd(n_samples = 100, n_predictors = 20)
+
+    for (col in names(hd$data$analysis)[2:21]) {
+
+      hd$data$analysis[[col]][1:5] <- 100
+
+    }
+
+    hd$data$analysis[["SOC"]][4:6] <- 500
+
+    analysis    <- hd$data$analysis
+    analysis$pH <- round(seq(5.5, 7.0, length.out = nrow(analysis)), 3)
+    analysis$pH[50:51] <- 60
+
+    role_map <- dplyr::bind_rows(hd$data$role_map,
+                                 tibble::tibble(variable = "pH", role = "response"))
+
+    set_analysis(hd, analysis, role_map)
+
+  }
+
+  quiet_reconfigure <- function(x, outcome) {
+
+    suppressWarnings(invisible(utils::capture.output(
+      result <- configure(x, outcome = outcome)
+    )))
+    result
+
+  }
+
+  record_of <- function(x) x$validation$outliers[c("removed_ids", "removal_detail", "removed")]
+
+  test_that("the record survives configure() and a second validate() (#70)", {
+
+    ## validate(remove_outliers = TRUE) |> configure(outcome = "pH") |> validate()
+    v1 <- quiet_validate(make_two_response_hd(), remove_outliers = TRUE)
+    v2 <- quiet_validate(quiet_reconfigure(v1, "pH"))
+
+    expect_true(v1$validation$outliers$removed)
+    expect_identical(record_of(v2), record_of(v1))
+    expect_false(any(v2$validation$outliers$removed_ids %in% v2$data$analysis$sample_id))
+
+  })
+
+  test_that("a second validate() that removes more rows adds to the record", {
+
+    v1 <- quiet_validate(make_two_response_hd(), remove_outliers = TRUE)
+    v3 <- quiet_validate(quiet_reconfigure(v1, "pH"), remove_outliers = "response")
+
+    first  <- v1$validation$outliers
+    out    <- v3$validation$outliers
+    added  <- setdiff(out$removed_ids, first$removed_ids)
+
+    expect_setequal(added, c("S050", "S051"))
+    expect_true(all(first$removed_ids %in% out$removed_ids))
+    expect_true(out$removed)
+
+    ## One detail row per removed id, the earlier rows unchanged, the new
+    ## ones attributed to the outcome that flagged them
+    expect_identical(sort(out$removal_detail$sample_id), sort(out$removed_ids))
+    expect_identical(out$removal_detail[seq_len(nrow(first$removal_detail)), ],
+                     first$removal_detail)
+    expect_true(all(out$removal_detail$outcome[out$removal_detail$sample_id %in% added] == "pH"))
+
+    expect_false(any(out$removed_ids %in% v3$data$analysis$sample_id))
+
+  })
+
 })
 
 

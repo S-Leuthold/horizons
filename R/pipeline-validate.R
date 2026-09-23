@@ -26,8 +26,10 @@
 #'
 #' **Idempotency:**
 #'
-#' Running `validate()` multiple times overwrites previous results. If
-#' outliers were removed in a prior call, those rows are gone; re-validation
+#' Running `validate()` again replaces the verdict, the checks and the
+#' flagged ids. The removal record accumulates instead: rows an earlier call
+#' removed are gone from the object and stay gone, so their ids and detail
+#' rows are kept and this call's removals are added to them. Re-validation
 #' operates on the reduced dataset.
 #'
 #' @param x `horizons_data`. Configured object (must have `config$configs`).
@@ -46,7 +48,14 @@
 #' @return `horizons_data`. Same object with `validation` section populated:
 #'   - `validation$passed`: `TRUE` if no ERROR checks failed
 #'   - `validation$checks`: tibble of check results
-#'   - `validation$outliers`: detected and optionally removed outlier IDs
+#'   - `validation$outliers`: the ids this call flagged (`spectral_ids`,
+#'     `response_ids`) and the record of every removal so far
+#'     (`removed_ids`, `removed`, and `removal_detail`, one row per removed
+#'     sample with `sample_id`, `reason` (`"spectral"`, `"response"` or
+#'     `"both"`), the `outcome` whose fences flagged it (`NA` for a
+#'     spectral-only removal), and the `spectral_threshold` and
+#'     `response_threshold` in force (`NA` for the kind that did not flag
+#'     it))
 #'   - `validation$timestamp`: when validation ran
 #'
 #' @examples
@@ -454,9 +463,16 @@ validate <- function(x,
         TRUE                      ~ "response"
       )
 
+      ## The outcome and the thresholds are recorded because the record
+      ## outlives them: configure() can change the outcome while these rows
+      ## stay removed, and it warns when a response removal was made for a
+      ## different one.
       removal_detail <- tibble::tibble(
-        sample_id = ids_to_remove,
-        reason    = reason
+        sample_id          = ids_to_remove,
+        reason             = reason,
+        outcome            = ifelse(in_response, outcome_col[1], NA_character_),
+        spectral_threshold = ifelse(in_spectral, as.numeric(spectral_threshold), NA_real_),
+        response_threshold = ifelse(in_response, as.numeric(response_threshold), NA_real_)
       )
 
       removed_ids <- ids_to_remove
@@ -487,11 +503,25 @@ validate <- function(x,
   checks$severity[checks$status == "pass"] <- ""
   x$validation$checks <- checks
 
-  x$validation$outliers$spectral_ids   <- spectral_outlier_ids
-  x$validation$outliers$response_ids   <- response_outlier_ids
-  x$validation$outliers$removed_ids    <- removed_ids
-  x$validation$outliers$removal_detail <- removal_detail
-  x$validation$outliers$removed        <- did_remove
+  ## The flags are this call's; the removal record accumulates. Rows an
+  ## earlier call removed (possibly before a re-configure) are gone from the
+  ## object and stay gone, so their record is kept and this call's removals
+  ## are added to it.
+  prior <- x$validation$outliers
+
+  all_removed_ids <- union(prior$removed_ids %||% character(0), removed_ids)
+  all_detail      <- if (is.null(prior$removal_detail) && is.null(removal_detail)) {
+    NULL
+  } else {
+    dplyr::bind_rows(prior$removal_detail, removal_detail)
+  }
+
+  ### Single-bracket assignment of list(value) keeps the key when value is NULL.
+  x$validation$outliers["spectral_ids"]   <- list(spectral_outlier_ids)
+  x$validation$outliers["response_ids"]   <- list(response_outlier_ids)
+  x$validation$outliers["removed_ids"]    <- list(all_removed_ids)
+  x$validation$outliers["removal_detail"] <- list(all_detail)
+  x$validation$outliers["removed"]        <- list(isTRUE(prior$removed) || did_remove)
 
   ## ---------------------------------------------------------------------------
   ## Step 15: CLI output

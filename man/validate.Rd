@@ -37,7 +37,14 @@ Default: \code{1.5}.}
 \itemize{
 \item \code{validation$passed}: \code{TRUE} if no ERROR checks failed
 \item \code{validation$checks}: tibble of check results
-\item \code{validation$outliers}: detected and optionally removed outlier IDs
+\item \code{validation$outliers}: the ids this call flagged (\code{spectral_ids},
+\code{response_ids}) and the record of every removal so far
+(\code{removed_ids}, \code{removed}, and \code{removal_detail}, one row per removed
+sample with \code{sample_id}, \code{reason} (\code{"spectral"}, \code{"response"} or
+\code{"both"}), the \code{outcome} whose fences flagged it (\code{NA} for a
+spectral-only removal), and the \code{spectral_threshold} and
+\code{response_threshold} in force (\code{NA} for the kind that did not flag
+it))
 \item \code{validation$timestamp}: when validation ran
 }
 }
@@ -68,8 +75,10 @@ variable.
 
 \strong{Idempotency:}
 
-Running \code{validate()} multiple times overwrites previous results. If
-outliers were removed in a prior call, those rows are gone; re-validation
+Running \code{validate()} again replaces the verdict, the checks and the
+flagged ids. The removal record accumulates instead: rows an earlier call
+removed are gone from the object and stay gone, so their ids and detail
+rows are kept and this call's removals are added to them. Re-validation
 operates on the reduced dataset.
 }
 \examples{
