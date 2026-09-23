@@ -397,6 +397,60 @@ apply_baseline_correction <- function(spectra_matrix, wavelengths) {
 
 
 ## =============================================================================
+## Helper: sort_axis_decreasing()
+## =============================================================================
+
+#' Put an object's predictor columns in decreasing wavenumber order
+#'
+#' @description
+#' Reorders the predictor columns among themselves, in `data$analysis` and
+#' `data$role_map` alike. Names and values are untouched and every other
+#' column keeps its place. `spectra()` keeps columns in the order it is given
+#' them, while every step of `standardize()` and the validator assume
+#' decreasing order.
+#'
+#' @param x `horizons_data.` The object.
+#'
+#' @return `list.` With elements:
+#'   - `x`: The object, reordered through `set_analysis()` when anything moved
+#'   - `sorted`: Whether any column moved
+#'
+#' @noRd
+sort_axis_decreasing <- function(x) {
+
+  analysis <- x$data$analysis
+  role_map <- x$data$role_map
+
+  pred_rows <- which(role_map$role == "predictor")
+  pred_vars <- role_map$variable[pred_rows]
+
+  ### A predictor name that is not a wavenumber leaves the order to the
+  ### validator rather than being pushed to the end.
+  wavenumbers <- suppressWarnings(as.numeric(gsub("^wn_", "", pred_vars)))
+  axis_order  <- order(wavenumbers, decreasing = TRUE)
+
+  if (anyNA(wavenumbers) || identical(axis_order, seq_along(pred_vars))) {
+
+    return(list(x = x, sorted = FALSE))
+
+  }
+
+  ## The same slots in both tables, filled in the new order ------------------
+
+  role_map[pred_rows, ] <- role_map[pred_rows[axis_order], ]
+
+  cols <- names(analysis)
+  cols[cols %in% pred_vars] <- pred_vars[axis_order]
+
+  list(
+    x      = set_analysis(x, analysis[, cols, drop = FALSE], role_map),
+    sorted = TRUE
+  )
+
+}
+
+
+## =============================================================================
 ## Helper: report_standardize_summary()
 ## =============================================================================
 
@@ -512,7 +566,9 @@ report_standardize_summary <- function(operations, n_samples, final_n_wavelength
 #' extrapolated: grid points beyond the data's range are dropped with a
 #' warning that says how many and where. Data already on the grid, to within
 #' 1e-6 cm⁻¹, is not re-interpolated, and the console says so. Columns stored
-#' in increasing order are sorted to decreasing first.
+#' in increasing order are sorted to decreasing first, on every path: a call
+#' with every operation off still sorts them, and is still validated before
+#' the object is marked standardized, but changes nothing else.
 #'
 #' The operations run in this order: sort, trim, baseline correction,
 #' resampling, water-band removal. Baseline correction sees the trimmed range;
@@ -677,14 +733,34 @@ standardize <- function(x,
   }
 
   ## ---------------------------------------------------------------------------
-  ## Step 1b: Early exit if no operations requested
+  ## Step 1b: Put the axis in decreasing order, on every path
   ## ---------------------------------------------------------------------------
+  ## spectra() keeps columns in the order it is given them. Every step below
+  ## assumes decreasing wavenumbers (the baseline helper reverses its output
+  ## on that assumption), and so does the validator. The no-op path sorts too:
+  ## a standardized object is never an invalid one.
+
+  sorted <- sort_axis_decreasing(x)
+  x      <- sorted$x
+
+  operations <- list()
+
+  if (sorted$sorted) {
+
+    operations$sort <- list(n = sum(x$data$role_map$role == "predictor"))
+
+  }
+
+  ## ---------------------------------------------------------------------------
+  ## Step 1c: Early exit if no operations requested
+  ## ---------------------------------------------------------------------------
+  ## Nothing but the column order changes here: no values, no names. The
+  ## object is validated before it is marked, so an invalid one stops here
+  ## rather than travelling on as standardized.
 
   if (is.null(resample) && is.null(trim) && !remove_water && !baseline) {
 
-    cat(paste0("\u251C\u2500 ", cli::style_bold("Standardizing"), "...\n"))
-    cat(paste0("\u2502  \u2514\u2500 No operations applied\n"))
-    cat("\u2502\n")
+    x <- validate_horizons_data(x)
 
     ## Still mark as standardized so downstream steps know it was evaluated -----
 
@@ -697,6 +773,22 @@ standardize <- function(x,
       grid         = NULL,
       applied_at   = Sys.time()
     )
+
+    if (length(operations) > 0) {
+
+      report_standardize_summary(
+        operations          = operations,
+        n_samples           = nrow(x$data$analysis),
+        final_n_wavelengths = operations$sort$n
+      )
+
+    } else {
+
+      cat(paste0("\u251C\u2500 ", cli::style_bold("Standardizing"), "...\n"))
+      cat(paste0("\u2502  \u2514\u2500 No operations applied\n"))
+      cat("\u2502\n")
+
+    }
 
     return(x)
 
@@ -717,28 +809,6 @@ standardize <- function(x,
   ## Extract wavenumbers from column names -------------------------------------
 
   wavelengths <- as.numeric(gsub("^wn_", "", predictor_vars))
-
-  ## Track operations applied --------------------------------------------------
-
-  operations <- list()
-
-  ## ---------------------------------------------------------------------------
-  ## Step 2b: Put the axis in decreasing order
-  ## ---------------------------------------------------------------------------
-  ## spectra() keeps columns in the order it is given them. Every step below
-  ## assumes decreasing wavenumbers (the baseline helper reverses its output
-  ## on that assumption), and so does the validator at the end.
-
-  axis_order <- order(wavelengths, decreasing = TRUE)
-
-  if (!identical(axis_order, seq_along(wavelengths))) {
-
-    spectra_matrix <- spectra_matrix[, axis_order, drop = FALSE]
-    wavelengths    <- wavelengths[axis_order]
-
-    operations$sort <- list(n = length(wavelengths))
-
-  }
 
   ## ---------------------------------------------------------------------------
   ## Step 3: Apply trim (if requested)

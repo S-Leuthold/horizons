@@ -158,76 +158,81 @@ verbs:
     args:
       - name: x
         touch: Always; the object from spectra().
-        source: R/pipeline-standardize.R#L576
+        source: R/pipeline-standardize.R#L632
       - name: resample
         touch: Set it to match the library you will draw from or predict against, since the same resample and trim put both on the same columns; 2 matches OSSL at full resolution, and the experiments run at 4 with no loss for the local model. NULL keeps the data's own axis.
-        source: R/pipeline-standardize.R#L791
+        source: R/pipeline-standardize.R#L861
       - name: trim
         touch: Rarely; 600 to 4000 is the MIR range the package and the KSSL library share. Narrow it only when an instrument's ends are unreliable.
-        source: R/pipeline-standardize.R#L751
+        source: R/pipeline-standardize.R#L821
       - name: remove_water
         touch: Leave FALSE. Deleting columns leaves holes in the axis, a derivative later straddles them, and select_training() refuses a pool with a non-contiguous grid.
-        source: R/pipeline-standardize.R#L898
+        source: R/pipeline-standardize.R#L968
       - name: baseline
         touch: Only for spectra with a known baseline drift; it runs before resampling on the trimmed range.
-        source: R/pipeline-standardize.R#L772
+        source: R/pipeline-standardize.R#L842
       - name: force
         touch: Never in a pipeline; it re-standardizes an already standardized object and warns that it is doing so.
-        source: R/pipeline-standardize.R#L673
+        source: R/pipeline-standardize.R#L729
     mechanics:
       - step: Validates every argument first and reports all failures together, as a horizons_input_error.
-        source: R/pipeline-standardize.R#L572
-      - step: If the object already carries a standardization record, returns it unchanged with a warning unless `force = TRUE`. If nothing at all is requested, it still writes the record so downstream verbs know the step was considered.
-        source: R/pipeline-standardize.R#L662
+        source: R/pipeline-standardize.R#L628
+      - step: If the object already carries a standardization record, returns it unchanged with a warning unless `force = TRUE`.
+        source: R/pipeline-standardize.R#L718
+      - step: Sorts the predictor columns into decreasing wavenumber order if they arrived otherwise, since spectra() keeps the order it is given. This runs on every path; names and values are untouched.
+        source: R/pipeline-standardize.R#L743
+      - step: If nothing at all is requested, validates the object and writes the record so downstream verbs know the step was considered. Beyond the sort, nothing changes.
+        source: R/pipeline-standardize.R#L761
       - step: Pulls the predictor columns into a matrix and reads the wavenumbers off the column names.
-        source: R/pipeline-standardize.R#L709
-      - step: Sorts the columns into decreasing wavenumber order if they arrived otherwise, since spectra() keeps the order it is given.
-        source: R/pipeline-standardize.R#L732
+        source: R/pipeline-standardize.R#L801
       - step: Trims to the requested range by dropping columns outside it. When resampling follows, it keeps the nearest column beyond each bound as well, so a grid point on the bound is interpolated rather than extrapolated; scans starting at 599.74 get a 600 column that way.
-        source: R/pipeline-standardize.R#L751
+        source: R/pipeline-standardize.R#L821
       - step: Baseline-corrects next, if asked, with a convex hull through prospectr::baseline(), on the trimmed range and before any water bands are removed, because the algorithm needs a continuous range.
-        source: R/pipeline-standardize.R#L770
+        source: R/pipeline-standardize.R#L840
       - step: Builds the canonical grid, every multiple of the resolution inside the trim bounds (inside the data's range when trim is NULL), rounded to six decimals. It depends on the arguments alone, so two sources standardized identically share their columns.
-        source: R/pipeline-standardize.R#L802
+        source: R/pipeline-standardize.R#L872
       - step: Drops the grid points the data does not reach, with a warning that says how many and at which end; nothing is extrapolated.
-        source: R/pipeline-standardize.R#L809
+        source: R/pipeline-standardize.R#L879
       - step: Leaves the values untouched when the axis already is the grid to within 1e-6 cm⁻¹, and says so on the console; otherwise resamples onto the grid by cubic spline through prospectr::resample().
-        source: R/pipeline-standardize.R#L846
+        source: R/pipeline-standardize.R#L916
       - step: Deletes the water bands last, if asked, by dropping columns in 1580 to 1720 and 3100 to 3700 cm⁻¹, after resampling so the gaps are not interpolated across.
-        source: R/pipeline-standardize.R#L898
+        source: R/pipeline-standardize.R#L968
       - step: Aborts if any value came out non-finite, rebuilds the analysis table and role map with the new wn_ columns, and lets set_analysis() recount the predictors.
-        source: R/pipeline-standardize.R#L917
+        source: R/pipeline-standardize.R#L987
       - step: Re-validates the whole object before returning it.
-        source: R/pipeline-standardize.R#L982
+        source: R/pipeline-standardize.R#L1052
     records:
       - field: provenance$standardization
         text: the four settings as given, whether the spectra were re-interpolated (resampled) and the grid they sit on (grid, with min, max, step and n; NULL without resampling), the time, and, when any operation actually ran, the final wavelength count and range; the no-op path writes the record without those two
-        source: R/pipeline-standardize.R#L966
+        source: R/pipeline-standardize.R#L1036
       - field: data$analysis, data$role_map
         text: rebuilt with the new predictor columns; every non-predictor column is carried through untouched
-        source: R/pipeline-standardize.R#L940
+        source: R/pipeline-standardize.R#L1010
     refuses:
       - when: an argument is the wrong type or range
         does: aborts with every failure listed, class horizons_input_error
-        source: R/pipeline-standardize.R#L639
+        source: R/pipeline-standardize.R#L695
       - when: the object is already standardized and force is FALSE
         does: warns and returns it unchanged
-        source: R/pipeline-standardize.R#L662
+        source: R/pipeline-standardize.R#L718
+      - when: the object fails validate_horizons_data(), which runs on every path, the no-op one included, before the object is marked standardized
+        does: aborts with the validator's findings, class horizons_validation_error
+        source: R/pipeline-standardize.R#L763
       - when: the trim range does not overlap the data, or water-band removal would delete every column, or fewer than two wavelengths remain to resample
         does: aborts
         source: R/pipeline-standardize.R#L229
       - when: the data does not reach part of the grid
         does: drops those grid points and warns, class horizons_standardize_warning
-        source: R/pipeline-standardize.R#L823
+        source: R/pipeline-standardize.R#L893
       - when: no grid point falls inside the data
         does: aborts, class horizons_input_error
-        source: R/pipeline-standardize.R#L834
+        source: R/pipeline-standardize.R#L904
       - when: baseline correction fails, which happens on constant spectra
         does: aborts with the original error
         source: R/pipeline-standardize.R#L374
       - when: any value is non-finite after the operations
         does: aborts with the count
-        source: R/pipeline-standardize.R#L917
+        source: R/pipeline-standardize.R#L987
     evidence:
       - claim: 4 cm⁻¹ loses nothing against 2 cm⁻¹ for the local model
         where: dev/experiments/2026-09-factorial/README.md#pivot-learner-held-to-pls-on-both-sides

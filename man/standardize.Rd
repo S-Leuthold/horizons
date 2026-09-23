@@ -85,7 +85,9 @@ The spectra are interpolated onto the grid by cubic spline and never
 extrapolated: grid points beyond the data's range are dropped with a
 warning that says how many and where. Data already on the grid, to within
 1e-6 cm⁻¹, is not re-interpolated, and the console says so. Columns stored
-in increasing order are sorted to decreasing first.
+in increasing order are sorted to decreasing first, on every path: a call
+with every operation off still sorts them, and is still validated before
+the object is marked standardized, but changes nothing else.
 
 The operations run in this order: sort, trim, baseline correction,
 resampling, water-band removal. Baseline correction sees the trimmed range;

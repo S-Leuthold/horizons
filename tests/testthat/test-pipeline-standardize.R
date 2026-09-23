@@ -486,6 +486,33 @@ test_that("resample = NULL keeps trim-as-subset but still sorts", {
 })
 
 
+test_that("a call with every operation off still sorts, validates, and changes nothing else", {
+
+  inc    <- make_axis_spectra(KSSL_WN)
+  before <- as.matrix(inc$data$analysis[, predictor_names(inc)])
+
+  out <- no_output(standardize(inc, resample = NULL, trim = NULL,
+                               remove_water = FALSE, baseline = FALSE))
+
+  ## Decreasing columns, a valid object, marked standardized
+  expect_identical(predictor_names(out), paste0("wn_", rev(KSSL_WN)))
+  expect_no_error(validate_horizons_data(out))
+  expect_false(is.null(out$provenance$standardization))
+
+  ## The same value at every wavenumber: only the column order moved
+  after <- as.matrix(out$data$analysis[, predictor_names(out)])
+  expect_identical(after[, colnames(before)], before)
+  expect_identical(out$data$analysis$sample_id, inc$data$analysis$sample_id)
+
+  ## An object the validator refuses is not marked standardized
+  bad <- inc
+  bad$data$analysis$wn_1000[1] <- NA_real_
+  expect_error(no_output(standardize(bad, resample = NULL, trim = NULL)),
+               class = "horizons_validation_error")
+
+})
+
+
 ## =============================================================================
 ## Trimming Tests
 ## =============================================================================

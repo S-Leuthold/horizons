@@ -66,7 +66,10 @@
   cm-1 tolerance that skipped resampling is gone: an axis is left alone only
   when it already is the grid to within 1e-6 cm-1, and the console now says
   so rather than skipping silently (#18). Columns stored in increasing order
-  are sorted first; that input used to abort at the final validation.
+  are sorted first, on every path; that input used to abort at the final
+  validation, or, with every operation off, come back unsorted and
+  unvalidated but marked standardized. The no-op call now validates the
+  object before marking it, so it refuses one the validator would.
   Grid wavenumbers are rounded to six decimal places, so a resolution such as
   1.5 gives stable names. `provenance$standardization` gains `resampled` and
   `grid` (`min`, `max`, `step`, `n`). Objects standardized before this change
