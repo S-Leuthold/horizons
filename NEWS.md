@@ -88,14 +88,16 @@
   the points kept beyond the trim bounds for interpolation never reach it;
   baseline-corrected values therefore change for resampled data, because
   the hull is now fitted on the grid and pinned at its bounds. Without
-  resampling the baseline is fitted on the trimmed native axis, as before. Columns stored in increasing order
-  are sorted first, on every path; that input used to abort at the final
-  validation, or, with every operation off, come back unsorted and
-  unvalidated but marked standardized. The no-op call now validates the
-  object before marking it, so it refuses one the validator would.
-  Grid wavenumbers are rounded to six decimal places, so a resolution such as
-  1.5 gives stable names. `provenance$standardization` gains `resampled` and
-  `grid` (`min`, `max`, `step`, `n`). Objects standardized before this change
+  resampling the baseline is fitted on the trimmed native axis, as before.
+  Columns stored in increasing order are sorted first, on every path; that
+  input used to abort at the final validation, or, with every operation
+  off, come back unsorted and unvalidated but marked standardized. The
+  no-op call now validates the object before marking it, so it refuses one
+  the validator would. Grid wavenumbers are rounded to six decimal places,
+  so a resolution such as 1.5 gives stable names.
+  `provenance$standardization` gains `resampled` and `grid` (`min`, `max`,
+  `step`, `n`), which a later no-op `force = TRUE` call keeps. Objects
+  standardized before this change
   sit on the old axes and do not share columns with ones standardized after
   it; re-run `standardize()` from the raw spectra before comparing,
   combining, or predicting across the two.
