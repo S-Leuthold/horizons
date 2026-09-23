@@ -26,6 +26,16 @@
 #' diagnostic messages detect common patterns (case mismatch, whitespace,
 #' prefix/suffix) and suggest fixes.
 #'
+#' **Missing values:**
+#'
+#' "Matched" counts samples whose join key is found in the source. A matched
+#' sample whose value is `NA` in the source is matched but unmeasured, so the
+#' console also reports, and provenance records, the non-missing count of
+#' each variable. Rows with missing values are kept: an object can carry
+#' several responses (`select_training()` puts every pool response on one
+#' object), and a row missing one of them may carry another. `evaluate()` and
+#' `fit()` drop the rows whose outcome is `NA` when they model it.
+#'
 #' **Duplicate detection:**
 #'
 #' Aborts if duplicates exist in either the source join key (would multiply
@@ -54,7 +64,8 @@
 #'   * Response columns added to `data$analysis`
 #'   * New entries in `data$role_map` with `role = "response"`
 #'   * Updated `data$n_responses` count
-#'   * Provenance record appended to `provenance$add_response`
+#'   * Provenance record appended to `provenance$add_response`, including
+#'     `n_non_missing`, a named integer of non-missing values per variable
 #'
 #' @examples
 #' \dontrun{
@@ -465,6 +476,14 @@ add_response <- function(x,
   ## Step 5: Update object
   ## ---------------------------------------------------------------------------
 
+  ## Count measured values per variable ----------------------------------------
+  ## n_matched counts join-key hits; a matched sample whose source value is NA
+  ## is matched but unmeasured. Count what each variable actually carries.
+
+  n_non_missing <- vapply(variable,
+                          function(v) sum(!is.na(x$data$analysis[[v]])),
+                          integer(1))
+
   ## Add response variables to role_map ----------------------------------------
 
   new_roles <- tibble::tibble(
@@ -478,12 +497,13 @@ add_response <- function(x,
   ## Record provenance ---------------------------------------------------------
 
   prov_entry <- list(
-    source      = source_label,
-    variables   = variable,
-    by          = by,
-    n_matched   = n_matched,
-    n_unmatched = n_unmatched,
-    applied_at  = Sys.time()
+    source        = source_label,
+    variables     = variable,
+    by            = by,
+    n_matched     = n_matched,
+    n_unmatched   = n_unmatched,
+    n_non_missing = n_non_missing,
+    applied_at    = Sys.time()
   )
 
   if (is.null(x$provenance$add_response)) {
@@ -517,8 +537,16 @@ add_response <- function(x,
   }
 
   cat(paste0("\u2502  \u251C\u2500 Matched: ", matched_str, "\n"))
-  cat(paste0("\u2502  \u2514\u2500 Variables: ",
-             paste(variable, collapse = ", "), "\n"))
+  cat("\u2502  \u2514\u2500 Variables:\n")
+
+  for (i in seq_along(variable)) {
+
+    branch <- if (i < length(variable)) "\u251C\u2500" else "\u2514\u2500"
+    cat(paste0("\u2502     ", branch, " ", variable[i], ": ",
+               n_non_missing[[i]], "/", n_horizons, " non-missing\n"))
+
+  }
+
   cat("\u2502\n")
 
   ## ---------------------------------------------------------------------------
