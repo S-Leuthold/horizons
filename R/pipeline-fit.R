@@ -44,7 +44,9 @@
 #'
 #' @return A `horizons_fit` object (inherits from `horizons_eval`,
 #'   `horizons_data`) with `models$` slot populated. The slot includes
-#'   `response_bound` (max training outcome times `RESPONSE_BOUND_MARGIN`),
+#'   `response_bound` (max training outcome times `RESPONSE_BOUND_MARGIN`,
+#'   where the training rows are the ones the final models are fit on: Split
+#'   F's training part, less the calibration set when UQ or AD is on),
 #'   the deploy-time winsorization guardrail `predict()` applies to
 #'   back-transformed point predictions, and `selection_present` (whether the
 #'   training object carried a `$selection` from `select_training()`, which
@@ -637,8 +639,10 @@ fit <- function(x,
 
   ## Deploy-time guardrail bound: predictions are winsorized to this value in
   ## predict_one_config(). max-times-margin (not a quantile) — the bound should
-  ## permit modest extrapolation and catch only the physically absurd.
-  response_bound <- max(analysis[[outcome_col]], na.rm = TRUE) * RESPONSE_BOUND_MARGIN
+  ## permit modest extrapolation and catch only the physically absurd. Taken
+  ## over train_Fit, the rows the final models are fit on, so neither Split
+  ## F's test rows nor the calibration rows shape it (#68).
+  response_bound <- max(train_Fit[[outcome_col]], na.rm = TRUE) * RESPONSE_BOUND_MARGIN
 
   ## Did the training rows come from select_training()? If so the calibration
   ## split below was drawn from rows chosen for proximity to the targets, so

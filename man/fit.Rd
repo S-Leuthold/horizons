@@ -54,7 +54,9 @@ independent of \code{evaluate()}'s split when both are called with the same
 \value{
 A \code{horizons_fit} object (inherits from \code{horizons_eval},
 \code{horizons_data}) with \verb{models$} slot populated. The slot includes
-\code{response_bound} (max training outcome times \code{RESPONSE_BOUND_MARGIN}),
+\code{response_bound} (max training outcome times \code{RESPONSE_BOUND_MARGIN},
+where the training rows are the ones the final models are fit on: Split
+F's training part, less the calibration set when UQ or AD is on),
 the deploy-time winsorization guardrail \code{predict()} applies to
 back-transformed point predictions, and \code{selection_present} (whether the
 training object carried a \verb{$selection} from \code{select_training()}, which

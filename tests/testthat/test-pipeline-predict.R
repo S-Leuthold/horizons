@@ -363,10 +363,14 @@ describe("predict.horizons_fit() - response bound guardrail", {
 
   new_df <- make_new_spectra()
 
-  it("fit() stores models$response_bound = max(outcome) * RESPONSE_BOUND_MARGIN", {
+  it("fit() stores models$response_bound = max(training outcome) * RESPONSE_BOUND_MARGIN", {
 
+    ## The training rows are the ones the final model was fit on, which
+    ## row_index records (#68); UQ is on here, so the calibration rows are out.
     eval_obj <- make_predict_eval()
-    expected <- max(eval_obj$data$analysis$SOC, na.rm = TRUE) * RESPONSE_BOUND_MARGIN
+    analysis <- eval_obj$data$analysis
+    fit_rows <- analysis$sample_id %in% fitted_fixture$models$row_index$sample_id
+    expected <- max(analysis$SOC[fit_rows]) * RESPONSE_BOUND_MARGIN
 
     expect_equal(fitted_fixture$models$response_bound, expected)
 

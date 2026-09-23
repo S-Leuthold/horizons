@@ -796,6 +796,39 @@ describe("fit() - NA-outcome rows (#67)", {
 
 
 ## =========================================================================
+## response_bound is taken over the rows the final models are fit on (#68)
+## =========================================================================
+
+describe("fit() - response_bound (#68)", {
+
+  obj <- make_fit_object(n = 60, n_configs = 1, seed = 42)
+  obj$config$tuning$final_bayesian_iter <- 0L
+
+  ## Seed 5 puts the object's largest outcome in Split F's test part, which
+  ## is what makes a whole-table bound and a training-row bound differ.
+  r <- suppressWarnings(
+    fit(obj, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE,
+        verbose = FALSE, seed = 5L)
+  )
+
+  it("equals the largest fit-row outcome times RESPONSE_BOUND_MARGIN", {
+
+    soc      <- obj$data$analysis$SOC
+    fit_rows <- obj$data$analysis$sample_id %in% r$models$row_index$sample_id
+
+    ## Precondition: the fixture discriminates. If a change to the split
+    ## moves the maximum back into the fit rows, pick another seed.
+    expect_gt(max(soc), max(soc[fit_rows]))
+
+    expect_equal(r$models$response_bound,
+                 max(soc[fit_rows]) * RESPONSE_BOUND_MARGIN)
+
+  })
+
+})
+
+
+## =========================================================================
 ## Members are ranked on the cross-validated metric (#50)
 ## =========================================================================
 
