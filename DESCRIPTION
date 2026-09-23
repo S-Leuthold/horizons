@@ -61,10 +61,11 @@ Imports:
     yardstick,
     zoo
 Roxygen: list(markdown = TRUE)
-Suggests: 
+Suggests:
     testthat (>= 3.0.0),
     withr,
     Boruta,
+    callr,
     circlize,
     covr,
     Cubist,
@@ -75,6 +76,7 @@ Suggests:
     lightgbm,
     mixOmics,
     nnet,
+    pkgload,
     pls,
     spectrolab,
     RhpcBLASctl,

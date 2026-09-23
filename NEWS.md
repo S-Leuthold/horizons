@@ -389,6 +389,26 @@ consequences; the review itself is in
   `provenance$average$source_ids` keeps the mapping back to the scans each
   averaged row came from.
 
+## Bug fixes
+
+* **`predict()` on a deserialized `horizons_fit` or `horizons_ensemble` no
+  longer requires the caller to have loaded `workflows` (or the config's
+  modeling engine) first** ([#65](https://github.com/S-Leuthold/horizons/issues/65)).
+  `library(horizons)` does not load `workflows`, most modeling engines, or
+  `ranger`, so `predict(readRDS(fit_path), new_data)` in a fresh session
+  failed with `no applicable method for 'predict' applied to an object of
+  class "c('butchered_workflow', 'workflow')"`. `predict()` now loads the
+  namespaces it needs before predicting, and aborts with an actionable
+  message naming the package and the model if a Suggested engine
+  (`Cubist`, `kernlab`, `earth`, `mixOmics`, `nnet`, `lightgbm`/`bonsai`) is
+  not installed.
+
+* **A failed prediction interval no longer disappears silently.** If the
+  quantile-forest step behind `interval = TRUE` failed — the `ranger`
+  namespace not being loaded was one way this happened — `predict()`
+  degraded to point predictions with no indication anything had gone
+  wrong. It now warns, naming the failure, and returns point predictions.
+
 ## Known limitations
 
 * **No pool-internal de-duplication, and the cross-validation downstream of

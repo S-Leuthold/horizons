@@ -746,6 +746,12 @@ predict.horizons_ensemble <- function(object,
 
   }
 
+  ## `library(horizons)` does not load workflows, most modeling engines, or
+  ## ranger (#65); see ensure_predict_namespaces() (R/pipeline-predict.R) for
+  ## why. Reads the member set from object$ensemble$weights directly, so it
+  ## must run before Step 1 only in the sense that it does not depend on it.
+  ensure_predict_namespaces(object)
+
   ## -------------------------------------------------------------------------
   ## Step 1: Resolve the authoritative member set
   ## -------------------------------------------------------------------------

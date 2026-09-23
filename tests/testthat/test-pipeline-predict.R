@@ -804,3 +804,293 @@ describe("predict.horizons_fit() - config with a covariate", {
   })
 
 })
+
+
+## ---------------------------------------------------------------------------
+## abort_on_missing_predict_packages() — missing-package gate (#65)
+## ---------------------------------------------------------------------------
+
+describe("abort_on_missing_predict_packages() - missing package gate", {
+
+  it("aborts cleanly, naming the package and the model that needs it", {
+
+    err <- tryCatch(
+      abort_on_missing_predict_packages(list(horizonsFakePkgXYZ123 = "cubist")),
+      horizons_missing_predict_package = function(e) e
+    )
+
+    expect_s3_class(err, "horizons_missing_predict_package")
+    expect_match(conditionMessage(err), "horizonsFakePkgXYZ123")
+    expect_match(conditionMessage(err), "cubist")
+
+  })
+
+  it("does not abort when every needed package is installed", {
+
+    expect_no_error(abort_on_missing_predict_packages(list(ranger = "rf")))
+
+  })
+
+  it("is a no-op for an empty needed list", {
+
+    expect_no_error(abort_on_missing_predict_packages(list()))
+
+  })
+
+})
+
+
+## ---------------------------------------------------------------------------
+## ensure_predict_namespaces() — per-model coverage (#65)
+## ---------------------------------------------------------------------------
+## Every model horizons supports maps to at least one predict-time namespace
+## (MODEL_PREDICT_PACKAGES, R/constants.R). Those packages are Suggests, so
+## whether they are installed varies by machine — assert clean success when
+## installed, and an informative, package-naming abort when not, rather than
+## assuming a fully-installed environment.
+
+make_ns_probe_fit <- function(model, config_id = "cfg1", with_uq = FALSE) {
+
+  obj <- list(
+    models = list(
+      workflows = stats::setNames(list(TRUE), config_id),
+      uq        = if (with_uq) {
+        stats::setNames(list(list(quantile_model = TRUE)), config_id)
+      } else {
+        NULL
+      }
+    ),
+    config = list(configs = tibble::tibble(config_id = config_id, model = model))
+  )
+
+  class(obj) <- "horizons_fit"
+  obj
+
+}
+
+describe("ensure_predict_namespaces() - per-model coverage", {
+
+  for (m in VALID_MODELS) {
+
+    pkgs          <- MODEL_PREDICT_PACKAGES[[m]]
+    all_installed <- all(vapply(pkgs, requireNamespace, logical(1), quietly = TRUE))
+
+    it(paste0("model '", m, "' loads its engine package(s), or aborts naming them"), {
+
+      obj <- make_ns_probe_fit(m)
+
+      if (all_installed) {
+
+        expect_no_error(ensure_predict_namespaces(obj))
+        for (pkg in pkgs) expect_true(requireNamespace(pkg, quietly = TRUE))
+
+      } else {
+
+        err <- tryCatch(
+          ensure_predict_namespaces(obj),
+          horizons_missing_predict_package = function(e) e
+        )
+
+        expect_s3_class(err, "horizons_missing_predict_package")
+        expect_true(any(vapply(
+          pkgs, function(p) grepl(p, conditionMessage(err), fixed = TRUE), logical(1)
+        )))
+
+      }
+
+    })
+
+  }
+
+  it("also loads ranger when the object carries a per-config UQ bundle", {
+
+    skip_if_not_installed("ranger")
+
+    obj <- make_ns_probe_fit("elastic_net", with_uq = TRUE)
+
+    expect_no_error(ensure_predict_namespaces(obj))
+    expect_true(requireNamespace("ranger", quietly = TRUE))
+
+  })
+
+  it("does not require ranger for a horizons_ensemble's own predict path", {
+
+    ## An ensemble inherits $models$uq from the underlying fit but never
+    ## consults it at predict time (ensemble intervals are CV+ fold refits,
+    ## not a quantile forest; see the roxygen on ensure_predict_namespaces()).
+    ## glmnet is a hard Import, so this must succeed regardless of whether
+    ## ranger happens to be installed.
+    obj <- make_ns_probe_fit("elastic_net", with_uq = TRUE)
+    obj$ensemble <- list(weights = tibble::tibble(member = "cfg1"))
+    class(obj) <- c("horizons_ensemble", "horizons_fit")
+
+    expect_no_error(ensure_predict_namespaces(obj))
+
+  })
+
+})
+
+
+## ---------------------------------------------------------------------------
+## predict_intervals() — failure now warns instead of degrading silently (#65)
+## ---------------------------------------------------------------------------
+## Before this fix, any failure in the bake-then-quantile-predict step (e.g. a
+## missing ranger namespace on the quantile forest) degraded to NULL with no
+## message, so `interval = TRUE` silently came back with no interval columns.
+
+describe("predict_intervals() - failure warns instead of degrading silently", {
+
+  new_df <- make_new_spectra()
+  point_pred <- rep(5, nrow(new_df))
+
+  cfg_id <- names(fitted_fixture$models$workflows)[1]
+  uq     <- fitted_fixture$models$uq[[cfg_id]]
+
+  it("the fixture carries a UQ bundle, so the gate is exercised", {
+
+    expect_false(is.null(uq))
+
+  })
+
+  it("warns and returns NULL when the quantile model cannot predict", {
+
+    broken_uq <- uq
+    broken_uq$quantile_model <- structure(list(), class = "not_a_real_model")
+
+    result <- NULL
+
+    expect_warning(
+      result <- predict_intervals(broken_uq, point_pred, new_df),
+      class = "horizons_interval_warning"
+    )
+
+    expect_null(result)
+
+  })
+
+  it("warns and returns NULL when baking new data through the UQ recipe fails", {
+
+    broken_uq <- uq
+    broken_uq$prepped_recipe <- "not a recipe"
+
+    result <- NULL
+
+    expect_warning(
+      result <- predict_intervals(broken_uq, point_pred, new_df),
+      class = "horizons_interval_warning"
+    )
+
+    expect_null(result)
+
+  })
+
+  it("end to end: predict(interval = TRUE) warns and still returns point predictions", {
+
+    broken_fixture <- fitted_fixture
+    broken_fixture$models$uq[[cfg_id]]$quantile_model <-
+      structure(list(), class = "not_a_real_model")
+
+    p <- NULL
+
+    expect_warning(
+      p <- predict(broken_fixture, new_df, interval = TRUE),
+      class = "horizons_interval_warning"
+    )
+
+    expect_true(".pred" %in% names(p))
+    expect_false(".pred_lower" %in% names(p))
+
+  })
+
+})
+
+
+## ---------------------------------------------------------------------------
+## Fresh-process round trip (#65)
+## ---------------------------------------------------------------------------
+## The bug: predict() on a deserialized horizons_fit fails unless workflows
+## (and, when a config's model needs one, its engine package) is already
+## loaded — a plain `library(horizons)` on an installed build does not load
+## them (see the roxygen on ensure_predict_namespaces(), R/pipeline-predict.R;
+## verified directly with `Rscript --vanilla` against a from-scratch
+## `R CMD INSTALL` with the fix reverted: predict() failed with exactly the
+## issue's "no applicable method for 'predict'" error, and succeeded with the
+## fix restored). Reproduced here the way a deployed model actually gets
+## used: saveRDS() a fit, predict from it in a genuinely fresh process via
+## callr, with no namespace preloaded.
+##
+## Under devtools::test(), this file is itself load_all()'d, so the child
+## has to load the CURRENT dev tree rather than whatever build happens to sit
+## in the ambient library (stale, and not necessarily carrying the fix). The
+## natural way is pkgload::load_all() in the child (detected the same way
+## test-evaluate-parallel.R's skip_if_dev_package() detects load_all(), via
+## the `.__DEVTOOLS__` marker). One caveat found while writing this test:
+## pkgload::load_all() is not a faithful stand-in for library() here — it
+## eagerly loads workflows/ranger/tune/xgboost/butcher as part of simulating
+## the installed package, even with the #65 fix reverted, so this branch
+## exercises the round trip functionally (serialization, cross-process
+## prediction, real intervals) without independently re-triggering the
+## missing-namespace defect. The library() branch below does, because R CMD
+## check always builds and installs the current source before running any
+## tests, so there is no staleness risk there and it is a faithful "fresh
+## install" — that branch is the one that would catch a real regression.
+
+describe("predict.horizons_fit() - fresh-process round trip", {
+
+  testthat::skip_if_not_installed("callr")
+  testthat::skip_on_cran()
+
+  in_load_all <- exists(".__DEVTOOLS__", envir = asNamespace("horizons"),
+                        inherits = FALSE)
+
+  if (in_load_all) testthat::skip_if_not_installed("pkgload")
+
+  pkg_root <- if (in_load_all) pkgload::pkg_path() else NA_character_
+
+  skip_if_not(has_uq(fitted_fixture), "fixture carries no UQ bundle")
+
+  fit_path <- tempfile(fileext = ".rds")
+  saveRDS(fitted_fixture, fit_path)
+
+  new_df <- make_new_spectra()
+
+  run_in_fresh_process <- function(interval) {
+
+    callr::r(
+      func = function(in_load_all, pkg_root, fit_path, new_df, interval) {
+
+        if (in_load_all) {
+          pkgload::load_all(pkg_root, quiet = TRUE)
+        } else {
+          library(horizons)
+        }
+
+        predict(readRDS(fit_path), new_df, interval = interval)
+
+      },
+      args = list(in_load_all = in_load_all, pkg_root = pkg_root,
+                 fit_path = fit_path, new_df = new_df, interval = interval)
+    )
+
+  }
+
+  it("predicts point estimates with no namespace preloaded in the caller", {
+
+    p <- run_in_fresh_process(interval = FALSE)
+
+    expect_true(".pred" %in% names(p))
+    expect_equal(nrow(p), nrow(new_df))
+    expect_true(all(is.finite(p$.pred)))
+
+  })
+
+  it("predicts intervals with no namespace preloaded in the caller", {
+
+    p <- run_in_fresh_process(interval = TRUE)
+
+    expect_true(all(c(".pred_lower", ".pred_upper", ".interval_width") %in% names(p)))
+    expect_true(all(p$.pred_lower <= p$.pred_upper))
+
+  })
+
+})

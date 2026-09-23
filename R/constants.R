@@ -31,6 +31,26 @@ MODEL_SPECS <- list(
   mars        = list(fn = "mars",         engine = "earth")
 )
 
+# Predict-time namespace requirements per model (#65), keyed by the same short
+# names as MODEL_SPECS and VALID_MODELS. Not derivable from MODEL_SPECS$engine
+# alone: predicting from a stored (butchered) workflow needs the extension
+# package that REGISTERS the parsnip method, which is sometimes a second
+# package beyond the engine itself — cubist_rules() needs `rules` (registers
+# the spec) alongside `Cubist` (the model implementation), and
+# boost_tree(engine = "lightgbm") needs `bonsai` (registers the engine)
+# alongside `lightgbm`. Read by ensure_predict_namespaces() (R/pipeline-predict.R).
+MODEL_PREDICT_PACKAGES <- list(
+  rf          = "ranger",
+  cubist      = c("rules", "Cubist"),
+  xgboost     = "xgboost",
+  plsr        = c("plsmod", "mixOmics"),
+  elastic_net = "glmnet",
+  svm_rbf     = "kernlab",
+  mlp         = "nnet",
+  lightgbm    = c("bonsai", "lightgbm"),
+  mars        = "earth"
+)
+
 # Human-readable model names for CLI tree output
 MODEL_DISPLAY_NAMES <- c(
   rf          = "Random Forest",
