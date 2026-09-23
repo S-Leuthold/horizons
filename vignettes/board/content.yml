@@ -107,15 +107,15 @@ verbs:
         source: R/pipeline-spectra.R#L925
       - step: Every wavenumber column is checked to be numeric and renamed with a wn_ prefix; every other column becomes a meta column.
         source: R/pipeline-spectra.R#L236
-      - step: Builds the role map (one id, the predictors, the rest meta) and the eight-section object through this file's own constructor; the class contract's ninth section, selection, is not written here at all.
-        source: R/pipeline-spectra.R#L1060
+      - step: Builds the role map (one id, the predictors, the rest meta) and the object through the class constructor new_horizons_data(), so a raw object carries all nine sections of the contract, with selection NULL until select_training() fills it.
+        source: R/class-core.R#L77
     records:
       - field: data$analysis, data$role_map
-        text: the analysis table and the map from every column to its role; n_rows and n_predictors are counted from them
-        source: R/pipeline-spectra.R#L1072
+        text: the analysis table and the map from every column to its role; n_rows and the predictor, covariate and response counts are computed from them
+        source: R/class-core.R#L115
       - field: provenance$spectra_source, provenance$spectra_type
         text: the path or "tibble", and opus, csv or tibble; created time and the horizons version
-        source: R/pipeline-spectra.R#L1081
+        source: R/class-core.R#L128
     refuses:
       - when: source is missing, is not a path or a data frame, or is a vector of paths
         does: aborts
@@ -132,10 +132,6 @@ verbs:
       - when: no id column matches an alias, or a named id or wavelength column is absent, or a wavelength column is not numeric
         does: aborts, listing the columns it saw
         source: R/pipeline-spectra.R#L937
-    issues:
-      - id: 71
-        text: spectra() builds the object with create_horizons_data() in its own file rather than the class-core constructor new_horizons_data(). The two agree on data, provenance, config and validation, which is everything a verb reads before fit(). They diverge on data$n_responses (absent from spectra()'s), on models and ensemble (the stubs predate the current contract, and the models$uq stub is a non-empty list, so has_uq() returns TRUE on a raw object), and selection is simply absent until select_training() adds it
-        source: R/pipeline-spectra.R#L1127
 
   # ---------------------------------------------------------------------------
   - verb: standardize
@@ -564,95 +560,92 @@ verbs:
     args:
       - name: x
         touch: Always; an object with at least one response column, from add_response() or select_training().
-        source: R/pipeline-configure.R#L177
+        source: R/pipeline-configure.R#L183
       - name: outcome
         touch: Whenever the object carries more than one response; with exactly one it is chosen for you.
-        source: R/pipeline-configure.R#L343
+        source: R/pipeline-configure.R#L353
       - name: models
         touch: To change the learners compared. rf, cubist and plsr are the default three; the full list is VALID_MODELS.
-        source: R/pipeline-configure.R#L192
+        source: R/pipeline-configure.R#L198
       - name: transformations
         touch: For a skewed outcome such as organic carbon, add "log"; the transform is applied per configuration and undone before scoring.
-        source: R/pipeline-configure.R#L203
+        source: R/pipeline-configure.R#L209
       - name: preprocessing
         touch: To compare spectral pretreatments; these run per configuration inside evaluate(), never on the object, so the same data can be modelled raw and as a derivative.
-        source: R/pipeline-configure.R#L214
+        source: R/pipeline-configure.R#L220
       - name: feature_selection
         touch: To reduce the predictor space; "pca" is what the tree learners need on a full-resolution spectrum, and boruta is expensive.
-        source: R/pipeline-configure.R#L225
+        source: R/pipeline-configure.R#L231
       - name: expand_covariates
         touch: Only when the object carries covariate columns; NULL uses all of them in every configuration, TRUE benchmarks the power set, FALSE drops them.
-        source: R/pipeline-configure.R#L427
+        source: R/pipeline-configure.R#L437
       - name: cov_fusion
-        touch: Required when covariates are present. Only early fusion is implemented, with the requested covariates promoted to predictors beside the spectral features; the value is recorded and printed but no verb reads it, so "late" currently behaves exactly like "early".
+        touch: Required when covariates are present, and "early" is the only value that runs, with the requested covariates promoted to predictors beside the spectral features. "late" is refused, because late fusion is designed but not built.
         source: R/utils-recipes.R#L278
       - name: cv_folds
         touch: Rarely; five is the default and validate() checks the object has enough rows for it.
-        source: R/pipeline-configure.R#L253
+        source: R/pipeline-configure.R#L284
       - name: grid_size
         touch: To widen or shrink the Latin hypercube evaluate() screens each configuration with.
-        source: R/pipeline-configure.R#L263
+        source: R/pipeline-configure.R#L294
       - name: bayesian_iter
         touch: To change how many Bayesian steps follow the grid in evaluate(); 0 disables them.
-        source: R/pipeline-configure.R#L273
+        source: R/pipeline-configure.R#L304
       - name: final_bayesian_iter
         touch: To change the re-tuning budget fit() spends on each selected configuration; larger than the screening budget by default.
-        source: R/pipeline-configure.R#L283
+        source: R/pipeline-configure.R#L314
     mechanics:
       - step: Requires at least one response or outcome column, and checks every axis value against the package's valid lists.
-        source: R/pipeline-configure.R#L175
-      - step: If a grid already exists, warns, nulls a fixed list of keys (the validation verdict and outliers; evaluation results, best_config and split; the models' workflows, n_models, split, row_index, cv_predictions and predictor_schema; the ensemble's method, weights and metrics) and demotes the class to horizons_data, because promotion was earned against an outcome that is about to change. Other keys in those slots survive; see the note below.
-        source: R/pipeline-configure.R#L301
+        source: R/pipeline-configure.R#L181
+      - step: If a grid already exists, warns and resets whatever evaluate(), fit() and ensemble() earned, because it was earned against an outcome that is about to change. The evaluation, models and ensemble slots go back to the constructor's empty shape, the validation verdict and flagged ids are cleared, and the class drops to horizons_data. The record of rows validate() already removed is kept, since they stay removed, and so is a select_training() record.
+        source: R/utils-subset.R#L114
       - step: Demotes any previous outcome to response, resolves the outcome (auto when there is exactly one), and promotes it, writing the roles back through set_analysis() so n_responses stays consistent.
-        source: R/pipeline-configure.R#L337
+        source: R/pipeline-configure.R#L347
       - step: Resolves the covariate sets, which are none, all, a power set, or a power set of the named ones merged with the rest fixed.
-        source: R/pipeline-configure.R#L389
+        source: R/pipeline-configure.R#L399
       - step: Crosses the five axes into one row per configuration and gives each a deterministic id, model_preprocessing_transformation_featsel plus a six-character hash of the whole tuple.
-        source: R/pipeline-configure.R#L499
+        source: R/pipeline-configure.R#L509
       - step: Stores the grid, the tuning budget, the expansion inputs, and the method defaults.
-        source: R/pipeline-configure.R#L547
+        source: R/pipeline-configure.R#L557
     records:
       - field: data$role_map
         text: exactly one column with role outcome; the others stay response
-        source: R/pipeline-configure.R#L376
+        source: R/pipeline-configure.R#L386
       - field: config$configs, config$n_configs
         text: one row per configuration with config_id, the five axis values, and three list-columns reserved for per-configuration parameter overrides, always empty today and not yet read by the recipe builder
-        source: R/pipeline-configure.R#L529
+        source: R/pipeline-configure.R#L539
       - field: config$tuning, config$expansion, config$defaults
         text: the budget evaluate() and fit() read; the original inputs for reproducibility; and intended method defaults that are not in force, since the recipe builder hardcodes its own (a PCA threshold of 0.995 and a Savitzky-Golay window of 9 against the recorded 0.99 and 11)
         source: R/utils-recipes.R#L217
     refuses:
       - when: the object has no response column
         does: aborts and points at add_response()
-        source: R/pipeline-configure.R#L181
+        source: R/pipeline-configure.R#L187
       - when: a model, transformation, preprocessing, feature-selection method, or cov_fusion value is not in the valid list
         does: aborts listing the valid options
-        source: R/pipeline-configure.R#L192
+        source: R/pipeline-configure.R#L198
+      - when: cov_fusion is "late", or is not NULL or a single string
+        does: aborts; for "late" the message says late fusion is not built and to use "early"
+        source: R/pipeline-configure.R#L260
       - when: a tuning parameter is not an integer in range
         does: aborts
-        source: R/pipeline-configure.R#L253
+        source: R/pipeline-configure.R#L284
       - when: several responses exist and outcome is not given, or the named outcome is not a response
         does: aborts listing the responses
-        source: R/pipeline-configure.R#L351
+        source: R/pipeline-configure.R#L361
       - when: covariates exist and cov_fusion is NULL, or expand_covariates names a column the object lacks
         does: aborts
-        source: R/pipeline-configure.R#L417
-      - when: a grid already exists, or cov_fusion or expand_covariates is given with no covariates
+        source: R/pipeline-configure.R#L427
+      - when: a grid already exists, or cov_fusion = "early" or expand_covariates is given with no covariates
         does: warns and continues
-        source: R/pipeline-configure.R#L303
+        source: R/pipeline-configure.R#L334
     notes:
       - text: Cubist with committees > 1 is not bit-reproducible under a fixed seed (fourth significant figure of a fold metric); every other engine is deterministic given seed. See #51.
-        source: R/pipeline-configure.R#L43
+        source: R/pipeline-configure.R#L47
     issues:
       - id: 62
         text: the recorded method defaults are not what the recipe runs, and the per-configuration override columns are never read
         source: R/utils-recipes.R#L217
-      - id: 69
-        text: cov_fusion = "late" is validated, stored and printed, and nothing reads it; late fusion is bit-identical to early
-        source: R/utils-recipes.R#L278
-      - id: 70
-        text: the reconfiguration clear is a fixed key list, not a slot reset, so models$uq, models$ad, models$results and the like survive demotion, and ensemble$model survives too; because the promotion check treats a non-NULL ensemble$model as promotion, re-configuring an object that has been through ensemble() aborts inside set_analysis() instead of resetting
-        source: R/utils-subset.R#L53
 
   # ---------------------------------------------------------------------------
   - verb: validate

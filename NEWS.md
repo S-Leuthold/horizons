@@ -141,6 +141,8 @@
   throughout. `%>%` was imported but never exported, so nothing user-facing
   changes.
 
+* **`configure(cov_fusion = "late")` now aborts** with condition class `horizons_input_error`, whether or not the object has covariates (#69). Late fusion is designed but was never built: `build_recipe()` only fuses early, so `"late"` was validated, stored and printed, and then ran early fusion bit for bit. Use `"early"`. `cov_fusion` must also be `NULL` or a single string; a vector previously failed with R's "the condition has length > 1".
+
 ## Review fixes (2026-09-21)
 
 A six-reviewer pass over `select_training()` and the code it touches, with
@@ -462,6 +464,10 @@ consequences; the review itself is in
   `seed`. Equality tests in the package use `rf` for that reason.
 
 ## Bug Fixes
+
+* **Re-running `configure()` on an object that has been through `ensemble()` no longer aborts** (#70). Reconfiguring cleared a hand-kept list of keys that missed `ensemble$model`, and `set_analysis()` counts a non-NULL `ensemble$model` as promotion, so it refused the object. The same list let `models$uq`, `models$ad`, `models$results` and most of `evaluation` survive the demotion, which left `has_uq()` answering `TRUE` on a plain `horizons_data` whenever the fit had calibrated UQ. Reconfiguring now resets the `evaluation`, `models` and `ensemble` slots whole to the constructor's shape, through an internal `reset_promotion()` that sits beside the promotion check so the two stay in step. The list also erased the record of outliers `validate(remove_outliers = TRUE)` had removed, although those rows stayed removed; that record is now kept, and only the verdict and the flagged ids are cleared. A `select_training()` record is kept, as before.
+
+* **`spectra()` now builds its object with the class constructor, `new_horizons_data()`** (#71), rather than a second constructor of its own that had drifted from the contract. A raw object had no `data$n_responses` or `selection` key, carried `models` and `ensemble` stubs that predated the current contract, and its `models$uq` stub was a non-empty list, so `has_uq()` answered `TRUE` before anything was fitted. The constructor itself now declares the `models` keys `fit()` writes (`ad` and `selection_present` were missing) and the `evaluation` keys `evaluate()` writes (it declared `backend` and `runtime`, which nothing writes). `summary()` read `evaluation$runtime`, so its evaluation runtime line never printed; it reads `runtime_secs` now. The tuning defaults on a raw object are integers (`10L`, `15L`, `5L`) rather than doubles. Objects saved by earlier versions keep their old shape until `configure()` resets their downstream slots.
 
 * `fit()` now honours `configure(final_bayesian_iter = )` (#46). It passed
   the screening budget `bayesian_iter` to the final re-tune instead, so the
