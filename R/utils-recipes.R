@@ -317,11 +317,11 @@ build_recipe <- function(config_row, train_data, role_map) {
 #' from the replacement environment. Harvesting `all.vars()` off the quosures
 #' themselves removes that failure mode rather than documenting it.
 #'
-#' Every slot is walked recursively rather than the `terms`/`columns` pair.
-#' Stock steps keep selectors in `terms` and this package's custom steps keep
-#' them in `columns`, but others use `impute_with`, `denom`, `inputs`,
-#' `outcome`, or `lon`/`lat`, and a slot holding a *single* quosure is not a
-#' list. Both would have been silently missed, restoring the leak.
+#' Every slot is walked recursively rather than `terms` alone. Stock steps
+#' and this package's custom steps keep their selectors in `terms` (#52), but
+#' others use `impute_with`, `denom`, `inputs`, `outcome`, or `lon`/`lat`,
+#' and a slot holding a *single* quosure is not a list. Both would have been
+#' silently missed, restoring the leak.
 #'
 #' Residual caveat: the replacement environment is parented on the `horizons`
 #' namespace, because bare `recipes::all_predictors()` / `all_outcomes()` are

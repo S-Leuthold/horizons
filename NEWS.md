@@ -528,6 +528,19 @@ consequences; the review itself is in
   that produced negative original-scale predictions. The deploy-time
   `upper_bound` guardrail is unchanged and still opt-in.
 
+* The four custom recipe steps now follow the `recipes` step contract (#52).
+  `step_transform_spectra()`, `step_select_correlation()`,
+  `step_select_boruta()` and `step_select_cars()` overwrote their selectors
+  with the resolved column names at `prep()`, so a trained recipe could not
+  be prepped again: `prep(trained, training = d, fresh = TRUE)` aborted with
+  "arguments ... do not exist". The selectors now live in `terms` and
+  survive `prep()`; the resolved names go in `columns`, which is all
+  `bake()` reads, so a butchered stored workflow still predicts. Trained
+  state and baked output are unchanged, and no package verb re-preps a
+  trained recipe, so no existing result moves. Code that read an untrained
+  step's selectors from `$columns` should read `$terms`; `$columns` is
+  `NULL` until the step is prepped.
+
 # horizons 0.9.0
 
 ## Major Changes

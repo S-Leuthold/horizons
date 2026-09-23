@@ -48,7 +48,8 @@ step_select_cars <- function(recipe,
   terms <- rlang::enquos(...)
 
   recipes::add_step(recipe,
-                    step_select_cars_new(columns       = terms,
+                    step_select_cars_new(terms         = terms,
+                                        columns       = NULL,
                                         outcome       = outcome,
                                         role          = role,
                                         trained       = trained,
@@ -61,9 +62,14 @@ step_select_cars <- function(recipe,
 ## Step 2: Constructor
 ## -----------------------------------------------------------------------------
 
+## Follows recipes' own contract: `terms` holds the selector quosures and
+## survives prep, so a trained recipe can be re-prepped (`fresh = TRUE`);
+## `columns` holds the names prep resolved them to, and is what bake reads.
+
 #' @keywords internal
 #' @noRd
-step_select_cars_new <- function(columns,
+step_select_cars_new <- function(terms,
+                                 columns,
                                  outcome,
                                  role,
                                  trained,
@@ -71,7 +77,8 @@ step_select_cars_new <- function(columns,
                                  skip,
                                  id) {
 
-  out <- list(columns        = columns,
+  out <- list(terms          = terms,
+              columns        = columns,
               outcome        = outcome,
               role           = role,
               trained        = trained,
@@ -95,7 +102,7 @@ prep.step_select_cars <- function(x, training, info = NULL, ...) {
   ## Stage 1: Resolve spectral column names
   ## ---------------------------------------------------------------------------
 
-  col_names <- recipes::recipes_eval_select(x$columns, training, info)
+  col_names <- recipes::recipes_eval_select(x$terms, training, info)
 
   check_selection_columns(col_names, "step_select_cars")
 
@@ -222,6 +229,7 @@ prep.step_select_cars <- function(x, training, info = NULL, ...) {
 
     # No valid iteration found \u2014 keep all predictors as safe fallback
     return(step_select_cars_new(
+      terms         = x$terms,
       columns       = col_names,
       outcome       = x$outcome,
       role          = x$role,
@@ -304,7 +312,8 @@ prep.step_select_cars <- function(x, training, info = NULL, ...) {
   ## Stage 5: Return trained step
   ## ---------------------------------------------------------------------------
 
-  step_select_cars_new(columns        = col_names,
+  step_select_cars_new(terms          = x$terms,
+                      columns        = col_names,
                       outcome        = x$outcome,
                       role           = x$role,
                       trained        = TRUE,
