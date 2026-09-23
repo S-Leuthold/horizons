@@ -243,6 +243,47 @@ describe("fit() - success path", {
 
   })
 
+  it("re-running evaluate() on it empties models and ensemble (#70)", {
+
+    ## compute_uq = FALSE above, so carry a bundle the way compute_uq = TRUE
+    ## leaves one; otherwise has_uq() is FALSE before and after
+    fitted <- result
+    fitted$models$uq <- stats::setNames(list(list(quantile_model = "a UQ bundle")),
+                                        names(fitted$models$workflows)[1])
+    fitted$ensemble$method <- "weighted"
+
+    expect_true(has_uq(fitted))
+
+    re <- suppressWarnings(evaluate(fitted, prune = FALSE, verbose = FALSE, seed = 42L))
+
+    blank <- new_horizons_data()
+
+    expect_identical(class(re), c("horizons_eval", "horizons_data", "list"))
+    expect_false(has_uq(re))
+    expect_identical(re$models,   blank$models)
+    expect_identical(re$ensemble, blank$ensemble)
+
+  })
+
+  it("re-running fit() on an ensemble empties the ensemble (#70)", {
+
+    ens <- suppressWarnings(
+      ensemble(result, method = "weighted", optimize = FALSE,
+               compute_uq = FALSE, verbose = FALSE)
+    )
+
+    ## Keep the re-fit cheap; the budget is not what is under test
+    ens$config$tuning$final_bayesian_iter <- 0L
+
+    refit <- suppressWarnings(
+      fit(ens, n_best = 1L, compute_uq = FALSE, verbose = FALSE, seed = 42L)
+    )
+
+    expect_identical(class(refit), c("horizons_fit", "horizons_eval", "horizons_data", "list"))
+    expect_identical(refit$ensemble, new_horizons_data()$ensemble)
+
+  })
+
 })
 
 

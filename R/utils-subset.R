@@ -113,19 +113,15 @@ promoted_state <- function(x) {
 #' @noRd
 reset_promotion <- function(x) {
 
-  blank <- new_horizons_data()
-
   ## Downstream slots go back to the constructor's shape ----------------------
 
-  x$evaluation <- blank$evaluation
-  x$models     <- blank$models
-  x$ensemble   <- blank$ensemble
+  x <- reset_slots(x, c("evaluation", "models", "ensemble"))
 
   ## Validation: clear the verdict, keep the record of removed rows -----------
 
   ### Single-bracket assignment of list(value) keeps the key when value is NULL.
   outliers     <- x$validation$outliers
-  x$validation <- blank$validation
+  x$validation <- new_horizons_data()$validation
 
   x$validation$outliers["removed_ids"]    <- list(outliers$removed_ids)
   x$validation$outliers["removal_detail"] <- list(outliers$removal_detail)
@@ -134,6 +130,53 @@ reset_promotion <- function(x) {
   ## The class is the claim that the state is there --------------------------
 
   class(x) <- c("horizons_data", "list")
+
+  x
+
+}
+
+
+## ---------------------------------------------------------------------------
+## reset_slots() — Return named slots to the constructor's shape
+## ---------------------------------------------------------------------------
+
+#' Return slots to the shape new_horizons_data() gives them
+#'
+#' @description
+#' Replaces each named slot of `x` with the constructor's empty version, key
+#' for key. The building block of [reset_promotion()], and what a verb that
+#' re-runs uses to clear the slots downstream of its own: `evaluate()` resets
+#' `models` and `ensemble` before writing `evaluation`, and `fit()` resets
+#' `ensemble` before writing `models`, so a re-run never leaves a later
+#' verb's state (UQ bundles, a meta-learner) describing models that are no
+#' longer there. The class is the calling verb's to set.
+#'
+#' @param x [horizons_data.] The object to reset.
+#' @param slots [Character.] Slot names; each must be a section of
+#'   [new_horizons_data()].
+#'
+#' @return [horizons_data.] `x` with those slots replaced.
+#'
+#' @seealso [reset_promotion()], [promoted_state()]
+#' @noRd
+reset_slots <- function(x, slots) {
+
+  blank   <- new_horizons_data()
+  unknown <- setdiff(slots, names(blank))
+
+  if (length(unknown)) {
+
+    cli::cli_abort("{.fn reset_slots} does not know {.field {unknown}}",
+                   class = "horizons_input_error")
+
+  }
+
+  ### list(value) keeps the key even for a slot whose empty value is NULL.
+  for (slot in slots) {
+
+    x[slot] <- list(blank[[slot]])
+
+  }
 
   x
 

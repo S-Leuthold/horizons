@@ -44,7 +44,9 @@
 #'   the deploy-time winsorization guardrail `predict()` applies to
 #'   back-transformed point predictions, and `selection_present` (whether the
 #'   training object carried a `$selection` from `select_training()`, which
-#'   `predict()` reads when asked for conformal intervals).
+#'   `predict()` reads when asked for conformal intervals). Called on a
+#'   `horizons_ensemble`, it returns a `horizons_fit` whose `ensemble` slot
+#'   is empty again, since the ensemble was built on the members it replaces.
 #'
 #' @export
 fit <- function(x,
@@ -623,6 +625,10 @@ fit <- function(x,
   ## conformal exchangeability with arbitrary prediction data does not hold.
   ## predict() reads this flag to say so; nothing else changes.
   selection_present <- !is.null(x$selection)
+
+  ## Re-fitting an ensembled object replaces the members the ensemble was
+  ## built on, so the ensemble goes with them.
+  x <- reset_slots(x, "ensemble")
 
   x$models <- list(
     workflows         = workflows_list,
