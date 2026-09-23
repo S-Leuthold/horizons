@@ -147,10 +147,10 @@ verbs:
     class_out: horizons_data
     summary: >-
       Puts the spectra into one shape for modelling: trims to a wavenumber
-      range, optionally baseline-corrects, resamples onto the canonical grid
-      (the multiples of the resolution inside the trim bounds, so two sources
-      standardized alike share their columns), and optionally deletes the
-      water bands. It handles shape, not chemistry: SNV,
+      range, resamples onto the canonical grid (the multiples of the
+      resolution inside the trim bounds, so two sources standardized alike
+      share their columns), optionally baseline-corrects on that grid, and
+      optionally deletes the water bands. It handles shape, not chemistry: SNV,
       derivatives and smoothing belong to configure() and are applied per
       configuration inside evaluate(), so the same standardized object can be
       modelled under every preprocessing. A second call is a no-op with a
@@ -158,81 +158,86 @@ verbs:
     args:
       - name: x
         touch: Always; the object from spectra().
-        source: R/pipeline-standardize.R#L632
+        source: R/pipeline-standardize.R#L651
       - name: resample
         touch: Set it to match the library you will draw from or predict against, since the same resample and trim put both on the same columns; 2 matches OSSL at full resolution, and the experiments run at 4 with no loss for the local model. NULL keeps the data's own axis.
-        source: R/pipeline-standardize.R#L861
+        source: R/pipeline-standardize.R#L878
       - name: trim
-        touch: Rarely; 600 to 4000 is the MIR range the package and the KSSL library share. Narrow it only when an instrument's ends are unreliable.
-        source: R/pipeline-standardize.R#L821
+        touch: Rarely, but keep it set when sources must share every column; 600 to 4000 is the MIR range the package and the KSSL library share, and with trim NULL each source keeps its own extent. Narrow it only when an instrument's ends are unreliable.
+        source: R/pipeline-standardize.R#L846
       - name: remove_water
         touch: Leave FALSE. Deleting columns leaves holes in the axis, a derivative later straddles them, and select_training() refuses a pool with a non-contiguous grid.
-        source: R/pipeline-standardize.R#L968
+        source: R/pipeline-standardize.R#L1068
       - name: baseline
-        touch: Only for spectra with a known baseline drift; it runs before resampling on the trimmed range.
-        source: R/pipeline-standardize.R#L842
+        touch: Only for spectra with a known baseline drift; with resampling it runs on the canonical grid, so every source's hull is pinned at the same bounds.
+        source: R/pipeline-standardize.R#L1055
       - name: force
         touch: Never in a pipeline; it re-standardizes an already standardized object and warns that it is doing so.
-        source: R/pipeline-standardize.R#L729
+        source: R/pipeline-standardize.R#L748
     mechanics:
       - step: Validates every argument first and reports all failures together, as a horizons_input_error.
-        source: R/pipeline-standardize.R#L628
+        source: R/pipeline-standardize.R#L647
       - step: If the object already carries a standardization record, returns it unchanged with a warning unless `force = TRUE`.
-        source: R/pipeline-standardize.R#L718
+        source: R/pipeline-standardize.R#L737
       - step: Sorts the predictor columns into decreasing wavenumber order if they arrived otherwise, since spectra() keeps the order it is given. This runs on every path; names and values are untouched.
-        source: R/pipeline-standardize.R#L743
-      - step: If nothing at all is requested, validates the object and writes the record so downstream verbs know the step was considered. Beyond the sort, nothing changes.
-        source: R/pipeline-standardize.R#L761
+        source: R/pipeline-standardize.R#L762
+      - step: If nothing at all is requested, validates the object and writes the record so downstream verbs know the step was considered, keeping the grid an earlier call recorded. Beyond the sort, nothing changes.
+        source: R/pipeline-standardize.R#L780
       - step: Pulls the predictor columns into a matrix and reads the wavenumbers off the column names.
-        source: R/pipeline-standardize.R#L801
-      - step: Trims to the requested range by dropping columns outside it. When resampling follows, it keeps the nearest column beyond each bound as well, so a grid point on the bound is interpolated rather than extrapolated; scans starting at 599.74 get a 600 column that way.
-        source: R/pipeline-standardize.R#L821
-      - step: Baseline-corrects next, if asked, with a convex hull through prospectr::baseline(), on the trimmed range and before any water bands are removed, because the algorithm needs a continuous range.
-        source: R/pipeline-standardize.R#L840
-      - step: Builds the canonical grid, every multiple of the resolution inside the trim bounds (inside the data's range when trim is NULL), rounded to six decimals. It depends on the arguments alone, so two sources standardized identically share their columns.
-        source: R/pipeline-standardize.R#L872
+        source: R/pipeline-standardize.R#L825
+      - step: Trims to the requested range by dropping columns outside it. When resampling follows, it keeps the nearest column beyond each bound as well, so a grid point on the bound is interpolated rather than extrapolated; scans starting at 599.74 get a 600 column that way. The count reported is the one inside the bounds.
+        source: R/pipeline-standardize.R#L846
+      - step: Builds the canonical grid, every multiple of the resolution inside the trim bounds (inside the data's range when trim is NULL), rounded to six decimals. It depends on the arguments alone, so two sources standardized identically over the same trim share their columns; with trim NULL they share them where their ranges overlap.
+        source: R/pipeline-standardize.R#L897
       - step: Drops the grid points the data does not reach, with a warning that says how many and at which end; nothing is extrapolated.
-        source: R/pipeline-standardize.R#L879
-      - step: Leaves the values untouched when the axis already is the grid to within 1e-6 cm⁻¹, and says so on the console; otherwise resamples onto the grid by cubic spline through prospectr::resample().
-        source: R/pipeline-standardize.R#L916
-      - step: Deletes the water bands last, if asked, by dropping columns in 1580 to 1720 and 3100 to 3700 cm⁻¹, after resampling so the gaps are not interpolated across.
-        source: R/pipeline-standardize.R#L968
+        source: R/pipeline-standardize.R#L904
+      - step: Drops the grid points that fall in a gap of the input's own axis (a spacing over three times the median and over 30 cm⁻¹, select_training()'s rule), such as a band deleted upstream or by an earlier remove_water, with a warning naming the gaps; nothing is filled.
+        source: R/pipeline-standardize.R#L931
+      - step: Leaves the values untouched when the axis already is the grid to within 1e-6 cm⁻¹, gaps apart, and says so on the console; otherwise resamples onto the grid by cubic spline through prospectr::resample(), one contiguous run of the data at a time. The points kept beyond the trim bounds go here.
+        source: R/pipeline-standardize.R#L969
+      - step: Baseline-corrects next, if asked, with a convex hull through prospectr::baseline(), on the canonical grid when resampling (so every source's hull is pinned at the grid's bounds) or on the trimmed native axis when not, and before any water bands are removed, because the hull needs a continuous range.
+        source: R/pipeline-standardize.R#L1047
+      - step: Deletes the water bands last, if asked, by dropping columns in 1580 to 1720 and 3100 to 3700 cm⁻¹, after resampling so standardize()'s own interpolation never spans them.
+        source: R/pipeline-standardize.R#L1068
       - step: Aborts if any value came out non-finite, rebuilds the analysis table and role map with the new wn_ columns, and lets set_analysis() recount the predictors.
-        source: R/pipeline-standardize.R#L987
+        source: R/pipeline-standardize.R#L1087
       - step: Re-validates the whole object before returning it.
-        source: R/pipeline-standardize.R#L1052
+        source: R/pipeline-standardize.R#L1152
     records:
       - field: provenance$standardization
         text: the four settings as given, whether the spectra were re-interpolated (resampled) and the grid they sit on (grid, with min, max, step and n; NULL without resampling), the time, and, when any operation actually ran, the final wavelength count and range; the no-op path writes the record without those two
-        source: R/pipeline-standardize.R#L1036
+        source: R/pipeline-standardize.R#L1136
       - field: data$analysis, data$role_map
         text: rebuilt with the new predictor columns; every non-predictor column is carried through untouched
-        source: R/pipeline-standardize.R#L1010
+        source: R/pipeline-standardize.R#L1110
     refuses:
       - when: an argument is the wrong type or range
         does: aborts with every failure listed, class horizons_input_error
-        source: R/pipeline-standardize.R#L695
+        source: R/pipeline-standardize.R#L714
       - when: the object is already standardized and force is FALSE
         does: warns and returns it unchanged
-        source: R/pipeline-standardize.R#L718
+        source: R/pipeline-standardize.R#L737
       - when: the object fails validate_horizons_data(), which runs on every path, the no-op one included, before the object is marked standardized
         does: aborts with the validator's findings, class horizons_validation_error
-        source: R/pipeline-standardize.R#L763
+        source: R/pipeline-standardize.R#L782
       - when: the trim range does not overlap the data, or water-band removal would delete every column, or fewer than two wavelengths remain to resample
         does: aborts
-        source: R/pipeline-standardize.R#L229
+        source: R/pipeline-standardize.R#L231
       - when: the data does not reach part of the grid
         does: drops those grid points and warns, class horizons_standardize_warning
-        source: R/pipeline-standardize.R#L893
+        source: R/pipeline-standardize.R#L918
+      - when: the input's axis has a gap, a band already deleted
+        does: drops the grid points inside it and warns, class horizons_standardize_warning
+        source: R/pipeline-standardize.R#L944
       - when: no grid point falls inside the data
         does: aborts, class horizons_input_error
-        source: R/pipeline-standardize.R#L904
+        source: R/pipeline-standardize.R#L957
       - when: baseline correction fails, which happens on constant spectra
         does: aborts with the original error
-        source: R/pipeline-standardize.R#L374
+        source: R/pipeline-standardize.R#L377
       - when: any value is non-finite after the operations
         does: aborts with the count
-        source: R/pipeline-standardize.R#L987
+        source: R/pipeline-standardize.R#L1087
     evidence:
       - claim: 4 cm⁻¹ loses nothing against 2 cm⁻¹ for the local model
         where: dev/experiments/2026-09-factorial/README.md#pivot-learner-held-to-pls-on-both-sides
@@ -403,7 +408,7 @@ verbs:
       - step: Validates everything together; refuses a pool that carries validation, evaluation or fitted state, or that is itself a prior selection, because subsetting it would leave that state describing rows it no longer has.
         source: R/pipeline-select-training.R#L829
       - step: Reconciles the axes. Either grid with a hole (a spacing over three times its median and over 30 cm⁻¹) stops the verb before anything interpolates; a pool that does not cover the targets' range stops it, except within half a pool spacing, where the column is clamped with a warning; finer targets warn. The pool is resampled onto the targets' grid through the same spline standardize() uses.
-        source: R/select-reconcile.R#L177
+        source: R/select-reconcile.R#L181
       - step: Compares raw absorbance spread before SNV can hide it, warning when the interquartile ranges differ more than twofold, the size of a natural-log against base-10 mismatch.
         source: R/pipeline-select-training.R#L901
       - step: Builds the similarity space on every pool row, SNV then Savitzky-Golay derivative then optional mask then PCA to the variance target, drops components under the sdev floor, and projects the targets with the pool's loadings.
@@ -442,7 +447,7 @@ verbs:
         source: R/pipeline-select-training.R#L341
       - when: either grid has a hole, or the pool does not cover the targets' range
         does: aborts before anything interpolates
-        source: R/select-reconcile.R#L202
+        source: R/select-reconcile.R#L206
       - when: a property has fewer measured pool rows than its k
         does: aborts before any draw, naming the property and its count
         source: R/select-neighbours.R#L447

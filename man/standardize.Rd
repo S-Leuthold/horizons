@@ -24,9 +24,9 @@ multiples of \code{resample} inside the \code{trim} bounds (see Details). Use
 \item{trim}{\verb{numeric(2) or NULL.} Wavenumber range to keep, inclusive.
 Default \code{c(600, 4000)} is the standard MIR range. With resampling, the
 bounds limit the grid, and the one data point beyond each bound is used
-to interpolate the grid points at the bounds and then dropped. Without
-resampling, columns outside the range are dropped. Use \code{NULL} to skip
-trimming.}
+to interpolate the grid points at the bounds and then dropped, before
+baseline correction. Without resampling, columns outside the range are
+dropped. Use \code{NULL} to skip trimming.}
 
 \item{remove_water}{\code{logical.} Remove water absorption bands
 (1580-1720, 3100-3700 cm⁻¹)? Default \code{FALSE}.}
@@ -72,26 +72,40 @@ preprocessing options.
 
 \strong{The wavenumber axis.} With resampling, the output axis is the canonical
 grid: every multiple of \code{resample} inside the \code{trim} bounds, or inside the
-data's own range when \code{trim} is \code{NULL}. It depends only on the arguments,
-never on where an instrument's axis happens to start, so two datasets
-standardized with the same arguments share their columns, which is what
-\code{predict()} and \code{select_training()} compare. \code{resample = 4} with the
-default trim gives \verb{wn_4000, wn_3996, ..., wn_600} (851 columns) whether
-the scans came at 2 cm⁻¹ from 600 or at 1.93 cm⁻¹ from 599.74. Grid
-wavenumbers are rounded to six decimal places, so a non-integer resolution
-such as 1.5 gives clean, stable names (\code{wn_601.5}).
+data's own range when \code{trim} is \code{NULL}. The grid points never depend on
+where an instrument's axis happens to start. With \code{trim} given, two
+datasets that cover the trim range and are standardized with the same
+arguments share all their columns, which is what \code{predict()} and
+\code{select_training()} compare. With \code{trim = NULL} each dataset keeps its own
+extent, so two sources share columns only where their ranges overlap; pass
+\code{trim} when you need a fixed extent. \code{resample = 4} with the default trim
+gives \verb{wn_4000, wn_3996, ..., wn_600} (851 columns) whether the scans came
+at 2 cm⁻¹ from 600 or at about 1.93 cm⁻¹ from 599.74. Grid wavenumbers are
+rounded to six decimal places, so a non-integer resolution such as 1.5
+gives clean, stable names (\code{wn_601.5}).
 
 The spectra are interpolated onto the grid by cubic spline and never
 extrapolated: grid points beyond the data's range are dropped with a
-warning that says how many and where. Data already on the grid, to within
-1e-6 cm⁻¹, is not re-interpolated, and the console says so. Columns stored
-in increasing order are sorted to decreasing first, on every path: a call
-with every operation off still sorts them, and is still validated before
-the object is marked standardized, but changes nothing else.
+warning that says how many and where. Nor is a hole in the input filled:
+where the data's own axis has a gap (a spacing over three times the median
+and over 30 cm⁻¹, such as a band deleted upstream or by an earlier
+\code{remove_water = TRUE}), the grid points inside it are dropped with a
+warning naming the gaps, and each side is interpolated on its own. Data
+already on the grid, to within 1e-6 cm⁻¹ and apart from any such gaps, is
+not re-interpolated, and the console says so. Columns stored in increasing
+order are sorted to decreasing first, on every path: a call with every
+operation off still sorts them, and is still validated before the object
+is marked standardized, but changes nothing else.
 
-The operations run in this order: sort, trim, baseline correction,
-resampling, water-band removal. Baseline correction sees the trimmed range;
-water bands are deleted last so the interpolation never spans their gaps.
+The operations run in this order: sort, trim, resampling, baseline
+correction, water-band removal. With resampling, the baseline is fitted on
+the canonical grid, so every source's convex hull is pinned at the same
+ends, the grid's; the points kept beyond the trim bounds for interpolation
+are gone by then and never reach it. Without resampling, it is fitted on
+the trimmed native axis. Water bands are deleted last so that
+\code{standardize()}'s own interpolation never spans them; a Savitzky-Golay
+derivative taken later still runs across the hole they leave, which is a
+separate matter (see \code{select_training()}'s \code{mask}).
 
 \strong{Idempotence:} If the object has already been standardized, calling
 \code{standardize()} again will warn and return the object unchanged. Use
