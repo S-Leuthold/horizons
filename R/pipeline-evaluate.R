@@ -217,7 +217,7 @@ evaluate <- function(x,
   set.seed(seed)
 
   split <- tryCatch(
-    rsample::initial_split(analysis, prop = 0.8, strata = outcome_col),
+    rsample::initial_split(analysis, prop = SPLIT_PROP, strata = outcome_col),
     error = function(e) {
 
       if (verbose) {
@@ -229,7 +229,7 @@ evaluate <- function(x,
 
       }
 
-      rsample::initial_split(analysis, prop = 0.8)
+      rsample::initial_split(analysis, prop = SPLIT_PROP)
 
     }
   )
