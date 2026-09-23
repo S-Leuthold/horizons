@@ -17,10 +17,16 @@ standardize(
 \item{x}{\code{horizons_data.} Object from \code{spectra()}.}
 
 \item{resample}{\verb{numeric or NULL.} Target resolution in cm⁻¹. Default \code{2}
-matches OSSL library resolution. Use \code{NULL} to skip resampling.}
+matches OSSL library resolution. The spectra are resampled onto the
+multiples of \code{resample} inside the \code{trim} bounds (see Details). Use
+\code{NULL} to skip resampling and keep the data's own axis.}
 
-\item{trim}{\verb{numeric(2) or NULL.} Wavenumber range to keep. Default
-\code{c(600, 4000)} is the standard MIR range. Use \code{NULL} to skip trimming.}
+\item{trim}{\verb{numeric(2) or NULL.} Wavenumber range to keep, inclusive.
+Default \code{c(600, 4000)} is the standard MIR range. With resampling, the
+bounds limit the grid, and the one data point beyond each bound is used
+to interpolate the grid points at the bounds and then dropped. Without
+resampling, columns outside the range are dropped. Use \code{NULL} to skip
+trimming.}
 
 \item{remove_water}{\code{logical.} Remove water absorption bands
 (1580-1720, 3100-3700 cm⁻¹)? Default \code{FALSE}.}
@@ -33,7 +39,9 @@ Default \code{FALSE}. Not recommended — may cause data quality issues.}
 }
 \value{
 \code{horizons_data.} The input object with standardized spectra.
-Provenance is updated to record what operations were applied.
+\code{provenance$standardization} records the arguments, whether the spectra
+were actually re-interpolated (\code{resampled}), and the grid they sit on
+(\code{grid}: \code{min}, \code{max}, \code{step}, \code{n}; \code{NULL} without resampling).
 }
 \description{
 Applies standardization operations to get spectra into a consistent format
@@ -61,6 +69,27 @@ Spectral transforms (NOT handled here):
 Spectral transforms are specified via \code{configure()} and applied per-config
 during \code{evaluate()}. This separation allows factorial comparison of
 preprocessing options.
+
+\strong{The wavenumber axis.} With resampling, the output axis is the canonical
+grid: every multiple of \code{resample} inside the \code{trim} bounds, or inside the
+data's own range when \code{trim} is \code{NULL}. It depends only on the arguments,
+never on where an instrument's axis happens to start, so two datasets
+standardized with the same arguments share their columns, which is what
+\code{predict()} and \code{select_training()} compare. \code{resample = 4} with the
+default trim gives \verb{wn_4000, wn_3996, ..., wn_600} (851 columns) whether
+the scans came at 2 cm⁻¹ from 600 or at 1.93 cm⁻¹ from 599.74. Grid
+wavenumbers are rounded to six decimal places, so a non-integer resolution
+such as 1.5 gives clean, stable names (\code{wn_601.5}).
+
+The spectra are interpolated onto the grid by cubic spline and never
+extrapolated: grid points beyond the data's range are dropped with a
+warning that says how many and where. Data already on the grid, to within
+1e-6 cm⁻¹, is not re-interpolated, and the console says so. Columns stored
+in increasing order are sorted to decreasing first.
+
+The operations run in this order: sort, trim, baseline correction,
+resampling, water-band removal. Baseline correction sees the trimmed range;
+water bands are deleted last so the interpolation never spans their gaps.
 
 \strong{Idempotence:} If the object has already been standardized, calling
 \code{standardize()} again will warn and return the object unchanged. Use

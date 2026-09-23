@@ -165,19 +165,20 @@ test_that("resample_spectra() changes wavelength count", {
 })
 
 
-test_that("resample_spectra(new_wav =) matches the resolution path bit for bit", {
+test_that("resample_spectra(target_resolution =) uses the multiples inside the data's range, bit for bit the new_wav path", {
 
-  ## Arrange
+  ## Arrange: an axis offset from the multiples of 2, as an instrument's is
   set.seed(7)
-  wn  <- seq(4000, 600, by = -4)
-  m   <- matrix(stats::runif(5 * length(wn)), nrow = 5)
-  grid <- seq(4000, 600, by = -2)
+  wn   <- seq(3999.57, 599.57, by = -4)
+  m    <- matrix(stats::runif(5 * length(wn)), nrow = 5)
+  grid <- seq(3998, 600, by = -2)
 
   ## Act
   by_res  <- resample_spectra(m, wn, target_resolution = 2)
   by_grid <- resample_spectra(m, wn, new_wav = grid)
 
-  ## Assert
+  ## Assert: the grid is the multiples, not a sequence stepped from 3999.57
+  expect_identical(by_res$wavelengths, grid)
   expect_identical(by_grid$matrix,      by_res$matrix)
   expect_identical(by_grid$wavelengths, by_res$wavelengths)
   expect_identical(by_grid$n_after,     by_res$n_after)
@@ -256,6 +257,231 @@ test_that("standardize() with resample = NULL skips resampling", {
                            remove_water = FALSE, baseline = FALSE)
 
   expect_equal(hd_result$data$n_predictors, original_n)
+
+})
+
+
+## =============================================================================
+## Canonical Grid Tests (#64, #18)
+## =============================================================================
+## Synthetic stand-ins for the two sources #64 was found on: a KSSL-shaped
+## library (600 to 4000 at 2 cm-1, stored increasing, as the snapshot is) and
+## MOYS-shaped scans (from 599.74 at 1.93 cm-1, well past 4000).
+
+#' Evaluate without the pipeline's console tree
+#' @noRd
+no_output <- function(expr) {
+
+  utils::capture.output(value <- expr)
+  value
+
+}
+
+#' A horizons_data on an explicit axis, in the order given
+#' @noRd
+make_axis_spectra <- function(wn, f = NULL, n = 3) {
+
+  set.seed(11)
+
+  m <- if (is.null(f)) {
+    matrix(stats::runif(n * length(wn), 0.1, 0.8), nrow = n)
+  } else {
+    t(vapply(seq_len(n), function(i) i * f(wn), numeric(length(wn))))
+  }
+
+  colnames(m) <- paste0("wn_", wn)
+
+  no_output(spectra(dplyr::bind_cols(tibble::tibble(sample_id = paste0("s", seq_len(n))),
+                                     tibble::as_tibble(m))))
+
+}
+
+#' A smooth absorbance-like spectrum: sloped baseline plus Gaussian bands,
+#' two of them close to the trim bounds so the ends carry curvature
+#' @noRd
+smooth_spectrum <- function(wn) {
+
+  0.3 + 5e-5 * (wn - 600) +
+    0.10 * exp(-((wn -  640) / 30)^2) +
+    0.40 * exp(-((wn - 1030) / 40)^2) +
+    0.15 * exp(-((wn - 1630) / 50)^2) +
+    0.25 * exp(-((wn - 2920) / 60)^2) +
+    0.20 * exp(-((wn - 3620) / 25)^2) +
+    0.10 * exp(-((wn - 3960) / 30)^2)
+
+}
+
+predictor_names <- function(hd) hd$data$role_map$variable[hd$data$role_map$role == "predictor"]
+
+KSSL_WN <- seq(600, 4000, by = 2)
+MOYS_WN <- 599.74 + 1.93 * (0:3574)
+
+
+test_that("a KSSL-shaped axis stored increasing comes out on wn_4000 ... wn_600", {
+
+  kssl <- make_axis_spectra(KSSL_WN)
+
+  at_2 <- no_output(standardize(kssl, resample = 2, trim = c(600, 4000)))
+  at_4 <- no_output(standardize(kssl, resample = 4, trim = c(600, 4000)))
+
+  expect_identical(predictor_names(at_2), paste0("wn_", seq(4000, 600, by = -2)))
+  expect_identical(predictor_names(at_4), paste0("wn_", seq(4000, 600, by = -4)))
+  expect_identical(at_2$data$n_predictors, 1701L)
+  expect_identical(at_4$data$n_predictors, 851L)
+
+})
+
+
+test_that("a MOYS-shaped axis lands on the same columns as a KSSL-shaped one", {
+
+  kssl <- no_output(standardize(make_axis_spectra(KSSL_WN), resample = 4, trim = c(600, 4000)))
+  moys <- no_output(standardize(make_axis_spectra(MOYS_WN), resample = 4, trim = c(600, 4000)))
+
+  ## 599.74 sits just below the bound, and it is what lets 600 be a column
+  expect_identical(predictor_names(moys), predictor_names(kssl))
+  expect_identical(predictor_names(moys)[c(1, 851)], c("wn_4000", "wn_600"))
+
+  expect_true(moys$provenance$standardization$resampled)
+  expect_identical(moys$provenance$standardization$grid,
+                   list(min = 600, max = 4000, step = 4, n = 851L))
+
+})
+
+
+test_that("grid points the data does not reach are dropped with a warning, never extrapolated", {
+
+  ## Covers 651.5 to 3500: short of the trim bounds at both ends
+  short <- make_axis_spectra(seq(3500, 651.5, by = -1.5))
+
+  caught <- list()
+  out <- withCallingHandlers(
+    no_output(standardize(short, resample = 4, trim = c(600, 4000))),
+    horizons_standardize_warning = function(w) {
+      caught[[length(caught) + 1]] <<- w
+      invokeRestart("muffleWarning")
+    }
+  )
+
+  ## One warning, naming how many points went and where (cli wraps the
+  ## message, so compare with the whitespace collapsed)
+  expect_length(caught, 1L)
+  msg <- gsub("\\s+", " ", conditionMessage(caught[[1]]))
+  expect_match(msg, "Dropped 138 grid points", fixed = TRUE)
+  expect_match(msg, "13 below the data's start at 651.5 (600 to 648 cm-1)", fixed = TRUE)
+  expect_match(msg, "125 above the data's end at 3500 (3504 to 4000 cm-1)", fixed = TRUE)
+
+  ## The covered multiples survive, and nothing beyond the data does
+  expect_identical(predictor_names(out), paste0("wn_", seq(3500, 652, by = -4)))
+  expect_identical(out$provenance$standardization$grid$n, 713L)
+
+})
+
+
+test_that("an axis already on the canonical grid is not re-interpolated", {
+
+  kssl <- make_axis_spectra(rev(KSSL_WN))
+  before <- as.matrix(kssl$data$analysis[, predictor_names(kssl)])
+
+  expect_output(
+    out <- standardize(kssl, resample = 2, trim = c(600, 4000)),
+    regexp = "already on the 2 cm"
+  )
+
+  ## Values untouched, bit for bit; a spline through its own knots would only
+  ## agree to about 1e-12
+  after <- as.matrix(out$data$analysis[, predictor_names(out)])
+  expect_identical(after, before)
+  expect_false(out$provenance$standardization$resampled)
+  expect_identical(out$provenance$standardization$grid$n, 1701L)
+
+  ## Stored increasing, the same spectra only change column order
+  inc     <- make_axis_spectra(KSSL_WN)
+  inc_out <- no_output(standardize(inc, resample = 2, trim = c(600, 4000)))
+  inc_in  <- as.matrix(inc$data$analysis[, predictor_names(inc)])
+
+  expect_identical(unname(as.matrix(inc_out$data$analysis[, predictor_names(inc_out)])),
+                   unname(inc_in[, rev(seq_len(ncol(inc_in)))]))
+
+})
+
+
+test_that("increasing-order input with baseline correction gives the decreasing-order result", {
+
+  ## The baseline helper reverses its output on the assumption of decreasing
+  ## input; before the sort this mirrored increasing spectra end to end and
+  ## still passed validation
+  inc <- make_axis_spectra(KSSL_WN, f = smooth_spectrum)
+  dec <- make_axis_spectra(rev(KSSL_WN), f = smooth_spectrum)
+
+  out_inc <- no_output(standardize(inc, resample = 4, baseline = TRUE))
+  out_dec <- no_output(standardize(dec, resample = 4, baseline = TRUE))
+
+  expect_identical(predictor_names(out_inc), predictor_names(out_dec))
+  expect_equal(as.matrix(out_inc$data$analysis[, predictor_names(out_inc)]),
+               as.matrix(out_dec$data$analysis[, predictor_names(out_dec)]))
+
+})
+
+
+test_that("interpolating a smooth spectrum onto the shifted grid stays on the true curve, edges included", {
+
+  moys <- make_axis_spectra(MOYS_WN, f = smooth_spectrum, n = 1)
+
+  for (res in c(4, 2, 1.5)) {
+
+    out <- no_output(standardize(moys, resample = res, trim = c(600, 4000)))
+    wn  <- as.numeric(sub("^wn_", "", predictor_names(out)))
+    got <- as.numeric(out$data$analysis[1, predictor_names(out)])
+
+    expect_lt(max(abs(got - smooth_spectrum(wn))), 1e-5)
+
+    ## Both ends by name: no end effect from the margin point or the bound
+    ends <- c(1, length(wn))
+    expect_lt(max(abs(got[ends] - smooth_spectrum(wn[ends]))), 1e-6)
+
+  }
+
+})
+
+
+test_that("non-integer resolutions give clean, stable column names", {
+
+  moys <- make_axis_spectra(MOYS_WN)
+
+  ## 1.5 cm-1: 3999, 3997.5, ..., 600
+  at_1.5 <- no_output(standardize(moys, resample = 1.5, trim = c(600, 4000)))
+  expect_identical(predictor_names(at_1.5), paste0("wn_", seq(3999, 600, by = -1.5)))
+
+  ## 0.1 cm-1: the expected names are built from integers, so no float
+  ## arithmetic reaches them
+  at_0.1 <- no_output(standardize(moys, resample = 0.1, trim = c(600, 610)))
+  k      <- 6100:6000
+  expect_identical(predictor_names(at_0.1),
+                   paste0("wn_", k %/% 10, ifelse(k %% 10 == 0, "", paste0(".", k %% 10))))
+
+  ## A step with no finite decimal form is snapped to six decimal places
+  fine     <- make_axis_spectra(seq(610, 590, by = -0.5))
+  at_third <- no_output(standardize(fine, resample = 1 / 3, trim = c(600, 601)))
+  expect_identical(predictor_names(at_third),
+                   c("wn_601", "wn_600.666667", "wn_600.333333", "wn_600"))
+
+})
+
+
+test_that("resample = NULL keeps trim-as-subset but still sorts", {
+
+  kssl <- make_axis_spectra(KSSL_WN)
+  out  <- no_output(standardize(kssl, resample = NULL, trim = c(1000, 2000)))
+
+  expect_identical(predictor_names(out), paste0("wn_", seq(2000, 1000, by = -2)))
+  expect_false(out$provenance$standardization$resampled)
+  expect_null(out$provenance$standardization$grid)
+
+  ## A subset, with no margin: 599.74 is outside c(600, 4000) and stays out
+  moys <- no_output(standardize(make_axis_spectra(MOYS_WN), resample = NULL, trim = c(600, 4000)))
+  wn   <- as.numeric(sub("^wn_", "", predictor_names(moys)))
+  expect_gte(min(wn), 600)
+  expect_lte(max(wn), 4000)
 
 })
 
