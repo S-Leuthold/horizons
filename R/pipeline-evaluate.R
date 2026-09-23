@@ -453,8 +453,8 @@ evaluate <- function(x,
 
     }
 
-    cat(paste0("\u2502  Split: ", n_train, " train / ", n_test,
-               " test (80/20, stratified)\n"))
+    cat(paste0("\u2502  Split: ", n_train, " train / ", n_test, " test (",
+               round(100 * SPLIT_PROP), "/", round(100 * (1 - SPLIT_PROP)), ", stratified)\n"))
     cat(paste0("\u2502  Tuning: ", cv_folds, "-fold CV, grid = ",
                tuning$grid_size, ", bayesian = ",
                tuning$bayesian_iter, "\n"))

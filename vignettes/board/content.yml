@@ -9,6 +9,10 @@
 # `path#heading-slug` for a markdown heading (slug must exist). Paths are
 # relative to the package root; `../dev/...` reaches the project's dev tree.
 #
+# Split shares are never typed: write {split_ratio}, {split_train},
+# {split_test}, {calib_ratio}, {calib_held} or {fit_rows_share}, and the
+# generator fills them from SPLIT_PROP and CALIB_PROP in R/constants.R.
+#
 # Spec: ../dev/specs/v1-refactor/pipeline-board.md
 
 lanes:
@@ -732,8 +736,8 @@ verbs:
     class_in: horizons_data
     class_out: horizons_eval
     summary: >-
-      Screens every configuration in the grid. Holds out 20 % of the rows as a
-      test set, tunes each configuration on the remaining 80 % by a Latin
+      Screens every configuration in the grid. Holds out {split_test} of the rows as a
+      test set, tunes each configuration on the remaining {split_train} by a Latin
       hypercube grid and then Bayesian optimization, scores it on the test set,
       and ranks the configurations by the cross-validated metric at each one's
       chosen hyperparameters. The test-set numbers are reported but never used
@@ -776,7 +780,7 @@ verbs:
         source: R/pipeline-evaluate.R#L107
       - step: Resolves the parallel axis against the registered plan, downgrading to sequential with a warning when the plan offers fewer than two workers, and pins BLAS and thread counts in the parent before any dispatch.
         source: R/pipeline-evaluate.R#L167
-      - step: Splits 80/20 stratified on the outcome (falling back to unstratified), builds cv_folds stratified folds on the training part, and fingerprints the training rows plus the outcome name so a checkpoint from other rows cannot be resumed.
+      - step: Splits {split_ratio} stratified on the outcome (falling back to unstratified), builds cv_folds stratified folds on the training part, and fingerprints the training rows plus the outcome name so a checkpoint from other rows cannot be resumed.
         source: R/pipeline-evaluate.R#L203
       - step: Loads checkpoints from the output directory, dropping rows for configurations no longer in the grid or scored under an older scoring schema, aborting on a fingerprint mismatch, and warning once for legacy checkpoints with no fingerprint.
         source: R/pipeline-evaluate.R#L272
@@ -840,11 +844,11 @@ verbs:
     class_in: horizons_eval
     class_out: horizons_fit
     summary: >-
-      Takes the top configurations from evaluate(), draws a fresh 80/20 split
+      Takes the top configurations from evaluate(), draws a fresh {split_ratio} split
       independent of evaluate()'s, re-tunes each with warm-started Bayesian
       optimization, keeps their out-of-fold predictions for stacking (and for
       the residual correction, once that is built), fits the final model on the
-      training part, and scores it on the new test part. With UQ or AD on, a further 20 % of the training
+      training part, and scores it on the new test part. With UQ or AD on, a further {calib_held} of the training
       part is held out to calibrate conformal intervals and the applicability
       domain. Promotes the object to horizons_fit.
     args:
@@ -858,7 +862,7 @@ verbs:
         touch: Rarely; defaults to the metric evaluate() ranked on, read from the cross-validated column.
         source: R/pipeline-fit.R#L119
       - name: compute_uq
-        touch: FALSE to skip conformal intervals. The fit regains the whole training part only when compute_ad is FALSE too, because the calibration split is drawn whenever either capability is on, and it is what shrinks the rows with out-of-fold predictions from 80 % to 64 %.
+        touch: FALSE to skip conformal intervals. The fit regains the whole training part only when compute_ad is FALSE too, because the calibration split is drawn whenever either capability is on, and it is what shrinks the rows with out-of-fold predictions from {split_train} to {fit_rows_share}.
         source: R/pipeline-fit.R#L242
       - name: compute_ad
         touch: FALSE to skip the applicability-domain bundle; it shares the calibration split with UQ.
@@ -877,9 +881,9 @@ verbs:
         source: R/pipeline-fit.R#L71
       - step: Drops rows whose outcome is NA by the rule evaluate() applies, and says how many in the tree, so the two verbs split the same frame.
         source: R/pipeline-fit.R#L179
-      - step: Draws Split F, 80/20 stratified, at seed + 1, and warns if its test rows are the same samples as evaluate()'s.
+      - step: Draws Split F, {split_ratio} stratified, at seed + 1, and warns if its test rows are the same samples as evaluate()'s.
         source: R/pipeline-fit.R#L192
-      - step: If UQ or AD is on, splits the training part 80/20 again into the fit rows and a calibration set; both capabilities are disabled together if the calibration set is under 30 rows.
+      - step: If UQ or AD is on, splits the training part {calib_ratio} again into the fit rows and a calibration set; both capabilities are disabled together if the calibration set is under 30 rows.
         source: R/pipeline-fit.R#L242
       - step: Builds cv_folds stratified folds on the fit rows.
         source: R/pipeline-fit.R#L291
@@ -921,7 +925,7 @@ verbs:
         does: records the failure in models$results and continues; butchering failure falls back to storing the unbutchered workflow
         source: R/fit-single-config.R#L75
     evidence:
-      - claim: out-of-fold predictions cover 80 % of the rows with an observed outcome with UQ and AD off, and 64 % with them on
+      - claim: out-of-fold predictions cover {split_train} of the rows with an observed outcome with UQ and AD off, and {fit_rows_share} with them on
         where: dev/experiments/2026-09-factorial/README.md#same-afternoon-2026-09-22-the-library-ships-whole-and-the-correction-from-the-pool-fit
       - claim: seeding Split F with the same seed as evaluate() reproduced its partition exactly
         where: R/pipeline-fit.R#L763
