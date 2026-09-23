@@ -10,6 +10,10 @@
 #' This is the render layer — it owns all console output. The capture layer
 #' (`fit_single_config()`) runs silently and returns structured results.
 #'
+#' Rows whose outcome is `NA` are dropped before Split F is drawn, by the same
+#' rule `evaluate()` applies, so the two verbs model the same rows; the count
+#' is reported in the console tree when `verbose = TRUE`.
+#'
 #' @param x A `horizons_eval` object (output of `evaluate()`).
 #' @param n_best Integer. Number of top configurations to re-tune. Default 5.
 #' @param metric Character or NULL. Metric for ranking the candidate
@@ -152,10 +156,29 @@ fit <- function(x,
   ## Extract references
   role_map     <- x$data$role_map
   outcome_col  <- role_map$variable[role_map$role == "outcome"]
-  analysis     <- x$data$analysis
   all_configs  <- x$config$configs
   tuning       <- x$config$tuning
   cv_folds     <- tuning$cv_folds
+
+  ## The identifier column: the "id" role, falling back to sample_id. The
+  ## coincidence guard compares partitions by it and row_index maps to it.
+  id_col <- role_map$variable[role_map$role == "id"]
+
+  if (length(id_col) == 0) {
+
+    id_col <- "sample_id"
+
+  } else {
+
+    id_col <- id_col[1]
+
+  }
+
+  ## Model the rows evaluate() modelled: the same rule on the same table, so
+  ## NA-outcome rows never reach Split F and both splits index one frame (#67).
+  modelled  <- outcome_complete_rows(x$data$analysis, outcome_col)
+  analysis  <- modelled$data
+  n_dropped <- modelled$n_dropped
 
   ## -----------------------------------------------------------------------
   ## Step 1: Data partitioning — Split F (new, independent from evaluate)
@@ -192,12 +215,14 @@ fit <- function(x,
 
   ## Visible guard: a caller can still make the partitions coincide (for
   ## example fit(seed = evaluate_seed - 1L)). Warn rather than abort; the
-  ## test metrics are then post-selection and the user should know.
+  ## test metrics are then post-selection and the user should know. The test
+  ## partitions are compared as sets of ids rather than in_id positions, which
+  ## name the same rows only when both splits index the same frame (#67).
   eval_split <- x$evaluation$split
 
-  if (!is.null(eval_split) && !is.null(eval_split$in_id) &&
-      identical(sort(as.integer(split_F$in_id)),
-                sort(as.integer(eval_split$in_id)))) {
+  if (inherits(eval_split, "rsplit") &&
+      id_col %in% names(test_F) && id_col %in% names(eval_split$data) &&
+      setequal(test_F[[id_col]], rsample::testing(eval_split)[[id_col]])) {
 
     cli::cli_warn(c(
       "!" = "fit()'s train/test partition is identical to evaluate()'s.",
@@ -290,6 +315,15 @@ fit <- function(x,
     cat(paste0("\u250C fit ",
                paste(rep("\u2500", 57), collapse = ""), "\n"))
     cat("\u2502\n")
+
+    if (n_dropped > 0) {
+
+      cat(paste0("\u2502  ",
+                 cli::col_yellow("Dropped ", n_dropped,
+                                  " rows with NA outcome"), "\n"))
+
+    }
+
     cat(paste0(
       "\u2502  Re-tuning top ", n_best, " of ",
       nrow(eval_results), " configurations\n"
@@ -540,18 +574,6 @@ fit <- function(x,
   })
 
   ## Build row_index: .row → id mapping from train_Fit
-  id_col <- role_map$variable[role_map$role == "id"]
-
-  if (length(id_col) == 0) {
-
-    id_col <- "sample_id"
-
-  } else {
-
-    id_col <- id_col[1]
-
-  }
-
   row_index <- tibble::tibble(
     .row      = seq_len(nrow(train_Fit)),
     sample_id = train_Fit[[id_col]]

@@ -69,4 +69,8 @@ components.
 
 This is the render layer — it owns all console output. The capture layer
 (\code{fit_single_config()}) runs silently and returns structured results.
+
+Rows whose outcome is \code{NA} are dropped before Split F is drawn, by the same
+rule \code{evaluate()} applies, so the two verbs model the same rows; the count
+is reported in the console tree when \code{verbose = TRUE}.
 }

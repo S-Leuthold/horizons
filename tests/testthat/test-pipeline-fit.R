@@ -9,7 +9,8 @@
 ## Helper: build a minimal horizons_eval object ready for fit()
 ## ---------------------------------------------------------------------------
 
-make_fit_object <- function(n = 60, n_wn = 10, n_configs = 2, seed = 42) {
+make_fit_object <- function(n = 60, n_wn = 10, n_configs = 2, seed = 42,
+                            n_na = 0L) {
 
   set.seed(seed)
 
@@ -23,6 +24,9 @@ make_fit_object <- function(n = 60, n_wn = 10, n_configs = 2, seed = 42) {
 
   ## Outcome with weak signal from first 3 predictors
   df$SOC <- 2 + rowMeans(spec_mat[, 1:min(3, n_wn)]) * 0.5 + rnorm(n, sd = 0.5)
+
+  ## Rows with no measured outcome, as add_response() leaves them (#67)
+  if (n_na > 0) df$SOC[seq_len(n_na)] <- NA_real_
 
   ## Role map
   roles <- tibble::tibble(
@@ -713,6 +717,78 @@ describe("fit() - split independence from evaluate()", {
 
     expect_identical(fit_split_seed(307L), 308L)
     expect_identical(fit_split_seed(42), 43L)
+
+  })
+
+})
+
+
+## =========================================================================
+## NA-outcome rows are dropped before Split F (#67)
+## =========================================================================
+## evaluate() drops rows whose outcome is NA. fit() used to split the
+## unfiltered table, so its partition was over a different frame, the
+## NA-outcome rows reached the fit, and the coincidence guard compared in_id
+## positions in frames of different length, so it could never fire.
+
+describe("fit() - NA-outcome rows (#67)", {
+
+  obj <- make_fit_object(n = 60, n_configs = 1, seed = 42, n_na = 6L)
+  obj$config$tuning$final_bayesian_iter <- 0L
+
+  na_ids <- obj$data$analysis$sample_id[is.na(obj$data$analysis$SOC)]
+
+  ## One verbose run at a seed that does not collide with evaluate()'s split:
+  ## keep the console tree and every warning for the assertions below.
+  warns <- character()
+  out   <- utils::capture.output(
+    r <- withCallingHandlers(
+      fit(obj, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE,
+          verbose = TRUE, seed = 42L),
+      warning = function(w) {
+        warns <<- c(warns, conditionMessage(w))
+        invokeRestart("muffleWarning")
+      }
+    )
+  )
+
+  it("keeps NA-outcome rows out of Split F and the row index", {
+
+    expect_length(na_ids, 6L)
+    expect_false(any(na_ids %in% r$models$split$data$sample_id))
+    expect_false(anyNA(r$models$split$data$SOC))
+    expect_false(any(na_ids %in% r$models$row_index$sample_id))
+
+  })
+
+  it("draws Split F from the frame evaluate() split", {
+
+    expect_setequal(r$models$split$data$sample_id,
+                    obj$evaluation$split$data$sample_id)
+
+  })
+
+  it("reports the rows it dropped in the console tree", {
+
+    expect_true(any(grepl("Dropped 6 rows with NA outcome", out, fixed = TRUE)))
+
+  })
+
+  it("warns on a genuine coincidence with evaluate()'s partition, and not otherwise", {
+
+    ## evaluate() split at seed 42; fit(seed = 41) draws Split F at 42 over
+    ## the same filtered frame, so the partitions genuinely coincide.
+    expect_warning(
+      keep_only_warning(
+        fit(obj, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE,
+            verbose = FALSE, seed = 41L),
+        "identical to evaluate"
+      ),
+      "identical to evaluate"
+    )
+
+    ## At seed 42 they differ, and the guard stays quiet.
+    expect_false(any(grepl("identical to evaluate", warns)))
 
   })
 

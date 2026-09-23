@@ -132,26 +132,12 @@ evaluate <- function(x,
   ## -----------------------------------------------------------------------
   ## Step 2: Handle NA outcome rows
   ## -----------------------------------------------------------------------
+  ## fit() applies the same rule to the same table, so the two verbs model
+  ## the same rows (#67).
 
-  outcome_vals <- analysis[[outcome_col]]
-  na_mask      <- is.na(outcome_vals)
-
-  if (all(na_mask)) {
-
-    rlang::abort(
-      "All outcome values are NA. Cannot evaluate models."
-    )
-
-  }
-
-  n_dropped <- 0L
-
-  if (any(na_mask)) {
-
-    n_dropped <- sum(na_mask)
-    analysis  <- analysis[!na_mask, , drop = FALSE]
-
-  }
+  modelled  <- outcome_complete_rows(analysis, outcome_col)
+  analysis  <- modelled$data
+  n_dropped <- modelled$n_dropped
 
   ## -----------------------------------------------------------------------
   ## Step 3: Validate minimum sample size
@@ -1209,6 +1195,53 @@ rank_configs_by_cv <- function(results, metric) {
   key <- if (metric %in% HIGHER_BETTER_METRICS) -vals else vals
 
   results[order(key, results$config_id), , drop = FALSE]
+
+}
+
+## ---------------------------------------------------------------------------
+## outcome_complete_rows — the one row rule evaluate() and fit() share
+## ---------------------------------------------------------------------------
+
+#' Keep the analysis rows whose outcome is observed
+#'
+#' @description
+#' Drops the rows whose outcome is `NA`. This is the single rule for which
+#' rows `evaluate()` and `fit()` model. Both apply it to `x$data$analysis`,
+#' which cannot change between the two verbs because `set_analysis()` refuses
+#' a promoted object, so both draw their splits from the same frame (#67).
+#' Before this, `fit()` split the unfiltered table: its partition was over
+#' different rows from `evaluate()`'s, and NA-outcome rows reached the fit.
+#'
+#' Rows are dropped per outcome, here, rather than when responses are joined.
+#' An object can carry several responses (`select_training()` puts every pool
+#' response on one object), and a row missing one of them may carry another.
+#'
+#' @param analysis Data frame. The object's analysis table.
+#' @param outcome_col Character. Name of the outcome column.
+#' @return List with `data` (the rows whose outcome is not `NA`, in their
+#'   original order) and `n_dropped` (integer, the rows removed). Aborts with
+#'   class `horizons_input_error` when every outcome is `NA`.
+#' @keywords internal
+#' @noRd
+outcome_complete_rows <- function(analysis, outcome_col) {
+
+  na_mask <- is.na(analysis[[outcome_col]])
+
+  if (all(na_mask)) {
+
+    cli::cli_abort(c(
+      "All outcome values are NA, so there are no rows to model.",
+      "i" = "Outcome column: {.field {outcome_col}}."
+    ), class = "horizons_input_error")
+
+  }
+
+  ## Return the table untouched when nothing is dropped, so an object without
+  ## NA outcomes splits exactly as it did before this helper existed.
+  list(
+    data      = if (any(na_mask)) analysis[!na_mask, , drop = FALSE] else analysis,
+    n_dropped = sum(na_mask)
+  )
 
 }
 
