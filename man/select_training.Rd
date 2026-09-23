@@ -41,7 +41,8 @@ named vector with one entry per property. Default: \code{400}.}
 \code{"global"}. Default: \code{"batch"}.}
 
 \item{properties}{\verb{character or NULL.} Response columns of the pool to
-draw for. \code{NULL} means all of them. Default: \code{NULL}.}
+draw for. \code{NULL} means all of them. Each needs at least one measured
+pool row, under every scope. Default: \code{NULL}.}
 
 \item{snv}{\code{logical.} SNV in the similarity space. Default: \code{TRUE}.}
 
@@ -138,7 +139,9 @@ the record (\code{x$selection$groups}), not in the shape of the return:
 under \code{cluster_min} merged into the nearest); one group per cluster.
 \item \code{"sample"}: one group per target, its own \code{k} nearest.
 \item \code{"global"}: no draw; the whole pool, kept so the comparison is one
-argument away.
+argument away. \code{k} only sets how many rows the recorded \code{mean_k}
+averages over, so a \code{k} above a property's measured rows is capped
+there under global, where the drawing scopes refuse it.
 }
 
 For \code{"cluster"} and \code{"sample"} the return is still the single union, and
@@ -194,11 +197,13 @@ target's neighbourhood, spares are fetched so the target still reaches
 reason. Except under \code{scope = "global"}, the flagged rows are also
 subtracted from the returned object, since a row excluded from one
 neighbourhood would otherwise walk back in through any other target that
-drew it. Under \code{scope = "global"} the same check runs, per property and
-with the same width, and is reported, but the rows stay, because global
-returns the whole pool by definition; its exclusions and target distances
-are the ones a batch-scope call on the same targets and pool records under
-\code{space_rows = "all"}. The membership table keeps the subtracted rows with
+drew it. Under \code{scope = "global"} the same check runs, per property, in
+the same space and with the same width, and its exclusions and target
+distances are the ones a batch-scope call with the same arguments
+records. The flagged rows are recorded but stay in the returned rows,
+because global returns the whole pool by definition, so a comparison that
+scores global against batch has to act on \code{x$selection$exclusions}
+itself. The membership table keeps the subtracted rows with
 \code{retained = FALSE} rather than dropping them, so the record still says
 what each neighbourhood was.
 

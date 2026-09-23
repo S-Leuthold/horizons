@@ -36,7 +36,9 @@
 #'   under `cluster_min` merged into the nearest); one group per cluster.
 #' * `"sample"`: one group per target, its own `k` nearest.
 #' * `"global"`: no draw; the whole pool, kept so the comparison is one
-#'   argument away.
+#'   argument away. `k` only sets how many rows the recorded `mean_k`
+#'   averages over, so a `k` above a property's measured rows is capped
+#'   there under global, where the drawing scopes refuse it.
 #'
 #' For `"cluster"` and `"sample"` the return is still the single union, and
 #' fitting one model per group is the caller's loop over
@@ -91,11 +93,13 @@
 #' reason. Except under `scope = "global"`, the flagged rows are also
 #' subtracted from the returned object, since a row excluded from one
 #' neighbourhood would otherwise walk back in through any other target that
-#' drew it. Under `scope = "global"` the same check runs, per property and
-#' with the same width, and is reported, but the rows stay, because global
-#' returns the whole pool by definition; its exclusions and target distances
-#' are the ones a batch-scope call on the same targets and pool records under
-#' `space_rows = "all"`. The membership table keeps the subtracted rows with
+#' drew it. Under `scope = "global"` the same check runs, per property, in
+#' the same space and with the same width, and its exclusions and target
+#' distances are the ones a batch-scope call with the same arguments
+#' records. The flagged rows are recorded but stay in the returned rows,
+#' because global returns the whole pool by definition, so a comparison that
+#' scores global against batch has to act on `x$selection$exclusions`
+#' itself. The membership table keeps the subtracted rows with
 #' `retained = FALSE` rather than dropping them, so the record still says
 #' what each neighbourhood was.
 #'
@@ -136,7 +140,8 @@
 #' @param scope `character.` `"batch"`, `"cluster"`, `"sample"` or
 #'   `"global"`. Default: `"batch"`.
 #' @param properties `character or NULL.` Response columns of the pool to
-#'   draw for. `NULL` means all of them. Default: `NULL`.
+#'   draw for. `NULL` means all of them. Each needs at least one measured
+#'   pool row, under every scope. Default: `NULL`.
 #' @param snv `logical.` SNV in the similarity space. Default: `TRUE`.
 #' @param derivative `integer.` Savitzky-Golay derivative order in the
 #'   similarity space; `0` disables the filter. Default: `1`.
@@ -284,8 +289,8 @@ select_training <- function(x, pool,
 
   ## A twin sits below this fraction of its reference distance. At 1 or more
   ## the threshold reaches the reference itself and flags ordinary
-  ## neighbours, and the global branch's claim to hold every twin in its
-  ## fetch rests on the threshold sitting below the reference.
+  ## neighbours, and global's claim to hold every twin in its fetch (Step 3)
+  ## rests on the threshold sitting below the reference.
 
   ratio_ok <- is.numeric(twin_ratio) && length(twin_ratio) == 1L &&
               is.finite(twin_ratio)  && twin_ratio > 0 && twin_ratio < 1
@@ -412,6 +417,24 @@ select_training <- function(x, pool,
   pool_ids <- pool_rc$data$analysis$sample_id
   resp_tbl <- pool_rc$data$analysis[, c("sample_id", properties), drop = FALSE]
 
+  ## A property no pool row has measured has no rows to draw from, no rows
+  ## to check twins against and no rows to fit a space on, under any scope.
+  ## Stop here, before a zero-row space fails with a message naming none of
+  ## that.
+
+  n_measured <- vapply(properties, function(p) sum(!is.na(resp_tbl[[p]])), integer(1))
+
+  unmeasured <- properties[n_measured == 0L]
+
+  if (length(unmeasured)) {
+
+    cli::cli_abort(c(
+      "{.arg pool} has no measured rows for {.field {unmeasured}}",
+      "i" = "Drop {cli::qty(unmeasured)}{?it/them} from {.arg properties}, or add the lab values to the pool first"
+    ), class = "horizons_input_error")
+
+  }
+
   ## Units, before SNV erases the evidence ----------------------------------
 
   units <- check_photometric_units(rc$matrix, tm$matrix)
@@ -443,7 +466,7 @@ select_training <- function(x, pool,
 
   spaces_by_property <- NULL
 
-  if (space_rows == "measured" && scope != "global") {
+  if (space_rows == "measured") {
 
     spaces_by_property <- lapply(properties, function(p) {
 
@@ -523,66 +546,36 @@ select_training <- function(x, pool,
   ## Step 3: Draw
   ## ---------------------------------------------------------------------------
 
-  if (scope == "global") {
+  ## Global draws nothing, but the twin check still runs: global is the
+  ## control arm of the batch-versus-global comparison, and a control arm
+  ## whose leakage was never measured biases that comparison in a fixed
+  ## direction. So global runs the same draw as batch, in the same space
+  ## under either space_rows, for its record and not its rows: the
+  ## exclusions and target_distances are kept, row for row the ones batch
+  ## records, and the membership and short draws are discarded below. The
+  ## flagged rows stay in the return, because global returns the whole pool
+  ## by definition.
+  ##
+  ## Global trains on every measured row, so it needs every twin in the
+  ## pool, not only those before a k-th kept row. draw_neighbours() records
+  ## every flagged column it fetched. A flag is a distance threshold on a
+  ## sorted row, so the flagged columns are always the leading run and its
+  ## k-th-row cutoff never cuts one. And twin_ratio is validated below 1, so
+  ## when the reference distance is positive the threshold sits below it and
+  ## no row past the reference width can be flagged: the fetch holds every
+  ## twin there is. A reference of zero, which takes exact copies in three
+  ## quarters of the width (38 at 50), flags on d == 0 alone, and an exact
+  ## copy beyond the fetch then goes unrecorded.
+  ##
+  ## k is capped at each property's measured rows under global, because
+  ## global draws nothing and k only sets the reach of mean_k; the drawing
+  ## scopes refuse such a k in draw_neighbours().
 
-    ## No draw, but the twin check still runs: global is the control arm of
-    ## the batch-versus-global comparison, and a control arm whose leakage
-    ## was never measured biases that comparison in a fixed direction. The
-    ## rows stay, because global returns the whole pool by definition.
+  k_draw <- if (scope == "global") pmin(k_by, n_measured) else k_by
 
-    ## The check is draw_neighbours() itself, run for its record and not its
-    ## draw: per property, on that property's measured rows, with the same
-    ## reference width, reference and flags as every other scope. An exclusion
-    ## here is the one batch records for the same target and pool in the
-    ## all-rows space, so selection$exclusions compares row for row by scope.
-    ## target_distances come from the same call, after the twins and over
-    ## the k rows a batch-scope run would have drawn. The membership is
-    ## discarded: global has no neighbourhoods.
-    ##
-    ## Global trains on every measured row, so it needs every twin in the
-    ## pool, not only those before a k-th kept row. draw_neighbours() records
-    ## every flagged column it fetched. A flag is a distance threshold on a
-    ## sorted row, so the flagged columns are always the leading run and its
-    ## k-th-row cutoff never cuts one. And twin_ratio is validated below 1, so
-    ## the threshold sits below the reference's 75th percentile and no row past
-    ## the reference width can be flagged: the fetch holds every twin there is.
-    ##
-    ## k is capped at each property's measured rows, because global draws
-    ## nothing and a k beyond them is not an error here. A property with no
-    ## measured row has nothing to check against and is skipped.
+  if (is.null(spaces_by_property)) {
 
-    n_measured <- vapply(properties, function(p) sum(!is.na(resp_tbl[[p]])), integer(1))
-    checked    <- properties[n_measured > 0L]
-
-    check <- if (length(checked)) {
-      draw_neighbours(St, sp$scores, responses = resp_tbl,
-                      k = pmin(k_by[checked], n_measured[checked]),
-                      properties = checked, metric = metric, sdev = sp$sdev,
-                      chunk_size = chunk_size, twin_ratio = twin_ratio,
-                      space_label = "all")
-    } else {
-      NULL
-    }
-
-    draw <- list(
-      membership       = tibble::tibble(target_id = character(), property = character(),
-                                        space = character(), pool_id = character(),
-                                        distance = numeric(), rank = integer(),
-                                        retained = logical()),
-      target_distances = if (is.null(check)) {
-        tibble::tibble(target_id = character(), property = character(), space = character(),
-                       nearest = numeric(), mean_k = numeric())
-      } else {
-        check$target_distances
-      },
-      exclusions       = if (is.null(check)) empty_exclusions() else check$exclusions,
-      short_draws      = empty_short_draws(),
-      k                = k_by
-    )
-
-  } else if (is.null(spaces_by_property)) {
-
-    draw <- draw_neighbours(St, sp$scores, responses = resp_tbl, k = k_by,
+    draw <- draw_neighbours(St, sp$scores, responses = resp_tbl, k = k_draw,
                             properties = properties, metric = metric, sdev = sp$sdev,
                             chunk_size = chunk_size, twin_ratio = twin_ratio,
                             space_label = "all")
@@ -596,7 +589,7 @@ select_training <- function(x, pool,
 
       s <- spaces_by_property[[p]]
 
-      draw_neighbours(s$St, s$space$scores, responses = resp_tbl, k = k_by[p],
+      draw_neighbours(s$St, s$space$scores, responses = resp_tbl, k = k_draw[p],
                       properties = p, metric = metric, sdev = s$space$sdev,
                       chunk_size = chunk_size, twin_ratio = twin_ratio,
                       space_label = p)
@@ -610,6 +603,17 @@ select_training <- function(x, pool,
       short_draws      = dplyr::bind_rows(lapply(per_property, `[[`, "short_draws")),
       k                = k_by
     )
+
+  }
+
+  if (scope == "global") {
+
+    draw$membership  <- tibble::tibble(target_id = character(), property = character(),
+                                       space = character(), pool_id = character(),
+                                       distance = numeric(), rank = integer(),
+                                       retained = logical())
+    draw$short_draws <- empty_short_draws()
+    draw$k           <- k_by
 
   }
 
@@ -669,6 +673,32 @@ select_training <- function(x, pool,
     left             <- setdiff(union_ids, excluded_ids)
     n_excluded_union <- length(union_ids) - length(left)
     union_ids        <- left
+
+  }
+
+  ## A property whose every drawn row was some target's twin has no training
+  ## rows left, and the subset below would fail on an empty keep with a
+  ## message naming neither the property nor the twin rule. At a twin_ratio
+  ## near 1 the threshold reaches ordinary neighbours and this is what
+  ## happens, so say that.
+
+  if (scope != "global") {
+
+    emptied <- properties[vapply(properties, function(p) {
+
+      drawn <- unique(membership$pool_id[membership$property == p])
+      length(drawn) > 0L && !any(drawn %in% union_ids)
+
+    }, logical(1))]
+
+    if (length(emptied)) {
+
+      cli::cli_abort(c(
+        "Every row drawn for {.field {emptied}} was flagged as some target's twin, so the training set has none left for {cli::qty(emptied)}{?it/them}",
+        "i" = "A twin sits below {.arg twin_ratio} = {twin_ratio} times its target's reference distance, and at this value ordinary neighbours are being flagged; lower it (the default is {SELECT_TWIN_RATIO})"
+      ), class = "horizons_input_error")
+
+    }
 
   }
 
