@@ -32,6 +32,9 @@ make_single_response_hd <- function() {
     role     = c("id", "predictor", "predictor", "predictor", "response")
   )
 
+  ## Downstream slots in the constructor's shape
+  contract <- new_horizons_data()
+
   obj <- list(
     data = list(
       analysis     = analysis,
@@ -54,9 +57,9 @@ make_single_response_hd <- function() {
       tuning    = list(grid_size = 10L, bayesian_iter = 15L, cv_folds = 5L)
     ),
     validation = list(passed = NULL, checks = NULL, timestamp = NULL),
-    evaluation = list(results = NULL),
-    models     = list(workflows = NULL),
-    ensemble   = list(stack = NULL),
+    evaluation = contract$evaluation,
+    models     = contract$models,
+    ensemble   = contract$ensemble,
     artifacts  = list(cache_dir = NULL)
   )
 
@@ -84,6 +87,9 @@ make_multi_response_hd <- function() {
     role     = c("id", "predictor", "predictor", "predictor", "response", "response")
   )
 
+  ## Downstream slots in the constructor's shape
+  contract <- new_horizons_data()
+
   obj <- list(
     data = list(
       analysis     = analysis,
@@ -106,9 +112,9 @@ make_multi_response_hd <- function() {
       tuning    = list(grid_size = 10L, bayesian_iter = 15L, cv_folds = 5L)
     ),
     validation = list(passed = NULL, checks = NULL, timestamp = NULL),
-    evaluation = list(results = NULL),
-    models     = list(workflows = NULL),
-    ensemble   = list(stack = NULL),
+    evaluation = contract$evaluation,
+    models     = contract$models,
+    ensemble   = contract$ensemble,
     artifacts  = list(cache_dir = NULL)
   )
 
@@ -138,6 +144,9 @@ make_covariate_hd <- function() {
                  "response", "covariate", "covariate")
   )
 
+  ## Downstream slots in the constructor's shape
+  contract <- new_horizons_data()
+
   obj <- list(
     data = list(
       analysis     = analysis,
@@ -160,9 +169,9 @@ make_covariate_hd <- function() {
       tuning    = list(grid_size = 10L, bayesian_iter = 15L, cv_folds = 5L)
     ),
     validation = list(passed = NULL, checks = NULL, timestamp = NULL),
-    evaluation = list(results = NULL),
-    models     = list(workflows = NULL),
-    ensemble   = list(stack = NULL),
+    evaluation = contract$evaluation,
+    models     = contract$models,
+    ensemble   = contract$ensemble,
     artifacts  = list(cache_dir = NULL)
   )
 

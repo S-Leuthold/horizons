@@ -169,30 +169,38 @@ new_horizons_data <- function(analysis        = NULL,
     ## Section 5: EVALUATION — Model comparison results (horizons_eval+)
     ## -------------------------------------------------------------------------
 
-    evaluation = list(results     = NULL,
-                      best_config = NULL,
-                      rank_metric = NULL,
-                      backend     = NULL,
-                      runtime     = NULL,
-                      timestamp   = NULL),
+    ## Populated by evaluate(); keys mirror what it writes.
+    evaluation = list(results          = NULL,  ## tibble: one row per config
+                      best_config      = NULL,  ## character: top config_id
+                      rank_metric      = NULL,  ## character: metric configs were ranked by
+                      split            = NULL,  ## rsplit: train/test partition fit() reuses
+                      n_train          = NULL,  ## integer
+                      n_test           = NULL,  ## integer
+                      workers          = NULL,  ## integer or NA: worker count of the plan
+                      parallelize_over = NULL,  ## character: axis actually parallelized
+                      runtime_secs     = NULL,  ## numeric
+                      timestamp        = NULL), ## POSIXct
 
     ## -------------------------------------------------------------------------
     ## Section 6: MODELS — Finalized models + UQ (horizons_fit+)
     ## -------------------------------------------------------------------------
 
-    models = list(workflows        = NULL,  ## list of butchered fitted workflows
-                  n_models         = NULL,  ## integer
-                  best_config      = NULL,  ## character: top config_id (best-first order)
-                  rank_metric      = NULL,  ## character: metric configs were ranked by
-                  predictor_schema = NULL,  ## character: training-axis predictor columns
-                  response_bound   = NULL,  ## numeric: deploy-time winsorization bound (max truth * margin)
-                  cv_predictions   = NULL,  ## tibble: .row, .fold, config_id, .pred, .pred_trans, truth
-                  results          = NULL,  ## tibble: config_id, status, degraded, metrics, etc.
-                  split            = NULL,  ## rsplit: Split F (train_F / test_F)
-                  row_index        = NULL,  ## tibble: .row \u2192 sample_id mapping
-                  uq               = NULL,  ## list of UQ bundles (one per config), or NULL
-                  timestamp        = NULL,  ## POSIXct
-                  runtime_secs     = NULL), ## numeric
+    ## Populated by fit(); keys mirror what it writes.
+    models = list(workflows         = NULL,  ## list of butchered fitted workflows
+                  n_models          = NULL,  ## integer
+                  best_config       = NULL,  ## character: top config_id (best-first order)
+                  rank_metric       = NULL,  ## character: metric configs were ranked by
+                  predictor_schema  = NULL,  ## character: training-axis predictor columns
+                  response_bound    = NULL,  ## numeric: deploy-time winsorization bound (max truth * margin)
+                  cv_predictions    = NULL,  ## tibble: .row, .fold, config_id, .pred, .pred_trans, truth
+                  results           = NULL,  ## tibble: config_id, status, degraded, metrics, etc.
+                  split             = NULL,  ## rsplit: Split F (train_F / test_F)
+                  row_index         = NULL,  ## tibble: .row \u2192 sample_id mapping
+                  uq                = NULL,  ## list of UQ bundles (one per config), or NULL
+                  ad                = NULL,  ## list of AD bundles (one per config), or NULL
+                  selection_present = NULL,  ## logical: training rows came from select_training()
+                  timestamp         = NULL,  ## POSIXct
+                  runtime_secs      = NULL), ## numeric
 
     ## -------------------------------------------------------------------------
     ## Section 7: ENSEMBLE — Optional ensemble (horizons_ensemble)
@@ -2585,9 +2593,9 @@ summary.horizons_data <- function(object, ...) {
     }
 
     ## Runtime
-    if (!is.null(x$evaluation$runtime)) {
+    if (!is.null(x$evaluation$runtime_secs)) {
 
-      cat(paste0("   \u2514\u2500 Runtime: ", round(x$evaluation$runtime, 1), " sec\n"))
+      cat(paste0("   \u2514\u2500 Runtime: ", round(x$evaluation$runtime_secs, 1), " sec\n"))
 
     } else {
 

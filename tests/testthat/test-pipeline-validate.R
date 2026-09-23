@@ -104,7 +104,9 @@ make_configured_hd <- function(n_samples      = 100L,
 
   }
 
-  ## Assemble object
+  ## Assemble object; downstream slots in the constructor's shape
+  contract <- new_horizons_data()
+
   obj <- list(
     data = list(
       analysis     = analysis,
@@ -138,9 +140,9 @@ make_configured_hd <- function(n_samples      = 100L,
         removed        = FALSE
       )
     ),
-    evaluation = list(results = NULL),
-    models     = list(workflows = NULL),
-    ensemble   = list(stack = NULL),
+    evaluation = contract$evaluation,
+    models     = contract$models,
+    ensemble   = contract$ensemble,
     artifacts  = list(cache_dir = NULL)
   )
 
