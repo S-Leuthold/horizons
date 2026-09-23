@@ -48,6 +48,12 @@ describe("evaluate() parallel worker footprint", {
 
   it("serializes the worker function without dragging data", {
 
+    ## covr instruments every function with trace calls, which puts the worker
+    ## at ~1.02 MB in the coverage run (2026-09-21). The guard is for data in
+    ## the closure, and covr's instrumentation is not that.
+    testthat::skip_if(identical(Sys.getenv("R_COVR"), "true"),
+                      "covr instrumentation inflates the serialized function")
+
     worker <- horizons:::evaluate_config_worker
 
     expect_lt(length(serialize(worker, NULL)), 1e6)
