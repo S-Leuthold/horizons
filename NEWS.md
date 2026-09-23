@@ -516,6 +516,31 @@ consequences; the review itself is in
   that produced negative original-scale predictions. The deploy-time
   `upper_bound` guardrail is unchanged and still opt-in.
 
+* `fit()` now drops rows whose outcome is `NA` before drawing Split F, by the
+  same rule `evaluate()` applies (#67). It split the unfiltered analysis
+  table, so with NA outcomes present its partition was over a different frame
+  from `evaluate()`'s, the NA-outcome rows reached the fit (a random forest
+  member failed in warm-start tuning on them), and the warning for coinciding
+  partitions compared row positions in frames of different length, so it
+  could not fire. Both verbs now share one helper, `fit()` reports the drop in
+  its console tree as `evaluate()` does, and the coincidence check compares
+  the two test partitions as sets of sample ids. Objects without NA outcomes
+  split exactly as before.
+
+* `models$response_bound` is now taken over the rows the final models are fit
+  on, as its documentation said (#68). It was the maximum outcome over the
+  whole analysis table, so Split F's test rows and the calibration rows
+  shaped a deploy-time guardrail. Re-fitting an object can lower the bound,
+  so the clamp can fire on predictions it previously let through.
+
+* `add_response()` now reports the non-missing count of each joined variable
+  beside the join count, and records it in provenance as `n_non_missing`, a
+  named integer (#39). "Matched" counts join-key hits, so a matched sample
+  whose source value was `NA` counted as matched and nothing said it was
+  unmeasured. Rows with missing values are still kept: an object can carry
+  several responses, and `evaluate()` and `fit()` drop the rows whose outcome
+  is `NA` when they model it.
+
 # horizons 0.9.0
 
 ## Major Changes
