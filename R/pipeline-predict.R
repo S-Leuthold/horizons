@@ -995,22 +995,37 @@ predict_intervals <- function(uq, point_pred, new_spectra) {
 
 #' Warn that interval computation failed and predictions are point-only
 #'
-#' Before #65, [predict_intervals()] degraded to `NULL` (point-only output)
-#' on any failure with no message: a missing `ranger` namespace made
+#' Before #65, [predict_intervals()] (and, for the ensemble path,
+#' [predict_ensemble_intervals()]) degraded to `NULL` (point-only output) on
+#' any failure with no message: a missing `ranger` namespace made
 #' `stats::predict()` on the quantile forest error, the error was swallowed
 #' by `safely_execute()`, and `interval = TRUE` came back with no interval
 #' columns and no explanation. Warn instead, naming the step that failed and
-#' the underlying error.
+#' the underlying reason.
 #'
 #' @param stage Character(1). Which step failed (for the warning text).
-#' @param error The error condition from the failing `safely_execute()` call,
-#'   or `NULL`.
+#' @param error The reason the step failed: an error condition (from a
+#'   failing `safely_execute()` call), a plain character string (for a
+#'   degrade path that has no caught condition, e.g. a structural check), or
+#'   `NULL`.
 #' @return Invisibly `NULL`. Called for the warning.
 #' @keywords internal
 #' @noRd
 warn_interval_failure <- function(stage, error) {
 
-  detail <- if (!is.null(error)) conditionMessage(error) else "unknown error"
+  detail <- if (is.null(error)) {
+
+    "unknown error"
+
+  } else if (inherits(error, "condition")) {
+
+    conditionMessage(error)
+
+  } else {
+
+    as.character(error)
+
+  }
 
   cli::cli_warn(c(
     "!" = "Prediction intervals could not be computed ({stage}); returning point predictions only.",

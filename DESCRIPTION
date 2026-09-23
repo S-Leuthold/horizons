@@ -76,7 +76,6 @@ Suggests:
     lightgbm,
     mixOmics,
     nnet,
-    pkgload,
     pls,
     spectrolab,
     RhpcBLASctl,

@@ -1019,33 +1019,30 @@ describe("predict_intervals() - failure warns instead of degrading silently", {
 ## used: saveRDS() a fit, predict from it in a genuinely fresh process via
 ## callr, with no namespace preloaded.
 ##
-## Under devtools::test(), this file is itself load_all()'d, so the child
-## has to load the CURRENT dev tree rather than whatever build happens to sit
-## in the ambient library (stale, and not necessarily carrying the fix). The
-## natural way is pkgload::load_all() in the child (detected the same way
-## test-evaluate-parallel.R's skip_if_dev_package() detects load_all(), via
-## the `.__DEVTOOLS__` marker). One caveat found while writing this test:
-## pkgload::load_all() is not a faithful stand-in for library() here — it
-## eagerly loads workflows/ranger/tune/xgboost/butcher as part of simulating
-## the installed package, even with the #65 fix reverted, so this branch
-## exercises the round trip functionally (serialization, cross-process
-## prediction, real intervals) without independently re-triggering the
-## missing-namespace defect. The library() branch below does, because R CMD
-## check always builds and installs the current source before running any
-## tests, so there is no staleness risk there and it is a faithful "fresh
-## install" — that branch is the one that would catch a real regression.
+## Only meaningful against an installed build. Under devtools::test(), this
+## file is itself load_all()'d into the parent session, and pkgload::load_all()
+## in the callr child (the natural way to run the CURRENT dev tree there) turns
+## out to eagerly load workflows/ranger/tune/xgboost/butcher as part of
+## simulating the installed package — even with the #65 fix reverted, so a
+## load_all() child cannot independently re-trigger the missing-namespace
+## defect (confirmed directly while writing this test). Rather than ship a
+## branch that always passes without testing anything, this test skips under
+## load_all() — detected the same way test-evaluate-parallel.R's
+## skip_if_dev_package() does, via the `.__DEVTOOLS__` marker — and runs only
+## against a genuinely installed build: R CMD check, or devtools::test() after
+## devtools::install().
+skip_if_dev_package <- function() {
+  testthat::skip_if(
+    exists(".__DEVTOOLS__", envir = asNamespace("horizons"), inherits = FALSE),
+    "predict-time namespace loading is not exercised under load_all(); run via R CMD check or an installed build"
+  )
+}
 
 describe("predict.horizons_fit() - fresh-process round trip", {
 
   testthat::skip_if_not_installed("callr")
   testthat::skip_on_cran()
-
-  in_load_all <- exists(".__DEVTOOLS__", envir = asNamespace("horizons"),
-                        inherits = FALSE)
-
-  if (in_load_all) testthat::skip_if_not_installed("pkgload")
-
-  pkg_root <- if (in_load_all) pkgload::pkg_path() else NA_character_
+  skip_if_dev_package()
 
   skip_if_not(has_uq(fitted_fixture), "fixture carries no UQ bundle")
 
@@ -1057,19 +1054,14 @@ describe("predict.horizons_fit() - fresh-process round trip", {
   run_in_fresh_process <- function(interval) {
 
     callr::r(
-      func = function(in_load_all, pkg_root, fit_path, new_df, interval) {
+      func = function(fit_path, new_df, interval) {
 
-        if (in_load_all) {
-          pkgload::load_all(pkg_root, quiet = TRUE)
-        } else {
-          library(horizons)
-        }
+        library(horizons)
 
         predict(readRDS(fit_path), new_df, interval = interval)
 
       },
-      args = list(in_load_all = in_load_all, pkg_root = pkg_root,
-                 fit_path = fit_path, new_df = new_df, interval = interval)
+      args = list(fit_path = fit_path, new_df = new_df, interval = interval)
     )
 
   }
