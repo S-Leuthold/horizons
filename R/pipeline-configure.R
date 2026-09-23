@@ -29,10 +29,14 @@
 #'
 #' Can be called multiple times on the same object. Previous configuration
 #' is overwritten, any prior outcome role is reverted to "response", and
-#' everything a previous `evaluate()` or `fit()` earned is dropped: the
-#' results, the splits, the row index, the cached CV predictions, the
-#' predictor schema, the ensemble, and the `horizons_eval` or `horizons_fit`
-#' class itself. All of it is keyed to the outcome that is being replaced.
+#' everything a previous `evaluate()`, `fit()` or `ensemble()` earned is
+#' dropped: the `evaluation`, `models` and `ensemble` slots return to their
+#' empty state, and the `horizons_eval`, `horizons_fit` or
+#' `horizons_ensemble` class goes with them. All of it is keyed to the
+#' outcome that is being replaced. The validation verdict is cleared too,
+#' but the record of outliers `validate()` already removed is kept, since
+#' those rows stay removed, and so is a `select_training()` record, which
+#' describes the rows rather than the outcome.
 #' This enables the `purrr::map()` multi-outcome pattern:
 #'
 #' ```
@@ -302,35 +306,14 @@ configure <- function(x,
 
     warning("Overwriting previous configuration", call. = FALSE)
 
-    ## Clear stale downstream state
-    x$validation$passed              <- NULL
-    x$validation$checks              <- NULL
-    x$validation$timestamp           <- NULL
-    x$validation$outliers$spectral_ids   <- NULL
-    x$validation$outliers$response_ids   <- NULL
-    x$validation$outliers$removed_ids    <- NULL
-    x$validation$outliers$removal_detail <- NULL
-    x$validation$outliers$removed        <- FALSE
-    x$evaluation$results      <- NULL
-    x$evaluation$best_config  <- NULL
-    x$evaluation$split        <- NULL
-    x$models$workflows        <- NULL
-    x$models$n_models         <- NULL
-    x$models$split            <- NULL
-    x$models$row_index        <- NULL
-    x$models$cv_predictions   <- NULL
-    x$models$predictor_schema <- NULL
-    x$ensemble$stack          <- NULL
-    x$ensemble$metrics        <- NULL
-    x$ensemble$method         <- NULL
-    x$ensemble$weights        <- NULL
-
     ## Promotion is earned, and reconfiguring un-earns it. The split, the row
     ## index and the cached predictions are all keyed to an outcome that is
     ## about to change, and the class is the claim that they are there, so
-    ## the object goes back to being a plain horizons_data.
+    ## the object goes back to being a plain horizons_data. The validation
+    ## verdict goes too; the record of rows already removed, and the
+    ## select_training() record, describe rows and are kept.
 
-    class(x) <- c("horizons_data", "list")
+    x <- reset_promotion(x)
 
   }
 

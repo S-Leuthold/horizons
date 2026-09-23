@@ -1075,26 +1075,122 @@ describe("configure() and the object contract", {
     obj$models$predictor_schema <- c("wn_4000")
     obj$ensemble$method         <- "weighted"
 
+    ## Keys the old hand-kept clear list missed (#70)
+    obj$evaluation$rank_metric  <- "rpd"
+    obj$evaluation$n_train      <- 30L
+    obj$evaluation$runtime_secs <- 1
+    obj$models$results          <- tibble::tibble(config_id = "cfg_a")
+    obj$models$uq               <- list(cfg_a = list(quantile_model = "a UQ bundle"))
+    obj$models$ad               <- list(cfg_a = list(centroid = 1))
+    obj$ensemble$model          <- "a trained meta-learner"
+
     class(obj) <- c("horizons_fit", "horizons_eval", "horizons_data", "list")
 
     ## Act
     result <- quiet_configure(obj, outcome = "oc")
 
     ## Assert — the slots and the class are both claims about state that the
-    ## new outcome has invalidated
-    expect_null(result$evaluation$results)
-    expect_null(result$evaluation$best_config)
-    expect_null(result$evaluation$split)
-    expect_null(result$models$workflows)
-    expect_null(result$models$n_models)
-    expect_null(result$models$split)
-    expect_null(result$models$row_index)
-    expect_null(result$models$cv_predictions)
-    expect_null(result$models$predictor_schema)
-    expect_null(result$ensemble$method)
+    ## new outcome has invalidated, so all three slots are back to the
+    ## constructor's shape, key for key
+    blank <- new_horizons_data()
+
+    expect_identical(result$evaluation, blank$evaluation)
+    expect_identical(result$models,     blank$models)
+    expect_identical(result$ensemble,   blank$ensemble)
+    expect_false(has_uq(result))
 
     expect_identical(class(result), c("horizons_data", "list"))
     expect_identical(promoted_state(result), character())
+    expect_no_error(validate_horizons_data(result))
+
+  })
+
+
+  test_that("reconfiguring clears the validation verdict and keeps the removal record (#70)", {
+
+    ## Arrange — a configured object that validate() has judged, with one
+    ## outlier removed (P099 is no longer in the analysis table)
+    fx  <- make_select_fixture(n_pool = 40)
+    obj <- quiet_configure(fx$pool, outcome = "clay")
+
+    removal <- list(removed_ids    = "P099",
+                    removal_detail = tibble::tibble(sample_id = "P099", reason = "spectral"),
+                    removed        = TRUE)
+
+    obj$validation$passed                <- TRUE
+    obj$validation$checks                <- tibble::tibble(check_id = "P001", status = "pass")
+    obj$validation$timestamp             <- Sys.time()
+    obj$validation$outliers$spectral_ids <- c("P099", "P012")
+    obj$validation$outliers$response_ids <- "P007"
+    obj$validation$outliers[names(removal)] <- removal
+
+    ## Act
+    result <- quiet_configure(obj, outcome = "oc")
+
+    ## Assert — the verdict and the flags are for the old outcome; the rows
+    ## that left are still gone
+    blank <- new_horizons_data()
+
+    expect_identical(names(result$validation), names(blank$validation))
+    expect_identical(names(result$validation$outliers), names(blank$validation$outliers))
+
+    expect_null(result$validation$passed)
+    expect_null(result$validation$checks)
+    expect_null(result$validation$timestamp)
+    expect_null(result$validation$outliers$spectral_ids)
+    expect_null(result$validation$outliers$response_ids)
+
+    expect_identical(result$validation$outliers[names(removal)], removal)
+
+  })
+
+
+  test_that("reconfiguring a real ensemble() result resets it (#70)", {
+
+    ## Arrange — the cached fit, through ensemble(). This used to abort in
+    ## set_analysis(): the hand-kept clear list missed ensemble$model, which
+    ## promoted_state() counts as promotion.
+    fitted <- readRDS(test_path("fixtures", "ensemble_fit.rds"))
+    ens    <- suppressWarnings(
+      ensemble(fitted, method = "weighted", optimize = FALSE,
+               compute_uq = FALSE, verbose = FALSE)
+    )
+
+    ## The fixture was fitted without UQ bundles; carry one the way
+    ## fit(compute_uq = TRUE) leaves it, or has_uq() is FALSE before and after.
+    ens$models$uq <- stats::setNames(list(list(quantile_model = "a UQ bundle")),
+                                     names(ens$models$workflows)[1])
+
+    ## A removal validate() made before evaluate(), and a select_training()
+    ## record. Both describe rows, not the outcome.
+    removal <- list(removed_ids    = "sample_999",
+                    removal_detail = tibble::tibble(sample_id = "sample_999", reason = "spectral"),
+                    removed        = TRUE)
+
+    ens$validation$outliers[names(removal)] <- removal
+    ens$selection <- make_selection_record(pool_ids = ens$data$analysis$sample_id[1:10])
+
+    expect_true(has_uq(ens))
+    expect_true("an ensemble" %in% promoted_state(ens))
+
+    ## Act
+    result <- quiet_configure(ens)
+
+    ## Assert
+    expect_identical(class(result), c("horizons_data", "list"))
+    expect_identical(promoted_state(result), character())
+    expect_false(has_uq(result))
+
+    blank <- new_horizons_data()
+
+    expect_identical(result$evaluation, blank$evaluation)
+    expect_identical(result$models,     blank$models)
+    expect_identical(result$ensemble,   blank$ensemble)
+
+    expect_identical(result$selection, ens$selection)
+    expect_identical(result$validation$outliers[names(removal)], removal)
+    expect_null(result$validation$passed)
+
     expect_no_error(validate_horizons_data(result))
 
   })

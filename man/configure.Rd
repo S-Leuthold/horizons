@@ -98,10 +98,14 @@ use all covariates in every configuration.
 
 Can be called multiple times on the same object. Previous configuration
 is overwritten, any prior outcome role is reverted to "response", and
-everything a previous \code{evaluate()} or \code{fit()} earned is dropped: the
-results, the splits, the row index, the cached CV predictions, the
-predictor schema, the ensemble, and the \code{horizons_eval} or \code{horizons_fit}
-class itself. All of it is keyed to the outcome that is being replaced.
+everything a previous \code{evaluate()}, \code{fit()} or \code{ensemble()} earned is
+dropped: the \code{evaluation}, \code{models} and \code{ensemble} slots return to their
+empty state, and the \code{horizons_eval}, \code{horizons_fit} or
+\code{horizons_ensemble} class goes with them. All of it is keyed to the
+outcome that is being replaced. The validation verdict is cleared too,
+but the record of outliers \code{validate()} already removed is kept, since
+those rows stay removed, and so is a \code{select_training()} record, which
+describes the rows rather than the outcome.
 This enables the \code{purrr::map()} multi-outcome pattern:
 
 \if{html}{\out{<div class="sourceCode">}}\preformatted{c("SOC", "POM_C", "pH") |>
