@@ -860,6 +860,50 @@ abort_validation <- function(errors) {
 }
 
 
+## ---------------------------------------------------------------------------
+## contract_keys() — The keys a promoted slot must carry
+## ---------------------------------------------------------------------------
+
+## Keys a slot may lack on objects built by an earlier version of the verb
+## that writes it. Each was added to the contract after objects without it
+## were already saved, so the validators accept its absence. Everything else
+## new_horizons_data() declares for the slot is required.
+CONTRACT_KEYS_OPTIONAL <- list(
+
+  ## evaluate(): run provenance, added 2026-09-15
+  evaluation = c("workers", "parallelize_over"),
+
+  ## fit(): the winsorization guardrail (objects fitted before it predict
+  ## without a clamp) and the select_training() flag, added 2026-09-21
+  models     = c("response_bound", "selection_present"),
+
+  ## ensemble(): every key has been written since the contract was built
+  ensemble   = character()
+
+)
+
+#' Required keys of a promoted slot
+#'
+#' @description
+#' The keys [new_horizons_data()] declares for `slot`, less the ones
+#' `CONTRACT_KEYS_OPTIONAL` lets older objects lack. The constructor is the
+#' single statement of each slot's shape, so the validators derive their
+#' completeness check from it rather than keeping lists of their own.
+#'
+#' @param slot [Character.] One of `"evaluation"`, `"models"`, `"ensemble"`.
+#'
+#' @return [Character.] The required keys, in the constructor's order.
+#'
+#' @seealso [validate_horizons_eval()], [validate_horizons_fit()],
+#'   [validate_horizons_ensemble()]
+#' @noRd
+contract_keys <- function(slot) {
+
+  setdiff(names(new_horizons_data()[[slot]]), CONTRACT_KEYS_OPTIONAL[[slot]])
+
+}
+
+
 #' Validate a horizons_ensemble object's contract
 #'
 #' @description
@@ -876,10 +920,11 @@ abort_validation <- function(errors) {
 #'
 #' Accumulated checks (reported together, tree-style):
 #'
-#' 1. **Slot completeness**: all 13 contract keys present (`method`, `model`,
-#'    `weights`, `predictions`, `metrics`, `member_metrics`, `improvement`,
-#'    `oof_predictions`, `optimize`, `seed`, `uq`, `timestamp`,
-#'    `runtime_secs`). Extra keys are tolerated.
+#' 1. **Slot completeness**: every key [new_horizons_data()] declares for
+#'    the `ensemble` slot is present (see [contract_keys()]): `method`,
+#'    `model`, `weights`, `predictions`, `metrics`, `member_metrics`,
+#'    `improvement`, `oof_predictions`, `optimize`, `seed`, `uq`,
+#'    `timestamp`, `runtime_secs`. Extra keys are tolerated.
 #' 2. **method**: one of `weighted`, `penalized`, `xgb`.
 #' 3. **weights**: data frame with character `member` + numeric `coef`,
 #'    at least 2 rows, unique members, no NA coefficients.
@@ -942,11 +987,7 @@ validate_horizons_ensemble <- function(x) {
 
   ## Slot completeness ----------------------------------------------------------
 
-  contract_keys <- c("method", "model", "weights", "predictions", "metrics",
-                     "member_metrics", "improvement", "oof_predictions",
-                     "optimize", "seed", "uq", "timestamp", "runtime_secs")
-
-  missing_keys <- setdiff(contract_keys, names(ens))
+  missing_keys <- setdiff(contract_keys("ensemble"), names(ens))
 
   if (length(missing_keys) > 0) {
 
@@ -1222,9 +1263,10 @@ validate_horizons_ensemble <- function(x) {
 #'
 #' Accumulated checks (reported together, tree-style):
 #'
-#' 1. **Slot completeness**: the metadata keys `evaluate()` writes are present
-#'    (`results`, `best_config`, `rank_metric`, `split`, `n_train`, `n_test`,
-#'    `runtime_secs`, `timestamp`). The run-provenance keys added 2026-09-15,
+#' 1. **Slot completeness**: every key [new_horizons_data()] declares for
+#'    the `evaluation` slot is present (see [contract_keys()]): `results`,
+#'    `best_config`, `rank_metric`, `split`, `n_train`, `n_test`,
+#'    `runtime_secs`, `timestamp`. The run-provenance keys added 2026-09-15,
 #'    `parallelize_over` and `workers`, are tolerated when absent (objects
 #'    evaluated earlier still fit) and validated when present:
 #'    `parallelize_over` one of `"sequential"`, `"configs"`, `"resamples"`;
@@ -1276,10 +1318,7 @@ validate_horizons_eval <- function(x) {
 
   ## Slot completeness ----------------------------------------------------------
 
-  required_keys <- c("results", "best_config", "rank_metric", "split",
-                     "n_train", "n_test", "runtime_secs", "timestamp")
-
-  missing_keys <- setdiff(required_keys, names(ev))
+  missing_keys <- setdiff(contract_keys("evaluation"), names(ev))
 
   if (length(missing_keys) > 0) {
 
@@ -1478,10 +1517,13 @@ validate_horizons_eval <- function(x) {
 #'
 #' Accumulated checks (reported together, tree-style):
 #'
-#' 1. **Slot completeness**: all 13 contract keys present (`workflows`,
-#'    `n_models`, `best_config`, `rank_metric`, `predictor_schema`,
-#'    `response_bound`, `cv_predictions`, `results`, `split`, `row_index`,
-#'    `uq`, `timestamp`, `runtime_secs`). Extra keys are tolerated.
+#' 1. **Slot completeness**: every key [new_horizons_data()] declares for
+#'    the `models` slot is present (see [contract_keys()]), 13 in all:
+#'    `workflows`, `n_models`, `best_config`, `rank_metric`,
+#'    `predictor_schema`, `cv_predictions`, `results`, `split`, `row_index`,
+#'    `uq`, `ad`, `timestamp`, `runtime_secs`. `response_bound` and
+#'    `selection_present` were added after objects without them were saved,
+#'    so they are tolerated when absent. Extra keys are tolerated.
 #' 2. **workflows**: a non-empty named list; `n_models` equals its length.
 #' 3. **best_config**: a length-1 character that is one of the workflow keys.
 #' 4. **rank_metric**: a length-1 character.
@@ -1538,12 +1580,7 @@ validate_horizons_fit <- function(x) {
 
   ## Slot completeness ----------------------------------------------------------
 
-  contract_keys <- c("workflows", "n_models", "best_config", "rank_metric",
-                     "predictor_schema", "response_bound", "cv_predictions",
-                     "results", "split", "row_index", "uq", "ad", "timestamp",
-                     "runtime_secs")
-
-  missing_keys <- setdiff(contract_keys, names(md))
+  missing_keys <- setdiff(contract_keys("models"), names(md))
 
   if (length(missing_keys) > 0) {
 
