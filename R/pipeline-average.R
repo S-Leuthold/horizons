@@ -48,6 +48,14 @@
 #'
 #' @param x A `horizons_data` object from the pipeline.
 #' @param by Character. Column name to group replicates by. Default: `"sample_id"`.
+#'   With any other column, the grouping values are coerced to character and
+#'   become the new `sample_id` of the averaged rows; the original ids are not
+#'   kept as a column, but the mapping from each new id to the scans it came
+#'   from is recorded in `provenance$average$source_ids`. The column name is
+#'   recorded in `provenance$aggregation_by`, which is written whatever `by`
+#'   is. A custom `by` is refused on an object carrying a `select_training()`
+#'   record, because renaming the rows breaks the link between the record and
+#'   the object; average first, then select.
 #' @param quality_check Logical. Enable correlation-based outlier detection.
 #'   Default: `TRUE`.
 #' @param correlation_threshold Numeric. Minimum mean pairwise correlation for
@@ -59,11 +67,22 @@
 #' @param verbose Logical. Print progress messages. Default: `TRUE`.
 #'
 #' @return The input `horizons_data` object with:
-#'   * `data$analysis`: One row per unique value in `by` column
+#'   * `data$analysis`: One row per unique value in `by`. With a custom `by`
+#'     that column is renamed to `sample_id` (as character), so the grouping
+#'     values are the ids of the averaged rows and the `by` column itself is
+#'     not in the output.
 #'   * Predictor columns: Mean of replicate values
+#'   * Response and outcome columns: Mean of replicate values when numeric,
+#'     the shared value when not; a group whose non-numeric response values
+#'     disagree is an error, not a silent pick
 #'   * Metadata columns: Uniform values preserved, non-uniform dropped
-#'   * `data$role_map`: Updated to remove dropped columns
-#'   * `provenance$average`: Processing metadata including QC results
+#'   * `data$role_map`: Updated to remove dropped columns and to point the
+#'     `id` role at the new `sample_id`
+#'   * `provenance$average`: Processing metadata including QC results and
+#'     `source_ids`, the mapping from each averaged `sample_id` to the source
+#'     scans it was built from
+#'   * `provenance$aggregation_by`: The `by` column name, written on every
+#'     call
 #'
 #' @examples
 #' \dontrun{
@@ -109,6 +128,18 @@ average <- function(x,
 
     errors <- c(errors,
                 cli::format_inline("Grouping column {.val {by}} not found in data"))
+
+  }
+
+  ## A custom `by` renames the rows, and a selection record is keyed to the
+  ## ids it drew. Refiltering the record needs the survivors to be a subset
+  ## of the ids the draw named; new ids are not a subset of anything, so the
+  ## record cannot be maintained and the object must be averaged first.
+
+  if (inherits(x, "horizons_data") && !is.null(x$selection) && by != "sample_id") {
+
+    errors <- c(errors,
+                cli::format_inline("{.fn average} cannot use a custom {.arg by} on an object carrying a selection record: promoting {.val {by}} to {.field sample_id} renames rows the draw is keyed to"))
 
   }
 
@@ -179,6 +210,14 @@ average <- function(x,
   meta_cols <- role_map$variable[role_map$role %in% c("meta", "covariate")]
   meta_cols <- setdiff(meta_cols, c(by, "filename"))
 
+  ## Response and outcome columns --------------------------------------------
+  ## Lab measurements of the same physical sample, so they collapse with the
+  ## spectra rather than being dropped; dropping them left the role map
+  ## naming columns the averaged table did not have.
+
+  response_cols <- role_map$variable[role_map$role %in% c("response", "outcome")]
+  response_cols <- setdiff(response_cols, c(by, "filename"))
+
   ## -------------------------------------------------------------------------
   ## Step 3: Group analysis data
   ## -------------------------------------------------------------------------
@@ -237,6 +276,7 @@ average <- function(x,
                   by                  = by,
                   predictor_cols      = predictor_cols,
                   meta_cols           = meta_cols,
+                  response_cols       = response_cols,
                   quality_check       = quality_check,
                   threshold           = correlation_threshold,
                   on_all_outliers     = on_all_outliers) -> group_result
@@ -324,9 +364,9 @@ average <- function(x,
   ## Step 7: Reorder columns
   ## -------------------------------------------------------------------------
 
-  ## Order: by column, retained meta, predictors -----------------------------
+  ## Order: by column, retained meta, responses, predictors ------------------
 
-  col_order <- c(by, retained_meta, predictor_cols)
+  col_order <- c(by, retained_meta, response_cols, predictor_cols)
   col_order <- col_order[col_order %in% names(averaged)]
   averaged <- averaged[, col_order, drop = FALSE]
 
@@ -336,21 +376,83 @@ average <- function(x,
 
   new_role_map <- role_map[!role_map$variable %in% dropped_meta, , drop = FALSE]
 
+  ## With a custom `by`, the averaged rows ARE the samples now and the
+  ## grouping value is their identity, so the `by` column becomes
+  ## `sample_id`: every downstream verb, and validate_horizons_data(), reads
+  ## that column by name. The original sample_id column should not have been
+  ## carried into the averaged table (only `by`, retained meta, responses and
+  ## predictors are), but that is asserted rather than assumed — if it ever
+  ## stops holding, the rename would mint a duplicate column name instead of
+  ## an error. `provenance$aggregation_by` keeps the name.
+
+  if (by != "sample_id") {
+
+    if ("sample_id" %in% names(averaged)) {
+
+      rlang::abort(
+        paste0("Cannot promote '", by, "' to sample_id: the averaged table already has a sample_id column"),
+        class = "horizons_data_error"
+      )
+
+    }
+
+    ## I2 says sample_id is character. A numeric or factor `by` would pass
+    ## the validator's presence and uniqueness checks and then break joins
+    ## against models$row_index and ensemble$predictions much later.
+    averaged[[by]] <- as.character(averaged[[by]])
+
+    if (anyNA(averaged[[by]])) {
+
+      rlang::abort(
+        paste0("Promoting '", by, "' to sample_id produced NA ids"),
+        class = "horizons_data_error"
+      )
+
+    }
+
+    dup_ids <- unique(averaged[[by]][duplicated(averaged[[by]])])
+
+    if (length(dup_ids) > 0) {
+
+      rlang::abort(
+        paste0("Promoting '", by, "' to sample_id produced duplicate ids: ",
+               paste(utils::head(dup_ids, 5), collapse = ", ")),
+        class = "horizons_data_error"
+      )
+
+    }
+
+    names(averaged)[names(averaged) == by] <- "sample_id"
+    new_role_map <- new_role_map[new_role_map$variable != "sample_id", , drop = FALSE]
+    new_role_map$variable[new_role_map$variable == by] <- "sample_id"
+    new_role_map$role[new_role_map$variable == "sample_id"] <- "id"
+
+  }
+
   ## -------------------------------------------------------------------------
   ## Step 9: Update horizons_data object
   ## -------------------------------------------------------------------------
 
-  x$data$analysis    <- averaged
-  x$data$role_map    <- new_role_map
-  x$data$n_rows      <- nrow(averaged)
-  x$data$n_covariates <- sum(new_role_map$role == "covariate")
+  x <- set_analysis(x, averaged, new_role_map)
 
   ## -------------------------------------------------------------------------
   ## Step 10: Update provenance
   ## -------------------------------------------------------------------------
 
+  ## Which scans each averaged row came from. Without this the source ids are
+  ## gone entirely once `by` is promoted, and any earlier
+  ## validation$outliers$*_ids become dangling references.
+
+  source_ids <- tibble::tibble(
+    sample_id        = as.character(group_values),
+    source_sample_id = as.character(analysis$sample_id)
+  )
+
+  source_ids <- source_ids[!source_ids$sample_id %in% dropped_samples, , drop = FALSE]
+
   x$provenance$average <- list(
     by                    = by,
+    source_ids            = source_ids,
     quality_check         = quality_check,
     correlation_threshold = correlation_threshold,
     on_all_outliers       = on_all_outliers,
@@ -586,6 +688,9 @@ compute_replicate_quality <- function(predictor_matrix, threshold) {
 #' @param by Name of grouping column.
 #' @param predictor_cols Character vector of predictor column names.
 #' @param meta_cols Character vector of metadata column names.
+#' @param response_cols Character vector of response and outcome column names.
+#'   Numeric columns are averaged over the same rows as the predictors;
+#'   non-numeric columns must be uniform within the group.
 #' @param quality_check Logical. Enable QC.
 #' @param threshold Numeric. Correlation threshold.
 #' @param on_all_outliers Character. Handling mode for all-outlier groups.
@@ -602,6 +707,7 @@ average_group <- function(group_data,
                           by,
                           predictor_cols,
                           meta_cols,
+                          response_cols = character(),
                           quality_check,
                           threshold,
                           on_all_outliers) {
@@ -710,6 +816,29 @@ average_group <- function(group_data,
   }
 
   ## -------------------------------------------------------------------------
+  ## Collapse responses over the same rows as the predictors
+  ## -------------------------------------------------------------------------
+
+  averaged_responses <- NULL
+
+  if (length(response_cols) > 0) {
+
+    collapsed <- vector("list", length(response_cols))
+    names(collapsed) <- response_cols
+
+    for (col in response_cols) {
+
+      collapsed[[col]] <- collapse_response(values   = rows_to_use[[col]],
+                                            column   = col,
+                                            group_id = group_id)
+
+    }
+
+    averaged_responses <- tibble::as_tibble(collapsed)
+
+  }
+
+  ## -------------------------------------------------------------------------
   ## Handle metadata
   ## -------------------------------------------------------------------------
 
@@ -737,6 +866,12 @@ average_group <- function(group_data,
   ## Combine
   ## -------------------------------------------------------------------------
 
+  if (!is.null(averaged_responses)) {
+
+    result <- dplyr::bind_cols(result, averaged_responses)
+
+  }
+
   result <- dplyr::bind_cols(result, averaged_predictors)
 
   list(
@@ -744,6 +879,60 @@ average_group <- function(group_data,
     n_dropped    = n_dropped,
     all_outliers = all_outliers,
     qc_info      = qc_info
+  )
+
+}
+
+
+## ---------------------------------------------------------------------------
+## collapse_response() — One response value for one group
+## ---------------------------------------------------------------------------
+
+#' Collapse one response column within a group of replicates
+#'
+#' @description
+#' Numeric response values become their mean over the replicates being
+#' averaged. Non-numeric values must be uniform within the group; a group
+#' whose values disagree is an error rather than a silent first-value pick,
+#' because there is no defensible way to average two different lab
+#' classifications of one sample.
+#'
+#' @param values Vector of the column's values for the group's replicates.
+#' @param column Character. Column name, for the error message.
+#' @param group_id The group identifier, for the error message.
+#'
+#' @return Length-one vector of the same type as `values` (numeric columns
+#'   return `NA_real_` when every replicate is missing).
+#'
+#' @noRd
+collapse_response <- function(values, column, group_id) {
+
+  if (is.numeric(values)) {
+
+    if (all(is.na(values))) {
+
+      return(NA_real_)
+
+    }
+
+    return(mean(values, na.rm = TRUE))
+
+  }
+
+  if (check_uniformity(values)) {
+
+    non_na <- values[!is.na(values)]
+
+    return(if (length(non_na) == 0) values[1] else non_na[1])
+
+  }
+
+  rlang::abort(
+    paste0("Response column '", column, "' has conflicting values within group '",
+           as.character(group_id), "': ",
+           paste(unique(values[!is.na(values)]), collapse = ", "),
+           ". Resolve before averaging, or drop the column."),
+    class = "horizons_data_error"
   )
 
 }

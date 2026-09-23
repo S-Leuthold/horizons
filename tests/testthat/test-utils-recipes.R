@@ -3,7 +3,16 @@
 ## ---------------------------------------------------------------------------
 
 ## Helper: create minimal test data + role_map for recipe testing
-make_test_data <- function(n = 20, n_wn = 50, covariates = NULL) {
+##
+## `covariates`, `meta` and `responses` add columns carrying the role map's
+## non-predictor roles: covariates from add_covariates(), meta from
+## select_training()'s provenance or spectra()'s user metadata, and responses
+## from add_response() properties that configure() did not promote to outcome.
+make_test_data <- function(n          = 20,
+                           n_wn       = 50,
+                           covariates = NULL,
+                           meta       = NULL,
+                           responses  = NULL) {
 
   ## Fake spectral data: n samples x n_wn wavelengths
   wn_names <- paste0("wn_", seq(4000, by = -2, length.out = n_wn))
@@ -30,7 +39,35 @@ make_test_data <- function(n = 20, n_wn = 50, covariates = NULL) {
 
   }
 
+  ## Optionally add meta (training-only provenance / user metadata)
+  if (!is.null(meta)) {
+
+    for (m in meta) {
+      df[[m]] <- paste0("m", seq_len(n))
+      roles <- rbind(roles, tibble::tibble(variable = m, role = "meta"))
+    }
+
+  }
+
+  ## Optionally add sibling lab responses (role "response", never the outcome)
+  if (!is.null(responses)) {
+
+    for (r in responses) {
+      df[[r]] <- runif(n, 0.5, 10)
+      roles <- rbind(roles, tibble::tibble(variable = r, role = "response"))
+    }
+
+  }
+
   list(data = df, role_map = roles)
+
+}
+
+## Helper: the role a built recipe assigns to a column, via summary()
+recipe_role <- function(rec, variable) {
+
+  info <- summary(rec)
+  info$role[info$variable == variable]
 
 }
 
@@ -301,29 +338,36 @@ describe("build_recipe()", {
 
   })
 
-  it("removes unrequested covariates via step_rm", {
+  it("holds unrequested covariates in covariate_hold rather than removing them", {
 
     td <- make_test_data(covariates = c("pH", "clay", "sand"))
     config <- make_config_row(covariates = "pH")
 
     rec <- build_recipe(config, td$data, td$role_map)
 
-    ## Should have a step_rm that removes clay and sand
+    ## The role alone keeps them out of the model. A step_rm() would also
+    ## require them at bake(), which breaks predict() on new data that never
+    ## carries covariates.
+    expect_equal(recipe_role(rec, "clay"), "covariate_hold")
+    expect_equal(recipe_role(rec, "sand"), "covariate_hold")
+
     step_classes <- vapply(rec$steps, function(s) class(s)[1], character(1))
-    expect_true("step_rm" %in% step_classes)
+    expect_false("step_rm" %in% step_classes)
 
   })
 
-  it("removes all covariates when config has NA covariates", {
+  it("holds all covariates when config has NA covariates", {
 
     td <- make_test_data(covariates = c("pH", "clay"))
     config <- make_config_row(covariates = NA_character_)
 
     rec <- build_recipe(config, td$data, td$role_map)
 
-    ## Should have a step_rm for all covariates
+    expect_equal(recipe_role(rec, "pH"),   "covariate_hold")
+    expect_equal(recipe_role(rec, "clay"), "covariate_hold")
+
     step_classes <- vapply(rec$steps, function(s) class(s)[1], character(1))
-    expect_true("step_rm" %in% step_classes)
+    expect_false("step_rm" %in% step_classes)
 
   })
 
@@ -418,6 +462,202 @@ describe("build_recipe()", {
     step_classes <- vapply(rec$steps, function(s) class(s)[1], character(1))
     expect_true("step_log" %in% step_classes)
     expect_true("step_pca" %in% step_classes)
+
+  })
+
+})
+
+## =========================================================================
+## Non-predictor roles: assignment, bake requirements, and step isolation
+## =========================================================================
+##
+## Three failure modes live together here, because they share one cause: a
+## column that the role map names but `build_recipe()` does not re-role falls
+## through `outcome ~ .` to predictor.
+##
+## (1) A sibling lab response (clay measured on the same samples as the SOC
+##     being modelled) becomes a predictor — target leakage the pool-internal
+##     CV cannot see, and a column that can never exist for a real target.
+## (2) A non-predictor role left required at bake aborts `predict()` on any
+##     batch that does not carry it, which is every batch: meta, sibling
+##     responses and covariates are training-table columns.
+## (3) `update_role()` is not sequenced with steps, so a covariate promoted to
+##     predictor after a selection step was added is nonetheless inside that
+##     step's `all_predictors()` at prep time.
+
+describe("build_recipe() non-predictor roles", {
+
+  it("assigns an explicit role to every non-spectral column", {
+
+    td <- make_test_data(n          = 30,
+                         n_wn       = 40,
+                         covariates = c("clay", "ph"),
+                         meta       = c(".drawn_by", ".group"),
+                         responses  = c("oc"))
+
+    config <- make_config_row(preprocessing     = "snv",
+                              feature_selection = "pca",
+                              covariates        = "clay")
+
+    rec <- build_recipe(config, td$data, td$role_map)
+
+    expect_equal(recipe_role(rec, "SOC"),       "outcome")
+    expect_equal(recipe_role(rec, "sample_id"), "id")
+    expect_equal(recipe_role(rec, ".drawn_by"), "meta")
+    expect_equal(recipe_role(rec, ".group"),    "meta")
+    expect_equal(recipe_role(rec, "oc"),        "response_hold")
+    expect_equal(recipe_role(rec, "clay"),      "predictor")
+    expect_equal(recipe_role(rec, "ph"),        "covariate_hold")
+
+    ## The sibling response is the one that used to slip through silently:
+    ## nothing outside the wavenumbers and the requested covariate may be a
+    ## predictor.
+    info      <- summary(rec)
+    preds     <- info$variable[info$role == "predictor"]
+    unexpected <- setdiff(preds, c(grep("^wn_", preds, value = TRUE), "clay"))
+
+    expect_equal(unexpected, character(0))
+
+  })
+
+  it("does not require meta, sibling responses or covariates at bake", {
+
+    td <- make_test_data(n          = 30,
+                         n_wn       = 40,
+                         covariates = c("clay", "ph"),
+                         meta       = c(".drawn_by"),
+                         responses  = c("oc"))
+
+    config <- make_config_row(preprocessing     = "snv",
+                              feature_selection = "pca")
+
+    rec     <- build_recipe(config, td$data, td$role_map)
+    prepped <- recipes::prep(rec)
+
+    ## What predict() actually sees: identifier plus spectra, nothing else.
+    wn_cols  <- grep("^wn_", names(td$data), value = TRUE)
+    new_data <- td$data[, c("sample_id", wn_cols)]
+
+    baked <- recipes::bake(prepped, new_data = new_data)
+
+    expect_equal(nrow(baked), nrow(new_data))
+    expect_true(any(grepl("^PC", names(baked))))
+    expect_false("oc" %in% names(baked))
+
+  })
+
+  it("predicts through a workflow on new data lacking the held columns", {
+
+    skip_if_not_installed("ranger")
+
+    td <- make_test_data(n          = 40,
+                         n_wn       = 40,
+                         covariates = c("clay", "ph"),
+                         meta       = c(".drawn_by"),
+                         responses  = c("oc"))
+
+    config <- make_config_row(preprocessing     = "snv",
+                              feature_selection = "pca")
+
+    rec <- build_recipe(config, td$data, td$role_map)
+
+    ## The workflow path is the one that matters: hardhat::forge() shrinks new
+    ## data to the blueprint's ptypes before recipes::bake() is reached, so a
+    ## role still required at bake aborts before any step runs.
+    wf <- workflows::workflow() |>
+      workflows::add_recipe(rec) |>
+      workflows::add_model(
+        parsnip::set_engine(
+          parsnip::set_mode(parsnip::rand_forest(trees = 20), "regression"),
+          "ranger"
+        )
+      )
+
+    fitted <- parsnip::fit(wf, td$data)
+
+    wn_cols  <- grep("^wn_", names(td$data), value = TRUE)
+    new_data <- td$data[, c("sample_id", wn_cols)]
+
+    preds <- predict(fitted, new_data = new_data)
+
+    expect_equal(nrow(preds), nrow(new_data))
+    expect_false(anyNA(preds$.pred))
+
+  })
+
+  it("keeps a promoted covariate out of the spectral selection steps", {
+
+    ## update_role() rewrites var_info for the whole recipe, so promoting
+    ## `clay` in Step 5 would put it inside all_predictors() for the PCA step
+    ## added in Step 4. Selecting spectra by name is what makes the bypass real.
+    td <- make_test_data(n = 40, n_wn = 40, covariates = c("clay", "ph"))
+
+    config <- make_config_row(preprocessing     = "snv",
+                              feature_selection = "pca",
+                              covariates        = "clay")
+
+    rec     <- build_recipe(config, td$data, td$role_map)
+    prepped <- recipes::prep(rec)
+
+    step_classes <- vapply(rec$steps, function(s) class(s)[1], character(1))
+    pca_number   <- which(step_classes == "step_pca")
+
+    pca_terms <- unique(recipes::tidy(prepped, number = pca_number)$terms)
+
+    expect_true(all(grepl("^spec[0-9]+$", pca_terms)))
+    expect_false("clay" %in% pca_terms)
+    expect_false("ph" %in% pca_terms)
+
+    ## The promoted covariate survives PCA untransformed, and the outcome is
+    ## still the outcome.
+    baked <- recipes::bake(prepped, new_data = NULL)
+    expect_true("clay" %in% names(baked))
+    expect_equal(recipe_role(rec, "SOC"), "outcome")
+
+  })
+
+  it("keeps a promoted covariate out of correlation selection", {
+
+    ## step_select_correlation()'s 3-wide rolling window assumes its input is
+    ## contiguous spectra; a covariate inside the window is not a contiguity
+    ## violation the step can detect.
+    td <- make_test_data(n = 40, n_wn = 40, covariates = c("clay"))
+
+    config <- make_config_row(preprocessing     = "snv",
+                              feature_selection = "correlation",
+                              covariates        = "clay")
+
+    rec     <- build_recipe(config, td$data, td$role_map)
+    prepped <- recipes::prep(rec)
+
+    step_classes <- vapply(rec$steps, function(s) class(s)[1], character(1))
+    sel_step     <- prepped$steps[[which(step_classes == "step_select_correlation")]]
+
+    expect_true(all(grepl("^spec[0-9]+$", sel_step$selected_vars)))
+    expect_false("clay" %in% sel_step$selected_vars)
+
+  })
+
+  it("does not let a sibling response reach the model matrix", {
+
+    td <- make_test_data(n = 30, n_wn = 40, responses = c("oc"))
+
+    for (fs in c("none", "pca")) {
+
+      config <- make_config_row(preprocessing     = "snv",
+                                feature_selection = fs)
+
+      rec  <- build_recipe(config, td$data, td$role_map)
+      info <- summary(rec)
+
+      expect_false("oc" %in% info$variable[info$role == "predictor"],
+                   info = paste("feature_selection =", fs))
+
+      ## And the blueprint agrees: `oc` is not a modelled predictor.
+      molded <- hardhat::mold(rec, td$data)
+      expect_false("oc" %in% names(molded$predictors))
+
+    }
 
   })
 
@@ -564,16 +804,22 @@ describe("build_recipe() serialization footprint", {
 
   it("resolves covariate selectors after stripping", {
 
-    ## step_rm() on covariates reads its column names from the same stripped
-    ## environment, so a config that drops one must still drop exactly that one.
+    ## The covariate promotion reads its column names from the same stripped
+    ## environment, so a config that uses one must still promote exactly that
+    ## one and leave the other held.
     td     <- make_test_data(n = 100, n_wn = 60, covariates = c("clay", "ph"))
     config <- make_config_row(feature_selection = "none", covariates = "clay")
 
     rec   <- build_recipe(config, td$data, td$role_map)
     baked <- recipes::bake(recipes::prep(rec), new_data = NULL)
 
+    expect_equal(recipe_role(rec, "clay"), "predictor")
+    expect_equal(recipe_role(rec, "ph"),   "covariate_hold")
+
+    ## A held column rides through bake() on training data — it is excluded by
+    ## role, not by removal.
     expect_true("clay" %in% names(baked))
-    expect_false("ph" %in% names(baked))
+    expect_true("ph" %in% names(baked))
 
   })
 
@@ -714,5 +960,196 @@ describe("transform_spectra_matrix()", {
                  "Unknown preprocessing type")
 
   })
+
+})
+
+
+## =========================================================================
+## Selection steps: a selector that matches nothing is a configuration error
+## =========================================================================
+##
+## build_recipe() selects the selection steps' inputs by the name pattern
+## step_transform_spectra() gives its output. A zero match means that naming
+## changed, and a selection step with nothing to select cannot train: the
+## custom steps either error deep inside a modelling package or fall through
+## their "retain everything" branch and become a silent no-op. Every branch
+## now aborts at prep() instead.
+
+describe("selection steps abort on a zero-column selector", {
+
+  no_match <- "^nomatch[0-9]+$"
+
+  base_recipe <- function() {
+
+    td <- make_test_data(n = 20, n_wn = 20)
+    recipes::recipe(SOC ~ ., data = dplyr::select(td$data, -sample_id))
+
+  }
+
+  it("step_select_correlation aborts naming itself", {
+
+    rec <- base_recipe() |>
+      step_select_correlation(dplyr::matches(no_match), outcome = "SOC")
+
+    expect_error(recipes::prep(rec), "step_select_correlation")
+    expect_error(recipes::prep(rec), "selected zero columns")
+
+  })
+
+  it("step_select_cars aborts naming itself", {
+
+    rec <- base_recipe() |>
+      step_select_cars(dplyr::matches(no_match), outcome = "SOC")
+
+    expect_error(recipes::prep(rec), "selected zero columns")
+
+  })
+
+  it("step_select_boruta aborts naming itself", {
+
+    rec <- base_recipe() |>
+      step_select_boruta(dplyr::matches(no_match), outcome = "SOC")
+
+    expect_error(recipes::prep(rec), "selected zero columns")
+
+  })
+
+  it("the pca branch aborts too, in the selector recipes::step_pca lacks", {
+
+    ## step_pca() treats an empty selection as a pass-through no-op, so the
+    ## gate lives in select_generated_spectra() rather than in a prep() this
+    ## package owns. Without it a config asking for PCA would train on the
+    ## untransformed spectral columns with nothing said.
+    rec <- base_recipe() |>
+      recipes::step_pca(select_generated_spectra(), threshold = 0.995)
+
+    expect_error(recipes::prep(rec), "nothing to select")
+
+  })
+
+  it("the pca branch still preps when the pattern matches", {
+
+    df <- as.data.frame(matrix(rnorm(200), nrow = 20))
+    names(df) <- paste0("spec", 1:10)
+    df$SOC    <- runif(20, 0.5, 10)
+
+    rec <- recipes::recipe(SOC ~ ., data = df) |>
+      recipes::step_pca(select_generated_spectra(), threshold = 0.995)
+
+    prepped <- recipes::prep(rec)
+    baked   <- recipes::bake(prepped, new_data = df)
+
+    expect_true(any(grepl("^PC", names(baked))))
+
+  })
+
+})
+
+
+## =========================================================================
+## step_transform_spectra(): generated names must not collide, window must fit
+## =========================================================================
+##
+## bake() binds the pass-through block to the transformed matrix. Under default
+## name repair a pass-through column named like a generated one (a covariate
+## called spec01) is resolved positionally: at training a band is silently
+## displaced from everything downstream, and at predict time the bind dies
+## inside vctrs without naming the column at fault.
+
+describe("step_transform_spectra() name collisions and window size", {
+
+  it("aborts, naming the covariate, when it collides with a generated name", {
+
+    ## n_wn = 50 with the default window leaves 42 columns, which names0()
+    ## writes as spec01 ... spec42 — so a covariate called spec01 collides.
+    td     <- make_test_data(n = 20, n_wn = 50, covariates = "spec01")
+    config <- make_config_row(covariates = "spec01")
+
+    rec <- build_recipe(config, td$data, td$role_map)
+
+    expect_error(recipes::prep(rec), "spec01")
+    expect_error(recipes::prep(rec), class = "horizons_input_error")
+
+  })
+
+  it("is quiet when no pass-through column uses the generated pattern", {
+
+    td     <- make_test_data(n = 20, n_wn = 50, covariates = "Clay")
+    config <- make_config_row(covariates = "Clay")
+
+    rec <- build_recipe(config, td$data, td$role_map)
+
+    expect_no_error(recipes::prep(rec))
+
+  })
+
+  it("aborts, naming both numbers, when the window is wider than the spectrum", {
+
+    td <- make_test_data(n = 20, n_wn = 10)
+
+    rec <- recipes::recipe(SOC ~ ., data = dplyr::select(td$data, -sample_id)) |>
+      step_transform_spectra(dplyr::starts_with("wn_"),
+                             preprocessing = "raw",
+                             window_size   = 21)
+
+    expect_error(recipes::prep(rec), "10 spectral columns")
+    expect_error(recipes::prep(rec), "window_size = 21")
+
+  })
+
+})
+
+
+## =========================================================================
+## Round trip: a prepped recipe bakes the same predictor names on new data
+## =========================================================================
+##
+## The predict path bakes new data through the recipe the model was fit with,
+## so any divergence between the training-time and predict-time predictor
+## names is a silent feature-space mismatch. Asserted across the selection
+## methods and the preprocessing methods, because the failure modes differ:
+## the transform step renames, and each selection step subsets.
+
+describe("prepped recipes bake identical predictor names on train and new data", {
+
+  selection_methods <- c("none", "pca", "correlation", "boruta", "cars")
+
+  for (fs in selection_methods) {
+
+    for (pp in c("raw", "snv", "deriv2")) {
+
+      it(paste0("feature_selection = '", fs, "', preprocessing = '", pp, "'"), {
+
+        if (fs == "boruta") skip_if_not_installed("Boruta")
+        if (fs == "cars")   skip_if_not_installed("pls")
+
+        set.seed(2026)
+        train_td <- make_test_data(n = 40, n_wn = 60)
+        new_td   <- make_test_data(n = 12, n_wn = 60)
+
+        config  <- make_config_row(preprocessing     = pp,
+                                   feature_selection = fs)
+
+        rec     <- build_recipe(config, train_td$data, train_td$role_map)
+        prepped <- suppressWarnings(
+          recipes::prep(rec, training = train_td$data)
+        )
+
+        train_names <- names(recipes::bake(prepped,
+                                           new_data = train_td$data,
+                                           recipes::all_predictors()))
+
+        new_names   <- names(recipes::bake(prepped,
+                                           new_data = new_td$data,
+                                           recipes::all_predictors()))
+
+        expect_true(length(train_names) > 0)
+        expect_identical(train_names, new_names)
+
+      })
+
+    }
+
+  }
 
 })

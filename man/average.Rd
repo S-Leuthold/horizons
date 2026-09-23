@@ -16,7 +16,15 @@ average(
 \arguments{
 \item{x}{A \code{horizons_data} object from the pipeline.}
 
-\item{by}{Character. Column name to group replicates by. Default: \code{"sample_id"}.}
+\item{by}{Character. Column name to group replicates by. Default: \code{"sample_id"}.
+With any other column, the grouping values are coerced to character and
+become the new \code{sample_id} of the averaged rows; the original ids are not
+kept as a column, but the mapping from each new id to the scans it came
+from is recorded in \code{provenance$average$source_ids}. The column name is
+recorded in \code{provenance$aggregation_by}, which is written whatever \code{by}
+is. A custom \code{by} is refused on an object carrying a \code{select_training()}
+record, because renaming the rows breaks the link between the record and
+the object; average first, then select.}
 
 \item{quality_check}{Logical. Enable correlation-based outlier detection.
 Default: \code{TRUE}.}
@@ -36,11 +44,22 @@ a replicate to pass QC. Default: \code{0.996}. Changing this is rarely needed.}
 \value{
 The input \code{horizons_data} object with:
 \itemize{
-\item \code{data$analysis}: One row per unique value in \code{by} column
+\item \code{data$analysis}: One row per unique value in \code{by}. With a custom \code{by}
+that column is renamed to \code{sample_id} (as character), so the grouping
+values are the ids of the averaged rows and the \code{by} column itself is
+not in the output.
 \item Predictor columns: Mean of replicate values
+\item Response and outcome columns: Mean of replicate values when numeric,
+the shared value when not; a group whose non-numeric response values
+disagree is an error, not a silent pick
 \item Metadata columns: Uniform values preserved, non-uniform dropped
-\item \code{data$role_map}: Updated to remove dropped columns
-\item \code{provenance$average}: Processing metadata including QC results
+\item \code{data$role_map}: Updated to remove dropped columns and to point the
+\code{id} role at the new \code{sample_id}
+\item \code{provenance$average}: Processing metadata including QC results and
+\code{source_ids}, the mapping from each averaged \code{sample_id} to the source
+scans it was built from
+\item \code{provenance$aggregation_by}: The \code{by} column name, written on every
+call
 }
 }
 \description{

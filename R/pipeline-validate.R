@@ -438,10 +438,11 @@ validate <- function(x,
 
     if (length(ids_to_remove) > 0) {
 
-      x$data$analysis <- x$data$analysis[
-        !x$data$analysis$sample_id %in% ids_to_remove,
-      ]
-      x$data$n_rows <- nrow(x$data$analysis)
+      ## validate() records the removal in x$validation$outliers below, so
+      ## the generic provenance entry is not needed here.
+      x <- subset_rows(x,
+                       keep   = !x$data$analysis$sample_id %in% ids_to_remove,
+                       record = FALSE)
 
       ## Build removal detail tibble
       in_spectral <- ids_to_remove %in% spectral_outlier_ids

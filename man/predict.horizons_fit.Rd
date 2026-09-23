@@ -33,7 +33,11 @@ config, with a \code{config_id} column).
 
 \item{interval}{Logical. Return conformal prediction intervals when UQ is
 available? Default \code{TRUE}. Ignored (with a note) for configs that have no
-UQ bundle.}
+UQ bundle. When intervals are actually available and the model was fit on
+a training object carrying a \verb{$selection} (from \code{select_training()}), this
+warns once that conformal coverage is not guaranteed: the calibration rows
+were chosen for proximity to the targets, so they are not exchangeable
+with arbitrary prediction data.}
 
 \item{abstain_ood}{Logical. When \code{TRUE}, \code{.pred} (and any interval bounds)
 are set to \code{NA} for samples flagged out-of-domain (\code{.ad_flag == "OOD"}),

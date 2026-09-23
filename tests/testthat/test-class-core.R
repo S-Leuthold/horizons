@@ -16,7 +16,7 @@ test_that("new_horizons_data creates object with correct class", {
 
 })
 
-test_that("new_horizons_data creates object with all 8 sections", {
+test_that("new_horizons_data creates object with all 9 sections", {
 
   obj <- new_horizons_data()
 
@@ -28,11 +28,13 @@ test_that("new_horizons_data creates object with all 8 sections", {
     "evaluation",
     "models",
     "ensemble",
-    "artifacts"
+    "artifacts",
+    "selection"
   )
 
   expect_true(all(expected_sections %in% names(obj)))
-  expect_equal(length(obj), 8)
+  expect_equal(length(obj), 9)
+  expect_null(obj$selection)
 
 })
 
@@ -506,6 +508,346 @@ test_that("validate_horizons_data errors when multiple id roles", {
     validate_horizons_data(obj),
     "(?i)multiple.*id|one.*id|exactly.*id"
   )
+
+})
+
+
+## ---------------------------------------------------------------------------
+## Wavelength order, wn_ prefixed
+## ---------------------------------------------------------------------------
+
+test_that("validate_horizons_data catches out-of-order wn_ prefixed predictors", {
+
+  ## Arrange — the naming every verb in the package actually mints
+  test_analysis <- tibble::tibble(
+    sample_id = c("A", "B"),
+    wn_3996   = c(0.1, 0.2),
+    wn_4000   = c(0.3, 0.4)
+  )
+
+  test_role_map <- tibble::tibble(
+    variable = c("sample_id", "wn_3996", "wn_4000"),
+    role     = c("id", "predictor", "predictor")
+  )
+
+  obj <- new_horizons_data(analysis = test_analysis, role_map = test_role_map)
+
+  ## Act & Assert
+  expect_error(validate_horizons_data(obj), "decreasing")
+
+})
+
+
+test_that("validate_horizons_data accepts wn_ prefixed predictors in decreasing order", {
+
+  test_analysis <- tibble::tibble(
+    sample_id = c("A", "B"),
+    wn_4000   = c(0.3, 0.4),
+    wn_3996   = c(0.1, 0.2)
+  )
+
+  test_role_map <- tibble::tibble(
+    variable = c("sample_id", "wn_4000", "wn_3996"),
+    role     = c("id", "predictor", "predictor")
+  )
+
+  obj <- new_horizons_data(analysis = test_analysis, role_map = test_role_map)
+
+  expect_no_error(validate_horizons_data(obj))
+
+})
+
+
+## ---------------------------------------------------------------------------
+## Role vocabulary, outcome cardinality and stored counts
+## ---------------------------------------------------------------------------
+
+test_that("validate_horizons_data rejects a role outside the vocabulary", {
+
+  ## Arrange — a typo'd role would otherwise make the column invisible
+  test_analysis <- tibble::tibble(
+    sample_id = c("A", "B"),
+    wn_4000   = c(0.1, 0.2),
+    clay      = c(10, 20)
+  )
+
+  test_role_map <- tibble::tibble(
+    variable = c("sample_id", "wn_4000", "clay"),
+    role     = c("id", "predictor", "responce")
+  )
+
+  obj <- new_horizons_data(analysis = test_analysis, role_map = test_role_map)
+
+  ## Act & Assert
+  expect_error(validate_horizons_data(obj),
+               regexp = "responce",
+               class  = "horizons_validation_error")
+
+})
+
+
+test_that("validate_horizons_data accepts every role in the vocabulary", {
+
+  test_analysis <- tibble::tibble(
+    sample_id = c("A", "B"),
+    wn_4000   = c(0.1, 0.2),
+    clay      = c(10, 20),
+    oc        = c(1.1, 1.2),
+    elevation = c(300, 310),
+    plot      = c("p1", "p2")
+  )
+
+  test_role_map <- tibble::tibble(
+    variable = c("sample_id", "wn_4000", "clay", "oc", "elevation", "plot"),
+    role     = c("id", "predictor", "outcome", "response", "covariate", "meta")
+  )
+
+  obj <- new_horizons_data(analysis = test_analysis, role_map = test_role_map)
+
+  expect_no_error(validate_horizons_data(obj))
+
+})
+
+
+test_that("validate_horizons_data rejects more than one outcome role", {
+
+  test_analysis <- tibble::tibble(
+    sample_id = c("A", "B"),
+    wn_4000   = c(0.1, 0.2),
+    clay      = c(10, 20),
+    oc        = c(1.1, 1.2)
+  )
+
+  test_role_map <- tibble::tibble(
+    variable = c("sample_id", "wn_4000", "clay", "oc"),
+    role     = c("id", "predictor", "outcome", "outcome")
+  )
+
+  obj <- new_horizons_data(analysis = test_analysis, role_map = test_role_map)
+
+  expect_error(validate_horizons_data(obj),
+               regexp = "(?i)outcome",
+               class  = "horizons_validation_error")
+
+})
+
+
+test_that("validate_horizons_data catches stored counts that drifted from the data", {
+
+  ## Arrange — the failure mode when a verb assigns counts by hand
+  test_analysis <- tibble::tibble(
+    sample_id = c("A", "B"),
+    wn_4000   = c(0.1, 0.2),
+    wn_3996   = c(0.3, 0.4)
+  )
+
+  test_role_map <- tibble::tibble(
+    variable = c("sample_id", "wn_4000", "wn_3996"),
+    role     = c("id", "predictor", "predictor")
+  )
+
+  obj <- new_horizons_data(analysis = test_analysis, role_map = test_role_map)
+
+  obj$data$n_predictors <- 426L
+  obj$data$n_rows       <- 99L
+
+  ## Act & Assert
+  expect_error(validate_horizons_data(obj),
+               regexp = "n_predictors",
+               class  = "horizons_validation_error")
+
+  expect_error(validate_horizons_data(obj), regexp = "n_rows")
+
+})
+
+
+test_that("validate_horizons_data tolerates absent stored counts", {
+
+  test_analysis <- tibble::tibble(
+    sample_id = c("A", "B"),
+    wn_4000   = c(0.1, 0.2)
+  )
+
+  test_role_map <- tibble::tibble(
+    variable = c("sample_id", "wn_4000"),
+    role     = c("id", "predictor")
+  )
+
+  obj <- new_horizons_data(analysis = test_analysis, role_map = test_role_map)
+
+  obj$data$n_covariates <- NULL
+  obj$data$n_responses  <- NULL
+
+  expect_no_error(validate_horizons_data(obj))
+
+})
+
+
+## ---------------------------------------------------------------------------
+## Selection record shape
+## ---------------------------------------------------------------------------
+
+test_that("validate_horizons_data accepts a well-formed selection record", {
+
+  ## Arrange
+  obj <- new_horizons_data()
+  obj$selection <- make_selection_record()
+
+  ## Act & Assert
+  expect_no_error(validate_horizons_data(obj))
+
+})
+
+
+test_that("validate_horizons_data names every missing piece of a selection record", {
+
+  ## Arrange
+  obj <- new_horizons_data()
+  obj$selection <- make_selection_record()
+
+  obj$selection$membership <- NULL
+  obj$selection$groups     <- NULL
+
+  ## Act & Assert
+  expect_error(validate_horizons_data(obj),
+               regexp = "membership",
+               class  = "horizons_validation_error")
+
+  expect_error(validate_horizons_data(obj), regexp = "groups")
+
+})
+
+
+test_that("validate_horizons_data rejects a selection record of the wrong type", {
+
+  obj <- new_horizons_data()
+  obj$selection <- make_selection_record()
+  obj$selection$settings   <- "batch"
+  obj$selection$pool_sizes <- list(property = "clay")
+
+  expect_error(validate_horizons_data(obj),
+               regexp = "settings",
+               class  = "horizons_validation_error")
+
+  expect_error(validate_horizons_data(obj), regexp = "pool_sizes")
+
+})
+
+
+test_that("validate_horizons_data names a selection table missing a column", {
+
+  ## Arrange — a membership without pool_id is indexed by name by every
+  ## consumer of the record
+  obj <- new_horizons_data()
+  obj$selection <- make_selection_record()
+  obj$selection$membership$pool_id <- NULL
+
+  ## Act & Assert
+  expect_error(validate_horizons_data(obj),
+               regexp = "pool_id",
+               class  = "horizons_validation_error")
+
+})
+
+
+test_that("validate_horizons_data enforces I4b containment on membership", {
+
+  ## Arrange — a record naming a pool id the analysis table does not have
+  ids      <- sprintf("P%03d", 1:4)
+  analysis <- tibble::tibble(sample_id = ids, wn_4000 = seq(0.1, 0.4, by = 0.1))
+  role_map <- tibble::tibble(variable = c("sample_id", "wn_4000"),
+                             role     = c("id", "predictor"))
+
+  obj <- new_horizons_data(analysis = analysis, role_map = role_map)
+  obj$selection <- make_selection_record(pool_ids = ids)
+
+  expect_no_error(validate_horizons_data(obj))
+
+  obj$selection$membership$pool_id[1] <- "P999"
+
+  ## Act & Assert
+  expect_error(validate_horizons_data(obj),
+               regexp = "P999",
+               class  = "horizons_validation_error")
+
+})
+
+
+test_that("I4b exempts membership rows marked retained = FALSE", {
+
+  ## Arrange — the union subtraction keeps the row in the record, and it was
+  ## never in the analysis table
+  ids      <- sprintf("P%03d", 1:4)
+  analysis <- tibble::tibble(sample_id = ids, wn_4000 = seq(0.1, 0.4, by = 0.1))
+  role_map <- tibble::tibble(variable = c("sample_id", "wn_4000"),
+                             role     = c("id", "predictor"))
+
+  obj <- new_horizons_data(analysis = analysis, role_map = role_map)
+  obj$selection <- make_selection_record(pool_ids = ids)
+
+  obj$selection$membership$pool_id[1]  <- "P999"
+  obj$selection$membership$retained[1] <- FALSE
+
+  ## Act & Assert
+  expect_no_error(validate_horizons_data(obj))
+
+})
+
+
+test_that("validate_horizons_data enforces I4b containment on groups$pool_ids", {
+
+  ids      <- sprintf("P%03d", 1:4)
+  analysis <- tibble::tibble(sample_id = ids, wn_4000 = seq(0.1, 0.4, by = 0.1))
+  role_map <- tibble::tibble(variable = c("sample_id", "wn_4000"),
+                             role     = c("id", "predictor"))
+
+  obj <- new_horizons_data(analysis = analysis, role_map = role_map)
+  obj$selection <- make_selection_record(pool_ids = ids)
+
+  obj$selection$groups$pool_ids[[1]] <- c(obj$selection$groups$pool_ids[[1]], "P999")
+
+  expect_error(validate_horizons_data(obj),
+               regexp = "P999",
+               class  = "horizons_validation_error")
+
+})
+
+
+test_that("the synthetic selection record matches the real one", {
+
+  ## A synthetic record that has drifted from the verb's output is not
+  ## evidence about anything, so the two are compared directly.
+
+  skip_on_cran()
+
+  ## Arrange
+  fx  <- make_select_fixture()
+  out <- suppressWarnings(select_training(fx$targets, fx$pool, k = 5, verbose = FALSE))
+
+  ## Act
+  synthetic <- make_selection_record()
+
+  ## Assert
+  expect_identical(check_selection_shape(synthetic), character())
+  expect_identical(names(synthetic), names(out$selection))
+
+})
+
+
+test_that("validate_horizons_data checks the selection record alongside the data", {
+
+  ## Arrange — a data problem and a selection problem in one object
+  test_analysis <- tibble::tibble(sample_id = c("A", "A"), wn_4000 = c(0.1, 0.2))
+  test_role_map <- tibble::tibble(variable = c("sample_id", "wn_4000"),
+                                  role     = c("id", "predictor"))
+
+  obj <- new_horizons_data(analysis = test_analysis, role_map = test_role_map)
+  obj$selection <- make_selection_record()
+  obj$selection$exclusions <- NULL
+
+  ## Act & Assert
+  expect_error(validate_horizons_data(obj), regexp = "exclusions")
+  expect_error(validate_horizons_data(obj), regexp = "Duplicate")
 
 })
 
@@ -1712,5 +2054,93 @@ test_that("the committed ensemble fixture (evaluated before the slot existed) st
 
   expect_false("parallelize_over" %in% names(fx$evaluation))
   expect_identical(validate_horizons_eval(fx), fx)
+
+})
+
+
+## ---------------------------------------------------------------------------
+## Selection section in print() and summary()
+## ---------------------------------------------------------------------------
+
+test_that("print.horizons_data shows the selection section", {
+
+  ## Arrange
+  obj <- make_selected_object()
+
+  ## Act
+  output <- capture.output(print(obj))
+
+  ## Assert
+  expect_true(any(grepl("Selection", output)))
+  expect_true(any(grepl("Scope: batch", output)))
+  expect_true(any(grepl("clay 12/12", output)))
+  expect_true(any(grepl("twins excluded: 0", output)))
+
+})
+
+
+test_that("print.horizons_data survives a partially-formed selection record", {
+
+  ## Arrange — a record missing everything print() dereferences
+  obj <- make_selected_object()
+  obj$selection <- list(settings = list())
+
+  ## Act
+  output <- capture.output(expect_no_error(print(obj)))
+
+  ## Assert
+  expect_true(any(grepl("Selection", output)))
+  expect_true(any(grepl("unknown", output)))
+
+})
+
+
+test_that("summary.horizons_data mirrors the selection block", {
+
+  obj    <- make_selected_object()
+  output <- capture.output(summary(obj))
+
+  expect_true(any(grepl("Selection", output)))
+  expect_true(any(grepl("Properties: clay, oc", output)))
+  expect_true(any(grepl("Drawn per property: clay 12/12", output)))
+  expect_true(any(grepl("Twins excluded: 0", output)))
+
+})
+
+
+test_that("summary.horizons_data pipeline status names the selection", {
+
+  obj    <- make_selected_object()
+  output <- capture.output(summary(obj))
+
+  expect_true(any(grepl("drawn from a pool by select_training", output)))
+
+})
+
+
+test_that("summary.horizons_data reports rows removed since the draw", {
+
+  ## Arrange — drop two rows, which routes through subset_rows()
+  obj  <- make_selected_object()
+  keep <- obj$data$analysis$sample_id[1:10]
+
+  ## Act
+  out    <- subset_rows(obj, keep, record = FALSE)
+  output <- capture.output(summary(out))
+
+  ## Assert
+  expect_true(any(grepl("Rows removed since the draw: 2", output)))
+
+})
+
+
+test_that("summary.horizons_data has no selection block without a record", {
+
+  obj    <- make_selected_object()
+  obj$selection <- NULL
+  output <- capture.output(summary(obj))
+
+  expect_false(any(grepl("Selection", output)))
+  expect_false(any(grepl("drawn from a pool", output)))
 
 })

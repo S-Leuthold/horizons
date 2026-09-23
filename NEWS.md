@@ -1,5 +1,29 @@
 # horizons (development version)
 
+## New features
+
+* **`select_training()`**, the training-set selection verb for library
+  mode. Targets and a reference pool in, a `horizons_data` drawn from the
+  pool out, on the targets' wavenumber grid, and the rest of the pipeline
+  runs on it unchanged. The rule is each target's `k` nearest pool rows
+  that have the property measured, drawn per property, rows entering once.
+  Four scopes over one return shape (`batch`, `cluster`, `sample`,
+  `global`): the return is always the union, and the grouping into training
+  sets lives in `x$selection$groups` alongside the full membership table.
+  Every lever of the similarity space is an argument (`snv`, `derivative`,
+  `window`, `poly`, `mask`, `space = "pca"|"pls"`, `ncomp`, `metric`), with
+  the design the 2026-09 experiments ran as the defaults, so the open
+  questions (k on a pool, the metric, tail batches) run as loops over the
+  verb. The verb reconciles the pool onto the targets' axis itself (#64 is
+  why), excludes and reports twins by the gap between first and second
+  nearest, and warns about targets beyond the pool's own nearest-neighbour
+  spread. Design: `dev/specs/v1-refactor/select-training-design.md`.
+
+* **`subset_rows()` and `set_analysis()`** (internal) give `horizons_data`
+  a row-subset operation (#43). `validate()`'s outlier removal and
+  `average()`'s collapse now go through them, so the derived counts have
+  one source of truth.
+
 ## Performance
 
 * `step_transform_spectra()` bakes the whole spectral matrix in one prospectr
@@ -40,6 +64,13 @@
   parallel runs previously drew different streams from the same seed.
 
 ## Breaking / behavioural
+
+* **`average(by = <column>)` no longer returns the `by` column.** The
+  grouping values now become the averaged rows' `sample_id`, and the
+  original column name is kept in `provenance$aggregation_by`. Previously
+  the result had no `sample_id` column at all and carried a dangling id
+  role, which nothing downstream could use. Code that read the `by` column
+  off the averaged object should read `sample_id` instead.
 
 * **`evaluate()` no longer manages a parallel backend.** The caller
   registers a `future::plan()`; `evaluate(allow_par = TRUE)` dispatches
@@ -122,12 +153,277 @@
   throughout. `%>%` was imported but never exported, so nothing user-facing
   changes.
 
+## Review fixes (2026-09-21)
+
+A six-reviewer pass over `select_training()` and the code it touches, with
+the findings fixed the same day. The entries below are the user-visible
+consequences; the review itself is in
+`dev/reviews/2026-09-21-horizons-review.md`.
+
+### The selection verb
+
+* **The self-leakage rule is now neighbourhood-relative.** Every pool row
+  closer to a target than `twin_ratio` times a reference distance for that
+  target is flagged, not just the nearest one. The reference is the 75th
+  percentile of a fixed-width reference set — the target's 50 nearest pool
+  rows, capped at a quarter of the measured rows on a small pool — so the
+  threshold does not move when `k` moves, and a `k` sweep varies one thing
+  at a time. The old rule compared the nearest distance to the
+  second-nearest, which cannot fire when a pool holds replicate scans of a
+  target, both distances being tiny and their ratio about one; the case the
+  check was written for was the case it missed.
+
+* **`twin_ratio` means something different, and is still uncalibrated.** It
+  is unchanged at 0.05, but 0.05 is now a fraction of that reference
+  distance rather than of the second-nearest distance, so the old and new
+  values are not comparable. The constant has always been a placeholder
+  pending a calibration on the KSSL replicate scans; that calibration is
+  more pressing under the new rule, not less.
+
+* **Flagged twins are subtracted from the returned training set** under
+  every scope but `"global"`, `"sample"` included, with the count in
+  `x$selection$n_excluded_union`. The exclusion was previously
+  per-neighbourhood only, so a twin dropped from its own target's
+  neighbourhood walked back in through any other target that drew it — the
+  normal case at `k = 400` over a coherent batch, not a corner one. Under
+  `"global"` the check runs and is reported but the rows stay, since global
+  returns the pool. `x$selection$membership` keeps every flagged row with
+  `retained = FALSE`, so the neighbourhoods stay inspectable after the
+  subtraction.
+
+* **`nearest_neighbours()` returns the `k` in recomputed-distance order.**
+  The bulk screen uses the squared-norm identity, which loses precision
+  exactly where this code makes its decisions, so the retained neighbours
+  are now re-differenced directly. Rank and nearest distance are exact in
+  the near-duplicate regime, which is the regime the twin rule reads.
+
+* **`select_training()` gains `sdev_floor`, default 0.1.** Components whose
+  standard deviation falls below that fraction of PC1's leave the distance.
+  Retaining components on cumulative variance alone and then whitening by
+  their own standard deviation gave the noise tail the same weight as the
+  dominant chemical axes, which made neighbour rankings unstable to small
+  changes in the pool. `sdev_floor = 0` restores the old behaviour.
+
+* **The raw absorbance scale of pool and targets is compared before SNV**,
+  and a gross mismatch warns. The comparison is on the interquartile
+  ranges, with the threshold at twofold: a natural-log against base-ten
+  convention differs by 2.303 and is caught, while an ordinary instrument
+  gain difference of about 1.5 stays silent. A pure additive offset is
+  deliberately not flagged, since baseline offset is what the pipeline's
+  own preprocessing exists to remove. SNV removes per-spectrum offset and
+  scale, so the resemblance check, which measures after it, was
+  structurally blind to a unit mismatch.
+
+* **`select_training()` refuses a pool that has been validated, evaluated
+  or fitted, or that is itself a prior selection.** The return is built by
+  subsetting the pool, so a promoted pool used to come back out still
+  claiming its class, carrying an evaluation split and a row index keyed to
+  positions the subset had just destroyed.
+
+* **The resemblance check is seeded from `seed`** and restores the caller's
+  RNG stream. It previously sampled the pool unseeded, so the "targets
+  beyond the pool's spread" warning was not reproducible on any real pool
+  and the call silently advanced the caller's stream.
+
+* Several additions to the record. `settings$window_cm` gives the
+  Savitzky-Golay window's width in cm⁻¹ on the reconciled grid, since
+  `window` is in points and the grid is the user's. The distance tables
+  carry a `space` column naming the space each distance came from. Draws
+  that cannot reach `k` are recorded in `x$selection$short_draws`, with a
+  `reason` column, and warned, rather than silently returning a short
+  neighbourhood. A target with no defined distance at all — `cosine` on a
+  target sitting at the pool centroid gives `NaN` — is a failed draw,
+  recorded and warned, where it previously fell through `order()` and drew
+  pool rows 1 to `k` in storage order. Under `"global"` scope `mean_k` is a
+  real mean over `k` neighbours rather than a placeholder.
+  `.min_distance` is `NA` under `space_rows = "measured"` with several
+  properties, where the per-property distances have no common scale, and
+  `.group` is `NA` in that case under `scope = "cluster"` only. A PLS space
+  records `settings$space_note`: the selection was made on the pool's own
+  responses, so the pool CV is optimistic.
+
+### The similarity space and reconciliation
+
+* **`reconcile_axes()` refuses an axis with a gap**, on either side. A gap
+  is spacing that is both over three times the grid's median *and* over
+  30 cm⁻¹, so an axis that is merely non-uniform — nm-sampled NIR
+  converted to wavenumbers, or two instrument resolutions merged — passes,
+  while a deleted band does not. A pool standardized
+  with `remove_water = TRUE` used to pass the endpoint-only coverage check
+  and then be spline-filled across the deleted bands and differentiated
+  across them, which put invented absorbance and a large spurious feature
+  into the returned predictors. Water bands belong in `mask`, which is
+  applied after the derivative.
+
+* **Coverage is tolerant to half the pool's median spacing.** A target grid
+  overshooting the pool by up to that much is clamped with a warning and
+  recorded in `record$clamp`; beyond it the verb aborts and states the
+  overshoot. #64 makes a fractional overshoot the expected case rather
+  than a corner one, and the old exact test made it a hard stop.
+
+* The Savitzky-Golay arguments are validated at the call site — `window`
+  odd, `poly < window`, `poly >= derivative` — rather than relying on
+  `prospectr` to raise. Two separate guards replace the old blanket one: a
+  `mask` that removes over 90 % of the columns aborts as a mask error, and
+  the column floor below which a space cannot be built is now
+  `max(2, ncomp)` rather than twice the component cap, so a legitimate
+  24 cm⁻¹ pool builds a space instead of being refused.
+
+* The space records `ncomp`, `ncomp_variance`, `sdev_ratio` and
+  `variance_retained`, so a run's component stability can be audited after
+  the fact. `sdev_ratio` is measured before the floor, over the set the
+  variance rule retained, so the record shows what `sdev_floor` cut rather
+  than only what survived it.
+
+### Recipes and prediction
+
+* **`build_recipe()` gives every non-spectral column an explicit role.** A
+  lab-measured response that `configure()` did not promote used to fall
+  through to the default predictor role, so a second measured property
+  entered the model matrix and inflated the cross-validated metrics.
+  Non-outcome responses now get a `response_hold` role.
+
+* **Meta, held-covariate and held-response columns are no longer required
+  at bake time**, so `predict()` accepts new data carrying only an
+  identifier and spectra. Unused covariates are held by role rather than
+  removed with `step_rm()`.
+
+* **The feature-selection steps select spectral columns by name.** PCA,
+  correlation filtering, Boruta and CARS previously resolved
+  `all_predictors()` at prep time, after `update_role()` had promoted a
+  covariate, so a covariate could be folded into the spectral rotation or
+  silently dropped by a spectral selection rule.
+
+* **`predict()` keeps the covariates a fitted config actually uses** and
+  names a missing one clearly rather than failing inside `shrink()`. The
+  presence check also runs on objects fitted before the predictor schema
+  existed. Ensemble prediction follows the same rule, and a malformed
+  ensemble now reports which members are missing rather than emitting a
+  covariate message that has nothing to do with the failure.
+
+* **`predict()` warns once when conformal intervals are requested on a fit
+  built from a selected training set**, and only when a UQ bundle exists.
+  Coverage assumes exchangeability between the calibration rows and the
+  prediction rows, and selection deliberately breaks it. `fit()` records
+  `models$selection_present` so the warning has something to check, and the
+  single-model and ensemble paths share one helper so the two cannot drift.
+
+* **Applicability-domain distances are computed row by row.** A row that
+  bakes to `NA` gets `NA` in `.ad_distance` and `.ad_flag` while every other
+  row is scored normally, and abstention still applies to the scored rows;
+  previously one bad row could take the whole bundle down to `NULL`. A bake
+  that aborts outright now warns, since that is a bug or a schema mismatch
+  rather than a degradation, and `abstain_ood = TRUE` with no applicability
+  information available warns instead of quietly returning unabstained
+  predictions.
+
+* **The recipe steps fail at `prep()` rather than producing an empty
+  matrix.** `step_select_correlation()`, `step_select_cars()` and
+  `step_select_boruta()` abort when the selector resolves to zero columns,
+  and the PCA branch does the same through a selector-level check.
+  `step_transform_spectra()` aborts naming the column when a generated name
+  (`spec01` and its siblings) collides with a pass-through column, and when
+  `window_size` would trim every spectral column away.
+
+* **The `mtry` upper bound comes from the prepped recipe's own predictor
+  roles.** It was taken from the analysis table's column count, so held
+  responses and unused covariates inflated the range a tuning grid searched
+  over.
+
+### `evaluate()` checkpoints
+
+* **`evaluate()` fingerprints the training rows** — a hash of the sorted
+  sample ids, the row count and the outcome column — into every checkpoint,
+  every per-config file and `eval_manifest.rds`, now schema 3, and
+  **refuses to resume on a mismatch**. The outcome is in the hash because
+  config ids do not encode it, so two properties evaluated on the same rows
+  would otherwise resume each other's checkpoints. Resuming an `output_dir` against a different table used to
+  mix results from two datasets silently. Checkpoints written before this
+  version carry no fingerprint; they warn once and resume.
+  `monitor_evaluate()` shows the fingerprint.
+
+### The object contract
+
+* **`$selection` is a ninth documented section** of `horizons_data`, `NULL`
+  unless the object came from `select_training()`, and shape-checked rather
+  than dereferenced on faith by `print()`.
+
+* **`validate_horizons_data()` enforces four more invariants:** wavelength
+  order (the existing check never fired, because it matched bare numeric
+  names and every predictor carries the `wn_` prefix), the closed role
+  vocabulary, at most one `outcome` column, and agreement between the
+  stored counts and the data.
+
+* **Breaking: the row operations refuse a promoted object.**
+  `subset_rows()` and `set_analysis()` replace the analysis table and
+  recompute counts while leaving splits, row indices and evaluation state
+  untouched, which on a promoted object leaves indices pointing at rows
+  that have moved. They now abort instead. The guard tests the slots the
+  verbs actually write — `evaluation$split`, `models$split`,
+  `models$row_index`, the fitted workflows, the results table and
+  `ensemble` — and refuses a promoted class vector on its own, so an object
+  carrying the class but no state is caught too.
+
+* **`configure()` recounts the stored role counts** through
+  `set_analysis()`. They were assigned by hand and went stale on every
+  configured object, so every one of them violated the count invariant the
+  validator now enforces, and `configure() |> standardize()` aborted.
+  Reconfiguring an object also clears what the old configuration produced:
+  `evaluation$split`, `models$split`, `models$row_index`,
+  `models$cv_predictions`, `models$predictor_schema` and `ensemble`, with
+  the class reset to `horizons_data`.
+
+* **The selection record is recomputed wherever rows leave**, in
+  `set_analysis()` rather than only in `subset_rows()`, so no path can drop
+  rows and leave the record describing the old set.
+  `validate(remove_outliers = TRUE)` refilters membership and groups,
+  recounts the draws, and records `selection$rows_removed`, which
+  `summary()` shows. `print()` and `summary()` report twins as "N flagged,
+  M removed", since after the union subtraction those are different
+  numbers. `average()` refuses a custom `by` on a selected object, because
+  collapsing groups of pool rows would make the record unrecoverable.
+
+* **Validation reaches into the selection record**: each table is checked
+  for its required columns, and invariant I4b — every retained row's
+  `pool_id` is present in the data — is enforced rather than assumed.
+
+### `average()`
+
+* **`average()` carries response and outcome columns through the
+  collapse** as within-group means; a conflicting non-numeric column is an
+  error rather than a silent drop. It previously dropped them, which since
+  the `set_analysis()` refactor aborted with a message blaming the role
+  map.
+
+* A promoted `by` column is coerced to a character `sample_id` and asserted
+  unique and non-missing, so a numeric or factor grouping column can no
+  longer produce an identifier that fails downstream joins.
+  `provenance$average$source_ids` keeps the mapping back to the scans each
+  averaged row came from.
+
+## Known limitations
+
+* **No pool-internal de-duplication, and the cross-validation downstream of
+  a selection is ungrouped.** Replicate scans of one library sample are each
+  other's nearest neighbours, so a target that draws one draws all of them,
+  and the selected training set is enriched in sibling pairs relative to the
+  pool it came from. Plain `vfold_cv()` then puts siblings on both sides of
+  a fold, which optimistically biases the pool-internal estimate, and the
+  effect scales inversely with `k`, so it also biases a `k` sweep. The twin
+  rule addresses target self-leakage, which is a different problem, and does
+  not touch this. Tracked as
+  [#66](https://github.com/S-Leuthold/horizons/issues/66).
+
 ## Internal
 
 * `build_recipe()` returns a recipe whose step selector quosures point at a
   minimal environment rather than the calling frame. Code reaching into
   `rec$steps[[i]]$terms` environments will see this; the prepped and baked
   output is unchanged.
+
+* `resample_spectra()` accepts an explicit `new_wav` grid and refuses to
+  extrapolate, so the package has one resampling routine for both
+  `standardize()` and `select_training()`.
 
 ## New Features
 

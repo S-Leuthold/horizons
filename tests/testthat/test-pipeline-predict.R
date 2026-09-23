@@ -10,7 +10,8 @@
 ## Helper: build a horizons_eval ready for fit(), large enough for UQ
 ## ---------------------------------------------------------------------------
 
-make_predict_eval <- function(n = 300, n_wn = 10, transformation = "none", seed = 42) {
+make_predict_eval <- function(n = 300, n_wn = 10, transformation = "none",
+                              covariates = NULL, seed = 42) {
 
   set.seed(seed)
 
@@ -31,18 +32,32 @@ make_predict_eval <- function(n = 300, n_wn = 10, transformation = "none", seed 
     role     = c("id", rep("predictor", n_wn), "outcome")
   )
 
+  ## Covariates carry the `covariate` role, as add_covariates() leaves them;
+  ## build_recipe() promotes the ones the config asks for to `predictor`.
+  for (cov in covariates) {
+
+    df[[cov]] <- runif(n, 10, 40)
+    roles     <- rbind(roles, tibble::tibble(variable = cov, role = "covariate"))
+
+  }
+
   configs <- tibble::tibble(
     config_id         = "cfg_001",
     model             = "rf",
     transformation    = transformation,
     preprocessing     = "raw",
     feature_selection = "none",
-    covariates        = NA_character_
+    covariates        = if (is.null(covariates)) {
+      NA_character_
+    } else {
+      paste(covariates, collapse = ",")
+    }
   )
 
   obj <- list(
     data = list(analysis = df, role_map = roles, n_rows = nrow(df),
-                n_predictors = n_wn, n_covariates = 0L, n_responses = 1L),
+                n_predictors = n_wn,
+                n_covariates = length(covariates), n_responses = 1L),
     provenance = list(spectra_source = "test", spectra_type = "mir",
                       schema_version = 1L),
     config = list(configs = configs, n_configs = 1L,
@@ -470,6 +485,321 @@ describe("predict.horizons_fit() - applicability domain", {
 
     p <- predict(fitted_fixture, new_df, interval = FALSE)
     expect_true(all(!is.na(p$.pred)))
+
+  })
+
+  it("one malformed spectrum costs that row its AD, not the whole batch", {
+
+    skip_if_not(has_ad(fitted_fixture))
+
+    ## Four out-of-domain spectra plus one that bakes to NA (the documented
+    ## step_transform_spectra failure path). Previously the single NA row made
+    ## predict_ad() return NULL for the batch, which silently removed the AD
+    ## columns AND the abstention the caller asked for.
+    bad_df    <- make_new_spectra(n = 5)
+    wn        <- grep("^wn_", names(bad_df))
+    bad_df[, wn]    <- bad_df[, wn] + 10        # far out of domain
+    bad_df[3, wn]   <- NA_real_                 # malformed spectrum
+
+    p <- suppressWarnings(
+      predict(fitted_fixture, bad_df, interval = FALSE, abstain_ood = TRUE)
+    )
+
+    expect_true(all(c(".ad_distance", ".ad_flag") %in% names(p)))
+    expect_equal(sum(!is.na(p$.ad_distance)), 4L)
+    expect_true(is.na(p$.ad_distance[3]))
+
+    ## Abstention still applies to the four scored rows.
+    expect_true(all(p$.ad_flag[-3] == "OOD"))
+    expect_true(all(is.na(p$.pred[-3])))
+
+  })
+
+  it("warns when abstain_ood is asked for and no AD is available", {
+
+    no_ad <- fitted_fixture
+    no_ad$models$ad <- NULL
+
+    warns <- testthat::capture_warnings(
+      p <- predict(no_ad, new_df, interval = FALSE, abstain_ood = TRUE)
+    )
+
+    expect_true(any(grepl("abstain_ood.*no applicability-domain", warns)))
+    expect_false(".ad_flag" %in% names(p))
+    expect_true(all(!is.na(p$.pred)))          # nothing was abstained
+
+  })
+
+  it("is silent about abstention when abstain_ood is not requested", {
+
+    no_ad <- fitted_fixture
+    no_ad$models$ad <- NULL
+
+    warns <- testthat::capture_warnings(
+      predict(no_ad, new_df, interval = FALSE)
+    )
+
+    expect_false(any(grepl("abstain_ood", warns)))
+
+  })
+
+})
+
+
+## ---------------------------------------------------------------------------
+## check_predictor_schema() — covariate gate runs on pre-schema objects
+## ---------------------------------------------------------------------------
+## models$predictor_schema is a later addition; objects written before it skip
+## the wavenumber-axis gate. The covariate requirement comes from the config
+## rows instead, so it must still be checked on those objects.
+
+describe("check_predictor_schema() - required_extra without a stored schema", {
+
+  it("aborts on a missing covariate even when predictor_schema is NULL", {
+
+    obj <- list(models = list(predictor_schema = NULL))
+
+    new_spectra <- tibble::tibble(sample_id = c("A", "B"),
+                                  wn_4000   = c(0.1, 0.2))
+
+    expect_error(
+      check_predictor_schema(obj, new_spectra, required_extra = "Clay"),
+      "covariate column"
+    )
+
+  })
+
+  it("passes when the covariate is supplied", {
+
+    obj <- list(models = list(predictor_schema = NULL))
+
+    new_spectra <- tibble::tibble(sample_id = c("A", "B"),
+                                  wn_4000   = c(0.1, 0.2),
+                                  Clay      = c(20, 30))
+
+    expect_true(check_predictor_schema(obj, new_spectra,
+                                       required_extra = "Clay"))
+
+  })
+
+  it("still skips the axis gate when predictor_schema is NULL", {
+
+    obj <- list(models = list(predictor_schema = NULL))
+
+    ## Nothing on the training axis at all, but no schema to check it against.
+    expect_true(check_predictor_schema(obj,
+                                       tibble::tibble(sample_id = "A",
+                                                      nonsense  = 1)))
+
+  })
+
+})
+
+
+## ---------------------------------------------------------------------------
+## Conformal coverage on a selected training set (2026-09-21)
+## ---------------------------------------------------------------------------
+## select_training() picks calibration rows for proximity to the targets, so
+## they are not exchangeable with arbitrary new_data and the conformal
+## guarantee does not transfer. predict() says so; nothing else changes.
+
+describe("predict.horizons_fit() - selected training set", {
+
+  new_df <- make_new_spectra()
+
+  ## Same fitted object, with fit()'s selection flag flipped on. fitted_fixture
+  ## was built with compute_uq = TRUE, which the warning also depends on.
+  selected_fixture <- fitted_fixture
+  selected_fixture$models$selection_present <- TRUE
+
+  ## The same object with no UQ bundle: intervals are not returned at all, so
+  ## there is no coverage claim to qualify.
+  selected_no_uq <- selected_fixture
+  selected_no_uq$models$uq <- NULL
+
+  it("the fixture carries UQ, so the gate is exercised", {
+
+    expect_true(has_uq(selected_fixture))
+    expect_false(has_uq(selected_no_uq))
+
+  })
+
+  it("warns once when intervals are requested on a selected fit", {
+
+    warns <- testthat::capture_warnings(
+      p <- predict(selected_fixture, new_df, interval = TRUE)
+    )
+
+    hits <- grepl("Conformal coverage is not guaranteed", warns)
+
+    expect_equal(sum(hits), 1L)
+    expect_true(any(grepl("target_distances", warns)))
+    expect_equal(nrow(p), nrow(new_df))
+
+  })
+
+  it("warns once per call, not once per config", {
+
+    warns <- testthat::capture_warnings(
+      predict(selected_fixture, new_df, config = "all", interval = TRUE)
+    )
+
+    expect_equal(sum(grepl("Conformal coverage is not guaranteed", warns)), 1L)
+
+  })
+
+  it("is silent when intervals are not requested", {
+
+    warns <- testthat::capture_warnings(
+      predict(selected_fixture, new_df, interval = FALSE)
+    )
+
+    expect_false(any(grepl("Conformal coverage", warns)))
+
+  })
+
+  it("is silent on a selected fit with no UQ, where no intervals are returned", {
+
+    warns <- testthat::capture_warnings(
+      p <- predict(selected_no_uq, new_df, interval = TRUE)
+    )
+
+    expect_false(any(grepl("Conformal coverage", warns)))
+    expect_false(".pred_lower" %in% names(p))
+
+  })
+
+  it("is silent when the fit carried no selection", {
+
+    warns <- testthat::capture_warnings(
+      predict(fitted_fixture, new_df, interval = TRUE)
+    )
+
+    expect_false(any(grepl("Conformal coverage", warns)))
+
+  })
+
+  it("carries the warning class", {
+
+    expect_warning(
+      predict(selected_fixture, new_df, interval = TRUE),
+      class = "horizons_select_warning"
+    )
+
+  })
+
+})
+
+
+## ---------------------------------------------------------------------------
+## Configs that use a covariate (2026-09-21)
+## ---------------------------------------------------------------------------
+## build_recipe() promotes a config's requested covariates to `predictor`, so
+## they are in that workflow's blueprint and required at forge time.
+## resolve_new_data() used to strip every covariate from new data by role,
+## which aborted predict() for any config that used one.
+
+## New data as a horizons_data — the branch that selects columns by role.
+make_new_hd <- function(include_cov = TRUE, n = 8, n_wn = 10, seed = 7) {
+
+  set.seed(seed)
+
+  wn_names <- paste0("wn_", seq(4000, by = -2, length.out = n_wn))
+  m        <- matrix(rnorm(n * n_wn), nrow = n)
+  colnames(m) <- wn_names
+
+  df <- tibble::as_tibble(m)
+  df$sample_id <- paste0("NEW", seq_len(n))
+
+  roles <- tibble::tibble(
+    variable = c("sample_id", wn_names),
+    role     = c("id", rep("predictor", n_wn))
+  )
+
+  if (include_cov) {
+
+    df$clay <- runif(n, 10, 40)
+    roles   <- rbind(roles, tibble::tibble(variable = "clay",
+                                           role     = "covariate"))
+
+  }
+
+  obj <- list(
+    data = list(analysis = df, role_map = roles, n_rows = n,
+                n_predictors = n_wn,
+                n_covariates = as.integer(include_cov), n_responses = 0L)
+  )
+
+  class(obj) <- c("horizons_data", "list")
+  obj
+
+}
+
+describe("resolve_new_data() - covariate columns", {
+
+  it("drops covariates by default", {
+
+    out <- resolve_new_data(make_new_hd(include_cov = TRUE))
+    expect_false("clay" %in% names(out))
+
+  })
+
+  it("keeps the ones the fitted model needs", {
+
+    out <- resolve_new_data(make_new_hd(include_cov = TRUE),
+                            keep_extra = "clay")
+
+    expect_true("clay" %in% names(out))
+    expect_true("sample_id" %in% names(out))
+
+  })
+
+  it("keeps stripping covariates the fit does not use", {
+
+    out <- resolve_new_data(make_new_hd(include_cov = TRUE),
+                            keep_extra = "some_other_covariate")
+
+    expect_false("clay" %in% names(out))
+
+  })
+
+})
+
+describe("predict.horizons_fit() - config with a covariate", {
+
+  cov_fit <- suppressWarnings(
+    fit(make_predict_eval(n = 150, covariates = "clay"),
+        n_best = 1L, compute_uq = FALSE, compute_ad = FALSE, verbose = FALSE)
+  )
+
+  it("names the covariate as a required column the fit uses", {
+
+    expect_equal(fitted_extra_predictors(cov_fit, "cfg_001",
+                                         include_blueprint = FALSE),
+                 "clay")
+
+  })
+
+  it("predicts on new data that carries the covariate", {
+
+    p <- predict(cov_fit, make_new_hd(include_cov = TRUE), interval = FALSE)
+
+    expect_equal(nrow(p), 8)
+    expect_true(all(is.finite(p$.pred)))
+
+  })
+
+  it("errors naming the column when new data lacks the covariate", {
+
+    expect_error(
+      predict(cov_fit, make_new_hd(include_cov = FALSE), interval = FALSE),
+      "clay"
+    )
+
+    expect_error(
+      predict(cov_fit, make_new_hd(include_cov = FALSE), interval = FALSE),
+      "covariate"
+    )
 
   })
 

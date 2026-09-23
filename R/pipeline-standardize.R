@@ -34,29 +34,60 @@ WATER_BANDS <- list(
 #'   wavelengths as columns.
 #' @param current_wav `numeric.` Current wavenumber positions (column names).
 #' @param target_resolution `numeric.` Target resolution in cm⁻¹ (e.g., 2).
+#'   The grid is generated from the data's own range at this spacing.
+#'   Exactly one of `target_resolution` and `new_wav` must be given.
+#' @param new_wav `numeric.` An explicit target grid, in any order. Used by
+#'   `select_training()` to bring a pool onto the targets' axis, so the
+#'   package has one resampling routine. Must lie within the range of
+#'   `current_wav`; this function never extrapolates. Default: `NULL`.
 #'
 #' @return `list.` With elements:
 #'   - `matrix`: Resampled spectral matrix
-#'   - `wavelengths`: New wavenumber positions
+#'   - `wavelengths`: New wavenumber positions, decreasing
 #'   - `n_before`: Number of wavelengths before resampling
 #'   - `n_after`: Number of wavelengths after resampling
 #'
 #' @noRd
-resample_spectra <- function(spectra_matrix, current_wav, target_resolution) {
+resample_spectra <- function(spectra_matrix,
+                             current_wav,
+                             target_resolution = NULL,
+                             new_wav           = NULL) {
 
   ## ---------------------------------------------------------------------------
-  ## Step 1: Generate target wavenumber grid
+  ## Step 1: Resolve the target wavenumber grid
   ## ---------------------------------------------------------------------------
 
- ## Determine range from current wavelengths ----------------------------------
+  if (is.null(target_resolution) == is.null(new_wav)) {
+
+    cli::cli_abort("Give exactly one of {.arg target_resolution} and {.arg new_wav}",
+                   class = "horizons_input_error")
+
+  }
 
   wn_min <- min(current_wav)
   wn_max <- max(current_wav)
 
-  ## Create evenly-spaced grid at target resolution ----------------------------
-  ## Sequence from max to min (decreasing) to maintain standard order
+  if (is.null(new_wav)) {
 
-  new_wav <- seq(from = wn_max, to = wn_min, by = -target_resolution)
+    ## Evenly-spaced grid at target resolution, max to min (decreasing) ---------
+
+    new_wav <- seq(from = wn_max, to = wn_min, by = -target_resolution)
+
+  } else {
+
+    ## Explicit grid: must sit inside the data's range --------------------------
+
+    if (min(new_wav) < wn_min || max(new_wav) > wn_max) {
+
+      cli::cli_abort(c(
+        "{.arg new_wav} extends beyond the data's wavenumber range",
+        "x" = "Requested {min(new_wav)} to {max(new_wav)}, data covers {wn_min} to {wn_max}",
+        "i" = "Resampling never extrapolates; trim the target grid to the data"
+      ), class = "horizons_input_error")
+
+    }
+
+  }
 
   ## ---------------------------------------------------------------------------
   ## Step 2: Resample using prospectr
@@ -704,9 +735,10 @@ standardize <- function(x,
   ## Step 9: Update object
   ## ---------------------------------------------------------------------------
 
-  x$data$analysis     <- new_analysis
-  x$data$role_map     <- new_role_map
-  x$data$n_predictors <- length(new_predictor_names)
+  ## set_analysis() is the one place that recomputes the stored counts, so
+  ## the predictor count is never written by hand here.
+
+  x <- set_analysis(x, new_analysis, new_role_map)
 
   ## Update provenance ---------------------------------------------------------
 

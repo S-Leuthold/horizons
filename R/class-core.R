@@ -14,14 +14,14 @@
 #' Internal constructor for horizons_data class
 #'
 #' @description
-#' Builds the foundational 8-section object structure for horizons workflows.
+#' Builds the foundational 9-section object structure for horizons workflows.
 #' This is a low-level constructor that assembles the object without validation.
 #' User-facing constructors like `spectra()` call this internally after input
 #' checking.
 #'
 #' @details
 #' The horizons_data class is the base of the class hierarchy (horizons_data →
-#' horizons_eval → horizons_fit). This constructor initializes all 8 sections
+#' horizons_eval → horizons_fit). This constructor initializes all 9 sections
 #' with either provided values or NULL defaults:
 #'
 #' 1. **data**: The analysis tibble and role_map
@@ -32,10 +32,23 @@
 #' 6. **models**: Fitted workflows and UQ models (populated by fit())
 #' 7. **ensemble**: Optional stacked ensemble (populated by ensemble())
 #' 8. **artifacts**: Paths to disk-backed storage for large objects
+#' 9. **selection**: The record of a draw from a reference pool, `NULL`
+#'    unless the object came from `select_training()`
 #'
-#' Derived values (n_rows, n_predictors, n_covariates) are computed from
-#' the provided data rather than passed as arguments. This ensures consistency
-#' and prevents mismatches between metadata and actual data.
+#' The selection record is a list with `settings` (every lever the draw used),
+#' `reconciliation` (how the pool's axis was brought onto the targets'),
+#' `pool` (row count and an id hash of the source pool), `membership` (one
+#' row per target-property-pool_id draw, with distance and rank), `groups`
+#' (one row per scope group, carrying its target and pool ids), `pool_sizes`
+#' (drawn and available per property), `target_distances`, `resemblance`,
+#' `exclusions` (twins dropped from a neighbourhood), `clustering` and
+#' `timestamp`. `subset_rows()` recomputes the row-level parts and records
+#' `rows_removed` when rows leave afterwards.
+#'
+#' Derived values (n_rows, n_predictors, n_covariates, n_responses) are
+#' computed from the provided data rather than passed as arguments. This
+#' ensures consistency and prevents mismatches between metadata and actual
+#' data.
 #'
 #' This function does NOT validate inputs. Call [validate_horizons_data()]
 #' after construction to verify structural integrity.
@@ -176,7 +189,7 @@ new_horizons_data <- function(analysis        = NULL,
                   cv_predictions   = NULL,  ## tibble: .row, .fold, config_id, .pred, .pred_trans, truth
                   results          = NULL,  ## tibble: config_id, status, degraded, metrics, etc.
                   split            = NULL,  ## rsplit: Split F (train_F / test_F)
-                  row_index        = NULL,  ## tibble: .row → sample_id mapping
+                  row_index        = NULL,  ## tibble: .row \u2192 sample_id mapping
                   uq               = NULL,  ## list of UQ bundles (one per config), or NULL
                   timestamp        = NULL,  ## POSIXct
                   runtime_secs     = NULL), ## numeric
@@ -208,7 +221,15 @@ new_horizons_data <- function(analysis        = NULL,
                                      index = NULL),
                      fit_objects = list(path  = NULL,
                                         index = NULL),
-                     cache_dir = NULL)
+                     cache_dir = NULL),
+
+    ## -------------------------------------------------------------------------
+    ## Section 9: SELECTION — The record of a draw from a reference pool
+    ## -------------------------------------------------------------------------
+
+    ## Populated by select_training(); NULL on every object that never went
+    ## through the verb. Shape is checked by validate_horizons_data().
+    selection = NULL
   )
 
 
@@ -257,8 +278,29 @@ new_horizons_data <- function(analysis        = NULL,
 #' 6. **Single id role**: Exactly one variable must have role = "id".
 #'    Zero or multiple id roles both fail.
 #'
+#' 7. **Role vocabulary**: Every role is one of `id`, `predictor`,
+#'    `covariate`, `outcome`, `response`, `meta`. A typo'd role makes a
+#'    column invisible to every consumer, so it fails here rather than
+#'    silently.
+#'
+#' 8. **Outcome cardinality**: At most one variable has role = "outcome"
+#'    (invariant I3).
+#'
+#' 9. **Stored counts**: `n_rows`, `n_predictors`, `n_covariates` and
+#'    `n_responses`, when present, equal the values recomputed from
+#'    `analysis` and `role_map`. The contract treats these as derived; the
+#'    implementation stores them, so they are checked.
+#'
+#' 10. **Selection record**: when `x$selection` is non-NULL it must be a list
+#'     carrying `settings` (a list) plus `membership`, `groups`,
+#'     `pool_sizes`, `target_distances` and `exclusions` (data frames, each
+#'     with the columns its consumers index by name), and every retained
+#'     `pool_id` it names must be a `sample_id` in `analysis` (I4b). Shape
+#'     and containment only — the contents are the verb's business.
+#'
 #' Empty objects (both analysis and role_map NULL) pass validation — this
-#' allows for incremental object construction.
+#' allows for incremental object construction. The selection record is
+#' checked even on an otherwise empty object.
 #'
 #' @param x `horizons_data`. The object to validate.
 #'
@@ -271,11 +313,25 @@ new_horizons_data <- function(analysis        = NULL,
 validate_horizons_data <- function(x) {
 
   ## ---------------------------------------------------------------------------
+  ## Selection record — checked whether or not the object carries data
+  ## ---------------------------------------------------------------------------
+
+  selection_errors <- check_selection_shape(x$selection, x$data$analysis$sample_id)
+
+  ## ---------------------------------------------------------------------------
   ## Early return for empty object
   ## ---------------------------------------------------------------------------
 
   if (is.null(x$data$analysis) && is.null(x$data$role_map)) {
+
+    if (length(selection_errors) > 0) {
+
+      abort_validation(selection_errors)
+
+    }
+
     return(x)
+
   }
 
   ## ---------------------------------------------------------------------------
@@ -301,7 +357,7 @@ validate_horizons_data <- function(x) {
   ## Collect errors for remaining checks
   ## ---------------------------------------------------------------------------
 
-  errors   <- character()
+  errors   <- selection_errors
   analysis <- x$data$analysis
   role_map <- x$data$role_map
 
@@ -366,16 +422,19 @@ validate_horizons_data <- function(x) {
   }
 
   # Check wavelength order (numeric column names should be decreasing) ---------
+  # Predictors are minted as wn_<wavenumber> everywhere in the package, so the
+  # pattern has to admit the prefix; without it this check matched nothing and
+  # invariant I2 went unenforced.
 
-  numeric_predictors <- predictor_vars[grepl("^[0-9.]+$", predictor_vars)]
+  numeric_predictors <- predictor_vars[grepl("^(wn_)?[0-9.]+$", predictor_vars)]
 
   if (length(numeric_predictors) > 1) {
 
-    wn_values <- as.numeric(numeric_predictors)
+    wn_values <- as.numeric(gsub("^wn_", "", numeric_predictors))
 
     if (!all(diff(wn_values) < 0)) {
 
-      errors <- c(errors, cli::format_inline("Wavelength columns must be in decreasing order"))
+      errors <- c(errors, cli::format_inline("Wavelength columns must be in strictly decreasing order"))
 
     }
   }
@@ -417,30 +476,378 @@ validate_horizons_data <- function(x) {
 
   }
 
+  ## Role vocabulary checks ----------------------------------------------------
+
+  valid_roles   <- c("id", "predictor", "covariate", "outcome", "response", "meta")
+  unknown_roles <- setdiff(unique(role_map$role), valid_roles)
+
+  if (length(unknown_roles) > 0) {
+
+    role_list <- paste(unknown_roles, collapse = ", ")
+    known     <- paste(valid_roles, collapse = ", ")
+    errors    <- c(errors, cli::format_inline("Unknown roles in {.field role_map}: {role_list} (expected one of: {known})"))
+
+  }
+
+  ## Outcome cardinality checks ------------------------------------------------
+
+  n_outcome_roles <- sum(role_map$role == "outcome")
+
+  if (n_outcome_roles > 1) {
+
+    outcome_list <- paste(role_map$variable[role_map$role == "outcome"], collapse = ", ")
+    errors       <- c(errors, cli::format_inline("Multiple {.field outcome} roles in {.field role_map} (at most one allowed): {outcome_list}"))
+
+  }
+
+  ## Stored count checks -------------------------------------------------------
+  ## The contract calls these derived; the implementation stores them, and
+  ## several verbs still assign them by hand, so they are checked here.
+
+  stored <- list(n_rows       = x$data$n_rows,
+                 n_predictors = x$data$n_predictors,
+                 n_covariates = x$data$n_covariates,
+                 n_responses  = x$data$n_responses)
+
+  actual <- list(n_rows       = nrow(analysis),
+                 n_predictors = sum(role_map$role == "predictor", na.rm = TRUE),
+                 n_covariates = sum(role_map$role == "covariate", na.rm = TRUE),
+                 n_responses  = sum(role_map$role == "response",  na.rm = TRUE))
+
+  for (count_name in names(stored)) {
+
+    value <- stored[[count_name]]
+
+    if (is.null(value)) {
+
+      next
+
+    }
+
+    if (length(value) != 1 || !is.numeric(value) || value != actual[[count_name]]) {
+
+      errors <- c(errors, cli::format_inline(
+        "Stored {.field {count_name}} ({paste(value, collapse = ', ')}) does not match the data ({actual[[count_name]]})"
+      ))
+
+    }
+  }
+
   ## ---------------------------------------------------------------------------
   ## Report errors or return
   ## ---------------------------------------------------------------------------
 
   if (length(errors) > 0) {
 
-    cat(cli::col_red(cli::style_bold("! The horizons_data object failed validation:\n")))
-
-    for (i in seq_along(errors)) {
-
-      branch <- if (i < length(errors)) "\u251C\u2500" else "\u2514\u2500"
-      cat(cli::col_red(paste0("   ", branch, " ", errors[i], "\n")))
-
-    }
-
-    cat("\n")
-    rlang::abort(
-      paste(c("Validation failed:", errors), collapse = "\n"),
-      class = "horizons_validation_error"
-    )
+    abort_validation(errors)
 
   }
 
   x
+
+}
+
+
+## ---------------------------------------------------------------------------
+## check_selection_shape() \u2014 Structural checks on x$selection
+## ---------------------------------------------------------------------------
+
+#' Check the shape of a selection record
+#'
+#' @description
+#' Returns one message per structural problem in `x$selection`, or an empty
+#' character vector when the record is absent or well-formed. Shape only:
+#' the record's contents are `select_training()`'s business, but every
+#' consumer (`print()`, `summary()`, `subset_rows()`) dereferences these
+#' fields, so a partially-formed record should fail at validation rather
+#' than inside a print method.
+#'
+#' @details
+#' Three layers, in order. Each named field is present and of the right
+#' type; each table carries the columns its consumers index by name; and,
+#' when `sample_ids` is given, every `pool_id` the record claims is a row of
+#' the object actually is one. That last check is invariant I4b, and it is
+#' the one that catches a record left describing the pre-subset object —
+#' the failure `subset_rows()` exists to prevent, which is otherwise
+#' invisible until a join silently drops rows.
+#'
+#' Membership rows marked `retained = FALSE` are exempt from containment.
+#' They record a neighbour the union subtraction removed, which was never in
+#' `data$analysis` by construction. A membership without the column is read
+#' as all retained.
+#'
+#' @param selection [List or NULL.] The record to check.
+#' @param sample_ids [Character or NULL.] `data$analysis$sample_id`, for the
+#'   containment check. `NULL` skips it, which is what an object with no
+#'   analysis table needs. Default: `NULL`.
+#'
+#' @return [Character.] Validation messages, possibly empty.
+#'
+#' @seealso [validate_horizons_data()]
+#' @noRd
+check_selection_shape <- function(selection, sample_ids = NULL) {
+
+  if (is.null(selection)) {
+
+    return(character())
+
+  }
+
+  if (!is.list(selection)) {
+
+    return(cli::format_inline("{.field selection} must be a list, not {.cls {class(selection)[1]}}"))
+
+  }
+
+  errors <- character()
+
+  ## settings is a list; the row-level parts are all tables ------------------
+
+  if (is.null(selection$settings)) {
+
+    errors <- c(errors, cli::format_inline("{.field selection$settings} is missing"))
+
+  } else if (!is.list(selection$settings)) {
+
+    errors <- c(errors, cli::format_inline("{.field selection$settings} must be a list, not {.cls {class(selection$settings)[1]}}"))
+
+  }
+
+  tables <- list(
+    membership       = c("target_id", "property", "pool_id", "distance", "rank",
+                         "space", "retained"),
+    groups           = c("group", "n_targets", "n_rows", "target_ids", "pool_ids"),
+    pool_sizes       = c("property", "available", "drawn"),
+    target_distances = c("target_id", "property", "nearest", "mean_k", "space"),
+    exclusions       = c("property", "target_id", "pool_id", "distance", "rank",
+                         "reference_distance", "reason")
+  )
+
+  for (field in names(tables)) {
+
+    value <- selection[[field]]
+
+    if (is.null(value)) {
+
+      errors <- c(errors, cli::format_inline("{.field selection${field}} is missing"))
+
+    } else if (!is.data.frame(value)) {
+
+      errors <- c(errors, cli::format_inline("{.field selection${field}} must be a data frame, not {.cls {class(value)[1]}}"))
+
+    } else {
+
+      missing_cols <- setdiff(tables[[field]], names(value))
+
+      if (length(missing_cols)) {
+
+        errors <- c(errors, cli::format_inline(
+          "{.field selection${field}} is missing column{?s} {.field {missing_cols}}"
+        ))
+
+      }
+
+    }
+  }
+
+  ## I4b: every id the record claims is a row of the object is one ----------
+
+  if (!is.null(sample_ids)) {
+
+    membership <- selection$membership
+
+    if (is.data.frame(membership) && "pool_id" %in% names(membership)) {
+
+      retained <- if ("retained" %in% names(membership)) {
+        !is.na(membership$retained) & membership$retained
+      } else {
+        rep(TRUE, nrow(membership))
+      }
+
+      foreign <- setdiff(membership$pool_id[retained], sample_ids)
+
+      if (length(foreign)) {
+
+        errors <- c(errors, cli::format_inline(
+          "{length(foreign)} {.field pool_id}{?s} in {.field selection$membership} {?is/are} not in {.field data$analysis}: {.val {utils::head(foreign, 3)}}"
+        ))
+
+      }
+
+    }
+
+    groups <- selection$groups
+
+    if (is.data.frame(groups) && "pool_ids" %in% names(groups)) {
+
+      foreign <- setdiff(unlist(groups$pool_ids, use.names = FALSE), sample_ids)
+
+      if (length(foreign)) {
+
+        errors <- c(errors, cli::format_inline(
+          "{length(foreign)} id{?s} in {.field selection$groups$pool_ids} {?is/are} not in {.field data$analysis}: {.val {utils::head(foreign, 3)}}"
+        ))
+
+      }
+
+    }
+
+  }
+
+  errors
+
+}
+
+
+## ---------------------------------------------------------------------------
+## describe_selection() \u2014 Printable pieces of a selection record
+## ---------------------------------------------------------------------------
+
+#' Render a selection record into printable fields
+#'
+#' @description
+#' Turns `x$selection` into the strings `print()` and `summary()` display,
+#' with every dereference guarded so a partially-formed or hand-edited
+#' record prints "unknown" rather than erroring inside a print method.
+#'
+#' @details
+#' `print()` and `summary()` show the same facts at different depths, so
+#' they share this one renderer and cannot drift apart. `removed_suffix` is
+#' empty unless rows have left the object since the draw, in which case it
+#' names the count \u2014 the record describes a draw the object no longer
+#' matches exactly, and that should be visible.
+#'
+#' @param selection [List.] The record from `x$selection`.
+#'
+#' @return [List.] Character fields: `scope`, `groups`, `k`, `pool_rows`,
+#'   `drawn`, `space`, `metric`, `twins`, `removed_suffix`,
+#'   `properties`, `n_membership`.
+#'
+#' @seealso [print.horizons_data()], [summary.horizons_data()]
+#' @noRd
+describe_selection <- function(selection) {
+
+  or_unknown <- function(value) {
+
+    if (is.null(value) || !length(value)) "unknown" else paste(value, collapse = ", ")
+
+  }
+
+  s  <- selection$settings
+  ps <- selection$pool_sizes
+
+  ## Group count ---------------------------------------------------------------
+
+  groups <- if (is.data.frame(selection$groups)) {
+
+    paste0(nrow(selection$groups), " group", if (nrow(selection$groups) != 1L) "s" else "")
+
+  } else {
+
+    "groups unknown"
+
+  }
+
+  ## k, scalar or one entry per property ---------------------------------------
+
+  k_str <- if (is.null(s$k) || !length(s$k)) {
+
+    "unknown"
+
+  } else if (length(unique(s$k)) == 1L) {
+
+    as.character(s$k[[1]])
+
+  } else {
+
+    paste(paste0(names(s$k), " = ", s$k), collapse = ", ")
+
+  }
+
+  ## Drawn per property --------------------------------------------------------
+
+  drawn <- if (is.data.frame(ps) && all(c("property", "drawn", "available") %in% names(ps))) {
+
+    paste(paste0(ps$property, " ", ps$drawn, "/", ps$available), collapse = ", ")
+
+  } else {
+
+    "unknown"
+
+  }
+
+  ## Space, with its component count -------------------------------------------
+
+  space <- if (is.null(s$space) || !length(s$space)) {
+
+    "unknown"
+
+  } else {
+
+    paste0(toupper(s$space), " ", or_unknown(s$ncomp_retained), " components")
+
+  }
+
+  removed <- selection$rows_removed
+
+  list(
+    scope          = or_unknown(s$scope),
+    groups         = groups,
+    k              = k_str,
+    pool_rows      = or_unknown(selection$pool$n_rows),
+    drawn          = drawn,
+    space          = space,
+    metric         = or_unknown(s$metric),
+    ## Flagged is per neighbourhood; removed is what actually left the union
+    ## (batch and cluster subtract flagged ids; global keeps every row).
+    twins          = if (is.data.frame(selection$exclusions)) {
+      paste0(nrow(selection$exclusions), " flagged, ",
+             or_unknown(selection$n_excluded_union), " removed")
+    } else {
+      "unknown"
+    },
+    removed_suffix = if (!is.null(removed) && length(removed) && removed > 0) {
+      paste0("; rows removed since the draw: ", removed)
+    } else {
+      ""
+    },
+    properties     = or_unknown(s$properties),
+    n_membership   = if (is.data.frame(selection$membership)) nrow(selection$membership) else "unknown"
+  )
+
+}
+
+
+## ---------------------------------------------------------------------------
+## abort_validation() \u2014 Report accumulated validation errors and abort
+## ---------------------------------------------------------------------------
+
+#' Print accumulated validation errors tree-style and abort
+#'
+#' @param errors [Character.] One message per failed check.
+#'
+#' @return [NULL.] Never returns; aborts with class
+#'   `horizons_validation_error`.
+#'
+#' @seealso [validate_horizons_data()]
+#' @noRd
+abort_validation <- function(errors) {
+
+  cat(cli::col_red(cli::style_bold("! The horizons_data object failed validation:\n")))
+
+  for (i in seq_along(errors)) {
+
+    branch <- if (i < length(errors)) "\u251C\u2500" else "\u2514\u2500"
+    cat(cli::col_red(paste0("   ", branch, " ", errors[i], "\n")))
+
+  }
+
+  cat("\n")
+
+  rlang::abort(
+    paste(c("Validation failed:", errors), collapse = "\n"),
+    class = "horizons_validation_error"
+  )
 
 }
 
@@ -1660,6 +2067,24 @@ print.horizons_data <- function(x, ...) {
   }
 
   ## ---------------------------------------------------------------------------
+  ## Selection section (rows drawn from a pool by select_training())
+  ## ---------------------------------------------------------------------------
+
+  if (!is.null(x$selection)) {
+
+    sel <- describe_selection(x$selection)
+
+    cat(cli::style_bold("Selection\n"))
+    cat(paste0("   \u251c\u2500 Scope: ", sel$scope, " (", sel$groups, ")\n"))
+    cat(paste0("   \u251c\u2500 k: ", sel$k, "\n"))
+    cat(paste0("   \u251c\u2500 Pool: ", sel$pool_rows, " rows; drawn per property: ", sel$drawn, "\n"))
+    cat(paste0("   \u2514\u2500 Space: ", sel$space, ", ", sel$metric,
+               "; twins excluded: ", sel$twins, sel$removed_suffix, "\n"))
+    cat("\n")
+
+  }
+
+  ## ---------------------------------------------------------------------------
   ## Evaluation section (horizons_eval and beyond)
   ## ---------------------------------------------------------------------------
 
@@ -1798,9 +2223,14 @@ print.horizons_data <- function(x, ...) {
 #'   covariate names (not just count), outcome variable, memory footprint
 #' - **Provenance section**: Full source paths, timestamps, version info,
 #'   preprocessing history, aggregation settings
+#' - **Selection section**: Scope and groups, properties, k, pool size, rows
+#'   drawn per property, similarity space and metric, twins excluded, and any
+#'   rows removed since the draw (present only for objects from
+#'   `select_training()`)
 #' - **Configuration section**: Tuning parameter defaults, config count
 #' - **Validation section**: Whether validation has run, pass/fail status
-#' - **Pipeline status**: Current stage and next step guidance
+#' - **Pipeline status**: Current stage and next step guidance, noting when
+#'   the rows were drawn from a pool
 #'
 #' Uses tree-style formatting consistent with the rest of the package.
 #'
@@ -1996,6 +2426,39 @@ summary.horizons_data <- function(object, ...) {
   }
 
   cat("\n")
+
+  ## ---------------------------------------------------------------------------
+  ## Selection section (rows drawn from a pool by select_training())
+  ## ---------------------------------------------------------------------------
+
+  if (!is.null(x$selection)) {
+
+    sel <- describe_selection(x$selection)
+
+    cat(cli::style_bold("Selection\n"))
+    cat(paste0("   \u251c\u2500 Scope: ", sel$scope, " (", sel$groups, ")\n"))
+    cat(paste0("   \u251c\u2500 Properties: ", sel$properties, "\n"))
+    cat(paste0("   \u251c\u2500 k: ", sel$k, "\n"))
+    cat(paste0("   \u251c\u2500 Pool: ", sel$pool_rows, " rows\n"))
+    cat(paste0("   \u2502     \u251c\u2500 Drawn per property: ", sel$drawn, "\n"))
+    cat(paste0("   \u2502     \u2514\u2500 Membership rows: ", sel$n_membership, "\n"))
+    cat(paste0("   \u251c\u2500 Space: ", sel$space, "\n"))
+    cat(paste0("   \u2502     \u2514\u2500 Metric: ", sel$metric, "\n"))
+
+    cat(paste0("   \u2514\u2500 Twins excluded: ", sel$twins, "\n"))
+
+    ## Rows can leave after the draw (validate(remove_outliers = TRUE)); the
+    ## record is recomputed for them, and the gap is worth naming.
+    if (nzchar(sel$removed_suffix)) {
+
+      cat(cli::col_yellow(paste0("         \u2514\u2500 Rows removed since the draw: ",
+                                 x$selection$rows_removed, "\n")))
+
+    }
+
+    cat("\n")
+
+  }
 
   ## ---------------------------------------------------------------------------
   ## Configuration section
@@ -2241,6 +2704,18 @@ summary.horizons_data <- function(object, ...) {
   ## ---------------------------------------------------------------------------
 
   cat(cli::style_bold("Pipeline Status\n"))
+
+  ## Selection is a state, not a step: a selected object is a training set
+  ## drawn from a pool, and the next step is the same one it would otherwise
+  ## be. Naming it keeps the status honest about what the rows are.
+  if (!is.null(x$selection)) {
+
+    sel_state <- describe_selection(x$selection)
+
+    cat(paste0("   \u251c\u2500 Rows: drawn from a pool by select_training() (scope: ",
+               sel_state$scope, ")\n"))
+
+  }
 
   # Determine next step based on object state
   if (!has_data) {

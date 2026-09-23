@@ -1,0 +1,30 @@
+<!-- The pipeline board. Generated into board.html by dev/board/build-board.R; do not edit board.html by hand. -->
+<div id="hz-board">
+<style>
+{{CSS}}
+</style>
+
+<div class="hz-toolbar">
+  <div class="hz-title">The pipeline, verb by verb</div>
+  <div class="hz-lanes">
+    <button class="hz-lane-btn" data-lane="both" aria-pressed="true">Both paths</button>
+    <button class="hz-lane-btn hz-lane-local" data-lane="local" aria-pressed="false">Local only</button>
+    <button class="hz-lane-btn hz-lane-library" data-lane="library" aria-pressed="false">Library only</button>
+  </div>
+</div>
+
+<div class="hz-diagram">
+{{SVG}}
+</div>
+
+<p class="hz-hint">Click a verb to open its card. Dashed nodes are optional. Argument names, defaults and parameter text are generated from the package; everything else carries a pointer to the code or spec it describes.</p>
+
+<div id="hz-cards"></div>
+
+<script type="application/json" id="hz-data">
+{{DATA}}
+</script>
+<script>
+{{JS}}
+</script>
+</div>

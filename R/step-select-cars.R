@@ -5,7 +5,13 @@
 #' with exponentially decreasing retention rates and adaptive reweighting.
 #'
 #' @param recipe A `recipes::recipe()` object.
-#' @param ... Selector functions to choose spectral columns (e.g., `all_predictors()`).
+#' @param ... Selector functions choosing the spectral columns CARS runs on,
+#'   e.g. `dplyr::matches("^spec[0-9]+$")` — the names
+#'   `step_transform_spectra()` gives its output. Select by name pattern rather
+#'   than `all_predictors()`: a covariate promoted to the predictor role is
+#'   inside `all_predictors()` by the time this step preps, and would then be
+#'   clustered and resampled as if it were a wavenumber. A selector matching
+#'   nothing aborts at `prep()`.
 #' @param outcome Character. Name of the outcome variable to use for model fitting.
 #' @param role Character. Role for retained variables. Default is `"predictor"`.
 #' @param trained Logical. Required by `recipes`; indicates if the step has been prepped.
@@ -90,6 +96,8 @@ prep.step_select_cars <- function(x, training, info = NULL, ...) {
   ## ---------------------------------------------------------------------------
 
   col_names <- recipes::recipes_eval_select(x$columns, training, info)
+
+  check_selection_columns(col_names, "step_select_cars")
 
   if (!is.character(x$outcome) || length(x$outcome) != 1) {
     cli::cli_abort("The {.arg outcome} must be a single character string.")

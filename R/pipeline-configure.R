@@ -28,7 +28,11 @@
 #' **Reconfiguration:**
 #'
 #' Can be called multiple times on the same object. Previous configuration
-#' is overwritten, and any prior outcome role is reverted to "response".
+#' is overwritten, any prior outcome role is reverted to "response", and
+#' everything a previous `evaluate()` or `fit()` earned is dropped: the
+#' results, the splits, the row index, the cached CV predictions, the
+#' predictor schema, the ensemble, and the `horizons_eval` or `horizons_fit`
+#' class itself. All of it is keyed to the outcome that is being replaced.
 #' This enables the `purrr::map()` multi-outcome pattern:
 #'
 #' ```
@@ -307,17 +311,32 @@ configure <- function(x,
     x$validation$outliers$removed_ids    <- NULL
     x$validation$outliers$removal_detail <- NULL
     x$validation$outliers$removed        <- FALSE
-    x$evaluation$results     <- NULL
-    x$evaluation$best_config <- NULL
-    x$models$workflows       <- NULL
-    x$models$n_models        <- NULL
-    x$ensemble$stack         <- NULL
-    x$ensemble$metrics       <- NULL
+    x$evaluation$results      <- NULL
+    x$evaluation$best_config  <- NULL
+    x$evaluation$split        <- NULL
+    x$models$workflows        <- NULL
+    x$models$n_models         <- NULL
+    x$models$split            <- NULL
+    x$models$row_index        <- NULL
+    x$models$cv_predictions   <- NULL
+    x$models$predictor_schema <- NULL
+    x$ensemble$stack          <- NULL
+    x$ensemble$metrics        <- NULL
+    x$ensemble$method         <- NULL
+    x$ensemble$weights        <- NULL
+
+    ## Promotion is earned, and reconfiguring un-earns it. The split, the row
+    ## index and the cached predictions are all keyed to an outcome that is
+    ## about to change, and the class is the claim that they are there, so
+    ## the object goes back to being a plain horizons_data.
+
+    class(x) <- c("horizons_data", "list")
 
   }
 
-  x$data$role_map$role[x$data$role_map$role == "outcome"] <- "response"
-  responses <- x$data$role_map$variable[x$data$role_map$role == "response"]
+  role_map <- x$data$role_map
+  role_map$role[role_map$role == "outcome"] <- "response"
+  responses <- role_map$variable[role_map$role == "response"]
 
   ## 2.2 Resolve outcome -------------------------------------------------------
 
@@ -354,7 +373,14 @@ configure <- function(x,
 
   ## 2.3 Promote to outcome role -----------------------------------------------
 
-  x$data$role_map$role[x$data$role_map$variable == outcome_var] <- "outcome"
+  role_map$role[role_map$variable == outcome_var] <- "outcome"
+
+  ## Demoting the old outcome and promoting the new one changes the response
+  ## count, so the roles go back through set_analysis() rather than being
+  ## written in place. Otherwise the stored n_responses disagrees with the
+  ## role map and validate_horizons_data() aborts on the next verb.
+
+  x <- set_analysis(x, x$data$analysis, role_map)
 
   ## ---------------------------------------------------------------------------
   ## Step 3: Handle covariates

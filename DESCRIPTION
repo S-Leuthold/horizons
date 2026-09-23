@@ -17,6 +17,8 @@ Description: Tools for constructing, tuning, and evaluating stacked ensemble mod
     modeling pipelines with support for clustered calibration, caching, and parallel
     execution on high-performance systems.
 License: MIT + file LICENSE
+URL: https://github.com/S-Leuthold/horizons
+BugReports: https://github.com/S-Leuthold/horizons/issues
 Encoding: UTF-8
 LazyData: false
 Remotes:
@@ -25,6 +27,7 @@ Remotes:
 Imports:
     butcher,
     cli,
+    cluster,
     corpcor,
     data.table,
     dials,
@@ -80,7 +83,12 @@ Suggests:
     car,
     shapr,
     plotly,
-    tidygraph
+    tidygraph,
+    knitr,
+    rmarkdown,
+    jsonlite,
+    yaml
+VignetteBuilder: knitr
 Config/testthat/edition: 3
 Depends:
     R (>= 4.1.0)
@@ -96,12 +104,17 @@ Collate:
     'utils-recipes.R'
     'utils-resamples.R'
     'utils-parallel.R'
+    'utils-subset.R'
     'step-transform-spectra.R'
     'step-select-boruta.R'
     'step-select-cars.R'
     'step-select-correlation.R'
     'pipeline-spectra.R'
     'pipeline-standardize.R'
+    'select-reconcile.R'
+    'select-space.R'
+    'select-neighbours.R'
+    'pipeline-select-training.R'
     'pipeline-parse-ids.R'
     'pipeline-average.R'
     'pipeline-add-response.R'
