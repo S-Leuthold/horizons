@@ -174,10 +174,10 @@
 #'   distance to that target is below this fraction of the reference
 #'   distance, the 75th percentile of the target's 50 nearest measured rows
 #'   (a quarter of the measured rows when fewer than 200 have the property),
-#'   under every scope. An exact match is always a twin. Currently `0.05`,
-#'   an internal constant carried over from an earlier rule and still to be
-#'   calibrated on replicate scans, so treat the value as provisional rather
-#'   than settled.
+#'   under every scope. In (0, 1). An exact match is always a twin.
+#'   Currently `0.05`, an internal constant carried over from an earlier rule
+#'   and still to be calibrated on replicate scans, so treat the value as
+#'   provisional rather than settled.
 #' @param chunk_size `integer.` Targets per distance chunk. Default: `500`.
 #' @param seed `integer.` Seed for every stochastic step of the verb: the
 #'   target clustering under `scope = "cluster"`, and the pool sample the
@@ -279,6 +279,20 @@ select_training <- function(x, pool,
   if (!floor_ok) {
 
     errors <- c(errors, cli::format_inline("{.arg sdev_floor} must be a single number in [0, 1); 0 disables the floor"))
+
+  }
+
+  ## A twin sits below this fraction of its reference distance. At 1 or more
+  ## the threshold reaches the reference itself and flags ordinary
+  ## neighbours, and the global branch's claim to hold every twin in its
+  ## fetch rests on the threshold sitting below the reference.
+
+  ratio_ok <- is.numeric(twin_ratio) && length(twin_ratio) == 1L &&
+              is.finite(twin_ratio)  && twin_ratio > 0 && twin_ratio < 1
+
+  if (!ratio_ok) {
+
+    errors <- c(errors, cli::format_inline("{.arg twin_ratio} must be a single number in (0, 1), a fraction of the reference distance"))
 
   }
 
@@ -529,8 +543,8 @@ select_training <- function(x, pool,
     ## pool, not only those before a k-th kept row. draw_neighbours() records
     ## every flagged column it fetched. A flag is a distance threshold on a
     ## sorted row, so the flagged columns are always the leading run and its
-    ## k-th-row cutoff never cuts one. And with twin_ratio below 1 the
-    ## threshold sits below the reference's 75th percentile, so no row past
+    ## k-th-row cutoff never cuts one. And twin_ratio is validated below 1, so
+    ## the threshold sits below the reference's 75th percentile and no row past
     ## the reference width can be flagged: the fetch holds every twin there is.
     ##
     ## k is capped at each property's measured rows, because global draws

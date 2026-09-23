@@ -73,6 +73,26 @@ test_that("select_training() rejects bad scope, metric and space", {
 })
 
 
+test_that("select_training() rejects a twin_ratio outside (0, 1)", {
+
+  ## At 1 or more the threshold reaches the reference distance and flags
+  ## ordinary neighbours; global's claim to see every twin rests on it
+  ## sitting below.
+
+  fx <- make_select_fixture(n_pool = 60)
+
+  for (bad in list(1, 1.5, NA_real_, NA, c(0.05, 0.1))) {
+
+    expect_error(quiet_select(fx, k = 5, twin_ratio = bad),
+                 regexp = "twin_ratio", class = "horizons_input_error")
+
+  }
+
+  expect_no_error(quiet_select(fx, k = 5, properties = "clay", twin_ratio = 0.5))
+
+})
+
+
 test_that("select_training(space = 'pls') needs exactly one property and an integer ncomp", {
 
   fx <- make_select_fixture(n_pool = 60)

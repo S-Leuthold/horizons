@@ -91,10 +91,10 @@ cluster size. Default: \code{30}.}
 distance to that target is below this fraction of the reference
 distance, the 75th percentile of the target's 50 nearest measured rows
 (a quarter of the measured rows when fewer than 200 have the property),
-under every scope. An exact match is always a twin. Currently \code{0.05},
-an internal constant carried over from an earlier rule and still to be
-calibrated on replicate scans, so treat the value as provisional rather
-than settled.}
+under every scope. In (0, 1). An exact match is always a twin.
+Currently \code{0.05}, an internal constant carried over from an earlier rule
+and still to be calibrated on replicate scans, so treat the value as
+provisional rather than settled.}
 
 \item{chunk_size}{\code{integer.} Targets per distance chunk. Default: \code{500}.}
 
