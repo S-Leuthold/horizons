@@ -657,21 +657,43 @@ describe("fit() - final_bayesian_iter", {
 
 describe("fit() - seed reproducibility", {
 
+  ## The train/test split is evaluate()'s, so what fit()'s seed controls is
+  ## the CV folds. UQ and AD are off, so no calibration draw precedes the
+  ## folds, and the ambient RNG is set differently before each call: the
+  ## folds must follow `seed`, not whatever state the caller left.
   obj <- make_fit_object(n = 60, n_configs = 1)
+  obj$config$tuning$final_bayesian_iter <- 0L
 
-  r1 <- suppressWarnings(
-    fit(obj, n_best = 1L, compute_uq = FALSE, verbose = FALSE, seed = 123L)
-  )
+  fit_at <- function(seed, ambient) {
+    set.seed(ambient)
+    suppressWarnings(
+      fit(obj, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE,
+          verbose = FALSE, seed = seed)
+    )
+  }
 
-  r2 <- suppressWarnings(
-    fit(obj, n_best = 1L, compute_uq = FALSE, verbose = FALSE, seed = 123L)
-  )
+  ## Fold membership per row. cv_predictions is grouped by fold, so the raw
+  ## .fold column has the same run lengths whichever rows fall in each fold
+  ## and cannot tell two fold assignments apart; order it by .row.
+  fold_of_row <- function(r) {
+    cp <- r$models$cv_predictions
+    cp$.fold[order(cp$.row)]
+  }
 
-  it("same seed produces same split", {
+  r1 <- fit_at(123L, ambient = 1L)
+  r2 <- fit_at(123L, ambient = 2L)
+  r3 <- fit_at(124L, ambient = 1L)
 
-    t1 <- rsample::training(r1$models$split)
-    t2 <- rsample::training(r2$models$split)
-    expect_equal(t1$sample_id, t2$sample_id)
+  it("same seed produces the same folds and row index", {
+
+    expect_identical(fold_of_row(r1), fold_of_row(r2))
+    expect_identical(r1$models$row_index, r2$models$row_index)
+
+  })
+
+  it("a different seed produces different folds", {
+
+    expect_false(identical(fold_of_row(r1), fold_of_row(r3)))
 
   })
 
