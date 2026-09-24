@@ -553,7 +553,8 @@ consequences; the review itself is in
   conformal interval around it, so on a clamped row both bounds dropped by
   the overshoot, contrary to the documented contract that interval bounds are
   never clamped, and unlike the ensemble path. The interval is now built
-  around the unclamped prediction and only `.pred` is winsorized.
+  around the unclamped prediction and only `.pred` is winsorized, so a
+  clamped `.pred` can sit outside its own interval, below `.pred_lower`.
 
 * `models$response_bound` is now taken over the rows the final models are fit
   on, as its documentation said (#68). It was the maximum outcome over the

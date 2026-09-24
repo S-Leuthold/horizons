@@ -85,8 +85,10 @@ NULL
 #' impossible back-transform blow-ups (e.g. an unconstrained log-scale
 #' prediction inflating through `exp()`) while permitting modest extrapolation.
 #' Interval bounds are deliberately NOT clamped — truncating the interval would
-#' overstate confidence exactly where the model is least trustworthy. Objects
-#' fitted before this field existed predict without a clamp.
+#' overstate confidence exactly where the model is least trustworthy. The
+#' interval is built around the unclamped prediction, so a clamped `.pred` can
+#' sit outside its own interval, below `.pred_lower`. Objects fitted before
+#' this field existed predict without a clamp.
 #'
 #' @examples
 #' \dontrun{
