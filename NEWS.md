@@ -11,6 +11,18 @@
 
 ## Performance
 
+* `step_transform_spectra()` bakes the whole spectral matrix in one prospectr
+  call instead of looping `process_spectra_row()` over rows. Every supported
+  method (SNV, Savitzky-Golay smoothing and derivatives, and their
+  combinations) is row-wise, so the numbers are identical; the new internal
+  `transform_spectra_matrix()` is tested against the row loop for all seven
+  methods and matches to the bit. On a 14,228 x 1,701 matrix a bake goes from
+  2.9 s to 0.6 s (`snv`) and 3.4 s to 1.2 s (`snv_deriv1`), and the 14k
+  small per-row allocations disappear. The peak R heap of one bake is
+  unchanged (about two full-width copies either way); the win is time and
+  allocator churn, not the transient's high-water mark. `process_spectra_row()`
+  stays as the reference implementation the test compares against.
+
 * `evaluate(workers > 1)` now works at library scale. It previously aborted
   with `future.globals.maxSize` or R's `long vectors not supported yet` on
   datasets above a few thousand rows, because R's serializer does not
@@ -37,6 +49,48 @@
   parallel runs previously drew different streams from the same seed.
 
 ## Breaking / behavioural
+
+* **`standardize()` resamples onto a canonical grid, so two sources
+  standardized alike share their columns (#64).** The grid is every multiple
+  of `resample` inside the `trim` bounds (inside the data's own range when
+  `trim` is `NULL`, so two sources then share columns only where their
+  ranges overlap); it used to start at the data's own maximum wavenumber.
+  At `resample = 4` and the default trim, MOYS scans starting at 599.74 at
+  about 1.93 cm-1 came out on `wn_3999.567 ... wn_603.567` while a library
+  at 2 cm-1 came out on `wn_4000 ... wn_600`; both now give
+  `wn_4000, wn_3996, ..., wn_600`. The nearest point beyond each trim bound
+  is kept for the interpolation, so the bounds are the grid's ends; grid
+  points the data does not reach are dropped with a warning (class
+  `horizons_standardize_warning`) rather than extrapolated. A gap already in
+  the input axis (a band deleted upstream, or by an earlier
+  `remove_water = TRUE`) is never spline-filled: the grid points inside it
+  are dropped with a warning naming the gaps, and each side is interpolated
+  on its own. The 0.1 cm-1 tolerance that skipped resampling is gone: an
+  axis is left alone only when it already is the grid to within 1e-6 cm-1,
+  gaps apart, and the console now says so rather than skipping silently
+  (#18). Baseline correction now runs after resampling, on the canonical
+  grid, so every source's convex hull is pinned at the grid's bounds and
+  the points kept beyond the trim bounds for interpolation never reach it;
+  baseline-corrected values therefore change for resampled data, because
+  the hull is now fitted on the grid and pinned at its bounds. That includes
+  data already on the lattice at a finer step (2 cm-1 data at
+  `resample = 4`), whether or not it extends past the trim bounds, since its
+  hull is now fitted on the coarser grid. Data already on the grid at the
+  requested step is corrected exactly as before, extending past the bounds
+  or not. Without resampling the baseline is fitted on the trimmed native
+  axis, as before.
+  Columns stored in increasing order are sorted first, on every path; that
+  input used to abort at the final validation, or, with every operation
+  off, come back unsorted and unvalidated but marked standardized. The
+  no-op call now validates the object before marking it, so it refuses one
+  the validator would. Grid wavenumbers are rounded to six decimal places,
+  so a resolution such as 1.5 gives stable names.
+  `provenance$standardization` gains `resampled` and `grid` (`min`, `max`,
+  `step`, `n`), which a later no-op `force = TRUE` call keeps. Objects
+  standardized before this change
+  sit on the old axes and do not share columns with ones standardized after
+  it; re-run `standardize()` from the raw spectra before comparing,
+  combining, or predicting across the two.
 
 * **`average(by = <column>)` no longer returns the `by` column.** The
   grouping values now become the averaged rows' `sample_id`, and the
@@ -504,6 +558,24 @@ consequences; the review itself is in
   floored member predictions at serve time. Metrics move only for configs
   that produced negative original-scale predictions. The deploy-time
   `upper_bound` guardrail is unchanged and still opt-in.
+
+* The four custom recipe steps now follow the `recipes` step contract (#52).
+  `step_transform_spectra()`, `step_select_correlation()`,
+  `step_select_boruta()` and `step_select_cars()` overwrote their selectors
+  with the resolved column names at `prep()`, so a trained recipe could not
+  be prepped again: `prep(trained, training = d, fresh = TRUE)` aborted with
+  "arguments ... do not exist". The selectors now live in `terms` and
+  survive `prep()`; the resolved names go in `columns`, which is all
+  `bake()` reads, so a butchered stored workflow still predicts. Trained
+  state and baked output are unchanged, and no package verb re-preps a
+  trained recipe, so no existing result moves. Code that read an untrained
+  step's selectors from `$columns` should read `$terms`; `$columns` is
+  `NULL` until the step is prepped. Steps built by earlier versions keep
+  working: stored fits predict and bake as before, and an untrained step
+  still preps. A trained step from an earlier version has no selectors left
+  to re-resolve, so re-prepping it aborts with a `horizons_input_error` that
+  says to rebuild the recipe, rather than with a misleading window-size or
+  zero-column message.
 
 # horizons 0.9.0
 
