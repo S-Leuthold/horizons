@@ -51,4 +51,34 @@ more important than the best shadow are retained. The algorithm is run at \code{
 For best results, this step should be applied \emph{after} spectral preprocessing (e.g. SNV,
 derivatives) and \emph{before} PCA or model fitting. It may be computationally expensive
 for large spectral datasets.
+
+Boruta runs on at most 50 cluster representatives of the selected columns
+(correlation clustering), for at most 25 runs of a 250-tree ranger forest.
+Its \code{mtry} is \code{round(2 * sqrt(n))} for \code{n} representatives (at least 5, at
+most \code{n - 1}), and each run clamps it to the columns that run is given,
+which shrink as Boruta rejects attributes. Attributes Boruta leaves
+tentative are kept with the confirmed ones, and each kept representative
+brings its whole cluster.
+
+When Boruta confirms nothing, the step warns with class
+\code{horizons_boruta_warning}: if it rejected every attribute, the step keeps
+all the variance-filtered columns; otherwise it keeps the tentative ones.
+When Boruta itself fails, \code{prep()} aborts; there is no fallback selector, so
+a Boruta error never yields results labelled Boruta from another method.
+The abort carries class \code{horizons_boruta_error} in its condition chain.
+Through \code{recipes::prep()} the outer condition is recipes' own
+\code{recipes_error_step}, with this error as its parent, so test for the class
+with \code{rlang::cnd_inherits(err, "horizons_boruta_error")} rather than
+\code{inherits()}. Boruta is a suggested package; \code{prep()} checks that it is
+installed before doing any work.
+
+Inside \code{evaluate()} and \code{fit()}, a configuration is recorded as failed when
+Boruta fails on the full training set or on every resampling fold. When it
+fails on some folds only, tune keeps those errors in its notes and scores
+the folds that ran.
+
+The trained step records what Boruta did in its \code{boruta} element: the
+confirmed, tentative and rejected counts, each attribute's \code{decision}, the
+\code{runs}, \code{max_runs} and \code{num_trees}, the \code{mtry} ceiling and the \code{mtry} of
+each run (\code{mtry_by_run}), and \code{retained_all}. \code{print()} shows the counts.
 }

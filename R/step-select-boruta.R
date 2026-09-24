@@ -29,6 +29,36 @@
 #' derivatives) and *before* PCA or model fitting. It may be computationally expensive
 #' for large spectral datasets.
 #'
+#' Boruta runs on at most 50 cluster representatives of the selected columns
+#' (correlation clustering), for at most 25 runs of a 250-tree ranger forest.
+#' Its `mtry` is `round(2 * sqrt(n))` for `n` representatives (at least 5, at
+#' most `n - 1`), and each run clamps it to the columns that run is given,
+#' which shrink as Boruta rejects attributes. Attributes Boruta leaves
+#' tentative are kept with the confirmed ones, and each kept representative
+#' brings its whole cluster.
+#'
+#' When Boruta confirms nothing, the step warns with class
+#' `horizons_boruta_warning`: if it rejected every attribute, the step keeps
+#' all the variance-filtered columns; otherwise it keeps the tentative ones.
+#' When Boruta itself fails, `prep()` aborts; there is no fallback selector, so
+#' a Boruta error never yields results labelled Boruta from another method.
+#' The abort carries class `horizons_boruta_error` in its condition chain.
+#' Through `recipes::prep()` the outer condition is recipes' own
+#' `recipes_error_step`, with this error as its parent, so test for the class
+#' with `rlang::cnd_inherits(err, "horizons_boruta_error")` rather than
+#' `inherits()`. Boruta is a suggested package; `prep()` checks that it is
+#' installed before doing any work.
+#'
+#' Inside `evaluate()` and `fit()`, a configuration is recorded as failed when
+#' Boruta fails on the full training set or on every resampling fold. When it
+#' fails on some folds only, tune keeps those errors in its notes and scores
+#' the folds that ran.
+#'
+#' The trained step records what Boruta did in its `boruta` element: the
+#' confirmed, tentative and rejected counts, each attribute's `decision`, the
+#' `runs`, `max_runs` and `num_trees`, the `mtry` ceiling and the `mtry` of
+#' each run (`mtry_by_run`), and `retained_all`. `print()` shows the counts.
+#'
 #' @export
 
 ## -----------------------------------------------------------------------------
@@ -53,6 +83,7 @@ step_select_boruta <- function(recipe,
                                            role          = role,
                                            trained       = trained,
                                            selected_vars = NULL,
+                                           boruta        = NULL,
                                            skip          = skip,
                                            id            = id))
 }
@@ -64,6 +95,8 @@ step_select_boruta <- function(recipe,
 ## Follows recipes' own contract: `terms` holds the selector quosures and
 ## survives prep, so a trained recipe can be re-prepped (`fresh = TRUE`);
 ## `columns` holds the names prep resolved them to, and is what bake reads.
+## `boruta` is prep's record of what Boruta did (see prep()); bake never
+## reads it, and a step trained before it existed has none.
 
 #' @keywords internal
 #' @noRd
@@ -73,6 +106,7 @@ step_select_boruta_new <- function(terms,
                                    role,
                                    trained,
                                    selected_vars,
+                                   boruta = NULL,
                                    skip,
                                    id) {
 
@@ -82,6 +116,7 @@ step_select_boruta_new <- function(terms,
               role           = role,
               trained        = trained,
               selected_vars  = selected_vars,
+              boruta         = boruta,
               skip           = skip,
               id             = id )
 
@@ -114,6 +149,11 @@ prep.step_select_boruta <- function(x, training, info = NULL, ...) {
     cli::cli_abort("Outcome column {.val {x$outcome}} not found in training data.")
   }
 
+  ## Boruta is suggested, not imported. Checked here, before any work, so a
+  ## missing install names the package rather than surfacing as a Boruta
+  ## failure.
+  rlang::check_installed("Boruta", reason = "for step_select_boruta() (feature_selection = \"boruta\")")
+
   outcome_vec  <- training[[x$outcome]]
   spectra_mat  <- as.matrix(training[, col_names, drop = FALSE])
 
@@ -143,69 +183,137 @@ prep.step_select_boruta <- function(x, training, info = NULL, ...) {
   cluster_vars  <- cluster_result$selected_vars
 
   ## ---------------------------------------------------------------------------
-  ## Stage 3: Run Boruta with optimized parameters
+  ## Stage 3: Run Boruta
   ## ---------------------------------------------------------------------------
 
-  # Optimize Random Forest parameters for correlated features
+  ## The random forest settings live here and reach ranger through the
+  ## importance source below, which is the only place Boruta hands them on
+  ## to. Boruta() passes its own `...` to a custom `getImp`, so settings given
+  ## to Boruta() as `ntree` or `mtry` would do nothing unless the importance
+  ## source read them.
+
+  max_runs     <- 25L
+  num_trees    <- 250L
   n_features   <- ncol(reduced_mat)
   optimal_mtry <- min(max(5, round(sqrt(n_features) * 2)), n_features - 1)
 
-  ## Create custom ranger function with thread control for Boruta ----
+  ## -------------------------------------------------------------------------
+  ## Importance source: ranger, mtry clamped per call
+  ## -------------------------------------------------------------------------
 
-  ranger_single_thread <- function(...) {
-    ranger::ranger(..., num.threads = 1)
+  ### Boruta calls this once per run with the attributes not yet rejected plus
+  ### their shadows, a matrix that narrows as attributes are rejected. A fixed
+  ### mtry outgrows it once fewer than mtry / 2 attributes remain, ranger
+  ### aborts, and Boruta with it (#75), so each call clamps to the columns it
+  ### is given. The mtry of every run is kept for the trained record.
+
+  mtry_by_run <- integer(0)
+
+  ranger_importance <- function(x, y, ...) {
+
+    mtry <- as.integer(max(1L, min(optimal_mtry, ncol(x))))
+
+    mtry_by_run <<- c(mtry_by_run, mtry)
+
+    rf <- ranger::ranger(x           = x,
+                         y           = y,
+                         num.trees   = num_trees,
+                         mtry        = mtry,
+                         importance  = "impurity",
+                         num.threads = 1,
+                         verbose     = FALSE)
+
+    rf$variable.importance
+
   }
 
-  boruta_fit <- tryCatch({
-    ## Run Boruta with thread-controlled ranger ----
+  ## -------------------------------------------------------------------------
+  ## A failed Boruta run fails the step
+  ## -------------------------------------------------------------------------
 
-    Boruta::Boruta(x       = reduced_mat,
-                   y       = outcome_vec,
-                   doTrace = 0,
-                   maxRuns = 25,           # Reduced for faster execution
-                   ntree   = 250,          # Reduced for faster execution
-                   mtry    = optimal_mtry, # Optimized for correlated predictors
-                   holdHistory = FALSE,
-                   getImp = function(x, y, ...) {
-                     ## Custom importance function with explicit thread control ----
+  ### There is no fallback selector. The step used to fall back to the 50
+  ### columns most correlated with the outcome, so a config labelled "boruta"
+  ### ran a correlation filter with nothing in the results saying so. An
+  ### error here stops the step; recipes::prep() wraps it in a
+  ### recipes_error_step, so the class sits one level down the chain.
 
-                     rf <- ranger::ranger(
-                       x = x,
-                       y = y,
-                       num.trees = 250,
-                       mtry = optimal_mtry,
-                       importance = "impurity",
-                       num.threads = 1,  # Force single thread
-                       verbose = FALSE
-                     )
-                     return(rf$variable.importance)
-                   })
-  }, error = function(e) {
-    cli::cli_alert_warning("Boruta failed: {e$message}")
-    cli::cli_alert_info("Falling back to correlation-based selection")
-    NULL
-  })
+  boruta_fit <- tryCatch(Boruta::Boruta(x           = reduced_mat,
+                                        y           = outcome_vec,
+                                        doTrace     = 0,
+                                        maxRuns     = max_runs,
+                                        holdHistory = FALSE,
+                                        getImp      = ranger_importance),
+                         error = function(e) e)
 
-  # Handle Boruta results or fallback
-  if(!is.null(boruta_fit)) {
-    kept_cluster_vars <- Boruta::getSelectedAttributes(boruta_fit, withTentative = TRUE)
-  } else {
-    # Fallback: select top 50 most correlated features
-    cors <- abs(cor(reduced_mat, outcome_vec, use = "pairwise.complete.obs"))
-    top_cors <- sort(cors[,1], decreasing = TRUE)[1:min(50, length(cors[,1]))]
-    kept_cluster_vars <- names(top_cors)
-    cli::cli_alert_info("Selected {length(kept_cluster_vars)} features via correlation fallback")
+  if (inherits(boruta_fit, "error")) {
+
+    boruta_error <- conditionMessage(boruta_fit)
+
+    cli::cli_abort(c(
+      "Boruta feature selection failed: {boruta_error}",
+      "i" = "Boruta ran on {n_features} cluster representative{?s} of {length(col_names_filtered)} wavenumber{?s}, with ranger mtry at most {optimal_mtry}.",
+      "i" = "{.fn step_select_boruta} has no fallback selector, so the step fails rather than select by another method."
+    ), class = "horizons_boruta_error")
+
   }
+
+  decision <- boruta_fit$finalDecision
+
+  boruta_record <- list(n_attributes = n_features,
+                        n_confirmed  = sum(decision == "Confirmed"),
+                        n_tentative  = sum(decision == "Tentative"),
+                        n_rejected   = sum(decision == "Rejected"),
+                        decision     = decision,
+                        runs         = length(mtry_by_run),
+                        max_runs     = max_runs,
+                        num_trees    = num_trees,
+                        mtry         = as.integer(optimal_mtry),
+                        mtry_by_run  = mtry_by_run,
+                        retained_all = FALSE)
 
   ## ---------------------------------------------------------------------------
   ## Stage 4: Map back to original wavenumbers
   ## ---------------------------------------------------------------------------
 
-  kept_wavenumbers <- unique(unlist(cluster_map[kept_cluster_vars]))
+  ## Tentative attributes are kept with the confirmed ones: maxRuns is capped
+  ## at 25 for speed, so Boruta often stops before it decides them.
+  ##
+  ## Boruta confirming nothing is a result, not a failure, and the step says
+  ## so rather than pass it off as a selection. Two cases:
+  ##
+  ##   - Every attribute rejected: nothing is selected, so the step keeps every
+  ##     variance-filtered wavenumber, as the other selection steps keep all
+  ##     their columns when they select nothing.
+  ##   - None confirmed, some tentative: the selection is the tentative
+  ##     attributes, none of which Boruta showed to beat the shadows.
+  ##
+  ## Both warn, and the trained record carries the counts either way.
 
-  if (length(kept_wavenumbers) == 0) {
-    cli::cli_alert_warning("No wavenumbers retained by Boruta. Retaining all variance-filtered predictors.")
-    kept_wavenumbers <- col_names_filtered
+  kept_cluster_vars <- Boruta::getSelectedAttributes(boruta_fit, withTentative = TRUE)
+
+  if (length(kept_cluster_vars) == 0) {
+
+    cli::cli_warn(c(
+      "Boruta rejected all {n_features} attribute{?s} it tested, so {.fn step_select_boruta} selected nothing.",
+      "i" = "Retaining all {length(col_names_filtered)} variance-filtered wavenumber{?s}; the model sees an unselected spectrum."
+    ), class = "horizons_boruta_warning")
+
+    kept_wavenumbers           <- col_names_filtered
+    boruta_record$retained_all <- TRUE
+
+  } else {
+
+    kept_wavenumbers <- unique(unlist(cluster_map[kept_cluster_vars]))
+
+    if (boruta_record$n_confirmed == 0) {
+
+      cli::cli_warn(c(
+        "Boruta confirmed none of the {n_features} attribute{?s} it tested in {boruta_record$runs} run{?s}.",
+        "i" = "The selection is the {boruta_record$n_tentative} attribute{?s} it left tentative ({length(kept_wavenumbers)} wavenumber{?s}), none shown to beat the shadow features."
+      ), class = "horizons_boruta_warning")
+
+    }
+
   }
 
   ## ---------------------------------------------------------------------------
@@ -218,6 +326,7 @@ prep.step_select_boruta <- function(x, training, info = NULL, ...) {
                          role           = x$role,
                          trained        = TRUE,
                          selected_vars  = kept_wavenumbers,
+                         boruta         = boruta_record,
                          skip           = x$skip,
                          id             = x$id)
 }
@@ -256,11 +365,29 @@ print.step_select_boruta <- function(x,
                                      width = max(20, options()$width - 30),
                                      ...) {
 
+  ## glue() trims a trailing newline, so each line ends with its own.
   cat("Boruta-based spectral feature selection step\n")
-  cat(glue::glue("\u2022 Outcome column: {x$outcome}\n"))
+  cat(glue::glue("\u2022 Outcome column: {x$outcome}"), "\n", sep = "")
 
   if (x$trained) {
-    cat(glue::glue("\u2022 {length(x$selected_vars)} wavenumbers retained after Boruta\n"))
+
+    cat(glue::glue("\u2022 {length(x$selected_vars)} wavenumbers retained after Boruta"), "\n", sep = "")
+
+    ## A step trained before the record existed has none to show.
+    b <- x$boruta
+
+    if (!is.null(b)) {
+
+      cat(glue::glue("\u2022 Boruta: {b$n_confirmed} confirmed, {b$n_tentative} tentative, ",
+                     "{b$n_rejected} rejected of {b$n_attributes} cluster representatives ",
+                     "in {b$runs} runs"), "\n", sep = "")
+
+      if (isTRUE(b$retained_all)) {
+        cat("\u2022 Nothing selected, so every variance-filtered wavenumber is retained\n")
+      }
+
+    }
+
   } else {
     cat("\u2022 Step not yet trained\n")
   }

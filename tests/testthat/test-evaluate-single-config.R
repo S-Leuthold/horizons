@@ -259,6 +259,37 @@ describe("evaluate_single_config() - failure paths", {
 
   })
 
+  it("returns 'failed' when Boruta fails, rather than selecting by correlation (#75)", {
+
+    skip_if_not_installed("Boruta")
+
+    ## step_select_boruta() used to catch this and select the columns most
+    ## correlated with the outcome, so the config succeeded under the boruta
+    ## label. rf fails where evaluate_single_config() preps the recipe to
+    ## bound mtry; elastic_net has no mtry and fails inside tune_grid().
+    local_mocked_bindings(Boruta = function(...) stop("Boruta could not run"),
+                          .package = "Boruta")
+
+    for (model in c("rf", "elastic_net")) {
+
+      config <- make_eval_config(model = model, feature_selection = "boruta")
+
+      result <- evaluate_single_config(
+        config_row    = config,
+        split         = setup$split,
+        cv_folds      = setup$folds,
+        role_map      = setup$role_map,
+        grid_size     = 2,
+        bayesian_iter = 0
+      )
+
+      expect_equal(result$status, "failed", label = model)
+      expect_true(is.na(result$cv_rmse), label = model)
+
+    }
+
+  })
+
   it("has NA metrics on failure", {
 
     config <- make_eval_config(model = "nope")
