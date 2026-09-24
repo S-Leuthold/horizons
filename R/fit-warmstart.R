@@ -281,7 +281,7 @@ point_in_grid <- function(point, grid) {
 #'     (the space-filling grid when `fallback_used` is TRUE)
 #'   - `error`: Character, present only when the grid failed, in which case
 #'     `tune_results` and `best_params` are NULL. When every model failed it
-#'     carries the first distinct error from `.notes`.
+#'     carries the most frequent distinct error note from `.notes`.
 #'
 #' @keywords internal
 #' @export

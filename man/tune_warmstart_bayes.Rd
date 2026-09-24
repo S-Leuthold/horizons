@@ -40,7 +40,7 @@ List with:
 (the space-filling grid when \code{fallback_used} is TRUE)
 \item \code{error}: Character, present only when the grid failed, in which case
 \code{tune_results} and \code{best_params} are NULL. When every model failed it
-carries the first distinct error from \code{.notes}.
+carries the most frequent distinct error note from \code{.notes}.
 }
 }
 \description{
