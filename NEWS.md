@@ -483,14 +483,24 @@ consequences; the review itself is in
   evaluated before this version have no `cv_*` columns and `fit()` asks for
   a re-run. `monitor_evaluate()`'s "best so far" reads the same column.
 
-* `fit()`'s train/test partition (Split F) is now seeded with
-  `fit_split_seed(seed)` (`seed + 1L`) rather than `seed` (#50). It was built
-  with the same `initial_split()` call as `evaluate()`'s on the same frame,
-  so at the shared default seed the two partitions were bit-identical and
-  `fit()`'s test metrics, and its degradation check, were measured on the rows
-  the configs had been selected on. `fit()` now warns if the two partitions
-  coincide anyway. Every `fit()` result changes test rows as a consequence,
-  by design.
+* `fit()` now scores on `evaluate()`'s train/test split instead of drawing
+  its own, so its test metrics are measured on `evaluate()`'s held-out rows,
+  which nothing was selected on. This supersedes the split-seed offset added
+  under #50 (`fit_split_seed()`, `seed + 1L`), which is removed together with
+  the warning for coinciding partitions. The offset kept the two partitions
+  from being identical, but a fresh draw is not an independent one: over 200
+  seeds at n = 250, a median 79 % of `fit()`'s test rows came from
+  `evaluate()`'s training rows, which had chosen the members on
+  `cv_<metric>` and tuned their warm-start parameters, so `fit()`'s test
+  metrics, and its degradation check, were optimistic through selection.
+  With ranking on cross-validated metrics (#50), `evaluate()`'s test rows are
+  the clean ones. The calibration set UQ and AD share is carved out of
+  `evaluate()`'s training rows with its own seed (`calib_split_seed()`,
+  `seed + 1L`), and the CV folds are seeded with `seed`, so `fit()`'s `seed`
+  no longer touches the train/test partition. `fit()` aborts with class
+  `horizons_input_error` when `evaluation$split` was not drawn from the rows
+  the object models, which means a stale or hand-edited object. Every `fit()`
+  result changes test rows as a consequence.
 
 * Tuning metrics are now scored on the original response scale (#49). The
   response transform is a `skip = TRUE` recipe step, so tune never applied it
@@ -516,16 +526,13 @@ consequences; the review itself is in
   that produced negative original-scale predictions. The deploy-time
   `upper_bound` guardrail is unchanged and still opt-in.
 
-* `fit()` now drops rows whose outcome is `NA` before drawing Split F, by the
-  same rule `evaluate()` applies (#67). It split the unfiltered analysis
+* `fit()` now models the same rows as `evaluate()`: rows whose outcome is `NA`
+  are dropped by one shared rule (#67). `fit()` split the unfiltered analysis
   table, so with NA outcomes present its partition was over a different frame
-  from `evaluate()`'s, the NA-outcome rows reached the fit (a random forest
-  member failed in warm-start tuning on them), and the warning for coinciding
-  partitions compared row positions in frames of different length, so it
-  could not fire. Both verbs now share one helper, `fit()` reports the drop in
-  its console tree as `evaluate()` does, and the coincidence check compares
-  the two test partitions as sets of sample ids. Objects without NA outcomes
-  split exactly as before.
+  from `evaluate()`'s and the NA-outcome rows reached the fit (a random forest
+  member failed in warm-start tuning on them). `fit()` reports the drop in its
+  console tree as `evaluate()` does, and the check that `evaluation$split`
+  was drawn from the modelled rows (above) applies the same rule.
 
 * `models$response_bound` is now taken over the rows the final models are fit
   on, as its documentation said (#68). It was the maximum outcome over the

@@ -679,44 +679,86 @@ describe("fit() - seed reproducibility", {
 
 
 ## =========================================================================
-## Split F is independent of evaluate()'s split (#50)
+## Split F is evaluate()'s split
 ## =========================================================================
-## evaluate() and fit() share the default seed and the same initial_split()
-## call on the same frame, so before fit_split_seed() the two partitions were
-## bit-identical and fit()'s test metrics were measured on the rows the
-## configs were selected on.
+## A fresh Split F (at seed + 1 since #50) drew most of its test rows from
+## evaluate()'s training rows, which chose the members and tuned the
+## warm-start parameters. evaluate()'s test rows are the only ones nothing was
+## selected on, so fit() scores on them, and carves the calibration set out
+## of evaluate()'s training rows.
 
-describe("fit() - split independence from evaluate()", {
+describe("fit() - scores on evaluate()'s split", {
 
-  obj <- make_fit_object(n = 60, n_configs = 1, seed = 42)   # evaluate(seed = 42)
+  ## n = 250 so the calibration split clears N_CALIB_MIN and UQ runs.
+  obj <- make_fit_object(n = 250, n_configs = 1, seed = 42)
+  obj$config$tuning$final_bayesian_iter <- 0L
 
-  it("does not reproduce evaluate()'s partition at the same seed", {
+  r <- suppressWarnings(
+    fit(obj, n_best = 1L, compute_uq = TRUE, compute_ad = FALSE,
+        verbose = FALSE, seed = 42L)
+  )
 
-    r <- suppressWarnings(
-      fit(obj, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE,
-          verbose = FALSE, seed = 42L)
-    )
+  it("reuses evaluate()'s split, so its test rows are evaluate()'s", {
 
-    expect_false(identical(sort(as.integer(r$models$split$in_id)),
-                           sort(as.integer(obj$evaluation$split$in_id))))
-
-  })
-
-  it("warns visibly when a caller makes the partitions coincide", {
-
-    ## fit(seed = s) seeds Split F with s + 1; evaluate used 42, so 41 collides
-    expect_warning(
-      fit(obj, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE,
-          verbose = FALSE, seed = 41L),
-      "identical to evaluate"
-    )
+    expect_identical(r$models$split$data, obj$evaluation$split$data)
+    expect_identical(rsample::testing(r$models$split)$sample_id,
+                     rsample::testing(obj$evaluation$split)$sample_id)
 
   })
 
-  it("fit_split_seed() is a documented offset of the user's seed", {
+  it("partitions the modelled rows into test, calibration and fit rows", {
 
-    expect_identical(fit_split_seed(307L), 308L)
-    expect_identical(fit_split_seed(42), 43L)
+    expect_false(is.null(r$models$uq))
+
+    ## Split C is reproducible from calib_split_seed() and evaluate()'s
+    ## training rows alone.
+    set.seed(calib_split_seed(42L))
+    split_C <- rsample::initial_split(rsample::training(obj$evaluation$split),
+                                      prop = CALIB_PROP,
+                                      strata = dplyr::all_of("SOC"))
+
+    test_ids  <- rsample::testing(r$models$split)$sample_id
+    calib_ids <- rsample::testing(split_C)$sample_id
+    fit_ids   <- r$models$row_index$sample_id
+
+    expect_setequal(rsample::training(split_C)$sample_id, fit_ids)
+    expect_equal(r$models$uq[[1]]$n_calib, length(calib_ids))
+
+    expect_length(intersect(test_ids, calib_ids), 0L)
+    expect_length(intersect(test_ids, fit_ids), 0L)
+    expect_length(intersect(calib_ids, fit_ids), 0L)
+    expect_setequal(c(test_ids, calib_ids, fit_ids),
+                    obj$evaluation$split$data$sample_id)
+
+  })
+
+  it("calib_split_seed() is a documented offset of the user's seed", {
+
+    expect_identical(calib_split_seed(307L), 308L)
+    expect_identical(calib_split_seed(42), 43L)
+
+  })
+
+  it("refuses an object whose split no longer matches its rows", {
+
+    stale <- obj
+    stale$data$analysis <- stale$data$analysis[-1, ]
+
+    expect_error(
+      fit(stale, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE,
+          verbose = FALSE),
+      "not drawn from the rows this object models",
+      class = "horizons_input_error"
+    )
+
+    no_split <- obj
+    no_split$evaluation$split <- NULL
+
+    expect_error(
+      fit(no_split, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE,
+          verbose = FALSE),
+      class = "horizons_input_error"
+    )
 
   })
 
@@ -727,9 +769,8 @@ describe("fit() - split independence from evaluate()", {
 ## NA-outcome rows are dropped before Split F (#67)
 ## =========================================================================
 ## evaluate() drops rows whose outcome is NA. fit() used to split the
-## unfiltered table, so its partition was over a different frame, the
-## NA-outcome rows reached the fit, and the coincidence guard compared in_id
-## positions in frames of different length, so it could never fire.
+## unfiltered table, so its partition was over a different frame and the
+## NA-outcome rows reached the fit.
 
 describe("fit() - NA-outcome rows (#67)", {
 
@@ -738,17 +779,11 @@ describe("fit() - NA-outcome rows (#67)", {
 
   na_ids <- obj$data$analysis$sample_id[is.na(obj$data$analysis$SOC)]
 
-  ## One verbose run at a seed that does not collide with evaluate()'s split:
-  ## keep the console tree and every warning for the assertions below.
-  warns <- character()
-  out   <- utils::capture.output(
-    r <- withCallingHandlers(
+  ## One verbose run, keeping the console tree for the drop report.
+  out <- utils::capture.output(
+    r <- suppressWarnings(
       fit(obj, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE,
-          verbose = TRUE, seed = 42L),
-      warning = function(w) {
-        warns <<- c(warns, conditionMessage(w))
-        invokeRestart("muffleWarning")
-      }
+          verbose = TRUE, seed = 42L)
     )
   )
 
@@ -761,34 +796,15 @@ describe("fit() - NA-outcome rows (#67)", {
 
   })
 
-  it("draws Split F from the frame evaluate() split", {
+  it("scores on the frame evaluate() split", {
 
-    expect_setequal(r$models$split$data$sample_id,
-                    obj$evaluation$split$data$sample_id)
+    expect_identical(r$models$split$data, obj$evaluation$split$data)
 
   })
 
   it("reports the rows it dropped in the console tree", {
 
     expect_true(any(grepl("Dropped 6 rows with NA outcome", out, fixed = TRUE)))
-
-  })
-
-  it("warns on a genuine coincidence with evaluate()'s partition, and not otherwise", {
-
-    ## evaluate() split at seed 42; fit(seed = 41) draws Split F at 42 over
-    ## the same filtered frame, so the partitions genuinely coincide.
-    expect_warning(
-      keep_only_warning(
-        fit(obj, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE,
-            verbose = FALSE, seed = 41L),
-        "identical to evaluate"
-      ),
-      "identical to evaluate"
-    )
-
-    ## At seed 42 they differ, and the guard stays quiet.
-    expect_false(any(grepl("identical to evaluate", warns)))
 
   })
 
@@ -801,14 +817,15 @@ describe("fit() - NA-outcome rows (#67)", {
 
 describe("fit() - response_bound (#68)", {
 
-  obj <- make_fit_object(n = 60, n_configs = 1, seed = 42)
+  ## At fixture seed 12, evaluate()'s split (which fit() reuses) puts the
+  ## object's largest outcome in the test part, which is what makes a
+  ## whole-table bound and a training-row bound differ.
+  obj <- make_fit_object(n = 60, n_configs = 1, seed = 12)
   obj$config$tuning$final_bayesian_iter <- 0L
 
-  ## Seed 5 puts the object's largest outcome in Split F's test part, which
-  ## is what makes a whole-table bound and a training-row bound differ.
   r <- suppressWarnings(
     fit(obj, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE,
-        verbose = FALSE, seed = 5L)
+        verbose = FALSE, seed = 12L)
   )
 
   it("equals the largest fit-row outcome times RESPONSE_BOUND_MARGIN", {
