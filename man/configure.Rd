@@ -75,8 +75,10 @@ by \code{evaluate()}) smaller than the number of spectral columns. For
 \code{c(lower, upper)} with lower < upper; either end may be infinite. Every
 scored and served prediction is clamped to it. Default \code{c(0, Inf)},
 non-negative; use \code{c(-Inf, Inf)} for a signed property such as δ13C.
-Every observed value of the outcome must lie inside it. See Outcome
-range.}
+Set it from the property's physical bounds, not the data's. Every
+observed value of the outcome must lie inside it. A negative lower bound
+rules out the \code{"log"}, \code{"log10"} and \code{"sqrt"} transformations. See
+Outcome range.}
 }
 \value{
 A modified \code{horizons_data} object with:
@@ -213,13 +215,26 @@ concentrations, contents and most other soil properties. A signed property
 such as δ13C or δ15N takes \code{c(-Inf, Inf)}, which clamps nothing, and a
 bounded one such as a percentage may take \code{c(0, 100)}.
 
-The range also sets the anchor of the response bound \code{fit()} stores (see
-\code{\link[=fit]{fit()}}), and it is checked against the data: when an observed value of the
-outcome lies outside it, \code{configure()} aborts with class
-\code{horizons_input_error}, and \code{evaluate()} and \code{fit()} repeat the check before
-they tune anything. One range applies to the one outcome an object models;
-to model several outcomes with different ranges, give each \code{configure()}
-call its own. See GitHub issue #76.
+The range comes from what the property can physically be, not from the
+data in hand. Setting it to the observed minimum and maximum clamps
+predictions to the training range and, once test rows are in the table,
+tunes the clamp on them. Prefer \code{-Inf} to an arbitrarily low finite floor:
+the range's lower bound anchors the response bound \code{fit()} stores (see
+\code{\link[=fit]{fit()}}), which allows half the span from that anchor above the training
+maximum, so a distant floor loosens the guardrail. For outcomes between 10
+and 20 the bound is 530 under \code{c(-1000, Inf)} and 25 under \code{c(-Inf, Inf)}.
+
+The range is checked against the data: when an observed value of the
+outcome lies outside it or is infinite, \code{configure()} aborts with class
+\code{horizons_input_error}, and \code{evaluate()}, \code{fit()} and \code{ensemble()} repeat
+the check before they fit anything. A range whose lower bound is negative
+cannot be combined with the \code{"log"}, \code{"log10"} or \code{"sqrt"} transformations,
+which are undefined for negative values and whose back-transforms floor
+the predictions, and \code{evaluate()} and \code{fit()} refuse to rank by \code{"rrmse"}
+under it, since its denominator, the mean outcome, can be zero or negative.
+One range applies to the one outcome an object models; to model several
+outcomes with different ranges, give each \code{configure()} call its own. See
+GitHub issue #76.
 }
 \examples{
 \dontrun{

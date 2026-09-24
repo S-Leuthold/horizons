@@ -399,8 +399,8 @@ compute_ensemble_uq <- function(oof,
 
   fold_safe <- safely_execute(
     fit_uq_fold_models(
-      meta_frame = meta_frame,
-      oof_row    = oof$row,
+      meta_frame    = meta_frame,
+      oof_row       = oof$row,
       folds         = folds_cal,
       contract      = contract,
       optimize      = optimize,

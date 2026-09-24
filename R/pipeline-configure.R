@@ -123,13 +123,26 @@
 #' such as δ13C or δ15N takes `c(-Inf, Inf)`, which clamps nothing, and a
 #' bounded one such as a percentage may take `c(0, 100)`.
 #'
-#' The range also sets the anchor of the response bound `fit()` stores (see
-#' [fit()]), and it is checked against the data: when an observed value of the
-#' outcome lies outside it, `configure()` aborts with class
-#' `horizons_input_error`, and `evaluate()` and `fit()` repeat the check before
-#' they tune anything. One range applies to the one outcome an object models;
-#' to model several outcomes with different ranges, give each `configure()`
-#' call its own. See GitHub issue #76.
+#' The range comes from what the property can physically be, not from the
+#' data in hand. Setting it to the observed minimum and maximum clamps
+#' predictions to the training range and, once test rows are in the table,
+#' tunes the clamp on them. Prefer `-Inf` to an arbitrarily low finite floor:
+#' the range's lower bound anchors the response bound `fit()` stores (see
+#' [fit()]), which allows half the span from that anchor above the training
+#' maximum, so a distant floor loosens the guardrail. For outcomes between 10
+#' and 20 the bound is 530 under `c(-1000, Inf)` and 25 under `c(-Inf, Inf)`.
+#'
+#' The range is checked against the data: when an observed value of the
+#' outcome lies outside it or is infinite, `configure()` aborts with class
+#' `horizons_input_error`, and `evaluate()`, `fit()` and `ensemble()` repeat
+#' the check before they fit anything. A range whose lower bound is negative
+#' cannot be combined with the `"log"`, `"log10"` or `"sqrt"` transformations,
+#' which are undefined for negative values and whose back-transforms floor
+#' the predictions, and `evaluate()` and `fit()` refuse to rank by `"rrmse"`
+#' under it, since its denominator, the mean outcome, can be zero or negative.
+#' One range applies to the one outcome an object models; to model several
+#' outcomes with different ranges, give each `configure()` call its own. See
+#' GitHub issue #76.
 #'
 #' @param x `horizons_data`. Object with response data attached via
 #'   `add_response()`.
@@ -170,8 +183,10 @@
 #'   `c(lower, upper)` with lower < upper; either end may be infinite. Every
 #'   scored and served prediction is clamped to it. Default `c(0, Inf)`,
 #'   non-negative; use `c(-Inf, Inf)` for a signed property such as δ13C.
-#'   Every observed value of the outcome must lie inside it. See Outcome
-#'   range.
+#'   Set it from the property's physical bounds, not the data's. Every
+#'   observed value of the outcome must lie inside it. A negative lower bound
+#'   rules out the `"log"`, `"log10"` and `"sqrt"` transformations. See
+#'   Outcome range.
 #'
 #' @return A modified `horizons_data` object with:
 #'   * Outcome variable promoted to `role = "outcome"` in `data$role_map`
@@ -473,6 +488,27 @@ configure <- function(x,
 
   }
 
+  ## A range that admits negative values rules out the response transforms.
+  ## log(x + 1) is NaN below -1 and sqrt(x) below 0, so the recipe hands the
+  ## model NaN outcomes, and the back-transforms reimpose a floor the range
+  ## says is not there (exp(x) - 1 >= -1, x^2 >= 0). Some engines then fail
+  ## after tuning, one crashes R, and some report success on NaN outcomes.
+  ## The default range never trips this.
+
+  signed_transforms <- intersect(transformations, c("log", "log10", "sqrt"))
+
+  if (outcome_range[1] < 0 && length(signed_transforms) > 0) {
+
+    abort_nested(
+      paste0("`transformations` ", paste(signed_transforms, collapse = ", "),
+             " cannot be used with `outcome_range` = ", format_outcome_range(outcome_range),
+             ", which admits negative values"),
+      c("log(x + 1) is undefined below -1 and sqrt(x) below 0, and their back-transforms floor the predictions",
+        "Use transformations = 'none' for an outcome that can be negative")
+    )
+
+  }
+
   ## ---------------------------------------------------------------------------
   ## Step 2: Resolve and promote outcome
   ## ---------------------------------------------------------------------------
@@ -546,7 +582,7 @@ configure <- function(x,
     abort_nested(
       paste0("Outcome '", outcome_var, "' lies outside `outcome_range` = ",
              format_outcome_range(outcome_range), ". Set `outcome_range` ",
-             "to a range that contains it: c(-Inf, Inf) for a signed property"),
+             "to the property's physical bounds: c(-Inf, Inf) for a signed property"),
       c(breach$lines,
         "`outcome_range` is the outcome's physical range, and every prediction is clamped to it",
         "The default, c(0, Inf), is for non-negative properties"),
@@ -967,40 +1003,47 @@ outcome_range_setting <- function(x) {
 #' Which outcome values lie outside a range
 #'
 #' @description
-#' The check `configure()`, `evaluate()` and `fit()` share. Missing values
-#' are ignored, since no verb models them. A non-numeric outcome is not this
-#' check's to judge, and passes.
+#' The check `configure()`, `evaluate()`, `fit()` and `ensemble()` share.
+#' Missing values are ignored, since no verb models them. Infinite values
+#' count as breaches whatever the range: no range admits them, and one would
+#' otherwise pass under an infinite bound and make [compute_response_bound()]
+#' return `Inf`, which the fit validator refuses only after tuning. A
+#' non-numeric outcome is not this check's to judge, and passes.
 #'
 #' @param values Numeric vector of outcome values.
 #' @param outcome_range `numeric(2)`.
 #'
-#' @return `NULL` when every non-missing value lies inside the range.
-#'   Otherwise a list with `n_below` and `n_above` (counts), `min` and `max`
-#'   (of the non-missing values), and `lines`, one sentence per breached side
-#'   for a message.
+#' @return `NULL` when every non-missing value is finite and lies inside the
+#'   range. Otherwise a list with `n_below`, `n_above` and `n_infinite`
+#'   (counts), `min` and `max` (of the non-missing values), and `lines`, one
+#'   sentence per kind of breach for a message.
 #' @keywords internal
 #' @noRd
 outcome_range_breach <- function(values, outcome_range) {
 
   if (!is.numeric(values)) return(NULL)
 
-  y     <- values[!is.na(values)]
-  below <- sum(y < outcome_range[1])
-  above <- sum(y > outcome_range[2])
+  y        <- values[!is.na(values)]
+  finite   <- is.finite(y)
+  infinite <- sum(!finite)
+  below    <- sum(finite & y < outcome_range[1])
+  above    <- sum(finite & y > outcome_range[2])
 
-  if (below == 0 && above == 0) return(NULL)
+  if (below == 0 && above == 0 && infinite == 0) return(NULL)
+
+  of_n <- function(k) paste0(k, " of ", length(y), " value", if (length(y) != 1) "s")
 
   lines <- c(
-    if (below > 0) paste0(below, " of ", length(y), " value", if (length(y) != 1) "s",
-                          " below the lower bound ", outcome_range[1],
-                          " (minimum ", signif(min(y), 4), ")"),
-    if (above > 0) paste0(above, " of ", length(y), " value", if (length(y) != 1) "s",
-                          " above the upper bound ", outcome_range[2],
-                          " (maximum ", signif(max(y), 4), ")")
+    if (below > 0) paste0(of_n(below), " below the lower bound ", outcome_range[1],
+                          " (minimum ", signif(min(y[finite]), 4), ")"),
+    if (above > 0) paste0(of_n(above), " above the upper bound ", outcome_range[2],
+                          " (maximum ", signif(max(y[finite]), 4), ")"),
+    if (infinite > 0) paste0(of_n(infinite), " infinite, which no range admits; ",
+                             "correct or drop ", if (infinite == 1) "it" else "them")
   )
 
-  list(n_below = below, n_above = above, min = min(y), max = max(y),
-       lines = lines)
+  list(n_below = below, n_above = above, n_infinite = infinite,
+       min = min(y), max = max(y), lines = lines)
 
 }
 
@@ -1008,11 +1051,11 @@ outcome_range_breach <- function(values, outcome_range) {
 #' Refuse an outcome that lies outside the object's range
 #'
 #' @description
-#' `evaluate()` and `fit()` call this on entry, before they draw a split or
-#' tune anything, so an object whose outcome no longer fits its range (or was
-#' configured before the range existed, under the default) fails in a second
-#' rather than after the tuning cost (#76). The rows are the ones the verbs
-#' model: missing outcomes are ignored.
+#' `evaluate()`, `fit()` and `ensemble()` call this on entry, before they
+#' draw a split or fit anything, so an object whose outcome no longer fits its
+#' range (or was configured before the range existed, under the default)
+#' fails in a second rather than after the tuning cost (#76). The rows are
+#' the ones the verbs model: missing outcomes are ignored.
 #'
 #' @param x A configured `horizons_data` object.
 #' @param verb `character(1)`. The calling verb, named in the message.
@@ -1047,7 +1090,46 @@ check_outcome_range <- function(x, verb, call = rlang::caller_env()) {
     stats::setNames(sprintf("{breach$lines[%d]}", seq_along(breach$lines)),
                     rep("x", length(breach$lines))),
     "i" = "{.arg outcome_range} is the outcome's physical range, set by {.fn configure}. The default, {.code c(0, Inf)}, is for non-negative properties.",
-    "i" = "Re-run {.code configure(outcome_range = c(-Inf, Inf))} for a signed property, or with bounds that contain the data."
+    "i" = "Re-run {.fn configure} with the property's physical bounds as {.arg outcome_range}: {.code c(-Inf, Inf)} for a signed property."
+  ), class = "horizons_input_error", call = call)
+
+}
+
+
+#' Refuse rrmse as the ranking metric under a range that admits negatives
+#'
+#' @description
+#' `rrmse` is `100 * rmse / mean(truth)`. Once the outcome can be negative its
+#' mean can be zero or negative, the metric's sign flips, and ranking by its
+#' minimum picks the worst configuration: in `evaluate()`, in `fit()`'s
+#' member ranking, and in the ensemble's meta-learner selection and its
+#' improvement over the best member, which read the rank metric `fit()`
+#' recorded. Refused wherever a range with a negative lower bound meets it,
+#' so the default range never trips it.
+#'
+#' @param metric `character(1)` or `NULL`. The metric the verb will rank by.
+#' @param outcome_range `numeric(2)`.
+#' @param verb `character(1)`. The calling verb, named in the message.
+#' @param call The call the condition is attributed to. Default: the caller.
+#'
+#' @return `NULL`, invisibly. Aborts with class `horizons_input_error`.
+#' @keywords internal
+#' @noRd
+check_rank_metric_range <- function(metric, outcome_range, verb,
+                                    call = rlang::caller_env()) {
+
+  if (!identical(metric, "rrmse") || outcome_range[1] >= 0) {
+
+    return(invisible(NULL))
+
+  }
+
+  range_text <- format_outcome_range(outcome_range)
+
+  cli::cli_abort(c(
+    "{.fn {verb}} cannot rank by {.val rrmse} under {.arg outcome_range} {range_text}.",
+    "x" = "{.val rrmse} divides the RMSE by the mean outcome, which can be zero or negative when the outcome can be, so a smaller value is not a better model.",
+    "i" = "Rank by {.val rmse}, {.val mae}, {.val rpd}, {.val rsq} or {.val ccc}."
   ), class = "horizons_input_error", call = call)
 
 }

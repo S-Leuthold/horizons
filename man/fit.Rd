@@ -150,6 +150,12 @@ Every prediction \code{fit()} scores (out-of-fold, test and calibration) is
 clamped to \code{configure()}'s \code{outcome_range}, as \code{predict()} clamps what it
 serves. Before anything is drawn or fitted, on either path, \code{fit()} aborts
 with class \code{horizons_input_error} when an observed outcome lies outside
-the range, naming \code{outcome_range} and how to set it (#76).
+the range or is infinite, naming \code{outcome_range} and how to set it (#76);
+when the ranking metric is \code{"rrmse"} and the range's lower bound is
+negative, since the mean outcome it divides by can then be zero or
+negative; and, on the \code{evaluate()} path, when the range differs from the
+one \code{evaluate()} recorded on its results rows (rows from before the range
+was recorded count as the default), since the members were chosen on
+predictions clamped to that range.
 }
 

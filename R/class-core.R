@@ -1941,13 +1941,25 @@ validate_horizons_fit <- function(x) {
   ## nothing. Under the default range that is the positive-finite rule the
   ## guardrail shipped with; a signed outcome's bound may be negative.
 
-  rb  <- md$response_bound
-  rng <- outcome_range_setting(x)
+  ## The range is read only when there is a bound to check against it, and a
+  ## malformed one is collected like any other finding rather than aborting
+  ## past the checks below.
+
+  rb <- md$response_bound
 
   if (!is.null(rb)) {
 
-    if (!is.numeric(rb) || length(rb) != 1 || is.na(rb) ||
-        !is.finite(rb) || rb <= rng[1] || rb > rng[2]) {
+    rng <- tryCatch(outcome_range_setting(x),
+                    horizons_validation_error = function(e) NULL)
+
+    if (is.null(rng)) {
+
+      errors <- c(errors, cli::format_inline(
+        "{.field config$outcome_range} is not a usable range (two numbers, lower below upper), so {.field response_bound} cannot be checked against it"
+      ))
+
+    } else if (!is.numeric(rb) || length(rb) != 1 || is.na(rb) ||
+               !is.finite(rb) || rb <= rng[1] || rb > rng[2]) {
 
       errors <- c(errors, cli::format_inline(
         "{.field response_bound} must be NULL or a single finite numeric above the lower bound of {.field outcome_range} ({rng[1]}) and no higher than its upper bound ({rng[2]})"
@@ -2576,7 +2588,8 @@ print.horizons_data <- function(x, ...) {
 #'   drawn per property, similarity space and metric, twins excluded, and any
 #'   rows removed since the draw (present only for objects from
 #'   `select_training()`)
-#' - **Configuration section**: Tuning parameter defaults, config count
+#' - **Configuration section**: Tuning parameter defaults, config count, and
+#'   the outcome range when it is not the default `c(0, Inf)`
 #' - **Validation section**: Whether validation has run, pass/fail status
 #' - **Pipeline status**: Current stage and next step guidance, noting when
 #'   the rows were drawn from a pool
@@ -2824,6 +2837,16 @@ summary.horizons_data <- function(object, ...) {
 
     cat(paste0("   \u251C\u2500 Configs defined: ", n_configs, "\n"))
     cat(paste0("   \u251C\u2500 Outcome: ", exp$outcome, "\n"))
+
+    ## The range only when it is not the default, which is what an object
+    ## configured before the range existed reads as (#76). Read raw, not
+    ## through outcome_range_setting(), so a summary never aborts.
+    range_rec <- x$config$outcome_range
+
+    if (is.numeric(range_rec) && !identical(as.double(range_rec), DEFAULT_OUTCOME_RANGE)) {
+      cat(paste0("   \u251C\u2500 Outcome range: ", format_outcome_range(range_rec), "\n"))
+    }
+
     cat(paste0("   \u251C\u2500 Models: ", paste(exp$models, collapse = ", "), "\n"))
     cat(paste0("   \u251C\u2500 Preprocessing: ", paste(exp$preprocessing, collapse = ", "), "\n"))
     cat(paste0("   \u251C\u2500 Transformations: ", paste(exp$transformations, collapse = ", "), "\n"))

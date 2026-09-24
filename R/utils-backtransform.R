@@ -254,8 +254,9 @@ clamp_to_outcome_range <- function(x, outcome_range = DEFAULT_OUTCOME_RANGE) {
 #' finite, and the training minimum when it is `-Inf`. The bound therefore
 #' allows half the span from the anchor to the maximum above the maximum.
 #' Under the default range the anchor is 0 and the bound is `max * 1.5`,
-#' identically to the double (the two are the same exact product, rounded
-#' once), so objects and tests pinned to the old formula are unchanged. The
+#' identical to the double for every normal double (`0.5 * max` is then
+#' exact, so both expressions round the same real number once), so objects
+#' and tests pinned to the old formula are unchanged. The
 #' old formula itself was wrong for a signed outcome: at a negative maximum
 #' `max * 1.5` lies below the maximum, and at a zero maximum it is zero. A
 #' finite upper bound of `outcome_range` caps the result, since nothing above

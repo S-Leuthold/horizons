@@ -101,7 +101,13 @@
 #' clamped to `configure()`'s `outcome_range`, as `predict()` clamps what it
 #' serves. Before anything is drawn or fitted, on either path, `fit()` aborts
 #' with class `horizons_input_error` when an observed outcome lies outside
-#' the range, naming `outcome_range` and how to set it (#76).
+#' the range or is infinite, naming `outcome_range` and how to set it (#76);
+#' when the ranking metric is `"rrmse"` and the range's lower bound is
+#' negative, since the mean outcome it divides by can then be zero or
+#' negative; and, on the `evaluate()` path, when the range differs from the
+#' one `evaluate()` recorded on its results rows (rows from before the range
+#' was recorded count as the default), since the members were chosen on
+#' predictions clamped to that range.
 #'
 #' @return A `horizons_fit` object (inherits from `horizons_eval`,
 #'   `horizons_data`) with `models$` slot populated. The slot includes
@@ -179,6 +185,17 @@ fit <- function(x,
   ## since; this is the last check before the re-tune pays for itself.
   check_outcome_range(x, verb = "fit")
   outcome_range <- outcome_range_setting(x)
+
+  ## The metric fit() will rank by, and that the ensemble inherits: rrmse
+  ## ranks backwards once the mean outcome can be negative.
+  check_rank_metric_range(metric %||% x$evaluation$rank_metric, outcome_range,
+                          verb = "fit")
+
+  ## evaluate() scored and ranked the configurations under the range it
+  ## stamped on each row; members chosen and warm-started under another range
+  ## would carry that range's scoring into this fit. A cold start has no
+  ## evaluate() rows to compare.
+  if (!cold_start) check_evaluated_outcome_range(x, outcome_range)
 
   if (cold_start) {
 
@@ -1093,6 +1110,67 @@ cold_start_evaluation <- function(x, metric, seed, call = rlang::caller_env()) {
     ),
     stratified = drawn$stratified
   )
+
+}
+
+## ---------------------------------------------------------------------------
+## check_evaluated_outcome_range — evaluate() ranked under this range
+## ---------------------------------------------------------------------------
+
+#' Refuse a fit whose evaluation was scored under another outcome range
+#'
+#' @description
+#' `evaluate()` stamps the range it clamped with on every results row, in the
+#' `settings` record (#76). `fit()` takes its members and their warm-start
+#' parameters from those rows, so a range changed since `evaluate()` would
+#' carry the old range's scoring into the new fit. The comparison is the
+#' checkpoint gate's: a recorded range must equal this object's, and a row
+#' with no recorded range (evaluated before the range existed, under the
+#' zero floor) passes only under the default range.
+#'
+#' @param x A `horizons_eval` that was screened by `evaluate()`.
+#' @param outcome_range `numeric(2)`. The object's range, from
+#'   [outcome_range_setting()].
+#' @param call The call the condition is attributed to. Default: the caller,
+#'   `fit()`.
+#' @return `NULL`, invisibly. Aborts with class `horizons_input_error`.
+#' @keywords internal
+#' @noRd
+check_evaluated_outcome_range <- function(x, outcome_range,
+                                          call = rlang::caller_env()) {
+
+  results <- x$evaluation$results
+
+  if (!is.data.frame(results) || nrow(results) == 0) return(invisible(NULL))
+
+  stamps <- if ("settings" %in% names(results)) {
+    lapply(results$settings, function(s) if (is.list(s)) normalize_eval_settings(s) else NULL)
+  } else {
+    rep(list(NULL), nrow(results))
+  }
+
+  differs <- vapply(stamps, function(s) {
+    if (is.null(s$outcome_range)) {
+      outcome_range_unrecorded(s, outcome_range)
+    } else {
+      !identical(s$outcome_range, as.double(outcome_range))
+    }
+  }, logical(1))
+
+  if (!any(differs)) return(invisible(NULL))
+
+  recorded <- unique(vapply(stamps[differs], function(s) {
+    if (is.null(s$outcome_range)) "unrecorded (the zero floor)" else format_outcome_range(s$outcome_range)
+  }, character(1)))
+
+  range_text <- format_outcome_range(outcome_range)
+
+  cli::cli_abort(c(
+    "{.fn evaluate} scored these configurations under another {.arg outcome_range}.",
+    "x" = "{.fn evaluate} recorded {recorded} on {sum(differs)} results row{?s}; this object's range is {range_text}.",
+    "i" = "The members and their warm-start parameters were chosen on predictions clamped to that range.",
+    "i" = "Re-run {.fn evaluate} on the object as it is now."
+  ), class = "horizons_input_error", call = call)
 
 }
 

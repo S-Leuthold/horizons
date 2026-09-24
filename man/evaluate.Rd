@@ -97,7 +97,10 @@ are scored, as are the tuning predictions of a transformed response,
 which are back-transformed first. Aborts, before any config runs, when
 \code{configure()}'s \code{sg_window} is not narrower than the spectrum, and, with class
 \code{horizons_input_error}, when an observed outcome lies outside
-\code{outcome_range} (#76). Called on an object that
+\code{outcome_range} or is infinite, or when \code{metric = "rrmse"} under a range
+whose lower bound is negative (the mean outcome it divides by can then be
+zero or negative) (#76). Checkpoint rows written before the range was
+recorded resume only under the default range. Called on an object that
 has already been through \code{fit()} or \code{ensemble()}, it returns a
 \code{horizons_eval} whose \code{models} and \code{ensemble} slots are empty again,
 since both were built on the evaluation it replaces.

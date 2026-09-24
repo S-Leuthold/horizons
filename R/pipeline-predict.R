@@ -84,7 +84,13 @@ NULL
 #' the outcome's physical range. Under the default, `c(0, Inf)`, that is a
 #' floor at zero, and objects configured before the range existed predict
 #' under it; a signed property configured with `c(-Inf, Inf)` is not clamped
-#' at all (#76).
+#' at all (#76). Clamping an interval keeps its coverage only for a truth
+#' inside the range: coverage is at least the nominal level minus the
+#' probability that the truth lies outside the range, so a range narrower
+#' than the property's physical bounds costs coverage. A finite upper bound
+#' clamps a blow-up silently, before the response bound below sees it, so
+#' when the bound is capped at the range (see [fit()]) the guardrail's
+#' warning does not fire.
 #'
 #' **Response upper bound (guardrail).** Point predictions are winsorized to
 #' `models$response_bound` (stored by [fit()]: the largest training outcome

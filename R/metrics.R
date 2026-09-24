@@ -269,7 +269,7 @@ ccc <- yardstick::new_numeric_metric(
 #' @seealso [back_transform_predictions()], [compute_original_scale_metrics()]
 #' @keywords internal
 tuning_metric_set <- function(transformation,
-                              metrics = c("rmse", "rrmse", "rsq", "mae", "rpd", "ccc"),
+                              metrics       = c("rmse", "rrmse", "rsq", "mae", "rpd", "ccc"),
                               outcome_range = DEFAULT_OUTCOME_RANGE) {
 
   ## -------------------------------------------------------------------------
