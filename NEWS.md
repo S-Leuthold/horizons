@@ -540,9 +540,10 @@ consequences; the review itself is in
   config = "cfg_rf")` does not require a co-stored `mars` config's engine —
   and aborts (condition class `horizons_missing_predict_package`) with an
   actionable message naming the package and the model if a Suggested engine
-  (`Cubist`, `kernlab`, `earth`, `mixOmics`, `nnet`) is not installed.
-  `lightgbm` prediction additionally needs the `bonsai` package installed;
-  it is not yet a declared package dependency.
+  (`Cubist`, `kernlab`, `earth`, `mixOmics`, `nnet`, `bonsai`) is not
+  installed. `lightgbm` prediction additionally needs `bonsai` (it
+  registers the `"lightgbm"` parsnip engine), now declared in `Suggests`
+  alongside it.
 
 * **A failed prediction interval no longer disappears silently, for either
   a single fit or an ensemble.** If the quantile-forest step behind

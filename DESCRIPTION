@@ -65,6 +65,7 @@ Suggests:
     testthat (>= 3.0.0),
     withr,
     Boruta,
+    bonsai,
     callr,
     circlize,
     covr,

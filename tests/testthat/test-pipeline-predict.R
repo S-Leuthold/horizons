@@ -880,6 +880,15 @@ describe("predict_package_install_hint()", {
 
   })
 
+  it("gives bonsai the ordinary CRAN hint, not a Bioconductor one", {
+
+    ## bonsai (lightgbm's engine-registering package) is on CRAN, unlike
+    ## mixOmics — confirm it is not accidentally special-cased.
+    expect_identical(predict_package_install_hint("bonsai"),
+                     'install.packages("bonsai")')
+
+  })
+
 })
 
 
