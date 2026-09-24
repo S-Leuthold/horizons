@@ -52,6 +52,8 @@ make_eval_object <- function(n = 40, n_wn = 10, n_configs = 2,
   )
 
   ## Build horizons_data-like structure
+  contract <- new_horizons_data()
+
   obj <- list(
 
     data = list(
@@ -92,19 +94,11 @@ make_eval_object <- function(n = 40, n_wn = 10, n_configs = 2,
       )
     ),
 
-    evaluation = list(
-      results     = NULL,
-      best_config = NULL,
-      rank_metric = NULL,
-      backend     = NULL,
-      runtime     = NULL,
-      timestamp   = NULL
-    ),
-
-    models   = list(workflows = NULL, n_models = NULL,
-                    uq = list(enabled = FALSE)),
-    ensemble = list(stack = NULL),
-    artifacts = list(cache_dir = NULL)
+    ## Downstream slots in the constructor's shape
+    evaluation = contract$evaluation,
+    models     = contract$models,
+    ensemble   = contract$ensemble,
+    artifacts  = list(cache_dir = NULL)
 
   )
 

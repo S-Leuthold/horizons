@@ -83,7 +83,10 @@ A \code{horizons_eval} object (inherits from \code{horizons_data}) with
 \code{evaluation$results}, \code{evaluation$best_config}, \code{evaluation$split}, and
 associated metadata populated, including \code{evaluation$parallelize_over}
 (the axis actually used) and \code{evaluation$workers} (the worker count the
-registered plan offered; 1 when sequential).
+registered plan offered; 1 when sequential). Called on an object that
+has already been through \code{fit()} or \code{ensemble()}, it returns a
+\code{horizons_eval} whose \code{models} and \code{ensemble} slots are empty again,
+since both were built on the evaluation it replaces.
 }
 \description{
 Evaluates all model configurations from \code{configure()} against held-out test

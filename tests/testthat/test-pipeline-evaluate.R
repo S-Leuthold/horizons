@@ -130,6 +130,14 @@ describe("evaluate() - success path", {
 
   })
 
+  it("writes exactly the evaluation keys new_horizons_data() declares (#71)", {
+
+    ## The constructor's empty slot is what configure() resets to, so it has
+    ## to name what evaluate() actually writes.
+    expect_identical(names(result$evaluation), names(new_horizons_data()$evaluation))
+
+  })
+
   it("has non-NA metrics for successful configs", {
 
     success_rows <- result$evaluation$results$status == "success"
