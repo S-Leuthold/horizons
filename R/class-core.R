@@ -172,8 +172,12 @@ new_horizons_data <- function(analysis        = NULL,
                       checks    = NULL,
                       timestamp = NULL,
 
+                      ## response_trim: validate()'s request that evaluate()
+                      ## trim response outliers from its training partition
+                      ## (list(outcome, method, threshold)), or NULL (#77)
                       outliers = list(spectral_ids   = NULL,
                                       response_ids   = NULL,
+                                      response_trim  = NULL,
                                       removed_ids    = NULL,
                                       removal_detail = NULL,
                                       removed        = FALSE)),
@@ -188,9 +192,10 @@ new_horizons_data <- function(analysis        = NULL,
                       best_config      = NULL,  ## character: top config_id
                       rank_metric      = NULL,  ## character: metric configs were ranked by
                       screened         = NULL,  ## logical: TRUE if evaluate() ranked the configs, FALSE for fit()'s cold start
-                      split            = NULL,  ## rsplit: train/test partition fit() reuses
-                      n_train          = NULL,  ## integer
+                      split            = NULL,  ## rsplit: train/test partition fit() reuses, less any training rows response_trim trimmed
+                      n_train          = NULL,  ## integer: training rows after any trim
                       n_test           = NULL,  ## integer
+                      response_trim    = NULL,  ## list: the training-partition response trim and its fences, or NULL when none was requested (#77)
                       workers          = NULL,  ## integer or NA: worker count of the plan
                       parallelize_over = NULL,  ## character: axis actually parallelized
                       recipe           = NULL,  ## list: sg_window, sg_window_cm, pca_threshold the configs ran with
@@ -1117,9 +1122,11 @@ CONTRACT_KEYS_OPTIONAL <- list(
 
   ## evaluate(): run provenance, added 2026-09-15, which fit()'s cold start
   ## also leaves out because no evaluate() ran; the recipe settings the
-  ## configs ran with, added with configure()'s sg_window (#62); and whether
-  ## the configs were screened, added 2026-09-24 (#45)
-  evaluation = c("workers", "parallelize_over", "recipe", "screened"),
+  ## configs ran with, added with configure()'s sg_window (#62); whether
+  ## the configs were screened, added 2026-09-24 (#45); and the
+  ## training-partition response trim, added 2026-09-24 (#77)
+  evaluation = c("workers", "parallelize_over", "recipe", "screened",
+                 "response_trim"),
 
   ## fit(): the winsorization guardrail (objects fitted before it predict
   ## without a clamp) and the select_training() flag, added 2026-09-21
@@ -1524,7 +1531,14 @@ validate_horizons_ensemble <- function(x) {
 #'    `sg_window` is a single whole number and whose `pca_threshold` is a
 #'    single number; the cold start writes it too. `screened`, added
 #'    2026-09-24 (#45), is likewise tolerated when absent and, when present,
-#'    must be `TRUE` or `FALSE`.
+#'    must be `TRUE` or `FALSE`. `response_trim` (the training-partition
+#'    response trim, #77) is tolerated when absent and may be `NULL`; when it
+#'    is a record, `fit()` and its console tree read it, so its `trimmed_ids`
+#'    must be a character vector (the rows [fit()] drops to line the split up
+#'    with the object), `threshold` a single positive number, `n_training` a
+#'    single non-negative whole number, `skipped` a single character (`NA`
+#'    when fences were drawn), and `lower` and `upper` single numbers, finite
+#'    whenever rows were trimmed, since the degradation check reads them.
 #' 2. **results**: data frame carrying `config_id`, `status`, and the six
 #'    metric columns (`rmse`, `rrmse`, `rsq`, `ccc`, `rpd`, `mae`); at least
 #'    one row; `config_id` values unique.
@@ -1644,6 +1658,39 @@ validate_horizons_eval <- function(x) {
 
       errors <- c(errors, cli::format_inline(
         "{.field recipe} must be a list with a single whole {.field sg_window} and a single numeric {.field pca_threshold}"
+      ))
+
+    }
+
+  }
+
+  ## response_trim (the training-partition trim, #77) ---------------------------
+  ## Tolerated when absent, by the same rule, and NULL when no trim was
+  ## requested. fit() reads trimmed_ids to line the split up with the rows
+  ## the object models, the fences for its degradation check, and the rest
+  ## for its console tree, so a malformed record is refused here rather than
+  ## read as "nothing trimmed" or crashing the tree.
+
+  if ("response_trim" %in% names(ev) && !is.null(ev$response_trim)) {
+
+    rt <- ev$response_trim
+
+    is_number <- function(v) is.numeric(v) && length(v) == 1
+
+    rt_ok <- is.list(rt) &&
+      is.character(rt$trimmed_ids) &&
+      is_number(rt$threshold) && !is.na(rt$threshold) && rt$threshold > 0 &&
+      is_number(rt$n_training) && !is.na(rt$n_training) &&
+        rt$n_training >= 0 && rt$n_training == round(rt$n_training) &&
+      is.character(rt$skipped) && length(rt$skipped) == 1 &&
+      is_number(rt$lower) && is_number(rt$upper) &&
+      (length(rt$trimmed_ids) == 0 ||
+         (is.finite(rt$lower) && is.finite(rt$upper) && is.na(rt$skipped)))
+
+    if (!rt_ok) {
+
+      errors <- c(errors, cli::format_inline(
+        "{.field response_trim} must be NULL or a record with a character {.field trimmed_ids}, a positive {.field threshold}, a whole {.field n_training}, a single character {.field skipped}, and single numbers {.field lower} and {.field upper}, finite when rows were trimmed"
       ))
 
     }
@@ -3033,7 +3080,17 @@ summary.horizons_data <- function(object, ...) {
 
       n_train <- nrow(rsample::training(x$models$split))
       n_test  <- nrow(rsample::testing(x$models$split))
-      cat(paste0("   \u251C\u2500 Split: ", n_train, " train / ", n_test, " test\n"))
+
+      ## After a response trim (#77) the CV above ran on trimmed training
+      ## rows and the test metrics on untrimmed ones; say so beside the pair.
+      n_trimmed <- length(x$evaluation$response_trim$trimmed_ids)
+
+      cat(paste0("   \u251C\u2500 Split: ", n_train, " train / ", n_test, " test",
+                 if (n_trimmed > 0) {
+                   paste0(" (", n_trimmed, " training row", if (n_trimmed != 1) "s",
+                          " trimmed)")
+                 } else "",
+                 "\n"))
 
     }
 

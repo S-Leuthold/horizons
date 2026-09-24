@@ -20,7 +20,8 @@ fit_single_config(
   seed = 42L,
   sg_window = DEFAULT_SG_WINDOW,
   pca_threshold = DEFAULT_PCA_THRESHOLD,
-  outcome_range = DEFAULT_OUTCOME_RANGE
+  outcome_range = DEFAULT_OUTCOME_RANGE,
+  response_fences = NULL
 )
 }
 \arguments{
@@ -64,6 +65,14 @@ which the back-transformed OOF, test-set and UQ-calibration predictions
 (and, for a transformed response, the tuning predictions) are clamped
 to. \code{fit()} reads it from \code{configure()}'s \code{config$outcome_range}.
 Default \code{c(0, Inf)}.}
+
+\item{response_fences}{Numeric \code{c(lower = , upper = )} or \code{NULL}. The
+training-partition fences \code{evaluate()} trimmed response outliers by
+(#77), passed by \code{fit()} when that trim removed rows. The CV folds then
+run on rows inside the fences while the test rows are untrimmed, so the
+degradation check takes its test RPD over the test rows inside the
+fences; the reported test metrics stay untrimmed. Default \code{NULL} (no
+trim: the check reads the test RPD).}
 }
 \value{
 List with fields: config_id, status, degraded, degraded_reason,

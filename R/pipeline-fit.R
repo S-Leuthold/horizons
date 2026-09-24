@@ -16,13 +16,26 @@
 #' warm-start parameters, so a partition drawn afresh would score the final
 #' models partly on those rows. `fit()` checks that the split still indexes
 #' the rows this object models: after dropping the rows whose outcome is `NA`
-#' (the rule `evaluate()` applies), the id and outcome columns must match the
-#' split's, value for value and in order, or `fit()` aborts with class
-#' `horizons_input_error`. Columns added since `evaluate()`, such as a sibling
-#' response from `add_response()`, are carried into the fit. The count of
-#' NA-outcome rows is reported in the console tree when `verbose = TRUE`.
-#' With UQ or AD on, the calibration set is carved out of Split F's training
-#' part.
+#' (the rule `evaluate()` applies) and the training rows `evaluate()` trimmed
+#' as response outliers (`evaluation$response_trim$trimmed_ids`; see
+#' `evaluate()`'s "Response outliers" section), the id and outcome columns
+#' must match the split's, value for value and in order, or `fit()` aborts
+#' with class `horizons_input_error`. The trim is reused, not recomputed, so
+#' `fit()` trains without exactly the rows `evaluate()` left out and scores
+#' on the same untrimmed test rows. Columns added since `evaluate()`, such
+#' as a sibling response from `add_response()`, are carried into the fit.
+#' The count of NA-outcome rows, and the response trim, are reported in the
+#' console tree when `verbose = TRUE`. With UQ or AD on, the calibration set
+#' is carved out of Split F's training part. After a response trim it is
+#' carved out of the untrimmed training part (the trimmed rows are training
+#' rows too, never test rows), and the trimmed rows are then dropped from the
+#' fit rows only: split conformal needs calibration rows exchangeable with
+#' the rows it will be asked about, extremes included, and a trimmed pool
+#' undercovered them. AD shares that calibration set (D7). Calibration rows
+#' never train, and test rows never calibrate. The degradation check then
+#' compares the CV RPD with the test RPD over the test rows inside the
+#' trim's fences, since the CV ran inside them; the reported test metrics
+#' stay untrimmed.
 #'
 #' The members are the top `n_best` of the configurations `evaluate()` chose
 #' `best_config` from, ranked by the same rule: the ones that succeeded or,
@@ -43,7 +56,9 @@
 #' configured `horizons_data` whose `config$configs` has exactly one row can
 #' go straight to `fit()` (#45). `fit()` then draws the train/test split
 #' itself, by the draw `evaluate()` uses, so at the same `seed` it holds out
-#' exactly the rows `evaluate()` would have. With no parameters from
+#' exactly the rows `evaluate()` would have, and applies a response trim
+#' `validate()` requested as `evaluate()` does, on fences from the training
+#' partition alone. With no parameters from
 #' `evaluate()` to warm-start from, the re-tune starts from a space-filling
 #' grid of `grid_size` points; the console tree says so, and
 #' `models$results$warm_start` is `FALSE`. The degradation check needs
@@ -122,7 +137,9 @@
 #'   range it lies above the largest training outcome unless the cap binds.
 #'   The training rows are the ones the final models are fit on:
 #'   `evaluate()`'s training part, less the calibration set when UQ or AD is
-#'   on. The slot also includes `selection_present` (whether the
+#'   on, plus the training rows a response trim left out, so the bound never
+#'   sits below a value observed in the training partition. The slot also
+#'   includes `selection_present` (whether the
 #'   training object carried a `$selection` from `select_training()`, which
 #'   `predict()` reads when asked for conformal intervals). Called on a
 #'   `horizons_ensemble`, it returns a `horizons_fit` whose `ensemble` slot
@@ -362,31 +379,69 @@ fit <- function(x,
 
   }
 
-  id_col <- role_map$variable[role_map$role == "id"]
+  id_col <- id_column(role_map)
 
-  if (length(id_col) == 0) {
-
-    id_col <- "sample_id"
-
+  ## evaluate()'s response trim (#77) dropped training rows from the split's
+  ## data, so the same rows are dropped here before the comparison. They are
+  ## the rows evaluate() recorded, not a fresh trim: fences recomputed here
+  ## could fall on another set. An evaluation without the record (no trim
+  ## requested, or evaluated before it existed) trimmed nothing.
+  trimmed_ids   <- x$evaluation$response_trim$trimmed_ids %||% character(0)
+  is_trimmed    <- modelled$data[[id_col]] %in% trimmed_ids
+  modelled_rows <- if (length(trimmed_ids) > 0) {
+    modelled$data[!is_trimmed, , drop = FALSE]
   } else {
-
-    id_col <- id_col[1]
-
+    modelled$data
   }
 
-  if (!identical(split_F$data[[id_col]], modelled$data[[id_col]]) ||
-      !identical(split_F$data[[outcome_col]], modelled$data[[outcome_col]])) {
+  ## The trimmed rows themselves. They belong to the training partition,
+  ## never the test part, and no model is fitted on them; the calibration
+  ## pool and the response bound below take them back in.
+  trimmed_rows <- if (length(trimmed_ids) > 0) {
+    modelled$data[is_trimmed, , drop = FALSE]
+  } else {
+    NULL
+  }
+
+  ## The fences the rows were trimmed by, for the degradation check: the CV
+  ## runs inside them and the test rows are untrimmed, so the check compares
+  ## like with like only within them (see fit_single_config()).
+  response_fences <- if (length(trimmed_ids) > 0) {
+    c(lower = x$evaluation$response_trim$lower,
+      upper = x$evaluation$response_trim$upper)
+  } else {
+    NULL
+  }
+
+  if (!identical(split_F$data[[id_col]], modelled_rows[[id_col]]) ||
+      !identical(split_F$data[[outcome_col]], modelled_rows[[outcome_col]])) {
+
+    trim_note <- if (length(trimmed_ids) > 0) {
+      paste0(" once the ", length(trimmed_ids), " training rows evaluate() trimmed are left out")
+    } else {
+      ""
+    }
 
     cli::cli_abort(c(
       "{.fn evaluate}'s split does not index the rows this object models.",
-      "x" = "{.field evaluation$split} was drawn on {nrow(split_F$data)} row{?s}; the analysis table has {nrow(modelled$data)} with an observed {.field {outcome_col}}, and their {.field {id_col}} or {.field {outcome_col}} values differ.",
+      "x" = "{.field evaluation$split} was drawn on {nrow(split_F$data)} row{?s}; the analysis table has {nrow(modelled_rows)} with an observed {.field {outcome_col}}{trim_note}, and their {.field {id_col}} or {.field {outcome_col}} values differ.",
       "i" = "The rows or outcomes changed after {.fn evaluate}, or the object was built by hand.",
       "i" = "Re-run {.fn evaluate} on the object as it is now."
     ), class = "horizons_input_error")
 
   }
 
-  split_F$data <- modelled$data
+  split_F$data <- modelled_rows
+
+  ## Rows an earlier version's validate() removed on whole-table fences are
+  ## gone from both parts, so this fit's test metrics exclude them too.
+  legacy_removed <- legacy_response_removals(x)
+
+  if (length(legacy_removed) > 0) {
+
+    warn_legacy_response_removals(legacy_removed, "fit")
+
+  }
 
   train_F <- rsample::training(split_F)
   test_F  <- rsample::testing(split_F)
@@ -398,25 +453,40 @@ fit <- function(x,
   ## and never train on it. Built whenever either capability is requested.
   ## Seeded on its own, so the calibration rows depend on `seed` and train_F
   ## alone, not on RNG state an earlier draw left behind.
+  ##
+  ## After a response trim (#77) the pool is the untrimmed training part,
+  ## train_F plus the trimmed rows. Split conformal needs calibration rows
+  ## exchangeable with the rows it will be asked about, and those include the
+  ## extremes the trim left out: a trimmed pool undercovered them, silently,
+  ## since the OOF coverage is read on trimmed rows too. The trimmed rows are
+  ## then dropped from the fit rows only. Calibration rows still never train,
+  ## and test rows never calibrate. Without a trim the pool is train_F.
   calib_data  <- NULL
   calib_drawn <- NULL
   calib_note  <- NULL
+  calib_pool  <- if (is.null(trimmed_rows)) train_F else dplyr::bind_rows(train_F, trimmed_rows)
 
   if (compute_uq || compute_ad) {
 
     set.seed(calib_split_seed(seed))
 
     calib_drawn <- draw_stratified(
-      outcome      = train_F[[outcome_col]],
-      stratified   = function() rsample::initial_split(train_F, prop = CALIB_PROP,
+      outcome      = calib_pool[[outcome_col]],
+      stratified   = function() rsample::initial_split(calib_pool, prop = CALIB_PROP,
                                                        strata = dplyr::all_of(outcome_col),
                                                        breaks = STRATA_BREAKS, pool = STRATA_POOL),
-      unstratified = function() rsample::initial_split(train_F, prop = CALIB_PROP)
+      unstratified = function() rsample::initial_split(calib_pool, prop = CALIB_PROP)
     )
     split_C <- calib_drawn$draw
 
-    train_Fit <- rsample::training(split_C)
+    train_Fit  <- rsample::training(split_C)
     calib_data <- rsample::testing(split_C)
+
+    if (!is.null(trimmed_rows)) {
+
+      train_Fit <- train_Fit[!train_Fit[[id_col]] %in% trimmed_ids, , drop = FALSE]
+
+    }
 
     ## Guard: minimum calibration size. Too small disables BOTH capabilities
     ## that needed it \u2014 neither UQ nor AD can calibrate on an undersized set.
@@ -527,15 +597,23 @@ fit <- function(x,
 
     }
 
+    render_response_trim(x$evaluation$response_trim, legacy_removed)
+
     ## The calibration set UQ and AD share, named for whichever it serves;
     ## with AD alone it went unreported. Both flags are FALSE here when the
     ## set was too small, and the note below says so instead.
     if (compute_uq || compute_ad) {
 
+      n_trim_calib <- sum(calib_data[[id_col]] %in% trimmed_ids)
+
       cat(paste0(
         "\u2502  ", paste(c(if (compute_uq) "UQ", if (compute_ad) "AD"), collapse = " and "),
         " calibration: ", nrow(train_Fit), " fit / ", nrow(calib_data), " calibration, ",
         if (calib_drawn$stratified) paste0("stratified on ", outcome_col) else "unstratified",
+        if (!is.null(trimmed_rows)) {
+          paste0(" (drawn from the untrimmed training part; ", n_trim_calib,
+                 " trimmed row", if (n_trim_calib != 1) "s", " in it)")
+        } else "",
         "\n"
       ))
 
@@ -640,7 +718,8 @@ fit <- function(x,
       seed                = seed,
       sg_window           = recipe_cfg$sg_window,
       pca_threshold       = recipe_cfg$pca_threshold,
-      outcome_range       = outcome_range
+      outcome_range       = outcome_range,
+      response_fences     = response_fences
     )
 
     results_list[[i]] <- config_result
@@ -898,8 +977,13 @@ fit <- function(x,
   ## minimum, with no floor) so it lies above the maximum for a signed outcome
   ## too; under the default range it is max * RESPONSE_BOUND_MARGIN exactly
   ## (#76). Taken over train_Fit, the rows the final models are fit on, so
-  ## neither Split F's test rows nor the calibration rows shape it (#68).
-  response_bound <- compute_response_bound(train_Fit[[outcome_col]], outcome_range)
+  ## neither Split F's test rows nor the calibration rows shape it (#68), plus
+  ## the rows a response trim left out of them (#77): those are
+  ## training-partition rows too, and a bound under values actually observed
+  ## there would clamp the very extremes the trim set aside.
+  response_bound <- compute_response_bound(
+    c(train_Fit[[outcome_col]], trimmed_rows[[outcome_col]]), outcome_range
+  )
 
   ## Did the training rows come from select_training()? If so the calibration
   ## split below was drawn from rows chosen for proximity to the targets, so
@@ -1030,8 +1114,9 @@ fit <- function(x,
 #' and the same Savitzky-Golay window check, [evaluation_recipe()]), and
 #' returns the record `fit()` stores in `x$evaluation` in place of
 #' `evaluate()`'s. The record carries every key [validate_horizons_eval()]
-#' requires, with `screened = FALSE`, and `recipe` as `evaluate()` records
-#' it; it leaves out the run provenance (`workers`, `parallelize_over`),
+#' requires, with `screened = FALSE`, and `recipe` and `response_trim` as
+#' `evaluate()` records them (the split is trimmed by the same helper, #77);
+#' it leaves out the run provenance (`workers`, `parallelize_over`),
 #' since no `evaluate()` ran. Its one
 #' results row has status `"not_evaluated"`, `NA` metrics and `cv_*`
 #' columns, and `NULL` `best_params`, which sends the re-tune to
@@ -1049,8 +1134,9 @@ fit <- function(x,
 #'   stratified draw failed and was retried without strata), as
 #'   [draw_eval_split()] returns them. Aborts with class
 #'   `horizons_input_error` when the object has no configuration or more than
-#'   one, too few rows have an observed outcome, or the window is at least as
-#'   wide as the spectrum.
+#'   one, too few rows have an observed outcome, the window is at least as
+#'   wide as the spectrum, or `validate()`'s response-trim request is for
+#'   another outcome ([response_trim_request()]).
 #' @keywords internal
 #' @noRd
 cold_start_evaluation <- function(x, metric, seed, call = rlang::caller_env()) {
@@ -1101,8 +1187,18 @@ cold_start_evaluation <- function(x, metric, seed, call = rlang::caller_env()) {
   ## fit() builds its recipe from the same settings.
   recipe_record <- evaluation_recipe(x, call = call)
 
+  ## The response trim evaluate() applies after the same draw (#77): a trim
+  ## validate() requested runs on this split's training partition by the
+  ## same helper, so a cold start leaves out the rows evaluate() would. The
+  ## request is read first, as evaluate() reads it, so one that cannot apply
+  ## is refused before anything is drawn.
+  trim_request <- response_trim_request(x, outcome_col, call = call)
+
   drawn <- draw_eval_split(modelled$data, outcome_col, seed)
-  split <- drawn$split
+
+  trimmed <- trim_training_responses(drawn$split, outcome_col, trim_request,
+                                     id_col = id_column(role_map))
+  split   <- trimmed$split
 
   ## The shape of an evaluate() results row (create_failed_result()'s
   ## columns less scoring_schema, since nothing was scored), all unmeasured
@@ -1123,16 +1219,17 @@ cold_start_evaluation <- function(x, metric, seed, call = rlang::caller_env()) {
 
   list(
     evaluation = list(
-      results      = results,
-      best_config  = configs$config_id,
-      rank_metric  = rank_metric,
-      screened     = FALSE,
-      split        = split,
-      n_train      = nrow(rsample::training(split)),
-      n_test       = nrow(rsample::testing(split)),
-      recipe       = recipe_record,
-      runtime_secs = 0,
-      timestamp    = Sys.time()
+      results       = results,
+      best_config   = configs$config_id,
+      rank_metric   = rank_metric,
+      screened      = FALSE,
+      split         = split,
+      n_train       = nrow(rsample::training(split)),
+      n_test        = nrow(rsample::testing(split)),
+      response_trim = trimmed$record,
+      recipe        = recipe_record,
+      runtime_secs  = 0,
+      timestamp     = Sys.time()
     ),
     stratified    = drawn$stratified,
     strata_failed = drawn$strata_failed

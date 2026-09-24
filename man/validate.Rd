@@ -17,8 +17,14 @@ validate(
 \item{x}{\code{horizons_data}. Configured object (must have \code{config$configs}).}
 
 \item{remove_outliers}{\verb{logical(1) or character(1)}. \code{FALSE} to detect
-only (default), \code{TRUE} to remove all flagged outliers, \code{"spectral"} or
-\code{"response"} for selective removal.}
+only (default). \code{"spectral"} removes the spectral outliers from the
+object. \code{"response"} removes nothing here: it asks \code{evaluate()} (and
+\code{fit()}'s cold start) to trim, from the training partition only, the
+training rows outside Tukey fences computed on that partition's labels,
+with \code{response_threshold} as the multiplier. \code{TRUE} does both. Objects
+validated by versions before this contract had their response outliers
+removed here, on whole-table fences; they still evaluate, with a
+warning that their test metrics exclude those rows.}
 
 \item{spectral_method}{\code{character(1)}. Spectral outlier detection method.
 Currently only \code{"mahalanobis"}. Default: \code{"mahalanobis"}.}
@@ -29,8 +35,9 @@ Mahalanobis distance cutoff. Default: \code{0.975}.}
 \item{response_method}{\code{character(1)}. Response outlier detection method.
 Currently only \code{"iqr"}. Default: \code{"iqr"}.}
 
-\item{response_threshold}{\code{numeric(1)}. IQR multiplier for Tukey fences.
-Default: \code{1.5}.}
+\item{response_threshold}{\code{numeric(1)}. IQR multiplier for Tukey fences,
+both the whole-table flags and the training-partition fences
+\code{evaluate()} trims by. Default: \code{1.5}.}
 }
 \value{
 \code{horizons_data}. Same object with \code{validation} section populated:
@@ -38,13 +45,20 @@ Default: \code{1.5}.}
 \item \code{validation$passed}: \code{TRUE} if no ERROR checks failed
 \item \code{validation$checks}: tibble of check results
 \item \code{validation$outliers}: the ids this call flagged (\code{spectral_ids},
-\code{response_ids}) and the record of every removal so far
-(\code{removed_ids}, \code{removed}, and \code{removal_detail}, one row per removed
-sample with \code{sample_id}, \code{reason} (\code{"spectral"}, \code{"response"} or
-\code{"both"}, counting only the detectors \code{remove_outliers} removed by),
-the \code{outcome} whose fences flagged it (\code{NA} unless the response
-detector did), and the \code{spectral_threshold} and \code{response_threshold}
-in force (\code{NA} for the kind that did not flag it))
+and \code{response_ids}, flagged on the whole table for information and
+never removed here); \code{response_trim}, the request for \code{evaluate()}
+when \code{remove_outliers} is \code{TRUE} or \code{"response"} (a list of the
+\code{outcome}, the \code{method} and the \code{threshold}), otherwise \code{NULL}; and
+the record of every removal so far (\code{removed_ids}, \code{removed}, and
+\code{removal_detail}, one row per removed sample with \code{sample_id},
+\code{reason}, the \code{outcome} whose fences flagged it, and the
+\code{spectral_threshold} and \code{response_threshold} in force). This version
+removes spectral outliers only, so its rows have \code{reason}
+\code{"spectral"}, an \code{NA} outcome and an \code{NA} \code{response_threshold};
+\code{"response"} and \code{"both"} rows, with the outcome and threshold filled
+in, are records carried from an earlier version that removed rows on
+their labels (a \code{"both"} row was a spectral outlier too, and would
+have gone anyway).
 \item \code{validation$timestamp}: when validation ran
 }
 }
@@ -73,13 +87,32 @@ of the raw (unpreprocessed) spectral matrix, scaled to unit variance per
 wavenumber. Response outliers use IQR-based Tukey fences on the outcome
 variable.
 
+\strong{Response outliers are trimmed from the training partition, not here:}
+
+Spectral outliers are removed here, since the detector reads no labels.
+Response outliers are not. Fences computed over the whole table would
+include the rows \code{evaluate()} later holds out as its test set, and
+removing the rows outside them before any split exists takes exactly the
+hardest cases out of the test set, chosen by their own labels, so the test
+metrics come out optimistic (#77). So \code{validate()} flags the rows outside
+the whole-table fences for information (\code{response_ids}, check P006) and,
+when \code{remove_outliers} asks for response removal, records the request in
+\code{validation$outliers$response_trim}. \code{evaluate()} then draws its
+train/test split on the untrimmed rows, computes the fences from the
+training partition's labels alone, and trims the training rows outside
+them before any CV fold is drawn; test rows are never removed on their
+labels. \code{fit()} reuses that split and those trimmed rows, and its cold
+start applies the same rule. A later \code{configure()} clears the request
+with the rest of the verdict, since it was made for the outcome being
+replaced.
+
 \strong{Idempotency:}
 
-Running \code{validate()} again replaces the verdict, the checks and the
-flagged ids. The removal record accumulates instead: rows an earlier call
-removed are gone from the object and stay gone, so their ids and detail
-rows are kept and this call's removals are added to them. Re-validation
-operates on the reduced dataset.
+Running \code{validate()} again replaces the verdict, the checks, the flagged
+ids and the response-trim request. The removal record accumulates
+instead: rows an earlier call removed are gone from the object and stay
+gone, so their ids and detail rows are kept and this call's removals are
+added to them. Re-validation operates on the reduced dataset.
 }
 \examples{
 \dontrun{
@@ -88,7 +121,8 @@ x |>
   validate() |>
   evaluate()
 
-# Remove outliers
+# Remove spectral outliers, and trim response outliers from
+# evaluate()'s training partition
 x |> validate(remove_outliers = TRUE)
 
 # Remove only spectral outliers

@@ -19,7 +19,11 @@ alignment limitation.}
 ensemble uncertainty quantification is available (\code{object$ensemble$uq},
 calibrated by \code{\link[=fit_ensemble_uq]{fit_ensemble_uq()}} — on by default in \code{\link[=ensemble]{ensemble()}}).
 Default \code{TRUE}. When no UQ bundle is present, point predictions are
-returned with a one-time note.}
+returned with a one-time note. When the members were fit on a
+response-trimmed training partition (\code{validate(remove_outliers = "response")}, #77), the intervals come from out-of-fold predictions on
+the rows inside the training fences, so this warns once, with class
+\code{horizons_response_trim_warning}, that they were calibrated within those
+fences and can undercover samples outside them.}
 
 \item{...}{Unused; present for S3 method consistency.}
 }

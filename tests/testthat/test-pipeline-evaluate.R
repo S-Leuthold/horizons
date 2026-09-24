@@ -479,6 +479,309 @@ describe("draw_eval_split()", {
     expect_identical(ev$evaluation$split$in_id, drawn$split$in_id)
     expect_identical(ev$evaluation$split$data, drawn$split$data)
 
+    ## No trim was requested, so none is applied or recorded (#77)
+    expect_identical(trim_training_responses(drawn$split, "SOC", NULL, "sample_id"),
+                     list(split = drawn$split, record = NULL))
+    expect_true("response_trim" %in% names(ev$evaluation))
+    expect_null(ev$evaluation$response_trim)
+
+  })
+
+})
+
+## =========================================================================
+## Response outliers are trimmed from the training partition (#77)
+## =========================================================================
+## validate(remove_outliers = "response") used to compute Tukey fences over
+## every row and remove the rows outside them before any split existed, so
+## the test set lost exactly its hardest cases, chosen by their own labels.
+## validate() now records the request; evaluate() draws the split on the
+## untrimmed rows and fences the training partition alone.
+
+## make_eval_object() with eight extreme labels, four high and four low. At
+## seed 307 the draw puts some of them on each side of the split, which the
+## first test checks, since everything after it rests on that.
+EXTREME_IDS <- sprintf("S%03d", c(1:4, 31:34))
+
+make_extreme_object <- function() {
+
+  obj <- make_eval_object(n = 60, n_configs = 1)
+  obj$data$analysis$SOC[match(EXTREME_IDS, obj$data$analysis$sample_id)] <-
+    c(20, 25, 30, 35, -15, -20, -25, -30)
+  ## The low extremes are negative, so the outcome is signed (#76)
+  obj$config$outcome_range <- c(-Inf, Inf)
+  obj
+
+}
+
+## Run `expr`, keeping every warning's condition object (so a class can be
+## checked) and muffling them all, so none reaches the test reporter.
+collect_warnings <- function(expr) {
+
+  caught <- list()
+
+  value <- withCallingHandlers(
+    expr,
+    warning = function(w) {
+      caught[[length(caught) + 1L]] <<- w
+      invokeRestart("muffleWarning")
+    }
+  )
+
+  list(value = value, warnings = caught)
+
+}
+
+has_warning_class <- function(warnings, class) {
+  any(vapply(warnings, inherits, logical(1), class))
+}
+
+## The Tukey fences on a set of values, computed here rather than through the
+## package's helper, so the test does not check the helper against itself.
+fences_of <- function(values, k = 1.5) {
+  q <- stats::quantile(values, c(0.25, 0.75), names = FALSE)
+  c(q[1] - k * (q[2] - q[1]), q[2] + k * (q[2] - q[1]))
+}
+
+describe("evaluate() - response outliers are trimmed from the training partition (#77)", {
+
+  obj <- make_extreme_object()
+  utils::capture.output(
+    v <- suppressWarnings(validate(obj, remove_outliers = "response"))
+  )
+  request <- response_trim_request(v, "SOC")
+
+  ## The split as drawn, before any trim
+  plain       <- suppressWarnings(draw_eval_split(v$data$analysis, "SOC", 307L))$split
+  train_plain <- rsample::training(plain)
+  test_plain  <- rsample::testing(plain)
+
+  fences        <- fences_of(train_plain$SOC)
+  expected_trim <- train_plain$sample_id[train_plain$SOC < fences[1] | train_plain$SOC > fences[2]]
+
+  out <- utils::capture.output(
+    ev <- suppressWarnings(evaluate(v, prune = FALSE, verbose = TRUE, seed = 307L))
+  )
+  trim <- ev$evaluation$response_trim
+
+  it("rests on a draw with extreme labels on both sides of the split", {
+
+    expect_true(any(EXTREME_IDS %in% test_plain$sample_id))
+    expect_true(any(EXTREME_IDS %in% train_plain$sample_id))
+
+  })
+
+  it("removes no row on its label in validate()", {
+
+    expect_equal(v$data$n_rows, 60)
+    expect_true(all(EXTREME_IDS %in% v$data$analysis$sample_id))
+    expect_true(all(EXTREME_IDS %in% v$validation$outliers$response_ids))
+    expect_false(v$validation$outliers$removed)
+
+  })
+
+  it("keeps every extreme row that lands in the test set in the test set", {
+
+    test_ids <- rsample::testing(ev$evaluation$split)$sample_id
+
+    expect_identical(test_ids, test_plain$sample_id)
+    expect_true(all(intersect(EXTREME_IDS, test_plain$sample_id) %in% test_ids))
+    expect_equal(ev$evaluation$n_test, nrow(test_plain))
+
+  })
+
+  it("trims the training rows outside fences from the training labels alone", {
+
+    expect_gt(length(expected_trim), 0)
+    expect_setequal(trim$trimmed_ids, expected_trim)
+    expect_equal(c(trim$lower, trim$upper), fences)
+
+    train_ids <- rsample::training(ev$evaluation$split)$sample_id
+
+    expect_identical(train_ids, setdiff(train_plain$sample_id, expected_trim))
+    expect_equal(ev$evaluation$n_train, length(train_ids))
+
+    ## Fences over the whole table are others, so this test can tell the two
+    ## rules apart
+    expect_false(isTRUE(all.equal(fences_of(v$data$analysis$SOC), fences)))
+
+  })
+
+  it("records what it did, and says so in the tree", {
+
+    expect_identical(trim$outcome, "SOC")
+    expect_identical(trim$method, "iqr")
+    expect_identical(trim$threshold, 1.5)
+    expect_identical(trim$fences_from, "training")
+    expect_identical(trim$n_training, nrow(train_plain))
+    expect_true(is.na(trim$skipped))
+
+    expect_true(any(grepl(paste0("Response outliers: ", length(expected_trim), " of ",
+                                 nrow(train_plain), " training rows trimmed"),
+                          out, fixed = TRUE)))
+    expect_true(any(grepl("from the training partition; test rows untouched", out, fixed = TRUE)))
+
+  })
+
+  it("draws the CV folds from the trimmed training rows", {
+
+    folds <- NULL
+
+    testthat::with_mocked_bindings(
+      evaluate_single_config = function(...) {
+        folds <<- list(...)$cv_folds
+        tibble::tibble(config_id = list(...)$config_row$config_id,
+                       status = "failed", error_message = "mocked")
+      },
+      tryCatch(suppressWarnings(evaluate(v, verbose = FALSE, seed = 307L)),
+               error = function(e) NULL),
+      .package = "horizons"
+    )
+
+    fold_ids <- unique(unlist(lapply(folds$splits, function(s) {
+      c(rsample::analysis(s)$sample_id, rsample::assessment(s)$sample_id)
+    })))
+
+    expect_setequal(fold_ids, setdiff(train_plain$sample_id, expected_trim))
+    expect_false(any(expected_trim %in% fold_ids))
+
+  })
+
+  it("trims the same training rows whatever the test rows' labels are", {
+
+    ## The partition is held fixed: the draw is stratified on every label by
+    ## design, as it always was, so what must not read a test label is the
+    ## trim. Every test row's outcome is moved a long way inside the drawn
+    ## split, and the trim must come out the same.
+    drawn   <- suppressWarnings(draw_eval_split(v$data$analysis, "SOC", 307L))
+    is_test <- !seq_len(nrow(drawn$split$data)) %in% drawn$split$in_id
+
+    relabelled <- drawn$split
+    relabelled$data$SOC[is_test] <- relabelled$data$SOC[is_test] * 50 + 400
+
+    ## Whole-table fences move under the relabelling, so a whole-table rule
+    ## would trim otherwise
+    expect_false(isTRUE(all.equal(fences_of(drawn$split$data$SOC),
+                                  fences_of(relabelled$data$SOC))))
+
+    a <- trim_training_responses(drawn$split, "SOC", request, "sample_id")
+    b <- trim_training_responses(relabelled, "SOC", request, "sample_id")
+
+    expect_gt(length(a$record$trimmed_ids), 0)
+    expect_identical(b$record, a$record)
+    expect_identical(rsample::training(b$split), rsample::training(a$split))
+
+    ## and the test part is the relabelled one, untrimmed
+    expect_identical(rsample::testing(b$split)$sample_id,
+                     rsample::testing(drawn$split)$sample_id)
+    expect_identical(rsample::testing(b$split)$SOC, relabelled$data$SOC[is_test])
+
+  })
+
+  it("fingerprints the trim: an untrimmed run's checkpoints are refused, naming it", {
+
+    tmpdir <- withr::local_tempdir()
+
+    untrimmed <- suppressWarnings(evaluate(obj, output_dir = tmpdir, prune = FALSE,
+                                           verbose = FALSE, seed = 307L))
+
+    expect_true(is.na(untrimmed$evaluation$results$settings[[1]]$response_threshold))
+    expect_identical(ev$evaluation$results$settings[[1]]$response_threshold, 1.5)
+
+    err <- expect_error(
+      suppressWarnings(evaluate(v, output_dir = tmpdir, prune = FALSE,
+                                verbose = FALSE, seed = 307L)),
+      class = "horizons_input_error"
+    )
+
+    msg <- gsub("\\s+", " ", conditionMessage(err))   # undo cli line wrapping
+    expect_match(msg, "different set of training samples", fixed = TRUE)
+    expect_match(msg, "response_threshold = NA (this run: 1.5)", fixed = TRUE)
+
+  })
+
+  it("round-trips the trimmed split through the parallel transport", {
+
+    split    <- ev$evaluation$split
+    cv_folds <- rsample::vfold_cv(rsample::training(split), v = 3)
+    rebuilt  <- rebuild_resamples(split$data, resample_indices(split, cv_folds))
+
+    expect_identical(rsample::testing(rebuilt$split)$sample_id,
+                     rsample::testing(split)$sample_id)
+    expect_identical(rsample::training(rebuilt$split)$sample_id,
+                     rsample::training(split)$sample_id)
+
+  })
+
+  it("refuses a request recorded for another outcome", {
+
+    other <- v
+    other$validation$outliers$response_trim$outcome <- "pH"
+
+    err <- expect_error(evaluate(other, verbose = FALSE),
+                        class = "horizons_input_error")
+
+    expect_match(conditionMessage(err), "another outcome", fixed = TRUE)
+
+  })
+
+  it("warns and trims nothing when the training partition has no fences", {
+
+    flat <- plain
+    flat$data$SOC[flat$in_id] <- 2
+
+    caught <- collect_warnings(trim_training_responses(flat, "SOC", request, "sample_id"))
+
+    expect_true(has_warning_class(caught$warnings, "horizons_response_trim_warning"))
+    expect_identical(caught$value$record$skipped, "zero_iqr")
+    expect_length(caught$value$record$trimmed_ids, 0)
+    expect_identical(caught$value$split, flat)
+
+  })
+
+})
+
+describe("evaluate() - an object validated before #77", {
+
+  ## Rows removed on their labels, on whole-table fences, before any split.
+  ## The last two are "both": spectral outliers too, which would have gone
+  ## whatever their labels, so they are not counted.
+  legacy <- legacy_label_removal(make_extreme_object(), EXTREME_IDS,
+                                 reason = rep(c("response", "both"), c(6, 2)))
+
+  out <- utils::capture.output(
+    caught <- collect_warnings(evaluate(legacy, prune = FALSE, verbose = TRUE, seed = 307L))
+  )
+
+  it("still evaluates, and trims nothing more", {
+
+    expect_s3_class(caught$value, "horizons_eval")
+    expect_null(caught$value$evaluation$response_trim)
+    expect_false(any(EXTREME_IDS %in% caught$value$evaluation$split$data$sample_id))
+
+  })
+
+  it("warns that its test metrics exclude those rows, and says so in the tree", {
+
+    expect_true(has_warning_class(caught$warnings, "horizons_response_trim_warning"))
+
+    msgs <- vapply(caught$warnings, conditionMessage, character(1))
+    expect_true(any(grepl("6 rows were removed as response outliers", msgs, fixed = TRUE)))
+
+    expect_true(any(grepl("Response outliers: 6 rows removed by an earlier validate() before the split",
+                          out, fixed = TRUE)))
+
+  })
+
+  it("counts only the rows removed on their labels, and none from a record this version wrote", {
+
+    expect_identical(legacy_response_removals(legacy), EXTREME_IDS[1:6])
+
+    utils::capture.output(
+      spectral_only <- suppressWarnings(validate(make_extreme_object(), remove_outliers = TRUE))
+    )
+    expect_length(legacy_response_removals(spectral_only), 0)
+
   })
 
 })
@@ -1249,7 +1552,9 @@ describe("evaluate() - checkpoint data provenance", {
                                    ## the defaults an unconfigured record runs
                                    sg_window = 9L, pca_threshold = 0.995,
                                    ## and its outcome range (#76), likewise
-                                   outcome_range = c(0, Inf)))
+                                   outcome_range = c(0, Inf),
+                                   ## no response trim requested (#77)
+                                   response_threshold = NA_real_))
 
     row <- readRDS(file.path(tmpdir, "checkpoints", "cfg_001.rds"))
     expect_identical(row$data_hash, manifest$data_hash)
