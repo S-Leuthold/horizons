@@ -591,6 +591,49 @@ test_that("parse_ids() warns (not aborts) when the parsed ids collapse to duplic
 
 })
 
+test_that("the regression this fixes: parse_ids() |> average() survives replicate scans sharing an id (#24)", {
+
+  ## Arrange — a synthetic stand-in for dev/test-pipeline.R's real chain
+  ## (spectra() |> standardize() |> parse_ids() |> average()) on the AONR
+  ## OPUS fixture: 15 scans, 4 samples, aborting at parse_ids() was the
+  ## critical finding this rework addresses. dev/test-data/opus/ is not
+  ## inside tests/, so this rebuilds the same shape post-spectra(): OPUS
+  ## filenames that share a sampleid token once parsed — replicate scans,
+  ## the state average() exists to collapse. standardize() is exercised
+  ## separately (test-pipeline-standardize.R); this covers parse_ids() and
+  ## average() end to end on the object shape spectra(type = "opus") builds.
+  filenames <- c(
+    "AONR-F_S100-1_GroundBulk_S1_A2", "AONR-F_S100-1_GroundBulk_S2_B2",
+    "AONR-F_S100-1_GroundBulk_S3_C2",
+    "AONR-F_S100-2_GroundBulk_S1_E2", "AONR-F_S100-2_GroundBulk_S2_F2"
+  )
+
+  hd <- make_test_hd(filenames)
+
+  ## Act -------------------------------------------------------------------
+
+  expect_warning(
+    hd_parsed <- parse_ids(hd, patterns = c("AONR-F_", sampleid = "S\\d+-\\d+", "_.*")),
+    class = "horizons_validation_warning"
+  )
+
+  expect_identical(hd_parsed$data$analysis$sample_id,
+                   c("S100-1", "S100-1", "S100-1", "S100-2", "S100-2"))
+
+  utils::capture.output(
+    hd_avg <- average(hd_parsed, by = "sample_id", quality_check = FALSE, verbose = FALSE)
+  )
+
+  ## Assert — no error anywhere in the chain, replicates collapsed to
+  ## samples, and the result is fully valid (full stage: unique ids)
+  ## ---------------------------------------------------------------------
+
+  expect_identical(sort(hd_avg$data$analysis$sample_id), c("S100-1", "S100-2"))
+  expect_identical(hd_avg$data$n_rows, 2L)
+  expect_no_error(validate_horizons_data(hd_avg))
+
+})
+
 
 ## ---------------------------------------------------------------------------
 ## Helper function tests
