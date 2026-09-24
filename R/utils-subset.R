@@ -95,9 +95,11 @@ promoted_state <- function(x) {
 #' * The record of rows `validate()` already removed (`removed_ids`,
 #'   `removal_detail` and `removed` in `validation$outliers`). Those rows are
 #'   gone from the analysis table and stay gone, so the record is still
-#'   true. The verdict (`passed`, `checks`, `timestamp`) and the flagged ids
-#'   (`spectral_ids`, `response_ids`) are cleared, because `validate()`
-#'   recomputes them for the rows and outcome in front of it.
+#'   true. The verdict (`passed`, `checks`, `timestamp`), the flagged ids
+#'   (`spectral_ids`, `response_ids`) and the response-trim request
+#'   (`response_trim`, which removed nothing from the object) are cleared,
+#'   because `validate()` recomputes them for the rows and outcome in front
+#'   of it.
 #' * `x$selection`. The `select_training()` record describes which rows were
 #'   drawn, not the outcome they are modelled for, and `fit()` reads its
 #'   presence into `models$selection_present`.

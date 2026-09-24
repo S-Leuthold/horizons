@@ -599,6 +599,69 @@ describe("predict.horizons_ensemble() - selected training set", {
 })
 
 ## =========================================================================
+## predict.horizons_ensemble() - members fit on a response-trimmed partition
+## =========================================================================
+## The ensemble's CV+ intervals come from the members' out-of-fold
+## predictions, which after a response trim (#77) cover only the rows inside
+## the training fences. The mechanism is a follow-up; predict() says so.
+
+describe("predict.horizons_ensemble() - trimmed members (#77)", {
+
+  trimmed_ensemble <- function(uq = TRUE, trimmed_ids = c("S001", "S002")) {
+
+    ens <- suppressWarnings(
+      ensemble(fitted, method = "weighted", optimize = FALSE,
+               compute_uq = uq, verbose = FALSE)
+    )
+
+    ens$evaluation$response_trim <- list(
+      outcome = "SOC", method = "iqr", threshold = 1.5, fences_from = "training",
+      lower = 0.5, upper = 4.5, n_training = 40L, trimmed_ids = trimmed_ids,
+      skipped = NA_character_
+    )
+
+    ens
+
+  }
+
+  it("warns once that the intervals were calibrated within the training fences", {
+
+    caught <- list()
+
+    withCallingHandlers(
+      suppressMessages(predict(trimmed_ensemble(), test_set, interval = TRUE)),
+      warning = function(w) {
+        caught[[length(caught) + 1L]] <<- w
+        invokeRestart("muffleWarning")
+      }
+    )
+
+    trim_warnings <- Filter(function(w) inherits(w, "horizons_response_trim_warning"), caught)
+
+    expect_length(trim_warnings, 1L)
+    expect_match(conditionMessage(trim_warnings[[1]]),
+                 "calibrated within the training fences [0.5, 4.5]", fixed = TRUE)
+
+  })
+
+  it("is silent without intervals, without ensemble UQ, or without a trim", {
+
+    quiet <- function(ens, interval) {
+      warns <- testthat::capture_warnings(
+        suppressMessages(predict(ens, test_set, interval = interval))
+      )
+      !any(grepl("training fences", warns))
+    }
+
+    expect_true(quiet(trimmed_ensemble(), interval = FALSE))
+    expect_true(quiet(trimmed_ensemble(uq = FALSE), interval = TRUE))
+    expect_true(quiet(trimmed_ensemble(trimmed_ids = character(0)), interval = TRUE))
+
+  })
+
+})
+
+## =========================================================================
 ## predict.horizons_ensemble() — a malformed ensemble is diagnosed as such
 ## =========================================================================
 ## The member-set gate runs before the covariate resolution, so an ensemble
