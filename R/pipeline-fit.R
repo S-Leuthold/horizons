@@ -63,9 +63,11 @@
 #' @param n_best Integer. Number of top configurations to re-tune. Default 5.
 #'   A cold start has one.
 #' @param metric Character or NULL. Metric for ranking the candidate
-#'   configs, by bare name (`"rpd"`, `"rmse"`, ...). If NULL, uses the
-#'   rank_metric from `evaluate()`, or `"rpd"` on a cold start, where there
-#'   is nothing to rank and the metric is only recorded. Ranking reads the
+#'   configs, by bare name: one of `"rpd"`, `"rsq"`, `"rmse"`, `"rrmse"`,
+#'   `"ccc"`, `"mae"`, or `fit()` aborts with class `horizons_input_error`.
+#'   If NULL, uses the rank_metric from `evaluate()`; on a cold start, where
+#'   there is nothing to rank and the metric is only recorded, the one a
+#'   cold-started fit recorded, else `"rpd"`. Ranking reads the
 #'   cross-validated value at each config's selected hyperparameters
 #'   (`evaluation$results$cv_<metric>`), never the test-set column, so the
 #'   test set stays held out from selection. Default NULL.
@@ -104,7 +106,7 @@
 #'   is empty again, since the ensemble was built on the members it replaces.
 #'   `models$results` records how each member's re-tune started:
 #'   `warm_start` (`TRUE` from `evaluate()`'s parameters, `FALSE` from a
-#'   space-filling grid) and `start_grid_points`.
+#'   space-filling grid) and `start_grid_size`.
 #'
 #' @export
 fit <- function(x,
@@ -127,19 +129,33 @@ fit <- function(x,
   ## an unscreened evaluation in its place. A cold-started fit re-fits the
   ## same way, since there is still no screening to reuse.
 
-  class_in   <- if (inherits(x, "horizons_eval")) "horizons_eval" else "horizons_data"
+  class_in   <- class(x)[1]
   cold_start <- !inherits(x, "horizons_eval") || isFALSE(x$evaluation$screened)
 
+  if (cold_start && !inherits(x, "horizons_data")) {
+
+    cli::cli_abort(c(
+      "{.fn fit} needs a {.cls horizons_eval} from {.fn evaluate}, or a configured {.cls horizons_data} with one configuration.",
+      "x" = "{.arg x} is {.obj_type_friendly {x}}."
+    ), class = "horizons_input_error")
+
+  }
+
+  ## `metric` on either path, before anything is drawn or fitted. On the
+  ## evaluate() path an unknown name used to surface as a missing cv_<metric>
+  ## column with the advice to re-run evaluate(); on a cold start the record
+  ## would fail validation only after every model had been fitted.
+  if (!is.null(metric) &&
+      (!rlang::is_string(metric) || !metric %in% VALID_RANK_METRICS)) {
+
+    cli::cli_abort(c(
+      "{.arg metric} must be one of {.val {VALID_RANK_METRICS}}.",
+      "x" = "Got {.val {metric}}."
+    ), class = "horizons_input_error")
+
+  }
+
   if (cold_start) {
-
-    if (!inherits(x, "horizons_data")) {
-
-      cli::cli_abort(c(
-        "{.fn fit} needs a {.cls horizons_eval} from {.fn evaluate}, or a configured {.cls horizons_data} with one configuration.",
-        "x" = "{.arg x} is {.obj_type_friendly {x}}."
-      ), class = "horizons_input_error")
-
-    }
 
     cold         <- cold_start_evaluation(x, metric, seed)
     x$evaluation <- cold$evaluation
@@ -269,6 +285,13 @@ fit <- function(x,
   all_configs  <- x$config$configs
   tuning       <- x$config$tuning
   cv_folds     <- tuning$cv_folds
+
+  ## configure() stores the screening and the final re-tune budgets
+  ## separately; fit() used to pass the screening one to the re-tune, so the
+  ## user-facing `final_bayesian_iter` did nothing (#46). Objects configured
+  ## before that field existed fall back to the constant. The tree header
+  ## prints this budget, the one that runs.
+  final_bayesian_iter <- tuning$final_bayesian_iter %||% DEFAULT_FINAL_BAYES_ITER
 
   ## The rows evaluate() modelled: the same rule on the same table (#67).
   modelled  <- outcome_complete_rows(x$data$analysis, outcome_col)
@@ -470,7 +493,7 @@ fit <- function(x,
       "\u2502  CV: ", cv_folds, "-fold stratified on ", outcome_col, "\n"
     ))
     cat(paste0(
-      "\u2502  Bayesian: ", tuning$bayesian_iter,
+      "\u2502  Bayesian: ", final_bayesian_iter,
       if (cold_start) " iterations from a space-filling grid\n" else " iterations with warm-start\n"
     ))
     cat("\u2502\n")
@@ -529,11 +552,7 @@ fit <- function(x,
       train_data          = train_Fit,
       role_map            = role_map,
       best_params_eval    = best_params_eval,
-      ## configure() stores the screening and the final re-tune budgets
-      ## separately; fit() used to pass the screening one here, so the
-      ## user-facing `final_bayesian_iter` did nothing (#46). Objects
-      ## configured before that field existed fall back to the constant.
-      final_bayesian_iter = tuning$final_bayesian_iter %||% DEFAULT_FINAL_BAYES_ITER,
+      final_bayesian_iter = final_bayesian_iter,
       grid_size           = tuning$grid_size,
       compute_uq          = compute_uq,
       compute_ad          = compute_ad,
@@ -553,7 +572,7 @@ fit <- function(x,
 
         start_text <- paste0(
           if (cold_start) "Cold start: no warm-start parameters" else "No usable warm-start parameters from evaluate()",
-          "; space-filling grid of ", config_result$start_grid_points, " points"
+          "; space-filling grid of ", config_result$start_grid_size, " points"
         )
 
         cat(paste0(
@@ -711,7 +730,7 @@ fit <- function(x,
       cv_rpd_se       = if (!is.null(cv_rpd)  && nrow(cv_rpd)  == 1) cv_rpd$std_err  else NA_real_,
       best_params     = list(res$best_params),
       warm_start      = res$warm_start %||% NA,
-      start_grid_points = res$start_grid_points %||% NA_integer_,
+      start_grid_size = res$start_grid_size %||% NA_integer_,
       error_message   = res$error_message %||% NA_character_,
       runtime_secs    = res$runtime_secs
     )
@@ -930,8 +949,9 @@ fit <- function(x,
 #' columns, and `NULL` `best_params`, which sends the re-tune to
 #' [build_warmstart_grid()]'s space-filling fallback.
 #'
-#' @param x A configured `horizons_data`.
-#' @param metric The `metric` passed to `fit()`, or `NULL` for `"rpd"`.
+#' @param x A configured `horizons_data`, or a fit that started cold.
+#' @param metric The `metric` passed to `fit()`, already checked. `NULL`
+#'   keeps the `rank_metric` a cold-started fit recorded, or `"rpd"`.
 #'   Recorded as `rank_metric`; with one configuration it ranks nothing.
 #' @param seed The `seed` passed to `fit()`.
 #' @param call The call the conditions are attributed to. Default: the
@@ -939,7 +959,7 @@ fit <- function(x,
 #' @return List with `evaluation` (the record) and `stratified` (`FALSE` when
 #'   the split fell back to unstratified). Aborts with class
 #'   `horizons_input_error` when the object has no configuration or more than
-#'   one, `metric` is unknown, or too few rows have an observed outcome.
+#'   one, or too few rows have an observed outcome.
 #' @keywords internal
 #' @noRd
 cold_start_evaluation <- function(x, metric, seed, call = rlang::caller_env()) {
@@ -965,19 +985,9 @@ cold_start_evaluation <- function(x, metric, seed, call = rlang::caller_env()) {
 
   }
 
-  ## evaluate() checks its metric up front; here the record would otherwise
-  ## fail validation only after every model had been fitted.
-  rank_metric   <- metric %||% "rpd"
-  valid_metrics <- c("rpd", "rsq", "rmse", "rrmse", "ccc", "mae")
-
-  if (!rlang::is_string(rank_metric) || !rank_metric %in% valid_metrics) {
-
-    cli::cli_abort(c(
-      "{.arg metric} must be one of {.val {valid_metrics}}.",
-      "x" = "Got {.val {rank_metric}}."
-    ), class = "horizons_input_error", call = call)
-
-  }
+  ## fit() has checked `metric`. A cold re-fit keeps the metric its record
+  ## carries, as a fit of an evaluated object keeps evaluate()'s.
+  rank_metric <- metric %||% x$evaluation$rank_metric %||% "rpd"
 
   ## The rows evaluate() would model, and the floor it applies to them
   role_map    <- x$data$role_map

@@ -140,13 +140,11 @@ evaluate <- function(x,
   ## Step 1: Gate checks
   ## -----------------------------------------------------------------------
 
-  valid_metrics <- c("rpd", "rsq", "rmse", "rrmse", "ccc", "mae")
-
-  if (!metric %in% valid_metrics) {
+  if (!metric %in% VALID_RANK_METRICS) {
 
     rlang::abort(paste0(
       "Invalid `metric`: '", metric, "'. ",
-      "Must be one of: ", paste(valid_metrics, collapse = ", ")
+      "Must be one of: ", paste(VALID_RANK_METRICS, collapse = ", ")
     ))
 
   }

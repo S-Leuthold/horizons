@@ -1452,7 +1452,7 @@ describe("fit() - cold start from one configuration (#45)", {
     expect_true(any(grepl("Cold start: no warm-start parameters; space-filling grid of 2 points",
                           cold_out, fixed = TRUE)))
     expect_false(cold$models$results$warm_start)
-    expect_identical(cold$models$results$start_grid_points, 2L)
+    expect_identical(cold$models$results$start_grid_size, 2L)
 
   })
 
@@ -1472,13 +1472,65 @@ describe("fit() - cold start from one configuration (#45)", {
 
   })
 
-  it("prints and summarises the record as unevaluated", {
+  ## The Evaluation section of print() or summary(): the lines after its
+  ## heading, up to the blank line that ends it.
+  evaluation_section <- function(out) {
+    start <- which(out == "Evaluation")[1]
+    end   <- start + which(out[-seq_len(start)] == "")[1]
+    out[(start + 1):(end - 1)]
+  }
 
-    label <- "Configs evaluated: none (fit() started cold from 1)"
+  it("prints and summarises the record as unevaluated, and nothing else", {
 
-    expect_true(any(grepl(label, utils::capture.output(print(cold)), fixed = TRUE)))
-    expect_true(any(grepl(label, utils::capture.output(summary(cold)), fixed = TRUE)))
-    expect_false(any(grepl(label, utils::capture.output(print(warm)), fixed = TRUE)))
+    only_line <- "   └─ Configs evaluated: none (fit() started cold from 1)"
+
+    ## No success count, results, rank metric or runtime to contradict it
+    expect_identical(evaluation_section(utils::capture.output(print(cold))), only_line)
+    expect_identical(evaluation_section(utils::capture.output(summary(cold))), only_line)
+    expect_false(any(grepl("none (fit() started cold", utils::capture.output(print(warm)),
+                           fixed = TRUE)))
+
+  })
+
+  it("closes print()'s evaluation branch on its last line, cold or not", {
+
+    ## A fitted object's Best line used to stay open (├─)
+    warm_section <- evaluation_section(utils::capture.output(print(warm)))
+    expect_match(warm_section[length(warm_section)], "^   └─ Best: ")
+    expect_false(any(grepl("└─", warm_section[-length(warm_section)], fixed = TRUE)))
+
+    ## Nothing succeeded: Successful is the last line, and used to stay open
+    none_succeeded <- ev
+    none_succeeded$evaluation$results$status <- "pruned"
+
+    none_section <- evaluation_section(utils::capture.output(print(none_succeeded)))
+    expect_identical(none_section[length(none_section)], "   └─ Successful: 0")
+
+  })
+
+  it("prints the Bayesian budget the re-tune runs, not the screening one", {
+
+    budget <- obj
+    budget$config$tuning$bayesian_iter       <- 0L
+    budget$config$tuning$final_bayesian_iter <- 1L
+
+    ## Stop at the first member: only the header is under test
+    out <- utils::capture.output(
+      testthat::with_mocked_bindings(
+        tryCatch(
+          fit(budget, compute_uq = FALSE, compute_ad = FALSE, verbose = TRUE),
+          horizons_all_members_failed = function(e) NULL
+        ),
+        fit_single_config = function(...) {
+          list(config_id = "cfg_001", status = "failed", error_message = "mocked",
+               runtime_secs = 0)
+        },
+        .package = "horizons"
+      )
+    )
+
+    expect_true(any(grepl("Bayesian: 1 iterations", out, fixed = TRUE)))
+    expect_false(any(grepl("Bayesian: 0 iterations", out, fixed = TRUE)))
 
   })
 
@@ -1495,15 +1547,50 @@ describe("fit() - cold start from one configuration (#45)", {
 
   })
 
-  it("re-fits a cold-started fit as a cold start", {
+  it("re-fits a cold-started fit as a cold start, keeping its recorded metric", {
 
-    again <- suppressWarnings(
-      fit(cold, compute_uq = FALSE, compute_ad = FALSE, verbose = FALSE, seed = 42L)
+    cold_rmse <- suppressWarnings(
+      fit(obj, metric = "rmse", compute_uq = FALSE, compute_ad = FALSE,
+          verbose = FALSE, seed = 42L)
+    )
+
+    again_out <- utils::capture.output(
+      again <- suppressWarnings(
+        fit(cold_rmse, compute_uq = FALSE, compute_ad = FALSE, verbose = TRUE, seed = 42L)
+      )
     )
 
     expect_s3_class(again, "horizons_fit")
     expect_false(again$evaluation$screened)
     expect_identical(again$models$split$in_id, cold$models$split$in_id)
+
+    ## metric = NULL carries the recorded one, as it carries evaluate()'s
+    expect_identical(again$evaluation$rank_metric, "rmse")
+    expect_identical(again$models$rank_metric, "rmse")
+
+    expect_true(any(grepl("horizons_fit → horizons_fit", again_out, fixed = TRUE)))
+
+  })
+
+  ## An object evaluated before `screened` existed has no such key; it is a
+  ## screened evaluation all the same, and must not be re-drawn.
+  it("takes the warm path for an evaluation that predates `screened`", {
+
+    legacy <- ev
+    legacy$evaluation$screened <- NULL
+
+    expect_false("screened" %in% names(legacy$evaluation))
+
+    legacy_out <- utils::capture.output(
+      r <- suppressWarnings(
+        fit(legacy, compute_uq = FALSE, compute_ad = FALSE, verbose = TRUE, seed = 42L)
+      )
+    )
+
+    expect_identical(r$evaluation, legacy$evaluation)
+    expect_identical(r$models$split$in_id, legacy$evaluation$split$in_id)
+    expect_true(r$models$results$warm_start)
+    expect_false(any(grepl("Cold start", legacy_out, fixed = TRUE)))
 
   })
 
@@ -1525,14 +1612,91 @@ describe("fit() - cold start from one configuration (#45)", {
 
   })
 
-  it("refuses a configured object with no configuration, or an unknown metric", {
+  it("refuses a configured object with no configuration", {
 
     none <- obj
     none$config$configs <- obj$config$configs[0, ]
 
     expect_error(fit(none, verbose = FALSE), "configure()", class = "horizons_input_error")
-    expect_error(fit(obj, metric = "accuracy", verbose = FALSE), "accuracy",
-                 class = "horizons_input_error")
+
+  })
+
+  ## On the evaluate() path an unknown metric used to surface as a missing
+  ## cv_<metric> column, with the advice to re-run evaluate().
+  it("refuses an unknown metric on either path, naming it and the valid ones", {
+
+    for (x in list(obj, ev)) {
+
+      err <- expect_error(fit(x, metric = "accuracy", verbose = FALSE),
+                          class = "horizons_input_error")
+
+      msg <- gsub("\\s+", " ", conditionMessage(err))   # undo cli line wrapping
+      expect_match(msg, "accuracy", fixed = TRUE)
+      expect_match(msg, "rrmse", fixed = TRUE)
+      expect_no_match(msg, "Re-run", fixed = TRUE)
+
+    }
+
+  })
+
+})
+
+
+## =========================================================================
+## Cold start with UQ and AD on (#45)
+## =========================================================================
+## The calibration set is carved from the cold start's own training part, as
+## it is from evaluate()'s, and predict() serves intervals and AD from it.
+
+describe("fit() - cold start with UQ and AD (#45)", {
+
+  ## n = 250 with 10 NA outcomes: 240 modelled rows, enough for the
+  ## calibration split to clear N_CALIB_MIN
+  obj <- make_eval_object(n = 250, n_configs = 1)
+  obj$config$tuning$final_bayesian_iter <- 0L
+  obj$data$analysis$SOC[seq(5, 50, by = 5)] <- NA_real_
+
+  cold <- suppressWarnings(
+    fit(obj, compute_uq = TRUE, compute_ad = TRUE, verbose = FALSE, seed = 42L)
+  )
+
+  modelled_ids <- obj$data$analysis$sample_id[!is.na(obj$data$analysis$SOC)]
+  test_ids     <- rsample::testing(cold$models$split)$sample_id
+  fit_ids      <- cold$models$row_index$sample_id
+
+  ## Split C, reproduced from calib_split_seed() and the training part alone
+  set.seed(calib_split_seed(42L))
+  split_C   <- rsample::initial_split(rsample::training(cold$models$split),
+                                      prop = CALIB_PROP,
+                                      strata = dplyr::all_of("SOC"))
+  calib_ids <- rsample::testing(split_C)$sample_id
+
+  it("partitions the modelled frame into disjoint test, calibration and fit rows", {
+
+    expect_length(modelled_ids, 240L)
+    expect_setequal(rsample::training(split_C)$sample_id, fit_ids)
+
+    expect_length(intersect(test_ids, calib_ids), 0L)
+    expect_length(intersect(test_ids, fit_ids), 0L)
+    expect_length(intersect(calib_ids, fit_ids), 0L)
+    expect_setequal(c(test_ids, calib_ids, fit_ids), modelled_ids)
+    expect_identical(length(c(test_ids, calib_ids, fit_ids)), 240L)
+
+    expect_equal(cold$models$uq[[1]]$n_calib, length(calib_ids))
+
+  })
+
+  it("serves intervals and AD flags from predict()", {
+
+    expect_true(has_uq(cold))
+    expect_true(has_ad(cold))
+
+    new_data <- obj$data$analysis[1:6, setdiff(names(obj$data$analysis), "SOC")]
+    p        <- predict(cold, new_data, interval = TRUE)
+
+    expect_true(all(c(".pred_lower", ".pred_upper", ".ad_distance", ".ad_flag") %in% names(p)))
+    expect_true(all(p$.pred_lower <= p$.pred_upper))
+    expect_false(anyNA(p$.ad_flag))
 
   })
 

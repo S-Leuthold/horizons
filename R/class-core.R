@@ -2152,7 +2152,16 @@ print.horizons_data <- function(x, ...) {
 
   has_eval <- !is.null(x$evaluation$results)
 
-  if (has_eval) {
+  ## fit()'s cold start (#45) records its one configuration without
+  ## evaluating it, so there is no success count or winner to report.
+  if (has_eval && isFALSE(x$evaluation$screened)) {
+
+    cat(cli::style_bold("Evaluation\n"))
+    cat(paste0("   \u2514\u2500 Configs evaluated: none (fit() started cold from ",
+               nrow(x$evaluation$results), ")\n"))
+    cat("\n")
+
+  } else if (has_eval) {
 
     cat(cli::style_bold("Evaluation\n"))
 
@@ -2160,52 +2169,45 @@ print.horizons_data <- function(x, ...) {
     n_success <- sum(eval_res$status == "success", na.rm = TRUE)
     n_total   <- nrow(eval_res)
 
-    ## fit()'s cold start records its one configuration without evaluating it (#45)
-    evaluated_label <- if (isFALSE(x$evaluation$screened)) {
-      paste0("none (fit() started cold from ", n_total, ")")
-    } else {
-      n_total
-    }
+    ## The Best line prints only when a configuration succeeded and its row
+    ## carries the rank metric. Whichever line is last closes the branch; the
+    ## Best line used to stay open on a fitted object, and Successful did
+    ## whenever nothing succeeded.
+    best_id   <- x$evaluation$best_config
+    metric    <- x$evaluation$rank_metric %||% "rmse"
+    best_row  <- eval_res[eval_res$config_id %in% best_id, ]
+    show_best <- n_success > 0 && length(best_id) == 1 &&
+                   nrow(best_row) > 0 && metric %in% names(best_row)
 
-    has_models <- !is.null(x$models$workflows)
-
-    cat(paste0("   \u251C\u2500 Configs evaluated: ", evaluated_label, "\n"))
-    cat(paste0("   \u251C\u2500 Successful: ", n_success, "\n"))
+    cat(paste0("   \u251C\u2500 Configs evaluated: ", n_total, "\n"))
+    cat(paste0("   ", if (show_best) "\u251C\u2500" else "\u2514\u2500",
+               " Successful: ", n_success, "\n"))
 
     ## Best config
-    if (n_success > 0 && !is.null(x$evaluation$best_config)) {
+    if (show_best) {
 
-      best_id  <- x$evaluation$best_config
-      metric   <- x$evaluation$rank_metric %||% "rmse"
-      best_row <- eval_res[eval_res$config_id == best_id, ]
+      cv_col <- paste0("cv_", metric)
 
-      if (nrow(best_row) > 0 && metric %in% names(best_row)) {
+      ## Ranking is on the CV metric (#50); show it first when present,
+      ## with the held-out test value beside it. Objects evaluated before
+      ## the cv_* columns existed print the test value alone.
+      if (cv_col %in% names(best_row) && !is.na(best_row[[cv_col]])) {
 
-        branch <- if (has_models) "\u251C\u2500" else "\u2514\u2500"
-        cv_col <- paste0("cv_", metric)
+        cat(paste0(
+          "   \u2514\u2500 Best: ", best_id,
+          " \u2014 CV ", toupper(metric), " = ",
+          round(best_row[[cv_col]], 3),
+          " (test ", toupper(metric), " = ",
+          round(best_row[[metric]], 3), ")\n"
+        ))
 
-        ## Ranking is on the CV metric (#50); show it first when present,
-        ## with the held-out test value beside it. Objects evaluated before
-        ## the cv_* columns existed print the test value alone.
-        if (cv_col %in% names(best_row) && !is.na(best_row[[cv_col]])) {
+      } else {
 
-          cat(paste0(
-            "   ", branch, " Best: ", best_id,
-            " \u2014 CV ", toupper(metric), " = ",
-            round(best_row[[cv_col]], 3),
-            " (test ", toupper(metric), " = ",
-            round(best_row[[metric]], 3), ")\n"
-          ))
-
-        } else {
-
-          cat(paste0(
-            "   ", branch, " Best: ", best_id,
-            " \u2014 ", toupper(metric), " = ",
-            round(best_row[[metric]], 3), "\n"
-          ))
-
-        }
+        cat(paste0(
+          "   \u2514\u2500 Best: ", best_id,
+          " \u2014 ", toupper(metric), " = ",
+          round(best_row[[metric]], 3), "\n"
+        ))
 
       }
 
@@ -2599,7 +2601,16 @@ summary.horizons_data <- function(object, ...) {
 
   has_eval <- !is.null(x$evaluation$results)
 
-  if (has_eval) {
+  ## fit()'s cold start (#45) records its one configuration without
+  ## evaluating it, so there are no results, rank metric or runtime to report.
+  if (has_eval && isFALSE(x$evaluation$screened)) {
+
+    cat(cli::style_bold("Evaluation\n"))
+    cat(paste0("   \u2514\u2500 Configs evaluated: none (fit() started cold from ",
+               nrow(x$evaluation$results), ")\n"))
+    cat("\n")
+
+  } else if (has_eval) {
 
     cat(cli::style_bold("Evaluation\n"))
 
@@ -2609,14 +2620,7 @@ summary.horizons_data <- function(object, ...) {
     n_failed  <- sum(eval_res$status == "failed", na.rm = TRUE)
     n_total   <- nrow(eval_res)
 
-    ## fit()'s cold start records its one configuration without evaluating it (#45)
-    evaluated_label <- if (isFALSE(x$evaluation$screened)) {
-      paste0("none (fit() started cold from ", n_total, ")")
-    } else {
-      n_total
-    }
-
-    cat(paste0("   \u251C\u2500 Configs evaluated: ", evaluated_label, "\n"))
+    cat(paste0("   \u251C\u2500 Configs evaluated: ", n_total, "\n"))
     cat(paste0("   \u251C\u2500 Results: ",
                cli::col_green(paste0(n_success, " success")), ", ",
                n_pruned, " pruned, ",

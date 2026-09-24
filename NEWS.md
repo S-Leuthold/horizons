@@ -40,10 +40,20 @@
   key existed still validate. With more than one configuration, `fit()`
   aborts with class `horizons_input_error` and says to run `evaluate()`.
 
-  `models$results` gains `warm_start` and `start_grid_points`, recording
+  `models$results` gains `warm_start` and `start_grid_size`, recording
   how each member's re-tune started, on the `evaluate()` path too: a
   member whose `evaluate()` parameters were unusable used to fall back to
   the same space-filling grid silently, and now the tree says so.
+
+  `fit()` now checks `metric` before anything is drawn or fitted, on either
+  path, against the list `evaluate()` accepts (`VALID_RANK_METRICS`); an
+  unknown name on the `evaluate()` path used to surface as a missing
+  `cv_<metric>` column with the advice to re-run `evaluate()`. Its tree
+  header prints the Bayesian budget the re-tune runs,
+  `final_bayesian_iter`, where it printed the screening `bayesian_iter`.
+  `print()` closes its Evaluation branch on the last line: the Best line
+  of a fitted object, and the Successful line when nothing succeeded,
+  were left open.
 
 ## Performance
 

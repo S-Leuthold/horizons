@@ -28,11 +28,11 @@
 #' @param seed Integer. Random seed for reproducibility.
 #'
 #' @return List with fields: config_id, status, degraded, degraded_reason,
-#'   fitted_workflow, best_params, warm_start, start_grid_points,
+#'   fitted_workflow, best_params, warm_start, start_grid_size,
 #'   cv_predictions, test_metrics, cv_metrics, uq, warnings, error_message,
 #'   runtime_secs. `warm_start` is `TRUE` when the re-tune started from
 #'   `best_params_eval`, `FALSE` when it fell back to a space-filling grid of
-#'   `start_grid_points` points, and `NA` (both) when the config failed
+#'   `start_grid_size` points, and `NA` (both) when the config failed
 #'   before tuning.
 #'
 #' @keywords internal
@@ -81,7 +81,7 @@ fit_single_config <- function(config_row,
   ## How the re-tune started, once it has: from evaluate()'s parameters, or
   ## from a space-filling grid when there were none to use (#45)
   warm_start        <- NA
-  start_grid_points <- NA_integer_
+  start_grid_size   <- NA_integer_
 
   ## --- Failed result helper ------------------------------------------------
 
@@ -95,7 +95,7 @@ fit_single_config <- function(config_row,
       fitted_workflow  = NULL,
       best_params      = NULL,
       warm_start       = warm_start,
-      start_grid_points = start_grid_points,
+      start_grid_size  = start_grid_size,
       cv_predictions   = NULL,
       test_metrics     = NULL,
       cv_metrics       = NULL,
@@ -250,7 +250,7 @@ fit_single_config <- function(config_row,
   collect_from(tune_result)
 
   warm_start        <- !isTRUE(warmstart$fallback_used)
-  start_grid_points <- as.integer(warmstart$grid_points %||% NA_integer_)
+  start_grid_size   <- as.integer(warmstart$grid_points %||% NA_integer_)
 
   ## Check for complete tuning failure (grid failed)
   if (is.null(warmstart$best_params)) {
@@ -579,7 +579,7 @@ fit_single_config <- function(config_row,
     fitted_workflow  = fitted_workflow,
     best_params      = best_params,
     warm_start       = warm_start,
-    start_grid_points = start_grid_points,
+    start_grid_size  = start_grid_size,
     cv_predictions   = cv_predictions,
     test_metrics     = test_metrics,
     cv_metrics       = cv_metrics,

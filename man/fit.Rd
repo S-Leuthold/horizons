@@ -18,15 +18,17 @@ fit(
 \arguments{
 \item{x}{A \code{horizons_eval} object (output of \code{evaluate()}), or a
 configured \code{horizons_data} with exactly one configuration, which \code{fit()}
-starts cold (see the section above).}
+starts cold (see "Cold start from one configuration").}
 
 \item{n_best}{Integer. Number of top configurations to re-tune. Default 5.
 A cold start has one.}
 
 \item{metric}{Character or NULL. Metric for ranking the candidate
-configs, by bare name (\code{"rpd"}, \code{"rmse"}, ...). If NULL, uses the
-rank_metric from \code{evaluate()}, or \code{"rpd"} on a cold start, where there
-is nothing to rank and the metric is only recorded. Ranking reads the
+configs, by bare name: one of \code{"rpd"}, \code{"rsq"}, \code{"rmse"}, \code{"rrmse"},
+\code{"ccc"}, \code{"mae"}, or \code{fit()} aborts with class \code{horizons_input_error}.
+If NULL, uses the rank_metric from \code{evaluate()}; on a cold start, where
+there is nothing to rank and the metric is only recorded, the one a
+cold-started fit recorded, else \code{"rpd"}. Ranking reads the
 cross-validated value at each config's selected hyperparameters
 (\verb{evaluation$results$cv_<metric>}), never the test-set column, so the
 test set stays held out from selection. Default NULL.}
@@ -71,7 +73,7 @@ training object carried a \verb{$selection} from \code{select_training()}, which
 is empty again, since the ensemble was built on the members it replaces.
 \code{models$results} records how each member's re-tune started:
 \code{warm_start} (\code{TRUE} from \code{evaluate()}'s parameters, \code{FALSE} from a
-space-filling grid) and \code{start_grid_points}.
+space-filling grid) and \code{start_grid_size}.
 }
 \description{
 Re-tunes the top N configurations from \code{evaluate()} with warm-start
