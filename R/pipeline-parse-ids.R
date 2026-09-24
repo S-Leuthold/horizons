@@ -62,6 +62,14 @@ SAMPLEID_VARIANTS <- c("sampleid", "sample_id", "SampleID", "Sample_ID", "sample
 #'   * `"error"`: Abort with list of non-matching files.
 #'   * `"na"`: Set `sample_id` to NA, warn.
 #'
+#' @details
+#' **Duplicate or missing sample ids:** Several filenames parsing to the same
+#' `sampleid` token is normal here — that is what identifies replicate scans
+#' of one physical sample — and so is an `NA` `sample_id` left by `too_few =
+#' "na"`. `parse_ids()` warns rather than aborts on either, the same as
+#' [spectra()]. Use [average()] to collapse the replicates before anything
+#' downstream that requires unique ids.
+#'
 #' @return The input `horizons_data` object with:
 #'   * `sample_id` updated from the `sampleid` token (if present)
 #'   * New metadata columns added to `data$analysis`
@@ -383,6 +391,15 @@ parse_ids <- function(x,
   )
 
   x$provenance$id_pattern <- format
+
+  ## -------------------------------------------------------------------------
+  ## Step 8b: Re-validate
+  ## -------------------------------------------------------------------------
+  ## Raw stage: parse_ids() runs before average() collapses replicates, so a
+  ## duplicate parsed sample_id (several filenames parsing to the same id) or
+  ## an NA one (too_few = "na") warns rather than aborts here.
+
+  x <- validate_horizons_data(x, stage = "raw")
 
   ## -------------------------------------------------------------------------
   ## Step 9: CLI output

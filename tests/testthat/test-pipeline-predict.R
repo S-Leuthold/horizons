@@ -57,7 +57,11 @@ make_predict_eval <- function(n = 300, n_wn = 10, transformation = "none",
   obj <- list(
     data = list(analysis = df, role_map = roles, n_rows = nrow(df),
                 n_predictors = n_wn,
-                n_covariates = length(covariates), n_responses = 1L),
+                ## SOC carries role "outcome" above, not "response" (n_responses
+                ## counts role == "response"); fit()'s entry-stage
+                ## validate_horizons_data() call (#24) is the first thing to
+                ## actually check this stored count against the role_map.
+                n_covariates = length(covariates), n_responses = 0L),
     provenance = list(spectra_source = "test", spectra_type = "mir",
                       schema_version = 1L),
     config = list(configs = configs, n_configs = 1L,

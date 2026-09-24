@@ -266,7 +266,9 @@ new_horizons_data <- function(analysis        = NULL,
 #' @description
 #' Checks structural integrity of a horizons_data object. Silent on success,
 #' collects all validation errors and reports them together with tree-style
-#' formatting on failure.
+#' formatting on failure. Some checks are downgraded to warnings at
+#' `stage = "raw"` (see Details); those are reported the same way, tree-style,
+#' but do not abort.
 #'
 #' @details
 #' This validator checks structural requirements, not data quality. It ensures
@@ -274,41 +276,95 @@ new_horizons_data <- function(analysis        = NULL,
 #' (outlier detection, response distribution, etc.) belong in separate
 #' diagnostic functions.
 #'
+#' **Stages.** `spectra()`, `parse_ids()` and `standardize()` run before
+#' replicate scans have been collapsed to one row per sample, so more than
+#' one row can legitimately share a `sample_id` (Bruker's own OPUS naming
+#' does this: `S100-1.0` and `S100-1.1` both become `S100-1` once the
+#' extension is stripped). Those three verbs call this validator with
+#' `stage = "raw"`, which downgrades the sample_id checks below to warnings.
+#' `average()` is where replicates actually collapse, so from `average()`
+#' onward (`average()`, `add_response()`, `configure()`, `validate()`,
+#' `select_training()`, and every other caller) the default `stage = "full"`
+#' applies: the same conditions abort.
+#'
+#' **`warn_ids`.** A duplicate or `NA` `sample_id` first appears at
+#' `spectra()` or `parse_ids()`, and that is where it is worth a warning.
+#' `standardize()` and `average()` also call this validator at
+#' `stage = "raw"` — to certify the base contract before rebuilding
+#' `data$analysis` from `role_map`, and (for `standardize()`) once more
+#' before returning — but by then the same duplicate has already been
+#' warned about, and `average()` exists specifically to collapse it, so
+#' warning about it again on every call would be noise about the verb's own
+#' designed input. Those call sites pass `warn_ids = FALSE`, which skips
+#' checks 3 and 4 below entirely at `stage = "raw"` (every other check,
+#' unregistered columns included, still runs). `warn_ids` has no effect at
+#' `stage = "full"`, where an id problem is always an abort.
+#'
 #' **Validation checks performed:**
 #'
 #' 1. **Pairing**: If `analysis` exists, `role_map` must also exist (and vice
 #'    versa). This is a gate check — failure here aborts immediately since
 #'    subsequent checks depend on both being present.
 #'
-#' 2. **sample_id column**: Must exist in analysis and contain unique values.
-#'    Duplicates are reported by ID.
+#' 2. **sample_id presence**: The column must exist in `analysis`. Always an
+#'    error, in both stages.
 #'
-#' 3. **Predictor columns**: Wavelength/predictor columns (role = "predictor")
-#'    must not contain NA or Inf values. First 3 problematic columns are named.
+#' 3. **sample_id missingness**: NA values in `sample_id`. An error at
+#'    `stage = "full"`; a warning at `stage = "raw"` (skipped entirely when
+#'    `warn_ids = FALSE`), where `parse_ids(too_few = "na")` documents
+#'    leaving unmatched filenames unresolved.
 #'
-#' 4. **Wavelength order**: Numeric column names (interpreted as wavenumbers)
-#'    must be in strictly decreasing order (e.g., 4000, 3998, 3996...).
+#' 4. **sample_id uniqueness**: Duplicate `sample_id` values (NAs excluded;
+#'    see check 3). An error at `stage = "full"`, naming the duplicates and
+#'    pointing at [average()]; a warning at `stage = "raw"` (skipped
+#'    entirely when `warn_ids = FALSE`), matching the A004 check in the
+#'    validation spec.
 #'
-#' 5. **role_map completeness**: Every column in analysis must appear in
-#'    role_map. Missing columns are listed.
+#' 5. **Predictor columns**: Wavelength/predictor columns (role = "predictor")
+#'    must not contain `NA` or `Inf` values. Checked only at `stage =
+#'    "full"`: a non-finite value outside `standardize()`'s eventual trim
+#'    range is legitimately still there before the trim runs, and
+#'    `standardize()` itself aborts on any non-finite value that survives
+#'    trimming and resampling, so this is only enforced from `average()` on.
+#'    First 3 problematic columns are named.
 #'
-#' 6. **Single id role**: Exactly one variable must have role = "id".
+#' 6. **Wavelength naming and order**: Predictor names that look like
+#'    wavenumbers (`wn_<number>` or a bare number) must parse to distinct
+#'    numeric values in strictly decreasing order (e.g., 4000, 3998,
+#'    3996...). A name that does not parse (e.g. two decimal points) or a
+#'    value that repeats (`600` and `600.0`) is named directly rather than
+#'    folded into a generic "must be strictly decreasing" message. Always
+#'    checked, in both stages.
+#'
+#' 7. **role_map completeness**: Every column in `analysis` must appear in
+#'    `role_map`, and every `role_map` row must name a real column
+#'    (predictors) or a real non-predictor column. Missing columns are
+#'    listed. Always checked.
+#'
+#' 8. **role_map uniqueness**: Every `analysis` column has exactly one
+#'    `role_map` row. A column named twice (whatever the roles) makes
+#'    `role_map$role[role_map$variable == x]` ambiguous to every consumer
+#'    that expects a scalar, and lets a column silently fall through
+#'    `build_recipe()`'s `outcome ~ .` as an unintended predictor. Always
+#'    checked.
+#'
+#' 9. **Single id role**: Exactly one variable must have role = "id".
 #'    Zero or multiple id roles both fail.
 #'
-#' 7. **Role vocabulary**: Every role is one of `id`, `predictor`,
-#'    `covariate`, `outcome`, `response`, `meta`. A typo'd role makes a
-#'    column invisible to every consumer, so it fails here rather than
-#'    silently.
+#' 10. **Role vocabulary**: Every role is one of `id`, `predictor`,
+#'     `covariate`, `outcome`, `response`, `meta`. A typo'd role makes a
+#'     column invisible to every consumer, so it fails here rather than
+#'     silently.
 #'
-#' 8. **Outcome cardinality**: At most one variable has role = "outcome"
-#'    (invariant I3).
+#' 11. **Outcome cardinality**: At most one variable has role = "outcome"
+#'     (invariant I3).
 #'
-#' 9. **Stored counts**: `n_rows`, `n_predictors`, `n_covariates` and
-#'    `n_responses`, when present, equal the values recomputed from
-#'    `analysis` and `role_map`. The contract treats these as derived; the
-#'    implementation stores them, so they are checked.
+#' 12. **Stored counts**: `n_rows`, `n_predictors`, `n_covariates` and
+#'     `n_responses`, when present, equal the values recomputed from
+#'     `analysis` and `role_map`. The contract treats these as derived; the
+#'     implementation stores them, so they are checked.
 #'
-#' 10. **Selection record**: when `x$selection` is non-NULL it must be a list
+#' 13. **Selection record**: when `x$selection` is non-NULL it must be a list
 #'     carrying `settings` (a list) plus `membership`, `groups`,
 #'     `pool_sizes`, `target_distances` and `exclusions` (data frames, each
 #'     with the columns its consumers index by name), and every retained
@@ -320,14 +376,21 @@ new_horizons_data <- function(analysis        = NULL,
 #' checked even on an otherwise empty object.
 #'
 #' @param x `horizons_data`. The object to validate.
+#' @param stage `character(1)`. `"full"` (default) or `"raw"`. See Details.
+#' @param warn_ids `logical(1)`. Default `TRUE`. At `stage = "raw"`, whether
+#'   a duplicate or `NA` `sample_id` is reported at all. See the `warn_ids`
+#'   section in Details.
 #'
-#' @return `horizons_data`. The input object, unchanged, if validation passes.
-#'   Aborts with class `horizons_validation_error` if validation fails.
+#' @return `horizons_data`. The input object, unchanged, if validation passes
+#'   (whether or not it printed warnings). Aborts with class
+#'   `horizons_validation_error` if validation fails.
 #'
 #' @seealso [new_horizons_data()] for object construction.
 #'
 #' @noRd
-validate_horizons_data <- function(x) {
+validate_horizons_data <- function(x, stage = c("full", "raw"), warn_ids = TRUE) {
+
+  stage <- match.arg(stage)
 
   ## ---------------------------------------------------------------------------
   ## Selection record — checked whether or not the object carries data
@@ -371,28 +434,91 @@ validate_horizons_data <- function(x) {
   }
 
   ## ---------------------------------------------------------------------------
-  ## Collect errors for remaining checks
+  ## Collect errors (both stages) and warnings (downgraded, "raw" only)
   ## ---------------------------------------------------------------------------
 
   errors   <- selection_errors
+  warnings <- character()
   analysis <- x$data$analysis
   role_map <- x$data$role_map
 
   ## sample_id checks ----
 
-
   if (!"sample_id" %in% names(analysis)) {
 
     errors <- c(errors, cli::format_inline("Column {.field sample_id} missing from {.field analysis}"))
 
+    } else if (stage == "raw" && !warn_ids) {
+
+    ## spectra() and parse_ids() already warned about a duplicate or NA
+    ## sample_id when it first appeared; standardize() and average() call
+    ## this validator with warn_ids = FALSE at both entry and exit so their
+    ## own structural checks (unregistered columns, wavelength order, ...)
+    ## still run at stage = "raw" without re-warning about the same rows —
+    ## average() in particular exists to collapse those very duplicates, so
+    ## warning about its own designed input on every call was noise.
+
     } else {
 
-    dup_ids <- analysis$sample_id[duplicated(analysis$sample_id)]
+    ## NA sample_id: full stage aborts; raw stage warns (parse_ids(too_few =
+    ## "na") documents leaving unmatched filenames as NA).
+
+    na_id_count <- sum(is.na(analysis$sample_id))
+
+    if (na_id_count > 0) {
+
+      na_msg <- cli::format_inline("{na_id_count} NA {.field sample_id} value{?s}")
+
+      if (stage == "raw") {
+
+        warnings <- c(warnings, na_msg)
+
+      } else {
+
+        errors <- c(errors, na_msg)
+
+      }
+
+    }
+
+    ## Duplicate sample_id, NAs excluded (handled above so they are not also
+    ## reported as duplicates of each other). Full stage aborts and points at
+    ## average(); raw stage warns, matching the validation spec's A004 check
+    ## ("Found {n} duplicate sample IDs") — replicate scans share an id until
+    ## average() collapses them.
+
+    non_na_ids <- analysis$sample_id[!is.na(analysis$sample_id)]
+    dup_ids    <- non_na_ids[duplicated(non_na_ids)]
 
     if (length(dup_ids) > 0) {
 
-      dup_str <- paste(unique(dup_ids), collapse = ", ")
-      errors  <- c(errors, cli::format_inline("Duplicate {.field sample_id} values: {dup_str}"))
+      ## First 5, like the other checks in this function — at library scale
+      ## (thousands of replicate groups) the full list is unreadable and, in
+      ## the raw-stage warning, would make the console message itself
+      ## enormous.
+      unique_dups <- unique(dup_ids)
+      shown       <- unique_dups[seq_len(min(5, length(unique_dups)))]
+      dup_str     <- paste(shown, collapse = ", ")
+
+      if (length(unique_dups) > 5) {
+
+        dup_str <- paste0(dup_str, ", and ", length(unique_dups) - 5, " more")
+
+      }
+
+      if (stage == "raw") {
+
+        warnings <- c(warnings, cli::format_inline(
+          "Found duplicate {.field sample_id} values: {dup_str}"
+        ))
+
+      } else {
+
+        errors <- c(errors, cli::format_inline(
+          "Duplicate {.field sample_id} values: {dup_str}. Use {.fn average} to aggregate replicates, or check your data."
+        ))
+
+      }
 
     }
   }
@@ -415,30 +541,38 @@ validate_horizons_data <- function(x) {
 
   predictor_cols <- analysis[, predictor_vars, drop = FALSE]
 
-  # Check for NA ---------------------------------------------------------------
+  # Check for NA and Inf — full stage only --------------------------------------
+  # A non-finite value outside standardize()'s trim range is legitimately
+  # there before the trim runs (Inf no less than NA); standardize() aborts on
+  # any non-finite value that survives trimming and resampling, so this is
+  # only enforced from average() on.
 
-  na_check <- sapply(predictor_cols, function(col) any(is.na(col)))
+  if (stage != "raw") {
 
-  if (any(na_check)) {
+    na_check <- sapply(predictor_cols, function(col) any(is.na(col)))
 
-    na_cols  <- names(na_check)[na_check]
-    col_list <- paste(na_cols[1:min(3, length(na_cols))], collapse = ", ")
-    errors   <- c(errors, cli::format_inline("NA values in predictor columns: {col_list}"))
+    if (any(na_check)) {
+
+      na_cols  <- names(na_check)[na_check]
+      col_list <- paste(na_cols[1:min(3, length(na_cols))], collapse = ", ")
+      errors   <- c(errors, cli::format_inline("NA values in predictor columns: {col_list}"))
+
+    }
+
+    inf_check <- sapply(predictor_cols, function(col) any(is.infinite(col)))
+
+    if (any(inf_check)) {
+
+      inf_cols <- names(inf_check)[inf_check]
+      col_list <- paste(inf_cols[1:min(3, length(inf_cols))], collapse = ", ")
+      errors   <- c(errors, cli::format_inline("Infinite values in predictor columns: {col_list}"))
+
+    }
 
   }
 
-  # Check for Inf --------------------------------------------------------------
-
-  inf_check <- sapply(predictor_cols, function(col) any(is.infinite(col)))
-  if (any(inf_check)) {
-
-    inf_cols <- names(inf_check)[inf_check]
-    col_list <- paste(inf_cols[1:min(3, length(inf_cols))], collapse = ", ")
-    errors   <- c(errors, cli::format_inline("Infinite values in predictor columns: {col_list}"))
-
-  }
-
-  # Check wavelength order (numeric column names should be decreasing) ---------
+  # Check wavelength naming and order (numeric column names should be
+  # decreasing) ------------------------------------------------------------
   # Predictors are minted as wn_<wavenumber> everywhere in the package, so the
   # pattern has to admit the prefix; without it this check matched nothing and
   # invariant I2 went unenforced.
@@ -447,11 +581,42 @@ validate_horizons_data <- function(x) {
 
   if (length(numeric_predictors) > 1) {
 
-    wn_values <- as.numeric(gsub("^wn_", "", numeric_predictors))
+    wn_raw    <- gsub("^wn_", "", numeric_predictors)
+    wn_values <- suppressWarnings(as.numeric(wn_raw))
 
-    if (!all(diff(wn_values) < 0)) {
+    ## A name that matches the wn_<digits> pattern but does not parse (e.g.
+    ## two decimal points) would otherwise reach `diff()`/`all()` as NA and
+    ## either crash ("missing value where TRUE/FALSE needed") or disappear
+    ## into a generic message; name it directly instead.
 
-      errors <- c(errors, cli::format_inline("Wavelength columns must be in strictly decreasing order"))
+    unparseable <- numeric_predictors[is.na(wn_values)]
+
+    if (length(unparseable) > 0) {
+
+      col_list <- paste(unparseable, collapse = ", ")
+      errors   <- c(errors, cli::format_inline(
+        "{cli::qty(length(unparseable))}Predictor column name{?s} that {?does/do} not parse as a wavenumber: {col_list}"
+      ))
+
+    } else {
+
+      ## Two columns naming the same wavenumber (e.g. "600" and "600.0")
+      ## trivially fail strict decrease once sorted; name every column in
+      ## the pair (not just the later occurrence duplicated() flags) rather
+      ## than reporting the generic order failure.
+
+      dup_wn <- numeric_predictors[wn_values %in% wn_values[duplicated(wn_values)]]
+
+      if (length(dup_wn) > 0) {
+
+        dup_list <- paste(dup_wn, collapse = ", ")
+        errors   <- c(errors, cli::format_inline("Duplicate wavenumber columns: {dup_list}"))
+
+      } else if (!all(diff(wn_values) < 0)) {
+
+        errors <- c(errors, cli::format_inline("Wavelength columns must be in strictly decreasing order"))
+
+      }
 
     }
   }
@@ -476,6 +641,21 @@ validate_horizons_data <- function(x) {
 
     col_list <- paste(missing_from_analysis, collapse = ", ")
     errors   <- c(errors, cli::format_inline("Non-predictor columns in {.field role_map} missing from {.field analysis}: {col_list}"))
+
+  }
+
+  # Every analysis column has exactly one role_map row (not just at least
+  # one, checked above). A duplicated variable makes
+  # role_map$role[role_map$variable == x] ambiguous, and lets the column
+  # fall through build_recipe()'s `outcome ~ .` as an unregistered predictor
+  # rather than failing loudly.
+
+  dup_role_map_vars <- unique(role_map$variable[duplicated(role_map$variable)])
+
+  if (length(dup_role_map_vars) > 0) {
+
+    col_list <- paste(dup_role_map_vars, collapse = ", ")
+    errors   <- c(errors, cli::format_inline("Column{?s} with more than one {.field role_map} row: {col_list}"))
 
   }
 
@@ -551,8 +731,14 @@ validate_horizons_data <- function(x) {
   }
 
   ## ---------------------------------------------------------------------------
-  ## Report errors or return
+  ## Report warnings, then errors, or return
   ## ---------------------------------------------------------------------------
+
+  if (length(warnings) > 0) {
+
+    warn_validation(warnings)
+
+  }
 
   if (length(errors) > 0) {
 
@@ -865,6 +1051,49 @@ abort_validation <- function(errors) {
     paste(c("Validation failed:", errors), collapse = "\n"),
     class = "horizons_validation_error"
   )
+
+}
+
+
+## ---------------------------------------------------------------------------
+## warn_validation() — Report accumulated validation warnings, non-fatally
+## ---------------------------------------------------------------------------
+
+#' Print accumulated validation warnings tree-style and warn
+#'
+#' @description
+#' The `stage = "raw"` counterpart to [abort_validation()]: the same
+#' tree-style report, in yellow rather than red, followed by a warning
+#' rather than an abort. Used for checks `validate_horizons_data()`
+#' downgrades before `average()` has had a chance to collapse replicate
+#' scans (duplicate or NA `sample_id`).
+#'
+#' @param warnings [Character.] One message per downgraded check.
+#'
+#' @return [NULL.] Invisibly. Warns with class
+#'   `horizons_validation_warning`; does not abort.
+#'
+#' @seealso [validate_horizons_data()], [abort_validation()]
+#' @noRd
+warn_validation <- function(warnings) {
+
+  cat(cli::col_yellow(cli::style_bold("! The horizons_data object has validation warnings:\n")))
+
+  for (i in seq_along(warnings)) {
+
+    branch <- if (i < length(warnings)) "\u251C\u2500" else "\u2514\u2500"
+    cat(cli::col_yellow(paste0("   ", branch, " ", warnings[i], "\n")))
+
+  }
+
+  cat("\n")
+
+  rlang::warn(
+    paste(c("Validation warnings:", warnings), collapse = "\n"),
+    class = "horizons_validation_warning"
+  )
+
+  invisible(NULL)
 
 }
 

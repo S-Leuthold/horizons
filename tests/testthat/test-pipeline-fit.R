@@ -56,7 +56,13 @@ make_fit_object <- function(n = 60, n_wn = 10, n_configs = 2, seed = 42,
       n_rows       = nrow(df),
       n_predictors = n_wn,
       n_covariates = 0L,
-      n_responses  = 1L
+      ## SOC carries role "outcome" below, not "response" — those are
+      ## distinct roles (n_responses counts role == "response", the sibling
+      ## responses add_response()/select_training() can carry alongside the
+      ## one outcome being modeled). evaluate()'s new entry-stage
+      ## validate_horizons_data() call (#24) is the first thing to actually
+      ## check this stored count against the role_map.
+      n_responses  = 0L
     ),
     provenance = list(
       spectra_source = "test",
@@ -158,6 +164,25 @@ describe("fit() - preflight validation", {
     expect_error(
       fit(obj, verbose = FALSE),
       class = "rlang_error"
+    )
+
+  })
+
+  it("refuses a column added after configure() with no role_map entry (#24)", {
+
+    ## validate_horizons_fit() (at return) certifies the models slot, not the
+    ## base data contract, so a column landing in $data$analysis after
+    ## configure() — by a later parse_ids(), or a direct assignment — used to
+    ## reach build_recipe()'s `outcome ~ .` as an unregistered predictor,
+    ## undetected. fit()'s entry-stage validate_horizons_data() call closes
+    ## that gap.
+
+    obj <- make_fit_object()
+    obj$data$analysis$stray_column <- seq_len(nrow(obj$data$analysis))
+
+    expect_error(
+      fit(obj, verbose = FALSE),
+      "[Mm]issing from.*role_map"
     )
 
   })
@@ -859,6 +884,11 @@ describe("fit() - scores on evaluate()'s split", {
 
     stale <- obj
     stale$data$analysis <- stale$data$analysis[-1, ]
+    ## Keep the stored row count honest so the only thing wrong with this
+    ## object is what the test means to exercise — the split no longer
+    ## indexing these rows — rather than also tripping fit()'s new
+    ## entry-stage validate_horizons_data() (#24) on a stale n_rows.
+    stale$data$n_rows <- nrow(stale$data$analysis)
 
     expect_error(
       fit(stale, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE,
@@ -1371,19 +1401,42 @@ describe("fit() - allow_par without a usable backend", {
 ## coverage does not transfer to a selected training set.
 
 ## A shape-complete stand-in for a real $selection, so this does not depend on
-## running select_training() (and survives a validator that checks the shape).
+## running select_training() (and survives a validator that checks the
+## shape). Column sets match validate_horizons_data()'s selection-record
+## check (R/class-core.R) and select_training()'s own construction
+## (R/pipeline-select-training.R) as of the 2026-09 design, not an earlier
+## draft of the schema.
 make_selection_stub <- function() {
 
   list(
     settings         = list(method = "neighbours", n_target = 10L),
-    membership       = tibble::tibble(sample_id = character(0),
-                                      group     = character(0)),
-    groups           = tibble::tibble(group = character(0), n = integer(0)),
-    pool_sizes       = tibble::tibble(group = character(0), n_pool = integer(0)),
-    target_distances = tibble::tibble(sample_id = character(0),
-                                      distance  = numeric(0)),
-    exclusions       = tibble::tibble(sample_id = character(0),
-                                      reason    = character(0))
+    membership       = tibble::tibble(target_id = character(0),
+                                      property  = character(0),
+                                      pool_id   = character(0),
+                                      distance  = numeric(0),
+                                      rank      = integer(0),
+                                      space     = character(0),
+                                      retained  = logical(0)),
+    groups           = tibble::tibble(group      = character(0),
+                                      n_targets  = integer(0),
+                                      n_rows     = integer(0),
+                                      target_ids = list(),
+                                      pool_ids   = list()),
+    pool_sizes       = tibble::tibble(property  = character(0),
+                                      available = integer(0),
+                                      drawn     = integer(0)),
+    target_distances = tibble::tibble(target_id = character(0),
+                                      property  = character(0),
+                                      nearest   = numeric(0),
+                                      mean_k    = numeric(0),
+                                      space     = character(0)),
+    exclusions       = tibble::tibble(property           = character(0),
+                                      target_id           = character(0),
+                                      pool_id              = character(0),
+                                      distance             = numeric(0),
+                                      rank                 = integer(0),
+                                      reference_distance   = numeric(0),
+                                      reason               = character(0))
   )
 
 }
@@ -1732,6 +1785,23 @@ describe("fit() - cold start from one configuration (#45)", {
     none$config$configs <- obj$config$configs[0, ]
 
     expect_error(fit(none, verbose = FALSE), "configure()", class = "horizons_input_error")
+
+  })
+
+  it("refuses a column added after configure() with no role_map entry on the cold-start path too (#24)", {
+
+    ## The entry-stage validate_horizons_data() call runs after cold_start_evaluation()
+    ## populates $evaluation (Step 0), on the configured-object path exactly as it
+    ## does on the horizons_eval path — a column with no role_map entry must not
+    ## reach build_recipe()'s outcome ~ . undetected just because there was no
+    ## evaluate() call to certify the object first.
+    stray <- obj
+    stray$data$analysis$stray_column <- seq_len(nrow(stray$data$analysis))
+
+    expect_error(
+      fit(stray, compute_uq = FALSE, compute_ad = FALSE, verbose = FALSE, seed = 42L),
+      "[Mm]issing from.*role_map"
+    )
 
   })
 

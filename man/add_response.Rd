@@ -66,6 +66,14 @@ several responses (\code{select_training()} puts every pool response on one
 object), and a row missing one of them may carry another. \code{evaluate()} and
 \code{fit()} drop the rows whose outcome is \code{NA} when they model it.
 
+An \code{NA} join key on the horizons side — left by \code{parse_ids(too_few = "na")}, say — is refused, not joined. \code{add_response()} validates the
+returned object at the structural validator's "full" stage, where an \code{NA}
+\code{sample_id} aborts the call (a duplicate one does too; see "Duplicate
+detection" below). Resolve it with \code{parse_ids()} before joining, or drop
+the row; \code{average()} (also full stage) refuses an \code{NA} grouping value for
+the same reason, so a chain that already ran \code{average()} cannot reach
+\code{add_response()} with one.
+
 \strong{Duplicate detection:}
 
 Aborts if duplicates exist in either the source join key (would multiply

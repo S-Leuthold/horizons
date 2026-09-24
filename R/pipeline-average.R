@@ -189,6 +189,20 @@ average <- function(x,
   on_all_outliers <- match.arg(on_all_outliers)
 
   ## -------------------------------------------------------------------------
+  ## Step 1b: Structural validation before the rebuild
+  ## -------------------------------------------------------------------------
+  ## Step 8 below rebuilds the averaged table from role_map's predictor,
+  ## meta and response columns; a column present in analysis but missing
+  ## from role_map is referenced by none of them and would be silently
+  ## dropped rather than carried through or refused. Catch it here, before
+  ## that happens (#24). Raw stage: replicate scans sharing a sample_id are
+  ## exactly the input average() exists to collapse — warn_ids = FALSE
+  ## because that duplicate was already warned about at spectra() or
+  ## parse_ids(), and average() collapsing it is not news.
+
+  x <- validate_horizons_data(x, stage = "raw", warn_ids = FALSE)
+
+  ## -------------------------------------------------------------------------
   ## Step 2: Identify column roles
   ## -------------------------------------------------------------------------
 
@@ -467,6 +481,12 @@ average <- function(x,
   )
 
   x$provenance$aggregation_by <- by
+
+  ## -------------------------------------------------------------------------
+  ## Step 10b: Re-validate
+  ## -------------------------------------------------------------------------
+
+  x <- validate_horizons_data(x)
 
   ## -------------------------------------------------------------------------
   ## Step 11: Emit warnings for all-outlier groups

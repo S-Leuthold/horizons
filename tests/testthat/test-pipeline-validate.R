@@ -40,8 +40,10 @@ make_configured_hd <- function(n_samples      = 100L,
   ## Build sample IDs
   sample_ids <- sprintf("S%03d", seq_len(n_samples))
 
-  ## Build predictor matrix (rnorm, varied)
-  wn_names <- as.character(seq(600, 600 + n_predictors - 1))
+  ## Build predictor matrix (rnorm, varied). Decreasing wavenumber order:
+  ## validate_horizons_data() (invariant I2) requires it, and validate() now
+  ## calls it at the end of every run.
+  wn_names <- as.character(seq(600 + n_predictors - 1, 600, by = -1))
   pred_mat <- matrix(stats::rnorm(n_samples * n_predictors, mean = 0.3, sd = 0.1),
                      nrow    = n_samples,
                      ncol    = n_predictors)
@@ -1585,6 +1587,35 @@ describe("validate() and the selection record", {
     expect_error(
       suppressWarnings(capture.output(validate(hd, remove_outliers = "spectral"))),
       class = "horizons_input_error"
+    )
+
+  })
+
+})
+
+
+## ===========================================================================
+## 9. Structural validation on return (#24)
+## ===========================================================================
+
+describe("validate() and the structural validator", {
+
+  test_that("validate() catches a corrupt input the verb itself never checks (#24)", {
+
+    ## Arrange — an increasing wavenumber axis. validate()'s own checks are
+    ## about sample counts, outcome health and outliers; none of them read or
+    ## enforce predictor order, so nothing here would ever catch this. The new
+    ## end-of-verb validate_horizons_data() call (#24) is what catches it.
+    hd <- make_configured_hd(n_samples = 20, n_predictors = 5)
+
+    pred_rows <- which(hd$data$role_map$role == "predictor")
+    hd$data$role_map[pred_rows, ] <- hd$data$role_map[rev(pred_rows), ]
+
+    ## Act & Assert ------------------------------------------------------------
+
+    expect_error(
+      capture.output(validate(hd)),
+      class = "horizons_validation_error"
     )
 
   })

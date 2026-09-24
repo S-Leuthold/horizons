@@ -36,6 +36,15 @@
 #' object), and a row missing one of them may carry another. `evaluate()` and
 #' `fit()` drop the rows whose outcome is `NA` when they model it.
 #'
+#' An `NA` join key on the horizons side — left by `parse_ids(too_few =
+#' "na")`, say — is refused, not joined. `add_response()` validates the
+#' returned object at the structural validator's "full" stage, where an `NA`
+#' `sample_id` aborts the call (a duplicate one does too; see "Duplicate
+#' detection" below). Resolve it with `parse_ids()` before joining, or drop
+#' the row; `average()` (also full stage) refuses an `NA` grouping value for
+#' the same reason, so a chain that already ran `average()` cannot reach
+#' `add_response()` with one.
+#'
 #' **Duplicate detection:**
 #'
 #' Aborts if duplicates exist in either the source join key (would multiply
@@ -515,6 +524,12 @@ add_response <- function(x,
     x$provenance$add_response <- c(x$provenance$add_response, list(prov_entry))
 
   }
+
+  ## ---------------------------------------------------------------------------
+  ## Step 5b: Re-validate
+  ## ---------------------------------------------------------------------------
+
+  x <- validate_horizons_data(x)
 
   ## ---------------------------------------------------------------------------
   ## Step 6: Progress output
