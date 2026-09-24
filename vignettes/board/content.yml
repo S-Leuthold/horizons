@@ -166,94 +166,94 @@ verbs:
     args:
       - name: x
         touch: Always; the object from spectra().
-        source: R/pipeline-standardize.R#L597
+        source: R/pipeline-standardize.R#L612
       - name: resample
         touch: Set it to match the library you will draw from or predict against, since the same resample and trim put both on the same columns; 2 matches OSSL at full resolution, and the experiments run at 4 with no loss for the local model. NULL keeps the data's own axis.
-        source: R/pipeline-standardize.R#L840
+        source: R/pipeline-standardize.R#L855
       - name: trim
         touch: Rarely, but keep it set when sources must share every column; 600 to 4000 is the MIR range the package and the KSSL library share, and with trim NULL each source keeps its own extent. Narrow it only when an instrument's ends are unreliable.
-        source: R/pipeline-standardize.R#L808
+        source: R/pipeline-standardize.R#L823
       - name: remove_water
         touch: Leave FALSE. Deleting columns leaves holes in the axis, a derivative later straddles them, and select_training() refuses a pool with a non-contiguous grid.
-        source: R/pipeline-standardize.R#L1030
+        source: R/pipeline-standardize.R#L1045
       - name: baseline
         touch: Only for spectra with a known baseline drift; with resampling it runs on the canonical grid, so every source's hull is pinned at the same bounds.
-        source: R/pipeline-standardize.R#L1017
+        source: R/pipeline-standardize.R#L1032
       - name: force
         touch: Never in a pipeline; it re-standardizes an already standardized object and warns that it is doing so.
-        source: R/pipeline-standardize.R#L694
+        source: R/pipeline-standardize.R#L709
     mechanics:
       - step: Validates every argument first and reports all failures together, as a horizons_input_error.
-        source: R/pipeline-standardize.R#L593
+        source: R/pipeline-standardize.R#L608
       - step: If the object already carries a standardization record, returns it unchanged with a warning unless `force = TRUE`.
-        source: R/pipeline-standardize.R#L683
+        source: R/pipeline-standardize.R#L698
       - step: Sorts the predictor columns into decreasing wavenumber order if they arrived otherwise. spectra() already sorts on construction (#24), so this is a no-op for objects built by it and only matters for a hand-built object. This runs on every path; names and values are untouched.
-        source: R/pipeline-standardize.R#L709
+        source: R/pipeline-standardize.R#L724
       - step: If nothing at all is requested, validates the object at stage = "raw" and writes the record so downstream verbs know the step was considered, keeping the grid an earlier call recorded. Beyond the sort, nothing changes.
-        source: R/pipeline-standardize.R#L730
+        source: R/pipeline-standardize.R#L745
       - step: Otherwise validates the object at stage = "raw" before the rebuild below, so a column present in analysis but missing from role_map is refused rather than silently dropped when Steps 7-9 rebuild the table from role_map's predictor and non-predictor columns (#24).
-        source: R/pipeline-standardize.R#L781
+        source: R/pipeline-standardize.R#L796
       - step: Pulls the predictor columns into a matrix and reads the wavenumbers off the column names.
-        source: R/pipeline-standardize.R#L793
+        source: R/pipeline-standardize.R#L808
       - step: Trims to the requested range by dropping columns outside it. When resampling follows, it keeps the nearest column beyond each bound as well, so a grid point on the bound is interpolated rather than extrapolated; scans starting at 599.74 get a 600 column that way. The count reported is the one inside the bounds.
-        source: R/pipeline-standardize.R#L810
+        source: R/pipeline-standardize.R#L825
       - step: Builds the canonical grid, every multiple of the resolution inside the trim bounds (inside the data's range when trim is NULL), rounded to six decimals. It depends on the arguments alone, so two sources standardized identically over the same trim share their columns; with trim NULL they share them where their ranges overlap.
-        source: R/pipeline-standardize.R#L859
+        source: R/pipeline-standardize.R#L874
       - step: Drops the grid points the data does not reach, with a warning that says how many and at which end; nothing is extrapolated.
-        source: R/pipeline-standardize.R#L866
+        source: R/pipeline-standardize.R#L881
       - step: Drops the grid points that fall in a gap of the input's own axis (a spacing over three times the median and over 30 cm⁻¹, select_training()'s rule), such as a band deleted upstream or by an earlier remove_water, with a warning naming the gaps; nothing is filled.
-        source: R/pipeline-standardize.R#L891
+        source: R/pipeline-standardize.R#L906
       - step: Leaves the values untouched when the axis already is the grid to within 1e-6 cm⁻¹, gaps apart, and says so on the console; otherwise resamples onto the grid by cubic spline through prospectr::resample(), one contiguous run of the data at a time. The points kept beyond the trim bounds go here.
-        source: R/pipeline-standardize.R#L932
+        source: R/pipeline-standardize.R#L947
       - step: Baseline-corrects next, if asked, with a convex hull through prospectr::baseline(), on the canonical grid when resampling (so every source's hull is pinned at the grid's bounds) or on the trimmed native axis when not, and before any water bands are removed, because the hull needs a continuous range.
-        source: R/pipeline-standardize.R#L1019
+        source: R/pipeline-standardize.R#L1034
       - step: Deletes the water bands last, if asked, by dropping columns in 1580 to 1720 and 3100 to 3700 cm⁻¹, after resampling so standardize()'s own interpolation never spans them.
-        source: R/pipeline-standardize.R#L1032
+        source: R/pipeline-standardize.R#L1047
       - step: Aborts if any value came out non-finite, rebuilds the analysis table and role map with the new wn_ columns, and lets set_analysis() recount the predictors.
-        source: R/pipeline-standardize.R#L1049
+        source: R/pipeline-standardize.R#L1064
       - step: Re-validates the whole object at stage = "raw" before returning it — replicate scans haven't reached average() yet, so a duplicate sample_id still only warns here (#24).
-        source: R/pipeline-standardize.R#L1120
+        source: R/pipeline-standardize.R#L1135
     records:
       - field: provenance$standardization
         text: the four settings as given, whether the spectra were re-interpolated (resampled) and the grid they sit on (grid, with min, max, step and n; NULL without resampling), the time, and, when any operation actually ran, the final wavelength count and range; the no-op path writes the record without those two
-        source: R/pipeline-standardize.R#L1098
+        source: R/pipeline-standardize.R#L1113
       - field: data$analysis, data$role_map
         text: rebuilt with the new predictor columns; every non-predictor column is carried through untouched
-        source: R/pipeline-standardize.R#L1072
+        source: R/pipeline-standardize.R#L1087
     refuses:
       - when: an argument is the wrong type or range
         does: aborts with every failure listed, class horizons_input_error
-        source: R/pipeline-standardize.R#L660
+        source: R/pipeline-standardize.R#L675
       - when: the object is already standardized and force is FALSE
         does: warns and returns it unchanged
-        source: R/pipeline-standardize.R#L683
+        source: R/pipeline-standardize.R#L698
       - when: an unregistered analysis column, or any other structural problem, is present before the rebuild (the non-no-op path validates at entry as well as on return, #24)
         does: aborts with the validator's findings, class horizons_validation_error
-        source: R/pipeline-standardize.R#L781
+        source: R/pipeline-standardize.R#L796
       - when: a duplicate or NA sample_id — normal before average() collapses replicate scans, and standardize() validates at stage = "raw" on every path, the no-op one included, for exactly this reason (#24)
         does: warns and continues, class horizons_validation_warning
-        source: R/pipeline-standardize.R#L1120
+        source: R/pipeline-standardize.R#L1135
       - when: the object fails validate_horizons_data() on anything else — a role_map that disagrees with the columns, a column with more than one role_map row, zero or more than one id role, an unknown role, more than one outcome, or a stored count that disagrees with the data
         does: aborts with the validator's findings, class horizons_validation_error
-        source: R/pipeline-standardize.R#L1120
+        source: R/pipeline-standardize.R#L1135
       - when: the trim range does not overlap the data, or water-band removal would delete every column, or fewer than two wavelengths remain to resample
         does: aborts
         source: R/pipeline-standardize.R#L231
       - when: the data does not reach part of the grid
         does: drops those grid points and warns, class horizons_standardize_warning
-        source: R/pipeline-standardize.R#L880
+        source: R/pipeline-standardize.R#L895
       - when: the input's axis has a gap, a band already deleted
         does: drops the grid points inside it and warns, class horizons_standardize_warning
-        source: R/pipeline-standardize.R#L906
+        source: R/pipeline-standardize.R#L921
       - when: no grid point falls inside the data
         does: aborts, class horizons_input_error
-        source: R/pipeline-standardize.R#L917
+        source: R/pipeline-standardize.R#L932
       - when: baseline correction fails, which happens on constant spectra
         does: aborts with the original error
-        source: R/pipeline-standardize.R#L377
+        source: R/pipeline-standardize.R#L378
       - when: any value is non-finite after the operations
         does: aborts with the count
-        source: R/pipeline-standardize.R#L1049
+        source: R/pipeline-standardize.R#L1064
     evidence:
       - claim: 4 cm⁻¹ loses nothing against 2 cm⁻¹ for the local model
         where: dev/experiments/2026-09-factorial/README.md#pivot-learner-held-to-pls-on-both-sides
@@ -362,28 +362,28 @@ verbs:
     args:
       - name: x
         touch: Always; the batch, standardized. Its grid is the reference the library is resampled onto.
-        source: R/pipeline-select-training.R#L242
+        source: R/pipeline-select-training.R#L251
       - name: pool
         touch: Always; a plain horizons_data with response columns, as it comes from standardize() and add_response(). The verb refuses one that has been validated, evaluated or fitted, or that is itself a prior selection; a merely configured pool is not caught, and its grid and outcome role ride along. To become the one routing argument, library, taking a registered name, a path, or an object.
-        source: R/pipeline-select-training.R#L919
+        source: R/pipeline-select-training.R#L940
       - name: k
         touch: The main lever. 100 is what every recent experiment ran; larger hurts on-library and the evidence off-library is mixed. A named vector sets it per property.
-        source: R/pipeline-select-training.R#L273
+        source: R/pipeline-select-training.R#L282
       - name: scope
         touch: Leave "batch" for one model on the union. "cluster" and "sample" return the same union but record groups for a caller's loop; "global" is the no-selection control.
-        source: R/pipeline-select-training.R#L635
+        source: R/pipeline-select-training.R#L656
       - name: properties
         touch: Name the properties you will model; every library response is drawn for by default, and each draw keeps k measured rows per target.
-        source: R/pipeline-select-training.R#L320
+        source: R/pipeline-select-training.R#L329
       - name: snv
         touch: Rarely; SNV in the similarity space only, never in the model.
-        source: R/pipeline-select-training.R#L463
+        source: R/pipeline-select-training.R#L484
       - name: derivative
         touch: Rarely; 0 turns the Savitzky-Golay filter off in the similarity space.
-        source: R/pipeline-select-training.R#L463
+        source: R/pipeline-select-training.R#L484
       - name: window
         touch: Rarely. The window is in grid points, so its physical width depends on the batch's resolution; the width in cm⁻¹ is recorded and printed.
-        source: R/pipeline-select-training.R#L493
+        source: R/pipeline-select-training.R#L514
       - name: poly
         touch: Rarely; must be at least the derivative order and smaller than the window.
         source: R/select-space.R#L101
@@ -392,7 +392,7 @@ verbs:
         source: R/select-space.R#L130
       - name: space
         touch: '"pls" for a response-driven space against one property; it selects rows using their own measured values, so pool-internal CV becomes optimistic and the verb says so.'
-        source: R/pipeline-select-training.R#L503
+        source: R/pipeline-select-training.R#L524
       - name: ncomp
         touch: Rarely; a proportion of variance for PCA (capped at 100 components) or an integer count, which PLS requires.
         source: R/select-space.R#L269
@@ -404,7 +404,7 @@ verbs:
         source: R/select-neighbours.R#L69
       - name: space_rows
         touch: Leave "all". Under Euclidean the two choices rank neighbours almost identically; the difference that appeared under Mahalanobis was the whitening, not the population.
-        source: R/pipeline-select-training.R#L475
+        source: R/pipeline-select-training.R#L496
       - name: clusters
         touch: scope = "cluster" only; NULL picks the count by silhouette over 2 to 10.
         source: R/select-neighbours.R#L697
@@ -419,17 +419,17 @@ verbs:
         source: R/select-neighbours.R#L54
       - name: seed
         touch: For the target clustering and the resemblance check's reference sample; the caller's RNG state is restored afterwards.
-        source: R/pipeline-select-training.R#L1136
+        source: R/pipeline-select-training.R#L1157
       - name: verbose
         touch: Set FALSE inside loops.
-        source: R/pipeline-select-training.R#L862
+        source: R/pipeline-select-training.R#L883
     mechanics:
       - step: Validates everything together; refuses a pool that carries validation, evaluation or fitted state, or that is itself a prior selection, because subsetting it would leave that state describing rows it no longer has.
-        source: R/pipeline-select-training.R#L919
+        source: R/pipeline-select-training.R#L940
       - step: Reconciles the axes. Either grid with a hole (a spacing over three times its median and over 30 cm⁻¹) stops the verb before anything interpolates; a pool that does not cover the targets' range stops it, except within half a pool spacing, where the column is clamped with a warning; finer targets warn. The pool is resampled onto the targets' grid through the same spline standardize() uses.
         source: R/select-reconcile.R#L181
       - step: Compares raw absorbance spread before SNV can hide it, warning when the interquartile ranges differ more than twofold, the size of a natural-log against base-10 mismatch.
-        source: R/pipeline-select-training.R#L991
+        source: R/pipeline-select-training.R#L1012
       - step: Builds the similarity space on every pool row, SNV then Savitzky-Golay derivative then optional mask then PCA to the variance target, drops components under the sdev floor, and projects the targets with the pool's loadings.
         source: R/select-space.R#L250
       - step: Per target and per property, finds the k nearest library rows that have the property measured, by the chosen metric, screening with the squared-norm identity and recomputing the kept distances directly so near-identical rows are ranked accurately.
@@ -437,48 +437,51 @@ verbs:
       - step: Flags twins, rows at distance zero or below twin_ratio times the 75th percentile of a fixed-width reference set, the target's 50 nearest measured rows, capped at a quarter of the measured rows on a small pool; drops them from the neighbourhood, fetches spares to reach k, and records each exclusion with its property. Under every scope but global the flagged rows are also subtracted from the union, since another target would otherwise draw them back in. Under global the same check runs, per property, in the same space and with the same width, and is reported, but the flagged rows stay in the return; its exclusions and target distances are the ones batch records with the same arguments, so a batch-versus-global comparison has to act on the record.
         source: R/select-neighbours.R#L526
       - step: Groups targets by scope, clustering them by k-means when asked, and builds one groups row per training set.
-        source: R/pipeline-select-training.R#L635
+        source: R/pipeline-select-training.R#L656
       - step: Subsets the reconciled pool to the union, adds .drawn_by and .min_distance as meta columns, plus .group under every scope but sample, and counts rows drawn against rows available per property. Both distance columns are NA under global, and .min_distance is NA when space_rows is "measured" with more than one property, because distances from different spaces have no shared scale.
-        source: R/pipeline-select-training.R#L740
+        source: R/pipeline-select-training.R#L761
       - step: Runs the resemblance check, naming targets whose nearest-library distance exceeds the 99th percentile of the library's own nearest-neighbour distances on a seeded sample of 2,000 rows; a warning, never a stop.
-        source: R/pipeline-select-training.R#L1129
+        source: R/pipeline-select-training.R#L1150
       - step: Writes the record, prints the report, and re-validates the object.
-        source: R/pipeline-select-training.R#L826
+        source: R/pipeline-select-training.R#L847
     records:
       - field: .drawn_by, .min_distance, .group
         text: the first two on every returned row, .group under every scope but sample; role meta, so recipes ignore them
-        source: R/pipeline-select-training.R#L770
+        source: R/pipeline-select-training.R#L791
       - field: selection$settings, selection$reconciliation, selection$pool
         text: every lever as resolved including the component count and the window width in cm⁻¹; the grids and the operation applied; the pool's row count and id hash
-        source: R/pipeline-select-training.R#L827
+        source: R/pipeline-select-training.R#L848
       - field: selection$membership, selection$groups, selection$pool_sizes
         text: one row per target, property and pool row with distance, rank, space and whether it was retained; one row per training set; drawn against available per property
-        source: R/pipeline-select-training.R#L845
+        source: R/pipeline-select-training.R#L866
       - field: selection$target_distances, selection$resemblance
         text: each target's nearest and mean-of-k distance, the applicability signal at selection time, and the targets beyond the library's spread
-        source: R/pipeline-select-training.R#L848
+        source: R/pipeline-select-training.R#L869
       - field: selection$exclusions, selection$n_excluded_union, selection$short_draws, selection$units, selection$clustering
         text: the twins by target and reason, how many left the union, draws that could not reach k, the unit comparison, and the clustering when scope is cluster
-        source: R/pipeline-select-training.R#L851
+        source: R/pipeline-select-training.R#L872
+      - field: provenance$standardization
+        text: when the pool was resampled, the pool's record rewritten to describe the returned axis (the targets' grid, the new count and range, resampled TRUE), its standardize() arguments kept since they produced the values, and the pool's record as it was, original grid included, kept under reconciliation (#90); a pool already on the targets' grid keeps its record unchanged
+        source: R/pipeline-select-training.R#L410
     refuses:
       - when: either input is not a horizons_data, the pool is promoted or already a selection, the pool has no responses, a property or a named k is missing, twin_ratio is not a single number in (0, 1), or pls is asked for with more than one property
         does: aborts with every failure listed, class horizons_input_error
-        source: R/pipeline-select-training.R#L367
+        source: R/pipeline-select-training.R#L376
       - when: either grid has a hole, or the pool does not cover the targets' range
         does: aborts before anything interpolates
         source: R/select-reconcile.R#L208
       - when: a property has no measured pool rows, or fewer than 2 under space_rows = "measured", under any scope
         does: aborts before the space is built, naming the property
-        source: R/pipeline-select-training.R#L429
+        source: R/pipeline-select-training.R#L450
       - when: a property has fewer measured pool rows than its k, under every scope but global, which caps k there
         does: aborts before any draw, naming the property and its count
         source: R/select-neighbours.R#L508
       - when: the twin subtraction leaves a property with no drawn rows, which a twin_ratio near 1 does, and so do targets that are themselves in the pool
         does: aborts naming the property and the cause, the ratio or the targets' own copies, class horizons_input_error
-        source: R/pipeline-select-training.R#L693
+        source: R/pipeline-select-training.R#L714
       - when: the pool and targets look like different photometric units, targets are finer than the pool, a target overshoots the pool by under half a spacing, a draw cannot reach k after twin exclusion, or targets sit beyond the pool's spread
         does: warns and proceeds
-        source: R/pipeline-select-training.R#L448
+        source: R/pipeline-select-training.R#L469
     evidence:
       - claim: on-library, the batch pool at k = 100 equals the global model and the residual correction takes it to the corrected-global number; off-library the pool beats global by a third
         where: dev/experiments/2026-09-factorial/README.md#same-afternoon-2026-09-22-the-library-ships-whole-and-the-correction-from-the-pool-fit
@@ -707,7 +710,7 @@ verbs:
         source: R/pipeline-configure.R#L436
       - when: rows were removed only as response outliers of a different outcome, or the training rows were drawn by select_training() for properties that exclude the outcome
         does: warns and continues; the rows stay as they are
-        source: R/pipeline-configure.R#L862
+        source: R/pipeline-configure.R#L864
       - when: the object fails validate_horizons_data() after the grid is stored
         does: aborts with the validator's findings, class horizons_validation_error
         source: R/pipeline-configure.R#L701
