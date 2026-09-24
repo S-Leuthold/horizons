@@ -934,7 +934,7 @@ read_checkpoint_file <- function(path) {
 
   if (inherits(row, "error")) {
 
-    return(list(row = NULL, error = conditionMessage(row)))
+    return(list(row = NULL, error = condition_summary(row)))
 
   }
 
@@ -1032,7 +1032,7 @@ read_checkpoint_store <- function(output_dir) {
       !"config_id" %in% names(legacy)) {
 
     unreadable[[legacy_file]] <- if (inherits(legacy, "error")) {
-      conditionMessage(legacy)
+      condition_summary(legacy)
     } else {
       "not a checkpoint table with a config_id"
     }

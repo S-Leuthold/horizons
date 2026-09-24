@@ -507,7 +507,7 @@ predict_ad <- function(workflow, ad_bundle, new_spectra, config_id = NULL) {
     bake_msg <- if (is.null(bake_safe$error)) {
       "The recipe returned nothing."
     } else {
-      conditionMessage(bake_safe$error)
+      condition_summary(bake_safe$error)
     }
 
     cli::cli_warn(c(
@@ -577,7 +577,7 @@ predict_ad <- function(workflow, ad_bundle, new_spectra, config_id = NULL) {
     ## Warned rather than dropped silently: the AD columns vanishing with no
     ## signal is the failure this replaces. Interpolated as a value, as the
     ## bake warning above is.
-    ad_msg <- conditionMessage(ad_safe$error)
+    ad_msg <- condition_summary(ad_safe$error)
 
     cli::cli_warn(c(
       "!" = paste0(ad_label, " could not be computed: the distance to the training centroid failed."),
