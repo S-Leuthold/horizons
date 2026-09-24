@@ -45,7 +45,10 @@ make_fit_object <- function(n = 60, n_wn = 10, n_configs = 2, seed = 42,
     covariates        = NA_character_
   )
 
-  ## Build horizons_data-like structure
+  ## Build horizons_data-like structure; downstream slots in the
+  ## constructor's shape
+  contract <- new_horizons_data()
+
   obj <- list(
     data = list(
       analysis     = df,
@@ -81,25 +84,10 @@ make_fit_object <- function(n = 60, n_wn = 10, n_configs = 2, seed = 42,
         removed        = FALSE
       )
     ),
-    evaluation = list(
-      results     = NULL,
-      best_config = NULL,
-      rank_metric = NULL,
-      backend     = NULL,
-      runtime     = NULL,
-      timestamp   = NULL
-    ),
-    models   = list(workflows      = NULL,
-                    n_models       = NULL,
-                    cv_predictions = NULL,
-                    results        = NULL,
-                    split          = NULL,
-                    row_index      = NULL,
-                    uq             = NULL,
-                    timestamp      = NULL,
-                    runtime_secs   = NULL),
-    ensemble  = list(stack = NULL),
-    artifacts = list(cache_dir = NULL)
+    evaluation = contract$evaluation,
+    models     = contract$models,
+    ensemble   = contract$ensemble,
+    artifacts  = list(cache_dir = NULL)
   )
 
   class(obj) <- c("horizons_data", "list")
@@ -208,6 +196,14 @@ describe("fit() - success path", {
 
   })
 
+  it("writes exactly the models keys new_horizons_data() declares (#71)", {
+
+    ## The constructor's empty slot is what configure() resets to, so it has
+    ## to name what fit() actually writes.
+    expect_identical(names(result$models), names(new_horizons_data()$models))
+
+  })
+
   it("records best_config as the top fitted config and the rank metric used", {
 
     ## best_config is the durable ranking fact predict() reads; it must be the
@@ -248,6 +244,47 @@ describe("fit() - success path", {
   it("models$runtime_secs is positive", {
 
     expect_true(result$models$runtime_secs > 0)
+
+  })
+
+  it("re-running evaluate() on it empties models and ensemble (#70)", {
+
+    ## compute_uq = FALSE above, so carry a bundle the way compute_uq = TRUE
+    ## leaves one; otherwise has_uq() is FALSE before and after
+    fitted <- result
+    fitted$models$uq <- stats::setNames(list(list(quantile_model = "a UQ bundle")),
+                                        names(fitted$models$workflows)[1])
+    fitted$ensemble$method <- "weighted"
+
+    expect_true(has_uq(fitted))
+
+    re <- suppressWarnings(evaluate(fitted, prune = FALSE, verbose = FALSE, seed = 42L))
+
+    blank <- new_horizons_data()
+
+    expect_identical(class(re), c("horizons_eval", "horizons_data", "list"))
+    expect_false(has_uq(re))
+    expect_identical(re$models,   blank$models)
+    expect_identical(re$ensemble, blank$ensemble)
+
+  })
+
+  it("re-running fit() on an ensemble empties the ensemble (#70)", {
+
+    ens <- suppressWarnings(
+      ensemble(result, method = "weighted", optimize = FALSE,
+               compute_uq = FALSE, verbose = FALSE)
+    )
+
+    ## Keep the re-fit cheap; the budget is not what is under test
+    ens$config$tuning$final_bayesian_iter <- 0L
+
+    refit <- suppressWarnings(
+      fit(ens, n_best = 1L, compute_uq = FALSE, verbose = FALSE, seed = 42L)
+    )
+
+    expect_identical(class(refit), c("horizons_fit", "horizons_eval", "horizons_data", "list"))
+    expect_identical(refit$ensemble, new_horizons_data()$ensemble)
 
   })
 

@@ -269,6 +269,85 @@ test_that("spectra() creates correct role_map structure", {
 
 
 ## ---------------------------------------------------------------------------
+## spectra() — The object contract (#71)
+## ---------------------------------------------------------------------------
+
+## spectra() used to build its object with a constructor of its own whose
+## models$uq stub was a non-empty list, so has_uq() answered TRUE on a raw
+## object. It now goes through new_horizons_data(), and the shape has to match
+## key for key, section by section.
+expect_contract_shape <- function(result) {
+
+  contract <- new_horizons_data()
+
+  expect_identical(names(result), names(contract))
+
+  for (section in names(contract)) {
+
+    expect_identical(names(result[[section]]), names(contract[[section]]),
+                     info = paste0("section ", section))
+
+  }
+
+  expect_null(result$selection)
+  expect_false(has_uq(result))
+  expect_identical(class(result), c("horizons_data", "list"))
+
+}
+
+test_that("spectra() from a tibble builds the new_horizons_data() shape", {
+
+  ## Arrange ---------------------------------------------------------------
+
+  test_data <- tibble::tibble(
+    Sample_ID = c("S001", "S002", "S003"),
+    site      = c("a", "b", "c"),
+    `4000`    = c(0.1, 0.2, 0.3),
+    `3000`    = c(0.2, 0.3, 0.4)
+  )
+
+  ## Act -------------------------------------------------------------------
+
+  result <- spectra(test_data)
+
+  ## Assert ----------------------------------------------------------------
+
+  expect_contract_shape(result)
+
+  expect_identical(result$data$n_responses, 0L)
+  expect_identical(result$config$tuning,
+                   list(grid_size = 10L, bayesian_iter = 15L, cv_folds = 5L))
+  expect_no_error(validate_horizons_data(result))
+
+})
+
+test_that("spectra() from a CSV builds the new_horizons_data() shape", {
+
+  ## Arrange ---------------------------------------------------------------
+
+  test_data <- tibble::tibble(
+    Sample_ID = c("S001", "S002"),
+    `4000`    = c(0.1, 0.2),
+    `3000`    = c(0.2, 0.3)
+  )
+
+  temp_csv <- tempfile(fileext = ".csv")
+  on.exit(unlink(temp_csv), add = TRUE)
+  readr::write_csv(test_data, temp_csv)
+
+  ## Act -------------------------------------------------------------------
+
+  result <- spectra(temp_csv)
+
+  ## Assert ----------------------------------------------------------------
+
+  expect_contract_shape(result)
+  expect_identical(result$provenance$spectra_source, temp_csv)
+
+})
+
+
+## ---------------------------------------------------------------------------
 ## spectra() — Validation and errors
 ## ---------------------------------------------------------------------------
 

@@ -888,27 +888,6 @@ predict.mock_workflow <- function(object, new_data, ...) {
 # Register the S3 method
 base::registerS3method("predict", "mock_workflow", predict.mock_workflow)
 
-#' Fit method for mock workflows in stacks tests
-#'
-#' @param object Mock workflow
-#' @param data Training data
-#'
-#' @return Fitted mock workflow (just returns itself)
-fit.mock_workflow <- function(object, data, ...) {
-  # Mock workflows don't need actual fitting
-  # Just return the workflow itself as if it were fitted
-  structure(
-    c(object, list(fitted = TRUE)),
-    class = class(object)
-  )
-}
-
-# Register the fit S3 method
-# TODO: Revisit S3 method registration - causing 'object fit not found' error
-# The mock workflow fit method is defined above but registerS3method fails
-# during helper loading. Consider alternative mocking approach.
-# base::registerS3method("fit", "mock_workflow", fit.mock_workflow)
-
 #' Mock XGBoost training for ensemble meta-learner tests
 #'
 #' Replaces xgboost::xgboost with a deterministic stub that records feature

@@ -29,10 +29,18 @@
 #'
 #' Can be called multiple times on the same object. Previous configuration
 #' is overwritten, any prior outcome role is reverted to "response", and
-#' everything a previous `evaluate()` or `fit()` earned is dropped: the
-#' results, the splits, the row index, the cached CV predictions, the
-#' predictor schema, the ensemble, and the `horizons_eval` or `horizons_fit`
-#' class itself. All of it is keyed to the outcome that is being replaced.
+#' everything a previous `evaluate()`, `fit()` or `ensemble()` earned is
+#' dropped: the `evaluation`, `models` and `ensemble` slots return to their
+#' empty state, and the `horizons_eval`, `horizons_fit` or
+#' `horizons_ensemble` class goes with them. All of it is keyed to the
+#' outcome that is being replaced. The validation verdict is cleared too,
+#' but the record of outliers `validate()` already removed is kept, since
+#' those rows stay removed, and so is a `select_training()` record, which
+#' describes the rows rather than the outcome. Because neither was chosen for
+#' the new outcome, `configure()` warns when rows were removed as response
+#' outliers of a different outcome, and when a `select_training()` record
+#' (other than `scope = "global"`) was drawn for properties that do not
+#' include it.
 #' This enables the `purrr::map()` multi-outcome pattern:
 #'
 #' ```
@@ -71,7 +79,9 @@
 #'   TRUE = power set of all covariate columns. Character vector = power set
 #'   of named covariates only. FALSE = exclude all covariates.
 #' @param cov_fusion `character(1) or NULL`. Covariate fusion strategy:
-#'   NULL (no covariates), `"early"`, or `"late"`.
+#'   NULL (no covariates) or `"early"`, which adds the covariates as
+#'   predictors beside the spectral features. Required when covariates are
+#'   present. `"late"` aborts: late fusion is designed but not built.
 #' @param cv_folds `integer`. Number of cross-validation folds. Default 5.
 #'   Minimum 2.
 #' @param grid_size `integer`. Hyperparameter grid size (Latin hypercube).
@@ -237,11 +247,36 @@ configure <- function(x,
 
   if (!is.null(cov_fusion)) {
 
-    if (!cov_fusion %in% c("early", "late")) {
+    if (!is.character(cov_fusion) || length(cov_fusion) != 1 || is.na(cov_fusion)) {
+
+      abort_nested(
+        "`cov_fusion` must be NULL or a single string",
+        c(paste0("Got: ", paste(deparse(cov_fusion), collapse = " ")),
+          "Use 'early'")
+      )
+
+    }
+
+    ## Late fusion is designed (two models per config, the second fitted to
+    ## the first's residuals) but not built; build_recipe() only fuses early.
+    ## Accepting "late" would run early fusion under the other name.
+
+    if (cov_fusion == "late") {
+
+      abort_nested(
+        "Late covariate fusion (`cov_fusion = 'late'`) is not built",
+        c("Only early fusion is implemented: covariates join the spectral features as predictors",
+          "Use `cov_fusion = 'early'`"),
+        error_class = c("horizons_configure_error", "horizons_input_error")
+      )
+
+    }
+
+    if (cov_fusion != "early") {
 
       abort_nested(
         paste0("Invalid `cov_fusion` value: '", cov_fusion, "'"),
-        c("Use 'early' or 'late'")
+        c("Use 'early'")
       )
 
     }
@@ -302,35 +337,14 @@ configure <- function(x,
 
     warning("Overwriting previous configuration", call. = FALSE)
 
-    ## Clear stale downstream state
-    x$validation$passed              <- NULL
-    x$validation$checks              <- NULL
-    x$validation$timestamp           <- NULL
-    x$validation$outliers$spectral_ids   <- NULL
-    x$validation$outliers$response_ids   <- NULL
-    x$validation$outliers$removed_ids    <- NULL
-    x$validation$outliers$removal_detail <- NULL
-    x$validation$outliers$removed        <- FALSE
-    x$evaluation$results      <- NULL
-    x$evaluation$best_config  <- NULL
-    x$evaluation$split        <- NULL
-    x$models$workflows        <- NULL
-    x$models$n_models         <- NULL
-    x$models$split            <- NULL
-    x$models$row_index        <- NULL
-    x$models$cv_predictions   <- NULL
-    x$models$predictor_schema <- NULL
-    x$ensemble$stack          <- NULL
-    x$ensemble$metrics        <- NULL
-    x$ensemble$method         <- NULL
-    x$ensemble$weights        <- NULL
-
     ## Promotion is earned, and reconfiguring un-earns it. The split, the row
     ## index and the cached predictions are all keyed to an outcome that is
     ## about to change, and the class is the claim that they are there, so
-    ## the object goes back to being a plain horizons_data.
+    ## the object goes back to being a plain horizons_data. The validation
+    ## verdict goes too; the record of rows already removed, and the
+    ## select_training() record, describe rows and are kept.
 
-    class(x) <- c("horizons_data", "list")
+    x <- reset_promotion(x)
 
   }
 
@@ -382,6 +396,15 @@ configure <- function(x,
 
   x <- set_analysis(x, x$data$analysis, role_map)
 
+  ## 2.4 Name what the rows carry from an earlier outcome ----------------------
+
+  ## Both describe rows, so both survive a re-configure; neither was chosen
+  ## with this outcome in mind. Warn rather than abort: the object is usable,
+  ## and starting again from an earlier object is the user's call.
+
+  warn_stale_removals(x, outcome_var)
+  warn_selection_properties(x, outcome_var)
+
   ## ---------------------------------------------------------------------------
   ## Step 3: Handle covariates
   ## ---------------------------------------------------------------------------
@@ -417,7 +440,7 @@ configure <- function(x,
       abort_nested(
         "Covariates detected but no fusion strategy specified",
         c(paste0("Covariates: ", paste(covariate_cols, collapse = ", ")),
-          "Use `cov_fusion = 'early'` or `cov_fusion = 'late'`")
+          "Use `cov_fusion = 'early'`")
       )
 
     }
@@ -630,6 +653,95 @@ generate_config_id <- function(model, preprocessing, transformation,
 
   hash <- substr(digest::digest(hash_input), 1, 6)
   paste(base, hash, sep = "_")
+
+}
+
+
+#' Warn when rows were removed as response outliers of another outcome
+#'
+#' @description
+#' `validate(remove_outliers = )` records, per removed row, the outcome whose
+#' Tukey fences flagged it. Those rows stay removed across a re-configure, so
+#' an outcome configured afterwards is modelled without rows that were judged
+#' against a different variable. Only `reason == "response"` rows count:
+#' spectral removals do not depend on the outcome, and a `"both"` row would
+#' have been removed as a spectral outlier anyway. Rows recorded before the
+#' `outcome` column existed cannot be attributed and are not counted either.
+#'
+#' @param x `horizons_data`. The object being configured.
+#' @param outcome_var `character(1)`. The outcome being configured.
+#'
+#' @return `NULL`, invisibly. Called for its warning.
+#' @noRd
+
+warn_stale_removals <- function(x, outcome_var) {
+
+  detail <- x$validation$outliers$removal_detail
+
+  if (is.null(detail) || !"outcome" %in% names(detail)) {
+
+    return(invisible(NULL))
+
+  }
+
+  stale <- detail$outcome[detail$reason %in% "response" &
+                          !is.na(detail$outcome) &
+                          detail$outcome != outcome_var]
+
+  if (length(stale) == 0) {
+
+    return(invisible(NULL))
+
+  }
+
+  counts <- table(stale)
+
+  warning(paste0(
+    length(stale), " row(s) were removed by validate() as response outliers of ",
+    paste0("'", names(counts), "' (", as.integer(counts), ")", collapse = ", "),
+    " and stay removed while modelling '", outcome_var, "'. ",
+    "Start from the object before validate() to model them."
+  ), call. = FALSE)
+
+  invisible(NULL)
+
+}
+
+
+#' Warn when the training rows were drawn for other properties
+#'
+#' @description
+#' `select_training()` draws each target's `k` nearest pool rows per
+#' property, among the rows that have that property measured. An outcome
+#' outside `settings$properties` inherits rows drawn for something else, so
+#' the per-target guarantee does not hold for it. `scope = "global"` draws
+#' the whole pool, so there is no guarantee to lose.
+#'
+#' @param x `horizons_data`. The object being configured.
+#' @param outcome_var `character(1)`. The outcome being configured.
+#'
+#' @return `NULL`, invisibly. Called for its warning.
+#' @noRd
+
+warn_selection_properties <- function(x, outcome_var) {
+
+  settings <- x$selection$settings
+
+  if (is.null(settings$properties) || identical(settings$scope, "global") ||
+      outcome_var %in% settings$properties) {
+
+    return(invisible(NULL))
+
+  }
+
+  warning(paste0(
+    "The training rows were drawn by select_training() for ",
+    paste0("'", settings$properties, "'", collapse = ", "), "; '",
+    outcome_var, "' is not one of them, so each target's k nearest rows ",
+    "were not drawn for it."
+  ), call. = FALSE)
+
+  invisible(NULL)
 
 }
 
