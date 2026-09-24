@@ -20,7 +20,7 @@
   RPD 3.82). `configure()`'s docs gain a "Choosing models for large spectral
   libraries" section covering n x p limits across `MODEL_SPECS`.
 
-* **`configure()` gains `sg_window` and `pca_threshold`** (#62): the Savitzky-Golay window, in grid points, and the share of variance `feature_selection = "pca"` keeps. Each is set once per object and applies to every configuration, so neither enters the config id; both are recorded in `config$recipe`. The defaults, 9 and 0.995, are the values the recipe already ran, so a call that does not set them builds the same recipes as before. `sg_window` must be odd and at least 5, because the second-derivative methods fit a cubic; it trims `(sg_window - 1) / 2` columns from each end for every preprocessing method, `raw` and `snv` included. The polynomial order is still fixed by the method, and for `"sg"` it is 1, which makes that smoother a moving average: a wider window is a wider boxcar, not a peak-preserving filter. `pca_threshold` must be in (0, 1]. `evaluate()`, its parallel workers and `fit()` read the settings from the object, and an object configured by an earlier version runs the defaults. Because the window counts grid points and `standardize()` can still change the axis after `configure()`, the window's width in cm-1 is not stored with the setting: `configure()` prints it for the axis it sees, and `evaluate()` records the settings it ran with in `evaluation$recipe`, with `sg_window_cm` measured on the axis the recipe ran on (the median spacing of the predictor wavenumbers, since the grid step in the provenance can describe another axis), so the runs of an `sg_window` sweep can be told apart. `evaluate()` also refuses, before any config runs, a window that is not narrower than the spectrum, naming both numbers and the width; it used to fail every config inside tune without naming the window. `step_transform_spectra()` now refuses an even window, or one under 5, when the step is built, and at `prep()` a window as wide as the spectrum, which prospectr refuses at bake time. `build_recipe()`, `evaluate_single_config()` and `fit_single_config()` take the two settings as arguments with the same defaults.
+* **`configure()` gains `sg_window` and `pca_threshold`** (#62): the Savitzky-Golay window, in grid points, and the share of variance `feature_selection = "pca"` keeps. Each is set once per object and applies to every configuration, so neither enters the config id; both are recorded in `config$recipe`. The defaults, 9 and 0.995, are the values the recipe already ran, so a call that does not set them builds the same recipes as before. `sg_window` must be odd and at least 5, because the second-derivative methods fit a cubic; it trims `(sg_window - 1) / 2` columns from each end for every preprocessing method, `raw` and `snv` included. The polynomial order is still fixed by the method, and for `"sg"` it is 1, which makes that smoother a moving average: a wider window is a wider boxcar, not a peak-preserving filter. `pca_threshold` must be in (0, 1]. `evaluate()`, its parallel workers and `fit()` read the settings from the object, and an object configured by an earlier version runs the defaults. Because the window counts grid points and `standardize()` can still change the axis after `configure()`, the window's width in cm-1 is not stored with the setting: `configure()` prints it for the axis it sees, and `evaluate()` records the settings it ran with in `evaluation$recipe`, with `sg_window_cm` measured on the axis the recipe ran on (the median spacing of the predictor wavenumbers, since the grid step in the provenance can describe another axis), so the runs of an `sg_window` sweep can be told apart. `evaluate()` also refuses, before any config runs, a window that is not narrower than the spectrum, naming both numbers and the width; it used to fail every config inside tune without naming the window. `step_transform_spectra()` now refuses an even window, or one under 5, when the step is built, and at `prep()` a window as wide as the spectrum, which prospectr refuses at bake time. Neither enters the config id, so both are part of the tuning settings `evaluate()` records on every checkpoint row (#42): a rerun into the same `output_dir` with another window or threshold refuses to resume, naming the setting, and rows written before the two were recorded resume as unverified. `build_recipe()`, `evaluate_single_config()` and `fit_single_config()` take the two settings as arguments with the same defaults.
 
 ## Performance
 
@@ -194,6 +194,38 @@
 * `magrittr` is no longer a dependency; the package uses the base pipe (`|>`)
   throughout. `%>%` was imported but never exported, so nothing user-facing
   changes.
+
+* **At `bayesian_iter = 0` no configuration is labelled "pruned" (#38).**
+  The prune gate decides whether to skip Bayesian refinement, and with no
+  Bayesian stage there is nothing to skip, so `evaluate_single_config()`
+  now labels a configuration below `prune_threshold` a success. "pruned"
+  keeps its meaning, Bayesian refinement skipped. The gate's reading is
+  recorded apart from the label, on every row, as `below_prune_threshold`
+  (with the `prune_threshold` it was taken against) whenever `prune =
+  TRUE`, whatever `bayesian_iter` is. For `configure(bayesian_iter = 0)`
+  this changes three things:
+
+  - Below-threshold configurations now enter the ranking with the rest,
+    where they used to be only a fallback, so `fit()` can fill `n_best`
+    with them. When every member it fits fell below the threshold, `fit()`
+    warns with class `horizons_below_threshold_warning`, naming the
+    threshold and each member's cross-validated RPD. The same warning
+    covers the pruned fallback at `bayesian_iter > 0`, where it also
+    carries `horizons_pruned_fallback_warning`.
+  - `best_config` can change. A below-threshold configuration was excluded
+    whenever another succeeded; ranked on RPD it rarely wins, since its RPD
+    is below the bar the others cleared, but ranked on `rmse`, `rsq` or
+    another metric it can.
+  - Rows checkpointed at `bayesian_iter = 0` under the old code still say
+    "pruned". `evaluate()` relabels them as successes, with
+    `below_prune_threshold = TRUE`, once checkpointed and new rows are
+    combined, so a resumed run ranks the same pool a fresh run does.
+
+  The exported `evaluate_single_config()`'s default `prune_threshold` drops
+  from 100 to 1.0, matching `evaluate()`. `evaluate()` always passed its
+  own value, so pipeline results do not move because of it, but a direct
+  call that relied on the default now prunes only configurations no better
+  than the mean.
 
 * **`configure(cov_fusion = "late")` now aborts**, whether or not the object has covariates (#69). The condition carries both `horizons_configure_error`, like every other `configure()` argument check, and `horizons_input_error`. Late fusion is designed but was never built: `build_recipe()` only fuses early, so `"late"` was validated, stored and printed, and then ran early fusion bit for bit. Use `"early"`. `cov_fusion` must also be `NULL` or a single string; a vector was not rejected cleanly before.
 
@@ -527,6 +559,71 @@ consequences; the review itself is in
 
 * **`configure()` no longer records method defaults the recipe does not run** (#62). It wrote `config$defaults`, a Savitzky-Golay window of 11 and order of 2, a PCA threshold of 0.99 and a `correlation_n` of 200, and gave every configuration three list-columns, `preprocessing_params`, `feature_params` and `transform_params`. Nothing read any of them. The recipe ran a window of 9, an order set by the preprocessing method, a threshold of 0.995, and a correlation step that has no `n` at all. The record and the columns are gone: `config$configs` has six columns, and `config$recipe` holds the settings that do run (see `configure(sg_window, pca_threshold)` under New features). Re-configuring an object saved by an earlier version drops its `config$defaults`.
 
+* `evaluate()` keeps one checkpoint store, a file per config under
+  `checkpoints/` (#42). The whole-table `eval_checkpoint.rds` was written by
+  the sequential path only and read first on resume, so the parallel path
+  left it stale and it shadowed the per-config files: repairing or
+  re-running one config's file changed nothing. It is no longer written. An
+  existing one is read only for configs with no per-config file; those rows
+  are copied into `checkpoints/`, with a message that the legacy file can
+  then be deleted. Every row from either store now passes the same gates in
+  the same order: the training-data fingerprint and the tuning settings
+  (below), where a mismatch aborts, then the scoring schema, where an older
+  row is dropped and re-evaluated. A per-config row with an older schema and
+  different data used to be skipped silently while the same row in the
+  single file aborted; both now abort. A checkpoint file that cannot be used
+  now warns, naming it, where it used to be skipped silently (per-config) or
+  abort `evaluate()` with a bare read error (single file). A file in
+  `checkpoints/` counts only for the config its name says: a leftover
+  `file*.rds` temp file from an interrupted write, which sorted ahead of
+  most model prefixes and shadowed the config's real file, is reported
+  instead. Checkpoints and the manifest are written under a `.rds.tmp` name
+  and renamed into place, so no reader sees a half-written file.
+  `monitor_evaluate()` reads through the same helpers and gates rows against
+  the fingerprint and settings in `eval_manifest.rds`, so it no longer
+  counts or ranks a row `evaluate()` would reject (every `.rds` file used to
+  count as complete); it shows what it ignored and which files it could not
+  use, and returns them as `ignored` and `unreadable`. It picks its best so
+  far by `evaluate()`'s candidate rule, including the `bayesian_iter = 0`
+  relabel of resumed "pruned" rows (#38), so the two name the same config.
+  In watch mode it re-reads the manifest on every poll, where it used to
+  read it once and, after a re-run with other settings, report nothing
+  complete for good.
+  Reading and gating the store is linear in the number of files: about
+  1.5 s for 16,000 files, down from about 6 s. Checkpoint refusals are
+  reported from `evaluate()` rather than from an internal helper.
+
+* `evaluate()` fingerprints the values on the training rows and the tuning
+  settings, and refuses to resume checkpoints that differ in either (#42).
+  The training-data fingerprint covered the sample ids and the outcome name
+  only, so re-standardized spectra on the same samples (the #64 grid change
+  does exactly this), an outcome rescaled under the same name, or another
+  `cv_folds`, `grid_size`, `bayesian_iter`, `prune`, `prune_threshold` or
+  `seed` resumed stale results, silently. Rows now carry `data_fields` (the
+  outcome, the sample ids, the role-map rows with the roles that reach a
+  row's contents, `id`, `outcome`, `predictor` and `covariate`, and the
+  outcome, predictor and covariate values in id order) and `settings`,
+  list-columns that are also in `evaluation$results`, compared field by
+  field on resume. A sibling `response` or a `meta` column never reaches the
+  model, so `add_response()` of another property between two runs still
+  resumes, while a predictor changing role refuses. An abort names what
+  differs: "was computed for outcome clay; this run models SOC" rather than
+  two hashes, "different predictor values for the same samples", or each
+  setting with both values; a data abort also names any settings that
+  differ, since a changed `seed` moves the split. Keep one `output_dir` per
+  outcome. Hashing the predictor values costs about 0.3 s
+  at 17,788 x 1,701, once per run; the parallel worker is sent both records
+  rather than recomputing them. `prune_threshold` is recorded only when
+  `prune = TRUE`, since it is never read otherwise. The ranking `metric` is
+  not recorded: every row carries all six cross-validated metrics and the
+  ranking is recomputed each run, so changing it still resumes. Rows
+  written before this version carry neither record; they resume, counted
+  in the existing once-per-run warning about unverifiable checkpoints. A
+  field or setting added later makes older rows unverified in the same way
+  rather than refused. `eval_manifest.rds` is schema 4, adding
+  `data_fields` and `settings`, and the parallel worker payload gains
+  `data_fp` and `settings`, stamped on each row as sent.
+
 * **Re-running `configure()` on an object that has been through `ensemble()` no longer aborts** (#70). Reconfiguring cleared a hand-kept list of keys that missed `ensemble$model`, and `set_analysis()` counts a non-NULL `ensemble$model` as promotion, so it refused the object. The same list let `models$uq`, `models$ad`, `models$results` and most of `evaluation` survive the demotion, which left `has_uq()` answering `TRUE` on a plain `horizons_data` whenever the fit had calibrated UQ. Reconfiguring now resets the `evaluation`, `models` and `ensemble` slots whole to the constructor's shape, through an internal `reset_promotion()` that sits beside the promotion check so the two stay in step. The list also erased the record of outliers `validate(remove_outliers = TRUE)` had removed, although those rows stayed removed; that record is now kept, and only the verdict and the flagged ids are cleared. A `select_training()` record is kept, as before.
 
 * **`spectra()` now builds its object with the class constructor, `new_horizons_data()`** (#71), rather than a second constructor of its own that had drifted from the contract. A raw object had no `data$n_responses` or `selection` key, carried `models` and `ensemble` stubs that predated the current contract, and its `models$uq` stub was a non-empty list, so `has_uq()` answered `TRUE` before anything was fitted. The constructor itself now declares the `models` keys `fit()` writes (`ad` and `selection_present` were missing) and the `evaluation` keys `evaluate()` writes (it declared `backend` and `runtime`, which nothing writes). `summary()` read `evaluation$runtime`, so its evaluation runtime line never printed; it reads `runtime_secs` now. The tuning defaults on a raw object are integers (`10L`, `15L`, `5L`) rather than doubles. An object saved by an earlier version keeps its old shape until its downstream slots are rewritten: by `configure()` when it runs on an object that already has a grid (not by the first `configure()`), or by `evaluate()` and `fit()`, which now reset the slots after their own.
@@ -679,6 +776,62 @@ consequences; the review itself is in
   to re-resolve, so re-prepping it aborts with a `horizons_input_error` that
   says to rebuild the recipe, rather than with a misleading window-size or
   zero-column message.
+
+* `fit()` now accepts the evaluations `evaluate()` accepts (#38). When no
+  configuration succeeded, `evaluate()` takes `best_config` from the pruned
+  configurations that carry a cross-validated value of the ranking metric,
+  but `fit()` kept successes only and refused the object with "No
+  successful configurations". Both verbs now draw their candidates from one
+  rule, and `fit()` warns, with class `horizons_pruned_fallback_warning`,
+  when the members it fits are pruned configurations, since none passed the
+  prune gate. The warning also carries `horizons_below_threshold_warning`,
+  described under Breaking / behavioural.
+
+* When every configuration fails, `evaluate()` aborts with a classed
+  condition, `horizons_all_configs_failed`, that names the errors and
+  carries the results table (#41). The abort gave only the counts of failed
+  and pruned configurations, and its hint ("Check evaluation$results")
+  could not be followed, because `evaluate()` aborts before it assigns
+  `x$evaluation`. The message now lists the first three distinct error
+  messages, each with the configurations that raised it, and counts the
+  rest. The per-configuration results, `error_message` included, are on the
+  condition as `results`, so a loop over subsets can catch the class and
+  keep them (`?evaluate` shows the pattern), and after an uncaught abort
+  `rlang::last_error()$results` recovers them without re-running. The
+  message also names any configurations loaded from checkpoints in
+  `output_dir`, since calling `evaluate()` again resumes those rather than
+  re-running them, and says which files to delete: `checkpoints/<id>.rds`,
+  and a legacy `eval_checkpoint.rds` only when a resumed row came from it
+  (#42). The same condition now
+  covers configurations that succeeded with no cross-validated value of the
+  ranking metric (rows checkpointed before the `cv_*` columns existed),
+  which `rank_configs_by_cv()` refused unclassed and without the results;
+  `fit()` refuses such an object with `horizons_input_error`.
+
+* `fit()` aborts with class `horizons_all_members_failed` when every member
+  it re-tunes fails, listing the distinct error messages and carrying the
+  per-member results as `results`. It used to carry on to the object
+  validator, which refused the empty workflows slot with a structural
+  message ("workflows must be a non-empty named list") that said nothing
+  about why. `models$results` gains an `error_message` column, which it had
+  dropped.
+
+* `predict()` warns, with class `horizons_ad_warning`, when a
+  configuration's applicability-domain distance cannot be computed, naming
+  the configuration and the cause, and returns the point predictions
+  without `.ad_distance` and `.ad_flag`. Those columns used to vanish with
+  no signal. A configuration without an AD bundle is still silent. The
+  other AD warnings (a failed bake, spectra that baked to NA) now name the
+  configuration too, so `config = "all"` says which model lost its AD.
+
+* `ensemble()` and `predict()` on a `horizons_ensemble` no longer compute
+  each member's applicability domain. The member helpers keep only `.pred`,
+  so every member's AD was baked, scored and dropped: a wasted bake per
+  member, and AD warnings about columns the ensemble never returns.
+
+* `evaluate()` and `fit()` name the outcome column when the analysis table
+  lacks it, aborting with class `horizons_input_error`. The shared row rule
+  read the absent column as empty and reported "All outcome values are NA".
 
 # horizons 0.9.0
 

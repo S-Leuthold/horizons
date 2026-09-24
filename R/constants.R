@@ -234,6 +234,8 @@ SHARED_ARG_NAMES <- c(
   "seed",
   "sg_window",
   "pca_threshold",
+  "data_fp",
+  "settings",
   "checkpoint_dir",
   "pkg_version"
 )
