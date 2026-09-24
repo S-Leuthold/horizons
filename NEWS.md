@@ -619,6 +619,54 @@ consequences; the review itself is in
   says to rebuild the recipe, rather than with a misleading window-size or
   zero-column message.
 
+* `fit()` now accepts the evaluations `evaluate()` accepts (#38). When no
+  configuration succeeded, `evaluate()` takes `best_config` from the pruned
+  configurations that carry a cross-validated value of the ranking metric,
+  but `fit()` kept successes only and refused the object with "No
+  successful configurations". Both verbs now draw their candidates from one
+  rule, and `fit()` warns, with class `horizons_pruned_fallback_warning`,
+  when the members it fits are pruned configurations, since none passed the
+  prune gate.
+
+* `evaluate_single_config()` no longer labels a configuration "pruned" when
+  `bayesian_iter` is 0 (#38). The prune gate decides whether to skip
+  Bayesian optimization, and with no Bayesian stage there is nothing to
+  skip, so the configuration is a success. Under `configure(bayesian_iter =
+  0)`, `evaluation$results` therefore has no pruned rows, and configurations
+  below `prune_threshold` enter the ranking with the rest instead of only as
+  a fallback. The function's own `prune_threshold` default is now 1.0, as in
+  `evaluate()`; it was 100, but `evaluate()` always passes its value, so no
+  pipeline result moves because of it.
+
+* When every configuration fails, `evaluate()` aborts with a classed
+  condition, `horizons_all_configs_failed`, that names the errors and
+  carries the results table (#41). The abort gave only the counts of failed
+  and pruned configurations, and its hint ("Check evaluation$results")
+  could not be followed, because `evaluate()` aborts before it assigns
+  `x$evaluation`. The message now lists the first three distinct error
+  messages, each with the configurations that raised it, and counts the
+  rest. The per-configuration results, `error_message` included, are on the
+  condition as `results`, so a loop over subsets can catch the class and
+  keep them; `?evaluate` shows the pattern.
+
+* `fit()` aborts with class `horizons_all_members_failed` when every member
+  it re-tunes fails, listing the distinct error messages and carrying the
+  per-member results as `results`. It used to carry on to the object
+  validator, which refused the empty workflows slot with a structural
+  message ("workflows must be a non-empty named list") that said nothing
+  about why. `models$results` gains an `error_message` column, which it had
+  dropped.
+
+* `predict()` warns, with class `horizons_ad_warning`, when a
+  configuration's applicability-domain distance cannot be computed, naming
+  the configuration and the cause, and returns the point predictions
+  without `.ad_distance` and `.ad_flag`. Those columns used to vanish with
+  no signal. A configuration without an AD bundle is still silent.
+
+* `evaluate()` and `fit()` name the outcome column when the analysis table
+  lacks it, aborting with class `horizons_input_error`. The shared row rule
+  read the absent column as empty and reported "All outcome values are NA".
+
 # horizons 0.9.0
 
 ## Major Changes
