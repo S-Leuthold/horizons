@@ -207,14 +207,17 @@ EVAL_WORKER_PAYLOAD_LIMIT <- 1 * 1024^3
 SELECT_PCA_MAX_COMP <- 100L
 
 # select_training(): a pool row is a target's twin when its distance to that
-# target is below this fraction of the median distance across the target's k
-# neighbours. An exact match (distance 0) is always a twin. The rule is
+# target is below this fraction of the reference distance, the 75th
+# percentile of the target's nearest twin_reference_width() measured rows
+# (SELECT_TWIN_REF below, capped at a quarter of the measured rows), the same
+# under every scope. An exact match (distance 0) is always a twin. The rule is
 # neighbourhood-relative rather than first-to-second-nearest so that a pool
 # holding two or three replicate scans of the same sample is caught: with a
 # gap rule every replicate distance is tiny, the gap never opens, and nothing
 # is flagged (2026-09-21 review, leakage critical 1). PLACEHOLDER: the spec
-# says to set this on the KSSL replicate scans; until that is done the value
-# is conservative and catches only near-exact copies.
+# says to set this on the KSSL replicate scans. The value was carried over
+# from the median-of-k rule this one replaced and has been calibrated against
+# neither, so its reach is unmeasured.
 SELECT_TWIN_RATIO <- 0.05
 
 # select_training(): columns of the distance matrix that define the twin
@@ -227,8 +230,9 @@ SELECT_TWIN_RATIO <- 0.05
 # a caller would ask for (2026-09-21 re-review, leakage). The reference also
 # has to stay local: the twin threshold is a fraction of it, so a reference
 # taken over most of the pool is a pool-wide spread and 5 % of that flags
-# ordinary nearest neighbours. draw_neighbours() therefore caps it at a
-# quarter of the measured rows, which binds only on pools under 200.
+# ordinary nearest neighbours. twin_reference_width() therefore caps it at a
+# quarter of the measured rows, which binds only on pools under 200, and every
+# scope, global included, takes its width from there.
 SELECT_TWIN_REF <- 50L
 
 # select_training(): components whose standard deviation falls below this
