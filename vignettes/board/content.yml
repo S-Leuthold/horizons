@@ -370,13 +370,13 @@ verbs:
         source: R/pipeline-select-training.R#L475
       - name: clusters
         touch: scope = "cluster" only; NULL picks the count by silhouette over 2 to 10.
-        source: R/select-neighbours.R#L671
+        source: R/select-neighbours.R#L697
       - name: cluster_min
         touch: scope = "cluster" only; clusters under this size are merged into the nearest, and a batch that cannot form two falls back to one group.
-        source: R/select-neighbours.R#L737
+        source: R/select-neighbours.R#L763
       - name: twin_ratio
         touch: Leave it until it is calibrated on the KSSL replicate scans; 0.05 was carried over from an earlier rule with a different reference distance.
-        source: R/select-neighbours.R#L197
+        source: R/select-neighbours.R#L198
       - name: chunk_size
         touch: Only to trade memory for speed; the target-by-library distance matrix is computed in chunks of this many targets.
         source: R/select-neighbours.R#L54
@@ -396,9 +396,9 @@ verbs:
       - step: Builds the similarity space on every pool row, SNV then Savitzky-Golay derivative then optional mask then PCA to the variance target, drops components under the sdev floor, and projects the targets with the pool's loadings.
         source: R/select-space.R#L250
       - step: Per target and per property, finds the k nearest library rows that have the property measured, by the chosen metric, screening with the squared-norm identity and recomputing the kept distances directly so near-identical rows are ranked accurately.
-        source: R/select-neighbours.R#L461
+        source: R/select-neighbours.R#L487
       - step: Flags twins, rows at distance zero or below twin_ratio times the 75th percentile of a fixed-width reference set, the target's 50 nearest measured rows, capped at a quarter of the measured rows on a small pool; drops them from the neighbourhood, fetches spares to reach k, and records each exclusion with its property. Under every scope but global the flagged rows are also subtracted from the union, since another target would otherwise draw them back in. Under global the same check runs, per property, in the same space and with the same width, and is reported, but the flagged rows stay in the return; its exclusions and target distances are the ones batch records with the same arguments, so a batch-versus-global comparison has to act on the record.
-        source: R/select-neighbours.R#L500
+        source: R/select-neighbours.R#L526
       - step: Groups targets by scope, clustering them by k-means when asked, and builds one groups row per training set.
         source: R/pipeline-select-training.R#L635
       - step: Subsets the reconciled pool to the union, adds .drawn_by and .min_distance as meta columns, plus .group under every scope but sample, and counts rows drawn against rows available per property. Both distance columns are NA under global, and .min_distance is NA when space_rows is "measured" with more than one property, because distances from different spaces have no shared scale.
@@ -435,7 +435,7 @@ verbs:
         source: R/pipeline-select-training.R#L429
       - when: a property has fewer measured pool rows than its k, under every scope but global, which caps k there
         does: aborts before any draw, naming the property and its count
-        source: R/select-neighbours.R#L482
+        source: R/select-neighbours.R#L508
       - when: the twin subtraction leaves a property with no drawn rows, which a twin_ratio near 1 does, and so do targets that are themselves in the pool
         does: aborts naming the property and the cause, the ratio or the targets' own copies, class horizons_input_error
         source: R/pipeline-select-training.R#L693

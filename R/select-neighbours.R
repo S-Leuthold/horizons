@@ -189,7 +189,8 @@ nearest_neighbours <- function(St, Sp, k,
 #'   over. `NULL` uses every column. Default: `NULL`.
 #'
 #' @return [Tibble.] `target_id`, `pool_id`, `distance`, `rank`,
-#'   `reference_distance`, `reason` (`"exact"` or `"neighbourhood"`); zero
+#'   `reference_distance`, `reason` (`"exact"` for a distance of zero to
+#'   rounding, see `is_exact_copy()`, or `"neighbourhood"`); zero
 #'   rows when there are no twins.
 #'
 #' @seealso [nearest_neighbours()], [twin_reference()], [draw_neighbours()]
@@ -304,6 +305,31 @@ twin_flags <- function(d, reference, ratio = SELECT_TWIN_RATIO) {
 }
 
 
+#' Is a twin the target's own copy? Zero distance, to rounding
+#'
+#' @description
+#' The same spectrum reaching the similarity space by two paths, once as a
+#' pool row and once projected as a target, lands at about 1e-16 rather
+#' than exactly 0, so an exact test would call most real copies
+#' neighbourhood twins. A distance at or below `sqrt(.Machine$double.eps)`
+#' times the target's reference distance is a copy: no `twin_ratio` could
+#' unflag it. The one rule for the exclusion record's `reason` and for
+#' `select_training()`'s error when copies empty a draw.
+#'
+#' @param distance [Numeric.] Distances to the target.
+#' @param reference [Numeric.] The target's reference distance, recycled.
+#'
+#' @return [Logical.] Same length as `distance`; `NA` in is `FALSE` out.
+#' @noRd
+is_exact_copy <- function(distance, reference) {
+
+  exact <- (distance == 0) | (distance <= sqrt(.Machine$double.eps) * reference)
+  exact[is.na(exact)] <- FALSE
+  exact
+
+}
+
+
 #' The twin table, built the one way, so every producer matches
 #' @noRd
 twin_tibble <- function(target_id, pool_id, distance, rank, reference) {
@@ -314,7 +340,7 @@ twin_tibble <- function(target_id, pool_id, distance, rank, reference) {
     distance           = distance,
     rank               = rank,
     reference_distance = reference,
-    reason             = ifelse(distance == 0, "exact", "neighbourhood")
+    reason             = ifelse(is_exact_copy(distance, reference), "exact", "neighbourhood")
   )
 
 }

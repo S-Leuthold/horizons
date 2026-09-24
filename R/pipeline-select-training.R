@@ -700,12 +700,12 @@ select_training <- function(x, pool,
     if (length(emptied)) {
 
       ### Whether a lower twin_ratio would bring the rows back. It cannot when
-      ### every drawn row is some target's own copy: its distance is zero,
-      ### or zero to rounding, which the same spectrum reaching the space by
-      ### two paths gives (about 1e-16 here), and that is below any ratio.
+      ### every drawn row is some target's own copy, at distance zero to
+      ### rounding, below any ratio. is_exact_copy() is the rule, the same
+      ### one that writes "exact" into the record's reason column.
 
       ex     <- draw$exclusions
-      copies <- ex$pool_id[ex$distance <= sqrt(.Machine$double.eps) * ex$reference_distance]
+      copies <- ex$pool_id[is_exact_copy(ex$distance, ex$reference_distance)]
       drawn  <- unique(membership$pool_id[membership$property %in% emptied])
 
       cause <- if (all(drawn %in% copies)) {

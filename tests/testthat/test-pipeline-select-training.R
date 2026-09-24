@@ -674,23 +674,71 @@ test_that("a draw the twin subtraction empties stops with the property and the c
 })
 
 
+#' Pool rows as targets, on the pool's own grid, ids prefixed "T"; every row
+#' unless `rows` picks some
+#' @noRd
+pool_as_targets <- function(fx, rows = NULL) {
+
+  pa <- fx$pool$data$analysis
+  if (!is.null(rows)) pa <- pa[rows, ]
+  tg <- pa[, c("sample_id", grep("^wn_", names(pa), value = TRUE))]
+  tg$sample_id <- paste0("T", tg$sample_id)
+
+  utils::capture.output(targets <- spectra(tg))
+  targets
+
+}
+
+
 test_that("a draw emptied by the targets' own copies says so, not twin_ratio", {
 
   ## Targets that are the pool's own rows: every row a target draws is
   ## another target's copy, at distance zero to rounding, and no twin_ratio
   ## brings it back.
 
-  fx <- make_select_fixture(n_pool = 60, seed = 3)
-  pa <- fx$pool$data$analysis
-  tg <- pa[, c("sample_id", grep("^wn_", names(pa), value = TRUE))]
-  tg$sample_id <- paste0("T", tg$sample_id)
-  utils::capture.output(targets <- spectra(tg))
+  fx      <- make_select_fixture(n_pool = 60, seed = 3)
+  targets <- pool_as_targets(fx)
 
   err <- expect_error(select_training(targets, fx$pool, k = 1, properties = "clay", verbose = FALSE),
                       regexp = "Every row drawn for clay was flagged", class = "horizons_input_error")
 
   expect_match(conditionMessage(err), "targets are in the pool")
   expect_no_match(conditionMessage(err), "lower it")
+
+})
+
+
+test_that("a target's own copy is recorded as exact, at distance zero to rounding", {
+
+  ## The same spectrum reaches the space as a pool row and as a projected
+  ## target. With the whole pool as targets the projection repeats the fit
+  ## and the copies land at exactly 0; with a subset the matrix product
+  ## rounds differently and they land near 1e-16, which the record called
+  ## "neighbourhood" while the emptied-draw error treated them as copies.
+  ## Whether a subset rounds to 0 depends on the BLAS, so the test asserts
+  ## the outcome, not the distance. On the replicate fixture's first eight
+  ## rows seven copies land above 0 on the reference box.
+
+  fx <- make_select_fixture(n_pool = 60, seed = 3, n_replicates = 3)
+
+  for (rows in list(NULL, 1:8)) {
+
+    targets <- pool_as_targets(fx, rows)
+    n_t     <- targets$data$n_rows
+
+    ex <- select_training(targets, fx$pool, k = 1, properties = "clay", scope = "global",
+                          verbose = FALSE)$selection$exclusions
+
+    own <- ex$pool_id == sub("^T", "", ex$target_id)
+
+    ## Every target's copy is flagged and recorded exact
+    expect_identical(sum(own), n_t)
+    expect_true(all(ex$reason[own] == "exact"))
+
+    ## And nothing that is not a copy is called exact
+    expect_true(all(ex$reason[!own] == "neighbourhood"))
+
+  }
 
 })
 

@@ -309,6 +309,33 @@ test_that("find_twins() does not flag an NA distance", {
 
 
 ## =============================================================================
+## is_exact_copy()
+## =============================================================================
+
+test_that("is_exact_copy() is zero distance to rounding, relative to the reference", {
+
+  ## Zero, and the ~1e-16 a copy reaching the space by two paths lands at
+  expect_true(is_exact_copy(0, 4))
+  expect_true(is_exact_copy(1e-16, 4))
+
+  ## A replicate scan is close but is not a copy
+  expect_false(is_exact_copy(5e-3, 4))
+  expect_false(is_exact_copy(1e-6, 4))
+
+  ## The tolerance scales with the reference, and a zero reference leaves
+  ## only an exact zero
+  expect_true(is_exact_copy(1e-10, 1e3))
+  expect_false(is_exact_copy(1e-10, 1e-3))
+  expect_true(is_exact_copy(0, 0))
+  expect_false(is_exact_copy(1e-16, 0))
+
+  ## Unknown is not a copy; the reference recycles
+  expect_identical(is_exact_copy(c(NA, 0, 1), 4), c(FALSE, TRUE, FALSE))
+
+})
+
+
+## =============================================================================
 ## twin_reference_width()
 ## =============================================================================
 
