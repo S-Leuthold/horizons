@@ -1071,13 +1071,18 @@ cold_start_evaluation <- function(x, metric, seed, call = rlang::caller_env()) {
   ## fit() builds its recipe from the same settings.
   recipe_record <- evaluation_recipe(x, call = call)
 
-  ## The draw evaluate() makes, and the response trim it applies (#77): a
-  ## trim validate() requested runs on this split's training partition by
-  ## the same helper, so a cold start leaves out the rows evaluate() would.
-  drawn <- draw_eval_split(modelled$data, outcome_col, seed,
-                           trim   = response_trim_request(x, outcome_col, call = call),
-                           id_col = id_column(role_map))
-  split <- drawn$split
+  ## The response trim evaluate() applies after the same draw (#77): a trim
+  ## validate() requested runs on this split's training partition by the
+  ## same helper, so a cold start leaves out the rows evaluate() would. The
+  ## request is read first, as evaluate() reads it, so one that cannot apply
+  ## is refused before anything is drawn.
+  trim_request <- response_trim_request(x, outcome_col, call = call)
+
+  drawn <- draw_eval_split(modelled$data, outcome_col, seed)
+
+  trimmed <- trim_training_responses(drawn$split, outcome_col, trim_request,
+                                     id_col = id_column(role_map))
+  split   <- trimmed$split
 
   ## The shape of an evaluate() results row (create_failed_result()'s
   ## columns less scoring_schema, since nothing was scored), all unmeasured
@@ -1105,7 +1110,7 @@ cold_start_evaluation <- function(x, metric, seed, call = rlang::caller_env()) {
       split        = split,
       n_train      = nrow(rsample::training(split)),
       n_test       = nrow(rsample::testing(split)),
-      response_trim = drawn$trim,
+      response_trim = trimmed$record,
       recipe       = recipe_record,
       runtime_secs = 0,
       timestamp    = Sys.time()

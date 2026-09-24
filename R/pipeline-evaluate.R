@@ -318,18 +318,21 @@ evaluate <- function(x,
   ## outcomes dropped already; the helper's own pass over it then drops
   ## nothing and returns it uncopied, so the split shares its rows.
   ##
-  ## A response trim validate() requested is applied inside the same helper
-  ## (#77): the split is drawn on the untrimmed rows, the fences come from
-  ## the training partition's labels alone, and only training rows outside
-  ## them leave, before the folds below are drawn. The trim draws nothing
-  ## from the RNG, so the folds follow the same stream they always did.
+  ## A response trim validate() requested (#77) is read first, so a request
+  ## that cannot apply is refused before anything is drawn, and applied to
+  ## the split as drawn: the fences come from the training partition's labels
+  ## alone, and only training rows outside them leave, before the folds below
+  ## are drawn. fit()'s cold start makes the same call after the same draw.
+  ## The trim draws nothing from the RNG, so the folds follow the stream they
+  ## always did; without a request the split is the draw.
 
   trim_request <- response_trim_request(x, outcome_col)
 
-  drawn <- draw_eval_split(analysis, outcome_col, seed,
-                           trim   = trim_request,
-                           id_col = id_column(role_map))
-  split <- drawn$split
+  drawn <- draw_eval_split(analysis, outcome_col, seed)
+
+  trimmed <- trim_training_responses(drawn$split, outcome_col, trim_request,
+                                     id_col = id_column(role_map))
+  split   <- trimmed$split
 
   ## Rows an earlier version removed on whole-table fences are gone before
   ## any split; say so, since the test metrics are conditional on it.
@@ -491,7 +494,7 @@ evaluate <- function(x,
 
     cat(paste0("\u2502  Split: ", n_train, " train / ", n_test, " test (",
                round(100 * SPLIT_PROP), "/", round(100 * (1 - SPLIT_PROP)), ", stratified)\n"))
-    render_response_trim(drawn$trim, legacy_removed)
+    render_response_trim(trimmed$record, legacy_removed)
     cat(paste0("\u2502  Tuning: ", cv_folds, "-fold CV, grid = ",
                tuning$grid_size, ", bayesian = ",
                tuning$bayesian_iter, "\n"))
@@ -878,7 +881,7 @@ evaluate <- function(x,
     n_test       = n_test,
     ## What the trim did, so fit() drops the same training rows rather than
     ## recomputing fences on another set; NULL when none was requested.
-    response_trim = drawn$trim,
+    response_trim = trimmed$record,
     workers      = plan_workers,
     parallelize_over = axis$axis,
     ## What every config's recipe ran with, the window's width included, so
@@ -2221,30 +2224,19 @@ outcome_complete_rows <- function(analysis, outcome_col) {
 #' It seeds the global RNG, as `evaluate()` always has: `evaluate()`'s CV
 #' folds are drawn from the state it leaves.
 #'
-#' When `validate()` requested a response trim, it is applied here, after
-#' the draw, by [trim_training_responses()], so `evaluate()` and the cold
-#' start cannot apply different rules (#77). The trim draws nothing from the
-#' RNG, and without a request the split is exactly the draw.
-#'
 #' @param analysis Data frame. The object's analysis table. Rows whose
 #'   outcome is `NA` are dropped here; a table the callers have already
 #'   filtered for their sample-size gate passes through uncopied.
 #' @param outcome_col Character. Name of the outcome column.
 #' @param seed Integer. The seed passed to `evaluate()` (or to `fit()` on a
 #'   cold start).
-#' @param trim The request from [response_trim_request()], or `NULL` for no
-#'   trim. Default `NULL`.
-#' @param id_col Character. The identifier column the trimmed rows are
-#'   recorded by. Default `"sample_id"`.
-#' @return List with `split` (the `rsplit`, less any trimmed training rows),
-#'   `n_dropped` (integer, the rows whose outcome is `NA`), `stratified`
-#'   (`FALSE` when the stratified draw failed and the split is unstratified)
-#'   and `trim` (the record from [trim_training_responses()], or `NULL`
-#'   without a request). Aborts as [outcome_complete_rows()] does.
+#' @return List with `split` (the `rsplit`), `n_dropped` (integer, the rows
+#'   whose outcome is `NA`) and `stratified` (`FALSE` when the stratified
+#'   draw failed and the split is unstratified). Aborts as
+#'   [outcome_complete_rows()] does.
 #' @keywords internal
 #' @noRd
-draw_eval_split <- function(analysis, outcome_col, seed, trim = NULL,
-                            id_col = "sample_id") {
+draw_eval_split <- function(analysis, outcome_col, seed) {
 
   modelled   <- outcome_complete_rows(analysis, outcome_col)
   stratified <- TRUE
@@ -2262,18 +2254,7 @@ draw_eval_split <- function(analysis, outcome_col, seed, trim = NULL,
     }
   )
 
-  trim_record <- NULL
-
-  if (!is.null(trim)) {
-
-    trimmed     <- trim_training_responses(split, outcome_col, trim, id_col)
-    split       <- trimmed$split
-    trim_record <- trimmed$record
-
-  }
-
-  list(split = split, n_dropped = modelled$n_dropped, stratified = stratified,
-       trim = trim_record)
+  list(split = split, n_dropped = modelled$n_dropped, stratified = stratified)
 
 }
 
@@ -2361,6 +2342,9 @@ response_trim_request <- function(x, outcome_col, call = rlang::caller_env()) {
 #' outcome values alone and removes the training rows outside them. Test
 #' rows are never removed and their labels are never read, so changing a
 #' test row's outcome cannot change which training rows are trimmed.
+#' `evaluate()` and `fit()`'s cold start call it on the split
+#' [draw_eval_split()] returns, so the two apply one rule; given no request
+#' it returns the split as drawn. It draws nothing from the RNG.
 #'
 #' The trimmed rows are dropped from the split's data, and the training
 #' indices renumbered, rather than left in the data outside both parts:
@@ -2374,12 +2358,13 @@ response_trim_request <- function(x, outcome_col, call = rlang::caller_env()) {
 #' IQR), nothing is trimmed and a warning with class
 #' `horizons_response_trim_warning` says so; the record carries the reason.
 #'
-#' @param split The `rsplit` from the draw.
+#' @param split The `rsplit` from [draw_eval_split()].
 #' @param outcome_col Character. The outcome column.
-#' @param trim The request from [response_trim_request()].
+#' @param trim The request from [response_trim_request()], or `NULL` for none.
 #' @param id_col Character. The identifier column the trimmed rows are
 #'   recorded by.
-#' @return List with `split` (the trimmed split) and `record`, a list of
+#' @return List with `split` (the trimmed split; `split` itself when `trim`
+#'   is `NULL`) and `record`: `NULL` when `trim` is, otherwise a list of
 #'   `outcome`, `method`, `threshold`, `fences_from` (`"training"`), `lower`
 #'   and `upper` (the fences, `NA` when skipped), `n_training` (the training
 #'   rows the fences were computed over), `trimmed_ids` (character) and
@@ -2387,6 +2372,8 @@ response_trim_request <- function(x, outcome_col, call = rlang::caller_env()) {
 #' @keywords internal
 #' @noRd
 trim_training_responses <- function(split, outcome_col, trim, id_col) {
+
+  if (is.null(trim)) return(list(split = split, record = NULL))
 
   train_pos <- split$in_id
   values    <- split$data[[outcome_col]][train_pos]

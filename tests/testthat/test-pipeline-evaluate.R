@@ -466,7 +466,8 @@ describe("draw_eval_split()", {
     expect_identical(ev$evaluation$split$data, drawn$split$data)
 
     ## No trim was requested, so none is applied or recorded (#77)
-    expect_null(drawn$trim)
+    expect_identical(trim_training_responses(drawn$split, "SOC", NULL, "sample_id"),
+                     list(split = drawn$split, record = NULL))
     expect_true("response_trim" %in% names(ev$evaluation))
     expect_null(ev$evaluation$response_trim)
 
