@@ -1697,7 +1697,10 @@ describe("fit() - cold start from one configuration (#45)", {
     )
 
     expect_identical(seen, list(sg_window = 7L, pca_threshold = 0.9))
-    expect_identical(cold_start_evaluation(tuned, NULL, 42L)$evaluation$recipe,
+    ## The helper draws the split, and rsample warns about thin quantiles
+    record <- suppressWarnings(cold_start_evaluation(tuned, NULL, 42L))
+
+    expect_identical(record$evaluation$recipe,
                      list(sg_window = 7L, sg_window_cm = 14, pca_threshold = 0.9))
 
   })
