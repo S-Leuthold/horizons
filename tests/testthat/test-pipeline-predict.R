@@ -1206,17 +1206,20 @@ describe("warn_interval_failure() - config naming and brace-safety", {
 ## point predictions alone would still succeed (glmnet needs no extra
 ## namespace), and only the interval half would fail.
 ##
-## Only meaningful against an installed build. Under devtools::test(), this
-## file is itself load_all()'d into the parent session, and pkgload::load_all()
-## in the callr child (the natural way to run the CURRENT dev tree there) turns
-## out to eagerly load workflows/ranger/tune/xgboost/butcher as part of
-## simulating the installed package — even with the #65 fix reverted, so a
-## load_all() child cannot independently re-trigger the missing-namespace
-## defect (confirmed directly while writing this test). Rather than ship a
-## branch that always passes without testing anything, this test skips under
-## load_all() (skip_if_dev_package(), from helper-load-all.R, shared with
-## test-evaluate-parallel.R) and runs only against a genuinely installed
-## build: R CMD check, or devtools::test() after devtools::install().
+## Only meaningful against an installed build — pkgload::load_all() (the
+## natural way to run the CURRENT dev tree in a callr child) turns out to
+## eagerly load workflows/ranger/tune/xgboost/butcher as part of simulating
+## the installed package, even with the #65 fix reverted, so a load_all()
+## child cannot independently re-trigger the missing-namespace defect
+## (confirmed directly while writing this test, by trying exactly that).
+## devtools::test() always load_all()s first, with no way to opt out — "run
+## devtools::test() after devtools::install()" does NOT avoid this, since
+## devtools::test() ignores what happens to be installed and load_all()s
+## regardless. So rather than ship a branch that always passes without
+## testing anything, this test skips under load_all() (skip_if_dev_package(),
+## from helper-load-all.R, shared with test-evaluate-parallel.R) and runs
+## only where the package is genuinely just installed and not load_all()'d:
+## R CMD check, or testthat::test_local(load_package = "installed").
 
 describe("predict.horizons_fit() - fresh-process round trip", {
 
