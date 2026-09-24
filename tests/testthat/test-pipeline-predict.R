@@ -422,8 +422,16 @@ describe("predict.horizons_fit() - response bound guardrail", {
 
     p <- suppressWarnings(predict(clamped_fixture, new_df))
 
+    clamped <- p_raw$.pred > bound
+    expect_true(any(clamped))
+
     expect_true(all(p$.pred <= bound))
     expect_true(any(p$.pred_upper > bound))
+
+    ## The intervals are built around the unclamped point, so the clamp
+    ## leaves both bounds exactly where they were on the rows it touched.
+    expect_equal(p$.pred_upper[clamped], p_raw$.pred_upper[clamped])
+    expect_equal(p$.pred_lower[clamped], p_raw$.pred_lower[clamped])
 
   })
 

@@ -534,6 +534,13 @@ consequences; the review itself is in
   console tree as `evaluate()` does, and the check that `evaluation$split`
   was drawn from the modelled rows (above) applies the same rule.
 
+* Single-model prediction intervals no longer move with the response-bound
+  clamp. `predict()` winsorized the point prediction before building the
+  conformal interval around it, so on a clamped row both bounds dropped by
+  the overshoot, contrary to the documented contract that interval bounds are
+  never clamped, and unlike the ensemble path. The interval is now built
+  around the unclamped prediction and only `.pred` is winsorized.
+
 * `models$response_bound` is now taken over the rows the final models are fit
   on, as its documentation said (#68). It was the maximum outcome over the
   whole analysis table, so Split F's test rows and the calibration rows
