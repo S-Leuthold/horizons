@@ -467,6 +467,44 @@ describe("predict.horizons_ensemble() - aborts on a failing member", {
 })
 
 ## =========================================================================
+## Members' applicability domain is not computed
+## =========================================================================
+## The member helpers keep only .pred, so a member's AD was baked, scored and
+## dropped: wasted work, and AD warnings about columns the ensemble never
+## returns. A member AD bundle that no longer matches the member's features
+## makes the distance fail, which is what would warn if it were computed.
+
+describe("ensemble() and predict.horizons_ensemble() - member AD", {
+
+  it("raises no AD warning from a broken member AD bundle", {
+
+    broken <- fitted
+    member <- names(broken$models$workflows)[1]
+
+    broken$models$ad <- stats::setNames(list(list(
+      centroid      = c(wn_0 = 0),
+      cov_matrix    = matrix(1, dimnames = list("wn_0", "wn_0")),
+      ad_thresholds = c(q25 = 1, q50 = 2, q75 = 3, ood = 4)
+    )), member)
+
+    expect_no_warning(
+      ens <- keep_only_warning(
+        ensemble(broken, method = "weighted", optimize = FALSE, verbose = FALSE),
+        "horizons_ad_warning"
+      ),
+      class = "horizons_ad_warning"
+    )
+
+    expect_no_warning(
+      keep_only_warning(predict(ens, test_set, interval = FALSE), "horizons_ad_warning"),
+      class = "horizons_ad_warning"
+    )
+
+  })
+
+})
+
+## =========================================================================
 ## predict.horizons_ensemble() — preflight
 ## =========================================================================
 

@@ -328,3 +328,40 @@ test_that("predict_ad warns with the cause and returns NULL when the distance fa
   expect_null(ad)
 
 })
+
+test_that("every predict_ad warning names the config when it is given", {
+
+  fx     <- ad_fitted_workflow()
+  bundle <- fit_ad(fx$workflow, calib_data = fx$data)
+
+  skip_if(is.null(bundle), "AD bundle could not be fit on the tiny fixture")
+
+  ad_warnings <- function(workflow, ad_bundle, new_df) {
+    testthat::capture_warnings(
+      predict_ad(workflow, ad_bundle, new_df, config_id = "cfg_ad")
+    )
+  }
+
+  new_df     <- ad_new_spectra(fx$wn, n = 5)
+  one_bad    <- new_df;  one_bad[3, fx$wn] <- NA_real_
+  all_bad    <- new_df;  all_bad[, fx$wn]  <- NA_real_
+  bad_bundle <- bundle;  bad_bundle$centroid <- bad_bundle$centroid[-1]
+
+  cases <- list(
+    bake     = ad_warnings(list(), bundle, new_df),
+    one_na   = ad_warnings(fx$workflow, bundle, one_bad),
+    all_na   = ad_warnings(fx$workflow, bundle, all_bad),
+    distance = ad_warnings(fx$workflow, bad_bundle, new_df)
+  )
+
+  for (case in names(cases)) {
+
+    ad_lines <- grep("Applicability domain", cases[[case]], value = TRUE)
+
+    expect_length(ad_lines, 1)
+    expect_match(ad_lines, "Applicability domain for config \"cfg_ad\"",
+                 fixed = TRUE, info = case)
+
+  }
+
+})

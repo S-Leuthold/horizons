@@ -457,8 +457,7 @@ fit_ad <- function(fitted_workflow,
 #'   (`centroid`, `cov_matrix`, `ad_thresholds`).
 #' @param new_spectra Tibble from `resolve_new_data()` (sample_id + predictors).
 #' @param config_id Character(1) or `NULL`. The config the bundle belongs to,
-#'   named in the warning when the distance cannot be computed. `NULL`
-#'   (default) omits it.
+#'   named in every warning. `NULL` (default) omits it.
 #'
 #' @return Tibble with `.ad_distance` (numeric, squared) and `.ad_flag`
 #'   (factor Q1-Q4/OOD), one row per sample — `NA` in both columns for rows
@@ -476,6 +475,14 @@ predict_ad <- function(workflow, ad_bundle, new_spectra, config_id = NULL) {
 
     return(NULL)
 
+  }
+
+  ## Every warning below names the config when it is known, so a multi-config
+  ## predict says which model lost its AD. The id enters as a value.
+  ad_label <- if (is.null(config_id)) {
+    "Applicability domain"
+  } else {
+    "Applicability domain for config {.val {config_id}}"
   }
 
   ## Bake new_data through the SAME recipe the model was fit with ---------------
@@ -504,7 +511,7 @@ predict_ad <- function(workflow, ad_bundle, new_spectra, config_id = NULL) {
     }
 
     cli::cli_warn(c(
-      "!" = "Applicability domain could not be computed: baking {.arg new_data} through the fitted recipe failed.",
+      "!" = paste0(ad_label, " could not be computed: baking {.arg new_data} through the fitted recipe failed."),
       "x" = "{bake_msg}",
       "i" = "This is a bug or a schema mismatch between {.arg new_data} and the training axis, not a property of one sample.",
       "i" = "No AD columns are returned, so out-of-domain abstention cannot be applied to this batch."
@@ -527,7 +534,7 @@ predict_ad <- function(workflow, ad_bundle, new_spectra, config_id = NULL) {
   if (all(bad_rows)) {
 
     cli::cli_warn(c(
-      "!" = "Applicability domain is unavailable for all {nrow(new_matrix)} sample{?s}: every spectrum baked to NA.",
+      "!" = paste0(ad_label, " is unavailable for all {nrow(new_matrix)} sample{?s}: every spectrum baked to NA."),
       "i" = "See the {.fn step_transform_spectra} warning above for the cause."
     ), class = "horizons_ad_warning")
 
@@ -538,7 +545,7 @@ predict_ad <- function(workflow, ad_bundle, new_spectra, config_id = NULL) {
   if (any(bad_rows)) {
 
     cli::cli_warn(c(
-      "!" = "Applicability domain is NA for {sum(bad_rows)} of {nrow(new_matrix)} sample{?s} whose spectra baked to NA.",
+      "!" = paste0(ad_label, " is NA for {sum(bad_rows)} of {nrow(new_matrix)} sample{?s} whose spectra baked to NA."),
       "i" = "The remaining samples are scored normally; the NA rows are neither binned nor abstained on."
     ), class = "horizons_ad_warning")
 
@@ -572,14 +579,8 @@ predict_ad <- function(workflow, ad_bundle, new_spectra, config_id = NULL) {
     ## bake warning above is.
     ad_msg <- conditionMessage(ad_safe$error)
 
-    header <- if (is.null(config_id)) {
-      "Applicability domain could not be computed: the distance to the training centroid failed."
-    } else {
-      "Applicability domain could not be computed for config {.val {config_id}}: the distance to the training centroid failed."
-    }
-
     cli::cli_warn(c(
-      "!" = header,
+      "!" = paste0(ad_label, " could not be computed: the distance to the training centroid failed."),
       "x" = "{ad_msg}",
       "i" = "Point predictions are returned without {.field .ad_distance} and {.field .ad_flag}, so out-of-domain abstention cannot be applied to this batch."
     ), class = "horizons_ad_warning")
