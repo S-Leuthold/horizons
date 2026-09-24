@@ -118,7 +118,7 @@ EXPECTED_FIT_RESULT_COLS <- c(
   "config_id", "status", "degraded", "degraded_reason",
   "rmse", "rrmse", "rsq", "ccc", "rpd", "mae",
   "cv_rmse_mean", "cv_rmse_se", "cv_rpd_mean", "cv_rpd_se",
-  "best_params", "runtime_secs"
+  "best_params", "error_message", "runtime_secs"
 )
 
 ## Expected columns in cv_predictions
@@ -1018,6 +1018,90 @@ describe("fit() - an evaluation with only pruned configs (#38)", {
           verbose = FALSE),
       class = "horizons_input_error"
     )
+
+  })
+
+})
+
+
+## =========================================================================
+## Every member fails
+## =========================================================================
+## fit() used to carry on to validate_horizons_fit(), which refused the empty
+## workflows slot with a structural message that said nothing about why the
+## members failed; and models$results dropped error_message.
+
+describe("fit() - member failures", {
+
+  obj <- make_fit_object(n = 60, n_configs = 2)
+  obj$config$tuning$final_bayesian_iter <- 0L
+
+  ## A member failure as fit_single_config() reports one. The message carries
+  ## braces, which must reach the abort as text, not as a cli template.
+  failed_member <- function(...) {
+
+    cfg <- list(...)$config_row
+
+    list(config_id = cfg$config_id, status = "failed",
+         degraded = NA, degraded_reason = NA_character_,
+         fitted_workflow = NULL, best_params = NULL,
+         cv_predictions = NULL, test_metrics = NULL, cv_metrics = NULL,
+         uq = NULL, ad = NULL, warnings = NULL,
+         error_message = paste0("Warm-start tuning failed: {", cfg$model, "} diverged"),
+         runtime_secs = 0)
+
+  }
+
+  it("aborts with horizons_all_members_failed when every member fails, naming the errors", {
+
+    err <- testthat::with_mocked_bindings(
+      tryCatch(
+        suppressWarnings(
+          fit(obj, n_best = 2L, compute_uq = FALSE, compute_ad = FALSE,
+              verbose = FALSE)
+        ),
+        horizons_all_members_failed = function(e) e
+      ),
+      fit_single_config = failed_member,
+      .package = "horizons"
+    )
+
+    expect_s3_class(err, "horizons_all_members_failed")
+
+    msg <- conditionMessage(err)
+    expect_match(msg, "{rf} diverged", fixed = TRUE)
+    expect_match(msg, "{cubist} diverged", fixed = TRUE)
+
+    expect_s3_class(err$results, "tbl_df")
+    expect_setequal(err$results$config_id, c("cfg_001", "cfg_002"))
+    expect_true(all(err$results$status == "failed"))
+
+  })
+
+  it("keeps each member's error_message in models$results", {
+
+    real_fit_single_config <- fit_single_config
+
+    r <- testthat::with_mocked_bindings(
+      suppressWarnings(
+        fit(obj, n_best = 2L, compute_uq = FALSE, compute_ad = FALSE,
+            verbose = FALSE, seed = 42L)
+      ),
+      fit_single_config = function(...) {
+        if (list(...)$config_row$config_id == "cfg_002") {
+          failed_member(...)
+        } else {
+          real_fit_single_config(...)
+        }
+      },
+      .package = "horizons"
+    )
+
+    res <- r$models$results
+
+    expect_identical(res$error_message[res$config_id == "cfg_002"],
+                     "Warm-start tuning failed: {cubist} diverged")
+    expect_true(all(is.na(res$error_message[res$status == "success"])))
 
   })
 

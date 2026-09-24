@@ -92,4 +92,8 @@ The members are the top \code{n_best} of the configurations \code{evaluate()} ch
 when none did, the pruned ones that carry a cross-validated value of
 \code{metric}. Fitting pruned configurations warns, with class
 \code{horizons_pruned_fallback_warning}, because none passed the prune gate.
+If every member fails, \code{fit()} aborts with class
+\code{horizons_all_members_failed}, listing the distinct error messages; the
+per-member results travel on the condition as \code{results}, and
+\code{models$results} keeps each member's \code{error_message} when some succeed.
 }

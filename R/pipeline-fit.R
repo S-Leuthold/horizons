@@ -29,6 +29,10 @@
 #' when none did, the pruned ones that carry a cross-validated value of
 #' `metric`. Fitting pruned configurations warns, with class
 #' `horizons_pruned_fallback_warning`, because none passed the prune gate.
+#' If every member fails, `fit()` aborts with class
+#' `horizons_all_members_failed`, listing the distinct error messages; the
+#' per-member results travel on the condition as `results`, and
+#' `models$results` keeps each member's `error_message` when some succeed.
 #'
 #' @param x A `horizons_eval` object (output of `evaluate()`).
 #' @param n_best Integer. Number of top configurations to re-tune. Default 5.
@@ -607,10 +611,20 @@ fit <- function(x,
       cv_rpd_mean     = if (!is.null(cv_rpd)  && nrow(cv_rpd)  == 1) cv_rpd$mean     else NA_real_,
       cv_rpd_se       = if (!is.null(cv_rpd)  && nrow(cv_rpd)  == 1) cv_rpd$std_err  else NA_real_,
       best_params     = list(res$best_params),
+      error_message   = res$error_message %||% NA_character_,
       runtime_secs    = res$runtime_secs
     )
 
   })
+
+  ## Every member failed. Abort here with the members' errors; carrying on
+  ## reached validate_horizons_fit(), which refused the empty workflows slot
+  ## with a structural message that said nothing about why.
+  if (length(workflows_list) == 0) {
+
+    abort_all_members_failed(results_tibble)
+
+  }
 
   ## Build row_index: .row → id mapping from train_Fit
   row_index <- tibble::tibble(
@@ -788,6 +802,48 @@ fit <- function(x,
   }
 
   x
+
+}
+
+## ---------------------------------------------------------------------------
+## abort_all_members_failed \u2014 no member fitted, with the reasons attached
+## ---------------------------------------------------------------------------
+
+#' Abort because every member fit() re-tuned failed
+#'
+#' @description
+#' The message lists the distinct error messages (the first three, each with
+#' the members that raised it, and a count of the rest), and the per-member
+#' results table travels on the condition as `results`, as it does for
+#' `evaluate()`'s `horizons_all_configs_failed`.
+#'
+#' @param results `fit()`'s per-member results tibble, with `error_message`.
+#' @param call The call the condition is attributed to. Default: the caller,
+#'   `fit()`.
+#' @return Never returns; aborts with class `horizons_all_members_failed`.
+#' @keywords internal
+#' @noRd
+abort_all_members_failed <- function(results, call = rlang::caller_env()) {
+
+  n_members <- nrow(results)
+
+  ## Upstream error text is interpolated as values, never as a cli template
+  ## (the "{detail}" pattern in R/ad.R).
+  errors    <- distinct_config_errors(results)
+  err_lines <- errors$lines
+  n_more    <- errors$n_more
+
+  err_bullets <- stats::setNames(
+    sprintf("{err_lines[%d]}", seq_along(err_lines)),
+    rep("x", length(err_lines))
+  )
+
+  cli::cli_abort(c(
+    "All {n_members} configuration{?s} {.fn fit} re-tuned failed, so there is no model to return.",
+    err_bullets,
+    if (n_more > 0) c("i" = "{n_more} more distinct error message{?s} not shown."),
+    "i" = "The per-member results, error messages included, are on this condition as {.field results}."
+  ), class = "horizons_all_members_failed", results = results, call = call)
 
 }
 
