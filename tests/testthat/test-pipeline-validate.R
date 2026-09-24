@@ -626,6 +626,116 @@ describe("validate() predictor checks", {
 
 
 ## ===========================================================================
+## 4b. Cubist feasibility check (P010)
+## ===========================================================================
+
+describe("validate() cubist feasibility check (P010)", {
+
+  test_that("P010 passes on the default fixture (below threshold, model = rf)", {
+
+    result <- quiet_validate(make_configured_hd())
+
+    p010 <- result$validation$checks[result$validation$checks$check_id == "P010", ]
+    expect_equal(p010$status, "pass")
+
+  })
+
+  test_that("P010 fires for cubist + feature_selection = 'none' above the cell threshold", {
+
+    hd <- make_configured_hd()
+    hd$config$configs$model             <- "cubist"
+    hd$config$configs$feature_selection <- "none"
+
+    ## Lower CUBIST_MAX_CELLS so the default fixture's 100 x 50 = 5,000 cells
+    ## trips it without building a library-scale matrix.
+    local_mocked_bindings(CUBIST_MAX_CELLS = 100, .package = "horizons")
+
+    ## Don't use quiet_validate — need to capture the warning
+    expect_warning(
+      capture.output(result <- validate(hd)),
+      "Cubist may not finish"
+    )
+
+    p010 <- result$validation$checks[result$validation$checks$check_id == "P010", ]
+    expect_equal(p010$status, "fail")
+    expect_equal(p010$severity, "WARNING")
+    expect_equal(p010$value, "1 config(s); 100 x 50 = 5,000 cells")
+
+  })
+
+  test_that("P010 does not fire with feature_selection = 'pca'", {
+
+    hd <- make_configured_hd()
+    hd$config$configs$model             <- "cubist"
+    hd$config$configs$feature_selection <- "pca"
+
+    local_mocked_bindings(CUBIST_MAX_CELLS = 100, .package = "horizons")
+
+    expect_no_warning(capture.output(result <- validate(hd)))
+
+    p010 <- result$validation$checks[result$validation$checks$check_id == "P010", ]
+    expect_equal(p010$status, "pass")
+
+  })
+
+  test_that("P010 does not fire below the cell threshold", {
+
+    hd <- make_configured_hd()
+    hd$config$configs$model             <- "cubist"
+    hd$config$configs$feature_selection <- "none"
+    ## Default CUBIST_MAX_CELLS (2e6) is far above 100 x 50 = 5,000 cells.
+
+    expect_no_warning(capture.output(result <- validate(hd)))
+
+    p010 <- result$validation$checks[result$validation$checks$check_id == "P010", ]
+    expect_equal(p010$status, "pass")
+
+  })
+
+  test_that("P010 does not fire for non-cubist models even above the threshold", {
+
+    hd <- make_configured_hd()
+    hd$config$configs$model             <- "rf"
+    hd$config$configs$feature_selection <- "none"
+
+    local_mocked_bindings(CUBIST_MAX_CELLS = 100, .package = "horizons")
+
+    expect_no_warning(capture.output(result <- validate(hd)))
+
+    p010 <- result$validation$checks[result$validation$checks$check_id == "P010", ]
+    expect_equal(p010$status, "pass")
+
+  })
+
+  test_that("P010 names only the affected configs in the warning", {
+
+    hd <- make_configured_hd()
+    hd$config$configs <- tibble::tibble(
+      config_id         = c("cubist_raw_none_none_ab12cd", "rf_raw_none_none_ef34gh"),
+      model             = c("cubist", "rf"),
+      transformation    = "none",
+      preprocessing     = "raw",
+      feature_selection = "none",
+      covariates        = NA_character_
+    )
+
+    local_mocked_bindings(CUBIST_MAX_CELLS = 100, .package = "horizons")
+
+    warned <- testthat::capture_warnings(capture.output(result <- validate(hd)))
+    combined <- paste(warned, collapse = "\n")
+
+    expect_true(grepl("cubist_raw_none_none_ab12cd", combined, fixed = TRUE))
+    expect_false(grepl("rf_raw_none_none_ef34gh", combined, fixed = TRUE))
+
+    p010 <- result$validation$checks[result$validation$checks$check_id == "P010", ]
+    expect_equal(p010$value, "1 config(s); 100 x 50 = 5,000 cells")
+
+  })
+
+})
+
+
+## ===========================================================================
 ## 5. Spectral outlier detection (P005)
 ## ===========================================================================
 
