@@ -191,6 +191,38 @@
   throughout. `%>%` was imported but never exported, so nothing user-facing
   changes.
 
+* **At `bayesian_iter = 0` no configuration is labelled "pruned" (#38).**
+  The prune gate decides whether to skip Bayesian refinement, and with no
+  Bayesian stage there is nothing to skip, so `evaluate_single_config()`
+  now labels a configuration below `prune_threshold` a success. "pruned"
+  keeps its meaning, Bayesian refinement skipped. The gate's reading is
+  recorded apart from the label, on every row, as `below_prune_threshold`
+  (with the `prune_threshold` it was taken against) whenever `prune =
+  TRUE`, whatever `bayesian_iter` is. For `configure(bayesian_iter = 0)`
+  this changes three things:
+
+  - Below-threshold configurations now enter the ranking with the rest,
+    where they used to be only a fallback, so `fit()` can fill `n_best`
+    with them. When every member it fits fell below the threshold, `fit()`
+    warns with class `horizons_below_threshold_warning`, naming the
+    threshold and each member's cross-validated RPD. The same warning
+    covers the pruned fallback at `bayesian_iter > 0`, where it also
+    carries `horizons_pruned_fallback_warning`.
+  - `best_config` can change. A below-threshold configuration was excluded
+    whenever another succeeded; ranked on RPD it rarely wins, since its RPD
+    is below the bar the others cleared, but ranked on `rmse`, `rsq` or
+    another metric it can.
+  - Rows checkpointed at `bayesian_iter = 0` under the old code still say
+    "pruned". `evaluate()` relabels them as successes, with
+    `below_prune_threshold = TRUE`, once checkpointed and new rows are
+    combined, so a resumed run ranks the same pool a fresh run does.
+
+  The exported `evaluate_single_config()`'s default `prune_threshold` drops
+  from 100 to 1.0, matching `evaluate()`. `evaluate()` always passed its
+  own value, so pipeline results do not move because of it, but a direct
+  call that relied on the default now prunes only configurations no better
+  than the mean.
+
 * **`configure(cov_fusion = "late")` now aborts**, whether or not the object has covariates (#69). The condition carries both `horizons_configure_error`, like every other `configure()` argument check, and `horizons_input_error`. Late fusion is designed but was never built: `build_recipe()` only fuses early, so `"late"` was validated, stored and printed, and then ran early fusion bit for bit. Use `"early"`. `cov_fusion` must also be `NULL` or a single string; a vector was not rejected cleanly before.
 
 * **`configure()` now warns about rows it keeps but did not choose** (#70). Re-configuring keeps the rows `validate()` removed and any `select_training()` record, because both describe rows rather than an outcome. It warns, naming the earlier outcome and the count, when rows were removed only as response outliers (`reason == "response"`) of a different outcome than the one being configured; a row removed as both a spectral and a response outlier would have gone anyway and is not counted. It also warns when a `select_training()` record (other than `scope = "global"`) was drawn for properties that do not include the outcome, since each target's `k` nearest rows were not drawn for it.
@@ -677,6 +709,60 @@ consequences; the review itself is in
   to re-resolve, so re-prepping it aborts with a `horizons_input_error` that
   says to rebuild the recipe, rather than with a misleading window-size or
   zero-column message.
+
+* `fit()` now accepts the evaluations `evaluate()` accepts (#38). When no
+  configuration succeeded, `evaluate()` takes `best_config` from the pruned
+  configurations that carry a cross-validated value of the ranking metric,
+  but `fit()` kept successes only and refused the object with "No
+  successful configurations". Both verbs now draw their candidates from one
+  rule, and `fit()` warns, with class `horizons_pruned_fallback_warning`,
+  when the members it fits are pruned configurations, since none passed the
+  prune gate. The warning also carries `horizons_below_threshold_warning`,
+  described under Breaking / behavioural.
+
+* When every configuration fails, `evaluate()` aborts with a classed
+  condition, `horizons_all_configs_failed`, that names the errors and
+  carries the results table (#41). The abort gave only the counts of failed
+  and pruned configurations, and its hint ("Check evaluation$results")
+  could not be followed, because `evaluate()` aborts before it assigns
+  `x$evaluation`. The message now lists the first three distinct error
+  messages, each with the configurations that raised it, and counts the
+  rest. The per-configuration results, `error_message` included, are on the
+  condition as `results`, so a loop over subsets can catch the class and
+  keep them (`?evaluate` shows the pattern), and after an uncaught abort
+  `rlang::last_error()$results` recovers them without re-running. The
+  message also names any configurations loaded from checkpoints in
+  `output_dir`, since calling `evaluate()` again resumes those rather than
+  re-running them, and says which files to delete. The same condition now
+  covers configurations that succeeded with no cross-validated value of the
+  ranking metric (rows checkpointed before the `cv_*` columns existed),
+  which `rank_configs_by_cv()` refused unclassed and without the results;
+  `fit()` refuses such an object with `horizons_input_error`.
+
+* `fit()` aborts with class `horizons_all_members_failed` when every member
+  it re-tunes fails, listing the distinct error messages and carrying the
+  per-member results as `results`. It used to carry on to the object
+  validator, which refused the empty workflows slot with a structural
+  message ("workflows must be a non-empty named list") that said nothing
+  about why. `models$results` gains an `error_message` column, which it had
+  dropped.
+
+* `predict()` warns, with class `horizons_ad_warning`, when a
+  configuration's applicability-domain distance cannot be computed, naming
+  the configuration and the cause, and returns the point predictions
+  without `.ad_distance` and `.ad_flag`. Those columns used to vanish with
+  no signal. A configuration without an AD bundle is still silent. The
+  other AD warnings (a failed bake, spectra that baked to NA) now name the
+  configuration too, so `config = "all"` says which model lost its AD.
+
+* `ensemble()` and `predict()` on a `horizons_ensemble` no longer compute
+  each member's applicability domain. The member helpers keep only `.pred`,
+  so every member's AD was baked, scored and dropped: a wasted bake per
+  member, and AD warnings about columns the ensemble never returns.
+
+* `evaluate()` and `fit()` name the outcome column when the analysis table
+  lacks it, aborting with class `horizons_input_error`. The shared row rule
+  read the absent column as empty and reported "All outcome values are NA".
 
 # horizons 0.9.0
 

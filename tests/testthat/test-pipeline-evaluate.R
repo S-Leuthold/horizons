@@ -277,6 +277,47 @@ describe("evaluate() - all configs fail", {
 
   })
 
+  ## evaluate() aborts before it assigns x$evaluation, so the message's old
+  ## hint ("Check evaluation$results") could not be followed. The results now
+  ## ride on the condition, so a loop over subsets can recover them (#41).
+  it("signals horizons_all_configs_failed, carrying the results and naming the errors", {
+
+    obj <- make_eval_object(n_configs = 5)
+
+    ## Four distinct messages; one carries braces, which must reach the
+    ## message as text rather than be read as a cli template.
+    obj$config$configs$model <- c("{wn_600}", "nope_2", "nope_2", "nope_4", "nope_5")
+
+    err <- tryCatch(
+      suppressWarnings(evaluate(obj, verbose = FALSE)),
+      horizons_all_configs_failed = function(e) e
+    )
+
+    expect_s3_class(err, "horizons_all_configs_failed")
+
+    ## The per-config results, error messages included
+    expect_s3_class(err$results, "tbl_df")
+    expect_identical(err$results$config_id, obj$config$configs$config_id)
+    expect_true(all(err$results$status == "failed"))
+    expect_true(all(grepl("Unknown model type", err$results$error_message)))
+
+    ## The first three distinct messages, each with the configs that raised
+    ## it; the fourth is counted, not listed.
+    msg <- gsub("\\s+", " ", conditionMessage(err))   # undo cli line wrapping
+    expect_match(msg, "'{wn_600}'", fixed = TRUE)
+    expect_match(msg, "'nope_2'", fixed = TRUE)
+    expect_match(msg, "cfg_002, cfg_003", fixed = TRUE)
+    expect_match(msg, "'nope_4'", fixed = TRUE)
+    expect_no_match(msg, "'nope_5'", fixed = TRUE)
+    expect_match(msg, "1 more distinct error message")
+
+    ## How to recover the table after an uncaught abort; nothing here came
+    ## from a checkpoint, so no checkpoint note.
+    expect_match(msg, "rlang::last_error()$results", fixed = TRUE)
+    expect_no_match(msg, "loaded from checkpoints", fixed = TRUE)
+
+  })
+
 })
 
 ## =========================================================================
@@ -318,6 +359,20 @@ describe("evaluate() - NA outcome rows", {
 
     expect_error(outcome_complete_rows(df[c(2, 4), ], "y"),
                  class = "horizons_input_error")
+
+  })
+
+  it("names an outcome column the analysis table lacks, rather than calling it all NA", {
+
+    obj <- make_eval_object()
+    obj$data$analysis$SOC <- NULL
+
+    err <- expect_error(evaluate(obj, verbose = FALSE),
+                        class = "horizons_input_error")
+
+    expect_match(conditionMessage(err), "SOC", fixed = TRUE)
+    expect_match(conditionMessage(err), "no such column", fixed = TRUE)
+    expect_no_match(conditionMessage(err), "All outcome values are NA", fixed = TRUE)
 
   })
 
@@ -370,6 +425,97 @@ describe("evaluate() - checkpointing", {
 
   })
 
+  ## Rows checkpointed before the prune gate went inert at bayesian_iter = 0
+  ## carry "pruned" where a fresh run now says "success", so without the
+  ## relabel the candidate pool would depend on whether the run was resumed.
+  it("relabels resumed 'pruned' rows as successes when bayesian_iter = 0 (#38)", {
+
+    obj <- make_eval_object(n_configs = 2)
+    obj$config$tuning$bayesian_iter <- 1L
+
+    tmpdir <- tempfile("eval_ckpt_relabel_")
+    dir.create(tmpdir)
+    on.exit(unlink(tmpdir, recursive = TRUE))
+
+    ## A first run that prunes both, standing in for the old code's rows
+    first <- suppressWarnings(evaluate(obj, prune_threshold = 9999,
+                                       output_dir = tmpdir, verbose = FALSE,
+                                       seed = 42L))
+    expect_true(all(first$evaluation$results$status == "pruned"))
+
+    ## Rows written before the gate's reading was recorded do not carry it
+    strip <- function(rows) {
+      rows$below_prune_threshold <- NULL
+      rows$prune_threshold       <- NULL
+      rows
+    }
+
+    for (f in list.files(file.path(tmpdir, "checkpoints"), full.names = TRUE)) {
+      saveRDS(strip(readRDS(f)), f)
+    }
+
+    single_file <- file.path(tmpdir, "eval_checkpoint.rds")
+    single      <- readRDS(single_file)
+    stripped    <- strip(single)
+    attr(stripped, "data_hash")   <- attr(single, "data_hash")
+    attr(stripped, "data_n_rows") <- attr(single, "data_n_rows")
+    saveRDS(stripped, single_file)
+
+    obj$config$tuning$bayesian_iter <- 0L
+
+    resumed <- suppressWarnings(evaluate(obj, prune_threshold = 9999,
+                                         output_dir = tmpdir, verbose = FALSE,
+                                         seed = 42L))
+    res <- resumed$evaluation$results
+
+    ## Resumed, not re-run
+    expect_equal(res$runtime_secs, first$evaluation$results$runtime_secs)
+
+    expect_true(all(res$status == "success"))
+    expect_true(all(res$below_prune_threshold))
+
+  })
+
+  ## Rows checkpointed before the cv_* columns existed can succeed with no
+  ## value to rank on. rank_configs_by_cv() refused them unclassed and without
+  ## the results, and re-running evaluate() resumes them rather than re-running.
+  it("signals horizons_all_configs_failed when no success has a cv_<metric>, naming the checkpoints", {
+
+    obj <- make_eval_object(n_configs = 2)
+
+    tmpdir <- tempfile("eval_ckpt_nocv_")
+    dir.create(tmpdir)
+    on.exit(unlink(tmpdir, recursive = TRUE))
+
+    suppressWarnings(evaluate(obj, output_dir = tmpdir, verbose = FALSE, seed = 42L))
+
+    cv_cols <- paste0("cv_", c("rmse", "rrmse", "rsq", "ccc", "rpd", "mae"))
+
+    for (f in list.files(file.path(tmpdir, "checkpoints"), full.names = TRUE)) {
+      row <- readRDS(f)
+      row[cv_cols] <- NULL
+      saveRDS(row, f)
+    }
+
+    unlink(file.path(tmpdir, "eval_checkpoint.rds"))
+
+    err <- tryCatch(
+      suppressWarnings(evaluate(obj, output_dir = tmpdir, verbose = FALSE,
+                                seed = 42L)),
+      horizons_all_configs_failed = function(e) e
+    )
+
+    expect_s3_class(err, "horizons_all_configs_failed")
+    expect_setequal(err$results$config_id, obj$config$configs$config_id)
+
+    msg <- gsub("\\s+", " ", conditionMessage(err))   # undo cli line wrapping
+    expect_match(msg, "2 succeeded, but none has a cv_rpd value", fixed = TRUE)
+    expect_match(msg, "2 configurations were loaded from checkpoints", fixed = TRUE)
+    expect_match(msg, "cfg_001, cfg_002", fixed = TRUE)
+    expect_match(msg, "eval_checkpoint.rds", fixed = TRUE)
+
+  })
+
 })
 
 ## =========================================================================
@@ -381,6 +527,9 @@ describe("evaluate() - pruning", {
   it("passes prune settings to evaluate_single_config", {
 
     obj <- make_eval_object(n_configs = 1)
+
+    ## The gate only runs when there is a Bayesian stage to skip (#38)
+    obj$config$tuning$bayesian_iter <- 1L
 
     ## Set a very high prune threshold — RPD must be above 9999
     result <- suppressWarnings(evaluate(obj, prune = TRUE, prune_threshold = 9999,

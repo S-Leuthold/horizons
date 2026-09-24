@@ -771,11 +771,17 @@ resolve_config_ids <- function(object, config) {
 #'   to `NA` for samples flagged out-of-domain (`.ad_flag == "OOD"`), while
 #'   `.ad_distance`/`.ad_flag` are preserved. `FALSE` (default) leaves
 #'   predictions untouched and only reports the AD columns.
+#' @param ad Logical; compute the applicability-domain columns. `TRUE`
+#'   (default) for user-facing predictions. `FALSE` for the ensemble member
+#'   helpers, which keep only `.pred`: computing a member's AD there wasted a
+#'   bake per member and raised AD warnings about columns the ensemble never
+#'   returns. With `ad = FALSE` there is nothing to abstain on, so
+#'   `abstain_ood` is not applied.
 #' @return A tibble: sample_id, config_id, .pred (+ interval + AD columns).
 #' @keywords internal
 #' @noRd
 predict_one_config <- function(object, config_id, new_spectra, interval,
-                               clamp = TRUE, abstain_ood = FALSE) {
+                               clamp = TRUE, abstain_ood = FALSE, ad = TRUE) {
 
   workflow <- object$models$workflows[[config_id]]
 
@@ -869,12 +875,18 @@ predict_one_config <- function(object, config_id, new_spectra, interval,
   ## Applicability domain — .ad_distance / .ad_flag when a bundle exists
   ## -------------------------------------------------------------------------
   ## Independent of intervals: AD reports even for point-only predictions. Old
-  ## objects without an AD bundle (or a failed bake) degrade to no AD columns.
+  ## objects without an AD bundle degrade to no AD columns quietly; a failed
+  ## bake or distance degrades the same way, with a horizons_ad_warning.
+  ## Callers that discard the AD columns (the ensemble member helpers) skip
+  ## the computation, and so its warnings.
+
+  if (!ad) return(out)
 
   ad_cols <- predict_ad(
     workflow    = workflow,
     ad_bundle   = object$models$ad[[config_id]],
-    new_spectra = new_spectra
+    new_spectra = new_spectra,
+    config_id   = config_id
   )
 
   if (!is.null(ad_cols)) {
@@ -970,8 +982,9 @@ predict_members <- function(object, members, new_spectra) {
     ## must match the raw (unclamped) member OOF the meta-learner trained and
     ## the UQ fold models calibrated on. The response-bound guardrail applies
     ## once, at the combined ensemble output in predict.horizons_ensemble().
+    ## ad = FALSE: only .pred is kept, so a member's AD is not computed.
     pc <- predict_one_config(object, config_id = m, new_spectra = new_spectra,
-                             interval = FALSE, clamp = FALSE)
+                             interval = FALSE, clamp = FALSE, ad = FALSE)
 
     tibble::tibble(config_id = m, sample_id = pc$sample_id, .pred = pc$.pred)
 

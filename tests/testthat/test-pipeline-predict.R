@@ -565,6 +565,44 @@ describe("predict.horizons_fit() - applicability domain", {
 
   })
 
+  it("warns, naming the config and the cause, when the AD distance fails", {
+
+    skip_if_not(has_ad(fitted_fixture))
+
+    ## A bundle that no longer matches the recipe's features: the distance
+    ## aborts inside predict_ad(), which used to drop the AD columns silently.
+    broken <- fitted_fixture
+    cid    <- names(broken$models$ad)[1]
+    broken$models$ad[[cid]]$centroid <- broken$models$ad[[cid]]$centroid[-1]
+
+    w <- expect_warning(
+      p <- keep_only_warning(
+        predict(broken, new_df, config = cid, interval = FALSE),
+        "horizons_ad_warning"
+      ),
+      class = "horizons_ad_warning"
+    )
+
+    expect_match(conditionMessage(w), cid, fixed = TRUE)
+    expect_match(conditionMessage(w), "Number of features must match", fixed = TRUE)
+
+    ## Point predictions are unaffected
+    expect_false(any(c(".ad_distance", ".ad_flag") %in% names(p)))
+    expect_equal(nrow(p), nrow(new_df))
+    expect_true(all(!is.na(p$.pred)))
+
+  })
+
+  it("says nothing about AD when the object has no AD bundle", {
+
+    no_ad <- fitted_fixture
+    no_ad$models$ad <- NULL
+
+    expect_no_warning(predict(no_ad, new_df, interval = FALSE),
+                      class = "horizons_ad_warning")
+
+  })
+
 })
 
 
