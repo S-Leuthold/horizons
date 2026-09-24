@@ -31,6 +31,45 @@ MODEL_SPECS <- list(
   mars        = list(fn = "mars",         engine = "earth")
 )
 
+# Predict-time namespace requirements per model (#65), keyed by the same short
+# names as MODEL_SPECS and VALID_MODELS. Not derivable from MODEL_SPECS$engine
+# alone: cubist_rules() needs `rules` (registers the parsnip spec) alongside
+# `Cubist` (the model implementation), and boost_tree(engine = "lightgbm")
+# needs `bonsai` (registers the engine) alongside `lightgbm`.
+#
+# Mostly an AVAILABILITY PREFLIGHT, not a dispatch fix: once workflows and
+# parsnip are loaded (ensure_predict_namespaces() always requires both, along
+# with recipes), parsnip's own predict.model_fit() dispatch loads each
+# model's engine package itself via load_libs() — horizons does not need to
+# preload it for dispatch to work. Checking here instead means a genuinely
+# missing (Suggested) engine package aborts with an actionable,
+# package-naming message up front, rather than surfacing as an obscure
+# failure partway through prediction. The one dispatch-critical case is
+# `ranger` for the UQ quantile forest: stats::predict() there dispatches on a
+# bare ranger::ranger object directly, with no parsnip/workflows layer to
+# auto-load it, so a missing ranger namespace genuinely breaks dispatch, not
+# just availability (see the ranger branch in ensure_predict_namespaces()).
+# Read by ensure_predict_namespaces() (R/pipeline-predict.R).
+MODEL_PREDICT_PACKAGES <- list(
+  rf          = "ranger",
+  cubist      = c("rules", "Cubist"),
+  xgboost     = "xgboost",
+  plsr        = c("plsmod", "mixOmics"),
+  elastic_net = "glmnet",
+  svm_rbf     = "kernlab",
+  mlp         = "nnet",
+  lightgbm    = c("bonsai", "lightgbm"),
+  mars        = "earth"
+)
+
+# Predict-time packages that are not on CRAN, so an install.packages() hint
+# would be actively wrong. mixOmics (the plsr engine) is on Bioconductor; see
+# README.md's Dependencies section for the same guidance. Read by
+# predict_package_install_hint() (R/pipeline-predict.R).
+PREDICT_PACKAGE_INSTALL_HINT <- list(
+  mixOmics = 'BiocManager::install("mixOmics")'
+)
+
 # Human-readable model names for CLI tree output
 MODEL_DISPLAY_NAMES <- c(
   rf          = "Random Forest",
@@ -254,3 +293,21 @@ SELECT_TWIN_REF <- 50L
 # a 26x amplification; a floor of 0.10 keeps 13 components, 0.05 keeps 27.
 # Set to 0 to disable the floor and recover the pre-2026-09-21 behaviour.
 SELECT_SDEV_FLOOR <- 0.10
+
+## validate() Heuristics --------------------------------------------------------
+
+# validate()'s P010 check: cubist without dimension reduction on a large
+# table. Cubist fits a linear model in every rule, so its cost grows sharply
+# with predictor count in a way rf/ranger and most other MODEL_SPECS entries
+# do not. Measured 2026-09 (#40): cubist + snv on the KSSL clay library at
+# 4 cm-1 (14,228 rows x 851 predictors = ~12.1M cells) did not finish a
+# single tune task in 29.5 minutes across 25 tasks (5 folds x grid 5), with
+# 8 workers pegged at 99% CPU; the same config with feature_selection = "pca"
+# (step_pca(threshold = 0.995)) finished in 368 s (test RPD 3.82), matching
+# OSSL's published SNV -> PCA(120) -> Cubist pipeline (Safanelli et al. 2025,
+# PLOS ONE 20(1):e0296545). rf/ranger finished the same 851-predictor table
+# in minutes. 2e6 is a heuristic floor set well below the ~12.1M-cell
+# measured failure point, not a calibrated benchmark of where cubist starts
+# to struggle — it exists to warn before the table gets anywhere near the
+# point that didn't finish, not to mark the exact boundary of what will.
+CUBIST_MAX_CELLS <- 2e6

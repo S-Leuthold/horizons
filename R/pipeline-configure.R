@@ -62,6 +62,29 @@
 #' reproducible to that tolerance rather than exactly. `rf` and the other
 #' engines are deterministic given `seed`. See GitHub issue #51.
 #'
+#' **Choosing models for large spectral libraries:**
+#'
+#' Cost scales very differently with predictor count (`p`) across
+#' `MODEL_SPECS`. `rf` (ranger), `xgboost`, `lightgbm` and `elastic_net`
+#' (glmnet) stay fast at full spectral resolution; `plsr` is built for
+#' `p >> n` and is not a concern either. `cubist` fits a linear model in
+#' every rule, so its cost grows sharply with `p`: on the KSSL clay library
+#' at 4 cm-1 (14,228 rows x 851 predictors, ~12.1M cells), not one of 25
+#' tune tasks finished in 29.5 minutes, while the same config with
+#' `feature_selection = "pca"` finished in 368 s (test RPD 3.82) — OSSL's
+#' published pipeline is SNV -> PCA(120) -> Cubist (Safanelli et al. 2025,
+#' PLOS ONE 20(1):e0296545). `validate()`'s P010 check warns when a
+#' `cubist` config with `feature_selection = "none"` sits on a table whose
+#' `n_rows * n_predictors` exceeds `CUBIST_MAX_CELLS` (a conservative floor
+#' well under the measured failure point, not a benchmark); the fix is
+#' `feature_selection = "pca"`. `svm_rbf` (kernlab) and `mars` (earth) also
+#' scale with `p` on well-established grounds — an RBF kernel matrix costs
+#' `O(n^2 p)` to build, and MARS's forward pass searches every predictor at
+#' every candidate knot — but neither has been measured at library scale,
+#' and `validate()` does not warn for them. A slow run with either on a
+#' full-resolution table is a signal to add `feature_selection` there too.
+#' See GitHub issue #40.
+#'
 #' @param x `horizons_data`. Object with response data attached via
 #'   `add_response()`.
 #' @param outcome `character(1) or NULL`. Which response variable to model.

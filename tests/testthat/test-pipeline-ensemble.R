@@ -413,7 +413,7 @@ describe("predict.horizons_ensemble() - intervals and degradation", {
 
   })
 
-  it("a corrupt uq bundle degrades to point-only without erroring", {
+  it("a corrupt uq bundle warns and degrades to point-only without erroring", {
 
     ens <- suppressWarnings(
       ensemble(fitted, method = "weighted", optimize = FALSE, verbose = FALSE)
@@ -421,7 +421,13 @@ describe("predict.horizons_ensemble() - intervals and degradation", {
 
     ens$ensemble$uq$method <- "bogus"
 
-    p <- predict(ens, test_set, interval = TRUE)
+    ## #65: predict_ensemble_intervals() used to degrade silently here; it now
+    ## warns, naming the bundle as unrecognized, via warn_interval_failure().
+    p <- NULL
+    expect_warning(
+      p <- predict(ens, test_set, interval = TRUE),
+      class = "horizons_interval_warning"
+    )
 
     expect_false(".pred_lower" %in% names(p))
     expect_true(".pred" %in% names(p))
