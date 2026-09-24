@@ -9,6 +9,17 @@
   `average()`'s collapse now go through them, so the derived counts have
   one source of truth.
 
+* **`validate()`** adds a **P010** check: pairing `cubist` with
+  `feature_selection = "none"` on an analysis table whose
+  `n_rows * n_predictors` exceeds `CUBIST_MAX_CELLS` (2e6 cells) now warns,
+  naming the affected configs and recommending `feature_selection = "pca"`
+  (#40). Cubist fits a linear model in every rule, so its cost grows sharply
+  with predictor count: on the KSSL clay library at 14,228 x 851 (12.1M
+  cells, 4 cm-1), not one of 25 tune tasks finished in 29.5 minutes, while
+  the same config with `feature_selection = "pca"` finished in 368 s (test
+  RPD 3.82). `configure()`'s docs gain a "Choosing models for large spectral
+  libraries" section covering n x p limits across `MODEL_SPECS`.
+
 ## Performance
 
 * `step_transform_spectra()` bakes the whole spectral matrix in one prospectr

@@ -131,6 +131,29 @@ the fourth significant figure of a fold metric (measured on Cubist
 metric by a few percent, so a \code{cubist} result should be read as
 reproducible to that tolerance rather than exactly. \code{rf} and the other
 engines are deterministic given \code{seed}. See GitHub issue #51.
+
+\strong{Choosing models for large spectral libraries:}
+
+Cost scales very differently with predictor count (\code{p}) across
+\code{MODEL_SPECS}. \code{rf} (ranger), \code{xgboost}, \code{lightgbm} and \code{elastic_net}
+(glmnet) stay fast at full spectral resolution; \code{plsr} is built for
+\verb{p >> n} and is not a concern either. \code{cubist} fits a linear model in
+every rule, so its cost grows sharply with \code{p}: on the KSSL clay library
+at 4 cm-1 (14,228 rows x 851 predictors, ~12.1M cells), not one of 25
+tune tasks finished in 29.5 minutes, while the same config with
+\code{feature_selection = "pca"} finished in 368 s (test RPD 3.82) — OSSL's
+published pipeline is SNV -> PCA(120) -> Cubist (Safanelli et al. 2025,
+PLOS ONE 20(1):e0296545). \code{validate()}'s P010 check warns when a
+\code{cubist} config with \code{feature_selection = "none"} sits on a table whose
+\code{n_rows * n_predictors} exceeds \code{CUBIST_MAX_CELLS} (a conservative floor
+well under the measured failure point, not a benchmark); the fix is
+\code{feature_selection = "pca"}. \code{svm_rbf} (kernlab) and \code{mars} (earth) also
+scale with \code{p} on well-established grounds — an RBF kernel matrix costs
+\verb{O(n^2 p)} to build, and MARS's forward pass searches every predictor at
+every candidate knot — but neither has been measured at library scale,
+and \code{validate()} does not warn for them. A slow run with either on a
+full-resolution table is a signal to add \code{feature_selection} there too.
+See GitHub issue #40.
 }
 \examples{
 \dontrun{

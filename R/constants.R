@@ -293,3 +293,21 @@ SELECT_TWIN_REF <- 50L
 # a 26x amplification; a floor of 0.10 keeps 13 components, 0.05 keeps 27.
 # Set to 0 to disable the floor and recover the pre-2026-09-21 behaviour.
 SELECT_SDEV_FLOOR <- 0.10
+
+## validate() Heuristics --------------------------------------------------------
+
+# validate()'s P010 check: cubist without dimension reduction on a large
+# table. Cubist fits a linear model in every rule, so its cost grows sharply
+# with predictor count in a way rf/ranger and most other MODEL_SPECS entries
+# do not. Measured 2026-09 (#40): cubist + snv on the KSSL clay library at
+# 4 cm-1 (14,228 rows x 851 predictors = ~12.1M cells) did not finish a
+# single tune task in 29.5 minutes across 25 tasks (5 folds x grid 5), with
+# 8 workers pegged at 99% CPU; the same config with feature_selection = "pca"
+# (step_pca(threshold = 0.995)) finished in 368 s (test RPD 3.82), matching
+# OSSL's published SNV -> PCA(120) -> Cubist pipeline (Safanelli et al. 2025,
+# PLOS ONE 20(1):e0296545). rf/ranger finished the same 851-predictor table
+# in minutes. 2e6 is a heuristic floor set well below the ~12.1M-cell
+# measured failure point, not a calibrated benchmark of where cubist starts
+# to struggle — it exists to warn before the table gets anywhere near the
+# point that didn't finish, not to mark the exact boundary of what will.
+CUBIST_MAX_CELLS <- 2e6
