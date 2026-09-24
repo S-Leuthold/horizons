@@ -112,7 +112,22 @@ Default: \code{1}.}
 wavenumber grid, with every response column the pool carried, three
 provenance columns with role \code{meta} (\code{.drawn_by}, \code{.min_distance},
 and \code{.group} except under \code{scope = "sample"}), and the record in
-\code{x$selection}.
+\code{x$selection}. \code{provenance$standardization} describes the returned
+axis. When the pool was resampled onto the targets' grid, the pool's
+record is rewritten: \code{grid} is the targets' (\code{NULL} when they are not on
+a canonical grid, or when their recorded grid does not match their
+columns), \code{n_wavelengths} and \code{wavelength_range} are the new axis's, and
+\code{resampled} is \code{TRUE}, while the \code{standardize()} arguments (\code{resample},
+\code{trim}, \code{remove_water}, \code{baseline}) and \code{applied_at} stay the pool's,
+since they produced its values; so \code{resample} can differ from
+\code{grid$step}, and \code{trim} from \code{wavelength_range}. Its \code{reconciliation}
+entry records the move: \code{operation}, \code{clamp} (the overshoot at each end
+when an end column was taken at the pool's endpoint, else \code{NULL}) and
+\code{pool}, the pool's record as it was, carrying its original \code{grid}. That
+entry is the object's axis history and travels with its provenance; it
+is distinct from \code{x$selection$reconciliation}, the selection's record of
+how the two axes compared. A pool already on the targets' grid keeps its
+record unchanged, and a pool never standardized keeps none.
 }
 \description{
 Draws a training set from a reference pool (a spectral library with
