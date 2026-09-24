@@ -85,6 +85,31 @@
 #' full-resolution table is a signal to add `feature_selection` there too.
 #' See GitHub issue #40.
 #'
+#' **Recipe settings:**
+#'
+#' `sg_window` and `pca_threshold` are set once per object, not per
+#' configuration: every configuration's recipe uses the same value, and
+#' neither is part of the config id. `sg_window` is the Savitzky-Golay window
+#' in grid points. It trims `(sg_window - 1) / 2` columns from each end of the
+#' spectrum for every preprocessing method, `"raw"` and `"snv"` included, so
+#' it matters even where no filter runs. The polynomial order is not a
+#' setting: each method fixes its own (`"sg"` order 1; `"deriv1"` first
+#' derivative, order 1; `"deriv2"` second derivative, order 3; the `"snv_"`
+#' variants the same), and the cubic is why the window must be at least 5.
+#' At order 1 the `"sg"` smoother is a moving average, so widening
+#' `sg_window` widens a boxcar: it flattens peaks and shoulders narrower than
+#' the window rather than preserving them, as a higher-order Savitzky-Golay
+#' filter would.
+#'
+#' Because the window counts grid points, its physical width depends on the
+#' axis it runs on, and `standardize()` can still change that axis after
+#' `configure()`. So the width is not stored here: `configure()` prints it in
+#' cm-1 for the axis it sees, `evaluate()` records the width it actually ran
+#' in `evaluation$recipe`, and `evaluate()` refuses a window as wide as the
+#' spectrum. `pca_threshold` is the share of variance kept by
+#' `feature_selection = "pca"` and is read by nothing else. Both defaults are
+#' the values the recipe ran before they were settable. See GitHub issue #62.
+#'
 #' @param x `horizons_data`. Object with response data attached via
 #'   `add_response()`.
 #' @param outcome `character(1) or NULL`. Which response variable to model.
@@ -113,14 +138,22 @@
 #'   Default 15. Minimum 0.
 #' @param final_bayesian_iter `integer`. Bayesian optimization iterations for
 #'   the final fit on the selected configuration. Default 25. Minimum 0.
+#' @param sg_window `integer`. Savitzky-Golay window in grid points, applied
+#'   to every configuration. Default 9. Must be odd, at least 5, and (checked
+#'   by `evaluate()`) smaller than the number of spectral columns. For
+#'   `"sg"` it is the width of a moving average. See Recipe settings.
+#' @param pca_threshold `numeric`. Share of variance `feature_selection =
+#'   "pca"` keeps, applied to every configuration that uses it. Default
+#'   0.995. Must be in (0, 1].
 #'
 #' @return A modified `horizons_data` object with:
 #'   * Outcome variable promoted to `role = "outcome"` in `data$role_map`
-#'   * `config$configs` — tibble of configuration grid (9 columns)
+#'   * `config$configs` — tibble of configuration grid (6 columns)
 #'   * `config$n_configs` — integer count
 #'   * `config$tuning` — list of tuning parameters
 #'   * `config$expansion` — list of original inputs (for reproducibility)
-#'   * `config$defaults` — list of method defaults
+#'   * `config$recipe` — the recipe settings every configuration is built
+#'     with: `sg_window` and `pca_threshold`
 #'
 #' @examples
 #' \dontrun{
@@ -138,6 +171,14 @@
 #'   preprocessing   = c("raw", "snv", "sg"),
 #'   cv_folds        = 10L,
 #'   grid_size       = 20L
+#' )
+#'
+#' # A wider Savitzky-Golay window and a tighter PCA for every config
+#' hd |> configure(
+#'   preprocessing     = c("deriv1", "snv_deriv2"),
+#'   feature_selection = "pca",
+#'   sg_window         = 15L,
+#'   pca_threshold     = 0.99
 #' )
 #'
 #' # Multi-outcome pattern
@@ -158,7 +199,9 @@ configure <- function(x,
                       cv_folds              = 5L,
                       grid_size             = 10L,
                       bayesian_iter         = 15L,
-                      final_bayesian_iter   = 25L) {
+                      final_bayesian_iter   = 25L,
+                      sg_window             = 9L,
+                      pca_threshold         = 0.995) {
 
   ## ---------------------------------------------------------------------------
   ## Step 0: Print header
@@ -346,6 +389,38 @@ configure <- function(x,
     abort_nested(
       "`final_bayesian_iter` must be a non-negative integer",
       c(paste0("Got: ", deparse(final_bayesian_iter)))
+    )
+
+  }
+
+  ## 1.6 Validate recipe settings ----------------------------------------------
+
+  ## The window is centred on a point, so it is odd. Its floor is 5 because
+  ## deriv2 and snv_deriv2 fit a cubic, and prospectr::savitzkyGolay() needs
+  ## the window wider than the polynomial order; the setting is object-level,
+  ## so it has to suit every method a grid might hold. The rule is the one
+  ## step_transform_spectra() enforces (is_valid_sg_window()). Whether the
+  ## window fits the spectrum is checked by evaluate(), since standardize()
+  ## can still change the axis after this.
+
+  if (!is_valid_sg_window(sg_window)) {
+
+    abort_nested(
+      "`sg_window` must be an odd integer >= 5",
+      c(paste0("Got: ", paste(deparse(sg_window), collapse = " ")),
+        "The window is centred on a point, so its width is odd",
+        "The second-derivative methods fit a cubic, which needs at least 5 points")
+    )
+
+  }
+
+  if (!is.numeric(pca_threshold) || length(pca_threshold) != 1 ||
+      is.na(pca_threshold) || pca_threshold <= 0 || pca_threshold > 1) {
+
+    abort_nested(
+      "`pca_threshold` must be a single number in (0, 1]",
+      c(paste0("Got: ", paste(deparse(pca_threshold), collapse = " ")),
+        "It is the share of variance feature_selection = 'pca' keeps")
     )
 
   }
@@ -550,12 +625,6 @@ configure <- function(x,
     covariates        = covariate_sets
   )
 
-  ## Add list-columns for parameter overrides ----------------------------------
-
-  config_grid$preprocessing_params <- vector("list", nrow(config_grid))
-  config_grid$feature_params       <- vector("list", nrow(config_grid))
-  config_grid$transform_params     <- vector("list", nrow(config_grid))
-
   ## ---------------------------------------------------------------------------
   ## Step 5: Generate config IDs
   ## ---------------------------------------------------------------------------
@@ -574,8 +643,7 @@ configure <- function(x,
 
   config_grid <- config_grid[, c(
     "config_id", "model", "transformation", "preprocessing",
-    "feature_selection", "covariates",
-    "preprocessing_params", "feature_params", "transform_params"
+    "feature_selection", "covariates"
   )]
 
   ## Deduplicate (defensive) ---------------------------------------------------
@@ -610,11 +678,21 @@ configure <- function(x,
     cov_fusion        = cov_fusion
   )
 
-  x$config$defaults <- list(
-    preprocessing_params = list(sg_window = 11L, sg_order = 2L),
-    feature_params       = list(pca_threshold = 0.99, correlation_n = 200L),
-    transform_params     = list()
+  ## One value of each for the whole object, read by build_recipe() for every
+  ## config through recipe_settings(). The window's width in cm-1 is not
+  ## stored: it depends on the axis, which standardize() can still change, so
+  ## it is printed below for the axis as it is now and recorded by evaluate()
+  ## for the axis the recipe actually ran on.
+
+  x$config$recipe <- list(
+    sg_window     = as.integer(sg_window),
+    pca_threshold = as.numeric(pca_threshold)
   )
+
+  ## Objects configured before #62 carry `config$defaults`, a record of
+  ## settings the recipe never ran. Re-configuring one drops it.
+
+  x$config$defaults <- NULL
 
   ## ---------------------------------------------------------------------------
   ## Step 6b: Re-validate
@@ -631,6 +709,13 @@ configure <- function(x,
   cat(paste0("\u2502  \u251C\u2500 Models: ", paste(models, collapse = ", "), "\n"))
   cat(paste0("\u2502  \u251C\u2500 Tuning: ", cv_folds, "-fold CV, grid = ",
              grid_size, "\n"))
+
+  window_cm <- x$config$recipe$sg_window * axis_spacing_cm(x)
+
+  cat(paste0("\u2502  \u251C\u2500 Recipe: SG window ", x$config$recipe$sg_window,
+             if (!is.na(window_cm)) paste0(" (", signif(window_cm, 3), " cm\u207B\u00B9)"),
+             if ("pca" %in% feature_selection) paste0(", PCA threshold ", pca_threshold),
+             "\n"))
 
   if (length(covariate_cols) > 0) {
 
@@ -682,6 +767,55 @@ generate_config_id <- function(model, preprocessing, transformation,
 
   hash <- substr(digest::digest(hash_input), 1, 6)
   paste(base, hash, sep = "_")
+
+}
+
+
+#' Spacing of an object's wavenumber axis, in cm-1
+#'
+#' @description
+#' The median absolute spacing of the predictor columns' wavenumbers, read
+#' from their names (`wn_<wavenumber>`, or a bare number). That is the axis
+#' the recipe's Savitzky-Golay window slides along, so it is what converts the
+#' window from grid points to cm-1. The grid step `standardize()` recorded is
+#' the fallback, used only when the names do not parse.
+#'
+#' The axis comes first because the recorded step can describe a different
+#' one. `select_training()` resamples the pool onto the targets' grid but
+#' returns the pool's `provenance$standardization`, so a library standardized
+#' at 2 cm-1 and drawn around a batch at 4 cm-1 still records a step of 2.
+#'
+#' Read at the moment it is needed, never stored: `configure()` prints the
+#' window's width for the axis it sees, and `evaluate()` records the width for
+#' the axis the recipe runs on, which `standardize()` may have changed since.
+#'
+#' @param x `horizons_data`. The object being configured or evaluated.
+#'
+#' @return `numeric(1)`. The spacing in cm-1, or `NA` when neither the names
+#'   nor the provenance give one.
+#' @noRd
+
+axis_spacing_cm <- function(x) {
+
+  role_map   <- x$data$role_map
+  predictors <- role_map$variable[role_map$role == "predictor"]
+  wn         <- suppressWarnings(as.numeric(sub("^wn_", "", predictors)))
+
+  if (length(wn) > 1 && !anyNA(wn)) {
+
+    return(stats::median(abs(diff(wn))))
+
+  }
+
+  step <- x$provenance$standardization$grid$step
+
+  if (is.numeric(step) && length(step) == 1 && !is.na(step)) {
+
+    return(step)
+
+  }
+
+  NA_real_
 
 }
 

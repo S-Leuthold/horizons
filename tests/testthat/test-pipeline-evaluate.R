@@ -157,6 +157,13 @@ describe("evaluate() - success path", {
 
   })
 
+  it("records that it screened the configurations (#45)", {
+
+    ## fit()'s cold start writes FALSE; evaluate() ranked, so TRUE.
+    expect_true(result$evaluation$screened)
+
+  })
+
   it("has non-NA metrics for successful configs", {
 
     success_rows <- result$evaluation$results$status == "success"
@@ -387,6 +394,82 @@ describe("evaluate() - NA outcome rows", {
 })
 
 ## =========================================================================
+## draw_eval_split(): the one split draw evaluate() and fit() share (#45)
+## =========================================================================
+## fit() cold-starts a configured object with one configuration by drawing
+## the split itself, so the draw moved out of evaluate() into a helper both
+## verbs call. It has to give the split evaluate() drew before the move.
+
+describe("draw_eval_split()", {
+
+  obj <- make_eval_object(n = 60, n_configs = 1)
+  obj$data$analysis$SOC[c(3, 17, 41)] <- NA_real_
+
+  ## evaluate()'s draw before #45, as it was written inline: the rows with an
+  ## observed outcome, then the seed, then a stratified split, falling back to
+  ## an unstratified one.
+  draw_before <- function(analysis, seed) {
+
+    modelled <- outcome_complete_rows(analysis, "SOC")$data
+
+    set.seed(seed)
+
+    tryCatch(
+      rsample::initial_split(modelled, prop = SPLIT_PROP, strata = dplyr::all_of("SOC")),
+      error = function(e) rsample::initial_split(modelled, prop = SPLIT_PROP)
+    )
+
+  }
+
+  it("gives the split evaluate() drew before it was factored out", {
+
+    for (seed in c(1L, 42L, 307L)) {
+
+      drawn  <- suppressWarnings(draw_eval_split(obj$data$analysis, "SOC", seed))
+      before <- suppressWarnings(draw_before(obj$data$analysis, seed))
+
+      expect_identical(drawn$split$in_id, before$in_id, info = paste("seed", seed))
+      expect_identical(drawn$split$data, before$data, info = paste("seed", seed))
+      expect_true(drawn$stratified)
+      expect_identical(drawn$n_dropped, 3L)
+
+    }
+
+  })
+
+  it("falls back to an unstratified split where evaluate() did", {
+
+    real_initial_split <- rsample::initial_split
+
+    local_mocked_bindings(
+      initial_split = function(data, prop = 3 / 4, strata = NULL, ...) {
+        if (!missing(strata)) stop("stratification refused")
+        real_initial_split(data, prop = prop, ...)
+      },
+      .package = "rsample"
+    )
+
+    drawn  <- draw_eval_split(obj$data$analysis, "SOC", 42L)
+    before <- draw_before(obj$data$analysis, 42L)
+
+    expect_false(drawn$stratified)
+    expect_identical(drawn$split$in_id, before$in_id)
+
+  })
+
+  it("is the split evaluate() stores", {
+
+    ev    <- suppressWarnings(evaluate(obj, prune = FALSE, verbose = FALSE, seed = 42L))
+    drawn <- suppressWarnings(draw_eval_split(obj$data$analysis, "SOC", 42L))
+
+    expect_identical(ev$evaluation$split$in_id, drawn$split$in_id)
+    expect_identical(ev$evaluation$split$data, drawn$split$data)
+
+  })
+
+})
+
+## =========================================================================
 ## Checkpointing
 ## =========================================================================
 
@@ -555,6 +638,124 @@ describe("evaluate() - pruning", {
 
     ## The single config should be pruned
     expect_equal(result$evaluation$results$status, "pruned")
+
+  })
+
+})
+
+## =========================================================================
+## Recipe settings passthrough (#62)
+## =========================================================================
+
+describe("evaluate() - recipe settings", {
+
+  ## Capture what evaluate() hands to evaluate_single_config() without tuning.
+  capture_recipe_args <- function(obj) {
+
+    seen <- NULL
+
+    testthat::with_mocked_bindings(
+      evaluate_single_config = function(...) {
+        seen <<- list(...)[c("sg_window", "pca_threshold")]
+        tibble::tibble(config_id = list(...)$config_row$config_id,
+                       status = "failed", error_message = "mocked")
+      },
+      tryCatch(suppressWarnings(evaluate(obj, verbose = FALSE, seed = 42L)),
+               error = function(e) NULL),
+      .package = "horizons"
+    )
+
+    seen
+
+  }
+
+  ## Twenty predictors, 2 cm-1 apart, so a window of 13 fits the spectrum.
+  obj <- make_eval_object(n_wn = 20, n_configs = 1)
+
+  it("passes configure()'s sg_window and pca_threshold to every config", {
+
+    obj$config$recipe <- list(sg_window = 13L, pca_threshold = 0.9)
+
+    expect_identical(capture_recipe_args(obj),
+                     list(sg_window = 13L, pca_threshold = 0.9))
+
+  })
+
+  it("falls back to the values the recipe always ran when the record is absent (older objects)", {
+
+    obj$config$recipe <- NULL
+
+    expect_identical(capture_recipe_args(obj),
+                     list(sg_window = 9L, pca_threshold = 0.995))
+
+  })
+
+  ## A window as wide as the spectrum used to pass prep() and fail every
+  ## config inside tune ("Grid search failed"); a wider one failed them all
+  ## ("All configurations failed"). Neither named the window. evaluate() now
+  ## refuses both before a single config runs.
+
+  refused_without_running <- function(obj) {
+
+    ran <- 0L
+
+    err <- testthat::with_mocked_bindings(
+      evaluate_single_config = function(...) {
+        ran <<- ran + 1L
+        tibble::tibble(config_id = "cfg_001", status = "failed")
+      },
+      tryCatch(evaluate(obj, verbose = FALSE, seed = 42L),
+               error = function(e) e),
+      .package = "horizons"
+    )
+
+    list(error = err, ran = ran)
+
+  }
+
+  it("refuses a window as wide as the spectrum, naming both numbers and the width", {
+
+    narrow <- make_eval_object(n_wn = 9, n_configs = 1)
+    narrow$config$recipe <- list(sg_window = 9L, pca_threshold = 0.995)
+
+    out <- refused_without_running(narrow)
+
+    expect_s3_class(out$error, "horizons_input_error")
+    expect_match(conditionMessage(out$error), "9 grid points (18 cm", fixed = TRUE)
+    expect_match(conditionMessage(out$error), "9 spectral columns", fixed = TRUE)
+    expect_identical(out$ran, 0L)
+
+  })
+
+  it("refuses a window wider than the spectrum the same way", {
+
+    obj$config$recipe <- list(sg_window = 21L, pca_threshold = 0.995)
+
+    out <- refused_without_running(obj)
+
+    expect_s3_class(out$error, "horizons_input_error")
+    expect_match(conditionMessage(out$error), "21 grid points (42 cm", fixed = TRUE)
+    expect_match(conditionMessage(out$error), "20 spectral columns", fixed = TRUE)
+    expect_identical(out$ran, 0L)
+
+  })
+
+  it("records the settings it ran with, the width measured on the axis it ran on", {
+
+    ## The axis here is 4 cm-1, as if standardize() had coarsened the object
+    ## after configure(): the record follows the axis the recipe saw, which is
+    ## why configure() stores no width of its own.
+    coarse <- obj
+    wn_old <- coarse$data$role_map$variable[coarse$data$role_map$role == "predictor"]
+    wn_new <- paste0("wn_", seq(4000, by = -4, length.out = length(wn_old)))
+    names(coarse$data$analysis)[match(wn_old, names(coarse$data$analysis))] <- wn_new
+    coarse$data$role_map$variable[match(wn_old, coarse$data$role_map$variable)] <- wn_new
+    coarse$config$recipe <- list(sg_window = 7L, pca_threshold = 0.9)
+
+    result <- suppressWarnings(evaluate(coarse, verbose = FALSE, seed = 42L))
+
+    expect_identical(result$evaluation$recipe,
+                     list(sg_window = 7L, sg_window_cm = 28, pca_threshold = 0.9))
 
   })
 
@@ -851,7 +1052,10 @@ describe("evaluate() - checkpoint data provenance", {
     expect_identical(manifest$settings,
                      eval_settings(cv_folds = 3L, grid_size = 2L,
                                    bayesian_iter = 0L, prune = FALSE,
-                                   prune_threshold = NA_real_, seed = 42L))
+                                   prune_threshold = NA_real_, seed = 42L,
+                                   ## configure()'s recipe settings (#62), at
+                                   ## the defaults an unconfigured record runs
+                                   sg_window = 9L, pca_threshold = 0.995))
 
     row <- readRDS(file.path(tmpdir, "checkpoints", "cfg_001.rds"))
     expect_identical(row$data_hash, manifest$data_hash)
@@ -946,7 +1150,10 @@ describe("evaluate() - checkpoint data provenance", {
   ## covers the ids and the outcome name only (#42).
   refuses_on <- function(edit) {
 
-    obj    <- make_eval_object(n_configs = 2)
+    ## Twelve predictors, so demoting one still leaves the spectrum wider than
+    ## the default window of 9 and evaluate()'s window check (#62) does not
+    ## refuse ahead of the checkpoint gate under test.
+    obj    <- make_eval_object(n_wn = 12, n_configs = 2)
     tmpdir <- withr::local_tempdir(.local_envir = parent.frame())
 
     suppressWarnings(evaluate(obj, output_dir = tmpdir, prune = FALSE,
@@ -1428,6 +1635,74 @@ describe("evaluate() - tuning-settings provenance", {
     )
 
     expect_equal(sum(grepl("no tuning-settings fingerprint", gsub("\\s+", " ", warns))), 1L)
+    expect_equal(second$evaluation$results$runtime_secs,
+                 first$evaluation$results$runtime_secs)
+
+  })
+
+  ## configure()'s recipe settings (#62) are object-level, so the config id
+  ## does not carry them; the settings record is what keeps a run with another
+  ## window from resuming rows built with the old one.
+
+  it("refuses to resume checkpoints built with a different sg_window or pca_threshold, naming it", {
+
+    obj    <- make_eval_object(n_wn = 20, n_configs = 2)
+    obj$config$recipe <- list(sg_window = 9L, pca_threshold = 0.995)
+    tmpdir <- withr::local_tempdir()
+
+    suppressWarnings(evaluate(obj, output_dir = tmpdir, prune = FALSE,
+                              verbose = FALSE, seed = 42L))
+
+    wider <- obj
+    wider$config$recipe$sg_window <- 11L
+
+    err <- tryCatch(
+      suppressWarnings(evaluate(wider, output_dir = tmpdir, prune = FALSE,
+                                verbose = FALSE, seed = 42L)),
+      horizons_input_error = function(e) e
+    )
+
+    expect_s3_class(err, "horizons_input_error")
+    expect_match(flat_message(err), "sg_window")
+    expect_match(flat_message(err), "settings")
+
+    tighter <- obj
+    tighter$config$recipe$pca_threshold <- 0.9
+
+    expect_error(
+      suppressWarnings(evaluate(tighter, output_dir = tmpdir, prune = FALSE,
+                                verbose = FALSE, seed = 42L)),
+      "pca_threshold",
+      class = "horizons_input_error"
+    )
+
+  })
+
+  it("counts rows written before the recipe settings were recorded as unverified, and resumes", {
+
+    obj    <- make_eval_object(n_wn = 20, n_configs = 2)
+    tmpdir <- withr::local_tempdir()
+
+    first <- suppressWarnings(evaluate(obj, output_dir = tmpdir, prune = FALSE,
+                                       verbose = FALSE, seed = 42L))
+
+    ## The shape rows have when a version recorded the tuning settings but not
+    ## yet sg_window and pca_threshold: a record, lacking the two.
+    for (f in list.files(file.path(tmpdir, "checkpoints"), full.names = TRUE)) {
+
+      row <- readRDS(f)
+      row$settings[[1]] <- row$settings[[1]][setdiff(names(row$settings[[1]]),
+                                                     c("sg_window", "pca_threshold"))]
+      saveRDS(row, f)
+
+    }
+
+    warns <- testthat::capture_warnings(
+      second <- evaluate(obj, output_dir = tmpdir, prune = FALSE,
+                         verbose = FALSE, seed = 42L)
+    )
+
+    expect_equal(sum(grepl("2 have no tuning-settings fingerprint", gsub("\\s+", " ", warns))), 1L)
     expect_equal(second$evaluation$results$runtime_secs,
                  first$evaluation$results$runtime_secs)
 

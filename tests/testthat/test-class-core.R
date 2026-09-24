@@ -2372,6 +2372,62 @@ test_that("validate_horizons_eval validates workers under the new meaning when p
 
 })
 
+test_that("validate_horizons_eval tolerates screened being absent and checks it when present (#45)", {
+
+  ## make_valid_eval() carries no `screened`, as objects evaluated before the
+  ## key existed do not.
+  obj <- make_valid_eval()
+
+  expect_false("screened" %in% names(obj$evaluation))
+  expect_false("screened" %in% contract_keys("evaluation"))
+  expect_identical(validate_horizons_eval(obj), obj)
+
+  ## fit()'s cold start writes FALSE, evaluate() TRUE
+  obj$evaluation$screened <- FALSE
+  expect_identical(validate_horizons_eval(obj), obj)
+
+  obj$evaluation$screened <- NA
+  expect_error(suppressMessages(validate_horizons_eval(obj)), "screened",
+               class = "horizons_validation_error")
+
+  obj$evaluation$screened <- c(TRUE, FALSE)
+  expect_error(suppressMessages(validate_horizons_eval(obj)), "screened",
+               class = "horizons_validation_error")
+
+})
+
+test_that("validate_horizons_eval accepts evaluation$recipe, and tolerates its absence (#62)", {
+
+  ## The fixture has no recipe key, which is every object evaluated before
+  ## evaluate() recorded the recipe settings.
+  obj <- make_valid_eval()
+  expect_false("recipe" %in% names(obj$evaluation))
+  expect_identical(validate_horizons_eval(obj), obj)
+
+  obj$evaluation$recipe <- list(sg_window = 9L, sg_window_cm = 18, pca_threshold = 0.995)
+  expect_identical(validate_horizons_eval(obj), obj)
+
+  ## The width is NA when the axis carries no wavenumbers
+  obj$evaluation$recipe$sg_window_cm <- NA_real_
+  expect_identical(validate_horizons_eval(obj), obj)
+
+})
+
+test_that("validate_horizons_eval rejects a malformed evaluation$recipe", {
+
+  obj <- make_valid_eval()
+
+  obj$evaluation$recipe <- list(sg_window = 9.5, pca_threshold = 0.995)
+  expect_error(suppressMessages(validate_horizons_eval(obj)), "recipe")
+
+  obj$evaluation$recipe <- list(sg_window = 9L)
+  expect_error(suppressMessages(validate_horizons_eval(obj)), "recipe")
+
+  obj$evaluation$recipe <- "sg9"
+  expect_error(suppressMessages(validate_horizons_eval(obj)), "recipe")
+
+})
+
 test_that("the committed ensemble fixture (evaluated before the slot existed) still validates", {
 
   ## The fixture also predates the response_bound / ad model slots, so the

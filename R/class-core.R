@@ -149,7 +149,13 @@ new_horizons_data <- function(analysis        = NULL,
 
                   tuning = list(grid_size     = 10L,
                                 bayesian_iter = 15L,
-                                cv_folds      = 5L)),
+                                cv_folds      = 5L),
+
+                  ## Written by configure(): list(sg_window, sg_window_cm,
+                  ## pca_threshold), the settings build_recipe() applies to
+                  ## every config. NULL until then, and on objects configured
+                  ## before it existed; see recipe_settings().
+                  recipe = NULL),
 
     ## -------------------------------------------------------------------------
     ## Section 4: VALIDATION — Pre-flight check results
@@ -169,15 +175,18 @@ new_horizons_data <- function(analysis        = NULL,
     ## Section 5: EVALUATION — Model comparison results (horizons_eval+)
     ## -------------------------------------------------------------------------
 
-    ## Populated by evaluate(); keys mirror what it writes.
+    ## Populated by evaluate(); keys mirror what it writes. fit()'s cold start
+    ## (#45) writes the same keys less the run provenance, with screened FALSE.
     evaluation = list(results          = NULL,  ## tibble: one row per config
                       best_config      = NULL,  ## character: top config_id
                       rank_metric      = NULL,  ## character: metric configs were ranked by
+                      screened         = NULL,  ## logical: TRUE if evaluate() ranked the configs, FALSE for fit()'s cold start
                       split            = NULL,  ## rsplit: train/test partition fit() reuses
                       n_train          = NULL,  ## integer
                       n_test           = NULL,  ## integer
                       workers          = NULL,  ## integer or NA: worker count of the plan
                       parallelize_over = NULL,  ## character: axis actually parallelized
+                      recipe           = NULL,  ## list: sg_window, sg_window_cm, pca_threshold the configs ran with
                       runtime_secs     = NULL,  ## numeric
                       timestamp        = NULL), ## POSIXct
 
@@ -1099,8 +1108,11 @@ warn_validation <- function(warnings) {
 ## new_horizons_data() declares for the slot is required.
 CONTRACT_KEYS_OPTIONAL <- list(
 
-  ## evaluate(): run provenance, added 2026-09-15
-  evaluation = c("workers", "parallelize_over"),
+  ## evaluate(): run provenance, added 2026-09-15, which fit()'s cold start
+  ## also leaves out because no evaluate() ran; the recipe settings the
+  ## configs ran with, added with configure()'s sg_window (#62); and whether
+  ## the configs were screened, added 2026-09-24 (#45)
+  evaluation = c("workers", "parallelize_over", "recipe", "screened"),
 
   ## fit(): the winsorization guardrail (objects fitted before it predict
   ## without a clamp) and the select_training() flag, added 2026-09-21
@@ -1497,9 +1509,15 @@ validate_horizons_ensemble <- function(x) {
 #'    `best_config`, `rank_metric`, `split`, `n_train`, `n_test`,
 #'    `runtime_secs`, `timestamp`. The run-provenance keys added 2026-09-15,
 #'    `parallelize_over` and `workers`, are tolerated when absent (objects
-#'    evaluated earlier still fit) and validated when present:
-#'    `parallelize_over` one of `"sequential"`, `"configs"`, `"resamples"`;
-#'    `workers` a single positive whole number or NA.
+#'    evaluated earlier still fit, and [fit()]'s cold start writes neither)
+#'    and validated when present: `parallelize_over` one of `"sequential"`,
+#'    `"configs"`, `"resamples"`; `workers` a single positive whole number or
+#'    NA. `recipe` (the recipe settings the configs ran with, #62) is likewise
+#'    tolerated when absent and, when present, must be a list whose
+#'    `sg_window` is a single whole number and whose `pca_threshold` is a
+#'    single number; the cold start writes it too. `screened`, added
+#'    2026-09-24 (#45), is likewise tolerated when absent and, when present,
+#'    must be `TRUE` or `FALSE`.
 #' 2. **results**: data frame carrying `config_id`, `status`, and the six
 #'    metric columns (`rmse`, `rrmse`, `rsq`, `ccc`, `rpd`, `mae`); at least
 #'    one row; `config_id` values unique.
@@ -1589,6 +1607,37 @@ validate_horizons_eval <- function(x) {
         ))
 
       }
+
+    }
+
+  }
+
+  ## screened (2026-09-24, #45) -------------------------------------------------
+  ## Tolerated when absent, for objects evaluated before the key existed.
+  ## When present it says whether best_config was chosen by ranking (TRUE) or
+  ## is the one configuration fit() started cold from (FALSE).
+
+  if ("screened" %in% names(ev) && !rlang::is_bool(ev$screened)) {
+
+    errors <- c(errors, cli::format_inline("{.field screened} must be TRUE or FALSE"))
+
+  }
+
+  ## recipe (the settings the configs ran with, #62) ---------------------------
+  ## Tolerated when absent, by the same rule, for objects evaluated before it.
+
+  if ("recipe" %in% names(ev) && !is.null(ev$recipe)) {
+
+    rc <- ev$recipe
+    sw <- if (is.list(rc)) rc$sg_window else NULL
+    pt <- if (is.list(rc)) rc$pca_threshold else NULL
+
+    if (!is.numeric(sw) || length(sw) != 1 || is.na(sw) || sw != round(sw) ||
+        !is.numeric(pt) || length(pt) != 1 || is.na(pt)) {
+
+      errors <- c(errors, cli::format_inline(
+        "{.field recipe} must be a list with a single whole {.field sg_window} and a single numeric {.field pca_threshold}"
+      ))
 
     }
 
@@ -2364,7 +2413,16 @@ print.horizons_data <- function(x, ...) {
 
   has_eval <- !is.null(x$evaluation$results)
 
-  if (has_eval) {
+  ## fit()'s cold start (#45) records its one configuration without
+  ## evaluating it, so there is no success count or winner to report.
+  if (has_eval && isFALSE(x$evaluation$screened)) {
+
+    cat(cli::style_bold("Evaluation\n"))
+    cat(paste0("   \u2514\u2500 Configs evaluated: none (fit() started cold from ",
+               nrow(x$evaluation$results), ")\n"))
+    cat("\n")
+
+  } else if (has_eval) {
 
     cat(cli::style_bold("Evaluation\n"))
 
@@ -2372,45 +2430,45 @@ print.horizons_data <- function(x, ...) {
     n_success <- sum(eval_res$status == "success", na.rm = TRUE)
     n_total   <- nrow(eval_res)
 
-    has_models <- !is.null(x$models$workflows)
+    ## The Best line prints only when a configuration succeeded and its row
+    ## carries the rank metric. Whichever line is last closes the branch; the
+    ## Best line used to stay open on a fitted object, and Successful did
+    ## whenever nothing succeeded.
+    best_id   <- x$evaluation$best_config
+    metric    <- x$evaluation$rank_metric %||% "rmse"
+    best_row  <- eval_res[eval_res$config_id %in% best_id, ]
+    show_best <- n_success > 0 && length(best_id) == 1 &&
+                   nrow(best_row) > 0 && metric %in% names(best_row)
 
     cat(paste0("   \u251C\u2500 Configs evaluated: ", n_total, "\n"))
-    cat(paste0("   \u251C\u2500 Successful: ", n_success, "\n"))
+    cat(paste0("   ", if (show_best) "\u251C\u2500" else "\u2514\u2500",
+               " Successful: ", n_success, "\n"))
 
     ## Best config
-    if (n_success > 0 && !is.null(x$evaluation$best_config)) {
+    if (show_best) {
 
-      best_id  <- x$evaluation$best_config
-      metric   <- x$evaluation$rank_metric %||% "rmse"
-      best_row <- eval_res[eval_res$config_id == best_id, ]
+      cv_col <- paste0("cv_", metric)
 
-      if (nrow(best_row) > 0 && metric %in% names(best_row)) {
+      ## Ranking is on the CV metric (#50); show it first when present,
+      ## with the held-out test value beside it. Objects evaluated before
+      ## the cv_* columns existed print the test value alone.
+      if (cv_col %in% names(best_row) && !is.na(best_row[[cv_col]])) {
 
-        branch <- if (has_models) "\u251C\u2500" else "\u2514\u2500"
-        cv_col <- paste0("cv_", metric)
+        cat(paste0(
+          "   \u2514\u2500 Best: ", best_id,
+          " \u2014 CV ", toupper(metric), " = ",
+          round(best_row[[cv_col]], 3),
+          " (test ", toupper(metric), " = ",
+          round(best_row[[metric]], 3), ")\n"
+        ))
 
-        ## Ranking is on the CV metric (#50); show it first when present,
-        ## with the held-out test value beside it. Objects evaluated before
-        ## the cv_* columns existed print the test value alone.
-        if (cv_col %in% names(best_row) && !is.na(best_row[[cv_col]])) {
+      } else {
 
-          cat(paste0(
-            "   ", branch, " Best: ", best_id,
-            " \u2014 CV ", toupper(metric), " = ",
-            round(best_row[[cv_col]], 3),
-            " (test ", toupper(metric), " = ",
-            round(best_row[[metric]], 3), ")\n"
-          ))
-
-        } else {
-
-          cat(paste0(
-            "   ", branch, " Best: ", best_id,
-            " \u2014 ", toupper(metric), " = ",
-            round(best_row[[metric]], 3), "\n"
-          ))
-
-        }
+        cat(paste0(
+          "   \u2514\u2500 Best: ", best_id,
+          " \u2014 ", toupper(metric), " = ",
+          round(best_row[[metric]], 3), "\n"
+        ))
 
       }
 
@@ -2804,7 +2862,16 @@ summary.horizons_data <- function(object, ...) {
 
   has_eval <- !is.null(x$evaluation$results)
 
-  if (has_eval) {
+  ## fit()'s cold start (#45) records its one configuration without
+  ## evaluating it, so there are no results, rank metric or runtime to report.
+  if (has_eval && isFALSE(x$evaluation$screened)) {
+
+    cat(cli::style_bold("Evaluation\n"))
+    cat(paste0("   \u2514\u2500 Configs evaluated: none (fit() started cold from ",
+               nrow(x$evaluation$results), ")\n"))
+    cat("\n")
+
+  } else if (has_eval) {
 
     cat(cli::style_bold("Evaluation\n"))
 

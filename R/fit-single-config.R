@@ -18,16 +18,27 @@
 #'   `training(split_F)`. Pass `train_Fit` when `compute_uq = TRUE` to avoid
 #'   calibration leakage.
 #' @param role_map Tibble with `variable` and `role` columns.
-#' @param best_params_eval Single-row tibble of best params from evaluate().
+#' @param best_params_eval Single-row tibble of best params from evaluate(),
+#'   or NULL (`fit()`'s cold start), in which case the re-tune starts from a
+#'   space-filling grid.
 #' @param final_bayesian_iter Integer. Bayesian iterations for re-tuning.
 #' @param grid_size Integer. Grid size for warm-start exploration.
 #' @param compute_uq Logical. Whether to train UQ components.
 #' @param allow_par Logical. Passed to tune control functions.
 #' @param seed Integer. Random seed for reproducibility.
+#' @param sg_window Odd integer. Savitzky-Golay window in grid points, passed
+#'   to [build_recipe()]. `fit()` reads it from `configure()`'s
+#'   `config$recipe`, the value `evaluate()` ran with. Default 9.
+#' @param pca_threshold Numeric. Variance share the `pca` feature selection
+#'   keeps, passed to [build_recipe()]. Read the same way. Default 0.995.
 #'
 #' @return List with fields: config_id, status, degraded, degraded_reason,
-#'   fitted_workflow, best_params, cv_predictions, test_metrics, cv_metrics,
-#'   uq, warnings, error_message, runtime_secs.
+#'   fitted_workflow, best_params, warm_start, start_grid_size,
+#'   cv_predictions, test_metrics, cv_metrics, uq, warnings, error_message,
+#'   runtime_secs. `warm_start` is `TRUE` when the re-tune started from
+#'   `best_params_eval`, `FALSE` when it fell back to a space-filling grid of
+#'   `start_grid_size` points, and `NA` (both) when the config failed
+#'   before tuning.
 #'
 #' @keywords internal
 #' @export
@@ -43,7 +54,9 @@ fit_single_config <- function(config_row,
                               compute_uq          = FALSE,
                               compute_ad          = FALSE,
                               allow_par           = FALSE,
-                              seed                = 42L) {
+                              seed                = 42L,
+                              sg_window           = DEFAULT_SG_WINDOW,
+                              pca_threshold       = DEFAULT_PCA_THRESHOLD) {
 
   start_time <- Sys.time()
 
@@ -72,6 +85,11 @@ fit_single_config <- function(config_row,
 
   }
 
+  ## How the re-tune started, once it has: from evaluate()'s parameters, or
+  ## from a space-filling grid when there were none to use (#45)
+  warm_start        <- NA
+  start_grid_size   <- NA_integer_
+
   ## --- Failed result helper ------------------------------------------------
 
   make_failed <- function(error_msg) {
@@ -83,6 +101,8 @@ fit_single_config <- function(config_row,
       degraded_reason  = NA_character_,
       fitted_workflow  = NULL,
       best_params      = NULL,
+      warm_start       = warm_start,
+      start_grid_size  = start_grid_size,
       cv_predictions   = NULL,
       test_metrics     = NULL,
       cv_metrics       = NULL,
@@ -100,7 +120,9 @@ fit_single_config <- function(config_row,
   ## -----------------------------------------------------------------------
 
   recipe_result <- safely_execute(
-    build_recipe(config_row, train_data, role_map),
+    build_recipe(config_row, train_data, role_map,
+                 sg_window     = sg_window,
+                 pca_threshold = pca_threshold),
     log_error          = FALSE,
     capture_conditions = TRUE
   )
@@ -235,6 +257,9 @@ fit_single_config <- function(config_row,
 
   warmstart <- tune_result$result
   collect_from(tune_result)
+
+  warm_start        <- !isTRUE(warmstart$fallback_used)
+  start_grid_size   <- as.integer(warmstart$grid_points %||% NA_integer_)
 
   ## Check for complete tuning failure (grid failed)
   if (is.null(warmstart$best_params)) {
@@ -562,6 +587,8 @@ fit_single_config <- function(config_row,
     degraded_reason  = degraded_reason,
     fitted_workflow  = fitted_workflow,
     best_params      = best_params,
+    warm_start       = warm_start,
+    start_grid_size  = start_grid_size,
     cv_predictions   = cv_predictions,
     test_metrics     = test_metrics,
     cv_metrics       = cv_metrics,

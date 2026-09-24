@@ -86,6 +86,54 @@ describe("evaluate() parallel worker footprint", {
 
   })
 
+  it("carries the recipe settings in the payload and hands them to the config (#62)", {
+
+    ## Run in-process: the worker body is an ordinary function, and what is
+    ## under test is that it forwards shared$sg_window and
+    ## shared$pca_threshold, not the dispatch. evaluate_single_config() is
+    ## replaced with a recorder, so nothing is tuned.
+    expect_true(all(c("sg_window", "pca_threshold") %in% horizons:::SHARED_ARG_NAMES))
+
+    obj   <- make_eval_object(n = 40, n_wn = 20, n_configs = 1)
+    set.seed(1)
+    split <- rsample::initial_split(obj$data$analysis, prop = 0.8)
+    folds <- rsample::vfold_cv(rsample::training(split), v = 3)
+
+    shared <- list(
+      data            = split$data,
+      resample_idx    = horizons:::resample_indices(split, folds),
+      configs         = obj$config$configs,
+      role_map        = obj$data$role_map,
+      grid_size       = 2L,
+      bayesian_iter   = 0L,
+      prune           = FALSE,
+      prune_threshold = 1,
+      seed            = 42L,
+      sg_window       = 13L,
+      pca_threshold   = 0.9,
+      data_fp         = horizons:::eval_data_fingerprint(rsample::training(split),
+                                                         obj$data$role_map),
+      settings        = horizons:::eval_settings(sg_window = 13L, pca_threshold = 0.9),
+      checkpoint_dir  = NULL,
+      pkg_version     = as.character(utils::packageVersion("horizons"))
+    )
+
+    seen <- NULL
+
+    testthat::local_mocked_bindings(
+      evaluate_single_config = function(...) {
+        seen <<- list(...)[c("sg_window", "pca_threshold")]
+        tibble::tibble(config_id = "cfg_001", status = "failed")
+      },
+      .package = "horizons"
+    )
+
+    horizons:::evaluate_config_worker(1L, shared)
+
+    expect_identical(seen, list(sg_window = 13L, pca_threshold = 0.9))
+
+  })
+
   it("refuses to dispatch in parallel under devtools::load_all()", {
 
     skip_if_not(exists(".__DEVTOOLS__", envir = asNamespace("horizons"),
@@ -631,6 +679,56 @@ describe("evaluate() - results are identical across axes", {
                  seq_result$evaluation$results[row_cols])
     expect_equal(par_result$evaluation$results$best_params,
                  seq_result$evaluation$results$best_params)
+
+  })
+
+})
+
+
+## =========================================================================
+## The recipe settings reach a worker in another process (#62)
+## =========================================================================
+## The in-process test above shows the worker forwards the settings; this one
+## shows they survive the trip to a multisession worker and change what it
+## computes. On "raw" a window of 13 trims 12 of the 20 columns rather than 8,
+## so the configured run and the default run model different predictors.
+
+describe("evaluate() - recipe settings on the configs axis", {
+
+  it("runs configure()'s window in the worker, as the sequential run does (installed build)", {
+
+    skip_on_cran()
+    skip_if_dev_package()
+
+    row_cols <- c("rmse", "rrmse", "rsq", "ccc", "rpd", "mae",
+                  "cv_rmse", "cv_rrmse", "cv_rsq", "cv_ccc", "cv_rpd", "cv_mae")
+
+    obj <- make_eval_object(n = 60, n_wn = 20, n_configs = 1)
+    obj$config$recipe <- list(sg_window = 13L, pca_threshold = 0.995)
+
+    seq_result <- suppressWarnings(
+      evaluate(obj, allow_par = FALSE, verbose = FALSE, seed = 42L)
+    )
+
+    default_obj <- obj
+    default_obj$config$recipe <- NULL
+
+    seq_default <- suppressWarnings(
+      evaluate(default_obj, allow_par = FALSE, verbose = FALSE, seed = 42L)
+    )
+
+    local_plan(future::multisession, workers = 2)
+    tmpdir <- withr::local_tempdir()
+
+    par_result <- suppressWarnings(
+      evaluate(obj, allow_par = TRUE, parallelize_over = "configs",
+               output_dir = tmpdir, verbose = FALSE, seed = 42L)
+    )
+
+    expect_equal(par_result$evaluation$results[row_cols],
+                 seq_result$evaluation$results[row_cols])
+    expect_false(isTRUE(all.equal(seq_result$evaluation$results$cv_rmse,
+                                  seq_default$evaluation$results$cv_rmse)))
 
   })
 

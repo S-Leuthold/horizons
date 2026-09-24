@@ -132,8 +132,12 @@
 #' @return A `horizons_eval` object (inherits from `horizons_data`) with
 #'   `evaluation$results`, `evaluation$best_config`, `evaluation$split`, and
 #'   associated metadata populated, including `evaluation$parallelize_over`
-#'   (the axis actually used) and `evaluation$workers` (the worker count the
-#'   registered plan offered; 1 when sequential). Called on an object that
+#'   (the axis actually used), `evaluation$workers` (the worker count the
+#'   registered plan offered; 1 when sequential) and `evaluation$recipe` (the
+#'   `sg_window`, its width in cm-1 on the evaluated axis as `sg_window_cm`,
+#'   and the `pca_threshold` every config's recipe ran with). Aborts, before
+#'   any config runs, when `configure()`'s `sg_window` is not narrower than
+#'   the spectrum. Called on an object that
 #'   has already been through `fit()` or `ensemble()`, it returns a
 #'   `horizons_eval` whose `models` and `ensemble` slots are empty again,
 #'   since both were built on the evaluation it replaces.
@@ -171,13 +175,11 @@ evaluate <- function(x,
   ## Step 1: Gate checks
   ## -----------------------------------------------------------------------
 
-  valid_metrics <- c("rpd", "rsq", "rmse", "rrmse", "ccc", "mae")
-
-  if (!metric %in% valid_metrics) {
+  if (!metric %in% VALID_RANK_METRICS) {
 
     rlang::abort(paste0(
       "Invalid `metric`: '", metric, "'. ",
-      "Must be one of: ", paste(valid_metrics, collapse = ", ")
+      "Must be one of: ", paste(VALID_RANK_METRICS, collapse = ", ")
     ))
 
   }
@@ -225,6 +227,22 @@ evaluate <- function(x,
   }
 
   ## -----------------------------------------------------------------------
+  ## Step 3a: The window has to fit the spectrum
+  ## -----------------------------------------------------------------------
+  ## Object-level recipe settings, the same for every config; see
+  ## recipe_settings() for objects configured before they were recorded.
+  ##
+  ## configure() cannot check the window against the spectrum, because
+  ## standardize() can still change the axis after it. Past this point a
+  ## window as wide as the spectrum fails every config inside tune, as a
+  ## "Grid search failed" or an "All configurations failed" that never names
+  ## the window. The width in cm-1 is read from the axis the recipe will run
+  ## on, and recorded in Step 11. The check is one helper, which fit()'s cold
+  ## start (#45) applies too.
+
+  recipe_cfg <- evaluation_recipe(x)
+
+  ## -----------------------------------------------------------------------
   ## Step 3b: Resolve the parallel axis against the registered plan
   ## -----------------------------------------------------------------------
   ## The user owns the backend; evaluate() only chooses the axis. The
@@ -266,26 +284,22 @@ evaluate <- function(x,
   ## -----------------------------------------------------------------------
   ## Step 4: Create train/test split
   ## -----------------------------------------------------------------------
+  ## The draw is shared with fit()'s cold start (#45), which must hold out
+  ## the rows this verb would at the same seed. `analysis` has had its NA
+  ## outcomes dropped already; the helper's own pass over it then drops
+  ## nothing and returns it uncopied, so the split shares its rows.
 
-  set.seed(seed)
+  drawn <- draw_eval_split(analysis, outcome_col, seed)
+  split <- drawn$split
 
-  split <- tryCatch(
-    rsample::initial_split(analysis, prop = SPLIT_PROP, strata = dplyr::all_of(outcome_col)),
-    error = function(e) {
+  if (!drawn$stratified && verbose) {
 
-      if (verbose) {
+    cat(paste0(
+      "\u2502  ", cli::col_yellow("Stratified split failed, ",
+                                   "retrying without strata"), "\n"
+    ))
 
-        cat(paste0(
-          "\u2502  ", cli::col_yellow("Stratified split failed, ",
-                                       "retrying without strata"), "\n"
-        ))
-
-      }
-
-      rsample::initial_split(analysis, prop = SPLIT_PROP)
-
-    }
-  )
+  }
 
   train_data <- rsample::training(split)
   test_data  <- rsample::testing(split)
@@ -347,7 +361,12 @@ evaluate <- function(x,
     prune           = prune,
     ## Read only when pruning, so it cannot have changed a row otherwise.
     prune_threshold = if (isTRUE(prune)) prune_threshold else NA_real_,
-    seed            = seed
+    seed            = seed,
+    ## configure()'s recipe settings (#62). pca_threshold is recorded for
+    ## every row, PCA or not: conservative, since a row that never ran PCA
+    ## re-runs rather than resumes when only the threshold changed.
+    sg_window       = recipe_cfg$sg_window,
+    pca_threshold   = recipe_cfg$pca_threshold
   )
 
   ## -----------------------------------------------------------------------
@@ -553,7 +572,9 @@ evaluate <- function(x,
         prune_threshold = prune_threshold,
         allow_par       = axis$tune_allow_par,
         parallel_over   = axis$tune_parallel_over %||% "resamples",
-        seed            = seed
+        seed            = seed,
+        sg_window       = recipe_cfg$sg_window,
+        pca_threshold   = recipe_cfg$pca_threshold
       )
 
       ## Stamp before anything else sees the row, so the in-memory results and
@@ -699,6 +720,8 @@ evaluate <- function(x,
       prune           = prune,
       prune_threshold = prune_threshold,
       seed            = seed,
+      sg_window       = recipe_cfg$sg_window,
+      pca_threshold   = recipe_cfg$pca_threshold,
       data_fp         = data_fp,
       settings        = settings,
       checkpoint_dir  = checkpoint_dir,
@@ -794,11 +817,15 @@ evaluate <- function(x,
     results      = all_results,
     best_config  = best_config_id,
     rank_metric  = metric,
+    screened     = TRUE,
     split        = split,
     n_train      = n_train,
     n_test       = n_test,
     workers      = plan_workers,
     parallelize_over = axis$axis,
+    ## What every config's recipe ran with, the window's width included, so
+    ## the results of an sg_window sweep can be told apart after the fact.
+    recipe       = recipe_cfg,
     runtime_secs = total_runtime,
     timestamp    = Sys.time()
   )
@@ -2118,6 +2145,109 @@ outcome_complete_rows <- function(analysis, outcome_col) {
 
 }
 
+## ---------------------------------------------------------------------------
+## draw_eval_split — the one train/test draw evaluate() and fit() share
+## ---------------------------------------------------------------------------
+
+#' Draw evaluate()'s train/test split
+#'
+#' @description
+#' The split `evaluate()` scores on and `fit()` reuses: the rows with an
+#' observed outcome ([outcome_complete_rows()]), then `set.seed(seed)`, then
+#' a `SPLIT_PROP` split stratified on the outcome, falling back to an
+#' unstratified one when stratifying fails. `fit()` calls it when it starts
+#' cold from a configured object with one configuration (#45), so that fit
+#' holds out exactly the rows `evaluate()` would have at the same seed. The
+#' draw was inline in `evaluate()` before, and it is unchanged.
+#'
+#' It seeds the global RNG, as `evaluate()` always has: `evaluate()`'s CV
+#' folds are drawn from the state it leaves.
+#'
+#' @param analysis Data frame. The object's analysis table. Rows whose
+#'   outcome is `NA` are dropped here; a table the callers have already
+#'   filtered for their sample-size gate passes through uncopied.
+#' @param outcome_col Character. Name of the outcome column.
+#' @param seed Integer. The seed passed to `evaluate()` (or to `fit()` on a
+#'   cold start).
+#' @return List with `split` (the `rsplit`), `n_dropped` (integer, the rows
+#'   whose outcome is `NA`) and `stratified` (`FALSE` when the stratified
+#'   draw failed and the split is unstratified). Aborts as
+#'   [outcome_complete_rows()] does.
+#' @keywords internal
+#' @noRd
+draw_eval_split <- function(analysis, outcome_col, seed) {
+
+  modelled   <- outcome_complete_rows(analysis, outcome_col)
+  stratified <- TRUE
+
+  set.seed(seed)
+
+  split <- tryCatch(
+    rsample::initial_split(modelled$data, prop = SPLIT_PROP,
+                           strata = dplyr::all_of(outcome_col)),
+    error = function(e) {
+
+      stratified <<- FALSE
+      rsample::initial_split(modelled$data, prop = SPLIT_PROP)
+
+    }
+  )
+
+  list(split = split, n_dropped = modelled$n_dropped, stratified = stratified)
+
+}
+
+## ---------------------------------------------------------------------------
+## evaluation_recipe — the window check and the evaluation$recipe record
+## ---------------------------------------------------------------------------
+
+#' Check the recipe settings against the spectrum and record them
+#'
+#' @description
+#' Reads the object's recipe settings ([recipe_settings()]) and aborts when
+#' the Savitzky-Golay window is at least as wide as the spectrum, which
+#' `configure()` cannot check because `standardize()` may still change the
+#' axis after it (#62). Past that point such a window fails every config
+#' inside tune with a message that never names it. Returns the record
+#' `evaluate()` stores as `evaluation$recipe`, the window's width in cm-1 on
+#' the axis the recipe runs on included. `fit()`'s cold start (#45) calls it
+#' too, so a configured object that skips `evaluate()` is held to the same
+#' check and records the same settings.
+#'
+#' @param x A configured `horizons_data`.
+#' @param call The call the condition is attributed to. Default: the caller,
+#'   `evaluate()` or `fit()`.
+#' @return List with `sg_window`, `sg_window_cm` (`NA` when the axis spacing
+#'   cannot be read) and `pca_threshold`. Aborts with class
+#'   `horizons_input_error` when the window does not fit the spectrum.
+#' @keywords internal
+#' @noRd
+evaluation_recipe <- function(x, call = rlang::caller_env()) {
+
+  recipe_cfg <- recipe_settings(x)
+  n_spectral <- sum(x$data$role_map$role == "predictor")
+  window_cm  <- recipe_cfg$sg_window * axis_spacing_cm(x)
+
+  if (recipe_cfg$sg_window >= n_spectral) {
+
+    width <- if (is.na(window_cm)) "" else {
+      paste0(" (", signif(window_cm, 3), " cm\u207B\u00B9)")
+    }
+
+    cli::cli_abort(c(
+      "The Savitzky-Golay window is at least as wide as the spectrum.",
+      "x" = "{.arg sg_window} is {recipe_cfg$sg_window} grid points{width}; the object has {n_spectral} spectral column{?s}.",
+      "i" = "The window must be narrower than the spectrum. Re-run {.fn configure} with a smaller {.arg sg_window}, or keep more of the spectrum."
+    ), class = "horizons_input_error", call = call)
+
+  }
+
+  list(sg_window     = recipe_cfg$sg_window,
+       sg_window_cm  = window_cm,
+       pca_threshold = recipe_cfg$pca_threshold)
+
+}
+
 ## -------------------------------------------------------------------------
 ## Parallel worker
 ## -------------------------------------------------------------------------
@@ -2150,7 +2280,8 @@ outcome_complete_rows <- function(analysis, outcome_col) {
 #'   fixed by `SHARED_ARG_NAMES` in `R/constants.R` and asserted on entry:
 #'   `data`, `resample_idx` (from `resample_indices()`), `configs`, `role_map`,
 #'   `grid_size`, `bayesian_iter`, `prune`, `prune_threshold`, `seed`,
-#'   `data_fp` and `settings` (the parent's [eval_data_fingerprint()] and
+#'   `sg_window`, `pca_threshold` (the object's recipe settings), `data_fp`
+#'   and `settings` (the parent's [eval_data_fingerprint()] and
 #'   [eval_settings()] records, stamped on the row as-is), `checkpoint_dir`,
 #'   and `pkg_version`. There is no `allow_par`: on
 #'   the configs axis tune always runs sequentially inside the worker.
@@ -2221,7 +2352,9 @@ evaluate_config_worker <- function(config_i, shared) {
     prune           = shared$prune,
     prune_threshold = shared$prune_threshold,
     allow_par       = FALSE,     # configs axis: tune runs sequentially inside
-    seed            = shared$seed
+    seed            = shared$seed,
+    sg_window       = shared$sg_window,
+    pca_threshold   = shared$pca_threshold
   )
 
   ## Both provenance records are sent rather than rebuilt. The data
