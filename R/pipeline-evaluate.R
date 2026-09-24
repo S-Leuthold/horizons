@@ -124,9 +124,9 @@
 #'
 #' An object validated by an earlier version, which removed response
 #' outliers on whole-table fences before any split, still evaluates. Its
-#' removal record says which rows went (`reason` `"response"` or `"both"`),
-#' and `evaluate()` warns, with class `horizons_response_trim_warning`, that
-#' its test metrics exclude them.
+#' removal record says which rows went on their labels (`reason`
+#' `"response"`), and `evaluate()` warns, with class
+#' `horizons_response_trim_warning`, that its test metrics exclude them.
 #'
 #' @section When every configuration fails:
 #' `best_config` is chosen from the configs that succeeded or, when none did,
@@ -2447,13 +2447,16 @@ trim_training_responses <- function(split, outcome_col, trim, id_col) {
 #' @description
 #' Versions before #77 removed response outliers in `validate()`, on fences
 #' over the whole table, before any split. Their removal record carries
-#' those rows with `reason` `"response"` or `"both"`; this version never
-#' writes either, so their presence identifies an object validated the old
-#' way. Records written before the `reason` column existed cannot be read
-#' this way and count as none.
+#' those rows with `reason` `"response"`, which this version never writes,
+#' so its presence identifies an object validated the old way. A `"both"`
+#' row is not counted: that version wrote it only under
+#' `remove_outliers = TRUE`, where the row went as a spectral outlier
+#' whatever its label, the rule `configure()`'s stale-removal warning
+#' applies. Records written before the `reason` column existed cannot be
+#' read this way and count as none.
 #'
 #' @param x A `horizons_data`.
-#' @return Character. The removed ids, possibly empty.
+#' @return Character. The ids removed on their labels, possibly empty.
 #' @keywords internal
 #' @noRd
 legacy_response_removals <- function(x) {
@@ -2466,7 +2469,7 @@ legacy_response_removals <- function(x) {
 
   }
 
-  as.character(detail$sample_id[detail$reason %in% c("response", "both")])
+  as.character(detail$sample_id[detail$reason %in% "response"])
 
 }
 

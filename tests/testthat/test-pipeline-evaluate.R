@@ -733,8 +733,11 @@ describe("evaluate() - response outliers are trimmed from the training partition
 
 describe("evaluate() - an object validated before #77", {
 
-  ## Rows removed on their labels, on whole-table fences, before any split
-  legacy <- legacy_label_removal(make_extreme_object(), EXTREME_IDS)
+  ## Rows removed on their labels, on whole-table fences, before any split.
+  ## The last two are "both": spectral outliers too, which would have gone
+  ## whatever their labels, so they are not counted.
+  legacy <- legacy_label_removal(make_extreme_object(), EXTREME_IDS,
+                                 reason = rep(c("response", "both"), c(6, 2)))
 
   out <- utils::capture.output(
     caught <- collect_warnings(evaluate(legacy, prune = FALSE, verbose = TRUE, seed = 307L))
@@ -753,10 +756,21 @@ describe("evaluate() - an object validated before #77", {
     expect_true(has_warning_class(caught$warnings, "horizons_response_trim_warning"))
 
     msgs <- vapply(caught$warnings, conditionMessage, character(1))
-    expect_true(any(grepl("8 rows were removed as response outliers", msgs, fixed = TRUE)))
+    expect_true(any(grepl("6 rows were removed as response outliers", msgs, fixed = TRUE)))
 
-    expect_true(any(grepl("Response outliers: 8 rows removed by an earlier validate() before the split",
+    expect_true(any(grepl("Response outliers: 6 rows removed by an earlier validate() before the split",
                           out, fixed = TRUE)))
+
+  })
+
+  it("counts only the rows removed on their labels, and none from a record this version wrote", {
+
+    expect_identical(legacy_response_removals(legacy), EXTREME_IDS[1:6])
+
+    utils::capture.output(
+      spectral_only <- suppressWarnings(validate(make_extreme_object(), remove_outliers = TRUE))
+    )
+    expect_length(legacy_response_removals(spectral_only), 0)
 
   })
 

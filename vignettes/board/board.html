@@ -229,8 +229,8 @@
 
 <script type="application/json" id="hz-data">
 {
-  "generated_at": "2026-09-24T13:43:23-0500",
-  "content_md5": "fe448ec1a86c0b7ded97fda64dc912c7",
+  "generated_at": "2026-09-24T13:45:57-0500",
+  "content_md5": "a85af6cc7b090ba0baef962ba7a1ea8e",
   "horizons": "0.9.0",
   "lanes": [
     {
@@ -1489,127 +1489,127 @@
           "default": null,
           "text": "`horizons_data`. Configured object (must have `config$configs`).",
           "touch": "Always; must be configured, so the outcome and the fold count are known.",
-          "source": "R/pipeline-validate.R#L177"
+          "source": "R/pipeline-validate.R#L178"
         },
         {
           "name": "remove_outliers",
           "default": "FALSE",
           "text": "logical(1) or character(1). `FALSE` to detect only (default). `\"spectral\"` removes the spectral outliers from the object. `\"response\"` removes nothing here: it asks `evaluate()` (and `fit()`'s cold start) to trim, from the training partition only, the training rows outside Tukey fences computed on that partition's labels, with `response_threshold` as the multiplier. `TRUE` does both. Objects validated by versions before this contract had their response outliers removed here, on whole-table fences; they still evaluate, with a warning that their test metrics exclude those rows.",
           "touch": "\"spectral\" to drop the spectral outliers here, through subset_rows(), so a selection record is kept consistent; \"response\" to have evaluate() (and fit()'s cold start) trim the training rows outside fences from its training partition, removing nothing here; TRUE for both. The default only reports.",
-          "source": "R/pipeline-validate.R#L508"
+          "source": "R/pipeline-validate.R#L509"
         },
         {
           "name": "spectral_method",
           "default": "\"mahalanobis\"",
           "text": "`character(1)`. Spectral outlier detection method. Currently only `\"mahalanobis\"`. Default: `\"mahalanobis\"`.",
           "touch": "Never; \"mahalanobis\" is the only method.",
-          "source": "R/pipeline-validate.R#L200"
+          "source": "R/pipeline-validate.R#L201"
         },
         {
           "name": "spectral_threshold",
           "default": "0.975",
           "text": "`numeric(1)`. Chi-squared quantile for Mahalanobis distance cutoff. Default: `0.975`.",
           "touch": "To loosen or tighten the chi-squared quantile the squared distance is cut at; 0.975 by default.",
-          "source": "R/pipeline-validate.R#L795"
+          "source": "R/pipeline-validate.R#L796"
         },
         {
           "name": "response_method",
           "default": "\"iqr\"",
           "text": "`character(1)`. Response outlier detection method. Currently only `\"iqr\"`. Default: `\"iqr\"`.",
           "touch": "Never; \"iqr\" is the only method.",
-          "source": "R/pipeline-validate.R#L211"
+          "source": "R/pipeline-validate.R#L212"
         },
         {
           "name": "response_threshold",
           "default": "1.5",
           "text": "`numeric(1)`. IQR multiplier for Tukey fences, both the whole-table flags and the training-partition fences `evaluate()` trims by. Default: `1.5`.",
           "touch": "The Tukey multiplier, for the whole-table flags and for the training-partition fences evaluate() trims by; 1.5 flags the conventional outer fences, 3 flags only extremes.",
-          "source": "R/pipeline-validate.R#L865"
+          "source": "R/pipeline-validate.R#L866"
         }
       ],
       "mechanics": [
         {
           "step": "Requires a configured object, validates the arguments, and warns if a previous validation is being overwritten.",
-          "source": "R/pipeline-validate.R#L177"
+          "source": "R/pipeline-validate.R#L178"
         },
         {
           "step": "Counts rows with a non-missing outcome, which is what evaluate() will actually model, and reads cv_folds from the tuning record.",
-          "source": "R/pipeline-validate.R#L282"
+          "source": "R/pipeline-validate.R#L283"
         },
         {
           "step": "P007 near-zero-variance predictors (warning); P001 at least 50 rows (warning); P001b at least twice cv_folds modelable rows (error); P002 at least ten rows per fold (warning); P003 outcome variance above zero (error); P004 outcome missing in at most 20 % (warning).",
-          "source": "R/pipeline-validate.R#L345"
+          "source": "R/pipeline-validate.R#L346"
         },
         {
           "step": "Spectral outliers, P005 (info), by PCA on the raw spectra scaled to unit variance per wavenumber, components to 99 % of variance capped at 50 and at two fewer than the row count, then the squared Mahalanobis distance of each score vector against the chi-squared quantile. Skipped with a warning below five rows or on a singular covariance.",
-          "source": "R/pipeline-validate.R#L723"
+          "source": "R/pipeline-validate.R#L724"
         },
         {
           "step": "Response outliers, P006 (info), as outcome values outside Q1 minus and Q3 plus the multiplier times the IQR, over the whole table and for information only. Skipped with a warning below four non-missing values or a zero IQR. The fence rule is one helper, which evaluate()'s training-partition trim uses too.",
-          "source": "R/pipeline-validate.R#L819"
+          "source": "R/pipeline-validate.R#L820"
         },
         {
           "step": "P010 (warning) flags configs pairing cubist with feature_selection = \"none\" once n_rows * n_predictors exceeds CUBIST_MAX_CELLS; the CLI tree line always shows the cell count, and a cli_warn() names the affected config_ids and recommends feature_selection = \"pca\" when any are flagged.",
-          "source": "R/pipeline-validate.R#L470"
+          "source": "R/pipeline-validate.R#L471"
         },
         {
           "step": "If spectral removal was asked for (TRUE or \"spectral\"), drops the spectral outliers through subset_rows() and records each with its threshold; a row outside both kinds of fence is removed as spectral.",
-          "source": "R/pipeline-validate.R#L519"
+          "source": "R/pipeline-validate.R#L520"
         },
         {
           "step": "A response request (TRUE or \"response\") removes nothing. Fences over the whole table span the rows evaluate() will hold out, so removing on them before any split took the test set's hardest cases out by their own labels (#77). It is recorded as a request (outcome, method, threshold) for evaluate().",
-          "source": "R/pipeline-validate.R#L544"
+          "source": "R/pipeline-validate.R#L545"
         },
         {
           "step": "The flags and the request are replaced on every call, but the removal record accumulates, since rows an earlier call removed (before a re-configure, say) are gone for good. configure() clears the request with the verdict.",
-          "source": "R/pipeline-validate.R#L579"
+          "source": "R/pipeline-validate.R#L580"
         },
         {
           "step": "passed is TRUE when no ERROR check failed; warnings do not affect it.",
-          "source": "R/pipeline-validate.R#L557"
+          "source": "R/pipeline-validate.R#L558"
         },
         {
           "step": "Re-validates the whole object structurally before returning it (#24).",
-          "source": "R/pipeline-validate.R#L598"
+          "source": "R/pipeline-validate.R#L599"
         }
       ],
       "records": [
         {
           "field": "validation$passed, validation$timestamp",
           "text": "the verdict and when it was reached",
-          "source": "R/pipeline-validate.R#L565"
+          "source": "R/pipeline-validate.R#L566"
         },
         {
           "field": "validation$checks",
           "text": "one row per check with description, status, severity (blank on passes), value and id",
-          "source": "R/pipeline-validate.R#L571"
+          "source": "R/pipeline-validate.R#L572"
         },
         {
           "field": "validation$outliers",
-          "text": "the spectral and response ids this call flagged; response_trim, the request evaluate() reads, or NULL; and the record of every removal so far, one detail row per removed sample with its reason, the outcome, and the spectral and response thresholds. Rows this version removes are spectral; \"response\" and \"both\" rows come from an earlier version that removed rows on their labels, which evaluate() and fit() warn about",
-          "source": "R/pipeline-validate.R#L587"
+          "text": "the spectral and response ids this call flagged; response_trim, the request evaluate() reads, or NULL; and the record of every removal so far, one detail row per removed sample with its reason, the outcome, and the spectral and response thresholds. Rows this version removes are spectral; \"response\" and \"both\" rows come from an earlier version that removed rows on their labels, and evaluate() and fit() warn about the \"response\" ones (a \"both\" row would have gone as a spectral outlier anyway)",
+          "source": "R/pipeline-validate.R#L588"
         }
       ],
       "refuses": [
         {
           "when": "the object is not configured, or an argument is out of range, or more than one outcome is configured, or the outcome column is missing from the table",
           "does": "aborts, class horizons_validate_error",
-          "source": "R/pipeline-validate.R#L177"
+          "source": "R/pipeline-validate.R#L178"
         },
         {
           "when": "too few rows or columns for a detector, or a singular covariance",
           "does": "warns and skips that detector",
-          "source": "R/pipeline-validate.R#L728"
+          "source": "R/pipeline-validate.R#L729"
         },
         {
           "when": "a previous validation exists",
           "does": "warns and overwrites it",
-          "source": "R/pipeline-validate.R#L244"
+          "source": "R/pipeline-validate.R#L245"
         },
         {
           "when": "the object fails validate_horizons_data() after checks and any removal",
           "does": "aborts with the validator's findings, class horizons_validation_error",
-          "source": "R/pipeline-validate.R#L598"
+          "source": "R/pipeline-validate.R#L599"
         }
       ],
       "evidence": [],
@@ -1846,14 +1846,14 @@
           "source": "R/pipeline-evaluate.R#L2322"
         },
         {
-          "when": "an earlier version's validate() removed rows on their labels before any split (removal_detail rows with reason \"response\" or \"both\")",
+          "when": "an earlier version's validate() removed rows on their labels before any split (removal_detail rows with reason \"response\"; a \"both\" row went as a spectral outlier too, and is not counted)",
           "does": "warns, class horizons_response_trim_warning, that the test metrics exclude those rows, says so in the tree, and evaluates",
-          "source": "R/pipeline-evaluate.R#L2481"
+          "source": "R/pipeline-evaluate.R#L2484"
         },
         {
           "when": "configure()'s sg_window is not narrower than the spectrum on the axis the object now has",
           "does": "aborts before any configuration runs, naming the window, its width in cm⁻¹ and the column count, class horizons_input_error",
-          "source": "R/pipeline-evaluate.R#L2574"
+          "source": "R/pipeline-evaluate.R#L2577"
         },
         {
           "when": "the registered plan has fewer than two workers, checkpoints lack a fingerprint or settings, or a configuration's cv metric is NA",
@@ -1874,7 +1874,7 @@
         },
         {
           "claim": "a closure defined inside evaluate() shipped 2.26 GiB per future against 232 MB of needed inputs, which is why the worker is a top-level function",
-          "where": "R/pipeline-evaluate.R#L2602"
+          "where": "R/pipeline-evaluate.R#L2605"
         },
         {
           "claim": "after the serialization fixes the per-worker payload on the configs axis is 418 MB at 17,788 by 1,701",

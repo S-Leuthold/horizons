@@ -87,7 +87,8 @@
 #'     `"spectral"`, an `NA` outcome and an `NA` `response_threshold`;
 #'     `"response"` and `"both"` rows, with the outcome and threshold filled
 #'     in, are records carried from an earlier version that removed rows on
-#'     their labels.
+#'     their labels (a `"both"` row was a spectral outlier too, and would
+#'     have gone anyway).
 #'   - `validation$timestamp`: when validation ran
 #'
 #' @examples

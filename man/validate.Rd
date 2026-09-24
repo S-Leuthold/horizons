@@ -57,7 +57,8 @@ removes spectral outliers only, so its rows have \code{reason}
 \code{"spectral"}, an \code{NA} outcome and an \code{NA} \code{response_threshold};
 \code{"response"} and \code{"both"} rows, with the outcome and threshold filled
 in, are records carried from an earlier version that removed rows on
-their labels.
+their labels (a \code{"both"} row was a spectral outlier too, and would
+have gone anyway).
 \item \code{validation$timestamp}: when validation ran
 }
 }
