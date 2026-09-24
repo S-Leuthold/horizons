@@ -882,13 +882,18 @@ abort_all_members_failed <- function(results, call = rlang::caller_env()) {
 #' @noRd
 warn_members_below_threshold <- function(members, fallback) {
 
+  ## Columns are read by name: results from before they existed, or built by
+  ## hand, lack them, and `$` on a tibble without the column warns.
+  column_or <- function(col, fill) {
+    if (col %in% names(members)) members[[col]] else rep(fill, nrow(members))
+  }
+
   n_members <- nrow(members)
-  below     <- members$below_prune_threshold %||% rep(NA, n_members)
-  below     <- below | members$status %in% "pruned"
+  below     <- column_or("below_prune_threshold", NA) | members$status %in% "pruned"
 
   if (n_members == 0 || !isTRUE(all(below))) return(invisible(NULL))
 
-  thresholds <- unique(stats::na.omit(members$prune_threshold %||% NA_real_))
+  thresholds <- unique(stats::na.omit(column_or("prune_threshold", NA_real_)))
 
   threshold_text <- if (length(thresholds) == 0) {
     "the prune threshold (not recorded on these rows)"
@@ -896,7 +901,7 @@ warn_members_below_threshold <- function(members, fallback) {
     paste0("the prune threshold of ", paste(format(thresholds), collapse = " and "))
   }
 
-  cv_rpd  <- members$cv_rpd %||% rep(NA_real_, n_members)
+  cv_rpd  <- column_or("cv_rpd", NA_real_)
   cv_text <- paste0(members$config_id, " ",
                     ifelse(is.na(cv_rpd), "NA", formatC(cv_rpd, digits = 2, format = "f")),
                     collapse = ", ")

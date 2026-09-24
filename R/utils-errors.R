@@ -294,9 +294,14 @@ create_failed_result <- function(config_id, error = NULL) {
 #' @noRd
 distinct_config_errors <- function(results, n_show = 3L, n_ids = 3L) {
 
-  msgs <- results$error_message
+  ## Checked by name: `$` on a tibble without the column warns.
+  if (!"error_message" %in% names(results)) {
 
-  if (is.null(msgs)) return(stats::setNames(character(0), character(0)))
+    return(stats::setNames(character(0), character(0)))
+
+  }
+
+  msgs <- results$error_message
 
   has_msg  <- !is.na(msgs) & nzchar(msgs)
   distinct <- unique(msgs[has_msg])
