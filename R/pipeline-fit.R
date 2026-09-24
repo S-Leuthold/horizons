@@ -53,9 +53,13 @@
 #' The fit carries an unscreened evaluation record in place of
 #' `evaluate()`'s: `evaluation$screened` is `FALSE`, the one configuration is
 #' `best_config` with status `"not_evaluated"`, its metric and `cv_*` columns
-#' are `NA`, and `runtime_secs` is 0. Re-fitting a cold-started fit starts
-#' cold again. With more than one configuration `fit()` aborts with class
-#' `horizons_input_error`: choosing among them is what `evaluate()` is for.
+#' are `NA`, and `runtime_secs` is 0. `evaluation$recipe` records the recipe
+#' settings as `evaluate()` does, and `fit()` applies `evaluate()`'s checks
+#' first: at least twice `cv_folds` rows with an observed outcome, and a
+#' Savitzky-Golay window narrower than the spectrum. Re-fitting a
+#' cold-started fit starts cold again. With more than one configuration
+#' `fit()` aborts with class `horizons_input_error`: choosing among them is
+#' what `evaluate()` is for.
 #'
 #' @param x A `horizons_eval` object (output of `evaluate()`), or a
 #'   configured `horizons_data` with exactly one configuration, which `fit()`
@@ -292,6 +296,11 @@ fit <- function(x,
   ## before that field existed fall back to the constant. The tree header
   ## prints this budget, the one that runs.
   final_bayesian_iter <- tuning$final_bayesian_iter %||% DEFAULT_FINAL_BAYES_ITER
+
+  ## The recipe settings evaluate() ran with, or on a cold start the ones
+  ## cold_start_evaluation() checked against the spectrum; see
+  ## recipe_settings().
+  recipe_cfg   <- recipe_settings(x)
 
   ## The rows evaluate() modelled: the same rule on the same table (#67).
   modelled  <- outcome_complete_rows(x$data$analysis, outcome_col)
@@ -557,7 +566,9 @@ fit <- function(x,
       compute_uq          = compute_uq,
       compute_ad          = compute_ad,
       allow_par           = allow_par,
-      seed                = seed
+      seed                = seed,
+      sg_window           = recipe_cfg$sg_window,
+      pca_threshold       = recipe_cfg$pca_threshold
     )
 
     results_list[[i]] <- config_result
@@ -940,11 +951,13 @@ fit <- function(x,
 #' With one configuration there is nothing for `evaluate()` to screen, so
 #' `fit()` starts from the configured object (#45). This checks that the
 #' object can start cold, draws the train/test split `evaluate()` would draw
-#' at the same `seed` ([draw_eval_split()], after the same sample-size floor),
-#' and returns the record `fit()` stores in `x$evaluation` in place of
+#' at the same `seed` ([draw_eval_split()], after the same sample-size floor
+#' and the same Savitzky-Golay window check, [evaluation_recipe()]), and
+#' returns the record `fit()` stores in `x$evaluation` in place of
 #' `evaluate()`'s. The record carries every key [validate_horizons_eval()]
-#' requires, with `screened = FALSE`; it leaves out the run provenance
-#' (`workers`, `parallelize_over`), since no `evaluate()` ran. Its one
+#' requires, with `screened = FALSE`, and `recipe` as `evaluate()` records
+#' it; it leaves out the run provenance (`workers`, `parallelize_over`),
+#' since no `evaluate()` ran. Its one
 #' results row has status `"not_evaluated"`, `NA` metrics and `cv_*`
 #' columns, and `NULL` `best_params`, which sends the re-tune to
 #' [build_warmstart_grid()]'s space-filling fallback.
@@ -959,7 +972,8 @@ fit <- function(x,
 #' @return List with `evaluation` (the record) and `stratified` (`FALSE` when
 #'   the split fell back to unstratified). Aborts with class
 #'   `horizons_input_error` when the object has no configuration or more than
-#'   one, or too few rows have an observed outcome.
+#'   one, too few rows have an observed outcome, or the window is at least as
+#'   wide as the spectrum.
 #' @keywords internal
 #' @noRd
 cold_start_evaluation <- function(x, metric, seed, call = rlang::caller_env()) {
@@ -1005,6 +1019,11 @@ cold_start_evaluation <- function(x, metric, seed, call = rlang::caller_env()) {
 
   }
 
+  ## evaluate()'s next check: the Savitzky-Golay window has to fit the
+  ## spectrum (#62). The record it returns is the one evaluate() stores, and
+  ## fit() builds its recipe from the same settings.
+  recipe_record <- evaluation_recipe(x, call = call)
+
   drawn <- draw_eval_split(modelled$data, outcome_col, seed)
   split <- drawn$split
 
@@ -1034,6 +1053,7 @@ cold_start_evaluation <- function(x, metric, seed, call = rlang::caller_env()) {
       split        = split,
       n_train      = nrow(rsample::training(split)),
       n_test       = nrow(rsample::testing(split)),
+      recipe       = recipe_record,
       runtime_secs = 0,
       timestamp    = Sys.time()
     ),

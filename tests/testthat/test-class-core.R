@@ -2093,6 +2093,38 @@ test_that("validate_horizons_eval tolerates screened being absent and checks it 
 
 })
 
+test_that("validate_horizons_eval accepts evaluation$recipe, and tolerates its absence (#62)", {
+
+  ## The fixture has no recipe key, which is every object evaluated before
+  ## evaluate() recorded the recipe settings.
+  obj <- make_valid_eval()
+  expect_false("recipe" %in% names(obj$evaluation))
+  expect_identical(validate_horizons_eval(obj), obj)
+
+  obj$evaluation$recipe <- list(sg_window = 9L, sg_window_cm = 18, pca_threshold = 0.995)
+  expect_identical(validate_horizons_eval(obj), obj)
+
+  ## The width is NA when the axis carries no wavenumbers
+  obj$evaluation$recipe$sg_window_cm <- NA_real_
+  expect_identical(validate_horizons_eval(obj), obj)
+
+})
+
+test_that("validate_horizons_eval rejects a malformed evaluation$recipe", {
+
+  obj <- make_valid_eval()
+
+  obj$evaluation$recipe <- list(sg_window = 9.5, pca_threshold = 0.995)
+  expect_error(suppressMessages(validate_horizons_eval(obj)), "recipe")
+
+  obj$evaluation$recipe <- list(sg_window = 9L)
+  expect_error(suppressMessages(validate_horizons_eval(obj)), "recipe")
+
+  obj$evaluation$recipe <- "sg9"
+  expect_error(suppressMessages(validate_horizons_eval(obj)), "recipe")
+
+})
+
 test_that("the committed ensemble fixture (evaluated before the slot existed) still validates", {
 
   ## The fixture also predates the response_bound / ad model slots, so the

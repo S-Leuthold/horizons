@@ -16,7 +16,9 @@ configure(
   cv_folds = 5L,
   grid_size = 10L,
   bayesian_iter = 15L,
-  final_bayesian_iter = 25L
+  final_bayesian_iter = 25L,
+  sg_window = 9L,
+  pca_threshold = 0.995
 )
 }
 \arguments{
@@ -59,16 +61,25 @@ Default 15. Minimum 0.}
 
 \item{final_bayesian_iter}{\code{integer}. Bayesian optimization iterations for
 the final fit on the selected configuration. Default 25. Minimum 0.}
+
+\item{sg_window}{\code{integer}. Savitzky-Golay window in grid points, applied
+to every configuration. Default 9. Must be odd, at least 5, and (checked
+by \code{evaluate()}) smaller than the number of spectral columns. For
+\code{"sg"} it is the width of a moving average. See Recipe settings.}
+
+\item{pca_threshold}{\code{numeric}. Share of variance \code{feature_selection = "pca"} keeps, applied to every configuration that uses it. Default
+0.995. Must be in (0, 1].}
 }
 \value{
 A modified \code{horizons_data} object with:
 \itemize{
 \item Outcome variable promoted to \code{role = "outcome"} in \code{data$role_map}
-\item \code{config$configs} — tibble of configuration grid (9 columns)
+\item \code{config$configs} — tibble of configuration grid (6 columns)
 \item \code{config$n_configs} — integer count
 \item \code{config$tuning} — list of tuning parameters
 \item \code{config$expansion} — list of original inputs (for reproducibility)
-\item \code{config$defaults} — list of method defaults
+\item \code{config$recipe} — the recipe settings every configuration is built
+with: \code{sg_window} and \code{pca_threshold}
 }
 }
 \description{
@@ -154,6 +165,31 @@ every candidate knot — but neither has been measured at library scale,
 and \code{validate()} does not warn for them. A slow run with either on a
 full-resolution table is a signal to add \code{feature_selection} there too.
 See GitHub issue #40.
+
+\strong{Recipe settings:}
+
+\code{sg_window} and \code{pca_threshold} are set once per object, not per
+configuration: every configuration's recipe uses the same value, and
+neither is part of the config id. \code{sg_window} is the Savitzky-Golay window
+in grid points. It trims \code{(sg_window - 1) / 2} columns from each end of the
+spectrum for every preprocessing method, \code{"raw"} and \code{"snv"} included, so
+it matters even where no filter runs. The polynomial order is not a
+setting: each method fixes its own (\code{"sg"} order 1; \code{"deriv1"} first
+derivative, order 1; \code{"deriv2"} second derivative, order 3; the \code{"snv_"}
+variants the same), and the cubic is why the window must be at least 5.
+At order 1 the \code{"sg"} smoother is a moving average, so widening
+\code{sg_window} widens a boxcar: it flattens peaks and shoulders narrower than
+the window rather than preserving them, as a higher-order Savitzky-Golay
+filter would.
+
+Because the window counts grid points, its physical width depends on the
+axis it runs on, and \code{standardize()} can still change that axis after
+\code{configure()}. So the width is not stored here: \code{configure()} prints it in
+cm-1 for the axis it sees, \code{evaluate()} records the width it actually ran
+in \code{evaluation$recipe}, and \code{evaluate()} refuses a window as wide as the
+spectrum. \code{pca_threshold} is the share of variance kept by
+\code{feature_selection = "pca"} and is read by nothing else. Both defaults are
+the values the recipe ran before they were settable. See GitHub issue #62.
 }
 \examples{
 \dontrun{
@@ -171,6 +207,14 @@ hd |> configure(
   preprocessing   = c("raw", "snv", "sg"),
   cv_folds        = 10L,
   grid_size       = 20L
+)
+
+# A wider Savitzky-Golay window and a tighter PCA for every config
+hd |> configure(
+  preprocessing     = c("deriv1", "snv_deriv2"),
+  feature_selection = "pca",
+  sg_window         = 15L,
+  pca_threshold     = 0.99
 )
 
 # Multi-outcome pattern

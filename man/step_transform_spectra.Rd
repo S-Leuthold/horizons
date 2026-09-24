@@ -22,7 +22,10 @@ step_transform_spectra(
 
 \item{preprocessing}{Character. One of the methods listed above.}
 
-\item{window_size}{Odd integer. Savitzky-Golay window size. Default 9.}
+\item{window_size}{Odd integer, at least 5. Savitzky-Golay window size, in
+grid points; it also sets the edge trimmed for \code{"raw"} and \code{"snv"}.
+Default 9. Checked here, so a direct caller cannot build the step with a
+window some method cannot run.}
 
 \item{role}{Character. Role for output columns. Default "predictor".}
 
@@ -43,7 +46,8 @@ Designed for wide-format spectral data where columns are wavenumbers.
 Supported preprocessing methods:
 \itemize{
 \item \code{"raw"} — trim edge artifacts only (no transformation)
-\item \code{"sg"} — Savitzky-Golay smoothing (0th derivative)
+\item \code{"sg"} — Savitzky-Golay smoothing (0th derivative) at polynomial order
+1, which is a moving average: a boxcar \code{window_size} points wide
 \item \code{"snv"} — Standard Normal Variate + edge trimming
 \item \code{"deriv1"} — Savitzky-Golay 1st derivative
 \item \code{"deriv2"} — Savitzky-Golay 2nd derivative

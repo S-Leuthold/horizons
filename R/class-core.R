@@ -149,7 +149,13 @@ new_horizons_data <- function(analysis        = NULL,
 
                   tuning = list(grid_size     = 10L,
                                 bayesian_iter = 15L,
-                                cv_folds      = 5L)),
+                                cv_folds      = 5L),
+
+                  ## Written by configure(): list(sg_window, sg_window_cm,
+                  ## pca_threshold), the settings build_recipe() applies to
+                  ## every config. NULL until then, and on objects configured
+                  ## before it existed; see recipe_settings().
+                  recipe = NULL),
 
     ## -------------------------------------------------------------------------
     ## Section 4: VALIDATION — Pre-flight check results
@@ -180,6 +186,7 @@ new_horizons_data <- function(analysis        = NULL,
                       n_test           = NULL,  ## integer
                       workers          = NULL,  ## integer or NA: worker count of the plan
                       parallelize_over = NULL,  ## character: axis actually parallelized
+                      recipe           = NULL,  ## list: sg_window, sg_window_cm, pca_threshold the configs ran with
                       runtime_secs     = NULL,  ## numeric
                       timestamp        = NULL), ## POSIXct
 
@@ -873,9 +880,10 @@ abort_validation <- function(errors) {
 CONTRACT_KEYS_OPTIONAL <- list(
 
   ## evaluate(): run provenance, added 2026-09-15, which fit()'s cold start
-  ## also leaves out because no evaluate() ran; and whether the configs were
-  ## screened, added 2026-09-24 (#45)
-  evaluation = c("workers", "parallelize_over", "screened"),
+  ## also leaves out because no evaluate() ran; the recipe settings the
+  ## configs ran with, added with configure()'s sg_window (#62); and whether
+  ## the configs were screened, added 2026-09-24 (#45)
+  evaluation = c("workers", "parallelize_over", "recipe", "screened"),
 
   ## fit(): the winsorization guardrail (objects fitted before it predict
   ## without a clamp) and the select_training() flag, added 2026-09-21
@@ -1275,8 +1283,12 @@ validate_horizons_ensemble <- function(x) {
 #'    evaluated earlier still fit, and [fit()]'s cold start writes neither)
 #'    and validated when present: `parallelize_over` one of `"sequential"`,
 #'    `"configs"`, `"resamples"`; `workers` a single positive whole number or
-#'    NA. `screened`, added 2026-09-24 (#45), is likewise tolerated when
-#'    absent and, when present, must be `TRUE` or `FALSE`.
+#'    NA. `recipe` (the recipe settings the configs ran with, #62) is likewise
+#'    tolerated when absent and, when present, must be a list whose
+#'    `sg_window` is a single whole number and whose `pca_threshold` is a
+#'    single number; the cold start writes it too. `screened`, added
+#'    2026-09-24 (#45), is likewise tolerated when absent and, when present,
+#'    must be `TRUE` or `FALSE`.
 #' 2. **results**: data frame carrying `config_id`, `status`, and the six
 #'    metric columns (`rmse`, `rrmse`, `rsq`, `ccc`, `rpd`, `mae`); at least
 #'    one row; `config_id` values unique.
@@ -1379,6 +1391,26 @@ validate_horizons_eval <- function(x) {
   if ("screened" %in% names(ev) && !rlang::is_bool(ev$screened)) {
 
     errors <- c(errors, cli::format_inline("{.field screened} must be TRUE or FALSE"))
+
+  }
+
+  ## recipe (the settings the configs ran with, #62) ---------------------------
+  ## Tolerated when absent, by the same rule, for objects evaluated before it.
+
+  if ("recipe" %in% names(ev) && !is.null(ev$recipe)) {
+
+    rc <- ev$recipe
+    sw <- if (is.list(rc)) rc$sg_window else NULL
+    pt <- if (is.list(rc)) rc$pca_threshold else NULL
+
+    if (!is.numeric(sw) || length(sw) != 1 || is.na(sw) || sw != round(sw) ||
+        !is.numeric(pt) || length(pt) != 1 || is.na(pt)) {
+
+      errors <- c(errors, cli::format_inline(
+        "{.field recipe} must be a list with a single whole {.field sg_window} and a single numeric {.field pca_threshold}"
+      ))
+
+    }
 
   }
 

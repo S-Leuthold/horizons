@@ -135,6 +135,19 @@ DEFAULT_CV_FOLDS <- 5
 BAYES_NO_IMPROVE_LIMIT <- 10
 DEFAULT_CORE_BUFFER <- 2  # Keep 2 cores free for system
 
+# Recipe settings configure() records and build_recipe() applies to every
+# config (#62): the Savitzky-Golay window in grid points, and the share of
+# variance step_pca() keeps. These are what the recipe ran before the settings
+# were exposed, so an object configured before them (no `config$recipe`) runs
+# unchanged through the fallback in recipe_settings().
+DEFAULT_SG_WINDOW     <- 9L
+DEFAULT_PCA_THRESHOLD <- 0.995
+
+# The narrowest Savitzky-Golay window every preprocessing method can run:
+# deriv2 and snv_deriv2 fit a cubic, and prospectr::savitzkyGolay() needs the
+# window wider than the polynomial order. See is_valid_sg_window().
+SG_WINDOW_MIN <- 5L
+
 ## Covariate Types ------------------------------------------------------------
 
 # Known soil covariate types
@@ -223,6 +236,8 @@ SHARED_ARG_NAMES <- c(
   "prune",
   "prune_threshold",
   "seed",
+  "sg_window",
+  "pca_threshold",
   "data_fp",
   "settings",
   "checkpoint_dir",

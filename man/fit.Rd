@@ -129,8 +129,12 @@ own cross-validation.
 The fit carries an unscreened evaluation record in place of
 \code{evaluate()}'s: \code{evaluation$screened} is \code{FALSE}, the one configuration is
 \code{best_config} with status \code{"not_evaluated"}, its metric and \verb{cv_*} columns
-are \code{NA}, and \code{runtime_secs} is 0. Re-fitting a cold-started fit starts
-cold again. With more than one configuration \code{fit()} aborts with class
-\code{horizons_input_error}: choosing among them is what \code{evaluate()} is for.
+are \code{NA}, and \code{runtime_secs} is 0. \code{evaluation$recipe} records the recipe
+settings as \code{evaluate()} does, and \code{fit()} applies \code{evaluate()}'s checks
+first: at least twice \code{cv_folds} rows with an observed outcome, and a
+Savitzky-Golay window narrower than the spectrum. Re-fitting a
+cold-started fit starts cold again. With more than one configuration
+\code{fit()} aborts with class \code{horizons_input_error}: choosing among them is
+what \code{evaluate()} is for.
 }
 

@@ -692,6 +692,63 @@ describe("fit() - final_bayesian_iter", {
 })
 
 
+## =========================================================================
+## The recipe settings evaluate() ran with reach the re-tune (#62)
+## =========================================================================
+
+describe("fit() - recipe settings", {
+
+  capture_recipe_args <- function(obj) {
+
+    seen <- NULL
+
+    testthat::with_mocked_bindings(
+      fit_single_config = function(...) {
+        seen <<- list(...)[c("sg_window", "pca_threshold")]
+        list(config_id = list(...)$config_row$config_id, status = "failed",
+             degraded = NA, degraded_reason = NA_character_,
+             fitted_workflow = NULL, best_params = NULL,
+             cv_predictions = NULL, test_metrics = NULL, cv_metrics = NULL,
+             uq = NULL, ad = NULL, warnings = NULL,
+             error_message = "mocked", runtime_secs = 0)
+      },
+      tryCatch(
+        suppressWarnings(
+          fit(obj, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE,
+              verbose = FALSE)
+        ),
+        error = function(e) NULL
+      ),
+      .package = "horizons"
+    )
+
+    seen
+
+  }
+
+  obj <- make_fit_object(n = 60, n_configs = 1)
+
+  it("passes configure()'s sg_window and pca_threshold to fit_single_config()", {
+
+    obj$config$recipe <- list(sg_window = 7L, pca_threshold = 0.9)
+
+    expect_identical(capture_recipe_args(obj),
+                     list(sg_window = 7L, pca_threshold = 0.9))
+
+  })
+
+  it("falls back to the values the recipe always ran when the record is absent (older objects)", {
+
+    obj$config$recipe <- NULL
+
+    expect_identical(capture_recipe_args(obj),
+                     list(sg_window = 9L, pca_threshold = 0.995))
+
+  })
+
+})
+
+
 describe("fit() - seed reproducibility", {
 
   ## The train/test split is evaluate()'s, so what fit()'s seed controls is
@@ -1611,6 +1668,58 @@ describe("fit() - cold start from one configuration (#45)", {
     msg <- gsub("\\s+", " ", conditionMessage(err))   # undo cli line wrapping
     expect_match(msg, "2 configurations", fixed = TRUE)
     expect_match(msg, "evaluate()", fixed = TRUE)
+
+  })
+
+  it("records evaluation$recipe as evaluate() does, and builds its recipe from it (#62)", {
+
+    expect_identical(cold$evaluation$recipe, ev$evaluation$recipe)
+
+    ## A non-default record reaches both the evaluation record and the re-tune
+    tuned <- obj
+    tuned$config$recipe <- list(sg_window = 7L, pca_threshold = 0.9)
+
+    seen <- NULL
+
+    testthat::with_mocked_bindings(
+      tryCatch(
+        suppressWarnings(
+          fit(tuned, compute_uq = FALSE, compute_ad = FALSE, verbose = FALSE)
+        ),
+        horizons_all_members_failed = function(e) NULL
+      ),
+      fit_single_config = function(...) {
+        seen <<- list(...)[c("sg_window", "pca_threshold")]
+        list(config_id = "cfg_001", status = "failed", error_message = "mocked",
+             runtime_secs = 0)
+      },
+      .package = "horizons"
+    )
+
+    expect_identical(seen, list(sg_window = 7L, pca_threshold = 0.9))
+    expect_identical(cold_start_evaluation(tuned, NULL, 42L)$evaluation$recipe,
+                     list(sg_window = 7L, sg_window_cm = 14, pca_threshold = 0.9))
+
+  })
+
+  it("refuses a Savitzky-Golay window as wide as the spectrum, as evaluate() does (#62)", {
+
+    ## make_eval_object() has 10 spectral columns
+    wide <- obj
+    wide$config$recipe <- list(sg_window = 11L, pca_threshold = 0.995)
+
+    ran <- 0L
+
+    err <- testthat::with_mocked_bindings(
+      tryCatch(fit(wide, verbose = FALSE, seed = 42L), error = function(e) e),
+      fit_single_config = function(...) { ran <<- ran + 1L; NULL },
+      .package = "horizons"
+    )
+
+    expect_s3_class(err, "horizons_input_error")
+    expect_match(conditionMessage(err), "11 grid points (22 cm", fixed = TRUE)
+    expect_match(conditionMessage(err), "10 spectral columns", fixed = TRUE)
+    expect_identical(ran, 0L)
 
   })
 
