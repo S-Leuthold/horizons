@@ -131,13 +131,6 @@ predict.horizons_fit <- function(object,
 
   }
 
-  ## `library(horizons)` does not load workflows, most modeling engines, or
-  ## ranger (#65) — none of them are referenced via NAMESPACE import
-  ## directives, only `::`. A stored workflow's S3 predict method therefore
-  ## fails to dispatch in a fresh session unless the caller has separately
-  ## loaded the right namespace. Load them before any predict work starts.
-  ensure_predict_namespaces(object)
-
   ## -------------------------------------------------------------------------
   ## Step 0b: Resolve new_data, then validate it carries the training axis
   ## -------------------------------------------------------------------------
@@ -145,8 +138,20 @@ predict.horizons_fit <- function(object,
   ## Which configs are being predicted decides which covariates are required:
   ## a covariate a config uses is a genuine predictor in that workflow's
   ## blueprint, so it must survive into new_spectra and be validated. Resolved
-  ## here, ahead of the data gate, rather than in Step 1.
+  ## here, ahead of the data gate, rather than in Step 1. resolve_config_ids()
+  ## needs no namespace loading itself, so it runs first.
   config_ids <- resolve_config_ids(object, config)
+
+  ## `library(horizons)` does not load workflows, most modeling engines, or
+  ## ranger (#65) — none of them are referenced via NAMESPACE import
+  ## directives, only `::`. A stored workflow's S3 predict method therefore
+  ## fails to dispatch in a fresh session unless the caller has separately
+  ## loaded the right namespace. Scoped to config_ids (not every config the
+  ## object stores): a fit holding both an rf and a mars config should not
+  ## need earth installed just to predict the rf one. Also has to run before
+  ## fitted_extra_predictors() below — its extract_mold() call silently
+  ## returns nothing (via a tryCatch) when workflows is not yet loaded.
+  ensure_predict_namespaces(object, config_ids)
 
   keep_extra <- fitted_extra_predictors(object, config_ids)
 
@@ -216,63 +221,47 @@ predict.horizons_fit <- function(object,
 #'
 #' A `horizons_fit` (or `horizons_ensemble`) stores a `butcher::butcher()`ed
 #' `workflows` object per config. `stats::predict()` S3 dispatch on that
-#' stored object only resolves if the relevant packages' namespaces are
-#' already loaded in the session — `workflows`, most modeling engines
-#' (`ranger`, `Cubist`, `xgboost`, ...), and `tune` are never referenced via a
+#' stored object only resolves if `workflows` (and `parsnip`, `recipes`) are
+#' already loaded in the session — none of them are referenced via a
 #' NAMESPACE import directive in this package (only `::`), so `library(
 #' horizons)` alone does not load them. A fresh session predicting a
 #' deserialized fit then fails with "no applicable method for 'predict'"
 #' (#65) instead of a clear message about a missing package. Called at the
-#' top of [predict.horizons_fit()] and [predict.horizons_ensemble()], before
-#' any config-specific work, so a genuinely missing (Suggested) engine
-#' package aborts with an actionable message rather than an opaque dispatch
-#' error.
+#' top of [predict.horizons_fit()] and [predict.horizons_ensemble()], with
+#' `config_ids` already resolved to the configs actually being predicted (not
+#' every config the object stores — a fit holding both an `rf` and a `mars`
+#' config should not need `earth` installed just to predict the `rf` one),
+#' and before [fitted_extra_predictors()] — its `extract_mold()` call
+#' silently returns nothing (via a `tryCatch`) when `workflows` is not yet
+#' loaded, so this has to run first for that function's answer to be right.
 #'
-#' Loads, unconditionally, `workflows`, `parsnip` and `recipes` (predict
-#' dispatch on any stored workflow needs all three), plus:
-#' - The engine package(s) for every model in use, from
-#'   [MODEL_PREDICT_PACKAGES]. For a `horizons_ensemble`, "in use" is the
-#'   member set the meta-learner actually trained on
-#'   (`object$ensemble$weights$member`) — not necessarily every workflow the
-#'   underlying fit stored, since [gather_members()] can drop a stored
-#'   config that lacks out-of-fold predictions. For a plain `horizons_fit`,
-#'   it is every workflow the object stores (`config` resolution to a single
-#'   config happens after this call).
-#' - `ranger`, when the object carries a per-config UQ bundle
-#'   ([fit_uq()]'s quantile forest is always a `ranger::ranger` object,
-#'   regardless of the config's own model). Only checked for a plain
-#'   `horizons_fit`: an ensemble's own intervals come from CV+ fold refits
-#'   ([fit_ensemble_uq()]), not a quantile forest, and its members always
-#'   predict with `interval = FALSE` ([predict_members()]), so the
-#'   per-config UQ bundles inherited from the underlying fit are never
-#'   consulted at ensemble predict time.
+#' Most of this is an availability preflight, not a dispatch fix. Once
+#' `workflows`/`parsnip` are loaded, `parsnip`'s own `predict.model_fit()`
+#' dispatch loads each model's own engine package itself; horizons does not
+#' need to preload it for dispatch to work (see the rationale comment on
+#' [MODEL_PREDICT_PACKAGES], `R/constants.R`). Checking here instead means a
+#' genuinely missing (Suggested) engine package aborts with an actionable,
+#' package-naming message up front, rather than surfacing as an obscure
+#' failure partway through prediction. `ranger` for the UQ quantile forest is
+#' the one case that is genuinely dispatch-critical, not just availability:
+#' `stats::predict()` there dispatches on a bare `ranger::ranger` object
+#' directly, with no `parsnip`/`workflows` layer to auto-load it.
 #'
 #' @param object A `horizons_fit` or `horizons_ensemble`.
+#' @param config_ids Character vector of config_ids actually being predicted
+#'   (the resolved `config` argument for a fit, or the member set for an
+#'   ensemble — see the call sites).
 #' @return Invisibly `NULL`. Called for the side effect of loading
 #'   namespaces (and aborting when a required Suggested package is missing).
 #' @keywords internal
 #' @noRd
-ensure_predict_namespaces <- function(object) {
-
-  requireNamespace("workflows", quietly = TRUE)
-  requireNamespace("parsnip",   quietly = TRUE)
-  requireNamespace("recipes",   quietly = TRUE)
-
-  config_ids <- if (inherits(object, "horizons_ensemble")) {
-
-    object$ensemble$weights$member
-
-  } else {
-
-    names(object$models$workflows)
-
-  }
+ensure_predict_namespaces <- function(object, config_ids) {
 
   configs <- object$config$configs
 
   models <- if (!is.null(configs) && "model" %in% names(configs)) {
 
-    unique(configs$model[configs$config_id %in% config_ids])
+    configs$model[configs$config_id %in% config_ids]
 
   } else {
 
@@ -280,11 +269,55 @@ ensure_predict_namespaces <- function(object) {
 
   }
 
-  ## pkg -> reasons (model names, or a UQ note), so a missing-package abort
-  ## can say why it is needed.
+  ## ranger for the UQ quantile forest is only relevant to a plain
+  ## horizons_fit: an ensemble's own intervals come from CV+ fold refits
+  ## (fit_ensemble_uq()), not a quantile forest, and its members always
+  ## predict with interval = FALSE (predict_members()), so the per-config UQ
+  ## bundles inherited from the underlying fit are never consulted at
+  ## ensemble predict time.
+  needs_ranger <- !inherits(object, "horizons_ensemble") &&
+    any(!vapply(object$models$uq[config_ids], is.null, logical(1)))
+
+  needed <- compute_needed_predict_packages(models, needs_ranger)
+
+  ## workflows/parsnip/recipes are needed to dispatch on ANY stored workflow
+  ## at all, regardless of model — folded into the same collect-then-abort-
+  ## once path below, rather than requireNamespace()d separately with their
+  ## result silently discarded on failure.
+  base_reason <- "predicting from a stored workflow"
+  needed[["workflows"]] <- unique(c(needed[["workflows"]], base_reason))
+  needed[["parsnip"]]   <- unique(c(needed[["parsnip"]],   base_reason))
+  needed[["recipes"]]   <- unique(c(needed[["recipes"]],   base_reason))
+
+  abort_on_missing_predict_packages(needed)
+
+}
+
+## ---------------------------------------------------------------------------
+## compute_needed_predict_packages() — model(s) -> package(s) (pure helper)
+## ---------------------------------------------------------------------------
+
+#' Compute the predict-time packages a set of models needs
+#'
+#' Pure: no `requireNamespace()` calls, no side effects. Factored out of
+#' [ensure_predict_namespaces()] so "which packages, and why" is directly
+#' testable without touching the search path or building a fitted object.
+#'
+#' @param models Character vector of model short names in use (the `model`
+#'   values of the config rows being predicted; may repeat).
+#' @param needs_ranger_for_uq Logical. Add `ranger` (reason: "prediction
+#'   intervals") when `TRUE` — the caller sets this when a per-config UQ
+#'   bundle is present, since [fit_uq()]'s quantile forest is always a bare
+#'   `ranger::ranger` object regardless of the config's own model.
+#' @return Named list: package name -> character vector of reasons (model
+#'   names, or a UQ note) that need it.
+#' @keywords internal
+#' @noRd
+compute_needed_predict_packages <- function(models, needs_ranger_for_uq = FALSE) {
+
   needed <- list()
 
-  for (m in models) {
+  for (m in unique(models)) {
 
     for (pkg in MODEL_PREDICT_PACKAGES[[m]] %||% character(0)) {
 
@@ -294,14 +327,13 @@ ensure_predict_namespaces <- function(object) {
 
   }
 
-  if (!inherits(object, "horizons_ensemble") &&
-      any(!vapply(object$models$uq[config_ids], is.null, logical(1)))) {
+  if (isTRUE(needs_ranger_for_uq)) {
 
     needed[["ranger"]] <- unique(c(needed[["ranger"]], "prediction intervals"))
 
   }
 
-  abort_on_missing_predict_packages(needed)
+  needed
 
 }
 
@@ -313,7 +345,10 @@ ensure_predict_namespaces <- function(object) {
 #'
 #' Factored out of [ensure_predict_namespaces()] so the missing-package abort
 #' path is unit-testable against a synthetic `needed` mapping, without a real
-#' fitted object or mocking `requireNamespace()`.
+#' fitted object or mocking `requireNamespace()`. Checks every needed package
+#' and aborts once, naming every missing one and what needs it — not on the
+#' first miss, which would hide the rest behind a fix-one-rerun-find-the-next
+#' cycle.
 #'
 #' @param needed Named list: package name -> character vector of reasons
 #'   (model names, or a UQ note) that need it.
@@ -322,21 +357,60 @@ ensure_predict_namespaces <- function(object) {
 #' @noRd
 abort_on_missing_predict_packages <- function(needed) {
 
-  for (pkg in names(needed)) {
+  missing <- names(needed)[
+    !vapply(names(needed), requireNamespace, logical(1), quietly = TRUE)
+  ]
 
-    if (!requireNamespace(pkg, quietly = TRUE)) {
+  if (length(missing) == 0) {
 
-      cli::cli_abort(c(
-        "Package {.pkg {pkg}} is required to predict from this object but is not installed.",
-        "i" = "Needed for {.val {needed[[pkg]]}}.",
-        "i" = "Install it with {.code install.packages(\"{pkg}\")}."
-      ), class = "horizons_missing_predict_package")
-
-    }
+    return(invisible(NULL))
 
   }
 
-  invisible(NULL)
+  ## Built with paste0(), not glue interpolation: pkg/reasons/hint are all
+  ## package- or model-controlled strings (never an upstream error message),
+  ## so there is no brace-injection risk here the way there is for
+  ## warn_interval_failure()'s `detail` — but the resulting {.pkg ...} /
+  ## {.code ...} spans are still literal cli markup, rendered when cli_abort()
+  ## parses the finished vector below.
+  bullets <- vapply(missing, function(pkg) {
+
+    reasons <- paste(needed[[pkg]], collapse = ", ")
+    hint    <- predict_package_install_hint(pkg)
+
+    paste0("{.pkg ", pkg, "}, needed for ", reasons, ": {.code ", hint, "}")
+
+  }, character(1))
+
+  names(bullets) <- rep("x", length(bullets))
+
+  cli::cli_abort(c(
+    "Predicting from this object needs {length(missing)} package{?s} that {?is/are} not installed.",
+    bullets
+  ), class = "horizons_missing_predict_package")
+
+}
+
+## ---------------------------------------------------------------------------
+## predict_package_install_hint() — CRAN vs. Bioconductor install() call
+## ---------------------------------------------------------------------------
+
+#' Install hint for a missing predict-time package
+#'
+#' Nearly every predict-time package installs with `install.packages()`.
+#' `mixOmics` (the `plsr` engine) is the one exception, on Bioconductor
+#' rather than CRAN — `install.packages("mixOmics")` cannot find it, so the
+#' generic hint would be actively wrong there (see README.md's Dependencies
+#' section for the same guidance).
+#'
+#' @param pkg Character(1). Package name.
+#' @return Character(1). An `install.packages()` or `BiocManager::install()`
+#'   call, as a string.
+#' @keywords internal
+#' @noRd
+predict_package_install_hint <- function(pkg) {
+
+  PREDICT_PACKAGE_INSTALL_HINT[[pkg]] %||% sprintf('install.packages("%s")', pkg)
 
 }
 
@@ -769,7 +843,8 @@ predict_one_config <- function(object, config_id, new_spectra, interval,
     interval_cols <- predict_intervals(
       uq          = uq,
       point_pred  = point_pred,
-      new_spectra = new_spectra
+      new_spectra = new_spectra,
+      config_id   = config_id
     )
 
     ## predict_intervals() returns NULL if quantile prediction fails — degrade
@@ -916,11 +991,13 @@ predict_members <- function(object, members, new_spectra) {
 #' @param uq A UQ bundle from `models$uq[[config_id]]`.
 #' @param point_pred Numeric point predictions, original scale.
 #' @param new_spectra Tibble of new data (sample_id + predictors).
+#' @param config_id Character(1) or `NULL`. The config this bundle belongs
+#'   to, named in the warning on failure. `NULL` (default) omits it.
 #' @param level Coverage level or NULL (-> `uq$level_default`).
 #' @return Tibble of interval columns, or NULL if quantile prediction fails.
 #' @keywords internal
 #' @noRd
-predict_intervals <- function(uq, point_pred, new_spectra) {
+predict_intervals <- function(uq, point_pred, new_spectra, config_id = NULL) {
 
   ## Intervals are returned at the coverage level the UQ was calibrated for.
   level <- uq$level_default
@@ -938,7 +1015,7 @@ predict_intervals <- function(uq, point_pred, new_spectra) {
   if (!is.null(bake_result$error) || is.null(bake_result$result)) {
 
     warn_interval_failure("baking new data through the UQ recipe",
-                          bake_result$error)
+                          bake_result$error, config_id = config_id)
     return(NULL)
 
   }
@@ -960,7 +1037,7 @@ predict_intervals <- function(uq, point_pred, new_spectra) {
   if (!is.null(q_result$error) || is.null(q_result$result)) {
 
     warn_interval_failure("predicting quantiles from the UQ model",
-                          q_result$error)
+                          q_result$error, config_id = config_id)
     return(NULL)
 
   }
@@ -1008,10 +1085,13 @@ predict_intervals <- function(uq, point_pred, new_spectra) {
 #'   failing `safely_execute()` call), a plain character string (for a
 #'   degrade path that has no caught condition, e.g. a structural check), or
 #'   `NULL`.
+#' @param config_id Character(1) or `NULL`. The config the failure belongs
+#'   to, when there is a single one to name (there is not, for the
+#'   ensemble's whole-bundle degrade points). `NULL` (default) omits it.
 #' @return Invisibly `NULL`. Called for the warning.
 #' @keywords internal
 #' @noRd
-warn_interval_failure <- function(stage, error) {
+warn_interval_failure <- function(stage, error, config_id = NULL) {
 
   detail <- if (is.null(error)) {
 
@@ -1027,9 +1107,24 @@ warn_interval_failure <- function(stage, error) {
 
   }
 
+  header <- if (is.null(config_id)) {
+
+    "Prediction intervals could not be computed ({stage}); returning point predictions only."
+
+  } else {
+
+    "Prediction intervals could not be computed for config {.val {config_id}} ({stage}); returning point predictions only."
+
+  }
+
+  ## `detail` is upstream, possibly attacker- or data-derived text (a column
+  ## name like a bare "{wn_600}" is a realistic example) — interpolated as a
+  ## VALUE via "{detail}", never handed to cli as a template directly, or a
+  ## brace or unmatched quote in the message would crash predict() here
+  ## instead of just being reported (mirrors ad.R's bake_msg handling).
   cli::cli_warn(c(
-    "!" = "Prediction intervals could not be computed ({stage}); returning point predictions only.",
-    "x" = detail
+    "!" = header,
+    "x" = "{detail}"
   ), class = "horizons_interval_warning")
 
   invisible(NULL)

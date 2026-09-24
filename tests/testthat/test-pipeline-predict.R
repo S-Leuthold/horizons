@@ -11,7 +11,7 @@
 ## ---------------------------------------------------------------------------
 
 make_predict_eval <- function(n = 300, n_wn = 10, transformation = "none",
-                              covariates = NULL, seed = 42) {
+                              covariates = NULL, seed = 42, model = "rf") {
 
   set.seed(seed)
 
@@ -43,7 +43,7 @@ make_predict_eval <- function(n = 300, n_wn = 10, transformation = "none",
 
   configs <- tibble::tibble(
     config_id         = "cfg_001",
-    model             = "rf",
+    model             = model,
     transformation    = transformation,
     preprocessing     = "raw",
     feature_selection = "none",
@@ -825,6 +825,22 @@ describe("abort_on_missing_predict_packages() - missing package gate", {
 
   })
 
+  it("collects every missing package and aborts once, not on the first miss", {
+
+    err <- tryCatch(
+      abort_on_missing_predict_packages(list(
+        horizonsFakePkgXYZ123 = "cubist",
+        horizonsFakePkgABC456 = "mars"
+      )),
+      horizons_missing_predict_package = function(e) e
+    )
+
+    expect_s3_class(err, "horizons_missing_predict_package")
+    expect_match(conditionMessage(err), "horizonsFakePkgXYZ123")
+    expect_match(conditionMessage(err), "horizonsFakePkgABC456")
+
+  })
+
   it("does not abort when every needed package is installed", {
 
     expect_no_error(abort_on_missing_predict_packages(list(ranger = "rf")))
@@ -841,7 +857,70 @@ describe("abort_on_missing_predict_packages() - missing package gate", {
 
 
 ## ---------------------------------------------------------------------------
-## ensure_predict_namespaces() — per-model coverage (#65)
+## predict_package_install_hint() — CRAN vs. Bioconductor (#65)
+## ---------------------------------------------------------------------------
+## mixOmics is on Bioconductor; install.packages() cannot find it. Tested
+## directly (a pure function) rather than through the abort path, since
+## mixOmics may well be installed wherever this runs, which would make the
+## abort path never fire and prove nothing either way.
+
+describe("predict_package_install_hint()", {
+
+  it("gives mixOmics a BiocManager install hint", {
+
+    expect_identical(predict_package_install_hint("mixOmics"),
+                     'BiocManager::install("mixOmics")')
+
+  })
+
+  it("gives an ordinary CRAN package the install.packages() hint", {
+
+    expect_identical(predict_package_install_hint("ranger"),
+                     'install.packages("ranger")')
+
+  })
+
+})
+
+
+## ---------------------------------------------------------------------------
+## compute_needed_predict_packages() — pure model -> package mapping (#65)
+## ---------------------------------------------------------------------------
+
+describe("compute_needed_predict_packages()", {
+
+  it("matches MODEL_PREDICT_PACKAGES for a single model", {
+
+    expect_identical(compute_needed_predict_packages("rf"), list(ranger = "rf"))
+
+  })
+
+  it("unions packages across models and dedupes reasons", {
+
+    needed <- compute_needed_predict_packages(c("rf", "cubist", "rf"))
+
+    expect_setequal(names(needed), c("ranger", "rules", "Cubist"))
+    expect_identical(needed$ranger, "rf")
+
+  })
+
+  it("adds ranger, reasoned as prediction intervals, only when asked", {
+
+    without_uq <- compute_needed_predict_packages("elastic_net")
+    with_uq    <- compute_needed_predict_packages("elastic_net",
+                                                   needs_ranger_for_uq = TRUE)
+
+    expect_false("ranger" %in% names(without_uq))
+    expect_true("ranger" %in% names(with_uq))
+    expect_identical(with_uq$ranger, "prediction intervals")
+
+  })
+
+})
+
+
+## ---------------------------------------------------------------------------
+## ensure_predict_namespaces() — per-model coverage and scoping (#65)
 ## ---------------------------------------------------------------------------
 ## Every model horizons supports maps to at least one predict-time namespace
 ## (MODEL_PREDICT_PACKAGES, R/constants.R). Those packages are Suggests, so
@@ -849,18 +928,28 @@ describe("abort_on_missing_predict_packages() - missing package gate", {
 ## installed, and an informative, package-naming abort when not, rather than
 ## assuming a fully-installed environment.
 
-make_ns_probe_fit <- function(model, config_id = "cfg1", with_uq = FALSE) {
+make_ns_probe_fit <- function(model, config_id = "cfg1", with_uq = FALSE,
+                              extra_configs = NULL) {
+
+  configs <- tibble::tibble(config_id = config_id, model = model)
+
+  if (!is.null(extra_configs)) {
+
+    configs <- dplyr::bind_rows(configs, extra_configs)
+
+  }
 
   obj <- list(
     models = list(
-      workflows = stats::setNames(list(TRUE), config_id),
+      workflows = stats::setNames(as.list(rep(TRUE, nrow(configs))),
+                                  configs$config_id),
       uq        = if (with_uq) {
         stats::setNames(list(list(quantile_model = TRUE)), config_id)
       } else {
         NULL
       }
     ),
-    config = list(configs = tibble::tibble(config_id = config_id, model = model))
+    config = list(configs = configs)
   )
 
   class(obj) <- "horizons_fit"
@@ -869,6 +958,12 @@ make_ns_probe_fit <- function(model, config_id = "cfg1", with_uq = FALSE) {
 }
 
 describe("ensure_predict_namespaces() - per-model coverage", {
+
+  it("MODEL_PREDICT_PACKAGES covers exactly the supported models", {
+
+    expect_setequal(names(MODEL_PREDICT_PACKAGES), VALID_MODELS)
+
+  })
 
   for (m in VALID_MODELS) {
 
@@ -881,13 +976,13 @@ describe("ensure_predict_namespaces() - per-model coverage", {
 
       if (all_installed) {
 
-        expect_no_error(ensure_predict_namespaces(obj))
+        expect_no_error(ensure_predict_namespaces(obj, config_ids = "cfg1"))
         for (pkg in pkgs) expect_true(requireNamespace(pkg, quietly = TRUE))
 
       } else {
 
         err <- tryCatch(
-          ensure_predict_namespaces(obj),
+          ensure_predict_namespaces(obj, config_ids = "cfg1"),
           horizons_missing_predict_package = function(e) e
         )
 
@@ -908,7 +1003,7 @@ describe("ensure_predict_namespaces() - per-model coverage", {
 
     obj <- make_ns_probe_fit("elastic_net", with_uq = TRUE)
 
-    expect_no_error(ensure_predict_namespaces(obj))
+    expect_no_error(ensure_predict_namespaces(obj, config_ids = "cfg1"))
     expect_true(requireNamespace("ranger", quietly = TRUE))
 
   })
@@ -924,7 +1019,36 @@ describe("ensure_predict_namespaces() - per-model coverage", {
     obj$ensemble <- list(weights = tibble::tibble(member = "cfg1"))
     class(obj) <- c("horizons_ensemble", "horizons_fit")
 
-    expect_no_error(ensure_predict_namespaces(obj))
+    expect_no_error(ensure_predict_namespaces(obj, config_ids = "cfg1"))
+
+  })
+
+  it("scopes the engine check to the configs actually being predicted", {
+
+    ## A fit that stores both an rf config (being predicted) and a mars
+    ## config (not) must not require earth just because the object also
+    ## holds a mars config somewhere — predict(fit, config = "cfg_rf") must
+    ## not need earth installed to predict the rf one.
+    obj <- make_ns_probe_fit(
+      "rf", config_id = "cfg_rf",
+      extra_configs = tibble::tibble(config_id = "cfg_mars", model = "mars")
+    )
+
+    ## ranger is a hard Import, so scoping to cfg_rf alone must succeed
+    ## regardless of what else the object stores.
+    expect_no_error(ensure_predict_namespaces(obj, config_ids = "cfg_rf"))
+
+    ## The discriminating half, gated on earth genuinely being absent here:
+    ## an unscoped check (every stored config, the pre-fix behaviour) would
+    ## abort naming earth even though only cfg_rf was ever requested.
+    if (!requireNamespace("earth", quietly = TRUE)) {
+
+      expect_error(
+        ensure_predict_namespaces(obj, config_ids = c("cfg_rf", "cfg_mars")),
+        class = "horizons_missing_predict_package"
+      )
+
+    }
 
   })
 
@@ -1006,6 +1130,57 @@ describe("predict_intervals() - failure warns instead of degrading silently", {
 
 
 ## ---------------------------------------------------------------------------
+## warn_interval_failure() — config naming and brace-safety (#65 review)
+## ---------------------------------------------------------------------------
+## `detail` (the upstream error message) is untrusted, possibly data-derived
+## text — a column name like a bare `{wn_600}` is a realistic example. Handed
+## to cli as a TEMPLATE rather than a VALUE, a brace or an unmatched quote in
+## that text crashes predict() itself, rather than just being reported.
+
+describe("warn_interval_failure() - config naming and brace-safety", {
+
+  it("does not crash when the underlying error message contains braces", {
+
+    brace_error <- simpleError('unexpected column `{wn_600}` in new_data')
+
+    warns <- NULL
+
+    expect_no_error(
+      warns <- testthat::capture_warnings(
+        warn_interval_failure("baking new data through the UQ recipe", brace_error)
+      )
+    )
+
+    expect_true(any(grepl("{wn_600}", warns, fixed = TRUE)))
+
+  })
+
+  it("names the config in the warning when one is given", {
+
+    expect_warning(
+      warn_interval_failure("predicting quantiles from the UQ model",
+                            simpleError("boom"), config_id = "cfg_001"),
+      regexp = "cfg_001",
+      class = "horizons_interval_warning"
+    )
+
+  })
+
+  it("omits any config mention when none is given", {
+
+    warns <- testthat::capture_warnings(
+      warn_interval_failure("predicting quantiles from the UQ model",
+                            simpleError("boom"))
+    )
+
+    expect_false(any(grepl("config", warns, ignore.case = TRUE)))
+
+  })
+
+})
+
+
+## ---------------------------------------------------------------------------
 ## Fresh-process round trip (#65)
 ## ---------------------------------------------------------------------------
 ## The bug: predict() on a deserialized horizons_fit fails unless workflows
@@ -1019,6 +1194,18 @@ describe("predict_intervals() - failure warns instead of degrading silently", {
 ## used: saveRDS() a fit, predict from it in a genuinely fresh process via
 ## callr, with no namespace preloaded.
 ##
+## The fixture is elastic_net (glmnet — a hard Import, always available),
+## not rf: parsnip's own predict.model_fit() dispatch loads an rf's ranger
+## engine as a side effect of the point prediction alone (MODEL_PREDICT_
+## PACKAGES's rationale, R/constants.R), which would make the interval
+## columns come back even if ensure_predict_namespaces()'s ranger-for-UQ
+## branch were broken or missing — the point-prediction step would have
+## already loaded ranger first, for an unrelated reason, and silently
+## covered for it. elastic_net's own predict path never touches ranger, so
+## this fixture genuinely exercises that branch: with the fix reverted,
+## point predictions alone would still succeed (glmnet needs no extra
+## namespace), and only the interval half would fail.
+##
 ## Only meaningful against an installed build. Under devtools::test(), this
 ## file is itself load_all()'d into the parent session, and pkgload::load_all()
 ## in the callr child (the natural way to run the CURRENT dev tree there) turns
@@ -1027,16 +1214,9 @@ describe("predict_intervals() - failure warns instead of degrading silently", {
 ## load_all() child cannot independently re-trigger the missing-namespace
 ## defect (confirmed directly while writing this test). Rather than ship a
 ## branch that always passes without testing anything, this test skips under
-## load_all() — detected the same way test-evaluate-parallel.R's
-## skip_if_dev_package() does, via the `.__DEVTOOLS__` marker — and runs only
-## against a genuinely installed build: R CMD check, or devtools::test() after
-## devtools::install().
-skip_if_dev_package <- function() {
-  testthat::skip_if(
-    exists(".__DEVTOOLS__", envir = asNamespace("horizons"), inherits = FALSE),
-    "predict-time namespace loading is not exercised under load_all(); run via R CMD check or an installed build"
-  )
-}
+## load_all() (skip_if_dev_package(), from helper-load-all.R, shared with
+## test-evaluate-parallel.R) and runs only against a genuinely installed
+## build: R CMD check, or devtools::test() after devtools::install().
 
 describe("predict.horizons_fit() - fresh-process round trip", {
 
@@ -1044,10 +1224,13 @@ describe("predict.horizons_fit() - fresh-process round trip", {
   testthat::skip_on_cran()
   skip_if_dev_package()
 
-  skip_if_not(has_uq(fitted_fixture), "fixture carries no UQ bundle")
+  elastic_net_fixture <- fit(make_predict_eval(model = "elastic_net"),
+                             n_best = 1L, compute_uq = TRUE, verbose = FALSE)
+
+  skip_if_not(has_uq(elastic_net_fixture), "fixture carries no UQ bundle")
 
   fit_path <- tempfile(fileext = ".rds")
-  saveRDS(fitted_fixture, fit_path)
+  saveRDS(elastic_net_fixture, fit_path)
 
   new_df <- make_new_spectra()
 

@@ -1028,63 +1028,63 @@ verbs:
         source: R/pipeline-predict.R#L117
       - name: new_data
         touch: Always; a horizons_data standardized to the same grid as the training data, or a data frame with the same wn_ columns and a sample_id.
-        source: R/pipeline-predict.R#L369
+        source: R/pipeline-predict.R#L443
       - name: config
         touch: A config_id to predict from a specific model, or "all" for one block per fitted model.
-        source: R/pipeline-predict.R#L636
+        source: R/pipeline-predict.R#L710
       - name: interval
         touch: FALSE for point predictions only; ignored where no UQ bundle exists.
-        source: R/pipeline-predict.R#L767
+        source: R/pipeline-predict.R#L841
       - name: abstain_ood
         touch: TRUE to return NA predictions for samples the applicability domain flags out-of-domain, keeping the distance and flag columns.
-        source: R/pipeline-predict.R#L825
+        source: R/pipeline-predict.R#L900
       - name: '...'
         touch: Unused.
-        source: R/pipeline-predict.R#L110
+        source: R/pipeline-predict.R#L111
     mechanics:
-      - step: Loads the namespaces predict() needs for the stored workflow and each config's model engine — workflows, parsnip and recipes unconditionally, plus the engine package(s) for every model the object stores, plus ranger when a UQ bundle is present — none of which library(horizons) alone pulls in; aborts naming the package and the model if a Suggested engine is not installed.
-        source: R/pipeline-predict.R#L139
       - step: Resolves which configurations are being predicted, and from their rows which covariate columns they promoted to predictors, so those are kept from new_data and required.
-        source: R/pipeline-predict.R#L149
+        source: R/pipeline-predict.R#L143
+      - step: Loads the namespaces predict() needs for the stored workflow and each config's model engine — workflows, parsnip and recipes unconditionally, plus the engine package(s) for every model actually being predicted (not every config the object stores), plus ranger when a UQ bundle is present — none of which library(horizons) alone pulls in; aborts naming the package and the model if a Suggested engine is not installed.
+        source: R/pipeline-predict.R#L154
       - step: Resolves new_data to sample_id plus the predictor columns, synthesizing ids for a bare data frame, and checks the training-axis schema fit() stored; a missing column aborts with the columns named.
-        source: R/pipeline-predict.R#L153
+        source: R/pipeline-predict.R#L158
       - step: Warns once, when intervals will be produced, that conformal coverage does not transfer if the model was fit on a selected training set.
-        source: R/pipeline-predict.R#L445
+        source: R/pipeline-predict.R#L519
       - step: Per configuration, predicts on the transformed scale, back-transforms once, winsorizes to the response bound with a warning when anything is clamped, and floors at zero.
-        source: R/pipeline-predict.R#L727
+        source: R/pipeline-predict.R#L801
       - step: With a UQ bundle and interval = TRUE, bakes the new data through the UQ recipe, predicts residual quantiles from the quantile forest, adds the signed conformal margin, repairs crossing bounds and floors them; every term is already on the original scale, so nothing is back-transformed twice. A bake or quantile-prediction failure warns and degrades to point predictions instead of disappearing silently.
-        source: R/pipeline-predict.R#L923
+        source: R/pipeline-predict.R#L1000
       - step: With an AD bundle, computes the squared Mahalanobis distance to the training centroid under the shrinkage covariance and bins it Q1 to Q4 or OOD against the held-out thresholds; abstains if asked.
-        source: R/pipeline-predict.R#L791
+        source: R/pipeline-predict.R#L866
     records:
       - field: sample_id, .pred
         text: one row per sample, plus config_id when config = "all"
-        source: R/pipeline-predict.R#L755
+        source: R/pipeline-predict.R#L829
       - field: .pred_lower, .pred_upper, .interval_width
         text: present when intervals were requested and available
-        source: R/pipeline-predict.R#L985
+        source: R/pipeline-predict.R#L1062
       - field: .ad_distance, .ad_flag
         text: present when the configuration has an AD bundle
-        source: R/pipeline-predict.R#L797
+        source: R/pipeline-predict.R#L872
     refuses:
       - when: the object is not a horizons_fit or has no workflows, config names an unfitted model, or new_data is neither a horizons_data nor a data frame
         does: aborts
         source: R/pipeline-predict.R#L117
       - when: new_data lacks a predictor column of the training axis, or a covariate a configuration uses
         does: aborts naming the missing columns and pointing at standardize()
-        source: R/pipeline-predict.R#L534
-      - when: a config's model needs an engine package (or ranger, for a UQ bundle) that is not installed
-        does: aborts naming the package and the model that needs it
-        source: R/pipeline-predict.R#L329
+        source: R/pipeline-predict.R#L608
+      - when: a config being predicted needs an engine package (or ranger, for a UQ bundle) that is not installed
+        does: aborts once, naming every missing package and the model(s) that need it
+        source: R/pipeline-predict.R#L387
       - when: a prediction is clamped to the response bound, coverage cannot be guaranteed on a selected fit, or abstention was asked for with no AD information
         does: warns
-        source: R/pipeline-predict.R#L835
+        source: R/pipeline-predict.R#L910
       - when: interval computation fails for a configuration (a UQ bundle exists, but baking new_data or predicting quantiles errors)
-        does: warns, naming the failing step, and degrades to point predictions without interval columns
-        source: R/pipeline-predict.R#L940
+        does: warns, naming the config and the failing step, and degrades to point predictions without interval columns
+        source: R/pipeline-predict.R#L1017
       - when: AD computation fails for a configuration
-        does: degrades silently to point predictions without those columns
-        source: R/pipeline-predict.R#L791
+        does: warns when baking new_data through the recipe fails or every spectrum bakes to NA; degrades silently only for a distance/covariance mismatch in an otherwise-baked batch. Either way, no AD columns are returned for the affected rows.
+        source: R/ad.R#L502
     design_ahead:
       - text: the on-library residual correction from the pool fit's out-of-fold errors, gated by the selection distance, is designed and unbuilt; where it lives (predict() reading the selection record, or a separate verb) is open
         source: ../dev/specs/v1-refactor/select-training-design.md#what-changed-on-2026-09-22-the-overnight-run-and-its-follow-up
@@ -1117,37 +1117,40 @@ verbs:
         source: R/ensemble-helpers.R#L734
       - name: new_data
         touch: Always; on the training axis, as for predict() on a fit.
-        source: R/ensemble-helpers.R#L788
+        source: R/ensemble-helpers.R#L794
       - name: interval
         touch: FALSE for point predictions only; only the ensemble's own CV+ bundle produces intervals, never the members'.
-        source: R/ensemble-helpers.R#L876
+        source: R/ensemble-helpers.R#L882
       - name: '...'
         touch: Unused.
         source: R/ensemble-helpers.R#L728
     mechanics:
-      - step: Loads the namespaces predict() needs, as predict.horizons_fit() does, scoped to the member set the meta-learner actually trained on rather than every config the underlying fit stored.
-        source: R/ensemble-helpers.R#L753
       - step: Reads the member set from the weights table, the members the meta-learner actually trained on, rather than re-deriving it.
-        source: R/ensemble-helpers.R#L768
+        source: R/ensemble-helpers.R#L764
+      - step: Loads the namespaces predict() needs, as predict.horizons_fit() does, scoped to the member set the meta-learner actually trained on rather than every config the underlying fit stored (gather_members() can drop a stored config that lacks out-of-fold predictions, so the two sets are not always the same).
+        source: R/ensemble-helpers.R#L783
       - step: Resolves and schema-checks new_data as the fit method does, and warns once about conformal coverage on a selected training set.
-        source: R/ensemble-helpers.R#L788
+        source: R/ensemble-helpers.R#L794
       - step: Every member predicts point-only and unclamped, so the features match the out-of-fold values the meta-learner trained on; duplicate sample ids abort.
-        source: R/ensemble-helpers.R#L805
+        source: R/ensemble-helpers.R#L811
       - step: Combines by the method, a weighted sum or the fitted meta-model, and applies the response bound once at the output.
-        source: R/ensemble-helpers.R#L813
-      - step: Joins CV+ interval bounds by sample_id when a bundle exists and intervals were asked for.
-        source: R/ensemble-helpers.R#L876
+        source: R/ensemble-helpers.R#L819
+      - step: Joins CV+ interval bounds by sample_id when a bundle exists and intervals were asked for; a corrupt or unusable bundle, a fold model that fails to predict, or a too-small calibration set warns and degrades to point predictions instead of disappearing silently.
+        source: R/ensemble-uq.R#L705
     records:
       - field: sample_id, .pred
         text: one row per sample, the response bound applied once here
-        source: R/ensemble-helpers.R#L836
+        source: R/ensemble-helpers.R#L842
       - field: .pred_lower, .pred_upper, .interval_width
         text: present when ensemble UQ exists and interval = TRUE
-        source: R/ensemble-helpers.R#L876
+        source: R/ensemble-helpers.R#L882
     refuses:
       - when: a member's model needs an engine package that is not installed
-        does: aborts naming the package and the model that needs it
-        source: R/pipeline-predict.R#L329
+        does: aborts once, naming every missing package and the model(s) that need it
+        source: R/pipeline-predict.R#L387
       - when: the object is not a horizons_ensemble or carries no ensemble, a member fails to predict, or sample ids repeat
         does: aborts naming the member or the key
         source: R/ensemble-helpers.R#L734
+      - when: the ensemble's CV+ interval bundle is unrecognized, a retained fold model fails to predict, or the calibration set is too small for the requested coverage level
+        does: warns and degrades to point predictions without interval columns
+        source: R/ensemble-uq.R#L705

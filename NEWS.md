@@ -389,26 +389,6 @@ consequences; the review itself is in
   `provenance$average$source_ids` keeps the mapping back to the scans each
   averaged row came from.
 
-## Bug fixes
-
-* **`predict()` on a deserialized `horizons_fit` or `horizons_ensemble` no
-  longer requires the caller to have loaded `workflows` (or the config's
-  modeling engine) first** ([#65](https://github.com/S-Leuthold/horizons/issues/65)).
-  `library(horizons)` does not load `workflows`, most modeling engines, or
-  `ranger`, so `predict(readRDS(fit_path), new_data)` in a fresh session
-  failed with `no applicable method for 'predict' applied to an object of
-  class "c('butchered_workflow', 'workflow')"`. `predict()` now loads the
-  namespaces it needs before predicting, and aborts with an actionable
-  message naming the package and the model if a Suggested engine
-  (`Cubist`, `kernlab`, `earth`, `mixOmics`, `nnet`, `lightgbm`/`bonsai`) is
-  not installed.
-
-* **A failed prediction interval no longer disappears silently.** If the
-  quantile-forest step behind `interval = TRUE` failed — the `ranger`
-  namespace not being loaded was one way this happened — `predict()`
-  degraded to point predictions with no indication anything had gone
-  wrong. It now warns, naming the failure, and returns point predictions.
-
 ## Known limitations
 
 * **No pool-internal de-duplication, and the cross-validation downstream of
@@ -535,6 +515,33 @@ consequences; the review itself is in
   floored member predictions at serve time. Metrics move only for configs
   that produced negative original-scale predictions. The deploy-time
   `upper_bound` guardrail is unchanged and still opt-in.
+
+* **`predict()` on a deserialized `horizons_fit` or `horizons_ensemble` no
+  longer requires the caller to have loaded `workflows` (or the config's
+  modeling engine) first** ([#65](https://github.com/S-Leuthold/horizons/issues/65)).
+  `library(horizons)` does not load `workflows`, most modeling engines, or
+  `ranger`, so `predict(readRDS(fit_path), new_data)` in a fresh session
+  failed with `no applicable method for 'predict' applied to an object of
+  class "c('butchered_workflow', 'workflow')"`. `predict()` now loads the
+  namespaces it needs before predicting — scoped to the configs actually
+  being predicted, not every config the object stores, so `predict(fit,
+  config = "cfg_rf")` does not require a co-stored `mars` config's engine —
+  and aborts (condition class `horizons_missing_predict_package`) with an
+  actionable message naming the package and the model if a Suggested engine
+  (`Cubist`, `kernlab`, `earth`, `mixOmics`, `nnet`) is not installed.
+  `lightgbm` prediction additionally needs the `bonsai` package installed;
+  it is not yet a declared package dependency.
+
+* **A failed prediction interval no longer disappears silently, for either
+  a single fit or an ensemble.** If the quantile-forest step behind
+  `interval = TRUE` failed — a `ranger` namespace not being loaded was one
+  way this happened — `predict()` degraded to point predictions with no
+  indication anything had gone wrong. The same applied on the ensemble
+  side: an unrecognized CV+ bundle, a retained fold model that failed to
+  predict, or a calibration set too small for the requested coverage level
+  all degraded silently too. Both paths now warn (condition class
+  `horizons_interval_warning`), naming the failure, and return point
+  predictions.
 
 # horizons 0.9.0
 
