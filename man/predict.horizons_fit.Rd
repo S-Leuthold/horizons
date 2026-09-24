@@ -85,8 +85,17 @@ distance is a squared Mahalanobis distance in the model's feature space; the
 flag bins it against held-out-calibrated thresholds. Set \code{abstain_ood = TRUE}
 to \code{NA} predictions for out-of-domain samples while keeping the AD columns.
 
+\strong{Outcome range.} Point predictions and interval bounds are clamped to
+the \code{outcome_range} given to \code{\link[=configure]{configure()}}, silently, since the range is
+the outcome's physical range. Under the default, \code{c(0, Inf)}, that is a
+floor at zero, and objects configured before the range existed predict
+under it; a signed property configured with \code{c(-Inf, Inf)} is not clamped
+at all (#76).
+
 \strong{Response upper bound (guardrail).} Point predictions are winsorized to
-\code{models$response_bound} (max training outcome times 1.5, stored by \code{\link[=fit]{fit()}})
+\code{models$response_bound} (stored by \code{\link[=fit]{fit()}}: the largest training outcome
+times 1.5 under the default range, and in general a margin above it
+scaled on the outcome's span; see \code{\link[=fit]{fit()}})
 with a visible warning when any value is clamped. This catches physically
 impossible back-transform blow-ups (e.g. an unconstrained log-scale
 prediction inflating through \code{exp()}) while permitting modest extrapolation.

@@ -155,7 +155,14 @@ new_horizons_data <- function(analysis        = NULL,
                   ## pca_threshold), the settings build_recipe() applies to
                   ## every config. NULL until then, and on objects configured
                   ## before it existed; see recipe_settings().
-                  recipe = NULL),
+                  recipe = NULL,
+
+                  ## Written by configure(): numeric(2), the outcome's
+                  ## physical range every prediction is clamped to (#76).
+                  ## NULL until then, and on objects configured before it
+                  ## existed, which read as c(0, Inf); see
+                  ## outcome_range_setting().
+                  outcome_range = NULL),
 
     ## -------------------------------------------------------------------------
     ## Section 4: VALIDATION — Pre-flight check results
@@ -200,7 +207,7 @@ new_horizons_data <- function(analysis        = NULL,
                   best_config       = NULL,  ## character: top config_id (best-first order)
                   rank_metric       = NULL,  ## character: metric configs were ranked by
                   predictor_schema  = NULL,  ## character: training-axis predictor columns
-                  response_bound    = NULL,  ## numeric: deploy-time winsorization bound (max training outcome * margin)
+                  response_bound    = NULL,  ## numeric: deploy-time winsorization bound (compute_response_bound(); max training outcome * margin under the default range)
                   cv_predictions    = NULL,  ## tibble: .row, .fold, config_id, .pred, .pred_trans, truth
                   results           = NULL,  ## tibble: config_id, status, degraded, metrics, etc.
                   split             = NULL,  ## rsplit: Split F (train_F / test_F)
@@ -1809,7 +1816,12 @@ validate_horizons_eval <- function(x) {
 #'    columns the predict() schema gate reads).
 #' 6. **response_bound** (the winsorization guardrail): NULL — tolerated,
 #'    since objects fitted before the guardrail shipped legitimately lack it
-#'    and predict without a clamp — or a single positive finite numeric.
+#'    and predict without a clamp — or a single finite numeric consistent
+#'    with the object's `outcome_range` (#76): above its lower bound and no
+#'    higher than its upper bound. Under the default range, `c(0, Inf)`, which
+#'    objects configured before the range existed read as, that is a single
+#'    positive finite numeric, the rule before the range; under
+#'    `c(-Inf, Inf)` any finite bound, negative included.
 #' 7. **I6 — workflow ⊆ config**: when `x$config$configs$config_id` is
 #'    reachable, every workflow key is a defined config id.
 #' 8. **I7 — uq ⊆ workflows**: `uq` is NULL, or a named list whose keys are a
@@ -1923,18 +1935,23 @@ validate_horizons_fit <- function(x) {
   ## response_bound (the winsorization guardrail) -------------------------------
   ## NULL is tolerated: objects fitted before the guardrail shipped carry no
   ## bound and predict without a clamp (documented pre-clamp behavior). When
-  ## present it must be a single positive finite numeric — the clamp compares
-  ## predictions against it, so a non-positive or non-finite bound would
-  ## silently clamp everything or nothing.
+  ## present it must be a single finite numeric inside the outcome's range
+  ## (#76): the clamp compares predictions against it, so a bound at or below
+  ## the floor, or a non-finite one, would silently clamp everything or
+  ## nothing. Under the default range that is the positive-finite rule the
+  ## guardrail shipped with; a signed outcome's bound may be negative.
 
-  rb <- md$response_bound
+  rb  <- md$response_bound
+  rng <- outcome_range_setting(x)
 
   if (!is.null(rb)) {
 
     if (!is.numeric(rb) || length(rb) != 1 || is.na(rb) ||
-        !is.finite(rb) || rb <= 0) {
+        !is.finite(rb) || rb <= rng[1] || rb > rng[2]) {
 
-      errors <- c(errors, cli::format_inline("{.field response_bound} must be NULL or a single positive finite numeric"))
+      errors <- c(errors, cli::format_inline(
+        "{.field response_bound} must be NULL or a single finite numeric above the lower bound of {.field outcome_range} ({rng[1]}) and no higher than its upper bound ({rng[2]})"
+      ))
 
     }
 

@@ -208,10 +208,22 @@ DEFAULT_ENSEMBLE_SEED <- 307L
 ## Prediction Guardrails --------------------------------------------------------
 
 ### Winsorization margin for the deploy-time response upper bound: predictions
-### are clamped to max(training outcome) * margin. Permits modest extrapolation
-### beyond the observed range while catching physically impossible blow-ups
-### (e.g. an unconstrained log-scale prediction exp()-inflating to 257 g/kg).
+### are clamped to max + (margin - 1) * (max - anchor), where the anchor is the
+### lower bound of outcome_range, or the training minimum when that bound is
+### -Inf (compute_response_bound()). Under the default range the anchor is 0,
+### so the bound is max(training outcome) * margin, as it has always been.
+### Permits modest extrapolation beyond the observed range while catching
+### physically impossible blow-ups (e.g. an unconstrained log-scale prediction
+### exp()-inflating to 257 g/kg).
 RESPONSE_BOUND_MARGIN <- 1.5
+
+### The physical range of the outcome when configure() is not told otherwise
+### (#76). Every prediction the package scores or serves is clamped to
+### configure()'s outcome_range; the default is the non-negative range the
+### package has always assumed, so an object configured before the argument
+### existed (no `config$outcome_range`) runs unchanged through the fallback in
+### outcome_range_setting().
+DEFAULT_OUTCOME_RANGE <- c(0, Inf)
 
 ## DAYMET Constants ------------------------------------------------------------
 
@@ -238,6 +250,7 @@ SHARED_ARG_NAMES <- c(
   "seed",
   "sg_window",
   "pca_threshold",
+  "outcome_range",
   "data_fp",
   "settings",
   "checkpoint_dir",

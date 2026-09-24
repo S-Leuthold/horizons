@@ -96,14 +96,27 @@
 #'   `evaluate()` would. Default 307L.
 #' @param verbose Logical. Print progress tree to console. Default TRUE.
 #'
+#' @section Outcome range:
+#' Every prediction `fit()` scores (out-of-fold, test and calibration) is
+#' clamped to `configure()`'s `outcome_range`, as `predict()` clamps what it
+#' serves. Before anything is drawn or fitted, on either path, `fit()` aborts
+#' with class `horizons_input_error` when an observed outcome lies outside
+#' the range, naming `outcome_range` and how to set it (#76).
+#'
 #' @return A `horizons_fit` object (inherits from `horizons_eval`,
 #'   `horizons_data`) with `models$` slot populated. The slot includes
-#'   `response_bound` (max training outcome times `RESPONSE_BOUND_MARGIN`,
-#'   where the training rows are the ones the final models are fit on:
+#'   `response_bound`, the deploy-time winsorization guardrail `predict()`
+#'   applies to back-transformed point predictions:
+#'   `max + (RESPONSE_BOUND_MARGIN - 1) * (max - anchor)`, capped at a finite
+#'   upper bound of `outcome_range`, where `max` is the largest training
+#'   outcome and the anchor is the lower bound of `outcome_range`, or the
+#'   smallest training outcome when that bound is `-Inf`. Under the default
+#'   range the anchor is 0 and the bound is the largest training outcome
+#'   times `RESPONSE_BOUND_MARGIN`, as before the range existed; for any
+#'   range it lies above the largest training outcome unless the cap binds.
+#'   The training rows are the ones the final models are fit on:
 #'   `evaluate()`'s training part, less the calibration set when UQ or AD is
-#'   on),
-#'   the deploy-time winsorization guardrail `predict()` applies to
-#'   back-transformed point predictions, and `selection_present` (whether the
+#'   on. The slot also includes `selection_present` (whether the
 #'   training object carried a `$selection` from `select_training()`, which
 #'   `predict()` reads when asked for conformal intervals). Called on a
 #'   `horizons_ensemble`, it returns a `horizons_fit` whose `ensemble` slot
@@ -158,6 +171,14 @@ fit <- function(x,
     ), class = "horizons_input_error")
 
   }
+
+  ## The outcome has to lie inside the range every prediction is clamped to,
+  ## checked on either path before anything is drawn or fitted (#76).
+  ## configure() and evaluate() check it too, but an object configured before
+  ## the range existed reads as c(0, Inf), and its rows can have changed
+  ## since; this is the last check before the re-tune pays for itself.
+  check_outcome_range(x, verb = "fit")
+  outcome_range <- outcome_range_setting(x)
 
   if (cold_start) {
 
@@ -577,7 +598,8 @@ fit <- function(x,
       allow_par           = allow_par,
       seed                = seed,
       sg_window           = recipe_cfg$sg_window,
-      pca_threshold       = recipe_cfg$pca_threshold
+      pca_threshold       = recipe_cfg$pca_threshold,
+      outcome_range       = outcome_range
     )
 
     results_list[[i]] <- config_result
@@ -829,11 +851,14 @@ fit <- function(x,
   predictor_schema <- role_map$variable[role_map$role == "predictor"]
 
   ## Deploy-time guardrail bound: predictions are winsorized to this value in
-  ## predict_one_config(). max-times-margin (not a quantile) — the bound should
-  ## permit modest extrapolation and catch only the physically absurd. Taken
-  ## over train_Fit, the rows the final models are fit on, so neither Split
-  ## F's test rows nor the calibration rows shape it (#68).
-  response_bound <- max(train_Fit[[outcome_col]], na.rm = TRUE) * RESPONSE_BOUND_MARGIN
+  ## predict_one_config(). A margin over the maximum (not a quantile) — the
+  ## bound should permit modest extrapolation and catch only the physically
+  ## absurd. Scaled on the span from the range's floor (or the training
+  ## minimum, with no floor) so it lies above the maximum for a signed outcome
+  ## too; under the default range it is max * RESPONSE_BOUND_MARGIN exactly
+  ## (#76). Taken over train_Fit, the rows the final models are fit on, so
+  ## neither Split F's test rows nor the calibration rows shape it (#68).
+  response_bound <- compute_response_bound(train_Fit[[outcome_col]], outcome_range)
 
   ## Did the training rows come from select_training()? If so the calibration
   ## split below was drawn from rows chosen for proximity to the targets, so

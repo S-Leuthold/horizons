@@ -110,6 +110,27 @@
 #' `feature_selection = "pca"` and is read by nothing else. Both defaults are
 #' the values the recipe ran before they were settable. See GitHub issue #62.
 #'
+#' **Outcome range:**
+#'
+#' `outcome_range` is the physical range of the outcome, `c(lower, upper)`,
+#' either end possibly infinite. Every prediction the package scores or
+#' serves is clamped to it: the test-set and out-of-fold predictions
+#' `evaluate()` and `fit()` score, the calibration predictions conformal
+#' intervals are built from, `predict()`'s point predictions and interval
+#' bounds, and the ensemble's. The default, `c(0, Inf)`, is the non-negative
+#' floor the package applied before the range was settable, right for
+#' concentrations, contents and most other soil properties. A signed property
+#' such as δ13C or δ15N takes `c(-Inf, Inf)`, which clamps nothing, and a
+#' bounded one such as a percentage may take `c(0, 100)`.
+#'
+#' The range also sets the anchor of the response bound `fit()` stores (see
+#' [fit()]), and it is checked against the data: when an observed value of the
+#' outcome lies outside it, `configure()` aborts with class
+#' `horizons_input_error`, and `evaluate()` and `fit()` repeat the check before
+#' they tune anything. One range applies to the one outcome an object models;
+#' to model several outcomes with different ranges, give each `configure()`
+#' call its own. See GitHub issue #76.
+#'
 #' @param x `horizons_data`. Object with response data attached via
 #'   `add_response()`.
 #' @param outcome `character(1) or NULL`. Which response variable to model.
@@ -145,6 +166,12 @@
 #' @param pca_threshold `numeric`. Share of variance `feature_selection =
 #'   "pca"` keeps, applied to every configuration that uses it. Default
 #'   0.995. Must be in (0, 1].
+#' @param outcome_range `numeric(2)`. The outcome's physical range,
+#'   `c(lower, upper)` with lower < upper; either end may be infinite. Every
+#'   scored and served prediction is clamped to it. Default `c(0, Inf)`,
+#'   non-negative; use `c(-Inf, Inf)` for a signed property such as δ13C.
+#'   Every observed value of the outcome must lie inside it. See Outcome
+#'   range.
 #'
 #' @return A modified `horizons_data` object with:
 #'   * Outcome variable promoted to `role = "outcome"` in `data$role_map`
@@ -154,6 +181,7 @@
 #'   * `config$expansion` — list of original inputs (for reproducibility)
 #'   * `config$recipe` — the recipe settings every configuration is built
 #'     with: `sg_window` and `pca_threshold`
+#'   * `config$outcome_range` — the outcome's range, as a length-2 double
 #'
 #' @examples
 #' \dontrun{
@@ -181,6 +209,9 @@
 #'   pca_threshold     = 0.99
 #' )
 #'
+#' # A signed property: no floor at zero
+#' hd |> configure(outcome = "d13C", outcome_range = c(-Inf, Inf))
+#'
 #' # Multi-outcome pattern
 #' c("SOC", "POM_C", "pH") |>
 #'   purrr::map(~base |> configure(outcome = .x) |> evaluate() |> fit())
@@ -201,7 +232,8 @@ configure <- function(x,
                       bayesian_iter         = 15L,
                       final_bayesian_iter   = 25L,
                       sg_window             = 9L,
-                      pca_threshold         = 0.995) {
+                      pca_threshold         = 0.995,
+                      outcome_range         = c(0, Inf)) {
 
   ## ---------------------------------------------------------------------------
   ## Step 0: Print header
@@ -425,6 +457,22 @@ configure <- function(x,
 
   }
 
+  ## 1.7 Validate outcome_range ------------------------------------------------
+
+  ## Checked against the outcome's values in Step 2, once the outcome is
+  ## known. The rule is is_valid_outcome_range(), which every reader of the
+  ## stored range applies too.
+
+  if (!is_valid_outcome_range(outcome_range)) {
+
+    abort_nested(
+      "`outcome_range` must be a numeric vector of length 2 with lower < upper",
+      c(paste0("Got: ", paste(deparse(outcome_range), collapse = " ")),
+        "Either end may be infinite: c(0, Inf) is non-negative, c(-Inf, Inf) is unbounded")
+    )
+
+  }
+
   ## ---------------------------------------------------------------------------
   ## Step 2: Resolve and promote outcome
   ## ---------------------------------------------------------------------------
@@ -483,7 +531,31 @@ configure <- function(x,
 
   }
 
-  ## 2.3 Promote to outcome role -----------------------------------------------
+  ## 2.3 The outcome has to lie inside outcome_range ---------------------------
+
+  ## Every prediction is clamped to the range, so an outcome outside it would
+  ## be scored against predictions that cannot reach it. Refused here, where
+  ## the values are first known, rather than after evaluate() has tuned every
+  ## configuration (#76). evaluate() and fit() repeat the check. abort_nested()
+  ## raises its header alone, so the header carries the remedy too.
+
+  breach <- outcome_range_breach(x$data$analysis[[outcome_var]], outcome_range)
+
+  if (!is.null(breach)) {
+
+    abort_nested(
+      paste0("Outcome '", outcome_var, "' lies outside `outcome_range` = ",
+             format_outcome_range(outcome_range), ". Set `outcome_range` ",
+             "to a range that contains it: c(-Inf, Inf) for a signed property"),
+      c(breach$lines,
+        "`outcome_range` is the outcome's physical range, and every prediction is clamped to it",
+        "The default, c(0, Inf), is for non-negative properties"),
+      error_class = c("horizons_configure_error", "horizons_input_error")
+    )
+
+  }
+
+  ## 2.4 Promote to outcome role -----------------------------------------------
 
   role_map$role[role_map$variable == outcome_var] <- "outcome"
 
@@ -494,7 +566,7 @@ configure <- function(x,
 
   x <- set_analysis(x, x$data$analysis, role_map)
 
-  ## 2.4 Name what the rows carry from an earlier outcome ----------------------
+  ## 2.5 Name what the rows carry from an earlier outcome ----------------------
 
   ## Both describe rows, so both survive a re-configure; neither was chosen
   ## with this outcome in mind. Warn rather than abort: the object is usable,
@@ -689,6 +761,12 @@ configure <- function(x,
     pca_threshold = as.numeric(pca_threshold)
   )
 
+  ## One range for the object's one outcome, read by every clamp through
+  ## outcome_range_setting() (#76). Not a recipe setting, so kept beside
+  ## config$recipe rather than in it.
+
+  x$config$outcome_range <- as.numeric(unname(outcome_range))
+
   ## Objects configured before #62 carry `config$defaults`, a record of
   ## settings the recipe never ran. Re-configuring one drops it.
 
@@ -705,7 +783,11 @@ configure <- function(x,
   ## ---------------------------------------------------------------------------
 
   cat(paste0("\u251C\u2500 ", cli::style_bold("Configuring pipelines"), "...\n"))
-  cat(paste0("\u2502  \u251C\u2500 Outcome: ", outcome_var, "\n"))
+  cat(paste0("\u2502  \u251C\u2500 Outcome: ", outcome_var,
+             if (!identical(x$config$outcome_range, DEFAULT_OUTCOME_RANGE)) {
+               paste0(" (range ", format_outcome_range(x$config$outcome_range), ")")
+             },
+             "\n"))
   cat(paste0("\u2502  \u251C\u2500 Models: ", paste(models, collapse = ", "), "\n"))
   cat(paste0("\u2502  \u251C\u2500 Tuning: ", cv_folds, "-fold CV, grid = ",
              grid_size, "\n"))
@@ -816,6 +898,170 @@ axis_spacing_cm <- function(x) {
   }
 
   NA_real_
+
+}
+
+
+## -----------------------------------------------------------------------------
+## Outcome range (#76)
+## -----------------------------------------------------------------------------
+
+#' Is this a usable outcome range?
+#'
+#' @description
+#' A numeric vector of two non-missing values, lower strictly below upper;
+#' either end may be infinite. `configure()` refuses anything else, and every
+#' reader of a stored range applies the same rule through
+#' [outcome_range_setting()], so a range that clamps everything to one value,
+#' or nothing to anything sensible, never reaches a prediction.
+#'
+#' @param r The range to check.
+#'
+#' @return `TRUE` or `FALSE`.
+#' @keywords internal
+#' @noRd
+is_valid_outcome_range <- function(r) {
+
+  is.numeric(r) && length(r) == 2 && !anyNA(r) && r[1] < r[2]
+
+}
+
+
+#' The outcome range an object's predictions are clamped to
+#'
+#' @description
+#' Reads the `outcome_range` `configure()` recorded in `x$config$outcome_range`.
+#' An object configured before the range existed, or fitted then and
+#' deserialized now, carries no record and gets `DEFAULT_OUTCOME_RANGE`, the
+#' zero floor it was scored and served under, so it evaluates, fits and
+#' predicts exactly as before. A stored range that breaks
+#' [is_valid_outcome_range()] was not written by `configure()`, and aborts
+#' rather than clamping by it.
+#'
+#' @param x A `horizons_data` object, or any subclass.
+#'
+#' @return `numeric(2)`.
+#' @keywords internal
+#' @noRd
+outcome_range_setting <- function(x) {
+
+  recorded <- x$config$outcome_range
+
+  if (is.null(recorded)) return(DEFAULT_OUTCOME_RANGE)
+
+  if (!is_valid_outcome_range(recorded)) {
+
+    cli::cli_abort(c(
+      "The object's {.field config$outcome_range} is not a usable range.",
+      "x" = "It is {.val {recorded}}; a range is two numbers, lower below upper.",
+      "i" = "Re-run {.fn configure} to record one."
+    ), class = "horizons_validation_error")
+
+  }
+
+  recorded
+
+}
+
+
+#' Which outcome values lie outside a range
+#'
+#' @description
+#' The check `configure()`, `evaluate()` and `fit()` share. Missing values
+#' are ignored, since no verb models them. A non-numeric outcome is not this
+#' check's to judge, and passes.
+#'
+#' @param values Numeric vector of outcome values.
+#' @param outcome_range `numeric(2)`.
+#'
+#' @return `NULL` when every non-missing value lies inside the range.
+#'   Otherwise a list with `n_below` and `n_above` (counts), `min` and `max`
+#'   (of the non-missing values), and `lines`, one sentence per breached side
+#'   for a message.
+#' @keywords internal
+#' @noRd
+outcome_range_breach <- function(values, outcome_range) {
+
+  if (!is.numeric(values)) return(NULL)
+
+  y     <- values[!is.na(values)]
+  below <- sum(y < outcome_range[1])
+  above <- sum(y > outcome_range[2])
+
+  if (below == 0 && above == 0) return(NULL)
+
+  lines <- c(
+    if (below > 0) paste0(below, " of ", length(y), " value", if (length(y) != 1) "s",
+                          " below the lower bound ", outcome_range[1],
+                          " (minimum ", signif(min(y), 4), ")"),
+    if (above > 0) paste0(above, " of ", length(y), " value", if (length(y) != 1) "s",
+                          " above the upper bound ", outcome_range[2],
+                          " (maximum ", signif(max(y), 4), ")")
+  )
+
+  list(n_below = below, n_above = above, min = min(y), max = max(y),
+       lines = lines)
+
+}
+
+
+#' Refuse an outcome that lies outside the object's range
+#'
+#' @description
+#' `evaluate()` and `fit()` call this on entry, before they draw a split or
+#' tune anything, so an object whose outcome no longer fits its range (or was
+#' configured before the range existed, under the default) fails in a second
+#' rather than after the tuning cost (#76). The rows are the ones the verbs
+#' model: missing outcomes are ignored.
+#'
+#' @param x A configured `horizons_data` object.
+#' @param verb `character(1)`. The calling verb, named in the message.
+#' @param call The call the condition is attributed to. Default: the caller.
+#'
+#' @return `NULL`, invisibly. Aborts with class `horizons_input_error`.
+#' @keywords internal
+#' @noRd
+check_outcome_range <- function(x, verb, call = rlang::caller_env()) {
+
+  role_map    <- x$data$role_map
+  outcome_col <- role_map$variable[role_map$role == "outcome"]
+
+  ## No single outcome to check: the verbs' own gates say so.
+  if (length(outcome_col) != 1 || !outcome_col %in% names(x$data$analysis)) {
+
+    return(invisible(NULL))
+
+  }
+
+  outcome_range <- outcome_range_setting(x)
+  breach        <- outcome_range_breach(x$data$analysis[[outcome_col]], outcome_range)
+
+  if (is.null(breach)) return(invisible(NULL))
+
+  range_text <- format_outcome_range(outcome_range)
+
+  ## The breach lines are built from numbers and the package's own words, but
+  ## the column name is the user's, so both go in as values, not templates.
+  cli::cli_abort(c(
+    "{.field {outcome_col}} lies outside {.arg outcome_range}, {range_text}, so {.fn {verb}} would score it against predictions clamped to that range.",
+    stats::setNames(sprintf("{breach$lines[%d]}", seq_along(breach$lines)),
+                    rep("x", length(breach$lines))),
+    "i" = "{.arg outcome_range} is the outcome's physical range, set by {.fn configure}. The default, {.code c(0, Inf)}, is for non-negative properties.",
+    "i" = "Re-run {.code configure(outcome_range = c(-Inf, Inf))} for a signed property, or with bounds that contain the data."
+  ), class = "horizons_input_error", call = call)
+
+}
+
+
+#' Format an outcome range the way it is typed
+#'
+#' @param outcome_range `numeric(2)`.
+#' @return `character(1)`, e.g. `"c(0, Inf)"`.
+#' @keywords internal
+#' @noRd
+format_outcome_range <- function(outcome_range) {
+
+  paste0("c(", paste(as.character(outcome_range), collapse = ", "), ")")
 
 }
 

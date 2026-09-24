@@ -74,6 +74,10 @@ compute_c_alpha <- function(scores, level) {
 #'   its own seed so the forest is reproducible regardless of how the
 #'   preceding stages consumed the parent RNG stream; NULL keeps ranger's
 #'   default of drawing a seed from that stream.
+#' @param outcome_range Numeric length-2 vector. The outcome's physical range,
+#'   which the back-transformed calibration predictions are clamped to, as
+#'   `predict()` clamps the point predictions the intervals are served
+#'   around. Default `c(0, Inf)`.
 #'
 #' @return Named list with fields: `quantile_model`, `scores`, `n_calib`,
 #'   `level_default`, `oof_coverage`, `mean_width`, `prepped_recipe`.
@@ -87,7 +91,8 @@ fit_uq <- function(fitted_workflow,
                    role_map,
                    transformation  = "none",
                    level_default   = DEFAULT_UQ_LEVEL,
-                   seed            = NULL) {
+                   seed            = NULL,
+                   outcome_range   = DEFAULT_OUTCOME_RANGE) {
 
   outcome_col <- role_map$variable[role_map$role == "outcome"]
 
@@ -168,11 +173,13 @@ fit_uq <- function(fitted_workflow,
 
   calib_point_preds <- calib_point_result$result$.pred
 
-  ## Back-transform, unconditionally: the zero floor inside
+  ## Back-transform, unconditionally: the clamp to the outcome's range inside
   ## back_transform_predictions() must reach the calibration residuals too,
-  ## since the intervals are served around floored point predictions (#53).
+  ## since the intervals are served around clamped point predictions (#53,
+  ## #76).
   bt_result <- safely_execute(
-    back_transform_predictions(calib_point_preds, transformation, warn = FALSE),
+    back_transform_predictions(calib_point_preds, transformation, warn = FALSE,
+                               outcome_range = outcome_range),
     log_error          = FALSE,
     capture_conditions = TRUE
   )

@@ -79,8 +79,17 @@ NULL
 #' flag bins it against held-out-calibrated thresholds. Set `abstain_ood = TRUE`
 #' to `NA` predictions for out-of-domain samples while keeping the AD columns.
 #'
+#' **Outcome range.** Point predictions and interval bounds are clamped to
+#' the `outcome_range` given to [configure()], silently, since the range is
+#' the outcome's physical range. Under the default, `c(0, Inf)`, that is a
+#' floor at zero, and objects configured before the range existed predict
+#' under it; a signed property configured with `c(-Inf, Inf)` is not clamped
+#' at all (#76).
+#'
 #' **Response upper bound (guardrail).** Point predictions are winsorized to
-#' `models$response_bound` (max training outcome times 1.5, stored by [fit()])
+#' `models$response_bound` (stored by [fit()]: the largest training outcome
+#' times 1.5 under the default range, and in general a margin above it
+#' scaled on the outcome's span; see [fit()])
 #' with a visible warning when any value is clamped. This catches physically
 #' impossible back-transform blow-ups (e.g. an unconstrained log-scale
 #' prediction inflating through `exp()`) while permitting modest extrapolation.
@@ -816,19 +825,21 @@ predict_one_config <- function(object, config_id, new_spectra, interval,
     error_title = paste0("Prediction failed for config '", config_id, "'.")
   )$.pred
 
-  ## Unconditional funnel call: the "none" branch is a passthrough. The
-  ## back-transform takes no bound here. The intervals below are built around
-  ## the unclamped point, so clamping first would drag both interval bounds
-  ## down by the overshoot, which the documented contract ("interval bounds
-  ## are not clamped") and the ensemble path both rule out.
+  ## Unconditional funnel call: the "none" branch is a passthrough, and the
+  ## funnel clamps to the outcome's range, a floor at 0 under the default and
+  ## no floor for a signed outcome (#76). It takes no response bound here.
+  ## The intervals below are built around the point before the guardrail, so
+  ## winsorizing first would drag both interval bounds down by the overshoot,
+  ## which the documented contract ("interval bounds are not clamped") and the
+  ## ensemble path both rule out.
+  outcome_range <- outcome_range_setting(object)
+
   point_pred <- back_transform_predictions(
     point_trans,
     transformation,
-    warn = FALSE
+    warn          = FALSE,
+    outcome_range = outcome_range
   )
-
-  ## Soil properties predicted from MIR are non-negative; floor at 0.
-  point_pred <- floor_at_zero(point_pred)
 
   ## Deploy-time winsorization guardrail, on .pred only. Old objects without
   ## response_bound degrade gracefully (NULL → no clamp), mirroring the
@@ -855,10 +866,11 @@ predict_one_config <- function(object, config_id, new_spectra, interval,
   if (interval && !is.null(uq)) {
 
     interval_cols <- predict_intervals(
-      uq          = uq,
-      point_pred  = point_pred,
-      new_spectra = new_spectra,
-      config_id   = config_id
+      uq            = uq,
+      point_pred    = point_pred,
+      new_spectra   = new_spectra,
+      config_id     = config_id,
+      outcome_range = outcome_range
     )
 
     ## predict_intervals() returns NULL if quantile prediction fails — degrade
@@ -1014,11 +1026,14 @@ predict_members <- function(object, members, new_spectra) {
 #' @param new_spectra Tibble of new data (sample_id + predictors).
 #' @param config_id Character(1) or `NULL`. The config this bundle belongs
 #'   to, named in the warning on failure. `NULL` (default) omits it.
+#' @param outcome_range Numeric length-2 vector the bounds are clamped to,
+#'   from [outcome_range_setting()]. Default `DEFAULT_OUTCOME_RANGE`.
 #' @param level Coverage level or NULL (-> `uq$level_default`).
 #' @return Tibble of interval columns, or NULL if quantile prediction fails.
 #' @keywords internal
 #' @noRd
-predict_intervals <- function(uq, point_pred, new_spectra, config_id = NULL) {
+predict_intervals <- function(uq, point_pred, new_spectra, config_id = NULL,
+                              outcome_range = DEFAULT_OUTCOME_RANGE) {
 
   ## Intervals are returned at the coverage level the UQ was calibrated for.
   level <- uq$level_default
@@ -1075,9 +1090,10 @@ predict_intervals <- function(uq, point_pred, new_spectra, config_id = NULL) {
   upper <- point_pred + q_high + c_alpha
 
   ## Crossing / negative-width repair (signed c_alpha makes this necessary),
-  ## then floor at 0 — applied after repair so ordering is preserved.
-  lo <- floor_at_zero(pmin(lower, upper))
-  hi <- floor_at_zero(pmax(lower, upper))
+  ## then clamp to the outcome's range (a floor at 0 under the default, #76)
+  ## — applied after repair so ordering is preserved.
+  lo <- clamp_to_outcome_range(pmin(lower, upper), outcome_range)
+  hi <- clamp_to_outcome_range(pmax(lower, upper), outcome_range)
 
   tibble::tibble(
     .pred_lower     = lo,
@@ -1149,25 +1165,5 @@ warn_interval_failure <- function(stage, error, config_id = NULL) {
   ), class = "horizons_interval_warning")
 
   invisible(NULL)
-
-}
-
-## ---------------------------------------------------------------------------
-## floor_at_zero() — non-negativity floor for predictions and bounds
-## ---------------------------------------------------------------------------
-
-#' Floor a numeric vector at zero, preserving NAs
-#'
-#' Soil properties predicted from MIR spectra are non-negative, so predictions
-#' and interval bounds are floored at 0. NAs pass through untouched.
-#'
-#' @param x Numeric vector.
-#' @return `x` with negative (non-NA) entries set to 0.
-#' @keywords internal
-#' @noRd
-floor_at_zero <- function(x) {
-
-  x[!is.na(x) & x < 0] <- 0
-  x
 
 }

@@ -61,12 +61,18 @@ except on a cold start, where \code{fit()} draws that split at this seed as
 \value{
 A \code{horizons_fit} object (inherits from \code{horizons_eval},
 \code{horizons_data}) with \verb{models$} slot populated. The slot includes
-\code{response_bound} (max training outcome times \code{RESPONSE_BOUND_MARGIN},
-where the training rows are the ones the final models are fit on:
+\code{response_bound}, the deploy-time winsorization guardrail \code{predict()}
+applies to back-transformed point predictions:
+\code{max + (RESPONSE_BOUND_MARGIN - 1) * (max - anchor)}, capped at a finite
+upper bound of \code{outcome_range}, where \code{max} is the largest training
+outcome and the anchor is the lower bound of \code{outcome_range}, or the
+smallest training outcome when that bound is \code{-Inf}. Under the default
+range the anchor is 0 and the bound is the largest training outcome
+times \code{RESPONSE_BOUND_MARGIN}, as before the range existed; for any
+range it lies above the largest training outcome unless the cap binds.
+The training rows are the ones the final models are fit on:
 \code{evaluate()}'s training part, less the calibration set when UQ or AD is
-on),
-the deploy-time winsorization guardrail \code{predict()} applies to
-back-transformed point predictions, and \code{selection_present} (whether the
+on. The slot also includes \code{selection_present} (whether the
 training object carried a \verb{$selection} from \code{select_training()}, which
 \code{predict()} reads when asked for conformal intervals). Called on a
 \code{horizons_ensemble}, it returns a \code{horizons_fit} whose \code{ensemble} slot
@@ -136,5 +142,14 @@ Savitzky-Golay window narrower than the spectrum. Re-fitting a
 cold-started fit starts cold again. With more than one configuration
 \code{fit()} aborts with class \code{horizons_input_error}: choosing among them is
 what \code{evaluate()} is for.
+}
+
+\section{Outcome range}{
+
+Every prediction \code{fit()} scores (out-of-fold, test and calibration) is
+clamped to \code{configure()}'s \code{outcome_range}, as \code{predict()} clamps what it
+serves. Before anything is drawn or fitted, on either path, \code{fit()} aborts
+with class \code{horizons_input_error} when an observed outcome lies outside
+the range, naming \code{outcome_range} and how to set it (#76).
 }
 

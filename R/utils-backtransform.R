@@ -9,12 +9,15 @@
 #' inverse is `exp(x) - 1`, NOT `exp(x)`. Similarly, `step_log(base = 10,
 #' offset = 1)` computes `log10(x + 1)`, so the inverse is `10^x - 1`.
 #'
-#' Original-scale output is floored at zero for every transformation,
-#' including `"none"`: the soil properties this package targets are
-#' non-negative by physical constraint, and `predict()` has always enforced
-#' that. Flooring here means the evaluation, OOF and calibration paths score
-#' the same predictions a deployed model would serve, rather than a vector
-#' that differs from it wherever a model extrapolated below zero. The
+#' Original-scale output is clamped to `outcome_range` for every
+#' transformation, including `"none"`. The range is the outcome's physical
+#' range, set by [configure()]; its default, `c(0, Inf)`, is the non-negative
+#' floor the package has always applied, which is a physical constraint only
+#' for non-negative properties. A signed property (δ13C, say) is configured
+#' with `outcome_range = c(-Inf, Inf)` and is not floored at all (#76).
+#' Clamping here means the evaluation, OOF and calibration paths score the
+#' same predictions a deployed model would serve, rather than a vector that
+#' differs from it wherever a model extrapolated past the range (#53). The
 #' `upper_bound` guardrail is deliberately not applied the same way, because
 #' fit-time ranking must see raw upper-tail behaviour.
 #'
@@ -24,27 +27,47 @@
 #'   Note: `warn = FALSE` suppresses these diagnostic warnings only — the
 #'   `upper_bound` winsorization warning is a guardrail and always fires. All
 #'   conditions signal via `cli` (uniform `rlang_warning` class).
-#' @param upper_bound Optional single positive finite numeric. When supplied,
+#' @param upper_bound Optional single finite numeric above the lower bound of
+#'   `outcome_range` (so positive under the default range). When supplied,
 #'   the back-transformed (original-scale) predictions are winsorized to this
 #'   bound, uniformly across all transformations. `NULL` (the default) applies
 #'   no upper clamp. The winsorization warning is NOT gated by `warn` — a
 #'   caller that passes a bound has opted into the guardrail and must see it
 #'   trip (visible recoverable failure over silent drift).
+#' @param outcome_range Numeric length-2 vector, lower < upper, either end
+#'   possibly infinite: the outcome's physical range, which every
+#'   original-scale value is clamped to. A `-Inf` lower bound applies no
+#'   floor and an `Inf` upper bound no cap. Default `c(0, Inf)`, the
+#'   non-negative floor.
 #'
-#' @return Numeric vector on the original response scale, floored at zero.
+#' @return Numeric vector on the original response scale, clamped to
+#'   `outcome_range`.
 #' @export
 back_transform_predictions <- function(predictions, transformation, warn = TRUE,
-                                       upper_bound = NULL) {
+                                       upper_bound   = NULL,
+                                       outcome_range = c(0, Inf)) {
 
   if (is.null(predictions) || length(predictions) == 0) return(predictions)
 
+  if (!is_valid_outcome_range(outcome_range)) {
+
+    cli::cli_abort(c(
+      "{.arg outcome_range} must be a numeric vector of length 2 with lower < upper.",
+      "x" = "Got {.val {outcome_range}}."
+    ))
+
+  }
+
+  ## The bound caps predictions from above, so it has to sit above the floor;
+  ## under the default range that is the "single positive finite" rule the
+  ## guardrail has always had.
   if (!is.null(upper_bound)) {
 
     if (!is.numeric(upper_bound) || length(upper_bound) != 1 ||
-        !is.finite(upper_bound) || upper_bound <= 0) {
+        !is.finite(upper_bound) || upper_bound <= outcome_range[1]) {
 
       cli::cli_abort(c(
-        "{.arg upper_bound} must be a single positive finite numeric.",
+        "{.arg upper_bound} must be a single finite numeric above the lower bound of {.arg outcome_range} ({outcome_range[1]}).",
         "x" = "Got {.val {upper_bound}}."
       ))
 
@@ -119,14 +142,15 @@ back_transform_predictions <- function(predictions, transformation, warn = TRUE,
 
   )
 
-  ## Physical floor: every response this package targets is non-negative, so a
-  ## negative original-scale value is not a model behaviour worth scoring or
-  ## serving. Applied uniformly after the switch so every transform (including
-  ## "none" and the unknown-transform passthrough) is covered, and applied here
-  ## rather than at each caller so evaluation scores exactly what predict()
-  ## serves (#53). The sqrt clamp above is a different thing: it prevents a
-  ## negative sqrt-scale value from squaring into a wrong positive.
-  out <- floor_at_zero(out)
+  ## Physical range: a value outside the outcome's range is not a model
+  ## behaviour worth scoring or serving. The default range is non-negative,
+  ## the floor #53 applied; a signed property configures a range with no
+  ## floor (#76). Applied uniformly after the switch so every transform
+  ## (including "none" and the unknown-transform passthrough) is covered, and
+  ## applied here rather than at each caller so evaluation scores exactly what
+  ## predict() serves (#53). The sqrt clamp above is a different thing: it
+  ## prevents a negative sqrt-scale value from squaring into a wrong positive.
+  out <- clamp_to_outcome_range(out, outcome_range)
 
   ## Deploy-time guardrail: winsorize the original-scale output to the caller's
   ## bound. Unlike the floor this is opt-in, because fit-time ranking must see
@@ -150,7 +174,8 @@ back_transform_predictions <- function(predictions, transformation, warn = TRUE,
 #' callers that suppress diagnostic warnings still surface this one.
 #'
 #' @param values Numeric vector, original response scale.
-#' @param upper_bound Single positive finite numeric, or NULL (no clamp).
+#' @param upper_bound Single finite numeric (negative for a signed outcome
+#'   whose training values are all negative), or NULL (no clamp).
 #' @return `values`, winsorized to `upper_bound` where it was exceeded.
 #' @keywords internal
 apply_response_bound <- function(values, upper_bound) {
@@ -176,6 +201,79 @@ apply_response_bound <- function(values, upper_bound) {
   }
 
   values
+
+}
+
+## ---------------------------------------------------------------------------
+## clamp_to_outcome_range
+## ---------------------------------------------------------------------------
+
+#' Clamp Predictions or Interval Bounds to the Outcome's Physical Range
+#'
+#' @description
+#' The one clamp every scoring and serving path applies (#76): values below
+#' the lower bound of `outcome_range` are raised to it, values above the upper
+#' bound lowered to it, and `NA`s pass through. An infinite end clamps
+#' nothing, so the default range, `c(0, Inf)`, is the zero floor the package
+#' applied before the range existed, and `c(-Inf, Inf)` leaves a signed
+#' property untouched.
+#'
+#' This is the physical constraint, applied silently and everywhere. The
+#' response bound ([apply_response_bound()]) is a different thing: a
+#' deploy-time guardrail against blow-ups, applied to served point
+#' predictions only, with a warning.
+#'
+#' @param x Numeric vector, original response scale.
+#' @param outcome_range Numeric length-2 vector from
+#'   [outcome_range_setting()]. Default `DEFAULT_OUTCOME_RANGE`.
+#' @return `x`, clamped to `outcome_range`.
+#' @keywords internal
+#' @noRd
+clamp_to_outcome_range <- function(x, outcome_range = DEFAULT_OUTCOME_RANGE) {
+
+  x[!is.na(x) & x < outcome_range[1]] <- outcome_range[1]
+  x[!is.na(x) & x > outcome_range[2]] <- outcome_range[2]
+  x
+
+}
+
+## ---------------------------------------------------------------------------
+## compute_response_bound
+## ---------------------------------------------------------------------------
+
+#' The Deploy-Time Response Bound for a Set of Training Outcomes
+#'
+#' @description
+#' `fit()` stores this bound, and `predict()` winsorizes served point
+#' predictions to it. It lies strictly above the training maximum whatever
+#' the outcome's sign:
+#'
+#' `bound = max + (RESPONSE_BOUND_MARGIN - 1) * (max - anchor)`
+#'
+#' where the anchor is the lower bound of `outcome_range` when that bound is
+#' finite, and the training minimum when it is `-Inf`. The bound therefore
+#' allows half the span from the anchor to the maximum above the maximum.
+#' Under the default range the anchor is 0 and the bound is `max * 1.5`,
+#' identically to the double (the two are the same exact product, rounded
+#' once), so objects and tests pinned to the old formula are unchanged. The
+#' old formula itself was wrong for a signed outcome: at a negative maximum
+#' `max * 1.5` lies below the maximum, and at a zero maximum it is zero. A
+#' finite upper bound of `outcome_range` caps the result, since nothing above
+#' it is served anyway.
+#'
+#' @param y Numeric vector of training outcomes; `NA`s are dropped.
+#' @param outcome_range Numeric length-2 vector. Default
+#'   `DEFAULT_OUTCOME_RANGE`.
+#' @return Single numeric: the bound.
+#' @keywords internal
+#' @noRd
+compute_response_bound <- function(y, outcome_range = DEFAULT_OUTCOME_RANGE) {
+
+  y      <- y[!is.na(y)]
+  top    <- max(y)
+  anchor <- if (is.finite(outcome_range[1])) outcome_range[1] else min(y)
+
+  min(top + (RESPONSE_BOUND_MARGIN - 1) * (top - anchor), outcome_range[2])
 
 }
 
