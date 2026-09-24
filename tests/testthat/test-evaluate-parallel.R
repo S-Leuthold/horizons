@@ -275,7 +275,7 @@ describe("evaluate() - resamples axis", {
 
 describe("evaluate() - configs axis", {
 
-  it("writes a schema-3 manifest describing the plan, the axis and the data", {
+  it("writes a schema-4 manifest describing the plan, the axis, the data and the settings", {
 
     skip_on_cran()
     skip_if_dev_package()
@@ -290,9 +290,14 @@ describe("evaluate() - configs axis", {
     )
 
     manifest <- readRDS(file.path(tmpdir, "eval_manifest.rds"))
-    expect_identical(manifest$schema_version, 3L)
+    expect_identical(manifest$schema_version, 4L)
     expect_identical(manifest$data_hash, result$evaluation$results$data_hash[1])
     expect_identical(manifest$data_n_rows, result$evaluation$n_train)
+
+    ## The worker stamps the record the parent sent, so rows written on the
+    ## configs axis carry the same settings as the manifest.
+    expect_true(all(vapply(result$evaluation$results$settings, identical,
+                           logical(1), manifest$settings)))
     expect_equal(manifest$axis, "configs")
     expect_equal(manifest$parallelize_over_requested, "auto")
     expect_equal(manifest$plan, "multisession")
@@ -400,6 +405,9 @@ describe("evaluate() - cross-mode checkpoint resume", {
       evaluate(obj, output_dir = tmpdir, verbose = FALSE, seed = 42L)
     )
 
+    ## Both axes share the one store (#42): no single file to go stale.
+    expect_false(file.exists(file.path(tmpdir, "eval_checkpoint.rds")))
+
     local_plan(future::multisession, workers = 2)
 
     par_result <- suppressWarnings(
@@ -410,6 +418,12 @@ describe("evaluate() - cross-mode checkpoint resume", {
     expect_equal(seq_result$evaluation$best_config,
                  par_result$evaluation$best_config)
     expect_equal(nrow(par_result$evaluation$results), 4)
+
+    ## Every row was resumed, none re-run: the runtimes are the checkpointed
+    ## ones.
+    by_id <- function(r) r$runtime_secs[order(r$config_id)]
+    expect_equal(by_id(par_result$evaluation$results),
+                 by_id(seq_result$evaluation$results))
 
   })
 
@@ -428,6 +442,8 @@ write_mock_checkpoints <- function(checkpoint_dir, n = 3) {
       config_id    = paste0("cfg_", sprintf("%03d", i)),
       model        = "rf",
       status       = "success",
+      ## Current schema, as a real row is: the monitor drops the rest (#42).
+      scoring_schema = horizons:::SCORING_SCHEMA,
       rpd          = runif(1, 1, 3),
       rsq          = runif(1, 0.5, 0.9),
       rmse         = runif(1, 0.1, 0.5),
@@ -643,6 +659,195 @@ describe("monitor_evaluate() - agrees with evaluate()", {
     invisible(capture.output(stats <- monitor_evaluate(tmpdir)))
 
     expect_equal(stats$best_config, result$evaluation$best_config)
+
+  })
+
+})
+
+
+## =========================================================================
+## monitor_evaluate() applies evaluate()'s checkpoint gates (#42)
+## =========================================================================
+
+describe("monitor_evaluate() - applies evaluate()'s checkpoint gates", {
+
+  it("neither counts nor ranks a row evaluate() would reject", {
+
+    skip_on_cran()
+    obj    <- make_eval_object(n = 60, n_configs = 4)
+    tmpdir <- withr::local_tempdir()
+
+    result <- suppressWarnings(
+      evaluate(obj, output_dir = tmpdir, prune = FALSE, verbose = FALSE,
+               seed = 42L)
+    )
+
+    res <- result$evaluation$results
+    expect_equal(res$status[res$config_id == "cfg_003"], "success")
+
+    ckpt <- file.path(tmpdir, "checkpoints")
+    doctor <- function(id, edit) {
+      f <- file.path(ckpt, paste0(id, ".rds"))
+      saveRDS(edit(readRDS(f)), f)
+    }
+
+    ## Each rejected row is made to look like the winner.
+    doctor("cfg_001", function(r) {        # scored on other training rows
+      r$data_hash <- "0000deadbeef"
+      r$cv_rpd    <- 999
+      r
+    })
+    doctor("cfg_002", function(r) {        # scored under an earlier schema
+      r$scoring_schema <- 1L
+      r$cv_rpd         <- 998
+      r
+    })
+    doctor("cfg_004", function(r) {        # tuned under other settings
+      s <- r$settings[[1]]
+      s$grid_size <- 99
+      r$settings  <- list(s)
+      r$cv_rpd    <- 997
+      r
+    })
+
+    ## A config no longer in the grid, and a file that is not a checkpoint.
+    stale <- readRDS(file.path(ckpt, "cfg_003.rds"))
+    stale$config_id <- "cfg_999"
+    stale$cv_rpd    <- 996
+    saveRDS(stale, file.path(ckpt, "cfg_999.rds"))
+    writeLines("not an rds file", file.path(ckpt, "cfg_005.rds"))
+
+    output <- capture.output(stats <- monitor_evaluate(tmpdir))
+
+    expect_equal(stats$n_complete, 1)
+    expect_equal(stats$best_config, "cfg_003")
+    expect_true(any(grepl("cfg_005.rds", stats$unreadable, fixed = TRUE)))
+
+    ## Refused rows are shown, not hidden.
+    expect_equal(sum(stats$ignored), 4)
+    expect_true(any(grepl("Ignored", output)))
+    expect_true(any(grepl("grid_size", output)))
+
+  })
+
+  it("relabels resumed 'pruned' rows at bayesian_iter = 0, naming evaluate()'s best", {
+
+    skip_on_cran()
+    obj    <- make_eval_object(n = 60, n_configs = 2)   # bayesian_iter = 0
+    tmpdir <- withr::local_tempdir()
+
+    first <- suppressWarnings(
+      evaluate(obj, output_dir = tmpdir, prune = FALSE, verbose = FALSE,
+               seed = 42L)
+    )
+
+    ## The winner's row gets the label code before #38 wrote at
+    ## bayesian_iter = 0. Taken at face value it would lose to the other
+    ## config's success; relabelled, it is ranked with it, as evaluate() does.
+    winner <- first$evaluation$best_config
+    f      <- file.path(tmpdir, "checkpoints", paste0(winner, ".rds"))
+    row    <- readRDS(f)
+    row$status <- "pruned"
+    saveRDS(row, f)
+
+    invisible(capture.output(stats <- monitor_evaluate(tmpdir)))
+
+    resumed <- suppressWarnings(
+      evaluate(obj, output_dir = tmpdir, prune = FALSE, verbose = FALSE,
+               seed = 42L)
+    )
+
+    expect_equal(resumed$evaluation$best_config, winner)
+    expect_equal(stats$best_config, resumed$evaluation$best_config)
+
+  })
+
+  it("re-reads the manifest on every poll in watch mode", {
+
+    skip_on_cran()
+
+    tmpdir <- withr::local_tempdir()
+    ckpt   <- file.path(tmpdir, "checkpoints")
+    dir.create(ckpt)
+
+    first_run  <- eval_settings(grid_size = 2L)
+    second_run <- eval_settings(grid_size = 3L)
+
+    manifest <- list(
+      schema_version = 4L,
+      n_total        = 1,
+      n_pending      = 1,
+      config_ids     = "cfg_001",
+      start_time     = Sys.time() - 60,
+      metric         = "rpd",
+      axis           = "configs",
+      plan           = "multisession",
+      workers        = 2L,
+      settings       = first_run
+    )
+    saveRDS(manifest, file.path(tmpdir, "eval_manifest.rds"))
+
+    ## The one row was tuned by the second run.
+    saveRDS(
+      tibble::tibble(config_id = "cfg_001", status = "success",
+                     scoring_schema = horizons:::SCORING_SCHEMA,
+                     rpd = 2, cv_rpd = 2, settings = list(second_run)),
+      file.path(ckpt, "cfg_001.rds")
+    )
+
+    ## After the first poll, the second run starts and rewrites the manifest.
+    ## A monitor still holding the first manifest ignores the row forever;
+    ## the guard turns that hang into a failure.
+    polls <- 0L
+
+    local_mocked_bindings(.render_monitor = function(stats, manifest) {
+
+      polls <<- polls + 1L
+
+      if (polls == 1L) {
+        manifest$settings <- second_run
+        saveRDS(manifest, file.path(tmpdir, "eval_manifest.rds"))
+      }
+
+      if (polls > 3L) stop("still gating against the first run's manifest")
+
+    })
+
+    invisible(capture.output(
+      stats <- monitor_evaluate(tmpdir, watch = TRUE, interval = 0)
+    ))
+
+    expect_equal(stats$n_complete, 1)
+    expect_equal(polls, 2L)
+
+  })
+
+  it("reads a legacy single file exactly where evaluate() would", {
+
+    skip_on_cran()
+    obj    <- make_eval_object(n = 60, n_configs = 2)
+    tmpdir <- withr::local_tempdir()
+
+    result <- suppressWarnings(
+      evaluate(obj, output_dir = tmpdir, prune = FALSE, verbose = FALSE,
+               seed = 42L)
+    )
+
+    ## A legacy file holding both configs, where cfg_002 won by a mile.
+    files <- list.files(file.path(tmpdir, "checkpoints"), full.names = TRUE)
+    stale <- dplyr::bind_rows(lapply(files, readRDS))
+    stale$cv_rpd[stale$config_id == "cfg_002"] <- 999
+    saveRDS(stale, file.path(tmpdir, "eval_checkpoint.rds"))
+
+    ## cfg_001 has no per-config file, so its legacy row counts; cfg_002's
+    ## per-config file shadows the legacy row.
+    unlink(file.path(tmpdir, "checkpoints", "cfg_001.rds"))
+
+    invisible(capture.output(stats <- monitor_evaluate(tmpdir)))
+
+    expect_equal(stats$n_complete, 2)
+    expect_equal(stats$best_config, result$evaluation$best_config)
+    expect_false(isTRUE(stats$best_metric == 999))
 
   })
 
