@@ -317,11 +317,11 @@ build_recipe <- function(config_row, train_data, role_map) {
 #' from the replacement environment. Harvesting `all.vars()` off the quosures
 #' themselves removes that failure mode rather than documenting it.
 #'
-#' Every slot is walked recursively rather than the `terms`/`columns` pair.
-#' Stock steps keep selectors in `terms` and this package's custom steps keep
-#' them in `columns`, but others use `impute_with`, `denom`, `inputs`,
-#' `outcome`, or `lon`/`lat`, and a slot holding a *single* quosure is not a
-#' list. Both would have been silently missed, restoring the leak.
+#' Every slot is walked recursively rather than `terms` alone. Stock steps
+#' and this package's custom steps keep their selectors in `terms` (#52), but
+#' others use `impute_with`, `denom`, `inputs`, `outcome`, or `lon`/`lat`,
+#' and a slot holding a *single* quosure is not a list. Both would have been
+#' silently missed, restoring the leak.
 #'
 #' Residual caveat: the replacement environment is parented on the `horizons`
 #' namespace, because bare `recipes::all_predictors()` / `all_outcomes()` are
@@ -499,6 +499,61 @@ check_selection_columns <- function(col_names, step) {
   }
 
   invisible(TRUE)
+
+}
+
+## ---------------------------------------------------------------------------
+## step_selectors
+## ---------------------------------------------------------------------------
+
+#' The Selector Quosures a Custom Step Should Resolve at prep()
+#'
+#' @description
+#' Shared by the `prep()` methods of the four custom steps. Since #52 a step
+#' keeps its selectors in `terms` and its resolved names in `columns`. Steps
+#' built by earlier versions kept the selectors in `columns` and overwrote them
+#' with the resolved names at `prep()`, so this reads whichever layout the step
+#' has and names the one case that cannot be recovered.
+#'
+#' Three layouts, in order:
+#'
+#' 1. `terms` holds the selectors. Returned as they are. After `butcher()` they
+#'    are a plain list of quosures rather than a `quosures` object, which still
+#'    counts.
+#' 2. `columns` holds quosures: an untrained step from an earlier version.
+#'    Returned, so the step preps normally and comes out in the current layout.
+#' 3. Neither: a step from an earlier version that has already been prepped,
+#'    whose selectors are gone. Aborts. Without this check the step resolves
+#'    zero columns and aborts on a symptom (the window check, or a selection
+#'    step's "selected zero columns") that points at the wrong cause.
+#'
+#' A `butcher()`ed step from an earlier version carries `terms = list()`, an
+#' empty plain list, which is why an empty `terms` counts as selectors only
+#' when it is a `quosures` object (a step called with no selectors at all).
+#'
+#' @param x A custom step object, as passed to its `prep()` method.
+#' @param step Character. The step's user-facing name, for the message.
+#'
+#' @return The selector quosures to pass to `recipes::recipes_eval_select()`.
+#' @keywords internal
+#' @noRd
+step_selectors <- function(x, step) {
+
+  terms <- x[["terms"]]
+
+  holds_quosures <- rlang::is_quosures(terms) ||
+    (is.list(terms) && length(terms) > 0 &&
+       all(vapply(terms, rlang::is_quosure, logical(1))))
+
+  if (holds_quosures) return(terms)
+
+  if (rlang::is_quosures(x[["columns"]])) return(x[["columns"]])
+
+  cli::cli_abort(c(
+    "{.fn {step}} has no stored selectors, so it cannot be prepped again.",
+    "x" = "The step was built by an earlier version of horizons, which replaced its selectors with the resolved column names at {.fn prep} (#52).",
+    "i" = "Rebuild the recipe with this version of horizons. A trained recipe from the earlier version still bakes; only re-prepping it needs the rebuild."
+  ), class = "horizons_input_error")
 
 }
 

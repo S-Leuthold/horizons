@@ -965,6 +965,103 @@ describe("transform_spectra_matrix()", {
 
 
 ## =========================================================================
+## process_spectra_row: each method equals its direct prospectr call
+## =========================================================================
+##
+## The row function is the reference transform_spectra_matrix() is tested
+## against, so it needs a reference of its own. Each method is written out
+## here as the prospectr call it is meant to be, derivative order and
+## polynomial degree spelled out, so a changed parameter fails here instead of
+## moving both paths together. The length invariant is the arithmetic prep()
+## uses to name the step's output. See #52.
+
+describe("process_spectra_row() against prospectr", {
+
+  sg <- function(x, m, p, w) {
+    as.vector(prospectr::savitzkyGolay(matrix(x, nrow = 1), m = m, p = p, w = w))
+  }
+
+  snv <- function(x) {
+    as.vector(prospectr::standardNormalVariate(matrix(x, nrow = 1)))
+  }
+
+  trim <- function(x, w) {
+    h <- (w - 1) / 2
+    x[(1 + h):(length(x) - h)]
+  }
+
+  reference <- list(
+    raw        = function(x, w) trim(x, w),
+    sg         = function(x, w) sg(x, m = 0, p = 1, w = w),
+    snv        = function(x, w) trim(snv(x), w),
+    deriv1     = function(x, w) sg(x, m = 1, p = 1, w = w),
+    deriv2     = function(x, w) sg(x, m = 2, p = 3, w = w),
+    snv_deriv1 = function(x, w) sg(snv(x), m = 1, p = 1, w = w),
+    snv_deriv2 = function(x, w) sg(snv(x), m = 2, p = 3, w = w)
+  )
+
+  it("matches the direct prospectr call for each of the seven methods", {
+
+    set.seed(52)
+    x <- cumsum(rnorm(61))
+
+    for (m in names(reference)) {
+
+      expect_equal(horizons:::process_spectra_row(x, preprocessing = m, window_size = 9),
+                   reference[[m]](x, 9),
+                   tolerance = 1e-12, label = m)
+
+    }
+
+  })
+
+  it("returns length(in) - (w - 1) for every method across odd windows", {
+
+    ## Windows start at 5: the second-derivative methods fit a cubic, which
+    ## needs a window wider than the polynomial degree.
+    set.seed(53)
+    x <- cumsum(rnorm(41))
+
+    for (w in c(5, 7, 9, 11, 15, 21)) {
+
+      for (m in names(reference)) {
+
+        out <- horizons:::process_spectra_row(x, preprocessing = m, window_size = w)
+
+        expect_equal(length(out), length(x) - (w - 1), label = paste(m, w))
+        expect_equal(out, reference[[m]](x, w), tolerance = 1e-12,
+                     label = paste(m, w))
+
+      }
+
+    }
+
+  })
+
+  it("agrees with the width prep() promises for the step's output", {
+
+    td  <- make_test_data(n = 10, n_wn = 41)
+    dat <- dplyr::select(td$data, -sample_id)
+
+    for (w in c(5, 7, 9, 11, 15, 21)) {
+
+      prepped <- recipes::recipe(SOC ~ ., data = dat) |>
+        step_transform_spectra(dplyr::starts_with("wn_"),
+                               preprocessing = "deriv2",
+                               window_size   = w) |>
+        recipes::prep()
+
+      expect_equal(length(prepped$steps[[1]]$trained_columns), 41 - (w - 1),
+                   label = paste("window", w))
+
+    }
+
+  })
+
+})
+
+
+## =========================================================================
 ## Selection steps: a selector that matches nothing is a configuration error
 ## =========================================================================
 ##
@@ -1151,5 +1248,342 @@ describe("prepped recipes bake identical predictor names on train and new data",
     }
 
   }
+
+})
+
+
+## =========================================================================
+## Custom steps: selectors survive prep, bake reads the resolved names
+## =========================================================================
+##
+## recipes' step contract keeps the selector quosures in `terms` for the life
+## of the step and records the names they resolved to in `columns`, which is
+## what bake() reads. The four custom steps used to overwrite their only copy
+## of the selector with the resolved names at prep(), so a trained recipe could
+## not be prepped a second time: `prep(fresh = TRUE)` handed the names back to
+## recipes_eval_select() as if they were selectors, and it aborted. See #52.
+##
+## The other half of the contract is what keeps a stored model working.
+## fit() keeps butchered workflows, and butcher re-points every step's `terms`
+## at the base environment, so a butchered recipe cannot resolve its
+## selectors again. That is expected of a butchered object, and harmless as
+## long as bake() never needs them.
+##
+## Steps built before the fix are still in the wild, stored fits above all.
+## prep() reads whichever layout a step has through step_selectors(), and
+## bake() and print() must never come to need `terms`, or every stored
+## pre-#52 fit stops predicting.
+
+describe("custom steps keep their selectors through prep (#52)", {
+
+  steps <- c("transform", "correlation", "boruta", "cars")
+
+  step_fn <- function(step) {
+
+    if (step == "transform") "step_transform_spectra" else paste0("step_select_", step)
+
+  }
+
+  ## A step as the release before #52 left it. Untrained, its selectors sat
+  ## in `columns`; trained, `columns` held the resolved names and the
+  ## selectors were gone. Neither had a `terms` slot, until butcher() added
+  ## an empty one (`terms = list()`), so both shapes are covered.
+  as_pre52 <- function(step_obj, butchered = FALSE) {
+
+    s <- unclass(step_obj)
+    if (!isTRUE(s$trained)) s$columns <- s$terms
+    s$terms <- NULL
+    if (butchered) s["terms"] <- list(list())
+    structure(s, class = class(step_obj))
+
+  }
+
+  ## Swap the prepped recipe a fitted workflow predicts with.
+  with_prepped_recipe <- function(wf, rec) {
+
+    wf$pre$mold$blueprint$recipe <- rec
+    wf
+
+  }
+
+  ## The step under test is always the recipe's last step. The selection
+  ## steps sit on the transform step's output, as build_recipe() puts them,
+  ## and the transform step selects through a local vector as build_recipe()
+  ## does, so a test can see whether its selector environment was cut loose.
+  step_recipe <- function(step, data) {
+
+    wn_cols <- grep("^wn_", names(data), value = TRUE)
+
+    rec <- recipes::recipe(SOC ~ ., data = data) |>
+      step_transform_spectra(dplyr::all_of(wn_cols), preprocessing = "snv")
+
+    switch(step,
+      transform   = rec,
+      correlation = step_select_correlation(rec, dplyr::matches("^spec[0-9]+$"),
+                                            outcome = "SOC"),
+      boruta      = step_select_boruta(rec, dplyr::matches("^spec[0-9]+$"),
+                                       outcome = "SOC"),
+      cars        = step_select_cars(rec, dplyr::matches("^spec[0-9]+$"),
+                                     outcome = "SOC")
+    )
+
+  }
+
+  step_data <- function(n = 40) {
+
+    dplyr::select(make_test_data(n = n, n_wn = 60)$data, -sample_id)
+
+  }
+
+  skip_if_step_unavailable <- function(step) {
+
+    if (step == "boruta") skip_if_not_installed("Boruta")
+    if (step == "cars")   skip_if_not_installed("pls")
+
+  }
+
+  for (step in steps) {
+
+    it(paste0(step, ": a trained recipe re-preps with fresh = TRUE"), {
+
+      skip_if_step_unavailable(step)
+
+      set.seed(52)
+      d1 <- step_data()
+      d2 <- step_data()
+
+      rec <- step_recipe(step, d1)
+
+      set.seed(1)
+      trained <- recipes::prep(rec, training = d1)
+
+      ## Re-prepped on other rows, the recipe has to land exactly where a
+      ## first prep on those rows does: selectors re-resolved, state
+      ## re-estimated, nothing carried over from d1.
+      set.seed(2)
+      refreshed <- recipes::prep(trained, training = d2, fresh = TRUE)
+
+      set.seed(2)
+      direct <- recipes::prep(rec, training = d2)
+
+      expect_identical(recipes::bake(refreshed, new_data = NULL),
+                       recipes::bake(direct,    new_data = NULL))
+
+    })
+
+    it(paste0(step, ": terms survive prep and columns hold the resolved names"), {
+
+      skip_if_step_unavailable(step)
+
+      set.seed(52)
+      d    <- step_data()
+      rec  <- step_recipe(step, d)
+      last <- length(rec$steps)
+
+      untrained <- rec$steps[[last]]
+
+      expect_true(rlang::is_quosures(untrained$terms))
+      expect_null(untrained$columns)
+
+      set.seed(1)
+      trained <- recipes::prep(rec, training = d)$steps[[last]]
+
+      expect_identical(trained$terms, untrained$terms)
+      expect_type(trained$columns, "character")
+      expect_named(trained$columns, unname(trained$columns))
+
+      pattern <- if (step == "transform") "^wn_" else "^spec[0-9]+$"
+      expect_gt(length(trained$columns), 0)
+      expect_true(all(grepl(pattern, trained$columns)))
+
+    })
+
+    it(paste0(step, ": prints untrained and trained"), {
+
+      skip_if_step_unavailable(step)
+
+      set.seed(52)
+      d    <- step_data()
+      rec  <- step_recipe(step, d)
+      last <- length(rec$steps)
+
+      set.seed(1)
+      prepped <- recipes::prep(rec, training = d)
+
+      untrained_says <- if (step == "transform") "Spectral transformation" else "not yet trained"
+      trained_says   <- if (step == "transform") "Spectral transformation" else "retained"
+
+      expect_output(print(rec$steps[[last]]),     untrained_says)
+      expect_output(print(prepped$steps[[last]]), trained_says)
+
+      ## And inside the recipe's own print method, which calls the step's.
+      expect_no_error(suppressMessages(utils::capture.output(print(rec))))
+      expect_no_error(suppressMessages(utils::capture.output(print(prepped))))
+
+    })
+
+    it(paste0(step, ": a butchered workflow still predicts"), {
+
+      skip_if_step_unavailable(step)
+
+      set.seed(52)
+      train <- step_data(n = 80)
+      new   <- step_data(n = 10)
+
+      wf <- workflows::workflow(step_recipe(step, train), parsnip::linear_reg())
+
+      set.seed(1)
+      fitted   <- parsnip::fit(wf, data = train)
+      expected <- predict(fitted, new_data = new)
+
+      butchered <- butcher::butcher(fitted)
+
+      ## The premise: butcher really did cut the selectors loose. The
+      ## transform step's selector names a local vector that its environment
+      ## held before butchering and does not hold after.
+      q_before <- workflows::extract_recipe(fitted)$steps[[1]]$terms[[1]]
+      q_after  <- workflows::extract_recipe(butchered)$steps[[1]]$terms[[1]]
+
+      expect_true(exists("wn_cols", envir = rlang::quo_get_env(q_before),
+                         inherits = FALSE))
+      expect_false(exists("wn_cols", envir = rlang::quo_get_env(q_after),
+                          inherits = FALSE))
+
+      expect_equal(predict(butchered, new_data = new), expected)
+
+    })
+
+    it(paste0(step, ": a fit stored before #52 predicts, bakes and prints unchanged"), {
+
+      skip_if_step_unavailable(step)
+
+      set.seed(52)
+      train <- step_data(n = 80)
+      new   <- step_data(n = 10)
+
+      wf <- workflows::workflow(step_recipe(step, train), parsnip::linear_reg())
+
+      set.seed(1)
+      fitted    <- parsnip::fit(wf, data = train)
+      expected  <- predict(fitted, new_data = new)
+      baked     <- recipes::bake(workflows::extract_recipe(fitted), new_data = new)
+      butchered <- butcher::butcher(fitted)
+
+      ## The guard: a future bake() or print() that reaches for `terms` fails
+      ## here, for every stored pre-#52 fit, butchered or not.
+      for (was_butchered in c(FALSE, TRUE)) {
+
+        source_wf <- if (was_butchered) butchered else fitted
+
+        old_rec       <- workflows::extract_recipe(source_wf)
+        old_rec$steps <- lapply(old_rec$steps, as_pre52, butchered = was_butchered)
+        old_wf        <- with_prepped_recipe(source_wf, old_rec)
+
+        label <- if (was_butchered) "butchered" else "unbutchered"
+        last  <- length(old_rec$steps)
+
+        ## The layout really is the old one before anything is asserted on it.
+        expect_identical(workflows::extract_recipe(old_wf)$steps[[last]]$terms,
+                         if (was_butchered) list() else NULL, label = label)
+
+        expect_equal(predict(old_wf, new_data = new), expected, label = label)
+        expect_equal(recipes::bake(old_rec, new_data = new), baked, label = label)
+        expect_output(print(old_rec$steps[[last]]))
+
+      }
+
+    })
+
+    it(paste0(step, ": an untrained step from before #52 preps into the current layout"), {
+
+      skip_if_step_unavailable(step)
+
+      set.seed(52)
+      d    <- step_data()
+      rec  <- step_recipe(step, d)
+      last <- length(rec$steps)
+
+      set.seed(1)
+      reference <- recipes::bake(recipes::prep(rec, training = d), new_data = NULL)
+
+      ## Selectors in `columns` and no `terms`, as the old release built it,
+      ## and the same with the empty `terms` a butchered workflow's
+      ## preprocessor carries.
+      for (was_butchered in c(FALSE, TRUE)) {
+
+        old       <- rec
+        old$steps <- lapply(old$steps, as_pre52, butchered = was_butchered)
+
+        expect_true(rlang::is_quosures(old$steps[[last]]$columns))
+
+        set.seed(1)
+        prepped <- recipes::prep(old, training = d)
+
+        expect_identical(recipes::bake(prepped, new_data = NULL), reference)
+
+        ## It comes out in the current layout, so it can be re-prepped.
+        expect_identical(prepped$steps[[last]]$terms, rec$steps[[last]]$terms)
+        expect_no_error(recipes::prep(prepped, training = d, fresh = TRUE))
+
+      }
+
+    })
+
+    it(paste0(step, ": a trained step from before #52 refuses to re-prep, naming why"), {
+
+      skip_if_step_unavailable(step)
+
+      set.seed(52)
+      d <- step_data()
+
+      set.seed(1)
+      trained <- recipes::prep(step_recipe(step, d), training = d)
+      last    <- length(trained$steps)
+
+      ## Only the step under test is old, so the error is its own and not
+      ## the transform step's ahead of it.
+      for (was_butchered in c(FALSE, TRUE)) {
+
+        old <- trained
+        old$steps[[last]] <- as_pre52(old$steps[[last]], butchered = was_butchered)
+
+        expect_error(recipes::prep(old, training = d, fresh = TRUE),
+                     class = "horizons_input_error")
+        expect_error(recipes::prep(old, training = d, fresh = TRUE),
+                     "earlier version of horizons")
+        expect_error(recipes::prep(old, training = d, fresh = TRUE),
+                     step_fn(step), fixed = TRUE)
+
+      }
+
+    })
+
+  }
+
+  it("step_selectors() reads each layout, and refuses the unrecoverable one", {
+
+    sel <- horizons:::step_selectors
+    q   <- rlang::quos(dplyr::starts_with("wn_"))
+
+    ## 1. `terms` holds the selectors: as built, after butcher() strips the
+    ##    quosures class, and empty (a step called with no selectors).
+    expect_identical(sel(list(terms = q, columns = NULL), "s"), q)
+    expect_identical(sel(list(terms = unclass(q), columns = c(wn_1 = "wn_1")), "s"),
+                     unclass(q))
+    expect_identical(sel(list(terms = rlang::quos(), columns = NULL), "s"),
+                     rlang::quos())
+
+    ## 2. Untrained before #52: the selectors are in `columns`, with or
+    ##    without butcher()'s empty `terms`.
+    expect_identical(sel(list(columns = q), "s"), q)
+    expect_identical(sel(list(terms = list(), columns = q), "s"), q)
+
+    ## 3. Trained before #52: no selectors anywhere.
+    expect_error(sel(list(columns = c(wn_1 = "wn_1")), "step_x"),
+                 class = "horizons_input_error")
+    expect_error(sel(list(terms = list(), columns = c(wn_1 = "wn_1")), "step_x"),
+                 "earlier version of horizons")
+
+  })
 
 })

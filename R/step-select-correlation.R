@@ -65,7 +65,8 @@ step_select_correlation <- function(recipe,
   recipes::add_step(
     recipe,
     step_select_correlation_new(
-      columns       = terms,
+      terms         = terms,
+      columns       = NULL,
       outcome       = outcome,
       role          = role,
       trained       = trained,
@@ -80,9 +81,14 @@ step_select_correlation <- function(recipe,
 ## Step 2: Constructor
 ## -----------------------------------------------------------------------------
 
+## Follows recipes' own contract: `terms` holds the selector quosures and
+## survives prep, so a trained recipe can be re-prepped (`fresh = TRUE`);
+## `columns` holds the names prep resolved them to, and is what bake reads.
+
 #' @keywords internal
 #' @noRd
-step_select_correlation_new <- function(columns,
+step_select_correlation_new <- function(terms,
+                                        columns,
                                         outcome,
                                         role,
                                         trained,
@@ -90,6 +96,7 @@ step_select_correlation_new <- function(columns,
                                         skip,
                                         id) {
   out <- list(
+    terms            = terms,
     columns          = columns,
     outcome          = outcome,
     role             = role,
@@ -111,7 +118,8 @@ step_select_correlation_new <- function(columns,
 prep.step_select_correlation <- function(x, training, info = NULL, ...) {
 
   ## Stage 1: Evaluate column predictors (No changes)
-  col_names <- recipes::recipes_eval_select(x$columns, training, info)
+  selectors <- step_selectors(x, "step_select_correlation")
+  col_names <- recipes::recipes_eval_select(selectors, training, info)
 
   check_selection_columns(col_names, "step_select_correlation")
 
@@ -151,6 +159,7 @@ prep.step_select_correlation <- function(x, training, info = NULL, ...) {
   }
 
   step_select_correlation_new(
+    terms         = selectors,
     columns       = col_names,
     outcome       = x$outcome,
     role          = x$role,

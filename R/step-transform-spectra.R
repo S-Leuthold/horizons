@@ -40,7 +40,8 @@ step_transform_spectra <- function(recipe,
   recipes::add_step(
     recipe,
     step_transform_spectra_new(
-      columns       = terms,
+      terms         = terms,
+      columns       = NULL,
       preprocessing = preprocessing,
       window_size   = window_size,
       role          = role,
@@ -56,9 +57,14 @@ step_transform_spectra <- function(recipe,
 ## Constructor
 ## ---------------------------------------------------------------------------
 
+## Follows recipes' own contract: `terms` holds the selector quosures and
+## survives prep, so a trained recipe can be re-prepped (`fresh = TRUE`);
+## `columns` holds the names prep resolved them to, and is what bake reads.
+
 #' @keywords internal
 #' @noRd
-step_transform_spectra_new <- function(columns,
+step_transform_spectra_new <- function(terms,
+                                       columns,
                                        preprocessing,
                                        window_size,
                                        role,
@@ -68,6 +74,7 @@ step_transform_spectra_new <- function(columns,
                                        trained_columns = NULL) {
 
   out <- list(
+    terms           = terms,
     columns         = columns,
     preprocessing   = preprocessing,
     window_size     = window_size,
@@ -90,7 +97,8 @@ step_transform_spectra_new <- function(columns,
 #' @export
 prep.step_transform_spectra <- function(x, training, info = NULL, ...) {
 
-  col_names   <- recipes::recipes_eval_select(x$columns, training, info)
+  selectors   <- step_selectors(x, "step_transform_spectra")
+  col_names   <- recipes::recipes_eval_select(selectors, training, info)
   non_numeric <- col_names[!vapply(training[, col_names], is.numeric, logical(1))]
 
   if (length(non_numeric) > 0) {
@@ -135,6 +143,7 @@ prep.step_transform_spectra <- function(x, training, info = NULL, ...) {
   check_transform_name_collision(new_colnames, setdiff(names(training), col_names))
 
   step_transform_spectra_new(
+    terms           = selectors,
     columns         = col_names,
     preprocessing   = x$preprocessing,
     window_size     = x$window_size,
