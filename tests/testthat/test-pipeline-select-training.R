@@ -73,6 +73,26 @@ test_that("select_training() rejects bad scope, metric and space", {
 })
 
 
+test_that("select_training() rejects a twin_ratio outside (0, 1)", {
+
+  ## At 1 or more the threshold reaches the reference distance and flags
+  ## ordinary neighbours; global's claim to see every twin rests on it
+  ## sitting below.
+
+  fx <- make_select_fixture(n_pool = 60)
+
+  for (bad in list(1, 1.5, NA_real_, NA, c(0.05, 0.1))) {
+
+    expect_error(quiet_select(fx, k = 5, twin_ratio = bad),
+                 regexp = "twin_ratio", class = "horizons_input_error")
+
+  }
+
+  expect_no_error(quiet_select(fx, k = 5, properties = "clay", twin_ratio = 0.5))
+
+})
+
+
 test_that("select_training(space = 'pls') needs exactly one property and an integer ncomp", {
 
   fx <- make_select_fixture(n_pool = 60)
@@ -523,11 +543,277 @@ test_that("scope = 'global' records mean_k as the mean of k, not the nearest aga
   expect_true(all(g$mean_k >= g$nearest))
   expect_false(isTRUE(all.equal(g$mean_k, g$nearest)))
 
-  ## The twin target aside, whose neighbourhood batch subtracts, the two
-  ## branches measure the same thing over the same k rows.
-  keep <- g$target_id != fx$twin_id
-  expect_equal(g$mean_k[keep], b$mean_k[match(g$target_id[keep], b$target_id)],
-               tolerance = 1e-10)
+  ## The two branches measure the same thing over the same k rows, the twin
+  ## target included: global drops its twins from the distances as batch does.
+  expect_equal(g$mean_k, b$mean_k[match(g$target_id, b$target_id)], tolerance = 1e-10)
+
+})
+
+
+test_that("scope = 'global' records the exclusions batch records, under the same rule", {
+
+  ## The control arm's twin rule has to be the rule the other arms run, or a
+  ## scope sweep measures the rule as well as the scope. On these 63 rows
+  ## batch takes its reference over a quarter of them, 15; global used to
+  ## take max(k, 50) with no cap, a wider reference and so a looser rule,
+  ## which at twin_ratio = 0.4 flagged three rows batch does not (#72).
+
+  fx <- make_select_fixture(n_pool = 60, seed = 3, n_replicates = 3)
+
+  for (ratio in c(SELECT_TWIN_RATIO, 0.4)) {
+
+    b <- quiet_select(fx, k = 10, properties = "clay", twin_ratio = ratio)$selection
+    g <- quiet_select(fx, k = 10, properties = "clay", twin_ratio = ratio, scope = "global")$selection
+
+    ## The twins fall inside k, so batch recorded every row it flagged
+    expect_gt(nrow(b$exclusions), 0L)
+    expect_true(all(b$exclusions$rank <= 10L))
+
+    ## Same rows, same reference distance, same property, row for row
+    expect_identical(g$exclusions, b$exclusions)
+
+    ## And the applicability signal is the one batch reports
+    expect_identical(g$target_distances, b$target_distances)
+
+  }
+
+})
+
+
+test_that("scope = 'global' records the exclusions batch records under space_rows = 'measured'", {
+
+  ## Global used to skip the per-property spaces and check every property in
+  ## the all-rows space, so under "measured" the two arms measured twins in
+  ## different spaces: 18 exclusions for batch against 16 for global on this
+  ## fixture at twin_ratio = 0.4.
+
+  fx <- make_select_fixture(n_pool = 120, seed = 3, n_replicates = 6)
+
+  for (ratio in c(SELECT_TWIN_RATIO, 0.4)) {
+
+    b <- quiet_select(fx, k = 10, twin_ratio = ratio, space_rows = "measured")$selection
+    g <- quiet_select(fx, k = 10, twin_ratio = ratio, space_rows = "measured",
+                      scope = "global")$selection
+
+    expect_gt(nrow(b$exclusions), 0L)
+    expect_identical(g$exclusions, b$exclusions)
+    expect_identical(g$target_distances, b$target_distances)
+
+    ## The distances say which space they came from, as batch's do
+    expect_setequal(unique(g$target_distances$space), c("clay", "oc"))
+
+  }
+
+})
+
+
+test_that("at k = 1 batch and global record every twin in the measured pool", {
+
+  ## The parity tests cannot see a fault inside draw_neighbours() that both
+  ## scopes share. This one fetches every measured row, flags them all, and
+  ## asks both scopes to have recorded exactly that set at the smallest k,
+  ## where the fetch is narrowest: the reference width, 15 of the 63 rows for
+  ## clay and 8 of the 32 for oc.
+
+  fx <- make_select_fixture(n_pool = 60, seed = 3, n_replicates = 3)
+  rc <- reconcile_axes(fx$pool, fx$targets)
+  tm <- predictor_matrix(fx$targets)
+  sp <- build_similarity_space(rc$matrix, rc$wavenumbers, sdev_floor = SELECT_SDEV_FLOOR)
+  St <- project_similarity(sp, tm$matrix, tm$wavenumbers)
+  a  <- fx$pool$data$analysis
+
+  brute_force <- function(p, ratio) {
+
+    measured <- intersect(rownames(sp$scores), a$sample_id[!is.na(a[[p]])])
+    nn  <- nearest_neighbours(St, sp$scores[measured, , drop = FALSE], k = length(measured),
+                              metric = "mahalanobis", sdev = sp$sdev)
+    ref <- twin_reference(nn$dist, k_ref = twin_reference_width(length(measured)))
+    hit <- which(twin_flags(nn$dist, ref, ratio = ratio), arr.ind = TRUE)
+
+    paste(p, rownames(nn$ids)[hit[, "row"]], nn$ids[hit])
+
+  }
+
+  key <- function(ex) paste(ex$property, ex$target_id, ex$pool_id)
+
+  for (ratio in c(SELECT_TWIN_RATIO, 0.4)) {
+
+    truth <- c(brute_force("clay", ratio), brute_force("oc", ratio))
+    expect_gt(length(truth), 0L)
+
+    for (scope in c("batch", "global")) {
+
+      ex <- quiet_select(fx, k = 1, scope = scope, twin_ratio = ratio)$selection$exclusions
+      expect_setequal(key(ex), truth)
+
+    }
+
+  }
+
+})
+
+
+test_that("a draw the twin subtraction empties stops with the property and the cause", {
+
+  ## At a twin_ratio this close to 1 every row any target drew is some
+  ## other target's twin. The subset used to fail on an empty keep, naming
+  ## neither the property nor the twin rule.
+
+  fx <- make_select_fixture(n_pool = 60, seed = 3, n_replicates = 3)
+
+  err <- expect_error(quiet_select(fx, k = 1, metric = "cosine", twin_ratio = 0.99, properties = "clay"),
+                      regexp = "Every row drawn for clay was flagged", class = "horizons_input_error")
+
+  ## Ordinary neighbours were flagged, so the ratio is the lever
+  expect_match(conditionMessage(err), "lower it")
+
+  ## Global keeps the pool, so there is nothing to empty
+  expect_no_error(quiet_select(fx, k = 1, metric = "cosine", twin_ratio = 0.99,
+                               properties = "clay", scope = "global"))
+
+})
+
+
+#' Pool rows as targets, on the pool's own grid, ids prefixed "T"; every row
+#' unless `rows` picks some
+#' @noRd
+pool_as_targets <- function(fx, rows = NULL) {
+
+  pa <- fx$pool$data$analysis
+  if (!is.null(rows)) pa <- pa[rows, ]
+  tg <- pa[, c("sample_id", grep("^wn_", names(pa), value = TRUE))]
+  tg$sample_id <- paste0("T", tg$sample_id)
+
+  utils::capture.output(targets <- spectra(tg))
+  targets
+
+}
+
+
+test_that("a draw emptied by the targets' own copies says so, not twin_ratio", {
+
+  ## Targets that are the pool's own rows: every row a target draws is
+  ## another target's copy, at distance zero to rounding, and no twin_ratio
+  ## brings it back.
+
+  fx      <- make_select_fixture(n_pool = 60, seed = 3)
+  targets <- pool_as_targets(fx)
+
+  err <- expect_error(select_training(targets, fx$pool, k = 1, properties = "clay", verbose = FALSE),
+                      regexp = "Every row drawn for clay was flagged", class = "horizons_input_error")
+
+  expect_match(conditionMessage(err), "targets are in the pool")
+  expect_no_match(conditionMessage(err), "lower it")
+
+})
+
+
+test_that("a target's own copy is recorded as exact, at distance zero to rounding", {
+
+  ## The same spectrum reaches the space as a pool row and as a projected
+  ## target. With the whole pool as targets the projection repeats the fit
+  ## and the copies land at exactly 0; with a subset the matrix product
+  ## rounds differently and they land near 1e-16, which the record called
+  ## "neighbourhood" while the emptied-draw error treated them as copies.
+  ## Whether a subset rounds to 0 depends on the BLAS, so the test asserts
+  ## the outcome, not the distance. On the replicate fixture's first eight
+  ## rows seven copies land above 0 on the reference box.
+
+  fx <- make_select_fixture(n_pool = 60, seed = 3, n_replicates = 3)
+
+  for (rows in list(NULL, 1:8)) {
+
+    targets <- pool_as_targets(fx, rows)
+    n_t     <- targets$data$n_rows
+
+    ex <- select_training(targets, fx$pool, k = 1, properties = "clay", scope = "global",
+                          verbose = FALSE)$selection$exclusions
+
+    own <- ex$pool_id == sub("^T", "", ex$target_id)
+
+    ## Every target's copy is flagged and recorded exact
+    expect_identical(sum(own), n_t)
+    expect_true(all(ex$reason[own] == "exact"))
+
+    ## And nothing that is not a copy is called exact
+    expect_true(all(ex$reason[!own] == "neighbourhood"))
+
+  }
+
+})
+
+
+test_that("a property with no measured pool row stops every scope", {
+
+  ## Global used to skip such a property; batch failed inside the draw, or
+  ## on a zero-row space under space_rows = "measured".
+
+  fx <- make_select_fixture(n_pool = 60)
+  fx$pool$data$analysis$oc <- NA_real_
+
+  for (scope in c("batch", "global")) {
+    for (rows in c("all", "measured")) {
+
+      ## "no measured rows", or "fewer than 2" where a space is fit per property
+      expect_error(quiet_select(fx, k = 5, scope = scope, space_rows = rows),
+                   regexp = "measured rows for oc", class = "horizons_input_error")
+
+    }
+  }
+
+})
+
+
+test_that("space_rows = 'measured' needs two measured rows per property, under every scope", {
+
+  ## A space fit on one row failed with a base-R message; global used to
+  ## skip the per-property spaces and so succeeded where batch crashed.
+
+  fx <- make_select_fixture(n_pool = 60)
+  a  <- fx$pool$data$analysis
+  a$oc[-which(!is.na(a$oc))[1]] <- NA_real_
+  fx$pool$data$analysis <- a
+
+  for (scope in c("batch", "global")) {
+
+    expect_error(quiet_select(fx, k = 1, scope = scope, space_rows = "measured"),
+                 regexp = "fewer than 2 measured rows for oc", class = "horizons_input_error")
+
+  }
+
+  ## In the all-rows space one measured row is enough to check against
+  expect_no_error(quiet_select(fx, k = 1, scope = "global", space_rows = "all"))
+
+})
+
+
+test_that("scope = 'global' records each exclusion with its property, on that property's rows", {
+
+  fx  <- make_select_fixture(n_pool = 60, seed = 3, n_replicates = 3)
+  out <- quiet_select(fx, k = 10, scope = "global")
+
+  ex   <- out$selection$exclusions
+  a    <- fx$pool$data$analysis
+  self <- c(fx$twin_pool_id, fx$replicate_pool_ids)
+
+  expect_false(anyNA(ex$property))
+  expect_setequal(unique(ex$property), c("clay", "oc"))
+
+  ## Clay is measured on every row, so the whole cluster is the twin
+  ## target's exclusion for clay; for oc only the members that have oc
+  ## measured are, because the check runs on each property's own rows.
+  oc_self <- self[!is.na(a$oc[match(self, a$sample_id)])]
+  expect_lt(length(oc_self), length(self))
+  expect_gt(length(oc_self), 0L)
+
+  mine <- ex[ex$target_id == fx$twin_id, ]
+  expect_setequal(mine$pool_id[mine$property == "clay"], self)
+  expect_setequal(mine$pool_id[mine$property == "oc"],   oc_self)
+
+  ## One distance row per target per property, as batch writes them
+  td <- out$selection$target_distances
+  expect_false(anyNA(td$property))
+  expect_identical(nrow(td), 2L * fx$targets$data$n_rows)
 
 })
 
@@ -833,12 +1119,19 @@ test_that("space_rows = 'measured' marks the space and refuses to pool distances
 })
 
 
-test_that("space_rows = 'measured' is ignored under scope = 'global' and rejected when invalid", {
+test_that("space_rows = 'measured' reaches scope = 'global' too, and is rejected when invalid", {
+
+  ## Global runs its twin check in the spaces batch would draw in, so the
+  ## per-property spaces are built and recorded; the return is still the
+  ## whole pool.
 
   fx  <- make_select_fixture(n_pool = 60)
   out <- quiet_select(fx, scope = "global", space_rows = "measured")
 
-  expect_null(out$selection$settings$ncomp_by_property)
+  expect_named(out$selection$settings$ncomp_by_property, c("clay", "oc"))
+  expect_setequal(unique(out$selection$target_distances$space), c("clay", "oc"))
+  expect_identical(out$data$n_rows, 60L)
+
   expect_error(quiet_select(fx, k = 5, space_rows = "some"), class = "horizons_input_error")
 
 })
