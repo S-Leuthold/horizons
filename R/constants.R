@@ -219,6 +219,8 @@ SHARED_ARG_NAMES <- c(
   "prune",
   "prune_threshold",
   "seed",
+  "data_fp",
+  "settings",
   "checkpoint_dir",
   "pkg_version"
 )
