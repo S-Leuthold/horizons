@@ -201,7 +201,8 @@ fit <- function(x,
   ## pruned fallback is one case; the other is bayesian_iter = 0, where the
   ## gate skips nothing, so below-threshold configs are successes and nothing
   ## else would say that none cleared the bar (#38).
-  warn_members_below_threshold(top_configs, fallback = candidates$fallback)
+  warn_members_below_threshold(top_configs, fallback = candidates$fallback,
+                               bayesian_iter = x$config$tuning$bayesian_iter)
 
   ## Extract references
   role_map     <- x$data$role_map
@@ -877,10 +878,13 @@ abort_all_members_failed <- function(results, call = rlang::caller_env()) {
 #' @param members The member rows (`evaluation$results` shape).
 #' @param fallback Logical. Whether the members are pruned configurations
 #'   because none succeeded.
+#' @param bayesian_iter The configured `bayesian_iter`
+#'   (`x$config$tuning$bayesian_iter`), which decides how the warning
+#'   explains unpruned members; `NULL` when unknown.
 #' @return Invisibly `NULL`. Called for the warning.
 #' @keywords internal
 #' @noRd
-warn_members_below_threshold <- function(members, fallback) {
+warn_members_below_threshold <- function(members, fallback, bayesian_iter = NULL) {
 
   ## Columns are read by name: results from before they existed, or built by
   ## hand, lack them, and `$` on a tibble without the column warns.
@@ -912,10 +916,19 @@ warn_members_below_threshold <- function(members, fallback) {
     "Every configuration {.fn fit} is fitting fell below {.fn evaluate}'s prune threshold."
   }
 
+  ## The cause of unpruned below-threshold members depends on the configured
+  ## bayesian_iter. At 0 there is nothing to skip. Above 0 the gate prunes a
+  ## below-threshold config, so a success marked below the threshold was
+  ## scored with no Bayesian stage (resumed from a bayesian_iter = 0 run's
+  ## checkpoints, say), and bayesian_iter = 0 is not the cause to name.
   why <- if (fallback) {
     "Pruned configurations skipped Bayesian optimization; {.fn evaluate} chose {.field best_config} from them for the same reason."
-  } else {
+  } else if (isTRUE(bayesian_iter == 0)) {
     "None was pruned because there was no Bayesian stage to skip ({.code bayesian_iter = 0}), so they ranked as successes."
+  } else if (length(bayesian_iter) == 1 && isTRUE(bayesian_iter > 0)) {
+    "None was pruned, so they ranked as successes, although the configured {.code bayesian_iter = {bayesian_iter}} prunes a configuration below the threshold: these rows were scored with no Bayesian stage, as rows resumed from a {.code bayesian_iter = 0} run's checkpoints are."
+  } else {
+    "None was pruned, so they ranked as successes."
   }
 
   ## The config ids and numbers are the package's, but the text is built

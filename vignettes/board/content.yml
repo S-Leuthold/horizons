@@ -849,7 +849,7 @@ verbs:
         where: R/pipeline-evaluate.R#L845
         value: "#50"
       - claim: a closure defined inside evaluate() shipped 2.26 GiB per future against 232 MB of needed inputs, which is why the worker is a top-level function
-        where: R/pipeline-evaluate.R#L1442
+        where: R/pipeline-evaluate.R#L1441
       - claim: after the serialization fixes the per-worker payload on the configs axis is 418 MB at 17,788 by 1,701
         where: R/constants.R#L207
 
@@ -874,39 +874,39 @@ verbs:
     args:
       - name: x
         touch: Always; the horizons_eval from evaluate().
-        source: R/pipeline-fit.R#L97
+        source: R/pipeline-fit.R#L98
       - name: n_best
         touch: How many configurations to carry forward; five by default, capped at the number that succeeded, or at the number pruned with a cross-validated metric when none did. One is enough for a single deployable model; several are what ensemble() stacks.
-        source: R/pipeline-fit.R#L174
+        source: R/pipeline-fit.R#L175
       - name: metric
         touch: Rarely; defaults to the metric evaluate() ranked on, read from the cross-validated column.
-        source: R/pipeline-fit.R#L145
+        source: R/pipeline-fit.R#L146
       - name: compute_uq
         touch: FALSE to skip conformal intervals. The fit regains the whole training part only when compute_ad is FALSE too, because the calibration split is drawn whenever either capability is on, and it is what shrinks the rows with out-of-fold predictions from {split_train} to {fit_rows_share}.
-        source: R/pipeline-fit.R#L286
+        source: R/pipeline-fit.R#L288
       - name: compute_ad
         touch: FALSE to skip the applicability-domain bundle; it shares the calibration split with UQ.
-        source: R/pipeline-fit.R#L286
+        source: R/pipeline-fit.R#L288
       - name: allow_par
         touch: TRUE after registering a future plan to parallelise the folds inside each re-tune; fit() never dispatches configurations to workers because a fitted object is hundreds of MB.
-        source: R/pipeline-fit.R#L127
+        source: R/pipeline-fit.R#L128
       - name: seed
         touch: To change the folds, and the calibration split, which is seeded at seed + 1. The train/test split is evaluate()'s, so this seed does not move it.
-        source: R/pipeline-fit.R#L288
+        source: R/pipeline-fit.R#L290
       - name: verbose
         touch: Set FALSE inside loops.
-        source: R/pipeline-fit.R#L364
+        source: R/pipeline-fit.R#L366
     mechanics:
       - step: Requires a horizons_eval with results, confirms a parallel backend if asked, takes the configurations evaluate() chose best_config from (the successful ones or, when none succeeded, the pruned ones with a cross-validated metric), ranks them by the cross-validated metric, takes the top n_best, and warns if every one of them fell below evaluate()'s prune threshold.
-        source: R/pipeline-fit.R#L151
+        source: R/pipeline-fit.R#L152
       - step: Drops rows whose outcome is NA by the rule evaluate() applies, and says how many in the tree.
-        source: R/pipeline-fit.R#L213
+        source: R/pipeline-fit.R#L215
       - step: Takes evaluate()'s {split_ratio} split as Split F, so the test part is evaluate()'s held-out rows, after checking that its id and outcome columns match those rows value for value and in order. Columns added since evaluate(), such as a sibling response, come along into the fit.
-        source: R/pipeline-fit.R#L236
+        source: R/pipeline-fit.R#L238
       - step: If UQ or AD is on, splits the training part {calib_ratio} again, at seed + 1, into the fit rows and a calibration set; both capabilities are disabled together if the calibration set is under 30 rows.
-        source: R/pipeline-fit.R#L286
+        source: R/pipeline-fit.R#L288
       - step: Builds cv_folds stratified folds on the fit rows, at seed.
-        source: R/pipeline-fit.R#L341
+        source: R/pipeline-fit.R#L343
       - step: Per configuration, fit_single_config() rebuilds the recipe and workflow, re-tunes with Bayesian optimization warm-started from evaluate()'s best parameters and its own final budget, finalizes, generates out-of-fold predictions over the folds and back-transforms them, computes fold-wise metrics, fits the final model on the fit rows, and scores it on the test part.
         source: R/fit-single-config.R#L34
       - step: Flags a configuration as degraded when its test RPD falls below the cross-validated mean minus two standard errors.
@@ -914,47 +914,47 @@ verbs:
       - step: With UQ on, trains a quantile forest on the out-of-fold residuals and computes signed conformal scores on the calibration set; with AD on, estimates the feature-space centroid and a Ledoit-Wolf shrinkage covariance and calibrates the quartile and out-of-domain cutoffs on the same calibration set. Both run before the workflow is butchered for storage.
         source: R/fit-single-config.R#L468
       - step: Assembles the workflows in best-first order, the stacked out-of-fold predictions keyed to a row index, the results table, the response bound (1.5 times the largest outcome among the fit rows, the ones the final models are trained on), and whether the training object carried a selection record; promotes to horizons_fit and certifies the models slot. On a horizons_ensemble, the ensemble slot is emptied first, since it was built on the members being replaced.
-        source: R/pipeline-fit.R#L690
+        source: R/pipeline-fit.R#L692
     records:
       - field: models$workflows, models$n_models, models$best_config, models$rank_metric
         text: the butchered fitted workflows by config_id in best-first order
-        source: R/pipeline-fit.R#L717
+        source: R/pipeline-fit.R#L719
       - field: models$cv_predictions, models$row_index
         text: out-of-fold predictions (.row, .fold, config_id, .pred, .pred_trans, truth) and the .row to sample_id map; what ensemble() stacks, and what the designed but unbuilt residual correction would read
-        source: R/pipeline-fit.R#L639
+        source: R/pipeline-fit.R#L641
       - field: models$results
         text: per configuration, status, degraded flag and reason, the six test metrics, the cv RMSE and RPD with standard errors, best parameters, the error message of a failed configuration, runtime
-        source: R/pipeline-fit.R#L598
+        source: R/pipeline-fit.R#L600
       - field: models$split, models$predictor_schema, models$response_bound, models$selection_present
         text: Split F; the training-axis predictor columns predict() checks new data against; the winsorization bound, computed over the fit rows; whether conformal exchangeability can be assumed
-        source: R/pipeline-fit.R#L697
+        source: R/pipeline-fit.R#L699
       - field: models$uq, models$ad
         text: per-configuration bundles, present only for configurations that succeeded with enough calibration rows
-        source: R/pipeline-fit.R#L644
+        source: R/pipeline-fit.R#L646
     refuses:
       - when: the input is not a horizons_eval, has no results, or no configuration either succeeded or was pruned with a cross-validated metric, or none of those has one
         does: aborts
-        source: R/pipeline-fit.R#L97
+        source: R/pipeline-fit.R#L98
       - when: every member it fits fell below evaluate()'s prune threshold, whether pruned (the fallback, when none succeeded) or not (bayesian_iter = 0, where nothing is pruned)
         does: warns with class horizons_below_threshold_warning, naming the threshold and each member's cv RPD, and fits them; in the fallback the warning also carries horizons_pruned_fallback_warning
-        source: R/pipeline-fit.R#L203
+        source: R/pipeline-fit.R#L204
       - when: evaluation$split is missing, or its ids or outcomes no longer match the rows the object models, because the rows or outcomes changed after evaluate() or the object was built by hand
         does: aborts, and says to re-run evaluate()
-        source: R/pipeline-fit.R#L260
+        source: R/pipeline-fit.R#L262
       - when: n_best exceeds the configurations available, or the calibration set is under 30 rows
         does: prints a console note and continues with what it can; the note is a tree line, so verbose = FALSE silences it
-        source: R/pipeline-fit.R#L178
+        source: R/pipeline-fit.R#L179
       - when: a configuration fails to re-tune or fit
         does: records the failure and its error message in models$results and continues; butchering failure falls back to storing the unbutchered workflow
         source: R/fit-single-config.R#L75
       - when: every configuration fails
         does: aborts with class horizons_all_members_failed, listing the first three distinct errors with the configurations that raised them; the per-member results travel on the condition as results
-        source: R/pipeline-fit.R#L839
+        source: R/pipeline-fit.R#L841
     evidence:
       - claim: out-of-fold predictions cover {split_train} of the rows with an observed outcome with UQ and AD off, and {fit_rows_share} with them on
         where: dev/experiments/2026-09-factorial/README.md#same-afternoon-2026-09-22-the-library-ships-whole-and-the-correction-from-the-pool-fit
       - claim: a Split F drawn afresh at seed + 1 took a median 79 % of its test rows from evaluate()'s training rows, which chose the members and tuned the warm-start parameters (200 seeds, n = 250); that is why fit() reuses evaluate()'s split
-        where: R/pipeline-fit.R#L219
+        where: R/pipeline-fit.R#L221
 
   # ---------------------------------------------------------------------------
   - verb: ensemble

@@ -1243,8 +1243,7 @@ abort_all_configs_failed <- function(results, metric,
       " loaded from checkpoints in ", output_dir, " rather than run (",
       ids_shown, "). To re-run ", if (n_ckpt == 1) "it" else "them",
       ", delete ", if (n_ckpt == 1) "its file" else "their files",
-      " in checkpoints/ and also eval_checkpoint.rds, which holds a copy of",
-      " every row; the other configurations resume from their own files."
+      " in checkpoints/ and eval_checkpoint.rds."
     )))
 
   }

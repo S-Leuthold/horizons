@@ -1157,6 +1157,41 @@ describe("fit() - members below the prune threshold at bayesian_iter = 0 (#38)",
 
   })
 
+  ## Unpruned below-threshold members under a configured bayesian_iter > 0
+  ## came from rows scored with no Bayesian stage (resumed checkpoints of a
+  ## bayesian_iter = 0 run); naming bayesian_iter = 0 as the setting would be
+  ## a false cause.
+  it("words its explanation from the configured bayesian_iter", {
+
+    members <- tibble::tibble(
+      config_id             = c("cfg_001", "cfg_002"),
+      status                = "success",
+      below_prune_threshold = TRUE,
+      prune_threshold       = 1,
+      cv_rpd                = c(0.93, 0.88)
+    )
+
+    warn_text <- function(bayesian_iter) {
+      w <- tryCatch(
+        warn_members_below_threshold(members, fallback = FALSE,
+                                     bayesian_iter = bayesian_iter),
+        horizons_below_threshold_warning = function(w) w
+      )
+      gsub("\\s+", " ", conditionMessage(w))   # undo cli line wrapping
+    }
+
+    expect_match(warn_text(0L), "no Bayesian stage to skip (`bayesian_iter = 0`)",
+                 fixed = TRUE)
+
+    at_five <- warn_text(5L)
+    expect_match(at_five, "configured `bayesian_iter = 5`", fixed = TRUE)
+    expect_no_match(at_five, "no Bayesian stage to skip", fixed = TRUE)
+
+    expect_match(warn_text(NULL), "None was pruned, so they ranked as successes.",
+                 fixed = TRUE)
+
+  })
+
 })
 
 
