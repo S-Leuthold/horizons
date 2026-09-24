@@ -235,8 +235,8 @@
 
 <script type="application/json" id="hz-data">
 {
-  "generated_at": "2026-09-23T18:08:05-0500",
-  "content_md5": "61ddd0ca919f560465ae550a45d12245",
+  "generated_at": "2026-09-23T20:05:47-0500",
+  "content_md5": "08bc29a391fcebe6c34ac88bf0fdd765",
   "horizons": "0.9.0",
   "lanes": [
     {
@@ -1274,7 +1274,7 @@
           "source": "R/pipeline-configure.R#L351"
         },
         {
-          "step": "Warns about kept rows that were not chosen for this outcome, naming the earlier outcome and the count when validate() removed rows as response outliers of a different one, and naming the drawn properties when a select_training() record (other than scope global) was drawn for properties that do not include it.",
+          "step": "Warns about kept rows that were not chosen for this outcome, naming the earlier outcome and the count when validate() removed rows only as response outliers of a different one, and naming the drawn properties when a select_training() record (other than scope global) was drawn for properties that do not include it.",
           "source": "R/pipeline-configure.R#L405"
         },
         {
@@ -1344,9 +1344,9 @@
           "source": "R/pipeline-configure.R#L338"
         },
         {
-          "when": "rows were removed as response outliers of a different outcome, or the training rows were drawn by select_training() for properties that exclude the outcome",
+          "when": "rows were removed only as response outliers of a different outcome, or the training rows were drawn by select_training() for properties that exclude the outcome",
           "does": "warns and continues; the rows stay as they are",
-          "source": "R/pipeline-configure.R#L676"
+          "source": "R/pipeline-configure.R#L677"
         }
       ],
       "evidence": [],
@@ -1407,7 +1407,7 @@
           "default": "0.975",
           "text": "`numeric(1)`. Chi-squared quantile for Mahalanobis distance cutoff. Default: `0.975`.",
           "touch": "To loosen or tighten the chi-squared quantile the squared distance is cut at; 0.975 by default.",
-          "source": "R/pipeline-validate.R#L711"
+          "source": "R/pipeline-validate.R#L715"
         },
         {
           "name": "response_method",
@@ -1421,7 +1421,7 @@
           "default": "1.5",
           "text": "`numeric(1)`. IQR multiplier for Tukey fences. Default: `1.5`.",
           "touch": "The Tukey multiplier; 1.5 flags the conventional outer fences, 3 flags only extremes.",
-          "source": "R/pipeline-validate.R#L757"
+          "source": "R/pipeline-validate.R#L761"
         }
       ],
       "mechanics": [
@@ -1439,40 +1439,40 @@
         },
         {
           "step": "Spectral outliers, P005 (info), by PCA on the raw spectra scaled to unit variance per wavenumber, components to 99 % of variance capped at 50 and at two fewer than the row count, then the squared Mahalanobis distance of each score vector against the chi-squared quantile. Skipped with a warning below five rows or on a singular covariance.",
-          "source": "R/pipeline-validate.R#L639"
+          "source": "R/pipeline-validate.R#L643"
         },
         {
           "step": "Response outliers, P006 (info), as outcome values outside Q1 minus and Q3 plus the multiplier times the IQR. Skipped with a warning below four non-missing values or a zero IQR.",
-          "source": "R/pipeline-validate.R#L732"
+          "source": "R/pipeline-validate.R#L736"
         },
         {
           "step": "If removal was asked for, drops the union or the chosen kind through subset_rows() and records why each row left, the outcome whose fences flagged a response removal, and the thresholds in force.",
-          "source": "R/pipeline-validate.R#L470"
+          "source": "R/pipeline-validate.R#L474"
         },
         {
           "step": "The flags are replaced on every call, but the removal record accumulates, since rows an earlier call removed (before a re-configure, say) are gone for good.",
-          "source": "R/pipeline-validate.R#L506"
+          "source": "R/pipeline-validate.R#L510"
         },
         {
           "step": "passed is TRUE when no ERROR check failed; warnings do not affect it.",
-          "source": "R/pipeline-validate.R#L489"
+          "source": "R/pipeline-validate.R#L493"
         }
       ],
       "records": [
         {
           "field": "validation$passed, validation$timestamp",
           "text": "the verdict and when it was reached",
-          "source": "R/pipeline-validate.R#L498"
+          "source": "R/pipeline-validate.R#L502"
         },
         {
           "field": "validation$checks",
           "text": "one row per check with description, status, severity (blank on passes), value and id",
-          "source": "R/pipeline-validate.R#L502"
+          "source": "R/pipeline-validate.R#L506"
         },
         {
           "field": "validation$outliers",
           "text": "the spectral and response ids this call flagged, and the record of every removal so far, one detail row per removed sample with its reason, the outcome that flagged a response removal, and the spectral and response thresholds",
-          "source": "R/pipeline-validate.R#L506"
+          "source": "R/pipeline-validate.R#L510"
         }
       ],
       "refuses": [
@@ -1484,7 +1484,7 @@
         {
           "when": "too few rows or columns for a detector, or a singular covariance",
           "does": "warns and skips that detector",
-          "source": "R/pipeline-validate.R#L644"
+          "source": "R/pipeline-validate.R#L648"
         },
         {
           "when": "a previous validation exists",

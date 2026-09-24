@@ -52,10 +52,10 @@
 #'     `response_ids`) and the record of every removal so far
 #'     (`removed_ids`, `removed`, and `removal_detail`, one row per removed
 #'     sample with `sample_id`, `reason` (`"spectral"`, `"response"` or
-#'     `"both"`), the `outcome` whose fences flagged it (`NA` for a
-#'     spectral-only removal), and the `spectral_threshold` and
-#'     `response_threshold` in force (`NA` for the kind that did not flag
-#'     it))
+#'     `"both"`, counting only the detectors `remove_outliers` removed by),
+#'     the `outcome` whose fences flagged it (`NA` unless the response
+#'     detector did), and the `spectral_threshold` and `response_threshold`
+#'     in force (`NA` for the kind that did not flag it))
 #'   - `validation$timestamp`: when validation ran
 #'
 #' @examples
@@ -453,9 +453,13 @@ validate <- function(x,
                        keep   = !x$data$analysis$sample_id %in% ids_to_remove,
                        record = FALSE)
 
-      ## Build removal detail tibble
-      in_spectral <- ids_to_remove %in% spectral_outlier_ids
-      in_response <- ids_to_remove %in% response_outlier_ids
+      ## Build removal detail tibble. A flag counts only for a detector this
+      ## mode removes by: under "spectral", a row that also sits outside the
+      ## response fences was not removed for it, so it is "spectral", not
+      ## "both", and carries no outcome.
+      mode        <- as.character(remove_outliers)
+      in_spectral <- mode %in% c("TRUE", "spectral") & ids_to_remove %in% spectral_outlier_ids
+      in_response <- mode %in% c("TRUE", "response") & ids_to_remove %in% response_outlier_ids
 
       reason <- dplyr::case_when(
         in_spectral & in_response ~ "both",

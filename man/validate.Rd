@@ -41,10 +41,10 @@ Default: \code{1.5}.}
 \code{response_ids}) and the record of every removal so far
 (\code{removed_ids}, \code{removed}, and \code{removal_detail}, one row per removed
 sample with \code{sample_id}, \code{reason} (\code{"spectral"}, \code{"response"} or
-\code{"both"}), the \code{outcome} whose fences flagged it (\code{NA} for a
-spectral-only removal), and the \code{spectral_threshold} and
-\code{response_threshold} in force (\code{NA} for the kind that did not flag
-it))
+\code{"both"}, counting only the detectors \code{remove_outliers} removed by),
+the \code{outcome} whose fences flagged it (\code{NA} unless the response
+detector did), and the \code{spectral_threshold} and \code{response_threshold}
+in force (\code{NA} for the kind that did not flag it))
 \item \code{validation$timestamp}: when validation ran
 }
 }

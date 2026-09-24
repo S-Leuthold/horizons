@@ -663,9 +663,10 @@ generate_config_id <- function(model, preprocessing, transformation,
 #' `validate(remove_outliers = )` records, per removed row, the outcome whose
 #' Tukey fences flagged it. Those rows stay removed across a re-configure, so
 #' an outcome configured afterwards is modelled without rows that were judged
-#' against a different variable. Spectral-only removals do not depend on the
-#' outcome and are not counted; rows recorded before the `outcome` column
-#' existed cannot be attributed and are not counted either.
+#' against a different variable. Only `reason == "response"` rows count:
+#' spectral removals do not depend on the outcome, and a `"both"` row would
+#' have been removed as a spectral outlier anyway. Rows recorded before the
+#' `outcome` column existed cannot be attributed and are not counted either.
 #'
 #' @param x `horizons_data`. The object being configured.
 #' @param outcome_var `character(1)`. The outcome being configured.
@@ -683,7 +684,7 @@ warn_stale_removals <- function(x, outcome_var) {
 
   }
 
-  stale <- detail$outcome[detail$reason %in% c("response", "both") &
+  stale <- detail$outcome[detail$reason %in% "response" &
                           !is.na(detail$outcome) &
                           detail$outcome != outcome_var]
 

@@ -1295,8 +1295,10 @@ describe("configure() and the object contract", {
     to_oc   <- testthat::capture_warnings(utils::capture.output(configure(obj, outcome = "oc")))
     to_clay <- testthat::capture_warnings(utils::capture.output(configure(obj, outcome = "clay")))
 
-    ## Assert — the spectral removal does not count; the same outcome is silent
-    expect_true(any(grepl("2 row\\(s\\) were removed .*'clay' \\(2\\).*'oc'", to_oc)))
+    ## Assert — only the response-only row counts: the spectral removal does
+    ## not depend on the outcome, and the "both" row would have gone as a
+    ## spectral outlier anyway. The same outcome is silent.
+    expect_true(any(grepl("1 row\\(s\\) were removed .*'clay' \\(1\\).*'oc'", to_oc)))
     expect_false(any(grepl("response outliers", to_clay)))
 
   })

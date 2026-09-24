@@ -1141,6 +1141,44 @@ describe("validate() keeps the removal record", {
 
   })
 
+  test_that("a spectral-only removal is not attributed to the outcome", {
+
+    ## Rows 4 and 5 sit outside SOC's fences too, but "spectral" did not
+    ## remove them for that, so they are "spectral" rows with no outcome
+    v1     <- quiet_validate(make_two_response_hd(), remove_outliers = "spectral")
+    detail <- v1$validation$outliers$removal_detail
+
+    expect_true(all(c("S004", "S005") %in% detail$sample_id))
+    expect_true(all(detail$reason == "spectral"))
+    expect_true(all(is.na(detail$outcome)))
+    expect_true(all(is.na(detail$response_threshold)))
+
+    ## So changing the outcome has nothing stale to warn about
+    warned <- testthat::capture_warnings(utils::capture.output(configure(v1, outcome = "pH")))
+
+    expect_false(any(grepl("response outliers", warned)))
+
+  })
+
+  test_that("a row removed as both is not counted as a stale response removal", {
+
+    ## Under TRUE, rows 4 and 5 are "both" (they would go as spectral
+    ## outliers whatever the outcome) and row 6 is "response"
+    v1     <- quiet_validate(make_two_response_hd(), remove_outliers = TRUE)
+    detail <- v1$validation$outliers$removal_detail
+
+    n_response <- sum(detail$reason == "response")
+
+    expect_true(all(detail$reason[detail$sample_id %in% c("S004", "S005")] == "both"))
+    expect_identical(detail$reason[detail$sample_id == "S006"], "response")
+
+    warned <- testthat::capture_warnings(utils::capture.output(configure(v1, outcome = "pH")))
+
+    expect_true(any(grepl(paste0("^", n_response, " row\\(s\\) were removed .*'SOC' \\(",
+                                 n_response, "\\)"), warned)))
+
+  })
+
 })
 
 

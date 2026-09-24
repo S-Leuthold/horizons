@@ -601,7 +601,7 @@ verbs:
         source: R/utils-subset.R#L114
       - step: Demotes any previous outcome to response, resolves the outcome (auto when there is exactly one), and promotes it, writing the roles back through set_analysis() so n_responses stays consistent.
         source: R/pipeline-configure.R#L351
-      - step: Warns about kept rows that were not chosen for this outcome, naming the earlier outcome and the count when validate() removed rows as response outliers of a different one, and naming the drawn properties when a select_training() record (other than scope global) was drawn for properties that do not include it.
+      - step: Warns about kept rows that were not chosen for this outcome, naming the earlier outcome and the count when validate() removed rows only as response outliers of a different one, and naming the drawn properties when a select_training() record (other than scope global) was drawn for properties that do not include it.
         source: R/pipeline-configure.R#L405
       - step: Resolves the covariate sets, which are none, all, a power set, or a power set of the named ones merged with the rest fixed.
         source: R/pipeline-configure.R#L412
@@ -641,9 +641,9 @@ verbs:
       - when: a grid already exists, or cov_fusion = "early" or expand_covariates is given with no covariates
         does: warns and continues
         source: R/pipeline-configure.R#L338
-      - when: rows were removed as response outliers of a different outcome, or the training rows were drawn by select_training() for properties that exclude the outcome
+      - when: rows were removed only as response outliers of a different outcome, or the training rows were drawn by select_training() for properties that exclude the outcome
         does: warns and continues; the rows stay as they are
-        source: R/pipeline-configure.R#L676
+        source: R/pipeline-configure.R#L677
     notes:
       - text: Cubist with committees > 1 is not bit-reproducible under a fixed seed (fourth significant figure of a fold metric); every other engine is deterministic given seed. See #51.
         source: R/pipeline-configure.R#L51
@@ -680,13 +680,13 @@ verbs:
         source: R/pipeline-validate.R#L167
       - name: spectral_threshold
         touch: To loosen or tighten the chi-squared quantile the squared distance is cut at; 0.975 by default.
-        source: R/pipeline-validate.R#L711
+        source: R/pipeline-validate.R#L715
       - name: response_method
         touch: Never; "iqr" is the only method.
         source: R/pipeline-validate.R#L178
       - name: response_threshold
         touch: The Tukey multiplier; 1.5 flags the conventional outer fences, 3 flags only extremes.
-        source: R/pipeline-validate.R#L757
+        source: R/pipeline-validate.R#L761
     mechanics:
       - step: Requires a configured object, validates the arguments, and warns if a previous validation is being overwritten.
         source: R/pipeline-validate.R#L142
@@ -695,32 +695,32 @@ verbs:
       - step: P007 near-zero-variance predictors (warning); P001 at least 50 rows (warning); P001b at least twice cv_folds modelable rows (error); P002 at least ten rows per fold (warning); P003 outcome variance above zero (error); P004 outcome missing in at most 20 % (warning).
         source: R/pipeline-validate.R#L312
       - step: Spectral outliers, P005 (info), by PCA on the raw spectra scaled to unit variance per wavenumber, components to 99 % of variance capped at 50 and at two fewer than the row count, then the squared Mahalanobis distance of each score vector against the chi-squared quantile. Skipped with a warning below five rows or on a singular covariance.
-        source: R/pipeline-validate.R#L639
+        source: R/pipeline-validate.R#L643
       - step: Response outliers, P006 (info), as outcome values outside Q1 minus and Q3 plus the multiplier times the IQR. Skipped with a warning below four non-missing values or a zero IQR.
-        source: R/pipeline-validate.R#L732
+        source: R/pipeline-validate.R#L736
       - step: If removal was asked for, drops the union or the chosen kind through subset_rows() and records why each row left, the outcome whose fences flagged a response removal, and the thresholds in force.
-        source: R/pipeline-validate.R#L470
+        source: R/pipeline-validate.R#L474
       - step: The flags are replaced on every call, but the removal record accumulates, since rows an earlier call removed (before a re-configure, say) are gone for good.
-        source: R/pipeline-validate.R#L506
+        source: R/pipeline-validate.R#L510
       - step: passed is TRUE when no ERROR check failed; warnings do not affect it.
-        source: R/pipeline-validate.R#L489
+        source: R/pipeline-validate.R#L493
     records:
       - field: validation$passed, validation$timestamp
         text: the verdict and when it was reached
-        source: R/pipeline-validate.R#L498
+        source: R/pipeline-validate.R#L502
       - field: validation$checks
         text: one row per check with description, status, severity (blank on passes), value and id
-        source: R/pipeline-validate.R#L502
+        source: R/pipeline-validate.R#L506
       - field: validation$outliers
         text: the spectral and response ids this call flagged, and the record of every removal so far, one detail row per removed sample with its reason, the outcome that flagged a response removal, and the spectral and response thresholds
-        source: R/pipeline-validate.R#L506
+        source: R/pipeline-validate.R#L510
     refuses:
       - when: the object is not configured, or an argument is out of range, or more than one outcome is configured, or the outcome column is missing from the table
         does: aborts, class horizons_validate_error
         source: R/pipeline-validate.R#L144
       - when: too few rows or columns for a detector, or a singular covariance
         does: warns and skips that detector
-        source: R/pipeline-validate.R#L644
+        source: R/pipeline-validate.R#L648
       - when: a previous validation exists
         does: warns and overwrites it
         source: R/pipeline-validate.R#L211
