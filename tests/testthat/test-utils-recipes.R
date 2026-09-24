@@ -1401,6 +1401,16 @@ describe("custom steps keep their selectors through prep (#52)", {
 
   }
 
+  ## Boruta finds nothing on these noise spectra and says so with a
+  ## horizons_boruta_warning (#75). That is the step working, and not what
+  ## these lifecycle tests check, so that one class is muffled around each
+  ## prep and fit; any other warning still surfaces.
+  quiet_boruta <- function(expr) {
+
+    suppressWarnings(expr, classes = "horizons_boruta_warning")
+
+  }
+
   for (step in steps) {
 
     it(paste0(step, ": a trained recipe re-preps with fresh = TRUE"), {
@@ -1414,16 +1424,16 @@ describe("custom steps keep their selectors through prep (#52)", {
       rec <- step_recipe(step, d1)
 
       set.seed(1)
-      trained <- recipes::prep(rec, training = d1)
+      trained <- quiet_boruta(recipes::prep(rec, training = d1))
 
       ## Re-prepped on other rows, the recipe has to land exactly where a
       ## first prep on those rows does: selectors re-resolved, state
       ## re-estimated, nothing carried over from d1.
       set.seed(2)
-      refreshed <- recipes::prep(trained, training = d2, fresh = TRUE)
+      refreshed <- quiet_boruta(recipes::prep(trained, training = d2, fresh = TRUE))
 
       set.seed(2)
-      direct <- recipes::prep(rec, training = d2)
+      direct <- quiet_boruta(recipes::prep(rec, training = d2))
 
       expect_identical(recipes::bake(refreshed, new_data = NULL),
                        recipes::bake(direct,    new_data = NULL))
@@ -1445,7 +1455,7 @@ describe("custom steps keep their selectors through prep (#52)", {
       expect_null(untrained$columns)
 
       set.seed(1)
-      trained <- recipes::prep(rec, training = d)$steps[[last]]
+      trained <- quiet_boruta(recipes::prep(rec, training = d))$steps[[last]]
 
       expect_identical(trained$terms, untrained$terms)
       expect_type(trained$columns, "character")
@@ -1467,7 +1477,7 @@ describe("custom steps keep their selectors through prep (#52)", {
       last <- length(rec$steps)
 
       set.seed(1)
-      prepped <- recipes::prep(rec, training = d)
+      prepped <- quiet_boruta(recipes::prep(rec, training = d))
 
       untrained_says <- if (step == "transform") "Spectral transformation" else "not yet trained"
       trained_says   <- if (step == "transform") "Spectral transformation" else "retained"
@@ -1492,7 +1502,7 @@ describe("custom steps keep their selectors through prep (#52)", {
       wf <- workflows::workflow(step_recipe(step, train), parsnip::linear_reg())
 
       set.seed(1)
-      fitted   <- parsnip::fit(wf, data = train)
+      fitted   <- quiet_boruta(parsnip::fit(wf, data = train))
       expected <- predict(fitted, new_data = new)
 
       butchered <- butcher::butcher(fitted)
@@ -1523,7 +1533,7 @@ describe("custom steps keep their selectors through prep (#52)", {
       wf <- workflows::workflow(step_recipe(step, train), parsnip::linear_reg())
 
       set.seed(1)
-      fitted    <- parsnip::fit(wf, data = train)
+      fitted    <- quiet_boruta(parsnip::fit(wf, data = train))
       expected  <- predict(fitted, new_data = new)
       baked     <- recipes::bake(workflows::extract_recipe(fitted), new_data = new)
       butchered <- butcher::butcher(fitted)
@@ -1563,7 +1573,7 @@ describe("custom steps keep their selectors through prep (#52)", {
       last <- length(rec$steps)
 
       set.seed(1)
-      reference <- recipes::bake(recipes::prep(rec, training = d), new_data = NULL)
+      reference <- recipes::bake(quiet_boruta(recipes::prep(rec, training = d)), new_data = NULL)
 
       ## Selectors in `columns` and no `terms`, as the old release built it,
       ## and the same with the empty `terms` a butchered workflow's
@@ -1576,13 +1586,13 @@ describe("custom steps keep their selectors through prep (#52)", {
         expect_true(rlang::is_quosures(old$steps[[last]]$columns))
 
         set.seed(1)
-        prepped <- recipes::prep(old, training = d)
+        prepped <- quiet_boruta(recipes::prep(old, training = d))
 
         expect_identical(recipes::bake(prepped, new_data = NULL), reference)
 
         ## It comes out in the current layout, so it can be re-prepped.
         expect_identical(prepped$steps[[last]]$terms, rec$steps[[last]]$terms)
-        expect_no_error(recipes::prep(prepped, training = d, fresh = TRUE))
+        expect_no_error(quiet_boruta(recipes::prep(prepped, training = d, fresh = TRUE)))
 
       }
 
@@ -1596,7 +1606,7 @@ describe("custom steps keep their selectors through prep (#52)", {
       d <- step_data()
 
       set.seed(1)
-      trained <- recipes::prep(step_recipe(step, d), training = d)
+      trained <- quiet_boruta(recipes::prep(step_recipe(step, d), training = d))
       last    <- length(trained$steps)
 
       ## Only the step under test is old, so the error is its own and not

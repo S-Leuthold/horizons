@@ -78,16 +78,23 @@ fit_single_config <- function(config_row,
   train_data     <- train_data %||% rsample::training(split_F)
   test_data      <- rsample::testing(split_F)
 
-  ## Accumulate warnings from all steps
-  collected_warnings <- character(0)
+  ## Accumulate warnings from all steps, as records that render_warning_log()
+  ## reduces to one line per distinct message (#96)
+  warning_log <- new_warning_log()
 
   collect_from <- function(safe_result) {
 
-    if (!is.null(safe_result$warnings)) {
+    warning_log <<- dplyr::bind_rows(warning_log, text_records(safe_result$warnings))
 
-      collected_warnings <<- c(collected_warnings, unlist(safe_result$warnings))
+  }
 
-    }
+  ## Warnings tune caught inside its resampling and kept in .notes, which
+  ## safely_execute() never sees. Both the re-tune and the out-of-fold
+  ## predictions resample cv_resamples, so their fold counts merge.
+  collect_notes_from <- function(tune_results) {
+
+    notes <- tune_note_records(tune_results, type = "warning", scope = "cv")
+    warning_log <<- dplyr::bind_rows(warning_log, notes)
 
   }
 
@@ -114,7 +121,7 @@ fit_single_config <- function(config_row,
       cv_metrics       = NULL,
       uq               = NULL,
       ad               = NULL,
-      warnings         = if (length(collected_warnings) > 0) collected_warnings else NULL,
+      warnings         = render_warning_log(warning_log),
       error_message    = error_msg,
       runtime_secs     = as.numeric(difftime(Sys.time(), start_time, units = "secs"))
     )
@@ -136,7 +143,7 @@ fit_single_config <- function(config_row,
   if (!is.null(recipe_result$error)) {
 
     return(make_failed(
-      paste0("Recipe building failed: ", recipe_result$error$message)
+      paste0("Recipe building failed: ", condition_summary(recipe_result$error))
     ))
 
   }
@@ -157,7 +164,7 @@ fit_single_config <- function(config_row,
   if (!is.null(model_result$error)) {
 
     return(make_failed(
-      paste0("Model specification failed: ", model_result$error$message)
+      paste0("Model specification failed: ", condition_summary(model_result$error))
     ))
 
   }
@@ -180,7 +187,7 @@ fit_single_config <- function(config_row,
   if (!is.null(wflow_result$error)) {
 
     return(make_failed(
-      paste0("Workflow creation failed: ", wflow_result$error$message)
+      paste0("Workflow creation failed: ", condition_summary(wflow_result$error))
     ))
 
   }
@@ -214,7 +221,7 @@ fit_single_config <- function(config_row,
     if (!is.null(finalize_result$error)) {
 
       return(make_failed(
-        paste0("Parameter finalization failed: ", finalize_result$error$message)
+        paste0("Parameter finalization failed: ", condition_summary(finalize_result$error))
       ))
 
     }
@@ -257,13 +264,14 @@ fit_single_config <- function(config_row,
   if (!is.null(tune_result$error)) {
 
     return(make_failed(
-      paste0("Warm-start tuning failed: ", tune_result$error$message)
+      paste0("Warm-start tuning failed: ", condition_summary(tune_result$error))
     ))
 
   }
 
   warmstart <- tune_result$result
   collect_from(tune_result)
+  collect_notes_from(warmstart$tune_results)
 
   warm_start        <- !isTRUE(warmstart$fallback_used)
   start_grid_size   <- as.integer(warmstart$grid_points %||% NA_integer_)
@@ -310,13 +318,14 @@ fit_single_config <- function(config_row,
   if (!is.null(resample_result$error)) {
 
     return(make_failed(
-      paste0("OOF predictions failed: ", resample_result$error$message)
+      paste0("OOF predictions failed: ", condition_summary(resample_result$error))
     ))
 
   }
 
   cv_fit <- resample_result$result
   collect_from(resample_result)
+  collect_notes_from(cv_fit)
 
   ## Extract raw OOF predictions
   oof_raw <- tune::collect_predictions(cv_fit)
@@ -345,7 +354,7 @@ fit_single_config <- function(config_row,
   if (!is.null(bt_result$error)) {
 
     return(make_failed(
-      paste0("OOF back-transformation failed: ", bt_result$error$message)
+      paste0("OOF back-transformation failed: ", condition_summary(bt_result$error))
     ))
 
   }
@@ -392,7 +401,7 @@ fit_single_config <- function(config_row,
   if (!is.null(final_fit_result$error)) {
 
     return(make_failed(
-      paste0("Final model fit failed: ", final_fit_result$error$message)
+      paste0("Final model fit failed: ", condition_summary(final_fit_result$error))
     ))
 
   }
@@ -413,7 +422,7 @@ fit_single_config <- function(config_row,
   if (!is.null(test_pred_result$error)) {
 
     return(make_failed(
-      paste0("Test prediction failed: ", test_pred_result$error$message)
+      paste0("Test prediction failed: ", condition_summary(test_pred_result$error))
     ))
 
   }
@@ -431,7 +440,7 @@ fit_single_config <- function(config_row,
   if (!is.null(bt_test$error)) {
 
     return(make_failed(
-      paste0("Test back-transformation failed: ", bt_test$error$message)
+      paste0("Test back-transformation failed: ", condition_summary(bt_test$error))
     ))
 
   }
@@ -603,7 +612,7 @@ fit_single_config <- function(config_row,
     cv_metrics       = cv_metrics,
     uq               = uq_result,
     ad               = ad_result,
-    warnings         = if (length(collected_warnings) > 0) collected_warnings else NULL,
+    warnings         = render_warning_log(warning_log),
     error_message    = NA_character_,
     runtime_secs     = runtime
   )

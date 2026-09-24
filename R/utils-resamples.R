@@ -194,3 +194,103 @@ rebuild_resamples <- function(data, idx) {
   list(split = split, cv_folds = cv_folds)
 
 }
+
+
+## ---------------------------------------------------------------------------
+## Stratified draws: whether the strata held
+## ---------------------------------------------------------------------------
+##
+## evaluate() and fit() ask rsample to stratify every draw on the outcome: the
+## train/test split, fit()'s calibration split and the CV folds. Two things
+## turn such a draw unstratified. The stratified call can error, and each site
+## retried without strata. More often, rsample draws unstratified by itself:
+## make_strata() bins a numeric outcome into quartiles only while every bin
+## would hold 20 rows, so below 80 rows it uses fewer bins and below 40 none,
+## warning "Too little data to stratify"; an outcome with five or fewer
+## distinct values is stratified by value, with values under 10 % of the rows
+## pooled into the others, and pooling down to one stratum draws unstratified
+## with no warning at all, as do tied quantiles that leave one bin (a
+## zero-inflated outcome). The returned object records none of this: its
+## `strata` attribute names the outcome either way. The console said
+## "stratified" regardless (#91), so the draws now go through here.
+
+
+#' Whether rsample stratifies a draw on this outcome
+#'
+#' @description
+#' Asks [rsample::make_strata()], with the `breaks` and `pool` every draw
+#' passes (`STRATA_BREAKS`, `STRATA_POOL`), how many strata it would form. One
+#' stratum is an unstratified draw. See the section header above for the
+#' cases.
+#'
+#' `make_strata()` draws a random stratum for each pooled value, and
+#' `evaluate()` draws its CV folds from the stream its split leaves without
+#' reseeding, so the caller's RNG state is restored on exit. Its warning is
+#' muffled here only because this is a second look at the outcome: the draw
+#' itself raises it.
+#'
+#' @param outcome The outcome vector the draw stratifies on.
+#' @return `TRUE` when `make_strata()` forms at least two strata.
+#' @keywords internal
+#' @noRd
+
+outcome_stratifies <- function(outcome) {
+
+  had_seed <- exists(".Random.seed", envir = globalenv(), inherits = FALSE)
+  old_seed <- if (had_seed) get(".Random.seed", envir = globalenv()) else NULL
+  on.exit({
+    if (had_seed) assign(".Random.seed", old_seed, envir = globalenv())
+    else if (exists(".Random.seed", envir = globalenv(), inherits = FALSE)) rm(".Random.seed", envir = globalenv())
+  }, add = TRUE)
+
+  strata <- suppressWarnings(
+    rsample::make_strata(outcome, breaks = STRATA_BREAKS, pool = STRATA_POOL)
+  )
+
+  nlevels(strata) > 1L
+
+}
+
+
+#' Draw stratified on the outcome, and say whether the strata held
+#'
+#' @description
+#' Runs `stratified()`, the rsample call with `strata`, and on an error runs
+#' `unstratified()`, the same call without, as each draw site did inline.
+#' The caller seeds the RNG first; [outcome_stratifies()] leaves it as found,
+#' so the draws consume the stream they always did. An error from the check
+#' itself counts as unstratified rather than aborting: the stratified draw
+#' calls `make_strata()` with the same arguments, so it fails too and is
+#' retried without strata, as it was before the check existed.
+#'
+#' @param outcome The outcome vector `stratified()` stratifies on.
+#' @param stratified,unstratified Functions of no arguments returning the
+#'   draw, with and without `strata`. `stratified()` passes `breaks =
+#'   STRATA_BREAKS, pool = STRATA_POOL`, the values the check uses.
+#' @return List with `draw` (the `rsplit` or `rset`), `stratified` (`FALSE`
+#'   when the draw is unstratified, whether rsample dropped the strata or the
+#'   stratified call failed) and `strata_failed` (`TRUE` when the stratified
+#'   call failed and `unstratified()` was run).
+#' @keywords internal
+#' @noRd
+
+draw_stratified <- function(outcome, stratified, unstratified) {
+
+  held          <- tryCatch(outcome_stratifies(outcome), error = function(e) FALSE)
+  strata_failed <- FALSE
+
+  draw <- tryCatch(
+    stratified(),
+    error = function(e) {
+
+      strata_failed <<- TRUE
+      unstratified()
+
+    }
+  )
+
+  list(draw          = draw,
+       stratified    = held && !strata_failed,
+       strata_failed = strata_failed)
+
+}
