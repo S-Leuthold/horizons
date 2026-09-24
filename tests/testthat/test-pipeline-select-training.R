@@ -661,12 +661,36 @@ test_that("a draw the twin subtraction empties stops with the property and the c
 
   fx <- make_select_fixture(n_pool = 60, seed = 3, n_replicates = 3)
 
-  expect_error(quiet_select(fx, k = 1, metric = "cosine", twin_ratio = 0.99, properties = "clay"),
-               regexp = "Every row drawn for clay was flagged", class = "horizons_input_error")
+  err <- expect_error(quiet_select(fx, k = 1, metric = "cosine", twin_ratio = 0.99, properties = "clay"),
+                      regexp = "Every row drawn for clay was flagged", class = "horizons_input_error")
+
+  ## Ordinary neighbours were flagged, so the ratio is the lever
+  expect_match(conditionMessage(err), "lower it")
 
   ## Global keeps the pool, so there is nothing to empty
   expect_no_error(quiet_select(fx, k = 1, metric = "cosine", twin_ratio = 0.99,
                                properties = "clay", scope = "global"))
+
+})
+
+
+test_that("a draw emptied by the targets' own copies says so, not twin_ratio", {
+
+  ## Targets that are the pool's own rows: every row a target draws is
+  ## another target's copy, at distance zero to rounding, and no twin_ratio
+  ## brings it back.
+
+  fx <- make_select_fixture(n_pool = 60, seed = 3)
+  pa <- fx$pool$data$analysis
+  tg <- pa[, c("sample_id", grep("^wn_", names(pa), value = TRUE))]
+  tg$sample_id <- paste0("T", tg$sample_id)
+  utils::capture.output(targets <- spectra(tg))
+
+  err <- expect_error(select_training(targets, fx$pool, k = 1, properties = "clay", verbose = FALSE),
+                      regexp = "Every row drawn for clay was flagged", class = "horizons_input_error")
+
+  expect_match(conditionMessage(err), "targets are in the pool")
+  expect_no_match(conditionMessage(err), "lower it")
 
 })
 
@@ -682,11 +706,35 @@ test_that("a property with no measured pool row stops every scope", {
   for (scope in c("batch", "global")) {
     for (rows in c("all", "measured")) {
 
+      ## "no measured rows", or "fewer than 2" where a space is fit per property
       expect_error(quiet_select(fx, k = 5, scope = scope, space_rows = rows),
-                   regexp = "no measured rows for oc", class = "horizons_input_error")
+                   regexp = "measured rows for oc", class = "horizons_input_error")
 
     }
   }
+
+})
+
+
+test_that("space_rows = 'measured' needs two measured rows per property, under every scope", {
+
+  ## A space fit on one row failed with a base-R message; global used to
+  ## skip the per-property spaces and so succeeded where batch crashed.
+
+  fx <- make_select_fixture(n_pool = 60)
+  a  <- fx$pool$data$analysis
+  a$oc[-which(!is.na(a$oc))[1]] <- NA_real_
+  fx$pool$data$analysis <- a
+
+  for (scope in c("batch", "global")) {
+
+    expect_error(quiet_select(fx, k = 1, scope = scope, space_rows = "measured"),
+                 regexp = "fewer than 2 measured rows for oc", class = "horizons_input_error")
+
+  }
+
+  ## In the all-rows space one measured row is enough to check against
+  expect_no_error(quiet_select(fx, k = 1, scope = "global", space_rows = "all"))
 
 })
 

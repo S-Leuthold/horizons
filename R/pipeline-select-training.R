@@ -417,19 +417,25 @@ select_training <- function(x, pool,
   pool_ids <- pool_rc$data$analysis$sample_id
   resp_tbl <- pool_rc$data$analysis[, c("sample_id", properties), drop = FALSE]
 
-  ## A property no pool row has measured has no rows to draw from, no rows
-  ## to check twins against and no rows to fit a space on, under any scope.
-  ## Stop here, before a zero-row space fails with a message naming none of
-  ## that.
+  ## A property no pool row has measured has no rows to draw from and no
+  ## rows to check twins against, under any scope; under space_rows =
+  ## "measured" a property needs two, because a space fit on one row fails.
+  ## Stop here, before the space build fails with a base-R message naming
+  ## none of that.
 
   n_measured <- vapply(properties, function(p) sum(!is.na(resp_tbl[[p]])), integer(1))
+  n_min      <- if (space_rows == "measured") 2L else 1L
 
-  unmeasured <- properties[n_measured == 0L]
+  unmeasured <- properties[n_measured < n_min]
 
   if (length(unmeasured)) {
 
     cli::cli_abort(c(
-      "{.arg pool} has no measured rows for {.field {unmeasured}}",
+      if (n_min == 1L) {
+        "{.arg pool} has no measured rows for {.field {unmeasured}}"
+      } else {
+        "{.arg pool} has fewer than 2 measured rows for {.field {unmeasured}}, and {.code space_rows = \"measured\"} fits a space on each property's measured rows"
+      },
       "i" = "Drop {cli::qty(unmeasured)}{?it/them} from {.arg properties}, or add the lab values to the pool first"
     ), class = "horizons_input_error")
 
@@ -693,9 +699,24 @@ select_training <- function(x, pool,
 
     if (length(emptied)) {
 
+      ### Whether a lower twin_ratio would bring the rows back. It cannot when
+      ### every drawn row is some target's own copy: its distance is zero,
+      ### or zero to rounding, which the same spectrum reaching the space by
+      ### two paths gives (about 1e-16 here), and that is below any ratio.
+
+      ex     <- draw$exclusions
+      copies <- ex$pool_id[ex$distance <= sqrt(.Machine$double.eps) * ex$reference_distance]
+      drawn  <- unique(membership$pool_id[membership$property %in% emptied])
+
+      cause <- if (all(drawn %in% copies)) {
+        "Each was a target's own copy, at distance zero, so the targets are in the pool; a lower {.arg twin_ratio} cannot help. Remove the targets from the pool"
+      } else {
+        "A twin sits below {.arg twin_ratio} = {twin_ratio} times its target's reference distance, and at this value ordinary neighbours are being flagged; lower it (the default is {SELECT_TWIN_RATIO})"
+      }
+
       cli::cli_abort(c(
         "Every row drawn for {.field {emptied}} was flagged as some target's twin, so the training set has none left for {cli::qty(emptied)}{?it/them}",
-        "i" = "A twin sits below {.arg twin_ratio} = {twin_ratio} times its target's reference distance, and at this value ordinary neighbours are being flagged; lower it (the default is {SELECT_TWIN_RATIO})"
+        "i" = cause
       ), class = "horizons_input_error")
 
     }
