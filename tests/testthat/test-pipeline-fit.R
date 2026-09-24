@@ -730,7 +730,7 @@ describe("fit() - recipe settings", {
 
   it("passes configure()'s sg_window and pca_threshold to fit_single_config()", {
 
-    obj$config$recipe <- list(sg_window = 7L, sg_window_cm = 14, pca_threshold = 0.9)
+    obj$config$recipe <- list(sg_window = 7L, pca_threshold = 0.9)
 
     expect_identical(capture_recipe_args(obj),
                      list(sg_window = 7L, pca_threshold = 0.9))

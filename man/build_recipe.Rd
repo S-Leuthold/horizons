@@ -20,8 +20,8 @@ build_recipe(
 \item{role_map}{Tibble with \code{variable} and \code{role} columns from the
 horizons_data object.}
 
-\item{sg_window}{Odd integer. Savitzky-Golay window, in grid points, passed
-to \code{step_transform_spectra(window_size = )}. Default 9.}
+\item{sg_window}{Odd integer, at least 5. Savitzky-Golay window, in grid
+points, passed to \code{step_transform_spectra(window_size = )}. Default 9.}
 
 \item{pca_threshold}{Numeric in (0, 1]. Share of variance the \code{pca} feature
 selection keeps, passed to \code{recipes::step_pca(threshold = )}. Default
@@ -62,8 +62,12 @@ columns from each end of the spectrum for every preprocessing method, \code{raw}
 and \code{snv} included, so the output is \code{p - (sg_window - 1)} columns wide. The
 Savitzky-Golay polynomial order is not a setting: each method fixes its own
 (\code{sg} p = 1; \code{deriv1} m = 1, p = 1; \code{deriv2} m = 2, p = 3; the \code{snv_}
-variants the same). \code{pca_threshold} is read only by
-\code{feature_selection = "pca"}. \code{configure()} validates both; this function
-passes them through as given.
+variants the same). A Savitzky-Golay smoother at m = 0, p = 1 is a moving
+average, so for \code{sg} a wider \code{sg_window} is a wider boxcar, which flattens
+features narrower than the window rather than preserving them.
+\code{pca_threshold} is read only by \code{feature_selection = "pca"}. \code{configure()}
+validates both, \code{step_transform_spectra()} refuses a window that is even or
+under 5, and \code{evaluate()} refuses one that is not narrower than the
+spectrum; this function otherwise passes them through as given.
 }
 \keyword{internal}

@@ -81,8 +81,12 @@
 #' @return A `horizons_eval` object (inherits from `horizons_data`) with
 #'   `evaluation$results`, `evaluation$best_config`, `evaluation$split`, and
 #'   associated metadata populated, including `evaluation$parallelize_over`
-#'   (the axis actually used) and `evaluation$workers` (the worker count the
-#'   registered plan offered; 1 when sequential). Called on an object that
+#'   (the axis actually used), `evaluation$workers` (the worker count the
+#'   registered plan offered; 1 when sequential) and `evaluation$recipe` (the
+#'   `sg_window`, its width in cm-1 on the evaluated axis as `sg_window_cm`,
+#'   and the `pca_threshold` every config's recipe ran with). Aborts, before
+#'   any config runs, when `configure()`'s `sg_window` is not narrower than
+#'   the spectrum. Called on an object that
 #'   has already been through `fit()` or `ensemble()`, it returns a
 #'   `horizons_eval` whose `models` and `ensemble` slots are empty again,
 #'   since both were built on the evaluation it replaces.
@@ -150,10 +154,6 @@ evaluate <- function(x,
   cv_folds  <- tuning$cv_folds
   n_samples <- nrow(analysis)
 
-  ## Object-level recipe settings, the same for every config; see
-  ## recipe_settings() for objects configured before they were recorded.
-  recipe_cfg <- recipe_settings(x)
-
   if (n_samples < cv_folds * 2) {
 
     rlang::abort(paste0(
@@ -161,6 +161,37 @@ evaluate <- function(x,
       "Need at least ", cv_folds * 2, " samples (cv_folds * 2), ",
       "but only ", n_samples, " available."
     ))
+
+  }
+
+  ## -----------------------------------------------------------------------
+  ## Step 3a: The window has to fit the spectrum
+  ## -----------------------------------------------------------------------
+  ## Object-level recipe settings, the same for every config; see
+  ## recipe_settings() for objects configured before they were recorded.
+  ##
+  ## configure() cannot check the window against the spectrum, because
+  ## standardize() can still change the axis after it. Past this point a
+  ## window as wide as the spectrum fails every config inside tune, as a
+  ## "Grid search failed" or an "All configurations failed" that never names
+  ## the window. The width in cm-1 is read from the axis the recipe will run
+  ## on, and recorded in Step 11.
+
+  recipe_cfg <- recipe_settings(x)
+  n_spectral <- sum(role_map$role == "predictor")
+  window_cm  <- recipe_cfg$sg_window * axis_spacing_cm(x)
+
+  if (recipe_cfg$sg_window >= n_spectral) {
+
+    width <- if (is.na(window_cm)) "" else {
+      paste0(" (", signif(window_cm, 3), " cm\u207B\u00B9)")
+    }
+
+    cli::cli_abort(c(
+      "The Savitzky-Golay window is at least as wide as the spectrum.",
+      "x" = "{.arg sg_window} is {recipe_cfg$sg_window} grid points{width}; the object has {n_spectral} spectral column{?s}.",
+      "i" = "The window must be narrower than the spectrum. Re-run {.fn configure} with a smaller {.arg sg_window}, or keep more of the spectrum."
+    ), class = "horizons_input_error")
 
   }
 
@@ -854,6 +885,11 @@ evaluate <- function(x,
     n_test       = n_test,
     workers      = plan_workers,
     parallelize_over = axis$axis,
+    ## What every config's recipe ran with, the window's width included, so
+    ## the results of an sg_window sweep can be told apart after the fact.
+    recipe       = list(sg_window     = recipe_cfg$sg_window,
+                        sg_window_cm  = window_cm,
+                        pca_threshold = recipe_cfg$pca_threshold),
     runtime_secs = total_runtime,
     timestamp    = Sys.time()
   )

@@ -64,8 +64,12 @@ levels while managing its own nested plan. Register a plan and use
 A \code{horizons_eval} object (inherits from \code{horizons_data}) with
 \code{evaluation$results}, \code{evaluation$best_config}, \code{evaluation$split}, and
 associated metadata populated, including \code{evaluation$parallelize_over}
-(the axis actually used) and \code{evaluation$workers} (the worker count the
-registered plan offered; 1 when sequential). Called on an object that
+(the axis actually used), \code{evaluation$workers} (the worker count the
+registered plan offered; 1 when sequential) and \code{evaluation$recipe} (the
+\code{sg_window}, its width in cm-1 on the evaluated axis as \code{sg_window_cm},
+and the \code{pca_threshold} every config's recipe ran with). Aborts, before
+any config runs, when \code{configure()}'s \code{sg_window} is not narrower than
+the spectrum. Called on an object that
 has already been through \code{fit()} or \code{ensemble()}, it returns a
 \code{horizons_eval} whose \code{models} and \code{ensemble} slots are empty again,
 since both were built on the evaluation it replaces.

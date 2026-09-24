@@ -63,8 +63,9 @@ Default 15. Minimum 0.}
 the final fit on the selected configuration. Default 25. Minimum 0.}
 
 \item{sg_window}{\code{integer}. Savitzky-Golay window in grid points, applied
-to every configuration. Default 9. Must be odd and at least 5. See
-Recipe settings.}
+to every configuration. Default 9. Must be odd, at least 5, and (checked
+by \code{evaluate()}) smaller than the number of spectral columns. For
+\code{"sg"} it is the width of a moving average. See Recipe settings.}
 
 \item{pca_threshold}{\code{numeric}. Share of variance \code{feature_selection = "pca"} keeps, applied to every configuration that uses it. Default
 0.995. Must be in (0, 1].}
@@ -78,9 +79,7 @@ A modified \code{horizons_data} object with:
 \item \code{config$tuning} — list of tuning parameters
 \item \code{config$expansion} — list of original inputs (for reproducibility)
 \item \code{config$recipe} — the recipe settings every configuration is built
-with: \code{sg_window}, \code{sg_window_cm} (the window's width in cm-1,
-\code{sg_window} times the median spacing of the predictor axis, \code{NA} when
-the axis is not numeric) and \code{pca_threshold}
+with: \code{sg_window} and \code{pca_threshold}
 }
 }
 \description{
@@ -178,12 +177,19 @@ it matters even where no filter runs. The polynomial order is not a
 setting: each method fixes its own (\code{"sg"} order 1; \code{"deriv1"} first
 derivative, order 1; \code{"deriv2"} second derivative, order 3; the \code{"snv_"}
 variants the same), and the cubic is why the window must be at least 5.
+At order 1 the \code{"sg"} smoother is a moving average, so widening
+\code{sg_window} widens a boxcar: it flattens peaks and shoulders narrower than
+the window rather than preserving them, as a higher-order Savitzky-Golay
+filter would.
+
 Because the window counts grid points, its physical width depends on the
-axis the object was standardized to; \code{configure()} records it in cm-1 as
-\code{config$recipe$sg_window_cm}. \code{pca_threshold} is the share of variance
-kept by \code{feature_selection = "pca"} and is read by nothing else. Both
-defaults are the values the recipe ran before they were settable. See
-GitHub issue #62.
+axis it runs on, and \code{standardize()} can still change that axis after
+\code{configure()}. So the width is not stored here: \code{configure()} prints it in
+cm-1 for the axis it sees, \code{evaluate()} records the width it actually ran
+in \code{evaluation$recipe}, and \code{evaluate()} refuses a window as wide as the
+spectrum. \code{pca_threshold} is the share of variance kept by
+\code{feature_selection = "pca"} and is read by nothing else. Both defaults are
+the values the recipe ran before they were settable. See GitHub issue #62.
 }
 \examples{
 \dontrun{

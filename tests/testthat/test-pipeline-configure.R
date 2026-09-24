@@ -853,8 +853,10 @@ describe("configure() storage", {
     hd     <- make_single_response_hd()
     result <- quiet_configure(hd, sg_window = 15, pca_threshold = 0.9)
 
-    expect_identical(result$config$recipe$sg_window, 15L)
-    expect_identical(result$config$recipe$pca_threshold, 0.9)
+    ## Nothing axis-dependent is stored: the window's width in cm-1 would go
+    ## stale if standardize() ran after configure(), so evaluate() records it.
+    expect_identical(result$config$recipe,
+                     list(sg_window = 15L, pca_threshold = 0.9))
     expect_identical(recipe_settings(result),
                      list(sg_window = 15L, pca_threshold = 0.9))
 
@@ -881,37 +883,38 @@ describe("configure() storage", {
 
   })
 
-  test_that("sg_window_cm is the window times the spacing of the predictor axis", {
+  ## axis_spacing_cm() converts the window to cm-1 for configure()'s console
+  ## line and evaluate()'s record, each reading the axis at that moment.
+
+  test_that("axis_spacing_cm() reads the spacing of the predictor axis", {
 
     ## The fixture's predictors are 600, 601 and 602: one cm-1 apart.
     hd <- make_single_response_hd()
 
-    expect_equal(quiet_configure(hd)$config$recipe$sg_window_cm, 9)
-    expect_equal(quiet_configure(hd, sg_window = 11L)$config$recipe$sg_window_cm, 11)
+    expect_equal(axis_spacing_cm(hd), 1)
 
     ## wn_-prefixed names, 4 cm-1 apart
-    wn4 <- hd
     old <- c("600", "601", "602")
     new <- paste0("wn_", c(608, 604, 600))
-    names(wn4$data$analysis)[match(old, names(wn4$data$analysis))] <- new
-    wn4$data$role_map$variable[match(old, wn4$data$role_map$variable)] <- new
+    names(hd$data$analysis)[match(old, names(hd$data$analysis))] <- new
+    hd$data$role_map$variable[match(old, hd$data$role_map$variable)] <- new
 
-    expect_equal(quiet_configure(wn4)$config$recipe$sg_window_cm, 36)
+    expect_equal(axis_spacing_cm(hd), 4)
 
   })
 
-  test_that("sg_window_cm reads the axis before a recorded grid step that disagrees", {
+  test_that("axis_spacing_cm() reads the axis before a recorded grid step that disagrees", {
 
     ## select_training() returns the pool's standardize() provenance on the
     ## targets' axis, so the recorded step can describe a different grid.
     hd <- make_single_response_hd()
     hd$provenance$standardization <- list(grid = list(step = 4))
 
-    expect_equal(quiet_configure(hd)$config$recipe$sg_window_cm, 9)
+    expect_equal(axis_spacing_cm(hd), 1)
 
   })
 
-  test_that("sg_window_cm falls back to the recorded grid step, then to NA", {
+  test_that("axis_spacing_cm() falls back to the recorded grid step, then to NA", {
 
     ## Predictor names that are not wavenumbers carry no spacing of their own.
     hd  <- make_single_response_hd()
@@ -920,10 +923,10 @@ describe("configure() storage", {
     names(hd$data$analysis)[match(old, names(hd$data$analysis))] <- new
     hd$data$role_map$variable[match(old, hd$data$role_map$variable)] <- new
 
-    expect_true(is.na(quiet_configure(hd)$config$recipe$sg_window_cm))
+    expect_true(is.na(axis_spacing_cm(hd)))
 
     hd$provenance$standardization <- list(grid = list(step = 2))
-    expect_equal(quiet_configure(hd)$config$recipe$sg_window_cm, 18)
+    expect_equal(axis_spacing_cm(hd), 2)
 
   })
 

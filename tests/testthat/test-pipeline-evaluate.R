@@ -400,11 +400,12 @@ describe("evaluate() - recipe settings", {
 
   }
 
-  obj <- make_eval_object(n_configs = 1)
+  ## Twenty predictors, 2 cm-1 apart, so a window of 13 fits the spectrum.
+  obj <- make_eval_object(n_wn = 20, n_configs = 1)
 
   it("passes configure()'s sg_window and pca_threshold to every config", {
 
-    obj$config$recipe <- list(sg_window = 13L, sg_window_cm = 26, pca_threshold = 0.9)
+    obj$config$recipe <- list(sg_window = 13L, pca_threshold = 0.9)
 
     expect_identical(capture_recipe_args(obj),
                      list(sg_window = 13L, pca_threshold = 0.9))
@@ -417,6 +418,75 @@ describe("evaluate() - recipe settings", {
 
     expect_identical(capture_recipe_args(obj),
                      list(sg_window = 9L, pca_threshold = 0.995))
+
+  })
+
+  ## A window as wide as the spectrum used to pass prep() and fail every
+  ## config inside tune ("Grid search failed"); a wider one failed them all
+  ## ("All configurations failed"). Neither named the window. evaluate() now
+  ## refuses both before a single config runs.
+
+  refused_without_running <- function(obj) {
+
+    ran <- 0L
+
+    err <- testthat::with_mocked_bindings(
+      evaluate_single_config = function(...) {
+        ran <<- ran + 1L
+        tibble::tibble(config_id = "cfg_001", status = "failed")
+      },
+      tryCatch(evaluate(obj, verbose = FALSE, seed = 42L),
+               error = function(e) e),
+      .package = "horizons"
+    )
+
+    list(error = err, ran = ran)
+
+  }
+
+  it("refuses a window as wide as the spectrum, naming both numbers and the width", {
+
+    narrow <- make_eval_object(n_wn = 9, n_configs = 1)
+    narrow$config$recipe <- list(sg_window = 9L, pca_threshold = 0.995)
+
+    out <- refused_without_running(narrow)
+
+    expect_s3_class(out$error, "horizons_input_error")
+    expect_match(conditionMessage(out$error), "9 grid points (18 cm", fixed = TRUE)
+    expect_match(conditionMessage(out$error), "9 spectral columns", fixed = TRUE)
+    expect_identical(out$ran, 0L)
+
+  })
+
+  it("refuses a window wider than the spectrum the same way", {
+
+    obj$config$recipe <- list(sg_window = 21L, pca_threshold = 0.995)
+
+    out <- refused_without_running(obj)
+
+    expect_s3_class(out$error, "horizons_input_error")
+    expect_match(conditionMessage(out$error), "21 grid points (42 cm", fixed = TRUE)
+    expect_match(conditionMessage(out$error), "20 spectral columns", fixed = TRUE)
+    expect_identical(out$ran, 0L)
+
+  })
+
+  it("records the settings it ran with, the width measured on the axis it ran on", {
+
+    ## The axis here is 4 cm-1, as if standardize() had coarsened the object
+    ## after configure(): the record follows the axis the recipe saw, which is
+    ## why configure() stores no width of its own.
+    coarse <- obj
+    wn_old <- coarse$data$role_map$variable[coarse$data$role_map$role == "predictor"]
+    wn_new <- paste0("wn_", seq(4000, by = -4, length.out = length(wn_old)))
+    names(coarse$data$analysis)[match(wn_old, names(coarse$data$analysis))] <- wn_new
+    coarse$data$role_map$variable[match(wn_old, coarse$data$role_map$variable)] <- wn_new
+    coarse$config$recipe <- list(sg_window = 7L, pca_threshold = 0.9)
+
+    result <- suppressWarnings(evaluate(coarse, verbose = FALSE, seed = 42L))
+
+    expect_identical(result$evaluation$recipe,
+                     list(sg_window = 7L, sg_window_cm = 28, pca_threshold = 0.9))
 
   })
 

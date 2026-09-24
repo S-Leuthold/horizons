@@ -30,16 +30,20 @@
 #' and `snv` included, so the output is `p - (sg_window - 1)` columns wide. The
 #' Savitzky-Golay polynomial order is not a setting: each method fixes its own
 #' (`sg` p = 1; `deriv1` m = 1, p = 1; `deriv2` m = 2, p = 3; the `snv_`
-#' variants the same). `pca_threshold` is read only by
-#' `feature_selection = "pca"`. `configure()` validates both; this function
-#' passes them through as given.
+#' variants the same). A Savitzky-Golay smoother at m = 0, p = 1 is a moving
+#' average, so for `sg` a wider `sg_window` is a wider boxcar, which flattens
+#' features narrower than the window rather than preserving them.
+#' `pca_threshold` is read only by `feature_selection = "pca"`. `configure()`
+#' validates both, `step_transform_spectra()` refuses a window that is even or
+#' under 5, and `evaluate()` refuses one that is not narrower than the
+#' spectrum; this function otherwise passes them through as given.
 #'
 #' @param config_row Single-row tibble from `config$configs`.
 #' @param train_data Data frame. Training split containing all columns.
 #' @param role_map Tibble with `variable` and `role` columns from the
 #'   horizons_data object.
-#' @param sg_window Odd integer. Savitzky-Golay window, in grid points, passed
-#'   to `step_transform_spectra(window_size = )`. Default 9.
+#' @param sg_window Odd integer, at least 5. Savitzky-Golay window, in grid
+#'   points, passed to `step_transform_spectra(window_size = )`. Default 9.
 #' @param pca_threshold Numeric in (0, 1]. Share of variance the `pca` feature
 #'   selection keeps, passed to `recipes::step_pca(threshold = )`. Default
 #'   0.995.

@@ -139,6 +139,11 @@ DEFAULT_CORE_BUFFER <- 2  # Keep 2 cores free for system
 DEFAULT_SG_WINDOW     <- 9L
 DEFAULT_PCA_THRESHOLD <- 0.995
 
+# The narrowest Savitzky-Golay window every preprocessing method can run:
+# deriv2 and snv_deriv2 fit a cubic, and prospectr::savitzkyGolay() needs the
+# window wider than the polynomial order. See is_valid_sg_window().
+SG_WINDOW_MIN <- 5L
+
 ## Covariate Types ------------------------------------------------------------
 
 # Known soil covariate types

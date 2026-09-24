@@ -685,7 +685,7 @@ describe("evaluate() - recipe settings on the configs axis", {
                   "cv_rmse", "cv_rrmse", "cv_rsq", "cv_ccc", "cv_rpd", "cv_mae")
 
     obj <- make_eval_object(n = 60, n_wn = 20, n_configs = 1)
-    obj$config$recipe <- list(sg_window = 13L, sg_window_cm = 26, pca_threshold = 0.995)
+    obj$config$recipe <- list(sg_window = 13L, pca_threshold = 0.995)
 
     seq_result <- suppressWarnings(
       evaluate(obj, allow_par = FALSE, verbose = FALSE, seed = 42L)

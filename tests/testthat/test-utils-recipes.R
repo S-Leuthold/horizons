@@ -1194,6 +1194,62 @@ describe("step_transform_spectra() name collisions and window size", {
 
   })
 
+  it("aborts at prep when the window is exactly as wide as the spectrum", {
+
+    ## prospectr::savitzkyGolay() needs w < ncol. A window equal to the column
+    ## count used to pass prep (it leaves one column after trimming) and then
+    ## fail at bake, inside tune, as a "Grid search failed" naming nothing.
+    td <- make_test_data(n = 20, n_wn = 9)
+
+    for (pp in c("raw", "deriv1", "deriv2")) {
+
+      rec <- recipes::recipe(SOC ~ ., data = dplyr::select(td$data, -sample_id)) |>
+        step_transform_spectra(dplyr::starts_with("wn_"), preprocessing = pp,
+                               window_size = 9)
+
+      expect_error(recipes::prep(rec), class = "horizons_input_error", label = pp)
+      expect_error(recipes::prep(rec), "9 spectral columns", label = pp)
+
+    }
+
+    ## One column wider, and every method runs.
+    td <- make_test_data(n = 20, n_wn = 11)
+
+    rec <- recipes::recipe(SOC ~ ., data = dplyr::select(td$data, -sample_id)) |>
+      step_transform_spectra(dplyr::starts_with("wn_"), preprocessing = "deriv2",
+                             window_size = 9)
+
+    expect_equal(ncol(recipes::bake(recipes::prep(rec), new_data = NULL)) - 1L, 3L)
+
+  })
+
+  it("refuses at construction a window that is even, under 5, fractional or not a scalar", {
+
+    td   <- make_test_data(n = 20, n_wn = 30)
+    base <- recipes::recipe(SOC ~ ., data = dplyr::select(td$data, -sample_id))
+
+    for (bad in list(8, 10L, 3, 1L, 7.5, NA_real_, Inf, "9", c(9, 11))) {
+
+      expect_error(
+        step_transform_spectra(base, dplyr::starts_with("wn_"),
+                               preprocessing = "raw", window_size = bad),
+        "odd whole number of at least 5",
+        class = "horizons_input_error",
+        info  = paste("window_size =", deparse(bad))
+      )
+
+    }
+
+    ## build_recipe() builds the step, so a direct caller is held to the same
+    ## rule configure() applies.
+    expect_error(build_recipe(make_config_row(), td$data, td$role_map, sg_window = 8L),
+                 class = "horizons_input_error")
+
+    expect_no_error(step_transform_spectra(base, dplyr::starts_with("wn_"),
+                                           preprocessing = "deriv2", window_size = 5))
+
+  })
+
 })
 
 
@@ -1307,9 +1363,12 @@ describe("custom steps keep their selectors through prep (#52)", {
   }
 
   ## The step under test is always the recipe's last step. The selection
-  ## steps sit on the transform step's output, as build_recipe() puts them,
-  ## and the transform step selects through a local vector as build_recipe()
-  ## does, so a test can see whether its selector environment was cut loose.
+  ## steps sit on the transform step's output, as build_recipe() puts them.
+  ## The transform step here selects through dplyr::all_of() on a local
+  ## vector, a selector that needs its environment, so a test can see whether
+  ## that environment was cut loose. build_recipe() itself now injects the
+  ## names as a literal vector, which needs none; the re-prep of its own
+  ## recipe is tested after this loop.
   step_recipe <- function(step, data) {
 
     wn_cols <- grep("^wn_", names(data), value = TRUE)
@@ -1559,6 +1618,33 @@ describe("custom steps keep their selectors through prep (#52)", {
     })
 
   }
+
+  it("a recipe build_recipe() made, literal selector and all, re-preps with fresh = TRUE", {
+
+    ## build_recipe() gives the transform step its columns as a literal name
+    ## vector. That quosure has to survive prep, as the #52 contract requires
+    ## of `terms`, and resolve again on a fresh re-prep to the same columns.
+    set.seed(52)
+    td <- make_test_data(n = 40, n_wn = 60, covariates = "clay")
+
+    for (fs in c("none", "pca", "correlation")) {
+
+      rec <- build_recipe(make_config_row(preprocessing = "snv_deriv1",
+                                          feature_selection = fs,
+                                          covariates = "clay"),
+                          td$data, td$role_map)
+
+      prepped <- recipes::prep(rec, training = td$data)
+      again   <- recipes::prep(prepped, training = td$data, fresh = TRUE)
+
+      expect_identical(prepped$steps[[1]]$terms, rec$steps[[1]]$terms, label = fs)
+      expect_identical(again$steps[[1]]$columns, prepped$steps[[1]]$columns, label = fs)
+      expect_identical(recipes::bake(again, new_data = NULL),
+                       recipes::bake(prepped, new_data = NULL), label = fs)
+
+    }
+
+  })
 
   it("step_selectors() reads each layout, and refuses the unrecoverable one", {
 
