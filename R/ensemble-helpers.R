@@ -758,7 +758,9 @@ predict.horizons_ensemble <- function(object,
   ## Gated before the covariate resolution below, not after: every downstream
   ## step reads this member set, and fitted_extra_predictors() on a malformed
   ## ensemble reports a covariate problem for what is really a missing member
-  ## set. Diagnose the object first.
+  ## set. Diagnose the object first. Also gated ahead of
+  ## ensure_predict_namespaces() immediately below, which needs the member
+  ## set to know which engines are actually in play.
   members <- object$ensemble$weights$member
 
   if (is.null(members) || length(members) < 2) {
@@ -769,6 +771,16 @@ predict.horizons_ensemble <- function(object,
     ))
 
   }
+
+  ## `library(horizons)` does not load workflows, most modeling engines, or
+  ## ranger (#65); see ensure_predict_namespaces() (R/pipeline-predict.R) for
+  ## why. Scoped to the member set, not every config the underlying fit
+  ## stored — gather_members() can drop a stored config that lacks
+  ## out-of-fold predictions, so "stored" and "member" are not always the
+  ## same set. Also has to run before fitted_extra_predictors() below — its
+  ## extract_mold() call silently returns nothing when workflows is not yet
+  ## loaded.
+  ensure_predict_namespaces(object, members)
 
   ## -------------------------------------------------------------------------
   ## Step 2: Resolve new_data, then validate it carries the training axis
