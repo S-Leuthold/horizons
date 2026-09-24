@@ -235,8 +235,8 @@
 
 <script type="application/json" id="hz-data">
 {
-  "generated_at": "2026-09-24T14:02:59-0500",
-  "content_md5": "813acdbbaed21c5072c3b58c5f1e47f1",
+  "generated_at": "2026-09-24T14:39:22-0500",
+  "content_md5": "e8f9af37b0cfdd297a2ff8e60be0f326",
   "horizons": "0.9.0",
   "lanes": [
     {
@@ -1659,14 +1659,14 @@
           "default": "TRUE",
           "text": "Logical. If TRUE, skip Bayesian optimization for configs whose grid-search RPD falls below `prune_threshold`. When `configure()` set `bayesian_iter = 0` there is nothing to skip, so no config is pruned. Either way, whether each config fell below the threshold is recorded in `evaluation$results$below_prune_threshold` (with the threshold in `prune_threshold`), and `fit()` warns when every member it fits did. Default TRUE.",
           "touch": "Leave TRUE. Since tuning metrics moved to the original response scale (#49), the grid RPD the gate reads is comparable across transformations, which closed the second half of",
-          "source": "R/evaluate-single-config.R#L299"
+          "source": "R/evaluate-single-config.R#L298"
         },
         {
           "name": "prune_threshold",
           "default": "1",
           "text": "Numeric. RPD threshold for pruning. Configs with grid-search RPD below this value skip Bayesian optimization but still receive test-set metrics from grid-search best. Default 1.0 (the \"no better than the mean\" line).",
           "touch": "The grid-search RPD below which Bayesian optimization is skipped; 1.0 is \"no better than the mean\".",
-          "source": "R/evaluate-single-config.R#L303"
+          "source": "R/evaluate-single-config.R#L302"
         },
         {
           "name": "allow_par",
@@ -1976,11 +1976,11 @@
         },
         {
           "step": "Flags a configuration as degraded when its test RPD falls below the cross-validated mean minus two standard errors.",
-          "source": "R/fit-single-config.R#L489"
+          "source": "R/fit-single-config.R#L487"
         },
         {
           "step": "With UQ on, trains a quantile forest on the out-of-fold residuals and computes signed conformal scores on the calibration set; with AD on, estimates the feature-space centroid and a Ledoit-Wolf shrinkage covariance and calibrates the quartile and out-of-domain cutoffs on the same calibration set. Both run before the workflow is butchered for storage.",
-          "source": "R/fit-single-config.R#L509"
+          "source": "R/fit-single-config.R#L507"
         },
         {
           "step": "Assembles the workflows in best-first order, the stacked out-of-fold predictions keyed to a row index, the results table, the response bound (1.5 times the largest outcome among the fit rows, the ones the final models are trained on), and whether the training object carried a selection record; promotes to horizons_fit and certifies the models slot. On a horizons_ensemble, the ensemble slot is emptied first, since it was built on the members being replaced.",
@@ -2058,7 +2058,7 @@
         {
           "when": "a configuration fails to re-tune or fit",
           "does": "records the failure and its error message in models$results and continues; butchering failure falls back to storing the unbutchered workflow",
-          "source": "R/fit-single-config.R#L104"
+          "source": "R/fit-single-config.R#L102"
         },
         {
           "when": "every configuration fails",

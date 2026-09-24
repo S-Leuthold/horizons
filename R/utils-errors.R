@@ -405,6 +405,21 @@ cli_escape <- function(x) {
 #' @noRd
 condition_summary <- function(x, detail = NULL, max_chars = 300L) {
 
+  parts <- condition_parts(x, max_chars = max_chars)
+
+  format_condition(parts$cause, parts$where, detail)
+
+}
+
+#' The cause and location of a condition, before they are joined
+#'
+#' @inheritParams condition_summary
+#' @return List with `cause` (character(1), never empty, capped at
+#'   `max_chars`) and `where` (a backticked call, or `NA`).
+#' @keywords internal
+#' @noRd
+condition_parts <- function(x, max_chars = 300L) {
+
   ## This runs on the failure path, so it must not fail itself: text it
   ## cannot read (an invalid multibyte string, say) is reported as such
   ## rather than taking the config down with it.
@@ -430,16 +445,27 @@ condition_summary <- function(x, detail = NULL, max_chars = 300L) {
 
   }
 
-  context <- c(if (!is.null(parts$where)) paste0("in ", parts$where), detail)
-  context <- context[nzchar(context)]
+  list(cause = cause, where = parts$where %||% NA_character_)
 
-  if (length(context) > 0) {
+}
 
-    cause <- paste0(cause, " (", paste(context, collapse = "; "), ")")
+#' Join a cause to its location and detail
+#'
+#' @param cause Character(1).
+#' @param where Character(1) or `NA`/`NULL`: a backticked call.
+#' @param detail Character or `NULL`: further context, e.g. a fold count.
+#' @return ``"cause (in `f()`; detail)"``, or `cause` alone when there is no
+#'   context.
+#' @keywords internal
+#' @noRd
+format_condition <- function(cause, where = NA_character_, detail = NULL) {
 
-  }
+  context <- c(if (length(where) == 1 && !is.na(where)) paste0("in ", where), detail)
+  context <- context[!is.na(context) & nzchar(context)]
 
-  cause
+  if (length(context) == 0) return(cause)
+
+  paste0(cause, " (", paste(context, collapse = "; "), ")")
 
 }
 
@@ -674,6 +700,260 @@ valid_utf8 <- function(x) {
 }
 
 ## ---------------------------------------------------------------------------
+## Warning records: tune's notes and captured warnings, deduplicated
+## ---------------------------------------------------------------------------
+## A config's warnings arrive from several places: conditions safely_execute()
+## caught (rendered by cli, possibly wrapped and bulleted), the notes tune kept
+## for each resample, and the notes of the final fit on the test set. The same
+## warning usually arrives from more than one of them, so they are gathered as
+## records first and reduced to one line per distinct message when the config
+## returns.
+
+#' An empty set of warning records
+#'
+#' @return Tibble with one row per distinct text from one source: `cause`,
+#'   `where` (backticked call or `NA`), `n` (how often it arrived), `scope`
+#'   (`"cv"`, `"test set"`, or `NA` for a captured warning), `folds` (list of
+#'   the resample ids that raised it), `n_folds` (resamples in that result)
+#'   and `pinned` (a package notice, always shown).
+#' @keywords internal
+#' @noRd
+new_warning_log <- function() {
+
+  tibble::tibble(
+    cause   = character(0),
+    where   = character(0),
+    n       = integer(0),
+    scope   = character(0),
+    folds   = list(),
+    n_folds = integer(0),
+    pinned  = logical(0)
+  )
+
+}
+
+#' Warning records from captured text
+#'
+#' @param x Character (or a list of strings, as `safely_execute()` returns).
+#' @param pinned Logical. A package notice that the cap must never hide.
+#' @return Records shaped like [new_warning_log()]'s, one per distinct text.
+#' @keywords internal
+#' @noRd
+text_records <- function(x, pinned = FALSE) {
+
+  x <- as.character(unlist(x))
+
+  if (length(x) == 0) return(new_warning_log())
+
+  distinct <- unique(x)
+  parts    <- lapply(distinct, condition_parts)
+
+  tibble::tibble(
+    cause   = vapply(parts, `[[`, character(1), "cause"),
+    where   = vapply(parts, `[[`, character(1), "where"),
+    n       = tabulate(match(x, distinct), nbins = length(distinct)),
+    scope   = NA_character_,
+    folds   = rep(list(character(0)), length(distinct)),
+    n_folds = NA_integer_,
+    pinned  = pinned
+  )
+
+}
+
+#' Warning or error records from the notes of a tune result
+#'
+#' @param tune_results A `tune_results` object (grid, Bayesian, resamples or
+#'   `last_fit()`), or anything `tune::collect_notes()` reads.
+#' @param type Character. Note types to keep: `"warning"`, `"error"`, or both.
+#' @param scope Character(1). `"cv"` for notes from cross-validation
+#'   resamples, `"test set"` for `last_fit()`'s.
+#' @return Records shaped like [new_warning_log()]'s, one per distinct note
+#'   text; empty when there are none or the notes cannot be read.
+#' @keywords internal
+#' @noRd
+tune_note_records <- function(tune_results, type = "warning", scope = "cv") {
+
+  notes <- tryCatch(tune::collect_notes(tune_results), error = function(e) NULL)
+
+  if (!is.data.frame(notes) || !all(c("type", "note") %in% names(notes))) {
+
+    return(new_warning_log())
+
+  }
+
+  notes <- notes[notes$type %in% type, , drop = FALSE]
+
+  if (nrow(notes) == 0) return(new_warning_log())
+
+  ## Parse each distinct note once, however many resamples raised it --------
+
+  distinct <- unique(notes$note)
+  idx      <- match(notes$note, distinct)
+  parts    <- lapply(distinct, condition_parts)
+
+  ## Which resample raised each note ------------------------------------------
+
+  ### id, plus id2 for repeated CV. last_fit()'s notes carry no id.
+  note_ids <- resample_ids(notes)
+
+  folds <- if (is.null(note_ids)) {
+
+    rep(list(character(0)), length(distinct))
+
+  } else {
+
+    lapply(split(note_ids, factor(idx, levels = seq_along(distinct))), unique)
+
+  }
+
+  n_folds <- tryCatch(length(unique(resample_ids(tune_results))),
+                      error = function(e) NA_integer_)
+
+  tibble::tibble(
+    cause   = vapply(parts, `[[`, character(1), "cause"),
+    where   = vapply(parts, `[[`, character(1), "where"),
+    n       = tabulate(idx, nbins = length(distinct)),
+    scope   = scope,
+    folds   = unname(folds),
+    n_folds = as.integer(n_folds),
+    pinned  = FALSE
+  )
+
+}
+
+#' The resample each row of a tune table belongs to
+#'
+#' @param x A data frame with `id` (and, for repeated CV, `id2`) columns.
+#' @return Character, one per row, or `NULL` when `x` has no id column.
+#' @keywords internal
+#' @noRd
+resample_ids <- function(x) {
+
+  id_cols <- grep("^id", names(x), value = TRUE)
+
+  if (length(id_cols) == 0) return(NULL)
+
+  do.call(paste, c(unname(as.list(x[id_cols])), sep = "/"))
+
+}
+
+#' Reduce warning records to one line per distinct message
+#'
+#' @description
+#' Records are the same message when their text matches once numbers,
+#' whitespace and bullet separators are set aside, and their location is the
+#' same. That joins a warning captured in full from a fit tune did not run
+#' with the note tune kept for the same warning, and the variants of a
+#' message that carries a value ("40 samples were requested but there were
+#' 20 rows", then 30 rows).
+#'
+#' Each line shows the variant seen most often, then in its parentheses the
+#' location, how many cross-validation folds raised it, `"test set"` when the
+#' final fit on the test set raised it, and `"numbers vary"` when the
+#' variants differ in their values. A test-set signal is labelled so it can
+#' never be read as a cross-validation one.
+#'
+#' @param records Records shaped like [new_warning_log()]'s.
+#' @return Tibble with one row per distinct message, in order of first
+#'   arrival: `line`, `n` (total arrivals) and `pinned`.
+#' @keywords internal
+#' @noRd
+summarise_warning_records <- function(records) {
+
+  if (nrow(records) == 0) {
+
+    return(tibble::tibble(line = character(0), n = integer(0), pinned = logical(0)))
+
+  }
+
+  ## The grouping key and the text it is shown with ---------------------------
+
+  ### ";" is set aside with whitespace because clean_message_text() joins a
+  ### bullet with "; " or with a space depending on the text before it.
+  spaced <- gsub("[[:space:];]+", " ", records$cause)
+  where  <- ifelse(is.na(records$where), "", records$where)
+  key    <- paste0(gsub("[0-9]+", "#", spaced), "\r", where)
+  keys   <- unique(key)
+  groups <- split(seq_len(nrow(records)), factor(key, levels = keys))
+
+  lines <- vapply(groups, function(i) {
+
+    n     <- records$n[i]
+    texts <- spaced[i]
+
+    ## The variant seen most often; among equals, the fullest -----------------
+
+    totals <- vapply(unique(texts), function(t) sum(n[texts == t]), numeric(1))
+    best   <- names(totals)[totals == max(totals)]
+    shown  <- i[texts %in% best]
+    shown  <- shown[which.max(nchar(records$cause[shown]))]
+
+    ## Where it came from --------------------------------------------------------
+
+    cv      <- i[records$scope[i] %in% "cv"]
+    cv_ids  <- unique(unlist(records$folds[cv]))
+    n_folds <- suppressWarnings(max(records$n_folds[cv], na.rm = TRUE))
+
+    detail <- c(
+      if (length(cv_ids) > 0 && is.finite(n_folds) && n_folds > 1) {
+
+        paste0(length(cv_ids), " of ", n_folds, " folds")
+
+      },
+      if (any(records$scope[i] %in% "test set")) "test set",
+      if (length(totals) > 1) "numbers vary"
+    )
+
+    format_condition(records$cause[shown], records$where[shown], detail)
+
+  }, character(1), USE.NAMES = FALSE)
+
+  tibble::tibble(
+    line   = lines,
+    n      = vapply(groups, function(i) sum(records$n[i]), integer(1), USE.NAMES = FALSE),
+    pinned = vapply(groups, function(i) any(records$pinned[i]), logical(1), USE.NAMES = FALSE)
+  )
+
+}
+
+#' The warnings a config reports
+#'
+#' @description
+#' One line per distinct message: the package's own notices first, then the
+#' `max_shown` messages that arrived most often, then one line counting the
+#' rest. A message carrying a value that differs per fold or per grid point
+#' would otherwise fill the list, and a config's warnings are read in a
+#' console tree and a results table.
+#'
+#' @param records Records shaped like [new_warning_log()]'s.
+#' @param max_shown Integer. Distinct messages to show besides the notices.
+#' @return Character, or `NULL` when there are no warnings.
+#' @keywords internal
+#' @noRd
+render_warning_log <- function(records, max_shown = 5L) {
+
+  lines <- summarise_warning_records(records)
+
+  if (nrow(lines) == 0) return(NULL)
+
+  notices <- lines$line[lines$pinned]
+  rest    <- lines[!lines$pinned, , drop = FALSE]
+  rest    <- rest$line[order(-rest$n, seq_len(nrow(rest)))]
+  n_more  <- length(rest) - max_shown
+
+  c(
+    notices,
+    utils::head(rest, max_shown),
+    if (n_more > 0) {
+
+      paste0(n_more, " more distinct warning", if (n_more > 1) "s", " not shown.")
+
+    }
+  )
+
+}
+
+## ---------------------------------------------------------------------------
 ## tune_note_messages
 ## ---------------------------------------------------------------------------
 
@@ -686,8 +966,16 @@ valid_utf8 <- function(x) {
 #' that only watches for conditions never sees them. A recipe step that fails
 #' or warns during prep inside tuning leaves its only trace there. This
 #' reads the notes back through [condition_summary()] and returns one line
-#' per distinct message, most frequent first, each saying how many folds
-#' raised it (`"3 of 5 folds"`) when the result has more than one.
+#' per distinct message (see [summarise_warning_records()]), most frequent
+#' first, each saying how many folds raised it (`"3 of 5 folds"`) when the
+#' result has more than one.
+#'
+#' tune 2.1.0 stores a warning note as the warning's raw `$message` field,
+#' not its rendered message. A warning whose own message is empty, with the
+#' text in a parent or body (an rlang wrapper around another warning),
+#' arrives as `""` and reads as `"no message"`. That text is lost before
+#' horizons sees it and cannot be recovered here. Error notes are stored
+#' rendered and keep their text.
 #'
 #' @param tune_results A `tune_results` object (or anything
 #'   `tune::collect_notes()` reads).
@@ -699,57 +987,9 @@ valid_utf8 <- function(x) {
 #' @noRd
 tune_note_messages <- function(tune_results, type = "warning") {
 
-  notes <- tryCatch(tune::collect_notes(tune_results), error = function(e) NULL)
+  lines <- summarise_warning_records(tune_note_records(tune_results, type))
 
-  if (!is.data.frame(notes) || !all(c("type", "note") %in% names(notes))) {
-
-    return(character(0))
-
-  }
-
-  notes <- notes[notes$type %in% type, , drop = FALSE]
-
-  if (nrow(notes) == 0) return(character(0))
-
-  ## One key per note: the summary without any count --------------------------
-
-  keys <- vapply(notes$note, condition_summary, character(1), USE.NAMES = FALSE)
-
-  ## Which resample raised each note ------------------------------------------
-
-  ### id, plus id2 for repeated CV. last_fit()'s notes carry no id, and one
-  ### split has nothing to count, so no count is given there.
-  id_cols  <- grep("^id", names(notes), value = TRUE)
-  note_ids <- if (length(id_cols) > 0) {
-    do.call(paste, c(unname(as.list(notes[id_cols])), sep = "/"))
-  } else {
-    NULL
-  }
-
-  n_resamples <- tryCatch({
-    all_cols <- grep("^id", names(tune_results), value = TRUE)
-    length(unique(do.call(paste, c(unname(as.list(tune_results[all_cols])), sep = "/"))))
-  }, error = function(e) NA_integer_)
-
-  ## Distinct messages, most frequent first ------------------------------------
-
-  distinct <- unique(keys)
-  counts   <- vapply(distinct, function(k) {
-    if (is.null(note_ids)) sum(keys == k) else length(unique(note_ids[keys == k]))
-  }, integer(1), USE.NAMES = FALSE)
-
-  ord <- order(-counts, seq_along(distinct))
-
-  vapply(ord, function(i) {
-
-    first  <- notes$note[match(distinct[i], keys)]
-    detail <- if (!is.null(note_ids) && isTRUE(n_resamples > 1)) {
-      paste0(counts[i], " of ", n_resamples, " folds")
-    }
-
-    condition_summary(first, detail = detail)
-
-  }, character(1))
+  lines$line[order(-lines$n, seq_len(nrow(lines)))]
 
 }
 

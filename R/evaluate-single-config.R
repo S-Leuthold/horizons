@@ -89,21 +89,20 @@ evaluate_single_config <- function(config_row,
   transformation <- tolower(as.character(config_row$transformation))
   train_data     <- rsample::training(split)
 
-  ## Accumulate warnings from all steps for tree rendering
-  collected_warnings <- character(0)
+  ## Accumulate warnings from all steps for tree rendering, as records that
+  ## render_warning_log() reduces to one line per distinct message (#96)
+  warning_log <- new_warning_log()
 
   collect_from <- function(safe_result) {
-    if (!is.null(safe_result$warnings)) {
-      collected_warnings <<- c(collected_warnings, unlist(safe_result$warnings))
-    }
+    warning_log <<- dplyr::bind_rows(warning_log, text_records(safe_result$warnings))
   }
 
   ## tune catches the warnings raised inside its resampling (a recipe step
   ## warning during prep, say) and keeps them in .notes, where
-  ## safely_execute() never sees them. One entry per distinct message (#96).
-  collect_notes_from <- function(tune_results) {
-    notes <- tune_note_messages(tune_results, type = "warning")
-    collected_warnings <<- c(collected_warnings, setdiff(notes, collected_warnings))
+  ## safely_execute() never sees them.
+  collect_notes_from <- function(tune_results, scope = "cv") {
+    notes <- tune_note_records(tune_results, type = "warning", scope = scope)
+    warning_log <<- dplyr::bind_rows(warning_log, notes)
   }
 
   ## -----------------------------------------------------------------------
@@ -403,10 +402,10 @@ evaluate_single_config <- function(config_row,
 
   if (all(is.na(unlist(cv_panel)))) {
 
-    collected_warnings <- c(
-      collected_warnings,
-      "CV metrics at the selected hyperparameters could not be recovered; cv_* columns are NA."
-    )
+    warning_log <- dplyr::bind_rows(warning_log, text_records(
+      "CV metrics at the selected hyperparameters could not be recovered; cv_* columns are NA.",
+      pinned = TRUE
+    ))
 
   }
 
@@ -452,7 +451,21 @@ evaluate_single_config <- function(config_row,
 
   last_fit_obj <- lastfit_result$result
   collect_from(lastfit_result)
-  collect_notes_from(last_fit_obj)
+  collect_notes_from(last_fit_obj, scope = "test set")
+
+  ## A final fit that failed inside last_fit() leaves its reason only in
+  ## .notes, and the row below still reads as a success with NA test
+  ## metrics. The reason is recorded so the row says why (#96).
+  test_set_cause <- tune_failure_cause(last_fit_obj)
+
+  if (!is.null(test_set_cause)) {
+
+    warning_log <- dplyr::bind_rows(warning_log, text_records(
+      paste0("Test-set fit failed: ", test_set_cause),
+      pinned = TRUE
+    ))
+
+  }
 
   ## -----------------------------------------------------------------------
   ## Step 12: Extract predictions and back-transform
@@ -540,7 +553,7 @@ evaluate_single_config <- function(config_row,
     scoring_schema = SCORING_SCHEMA,
     best_params   = list(best_params),
     error_message = NA_character_,
-    warnings      = list(if (length(collected_warnings) > 0) collected_warnings else NULL),
+    warnings      = list(render_warning_log(warning_log)),
     runtime_secs  = runtime
   )
 

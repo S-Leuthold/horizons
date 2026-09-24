@@ -72,25 +72,23 @@ fit_single_config <- function(config_row,
   train_data     <- train_data %||% rsample::training(split_F)
   test_data      <- rsample::testing(split_F)
 
-  ## Accumulate warnings from all steps
-  collected_warnings <- character(0)
+  ## Accumulate warnings from all steps, as records that render_warning_log()
+  ## reduces to one line per distinct message (#96)
+  warning_log <- new_warning_log()
 
   collect_from <- function(safe_result) {
 
-    if (!is.null(safe_result$warnings)) {
-
-      collected_warnings <<- c(collected_warnings, unlist(safe_result$warnings))
-
-    }
+    warning_log <<- dplyr::bind_rows(warning_log, text_records(safe_result$warnings))
 
   }
 
   ## Warnings tune caught inside its resampling and kept in .notes, which
-  ## safely_execute() never sees; one entry per distinct message (#96).
+  ## safely_execute() never sees. Both the re-tune and the out-of-fold
+  ## predictions resample cv_resamples, so their fold counts merge.
   collect_notes_from <- function(tune_results) {
 
-    notes <- tune_note_messages(tune_results, type = "warning")
-    collected_warnings <<- c(collected_warnings, setdiff(notes, collected_warnings))
+    notes <- tune_note_records(tune_results, type = "warning", scope = "cv")
+    warning_log <<- dplyr::bind_rows(warning_log, notes)
 
   }
 
@@ -117,7 +115,7 @@ fit_single_config <- function(config_row,
       cv_metrics       = NULL,
       uq               = NULL,
       ad               = NULL,
-      warnings         = if (length(collected_warnings) > 0) collected_warnings else NULL,
+      warnings         = render_warning_log(warning_log),
       error_message    = error_msg,
       runtime_secs     = as.numeric(difftime(Sys.time(), start_time, units = "secs"))
     )
@@ -605,7 +603,7 @@ fit_single_config <- function(config_row,
     cv_metrics       = cv_metrics,
     uq               = uq_result,
     ad               = ad_result,
-    warnings         = if (length(collected_warnings) > 0) collected_warnings else NULL,
+    warnings         = render_warning_log(warning_log),
     error_message    = NA_character_,
     runtime_secs     = runtime
   )
