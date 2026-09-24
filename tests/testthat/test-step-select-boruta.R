@@ -174,6 +174,46 @@ describe("a failed Boruta run fails step_select_boruta() (#75)", {
     expect_error(recipes::prep(rec, training = d), "Boruta feature selection failed")
     expect_error(recipes::prep(rec, training = d), "Missing data in dependent variable")
 
+    ## recipes wraps a step's error in its own recipes_error_step, so the
+    ## class is one level down the chain: cnd_inherits() finds it, as the
+    ## step's documentation says to check it.
+    err <- tryCatch(recipes::prep(rec, training = d), error = identity)
+
+    expect_true(rlang::cnd_inherits(err, "horizons_boruta_error"))
+
+  })
+
+  it("names Boruta and stops before running it when Boruta is not installed", {
+
+    skip_if_not_installed("Boruta")
+
+    ## Boruta is suggested, not imported. Only the check for it is faked
+    ## here; any other check_installed() call goes to the real one.
+    real_check_installed <- rlang::check_installed
+    checked_reason       <- NULL
+
+    local_mocked_bindings(
+      check_installed = function(pkg, reason = NULL, ...) {
+
+        if (identical(pkg, "Boruta")) {
+          checked_reason <<- reason
+          rlang::abort("Boruta is not installed.", class = "rlib_error_package_not_found")
+        }
+
+        real_check_installed(pkg, reason = reason, ...)
+
+      },
+      .package = "rlang"
+    )
+
+    local_mocked_bindings(Boruta = function(...) stop("Boruta ran"), .package = "Boruta")
+
+    d <- boruta_signal_data()
+
+    expect_error(recipes::prep(boruta_recipe(d), training = d),
+                 class = "rlib_error_package_not_found")
+    expect_match(checked_reason, "boruta")
+
   })
 
   it("carries the upstream message as text, braces included", {

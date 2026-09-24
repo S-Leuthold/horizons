@@ -139,6 +139,11 @@ prep.step_select_boruta <- function(x, training, info = NULL, ...) {
     cli::cli_abort("Outcome column {.val {x$outcome}} not found in training data.")
   }
 
+  ## Boruta is suggested, not imported. Checked here, before any work, so a
+  ## missing install names the package rather than surfacing as a Boruta
+  ## failure.
+  rlang::check_installed("Boruta", reason = "for step_select_boruta() (feature_selection = \"boruta\")")
+
   outcome_vec  <- training[[x$outcome]]
   spectra_mat  <- as.matrix(training[, col_names, drop = FALSE])
 
