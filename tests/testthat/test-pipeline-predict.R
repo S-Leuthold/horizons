@@ -372,6 +372,12 @@ describe("predict.horizons_fit() - response bound guardrail", {
     fit_rows <- analysis$sample_id %in% fitted_fixture$models$row_index$sample_id
     expected <- max(analysis$SOC[fit_rows]) * RESPONSE_BOUND_MARGIN
 
+    ## Precondition: the fixture discriminates. The largest training-part
+    ## outcome sits in the calibration rows, so a bound over Split F's whole
+    ## training part would differ from one over the fit rows.
+    train_F <- rsample::training(fitted_fixture$models$split)
+    expect_gt(max(train_F$SOC), max(analysis$SOC[fit_rows]))
+
     expect_equal(fitted_fixture$models$response_bound, expected)
 
   })

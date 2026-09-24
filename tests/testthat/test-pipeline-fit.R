@@ -811,6 +811,44 @@ describe("fit() - NA-outcome rows (#67)", {
 })
 
 
+describe("fit() - NA-outcome rows with UQ on (#67)", {
+
+  ## n = 300 with 40 NA outcomes leaves 260 modelled rows, enough for the
+  ## calibration split to clear N_CALIB_MIN.
+  obj <- make_fit_object(n = 300, n_configs = 1, seed = 42, n_na = 40L)
+  obj$config$tuning$final_bayesian_iter <- 0L
+
+  r <- suppressWarnings(
+    fit(obj, n_best = 1L, compute_uq = TRUE, compute_ad = FALSE,
+        verbose = FALSE, seed = 42L)
+  )
+
+  analysis  <- obj$data$analysis
+  test_ids  <- rsample::testing(r$models$split)$sample_id
+  fit_ids   <- r$models$row_index$sample_id
+  calib_ids <- setdiff(rsample::training(r$models$split)$sample_id, fit_ids)
+
+  it("calibrates UQ on the rows left between the fit rows and the test part", {
+
+    expect_false(is.null(r$models$uq))
+    expect_equal(r$models$uq[[1]]$n_calib, length(calib_ids))
+    expect_equal(length(test_ids) + length(fit_ids) + length(calib_ids), 260L)
+
+  })
+
+  it("puts no NA outcome in any partition", {
+
+    outcome_of <- function(ids) analysis$SOC[match(ids, analysis$sample_id)]
+
+    expect_false(anyNA(outcome_of(test_ids)))
+    expect_false(anyNA(outcome_of(calib_ids)))
+    expect_false(anyNA(outcome_of(fit_ids)))
+
+  })
+
+})
+
+
 ## =========================================================================
 ## response_bound is taken over the rows the final models are fit on (#68)
 ## =========================================================================
