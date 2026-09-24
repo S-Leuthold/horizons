@@ -77,9 +77,13 @@ fit_ensemble_weighted <- function(object,
   oof_mat        <- as.matrix(oof$predictors[, paste0("member_", oof$members)])
   oof_combined   <- as.numeric(oof_mat %*% raw_weights)
 
+  ## Combined predictions are clamped to the outcome's range, as every served
+  ## prediction is (#76); a floor at 0 under the default range.
+  outcome_range <- outcome_range_setting(object)
+
   oof_pred <- tibble::tibble(
     .row  = oof$row,
-    .pred = floor_at_zero(oof_combined),
+    .pred = clamp_to_outcome_range(oof_combined, outcome_range),
     truth = oof$truth
   )
 
@@ -100,7 +104,7 @@ fit_ensemble_weighted <- function(object,
       .groups = "drop"
     )
 
-  ensemble_pred$.pred <- floor_at_zero(ensemble_pred$.pred)
+  ensemble_pred$.pred <- clamp_to_outcome_range(ensemble_pred$.pred, outcome_range)
 
   ## -------------------------------------------------------------------------
   ## Step 4: Pack the contract (scoring is centralized in the builder)

@@ -9,7 +9,8 @@ apply_response_bound(values, upper_bound)
 \arguments{
 \item{values}{Numeric vector, original response scale.}
 
-\item{upper_bound}{Single positive finite numeric, or NULL (no clamp).}
+\item{upper_bound}{Single finite numeric (negative for a signed outcome
+whose training values are all negative), or NULL (no clamp).}
 }
 \value{
 \code{values}, winsorized to \code{upper_bound} where it was exceeded.

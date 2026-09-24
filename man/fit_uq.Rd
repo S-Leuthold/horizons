@@ -11,7 +11,8 @@ fit_uq(
   role_map,
   transformation = "none",
   level_default = DEFAULT_UQ_LEVEL,
-  seed = NULL
+  seed = NULL,
+  outcome_range = DEFAULT_OUTCOME_RANGE
 )
 }
 \arguments{
@@ -34,6 +35,11 @@ train_Fit).}
 its own seed so the forest is reproducible regardless of how the
 preceding stages consumed the parent RNG stream; NULL keeps ranger's
 default of drawing a seed from that stream.}
+
+\item{outcome_range}{Numeric length-2 vector. The outcome's physical range,
+which the back-transformed calibration predictions are clamped to, as
+\code{predict()} clamps the point predictions the intervals are served
+around. Default \code{c(0, Inf)}.}
 }
 \value{
 Named list with fields: \code{quantile_model}, \code{scores}, \code{n_calib},

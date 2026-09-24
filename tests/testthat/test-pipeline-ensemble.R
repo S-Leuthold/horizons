@@ -339,7 +339,7 @@ describe("predict.horizons_ensemble() - weighted combine is the documented sum",
       dplyr::summarise(by_hand = sum(.data$.pred * .data$coef),
                        .groups = "drop")
 
-    by_hand$by_hand <- floor_at_zero(by_hand$by_hand)
+    by_hand$by_hand <- clamp_to_outcome_range(by_hand$by_hand)
 
     p <- predict(ens, test_set, interval = FALSE)
 
