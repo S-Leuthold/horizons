@@ -102,7 +102,8 @@ prep.step_select_cars <- function(x, training, info = NULL, ...) {
   ## Stage 1: Resolve spectral column names
   ## ---------------------------------------------------------------------------
 
-  col_names <- recipes::recipes_eval_select(x$terms, training, info)
+  selectors <- step_selectors(x, "step_select_cars")
+  col_names <- recipes::recipes_eval_select(selectors, training, info)
 
   check_selection_columns(col_names, "step_select_cars")
 
@@ -229,7 +230,7 @@ prep.step_select_cars <- function(x, training, info = NULL, ...) {
 
     # No valid iteration found \u2014 keep all predictors as safe fallback
     return(step_select_cars_new(
-      terms         = x$terms,
+      terms         = selectors,
       columns       = col_names,
       outcome       = x$outcome,
       role          = x$role,
@@ -312,7 +313,7 @@ prep.step_select_cars <- function(x, training, info = NULL, ...) {
   ## Stage 5: Return trained step
   ## ---------------------------------------------------------------------------
 
-  step_select_cars_new(terms          = x$terms,
+  step_select_cars_new(terms          = selectors,
                       columns        = col_names,
                       outcome        = x$outcome,
                       role           = x$role,

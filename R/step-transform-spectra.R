@@ -97,7 +97,8 @@ step_transform_spectra_new <- function(terms,
 #' @export
 prep.step_transform_spectra <- function(x, training, info = NULL, ...) {
 
-  col_names   <- recipes::recipes_eval_select(x$terms, training, info)
+  selectors   <- step_selectors(x, "step_transform_spectra")
+  col_names   <- recipes::recipes_eval_select(selectors, training, info)
   non_numeric <- col_names[!vapply(training[, col_names], is.numeric, logical(1))]
 
   if (length(non_numeric) > 0) {
@@ -142,7 +143,7 @@ prep.step_transform_spectra <- function(x, training, info = NULL, ...) {
   check_transform_name_collision(new_colnames, setdiff(names(training), col_names))
 
   step_transform_spectra_new(
-    terms           = x$terms,
+    terms           = selectors,
     columns         = col_names,
     preprocessing   = x$preprocessing,
     window_size     = x$window_size,

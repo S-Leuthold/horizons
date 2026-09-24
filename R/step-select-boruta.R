@@ -101,7 +101,8 @@ prep.step_select_boruta <- function(x, training, info = NULL, ...) {
   ## Stage 1: Resolve spectral column names
   ## ---------------------------------------------------------------------------
 
-  col_names <- recipes::recipes_eval_select(x$terms, training, info)
+  selectors <- step_selectors(x, "step_select_boruta")
+  col_names <- recipes::recipes_eval_select(selectors, training, info)
 
   check_selection_columns(col_names, "step_select_boruta")
 
@@ -211,7 +212,7 @@ prep.step_select_boruta <- function(x, training, info = NULL, ...) {
   ## Stage 5: Return trained step
   ## ---------------------------------------------------------------------------
 
-  step_select_boruta_new(terms          = x$terms,
+  step_select_boruta_new(terms          = selectors,
                          columns        = col_names,
                          outcome        = x$outcome,
                          role           = x$role,

@@ -539,7 +539,12 @@ consequences; the review itself is in
   state and baked output are unchanged, and no package verb re-preps a
   trained recipe, so no existing result moves. Code that read an untrained
   step's selectors from `$columns` should read `$terms`; `$columns` is
-  `NULL` until the step is prepped.
+  `NULL` until the step is prepped. Steps built by earlier versions keep
+  working: stored fits predict and bake as before, and an untrained step
+  still preps. A trained step from an earlier version has no selectors left
+  to re-resolve, so re-prepping it aborts with a `horizons_input_error` that
+  says to rebuild the recipe, rather than with a misleading window-size or
+  zero-column message.
 
 # horizons 0.9.0
 
