@@ -433,20 +433,22 @@ test_that("an axis already on the canonical grid is not re-interpolated", {
 ## Raw-stage validation: warns rather than aborts before average() (#24)
 ## ---------------------------------------------------------------------------
 
-test_that("standardize() warns (not aborts) on duplicate sample ids", {
+test_that("standardize() neither aborts nor warns on duplicate sample ids", {
 
   ## Arrange — replicate scans that haven't reached average() yet. This is
   ## legitimate before replicates collapse, the same as at spectra() and
   ## parse_ids(); standardize() validates at stage = "raw" for exactly this
-  ## reason (#24 rework).
+  ## reason (#24 rework). spectra() and parse_ids() are where the duplicate
+  ## first appears and warns; standardize() calls the validator with
+  ## warn_ids = FALSE so its own entry/exit structural checks do not
+  ## re-warn about the same rows on every call.
   hd <- make_axis_spectra(KSSL_WN, n = 2)
   hd$data$analysis$sample_id <- c("S1", "S1")
 
   ## Act & Assert --------------------------------------------------------------
 
-  expect_warning(
-    out <- no_output(standardize(hd, resample = 2, trim = c(600, 4000))),
-    class = "horizons_validation_warning"
+  expect_no_warning(
+    out <- no_output(standardize(hd, resample = 2, trim = c(600, 4000)))
   )
 
   expect_identical(out$data$analysis$sample_id, c("S1", "S1"))

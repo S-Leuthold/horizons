@@ -278,6 +278,19 @@ new_horizons_data <- function(analysis        = NULL,
 #' `select_training()`, and every other caller) the default `stage = "full"`
 #' applies: the same conditions abort.
 #'
+#' **`warn_ids`.** A duplicate or `NA` `sample_id` first appears at
+#' `spectra()` or `parse_ids()`, and that is where it is worth a warning.
+#' `standardize()` and `average()` also call this validator at
+#' `stage = "raw"` — to certify the base contract before rebuilding
+#' `data$analysis` from `role_map`, and (for `standardize()`) once more
+#' before returning — but by then the same duplicate has already been
+#' warned about, and `average()` exists specifically to collapse it, so
+#' warning about it again on every call would be noise about the verb's own
+#' designed input. Those call sites pass `warn_ids = FALSE`, which skips
+#' checks 3 and 4 below entirely at `stage = "raw"` (every other check,
+#' unregistered columns included, still runs). `warn_ids` has no effect at
+#' `stage = "full"`, where an id problem is always an abort.
+#'
 #' **Validation checks performed:**
 #'
 #' 1. **Pairing**: If `analysis` exists, `role_map` must also exist (and vice
@@ -288,13 +301,15 @@ new_horizons_data <- function(analysis        = NULL,
 #'    error, in both stages.
 #'
 #' 3. **sample_id missingness**: NA values in `sample_id`. An error at
-#'    `stage = "full"`; a warning at `stage = "raw"`, where `parse_ids(too_few
-#'    = "na")` documents leaving unmatched filenames unresolved.
+#'    `stage = "full"`; a warning at `stage = "raw"` (skipped entirely when
+#'    `warn_ids = FALSE`), where `parse_ids(too_few = "na")` documents
+#'    leaving unmatched filenames unresolved.
 #'
 #' 4. **sample_id uniqueness**: Duplicate `sample_id` values (NAs excluded;
 #'    see check 3). An error at `stage = "full"`, naming the duplicates and
-#'    pointing at [average()]; a warning at `stage = "raw"`, matching the
-#'    A004 check in the validation spec.
+#'    pointing at [average()]; a warning at `stage = "raw"` (skipped
+#'    entirely when `warn_ids = FALSE`), matching the A004 check in the
+#'    validation spec.
 #'
 #' 5. **Predictor columns**: Wavelength/predictor columns (role = "predictor")
 #'    must not contain `NA` or `Inf` values. Checked only at `stage =
@@ -353,6 +368,9 @@ new_horizons_data <- function(analysis        = NULL,
 #'
 #' @param x `horizons_data`. The object to validate.
 #' @param stage `character(1)`. `"full"` (default) or `"raw"`. See Details.
+#' @param warn_ids `logical(1)`. Default `TRUE`. At `stage = "raw"`, whether
+#'   a duplicate or `NA` `sample_id` is reported at all. See the `warn_ids`
+#'   section in Details.
 #'
 #' @return `horizons_data`. The input object, unchanged, if validation passes
 #'   (whether or not it printed warnings). Aborts with class
@@ -361,7 +379,7 @@ new_horizons_data <- function(analysis        = NULL,
 #' @seealso [new_horizons_data()] for object construction.
 #'
 #' @noRd
-validate_horizons_data <- function(x, stage = c("full", "raw")) {
+validate_horizons_data <- function(x, stage = c("full", "raw"), warn_ids = TRUE) {
 
   stage <- match.arg(stage)
 
@@ -420,6 +438,16 @@ validate_horizons_data <- function(x, stage = c("full", "raw")) {
   if (!"sample_id" %in% names(analysis)) {
 
     errors <- c(errors, cli::format_inline("Column {.field sample_id} missing from {.field analysis}"))
+
+    } else if (stage == "raw" && !warn_ids) {
+
+    ## spectra() and parse_ids() already warned about a duplicate or NA
+    ## sample_id when it first appeared; standardize() and average() call
+    ## this validator with warn_ids = FALSE at both entry and exit so their
+    ## own structural checks (unregistered columns, wavelength order, ...)
+    ## still run at stage = "raw" without re-warning about the same rows —
+    ## average() in particular exists to collapse those very duplicates, so
+    ## warning about its own designed input on every call was noise.
 
     } else {
 

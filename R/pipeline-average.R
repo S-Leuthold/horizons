@@ -196,9 +196,11 @@ average <- function(x,
   ## from role_map is referenced by none of them and would be silently
   ## dropped rather than carried through or refused. Catch it here, before
   ## that happens (#24). Raw stage: replicate scans sharing a sample_id are
-  ## exactly the input average() exists to collapse.
+  ## exactly the input average() exists to collapse — warn_ids = FALSE
+  ## because that duplicate was already warned about at spectra() or
+  ## parse_ids(), and average() collapsing it is not news.
 
-  x <- validate_horizons_data(x, stage = "raw")
+  x <- validate_horizons_data(x, stage = "raw", warn_ids = FALSE)
 
   ## -------------------------------------------------------------------------
   ## Step 2: Identify column roles
