@@ -112,7 +112,16 @@ Default: \code{1}.}
 wavenumber grid, with every response column the pool carried, three
 provenance columns with role \code{meta} (\code{.drawn_by}, \code{.min_distance},
 and \code{.group} except under \code{scope = "sample"}), and the record in
-\code{x$selection}.
+\code{x$selection}. \code{provenance$standardization} describes the returned
+axis. When the pool was resampled onto the targets' grid, the pool's
+record is rewritten: \code{grid} is the targets' (\code{NULL} when they are not on
+a canonical grid), \code{n_wavelengths} and \code{wavelength_range} are the new
+axis's, and \code{resampled} is \code{TRUE}, while the \code{standardize()} arguments
+(\code{resample}, \code{trim}, \code{remove_water}, \code{baseline}) stay the pool's, since
+they produced its values. \code{reconciliation} records the move:
+\code{operation} and \code{pool}, the pool's record as it was, carrying its
+original \code{grid}. A pool already on the targets' grid keeps its record
+unchanged, and a pool never standardized keeps none.
 }
 \description{
 Draws a training set from a reference pool (a spectral library with

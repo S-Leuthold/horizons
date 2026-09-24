@@ -195,7 +195,16 @@
 #'   wavenumber grid, with every response column the pool carried, three
 #'   provenance columns with role `meta` (`.drawn_by`, `.min_distance`,
 #'   and `.group` except under `scope = "sample"`), and the record in
-#'   `x$selection`.
+#'   `x$selection`. `provenance$standardization` describes the returned
+#'   axis. When the pool was resampled onto the targets' grid, the pool's
+#'   record is rewritten: `grid` is the targets' (`NULL` when they are not on
+#'   a canonical grid), `n_wavelengths` and `wavelength_range` are the new
+#'   axis's, and `resampled` is `TRUE`, while the `standardize()` arguments
+#'   (`resample`, `trim`, `remove_water`, `baseline`) stay the pool's, since
+#'   they produced its values. `reconciliation` records the move:
+#'   `operation` and `pool`, the pool's record as it was, carrying its
+#'   original `grid`. A pool already on the targets' grid keeps its record
+#'   unchanged, and a pool never standardized keeps none.
 #'
 #' @examples
 #' \dontrun{
@@ -393,6 +402,18 @@ select_training <- function(x, pool,
   tm <- predictor_matrix(x)
 
   pool_rc <- rebuild_predictors(pool, rc$matrix, rc$wavenumbers)
+
+  ## The return is subset from pool_rc and carries its provenance, so once the
+  ## pool is resampled its standardization record has to describe the
+  ## targets' axis, not the one it came from (#90).
+
+  if (rc$record$operation == "resampled") {
+
+    pool_rc$provenance$standardization <- reconciled_standardization(
+      pool$provenance$standardization, x$provenance$standardization, rc$wavenumbers
+    )
+
+  }
 
   if (verbose) {
 

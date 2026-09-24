@@ -858,6 +858,89 @@ test_that("the record carries settings, reconciliation, pool identity and distan
 })
 
 
+## The standardization record describes the returned axis (#90). The fixture
+## already sits on the two lattices, so standardize() records each grid
+## without re-interpolating.
+
+test_that("a pool resampled onto the targets' grid records that grid, and the pool's (#90)", {
+
+  fx <- make_select_fixture(n_pool = 100)
+
+  utils::capture.output({
+    pool    <- standardize(fx$pool,    resample = 4, trim = c(600, 4000))
+    targets <- standardize(fx$targets, resample = 8, trim = c(600, 4000))
+  })
+
+  out <- select_training(targets, pool, k = 10, verbose = FALSE)
+  rec <- out$provenance$standardization
+  wn  <- predictor_matrix(out)$wavenumbers
+
+  expect_identical(out$selection$reconciliation$operation, "resampled")
+
+  ## The recorded step is the axis's spacing, the targets' 8, not the pool's 4
+  expect_equal(rec$grid$step, stats::median(abs(diff(wn))))
+  expect_equal(rec$grid$step, 8)
+  expect_identical(rec$grid, targets$provenance$standardization$grid)
+  expect_identical(rec$n_wavelengths, length(wn))
+  expect_equal(rec$wavelength_range, range(wn))
+  expect_true(rec$resampled)
+
+  ## So axis_spacing_cm()'s fallback agrees with the axis it reads first
+  expect_equal(rec$grid$step, axis_spacing_cm(out))
+
+  ## The move is recorded, with the pool's own record and its 4 cm-1 grid
+  expect_identical(rec$reconciliation$operation, "resampled")
+  expect_identical(rec$reconciliation$pool, pool$provenance$standardization)
+  expect_equal(rec$reconciliation$pool$grid$step, 4)
+
+  ## The standardize() arguments that produced the values stay the pool's
+  expect_identical(rec$resample, 4)
+  expect_identical(rec$trim, c(600, 4000))
+  expect_identical(rec$baseline, FALSE)
+
+})
+
+
+test_that("a pool already on the targets' grid keeps its standardization record (#90)", {
+
+  fx <- make_select_fixture(n_pool = 100)
+
+  utils::capture.output({
+    pool    <- standardize(fx$pool,    resample = 8, trim = c(600, 4000))
+    targets <- standardize(fx$targets, resample = 8, trim = c(600, 4000))
+  })
+
+  out <- select_training(targets, pool, k = 10, verbose = FALSE)
+
+  expect_identical(out$selection$reconciliation$operation, "none")
+  expect_identical(out$provenance$standardization, pool$provenance$standardization)
+
+})
+
+
+test_that("targets off a canonical grid give the resampled pool a NULL grid, and an unstandardized pool no record (#90)", {
+
+  fx <- make_select_fixture(n_pool = 100)
+
+  ## resample = NULL keeps the targets' own axis and records no grid
+  utils::capture.output({
+    pool    <- standardize(fx$pool,    resample = 4,    trim = c(600, 4000))
+    targets <- standardize(fx$targets, resample = NULL, trim = c(600, 4000))
+  })
+
+  rec <- select_training(targets, pool, k = 10, verbose = FALSE)$provenance$standardization
+
+  expect_true("grid" %in% names(rec))
+  expect_null(rec$grid)
+  expect_identical(rec$n_wavelengths, fx$targets$data$n_predictors)
+  expect_equal(rec$reconciliation$pool$grid$step, 4)
+
+  ## A pool standardize() never saw is not marked standardized
+  expect_null(quiet_select(fx, k = 10)$provenance$standardization)
+
+})
+
+
 test_that("the record carries the SG window in cm-1 and the space's floor", {
 
   fx  <- make_select_fixture(n_pool = 100)

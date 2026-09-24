@@ -914,8 +914,9 @@ describe("configure() storage", {
 
   test_that("axis_spacing_cm() reads the axis before a recorded grid step that disagrees", {
 
-    ## select_training() returns the pool's standardize() provenance on the
-    ## targets' axis, so the recorded step can describe a different grid.
+    ## An object select_training() returned before #90 carries the pool's
+    ## standardize() provenance on the targets' axis, so the recorded step
+    ## can describe a different grid.
     hd <- make_single_response_hd()
     hd$provenance$standardization <- list(grid = list(step = 4))
 

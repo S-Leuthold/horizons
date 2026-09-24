@@ -313,3 +313,69 @@ reconcile_axes <- function(pool, targets) {
   )
 
 }
+
+
+## ---------------------------------------------------------------------------
+## reconciled_standardization() — The pool's record, on the targets' axis
+## ---------------------------------------------------------------------------
+
+#' Rewrite a resampled pool's standardization record for its new axis
+#'
+#' @description
+#' `provenance$standardization` describes the object's own axis. Once
+#' `reconcile_axes()` has resampled the pool onto the targets' wavenumbers,
+#' the pool's record describes columns the object no longer has: a pool
+#' standardized at 4 cm-1, drawn around targets at 8, would record step 4 on
+#' an axis spaced 8 (#90). This returns the record the resampled pool should
+#' carry. Call it only when the pool was resampled; a pool already on the
+#' targets' grid keeps its record as it is, because it is still true.
+#'
+#' @details
+#' The axis fields are replaced: `grid` becomes the targets' (their own
+#' record's `grid`, so `NULL` when the targets were not put on a canonical
+#' grid, the convention `standardize()` uses), `n_wavelengths` and
+#' `wavelength_range` are read off the new axis, and `resampled` is `TRUE`,
+#' since the values were re-interpolated. The arguments stay the pool's:
+#' `resample`, `trim`, `remove_water`, `baseline` and `applied_at` describe
+#' the `standardize()` call that produced these values, which resampling
+#' onto another axis does not undo, and a later `force = TRUE` no-op call
+#' already records its own arguments beside a grid an earlier call built.
+#' Any other key the pool's record carries is kept.
+#'
+#' The move itself is recorded under `reconciliation`: `operation`
+#' (`"resampled"`) and `pool`, the pool's record as it stood before, whose
+#' `grid` is the pool's original grid. The grid summaries both axes were
+#' compared on stay in `selection$reconciliation`.
+#'
+#' A pool that was never standardized has no record, and gets none: the
+#' verb does not mark as standardized rows that `standardize()` never saw.
+#'
+#' @param pool_record [List or NULL.] The pool's `provenance$standardization`.
+#' @param target_record [List or NULL.] The targets'
+#'   `provenance$standardization`.
+#' @param wn [Numeric.] The wavenumbers the pool now sits on, the targets'.
+#'
+#' @return [List or NULL.] The record for the resampled pool; `NULL` when
+#'   `pool_record` is.
+#'
+#' @seealso [reconcile_axes()]
+#' @noRd
+reconciled_standardization <- function(pool_record, target_record, wn) {
+
+  if (is.null(pool_record)) return(NULL)
+
+  record <- pool_record
+
+  ### Single-bracket assignment, so a NULL grid is kept as an entry rather
+  ### than deleting the key, as standardize() writes it.
+  record[c("resampled", "grid", "n_wavelengths", "wavelength_range", "reconciliation")] <- list(
+    TRUE,
+    target_record$grid,
+    length(wn),
+    c(min(wn), max(wn)),
+    list(operation = "resampled", pool = pool_record)
+  )
+
+  record
+
+}
