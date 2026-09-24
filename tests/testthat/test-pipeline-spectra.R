@@ -433,6 +433,56 @@ test_that("spectra() errors when wavelength columns contain non-numeric data", {
 
 
 ## ---------------------------------------------------------------------------
+## spectra() — Structural validation at construction (#24)
+## ---------------------------------------------------------------------------
+
+test_that("spectra() refuses a tibble with duplicate sample ids", {
+
+  ## Arrange — two rows share the same id, which validate_horizons_data()
+  ## now catches at the end of spectra() itself rather than only surfacing
+  ## once the object reaches standardize() or select_training().
+  test_data <- tibble::tibble(
+    Sample_ID = c("A", "A"),
+    `4000`    = c(0.1, 0.2),
+    `3000`    = c(0.2, 0.3)
+  )
+
+  expect_error(
+    spectra(test_data),
+    class = "horizons_validation_error"
+  )
+
+})
+
+test_that("spectra() sorts predictor columns into decreasing order when given increasing input", {
+
+  ## Arrange — a KSSL-shaped snapshot, stored increasing
+  test_data <- tibble::tibble(
+    Sample_ID = c("A", "B"),
+    `600`     = c(0.1, 0.2),
+    `601`     = c(0.3, 0.4),
+    `602`     = c(0.5, 0.6)
+  )
+
+  ## Act ---------------------------------------------------------------------
+
+  result <- spectra(test_data)
+
+  ## Assert — sorted rather than refused, and immediately valid
+  predictor_vars <- result$data$role_map$variable[result$data$role_map$role == "predictor"]
+
+  expect_identical(predictor_vars, c("wn_602", "wn_601", "wn_600"))
+  expect_identical(names(result$data$analysis)[2:4], c("wn_602", "wn_601", "wn_600"))
+  expect_no_error(validate_horizons_data(result))
+
+  ## The values travelled with their names through the sort
+  expect_identical(result$data$analysis$wn_600, c(0.1, 0.2))
+  expect_identical(result$data$analysis$wn_602, c(0.5, 0.6))
+
+})
+
+
+## ---------------------------------------------------------------------------
 ## spectra() — S3 methods
 ## ---------------------------------------------------------------------------
 

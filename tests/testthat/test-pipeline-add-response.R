@@ -775,3 +775,31 @@ test_that("print.horizons_data omits response line when none exist", {
   expect_false(any(grepl("Responses", output)))
 
 })
+
+
+## ---------------------------------------------------------------------------
+## add_response() — Structural validation on return (#24)
+## ---------------------------------------------------------------------------
+
+test_that("add_response() catches a corrupt input the verb itself never checks (#24)", {
+
+  ## Arrange — an increasing wavenumber axis. add_response() only joins and
+  ## checks the response columns; it never reads or reorders the predictor
+  ## axis, so nothing about the join would ever catch this. The new
+  ## end-of-verb validate_horizons_data() call (#24) is what catches it.
+  hd <- make_test_hd()
+
+  pred_rows <- which(hd$data$role_map$role == "predictor")
+  hd$data$role_map[pred_rows, ] <- hd$data$role_map[rev(pred_rows), ]
+
+  lab <- tibble::tibble(sample_id = hd$data$analysis$sample_id,
+                        SOC       = c(1.2, 3.4, 5.6))
+
+  ## Act & Assert --------------------------------------------------------------
+
+  expect_error(
+    add_response(hd, lab, variable = "SOC"),
+    class = "horizons_validation_error"
+  )
+
+})

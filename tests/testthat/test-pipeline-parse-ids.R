@@ -564,6 +564,22 @@ test_that("parse_ids() errors when filename column missing", {
 
 })
 
+test_that("parse_ids() refuses when the parsed ids collapse to duplicates (#24)", {
+
+  ## Arrange — two distinct filenames whose sampleid token is identical once
+  ## the trailing replicate marker is discarded. Nothing in parse_ids() itself
+  ## checks for this; the end-of-verb validate_horizons_data() call does.
+  hd <- make_test_hd(c("A_rep1", "A_rep2"))
+
+  ## Act & Assert ------------------------------------------------------------
+
+  expect_error(
+    parse_ids(hd, format = "{sampleid}_{junk}"),
+    class = "horizons_validation_error"
+  )
+
+})
+
 
 ## ---------------------------------------------------------------------------
 ## Helper function tests

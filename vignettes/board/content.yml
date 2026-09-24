@@ -86,33 +86,35 @@ verbs:
         source: R/pipeline-spectra.R#L97
       - name: type
         touch: Only when a directory holds both OPUS and CSV files, or the extension is unusual; otherwise auto-detection reads it from the path.
-        source: R/pipeline-spectra.R#L344
+        source: R/pipeline-spectra.R#L356
       - name: id_col
         touch: When the id column is not one of the recognised aliases (sample_id, id, sample, filename, name and their casings, walked in that priority order). Ignored for OPUS, where the file name is the id.
         source: R/pipeline-spectra.R#L11
       - name: wavelength_cols
         touch: When the spectral columns are neither wn_-prefixed nor purely numeric names, so auto-detection cannot find them.
-        source: R/pipeline-spectra.R#L958
+        source: R/pipeline-spectra.R#L970
       - name: recursive
         touch: When OPUS files sit in subdirectories of the path given.
-        source: R/pipeline-spectra.R#L417
+        source: R/pipeline-spectra.R#L429
     mechanics:
       - step: Refuses anything that is not a single path or a data frame, then dispatches on which it got.
         source: R/pipeline-spectra.R#L125
       - step: For a path, detects the type from the directory contents or the extension unless `type` says otherwise; OPUS files are anything ending in a dot and digits.
-        source: R/pipeline-spectra.R#L858
+        source: R/pipeline-spectra.R#L870
       - step: OPUS files are read one at a time with opusreader2; a file that fails to read is warned about and skipped, and the run aborts only if none could be read.
-        source: R/pipeline-spectra.R#L473
+        source: R/pipeline-spectra.R#L485
       - step: From each OPUS object it takes the absorbance block (`ab` or `AB`), falling back to the first block that is not metadata, and names the columns by the block's wavenumbers.
-        source: R/pipeline-spectra.R#L530
+        source: R/pipeline-spectra.R#L542
       - step: The file name without its extension becomes both `sample_id` and a `filename` column, kept with role meta for parse_ids() later.
-        source: R/pipeline-spectra.R#L599
+        source: R/pipeline-spectra.R#L611
       - step: For a CSV or a data frame, the id column is found by walking the alias list in priority order, and the wavenumber columns by a wn_ prefix first and purely numeric names second.
-        source: R/pipeline-spectra.R#L925
+        source: R/pipeline-spectra.R#L937
       - step: Every wavenumber column is checked to be numeric and renamed with a wn_ prefix; every other column becomes a meta column.
-        source: R/pipeline-spectra.R#L236
+        source: R/pipeline-spectra.R#L248
       - step: Builds the role map (one id, the predictors, the rest meta) and the object through the class constructor new_horizons_data(), so a raw object carries all nine sections of the contract, with selection NULL until select_training() fills it.
         source: R/class-core.R#L77
+      - step: Sorts the predictor columns into decreasing wavenumber order if they arrived otherwise (a library stored increasing, such as the KSSL snapshot), the same way standardize()'s no-op path does, then validates the whole object structurally before returning it (#24).
+        source: R/pipeline-spectra.R#L154
     records:
       - field: data$analysis, data$role_map
         text: the analysis table and the map from every column to its role; n_rows and the predictor, covariate and response counts are computed from them
@@ -126,16 +128,19 @@ verbs:
         source: R/pipeline-spectra.R#L89
       - when: the type cannot be detected, or a given type is not opus or csv
         does: aborts and asks for `type`
-        source: R/pipeline-spectra.R#L352
+        source: R/pipeline-spectra.R#L364
       - when: no OPUS files are found, or opusreader2 is not installed, or no file could be read
         does: aborts
-        source: R/pipeline-spectra.R#L424
+        source: R/pipeline-spectra.R#L436
       - when: a single OPUS file fails to read or carries no data block
         does: warns and drops that file
-        source: R/pipeline-spectra.R#L479
+        source: R/pipeline-spectra.R#L491
       - when: no id column matches an alias, or a named id or wavelength column is absent, or a wavelength column is not numeric
         does: aborts, listing the columns it saw
-        source: R/pipeline-spectra.R#L937
+        source: R/pipeline-spectra.R#L949
+      - when: the built object fails validate_horizons_data() — a duplicate sample_id, a role_map that disagrees with the columns, zero or more than one id role, an unknown role, more than one outcome, or a stored count that disagrees with the data
+        does: aborts with the validator's findings, class horizons_validation_error
+        source: R/pipeline-spectra.R#L155
 
   # ---------------------------------------------------------------------------
   - verb: standardize
@@ -179,7 +184,7 @@ verbs:
         source: R/pipeline-standardize.R#L647
       - step: If the object already carries a standardization record, returns it unchanged with a warning unless `force = TRUE`.
         source: R/pipeline-standardize.R#L737
-      - step: Sorts the predictor columns into decreasing wavenumber order if they arrived otherwise, since spectra() keeps the order it is given. This runs on every path; names and values are untouched.
+      - step: Sorts the predictor columns into decreasing wavenumber order if they arrived otherwise. spectra() already sorts on construction (#24), so this is a no-op for objects built by it and only matters for a hand-built object. This runs on every path; names and values are untouched.
         source: R/pipeline-standardize.R#L762
       - step: If nothing at all is requested, validates the object and writes the record so downstream verbs know the step was considered, keeping the grid an earlier call recorded. Beyond the sort, nothing changes.
         source: R/pipeline-standardize.R#L780
@@ -290,6 +295,8 @@ verbs:
         source: R/pipeline-add-response.R#L489
       - step: Appends a provenance entry, one per call, so several sources can be joined across calls.
         source: R/pipeline-add-response.R#L499
+      - step: Re-validates the whole object structurally before returning it (#24).
+        source: R/pipeline-add-response.R#L523
     records:
       - field: data$analysis
         text: the response columns, NA where a sample had no match
@@ -319,6 +326,9 @@ verbs:
       - when: fewer than half match, or any sample is left unmatched
         does: warns, and the unmatched rows carry NA
         source: R/pipeline-add-response.R#L417
+      - when: the object fails validate_horizons_data() after the join
+        does: aborts with the validator's findings, class horizons_validation_error
+        source: R/pipeline-add-response.R#L523
 
   # ---------------------------------------------------------------------------
   - verb: select_training
@@ -507,33 +517,35 @@ verbs:
         source: R/pipeline-average.R#L139
       - name: quality_check
         touch: Leave TRUE unless you have already screened the scans yourself.
-        source: R/pipeline-average.R#L728
+        source: R/pipeline-average.R#L734
       - name: correlation_threshold
         touch: Rarely; 0.996 is the mean pairwise correlation a replicate must reach against its siblings.
-        source: R/pipeline-average.R#L626
+        source: R/pipeline-average.R#L632
       - name: on_all_outliers
         touch: When a whole group fails the check, decide whether to average it anyway with a warning, drop the sample, or keep only the best replicate.
-        source: R/pipeline-average.R#L743
+        source: R/pipeline-average.R#L749
       - name: verbose
         touch: Set FALSE inside loops.
-        source: R/pipeline-average.R#L490
+        source: R/pipeline-average.R#L496
     mechanics:
       - step: Validates the arguments together, and refuses a custom `by` on an object with a selection record, because renaming rows would orphan the record.
         source: R/pipeline-average.R#L114
       - step: Groups rows by the `by` column; NA in that column aborts.
         source: R/pipeline-average.R#L229
       - step: Per group with two or more scans, computes each replicate's mean correlation with the others, removes the worst one, and repeats until every survivor clears the threshold or one remains. Iterative so a single bad scan cannot drag its siblings under.
-        source: R/pipeline-average.R#L598
+        source: R/pipeline-average.R#L604
       - step: A group whose survivors fall to one is an all-outlier group and is handled by `on_all_outliers`; otherwise the flagged scans are dropped and the rest averaged.
-        source: R/pipeline-average.R#L741
+        source: R/pipeline-average.R#L747
       - step: Predictors are column means over the surviving scans. Numeric responses are averaged over the same rows; a non-numeric response that disagrees within a group is an error, not a silent pick.
-        source: R/pipeline-average.R#L908
+        source: R/pipeline-average.R#L914
       - step: Meta columns are kept when uniform within the group and dropped otherwise; `filename` is always dropped.
-        source: R/pipeline-average.R#L851
+        source: R/pipeline-average.R#L857
       - step: With a custom `by`, that column is coerced to character and becomes `sample_id`, after checks that it produces no NA and no duplicates.
         source: R/pipeline-average.R#L388
       - step: Writes the table back through set_analysis(), which recounts rows and predictors.
         source: R/pipeline-average.R#L436
+      - step: Re-validates the whole object structurally before returning it (#24).
+        source: R/pipeline-average.R#L475
     records:
       - field: provenance$average
         text: the settings, group and replicate counts before and after, which samples were all-outlier or dropped, which meta columns were dropped, and source_ids, the map from each averaged id to the scans it came from
@@ -553,10 +565,13 @@ verbs:
         source: R/pipeline-average.R#L332
       - when: all replicates of a sample fail and on_all_outliers is "warn"
         does: averages them anyway and warns, naming the samples
-        source: R/pipeline-average.R#L475
+        source: R/pipeline-average.R#L481
       - when: a non-numeric response disagrees within a group
         does: aborts naming the column and group
-        source: R/pipeline-average.R#L930
+        source: R/pipeline-average.R#L936
+      - when: the object fails validate_horizons_data() after averaging
+        does: aborts with the validator's findings, class horizons_validation_error
+        source: R/pipeline-average.R#L475
 
   # ---------------------------------------------------------------------------
   - verb: configure
@@ -627,6 +642,8 @@ verbs:
         source: R/pipeline-configure.R#L522
       - step: Stores the grid, the tuning budget, the expansion inputs, and the method defaults.
         source: R/pipeline-configure.R#L570
+      - step: Re-validates the whole object structurally before returning it (#24).
+        source: R/pipeline-configure.R#L600
     records:
       - field: data$role_map
         text: exactly one column with role outcome; the others stay response
@@ -661,7 +678,10 @@ verbs:
         source: R/pipeline-configure.R#L338
       - when: rows were removed only as response outliers of a different outcome, or the training rows were drawn by select_training() for properties that exclude the outcome
         does: warns and continues; the rows stay as they are
-        source: R/pipeline-configure.R#L677
+        source: R/pipeline-configure.R#L683
+      - when: the object fails validate_horizons_data() after the grid is stored
+        does: aborts with the validator's findings, class horizons_validation_error
+        source: R/pipeline-configure.R#L600
     notes:
       - text: Cubist with committees > 1 is not bit-reproducible under a fixed seed (fourth significant figure of a fold metric); every other engine is deterministic given seed. See #51.
         source: R/pipeline-configure.R#L51
@@ -698,13 +718,13 @@ verbs:
         source: R/pipeline-validate.R#L167
       - name: spectral_threshold
         touch: To loosen or tighten the chi-squared quantile the squared distance is cut at; 0.975 by default.
-        source: R/pipeline-validate.R#L715
+        source: R/pipeline-validate.R#L721
       - name: response_method
         touch: Never; "iqr" is the only method.
         source: R/pipeline-validate.R#L178
       - name: response_threshold
         touch: The Tukey multiplier; 1.5 flags the conventional outer fences, 3 flags only extremes.
-        source: R/pipeline-validate.R#L761
+        source: R/pipeline-validate.R#L767
     mechanics:
       - step: Requires a configured object, validates the arguments, and warns if a previous validation is being overwritten.
         source: R/pipeline-validate.R#L142
@@ -713,15 +733,17 @@ verbs:
       - step: P007 near-zero-variance predictors (warning); P001 at least 50 rows (warning); P001b at least twice cv_folds modelable rows (error); P002 at least ten rows per fold (warning); P003 outcome variance above zero (error); P004 outcome missing in at most 20 % (warning).
         source: R/pipeline-validate.R#L312
       - step: Spectral outliers, P005 (info), by PCA on the raw spectra scaled to unit variance per wavenumber, components to 99 % of variance capped at 50 and at two fewer than the row count, then the squared Mahalanobis distance of each score vector against the chi-squared quantile. Skipped with a warning below five rows or on a singular covariance.
-        source: R/pipeline-validate.R#L643
+        source: R/pipeline-validate.R#L649
       - step: Response outliers, P006 (info), as outcome values outside Q1 minus and Q3 plus the multiplier times the IQR. Skipped with a warning below four non-missing values or a zero IQR.
-        source: R/pipeline-validate.R#L736
+        source: R/pipeline-validate.R#L742
       - step: If removal was asked for, drops the union or the chosen kind through subset_rows() and records why each row left, the outcome whose fences flagged a response removal, and the thresholds in force.
         source: R/pipeline-validate.R#L474
       - step: The flags are replaced on every call, but the removal record accumulates, since rows an earlier call removed (before a re-configure, say) are gone for good.
         source: R/pipeline-validate.R#L510
       - step: passed is TRUE when no ERROR check failed; warnings do not affect it.
         source: R/pipeline-validate.R#L493
+      - step: Re-validates the whole object structurally before returning it (#24).
+        source: R/pipeline-validate.R#L534
     records:
       - field: validation$passed, validation$timestamp
         text: the verdict and when it was reached
@@ -738,10 +760,13 @@ verbs:
         source: R/pipeline-validate.R#L144
       - when: too few rows or columns for a detector, or a singular covariance
         does: warns and skips that detector
-        source: R/pipeline-validate.R#L648
+        source: R/pipeline-validate.R#L654
       - when: a previous validation exists
         does: warns and overwrites it
         source: R/pipeline-validate.R#L211
+      - when: the object fails validate_horizons_data() after checks and any removal
+        does: aborts with the validator's findings, class horizons_validation_error
+        source: R/pipeline-validate.R#L534
 
   # ---------------------------------------------------------------------------
   - verb: evaluate

@@ -143,6 +143,18 @@ spectra <- function(source,
   }
 
   ## -------------------------------------------------------------------------
+  ## Step 2b: Put the axis in decreasing order, then validate
+  ## -------------------------------------------------------------------------
+  ## Every dispatch path above keeps columns in whatever order the source
+  ## gave them (a KSSL-shaped library is stored increasing). standardize()
+  ## and the validator both assume decreasing order, so sort here the same
+  ## way standardize()'s no-op path does, rather than rejecting increasing
+  ## input that `spectra() |> standardize()` is documented to accept.
+
+  result <- sort_axis_decreasing(result)$x
+  result <- validate_horizons_data(result)
+
+  ## -------------------------------------------------------------------------
   ## Step 3: CLI output
   ## -------------------------------------------------------------------------
 

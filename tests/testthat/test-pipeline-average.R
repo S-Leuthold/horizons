@@ -953,3 +953,28 @@ test_that("average() leaves an object without a record alone", {
   expect_null(result$selection)
 
 })
+
+
+## ---------------------------------------------------------------------------
+## average() — Structural validation on return (#24)
+## ---------------------------------------------------------------------------
+
+test_that("average() catches a corrupt input the verb itself never checks (#24)", {
+
+  ## Arrange — an increasing wavenumber axis. average() neither reads nor
+  ## enforces predictor order, so nothing about grouping or collapsing the
+  ## replicates would ever catch this; the new end-of-verb
+  ## validate_horizons_data() call (#24) is what catches it.
+  hd <- make_test_hd_average(n_samples = 2, n_reps = 2, n_wavelengths = 3)
+
+  pred_rows <- which(hd$data$role_map$role == "predictor")
+  hd$data$role_map[pred_rows, ] <- hd$data$role_map[rev(pred_rows), ]
+
+  ## Act & Assert --------------------------------------------------------------
+
+  expect_error(
+    average(hd, quality_check = FALSE, verbose = FALSE),
+    class = "horizons_validation_error"
+  )
+
+})

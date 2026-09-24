@@ -235,8 +235,8 @@
 
 <script type="application/json" id="hz-data">
 {
-  "generated_at": "2026-09-23T22:22:44-0500",
-  "content_md5": "0fc9a43a7de0e49214fb17915298193f",
+  "generated_at": "2026-09-24T00:11:13-0500",
+  "content_md5": "e4e9373461546a38eef62f3b3119b356",
   "horizons": "0.9.0",
   "lanes": [
     {
@@ -317,7 +317,7 @@
           "default": "NULL",
           "text": "Character. One of `\"opus\"`, `\"csv\"`, or `NULL` for auto-detect. Default: `NULL`.",
           "touch": "Only when a directory holds both OPUS and CSV files, or the extension is unusual; otherwise auto-detection reads it from the path.",
-          "source": "R/pipeline-spectra.R#L344"
+          "source": "R/pipeline-spectra.R#L356"
         },
         {
           "name": "id_col",
@@ -331,14 +331,14 @@
           "default": "NULL",
           "text": "Character vector. Column names containing spectral data. If `NULL`, auto-detects numeric column names or wn_* prefix. Default: `NULL`.",
           "touch": "When the spectral columns are neither wn_-prefixed nor purely numeric names, so auto-detection cannot find them.",
-          "source": "R/pipeline-spectra.R#L958"
+          "source": "R/pipeline-spectra.R#L970"
         },
         {
           "name": "recursive",
           "default": "FALSE",
           "text": "Logical. For directory paths, search subdirectories. Default: `FALSE`.",
           "touch": "When OPUS files sit in subdirectories of the path given.",
-          "source": "R/pipeline-spectra.R#L417"
+          "source": "R/pipeline-spectra.R#L429"
         }
       ],
       "mechanics": [
@@ -348,31 +348,35 @@
         },
         {
           "step": "For a path, detects the type from the directory contents or the extension unless `type` says otherwise; OPUS files are anything ending in a dot and digits.",
-          "source": "R/pipeline-spectra.R#L858"
+          "source": "R/pipeline-spectra.R#L870"
         },
         {
           "step": "OPUS files are read one at a time with opusreader2; a file that fails to read is warned about and skipped, and the run aborts only if none could be read.",
-          "source": "R/pipeline-spectra.R#L473"
+          "source": "R/pipeline-spectra.R#L485"
         },
         {
           "step": "From each OPUS object it takes the absorbance block (`ab` or `AB`), falling back to the first block that is not metadata, and names the columns by the block's wavenumbers.",
-          "source": "R/pipeline-spectra.R#L530"
+          "source": "R/pipeline-spectra.R#L542"
         },
         {
           "step": "The file name without its extension becomes both `sample_id` and a `filename` column, kept with role meta for parse_ids() later.",
-          "source": "R/pipeline-spectra.R#L599"
+          "source": "R/pipeline-spectra.R#L611"
         },
         {
           "step": "For a CSV or a data frame, the id column is found by walking the alias list in priority order, and the wavenumber columns by a wn_ prefix first and purely numeric names second.",
-          "source": "R/pipeline-spectra.R#L925"
+          "source": "R/pipeline-spectra.R#L937"
         },
         {
           "step": "Every wavenumber column is checked to be numeric and renamed with a wn_ prefix; every other column becomes a meta column.",
-          "source": "R/pipeline-spectra.R#L236"
+          "source": "R/pipeline-spectra.R#L248"
         },
         {
           "step": "Builds the role map (one id, the predictors, the rest meta) and the object through the class constructor new_horizons_data(), so a raw object carries all nine sections of the contract, with selection NULL until select_training() fills it.",
           "source": "R/class-core.R#L77"
+        },
+        {
+          "step": "Sorts the predictor columns into decreasing wavenumber order if they arrived otherwise (a library stored increasing, such as the KSSL snapshot), the same way standardize()'s no-op path does, then validates the whole object structurally before returning it (#24).",
+          "source": "R/pipeline-spectra.R#L154"
         }
       ],
       "records": [
@@ -396,22 +400,27 @@
         {
           "when": "the type cannot be detected, or a given type is not opus or csv",
           "does": "aborts and asks for `type`",
-          "source": "R/pipeline-spectra.R#L352"
+          "source": "R/pipeline-spectra.R#L364"
         },
         {
           "when": "no OPUS files are found, or opusreader2 is not installed, or no file could be read",
           "does": "aborts",
-          "source": "R/pipeline-spectra.R#L424"
+          "source": "R/pipeline-spectra.R#L436"
         },
         {
           "when": "a single OPUS file fails to read or carries no data block",
           "does": "warns and drops that file",
-          "source": "R/pipeline-spectra.R#L479"
+          "source": "R/pipeline-spectra.R#L491"
         },
         {
           "when": "no id column matches an alias, or a named id or wavelength column is absent, or a wavelength column is not numeric",
           "does": "aborts, listing the columns it saw",
-          "source": "R/pipeline-spectra.R#L937"
+          "source": "R/pipeline-spectra.R#L949"
+        },
+        {
+          "when": "the built object fails validate_horizons_data() — a duplicate sample_id, a role_map that disagrees with the columns, zero or more than one id role, an unknown role, more than one outcome, or a stored count that disagrees with the data",
+          "does": "aborts with the validator's findings, class horizons_validation_error",
+          "source": "R/pipeline-spectra.R#L155"
         }
       ],
       "evidence": [],
@@ -488,7 +497,7 @@
           "source": "R/pipeline-standardize.R#L737"
         },
         {
-          "step": "Sorts the predictor columns into decreasing wavenumber order if they arrived otherwise, since spectra() keeps the order it is given. This runs on every path; names and values are untouched.",
+          "step": "Sorts the predictor columns into decreasing wavenumber order if they arrived otherwise. spectra() already sorts on construction (#24), so this is a no-op for objects built by it and only matters for a hand-built object. This runs on every path; names and values are untouched.",
           "source": "R/pipeline-standardize.R#L762"
         },
         {
@@ -641,28 +650,28 @@
           "default": "TRUE",
           "text": "Logical. Enable correlation-based outlier detection. Default: `TRUE`.",
           "touch": "Leave TRUE unless you have already screened the scans yourself.",
-          "source": "R/pipeline-average.R#L728"
+          "source": "R/pipeline-average.R#L734"
         },
         {
           "name": "correlation_threshold",
           "default": "0.996",
           "text": "Numeric. Minimum mean pairwise correlation for a replicate to pass QC. Default: `0.996`. Changing this is rarely needed.",
           "touch": "Rarely; 0.996 is the mean pairwise correlation a replicate must reach against its siblings.",
-          "source": "R/pipeline-average.R#L626"
+          "source": "R/pipeline-average.R#L632"
         },
         {
           "name": "on_all_outliers",
           "default": "c(\"warn\", \"drop\", \"keep_best\")",
           "text": "Character. Behavior when all replicates fail QC: - `\"warn\"` (default): Keep all replicates and average - `\"drop\"`: Remove the sample entirely - `\"keep_best\"`: Keep only the replicate with highest mean correlation",
           "touch": "When a whole group fails the check, decide whether to average it anyway with a warning, drop the sample, or keep only the best replicate.",
-          "source": "R/pipeline-average.R#L743"
+          "source": "R/pipeline-average.R#L749"
         },
         {
           "name": "verbose",
           "default": "TRUE",
           "text": "Logical. Print progress messages. Default: `TRUE`.",
           "touch": "Set FALSE inside loops.",
-          "source": "R/pipeline-average.R#L490"
+          "source": "R/pipeline-average.R#L496"
         }
       ],
       "mechanics": [
@@ -676,19 +685,19 @@
         },
         {
           "step": "Per group with two or more scans, computes each replicate's mean correlation with the others, removes the worst one, and repeats until every survivor clears the threshold or one remains. Iterative so a single bad scan cannot drag its siblings under.",
-          "source": "R/pipeline-average.R#L598"
+          "source": "R/pipeline-average.R#L604"
         },
         {
           "step": "A group whose survivors fall to one is an all-outlier group and is handled by `on_all_outliers`; otherwise the flagged scans are dropped and the rest averaged.",
-          "source": "R/pipeline-average.R#L741"
+          "source": "R/pipeline-average.R#L747"
         },
         {
           "step": "Predictors are column means over the surviving scans. Numeric responses are averaged over the same rows; a non-numeric response that disagrees within a group is an error, not a silent pick.",
-          "source": "R/pipeline-average.R#L908"
+          "source": "R/pipeline-average.R#L914"
         },
         {
           "step": "Meta columns are kept when uniform within the group and dropped otherwise; `filename` is always dropped.",
-          "source": "R/pipeline-average.R#L851"
+          "source": "R/pipeline-average.R#L857"
         },
         {
           "step": "With a custom `by`, that column is coerced to character and becomes `sample_id`, after checks that it produces no NA and no duplicates.",
@@ -697,6 +706,10 @@
         {
           "step": "Writes the table back through set_analysis(), which recounts rows and predictors.",
           "source": "R/pipeline-average.R#L436"
+        },
+        {
+          "step": "Re-validates the whole object structurally before returning it (#24).",
+          "source": "R/pipeline-average.R#L475"
         }
       ],
       "records": [
@@ -730,12 +743,17 @@
         {
           "when": "all replicates of a sample fail and on_all_outliers is \"warn\"",
           "does": "averages them anyway and warns, naming the samples",
-          "source": "R/pipeline-average.R#L475"
+          "source": "R/pipeline-average.R#L481"
         },
         {
           "when": "a non-numeric response disagrees within a group",
           "does": "aborts naming the column and group",
-          "source": "R/pipeline-average.R#L930"
+          "source": "R/pipeline-average.R#L936"
+        },
+        {
+          "when": "the object fails validate_horizons_data() after averaging",
+          "does": "aborts with the validator's findings, class horizons_validation_error",
+          "source": "R/pipeline-average.R#L475"
         }
       ],
       "evidence": [],
@@ -819,6 +837,10 @@
         {
           "step": "Appends a provenance entry, one per call, so several sources can be joined across calls.",
           "source": "R/pipeline-add-response.R#L499"
+        },
+        {
+          "step": "Re-validates the whole object structurally before returning it (#24).",
+          "source": "R/pipeline-add-response.R#L523"
         }
       ],
       "records": [
@@ -868,6 +890,11 @@
           "when": "fewer than half match, or any sample is left unmatched",
           "does": "warns, and the unmatched rows carry NA",
           "source": "R/pipeline-add-response.R#L417"
+        },
+        {
+          "when": "the object fails validate_horizons_data() after the join",
+          "does": "aborts with the validator's findings, class horizons_validation_error",
+          "source": "R/pipeline-add-response.R#L523"
         }
       ],
       "evidence": [],
@@ -1312,6 +1339,10 @@
         {
           "step": "Stores the grid, the tuning budget, the expansion inputs, and the method defaults.",
           "source": "R/pipeline-configure.R#L570"
+        },
+        {
+          "step": "Re-validates the whole object structurally before returning it (#24).",
+          "source": "R/pipeline-configure.R#L600"
         }
       ],
       "records": [
@@ -1370,7 +1401,12 @@
         {
           "when": "rows were removed only as response outliers of a different outcome, or the training rows were drawn by select_training() for properties that exclude the outcome",
           "does": "warns and continues; the rows stay as they are",
-          "source": "R/pipeline-configure.R#L677"
+          "source": "R/pipeline-configure.R#L683"
+        },
+        {
+          "when": "the object fails validate_horizons_data() after the grid is stored",
+          "does": "aborts with the validator's findings, class horizons_validation_error",
+          "source": "R/pipeline-configure.R#L600"
         }
       ],
       "evidence": [],
@@ -1431,7 +1467,7 @@
           "default": "0.975",
           "text": "`numeric(1)`. Chi-squared quantile for Mahalanobis distance cutoff. Default: `0.975`.",
           "touch": "To loosen or tighten the chi-squared quantile the squared distance is cut at; 0.975 by default.",
-          "source": "R/pipeline-validate.R#L715"
+          "source": "R/pipeline-validate.R#L721"
         },
         {
           "name": "response_method",
@@ -1445,7 +1481,7 @@
           "default": "1.5",
           "text": "`numeric(1)`. IQR multiplier for Tukey fences. Default: `1.5`.",
           "touch": "The Tukey multiplier; 1.5 flags the conventional outer fences, 3 flags only extremes.",
-          "source": "R/pipeline-validate.R#L761"
+          "source": "R/pipeline-validate.R#L767"
         }
       ],
       "mechanics": [
@@ -1463,11 +1499,11 @@
         },
         {
           "step": "Spectral outliers, P005 (info), by PCA on the raw spectra scaled to unit variance per wavenumber, components to 99 % of variance capped at 50 and at two fewer than the row count, then the squared Mahalanobis distance of each score vector against the chi-squared quantile. Skipped with a warning below five rows or on a singular covariance.",
-          "source": "R/pipeline-validate.R#L643"
+          "source": "R/pipeline-validate.R#L649"
         },
         {
           "step": "Response outliers, P006 (info), as outcome values outside Q1 minus and Q3 plus the multiplier times the IQR. Skipped with a warning below four non-missing values or a zero IQR.",
-          "source": "R/pipeline-validate.R#L736"
+          "source": "R/pipeline-validate.R#L742"
         },
         {
           "step": "If removal was asked for, drops the union or the chosen kind through subset_rows() and records why each row left, the outcome whose fences flagged a response removal, and the thresholds in force.",
@@ -1480,6 +1516,10 @@
         {
           "step": "passed is TRUE when no ERROR check failed; warnings do not affect it.",
           "source": "R/pipeline-validate.R#L493"
+        },
+        {
+          "step": "Re-validates the whole object structurally before returning it (#24).",
+          "source": "R/pipeline-validate.R#L534"
         }
       ],
       "records": [
@@ -1508,12 +1548,17 @@
         {
           "when": "too few rows or columns for a detector, or a singular covariance",
           "does": "warns and skips that detector",
-          "source": "R/pipeline-validate.R#L648"
+          "source": "R/pipeline-validate.R#L654"
         },
         {
           "when": "a previous validation exists",
           "does": "warns and overwrites it",
           "source": "R/pipeline-validate.R#L211"
+        },
+        {
+          "when": "the object fails validate_horizons_data() after checks and any removal",
+          "does": "aborts with the validator's findings, class horizons_validation_error",
+          "source": "R/pipeline-validate.R#L534"
         }
       ],
       "evidence": [],

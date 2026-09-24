@@ -394,13 +394,16 @@ test_that("an axis already on the canonical grid is not re-interpolated", {
   expect_false(out$provenance$standardization$resampled)
   expect_identical(out$provenance$standardization$grid$n, 1701L)
 
-  ## Stored increasing, the same spectra only change column order
-  inc     <- make_axis_spectra(KSSL_WN)
-  inc_out <- no_output(standardize(inc, resample = 2, trim = c(600, 4000)))
-  inc_in  <- as.matrix(inc$data$analysis[, predictor_names(inc)])
+  ## Given increasing, spectra() itself now sorts to decreasing (#24) before
+  ## standardize() ever sees it, so the object is already on-grid by the
+  ## time it gets here and this is the same no-op path as `kssl` above.
+  inc        <- make_axis_spectra(KSSL_WN)
+  inc_before <- as.matrix(inc$data$analysis[, predictor_names(inc)])
+  inc_out    <- no_output(standardize(inc, resample = 2, trim = c(600, 4000)))
+  inc_after  <- as.matrix(inc_out$data$analysis[, predictor_names(inc_out)])
 
-  expect_identical(unname(as.matrix(inc_out$data$analysis[, predictor_names(inc_out)])),
-                   unname(inc_in[, rev(seq_len(ncol(inc_in)))]))
+  expect_identical(unname(inc_after), unname(inc_before))
+  expect_identical(predictor_names(inc), predictor_names(inc_out))
 
 })
 
