@@ -454,6 +454,31 @@ test_that("standardize() warns (not aborts) on duplicate sample ids", {
 })
 
 
+test_that("standardize() refuses a column with no role_map entry instead of silently dropping it (#24)", {
+
+  ## Arrange — Steps 7-9 rebuild data$analysis from role_map's predictor and
+  ## non-predictor columns; a column present in analysis but absent from
+  ## role_map is referenced by neither set, so it used to disappear from the
+  ## output without a trace. The entry-stage validate_horizons_data(x, stage
+  ## = "raw") call (#24) refuses it before the rebuild happens.
+  ##
+  ## rev(KSSL_WN) (already decreasing) is deliberate: an increasing axis
+  ## would reorder in Step 1b, and sort_axis_decreasing() catches an
+  ## unregistered column through set_analysis()'s own check on that path,
+  ## which would pass even without the Step 1d entry check this test exists
+  ## to exercise.
+  hd <- make_axis_spectra(rev(KSSL_WN), n = 2)
+  hd$data$analysis$stray_column <- seq_len(nrow(hd$data$analysis))
+
+  expect_error(
+    standardize(hd, resample = 2, trim = c(600, 4000)),
+    regexp = "[Mm]issing from.*role_map",
+    class  = "horizons_validation_error"
+  )
+
+})
+
+
 test_that("an NA outside the trim range passes spectra() |> standardize(trim = )", {
 
   ## Arrange — a wide axis with one bad value outside where trim will cut it
@@ -488,12 +513,17 @@ test_that("increasing-order input with baseline correction gives the decreasing-
 
   ## The baseline helper reverses its output on the assumption of decreasing
   ## input; before the sort this mirrored increasing spectra end to end and
-  ## still passed validation
+  ## still passed validation. resample = NULL is deliberate: with resampling
+  ## engaged, both inc and dec are re-interpolated onto the same canonical
+  ## grid regardless of their original order, which can mask a sort
+  ## regression here; with resample = NULL, baseline correction runs
+  ## directly on the trimmed native axis, in whatever order the object
+  ## carries, so this is the version that actually depends on the sort.
   inc <- make_axis_spectra(KSSL_WN, f = smooth_spectrum)
   dec <- make_axis_spectra(rev(KSSL_WN), f = smooth_spectrum)
 
-  out_inc <- no_output(standardize(inc, resample = 4, baseline = TRUE))
-  out_dec <- no_output(standardize(dec, resample = 4, baseline = TRUE))
+  out_inc <- no_output(standardize(inc, resample = NULL, baseline = TRUE))
+  out_dec <- no_output(standardize(dec, resample = NULL, baseline = TRUE))
 
   expect_identical(predictor_names(out_inc), predictor_names(out_dec))
   expect_equal(as.matrix(out_inc$data$analysis[, predictor_names(out_inc)]),

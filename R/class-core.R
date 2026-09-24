@@ -297,12 +297,12 @@ new_horizons_data <- function(analysis        = NULL,
 #'    A004 check in the validation spec.
 #'
 #' 5. **Predictor columns**: Wavelength/predictor columns (role = "predictor")
-#'    must not contain Inf values (always checked); NA values are checked
-#'    only at `stage = "full"`, since a value outside `standardize()`'s trim
-#'    range is legitimately still `NA`-free-to-be-NA before trimming removes
-#'    the column (`standardize()` itself aborts on any non-finite value that
-#'    survives trimming and resampling). First 3 problematic columns are
-#'    named.
+#'    must not contain `NA` or `Inf` values. Checked only at `stage =
+#'    "full"`: a non-finite value outside `standardize()`'s eventual trim
+#'    range is legitimately still there before the trim runs, and
+#'    `standardize()` itself aborts on any non-finite value that survives
+#'    trimming and resampling, so this is only enforced from `average()` on.
+#'    First 3 problematic columns are named.
 #'
 #' 6. **Wavelength naming and order**: Predictor names that look like
 #'    wavenumbers (`wn_<number>` or a bare number) must parse to distinct
@@ -455,7 +455,19 @@ validate_horizons_data <- function(x, stage = c("full", "raw")) {
 
     if (length(dup_ids) > 0) {
 
-      dup_str <- paste(unique(dup_ids), collapse = ", ")
+      ## First 5, like the other checks in this function — at library scale
+      ## (thousands of replicate groups) the full list is unreadable and, in
+      ## the raw-stage warning, would make the console message itself
+      ## enormous.
+      unique_dups <- unique(dup_ids)
+      shown       <- unique_dups[seq_len(min(5, length(unique_dups)))]
+      dup_str     <- paste(shown, collapse = ", ")
+
+      if (length(unique_dups) > 5) {
+
+        dup_str <- paste0(dup_str, ", and ", length(unique_dups) - 5, " more")
+
+      }
 
       if (stage == "raw") {
 
@@ -492,10 +504,11 @@ validate_horizons_data <- function(x, stage = c("full", "raw")) {
 
   predictor_cols <- analysis[, predictor_vars, drop = FALSE]
 
-  # Check for NA — full stage only ----------------------------------------------
-  # A value outside standardize()'s trim range is legitimately NA before the
-  # trim runs; standardize() aborts on any non-finite value that survives
-  # trimming and resampling, so this is only enforced from average() on.
+  # Check for NA and Inf — full stage only --------------------------------------
+  # A non-finite value outside standardize()'s trim range is legitimately
+  # there before the trim runs (Inf no less than NA); standardize() aborts on
+  # any non-finite value that survives trimming and resampling, so this is
+  # only enforced from average() on.
 
   if (stage != "raw") {
 
@@ -509,16 +522,15 @@ validate_horizons_data <- function(x, stage = c("full", "raw")) {
 
     }
 
-  }
+    inf_check <- sapply(predictor_cols, function(col) any(is.infinite(col)))
 
-  # Check for Inf --------------------------------------------------------------
+    if (any(inf_check)) {
 
-  inf_check <- sapply(predictor_cols, function(col) any(is.infinite(col)))
-  if (any(inf_check)) {
+      inf_cols <- names(inf_check)[inf_check]
+      col_list <- paste(inf_cols[1:min(3, length(inf_cols))], collapse = ", ")
+      errors   <- c(errors, cli::format_inline("Infinite values in predictor columns: {col_list}"))
 
-    inf_cols <- names(inf_check)[inf_check]
-    col_list <- paste(inf_cols[1:min(3, length(inf_cols))], collapse = ", ")
-    errors   <- c(errors, cli::format_inline("Infinite values in predictor columns: {col_list}"))
+    }
 
   }
 
@@ -545,15 +557,18 @@ validate_horizons_data <- function(x, stage = c("full", "raw")) {
     if (length(unparseable) > 0) {
 
       col_list <- paste(unparseable, collapse = ", ")
-      errors   <- c(errors, cli::format_inline("Predictor column name{?s} that do not parse as a wavenumber: {col_list}"))
+      errors   <- c(errors, cli::format_inline(
+        "{cli::qty(length(unparseable))}Predictor column name{?s} that {?does/do} not parse as a wavenumber: {col_list}"
+      ))
 
     } else {
 
       ## Two columns naming the same wavenumber (e.g. "600" and "600.0")
-      ## trivially fail strict decrease once sorted; name them rather than
-      ## reporting the generic order failure.
+      ## trivially fail strict decrease once sorted; name every column in
+      ## the pair (not just the later occurrence duplicated() flags) rather
+      ## than reporting the generic order failure.
 
-      dup_wn <- unique(numeric_predictors[duplicated(wn_values)])
+      dup_wn <- numeric_predictors[wn_values %in% wn_values[duplicated(wn_values)]]
 
       if (length(dup_wn) > 0) {
 

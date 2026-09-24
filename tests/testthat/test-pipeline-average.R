@@ -982,3 +982,21 @@ test_that("average() catches a corrupt input the verb itself never checks (#24)"
   )
 
 })
+
+test_that("average() refuses a column with no role_map entry instead of silently dropping it (#24)", {
+
+  ## Arrange — Step 8 rebuilds the averaged table from role_map's predictor,
+  ## meta and response columns; a column present in analysis but absent from
+  ## role_map is referenced by none of them, so it used to disappear from the
+  ## output without a trace. The entry-stage validate_horizons_data(x, stage
+  ## = "raw") call (#24) refuses it instead.
+  hd <- make_test_hd_average(n_samples = 2, n_reps = 2, n_wavelengths = 3)
+  hd$data$analysis$stray_column <- seq_len(nrow(hd$data$analysis))
+
+  expect_error(
+    average(hd, quality_check = FALSE, verbose = FALSE),
+    regexp = "[Mm]issing from.*role_map",
+    class  = "horizons_validation_error"
+  )
+
+})

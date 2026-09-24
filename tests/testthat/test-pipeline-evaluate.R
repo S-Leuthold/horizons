@@ -59,6 +59,25 @@ describe("evaluate() - gate checks", {
 
   })
 
+  it("refuses a column added after configure() with no role_map entry (#24)", {
+
+    ## validate_horizons_eval() (at return) certifies the evaluation slot,
+    ## not the base data contract, so a column landing in $data$analysis
+    ## after configure() — by a later parse_ids(), or a direct assignment —
+    ## used to reach build_recipe()'s `outcome ~ .` as an unregistered
+    ## predictor, undetected. evaluate()'s entry-stage validate_horizons_data()
+    ## call closes that gap.
+
+    obj <- make_eval_object()
+    obj$data$analysis$stray_column <- seq_len(nrow(obj$data$analysis))
+
+    expect_error(
+      evaluate(obj, verbose = FALSE),
+      "[Mm]issing from.*role_map"
+    )
+
+  })
+
 })
 
 ## =========================================================================

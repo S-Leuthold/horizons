@@ -62,12 +62,13 @@ changes. The console reports it as a "Sorting" step when it happens.
 
 \strong{Duplicate or missing sample ids:} Bruker's own OPUS naming can collide
 at this stage — \code{S100-1.0} and \code{S100-1.1} both become \code{S100-1} once the
-extension is stripped — and a filename that doesn't parse can leave a
-\code{sample_id} unresolved. Both are legitimate before replicate scans are
-collapsed, so \code{spectra()} warns rather than aborts on a duplicate or \code{NA}
-\code{sample_id}; use \code{\link[=average]{average()}} to collapse replicates before anything that
-requires unique ids (\code{add_response()}, \code{configure()}, and onward, which
-refuse the object instead of warning).
+extension is stripped — and, for CSV or tibble input, a blank or missing
+cell in the detected id column leaves a \code{sample_id} of \code{NA}. Both are
+legitimate before replicate scans are collapsed, so \code{spectra()} warns
+rather than aborts on a duplicate or \code{NA} \code{sample_id}; use \code{\link[=average]{average()}} to
+collapse replicates before anything that requires unique ids
+(\code{add_response()}, \code{configure()}, and onward, which refuse the object
+instead of warning).
 }
 \examples{
 \dontrun{

@@ -338,6 +338,36 @@ test_that("validate_horizons_data error message includes duplicate sample_ids", 
 
 })
 
+test_that("validate_horizons_data truncates a long duplicate-sample_id list to 5 and a count (#24)", {
+
+  ## Arrange — 8 duplicated ids; at library scale (thousands of replicate
+  ## groups) the full list is unreadable, so the message names the first 5
+  ## and counts the rest.
+  dup_letters <- LETTERS[1:8]
+  test_analysis <- tibble::tibble(
+    sample_id = c(rep(dup_letters, each = 2), "Z"),
+    `4000`    = seq_len(length(dup_letters) * 2 + 1) / 10
+  )
+
+  test_role_map <- tibble::tibble(
+    variable = c("sample_id", "4000"),
+    role     = c("id", "predictor")
+  )
+
+  obj <- new_horizons_data(analysis = test_analysis, role_map = test_role_map)
+
+  err <- tryCatch(validate_horizons_data(obj), error = function(e) e)
+
+  expect_s3_class(err, "horizons_validation_error")
+  msg <- conditionMessage(err)
+
+  ## First 5 named, the remaining 3 counted rather than listed
+  expect_match(msg, paste(dup_letters[1:5], collapse = ", "), fixed = TRUE)
+  expect_match(msg, "and 3 more", fixed = TRUE)
+  expect_false(grepl(dup_letters[6], msg, fixed = TRUE))
+
+})
+
 ## ---------------------------------------------------------------------------
 ## stage = "raw" vs "full" (#24 rework)
 ## ---------------------------------------------------------------------------
@@ -516,7 +546,7 @@ test_that("validate_horizons_data errors when wavelength columns contain Inf", {
 
 })
 
-test_that("stage = \"raw\" does not check predictor NA at all", {
+test_that("stage = \"raw\" does not check predictor NA or Inf at all", {
 
   ## Arrange — same fixture as the NA-predictor test above, but a value
   ## outside standardize()'s eventual trim range is legitimately still NA
@@ -537,11 +567,18 @@ test_that("stage = \"raw\" does not check predictor NA at all", {
 
   expect_no_warning(expect_no_error(validate_horizons_data(obj, stage = "raw")))
 
-  ## Inf is still checked at both stages
+  ## Inf is treated the same as NA at raw stage: a non-finite value outside
+  ## standardize()'s eventual trim range is legitimately still there before
+  ## the trim runs, and standardize() itself aborts on any non-finite value
+  ## that survives trimming and resampling, so this is only enforced from
+  ## average() on (#24 rework).
   test_analysis$`4000` <- c(0.1, Inf, 0.3)
   obj_inf <- new_horizons_data(analysis = test_analysis, role_map = test_role_map)
 
-  expect_error(validate_horizons_data(obj_inf, stage = "raw"), "Inf|infinite")
+  expect_no_warning(expect_no_error(validate_horizons_data(obj_inf, stage = "raw")))
+
+  ## Full stage (the default) still catches it.
+  expect_error(validate_horizons_data(obj_inf), "Inf|infinite")
 
 })
 
@@ -596,8 +633,12 @@ test_that("validate_horizons_data names duplicate wavenumber columns rather than
 
   expect_s3_class(err, "horizons_validation_error")
   expect_match(conditionMessage(err), "Duplicate wavenumber", fixed = TRUE)
-  expect_match(conditionMessage(err), "600", fixed = TRUE)
-  expect_match(conditionMessage(err), "600.0", fixed = TRUE)
+
+  ## Both columns of the pair are named, not just the later occurrence
+  ## duplicated() flags — "600" alone would also match as a substring of
+  ## "600.0", so check the exact paired listing rather than each in
+  ## isolation.
+  expect_match(conditionMessage(err), "600, 600.0", fixed = TRUE)
 
 })
 
@@ -624,7 +665,9 @@ test_that("validate_horizons_data names an unparseable wavenumber column rather 
   err <- tryCatch(validate_horizons_data(obj), error = function(e) e)
 
   expect_s3_class(err, "horizons_validation_error")
-  expect_match(conditionMessage(err), "do not parse", fixed = TRUE)
+  ## Singular subject, singular verb: one unparseable column reads "does not
+  ## parse", not "do not parse" (#24 grammar fix).
+  expect_match(conditionMessage(err), "does not parse", fixed = TRUE)
   expect_match(conditionMessage(err), "600.600.1", fixed = TRUE)
 
 })

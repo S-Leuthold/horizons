@@ -104,6 +104,19 @@ evaluate <- function(x,
   deprecate_workers_arg(workers)
 
   ## -----------------------------------------------------------------------
+  ## Step 0: Structural validation
+  ## -----------------------------------------------------------------------
+  ## validate_horizons_eval() (at return) checks the evaluation slot, not the
+  ## base data contract, so a column added after configure() without a
+  ## role_map entry — by a later parse_ids(), or a direct
+  ## `x$data$analysis$col <- ...` — reached build_recipe()'s `outcome ~ .` as
+  ## an unregistered predictor, undetected, until this call closed that gap
+  ## (#24). Full stage: an object this far into the pipeline is expected to
+  ## have unique, non-NA sample ids.
+
+  x <- validate_horizons_data(x)
+
+  ## -----------------------------------------------------------------------
   ## Step 1: Gate checks
   ## -----------------------------------------------------------------------
 

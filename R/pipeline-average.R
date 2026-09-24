@@ -189,6 +189,18 @@ average <- function(x,
   on_all_outliers <- match.arg(on_all_outliers)
 
   ## -------------------------------------------------------------------------
+  ## Step 1b: Structural validation before the rebuild
+  ## -------------------------------------------------------------------------
+  ## Step 8 below rebuilds the averaged table from role_map's predictor,
+  ## meta and response columns; a column present in analysis but missing
+  ## from role_map is referenced by none of them and would be silently
+  ## dropped rather than carried through or refused. Catch it here, before
+  ## that happens (#24). Raw stage: replicate scans sharing a sample_id are
+  ## exactly the input average() exists to collapse.
+
+  x <- validate_horizons_data(x, stage = "raw")
+
+  ## -------------------------------------------------------------------------
   ## Step 2: Identify column roles
   ## -------------------------------------------------------------------------
 

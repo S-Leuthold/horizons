@@ -721,8 +721,10 @@ standardize <- function(x,
   ## Step 1c: Early exit if no operations requested
   ## ---------------------------------------------------------------------------
   ## Nothing but the column order changes here: no values, no names. The
-  ## object is validated before it is marked, so an invalid one stops here
-  ## rather than travelling on as standardized.
+  ## object is validated (stage = "raw") before it is marked, so a
+  ## structurally invalid one stops here rather than travelling on as
+  ## standardized — though at this stage a duplicate or NA sample_id only
+  ## warns, and predictor NA is not checked at all (#24).
 
   if (is.null(resample) && is.null(trim) && !remove_water && !baseline) {
 
@@ -764,6 +766,17 @@ standardize <- function(x,
     return(x)
 
   }
+
+  ## ---------------------------------------------------------------------------
+  ## Step 1d: Structural validation before the rebuild
+  ## ---------------------------------------------------------------------------
+  ## Steps 7-9 below rebuild data$analysis from role_map's predictor and
+  ## non-predictor columns; a column present in analysis but missing from
+  ## role_map is referenced by neither set and would be silently dropped
+  ## rather than carried through or refused. Catch it here, before that
+  ## happens (#24).
+
+  x <- validate_horizons_data(x, stage = "raw")
 
   ## ---------------------------------------------------------------------------
   ## Step 2: Extract spectral matrix
@@ -1097,8 +1110,9 @@ standardize <- function(x,
   ## ---------------------------------------------------------------------------
   ## Raw stage: standardize() runs before average() collapses replicates, so
   ## a duplicate sample_id is still legitimate here. The Inf/NA-after-trim
-  ## check above (Step 9) already aborts on anything non-finite, so full-mode
-  ## predictor-NA checking would never fire differently at this point.
+  ## check above (Step 6b) already aborts on anything non-finite, so
+  ## full-mode predictor-NA checking would never fire differently at this
+  ## point.
 
   x <- validate_horizons_data(x, stage = "raw")
 

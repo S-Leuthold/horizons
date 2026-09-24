@@ -55,12 +55,13 @@ ID_ALIASES <- c(
 #'
 #' **Duplicate or missing sample ids:** Bruker's own OPUS naming can collide
 #' at this stage — `S100-1.0` and `S100-1.1` both become `S100-1` once the
-#' extension is stripped — and a filename that doesn't parse can leave a
-#' `sample_id` unresolved. Both are legitimate before replicate scans are
-#' collapsed, so `spectra()` warns rather than aborts on a duplicate or `NA`
-#' `sample_id`; use [average()] to collapse replicates before anything that
-#' requires unique ids (`add_response()`, `configure()`, and onward, which
-#' refuse the object instead of warning).
+#' extension is stripped — and, for CSV or tibble input, a blank or missing
+#' cell in the detected id column leaves a `sample_id` of `NA`. Both are
+#' legitimate before replicate scans are collapsed, so `spectra()` warns
+#' rather than aborts on a duplicate or `NA` `sample_id`; use [average()] to
+#' collapse replicates before anything that requires unique ids
+#' (`add_response()`, `configure()`, and onward, which refuse the object
+#' instead of warning).
 #'
 #' @param source Path to directory, file(s), or a tibble/data.frame.
 #' @param type Character. One of `"opus"`, `"csv"`, or `NULL` for auto-detect.
