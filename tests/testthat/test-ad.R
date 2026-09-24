@@ -304,3 +304,27 @@ test_that("predict_ad returns NULL, with a warning, when every spectrum is bad",
   expect_null(ad)
 
 })
+
+test_that("predict_ad warns with the cause and returns NULL when the distance fails", {
+
+  fx     <- ad_fitted_workflow()
+  bundle <- fit_ad(fx$workflow, calib_data = fx$data)
+
+  skip_if(is.null(bundle), "AD bundle could not be fit on the tiny fixture")
+
+  ## The bake succeeds, but the bundle's centroid no longer matches the
+  ## recipe's features, so calculate_ad_distance() aborts. This used to
+  ## return NULL with no signal, and the AD columns vanished.
+  bundle$centroid <- bundle$centroid[-1]
+
+  new_df <- ad_new_spectra(fx$wn, n = 5)
+
+  w <- expect_warning(
+    ad <- predict_ad(fx$workflow, bundle, new_df),
+    class = "horizons_ad_warning"
+  )
+
+  expect_match(conditionMessage(w), "Number of features must match", fixed = TRUE)
+  expect_null(ad)
+
+})

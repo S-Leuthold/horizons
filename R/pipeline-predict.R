@@ -655,12 +655,14 @@ predict_one_config <- function(object, config_id, new_spectra, interval,
   ## Applicability domain — .ad_distance / .ad_flag when a bundle exists
   ## -------------------------------------------------------------------------
   ## Independent of intervals: AD reports even for point-only predictions. Old
-  ## objects without an AD bundle (or a failed bake) degrade to no AD columns.
+  ## objects without an AD bundle degrade to no AD columns quietly; a failed
+  ## bake or distance degrades the same way, with a horizons_ad_warning.
 
   ad_cols <- predict_ad(
     workflow    = workflow,
     ad_bundle   = object$models$ad[[config_id]],
-    new_spectra = new_spectra
+    new_spectra = new_spectra,
+    config_id   = config_id
   )
 
   if (!is.null(ad_cols)) {

@@ -432,8 +432,8 @@ fit_ad <- function(fitted_workflow,
 #' Bakes `new_spectra` through the fitted workflow's recipe to reach the
 #' model's feature space, then computes each sample's squared Mahalanobis
 #' distance to the training centroid and its AD bin. Returns the two predict-time
-#' AD columns, or `NULL` on any failure (so predict degrades to no-AD rather
-#' than erroring).
+#' AD columns, or `NULL` with a warning on any failure (so predict degrades to
+#' no-AD rather than erroring).
 #'
 #' @details
 #' The recipe is re-extracted from the (butchered) stored `workflow` rather than
@@ -456,17 +456,21 @@ fit_ad <- function(fitted_workflow,
 #' @param ad_bundle The config's AD bundle from `models$ad[[config_id]]`
 #'   (`centroid`, `cov_matrix`, `ad_thresholds`).
 #' @param new_spectra Tibble from `resolve_new_data()` (sample_id + predictors).
+#' @param config_id Character(1) or `NULL`. The config the bundle belongs to,
+#'   named in the warning when the distance cannot be computed. `NULL`
+#'   (default) omits it.
 #'
 #' @return Tibble with `.ad_distance` (numeric, squared) and `.ad_flag`
 #'   (factor Q1-Q4/OOD), one row per sample — `NA` in both columns for rows
 #'   that baked to NA; or `NULL` when the bake aborted or the distance could
-#'   not be computed at all.
+#'   not be computed at all, each with a warning of class
+#'   `horizons_ad_warning`. A `NULL` bundle returns `NULL` without a warning.
 #'
 #' @seealso [fit_ad()], [calculate_ad_distance()], [assign_ad_bin()].
 #'
 #' @keywords internal
 #' @noRd
-predict_ad <- function(workflow, ad_bundle, new_spectra) {
+predict_ad <- function(workflow, ad_bundle, new_spectra, config_id = NULL) {
 
   if (is.null(ad_bundle)) {
 
@@ -562,6 +566,23 @@ predict_ad <- function(workflow, ad_bundle, new_spectra) {
   )
 
   if (!is.null(ad_safe$error)) {
+
+    ## Warned rather than dropped silently: the AD columns vanishing with no
+    ## signal is the failure this replaces. Interpolated as a value, as the
+    ## bake warning above is.
+    ad_msg <- conditionMessage(ad_safe$error)
+
+    header <- if (is.null(config_id)) {
+      "Applicability domain could not be computed: the distance to the training centroid failed."
+    } else {
+      "Applicability domain could not be computed for config {.val {config_id}}: the distance to the training centroid failed."
+    }
+
+    cli::cli_warn(c(
+      "!" = header,
+      "x" = "{ad_msg}",
+      "i" = "Point predictions are returned without {.field .ad_distance} and {.field .ad_flag}, so out-of-domain abstention cannot be applied to this batch."
+    ), class = "horizons_ad_warning")
 
     return(NULL)
 
