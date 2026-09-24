@@ -651,6 +651,39 @@ test_that("force = TRUE with every operation off keeps the grid an earlier call 
 })
 
 
+test_that("force = TRUE with every operation off keeps a select_training() reconciliation (#90)", {
+
+  ## The record select_training() leaves on a pool it moved onto its targets'
+  ## axis: the axis history is untouched by a no-op call, like the grid
+  on_4  <- no_output(standardize(make_axis_spectra(MOYS_WN), resample = 4))
+  moved <- on_4
+  moved$provenance$standardization$reconciliation <- list(
+    operation = "resampled",
+    clamp     = NULL,
+    pool      = list(grid = list(min = 600, max = 4000, step = 2, n = 1701L))
+  )
+
+  expect_warning(
+    again <- no_output(standardize(moved, resample = NULL, trim = NULL, force = TRUE)),
+    regexp = "Re-standardizing"
+  )
+
+  expect_identical(again$provenance$standardization$reconciliation,
+                   moved$provenance$standardization$reconciliation)
+  expect_identical(again$provenance$standardization$grid,
+                   moved$provenance$standardization$grid)
+
+  ## An object that never had one does not gain the key
+  expect_warning(
+    plain <- no_output(standardize(on_4, resample = NULL, trim = NULL, force = TRUE)),
+    regexp = "Re-standardizing"
+  )
+
+  expect_false("reconciliation" %in% names(plain$provenance$standardization))
+
+})
+
+
 test_that("the trim line counts the columns inside the bounds, not the interpolation margin", {
 
   ## MOYS-shaped: 1761 points inside 600-4000, plus 599.74 and one above 4000

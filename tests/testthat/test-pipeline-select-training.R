@@ -888,15 +888,21 @@ test_that("a pool resampled onto the targets' grid records that grid, and the po
   ## So axis_spacing_cm()'s fallback agrees with the axis it reads first
   expect_equal(rec$grid$step, axis_spacing_cm(out))
 
-  ## The move is recorded, with the pool's own record and its 4 cm-1 grid
+  ## The move is recorded, with the pool's own record and its 4 cm-1 grid;
+  ## the targets sit inside the pool, so nothing was clamped
   expect_identical(rec$reconciliation$operation, "resampled")
+  expect_true("clamp" %in% names(rec$reconciliation))
+  expect_null(rec$reconciliation$clamp)
   expect_identical(rec$reconciliation$pool, pool$provenance$standardization)
   expect_equal(rec$reconciliation$pool$grid$step, 4)
 
-  ## The standardize() arguments that produced the values stay the pool's
+  ## The standardize() arguments that produced the values stay the pool's,
+  ## and so does the time they were applied
   expect_identical(rec$resample, 4)
   expect_identical(rec$trim, c(600, 4000))
+  expect_identical(rec$remove_water, FALSE)
   expect_identical(rec$baseline, FALSE)
+  expect_identical(rec$applied_at, pool$provenance$standardization$applied_at)
 
 })
 
@@ -918,11 +924,12 @@ test_that("a pool already on the targets' grid keeps its standardization record 
 })
 
 
-test_that("targets off a canonical grid give the resampled pool a NULL grid, and an unstandardized pool no record (#90)", {
+test_that("targets with no grid record give the resampled pool a NULL grid, and an unstandardized pool no record (#90)", {
 
   fx <- make_select_fixture(n_pool = 100)
 
-  ## resample = NULL keeps the targets' own axis and records no grid
+  ## The targets' axis is the 8 cm-1 lattice, but resample = NULL records
+  ## no grid for it, so there is none to copy
   utils::capture.output({
     pool    <- standardize(fx$pool,    resample = 4,    trim = c(600, 4000))
     targets <- standardize(fx$targets, resample = NULL, trim = c(600, 4000))
@@ -937,6 +944,61 @@ test_that("targets off a canonical grid give the resampled pool a NULL grid, and
 
   ## A pool standardize() never saw is not marked standardized
   expect_null(quiet_select(fx, k = 10)$provenance$standardization)
+
+})
+
+
+test_that("targets on an instrument's own axis give the resampled pool a NULL grid, and the clamp (#90)", {
+
+  fx <- make_select_fixture(n_pool = 100)
+
+  ## MOYS-shaped, 599.74 + 1.93 k: on no canonical grid, and starting 0.26
+  ## cm-1 below the pool's 600, inside half its 4 cm-1 spacing, so the lowest
+  ## column is taken at the pool's endpoint and the clamp is recorded
+  moys_wn <- rev(599.74 + 1.93 * (0:1761))
+
+  set.seed(3)
+  m <- rbind(gaussian_family(4, moys_wn, centres = c(3400, 2920, 1630, 1030)),
+             gaussian_family(4, moys_wn, centres = c(3620, 2515, 1420, 870)))
+  colnames(m) <- paste0("wn_", moys_wn)
+
+  tbl <- dplyr::bind_cols(tibble::tibble(sample_id = sprintf("M%02d", 1:8)),
+                          tibble::as_tibble(m))
+
+  ## resample = NULL and trim = NULL keep the instrument's axis as it came
+  utils::capture.output({
+    pool    <- standardize(fx$pool, resample = 4, trim = c(600, 4000))
+    targets <- standardize(spectra(tbl), resample = NULL, trim = NULL)
+  })
+
+  ## The clamp and the finer targets both warn; the record is under test here
+  warned <- character()
+  out <- withCallingHandlers(
+    select_training(targets, pool, k = 10, verbose = FALSE),
+    horizons_select_warning = function(w) {
+      warned <<- c(warned, conditionMessage(w))
+      invokeRestart("muffleWarning")
+    }
+  )
+
+  rec <- out$provenance$standardization
+  wn  <- predictor_matrix(out)$wavenumbers
+
+  expect_true(any(grepl("overshoot", warned)))
+
+  expect_true("grid" %in% names(rec))
+  expect_null(rec$grid)
+  expect_identical(rec$n_wavelengths, length(wn))
+  expect_identical(rec$n_wavelengths, length(moys_wn))
+  expect_equal(rec$wavelength_range, range(wn))
+  expect_equal(rec$wavelength_range, c(599.74, max(moys_wn)))
+
+  ## The lowest column holds the pool's value at 600, 0.26 cm-1 from the
+  ## 599.74 it is named for, and the axis record says so
+  expect_identical(rec$reconciliation$clamp, out$selection$reconciliation$clamp)
+  expect_equal(rec$reconciliation$clamp$low, 0.26)
+  expect_equal(rec$reconciliation$clamp$high, 0)
+  expect_equal(rec$reconciliation$pool$grid$step, 4)
 
 })
 

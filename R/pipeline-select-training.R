@@ -198,13 +198,19 @@
 #'   `x$selection`. `provenance$standardization` describes the returned
 #'   axis. When the pool was resampled onto the targets' grid, the pool's
 #'   record is rewritten: `grid` is the targets' (`NULL` when they are not on
-#'   a canonical grid), `n_wavelengths` and `wavelength_range` are the new
-#'   axis's, and `resampled` is `TRUE`, while the `standardize()` arguments
-#'   (`resample`, `trim`, `remove_water`, `baseline`) stay the pool's, since
-#'   they produced its values. `reconciliation` records the move:
-#'   `operation` and `pool`, the pool's record as it was, carrying its
-#'   original `grid`. A pool already on the targets' grid keeps its record
-#'   unchanged, and a pool never standardized keeps none.
+#'   a canonical grid, or when their recorded grid does not match their
+#'   columns), `n_wavelengths` and `wavelength_range` are the new axis's, and
+#'   `resampled` is `TRUE`, while the `standardize()` arguments (`resample`,
+#'   `trim`, `remove_water`, `baseline`) and `applied_at` stay the pool's,
+#'   since they produced its values; so `resample` can differ from
+#'   `grid$step`, and `trim` from `wavelength_range`. Its `reconciliation`
+#'   entry records the move: `operation`, `clamp` (the overshoot at each end
+#'   when an end column was taken at the pool's endpoint, else `NULL`) and
+#'   `pool`, the pool's record as it was, carrying its original `grid`. That
+#'   entry is the object's axis history and travels with its provenance; it
+#'   is distinct from `x$selection$reconciliation`, the selection's record of
+#'   how the two axes compared. A pool already on the targets' grid keeps its
+#'   record unchanged, and a pool never standardized keeps none.
 #'
 #' @examples
 #' \dontrun{
@@ -410,7 +416,8 @@ select_training <- function(x, pool,
   if (rc$record$operation == "resampled") {
 
     pool_rc$provenance$standardization <- reconciled_standardization(
-      pool$provenance$standardization, x$provenance$standardization, rc$wavenumbers
+      pool$provenance$standardization, x$provenance$standardization, rc$wavenumbers,
+      clamp = rc$record$clamp
     )
 
   }
