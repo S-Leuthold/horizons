@@ -294,3 +294,65 @@ describe("step_select_boruta() when Boruta confirms nothing (#75)", {
   })
 
 })
+
+## =========================================================================
+## Inside resampling, Boruta sees only the fold it is prepped on
+## =========================================================================
+
+describe("step_select_boruta() inside resampling (#75)", {
+
+  it("runs Boruta on exactly each fold's analysis rows", {
+
+    skip_if_not_installed("Boruta")
+
+    ## Under fifty columns each is its own cluster, so every column reaches
+    ## Boruta by name and its rows can be matched against the fold's.
+    d <- boruta_signal_data(n = 30, p = 36)
+
+    calls   <- list()
+    confirm <- mock_boruta_deciding(function(nm) ifelse(nm == "spec005", "Confirmed", "Rejected"))
+
+    local_mocked_bindings(
+      Boruta = function(x, y, ...) {
+
+        calls[[length(calls) + 1L]] <<- list(y = y, spec001 = x[["spec001"]])
+        confirm(x, y)
+
+      },
+      .package = "Boruta"
+    )
+
+    set.seed(3)
+    folds <- rsample::vfold_cv(d, v = 3)
+
+    ## allow_par = FALSE keeps the fits in this process, where the mock is,
+    ## whatever future plan an earlier test left registered.
+    res <- tune::fit_resamples(
+      workflows::workflow(boruta_recipe(d), parsnip::linear_reg()),
+      resamples = folds,
+      control   = tune::control_resamples(allow_par = FALSE)
+    )
+
+    expect_s3_class(res, "resample_results")
+    expect_length(calls, nrow(folds))
+
+    key <- function(y) paste(sort(y), collapse = ",")
+
+    call_keys <- vapply(calls, function(cl) key(cl$y), character(1))
+
+    for (i in seq_len(nrow(folds))) {
+
+      analysis_rows <- rsample::analysis(folds$splits[[i]])
+      hit           <- which(call_keys == key(analysis_rows$SOC))
+
+      ## One call per fold, on that fold's analysis rows in their order, with
+      ## the predictors of the same rows: no assessment row reaches Boruta.
+      expect_length(hit, 1L)
+      expect_identical(calls[[hit]]$y, analysis_rows$SOC)
+      expect_identical(calls[[hit]]$spec001, analysis_rows$spec001)
+
+    }
+
+  })
+
+})
