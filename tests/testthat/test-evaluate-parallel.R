@@ -734,6 +734,66 @@ describe("monitor_evaluate() - applies evaluate()'s checkpoint gates", {
 
   })
 
+  it("re-reads the manifest on every poll in watch mode", {
+
+    skip_on_cran()
+
+    tmpdir <- withr::local_tempdir()
+    ckpt   <- file.path(tmpdir, "checkpoints")
+    dir.create(ckpt)
+
+    first_run  <- eval_settings(grid_size = 2L)
+    second_run <- eval_settings(grid_size = 3L)
+
+    manifest <- list(
+      schema_version = 4L,
+      n_total        = 1,
+      n_pending      = 1,
+      config_ids     = "cfg_001",
+      start_time     = Sys.time() - 60,
+      metric         = "rpd",
+      axis           = "configs",
+      plan           = "multisession",
+      workers        = 2L,
+      settings       = first_run
+    )
+    saveRDS(manifest, file.path(tmpdir, "eval_manifest.rds"))
+
+    ## The one row was tuned by the second run.
+    saveRDS(
+      tibble::tibble(config_id = "cfg_001", status = "success",
+                     scoring_schema = horizons:::SCORING_SCHEMA,
+                     rpd = 2, cv_rpd = 2, settings = list(second_run)),
+      file.path(ckpt, "cfg_001.rds")
+    )
+
+    ## After the first poll, the second run starts and rewrites the manifest.
+    ## A monitor still holding the first manifest ignores the row forever;
+    ## the guard turns that hang into a failure.
+    polls <- 0L
+
+    local_mocked_bindings(.render_monitor = function(stats, manifest) {
+
+      polls <<- polls + 1L
+
+      if (polls == 1L) {
+        manifest$settings <- second_run
+        saveRDS(manifest, file.path(tmpdir, "eval_manifest.rds"))
+      }
+
+      if (polls > 3L) stop("still gating against the first run's manifest")
+
+    })
+
+    invisible(capture.output(
+      stats <- monitor_evaluate(tmpdir, watch = TRUE, interval = 0)
+    ))
+
+    expect_equal(stats$n_complete, 1)
+    expect_equal(polls, 2L)
+
+  })
+
   it("reads a legacy single file exactly where evaluate() would", {
 
     skip_on_cran()

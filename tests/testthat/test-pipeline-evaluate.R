@@ -549,10 +549,74 @@ describe("eval_data_fingerprint()", {
 
     expect_true(is.na(fp$data_hash))
     expect_identical(fp$data_n_rows, 3L)
+    expect_null(fp$data_fields)
+
+  })
+
+  ## The hash covers the ids and the outcome name only; the fields cover the
+  ## values on those rows (#42).
+  roles_xy <- tibble::tibble(variable = c("sample_id", "wn_1", "wn_2", "y"),
+                             role     = c("id", "predictor", "predictor", "outcome"))
+  df_xy    <- tibble::tibble(sample_id = c("c", "a", "b"), wn_1 = c(1, 2, 3),
+                             wn_2 = c(4, 5, 6), y = c(7, 8, 9))
+
+  it("records the value fields, invariant to row order", {
+
+    fp1 <- eval_data_fingerprint(df_xy, roles_xy)
+    fp2 <- eval_data_fingerprint(df_xy[c(2, 3, 1), ], roles_xy)
+
+    expect_named(fp1$data_fields, c("outcome", "ids", "roles", "outcome_values",
+                                    "predictors", "covariates"))
+    expect_identical(fp1$data_fields$outcome, "y")
+    expect_identical(fp1$data_fields, fp2$data_fields)
+
+  })
+
+  it("changes only the predictor field when the spectra change on the same ids", {
+
+    spectra <- df_xy
+    spectra$wn_1 <- spectra$wn_1 + 0.001
+
+    cmp <- compare_record(eval_data_fingerprint(spectra, roles_xy)$data_fields,
+                          eval_data_fingerprint(df_xy, roles_xy)$data_fields)
+
+    expect_identical(cmp$differ, "predictors")
+    expect_identical(eval_data_fingerprint(spectra, roles_xy)$data_hash,
+                     eval_data_fingerprint(df_xy, roles_xy)$data_hash)
+
+  })
+
+  it("changes only the outcome-values field when the outcome is rescaled under its name", {
+
+    rescaled   <- df_xy
+    rescaled$y <- rescaled$y * 10
+
+    cmp <- compare_record(eval_data_fingerprint(rescaled, roles_xy)$data_fields,
+                          eval_data_fingerprint(df_xy, roles_xy)$data_fields)
+
+    expect_identical(cmp$differ, "outcome_values")
+
+  })
+
+  it("changes the roles field when a column changes role", {
+
+    roles_meta <- roles_xy
+    roles_meta$role[roles_meta$variable == "wn_2"] <- "meta"
+
+    cmp <- compare_record(eval_data_fingerprint(df_xy, roles_meta)$data_fields,
+                          eval_data_fingerprint(df_xy, roles_xy)$data_fields)
+
+    expect_setequal(cmp$differ, c("roles", "predictors"))
 
   })
 
 })
+
+## A condition's message on one line: cli wraps at the console width, so a
+## phrase can straddle a line break.
+flat_message <- function(err) {
+  gsub("\\s+", " ", paste(conditionMessage(err), collapse = " "))
+}
 
 describe("evaluate() - checkpoint data provenance", {
 
@@ -579,6 +643,8 @@ describe("evaluate() - checkpoint data provenance", {
 
     row <- readRDS(file.path(tmpdir, "checkpoints", "cfg_001.rds"))
     expect_identical(row$data_hash, manifest$data_hash)
+    expect_identical(row$data_fields[[1]], manifest$data_fields)
+    expect_identical(manifest$data_fields$outcome, "SOC")
     expect_identical(row$settings[[1]], manifest$settings)
     expect_identical(res$evaluation$results$settings[[1]], manifest$settings)
 
@@ -622,12 +688,15 @@ describe("evaluate() - checkpoint data provenance", {
       horizons_input_error = function(e) e
     )
 
-    msg <- paste(conditionMessage(err), collapse = " ")
+    msg <- flat_message(err)
 
     expect_match(msg, "different training data")
     expect_match(msg, basename(tmpdir), fixed = TRUE)
-    expect_match(msg, "training row")
+    expect_match(msg, "different set of training samples")
     expect_match(msg, "output_dir")
+
+    ## Reported from the verb the user called, not from a helper.
+    expect_identical(as.character(err$call[[1]]), "evaluate")
 
   })
 
@@ -646,11 +715,75 @@ describe("evaluate() - checkpoint data provenance", {
     suppressWarnings(evaluate(obj_soc, output_dir = tmpdir, prune = FALSE,
                               verbose = FALSE, seed = 42L))
 
-    expect_error(
+    err <- tryCatch(
       suppressWarnings(evaluate(obj_clay, output_dir = tmpdir, prune = FALSE,
                                 verbose = FALSE, seed = 42L)),
-      class = "horizons_input_error"
+      horizons_input_error = function(e) e
     )
+
+    expect_s3_class(err, "horizons_input_error")
+
+    ## Named, not two opaque hashes.
+    msg <- flat_message(err)
+    expect_match(msg, "computed for outcome SOC; this run models clay")
+    expect_match(msg, "one `output_dir` per outcome")
+
+  })
+
+  ## The same samples with other values used to resume, because the hash
+  ## covers the ids and the outcome name only (#42).
+  refuses_on <- function(edit) {
+
+    obj    <- make_eval_object(n_configs = 2)
+    tmpdir <- withr::local_tempdir(.local_envir = parent.frame())
+
+    suppressWarnings(evaluate(obj, output_dir = tmpdir, prune = FALSE,
+                              verbose = FALSE, seed = 42L))
+
+    tryCatch(
+      suppressWarnings(evaluate(edit(obj), output_dir = tmpdir, prune = FALSE,
+                                verbose = FALSE, seed = 42L)),
+      horizons_input_error = function(e) e
+    )
+
+  }
+
+  it("aborts when the spectra change on the same samples", {
+
+    err <- refuses_on(function(o) {
+      o$data$analysis$wn_4000 <- o$data$analysis$wn_4000 + 0.01
+      o
+    })
+
+    expect_s3_class(err, "horizons_input_error")
+    msg <- flat_message(err)
+    expect_match(msg, "different predictor values")
+    expect_no_match(msg, "different outcome values")
+
+  })
+
+  it("aborts when the outcome is rescaled under the same name", {
+
+    err <- refuses_on(function(o) {
+      o$data$analysis$SOC <- o$data$analysis$SOC * 10
+      o
+    })
+
+    expect_s3_class(err, "horizons_input_error")
+    expect_match(flat_message(err),
+                 "different outcome values")
+
+  })
+
+  it("aborts when the column roles change", {
+
+    err <- refuses_on(function(o) {
+      o$data$role_map$role[o$data$role_map$variable == "wn_3982"] <- "meta"
+      o
+    })
+
+    expect_s3_class(err, "horizons_input_error")
+    expect_match(flat_message(err), "role_map")
 
   })
 
@@ -668,6 +801,7 @@ describe("evaluate() - checkpoint data provenance", {
       row <- readRDS(f)
       row$data_hash   <- NULL
       row$data_n_rows <- NULL
+      row$data_fields <- NULL
       saveRDS(row, f)
 
     }
@@ -678,10 +812,39 @@ describe("evaluate() - checkpoint data provenance", {
     )
 
     ## Once per run, not once per unverifiable file.
-    expect_equal(sum(grepl("no training-data fingerprint", warns)), 1L)
+    expect_equal(sum(grepl("no training-data fingerprint", gsub("\\s+", " ", warns))), 1L)
 
     expect_s3_class(second, "horizons_eval")
     expect_equal(first$evaluation$best_config, second$evaluation$best_config)
+
+  })
+
+  it("warns once and resumes rows with the id hash but no value fields", {
+
+    obj    <- make_eval_object(n_configs = 2)
+    tmpdir <- withr::local_tempdir()
+
+    first <- suppressWarnings(evaluate(obj, output_dir = tmpdir, prune = FALSE,
+                                       verbose = FALSE, seed = 42L))
+
+    ## The shape every row written before the value fields has: unverified,
+    ## not refused, even though the values cannot be checked.
+    for (f in list.files(file.path(tmpdir, "checkpoints"), full.names = TRUE)) {
+
+      row <- readRDS(f)
+      row$data_fields <- NULL
+      saveRDS(row, f)
+
+    }
+
+    warns <- testthat::capture_warnings(
+      second <- evaluate(obj, output_dir = tmpdir, prune = FALSE,
+                         verbose = FALSE, seed = 42L)
+    )
+
+    expect_equal(sum(grepl("no training-data fingerprint covering", gsub("\\s+", " ", warns))), 1L)
+    expect_equal(second$evaluation$results$runtime_secs,
+                 first$evaluation$results$runtime_secs)
 
   })
 
@@ -808,6 +971,43 @@ describe("evaluate() - one checkpoint store (#42)", {
 
   })
 
+  it("never lets a leftover temp file stand in for a config's own file", {
+
+    ## Older versions wrote each row to file*.rds before renaming it; a
+    ## leftover one sorted ahead of most model prefixes and shadowed the real
+    ## file (review finding, #42). Config ids with a model prefix reproduce
+    ## the order.
+    obj <- make_eval_object(n_configs = 2)
+    obj$config$configs$config_id <- c("rf_001", "rf_002")
+    tmpdir <- withr::local_tempdir()
+
+    suppressWarnings(evaluate(obj, output_dir = tmpdir, prune = FALSE,
+                              verbose = FALSE, seed = 42L))
+
+    real     <- readRDS(file.path(tmpdir, "checkpoints", "rf_001.rds"))
+    leftover <- real
+    leftover$data_hash <- NA_character_      # unverified, and made to win
+    leftover$cv_rpd    <- 999
+    saveRDS(leftover, file.path(tmpdir, "checkpoints", "file1a2b3c.rds"))
+
+    expect_identical(
+      list.files(file.path(tmpdir, "checkpoints"))[1], "file1a2b3c.rds"
+    )
+
+    warns <- testthat::capture_warnings(
+      second <- evaluate(obj, output_dir = tmpdir, prune = FALSE,
+                         verbose = FALSE, seed = 42L)
+    )
+
+    got <- second$evaluation$results
+    expect_equal(got$cv_rpd[got$config_id == "rf_001"], real$cv_rpd)
+
+    flat <- gsub("\\s+", " ", warns)
+    expect_true(any(grepl("file1a2b3c.rds: holds config rf_001; not a checkpoint name",
+                          flat, fixed = TRUE)))
+
+  })
+
   it("refuses a foreign-schema row written on other data from either store", {
 
     obj    <- make_eval_object(n_configs = 2)
@@ -837,7 +1037,7 @@ describe("evaluate() - one checkpoint store (#42)", {
     saveRDS(foreign, f)
     err <- refusal()
     expect_s3_class(err, "horizons_input_error")
-    expect_match(paste(conditionMessage(err), collapse = " "), "cfg_001.rds", fixed = TRUE)
+    expect_match(flat_message(err), "cfg_001.rds", fixed = TRUE)
 
     ## In a legacy single file, for a config with no per-config file: the
     ## same verdict.
@@ -845,7 +1045,7 @@ describe("evaluate() - one checkpoint store (#42)", {
     write_legacy_checkpoint(tmpdir, list(cfg_001 = foreign))
     err <- refusal()
     expect_s3_class(err, "horizons_input_error")
-    expect_match(paste(conditionMessage(err), collapse = " "), "eval_checkpoint.rds", fixed = TRUE)
+    expect_match(flat_message(err), "eval_checkpoint.rds", fixed = TRUE)
 
   })
 
@@ -872,12 +1072,12 @@ describe("eval_settings()", {
     current <- eval_settings(cv_folds = 5L, grid_size = 10L, seed = 42L)
     stored  <- eval_settings(cv_folds = 5L, grid_size = 20L)
 
-    cmp <- compare_eval_settings(stored, current)
+    cmp <- compare_record(stored, current)
 
     expect_identical(cmp$differ, "grid_size")
     expect_identical(cmp$missing, "seed")
 
-    none <- compare_eval_settings(NULL, current)
+    none <- compare_record(NULL, current)
     expect_length(none$differ, 0)
     expect_setequal(none$missing, names(current))
 
@@ -906,10 +1106,11 @@ describe("evaluate() - tuning-settings provenance", {
 
     expect_s3_class(err, "horizons_input_error")
 
-    msg <- paste(conditionMessage(err), collapse = " ")
+    msg <- flat_message(err)
     expect_match(msg, "grid_size")
     expect_match(msg, "settings")
     expect_match(msg, "output_dir")
+    expect_identical(as.character(err$call[[1]]), "evaluate")
 
   })
 
@@ -983,7 +1184,7 @@ describe("evaluate() - tuning-settings provenance", {
                          verbose = FALSE, seed = 42L)
     )
 
-    expect_equal(sum(grepl("no tuning-settings fingerprint", warns)), 1L)
+    expect_equal(sum(grepl("no tuning-settings fingerprint", gsub("\\s+", " ", warns))), 1L)
     expect_equal(second$evaluation$results$runtime_secs,
                  first$evaluation$results$runtime_secs)
 

@@ -514,36 +514,51 @@ consequences; the review itself is in
   (below), where a mismatch aborts, then the scoring schema, where an older
   row is dropped and re-evaluated. A per-config row with an older schema and
   different data used to be skipped silently while the same row in the
-  single file aborted; both now abort. A checkpoint file that cannot be read
+  single file aborted; both now abort. A checkpoint file that cannot be used
   now warns, naming it, where it used to be skipped silently (per-config) or
-  abort `evaluate()` with a bare read error (single file). Checkpoints are
-  written under a `.rds.tmp` name and renamed into place, so no reader sees
-  a half-written file. `monitor_evaluate()` reads through the same helpers
-  and gates rows against the fingerprint and settings in
-  `eval_manifest.rds`, so it no longer counts or ranks a row `evaluate()`
-  would reject (every `.rds` file used to count as complete); it shows what
-  it ignored and which files it could not read, and returns them as
-  `ignored` and `unreadable`.
+  abort `evaluate()` with a bare read error (single file). A file in
+  `checkpoints/` counts only for the config its name says: a leftover
+  `file*.rds` temp file from an interrupted write, which sorted ahead of
+  most model prefixes and shadowed the config's real file, is reported
+  instead. Checkpoints and the manifest are written under a `.rds.tmp` name
+  and renamed into place, so no reader sees a half-written file.
+  `monitor_evaluate()` reads through the same helpers and gates rows against
+  the fingerprint and settings in `eval_manifest.rds`, so it no longer
+  counts or ranks a row `evaluate()` would reject (every `.rds` file used to
+  count as complete); it shows what it ignored and which files it could not
+  use, and returns them as `ignored` and `unreadable`. In watch mode it
+  re-reads the manifest on every poll, where it used to read it once and,
+  after a re-run with other settings, report nothing complete for good.
+  Reading and gating the store is linear in the number of files: about
+  1.5 s for 16,000 files, down from about 6 s. Checkpoint refusals are
+  reported from `evaluate()` rather than from an internal helper.
 
-* `evaluate()` records the tuning settings on every checkpoint row and
-  refuses to resume rows tuned differently (#42). The training-data
-  fingerprint covers the rows and the outcome only, so re-running into the
-  same `output_dir` with another `cv_folds`, `grid_size`, `bayesian_iter`,
-  `prune`, `prune_threshold` or `seed` resumed results tuned under the old
-  settings, silently. Rows now carry a `settings` list-column, also in
-  `evaluation$results`, compared setting by setting on resume; the abort
-  names each setting that differs, and a data-fingerprint abort names any
-  settings that also differ (a changed `seed` moves the split, so it
-  surfaces as a data mismatch). `prune_threshold` is recorded only when
+* `evaluate()` fingerprints the values on the training rows and the tuning
+  settings, and refuses to resume checkpoints that differ in either (#42).
+  The training-data fingerprint covered the sample ids and the outcome name
+  only, so re-standardized spectra on the same samples (the #64 grid change
+  does exactly this), an outcome rescaled under the same name, or another
+  `cv_folds`, `grid_size`, `bayesian_iter`, `prune`, `prune_threshold` or
+  `seed` resumed stale results, silently. Rows now carry `data_fields` (the
+  outcome, the sample ids, the role map, and the outcome, predictor and
+  covariate values in id order) and `settings`, list-columns that are also
+  in `evaluation$results`, compared field by field on resume. An abort
+  names what differs: "was computed for outcome clay; this run models SOC"
+  rather than two hashes, "different predictor values for the same
+  samples", or each setting with both values; a data abort also names any
+  settings that differ, since a changed `seed` moves the split. Keep one
+  `output_dir` per outcome. Hashing the predictor values costs about 0.3 s
+  at 17,788 x 1,701, once per run; the parallel worker is sent both records
+  rather than recomputing them. `prune_threshold` is recorded only when
   `prune = TRUE`, since it is never read otherwise. The ranking `metric` is
   not recorded: every row carries all six cross-validated metrics and the
-  ranking is recomputed each run, so changing it still resumes. Rows written
-  before this version carry no settings; they resume, counted in the
-  existing once-per-run warning about unverifiable checkpoints. A setting
-  added to the record later makes older rows unverified in the same way
-  rather than refused. `eval_manifest.rds` is schema 4, adding `settings`,
-  and the parallel worker payload gains `settings`, stamped on each row as
-  sent.
+  ranking is recomputed each run, so changing it still resumes. Rows
+  written before this version carry neither record; they resume, counted
+  in the existing once-per-run warning about unverifiable checkpoints. A
+  field or setting added later makes older rows unverified in the same way
+  rather than refused. `eval_manifest.rds` is schema 4, adding
+  `data_fields` and `settings`, and the parallel worker payload gains
+  `data_fp` and `settings`, stamped on each row as sent.
 
 * `select_training(scope = "global")` now runs the same twin rule as the other scopes (#72). The control arm took its reference over the nearest `max(k, 50)` of all pool rows, 400 at the default `k`, with no cap at a quarter of the measured rows. A wider reference raises the threshold, so global ran a looser rule than the arms it is compared against and could flag rows batch does not. Global now runs the check through the same code as batch, per property on that property's measured rows, with the width from one helper, and under `space_rows = "measured"` in the same per-property spaces batch draws in, where it used to check every property in the all-rows space. Under global, `x$selection$exclusions` carries the property rather than `NA`, and a twin appears once per property it is flagged for, as under batch. The flagged rows are recorded but stay in global's returned rows, by design, since global is the control and returns the whole pool; a batch-versus-global comparison has to act on the record. `x$selection$target_distances` has one row per target per property, labelled with the space batch would label it with, and `nearest` and `mean_k` are now measured after the twins rather than including them. For the same targets, pool and arguments, both tables equal the batch record under either `space_rows`. Twin counts, reference distances and target distances from earlier global runs are not comparable with new ones. Under global a `k` above a property's measured rows is still capped there rather than refused, since `k` only sets the reach of `mean_k`; a property with no measured pool row, or fewer than two under `space_rows = "measured"`, now stops every scope with a named input error, where global used to skip it and batch failed in the space build. `twin_ratio` is now validated as a single number in (0, 1); anything else stops the verb with the other input errors. The `twin_ratio` documentation, which still described the retired median-of-`k` rule, is corrected.
 

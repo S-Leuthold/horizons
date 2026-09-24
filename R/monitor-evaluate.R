@@ -38,25 +38,7 @@ monitor_evaluate <- function(output_dir, watch = FALSE, interval = 10) {
 
   }
 
-  manifest_path <- file.path(output_dir, "eval_manifest.rds")
-
-  if (!file.exists(manifest_path)) {
-
-    rlang::abort(paste0(
-      "No eval_manifest.rds found in '", output_dir, "'. ",
-      "evaluate() writes it when called with output_dir; has the run started?"
-    ))
-
-  }
-
-  manifest      <- readRDS(manifest_path)
-
-  ## Schema 1 (pre-2026-09-15) manifests carry workers/outer/inner from the
-  ## auto-split design; schema 2 carries the axis and the user's plan; schema
-  ## 3 (2026-09-21) adds the training-data fingerprint; schema 4 (#42) the
-  ## tuning settings. All are read: the monitor needs only n_total, metric
-  ## and start_time to work, so a run started before M2 can still be watched.
-  manifest$schema_version <- manifest$schema_version %||% 1L
+  manifest <- .read_monitor_manifest(output_dir)
 
   if (watch) {
 
@@ -64,7 +46,12 @@ monitor_evaluate <- function(output_dir, watch = FALSE, interval = 10) {
 
     repeat {
 
-      stats <- .monitor_snapshot(manifest, output_dir)
+      ## Re-read on every poll: evaluate() rewrites the manifest at the start
+      ## of each run, and a re-run with other settings or data would
+      ## otherwise be gated against the first run's, showing 0 complete
+      ## forever.
+      manifest <- .read_monitor_manifest(output_dir)
+      stats    <- .monitor_snapshot(manifest, output_dir)
       .render_monitor(stats, manifest)
 
       if (stats$n_complete >= manifest$n_total) {
@@ -94,6 +81,36 @@ monitor_evaluate <- function(output_dir, watch = FALSE, interval = 10) {
 ## -------------------------------------------------------------------------
 
 
+#' Read the run manifest evaluate() writes
+#' @noRd
+.read_monitor_manifest <- function(output_dir) {
+
+  manifest_path <- file.path(output_dir, "eval_manifest.rds")
+
+  if (!file.exists(manifest_path)) {
+
+    rlang::abort(paste0(
+      "No eval_manifest.rds found in '", output_dir, "'. ",
+      "evaluate() writes it when called with output_dir; has the run started?"
+    ))
+
+  }
+
+  manifest <- readRDS(manifest_path)
+
+  ## Schema 1 (pre-2026-09-15) manifests carry workers/outer/inner from the
+  ## auto-split design; schema 2 carries the axis and the user's plan; schema
+  ## 3 (2026-09-21) adds the training-data fingerprint; schema 4 (#42) the
+  ## data fields and tuning settings. All are read: the monitor needs only
+  ## n_total, metric and start_time to work, so a run started before M2 can
+  ## still be watched.
+  manifest$schema_version <- manifest$schema_version %||% 1L
+
+  manifest
+
+}
+
+
 #' Read checkpoint directory and compute stats
 #' @noRd
 .monitor_snapshot <- function(manifest, output_dir) {
@@ -107,7 +124,8 @@ monitor_evaluate <- function(output_dir, watch = FALSE, interval = 10) {
 
   data_fp <- list(
     data_hash   = manifest$data_hash %||% NA_character_,
-    data_n_rows = manifest$data_n_rows %||% NA_integer_
+    data_n_rows = manifest$data_n_rows %||% NA_integer_,
+    data_fields = manifest$data_fields
   )
 
   store <- read_checkpoint_store(output_dir)
@@ -277,9 +295,12 @@ monitor_evaluate <- function(output_dir, watch = FALSE, interval = 10) {
   ## one output_dir are indistinguishable in the monitor.
   if (!is.null(manifest$data_hash) && !is.na(manifest$data_hash)) {
 
+    outcome <- manifest$data_fields$outcome
+
     cat(paste0("  Data:      ", manifest$data_n_rows %||% "?",
-               " training rows, hash ",
-               substr(manifest$data_hash, 1, 12), "\n"))
+               " training rows",
+               if (!is.null(outcome)) paste0(" of ", outcome) else "",
+               ", hash ", substr(manifest$data_hash, 1, 12), "\n"))
 
   }
 
