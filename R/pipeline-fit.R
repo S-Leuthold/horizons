@@ -32,8 +32,9 @@
 #' `horizons_below_threshold_warning`, naming the threshold and the members'
 #' cross-validated RPD; that includes `bayesian_iter = 0`, where nothing is
 #' pruned. When the members are pruned configurations the warning also
-#' carries class `horizons_pruned_fallback_warning`. If every member fails, `fit()` aborts with class
-#' `horizons_all_members_failed`, listing the distinct error messages; the
+#' carries class `horizons_pruned_fallback_warning`. If every member fails,
+#' `fit()` aborts with class `horizons_all_members_failed`, listing the
+#' distinct error messages; the
 #' per-member results travel on the condition as `results`, and
 #' `models$results` keeps each member's `error_message` when some succeed.
 #'

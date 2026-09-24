@@ -97,8 +97,9 @@ when none did, the pruned ones that carry a cross-validated value of
 \code{horizons_below_threshold_warning}, naming the threshold and the members'
 cross-validated RPD; that includes \code{bayesian_iter = 0}, where nothing is
 pruned. When the members are pruned configurations the warning also
-carries class \code{horizons_pruned_fallback_warning}. If every member fails, \code{fit()} aborts with class
-\code{horizons_all_members_failed}, listing the distinct error messages; the
+carries class \code{horizons_pruned_fallback_warning}. If every member fails,
+\code{fit()} aborts with class \code{horizons_all_members_failed}, listing the
+distinct error messages; the
 per-member results travel on the condition as \code{results}, and
 \code{models$results} keeps each member's \code{error_message} when some succeed.
 }
