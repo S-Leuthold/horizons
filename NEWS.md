@@ -87,8 +87,13 @@
   grid, so every source's convex hull is pinned at the grid's bounds and
   the points kept beyond the trim bounds for interpolation never reach it;
   baseline-corrected values therefore change for resampled data, because
-  the hull is now fitted on the grid and pinned at its bounds. Without
-  resampling the baseline is fitted on the trimmed native axis, as before.
+  the hull is now fitted on the grid and pinned at its bounds. That includes
+  data already on the lattice at a finer step (2 cm-1 data at
+  `resample = 4`), whether or not it extends past the trim bounds, since its
+  hull is now fitted on the coarser grid. Data already on the grid at the
+  requested step is corrected exactly as before, extending past the bounds
+  or not. Without resampling the baseline is fitted on the trimmed native
+  axis, as before.
   Columns stored in increasing order are sorted first, on every path; that
   input used to abort at the final validation, or, with every operation
   off, come back unsorted and unvalidated but marked standardized. The
