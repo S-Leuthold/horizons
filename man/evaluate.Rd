@@ -29,7 +29,9 @@ are reported but never used for selection, so they remain honest
 held-out estimates. Default \code{"rpd"}.}
 
 \item{prune}{Logical. If TRUE, skip Bayesian optimization for configs
-whose grid-search RPD falls below \code{prune_threshold}. Default TRUE.}
+whose grid-search RPD falls below \code{prune_threshold}. When \code{configure()}
+set \code{bayesian_iter = 0} there is nothing to skip, so no config is
+pruned. Default TRUE.}
 
 \item{prune_threshold}{Numeric. RPD threshold for pruning. Configs with
 grid-search RPD below this value skip Bayesian optimization but still

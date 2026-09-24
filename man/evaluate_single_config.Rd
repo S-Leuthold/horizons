@@ -12,7 +12,7 @@ evaluate_single_config(
   grid_size = DEFAULT_GRID_SIZE,
   bayesian_iter = DEFAULT_BAYES_ITER,
   prune = FALSE,
-  prune_threshold = 100,
+  prune_threshold = 1,
   allow_par = FALSE,
   parallel_over = "resamples",
   seed = 42L
@@ -35,11 +35,14 @@ evaluate_single_config(
 skip Bayesian optimization entirely.}
 
 \item{prune}{Logical. If TRUE, skip Bayesian optimization when the best
-grid-search RPD falls below \code{prune_threshold}.}
+grid-search RPD falls below \code{prune_threshold}, and label the config
+\code{"pruned"}. A no-op when \code{bayesian_iter} is 0, since there is nothing to
+skip.}
 
 \item{prune_threshold}{Numeric. RPD threshold for pruning, on the original
 response scale (tuning metrics are scored there via
-\code{tuning_metric_set()}). Only used when \code{prune = TRUE}.}
+\code{tuning_metric_set()}). Only used when \code{prune = TRUE}. Default 1.0, as
+in \code{evaluate()}.}
 
 \item{allow_par}{Logical. Passed to \code{tune::control_grid()} and
 \code{tune::control_bayes()} to enable parallel CV folds on the registered

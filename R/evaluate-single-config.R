@@ -20,10 +20,13 @@
 #' @param bayesian_iter Integer. Iterations for `tune_bayes()`. Set to 0 to
 #'   skip Bayesian optimization entirely.
 #' @param prune Logical. If TRUE, skip Bayesian optimization when the best
-#'   grid-search RPD falls below `prune_threshold`.
+#'   grid-search RPD falls below `prune_threshold`, and label the config
+#'   `"pruned"`. A no-op when `bayesian_iter` is 0, since there is nothing to
+#'   skip.
 #' @param prune_threshold Numeric. RPD threshold for pruning, on the original
 #'   response scale (tuning metrics are scored there via
-#'   `tuning_metric_set()`). Only used when `prune = TRUE`.
+#'   `tuning_metric_set()`). Only used when `prune = TRUE`. Default 1.0, as
+#'   in `evaluate()`.
 #' @param allow_par Logical. Passed to `tune::control_grid()` and
 #'   `tune::control_bayes()` to enable parallel CV folds on the registered
 #'   `future::plan()`. `evaluate()` sets this from the resolved axis: `FALSE`
@@ -52,7 +55,7 @@ evaluate_single_config <- function(config_row,
                                    grid_size       = DEFAULT_GRID_SIZE,
                                    bayesian_iter   = DEFAULT_BAYES_ITER,
                                    prune           = FALSE,
-                                   prune_threshold = 100,
+                                   prune_threshold = 1.0,
                                    allow_par       = FALSE,
                                    parallel_over   = "resamples",
                                    seed            = 42L) {
@@ -253,10 +256,14 @@ evaluate_single_config <- function(config_row,
   ## the original response scale (tuning_metric_set()), so the threshold means
   ## the same thing for every transformation.
   ## The config still gets last_fit metrics from grid-search best.
+  ##
+  ## With bayesian_iter = 0 there is no Bayesian stage to skip, so the gate
+  ## does not run and the config is a success. It used to be labelled
+  ## "pruned" anyway, which evaluate() and fit() rank only as a fallback (#38).
 
   skip_bayesian <- FALSE
 
-  if (prune) {
+  if (prune && bayesian_iter > 0) {
 
     best_grid <- tune::show_best(grid_results, metric = "rpd", n = 1)
 

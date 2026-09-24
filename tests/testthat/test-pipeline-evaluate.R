@@ -355,6 +355,9 @@ describe("evaluate() - pruning", {
 
     obj <- make_eval_object(n_configs = 1)
 
+    ## The gate only runs when there is a Bayesian stage to skip (#38)
+    obj$config$tuning$bayesian_iter <- 1L
+
     ## Set a very high prune threshold — RPD must be above 9999
     result <- suppressWarnings(evaluate(obj, prune = TRUE, prune_threshold = 9999,
                                         verbose = FALSE, seed = 42L))

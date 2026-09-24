@@ -16,7 +16,9 @@
 #'   are reported but never used for selection, so they remain honest
 #'   held-out estimates. Default `"rpd"`.
 #' @param prune Logical. If TRUE, skip Bayesian optimization for configs
-#'   whose grid-search RPD falls below `prune_threshold`. Default TRUE.
+#'   whose grid-search RPD falls below `prune_threshold`. When `configure()`
+#'   set `bayesian_iter = 0` there is nothing to skip, so no config is
+#'   pruned. Default TRUE.
 #' @param prune_threshold Numeric. RPD threshold for pruning. Configs with
 #'   grid-search RPD below this value skip Bayesian optimization but still
 #'   receive test-set metrics from grid-search best. Default 1.0 (the
