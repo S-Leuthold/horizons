@@ -421,3 +421,45 @@ describe("create_failed_result()", {
   })
 
 })
+
+## ---------------------------------------------------------------------------
+## distinct_config_errors() — finished, brace-safe cli bullets
+## ---------------------------------------------------------------------------
+## The helper is the one place the brace-safety rule is enforced for the
+## all-failed aborts, so its bullets must render literally whatever the
+## upstream text carries.
+
+describe("distinct_config_errors()", {
+
+  results <- tibble::tibble(
+    config_id     = c("a", "b", "c", "d", "e", "f"),
+    error_message = c("Grid {wn_600} failed", "Grid {wn_600} failed", NA,
+                      "second", "third", "fourth")
+  )
+
+  bullets <- distinct_config_errors(results)
+
+  it("returns one x bullet per shown message and an i bullet for the rest", {
+
+    expect_identical(names(bullets), c("x", "x", "x", "i"))
+    expect_identical(bullets[["i"]], "1 more distinct error message not shown.")
+
+  })
+
+  it("renders upstream braces literally through cli", {
+
+    expect_identical(cli::format_inline(bullets[[1]]), "Grid {wn_600} failed (a, b)")
+
+    err <- tryCatch(cli::cli_abort(c("header", bullets)), error = function(e) e)
+    expect_match(conditionMessage(err), "Grid {wn_600} failed (a, b)", fixed = TRUE)
+
+  })
+
+  it("is empty when no row has a message", {
+
+    expect_length(distinct_config_errors(results[3, ]), 0)
+    expect_length(distinct_config_errors(tibble::tibble(config_id = "a")), 0)
+
+  })
+
+})

@@ -291,8 +291,9 @@ predict_members_on_test <- function(object, members) {
     ## comparison must see raw model behavior — a blow-up member must score
     ## terribly, not be laundered by the deploy guardrail — mirroring the
     ## unclamped fit-time paths in fit-single-config.R.
+    ## ad = FALSE: only .pred is kept, so a member's AD is not computed.
     pc <- predict_one_config(object, config_id = m, new_spectra = test_data,
-                             interval = FALSE, clamp = FALSE)
+                             interval = FALSE, clamp = FALSE, ad = FALSE)
 
     dplyr::left_join(
       tibble::tibble(config_id = m, sample_id = pc$sample_id, .pred = pc$.pred),

@@ -239,6 +239,8 @@ create_failed_result <- function(config_id, error = NULL) {
   tibble::tibble(
     config_id     = config_id,
     status        = "failed",
+    below_prune_threshold = NA,
+    prune_threshold       = NA_real_,
     rmse          = NA_real_,
     rrmse         = NA_real_,
     rsq           = NA_real_,
@@ -257,5 +259,103 @@ create_failed_result <- function(config_id, error = NULL) {
     warnings      = list(NULL),
     runtime_secs  = NA_real_
   )
+
+}
+
+## ---------------------------------------------------------------------------
+## distinct_config_errors
+## ---------------------------------------------------------------------------
+
+#' Summarise the distinct error messages in a results table as cli bullets
+#'
+#' @description
+#' Groups the configs of a results table by their `error_message` and returns
+#' one `"x"` bullet per distinct message, in the order the messages first
+#' appear, each followed by the configs that raised it, then an `"i"` bullet
+#' counting the messages not shown. `evaluate()` and `fit()` put these
+#' bullets in the abort they raise when every config (or member) fails, so
+#' the cause is in the message rather than only in a table the caller may not
+#' be able to reach.
+#'
+#' The bullets are finished: the upstream text in them has its braces escaped
+#' with `cli_escape()`, so they can be passed to cli as they are. This is the
+#' one place the brace-safety rule is enforced for these aborts; a caller
+#' never builds the bullets itself.
+#'
+#' @param results Tibble with `config_id` and `error_message` columns.
+#' @param n_show Integer. How many distinct messages to list. Default 3.
+#' @param n_ids Integer. How many config ids to name per message before
+#'   counting the rest. Default 3.
+#'
+#' @return Named character vector of cli bullets (names `"x"` and `"i"`),
+#'   empty when no row has a message. Rows whose `error_message` is `NA` or
+#'   empty are ignored.
+#' @keywords internal
+#' @noRd
+distinct_config_errors <- function(results, n_show = 3L, n_ids = 3L) {
+
+  ## Checked by name: `$` on a tibble without the column warns.
+  if (!"error_message" %in% names(results)) {
+
+    return(stats::setNames(character(0), character(0)))
+
+  }
+
+  msgs <- results$error_message
+
+  has_msg  <- !is.na(msgs) & nzchar(msgs)
+  distinct <- unique(msgs[has_msg])
+  shown    <- utils::head(distinct, n_show)
+  n_more   <- length(distinct) - length(shown)
+
+  lines <- vapply(shown, function(m) {
+
+    ids <- results$config_id[has_msg & msgs == m]
+
+    id_label <- if (length(ids) > n_ids) {
+      paste0(paste(ids[seq_len(n_ids)], collapse = ", "),
+             " and ", length(ids) - n_ids, " more")
+    } else {
+      paste(ids, collapse = ", ")
+    }
+
+    paste0(m, " (", id_label, ")")
+
+  }, character(1), USE.NAMES = FALSE)
+
+  bullets <- stats::setNames(cli_escape(lines), rep("x", length(lines)))
+
+  if (n_more > 0) {
+
+    bullets <- c(bullets, "i" = paste0(
+      n_more, " more distinct error message", if (n_more > 1) "s", " not shown."
+    ))
+
+  }
+
+  bullets
+
+}
+
+## ---------------------------------------------------------------------------
+## cli_escape
+## ---------------------------------------------------------------------------
+
+#' Escape text for use inside a cli template
+#'
+#' @description
+#' Doubles every brace, which cli reads as a literal brace, so text that did
+#' not come from the package (an upstream error message, a column name, a
+#' path) can sit in a cli message without being evaluated as an
+#' interpolation. A bare `"{wn_600}"` would otherwise make cli look up an
+#' object called `wn_600` and crash the abort that was reporting it.
+#'
+#' @param x Character vector.
+#' @return `x` with `{` and `}` doubled.
+#' @keywords internal
+#' @noRd
+cli_escape <- function(x) {
+
+  gsub("}", "}}", gsub("{", "{{", x, fixed = TRUE), fixed = TRUE)
 
 }
