@@ -32,6 +32,9 @@ make_single_response_hd <- function() {
     role     = c("id", "predictor", "predictor", "predictor", "response")
   )
 
+  ## Downstream slots in the constructor's shape
+  contract <- new_horizons_data()
+
   obj <- list(
     data = list(
       analysis     = analysis,
@@ -54,9 +57,9 @@ make_single_response_hd <- function() {
       tuning    = list(grid_size = 10L, bayesian_iter = 15L, cv_folds = 5L)
     ),
     validation = list(passed = NULL, checks = NULL, timestamp = NULL),
-    evaluation = list(results = NULL),
-    models     = list(workflows = NULL),
-    ensemble   = list(stack = NULL),
+    evaluation = contract$evaluation,
+    models     = contract$models,
+    ensemble   = contract$ensemble,
     artifacts  = list(cache_dir = NULL)
   )
 
@@ -84,6 +87,9 @@ make_multi_response_hd <- function() {
     role     = c("id", "predictor", "predictor", "predictor", "response", "response")
   )
 
+  ## Downstream slots in the constructor's shape
+  contract <- new_horizons_data()
+
   obj <- list(
     data = list(
       analysis     = analysis,
@@ -106,9 +112,9 @@ make_multi_response_hd <- function() {
       tuning    = list(grid_size = 10L, bayesian_iter = 15L, cv_folds = 5L)
     ),
     validation = list(passed = NULL, checks = NULL, timestamp = NULL),
-    evaluation = list(results = NULL),
-    models     = list(workflows = NULL),
-    ensemble   = list(stack = NULL),
+    evaluation = contract$evaluation,
+    models     = contract$models,
+    ensemble   = contract$ensemble,
     artifacts  = list(cache_dir = NULL)
   )
 
@@ -138,6 +144,9 @@ make_covariate_hd <- function() {
                  "response", "covariate", "covariate")
   )
 
+  ## Downstream slots in the constructor's shape
+  contract <- new_horizons_data()
+
   obj <- list(
     data = list(
       analysis     = analysis,
@@ -160,9 +169,9 @@ make_covariate_hd <- function() {
       tuning    = list(grid_size = 10L, bayesian_iter = 15L, cv_folds = 5L)
     ),
     validation = list(passed = NULL, checks = NULL, timestamp = NULL),
-    evaluation = list(results = NULL),
-    models     = list(workflows = NULL),
-    ensemble   = list(stack = NULL),
+    evaluation = contract$evaluation,
+    models     = contract$models,
+    ensemble   = contract$ensemble,
     artifacts  = list(cache_dir = NULL)
   )
 
@@ -821,9 +830,56 @@ describe("configure() covariate fusion", {
   test_that("cov_fusion stored correctly when covariates present", {
 
     hd     <- make_covariate_hd()
-    result <- quiet_configure(hd, cov_fusion = "late")
+    result <- quiet_configure(hd, cov_fusion = "early")
 
-    expect_equal(result$config$expansion$cov_fusion, "late")
+    expect_equal(result$config$expansion$cov_fusion, "early")
+
+  })
+
+  test_that("cov_fusion = 'late' aborts: late fusion is not built (#69)", {
+
+    ## build_recipe() only fuses early, so accepting "late" ran early fusion
+    ## under the other name. Refused with or without covariates present, and
+    ## caught by a handler for either class.
+    expect_error(
+      capture.output(configure(make_covariate_hd(), cov_fusion = "late")),
+      "not built",
+      class = "horizons_configure_error"
+    )
+
+    expect_error(
+      capture.output(configure(make_covariate_hd(), cov_fusion = "late")),
+      class = "horizons_input_error"
+    )
+
+    expect_error(
+      capture.output(configure(make_single_response_hd(), cov_fusion = "late")),
+      class = "horizons_configure_error"
+    )
+
+  })
+
+  test_that("cov_fusion must be NULL or a single string (#69)", {
+
+    hd <- make_covariate_hd()
+
+    expect_error(
+      capture.output(configure(hd, cov_fusion = c("early", "late"))),
+      "single string",
+      class = "horizons_configure_error"
+    )
+
+    expect_error(
+      capture.output(configure(hd, cov_fusion = NA_character_)),
+      "single string",
+      class = "horizons_configure_error"
+    )
+
+    expect_error(
+      capture.output(configure(hd, cov_fusion = TRUE)),
+      "single string",
+      class = "horizons_configure_error"
+    )
 
   })
 
@@ -1066,27 +1122,206 @@ describe("configure() and the object contract", {
     obj$models$predictor_schema <- c("wn_4000")
     obj$ensemble$method         <- "weighted"
 
+    ## Keys the old hand-kept clear list missed (#70)
+    obj$evaluation$rank_metric  <- "rpd"
+    obj$evaluation$n_train      <- 30L
+    obj$evaluation$runtime_secs <- 1
+    obj$models$results          <- tibble::tibble(config_id = "cfg_a")
+    obj$models$uq               <- list(cfg_a = list(quantile_model = "a UQ bundle"))
+    obj$models$ad               <- list(cfg_a = list(centroid = 1))
+    obj$ensemble$model          <- "a trained meta-learner"
+
     class(obj) <- c("horizons_fit", "horizons_eval", "horizons_data", "list")
 
     ## Act
     result <- quiet_configure(obj, outcome = "oc")
 
     ## Assert — the slots and the class are both claims about state that the
-    ## new outcome has invalidated
-    expect_null(result$evaluation$results)
-    expect_null(result$evaluation$best_config)
-    expect_null(result$evaluation$split)
-    expect_null(result$models$workflows)
-    expect_null(result$models$n_models)
-    expect_null(result$models$split)
-    expect_null(result$models$row_index)
-    expect_null(result$models$cv_predictions)
-    expect_null(result$models$predictor_schema)
-    expect_null(result$ensemble$method)
+    ## new outcome has invalidated, so all three slots are back to the
+    ## constructor's shape, key for key
+    blank <- new_horizons_data()
+
+    expect_identical(result$evaluation, blank$evaluation)
+    expect_identical(result$models,     blank$models)
+    expect_identical(result$ensemble,   blank$ensemble)
+    expect_false(has_uq(result))
 
     expect_identical(class(result), c("horizons_data", "list"))
     expect_identical(promoted_state(result), character())
     expect_no_error(validate_horizons_data(result))
+
+  })
+
+
+  test_that("reconfiguring clears the validation verdict and keeps the removal record (#70)", {
+
+    ## Arrange — a configured object that validate() has judged, with one
+    ## outlier removed (P099 is no longer in the analysis table)
+    fx  <- make_select_fixture(n_pool = 40)
+    obj <- quiet_configure(fx$pool, outcome = "clay")
+
+    removal <- list(removed_ids    = "P099",
+                    removal_detail = tibble::tibble(sample_id = "P099", reason = "spectral"),
+                    removed        = TRUE)
+
+    obj$validation$passed                <- TRUE
+    obj$validation$checks                <- tibble::tibble(check_id = "P001", status = "pass")
+    obj$validation$timestamp             <- Sys.time()
+    obj$validation$outliers$spectral_ids <- c("P099", "P012")
+    obj$validation$outliers$response_ids <- "P007"
+    obj$validation$outliers[names(removal)] <- removal
+
+    ## Act
+    result <- quiet_configure(obj, outcome = "oc")
+
+    ## Assert — the verdict and the flags are for the old outcome; the rows
+    ## that left are still gone
+    blank <- new_horizons_data()
+
+    expect_identical(names(result$validation), names(blank$validation))
+    expect_identical(names(result$validation$outliers), names(blank$validation$outliers))
+
+    expect_null(result$validation$passed)
+    expect_null(result$validation$checks)
+    expect_null(result$validation$timestamp)
+    expect_null(result$validation$outliers$spectral_ids)
+    expect_null(result$validation$outliers$response_ids)
+
+    expect_identical(result$validation$outliers[names(removal)], removal)
+
+  })
+
+
+  test_that("reconfiguring a real ensemble() result resets it (#70)", {
+
+    ## Arrange — the cached fit, through ensemble(). This used to abort in
+    ## set_analysis(): the hand-kept clear list missed ensemble$model, which
+    ## promoted_state() counts as promotion.
+    fitted <- readRDS(test_path("fixtures", "ensemble_fit.rds"))
+    ens    <- suppressWarnings(
+      ensemble(fitted, method = "weighted", optimize = FALSE,
+               compute_uq = FALSE, verbose = FALSE)
+    )
+
+    ## The fixture was fitted without UQ bundles; carry one the way
+    ## fit(compute_uq = TRUE) leaves it, or has_uq() is FALSE before and after.
+    ens$models$uq <- stats::setNames(list(list(quantile_model = "a UQ bundle")),
+                                     names(ens$models$workflows)[1])
+
+    ## A removal validate() made before evaluate(), and a select_training()
+    ## record. Both describe rows, not the outcome.
+    removal <- list(removed_ids    = "sample_999",
+                    removal_detail = tibble::tibble(sample_id = "sample_999", reason = "spectral"),
+                    removed        = TRUE)
+
+    ens$validation$outliers[names(removal)] <- removal
+    ens$selection <- make_selection_record(pool_ids = ens$data$analysis$sample_id[1:10])
+
+    expect_true(has_uq(ens))
+    expect_true("an ensemble" %in% promoted_state(ens))
+
+    ## Act
+    result <- quiet_configure(ens)
+
+    ## Assert
+    expect_identical(class(result), c("horizons_data", "list"))
+    expect_identical(promoted_state(result), character())
+    expect_false(has_uq(result))
+
+    blank <- new_horizons_data()
+
+    expect_identical(result$evaluation, blank$evaluation)
+    expect_identical(result$models,     blank$models)
+    expect_identical(result$ensemble,   blank$ensemble)
+
+    expect_identical(result$selection, ens$selection)
+    expect_identical(result$validation$outliers[names(removal)], removal)
+    expect_null(result$validation$passed)
+
+    expect_no_error(validate_horizons_data(result))
+
+  })
+
+
+  test_that("evaluating a re-configured fit matches evaluating the plain object (#70)", {
+
+    ## What the reset promises: nothing the clay fit earned leaks into the oc
+    ## evaluation. rf, because cubist is not bit-reproducible (#51).
+    fx    <- make_select_fixture(n_pool = 60)
+    plain <- fx$pool
+    args  <- list(models = "rf", grid_size = 2L, bayesian_iter = 0L,
+                  final_bayesian_iter = 0L, cv_folds = 3L)
+
+    run_configure <- function(x, outcome) do.call(quiet_configure, c(list(x, outcome = outcome), args))
+    run_evaluate  <- function(x) suppressWarnings(evaluate(x, prune = FALSE, verbose = FALSE, seed = 7L))
+
+    fit_clay <- suppressWarnings(
+      fit(run_evaluate(run_configure(plain, "clay")),
+          n_best = 1L, compute_uq = FALSE, verbose = FALSE, seed = 7L)
+    )
+
+    via_fit   <- run_evaluate(run_configure(fit_clay, "oc"))
+    via_plain <- run_evaluate(run_configure(plain, "oc"))
+
+    ## Timing columns are the only thing allowed to differ
+    untimed <- function(results) results[, setdiff(names(results), "runtime_secs")]
+
+    expect_identical(via_fit$evaluation$split$in_id, via_plain$evaluation$split$in_id)
+    expect_equal(untimed(via_fit$evaluation$results), untimed(via_plain$evaluation$results))
+    expect_identical(via_fit$evaluation$best_config, via_plain$evaluation$best_config)
+    expect_identical(via_fit$models, via_plain$models)
+
+  })
+
+
+  test_that("configure() warns when rows were removed as response outliers of another outcome", {
+
+    ## Arrange — a clay configuration after validate() removed one row as a
+    ## clay response outlier, one as both, and one as a spectral outlier
+    fx  <- make_select_fixture(n_pool = 40)
+    obj <- quiet_configure(fx$pool, outcome = "clay")
+
+    obj$validation$outliers["removed_ids"]    <- list(c("P097", "P098", "P099"))
+    obj$validation$outliers["removed"]        <- list(TRUE)
+    obj$validation$outliers["removal_detail"] <- list(tibble::tibble(
+      sample_id          = c("P097", "P098", "P099"),
+      reason             = c("response", "both", "spectral"),
+      outcome            = c("clay", "clay", NA_character_),
+      spectral_threshold = c(NA, 0.975, 0.975),
+      response_threshold = c(1.5, 1.5, NA)
+    ))
+
+    ## Act
+    to_oc   <- testthat::capture_warnings(utils::capture.output(configure(obj, outcome = "oc")))
+    to_clay <- testthat::capture_warnings(utils::capture.output(configure(obj, outcome = "clay")))
+
+    ## Assert — only the response-only row counts: the spectral removal does
+    ## not depend on the outcome, and the "both" row would have gone as a
+    ## spectral outlier anyway. The same outcome is silent.
+    expect_true(any(grepl("1 row\\(s\\) were removed .*'clay' \\(1\\).*'oc'", to_oc)))
+    expect_false(any(grepl("response outliers", to_clay)))
+
+  })
+
+
+  test_that("configure() warns when a selection was drawn for other properties", {
+
+    ## Arrange — a select_training() record drawn for clay only
+    obj <- make_selected_object()
+    obj$selection$settings$properties <- "clay"
+
+    global <- obj
+    global$selection$settings$scope <- "global"
+
+    ## Act
+    to_oc     <- testthat::capture_warnings(utils::capture.output(configure(obj, outcome = "oc")))
+    to_clay   <- testthat::capture_warnings(utils::capture.output(configure(obj, outcome = "clay")))
+    global_oc <- testthat::capture_warnings(utils::capture.output(configure(global, outcome = "oc")))
+
+    ## Assert — a global draw takes the whole pool, so there is nothing to lose
+    expect_true(any(grepl("drawn by select_training\\(\\) for 'clay'; 'oc' is not one of them", to_oc)))
+    expect_false(any(grepl("select_training", to_clay)))
+    expect_false(any(grepl("select_training", global_oc)))
 
   })
 

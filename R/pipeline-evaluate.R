@@ -82,7 +82,10 @@
 #'   `evaluation$results`, `evaluation$best_config`, `evaluation$split`, and
 #'   associated metadata populated, including `evaluation$parallelize_over`
 #'   (the axis actually used) and `evaluation$workers` (the worker count the
-#'   registered plan offered; 1 when sequential).
+#'   registered plan offered; 1 when sequential). Called on an object that
+#'   has already been through `fit()` or `ensemble()`, it returns a
+#'   `horizons_eval` whose `models` and `ensemble` slots are empty again,
+#'   since both were built on the evaluation it replaces.
 #'
 #' @export
 evaluate <- function(x,
@@ -829,6 +832,10 @@ evaluate <- function(x,
   ## -----------------------------------------------------------------------
 
   total_runtime <- as.numeric(difftime(Sys.time(), start_time, units = "secs"))
+
+  ## Re-evaluating a fitted or ensembled object replaces the evaluation the
+  ## models were selected from, so the models and the ensemble go with it.
+  x <- reset_slots(x, c("models", "ensemble"))
 
   x$evaluation <- list(
     results      = all_results,
