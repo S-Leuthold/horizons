@@ -360,7 +360,8 @@ remove_water_bands <- function(spectra_matrix, wavelengths) {
 #'   wavelengths as columns.
 #' @param wavelengths `numeric.` Wavenumber positions (column names).
 #'
-#' @return `matrix.` Baseline-corrected spectral matrix.
+#' @return `matrix.` Baseline-corrected spectral matrix, the input's shape,
+#'   a single spectrum included.
 #'
 #' @noRd
 apply_baseline_correction <- function(spectra_matrix, wavelengths) {
@@ -389,6 +390,20 @@ apply_baseline_correction <- function(spectra_matrix, wavelengths) {
 
     }
   )
+
+  ## One spectrum comes back from prospectr as a vector -------------------------
+
+  ### prospectr::baseline() drops the edge columns it pads with by indexing
+  ### without drop = FALSE, so a one-row input returns a named vector and the
+  ### reorder below fails on its dimensions (#78). The hull is fitted row by
+  ### row, so the row is put back as a 1 x p matrix, named by wavenumber the
+  ### way prospectr names a matrix result.
+  if (!is.matrix(corrected)) {
+
+    corrected <- matrix(corrected, nrow = 1,
+                        dimnames = list(rownames(spectra_sorted), names(corrected)))
+
+  }
 
   ## Restore the input's own column order ---------------------------------------
 

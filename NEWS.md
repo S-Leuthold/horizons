@@ -602,6 +602,8 @@ consequences; the review itself is in
 
 ## Bug Fixes
 
+* **`standardize(baseline = TRUE)` no longer fails on a single sample** (#78). `prospectr::baseline()` returns a vector rather than a one-row matrix for a single spectrum, and the column reorder after it failed with "incorrect number of dimensions", so one new sample could not be standardized the way the training spectra were, which is the ordinary first step of predicting it. The row is now put back as a 1 × p matrix named by wavenumber. Every other combination of `resample`, `trim`, `remove_water` and `baseline` already ran on one row; a test now checks that, under every combination, a sample standardized alone comes out bit for bit as its row of a batch standardized alike.
+
 * **`configure()` no longer records method defaults the recipe does not run** (#62). It wrote `config$defaults`, a Savitzky-Golay window of 11 and order of 2, a PCA threshold of 0.99 and a `correlation_n` of 200, and gave every configuration three list-columns, `preprocessing_params`, `feature_params` and `transform_params`. Nothing read any of them. The recipe ran a window of 9, an order set by the preprocessing method, a threshold of 0.995, and a correlation step that has no `n` at all. The record and the columns are gone: `config$configs` has six columns, and `config$recipe` holds the settings that do run (see `configure(sg_window, pca_threshold)` under New features). Re-configuring an object saved by an earlier version drops its `config$defaults`.
 
 * `evaluate()` keeps one checkpoint store, a file per config under

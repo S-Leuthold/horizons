@@ -860,6 +860,70 @@ test_that("a point beyond the trim bound does not move the baseline inside it", 
 
 
 ## =============================================================================
+## Single-Sample Objects (#78)
+## =============================================================================
+## Predicting one new sample means standardizing one spectrum the way the
+## training spectra were. Every operation here is row-wise, so a sample
+## standardized alone has to come out as its row of a batch standardized alike.
+
+#' The predictor block of a horizons_data, as a matrix
+#' @noRd
+predictor_block <- function(hd) as.matrix(hd$data$analysis[, predictor_names(hd)])
+
+
+test_that("standardize(baseline = TRUE) runs on a single sample, with and without resampling (#78)", {
+
+  ## MOYS-shaped: stored increasing and off the grid, so resample = 4 really
+  ## interpolates; three random spectra, so the rows differ in shape
+  batch  <- make_axis_spectra(MOYS_WN)
+  single <- subset_rows(batch, "s2", record = FALSE)
+
+  for (res in list(NULL, 4)) {
+
+    one  <- no_output(standardize(single, resample = res, trim = c(600, 4000), baseline = TRUE))
+    many <- no_output(standardize(batch,  resample = res, trim = c(600, 4000), baseline = TRUE))
+
+    expect_identical(one$data$n_rows, 1L)
+    expect_identical(predictor_names(one), predictor_names(many))
+    expect_identical(unname(predictor_block(one)), unname(predictor_block(many)[2, , drop = FALSE]))
+
+  }
+
+})
+
+
+test_that("a single sample standardizes as its row of a batch, under every option (#78)", {
+
+  batch  <- make_axis_spectra(MOYS_WN)
+  single <- subset_rows(batch, "s2", record = FALSE)
+
+  opts <- expand.grid(resample     = c(NA, 4),
+                      trim         = c(FALSE, TRUE),
+                      remove_water = c(FALSE, TRUE),
+                      baseline     = c(FALSE, TRUE))
+
+  for (i in seq_len(nrow(opts))) {
+
+    o    <- opts[i, ]
+    args <- list(resample     = if (is.na(o$resample)) NULL else o$resample,
+                 trim         = if (o$trim) c(600, 4000) else NULL,
+                 remove_water = o$remove_water,
+                 baseline     = o$baseline)
+    what <- paste(names(o), vapply(o, format, character(1)), sep = " = ", collapse = ", ")
+
+    one  <- no_output(do.call(standardize, c(list(single), args)))
+    many <- no_output(do.call(standardize, c(list(batch),  args)))
+
+    expect_identical(predictor_names(one), predictor_names(many), info = what)
+    expect_identical(unname(predictor_block(one)), unname(predictor_block(many)[2, , drop = FALSE]),
+                     info = what)
+
+  }
+
+})
+
+
+## =============================================================================
 ## Helper Edge Cases
 ## =============================================================================
 
@@ -886,6 +950,24 @@ test_that("apply_baseline_correction() returns columns in the order it was given
   inc <- apply_baseline_correction(m[, rev(seq_along(wn))], rev(wn))
 
   expect_equal(unname(inc[, rev(seq_along(wn))]), unname(dec))
+
+})
+
+
+test_that("apply_baseline_correction() returns one spectrum as a 1 x p matrix named by wavenumber (#78)", {
+
+  ## prospectr::baseline() returns a vector for one row
+  wn <- seq(4000, 600, by = -4)
+  m  <- rbind(smooth_spectrum(wn), 2 * smooth_spectrum(wn) + 1e-4 * (wn - 600))
+
+  one  <- apply_baseline_correction(m[2, , drop = FALSE], wn)
+  both <- apply_baseline_correction(m, wn)
+
+  expect_true(is.matrix(one))
+  expect_identical(dim(one), c(1L, length(wn)))
+  expect_identical(colnames(one), colnames(both))
+  expect_identical(colnames(one), as.character(wn))
+  expect_identical(one, both[2, , drop = FALSE])
 
 })
 
