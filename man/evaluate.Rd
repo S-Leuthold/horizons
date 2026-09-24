@@ -59,7 +59,8 @@ this run's training data (the outcome, the sample ids, which columns hold
 the \code{id}, \code{outcome}, \code{predictor} and \code{covariate} roles, and the outcome,
 predictor and covariate values) and tuned with this run's settings
 (\code{cv_folds}, \code{grid_size}, \code{bayesian_iter}, \code{prune}, \code{prune_threshold}
-when pruning, and \code{seed}) and this run's response trim
+when pruning, \code{seed}, and \code{configure()}'s \code{sg_window}, \code{pca_threshold}
+and \code{outcome_range}) and this run's response trim
 (\code{response_threshold}, \code{NA} when none was requested); either mismatch
 aborts, naming what differs.
 So re-standardized spectra, a rescaled outcome, or another outcome on the
@@ -94,9 +95,16 @@ registered plan offered; 1 when sequential) and \code{evaluation$recipe} (the
 \code{sg_window}, its width in cm-1 on the evaluated axis as \code{sg_window_cm},
 and the \code{pca_threshold} every config's recipe ran with) and
 \code{evaluation$response_trim} (the training-partition response trim, or
-\code{NULL} when none was requested; see "Response outliers"). Aborts, before
-any config runs, when \code{configure()}'s \code{sg_window} is not narrower than
-the spectrum. Called on an object that
+\code{NULL} when none was requested; see "Response outliers"). Test-set
+predictions are clamped to \code{configure()}'s \code{outcome_range} before they
+are scored, as are the tuning predictions of a transformed response,
+which are back-transformed first. Aborts, before any config runs, when
+\code{configure()}'s \code{sg_window} is not narrower than the spectrum, and, with class
+\code{horizons_input_error}, when an observed outcome lies outside
+\code{outcome_range} or is infinite, or when \code{metric = "rrmse"} under a range
+whose lower bound is negative (the mean outcome it divides by can then be
+zero or negative) (#76). Checkpoint rows written before the range was
+recorded resume only under the default range. Called on an object that
 has already been through \code{fit()} or \code{ensemble()}, it returns a
 \code{horizons_eval} whose \code{models} and \code{ensemble} slots are empty again,
 since both were built on the evaluation it replaces.

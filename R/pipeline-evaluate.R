@@ -42,7 +42,8 @@
 #'   the `id`, `outcome`, `predictor` and `covariate` roles, and the outcome,
 #'   predictor and covariate values) and tuned with this run's settings
 #'   (`cv_folds`, `grid_size`, `bayesian_iter`, `prune`, `prune_threshold`
-#'   when pruning, and `seed`) and this run's response trim
+#'   when pruning, `seed`, and `configure()`'s `sg_window`, `pca_threshold`
+#'   and `outcome_range`) and this run's response trim
 #'   (`response_threshold`, `NA` when none was requested); either mismatch
 #'   aborts, naming what differs.
 #'   So re-standardized spectra, a rescaled outcome, or another outcome on the
@@ -164,9 +165,16 @@
 #'   `sg_window`, its width in cm-1 on the evaluated axis as `sg_window_cm`,
 #'   and the `pca_threshold` every config's recipe ran with) and
 #'   `evaluation$response_trim` (the training-partition response trim, or
-#'   `NULL` when none was requested; see "Response outliers"). Aborts, before
-#'   any config runs, when `configure()`'s `sg_window` is not narrower than
-#'   the spectrum. Called on an object that
+#'   `NULL` when none was requested; see "Response outliers"). Test-set
+#'   predictions are clamped to `configure()`'s `outcome_range` before they
+#'   are scored, as are the tuning predictions of a transformed response,
+#'   which are back-transformed first. Aborts, before any config runs, when
+#'   `configure()`'s `sg_window` is not narrower than the spectrum, and, with class
+#'   `horizons_input_error`, when an observed outcome lies outside
+#'   `outcome_range` or is infinite, or when `metric = "rrmse"` under a range
+#'   whose lower bound is negative (the mean outcome it divides by can then be
+#'   zero or negative) (#76). Checkpoint rows written before the range was
+#'   recorded resume only under the default range. Called on an object that
 #'   has already been through `fit()` or `ensemble()`, it returns a
 #'   `horizons_eval` whose `models` and `ensemble` slots are empty again,
 #'   since both were built on the evaluation it replaces.
@@ -236,6 +244,24 @@ evaluate <- function(x,
   modelled  <- outcome_complete_rows(analysis, outcome_col)
   analysis  <- modelled$data
   n_dropped <- modelled$n_dropped
+
+  ## -----------------------------------------------------------------------
+  ## Step 2b: The outcome has to lie inside its range
+  ## -----------------------------------------------------------------------
+  ## Every test-set and tuning prediction is clamped to configure()'s
+  ## outcome_range, so an outcome outside it would be scored against values
+  ## the predictions cannot reach. configure() refuses that already, but an
+  ## object configured before the range existed reads as c(0, Inf), and rows
+  ## can change after configure(). Refused here, before any split or tuning,
+  ## so it costs a second rather than the whole grid (#76).
+
+  check_outcome_range(x, verb = "evaluate")
+  outcome_range <- outcome_range_setting(x)
+
+  ## rrmse divides by the mean outcome, which a range with a negative floor
+  ## lets be zero or negative; ranking by its minimum would then pick the
+  ## worst configuration.
+  check_rank_metric_range(metric, outcome_range, verb = "evaluate")
 
   ## -----------------------------------------------------------------------
   ## Step 3: Validate minimum sample size
@@ -344,15 +370,6 @@ evaluate <- function(x,
 
   }
 
-  if (!drawn$stratified && verbose) {
-
-    cat(paste0(
-      "\u2502  ", cli::col_yellow("Stratified split failed, ",
-                                   "retrying without strata"), "\n"
-    ))
-
-  }
-
   train_data <- rsample::training(split)
   test_data  <- rsample::testing(split)
   n_train    <- nrow(train_data)
@@ -362,23 +379,17 @@ evaluate <- function(x,
   ## Step 5: Create CV folds
   ## -----------------------------------------------------------------------
 
-  cv_fold_obj <- tryCatch(
-    rsample::vfold_cv(train_data, v = cv_folds, strata = dplyr::all_of(outcome_col)),
-    error = function(e) {
+  ## Drawn from the stream the split left. The fallback notes print inside
+  ## the tree, after its header (#91).
 
-      if (verbose) {
-
-        cat(paste0(
-          "\u2502  ", cli::col_yellow("Stratified CV failed, ",
-                                       "retrying without strata"), "\n"
-        ))
-
-      }
-
-      rsample::vfold_cv(train_data, v = cv_folds)
-
-    }
+  cv_drawn <- draw_stratified(
+    outcome      = train_data[[outcome_col]],
+    stratified   = function() rsample::vfold_cv(train_data, v = cv_folds,
+                                                strata = dplyr::all_of(outcome_col),
+                                                breaks = STRATA_BREAKS, pool = STRATA_POOL),
+    unstratified = function() rsample::vfold_cv(train_data, v = cv_folds)
   )
+  cv_fold_obj <- cv_drawn$draw
 
   ## -----------------------------------------------------------------------
   ## Step 5b: Fingerprint the training rows
@@ -419,6 +430,9 @@ evaluate <- function(x,
     ## re-runs rather than resumes when only the threshold changed.
     sg_window       = recipe_cfg$sg_window,
     pca_threshold   = recipe_cfg$pca_threshold,
+    ## The range every scored prediction is clamped to (#76): the same fit
+    ## scores differently under another range, so a resume under one refuses.
+    outcome_range      = outcome_range,
     ## The response trim (#77). The fingerprint above already covers the
     ## rows it left, since it hashes the trimmed training part; recording the
     ## threshold as well makes a refusal name the trim as the reason. NA when
@@ -436,6 +450,7 @@ evaluate <- function(x,
   checkpoint_dir     <- NULL
   checkpoint_results <- list()
   legacy_ids         <- character(0)
+  checkpoint_notes   <- character(0)
 
   if (!is.null(output_dir)) {
 
@@ -449,22 +464,15 @@ evaluate <- function(x,
       output_dir = output_dir,
       config_ids = configs$config_id,
       data_fp    = data_fp,
-      settings   = settings,
-      verbose    = verbose
+      settings   = settings
     )
 
+    ## The count of loaded results is the Configs line's "from checkpoint",
+    ## and the notes on dropped rows print under it: both used to print
+    ## here, above the tree's header (#91).
     checkpoint_results <- loaded$rows
     legacy_ids         <- loaded$legacy_ids
-
-    n_loaded <- length(checkpoint_results)
-
-    if (n_loaded > 0 && verbose) {
-
-      cat(paste0(
-        "\u2502  Loaded ", n_loaded, " checkpointed results\n"
-      ))
-
-    }
+    checkpoint_notes   <- loaded$notes
 
   }
 
@@ -492,16 +500,45 @@ evaluate <- function(x,
 
     }
 
+    ## "stratified" only when the strata held: rsample draws unstratified
+    ## below 40 rows without an error (#91; see draw_stratified()). The folds
+    ## are drawn on the training part, so they can be unstratified under a
+    ## stratified split.
     cat(paste0("\u2502  Split: ", n_train, " train / ", n_test, " test (",
-               round(100 * SPLIT_PROP), "/", round(100 * (1 - SPLIT_PROP)), ", stratified)\n"))
+               round(100 * SPLIT_PROP), "/", round(100 * (1 - SPLIT_PROP)), ", ",
+               if (drawn$stratified) "stratified" else "unstratified", ")\n"))
+
+    if (drawn$strata_failed) {
+
+      cat(paste0("\u2502  ", cli::col_yellow("Stratified split failed, ",
+                                             "retrying without strata"), "\n"))
+
+    }
+
     render_response_trim(trimmed$record, legacy_removed)
-    cat(paste0("\u2502  Tuning: ", cv_folds, "-fold CV, grid = ",
-               tuning$grid_size, ", bayesian = ",
+
+    cat(paste0("\u2502  Tuning: ", cv_folds, "-fold CV (",
+               if (cv_drawn$stratified) "stratified" else "unstratified",
+               "), grid = ", tuning$grid_size, ", bayesian = ",
                tuning$bayesian_iter, "\n"))
+
+    if (cv_drawn$strata_failed) {
+
+      cat(paste0("\u2502  ", cli::col_yellow("Stratified CV failed, ",
+                                             "retrying without strata"), "\n"))
+
+    }
+
     cat(paste0("\u2502  Configs: ", n_total, " total",
                if (n_pending < n_total) paste0(" (", n_total - n_pending,
                                                 " from checkpoint)") else "",
                "\n"))
+
+    for (note in checkpoint_notes) {
+
+      cat(paste0("\u2502  ", cli::col_yellow(note), "\n"))
+
+    }
 
     if (axis$axis != "sequential") {
 
@@ -632,7 +669,8 @@ evaluate <- function(x,
         parallel_over   = axis$tune_parallel_over %||% "resamples",
         seed            = seed,
         sg_window       = recipe_cfg$sg_window,
-        pca_threshold   = recipe_cfg$pca_threshold
+        pca_threshold   = recipe_cfg$pca_threshold,
+        outcome_range   = outcome_range
       )
 
       ## Stamp before anything else sees the row, so the in-memory results and
@@ -780,6 +818,7 @@ evaluate <- function(x,
       seed            = seed,
       sg_window       = recipe_cfg$sg_window,
       pca_threshold   = recipe_cfg$pca_threshold,
+      outcome_range   = outcome_range,
       data_fp         = data_fp,
       settings        = settings,
       checkpoint_dir  = checkpoint_dir,
@@ -988,7 +1027,7 @@ read_checkpoint_file <- function(path) {
 
   if (inherits(row, "error")) {
 
-    return(list(row = NULL, error = conditionMessage(row)))
+    return(list(row = NULL, error = condition_summary(row)))
 
   }
 
@@ -1086,7 +1125,7 @@ read_checkpoint_store <- function(output_dir) {
       !"config_id" %in% names(legacy)) {
 
     unreadable[[legacy_file]] <- if (inherits(legacy, "error")) {
-      conditionMessage(legacy)
+      condition_summary(legacy)
     } else {
       "not a checkpoint table with a config_id"
     }
@@ -1138,6 +1177,18 @@ checkpoint_row_verdict <- function(row, data_fp, settings) {
   data_cmp <- compare_record(row_fp$data_fields, data_fp$data_fields)
   stored   <- checkpoint_row_settings(row)
   cmp      <- compare_record(stored, settings)
+
+  ## A row stamped before #76 records no outcome_range, and was scored with
+  ## the zero floor. Under the default range that is this run's scoring, so
+  ## the row is only unverified; under any other range it was clamped
+  ## differently, and ranking it beside this run's rows, or warm-starting
+  ## fit() from it, would mix the two. Refused like a changed setting.
+  if (outcome_range_unrecorded(stored, settings$outcome_range)) {
+
+    cmp$differ  <- c(cmp$differ, "outcome_range")
+    cmp$missing <- setdiff(cmp$missing, "outcome_range")
+
+  }
 
   hash_known <- !is.na(row_fp$data_hash) && !is.na(expected)
 
@@ -1213,24 +1264,27 @@ gate_checkpoint_rows <- function(candidates, data_fp, settings, config_ids = NUL
 #' Load the checkpoint rows evaluate() may resume
 #'
 #' Reads the store, gates every row, and reports: aborts on the first row
-#' written on other training data or under other settings, prints the drops
-#' in the tree, warns naming any file it could not read, copies rows adopted
-#' from a legacy single file into the per-config store (so the legacy file
-#' can then be deleted), and warns once for rows it cannot verify.
+#' written on other training data or under other settings, returns the drops
+#' as notes for `evaluate()` to print inside its tree (they used to print
+#' here, above the tree's header; #91), warns naming any file it could not
+#' read, copies rows adopted from a legacy single file into the per-config
+#' store (so the legacy file can then be deleted), and warns once for rows it
+#' cannot verify.
 #'
 #' @param output_dir The run's output directory.
 #' @param config_ids The configs in this run's grid.
 #' @param data_fp,settings This run's fingerprint and settings.
-#' @param verbose Print drops in the tree.
 #' @param call The frame to report a refusal from; the default is the
 #'   caller's, so the error reads as `evaluate()`'s.
-#' @return List with `rows` (one-row results named by config id) and
+#' @return List with `rows` (one-row results named by config id),
 #'   `legacy_ids` (the ids among them read from a legacy
-#'   `eval_checkpoint.rds`, which still holds them after they are copied).
+#'   `eval_checkpoint.rds`, which still holds them after they are copied) and
+#'   `notes` (character, one tree line per kind of dropped row; empty when
+#'   none were dropped).
 #' @keywords internal
 #' @noRd
 load_eval_checkpoints <- function(output_dir, config_ids, data_fp, settings,
-                                  verbose = TRUE, call = rlang::caller_env()) {
+                                  call = rlang::caller_env()) {
 
   store <- read_checkpoint_store(output_dir)
   gated <- gate_checkpoint_rows(store$rows, data_fp, settings, config_ids)
@@ -1268,26 +1322,24 @@ load_eval_checkpoints <- function(output_dir, config_ids, data_fp, settings,
   ## Report what was dropped, and what could not be read
   ## -------------------------------------------------------------------------
 
-  if (verbose && gated$n_stale > 0) {
+  notes <- character(0)
 
-    cat(paste0(
-      "\u2502  ", cli::col_yellow("Dropped ", gated$n_stale,
-                                   " stale checkpoint entries"), "\n"
-    ))
+  if (gated$n_stale > 0) {
+
+    notes <- c(notes, paste0("Dropped ", gated$n_stale,
+                             " stale checkpoint entries"))
 
   }
 
   ## Rows scored under a different regime (SCORING_SCHEMA) are not comparable
   ## to what this run produces, and ranking them together would make
   ## best_config an artifact of which regime scored each config.
-  if (verbose && gated$n_foreign > 0) {
+  if (gated$n_foreign > 0) {
 
-    cat(paste0(
-      "\u2502  ", cli::col_yellow(
-        "Dropped ", gated$n_foreign, " checkpoint row",
-        if (gated$n_foreign > 1) "s" else "",
-        " scored under an earlier scoring schema (will be re-evaluated)"
-      ), "\n"
+    notes <- c(notes, paste0(
+      "Dropped ", gated$n_foreign, " checkpoint row",
+      if (gated$n_foreign > 1) "s" else "",
+      " scored under an earlier scoring schema (will be re-evaluated)"
     ))
 
   }
@@ -1330,7 +1382,8 @@ load_eval_checkpoints <- function(output_dir, config_ids, data_fp, settings,
 
   list(
     rows       = lapply(gated$kept, `[[`, "row"),
-    legacy_ids = names(from_legacy) %||% character(0)
+    legacy_ids = names(from_legacy) %||% character(0),
+    notes      = notes
   )
 
 }
@@ -1518,6 +1571,29 @@ compare_record <- function(stored, current) {
 
 }
 
+#' Is a result row's range unrecorded under a range other than the default?
+#'
+#' @description
+#' Rows stamped before the outcome range existed (#76) carry no
+#' `outcome_range` in their settings record; they were scored with the zero
+#' floor, which is the default range. Under the default such a row is merely
+#' unverified. Under any other range it was scored differently, and the
+#' checkpoint gate and `fit()` refuse it.
+#'
+#' @param stored The row's settings record, or `NULL` when it has none.
+#' @param current_range This run's range, or `NULL` when unknown (a manifest
+#'   older than the range).
+#' @return `TRUE` when the row has no recorded range and `current_range` is
+#'   not `DEFAULT_OUTCOME_RANGE`.
+#' @keywords internal
+#' @noRd
+outcome_range_unrecorded <- function(stored, current_range) {
+
+  !is.null(current_range) && is.null(stored$outcome_range) &&
+    !identical(as.double(current_range), DEFAULT_OUTCOME_RANGE)
+
+}
+
 #' Describe differing settings for a message
 #'
 #' @param stored,current Settings records.
@@ -1546,7 +1622,9 @@ format_setting_value <- function(v) {
 
   if (length(v) == 1 && is.na(v)) return("NA")
 
-  paste(format(v), collapse = ", ")
+  ## trim: format() pads a vector's elements to one width, which put a
+  ## second space into "-Inf,  Inf" for the outcome range (#76)
+  paste(format(v, trim = TRUE), collapse = ", ")
 
 }
 
@@ -2210,10 +2288,16 @@ outcome_complete_rows <- function(analysis, outcome_col) {
 #' The split `evaluate()` scores on and `fit()` reuses: the rows with an
 #' observed outcome ([outcome_complete_rows()]), then `set.seed(seed)`, then
 #' a `SPLIT_PROP` split stratified on the outcome, falling back to an
-#' unstratified one when stratifying fails. `fit()` calls it when it starts
-#' cold from a configured object with one configuration (#45), so that fit
-#' holds out exactly the rows `evaluate()` would have at the same seed. The
-#' draw was inline in `evaluate()` before, and it is unchanged.
+#' unstratified one when the stratified draw fails. The split can also come
+#' out unstratified with no failure: rsample drops the strata itself when it
+#' cannot bin the outcome (under 40 rows, warning "Too little data to
+#' stratify"; or silently, when a few-valued outcome pools into one stratum or
+#' tied quantiles leave one bin). The object's `strata` attribute names the
+#' outcome either way, so `stratified` in the return value is the record of
+#' which happened (#91; see [draw_stratified()]). `fit()` calls it when it
+#' starts cold from a configured object with one configuration (#45), so that
+#' fit holds out exactly the rows `evaluate()` would have at the same seed.
+#' The draw was inline in `evaluate()` before, and it is unchanged.
 #'
 #' It seeds the global RNG, as `evaluate()` always has: `evaluate()`'s CV
 #' folds are drawn from the state it leaves.
@@ -2225,30 +2309,31 @@ outcome_complete_rows <- function(analysis, outcome_col) {
 #' @param seed Integer. The seed passed to `evaluate()` (or to `fit()` on a
 #'   cold start).
 #' @return List with `split` (the `rsplit`), `n_dropped` (integer, the rows
-#'   whose outcome is `NA`) and `stratified` (`FALSE` when the stratified
-#'   draw failed and the split is unstratified). Aborts as
+#'   whose outcome is `NA`), `stratified` (`FALSE` when the split is
+#'   unstratified, because rsample dropped the strata or the stratified draw
+#'   failed; see [draw_stratified()]) and `strata_failed` (`TRUE` when the
+#'   stratified draw failed and was retried without strata). Aborts as
 #'   [outcome_complete_rows()] does.
 #' @keywords internal
 #' @noRd
 draw_eval_split <- function(analysis, outcome_col, seed) {
 
-  modelled   <- outcome_complete_rows(analysis, outcome_col)
-  stratified <- TRUE
+  modelled <- outcome_complete_rows(analysis, outcome_col)
 
   set.seed(seed)
 
-  split <- tryCatch(
-    rsample::initial_split(modelled$data, prop = SPLIT_PROP,
-                           strata = dplyr::all_of(outcome_col)),
-    error = function(e) {
-
-      stratified <<- FALSE
-      rsample::initial_split(modelled$data, prop = SPLIT_PROP)
-
-    }
+  drawn <- draw_stratified(
+    outcome      = modelled$data[[outcome_col]],
+    stratified   = function() rsample::initial_split(modelled$data, prop = SPLIT_PROP,
+                                                     strata = dplyr::all_of(outcome_col),
+                                                     breaks = STRATA_BREAKS, pool = STRATA_POOL),
+    unstratified = function() rsample::initial_split(modelled$data, prop = SPLIT_PROP)
   )
 
-  list(split = split, n_dropped = modelled$n_dropped, stratified = stratified)
+  list(split         = drawn$draw,
+       n_dropped     = modelled$n_dropped,
+       stratified    = drawn$stratified,
+       strata_failed = drawn$strata_failed)
 
 }
 
@@ -2602,7 +2687,8 @@ evaluation_recipe <- function(x, call = rlang::caller_env()) {
 #'   fixed by `SHARED_ARG_NAMES` in `R/constants.R` and asserted on entry:
 #'   `data`, `resample_idx` (from `resample_indices()`), `configs`, `role_map`,
 #'   `grid_size`, `bayesian_iter`, `prune`, `prune_threshold`, `seed`,
-#'   `sg_window`, `pca_threshold` (the object's recipe settings), `data_fp`
+#'   `sg_window`, `pca_threshold` (the object's recipe settings),
+#'   `outcome_range` (the range scored predictions are clamped to), `data_fp`
 #'   and `settings` (the parent's [eval_data_fingerprint()] and
 #'   [eval_settings()] records, stamped on the row as-is), `checkpoint_dir`,
 #'   and `pkg_version`. There is no `allow_par`: on
@@ -2676,7 +2762,8 @@ evaluate_config_worker <- function(config_i, shared) {
     allow_par       = FALSE,     # configs axis: tune runs sequentially inside
     seed            = shared$seed,
     sg_window       = shared$sg_window,
-    pca_threshold   = shared$pca_threshold
+    pca_threshold   = shared$pca_threshold,
+    outcome_range   = shared$outcome_range
   )
 
   ## Both provenance records are sent rather than rebuilt. The data

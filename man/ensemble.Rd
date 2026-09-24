@@ -67,6 +67,11 @@ between members.
 All three train on the members' out-of-fold predictions and are evaluated on
 the held-out Split-F test set, so the reported ensemble metrics are directly
 comparable to the single-model metrics from \code{fit()}.
+
+Combined predictions are clamped to \code{configure()}'s \code{outcome_range}, as
+every scored and served prediction is, and \code{ensemble()} aborts with class
+\code{horizons_input_error} before fitting anything when an observed outcome
+lies outside it (#76).
 }
 \examples{
 \dontrun{

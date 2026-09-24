@@ -28,6 +28,11 @@
 #' the held-out Split-F test set, so the reported ensemble metrics are directly
 #' comparable to the single-model metrics from `fit()`.
 #'
+#' Combined predictions are clamped to `configure()`'s `outcome_range`, as
+#' every scored and served prediction is, and `ensemble()` aborts with class
+#' `horizons_input_error` before fitting anything when an observed outcome
+#' lies outside it (#76).
+#'
 #' @param x A `horizons_fit` object (output of [fit()]).
 #' @param method Character. Meta-learner to use: `"penalized"` (default),
 #'   `"weighted"`, or `"xgb"`.
@@ -92,6 +97,11 @@ ensemble <- function(x,
     ))
 
   }
+
+  ## The meta-learner trains and is scored on predictions clamped to the
+  ## outcome's range, so the outcome has to lie inside it (#76), as
+  ## evaluate() and fit() require before they fit anything.
+  check_outcome_range(x, verb = "ensemble")
 
   valid_methods <- c("penalized", "weighted", "xgb")
 

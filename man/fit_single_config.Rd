@@ -20,6 +20,7 @@ fit_single_config(
   seed = 42L,
   sg_window = DEFAULT_SG_WINDOW,
   pca_threshold = DEFAULT_PCA_THRESHOLD,
+  outcome_range = DEFAULT_OUTCOME_RANGE,
   response_fences = NULL
 )
 }
@@ -58,6 +59,12 @@ to \code{\link[=build_recipe]{build_recipe()}}. \code{fit()} reads it from \code
 
 \item{pca_threshold}{Numeric. Variance share the \code{pca} feature selection
 keeps, passed to \code{\link[=build_recipe]{build_recipe()}}. Read the same way. Default 0.995.}
+
+\item{outcome_range}{Numeric length-2 vector. The outcome's physical range,
+which the back-transformed OOF, test-set and UQ-calibration predictions
+(and, for a transformed response, the tuning predictions) are clamped
+to. \code{fit()} reads it from \code{configure()}'s \code{config$outcome_range}.
+Default \code{c(0, Inf)}.}
 
 \item{response_fences}{Numeric \code{c(lower = , upper = )} or \code{NULL}. The
 training-partition fences \code{evaluate()} trimmed response outliers by

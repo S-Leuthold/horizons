@@ -31,6 +31,11 @@
 #'   `config$recipe`, the value `evaluate()` ran with. Default 9.
 #' @param pca_threshold Numeric. Variance share the `pca` feature selection
 #'   keeps, passed to [build_recipe()]. Read the same way. Default 0.995.
+#' @param outcome_range Numeric length-2 vector. The outcome's physical range,
+#'   which the back-transformed OOF, test-set and UQ-calibration predictions
+#'   (and, for a transformed response, the tuning predictions) are clamped
+#'   to. `fit()` reads it from `configure()`'s `config$outcome_range`.
+#'   Default `c(0, Inf)`.
 #' @param response_fences Numeric `c(lower = , upper = )` or `NULL`. The
 #'   training-partition fences `evaluate()` trimmed response outliers by
 #'   (#77), passed by `fit()` when that trim removed rows. The CV folds then
@@ -64,6 +69,7 @@ fit_single_config <- function(config_row,
                               seed                = 42L,
                               sg_window           = DEFAULT_SG_WINDOW,
                               pca_threshold       = DEFAULT_PCA_THRESHOLD,
+                              outcome_range       = DEFAULT_OUTCOME_RANGE,
                               response_fences     = NULL) {
 
   start_time <- Sys.time()
@@ -80,16 +86,23 @@ fit_single_config <- function(config_row,
   train_data     <- train_data %||% rsample::training(split_F)
   test_data      <- rsample::testing(split_F)
 
-  ## Accumulate warnings from all steps
-  collected_warnings <- character(0)
+  ## Accumulate warnings from all steps, as records that render_warning_log()
+  ## reduces to one line per distinct message (#96)
+  warning_log <- new_warning_log()
 
   collect_from <- function(safe_result) {
 
-    if (!is.null(safe_result$warnings)) {
+    warning_log <<- dplyr::bind_rows(warning_log, text_records(safe_result$warnings))
 
-      collected_warnings <<- c(collected_warnings, unlist(safe_result$warnings))
+  }
 
-    }
+  ## Warnings tune caught inside its resampling and kept in .notes, which
+  ## safely_execute() never sees. Both the re-tune and the out-of-fold
+  ## predictions resample cv_resamples, so their fold counts merge.
+  collect_notes_from <- function(tune_results) {
+
+    notes <- tune_note_records(tune_results, type = "warning", scope = "cv")
+    warning_log <<- dplyr::bind_rows(warning_log, notes)
 
   }
 
@@ -116,7 +129,7 @@ fit_single_config <- function(config_row,
       cv_metrics       = NULL,
       uq               = NULL,
       ad               = NULL,
-      warnings         = if (length(collected_warnings) > 0) collected_warnings else NULL,
+      warnings         = render_warning_log(warning_log),
       error_message    = error_msg,
       runtime_secs     = as.numeric(difftime(Sys.time(), start_time, units = "secs"))
     )
@@ -138,7 +151,7 @@ fit_single_config <- function(config_row,
   if (!is.null(recipe_result$error)) {
 
     return(make_failed(
-      paste0("Recipe building failed: ", recipe_result$error$message)
+      paste0("Recipe building failed: ", condition_summary(recipe_result$error))
     ))
 
   }
@@ -159,7 +172,7 @@ fit_single_config <- function(config_row,
   if (!is.null(model_result$error)) {
 
     return(make_failed(
-      paste0("Model specification failed: ", model_result$error$message)
+      paste0("Model specification failed: ", condition_summary(model_result$error))
     ))
 
   }
@@ -182,7 +195,7 @@ fit_single_config <- function(config_row,
   if (!is.null(wflow_result$error)) {
 
     return(make_failed(
-      paste0("Workflow creation failed: ", wflow_result$error$message)
+      paste0("Workflow creation failed: ", condition_summary(wflow_result$error))
     ))
 
   }
@@ -216,7 +229,7 @@ fit_single_config <- function(config_row,
     if (!is.null(finalize_result$error)) {
 
       return(make_failed(
-        paste0("Parameter finalization failed: ", finalize_result$error$message)
+        paste0("Parameter finalization failed: ", condition_summary(finalize_result$error))
       ))
 
     }
@@ -233,8 +246,9 @@ fit_single_config <- function(config_row,
   ## Scored on the original response scale, for the same reason as in
   ## evaluate_single_config(): the skip = TRUE transform never reaches tune's
   ## assessment set. tune_warmstart_bayes() selects on "rmse" by name, which
-  ## the factory preserves. See #49.
-  tune_metrics <- tuning_metric_set(transformation, metrics = c("rmse", "rsq"))
+  ## the factory preserves. See #49. Clamped to the outcome's range (#76).
+  tune_metrics <- tuning_metric_set(transformation, metrics = c("rmse", "rsq"),
+                                    outcome_range = outcome_range)
 
   ## -----------------------------------------------------------------------
   ## Step 6: Warm-start Bayesian re-tuning
@@ -258,13 +272,14 @@ fit_single_config <- function(config_row,
   if (!is.null(tune_result$error)) {
 
     return(make_failed(
-      paste0("Warm-start tuning failed: ", tune_result$error$message)
+      paste0("Warm-start tuning failed: ", condition_summary(tune_result$error))
     ))
 
   }
 
   warmstart <- tune_result$result
   collect_from(tune_result)
+  collect_notes_from(warmstart$tune_results)
 
   warm_start        <- !isTRUE(warmstart$fallback_used)
   start_grid_size   <- as.integer(warmstart$grid_points %||% NA_integer_)
@@ -311,13 +326,14 @@ fit_single_config <- function(config_row,
   if (!is.null(resample_result$error)) {
 
     return(make_failed(
-      paste0("OOF predictions failed: ", resample_result$error$message)
+      paste0("OOF predictions failed: ", condition_summary(resample_result$error))
     ))
 
   }
 
   cv_fit <- resample_result$result
   collect_from(resample_result)
+  collect_notes_from(cv_fit)
 
   ## Extract raw OOF predictions
   oof_raw <- tune::collect_predictions(cv_fit)
@@ -332,13 +348,13 @@ fit_single_config <- function(config_row,
   )
 
   ## Back-transform .pred to original scale. Unconditional, like predict():
-  ## "none" is a passthrough, and the zero floor inside
+  ## "none" is a passthrough, and the clamp to the outcome's range inside
   ## back_transform_predictions() must reach these OOF predictions because
-  ## they are the meta-learner's training features, and predict() floors the
-  ## same members at serve time (#53).
+  ## they are the meta-learner's training features, and predict() clamps the
+  ## same members at serve time (#53, #76).
   bt_result <- safely_execute(
     back_transform_predictions(cv_predictions$.pred_trans, transformation,
-                               warn = FALSE),
+                               warn = FALSE, outcome_range = outcome_range),
     log_error          = FALSE,
     capture_conditions = TRUE
   )
@@ -346,7 +362,7 @@ fit_single_config <- function(config_row,
   if (!is.null(bt_result$error)) {
 
     return(make_failed(
-      paste0("OOF back-transformation failed: ", bt_result$error$message)
+      paste0("OOF back-transformation failed: ", condition_summary(bt_result$error))
     ))
 
   }
@@ -393,7 +409,7 @@ fit_single_config <- function(config_row,
   if (!is.null(final_fit_result$error)) {
 
     return(make_failed(
-      paste0("Final model fit failed: ", final_fit_result$error$message)
+      paste0("Final model fit failed: ", condition_summary(final_fit_result$error))
     ))
 
   }
@@ -414,16 +430,17 @@ fit_single_config <- function(config_row,
   if (!is.null(test_pred_result$error)) {
 
     return(make_failed(
-      paste0("Test prediction failed: ", test_pred_result$error$message)
+      paste0("Test prediction failed: ", condition_summary(test_pred_result$error))
     ))
 
   }
 
   test_preds <- test_pred_result$result$.pred
 
-  ## Back-transform, unconditionally (see the OOF block above and #53)
+  ## Back-transform, unconditionally (see the OOF block above, #53 and #76)
   bt_test <- safely_execute(
-    back_transform_predictions(test_preds, transformation, warn = FALSE),
+    back_transform_predictions(test_preds, transformation, warn = FALSE,
+                               outcome_range = outcome_range),
     log_error          = FALSE,
     capture_conditions = TRUE
   )
@@ -431,7 +448,7 @@ fit_single_config <- function(config_row,
   if (!is.null(bt_test$error)) {
 
     return(make_failed(
-      paste0("Test back-transformation failed: ", bt_test$error$message)
+      paste0("Test back-transformation failed: ", condition_summary(bt_test$error))
     ))
 
   }
@@ -502,7 +519,8 @@ fit_single_config <- function(config_row,
         role_map        = role_map,
         transformation  = transformation,
         level_default   = DEFAULT_UQ_LEVEL,
-        seed            = seed
+        seed            = seed,
+        outcome_range   = outcome_range
       ),
       log_error          = FALSE,
       capture_conditions = TRUE
@@ -591,7 +609,7 @@ fit_single_config <- function(config_row,
     cv_metrics       = cv_metrics,
     uq               = uq_result,
     ad               = ad_result,
-    warnings         = if (length(collected_warnings) > 0) collected_warnings else NULL,
+    warnings         = render_warning_log(warning_log),
     error_message    = NA_character_,
     runtime_secs     = runtime
   )

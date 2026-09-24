@@ -521,7 +521,7 @@ load_opus_files <- function(source,
     }, error = function(e) {
 
       n_failed <<- n_failed + 1L
-      cli::cli_warn("Failed to read {.path {file_paths[[i]]}}: {e$message}")
+      cli::cli_warn("Failed to read {.path {file_paths[[i]]}}: {condition_summary(e)}")
       return(NULL)
 
     })

@@ -111,15 +111,35 @@
 #'   `evaluate()` would. Default 307L.
 #' @param verbose Logical. Print progress tree to console. Default TRUE.
 #'
+#' @section Outcome range:
+#' Every prediction `fit()` scores (out-of-fold, test and calibration) is
+#' clamped to `configure()`'s `outcome_range`, as `predict()` clamps what it
+#' serves. Before anything is drawn or fitted, on either path, `fit()` aborts
+#' with class `horizons_input_error` when an observed outcome lies outside
+#' the range or is infinite, naming `outcome_range` and how to set it (#76);
+#' when the ranking metric is `"rrmse"` and the range's lower bound is
+#' negative, since the mean outcome it divides by can then be zero or
+#' negative; and, on the `evaluate()` path, when the range differs from the
+#' one `evaluate()` recorded on its results rows (rows from before the range
+#' was recorded count as the default), since the members were chosen on
+#' predictions clamped to that range.
+#'
 #' @return A `horizons_fit` object (inherits from `horizons_eval`,
 #'   `horizons_data`) with `models$` slot populated. The slot includes
-#'   `response_bound` (max training outcome times `RESPONSE_BOUND_MARGIN`,
-#'   where the training rows are the ones the final models are fit on:
+#'   `response_bound`, the deploy-time winsorization guardrail `predict()`
+#'   applies to back-transformed point predictions:
+#'   `max + (RESPONSE_BOUND_MARGIN - 1) * (max - anchor)`, capped at a finite
+#'   upper bound of `outcome_range`, where `max` is the largest training
+#'   outcome and the anchor is the lower bound of `outcome_range`, or the
+#'   smallest training outcome when that bound is `-Inf`. Under the default
+#'   range the anchor is 0 and the bound is the largest training outcome
+#'   times `RESPONSE_BOUND_MARGIN`, as before the range existed; for any
+#'   range it lies above the largest training outcome unless the cap binds.
+#'   The training rows are the ones the final models are fit on:
 #'   `evaluate()`'s training part, less the calibration set when UQ or AD is
 #'   on, plus the training rows a response trim left out, so the bound never
-#'   sits below a value observed in the training partition),
-#'   the deploy-time winsorization guardrail `predict()` applies to
-#'   back-transformed point predictions, and `selection_present` (whether the
+#'   sits below a value observed in the training partition. The slot also
+#'   includes `selection_present` (whether the
 #'   training object carried a `$selection` from `select_training()`, which
 #'   `predict()` reads when asked for conformal intervals). Called on a
 #'   `horizons_ensemble`, it returns a `horizons_fit` whose `ensemble` slot
@@ -175,19 +195,32 @@ fit <- function(x,
 
   }
 
+  ## The outcome has to lie inside the range every prediction is clamped to,
+  ## checked on either path before anything is drawn or fitted (#76).
+  ## configure() and evaluate() check it too, but an object configured before
+  ## the range existed reads as c(0, Inf), and its rows can have changed
+  ## since; this is the last check before the re-tune pays for itself.
+  check_outcome_range(x, verb = "fit")
+  outcome_range <- outcome_range_setting(x)
+
+  ## The metric fit() will rank by, and that the ensemble inherits: rrmse
+  ## ranks backwards once the mean outcome can be negative.
+  check_rank_metric_range(metric %||% x$evaluation$rank_metric, outcome_range,
+                          verb = "fit")
+
+  ## evaluate() scored and ranked the configurations under the range it
+  ## stamped on each row; members chosen and warm-started under another range
+  ## would carry that range's scoring into this fit. A cold start has no
+  ## evaluate() rows to compare.
+  if (!cold_start) check_evaluated_outcome_range(x, outcome_range)
+
+  ## Notes on the draws and the member count are printed inside the tree,
+  ## after its header in Step 3; they used to print above it (#91).
+
   if (cold_start) {
 
     cold         <- cold_start_evaluation(x, metric, seed)
     x$evaluation <- cold$evaluation
-
-    if (!cold$stratified && verbose) {
-
-      cat(paste0(
-        "\u2502  ", cli::col_yellow("Stratified split failed, ",
-                                     "retrying without strata"), "\n"
-      ))
-
-    }
 
   }
 
@@ -278,26 +311,8 @@ fit <- function(x,
   ## Cap n_best at available candidates. A cold start has one configuration
   ## by construction, so the default n_best is no request worth a note.
   n_available <- nrow(ranked)
-  n_best      <- as.integer(n_best)
-
-  if (n_best > n_available) {
-
-    if (verbose && !cold_start) {
-
-      cat(paste0(
-        "\u2502  ", cli::col_yellow(
-          "Requested n_best = ", n_best,
-          " but only ", n_available,
-          if (candidates$fallback) " pruned" else " successful",
-          " configs available. Using ", n_available, "."
-        ), "\n"
-      ))
-
-    }
-
-    n_best <- n_available
-
-  }
+  n_requested <- as.integer(n_best)
+  n_best      <- min(n_requested, n_available)
 
   top_configs <- ranked[seq_len(n_best), ]
 
@@ -446,21 +461,23 @@ fit <- function(x,
   ## since the OOF coverage is read on trimmed rows too. The trimmed rows are
   ## then dropped from the fit rows only. Calibration rows still never train,
   ## and test rows never calibrate. Without a trim the pool is train_F.
-  calib_data <- NULL
-  calib_pool <- if (is.null(trimmed_rows)) train_F else dplyr::bind_rows(train_F, trimmed_rows)
+  calib_data  <- NULL
+  calib_drawn <- NULL
+  calib_note  <- NULL
+  calib_pool  <- if (is.null(trimmed_rows)) train_F else dplyr::bind_rows(train_F, trimmed_rows)
 
   if (compute_uq || compute_ad) {
 
     set.seed(calib_split_seed(seed))
 
-    split_C <- tryCatch(
-      rsample::initial_split(calib_pool, prop = CALIB_PROP, strata = dplyr::all_of(outcome_col)),
-      error = function(e) {
-
-        rsample::initial_split(calib_pool, prop = CALIB_PROP)
-
-      }
+    calib_drawn <- draw_stratified(
+      outcome      = calib_pool[[outcome_col]],
+      stratified   = function() rsample::initial_split(calib_pool, prop = CALIB_PROP,
+                                                       strata = dplyr::all_of(outcome_col),
+                                                       breaks = STRATA_BREAKS, pool = STRATA_POOL),
+      unstratified = function() rsample::initial_split(calib_pool, prop = CALIB_PROP)
     )
+    split_C <- calib_drawn$draw
 
     train_Fit  <- rsample::training(split_C)
     calib_data <- rsample::testing(split_C)
@@ -475,19 +492,10 @@ fit <- function(x,
     ## that needed it \u2014 neither UQ nor AD can calibrate on an undersized set.
     if (nrow(calib_data) < N_CALIB_MIN) {
 
-      if (verbose) {
-
-        disabled <- paste(c(if (compute_uq) "UQ", if (compute_ad) "AD"),
+      disabled   <- paste(c(if (compute_uq) "UQ", if (compute_ad) "AD"),
                           collapse = " and ")
-
-        cat(paste0(
-          "\u2502  ", cli::col_yellow(
-            "Calibration set too small (", nrow(calib_data),
-            " < ", N_CALIB_MIN, "). Disabling ", disabled, "."
-          ), "\n"
-        ))
-
-      }
+      calib_note <- paste0("Calibration set too small (", nrow(calib_data),
+                           " < ", N_CALIB_MIN, "). Disabling ", disabled, ".")
 
       compute_uq <- FALSE
       compute_ad <- FALSE
@@ -510,24 +518,14 @@ fit <- function(x,
 
   set.seed(seed)
 
-  cv_resamples <- tryCatch(
-    rsample::vfold_cv(train_Fit, v = cv_folds, strata = dplyr::all_of(outcome_col)),
-    error = function(e) {
-
-      if (verbose) {
-
-        cat(paste0(
-          "\u2502  ", cli::col_yellow(
-            "Stratified CV failed, retrying without strata"
-          ), "\n"
-        ))
-
-      }
-
-      rsample::vfold_cv(train_Fit, v = cv_folds)
-
-    }
+  cv_drawn <- draw_stratified(
+    outcome      = train_Fit[[outcome_col]],
+    stratified   = function() rsample::vfold_cv(train_Fit, v = cv_folds,
+                                                strata = dplyr::all_of(outcome_col),
+                                                breaks = STRATA_BREAKS, pool = STRATA_POOL),
+    unstratified = function() rsample::vfold_cv(train_Fit, v = cv_folds)
   )
+  cv_resamples <- cv_drawn$draw
 
   ## -----------------------------------------------------------------------
   ## Step 3: Tree header
@@ -559,23 +557,59 @@ fit <- function(x,
         nrow(eval_results), " configurations\n"
       ))
 
+      if (n_requested > n_available) {
+
+        cat(paste0(
+          "\u2502  ", cli::col_yellow(
+            "Requested n_best = ", n_requested,
+            " but only ", n_available,
+            if (candidates$fallback) " pruned" else " successful",
+            " configs available. Using ", n_available, "."
+          ), "\n"
+        ))
+
+      }
+
     }
+
+    ## Each draw fit() makes says "stratified" only when the strata held:
+    ## rsample draws unstratified below 40 rows without an error (#91; see
+    ## draw_stratified()). evaluate()'s split, reused, is reported by
+    ## evaluate().
 
     cat(paste0(
       "\u2502  Split: ", n_train, " train / ", n_test, " test (",
-      if (cold_start) "the rows evaluate() holds out at this seed" else "evaluate()'s held-out rows",
+      if (cold_start) {
+        paste0("the rows evaluate() holds out at this seed, ",
+               if (cold$stratified) "stratified" else "unstratified")
+      } else {
+        "evaluate()'s held-out rows"
+      },
       ")\n"
     ))
 
+    if (cold_start && cold$strata_failed) {
+
+      cat(paste0(
+        "\u2502  ", cli::col_yellow("Stratified split failed, ",
+                                     "retrying without strata"), "\n"
+      ))
+
+    }
+
     render_response_trim(x$evaluation$response_trim, legacy_removed)
 
-    if (compute_uq) {
+    ## The calibration set UQ and AD share, named for whichever it serves;
+    ## with AD alone it went unreported. Both flags are FALSE here when the
+    ## set was too small, and the note below says so instead.
+    if (compute_uq || compute_ad) {
 
       n_trim_calib <- sum(calib_data[[id_col]] %in% trimmed_ids)
 
       cat(paste0(
-        "\u2502  UQ calibration: ", nrow(train_Fit), " fit / ",
-        nrow(calib_data), " calibration",
+        "\u2502  ", paste(c(if (compute_uq) "UQ", if (compute_ad) "AD"), collapse = " and "),
+        " calibration: ", nrow(train_Fit), " fit / ", nrow(calib_data), " calibration, ",
+        if (calib_drawn$stratified) paste0("stratified on ", outcome_col) else "unstratified",
         if (!is.null(trimmed_rows)) {
           paste0(" (drawn from the untrimmed training part; ", n_trim_calib,
                  " trimmed row", if (n_trim_calib != 1) "s", " in it)")
@@ -583,11 +617,39 @@ fit <- function(x,
         "\n"
       ))
 
+      if (calib_drawn$strata_failed) {
+
+        cat(paste0(
+          "\u2502  ", cli::col_yellow("Stratified calibration split failed, ",
+                                       "retrying without strata"), "\n"
+        ))
+
+      }
+
+    }
+
+    if (!is.null(calib_note)) {
+
+      cat(paste0("\u2502  ", cli::col_yellow(calib_note), "\n"))
+
     }
 
     cat(paste0(
-      "\u2502  CV: ", cv_folds, "-fold stratified on ", outcome_col, "\n"
+      "\u2502  CV: ", cv_folds, "-fold ",
+      if (cv_drawn$stratified) paste0("stratified on ", outcome_col) else "unstratified",
+      "\n"
     ))
+
+    if (cv_drawn$strata_failed) {
+
+      cat(paste0(
+        "\u2502  ", cli::col_yellow(
+          "Stratified CV failed, retrying without strata"
+        ), "\n"
+      ))
+
+    }
+
     cat(paste0(
       "\u2502  Bayesian: ", final_bayesian_iter,
       if (cold_start) " iterations from a space-filling grid\n" else " iterations with warm-start\n"
@@ -656,6 +718,7 @@ fit <- function(x,
       seed                = seed,
       sg_window           = recipe_cfg$sg_window,
       pca_threshold       = recipe_cfg$pca_threshold,
+      outcome_range       = outcome_range,
       response_fences     = response_fences
     )
 
@@ -908,15 +971,19 @@ fit <- function(x,
   predictor_schema <- role_map$variable[role_map$role == "predictor"]
 
   ## Deploy-time guardrail bound: predictions are winsorized to this value in
-  ## predict_one_config(). max-times-margin (not a quantile) — the bound should
-  ## permit modest extrapolation and catch only the physically absurd. Taken
-  ## over train_Fit, the rows the final models are fit on, so neither Split
-  ## F's test rows nor the calibration rows shape it (#68), plus the rows a
-  ## response trim left out of them (#77): those are training-partition rows
-  ## too, and a bound under values actually observed there would clamp the
-  ## very extremes the trim set aside.
-  response_bound <- max(c(train_Fit[[outcome_col]], trimmed_rows[[outcome_col]]),
-                        na.rm = TRUE) * RESPONSE_BOUND_MARGIN
+  ## predict_one_config(). A margin over the maximum (not a quantile) — the
+  ## bound should permit modest extrapolation and catch only the physically
+  ## absurd. Scaled on the span from the range's floor (or the training
+  ## minimum, with no floor) so it lies above the maximum for a signed outcome
+  ## too; under the default range it is max * RESPONSE_BOUND_MARGIN exactly
+  ## (#76). Taken over train_Fit, the rows the final models are fit on, so
+  ## neither Split F's test rows nor the calibration rows shape it (#68), plus
+  ## the rows a response trim left out of them (#77): those are
+  ## training-partition rows too, and a bound under values actually observed
+  ## there would clamp the very extremes the trim set aside.
+  response_bound <- compute_response_bound(
+    c(train_Fit[[outcome_col]], trimmed_rows[[outcome_col]]), outcome_range
+  )
 
   ## Did the training rows come from select_training()? If so the calibration
   ## split below was drawn from rows chosen for proximity to the targets, so
@@ -1062,8 +1129,10 @@ fit <- function(x,
 #' @param seed The `seed` passed to `fit()`.
 #' @param call The call the conditions are attributed to. Default: the
 #'   caller, `fit()`.
-#' @return List with `evaluation` (the record) and `stratified` (`FALSE` when
-#'   the split fell back to unstratified). Aborts with class
+#' @return List with `evaluation` (the record), `stratified` (`FALSE` when
+#'   the split is unstratified) and `strata_failed` (`TRUE` when the
+#'   stratified draw failed and was retried without strata), as
+#'   [draw_eval_split()] returns them. Aborts with class
 #'   `horizons_input_error` when the object has no configuration or more than
 #'   one, too few rows have an observed outcome, the window is at least as
 #'   wide as the spectrum, or `validate()`'s response-trim request is for
@@ -1162,8 +1231,70 @@ cold_start_evaluation <- function(x, metric, seed, call = rlang::caller_env()) {
       runtime_secs  = 0,
       timestamp     = Sys.time()
     ),
-    stratified = drawn$stratified
+    stratified    = drawn$stratified,
+    strata_failed = drawn$strata_failed
   )
+
+}
+
+## ---------------------------------------------------------------------------
+## check_evaluated_outcome_range — evaluate() ranked under this range
+## ---------------------------------------------------------------------------
+
+#' Refuse a fit whose evaluation was scored under another outcome range
+#'
+#' @description
+#' `evaluate()` stamps the range it clamped with on every results row, in the
+#' `settings` record (#76). `fit()` takes its members and their warm-start
+#' parameters from those rows, so a range changed since `evaluate()` would
+#' carry the old range's scoring into the new fit. The comparison is the
+#' checkpoint gate's: a recorded range must equal this object's, and a row
+#' with no recorded range (evaluated before the range existed, under the
+#' zero floor) passes only under the default range.
+#'
+#' @param x A `horizons_eval` that was screened by `evaluate()`.
+#' @param outcome_range `numeric(2)`. The object's range, from
+#'   [outcome_range_setting()].
+#' @param call The call the condition is attributed to. Default: the caller,
+#'   `fit()`.
+#' @return `NULL`, invisibly. Aborts with class `horizons_input_error`.
+#' @keywords internal
+#' @noRd
+check_evaluated_outcome_range <- function(x, outcome_range,
+                                          call = rlang::caller_env()) {
+
+  results <- x$evaluation$results
+
+  if (!is.data.frame(results) || nrow(results) == 0) return(invisible(NULL))
+
+  stamps <- if ("settings" %in% names(results)) {
+    lapply(results$settings, function(s) if (is.list(s)) normalize_eval_settings(s) else NULL)
+  } else {
+    rep(list(NULL), nrow(results))
+  }
+
+  differs <- vapply(stamps, function(s) {
+    if (is.null(s$outcome_range)) {
+      outcome_range_unrecorded(s, outcome_range)
+    } else {
+      !identical(s$outcome_range, as.double(outcome_range))
+    }
+  }, logical(1))
+
+  if (!any(differs)) return(invisible(NULL))
+
+  recorded <- unique(vapply(stamps[differs], function(s) {
+    if (is.null(s$outcome_range)) "unrecorded (the zero floor)" else format_outcome_range(s$outcome_range)
+  }, character(1)))
+
+  range_text <- format_outcome_range(outcome_range)
+
+  cli::cli_abort(c(
+    "{.fn evaluate} scored these configurations under another {.arg outcome_range}.",
+    "x" = "{.fn evaluate} recorded {recorded} on {sum(differs)} results row{?s}; this object's range is {range_text}.",
+    "i" = "The members and their warm-start parameters were chosen on predictions clamped to that range.",
+    "i" = "Re-run {.fn evaluate} on the object as it is now."
+  ), class = "horizons_input_error", call = call)
 
 }
 

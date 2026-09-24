@@ -8,7 +8,8 @@ back_transform_predictions(
   predictions,
   transformation,
   warn = TRUE,
-  upper_bound = NULL
+  upper_bound = NULL,
+  outcome_range = c(0, Inf)
 )
 }
 \arguments{
@@ -21,15 +22,23 @@ Note: \code{warn = FALSE} suppresses these diagnostic warnings only — the
 \code{upper_bound} winsorization warning is a guardrail and always fires. All
 conditions signal via \code{cli} (uniform \code{rlang_warning} class).}
 
-\item{upper_bound}{Optional single positive finite numeric. When supplied,
+\item{upper_bound}{Optional single finite numeric above the lower bound of
+\code{outcome_range} (so positive under the default range). When supplied,
 the back-transformed (original-scale) predictions are winsorized to this
 bound, uniformly across all transformations. \code{NULL} (the default) applies
 no upper clamp. The winsorization warning is NOT gated by \code{warn} — a
 caller that passes a bound has opted into the guardrail and must see it
 trip (visible recoverable failure over silent drift).}
+
+\item{outcome_range}{Numeric length-2 vector, lower < upper, either end
+possibly infinite: the outcome's physical range, which every
+original-scale value is clamped to. A \code{-Inf} lower bound applies no
+floor and an \code{Inf} upper bound no cap. Default \code{c(0, Inf)}, the
+non-negative floor.}
 }
 \value{
-Numeric vector on the original response scale, floored at zero.
+Numeric vector on the original response scale, clamped to
+\code{outcome_range}.
 }
 \description{
 Inverts response transformations applied by \code{step_log(offset = 1)} or
@@ -39,12 +48,15 @@ truth for back-transformation logic in horizons.
 \strong{Important:} \code{step_log(offset = 1)} computes \code{log(x + 1)}, so the correct
 inverse is \code{exp(x) - 1}, NOT \code{exp(x)}. Similarly, \code{step_log(base = 10, offset = 1)} computes \code{log10(x + 1)}, so the inverse is \code{10^x - 1}.
 
-Original-scale output is floored at zero for every transformation,
-including \code{"none"}: the soil properties this package targets are
-non-negative by physical constraint, and \code{predict()} has always enforced
-that. Flooring here means the evaluation, OOF and calibration paths score
-the same predictions a deployed model would serve, rather than a vector
-that differs from it wherever a model extrapolated below zero. The
+Original-scale output is clamped to \code{outcome_range} for every
+transformation, including \code{"none"}. The range is the outcome's physical
+range, set by \code{\link[=configure]{configure()}}; its default, \code{c(0, Inf)}, is the non-negative
+floor the package has always applied, which is a physical constraint only
+for non-negative properties. A signed property (δ13C, say) is configured
+with \code{outcome_range = c(-Inf, Inf)} and is not floored at all (#76).
+Clamping here means the evaluation, OOF and calibration paths score the
+same predictions a deployed model would serve, rather than a vector that
+differs from it wherever a model extrapolated past the range (#53). The
 \code{upper_bound} guardrail is deliberately not applied the same way, because
 fit-time ranking must see raw upper-tail behaviour.
 }

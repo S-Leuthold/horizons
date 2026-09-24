@@ -70,20 +70,24 @@ cv_plus_indices <- function(n, level) {
 #' @description
 #' The single fold-prediction primitive: a weighted fold model (weights
 #' tibble) combines by matrix product; a penalized/xgb fold model (trained
-#' workflow) predicts through [stats::predict()]. Floored at zero to match
-#' deployed-combine semantics. Shared by `fit_uq_fold_models()` (assessment
-#' predictions), `compute_ensemble_uq()` (leave-self-out diagnostics), and
+#' workflow) predicts through [stats::predict()]. Clamped to the outcome's
+#' range (a floor at zero under the default, #76) to match deployed-combine
+#' semantics. Shared by `fit_uq_fold_models()` (assessment predictions),
+#' `compute_ensemble_uq()` (leave-self-out diagnostics), and
 #' `predict_ensemble_uq_matrix()` (new-data intervals) so the dispatch and
-#' floor semantics cannot drift across the three call sites.
+#' clamp semantics cannot drift across the three call sites.
 #'
 #' @param fold_model A weights tibble (`member`, `coef`) or a trained workflow.
 #' @param method Character. The ensemble method (`"weighted"` combines by
 #'   product; anything else predicts through the workflow).
 #' @param member_mat Tibble/data.frame of `member_<config_id>` columns, in the
 #'   fold model's training column order.
-#' @return Numeric vector of floored fold predictions, one per row.
+#' @param outcome_range Numeric length-2 vector from
+#'   [outcome_range_setting()]. Default `DEFAULT_OUTCOME_RANGE`.
+#' @return Numeric vector of clamped fold predictions, one per row.
 #' @noRd
-predict_fold_model <- function(fold_model, method, member_mat) {
+predict_fold_model <- function(fold_model, method, member_mat,
+                               outcome_range = DEFAULT_OUTCOME_RANGE) {
 
   pred <- if (method == "weighted") {
 
@@ -95,7 +99,7 @@ predict_fold_model <- function(fold_model, method, member_mat) {
 
   }
 
-  floor_at_zero(pred)
+  clamp_to_outcome_range(pred, outcome_range)
 
 }
 
@@ -247,6 +251,8 @@ cv_plus_bounds <- function(fold_matrix, fold_id, residuals, level) {
 #' @param contract The `$ensemble` contract list (for `method` and `model`).
 #' @param optimize Logical. The build-time optimize flag (drives the weighted
 #'   fold-weight rule).
+#' @param outcome_range Numeric length-2 vector the fold predictions are
+#'   clamped to. Default `DEFAULT_OUTCOME_RANGE`.
 #'
 #' @return A list with:
 #'   \describe{
@@ -257,7 +263,8 @@ cv_plus_bounds <- function(fold_matrix, fold_id, residuals, level) {
 #'   }
 #'
 #' @noRd
-fit_uq_fold_models <- function(meta_frame, oof_row, folds, contract, optimize) {
+fit_uq_fold_models <- function(meta_frame, oof_row, folds, contract, optimize,
+                               outcome_range = DEFAULT_OUTCOME_RANGE) {
 
   method      <- contract$method
   members     <- contract$weights$member
@@ -304,15 +311,16 @@ fit_uq_fold_models <- function(meta_frame, oof_row, folds, contract, optimize) {
 
     }
 
-    ## Shared fold-prediction primitive: dispatch + floor semantics live in
-    ## one place. Flooring before the residual is deliberate — the deployed
-    ## prediction rule floors, and conformal validity requires the calibration
+    ## Shared fold-prediction primitive: dispatch + clamp semantics live in
+    ## one place. Clamping before the residual is deliberate — the deployed
+    ## prediction rule clamps, and conformal validity requires the calibration
     ## score function to match the deployed one (residuals must be measured
     ## against the prediction the deployed path would produce).
     fold_pred <- predict_fold_model(
       fold_models[[k]],
       method,
-      assessment[, member_cols, drop = FALSE]
+      assessment[, member_cols, drop = FALSE],
+      outcome_range
     )
 
     calib_rows[[k]] <- tibble::tibble(
@@ -359,6 +367,8 @@ fit_uq_fold_models <- function(meta_frame, oof_row, folds, contract, optimize) {
 #' @param conformal_seed Integer. Seed for the fresh calibration partition.
 #' @param level Numeric in (0, 1). Target coverage stored as the bundle's
 #'   `level_default`.
+#' @param outcome_range Numeric length-2 vector the fold predictions are
+#'   clamped to. Default `DEFAULT_OUTCOME_RANGE`.
 #'
 #' @return The uq bundle list (see [fit_ensemble_uq()]), or `NULL`.
 #'
@@ -367,7 +377,8 @@ compute_ensemble_uq <- function(oof,
                                 contract,
                                 optimize,
                                 conformal_seed,
-                                level = DEFAULT_UQ_LEVEL) {
+                                level         = DEFAULT_UQ_LEVEL,
+                                outcome_range = DEFAULT_OUTCOME_RANGE) {
 
   meta_frame        <- oof$predictors
   meta_frame$.truth <- oof$truth
@@ -388,11 +399,12 @@ compute_ensemble_uq <- function(oof,
 
   fold_safe <- safely_execute(
     fit_uq_fold_models(
-      meta_frame = meta_frame,
-      oof_row    = oof$row,
-      folds      = folds_cal,
-      contract   = contract,
-      optimize   = optimize
+      meta_frame    = meta_frame,
+      oof_row       = oof$row,
+      folds         = folds_cal,
+      contract      = contract,
+      optimize      = optimize,
+      outcome_range = outcome_range
     ),
     log_error = FALSE
   )
@@ -431,7 +443,8 @@ compute_ensemble_uq <- function(oof,
     fold_models,
     function(fm) {
       predict_fold_model(fm, contract$method,
-                         meta_frame[, member_cols, drop = FALSE])
+                         meta_frame[, member_cols, drop = FALSE],
+                         outcome_range)
     },
     numeric(nrow(meta_frame))
   )
@@ -580,13 +593,18 @@ fit_ensemble_uq <- function(x,
     !all(abs(coefs - coefs[1]) < 1e-12)
   }
 
+  ## Read outside the capture below, so a malformed stored range aborts
+  ## rather than silently leaving the ensemble without intervals.
+  outcome_range <- outcome_range_setting(x)
+
   uq_safe <- safely_execute(
     compute_ensemble_uq(
       oof            = oof,
       contract       = x$ensemble,
       optimize       = optimize,
       conformal_seed = conformal_seed,
-      level          = level
+      level          = level,
+      outcome_range  = outcome_range
     ),
     log_error = FALSE
   )
@@ -639,24 +657,29 @@ fit_ensemble_uq <- function(x,
 #' Builds the `n_new x K` fold-prediction matrix `cv_plus_bounds()` consumes:
 #' each retained fold model predicts the widened member matrix. Weighted fold
 #' models (weights tibbles) combine by matrix product; penalized/xgb fold
-#' models (workflows) predict through [stats::predict()]. Columns are floored
-#' at zero to match deployed-combine semantics.
+#' models (workflows) predict through [stats::predict()]. Columns are clamped
+#' to the outcome's range (a floor at zero under the default, #76) to match
+#' deployed-combine semantics.
 #'
 #' @param uq The `$ensemble$uq` bundle.
 #' @param wide Tibble with `member_<config_id>` columns in `uq$members` order
 #'   (one row per new sample).
+#' @param outcome_range Numeric length-2 vector from
+#'   [outcome_range_setting()]. Default `DEFAULT_OUTCOME_RANGE`.
 #'
 #' @return Numeric matrix, `n_new x K`.
 #'
 #' @noRd
-predict_ensemble_uq_matrix <- function(uq, wide) {
+predict_ensemble_uq_matrix <- function(uq, wide,
+                                       outcome_range = DEFAULT_OUTCOME_RANGE) {
 
   member_cols <- paste0("member_", uq$members)
   member_mat  <- wide[, member_cols, drop = FALSE]
 
   vapply(
     uq$fold_models,
-    function(fm) predict_fold_model(fm, uq$ensemble_method, member_mat),
+    function(fm) predict_fold_model(fm, uq$ensemble_method, member_mat,
+                                    outcome_range),
     numeric(nrow(wide))
   )
 
@@ -691,12 +714,16 @@ predict_ensemble_uq_matrix <- function(uq, wide) {
 #' @param uq The `$ensemble$uq` bundle (from [fit_ensemble_uq()]).
 #' @param member_pred Long tibble from `predict_members()` (`config_id`,
 #'   `sample_id`, `.pred`).
+#' @param outcome_range Numeric length-2 vector the fold predictions and the
+#'   bounds are clamped to, from [outcome_range_setting()]. Default
+#'   `DEFAULT_OUTCOME_RANGE`.
 #'
 #' @return A tibble — `sample_id`, `.pred_lower`, `.pred_upper`,
 #'   `.interval_width` — or `NULL` (degrade to point-only).
 #'
 #' @noRd
-predict_ensemble_intervals <- function(uq, member_pred) {
+predict_ensemble_intervals <- function(uq, member_pred,
+                                       outcome_range = DEFAULT_OUTCOME_RANGE) {
 
   ## Guard: only consume a bundle this assembler understands. Anything else
   ## (a corrupt slot, a future bundle format) degrades to point-only.
@@ -734,7 +761,7 @@ predict_ensemble_intervals <- function(uq, member_pred) {
   ## predict degrades the whole interval request rather than erroring the
   ## point path.
   matrix_safe <- safely_execute(
-    predict_ensemble_uq_matrix(uq, wide),
+    predict_ensemble_uq_matrix(uq, wide, outcome_range),
     log_error = FALSE
   )
 
@@ -762,11 +789,12 @@ predict_ensemble_intervals <- function(uq, member_pred) {
 
   }
 
-  ## Crossing repair then floor at 0 (repair-then-floor, mirroring the
-  ## single-model assembler). Crossings cannot occur by construction — l <= u
-  ## on one sorted vector — so this is defensive only.
-  lo <- floor_at_zero(pmin(bounds$lower, bounds$upper))
-  hi <- floor_at_zero(pmax(bounds$lower, bounds$upper))
+  ## Crossing repair then clamp to the outcome's range (repair-then-clamp,
+  ## mirroring the single-model assembler; a floor at 0 under the default
+  ## range, #76). Crossings cannot occur by construction — l <= u on one
+  ## sorted vector — so the repair is defensive only.
+  lo <- clamp_to_outcome_range(pmin(bounds$lower, bounds$upper), outcome_range)
+  hi <- clamp_to_outcome_range(pmax(bounds$lower, bounds$upper), outcome_range)
 
   tibble::tibble(
     sample_id       = wide$sample_id,

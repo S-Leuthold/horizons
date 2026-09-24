@@ -489,9 +489,13 @@ fit_tuned_meta_learner <- function(object,
   ## recovers the real id, and a position-keyed lookup reorders to oof$row.
   oof_by_pos <- oof_collected$.pred[order(oof_collected$.row)]
 
+  ## Combined predictions are clamped to the outcome's range, as every served
+  ## prediction is (#76); a floor at 0 under the default range.
+  outcome_range <- outcome_range_setting(object)
+
   oof_pred <- tibble::tibble(
     .row  = oof$row,
-    .pred = floor_at_zero(oof_by_pos),
+    .pred = clamp_to_outcome_range(oof_by_pos, outcome_range),
     truth = oof$truth
   )
 
@@ -514,7 +518,7 @@ fit_tuned_meta_learner <- function(object,
 
   ensemble_pred <- tibble::tibble(
     sample_id = test_wide$sample_id,
-    .pred     = floor_at_zero(combined),
+    .pred     = clamp_to_outcome_range(combined, outcome_range),
     truth     = test_wide$truth
   )
 
@@ -824,16 +828,19 @@ predict.horizons_ensemble <- function(object,
   ## Step 4: Combine member predictions by the meta-learner (per method)
   ## -------------------------------------------------------------------------
 
-  method <- object$ensemble$method
+  method        <- object$ensemble$method
+  outcome_range <- outcome_range_setting(object)
 
   point <- switch(
     method,
 
-    weighted = combine_ensemble_weighted(member_pred, object$ensemble$weights),
+    weighted = combine_ensemble_weighted(member_pred, object$ensemble$weights,
+                                         outcome_range),
 
     penalized = ,
     xgb       = combine_ensemble_metamodel(member_pred, members,
-                                           object$ensemble$model),
+                                           object$ensemble$model,
+                                           outcome_range),
 
     cli::cli_abort(c(
       "Unknown ensemble method {.val {method}}.",
@@ -879,8 +886,9 @@ predict.horizons_ensemble <- function(object,
   }
 
   interval_cols <- predict_ensemble_intervals(
-    uq          = uq,
-    member_pred = member_pred
+    uq            = uq,
+    member_pred   = member_pred,
+    outcome_range = outcome_range
   )
 
   if (is.null(interval_cols)) {
@@ -901,15 +909,18 @@ predict.horizons_ensemble <- function(object,
 #'
 #' The predict-time generalization of the `weighted` engine's train-time
 #' combine (`fit_ensemble_weighted()`): join the per-member weights, then take
-#' the weighted sum per sample. Floored at zero — soil properties are
-#' non-negative.
+#' the weighted sum per sample. Clamped to the outcome's range, a floor at
+#' zero under the default (#76).
 #'
 #' @param member_pred Long tibble from [predict_members()] (`config_id`,
 #'   `sample_id`, `.pred`).
 #' @param weights The ensemble weights tibble (`member`, `coef`).
+#' @param outcome_range Numeric length-2 vector from
+#'   [outcome_range_setting()]. Default `DEFAULT_OUTCOME_RANGE`.
 #' @return A tibble: `sample_id`, `.pred` (ensemble point prediction).
 #' @noRd
-combine_ensemble_weighted <- function(member_pred, weights) {
+combine_ensemble_weighted <- function(member_pred, weights,
+                                      outcome_range = DEFAULT_OUTCOME_RANGE) {
 
   joined <- member_pred |>
     dplyr::left_join(weights, by = c("config_id" = "member"))
@@ -937,7 +948,7 @@ combine_ensemble_weighted <- function(member_pred, weights) {
     dplyr::summarise(.pred = sum(.data$.pred * .data$coef),
                      .groups = "drop")
 
-  out$.pred <- floor_at_zero(out$.pred)
+  out$.pred <- clamp_to_outcome_range(out$.pred, outcome_range)
 
   out
 
@@ -952,7 +963,7 @@ combine_ensemble_weighted <- function(member_pred, weights) {
 #' The predict-time generalization of the `penalized`/`xgb` engines' train-time
 #' combine: widen the member predictions into the `member_<config_id>` matrix
 #' the meta-model trained on, then run them THROUGH the fitted meta-workflow.
-#' Floored at zero.
+#' Clamped to the outcome's range, a floor at zero under the default (#76).
 #'
 #' The wide-frame columns are selected explicitly from the trained-on member
 #' set (not from whatever the pivot happens to produce), and a missing member
@@ -963,9 +974,12 @@ combine_ensemble_weighted <- function(member_pred, weights) {
 #' @param member_pred Long tibble from [predict_members()].
 #' @param members Character vector of the trained-on member `config_id`s.
 #' @param model The fitted meta-workflow (`object$ensemble$model`).
+#' @param outcome_range Numeric length-2 vector from
+#'   [outcome_range_setting()]. Default `DEFAULT_OUTCOME_RANGE`.
 #' @return A tibble: `sample_id`, `.pred` (ensemble point prediction).
 #' @noRd
-combine_ensemble_metamodel <- function(member_pred, members, model) {
+combine_ensemble_metamodel <- function(member_pred, members, model,
+                                       outcome_range = DEFAULT_OUTCOME_RANGE) {
 
   member_cols <- paste0("member_", members)
 
@@ -994,7 +1008,7 @@ combine_ensemble_metamodel <- function(member_pred, members, model) {
 
   tibble::tibble(
     sample_id = wide$sample_id,
-    .pred     = floor_at_zero(combined)
+    .pred     = clamp_to_outcome_range(combined, outcome_range)
   )
 
 }

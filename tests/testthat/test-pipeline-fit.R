@@ -1888,6 +1888,145 @@ describe("fit() - cold start with UQ and AD (#45)", {
 
 
 ## =========================================================================
+## fit()'s tree header says what the draws did, and holds its notes (#91)
+## =========================================================================
+## The CV line printed "stratified" whatever the folds were, and the notes on
+## the member count, a failed stratified draw and an undersized calibration
+## set printed above the tree's header.
+
+## fit()'s console output down to its first member, which is mocked to fail:
+## only the header is under test.
+fit_header <- function(obj, ...) {
+
+  utils::capture.output(
+    testthat::with_mocked_bindings(
+      tryCatch(
+        suppressWarnings(fit(obj, seed = 42L, ...)),
+        horizons_all_members_failed = function(e) NULL
+      ),
+      fit_single_config = function(...) {
+        list(config_id = "cfg_001", status = "failed", error_message = "mocked",
+             runtime_secs = 0)
+      },
+      .package = "horizons"
+    )
+  )
+
+}
+
+describe("fit() - the draw lines and the notes (#91)", {
+
+  it("says the CV folds are unstratified when rsample drew them without strata", {
+
+    ## 40 rows: 32 fit rows, too few for rsample to bin the outcome
+    out <- fit_header(make_eval_object(n = 40, n_configs = 1),
+                      compute_uq = FALSE, compute_ad = FALSE)
+
+    expect_true("│  CV: 3-fold unstratified" %in% out)
+    expect_false(any(grepl("CV: .*stratified on", out)))
+
+  })
+
+  it("says the CV folds are stratified when the strata held", {
+
+    out <- fit_header(make_eval_object(n = 60, n_configs = 1),
+                      compute_uq = FALSE, compute_ad = FALSE)
+
+    expect_true("│  CV: 3-fold stratified on SOC" %in% out)
+
+  })
+
+  it("says whether the calibration split stratified, and which capabilities it serves", {
+
+    ## 250 rows: a calibration set of 40, over N_CALIB_MIN
+    obj <- make_eval_object(n = 250, n_configs = 1)
+
+    expect_true("│  UQ and AD calibration: 158 fit / 40 calibration, stratified on SOC" %in%
+                  fit_header(obj))
+
+    ## With AD alone the holdout used to go unreported
+    expect_true("│  AD calibration: 158 fit / 40 calibration, stratified on SOC" %in%
+                  fit_header(obj, compute_uq = FALSE, compute_ad = TRUE))
+
+    real_initial_split <- rsample::initial_split
+
+    local_mocked_bindings(
+      initial_split = function(data, prop = 3 / 4, strata = NULL, ...) {
+        if (!missing(strata)) stop("stratification refused")
+        real_initial_split(data, prop = prop, ...)
+      },
+      .package = "rsample"
+    )
+
+    out        <- fit_header(obj, compute_uq = FALSE, compute_ad = TRUE)
+    calib_line <- grep("│  AD calibration: ", out, fixed = TRUE)
+
+    expect_match(out[calib_line], "calibration, unstratified$")
+    expect_identical(out[calib_line + 1L],
+                     "│  Stratified calibration split failed, retrying without strata")
+
+  })
+
+  it("prints the draw and calibration notes inside the tree, under the lines they qualify", {
+
+    real_initial_split <- rsample::initial_split
+    real_vfold_cv      <- rsample::vfold_cv
+
+    local_mocked_bindings(
+      initial_split = function(data, prop = 3 / 4, strata = NULL, ...) {
+        if (!missing(strata)) stop("stratification refused")
+        real_initial_split(data, prop = prop, ...)
+      },
+      vfold_cv = function(data, v = 10, repeats = 1, strata = NULL, ...) {
+        if (!missing(strata)) stop("stratification refused")
+        real_vfold_cv(data, v = v, repeats = repeats, ...)
+      },
+      .package = "rsample"
+    )
+
+    ## A cold start draws the split itself; 60 rows leave a calibration set
+    ## under N_CALIB_MIN
+    out <- fit_header(make_eval_object(n = 60, n_configs = 1))
+
+    header     <- grep("┌ fit", out, fixed = TRUE)
+    split_line <- grep("│  Split: ", out, fixed = TRUE)
+    split_note <- grep("Stratified split failed, retrying without strata", out, fixed = TRUE)
+    calib_note <- grep("Calibration set too small (10 < 30). Disabling UQ and AD.", out, fixed = TRUE)
+    cv_line    <- grep("│  CV: ", out, fixed = TRUE)
+    cv_note    <- grep("Stratified CV failed, retrying without strata", out, fixed = TRUE)
+
+    expect_length(header, 1L)
+    expect_identical(out[split_line],
+                     "│  Split: 48 train / 12 test (the rows evaluate() holds out at this seed, unstratified)")
+    expect_identical(split_note, split_line + 1L)
+    expect_identical(calib_note, split_note + 1L)
+    expect_identical(out[cv_line], "│  CV: 3-fold unstratified")
+    expect_identical(cv_note, cv_line + 1L)
+    expect_true(all(c(split_note, calib_note, cv_note) > header))
+
+  })
+
+  it("prints the n_best note inside the tree, under the member count", {
+
+    ev <- make_fit_object(n = 60, n_configs = 1)
+
+    out <- fit_header(ev, n_best = 3L, compute_uq = FALSE, compute_ad = FALSE)
+
+    header  <- grep("┌ fit", out, fixed = TRUE)
+    members <- grep("│  Re-tuning top 1 of 1 configurations", out, fixed = TRUE)
+    note    <- grep("Requested n_best = 3 but only 1 successful configs available. Using 1.",
+                    out, fixed = TRUE)
+
+    expect_length(header, 1L)
+    expect_true(members > header)
+    expect_identical(note, members + 1L)
+
+  })
+
+})
+
+
+## =========================================================================
 ## evaluate()'s response trim is reused, not recomputed (#77)
 ## =========================================================================
 ## validate(remove_outliers = "response") no longer removes rows; evaluate()
@@ -1899,6 +2038,8 @@ describe("fit() - evaluate()'s response trim (#77)", {
 
   obj <- make_eval_object(n = 60, n_configs = 1)
   obj$data$analysis$SOC[c(1:4, 31:34)] <- c(20, 25, 30, 35, -15, -20, -25, -30)
+  ## The low extremes are negative, so the outcome is signed (#76)
+  obj$config$outcome_range <- c(-Inf, Inf)
   obj$config$tuning$final_bayesian_iter <- 0L
 
   utils::capture.output(
@@ -2030,7 +2171,7 @@ describe("fit() - evaluate()'s response trim (#77)", {
 
     expect_gt(max(trim_soc), max(fit_soc))
     expect_equal(f$models$response_bound,
-                 max(c(fit_soc, trim_soc)) * RESPONSE_BOUND_MARGIN)
+                 compute_response_bound(c(fit_soc, trim_soc), c(-Inf, Inf)))
 
   })
 
@@ -2092,6 +2233,8 @@ describe("fit() - calibration after a response trim (#77)", {
   obj <- make_eval_object(n = 250, n_configs = 1)
   extreme <- c(1:10, 101:110)
   obj$data$analysis$SOC[extreme] <- c(seq(20, 38, by = 2), seq(-20, -38, by = -2))
+  ## The low extremes are negative, so the outcome is signed (#76)
+  obj$config$outcome_range <- c(-Inf, Inf)
 
   utils::capture.output(
     v <- suppressWarnings(validate(obj, remove_outliers = "response"))

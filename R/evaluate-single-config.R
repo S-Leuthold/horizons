@@ -45,6 +45,11 @@
 #' @param pca_threshold Numeric. Variance share the `pca` feature selection
 #'   keeps, passed to [build_recipe()]. `evaluate()` reads it from
 #'   `configure()`'s `config$recipe`. Default 0.995.
+#' @param outcome_range Numeric length-2 vector. The outcome's physical range,
+#'   which the back-transformed test-set predictions (and, for a transformed
+#'   response, the tuning predictions) are clamped to before scoring.
+#'   `evaluate()` reads it from `configure()`'s `config$outcome_range`.
+#'   Default `c(0, Inf)`.
 #'
 #' @return Single-row tibble with columns: `config_id`, `status` (`"pruned"`
 #'   means Bayesian refinement was skipped), `below_prune_threshold` (logical;
@@ -70,7 +75,8 @@ evaluate_single_config <- function(config_row,
                                    parallel_over   = "resamples",
                                    seed            = 42L,
                                    sg_window       = DEFAULT_SG_WINDOW,
-                                   pca_threshold   = DEFAULT_PCA_THRESHOLD) {
+                                   pca_threshold   = DEFAULT_PCA_THRESHOLD,
+                                   outcome_range   = DEFAULT_OUTCOME_RANGE) {
 
   start_time <- Sys.time()
 
@@ -89,13 +95,20 @@ evaluate_single_config <- function(config_row,
   transformation <- tolower(as.character(config_row$transformation))
   train_data     <- rsample::training(split)
 
-  ## Accumulate warnings from all steps for tree rendering
-  collected_warnings <- character(0)
+  ## Accumulate warnings from all steps for tree rendering, as records that
+  ## render_warning_log() reduces to one line per distinct message (#96)
+  warning_log <- new_warning_log()
 
   collect_from <- function(safe_result) {
-    if (!is.null(safe_result$warnings)) {
-      collected_warnings <<- c(collected_warnings, unlist(safe_result$warnings))
-    }
+    warning_log <<- dplyr::bind_rows(warning_log, text_records(safe_result$warnings))
+  }
+
+  ## tune catches the warnings raised inside its resampling (a recipe step
+  ## warning during prep, say) and keeps them in .notes, where
+  ## safely_execute() never sees them.
+  collect_notes_from <- function(tune_results, scope = "cv") {
+    notes <- tune_note_records(tune_results, type = "warning", scope = scope)
+    warning_log <<- dplyr::bind_rows(warning_log, notes)
   }
 
   ## -----------------------------------------------------------------------
@@ -113,7 +126,7 @@ evaluate_single_config <- function(config_row,
   if (!is.null(recipe_result$error)) {
 
     return(create_failed_result(config_id,
-      paste0("Recipe building failed: ", recipe_result$error$message)))
+      paste0("Recipe building failed: ", condition_summary(recipe_result$error))))
 
   }
 
@@ -133,7 +146,7 @@ evaluate_single_config <- function(config_row,
   if (!is.null(model_result$error)) {
 
     return(create_failed_result(config_id,
-      paste0("Model specification failed: ", model_result$error$message)))
+      paste0("Model specification failed: ", condition_summary(model_result$error))))
 
   }
 
@@ -155,7 +168,7 @@ evaluate_single_config <- function(config_row,
   if (!is.null(wflow_result$error)) {
 
     return(create_failed_result(config_id,
-      paste0("Workflow creation failed: ", wflow_result$error$message)))
+      paste0("Workflow creation failed: ", condition_summary(wflow_result$error))))
 
   }
 
@@ -191,7 +204,7 @@ evaluate_single_config <- function(config_row,
     if (!is.null(finalize_result$error)) {
 
       return(create_failed_result(config_id,
-        paste0("Parameter finalization failed: ", finalize_result$error$message)))
+        paste0("Parameter finalization failed: ", condition_summary(finalize_result$error))))
 
     }
 
@@ -209,8 +222,9 @@ evaluate_single_config <- function(config_row,
   ## tuning_metric_set() back-transforms the estimate inside each metric so
   ## select_best(), tune_bayes() and the prune gate all see the same scale the
   ## leaderboard reports. rmse stays first: tune_bayes() optimises the first
-  ## metric in the set. See #49.
-  tune_metrics <- tuning_metric_set(transformation)
+  ## metric in the set. See #49. The back-transform clamps to the outcome's
+  ## range, as the test-set scoring below does (#76).
+  tune_metrics <- tuning_metric_set(transformation, outcome_range = outcome_range)
 
   ## -----------------------------------------------------------------------
   ## Step 6: Grid search
@@ -240,20 +254,26 @@ evaluate_single_config <- function(config_row,
   if (!is.null(grid_result$error)) {
 
     return(create_failed_result(config_id,
-      paste0("Grid search failed: ", grid_result$error$message)))
+      paste0("Grid search failed: ", condition_summary(grid_result$error))))
 
   }
 
   grid_results <- grid_result$result
   collect_from(grid_result)
 
-  ## Check for "All models failed" warning from tune
+  ## Check for "All models failed" warning from tune. tune_grid() returns
+  ## rather than erroring, and the reason is only in its .notes, so it is
+  ## read back from there (#96).
   if (!is.null(grid_result$warnings)) {
 
     if (any(grepl("All models failed", unlist(grid_result$warnings)))) {
 
-      return(create_failed_result(config_id,
-        "Grid search failed: all models failed during CV"))
+      cause <- tune_failure_cause(grid_results)
+
+      return(create_failed_result(config_id, paste0(
+        "Grid search failed: all models failed during CV",
+        if (!is.null(cause)) paste0(" \u2014 ", cause)
+      )))
 
     }
 
@@ -354,6 +374,10 @@ evaluate_single_config <- function(config_row,
 
   }
 
+  ## Read once, from whichever result is kept: a tune_bayes() result carries
+  ## its initial grid's notes as .iter 0, so this covers both stages.
+  collect_notes_from(final_tune_results)
+
   ## -----------------------------------------------------------------------
   ## Step 9: Select best hyperparameters
   ## -----------------------------------------------------------------------
@@ -367,7 +391,7 @@ evaluate_single_config <- function(config_row,
   if (!is.null(best_result$error)) {
 
     return(create_failed_result(config_id,
-      paste0("Parameter selection failed: ", best_result$error$message)))
+      paste0("Parameter selection failed: ", condition_summary(best_result$error))))
 
   }
 
@@ -385,10 +409,10 @@ evaluate_single_config <- function(config_row,
 
   if (all(is.na(unlist(cv_panel)))) {
 
-    collected_warnings <- c(
-      collected_warnings,
-      "CV metrics at the selected hyperparameters could not be recovered; cv_* columns are NA."
-    )
+    warning_log <- dplyr::bind_rows(warning_log, text_records(
+      "CV metrics at the selected hyperparameters could not be recovered; cv_* columns are NA.",
+      pinned = TRUE
+    ))
 
   }
 
@@ -405,7 +429,7 @@ evaluate_single_config <- function(config_row,
   if (!is.null(final_wflow_result$error)) {
 
     return(create_failed_result(config_id,
-      paste0("Workflow finalization failed: ", final_wflow_result$error$message)))
+      paste0("Workflow finalization failed: ", condition_summary(final_wflow_result$error))))
 
   }
 
@@ -428,12 +452,27 @@ evaluate_single_config <- function(config_row,
   if (!is.null(lastfit_result$error)) {
 
     return(create_failed_result(config_id,
-      paste0("Test evaluation failed: ", lastfit_result$error$message)))
+      paste0("Test evaluation failed: ", condition_summary(lastfit_result$error))))
 
   }
 
   last_fit_obj <- lastfit_result$result
   collect_from(lastfit_result)
+  collect_notes_from(last_fit_obj, scope = "test set")
+
+  ## A final fit that failed inside last_fit() leaves its reason only in
+  ## .notes, and the row below still reads as a success with NA test
+  ## metrics. The reason is recorded so the row says why (#96).
+  test_set_cause <- tune_failure_cause(last_fit_obj)
+
+  if (!is.null(test_set_cause)) {
+
+    warning_log <- dplyr::bind_rows(warning_log, text_records(
+      paste0("Test-set fit failed: ", test_set_cause),
+      pinned = TRUE
+    ))
+
+  }
 
   ## -----------------------------------------------------------------------
   ## Step 12: Extract predictions and back-transform
@@ -442,11 +481,12 @@ evaluate_single_config <- function(config_row,
   test_predictions <- tune::collect_predictions(last_fit_obj)
 
   ## Unconditional, like predict(): the "none" branch is a passthrough, and
-  ## the zero floor inside back_transform_predictions() must apply to every
-  ## transformation so evaluation scores what deploy serves (#53).
+  ## the clamp to the outcome's range inside back_transform_predictions()
+  ## must apply to every transformation so evaluation scores what deploy
+  ## serves (#53, #76).
   bt_result <- safely_execute(
     back_transform_predictions(test_predictions$.pred, transformation,
-                               warn = FALSE),
+                               warn = FALSE, outcome_range = outcome_range),
     log_error          = FALSE,
     capture_conditions = TRUE
   )
@@ -454,7 +494,7 @@ evaluate_single_config <- function(config_row,
   if (!is.null(bt_result$error)) {
 
     return(create_failed_result(config_id,
-      paste0("Back-transformation failed: ", bt_result$error$message)))
+      paste0("Back-transformation failed: ", condition_summary(bt_result$error))))
 
   }
 
@@ -521,7 +561,7 @@ evaluate_single_config <- function(config_row,
     scoring_schema = SCORING_SCHEMA,
     best_params   = list(best_params),
     error_message = NA_character_,
-    warnings      = list(if (length(collected_warnings) > 0) collected_warnings else NULL),
+    warnings      = list(render_warning_log(warning_log)),
     runtime_secs  = runtime
   )
 

@@ -313,3 +313,102 @@ reconcile_axes <- function(pool, targets) {
   )
 
 }
+
+
+## ---------------------------------------------------------------------------
+## reconciled_standardization() — The pool's record, on the targets' axis
+## ---------------------------------------------------------------------------
+
+#' Rewrite a resampled pool's standardization record for its new axis
+#'
+#' @description
+#' `provenance$standardization` describes the object's own axis. Once
+#' `reconcile_axes()` has resampled the pool onto the targets' wavenumbers,
+#' the pool's record describes columns the object no longer has: a pool
+#' standardized at 4 cm-1, drawn around targets at 8, would record step 4 on
+#' an axis spaced 8 (#90). This returns the record the resampled pool should
+#' carry. Call it only when the pool was resampled; a pool already on the
+#' targets' grid keeps its record as it is, because it is still true.
+#'
+#' @details
+#' The axis fields are replaced: `grid` becomes the targets' (their own
+#' record's `grid`, so `NULL` when the targets were not put on a canonical
+#' grid, the convention `standardize()` uses), `n_wavelengths` and
+#' `wavelength_range` are read off the new axis, and `resampled` is `TRUE`,
+#' since the values were re-interpolated. The targets' `grid` is copied only
+#' when its `n` and range agree with `wn`; otherwise `grid` is written
+#' `NULL`, so the record describes the axis without resting on the targets'
+#' record having been kept true upstream.
+#'
+#' The arguments stay the pool's: `resample`, `trim`, `remove_water`,
+#' `baseline` and `applied_at` describe the `standardize()` call that
+#' produced these values, which resampling onto another axis does not undo,
+#' and a later `force = TRUE` no-op call already records its own arguments
+#' beside a grid an earlier call built. So `resample` can differ from
+#' `grid$step`, and `trim` from `wavelength_range`. Under `baseline = TRUE`
+#' the convex hull was fitted and subtracted on the pool's grid and the
+#' corrected spectra were then interpolated onto the targets', which is not
+#' the same as correcting on the targets' grid, where the hull would be
+#' pinned at the targets' points. Any other key the pool's record carries
+#' is kept.
+#'
+#' The move itself is recorded under `reconciliation`: `operation`
+#' (`"resampled"`), `clamp` (`NULL`, or the overshoot at each end: an end
+#' column there holds the pool's endpoint value, up to half a pool spacing
+#' off the grid point it is named for) and `pool`, the pool's record as it
+#' stood before, whose `grid` is the pool's original grid. This is the
+#' object's own axis history and travels with `provenance`; it is not
+#' `selection$reconciliation`, which is the selection record's account of
+#' the comparison, with the grid summaries both axes were compared on and
+#' the warnings raised.
+#'
+#' A pool that was never standardized has no record, and gets none: the
+#' verb does not mark as standardized rows that `standardize()` never saw.
+#'
+#' @param pool_record [List or NULL.] The pool's `provenance$standardization`.
+#' @param target_record [List or NULL.] The targets'
+#'   `provenance$standardization`.
+#' @param wn [Numeric.] The wavenumbers the pool now sits on, the targets'.
+#' @param clamp [List or NULL.] `reconcile_axes()`'s `record$clamp`.
+#'
+#' @return [List or NULL.] The record for the resampled pool; `NULL` when
+#'   `pool_record` is.
+#'
+#' @seealso [reconcile_axes()]
+#' @noRd
+reconciled_standardization <- function(pool_record, target_record, wn, clamp) {
+
+  if (is.null(pool_record)) return(NULL)
+
+  ## The targets' grid, if it is the axis the pool now sits on --------------
+
+  ### A grid whose count or ends disagree with wn describes some other axis;
+  ### NULL says "no canonical grid" without claiming one.
+  grid <- target_record$grid
+
+  grid_ok <- is.list(grid) &&
+             is.numeric(grid$n)   && length(grid$n)   == 1L && isTRUE(grid$n == length(wn)) &&
+             is.numeric(grid$min) && length(grid$min) == 1L && isTRUE(abs(grid$min - min(wn)) <= GRID_TOL) &&
+             is.numeric(grid$max) && length(grid$max) == 1L && isTRUE(abs(grid$max - max(wn)) <= GRID_TOL)
+
+  if (!grid_ok) grid <- NULL
+
+  ## The pool's record, its axis fields replaced -----------------------------
+
+  ### Assigned by name through single brackets, so a NULL grid or clamp is
+  ### kept as an entry rather than deleting the key, as standardize() writes
+  ### grid.
+  axis <- list(
+    resampled        = TRUE,
+    grid             = grid,
+    n_wavelengths    = length(wn),
+    wavelength_range = c(min(wn), max(wn)),
+    reconciliation   = list(operation = "resampled", clamp = clamp, pool = pool_record)
+  )
+
+  record <- pool_record
+  record[names(axis)] <- axis
+
+  record
+
+}
