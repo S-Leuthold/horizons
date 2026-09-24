@@ -1740,6 +1740,30 @@ test_that("validate_horizons_fit tolerates a NULL response_bound (pre-clamp obje
 
 })
 
+test_that("validate_horizons_fit takes its required keys from the constructor", {
+
+  ## Keys added after objects without them were saved may be absent
+  ## (CONTRACT_KEYS_OPTIONAL); every other key new_horizons_data() declares
+  ## for the slot is required, ad included.
+  old <- make_valid_fit()
+  old$models$response_bound    <- NULL   # NULL removes the key
+  old$models$selection_present <- NULL
+
+  expect_identical(validate_horizons_fit(old), old)
+
+  no_ad <- make_valid_fit()
+  no_ad$models$ad <- NULL
+
+  expect_error(suppressMessages(validate_horizons_fit(no_ad)),
+               "missing from models: ad",
+               class = "horizons_validation_error")
+
+  expect_identical(contract_keys("models"),
+                   setdiff(names(new_horizons_data()$models),
+                           c("response_bound", "selection_present")))
+
+})
+
 test_that("validate_horizons_fit tolerates a NULL uq slot (compute_uq = FALSE)", {
 
   obj <- make_valid_fit()

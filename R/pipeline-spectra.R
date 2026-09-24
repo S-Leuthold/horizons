@@ -306,7 +306,7 @@ spectra_from_tibble <- function(data,
   ## Step 6: Build horizons_data object
   ## -------------------------------------------------------------------------
 
-  create_horizons_data(
+  new_horizons_data(
     analysis       = analysis,
     role_map       = role_map,
     spectra_source = "tibble",
@@ -653,7 +653,7 @@ load_opus_files <- function(source,
     other_cols = character()
   )
 
-  create_horizons_data(
+  new_horizons_data(
     analysis       = combined,
     role_map       = role_map,
     spectra_source = source,
@@ -829,7 +829,7 @@ load_csv_files <- function(source,
     other_cols = character()
   )
 
-  create_horizons_data(
+  new_horizons_data(
     analysis       = analysis,
     role_map       = role_map,
     spectra_source = source,
@@ -1039,127 +1039,6 @@ build_role_map <- function(id_col,
       rep("meta", length(other_cols))
     )
   )
-
-}
-
-
-## ---------------------------------------------------------------------------
-## create_horizons_data() — Create horizons_data S3 object
-## ---------------------------------------------------------------------------
-
-#' Create horizons_data S3 object
-#'
-#' @param analysis Analysis tibble.
-#' @param role_map Role mapping tibble.
-#' @param spectra_source Source path or "tibble".
-#' @param spectra_type Source type ("opus", "csv", "tibble").
-#'
-#' @return A horizons_data S3 object.
-#'
-#' @noRd
-create_horizons_data <- function(analysis,
-                                 role_map,
-                                 spectra_source,
-                                 spectra_type) {
-
-  ## Count predictors and covariates -----------------------------------------
-
-  n_predictors <- sum(role_map$role == "predictor")
-  n_covariates <- sum(role_map$role == "covariate")
-
-  ## Build object ------------------------------------------------------------
-
-  obj <- list(
-    data = list(
-      analysis     = analysis,
-      role_map     = role_map,
-      n_rows       = nrow(analysis),
-      n_predictors = n_predictors,
-      n_covariates = n_covariates
-    ),
-
-    provenance = list(
-      spectra_source       = spectra_source,
-      spectra_type         = spectra_type,
-      response_source      = NULL,
-      ossl_properties      = NULL,
-      created              = Sys.time(),
-      horizons_version     = utils::packageVersion("horizons"),
-      schema_version       = 1L,
-      preprocessing        = NULL,
-      preprocessing_params = list(),
-      id_pattern           = NULL,
-      aggregation_by       = NULL
-    ),
-
-    config = list(
-      configs   = NULL,
-      n_configs = NULL,
-      tuning    = list(
-        grid_size     = 10,
-        bayesian_iter = 15,
-        cv_folds      = 5
-      )
-    ),
-
-    validation = list(
-      passed    = NULL,
-      checks    = NULL,
-      outliers  = list(
-        spectral_ids   = NULL,
-        response_ids   = NULL,
-        removed_ids    = NULL,
-        removal_detail = NULL,
-        removed        = FALSE
-      ),
-      timestamp = NULL
-    ),
-
-    evaluation = list(
-      results     = NULL,
-      best_config = NULL,
-      rank_metric = NULL,
-      backend     = NULL,
-      runtime     = NULL,
-      timestamp   = NULL
-    ),
-
-    models = list(
-      workflows = NULL,
-      n_models  = NULL,
-      uq        = list(
-        enabled         = FALSE,
-        quantile_models = NULL,
-        conformal       = NULL,
-        ad_metadata     = NULL
-      )
-    ),
-
-    ensemble = list(
-      stack   = NULL,
-      method  = NULL,
-      weights = NULL,
-      metrics = NULL
-    ),
-
-    artifacts = list(
-      cv_preds = list(
-        path  = NULL,
-        index = NULL
-      ),
-      fit_objects = list(
-        path  = NULL,
-        index = NULL
-      ),
-      cache_dir = NULL
-    )
-  )
-
-  ## Set class ---------------------------------------------------------------
-
-  class(obj) <- c("horizons_data", "list")
-
-  obj
 
 }
 

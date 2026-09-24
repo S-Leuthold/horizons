@@ -61,7 +61,9 @@ on),
 the deploy-time winsorization guardrail \code{predict()} applies to
 back-transformed point predictions, and \code{selection_present} (whether the
 training object carried a \verb{$selection} from \code{select_training()}, which
-\code{predict()} reads when asked for conformal intervals).
+\code{predict()} reads when asked for conformal intervals). Called on a
+\code{horizons_ensemble}, it returns a \code{horizons_fit} whose \code{ensemble} slot
+is empty again, since the ensemble was built on the members it replaces.
 }
 \description{
 Re-tunes the top N configurations from \code{evaluate()} with warm-start

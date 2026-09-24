@@ -25,8 +25,12 @@
 #' from `evaluate()`, `models$workflows`, `models$split` and
 #' `models$row_index` from `fit()`, `ensemble$method` or `ensemble$model`
 #' from `ensemble()`. Anything narrower would miss a promotion; anything
-#' broader trips on a default (`models$uq` is `list(enabled = FALSE)` on some
-#' construction paths, which is not a fitted model).
+#' broader trips on a default (`models$uq` is `list(enabled = FALSE)` on
+#' objects `spectra()` built before it used `new_horizons_data()`, which is
+#' not a fitted model).
+#'
+#' [reset_promotion()] clears everything this function names, and lives
+#' beside it so the two stay in step.
 #'
 #' The class vector is promotion in its own right. `evaluate()` and `fit()`
 #' prepend `horizons_eval` and `horizons_fit`, and a class carrying one of
@@ -38,7 +42,7 @@
 #'
 #' @return [Character.] Names of the filled downstream slots, possibly empty.
 #'
-#' @seealso [set_analysis()], [subset_rows()]
+#' @seealso [set_analysis()], [subset_rows()], [reset_promotion()]
 #' @noRd
 promoted_state <- function(x) {
 
@@ -63,6 +67,118 @@ promoted_state <- function(x) {
   }
 
   states
+
+}
+
+
+## ---------------------------------------------------------------------------
+## reset_promotion() — Return a promoted object to a plain horizons_data
+## ---------------------------------------------------------------------------
+
+#' Clear everything a promotion earned
+#'
+#' @description
+#' Returns `x` with the `evaluation`, `models` and `ensemble` slots back in
+#' the shape [new_horizons_data()] gives them, the validation verdict
+#' cleared, and the class demoted to `c("horizons_data", "list")`. After it,
+#' [promoted_state()] is empty.
+#'
+#' @details
+#' This undoes what `evaluate()`, `fit()` and `ensemble()` write, and it
+#' lives beside [promoted_state()] so the two stay in step. The three slots
+#' are replaced whole from the constructor rather than cleared key by key,
+#' so a key a verb gains later is cleared without anyone having to add it
+#' to a list here.
+#'
+#' Two things survive on purpose:
+#'
+#' * The record of rows `validate()` already removed (`removed_ids`,
+#'   `removal_detail` and `removed` in `validation$outliers`). Those rows are
+#'   gone from the analysis table and stay gone, so the record is still
+#'   true. The verdict (`passed`, `checks`, `timestamp`) and the flagged ids
+#'   (`spectral_ids`, `response_ids`) are cleared, because `validate()`
+#'   recomputes them for the rows and outcome in front of it.
+#' * `x$selection`. The `select_training()` record describes which rows were
+#'   drawn, not the outcome they are modelled for, and `fit()` reads its
+#'   presence into `models$selection_present`.
+#'
+#' `x$config` is the caller's to replace; `configure()` overwrites it.
+#'
+#' @param x [horizons_data.] The object to reset.
+#'
+#' @return [horizons_data.] `x` with class `c("horizons_data", "list")` and
+#'   an empty [promoted_state()].
+#'
+#' @seealso [promoted_state()], [configure()]
+#' @noRd
+reset_promotion <- function(x) {
+
+  ## Downstream slots go back to the constructor's shape ----------------------
+
+  x <- reset_slots(x, c("evaluation", "models", "ensemble"))
+
+  ## Validation: clear the verdict, keep the record of removed rows -----------
+
+  ### Single-bracket assignment of list(value) keeps the key when value is NULL.
+  outliers     <- x$validation$outliers
+  x$validation <- new_horizons_data()$validation
+
+  x$validation$outliers["removed_ids"]    <- list(outliers$removed_ids)
+  x$validation$outliers["removal_detail"] <- list(outliers$removal_detail)
+  x$validation$outliers["removed"]        <- list(outliers$removed %||% FALSE)
+
+  ## The class is the claim that the state is there --------------------------
+
+  class(x) <- c("horizons_data", "list")
+
+  x
+
+}
+
+
+## ---------------------------------------------------------------------------
+## reset_slots() — Return named slots to the constructor's shape
+## ---------------------------------------------------------------------------
+
+#' Return slots to the shape new_horizons_data() gives them
+#'
+#' @description
+#' Replaces each named slot of `x` with the constructor's empty version, key
+#' for key. The building block of [reset_promotion()], and what a verb that
+#' re-runs uses to clear the slots downstream of its own: `evaluate()` resets
+#' `models` and `ensemble` before writing `evaluation`, and `fit()` resets
+#' `ensemble` before writing `models`, so a re-run never leaves a later
+#' verb's state (UQ bundles, a meta-learner) describing models that are no
+#' longer there. The class is the calling verb's to set.
+#'
+#' @param x [horizons_data.] The object to reset.
+#' @param slots [Character.] Slot names; each must be a section of
+#'   [new_horizons_data()].
+#'
+#' @return [horizons_data.] `x` with those slots replaced.
+#'
+#' @seealso [reset_promotion()], [promoted_state()]
+#' @noRd
+reset_slots <- function(x, slots) {
+
+  blank   <- new_horizons_data()
+  unknown <- setdiff(slots, names(blank))
+
+  if (length(unknown)) {
+
+    cli::cli_abort("{.fn reset_slots} does not know {.field {unknown}}",
+                   class = "horizons_input_error")
+
+  }
+
+  ### list(value) keeps the key even for a slot whose empty value is NULL.
+  for (slot in slots) {
+
+    x[slot] <- list(blank[[slot]])
+
+  }
+
+  x
 
 }
 
