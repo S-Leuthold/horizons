@@ -118,6 +118,10 @@ VALID_FEATURE_SELECTION <- c(
 
 ## Metrics --------------------------------------------------------------------
 
+# Metrics evaluate() and fit() accept as `metric`, the ones configs are ranked
+# by (on their cv_<metric> column)
+VALID_RANK_METRICS <- c("rpd", "rsq", "rmse", "rrmse", "ccc", "mae")
+
 # Metrics where a higher value is better (used for ranking configs). All other
 # metrics (rmse, rrmse, mae, ...) are lower-is-better.
 HIGHER_BETTER_METRICS <- c("rpd", "rsq", "ccc")

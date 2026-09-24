@@ -20,6 +20,45 @@
   RPD 3.82). `configure()`'s docs gain a "Choosing models for large spectral
   libraries" section covering n x p limits across `MODEL_SPECS`.
 
+* **`fit()` starts cold from a configured object with one configuration**
+  (#45). `fit()` required a `horizons_eval`, so a full `evaluate()`, grid
+  tuning and all, had to run even when there was one configuration and
+  nothing to screen; a loop fitting one known configuration across many
+  subsets (per cluster, per site) spent about half its compute re-deciding
+  a question with one answer. `fit()` now also takes a configured
+  `horizons_data` whose `config$configs` has exactly one row. It draws the
+  train/test split `evaluate()` would draw at the same `seed`, through one
+  helper both verbs now call, so the model is scored on the rows
+  `evaluate()` would have held out, and it re-tunes from a space-filling
+  grid of `grid_size` points where `evaluate()`'s parameters would
+  otherwise seed it. The console tree says so. The degradation check is
+  unaffected, since it compares the test RPD with `fit()`'s own
+  cross-validation. The fit carries an unscreened evaluation record:
+  `evaluation$screened` is `FALSE`, the configuration's status is
+  `"not_evaluated"`, and its metric and `cv_*` columns are `NA`.
+  `evaluate()` now writes `screened = TRUE`; objects evaluated before the
+  key existed still validate. With more than one configuration, `fit()`
+  aborts with class `horizons_input_error` and says to run `evaluate()`.
+  Before drawing, it applies `evaluate()`'s checks: at least twice
+  `cv_folds` rows with an observed outcome, and a Savitzky-Golay window
+  narrower than the spectrum (#62); `evaluation$recipe` records the recipe
+  settings as `evaluate()` does.
+
+  `models$results` gains `warm_start` and `start_grid_size`, recording
+  how each member's re-tune started, on the `evaluate()` path too: a
+  member whose `evaluate()` parameters were unusable used to fall back to
+  the same space-filling grid silently, and now the tree says so.
+
+  `fit()` now checks `metric` before anything is drawn or fitted, on either
+  path, against the list `evaluate()` accepts (`VALID_RANK_METRICS`); an
+  unknown name on the `evaluate()` path used to surface as a missing
+  `cv_<metric>` column with the advice to re-run `evaluate()`. Its tree
+  header prints the Bayesian budget the re-tune runs,
+  `final_bayesian_iter`, where it printed the screening `bayesian_iter`.
+  `print()` closes its Evaluation branch on the last line: the Best line
+  of a fitted object, and the Successful line when nothing succeeded,
+  were left open.
+
 * **`configure()` gains `sg_window` and `pca_threshold`** (#62): the Savitzky-Golay window, in grid points, and the share of variance `feature_selection = "pca"` keeps. Each is set once per object and applies to every configuration, so neither enters the config id; both are recorded in `config$recipe`. The defaults, 9 and 0.995, are the values the recipe already ran, so a call that does not set them builds the same recipes as before. `sg_window` must be odd and at least 5, because the second-derivative methods fit a cubic; it trims `(sg_window - 1) / 2` columns from each end for every preprocessing method, `raw` and `snv` included. The polynomial order is still fixed by the method, and for `"sg"` it is 1, which makes that smoother a moving average: a wider window is a wider boxcar, not a peak-preserving filter. `pca_threshold` must be in (0, 1]. `evaluate()`, its parallel workers and `fit()` read the settings from the object, and an object configured by an earlier version runs the defaults. Because the window counts grid points and `standardize()` can still change the axis after `configure()`, the window's width in cm-1 is not stored with the setting: `configure()` prints it for the axis it sees, and `evaluate()` records the settings it ran with in `evaluation$recipe`, with `sg_window_cm` measured on the axis the recipe ran on (the median spacing of the predictor wavenumbers, since the grid step in the provenance can describe another axis), so the runs of an `sg_window` sweep can be told apart. `evaluate()` also refuses, before any config runs, a window that is not narrower than the spectrum, naming both numbers and the width; it used to fail every config inside tune without naming the window. `step_transform_spectra()` now refuses an even window, or one under 5, when the step is built, and at `prep()` a window as wide as the spectrum, which prospectr refuses at bake time. Neither enters the config id, so both are part of the tuning settings `evaluate()` records on every checkpoint row (#42): a rerun into the same `output_dir` with another window or threshold refuses to resume, naming the setting, and rows written before the two were recorded resume as unverified. `build_recipe()`, `evaluate_single_config()` and `fit_single_config()` take the two settings as arguments with the same defaults.
 
 ## Performance
