@@ -149,12 +149,20 @@ fit <- function(x,
   candidates  <- ranking_candidates(eval_results, rank_metric)
   rank_column <- paste0("cv_", rank_metric)
 
-  if (nrow(candidates$rows) == 0) {
+  ## Nothing to fit: no candidates, or candidates none of which has a
+  ## cv_<metric> value, which rank_configs_by_cv() would refuse unclassed.
+  n_candidates <- nrow(candidates$rows)
+
+  if (n_candidates == 0 || all(is.na(candidates$rows[[rank_column]]))) {
 
     cli::cli_abort(c(
       "No configuration in {.field evaluation$results} can be fitted.",
-      "x" = "None succeeded, and no pruned configuration has a {.field {rank_column}} value.",
-      "i" = "Re-run {.fn evaluate}; when every configuration fails it aborts and lists the errors."
+      "x" = if (n_candidates == 0) {
+        "None succeeded, and no pruned configuration has a {.field {rank_column}} value."
+      } else {
+        "{n_candidates} succeeded, but none has a {.field {rank_column}} value."
+      },
+      "i" = "Re-run {.fn evaluate} to record the cross-validated metrics; when every configuration fails it aborts and lists the errors."
     ), class = "horizons_input_error")
 
   }
@@ -826,22 +834,12 @@ abort_all_members_failed <- function(results, call = rlang::caller_env()) {
 
   n_members <- nrow(results)
 
-  ## Upstream error text is interpolated as values, never as a cli template
-  ## (the "{detail}" pattern in R/ad.R).
-  errors    <- distinct_config_errors(results)
-  err_lines <- errors$lines
-  n_more    <- errors$n_more
-
-  err_bullets <- stats::setNames(
-    sprintf("{err_lines[%d]}", seq_along(err_lines)),
-    rep("x", length(err_lines))
-  )
-
+  ## distinct_config_errors() returns the bullets brace-escaped, so upstream
+  ## error text cannot be read as a cli template.
   cli::cli_abort(c(
     "All {n_members} configuration{?s} {.fn fit} re-tuned failed, so there is no model to return.",
-    err_bullets,
-    if (n_more > 0) c("i" = "{n_more} more distinct error message{?s} not shown."),
-    "i" = "The per-member results, error messages included, are on this condition as {.field results}."
+    distinct_config_errors(results),
+    "i" = "The per-member results, error messages included, are on this condition as {.field results}. Recover them with {.code rlang::last_error()$results}."
   ), class = "horizons_all_members_failed", results = results, call = call)
 
 }

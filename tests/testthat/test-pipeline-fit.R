@@ -1034,6 +1034,22 @@ describe("fit() - an evaluation with only pruned configs (#38)", {
 
   })
 
+  ## rank_configs_by_cv() used to refuse this unclassed.
+  it("refuses, classed, when configs succeeded but none has the ranking metric", {
+
+    unranked <- pruned
+    unranked$evaluation$results$status <- "success"
+    unranked$evaluation$results$cv_rpd <- NA_real_
+
+    expect_error(
+      fit(unranked, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE,
+          verbose = FALSE),
+      "succeeded, but none has",
+      class = "horizons_input_error"
+    )
+
+  })
+
 })
 
 
@@ -1151,7 +1167,7 @@ describe("fit() - member failures", {
 
     expect_s3_class(err, "horizons_all_members_failed")
 
-    msg <- conditionMessage(err)
+    msg <- gsub("\\s+", " ", conditionMessage(err))   # undo cli line wrapping
     expect_match(msg, "{rf} diverged", fixed = TRUE)
     expect_match(msg, "{cubist} diverged", fixed = TRUE)
 

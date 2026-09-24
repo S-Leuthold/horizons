@@ -123,13 +123,17 @@ on exit. Configs are dispatched to a top-level worker that loads the
 
 \code{best_config} is chosen from the configs that succeeded or, when none did,
 from the pruned configs that carry a cross-validated value of \code{metric}.
-When there are neither, \code{evaluate()} aborts with class
-\code{horizons_all_configs_failed}. The message lists the distinct error
-messages (the first three, each with the configs that raised it), and the
-per-config results, \code{error_message} included, travel on the condition as
-\code{results}, because \code{evaluate()} aborts before it assigns \code{x$evaluation}.
-A loop over subsets can therefore tolerate one subset whose every config
-fails and keep its errors:
+When there are neither, or none of them has a value of \code{metric} to rank
+on, \code{evaluate()} aborts with class \code{horizons_all_configs_failed}. The
+message lists the distinct error messages (the first three, each with the
+configs that raised it) and names any configs that were loaded from
+checkpoints in \code{output_dir} rather than run, since calling \code{evaluate()}
+again resumes them instead of re-running them. The per-config results,
+\code{error_message} included, travel on the condition as \code{results}, because
+\code{evaluate()} aborts before it assigns \code{x$evaluation}; after an uncaught
+abort, \code{rlang::last_error()$results} recovers them without re-running. A
+loop over subsets can catch the class, tolerate one subset whose every
+config fails, and keep its errors:
 
 \if{html}{\out{<div class="sourceCode">}}\preformatted{runs <- lapply(subsets, function(hd) \{
   tryCatch(

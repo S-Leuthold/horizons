@@ -276,13 +276,18 @@ describe("evaluate() - all configs fail", {
 
     ## The first three distinct messages, each with the configs that raised
     ## it; the fourth is counted, not listed.
-    msg <- conditionMessage(err)
+    msg <- gsub("\\s+", " ", conditionMessage(err))   # undo cli line wrapping
     expect_match(msg, "'{wn_600}'", fixed = TRUE)
     expect_match(msg, "'nope_2'", fixed = TRUE)
     expect_match(msg, "cfg_002, cfg_003", fixed = TRUE)
     expect_match(msg, "'nope_4'", fixed = TRUE)
     expect_no_match(msg, "'nope_5'", fixed = TRUE)
     expect_match(msg, "1 more distinct error message")
+
+    ## How to recover the table after an uncaught abort; nothing here came
+    ## from a checkpoint, so no checkpoint note.
+    expect_match(msg, "rlang::last_error()$results", fixed = TRUE)
+    expect_no_match(msg, "loaded from checkpoints", fixed = TRUE)
 
   })
 
@@ -441,6 +446,46 @@ describe("evaluate() - checkpointing", {
 
     expect_true(all(res$status == "success"))
     expect_true(all(res$below_prune_threshold))
+
+  })
+
+  ## Rows checkpointed before the cv_* columns existed can succeed with no
+  ## value to rank on. rank_configs_by_cv() refused them unclassed and without
+  ## the results, and re-running evaluate() resumes them rather than re-running.
+  it("signals horizons_all_configs_failed when no success has a cv_<metric>, naming the checkpoints", {
+
+    obj <- make_eval_object(n_configs = 2)
+
+    tmpdir <- tempfile("eval_ckpt_nocv_")
+    dir.create(tmpdir)
+    on.exit(unlink(tmpdir, recursive = TRUE))
+
+    suppressWarnings(evaluate(obj, output_dir = tmpdir, verbose = FALSE, seed = 42L))
+
+    cv_cols <- paste0("cv_", c("rmse", "rrmse", "rsq", "ccc", "rpd", "mae"))
+
+    for (f in list.files(file.path(tmpdir, "checkpoints"), full.names = TRUE)) {
+      row <- readRDS(f)
+      row[cv_cols] <- NULL
+      saveRDS(row, f)
+    }
+
+    unlink(file.path(tmpdir, "eval_checkpoint.rds"))
+
+    err <- tryCatch(
+      suppressWarnings(evaluate(obj, output_dir = tmpdir, verbose = FALSE,
+                                seed = 42L)),
+      horizons_all_configs_failed = function(e) e
+    )
+
+    expect_s3_class(err, "horizons_all_configs_failed")
+    expect_setequal(err$results$config_id, obj$config$configs$config_id)
+
+    msg <- gsub("\\s+", " ", conditionMessage(err))   # undo cli line wrapping
+    expect_match(msg, "2 succeeded, but none has a cv_rpd value", fixed = TRUE)
+    expect_match(msg, "2 configurations were loaded from checkpoints", fixed = TRUE)
+    expect_match(msg, "cfg_001, cfg_002", fixed = TRUE)
+    expect_match(msg, "eval_checkpoint.rds", fixed = TRUE)
 
   })
 

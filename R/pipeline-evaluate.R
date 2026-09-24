@@ -86,13 +86,17 @@
 #' @section When every configuration fails:
 #' `best_config` is chosen from the configs that succeeded or, when none did,
 #' from the pruned configs that carry a cross-validated value of `metric`.
-#' When there are neither, `evaluate()` aborts with class
-#' `horizons_all_configs_failed`. The message lists the distinct error
-#' messages (the first three, each with the configs that raised it), and the
-#' per-config results, `error_message` included, travel on the condition as
-#' `results`, because `evaluate()` aborts before it assigns `x$evaluation`.
-#' A loop over subsets can therefore tolerate one subset whose every config
-#' fails and keep its errors:
+#' When there are neither, or none of them has a value of `metric` to rank
+#' on, `evaluate()` aborts with class `horizons_all_configs_failed`. The
+#' message lists the distinct error messages (the first three, each with the
+#' configs that raised it) and names any configs that were loaded from
+#' checkpoints in `output_dir` rather than run, since calling `evaluate()`
+#' again resumes them instead of re-running them. The per-config results,
+#' `error_message` included, travel on the condition as `results`, because
+#' `evaluate()` aborts before it assigns `x$evaluation`; after an uncaught
+#' abort, `rlang::last_error()$results` recovers them without re-running. A
+#' loop over subsets can catch the class, tolerate one subset whose every
+#' config fails, and keep its errors:
 #'
 #' ```
 #' runs <- lapply(subsets, function(hd) {
@@ -847,9 +851,17 @@ evaluate <- function(x,
   ## fit() applies to the same table.
   candidates <- ranking_candidates(all_results, metric)
 
-  if (nrow(candidates$rows) == 0) {
+  ## Nothing to rank: no candidates, or candidates none of which has a
+  ## cv_<metric> value, which rank_configs_by_cv() would refuse unclassed and
+  ## without the results. Rows resumed from checkpoints are named, since
+  ## re-running evaluate() does not re-run them.
+  if (nrow(candidates$rows) == 0 || all(is.na(candidates$rows[[rank_column]]))) {
 
-    abort_all_configs_failed(all_results, metric)
+    abort_all_configs_failed(
+      all_results, metric,
+      checkpoint_ids = intersect(all_results$config_id, completed_ids),
+      output_dir     = output_dir
+    )
 
   }
 
@@ -1165,47 +1177,77 @@ abort_checkpoint_data_mismatch <- function(stored, current, output_dir, source) 
 #' Abort because no configuration can be ranked
 #'
 #' @description
-#' Raised by `evaluate()` when every configuration failed, or was pruned
-#' without a cross-validated value of the ranking metric (#41). `evaluate()`
-#' aborts before it assigns `x$evaluation`, so the results table travels on
-#' the condition as `results`, and the message lists the distinct error
-#' messages (the first three, each with the configs that raised it, and a
-#' count of the rest). A caller looping over subsets can catch the class and
-#' keep the per-config errors; see `evaluate()`'s "When every configuration
-#' fails" section.
+#' Raised by `evaluate()` when no configuration can be ranked: every one
+#' failed, or was pruned without a cross-validated value of the ranking
+#' metric (#41), or succeeded without one (rows checkpointed before the
+#' `cv_*` columns existed). `evaluate()` aborts before it assigns
+#' `x$evaluation`, so the results table travels on the condition as
+#' `results`, and the message lists the distinct error messages (the first
+#' three, each with the configs that raised it, and a count of the rest). A
+#' caller looping over subsets can catch the class and keep the per-config
+#' errors; see `evaluate()`'s "When every configuration fails" section.
+#'
+#' Rows resumed from checkpoints are not re-run by calling `evaluate()`
+#' again, so the message names them and the files to delete. They are
+#' identified by `evaluate()` from the ids its loader returned, without
+#' reading the checkpoint files again.
 #'
 #' @param results The aggregated result rows (`evaluation$results` shape).
 #' @param metric Bare ranking metric name.
+#' @param checkpoint_ids Character. Config ids among `results` that were
+#'   loaded from checkpoints rather than run. Default none.
+#' @param output_dir The checkpoint directory, or `NULL`.
 #' @param call The call the condition is attributed to. Default: the caller,
 #'   `evaluate()`.
 #' @return Never returns; aborts with class `horizons_all_configs_failed`.
 #' @keywords internal
 #' @noRd
-abort_all_configs_failed <- function(results, metric, call = rlang::caller_env()) {
+abort_all_configs_failed <- function(results, metric,
+                                     checkpoint_ids = character(0),
+                                     output_dir     = NULL,
+                                     call           = rlang::caller_env()) {
 
   rank_column <- paste0("cv_", metric)
   n_total     <- nrow(results)
+  n_success   <- sum(results$status == "success")
   n_failed    <- sum(results$status == "failed")
   n_pruned    <- sum(results$status == "pruned")
 
-  ## Upstream error text is interpolated as values ("{err_lines[1]}"), never
-  ## handed to cli as a template, so a brace in a message cannot break the
-  ## abort (the "{detail}" pattern in R/ad.R).
-  errors    <- distinct_config_errors(results)
-  err_lines <- errors$lines
-  n_more    <- errors$n_more
+  header <- if (n_success > 0) {
+    "No configuration can be ranked: {n_success} succeeded, but none has a {.field {rank_column}} value."
+  } else {
+    "All configurations failed or were pruned without a {.field {rank_column}} value, so none can be ranked."
+  }
 
-  err_bullets <- stats::setNames(
-    sprintf("{err_lines[%d]}", seq_along(err_lines)),
-    rep("x", length(err_lines))
-  )
+  ## Resumed rows are not re-run by calling evaluate() again, so a failure
+  ## loaded from a checkpoint persists until its files are deleted. Built as
+  ## plain text (the directory is the caller's), escaped for cli.
+  checkpoint_note <- NULL
+
+  if (length(checkpoint_ids) > 0 && !is.null(output_dir)) {
+
+    n_ckpt    <- length(checkpoint_ids)
+    ids_shown <- paste(utils::head(checkpoint_ids, 3), collapse = ", ")
+
+    if (n_ckpt > 3) ids_shown <- paste0(ids_shown, " and ", n_ckpt - 3, " more")
+
+    checkpoint_note <- c("i" = cli_escape(paste0(
+      n_ckpt, if (n_ckpt == 1) " configuration was" else " configurations were",
+      " loaded from checkpoints in ", output_dir, " rather than run (",
+      ids_shown, "). To re-run ", if (n_ckpt == 1) "it" else "them",
+      ", delete ", if (n_ckpt == 1) "its file" else "their files",
+      " in checkpoints/ and also eval_checkpoint.rds, which holds a copy of",
+      " every row; the other configurations resume from their own files."
+    )))
+
+  }
 
   cli::cli_abort(c(
-    "All configurations failed or were pruned without a {.field {rank_column}} value, so none can be ranked.",
-    "i" = "Of {n_total} configuration{?s}: {n_failed} failed, {n_pruned} pruned.",
-    err_bullets,
-    if (n_more > 0) c("i" = "{n_more} more distinct error message{?s} not shown."),
-    "i" = "The per-config results, error messages included, are on this condition as {.field results}: {.code tryCatch(evaluate(x), horizons_all_configs_failed = function(e) e$results)}."
+    header,
+    "i" = "Of {n_total} configuration{?s}: {n_success} succeeded, {n_failed} failed, {n_pruned} pruned.",
+    distinct_config_errors(results),
+    checkpoint_note,
+    "i" = "The per-config results, error messages included, are on this condition as {.field results}. Recover them without re-running with {.code rlang::last_error()$results}, or catch the class: {.code tryCatch(evaluate(x), horizons_all_configs_failed = function(e) e$results)}."
   ), class = "horizons_all_configs_failed", results = results, call = call)
 
 }
