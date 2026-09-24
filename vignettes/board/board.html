@@ -229,8 +229,8 @@
 
 <script type="application/json" id="hz-data">
 {
-  "generated_at": "2026-09-24T06:46:13-0500",
-  "content_md5": "9955b2ce6aafa62c08b73a6ca573f29e",
+  "generated_at": "2026-09-24T13:35:33-0500",
+  "content_md5": "a73b03a5a5c34f822d6f7e9596f65b6d",
   "horizons": "0.9.0",
   "lanes": [
     {
@@ -663,28 +663,28 @@
           "default": "TRUE",
           "text": "Logical. Enable correlation-based outlier detection. Default: `TRUE`.",
           "touch": "Leave TRUE unless you have already screened the scans yourself.",
-          "source": "R/pipeline-average.R#L748"
+          "source": "R/pipeline-average.R#L780"
         },
         {
           "name": "correlation_threshold",
           "default": "0.996",
           "text": "Numeric. Minimum mean pairwise correlation for a replicate to pass QC. Default: `0.996`. Changing this is rarely needed.",
           "touch": "Rarely; 0.996 is the mean pairwise correlation a replicate must reach against its siblings.",
-          "source": "R/pipeline-average.R#L646"
+          "source": "R/pipeline-average.R#L678"
         },
         {
           "name": "on_all_outliers",
           "default": "c(\"warn\", \"drop\", \"keep_best\")",
           "text": "Character. Behavior when all replicates fail QC: - `\"warn\"` (default): Keep all replicates and average - `\"drop\"`: Remove the sample entirely - `\"keep_best\"`: Keep only the replicate with highest mean correlation",
           "touch": "When a whole group fails the check, decide whether to average it anyway with a warning, drop the sample, or keep only the best replicate.",
-          "source": "R/pipeline-average.R#L763"
+          "source": "R/pipeline-average.R#L795"
         },
         {
           "name": "verbose",
           "default": "TRUE",
           "text": "Logical. Print progress messages. Default: `TRUE`.",
           "touch": "Set FALSE inside loops.",
-          "source": "R/pipeline-average.R#L510"
+          "source": "R/pipeline-average.R#L525"
         }
       ],
       "mechanics": [
@@ -702,43 +702,43 @@
         },
         {
           "step": "Per group with two or more scans, computes each replicate's mean correlation with the others, removes the worst one, and repeats until every survivor clears the threshold or one remains. Iterative so a single bad scan cannot drag its siblings under.",
-          "source": "R/pipeline-average.R#L618"
+          "source": "R/pipeline-average.R#L650"
         },
         {
           "step": "A group whose survivors fall to one is an all-outlier group and is handled by `on_all_outliers`; otherwise the flagged scans are dropped and the rest averaged.",
-          "source": "R/pipeline-average.R#L761"
+          "source": "R/pipeline-average.R#L793"
         },
         {
           "step": "Predictors are column means over the surviving scans. Numeric responses are averaged over the same rows; a non-numeric response that disagrees within a group is an error, not a silent pick.",
-          "source": "R/pipeline-average.R#L928"
+          "source": "R/pipeline-average.R#L960"
         },
         {
           "step": "Meta columns are kept when uniform within the group and dropped otherwise; `filename` is always dropped.",
-          "source": "R/pipeline-average.R#L871"
+          "source": "R/pipeline-average.R#L903"
         },
         {
           "step": "With a custom `by`, that column is coerced to character and becomes `sample_id`, after checks that it produces no NA and no duplicates.",
-          "source": "R/pipeline-average.R#L402"
+          "source": "R/pipeline-average.R#L417"
         },
         {
           "step": "Writes the table back through set_analysis(), which recounts rows and predictors.",
-          "source": "R/pipeline-average.R#L450"
+          "source": "R/pipeline-average.R#L465"
         },
         {
           "step": "Re-validates the whole object structurally before returning it (#24).",
-          "source": "R/pipeline-average.R#L489"
+          "source": "R/pipeline-average.R#L504"
         }
       ],
       "records": [
         {
           "field": "provenance$average",
           "text": "the settings, group and replicate counts before and after, which samples were all-outlier or dropped, which meta columns were dropped, and source_ids, the map from each averaged id to the scans it came from",
-          "source": "R/pipeline-average.R#L467"
+          "source": "R/pipeline-average.R#L482"
         },
         {
           "field": "provenance$aggregation_by",
           "text": "the grouping column, written on every call",
-          "source": "R/pipeline-average.R#L483"
+          "source": "R/pipeline-average.R#L498"
         }
       ],
       "refuses": [
@@ -760,22 +760,22 @@
         {
           "when": "every sample is dropped by quality control",
           "does": "aborts and suggests on_all_outliers = \"warn\" or a lower threshold",
-          "source": "R/pipeline-average.R#L346"
+          "source": "R/pipeline-average.R#L361"
         },
         {
           "when": "all replicates of a sample fail and on_all_outliers is \"warn\"",
           "does": "averages them anyway and warns, naming the samples",
-          "source": "R/pipeline-average.R#L495"
+          "source": "R/pipeline-average.R#L510"
         },
         {
           "when": "a non-numeric response disagrees within a group",
           "does": "aborts naming the column and group",
-          "source": "R/pipeline-average.R#L950"
+          "source": "R/pipeline-average.R#L982"
         },
         {
           "when": "the object fails validate_horizons_data() after averaging",
           "does": "aborts with the validator's findings, class horizons_validation_error",
-          "source": "R/pipeline-average.R#L489"
+          "source": "R/pipeline-average.R#L504"
         }
       ],
       "evidence": [],
@@ -846,40 +846,40 @@
         },
         {
           "step": "Left-joins with dplyr, so every spectrum is kept and unmatched ones get NA in the new columns.",
-          "source": "R/pipeline-add-response.R#L478"
+          "source": "R/pipeline-add-response.R#L473"
         },
         {
           "step": "Counts each variable's non-missing values after the join and prints them under the join count, because a matched id can still carry NA. Rows with NA are kept, since another response on the object may be measured on them; evaluate() and fit() drop the rows whose outcome is NA.",
-          "source": "R/pipeline-add-response.R#L492"
+          "source": "R/pipeline-add-response.R#L487"
         },
         {
           "step": "Appends the variables to the role map as response and recounts n_responses; the outcome role is not assigned here.",
-          "source": "R/pipeline-add-response.R#L503"
+          "source": "R/pipeline-add-response.R#L498"
         },
         {
           "step": "Appends a provenance entry, one per call, so several sources can be joined across calls.",
-          "source": "R/pipeline-add-response.R#L508"
+          "source": "R/pipeline-add-response.R#L503"
         },
         {
           "step": "Re-validates the whole object structurally before returning it (#24).",
-          "source": "R/pipeline-add-response.R#L532"
+          "source": "R/pipeline-add-response.R#L527"
         }
       ],
       "records": [
         {
           "field": "data$analysis",
           "text": "the response columns, NA where a sample had no match",
-          "source": "R/pipeline-add-response.R#L478"
+          "source": "R/pipeline-add-response.R#L473"
         },
         {
           "field": "data$role_map, data$n_responses",
           "text": "one response role per variable",
-          "source": "R/pipeline-add-response.R#L503"
+          "source": "R/pipeline-add-response.R#L498"
         },
         {
           "field": "provenance$add_response",
           "text": "a list of entries, each with the source label, the variables, the join key, the matched and unmatched counts, the non-missing count per variable, and the time",
-          "source": "R/pipeline-add-response.R#L508"
+          "source": "R/pipeline-add-response.R#L503"
         }
       ],
       "refuses": [
@@ -911,12 +911,12 @@
         {
           "when": "fewer than half match, or any sample is left unmatched",
           "does": "warns, and the unmatched rows carry NA",
-          "source": "R/pipeline-add-response.R#L426"
+          "source": "R/pipeline-add-response.R#L431"
         },
         {
           "when": "the object fails validate_horizons_data() after the join",
           "does": "aborts with the validator's findings, class horizons_validation_error",
-          "source": "R/pipeline-add-response.R#L532"
+          "source": "R/pipeline-add-response.R#L527"
         }
       ],
       "evidence": [],
@@ -1646,7 +1646,7 @@
           "default": "\"rpd\"",
           "text": "Character. Metric for ranking configurations. One of `\"rpd\"`, `\"rsq\"`, `\"rmse\"`, `\"rrmse\"`, `\"ccc\"`, `\"mae\"`. Ranking uses the cross-validated value of that metric at each config's selected hyperparameters (evaluation$results$cv_<metric>); the test-set columns are reported but never used for selection, so they remain honest held-out estimates. Default `\"rpd\"`.",
           "touch": "To rank by something other than RPD; the ranking reads the cross-validated column of that metric.",
-          "source": "R/pipeline-evaluate.R#L781"
+          "source": "R/pipeline-evaluate.R#L784"
         },
         {
           "name": "prune",
@@ -1681,7 +1681,7 @@
           "default": "NULL",
           "text": "Character or NULL. If provided, each config's result is written to <output_dir>/checkpoints/<config_id>.rds as it finishes, and a rerun into the same directory resumes from those files. Required when configs are dispatched to workers. A resumed row must have been scored on this run's training data (the outcome, the sample ids, which columns hold the `id`, `outcome`, `predictor` and `covariate` roles, and the outcome, predictor and covariate values) and tuned with this run's settings (`cv_folds`, `grid_size`, `bayesian_iter`, `prune`, `prune_threshold` when pruning, and `seed`); either mismatch aborts, naming what differs. So re-standardized spectra, a rescaled outcome, or another outcome on the same samples is refused rather than resumed, while adding a sibling response with `add_response()` or a `meta` column resumes. Keep one `output_dir` per outcome. The ranking `metric` is not checked, since every row carries all six cross-validated metrics. Rows scored under an earlier scoring schema are dropped and re-evaluated; rows for configs no longer in the grid are dropped; a file that cannot be used warns and its config is re-evaluated; rows written before a fingerprint field existed warn once and resume. A whole-table `eval_checkpoint.rds` from earlier versions is read only for configs with no per-config file, and its rows are copied into checkpoints/, after which it can be deleted. Default NULL (no checkpointing).",
           "touch": "Always for a long run; required when configurations are dispatched to workers. Each configuration is checkpointed to its own file under checkpoints/ and a rerun resumes, refusing checkpoints written on other training data (other samples, outcome, id/outcome/predictor/covariate columns, or values, so re-standardized spectra count) or tuned under different settings. Keep one directory per outcome; changing only the ranking metric, or adding a sibling response or meta column, resumes.",
-          "source": "R/pipeline-evaluate.R#L383"
+          "source": "R/pipeline-evaluate.R#L367"
         },
         {
           "name": "seed",
@@ -1695,7 +1695,7 @@
           "default": "TRUE",
           "text": "Logical. Print progress tree to console. Default TRUE.",
           "touch": "Set FALSE inside loops.",
-          "source": "R/pipeline-evaluate.R#L424"
+          "source": "R/pipeline-evaluate.R#L408"
         },
         {
           "name": "workers",
@@ -1723,20 +1723,20 @@
           "source": "R/pipeline-evaluate.R#L252"
         },
         {
-          "step": "Splits 80/20 stratified on the outcome (falling back to unstratified), by the draw fit() also makes when it starts cold, builds cv_folds stratified folds on the training part, and fingerprints the training data (the outcome, the sample ids, which columns hold the id, outcome, predictor and covariate roles, and the outcome, predictor and covariate values, once per run) so a checkpoint from other rows or other values cannot be resumed.",
+          "step": "Splits 80/20 stratified on the outcome, by the draw fit() also makes when it starts cold, and builds cv_folds folds on the training part stratified the same way. A draw comes out unstratified when rsample cannot bin the outcome (under 40 rows, or bins that collapse to one, as a mostly-zero outcome's do) or the stratified draw fails, and the tree's split line says which (#91). Then fingerprints the training data (the outcome, the sample ids, which columns hold the id, outcome, predictor and covariate roles, and the outcome, predictor and covariate values, once per run) so a checkpoint from other rows or other values cannot be resumed.",
           "source": "R/pipeline-evaluate.R#L292"
         },
         {
           "step": "Records the tuning settings a result row depends on (cv_folds, grid_size, bayesian_iter, prune, prune_threshold when pruning, seed, and configure()'s sg_window and pca_threshold, which the config id does not carry), so a checkpoint tuned or preprocessed differently cannot be resumed either. The metric is left out, since every row carries all six cv_ metrics.",
-          "source": "R/pipeline-evaluate.R#L357"
+          "source": "R/pipeline-evaluate.R#L341"
         },
         {
           "step": "Loads the per-config checkpoints, the only store, plus the rows of a legacy eval_checkpoint.rds for configurations with no per-config file, which it copies across. A file counts only under its own configuration's name, so a leftover temp file cannot shadow it. Every row passes one gate order, fingerprint and settings (a mismatch aborts) then scoring schema (an older one is dropped); rows for configurations no longer in the grid are dropped, a file that cannot be used warns, and rows with no fingerprint warn once.",
-          "source": "R/pipeline-evaluate.R#L1171"
+          "source": "R/pipeline-evaluate.R#L1174"
         },
         {
           "step": "Writes a manifest carrying the fingerprint and settings, so monitor_evaluate() can watch the run and gate the checkpoints the way evaluate() does.",
-          "source": "R/pipeline-evaluate.R#L476"
+          "source": "R/pipeline-evaluate.R#L479"
         },
         {
           "step": "Per configuration, evaluate_single_config() builds the recipe, with the object's recorded window and PCA threshold, and the model spec, finalizes the parameter ranges, runs the grid, reads the prune gate (recording whether the grid RPD fell below prune_threshold, and skipping Bayesian optimization for those only when there is a Bayesian stage to skip), runs Bayesian optimization, selects the best hyperparameters, records the cross-validated panel at that point, and fits and scores once on the held-out test rows on the original scale.",
@@ -1744,51 +1744,51 @@
         },
         {
           "step": "On the configs axis, each configuration is one future carrying only what it needs; workers load the installed package, so dispatch is refused under devtools::load_all().",
-          "source": "R/pipeline-evaluate.R#L701"
+          "source": "R/pipeline-evaluate.R#L704"
         },
         {
           "step": "With bayesian_iter = 0, relabels checkpointed rows still marked pruned as successes, since there the gate skipped nothing. Ranks the successful configurations by cv_<metric>, falling back to pruned ones, with a tie-break on config_id, and names the winner.",
-          "source": "R/pipeline-evaluate.R#L770"
+          "source": "R/pipeline-evaluate.R#L773"
         },
         {
           "step": "Empties the models and ensemble slots, which were built on the evaluation being replaced, so a fitted or ensembled object comes back a plain horizons_eval.",
-          "source": "R/pipeline-evaluate.R#L814"
+          "source": "R/pipeline-evaluate.R#L817"
         },
         {
           "step": "Promotes the class to horizons_eval and certifies the evaluation slot against its contract.",
-          "source": "R/pipeline-evaluate.R#L837"
+          "source": "R/pipeline-evaluate.R#L840"
         }
       ],
       "records": [
         {
           "field": "evaluation$results",
           "text": "one row per configuration with status (success, pruned, failed; pruned means Bayesian refinement was skipped), whether its grid RPD fell below prune_threshold and the threshold, the six test metrics, the six cv_ metrics, the selected hyperparameters, warnings, runtime, the scoring schema, the training-data fingerprint, and the tuning settings",
-          "source": "R/pipeline-evaluate.R#L816"
+          "source": "R/pipeline-evaluate.R#L819"
         },
         {
           "field": "evaluation$best_config, evaluation$rank_metric",
           "text": "the winner and the metric it won on",
-          "source": "R/pipeline-evaluate.R#L818"
+          "source": "R/pipeline-evaluate.R#L821"
         },
         {
           "field": "evaluation$screened",
           "text": "TRUE, since the configurations were ranked; fit()'s cold start from a single configuration writes FALSE",
-          "source": "R/pipeline-evaluate.R#L820"
+          "source": "R/pipeline-evaluate.R#L823"
         },
         {
           "field": "evaluation$split, evaluation$n_train, evaluation$n_test",
           "text": "the rsplit itself, so the partition can be replayed",
-          "source": "R/pipeline-evaluate.R#L821"
+          "source": "R/pipeline-evaluate.R#L824"
         },
         {
           "field": "evaluation$parallelize_over, evaluation$workers",
           "text": "the axis actually used and the worker count the plan offered",
-          "source": "R/pipeline-evaluate.R#L824"
+          "source": "R/pipeline-evaluate.R#L827"
         },
         {
           "field": "evaluation$recipe",
           "text": "the sg_window and pca_threshold every configuration's recipe ran with, and sg_window_cm, the window's width in cm⁻¹ on the axis it ran on, so the runs of an sg_window sweep can be told apart",
-          "source": "R/pipeline-evaluate.R#L828"
+          "source": "R/pipeline-evaluate.R#L831"
         }
       ],
       "refuses": [
@@ -1810,48 +1810,48 @@
         {
           "when": "a checkpoint was written on other training data (other samples, outcome, id/outcome/predictor/covariate columns, or values)",
           "does": "aborts naming what differs, and any settings that also differ",
-          "source": "R/pipeline-evaluate.R#L1772"
+          "source": "R/pipeline-evaluate.R#L1775"
         },
         {
           "when": "a checkpoint was tuned under different settings",
           "does": "aborts naming each setting that differs",
-          "source": "R/pipeline-evaluate.R#L1501"
+          "source": "R/pipeline-evaluate.R#L1504"
         },
         {
           "when": "parallel dispatch is requested under devtools::load_all()",
           "does": "aborts",
-          "source": "R/pipeline-evaluate.R#L701"
+          "source": "R/pipeline-evaluate.R#L704"
         },
         {
           "when": "no configuration can be ranked, because every one failed, was pruned without a rankable metric, or succeeded without one (rows checkpointed before the cv_ columns)",
           "does": "aborts with class horizons_all_configs_failed, listing the first three distinct errors with the configurations that raised them and naming any loaded from checkpoints, which a re-run resumes rather than re-runs; the results table travels on the condition as results, since evaluation$results is never assigned, so a loop over subsets can catch the class and keep the errors, and rlang::last_error()$results recovers it after the fact",
-          "source": "R/pipeline-evaluate.R#L1925"
+          "source": "R/pipeline-evaluate.R#L1928"
         },
         {
           "when": "configure()'s sg_window is not narrower than the spectrum on the axis the object now has",
           "does": "aborts before any configuration runs, naming the window, its width in cm⁻¹ and the column count, class horizons_input_error",
-          "source": "R/pipeline-evaluate.R#L2237"
+          "source": "R/pipeline-evaluate.R#L2240"
         },
         {
           "when": "the registered plan has fewer than two workers, checkpoints lack a fingerprint or settings, or a configuration's cv metric is NA",
           "does": "warns and continues",
-          "source": "R/pipeline-evaluate.R#L1334"
+          "source": "R/pipeline-evaluate.R#L1337"
         },
         {
           "when": "a checkpoint file cannot be read",
           "does": "warns naming it and re-evaluates the configuration",
-          "source": "R/pipeline-evaluate.R#L1305"
+          "source": "R/pipeline-evaluate.R#L1308"
         }
       ],
       "evidence": [
         {
           "claim": "ranking on the test set would make the winner's test metric a maximum over the grid rather than a held-out estimate",
-          "where": "R/pipeline-evaluate.R#L775",
+          "where": "R/pipeline-evaluate.R#L778",
           "value": "#50"
         },
         {
           "claim": "a closure defined inside evaluate() shipped 2.26 GiB per future against 232 MB of needed inputs, which is why the worker is a top-level function",
-          "where": "R/pipeline-evaluate.R#L2265"
+          "where": "R/pipeline-evaluate.R#L2268"
         },
         {
           "claim": "after the serialization fixes the per-worker payload on the configs axis is 418 MB at 17,788 by 1,701",
@@ -1890,7 +1890,7 @@
           "default": "5L",
           "text": "Integer. Number of top configurations to re-tune. Default 5. A cold start has one.",
           "touch": "How many configurations to carry forward; five by default, capped at the number that succeeded, or at the number pruned with a cross-validated metric when none did. One is enough for a single deployable model; several are what ensemble() stacks. A cold start fits its one.",
-          "source": "R/pipeline-fit.R#L267"
+          "source": "R/pipeline-fit.R#L260"
         },
         {
           "name": "metric",
@@ -1904,41 +1904,41 @@
           "default": "TRUE",
           "text": "Logical. Train UQ components (quantile model + conformal calibration). Default TRUE.",
           "touch": "FALSE to skip conformal intervals. The fit regains the whole training part only when compute_ad is FALSE too, because the calibration split is drawn whenever either capability is on, and it is what shrinks the rows with out-of-fold predictions from 80 % to 64 %.",
-          "source": "R/pipeline-fit.R#L389"
+          "source": "R/pipeline-fit.R#L367"
         },
         {
           "name": "compute_ad",
           "default": "TRUE",
           "text": "Logical. Compute applicability-domain metadata (centroid + shrinkage covariance + held-out OOD thresholds) per config, so `predict()` can emit `.ad_distance` / `.ad_flag`. Shares the UQ calibration split. Default TRUE.",
           "touch": "FALSE to skip the applicability-domain bundle; it shares the calibration split with UQ.",
-          "source": "R/pipeline-fit.R#L389"
+          "source": "R/pipeline-fit.R#L367"
         },
         {
           "name": "allow_par",
           "default": "FALSE",
           "text": "Logical. If `TRUE`, tune parallelises the CV folds inside each member's re-tune and OOF pass on whatever `future::plan()` the caller has registered; `fit()` never registers a plan. If the plan offers fewer than two workers, warns naming it and runs sequentially. `fit()` parallelises folds only in this version; a configs axis across the `n_best` members is gated on the fitted-object memory contract (a fitted object is hundreds of MB and would cross to workers). Default FALSE.",
           "touch": "TRUE after registering a future plan to parallelise the folds inside each re-tune; fit() never dispatches configurations to workers because a fitted object is hundreds of MB.",
-          "source": "R/pipeline-fit.R#L203"
+          "source": "R/pipeline-fit.R#L197"
         },
         {
           "name": "seed",
           "default": "307L",
           "text": "Integer. Random seed for the CV folds and, through `calib_split_seed()` (`seed + 1L`), for the calibration split. The train/test split is `evaluate()`'s, so it does not depend on this seed, except on a cold start, where `fit()` draws that split at this seed as `evaluate()` would. Default 307L.",
           "touch": "To change the folds, and the calibration split, which is seeded at seed + 1. The train/test split is evaluate()'s, so this seed does not move it, except on a cold start, where fit() draws that split at this seed as evaluate() would.",
-          "source": "R/pipeline-fit.R#L391"
+          "source": "R/pipeline-fit.R#L369"
         },
         {
           "name": "verbose",
           "default": "TRUE",
           "text": "Logical. Print progress tree to console. Default TRUE.",
           "touch": "Set FALSE inside loops.",
-          "source": "R/pipeline-fit.R#L467"
+          "source": "R/pipeline-fit.R#L424"
         }
       ],
       "mechanics": [
         {
           "step": "Certifies the base data contract at entry, at the full stage, so a column added after configure() without a role_map entry cannot reach build_recipe()'s outcome ~ . formula undetected (#24). validate_horizons_fit() at return checks the models slot, not this. Runs on both paths, after the cold start (if any) has populated evaluation.",
-          "source": "R/pipeline-fit.R#L185"
+          "source": "R/pipeline-fit.R#L179"
         },
         {
           "step": "Checks metric against the metrics evaluate() accepts. Given a configured object with exactly one configuration, or a fit that started that way, starts cold. Draws the 80/20 split evaluate() would at seed, by the draw evaluate() uses and after evaluate()'s checks (a floor of twice cv_folds rows, and a Savitzky-Golay window narrower than the spectrum), and records an unscreened evaluation in evaluate()'s place, with screened FALSE and the configuration not_evaluated, carrying no metrics or parameters, and the recipe settings as evaluate() records them.",
@@ -1946,23 +1946,23 @@
         },
         {
           "step": "Otherwise requires a horizons_eval with results. Confirms a parallel backend if asked, takes the configurations evaluate() chose best_config from (the successful ones or, when none succeeded, the pruned ones with a cross-validated metric; on a cold start, the one configuration), ranks them by the cross-validated metric, takes the top n_best, and warns if every one of them fell below evaluate()'s prune threshold.",
-          "source": "R/pipeline-fit.R#L187"
+          "source": "R/pipeline-fit.R#L181"
         },
         {
           "step": "Drops rows whose outcome is NA by the rule evaluate() applies, and says how many in the tree.",
-          "source": "R/pipeline-fit.R#L315"
+          "source": "R/pipeline-fit.R#L291"
         },
         {
           "step": "Takes evaluate()'s 80/20 split as Split F, so the test part is evaluate()'s held-out rows, after checking that its id and outcome columns match those rows value for value and in order. Columns added since evaluate(), such as a sibling response, come along into the fit.",
-          "source": "R/pipeline-fit.R#L339"
+          "source": "R/pipeline-fit.R#L315"
         },
         {
           "step": "If UQ or AD is on, splits the training part 80/20 again, at seed + 1, into the fit rows and a calibration set; both capabilities are disabled together if the calibration set is under 30 rows.",
-          "source": "R/pipeline-fit.R#L389"
+          "source": "R/pipeline-fit.R#L367"
         },
         {
-          "step": "Builds cv_folds stratified folds on the fit rows, at seed.",
-          "source": "R/pipeline-fit.R#L444"
+          "step": "Builds cv_folds folds on the fit rows, at seed, stratified on the outcome as evaluate()'s draws are, and says in the tree whether each of its draws stratified.",
+          "source": "R/pipeline-fit.R#L412"
         },
         {
           "step": "Per configuration, fit_single_config() rebuilds the recipe, with the same window and PCA threshold evaluate() used (on a cold start, the ones the object's configuration records), and the workflow, re-tunes with Bayesian optimization on its own final budget, warm-started from evaluate()'s best parameters or, with none to use (always, on a cold start), from a space-filling grid of grid_size points, which the tree reports and models$results records, finalizes, generates out-of-fold predictions over the folds and back-transforms them, computes fold-wise metrics, fits the final model on the fit rows, and scores it on the test part.",
@@ -1978,39 +1978,39 @@
         },
         {
           "step": "Assembles the workflows in best-first order, the stacked out-of-fold predictions keyed to a row index, the results table, the response bound (1.5 times the largest outcome among the fit rows, the ones the final models are trained on), and whether the training object carried a selection record; promotes to horizons_fit and certifies the models slot. On a horizons_ensemble, the ensemble slot is emptied first, since it was built on the members being replaced.",
-          "source": "R/pipeline-fit.R#L848"
+          "source": "R/pipeline-fit.R#L858"
         }
       ],
       "records": [
         {
           "field": "models$workflows, models$n_models, models$best_config, models$rank_metric",
           "text": "the butchered fitted workflows by config_id in best-first order",
-          "source": "R/pipeline-fit.R#L848"
+          "source": "R/pipeline-fit.R#L858"
         },
         {
           "field": "models$cv_predictions, models$row_index",
           "text": "out-of-fold predictions (.row, .fold, config_id, .pred, .pred_trans, truth) and the .row to sample_id map; what ensemble() stacks, and what the designed but unbuilt residual correction would read",
-          "source": "R/pipeline-fit.R#L770"
+          "source": "R/pipeline-fit.R#L780"
         },
         {
           "field": "models$results",
           "text": "per configuration, status, degraded flag and reason, the six test metrics, the cv RMSE and RPD with standard errors, best parameters, whether the re-tune was warm-started and the size of its starting grid, the error message of a failed configuration, runtime",
-          "source": "R/pipeline-fit.R#L727"
+          "source": "R/pipeline-fit.R#L737"
         },
         {
           "field": "models$split, models$predictor_schema, models$response_bound, models$selection_present",
           "text": "Split F; the training-axis predictor columns predict() checks new data against; the winsorization bound, computed over the fit rows; whether conformal exchangeability can be assumed",
-          "source": "R/pipeline-fit.R#L829"
+          "source": "R/pipeline-fit.R#L839"
         },
         {
           "field": "models$uq, models$ad",
           "text": "per-configuration bundles, present only for configurations that succeeded with enough calibration rows",
-          "source": "R/pipeline-fit.R#L776"
+          "source": "R/pipeline-fit.R#L786"
         },
         {
           "field": "evaluation$screened, evaluation$results, evaluation$recipe, on a cold start",
           "text": "the unscreened record fit() writes in evaluate()'s place, screened FALSE, the one configuration as best_config with status not_evaluated and NA metrics, the split drawn at seed, the recipe settings as evaluate() records them, and no run provenance",
-          "source": "R/pipeline-fit.R#L1057"
+          "source": "R/pipeline-fit.R#L1069"
         }
       ],
       "refuses": [
@@ -2022,7 +2022,7 @@
         {
           "when": "x carries an analysis column with no role_map entry, or a duplicate/NA sample_id or a non-finite predictor value",
           "does": "aborts",
-          "source": "R/pipeline-fit.R#L185"
+          "source": "R/pipeline-fit.R#L179"
         },
         {
           "when": "metric is not one evaluate() accepts, on either path",
@@ -2032,22 +2032,22 @@
         {
           "when": "a configured object that has not been through evaluate() has no configuration or more than one, fewer than twice cv_folds rows with an observed outcome, or a Savitzky-Golay window at least as wide as the spectrum",
           "does": "aborts with class horizons_input_error before anything is drawn; with several configurations it says to run evaluate(), which is what chooses among them, and the window check is evaluate()'s own",
-          "source": "R/pipeline-fit.R#L988"
+          "source": "R/pipeline-fit.R#L1000"
         },
         {
           "when": "every member it fits fell below evaluate()'s prune threshold, whether pruned (the fallback, when none succeeded) or not (bayesian_iter = 0, where nothing is pruned)",
           "does": "warns with class horizons_below_threshold_warning, naming the threshold and each member's cv RPD, and fits them; in the fallback the warning also carries horizons_pruned_fallback_warning",
-          "source": "R/pipeline-fit.R#L292"
+          "source": "R/pipeline-fit.R#L268"
         },
         {
           "when": "evaluation$split is missing, or its ids or outcomes no longer match the rows the object models, because the rows or outcomes changed after evaluate() or the object was built by hand",
           "does": "aborts, and says to re-run evaluate()",
-          "source": "R/pipeline-fit.R#L343"
+          "source": "R/pipeline-fit.R#L319"
         },
         {
           "when": "n_best exceeds the configurations available, or the calibration set is under 30 rows",
           "does": "prints a console note and continues with what it can; the note is a tree line, so verbose = FALSE silences it",
-          "source": "R/pipeline-fit.R#L267"
+          "source": "R/pipeline-fit.R#L260"
         },
         {
           "when": "a configuration fails to re-tune or fit",
@@ -2057,7 +2057,7 @@
         {
           "when": "every configuration fails",
           "does": "aborts with class horizons_all_members_failed, listing the first three distinct errors with the configurations that raised them; the per-member results travel on the condition as results",
-          "source": "R/pipeline-fit.R#L1098"
+          "source": "R/pipeline-fit.R#L1111"
         }
       ],
       "evidence": [
@@ -2067,7 +2067,7 @@
         },
         {
           "claim": "a Split F drawn afresh at seed + 1 took a median 79 % of its test rows from evaluate()'s training rows, which chose the members and tuned the warm-start parameters (200 seeds, n = 250); that is why fit() reuses evaluate()'s split",
-          "where": "R/pipeline-fit.R#L321"
+          "where": "R/pipeline-fit.R#L297"
         }
       ],
       "issues": [],
