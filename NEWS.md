@@ -526,14 +526,26 @@ consequences; the review itself is in
   evaluated before this version have no `cv_*` columns and `fit()` asks for
   a re-run. `monitor_evaluate()`'s "best so far" reads the same column.
 
-* `fit()`'s train/test partition (Split F) is now seeded with
-  `fit_split_seed(seed)` (`seed + 1L`) rather than `seed` (#50). It was built
-  with the same `initial_split()` call as `evaluate()`'s on the same frame,
-  so at the shared default seed the two partitions were bit-identical and
-  `fit()`'s test metrics, and its degradation check, were measured on the rows
-  the configs had been selected on. `fit()` now warns if the two partitions
-  coincide anyway. Every `fit()` result changes test rows as a consequence,
-  by design.
+* `fit()` now scores on `evaluate()`'s train/test split instead of drawing
+  its own, so its test metrics are measured on `evaluate()`'s held-out rows,
+  which nothing was selected on. This supersedes the split-seed offset added
+  under #50 (`fit_split_seed()`, `seed + 1L`), which is removed together with
+  the warning for coinciding partitions. The offset kept the two partitions
+  from being identical, but a fresh draw is not an independent one: over 200
+  seeds at n = 250, a median 79 % of `fit()`'s test rows came from
+  `evaluate()`'s training rows, which had chosen the members on
+  `cv_<metric>` and tuned their warm-start parameters, so `fit()`'s test
+  metrics, and its degradation check, were optimistic through selection.
+  With ranking on cross-validated metrics (#50), `evaluate()`'s test rows are
+  the clean ones. The calibration set UQ and AD share is carved out of
+  `evaluate()`'s training rows with its own seed (`calib_split_seed()`,
+  `seed + 1L`), and the CV folds are seeded with `seed`, so `fit()`'s `seed`
+  no longer touches the train/test partition. `fit()` checks that the split
+  still indexes the rows the object models, meaning the id and outcome
+  columns match the split's value for value and in order, and aborts with
+  class `horizons_input_error` if they do not. Columns added since
+  `evaluate()`, such as a sibling response from `add_response()`, are carried
+  into the fit. Every `fit()` result changes test rows as a consequence.
 
 * Tuning metrics are now scored on the original response scale (#49). The
   response transform is a `skip = TRUE` recipe step, so tune never applied it
@@ -558,6 +570,36 @@ consequences; the review itself is in
   floored member predictions at serve time. Metrics move only for configs
   that produced negative original-scale predictions. The deploy-time
   `upper_bound` guardrail is unchanged and still opt-in.
+
+* `fit()` now models the same rows as `evaluate()`: rows whose outcome is `NA`
+  are dropped by one shared rule (#67). `fit()` split the unfiltered analysis
+  table, so with NA outcomes present its partition was over a different frame
+  from `evaluate()`'s and the NA-outcome rows reached the fit (a random forest
+  member failed in warm-start tuning on them). `fit()` reports the drop in its
+  console tree as `evaluate()` does, and the check that `evaluation$split`
+  still indexes the modelled rows (above) applies the same rule.
+
+* Single-model prediction intervals no longer move with the response-bound
+  clamp. `predict()` winsorized the point prediction before building the
+  conformal interval around it, so on a clamped row both bounds dropped by
+  the overshoot, contrary to the documented contract that interval bounds are
+  never clamped, and unlike the ensemble path. The interval is now built
+  around the unclamped prediction and only `.pred` is winsorized, so a
+  clamped `.pred` can sit outside its own interval, below `.pred_lower`.
+
+* `models$response_bound` is now taken over the rows the final models are fit
+  on, as its documentation said (#68). It was the maximum outcome over the
+  whole analysis table, so Split F's test rows and the calibration rows
+  shaped a deploy-time guardrail. Re-fitting an object can lower the bound,
+  so the clamp can fire on predictions it previously let through.
+
+* `add_response()` now reports the non-missing count of each joined variable
+  beside the join count, and records it in provenance as `n_non_missing`, a
+  named integer (#39). "Matched" counts join-key hits, so a matched sample
+  whose source value was `NA` counted as matched and nothing said it was
+  unmeasured. Rows with missing values are still kept: an object can carry
+  several responses, and `evaluate()` and `fit()` drop the rows whose outcome
+  is `NA` when they model it.
 
 * The four custom recipe steps now follow the `recipes` step contract (#52).
   `step_transform_spectra()`, `step_select_correlation()`,
