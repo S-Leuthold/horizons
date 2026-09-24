@@ -255,11 +255,17 @@ test_that("parse_ids() too_few='na' sets sample_id to NA", {
   hd <- make_test_hd(c("PROJ_S001", "nomatch"))
 
   ## Act -------------------------------------------------------------------
+  ## Two warnings fire here: parse_ids()'s own "did not match" (unmatched
+  ## filename) and, since the resulting sample_id is NA, the raw-stage
+  ## validator's NA warning (#24 rework) — both are expected.
 
   expect_warning(
-    result <- parse_ids(hd, format = "{project}_{sampleid}",
-                        too_few = "na"),
-    "did not match"
+    expect_warning(
+      result <- parse_ids(hd, format = "{project}_{sampleid}",
+                          too_few = "na"),
+      "did not match"
+    ),
+    class = "horizons_validation_warning"
   )
 
   ## Assert ----------------------------------------------------------------
@@ -564,19 +570,24 @@ test_that("parse_ids() errors when filename column missing", {
 
 })
 
-test_that("parse_ids() refuses when the parsed ids collapse to duplicates (#24)", {
+test_that("parse_ids() warns (not aborts) when the parsed ids collapse to duplicates (#24)", {
 
   ## Arrange — two distinct filenames whose sampleid token is identical once
-  ## the trailing replicate marker is discarded. Nothing in parse_ids() itself
-  ## checks for this; the end-of-verb validate_horizons_data() call does.
+  ## the trailing replicate marker is discarded. That is exactly what
+  ## replicate scans look like before average() collapses them, so
+  ## parse_ids() (raw stage) warns rather than aborts — a hard error here
+  ## would break the documented
+  ## spectra() |> standardize() |> parse_ids() |> average() chain (#24 rework).
   hd <- make_test_hd(c("A_rep1", "A_rep2"))
 
   ## Act & Assert ------------------------------------------------------------
 
-  expect_error(
-    parse_ids(hd, format = "{sampleid}_{junk}"),
-    class = "horizons_validation_error"
+  expect_warning(
+    result <- parse_ids(hd, format = "{sampleid}_{junk}"),
+    class = "horizons_validation_warning"
   )
+
+  expect_identical(result$data$analysis$sample_id, c("A", "A"))
 
 })
 

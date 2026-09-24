@@ -64,7 +64,11 @@ console also reports, and provenance records, the non-missing count of
 each variable. Rows with missing values are kept: an object can carry
 several responses (\code{select_training()} puts every pool response on one
 object), and a row missing one of them may carry another. \code{evaluate()} and
-\code{fit()} drop the rows whose outcome is \code{NA} when they model it.
+\code{fit()} drop the rows whose outcome is \code{NA} when they model it. An \code{NA}
+join key on the horizons side — left by \code{parse_ids(too_few = "na")}, say —
+does not join: it only matches an \code{NA} key on the source side, which real
+lab data essentially never has, so that row's response columns come back
+\code{NA} like any other unmatched sample.
 
 \strong{Duplicate detection:}
 

@@ -1351,7 +1351,29 @@ describe("configure() and the object contract", {
 
     expect_error(
       capture.output(configure(hd, models = "rf")),
-      class = "horizons_validation_error"
+      regexp = "strictly decreasing",
+      class  = "horizons_validation_error"
+    )
+
+  })
+
+
+  test_that("configure() aborts on duplicate sample ids that survived to it (#24)", {
+
+    ## Arrange — replicate scans that never went through average(). Duplicate
+    ## sample_id is a legitimate, warned-about state before average() (see
+    ## spectra()/parse_ids()/standardize()); by the time an object reaches
+    ## configure() the full-stage validator treats the same condition as an
+    ## error, since nothing downstream can collapse it.
+    hd <- make_single_response_hd()
+    hd$data$analysis$sample_id <- c("S001", "S001", "S003")
+
+    ## Act & Assert ------------------------------------------------------------
+
+    expect_error(
+      capture.output(configure(hd, models = "rf")),
+      regexp = "Duplicate.*sample_id",
+      class  = "horizons_validation_error"
     )
 
   })

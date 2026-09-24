@@ -436,21 +436,28 @@ test_that("spectra() errors when wavelength columns contain non-numeric data", {
 ## spectra() — Structural validation at construction (#24)
 ## ---------------------------------------------------------------------------
 
-test_that("spectra() refuses a tibble with duplicate sample ids", {
+test_that("spectra() warns (not aborts) on duplicate sample ids", {
 
-  ## Arrange — two rows share the same id, which validate_horizons_data()
-  ## now catches at the end of spectra() itself rather than only surfacing
-  ## once the object reaches standardize() or select_training().
+  ## Arrange — two rows share the same id. This is normal at spectra(): two
+  ## Bruker OPUS filenames like "S100-1.0" and "S100-1.1" both become
+  ## "S100-1" once the extension is stripped, and average() is what collapses
+  ## replicates. A hard error here would break the documented
+  ## spectra() |> standardize() |> parse_ids() |> average() chain, so
+  ## validate_horizons_data(stage = "raw") warns rather than aborts (#24
+  ## rework; matches the validation spec's A004 check).
   test_data <- tibble::tibble(
     Sample_ID = c("A", "A"),
     `4000`    = c(0.1, 0.2),
     `3000`    = c(0.2, 0.3)
   )
 
-  expect_error(
-    spectra(test_data),
-    class = "horizons_validation_error"
+  expect_warning(
+    result <- spectra(test_data),
+    class = "horizons_validation_warning"
   )
+
+  ## The duplicates are kept, not dropped — average() is what resolves them
+  expect_identical(result$data$analysis$sample_id, c("A", "A"))
 
 })
 

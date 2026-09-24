@@ -402,60 +402,6 @@ apply_baseline_correction <- function(spectra_matrix, wavelengths) {
 
 
 ## =============================================================================
-## Helper: sort_axis_decreasing()
-## =============================================================================
-
-#' Put an object's predictor columns in decreasing wavenumber order
-#'
-#' @description
-#' Reorders the predictor columns among themselves, in `data$analysis` and
-#' `data$role_map` alike. Names and values are untouched and every other
-#' column keeps its place. `spectra()` keeps columns in the order it is given
-#' them, while every step of `standardize()` and the validator assume
-#' decreasing order.
-#'
-#' @param x `horizons_data.` The object.
-#'
-#' @return `list.` With elements:
-#'   - `x`: The object, reordered through `set_analysis()` when anything moved
-#'   - `sorted`: Whether any column moved
-#'
-#' @noRd
-sort_axis_decreasing <- function(x) {
-
-  analysis <- x$data$analysis
-  role_map <- x$data$role_map
-
-  pred_rows <- which(role_map$role == "predictor")
-  pred_vars <- role_map$variable[pred_rows]
-
-  ### A predictor name that is not a wavenumber leaves the order to the
-  ### validator rather than being pushed to the end.
-  wavenumbers <- suppressWarnings(as.numeric(gsub("^wn_", "", pred_vars)))
-  axis_order  <- order(wavenumbers, decreasing = TRUE)
-
-  if (anyNA(wavenumbers) || identical(axis_order, seq_along(pred_vars))) {
-
-    return(list(x = x, sorted = FALSE))
-
-  }
-
-  ## The same slots in both tables, filled in the new order ------------------
-
-  role_map[pred_rows, ] <- role_map[pred_rows[axis_order], ]
-
-  cols <- names(analysis)
-  cols[cols %in% pred_vars] <- pred_vars[axis_order]
-
-  list(
-    x      = set_analysis(x, analysis[, cols, drop = FALSE], role_map),
-    sorted = TRUE
-  )
-
-}
-
-
-## =============================================================================
 ## Helper: report_standardize_summary()
 ## =============================================================================
 
@@ -754,10 +700,11 @@ standardize <- function(x,
   ## ---------------------------------------------------------------------------
   ## Step 1b: Put the axis in decreasing order, on every path
   ## ---------------------------------------------------------------------------
-  ## spectra() keeps columns in the order it is given them. The steps below
-  ## work on a decreasing axis (the margin, the grid comparison, the column
-  ## names), and so does the validator. The no-op path sorts too: a
-  ## standardized object is never an invalid one.
+  ## spectra() already sorts on construction (#24), so this is a no-op for
+  ## objects built by it; it stays here for a hand-built object arriving
+  ## increasing. The steps below work on a decreasing axis (the margin, the
+  ## grid comparison, the column names), and so does the validator. The
+  ## no-op path sorts too: a standardized object is never an invalid one.
 
   sorted <- sort_axis_decreasing(x)
   x      <- sorted$x
@@ -779,7 +726,7 @@ standardize <- function(x,
 
   if (is.null(resample) && is.null(trim) && !remove_water && !baseline) {
 
-    x <- validate_horizons_data(x)
+    x <- validate_horizons_data(x, stage = "raw")
 
     ## Still mark as standardized so downstream steps know it was evaluated -----
 
@@ -1148,8 +1095,12 @@ standardize <- function(x,
   ## ---------------------------------------------------------------------------
   ## Step 10: Re-validate
   ## ---------------------------------------------------------------------------
+  ## Raw stage: standardize() runs before average() collapses replicates, so
+  ## a duplicate sample_id is still legitimate here. The Inf/NA-after-trim
+  ## check above (Step 9) already aborts on anything non-finite, so full-mode
+  ## predictor-NA checking would never fire differently at this point.
 
-  x <- validate_horizons_data(x)
+  x <- validate_horizons_data(x, stage = "raw")
 
   ## ---------------------------------------------------------------------------
   ## Step 11: Report

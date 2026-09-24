@@ -278,6 +278,14 @@ no_output <- function(expr) {
 }
 
 #' A horizons_data on an explicit axis, in the order given
+#'
+#' @description
+#' Builds directly through `new_horizons_data()`, bypassing `spectra()`.
+#' `spectra()` now sorts its predictor axis to decreasing and validates at
+#' `stage = "raw"` before returning (#24), so routing through it here would
+#' make every "given increasing" fixture below arrive already sorted, and
+#' the standardize()-level sort and validation checks these tests exist for
+#' would silently stop exercising anything.
 #' @noRd
 make_axis_spectra <- function(wn, f = NULL, n = 3) {
 
@@ -291,8 +299,22 @@ make_axis_spectra <- function(wn, f = NULL, n = 3) {
 
   colnames(m) <- paste0("wn_", wn)
 
-  no_output(spectra(dplyr::bind_cols(tibble::tibble(sample_id = paste0("s", seq_len(n))),
-                                     tibble::as_tibble(m))))
+  analysis <- dplyr::bind_cols(
+    tibble::tibble(sample_id = paste0("s", seq_len(n))),
+    tibble::as_tibble(m)
+  )
+
+  role_map <- tibble::tibble(
+    variable = names(analysis),
+    role     = c("id", rep("predictor", ncol(m)))
+  )
+
+  new_horizons_data(
+    analysis       = analysis,
+    role_map       = role_map,
+    spectra_source = "test",
+    spectra_type   = "tibble"
+  )
 
 }
 
@@ -394,16 +416,70 @@ test_that("an axis already on the canonical grid is not re-interpolated", {
   expect_false(out$provenance$standardization$resampled)
   expect_identical(out$provenance$standardization$grid$n, 1701L)
 
-  ## Given increasing, spectra() itself now sorts to decreasing (#24) before
-  ## standardize() ever sees it, so the object is already on-grid by the
-  ## time it gets here and this is the same no-op path as `kssl` above.
-  inc        <- make_axis_spectra(KSSL_WN)
-  inc_before <- as.matrix(inc$data$analysis[, predictor_names(inc)])
-  inc_out    <- no_output(standardize(inc, resample = 2, trim = c(600, 4000)))
-  inc_after  <- as.matrix(inc_out$data$analysis[, predictor_names(inc_out)])
+  ## Stored increasing (make_axis_spectra() bypasses spectra()'s own sort,
+  ## #24, so this is genuinely unsorted input): standardize() sorts it, and
+  ## the same spectra only change column order.
+  inc     <- make_axis_spectra(KSSL_WN)
+  inc_out <- no_output(standardize(inc, resample = 2, trim = c(600, 4000)))
+  inc_in  <- as.matrix(inc$data$analysis[, predictor_names(inc)])
 
-  expect_identical(unname(inc_after), unname(inc_before))
-  expect_identical(predictor_names(inc), predictor_names(inc_out))
+  expect_identical(unname(as.matrix(inc_out$data$analysis[, predictor_names(inc_out)])),
+                   unname(inc_in[, rev(seq_len(ncol(inc_in)))]))
+
+})
+
+
+## ---------------------------------------------------------------------------
+## Raw-stage validation: warns rather than aborts before average() (#24)
+## ---------------------------------------------------------------------------
+
+test_that("standardize() warns (not aborts) on duplicate sample ids", {
+
+  ## Arrange — replicate scans that haven't reached average() yet. This is
+  ## legitimate before replicates collapse, the same as at spectra() and
+  ## parse_ids(); standardize() validates at stage = "raw" for exactly this
+  ## reason (#24 rework).
+  hd <- make_axis_spectra(KSSL_WN, n = 2)
+  hd$data$analysis$sample_id <- c("S1", "S1")
+
+  ## Act & Assert --------------------------------------------------------------
+
+  expect_warning(
+    out <- no_output(standardize(hd, resample = 2, trim = c(600, 4000))),
+    class = "horizons_validation_warning"
+  )
+
+  expect_identical(out$data$analysis$sample_id, c("S1", "S1"))
+
+})
+
+
+test_that("an NA outside the trim range passes spectra() |> standardize(trim = )", {
+
+  ## Arrange — a wide axis with one bad value outside where trim will cut it
+  wn <- seq(4500, 600, by = -100)
+  df <- tibble::tibble(sample_id = c("s1", "s2"))
+
+  for (w in wn) {
+
+    df[[as.character(w)]] <- c(0.3, 0.4)
+
+  }
+
+  df[["4500"]][1] <- NA_real_
+
+  ## Act -------------------------------------------------------------------
+  ## spectra() (raw stage) does not check predictor NAs at all; standardize()
+  ## drops the wn_4500 column via trim before its own finiteness check
+  ## (Step 6b) ever sees it.
+
+  hd  <- no_output(spectra(df))
+  out <- no_output(standardize(hd, trim = c(600, 4000)))
+
+  ## Assert ----------------------------------------------------------------
+
+  expect_false("wn_4500" %in% predictor_names(out))
+  expect_false(anyNA(as.matrix(out$data$analysis[, predictor_names(out)])))
 
 })
 
@@ -507,11 +583,21 @@ test_that("a call with every operation off still sorts, validates, and changes n
   expect_identical(after[, colnames(before)], before)
   expect_identical(out$data$analysis$sample_id, inc$data$analysis$sample_id)
 
-  ## An object the validator refuses is not marked standardized
+  ## standardize() validates at "raw" stage (#24 rework): a stray NA in a
+  ## predictor column is legitimate before replicates are collapsed by
+  ## average() (it stays legal until a real trim/resample runs and Step 6b's
+  ## own non-finite check applies), so the no-op path no longer refuses it.
   bad <- inc
   bad$data$analysis$wn_1000[1] <- NA_real_
-  expect_error(no_output(standardize(bad, resample = NULL, trim = NULL)),
-               class = "horizons_validation_error")
+  bad_out <- no_output(standardize(bad, resample = NULL, trim = NULL))
+  expect_true(is.na(bad_out$data$analysis$wn_1000[1]))
+
+  ## A value that survives an actual trim/resample as non-finite is still
+  ## caught, by standardize()'s own Step 6b check rather than the validator.
+  expect_error(
+    no_output(standardize(bad, resample = 2, trim = c(600, 4000))),
+    "non-finite"
+  )
 
 })
 

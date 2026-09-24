@@ -582,3 +582,58 @@ subset_selection <- function(selection, keep_ids, n_removed) {
   selection
 
 }
+
+
+## ---------------------------------------------------------------------------
+## sort_axis_decreasing() — Put the predictor axis in decreasing order
+## ---------------------------------------------------------------------------
+
+#' Put an object's predictor columns in decreasing wavenumber order
+#'
+#' @description
+#' Reorders the predictor columns among themselves, in `data$analysis` and
+#' `data$role_map` alike. Names and values are untouched and every other
+#' column keeps its place. Shared by [spectra()] and [standardize()]: both
+#' sort their predictor axis on this helper, since a source can arrive in
+#' either order (a KSSL-shaped library is stored increasing) and every check
+#' and downstream step assumes decreasing.
+#'
+#' @param x `horizons_data.` The object.
+#'
+#' @return `list.` With elements:
+#'   - `x`: The object, reordered through `set_analysis()` when anything moved
+#'   - `sorted`: Whether any column moved
+#'
+#' @noRd
+sort_axis_decreasing <- function(x) {
+
+  analysis <- x$data$analysis
+  role_map <- x$data$role_map
+
+  pred_rows <- which(role_map$role == "predictor")
+  pred_vars <- role_map$variable[pred_rows]
+
+  ### A predictor name that is not a wavenumber leaves the order to the
+  ### validator rather than being pushed to the end.
+  wavenumbers <- suppressWarnings(as.numeric(gsub("^wn_", "", pred_vars)))
+  axis_order  <- order(wavenumbers, decreasing = TRUE)
+
+  if (anyNA(wavenumbers) || identical(axis_order, seq_along(pred_vars))) {
+
+    return(list(x = x, sorted = FALSE))
+
+  }
+
+  ## The same slots in both tables, filled in the new order ------------------
+
+  role_map[pred_rows, ] <- role_map[pred_rows[axis_order], ]
+
+  cols <- names(analysis)
+  cols[cols %in% pred_vars] <- pred_vars[axis_order]
+
+  list(
+    x      = set_analysis(x, analysis[, cols, drop = FALSE], role_map),
+    sorted = TRUE
+  )
+
+}

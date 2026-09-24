@@ -34,7 +34,11 @@
 #' each variable. Rows with missing values are kept: an object can carry
 #' several responses (`select_training()` puts every pool response on one
 #' object), and a row missing one of them may carry another. `evaluate()` and
-#' `fit()` drop the rows whose outcome is `NA` when they model it.
+#' `fit()` drop the rows whose outcome is `NA` when they model it. An `NA`
+#' join key on the horizons side — left by `parse_ids(too_few = "na")`, say —
+#' does not join: it only matches an `NA` key on the source side, which real
+#' lab data essentially never has, so that row's response columns come back
+#' `NA` like any other unmatched sample.
 #'
 #' **Duplicate detection:**
 #'

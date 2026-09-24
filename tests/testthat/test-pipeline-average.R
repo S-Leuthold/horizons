@@ -971,10 +971,14 @@ test_that("average() catches a corrupt input the verb itself never checks (#24)"
   hd$data$role_map[pred_rows, ] <- hd$data$role_map[rev(pred_rows), ]
 
   ## Act & Assert --------------------------------------------------------------
+  ## average()'s own input-validation abort (Step 1) also carries class
+  ## horizons_validation_error, so the message is checked too — otherwise
+  ## this could pass without ever exercising the new end-of-verb call.
 
   expect_error(
     average(hd, quality_check = FALSE, verbose = FALSE),
-    class = "horizons_validation_error"
+    regexp = "strictly decreasing",
+    class  = "horizons_validation_error"
   )
 
 })
