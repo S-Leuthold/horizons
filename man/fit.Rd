@@ -86,4 +86,10 @@ response from \code{add_response()}, are carried into the fit. The count of
 NA-outcome rows is reported in the console tree when \code{verbose = TRUE}.
 With UQ or AD on, the calibration set is carved out of Split F's training
 part.
+
+The members are the top \code{n_best} of the configurations \code{evaluate()} chose
+\code{best_config} from, ranked by the same rule: the ones that succeeded or,
+when none did, the pruned ones that carry a cross-validated value of
+\code{metric}. Fitting pruned configurations warns, with class
+\code{horizons_pruned_fallback_warning}, because none passed the prune gate.
 }

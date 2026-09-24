@@ -24,6 +24,12 @@
 #' With UQ or AD on, the calibration set is carved out of Split F's training
 #' part.
 #'
+#' The members are the top `n_best` of the configurations `evaluate()` chose
+#' `best_config` from, ranked by the same rule: the ones that succeeded or,
+#' when none did, the pruned ones that carry a cross-validated value of
+#' `metric`. Fitting pruned configurations warns, with class
+#' `horizons_pruned_fallback_warning`, because none passed the prune gate.
+#'
 #' @param x A `horizons_eval` object (output of `evaluate()`).
 #' @param n_best Integer. Number of top configurations to re-tune. Default 5.
 #' @param metric Character or NULL. Metric for ranking the candidate
@@ -129,21 +135,37 @@ fit <- function(x,
   ## reported, and are honest precisely because they are not used here.
   rank_metric <- metric %||% x$evaluation$rank_metric %||% "rpd"
 
-  ## Extract successful configs and rank
-  successes <- eval_results[eval_results$status == "success", ]
+  ## The candidates are evaluate()'s best_config candidates: the successes
+  ## or, when none succeeded, the pruned configs with a cv_<metric>. fit()
+  ## used to keep successes only, so it refused an evaluation whose
+  ## best_config was a pruned config (#38).
+  candidates  <- ranking_candidates(eval_results, rank_metric)
+  rank_column <- paste0("cv_", rank_metric)
 
-  if (nrow(successes) == 0) {
+  if (nrow(candidates$rows) == 0) {
 
-    rlang::abort(
-      "No successful configurations in evaluation results. Cannot fit models."
-    )
+    cli::cli_abort(c(
+      "No configuration in {.field evaluation$results} can be fitted.",
+      "x" = "None succeeded, and no pruned configuration has a {.field {rank_column}} value.",
+      "i" = "Re-run {.fn evaluate}; when every configuration fails it aborts and lists the errors."
+    ), class = "horizons_input_error")
 
   }
 
-  successes <- rank_configs_by_cv(successes, rank_metric)
+  if (candidates$fallback) {
 
-  ## Cap n_best at available successes
-  n_available <- nrow(successes)
+    cli::cli_warn(c(
+      "!" = "No configuration passed {.fn evaluate}'s prune gate, so {.fn fit} is fitting pruned configurations.",
+      "i" = "Each had a grid-search RPD below {.arg prune_threshold}, so it skipped Bayesian optimization; {.fn evaluate} chose {.field best_config} from them for the same reason.",
+      "i" = "They are ranked on {.field {rank_column}} as usual. Check their metrics before relying on the fit."
+    ), class = "horizons_pruned_fallback_warning")
+
+  }
+
+  ranked <- rank_configs_by_cv(candidates$rows, rank_metric)
+
+  ## Cap n_best at available candidates
+  n_available <- nrow(ranked)
   n_best      <- as.integer(n_best)
 
   if (n_best > n_available) {
@@ -154,7 +176,8 @@ fit <- function(x,
         "\u2502  ", cli::col_yellow(
           "Requested n_best = ", n_best,
           " but only ", n_available,
-          " successful configs available. Using ", n_available, "."
+          if (candidates$fallback) " pruned" else " successful",
+          " configs available. Using ", n_available, "."
         ), "\n"
       ))
 
@@ -164,7 +187,7 @@ fit <- function(x,
 
   }
 
-  top_configs <- successes[seq_len(n_best), ]
+  top_configs <- ranked[seq_len(n_best), ]
 
   ## Extract references
   role_map     <- x$data$role_map

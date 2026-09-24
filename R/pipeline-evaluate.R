@@ -796,33 +796,24 @@ evaluate <- function(x,
 
   rank_column <- paste0("cv_", metric)
 
-  successes <- all_results[all_results$status == "success", ]
+  ## The successes, or the pruned configs when none succeeded: the rule
+  ## fit() applies to the same table.
+  candidates <- ranking_candidates(all_results, metric)
 
-  if (nrow(successes) == 0) {
+  if (nrow(candidates$rows) == 0) {
 
-    ## Check if there are pruned configs with metrics for the ranking metric
-    pruned <- all_results[all_results$status == "pruned" &
-                            !is.na(all_results[[rank_column]]), ]
+    n_failed <- sum(all_results$status == "failed")
+    n_pruned <- sum(all_results$status == "pruned")
 
-    if (nrow(pruned) == 0) {
-
-      n_failed <- sum(all_results$status == "failed")
-      n_pruned <- sum(all_results$status == "pruned")
-
-      rlang::abort(paste0(
-        "All configurations failed or were pruned. ",
-        "Failed: ", n_failed, ", Pruned: ", n_pruned, ". ",
-        "Check evaluation$results for error messages."
-      ))
-
-    }
-
-    ## Use pruned configs as fallback
-    successes <- pruned
+    rlang::abort(paste0(
+      "All configurations failed or were pruned. ",
+      "Failed: ", n_failed, ", Pruned: ", n_pruned, ". ",
+      "Check evaluation$results for error messages."
+    ))
 
   }
 
-  ranked <- rank_configs_by_cv(successes, metric)
+  ranked <- rank_configs_by_cv(candidates$rows, metric)
 
   best_config_id <- ranked$config_id[1]
 
@@ -1124,6 +1115,43 @@ abort_checkpoint_data_mismatch <- function(stored, current, output_dir, source) 
     "i" = "Resuming would reuse cross-validated results, and warm-start {.fn fit}, from hyperparameters tuned on the wrong rows.",
     "i" = "Use a different {.arg output_dir}, or delete the stale checkpoints in {.path {output_dir}}."
   ), class = "horizons_input_error")
+
+}
+
+## ---------------------------------------------------------------------------
+## ranking_candidates \u2014 the one candidate rule evaluate() and fit() share
+## ---------------------------------------------------------------------------
+
+#' The result rows eligible for ranking
+#'
+#' @description
+#' Returns the rows `evaluate()` picks `best_config` from and `fit()` picks
+#' its members from: the configurations that succeeded, or, when none did,
+#' the pruned configurations that carry a cross-validated value of the
+#' ranking metric. [rank_configs_by_cv()] then orders them. `fit()` used to
+#' keep successes only, so it refused an evaluation whose `best_config` was a
+#' pruned configuration (#38).
+#'
+#' @param results Tibble of evaluation result rows (`evaluation$results`
+#'   shape).
+#' @param metric Bare metric name, e.g. `"rpd"`.
+#' @return List with `rows` (the candidate rows, unranked; zero rows when
+#'   nothing qualifies) and `fallback` (`TRUE` when the rows are pruned
+#'   configurations because none succeeded).
+#' @keywords internal
+#' @noRd
+ranking_candidates <- function(results, metric) {
+
+  successes <- results[results$status %in% "success", , drop = FALSE]
+
+  if (nrow(successes) > 0) return(list(rows = successes, fallback = FALSE))
+
+  cv_values <- results[[paste0("cv_", metric)]]
+  has_cv    <- if (is.null(cv_values)) rep(FALSE, nrow(results)) else !is.na(cv_values)
+
+  pruned <- results[results$status %in% "pruned" & has_cv, , drop = FALSE]
+
+  list(rows = pruned, fallback = nrow(pruned) > 0)
 
 }
 

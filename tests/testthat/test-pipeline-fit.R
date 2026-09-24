@@ -964,6 +964,67 @@ describe("fit() - member ranking on cv_<metric>", {
 
 
 ## =========================================================================
+## No config passed the prune gate: fit() takes evaluate()'s fallback (#38)
+## =========================================================================
+## evaluate() takes best_config from the pruned configs when none succeeded.
+## fit() kept successes only, so it refused the object evaluate() had just
+## returned ("No successful configurations").
+
+describe("fit() - an evaluation with only pruned configs (#38)", {
+
+  ## A threshold no model clears, with a Bayesian stage for the gate to skip,
+  ## so evaluate() prunes both configs.
+  obj <- make_eval_object(n = 60, n_configs = 2)
+  obj$config$tuning$bayesian_iter       <- 1L
+  obj$config$tuning$final_bayesian_iter <- 0L
+
+  pruned <- suppressWarnings(
+    evaluate(obj, prune = TRUE, prune_threshold = 9999, verbose = FALSE,
+             seed = 42L)
+  )
+
+  it("fits the pruned configs in evaluate()'s order, and warns that it fell back", {
+
+    ## Precondition: nothing succeeded, and evaluate() still named a winner
+    expect_true(all(pruned$evaluation$results$status == "pruned"))
+
+    w <- expect_warning(
+      r <- keep_only_warning(
+        fit(pruned, n_best = 2L, compute_uq = FALSE, compute_ad = FALSE,
+            verbose = FALSE, seed = 42L),
+        "horizons_pruned_fallback_warning"
+      ),
+      class = "horizons_pruned_fallback_warning"
+    )
+
+    expect_match(conditionMessage(w), "prune gate", fixed = TRUE)
+
+    expected <- rank_configs_by_cv(pruned$evaluation$results,
+                                   pruned$evaluation$rank_metric)$config_id
+
+    expect_s3_class(r, "horizons_fit")
+    expect_identical(r$models$results$config_id, expected)
+    expect_identical(r$models$best_config, pruned$evaluation$best_config)
+
+  })
+
+  it("refuses when no pruned config carries the ranking metric", {
+
+    unranked <- pruned
+    unranked$evaluation$results$cv_rpd <- NA_real_
+
+    expect_error(
+      fit(unranked, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE,
+          verbose = FALSE),
+      class = "horizons_input_error"
+    )
+
+  })
+
+})
+
+
+## =========================================================================
 ## allow_par with no backend (M2e, 2026-09-15)
 ## =========================================================================
 
