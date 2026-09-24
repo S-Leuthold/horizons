@@ -364,14 +364,22 @@ describe("evaluate() - NA outcome rows", {
 
   it("names an outcome column the analysis table lacks, rather than calling it all NA", {
 
+    ## evaluate()'s own outcome_complete_rows() check has a dedicated "no such
+    ## column" message for exactly this case, distinct from "all NA" — but
+    ## the entry-stage validate_horizons_data() call (#24) now certifies the
+    ## base data contract first, and a role_map row with no matching analysis
+    ## column is a structural defect that check catches before
+    ## outcome_complete_rows() ever runs. Either way the message names SOC
+    ## and never claims the values are all NA.
+
     obj <- make_eval_object()
     obj$data$analysis$SOC <- NULL
 
     err <- expect_error(evaluate(obj, verbose = FALSE),
-                        class = "horizons_input_error")
+                        class = "horizons_validation_error")
 
     expect_match(conditionMessage(err), "SOC", fixed = TRUE)
-    expect_match(conditionMessage(err), "no such column", fixed = TRUE)
+    expect_match(conditionMessage(err), "missing from", fixed = TRUE)
     expect_no_match(conditionMessage(err), "All outcome values are NA", fixed = TRUE)
 
   })
