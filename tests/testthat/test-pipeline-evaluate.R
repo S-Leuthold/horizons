@@ -138,6 +138,13 @@ describe("evaluate() - success path", {
 
   })
 
+  it("records that it screened the configurations (#45)", {
+
+    ## fit()'s cold start writes FALSE; evaluate() ranked, so TRUE.
+    expect_true(result$evaluation$screened)
+
+  })
+
   it("has non-NA metrics for successful configs", {
 
     success_rows <- result$evaluation$results$status == "success"
@@ -354,6 +361,82 @@ describe("evaluate() - NA outcome rows", {
     expect_match(conditionMessage(err), "SOC", fixed = TRUE)
     expect_match(conditionMessage(err), "no such column", fixed = TRUE)
     expect_no_match(conditionMessage(err), "All outcome values are NA", fixed = TRUE)
+
+  })
+
+})
+
+## =========================================================================
+## draw_eval_split(): the one split draw evaluate() and fit() share (#45)
+## =========================================================================
+## fit() cold-starts a configured object with one configuration by drawing
+## the split itself, so the draw moved out of evaluate() into a helper both
+## verbs call. It has to give the split evaluate() drew before the move.
+
+describe("draw_eval_split()", {
+
+  obj <- make_eval_object(n = 60, n_configs = 1)
+  obj$data$analysis$SOC[c(3, 17, 41)] <- NA_real_
+
+  ## evaluate()'s draw before #45, as it was written inline: the rows with an
+  ## observed outcome, then the seed, then a stratified split, falling back to
+  ## an unstratified one.
+  draw_before <- function(analysis, seed) {
+
+    modelled <- outcome_complete_rows(analysis, "SOC")$data
+
+    set.seed(seed)
+
+    tryCatch(
+      rsample::initial_split(modelled, prop = SPLIT_PROP, strata = dplyr::all_of("SOC")),
+      error = function(e) rsample::initial_split(modelled, prop = SPLIT_PROP)
+    )
+
+  }
+
+  it("gives the split evaluate() drew before it was factored out", {
+
+    for (seed in c(1L, 42L, 307L)) {
+
+      drawn  <- suppressWarnings(draw_eval_split(obj$data$analysis, "SOC", seed))
+      before <- suppressWarnings(draw_before(obj$data$analysis, seed))
+
+      expect_identical(drawn$split$in_id, before$in_id, info = paste("seed", seed))
+      expect_identical(drawn$split$data, before$data, info = paste("seed", seed))
+      expect_true(drawn$stratified)
+      expect_identical(drawn$n_dropped, 3L)
+
+    }
+
+  })
+
+  it("falls back to an unstratified split where evaluate() did", {
+
+    real_initial_split <- rsample::initial_split
+
+    local_mocked_bindings(
+      initial_split = function(data, prop = 3 / 4, strata = NULL, ...) {
+        if (!missing(strata)) stop("stratification refused")
+        real_initial_split(data, prop = prop, ...)
+      },
+      .package = "rsample"
+    )
+
+    drawn  <- draw_eval_split(obj$data$analysis, "SOC", 42L)
+    before <- draw_before(obj$data$analysis, 42L)
+
+    expect_false(drawn$stratified)
+    expect_identical(drawn$split$in_id, before$in_id)
+
+  })
+
+  it("is the split evaluate() stores", {
+
+    ev    <- suppressWarnings(evaluate(obj, prune = FALSE, verbose = FALSE, seed = 42L))
+    drawn <- suppressWarnings(draw_eval_split(obj$data$analysis, "SOC", 42L))
+
+    expect_identical(ev$evaluation$split$in_id, drawn$split$in_id)
+    expect_identical(ev$evaluation$split$data, drawn$split$data)
 
   })
 

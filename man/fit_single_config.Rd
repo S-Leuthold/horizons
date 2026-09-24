@@ -37,7 +37,9 @@ calibration leakage.}
 
 \item{role_map}{Tibble with \code{variable} and \code{role} columns.}
 
-\item{best_params_eval}{Single-row tibble of best params from evaluate().}
+\item{best_params_eval}{Single-row tibble of best params from evaluate(),
+or NULL (\code{fit()}'s cold start), in which case the re-tune starts from a
+space-filling grid.}
 
 \item{final_bayesian_iter}{Integer. Bayesian iterations for re-tuning.}
 
@@ -58,8 +60,12 @@ keeps, passed to \code{\link[=build_recipe]{build_recipe()}}. Read the same way.
 }
 \value{
 List with fields: config_id, status, degraded, degraded_reason,
-fitted_workflow, best_params, cv_predictions, test_metrics, cv_metrics,
-uq, warnings, error_message, runtime_secs.
+fitted_workflow, best_params, warm_start, start_grid_size,
+cv_predictions, test_metrics, cv_metrics, uq, warnings, error_message,
+runtime_secs. \code{warm_start} is \code{TRUE} when the re-tune started from
+\code{best_params_eval}, \code{FALSE} when it fell back to a space-filling grid of
+\code{start_grid_size} points, and \code{NA} (both) when the config failed
+before tuning.
 }
 \description{
 Inner-loop function for \code{fit()}. Takes a single config row from the

@@ -277,6 +277,8 @@ point_in_grid <- function(point, grid) {
 #'   - `tune_results`: The final tuning result object
 #'   - `best_params`: Single-row tibble of best hyperparameters
 #'   - `fallback_used`: Logical, TRUE if grid fallback was used
+#'   - `grid_points`: Integer, the number of points in the starting grid
+#'     (the space-filling grid when `fallback_used` is TRUE)
 #'
 #' @keywords internal
 #' @export
@@ -317,6 +319,7 @@ tune_warmstart_bayes <- function(workflow,
       tune_results  = NULL,
       best_params   = NULL,
       fallback_used = fallback_used,
+      grid_points   = nrow(initial_grid),
       error         = grid_result$error$message
     ))
 
@@ -368,6 +371,7 @@ tune_warmstart_bayes <- function(workflow,
     tune_results  = tune_results,
     best_params   = final_best,
     fallback_used = fallback_used,
+    grid_points   = nrow(initial_grid),
     bayes_failed  = bayes_failed
   )
 

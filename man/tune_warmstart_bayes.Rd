@@ -36,6 +36,8 @@ List with:
 \item \code{tune_results}: The final tuning result object
 \item \code{best_params}: Single-row tibble of best hyperparameters
 \item \code{fallback_used}: Logical, TRUE if grid fallback was used
+\item \code{grid_points}: Integer, the number of points in the starting grid
+(the space-filling grid when \code{fallback_used} is TRUE)
 }
 }
 \description{

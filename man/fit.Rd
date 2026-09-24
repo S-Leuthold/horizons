@@ -16,16 +16,22 @@ fit(
 )
 }
 \arguments{
-\item{x}{A \code{horizons_eval} object (output of \code{evaluate()}).}
+\item{x}{A \code{horizons_eval} object (output of \code{evaluate()}), or a
+configured \code{horizons_data} with exactly one configuration, which \code{fit()}
+starts cold (see "Cold start from one configuration").}
 
-\item{n_best}{Integer. Number of top configurations to re-tune. Default 5.}
+\item{n_best}{Integer. Number of top configurations to re-tune. Default 5.
+A cold start has one.}
 
 \item{metric}{Character or NULL. Metric for ranking the candidate
-configs, by bare name (\code{"rpd"}, \code{"rmse"}, ...). If NULL, uses the
-rank_metric from \code{evaluate()}. Ranking reads the cross-validated value
-at each config's selected hyperparameters (\verb{evaluation$results$cv_<metric>}),
-never the test-set column, so the test set stays held out from
-selection. Default NULL.}
+configs, by bare name: one of \code{"rpd"}, \code{"rsq"}, \code{"rmse"}, \code{"rrmse"},
+\code{"ccc"}, \code{"mae"}, or \code{fit()} aborts with class \code{horizons_input_error}.
+If NULL, uses the rank_metric from \code{evaluate()}; on a cold start, where
+there is nothing to rank and the metric is only recorded, the one a
+cold-started fit recorded, else \code{"rpd"}. Ranking reads the
+cross-validated value at each config's selected hyperparameters
+(\verb{evaluation$results$cv_<metric>}), never the test-set column, so the
+test set stays held out from selection. Default NULL.}
 
 \item{compute_uq}{Logical. Train UQ components (quantile model +
 conformal calibration). Default TRUE.}
@@ -46,8 +52,9 @@ FALSE.}
 
 \item{seed}{Integer. Random seed for the CV folds and, through
 \code{calib_split_seed()} (\code{seed + 1L}), for the calibration split. The
-train/test split is \code{evaluate()}'s, so it does not depend on this seed.
-Default 307L.}
+train/test split is \code{evaluate()}'s, so it does not depend on this seed,
+except on a cold start, where \code{fit()} draws that split at this seed as
+\code{evaluate()} would. Default 307L.}
 
 \item{verbose}{Logical. Print progress tree to console. Default TRUE.}
 }
@@ -64,6 +71,9 @@ training object carried a \verb{$selection} from \code{select_training()}, which
 \code{predict()} reads when asked for conformal intervals). Called on a
 \code{horizons_ensemble}, it returns a \code{horizons_fit} whose \code{ensemble} slot
 is empty again, since the ensemble was built on the members it replaces.
+\code{models$results} records how each member's re-tune started:
+\code{warm_start} (\code{TRUE} from \code{evaluate()}'s parameters, \code{FALSE} from a
+space-filling grid) and \code{start_grid_size}.
 }
 \description{
 Re-tunes the top N configurations from \code{evaluate()} with warm-start
@@ -103,3 +113,28 @@ distinct error messages; the
 per-member results travel on the condition as \code{results}, and
 \code{models$results} keeps each member's \code{error_message} when some succeed.
 }
+\section{Cold start from one configuration}{
+
+With one configuration there is nothing for \code{evaluate()} to choose, so a
+configured \code{horizons_data} whose \code{config$configs} has exactly one row can
+go straight to \code{fit()} (#45). \code{fit()} then draws the train/test split
+itself, by the draw \code{evaluate()} uses, so at the same \code{seed} it holds out
+exactly the rows \code{evaluate()} would have. With no parameters from
+\code{evaluate()} to warm-start from, the re-tune starts from a space-filling
+grid of \code{grid_size} points; the console tree says so, and
+\code{models$results$warm_start} is \code{FALSE}. The degradation check needs
+nothing from \code{evaluate()}, since it compares the test RPD with \code{fit()}'s
+own cross-validation.
+
+The fit carries an unscreened evaluation record in place of
+\code{evaluate()}'s: \code{evaluation$screened} is \code{FALSE}, the one configuration is
+\code{best_config} with status \code{"not_evaluated"}, its metric and \verb{cv_*} columns
+are \code{NA}, and \code{runtime_secs} is 0. \code{evaluation$recipe} records the recipe
+settings as \code{evaluate()} does, and \code{fit()} applies \code{evaluate()}'s checks
+first: at least twice \code{cv_folds} rows with an observed outcome, and a
+Savitzky-Golay window narrower than the spectrum. Re-fitting a
+cold-started fit starts cold again. With more than one configuration
+\code{fit()} aborts with class \code{horizons_input_error}: choosing among them is
+what \code{evaluate()} is for.
+}
+
