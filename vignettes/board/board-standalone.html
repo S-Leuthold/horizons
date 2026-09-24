@@ -235,8 +235,8 @@
 
 <script type="application/json" id="hz-data">
 {
-  "generated_at": "2026-09-24T00:17:35-0500",
-  "content_md5": "915ca876ac6e9593b6b565a3f0e0b652",
+  "generated_at": "2026-09-24T01:22:11-0500",
+  "content_md5": "ea31ec17e3ec40a9623b505324895947",
   "horizons": "0.9.0",
   "lanes": [
     {
@@ -1204,49 +1204,49 @@
           "default": null,
           "text": "`horizons_data`. Object with response data attached via `add_response()`.",
           "touch": "Always; an object with at least one response column, from add_response() or select_training().",
-          "source": "R/pipeline-configure.R#L187"
+          "source": "R/pipeline-configure.R#L210"
         },
         {
           "name": "outcome",
           "default": "NULL",
           "text": "character(1) or NULL. Which response variable to model. Auto-selects if exactly one response exists.",
           "touch": "Whenever the object carries more than one response; with exactly one it is chosen for you.",
-          "source": "R/pipeline-configure.R#L357"
+          "source": "R/pipeline-configure.R#L380"
         },
         {
           "name": "models",
           "default": "c(\"rf\", \"cubist\", \"plsr\")",
           "text": "`character`. Model algorithms to benchmark. Default `c(\"rf\", \"cubist\", \"plsr\")`. See `VALID_MODELS` for options.",
           "touch": "To change the learners compared. rf, cubist and plsr are the default three; the full list is VALID_MODELS.",
-          "source": "R/pipeline-configure.R#L202"
+          "source": "R/pipeline-configure.R#L225"
         },
         {
           "name": "transformations",
           "default": "\"none\"",
           "text": "`character`. Response transformations to test. Default `\"none\"`.",
           "touch": "For a skewed outcome such as organic carbon, add \"log\"; the transform is applied per configuration and undone before scoring.",
-          "source": "R/pipeline-configure.R#L213"
+          "source": "R/pipeline-configure.R#L236"
         },
         {
           "name": "preprocessing",
           "default": "\"raw\"",
           "text": "`character`. Per-config spectral preprocessing methods. Default `\"raw\"`.",
           "touch": "To compare spectral pretreatments; these run per configuration inside evaluate(), never on the object, so the same data can be modelled raw and as a derivative.",
-          "source": "R/pipeline-configure.R#L224"
+          "source": "R/pipeline-configure.R#L247"
         },
         {
           "name": "feature_selection",
           "default": "\"none\"",
           "text": "`character`. Feature selection methods to test. Default `\"none\"`.",
           "touch": "To reduce the predictor space; \"pca\" is what the tree learners need on a full-resolution spectrum, and boruta is expensive.",
-          "source": "R/pipeline-configure.R#L235"
+          "source": "R/pipeline-configure.R#L258"
         },
         {
           "name": "expand_covariates",
           "default": "NULL",
           "text": "logical(1), character, or NULL. Covariate expansion strategy. NULL = all covariates in every config (no expansion). TRUE = power set of all covariate columns. Character vector = power set of named covariates only. FALSE = exclude all covariates.",
           "touch": "Only when the object carries covariate columns; NULL uses all of them in every configuration, TRUE benchmarks the power set, FALSE drops them.",
-          "source": "R/pipeline-configure.R#L450"
+          "source": "R/pipeline-configure.R#L473"
         },
         {
           "name": "cov_fusion",
@@ -1260,34 +1260,34 @@
           "default": "5L",
           "text": "`integer`. Number of cross-validation folds. Default 5. Minimum 2.",
           "touch": "Rarely; five is the default and validate() checks the object has enough rows for it.",
-          "source": "R/pipeline-configure.R#L288"
+          "source": "R/pipeline-configure.R#L311"
         },
         {
           "name": "grid_size",
           "default": "10L",
           "text": "`integer`. Hyperparameter grid size (Latin hypercube). Default 10. Minimum 1.",
           "touch": "To widen or shrink the Latin hypercube evaluate() screens each configuration with.",
-          "source": "R/pipeline-configure.R#L298"
+          "source": "R/pipeline-configure.R#L321"
         },
         {
           "name": "bayesian_iter",
           "default": "15L",
           "text": "`integer`. Bayesian optimization iterations. Default 15. Minimum 0.",
           "touch": "To change how many Bayesian steps follow the grid in evaluate(); 0 disables them.",
-          "source": "R/pipeline-configure.R#L308"
+          "source": "R/pipeline-configure.R#L331"
         },
         {
           "name": "final_bayesian_iter",
           "default": "25L",
           "text": "`integer`. Bayesian optimization iterations for the final fit on the selected configuration. Default 25. Minimum 0.",
           "touch": "To change the re-tuning budget fit() spends on each selected configuration; larger than the screening budget by default.",
-          "source": "R/pipeline-configure.R#L318"
+          "source": "R/pipeline-configure.R#L341"
         }
       ],
       "mechanics": [
         {
           "step": "Requires at least one response or outcome column, and checks every axis value against the package's valid lists.",
-          "source": "R/pipeline-configure.R#L185"
+          "source": "R/pipeline-configure.R#L208"
         },
         {
           "step": "If a grid already exists, warns and resets whatever evaluate(), fit() and ensemble() earned, because it was earned against an outcome that is about to change. The evaluation, models and ensemble slots go back to the constructor's empty shape, the validation verdict and flagged ids are cleared, and the class drops to horizons_data. The record of rows validate() already removed is kept, since they stay removed, and so is a select_training() record.",
@@ -1295,35 +1295,35 @@
         },
         {
           "step": "Demotes any previous outcome to response, resolves the outcome (auto when there is exactly one), and promotes it, writing the roles back through set_analysis() so n_responses stays consistent.",
-          "source": "R/pipeline-configure.R#L351"
+          "source": "R/pipeline-configure.R#L374"
         },
         {
           "step": "Warns about kept rows that were not chosen for this outcome, naming the earlier outcome and the count when validate() removed rows only as response outliers of a different one, and naming the drawn properties when a select_training() record (other than scope global) was drawn for properties that do not include it.",
-          "source": "R/pipeline-configure.R#L405"
+          "source": "R/pipeline-configure.R#L428"
         },
         {
           "step": "Resolves the covariate sets, which are none, all, a power set, or a power set of the named ones merged with the rest fixed.",
-          "source": "R/pipeline-configure.R#L412"
+          "source": "R/pipeline-configure.R#L435"
         },
         {
           "step": "Crosses the five axes into one row per configuration and gives each a deterministic id, model_preprocessing_transformation_featsel plus a six-character hash of the whole tuple.",
-          "source": "R/pipeline-configure.R#L522"
+          "source": "R/pipeline-configure.R#L545"
         },
         {
           "step": "Stores the grid, the tuning budget, the expansion inputs, and the method defaults.",
-          "source": "R/pipeline-configure.R#L570"
+          "source": "R/pipeline-configure.R#L593"
         }
       ],
       "records": [
         {
           "field": "data$role_map",
           "text": "exactly one column with role outcome; the others stay response",
-          "source": "R/pipeline-configure.R#L390"
+          "source": "R/pipeline-configure.R#L413"
         },
         {
           "field": "config$configs, config$n_configs",
           "text": "one row per configuration with config_id, the five axis values, and three list-columns reserved for per-configuration parameter overrides, always empty today and not yet read by the recipe builder",
-          "source": "R/pipeline-configure.R#L552"
+          "source": "R/pipeline-configure.R#L575"
         },
         {
           "field": "config$tuning, config$expansion, config$defaults",
@@ -1335,42 +1335,42 @@
         {
           "when": "the object has no response column",
           "does": "aborts and points at add_response()",
-          "source": "R/pipeline-configure.R#L191"
+          "source": "R/pipeline-configure.R#L214"
         },
         {
           "when": "a model, transformation, preprocessing, feature-selection method, or cov_fusion value is not in the valid list",
           "does": "aborts listing the valid options",
-          "source": "R/pipeline-configure.R#L202"
+          "source": "R/pipeline-configure.R#L225"
         },
         {
           "when": "cov_fusion is \"late\", or is not NULL or a single string",
           "does": "aborts; for \"late\" the message says late fusion is not built and to use \"early\", and the condition is both horizons_configure_error and horizons_input_error",
-          "source": "R/pipeline-configure.R#L264"
+          "source": "R/pipeline-configure.R#L287"
         },
         {
           "when": "a tuning parameter is not an integer in range",
           "does": "aborts",
-          "source": "R/pipeline-configure.R#L288"
+          "source": "R/pipeline-configure.R#L311"
         },
         {
           "when": "several responses exist and outcome is not given, or the named outcome is not a response",
           "does": "aborts listing the responses",
-          "source": "R/pipeline-configure.R#L365"
+          "source": "R/pipeline-configure.R#L388"
         },
         {
           "when": "covariates exist and cov_fusion is NULL, or expand_covariates names a column the object lacks",
           "does": "aborts",
-          "source": "R/pipeline-configure.R#L440"
+          "source": "R/pipeline-configure.R#L463"
         },
         {
           "when": "a grid already exists, or cov_fusion = \"early\" or expand_covariates is given with no covariates",
           "does": "warns and continues",
-          "source": "R/pipeline-configure.R#L338"
+          "source": "R/pipeline-configure.R#L361"
         },
         {
           "when": "rows were removed only as response outliers of a different outcome, or the training rows were drawn by select_training() for properties that exclude the outcome",
           "does": "warns and continues; the rows stay as they are",
-          "source": "R/pipeline-configure.R#L677"
+          "source": "R/pipeline-configure.R#L700"
         }
       ],
       "evidence": [],
@@ -1385,6 +1385,10 @@
         {
           "text": "Cubist with committees > 1 is not bit-reproducible under a fixed seed (fourth significant figure of a fold metric); every other engine is deterministic given seed. See",
           "source": "R/pipeline-configure.R#L51"
+        },
+        {
+          "text": "cubist and svm_rbf/mars scale badly with predictor count on full-resolution spectra; the \"Choosing models for large spectral libraries\" section documents practical n x p limits per learner, and validate()'s P010 check warns for cubist + feature_selection = \"none\" specifically. See",
+          "source": "R/pipeline-configure.R#L65"
         }
       ],
       "design_ahead": []
@@ -1417,7 +1421,7 @@
           "default": "FALSE",
           "text": "logical(1) or character(1). `FALSE` to detect only (default), `TRUE` to remove all flagged outliers, `\"spectral\"` or `\"response\"` for selective removal.",
           "touch": "TRUE, \"spectral\" or \"response\" to drop the flagged rows; the default only reports them. Removal goes through subset_rows(), so a selection record is kept consistent.",
-          "source": "R/pipeline-validate.R#L439"
+          "source": "R/pipeline-validate.R#L473"
         },
         {
           "name": "spectral_method",
@@ -1431,7 +1435,7 @@
           "default": "0.975",
           "text": "`numeric(1)`. Chi-squared quantile for Mahalanobis distance cutoff. Default: `0.975`.",
           "touch": "To loosen or tighten the chi-squared quantile the squared distance is cut at; 0.975 by default.",
-          "source": "R/pipeline-validate.R#L715"
+          "source": "R/pipeline-validate.R#L755"
         },
         {
           "name": "response_method",
@@ -1445,7 +1449,7 @@
           "default": "1.5",
           "text": "`numeric(1)`. IQR multiplier for Tukey fences. Default: `1.5`.",
           "touch": "The Tukey multiplier; 1.5 flags the conventional outer fences, 3 flags only extremes.",
-          "source": "R/pipeline-validate.R#L761"
+          "source": "R/pipeline-validate.R#L801"
         }
       ],
       "mechanics": [
@@ -1463,40 +1467,44 @@
         },
         {
           "step": "Spectral outliers, P005 (info), by PCA on the raw spectra scaled to unit variance per wavenumber, components to 99 % of variance capped at 50 and at two fewer than the row count, then the squared Mahalanobis distance of each score vector against the chi-squared quantile. Skipped with a warning below five rows or on a singular covariance.",
-          "source": "R/pipeline-validate.R#L643"
+          "source": "R/pipeline-validate.R#L683"
         },
         {
           "step": "Response outliers, P006 (info), as outcome values outside Q1 minus and Q3 plus the multiplier times the IQR. Skipped with a warning below four non-missing values or a zero IQR.",
-          "source": "R/pipeline-validate.R#L736"
+          "source": "R/pipeline-validate.R#L776"
+        },
+        {
+          "step": "P010 (warning) flags configs pairing cubist with feature_selection = \"none\" once n_rows * n_predictors exceeds CUBIST_MAX_CELLS; the CLI tree line always shows the cell count, and a cli_warn() names the affected config_ids and recommends feature_selection = \"pca\" when any are flagged.",
+          "source": "R/pipeline-validate.R#L432"
         },
         {
           "step": "If removal was asked for, drops the union or the chosen kind through subset_rows() and records why each row left, the outcome whose fences flagged a response removal, and the thresholds in force.",
-          "source": "R/pipeline-validate.R#L474"
+          "source": "R/pipeline-validate.R#L508"
         },
         {
           "step": "The flags are replaced on every call, but the removal record accumulates, since rows an earlier call removed (before a re-configure, say) are gone for good.",
-          "source": "R/pipeline-validate.R#L510"
+          "source": "R/pipeline-validate.R#L544"
         },
         {
           "step": "passed is TRUE when no ERROR check failed; warnings do not affect it.",
-          "source": "R/pipeline-validate.R#L493"
+          "source": "R/pipeline-validate.R#L527"
         }
       ],
       "records": [
         {
           "field": "validation$passed, validation$timestamp",
           "text": "the verdict and when it was reached",
-          "source": "R/pipeline-validate.R#L502"
+          "source": "R/pipeline-validate.R#L536"
         },
         {
           "field": "validation$checks",
           "text": "one row per check with description, status, severity (blank on passes), value and id",
-          "source": "R/pipeline-validate.R#L506"
+          "source": "R/pipeline-validate.R#L540"
         },
         {
           "field": "validation$outliers",
           "text": "the spectral and response ids this call flagged, and the record of every removal so far, one detail row per removed sample with its reason, the outcome that flagged a response removal, and the spectral and response thresholds",
-          "source": "R/pipeline-validate.R#L510"
+          "source": "R/pipeline-validate.R#L544"
         }
       ],
       "refuses": [
@@ -1508,7 +1516,7 @@
         {
           "when": "too few rows or columns for a detector, or a singular covariance",
           "does": "warns and skips that detector",
-          "source": "R/pipeline-validate.R#L648"
+          "source": "R/pipeline-validate.R#L688"
         },
         {
           "when": "a previous validation exists",
@@ -1518,7 +1526,12 @@
       ],
       "evidence": [],
       "issues": [],
-      "notes": [],
+      "notes": [
+        {
+          "text": "P010's 2e6-cell threshold (CUBIST_MAX_CELLS) is a heuristic floor from one measurement, not a calibrated benchmark — cubist + snv on 14,228 x 851 (12.1M cells) did not finish a single tune task in 29.5 minutes, while feature_selection = \"pca\" on the same config finished in 368 s. See",
+          "source": "R/constants.R#L258"
+        }
+      ],
       "design_ahead": []
     },
     {
@@ -1730,7 +1743,7 @@
         },
         {
           "claim": "after the serialization fixes the per-worker payload on the configs axis is 418 MB at 17,788 by 1,701",
-          "where": "R/constants.R#L209"
+          "where": "R/constants.R#L248"
         }
       ],
       "issues": [],
@@ -2065,28 +2078,28 @@
           "default": null,
           "text": "Spectra to predict. Either a `horizons_data` object or a tibble/data.frame whose predictor (wavelength) columns match the training schema. The spectra must already be on the training axis — `predict()` replays per-config recipe steps (preprocessing, feature selection) but does not re-run object-level `standardize()`. Resample/trim/water-band alignment is the caller's responsibility (see Details).",
           "touch": "Always; a horizons_data standardized to the same grid as the training data, or a data frame with the same wn_ columns and a sample_id.",
-          "source": "R/pipeline-predict.R#L232"
+          "source": "R/pipeline-predict.R#L443"
         },
         {
           "name": "config",
           "default": "\"best\"",
           "text": "Which fitted model to use. One of: - `\"best\"` (default): the top-ranked config by the object's rank metric. - a `config_id` string: a specific fitted model. - `\"all\"`: every successfully fitted model (long output, one block per config, with a `config_id` column).",
           "touch": "A config_id to predict from a specific model, or \"all\" for one block per fitted model.",
-          "source": "R/pipeline-predict.R#L499"
+          "source": "R/pipeline-predict.R#L710"
         },
         {
           "name": "interval",
           "default": "TRUE",
           "text": "Logical. Return conformal prediction intervals when UQ is available? Default `TRUE`. Ignored (with a note) for configs that have no UQ bundle. When intervals are actually available and the model was fit on a training object carrying a $selection (from `select_training()`), this warns once that conformal coverage is not guaranteed: the calibration rows were chosen for proximity to the targets, so they are not exchangeable with arbitrary prediction data.",
           "touch": "FALSE for point predictions only; ignored where no UQ bundle exists.",
-          "source": "R/pipeline-predict.R#L636"
+          "source": "R/pipeline-predict.R#L841"
         },
         {
           "name": "abstain_ood",
           "default": "FALSE",
           "text": "Logical. When `TRUE`, `.pred` (and any interval bounds) are set to `NA` for samples flagged out-of-domain (`.ad_flag == \"OOD\"`), while `.ad_distance`/`.ad_flag` are preserved so the caller can see how far out each sample was. Default `FALSE` (report AD, predict for all samples). Has no effect on configs without an AD bundle.",
           "touch": "TRUE to return NA predictions for samples the applicability domain flags out-of-domain, keeping the distance and flag columns.",
-          "source": "R/pipeline-predict.R#L674"
+          "source": "R/pipeline-predict.R#L900"
         },
         {
           "name": "...",
@@ -2099,44 +2112,48 @@
       "mechanics": [
         {
           "step": "Resolves which configurations are being predicted, and from their rows which covariate columns they promoted to predictors, so those are kept from new_data and required.",
-          "source": "R/pipeline-predict.R#L144"
+          "source": "R/pipeline-predict.R#L143"
+        },
+        {
+          "step": "Loads the namespaces predict() needs for the stored workflow and each config's model engine — workflows, parsnip and recipes unconditionally, plus the engine package(s) for every model actually being predicted (not every config the object stores), plus ranger when a UQ bundle is present — none of which library(horizons) alone pulls in; aborts naming the package and the model if a Suggested engine is not installed.",
+          "source": "R/pipeline-predict.R#L154"
         },
         {
           "step": "Resolves new_data to sample_id plus the predictor columns, synthesizing ids for a bare data frame, and checks the training-axis schema fit() stored; a missing column aborts with the columns named.",
-          "source": "R/pipeline-predict.R#L148"
+          "source": "R/pipeline-predict.R#L158"
         },
         {
           "step": "Warns once, when intervals will be produced, that conformal coverage does not transfer if the model was fit on a selected training set.",
-          "source": "R/pipeline-predict.R#L308"
+          "source": "R/pipeline-predict.R#L519"
         },
         {
           "step": "Per configuration, predicts on the transformed scale, back-transforms once and floors at zero, then winsorizes .pred alone to the response bound, with a warning when anything is clamped.",
-          "source": "R/pipeline-predict.R#L589"
+          "source": "R/pipeline-predict.R#L801"
         },
         {
-          "step": "With a UQ bundle and interval = TRUE, bakes the new data through the UQ recipe, predicts residual quantiles from the quantile forest, adds the signed conformal margin around the unclamped point, repairs crossing bounds and floors them; every term is already on the original scale, so nothing is back-transformed twice.",
-          "source": "R/pipeline-predict.R#L787"
+          "step": "With a UQ bundle and interval = TRUE, bakes the new data through the UQ recipe, predicts residual quantiles from the quantile forest, adds the signed conformal margin around the unclamped point, repairs crossing bounds and floors them; every term is already on the original scale, so nothing is back-transformed twice. A bake or quantile-prediction failure warns and degrades to point predictions instead of disappearing silently.",
+          "source": "R/pipeline-predict.R#L1000"
         },
         {
           "step": "With an AD bundle, computes the squared Mahalanobis distance to the training centroid under the shrinkage covariance and bins it Q1 to Q4 or OOD against the held-out thresholds; abstains if asked.",
-          "source": "R/pipeline-predict.R#L660"
+          "source": "R/pipeline-predict.R#L866"
         }
       ],
       "records": [
         {
           "field": "sample_id, .pred",
           "text": "one row per sample, plus config_id when config = \"all\"",
-          "source": "R/pipeline-predict.R#L621"
+          "source": "R/pipeline-predict.R#L829"
         },
         {
           "field": ".pred_lower, .pred_upper, .interval_width",
           "text": "present when intervals were requested and available",
-          "source": "R/pipeline-predict.R#L844"
+          "source": "R/pipeline-predict.R#L1062"
         },
         {
           "field": ".ad_distance, .ad_flag",
           "text": "present when the configuration has an AD bundle",
-          "source": "R/pipeline-predict.R#L666"
+          "source": "R/pipeline-predict.R#L872"
         }
       ],
       "refuses": [
@@ -2148,17 +2165,27 @@
         {
           "when": "new_data lacks a predictor column of the training axis, or a covariate a configuration uses",
           "does": "aborts naming the missing columns and pointing at standardize()",
-          "source": "R/pipeline-predict.R#L373"
+          "source": "R/pipeline-predict.R#L608"
+        },
+        {
+          "when": "a config being predicted needs an engine package (or ranger, for a UQ bundle) that is not installed",
+          "does": "aborts once, naming every missing package and the model(s) that need it",
+          "source": "R/pipeline-predict.R#L387"
         },
         {
           "when": "a prediction is clamped to the response bound, coverage cannot be guaranteed on a selected fit, or abstention was asked for with no AD information",
           "does": "warns",
-          "source": "R/pipeline-predict.R#L700"
+          "source": "R/pipeline-predict.R#L910"
         },
         {
-          "when": "interval or AD computation fails for a configuration",
-          "does": "degrades to point predictions without those columns",
-          "source": "R/pipeline-predict.R#L644"
+          "when": "interval computation fails for a configuration (a UQ bundle exists, but baking new_data or predicting quantiles errors)",
+          "does": "warns, naming the config and the failing step, and degrades to point predictions without interval columns",
+          "source": "R/pipeline-predict.R#L1017"
+        },
+        {
+          "when": "AD computation fails for a configuration",
+          "does": "warns when baking new_data through the recipe fails or every spectrum bakes to NA; degrades silently only for a distance/covariance mismatch in an otherwise-baked batch. Either way, no AD columns are returned for the affected rows.",
+          "source": "R/ad.R#L502"
         }
       ],
       "evidence": [
@@ -2198,69 +2225,83 @@
           "default": null,
           "text": "A `horizons_ensemble` object (the output of `ensemble()`).",
           "touch": "Always; the horizons_ensemble.",
-          "source": "R/ensemble-helpers.R#L731"
+          "source": "R/ensemble-helpers.R#L734"
         },
         {
           "name": "new_data",
           "default": null,
           "text": "Spectra to predict. Either a `horizons_data` object or a tibble/data.frame whose predictor (wavelength) columns match the training schema. The spectra must already be on the training axis — the same requirement as `predict.horizons_fit()`; see its Details for the axis- alignment limitation.",
           "touch": "Always; on the training axis, as for predict() on a fit.",
-          "source": "R/ensemble-helpers.R#L774"
+          "source": "R/ensemble-helpers.R#L794"
         },
         {
           "name": "interval",
           "default": "TRUE",
           "text": "Logical. Return CV+ conformal prediction intervals when ensemble uncertainty quantification is available (`object$ensemble$uq`, calibrated by `fit_ensemble_uq()` — on by default in `ensemble()`). Default `TRUE`. When no UQ bundle is present, point predictions are returned with a one-time note.",
           "touch": "FALSE for point predictions only; only the ensemble's own CV+ bundle produces intervals, never the members'.",
-          "source": "R/ensemble-helpers.R#L834"
+          "source": "R/ensemble-helpers.R#L882"
         },
         {
           "name": "...",
           "default": null,
           "text": "Unused; present for S3 method consistency.",
           "touch": "Unused.",
-          "source": "R/ensemble-helpers.R#L725"
+          "source": "R/ensemble-helpers.R#L728"
         }
       ],
       "mechanics": [
         {
           "step": "Reads the member set from the weights table, the members the meta-learner actually trained on, rather than re-deriving it.",
-          "source": "R/ensemble-helpers.R#L750"
+          "source": "R/ensemble-helpers.R#L764"
+        },
+        {
+          "step": "Loads the namespaces predict() needs, as predict.horizons_fit() does, scoped to the member set the meta-learner actually trained on rather than every config the underlying fit stored (gather_members() can drop a stored config that lacks out-of-fold predictions, so the two sets are not always the same).",
+          "source": "R/ensemble-helpers.R#L783"
         },
         {
           "step": "Resolves and schema-checks new_data as the fit method does, and warns once about conformal coverage on a selected training set.",
-          "source": "R/ensemble-helpers.R#L774"
+          "source": "R/ensemble-helpers.R#L794"
         },
         {
           "step": "Every member predicts point-only and unclamped, so the features match the out-of-fold values the meta-learner trained on; duplicate sample ids abort.",
-          "source": "R/ensemble-helpers.R#L796"
+          "source": "R/ensemble-helpers.R#L811"
         },
         {
           "step": "Combines by the method, a weighted sum or the fitted meta-model, and applies the response bound once at the output.",
-          "source": "R/ensemble-helpers.R#L802"
+          "source": "R/ensemble-helpers.R#L819"
         },
         {
-          "step": "Joins CV+ interval bounds by sample_id when a bundle exists and intervals were asked for.",
-          "source": "R/ensemble-helpers.R#L834"
+          "step": "Joins CV+ interval bounds by sample_id when a bundle exists and intervals were asked for; a corrupt or unusable bundle, a fold model that fails to predict, or a too-small calibration set warns and degrades to point predictions instead of disappearing silently.",
+          "source": "R/ensemble-uq.R#L705"
         }
       ],
       "records": [
         {
           "field": "sample_id, .pred",
           "text": "one row per sample, the response bound applied once here",
-          "source": "R/ensemble-helpers.R#L830"
+          "source": "R/ensemble-helpers.R#L842"
         },
         {
           "field": ".pred_lower, .pred_upper, .interval_width",
           "text": "present when ensemble UQ exists and interval = TRUE",
-          "source": "R/ensemble-helpers.R#L834"
+          "source": "R/ensemble-helpers.R#L882"
         }
       ],
       "refuses": [
         {
+          "when": "a member's model needs an engine package that is not installed",
+          "does": "aborts once, naming every missing package and the model(s) that need it",
+          "source": "R/pipeline-predict.R#L387"
+        },
+        {
           "when": "the object is not a horizons_ensemble or carries no ensemble, a member fails to predict, or sample ids repeat",
           "does": "aborts naming the member or the key",
-          "source": "R/ensemble-helpers.R#L731"
+          "source": "R/ensemble-helpers.R#L734"
+        },
+        {
+          "when": "the ensemble's CV+ interval bundle is unrecognized, a retained fold model fails to predict, or the calibration set is too small for the requested coverage level",
+          "does": "warns and degrades to point predictions without interval columns",
+          "source": "R/ensemble-uq.R#L705"
         }
       ],
       "evidence": [],

@@ -9,6 +9,17 @@
   `average()`'s collapse now go through them, so the derived counts have
   one source of truth.
 
+* **`validate()`** adds a **P010** check: pairing `cubist` with
+  `feature_selection = "none"` on an analysis table whose
+  `n_rows * n_predictors` exceeds `CUBIST_MAX_CELLS` (2e6 cells) now warns,
+  naming the affected configs and recommending `feature_selection = "pca"`
+  (#40). Cubist fits a linear model in every rule, so its cost grows sharply
+  with predictor count: on the KSSL clay library at 14,228 x 851 (12.1M
+  cells, 4 cm-1), not one of 25 tune tasks finished in 29.5 minutes, while
+  the same config with `feature_selection = "pca"` finished in 368 s (test
+  RPD 3.82). `configure()`'s docs gain a "Choosing models for large spectral
+  libraries" section covering n x p limits across `MODEL_SPECS`.
+
 ## Performance
 
 * `step_transform_spectra()` bakes the whole spectral matrix in one prospectr
@@ -646,6 +657,34 @@ consequences; the review itself is in
   floored member predictions at serve time. Metrics move only for configs
   that produced negative original-scale predictions. The deploy-time
   `upper_bound` guardrail is unchanged and still opt-in.
+
+* **`predict()` on a deserialized `horizons_fit` or `horizons_ensemble` no
+  longer requires the caller to have loaded `workflows` (or the config's
+  modeling engine) first** ([#65](https://github.com/S-Leuthold/horizons/issues/65)).
+  `library(horizons)` does not load `workflows`, most modeling engines, or
+  `ranger`, so `predict(readRDS(fit_path), new_data)` in a fresh session
+  failed with `no applicable method for 'predict' applied to an object of
+  class "c('butchered_workflow', 'workflow')"`. `predict()` now loads the
+  namespaces it needs before predicting — scoped to the configs actually
+  being predicted, not every config the object stores, so `predict(fit,
+  config = "cfg_rf")` does not require a co-stored `mars` config's engine —
+  and aborts (condition class `horizons_missing_predict_package`) with an
+  actionable message naming the package and the model if a Suggested engine
+  (`Cubist`, `kernlab`, `earth`, `mixOmics`, `nnet`, `bonsai`) is not
+  installed. `lightgbm` prediction additionally needs `bonsai` (it
+  registers the `"lightgbm"` parsnip engine), now declared in `Suggests`
+  alongside it.
+
+* **A failed prediction interval no longer disappears silently, for either
+  a single fit or an ensemble.** If the quantile-forest step behind
+  `interval = TRUE` failed — a `ranger` namespace not being loaded was one
+  way this happened — `predict()` degraded to point predictions with no
+  indication anything had gone wrong. The same applied on the ensemble
+  side: an unrecognized CV+ bundle, a retained fold model that failed to
+  predict, or a calibration set too small for the requested coverage level
+  all degraded silently too. Both paths now warn (condition class
+  `horizons_interval_warning`), naming the failure, and return point
+  predictions.
 
 * `fit()` now models the same rows as `evaluate()`: rows whose outcome is `NA`
   are dropped by one shared rule (#67). `fit()` split the unfiltered analysis
