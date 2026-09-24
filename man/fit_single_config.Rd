@@ -17,7 +17,9 @@ fit_single_config(
   compute_uq = FALSE,
   compute_ad = FALSE,
   allow_par = FALSE,
-  seed = 42L
+  seed = 42L,
+  sg_window = DEFAULT_SG_WINDOW,
+  pca_threshold = DEFAULT_PCA_THRESHOLD
 )
 }
 \arguments{
@@ -46,6 +48,13 @@ calibration leakage.}
 \item{allow_par}{Logical. Passed to tune control functions.}
 
 \item{seed}{Integer. Random seed for reproducibility.}
+
+\item{sg_window}{Odd integer. Savitzky-Golay window in grid points, passed
+to \code{\link[=build_recipe]{build_recipe()}}. \code{fit()} reads it from \code{configure()}'s
+\code{config$recipe}, the value \code{evaluate()} ran with. Default 9.}
+
+\item{pca_threshold}{Numeric. Variance share the \code{pca} feature selection
+keeps, passed to \code{\link[=build_recipe]{build_recipe()}}. Read the same way. Default 0.995.}
 }
 \value{
 List with fields: config_id, status, degraded, degraded_reason,
