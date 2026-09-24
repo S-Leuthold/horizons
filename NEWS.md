@@ -2,22 +2,7 @@
 
 ## New features
 
-* **`select_training()`**, the training-set selection verb for library
-  mode. Targets and a reference pool in, a `horizons_data` drawn from the
-  pool out, on the targets' wavenumber grid, and the rest of the pipeline
-  runs on it unchanged. The rule is each target's `k` nearest pool rows
-  that have the property measured, drawn per property, rows entering once.
-  Four scopes over one return shape (`batch`, `cluster`, `sample`,
-  `global`): the return is always the union, and the grouping into training
-  sets lives in `x$selection$groups` alongside the full membership table.
-  Every lever of the similarity space is an argument (`snv`, `derivative`,
-  `window`, `poly`, `mask`, `space = "pca"|"pls"`, `ncomp`, `metric`), with
-  the design the 2026-09 experiments ran as the defaults, so the open
-  questions (k on a pool, the metric, tail batches) run as loops over the
-  verb. The verb reconciles the pool onto the targets' axis itself (#64 is
-  why), excludes and reports twins by the gap between first and second
-  nearest, and warns about targets beyond the pool's own nearest-neighbour
-  spread. Design: `dev/specs/v1-refactor/select-training-design.md`.
+* **`select_training()`**, the training-set selection verb for library mode. Targets and a reference pool in, a `horizons_data` drawn from the pool out, on the targets' wavenumber grid, and the rest of the pipeline runs on it unchanged. The rule is each target's `k` nearest pool rows that have the property measured, drawn per property, rows entering once. Four scopes over one return shape (`batch`, `cluster`, `sample`, `global`): the return is always the union, and the grouping into training sets lives in `x$selection$groups` alongside the full membership table. Every lever of the similarity space is an argument (`snv`, `derivative`, `window`, `poly`, `mask`, `space = "pca"|"pls"`, `ncomp`, `metric`), with the design the 2026-09 experiments ran as the defaults, so the open questions (k on a pool, the metric, tail batches) run as loops over the verb. The verb reconciles the pool onto the targets' axis itself (#64 is why), excludes and reports twins, and warns about targets beyond the pool's own nearest-neighbour spread. A twin is a pool row at distance zero or closer to a target than `twin_ratio` times a reference distance, the 75th percentile of the target's nearest `twin_reference_width()` measured rows: 50, or a quarter of the measured rows when fewer than 200 have the property. Under `global` the twins are recorded in `x$selection$exclusions` but stay in the returned rows, by design, since global is the control and returns the whole pool; a batch-versus-global comparison has to act on the record. Design: `dev/specs/v1-refactor/select-training-design.md`.
 
 * **`subset_rows()` and `set_analysis()`** (internal) give `horizons_data`
   a row-subset operation (#43). `validate()`'s outlier removal and
@@ -64,6 +49,48 @@
   parallel runs previously drew different streams from the same seed.
 
 ## Breaking / behavioural
+
+* **`standardize()` resamples onto a canonical grid, so two sources
+  standardized alike share their columns (#64).** The grid is every multiple
+  of `resample` inside the `trim` bounds (inside the data's own range when
+  `trim` is `NULL`, so two sources then share columns only where their
+  ranges overlap); it used to start at the data's own maximum wavenumber.
+  At `resample = 4` and the default trim, MOYS scans starting at 599.74 at
+  about 1.93 cm-1 came out on `wn_3999.567 ... wn_603.567` while a library
+  at 2 cm-1 came out on `wn_4000 ... wn_600`; both now give
+  `wn_4000, wn_3996, ..., wn_600`. The nearest point beyond each trim bound
+  is kept for the interpolation, so the bounds are the grid's ends; grid
+  points the data does not reach are dropped with a warning (class
+  `horizons_standardize_warning`) rather than extrapolated. A gap already in
+  the input axis (a band deleted upstream, or by an earlier
+  `remove_water = TRUE`) is never spline-filled: the grid points inside it
+  are dropped with a warning naming the gaps, and each side is interpolated
+  on its own. The 0.1 cm-1 tolerance that skipped resampling is gone: an
+  axis is left alone only when it already is the grid to within 1e-6 cm-1,
+  gaps apart, and the console now says so rather than skipping silently
+  (#18). Baseline correction now runs after resampling, on the canonical
+  grid, so every source's convex hull is pinned at the grid's bounds and
+  the points kept beyond the trim bounds for interpolation never reach it;
+  baseline-corrected values therefore change for resampled data, because
+  the hull is now fitted on the grid and pinned at its bounds. That includes
+  data already on the lattice at a finer step (2 cm-1 data at
+  `resample = 4`), whether or not it extends past the trim bounds, since its
+  hull is now fitted on the coarser grid. Data already on the grid at the
+  requested step is corrected exactly as before, extending past the bounds
+  or not. Without resampling the baseline is fitted on the trimmed native
+  axis, as before.
+  Columns stored in increasing order are sorted first, on every path; that
+  input used to abort at the final validation, or, with every operation
+  off, come back unsorted and unvalidated but marked standardized. The
+  no-op call now validates the object before marking it, so it refuses one
+  the validator would. Grid wavenumbers are rounded to six decimal places,
+  so a resolution such as 1.5 gives stable names.
+  `provenance$standardization` gains `resampled` and `grid` (`min`, `max`,
+  `step`, `n`), which a later no-op `force = TRUE` call keeps. Objects
+  standardized before this change
+  sit on the old axes and do not share columns with ones standardized after
+  it; re-run `standardize()` from the raw spectra before comparing,
+  combining, or predicting across the two.
 
 * **`average(by = <column>)` no longer returns the `by` column.** The
   grouping values now become the averaged rows' `sample_id`, and the
@@ -474,6 +501,10 @@ consequences; the review itself is in
   `seed`. Equality tests in the package use `rf` for that reason.
 
 ## Bug Fixes
+
+* `select_training(scope = "global")` now runs the same twin rule as the other scopes (#72). The control arm took its reference over the nearest `max(k, 50)` of all pool rows, 400 at the default `k`, with no cap at a quarter of the measured rows. A wider reference raises the threshold, so global ran a looser rule than the arms it is compared against and could flag rows batch does not. Global now runs the check through the same code as batch, per property on that property's measured rows, with the width from one helper, and under `space_rows = "measured"` in the same per-property spaces batch draws in, where it used to check every property in the all-rows space. Under global, `x$selection$exclusions` carries the property rather than `NA`, and a twin appears once per property it is flagged for, as under batch. The flagged rows are recorded but stay in global's returned rows, by design, since global is the control and returns the whole pool; a batch-versus-global comparison has to act on the record. `x$selection$target_distances` has one row per target per property, labelled with the space batch would label it with, and `nearest` and `mean_k` are now measured after the twins rather than including them. For the same targets, pool and arguments, both tables equal the batch record under either `space_rows`. Twin counts, reference distances and target distances from earlier global runs are not comparable with new ones. Under global a `k` above a property's measured rows is still capped there rather than refused, since `k` only sets the reach of `mean_k`; a property with no measured pool row, or fewer than two under `space_rows = "measured"`, now stops every scope with a named input error, where global used to skip it and batch failed in the space build. `twin_ratio` is now validated as a single number in (0, 1); anything else stops the verb with the other input errors. The `twin_ratio` documentation, which still described the retired median-of-`k` rule, is corrected.
+
+* `select_training()` stops with an informative error when the twin subtraction leaves a property with no drawn rows, naming the property and the cause. At a `twin_ratio` near 1 every row any target drew can be some other target's twin, and the subset then failed with "`keep` selects no rows". When the rows were the targets' own copies, at distance zero, the error says the targets are in the pool instead, since no `twin_ratio` brings those back. "At distance zero" means zero to rounding, at or below `sqrt(.Machine$double.eps)` times the target's reference distance, because a spectrum reaching the similarity space as a pool row and as a projected target can land near 1e-16 rather than exactly 0. The `reason` column of `x$selection$exclusions` now uses the same rule, so such a copy is recorded as `"exact"` where it used to be recorded as `"neighbourhood"`.
 
 * `fit()` now honours `configure(final_bayesian_iter = )` (#46). It passed
   the screening budget `bayesian_iter` to the final re-tune instead, so the
