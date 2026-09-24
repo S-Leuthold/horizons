@@ -690,7 +690,12 @@ build_ensemble_contract <- function(method,
 #'   ensemble uncertainty quantification is available (`object$ensemble$uq`,
 #'   calibrated by [fit_ensemble_uq()] — on by default in [ensemble()]).
 #'   Default `TRUE`. When no UQ bundle is present, point predictions are
-#'   returned with a one-time note.
+#'   returned with a one-time note. When the members were fit on a
+#'   response-trimmed training partition (`validate(remove_outliers =
+#'   "response")`, #77), the intervals come from out-of-fold predictions on
+#'   the rows inside the training fences, so this warns once, with class
+#'   `horizons_response_trim_warning`, that they were calibrated within those
+#'   fences and can undercover samples outside them.
 #' @param ... Unused; present for S3 method consistency.
 #'
 #' @return A tibble, one row per sample:
@@ -804,6 +809,10 @@ predict.horizons_ensemble <- function(object,
   ## the member intervals do. Warned once per call, ahead of the member loop.
 
   warn_selection_intervals(object, interval)
+
+  ## And when the members were fit on a response-trimmed partition (#77),
+  ## the CV+ intervals come from out-of-fold predictions inside the fences.
+  warn_trimmed_ensemble_intervals(object, interval)
 
   ## -------------------------------------------------------------------------
   ## Step 3: Every member predicts new_data (long frame, original scale)

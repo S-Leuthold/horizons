@@ -546,6 +546,52 @@ warn_selection_intervals <- function(object, interval) {
 }
 
 ## ---------------------------------------------------------------------------
+## warn_trimmed_ensemble_intervals(): CV+ intervals within the training fences
+## ---------------------------------------------------------------------------
+
+#' Warn that an ensemble's intervals were calibrated within the training fences
+#'
+#' When `validate()` asked for a response trim, `fit()` trains its members
+#' without the training rows outside the fences (#77), so their out-of-fold
+#' predictions, which the ensemble's CV+ intervals are built from, cover only
+#' the rows inside them. The intervals are then calibrated on a population
+#' without the extremes the trim set aside, and can undercover samples like
+#' them. A single fit does not have this problem: its conformal calibration
+#' set is drawn from the untrimmed training part. The mechanism is not fixed
+#' here; this says so, once per `predict()` call, alongside
+#' [warn_selection_intervals()] and on the same gate: intervals requested and
+#' an ensemble conformal slot to produce them.
+#'
+#' @param object A `horizons_ensemble`.
+#' @param interval The call's `interval` argument.
+#' @return Invisibly `NULL`. Called for the warning, class
+#'   `horizons_response_trim_warning`.
+#' @keywords internal
+#' @noRd
+warn_trimmed_ensemble_intervals <- function(object, interval) {
+
+  trim      <- object$evaluation$response_trim
+  n_trimmed <- length(trim$trimmed_ids)
+
+  if (!isTRUE(interval) || is.null(object$ensemble$uq) || n_trimmed == 0) {
+
+    return(invisible(NULL))
+
+  }
+
+  fences <- paste0("[", signif(trim$lower, 4), ", ", signif(trim$upper, 4), "]")
+
+  cli::cli_warn(c(
+    "!" = "The ensemble's intervals were calibrated within the training fences {fences}.",
+    "i" = "{n_trimmed} training row{?s} outside them {cli::qty(n_trimmed)}{?was/were} trimmed as response outliers, so the members' out-of-fold predictions, which the CV+ intervals are built from, cover only the rows inside.",
+    "i" = "The intervals can undercover samples outside the fences."
+  ), class = "horizons_response_trim_warning")
+
+  invisible(NULL)
+
+}
+
+## ---------------------------------------------------------------------------
 ## check_predictor_schema() — axis-alignment gate
 ## ---------------------------------------------------------------------------
 
