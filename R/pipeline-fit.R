@@ -24,6 +24,20 @@
 #' With UQ or AD on, the calibration set is carved out of Split F's training
 #' part.
 #'
+#' The members are the top `n_best` of the configurations `evaluate()` chose
+#' `best_config` from, ranked by the same rule: the ones that succeeded or,
+#' when none did, the pruned ones that carry a cross-validated value of
+#' `metric`. When every member fell below `evaluate()`'s `prune_threshold`
+#' (`evaluation$results$below_prune_threshold`), `fit()` warns with class
+#' `horizons_below_threshold_warning`, naming the threshold and the members'
+#' cross-validated RPD; that includes `bayesian_iter = 0`, where nothing is
+#' pruned. When the members are pruned configurations the warning also
+#' carries class `horizons_pruned_fallback_warning`. If every member fails,
+#' `fit()` aborts with class `horizons_all_members_failed`, listing the
+#' distinct error messages; the
+#' per-member results travel on the condition as `results`, and
+#' `models$results` keeps each member's `error_message` when some succeed.
+#'
 #' @param x A `horizons_eval` object (output of `evaluate()`).
 #' @param n_best Integer. Number of top configurations to re-tune. Default 5.
 #' @param metric Character or NULL. Metric for ranking the candidate
@@ -131,21 +145,35 @@ fit <- function(x,
   ## reported, and are honest precisely because they are not used here.
   rank_metric <- metric %||% x$evaluation$rank_metric %||% "rpd"
 
-  ## Extract successful configs and rank
-  successes <- eval_results[eval_results$status == "success", ]
+  ## The candidates are evaluate()'s best_config candidates: the successes
+  ## or, when none succeeded, the pruned configs with a cv_<metric>. fit()
+  ## used to keep successes only, so it refused an evaluation whose
+  ## best_config was a pruned config (#38).
+  candidates  <- ranking_candidates(eval_results, rank_metric)
+  rank_column <- paste0("cv_", rank_metric)
 
-  if (nrow(successes) == 0) {
+  ## Nothing to fit: no candidates, or candidates none of which has a
+  ## cv_<metric> value, which rank_configs_by_cv() would refuse unclassed.
+  n_candidates <- nrow(candidates$rows)
 
-    rlang::abort(
-      "No successful configurations in evaluation results. Cannot fit models."
-    )
+  if (n_candidates == 0 || all(is.na(candidates$rows[[rank_column]]))) {
+
+    cli::cli_abort(c(
+      "No configuration in {.field evaluation$results} can be fitted.",
+      "x" = if (n_candidates == 0) {
+        "None succeeded, and no pruned configuration has a {.field {rank_column}} value."
+      } else {
+        "{n_candidates} succeeded, but none has a {.field {rank_column}} value."
+      },
+      "i" = "Re-run {.fn evaluate} to record the cross-validated metrics; when every configuration fails it aborts and lists the errors."
+    ), class = "horizons_input_error")
 
   }
 
-  successes <- rank_configs_by_cv(successes, rank_metric)
+  ranked <- rank_configs_by_cv(candidates$rows, rank_metric)
 
-  ## Cap n_best at available successes
-  n_available <- nrow(successes)
+  ## Cap n_best at available candidates
+  n_available <- nrow(ranked)
   n_best      <- as.integer(n_best)
 
   if (n_best > n_available) {
@@ -156,7 +184,8 @@ fit <- function(x,
         "\u2502  ", cli::col_yellow(
           "Requested n_best = ", n_best,
           " but only ", n_available,
-          " successful configs available. Using ", n_available, "."
+          if (candidates$fallback) " pruned" else " successful",
+          " configs available. Using ", n_available, "."
         ), "\n"
       ))
 
@@ -166,7 +195,14 @@ fit <- function(x,
 
   }
 
-  top_configs <- successes[seq_len(n_best), ]
+  top_configs <- ranked[seq_len(n_best), ]
+
+  ## Say so when every member fell below evaluate()'s prune threshold. The
+  ## pruned fallback is one case; the other is bayesian_iter = 0, where the
+  ## gate skips nothing, so below-threshold configs are successes and nothing
+  ## else would say that none cleared the bar (#38).
+  warn_members_below_threshold(top_configs, fallback = candidates$fallback,
+                               bayesian_iter = x$config$tuning$bayesian_iter)
 
   ## Extract references
   role_map     <- x$data$role_map
@@ -586,10 +622,20 @@ fit <- function(x,
       cv_rpd_mean     = if (!is.null(cv_rpd)  && nrow(cv_rpd)  == 1) cv_rpd$mean     else NA_real_,
       cv_rpd_se       = if (!is.null(cv_rpd)  && nrow(cv_rpd)  == 1) cv_rpd$std_err  else NA_real_,
       best_params     = list(res$best_params),
+      error_message   = res$error_message %||% NA_character_,
       runtime_secs    = res$runtime_secs
     )
 
   })
+
+  ## Every member failed. Abort here with the members' errors; carrying on
+  ## reached validate_horizons_fit(), which refused the empty workflows slot
+  ## with a structural message that said nothing about why.
+  if (length(workflows_list) == 0) {
+
+    abort_all_members_failed(results_tibble)
+
+  }
 
   ## Build row_index: .row → id mapping from train_Fit
   row_index <- tibble::tibble(
@@ -771,6 +817,134 @@ fit <- function(x,
   }
 
   x
+
+}
+
+## ---------------------------------------------------------------------------
+## abort_all_members_failed \u2014 no member fitted, with the reasons attached
+## ---------------------------------------------------------------------------
+
+#' Abort because every member fit() re-tuned failed
+#'
+#' @description
+#' The message lists the distinct error messages (the first three, each with
+#' the members that raised it, and a count of the rest), and the per-member
+#' results table travels on the condition as `results`, as it does for
+#' `evaluate()`'s `horizons_all_configs_failed`.
+#'
+#' @param results `fit()`'s per-member results tibble, with `error_message`.
+#' @param call The call the condition is attributed to. Default: the caller,
+#'   `fit()`.
+#' @return Never returns; aborts with class `horizons_all_members_failed`.
+#' @keywords internal
+#' @noRd
+abort_all_members_failed <- function(results, call = rlang::caller_env()) {
+
+  n_members <- nrow(results)
+
+  ## distinct_config_errors() returns the bullets brace-escaped, so upstream
+  ## error text cannot be read as a cli template.
+  cli::cli_abort(c(
+    "All {n_members} configuration{?s} {.fn fit} re-tuned failed, so there is no model to return.",
+    distinct_config_errors(results),
+    "i" = "The per-member results, error messages included, are on this condition as {.field results}. Recover them with {.code rlang::last_error()$results}."
+  ), class = "horizons_all_members_failed", results = results, call = call)
+
+}
+
+## ---------------------------------------------------------------------------
+## warn_members_below_threshold \u2014 no member cleared the prune threshold
+## ---------------------------------------------------------------------------
+
+#' Warn when every member fell below evaluate()'s prune threshold
+#'
+#' @description
+#' `evaluate()` records the prune gate's reading on every row as
+#' `below_prune_threshold` whenever `prune = TRUE`, apart from the status,
+#' which says only whether Bayesian refinement was skipped (#38). `fit()`
+#' warns, with class `horizons_below_threshold_warning`, when every member it
+#' is about to fit fell below the threshold, naming the threshold and each
+#' member's cross-validated RPD. Without this, `bayesian_iter = 0` would fit
+#' below-threshold configurations silently, since nothing is pruned there.
+#' When the members are pruned configurations (the fallback, because none
+#' succeeded) the one warning also carries class
+#' `horizons_pruned_fallback_warning` and says so.
+#'
+#' A pruned row counts as below the threshold whether or not it carries the
+#' column, since the gate put it there. A row with no reading (`prune =
+#' FALSE`, or written before the column existed) does not, so one such member
+#' keeps the warning from firing.
+#'
+#' @param members The member rows (`evaluation$results` shape).
+#' @param fallback Logical. Whether the members are pruned configurations
+#'   because none succeeded.
+#' @param bayesian_iter The configured `bayesian_iter`
+#'   (`x$config$tuning$bayesian_iter`), which decides how the warning
+#'   explains unpruned members; `NULL` when unknown.
+#' @return Invisibly `NULL`. Called for the warning.
+#' @keywords internal
+#' @noRd
+warn_members_below_threshold <- function(members, fallback, bayesian_iter = NULL) {
+
+  ## Columns are read by name: results from before they existed, or built by
+  ## hand, lack them, and `$` on a tibble without the column warns.
+  column_or <- function(col, fill) {
+    if (col %in% names(members)) members[[col]] else rep(fill, nrow(members))
+  }
+
+  n_members <- nrow(members)
+  below     <- column_or("below_prune_threshold", NA) | members$status %in% "pruned"
+
+  if (n_members == 0 || !isTRUE(all(below))) return(invisible(NULL))
+
+  thresholds <- unique(stats::na.omit(column_or("prune_threshold", NA_real_)))
+
+  threshold_text <- if (length(thresholds) == 0) {
+    "the prune threshold (not recorded on these rows)"
+  } else {
+    paste0("the prune threshold of ", paste(format(thresholds), collapse = " and "))
+  }
+
+  cv_rpd  <- column_or("cv_rpd", NA_real_)
+  cv_text <- paste0(members$config_id, " ",
+                    ifelse(is.na(cv_rpd), "NA", formatC(cv_rpd, digits = 2, format = "f")),
+                    collapse = ", ")
+
+  header <- if (fallback) {
+    "No configuration passed {.fn evaluate}'s prune gate, so {.fn fit} is fitting pruned configurations."
+  } else {
+    "Every configuration {.fn fit} is fitting fell below {.fn evaluate}'s prune threshold."
+  }
+
+  ## The cause of unpruned below-threshold members depends on the configured
+  ## bayesian_iter. At 0 there is nothing to skip. Above 0 the gate prunes a
+  ## below-threshold config, so a success marked below the threshold was
+  ## scored with no Bayesian stage (resumed from a bayesian_iter = 0 run's
+  ## checkpoints, say), and bayesian_iter = 0 is not the cause to name.
+  why <- if (fallback) {
+    "Pruned configurations skipped Bayesian optimization; {.fn evaluate} chose {.field best_config} from them for the same reason."
+  } else if (isTRUE(bayesian_iter == 0)) {
+    "None was pruned because there was no Bayesian stage to skip ({.code bayesian_iter = 0}), so they ranked as successes."
+  } else if (length(bayesian_iter) == 1 && isTRUE(bayesian_iter > 0)) {
+    "None was pruned, so they ranked as successes, although the configured {.code bayesian_iter = {bayesian_iter}} prunes a configuration below the threshold: these rows were scored with no Bayesian stage, as rows resumed from a {.code bayesian_iter = 0} run's checkpoints are."
+  } else {
+    "None was pruned, so they ranked as successes."
+  }
+
+  ## The config ids and numbers are the package's, but the text is built
+  ## outside cli, so it is escaped rather than trusted as a template.
+  cli::cli_warn(c(
+    "!" = header,
+    "i" = cli_escape(paste0(
+      "Their grid-search RPD fell below ", threshold_text,
+      ". Cross-validated RPD: ", cv_text, "."
+    )),
+    "i" = why,
+    "i" = "Check their metrics before relying on the fit."
+  ), class = c(if (fallback) "horizons_pruned_fallback_warning",
+               "horizons_below_threshold_warning"))
+
+  invisible(NULL)
 
 }
 
