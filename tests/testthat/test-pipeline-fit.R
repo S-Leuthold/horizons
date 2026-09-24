@@ -2006,17 +2006,53 @@ describe("fit() - evaluate()'s response trim (#77)", {
 
   })
 
-  it("fits and scores end to end on the trimmed split", {
+  f <- suppressWarnings(
+    fit(ev, compute_uq = FALSE, compute_ad = FALSE, verbose = FALSE, seed = 307L)
+  )
 
-    f <- suppressWarnings(
-      fit(ev, compute_uq = FALSE, compute_ad = FALSE, verbose = FALSE, seed = 307L)
-    )
+  it("fits and scores end to end on the trimmed split", {
 
     expect_s3_class(f, "horizons_fit")
     expect_false(any(trimmed %in% f$models$row_index$sample_id))
     expect_identical(rsample::testing(f$models$split)$sample_id,
                      rsample::testing(ev$evaluation$split)$sample_id)
     expect_true(is.finite(f$models$results$rmse))
+
+  })
+
+  it("sets the response bound over the fit rows and the trimmed rows", {
+
+    ## The trimmed rows are training-partition rows: a bound below a value
+    ## observed there would clamp the extremes the trim set aside.
+    analysis <- obj$data$analysis
+    fit_soc  <- analysis$SOC[match(f$models$row_index$sample_id, analysis$sample_id)]
+    trim_soc <- analysis$SOC[match(trimmed, analysis$sample_id)]
+
+    expect_gt(max(trim_soc), max(fit_soc))
+    expect_equal(f$models$response_bound,
+                 max(c(fit_soc, trim_soc)) * RESPONSE_BOUND_MARGIN)
+
+  })
+
+  it("runs the degradation check within the fences", {
+
+    ## The CV ran inside the fences and the test rows are untrimmed, so the
+    ## check compares within them (check_degradation() has the cases). This
+    ## fixture's model is barely better than the mean, so whether it is
+    ## flagged says little; that a flag names the fences is the point.
+    res <- f$models$results
+
+    expect_true(isFALSE(res$degraded) ||
+                  grepl("within the training fences", res$degraded_reason, fixed = TRUE))
+
+  })
+
+  it("says in summary() that the split's training part was trimmed", {
+
+    out <- utils::capture.output(summary(f))
+
+    expect_true(any(grepl(paste0("Split: .* test \\(", length(trimmed),
+                                 " training rows trimmed\\)"), out)))
 
   })
 
@@ -2034,6 +2070,144 @@ describe("fit() - evaluate()'s response trim (#77)", {
 
     expect_true(any(vapply(warm_legacy$warnings, inherits, logical(1),
                            "horizons_response_trim_warning")))
+
+  })
+
+})
+
+
+## =========================================================================
+## The conformal calibration pool is the untrimmed training part (#77)
+## =========================================================================
+## Split conformal needs calibration rows exchangeable with the rows it will
+## be asked about, extremes included. A pool trimmed of them undercovered,
+## silently. The pool is the untrimmed training part (the trimmed rows are
+## training rows, never test rows); the trimmed rows are dropped from the fit
+## rows only.
+
+describe("fit() - calibration after a response trim (#77)", {
+
+  ## n = 250, so the calibration set clears N_CALIB_MIN, with twenty extreme
+  ## labels, so some trimmed rows land in it at this seed
+  obj <- make_eval_object(n = 250, n_configs = 1)
+  extreme <- c(1:10, 101:110)
+  obj$data$analysis$SOC[extreme] <- c(seq(20, 38, by = 2), seq(-20, -38, by = -2))
+
+  utils::capture.output(
+    v <- suppressWarnings(validate(obj, remove_outliers = "response"))
+  )
+
+  seen <- NULL
+
+  testthat::with_mocked_bindings(
+    tryCatch(
+      suppressWarnings(fit(v, compute_uq = TRUE, compute_ad = TRUE,
+                           verbose = FALSE, seed = 307L)),
+      horizons_all_members_failed = function(e) NULL
+    ),
+    fit_single_config = function(...) {
+      args <- list(...)
+      seen <<- list(split = args$split_F, train = args$train_data,
+                    calib = args$calib_data, fences = args$response_fences)
+      list(config_id = args$config_row$config_id, status = "failed",
+           error_message = "mocked", runtime_secs = 0)
+    },
+    .package = "horizons"
+  )
+
+  record  <- suppressWarnings(cold_start_evaluation(v, NULL, 307L))$evaluation
+  trimmed <- record$response_trim$trimmed_ids
+
+  train_ids <- seen$train$sample_id
+  calib_ids <- seen$calib$sample_id
+  test_ids  <- rsample::testing(seen$split)$sample_id
+
+  it("draws calibration rows from the trimmed rows too, and never fits on one", {
+
+    expect_gt(length(trimmed), 0)
+    expect_gt(sum(trimmed %in% calib_ids), 0)
+    expect_false(any(trimmed %in% train_ids))
+
+  })
+
+  it("keeps calibration, fit and test rows apart, and takes nothing from the test part", {
+
+    expect_length(intersect(calib_ids, train_ids), 0L)
+    expect_length(intersect(calib_ids, test_ids), 0L)
+    expect_length(intersect(train_ids, test_ids), 0L)
+
+    ## The pool is the untrimmed training partition: the split's training
+    ## part plus the trimmed rows, every one of them either calibrating or
+    ## fitting, trimmed rows only calibrating
+    pool <- c(rsample::training(seen$split)$sample_id, trimmed)
+
+    expect_setequal(c(calib_ids, train_ids, trimmed[!trimmed %in% calib_ids]), pool)
+
+  })
+
+  it("passes the trim's fences to the degradation check", {
+
+    expect_equal(seen$fences,
+                 c(lower = record$response_trim$lower, upper = record$response_trim$upper))
+
+  })
+
+})
+
+
+## =========================================================================
+## check_degradation(): within the fences after a trim (#77)
+## =========================================================================
+
+describe("check_degradation()", {
+
+  cv <- tibble::tibble(.metric = "rpd", mean = 2, std_err = 0.1)
+
+  ## Twenty test rows inside [0, 10] predicted well, and two extremes far
+  ## outside predicted badly, which sink the RPD over every row
+  set.seed(1)
+  truth <- c(seq(1, 9, length.out = 20), 60, -50)
+  preds <- c(truth[1:20] + stats::rnorm(20, sd = 0.2), 5, 5)
+
+  it("flags the untrimmed test RPD when there are no fences", {
+
+    out <- check_degradation(cv, rpd_vec(truth, preds), truth, preds)
+
+    expect_true(out$degraded)
+    expect_no_match(out$reason, "fences")
+
+  })
+
+  it("compares within the fences when the rows were trimmed", {
+
+    out <- check_degradation(cv, rpd_vec(truth, preds), truth, preds,
+                             response_fences = c(lower = 0, upper = 10))
+
+    expect_false(out$degraded)
+    expect_true(is.na(out$reason))
+
+  })
+
+  it("says the comparison was within the fences when it flags", {
+
+    bad <- preds
+    bad[1:20] <- 5
+
+    out <- check_degradation(cv, rpd_vec(truth, bad), truth, bad,
+                             response_fences = c(lower = 0, upper = 10))
+
+    expect_true(out$degraded)
+    expect_match(out$reason, "within the training fences [0, 10] (20 of 22 test rows)",
+                 fixed = TRUE)
+
+  })
+
+  it("flags nothing with fewer than two test rows inside the fences", {
+
+    out <- check_degradation(cv, rpd_vec(truth, preds), truth, preds,
+                             response_fences = c(lower = 100, upper = 200))
+
+    expect_false(out$degraded)
 
   })
 

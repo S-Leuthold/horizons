@@ -31,6 +31,13 @@
 #'   `config$recipe`, the value `evaluate()` ran with. Default 9.
 #' @param pca_threshold Numeric. Variance share the `pca` feature selection
 #'   keeps, passed to [build_recipe()]. Read the same way. Default 0.995.
+#' @param response_fences Numeric `c(lower = , upper = )` or `NULL`. The
+#'   training-partition fences `evaluate()` trimmed response outliers by
+#'   (#77), passed by `fit()` when that trim removed rows. The CV folds then
+#'   run on rows inside the fences while the test rows are untrimmed, so the
+#'   degradation check takes its test RPD over the test rows inside the
+#'   fences; the reported test metrics stay untrimmed. Default `NULL` (no
+#'   trim: the check reads the test RPD).
 #'
 #' @return List with fields: config_id, status, degraded, degraded_reason,
 #'   fitted_workflow, best_params, warm_start, start_grid_size,
@@ -56,7 +63,8 @@ fit_single_config <- function(config_row,
                               allow_par           = FALSE,
                               seed                = 42L,
                               sg_window           = DEFAULT_SG_WINDOW,
-                              pca_threshold       = DEFAULT_PCA_THRESHOLD) {
+                              pca_threshold       = DEFAULT_PCA_THRESHOLD,
+                              response_fences     = NULL) {
 
   start_time <- Sys.time()
 
@@ -466,28 +474,17 @@ fit_single_config <- function(config_row,
   ## -----------------------------------------------------------------------
   ## Compare test_F RPD to cv_mean_rpd - 2 * cv_se_rpd.
   ## If test is below that threshold, the model has degraded.
+  ##
+  ## After a response trim (#77) the folds ran on rows inside the training
+  ## fences while the test rows are untrimmed, so the two RPDs would describe
+  ## two populations and the flag would fire whenever a trim removed an
+  ## extreme. The diagnostic RPD is then taken over the test rows inside the
+  ## same fences; test_metrics, which is what is reported, stays untrimmed.
 
-  degraded        <- FALSE
-  degraded_reason <- NA_character_
-
-  rpd_cv <- cv_metrics |> dplyr::filter(.metric == "rpd")
-
-  if (nrow(rpd_cv) == 1 && is.finite(rpd_cv$mean) &&
-      is.finite(rpd_cv$std_err) && is.finite(test_metrics$rpd)) {
-
-    rpd_threshold <- rpd_cv$mean - 2 * rpd_cv$std_err
-
-    if (test_metrics$rpd < rpd_threshold) {
-
-      degraded <- TRUE
-      degraded_reason <- sprintf(
-        "test_rpd (%.3f) below cv_mean - 2*cv_se (%.3f - 2*%.3f = %.3f)",
-        test_metrics$rpd, rpd_cv$mean, rpd_cv$std_err, rpd_threshold
-      )
-
-    }
-
-  }
+  degradation     <- check_degradation(cv_metrics, test_metrics$rpd, test_truth,
+                                       test_preds, response_fences)
+  degraded        <- degradation$degraded
+  degraded_reason <- degradation$reason
 
   ## -----------------------------------------------------------------------
   ## Step 13: UQ (must run BEFORE butchering — needs extract_mold())
@@ -597,6 +594,83 @@ fit_single_config <- function(config_row,
     warnings         = if (length(collected_warnings) > 0) collected_warnings else NULL,
     error_message    = NA_character_,
     runtime_secs     = runtime
+  )
+
+}
+
+
+## ---------------------------------------------------------------------------
+## check_degradation(): test RPD against the CV band
+## ---------------------------------------------------------------------------
+
+#' Flag a fitted configuration whose test RPD falls below its CV band
+#'
+#' @description
+#' Degraded means the test RPD is below the cross-validated mean minus two
+#' standard errors. After a response trim (#77) the folds ran on rows inside
+#' the training fences while the test rows are untrimmed, so the two would
+#' describe two populations and the flag would fire whenever the trim removed
+#' an extreme. With `response_fences`, the RPD compared is therefore the one
+#' over the test rows inside the fences, and the reason says so; the test
+#' metrics `fit()` reports are untouched. Fewer than two test rows inside the
+#' fences leave nothing to compare, and nothing is flagged.
+#'
+#' @param cv_metrics Tibble with `.metric`, `mean` and `std_err`.
+#' @param test_rpd Numeric(1). The RPD over every test row.
+#' @param test_truth,test_preds Numeric. Test outcomes and back-transformed
+#'   predictions, original scale.
+#' @param response_fences Numeric `c(lower = , upper = )`, or `NULL` when no
+#'   rows were trimmed.
+#' @return List with `degraded` (logical) and `reason` (character, `NA` when
+#'   not degraded).
+#' @keywords internal
+#' @noRd
+check_degradation <- function(cv_metrics, test_rpd, test_truth, test_preds,
+                              response_fences = NULL) {
+
+  scope <- ""
+
+  if (!is.null(response_fences)) {
+
+    inside <- !is.na(test_truth) &
+      test_truth >= response_fences[["lower"]] &
+      test_truth <= response_fences[["upper"]]
+
+    test_rpd <- if (sum(inside) >= 2) {
+      rpd_vec(test_truth[inside], test_preds[inside])
+    } else {
+      NA_real_
+    }
+
+    scope <- sprintf(" within the training fences [%.4g, %.4g] (%d of %d test rows)",
+                     response_fences[["lower"]], response_fences[["upper"]],
+                     sum(inside), length(test_truth))
+
+  }
+
+  rpd_cv <- cv_metrics[cv_metrics$.metric == "rpd", , drop = FALSE]
+
+  if (nrow(rpd_cv) != 1 || !is.finite(rpd_cv$mean) ||
+      !is.finite(rpd_cv$std_err) || !is.finite(test_rpd)) {
+
+    return(list(degraded = FALSE, reason = NA_character_))
+
+  }
+
+  rpd_threshold <- rpd_cv$mean - 2 * rpd_cv$std_err
+
+  if (test_rpd >= rpd_threshold) {
+
+    return(list(degraded = FALSE, reason = NA_character_))
+
+  }
+
+  list(
+    degraded = TRUE,
+    reason   = sprintf(
+      "test_rpd%s (%.3f) below cv_mean - 2*cv_se (%.3f - 2*%.3f = %.3f)",
+      scope, test_rpd, rpd_cv$mean, rpd_cv$std_err, rpd_threshold
+    )
   )
 
 }

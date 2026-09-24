@@ -64,7 +64,8 @@ A \code{horizons_fit} object (inherits from \code{horizons_eval},
 \code{response_bound} (max training outcome times \code{RESPONSE_BOUND_MARGIN},
 where the training rows are the ones the final models are fit on:
 \code{evaluate()}'s training part, less the calibration set when UQ or AD is
-on),
+on, plus the training rows a response trim left out, so the bound never
+sits below a value observed in the training partition),
 the deploy-time winsorization guardrail \code{predict()} applies to
 back-transformed point predictions, and \code{selection_present} (whether the
 training object carried a \verb{$selection} from \code{select_training()}, which
@@ -101,7 +102,16 @@ on the same untrimmed test rows. Columns added since \code{evaluate()}, such
 as a sibling response from \code{add_response()}, are carried into the fit.
 The count of NA-outcome rows, and the response trim, are reported in the
 console tree when \code{verbose = TRUE}. With UQ or AD on, the calibration set
-is carved out of Split F's training part, after the trim.
+is carved out of Split F's training part. After a response trim it is
+carved out of the untrimmed training part (the trimmed rows are training
+rows too, never test rows), and the trimmed rows are then dropped from the
+fit rows only: split conformal needs calibration rows exchangeable with
+the rows it will be asked about, extremes included, and a trimmed pool
+undercovered them. AD shares that calibration set (D7). Calibration rows
+never train, and test rows never calibrate. The degradation check then
+compares the CV RPD with the test RPD over the test rows inside the
+trim's fences, since the CV ran inside them; the reported test metrics
+stay untrimmed.
 
 The members are the top \code{n_best} of the configurations \code{evaluate()} chose
 \code{best_config} from, ranked by the same rule: the ones that succeeded or,
