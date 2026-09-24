@@ -338,6 +338,13 @@ describe("evaluate_single_config() - pruning", {
 
   })
 
+  it("records the gate's reading and the threshold it was taken against", {
+
+    expect_identical(result$below_prune_threshold, TRUE)
+    expect_identical(result$prune_threshold, 9999)
+
+  })
+
 })
 
 ## =========================================================================
@@ -404,13 +411,15 @@ describe("evaluate_single_config() - tuning on the original scale", {
 
   config <- make_eval_config(model = "plsr", transformation = "log")
 
+  ## bayesian_iter = 1: the prune gate only runs when there is a Bayesian
+  ## stage to skip (#38), and this test is about the gate.
   result <- evaluate_single_config(
     config_row      = config,
     split           = setup$split,
     cv_folds        = setup$folds,
     role_map        = setup$role_map,
     grid_size       = 3,
-    bayesian_iter   = 0,
+    bayesian_iter   = 1,
     prune           = TRUE,
     prune_threshold = 1.0,
     seed            = 42L
@@ -453,6 +462,77 @@ describe("evaluate_single_config() - bayesian_iter = 0", {
 
     expect_equal(result$status, "success")
     expect_false(is.na(result$rmse))
+
+  })
+
+})
+
+
+## =========================================================================
+## The prune gate is a no-op without a Bayesian stage (#38)
+## =========================================================================
+## The gate decides whether to skip Bayesian optimization. With
+## bayesian_iter = 0 there is none to skip, yet a config below the threshold
+## was labelled "pruned", and evaluate() and fit() treat that label as a
+## fallback rank.
+
+describe("evaluate_single_config() - prune gate at bayesian_iter = 0 (#38)", {
+
+  setup  <- make_eval_setup()
+  config <- make_eval_config()
+
+  ## A threshold no model clears: with a Bayesian stage this config is pruned
+  ## (see the pruning block above).
+  result <- suppressWarnings(evaluate_single_config(
+    config_row      = config,
+    split           = setup$split,
+    cv_folds        = setup$folds,
+    role_map        = setup$role_map,
+    grid_size       = 2,
+    bayesian_iter   = 0,
+    prune           = TRUE,
+    prune_threshold = 9999,
+    seed            = 42L
+  ))
+
+  it("labels the config a success, since no Bayesian stage was skipped", {
+
+    expect_equal(result$status, "success")
+
+  })
+
+  it("still records that the config fell below the threshold", {
+
+    ## The quality signal is kept apart from the status label, so fit() can
+    ## warn at bayesian_iter = 0, where nothing is pruned.
+    expect_identical(result$below_prune_threshold, TRUE)
+    expect_identical(result$prune_threshold, 9999)
+
+  })
+
+  it("records no reading when prune = FALSE", {
+
+    unpruned <- suppressWarnings(evaluate_single_config(
+      config_row    = config,
+      split         = setup$split,
+      cv_folds      = setup$folds,
+      role_map      = setup$role_map,
+      grid_size     = 2,
+      bayesian_iter = 0,
+      prune         = FALSE,
+      seed          = 42L
+    ))
+
+    expect_identical(unpruned$below_prune_threshold, NA)
+    expect_identical(unpruned$prune_threshold, NA_real_)
+
+  })
+
+  it("defaults prune_threshold to 1.0, the value evaluate() passes", {
+
+    expect_identical(formals(evaluate_single_config)$prune_threshold, 1.0)
+    expect_identical(formals(evaluate_single_config)$prune_threshold,
+                     formals(evaluate)$prune_threshold)
 
   })
 

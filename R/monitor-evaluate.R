@@ -156,10 +156,12 @@ monitor_evaluate <- function(output_dir, watch = FALSE, interval = 10) {
 
   pct <- round(100 * n_complete / manifest$n_total, 1)
 
-  ## Find best so far, by the SAME rule evaluate() will use: successes only
-  ## (pruned rows only if there is no success at all), ranked on cv_<metric>
-  ## through rank_configs_by_cv() with its config_id tie-break, falling back
-  ## to the test-set column for checkpoint rows written before cv_* existed.
+  ## Find best so far, by the SAME rule evaluate() will use: the relabel of
+  ## inert "pruned" rows at bayesian_iter = 0 (from the manifest's settings),
+  ## then ranking_candidates() (successes, or pruned rows with a cv value when
+  ## none succeeded), ranked on cv_<metric> through rank_configs_by_cv() with
+  ## its config_id tie-break, falling back to the test-set column for
+  ## checkpoint rows written before cv_* existed.
   best_config   <- NA_character_
   best_metric   <- NA_real_
   metric_name   <- manifest$metric
@@ -169,14 +171,9 @@ monitor_evaluate <- function(output_dir, watch = FALSE, interval = 10) {
 
   if (length(rows) > 0) {
 
-    all_rows   <- dplyr::bind_rows(rows)
-    candidates <- all_rows[all_rows$status == "success", , drop = FALSE]
-
-    if (nrow(candidates) == 0) {
-
-      candidates <- all_rows[all_rows$status == "pruned", , drop = FALSE]
-
-    }
+    all_rows   <- relabel_inert_pruned(dplyr::bind_rows(rows),
+                                       manifest$settings$bayesian_iter)
+    candidates <- ranking_candidates(all_rows, metric_name)$rows
 
     cv_col <- paste0("cv_", metric_name)
 

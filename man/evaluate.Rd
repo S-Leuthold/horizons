@@ -29,7 +29,12 @@ are reported but never used for selection, so they remain honest
 held-out estimates. Default \code{"rpd"}.}
 
 \item{prune}{Logical. If TRUE, skip Bayesian optimization for configs
-whose grid-search RPD falls below \code{prune_threshold}. Default TRUE.}
+whose grid-search RPD falls below \code{prune_threshold}. When \code{configure()}
+set \code{bayesian_iter = 0} there is nothing to skip, so no config is
+pruned. Either way, whether each config fell below the threshold is
+recorded in \code{evaluation$results$below_prune_threshold} (with the
+threshold in \code{prune_threshold}), and \code{fit()} warns when every member it
+fits did. Default TRUE.}
 
 \item{prune_threshold}{Numeric. RPD threshold for pruning. Configs with
 grid-search RPD below this value skip Bayesian optimization but still
@@ -133,5 +138,34 @@ one in the calling process (via \code{RhpcBLASctl} when installed) and restored
 on exit. Configs are dispatched to a top-level worker that loads the
 \emph{installed} package, so parallel dispatch refuses to run under
 \code{devtools::load_all()}.
+}
+
+\section{When every configuration fails}{
+
+\code{best_config} is chosen from the configs that succeeded or, when none did,
+from the pruned configs that carry a cross-validated value of \code{metric}.
+When there are neither, or none of them has a value of \code{metric} to rank
+on, \code{evaluate()} aborts with class \code{horizons_all_configs_failed}. The
+message lists the distinct error messages (the first three, each with the
+configs that raised it) and names any configs that were loaded from
+checkpoints in \code{output_dir} rather than run, since calling \code{evaluate()}
+again resumes them instead of re-running them. The per-config results,
+\code{error_message} included, travel on the condition as \code{results}, because
+\code{evaluate()} aborts before it assigns \code{x$evaluation}; after an uncaught
+abort, \code{rlang::last_error()$results} recovers them without re-running. A
+loop over subsets can catch the class, tolerate one subset whose every
+config fails, and keep its errors:
+
+\if{html}{\out{<div class="sourceCode">}}\preformatted{runs <- lapply(subsets, function(hd) \{
+  tryCatch(
+    evaluate(hd, verbose = FALSE),
+    horizons_all_configs_failed = function(e) e$results
+  )
+\})
+
+# A horizons_eval for each subset that ranked, and the failed configs'
+# results table for each subset that did not.
+failed <- runs[!vapply(runs, inherits, logical(1), "horizons_eval")]
+}\if{html}{\out{</div>}}
 }
 

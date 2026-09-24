@@ -730,6 +730,38 @@ describe("monitor_evaluate() - applies evaluate()'s checkpoint gates", {
 
   })
 
+  it("relabels resumed 'pruned' rows at bayesian_iter = 0, naming evaluate()'s best", {
+
+    skip_on_cran()
+    obj    <- make_eval_object(n = 60, n_configs = 2)   # bayesian_iter = 0
+    tmpdir <- withr::local_tempdir()
+
+    first <- suppressWarnings(
+      evaluate(obj, output_dir = tmpdir, prune = FALSE, verbose = FALSE,
+               seed = 42L)
+    )
+
+    ## The winner's row gets the label code before #38 wrote at
+    ## bayesian_iter = 0. Taken at face value it would lose to the other
+    ## config's success; relabelled, it is ranked with it, as evaluate() does.
+    winner <- first$evaluation$best_config
+    f      <- file.path(tmpdir, "checkpoints", paste0(winner, ".rds"))
+    row    <- readRDS(f)
+    row$status <- "pruned"
+    saveRDS(row, f)
+
+    invisible(capture.output(stats <- monitor_evaluate(tmpdir)))
+
+    resumed <- suppressWarnings(
+      evaluate(obj, output_dir = tmpdir, prune = FALSE, verbose = FALSE,
+               seed = 42L)
+    )
+
+    expect_equal(resumed$evaluation$best_config, winner)
+    expect_equal(stats$best_config, resumed$evaluation$best_config)
+
+  })
+
   it("re-reads the manifest on every poll in watch mode", {
 
     skip_on_cran()

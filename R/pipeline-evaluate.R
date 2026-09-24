@@ -16,7 +16,12 @@
 #'   are reported but never used for selection, so they remain honest
 #'   held-out estimates. Default `"rpd"`.
 #' @param prune Logical. If TRUE, skip Bayesian optimization for configs
-#'   whose grid-search RPD falls below `prune_threshold`. Default TRUE.
+#'   whose grid-search RPD falls below `prune_threshold`. When `configure()`
+#'   set `bayesian_iter = 0` there is nothing to skip, so no config is
+#'   pruned. Either way, whether each config fell below the threshold is
+#'   recorded in `evaluation$results$below_prune_threshold` (with the
+#'   threshold in `prune_threshold`), and `fit()` warns when every member it
+#'   fits did. Default TRUE.
 #' @param prune_threshold Numeric. RPD threshold for pruning. Configs with
 #'   grid-search RPD below this value skip Bayesian optimization but still
 #'   receive test-set metrics from grid-search best. Default 1.0 (the
@@ -95,6 +100,34 @@
 #' on exit. Configs are dispatched to a top-level worker that loads the
 #' *installed* package, so parallel dispatch refuses to run under
 #' `devtools::load_all()`.
+#'
+#' @section When every configuration fails:
+#' `best_config` is chosen from the configs that succeeded or, when none did,
+#' from the pruned configs that carry a cross-validated value of `metric`.
+#' When there are neither, or none of them has a value of `metric` to rank
+#' on, `evaluate()` aborts with class `horizons_all_configs_failed`. The
+#' message lists the distinct error messages (the first three, each with the
+#' configs that raised it) and names any configs that were loaded from
+#' checkpoints in `output_dir` rather than run, since calling `evaluate()`
+#' again resumes them instead of re-running them. The per-config results,
+#' `error_message` included, travel on the condition as `results`, because
+#' `evaluate()` aborts before it assigns `x$evaluation`; after an uncaught
+#' abort, `rlang::last_error()$results` recovers them without re-running. A
+#' loop over subsets can catch the class, tolerate one subset whose every
+#' config fails, and keep its errors:
+#'
+#' ```
+#' runs <- lapply(subsets, function(hd) {
+#'   tryCatch(
+#'     evaluate(hd, verbose = FALSE),
+#'     horizons_all_configs_failed = function(e) e$results
+#'   )
+#' })
+#'
+#' # A horizons_eval for each subset that ranked, and the failed configs'
+#' # results table for each subset that did not.
+#' failed <- runs[!vapply(runs, inherits, logical(1), "horizons_eval")]
+#' ```
 #'
 #' @return A `horizons_eval` object (inherits from `horizons_data`) with
 #'   `evaluation$results`, `evaluation$best_config`, `evaluation$split`, and
@@ -313,6 +346,7 @@ evaluate <- function(x,
 
   checkpoint_dir     <- NULL
   checkpoint_results <- list()
+  legacy_ids         <- character(0)
 
   if (!is.null(output_dir)) {
 
@@ -322,13 +356,16 @@ evaluate <- function(x,
 
     if (!dir.exists(checkpoint_dir)) dir.create(checkpoint_dir)
 
-    checkpoint_results <- load_eval_checkpoints(
+    loaded <- load_eval_checkpoints(
       output_dir = output_dir,
       config_ids = configs$config_id,
       data_fp    = data_fp,
       settings   = settings,
       verbose    = verbose
     )
+
+    checkpoint_results <- loaded$rows
+    legacy_ids         <- loaded$legacy_ids
 
     n_loaded <- length(checkpoint_results)
 
@@ -687,6 +724,15 @@ evaluate <- function(x,
 
   }
 
+  ## Likewise the prune gate's reading, which rows written before it was
+  ## recorded (#38) do not carry.
+  if (!"below_prune_threshold" %in% names(all_results)) all_results$below_prune_threshold <- NA
+  if (!"prune_threshold" %in% names(all_results)) all_results$prune_threshold <- NA_real_
+
+  ## Once checkpointed and new rows are combined, rather than in the loader;
+  ## monitor_evaluate() applies the same helper to the same rows.
+  all_results <- relabel_inert_pruned(all_results, tuning$bayesian_iter)
+
   ## -----------------------------------------------------------------------
   ## Step 10: Determine best config
   ## -----------------------------------------------------------------------
@@ -698,33 +744,26 @@ evaluate <- function(x,
 
   rank_column <- paste0("cv_", metric)
 
-  successes <- all_results[all_results$status == "success", ]
+  ## The successes, or the pruned configs when none succeeded: the rule
+  ## fit() applies to the same table.
+  candidates <- ranking_candidates(all_results, metric)
 
-  if (nrow(successes) == 0) {
+  ## Nothing to rank: no candidates, or candidates none of which has a
+  ## cv_<metric> value, which rank_configs_by_cv() would refuse unclassed and
+  ## without the results. Rows resumed from checkpoints are named, since
+  ## re-running evaluate() does not re-run them.
+  if (nrow(candidates$rows) == 0 || all(is.na(candidates$rows[[rank_column]]))) {
 
-    ## Check if there are pruned configs with metrics for the ranking metric
-    pruned <- all_results[all_results$status == "pruned" &
-                            !is.na(all_results[[rank_column]]), ]
-
-    if (nrow(pruned) == 0) {
-
-      n_failed <- sum(all_results$status == "failed")
-      n_pruned <- sum(all_results$status == "pruned")
-
-      rlang::abort(paste0(
-        "All configurations failed or were pruned. ",
-        "Failed: ", n_failed, ", Pruned: ", n_pruned, ". ",
-        "Check evaluation$results for error messages."
-      ))
-
-    }
-
-    ## Use pruned configs as fallback
-    successes <- pruned
+    abort_all_configs_failed(
+      all_results, metric,
+      checkpoint_ids = intersect(all_results$config_id, completed_ids),
+      legacy_ids     = intersect(all_results$config_id, legacy_ids),
+      output_dir     = output_dir
+    )
 
   }
 
-  ranked <- rank_configs_by_cv(successes, metric)
+  ranked <- rank_configs_by_cv(candidates$rows, metric)
 
   best_config_id <- ranked$config_id[1]
 
@@ -1084,7 +1123,9 @@ gate_checkpoint_rows <- function(candidates, data_fp, settings, config_ids = NUL
 #' @param verbose Print drops in the tree.
 #' @param call The frame to report a refusal from; the default is the
 #'   caller's, so the error reads as `evaluate()`'s.
-#' @return Named list of one-row results, by config id.
+#' @return List with `rows` (one-row results named by config id) and
+#'   `legacy_ids` (the ids among them read from a legacy
+#'   `eval_checkpoint.rds`, which still holds them after they are copied).
 #' @keywords internal
 #' @noRd
 load_eval_checkpoints <- function(output_dir, config_ids, data_fp, settings,
@@ -1186,7 +1227,10 @@ load_eval_checkpoints <- function(output_dir, config_ids, data_fp, settings,
 
   }
 
-  lapply(gated$kept, `[[`, "row")
+  list(
+    rows       = lapply(gated$kept, `[[`, "row"),
+    legacy_ids = names(from_legacy) %||% character(0)
+  )
 
 }
 
@@ -1745,6 +1789,184 @@ describe_data_diff <- function(stored, current, differ) {
 }
 
 ## ---------------------------------------------------------------------------
+## abort_all_configs_failed — nothing to rank, with the reasons attached
+## ---------------------------------------------------------------------------
+
+#' Abort because no configuration can be ranked
+#'
+#' @description
+#' Raised by `evaluate()` when no configuration can be ranked: every one
+#' failed, or was pruned without a cross-validated value of the ranking
+#' metric (#41), or succeeded without one (rows checkpointed before the
+#' `cv_*` columns existed). `evaluate()` aborts before it assigns
+#' `x$evaluation`, so the results table travels on the condition as
+#' `results`, and the message lists the distinct error messages (the first
+#' three, each with the configs that raised it, and a count of the rest). A
+#' caller looping over subsets can catch the class and keep the per-config
+#' errors; see `evaluate()`'s "When every configuration fails" section.
+#'
+#' Rows resumed from checkpoints are not re-run by calling `evaluate()`
+#' again, so the message names them and the files to delete. They are
+#' identified by `evaluate()` from the ids its loader returned, without
+#' reading the checkpoint files again. Each lives in
+#' `checkpoints/<config_id>.rds`; a row read from a legacy
+#' `eval_checkpoint.rds` was copied there, but the legacy file still holds
+#' it and would be read again once the copy is gone, so that file is named
+#' too, and only then.
+#'
+#' @param results The aggregated result rows (`evaluation$results` shape).
+#' @param metric Bare ranking metric name.
+#' @param checkpoint_ids Character. Config ids among `results` that were
+#'   loaded from checkpoints rather than run. Default none.
+#' @param legacy_ids Character. The ids among `checkpoint_ids` read from a
+#'   legacy `eval_checkpoint.rds`. Default none.
+#' @param output_dir The checkpoint directory, or `NULL`.
+#' @param call The call the condition is attributed to. Default: the caller,
+#'   `evaluate()`.
+#' @return Never returns; aborts with class `horizons_all_configs_failed`.
+#' @keywords internal
+#' @noRd
+abort_all_configs_failed <- function(results, metric,
+                                     checkpoint_ids = character(0),
+                                     legacy_ids     = character(0),
+                                     output_dir     = NULL,
+                                     call           = rlang::caller_env()) {
+
+  rank_column <- paste0("cv_", metric)
+  n_total     <- nrow(results)
+  n_success   <- sum(results$status == "success")
+  n_failed    <- sum(results$status == "failed")
+  n_pruned    <- sum(results$status == "pruned")
+
+  header <- if (n_success > 0) {
+    "No configuration can be ranked: {n_success} succeeded, but none has a {.field {rank_column}} value."
+  } else {
+    "All configurations failed or were pruned without a {.field {rank_column}} value, so none can be ranked."
+  }
+
+  ## Resumed rows are not re-run by calling evaluate() again, so a failure
+  ## loaded from a checkpoint persists until its files are deleted. Built as
+  ## plain text (the directory is the caller's), escaped for cli.
+  checkpoint_note <- NULL
+
+  if (length(checkpoint_ids) > 0 && !is.null(output_dir)) {
+
+    n_ckpt    <- length(checkpoint_ids)
+    ids_shown <- paste(utils::head(checkpoint_ids, 3), collapse = ", ")
+
+    if (n_ckpt > 3) ids_shown <- paste0(ids_shown, " and ", n_ckpt - 3, " more")
+
+    files <- if (n_ckpt == 1) {
+      paste0("checkpoints/", checkpoint_ids, ".rds")
+    } else {
+      "their files, checkpoints/<config_id>.rds"
+    }
+
+    n_legacy    <- length(legacy_ids)
+    legacy_note <- if (n_legacy == 0) {
+      ""
+    } else if (n_legacy == n_ckpt) {
+      paste0(", and eval_checkpoint.rds, which ",
+             if (n_ckpt == 1) "it was" else "they were", " read from")
+    } else {
+      paste0(", and eval_checkpoint.rds, which ", n_legacy, " of them ",
+             if (n_legacy == 1) "was" else "were", " read from")
+    }
+
+    checkpoint_note <- c("i" = cli_escape(paste0(
+      n_ckpt, if (n_ckpt == 1) " configuration was" else " configurations were",
+      " loaded from checkpoints in ", output_dir, " rather than run (",
+      ids_shown, "). To re-run ", if (n_ckpt == 1) "it" else "them",
+      ", delete ", files, legacy_note, "."
+    )))
+
+  }
+
+  cli::cli_abort(c(
+    header,
+    "i" = "Of {n_total} configuration{?s}: {n_success} succeeded, {n_failed} failed, {n_pruned} pruned.",
+    distinct_config_errors(results),
+    checkpoint_note,
+    "i" = "The per-config results, error messages included, are on this condition as {.field results}. Recover them without re-running with {.code rlang::last_error()$results}, or catch the class: {.code tryCatch(evaluate(x), horizons_all_configs_failed = function(e) e$results)}."
+  ), class = "horizons_all_configs_failed", results = results, call = call)
+
+}
+
+## ---------------------------------------------------------------------------
+## relabel_inert_pruned \u2014 the one relabel evaluate() and the monitor share
+## ---------------------------------------------------------------------------
+
+#' Relabel "pruned" rows as successes when there was nothing to prune
+#'
+#' @description
+#' At `bayesian_iter = 0` the prune gate skips nothing, so a "pruned" row ran
+#' exactly what a success runs (#38). Rows checkpointed before that fix still
+#' carry the label, and a resumed run would rank them only as a fallback
+#' where a fresh run ranks them with the rest. `evaluate()` applies this once
+#' checkpointed and new rows are combined, rather than in the loader, and
+#' `monitor_evaluate()` applies it to the same rows with `bayesian_iter` from
+#' the manifest's settings, so the two name the same best config.
+#' `below_prune_threshold` keeps what the label said about quality.
+#'
+#' @param results Result rows.
+#' @param bayesian_iter The run's Bayesian iterations; `NULL` (a manifest
+#'   that does not record it) leaves the rows as they are.
+#' @return `results`, relabelled when `bayesian_iter` is 0.
+#' @keywords internal
+#' @noRd
+relabel_inert_pruned <- function(results, bayesian_iter) {
+
+  if (!isTRUE(bayesian_iter == 0)) return(results)
+
+  if (!"below_prune_threshold" %in% names(results)) results$below_prune_threshold <- NA
+
+  inert_pruned <- results$status %in% "pruned"
+
+  results$below_prune_threshold[inert_pruned] <- TRUE
+  results$status[inert_pruned]                <- "success"
+
+  results
+
+}
+
+## ---------------------------------------------------------------------------
+## ranking_candidates \u2014 the one candidate rule evaluate() and fit() share
+## ---------------------------------------------------------------------------
+
+#' The result rows eligible for ranking
+#'
+#' @description
+#' Returns the rows `evaluate()` picks `best_config` from and `fit()` picks
+#' its members from: the configurations that succeeded, or, when none did,
+#' the pruned configurations that carry a cross-validated value of the
+#' ranking metric. [rank_configs_by_cv()] then orders them. `fit()` used to
+#' keep successes only, so it refused an evaluation whose `best_config` was a
+#' pruned configuration (#38).
+#'
+#' @param results Tibble of evaluation result rows (`evaluation$results`
+#'   shape).
+#' @param metric Bare metric name, e.g. `"rpd"`.
+#' @return List with `rows` (the candidate rows, unranked; zero rows when
+#'   nothing qualifies) and `fallback` (`TRUE` when the rows are pruned
+#'   configurations because none succeeded).
+#' @keywords internal
+#' @noRd
+ranking_candidates <- function(results, metric) {
+
+  successes <- results[results$status %in% "success", , drop = FALSE]
+
+  if (nrow(successes) > 0) return(list(rows = successes, fallback = FALSE))
+
+  cv_values <- results[[paste0("cv_", metric)]]
+  has_cv    <- if (is.null(cv_values)) rep(FALSE, nrow(results)) else !is.na(cv_values)
+
+  pruned <- results[results$status %in% "pruned" & has_cv, , drop = FALSE]
+
+  list(rows = pruned, fallback = nrow(pruned) > 0)
+
+}
+
+## ---------------------------------------------------------------------------
 ## rank_configs_by_cv \u2014 the one ranking rule evaluate() and fit() share
 ## ---------------------------------------------------------------------------
 
@@ -1839,10 +2061,29 @@ rank_configs_by_cv <- function(results, metric) {
 #' @param outcome_col Character. Name of the outcome column.
 #' @return List with `data` (the rows whose outcome is not `NA`, in their
 #'   original order) and `n_dropped` (integer, the rows removed). Aborts with
-#'   class `horizons_input_error` when every outcome is `NA`.
+#'   class `horizons_input_error` when the outcome column is absent from
+#'   `analysis` or every outcome is `NA`.
 #' @keywords internal
 #' @noRd
 outcome_complete_rows <- function(analysis, outcome_col) {
+
+  ## An absent column reads as NULL, and is.na(NULL) is empty, so without
+  ## this check a missing outcome was reported as "All outcome values are NA".
+  absent <- setdiff(outcome_col, names(analysis))
+
+  if (length(outcome_col) == 0 || length(absent) > 0) {
+
+    cli::cli_abort(c(
+      "The analysis table has no outcome column to model.",
+      "x" = if (length(outcome_col) == 0) {
+        "The role map gives no column the {.val outcome} role."
+      } else {
+        "The role map names {.field {absent}} as the outcome, and {.field data$analysis} has no such column."
+      },
+      "i" = "Add the column to the analysis table, or correct the role map."
+    ), class = "horizons_input_error")
+
+  }
 
   na_mask <- is.na(analysis[[outcome_col]])
 
