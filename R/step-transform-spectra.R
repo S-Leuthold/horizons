@@ -156,42 +156,46 @@ bake.step_transform_spectra <- function(object, new_data, ...) {
 
   spectral_matrix <- as.matrix(new_data[, object$columns])
 
-  ## Failures are recorded, not swallowed. The fallback below is an all-NA row
-  ## built to `length(object$trained_columns)`, which means the length check
-  ## further down cannot detect it — so without this accounting a malformed
-  ## spectrum returns NA predictions at predict time, or injects NA rows into
-  ## the model matrix at train time, with no signal either way. See #52.
+  ## The whole matrix goes through prospectr in one call. Every supported
+  ## method is row-wise (SNV normalizes a spectrum by its own mean and SD; the
+  ## Savitzky-Golay filter convolves along the wavenumber axis within one
+  ## spectrum), so a matrix call gives the same numbers as the old
+  ## one-row-at-a-time loop without the per-row list and rbind copies that
+  ## dominated the prep transient at library scale (2026-09-16).
 
-  failed_rows <- integer(0)
-  failure_msg <- NULL
+  transformed_matrix <- tryCatch(
+    transform_spectra_matrix(spectral_matrix,
+                             preprocessing = object$preprocessing,
+                             window_size   = object$window_size),
+    error = function(e) {
+      rlang::abort(paste0(
+        "step_transform_spectra: preprocessing '", object$preprocessing,
+        "' failed on a ", nrow(spectral_matrix), " x ", ncol(spectral_matrix),
+        " spectral matrix (window_size = ", object$window_size, "): ",
+        conditionMessage(e)
+      ), parent = e)
+    }
+  )
 
-  transformed_list <- lapply(seq_len(nrow(spectral_matrix)), function(i) {
+  ## Verify the output width matches what prep() promised ---------------------
 
-    tryCatch(
-      process_spectra_row(
-        spectral_matrix[i, ],
-        preprocessing = object$preprocessing,
-        window_size   = object$window_size
-      ),
-      error = function(e) {
+  if (ncol(transformed_matrix) != length(object$trained_columns)) {
 
-        failed_rows <<- c(failed_rows, i)
-        if (is.null(failure_msg)) failure_msg <<- conditionMessage(e)
-        rep(NA_real_, length(object$trained_columns))
+    rlang::abort(paste0(
+      "Inconsistent row lengths in transformed spectra: got ",
+      ncol(transformed_matrix), " columns, expected ",
+      length(object$trained_columns), ". Check preprocessing logic."
+    ))
 
-      }
-    )
+  }
 
-  })
+  ## Failures are visible, not silent. A non-finite spectrum raises no error
+  ## in prospectr but comes back as an all-NA row of the expected width, which
+  ## the width check above cannot see — so without this accounting a malformed
+  ## sample returns NA predictions at predict time, or injects NA rows into the
+  ## model matrix at train time, with no signal either way. See #52.
 
-  ## A non-finite input produces no error but an all-NA output, so check the
-  ## results rather than trusting that a failure raised a condition.
-
-  na_rows <- which(vapply(transformed_list,
-                          function(x) all(is.na(x)),
-                          logical(1)))
-
-  bad_rows <- sort(unique(c(failed_rows, na_rows)))
+  bad_rows <- which(rowSums(!is.na(transformed_matrix)) == 0L)
 
   if (length(bad_rows) > 0) {
 
@@ -202,24 +206,12 @@ bake.step_transform_spectra <- function(object, new_data, ...) {
       "step_transform_spectra: ", length(bad_rows), " of ",
       nrow(spectral_matrix), " spectra produced no usable output and were ",
       "returned as NA (rows: ", shown, ").",
-      if (!is.null(failure_msg)) paste0(" First error: ", failure_msg) else
-        " No error was raised, so the input was likely non-finite.",
+      " No error was raised, so the input was likely non-finite.",
       " Downstream predictions for these rows are NA."
     ))
 
   }
 
-  ## Verify all rows produced same length -----------------------------------
-
-  lengths_vec <- vapply(transformed_list, length, integer(1))
-
-  if (length(unique(lengths_vec)) != 1) {
-
-    rlang::abort("Inconsistent row lengths in transformed spectra. Check preprocessing logic.")
-
-  }
-
-  transformed_matrix <- do.call(rbind, transformed_list)
   metadata <- new_data[, !names(new_data) %in% object$columns, drop = FALSE]
 
   ## Re-checked at bake as well as prep: `new_data` can carry a column the
@@ -285,7 +277,74 @@ print.step_transform_spectra <- function(x, width = max(20, options()$width - 30
 }
 
 ## ---------------------------------------------------------------------------
-## Row-level spectral processing
+## Matrix-level spectral processing
+## ---------------------------------------------------------------------------
+
+#' Transform a Spectral Matrix
+#'
+#' @description
+#' Applies one of the supported preprocessing methods to a whole spectral
+#' matrix (rows are spectra, columns are wavenumbers in monotonic order) in a
+#' single prospectr call. This is the implementation behind
+#' `bake.step_transform_spectra()`, and the unit a caller can use to apply the
+#' same preprocessing outside a recipe.
+#'
+#' Every method is row-wise, so the result for a given spectrum does not
+#' depend on which other rows are present. Output width is
+#' `ncol(X) - (window_size - 1)` for every method: `raw` and `snv` drop
+#' `(window_size - 1) / 2` columns from each edge explicitly, the
+#' Savitzky-Golay methods lose the same edge inside `prospectr::savitzkyGolay()`.
+#'
+#' @param X Numeric matrix (or something `as.matrix()` turns into one). One
+#'   spectrum per row.
+#' @param preprocessing Character. One of the methods documented in
+#'   [step_transform_spectra()].
+#' @param window_size Odd integer. Savitzky-Golay window size. Default 9.
+#'
+#' @return A numeric matrix with `nrow(X)` rows and
+#'   `ncol(X) - (window_size - 1)` columns, without dimnames. Rows whose input
+#'   is entirely non-finite come back entirely `NA`; no error is raised for
+#'   them, so callers that need to surface such rows must check.
+#' @keywords internal
+transform_spectra_matrix <- function(X, preprocessing, window_size = 9) {
+
+  X <- as.matrix(X)
+  if (!is.double(X)) storage.mode(X) <- "double"
+
+  half_window <- (window_size - 1) / 2
+  keep        <- seq.int(1 + half_window, ncol(X) - half_window)
+
+  ## prospectr's convolution has nothing to do on an empty matrix; return the
+  ## right shape rather than letting it error.
+  if (nrow(X) == 0L) {
+    return(matrix(numeric(0), nrow = 0L, ncol = length(keep)))
+  }
+
+  sg  <- function(M, m, p) prospectr::savitzkyGolay(M, m = m, p = p, w = window_size)
+  snv <- function(M) prospectr::standardNormalVariate(M)
+
+  out <- switch(as.character(preprocessing),
+
+    "raw"        = X[, keep, drop = FALSE],
+    "sg"         = sg(X, m = 0, p = 1),
+    "snv"        = snv(X)[, keep, drop = FALSE],
+    "deriv1"     = sg(X, m = 1, p = 1),
+    "deriv2"     = sg(X, m = 2, p = 3),
+    "snv_deriv1" = sg(snv(X), m = 1, p = 1),
+    "snv_deriv2" = sg(snv(X), m = 2, p = 3),
+
+    rlang::abort(paste0("Unknown preprocessing type: ", preprocessing))
+
+  )
+
+  out <- as.matrix(out)
+  dimnames(out) <- NULL
+  out
+
+}
+
+## ---------------------------------------------------------------------------
+## Row-level spectral processing (reference implementation)
 ## ---------------------------------------------------------------------------
 
 #' Process a Single Spectral Row
@@ -293,6 +352,11 @@ print.step_transform_spectra <- function(x, width = max(20, options()$width - 30
 #' @description
 #' Applies one of the supported preprocessing methods to a single spectrum
 #' (numeric vector). Uses prospectr for Savitzky-Golay and SNV operations.
+#'
+#' This was the per-row implementation `bake.step_transform_spectra()` looped
+#' over until 2026-09-16. It is kept as the reference that
+#' `transform_spectra_matrix()` is tested against, and is not called by the
+#' package otherwise.
 #'
 #' @param input_vector Numeric vector. One spectrum.
 #' @param preprocessing Character. Preprocessing method.
