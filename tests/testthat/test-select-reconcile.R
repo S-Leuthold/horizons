@@ -267,7 +267,8 @@ test_that("grid_summary() still catches a deleted band on either side of it", {
 
 test_that("reconcile_axes() clamps a target grid overshooting by less than half a spacing", {
 
-  ## #64's signature: two standardize() calls anchored on their own maxima.
+  ## Targets on an axis standardize() did not put on the canonical grid, as
+  ## with resample = NULL, overshooting the pool's end by a fraction.
   ## The pool is at 4 cm-1, so the tolerance is 2 cm-1 and a 1 cm-1
   ## overshoot at the high end is inside it.
   fx      <- make_select_fixture(n_pool = 20)

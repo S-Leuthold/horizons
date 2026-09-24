@@ -19,6 +19,52 @@ WATER_BANDS <- list(
 
 )
 
+#' Decimal places canonical-grid wavenumbers are rounded to (clean names)
+#' @noRd
+GRID_DIGITS <- 6L
+
+#' Tolerance (cm⁻¹) within which two wavenumbers are the same grid point
+#' @noRd
+GRID_TOL <- 1e-6
+
+
+## =============================================================================
+## Helper: canonical_grid()
+## =============================================================================
+
+#' The canonical wavenumber grid for a resolution and a range
+#'
+#' @description
+#' Every multiple of `step` inside `[lo, hi]`, decreasing. The grid depends
+#' only on `step` and the bounds, never on where a dataset's own axis starts,
+#' so two sources resampled with the same arguments land on the same columns
+#' (#64).
+#'
+#' @details
+#' Points are `k * step` for integer `k`, rounded to `GRID_DIGITS` decimal
+#' places (`6001 * 0.1` is `600.10000000000002` before rounding). The division
+#' that finds the first and last `k` carries a 1e-9 allowance, so a bound that
+#' is itself a multiple of `step` stays on the grid when `lo / step` lands a
+#' hair off an integer.
+#'
+#' @param lo,hi `numeric(1).` The range, inclusive.
+#' @param step `numeric(1).` The resolution in cm⁻¹, positive.
+#'
+#' @return `numeric.` The grid, decreasing; empty when no multiple of `step`
+#'   falls inside the range.
+#'
+#' @noRd
+canonical_grid <- function(lo, hi, step) {
+
+  k_lo <- ceiling(lo / step - 1e-9)
+  k_hi <- floor(hi / step + 1e-9)
+
+  if (k_lo > k_hi) return(numeric(0))
+
+  round(seq(k_hi, k_lo) * step, GRID_DIGITS)
+
+}
+
 
 ## =============================================================================
 ## Helper: resample_spectra()
@@ -34,8 +80,9 @@ WATER_BANDS <- list(
 #'   wavelengths as columns.
 #' @param current_wav `numeric.` Current wavenumber positions (column names).
 #' @param target_resolution `numeric.` Target resolution in cm⁻¹ (e.g., 2).
-#'   The grid is generated from the data's own range at this spacing.
-#'   Exactly one of `target_resolution` and `new_wav` must be given.
+#'   The grid is the multiples of this resolution inside the data's range
+#'   (`canonical_grid()`), not a sequence stepped from the data's own
+#'   maximum. Exactly one of `target_resolution` and `new_wav` must be given.
 #' @param new_wav `numeric.` An explicit target grid, in any order. Used by
 #'   `select_training()` to bring a pool onto the targets' axis, so the
 #'   package has one resampling routine. Must lie within the range of
@@ -69,9 +116,18 @@ resample_spectra <- function(spectra_matrix,
 
   if (is.null(new_wav)) {
 
-    ## Evenly-spaced grid at target resolution, max to min (decreasing) ---------
+    ## Canonical grid inside the data's range (decreasing) ----------------------
 
-    new_wav <- seq(from = wn_max, to = wn_min, by = -target_resolution)
+    new_wav <- canonical_grid(wn_min, wn_max, target_resolution)
+
+    if (length(new_wav) == 0) {
+
+      cli::cli_abort(c(
+        "No multiple of {target_resolution} cm-1 falls inside the data's range",
+        "x" = "The data covers {wn_min} to {wn_max} cm-1"
+      ), class = "horizons_input_error")
+
+    }
 
   } else {
 
@@ -98,12 +154,20 @@ resample_spectra <- function(spectra_matrix,
   current_wav_sorted <- sort(current_wav)
   spectra_sorted     <- spectra_matrix[, order(current_wav), drop = FALSE]
 
+  ### prospectr cannot return a single grid point (it builds one row across
+  ### the samples and fails to name it), so a lone point is evaluated twice
+  ### and one copy kept.
+  eval_wav <- sort(new_wav)
+  if (length(eval_wav) == 1) eval_wav <- rep(eval_wav, 2)
+
   resampled <- prospectr::resample(
     X        = spectra_sorted,
     wav      = current_wav_sorted,
-    new.wav  = sort(new_wav),
+    new.wav  = eval_wav,
     interpol = "spline"
   )
+
+  resampled <- resampled[, seq_along(new_wav), drop = FALSE]
 
   ## Restore decreasing order --------------------------------------------------
 
@@ -137,15 +201,21 @@ resample_spectra <- function(spectra_matrix,
 #'   wavelengths as columns.
 #' @param wavelengths `numeric.` Current wavenumber positions (column names).
 #' @param range `numeric(2).` Min and max wavenumbers to keep, e.g., `c(600, 4000)`.
+#' @param margin `logical.` Also keep the nearest wavenumber beyond each bound,
+#'   where the data has one? `standardize()` sets this when it resamples next:
+#'   a grid point on the bound usually falls between two of the data's points
+#'   (600 between 599.74 and 601.67), and interpolating it needs both.
+#'   Default `FALSE`.
 #'
 #' @return `list.` With elements:
 #'   - `matrix`: Trimmed spectral matrix
 #'   - `wavelengths`: Retained wavenumber positions
 #'   - `n_before`: Number of wavelengths before trimming
-#'   - `n_after`: Number of wavelengths after trimming
+#'   - `n_after`: Number of wavelengths returned, margin points included
+#'   - `n_inside`: Number of those inside the range, the count to report
 #'
 #' @noRd
-trim_spectra <- function(spectra_matrix, wavelengths, range) {
+trim_spectra <- function(spectra_matrix, wavelengths, range, margin = FALSE) {
 
   ## ---------------------------------------------------------------------------
   ## Step 1: Find columns within range
@@ -168,6 +238,21 @@ trim_spectra <- function(spectra_matrix, wavelengths, range) {
 
   }
 
+  ## One point beyond each bound, for the interpolation that follows ----------
+
+  if (margin) {
+
+    below <- which(wavelengths < wn_min)
+    above <- which(wavelengths > wn_max)
+
+    if (length(below) > 0) keep_idx <- c(keep_idx, below[which.max(wavelengths[below])])
+    if (length(above) > 0) keep_idx <- c(keep_idx, above[which.min(wavelengths[above])])
+
+    ### Back into the input's column order.
+    keep_idx <- sort(keep_idx)
+
+  }
+
   ## ---------------------------------------------------------------------------
   ## Step 2: Subset matrix and wavelengths
   ## ---------------------------------------------------------------------------
@@ -183,7 +268,8 @@ trim_spectra <- function(spectra_matrix, wavelengths, range) {
     matrix      = trimmed_matrix,
     wavelengths = trimmed_wav,
     n_before    = length(wavelengths),
-    n_after     = length(trimmed_wav)
+    n_after     = length(trimmed_wav),
+    n_inside    = sum(trimmed_wav >= wn_min & trimmed_wav <= wn_max)
   )
 
 }
@@ -304,11 +390,67 @@ apply_baseline_correction <- function(spectra_matrix, wavelengths) {
     }
   )
 
-  ## Restore decreasing order --------------------------------------------------
+  ## Restore the input's own column order ---------------------------------------
 
-  corrected <- corrected[, rev(seq_len(ncol(corrected))), drop = FALSE]
+  ### Column i of the input is the rank(wavelengths)[i]-th of the sorted
+  ### result, whatever order the caller passed.
+  corrected <- corrected[, order(order(wavelengths)), drop = FALSE]
 
   corrected
+
+}
+
+
+## =============================================================================
+## Helper: sort_axis_decreasing()
+## =============================================================================
+
+#' Put an object's predictor columns in decreasing wavenumber order
+#'
+#' @description
+#' Reorders the predictor columns among themselves, in `data$analysis` and
+#' `data$role_map` alike. Names and values are untouched and every other
+#' column keeps its place. `spectra()` keeps columns in the order it is given
+#' them, while every step of `standardize()` and the validator assume
+#' decreasing order.
+#'
+#' @param x `horizons_data.` The object.
+#'
+#' @return `list.` With elements:
+#'   - `x`: The object, reordered through `set_analysis()` when anything moved
+#'   - `sorted`: Whether any column moved
+#'
+#' @noRd
+sort_axis_decreasing <- function(x) {
+
+  analysis <- x$data$analysis
+  role_map <- x$data$role_map
+
+  pred_rows <- which(role_map$role == "predictor")
+  pred_vars <- role_map$variable[pred_rows]
+
+  ### A predictor name that is not a wavenumber leaves the order to the
+  ### validator rather than being pushed to the end.
+  wavenumbers <- suppressWarnings(as.numeric(gsub("^wn_", "", pred_vars)))
+  axis_order  <- order(wavenumbers, decreasing = TRUE)
+
+  if (anyNA(wavenumbers) || identical(axis_order, seq_along(pred_vars))) {
+
+    return(list(x = x, sorted = FALSE))
+
+  }
+
+  ## The same slots in both tables, filled in the new order ------------------
+
+  role_map[pred_rows, ] <- role_map[pred_rows[axis_order], ]
+
+  cols <- names(analysis)
+  cols[cols %in% pred_vars] <- pred_vars[axis_order]
+
+  list(
+    x      = set_analysis(x, analysis[, cols, drop = FALSE], role_map),
+    sorted = TRUE
+  )
 
 }
 
@@ -341,15 +483,26 @@ report_standardize_summary <- function(operations, n_samples, final_n_wavelength
     op_name <- op_names[i]
     op      <- operations[[op_name]]
 
-    if (op_name == "trim") {
+    if (op_name == "sort") {
+
+      msg <- "Sorting: wavenumber columns put in decreasing order"
+
+    } else if (op_name == "trim") {
 
       msg <- paste0("Trimming: ", op$range[1], "-", op$range[2],
                     " cm\u207B\u00B9 (", op$n_before, " \u2192 ", op$n_after, ")")
 
+    } else if (op_name == "resample" && op$status == "skipped") {
+
+      msg <- paste0("Resampling: already on the ", op$resolution_after,
+                    " cm\u207B\u00B9 grid, ", op$grid_range[1], "-",
+                    op$grid_range[2], " (", op$n_after, "), not re-interpolated")
+
     } else if (op_name == "resample") {
 
       msg <- paste0("Resampling: ", op$resolution_before, " \u2192 ",
-                    op$resolution_after, " cm\u207B\u00B9 (",
+                    op$resolution_after, " cm\u207B\u00B9 onto ",
+                    op$grid_range[1], "-", op$grid_range[2], " (",
                     op$n_before, " \u2192 ", op$n_after, ")")
 
     } else if (op_name == "remove_water") {
@@ -403,15 +556,58 @@ report_standardize_summary <- function(operations, n_samples, final_n_wavelength
 #' during `evaluate()`. This separation allows factorial comparison of
 #' preprocessing options.
 #'
+#' **The wavenumber axis.** With resampling, the output axis is the canonical
+#' grid: every multiple of `resample` inside the `trim` bounds, or inside the
+#' data's own range when `trim` is `NULL`. The grid points never depend on
+#' where an instrument's axis happens to start. With `trim` given, two
+#' datasets that cover the trim range and are standardized with the same
+#' arguments share all their columns, which is what `predict()` and
+#' `select_training()` compare. With `trim = NULL` each dataset keeps its own
+#' extent, so two sources share columns only where their ranges overlap; pass
+#' `trim` when you need a fixed extent. `resample = 4` with the default trim
+#' gives `wn_4000, wn_3996, ..., wn_600` (851 columns) whether the scans came
+#' at 2 cm⁻¹ from 600 or at about 1.93 cm⁻¹ from 599.74. Grid wavenumbers are
+#' rounded to six decimal places, so a non-integer resolution such as 1.5
+#' gives clean, stable names (`wn_601.5`).
+#'
+#' The spectra are interpolated onto the grid by cubic spline and never
+#' extrapolated: grid points beyond the data's range are dropped with a
+#' warning that says how many and where. Nor is a hole in the input filled:
+#' where the data's own axis has a gap (a spacing over three times the median
+#' and over 30 cm⁻¹, such as a band deleted upstream or by an earlier
+#' `remove_water = TRUE`), the grid points inside it are dropped with a
+#' warning naming the gaps, and each side is interpolated on its own. Data
+#' already on the grid, to within 1e-6 cm⁻¹ and apart from any such gaps, is
+#' not re-interpolated, and the console says so. Columns stored in increasing
+#' order are sorted to decreasing first, on every path: a call with every
+#' operation off still sorts them, and is still validated before the object
+#' is marked standardized, but changes nothing else.
+#'
+#' The operations run in this order: sort, trim, resampling, baseline
+#' correction, water-band removal. With resampling, the baseline is fitted on
+#' the canonical grid, so every source's convex hull is pinned at the same
+#' ends, the grid's; the points kept beyond the trim bounds for interpolation
+#' are gone by then and never reach it. Without resampling, it is fitted on
+#' the trimmed native axis. Water bands are deleted last so that
+#' `standardize()`'s own interpolation never spans them; a Savitzky-Golay
+#' derivative taken later still runs across the hole they leave, which is a
+#' separate matter (see `select_training()`'s `mask`).
+#'
 #' **Idempotence:** If the object has already been standardized, calling
 #' `standardize()` again will warn and return the object unchanged. Use
 #' `force = TRUE` to override (not recommended).
 #'
 #' @param x `horizons_data.` Object from `spectra()`.
 #' @param resample `numeric or NULL.` Target resolution in cm⁻¹. Default `2`
-#'   matches OSSL library resolution. Use `NULL` to skip resampling.
-#' @param trim `numeric(2) or NULL.` Wavenumber range to keep. Default
-#'   `c(600, 4000)` is the standard MIR range. Use `NULL` to skip trimming.
+#'   matches OSSL library resolution. The spectra are resampled onto the
+#'   multiples of `resample` inside the `trim` bounds (see Details). Use
+#'   `NULL` to skip resampling and keep the data's own axis.
+#' @param trim `numeric(2) or NULL.` Wavenumber range to keep, inclusive.
+#'   Default `c(600, 4000)` is the standard MIR range. With resampling, the
+#'   bounds limit the grid, and the one data point beyond each bound is used
+#'   to interpolate the grid points at the bounds and then dropped, before
+#'   baseline correction. Without resampling, columns outside the range are
+#'   dropped. Use `NULL` to skip trimming.
 #' @param remove_water `logical.` Remove water absorption bands
 #'   (1580-1720, 3100-3700 cm⁻¹)? Default `FALSE`.
 #' @param baseline `logical.` Apply convex hull baseline correction?
@@ -420,7 +616,9 @@ report_standardize_summary <- function(operations, n_samples, final_n_wavelength
 #'   Default `FALSE`. Not recommended — may cause data quality issues.
 #'
 #' @return `horizons_data.` The input object with standardized spectra.
-#'   Provenance is updated to record what operations were applied.
+#'   `provenance$standardization` records the arguments, whether the spectra
+#'   were actually re-interpolated (`resampled`), and the grid they sit on
+#'   (`grid`: `min`, `max`, `step`, `n`; `NULL` without resampling).
 #'
 #' @examples
 #' \dontrun{
@@ -554,24 +752,67 @@ standardize <- function(x,
   }
 
   ## ---------------------------------------------------------------------------
-  ## Step 1b: Early exit if no operations requested
+  ## Step 1b: Put the axis in decreasing order, on every path
   ## ---------------------------------------------------------------------------
+  ## spectra() keeps columns in the order it is given them. The steps below
+  ## work on a decreasing axis (the margin, the grid comparison, the column
+  ## names), and so does the validator. The no-op path sorts too: a
+  ## standardized object is never an invalid one.
+
+  sorted <- sort_axis_decreasing(x)
+  x      <- sorted$x
+
+  operations <- list()
+
+  if (sorted$sorted) {
+
+    operations$sort <- list(n = sum(x$data$role_map$role == "predictor"))
+
+  }
+
+  ## ---------------------------------------------------------------------------
+  ## Step 1c: Early exit if no operations requested
+  ## ---------------------------------------------------------------------------
+  ## Nothing but the column order changes here: no values, no names. The
+  ## object is validated before it is marked, so an invalid one stops here
+  ## rather than travelling on as standardized.
 
   if (is.null(resample) && is.null(trim) && !remove_water && !baseline) {
 
-    cat(paste0("\u251C\u2500 ", cli::style_bold("Standardizing"), "...\n"))
-    cat(paste0("\u2502  \u2514\u2500 No operations applied\n"))
-    cat("\u2502\n")
+    x <- validate_horizons_data(x)
 
     ## Still mark as standardized so downstream steps know it was evaluated -----
+
+    ### Under force = TRUE the object may already sit on a grid an earlier
+    ### call built. The axis is untouched here, so that record still holds.
+    prior      <- x$provenance$standardization
+    keep_prior <- !is.null(prior) && !sorted$sorted
 
     x$provenance$standardization <- list(
       resample     = NULL,
       trim         = NULL,
       remove_water = FALSE,
       baseline     = FALSE,
+      resampled    = keep_prior && isTRUE(prior$resampled),
+      grid         = if (keep_prior) prior$grid else NULL,
       applied_at   = Sys.time()
     )
+
+    if (length(operations) > 0) {
+
+      report_standardize_summary(
+        operations          = operations,
+        n_samples           = nrow(x$data$analysis),
+        final_n_wavelengths = operations$sort$n
+      )
+
+    } else {
+
+      cat(paste0("\u251C\u2500 ", cli::style_bold("Standardizing"), "...\n"))
+      cat(paste0("\u2502  \u2514\u2500 No operations applied\n"))
+      cat("\u2502\n")
+
+    }
 
     return(x)
 
@@ -593,48 +834,46 @@ standardize <- function(x,
 
   wavelengths <- as.numeric(gsub("^wn_", "", predictor_vars))
 
-  ## Track operations applied --------------------------------------------------
-
-  operations <- list()
-
   ## ---------------------------------------------------------------------------
   ## Step 3: Apply trim (if requested)
   ## ---------------------------------------------------------------------------
-  ## Trim first to reduce data volume for subsequent operations
+  ## Trim first to reduce data volume for subsequent operations. When the
+  ## spectra are resampled next, the nearest point beyond each bound is kept
+  ## too, so the grid points on the bounds are interpolated, not extrapolated;
+  ## the resampling step drops those points again, before baseline correction
+  ## could see them.
 
   if (!is.null(trim)) {
 
-    result <- trim_spectra(spectra_matrix, wavelengths, trim)
+    result <- trim_spectra(spectra_matrix, wavelengths, trim,
+                           margin = !is.null(resample))
 
     spectra_matrix <- result$matrix
     wavelengths    <- result$wavelengths
 
+    ### The margin points are scaffolding for the interpolation and are
+    ### dropped there, so the count reported is the one inside the bounds.
     operations$trim <- list(
       range    = trim,
       n_before = result$n_before,
-      n_after  = result$n_after
+      n_after  = result$n_inside
     )
 
   }
 
   ## ---------------------------------------------------------------------------
-  ## Step 4: Apply baseline correction (if requested)
+  ## Step 4: Resample onto the canonical grid (if requested)
   ## ---------------------------------------------------------------------------
-  ## Baseline before water removal — algorithm needs continuous spectral range
+  ## Before baseline correction, so the hull is fitted on the grid, and before
+  ## this call's water-band removal, so this interpolation never spans the
+  ## bands it deletes. The grid is every multiple of `resample` inside the
+  ## trim bounds (the data's range when trim is NULL): it depends on the
+  ## arguments alone, so two sources standardized alike share their columns
+  ## (#64). A hole already in the input (a band deleted upstream, or by an
+  ## earlier standardize()) is never filled: grid points inside it are
+  ## dropped, and each contiguous run is interpolated on its own.
 
-  if (baseline) {
-
-    spectra_matrix <- apply_baseline_correction(spectra_matrix, wavelengths)
-
-    operations$baseline <- list(applied = TRUE)
-
-  }
-
-  ## ---------------------------------------------------------------------------
-  ## Step 5: Apply resample (if requested)
-  ## ---------------------------------------------------------------------------
-  ## Resample before water removal — creates continuous grid for baseline
-  ## Water bands removed last to avoid gaps being filled by interpolation
+  grid_record <- NULL
 
   if (!is.null(resample)) {
 
@@ -644,28 +883,180 @@ standardize <- function(x,
 
     }
 
-    ## Estimate current resolution from wavelength spacing ---------------------
+    ## Holes in the data's own axis, by select_training()'s rule ---------------
 
-    wn_diff  <- abs(diff(sort(wavelengths)))
-    current_resolution <- round(median(wn_diff), 1)
+    ### grid_summary() calls a spacing a gap when it is over three times the
+    ### median and over 30 cm-1: a deleted band is an absolute width, a
+    ### resolution step is a few cm-1.
 
-    ## Only resample if resolution differs -------------------------------------
+    gaps <- grid_summary(wavelengths)$gaps
 
-    if (abs(current_resolution - resample) > 0.1) {
+    ## The grid, from the bounds -----------------------------------------------
 
-      result <- resample_spectra(spectra_matrix, wavelengths, resample)
+    bounds <- if (is.null(trim)) range(wavelengths) else range(trim)
+    grid   <- canonical_grid(bounds[1], bounds[2], resample)
 
-      spectra_matrix <- result$matrix
-      wavelengths    <- result$wavelengths
+    ## Grid points the data does not reach are dropped, never extrapolated ----
 
-      operations$resample <- list(
-        resolution_before = current_resolution,
-        resolution_after  = resample,
-        n_before          = result$n_before,
-        n_after           = result$n_after
+    data_lo <- min(wavelengths)
+    data_hi <- max(wavelengths)
+
+    below <- grid[grid < data_lo - GRID_TOL]
+    above <- grid[grid > data_hi + GRID_TOL]
+
+    if (length(below) + length(above) > 0) {
+
+      where <- c(
+        if (length(below) > 0) {
+          cli::format_inline("{length(below)} below the data's start at {data_lo} ({min(below)} to {max(below)} cm-1)")
+        },
+        if (length(above) > 0) {
+          cli::format_inline("{length(above)} above the data's end at {data_hi} ({min(above)} to {max(above)} cm-1)")
+        }
       )
 
+      cli::cli_warn(c(
+        "The data does not cover the {resample} cm-1 grid from {bounds[1]} to {bounds[2]} cm-1",
+        "i" = "Dropped {length(below) + length(above)} grid point{?s} rather than extrapolate: {paste(where, collapse = '; ')}"
+      ), class = "horizons_standardize_warning")
+
+      grid <- grid[grid >= data_lo - GRID_TOL & grid <= data_hi + GRID_TOL]
+
     }
+
+    ## Grid points inside a hole are dropped, never interpolated across -------
+
+    if (!is.null(gaps)) {
+
+      in_gap <- rep(FALSE, length(grid))
+
+      for (i in seq_len(nrow(gaps))) {
+
+        in_gap <- in_gap |
+                  (grid > gaps[i, "low"] + GRID_TOL & grid < gaps[i, "high"] - GRID_TOL)
+
+      }
+
+      if (any(in_gap)) {
+
+        gap_text <- sprintf("%g to %g", gaps[, "low"], gaps[, "high"])
+
+        cli::cli_warn(c(
+          "The data's axis has {nrow(gaps)} gap{?s} in it: {paste(gap_text, collapse = ', ')} cm-1",
+          "i" = "Dropped {sum(in_gap)} grid point{?s} that fall in a gap rather than interpolate across it; each side of a gap is resampled on its own"
+        ), class = "horizons_standardize_warning")
+
+        grid <- grid[!in_gap]
+
+      }
+
+    }
+
+    if (length(grid) == 0) {
+
+      cli::cli_abort(c(
+        "No multiple of {resample} cm-1 between {bounds[1]} and {bounds[2]} cm-1 falls inside the data",
+        "x" = "The data covers {data_lo} to {data_hi} cm-1"
+      ), class = "horizons_input_error")
+
+    }
+
+    ## Already on the grid: keep the values, do not re-interpolate ------------
+
+    ### The margin points trim kept lie outside the bounds and are not part of
+    ### the comparison; an on-grid axis simply loses them here.
+
+    in_bounds <- wavelengths >= bounds[1] - GRID_TOL & wavelengths <= bounds[2] + GRID_TOL
+    on_grid   <- sum(in_bounds) == length(grid) &&
+                 all(abs(wavelengths[in_bounds] - grid) <= GRID_TOL)
+
+    if (on_grid) {
+
+      spectra_matrix <- spectra_matrix[, in_bounds, drop = FALSE]
+      wavelengths    <- grid
+
+      operations$resample <- list(
+        status            = "skipped",
+        resolution_after  = resample,
+        grid_range        = range(grid),
+        n_after           = length(grid)
+      )
+
+    } else {
+
+      ### One contiguous run of the data at a time, so no spline is fitted
+      ### across a gap. A point's run is the number of gaps below it.
+
+      gap_highs <- if (is.null(gaps)) numeric(0) else gaps[, "high"]
+      run_of    <- function(wn) vapply(wn, function(w) sum(gap_highs <= w + GRID_TOL), integer(1))
+
+      data_run <- run_of(wavelengths)
+      grid_run <- run_of(grid)
+
+      resampled <- matrix(NA_real_, nrow = nrow(spectra_matrix), ncol = length(grid))
+
+      for (run in unique(grid_run)) {
+
+        cols <- which(data_run == run)
+        at   <- which(grid_run == run)
+
+        if (length(cols) == 1) {
+
+          ### A lone knot between two gaps: the only grid point it can carry
+          ### is the knot itself.
+          resampled[, at] <- spectra_matrix[, cols]
+          next
+
+        }
+
+        ### A grid point inside GRID_TOL of the run's end is evaluated at
+        ### that end, so resample_spectra()'s strict no-extrapolation check
+        ### holds.
+        run_wn <- wavelengths[cols]
+        piece  <- resample_spectra(spectra_matrix[, cols, drop = FALSE], run_wn,
+                                   new_wav = pmin(pmax(grid[at], min(run_wn)), max(run_wn)))
+
+        resampled[, at] <- piece$matrix
+
+      }
+
+      operations$resample <- list(
+        status            = "resampled",
+        resolution_before = signif(stats::median(abs(diff(wavelengths))), 3),
+        resolution_after  = resample,
+        grid_range        = range(grid),
+        n_before          = sum(in_bounds),
+        n_after           = length(grid)
+      )
+
+      spectra_matrix <- resampled
+      wavelengths    <- grid
+
+    }
+
+    grid_record <- list(
+      min  = min(grid),
+      max  = max(grid),
+      step = resample,
+      n    = length(grid)
+    )
+
+  }
+
+  ## ---------------------------------------------------------------------------
+  ## Step 5: Apply baseline correction (if requested)
+  ## ---------------------------------------------------------------------------
+  ## On the canonical grid when resampling, so every source's convex hull is
+  ## pinned at the same ends, the grid's, and the margin points beyond the
+  ## trim bounds (already dropped) never reach it. Without resampling, on the
+  ## trimmed native axis. Before water removal: the hull needs a continuous
+  ## range.
+
+  if (baseline) {
+
+    spectra_matrix <- apply_baseline_correction(spectra_matrix, wavelengths)
+
+    operations$baseline <- list(applied = TRUE)
 
   }
 
@@ -747,6 +1138,8 @@ standardize <- function(x,
     trim             = trim,
     remove_water     = remove_water,
     baseline         = baseline,
+    resampled        = identical(operations$resample$status, "resampled"),
+    grid             = grid_record,
     applied_at       = Sys.time(),
     n_wavelengths    = length(new_predictor_names),
     wavelength_range = c(min(wavelengths), max(wavelengths))
@@ -762,21 +1155,14 @@ standardize <- function(x,
   ## Step 11: Report
   ## ---------------------------------------------------------------------------
 
-  if (length(operations) > 0) {
+  ### Every operation requested on this path records itself, and the no-op
+  ### call returned at Step 1c, so there is always something to report.
 
-    report_standardize_summary(
-      operations          = operations,
-      n_samples           = nrow(new_analysis),
-      final_n_wavelengths = length(new_predictor_names)
-    )
-
-  } else {
-
-    cat(paste0("\u251C\u2500 ", cli::style_bold("Standardizing"), "...\n"))
-    cat(paste0("\u2502  \u2514\u2500 No operations applied\n"))
-    cat("\u2502\n")
-
-  }
+  report_standardize_summary(
+    operations          = operations,
+    n_samples           = nrow(new_analysis),
+    final_n_wavelengths = length(new_predictor_names)
+  )
 
   ## ---------------------------------------------------------------------------
   ## Step 12: Return

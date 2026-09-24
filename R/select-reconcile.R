@@ -135,10 +135,14 @@ check_contiguous <- function(grid, side) {
 #' on the targets' grid is passed through unchanged.
 #'
 #' @details
-#' `standardize()` derives its grid from each dataset's own range and
-#' maximum wavenumber (horizons #64), so two sources standardized with the
-#' same arguments can land on different columns. This function is where the
-#' two meet, and it settles the axis in the user's favour.
+#' `standardize()` puts every dataset on the canonical grid, the multiples of
+#' `resample` inside the trim bounds (#64), so two sources standardized with
+#' the same `resample` and `trim` normally arrive on the same columns and
+#' pass straight through. They still can differ: targets standardized with
+#' `resample = NULL` keep their instrument's own axis, a different `resample`
+#' or `trim` gives a different grid, and `trim = NULL` leaves each source on
+#' its own extent. This function is where the two meet, and it settles the
+#' axis in the user's favour.
 #'
 #' Three conditions are checked, in this order:
 #'
@@ -206,10 +210,11 @@ reconcile_axes <- function(pool, targets) {
 
   ## Coverage: the one hard stop, to within half a pool spacing ---------------
 
-  ### #64 makes two standardize() calls anchor on their own maxima, so a
-  ### target grid overshooting the pool by a fraction of one spacing is the
-  ### expected case rather than the pathological one. Inside half a spacing
-  ### the pool's endpoint is the nearest knot there is, so the overshooting
+  ### Since #64, standardize() puts both sides on the canonical grid, so an
+  ### overshoot needs an axis it did not make: targets standardized with
+  ### resample = NULL (an instrument's own axis, 3999.57 against the pool's
+  ### 4000) or with a trim wider than the pool. Inside half a spacing the
+  ### pool's endpoint is the nearest knot there is, so the overshooting
   ### column is resampled at that endpoint and the clamp is recorded. Beyond
   ### it, the verb still stops: a training set narrower than the targets
   ### breaks predict() later.
