@@ -235,8 +235,8 @@
 
 <script type="application/json" id="hz-data">
 {
-  "generated_at": "2026-09-23T17:36:49-0500",
-  "content_md5": "e94025bc9a2a015254f23471261880ca",
+  "generated_at": "2026-09-23T19:10:19-0500",
+  "content_md5": "99575f134aad1184889970e745bce0f1",
   "horizons": "0.9.0",
   "lanes": [
     {
@@ -1705,85 +1705,85 @@
       "class_in": "horizons_eval",
       "class_out": "horizons_fit",
       "signature": "fit (x, n_best = 5L, metric = NULL, compute_uq = TRUE, compute_ad = TRUE, allow_par = FALSE, seed = 307L, verbose = TRUE)",
-      "summary": "Takes the top configurations from evaluate(), draws a fresh 80/20 split independent of evaluate()'s, re-tunes each with warm-started Bayesian optimization, keeps their out-of-fold predictions for stacking (and for the residual correction, once that is built), fits the final model on the training part, and scores it on the new test part. With UQ or AD on, a further 20 % of the training part is held out to calibrate conformal intervals and the applicability domain. Promotes the object to horizons_fit.",
+      "summary": "Takes the top configurations from evaluate() and reuses its 80/20 split, so the final models are scored on evaluate()'s held-out rows, which nothing was selected on. Re-tunes each configuration with warm-started Bayesian optimization, keeps their out-of-fold predictions for stacking (and for the residual correction, once that is built), fits the final model on the training part, and scores it on the test part. With UQ or AD on, a further 20 % of the training part is held out to calibrate conformal intervals and the applicability domain. Promotes the object to horizons_fit.",
       "args": [
         {
           "name": "x",
           "default": null,
           "text": "A `horizons_eval` object (output of `evaluate()`).",
           "touch": "Always; the horizons_eval from evaluate().",
-          "source": "R/pipeline-fit.R#L71"
+          "source": "R/pipeline-fit.R#L79"
         },
         {
           "name": "n_best",
           "default": "5L",
           "text": "Integer. Number of top configurations to re-tune. Default 5.",
           "touch": "How many configurations to carry forward; five by default, capped at the number that succeeded. One is enough for a single deployable model; several are what ensemble() stacks.",
-          "source": "R/pipeline-fit.R#L134"
+          "source": "R/pipeline-fit.R#L142"
         },
         {
           "name": "metric",
           "default": "NULL",
-          "text": "Character or NULL. Metric for ranking the candidate configs, by bare name (`\"rpd\"`, `\"rmse\"`, ...). If NULL, uses the rank_metric from `evaluate()`. Ranking reads the cross-validated value at each config's selected hyperparameters (evaluation$results$cv_<metric>), never the test-set column, so the test sets stay held out from selection. Default NULL.",
+          "text": "Character or NULL. Metric for ranking the candidate configs, by bare name (`\"rpd\"`, `\"rmse\"`, ...). If NULL, uses the rank_metric from `evaluate()`. Ranking reads the cross-validated value at each config's selected hyperparameters (evaluation$results$cv_<metric>), never the test-set column, so the test set stays held out from selection. Default NULL.",
           "touch": "Rarely; defaults to the metric evaluate() ranked on, read from the cross-validated column.",
-          "source": "R/pipeline-fit.R#L119"
+          "source": "R/pipeline-fit.R#L127"
         },
         {
           "name": "compute_uq",
           "default": "TRUE",
           "text": "Logical. Train UQ components (quantile model + conformal calibration). Default TRUE.",
           "touch": "FALSE to skip conformal intervals. The fit regains the whole training part only when compute_ad is FALSE too, because the calibration split is drawn whenever either capability is on, and it is what shrinks the rows with out-of-fold predictions from 80 % to 64 %.",
-          "source": "R/pipeline-fit.R#L242"
+          "source": "R/pipeline-fit.R#L226"
         },
         {
           "name": "compute_ad",
           "default": "TRUE",
           "text": "Logical. Compute applicability-domain metadata (centroid + shrinkage covariance + held-out OOD thresholds) per config, so `predict()` can emit `.ad_distance` / `.ad_flag`. Shares the UQ calibration split. Default TRUE.",
           "touch": "FALSE to skip the applicability-domain bundle; it shares the calibration split with UQ.",
-          "source": "R/pipeline-fit.R#L242"
+          "source": "R/pipeline-fit.R#L226"
         },
         {
           "name": "allow_par",
           "default": "FALSE",
           "text": "Logical. If `TRUE`, tune parallelises the CV folds inside each member's re-tune and OOF pass on whatever `future::plan()` the caller has registered; `fit()` never registers a plan. If the plan offers fewer than two workers, warns naming it and runs sequentially. `fit()` parallelises folds only in this version; a configs axis across the `n_best` members is gated on the fitted-object memory contract (a fitted object is hundreds of MB and would cross to workers). Default FALSE.",
           "touch": "TRUE after registering a future plan to parallelise the folds inside each re-tune; fit() never dispatches configurations to workers because a fitted object is hundreds of MB.",
-          "source": "R/pipeline-fit.R#L101"
+          "source": "R/pipeline-fit.R#L109"
         },
         {
           "name": "seed",
           "default": "307L",
-          "text": "Integer. Random seed for CV folds and, through `fit_split_seed()` (`seed + 1L`), for Split F. The offset keeps Split F independent of `evaluate()`'s split when both are called with the same `seed`, which is the default. Default 307L.",
-          "touch": "To change the folds; the fit split is seeded at seed + 1 so it differs from evaluate()'s at the shared default. A seed that makes the two partitions coincide is warned about.",
-          "source": "R/pipeline-fit.R#L192"
+          "text": "Integer. Random seed for the CV folds and, through `calib_split_seed()` (`seed + 1L`), for the calibration split. The train/test split is `evaluate()`'s, so it does not depend on this seed. Default 307L.",
+          "touch": "To change the folds, and the calibration split, which is seeded at seed + 1. The train/test split is evaluate()'s, so this seed does not move it.",
+          "source": "R/pipeline-fit.R#L228"
         },
         {
           "name": "verbose",
           "default": "TRUE",
           "text": "Logical. Print progress tree to console. Default TRUE.",
           "touch": "Set FALSE inside loops.",
-          "source": "R/pipeline-fit.R#L314"
+          "source": "R/pipeline-fit.R#L304"
         }
       ],
       "mechanics": [
         {
           "step": "Requires a horizons_eval with results, confirms a parallel backend if asked, ranks the successful configurations by the cross-validated metric, and takes the top n_best.",
-          "source": "R/pipeline-fit.R#L71"
+          "source": "R/pipeline-fit.R#L79"
         },
         {
-          "step": "Drops rows whose outcome is NA by the rule evaluate() applies, and says how many in the tree, so the two verbs split the same frame.",
-          "source": "R/pipeline-fit.R#L179"
+          "step": "Drops rows whose outcome is NA by the rule evaluate() applies, and says how many in the tree.",
+          "source": "R/pipeline-fit.R#L174"
         },
         {
-          "step": "Draws Split F, 80/20 stratified, at seed + 1, and warns if its test rows are the same samples as evaluate()'s.",
-          "source": "R/pipeline-fit.R#L192"
+          "step": "Takes evaluate()'s 80/20 split as Split F, after checking it was drawn from exactly those rows, so the test part is evaluate()'s held-out rows.",
+          "source": "R/pipeline-fit.R#L191"
         },
         {
-          "step": "If UQ or AD is on, splits the training part 80/20 again into the fit rows and a calibration set; both capabilities are disabled together if the calibration set is under 30 rows.",
-          "source": "R/pipeline-fit.R#L242"
+          "step": "If UQ or AD is on, splits the training part 80/20 again, at seed + 1, into the fit rows and a calibration set; both capabilities are disabled together if the calibration set is under 30 rows.",
+          "source": "R/pipeline-fit.R#L226"
         },
         {
-          "step": "Builds cv_folds stratified folds on the fit rows.",
-          "source": "R/pipeline-fit.R#L291"
+          "step": "Builds cv_folds stratified folds on the fit rows, at seed.",
+          "source": "R/pipeline-fit.R#L281"
         },
         {
           "step": "Per configuration, fit_single_config() rebuilds the recipe and workflow, re-tunes with Bayesian optimization warm-started from evaluate()'s best parameters and its own final budget, finalizes, generates out-of-fold predictions over the folds and back-transforms them, computes fold-wise metrics, fits the final model on the fit rows, and scores it on the test part.",
@@ -1799,51 +1799,51 @@
         },
         {
           "step": "Assembles the workflows in best-first order, the stacked out-of-fold predictions keyed to a row index, the results table, the response bound (1.5 times the largest outcome among the fit rows, the ones the final models are trained on), and whether the training object carried a selection record; promotes to horizons_fit and certifies the models slot.",
-          "source": "R/pipeline-fit.R#L630"
+          "source": "R/pipeline-fit.R#L632"
         }
       ],
       "records": [
         {
           "field": "models$workflows, models$n_models, models$best_config, models$rank_metric",
           "text": "the butchered fitted workflows by config_id in best-first order",
-          "source": "R/pipeline-fit.R#L653"
+          "source": "R/pipeline-fit.R#L655"
         },
         {
           "field": "models$cv_predictions, models$row_index",
           "text": "out-of-fold predictions (.row, .fold, config_id, .pred, .pred_trans, truth) and the .row to sample_id map; what ensemble() stacks, and what the designed but unbuilt residual correction would read",
-          "source": "R/pipeline-fit.R#L579"
+          "source": "R/pipeline-fit.R#L581"
         },
         {
           "field": "models$results",
           "text": "per configuration, status, degraded flag and reason, the six test metrics, the cv RMSE and RPD with standard errors, best parameters, runtime",
-          "source": "R/pipeline-fit.R#L548"
+          "source": "R/pipeline-fit.R#L538"
         },
         {
           "field": "models$split, models$predictor_schema, models$response_bound, models$selection_present",
           "text": "Split F; the training-axis predictor columns predict() checks new data against; the winsorization bound, computed over the fit rows; whether conformal exchangeability can be assumed",
-          "source": "R/pipeline-fit.R#L637"
+          "source": "R/pipeline-fit.R#L639"
         },
         {
           "field": "models$uq, models$ad",
           "text": "per-configuration bundles, present only for configurations that succeeded with enough calibration rows",
-          "source": "R/pipeline-fit.R#L584"
+          "source": "R/pipeline-fit.R#L586"
         }
       ],
       "refuses": [
         {
           "when": "the input is not a horizons_eval, has no results, or no configuration succeeded",
           "does": "aborts",
-          "source": "R/pipeline-fit.R#L71"
+          "source": "R/pipeline-fit.R#L79"
         },
         {
-          "when": "the fit partition coincides with evaluate()'s",
-          "does": "warns and continues",
-          "source": "R/pipeline-fit.R#L229"
+          "when": "evaluation$split is missing, or was not drawn from the rows the object models, which means a stale or hand-edited object",
+          "does": "aborts, and says to re-run evaluate()",
+          "source": "R/pipeline-fit.R#L203"
         },
         {
           "when": "n_best exceeds the successful configurations, or the calibration set is under 30 rows",
           "does": "prints a console note and continues with what it can; the note is a tree line, so verbose = FALSE silences it",
-          "source": "R/pipeline-fit.R#L138"
+          "source": "R/pipeline-fit.R#L146"
         },
         {
           "when": "a configuration fails to re-tune or fit",
@@ -1857,9 +1857,8 @@
           "where": "dev/experiments/2026-09-factorial/README.md#same-afternoon-2026-09-22-the-library-ships-whole-and-the-correction-from-the-pool-fit"
         },
         {
-          "claim": "seeding Split F with the same seed as evaluate() reproduced its partition exactly",
-          "where": "R/pipeline-fit.R#L763",
-          "value": "#50"
+          "claim": "a Split F drawn afresh at seed + 1 took a median 79 % of its test rows from evaluate()'s training rows, which chose the members and tuned the warm-start parameters (200 seeds, n = 250); that is why fit() reuses evaluate()'s split",
+          "where": "R/pipeline-fit.R#L180"
         }
       ],
       "issues": [],
@@ -2034,14 +2033,14 @@
           "default": "TRUE",
           "text": "Logical. Return conformal prediction intervals when UQ is available? Default `TRUE`. Ignored (with a note) for configs that have no UQ bundle. When intervals are actually available and the model was fit on a training object carrying a $selection (from `select_training()`), this warns once that conformal coverage is not guaranteed: the calibration rows were chosen for proximity to the targets, so they are not exchangeable with arbitrary prediction data.",
           "touch": "FALSE for point predictions only; ignored where no UQ bundle exists.",
-          "source": "R/pipeline-predict.R#L628"
+          "source": "R/pipeline-predict.R#L634"
         },
         {
           "name": "abstain_ood",
           "default": "FALSE",
           "text": "Logical. When `TRUE`, `.pred` (and any interval bounds) are set to `NA` for samples flagged out-of-domain (`.ad_flag == \"OOD\"`), while `.ad_distance`/`.ad_flag` are preserved so the caller can see how far out each sample was. Default `FALSE` (report AD, predict for all samples). Has no effect on configs without an AD bundle.",
           "touch": "TRUE to return NA predictions for samples the applicability domain flags out-of-domain, keeping the distance and flag columns.",
-          "source": "R/pipeline-predict.R#L666"
+          "source": "R/pipeline-predict.R#L672"
         },
         {
           "name": "...",
@@ -2065,33 +2064,33 @@
           "source": "R/pipeline-predict.R#L306"
         },
         {
-          "step": "Per configuration, predicts on the transformed scale, back-transforms once, winsorizes to the response bound with a warning when anything is clamped, and floors at zero.",
+          "step": "Per configuration, predicts on the transformed scale, back-transforms once and floors at zero, then winsorizes .pred alone to the response bound, with a warning when anything is clamped.",
           "source": "R/pipeline-predict.R#L587"
         },
         {
-          "step": "With a UQ bundle and interval = TRUE, bakes the new data through the UQ recipe, predicts residual quantiles from the quantile forest, adds the signed conformal margin, repairs crossing bounds and floors them; every term is already on the original scale, so nothing is back-transformed twice.",
-          "source": "R/pipeline-predict.R#L779"
+          "step": "With a UQ bundle and interval = TRUE, bakes the new data through the UQ recipe, predicts residual quantiles from the quantile forest, adds the signed conformal margin around the unclamped point, repairs crossing bounds and floors them; every term is already on the original scale, so nothing is back-transformed twice.",
+          "source": "R/pipeline-predict.R#L785"
         },
         {
           "step": "With an AD bundle, computes the squared Mahalanobis distance to the training centroid under the shrinkage covariance and bins it Q1 to Q4 or OOD against the held-out thresholds; abstains if asked.",
-          "source": "R/pipeline-predict.R#L652"
+          "source": "R/pipeline-predict.R#L658"
         }
       ],
       "records": [
         {
           "field": "sample_id, .pred",
           "text": "one row per sample, plus config_id when config = \"all\"",
-          "source": "R/pipeline-predict.R#L616"
+          "source": "R/pipeline-predict.R#L619"
         },
         {
           "field": ".pred_lower, .pred_upper, .interval_width",
           "text": "present when intervals were requested and available",
-          "source": "R/pipeline-predict.R#L836"
+          "source": "R/pipeline-predict.R#L842"
         },
         {
           "field": ".ad_distance, .ad_flag",
           "text": "present when the configuration has an AD bundle",
-          "source": "R/pipeline-predict.R#L658"
+          "source": "R/pipeline-predict.R#L664"
         }
       ],
       "refuses": [
@@ -2108,12 +2107,12 @@
         {
           "when": "a prediction is clamped to the response bound, coverage cannot be guaranteed on a selected fit, or abstention was asked for with no AD information",
           "does": "warns",
-          "source": "R/pipeline-predict.R#L692"
+          "source": "R/pipeline-predict.R#L698"
         },
         {
           "when": "interval or AD computation fails for a configuration",
           "does": "degrades to point predictions without those columns",
-          "source": "R/pipeline-predict.R#L636"
+          "source": "R/pipeline-predict.R#L642"
         }
       ],
       "evidence": [
