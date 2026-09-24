@@ -292,15 +292,6 @@ evaluate <- function(x,
   drawn <- draw_eval_split(analysis, outcome_col, seed)
   split <- drawn$split
 
-  if (!drawn$stratified && verbose) {
-
-    cat(paste0(
-      "\u2502  ", cli::col_yellow("Stratified split failed, ",
-                                   "retrying without strata"), "\n"
-    ))
-
-  }
-
   train_data <- rsample::training(split)
   test_data  <- rsample::testing(split)
   n_train    <- nrow(train_data)
@@ -310,23 +301,17 @@ evaluate <- function(x,
   ## Step 5: Create CV folds
   ## -----------------------------------------------------------------------
 
-  cv_fold_obj <- tryCatch(
-    rsample::vfold_cv(train_data, v = cv_folds, strata = dplyr::all_of(outcome_col)),
-    error = function(e) {
+  ## Drawn from the stream the split left. The fallback notes print inside
+  ## the tree, after its header (#91).
 
-      if (verbose) {
-
-        cat(paste0(
-          "\u2502  ", cli::col_yellow("Stratified CV failed, ",
-                                       "retrying without strata"), "\n"
-        ))
-
-      }
-
-      rsample::vfold_cv(train_data, v = cv_folds)
-
-    }
+  cv_drawn <- draw_stratified(
+    outcome      = train_data[[outcome_col]],
+    stratified   = function() rsample::vfold_cv(train_data, v = cv_folds,
+                                                strata = dplyr::all_of(outcome_col),
+                                                breaks = STRATA_BREAKS, pool = STRATA_POOL),
+    unstratified = function() rsample::vfold_cv(train_data, v = cv_folds)
   )
+  cv_fold_obj <- cv_drawn$draw
 
   ## -----------------------------------------------------------------------
   ## Step 5b: Fingerprint the training rows
@@ -379,6 +364,7 @@ evaluate <- function(x,
   checkpoint_dir     <- NULL
   checkpoint_results <- list()
   legacy_ids         <- character(0)
+  checkpoint_notes   <- character(0)
 
   if (!is.null(output_dir)) {
 
@@ -392,22 +378,15 @@ evaluate <- function(x,
       output_dir = output_dir,
       config_ids = configs$config_id,
       data_fp    = data_fp,
-      settings   = settings,
-      verbose    = verbose
+      settings   = settings
     )
 
+    ## The count of loaded results is the Configs line's "from checkpoint",
+    ## and the notes on dropped rows print under it: both used to print
+    ## here, above the tree's header (#91).
     checkpoint_results <- loaded$rows
     legacy_ids         <- loaded$legacy_ids
-
-    n_loaded <- length(checkpoint_results)
-
-    if (n_loaded > 0 && verbose) {
-
-      cat(paste0(
-        "\u2502  Loaded ", n_loaded, " checkpointed results\n"
-      ))
-
-    }
+    checkpoint_notes   <- loaded$notes
 
   }
 
@@ -435,15 +414,43 @@ evaluate <- function(x,
 
     }
 
+    ## "stratified" only when the strata held: rsample draws unstratified
+    ## below 40 rows without an error (#91; see draw_stratified()). The folds
+    ## are drawn on the training part, so they can be unstratified under a
+    ## stratified split.
     cat(paste0("\u2502  Split: ", n_train, " train / ", n_test, " test (",
-               round(100 * SPLIT_PROP), "/", round(100 * (1 - SPLIT_PROP)), ", stratified)\n"))
-    cat(paste0("\u2502  Tuning: ", cv_folds, "-fold CV, grid = ",
-               tuning$grid_size, ", bayesian = ",
+               round(100 * SPLIT_PROP), "/", round(100 * (1 - SPLIT_PROP)), ", ",
+               if (drawn$stratified) "stratified" else "unstratified", ")\n"))
+
+    if (drawn$strata_failed) {
+
+      cat(paste0("\u2502  ", cli::col_yellow("Stratified split failed, ",
+                                             "retrying without strata"), "\n"))
+
+    }
+
+    cat(paste0("\u2502  Tuning: ", cv_folds, "-fold CV (",
+               if (cv_drawn$stratified) "stratified" else "unstratified",
+               "), grid = ", tuning$grid_size, ", bayesian = ",
                tuning$bayesian_iter, "\n"))
+
+    if (cv_drawn$strata_failed) {
+
+      cat(paste0("\u2502  ", cli::col_yellow("Stratified CV failed, ",
+                                             "retrying without strata"), "\n"))
+
+    }
+
     cat(paste0("\u2502  Configs: ", n_total, " total",
                if (n_pending < n_total) paste0(" (", n_total - n_pending,
                                                 " from checkpoint)") else "",
                "\n"))
+
+    for (note in checkpoint_notes) {
+
+      cat(paste0("\u2502  ", cli::col_yellow(note), "\n"))
+
+    }
 
     if (axis$axis != "sequential") {
 
@@ -1152,24 +1159,27 @@ gate_checkpoint_rows <- function(candidates, data_fp, settings, config_ids = NUL
 #' Load the checkpoint rows evaluate() may resume
 #'
 #' Reads the store, gates every row, and reports: aborts on the first row
-#' written on other training data or under other settings, prints the drops
-#' in the tree, warns naming any file it could not read, copies rows adopted
-#' from a legacy single file into the per-config store (so the legacy file
-#' can then be deleted), and warns once for rows it cannot verify.
+#' written on other training data or under other settings, returns the drops
+#' as notes for `evaluate()` to print inside its tree (they used to print
+#' here, above the tree's header; #91), warns naming any file it could not
+#' read, copies rows adopted from a legacy single file into the per-config
+#' store (so the legacy file can then be deleted), and warns once for rows it
+#' cannot verify.
 #'
 #' @param output_dir The run's output directory.
 #' @param config_ids The configs in this run's grid.
 #' @param data_fp,settings This run's fingerprint and settings.
-#' @param verbose Print drops in the tree.
 #' @param call The frame to report a refusal from; the default is the
 #'   caller's, so the error reads as `evaluate()`'s.
-#' @return List with `rows` (one-row results named by config id) and
+#' @return List with `rows` (one-row results named by config id),
 #'   `legacy_ids` (the ids among them read from a legacy
-#'   `eval_checkpoint.rds`, which still holds them after they are copied).
+#'   `eval_checkpoint.rds`, which still holds them after they are copied) and
+#'   `notes` (character, one tree line per kind of dropped row; empty when
+#'   none were dropped).
 #' @keywords internal
 #' @noRd
 load_eval_checkpoints <- function(output_dir, config_ids, data_fp, settings,
-                                  verbose = TRUE, call = rlang::caller_env()) {
+                                  call = rlang::caller_env()) {
 
   store <- read_checkpoint_store(output_dir)
   gated <- gate_checkpoint_rows(store$rows, data_fp, settings, config_ids)
@@ -1207,26 +1217,24 @@ load_eval_checkpoints <- function(output_dir, config_ids, data_fp, settings,
   ## Report what was dropped, and what could not be read
   ## -------------------------------------------------------------------------
 
-  if (verbose && gated$n_stale > 0) {
+  notes <- character(0)
 
-    cat(paste0(
-      "\u2502  ", cli::col_yellow("Dropped ", gated$n_stale,
-                                   " stale checkpoint entries"), "\n"
-    ))
+  if (gated$n_stale > 0) {
+
+    notes <- c(notes, paste0("Dropped ", gated$n_stale,
+                             " stale checkpoint entries"))
 
   }
 
   ## Rows scored under a different regime (SCORING_SCHEMA) are not comparable
   ## to what this run produces, and ranking them together would make
   ## best_config an artifact of which regime scored each config.
-  if (verbose && gated$n_foreign > 0) {
+  if (gated$n_foreign > 0) {
 
-    cat(paste0(
-      "\u2502  ", cli::col_yellow(
-        "Dropped ", gated$n_foreign, " checkpoint row",
-        if (gated$n_foreign > 1) "s" else "",
-        " scored under an earlier scoring schema (will be re-evaluated)"
-      ), "\n"
+    notes <- c(notes, paste0(
+      "Dropped ", gated$n_foreign, " checkpoint row",
+      if (gated$n_foreign > 1) "s" else "",
+      " scored under an earlier scoring schema (will be re-evaluated)"
     ))
 
   }
@@ -1269,7 +1277,8 @@ load_eval_checkpoints <- function(output_dir, config_ids, data_fp, settings,
 
   list(
     rows       = lapply(gated$kept, `[[`, "row"),
-    legacy_ids = names(from_legacy) %||% character(0)
+    legacy_ids = names(from_legacy) %||% character(0),
+    notes      = notes
   )
 
 }
@@ -2155,10 +2164,16 @@ outcome_complete_rows <- function(analysis, outcome_col) {
 #' The split `evaluate()` scores on and `fit()` reuses: the rows with an
 #' observed outcome ([outcome_complete_rows()]), then `set.seed(seed)`, then
 #' a `SPLIT_PROP` split stratified on the outcome, falling back to an
-#' unstratified one when stratifying fails. `fit()` calls it when it starts
-#' cold from a configured object with one configuration (#45), so that fit
-#' holds out exactly the rows `evaluate()` would have at the same seed. The
-#' draw was inline in `evaluate()` before, and it is unchanged.
+#' unstratified one when the stratified draw fails. The split can also come
+#' out unstratified with no failure: rsample drops the strata itself when it
+#' cannot bin the outcome (under 40 rows, warning "Too little data to
+#' stratify"; or silently, when a few-valued outcome pools into one stratum or
+#' tied quantiles leave one bin). The object's `strata` attribute names the
+#' outcome either way, so `stratified` in the return value is the record of
+#' which happened (#91; see [draw_stratified()]). `fit()` calls it when it
+#' starts cold from a configured object with one configuration (#45), so that
+#' fit holds out exactly the rows `evaluate()` would have at the same seed.
+#' The draw was inline in `evaluate()` before, and it is unchanged.
 #'
 #' It seeds the global RNG, as `evaluate()` always has: `evaluate()`'s CV
 #' folds are drawn from the state it leaves.
@@ -2170,30 +2185,31 @@ outcome_complete_rows <- function(analysis, outcome_col) {
 #' @param seed Integer. The seed passed to `evaluate()` (or to `fit()` on a
 #'   cold start).
 #' @return List with `split` (the `rsplit`), `n_dropped` (integer, the rows
-#'   whose outcome is `NA`) and `stratified` (`FALSE` when the stratified
-#'   draw failed and the split is unstratified). Aborts as
+#'   whose outcome is `NA`), `stratified` (`FALSE` when the split is
+#'   unstratified, because rsample dropped the strata or the stratified draw
+#'   failed; see [draw_stratified()]) and `strata_failed` (`TRUE` when the
+#'   stratified draw failed and was retried without strata). Aborts as
 #'   [outcome_complete_rows()] does.
 #' @keywords internal
 #' @noRd
 draw_eval_split <- function(analysis, outcome_col, seed) {
 
-  modelled   <- outcome_complete_rows(analysis, outcome_col)
-  stratified <- TRUE
+  modelled <- outcome_complete_rows(analysis, outcome_col)
 
   set.seed(seed)
 
-  split <- tryCatch(
-    rsample::initial_split(modelled$data, prop = SPLIT_PROP,
-                           strata = dplyr::all_of(outcome_col)),
-    error = function(e) {
-
-      stratified <<- FALSE
-      rsample::initial_split(modelled$data, prop = SPLIT_PROP)
-
-    }
+  drawn <- draw_stratified(
+    outcome      = modelled$data[[outcome_col]],
+    stratified   = function() rsample::initial_split(modelled$data, prop = SPLIT_PROP,
+                                                     strata = dplyr::all_of(outcome_col),
+                                                     breaks = STRATA_BREAKS, pool = STRATA_POOL),
+    unstratified = function() rsample::initial_split(modelled$data, prop = SPLIT_PROP)
   )
 
-  list(split = split, n_dropped = modelled$n_dropped, stratified = stratified)
+  list(split         = drawn$draw,
+       n_dropped     = modelled$n_dropped,
+       stratified    = drawn$stratified,
+       strata_failed = drawn$strata_failed)
 
 }
 
