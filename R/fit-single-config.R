@@ -31,6 +31,11 @@
 #'   `config$recipe`, the value `evaluate()` ran with. Default 9.
 #' @param pca_threshold Numeric. Variance share the `pca` feature selection
 #'   keeps, passed to [build_recipe()]. Read the same way. Default 0.995.
+#' @param outcome_range Numeric length-2 vector. The outcome's physical range,
+#'   which the back-transformed OOF, test-set and UQ-calibration predictions
+#'   (and, for a transformed response, the tuning predictions) are clamped
+#'   to. `fit()` reads it from `configure()`'s `config$outcome_range`.
+#'   Default `c(0, Inf)`.
 #'
 #' @return List with fields: config_id, status, degraded, degraded_reason,
 #'   fitted_workflow, best_params, warm_start, start_grid_size,
@@ -56,7 +61,8 @@ fit_single_config <- function(config_row,
                               allow_par           = FALSE,
                               seed                = 42L,
                               sg_window           = DEFAULT_SG_WINDOW,
-                              pca_threshold       = DEFAULT_PCA_THRESHOLD) {
+                              pca_threshold       = DEFAULT_PCA_THRESHOLD,
+                              outcome_range       = DEFAULT_OUTCOME_RANGE) {
 
   start_time <- Sys.time()
 
@@ -232,8 +238,9 @@ fit_single_config <- function(config_row,
   ## Scored on the original response scale, for the same reason as in
   ## evaluate_single_config(): the skip = TRUE transform never reaches tune's
   ## assessment set. tune_warmstart_bayes() selects on "rmse" by name, which
-  ## the factory preserves. See #49.
-  tune_metrics <- tuning_metric_set(transformation, metrics = c("rmse", "rsq"))
+  ## the factory preserves. See #49. Clamped to the outcome's range (#76).
+  tune_metrics <- tuning_metric_set(transformation, metrics = c("rmse", "rsq"),
+                                    outcome_range = outcome_range)
 
   ## -----------------------------------------------------------------------
   ## Step 6: Warm-start Bayesian re-tuning
@@ -333,13 +340,13 @@ fit_single_config <- function(config_row,
   )
 
   ## Back-transform .pred to original scale. Unconditional, like predict():
-  ## "none" is a passthrough, and the zero floor inside
+  ## "none" is a passthrough, and the clamp to the outcome's range inside
   ## back_transform_predictions() must reach these OOF predictions because
-  ## they are the meta-learner's training features, and predict() floors the
-  ## same members at serve time (#53).
+  ## they are the meta-learner's training features, and predict() clamps the
+  ## same members at serve time (#53, #76).
   bt_result <- safely_execute(
     back_transform_predictions(cv_predictions$.pred_trans, transformation,
-                               warn = FALSE),
+                               warn = FALSE, outcome_range = outcome_range),
     log_error          = FALSE,
     capture_conditions = TRUE
   )
@@ -422,9 +429,10 @@ fit_single_config <- function(config_row,
 
   test_preds <- test_pred_result$result$.pred
 
-  ## Back-transform, unconditionally (see the OOF block above and #53)
+  ## Back-transform, unconditionally (see the OOF block above, #53 and #76)
   bt_test <- safely_execute(
-    back_transform_predictions(test_preds, transformation, warn = FALSE),
+    back_transform_predictions(test_preds, transformation, warn = FALSE,
+                               outcome_range = outcome_range),
     log_error          = FALSE,
     capture_conditions = TRUE
   )
@@ -514,7 +522,8 @@ fit_single_config <- function(config_row,
         role_map        = role_map,
         transformation  = transformation,
         level_default   = DEFAULT_UQ_LEVEL,
-        seed            = seed
+        seed            = seed,
+        outcome_range   = outcome_range
       ),
       log_error          = FALSE,
       capture_conditions = TRUE

@@ -42,7 +42,8 @@
 #'   the `id`, `outcome`, `predictor` and `covariate` roles, and the outcome,
 #'   predictor and covariate values) and tuned with this run's settings
 #'   (`cv_folds`, `grid_size`, `bayesian_iter`, `prune`, `prune_threshold`
-#'   when pruning, and `seed`); either mismatch aborts, naming what differs.
+#'   when pruning, `seed`, and `configure()`'s `sg_window`, `pca_threshold`
+#'   and `outcome_range`); either mismatch aborts, naming what differs.
 #'   So re-standardized spectra, a rescaled outcome, or another outcome on the
 #'   same samples is refused rather than resumed, while adding a sibling
 #'   response with `add_response()` or a `meta` column resumes. Keep one
@@ -135,9 +136,16 @@
 #'   (the axis actually used), `evaluation$workers` (the worker count the
 #'   registered plan offered; 1 when sequential) and `evaluation$recipe` (the
 #'   `sg_window`, its width in cm-1 on the evaluated axis as `sg_window_cm`,
-#'   and the `pca_threshold` every config's recipe ran with). Aborts, before
-#'   any config runs, when `configure()`'s `sg_window` is not narrower than
-#'   the spectrum. Called on an object that
+#'   and the `pca_threshold` every config's recipe ran with). Test-set
+#'   predictions are clamped to `configure()`'s `outcome_range` before they
+#'   are scored, as are the tuning predictions of a transformed response,
+#'   which are back-transformed first. Aborts, before any config runs, when
+#'   `configure()`'s `sg_window` is not narrower than the spectrum, and, with class
+#'   `horizons_input_error`, when an observed outcome lies outside
+#'   `outcome_range` or is infinite, or when `metric = "rrmse"` under a range
+#'   whose lower bound is negative (the mean outcome it divides by can then be
+#'   zero or negative) (#76). Checkpoint rows written before the range was
+#'   recorded resume only under the default range. Called on an object that
 #'   has already been through `fit()` or `ensemble()`, it returns a
 #'   `horizons_eval` whose `models` and `ensemble` slots are empty again,
 #'   since both were built on the evaluation it replaces.
@@ -207,6 +215,24 @@ evaluate <- function(x,
   modelled  <- outcome_complete_rows(analysis, outcome_col)
   analysis  <- modelled$data
   n_dropped <- modelled$n_dropped
+
+  ## -----------------------------------------------------------------------
+  ## Step 2b: The outcome has to lie inside its range
+  ## -----------------------------------------------------------------------
+  ## Every test-set and tuning prediction is clamped to configure()'s
+  ## outcome_range, so an outcome outside it would be scored against values
+  ## the predictions cannot reach. configure() refuses that already, but an
+  ## object configured before the range existed reads as c(0, Inf), and rows
+  ## can change after configure(). Refused here, before any split or tuning,
+  ## so it costs a second rather than the whole grid (#76).
+
+  check_outcome_range(x, verb = "evaluate")
+  outcome_range <- outcome_range_setting(x)
+
+  ## rrmse divides by the mean outcome, which a range with a negative floor
+  ## lets be zero or negative; ranking by its minimum would then pick the
+  ## worst configuration.
+  check_rank_metric_range(metric, outcome_range, verb = "evaluate")
 
   ## -----------------------------------------------------------------------
   ## Step 3: Validate minimum sample size
@@ -351,7 +377,10 @@ evaluate <- function(x,
     ## every row, PCA or not: conservative, since a row that never ran PCA
     ## re-runs rather than resumes when only the threshold changed.
     sg_window       = recipe_cfg$sg_window,
-    pca_threshold   = recipe_cfg$pca_threshold
+    pca_threshold   = recipe_cfg$pca_threshold,
+    ## The range every scored prediction is clamped to (#76): the same fit
+    ## scores differently under another range, so a resume under one refuses.
+    outcome_range   = outcome_range
   )
 
   ## -----------------------------------------------------------------------
@@ -581,7 +610,8 @@ evaluate <- function(x,
         parallel_over   = axis$tune_parallel_over %||% "resamples",
         seed            = seed,
         sg_window       = recipe_cfg$sg_window,
-        pca_threshold   = recipe_cfg$pca_threshold
+        pca_threshold   = recipe_cfg$pca_threshold,
+        outcome_range   = outcome_range
       )
 
       ## Stamp before anything else sees the row, so the in-memory results and
@@ -729,6 +759,7 @@ evaluate <- function(x,
       seed            = seed,
       sg_window       = recipe_cfg$sg_window,
       pca_threshold   = recipe_cfg$pca_threshold,
+      outcome_range   = outcome_range,
       data_fp         = data_fp,
       settings        = settings,
       checkpoint_dir  = checkpoint_dir,
@@ -1084,6 +1115,18 @@ checkpoint_row_verdict <- function(row, data_fp, settings) {
   data_cmp <- compare_record(row_fp$data_fields, data_fp$data_fields)
   stored   <- checkpoint_row_settings(row)
   cmp      <- compare_record(stored, settings)
+
+  ## A row stamped before #76 records no outcome_range, and was scored with
+  ## the zero floor. Under the default range that is this run's scoring, so
+  ## the row is only unverified; under any other range it was clamped
+  ## differently, and ranking it beside this run's rows, or warm-starting
+  ## fit() from it, would mix the two. Refused like a changed setting.
+  if (outcome_range_unrecorded(stored, settings$outcome_range)) {
+
+    cmp$differ  <- c(cmp$differ, "outcome_range")
+    cmp$missing <- setdiff(cmp$missing, "outcome_range")
+
+  }
 
   hash_known <- !is.na(row_fp$data_hash) && !is.na(expected)
 
@@ -1466,6 +1509,29 @@ compare_record <- function(stored, current) {
 
 }
 
+#' Is a result row's range unrecorded under a range other than the default?
+#'
+#' @description
+#' Rows stamped before the outcome range existed (#76) carry no
+#' `outcome_range` in their settings record; they were scored with the zero
+#' floor, which is the default range. Under the default such a row is merely
+#' unverified. Under any other range it was scored differently, and the
+#' checkpoint gate and `fit()` refuse it.
+#'
+#' @param stored The row's settings record, or `NULL` when it has none.
+#' @param current_range This run's range, or `NULL` when unknown (a manifest
+#'   older than the range).
+#' @return `TRUE` when the row has no recorded range and `current_range` is
+#'   not `DEFAULT_OUTCOME_RANGE`.
+#' @keywords internal
+#' @noRd
+outcome_range_unrecorded <- function(stored, current_range) {
+
+  !is.null(current_range) && is.null(stored$outcome_range) &&
+    !identical(as.double(current_range), DEFAULT_OUTCOME_RANGE)
+
+}
+
 #' Describe differing settings for a message
 #'
 #' @param stored,current Settings records.
@@ -1494,7 +1560,9 @@ format_setting_value <- function(v) {
 
   if (length(v) == 1 && is.na(v)) return("NA")
 
-  paste(format(v), collapse = ", ")
+  ## trim: format() pads a vector's elements to one width, which put a
+  ## second space into "-Inf,  Inf" for the outcome range (#76)
+  paste(format(v, trim = TRUE), collapse = ", ")
 
 }
 
@@ -2296,7 +2364,8 @@ evaluation_recipe <- function(x, call = rlang::caller_env()) {
 #'   fixed by `SHARED_ARG_NAMES` in `R/constants.R` and asserted on entry:
 #'   `data`, `resample_idx` (from `resample_indices()`), `configs`, `role_map`,
 #'   `grid_size`, `bayesian_iter`, `prune`, `prune_threshold`, `seed`,
-#'   `sg_window`, `pca_threshold` (the object's recipe settings), `data_fp`
+#'   `sg_window`, `pca_threshold` (the object's recipe settings),
+#'   `outcome_range` (the range scored predictions are clamped to), `data_fp`
 #'   and `settings` (the parent's [eval_data_fingerprint()] and
 #'   [eval_settings()] records, stamped on the row as-is), `checkpoint_dir`,
 #'   and `pkg_version`. There is no `allow_par`: on
@@ -2370,7 +2439,8 @@ evaluate_config_worker <- function(config_i, shared) {
     allow_par       = FALSE,     # configs axis: tune runs sequentially inside
     seed            = shared$seed,
     sg_window       = shared$sg_window,
-    pca_threshold   = shared$pca_threshold
+    pca_threshold   = shared$pca_threshold,
+    outcome_range   = shared$outcome_range
   )
 
   ## Both provenance records are sent rather than rebuilt. The data

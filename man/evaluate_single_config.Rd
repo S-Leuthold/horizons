@@ -17,7 +17,8 @@ evaluate_single_config(
   parallel_over = "resamples",
   seed = 42L,
   sg_window = DEFAULT_SG_WINDOW,
-  pca_threshold = DEFAULT_PCA_THRESHOLD
+  pca_threshold = DEFAULT_PCA_THRESHOLD,
+  outcome_range = DEFAULT_OUTCOME_RANGE
 )
 }
 \arguments{
@@ -68,6 +69,12 @@ to \code{\link[=build_recipe]{build_recipe()}}. \code{evaluate()} reads it from 
 \item{pca_threshold}{Numeric. Variance share the \code{pca} feature selection
 keeps, passed to \code{\link[=build_recipe]{build_recipe()}}. \code{evaluate()} reads it from
 \code{configure()}'s \code{config$recipe}. Default 0.995.}
+
+\item{outcome_range}{Numeric length-2 vector. The outcome's physical range,
+which the back-transformed test-set predictions (and, for a transformed
+response, the tuning predictions) are clamped to before scoring.
+\code{evaluate()} reads it from \code{configure()}'s \code{config$outcome_range}.
+Default \code{c(0, Inf)}.}
 }
 \value{
 Single-row tibble with columns: \code{config_id}, \code{status} (\code{"pruned"}

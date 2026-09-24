@@ -1247,7 +1247,9 @@ describe("evaluate() - checkpoint data provenance", {
                                    prune_threshold = NA_real_, seed = 42L,
                                    ## configure()'s recipe settings (#62), at
                                    ## the defaults an unconfigured record runs
-                                   sg_window = 9L, pca_threshold = 0.995))
+                                   sg_window = 9L, pca_threshold = 0.995,
+                                   ## and its outcome range (#76), likewise
+                                   outcome_range = c(0, Inf)))
 
     row <- readRDS(file.path(tmpdir, "checkpoints", "cfg_001.rds"))
     expect_identical(row$data_hash, manifest$data_hash)

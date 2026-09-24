@@ -259,12 +259,18 @@ ccc <- yardstick::new_numeric_metric(
 #'   values abort rather than silently scoring cross-scale.
 #' @param metrics Character vector naming the metrics to include, in order.
 #'   Any of `"rmse"`, `"rrmse"`, `"rsq"`, `"mae"`, `"rpd"`, `"ccc"`.
+#' @param outcome_range Numeric length-2 vector. The outcome's physical range,
+#'   which the back-transformed estimate is clamped to, as
+#'   [back_transform_predictions()] clamps every scored prediction. Read only
+#'   for a transformed response; the `"none"` set scores the estimate as tune
+#'   produced it, as it did before the range existed. Default `c(0, Inf)`.
 #'
 #' @return A `yardstick` metric set.
 #' @seealso [back_transform_predictions()], [compute_original_scale_metrics()]
 #' @keywords internal
 tuning_metric_set <- function(transformation,
-                              metrics = c("rmse", "rrmse", "rsq", "mae", "rpd", "ccc")) {
+                              metrics       = c("rmse", "rrmse", "rsq", "mae", "rpd", "ccc"),
+                              outcome_range = DEFAULT_OUTCOME_RANGE) {
 
   ## -------------------------------------------------------------------------
   ## Validate inputs
@@ -316,6 +322,18 @@ tuning_metric_set <- function(transformation,
 
   }
 
+  ## Checking the range also forces it. The wrapped metrics close over it, and
+  ## tune may serialize them to workers: an unforced promise would carry the
+  ## caller's frame, training data and all, along with it.
+  if (!is_valid_outcome_range(outcome_range)) {
+
+    cli::cli_abort(c(
+      "{.arg outcome_range} must be a numeric vector of length 2 with lower < upper.",
+      "x" = "Got {.val {outcome_range}}."
+    ))
+
+  }
+
   ## -------------------------------------------------------------------------
   ## No transformation: the plain metric set, exactly as before
   ## -------------------------------------------------------------------------
@@ -339,7 +357,8 @@ tuning_metric_set <- function(transformation,
       name           = name,
       vec_fn         = registry[[name]]$vec,
       direction      = registry[[name]]$direction,
-      transformation = transformation
+      transformation = transformation,
+      outcome_range  = outcome_range
     )
 
   })
@@ -358,16 +377,21 @@ tuning_metric_set <- function(transformation,
 #' @param vec_fn The `*_vec()` implementation to score with.
 #' @param direction `"minimize"` or `"maximize"`, as `tune` expects.
 #' @param transformation Transformation to invert on the estimate.
+#' @param outcome_range The range the back-transformed estimate is clamped to.
 #' @return A `yardstick` numeric metric.
 #' @keywords internal
 #' @noRd
-make_original_scale_metric <- function(name, vec_fn, direction, transformation) {
+make_original_scale_metric <- function(name, vec_fn, direction, transformation,
+                                       outcome_range = DEFAULT_OUTCOME_RANGE) {
+
+  force(outcome_range)
 
   ### The estimate arrives on the transformed scale; the truth does not.
   ### Back-transform the estimate only, then score as usual.
   scaled_vec <- function(truth, estimate, na_rm = TRUE, ...) {
 
-    estimate <- back_transform_predictions(estimate, transformation, warn = FALSE)
+    estimate <- back_transform_predictions(estimate, transformation, warn = FALSE,
+                                           outcome_range = outcome_range)
     vec_fn(truth, estimate, na_rm = na_rm, ...)
 
   }

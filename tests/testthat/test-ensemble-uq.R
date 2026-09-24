@@ -213,7 +213,7 @@ describe("fit_ensemble_uq() - fold honesty and Route B", {
 
     meta_frame <- oof$predictors
 
-    in_sample_pred <- floor_at_zero(
+    in_sample_pred <- clamp_to_outcome_range(
       stats::predict(ens_xgb$ensemble$model, new_data = meta_frame)$.pred
     )
     in_sample_resid <- oof$truth - in_sample_pred

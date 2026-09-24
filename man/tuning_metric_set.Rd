@@ -6,7 +6,8 @@
 \usage{
 tuning_metric_set(
   transformation,
-  metrics = c("rmse", "rrmse", "rsq", "mae", "rpd", "ccc")
+  metrics = c("rmse", "rrmse", "rsq", "mae", "rpd", "ccc"),
+  outcome_range = DEFAULT_OUTCOME_RANGE
 )
 }
 \arguments{
@@ -16,6 +17,12 @@ values abort rather than silently scoring cross-scale.}
 
 \item{metrics}{Character vector naming the metrics to include, in order.
 Any of \code{"rmse"}, \code{"rrmse"}, \code{"rsq"}, \code{"mae"}, \code{"rpd"}, \code{"ccc"}.}
+
+\item{outcome_range}{Numeric length-2 vector. The outcome's physical range,
+which the back-transformed estimate is clamped to, as
+\code{\link[=back_transform_predictions]{back_transform_predictions()}} clamps every scored prediction. Read only
+for a transformed response; the \code{"none"} set scores the estimate as tune
+produced it, as it did before the range existed. Default \code{c(0, Inf)}.}
 }
 \value{
 A \code{yardstick} metric set.

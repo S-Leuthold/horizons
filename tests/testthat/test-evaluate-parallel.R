@@ -86,13 +86,15 @@ describe("evaluate() parallel worker footprint", {
 
   })
 
-  it("carries the recipe settings in the payload and hands them to the config (#62)", {
+  it("carries the recipe settings and the outcome range in the payload and hands them to the config (#62, #76)", {
 
     ## Run in-process: the worker body is an ordinary function, and what is
-    ## under test is that it forwards shared$sg_window and
-    ## shared$pca_threshold, not the dispatch. evaluate_single_config() is
-    ## replaced with a recorder, so nothing is tuned.
-    expect_true(all(c("sg_window", "pca_threshold") %in% horizons:::SHARED_ARG_NAMES))
+    ## under test is that it forwards shared$sg_window,
+    ## shared$pca_threshold and shared$outcome_range, not the dispatch.
+    ## evaluate_single_config() is replaced with a recorder, so nothing is
+    ## tuned.
+    expect_true(all(c("sg_window", "pca_threshold", "outcome_range") %in%
+                      horizons:::SHARED_ARG_NAMES))
 
     obj   <- make_eval_object(n = 40, n_wn = 20, n_configs = 1)
     set.seed(1)
@@ -111,9 +113,11 @@ describe("evaluate() parallel worker footprint", {
       seed            = 42L,
       sg_window       = 13L,
       pca_threshold   = 0.9,
+      outcome_range   = c(-Inf, Inf),
       data_fp         = horizons:::eval_data_fingerprint(rsample::training(split),
                                                          obj$data$role_map),
-      settings        = horizons:::eval_settings(sg_window = 13L, pca_threshold = 0.9),
+      settings        = horizons:::eval_settings(sg_window = 13L, pca_threshold = 0.9,
+                                                 outcome_range = c(-Inf, Inf)),
       checkpoint_dir  = NULL,
       pkg_version     = as.character(utils::packageVersion("horizons"))
     )
@@ -122,7 +126,7 @@ describe("evaluate() parallel worker footprint", {
 
     testthat::local_mocked_bindings(
       evaluate_single_config = function(...) {
-        seen <<- list(...)[c("sg_window", "pca_threshold")]
+        seen <<- list(...)[c("sg_window", "pca_threshold", "outcome_range")]
         tibble::tibble(config_id = "cfg_001", status = "failed")
       },
       .package = "horizons"
@@ -130,7 +134,9 @@ describe("evaluate() parallel worker footprint", {
 
     horizons:::evaluate_config_worker(1L, shared)
 
-    expect_identical(seen, list(sg_window = 13L, pca_threshold = 0.9))
+    ## The outcome range rides the same payload (#76)
+    expect_identical(seen, list(sg_window = 13L, pca_threshold = 0.9,
+                                outcome_range = c(-Inf, Inf)))
 
   })
 

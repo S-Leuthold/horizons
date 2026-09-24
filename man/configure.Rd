@@ -18,7 +18,8 @@ configure(
   bayesian_iter = 15L,
   final_bayesian_iter = 25L,
   sg_window = 9L,
-  pca_threshold = 0.995
+  pca_threshold = 0.995,
+  outcome_range = c(0, Inf)
 )
 }
 \arguments{
@@ -69,6 +70,15 @@ by \code{evaluate()}) smaller than the number of spectral columns. For
 
 \item{pca_threshold}{\code{numeric}. Share of variance \code{feature_selection = "pca"} keeps, applied to every configuration that uses it. Default
 0.995. Must be in (0, 1].}
+
+\item{outcome_range}{\code{numeric(2)}. The outcome's physical range,
+\code{c(lower, upper)} with lower < upper; either end may be infinite. Every
+scored and served prediction is clamped to it. Default \code{c(0, Inf)},
+non-negative; use \code{c(-Inf, Inf)} for a signed property such as δ13C.
+Set it from the property's physical bounds, not the data's. Every
+observed value of the outcome must lie inside it. A negative lower bound
+rules out the \code{"log"}, \code{"log10"} and \code{"sqrt"} transformations. See
+Outcome range.}
 }
 \value{
 A modified \code{horizons_data} object with:
@@ -80,6 +90,7 @@ A modified \code{horizons_data} object with:
 \item \code{config$expansion} — list of original inputs (for reproducibility)
 \item \code{config$recipe} — the recipe settings every configuration is built
 with: \code{sg_window} and \code{pca_threshold}
+\item \code{config$outcome_range} — the outcome's range, as a length-2 double
 }
 }
 \description{
@@ -190,6 +201,40 @@ in \code{evaluation$recipe}, and \code{evaluate()} refuses a window as wide as t
 spectrum. \code{pca_threshold} is the share of variance kept by
 \code{feature_selection = "pca"} and is read by nothing else. Both defaults are
 the values the recipe ran before they were settable. See GitHub issue #62.
+
+\strong{Outcome range:}
+
+\code{outcome_range} is the physical range of the outcome, \code{c(lower, upper)},
+either end possibly infinite. Every prediction the package scores or
+serves is clamped to it: the test-set and out-of-fold predictions
+\code{evaluate()} and \code{fit()} score, the calibration predictions conformal
+intervals are built from, \code{predict()}'s point predictions and interval
+bounds, and the ensemble's. The default, \code{c(0, Inf)}, is the non-negative
+floor the package applied before the range was settable, right for
+concentrations, contents and most other soil properties. A signed property
+such as δ13C or δ15N takes \code{c(-Inf, Inf)}, which clamps nothing, and a
+bounded one such as a percentage may take \code{c(0, 100)}.
+
+The range comes from what the property can physically be, not from the
+data in hand. Setting it to the observed minimum and maximum clamps
+predictions to the training range and, once test rows are in the table,
+tunes the clamp on them. Prefer \code{-Inf} to an arbitrarily low finite floor:
+the range's lower bound anchors the response bound \code{fit()} stores (see
+\code{\link[=fit]{fit()}}), which allows half the span from that anchor above the training
+maximum, so a distant floor loosens the guardrail. For outcomes between 10
+and 20 the bound is 530 under \code{c(-1000, Inf)} and 25 under \code{c(-Inf, Inf)}.
+
+The range is checked against the data: when an observed value of the
+outcome lies outside it or is infinite, \code{configure()} aborts with class
+\code{horizons_input_error}, and \code{evaluate()}, \code{fit()} and \code{ensemble()} repeat
+the check before they fit anything. A range whose lower bound is negative
+cannot be combined with the \code{"log"}, \code{"log10"} or \code{"sqrt"} transformations,
+which are undefined for negative values and whose back-transforms floor
+the predictions, and \code{evaluate()} and \code{fit()} refuse to rank by \code{"rrmse"}
+under it, since its denominator, the mean outcome, can be zero or negative.
+One range applies to the one outcome an object models; to model several
+outcomes with different ranges, give each \code{configure()} call its own. See
+GitHub issue #76.
 }
 \examples{
 \dontrun{
@@ -216,6 +261,9 @@ hd |> configure(
   sg_window         = 15L,
   pca_threshold     = 0.99
 )
+
+# A signed property: no floor at zero
+hd |> configure(outcome = "d13C", outcome_range = c(-Inf, Inf))
 
 # Multi-outcome pattern
 c("SOC", "POM_C", "pH") |>

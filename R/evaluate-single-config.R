@@ -45,6 +45,11 @@
 #' @param pca_threshold Numeric. Variance share the `pca` feature selection
 #'   keeps, passed to [build_recipe()]. `evaluate()` reads it from
 #'   `configure()`'s `config$recipe`. Default 0.995.
+#' @param outcome_range Numeric length-2 vector. The outcome's physical range,
+#'   which the back-transformed test-set predictions (and, for a transformed
+#'   response, the tuning predictions) are clamped to before scoring.
+#'   `evaluate()` reads it from `configure()`'s `config$outcome_range`.
+#'   Default `c(0, Inf)`.
 #'
 #' @return Single-row tibble with columns: `config_id`, `status` (`"pruned"`
 #'   means Bayesian refinement was skipped), `below_prune_threshold` (logical;
@@ -70,7 +75,8 @@ evaluate_single_config <- function(config_row,
                                    parallel_over   = "resamples",
                                    seed            = 42L,
                                    sg_window       = DEFAULT_SG_WINDOW,
-                                   pca_threshold   = DEFAULT_PCA_THRESHOLD) {
+                                   pca_threshold   = DEFAULT_PCA_THRESHOLD,
+                                   outcome_range   = DEFAULT_OUTCOME_RANGE) {
 
   start_time <- Sys.time()
 
@@ -216,8 +222,9 @@ evaluate_single_config <- function(config_row,
   ## tuning_metric_set() back-transforms the estimate inside each metric so
   ## select_best(), tune_bayes() and the prune gate all see the same scale the
   ## leaderboard reports. rmse stays first: tune_bayes() optimises the first
-  ## metric in the set. See #49.
-  tune_metrics <- tuning_metric_set(transformation)
+  ## metric in the set. See #49. The back-transform clamps to the outcome's
+  ## range, as the test-set scoring below does (#76).
+  tune_metrics <- tuning_metric_set(transformation, outcome_range = outcome_range)
 
   ## -----------------------------------------------------------------------
   ## Step 6: Grid search
@@ -474,11 +481,12 @@ evaluate_single_config <- function(config_row,
   test_predictions <- tune::collect_predictions(last_fit_obj)
 
   ## Unconditional, like predict(): the "none" branch is a passthrough, and
-  ## the zero floor inside back_transform_predictions() must apply to every
-  ## transformation so evaluation scores what deploy serves (#53).
+  ## the clamp to the outcome's range inside back_transform_predictions()
+  ## must apply to every transformation so evaluation scores what deploy
+  ## serves (#53, #76).
   bt_result <- safely_execute(
     back_transform_predictions(test_predictions$.pred, transformation,
-                               warn = FALSE),
+                               warn = FALSE, outcome_range = outcome_range),
     log_error          = FALSE,
     capture_conditions = TRUE
   )

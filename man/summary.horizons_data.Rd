@@ -30,7 +30,8 @@ preprocessing history, aggregation settings
 drawn per property, similarity space and metric, twins excluded, and any
 rows removed since the draw (present only for objects from
 \code{select_training()})
-\item \strong{Configuration section}: Tuning parameter defaults, config count
+\item \strong{Configuration section}: Tuning parameter defaults, config count, and
+the outcome range when it is not the default \code{c(0, Inf)}
 \item \strong{Validation section}: Whether validation has run, pass/fail status
 \item \strong{Pipeline status}: Current stage and next step guidance, noting when
 the rows were drawn from a pool
