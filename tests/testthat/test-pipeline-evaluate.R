@@ -610,6 +610,21 @@ describe("eval_data_fingerprint()", {
 
   })
 
+  it("ignores roles that never reach the model: a sibling response or a meta column", {
+
+    wider <- df_xy
+    wider$clay <- c(1, 2, 3)
+    wider$note <- c("p", "q", "r")
+
+    roles_wider <- rbind(roles_xy,
+                         tibble::tibble(variable = c("clay", "note"),
+                                        role     = c("response", "meta")))
+
+    expect_identical(eval_data_fingerprint(wider, roles_wider)$data_fields,
+                     eval_data_fingerprint(df_xy, roles_xy)$data_fields)
+
+  })
+
 })
 
 ## A condition's message on one line: cli wraps at the console width, so a
@@ -775,7 +790,7 @@ describe("evaluate() - checkpoint data provenance", {
 
   })
 
-  it("aborts when the column roles change", {
+  it("aborts when a predictor changes role", {
 
     err <- refuses_on(function(o) {
       o$data$role_map$role[o$data$role_map$variable == "wn_3982"] <- "meta"
@@ -784,6 +799,31 @@ describe("evaluate() - checkpoint data provenance", {
 
     expect_s3_class(err, "horizons_input_error")
     expect_match(flat_message(err), "role_map")
+
+  })
+
+  it("resumes after add_response() joins another property", {
+
+    ## A sibling response is held out of the model (response_hold), so it
+    ## cannot change what a row holds, and must not refuse the resume.
+    obj    <- make_eval_object(n_configs = 2)
+    tmpdir <- withr::local_tempdir()
+
+    first <- suppressWarnings(evaluate(obj, output_dir = tmpdir, prune = FALSE,
+                                       verbose = FALSE, seed = 42L))
+
+    lab <- tibble::tibble(sample_id = obj$data$analysis$sample_id,
+                          clay      = seq_len(nrow(obj$data$analysis)))
+    invisible(capture.output(wider <- add_response(obj, lab, variable = "clay")))
+
+    warns <- testthat::capture_warnings(
+      second <- evaluate(wider, output_dir = tmpdir, prune = FALSE,
+                         verbose = FALSE, seed = 42L)
+    )
+
+    expect_false(any(grepl("fingerprint", warns)))
+    expect_equal(second$evaluation$results$runtime_secs,
+                 first$evaluation$results$runtime_secs)
 
   })
 

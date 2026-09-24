@@ -540,14 +540,18 @@ consequences; the review itself is in
   does exactly this), an outcome rescaled under the same name, or another
   `cv_folds`, `grid_size`, `bayesian_iter`, `prune`, `prune_threshold` or
   `seed` resumed stale results, silently. Rows now carry `data_fields` (the
-  outcome, the sample ids, the role map, and the outcome, predictor and
-  covariate values in id order) and `settings`, list-columns that are also
-  in `evaluation$results`, compared field by field on resume. An abort
-  names what differs: "was computed for outcome clay; this run models SOC"
-  rather than two hashes, "different predictor values for the same
-  samples", or each setting with both values; a data abort also names any
-  settings that differ, since a changed `seed` moves the split. Keep one
-  `output_dir` per outcome. Hashing the predictor values costs about 0.3 s
+  outcome, the sample ids, the role-map rows with the roles that reach a
+  row's contents, `id`, `outcome`, `predictor` and `covariate`, and the
+  outcome, predictor and covariate values in id order) and `settings`,
+  list-columns that are also in `evaluation$results`, compared field by
+  field on resume. A sibling `response` or a `meta` column never reaches the
+  model, so `add_response()` of another property between two runs still
+  resumes, while a predictor changing role refuses. An abort names what
+  differs: "was computed for outcome clay; this run models SOC" rather than
+  two hashes, "different predictor values for the same samples", or each
+  setting with both values; a data abort also names any settings that
+  differ, since a changed `seed` moves the split. Keep one `output_dir` per
+  outcome. Hashing the predictor values costs about 0.3 s
   at 17,788 x 1,701, once per run; the parallel worker is sent both records
   rather than recomputing them. `prune_threshold` is recorded only when
   `prune = TRUE`, since it is never read otherwise. The ranking `metric` is

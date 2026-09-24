@@ -50,13 +50,15 @@ Parallelism section. Default \code{"auto"}.}
 written to \verb{<output_dir>/checkpoints/<config_id>.rds} as it finishes, and
 a rerun into the same directory resumes from those files. Required when
 configs are dispatched to workers. A resumed row must have been scored on
-this run's training data (the outcome, the sample ids, the role map, and
-the outcome, predictor and covariate values) and tuned with this run's
-settings (\code{cv_folds}, \code{grid_size}, \code{bayesian_iter}, \code{prune},
-\code{prune_threshold} when pruning, and \code{seed}); either mismatch aborts,
-naming what differs. So re-standardized spectra, a rescaled outcome, or
-another outcome on the same samples is refused rather than resumed. Keep
-one \code{output_dir} per outcome. The ranking \code{metric} is not checked, since
+this run's training data (the outcome, the sample ids, which columns hold
+the \code{id}, \code{outcome}, \code{predictor} and \code{covariate} roles, and the outcome,
+predictor and covariate values) and tuned with this run's settings
+(\code{cv_folds}, \code{grid_size}, \code{bayesian_iter}, \code{prune}, \code{prune_threshold}
+when pruning, and \code{seed}); either mismatch aborts, naming what differs.
+So re-standardized spectra, a rescaled outcome, or another outcome on the
+same samples is refused rather than resumed, while adding a sibling
+response with \code{add_response()} or a \code{meta} column resumes. Keep one
+\code{output_dir} per outcome. The ranking \code{metric} is not checked, since
 every row carries all six cross-validated metrics. Rows scored under an
 earlier scoring schema are dropped and re-evaluated; rows for configs no
 longer in the grid are dropped; a file that cannot be used warns and its

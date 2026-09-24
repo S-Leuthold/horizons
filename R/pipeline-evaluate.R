@@ -33,13 +33,15 @@
 #'   written to `<output_dir>/checkpoints/<config_id>.rds` as it finishes, and
 #'   a rerun into the same directory resumes from those files. Required when
 #'   configs are dispatched to workers. A resumed row must have been scored on
-#'   this run's training data (the outcome, the sample ids, the role map, and
-#'   the outcome, predictor and covariate values) and tuned with this run's
-#'   settings (`cv_folds`, `grid_size`, `bayesian_iter`, `prune`,
-#'   `prune_threshold` when pruning, and `seed`); either mismatch aborts,
-#'   naming what differs. So re-standardized spectra, a rescaled outcome, or
-#'   another outcome on the same samples is refused rather than resumed. Keep
-#'   one `output_dir` per outcome. The ranking `metric` is not checked, since
+#'   this run's training data (the outcome, the sample ids, which columns hold
+#'   the `id`, `outcome`, `predictor` and `covariate` roles, and the outcome,
+#'   predictor and covariate values) and tuned with this run's settings
+#'   (`cv_folds`, `grid_size`, `bayesian_iter`, `prune`, `prune_threshold`
+#'   when pruning, and `seed`); either mismatch aborts, naming what differs.
+#'   So re-standardized spectra, a rescaled outcome, or another outcome on the
+#'   same samples is refused rather than resumed, while adding a sibling
+#'   response with `add_response()` or a `meta` column resumes. Keep one
+#'   `output_dir` per outcome. The ranking `metric` is not checked, since
 #'   every row carries all six cross-validated metrics. Rows scored under an
 #'   earlier scoring schema are dropped and re-evaluated; rows for configs no
 #'   longer in the grid are dropped; a file that cannot be used warns and its
@@ -1441,7 +1443,8 @@ abort_checkpoint_settings_mismatch <- function(diffs, output_dir, source,
 #' The hash says nothing about the values on those rows, so re-standardized
 #' spectra (#64 moved the grid for the same samples) or a rescaled outcome
 #' under the same name resumed stale results silently (#42). `data_fields`
-#' records them by name: the outcome, the sample ids, the role map, and the
+#' records them by name: the outcome, the sample ids, the role-map rows whose
+#' roles shape a row (`id`, `outcome`, `predictor`, `covariate`), and the
 #' outcome, predictor and covariate values in id order. They are compared
 #' field by field, like the tuning settings, so a row written before a field
 #' existed is unverified (warned) rather than refused, and a refusal can say
@@ -1516,9 +1519,16 @@ eval_data_fingerprint <- function(train_data, role_map = NULL) {
     if (has_roles) as.character(role_map$variable[role_map$role == role]) else character(0)
   }
 
+  ## Only the roles that shape a row's contents. build_recipe() models the
+  ## outcome on the predictors and on covariates (held, then promoted per
+  ## config), and the id names the rows; a sibling `response` becomes
+  ## `response_hold` and `meta` stays `meta`, neither reaching the model. So
+  ## add_response() of another property, or a new meta column, between two
+  ## runs does not refuse a resume.
   roles <- if (has_roles) {
-    data.frame(variable = as.character(role_map$variable),
-               role     = as.character(role_map$role))
+    shaping <- role_map$role %in% c("id", "outcome", "predictor", "covariate")
+    data.frame(variable = as.character(role_map$variable[shaping]),
+               role     = as.character(role_map$role[shaping]))
   } else {
     NULL
   }
@@ -1708,7 +1718,7 @@ describe_data_diff <- function(stored, current, differ) {
 
   clauses <- c(
     ids            = "was scored on a different set of training samples.",
-    roles          = "was scored under different column roles (role_map).",
+    roles          = "was scored with different id, outcome, predictor or covariate columns (role_map).",
     outcome_values = "was scored on different outcome values for the same samples.",
     predictors     = "was scored on different predictor values for the same samples (re-standardized or re-processed spectra, for example).",
     covariates     = "was scored on different covariate values for the same samples."

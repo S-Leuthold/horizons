@@ -1,6 +1,6 @@
 {
-  "generated_at": "2026-09-23T23:39:08-0500",
-  "content_md5": "a7491c0feeb9002a4f0bb9990c7423d8",
+  "generated_at": "2026-09-24T00:16:18-0500",
+  "content_md5": "891207cab60d5d335c417635904adfce",
   "horizons": "0.9.0",
   "lanes": [
     {
@@ -1304,14 +1304,14 @@
           "default": null,
           "text": "A `horizons_data` object with `config$configs` populated by `configure()`.",
           "touch": "Always; a configured object, ideally validated.",
-          "source": "R/pipeline-evaluate.R#L134"
+          "source": "R/pipeline-evaluate.R#L136"
         },
         {
           "name": "metric",
           "default": "\"rpd\"",
           "text": "Character. Metric for ranking configurations. One of `\"rpd\"`, `\"rsq\"`, `\"rmse\"`, `\"rrmse\"`, `\"ccc\"`, `\"mae\"`. Ranking uses the cross-validated value of that metric at each config's selected hyperparameters (evaluation$results$cv_<metric>); the test-set columns are reported but never used for selection, so they remain honest held-out estimates. Default `\"rpd\"`.",
           "touch": "To rank by something other than RPD; the ranking reads the cross-validated column of that metric.",
-          "source": "R/pipeline-evaluate.R#L694"
+          "source": "R/pipeline-evaluate.R#L696"
         },
         {
           "name": "prune",
@@ -1332,68 +1332,68 @@
           "default": "FALSE",
           "text": "Logical. If `TRUE`, dispatch onto whatever `future::plan()` the caller has registered. If no usable backend is registered (fewer than two workers), warns naming the plan it found and runs sequentially. `FALSE` (the default) runs in the calling process and never inspects the plan. `evaluate()` never registers or alters a plan.",
           "touch": "TRUE after registering a future plan; evaluate() never registers one. FALSE ignores any plan.",
-          "source": "R/pipeline-evaluate.R#L183"
+          "source": "R/pipeline-evaluate.R#L185"
         },
         {
           "name": "parallelize_over",
           "default": "\"auto\"",
           "text": "Character. Which axis of the work the registered plan is applied to; ignored when `allow_par = FALSE`. See the Parallelism section. Default `\"auto\"`.",
           "touch": "\"configs\" for a large grid on many cores, \"resamples\" for a short grid on few; \"auto\" picks configs when the grid is at least cv_folds long.",
-          "source": "R/pipeline-evaluate.R#L183"
+          "source": "R/pipeline-evaluate.R#L185"
         },
         {
           "name": "output_dir",
           "default": "NULL",
-          "text": "Character or NULL. If provided, each config's result is written to <output_dir>/checkpoints/<config_id>.rds as it finishes, and a rerun into the same directory resumes from those files. Required when configs are dispatched to workers. A resumed row must have been scored on this run's training data (the outcome, the sample ids, the role map, and the outcome, predictor and covariate values) and tuned with this run's settings (`cv_folds`, `grid_size`, `bayesian_iter`, `prune`, `prune_threshold` when pruning, and `seed`); either mismatch aborts, naming what differs. So re-standardized spectra, a rescaled outcome, or another outcome on the same samples is refused rather than resumed. Keep one `output_dir` per outcome. The ranking `metric` is not checked, since every row carries all six cross-validated metrics. Rows scored under an earlier scoring schema are dropped and re-evaluated; rows for configs no longer in the grid are dropped; a file that cannot be used warns and its config is re-evaluated; rows written before a fingerprint field existed warn once and resume. A whole-table `eval_checkpoint.rds` from earlier versions is read only for configs with no per-config file, and its rows are copied into checkpoints/, after which it can be deleted. Default NULL (no checkpointing).",
-          "touch": "Always for a long run; required when configurations are dispatched to workers. Each configuration is checkpointed to its own file under checkpoints/ and a rerun resumes, refusing checkpoints written on other training data (other samples, outcome, roles or values, so re-standardized spectra count) or tuned under different settings. Keep one directory per outcome; changing only the ranking metric resumes.",
-          "source": "R/pipeline-evaluate.R#L312"
+          "text": "Character or NULL. If provided, each config's result is written to <output_dir>/checkpoints/<config_id>.rds as it finishes, and a rerun into the same directory resumes from those files. Required when configs are dispatched to workers. A resumed row must have been scored on this run's training data (the outcome, the sample ids, which columns hold the `id`, `outcome`, `predictor` and `covariate` roles, and the outcome, predictor and covariate values) and tuned with this run's settings (`cv_folds`, `grid_size`, `bayesian_iter`, `prune`, `prune_threshold` when pruning, and `seed`); either mismatch aborts, naming what differs. So re-standardized spectra, a rescaled outcome, or another outcome on the same samples is refused rather than resumed, while adding a sibling response with `add_response()` or a `meta` column resumes. Keep one `output_dir` per outcome. The ranking `metric` is not checked, since every row carries all six cross-validated metrics. Rows scored under an earlier scoring schema are dropped and re-evaluated; rows for configs no longer in the grid are dropped; a file that cannot be used warns and its config is re-evaluated; rows written before a fingerprint field existed warn once and resume. A whole-table `eval_checkpoint.rds` from earlier versions is read only for configs with no per-config file, and its rows are copied into checkpoints/, after which it can be deleted. Default NULL (no checkpointing).",
+          "touch": "Always for a long run; required when configurations are dispatched to workers. Each configuration is checkpointed to its own file under checkpoints/ and a rerun resumes, refusing checkpoints written on other training data (other samples, outcome, id/outcome/predictor/covariate columns, or values, so re-standardized spectra count) or tuned under different settings. Keep one directory per outcome; changing only the ranking metric, or adding a sibling response or meta column, resumes.",
+          "source": "R/pipeline-evaluate.R#L314"
         },
         {
           "name": "seed",
           "default": "307L",
           "text": "Integer. Random seed for train/test split and CV folds. Default 307L.",
           "touch": "To change the split and the folds; the same seed reproduces the run for every engine except Cubist with committees.",
-          "source": "R/pipeline-evaluate.R#L219"
+          "source": "R/pipeline-evaluate.R#L221"
         },
         {
           "name": "verbose",
           "default": "TRUE",
           "text": "Logical. Print progress tree to console. Default TRUE.",
           "touch": "Set FALSE inside loops.",
-          "source": "R/pipeline-evaluate.R#L350"
+          "source": "R/pipeline-evaluate.R#L352"
         },
         {
           "name": "workers",
           "default": "NULL",
           "text": "Deprecated (2026-09-14) and ignored, with a warning. The earlier design took a core count and auto-split it into outer and inner levels while managing its own nested plan. Register a plan and use `allow_par` with `parallelize_over` instead.",
           "touch": "Never; deprecated and ignored with a warning. Register a plan instead.",
-          "source": "R/pipeline-evaluate.R#L117"
+          "source": "R/pipeline-evaluate.R#L119"
         }
       ],
       "mechanics": [
         {
           "step": "Checks the metric and the grid, drops rows whose outcome is NA, and requires at least twice cv_folds rows.",
-          "source": "R/pipeline-evaluate.R#L123"
+          "source": "R/pipeline-evaluate.R#L125"
         },
         {
           "step": "Resolves the parallel axis against the registered plan, downgrading to sequential with a warning when the plan offers fewer than two workers, and pins BLAS and thread counts in the parent before any dispatch.",
-          "source": "R/pipeline-evaluate.R#L183"
+          "source": "R/pipeline-evaluate.R#L185"
         },
         {
-          "step": "Splits 80/20 stratified on the outcome (falling back to unstratified), builds cv_folds stratified folds on the training part, and fingerprints the training data (the outcome, the sample ids, the role map, and the outcome, predictor and covariate values, once per run) so a checkpoint from other rows or other values cannot be resumed.",
-          "source": "R/pipeline-evaluate.R#L219"
+          "step": "Splits 80/20 stratified on the outcome (falling back to unstratified), builds cv_folds stratified folds on the training part, and fingerprints the training data (the outcome, the sample ids, which columns hold the id, outcome, predictor and covariate roles, and the outcome, predictor and covariate values, once per run) so a checkpoint from other rows or other values cannot be resumed.",
+          "source": "R/pipeline-evaluate.R#L221"
         },
         {
           "step": "Records the tuning settings a result row depends on (cv_folds, grid_size, bayesian_iter, prune, prune_threshold when pruning, and seed), so a checkpoint tuned differently cannot be resumed either. The metric is left out, since every row carries all six cv_ metrics.",
-          "source": "R/pipeline-evaluate.R#L292"
+          "source": "R/pipeline-evaluate.R#L294"
         },
         {
           "step": "Loads the per-config checkpoints, the only store, plus the rows of a legacy eval_checkpoint.rds for configurations with no per-config file, which it copies across. A file counts only under its own configuration's name, so a leftover temp file cannot shadow it. Every row passes one gate order, fingerprint and settings (a mismatch aborts) then scoring schema (an older one is dropped); rows for configurations no longer in the grid are dropped, a file that cannot be used warns, and rows with no fingerprint warn once.",
-          "source": "R/pipeline-evaluate.R#L1081"
+          "source": "R/pipeline-evaluate.R#L1083"
         },
         {
           "step": "Writes a manifest carrying the fingerprint and settings, so monitor_evaluate() can watch the run and gate the checkpoints the way evaluate() does.",
-          "source": "R/pipeline-evaluate.R#L402"
+          "source": "R/pipeline-evaluate.R#L404"
         },
         {
           "step": "Per configuration, evaluate_single_config() builds the recipe and model spec, finalizes the parameter ranges, runs the grid, applies the prune gate, runs Bayesian optimization, selects the best hyperparameters, records the cross-validated panel at that point, and fits and scores once on the held-out test rows on the original scale.",
@@ -1401,90 +1401,90 @@
         },
         {
           "step": "On the configs axis, each configuration is one future carrying only what it needs; workers load the installed package, so dispatch is refused under devtools::load_all().",
-          "source": "R/pipeline-evaluate.R#L625"
+          "source": "R/pipeline-evaluate.R#L627"
         },
         {
           "step": "Ranks the successful configurations by cv_<metric>, falling back to pruned ones, with a tie-break on config_id, and names the winner.",
-          "source": "R/pipeline-evaluate.R#L694"
+          "source": "R/pipeline-evaluate.R#L696"
         },
         {
           "step": "Promotes the class to horizons_eval and certifies the evaluation slot against its contract.",
-          "source": "R/pipeline-evaluate.R#L749"
+          "source": "R/pipeline-evaluate.R#L751"
         }
       ],
       "records": [
         {
           "field": "evaluation$results",
           "text": "one row per configuration with status (success, pruned, failed), the six test metrics, the six cv_ metrics, the selected hyperparameters, warnings, runtime, the scoring schema, the training-data fingerprint, and the tuning settings",
-          "source": "R/pipeline-evaluate.R#L732"
+          "source": "R/pipeline-evaluate.R#L734"
         },
         {
           "field": "evaluation$best_config, evaluation$rank_metric",
           "text": "the winner and the metric it won on",
-          "source": "R/pipeline-evaluate.R#L734"
+          "source": "R/pipeline-evaluate.R#L736"
         },
         {
           "field": "evaluation$split, evaluation$n_train, evaluation$n_test",
           "text": "the rsplit itself, so the partition can be replayed",
-          "source": "R/pipeline-evaluate.R#L736"
+          "source": "R/pipeline-evaluate.R#L738"
         },
         {
           "field": "evaluation$parallelize_over, evaluation$workers",
           "text": "the axis actually used and the worker count the plan offered",
-          "source": "R/pipeline-evaluate.R#L739"
+          "source": "R/pipeline-evaluate.R#L741"
         }
       ],
       "refuses": [
         {
           "when": "the metric is unknown, no grid exists, every outcome is NA, or there are fewer than twice cv_folds rows",
           "does": "aborts",
-          "source": "R/pipeline-evaluate.R#L125"
+          "source": "R/pipeline-evaluate.R#L127"
         },
         {
           "when": "configurations would be dispatched to workers with no output_dir",
           "does": "aborts",
-          "source": "R/pipeline-evaluate.R#L205"
+          "source": "R/pipeline-evaluate.R#L207"
         },
         {
-          "when": "a checkpoint was written on other training data (other samples, outcome, roles or values)",
+          "when": "a checkpoint was written on other training data (other samples, outcome, id/outcome/predictor/covariate columns, or values)",
           "does": "aborts naming what differs, and any settings that also differ",
-          "source": "R/pipeline-evaluate.R#L1671"
+          "source": "R/pipeline-evaluate.R#L1681"
         },
         {
           "when": "a checkpoint was tuned under different settings",
           "does": "aborts naming each setting that differs",
-          "source": "R/pipeline-evaluate.R#L1408"
+          "source": "R/pipeline-evaluate.R#L1410"
         },
         {
           "when": "parallel dispatch is requested under devtools::load_all()",
           "does": "aborts",
-          "source": "R/pipeline-evaluate.R#L625"
+          "source": "R/pipeline-evaluate.R#L627"
         },
         {
           "when": "every configuration failed or was pruned without a rankable metric",
           "does": "aborts and points at evaluation$results",
-          "source": "R/pipeline-evaluate.R#L709"
+          "source": "R/pipeline-evaluate.R#L711"
         },
         {
           "when": "the registered plan has fewer than two workers, checkpoints lack a fingerprint or settings, or a configuration's cv metric is NA",
           "does": "warns and continues",
-          "source": "R/pipeline-evaluate.R#L1241"
+          "source": "R/pipeline-evaluate.R#L1243"
         },
         {
           "when": "a checkpoint file cannot be read",
           "does": "warns naming it and re-evaluates the configuration",
-          "source": "R/pipeline-evaluate.R#L1212"
+          "source": "R/pipeline-evaluate.R#L1214"
         }
       ],
       "evidence": [
         {
           "claim": "ranking on the test set would make the winner's test metric a maximum over the grid rather than a held-out estimate",
-          "where": "R/pipeline-evaluate.R#L688",
+          "where": "R/pipeline-evaluate.R#L690",
           "value": "#50"
         },
         {
           "claim": "a closure defined inside evaluate() shipped 2.26 GiB per future against 232 MB of needed inputs, which is why the worker is a top-level function",
-          "where": "R/pipeline-evaluate.R#L1854"
+          "where": "R/pipeline-evaluate.R#L1864"
         },
         {
           "claim": "after the serialization fixes the per-worker payload on the configs axis is 418 MB at 17,788 by 1,701",
