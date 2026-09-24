@@ -24,7 +24,7 @@ fit(
 configs, by bare name (\code{"rpd"}, \code{"rmse"}, ...). If NULL, uses the
 rank_metric from \code{evaluate()}. Ranking reads the cross-validated value
 at each config's selected hyperparameters (\verb{evaluation$results$cv_<metric>}),
-never the test-set column, so the test sets stay held out from
+never the test-set column, so the test set stays held out from
 selection. Default NULL.}
 
 \item{compute_uq}{Logical. Train UQ components (quantile model +
@@ -44,17 +44,20 @@ the \code{n_best} members is gated on the fitted-object memory contract (a
 fitted object is hundreds of MB and would cross to workers). Default
 FALSE.}
 
-\item{seed}{Integer. Random seed for CV folds and, through
-\code{fit_split_seed()} (\code{seed + 1L}), for Split F. The offset keeps Split F
-independent of \code{evaluate()}'s split when both are called with the same
-\code{seed}, which is the default. Default 307L.}
+\item{seed}{Integer. Random seed for the CV folds and, through
+\code{calib_split_seed()} (\code{seed + 1L}), for the calibration split. The
+train/test split is \code{evaluate()}'s, so it does not depend on this seed.
+Default 307L.}
 
 \item{verbose}{Logical. Print progress tree to console. Default TRUE.}
 }
 \value{
 A \code{horizons_fit} object (inherits from \code{horizons_eval},
 \code{horizons_data}) with \verb{models$} slot populated. The slot includes
-\code{response_bound} (max training outcome times \code{RESPONSE_BOUND_MARGIN}),
+\code{response_bound} (max training outcome times \code{RESPONSE_BOUND_MARGIN},
+where the training rows are the ones the final models are fit on:
+\code{evaluate()}'s training part, less the calibration set when UQ or AD is
+on),
 the deploy-time winsorization guardrail \code{predict()} applies to
 back-transformed point predictions, and \code{selection_present} (whether the
 training object carried a \verb{$selection} from \code{select_training()}, which
@@ -63,10 +66,24 @@ training object carried a \verb{$selection} from \code{select_training()}, which
 \description{
 Re-tunes the top N configurations from \code{evaluate()} with warm-start
 Bayesian optimization, generates out-of-fold (OOF) CV predictions for
-downstream stacking, fits final deployable models, evaluates on a new
-held-out test set, and optionally trains uncertainty quantification (UQ)
-components.
+downstream stacking, fits final deployable models, scores them on
+\code{evaluate()}'s held-out test rows, and optionally trains uncertainty
+quantification (UQ) components.
 
 This is the render layer — it owns all console output. The capture layer
 (\code{fit_single_config()}) runs silently and returns structured results.
+
+The train/test partition (Split F) is \code{evaluate()}'s split, reused. Its
+test rows are the only rows nothing was selected on: \code{evaluate()}'s
+training rows chose the members (on \verb{cv_<metric>}) and tuned the
+warm-start parameters, so a partition drawn afresh would score the final
+models partly on those rows. \code{fit()} checks that the split still indexes
+the rows this object models: after dropping the rows whose outcome is \code{NA}
+(the rule \code{evaluate()} applies), the id and outcome columns must match the
+split's, value for value and in order, or \code{fit()} aborts with class
+\code{horizons_input_error}. Columns added since \code{evaluate()}, such as a sibling
+response from \code{add_response()}, are carried into the fit. The count of
+NA-outcome rows is reported in the console tree when \code{verbose = TRUE}.
+With UQ or AD on, the calibration set is carved out of Split F's training
+part.
 }

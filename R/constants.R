@@ -121,6 +121,14 @@ DEFAULT_UQ_LEVEL         <- 0.90
 UQ_QUANTILE_TREES        <- 500L
 WARMSTART_GRID_SIZE      <- 25L
 
+### Training share of the train/test split, for evaluate()'s split and fit()'s
+### Split F alike.
+SPLIT_PROP <- 0.8
+
+### Share of Split F's training part that fit() keeps as the fit rows when UQ
+### or AD is on; the rest is the calibration set the two share.
+CALIB_PROP <- 0.8
+
 ## Applicability Domain (AD) ----------------------------------------------------
 
 ### Coverage level for the out-of-domain (OOD) cutoff: a sample is flagged OOD

@@ -363,10 +363,20 @@ describe("predict.horizons_fit() - response bound guardrail", {
 
   new_df <- make_new_spectra()
 
-  it("fit() stores models$response_bound = max(outcome) * RESPONSE_BOUND_MARGIN", {
+  it("fit() stores models$response_bound = max(training outcome) * RESPONSE_BOUND_MARGIN", {
 
+    ## The training rows are the ones the final model was fit on, which
+    ## row_index records (#68); UQ is on here, so the calibration rows are out.
     eval_obj <- make_predict_eval()
-    expected <- max(eval_obj$data$analysis$SOC, na.rm = TRUE) * RESPONSE_BOUND_MARGIN
+    analysis <- eval_obj$data$analysis
+    fit_rows <- analysis$sample_id %in% fitted_fixture$models$row_index$sample_id
+    expected <- max(analysis$SOC[fit_rows]) * RESPONSE_BOUND_MARGIN
+
+    ## Precondition: the fixture discriminates. The largest training-part
+    ## outcome sits in the calibration rows, so a bound over Split F's whole
+    ## training part would differ from one over the fit rows.
+    train_F <- rsample::training(fitted_fixture$models$split)
+    expect_gt(max(train_F$SOC), max(analysis$SOC[fit_rows]))
 
     expect_equal(fitted_fixture$models$response_bound, expected)
 
@@ -418,8 +428,16 @@ describe("predict.horizons_fit() - response bound guardrail", {
 
     p <- suppressWarnings(predict(clamped_fixture, new_df))
 
+    clamped <- p_raw$.pred > bound
+    expect_true(any(clamped))
+
     expect_true(all(p$.pred <= bound))
     expect_true(any(p$.pred_upper > bound))
+
+    ## The intervals are built around the unclamped point, so the clamp
+    ## leaves both bounds exactly where they were on the rows it touched.
+    expect_equal(p$.pred_upper[clamped], p_raw$.pred_upper[clamped])
+    expect_equal(p$.pred_lower[clamped], p_raw$.pred_lower[clamped])
 
   })
 

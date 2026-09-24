@@ -26,7 +26,8 @@ A modified \code{horizons_data} object with:
 \item Response columns added to \code{data$analysis}
 \item New entries in \code{data$role_map} with \code{role = "response"}
 \item Updated \code{data$n_responses} count
-\item Provenance record appended to \code{provenance$add_response}
+\item Provenance record appended to \code{provenance$add_response}, including
+\code{n_non_missing}, a named integer of non-missing values per variable
 }
 }
 \description{
@@ -54,6 +55,16 @@ Left-join semantics matching \code{dplyr::left_join()} conventions. Strict exact
 matching - no case-folding or fuzzy matching. When match quality is poor,
 diagnostic messages detect common patterns (case mismatch, whitespace,
 prefix/suffix) and suggest fixes.
+
+\strong{Missing values:}
+
+"Matched" counts samples whose join key is found in the source. A matched
+sample whose value is \code{NA} in the source is matched but unmeasured, so the
+console also reports, and provenance records, the non-missing count of
+each variable. Rows with missing values are kept: an object can carry
+several responses (\code{select_training()} puts every pool response on one
+object), and a row missing one of them may carry another. \code{evaluate()} and
+\code{fit()} drop the rows whose outcome is \code{NA} when they model it.
 
 \strong{Duplicate detection:}
 
