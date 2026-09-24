@@ -542,15 +542,26 @@ average <- function(x,
     if (quality_check) {
 
       ## One line per kind of group, so the lines add up to n_groups and a
-      ## group whose every replicate failed is never counted clean (#89).
+      ## group whose every replicate failed is never counted clean (#89). A
+      ## group of one scan has nothing to correlate against, so QC never
+      ## looked at it; it is not counted clean either.
 
-      n_clean <- n_groups - n_groups_partial - n_groups_failed
+      n_single <- sum(reps_per_group < 2)
+      n_clean  <- n_groups - n_single - n_groups_partial - n_groups_failed
 
       if (n_clean < n_groups) {
 
         cat(paste0("\u2502  \u251C\u2500 QC (r > ", correlation_threshold, ")\n"))
         cat(paste0("\u2502  \u2502  \u251C\u2500 ", n_clean, "/", n_groups,
                    " groups clean\n"))
+
+        if (n_single > 0) {
+
+          cat(paste0("\u2502  \u2502  \u251C\u2500 ", cli::format_inline(
+            "{n_single} single-replicate group{?s} (not QC'd)"
+          ), "\n"))
+
+        }
 
         if (n_groups_partial > 0) {
 
@@ -564,7 +575,7 @@ average <- function(x,
 
           handled <- switch(on_all_outliers,
             warn      = "averaged anyway",
-            keep_best = cli::format_inline("one replicate kept, {n_reps_failed} removed"),
+            keep_best = cli::format_inline("{n_groups_failed} replicate{?s} kept, {n_reps_failed} removed"),
             drop      = cli::format_inline("dropped, {n_reps_failed} replicate{?s} removed")
           )
 
