@@ -1,6 +1,7 @@
 # tests/testthat/test-select-reconcile.R
-# Tests for predictor_matrix() and reconcile_axes(), the first act of
-# select_training(): bring the pool onto the targets' wavenumber axis.
+# Tests for predictor_matrix(), reconcile_axes() and
+# reconciled_standardization(), the first act of select_training(): bring the
+# pool onto the targets' wavenumber axis, and its record with it.
 
 
 ## =============================================================================
@@ -330,5 +331,109 @@ test_that("reconcile_axes() rejects inputs that are not horizons_data", {
                class = "horizons_input_error")
   expect_error(reconcile_axes(fx$pool, data.frame(a = 1)),
                class = "horizons_input_error")
+
+})
+
+
+## =============================================================================
+## reconciled_standardization(): the pool's record on the targets' axis (#90)
+## =============================================================================
+
+#' A standardize()-shaped record on the canonical grid at `step`
+#'
+#' @param step [Numeric.] Grid step in cm-1.
+#' @param ... Further keys, appended.
+#'
+#' @return [List.] Shaped as `standardize()` writes `provenance$standardization`.
+#' @noRd
+std_record <- function(step, ...) {
+
+  n <- length(seq(4000, 600, by = -step))
+
+  c(list(resample         = step,
+         trim             = c(600, 4000),
+         remove_water     = FALSE,
+         baseline         = TRUE,
+         resampled        = FALSE,
+         grid             = list(min = 600, max = 4000, step = step, n = n),
+         applied_at       = as.POSIXct("2026-09-24 08:00:00", tz = "UTC"),
+         n_wavelengths    = n,
+         wavelength_range = c(600, 4000)),
+    list(...))
+
+}
+
+
+test_that("reconciled_standardization() replaces the axis fields and keeps the pool's arguments", {
+
+  pool   <- std_record(4, extra = "kept")
+  target <- std_record(8)
+  wn     <- seq(4000, 600, by = -8)
+  clamp  <- list(high = 0, low = 0.26, tolerance = 2)
+
+  rec <- reconciled_standardization(pool, target, wn, clamp = clamp)
+
+  ## The axis the pool now sits on
+  expect_identical(rec$grid, target$grid)
+  expect_identical(rec$n_wavelengths, length(wn))
+  expect_identical(rec$wavelength_range, c(600, 4000))
+  expect_true(rec$resampled)
+
+  ## The call that produced the values, and anything else the pool carried
+  for (key in c("resample", "trim", "remove_water", "baseline", "applied_at", "extra")) {
+
+    expect_identical(rec[[key]], pool[[key]], info = key)
+
+  }
+
+  ## The move, with the pool's record as it stood
+  expect_identical(rec$reconciliation,
+                   list(operation = "resampled", clamp = clamp, pool = pool))
+
+})
+
+
+test_that("reconciled_standardization() keeps a NULL grid and clamp as entries, and gives no record for none", {
+
+  wn  <- seq(4000, 600, by = -8)
+  rec <- reconciled_standardization(std_record(4), NULL, wn, clamp = NULL)
+
+  expect_true(all(c("grid", "reconciliation") %in% names(rec)))
+  expect_null(rec$grid)
+  expect_true("clamp" %in% names(rec$reconciliation))
+  expect_null(rec$reconciliation$clamp)
+
+  ## A pool standardize() never saw is not given a record
+  expect_null(reconciled_standardization(NULL, std_record(8), wn, clamp = NULL))
+
+})
+
+
+test_that("reconciled_standardization() writes a NULL grid when the targets' grid does not match the axis", {
+
+  pool <- std_record(4)
+  wn   <- seq(4000, 600, by = -8)
+
+  ## A grid that matches the columns is copied
+  expect_identical(reconciled_standardization(pool, std_record(8), wn, clamp = NULL)$grid,
+                   std_record(8)$grid)
+
+  ## One whose count, range or shape disagrees is not
+  short  <- std_record(8)
+  short$grid$n <- short$grid$n - 1L
+  wide   <- std_record(8)
+  wide$grid$max <- 4008
+  broken <- std_record(8)
+  broken$grid$n <- NULL
+
+  for (target in list(short = short, wide = wide, broken = broken)) {
+
+    rec <- reconciled_standardization(pool, target, wn, clamp = NULL)
+
+    expect_true("grid" %in% names(rec))
+    expect_null(rec$grid)
+    expect_identical(rec$n_wavelengths, length(wn))
+
+  }
 
 })
