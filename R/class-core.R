@@ -149,7 +149,13 @@ new_horizons_data <- function(analysis        = NULL,
 
                   tuning = list(grid_size     = 10L,
                                 bayesian_iter = 15L,
-                                cv_folds      = 5L)),
+                                cv_folds      = 5L),
+
+                  ## Written by configure(): list(sg_window, sg_window_cm,
+                  ## pca_threshold), the settings build_recipe() applies to
+                  ## every config. NULL until then, and on objects configured
+                  ## before it existed; see recipe_settings().
+                  recipe = NULL),
 
     ## -------------------------------------------------------------------------
     ## Section 4: VALIDATION — Pre-flight check results

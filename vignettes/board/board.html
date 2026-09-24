@@ -229,8 +229,8 @@
 
 <script type="application/json" id="hz-data">
 {
-  "generated_at": "2026-09-24T00:45:22-0500",
-  "content_md5": "3aecfd79936cd1602bc4d5bff9c1acf3",
+  "generated_at": "2026-09-24T02:33:15-0500",
+  "content_md5": "3fb65bfba015a11bba93ff1d08c7ffcb",
   "horizons": "0.9.0",
   "lanes": [
     {
@@ -1190,98 +1190,112 @@
       "optional": false,
       "class_in": "horizons_data",
       "class_out": "horizons_data",
-      "signature": "configure (x, outcome = NULL, models = c(\"rf\", \"cubist\", \"plsr\"), transformations = \"none\", preprocessing = \"raw\", feature_selection = \"none\", expand_covariates = NULL, cov_fusion = NULL, cv_folds = 5L, grid_size = 10L, bayesian_iter = 15L, final_bayesian_iter = 25L)",
-      "summary": "Names the outcome and lays out the grid of pipelines to compare: every combination of model, response transformation, spectral preprocessing, feature selection, and covariate set becomes one configuration with a deterministic id. Nothing is fitted. The tuning budget is recorded here for evaluate() and fit() to read. Calling it again replaces the grid, demotes the old outcome, clears the named state a previous evaluate() or fit() earned, and demotes the class, so one object can be configured per outcome in a loop.",
+      "signature": "configure (x, outcome = NULL, models = c(\"rf\", \"cubist\", \"plsr\"), transformations = \"none\", preprocessing = \"raw\", feature_selection = \"none\", expand_covariates = NULL, cov_fusion = NULL, cv_folds = 5L, grid_size = 10L, bayesian_iter = 15L, final_bayesian_iter = 25L, sg_window = 9L, pca_threshold = 0.995)",
+      "summary": "Names the outcome and lays out the grid of pipelines to compare: every combination of model, response transformation, spectral preprocessing, feature selection, and covariate set becomes one configuration with a deterministic id. Nothing is fitted. The tuning budget is recorded here for evaluate() and fit() to read, and so are the recipe settings every configuration shares, the Savitzky-Golay window and the PCA threshold. Calling it again replaces the grid, demotes the old outcome, clears the named state a previous evaluate() or fit() earned, and demotes the class, so one object can be configured per outcome in a loop.",
       "args": [
         {
           "name": "x",
           "default": null,
           "text": "`horizons_data`. Object with response data attached via `add_response()`.",
           "touch": "Always; an object with at least one response column, from add_response() or select_training().",
-          "source": "R/pipeline-configure.R#L210"
+          "source": "R/pipeline-configure.R#L247"
         },
         {
           "name": "outcome",
           "default": "NULL",
           "text": "character(1) or NULL. Which response variable to model. Auto-selects if exactly one response exists.",
           "touch": "Whenever the object carries more than one response; with exactly one it is chosen for you.",
-          "source": "R/pipeline-configure.R#L380"
+          "source": "R/pipeline-configure.R#L447"
         },
         {
           "name": "models",
           "default": "c(\"rf\", \"cubist\", \"plsr\")",
           "text": "`character`. Model algorithms to benchmark. Default `c(\"rf\", \"cubist\", \"plsr\")`. See `VALID_MODELS` for options.",
           "touch": "To change the learners compared. rf, cubist and plsr are the default three; the full list is VALID_MODELS.",
-          "source": "R/pipeline-configure.R#L225"
+          "source": "R/pipeline-configure.R#L262"
         },
         {
           "name": "transformations",
           "default": "\"none\"",
           "text": "`character`. Response transformations to test. Default `\"none\"`.",
           "touch": "For a skewed outcome such as organic carbon, add \"log\"; the transform is applied per configuration and undone before scoring.",
-          "source": "R/pipeline-configure.R#L236"
+          "source": "R/pipeline-configure.R#L273"
         },
         {
           "name": "preprocessing",
           "default": "\"raw\"",
           "text": "`character`. Per-config spectral preprocessing methods. Default `\"raw\"`.",
           "touch": "To compare spectral pretreatments; these run per configuration inside evaluate(), never on the object, so the same data can be modelled raw and as a derivative.",
-          "source": "R/pipeline-configure.R#L247"
+          "source": "R/pipeline-configure.R#L284"
         },
         {
           "name": "feature_selection",
           "default": "\"none\"",
           "text": "`character`. Feature selection methods to test. Default `\"none\"`.",
           "touch": "To reduce the predictor space; \"pca\" is what the tree learners need on a full-resolution spectrum, and boruta is expensive.",
-          "source": "R/pipeline-configure.R#L258"
+          "source": "R/pipeline-configure.R#L295"
         },
         {
           "name": "expand_covariates",
           "default": "NULL",
           "text": "logical(1), character, or NULL. Covariate expansion strategy. NULL = all covariates in every config (no expansion). TRUE = power set of all covariate columns. Character vector = power set of named covariates only. FALSE = exclude all covariates.",
           "touch": "Only when the object carries covariate columns; NULL uses all of them in every configuration, TRUE benchmarks the power set, FALSE drops them.",
-          "source": "R/pipeline-configure.R#L473"
+          "source": "R/pipeline-configure.R#L540"
         },
         {
           "name": "cov_fusion",
           "default": "NULL",
           "text": "character(1) or NULL. Covariate fusion strategy: NULL (no covariates) or `\"early\"`, which adds the covariates as predictors beside the spectral features. Required when covariates are present. `\"late\"` aborts: late fusion is designed but not built.",
           "touch": "Required when covariates are present, and \"early\" is the only value that runs, with the requested covariates promoted to predictors beside the spectral features. \"late\" is refused, because late fusion is designed but not built.",
-          "source": "R/utils-recipes.R#L278"
+          "source": "R/utils-recipes.R#L302"
         },
         {
           "name": "cv_folds",
           "default": "5L",
           "text": "`integer`. Number of cross-validation folds. Default 5. Minimum 2.",
           "touch": "Rarely; five is the default and validate() checks the object has enough rows for it.",
-          "source": "R/pipeline-configure.R#L311"
+          "source": "R/pipeline-configure.R#L348"
         },
         {
           "name": "grid_size",
           "default": "10L",
           "text": "`integer`. Hyperparameter grid size (Latin hypercube). Default 10. Minimum 1.",
           "touch": "To widen or shrink the Latin hypercube evaluate() screens each configuration with.",
-          "source": "R/pipeline-configure.R#L321"
+          "source": "R/pipeline-configure.R#L358"
         },
         {
           "name": "bayesian_iter",
           "default": "15L",
           "text": "`integer`. Bayesian optimization iterations. Default 15. Minimum 0.",
           "touch": "To change how many Bayesian steps follow the grid in evaluate(); 0 disables them.",
-          "source": "R/pipeline-configure.R#L331"
+          "source": "R/pipeline-configure.R#L368"
         },
         {
           "name": "final_bayesian_iter",
           "default": "25L",
           "text": "`integer`. Bayesian optimization iterations for the final fit on the selected configuration. Default 25. Minimum 0.",
           "touch": "To change the re-tuning budget fit() spends on each selected configuration; larger than the screening budget by default.",
-          "source": "R/pipeline-configure.R#L341"
+          "source": "R/pipeline-configure.R#L378"
+        },
+        {
+          "name": "sg_window",
+          "default": "9L",
+          "text": "`integer`. Savitzky-Golay window in grid points, applied to every configuration. Default 9. Must be odd and at least 5. See Recipe settings.",
+          "touch": "Rarely. The window is in grid points, so its physical width follows the resolution the spectra were standardized to; the width in cm⁻¹ is recorded and printed. One value serves the whole grid and trims (sg_window - 1) / 2 columns from each end under every preprocessing method, raw included, which is why it must suit the second-derivative methods' cubic and be at least 5.",
+          "source": "R/pipeline-configure.R#L397"
+        },
+        {
+          "name": "pca_threshold",
+          "default": "0.995",
+          "text": "`numeric`. Share of variance `feature_selection = \"pca\"` keeps, applied to every configuration that uses it. Default 0.995. Must be in (0, 1].",
+          "touch": "Only with feature_selection = \"pca\"; lower it to keep fewer components. One value serves every configuration that runs PCA.",
+          "source": "R/utils-recipes.R#L241"
         }
       ],
       "mechanics": [
         {
           "step": "Requires at least one response or outcome column, and checks every axis value against the package's valid lists.",
-          "source": "R/pipeline-configure.R#L208"
+          "source": "R/pipeline-configure.R#L245"
         },
         {
           "step": "If a grid already exists, warns and resets whatever evaluate(), fit() and ensemble() earned, because it was earned against an outcome that is about to change. The evaluation, models and ensemble slots go back to the constructor's empty shape, the validation verdict and flagged ids are cleared, and the class drops to horizons_data. The record of rows validate() already removed is kept, since they stay removed, and so is a select_training() record.",
@@ -1289,92 +1303,95 @@
         },
         {
           "step": "Demotes any previous outcome to response, resolves the outcome (auto when there is exactly one), and promotes it, writing the roles back through set_analysis() so n_responses stays consistent.",
-          "source": "R/pipeline-configure.R#L374"
+          "source": "R/pipeline-configure.R#L441"
         },
         {
           "step": "Warns about kept rows that were not chosen for this outcome, naming the earlier outcome and the count when validate() removed rows only as response outliers of a different one, and naming the drawn properties when a select_training() record (other than scope global) was drawn for properties that do not include it.",
-          "source": "R/pipeline-configure.R#L428"
+          "source": "R/pipeline-configure.R#L495"
         },
         {
           "step": "Resolves the covariate sets, which are none, all, a power set, or a power set of the named ones merged with the rest fixed.",
-          "source": "R/pipeline-configure.R#L435"
+          "source": "R/pipeline-configure.R#L502"
         },
         {
           "step": "Crosses the five axes into one row per configuration and gives each a deterministic id, model_preprocessing_transformation_featsel plus a six-character hash of the whole tuple.",
-          "source": "R/pipeline-configure.R#L545"
+          "source": "R/pipeline-configure.R#L612"
         },
         {
-          "step": "Stores the grid, the tuning budget, the expansion inputs, and the method defaults.",
-          "source": "R/pipeline-configure.R#L593"
+          "step": "Stores the grid, the tuning budget and the expansion inputs.",
+          "source": "R/pipeline-configure.R#L653"
+        },
+        {
+          "step": "Records the recipe settings build_recipe() applies to every configuration, with the window's width in cm⁻¹ from the spacing of the predictor axis itself; the grid step in the provenance is only the fallback, because a select_training() result carries the pool's.",
+          "source": "R/pipeline-configure.R#L678"
         }
       ],
       "records": [
         {
           "field": "data$role_map",
           "text": "exactly one column with role outcome; the others stay response",
-          "source": "R/pipeline-configure.R#L413"
+          "source": "R/pipeline-configure.R#L480"
         },
         {
           "field": "config$configs, config$n_configs",
-          "text": "one row per configuration with config_id, the five axis values, and three list-columns reserved for per-configuration parameter overrides, always empty today and not yet read by the recipe builder",
-          "source": "R/pipeline-configure.R#L575"
+          "text": "one row per configuration with config_id and the five axis values",
+          "source": "R/pipeline-configure.R#L636"
         },
         {
-          "field": "config$tuning, config$expansion, config$defaults",
-          "text": "the budget evaluate() and fit() read; the original inputs for reproducibility; and intended method defaults that are not in force, since the recipe builder hardcodes its own (a PCA threshold of 0.995 and a Savitzky-Golay window of 9 against the recorded 0.99 and 11)",
-          "source": "R/utils-recipes.R#L217"
+          "field": "config$tuning, config$expansion, config$recipe",
+          "text": "the budget evaluate() and fit() read; the original inputs for reproducibility; and the recipe settings they pass to build_recipe() for every configuration, sg_window with its width in cm⁻¹ (sg_window_cm) and pca_threshold",
+          "source": "R/pipeline-configure.R#L678"
         }
       ],
       "refuses": [
         {
           "when": "the object has no response column",
           "does": "aborts and points at add_response()",
-          "source": "R/pipeline-configure.R#L214"
+          "source": "R/pipeline-configure.R#L251"
         },
         {
           "when": "a model, transformation, preprocessing, feature-selection method, or cov_fusion value is not in the valid list",
           "does": "aborts listing the valid options",
-          "source": "R/pipeline-configure.R#L225"
+          "source": "R/pipeline-configure.R#L262"
         },
         {
           "when": "cov_fusion is \"late\", or is not NULL or a single string",
           "does": "aborts; for \"late\" the message says late fusion is not built and to use \"early\", and the condition is both horizons_configure_error and horizons_input_error",
-          "source": "R/pipeline-configure.R#L287"
+          "source": "R/pipeline-configure.R#L324"
         },
         {
           "when": "a tuning parameter is not an integer in range",
           "does": "aborts",
-          "source": "R/pipeline-configure.R#L311"
+          "source": "R/pipeline-configure.R#L348"
+        },
+        {
+          "when": "sg_window is not an odd integer of at least 5, or pca_threshold is not a single number in (0, 1]",
+          "does": "aborts",
+          "source": "R/pipeline-configure.R#L397"
         },
         {
           "when": "several responses exist and outcome is not given, or the named outcome is not a response",
           "does": "aborts listing the responses",
-          "source": "R/pipeline-configure.R#L388"
+          "source": "R/pipeline-configure.R#L455"
         },
         {
           "when": "covariates exist and cov_fusion is NULL, or expand_covariates names a column the object lacks",
           "does": "aborts",
-          "source": "R/pipeline-configure.R#L463"
+          "source": "R/pipeline-configure.R#L530"
         },
         {
           "when": "a grid already exists, or cov_fusion = \"early\" or expand_covariates is given with no covariates",
           "does": "warns and continues",
-          "source": "R/pipeline-configure.R#L361"
+          "source": "R/pipeline-configure.R#L428"
         },
         {
           "when": "rows were removed only as response outliers of a different outcome, or the training rows were drawn by select_training() for properties that exclude the outcome",
           "does": "warns and continues; the rows stay as they are",
-          "source": "R/pipeline-configure.R#L700"
+          "source": "R/pipeline-configure.R#L822"
         }
       ],
       "evidence": [],
-      "issues": [
-        {
-          "id": 62,
-          "text": "the recorded method defaults are not what the recipe runs, and the per-configuration override columns are never read",
-          "source": "R/utils-recipes.R#L217"
-        }
-      ],
+      "issues": [],
       "notes": [
         {
           "text": "Cubist with committees > 1 is not bit-reproducible under a fixed seed (fourth significant figure of a fold metric); every other engine is deterministic given seed. See",
@@ -1523,7 +1540,7 @@
       "notes": [
         {
           "text": "P010's 2e6-cell threshold (CUBIST_MAX_CELLS) is a heuristic floor from one measurement, not a calibrated benchmark — cubist + snv on 14,228 x 851 (12.1M cells) did not finish a single tune task in 29.5 minutes, while feature_selection = \"pca\" on the same config finished in 368 s. See",
-          "source": "R/constants.R#L258"
+          "source": "R/constants.R#L268"
         }
       ],
       "design_ahead": []
@@ -1556,14 +1573,14 @@
           "default": "\"rpd\"",
           "text": "Character. Metric for ranking configurations. One of `\"rpd\"`, `\"rsq\"`, `\"rmse\"`, `\"rrmse\"`, `\"ccc\"`, `\"mae\"`. Ranking uses the cross-validated value of that metric at each config's selected hyperparameters (evaluation$results$cv_<metric>); the test-set columns are reported but never used for selection, so they remain honest held-out estimates. Default `\"rpd\"`.",
           "touch": "To rank by something other than RPD; the ranking reads the cross-validated column of that metric.",
-          "source": "R/pipeline-evaluate.R#L798"
+          "source": "R/pipeline-evaluate.R#L806"
         },
         {
           "name": "prune",
           "default": "TRUE",
           "text": "Logical. If TRUE, skip Bayesian optimization for configs whose grid-search RPD falls below `prune_threshold`. Default TRUE.",
           "touch": "Leave TRUE. Since tuning metrics moved to the original response scale (#49), the grid RPD the gate reads is comparable across transformations, which closed the second half of",
-          "source": "R/evaluate-single-config.R#L250"
+          "source": "R/evaluate-single-config.R#L260"
         },
         {
           "name": "prune_threshold",
@@ -1577,35 +1594,35 @@
           "default": "FALSE",
           "text": "Logical. If `TRUE`, dispatch onto whatever `future::plan()` the caller has registered. If no usable backend is registered (fewer than two workers), warns naming the plan it found and runs sequentially. `FALSE` (the default) runs in the calling process and never inspects the plan. `evaluate()` never registers or alters a plan.",
           "touch": "TRUE after registering a future plan; evaluate() never registers one. FALSE ignores any plan.",
-          "source": "R/pipeline-evaluate.R#L170"
+          "source": "R/pipeline-evaluate.R#L174"
         },
         {
           "name": "parallelize_over",
           "default": "\"auto\"",
           "text": "Character. Which axis of the work the registered plan is applied to; ignored when `allow_par = FALSE`. See the Parallelism section. Default `\"auto\"`.",
           "touch": "\"configs\" for a large grid on many cores, \"resamples\" for a short grid on few; \"auto\" picks configs when the grid is at least cv_folds long.",
-          "source": "R/pipeline-evaluate.R#L170"
+          "source": "R/pipeline-evaluate.R#L174"
         },
         {
           "name": "output_dir",
           "default": "NULL",
           "text": "Character or NULL. If provided, checkpoint results to disk after each config. Enables resuming interrupted runs. Required when configs are dispatched to workers. Default NULL (no checkpointing).",
           "touch": "Always for a long run; required when configurations are dispatched to workers. Each configuration is checkpointed and a rerun resumes, refusing checkpoints written on different training rows.",
-          "source": "R/pipeline-evaluate.R#L275"
+          "source": "R/pipeline-evaluate.R#L279"
         },
         {
           "name": "seed",
           "default": "307L",
           "text": "Integer. Random seed for train/test split and CV folds. Default 307L.",
           "touch": "To change the split and the folds; the same seed reproduces the run for every engine except Cubist with committees.",
-          "source": "R/pipeline-evaluate.R#L206"
+          "source": "R/pipeline-evaluate.R#L210"
         },
         {
           "name": "verbose",
           "default": "TRUE",
           "text": "Logical. Print progress tree to console. Default TRUE.",
           "touch": "Set FALSE inside loops.",
-          "source": "R/pipeline-evaluate.R#L445"
+          "source": "R/pipeline-evaluate.R#L449"
         },
         {
           "name": "workers",
@@ -1622,61 +1639,61 @@
         },
         {
           "step": "Resolves the parallel axis against the registered plan, downgrading to sequential with a warning when the plan offers fewer than two workers, and pins BLAS and thread counts in the parent before any dispatch.",
-          "source": "R/pipeline-evaluate.R#L170"
+          "source": "R/pipeline-evaluate.R#L174"
         },
         {
           "step": "Splits 80/20 stratified on the outcome (falling back to unstratified), builds cv_folds stratified folds on the training part, and fingerprints the training rows plus the outcome name so a checkpoint from other rows cannot be resumed.",
-          "source": "R/pipeline-evaluate.R#L206"
+          "source": "R/pipeline-evaluate.R#L210"
         },
         {
           "step": "Loads checkpoints from the output directory, dropping rows for configurations no longer in the grid or scored under an older scoring schema, aborting on a fingerprint mismatch, and warning once for legacy checkpoints with no fingerprint.",
-          "source": "R/pipeline-evaluate.R#L275"
+          "source": "R/pipeline-evaluate.R#L279"
         },
         {
           "step": "Writes a manifest so monitor_evaluate() can watch the run.",
-          "source": "R/pipeline-evaluate.R#L494"
+          "source": "R/pipeline-evaluate.R#L498"
         },
         {
-          "step": "Per configuration, evaluate_single_config() builds the recipe and model spec, finalizes the parameter ranges, runs the grid, applies the prune gate, runs Bayesian optimization, selects the best hyperparameters, records the cross-validated panel at that point, and fits and scores once on the held-out test rows on the original scale.",
-          "source": "R/evaluate-single-config.R#L48"
+          "step": "Per configuration, evaluate_single_config() builds the recipe, with the object's recorded window and PCA threshold, and the model spec, finalizes the parameter ranges, runs the grid, applies the prune gate, runs Bayesian optimization, selects the best hyperparameters, records the cross-validated panel at that point, and fits and scores once on the held-out test rows on the original scale.",
+          "source": "R/evaluate-single-config.R#L54"
         },
         {
           "step": "On the configs axis, each configuration is one future carrying only what it needs; workers load the installed package, so dispatch is refused under devtools::load_all().",
-          "source": "R/pipeline-evaluate.R#L731"
+          "source": "R/pipeline-evaluate.R#L737"
         },
         {
           "step": "Ranks the successful configurations by cv_<metric>, falling back to pruned ones, with a tie-break on config_id, and names the winner.",
-          "source": "R/pipeline-evaluate.R#L798"
+          "source": "R/pipeline-evaluate.R#L806"
         },
         {
           "step": "Empties the models and ensemble slots, which were built on the evaluation being replaced, so a fitted or ensembled object comes back a plain horizons_eval.",
-          "source": "R/pipeline-evaluate.R#L838"
+          "source": "R/pipeline-evaluate.R#L846"
         },
         {
           "step": "Promotes the class to horizons_eval and certifies the evaluation slot against its contract.",
-          "source": "R/pipeline-evaluate.R#L857"
+          "source": "R/pipeline-evaluate.R#L865"
         }
       ],
       "records": [
         {
           "field": "evaluation$results",
           "text": "one row per configuration with status (success, pruned, failed), the six test metrics, the six cv_ metrics, the selected hyperparameters, warnings, runtime, the scoring schema, and the training-data fingerprint",
-          "source": "R/pipeline-evaluate.R#L840"
+          "source": "R/pipeline-evaluate.R#L848"
         },
         {
           "field": "evaluation$best_config, evaluation$rank_metric",
           "text": "the winner and the metric it won on",
-          "source": "R/pipeline-evaluate.R#L842"
+          "source": "R/pipeline-evaluate.R#L850"
         },
         {
           "field": "evaluation$split, evaluation$n_train, evaluation$n_test",
           "text": "the rsplit itself, so the partition can be replayed",
-          "source": "R/pipeline-evaluate.R#L844"
+          "source": "R/pipeline-evaluate.R#L852"
         },
         {
           "field": "evaluation$parallelize_over, evaluation$workers",
           "text": "the axis actually used and the worker count the plan offered",
-          "source": "R/pipeline-evaluate.R#L847"
+          "source": "R/pipeline-evaluate.R#L855"
         }
       ],
       "refuses": [
@@ -1688,42 +1705,42 @@
         {
           "when": "configurations would be dispatched to workers with no output_dir",
           "does": "aborts",
-          "source": "R/pipeline-evaluate.R#L192"
+          "source": "R/pipeline-evaluate.R#L196"
         },
         {
           "when": "a checkpoint was written on different training rows",
           "does": "aborts naming both fingerprints",
-          "source": "R/pipeline-evaluate.R#L1123"
+          "source": "R/pipeline-evaluate.R#L1131"
         },
         {
           "when": "parallel dispatch is requested under devtools::load_all()",
           "does": "aborts",
-          "source": "R/pipeline-evaluate.R#L731"
+          "source": "R/pipeline-evaluate.R#L737"
         },
         {
           "when": "every configuration failed or was pruned without a rankable metric",
           "does": "aborts and points at evaluation$results",
-          "source": "R/pipeline-evaluate.R#L813"
+          "source": "R/pipeline-evaluate.R#L821"
         },
         {
           "when": "the registered plan has fewer than two workers, checkpoints lack a fingerprint, or a configuration's cv metric is NA",
           "does": "warns and continues",
-          "source": "R/pipeline-evaluate.R#L413"
+          "source": "R/pipeline-evaluate.R#L417"
         }
       ],
       "evidence": [
         {
           "claim": "ranking on the test set would make the winner's test metric a maximum over the grid rather than a held-out estimate",
-          "where": "R/pipeline-evaluate.R#L792",
+          "where": "R/pipeline-evaluate.R#L800",
           "value": "#50"
         },
         {
           "claim": "a closure defined inside evaluate() shipped 2.26 GiB per future against 232 MB of needed inputs, which is why the worker is a top-level function",
-          "where": "R/pipeline-evaluate.R#L1259"
+          "where": "R/pipeline-evaluate.R#L1267"
         },
         {
           "claim": "after the serialization fixes the per-worker payload on the configs axis is 418 MB at 17,788 by 1,701",
-          "where": "R/constants.R#L207"
+          "where": "R/constants.R#L215"
         }
       ],
       "issues": [],
@@ -1772,14 +1789,14 @@
           "default": "TRUE",
           "text": "Logical. Train UQ components (quantile model + conformal calibration). Default TRUE.",
           "touch": "FALSE to skip conformal intervals. The fit regains the whole training part only when compute_ad is FALSE too, because the calibration split is drawn whenever either capability is on, and it is what shrinks the rows with out-of-fold predictions from 80 % to 64 %.",
-          "source": "R/pipeline-fit.R#L252"
+          "source": "R/pipeline-fit.R#L255"
         },
         {
           "name": "compute_ad",
           "default": "TRUE",
           "text": "Logical. Compute applicability-domain metadata (centroid + shrinkage covariance + held-out OOD thresholds) per config, so `predict()` can emit `.ad_distance` / `.ad_flag`. Shares the UQ calibration split. Default TRUE.",
           "touch": "FALSE to skip the applicability-domain bundle; it shares the calibration split with UQ.",
-          "source": "R/pipeline-fit.R#L252"
+          "source": "R/pipeline-fit.R#L255"
         },
         {
           "name": "allow_par",
@@ -1793,14 +1810,14 @@
           "default": "307L",
           "text": "Integer. Random seed for the CV folds and, through `calib_split_seed()` (`seed + 1L`), for the calibration split. The train/test split is `evaluate()`'s, so it does not depend on this seed. Default 307L.",
           "touch": "To change the folds, and the calibration split, which is seeded at seed + 1. The train/test split is evaluate()'s, so this seed does not move it.",
-          "source": "R/pipeline-fit.R#L254"
+          "source": "R/pipeline-fit.R#L257"
         },
         {
           "name": "verbose",
           "default": "TRUE",
           "text": "Logical. Print progress tree to console. Default TRUE.",
           "touch": "Set FALSE inside loops.",
-          "source": "R/pipeline-fit.R#L330"
+          "source": "R/pipeline-fit.R#L333"
         }
       ],
       "mechanics": [
@@ -1810,62 +1827,62 @@
         },
         {
           "step": "Drops rows whose outcome is NA by the rule evaluate() applies, and says how many in the tree.",
-          "source": "R/pipeline-fit.R#L179"
+          "source": "R/pipeline-fit.R#L182"
         },
         {
           "step": "Takes evaluate()'s 80/20 split as Split F, so the test part is evaluate()'s held-out rows, after checking that its id and outcome columns match those rows value for value and in order. Columns added since evaluate(), such as a sibling response, come along into the fit.",
-          "source": "R/pipeline-fit.R#L202"
+          "source": "R/pipeline-fit.R#L205"
         },
         {
           "step": "If UQ or AD is on, splits the training part 80/20 again, at seed + 1, into the fit rows and a calibration set; both capabilities are disabled together if the calibration set is under 30 rows.",
-          "source": "R/pipeline-fit.R#L252"
+          "source": "R/pipeline-fit.R#L255"
         },
         {
           "step": "Builds cv_folds stratified folds on the fit rows, at seed.",
-          "source": "R/pipeline-fit.R#L307"
+          "source": "R/pipeline-fit.R#L310"
         },
         {
-          "step": "Per configuration, fit_single_config() rebuilds the recipe and workflow, re-tunes with Bayesian optimization warm-started from evaluate()'s best parameters and its own final budget, finalizes, generates out-of-fold predictions over the folds and back-transforms them, computes fold-wise metrics, fits the final model on the fit rows, and scores it on the test part.",
-          "source": "R/fit-single-config.R#L34"
+          "step": "Per configuration, fit_single_config() rebuilds the recipe, with the same window and PCA threshold evaluate() used, and the workflow, re-tunes with Bayesian optimization warm-started from evaluate()'s best parameters and its own final budget, finalizes, generates out-of-fold predictions over the folds and back-transforms them, computes fold-wise metrics, fits the final model on the fit rows, and scores it on the test part.",
+          "source": "R/fit-single-config.R#L39"
         },
         {
           "step": "Flags a configuration as degraded when its test RPD falls below the cross-validated mean minus two standard errors.",
-          "source": "R/fit-single-config.R#L440"
+          "source": "R/fit-single-config.R#L449"
         },
         {
           "step": "With UQ on, trains a quantile forest on the out-of-fold residuals and computes signed conformal scores on the calibration set; with AD on, estimates the feature-space centroid and a Ledoit-Wolf shrinkage covariance and calibrates the quartile and out-of-domain cutoffs on the same calibration set. Both run before the workflow is butchered for storage.",
-          "source": "R/fit-single-config.R#L468"
+          "source": "R/fit-single-config.R#L477"
         },
         {
           "step": "Assembles the workflows in best-first order, the stacked out-of-fold predictions keyed to a row index, the results table, the response bound (1.5 times the largest outcome among the fit rows, the ones the final models are trained on), and whether the training object carried a selection record; promotes to horizons_fit and certifies the models slot. On a horizons_ensemble, the ensemble slot is emptied first, since it was built on the members being replaced.",
-          "source": "R/pipeline-fit.R#L646"
+          "source": "R/pipeline-fit.R#L651"
         }
       ],
       "records": [
         {
           "field": "models$workflows, models$n_models, models$best_config, models$rank_metric",
           "text": "the butchered fitted workflows by config_id in best-first order",
-          "source": "R/pipeline-fit.R#L673"
+          "source": "R/pipeline-fit.R#L678"
         },
         {
           "field": "models$cv_predictions, models$row_index",
           "text": "out-of-fold predictions (.row, .fold, config_id, .pred, .pred_trans, truth) and the .row to sample_id map; what ensemble() stacks, and what the designed but unbuilt residual correction would read",
-          "source": "R/pipeline-fit.R#L595"
+          "source": "R/pipeline-fit.R#L600"
         },
         {
           "field": "models$results",
           "text": "per configuration, status, degraded flag and reason, the six test metrics, the cv RMSE and RPD with standard errors, best parameters, runtime",
-          "source": "R/pipeline-fit.R#L564"
+          "source": "R/pipeline-fit.R#L569"
         },
         {
           "field": "models$split, models$predictor_schema, models$response_bound, models$selection_present",
           "text": "Split F; the training-axis predictor columns predict() checks new data against; the winsorization bound, computed over the fit rows; whether conformal exchangeability can be assumed",
-          "source": "R/pipeline-fit.R#L653"
+          "source": "R/pipeline-fit.R#L658"
         },
         {
           "field": "models$uq, models$ad",
           "text": "per-configuration bundles, present only for configurations that succeeded with enough calibration rows",
-          "source": "R/pipeline-fit.R#L600"
+          "source": "R/pipeline-fit.R#L605"
         }
       ],
       "refuses": [
@@ -1877,7 +1894,7 @@
         {
           "when": "evaluation$split is missing, or its ids or outcomes no longer match the rows the object models, because the rows or outcomes changed after evaluate() or the object was built by hand",
           "does": "aborts, and says to re-run evaluate()",
-          "source": "R/pipeline-fit.R#L226"
+          "source": "R/pipeline-fit.R#L229"
         },
         {
           "when": "n_best exceeds the successful configurations, or the calibration set is under 30 rows",
@@ -1887,7 +1904,7 @@
         {
           "when": "a configuration fails to re-tune or fit",
           "does": "records the failure in models$results and continues; butchering failure falls back to storing the unbutchered workflow",
-          "source": "R/fit-single-config.R#L75"
+          "source": "R/fit-single-config.R#L82"
         }
       ],
       "evidence": [
@@ -1897,7 +1914,7 @@
         },
         {
           "claim": "a Split F drawn afresh at seed + 1 took a median 79 % of its test rows from evaluate()'s training rows, which chose the members and tuned the warm-start parameters (200 seeds, n = 250); that is why fit() reuses evaluate()'s split",
-          "where": "R/pipeline-fit.R#L185"
+          "where": "R/pipeline-fit.R#L188"
         }
       ],
       "issues": [],

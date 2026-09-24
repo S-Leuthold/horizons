@@ -1587,3 +1587,99 @@ describe("custom steps keep their selectors through prep (#52)", {
   })
 
 })
+
+
+## =========================================================================
+## Recipe settings: configure()'s sg_window and pca_threshold reach the steps
+## =========================================================================
+##
+## Before #62 build_recipe() hardcoded both: step_transform_spectra() ran its
+## own default window of 9 and step_pca() a threshold of 0.995, whatever
+## configure() recorded. The settings are now arguments, threaded from
+## config$recipe, with the old values as defaults.
+
+describe("build_recipe() recipe settings (#62)", {
+
+  methods <- c("raw", "sg", "snv", "deriv1", "deriv2", "snv_deriv1", "snv_deriv2")
+
+  it("passes sg_window to the transform step: a window of 11 leaves p - 10 columns", {
+
+    td <- make_test_data(n = 20, n_wn = 40)
+
+    for (pp in methods) {
+
+      config <- make_config_row(preprocessing = pp)
+      rec    <- build_recipe(config, td$data, td$role_map, sg_window = 11L)
+
+      expect_identical(rec$steps[[1]]$window_size, 11L, label = pp)
+
+      baked <- recipes::bake(recipes::prep(rec), new_data = NULL)
+
+      expect_equal(sum(grepl("^spec[0-9]+$", names(baked))), 40 - 10, label = pp)
+
+    }
+
+  })
+
+  it("passes pca_threshold to step_pca, where it sets the component count", {
+
+    set.seed(62)
+    td     <- make_test_data(n = 40, n_wn = 40)
+    config <- make_config_row(preprocessing = "snv", feature_selection = "pca")
+
+    n_components <- function(threshold) {
+
+      rec <- build_recipe(config, td$data, td$role_map, pca_threshold = threshold)
+      pca <- rec$steps[[which(vapply(rec$steps, inherits, logical(1), "step_pca"))]]
+
+      expect_identical(pca$threshold, threshold)
+
+      sum(grepl("^PC", names(recipes::bake(recipes::prep(rec), new_data = NULL))))
+
+    }
+
+    ## Noise spectra spread their variance over many components, so a lower
+    ## threshold keeps strictly fewer.
+    expect_lt(n_components(0.5), n_components(0.995))
+
+  })
+
+  it("builds, at its defaults, the recipe the hardcoded values built", {
+
+    ## The reference is the call build_recipe() made before the settings were
+    ## arguments: step_transform_spectra() with no window_size, so the step's
+    ## own default of 9, and step_pca() at 0.995. The baked output must be
+    ## identical, so the default behaviour did not move.
+    td <- make_test_data(n = 40, n_wn = 40)
+    wn <- td$role_map$variable[td$role_map$role == "predictor"]
+
+    for (pp in c("raw", "snv", "deriv2")) {
+
+      for (fs in c("none", "pca")) {
+
+        reference <- recipes::recipe(SOC ~ ., data = td$data) |>
+          recipes::update_role(sample_id, new_role = "id") |>
+          step_transform_spectra(dplyr::all_of(wn), preprocessing = pp)
+
+        if (fs == "pca") {
+
+          reference <- reference |>
+            recipes::step_pca(select_generated_spectra(), threshold = 0.995,
+                              options = list(scale. = TRUE, center = TRUE))
+
+        }
+
+        built <- build_recipe(make_config_row(preprocessing = pp, feature_selection = fs),
+                              td$data, td$role_map)
+
+        expect_identical(recipes::bake(recipes::prep(built), new_data = NULL),
+                         recipes::bake(recipes::prep(reference), new_data = NULL),
+                         label = paste(pp, fs))
+
+      }
+
+    }
+
+  })
+
+})

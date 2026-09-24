@@ -175,6 +175,9 @@ fit <- function(x,
   tuning       <- x$config$tuning
   cv_folds     <- tuning$cv_folds
 
+  ## The recipe settings evaluate() ran with; see recipe_settings().
+  recipe_cfg   <- recipe_settings(x)
+
   ## The rows evaluate() modelled: the same rule on the same table (#67).
   modelled  <- outcome_complete_rows(x$data$analysis, outcome_col)
   n_dropped <- modelled$n_dropped
@@ -431,7 +434,9 @@ fit <- function(x,
       compute_uq          = compute_uq,
       compute_ad          = compute_ad,
       allow_par           = allow_par,
-      seed                = seed
+      seed                = seed,
+      sg_window           = recipe_cfg$sg_window,
+      pca_threshold       = recipe_cfg$pca_threshold
     )
 
     results_list[[i]] <- config_result

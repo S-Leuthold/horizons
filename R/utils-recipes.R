@@ -23,15 +23,35 @@
 #' frame, which would otherwise be serialized to every parallel worker. See
 #' `strip_selector_envs()`.
 #'
+#' `sg_window` and `pca_threshold` are object-level: `configure()` records one
+#' value of each and every config's recipe uses it, so neither is part of the
+#' config id. The window is in grid points, and it trims `(sg_window - 1) / 2`
+#' columns from each end of the spectrum for every preprocessing method, `raw`
+#' and `snv` included, so the output is `p - (sg_window - 1)` columns wide. The
+#' Savitzky-Golay polynomial order is not a setting: each method fixes its own
+#' (`sg` p = 1; `deriv1` m = 1, p = 1; `deriv2` m = 2, p = 3; the `snv_`
+#' variants the same). `pca_threshold` is read only by
+#' `feature_selection = "pca"`. `configure()` validates both; this function
+#' passes them through as given.
+#'
 #' @param config_row Single-row tibble from `config$configs`.
 #' @param train_data Data frame. Training split containing all columns.
 #' @param role_map Tibble with `variable` and `role` columns from the
 #'   horizons_data object.
+#' @param sg_window Odd integer. Savitzky-Golay window, in grid points, passed
+#'   to `step_transform_spectra(window_size = )`. Default 9.
+#' @param pca_threshold Numeric in (0, 1]. Share of variance the `pca` feature
+#'   selection keeps, passed to `recipes::step_pca(threshold = )`. Default
+#'   0.995.
 #'
 #' @return A `recipes::recipe` object ready for `workflows::add_recipe()`.
 #' @keywords internal
 #' @export
-build_recipe <- function(config_row, train_data, role_map) {
+build_recipe <- function(config_row,
+                         train_data,
+                         role_map,
+                         sg_window     = DEFAULT_SG_WINDOW,
+                         pca_threshold = DEFAULT_PCA_THRESHOLD) {
 
   ## Extract columns by role ------------------------------------------------
 
@@ -170,13 +190,17 @@ build_recipe <- function(config_row, train_data, role_map) {
   ## -----------------------------------------------------------------------
   ## Targets predictor_cols by name (NOT all_predictors()), so covariates
   ## in covariate_hold role are never touched by spectral operations.
+  ##
+  ## The window is configure()'s object-level `sg_window`; each method fixes
+  ## its own polynomial order (see transform_spectra_matrix()).
 
   preprocessing <- tolower(as.character(config_row$preprocessing))
 
   rec <- rec |>
     step_transform_spectra(
       dplyr::all_of(predictor_cols),
-      preprocessing = preprocessing
+      preprocessing = preprocessing,
+      window_size   = sg_window
     )
 
   ## -----------------------------------------------------------------------
@@ -214,7 +238,7 @@ build_recipe <- function(config_row, train_data, role_map) {
     "pca" = rec |>
       recipes::step_pca(
         select_generated_spectra(),
-        threshold = 0.995,
+        threshold = pca_threshold,
         options   = list(scale. = TRUE, center = TRUE)
       ),
 
@@ -288,6 +312,36 @@ build_recipe <- function(config_row, train_data, role_map) {
   ## worker. Passing environment() explicitly keeps that dependency visible.
 
   strip_selector_envs(rec, environment())
+
+}
+
+
+## ---------------------------------------------------------------------------
+## recipe_settings
+## ---------------------------------------------------------------------------
+
+#' The Recipe Settings an Object's Configs Are Built With
+#'
+#' @description
+#' Reads the `sg_window` and `pca_threshold` `configure()` recorded in
+#' `x$config$recipe`, the values `evaluate()` and `fit()` hand to
+#' `build_recipe()` for every config. An object configured before the settings
+#' existed carries no record and gets the defaults, which are what its recipe
+#' ran then, so it evaluates and fits exactly as before.
+#'
+#' @param x A configured `horizons_data` object.
+#'
+#' @return List with `sg_window` and `pca_threshold`.
+#' @keywords internal
+#' @noRd
+recipe_settings <- function(x) {
+
+  recorded <- x$config$recipe
+
+  list(
+    sg_window     = recorded$sg_window     %||% DEFAULT_SG_WINDOW,
+    pca_threshold = recorded$pca_threshold %||% DEFAULT_PCA_THRESHOLD
+  )
 
 }
 

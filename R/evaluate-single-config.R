@@ -35,6 +35,12 @@
 #'   value before dispatch (parameter-free configs become `"resamples"`;
 #'   single-split rsets become `"everything"`).
 #' @param seed Integer. Random seed for reproducibility.
+#' @param sg_window Odd integer. Savitzky-Golay window in grid points, passed
+#'   to [build_recipe()]. `evaluate()` reads it from `configure()`'s
+#'   `config$recipe`. Default 9.
+#' @param pca_threshold Numeric. Variance share the `pca` feature selection
+#'   keeps, passed to [build_recipe()]. `evaluate()` reads it from
+#'   `configure()`'s `config$recipe`. Default 0.995.
 #'
 #' @return Single-row tibble with columns: `config_id`, `status`, the six
 #'   test-set metrics `rmse`, `rrmse`, `rsq`, `ccc`, `rpd`, `mae`, the six
@@ -55,7 +61,9 @@ evaluate_single_config <- function(config_row,
                                    prune_threshold = 100,
                                    allow_par       = FALSE,
                                    parallel_over   = "resamples",
-                                   seed            = 42L) {
+                                   seed            = 42L,
+                                   sg_window       = DEFAULT_SG_WINDOW,
+                                   pca_threshold   = DEFAULT_PCA_THRESHOLD) {
 
   start_time <- Sys.time()
 
@@ -88,7 +96,9 @@ evaluate_single_config <- function(config_row,
   ## -----------------------------------------------------------------------
 
   recipe_result <- safely_execute(
-    build_recipe(config_row, train_data, role_map),
+    build_recipe(config_row, train_data, role_map,
+                 sg_window     = sg_window,
+                 pca_threshold = pca_threshold),
     log_error          = FALSE,
     capture_conditions = TRUE
   )

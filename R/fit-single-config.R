@@ -24,6 +24,11 @@
 #' @param compute_uq Logical. Whether to train UQ components.
 #' @param allow_par Logical. Passed to tune control functions.
 #' @param seed Integer. Random seed for reproducibility.
+#' @param sg_window Odd integer. Savitzky-Golay window in grid points, passed
+#'   to [build_recipe()]. `fit()` reads it from `configure()`'s
+#'   `config$recipe`, the value `evaluate()` ran with. Default 9.
+#' @param pca_threshold Numeric. Variance share the `pca` feature selection
+#'   keeps, passed to [build_recipe()]. Read the same way. Default 0.995.
 #'
 #' @return List with fields: config_id, status, degraded, degraded_reason,
 #'   fitted_workflow, best_params, cv_predictions, test_metrics, cv_metrics,
@@ -43,7 +48,9 @@ fit_single_config <- function(config_row,
                               compute_uq          = FALSE,
                               compute_ad          = FALSE,
                               allow_par           = FALSE,
-                              seed                = 42L) {
+                              seed                = 42L,
+                              sg_window           = DEFAULT_SG_WINDOW,
+                              pca_threshold       = DEFAULT_PCA_THRESHOLD) {
 
   start_time <- Sys.time()
 
@@ -100,7 +107,9 @@ fit_single_config <- function(config_row,
   ## -----------------------------------------------------------------------
 
   recipe_result <- safely_execute(
-    build_recipe(config_row, train_data, role_map),
+    build_recipe(config_row, train_data, role_map,
+                 sg_window     = sg_window,
+                 pca_threshold = pca_threshold),
     log_error          = FALSE,
     capture_conditions = TRUE
   )

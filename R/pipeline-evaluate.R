@@ -150,6 +150,10 @@ evaluate <- function(x,
   cv_folds  <- tuning$cv_folds
   n_samples <- nrow(analysis)
 
+  ## Object-level recipe settings, the same for every config; see
+  ## recipe_settings() for objects configured before they were recorded.
+  recipe_cfg <- recipe_settings(x)
+
   if (n_samples < cv_folds * 2) {
 
     rlang::abort(paste0(
@@ -586,7 +590,9 @@ evaluate <- function(x,
         prune_threshold = prune_threshold,
         allow_par       = axis$tune_allow_par,
         parallel_over   = axis$tune_parallel_over %||% "resamples",
-        seed            = seed
+        seed            = seed,
+        sg_window       = recipe_cfg$sg_window,
+        pca_threshold   = recipe_cfg$pca_threshold
       )
 
       ## Stamp before anything else sees the row, so the in-memory results and
@@ -750,6 +756,8 @@ evaluate <- function(x,
       prune           = prune,
       prune_threshold = prune_threshold,
       seed            = seed,
+      sg_window       = recipe_cfg$sg_window,
+      pca_threshold   = recipe_cfg$pca_threshold,
       checkpoint_dir  = checkpoint_dir,
       pkg_version     = as.character(utils::packageVersion("horizons"))
     )
@@ -1284,6 +1292,7 @@ outcome_complete_rows <- function(analysis, outcome_col) {
 #'   fixed by `SHARED_ARG_NAMES` in `R/constants.R` and asserted on entry:
 #'   `data`, `resample_idx` (from `resample_indices()`), `configs`, `role_map`,
 #'   `grid_size`, `bayesian_iter`, `prune`, `prune_threshold`, `seed`,
+#'   `sg_window`, `pca_threshold` (the object's recipe settings),
 #'   `checkpoint_dir`, and `pkg_version`. There is no `allow_par`: on the
 #'   configs axis tune always runs sequentially inside the worker.
 #'
@@ -1353,7 +1362,9 @@ evaluate_config_worker <- function(config_i, shared) {
     prune           = shared$prune,
     prune_threshold = shared$prune_threshold,
     allow_par       = FALSE,     # configs axis: tune runs sequentially inside
-    seed            = shared$seed
+    seed            = shared$seed,
+    sg_window       = shared$sg_window,
+    pca_threshold   = shared$pca_threshold
   )
 
   ## Stamp the training-row fingerprint. The worker recomputes it from the

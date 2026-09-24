@@ -401,6 +401,52 @@ describe("configure() validation", {
 
   })
 
+  test_that("rejects an sg_window that is even, below 5, fractional or not a scalar (#62)", {
+
+    hd <- make_single_response_hd()
+
+    ## 3 is odd but too narrow: deriv2 fits a cubic, which needs 5 points.
+    for (bad in list(10L, 8, 3L, 1L, 7.5, NA_integer_, Inf, "9", c(9L, 11L))) {
+
+      expect_error(
+        capture.output(configure(hd, sg_window = bad)),
+        "`sg_window` must be an odd integer >= 5",
+        class = "horizons_configure_error",
+        info  = paste("sg_window =", deparse(bad))
+      )
+
+    }
+
+  })
+
+  test_that("rejects a pca_threshold outside (0, 1] or not a single number (#62)", {
+
+    hd <- make_single_response_hd()
+
+    for (bad in list(0, -0.5, 1.01, 2, NA_real_, NaN, "0.99", c(0.9, 0.99))) {
+
+      expect_error(
+        capture.output(configure(hd, pca_threshold = bad)),
+        "`pca_threshold` must be a single number in \\(0, 1\\]",
+        class = "horizons_configure_error",
+        info  = paste("pca_threshold =", deparse(bad))
+      )
+
+    }
+
+  })
+
+  test_that("accepts the boundary recipe settings: sg_window = 5, pca_threshold = 1", {
+
+    hd <- make_single_response_hd()
+
+    result <- quiet_configure(hd, sg_window = 5L, pca_threshold = 1)
+
+    expect_identical(result$config$recipe$sg_window, 5L)
+    expect_identical(result$config$recipe$pca_threshold, 1)
+
+  })
+
   test_that("errors for expand_covariates with invalid covariate names", {
 
     hd <- make_covariate_hd()
@@ -513,14 +559,15 @@ describe("configure() config grid", {
 
   })
 
-  test_that("all 9 columns present", {
+  test_that("all 6 columns present, and no per-config parameter columns (#62)", {
 
     hd     <- make_single_response_hd()
     result <- quiet_configure(hd)
 
+    ## The three list-columns that stood here were never read by the recipe
+    ## builder, so they claimed per-config overrides that did not exist.
     expected_cols <- c("config_id", "model", "transformation", "preprocessing",
-                       "feature_selection", "covariates",
-                       "preprocessing_params", "feature_params", "transform_params")
+                       "feature_selection", "covariates")
 
     expect_equal(sort(names(result$config$configs)), sort(expected_cols))
 
@@ -548,17 +595,19 @@ describe("configure() config grid", {
 
   })
 
-  test_that("list-columns initialized as NULL (each element is NULL)", {
+  test_that("config IDs do not depend on the recipe settings (#62)", {
 
-    hd     <- make_single_response_hd()
-    result <- quiet_configure(hd, models = "rf")
+    ## The settings are object-level, so two objects that differ only in them
+    ## name their configs identically; nothing per-config changed.
+    hd      <- make_single_response_hd()
+    default <- quiet_configure(hd, models = c("rf", "plsr"),
+                               feature_selection = c("none", "pca"))
+    tuned   <- quiet_configure(hd, models = c("rf", "plsr"),
+                               feature_selection = c("none", "pca"),
+                               sg_window = 15L, pca_threshold = 0.9)
 
-    expect_true(all(vapply(result$config$configs$preprocessing_params,
-                           is.null, logical(1))))
-    expect_true(all(vapply(result$config$configs$feature_params,
-                           is.null, logical(1))))
-    expect_true(all(vapply(result$config$configs$transform_params,
-                           is.null, logical(1))))
+    expect_identical(tuned$config$configs$config_id,
+                     default$config$configs$config_id)
 
   })
 
@@ -780,19 +829,114 @@ describe("configure() storage", {
 
   })
 
-  test_that("config$defaults has expected structure", {
+  ## -------------------------------------------------------------------------
+  ## Recipe settings (#62)
+  ## -------------------------------------------------------------------------
+  ## configure() used to write config$defaults (a window of 11, an order of 2,
+  ## a PCA threshold of 0.99, a correlation_n of 200) while the recipe ran a
+  ## window of 9, a method-determined order, a threshold of 0.995 and a
+  ## correlation step with no n at all. The record now holds what runs.
+
+  test_that("config$recipe records the settings the recipe runs, at their defaults", {
 
     hd     <- make_single_response_hd()
     result <- quiet_configure(hd)
 
-    defaults <- result$config$defaults
-    expect_true("preprocessing_params" %in% names(defaults))
-    expect_true("feature_params" %in% names(defaults))
-    expect_true("transform_params" %in% names(defaults))
-    expect_equal(defaults$preprocessing_params$sg_window, 11L)
-    expect_equal(defaults$preprocessing_params$sg_order, 2L)
-    expect_equal(defaults$feature_params$pca_threshold, 0.99)
-    expect_equal(defaults$feature_params$correlation_n, 200L)
+    expect_identical(result$config$recipe$sg_window, 9L)
+    expect_identical(result$config$recipe$pca_threshold, 0.995)
+    expect_null(result$config$defaults)
+
+  })
+
+  test_that("config$recipe stores sg_window and pca_threshold as given", {
+
+    hd     <- make_single_response_hd()
+    result <- quiet_configure(hd, sg_window = 15, pca_threshold = 0.9)
+
+    expect_identical(result$config$recipe$sg_window, 15L)
+    expect_identical(result$config$recipe$pca_threshold, 0.9)
+    expect_identical(recipe_settings(result),
+                     list(sg_window = 15L, pca_threshold = 0.9))
+
+  })
+
+  test_that("configure()'s defaults are the values recipe_settings() falls back on", {
+
+    ## An object configured before the settings existed runs the fallback;
+    ## a freshly configured one runs the formals. They must be the same
+    ## values, or the two would build different recipes from one grid.
+    fm <- formals(configure)
+
+    expect_identical(fm$sg_window, DEFAULT_SG_WINDOW)
+    expect_identical(fm$pca_threshold, DEFAULT_PCA_THRESHOLD)
+    expect_identical(recipe_settings(list(config = list(configs = NULL))),
+                     list(sg_window = DEFAULT_SG_WINDOW,
+                          pca_threshold = DEFAULT_PCA_THRESHOLD))
+
+  })
+
+  test_that("config$recipe is a key of the constructor's config slot", {
+
+    expect_true("recipe" %in% names(new_horizons_data()$config))
+
+  })
+
+  test_that("sg_window_cm is the window times the spacing of the predictor axis", {
+
+    ## The fixture's predictors are 600, 601 and 602: one cm-1 apart.
+    hd <- make_single_response_hd()
+
+    expect_equal(quiet_configure(hd)$config$recipe$sg_window_cm, 9)
+    expect_equal(quiet_configure(hd, sg_window = 11L)$config$recipe$sg_window_cm, 11)
+
+    ## wn_-prefixed names, 4 cm-1 apart
+    wn4 <- hd
+    old <- c("600", "601", "602")
+    new <- paste0("wn_", c(608, 604, 600))
+    names(wn4$data$analysis)[match(old, names(wn4$data$analysis))] <- new
+    wn4$data$role_map$variable[match(old, wn4$data$role_map$variable)] <- new
+
+    expect_equal(quiet_configure(wn4)$config$recipe$sg_window_cm, 36)
+
+  })
+
+  test_that("sg_window_cm reads the axis before a recorded grid step that disagrees", {
+
+    ## select_training() returns the pool's standardize() provenance on the
+    ## targets' axis, so the recorded step can describe a different grid.
+    hd <- make_single_response_hd()
+    hd$provenance$standardization <- list(grid = list(step = 4))
+
+    expect_equal(quiet_configure(hd)$config$recipe$sg_window_cm, 9)
+
+  })
+
+  test_that("sg_window_cm falls back to the recorded grid step, then to NA", {
+
+    ## Predictor names that are not wavenumbers carry no spacing of their own.
+    hd  <- make_single_response_hd()
+    old <- c("600", "601", "602")
+    new <- c("band_a", "band_b", "band_c")
+    names(hd$data$analysis)[match(old, names(hd$data$analysis))] <- new
+    hd$data$role_map$variable[match(old, hd$data$role_map$variable)] <- new
+
+    expect_true(is.na(quiet_configure(hd)$config$recipe$sg_window_cm))
+
+    hd$provenance$standardization <- list(grid = list(step = 2))
+    expect_equal(quiet_configure(hd)$config$recipe$sg_window_cm, 18)
+
+  })
+
+  test_that("re-configuring an object from an earlier version drops its config$defaults", {
+
+    hd <- make_single_response_hd()
+    hd$config$defaults <- list(
+      preprocessing_params = list(sg_window = 11L, sg_order = 2L),
+      feature_params       = list(pca_threshold = 0.99, correlation_n = 200L),
+      transform_params     = list()
+    )
+
+    expect_null(quiet_configure(hd)$config$defaults)
 
   })
 
@@ -995,6 +1139,22 @@ describe("configure() CLI output", {
     expect_true(grepl("Covariate", combined, ignore.case = TRUE))
     expect_true(grepl("clay", combined))
     expect_true(grepl("MAP", combined))
+
+  })
+
+  test_that("prints the window with its width in cm-1, and the PCA threshold when PCA runs", {
+
+    hd <- make_single_response_hd()
+
+    plain <- paste(capture.output(suppressWarnings(configure(hd, sg_window = 11L))),
+                   collapse = "\n")
+    pca   <- paste(capture.output(suppressWarnings(
+      configure(hd, feature_selection = "pca", pca_threshold = 0.9)
+    )), collapse = "\n")
+
+    expect_match(plain, "SG window 11 (11 cm", fixed = TRUE)
+    expect_no_match(plain, "PCA threshold")
+    expect_match(pca, "PCA threshold 0.9", fixed = TRUE)
 
   })
 

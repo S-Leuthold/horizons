@@ -20,6 +20,8 @@
   RPD 3.82). `configure()`'s docs gain a "Choosing models for large spectral
   libraries" section covering n x p limits across `MODEL_SPECS`.
 
+* **`configure()` gains `sg_window` and `pca_threshold`** (#62): the Savitzky-Golay window, in grid points, and the share of variance `feature_selection = "pca"` keeps. Each is set once per object and applies to every configuration, so neither enters the config id. Both are recorded in `config$recipe`, beside `sg_window_cm`, the window's width in cm-1 on the object's own axis (the median spacing of the predictor wavenumbers, since the grid step in the provenance can describe another axis). The defaults, 9 and 0.995, are the values the recipe already ran, so a call that does not set them builds the same recipes as before. `sg_window` must be odd and at least 5, because the second-derivative methods fit a cubic; it trims `(sg_window - 1) / 2` columns from each end for every preprocessing method, `raw` and `snv` included. The polynomial order is still fixed by the method. `pca_threshold` must be in (0, 1]. `evaluate()`, its parallel workers and `fit()` read the settings from the object, and an object configured by an earlier version runs the defaults. `build_recipe()`, `evaluate_single_config()` and `fit_single_config()` take the two as arguments with the same defaults.
+
 ## Performance
 
 * `step_transform_spectra()` bakes the whole spectral matrix in one prospectr
@@ -518,6 +520,8 @@ consequences; the review itself is in
   `seed`. Equality tests in the package use `rf` for that reason.
 
 ## Bug Fixes
+
+* **`configure()` no longer records method defaults the recipe does not run** (#62). It wrote `config$defaults`, a Savitzky-Golay window of 11 and order of 2, a PCA threshold of 0.99 and a `correlation_n` of 200, and gave every configuration three list-columns, `preprocessing_params`, `feature_params` and `transform_params`. Nothing read any of them. The recipe ran a window of 9, an order set by the preprocessing method, a threshold of 0.995, and a correlation step that has no `n` at all. The record and the columns are gone: `config$configs` has six columns, and `config$recipe` holds the settings that do run (see `configure(sg_window, pca_threshold)` under New features). Re-configuring an object saved by an earlier version drops its `config$defaults`.
 
 * **Re-running `configure()` on an object that has been through `ensemble()` no longer aborts** (#70). Reconfiguring cleared a hand-kept list of keys that missed `ensemble$model`, and `set_analysis()` counts a non-NULL `ensemble$model` as promotion, so it refused the object. The same list let `models$uq`, `models$ad`, `models$results` and most of `evaluation` survive the demotion, which left `has_uq()` answering `TRUE` on a plain `horizons_data` whenever the fit had calibrated UQ. Reconfiguring now resets the `evaluation`, `models` and `ensemble` slots whole to the constructor's shape, through an internal `reset_promotion()` that sits beside the promotion check so the two stay in step. The list also erased the record of outliers `validate(remove_outliers = TRUE)` had removed, although those rows stayed removed; that record is now kept, and only the verdict and the flagged ids are cleared. A `select_training()` record is kept, as before.
 

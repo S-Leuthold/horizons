@@ -375,6 +375,54 @@ describe("evaluate() - pruning", {
 })
 
 ## =========================================================================
+## Recipe settings passthrough (#62)
+## =========================================================================
+
+describe("evaluate() - recipe settings", {
+
+  ## Capture what evaluate() hands to evaluate_single_config() without tuning.
+  capture_recipe_args <- function(obj) {
+
+    seen <- NULL
+
+    testthat::with_mocked_bindings(
+      evaluate_single_config = function(...) {
+        seen <<- list(...)[c("sg_window", "pca_threshold")]
+        tibble::tibble(config_id = list(...)$config_row$config_id,
+                       status = "failed", error_message = "mocked")
+      },
+      tryCatch(suppressWarnings(evaluate(obj, verbose = FALSE, seed = 42L)),
+               error = function(e) NULL),
+      .package = "horizons"
+    )
+
+    seen
+
+  }
+
+  obj <- make_eval_object(n_configs = 1)
+
+  it("passes configure()'s sg_window and pca_threshold to every config", {
+
+    obj$config$recipe <- list(sg_window = 13L, sg_window_cm = 26, pca_threshold = 0.9)
+
+    expect_identical(capture_recipe_args(obj),
+                     list(sg_window = 13L, pca_threshold = 0.9))
+
+  })
+
+  it("falls back to the values the recipe always ran when the record is absent (older objects)", {
+
+    obj$config$recipe <- NULL
+
+    expect_identical(capture_recipe_args(obj),
+                     list(sg_window = 9L, pca_threshold = 0.995))
+
+  })
+
+})
+
+## =========================================================================
 ## Seed reproducibility
 ## =========================================================================
 

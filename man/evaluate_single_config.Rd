@@ -15,7 +15,9 @@ evaluate_single_config(
   prune_threshold = 100,
   allow_par = FALSE,
   parallel_over = "resamples",
-  seed = 42L
+  seed = 42L,
+  sg_window = DEFAULT_SG_WINDOW,
+  pca_threshold = DEFAULT_PCA_THRESHOLD
 )
 }
 \arguments{
@@ -54,6 +56,14 @@ value before dispatch (parameter-free configs become \code{"resamples"};
 single-split rsets become \code{"everything"}).}
 
 \item{seed}{Integer. Random seed for reproducibility.}
+
+\item{sg_window}{Odd integer. Savitzky-Golay window in grid points, passed
+to \code{\link[=build_recipe]{build_recipe()}}. \code{evaluate()} reads it from \code{configure()}'s
+\code{config$recipe}. Default 9.}
+
+\item{pca_threshold}{Numeric. Variance share the \code{pca} feature selection
+keeps, passed to \code{\link[=build_recipe]{build_recipe()}}. \code{evaluate()} reads it from
+\code{configure()}'s \code{config$recipe}. Default 0.995.}
 }
 \value{
 Single-row tibble with columns: \code{config_id}, \code{status}, the six
