@@ -2413,6 +2413,33 @@ test_that("validate_horizons_eval accepts evaluation$recipe, and tolerates its a
 
 })
 
+test_that("validate_horizons_eval tolerates response_trim absent or NULL, and checks a record (#77)", {
+
+  ## The fixture has no response_trim key, which is every object evaluated
+  ## before evaluate() trimmed the training partition.
+  obj <- make_valid_eval()
+  expect_false("response_trim" %in% names(obj$evaluation))
+  expect_false("response_trim" %in% contract_keys("evaluation"))
+  expect_identical(validate_horizons_eval(obj), obj)
+
+  ## No trim requested
+  obj$evaluation["response_trim"] <- list(NULL)
+  expect_identical(validate_horizons_eval(obj), obj)
+
+  obj$evaluation$response_trim <- list(outcome = "SOC", trimmed_ids = c("S001", "S002"))
+  expect_identical(validate_horizons_eval(obj), obj)
+
+  ## fit() drops the recorded rows, so a record without them is refused
+  obj$evaluation$response_trim <- list(outcome = "SOC", trimmed_ids = 1:2)
+  expect_error(suppressMessages(validate_horizons_eval(obj)), "response_trim",
+               class = "horizons_validation_error")
+
+  obj$evaluation$response_trim <- "S001"
+  expect_error(suppressMessages(validate_horizons_eval(obj)), "response_trim",
+               class = "horizons_validation_error")
+
+})
+
 test_that("validate_horizons_eval rejects a malformed evaluation$recipe", {
 
   obj <- make_valid_eval()

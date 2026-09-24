@@ -16,13 +16,17 @@
 #' warm-start parameters, so a partition drawn afresh would score the final
 #' models partly on those rows. `fit()` checks that the split still indexes
 #' the rows this object models: after dropping the rows whose outcome is `NA`
-#' (the rule `evaluate()` applies), the id and outcome columns must match the
-#' split's, value for value and in order, or `fit()` aborts with class
-#' `horizons_input_error`. Columns added since `evaluate()`, such as a sibling
-#' response from `add_response()`, are carried into the fit. The count of
-#' NA-outcome rows is reported in the console tree when `verbose = TRUE`.
-#' With UQ or AD on, the calibration set is carved out of Split F's training
-#' part.
+#' (the rule `evaluate()` applies) and the training rows `evaluate()` trimmed
+#' as response outliers (`evaluation$response_trim$trimmed_ids`; see
+#' `evaluate()`'s "Response outliers" section), the id and outcome columns
+#' must match the split's, value for value and in order, or `fit()` aborts
+#' with class `horizons_input_error`. The trim is reused, not recomputed, so
+#' `fit()` trains without exactly the rows `evaluate()` left out and scores
+#' on the same untrimmed test rows. Columns added since `evaluate()`, such
+#' as a sibling response from `add_response()`, are carried into the fit.
+#' The count of NA-outcome rows, and the response trim, are reported in the
+#' console tree when `verbose = TRUE`. With UQ or AD on, the calibration set
+#' is carved out of Split F's training part, after the trim.
 #'
 #' The members are the top `n_best` of the configurations `evaluate()` chose
 #' `best_config` from, ranked by the same rule: the ones that succeeded or,
@@ -43,7 +47,9 @@
 #' configured `horizons_data` whose `config$configs` has exactly one row can
 #' go straight to `fit()` (#45). `fit()` then draws the train/test split
 #' itself, by the draw `evaluate()` uses, so at the same `seed` it holds out
-#' exactly the rows `evaluate()` would have. With no parameters from
+#' exactly the rows `evaluate()` would have, and applies a response trim
+#' `validate()` requested as `evaluate()` does, on fences from the training
+#' partition alone. With no parameters from
 #' `evaluate()` to warm-start from, the re-tune starts from a space-filling
 #' grid of `grid_size` points; the console tree says so, and
 #' `models$results$warm_start` is `FALSE`. The degradation check needs
@@ -360,19 +366,47 @@ fit <- function(x,
 
   }
 
-  if (!identical(split_F$data[[id_col]], modelled$data[[id_col]]) ||
-      !identical(split_F$data[[outcome_col]], modelled$data[[outcome_col]])) {
+  ## evaluate()'s response trim (#77) dropped training rows from the split's
+  ## data, so the same rows are dropped here before the comparison. They are
+  ## the rows evaluate() recorded, not a fresh trim: fences recomputed here
+  ## could fall on another set. An evaluation without the record (no trim
+  ## requested, or evaluated before it existed) trimmed nothing.
+  trimmed_ids   <- x$evaluation$response_trim$trimmed_ids %||% character(0)
+  modelled_rows <- if (length(trimmed_ids) > 0) {
+    modelled$data[!modelled$data[[id_col]] %in% trimmed_ids, , drop = FALSE]
+  } else {
+    modelled$data
+  }
+
+  if (!identical(split_F$data[[id_col]], modelled_rows[[id_col]]) ||
+      !identical(split_F$data[[outcome_col]], modelled_rows[[outcome_col]])) {
+
+    trim_note <- if (length(trimmed_ids) > 0) {
+      paste0(" once the ", length(trimmed_ids), " training rows evaluate() trimmed are left out")
+    } else {
+      ""
+    }
 
     cli::cli_abort(c(
       "{.fn evaluate}'s split does not index the rows this object models.",
-      "x" = "{.field evaluation$split} was drawn on {nrow(split_F$data)} row{?s}; the analysis table has {nrow(modelled$data)} with an observed {.field {outcome_col}}, and their {.field {id_col}} or {.field {outcome_col}} values differ.",
+      "x" = "{.field evaluation$split} was drawn on {nrow(split_F$data)} row{?s}; the analysis table has {nrow(modelled_rows)} with an observed {.field {outcome_col}}{trim_note}, and their {.field {id_col}} or {.field {outcome_col}} values differ.",
       "i" = "The rows or outcomes changed after {.fn evaluate}, or the object was built by hand.",
       "i" = "Re-run {.fn evaluate} on the object as it is now."
     ), class = "horizons_input_error")
 
   }
 
-  split_F$data <- modelled$data
+  split_F$data <- modelled_rows
+
+  ## Rows an earlier version's validate() removed on whole-table fences are
+  ## gone from both parts, so this fit's test metrics exclude them too.
+  legacy_removed <- legacy_response_removals(x)
+
+  if (length(legacy_removed) > 0) {
+
+    warn_legacy_response_removals(legacy_removed, "fit")
+
+  }
 
   train_F <- rsample::training(split_F)
   test_F  <- rsample::testing(split_F)
@@ -497,6 +531,8 @@ fit <- function(x,
       if (cold_start) "the rows evaluate() holds out at this seed" else "evaluate()'s held-out rows",
       ")\n"
     ))
+
+    render_response_trim(x$evaluation$response_trim, legacy_removed)
 
     if (compute_uq) {
 
@@ -964,8 +1000,9 @@ fit <- function(x,
 #' and the same Savitzky-Golay window check, [evaluation_recipe()]), and
 #' returns the record `fit()` stores in `x$evaluation` in place of
 #' `evaluate()`'s. The record carries every key [validate_horizons_eval()]
-#' requires, with `screened = FALSE`, and `recipe` as `evaluate()` records
-#' it; it leaves out the run provenance (`workers`, `parallelize_over`),
+#' requires, with `screened = FALSE`, and `recipe` and `response_trim` as
+#' `evaluate()` records them (the split is trimmed by the same helper, #77);
+#' it leaves out the run provenance (`workers`, `parallelize_over`),
 #' since no `evaluate()` ran. Its one
 #' results row has status `"not_evaluated"`, `NA` metrics and `cv_*`
 #' columns, and `NULL` `best_params`, which sends the re-tune to
@@ -981,8 +1018,9 @@ fit <- function(x,
 #' @return List with `evaluation` (the record) and `stratified` (`FALSE` when
 #'   the split fell back to unstratified). Aborts with class
 #'   `horizons_input_error` when the object has no configuration or more than
-#'   one, too few rows have an observed outcome, or the window is at least as
-#'   wide as the spectrum.
+#'   one, too few rows have an observed outcome, the window is at least as
+#'   wide as the spectrum, or `validate()`'s response-trim request is for
+#'   another outcome ([response_trim_request()]).
 #' @keywords internal
 #' @noRd
 cold_start_evaluation <- function(x, metric, seed, call = rlang::caller_env()) {
@@ -1033,7 +1071,12 @@ cold_start_evaluation <- function(x, metric, seed, call = rlang::caller_env()) {
   ## fit() builds its recipe from the same settings.
   recipe_record <- evaluation_recipe(x, call = call)
 
-  drawn <- draw_eval_split(modelled$data, outcome_col, seed)
+  ## The draw evaluate() makes, and the response trim it applies (#77): a
+  ## trim validate() requested runs on this split's training partition by
+  ## the same helper, so a cold start leaves out the rows evaluate() would.
+  drawn <- draw_eval_split(modelled$data, outcome_col, seed,
+                           trim   = response_trim_request(x, outcome_col, call = call),
+                           id_col = id_column(role_map))
   split <- drawn$split
 
   ## The shape of an evaluate() results row (create_failed_result()'s
@@ -1062,6 +1105,7 @@ cold_start_evaluation <- function(x, metric, seed, call = rlang::caller_env()) {
       split        = split,
       n_train      = nrow(rsample::training(split)),
       n_test       = nrow(rsample::testing(split)),
+      response_trim = drawn$trim,
       recipe       = recipe_record,
       runtime_secs = 0,
       timestamp    = Sys.time()

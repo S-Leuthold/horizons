@@ -24,38 +24,70 @@
 #' wavenumber. Response outliers use IQR-based Tukey fences on the outcome
 #' variable.
 #'
+#' **Response outliers are trimmed from the training partition, not here:**
+#'
+#' Spectral outliers are removed here, since the detector reads no labels.
+#' Response outliers are not. Fences computed over the whole table would
+#' include the rows `evaluate()` later holds out as its test set, and
+#' removing the rows outside them before any split exists takes exactly the
+#' hardest cases out of the test set, chosen by their own labels, so the test
+#' metrics come out optimistic (#77). So `validate()` flags the rows outside
+#' the whole-table fences for information (`response_ids`, check P006) and,
+#' when `remove_outliers` asks for response removal, records the request in
+#' `validation$outliers$response_trim`. `evaluate()` then draws its
+#' train/test split on the untrimmed rows, computes the fences from the
+#' training partition's labels alone, and trims the training rows outside
+#' them before any CV fold is drawn; test rows are never removed on their
+#' labels. `fit()` reuses that split and those trimmed rows, and its cold
+#' start applies the same rule. A later `configure()` clears the request
+#' with the rest of the verdict, since it was made for the outcome being
+#' replaced.
+#'
 #' **Idempotency:**
 #'
-#' Running `validate()` again replaces the verdict, the checks and the
-#' flagged ids. The removal record accumulates instead: rows an earlier call
-#' removed are gone from the object and stay gone, so their ids and detail
-#' rows are kept and this call's removals are added to them. Re-validation
-#' operates on the reduced dataset.
+#' Running `validate()` again replaces the verdict, the checks, the flagged
+#' ids and the response-trim request. The removal record accumulates
+#' instead: rows an earlier call removed are gone from the object and stay
+#' gone, so their ids and detail rows are kept and this call's removals are
+#' added to them. Re-validation operates on the reduced dataset.
 #'
 #' @param x `horizons_data`. Configured object (must have `config$configs`).
 #' @param remove_outliers `logical(1) or character(1)`. `FALSE` to detect
-#'   only (default), `TRUE` to remove all flagged outliers, `"spectral"` or
-#'   `"response"` for selective removal.
+#'   only (default). `"spectral"` removes the spectral outliers from the
+#'   object. `"response"` removes nothing here: it asks `evaluate()` (and
+#'   `fit()`'s cold start) to trim, from the training partition only, the
+#'   training rows outside Tukey fences computed on that partition's labels,
+#'   with `response_threshold` as the multiplier. `TRUE` does both. Objects
+#'   validated by versions before this contract had their response outliers
+#'   removed here, on whole-table fences; they still evaluate, with a
+#'   warning that their test metrics exclude those rows.
 #' @param spectral_method `character(1)`. Spectral outlier detection method.
 #'   Currently only `"mahalanobis"`. Default: `"mahalanobis"`.
 #' @param spectral_threshold `numeric(1)`. Chi-squared quantile for
 #'   Mahalanobis distance cutoff. Default: `0.975`.
 #' @param response_method `character(1)`. Response outlier detection method.
 #'   Currently only `"iqr"`. Default: `"iqr"`.
-#' @param response_threshold `numeric(1)`. IQR multiplier for Tukey fences.
-#'   Default: `1.5`.
+#' @param response_threshold `numeric(1)`. IQR multiplier for Tukey fences,
+#'   both the whole-table flags and the training-partition fences
+#'   `evaluate()` trims by. Default: `1.5`.
 #'
 #' @return `horizons_data`. Same object with `validation` section populated:
 #'   - `validation$passed`: `TRUE` if no ERROR checks failed
 #'   - `validation$checks`: tibble of check results
 #'   - `validation$outliers`: the ids this call flagged (`spectral_ids`,
-#'     `response_ids`) and the record of every removal so far
-#'     (`removed_ids`, `removed`, and `removal_detail`, one row per removed
-#'     sample with `sample_id`, `reason` (`"spectral"`, `"response"` or
-#'     `"both"`, counting only the detectors `remove_outliers` removed by),
-#'     the `outcome` whose fences flagged it (`NA` unless the response
-#'     detector did), and the `spectral_threshold` and `response_threshold`
-#'     in force (`NA` for the kind that did not flag it))
+#'     and `response_ids`, flagged on the whole table for information and
+#'     never removed here); `response_trim`, the request for `evaluate()`
+#'     when `remove_outliers` is `TRUE` or `"response"` (a list of the
+#'     `outcome`, the `method` and the `threshold`), otherwise `NULL`; and
+#'     the record of every removal so far (`removed_ids`, `removed`, and
+#'     `removal_detail`, one row per removed sample with `sample_id`,
+#'     `reason`, the `outcome` whose fences flagged it, and the
+#'     `spectral_threshold` and `response_threshold` in force). This version
+#'     removes spectral outliers only, so its rows have `reason`
+#'     `"spectral"`, an `NA` outcome and an `NA` `response_threshold`;
+#'     `"response"` and `"both"` rows, with the outcome and threshold filled
+#'     in, are records carried from an earlier version that removed rows on
+#'     their labels.
 #'   - `validation$timestamp`: when validation ran
 #'
 #' @examples
@@ -65,7 +97,8 @@
 #'   validate() |>
 #'   evaluate()
 #'
-#' # Remove outliers
+#' # Remove spectral outliers, and trim response outliers from
+#' # evaluate()'s training partition
 #' x |> validate(remove_outliers = TRUE)
 #'
 #' # Remove only spectral outliers
@@ -465,59 +498,55 @@ validate <- function(x,
   ## ---------------------------------------------------------------------------
   ## Step 12: Outlier removal (if requested)
   ## ---------------------------------------------------------------------------
+  ## Only spectral outliers leave the object here, since that detector reads
+  ## no labels. Response outliers are never removed here (#77): the fences
+  ## above span every row, including the rows evaluate() will hold out, so
+  ## removing on them would take the test set's hardest cases out by their
+  ## own labels. A response request is recorded instead, and evaluate()
+  ## trims the training partition on fences from its labels alone.
+
+  remove_spectral <- isTRUE(remove_outliers) || identical(remove_outliers, "spectral")
+  trim_response   <- isTRUE(remove_outliers) || identical(remove_outliers, "response")
 
   removed_ids    <- character(0)
   removal_detail <- NULL
   did_remove     <- FALSE
 
-  if (!isFALSE(remove_outliers)) {
+  if (remove_spectral && length(spectral_outlier_ids) > 0) {
 
-    ids_to_remove <- switch(
-      as.character(remove_outliers),
-      "TRUE"     = union(spectral_outlier_ids, response_outlier_ids),
-      "spectral" = spectral_outlier_ids,
-      "response" = response_outlier_ids
+    ## validate() records the removal in x$validation$outliers below, so
+    ## the generic provenance entry is not needed here.
+    x <- subset_rows(x,
+                     keep   = !x$data$analysis$sample_id %in% spectral_outlier_ids,
+                     record = FALSE)
+
+    ## The detail keeps the columns earlier versions wrote, since the record
+    ## accumulates across versions: a row removed on labels by one of them
+    ## carries its reason ("response" or "both"), outcome and response
+    ## threshold, and configure() warns about those when the outcome changes.
+    ## Rows removed here are spectral, with no outcome.
+    removal_detail <- tibble::tibble(
+      sample_id          = spectral_outlier_ids,
+      reason             = "spectral",
+      outcome            = NA_character_,
+      spectral_threshold = as.numeric(spectral_threshold),
+      response_threshold = NA_real_
     )
 
-    if (length(ids_to_remove) > 0) {
+    removed_ids <- spectral_outlier_ids
+    did_remove  <- TRUE
 
-      ## validate() records the removal in x$validation$outliers below, so
-      ## the generic provenance entry is not needed here.
-      x <- subset_rows(x,
-                       keep   = !x$data$analysis$sample_id %in% ids_to_remove,
-                       record = FALSE)
+  }
 
-      ## Build removal detail tibble. A flag counts only for a detector this
-      ## mode removes by: under "spectral", a row that also sits outside the
-      ## response fences was not removed for it, so it is "spectral", not
-      ## "both", and carries no outcome.
-      mode        <- as.character(remove_outliers)
-      in_spectral <- mode %in% c("TRUE", "spectral") & ids_to_remove %in% spectral_outlier_ids
-      in_response <- mode %in% c("TRUE", "response") & ids_to_remove %in% response_outlier_ids
-
-      reason <- dplyr::case_when(
-        in_spectral & in_response ~ "both",
-        in_spectral               ~ "spectral",
-        TRUE                      ~ "response"
-      )
-
-      ## The outcome and the thresholds are recorded because the record
-      ## outlives them: configure() can change the outcome while these rows
-      ## stay removed, and it warns when a response removal was made for a
-      ## different one.
-      removal_detail <- tibble::tibble(
-        sample_id          = ids_to_remove,
-        reason             = reason,
-        outcome            = ifelse(in_response, outcome_col[1], NA_character_),
-        spectral_threshold = ifelse(in_spectral, as.numeric(spectral_threshold), NA_real_),
-        response_threshold = ifelse(in_response, as.numeric(response_threshold), NA_real_)
-      )
-
-      removed_ids <- ids_to_remove
-      did_remove  <- TRUE
-
-    }
-
+  ## The request evaluate() and fit()'s cold start read. The outcome is
+  ## recorded so a request can never be applied to another outcome's labels;
+  ## configure() clears it with the verdict anyway.
+  response_trim <- if (trim_response && has_outcome) {
+    list(outcome   = outcome_col,
+         method    = response_method,
+         threshold = as.numeric(response_threshold))
+  } else {
+    NULL
   }
 
   ## ---------------------------------------------------------------------------
@@ -541,10 +570,10 @@ validate <- function(x,
   checks$severity[checks$status == "pass"] <- ""
   x$validation$checks <- checks
 
-  ## The flags are this call's; the removal record accumulates. Rows an
-  ## earlier call removed (possibly before a re-configure) are gone from the
-  ## object and stay gone, so their record is kept and this call's removals
-  ## are added to it.
+  ## The flags and the trim request are this call's; the removal record
+  ## accumulates. Rows an earlier call removed (possibly before a
+  ## re-configure) are gone from the object and stay gone, so their record is
+  ## kept and this call's removals are added to it.
   prior <- x$validation$outliers
 
   all_removed_ids <- union(prior$removed_ids %||% character(0), removed_ids)
@@ -557,6 +586,7 @@ validate <- function(x,
   ### Single-bracket assignment of list(value) keeps the key when value is NULL.
   x$validation$outliers["spectral_ids"]   <- list(spectral_outlier_ids)
   x$validation$outliers["response_ids"]   <- list(response_outlier_ids)
+  x$validation$outliers["response_trim"]  <- list(response_trim)
   x$validation$outliers["removed_ids"]    <- list(all_removed_ids)
   x$validation$outliers["removal_detail"] <- list(all_detail)
   x$validation$outliers["removed"]        <- list(isTRUE(prior$removed) || did_remove)
@@ -623,7 +653,18 @@ validate <- function(x,
 
     cat(paste0("\u2502  \u251C\u2500 ",
                cli::col_cyan("\u2139"), " Response outliers: ",
-               length(response_outlier_ids), "\n"))
+               length(response_outlier_ids),
+               if (!is.null(response_trim)) " on the whole table, not removed" else "",
+               "\n"))
+
+    ## Where the request goes, so nobody reads the count above as rows gone
+    if (!is.null(response_trim)) {
+
+      cat(paste0("\u2502  \u2502  \u2514\u2500 Trim requested: evaluate() fences its training ",
+                 "partition (", format(response_trim$threshold), " x IQR) and trims ",
+                 "training rows only; test rows untouched\n"))
+
+    }
 
   }
 
@@ -631,14 +672,7 @@ validate <- function(x,
 
   if (did_remove) {
 
-    n_spectral_only <- sum(removal_detail$reason == "spectral")
-    n_response_only <- sum(removal_detail$reason == "response")
-    n_both          <- sum(removal_detail$reason == "both")
-
-    cat(paste0("\u2502  \u251C\u2500 Removed ", length(removed_ids), " outliers",
-               " (", n_spectral_only, " spectral, ",
-               n_response_only, " response, ",
-               n_both, " both)\n"))
+    cat(paste0("\u2502  \u251C\u2500 Removed ", length(removed_ids), " spectral outliers\n"))
     cat(paste0("\u2502  \u251C\u2500 ", x$data$n_rows, " samples remaining\n"))
 
   }
@@ -769,8 +803,11 @@ detect_spectral_outliers <- function(analysis, predictor_cols, nzv_cols, thresho
 #' Detect response outliers via IQR-based Tukey fences
 #'
 #' @description
-#' Flags outcome values outside `[Q1 - threshold*IQR, Q3 + threshold*IQR]`.
-#' Only non-NA outcome values are considered for fence computation.
+#' Flags outcome values outside `[Q1 - threshold*IQR, Q3 + threshold*IQR]`,
+#' with the fences from [tukey_fences()] over the whole table. Only non-NA
+#' outcome values are considered for fence computation. `validate()` reports
+#' these flags and removes nothing on them (#77); `evaluate()` computes its
+#' own fences on the training partition.
 #'
 #' @param analysis `tibble`. The analysis table.
 #' @param outcome_col `character(1)`. Name of the outcome column.
@@ -781,22 +818,18 @@ detect_spectral_outliers <- function(analysis, predictor_cols, nzv_cols, thresho
 #' @noRd
 detect_response_outliers <- function(analysis, outcome_col, threshold) {
 
-  outcome_vals  <- analysis[[outcome_col]]
-  complete_mask <- !is.na(outcome_vals)
-  outcome_complete <- outcome_vals[complete_mask]
+  outcome_vals <- analysis[[outcome_col]]
+  fences       <- tukey_fences(outcome_vals, threshold)
 
-  if (length(outcome_complete) < 4) {
+  if (identical(fences$skipped, "too_few")) {
 
     warning(paste0("Too few non-NA outcome values for IQR detection (n=",
-                   length(outcome_complete), "). Skipping."), call. = FALSE)
+                   fences$n, "). Skipping."), call. = FALSE)
     return(character(0))
 
   }
 
-  q     <- stats::quantile(outcome_complete, c(0.25, 0.75))
-  iqr   <- q[2] - q[1]
-
-  if (iqr < sqrt(.Machine$double.eps)) {
+  if (identical(fences$skipped, "zero_iqr")) {
 
     warning("IQR is zero or near-zero \u2014 skipping response outlier detection.",
             call. = FALSE)
@@ -804,13 +837,55 @@ detect_response_outliers <- function(analysis, outcome_col, threshold) {
 
   }
 
-  lower <- q[1] - threshold * iqr
-  upper <- q[2] + threshold * iqr
-
-  outlier_mask <- complete_mask &
-    (outcome_vals < lower | outcome_vals > upper)
+  outlier_mask <- !is.na(outcome_vals) &
+    (outcome_vals < fences$lower | outcome_vals > fences$upper)
 
   analysis$sample_id[outlier_mask]
+
+}
+
+
+#' Tukey fences on a set of outcome values
+#'
+#' @description
+#' `[Q1 - threshold*IQR, Q3 + threshold*IQR]` over the non-NA values. The one
+#' fence rule shared by `validate()`'s whole-table flags and the
+#' training-partition trim `evaluate()` and `fit()`'s cold start apply
+#' ([trim_training_responses()]), so the two cannot drift apart.
+#'
+#' @param values `numeric`. Outcome values; `NA` is ignored.
+#' @param threshold `numeric(1)`. IQR multiplier.
+#'
+#' @return `list` with `lower` and `upper` (`NA` when skipped), `n` (the
+#'   non-NA values the fences were computed over), and `skipped`: `NA`, or
+#'   `"too_few"` (fewer than four values) or `"zero_iqr"` (an IQR of zero, or
+#'   near it), when no fences can be drawn.
+#'
+#' @noRd
+tukey_fences <- function(values, threshold) {
+
+  values <- values[!is.na(values)]
+  n      <- length(values)
+
+  if (n < 4) {
+
+    return(list(lower = NA_real_, upper = NA_real_, n = n, skipped = "too_few"))
+
+  }
+
+  q   <- stats::quantile(values, c(0.25, 0.75), names = FALSE)
+  iqr <- q[2] - q[1]
+
+  if (iqr < sqrt(.Machine$double.eps)) {
+
+    return(list(lower = NA_real_, upper = NA_real_, n = n, skipped = "zero_iqr"))
+
+  }
+
+  list(lower   = q[1] - threshold * iqr,
+       upper   = q[2] + threshold * iqr,
+       n       = n,
+       skipped = NA_character_)
 
 }
 

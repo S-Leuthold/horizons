@@ -1885,3 +1885,156 @@ describe("fit() - cold start with UQ and AD (#45)", {
   })
 
 })
+
+
+## =========================================================================
+## evaluate()'s response trim is reused, not recomputed (#77)
+## =========================================================================
+## validate(remove_outliers = "response") no longer removes rows; evaluate()
+## trims the training rows outside fences from its training partition and
+## records them. fit() leaves out exactly those rows, on both paths, and
+## scores on the untrimmed test rows.
+
+describe("fit() - evaluate()'s response trim (#77)", {
+
+  obj <- make_eval_object(n = 60, n_configs = 1)
+  obj$data$analysis$SOC[c(1:4, 31:34)] <- c(20, 25, 30, 35, -15, -20, -25, -30)
+  obj$config$tuning$final_bayesian_iter <- 0L
+
+  utils::capture.output(
+    v <- suppressWarnings(validate(obj, remove_outliers = "response"))
+  )
+
+  ev      <- suppressWarnings(evaluate(v, prune = FALSE, verbose = FALSE, seed = 307L))
+  trimmed <- ev$evaluation$response_trim$trimmed_ids
+
+  ## What fit() hands its member, without tuning: the split, the rows it fits
+  ## on, the console tree and the warnings (kept, and muffled, so none
+  ## reaches the reporter).
+  seen_by_fit <- function(x, verbose = FALSE) {
+
+    seen   <- NULL
+    caught <- list()
+
+    out <- utils::capture.output(
+      withCallingHandlers(
+        testthat::with_mocked_bindings(
+          tryCatch(
+            fit(x, compute_uq = FALSE, compute_ad = FALSE, verbose = verbose, seed = 307L),
+            horizons_all_members_failed = function(e) NULL
+          ),
+          fit_single_config = function(...) {
+            args <- list(...)
+            seen <<- list(split = args$split_F, train = args$train_data)
+            list(config_id = args$config_row$config_id, status = "failed",
+                 error_message = "mocked", runtime_secs = 0)
+          },
+          .package = "horizons"
+        ),
+        warning = function(w) {
+          caught[[length(caught) + 1L]] <<- w
+          invokeRestart("muffleWarning")
+        }
+      )
+    )
+
+    c(seen, list(out = out, warnings = caught))
+
+  }
+
+  warm <- seen_by_fit(ev, verbose = TRUE)
+
+  it("fits without the rows evaluate() trimmed, and scores on its untrimmed test rows", {
+
+    expect_gt(length(trimmed), 0)
+    expect_false(any(trimmed %in% warm$train$sample_id))
+    expect_identical(warm$train$sample_id,
+                     rsample::training(ev$evaluation$split)$sample_id)
+    expect_identical(rsample::testing(warm$split)$sample_id,
+                     rsample::testing(ev$evaluation$split)$sample_id)
+
+  })
+
+  it("says so in its tree", {
+
+    expect_true(any(grepl(paste0("Response outliers: ", length(trimmed), " of ",
+                                 ev$evaluation$response_trim$n_training,
+                                 " training rows trimmed"),
+                          warm$out, fixed = TRUE)))
+
+  })
+
+  it("trims the same rows on a cold start, through the same helper", {
+
+    cold <- seen_by_fit(v)
+
+    expect_identical(cold$train$sample_id, warm$train$sample_id)
+    expect_identical(rsample::testing(cold$split)$sample_id,
+                     rsample::testing(warm$split)$sample_id)
+
+    ## The cold start's record is evaluate()'s
+    record <- suppressWarnings(cold_start_evaluation(v, NULL, 307L))
+
+    expect_identical(record$evaluation$response_trim, ev$evaluation$response_trim)
+    expect_identical(record$evaluation$split$data, ev$evaluation$split$data)
+    expect_identical(record$evaluation$split$in_id, ev$evaluation$split$in_id)
+
+  })
+
+  it("reuses the recorded rows rather than re-reading validate()'s request", {
+
+    ## A request changed after evaluate() does not reach the fit: fences
+    ## recomputed at another threshold would trim other rows.
+    changed <- ev
+    changed$validation$outliers$response_trim$threshold <- 3
+
+    expect_identical(seen_by_fit(changed)$train$sample_id, warm$train$sample_id)
+
+  })
+
+  it("refuses the split once the record of its trimmed rows is gone", {
+
+    no_record <- ev
+    no_record$evaluation["response_trim"] <- list(NULL)
+
+    expect_error(
+      suppressWarnings(fit(no_record, compute_uq = FALSE, compute_ad = FALSE,
+                           verbose = FALSE)),
+      "does not index the rows this object models",
+      class = "horizons_input_error"
+    )
+
+  })
+
+  it("fits and scores end to end on the trimmed split", {
+
+    f <- suppressWarnings(
+      fit(ev, compute_uq = FALSE, compute_ad = FALSE, verbose = FALSE, seed = 307L)
+    )
+
+    expect_s3_class(f, "horizons_fit")
+    expect_false(any(trimmed %in% f$models$row_index$sample_id))
+    expect_identical(rsample::testing(f$models$split)$sample_id,
+                     rsample::testing(ev$evaluation$split)$sample_id)
+    expect_true(is.finite(f$models$results$rmse))
+
+  })
+
+  it("warns about an object an earlier version validated, on either path", {
+
+    legacy <- legacy_label_removal(obj, sprintf("S%03d", c(1:4, 31:34)))
+
+    cold_legacy <- seen_by_fit(legacy)
+
+    expect_true(any(vapply(cold_legacy$warnings, inherits, logical(1),
+                           "horizons_response_trim_warning")))
+
+    ev_legacy   <- suppressWarnings(evaluate(legacy, prune = FALSE, verbose = FALSE, seed = 307L))
+    warm_legacy <- seen_by_fit(ev_legacy)
+
+    expect_true(any(vapply(warm_legacy$warnings, inherits, logical(1),
+                           "horizons_response_trim_warning")))
+
+  })
+
+})

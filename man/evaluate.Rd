@@ -59,7 +59,9 @@ this run's training data (the outcome, the sample ids, which columns hold
 the \code{id}, \code{outcome}, \code{predictor} and \code{covariate} roles, and the outcome,
 predictor and covariate values) and tuned with this run's settings
 (\code{cv_folds}, \code{grid_size}, \code{bayesian_iter}, \code{prune}, \code{prune_threshold}
-when pruning, and \code{seed}); either mismatch aborts, naming what differs.
+when pruning, and \code{seed}) and this run's response trim
+(\code{response_threshold}, \code{NA} when none was requested); either mismatch
+aborts, naming what differs.
 So re-standardized spectra, a rescaled outcome, or another outcome on the
 same samples is refused rather than resumed, while adding a sibling
 response with \code{add_response()} or a \code{meta} column resumes. Keep one
@@ -90,7 +92,9 @@ associated metadata populated, including \code{evaluation$parallelize_over}
 (the axis actually used), \code{evaluation$workers} (the worker count the
 registered plan offered; 1 when sequential) and \code{evaluation$recipe} (the
 \code{sg_window}, its width in cm-1 on the evaluated axis as \code{sg_window_cm},
-and the \code{pca_threshold} every config's recipe ran with). Aborts, before
+and the \code{pca_threshold} every config's recipe ran with) and
+\code{evaluation$response_trim} (the training-partition response trim, or
+\code{NULL} when none was requested; see "Response outliers"). Aborts, before
 any config runs, when \code{configure()}'s \code{sg_window} is not narrower than
 the spectrum. Called on an object that
 has already been through \code{fit()} or \code{ensemble()}, it returns a
@@ -142,6 +146,33 @@ one in the calling process (via \code{RhpcBLASctl} when installed) and restored
 on exit. Configs are dispatched to a top-level worker that loads the
 \emph{installed} package, so parallel dispatch refuses to run under
 \code{devtools::load_all()}.
+}
+
+\section{Response outliers}{
+
+When \code{validate()} was asked to remove response outliers
+(\code{remove_outliers = TRUE} or \code{"response"}), it records the request and
+removes nothing on labels. \code{evaluate()} draws its train/test split on the
+untrimmed rows, computes Tukey fences (\code{validate()}'s
+\code{response_threshold} times the IQR) from the training partition's
+outcome values alone, and drops the training rows outside them before
+the CV folds are drawn. Test rows are never removed on their labels, so
+the test metrics describe the population the model will meet, extremes
+included. \code{n_train} counts the training rows left after the trim, and
+\code{evaluation$response_trim} records it: the \code{outcome}, \code{method} and
+\code{threshold}, \code{fences_from} (\code{"training"}), the \code{lower} and \code{upper}
+fences, \code{n_training} (the training rows the fences were computed over),
+\code{trimmed_ids}, and \code{skipped} (\code{NA}, or why no fences could be drawn, in
+which case nothing is trimmed and \code{evaluate()} warns). \code{fit()} reuses
+the split and those ids. The CV assessment folds are drawn from the
+trimmed training rows, so the cross-validated metrics (and the ranking
+on them) describe the trimmed population; the test metrics do not.
+
+An object validated by an earlier version, which removed response
+outliers on whole-table fences before any split, still evaluates. Its
+removal record says which rows went (\code{reason} \code{"response"} or \code{"both"}),
+and \code{evaluate()} warns, with class \code{horizons_response_trim_warning}, that
+its test metrics exclude them.
 }
 
 \section{When every configuration fails}{

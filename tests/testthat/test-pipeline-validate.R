@@ -1046,14 +1046,22 @@ describe("validate() outlier removal", {
 
   })
 
-  test_that("remove_outliers=TRUE: removes union of spectral + response", {
+  test_that("remove_outliers=TRUE: removes the spectral outliers and requests the response trim (#77)", {
 
     hd     <- make_outlier_hd()
     result <- quiet_validate(hd, remove_outliers = TRUE)
+    out    <- result$validation$outliers
 
-    expect_true(result$validation$outliers$removed)
-    expect_true(length(result$validation$outliers$removed_ids) > 0)
+    expect_true(out$removed)
+    expect_setequal(out$removed_ids, out$spectral_ids)
     expect_true(result$data$n_rows < 100)
+
+    ## S006 is a response outlier only: flagged, not removed
+    expect_true("S006" %in% out$response_ids)
+    expect_true("S006" %in% result$data$analysis$sample_id)
+
+    expect_identical(out$response_trim,
+                     list(outcome = "SOC", method = "iqr", threshold = 1.5))
 
   })
 
@@ -1067,16 +1075,48 @@ describe("validate() outlier removal", {
     spectral <- result$validation$outliers$spectral_ids
     expect_true(all(removed %in% spectral))
 
+    ## and nothing is asked of evaluate()
+    expect_null(result$validation$outliers$response_trim)
+
   })
 
-  test_that("remove_outliers='response': removes only response outliers", {
+  test_that("remove_outliers='response': removes nothing on labels and records the trim request (#77)", {
 
+    ## The whole-table fences span the rows evaluate() will hold out, so
+    ## removing on them would drop the test set's extremes by their own
+    ## labels. The request goes to evaluate(), which fences its training
+    ## partition instead.
     hd     <- make_outlier_hd()
-    result <- quiet_validate(hd, remove_outliers = "response")
+    result <- quiet_validate(hd, remove_outliers = "response",
+                             response_threshold = 2)
+    out    <- result$validation$outliers
 
-    removed  <- result$validation$outliers$removed_ids
-    response <- result$validation$outliers$response_ids
-    expect_true(all(removed %in% response))
+    expect_equal(result$data$n_rows, 100)
+    expect_false(out$removed)
+    expect_equal(out$removed_ids, character(0))
+    expect_null(out$removal_detail)
+
+    ## Flagged for information, and every flagged row still there
+    expect_true(all(c("S004", "S005", "S006") %in% out$response_ids))
+    expect_true(all(out$response_ids %in% result$data$analysis$sample_id))
+
+    expect_identical(out$response_trim,
+                     list(outcome = "SOC", method = "iqr", threshold = 2))
+
+  })
+
+  test_that("remove_outliers=FALSE records no trim request, and a second call replaces one", {
+
+    hd <- make_outlier_hd()
+
+    expect_null(quiet_validate(hd)$validation$outliers$response_trim)
+
+    requested <- quiet_validate(hd, remove_outliers = "response")
+    expect_false(is.null(requested$validation$outliers$response_trim))
+
+    ## The request is this call's, like the flags; it does not accumulate
+    again <- quiet_validate(requested, remove_outliers = FALSE)
+    expect_null(again$validation$outliers$response_trim)
 
   })
 
@@ -1100,11 +1140,13 @@ describe("validate() outlier removal", {
     expect_s3_class(detail, "tbl_df")
     expect_true("sample_id" %in% names(detail))
     expect_true("reason" %in% names(detail))
-    expect_true(all(detail$reason %in% c("spectral", "response", "both")))
+
+    ## Only the spectral detector removes rows now (#77)
+    expect_true(all(detail$reason == "spectral"))
 
   })
 
-  test_that("removal_detail correctly identifies overlap as 'both'", {
+  test_that("a row outside both kinds of fence is removed as spectral, not 'both' (#77)", {
 
     hd     <- make_outlier_hd()
     result <- quiet_validate(hd, remove_outliers = TRUE)
@@ -1114,12 +1156,9 @@ describe("validate() outlier removal", {
     response <- result$validation$outliers$response_ids
     overlap  <- intersect(spectral, response)
 
-    if (length(overlap) > 0) {
-
-      both_rows <- detail[detail$sample_id %in% overlap, ]
-      expect_true(all(both_rows$reason == "both"))
-
-    }
+    ## S004 and S005 carry both kinds of outlier in the fixture
+    expect_true(all(c("S004", "S005") %in% overlap))
+    expect_true(all(detail$reason[detail$sample_id %in% overlap] == "spectral"))
 
   })
 
@@ -1147,28 +1186,28 @@ describe("validate() outlier removal", {
 
   })
 
-  test_that("removal_detail records the outcome and threshold behind each removal", {
+  test_that("removal_detail records the threshold behind each removal, and the trim request its own", {
 
     ## Rows 1-3 are spectral only, 4-5 both, 6 response only
     hd     <- make_outlier_hd()
     result <- quiet_validate(hd, remove_outliers = TRUE,
                              spectral_threshold = 0.99, response_threshold = 2)
 
-    detail        <- result$validation$outliers$removal_detail
-    spectral_only <- detail[detail$reason == "spectral", ]
-    response_side <- detail[detail$reason %in% c("response", "both"), ]
+    detail <- result$validation$outliers$removal_detail
 
+    ## The columns earlier versions wrote, kept so records accumulate
     expect_true(all(c("outcome", "spectral_threshold", "response_threshold") %in% names(detail)))
-    expect_gt(nrow(spectral_only), 0)
-    expect_gt(nrow(response_side), 0)
+    expect_gt(nrow(detail), 0)
 
     ## A spectral removal does not depend on the outcome
-    expect_true(all(is.na(spectral_only$outcome)))
-    expect_true(all(is.na(spectral_only$response_threshold)))
-    expect_true(all(spectral_only$spectral_threshold == 0.99))
+    expect_true(all(detail$reason == "spectral"))
+    expect_true(all(is.na(detail$outcome)))
+    expect_true(all(is.na(detail$response_threshold)))
+    expect_true(all(detail$spectral_threshold == 0.99))
 
-    expect_true(all(response_side$outcome == "SOC"))
-    expect_true(all(response_side$response_threshold == 2))
+    ## The response threshold travels with the request instead
+    expect_identical(result$validation$outliers$response_trim$threshold, 2)
+    expect_false("S006" %in% detail$sample_id)
 
   })
 
@@ -1232,24 +1271,66 @@ describe("validate() keeps the removal record", {
   test_that("a second validate() that removes more rows adds to the record", {
 
     v1 <- quiet_validate(make_two_response_hd(), remove_outliers = TRUE)
-    v3 <- quiet_validate(quiet_reconfigure(v1, "pH"), remove_outliers = "response")
+
+    ## New spectral outliers on rows 50 and 51, after the first removal. Only
+    ## spectral outliers leave the object now (#77), so they are what a
+    ## second call can add.
+    reconfigured <- quiet_reconfigure(v1, "pH")
+    analysis     <- reconfigured$data$analysis
+    spec_cols    <- reconfigured$data$role_map$variable[reconfigured$data$role_map$role == "predictor"]
+    analysis[analysis$sample_id %in% c("S050", "S051"), spec_cols] <- 100
+    reconfigured <- set_analysis(reconfigured, analysis)
+
+    v3 <- quiet_validate(reconfigured, remove_outliers = "spectral")
 
     first  <- v1$validation$outliers
     out    <- v3$validation$outliers
     added  <- setdiff(out$removed_ids, first$removed_ids)
 
-    expect_setequal(added, c("S050", "S051"))
+    expect_true(all(c("S050", "S051") %in% added))
     expect_true(all(first$removed_ids %in% out$removed_ids))
     expect_true(out$removed)
 
     ## One detail row per removed id, the earlier rows unchanged, the new
-    ## ones attributed to the outcome that flagged them
+    ## ones spectral, with no outcome
     expect_identical(sort(out$removal_detail$sample_id), sort(out$removed_ids))
     expect_identical(out$removal_detail[seq_len(nrow(first$removal_detail)), ],
                      first$removal_detail)
-    expect_true(all(out$removal_detail$outcome[out$removal_detail$sample_id %in% added] == "pH"))
+    new_rows <- out$removal_detail[out$removal_detail$sample_id %in% added, ]
+    expect_true(all(new_rows$reason == "spectral"))
+    expect_true(all(is.na(new_rows$outcome)))
 
     expect_false(any(out$removed_ids %in% v3$data$analysis$sample_id))
+
+  })
+
+  test_that("the record an earlier version wrote keeps accumulating (#77)", {
+
+    ## Rows 4-6 removed on SOC's labels by a version before #77
+    legacy <- legacy_label_removal(make_two_response_hd(), c("S004", "S005", "S006"),
+                                   reason = c("both", "both", "response"))
+
+    v2  <- quiet_validate(quiet_reconfigure(legacy, "pH"), remove_outliers = "spectral")
+    out <- v2$validation$outliers
+
+    expect_true(all(c("S004", "S005", "S006") %in% out$removed_ids))
+    expect_identical(out$removal_detail[1:3, ], legacy$validation$outliers$removal_detail)
+    expect_true(out$removed)
+
+  })
+
+  test_that("configure() clears the trim request with the verdict (#77)", {
+
+    ## Made for SOC's labels; the rows are all still there, so there is
+    ## nothing to keep once the outcome changes
+    v1 <- quiet_validate(make_two_response_hd(), remove_outliers = "response")
+
+    expect_false(is.null(v1$validation$outliers$response_trim))
+
+    reconfigured <- quiet_reconfigure(v1, "pH")
+
+    expect_null(reconfigured$validation$outliers$response_trim)
+    expect_identical(reconfigured$data$n_rows, v1$data$n_rows)
 
   })
 
@@ -1274,15 +1355,16 @@ describe("validate() keeps the removal record", {
 
   test_that("a row removed as both is not counted as a stale response removal", {
 
-    ## Under TRUE, rows 4 and 5 are "both" (they would go as spectral
-    ## outliers whatever the outcome) and row 6 is "response"
-    v1     <- quiet_validate(make_two_response_hd(), remove_outliers = TRUE)
+    ## Only a version before #77 removed rows on their labels, so the record
+    ## is that version's: rows 4 and 5 "both" (they would go as spectral
+    ## outliers whatever the outcome) and row 6 "response"
+    v1     <- legacy_label_removal(make_two_response_hd(), c("S004", "S005", "S006"),
+                                   reason = c("both", "both", "response"))
     detail <- v1$validation$outliers$removal_detail
 
     n_response <- sum(detail$reason == "response")
 
-    expect_true(all(detail$reason[detail$sample_id %in% c("S004", "S005")] == "both"))
-    expect_identical(detail$reason[detail$sample_id == "S006"], "response")
+    expect_identical(n_response, 1L)
 
     warned <- testthat::capture_warnings(utils::capture.output(configure(v1, outcome = "pH")))
 
@@ -1380,6 +1462,23 @@ describe("validate() passed logic and CLI output", {
 
   })
 
+  test_that("CLI output says a response trim goes to evaluate() and removes nothing here (#77)", {
+
+    outcome_vals <- c(stats::rnorm(97, 15, 2), 100, 200, 300)
+    hd           <- make_configured_hd(outcome_values = outcome_vals)
+
+    requested <- capture.output(suppressWarnings(validate(hd, remove_outliers = "response")))
+    plain     <- capture.output(suppressWarnings(validate(hd)))
+
+    expect_true(any(grepl("Response outliers: [0-9]+ on the whole table, not removed", requested)))
+    expect_true(any(grepl("Trim requested: evaluate() fences its training partition",
+                          requested, fixed = TRUE)))
+    expect_false(any(grepl("Removed", requested, fixed = TRUE)))
+
+    expect_false(any(grepl("Trim requested", plain, fixed = TRUE)))
+
+  })
+
 })
 
 
@@ -1432,7 +1531,7 @@ describe("validate() edge cases", {
 
   })
 
-  test_that("spectral + response overlap: union removes correct count", {
+  test_that("spectral + response overlap: TRUE removes the spectral rows only (#77)", {
 
     hd <- make_configured_hd(n_samples = 100, n_predictors = 20)
 
@@ -1452,9 +1551,11 @@ describe("validate() edge cases", {
     response <- result$validation$outliers$response_ids
     removed  <- result$validation$outliers$removed_ids
 
-    ## Union removes unique samples
-    expected_removed <- union(spectral, response)
-    expect_equal(sort(removed), sort(expected_removed))
+    ## The spectral rows leave; the response-only row (S006) stays, for
+    ## evaluate() to trim if it lands in the training partition
+    expect_equal(sort(removed), sort(spectral))
+    expect_true(all(setdiff(response, spectral) %in% result$data$analysis$sample_id))
+    expect_equal(result$data$n_rows, 100 - length(spectral))
 
   })
 

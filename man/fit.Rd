@@ -91,13 +91,17 @@ training rows chose the members (on \verb{cv_<metric>}) and tuned the
 warm-start parameters, so a partition drawn afresh would score the final
 models partly on those rows. \code{fit()} checks that the split still indexes
 the rows this object models: after dropping the rows whose outcome is \code{NA}
-(the rule \code{evaluate()} applies), the id and outcome columns must match the
-split's, value for value and in order, or \code{fit()} aborts with class
-\code{horizons_input_error}. Columns added since \code{evaluate()}, such as a sibling
-response from \code{add_response()}, are carried into the fit. The count of
-NA-outcome rows is reported in the console tree when \code{verbose = TRUE}.
-With UQ or AD on, the calibration set is carved out of Split F's training
-part.
+(the rule \code{evaluate()} applies) and the training rows \code{evaluate()} trimmed
+as response outliers (\code{evaluation$response_trim$trimmed_ids}; see
+\code{evaluate()}'s "Response outliers" section), the id and outcome columns
+must match the split's, value for value and in order, or \code{fit()} aborts
+with class \code{horizons_input_error}. The trim is reused, not recomputed, so
+\code{fit()} trains without exactly the rows \code{evaluate()} left out and scores
+on the same untrimmed test rows. Columns added since \code{evaluate()}, such
+as a sibling response from \code{add_response()}, are carried into the fit.
+The count of NA-outcome rows, and the response trim, are reported in the
+console tree when \code{verbose = TRUE}. With UQ or AD on, the calibration set
+is carved out of Split F's training part, after the trim.
 
 The members are the top \code{n_best} of the configurations \code{evaluate()} chose
 \code{best_config} from, ranked by the same rule: the ones that succeeded or,
@@ -119,7 +123,9 @@ With one configuration there is nothing for \code{evaluate()} to choose, so a
 configured \code{horizons_data} whose \code{config$configs} has exactly one row can
 go straight to \code{fit()} (#45). \code{fit()} then draws the train/test split
 itself, by the draw \code{evaluate()} uses, so at the same \code{seed} it holds out
-exactly the rows \code{evaluate()} would have. With no parameters from
+exactly the rows \code{evaluate()} would have, and applies a response trim
+\code{validate()} requested as \code{evaluate()} does, on fences from the training
+partition alone. With no parameters from
 \code{evaluate()} to warm-start from, the re-tune starts from a space-filling
 grid of \code{grid_size} points; the console tree says so, and
 \code{models$results$warm_start} is \code{FALSE}. The degradation check needs

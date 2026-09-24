@@ -113,6 +113,39 @@ make_eval_object <- function(n = 40, n_wn = 10, n_configs = 2,
 
 }
 
+## ---------------------------------------------------------------------------
+## An object validated before #77
+## ---------------------------------------------------------------------------
+
+#' Remove rows the way validate(remove_outliers = "response") did before #77
+#'
+#' Versions before #77 removed response outliers from the object, on fences
+#' over the whole table, and recorded them in removal_detail with reason
+#' "response" (or "both" when the row was a spectral outlier too), the
+#' outcome whose fences flagged them and the response threshold. They wrote
+#' no response_trim request. This builds that record shape on an unpromoted
+#' object.
+legacy_label_removal <- function(hd, ids, reason = "response", outcome = "SOC",
+                                 response_threshold = 1.5) {
+
+  x      <- subset_rows(hd, keep = !hd$data$analysis$sample_id %in% ids, record = FALSE)
+  reason <- rep_len(reason, length(ids))
+
+  x$validation$outliers["removed_ids"]    <- list(ids)
+  x$validation$outliers["removal_detail"] <- list(tibble::tibble(
+    sample_id          = ids,
+    reason             = reason,
+    outcome            = outcome,
+    spectral_threshold = ifelse(reason == "both", 0.975, NA_real_),
+    response_threshold = response_threshold
+  ))
+  x$validation$outliers["removed"]        <- list(TRUE)
+  x$validation$outliers$response_trim     <- NULL   # NULL removes the key
+
+  x
+
+}
+
 library(dplyr)
 library(tibble)
 

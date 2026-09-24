@@ -42,7 +42,9 @@
 #'   the `id`, `outcome`, `predictor` and `covariate` roles, and the outcome,
 #'   predictor and covariate values) and tuned with this run's settings
 #'   (`cv_folds`, `grid_size`, `bayesian_iter`, `prune`, `prune_threshold`
-#'   when pruning, and `seed`); either mismatch aborts, naming what differs.
+#'   when pruning, and `seed`) and this run's response trim
+#'   (`response_threshold`, `NA` when none was requested); either mismatch
+#'   aborts, naming what differs.
 #'   So re-standardized spectra, a rescaled outcome, or another outcome on the
 #'   same samples is refused rather than resumed, while adding a sibling
 #'   response with `add_response()` or a `meta` column resumes. Keep one
@@ -101,6 +103,31 @@
 #' *installed* package, so parallel dispatch refuses to run under
 #' `devtools::load_all()`.
 #'
+#' @section Response outliers:
+#' When `validate()` was asked to remove response outliers
+#' (`remove_outliers = TRUE` or `"response"`), it records the request and
+#' removes nothing on labels. `evaluate()` draws its train/test split on the
+#' untrimmed rows, computes Tukey fences (`validate()`'s
+#' `response_threshold` times the IQR) from the training partition's
+#' outcome values alone, and drops the training rows outside them before
+#' the CV folds are drawn. Test rows are never removed on their labels, so
+#' the test metrics describe the population the model will meet, extremes
+#' included. `n_train` counts the training rows left after the trim, and
+#' `evaluation$response_trim` records it: the `outcome`, `method` and
+#' `threshold`, `fences_from` (`"training"`), the `lower` and `upper`
+#' fences, `n_training` (the training rows the fences were computed over),
+#' `trimmed_ids`, and `skipped` (`NA`, or why no fences could be drawn, in
+#' which case nothing is trimmed and `evaluate()` warns). `fit()` reuses
+#' the split and those ids. The CV assessment folds are drawn from the
+#' trimmed training rows, so the cross-validated metrics (and the ranking
+#' on them) describe the trimmed population; the test metrics do not.
+#'
+#' An object validated by an earlier version, which removed response
+#' outliers on whole-table fences before any split, still evaluates. Its
+#' removal record says which rows went (`reason` `"response"` or `"both"`),
+#' and `evaluate()` warns, with class `horizons_response_trim_warning`, that
+#' its test metrics exclude them.
+#'
 #' @section When every configuration fails:
 #' `best_config` is chosen from the configs that succeeded or, when none did,
 #' from the pruned configs that carry a cross-validated value of `metric`.
@@ -135,7 +162,9 @@
 #'   (the axis actually used), `evaluation$workers` (the worker count the
 #'   registered plan offered; 1 when sequential) and `evaluation$recipe` (the
 #'   `sg_window`, its width in cm-1 on the evaluated axis as `sg_window_cm`,
-#'   and the `pca_threshold` every config's recipe ran with). Aborts, before
+#'   and the `pca_threshold` every config's recipe ran with) and
+#'   `evaluation$response_trim` (the training-partition response trim, or
+#'   `NULL` when none was requested; see "Response outliers"). Aborts, before
 #'   any config runs, when `configure()`'s `sg_window` is not narrower than
 #'   the spectrum. Called on an object that
 #'   has already been through `fit()` or `ensemble()`, it returns a
@@ -288,9 +317,29 @@ evaluate <- function(x,
   ## the rows this verb would at the same seed. `analysis` has had its NA
   ## outcomes dropped already; the helper's own pass over it then drops
   ## nothing and returns it uncopied, so the split shares its rows.
+  ##
+  ## A response trim validate() requested is applied inside the same helper
+  ## (#77): the split is drawn on the untrimmed rows, the fences come from
+  ## the training partition's labels alone, and only training rows outside
+  ## them leave, before the folds below are drawn. The trim draws nothing
+  ## from the RNG, so the folds follow the same stream they always did.
 
-  drawn <- draw_eval_split(analysis, outcome_col, seed)
+  trim_request <- response_trim_request(x, outcome_col)
+
+  drawn <- draw_eval_split(analysis, outcome_col, seed,
+                           trim   = trim_request,
+                           id_col = id_column(role_map))
   split <- drawn$split
+
+  ## Rows an earlier version removed on whole-table fences are gone before
+  ## any split; say so, since the test metrics are conditional on it.
+  legacy_removed <- legacy_response_removals(x)
+
+  if (length(legacy_removed) > 0) {
+
+    warn_legacy_response_removals(legacy_removed, "evaluate")
+
+  }
 
   if (!drawn$stratified && verbose) {
 
@@ -366,7 +415,12 @@ evaluate <- function(x,
     ## every row, PCA or not: conservative, since a row that never ran PCA
     ## re-runs rather than resumes when only the threshold changed.
     sg_window       = recipe_cfg$sg_window,
-    pca_threshold   = recipe_cfg$pca_threshold
+    pca_threshold   = recipe_cfg$pca_threshold,
+    ## The response trim (#77). The fingerprint above already covers the
+    ## rows it left, since it hashes the trimmed training part; recording the
+    ## threshold as well makes a refusal name the trim as the reason. NA when
+    ## no trim was requested, as prune_threshold is when not pruning.
+    response_threshold = if (is.null(trim_request)) NA_real_ else trim_request$threshold
   )
 
   ## -----------------------------------------------------------------------
@@ -437,6 +491,7 @@ evaluate <- function(x,
 
     cat(paste0("\u2502  Split: ", n_train, " train / ", n_test, " test (",
                round(100 * SPLIT_PROP), "/", round(100 * (1 - SPLIT_PROP)), ", stratified)\n"))
+    render_response_trim(drawn$trim, legacy_removed)
     cat(paste0("\u2502  Tuning: ", cv_folds, "-fold CV, grid = ",
                tuning$grid_size, ", bayesian = ",
                tuning$bayesian_iter, "\n"))
@@ -821,6 +876,9 @@ evaluate <- function(x,
     split        = split,
     n_train      = n_train,
     n_test       = n_test,
+    ## What the trim did, so fit() drops the same training rows rather than
+    ## recomputing fences on another set; NULL when none was requested.
+    response_trim = drawn$trim,
     workers      = plan_workers,
     parallelize_over = axis$axis,
     ## What every config's recipe ran with, the window's width included, so
@@ -2163,19 +2221,30 @@ outcome_complete_rows <- function(analysis, outcome_col) {
 #' It seeds the global RNG, as `evaluate()` always has: `evaluate()`'s CV
 #' folds are drawn from the state it leaves.
 #'
+#' When `validate()` requested a response trim, it is applied here, after
+#' the draw, by [trim_training_responses()], so `evaluate()` and the cold
+#' start cannot apply different rules (#77). The trim draws nothing from the
+#' RNG, and without a request the split is exactly the draw.
+#'
 #' @param analysis Data frame. The object's analysis table. Rows whose
 #'   outcome is `NA` are dropped here; a table the callers have already
 #'   filtered for their sample-size gate passes through uncopied.
 #' @param outcome_col Character. Name of the outcome column.
 #' @param seed Integer. The seed passed to `evaluate()` (or to `fit()` on a
 #'   cold start).
-#' @return List with `split` (the `rsplit`), `n_dropped` (integer, the rows
-#'   whose outcome is `NA`) and `stratified` (`FALSE` when the stratified
-#'   draw failed and the split is unstratified). Aborts as
-#'   [outcome_complete_rows()] does.
+#' @param trim The request from [response_trim_request()], or `NULL` for no
+#'   trim. Default `NULL`.
+#' @param id_col Character. The identifier column the trimmed rows are
+#'   recorded by. Default `"sample_id"`.
+#' @return List with `split` (the `rsplit`, less any trimmed training rows),
+#'   `n_dropped` (integer, the rows whose outcome is `NA`), `stratified`
+#'   (`FALSE` when the stratified draw failed and the split is unstratified)
+#'   and `trim` (the record from [trim_training_responses()], or `NULL`
+#'   without a request). Aborts as [outcome_complete_rows()] does.
 #' @keywords internal
 #' @noRd
-draw_eval_split <- function(analysis, outcome_col, seed) {
+draw_eval_split <- function(analysis, outcome_col, seed, trim = NULL,
+                            id_col = "sample_id") {
 
   modelled   <- outcome_complete_rows(analysis, outcome_col)
   stratified <- TRUE
@@ -2193,7 +2262,275 @@ draw_eval_split <- function(analysis, outcome_col, seed) {
     }
   )
 
-  list(split = split, n_dropped = modelled$n_dropped, stratified = stratified)
+  trim_record <- NULL
+
+  if (!is.null(trim)) {
+
+    trimmed     <- trim_training_responses(split, outcome_col, trim, id_col)
+    split       <- trimmed$split
+    trim_record <- trimmed$record
+
+  }
+
+  list(split = split, n_dropped = modelled$n_dropped, stratified = stratified,
+       trim = trim_record)
+
+}
+
+## ---------------------------------------------------------------------------
+## Response trim: validate()'s request, applied to the training partition
+## ---------------------------------------------------------------------------
+## validate() used to remove response outliers on fences computed over every
+## row, before any split, so the test set lost exactly its hardest cases,
+## chosen by their own labels (#77). It now records the request; these
+## helpers read it and apply it to the training partition of the split
+## evaluate() (and fit()'s cold start) draws.
+
+#' The identifier column of a role map
+#'
+#' @param role_map The object's role map.
+#' @return Character. The first `"id"` variable, else `"sample_id"`, the
+#'   rule [eval_data_fingerprint()] and `fit()` apply.
+#' @keywords internal
+#' @noRd
+id_column <- function(role_map) {
+
+  id_col <- role_map$variable[role_map$role == "id"]
+
+  if (length(id_col) == 0) "sample_id" else as.character(id_col[1])
+
+}
+
+#' Read validate()'s response-trim request
+#'
+#' @description
+#' Returns the request `validate(remove_outliers = TRUE or "response")`
+#' recorded in `x$validation$outliers$response_trim`, or `NULL` when there
+#' is none (not requested, cleared by a re-configure, or an object validated
+#' before the request existed). A request recorded for another outcome is
+#' refused rather than applied to this one's labels: `configure()` clears
+#' the request, so that only happens to an object edited by hand.
+#'
+#' @param x A `horizons_data`.
+#' @param outcome_col Character. The outcome being modelled.
+#' @param call The call the condition is attributed to. Default: the caller.
+#' @return `NULL`, or a list with `outcome`, `method` and `threshold`. Aborts
+#'   with class `horizons_input_error` on a request for another outcome, or
+#'   one without a single positive threshold.
+#' @keywords internal
+#' @noRd
+response_trim_request <- function(x, outcome_col, call = rlang::caller_env()) {
+
+  request <- x$validation$outliers$response_trim
+
+  if (is.null(request)) return(NULL)
+
+  if (!identical(as.character(request$outcome), as.character(outcome_col))) {
+
+    cli::cli_abort(c(
+      "{.fn validate}'s response-trim request is for another outcome.",
+      "x" = "It was recorded for {.field {request$outcome}}; this object models {.field {outcome_col}}.",
+      "i" = "Run {.fn validate} again on the object as configured."
+    ), class = "horizons_input_error", call = call)
+
+  }
+
+  threshold <- request$threshold
+
+  if (!is.numeric(threshold) || length(threshold) != 1 || is.na(threshold) ||
+      threshold <= 0) {
+
+    cli::cli_abort(c(
+      "{.fn validate}'s response-trim request has no usable threshold.",
+      "x" = "{.field validation$outliers$response_trim$threshold} must be a single positive number.",
+      "i" = "Run {.fn validate} again."
+    ), class = "horizons_input_error", call = call)
+
+  }
+
+  list(outcome   = as.character(request$outcome),
+       method    = request$method %||% "iqr",
+       threshold = as.numeric(threshold))
+
+}
+
+#' Trim response outliers from a split's training partition
+#'
+#' @description
+#' Computes Tukey fences ([tukey_fences()]) from the training partition's
+#' outcome values alone and removes the training rows outside them. Test
+#' rows are never removed and their labels are never read, so changing a
+#' test row's outcome cannot change which training rows are trimmed.
+#'
+#' The trimmed rows are dropped from the split's data, and the training
+#' indices renumbered, rather than left in the data outside both parts:
+#' `rsample::testing()` and the parallel transport ([resample_indices()])
+#' take the test part as the complement of the training indices, so a row
+#' left in the data would land in the test set. The split keeps its class,
+#' attributes and `out_id = NA`, and its test part is the untrimmed test
+#' rows in their original order.
+#'
+#' When no fences can be drawn (fewer than four training values, or a zero
+#' IQR), nothing is trimmed and a warning with class
+#' `horizons_response_trim_warning` says so; the record carries the reason.
+#'
+#' @param split The `rsplit` from the draw.
+#' @param outcome_col Character. The outcome column.
+#' @param trim The request from [response_trim_request()].
+#' @param id_col Character. The identifier column the trimmed rows are
+#'   recorded by.
+#' @return List with `split` (the trimmed split) and `record`, a list of
+#'   `outcome`, `method`, `threshold`, `fences_from` (`"training"`), `lower`
+#'   and `upper` (the fences, `NA` when skipped), `n_training` (the training
+#'   rows the fences were computed over), `trimmed_ids` (character) and
+#'   `skipped` (`NA`, `"too_few"` or `"zero_iqr"`).
+#' @keywords internal
+#' @noRd
+trim_training_responses <- function(split, outcome_col, trim, id_col) {
+
+  train_pos <- split$in_id
+  values    <- split$data[[outcome_col]][train_pos]
+  fences    <- tukey_fences(values, trim$threshold)
+
+  outside <- if (is.na(fences$skipped)) {
+    !is.na(values) & (values < fences$lower | values > fences$upper)
+  } else {
+    rep(FALSE, length(values))
+  }
+
+  trimmed_pos <- train_pos[outside]
+
+  record <- list(
+    outcome     = trim$outcome,
+    method      = trim$method,
+    threshold   = trim$threshold,
+    fences_from = "training",
+    lower       = fences$lower,
+    upper       = fences$upper,
+    n_training  = length(train_pos),
+    trimmed_ids = as.character(split$data[[id_col]][trimmed_pos]),
+    skipped     = fences$skipped
+  )
+
+  if (!is.na(fences$skipped)) {
+
+    why <- if (fences$skipped == "too_few") {
+      paste0("it has fewer than four outcome values (", fences$n, ")")
+    } else {
+      "its outcome has a zero interquartile range"
+    }
+
+    cli::cli_warn(c(
+      "!" = "Response trimming was requested, but no fences can be drawn on the training partition: {why}.",
+      "i" = "No training rows were trimmed."
+    ), class = "horizons_response_trim_warning")
+
+  }
+
+  if (length(trimmed_pos) > 0) {
+
+    ## Renumber the kept rows; the training indices keep their order.
+    keep      <- !seq_len(nrow(split$data)) %in% trimmed_pos
+    new_index <- cumsum(keep)
+
+    split$in_id <- as.integer(new_index[train_pos[!outside]])
+    split$data  <- split$data[keep, , drop = FALSE]
+
+  }
+
+  list(split = split, record = record)
+
+}
+
+#' Rows an earlier validate() removed on their labels
+#'
+#' @description
+#' Versions before #77 removed response outliers in `validate()`, on fences
+#' over the whole table, before any split. Their removal record carries
+#' those rows with `reason` `"response"` or `"both"`; this version never
+#' writes either, so their presence identifies an object validated the old
+#' way. Records written before the `reason` column existed cannot be read
+#' this way and count as none.
+#'
+#' @param x A `horizons_data`.
+#' @return Character. The removed ids, possibly empty.
+#' @keywords internal
+#' @noRd
+legacy_response_removals <- function(x) {
+
+  detail <- x$validation$outliers$removal_detail
+
+  if (is.null(detail) || !all(c("sample_id", "reason") %in% names(detail))) {
+
+    return(character(0))
+
+  }
+
+  as.character(detail$sample_id[detail$reason %in% c("response", "both")])
+
+}
+
+#' Warn that an earlier validate() removed rows on their labels
+#'
+#' @param ids Character. The ids from [legacy_response_removals()].
+#' @param verb Character. The verb whose test metrics are affected.
+#' @return `NULL`, invisibly; warns with class
+#'   `horizons_response_trim_warning`.
+#' @keywords internal
+#' @noRd
+warn_legacy_response_removals <- function(ids, verb) {
+
+  n_rows <- length(ids)
+
+  cli::cli_warn(c(
+    "!" = "{n_rows} row{?s} {?was/were} removed as response outliers by an earlier {.fn validate}, before any train/test split existed.",
+    "i" = "That version drew its fences over the whole table, so the rows {.fn {verb}} holds out as its test set lost their extremes by their own labels. Its test metrics describe the table without {cli::qty(n_rows)}{?that row/those rows}, and are optimistic for samples like {cli::qty(n_rows)}{?it/them}.",
+    "i" = "The rows cannot be restored to this object. To score on untrimmed test rows, start from the object before that {.fn validate} and run {.code validate(remove_outliers = \"response\")} again, which now trims the training partition only."
+  ), class = "horizons_response_trim_warning")
+
+  invisible(NULL)
+
+}
+
+#' Print the response-trim lines of a console tree
+#'
+#' @param trim The record from [trim_training_responses()], or `NULL`.
+#' @param legacy_removed Character. Ids from [legacy_response_removals()].
+#' @return `NULL`, invisibly; prints tree lines, or nothing when there is
+#'   neither a trim nor a legacy removal.
+#' @keywords internal
+#' @noRd
+render_response_trim <- function(trim, legacy_removed = character(0)) {
+
+  if (!is.null(trim) && is.na(trim$skipped)) {
+
+    n_trimmed <- length(trim$trimmed_ids)
+
+    cat(paste0(
+      "\u2502  Response outliers: ", n_trimmed, " of ", trim$n_training,
+      " training rows trimmed; fences [", signif(trim$lower, 4), ", ",
+      signif(trim$upper, 4), "] (", format(trim$threshold),
+      " x IQR) from the training partition; test rows untouched\n"
+    ))
+
+  } else if (!is.null(trim)) {
+
+    cat(paste0("\u2502  ", cli::col_yellow(
+      "Response outliers: trim requested, but no fences on the training partition; nothing trimmed"
+    ), "\n"))
+
+  }
+
+  if (length(legacy_removed) > 0) {
+
+    cat(paste0("\u2502  ", cli::col_yellow(
+      "Response outliers: ", length(legacy_removed),
+      " rows removed by an earlier validate() before the split; test metrics exclude them"
+    ), "\n"))
+
+  }
+
+  invisible(NULL)
 
 }
 
