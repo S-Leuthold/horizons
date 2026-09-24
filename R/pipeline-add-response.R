@@ -540,13 +540,10 @@ add_response <- function(x,
   cat("\u2502  \u2514\u2500 Variables:\n")
 
   for (i in seq_along(variable)) {
-
     branch <- if (i < length(variable)) "\u251C\u2500" else "\u2514\u2500"
     cat(paste0("\u2502     ", branch, " ", variable[i], ": ",
                n_non_missing[[i]], "/", n_horizons, " non-missing\n"))
-
   }
-
   cat("\u2502\n")
 
   ## ---------------------------------------------------------------------------
