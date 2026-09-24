@@ -872,23 +872,23 @@ evaluate <- function(x,
   x <- reset_slots(x, c("models", "ensemble"))
 
   x$evaluation <- list(
-    results      = all_results,
-    best_config  = best_config_id,
-    rank_metric  = metric,
-    screened     = TRUE,
-    split        = split,
-    n_train      = n_train,
-    n_test       = n_test,
+    results          = all_results,
+    best_config      = best_config_id,
+    rank_metric      = metric,
+    screened         = TRUE,
+    split            = split,
+    n_train          = n_train,
+    n_test           = n_test,
     ## What the trim did, so fit() drops the same training rows rather than
     ## recomputing fences on another set; NULL when none was requested.
-    response_trim = trimmed$record,
-    workers      = plan_workers,
+    response_trim    = trimmed$record,
+    workers          = plan_workers,
     parallelize_over = axis$axis,
     ## What every config's recipe ran with, the window's width included, so
     ## the results of an sg_window sweep can be told apart after the fact.
-    recipe       = recipe_cfg,
-    runtime_secs = total_runtime,
-    timestamp    = Sys.time()
+    recipe           = recipe_cfg,
+    runtime_secs     = total_runtime,
+    timestamp        = Sys.time()
   )
 
   ## -----------------------------------------------------------------------
@@ -1619,13 +1619,7 @@ eval_data_fingerprint <- function(train_data, role_map = NULL) {
 
   has_roles <- !is.null(role_map) && "role" %in% names(role_map)
 
-  id_col <- if (has_roles) {
-    role_map$variable[role_map$role == "id"]
-  } else {
-    character(0)
-  }
-
-  id_col <- if (length(id_col) > 0) id_col[1] else "sample_id"
+  id_col <- if (has_roles) id_column(role_map) else "sample_id"
 
   outcome_col <- if (has_roles) {
     role_map$variable[role_map$role == "outcome"]
@@ -2270,8 +2264,9 @@ draw_eval_split <- function(analysis, outcome_col, seed) {
 #' The identifier column of a role map
 #'
 #' @param role_map The object's role map.
-#' @return Character. The first `"id"` variable, else `"sample_id"`, the
-#'   rule [eval_data_fingerprint()] and `fit()` apply.
+#' @return Character. The first `"id"` variable, else `"sample_id"`. The one
+#'   rule for it: [eval_data_fingerprint()], `fit()` and the response trim
+#'   all read it here.
 #' @keywords internal
 #' @noRd
 id_column <- function(role_map) {
