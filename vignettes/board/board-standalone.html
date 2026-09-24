@@ -235,8 +235,8 @@
 
 <script type="application/json" id="hz-data">
 {
-  "generated_at": "2026-09-24T02:33:15-0500",
-  "content_md5": "3fb65bfba015a11bba93ff1d08c7ffcb",
+  "generated_at": "2026-09-24T02:34:14-0500",
+  "content_md5": "419dc34b2c9afd9cca5a11c15fb77093",
   "horizons": "0.9.0",
   "lanes": [
     {
@@ -1253,7 +1253,7 @@
           "default": "NULL",
           "text": "character(1) or NULL. Covariate fusion strategy: NULL (no covariates) or `\"early\"`, which adds the covariates as predictors beside the spectral features. Required when covariates are present. `\"late\"` aborts: late fusion is designed but not built.",
           "touch": "Required when covariates are present, and \"early\" is the only value that runs, with the requested covariates promoted to predictors beside the spectral features. \"late\" is refused, because late fusion is designed but not built.",
-          "source": "R/utils-recipes.R#L302"
+          "source": "R/utils-recipes.R#L310"
         },
         {
           "name": "cv_folds",
@@ -1295,7 +1295,7 @@
           "default": "0.995",
           "text": "`numeric`. Share of variance `feature_selection = \"pca\"` keeps, applied to every configuration that uses it. Default 0.995. Must be in (0, 1].",
           "touch": "Only with feature_selection = \"pca\"; lower it to keep fewer components. One value serves every configuration that runs PCA.",
-          "source": "R/utils-recipes.R#L241"
+          "source": "R/utils-recipes.R#L249"
         }
       ],
       "mechanics": [

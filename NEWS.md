@@ -467,6 +467,8 @@ consequences; the review itself is in
   `rec$steps[[i]]$terms` environments will see this; the prepped and baked
   output is unchanged.
 
+* `build_recipe()` gives `step_transform_spectra()` the spectral column names as a literal vector rather than `dplyr::all_of(predictor_cols)`. tune's parameter extraction evaluates step selectors outside a selecting context, where `all_of()` raised tidyselect's "Using `all_of()` outside of a selecting function" deprecation on every `evaluate_single_config()` and `fit_single_config()` call. The step selects the same columns, and its `terms` now holds the names themselves.
+
 * `resample_spectra()` accepts an explicit `new_wav` grid and refuses to
   extrapolate, so the package has one resampling routine for both
   `standardize()` and `select_training()`.

@@ -1683,3 +1683,63 @@ describe("build_recipe() recipe settings (#62)", {
   })
 
 })
+
+
+## =========================================================================
+## tune reads the recipe without tidyselect's all_of() deprecation
+## =========================================================================
+##
+## evaluate_single_config() and fit_single_config() call
+## workflows::extract_parameter_set_dials(), which reaches every step argument
+## through recipes:::find_tune_id(). That evaluates the selector quosures
+## outside a selecting context, and the transform step's selector used to be
+## dplyr::all_of(predictor_cols), so every config raised "Using `all_of()`
+## outside of a selecting function" (about 26 warnings in the suite). The
+## lifecycle verbosity is forced so the check does not depend on whether
+## lifecycle has already warned once this session.
+
+describe("build_recipe() under tune's parameter extraction", {
+
+  it("raises no warning for any feature selection, with or without a covariate", {
+
+    rlang::local_options(lifecycle_verbosity = "warning")
+
+    td   <- make_test_data(n = 20, n_wn = 30, covariates = "clay")
+    spec <- define_model_spec("rf")
+
+    for (fs in c("none", "pca", "correlation", "boruta", "cars")) {
+
+      for (cov in list(NA_character_, "clay")) {
+
+        rec <- build_recipe(make_config_row(preprocessing = "deriv1",
+                                            feature_selection = fs,
+                                            covariates = cov),
+                            td$data, td$role_map)
+
+        wf <- workflows::workflow() |>
+          workflows::add_recipe(rec) |>
+          workflows::add_model(spec)
+
+        expect_no_warning(workflows::extract_parameter_set_dials(wf),
+                          message = "outside of a selecting function")
+
+      }
+
+    }
+
+  })
+
+  it("still selects exactly the spectral columns, leaving a promoted covariate alone", {
+
+    td  <- make_test_data(n = 20, n_wn = 30, covariates = "clay")
+    rec <- build_recipe(make_config_row(covariates = "clay"), td$data, td$role_map)
+
+    prepped <- recipes::prep(rec)
+    wn      <- td$role_map$variable[td$role_map$role == "predictor"]
+
+    expect_identical(unname(prepped$steps[[1]]$columns), wn)
+    expect_true("clay" %in% names(recipes::bake(prepped, new_data = NULL)))
+
+  })
+
+})

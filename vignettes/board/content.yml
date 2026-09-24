@@ -601,7 +601,7 @@ verbs:
         source: R/pipeline-configure.R#L540
       - name: cov_fusion
         touch: Required when covariates are present, and "early" is the only value that runs, with the requested covariates promoted to predictors beside the spectral features. "late" is refused, because late fusion is designed but not built.
-        source: R/utils-recipes.R#L302
+        source: R/utils-recipes.R#L310
       - name: cv_folds
         touch: Rarely; five is the default and validate() checks the object has enough rows for it.
         source: R/pipeline-configure.R#L348
@@ -619,7 +619,7 @@ verbs:
         source: R/pipeline-configure.R#L397
       - name: pca_threshold
         touch: Only with feature_selection = "pca"; lower it to keep fewer components. One value serves every configuration that runs PCA.
-        source: R/utils-recipes.R#L241
+        source: R/utils-recipes.R#L249
     mechanics:
       - step: Requires at least one response or outcome column, and checks every axis value against the package's valid lists.
         source: R/pipeline-configure.R#L245

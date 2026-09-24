@@ -191,6 +191,14 @@ build_recipe <- function(config_row,
   ## Targets predictor_cols by name (NOT all_predictors()), so covariates
   ## in covariate_hold role are never touched by spectral operations.
   ##
+  ## The names go in as a literal vector (`!!`), not through dplyr::all_of().
+  ## tune reads every step argument with recipes:::find_tune_id(), which
+  ## evaluates the selector quosures outside a selecting context, and all_of()
+  ## evaluated there raises tidyselect's "Using `all_of()` outside of a
+  ## selecting function" deprecation on every tune and fit call. A character
+  ## vector is a selection in its own right: it resolves to the same columns
+  ## at prep() and refers to nothing in this frame.
+  ##
   ## The window is configure()'s object-level `sg_window`; each method fixes
   ## its own polynomial order (see transform_spectra_matrix()).
 
@@ -198,7 +206,7 @@ build_recipe <- function(config_row,
 
   rec <- rec |>
     step_transform_spectra(
-      dplyr::all_of(predictor_cols),
+      !!predictor_cols,
       preprocessing = preprocessing,
       window_size   = sg_window
     )
