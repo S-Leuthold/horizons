@@ -453,7 +453,21 @@ describe("draw_eval_split()", {
     before <- draw_before(obj$data$analysis, 42L)
 
     expect_false(drawn$stratified)
+    expect_true(drawn$strata_failed)
     expect_identical(drawn$split$in_id, before$in_id)
+
+  })
+
+  it("reports an unstratified split when rsample drops the strata without failing (#91)", {
+
+    ## 30 rows: too few for rsample to bin the outcome, so it warns and draws
+    ## unstratified, and the draw used to be reported stratified
+    small <- make_eval_object(n = 30, n_configs = 1)
+
+    drawn <- suppressWarnings(draw_eval_split(small$data$analysis, "SOC", 42L))
+
+    expect_false(drawn$stratified)
+    expect_false(drawn$strata_failed)
 
   })
 
@@ -464,6 +478,84 @@ describe("draw_eval_split()", {
 
     expect_identical(ev$evaluation$split$in_id, drawn$split$in_id)
     expect_identical(ev$evaluation$split$data, drawn$split$data)
+
+  })
+
+})
+
+## =========================================================================
+## evaluate()'s tree header says what the draws did (#91)
+## =========================================================================
+## The split line printed "stratified" whatever the draw did, and the notes
+## for a failed stratified draw printed above the tree's header.
+
+## evaluate()'s console output down to its first configuration, which is
+## mocked to stop the run: only the header is under test.
+evaluate_header <- function(obj) {
+
+  utils::capture.output(
+    testthat::with_mocked_bindings(
+      tryCatch(
+        suppressWarnings(evaluate(obj, prune = FALSE, seed = 42L)),
+        header_rendered = function(e) NULL
+      ),
+      evaluate_single_config = function(...) rlang::abort("stop", class = "header_rendered"),
+      .package = "horizons"
+    )
+  )
+
+}
+
+describe("evaluate() - the split line and the fallback notes (#91)", {
+
+  it("says unstratified when rsample drew the split without strata", {
+
+    ## 30 rows are too few for rsample to bin the outcome
+    out <- evaluate_header(make_eval_object(n = 30, n_configs = 1))
+
+    expect_true("│  Split: 24 train / 6 test (80/20, unstratified)" %in% out)
+    expect_false(any(grepl(", stratified)", out, fixed = TRUE)))
+
+  })
+
+  it("says stratified when the strata held", {
+
+    out <- evaluate_header(make_eval_object(n = 60, n_configs = 1))
+
+    expect_true("│  Split: 48 train / 12 test (80/20, stratified)" %in% out)
+
+  })
+
+  it("prints the notes for a failed stratified draw inside the tree, under the lines they qualify", {
+
+    real_initial_split <- rsample::initial_split
+    real_vfold_cv      <- rsample::vfold_cv
+
+    local_mocked_bindings(
+      initial_split = function(data, prop = 3 / 4, strata = NULL, ...) {
+        if (!missing(strata)) stop("stratification refused")
+        real_initial_split(data, prop = prop, ...)
+      },
+      vfold_cv = function(data, v = 10, repeats = 1, strata = NULL, ...) {
+        if (!missing(strata)) stop("stratification refused")
+        real_vfold_cv(data, v = v, repeats = repeats, ...)
+      },
+      .package = "rsample"
+    )
+
+    out <- evaluate_header(make_eval_object(n = 60, n_configs = 1))
+
+    header     <- grep("┌ Evaluation", out, fixed = TRUE)
+    split_line <- grep("│  Split: ", out, fixed = TRUE)
+    split_note <- grep("Stratified split failed, retrying without strata", out, fixed = TRUE)
+    cv_line    <- grep("│  Tuning: ", out, fixed = TRUE)
+    cv_note    <- grep("Stratified CV failed, retrying without strata", out, fixed = TRUE)
+
+    expect_length(header, 1L)
+    expect_identical(out[split_line], "│  Split: 48 train / 12 test (80/20, unstratified)")
+    expect_identical(split_note, split_line + 1L)
+    expect_identical(cv_note, cv_line + 1L)
+    expect_true(all(c(split_note, cv_note) > header))
 
   })
 

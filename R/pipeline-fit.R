@@ -159,19 +159,13 @@ fit <- function(x,
 
   }
 
+  ## Notes on the draws and the member count are printed inside the tree,
+  ## after its header in Step 3; they used to print above it (#91).
+
   if (cold_start) {
 
     cold         <- cold_start_evaluation(x, metric, seed)
     x$evaluation <- cold$evaluation
-
-    if (!cold$stratified && verbose) {
-
-      cat(paste0(
-        "\u2502  ", cli::col_yellow("Stratified split failed, ",
-                                     "retrying without strata"), "\n"
-      ))
-
-    }
 
   }
 
@@ -262,26 +256,8 @@ fit <- function(x,
   ## Cap n_best at available candidates. A cold start has one configuration
   ## by construction, so the default n_best is no request worth a note.
   n_available <- nrow(ranked)
-  n_best      <- as.integer(n_best)
-
-  if (n_best > n_available) {
-
-    if (verbose && !cold_start) {
-
-      cat(paste0(
-        "\u2502  ", cli::col_yellow(
-          "Requested n_best = ", n_best,
-          " but only ", n_available,
-          if (candidates$fallback) " pruned" else " successful",
-          " configs available. Using ", n_available, "."
-        ), "\n"
-      ))
-
-    }
-
-    n_best <- n_available
-
-  }
+  n_requested <- as.integer(n_best)
+  n_best      <- min(n_requested, n_available)
 
   top_configs <- ranked[seq_len(n_best), ]
 
@@ -384,20 +360,21 @@ fit <- function(x,
   ## and never train on it. Built whenever either capability is requested.
   ## Seeded on its own, so the calibration rows depend on `seed` and train_F
   ## alone, not on RNG state an earlier draw left behind.
-  calib_data <- NULL
+  calib_data  <- NULL
+  calib_drawn <- NULL
+  calib_note  <- NULL
 
   if (compute_uq || compute_ad) {
 
     set.seed(calib_split_seed(seed))
 
-    split_C <- tryCatch(
-      rsample::initial_split(train_F, prop = CALIB_PROP, strata = dplyr::all_of(outcome_col)),
-      error = function(e) {
-
-        rsample::initial_split(train_F, prop = CALIB_PROP)
-
-      }
+    calib_drawn <- draw_stratified(
+      outcome      = train_F[[outcome_col]],
+      stratified   = function() rsample::initial_split(train_F, prop = CALIB_PROP,
+                                                       strata = dplyr::all_of(outcome_col)),
+      unstratified = function() rsample::initial_split(train_F, prop = CALIB_PROP)
     )
+    split_C <- calib_drawn$draw
 
     train_Fit <- rsample::training(split_C)
     calib_data <- rsample::testing(split_C)
@@ -406,19 +383,10 @@ fit <- function(x,
     ## that needed it \u2014 neither UQ nor AD can calibrate on an undersized set.
     if (nrow(calib_data) < N_CALIB_MIN) {
 
-      if (verbose) {
-
-        disabled <- paste(c(if (compute_uq) "UQ", if (compute_ad) "AD"),
+      disabled   <- paste(c(if (compute_uq) "UQ", if (compute_ad) "AD"),
                           collapse = " and ")
-
-        cat(paste0(
-          "\u2502  ", cli::col_yellow(
-            "Calibration set too small (", nrow(calib_data),
-            " < ", N_CALIB_MIN, "). Disabling ", disabled, "."
-          ), "\n"
-        ))
-
-      }
+      calib_note <- paste0("Calibration set too small (", nrow(calib_data),
+                           " < ", N_CALIB_MIN, "). Disabling ", disabled, ".")
 
       compute_uq <- FALSE
       compute_ad <- FALSE
@@ -441,24 +409,13 @@ fit <- function(x,
 
   set.seed(seed)
 
-  cv_resamples <- tryCatch(
-    rsample::vfold_cv(train_Fit, v = cv_folds, strata = dplyr::all_of(outcome_col)),
-    error = function(e) {
-
-      if (verbose) {
-
-        cat(paste0(
-          "\u2502  ", cli::col_yellow(
-            "Stratified CV failed, retrying without strata"
-          ), "\n"
-        ))
-
-      }
-
-      rsample::vfold_cv(train_Fit, v = cv_folds)
-
-    }
+  cv_drawn <- draw_stratified(
+    outcome      = train_Fit[[outcome_col]],
+    stratified   = function() rsample::vfold_cv(train_Fit, v = cv_folds,
+                                                strata = dplyr::all_of(outcome_col)),
+    unstratified = function() rsample::vfold_cv(train_Fit, v = cv_folds)
   )
+  cv_resamples <- cv_drawn$draw
 
   ## -----------------------------------------------------------------------
   ## Step 3: Tree header
@@ -490,26 +447,79 @@ fit <- function(x,
         nrow(eval_results), " configurations\n"
       ))
 
+      if (n_requested > n_available) {
+
+        cat(paste0(
+          "\u2502  ", cli::col_yellow(
+            "Requested n_best = ", n_requested,
+            " but only ", n_available,
+            if (candidates$fallback) " pruned" else " successful",
+            " configs available. Using ", n_available, "."
+          ), "\n"
+        ))
+
+      }
+
     }
+
+    ## Each draw fit() makes says "stratified" only when the strata held:
+    ## rsample draws unstratified below 40 rows without an error (#91; see
+    ## draw_stratified()). evaluate()'s split, reused, is reported by
+    ## evaluate().
 
     cat(paste0(
       "\u2502  Split: ", n_train, " train / ", n_test, " test (",
-      if (cold_start) "the rows evaluate() holds out at this seed" else "evaluate()'s held-out rows",
+      if (cold_start) {
+        paste0("the rows evaluate() holds out at this seed, ",
+               if (cold$stratified) "stratified" else "unstratified")
+      } else {
+        "evaluate()'s held-out rows"
+      },
       ")\n"
     ))
+
+    if (cold_start && cold$strata_failed) {
+
+      cat(paste0(
+        "\u2502  ", cli::col_yellow("Stratified split failed, ",
+                                     "retrying without strata"), "\n"
+      ))
+
+    }
 
     if (compute_uq) {
 
       cat(paste0(
         "\u2502  UQ calibration: ", nrow(train_Fit), " fit / ",
-        nrow(calib_data), " calibration\n"
+        nrow(calib_data), " calibration, ",
+        if (calib_drawn$stratified) paste0("stratified on ", outcome_col) else "unstratified",
+        "\n"
       ))
 
     }
 
+    if (!is.null(calib_note)) {
+
+      cat(paste0("\u2502  ", cli::col_yellow(calib_note), "\n"))
+
+    }
+
     cat(paste0(
-      "\u2502  CV: ", cv_folds, "-fold stratified on ", outcome_col, "\n"
+      "\u2502  CV: ", cv_folds, "-fold ",
+      if (cv_drawn$stratified) paste0("stratified on ", outcome_col) else "unstratified",
+      "\n"
     ))
+
+    if (cv_drawn$strata_failed) {
+
+      cat(paste0(
+        "\u2502  ", cli::col_yellow(
+          "Stratified CV failed, retrying without strata"
+        ), "\n"
+      ))
+
+    }
+
     cat(paste0(
       "\u2502  Bayesian: ", final_bayesian_iter,
       if (cold_start) " iterations from a space-filling grid\n" else " iterations with warm-start\n"
@@ -978,8 +988,10 @@ fit <- function(x,
 #' @param seed The `seed` passed to `fit()`.
 #' @param call The call the conditions are attributed to. Default: the
 #'   caller, `fit()`.
-#' @return List with `evaluation` (the record) and `stratified` (`FALSE` when
-#'   the split fell back to unstratified). Aborts with class
+#' @return List with `evaluation` (the record), `stratified` (`FALSE` when
+#'   the split is unstratified) and `strata_failed` (`TRUE` when the
+#'   stratified draw failed and was retried without strata), as
+#'   [draw_eval_split()] returns them. Aborts with class
 #'   `horizons_input_error` when the object has no configuration or more than
 #'   one, too few rows have an observed outcome, or the window is at least as
 #'   wide as the spectrum.
@@ -1066,7 +1078,8 @@ cold_start_evaluation <- function(x, metric, seed, call = rlang::caller_env()) {
       runtime_secs = 0,
       timestamp    = Sys.time()
     ),
-    stratified = drawn$stratified
+    stratified    = drawn$stratified,
+    strata_failed = drawn$strata_failed
   )
 
 }

@@ -292,15 +292,6 @@ evaluate <- function(x,
   drawn <- draw_eval_split(analysis, outcome_col, seed)
   split <- drawn$split
 
-  if (!drawn$stratified && verbose) {
-
-    cat(paste0(
-      "\u2502  ", cli::col_yellow("Stratified split failed, ",
-                                   "retrying without strata"), "\n"
-    ))
-
-  }
-
   train_data <- rsample::training(split)
   test_data  <- rsample::testing(split)
   n_train    <- nrow(train_data)
@@ -310,23 +301,16 @@ evaluate <- function(x,
   ## Step 5: Create CV folds
   ## -----------------------------------------------------------------------
 
-  cv_fold_obj <- tryCatch(
-    rsample::vfold_cv(train_data, v = cv_folds, strata = dplyr::all_of(outcome_col)),
-    error = function(e) {
+  ## Drawn from the stream the split left. The fallback notes print inside
+  ## the tree, after its header (#91).
 
-      if (verbose) {
-
-        cat(paste0(
-          "\u2502  ", cli::col_yellow("Stratified CV failed, ",
-                                       "retrying without strata"), "\n"
-        ))
-
-      }
-
-      rsample::vfold_cv(train_data, v = cv_folds)
-
-    }
+  cv_drawn <- draw_stratified(
+    outcome      = train_data[[outcome_col]],
+    stratified   = function() rsample::vfold_cv(train_data, v = cv_folds,
+                                                strata = dplyr::all_of(outcome_col)),
+    unstratified = function() rsample::vfold_cv(train_data, v = cv_folds)
   )
+  cv_fold_obj <- cv_drawn$draw
 
   ## -----------------------------------------------------------------------
   ## Step 5b: Fingerprint the training rows
@@ -435,11 +419,30 @@ evaluate <- function(x,
 
     }
 
+    ## "stratified" only when the strata held: rsample draws unstratified
+    ## below 40 rows without an error (#91; see draw_stratified()).
     cat(paste0("\u2502  Split: ", n_train, " train / ", n_test, " test (",
-               round(100 * SPLIT_PROP), "/", round(100 * (1 - SPLIT_PROP)), ", stratified)\n"))
+               round(100 * SPLIT_PROP), "/", round(100 * (1 - SPLIT_PROP)), ", ",
+               if (drawn$stratified) "stratified" else "unstratified", ")\n"))
+
+    if (drawn$strata_failed) {
+
+      cat(paste0("\u2502  ", cli::col_yellow("Stratified split failed, ",
+                                             "retrying without strata"), "\n"))
+
+    }
+
     cat(paste0("\u2502  Tuning: ", cv_folds, "-fold CV, grid = ",
                tuning$grid_size, ", bayesian = ",
                tuning$bayesian_iter, "\n"))
+
+    if (cv_drawn$strata_failed) {
+
+      cat(paste0("\u2502  ", cli::col_yellow("Stratified CV failed, ",
+                                             "retrying without strata"), "\n"))
+
+    }
+
     cat(paste0("\u2502  Configs: ", n_total, " total",
                if (n_pending < n_total) paste0(" (", n_total - n_pending,
                                                 " from checkpoint)") else "",
@@ -2170,30 +2173,30 @@ outcome_complete_rows <- function(analysis, outcome_col) {
 #' @param seed Integer. The seed passed to `evaluate()` (or to `fit()` on a
 #'   cold start).
 #' @return List with `split` (the `rsplit`), `n_dropped` (integer, the rows
-#'   whose outcome is `NA`) and `stratified` (`FALSE` when the stratified
-#'   draw failed and the split is unstratified). Aborts as
+#'   whose outcome is `NA`), `stratified` (`FALSE` when the split is
+#'   unstratified, because rsample dropped the strata or the stratified draw
+#'   failed; see [draw_stratified()]) and `strata_failed` (`TRUE` when the
+#'   stratified draw failed and was retried without strata). Aborts as
 #'   [outcome_complete_rows()] does.
 #' @keywords internal
 #' @noRd
 draw_eval_split <- function(analysis, outcome_col, seed) {
 
-  modelled   <- outcome_complete_rows(analysis, outcome_col)
-  stratified <- TRUE
+  modelled <- outcome_complete_rows(analysis, outcome_col)
 
   set.seed(seed)
 
-  split <- tryCatch(
-    rsample::initial_split(modelled$data, prop = SPLIT_PROP,
-                           strata = dplyr::all_of(outcome_col)),
-    error = function(e) {
-
-      stratified <<- FALSE
-      rsample::initial_split(modelled$data, prop = SPLIT_PROP)
-
-    }
+  drawn <- draw_stratified(
+    outcome      = modelled$data[[outcome_col]],
+    stratified   = function() rsample::initial_split(modelled$data, prop = SPLIT_PROP,
+                                                     strata = dplyr::all_of(outcome_col)),
+    unstratified = function() rsample::initial_split(modelled$data, prop = SPLIT_PROP)
   )
 
-  list(split = split, n_dropped = modelled$n_dropped, stratified = stratified)
+  list(split         = drawn$draw,
+       n_dropped     = modelled$n_dropped,
+       stratified    = drawn$stratified,
+       strata_failed = drawn$strata_failed)
 
 }
 
