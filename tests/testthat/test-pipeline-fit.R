@@ -1518,7 +1518,9 @@ describe("fit() - cold start from one configuration (#45)", {
     out <- utils::capture.output(
       testthat::with_mocked_bindings(
         tryCatch(
-          fit(budget, compute_uq = FALSE, compute_ad = FALSE, verbose = TRUE),
+          suppressWarnings(
+            fit(budget, compute_uq = FALSE, compute_ad = FALSE, verbose = TRUE)
+          ),
           horizons_all_members_failed = function(e) NULL
         ),
         fit_single_config = function(...) {
