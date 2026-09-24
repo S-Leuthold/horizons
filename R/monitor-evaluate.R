@@ -5,6 +5,17 @@
 #' files from the output directory. Run this from a separate R session while
 #' `evaluate()` is running.
 #'
+#' The monitor reads the checkpoints through the same helpers and gates as
+#' `evaluate()`: the per-config files under `checkpoints/`, plus the rows of
+#' a legacy `eval_checkpoint.rds` for configs with no per-config file. A row
+#' is neither counted nor ranked unless `evaluate()` would resume it: it must
+#' match the training-data fingerprint and the tuning settings recorded in
+#' `eval_manifest.rds` (which `evaluate()` writes at the start of each run),
+#' be scored under the current scoring schema, and belong to a config in the
+#' manifest's grid. A manifest written before a fingerprint or the settings
+#' were recorded cannot be checked against them, so rows are not refused on
+#' that count. Refused rows and unreadable files are shown, not hidden.
+#'
 #' @param output_dir Character. Path to the output directory passed to
 #'   `evaluate()`.
 #' @param watch Logical. If TRUE, continuously poll for updates. Default FALSE
@@ -13,7 +24,10 @@
 #'   Default 10.
 #'
 #' @return Invisibly returns a list with completion stats (n_complete,
-#'   n_total, rate, eta, best_config, best_metric).
+#'   n_total, rate, eta, best_config, best_metric), `ignored` (the number of
+#'   rows refused, by reason: `other_data`, `other_settings`,
+#'   `earlier_schema`, `not_in_grid`) and `unreadable` (checkpoint files that
+#'   could not be read, relative to `output_dir`).
 #'
 #' @export
 monitor_evaluate <- function(output_dir, watch = FALSE, interval = 10) {
@@ -39,11 +53,10 @@ monitor_evaluate <- function(output_dir, watch = FALSE, interval = 10) {
 
   ## Schema 1 (pre-2026-09-15) manifests carry workers/outer/inner from the
   ## auto-split design; schema 2 carries the axis and the user's plan; schema
-  ## 3 (2026-09-21) adds the training-data fingerprint. All are read: the
-  ## monitor needs only n_total, metric and start_time to work, so a run
-  ## started before M2 can still be watched.
+  ## 3 (2026-09-21) adds the training-data fingerprint; schema 4 (#42) the
+  ## tuning settings. All are read: the monitor needs only n_total, metric
+  ## and start_time to work, so a run started before M2 can still be watched.
   manifest$schema_version <- manifest$schema_version %||% 1L
-  checkpoint_dir <- file.path(output_dir, "checkpoints")
 
   if (watch) {
 
@@ -51,7 +64,7 @@ monitor_evaluate <- function(output_dir, watch = FALSE, interval = 10) {
 
     repeat {
 
-      stats <- .monitor_snapshot(manifest, checkpoint_dir)
+      stats <- .monitor_snapshot(manifest, output_dir)
       .render_monitor(stats, manifest)
 
       if (stats$n_complete >= manifest$n_total) {
@@ -67,7 +80,7 @@ monitor_evaluate <- function(output_dir, watch = FALSE, interval = 10) {
 
   } else {
 
-    stats <- .monitor_snapshot(manifest, checkpoint_dir)
+    stats <- .monitor_snapshot(manifest, output_dir)
     .render_monitor(stats, manifest)
     invisible(stats)
 
@@ -83,27 +96,34 @@ monitor_evaluate <- function(output_dir, watch = FALSE, interval = 10) {
 
 #' Read checkpoint directory and compute stats
 #' @noRd
-.monitor_snapshot <- function(manifest, checkpoint_dir) {
+.monitor_snapshot <- function(manifest, output_dir) {
 
-  if (!dir.exists(checkpoint_dir)) {
+  ## -------------------------------------------------------------------------
+  ## Read and gate the store as evaluate() does
+  ## -------------------------------------------------------------------------
+  ## The expected fingerprint and settings come from the manifest, which
+  ## evaluate() writes after its own gate has passed. What an older manifest
+  ## does not record is NA or NULL, which the gate treats as uncheckable.
 
-    return(list(
-      n_complete  = 0L,
-      n_total     = manifest$n_total,
-      pct         = 0,
-      rate        = NA_real_,
-      eta         = NA_character_,
-      best_config = NA_character_,
-      best_metric = NA_real_,
-      recent      = character(0)
-    ))
+  data_fp <- list(
+    data_hash   = manifest$data_hash %||% NA_character_,
+    data_n_rows = manifest$data_n_rows %||% NA_integer_
+  )
 
-  }
+  store <- read_checkpoint_store(output_dir)
+  gated <- gate_checkpoint_rows(store$rows, data_fp, manifest$settings,
+                                manifest$config_ids)
 
-  checkpoint_files <- list.files(checkpoint_dir, pattern = "\\.rds$",
-                                  full.names = TRUE)
+  verdicts <- vapply(gated$refused, `[[`, character(1), "verdict")
 
-  n_complete <- length(checkpoint_files)
+  ignored <- c(
+    other_data     = sum(verdicts == "data_mismatch"),
+    other_settings = sum(verdicts == "settings_mismatch"),
+    earlier_schema = gated$n_foreign,
+    not_in_grid    = gated$n_stale
+  )
+
+  n_complete <- length(gated$kept)
   elapsed    <- as.numeric(difftime(Sys.time(), manifest$start_time,
                                      units = "hours"))
   rate       <- if (elapsed > 0) n_complete / elapsed else NA_real_
@@ -127,13 +147,7 @@ monitor_evaluate <- function(output_dir, watch = FALSE, interval = 10) {
   metric_name   <- manifest$metric
   higher_better <- metric_name %in% HIGHER_BETTER_METRICS
 
-  recent_files <- checkpoint_files[order(file.mtime(checkpoint_files),
-                                          decreasing = TRUE)]
-
-  rows <- lapply(checkpoint_files, function(f) {
-    tryCatch(readRDS(f), error = function(e) NULL)
-  })
-  rows <- rows[!vapply(rows, is.null, logical(1))]
+  rows <- unname(lapply(gated$kept, `[[`, "row"))
 
   if (length(rows) > 0) {
 
@@ -172,31 +186,31 @@ monitor_evaluate <- function(output_dir, watch = FALSE, interval = 10) {
 
   }
 
-  ## Recent completions (last 5)
+  ## Recent completions (last 5), among the per-config files that passed the
+  ## gate; rows adopted from a legacy single file have no completion time.
   recent <- character(0)
 
-  for (f in utils::head(recent_files, 5)) {
+  on_disk <- Filter(function(k) !is.na(k$path), gated$kept)
+  mtimes  <- file.mtime(vapply(on_disk, `[[`, character(1), "path"))
 
-    row <- tryCatch(readRDS(f), error = function(e) NULL)
+  for (k in utils::head(on_disk[order(mtimes, decreasing = TRUE)], 5)) {
 
-    if (!is.null(row)) {
+    row <- k$row
 
-      ## Checkpoint rows are evaluate_single_config() result rows, which carry
-      ## no `model` column; only show the model when something wrote one.
-      model_label <- if ("model" %in% names(row) && !is.na(row$model)) {
-        paste0(" (", MODEL_DISPLAY_NAMES[row$model] %||% row$model, ")")
-      } else {
-        ""
-      }
-      metric_val <- if (!is.na(.monitor_metric_value(row, metric_name))) {
-        paste0(toupper(metric_name), " = ",
-               round(.monitor_metric_value(row, metric_name), 3))
-      } else {
-        row$status
-      }
-      recent <- c(recent, paste0(row$config_id, model_label, " ", metric_val))
-
+    ## Checkpoint rows are evaluate_single_config() result rows, which carry
+    ## no `model` column; only show the model when something wrote one.
+    model_label <- if ("model" %in% names(row) && !is.na(row$model)) {
+      paste0(" (", MODEL_DISPLAY_NAMES[row$model] %||% row$model, ")")
+    } else {
+      ""
     }
+    metric_val <- if (!is.na(.monitor_metric_value(row, metric_name))) {
+      paste0(toupper(metric_name), " = ",
+             round(.monitor_metric_value(row, metric_name), 3))
+    } else {
+      row$status
+    }
+    recent <- c(recent, paste0(row$config_id, model_label, " ", metric_val))
 
   }
 
@@ -208,7 +222,9 @@ monitor_evaluate <- function(output_dir, watch = FALSE, interval = 10) {
     eta         = eta,
     best_config = best_config,
     best_metric = best_metric,
-    recent      = recent
+    recent      = recent,
+    ignored     = ignored,
+    unreadable  = names(store$unreadable)
   )
 
 }
@@ -266,10 +282,44 @@ monitor_evaluate <- function(output_dir, watch = FALSE, interval = 10) {
                substr(manifest$data_hash, 1, 12), "\n"))
 
   }
+
+  if (!is.null(manifest$settings)) {
+
+    cat(paste0("  Settings:  ",
+               paste0(names(manifest$settings), " = ",
+                      vapply(manifest$settings, format_setting_value,
+                             character(1)),
+                      collapse = ", "),
+               "\n"))
+
+  }
   cat(paste0(paste(rep("\u2500", 50), collapse = ""), "\n\n"))
 
   cat(paste0("  Progress:  ", stats$n_complete, " / ", stats$n_total,
              " (", stats$pct, "%)\n"))
+
+  ## Rows evaluate() would not resume, so they are not in the progress count.
+  if (sum(stats$ignored) > 0) {
+
+    reasons <- c(other_data     = "other training data",
+                 other_settings = "other tuning settings",
+                 earlier_schema = "earlier scoring schema",
+                 not_in_grid    = "config not in this grid")
+    shown   <- stats$ignored[stats$ignored > 0]
+
+    cat(paste0("  Ignored:   ", sum(stats$ignored), " checkpoint",
+               if (sum(stats$ignored) != 1) "s" else "", " (",
+               paste0(shown, " ", reasons[names(shown)], collapse = ", "),
+               ")\n"))
+
+  }
+
+  if (length(stats$unreadable) > 0) {
+
+    cat(paste0("  Unreadable: ", paste(stats$unreadable, collapse = ", "),
+               "\n"))
+
+  }
 
   if (!is.na(stats$rate)) {
 

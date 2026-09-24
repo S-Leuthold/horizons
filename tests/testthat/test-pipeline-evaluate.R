@@ -302,24 +302,21 @@ describe("evaluate() - NA outcome rows", {
 
 describe("evaluate() - checkpointing", {
 
-  it("writes checkpoint file when output_dir is provided", {
+  it("writes one checkpoint file per config, and no single-file checkpoint", {
 
     obj <- make_eval_object(n_configs = 2)
     tmpdir <- tempfile("eval_ckpt_write_")
     dir.create(tmpdir)
     on.exit(unlink(tmpdir, recursive = TRUE))
 
-    checkpoint_path <- file.path(tmpdir, "eval_checkpoint.rds")
-    checkpoint_dir  <- file.path(tmpdir, "checkpoints")
+    checkpoint_dir <- file.path(tmpdir, "checkpoints")
 
     result <- suppressWarnings(evaluate(obj, output_dir = tmpdir, verbose = FALSE, seed = 42L))
 
-    ## Checkpoint file should exist after completion
-    expect_true(file.exists(checkpoint_path))
-
-    ## Per-config checkpoint files should also exist
-    expect_true(dir.exists(checkpoint_dir))
-    expect_gt(length(list.files(checkpoint_dir, pattern = "\\.rds$")), 0)
+    ## The per-config files are the only store (#42)
+    expect_setequal(list.files(checkpoint_dir),
+                    paste0(obj$config$configs$config_id, ".rds"))
+    expect_false(file.exists(file.path(tmpdir, "eval_checkpoint.rds")))
 
   })
 
@@ -424,18 +421,35 @@ describe("checkpoint scoring schema", {
 
   it("drops rows scored under a different schema and keeps the current ones", {
 
-    rows <- tibble::tibble(
-      config_id      = c("a", "b", "c"),
-      scoring_schema = c(1L, SCORING_SCHEMA, NA)
+    candidates <- lapply(
+      list(
+        tibble::tibble(config_id = "a", scoring_schema = 1L),
+        tibble::tibble(config_id = "b", scoring_schema = SCORING_SCHEMA),
+        tibble::tibble(config_id = "c", scoring_schema = NA_integer_),
+        tibble::tibble(config_id = "d")
+      ),
+      function(r) list(row = r, source = "x", path = NA_character_)
     )
 
-    kept <- suppressMessages(capture.output(out <- drop_foreign_schema_rows(rows, verbose = TRUE)))
+    gated <- gate_checkpoint_rows(candidates, list(data_hash = NA_character_),
+                                  settings = NULL)
 
-    expect_equal(out$config_id, "b")
-    expect_true(any(grepl("earlier scoring schema", kept)))
+    expect_named(gated$kept, "b")
+    expect_equal(gated$n_foreign, 3L)
 
-    legacy <- tibble::tibble(config_id = c("a", "b"))
-    expect_equal(nrow(drop_foreign_schema_rows(legacy, verbose = FALSE)), 0)
+  })
+
+  it("checks the fingerprint before the schema, whichever store a row came from", {
+
+    ## Written on other rows AND under an earlier schema: refused, not
+    ## quietly dropped.
+    row <- tibble::tibble(config_id = "a", scoring_schema = 1L,
+                          data_hash = "other", data_n_rows = 10L)
+
+    v <- checkpoint_row_verdict(row, list(data_hash = "this", data_n_rows = 10L),
+                                settings = NULL)
+
+    expect_identical(v$verdict, "data_mismatch")
 
   })
 
@@ -461,12 +475,6 @@ describe("checkpoint scoring schema", {
     row$scoring_schema <- NULL
     row$cv_rpd <- 999          # a value that would win if it were trusted
     saveRDS(row, f)
-    ## and the single-file checkpoint, which the sequential path also writes
-    single <- file.path(tmpdir, "eval_checkpoint.rds")
-    if (file.exists(single)) {
-      s <- readRDS(single); s$scoring_schema <- NULL; s$cv_rpd[s$config_id == "cfg_001"] <- 999
-      saveRDS(s, single)
-    }
 
     out <- capture.output(
       second <- suppressWarnings(evaluate(obj, output_dir = tmpdir, verbose = TRUE, seed = 42L))
@@ -548,7 +556,7 @@ describe("eval_data_fingerprint()", {
 
 describe("evaluate() - checkpoint data provenance", {
 
-  it("stamps the fingerprint on results, checkpoints and the manifest", {
+  it("stamps the fingerprint and settings on results, checkpoints and the manifest", {
 
     obj    <- make_eval_object(n_configs = 2)
     tmpdir <- withr::local_tempdir()
@@ -561,15 +569,18 @@ describe("evaluate() - checkpoint data provenance", {
                       res$evaluation$n_train))
 
     manifest <- readRDS(file.path(tmpdir, "eval_manifest.rds"))
-    expect_identical(manifest$schema_version, 3L)
+    expect_identical(manifest$schema_version, 4L)
     expect_identical(manifest$data_hash, res$evaluation$results$data_hash[1])
     expect_identical(manifest$data_n_rows, res$evaluation$n_train)
+    expect_identical(manifest$settings,
+                     eval_settings(cv_folds = 3L, grid_size = 2L,
+                                   bayesian_iter = 0L, prune = FALSE,
+                                   prune_threshold = NA_real_, seed = 42L))
 
     row <- readRDS(file.path(tmpdir, "checkpoints", "cfg_001.rds"))
     expect_identical(row$data_hash, manifest$data_hash)
-
-    single <- readRDS(file.path(tmpdir, "eval_checkpoint.rds"))
-    expect_identical(attr(single, "data_hash"), manifest$data_hash)
+    expect_identical(row$settings[[1]], manifest$settings)
+    expect_identical(res$evaluation$results$settings[[1]], manifest$settings)
 
   })
 
@@ -651,7 +662,7 @@ describe("evaluate() - checkpoint data provenance", {
     first <- suppressWarnings(evaluate(obj, output_dir = tmpdir, prune = FALSE,
                                        verbose = FALSE, seed = 42L))
 
-    ## Hand-write the pre-provenance shape: no columns, no attributes.
+    ## Hand-write the pre-provenance shape: no fingerprint columns.
     for (f in list.files(file.path(tmpdir, "checkpoints"), full.names = TRUE)) {
 
       row <- readRDS(f)
@@ -660,14 +671,6 @@ describe("evaluate() - checkpoint data provenance", {
       saveRDS(row, f)
 
     }
-
-    single <- file.path(tmpdir, "eval_checkpoint.rds")
-    s      <- readRDS(single)
-    s$data_hash   <- NULL
-    s$data_n_rows <- NULL
-    attr(s, "data_hash")   <- NULL
-    attr(s, "data_n_rows") <- NULL
-    saveRDS(s, single)
 
     warns <- testthat::capture_warnings(
       second <- evaluate(obj, output_dir = tmpdir, prune = FALSE,
@@ -679,6 +682,310 @@ describe("evaluate() - checkpoint data provenance", {
 
     expect_s3_class(second, "horizons_eval")
     expect_equal(first$evaluation$best_config, second$evaluation$best_config)
+
+  })
+
+})
+
+## =========================================================================
+## One checkpoint store (#42)
+## =========================================================================
+## evaluate() used to keep two stores: a whole-table eval_checkpoint.rds,
+## written only by the sequential path, and one file per config under
+## checkpoints/. The single file was read first and shadowed the per-config
+## rows, so repairing a per-config file changed nothing, and the two stores
+## ran their gates in different orders. The per-config files are now the only
+## store; a legacy single file is read only for configs with no per-config
+## file.
+
+## The per-config rows of a finished run, named by config id.
+read_per_config_rows <- function(output_dir) {
+
+  files <- list.files(file.path(output_dir, "checkpoints"),
+                      pattern = "\\.rds$", full.names = TRUE)
+
+  stats::setNames(lapply(files, readRDS), sub("\\.rds$", "", basename(files)))
+
+}
+
+## A single-file checkpoint in the shape the old sequential path wrote: the
+## whole table, with the fingerprint also carried in attributes.
+write_legacy_checkpoint <- function(output_dir, rows) {
+
+  tbl <- dplyr::bind_rows(rows)
+  attr(tbl, "data_hash")   <- rows[[1]]$data_hash
+  attr(tbl, "data_n_rows") <- rows[[1]]$data_n_rows
+  saveRDS(tbl, file.path(output_dir, "eval_checkpoint.rds"))
+
+}
+
+describe("evaluate() - one checkpoint store (#42)", {
+
+  it("reads a repaired per-config file over a legacy single file", {
+
+    obj    <- make_eval_object(n_configs = 2)
+    tmpdir <- withr::local_tempdir()
+
+    suppressWarnings(evaluate(obj, output_dir = tmpdir, prune = FALSE,
+                              verbose = FALSE, seed = 42L))
+
+    rows <- read_per_config_rows(tmpdir)
+
+    ## The legacy file carries a bad cfg_001; the per-config file, as if it
+    ## had been repaired, carries the good one.
+    stale <- rows
+    stale$cfg_001$cv_rpd <- 999
+    write_legacy_checkpoint(tmpdir, stale)
+
+    second <- suppressMessages(suppressWarnings(
+      evaluate(obj, output_dir = tmpdir, prune = FALSE, verbose = FALSE,
+               seed = 42L)
+    ))
+
+    got <- second$evaluation$results
+    expect_equal(got$cv_rpd[got$config_id == "cfg_001"], rows$cfg_001$cv_rpd)
+
+  })
+
+  it("reads a legacy single file only for configs with no per-config file, and says so", {
+
+    obj    <- make_eval_object(n_configs = 2)
+    tmpdir <- withr::local_tempdir()
+
+    suppressWarnings(evaluate(obj, output_dir = tmpdir, prune = FALSE,
+                              verbose = FALSE, seed = 42L))
+
+    ## Mark every legacy row so its origin shows in the results.
+    legacy <- lapply(read_per_config_rows(tmpdir), function(r) {
+      r$runtime_secs <- -1
+      r
+    })
+    write_legacy_checkpoint(tmpdir, legacy)
+    unlink(file.path(tmpdir, "checkpoints", "cfg_002.rds"))
+
+    expect_message(
+      second <- suppressWarnings(
+        evaluate(obj, output_dir = tmpdir, prune = FALSE, verbose = FALSE,
+                 seed = 42L)
+      ),
+      "eval_checkpoint.rds",
+      class = "horizons_checkpoint_message"
+    )
+
+    got <- second$evaluation$results
+    expect_equal(got$runtime_secs[got$config_id == "cfg_002"], -1)
+    expect_false(got$runtime_secs[got$config_id == "cfg_001"] == -1)
+
+    ## The legacy row is copied into the per-config store, so deleting the
+    ## legacy file afterwards loses nothing.
+    expect_true(file.exists(file.path(tmpdir, "checkpoints", "cfg_002.rds")))
+
+  })
+
+  it("warns naming a per-config file it cannot read, and re-evaluates that config", {
+
+    obj    <- make_eval_object(n_configs = 2)
+    tmpdir <- withr::local_tempdir()
+
+    suppressWarnings(evaluate(obj, output_dir = tmpdir, prune = FALSE,
+                              verbose = FALSE, seed = 42L))
+
+    ## Only the per-config store, so nothing else can stand in for the file.
+    unlink(file.path(tmpdir, "eval_checkpoint.rds"))
+    writeLines("not an rds file", file.path(tmpdir, "checkpoints", "cfg_001.rds"))
+
+    warns <- testthat::capture_warnings(
+      second <- evaluate(obj, output_dir = tmpdir, prune = FALSE,
+                         verbose = FALSE, seed = 42L)
+    )
+
+    expect_true(any(grepl("cfg_001.rds", warns, fixed = TRUE)))
+    expect_setequal(second$evaluation$results$config_id, c("cfg_001", "cfg_002"))
+
+    ## Re-evaluated and rewritten, so the next resume can read it.
+    expect_identical(readRDS(file.path(tmpdir, "checkpoints", "cfg_001.rds"))$config_id,
+                     "cfg_001")
+
+  })
+
+  it("refuses a foreign-schema row written on other data from either store", {
+
+    obj    <- make_eval_object(n_configs = 2)
+    tmpdir <- withr::local_tempdir()
+
+    suppressWarnings(evaluate(obj, output_dir = tmpdir, prune = FALSE,
+                              verbose = FALSE, seed = 42L))
+    unlink(file.path(tmpdir, "eval_checkpoint.rds"))
+
+    f       <- file.path(tmpdir, "checkpoints", "cfg_001.rds")
+    foreign <- readRDS(f)
+    foreign$scoring_schema <- 1L
+    foreign$data_hash      <- "0000deadbeef"
+
+    refusal <- function() {
+      tryCatch(
+        suppressMessages(suppressWarnings(
+          evaluate(obj, output_dir = tmpdir, prune = FALSE, verbose = FALSE,
+                   seed = 42L)
+        )),
+        horizons_input_error = function(e) e
+      )
+    }
+
+    ## In the per-config store: the fingerprint is checked before the
+    ## schema, so the row aborts rather than being dropped silently.
+    saveRDS(foreign, f)
+    err <- refusal()
+    expect_s3_class(err, "horizons_input_error")
+    expect_match(paste(conditionMessage(err), collapse = " "), "cfg_001.rds", fixed = TRUE)
+
+    ## In a legacy single file, for a config with no per-config file: the
+    ## same verdict.
+    unlink(f)
+    write_legacy_checkpoint(tmpdir, list(cfg_001 = foreign))
+    err <- refusal()
+    expect_s3_class(err, "horizons_input_error")
+    expect_match(paste(conditionMessage(err), collapse = " "), "eval_checkpoint.rds", fixed = TRUE)
+
+  })
+
+})
+
+## =========================================================================
+## Tuning-settings provenance (#42)
+## =========================================================================
+## The data fingerprint says which rows a checkpoint was scored on, not how it
+## was tuned. Reconfiguring cv_folds or grid_size and re-running into the same
+## output_dir used to resume results tuned under the old settings, silently.
+
+describe("eval_settings()", {
+
+  it("is invariant to integer versus double spelling", {
+
+    expect_identical(eval_settings(grid_size = 10L, seed = 42L),
+                     eval_settings(grid_size = 10, seed = 42))
+
+  })
+
+  it("names the settings that differ, and separates the ones a row lacks", {
+
+    current <- eval_settings(cv_folds = 5L, grid_size = 10L, seed = 42L)
+    stored  <- eval_settings(cv_folds = 5L, grid_size = 20L)
+
+    cmp <- compare_eval_settings(stored, current)
+
+    expect_identical(cmp$differ, "grid_size")
+    expect_identical(cmp$missing, "seed")
+
+    none <- compare_eval_settings(NULL, current)
+    expect_length(none$differ, 0)
+    expect_setequal(none$missing, names(current))
+
+  })
+
+})
+
+describe("evaluate() - tuning-settings provenance", {
+
+  it("refuses to resume checkpoints tuned under a different grid_size, naming it", {
+
+    obj    <- make_eval_object(n_configs = 2)
+    tmpdir <- withr::local_tempdir()
+
+    suppressWarnings(evaluate(obj, output_dir = tmpdir, prune = FALSE,
+                              verbose = FALSE, seed = 42L))
+
+    changed <- obj
+    changed$config$tuning$grid_size <- obj$config$tuning$grid_size + 1L
+
+    err <- tryCatch(
+      suppressWarnings(evaluate(changed, output_dir = tmpdir, prune = FALSE,
+                                verbose = FALSE, seed = 42L)),
+      horizons_input_error = function(e) e
+    )
+
+    expect_s3_class(err, "horizons_input_error")
+
+    msg <- paste(conditionMessage(err), collapse = " ")
+    expect_match(msg, "grid_size")
+    expect_match(msg, "settings")
+    expect_match(msg, "output_dir")
+
+  })
+
+  it("refuses a changed prune threshold while pruning, and ignores it when not", {
+
+    obj    <- make_eval_object(n_configs = 2)
+    tmpdir <- withr::local_tempdir()
+
+    suppressWarnings(evaluate(obj, output_dir = tmpdir, prune = TRUE,
+                              prune_threshold = 1, verbose = FALSE, seed = 42L))
+
+    expect_error(
+      suppressWarnings(evaluate(obj, output_dir = tmpdir, prune = TRUE,
+                                prune_threshold = 2, verbose = FALSE, seed = 42L)),
+      "prune_threshold",
+      class = "horizons_input_error"
+    )
+
+    ## With pruning off the threshold is never read, so it cannot have
+    ## changed what a row holds.
+    off <- withr::local_tempdir()
+
+    first  <- suppressWarnings(evaluate(obj, output_dir = off, prune = FALSE,
+                                        prune_threshold = 1, verbose = FALSE, seed = 42L))
+    second <- suppressWarnings(evaluate(obj, output_dir = off, prune = FALSE,
+                                        prune_threshold = 2, verbose = FALSE, seed = 42L))
+
+    expect_equal(second$evaluation$results$runtime_secs,
+                 first$evaluation$results$runtime_secs)
+
+  })
+
+  it("resumes when only the ranking metric changes", {
+
+    obj    <- make_eval_object(n_configs = 2)
+    tmpdir <- withr::local_tempdir()
+
+    first  <- suppressWarnings(evaluate(obj, output_dir = tmpdir, prune = FALSE,
+                                        metric = "rpd", verbose = FALSE, seed = 42L))
+    second <- suppressWarnings(evaluate(obj, output_dir = tmpdir, prune = FALSE,
+                                        metric = "rmse", verbose = FALSE, seed = 42L))
+
+    ## Every row carries all six cv_ columns and the ranking is recomputed on
+    ## each run, so the metric is not part of what a row holds.
+    expect_equal(second$evaluation$results$runtime_secs,
+                 first$evaluation$results$runtime_secs)
+    expect_equal(second$evaluation$rank_metric, "rmse")
+
+  })
+
+  it("counts rows with no settings stamp as unverified, warns once, and resumes", {
+
+    obj    <- make_eval_object(n_configs = 2)
+    tmpdir <- withr::local_tempdir()
+
+    first <- suppressWarnings(evaluate(obj, output_dir = tmpdir, prune = FALSE,
+                                       verbose = FALSE, seed = 42L))
+    unlink(file.path(tmpdir, "eval_checkpoint.rds"))
+
+    ## The shape every row written before the settings stamp has.
+    for (f in list.files(file.path(tmpdir, "checkpoints"), full.names = TRUE)) {
+
+      row <- readRDS(f)
+      row$settings <- NULL
+      saveRDS(row, f)
+
+    }
+
+    warns <- testthat::capture_warnings(
+      second <- evaluate(obj, output_dir = tmpdir, prune = FALSE,
+                         verbose = FALSE, seed = 42L)
+    )
+
+    expect_equal(sum(grepl("no tuning-settings fingerprint", warns)), 1L)
+    expect_equal(second$evaluation$results$runtime_secs,
+                 first$evaluation$results$runtime_secs)
 
   })
 

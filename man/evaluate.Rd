@@ -46,9 +46,22 @@ never inspects the plan. \code{evaluate()} never registers or alters a plan.}
 plan is applied to; ignored when \code{allow_par = FALSE}. See the
 Parallelism section. Default \code{"auto"}.}
 
-\item{output_dir}{Character or NULL. If provided, checkpoint results to
-disk after each config. Enables resuming interrupted runs. Required when
-configs are dispatched to workers. Default NULL (no checkpointing).}
+\item{output_dir}{Character or NULL. If provided, each config's result is
+written to \verb{<output_dir>/checkpoints/<config_id>.rds} as it finishes, and
+a rerun into the same directory resumes from those files. Required when
+configs are dispatched to workers. A resumed row must have been scored on
+this run's training rows (a fingerprint of the sorted sample ids and the
+outcome name) and tuned with this run's settings (\code{cv_folds},
+\code{grid_size}, \code{bayesian_iter}, \code{prune}, \code{prune_threshold} when pruning,
+and \code{seed}); either mismatch aborts. The ranking \code{metric} is not checked,
+since every row carries all six cross-validated metrics. Rows scored
+under an earlier scoring schema, or for configs no longer in the grid,
+are dropped and re-evaluated; a file that cannot be read warns and its
+config is re-evaluated; rows written before a fingerprint existed warn
+once and resume. A whole-table \code{eval_checkpoint.rds} from earlier
+versions is read only for configs with no per-config file, and its rows
+are copied into \verb{checkpoints/}, after which it can be deleted. Default
+NULL (no checkpointing).}
 
 \item{seed}{Integer. Random seed for train/test split and CV folds.
 Default 307L.}
