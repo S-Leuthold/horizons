@@ -235,8 +235,8 @@
 
 <script type="application/json" id="hz-data">
 {
-  "generated_at": "2026-09-24T05:55:26-0500",
-  "content_md5": "6166642e1d1938a5f40afe0cbf8432fb",
+  "generated_at": "2026-09-24T06:46:13-0500",
+  "content_md5": "9955b2ce6aafa62c08b73a6ca573f29e",
   "horizons": "0.9.0",
   "lanes": [
     {
@@ -338,7 +338,7 @@
           "default": "FALSE",
           "text": "Logical. For directory paths, search subdirectories. Default: `FALSE`.",
           "touch": "When OPUS files sit in subdirectories of the path given.",
-          "source": "R/pipeline-spectra.R#L457"
+          "source": "R/pipeline-spectra.R#L463"
         }
       ],
       "mechanics": [
@@ -356,7 +356,7 @@
         },
         {
           "step": "From each OPUS object it takes the absorbance block (`ab` or `AB`), falling back to the first block that is not metadata, and names the columns by the block's wavenumbers.",
-          "source": "R/pipeline-spectra.R#L570"
+          "source": "R/pipeline-spectra.R#L574"
         },
         {
           "step": "The file name without its extension becomes both `sample_id` and a `filename` column, kept with role meta for parse_ids() later.",
@@ -461,28 +461,28 @@
           "default": "2",
           "text": "numeric or NULL. Target resolution in cm⁻¹. Default `2` matches OSSL library resolution. The spectra are resampled onto the multiples of `resample` inside the `trim` bounds (see Details). Use `NULL` to skip resampling and keep the data's own axis.",
           "touch": "Set it to match the library you will draw from or predict against, since the same resample and trim put both on the same columns; 2 matches OSSL at full resolution, and the experiments run at 4 with no loss for the local model. NULL keeps the data's own axis.",
-          "source": "R/pipeline-standardize.R#L838"
+          "source": "R/pipeline-standardize.R#L840"
         },
         {
           "name": "trim",
           "default": "c(600, 4000)",
           "text": "numeric(2) or NULL. Wavenumber range to keep, inclusive. Default `c(600, 4000)` is the standard MIR range. With resampling, the bounds limit the grid, and the one data point beyond each bound is used to interpolate the grid points at the bounds and then dropped, before baseline correction. Without resampling, columns outside the range are dropped. Use `NULL` to skip trimming.",
           "touch": "Rarely, but keep it set when sources must share every column; 600 to 4000 is the MIR range the package and the KSSL library share, and with trim NULL each source keeps its own extent. Narrow it only when an instrument's ends are unreliable.",
-          "source": "R/pipeline-standardize.R#L806"
+          "source": "R/pipeline-standardize.R#L808"
         },
         {
           "name": "remove_water",
           "default": "FALSE",
           "text": "`logical.` Remove water absorption bands (1580-1720, 3100-3700 cm⁻¹)? Default `FALSE`.",
           "touch": "Leave FALSE. Deleting columns leaves holes in the axis, a derivative later straddles them, and select_training() refuses a pool with a non-contiguous grid.",
-          "source": "R/pipeline-standardize.R#L1028"
+          "source": "R/pipeline-standardize.R#L1030"
         },
         {
           "name": "baseline",
           "default": "FALSE",
           "text": "`logical.` Apply convex hull baseline correction? Default `FALSE`.",
           "touch": "Only for spectra with a known baseline drift; with resampling it runs on the canonical grid, so every source's hull is pinned at the same bounds.",
-          "source": "R/pipeline-standardize.R#L1015"
+          "source": "R/pipeline-standardize.R#L1017"
         },
         {
           "name": "force",
@@ -507,27 +507,27 @@
         },
         {
           "step": "If nothing at all is requested, validates the object at stage = \"raw\" and writes the record so downstream verbs know the step was considered, keeping the grid an earlier call recorded. Beyond the sort, nothing changes.",
-          "source": "R/pipeline-standardize.R#L729"
+          "source": "R/pipeline-standardize.R#L730"
         },
         {
           "step": "Otherwise validates the object at stage = \"raw\" before the rebuild below, so a column present in analysis but missing from role_map is refused rather than silently dropped when Steps 7-9 rebuild the table from role_map's predictor and non-predictor columns (#24).",
-          "source": "R/pipeline-standardize.R#L779"
+          "source": "R/pipeline-standardize.R#L781"
         },
         {
           "step": "Pulls the predictor columns into a matrix and reads the wavenumbers off the column names.",
-          "source": "R/pipeline-standardize.R#L785"
+          "source": "R/pipeline-standardize.R#L793"
         },
         {
           "step": "Trims to the requested range by dropping columns outside it. When resampling follows, it keeps the nearest column beyond each bound as well, so a grid point on the bound is interpolated rather than extrapolated; scans starting at 599.74 get a 600 column that way. The count reported is the one inside the bounds.",
-          "source": "R/pipeline-standardize.R#L806"
+          "source": "R/pipeline-standardize.R#L810"
         },
         {
           "step": "Builds the canonical grid, every multiple of the resolution inside the trim bounds (inside the data's range when trim is NULL), rounded to six decimals. It depends on the arguments alone, so two sources standardized identically over the same trim share their columns; with trim NULL they share them where their ranges overlap.",
-          "source": "R/pipeline-standardize.R#L857"
+          "source": "R/pipeline-standardize.R#L859"
         },
         {
           "step": "Drops the grid points the data does not reach, with a warning that says how many and at which end; nothing is extrapolated.",
-          "source": "R/pipeline-standardize.R#L864"
+          "source": "R/pipeline-standardize.R#L866"
         },
         {
           "step": "Drops the grid points that fall in a gap of the input's own axis (a spacing over three times the median and over 30 cm⁻¹, select_training()'s rule), such as a band deleted upstream or by an earlier remove_water, with a warning naming the gaps; nothing is filled.",
@@ -535,35 +535,35 @@
         },
         {
           "step": "Leaves the values untouched when the axis already is the grid to within 1e-6 cm⁻¹, gaps apart, and says so on the console; otherwise resamples onto the grid by cubic spline through prospectr::resample(), one contiguous run of the data at a time. The points kept beyond the trim bounds go here.",
-          "source": "R/pipeline-standardize.R#L929"
+          "source": "R/pipeline-standardize.R#L932"
         },
         {
           "step": "Baseline-corrects next, if asked, with a convex hull through prospectr::baseline(), on the canonical grid when resampling (so every source's hull is pinned at the grid's bounds) or on the trimmed native axis when not, and before any water bands are removed, because the hull needs a continuous range.",
-          "source": "R/pipeline-standardize.R#L1007"
+          "source": "R/pipeline-standardize.R#L1019"
         },
         {
           "step": "Deletes the water bands last, if asked, by dropping columns in 1580 to 1720 and 3100 to 3700 cm⁻¹, after resampling so standardize()'s own interpolation never spans them.",
-          "source": "R/pipeline-standardize.R#L1028"
+          "source": "R/pipeline-standardize.R#L1032"
         },
         {
           "step": "Aborts if any value came out non-finite, rebuilds the analysis table and role map with the new wn_ columns, and lets set_analysis() recount the predictors.",
-          "source": "R/pipeline-standardize.R#L1047"
+          "source": "R/pipeline-standardize.R#L1049"
         },
         {
           "step": "Re-validates the whole object at stage = \"raw\" before returning it — replicate scans haven't reached average() yet, so a duplicate sample_id still only warns here (#24).",
-          "source": "R/pipeline-standardize.R#L1117"
+          "source": "R/pipeline-standardize.R#L1120"
         }
       ],
       "records": [
         {
           "field": "provenance$standardization",
           "text": "the four settings as given, whether the spectra were re-interpolated (resampled) and the grid they sit on (grid, with min, max, step and n; NULL without resampling), the time, and, when any operation actually ran, the final wavelength count and range; the no-op path writes the record without those two",
-          "source": "R/pipeline-standardize.R#L1096"
+          "source": "R/pipeline-standardize.R#L1098"
         },
         {
           "field": "data$analysis, data$role_map",
           "text": "rebuilt with the new predictor columns; every non-predictor column is carried through untouched",
-          "source": "R/pipeline-standardize.R#L1070"
+          "source": "R/pipeline-standardize.R#L1072"
         }
       ],
       "refuses": [
@@ -580,17 +580,17 @@
         {
           "when": "an unregistered analysis column, or any other structural problem, is present before the rebuild (the non-no-op path validates at entry as well as on return,",
           "does": "aborts with the validator's findings, class horizons_validation_error",
-          "source": "R/pipeline-standardize.R#L779"
+          "source": "R/pipeline-standardize.R#L781"
         },
         {
           "when": "a duplicate or NA sample_id — normal before average() collapses replicate scans, and standardize() validates at stage = \"raw\" on every path, the no-op one included, for exactly this reason (#24)",
           "does": "warns and continues, class horizons_validation_warning",
-          "source": "R/pipeline-standardize.R#L1117"
+          "source": "R/pipeline-standardize.R#L1120"
         },
         {
           "when": "the object fails validate_horizons_data() on anything else — a role_map that disagrees with the columns, a column with more than one role_map row, zero or more than one id role, an unknown role, more than one outcome, or a stored count that disagrees with the data",
           "does": "aborts with the validator's findings, class horizons_validation_error",
-          "source": "R/pipeline-standardize.R#L1117"
+          "source": "R/pipeline-standardize.R#L1120"
         },
         {
           "when": "the trim range does not overlap the data, or water-band removal would delete every column, or fewer than two wavelengths remain to resample",
@@ -600,12 +600,12 @@
         {
           "when": "the data does not reach part of the grid",
           "does": "drops those grid points and warns, class horizons_standardize_warning",
-          "source": "R/pipeline-standardize.R#L878"
+          "source": "R/pipeline-standardize.R#L880"
         },
         {
           "when": "the input's axis has a gap, a band already deleted",
           "does": "drops the grid points inside it and warns, class horizons_standardize_warning",
-          "source": "R/pipeline-standardize.R#L904"
+          "source": "R/pipeline-standardize.R#L906"
         },
         {
           "when": "no grid point falls inside the data",
@@ -620,7 +620,7 @@
         {
           "when": "any value is non-finite after the operations",
           "does": "aborts with the count",
-          "source": "R/pipeline-standardize.R#L1047"
+          "source": "R/pipeline-standardize.R#L1049"
         }
       ],
       "evidence": [
@@ -669,28 +669,28 @@
           "default": "TRUE",
           "text": "Logical. Enable correlation-based outlier detection. Default: `TRUE`.",
           "touch": "Leave TRUE unless you have already screened the scans yourself.",
-          "source": "R/pipeline-average.R#L746"
+          "source": "R/pipeline-average.R#L748"
         },
         {
           "name": "correlation_threshold",
           "default": "0.996",
           "text": "Numeric. Minimum mean pairwise correlation for a replicate to pass QC. Default: `0.996`. Changing this is rarely needed.",
           "touch": "Rarely; 0.996 is the mean pairwise correlation a replicate must reach against its siblings.",
-          "source": "R/pipeline-average.R#L644"
+          "source": "R/pipeline-average.R#L646"
         },
         {
           "name": "on_all_outliers",
           "default": "c(\"warn\", \"drop\", \"keep_best\")",
           "text": "Character. Behavior when all replicates fail QC: - `\"warn\"` (default): Keep all replicates and average - `\"drop\"`: Remove the sample entirely - `\"keep_best\"`: Keep only the replicate with highest mean correlation",
           "touch": "When a whole group fails the check, decide whether to average it anyway with a warning, drop the sample, or keep only the best replicate.",
-          "source": "R/pipeline-average.R#L761"
+          "source": "R/pipeline-average.R#L763"
         },
         {
           "name": "verbose",
           "default": "TRUE",
           "text": "Logical. Print progress messages. Default: `TRUE`.",
           "touch": "Set FALSE inside loops.",
-          "source": "R/pipeline-average.R#L508"
+          "source": "R/pipeline-average.R#L510"
         }
       ],
       "mechanics": [
@@ -700,51 +700,51 @@
         },
         {
           "step": "Validates the object at stage = \"raw\" before the rebuild below, so a column present in analysis but missing from role_map is refused rather than silently dropped when Step 8 rebuilds the averaged table from role_map's predictor, meta and response columns (#24). Raw stage, since replicate scans sharing a sample_id are exactly what average() collapses.",
-          "source": "R/pipeline-average.R#L201"
+          "source": "R/pipeline-average.R#L203"
         },
         {
           "step": "Groups rows by the `by` column; NA in that column aborts.",
-          "source": "R/pipeline-average.R#L241"
+          "source": "R/pipeline-average.R#L243"
         },
         {
           "step": "Per group with two or more scans, computes each replicate's mean correlation with the others, removes the worst one, and repeats until every survivor clears the threshold or one remains. Iterative so a single bad scan cannot drag its siblings under.",
-          "source": "R/pipeline-average.R#L616"
+          "source": "R/pipeline-average.R#L618"
         },
         {
           "step": "A group whose survivors fall to one is an all-outlier group and is handled by `on_all_outliers`; otherwise the flagged scans are dropped and the rest averaged.",
-          "source": "R/pipeline-average.R#L759"
+          "source": "R/pipeline-average.R#L761"
         },
         {
           "step": "Predictors are column means over the surviving scans. Numeric responses are averaged over the same rows; a non-numeric response that disagrees within a group is an error, not a silent pick.",
-          "source": "R/pipeline-average.R#L926"
+          "source": "R/pipeline-average.R#L928"
         },
         {
           "step": "Meta columns are kept when uniform within the group and dropped otherwise; `filename` is always dropped.",
-          "source": "R/pipeline-average.R#L869"
+          "source": "R/pipeline-average.R#L871"
         },
         {
           "step": "With a custom `by`, that column is coerced to character and becomes `sample_id`, after checks that it produces no NA and no duplicates.",
-          "source": "R/pipeline-average.R#L400"
+          "source": "R/pipeline-average.R#L402"
         },
         {
           "step": "Writes the table back through set_analysis(), which recounts rows and predictors.",
-          "source": "R/pipeline-average.R#L448"
+          "source": "R/pipeline-average.R#L450"
         },
         {
           "step": "Re-validates the whole object structurally before returning it (#24).",
-          "source": "R/pipeline-average.R#L487"
+          "source": "R/pipeline-average.R#L489"
         }
       ],
       "records": [
         {
           "field": "provenance$average",
           "text": "the settings, group and replicate counts before and after, which samples were all-outlier or dropped, which meta columns were dropped, and source_ids, the map from each averaged id to the scans it came from",
-          "source": "R/pipeline-average.R#L465"
+          "source": "R/pipeline-average.R#L467"
         },
         {
           "field": "provenance$aggregation_by",
           "text": "the grouping column, written on every call",
-          "source": "R/pipeline-average.R#L481"
+          "source": "R/pipeline-average.R#L483"
         }
       ],
       "refuses": [
@@ -756,32 +756,32 @@
         {
           "when": "an unregistered analysis column, or any other structural problem, is present before the rebuild — average() validates at entry as well as on return (#24)",
           "does": "aborts with the validator's findings, class horizons_validation_error",
-          "source": "R/pipeline-average.R#L201"
+          "source": "R/pipeline-average.R#L203"
         },
         {
           "when": "the grouping column has NA, or no predictor columns exist",
           "does": "aborts",
-          "source": "R/pipeline-average.R#L243"
+          "source": "R/pipeline-average.R#L245"
         },
         {
           "when": "every sample is dropped by quality control",
           "does": "aborts and suggests on_all_outliers = \"warn\" or a lower threshold",
-          "source": "R/pipeline-average.R#L344"
+          "source": "R/pipeline-average.R#L346"
         },
         {
           "when": "all replicates of a sample fail and on_all_outliers is \"warn\"",
           "does": "averages them anyway and warns, naming the samples",
-          "source": "R/pipeline-average.R#L493"
+          "source": "R/pipeline-average.R#L495"
         },
         {
           "when": "a non-numeric response disagrees within a group",
           "does": "aborts naming the column and group",
-          "source": "R/pipeline-average.R#L948"
+          "source": "R/pipeline-average.R#L950"
         },
         {
           "when": "the object fails validate_horizons_data() after averaging",
           "does": "aborts with the validator's findings, class horizons_validation_error",
-          "source": "R/pipeline-average.R#L487"
+          "source": "R/pipeline-average.R#L489"
         }
       ],
       "evidence": [],
@@ -1020,7 +1020,7 @@
           "default": "c(\"pca\", \"pls\")",
           "text": "`character.` `\"pca\"` (unsupervised, of the pool) or `\"pls\"` (against one property; `properties` must name exactly one). Default: `\"pca\"`.",
           "touch": "\"pls\" for a response-driven space against one property; it selects rows using their own measured values, so pool-internal CV becomes optimistic and the verb says so.",
-          "source": "R/pipeline-select-training.R#L499"
+          "source": "R/pipeline-select-training.R#L503"
         },
         {
           "name": "ncomp",
@@ -1034,7 +1034,7 @@
           "default": "SELECT_SDEV_FLOOR",
           "text": "`numeric.` Components whose standard deviation is below this fraction of PC1's leave the distance. Mahalanobis divides each component by its standard deviation, so a variance-chosen tail orders of magnitude below PC1 would otherwise weigh as much as the dominant chemical axes, and those trailing eigenvectors are the least stable part of the decomposition. In [0, 1); `0` disables the floor. Default: `0.1`.",
           "touch": "Rarely. Components below this fraction of PC1's standard deviation leave the distance; 0.10 keeps 13 of 33 components on KSSL and is what makes Mahalanobis stable. 0 disables it.",
-          "source": "R/select-space.R#L209"
+          "source": "R/select-space.R#L349"
         },
         {
           "name": "metric",
@@ -1062,14 +1062,14 @@
           "default": "30L",
           "text": "`integer.` `scope = \"cluster\"` only: the floor on cluster size. Default: `30`.",
           "touch": "scope = \"cluster\" only; clusters under this size are merged into the nearest, and a batch that cannot form two falls back to one group.",
-          "source": "R/select-neighbours.R#L763"
+          "source": "R/select-neighbours.R#L770"
         },
         {
           "name": "twin_ratio",
           "default": "SELECT_TWIN_RATIO",
           "text": "`numeric.` A pool row is a target's twin when its distance to that target is below this fraction of the reference distance, the 75th percentile of the target's 50 nearest measured rows (a quarter of the measured rows when fewer than 200 have the property), under every scope. In (0, 1). An exact match is always a twin. Currently `0.05`, an internal constant carried over from an earlier rule and still to be calibrated on replicate scans, so treat the value as provisional rather than settled.",
           "touch": "Leave it until it is calibrated on the KSSL replicate scans; 0.05 was carried over from an earlier rule with a different reference distance.",
-          "source": "R/select-neighbours.R#L198"
+          "source": "R/constants.R#L289"
         },
         {
           "name": "chunk_size",
@@ -1083,7 +1083,7 @@
           "default": "1L",
           "text": "`integer.` Seed for every stochastic step of the verb: the target clustering under `scope = \"cluster\"`, and the pool sample the resemblance check draws its reference distribution from. The caller's RNG state is saved and restored, so the verb does not advance it. Default: `1`.",
           "touch": "For the target clustering and the resemblance check's reference sample; the caller's RNG state is restored afterwards.",
-          "source": "R/pipeline-select-training.R#L1134"
+          "source": "R/pipeline-select-training.R#L1136"
         },
         {
           "name": "verbose",
@@ -1171,7 +1171,7 @@
         {
           "when": "either grid has a hole, or the pool does not cover the targets' range",
           "does": "aborts before anything interpolates",
-          "source": "R/select-reconcile.R#L206"
+          "source": "R/select-reconcile.R#L208"
         },
         {
           "when": "a property has no measured pool rows, or fewer than 2 under space_rows = \"measured\", under any scope",
@@ -1356,7 +1356,7 @@
       "mechanics": [
         {
           "step": "Requires at least one response or outcome column, and checks every axis value against the package's valid lists.",
-          "source": "R/pipeline-configure.R#L251"
+          "source": "R/pipeline-configure.R#L257"
         },
         {
           "step": "If a grid already exists, warns and resets whatever evaluate(), fit() and ensemble() earned, because it was earned against an outcome that is about to change. The evaluation, models and ensemble slots go back to the constructor's empty shape, the validation verdict and flagged ids are cleared, and the class drops to horizons_data. The record of rows validate() already removed is kept, since they stay removed, and so is a select_training() record.",
@@ -1452,7 +1452,7 @@
         {
           "when": "rows were removed only as response outliers of a different outcome, or the training rows were drawn by select_training() for properties that exclude the outcome",
           "does": "warns and continues; the rows stay as they are",
-          "source": "R/pipeline-configure.R#L861"
+          "source": "R/pipeline-configure.R#L862"
         },
         {
           "when": "the object fails validate_horizons_data() after the grid is stored",
@@ -1536,7 +1536,7 @@
       "mechanics": [
         {
           "step": "Requires a configured object, validates the arguments, and warns if a previous validation is being overwritten.",
-          "source": "R/pipeline-validate.R#L142"
+          "source": "R/pipeline-validate.R#L144"
         },
         {
           "step": "Counts rows with a non-missing outcome, which is what evaluate() will actually model, and reads cv_folds from the tuning record.",
@@ -1556,7 +1556,7 @@
         },
         {
           "step": "P010 (warning) flags configs pairing cubist with feature_selection = \"none\" once n_rows * n_predictors exceeds CUBIST_MAX_CELLS; the CLI tree line always shows the cell count, and a cli_warn() names the affected config_ids and recommends feature_selection = \"pca\" when any are flagged.",
-          "source": "R/pipeline-validate.R#L432"
+          "source": "R/pipeline-validate.R#L437"
         },
         {
           "step": "If removal was asked for, drops the union or the chosen kind through subset_rows() and records why each row left, the outcome whose fences flagged a response removal, and the thresholds in force.",
@@ -1564,7 +1564,7 @@
         },
         {
           "step": "The flags are replaced on every call, but the removal record accumulates, since rows an earlier call removed (before a re-configure, say) are gone for good.",
-          "source": "R/pipeline-validate.R#L544"
+          "source": "R/pipeline-validate.R#L550"
         },
         {
           "step": "passed is TRUE when no ERROR check failed; warnings do not affect it.",
@@ -1589,7 +1589,7 @@
         {
           "field": "validation$outliers",
           "text": "the spectral and response ids this call flagged, and the record of every removal so far, one detail row per removed sample with its reason, the outcome that flagged a response removal, and the spectral and response thresholds",
-          "source": "R/pipeline-validate.R#L544"
+          "source": "R/pipeline-validate.R#L558"
         }
       ],
       "refuses": [
@@ -1659,14 +1659,14 @@
           "default": "TRUE",
           "text": "Logical. If TRUE, skip Bayesian optimization for configs whose grid-search RPD falls below `prune_threshold`. When `configure()` set `bayesian_iter = 0` there is nothing to skip, so no config is pruned. Either way, whether each config fell below the threshold is recorded in `evaluation$results$below_prune_threshold` (with the threshold in `prune_threshold`), and `fit()` warns when every member it fits did. Default TRUE.",
           "touch": "Leave TRUE. Since tuning metrics moved to the original response scale (#49), the grid RPD the gate reads is comparable across transformations, which closed the second half of",
-          "source": "R/evaluate-single-config.R#L267"
+          "source": "R/evaluate-single-config.R#L285"
         },
         {
           "name": "prune_threshold",
           "default": "1",
           "text": "Numeric. RPD threshold for pruning. Configs with grid-search RPD below this value skip Bayesian optimization but still receive test-set metrics from grid-search best. Default 1.0 (the \"no better than the mean\" line).",
           "touch": "The grid-search RPD below which Bayesian optimization is skipped; 1.0 is \"no better than the mean\".",
-          "source": "R/pipeline-evaluate.R#L25"
+          "source": "R/evaluate-single-config.R#L289"
         },
         {
           "name": "allow_par",
@@ -1754,7 +1754,7 @@
         },
         {
           "step": "With bayesian_iter = 0, relabels checkpointed rows still marked pruned as successes, since there the gate skipped nothing. Ranks the successful configurations by cv_<metric>, falling back to pruned ones, with a tie-break on config_id, and names the winner.",
-          "source": "R/pipeline-evaluate.R#L781"
+          "source": "R/pipeline-evaluate.R#L770"
         },
         {
           "step": "Empties the models and ensemble slots, which were built on the evaluation being replaced, so a fitted or ensembled object comes back a plain horizons_eval.",
@@ -1836,7 +1836,7 @@
         {
           "when": "configure()'s sg_window is not narrower than the spectrum on the axis the object now has",
           "does": "aborts before any configuration runs, naming the window, its width in cm⁻¹ and the column count, class horizons_input_error",
-          "source": "R/pipeline-evaluate.R#L2236"
+          "source": "R/pipeline-evaluate.R#L2237"
         },
         {
           "when": "the registered plan has fewer than two workers, checkpoints lack a fingerprint or settings, or a configuration's cv metric is NA",
@@ -1976,15 +1976,15 @@
         },
         {
           "step": "Flags a configuration as degraded when its test RPD falls below the cross-validated mean minus two standard errors.",
-          "source": "R/fit-single-config.R#L465"
+          "source": "R/fit-single-config.R#L478"
         },
         {
           "step": "With UQ on, trains a quantile forest on the out-of-fold residuals and computes signed conformal scores on the calibration set; with AD on, estimates the feature-space centroid and a Ledoit-Wolf shrinkage covariance and calibrates the quartile and out-of-domain cutoffs on the same calibration set. Both run before the workflow is butchered for storage.",
-          "source": "R/fit-single-config.R#L493"
+          "source": "R/fit-single-config.R#L498"
         },
         {
           "step": "Assembles the workflows in best-first order, the stacked out-of-fold predictions keyed to a row index, the results table, the response bound (1.5 times the largest outcome among the fit rows, the ones the final models are trained on), and whether the training object carried a selection record; promotes to horizons_fit and certifies the models slot. On a horizons_ensemble, the ensemble slot is emptied first, since it was built on the members being replaced.",
-          "source": "R/pipeline-fit.R#L821"
+          "source": "R/pipeline-fit.R#L848"
         }
       ],
       "records": [
@@ -2006,7 +2006,7 @@
         {
           "field": "models$split, models$predictor_schema, models$response_bound, models$selection_present",
           "text": "Split F; the training-axis predictor columns predict() checks new data against; the winsorization bound, computed over the fit rows; whether conformal exchangeability can be assumed",
-          "source": "R/pipeline-fit.R#L828"
+          "source": "R/pipeline-fit.R#L829"
         },
         {
           "field": "models$uq, models$ad",
@@ -2058,7 +2058,7 @@
         {
           "when": "a configuration fails to re-tune or fit",
           "does": "records the failure and its error message in models$results and continues; butchering failure falls back to storing the unbutchered workflow",
-          "source": "R/fit-single-config.R#L93"
+          "source": "R/fit-single-config.R#L95"
         },
         {
           "when": "every configuration fails",
@@ -2069,7 +2069,7 @@
       "evidence": [
         {
           "claim": "out-of-fold predictions cover 80 % of the rows with an observed outcome with UQ and AD off, and 64 % with them on",
-          "where": "dev/experiments/2026-09-factorial/README.md#same-afternoon-2026-09-22-the-library-ships-whole-and-the-correction-from-the-pool-fit"
+          "where": "../dev/specs/v1-refactor/select-training-design.md#what-changed-on-2026-09-22-the-overnight-run-and-its-follow-up"
         },
         {
           "claim": "a Split F drawn afresh at seed + 1 took a median 79 % of its test rows from evaluate()'s training rows, which chose the members and tuned the warm-start parameters (200 seeds, n = 250); that is why fit() reuses evaluate()'s split",
@@ -2122,7 +2122,7 @@
           "default": "DEFAULT_ENSEMBLE_SEED",
           "text": "Integer. Random seed for the meta-learner's CV folds (used by the `penalized` and `xgb` engines for both tuning and the genuine out-of-fold meta predictions; recorded on the contract for all methods). Ensemble UQ draws its calibration partition at `seed + 1000`, disjoint from the tuning folds. Mirrors the `seed` argument of `fit()` and `evaluate()`. Default `DEFAULT_ENSEMBLE_SEED` (307).",
           "touch": "To change the meta-learner's folds; the ensemble UQ partition is drawn at seed + 1000.",
-          "source": "R/pipeline-ensemble.R#L163"
+          "source": "R/pipeline-ensemble.R#L169"
         },
         {
           "name": "compute_uq",
@@ -2165,7 +2165,7 @@
         },
         {
           "step": "Promotes to horizons_ensemble, then with compute_uq on refits the meta-learner per fold and calibrates CV+ intervals on signed residuals; UQ failure degrades to no bundle with a note, never to a failed ensemble.",
-          "source": "R/pipeline-ensemble.R#L182"
+          "source": "R/pipeline-ensemble.R#L184"
         },
         {
           "step": "Certifies the ensemble slot against its contract before returning.",
@@ -2321,7 +2321,7 @@
         {
           "when": "new_data lacks a predictor column of the training axis, or a covariate a configuration uses",
           "does": "aborts naming the missing columns and pointing at standardize()",
-          "source": "R/pipeline-predict.R#L586"
+          "source": "R/pipeline-predict.R#L607"
         },
         {
           "when": "a config being predicted needs an engine package (or ranger, for a UQ bundle) that is not installed",
@@ -2395,7 +2395,7 @@
           "default": "TRUE",
           "text": "Logical. Return CV+ conformal prediction intervals when ensemble uncertainty quantification is available (`object$ensemble$uq`, calibrated by `fit_ensemble_uq()` — on by default in `ensemble()`). Default `TRUE`. When no UQ bundle is present, point predictions are returned with a one-time note.",
           "touch": "FALSE for point predictions only; only the ensemble's own CV+ bundle produces intervals, never the members'.",
-          "source": "R/ensemble-helpers.R#L883"
+          "source": "R/ensemble-helpers.R#L857"
         },
         {
           "name": "...",
