@@ -781,9 +781,11 @@ generate_config_id <- function(model, preprocessing, transformation,
 #' the fallback, used only when the names do not parse.
 #'
 #' The axis comes first because the recorded step can describe a different
-#' one. `select_training()` resamples the pool onto the targets' grid but
-#' returns the pool's `provenance$standardization`, so a library standardized
-#' at 2 cm-1 and drawn around a batch at 4 cm-1 still records a step of 2.
+#' one. `select_training()` now rewrites the record of a pool it resamples
+#' onto the targets' grid (#90), so on its return the two agree, but an
+#' object selected before that carries the pool's `provenance$standardization`:
+#' a library standardized at 2 cm-1 and drawn around a batch at 4 cm-1
+#' records a step of 2.
 #'
 #' Read at the moment it is needed, never stored: `configure()` prints the
 #' window's width for the axis it sees, and `evaluate()` records the width for

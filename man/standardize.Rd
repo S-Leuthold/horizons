@@ -42,6 +42,12 @@ Default \code{FALSE}. Not recommended — may cause data quality issues.}
 \code{provenance$standardization} records the arguments, whether the spectra
 were actually re-interpolated (\code{resampled}), and the grid they sit on
 (\code{grid}: \code{min}, \code{max}, \code{step}, \code{n}; \code{NULL} without resampling).
+\code{resample} records the argument as given, never the axis's spacing;
+read that from \code{grid$step} or from the columns. On an object
+\code{select_training()} returns after resampling its pool onto the targets'
+axis, the record is rewritten to describe that axis (see
+\code{\link[=select_training]{select_training()}}), and \code{grid} can be \code{NULL} there though the pool
+itself was on a grid, when the targets sit on none.
 }
 \description{
 Applies standardization operations to get spectra into a consistent format
