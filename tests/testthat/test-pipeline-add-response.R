@@ -517,6 +517,44 @@ test_that("add_response() appends provenance on repeated calls", {
 
 
 ## ---------------------------------------------------------------------------
+## add_response() — Non-missing counts (#39)
+## ---------------------------------------------------------------------------
+
+test_that("add_response() reports and records non-missing counts, not only key matches (#39)", {
+
+  ## Arrange — every key matches, but clay is measured on half the samples --
+
+  hd  <- make_test_hd(c("S001", "S002", "S003", "S004"))
+  lab <- tibble::tibble(
+    sample_id = c("S001", "S002", "S003", "S004"),
+    clay      = c(12, NA, 30, NA),
+    oc        = c(1.1, 2.2, 3.3, 4.4)
+  )
+
+  ## Act -------------------------------------------------------------------
+
+  out <- utils::capture.output(
+    result <- add_response(hd, lab, variable = c("clay", "oc"))
+  )
+
+  ## Assert ----------------------------------------------------------------
+
+  expect_true(any(grepl("Matched: 4/4 samples", out, fixed = TRUE)))
+  expect_true(any(grepl("clay: 2/4 non-missing", out, fixed = TRUE)))
+  expect_true(any(grepl("oc: 4/4 non-missing", out, fixed = TRUE)))
+
+  prov <- result$provenance$add_response[[1]]
+
+  expect_equal(prov$n_matched, 4)
+  expect_identical(prov$n_non_missing, c(clay = 2L, oc = 4L))
+
+  ## Rows are kept; NA outcomes are dropped per outcome when modelled
+  expect_equal(nrow(result$data$analysis), 4)
+
+})
+
+
+## ---------------------------------------------------------------------------
 ## add_response() — Repeated calls
 ## ---------------------------------------------------------------------------
 

@@ -16,7 +16,8 @@
 ##
 ## Refuses to run if content.yml carries a `default` or `text` field on any
 ## argument (those are generated, never typed), if a verb's formals are not
-## all documented in content.yml, or if the Rd has no text for a formal.
+## all documented in content.yml, if the Rd has no text for a formal, or if
+## content.yml uses a {token} the split-share table below does not define.
 ##
 ## Spec: ../dev/specs/v1-refactor/pipeline-board.md (the project's dev tree, beside package/)
 ## ===========================================================================
@@ -85,7 +86,37 @@ rd_arguments <- function(rd_name) {
 ## Merge content with formals and Rd
 ## ---------------------------------------------------------------------------
 
-content <- yaml::read_yaml(file.path(board_dir, "content.yml"))
+## ---------------------------------------------------------------------------
+## Split shares: filled from the package, never typed (#44)
+## ---------------------------------------------------------------------------
+## Wherever the prose states a split share, content.yml writes a token and it
+## is filled here from the installed SPLIT_PROP and CALIB_PROP, so changing a
+## constant cannot leave the board describing the old shares. A {token} not
+## in this table is refused rather than published.
+
+share <- function(p) paste0(format(round(100 * p, 1)), " %")
+ratio <- function(p) paste0(format(round(100 * p, 1)), "/", format(round(100 * (1 - p), 1)))
+
+board_tokens <- c(
+  split_ratio    = ratio(ns$SPLIT_PROP),                  # evaluate()'s split and Split F, train/test
+  split_train    = share(ns$SPLIT_PROP),                  # their training share
+  split_test     = share(1 - ns$SPLIT_PROP),              # their test share
+  calib_ratio    = ratio(ns$CALIB_PROP),                  # fit rows/calibration within Split F's training part
+  calib_held     = share(1 - ns$CALIB_PROP),              # the calibration share of that training part
+  fit_rows_share = share(ns$SPLIT_PROP * ns$CALIB_PROP)   # the fit rows as a share of the modelled rows
+)
+
+fill_tokens <- function(x) {
+  if (is.list(x)) return(lapply(x, fill_tokens))
+  if (!is.character(x)) return(x)
+  for (k in names(board_tokens)) x <- gsub(paste0("{", k, "}"), board_tokens[[k]], x, fixed = TRUE)
+  left <- unique(unlist(regmatches(x, gregexpr("\\{[a-z_]+\\}", x))))
+  if (length(left)) stop("content.yml: unknown token ", paste(left, collapse = ", "),
+                         "; known tokens are ", paste0("{", names(board_tokens), "}", collapse = ", "))
+  x
+}
+
+content <- fill_tokens(yaml::read_yaml(file.path(board_dir, "content.yml")))
 
 build_verb <- function(v) {
   fn <- get(v$verb, envir = ns)

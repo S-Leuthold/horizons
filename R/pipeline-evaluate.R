@@ -135,26 +135,12 @@ evaluate <- function(x,
   ## -----------------------------------------------------------------------
   ## Step 2: Handle NA outcome rows
   ## -----------------------------------------------------------------------
+  ## fit() applies the same rule to the same table, so the two verbs model
+  ## the same rows (#67).
 
-  outcome_vals <- analysis[[outcome_col]]
-  na_mask      <- is.na(outcome_vals)
-
-  if (all(na_mask)) {
-
-    rlang::abort(
-      "All outcome values are NA. Cannot evaluate models."
-    )
-
-  }
-
-  n_dropped <- 0L
-
-  if (any(na_mask)) {
-
-    n_dropped <- sum(na_mask)
-    analysis  <- analysis[!na_mask, , drop = FALSE]
-
-  }
+  modelled  <- outcome_complete_rows(analysis, outcome_col)
+  analysis  <- modelled$data
+  n_dropped <- modelled$n_dropped
 
   ## -----------------------------------------------------------------------
   ## Step 3: Validate minimum sample size
@@ -220,7 +206,7 @@ evaluate <- function(x,
   set.seed(seed)
 
   split <- tryCatch(
-    rsample::initial_split(analysis, prop = 0.8, strata = outcome_col),
+    rsample::initial_split(analysis, prop = SPLIT_PROP, strata = dplyr::all_of(outcome_col)),
     error = function(e) {
 
       if (verbose) {
@@ -232,7 +218,7 @@ evaluate <- function(x,
 
       }
 
-      rsample::initial_split(analysis, prop = 0.8)
+      rsample::initial_split(analysis, prop = SPLIT_PROP)
 
     }
   )
@@ -247,7 +233,7 @@ evaluate <- function(x,
   ## -----------------------------------------------------------------------
 
   cv_fold_obj <- tryCatch(
-    rsample::vfold_cv(train_data, v = cv_folds, strata = outcome_col),
+    rsample::vfold_cv(train_data, v = cv_folds, strata = dplyr::all_of(outcome_col)),
     error = function(e) {
 
       if (verbose) {
@@ -470,8 +456,8 @@ evaluate <- function(x,
 
     }
 
-    cat(paste0("\u2502  Split: ", n_train, " train / ", n_test,
-               " test (80/20, stratified)\n"))
+    cat(paste0("\u2502  Split: ", n_train, " train / ", n_test, " test (",
+               round(100 * SPLIT_PROP), "/", round(100 * (1 - SPLIT_PROP)), ", stratified)\n"))
     cat(paste0("\u2502  Tuning: ", cv_folds, "-fold CV, grid = ",
                tuning$grid_size, ", bayesian = ",
                tuning$bayesian_iter, "\n"))
@@ -1216,6 +1202,53 @@ rank_configs_by_cv <- function(results, metric) {
   key <- if (metric %in% HIGHER_BETTER_METRICS) -vals else vals
 
   results[order(key, results$config_id), , drop = FALSE]
+
+}
+
+## ---------------------------------------------------------------------------
+## outcome_complete_rows — the one row rule evaluate() and fit() share
+## ---------------------------------------------------------------------------
+
+#' Keep the analysis rows whose outcome is observed
+#'
+#' @description
+#' Drops the rows whose outcome is `NA`. This is the single rule for which
+#' rows `evaluate()` and `fit()` model (#67). `evaluate()` draws its split
+#' from the rows it returns; `fit()` reuses that split and applies the same
+#' rule to check that the split's ids and outcomes still match the object's.
+#' Before this, `fit()` split the unfiltered table: its partition was over
+#' different rows from `evaluate()`'s, and NA-outcome rows reached the fit.
+#'
+#' Rows are dropped per outcome, here, rather than when responses are joined.
+#' An object can carry several responses (`select_training()` puts every pool
+#' response on one object), and a row missing one of them may carry another.
+#'
+#' @param analysis Data frame. The object's analysis table.
+#' @param outcome_col Character. Name of the outcome column.
+#' @return List with `data` (the rows whose outcome is not `NA`, in their
+#'   original order) and `n_dropped` (integer, the rows removed). Aborts with
+#'   class `horizons_input_error` when every outcome is `NA`.
+#' @keywords internal
+#' @noRd
+outcome_complete_rows <- function(analysis, outcome_col) {
+
+  na_mask <- is.na(analysis[[outcome_col]])
+
+  if (all(na_mask)) {
+
+    cli::cli_abort(c(
+      "All outcome values are NA, so there are no rows to model.",
+      "i" = "Outcome column: {.field {outcome_col}}."
+    ), class = "horizons_input_error")
+
+  }
+
+  ## Return the table untouched when nothing is dropped, so an object without
+  ## NA outcomes splits exactly as it did before this helper existed.
+  list(
+    data      = if (any(na_mask)) analysis[!na_mask, , drop = FALSE] else analysis,
+    n_dropped = sum(na_mask)
+  )
 
 }
 

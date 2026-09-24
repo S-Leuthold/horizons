@@ -3,12 +3,26 @@
 #' @description
 #' Re-tunes the top N configurations from `evaluate()` with warm-start
 #' Bayesian optimization, generates out-of-fold (OOF) CV predictions for
-#' downstream stacking, fits final deployable models, evaluates on a new
-#' held-out test set, and optionally trains uncertainty quantification (UQ)
-#' components.
+#' downstream stacking, fits final deployable models, scores them on
+#' `evaluate()`'s held-out test rows, and optionally trains uncertainty
+#' quantification (UQ) components.
 #'
 #' This is the render layer — it owns all console output. The capture layer
 #' (`fit_single_config()`) runs silently and returns structured results.
+#'
+#' The train/test partition (Split F) is `evaluate()`'s split, reused. Its
+#' test rows are the only rows nothing was selected on: `evaluate()`'s
+#' training rows chose the members (on `cv_<metric>`) and tuned the
+#' warm-start parameters, so a partition drawn afresh would score the final
+#' models partly on those rows. `fit()` checks that the split still indexes
+#' the rows this object models: after dropping the rows whose outcome is `NA`
+#' (the rule `evaluate()` applies), the id and outcome columns must match the
+#' split's, value for value and in order, or `fit()` aborts with class
+#' `horizons_input_error`. Columns added since `evaluate()`, such as a sibling
+#' response from `add_response()`, are carried into the fit. The count of
+#' NA-outcome rows is reported in the console tree when `verbose = TRUE`.
+#' With UQ or AD on, the calibration set is carved out of Split F's training
+#' part.
 #'
 #' @param x A `horizons_eval` object (output of `evaluate()`).
 #' @param n_best Integer. Number of top configurations to re-tune. Default 5.
@@ -16,7 +30,7 @@
 #'   configs, by bare name (`"rpd"`, `"rmse"`, ...). If NULL, uses the
 #'   rank_metric from `evaluate()`. Ranking reads the cross-validated value
 #'   at each config's selected hyperparameters (`evaluation$results$cv_<metric>`),
-#'   never the test-set column, so the test sets stay held out from
+#'   never the test-set column, so the test set stays held out from
 #'   selection. Default NULL.
 #' @param compute_uq Logical. Train UQ components (quantile model +
 #'   conformal calibration). Default TRUE.
@@ -32,15 +46,18 @@
 #'   the `n_best` members is gated on the fitted-object memory contract (a
 #'   fitted object is hundreds of MB and would cross to workers). Default
 #'   FALSE.
-#' @param seed Integer. Random seed for CV folds and, through
-#'   `fit_split_seed()` (`seed + 1L`), for Split F. The offset keeps Split F
-#'   independent of `evaluate()`'s split when both are called with the same
-#'   `seed`, which is the default. Default 307L.
+#' @param seed Integer. Random seed for the CV folds and, through
+#'   `calib_split_seed()` (`seed + 1L`), for the calibration split. The
+#'   train/test split is `evaluate()`'s, so it does not depend on this seed.
+#'   Default 307L.
 #' @param verbose Logical. Print progress tree to console. Default TRUE.
 #'
 #' @return A `horizons_fit` object (inherits from `horizons_eval`,
 #'   `horizons_data`) with `models$` slot populated. The slot includes
-#'   `response_bound` (max training outcome times `RESPONSE_BOUND_MARGIN`),
+#'   `response_bound` (max training outcome times `RESPONSE_BOUND_MARGIN`,
+#'   where the training rows are the ones the final models are fit on:
+#'   `evaluate()`'s training part, less the calibration set when UQ or AD is
+#'   on),
 #'   the deploy-time winsorization guardrail `predict()` applies to
 #'   back-transformed point predictions, and `selection_present` (whether the
 #'   training object carried a `$selection` from `select_training()`, which
@@ -110,7 +127,7 @@ fit <- function(x,
 
   ## Determine ranking metric. The name stays bare ("rpd"); ranking reads the
   ## cross-validated column cv_rpd, so members are chosen without touching
-  ## either test set (#50). The test-set metrics on the leaderboard remain
+  ## the test set (#50). The test-set metrics on the leaderboard remain
   ## reported, and are honest precisely because they are not used here.
   rank_metric <- metric %||% x$evaluation$rank_metric %||% "rpd"
 
@@ -154,73 +171,93 @@ fit <- function(x,
   ## Extract references
   role_map     <- x$data$role_map
   outcome_col  <- role_map$variable[role_map$role == "outcome"]
-  analysis     <- x$data$analysis
   all_configs  <- x$config$configs
   tuning       <- x$config$tuning
   cv_folds     <- tuning$cv_folds
 
+  ## The rows evaluate() modelled: the same rule on the same table (#67).
+  modelled  <- outcome_complete_rows(x$data$analysis, outcome_col)
+  n_dropped <- modelled$n_dropped
+
   ## -----------------------------------------------------------------------
-  ## Step 1: Data partitioning — Split F (new, independent from evaluate)
+  ## Step 1: Data partitioning — Split F is evaluate()'s split
   ## -----------------------------------------------------------------------
-  ## evaluate() seeds its split with `seed` and this call shape on the same
-  ## frame, so seeding Split F with `seed` too made the two partitions
-  ## bit-identical at the shared default (#50). Derive F's seed instead.
+  ## fit() used to draw its own Split F, at seed + 1 since #50. Measured over
+  ## 200 seeds at n = 250, that draw took a median 79 % of its test rows from
+  ## evaluate()'s training rows, which chose the members (cv_<metric>) and
+  ## tuned the warm-start parameters, so fit()'s test metrics were optimistic
+  ## through selection. evaluate()'s test rows are the only rows nothing was
+  ## selected on, so fit() is scored on them.
+  ##
+  ## Reusing the split is sound only if its row positions still name the
+  ## same samples with the same outcomes, so that is what is checked: the id
+  ## and outcome columns, identical values in the same order. Other columns
+  ## may legitimately have changed; add_response() can add a sibling response
+  ## to an evaluated object. set_analysis() refuses a promoted object, so a
+  ## mismatch here means the rows or outcomes were changed some other way, or
+  ## the object was built by hand; refuse it rather than score the wrong rows.
+  ## The split is then pointed at the current table, so the fit sees the
+  ## object's columns as they are now.
 
-  set.seed(fit_split_seed(seed))
+  split_F <- x$evaluation$split
 
-  split_F <- tryCatch(
-    rsample::initial_split(analysis, prop = 0.8, strata = outcome_col),
-    error = function(e) {
+  if (!inherits(split_F, "rsplit")) {
 
-      if (verbose) {
+    cli::cli_abort(c(
+      "{.fn fit} scores on {.fn evaluate}'s split, and this object has none.",
+      "x" = "{.field evaluation$split} is {.obj_type_friendly {split_F}}, not an {.cls rsplit}.",
+      "i" = "Run {.fn evaluate} on the object before {.fn fit}."
+    ), class = "horizons_input_error")
 
-        cat(paste0(
-          "\u2502  ", cli::col_yellow(
-            "Stratified split failed, retrying without strata"
-          ), "\n"
-        ))
+  }
 
-      }
+  id_col <- role_map$variable[role_map$role == "id"]
 
-      rsample::initial_split(analysis, prop = 0.8)
+  if (length(id_col) == 0) {
 
-    }
-  )
+    id_col <- "sample_id"
+
+  } else {
+
+    id_col <- id_col[1]
+
+  }
+
+  if (!identical(split_F$data[[id_col]], modelled$data[[id_col]]) ||
+      !identical(split_F$data[[outcome_col]], modelled$data[[outcome_col]])) {
+
+    cli::cli_abort(c(
+      "{.fn evaluate}'s split does not index the rows this object models.",
+      "x" = "{.field evaluation$split} was drawn on {nrow(split_F$data)} row{?s}; the analysis table has {nrow(modelled$data)} with an observed {.field {outcome_col}}, and their {.field {id_col}} or {.field {outcome_col}} values differ.",
+      "i" = "The rows or outcomes changed after {.fn evaluate}, or the object was built by hand.",
+      "i" = "Re-run {.fn evaluate} on the object as it is now."
+    ), class = "horizons_input_error")
+
+  }
+
+  split_F$data <- modelled$data
 
   train_F <- rsample::training(split_F)
   test_F  <- rsample::testing(split_F)
   n_train <- nrow(train_F)
   n_test  <- nrow(test_F)
 
-  ## Visible guard: a caller can still make the partitions coincide (for
-  ## example fit(seed = evaluate_seed - 1L)). Warn rather than abort; the
-  ## test metrics are then post-selection and the user should know.
-  eval_split <- x$evaluation$split
-
-  if (!is.null(eval_split) && !is.null(eval_split$in_id) &&
-      identical(sort(as.integer(split_F$in_id)),
-                sort(as.integer(eval_split$in_id)))) {
-
-    cli::cli_warn(c(
-      "!" = "fit()'s train/test partition is identical to evaluate()'s.",
-      "i" = "Reported test metrics are then measured on the rows the configs were selected on.",
-      "i" = "Pass a different {.arg seed} to fit() to get an independent partition."
-    ))
-
-  }
-
   ## Calibration partitioning: split train_F into train_Fit / calib_Fit.
   ## UQ and AD share this one held-out split (D7) \u2014 both calibrate on calib_Fit
   ## and never train on it. Built whenever either capability is requested.
+  ## Seeded on its own, so the calibration rows depend on `seed` and train_F
+  ## alone, not on RNG state an earlier draw left behind.
   calib_data <- NULL
 
   if (compute_uq || compute_ad) {
 
+    set.seed(calib_split_seed(seed))
+
     split_C <- tryCatch(
-      rsample::initial_split(train_F, prop = 0.8, strata = outcome_col),
+      rsample::initial_split(train_F, prop = CALIB_PROP, strata = dplyr::all_of(outcome_col)),
       error = function(e) {
 
-        rsample::initial_split(train_F, prop = 0.8)
+        rsample::initial_split(train_F, prop = CALIB_PROP)
 
       }
     )
@@ -262,9 +299,13 @@ fit <- function(x,
   ## -----------------------------------------------------------------------
   ## Step 2: Create CV resamples from train_Fit
   ## -----------------------------------------------------------------------
+  ## Seeded here: with the split reused, no draw precedes this one when UQ
+  ## and AD are off, so the folds would otherwise follow the caller's RNG.
+
+  set.seed(seed)
 
   cv_resamples <- tryCatch(
-    rsample::vfold_cv(train_Fit, v = cv_folds, strata = outcome_col),
+    rsample::vfold_cv(train_Fit, v = cv_folds, strata = dplyr::all_of(outcome_col)),
     error = function(e) {
 
       if (verbose) {
@@ -292,13 +333,22 @@ fit <- function(x,
     cat(paste0("\u250C fit ",
                paste(rep("\u2500", 57), collapse = ""), "\n"))
     cat("\u2502\n")
+
+    if (n_dropped > 0) {
+
+      cat(paste0("\u2502  ",
+                 cli::col_yellow("Dropped ", n_dropped,
+                                  " rows with NA outcome"), "\n"))
+
+    }
+
     cat(paste0(
       "\u2502  Re-tuning top ", n_best, " of ",
       nrow(eval_results), " configurations\n"
     ))
     cat(paste0(
       "\u2502  Split: ", n_train, " train / ", n_test,
-      " test (new, independent)\n"
+      " test (evaluate()'s held-out rows)\n"
     ))
 
     if (compute_uq) {
@@ -542,18 +592,6 @@ fit <- function(x,
   })
 
   ## Build row_index: .row → id mapping from train_Fit
-  id_col <- role_map$variable[role_map$role == "id"]
-
-  if (length(id_col) == 0) {
-
-    id_col <- "sample_id"
-
-  } else {
-
-    id_col <- id_col[1]
-
-  }
-
   row_index <- tibble::tibble(
     .row      = seq_len(nrow(train_Fit)),
     sample_id = train_Fit[[id_col]]
@@ -617,8 +655,10 @@ fit <- function(x,
 
   ## Deploy-time guardrail bound: predictions are winsorized to this value in
   ## predict_one_config(). max-times-margin (not a quantile) — the bound should
-  ## permit modest extrapolation and catch only the physically absurd.
-  response_bound <- max(analysis[[outcome_col]], na.rm = TRUE) * RESPONSE_BOUND_MARGIN
+  ## permit modest extrapolation and catch only the physically absurd. Taken
+  ## over train_Fit, the rows the final models are fit on, so neither Split
+  ## F's test rows nor the calibration rows shape it (#68).
+  response_bound <- max(train_Fit[[outcome_col]], na.rm = TRUE) * RESPONSE_BOUND_MARGIN
 
   ## Did the training rows come from select_training()? If so the calibration
   ## split below was drawn from rows chosen for proximity to the targets, so
@@ -694,18 +734,16 @@ fit <- function(x,
 
     }
 
-    ## Best test RPD
-    success_rows <- results_tibble[results_tibble$status == "success", ]
+    ## The CV-selected member's test RPD. The best test RPD across members
+    ## would be a best-of-N on the held-out rows, and could name a different
+    ## config from models$best_config.
+    if (!is.na(best_config)) {
 
-    if (nrow(success_rows) > 0) {
-
-      best_idx <- which.max(success_rows$rpd)
-      best_rpd <- success_rows$rpd[best_idx]
-      best_id  <- success_rows$config_id[best_idx]
+      best_rpd <- results_tibble$rpd[results_tibble$config_id == best_config]
 
       cat(paste0(
-        "\u2502  \u251C\u2500 Best test RPD: ", best_id,
-        " (", round(best_rpd, 2), ")\n"
+        "\u2502  \u251C\u2500 CV-selected: ", best_config,
+        " (test RPD ", round(best_rpd, 2), ")\n"
       ))
 
     }
@@ -737,22 +775,23 @@ fit <- function(x,
 }
 
 ## ---------------------------------------------------------------------------
-## fit_split_seed \u2014 Split F's seed, derived from the user's seed
+## calib_split_seed \u2014 Split C's seed, derived from the user's seed
 ## ---------------------------------------------------------------------------
 
-#' Seed for fit()'s train/test partition
+#' Seed for fit()'s calibration split
 #'
 #' @description
-#' `evaluate()` seeds its train/test split with `seed`. `fit()` builds its own
-#' split with the same `rsample::initial_split()` call on the same frame, so
-#' seeding it with `seed` too reproduced `evaluate()`'s partition exactly
-#' (#50). Split F is seeded with `seed + 1L` instead. The offset is documented
-#' rather than hidden so a caller who needs to reproduce the partition can.
+#' `fit()` scores on `evaluate()`'s train/test split and carves the
+#' calibration set that UQ and AD share (Split C) out of its training part.
+#' Split C is seeded on its own, with `seed + 1L`, so the calibration rows
+#' depend only on `seed` and those training rows, not on RNG state left by an
+#' earlier draw. The offset is documented rather than hidden so a caller who
+#' needs to reproduce the partition can.
 #'
 #' @param seed Integer seed passed to `fit()`.
-#' @return Integer seed for Split F.
+#' @return Integer seed for Split C.
 #' @keywords internal
-fit_split_seed <- function(seed) {
+calib_split_seed <- function(seed) {
 
   as.integer(seed) + 1L
 

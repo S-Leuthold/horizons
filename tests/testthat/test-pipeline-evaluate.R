@@ -282,6 +282,26 @@ describe("evaluate() - NA outcome rows", {
 
   })
 
+  it("outcome_complete_rows(), the rule fit() shares, drops and counts NA outcomes (#67)", {
+
+    df <- tibble::tibble(sample_id = c("A", "B", "C", "D"),
+                         y         = c(1, NA, 3, NA))
+
+    kept <- outcome_complete_rows(df, "y")
+
+    expect_identical(kept$data$sample_id, c("A", "C"))
+    expect_identical(kept$n_dropped, 2L)
+
+    ## Nothing to drop: the table comes back untouched
+    complete <- df[c(1, 3), ]
+    expect_identical(outcome_complete_rows(complete, "y")$data, complete)
+    expect_identical(outcome_complete_rows(complete, "y")$n_dropped, 0L)
+
+    expect_error(outcome_complete_rows(df[c(2, 4), ], "y"),
+                 class = "horizons_input_error")
+
+  })
+
 })
 
 ## =========================================================================
