@@ -20,6 +20,31 @@
   RPD 3.82). `configure()`'s docs gain a "Choosing models for large spectral
   libraries" section covering n x p limits across `MODEL_SPECS`.
 
+* **`fit()` starts cold from a configured object with one configuration**
+  (#45). `fit()` required a `horizons_eval`, so a full `evaluate()`, grid
+  tuning and all, had to run even when there was one configuration and
+  nothing to screen; a loop fitting one known configuration across many
+  subsets (per cluster, per site) spent about half its compute re-deciding
+  a question with one answer. `fit()` now also takes a configured
+  `horizons_data` whose `config$configs` has exactly one row. It draws the
+  train/test split `evaluate()` would draw at the same `seed`, through one
+  helper both verbs now call, so the model is scored on the rows
+  `evaluate()` would have held out, and it re-tunes from a space-filling
+  grid of `grid_size` points where `evaluate()`'s parameters would
+  otherwise seed it. The console tree says so. The degradation check is
+  unaffected, since it compares the test RPD with `fit()`'s own
+  cross-validation. The fit carries an unscreened evaluation record:
+  `evaluation$screened` is `FALSE`, the configuration's status is
+  `"not_evaluated"`, and its metric and `cv_*` columns are `NA`.
+  `evaluate()` now writes `screened = TRUE`; objects evaluated before the
+  key existed still validate. With more than one configuration, `fit()`
+  aborts with class `horizons_input_error` and says to run `evaluate()`.
+
+  `models$results` gains `warm_start` and `start_grid_points`, recording
+  how each member's re-tune started, on the `evaluate()` path too: a
+  member whose `evaluate()` parameters were unusable used to fall back to
+  the same space-filling grid silently, and now the tree says so.
+
 ## Performance
 
 * `step_transform_spectra()` bakes the whole spectral matrix in one prospectr

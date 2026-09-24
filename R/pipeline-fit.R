@@ -38,14 +38,37 @@
 #' per-member results travel on the condition as `results`, and
 #' `models$results` keeps each member's `error_message` when some succeed.
 #'
-#' @param x A `horizons_eval` object (output of `evaluate()`).
+#' @section Cold start from one configuration:
+#' With one configuration there is nothing for `evaluate()` to choose, so a
+#' configured `horizons_data` whose `config$configs` has exactly one row can
+#' go straight to `fit()` (#45). `fit()` then draws the train/test split
+#' itself, by the draw `evaluate()` uses, so at the same `seed` it holds out
+#' exactly the rows `evaluate()` would have. With no parameters from
+#' `evaluate()` to warm-start from, the re-tune starts from a space-filling
+#' grid of `grid_size` points; the console tree says so, and
+#' `models$results$warm_start` is `FALSE`. The degradation check needs
+#' nothing from `evaluate()`, since it compares the test RPD with `fit()`'s
+#' own cross-validation.
+#'
+#' The fit carries an unscreened evaluation record in place of
+#' `evaluate()`'s: `evaluation$screened` is `FALSE`, the one configuration is
+#' `best_config` with status `"not_evaluated"`, its metric and `cv_*` columns
+#' are `NA`, and `runtime_secs` is 0. Re-fitting a cold-started fit starts
+#' cold again. With more than one configuration `fit()` aborts with class
+#' `horizons_input_error`: choosing among them is what `evaluate()` is for.
+#'
+#' @param x A `horizons_eval` object (output of `evaluate()`), or a
+#'   configured `horizons_data` with exactly one configuration, which `fit()`
+#'   starts cold (see "Cold start from one configuration").
 #' @param n_best Integer. Number of top configurations to re-tune. Default 5.
+#'   A cold start has one.
 #' @param metric Character or NULL. Metric for ranking the candidate
 #'   configs, by bare name (`"rpd"`, `"rmse"`, ...). If NULL, uses the
-#'   rank_metric from `evaluate()`. Ranking reads the cross-validated value
-#'   at each config's selected hyperparameters (`evaluation$results$cv_<metric>`),
-#'   never the test-set column, so the test set stays held out from
-#'   selection. Default NULL.
+#'   rank_metric from `evaluate()`, or `"rpd"` on a cold start, where there
+#'   is nothing to rank and the metric is only recorded. Ranking reads the
+#'   cross-validated value at each config's selected hyperparameters
+#'   (`evaluation$results$cv_<metric>`), never the test-set column, so the
+#'   test set stays held out from selection. Default NULL.
 #' @param compute_uq Logical. Train UQ components (quantile model +
 #'   conformal calibration). Default TRUE.
 #' @param compute_ad Logical. Compute applicability-domain metadata (centroid +
@@ -62,8 +85,9 @@
 #'   FALSE.
 #' @param seed Integer. Random seed for the CV folds and, through
 #'   `calib_split_seed()` (`seed + 1L`), for the calibration split. The
-#'   train/test split is `evaluate()`'s, so it does not depend on this seed.
-#'   Default 307L.
+#'   train/test split is `evaluate()`'s, so it does not depend on this seed,
+#'   except on a cold start, where `fit()` draws that split at this seed as
+#'   `evaluate()` would. Default 307L.
 #' @param verbose Logical. Print progress tree to console. Default TRUE.
 #'
 #' @return A `horizons_fit` object (inherits from `horizons_eval`,
@@ -78,6 +102,9 @@
 #'   `predict()` reads when asked for conformal intervals). Called on a
 #'   `horizons_ensemble`, it returns a `horizons_fit` whose `ensemble` slot
 #'   is empty again, since the ensemble was built on the members it replaces.
+#'   `models$results` records how each member's re-tune started:
+#'   `warm_start` (`TRUE` from `evaluate()`'s parameters, `FALSE` from a
+#'   space-filling grid) and `start_grid_points`.
 #'
 #' @export
 fit <- function(x,
@@ -94,12 +121,37 @@ fit <- function(x,
   ## -----------------------------------------------------------------------
   ## Step 0: Preflight validation
   ## -----------------------------------------------------------------------
+  ## A horizons_eval carries evaluate()'s ranking and split. A configured
+  ## object with one configuration has nothing to rank, so fit() starts cold
+  ## (#45): it draws the split evaluate() would draw at this seed and records
+  ## an unscreened evaluation in its place. A cold-started fit re-fits the
+  ## same way, since there is still no screening to reuse.
 
-  if (!inherits(x, "horizons_eval")) {
+  class_in   <- if (inherits(x, "horizons_eval")) "horizons_eval" else "horizons_data"
+  cold_start <- !inherits(x, "horizons_eval") || isFALSE(x$evaluation$screened)
 
-    rlang::abort(
-      "Input must be a `horizons_eval` object (output of `evaluate()`)."
-    )
+  if (cold_start) {
+
+    if (!inherits(x, "horizons_data")) {
+
+      cli::cli_abort(c(
+        "{.fn fit} needs a {.cls horizons_eval} from {.fn evaluate}, or a configured {.cls horizons_data} with one configuration.",
+        "x" = "{.arg x} is {.obj_type_friendly {x}}."
+      ), class = "horizons_input_error")
+
+    }
+
+    cold         <- cold_start_evaluation(x, metric, seed)
+    x$evaluation <- cold$evaluation
+
+    if (!cold$stratified && verbose) {
+
+      cat(paste0(
+        "\u2502  ", cli::col_yellow("Stratified split failed, ",
+                                     "retrying without strata"), "\n"
+      ))
+
+    }
 
   }
 
@@ -148,15 +200,21 @@ fit <- function(x,
   ## The candidates are evaluate()'s best_config candidates: the successes
   ## or, when none succeeded, the pruned configs with a cv_<metric>. fit()
   ## used to keep successes only, so it refused an evaluation whose
-  ## best_config was a pruned config (#38).
-  candidates  <- ranking_candidates(eval_results, rank_metric)
+  ## best_config was a pruned config (#38). A cold start's one configuration
+  ## is the member as it stands: not_evaluated, with nothing to rank on.
+  candidates  <- if (cold_start) {
+    list(rows = eval_results, fallback = FALSE)
+  } else {
+    ranking_candidates(eval_results, rank_metric)
+  }
   rank_column <- paste0("cv_", rank_metric)
 
   ## Nothing to fit: no candidates, or candidates none of which has a
   ## cv_<metric> value, which rank_configs_by_cv() would refuse unclassed.
   n_candidates <- nrow(candidates$rows)
 
-  if (n_candidates == 0 || all(is.na(candidates$rows[[rank_column]]))) {
+  if (!cold_start &&
+      (n_candidates == 0 || all(is.na(candidates$rows[[rank_column]])))) {
 
     cli::cli_abort(c(
       "No configuration in {.field evaluation$results} can be fitted.",
@@ -170,15 +228,16 @@ fit <- function(x,
 
   }
 
-  ranked <- rank_configs_by_cv(candidates$rows, rank_metric)
+  ranked <- if (cold_start) candidates$rows else rank_configs_by_cv(candidates$rows, rank_metric)
 
-  ## Cap n_best at available candidates
+  ## Cap n_best at available candidates. A cold start has one configuration
+  ## by construction, so the default n_best is no request worth a note.
   n_available <- nrow(ranked)
   n_best      <- as.integer(n_best)
 
   if (n_best > n_available) {
 
-    if (verbose) {
+    if (verbose && !cold_start) {
 
       cat(paste0(
         "\u2502  ", cli::col_yellow(
@@ -233,7 +292,8 @@ fit <- function(x,
   ## mismatch here means the rows or outcomes were changed some other way, or
   ## the object was built by hand; refuse it rather than score the wrong rows.
   ## The split is then pointed at the current table, so the fit sees the
-  ## object's columns as they are now.
+  ## object's columns as they are now. On a cold start the split was drawn in
+  ## Step 0 from these rows, by the draw evaluate() uses, so it passes.
 
   split_F <- x$evaluation$split
 
@@ -378,13 +438,23 @@ fit <- function(x,
 
     }
 
+    if (cold_start) {
+
+      cat("\u2502  Cold start: 1 configuration, not screened by evaluate()\n")
+
+    } else {
+
+      cat(paste0(
+        "\u2502  Re-tuning top ", n_best, " of ",
+        nrow(eval_results), " configurations\n"
+      ))
+
+    }
+
     cat(paste0(
-      "\u2502  Re-tuning top ", n_best, " of ",
-      nrow(eval_results), " configurations\n"
-    ))
-    cat(paste0(
-      "\u2502  Split: ", n_train, " train / ", n_test,
-      " test (evaluate()'s held-out rows)\n"
+      "\u2502  Split: ", n_train, " train / ", n_test, " test (",
+      if (cold_start) "the rows evaluate() holds out at this seed" else "evaluate()'s held-out rows",
+      ")\n"
     ))
 
     if (compute_uq) {
@@ -401,7 +471,7 @@ fit <- function(x,
     ))
     cat(paste0(
       "\u2502  Bayesian: ", tuning$bayesian_iter,
-      " iterations with warm-start\n"
+      if (cold_start) " iterations from a space-filling grid\n" else " iterations with warm-start\n"
     ))
     cat("\u2502\n")
 
@@ -446,7 +516,8 @@ fit <- function(x,
 
     }
 
-    ## Extract best_params from evaluate
+    ## Extract best_params from evaluate. NULL on a cold start, so the
+    ## re-tune starts from build_warmstart_grid()'s space-filling fallback.
     best_params_eval <- top_row$best_params[[1]]
 
     ## Call capture layer
@@ -474,6 +545,23 @@ fit <- function(x,
 
     ## Render result
     if (verbose) {
+
+      ## A re-tune with no usable parameters to centre on starts from a
+      ## space-filling grid. On a cold start that is by design; on the
+      ## evaluate() path it means evaluate()'s parameters were unusable.
+      if (isFALSE(config_result$warm_start)) {
+
+        start_text <- paste0(
+          if (cold_start) "Cold start: no warm-start parameters" else "No usable warm-start parameters from evaluate()",
+          "; space-filling grid of ", config_result$start_grid_points, " points"
+        )
+
+        cat(paste0(
+          "\u2502  ", cont, "\u251C\u2500 ",
+          if (cold_start) start_text else cli::col_yellow(start_text), "\n"
+        ))
+
+      }
 
       if (config_result$status == "success") {
 
@@ -622,6 +710,8 @@ fit <- function(x,
       cv_rpd_mean     = if (!is.null(cv_rpd)  && nrow(cv_rpd)  == 1) cv_rpd$mean     else NA_real_,
       cv_rpd_se       = if (!is.null(cv_rpd)  && nrow(cv_rpd)  == 1) cv_rpd$std_err  else NA_real_,
       best_params     = list(res$best_params),
+      warm_start      = res$warm_start %||% NA,
+      start_grid_points = res$start_grid_points %||% NA_integer_,
       error_message   = res$error_message %||% NA_character_,
       runtime_secs    = res$runtime_secs
     )
@@ -782,13 +872,14 @@ fit <- function(x,
 
     ## The CV-selected member's test RPD. The best test RPD across members
     ## would be a best-of-N on the held-out rows, and could name a different
-    ## config from models$best_config.
+    ## config from models$best_config. A cold start selected nothing.
     if (!is.na(best_config)) {
 
       best_rpd <- results_tibble$rpd[results_tibble$config_id == best_config]
 
       cat(paste0(
-        "\u2502  \u251C\u2500 CV-selected: ", best_config,
+        "\u2502  \u251C\u2500 ", if (cold_start) "Cold-started: " else "CV-selected: ",
+        best_config,
         " (test RPD ", round(best_rpd, 2), ")\n"
       ))
 
@@ -808,7 +899,7 @@ fit <- function(x,
     cat(paste0("\u2502  \u2514\u2500 Runtime: ", time_str, "\n"))
     cat("\u2502\n")
     cat(paste0(
-      "\u2514\u2500 Class: horizons_eval \u2192 horizons_fit\n"
+      "\u2514\u2500 Class: ", class_in, " \u2192 horizons_fit\n"
     ))
     cat(paste0(
       paste(rep("\u2500", 62), collapse = ""), "\n"
@@ -817,6 +908,127 @@ fit <- function(x,
   }
 
   x
+
+}
+
+## ---------------------------------------------------------------------------
+## cold_start_evaluation \u2014 the evaluation record fit() writes without evaluate()
+## ---------------------------------------------------------------------------
+
+#' Build the evaluation record for fit()'s cold start
+#'
+#' @description
+#' With one configuration there is nothing for `evaluate()` to screen, so
+#' `fit()` starts from the configured object (#45). This checks that the
+#' object can start cold, draws the train/test split `evaluate()` would draw
+#' at the same `seed` ([draw_eval_split()], after the same sample-size floor),
+#' and returns the record `fit()` stores in `x$evaluation` in place of
+#' `evaluate()`'s. The record carries every key [validate_horizons_eval()]
+#' requires, with `screened = FALSE`; it leaves out the run provenance
+#' (`workers`, `parallelize_over`), since no `evaluate()` ran. Its one
+#' results row has status `"not_evaluated"`, `NA` metrics and `cv_*`
+#' columns, and `NULL` `best_params`, which sends the re-tune to
+#' [build_warmstart_grid()]'s space-filling fallback.
+#'
+#' @param x A configured `horizons_data`.
+#' @param metric The `metric` passed to `fit()`, or `NULL` for `"rpd"`.
+#'   Recorded as `rank_metric`; with one configuration it ranks nothing.
+#' @param seed The `seed` passed to `fit()`.
+#' @param call The call the conditions are attributed to. Default: the
+#'   caller, `fit()`.
+#' @return List with `evaluation` (the record) and `stratified` (`FALSE` when
+#'   the split fell back to unstratified). Aborts with class
+#'   `horizons_input_error` when the object has no configuration or more than
+#'   one, `metric` is unknown, or too few rows have an observed outcome.
+#' @keywords internal
+#' @noRd
+cold_start_evaluation <- function(x, metric, seed, call = rlang::caller_env()) {
+
+  configs   <- x$config$configs
+  n_configs <- if (is.data.frame(configs)) nrow(configs) else 0L
+
+  if (n_configs == 0) {
+
+    cli::cli_abort(c(
+      "There is no configuration to fit.",
+      "i" = "Run {.fn configure} first."
+    ), class = "horizons_input_error", call = call)
+
+  }
+
+  if (n_configs > 1) {
+
+    cli::cli_abort(c(
+      "{.fn fit} can start without {.fn evaluate} only from a single configuration, and this object has {n_configs} configurations.",
+      "i" = "Choosing among configurations is what {.fn evaluate} is for. Run it first, and {.fn fit} re-tunes the best of them."
+    ), class = "horizons_input_error", call = call)
+
+  }
+
+  ## evaluate() checks its metric up front; here the record would otherwise
+  ## fail validation only after every model had been fitted.
+  rank_metric   <- metric %||% "rpd"
+  valid_metrics <- c("rpd", "rsq", "rmse", "rrmse", "ccc", "mae")
+
+  if (!rlang::is_string(rank_metric) || !rank_metric %in% valid_metrics) {
+
+    cli::cli_abort(c(
+      "{.arg metric} must be one of {.val {valid_metrics}}.",
+      "x" = "Got {.val {rank_metric}}."
+    ), class = "horizons_input_error", call = call)
+
+  }
+
+  ## The rows evaluate() would model, and the floor it applies to them
+  role_map    <- x$data$role_map
+  outcome_col <- role_map$variable[role_map$role == "outcome"]
+  cv_folds    <- x$config$tuning$cv_folds
+  modelled    <- outcome_complete_rows(x$data$analysis, outcome_col)
+  n_modelled  <- nrow(modelled$data)
+
+  if (n_modelled < cv_folds * 2) {
+
+    cli::cli_abort(c(
+      "Too few rows to fit: {n_modelled} ha{?s/ve} an observed {.field {outcome_col}}.",
+      "i" = "{.fn fit} needs at least {cv_folds * 2} (twice {.field cv_folds}), the floor {.fn evaluate} applies."
+    ), class = "horizons_input_error", call = call)
+
+  }
+
+  drawn <- draw_eval_split(modelled$data, outcome_col, seed)
+  split <- drawn$split
+
+  ## The shape of an evaluate() results row (create_failed_result()'s
+  ## columns less scoring_schema, since nothing was scored), all unmeasured
+  results <- tibble::tibble(
+    config_id             = configs$config_id,
+    status                = "not_evaluated",
+    below_prune_threshold = NA,
+    prune_threshold       = NA_real_,
+    rmse    = NA_real_, rrmse    = NA_real_, rsq    = NA_real_,
+    ccc     = NA_real_, rpd      = NA_real_, mae    = NA_real_,
+    cv_rmse = NA_real_, cv_rrmse = NA_real_, cv_rsq = NA_real_,
+    cv_ccc  = NA_real_, cv_rpd   = NA_real_, cv_mae = NA_real_,
+    best_params           = list(NULL),
+    error_message         = NA_character_,
+    warnings              = list(NULL),
+    runtime_secs          = NA_real_
+  )
+
+  list(
+    evaluation = list(
+      results      = results,
+      best_config  = configs$config_id,
+      rank_metric  = rank_metric,
+      screened     = FALSE,
+      split        = split,
+      n_train      = nrow(rsample::training(split)),
+      n_test       = nrow(rsample::testing(split)),
+      runtime_secs = 0,
+      timestamp    = Sys.time()
+    ),
+    stratified = drawn$stratified
+  )
 
 }
 

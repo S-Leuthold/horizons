@@ -169,10 +169,12 @@ new_horizons_data <- function(analysis        = NULL,
     ## Section 5: EVALUATION — Model comparison results (horizons_eval+)
     ## -------------------------------------------------------------------------
 
-    ## Populated by evaluate(); keys mirror what it writes.
+    ## Populated by evaluate(); keys mirror what it writes. fit()'s cold start
+    ## (#45) writes the same keys less the run provenance, with screened FALSE.
     evaluation = list(results          = NULL,  ## tibble: one row per config
                       best_config      = NULL,  ## character: top config_id
                       rank_metric      = NULL,  ## character: metric configs were ranked by
+                      screened         = NULL,  ## logical: TRUE if evaluate() ranked the configs, FALSE for fit()'s cold start
                       split            = NULL,  ## rsplit: train/test partition fit() reuses
                       n_train          = NULL,  ## integer
                       n_test           = NULL,  ## integer
@@ -870,8 +872,10 @@ abort_validation <- function(errors) {
 ## new_horizons_data() declares for the slot is required.
 CONTRACT_KEYS_OPTIONAL <- list(
 
-  ## evaluate(): run provenance, added 2026-09-15
-  evaluation = c("workers", "parallelize_over"),
+  ## evaluate(): run provenance, added 2026-09-15, which fit()'s cold start
+  ## also leaves out because no evaluate() ran; and whether the configs were
+  ## screened, added 2026-09-24 (#45)
+  evaluation = c("workers", "parallelize_over", "screened"),
 
   ## fit(): the winsorization guardrail (objects fitted before it predict
   ## without a clamp) and the select_training() flag, added 2026-09-21
@@ -1268,9 +1272,11 @@ validate_horizons_ensemble <- function(x) {
 #'    `best_config`, `rank_metric`, `split`, `n_train`, `n_test`,
 #'    `runtime_secs`, `timestamp`. The run-provenance keys added 2026-09-15,
 #'    `parallelize_over` and `workers`, are tolerated when absent (objects
-#'    evaluated earlier still fit) and validated when present:
-#'    `parallelize_over` one of `"sequential"`, `"configs"`, `"resamples"`;
-#'    `workers` a single positive whole number or NA.
+#'    evaluated earlier still fit, and [fit()]'s cold start writes neither)
+#'    and validated when present: `parallelize_over` one of `"sequential"`,
+#'    `"configs"`, `"resamples"`; `workers` a single positive whole number or
+#'    NA. `screened`, added 2026-09-24 (#45), is likewise tolerated when
+#'    absent and, when present, must be `TRUE` or `FALSE`.
 #' 2. **results**: data frame carrying `config_id`, `status`, and the six
 #'    metric columns (`rmse`, `rrmse`, `rsq`, `ccc`, `rpd`, `mae`); at least
 #'    one row; `config_id` values unique.
@@ -1362,6 +1368,17 @@ validate_horizons_eval <- function(x) {
       }
 
     }
+
+  }
+
+  ## screened (2026-09-24, #45) -------------------------------------------------
+  ## Tolerated when absent, for objects evaluated before the key existed.
+  ## When present it says whether best_config was chosen by ranking (TRUE) or
+  ## is the one configuration fit() started cold from (FALSE).
+
+  if ("screened" %in% names(ev) && !rlang::is_bool(ev$screened)) {
+
+    errors <- c(errors, cli::format_inline("{.field screened} must be TRUE or FALSE"))
 
   }
 
@@ -2143,9 +2160,16 @@ print.horizons_data <- function(x, ...) {
     n_success <- sum(eval_res$status == "success", na.rm = TRUE)
     n_total   <- nrow(eval_res)
 
+    ## fit()'s cold start records its one configuration without evaluating it (#45)
+    evaluated_label <- if (isFALSE(x$evaluation$screened)) {
+      paste0("none (fit() started cold from ", n_total, ")")
+    } else {
+      n_total
+    }
+
     has_models <- !is.null(x$models$workflows)
 
-    cat(paste0("   \u251C\u2500 Configs evaluated: ", n_total, "\n"))
+    cat(paste0("   \u251C\u2500 Configs evaluated: ", evaluated_label, "\n"))
     cat(paste0("   \u251C\u2500 Successful: ", n_success, "\n"))
 
     ## Best config
@@ -2585,7 +2609,14 @@ summary.horizons_data <- function(object, ...) {
     n_failed  <- sum(eval_res$status == "failed", na.rm = TRUE)
     n_total   <- nrow(eval_res)
 
-    cat(paste0("   \u251C\u2500 Configs evaluated: ", n_total, "\n"))
+    ## fit()'s cold start records its one configuration without evaluating it (#45)
+    evaluated_label <- if (isFALSE(x$evaluation$screened)) {
+      paste0("none (fit() started cold from ", n_total, ")")
+    } else {
+      n_total
+    }
+
+    cat(paste0("   \u251C\u2500 Configs evaluated: ", evaluated_label, "\n"))
     cat(paste0("   \u251C\u2500 Results: ",
                cli::col_green(paste0(n_success, " success")), ", ",
                n_pruned, " pruned, ",

@@ -235,26 +235,22 @@ evaluate <- function(x,
   ## -----------------------------------------------------------------------
   ## Step 4: Create train/test split
   ## -----------------------------------------------------------------------
+  ## The draw is shared with fit()'s cold start (#45), which must hold out
+  ## the rows this verb would at the same seed. `analysis` has had its NA
+  ## outcomes dropped already; the helper's own pass over it then drops
+  ## nothing and returns it uncopied, so the split shares its rows.
 
-  set.seed(seed)
+  drawn <- draw_eval_split(analysis, outcome_col, seed)
+  split <- drawn$split
 
-  split <- tryCatch(
-    rsample::initial_split(analysis, prop = SPLIT_PROP, strata = dplyr::all_of(outcome_col)),
-    error = function(e) {
+  if (!drawn$stratified && verbose) {
 
-      if (verbose) {
+    cat(paste0(
+      "\u2502  ", cli::col_yellow("Stratified split failed, ",
+                                   "retrying without strata"), "\n"
+    ))
 
-        cat(paste0(
-          "\u2502  ", cli::col_yellow("Stratified split failed, ",
-                                       "retrying without strata"), "\n"
-        ))
-
-      }
-
-      rsample::initial_split(analysis, prop = SPLIT_PROP)
-
-    }
-  )
+  }
 
   train_data <- rsample::training(split)
   test_data  <- rsample::testing(split)
@@ -886,6 +882,7 @@ evaluate <- function(x,
     results      = all_results,
     best_config  = best_config_id,
     rank_metric  = metric,
+    screened     = TRUE,
     split        = split,
     n_train      = n_train,
     n_test       = n_test,
@@ -1431,6 +1428,58 @@ outcome_complete_rows <- function(analysis, outcome_col) {
     data      = if (any(na_mask)) analysis[!na_mask, , drop = FALSE] else analysis,
     n_dropped = sum(na_mask)
   )
+
+}
+
+## ---------------------------------------------------------------------------
+## draw_eval_split — the one train/test draw evaluate() and fit() share
+## ---------------------------------------------------------------------------
+
+#' Draw evaluate()'s train/test split
+#'
+#' @description
+#' The split `evaluate()` scores on and `fit()` reuses: the rows with an
+#' observed outcome ([outcome_complete_rows()]), then `set.seed(seed)`, then
+#' a `SPLIT_PROP` split stratified on the outcome, falling back to an
+#' unstratified one when stratifying fails. `fit()` calls it when it starts
+#' cold from a configured object with one configuration (#45), so that fit
+#' holds out exactly the rows `evaluate()` would have at the same seed. The
+#' draw was inline in `evaluate()` before, and it is unchanged.
+#'
+#' It seeds the global RNG, as `evaluate()` always has: `evaluate()`'s CV
+#' folds are drawn from the state it leaves.
+#'
+#' @param analysis Data frame. The object's analysis table. Rows whose
+#'   outcome is `NA` are dropped here; a table the callers have already
+#'   filtered for their sample-size gate passes through uncopied.
+#' @param outcome_col Character. Name of the outcome column.
+#' @param seed Integer. The seed passed to `evaluate()` (or to `fit()` on a
+#'   cold start).
+#' @return List with `split` (the `rsplit`), `n_dropped` (integer, the rows
+#'   whose outcome is `NA`) and `stratified` (`FALSE` when the stratified
+#'   draw failed and the split is unstratified). Aborts as
+#'   [outcome_complete_rows()] does.
+#' @keywords internal
+#' @noRd
+draw_eval_split <- function(analysis, outcome_col, seed) {
+
+  modelled   <- outcome_complete_rows(analysis, outcome_col)
+  stratified <- TRUE
+
+  set.seed(seed)
+
+  split <- tryCatch(
+    rsample::initial_split(modelled$data, prop = SPLIT_PROP,
+                           strata = dplyr::all_of(outcome_col)),
+    error = function(e) {
+
+      stratified <<- FALSE
+      rsample::initial_split(modelled$data, prop = SPLIT_PROP)
+
+    }
+  )
+
+  list(split = split, n_dropped = modelled$n_dropped, stratified = stratified)
 
 }
 

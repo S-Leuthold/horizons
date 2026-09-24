@@ -1360,3 +1360,180 @@ describe("fit() - selection provenance", {
   })
 
 })
+
+
+## =========================================================================
+## Cold start: a configured object with one configuration (#45)
+## =========================================================================
+## With one configuration there is nothing for evaluate() to screen, so fit()
+## takes the configured object, draws the split evaluate() would draw at the
+## same seed, and re-tunes from a space-filling grid where evaluate()'s
+## parameters would otherwise seed it.
+
+describe("fit() - cold start from one configuration (#45)", {
+
+  ## make_eval_object() is configured, not evaluated (helper-fixtures.R)
+  obj <- make_eval_object(n = 60, n_configs = 1)
+  obj$config$tuning$final_bayesian_iter <- 0L
+
+  cold_out <- utils::capture.output(
+    cold <- suppressWarnings(
+      fit(obj, compute_uq = FALSE, compute_ad = FALSE, verbose = TRUE, seed = 42L)
+    )
+  )
+
+  ## The same configuration through evaluate(), at the same seed
+  ev <- suppressWarnings(evaluate(obj, prune = FALSE, verbose = FALSE, seed = 42L))
+
+  warm_out <- utils::capture.output(
+    warm <- suppressWarnings(
+      fit(ev, compute_uq = FALSE, compute_ad = FALSE, verbose = TRUE, seed = 42L)
+    )
+  )
+
+  it("fits a configured object without evaluate(), and predict() works on it", {
+
+    expect_identical(class(cold), c("horizons_fit", "horizons_eval", "horizons_data", "list"))
+    expect_identical(validate_horizons_fit(cold), cold)
+    expect_identical(names(cold$models$workflows), "cfg_001")
+
+    new_data <- obj$data$analysis[1:5, setdiff(names(obj$data$analysis), "SOC")]
+    p        <- predict(cold, new_data, interval = FALSE)
+
+    expect_identical(p$sample_id, new_data$sample_id)
+    expect_true(all(is.finite(p$.pred)))
+
+  })
+
+  it("records an unscreened evaluation: one not_evaluated row, no CV, no parameters", {
+
+    rec <- cold$evaluation
+
+    expect_false(rec$screened)
+    expect_identical(rec$best_config, "cfg_001")
+    expect_identical(rec$rank_metric, "rpd")
+    expect_identical(rec$results$config_id, "cfg_001")
+    expect_identical(rec$results$status, "not_evaluated")
+    expect_true(all(is.na(unlist(rec$results[paste0("cv_", c("rmse", "rrmse", "rsq", "ccc", "rpd", "mae"))]))))
+    expect_null(rec$results$best_params[[1]])
+    expect_equal(rec$n_train + rec$n_test, 60)
+
+  })
+
+  it("holds out the rows evaluate() holds out at the same seed", {
+
+    expect_identical(cold$evaluation$split$in_id, ev$evaluation$split$in_id)
+    expect_identical(rsample::testing(cold$models$split)$sample_id,
+                     rsample::testing(ev$evaluation$split)$sample_id)
+    expect_identical(rsample::testing(cold$models$split)$sample_id,
+                     rsample::testing(warm$models$split)$sample_id)
+
+  })
+
+  it("holds out evaluate()'s rows when some outcomes are NA", {
+
+    with_na <- obj
+    with_na$data$analysis$SOC[c(2, 9, 30)] <- NA_real_
+
+    cold_na <- suppressWarnings(
+      fit(with_na, compute_uq = FALSE, compute_ad = FALSE, verbose = FALSE, seed = 7L)
+    )
+    ev_na <- suppressWarnings(
+      evaluate(with_na, prune = FALSE, verbose = FALSE, seed = 7L)
+    )
+
+    expect_identical(cold_na$models$split$data, ev_na$evaluation$split$data)
+    expect_identical(cold_na$models$split$in_id, ev_na$evaluation$split$in_id)
+
+  })
+
+  it("prints and records the space-filling start", {
+
+    expect_true(any(grepl("Cold start: no warm-start parameters; space-filling grid of 2 points",
+                          cold_out, fixed = TRUE)))
+    expect_false(cold$models$results$warm_start)
+    expect_identical(cold$models$results$start_grid_points, 2L)
+
+  })
+
+  it("records a warm start on the evaluate() path and prints no space-filling note", {
+
+    expect_true(warm$models$results$warm_start)
+    expect_false(any(grepl("space-filling", warm_out, fixed = TRUE)))
+
+  })
+
+  it("says in the tree that it started cold from a configured object", {
+
+    expect_true(any(grepl("Cold start: 1 configuration, not screened by evaluate()",
+                          cold_out, fixed = TRUE)))
+    expect_true(any(grepl("horizons_data → horizons_fit", cold_out, fixed = TRUE)))
+    expect_false(any(grepl("Cold start", warm_out, fixed = TRUE)))
+
+  })
+
+  it("prints and summarises the record as unevaluated", {
+
+    label <- "Configs evaluated: none (fit() started cold from 1)"
+
+    expect_true(any(grepl(label, utils::capture.output(print(cold)), fixed = TRUE)))
+    expect_true(any(grepl(label, utils::capture.output(summary(cold)), fixed = TRUE)))
+    expect_false(any(grepl(label, utils::capture.output(print(warm)), fixed = TRUE)))
+
+  })
+
+  ## Degradation compares the test RPD with fit()'s own out-of-fold CV on the
+  ## fit rows, not with evaluate()'s, so a cold start has what the check needs.
+  it("checks degradation against its own cross-validation, which a cold start has", {
+
+    res <- cold$models$results
+
+    expect_true(is.finite(res$cv_rpd_mean))
+    expect_true(is.finite(res$cv_rpd_se))
+    expect_type(res$degraded, "logical")
+    expect_false(is.na(res$degraded))
+
+  })
+
+  it("re-fits a cold-started fit as a cold start", {
+
+    again <- suppressWarnings(
+      fit(cold, compute_uq = FALSE, compute_ad = FALSE, verbose = FALSE, seed = 42L)
+    )
+
+    expect_s3_class(again, "horizons_fit")
+    expect_false(again$evaluation$screened)
+    expect_identical(again$models$split$in_id, cold$models$split$in_id)
+
+  })
+
+  it("is refused by ensemble(), as any single-member fit is", {
+
+    expect_error(ensemble(cold, verbose = FALSE), "at least 2 members")
+
+  })
+
+  it("refuses more than one configuration, naming evaluate()", {
+
+    two <- make_eval_object(n = 60, n_configs = 2)
+
+    err <- expect_error(fit(two, verbose = FALSE), class = "horizons_input_error")
+
+    msg <- gsub("\\s+", " ", conditionMessage(err))   # undo cli line wrapping
+    expect_match(msg, "2 configurations", fixed = TRUE)
+    expect_match(msg, "evaluate()", fixed = TRUE)
+
+  })
+
+  it("refuses a configured object with no configuration, or an unknown metric", {
+
+    none <- obj
+    none$config$configs <- obj$config$configs[0, ]
+
+    expect_error(fit(none, verbose = FALSE), "configure()", class = "horizons_input_error")
+    expect_error(fit(obj, metric = "accuracy", verbose = FALSE), "accuracy",
+                 class = "horizons_input_error")
+
+  })
+
+})
