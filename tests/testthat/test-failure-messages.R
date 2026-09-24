@@ -35,6 +35,48 @@ warning_recipe <- function(config_row, train_data, role_map, ...) {
 
 }
 
+## Fails only on more rows than a cross-validation analysis set holds (about
+## 20 here), so tuning succeeds and only last_fit()'s final fit on the whole
+## training set (about 30) fails.
+fail_on_full_training <- function(x) {
+
+  if (length(x) > 25) stop("boom on the full training set")
+
+  x
+
+}
+
+test_set_failing_recipe <- function(config_row, train_data, role_map, ...) {
+
+  recipes::recipe(SOC ~ ., data = train_data) |>
+    recipes::update_role("sample_id", new_role = "id") |>
+    recipes::step_mutate(boom = fail_on_full_training(wn_4000))
+
+}
+
+## A tune_results-shaped object with hand-written notes, one tibble per fold.
+fake_tune_results <- function(...) {
+
+  folds <- list(...)
+
+  x <- tibble::tibble(
+    id     = paste0("Fold", seq_along(folds)),
+    .notes = lapply(folds, function(f) {
+      tibble::tibble(location = "preprocessor 1/1", type = f$type, note = f$note)
+    })
+  )
+
+  class(x) <- c("tune_results", class(x))
+  x
+
+}
+
+fold_notes <- function(type = character(0), note = character(0)) {
+
+  list(type = type, note = note)
+
+}
+
 make_failure_setup <- function(n = 40, n_wn = 10) {
 
   set.seed(96)
@@ -323,16 +365,40 @@ describe("evaluate_single_config() records the warnings tune kept in .notes", {
 
   })
 
-  it("records each distinct note once, with how many folds raised it", {
+  it("records each message once across the captured warnings, CV and the test set", {
 
     local_mocked_bindings(build_recipe = warning_recipe, .package = "horizons")
 
-    warns <- run_evaluate("elastic_net", setup)$warnings[[1]]
-    noted <- grep("Non-positive values in selected variable", warns,
-                  fixed = TRUE, value = TRUE)
+    ## rf preps the recipe outside tune to finalize mtry, so the same warning
+    ## arrives captured in full, as a note from every fold, and as a note
+    ## from the final fit on the test set.
+    warns <- run_evaluate("rf", setup)$warnings[[1]]
 
-    expect_identical(anyDuplicated(warns), 0L)
-    expect_true(any(grepl("(3 of 3 folds)", noted, fixed = TRUE)))
+    non_positive <- grep("Non-positive values in selected variable", warns, fixed = TRUE)
+    no_box_cox   <- grep("No Box-Cox transformation could be estimated", warns, fixed = TRUE)
+
+    expect_length(non_positive, 1L)
+    expect_length(no_box_cox, 1L)
+    expect_match(warns[non_positive], "(3 of 3 folds; test set)", fixed = TRUE)
+
+    ## One line, cleaned: no cli wrapping or bullets survive.
+    expect_false(any(grepl("\n", warns)))
+
+  })
+
+  it("records why the final fit on the test set failed", {
+
+    local_mocked_bindings(build_recipe = test_set_failing_recipe, .package = "horizons")
+
+    result <- run_evaluate("elastic_net", setup)
+
+    ## Tuning succeeded and the test metrics are missing; the cause used to
+    ## be only in last_fit()'s .notes.
+    expect_true(is.na(result$rmse))
+    expect_true(
+      "Test-set fit failed: boom on the full training set (in `step_mutate()`)" %in%
+        result$warnings[[1]]
+    )
 
   })
 
@@ -366,6 +432,10 @@ describe("fit_single_config() records the cause of a recipe step error", {
     expect_match(result$error_message,
                  "boom from step (in `step_mutate()`; 3 of 3 folds)", fixed = TRUE)
 
+    ## The re-tune started before it failed, so how it started is recorded.
+    expect_false(result$warm_start)
+    expect_false(is.na(result$start_grid_size))
+
   })
 
 })
@@ -383,6 +453,122 @@ describe("fit_single_config() records the warnings tune kept in .notes", {
     expect_identical(result$status, "success")
     expect_true(any(grepl("Non-positive values in selected variable.*of 3 folds",
                           result$warnings)))
+
+  })
+
+  it("records each message once across the captured warnings, re-tune and OOF folds", {
+
+    local_mocked_bindings(build_recipe = warning_recipe, .package = "horizons")
+
+    ## Step 9's fold metrics run outside the capture, so yardstick's
+    ## constant-estimate warning reaches the caller; it is not under test.
+    warns <- suppressWarnings(run_fit("rf", setup))$warnings
+
+    non_positive <- grep("Non-positive values in selected variable", warns, fixed = TRUE)
+
+    expect_length(non_positive, 1L)
+    expect_match(warns[non_positive], "(3 of 3 folds)", fixed = TRUE)
+    expect_false(any(grepl("\n", warns)))
+
+  })
+
+})
+
+## ---------------------------------------------------------------------------
+## The note readers, on hand-written notes
+## ---------------------------------------------------------------------------
+
+describe("tune_note_messages() and tune_failure_cause()", {
+
+  results <- fake_tune_results(
+    fold_notes(c("warning", "warning", "warning", "error"),
+               c("w common", "w common", "rare", "e main")),
+    fold_notes(c("warning", "warning", "error"),
+               c("w common", "40 samples were requested but there were 20 rows", "e main")),
+    fold_notes(c("warning", "warning", "error"),
+               c("w common", "40 samples were requested but there were 21 rows", "e other"))
+  )
+
+  it("gives one line per distinct message, most frequent first, with its folds", {
+
+    expect_identical(
+      tune_note_messages(results, type = "warning"),
+      c("w common (3 of 3 folds)",
+        "40 samples were requested but there were 20 rows (2 of 3 folds; numbers vary)",
+        "rare (1 of 3 folds)")
+    )
+
+  })
+
+  it("names the most frequent error and counts the others", {
+
+    expect_identical(tune_failure_cause(results),
+                     "e main (2 of 3 folds), plus 1 other distinct error")
+
+  })
+
+  it("reads a rendered error chain in a note", {
+
+    chained <- fake_tune_results(
+      fold_notes("error", "Error in `step_mutate()`:\nCaused by error in `s()`:\n! boom"),
+      fold_notes()
+    )
+
+    expect_identical(tune_failure_cause(chained), "boom (in `step_mutate()`; 1 of 2 folds)")
+
+  })
+
+  it("is empty when there are no notes of the type", {
+
+    quiet <- fake_tune_results(fold_notes("warning", "only a warning"), fold_notes())
+
+    expect_identical(tune_note_messages(quiet, type = "error"), character(0))
+    expect_null(tune_failure_cause(quiet))
+    expect_identical(tune_note_messages(list(), type = "warning"), character(0))
+
+  })
+
+})
+
+describe("render_warning_log()", {
+
+  it("merges a captured warning with the same message from notes and the test set", {
+
+    cv <- fake_tune_results(fold_notes("warning", "careful: 3 columns"),
+                            fold_notes("warning", "careful: 3 columns"))
+
+    last_fit_notes <- fake_tune_results(fold_notes("warning", "careful: 3 columns"))
+    last_fit_notes$id <- NULL
+
+    log <- dplyr::bind_rows(
+      text_records(list("! careful:\n3 columns", "! careful:\n3 columns")),
+      tune_note_records(cv, "warning", scope = "cv"),
+      tune_note_records(last_fit_notes, "warning", scope = "test set")
+    )
+
+    expect_identical(render_warning_log(log), "careful: 3 columns (2 of 2 folds; test set)")
+
+  })
+
+  it("shows the notices, the five most frequent messages, and counts the rest", {
+
+    log <- dplyr::bind_rows(
+      text_records(c(rep("often", 5), rep("second", 4), rep("third", 3),
+                     "a", "b", "c", "d")),
+      text_records("a package notice", pinned = TRUE)
+    )
+
+    expect_identical(
+      render_warning_log(log),
+      c("a package notice", "often", "second", "third", "a", "b",
+        "2 more distinct warnings not shown.")
+    )
+
+  })
+
+  it("is NULL when there is nothing to report", {
+
+    expect_null(render_warning_log(new_warning_log()))
 
   })
 
