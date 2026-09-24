@@ -728,18 +728,16 @@ fit <- function(x,
 
     }
 
-    ## Best test RPD
-    success_rows <- results_tibble[results_tibble$status == "success", ]
+    ## The CV-selected member's test RPD. The best test RPD across members
+    ## would be a best-of-N on the held-out rows, and could name a different
+    ## config from models$best_config.
+    if (!is.na(best_config)) {
 
-    if (nrow(success_rows) > 0) {
-
-      best_idx <- which.max(success_rows$rpd)
-      best_rpd <- success_rows$rpd[best_idx]
-      best_id  <- success_rows$config_id[best_idx]
+      best_rpd <- results_tibble$rpd[results_tibble$config_id == best_config]
 
       cat(paste0(
-        "\u2502  \u251C\u2500 Best test RPD: ", best_id,
-        " (", round(best_rpd, 2), ")\n"
+        "\u2502  \u251C\u2500 CV-selected: ", best_config,
+        " (test RPD ", round(best_rpd, 2), ")\n"
       ))
 
     }
