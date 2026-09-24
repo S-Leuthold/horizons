@@ -338,6 +338,13 @@ describe("evaluate_single_config() - pruning", {
 
   })
 
+  it("records the gate's reading and the threshold it was taken against", {
+
+    expect_identical(result$below_prune_threshold, TRUE)
+    expect_identical(result$prune_threshold, 9999)
+
+  })
+
 })
 
 ## =========================================================================
@@ -491,6 +498,33 @@ describe("evaluate_single_config() - prune gate at bayesian_iter = 0 (#38)", {
   it("labels the config a success, since no Bayesian stage was skipped", {
 
     expect_equal(result$status, "success")
+
+  })
+
+  it("still records that the config fell below the threshold", {
+
+    ## The quality signal is kept apart from the status label, so fit() can
+    ## warn at bayesian_iter = 0, where nothing is pruned.
+    expect_identical(result$below_prune_threshold, TRUE)
+    expect_identical(result$prune_threshold, 9999)
+
+  })
+
+  it("records no reading when prune = FALSE", {
+
+    unpruned <- suppressWarnings(evaluate_single_config(
+      config_row    = config,
+      split         = setup$split,
+      cv_folds      = setup$folds,
+      role_map      = setup$role_map,
+      grid_size     = 2,
+      bayesian_iter = 0,
+      prune         = FALSE,
+      seed          = 42L
+    ))
+
+    expect_identical(unpruned$below_prune_threshold, NA)
+    expect_identical(unpruned$prune_threshold, NA_real_)
 
   })
 

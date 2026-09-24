@@ -393,6 +393,57 @@ describe("evaluate() - checkpointing", {
 
   })
 
+  ## Rows checkpointed before the prune gate went inert at bayesian_iter = 0
+  ## carry "pruned" where a fresh run now says "success", so without the
+  ## relabel the candidate pool would depend on whether the run was resumed.
+  it("relabels resumed 'pruned' rows as successes when bayesian_iter = 0 (#38)", {
+
+    obj <- make_eval_object(n_configs = 2)
+    obj$config$tuning$bayesian_iter <- 1L
+
+    tmpdir <- tempfile("eval_ckpt_relabel_")
+    dir.create(tmpdir)
+    on.exit(unlink(tmpdir, recursive = TRUE))
+
+    ## A first run that prunes both, standing in for the old code's rows
+    first <- suppressWarnings(evaluate(obj, prune_threshold = 9999,
+                                       output_dir = tmpdir, verbose = FALSE,
+                                       seed = 42L))
+    expect_true(all(first$evaluation$results$status == "pruned"))
+
+    ## Rows written before the gate's reading was recorded do not carry it
+    strip <- function(rows) {
+      rows$below_prune_threshold <- NULL
+      rows$prune_threshold       <- NULL
+      rows
+    }
+
+    for (f in list.files(file.path(tmpdir, "checkpoints"), full.names = TRUE)) {
+      saveRDS(strip(readRDS(f)), f)
+    }
+
+    single_file <- file.path(tmpdir, "eval_checkpoint.rds")
+    single      <- readRDS(single_file)
+    stripped    <- strip(single)
+    attr(stripped, "data_hash")   <- attr(single, "data_hash")
+    attr(stripped, "data_n_rows") <- attr(single, "data_n_rows")
+    saveRDS(stripped, single_file)
+
+    obj$config$tuning$bayesian_iter <- 0L
+
+    resumed <- suppressWarnings(evaluate(obj, prune_threshold = 9999,
+                                         output_dir = tmpdir, verbose = FALSE,
+                                         seed = 42L))
+    res <- resumed$evaluation$results
+
+    ## Resumed, not re-run
+    expect_equal(res$runtime_secs, first$evaluation$results$runtime_secs)
+
+    expect_true(all(res$status == "success"))
+    expect_true(all(res$below_prune_threshold))
+
+  })
+
 })
 
 ## =========================================================================

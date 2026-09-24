@@ -27,9 +27,12 @@
 #' The members are the top `n_best` of the configurations `evaluate()` chose
 #' `best_config` from, ranked by the same rule: the ones that succeeded or,
 #' when none did, the pruned ones that carry a cross-validated value of
-#' `metric`. Fitting pruned configurations warns, with class
-#' `horizons_pruned_fallback_warning`, because none passed the prune gate.
-#' If every member fails, `fit()` aborts with class
+#' `metric`. When every member fell below `evaluate()`'s `prune_threshold`
+#' (`evaluation$results$below_prune_threshold`), `fit()` warns with class
+#' `horizons_below_threshold_warning`, naming the threshold and the members'
+#' cross-validated RPD; that includes `bayesian_iter = 0`, where nothing is
+#' pruned. When the members are pruned configurations the warning also
+#' carries class `horizons_pruned_fallback_warning`. If every member fails, `fit()` aborts with class
 #' `horizons_all_members_failed`, listing the distinct error messages; the
 #' per-member results travel on the condition as `results`, and
 #' `models$results` keeps each member's `error_message` when some succeed.
@@ -156,16 +159,6 @@ fit <- function(x,
 
   }
 
-  if (candidates$fallback) {
-
-    cli::cli_warn(c(
-      "!" = "No configuration passed {.fn evaluate}'s prune gate, so {.fn fit} is fitting pruned configurations.",
-      "i" = "Each had a grid-search RPD below {.arg prune_threshold}, so it skipped Bayesian optimization; {.fn evaluate} chose {.field best_config} from them for the same reason.",
-      "i" = "They are ranked on {.field {rank_column}} as usual. Check their metrics before relying on the fit."
-    ), class = "horizons_pruned_fallback_warning")
-
-  }
-
   ranked <- rank_configs_by_cv(candidates$rows, rank_metric)
 
   ## Cap n_best at available candidates
@@ -192,6 +185,12 @@ fit <- function(x,
   }
 
   top_configs <- ranked[seq_len(n_best), ]
+
+  ## Say so when every member fell below evaluate()'s prune threshold. The
+  ## pruned fallback is one case; the other is bayesian_iter = 0, where the
+  ## gate skips nothing, so below-threshold configs are successes and nothing
+  ## else would say that none cleared the bar (#38).
+  warn_members_below_threshold(top_configs, fallback = candidates$fallback)
 
   ## Extract references
   role_map     <- x$data$role_map
@@ -844,6 +843,85 @@ abort_all_members_failed <- function(results, call = rlang::caller_env()) {
     if (n_more > 0) c("i" = "{n_more} more distinct error message{?s} not shown."),
     "i" = "The per-member results, error messages included, are on this condition as {.field results}."
   ), class = "horizons_all_members_failed", results = results, call = call)
+
+}
+
+## ---------------------------------------------------------------------------
+## warn_members_below_threshold \u2014 no member cleared the prune threshold
+## ---------------------------------------------------------------------------
+
+#' Warn when every member fell below evaluate()'s prune threshold
+#'
+#' @description
+#' `evaluate()` records the prune gate's reading on every row as
+#' `below_prune_threshold` whenever `prune = TRUE`, apart from the status,
+#' which says only whether Bayesian refinement was skipped (#38). `fit()`
+#' warns, with class `horizons_below_threshold_warning`, when every member it
+#' is about to fit fell below the threshold, naming the threshold and each
+#' member's cross-validated RPD. Without this, `bayesian_iter = 0` would fit
+#' below-threshold configurations silently, since nothing is pruned there.
+#' When the members are pruned configurations (the fallback, because none
+#' succeeded) the one warning also carries class
+#' `horizons_pruned_fallback_warning` and says so.
+#'
+#' A pruned row counts as below the threshold whether or not it carries the
+#' column, since the gate put it there. A row with no reading (`prune =
+#' FALSE`, or written before the column existed) does not, so one such member
+#' keeps the warning from firing.
+#'
+#' @param members The member rows (`evaluation$results` shape).
+#' @param fallback Logical. Whether the members are pruned configurations
+#'   because none succeeded.
+#' @return Invisibly `NULL`. Called for the warning.
+#' @keywords internal
+#' @noRd
+warn_members_below_threshold <- function(members, fallback) {
+
+  n_members <- nrow(members)
+  below     <- members$below_prune_threshold %||% rep(NA, n_members)
+  below     <- below | members$status %in% "pruned"
+
+  if (n_members == 0 || !isTRUE(all(below))) return(invisible(NULL))
+
+  thresholds <- unique(stats::na.omit(members$prune_threshold %||% NA_real_))
+
+  threshold_text <- if (length(thresholds) == 0) {
+    "the prune threshold (not recorded on these rows)"
+  } else {
+    paste0("the prune threshold of ", paste(format(thresholds), collapse = " and "))
+  }
+
+  cv_rpd  <- members$cv_rpd %||% rep(NA_real_, n_members)
+  cv_text <- paste0(members$config_id, " ",
+                    ifelse(is.na(cv_rpd), "NA", formatC(cv_rpd, digits = 2, format = "f")),
+                    collapse = ", ")
+
+  header <- if (fallback) {
+    "No configuration passed {.fn evaluate}'s prune gate, so {.fn fit} is fitting pruned configurations."
+  } else {
+    "Every configuration {.fn fit} is fitting fell below {.fn evaluate}'s prune threshold."
+  }
+
+  why <- if (fallback) {
+    "Pruned configurations skipped Bayesian optimization; {.fn evaluate} chose {.field best_config} from them for the same reason."
+  } else {
+    "None was pruned because there was no Bayesian stage to skip ({.code bayesian_iter = 0}), so they ranked as successes."
+  }
+
+  ## The config ids and numbers are the package's, but the text is built
+  ## outside cli, so it is escaped rather than trusted as a template.
+  cli::cli_warn(c(
+    "!" = header,
+    "i" = cli_escape(paste0(
+      "Their grid-search RPD fell below ", threshold_text,
+      ". Cross-validated RPD: ", cv_text, "."
+    )),
+    "i" = why,
+    "i" = "Check their metrics before relying on the fit."
+  ), class = c(if (fallback) "horizons_pruned_fallback_warning",
+               "horizons_below_threshold_warning"))
+
+  invisible(NULL)
 
 }
 

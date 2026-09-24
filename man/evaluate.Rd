@@ -31,7 +31,10 @@ held-out estimates. Default \code{"rpd"}.}
 \item{prune}{Logical. If TRUE, skip Bayesian optimization for configs
 whose grid-search RPD falls below \code{prune_threshold}. When \code{configure()}
 set \code{bayesian_iter = 0} there is nothing to skip, so no config is
-pruned. Default TRUE.}
+pruned. Either way, whether each config fell below the threshold is
+recorded in \code{evaluation$results$below_prune_threshold} (with the
+threshold in \code{prune_threshold}), and \code{fit()} warns when every member it
+fits did. Default TRUE.}
 
 \item{prune_threshold}{Numeric. RPD threshold for pruning. Configs with
 grid-search RPD below this value skip Bayesian optimization but still

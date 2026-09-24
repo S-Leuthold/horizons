@@ -18,7 +18,10 @@
 #' @param prune Logical. If TRUE, skip Bayesian optimization for configs
 #'   whose grid-search RPD falls below `prune_threshold`. When `configure()`
 #'   set `bayesian_iter = 0` there is nothing to skip, so no config is
-#'   pruned. Default TRUE.
+#'   pruned. Either way, whether each config fell below the threshold is
+#'   recorded in `evaluation$results$below_prune_threshold` (with the
+#'   threshold in `prune_threshold`), and `fit()` warns when every member it
+#'   fits did. Default TRUE.
 #' @param prune_threshold Numeric. RPD threshold for pruning. Configs with
 #'   grid-search RPD below this value skip Bayesian optimization but still
 #'   receive test-set metrics from grid-search best. Default 1.0 (the
@@ -806,6 +809,26 @@ evaluate <- function(x,
   for (cv_col in paste0("cv_", c("rmse", "rrmse", "rsq", "ccc", "rpd", "mae"))) {
 
     if (!cv_col %in% names(all_results)) all_results[[cv_col]] <- NA_real_
+
+  }
+
+  ## Likewise the prune gate's reading, which rows written before it was
+  ## recorded (#38) do not carry.
+  if (!"below_prune_threshold" %in% names(all_results)) all_results$below_prune_threshold <- NA
+  if (!"prune_threshold" %in% names(all_results)) all_results$prune_threshold <- NA_real_
+
+  ## At bayesian_iter = 0 the gate skips nothing, so a "pruned" row ran
+  ## exactly what a success runs (#38). Rows checkpointed before that fix
+  ## still carry the label, and a resumed run would rank them only as a
+  ## fallback where a fresh run ranks them with the rest. Relabel them here,
+  ## once checkpointed and new rows are combined, rather than in the loader;
+  ## below_prune_threshold keeps what the label said about quality.
+  if (isTRUE(tuning$bayesian_iter == 0)) {
+
+    inert_pruned <- all_results$status %in% "pruned"
+
+    all_results$below_prune_threshold[inert_pruned] <- TRUE
+    all_results$status[inert_pruned]                <- "success"
 
   }
 

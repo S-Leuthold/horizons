@@ -19,10 +19,11 @@
 #' @param grid_size Integer. Number of grid points for `tune_grid()`.
 #' @param bayesian_iter Integer. Iterations for `tune_bayes()`. Set to 0 to
 #'   skip Bayesian optimization entirely.
-#' @param prune Logical. If TRUE, skip Bayesian optimization when the best
-#'   grid-search RPD falls below `prune_threshold`, and label the config
-#'   `"pruned"`. A no-op when `bayesian_iter` is 0, since there is nothing to
-#'   skip.
+#' @param prune Logical. If TRUE, record whether the best grid-search RPD
+#'   falls below `prune_threshold` (`below_prune_threshold`), and when it
+#'   does, skip Bayesian optimization and label the config `"pruned"`. With
+#'   `bayesian_iter = 0` there is nothing to skip, so the config is labelled
+#'   `"success"` and only `below_prune_threshold` carries the reading.
 #' @param prune_threshold Numeric. RPD threshold for pruning, on the original
 #'   response scale (tuning metrics are scored there via
 #'   `tuning_metric_set()`). Only used when `prune = TRUE`. Default 1.0, as
@@ -39,7 +40,10 @@
 #'   single-split rsets become `"everything"`).
 #' @param seed Integer. Random seed for reproducibility.
 #'
-#' @return Single-row tibble with columns: `config_id`, `status`, the six
+#' @return Single-row tibble with columns: `config_id`, `status` (`"pruned"`
+#'   means Bayesian refinement was skipped), `below_prune_threshold` (logical;
+#'   `NA` when `prune = FALSE`), `prune_threshold` (the threshold that reading
+#'   was taken against; `NA` when `prune = FALSE`), the six
 #'   test-set metrics `rmse`, `rrmse`, `rsq`, `ccc`, `rpd`, `mae`, the six
 #'   cross-validated means at the selected hyperparameters `cv_rmse`,
 #'   `cv_rrmse`, `cv_rsq`, `cv_ccc`, `cv_rpd`, `cv_mae` (what `evaluate()` and
@@ -257,21 +261,25 @@ evaluate_single_config <- function(config_row,
   ## the same thing for every transformation.
   ## The config still gets last_fit metrics from grid-search best.
   ##
-  ## With bayesian_iter = 0 there is no Bayesian stage to skip, so the gate
-  ## does not run and the config is a success. It used to be labelled
-  ## "pruned" anyway, which evaluate() and fit() rank only as a fallback (#38).
+  ## The quality signal and the status label are kept apart (#38). Whenever
+  ## prune = TRUE the gate's reading is recorded as below_prune_threshold,
+  ## which fit() reads to warn when every member it fits fell below it. The
+  ## "pruned" status means only that Bayesian refinement was skipped, so with
+  ## bayesian_iter = 0, where there is nothing to skip, a config below the
+  ## threshold is a success. It used to be labelled "pruned" anyway, which
+  ## evaluate() and fit() rank only as a fallback.
 
-  skip_bayesian <- FALSE
+  skip_bayesian         <- FALSE
+  below_prune_threshold <- NA
 
-  if (prune && bayesian_iter > 0) {
+  if (prune) {
 
     best_grid <- tune::show_best(grid_results, metric = "rpd", n = 1)
 
-    if (!is.finite(best_grid$mean[1]) || best_grid$mean[1] < prune_threshold) {
+    below_prune_threshold <- !is.finite(best_grid$mean[1]) ||
+      best_grid$mean[1] < prune_threshold
 
-      skip_bayesian <- TRUE
-
-    }
+    skip_bayesian <- below_prune_threshold && bayesian_iter > 0
 
   }
 
@@ -486,6 +494,8 @@ evaluate_single_config <- function(config_row,
   tibble::tibble(
     config_id     = config_id,
     status        = if (skip_bayesian) "pruned" else "success",
+    below_prune_threshold = below_prune_threshold,
+    prune_threshold       = if (prune) as.numeric(prune_threshold) else NA_real_,
     rmse          = test_metrics$rmse   %||% NA_real_,
     rrmse         = test_metrics$rrmse  %||% NA_real_,
     rsq           = test_metrics$rsq    %||% NA_real_,

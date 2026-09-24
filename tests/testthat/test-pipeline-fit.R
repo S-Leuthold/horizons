@@ -997,7 +997,20 @@ describe("fit() - an evaluation with only pruned configs (#38)", {
       class = "horizons_pruned_fallback_warning"
     )
 
-    expect_match(conditionMessage(w), "prune gate", fixed = TRUE)
+    ## One warning, carrying both classes: pruned members are below the
+    ## threshold by definition. It names the threshold and each member's cv RPD.
+    msg <- gsub("\\s+", " ", conditionMessage(w))   # undo cli line wrapping
+
+    expect_s3_class(w, "horizons_below_threshold_warning")
+    expect_match(msg, "prune gate", fixed = TRUE)
+    expect_match(msg, "prune threshold of 9999", fixed = TRUE)
+
+    res <- pruned$evaluation$results
+
+    for (i in seq_len(nrow(res))) {
+      expect_match(msg, paste0(res$config_id[i], " ", formatC(res$cv_rpd[i], digits = 2, format = "f")),
+                   fixed = TRUE)
+    }
 
     expected <- rank_configs_by_cv(pruned$evaluation$results,
                                    pruned$evaluation$rank_metric)$config_id
@@ -1017,6 +1030,76 @@ describe("fit() - an evaluation with only pruned configs (#38)", {
       fit(unranked, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE,
           verbose = FALSE),
       class = "horizons_input_error"
+    )
+
+  })
+
+})
+
+
+## =========================================================================
+## Every member fell below the prune threshold at bayesian_iter = 0 (#38)
+## =========================================================================
+## With no Bayesian stage the gate skips nothing, so nothing is pruned and
+## the fallback warning cannot fire. The gate's reading is recorded apart from
+## the status (below_prune_threshold), and fit() warns from it.
+
+describe("fit() - members below the prune threshold at bayesian_iter = 0 (#38)", {
+
+  obj <- make_eval_object(n = 60, n_configs = 2)
+  obj$config$tuning$bayesian_iter       <- 0L
+  obj$config$tuning$final_bayesian_iter <- 0L
+
+  below <- suppressWarnings(
+    evaluate(obj, prune = TRUE, prune_threshold = 9999, verbose = FALSE,
+             seed = 42L)
+  )
+
+  it("warns, naming the threshold and the members' cv RPD", {
+
+    ## Precondition: both are successes, and both fell below the threshold
+    expect_true(all(below$evaluation$results$status == "success"))
+    expect_true(all(below$evaluation$results$below_prune_threshold))
+
+    w <- expect_warning(
+      r <- keep_only_warning(
+        fit(below, n_best = 2L, compute_uq = FALSE, compute_ad = FALSE,
+            verbose = FALSE, seed = 42L),
+        "horizons_below_threshold_warning"
+      ),
+      class = "horizons_below_threshold_warning"
+    )
+
+    ## Not the fallback: these configs succeeded
+    expect_false(inherits(w, "horizons_pruned_fallback_warning"))
+
+    msg <- gsub("\\s+", " ", conditionMessage(w))   # undo cli line wrapping
+    res <- below$evaluation$results
+
+    expect_match(msg, "prune threshold of 9999", fixed = TRUE)
+
+    for (i in seq_len(nrow(res))) {
+      expect_match(msg, paste0(res$config_id[i], " ", formatC(res$cv_rpd[i], digits = 2, format = "f")),
+                   fixed = TRUE)
+    }
+
+    expect_s3_class(r, "horizons_fit")
+    expect_equal(r$models$n_models, 2L)
+
+  })
+
+  it("is quiet when a member cleared the threshold", {
+
+    cleared <- below
+    cleared$evaluation$results$below_prune_threshold[1] <- FALSE
+
+    expect_no_warning(
+      keep_only_warning(
+        fit(cleared, n_best = 2L, compute_uq = FALSE, compute_ad = FALSE,
+            verbose = FALSE, seed = 42L),
+        "horizons_below_threshold_warning"
+      ),
+      class = "horizons_below_threshold_warning"
     )
 
   })

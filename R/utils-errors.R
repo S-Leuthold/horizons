@@ -239,6 +239,8 @@ create_failed_result <- function(config_id, error = NULL) {
   tibble::tibble(
     config_id     = config_id,
     status        = "failed",
+    below_prune_threshold = NA,
+    prune_threshold       = NA_real_,
     rmse          = NA_real_,
     rrmse         = NA_real_,
     rsq           = NA_real_,

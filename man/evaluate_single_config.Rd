@@ -34,10 +34,11 @@ evaluate_single_config(
 \item{bayesian_iter}{Integer. Iterations for \code{tune_bayes()}. Set to 0 to
 skip Bayesian optimization entirely.}
 
-\item{prune}{Logical. If TRUE, skip Bayesian optimization when the best
-grid-search RPD falls below \code{prune_threshold}, and label the config
-\code{"pruned"}. A no-op when \code{bayesian_iter} is 0, since there is nothing to
-skip.}
+\item{prune}{Logical. If TRUE, record whether the best grid-search RPD
+falls below \code{prune_threshold} (\code{below_prune_threshold}), and when it
+does, skip Bayesian optimization and label the config \code{"pruned"}. With
+\code{bayesian_iter = 0} there is nothing to skip, so the config is labelled
+\code{"success"} and only \code{below_prune_threshold} carries the reading.}
 
 \item{prune_threshold}{Numeric. RPD threshold for pruning, on the original
 response scale (tuning metrics are scored there via
@@ -59,7 +60,10 @@ single-split rsets become \code{"everything"}).}
 \item{seed}{Integer. Random seed for reproducibility.}
 }
 \value{
-Single-row tibble with columns: \code{config_id}, \code{status}, the six
+Single-row tibble with columns: \code{config_id}, \code{status} (\code{"pruned"}
+means Bayesian refinement was skipped), \code{below_prune_threshold} (logical;
+\code{NA} when \code{prune = FALSE}), \code{prune_threshold} (the threshold that reading
+was taken against; \code{NA} when \code{prune = FALSE}), the six
 test-set metrics \code{rmse}, \code{rrmse}, \code{rsq}, \code{ccc}, \code{rpd}, \code{mae}, the six
 cross-validated means at the selected hyperparameters \code{cv_rmse},
 \code{cv_rrmse}, \code{cv_rsq}, \code{cv_ccc}, \code{cv_rpd}, \code{cv_mae} (what \code{evaluate()} and
