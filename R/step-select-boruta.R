@@ -40,9 +40,19 @@
 #' When Boruta confirms nothing, the step warns with class
 #' `horizons_boruta_warning`: if it rejected every attribute, the step keeps
 #' all the variance-filtered columns; otherwise it keeps the tentative ones.
-#' When Boruta itself fails, `prep()` aborts with class `horizons_boruta_error`.
-#' There is no fallback selector, so `evaluate()` and `fit()` record the
-#' configuration as failed.
+#' When Boruta itself fails, `prep()` aborts; there is no fallback selector, so
+#' a Boruta error never yields results labelled Boruta from another method.
+#' The abort carries class `horizons_boruta_error` in its condition chain.
+#' Through `recipes::prep()` the outer condition is recipes' own
+#' `recipes_error_step`, with this error as its parent, so test for the class
+#' with `rlang::cnd_inherits(err, "horizons_boruta_error")` rather than
+#' `inherits()`. Boruta is a suggested package; `prep()` checks that it is
+#' installed before doing any work.
+#'
+#' Inside `evaluate()` and `fit()`, a configuration is recorded as failed when
+#' Boruta fails on the full training set or on every resampling fold. When it
+#' fails on some folds only, tune keeps those errors in its notes and scores
+#' the folds that ran.
 #'
 #' The trained step records what Boruta did in its `boruta` element: the
 #' confirmed, tentative and rejected counts, each attribute's `decision`, the
@@ -224,7 +234,8 @@ prep.step_select_boruta <- function(x, training, info = NULL, ...) {
   ### There is no fallback selector. The step used to fall back to the 50
   ### columns most correlated with the outcome, so a config labelled "boruta"
   ### ran a correlation filter with nothing in the results saying so. An
-  ### error here fails the config in evaluate() and fit().
+  ### error here stops the step; recipes::prep() wraps it in a
+  ### recipes_error_step, so the class sits one level down the chain.
 
   boruta_fit <- tryCatch(Boruta::Boruta(x           = reduced_mat,
                                         y           = outcome_vec,
