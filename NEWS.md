@@ -2,22 +2,7 @@
 
 ## New features
 
-* **`select_training()`**, the training-set selection verb for library
-  mode. Targets and a reference pool in, a `horizons_data` drawn from the
-  pool out, on the targets' wavenumber grid, and the rest of the pipeline
-  runs on it unchanged. The rule is each target's `k` nearest pool rows
-  that have the property measured, drawn per property, rows entering once.
-  Four scopes over one return shape (`batch`, `cluster`, `sample`,
-  `global`): the return is always the union, and the grouping into training
-  sets lives in `x$selection$groups` alongside the full membership table.
-  Every lever of the similarity space is an argument (`snv`, `derivative`,
-  `window`, `poly`, `mask`, `space = "pca"|"pls"`, `ncomp`, `metric`), with
-  the design the 2026-09 experiments ran as the defaults, so the open
-  questions (k on a pool, the metric, tail batches) run as loops over the
-  verb. The verb reconciles the pool onto the targets' axis itself (#64 is
-  why), excludes and reports twins by the gap between first and second
-  nearest, and warns about targets beyond the pool's own nearest-neighbour
-  spread. Design: `dev/specs/v1-refactor/select-training-design.md`.
+* **`select_training()`**, the training-set selection verb for library mode. Targets and a reference pool in, a `horizons_data` drawn from the pool out, on the targets' wavenumber grid, and the rest of the pipeline runs on it unchanged. The rule is each target's `k` nearest pool rows that have the property measured, drawn per property, rows entering once. Four scopes over one return shape (`batch`, `cluster`, `sample`, `global`): the return is always the union, and the grouping into training sets lives in `x$selection$groups` alongside the full membership table. Every lever of the similarity space is an argument (`snv`, `derivative`, `window`, `poly`, `mask`, `space = "pca"|"pls"`, `ncomp`, `metric`), with the design the 2026-09 experiments ran as the defaults, so the open questions (k on a pool, the metric, tail batches) run as loops over the verb. The verb reconciles the pool onto the targets' axis itself (#64 is why), excludes and reports twins, and warns about targets beyond the pool's own nearest-neighbour spread. A twin is a pool row at distance zero or closer to a target than `twin_ratio` times a reference distance, the 75th percentile of the target's nearest `twin_reference_width()` measured rows: 50, or a quarter of the measured rows when fewer than 200 have the property. Under `global` the twins are recorded in `x$selection$exclusions` but stay in the returned rows, by design, since global is the control and returns the whole pool; a batch-versus-global comparison has to act on the record. Design: `dev/specs/v1-refactor/select-training-design.md`.
 
 * **`subset_rows()` and `set_analysis()`** (internal) give `horizons_data`
   a row-subset operation (#43). `validate()`'s outlier removal and
@@ -64,6 +49,48 @@
   parallel runs previously drew different streams from the same seed.
 
 ## Breaking / behavioural
+
+* **`standardize()` resamples onto a canonical grid, so two sources
+  standardized alike share their columns (#64).** The grid is every multiple
+  of `resample` inside the `trim` bounds (inside the data's own range when
+  `trim` is `NULL`, so two sources then share columns only where their
+  ranges overlap); it used to start at the data's own maximum wavenumber.
+  At `resample = 4` and the default trim, MOYS scans starting at 599.74 at
+  about 1.93 cm-1 came out on `wn_3999.567 ... wn_603.567` while a library
+  at 2 cm-1 came out on `wn_4000 ... wn_600`; both now give
+  `wn_4000, wn_3996, ..., wn_600`. The nearest point beyond each trim bound
+  is kept for the interpolation, so the bounds are the grid's ends; grid
+  points the data does not reach are dropped with a warning (class
+  `horizons_standardize_warning`) rather than extrapolated. A gap already in
+  the input axis (a band deleted upstream, or by an earlier
+  `remove_water = TRUE`) is never spline-filled: the grid points inside it
+  are dropped with a warning naming the gaps, and each side is interpolated
+  on its own. The 0.1 cm-1 tolerance that skipped resampling is gone: an
+  axis is left alone only when it already is the grid to within 1e-6 cm-1,
+  gaps apart, and the console now says so rather than skipping silently
+  (#18). Baseline correction now runs after resampling, on the canonical
+  grid, so every source's convex hull is pinned at the grid's bounds and
+  the points kept beyond the trim bounds for interpolation never reach it;
+  baseline-corrected values therefore change for resampled data, because
+  the hull is now fitted on the grid and pinned at its bounds. That includes
+  data already on the lattice at a finer step (2 cm-1 data at
+  `resample = 4`), whether or not it extends past the trim bounds, since its
+  hull is now fitted on the coarser grid. Data already on the grid at the
+  requested step is corrected exactly as before, extending past the bounds
+  or not. Without resampling the baseline is fitted on the trimmed native
+  axis, as before.
+  Columns stored in increasing order are sorted first, on every path; that
+  input used to abort at the final validation, or, with every operation
+  off, come back unsorted and unvalidated but marked standardized. The
+  no-op call now validates the object before marking it, so it refuses one
+  the validator would. Grid wavenumbers are rounded to six decimal places,
+  so a resolution such as 1.5 gives stable names.
+  `provenance$standardization` gains `resampled` and `grid` (`min`, `max`,
+  `step`, `n`), which a later no-op `force = TRUE` call keeps. Objects
+  standardized before this change
+  sit on the old axes and do not share columns with ones standardized after
+  it; re-run `standardize()` from the raw spectra before comparing,
+  combining, or predicting across the two.
 
 * **`average(by = <column>)` no longer returns the `by` column.** The
   grouping values now become the averaged rows' `sample_id`, and the
@@ -152,6 +179,10 @@
 * `magrittr` is no longer a dependency; the package uses the base pipe (`|>`)
   throughout. `%>%` was imported but never exported, so nothing user-facing
   changes.
+
+* **`configure(cov_fusion = "late")` now aborts**, whether or not the object has covariates (#69). The condition carries both `horizons_configure_error`, like every other `configure()` argument check, and `horizons_input_error`. Late fusion is designed but was never built: `build_recipe()` only fuses early, so `"late"` was validated, stored and printed, and then ran early fusion bit for bit. Use `"early"`. `cov_fusion` must also be `NULL` or a single string; a vector was not rejected cleanly before.
+
+* **`configure()` now warns about rows it keeps but did not choose** (#70). Re-configuring keeps the rows `validate()` removed and any `select_training()` record, because both describe rows rather than an outcome. It warns, naming the earlier outcome and the count, when rows were removed only as response outliers (`reason == "response"`) of a different outcome than the one being configured; a row removed as both a spectral and a response outlier would have gone anyway and is not counted. It also warns when a `select_training()` record (other than `scope = "global"`) was drawn for properties that do not include the outcome, since each target's `k` nearest rows were not drawn for it.
 
 ## Review fixes (2026-09-21)
 
@@ -416,6 +447,8 @@ consequences; the review itself is in
 
 ## Internal
 
+* The `horizons_eval`, `horizons_fit` and `horizons_ensemble` validators take their required keys from `new_horizons_data()`, less a commented list of keys older objects may lack (`workers`, `parallelize_over`, `response_bound`, `selection_present`), instead of keeping lists of their own. `response_bound` may now be absent as well as `NULL`, which is what the validator's documentation already said.
+
 * `build_recipe()` returns a recipe whose step selector quosures point at a
   minimal environment rather than the calling frame. Code reaching into
   `rec$steps[[i]]$terms` environments will see this; the prepped and baked
@@ -475,6 +508,18 @@ consequences; the review itself is in
 
 ## Bug Fixes
 
+* **Re-running `configure()` on an object that has been through `ensemble()` no longer aborts** (#70). Reconfiguring cleared a hand-kept list of keys that missed `ensemble$model`, and `set_analysis()` counts a non-NULL `ensemble$model` as promotion, so it refused the object. The same list let `models$uq`, `models$ad`, `models$results` and most of `evaluation` survive the demotion, which left `has_uq()` answering `TRUE` on a plain `horizons_data` whenever the fit had calibrated UQ. Reconfiguring now resets the `evaluation`, `models` and `ensemble` slots whole to the constructor's shape, through an internal `reset_promotion()` that sits beside the promotion check so the two stay in step. The list also erased the record of outliers `validate(remove_outliers = TRUE)` had removed, although those rows stayed removed; that record is now kept, and only the verdict and the flagged ids are cleared. A `select_training()` record is kept, as before.
+
+* **`spectra()` now builds its object with the class constructor, `new_horizons_data()`** (#71), rather than a second constructor of its own that had drifted from the contract. A raw object had no `data$n_responses` or `selection` key, carried `models` and `ensemble` stubs that predated the current contract, and its `models$uq` stub was a non-empty list, so `has_uq()` answered `TRUE` before anything was fitted. The constructor itself now declares the `models` keys `fit()` writes (`ad` and `selection_present` were missing) and the `evaluation` keys `evaluate()` writes (it declared `backend` and `runtime`, which nothing writes). `summary()` read `evaluation$runtime`, so its evaluation runtime line never printed; it reads `runtime_secs` now. The tuning defaults on a raw object are integers (`10L`, `15L`, `5L`) rather than doubles. An object saved by an earlier version keeps its old shape until its downstream slots are rewritten: by `configure()` when it runs on an object that already has a grid (not by the first `configure()`), or by `evaluate()` and `fit()`, which now reset the slots after their own.
+
+* **`validate()` no longer erases the record of rows an earlier call removed** (#70). Each call replaced `removed_ids`, `removal_detail` and `removed` with its own, so `validate(remove_outliers = TRUE) |> configure(outcome = ...) |> validate()` reported nothing removed (and dropped the `removal_detail` key) while the rows stayed gone. The verdict and the flagged ids are still replaced; the removal record now accumulates. `removal_detail` gains three columns: `outcome`, the outcome whose fences flagged a response removal (`NA` otherwise), and the `spectral_threshold` and `response_threshold` in force. Its `reason` now counts only the detectors the call removed by, so `remove_outliers = "spectral"` labels a row `"spectral"` even when it also sits outside the response fences (it was `"both"`), and likewise for `"response"`.
+
+* **`evaluate()` on a fitted or ensembled object, and `fit()` on an ensembled one, now empty the slots downstream of their own** (#70). Both demoted the class but left the later slots filled, so re-evaluating a `horizons_fit` returned a `horizons_eval` whose `has_uq()` was still `TRUE`, and re-fitting a `horizons_ensemble` kept a meta-learner built on the members it replaced. They now reset `models` and `ensemble` (`evaluate()`) or `ensemble` (`fit()`) to the constructor's shape before writing their own.
+
+* `select_training(scope = "global")` now runs the same twin rule as the other scopes (#72). The control arm took its reference over the nearest `max(k, 50)` of all pool rows, 400 at the default `k`, with no cap at a quarter of the measured rows. A wider reference raises the threshold, so global ran a looser rule than the arms it is compared against and could flag rows batch does not. Global now runs the check through the same code as batch, per property on that property's measured rows, with the width from one helper, and under `space_rows = "measured"` in the same per-property spaces batch draws in, where it used to check every property in the all-rows space. Under global, `x$selection$exclusions` carries the property rather than `NA`, and a twin appears once per property it is flagged for, as under batch. The flagged rows are recorded but stay in global's returned rows, by design, since global is the control and returns the whole pool; a batch-versus-global comparison has to act on the record. `x$selection$target_distances` has one row per target per property, labelled with the space batch would label it with, and `nearest` and `mean_k` are now measured after the twins rather than including them. For the same targets, pool and arguments, both tables equal the batch record under either `space_rows`. Twin counts, reference distances and target distances from earlier global runs are not comparable with new ones. Under global a `k` above a property's measured rows is still capped there rather than refused, since `k` only sets the reach of `mean_k`; a property with no measured pool row, or fewer than two under `space_rows = "measured"`, now stops every scope with a named input error, where global used to skip it and batch failed in the space build. `twin_ratio` is now validated as a single number in (0, 1); anything else stops the verb with the other input errors. The `twin_ratio` documentation, which still described the retired median-of-`k` rule, is corrected.
+
+* `select_training()` stops with an informative error when the twin subtraction leaves a property with no drawn rows, naming the property and the cause. At a `twin_ratio` near 1 every row any target drew can be some other target's twin, and the subset then failed with "`keep` selects no rows". When the rows were the targets' own copies, at distance zero, the error says the targets are in the pool instead, since no `twin_ratio` brings those back. "At distance zero" means zero to rounding, at or below `sqrt(.Machine$double.eps)` times the target's reference distance, because a spectrum reaching the similarity space as a pool row and as a projected target can land near 1e-16 rather than exactly 0. The `reason` column of `x$selection$exclusions` now uses the same rule, so such a copy is recorded as `"exact"` where it used to be recorded as `"neighbourhood"`.
+
 * `fit()` now honours `configure(final_bayesian_iter = )` (#46). It passed
   the screening budget `bayesian_iter` to the final re-tune instead, so the
   user-facing knob did nothing; `configure(bayesian_iter = 0,
@@ -495,14 +540,26 @@ consequences; the review itself is in
   evaluated before this version have no `cv_*` columns and `fit()` asks for
   a re-run. `monitor_evaluate()`'s "best so far" reads the same column.
 
-* `fit()`'s train/test partition (Split F) is now seeded with
-  `fit_split_seed(seed)` (`seed + 1L`) rather than `seed` (#50). It was built
-  with the same `initial_split()` call as `evaluate()`'s on the same frame,
-  so at the shared default seed the two partitions were bit-identical and
-  `fit()`'s test metrics, and its degradation check, were measured on the rows
-  the configs had been selected on. `fit()` now warns if the two partitions
-  coincide anyway. Every `fit()` result changes test rows as a consequence,
-  by design.
+* `fit()` now scores on `evaluate()`'s train/test split instead of drawing
+  its own, so its test metrics are measured on `evaluate()`'s held-out rows,
+  which nothing was selected on. This supersedes the split-seed offset added
+  under #50 (`fit_split_seed()`, `seed + 1L`), which is removed together with
+  the warning for coinciding partitions. The offset kept the two partitions
+  from being identical, but a fresh draw is not an independent one: over 200
+  seeds at n = 250, a median 79 % of `fit()`'s test rows came from
+  `evaluate()`'s training rows, which had chosen the members on
+  `cv_<metric>` and tuned their warm-start parameters, so `fit()`'s test
+  metrics, and its degradation check, were optimistic through selection.
+  With ranking on cross-validated metrics (#50), `evaluate()`'s test rows are
+  the clean ones. The calibration set UQ and AD share is carved out of
+  `evaluate()`'s training rows with its own seed (`calib_split_seed()`,
+  `seed + 1L`), and the CV folds are seeded with `seed`, so `fit()`'s `seed`
+  no longer touches the train/test partition. `fit()` checks that the split
+  still indexes the rows the object models, meaning the id and outcome
+  columns match the split's value for value and in order, and aborts with
+  class `horizons_input_error` if they do not. Columns added since
+  `evaluate()`, such as a sibling response from `add_response()`, are carried
+  into the fit. Every `fit()` result changes test rows as a consequence.
 
 * Tuning metrics are now scored on the original response scale (#49). The
   response transform is a `skip = TRUE` recipe step, so tune never applied it
@@ -555,6 +612,54 @@ consequences; the review itself is in
   all degraded silently too. Both paths now warn (condition class
   `horizons_interval_warning`), naming the failure, and return point
   predictions.
+
+* `fit()` now models the same rows as `evaluate()`: rows whose outcome is `NA`
+  are dropped by one shared rule (#67). `fit()` split the unfiltered analysis
+  table, so with NA outcomes present its partition was over a different frame
+  from `evaluate()`'s and the NA-outcome rows reached the fit (a random forest
+  member failed in warm-start tuning on them). `fit()` reports the drop in its
+  console tree as `evaluate()` does, and the check that `evaluation$split`
+  still indexes the modelled rows (above) applies the same rule.
+
+* Single-model prediction intervals no longer move with the response-bound
+  clamp. `predict()` winsorized the point prediction before building the
+  conformal interval around it, so on a clamped row both bounds dropped by
+  the overshoot, contrary to the documented contract that interval bounds are
+  never clamped, and unlike the ensemble path. The interval is now built
+  around the unclamped prediction and only `.pred` is winsorized, so a
+  clamped `.pred` can sit outside its own interval, below `.pred_lower`.
+
+* `models$response_bound` is now taken over the rows the final models are fit
+  on, as its documentation said (#68). It was the maximum outcome over the
+  whole analysis table, so Split F's test rows and the calibration rows
+  shaped a deploy-time guardrail. Re-fitting an object can lower the bound,
+  so the clamp can fire on predictions it previously let through.
+
+* `add_response()` now reports the non-missing count of each joined variable
+  beside the join count, and records it in provenance as `n_non_missing`, a
+  named integer (#39). "Matched" counts join-key hits, so a matched sample
+  whose source value was `NA` counted as matched and nothing said it was
+  unmeasured. Rows with missing values are still kept: an object can carry
+  several responses, and `evaluate()` and `fit()` drop the rows whose outcome
+  is `NA` when they model it.
+
+* The four custom recipe steps now follow the `recipes` step contract (#52).
+  `step_transform_spectra()`, `step_select_correlation()`,
+  `step_select_boruta()` and `step_select_cars()` overwrote their selectors
+  with the resolved column names at `prep()`, so a trained recipe could not
+  be prepped again: `prep(trained, training = d, fresh = TRUE)` aborted with
+  "arguments ... do not exist". The selectors now live in `terms` and
+  survive `prep()`; the resolved names go in `columns`, which is all
+  `bake()` reads, so a butchered stored workflow still predicts. Trained
+  state and baked output are unchanged, and no package verb re-preps a
+  trained recipe, so no existing result moves. Code that read an untrained
+  step's selectors from `$columns` should read `$terms`; `$columns` is
+  `NULL` until the step is prepped. Steps built by earlier versions keep
+  working: stored fits predict and bake as before, and an untrained step
+  still preps. A trained step from an earlier version has no selectors left
+  to re-resolve, so re-prepping it aborts with a `horizons_input_error` that
+  says to rebuild the recipe, rather than with a misleading window-size or
+  zero-column message.
 
 # horizons 0.9.0
 

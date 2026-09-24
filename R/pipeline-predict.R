@@ -85,8 +85,10 @@ NULL
 #' impossible back-transform blow-ups (e.g. an unconstrained log-scale
 #' prediction inflating through `exp()`) while permitting modest extrapolation.
 #' Interval bounds are deliberately NOT clamped — truncating the interval would
-#' overstate confidence exactly where the model is least trustworthy. Objects
-#' fitted before this field existed predict without a clamp.
+#' overstate confidence exactly where the model is least trustworthy. The
+#' interval is built around the unclamped prediction, so a clamped `.pred` can
+#' sit outside its own interval, below `.pred_lower`. Objects fitted before
+#' this field existed predict without a clamp.
 #'
 #' @examples
 #' \dontrun{
@@ -808,28 +810,34 @@ predict_one_config <- function(object, config_id, new_spectra, interval,
     error_title = paste0("Prediction failed for config '", config_id, "'.")
   )$.pred
 
-  ## Unconditional funnel call: the "none" branch is a passthrough, and the
-  ## deploy-time winsorization guardrail applies after the switch regardless of
-  ## transform. Old objects without response_bound degrade gracefully (NULL →
-  ## no clamp), mirroring the predictor_schema NULL-skip above. Fit-time paths
-  ## deliberately do NOT pass a bound — ranking must see raw model behavior —
-  ## and ensemble machinery passes clamp = FALSE (guardrail applies once at
-  ## the ensemble output, keeping member features consistent with the raw
-  ## member OOF the meta-learner trained and calibrated on).
+  ## Unconditional funnel call: the "none" branch is a passthrough. The
+  ## back-transform takes no bound here. The intervals below are built around
+  ## the unclamped point, so clamping first would drag both interval bounds
+  ## down by the overshoot, which the documented contract ("interval bounds
+  ## are not clamped") and the ensemble path both rule out.
   point_pred <- back_transform_predictions(
     point_trans,
     transformation,
-    warn        = FALSE,
-    upper_bound = if (clamp) object$models$response_bound else NULL
+    warn = FALSE
   )
 
   ## Soil properties predicted from MIR are non-negative; floor at 0.
   point_pred <- floor_at_zero(point_pred)
 
+  ## Deploy-time winsorization guardrail, on .pred only. Old objects without
+  ## response_bound degrade gracefully (NULL → no clamp), mirroring the
+  ## predictor_schema NULL-skip above. Fit-time paths deliberately do NOT pass
+  ## a bound — ranking must see raw model behavior — and ensemble machinery
+  ## passes clamp = FALSE (guardrail applies once at the ensemble output,
+  ## keeping member features consistent with the raw member OOF the
+  ## meta-learner trained and calibrated on).
   out <- tibble::tibble(
     sample_id = new_spectra$sample_id,
     config_id = config_id,
-    .pred     = point_pred
+    .pred     = apply_response_bound(
+      point_pred,
+      if (clamp) object$models$response_bound else NULL
+    )
   )
 
   ## -------------------------------------------------------------------------

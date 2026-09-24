@@ -9,7 +9,8 @@
 ## Helper: build a minimal horizons_eval object ready for fit()
 ## ---------------------------------------------------------------------------
 
-make_fit_object <- function(n = 60, n_wn = 10, n_configs = 2, seed = 42) {
+make_fit_object <- function(n = 60, n_wn = 10, n_configs = 2, seed = 42,
+                            n_na = 0L) {
 
   set.seed(seed)
 
@@ -23,6 +24,9 @@ make_fit_object <- function(n = 60, n_wn = 10, n_configs = 2, seed = 42) {
 
   ## Outcome with weak signal from first 3 predictors
   df$SOC <- 2 + rowMeans(spec_mat[, 1:min(3, n_wn)]) * 0.5 + rnorm(n, sd = 0.5)
+
+  ## Rows with no measured outcome, as add_response() leaves them (#67)
+  if (n_na > 0) df$SOC[seq_len(n_na)] <- NA_real_
 
   ## Role map
   roles <- tibble::tibble(
@@ -41,7 +45,10 @@ make_fit_object <- function(n = 60, n_wn = 10, n_configs = 2, seed = 42) {
     covariates        = NA_character_
   )
 
-  ## Build horizons_data-like structure
+  ## Build horizons_data-like structure; downstream slots in the
+  ## constructor's shape
+  contract <- new_horizons_data()
+
   obj <- list(
     data = list(
       analysis     = df,
@@ -77,25 +84,10 @@ make_fit_object <- function(n = 60, n_wn = 10, n_configs = 2, seed = 42) {
         removed        = FALSE
       )
     ),
-    evaluation = list(
-      results     = NULL,
-      best_config = NULL,
-      rank_metric = NULL,
-      backend     = NULL,
-      runtime     = NULL,
-      timestamp   = NULL
-    ),
-    models   = list(workflows      = NULL,
-                    n_models       = NULL,
-                    cv_predictions = NULL,
-                    results        = NULL,
-                    split          = NULL,
-                    row_index      = NULL,
-                    uq             = NULL,
-                    timestamp      = NULL,
-                    runtime_secs   = NULL),
-    ensemble  = list(stack = NULL),
-    artifacts = list(cache_dir = NULL)
+    evaluation = contract$evaluation,
+    models     = contract$models,
+    ensemble   = contract$ensemble,
+    artifacts  = list(cache_dir = NULL)
   )
 
   class(obj) <- c("horizons_data", "list")
@@ -204,6 +196,14 @@ describe("fit() - success path", {
 
   })
 
+  it("writes exactly the models keys new_horizons_data() declares (#71)", {
+
+    ## The constructor's empty slot is what configure() resets to, so it has
+    ## to name what fit() actually writes.
+    expect_identical(names(result$models), names(new_horizons_data()$models))
+
+  })
+
   it("records best_config as the top fitted config and the rank metric used", {
 
     ## best_config is the durable ranking fact predict() reads; it must be the
@@ -244,6 +244,47 @@ describe("fit() - success path", {
   it("models$runtime_secs is positive", {
 
     expect_true(result$models$runtime_secs > 0)
+
+  })
+
+  it("re-running evaluate() on it empties models and ensemble (#70)", {
+
+    ## compute_uq = FALSE above, so carry a bundle the way compute_uq = TRUE
+    ## leaves one; otherwise has_uq() is FALSE before and after
+    fitted <- result
+    fitted$models$uq <- stats::setNames(list(list(quantile_model = "a UQ bundle")),
+                                        names(fitted$models$workflows)[1])
+    fitted$ensemble$method <- "weighted"
+
+    expect_true(has_uq(fitted))
+
+    re <- suppressWarnings(evaluate(fitted, prune = FALSE, verbose = FALSE, seed = 42L))
+
+    blank <- new_horizons_data()
+
+    expect_identical(class(re), c("horizons_eval", "horizons_data", "list"))
+    expect_false(has_uq(re))
+    expect_identical(re$models,   blank$models)
+    expect_identical(re$ensemble, blank$ensemble)
+
+  })
+
+  it("re-running fit() on an ensemble empties the ensemble (#70)", {
+
+    ens <- suppressWarnings(
+      ensemble(result, method = "weighted", optimize = FALSE,
+               compute_uq = FALSE, verbose = FALSE)
+    )
+
+    ## Keep the re-fit cheap; the budget is not what is under test
+    ens$config$tuning$final_bayesian_iter <- 0L
+
+    refit <- suppressWarnings(
+      fit(ens, n_best = 1L, compute_uq = FALSE, verbose = FALSE, seed = 42L)
+    )
+
+    expect_identical(class(refit), c("horizons_fit", "horizons_eval", "horizons_data", "list"))
+    expect_identical(refit$ensemble, new_horizons_data()$ensemble)
 
   })
 
@@ -653,21 +694,43 @@ describe("fit() - final_bayesian_iter", {
 
 describe("fit() - seed reproducibility", {
 
+  ## The train/test split is evaluate()'s, so what fit()'s seed controls is
+  ## the CV folds. UQ and AD are off, so no calibration draw precedes the
+  ## folds, and the ambient RNG is set differently before each call: the
+  ## folds must follow `seed`, not whatever state the caller left.
   obj <- make_fit_object(n = 60, n_configs = 1)
+  obj$config$tuning$final_bayesian_iter <- 0L
 
-  r1 <- suppressWarnings(
-    fit(obj, n_best = 1L, compute_uq = FALSE, verbose = FALSE, seed = 123L)
-  )
+  fit_at <- function(seed, ambient) {
+    set.seed(ambient)
+    suppressWarnings(
+      fit(obj, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE,
+          verbose = FALSE, seed = seed)
+    )
+  }
 
-  r2 <- suppressWarnings(
-    fit(obj, n_best = 1L, compute_uq = FALSE, verbose = FALSE, seed = 123L)
-  )
+  ## Fold membership per row. cv_predictions is grouped by fold, so the raw
+  ## .fold column has the same run lengths whichever rows fall in each fold
+  ## and cannot tell two fold assignments apart; order it by .row.
+  fold_of_row <- function(r) {
+    cp <- r$models$cv_predictions
+    cp$.fold[order(cp$.row)]
+  }
 
-  it("same seed produces same split", {
+  r1 <- fit_at(123L, ambient = 1L)
+  r2 <- fit_at(123L, ambient = 2L)
+  r3 <- fit_at(124L, ambient = 1L)
 
-    t1 <- rsample::training(r1$models$split)
-    t2 <- rsample::training(r2$models$split)
-    expect_equal(t1$sample_id, t2$sample_id)
+  it("same seed produces the same folds and row index", {
+
+    expect_identical(fold_of_row(r1), fold_of_row(r2))
+    expect_identical(r1$models$row_index, r2$models$row_index)
+
+  })
+
+  it("a different seed produces different folds", {
+
+    expect_false(identical(fold_of_row(r1), fold_of_row(r3)))
 
   })
 
@@ -675,44 +738,237 @@ describe("fit() - seed reproducibility", {
 
 
 ## =========================================================================
-## Split F is independent of evaluate()'s split (#50)
+## Split F is evaluate()'s split
 ## =========================================================================
-## evaluate() and fit() share the default seed and the same initial_split()
-## call on the same frame, so before fit_split_seed() the two partitions were
-## bit-identical and fit()'s test metrics were measured on the rows the
-## configs were selected on.
+## A fresh Split F (at seed + 1 since #50) drew most of its test rows from
+## evaluate()'s training rows, which chose the members and tuned the
+## warm-start parameters. evaluate()'s test rows are the only ones nothing was
+## selected on, so fit() scores on them, and carves the calibration set out
+## of evaluate()'s training rows.
 
-describe("fit() - split independence from evaluate()", {
+describe("fit() - scores on evaluate()'s split", {
 
-  obj <- make_fit_object(n = 60, n_configs = 1, seed = 42)   # evaluate(seed = 42)
+  ## n = 250 so the calibration split clears N_CALIB_MIN and UQ runs.
+  obj <- make_fit_object(n = 250, n_configs = 1, seed = 42)
+  obj$config$tuning$final_bayesian_iter <- 0L
 
-  it("does not reproduce evaluate()'s partition at the same seed", {
+  r <- suppressWarnings(
+    fit(obj, n_best = 1L, compute_uq = TRUE, compute_ad = FALSE,
+        verbose = FALSE, seed = 42L)
+  )
 
-    r <- suppressWarnings(
-      fit(obj, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE,
+  it("reuses evaluate()'s split, so its test rows are evaluate()'s", {
+
+    expect_identical(r$models$split$data, obj$evaluation$split$data)
+    expect_identical(rsample::testing(r$models$split)$sample_id,
+                     rsample::testing(obj$evaluation$split)$sample_id)
+
+  })
+
+  it("partitions the modelled rows into test, calibration and fit rows", {
+
+    expect_false(is.null(r$models$uq))
+
+    ## Split C is reproducible from calib_split_seed() and evaluate()'s
+    ## training rows alone.
+    set.seed(calib_split_seed(42L))
+    split_C <- rsample::initial_split(rsample::training(obj$evaluation$split),
+                                      prop = CALIB_PROP,
+                                      strata = dplyr::all_of("SOC"))
+
+    test_ids  <- rsample::testing(r$models$split)$sample_id
+    calib_ids <- rsample::testing(split_C)$sample_id
+    fit_ids   <- r$models$row_index$sample_id
+
+    expect_setequal(rsample::training(split_C)$sample_id, fit_ids)
+    expect_equal(r$models$uq[[1]]$n_calib, length(calib_ids))
+
+    expect_length(intersect(test_ids, calib_ids), 0L)
+    expect_length(intersect(test_ids, fit_ids), 0L)
+    expect_length(intersect(calib_ids, fit_ids), 0L)
+    expect_setequal(c(test_ids, calib_ids, fit_ids),
+                    obj$evaluation$split$data$sample_id)
+
+  })
+
+  it("calib_split_seed() is a documented offset of the user's seed", {
+
+    expect_identical(calib_split_seed(307L), 308L)
+    expect_identical(calib_split_seed(42), 43L)
+
+  })
+
+  it("refuses an object whose split no longer matches its rows", {
+
+    stale <- obj
+    stale$data$analysis <- stale$data$analysis[-1, ]
+
+    expect_error(
+      fit(stale, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE,
+          verbose = FALSE),
+      "does not index the rows this object models",
+      class = "horizons_input_error"
+    )
+
+    ## Same ids, one outcome changed: the split's rows no longer carry the
+    ## outcomes it was stratified and scored on.
+    relabelled <- obj
+    relabelled$data$analysis$SOC[1] <- relabelled$data$analysis$SOC[1] + 1
+
+    expect_error(
+      fit(relabelled, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE,
+          verbose = FALSE),
+      "does not index the rows this object models",
+      class = "horizons_input_error"
+    )
+
+    no_split <- obj
+    no_split$evaluation$split <- NULL
+
+    expect_error(
+      fit(no_split, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE,
+          verbose = FALSE),
+      class = "horizons_input_error"
+    )
+
+  })
+
+  it("still fits after add_response() adds a sibling response", {
+
+    lab <- tibble::tibble(sample_id = obj$data$analysis$sample_id,
+                          clay      = seq_len(nrow(obj$data$analysis)))
+
+    utils::capture.output(
+      with_clay <- add_response(obj, lab, variable = "clay")
+    )
+
+    r_clay <- suppressWarnings(
+      fit(with_clay, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE,
           verbose = FALSE, seed = 42L)
     )
 
-    expect_false(identical(sort(as.integer(r$models$split$in_id)),
-                           sort(as.integer(obj$evaluation$split$in_id))))
+    expect_s3_class(r_clay, "horizons_fit")
+    expect_true("clay" %in% names(r_clay$models$split$data))
+    expect_identical(rsample::testing(r_clay$models$split)$sample_id,
+                     rsample::testing(obj$evaluation$split)$sample_id)
 
   })
 
-  it("warns visibly when a caller makes the partitions coincide", {
+})
 
-    ## fit(seed = s) seeds Split F with s + 1; evaluate used 42, so 41 collides
-    expect_warning(
+
+## =========================================================================
+## NA-outcome rows are dropped before Split F (#67)
+## =========================================================================
+## evaluate() drops rows whose outcome is NA. fit() used to split the
+## unfiltered table, so its partition was over a different frame and the
+## NA-outcome rows reached the fit.
+
+describe("fit() - NA-outcome rows (#67)", {
+
+  obj <- make_fit_object(n = 60, n_configs = 1, seed = 42, n_na = 6L)
+  obj$config$tuning$final_bayesian_iter <- 0L
+
+  na_ids <- obj$data$analysis$sample_id[is.na(obj$data$analysis$SOC)]
+
+  ## One verbose run, keeping the console tree for the drop report.
+  out <- utils::capture.output(
+    r <- suppressWarnings(
       fit(obj, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE,
-          verbose = FALSE, seed = 41L),
-      "identical to evaluate"
+          verbose = TRUE, seed = 42L)
     )
+  )
+
+  it("keeps NA-outcome rows out of Split F and the row index", {
+
+    expect_length(na_ids, 6L)
+    expect_false(any(na_ids %in% r$models$split$data$sample_id))
+    expect_false(anyNA(r$models$split$data$SOC))
+    expect_false(any(na_ids %in% r$models$row_index$sample_id))
 
   })
 
-  it("fit_split_seed() is a documented offset of the user's seed", {
+  it("scores on the frame evaluate() split", {
 
-    expect_identical(fit_split_seed(307L), 308L)
-    expect_identical(fit_split_seed(42), 43L)
+    expect_identical(r$models$split$data, obj$evaluation$split$data)
+
+  })
+
+  it("reports the rows it dropped in the console tree", {
+
+    expect_true(any(grepl("Dropped 6 rows with NA outcome", out, fixed = TRUE)))
+
+  })
+
+})
+
+
+describe("fit() - NA-outcome rows with UQ on (#67)", {
+
+  ## n = 300 with 40 NA outcomes leaves 260 modelled rows, enough for the
+  ## calibration split to clear N_CALIB_MIN.
+  obj <- make_fit_object(n = 300, n_configs = 1, seed = 42, n_na = 40L)
+  obj$config$tuning$final_bayesian_iter <- 0L
+
+  r <- suppressWarnings(
+    fit(obj, n_best = 1L, compute_uq = TRUE, compute_ad = FALSE,
+        verbose = FALSE, seed = 42L)
+  )
+
+  analysis  <- obj$data$analysis
+  test_ids  <- rsample::testing(r$models$split)$sample_id
+  fit_ids   <- r$models$row_index$sample_id
+  calib_ids <- setdiff(rsample::training(r$models$split)$sample_id, fit_ids)
+
+  it("calibrates UQ on the rows left between the fit rows and the test part", {
+
+    expect_false(is.null(r$models$uq))
+    expect_equal(r$models$uq[[1]]$n_calib, length(calib_ids))
+    expect_equal(length(test_ids) + length(fit_ids) + length(calib_ids), 260L)
+
+  })
+
+  it("puts no NA outcome in any partition", {
+
+    outcome_of <- function(ids) analysis$SOC[match(ids, analysis$sample_id)]
+
+    expect_false(anyNA(outcome_of(test_ids)))
+    expect_false(anyNA(outcome_of(calib_ids)))
+    expect_false(anyNA(outcome_of(fit_ids)))
+
+  })
+
+})
+
+
+## =========================================================================
+## response_bound is taken over the rows the final models are fit on (#68)
+## =========================================================================
+
+describe("fit() - response_bound (#68)", {
+
+  ## At fixture seed 12, evaluate()'s split (which fit() reuses) puts the
+  ## object's largest outcome in the test part, which is what makes a
+  ## whole-table bound and a training-row bound differ.
+  obj <- make_fit_object(n = 60, n_configs = 1, seed = 12)
+  obj$config$tuning$final_bayesian_iter <- 0L
+
+  r <- suppressWarnings(
+    fit(obj, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE,
+        verbose = FALSE, seed = 12L)
+  )
+
+  it("equals the largest fit-row outcome times RESPONSE_BOUND_MARGIN", {
+
+    soc      <- obj$data$analysis$SOC
+    fit_rows <- obj$data$analysis$sample_id %in% r$models$row_index$sample_id
+
+    ## Precondition: the fixture discriminates. If a change to the split
+    ## moves the maximum back into the fit rows, pick another seed.
+    expect_gt(max(soc), max(soc[fit_rows]))
+
+    expect_equal(r$models$response_bound,
+                 max(soc[fit_rows]) * RESPONSE_BOUND_MARGIN)
 
   })
 

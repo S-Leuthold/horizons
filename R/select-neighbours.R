@@ -178,9 +178,9 @@ nearest_neighbours <- function(St, Sp, k,
 #' self-rows among five neighbours, the median is a replicate distance and one
 #' row is flagged instead of four; the 75th percentile moves the break from
 #' half the columns to three quarters of them and no further. So the reference
-#' is taken over `k_ref` columns, which `draw_neighbours()` fetches at
-#' `SELECT_TWIN_REF` regardless of the `k` being drawn, and the flag is then
-#' independent of how many rows the caller happens to want.
+#' is taken over `k_ref` columns, which `draw_neighbours()` sets by
+#' `twin_reference_width()` regardless of the `k` being drawn, and the flag is
+#' then independent of how many rows the caller happens to want.
 #'
 #' @param nn [List.] From `nearest_neighbours()`.
 #' @param ratio [Numeric.] The fraction of the reference distance below which
@@ -189,7 +189,8 @@ nearest_neighbours <- function(St, Sp, k,
 #'   over. `NULL` uses every column. Default: `NULL`.
 #'
 #' @return [Tibble.] `target_id`, `pool_id`, `distance`, `rank`,
-#'   `reference_distance`, `reason` (`"exact"` or `"neighbourhood"`); zero
+#'   `reference_distance`, `reason` (`"exact"` for a distance of zero to
+#'   rounding, see `is_exact_copy()`, or `"neighbourhood"`); zero
 #'   rows when there are no twins.
 #'
 #' @seealso [nearest_neighbours()], [twin_reference()], [draw_neighbours()]
@@ -246,6 +247,41 @@ twin_reference <- function(d, k_ref = NULL) {
 }
 
 
+#' The twin rule's reference width, one rule for every scope
+#'
+#' @description
+#' How many of a target's nearest measured rows the reference percentile is
+#' taken over. `draw_neighbours()` calls it for every scope, `"global"`
+#' included, so the control arm's twin rule is the rule the other arms run.
+#'
+#' @details
+#' The width is fixed rather than the `k` being drawn, which is why `k` is not
+#' an argument: a replicate cluster cannot set its own reference, and a k
+#' sweep does not move the flags. It has to stay local as well as wide,
+#' though. The threshold is a fraction of the reference, so a reference taken
+#' over most of the pool is a pool-wide spread and 5 % of that flags ordinary
+#' nearest neighbours. A quarter of the measured rows is the ceiling, which
+#' binds only on pools under `4 * twin_ref` rows; the floor of four keeps a
+#' percentile meaningful on a tiny pool, and the width never exceeds the rows
+#' there are.
+#'
+#' @param n_measured [Integer.] Pool rows with the property measured.
+#' @param twin_ref [Integer.] The width before the cap.
+#'   Default: `SELECT_TWIN_REF`.
+#'
+#' @return [Integer.] Columns the reference percentile is taken over.
+#'
+#' @seealso [twin_reference()], [draw_neighbours()]
+#' @noRd
+twin_reference_width <- function(n_measured, twin_ref = SELECT_TWIN_REF) {
+
+  n_measured <- as.integer(n_measured)
+
+  min(as.integer(twin_ref), max(4L, n_measured %/% 4L), n_measured)
+
+}
+
+
 #' The twin flag matrix for a distance matrix and its references
 #'
 #' @description
@@ -269,6 +305,31 @@ twin_flags <- function(d, reference, ratio = SELECT_TWIN_RATIO) {
 }
 
 
+#' Is a twin the target's own copy? Zero distance, to rounding
+#'
+#' @description
+#' The same spectrum reaching the similarity space by two paths, once as a
+#' pool row and once projected as a target, lands at about 1e-16 rather
+#' than exactly 0, so an exact test would call most real copies
+#' neighbourhood twins. A distance at or below `sqrt(.Machine$double.eps)`
+#' times the target's reference distance is a copy: no `twin_ratio` could
+#' unflag it. The one rule for the exclusion record's `reason` and for
+#' `select_training()`'s error when copies empty a draw.
+#'
+#' @param distance [Numeric.] Distances to the target.
+#' @param reference [Numeric.] The target's reference distance, recycled.
+#'
+#' @return [Logical.] Same length as `distance`; `NA` in is `FALSE` out.
+#' @noRd
+is_exact_copy <- function(distance, reference) {
+
+  exact <- (distance == 0) | (distance <= sqrt(.Machine$double.eps) * reference)
+  exact[is.na(exact)] <- FALSE
+  exact
+
+}
+
+
 #' The twin table, built the one way, so every producer matches
 #' @noRd
 twin_tibble <- function(target_id, pool_id, distance, rank, reference) {
@@ -279,7 +340,7 @@ twin_tibble <- function(target_id, pool_id, distance, rank, reference) {
     distance           = distance,
     rank               = rank,
     reference_distance = reference,
-    reason             = ifelse(distance == 0, "exact", "neighbourhood")
+    reason             = ifelse(is_exact_copy(distance, reference), "exact", "neighbourhood")
   )
 
 }
@@ -459,14 +520,10 @@ draw_neighbours <- function(St, Sp, responses, k, properties,
 
     ### The reference is not the neighbourhood: it is a fixed width, so the
     ### same pool row is or is not a twin of the same target whatever k was
-    ### asked for, and a replicate cluster cannot set its own reference. It
-    ### has to stay local as well as wide, though. The threshold is a
-    ### fraction of the reference, so a reference taken over most of the pool
-    ### is a pool-wide spread and 5 % of that flags ordinary nearest
-    ### neighbours. A quarter of the measured rows is the ceiling; the cap is
-    ### what binds on any real library.
+    ### asked for, and a replicate cluster cannot set its own reference.
+    ### twin_reference_width() holds the rule and its local cap.
 
-    n_ref   <- min(as.integer(twin_ref), max(4L, length(measured) %/% 4L))
+    n_ref   <- twin_reference_width(length(measured), twin_ref)
     n_fetch <- min(max(kp, n_ref), length(measured))
 
     nn  <- nearest_neighbours(St, Sp_p, k = n_fetch, metric = metric,
