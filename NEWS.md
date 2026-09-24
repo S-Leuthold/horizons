@@ -509,10 +509,12 @@ consequences; the review itself is in
   the clean ones. The calibration set UQ and AD share is carved out of
   `evaluate()`'s training rows with its own seed (`calib_split_seed()`,
   `seed + 1L`), and the CV folds are seeded with `seed`, so `fit()`'s `seed`
-  no longer touches the train/test partition. `fit()` aborts with class
-  `horizons_input_error` when `evaluation$split` was not drawn from the rows
-  the object models, which means a stale or hand-edited object. Every `fit()`
-  result changes test rows as a consequence.
+  no longer touches the train/test partition. `fit()` checks that the split
+  still indexes the rows the object models, meaning the id and outcome
+  columns match the split's value for value and in order, and aborts with
+  class `horizons_input_error` if they do not. Columns added since
+  `evaluate()`, such as a sibling response from `add_response()`, are carried
+  into the fit. Every `fit()` result changes test rows as a consequence.
 
 * Tuning metrics are now scored on the original response scale (#49). The
   response transform is a `skip = TRUE` recipe step, so tune never applied it
@@ -544,7 +546,7 @@ consequences; the review itself is in
   from `evaluate()`'s and the NA-outcome rows reached the fit (a random forest
   member failed in warm-start tuning on them). `fit()` reports the drop in its
   console tree as `evaluate()` does, and the check that `evaluation$split`
-  was drawn from the modelled rows (above) applies the same rule.
+  still indexes the modelled rows (above) applies the same rule.
 
 * Single-model prediction intervals no longer move with the response-bound
   clamp. `predict()` winsorized the point prediction before building the

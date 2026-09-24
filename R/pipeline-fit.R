@@ -14,12 +14,15 @@
 #' test rows are the only rows nothing was selected on: `evaluate()`'s
 #' training rows chose the members (on `cv_<metric>`) and tuned the
 #' warm-start parameters, so a partition drawn afresh would score the final
-#' models partly on those rows. `fit()` checks that the split was drawn from
-#' the rows this object models, the analysis table less the rows whose
-#' outcome is `NA` (the rule `evaluate()` applies), and aborts with class
-#' `horizons_input_error` if not. The count of NA-outcome rows is reported in
-#' the console tree when `verbose = TRUE`. With UQ or AD on, the calibration
-#' set is carved out of Split F's training part.
+#' models partly on those rows. `fit()` checks that the split still indexes
+#' the rows this object models: after dropping the rows whose outcome is `NA`
+#' (the rule `evaluate()` applies), the id and outcome columns must match the
+#' split's, value for value and in order, or `fit()` aborts with class
+#' `horizons_input_error`. Columns added since `evaluate()`, such as a sibling
+#' response from `add_response()`, are carried into the fit. The count of
+#' NA-outcome rows is reported in the console tree when `verbose = TRUE`.
+#' With UQ or AD on, the calibration set is carved out of Split F's training
+#' part.
 #'
 #' @param x A `horizons_eval` object (output of `evaluate()`).
 #' @param n_best Integer. Number of top configurations to re-tune. Default 5.
@@ -184,9 +187,15 @@ fit <- function(x,
   ## through selection. evaluate()'s test rows are the only rows nothing was
   ## selected on, so fit() is scored on them.
   ##
-  ## Reusing the split is sound only if it indexes the rows this object
-  ## models now. set_analysis() refuses a promoted object, so a mismatch means
-  ## a stale or hand-edited object; refuse it rather than score the wrong rows.
+  ## Reusing the split is sound only if its row positions still name the
+  ## same samples with the same outcomes, so that is what is checked: the id
+  ## and outcome columns, identical values in the same order. Other columns
+  ## may legitimately have changed; add_response() can add a sibling response
+  ## to an evaluated object. set_analysis() refuses a promoted object, so a
+  ## mismatch here means the rows or outcomes were changed some other way, or
+  ## the object was built by hand; refuse it rather than score the wrong rows.
+  ## The split is then pointed at the current table, so the fit sees the
+  ## object's columns as they are now.
 
   split_F <- x$evaluation$split
 
@@ -200,16 +209,31 @@ fit <- function(x,
 
   }
 
-  if (!identical(split_F$data, modelled$data)) {
+  id_col <- role_map$variable[role_map$role == "id"]
+
+  if (length(id_col) == 0) {
+
+    id_col <- "sample_id"
+
+  } else {
+
+    id_col <- id_col[1]
+
+  }
+
+  if (!identical(split_F$data[[id_col]], modelled$data[[id_col]]) ||
+      !identical(split_F$data[[outcome_col]], modelled$data[[outcome_col]])) {
 
     cli::cli_abort(c(
-      "{.fn evaluate}'s split was not drawn from the rows this object models.",
-      "x" = "{.field evaluation$split} holds {nrow(split_F$data)} row{?s}; the analysis table has {nrow(modelled$data)} with an observed {.field {outcome_col}}, and the two tables differ.",
-      "i" = "The object was changed after {.fn evaluate}, or built by hand.",
+      "{.fn evaluate}'s split does not index the rows this object models.",
+      "x" = "{.field evaluation$split} was drawn on {nrow(split_F$data)} row{?s}; the analysis table has {nrow(modelled$data)} with an observed {.field {outcome_col}}, and their {.field {id_col}} or {.field {outcome_col}} values differ.",
+      "i" = "The rows or outcomes changed after {.fn evaluate}, or the object was built by hand.",
       "i" = "Re-run {.fn evaluate} on the object as it is now."
     ), class = "horizons_input_error")
 
   }
+
+  split_F$data <- modelled$data
 
   train_F <- rsample::training(split_F)
   test_F  <- rsample::testing(split_F)
@@ -566,18 +590,6 @@ fit <- function(x,
   })
 
   ## Build row_index: .row → id mapping from train_Fit
-  id_col <- role_map$variable[role_map$role == "id"]
-
-  if (length(id_col) == 0) {
-
-    id_col <- "sample_id"
-
-  } else {
-
-    id_col <- id_col[1]
-
-  }
-
   row_index <- tibble::tibble(
     .row      = seq_len(nrow(train_Fit)),
     sample_id = train_Fit[[id_col]]

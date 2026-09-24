@@ -769,7 +769,19 @@ describe("fit() - scores on evaluate()'s split", {
     expect_error(
       fit(stale, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE,
           verbose = FALSE),
-      "not drawn from the rows this object models",
+      "does not index the rows this object models",
+      class = "horizons_input_error"
+    )
+
+    ## Same ids, one outcome changed: the split's rows no longer carry the
+    ## outcomes it was stratified and scored on.
+    relabelled <- obj
+    relabelled$data$analysis$SOC[1] <- relabelled$data$analysis$SOC[1] + 1
+
+    expect_error(
+      fit(relabelled, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE,
+          verbose = FALSE),
+      "does not index the rows this object models",
       class = "horizons_input_error"
     )
 
@@ -781,6 +793,27 @@ describe("fit() - scores on evaluate()'s split", {
           verbose = FALSE),
       class = "horizons_input_error"
     )
+
+  })
+
+  it("still fits after add_response() adds a sibling response", {
+
+    lab <- tibble::tibble(sample_id = obj$data$analysis$sample_id,
+                          clay      = seq_len(nrow(obj$data$analysis)))
+
+    utils::capture.output(
+      with_clay <- add_response(obj, lab, variable = "clay")
+    )
+
+    r_clay <- suppressWarnings(
+      fit(with_clay, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE,
+          verbose = FALSE, seed = 42L)
+    )
+
+    expect_s3_class(r_clay, "horizons_fit")
+    expect_true("clay" %in% names(r_clay$models$split$data))
+    expect_identical(rsample::testing(r_clay$models$split)$sample_id,
+                     rsample::testing(obj$evaluation$split)$sample_id)
 
   })
 

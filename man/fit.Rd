@@ -77,10 +77,13 @@ The train/test partition (Split F) is \code{evaluate()}'s split, reused. Its
 test rows are the only rows nothing was selected on: \code{evaluate()}'s
 training rows chose the members (on \verb{cv_<metric>}) and tuned the
 warm-start parameters, so a partition drawn afresh would score the final
-models partly on those rows. \code{fit()} checks that the split was drawn from
-the rows this object models, the analysis table less the rows whose
-outcome is \code{NA} (the rule \code{evaluate()} applies), and aborts with class
-\code{horizons_input_error} if not. The count of NA-outcome rows is reported in
-the console tree when \code{verbose = TRUE}. With UQ or AD on, the calibration
-set is carved out of Split F's training part.
+models partly on those rows. \code{fit()} checks that the split still indexes
+the rows this object models: after dropping the rows whose outcome is \code{NA}
+(the rule \code{evaluate()} applies), the id and outcome columns must match the
+split's, value for value and in order, or \code{fit()} aborts with class
+\code{horizons_input_error}. Columns added since \code{evaluate()}, such as a sibling
+response from \code{add_response()}, are carried into the fit. The count of
+NA-outcome rows is reported in the console tree when \code{verbose = TRUE}.
+With UQ or AD on, the calibration set is carved out of Split F's training
+part.
 }

@@ -1206,9 +1206,9 @@ rank_configs_by_cv <- function(results, metric) {
 #'
 #' @description
 #' Drops the rows whose outcome is `NA`. This is the single rule for which
-#' rows `evaluate()` and `fit()` model. Both apply it to `x$data$analysis`,
-#' which cannot change between the two verbs because `set_analysis()` refuses
-#' a promoted object, so both draw their splits from the same frame (#67).
+#' rows `evaluate()` and `fit()` model (#67). `evaluate()` draws its split
+#' from the rows it returns; `fit()` reuses that split and applies the same
+#' rule to check that the split's ids and outcomes still match the object's.
 #' Before this, `fit()` split the unfiltered table: its partition was over
 #' different rows from `evaluate()`'s, and NA-outcome rows reached the fit.
 #'
