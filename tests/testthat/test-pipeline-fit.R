@@ -692,6 +692,63 @@ describe("fit() - final_bayesian_iter", {
 })
 
 
+## =========================================================================
+## The recipe settings evaluate() ran with reach the re-tune (#62)
+## =========================================================================
+
+describe("fit() - recipe settings", {
+
+  capture_recipe_args <- function(obj) {
+
+    seen <- NULL
+
+    testthat::with_mocked_bindings(
+      fit_single_config = function(...) {
+        seen <<- list(...)[c("sg_window", "pca_threshold")]
+        list(config_id = list(...)$config_row$config_id, status = "failed",
+             degraded = NA, degraded_reason = NA_character_,
+             fitted_workflow = NULL, best_params = NULL,
+             cv_predictions = NULL, test_metrics = NULL, cv_metrics = NULL,
+             uq = NULL, ad = NULL, warnings = NULL,
+             error_message = "mocked", runtime_secs = 0)
+      },
+      tryCatch(
+        suppressWarnings(
+          fit(obj, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE,
+              verbose = FALSE)
+        ),
+        error = function(e) NULL
+      ),
+      .package = "horizons"
+    )
+
+    seen
+
+  }
+
+  obj <- make_fit_object(n = 60, n_configs = 1)
+
+  it("passes configure()'s sg_window and pca_threshold to fit_single_config()", {
+
+    obj$config$recipe <- list(sg_window = 7L, pca_threshold = 0.9)
+
+    expect_identical(capture_recipe_args(obj),
+                     list(sg_window = 7L, pca_threshold = 0.9))
+
+  })
+
+  it("falls back to the values the recipe always ran when the record is absent (older objects)", {
+
+    obj$config$recipe <- NULL
+
+    expect_identical(capture_recipe_args(obj),
+                     list(sg_window = 9L, pca_threshold = 0.995))
+
+  })
+
+})
+
+
 describe("fit() - seed reproducibility", {
 
   ## The train/test split is evaluate()'s, so what fit()'s seed controls is

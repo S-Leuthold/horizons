@@ -20,6 +20,8 @@
   RPD 3.82). `configure()`'s docs gain a "Choosing models for large spectral
   libraries" section covering n x p limits across `MODEL_SPECS`.
 
+* **`configure()` gains `sg_window` and `pca_threshold`** (#62): the Savitzky-Golay window, in grid points, and the share of variance `feature_selection = "pca"` keeps. Each is set once per object and applies to every configuration, so neither enters the config id; both are recorded in `config$recipe`. The defaults, 9 and 0.995, are the values the recipe already ran, so a call that does not set them builds the same recipes as before. `sg_window` must be odd and at least 5, because the second-derivative methods fit a cubic; it trims `(sg_window - 1) / 2` columns from each end for every preprocessing method, `raw` and `snv` included. The polynomial order is still fixed by the method, and for `"sg"` it is 1, which makes that smoother a moving average: a wider window is a wider boxcar, not a peak-preserving filter. `pca_threshold` must be in (0, 1]. `evaluate()`, its parallel workers and `fit()` read the settings from the object, and an object configured by an earlier version runs the defaults. Because the window counts grid points and `standardize()` can still change the axis after `configure()`, the window's width in cm-1 is not stored with the setting: `configure()` prints it for the axis it sees, and `evaluate()` records the settings it ran with in `evaluation$recipe`, with `sg_window_cm` measured on the axis the recipe ran on (the median spacing of the predictor wavenumbers, since the grid step in the provenance can describe another axis), so the runs of an `sg_window` sweep can be told apart. `evaluate()` also refuses, before any config runs, a window that is not narrower than the spectrum, naming both numbers and the width; it used to fail every config inside tune without naming the window. `step_transform_spectra()` now refuses an even window, or one under 5, when the step is built, and at `prep()` a window as wide as the spectrum, which prospectr refuses at bake time. Neither enters the config id, so both are part of the tuning settings `evaluate()` records on every checkpoint row (#42): a rerun into the same `output_dir` with another window or threshold refuses to resume, naming the setting, and rows written before the two were recorded resume as unverified. `build_recipe()`, `evaluate_single_config()` and `fit_single_config()` take the two settings as arguments with the same defaults.
+
 ## Performance
 
 * `step_transform_spectra()` bakes the whole spectral matrix in one prospectr
@@ -60,6 +62,8 @@
   parallel runs previously drew different streams from the same seed.
 
 ## Breaking / behavioural
+
+* **`configure()` no longer writes `config$defaults`, and `config$configs` drops from 9 columns to 6** (#62). The `preprocessing_params`, `feature_params` and `transform_params` list-columns are gone, along with the `config$defaults` record; nothing read any of them, and the values the record held were not the ones the recipe ran (see Bug Fixes). Code that indexed the config table by position, expected nine columns, or read `config$defaults` needs updating; the settings that do run are in `config$recipe`, and after `evaluate()` in `evaluation$recipe`. Re-configuring an object saved by an earlier version drops its `config$defaults`.
 
 * **`standardize()` resamples onto a canonical grid, so two sources
   standardized alike share their columns (#64).** The grid is every multiple
@@ -497,6 +501,8 @@ consequences; the review itself is in
   `rec$steps[[i]]$terms` environments will see this; the prepped and baked
   output is unchanged.
 
+* `build_recipe()` gives `step_transform_spectra()` the spectral column names as a literal vector rather than `dplyr::all_of(predictor_cols)`. tune's parameter extraction evaluates step selectors outside a selecting context, where `all_of()` is soft-deprecated, so the test suite carried 26 copies of tidyselect's "Using `all_of()` outside of a selecting function" warning, one or two per `evaluate_single_config()` or `fit_single_config()` call. lifecycle raises a soft deprecation only when the call traces back to the global environment or to the package under test. The selector's environment belongs to horizons, so the warning fired under testthat and never in a user's session: this removes test-suite noise, not a warning users saw. The step selects the same columns, and its `terms` now holds the names themselves.
+
 * `resample_spectra()` accepts an explicit `new_wav` grid and refuses to
   extrapolate, so the package has one resampling routine for both
   `standardize()` and `select_training()`.
@@ -550,6 +556,8 @@ consequences; the review itself is in
   `seed`. Equality tests in the package use `rf` for that reason.
 
 ## Bug Fixes
+
+* **`configure()` no longer records method defaults the recipe does not run** (#62). It wrote `config$defaults`, a Savitzky-Golay window of 11 and order of 2, a PCA threshold of 0.99 and a `correlation_n` of 200, and gave every configuration three list-columns, `preprocessing_params`, `feature_params` and `transform_params`. Nothing read any of them. The recipe ran a window of 9, an order set by the preprocessing method, a threshold of 0.995, and a correlation step that has no `n` at all. The record and the columns are gone: `config$configs` has six columns, and `config$recipe` holds the settings that do run (see `configure(sg_window, pca_threshold)` under New features). Re-configuring an object saved by an earlier version drops its `config$defaults`.
 
 * `evaluate()` keeps one checkpoint store, a file per config under
   `checkpoints/` (#42). The whole-table `eval_checkpoint.rds` was written by

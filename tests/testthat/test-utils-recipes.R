@@ -1194,6 +1194,62 @@ describe("step_transform_spectra() name collisions and window size", {
 
   })
 
+  it("aborts at prep when the window is exactly as wide as the spectrum", {
+
+    ## prospectr::savitzkyGolay() needs w < ncol. A window equal to the column
+    ## count used to pass prep (it leaves one column after trimming) and then
+    ## fail at bake, inside tune, as a "Grid search failed" naming nothing.
+    td <- make_test_data(n = 20, n_wn = 9)
+
+    for (pp in c("raw", "deriv1", "deriv2")) {
+
+      rec <- recipes::recipe(SOC ~ ., data = dplyr::select(td$data, -sample_id)) |>
+        step_transform_spectra(dplyr::starts_with("wn_"), preprocessing = pp,
+                               window_size = 9)
+
+      expect_error(recipes::prep(rec), class = "horizons_input_error", label = pp)
+      expect_error(recipes::prep(rec), "9 spectral columns", label = pp)
+
+    }
+
+    ## One column wider, and every method runs.
+    td <- make_test_data(n = 20, n_wn = 11)
+
+    rec <- recipes::recipe(SOC ~ ., data = dplyr::select(td$data, -sample_id)) |>
+      step_transform_spectra(dplyr::starts_with("wn_"), preprocessing = "deriv2",
+                             window_size = 9)
+
+    expect_equal(ncol(recipes::bake(recipes::prep(rec), new_data = NULL)) - 1L, 3L)
+
+  })
+
+  it("refuses at construction a window that is even, under 5, fractional or not a scalar", {
+
+    td   <- make_test_data(n = 20, n_wn = 30)
+    base <- recipes::recipe(SOC ~ ., data = dplyr::select(td$data, -sample_id))
+
+    for (bad in list(8, 10L, 3, 1L, 7.5, NA_real_, Inf, "9", c(9, 11))) {
+
+      expect_error(
+        step_transform_spectra(base, dplyr::starts_with("wn_"),
+                               preprocessing = "raw", window_size = bad),
+        "odd whole number of at least 5",
+        class = "horizons_input_error",
+        info  = paste("window_size =", deparse(bad))
+      )
+
+    }
+
+    ## build_recipe() builds the step, so a direct caller is held to the same
+    ## rule configure() applies.
+    expect_error(build_recipe(make_config_row(), td$data, td$role_map, sg_window = 8L),
+                 class = "horizons_input_error")
+
+    expect_no_error(step_transform_spectra(base, dplyr::starts_with("wn_"),
+                                           preprocessing = "deriv2", window_size = 5))
+
+  })
+
 })
 
 
@@ -1307,9 +1363,12 @@ describe("custom steps keep their selectors through prep (#52)", {
   }
 
   ## The step under test is always the recipe's last step. The selection
-  ## steps sit on the transform step's output, as build_recipe() puts them,
-  ## and the transform step selects through a local vector as build_recipe()
-  ## does, so a test can see whether its selector environment was cut loose.
+  ## steps sit on the transform step's output, as build_recipe() puts them.
+  ## The transform step here selects through dplyr::all_of() on a local
+  ## vector, a selector that needs its environment, so a test can see whether
+  ## that environment was cut loose. build_recipe() itself now injects the
+  ## names as a literal vector, which needs none; the re-prep of its own
+  ## recipe is tested after this loop.
   step_recipe <- function(step, data) {
 
     wn_cols <- grep("^wn_", names(data), value = TRUE)
@@ -1560,6 +1619,33 @@ describe("custom steps keep their selectors through prep (#52)", {
 
   }
 
+  it("a recipe build_recipe() made, literal selector and all, re-preps with fresh = TRUE", {
+
+    ## build_recipe() gives the transform step its columns as a literal name
+    ## vector. That quosure has to survive prep, as the #52 contract requires
+    ## of `terms`, and resolve again on a fresh re-prep to the same columns.
+    set.seed(52)
+    td <- make_test_data(n = 40, n_wn = 60, covariates = "clay")
+
+    for (fs in c("none", "pca", "correlation")) {
+
+      rec <- build_recipe(make_config_row(preprocessing = "snv_deriv1",
+                                          feature_selection = fs,
+                                          covariates = "clay"),
+                          td$data, td$role_map)
+
+      prepped <- recipes::prep(rec, training = td$data)
+      again   <- recipes::prep(prepped, training = td$data, fresh = TRUE)
+
+      expect_identical(prepped$steps[[1]]$terms, rec$steps[[1]]$terms, label = fs)
+      expect_identical(again$steps[[1]]$columns, prepped$steps[[1]]$columns, label = fs)
+      expect_identical(recipes::bake(again, new_data = NULL),
+                       recipes::bake(prepped, new_data = NULL), label = fs)
+
+    }
+
+  })
+
   it("step_selectors() reads each layout, and refuses the unrecoverable one", {
 
     sel <- horizons:::step_selectors
@@ -1583,6 +1669,162 @@ describe("custom steps keep their selectors through prep (#52)", {
                  class = "horizons_input_error")
     expect_error(sel(list(terms = list(), columns = c(wn_1 = "wn_1")), "step_x"),
                  "earlier version of horizons")
+
+  })
+
+})
+
+
+## =========================================================================
+## Recipe settings: configure()'s sg_window and pca_threshold reach the steps
+## =========================================================================
+##
+## Before #62 build_recipe() hardcoded both: step_transform_spectra() ran its
+## own default window of 9 and step_pca() a threshold of 0.995, whatever
+## configure() recorded. The settings are now arguments, threaded from
+## config$recipe, with the old values as defaults.
+
+describe("build_recipe() recipe settings (#62)", {
+
+  methods <- c("raw", "sg", "snv", "deriv1", "deriv2", "snv_deriv1", "snv_deriv2")
+
+  it("passes sg_window to the transform step: a window of 11 leaves p - 10 columns", {
+
+    td <- make_test_data(n = 20, n_wn = 40)
+
+    for (pp in methods) {
+
+      config <- make_config_row(preprocessing = pp)
+      rec    <- build_recipe(config, td$data, td$role_map, sg_window = 11L)
+
+      expect_identical(rec$steps[[1]]$window_size, 11L, label = pp)
+
+      baked <- recipes::bake(recipes::prep(rec), new_data = NULL)
+
+      expect_equal(sum(grepl("^spec[0-9]+$", names(baked))), 40 - 10, label = pp)
+
+    }
+
+  })
+
+  it("passes pca_threshold to step_pca, where it sets the component count", {
+
+    set.seed(62)
+    td     <- make_test_data(n = 40, n_wn = 40)
+    config <- make_config_row(preprocessing = "snv", feature_selection = "pca")
+
+    n_components <- function(threshold) {
+
+      rec <- build_recipe(config, td$data, td$role_map, pca_threshold = threshold)
+      pca <- rec$steps[[which(vapply(rec$steps, inherits, logical(1), "step_pca"))]]
+
+      expect_identical(pca$threshold, threshold)
+
+      sum(grepl("^PC", names(recipes::bake(recipes::prep(rec), new_data = NULL))))
+
+    }
+
+    ## Noise spectra spread their variance over many components, so a lower
+    ## threshold keeps strictly fewer.
+    expect_lt(n_components(0.5), n_components(0.995))
+
+  })
+
+  it("builds, at its defaults, the recipe the hardcoded values built", {
+
+    ## The reference is the call build_recipe() made before the settings were
+    ## arguments: step_transform_spectra() with no window_size, so the step's
+    ## own default of 9, and step_pca() at 0.995. The baked output must be
+    ## identical, so the default behaviour did not move.
+    td <- make_test_data(n = 40, n_wn = 40)
+    wn <- td$role_map$variable[td$role_map$role == "predictor"]
+
+    for (pp in c("raw", "snv", "deriv2")) {
+
+      for (fs in c("none", "pca")) {
+
+        reference <- recipes::recipe(SOC ~ ., data = td$data) |>
+          recipes::update_role(sample_id, new_role = "id") |>
+          step_transform_spectra(dplyr::all_of(wn), preprocessing = pp)
+
+        if (fs == "pca") {
+
+          reference <- reference |>
+            recipes::step_pca(select_generated_spectra(), threshold = 0.995,
+                              options = list(scale. = TRUE, center = TRUE))
+
+        }
+
+        built <- build_recipe(make_config_row(preprocessing = pp, feature_selection = fs),
+                              td$data, td$role_map)
+
+        expect_identical(recipes::bake(recipes::prep(built), new_data = NULL),
+                         recipes::bake(recipes::prep(reference), new_data = NULL),
+                         label = paste(pp, fs))
+
+      }
+
+    }
+
+  })
+
+})
+
+
+## =========================================================================
+## tune reads the recipe without tidyselect's all_of() deprecation
+## =========================================================================
+##
+## evaluate_single_config() and fit_single_config() call
+## workflows::extract_parameter_set_dials(), which reaches every step argument
+## through recipes:::find_tune_id(). That evaluates the selector quosures
+## outside a selecting context, and the transform step's selector used to be
+## dplyr::all_of(predictor_cols), so every config raised "Using `all_of()`
+## outside of a selecting function" (about 26 warnings in the suite). The
+## lifecycle verbosity is forced so the check does not depend on whether
+## lifecycle has already warned once this session.
+
+describe("build_recipe() under tune's parameter extraction", {
+
+  it("raises no warning for any feature selection, with or without a covariate", {
+
+    rlang::local_options(lifecycle_verbosity = "warning")
+
+    td   <- make_test_data(n = 20, n_wn = 30, covariates = "clay")
+    spec <- define_model_spec("rf")
+
+    for (fs in c("none", "pca", "correlation", "boruta", "cars")) {
+
+      for (cov in list(NA_character_, "clay")) {
+
+        rec <- build_recipe(make_config_row(preprocessing = "deriv1",
+                                            feature_selection = fs,
+                                            covariates = cov),
+                            td$data, td$role_map)
+
+        wf <- workflows::workflow() |>
+          workflows::add_recipe(rec) |>
+          workflows::add_model(spec)
+
+        expect_no_warning(workflows::extract_parameter_set_dials(wf),
+                          message = "outside of a selecting function")
+
+      }
+
+    }
+
+  })
+
+  it("still selects exactly the spectral columns, leaving a promoted covariate alone", {
+
+    td  <- make_test_data(n = 20, n_wn = 30, covariates = "clay")
+    rec <- build_recipe(make_config_row(covariates = "clay"), td$data, td$role_map)
+
+    prepped <- recipes::prep(rec)
+    wn      <- td$role_map$variable[td$role_map$role == "predictor"]
+
+    expect_identical(unname(prepped$steps[[1]]$columns), wn)
+    expect_true("clay" %in% names(recipes::bake(prepped, new_data = NULL)))
 
   })
 

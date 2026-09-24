@@ -7,7 +7,8 @@
 #'
 #' Supported preprocessing methods:
 #' - `"raw"` — trim edge artifacts only (no transformation)
-#' - `"sg"` — Savitzky-Golay smoothing (0th derivative)
+#' - `"sg"` — Savitzky-Golay smoothing (0th derivative) at polynomial order
+#'   1, which is a moving average: a boxcar `window_size` points wide
 #' - `"snv"` — Standard Normal Variate + edge trimming
 #' - `"deriv1"` — Savitzky-Golay 1st derivative
 #' - `"deriv2"` — Savitzky-Golay 2nd derivative
@@ -17,7 +18,10 @@
 #' @param recipe A `recipes::recipe()` object.
 #' @param ... Column selectors for spectral columns.
 #' @param preprocessing Character. One of the methods listed above.
-#' @param window_size Odd integer. Savitzky-Golay window size. Default 9.
+#' @param window_size Odd integer, at least 5. Savitzky-Golay window size, in
+#'   grid points; it also sets the edge trimmed for `"raw"` and `"snv"`.
+#'   Default 9. Checked here, so a direct caller cannot build the step with a
+#'   window some method cannot run.
 #' @param role Character. Role for output columns. Default "predictor".
 #' @param trained Logical. Internal recipes flag.
 #' @param skip Logical. Skip during bake()? Default FALSE.
@@ -36,6 +40,19 @@ step_transform_spectra <- function(recipe,
                                    id          = recipes::rand_id("transform_spectra")) {
 
   terms <- rlang::enquos(...)
+
+  ## An even window has no centre point, and a window under 5 cannot fit the
+  ## cubic deriv2 needs. Either would otherwise build, prep, and fail at bake
+  ## inside prospectr (or, for raw and snv, trim a fractional edge).
+  if (!is_valid_sg_window(window_size)) {
+
+    cli::cli_abort(c(
+      "{.arg window_size} must be an odd whole number of at least {SG_WINDOW_MIN}.",
+      "x" = "Got {.code {paste(deparse(window_size), collapse = ' ')}}.",
+      "i" = "The window is centred on a point, so its width is odd, and the second-derivative methods fit a cubic, which needs at least {SG_WINDOW_MIN} points."
+    ), class = "horizons_input_error")
+
+  }
 
   recipes::add_step(
     recipe,
@@ -116,17 +133,19 @@ prep.step_transform_spectra <- function(x, training, info = NULL, ...) {
   half_window  <- (x$window_size - 1) / 2
   out_len      <- input_len - 2 * half_window
 
-  ## A window wider than the spectrum trims everything away. Downstream this
-  ## surfaces as a `names0()` of a non-positive length or an empty predictor
-  ## matrix, neither of which names the cause, so check it here with both
-  ## numbers in the message.
+  ## A window wider than the spectrum trims everything away, and one exactly
+  ## as wide is refused by prospectr::savitzkyGolay() (it needs w < ncol) at
+  ## bake time, inside tune, where the message is lost. Downstream the first
+  ## surfaces as a `names0()` of a non-positive length and the second as a
+  ## failed grid search, neither of which names the cause, so check both here
+  ## with the numbers in the message.
 
-  if (out_len < 1) {
+  if (input_len <= x$window_size) {
 
     cli::cli_abort(c(
-      "{.fn step_transform_spectra} would trim every spectral column away.",
-      "x" = "{input_len} spectral column{?s} with {.code window_size = {x$window_size}} leaves {out_len} after Savitzky-Golay edge trimming.",
-      "i" = "Savitzky-Golay drops {half_window} column{?s} from each end, so {.arg window_size} must be smaller than the number of spectral columns."
+      "{.fn step_transform_spectra}'s window is at least as wide as the spectrum.",
+      "x" = "{input_len} spectral column{?s} with {.code window_size = {x$window_size}}.",
+      "i" = "Savitzky-Golay drops {half_window} column{?s} from each end and needs the window narrower than the spectrum, so {.arg window_size} must be smaller than the number of spectral columns."
     ), class = "horizons_input_error")
 
   }
@@ -270,6 +289,33 @@ check_transform_name_collision <- function(generated, passthrough) {
   }
 
   invisible(TRUE)
+
+}
+
+## ---------------------------------------------------------------------------
+## Window rule (shared by the step constructor and configure())
+## ---------------------------------------------------------------------------
+
+#' Is this a Savitzky-Golay window every preprocessing method can run?
+#'
+#' @description
+#' Odd, because the window is centred on a point, and at least
+#' `SG_WINDOW_MIN`, because `deriv2` and `snv_deriv2` fit a cubic and
+#' `prospectr::savitzkyGolay()` needs the window wider than the polynomial
+#' order. `configure()` applies one window to every method in a grid, so the
+#' rule is the strictest method's. Whether the window fits the spectrum is a
+#' separate check, made where the spectrum is known (`prep()`, and
+#' `evaluate()`'s preflight).
+#'
+#' @param w The window to check.
+#'
+#' @return `TRUE` or `FALSE`.
+#' @keywords internal
+#' @noRd
+is_valid_sg_window <- function(w) {
+
+  is.numeric(w) && length(w) == 1 && is.finite(w) && w == round(w) &&
+    w >= SG_WINDOW_MIN && w %% 2 == 1
 
 }
 
