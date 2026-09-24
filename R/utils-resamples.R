@@ -218,10 +218,10 @@ rebuild_resamples <- function(data, idx) {
 #' Whether rsample stratifies a draw on this outcome
 #'
 #' @description
-#' Asks [rsample::make_strata()], with the defaults `initial_split()` and
-#' `vfold_cv()` pass it (`breaks = 4`, `pool = 0.1`), how many strata it would
-#' form. One stratum is an unstratified draw. See the section header above for
-#' the cases.
+#' Asks [rsample::make_strata()], with the `breaks` and `pool` every draw
+#' passes (`STRATA_BREAKS`, `STRATA_POOL`), how many strata it would form. One
+#' stratum is an unstratified draw. See the section header above for the
+#' cases.
 #'
 #' `make_strata()` draws a random stratum for each pooled value, and
 #' `evaluate()` draws its CV folds from the stream its split leaves without
@@ -243,7 +243,9 @@ outcome_stratifies <- function(outcome) {
     else if (exists(".Random.seed", envir = globalenv(), inherits = FALSE)) rm(".Random.seed", envir = globalenv())
   }, add = TRUE)
 
-  strata <- suppressWarnings(rsample::make_strata(outcome))
+  strata <- suppressWarnings(
+    rsample::make_strata(outcome, breaks = STRATA_BREAKS, pool = STRATA_POOL)
+  )
 
   nlevels(strata) > 1L
 
@@ -256,11 +258,15 @@ outcome_stratifies <- function(outcome) {
 #' Runs `stratified()`, the rsample call with `strata`, and on an error runs
 #' `unstratified()`, the same call without, as each draw site did inline.
 #' The caller seeds the RNG first; [outcome_stratifies()] leaves it as found,
-#' so the draws consume the stream they always did.
+#' so the draws consume the stream they always did. An error from the check
+#' itself counts as unstratified rather than aborting: the stratified draw
+#' calls `make_strata()` with the same arguments, so it fails too and is
+#' retried without strata, as it was before the check existed.
 #'
 #' @param outcome The outcome vector `stratified()` stratifies on.
 #' @param stratified,unstratified Functions of no arguments returning the
-#'   draw, with and without `strata`.
+#'   draw, with and without `strata`. `stratified()` passes `breaks =
+#'   STRATA_BREAKS, pool = STRATA_POOL`, the values the check uses.
 #' @return List with `draw` (the `rsplit` or `rset`), `stratified` (`FALSE`
 #'   when the draw is unstratified, whether rsample dropped the strata or the
 #'   stratified call failed) and `strata_failed` (`TRUE` when the stratified
@@ -270,7 +276,7 @@ outcome_stratifies <- function(outcome) {
 
 draw_stratified <- function(outcome, stratified, unstratified) {
 
-  held          <- outcome_stratifies(outcome)
+  held          <- tryCatch(outcome_stratifies(outcome), error = function(e) FALSE)
   strata_failed <- FALSE
 
   draw <- tryCatch(

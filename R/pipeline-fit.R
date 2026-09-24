@@ -371,7 +371,8 @@ fit <- function(x,
     calib_drawn <- draw_stratified(
       outcome      = train_F[[outcome_col]],
       stratified   = function() rsample::initial_split(train_F, prop = CALIB_PROP,
-                                                       strata = dplyr::all_of(outcome_col)),
+                                                       strata = dplyr::all_of(outcome_col),
+                                                       breaks = STRATA_BREAKS, pool = STRATA_POOL),
       unstratified = function() rsample::initial_split(train_F, prop = CALIB_PROP)
     )
     split_C <- calib_drawn$draw
@@ -412,7 +413,8 @@ fit <- function(x,
   cv_drawn <- draw_stratified(
     outcome      = train_Fit[[outcome_col]],
     stratified   = function() rsample::vfold_cv(train_Fit, v = cv_folds,
-                                                strata = dplyr::all_of(outcome_col)),
+                                                strata = dplyr::all_of(outcome_col),
+                                                breaks = STRATA_BREAKS, pool = STRATA_POOL),
     unstratified = function() rsample::vfold_cv(train_Fit, v = cv_folds)
   )
   cv_resamples <- cv_drawn$draw
@@ -487,14 +489,26 @@ fit <- function(x,
 
     }
 
-    if (compute_uq) {
+    ## The calibration set UQ and AD share, named for whichever it serves;
+    ## with AD alone it went unreported. Both flags are FALSE here when the
+    ## set was too small, and the note below says so instead.
+    if (compute_uq || compute_ad) {
 
       cat(paste0(
-        "\u2502  UQ calibration: ", nrow(train_Fit), " fit / ",
-        nrow(calib_data), " calibration, ",
+        "\u2502  ", paste(c(if (compute_uq) "UQ", if (compute_ad) "AD"), collapse = " and "),
+        " calibration: ", nrow(train_Fit), " fit / ", nrow(calib_data), " calibration, ",
         if (calib_drawn$stratified) paste0("stratified on ", outcome_col) else "unstratified",
         "\n"
       ))
+
+      if (calib_drawn$strata_failed) {
+
+        cat(paste0(
+          "\u2502  ", cli::col_yellow("Stratified calibration split failed, ",
+                                       "retrying without strata"), "\n"
+        ))
+
+      }
 
     }
 

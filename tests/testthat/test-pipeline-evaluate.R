@@ -514,6 +514,8 @@ describe("evaluate() - the split line and the fallback notes (#91)", {
     out <- evaluate_header(make_eval_object(n = 30, n_configs = 1))
 
     expect_true("│  Split: 24 train / 6 test (80/20, unstratified)" %in% out)
+    expect_true("│  Tuning: 3-fold CV (unstratified), grid = 2, bayesian = 0" %in% out)
+    expect_false(any(grepl("(stratified)", out, fixed = TRUE)))
     expect_false(any(grepl(", stratified)", out, fixed = TRUE)))
 
   })
@@ -523,6 +525,18 @@ describe("evaluate() - the split line and the fallback notes (#91)", {
     out <- evaluate_header(make_eval_object(n = 60, n_configs = 1))
 
     expect_true("│  Split: 48 train / 12 test (80/20, stratified)" %in% out)
+    expect_true("│  Tuning: 3-fold CV (stratified), grid = 2, bayesian = 0" %in% out)
+
+  })
+
+  it("says the folds are unstratified under a stratified split", {
+
+    ## 45 rows bin into two strata; the 35 training rows the folds are drawn
+    ## on are too few
+    out <- evaluate_header(make_eval_object(n = 45, n_configs = 1))
+
+    expect_true(any(grepl("^│  Split: 35 train / 10 test \\(80/20, stratified\\)$", out)))
+    expect_true("│  Tuning: 3-fold CV (unstratified), grid = 2, bayesian = 0" %in% out)
 
   })
 
@@ -553,9 +567,48 @@ describe("evaluate() - the split line and the fallback notes (#91)", {
 
     expect_length(header, 1L)
     expect_identical(out[split_line], "│  Split: 48 train / 12 test (80/20, unstratified)")
+    expect_identical(out[cv_line], "│  Tuning: 3-fold CV (unstratified), grid = 2, bayesian = 0")
     expect_identical(split_note, split_line + 1L)
     expect_identical(cv_note, cv_line + 1L)
     expect_true(all(c(split_note, cv_note) > header))
+
+  })
+
+  it("draws the split and the folds it drew before the check, on an outcome whose strata draw random numbers", {
+
+    ## A pooled outcome (5 is under 10 % of the rows): make_strata() samples a
+    ## stratum for each pooled row, in the split and again in the folds, which
+    ## are drawn from the stream the split leaves, without a reseed. The
+    ## check runs make_strata() before each draw, so without its RNG restore
+    ## the folds would move.
+    obj <- make_eval_object(n = 96, n_configs = 1)
+    set.seed(3)
+    obj$data$analysis$SOC <- sample(c(rep(1:4, each = 23), rep(5, 4)))
+
+    captured <- NULL
+
+    testthat::with_mocked_bindings(
+      tryCatch(
+        suppressWarnings(evaluate(obj, prune = FALSE, verbose = FALSE, seed = 42L)),
+        header_rendered = function(e) NULL
+      ),
+      evaluate_single_config = function(config_row, split, cv_folds, ...) {
+        captured <<- list(split = split, cv_folds = cv_folds)
+        rlang::abort("stop", class = "header_rendered")
+      },
+      .package = "horizons"
+    )
+
+    ## The inline draws, as evaluate() made them before #91
+    set.seed(42L)
+    split <- rsample::initial_split(obj$data$analysis, prop = SPLIT_PROP,
+                                    strata = dplyr::all_of("SOC"))
+    folds <- rsample::vfold_cv(rsample::training(split), v = 3L,
+                               strata = dplyr::all_of("SOC"))
+
+    expect_identical(captured$split$in_id, split$in_id)
+    expect_identical(lapply(captured$cv_folds$splits, `[[`, "in_id"),
+                     lapply(folds$splits, `[[`, "in_id"))
 
   })
 
@@ -973,6 +1026,53 @@ describe("checkpoint scoring schema", {
     expect_true(any(grepl("earlier scoring schema", out)))
     expect_false(any(second$evaluation$results$cv_rpd == 999))
     expect_equal(second$evaluation$best_config, first$evaluation$best_config)
+
+  })
+
+  it("prints the checkpoint notes inside the tree, under the Configs line (#91)", {
+
+    obj    <- make_eval_object(n_configs = 2)
+    tmpdir <- withr::local_tempdir()
+    ckpt   <- file.path(tmpdir, "checkpoints")
+
+    suppressWarnings(evaluate(obj, output_dir = tmpdir, verbose = FALSE, seed = 42L))
+
+    ## cfg_002 rewritten as a schema-1 row, and a copy of cfg_001 filed under
+    ## a config the grid does not have
+    row <- readRDS(file.path(ckpt, "cfg_002.rds"))
+    row$scoring_schema <- NULL
+    saveRDS(row, file.path(ckpt, "cfg_002.rds"))
+
+    stale <- readRDS(file.path(ckpt, "cfg_001.rds"))
+    stale$config_id <- "cfg_009"
+    saveRDS(stale, file.path(ckpt, "cfg_009.rds"))
+
+    ## Resume, stopping at the first config the run has to evaluate
+    out <- utils::capture.output(
+      testthat::with_mocked_bindings(
+        tryCatch(
+          suppressWarnings(evaluate(obj, output_dir = tmpdir, seed = 42L)),
+          header_rendered = function(e) NULL
+        ),
+        evaluate_single_config = function(...) rlang::abort("stop", class = "header_rendered"),
+        .package = "horizons"
+      )
+    )
+
+    header  <- grep("┌ Evaluation", out, fixed = TRUE)
+    configs <- grep("│  Configs: ", out, fixed = TRUE)
+
+    expect_length(header, 1L)
+    expect_true(configs > header)
+    expect_identical(out[configs + 0:2], c(
+      "│  Configs: 2 total (1 from checkpoint)",
+      "│  Dropped 1 stale checkpoint entries",
+      "│  Dropped 1 checkpoint row scored under an earlier scoring schema (will be re-evaluated)"
+    ))
+
+    ## The loaded count is the Configs line's; its own line printed above
+    ## the header
+    expect_false(any(grepl("checkpointed results", out, fixed = TRUE)))
 
   })
 

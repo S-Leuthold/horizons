@@ -1936,13 +1936,17 @@ describe("fit() - the draw lines and the notes (#91)", {
 
   })
 
-  it("says whether the calibration split stratified", {
+  it("says whether the calibration split stratified, and which capabilities it serves", {
 
     ## 250 rows: a calibration set of 40, over N_CALIB_MIN
     obj <- make_eval_object(n = 250, n_configs = 1)
 
-    expect_true("│  UQ calibration: 158 fit / 40 calibration, stratified on SOC" %in%
+    expect_true("│  UQ and AD calibration: 158 fit / 40 calibration, stratified on SOC" %in%
                   fit_header(obj))
+
+    ## With AD alone the holdout used to go unreported
+    expect_true("│  AD calibration: 158 fit / 40 calibration, stratified on SOC" %in%
+                  fit_header(obj, compute_uq = FALSE, compute_ad = TRUE))
 
     real_initial_split <- rsample::initial_split
 
@@ -1954,8 +1958,12 @@ describe("fit() - the draw lines and the notes (#91)", {
       .package = "rsample"
     )
 
-    expect_true(any(grepl("^│  UQ calibration: .* calibration, unstratified$",
-                          fit_header(obj))))
+    out        <- fit_header(obj, compute_uq = FALSE, compute_ad = TRUE)
+    calib_line <- grep("│  AD calibration: ", out, fixed = TRUE)
+
+    expect_match(out[calib_line], "calibration, unstratified$")
+    expect_identical(out[calib_line + 1L],
+                     "│  Stratified calibration split failed, retrying without strata")
 
   })
 
