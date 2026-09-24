@@ -49,6 +49,10 @@ configure_small <- function(x, ...) {
 ## -27 to -17 per mil, every value negative.
 to_d13c <- function(soc) -22 + 3 * (soc - 2)
 
+## A condition's message on one line: cli wraps long messages, which would
+## split the phrases the tests look for.
+flat_message <- function(e) gsub("\\s+", " ", conditionMessage(e))
+
 
 ## ===========================================================================
 ## The rule, the accessor and the clamp
@@ -451,6 +455,94 @@ describe("a d13C-like outcome with outcome_range = c(-Inf, Inf)", {
 
   })
 
+  it("refuses to fit an evaluation scored under another range, before fitting", {
+
+    ## c(-40, 0) contains the data, so only the comparison with the range
+    ## evaluate() recorded on its rows can refuse it
+    moved <- ev
+    moved$config$outcome_range <- c(-40, 0)
+
+    local_mocked_bindings(
+      fit_single_config = function(...) stop("fit_single_config() was reached"),
+      .package = "horizons"
+    )
+
+    err <- expect_error(fit(moved, n_best = 1L, verbose = FALSE),
+                        class = "horizons_input_error")
+    expect_match(flat_message(err), "outcome_range")
+    expect_match(flat_message(err), "c(-Inf, Inf)", fixed = TRUE)
+    expect_match(flat_message(err), "c(-40, 0)", fixed = TRUE)
+
+  })
+
+  it("refuses to rank by rrmse, in evaluate() and in fit(), before tuning", {
+
+    local_mocked_bindings(
+      evaluate_single_config = function(...) stop("evaluate_single_config() was reached"),
+      fit_single_config      = function(...) stop("fit_single_config() was reached"),
+      .package = "horizons"
+    )
+
+    expect_error(evaluate(cfg, metric = "rrmse", verbose = FALSE), "rrmse",
+                 class = "horizons_input_error")
+    expect_error(fit(ev, metric = "rrmse", verbose = FALSE), "rrmse",
+                 class = "horizons_input_error")
+
+    ## ...and when the rrmse comes from the evaluation fit() would re-tune
+    by_rrmse <- ev
+    by_rrmse$evaluation$rank_metric <- "rrmse"
+    expect_error(fit(by_rrmse, verbose = FALSE), "rrmse",
+                 class = "horizons_input_error")
+
+  })
+
+  it("refuses to resume checkpoint rows that record no range", {
+
+    ## A copy of one row as it would have been written before #76: the same
+    ## data and settings, less the outcome_range. Under c(-Inf, Inf) it was
+    ## scored differently (floored at zero), so it is refused, naming it.
+    row <- readRDS(list.files(file.path(outdir, "checkpoints"), full.names = TRUE)[1])
+    row$settings[[1]]$outcome_range <- NULL
+
+    legacy <- withr::local_tempdir()
+    dir.create(file.path(legacy, "checkpoints"))
+    saveRDS(row, file.path(legacy, "checkpoints", paste0(row$config_id, ".rds")))
+
+    local_mocked_bindings(
+      evaluate_single_config = function(...) stop("evaluate_single_config() was reached"),
+      .package = "horizons"
+    )
+
+    err <- expect_error(
+      suppressWarnings(evaluate(cfg, prune = FALSE, verbose = FALSE, seed = 42L,
+                                output_dir = legacy)),
+      class = "horizons_input_error"
+    )
+    expect_match(flat_message(err), "outcome_range = unset", fixed = TRUE)
+
+  })
+
+  it("ensemble() refuses an outcome outside the range at entry", {
+
+    stale <- fitted
+    stale$config$outcome_range <- DEFAULT_OUTCOME_RANGE
+
+    ## One member would also be refused, later; the range check comes first
+    expect_error(ensemble(stale, verbose = FALSE), "outcome_range",
+                 class = "horizons_input_error")
+
+  })
+
+  it("summary() shows the range when it is not the default", {
+
+    out <- utils::capture.output(summary(cfg))
+    expect_true(any(grepl("Outcome range: c(-Inf, Inf)", out, fixed = TRUE)))
+
+    plain <- utils::capture.output(summary(configure_small(make_range_hd())))
+    expect_false(any(grepl("Outcome range", plain, fixed = TRUE)))
+
+  })
+
 })
 
 
@@ -636,8 +728,10 @@ describe("a non-negative outcome under the default range", {
 
 describe("a finite upper bound", {
 
-  ## The range's upper bound is the largest observed value, so the bound
-  ## formula (1.5 times the fit rows' maximum) lands above it and is capped.
+  ## A cap test only, not a way to choose a range: a range comes from the
+  ## property's physical bounds, never from the data. Here the upper bound is
+  ## the largest observed value so the bound formula (1.5 times the fit rows'
+  ## maximum) lands above it and is capped.
   hd  <- make_range_hd(n = 60)
   top <- max(hd$data$analysis$SOC)
   cfg <- configure_small(hd, outcome_range = c(0, top))
@@ -708,6 +802,252 @@ describe("ensemble combines and fold predictions - outcome_range", {
                      c(-21, -17))
     expect_identical(predict_fold_model(weights, "weighted", mat, c(-18, Inf)),
                      c(-18, -17))
+
+  })
+
+})
+
+
+## ===========================================================================
+## Review follow-ups (#76)
+## ===========================================================================
+
+describe("configure() - a range with a negative floor and a response transform", {
+
+  it("refuses log, log10 and sqrt, naming both arguments", {
+
+    for (tr in c("log", "log10", "sqrt")) {
+
+      err <- expect_error(
+        configure_small(make_range_hd(value = to_d13c),
+                        transformations = c("none", tr),
+                        outcome_range = c(-Inf, Inf)),
+        class = "horizons_configure_error",
+        info  = tr
+      )
+
+      expect_match(flat_message(err), "transformations", info = tr)
+      expect_match(flat_message(err), "outcome_range", info = tr)
+      expect_match(flat_message(err), tr, fixed = TRUE, info = tr)
+
+    }
+
+    ## A floor just below zero is enough: sqrt is NaN there
+    expect_error(
+      configure_small(make_range_hd(), transformations = "sqrt",
+                      outcome_range = c(-0.5, Inf)),
+      class = "horizons_configure_error"
+    )
+
+  })
+
+  it("accepts them under the default range, and 'none' under a signed one", {
+
+    expect_no_error(configure_small(make_range_hd(),
+                                    transformations = c("log", "log10", "sqrt")))
+    expect_no_error(configure_small(make_range_hd(value = to_d13c),
+                                    transformations = "none",
+                                    outcome_range = c(-Inf, Inf)))
+
+  })
+
+})
+
+describe("check_rank_metric_range()", {
+
+  it("refuses rrmse only under a negative floor", {
+
+    expect_error(check_rank_metric_range("rrmse", c(-Inf, Inf), "evaluate"),
+                 "rrmse", class = "horizons_input_error")
+    expect_error(check_rank_metric_range("rrmse", c(-5, 5), "fit"),
+                 class = "horizons_input_error")
+
+    expect_null(check_rank_metric_range("rrmse", DEFAULT_OUTCOME_RANGE, "evaluate"))
+    expect_null(check_rank_metric_range("rrmse", c(0, 100), "evaluate"))
+    expect_null(check_rank_metric_range("rmse", c(-Inf, Inf), "evaluate"))
+    expect_null(check_rank_metric_range(NULL, c(-Inf, Inf), "fit"))
+
+  })
+
+})
+
+describe("checkpoint rows that record no outcome_range", {
+
+  ## As written before #76: settings stamped, but without the range
+  row <- tibble::tibble(config_id = "a", scoring_schema = SCORING_SCHEMA)
+  row <- stamp_eval_settings(row, eval_settings(cv_folds = 3L, grid_size = 2L))
+
+  no_stamp <- tibble::tibble(config_id = "a", scoring_schema = SCORING_SCHEMA)
+  data_fp  <- list(data_hash = NA_character_, data_n_rows = 10L)
+
+  it("are refused under a range other than the default, naming the range", {
+
+    v <- checkpoint_row_verdict(
+      row, data_fp,
+      eval_settings(cv_folds = 3L, grid_size = 2L, outcome_range = c(-Inf, Inf))
+    )
+
+    expect_identical(v$verdict, "settings_mismatch")
+    expect_identical(v$settings_differ, "outcome_range")
+    expect_identical(
+      describe_settings_diff(v$stored_settings,
+                             eval_settings(outcome_range = c(-Inf, Inf)),
+                             v$settings_differ),
+      "outcome_range = unset (this run: -Inf, Inf)"
+    )
+
+    ## A row with no settings record at all, the same
+    v0 <- checkpoint_row_verdict(no_stamp, data_fp,
+                                 eval_settings(outcome_range = c(-10, 10)))
+    expect_identical(v0$verdict, "settings_mismatch")
+
+  })
+
+  it("resume as unverified under the default, as before", {
+
+    v <- checkpoint_row_verdict(
+      row, data_fp,
+      eval_settings(cv_folds = 3L, grid_size = 2L, outcome_range = DEFAULT_OUTCOME_RANGE)
+    )
+
+    expect_identical(v$verdict, "keep")
+    expect_false(v$settings_verified)
+
+  })
+
+  it("a row that records a range is compared as any setting is", {
+
+    stamped <- stamp_eval_settings(
+      row, eval_settings(cv_folds = 3L, grid_size = 2L, outcome_range = c(-Inf, Inf))
+    )
+
+    keep <- checkpoint_row_verdict(
+      stamped, data_fp,
+      eval_settings(cv_folds = 3L, grid_size = 2L, outcome_range = c(-Inf, Inf))
+    )
+    expect_identical(keep$verdict, "keep")
+    expect_true(keep$settings_verified)
+
+    moved <- checkpoint_row_verdict(
+      stamped, data_fp,
+      eval_settings(cv_folds = 3L, grid_size = 2L, outcome_range = c(-40, 0))
+    )
+    expect_identical(moved$verdict, "settings_mismatch")
+
+  })
+
+})
+
+describe("check_evaluated_outcome_range()", {
+
+  ## An evaluation's results rows, as stamped before and after #76
+  results_with <- function(stamps) {
+    tibble::tibble(config_id = paste0("c", seq_along(stamps)), settings = stamps)
+  }
+
+  x_with <- function(results) list(evaluation = list(results = results))
+
+  it("passes rows that record this range, and unrecorded rows under the default", {
+
+    signed <- results_with(list(eval_settings(outcome_range = c(-Inf, Inf))))
+    expect_null(check_evaluated_outcome_range(x_with(signed), c(-Inf, Inf)))
+
+    old <- results_with(list(eval_settings(seed = 1L)))
+    expect_null(check_evaluated_outcome_range(x_with(old), DEFAULT_OUTCOME_RANGE))
+
+    ## Evaluations from before the settings stamp carry no settings column
+    bare <- tibble::tibble(config_id = "c1")
+    expect_null(check_evaluated_outcome_range(x_with(bare), DEFAULT_OUTCOME_RANGE))
+
+  })
+
+  it("refuses a recorded range that differs, and unrecorded rows under another range", {
+
+    signed <- results_with(list(eval_settings(outcome_range = c(-Inf, Inf))))
+    expect_error(check_evaluated_outcome_range(x_with(signed), DEFAULT_OUTCOME_RANGE),
+                 class = "horizons_input_error")
+
+    old <- results_with(list(eval_settings(seed = 1L)))
+    err <- expect_error(check_evaluated_outcome_range(x_with(old), c(-Inf, Inf)),
+                        class = "horizons_input_error")
+    expect_match(flat_message(err), "unrecorded", fixed = TRUE)
+
+  })
+
+})
+
+describe("validate_horizons_fit() - a malformed outcome range", {
+
+  ## A fitted object from the non-negative fixture, cold-started and cheap
+  obj <- make_eval_object(n = 60, n_configs = 1)
+  obj$config$tuning$final_bayesian_iter <- 0L
+
+  fitted <- suppressWarnings(
+    fit(obj, compute_uq = FALSE, compute_ad = FALSE, verbose = FALSE, seed = 42L)
+  )
+
+  it("is not read, and not fatal, when there is no bound to check", {
+
+    no_bound <- fitted
+    no_bound$models["response_bound"] <- list(NULL)
+    no_bound$config$outcome_range <- c(5, 1)
+
+    expect_no_error(validate_horizons_fit(no_bound))
+
+  })
+
+  it("is collected with the other findings when there is a bound", {
+
+    broken <- fitted
+    broken$config$outcome_range <- c(5, 1)
+    broken$models$n_models      <- 99L
+
+    err <- expect_error(suppressMessages(utils::capture.output(validate_horizons_fit(broken))),
+                        class = "horizons_validation_error")
+
+    expect_match(flat_message(err), "config$outcome_range", fixed = TRUE)
+    expect_match(flat_message(err), "n_models", fixed = TRUE)
+
+  })
+
+})
+
+describe("infinite outcome values", {
+
+  it("count as breaches whatever the range", {
+
+    b <- outcome_range_breach(c(1, Inf, NA), DEFAULT_OUTCOME_RANGE)
+    expect_identical(b$n_infinite, 1L)
+    expect_identical(b$n_below + b$n_above, 0L)
+
+    expect_false(is.null(outcome_range_breach(c(-5, -Inf), c(-Inf, Inf))))
+    expect_null(outcome_range_breach(c(-5, NA, 3), c(-Inf, Inf)))
+
+  })
+
+  it("are refused by configure() before the bound could become Inf", {
+
+    hd <- make_range_hd(value = function(v) { v[2] <- Inf; v })
+
+    err <- expect_error(configure_small(hd), class = "horizons_input_error")
+    expect_match(flat_message(err), "outcome_range")
+
+  })
+
+})
+
+describe("the remedy text", {
+
+  it("points at the property's physical bounds, not the data's", {
+
+    obj <- make_eval_object(n = 60, n_configs = 1)
+    obj$data$analysis$SOC <- to_d13c(obj$data$analysis$SOC)
+
+    err <- expect_error(check_outcome_range(obj, verb = "evaluate"),
+                        class = "horizons_input_error")
+
+    expect_match(flat_message(err), "physical bounds", fixed = TRUE)
+    expect_no_match(flat_message(err), "contain the data", fixed = TRUE)
 
   })
 
