@@ -395,6 +395,138 @@ test_that("average() errors when all samples dropped", {
 
 
 ## ---------------------------------------------------------------------------
+## average() — The QC report counts a group that failed QC (#89)
+## ---------------------------------------------------------------------------
+## Under "warn" a group whose every replicate failed QC is averaged with all
+## its replicates, so it drops none. The report counted clean groups as the
+## groups without drops, and printed "all 2 groups clean" under the warning
+## that said the group had failed. Each mode's report has to say what it did.
+
+## The QC sub-tree of average()'s console output
+qc_report <- function(out) {
+
+  out[grepl("QC \\(r >|^│  │  ", out)]
+
+}
+
+test_that("average() on_all_outliers='warn' reports the failed group as averaged anyway, not clean (#89)", {
+
+  ## Arrange ---------------------------------------------------------------
+
+  hd <- make_test_hd_average(n_samples = 2, n_reps = 3, all_outliers = TRUE)
+
+  ## Act -------------------------------------------------------------------
+
+  expect_warning(
+    out <- utils::capture.output(average(hd, on_all_outliers = "warn")),
+    "All replicates failed QC"
+  )
+
+  ## Assert ----------------------------------------------------------------
+
+  report <- qc_report(out)
+
+  expect_false(any(grepl("all 2 groups clean", out, fixed = TRUE)))
+  expect_identical(report, c(
+    "│  ├─ QC (r > 0.996)",
+    "│  │  ├─ 1/2 groups clean",
+    "│  │  ├─ 1 group failed QC on every replicate → averaged anyway (on_all_outliers = 'warn')",
+    "│  │  └─ 2 samples retained"
+  ))
+
+})
+
+test_that("average() on_all_outliers='keep_best' reports the failed group and the replicates it lost (#89)", {
+
+  ## Arrange ---------------------------------------------------------------
+
+  hd <- make_test_hd_average(n_samples = 2, n_reps = 3, all_outliers = TRUE)
+
+  ## Act -------------------------------------------------------------------
+
+  out <- utils::capture.output(average(hd, on_all_outliers = "keep_best"))
+
+  ## Assert ----------------------------------------------------------------
+
+  expect_identical(qc_report(out), c(
+    "│  ├─ QC (r > 0.996)",
+    "│  │  ├─ 1/2 groups clean",
+    "│  │  ├─ 1 group failed QC on every replicate → one replicate kept, 2 removed (on_all_outliers = 'keep_best')",
+    "│  │  └─ 2 samples retained"
+  ))
+
+})
+
+test_that("average() on_all_outliers='drop' reports the failed group as dropped (#89)", {
+
+  ## Arrange ---------------------------------------------------------------
+
+  hd <- make_test_hd_average(n_samples = 2, n_reps = 3, all_outliers = TRUE)
+
+  ## Act -------------------------------------------------------------------
+
+  out <- utils::capture.output(average(hd, on_all_outliers = "drop"))
+
+  ## Assert ----------------------------------------------------------------
+
+  expect_identical(qc_report(out), c(
+    "│  ├─ QC (r > 0.996)",
+    "│  │  ├─ 1/2 groups clean",
+    "│  │  ├─ 1 group failed QC on every replicate → dropped, 3 replicates removed (on_all_outliers = 'drop')",
+    "│  │  └─ 1 sample retained"
+  ))
+
+})
+
+test_that("average() reports a partly failed group apart from a wholly failed one (#89)", {
+
+  ## Arrange ---------------------------------------------------------------
+
+  ## S1: every replicate fails. S2: one replicate is the mirror image of a
+  ## sibling, so it alone fails. S3: clean.
+  hd      <- make_test_hd_average(n_samples = 3, n_reps = 3, all_outliers = TRUE)
+  wn_cols <- grep("^wn_", names(hd$data$analysis), value = TRUE)
+  hd$data$analysis[4, wn_cols] <- as.list(2 - unlist(hd$data$analysis[5, wn_cols]))
+
+  ## Act -------------------------------------------------------------------
+
+  expect_warning(
+    out <- utils::capture.output(average(hd, on_all_outliers = "warn")),
+    "All replicates failed QC"
+  )
+
+  ## Assert ----------------------------------------------------------------
+
+  ## One line per kind of group, adding up to the three groups
+  expect_identical(qc_report(out), c(
+    "│  ├─ QC (r > 0.996)",
+    "│  │  ├─ 1/3 groups clean",
+    "│  │  ├─ 1 group → 1 replicate removed",
+    "│  │  ├─ 1 group failed QC on every replicate → averaged anyway (on_all_outliers = 'warn')",
+    "│  │  └─ 3 samples retained"
+  ))
+
+})
+
+test_that("average() still reports all groups clean when none failed", {
+
+  ## Arrange ---------------------------------------------------------------
+
+  hd <- make_test_hd_average(n_samples = 3, n_reps = 3)
+
+  ## Act -------------------------------------------------------------------
+
+  out <- utils::capture.output(average(hd))
+
+  ## Assert ----------------------------------------------------------------
+
+  expect_identical(qc_report(out),
+                   "│  ├─ QC (r > 0.996): all 3 groups clean")
+
+})
+
+
+## ---------------------------------------------------------------------------
 ## average() — Metadata handling
 ## ---------------------------------------------------------------------------
 
