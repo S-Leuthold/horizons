@@ -1120,7 +1120,7 @@ warn_interval_failure <- function(stage, error, config_id = NULL) {
 
   } else if (inherits(error, "condition")) {
 
-    conditionMessage(error)
+    condition_summary(error)
 
   } else {
 
