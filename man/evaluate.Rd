@@ -116,3 +116,28 @@ on exit. Configs are dispatched to a top-level worker that loads the
 \code{devtools::load_all()}.
 }
 
+\section{When every configuration fails}{
+
+\code{best_config} is chosen from the configs that succeeded or, when none did,
+from the pruned configs that carry a cross-validated value of \code{metric}.
+When there are neither, \code{evaluate()} aborts with class
+\code{horizons_all_configs_failed}. The message lists the distinct error
+messages (the first three, each with the configs that raised it), and the
+per-config results, \code{error_message} included, travel on the condition as
+\code{results}, because \code{evaluate()} aborts before it assigns \code{x$evaluation}.
+A loop over subsets can therefore tolerate one subset whose every config
+fails and keep its errors:
+
+\if{html}{\out{<div class="sourceCode">}}\preformatted{runs <- lapply(subsets, function(hd) \{
+  tryCatch(
+    evaluate(hd, verbose = FALSE),
+    horizons_all_configs_failed = function(e) e$results
+  )
+\})
+
+# A horizons_eval for each subset that ranked, and the failed configs'
+# results table for each subset that did not.
+failed <- runs[!vapply(runs, inherits, logical(1), "horizons_eval")]
+}\if{html}{\out{</div>}}
+}
+

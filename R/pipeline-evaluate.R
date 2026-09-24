@@ -80,6 +80,30 @@
 #' *installed* package, so parallel dispatch refuses to run under
 #' `devtools::load_all()`.
 #'
+#' @section When every configuration fails:
+#' `best_config` is chosen from the configs that succeeded or, when none did,
+#' from the pruned configs that carry a cross-validated value of `metric`.
+#' When there are neither, `evaluate()` aborts with class
+#' `horizons_all_configs_failed`. The message lists the distinct error
+#' messages (the first three, each with the configs that raised it), and the
+#' per-config results, `error_message` included, travel on the condition as
+#' `results`, because `evaluate()` aborts before it assigns `x$evaluation`.
+#' A loop over subsets can therefore tolerate one subset whose every config
+#' fails and keep its errors:
+#'
+#' ```
+#' runs <- lapply(subsets, function(hd) {
+#'   tryCatch(
+#'     evaluate(hd, verbose = FALSE),
+#'     horizons_all_configs_failed = function(e) e$results
+#'   )
+#' })
+#'
+#' # A horizons_eval for each subset that ranked, and the failed configs'
+#' # results table for each subset that did not.
+#' failed <- runs[!vapply(runs, inherits, logical(1), "horizons_eval")]
+#' ```
+#'
 #' @return A `horizons_eval` object (inherits from `horizons_data`) with
 #'   `evaluation$results`, `evaluation$best_config`, `evaluation$split`, and
 #'   associated metadata populated, including `evaluation$parallelize_over`
@@ -802,14 +826,7 @@ evaluate <- function(x,
 
   if (nrow(candidates$rows) == 0) {
 
-    n_failed <- sum(all_results$status == "failed")
-    n_pruned <- sum(all_results$status == "pruned")
-
-    rlang::abort(paste0(
-      "All configurations failed or were pruned. ",
-      "Failed: ", n_failed, ", Pruned: ", n_pruned, ". ",
-      "Check evaluation$results for error messages."
-    ))
+    abort_all_configs_failed(all_results, metric)
 
   }
 
@@ -1115,6 +1132,58 @@ abort_checkpoint_data_mismatch <- function(stored, current, output_dir, source) 
     "i" = "Resuming would reuse cross-validated results, and warm-start {.fn fit}, from hyperparameters tuned on the wrong rows.",
     "i" = "Use a different {.arg output_dir}, or delete the stale checkpoints in {.path {output_dir}}."
   ), class = "horizons_input_error")
+
+}
+
+## ---------------------------------------------------------------------------
+## abort_all_configs_failed — nothing to rank, with the reasons attached
+## ---------------------------------------------------------------------------
+
+#' Abort because no configuration can be ranked
+#'
+#' @description
+#' Raised by `evaluate()` when every configuration failed, or was pruned
+#' without a cross-validated value of the ranking metric (#41). `evaluate()`
+#' aborts before it assigns `x$evaluation`, so the results table travels on
+#' the condition as `results`, and the message lists the distinct error
+#' messages (the first three, each with the configs that raised it, and a
+#' count of the rest). A caller looping over subsets can catch the class and
+#' keep the per-config errors; see `evaluate()`'s "When every configuration
+#' fails" section.
+#'
+#' @param results The aggregated result rows (`evaluation$results` shape).
+#' @param metric Bare ranking metric name.
+#' @param call The call the condition is attributed to. Default: the caller,
+#'   `evaluate()`.
+#' @return Never returns; aborts with class `horizons_all_configs_failed`.
+#' @keywords internal
+#' @noRd
+abort_all_configs_failed <- function(results, metric, call = rlang::caller_env()) {
+
+  rank_column <- paste0("cv_", metric)
+  n_total     <- nrow(results)
+  n_failed    <- sum(results$status == "failed")
+  n_pruned    <- sum(results$status == "pruned")
+
+  ## Upstream error text is interpolated as values ("{err_lines[1]}"), never
+  ## handed to cli as a template, so a brace in a message cannot break the
+  ## abort (the "{detail}" pattern in R/ad.R).
+  errors    <- distinct_config_errors(results)
+  err_lines <- errors$lines
+  n_more    <- errors$n_more
+
+  err_bullets <- stats::setNames(
+    sprintf("{err_lines[%d]}", seq_along(err_lines)),
+    rep("x", length(err_lines))
+  )
+
+  cli::cli_abort(c(
+    "All configurations failed or were pruned without a {.field {rank_column}} value, so none can be ranked.",
+    "i" = "Of {n_total} configuration{?s}: {n_failed} failed, {n_pruned} pruned.",
+    err_bullets,
+    if (n_more > 0) c("i" = "{n_more} more distinct error message{?s} not shown."),
+    "i" = "The per-config results, error messages included, are on this condition as {.field results}: {.code tryCatch(evaluate(x), horizons_all_configs_failed = function(e) e$results)}."
+  ), class = "horizons_all_configs_failed", results = results, call = call)
 
 }
 

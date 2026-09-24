@@ -250,6 +250,42 @@ describe("evaluate() - all configs fail", {
 
   })
 
+  ## evaluate() aborts before it assigns x$evaluation, so the message's old
+  ## hint ("Check evaluation$results") could not be followed. The results now
+  ## ride on the condition, so a loop over subsets can recover them (#41).
+  it("signals horizons_all_configs_failed, carrying the results and naming the errors", {
+
+    obj <- make_eval_object(n_configs = 5)
+
+    ## Four distinct messages; one carries braces, which must reach the
+    ## message as text rather than be read as a cli template.
+    obj$config$configs$model <- c("{wn_600}", "nope_2", "nope_2", "nope_4", "nope_5")
+
+    err <- tryCatch(
+      suppressWarnings(evaluate(obj, verbose = FALSE)),
+      horizons_all_configs_failed = function(e) e
+    )
+
+    expect_s3_class(err, "horizons_all_configs_failed")
+
+    ## The per-config results, error messages included
+    expect_s3_class(err$results, "tbl_df")
+    expect_identical(err$results$config_id, obj$config$configs$config_id)
+    expect_true(all(err$results$status == "failed"))
+    expect_true(all(grepl("Unknown model type", err$results$error_message)))
+
+    ## The first three distinct messages, each with the configs that raised
+    ## it; the fourth is counted, not listed.
+    msg <- conditionMessage(err)
+    expect_match(msg, "'{wn_600}'", fixed = TRUE)
+    expect_match(msg, "'nope_2'", fixed = TRUE)
+    expect_match(msg, "cfg_002, cfg_003", fixed = TRUE)
+    expect_match(msg, "'nope_4'", fixed = TRUE)
+    expect_no_match(msg, "'nope_5'", fixed = TRUE)
+    expect_match(msg, "1 more distinct error message")
+
+  })
+
 })
 
 ## =========================================================================

@@ -259,3 +259,60 @@ create_failed_result <- function(config_id, error = NULL) {
   )
 
 }
+
+## ---------------------------------------------------------------------------
+## distinct_config_errors
+## ---------------------------------------------------------------------------
+
+#' Summarise the distinct error messages in a results table
+#'
+#' @description
+#' Groups the configs of a results table by their `error_message` and returns
+#' one line per distinct message, in the order the messages first appear,
+#' each followed by the configs that raised it. `evaluate()` and `fit()` put
+#' these lines in the abort they raise when every config (or member) fails,
+#' so the cause is in the message rather than only in a table the caller may
+#' not be able to reach.
+#'
+#' The lines carry upstream error text. A caller must interpolate them as
+#' values (`"x" = "{lines[1]}"`), never pass them to cli as templates, or a
+#' brace in an error message is re-evaluated.
+#'
+#' @param results Tibble with `config_id` and `error_message` columns.
+#' @param n_show Integer. How many distinct messages to return. Default 3.
+#' @param n_ids Integer. How many config ids to name per message before
+#'   counting the rest. Default 3.
+#'
+#' @return List with `lines` (character, at most `n_show`) and `n_more`
+#'   (integer, the distinct messages not shown). Rows whose `error_message`
+#'   is `NA` or empty are ignored.
+#' @keywords internal
+#' @noRd
+distinct_config_errors <- function(results, n_show = 3L, n_ids = 3L) {
+
+  msgs <- results$error_message
+
+  if (is.null(msgs)) return(list(lines = character(0), n_more = 0L))
+
+  has_msg  <- !is.na(msgs) & nzchar(msgs)
+  distinct <- unique(msgs[has_msg])
+  shown    <- utils::head(distinct, n_show)
+
+  lines <- vapply(shown, function(m) {
+
+    ids <- results$config_id[has_msg & msgs == m]
+
+    id_label <- if (length(ids) > n_ids) {
+      paste0(paste(ids[seq_len(n_ids)], collapse = ", "),
+             " and ", length(ids) - n_ids, " more")
+    } else {
+      paste(ids, collapse = ", ")
+    }
+
+    paste0(m, " (", id_label, ")")
+
+  }, character(1), USE.NAMES = FALSE)
+
+  list(lines = lines, n_more = length(distinct) - length(shown))
+
+}
