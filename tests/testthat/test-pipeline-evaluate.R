@@ -633,39 +633,32 @@ describe("evaluate() - response outliers are trimmed from the training partition
 
   it("trims the same training rows whatever the test rows' labels are", {
 
-    ## The stratified draw reads every label by design, as it always has, so
-    ## the draw is made unstratified here: the split then depends on the seed
-    ## alone, and only the fences could carry a test label into the trim.
-    real_initial_split <- rsample::initial_split
+    ## The partition is held fixed: the draw is stratified on every label by
+    ## design, as it always was, so what must not read a test label is the
+    ## trim. Every test row's outcome is moved a long way inside the drawn
+    ## split, and the trim must come out the same.
+    drawn   <- suppressWarnings(draw_eval_split(v$data$analysis, "SOC", 307L))
+    is_test <- !seq_len(nrow(drawn$split$data)) %in% drawn$split$in_id
 
-    local_mocked_bindings(
-      initial_split = function(data, prop = 3 / 4, strata = NULL, ...) {
-        real_initial_split(data, prop = prop, ...)
-      },
-      .package = "rsample"
-    )
+    relabelled <- drawn$split
+    relabelled$data$SOC[is_test] <- relabelled$data$SOC[is_test] * 50 + 400
 
-    test_rows <- rsample::testing(draw_eval_split(v$data$analysis, "SOC", 307L)$split)$sample_id
+    ## Whole-table fences move under the relabelling, so a whole-table rule
+    ## would trim otherwise
+    expect_false(isTRUE(all.equal(fences_of(drawn$split$data$SOC),
+                                  fences_of(relabelled$data$SOC))))
 
-    relabelled <- v
-    at         <- match(test_rows, relabelled$data$analysis$sample_id)
-    relabelled$data$analysis$SOC[at] <- relabelled$data$analysis$SOC[at] * 50 + 400
+    a <- trim_training_responses(drawn$split, "SOC", request, "sample_id")
+    b <- trim_training_responses(relabelled, "SOC", request, "sample_id")
 
-    ## Whole-table fences move a long way under the relabelling
-    expect_false(isTRUE(all.equal(fences_of(v$data$analysis$SOC),
-                                  fences_of(relabelled$data$analysis$SOC))))
+    expect_gt(length(a$record$trimmed_ids), 0)
+    expect_identical(b$record, a$record)
+    expect_identical(rsample::training(b$split), rsample::training(a$split))
 
-    ev_a <- suppressWarnings(evaluate(v, prune = FALSE, verbose = FALSE, seed = 307L))
-    ev_b <- suppressWarnings(evaluate(relabelled, prune = FALSE, verbose = FALSE, seed = 307L))
-
-    expect_gt(length(ev_a$evaluation$response_trim$trimmed_ids), 0)
-    expect_identical(ev_b$evaluation$response_trim$trimmed_ids,
-                     ev_a$evaluation$response_trim$trimmed_ids)
-    expect_identical(ev_b$evaluation$response_trim[c("lower", "upper")],
-                     ev_a$evaluation$response_trim[c("lower", "upper")])
-    expect_identical(rsample::training(ev_b$evaluation$split),
-                     rsample::training(ev_a$evaluation$split))
-    expect_identical(rsample::testing(ev_b$evaluation$split)$sample_id, test_rows)
+    ## and the test part is the relabelled one, untrimmed
+    expect_identical(rsample::testing(b$split)$sample_id,
+                     rsample::testing(drawn$split)$sample_id)
+    expect_identical(rsample::testing(b$split)$SOC, relabelled$data$SOC[is_test])
 
   })
 
