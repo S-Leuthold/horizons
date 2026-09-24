@@ -1319,10 +1319,29 @@ rank_configs_by_cv <- function(results, metric) {
 #' @param outcome_col Character. Name of the outcome column.
 #' @return List with `data` (the rows whose outcome is not `NA`, in their
 #'   original order) and `n_dropped` (integer, the rows removed). Aborts with
-#'   class `horizons_input_error` when every outcome is `NA`.
+#'   class `horizons_input_error` when the outcome column is absent from
+#'   `analysis` or every outcome is `NA`.
 #' @keywords internal
 #' @noRd
 outcome_complete_rows <- function(analysis, outcome_col) {
+
+  ## An absent column reads as NULL, and is.na(NULL) is empty, so without
+  ## this check a missing outcome was reported as "All outcome values are NA".
+  absent <- setdiff(outcome_col, names(analysis))
+
+  if (length(outcome_col) == 0 || length(absent) > 0) {
+
+    cli::cli_abort(c(
+      "The analysis table has no outcome column to model.",
+      "x" = if (length(outcome_col) == 0) {
+        "The role map gives no column the {.val outcome} role."
+      } else {
+        "The role map names {.field {absent}} as the outcome, and {.field data$analysis} has no such column."
+      },
+      "i" = "Add the column to the analysis table, or correct the role map."
+    ), class = "horizons_input_error")
+
+  }
 
   na_mask <- is.na(analysis[[outcome_col]])
 

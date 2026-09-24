@@ -330,6 +330,20 @@ describe("evaluate() - NA outcome rows", {
 
   })
 
+  it("names an outcome column the analysis table lacks, rather than calling it all NA", {
+
+    obj <- make_eval_object()
+    obj$data$analysis$SOC <- NULL
+
+    err <- expect_error(evaluate(obj, verbose = FALSE),
+                        class = "horizons_input_error")
+
+    expect_match(conditionMessage(err), "SOC", fixed = TRUE)
+    expect_match(conditionMessage(err), "no such column", fixed = TRUE)
+    expect_no_match(conditionMessage(err), "All outcome values are NA", fixed = TRUE)
+
+  })
+
 })
 
 ## =========================================================================
