@@ -1526,8 +1526,12 @@ validate_horizons_ensemble <- function(x) {
 #'    2026-09-24 (#45), is likewise tolerated when absent and, when present,
 #'    must be `TRUE` or `FALSE`. `response_trim` (the training-partition
 #'    response trim, #77) is tolerated when absent and may be `NULL`; when it
-#'    is a record, its `trimmed_ids` must be a character vector, since
-#'    [fit()] drops exactly those rows to line the split up with the object.
+#'    is a record, `fit()` and its console tree read it, so its `trimmed_ids`
+#'    must be a character vector (the rows [fit()] drops to line the split up
+#'    with the object), `threshold` a single positive number, `n_training` a
+#'    single non-negative whole number, `skipped` a single character (`NA`
+#'    when fences were drawn), and `lower` and `upper` single numbers, finite
+#'    whenever rows were trimmed, since the degradation check reads them.
 #' 2. **results**: data frame carrying `config_id`, `status`, and the six
 #'    metric columns (`rmse`, `rrmse`, `rsq`, `ccc`, `rpd`, `mae`); at least
 #'    one row; `config_id` values unique.
@@ -1656,17 +1660,30 @@ validate_horizons_eval <- function(x) {
   ## response_trim (the training-partition trim, #77) ---------------------------
   ## Tolerated when absent, by the same rule, and NULL when no trim was
   ## requested. fit() reads trimmed_ids to line the split up with the rows
-  ## the object models, so a record without a character one is refused here
-  ## rather than read as "nothing trimmed".
+  ## the object models, the fences for its degradation check, and the rest
+  ## for its console tree, so a malformed record is refused here rather than
+  ## read as "nothing trimmed" or crashing the tree.
 
   if ("response_trim" %in% names(ev) && !is.null(ev$response_trim)) {
 
     rt <- ev$response_trim
 
-    if (!is.list(rt) || !is.character(rt$trimmed_ids)) {
+    is_number <- function(v) is.numeric(v) && length(v) == 1
+
+    rt_ok <- is.list(rt) &&
+      is.character(rt$trimmed_ids) &&
+      is_number(rt$threshold) && !is.na(rt$threshold) && rt$threshold > 0 &&
+      is_number(rt$n_training) && !is.na(rt$n_training) &&
+        rt$n_training >= 0 && rt$n_training == round(rt$n_training) &&
+      is.character(rt$skipped) && length(rt$skipped) == 1 &&
+      is_number(rt$lower) && is_number(rt$upper) &&
+      (length(rt$trimmed_ids) == 0 ||
+         (is.finite(rt$lower) && is.finite(rt$upper) && is.na(rt$skipped)))
+
+    if (!rt_ok) {
 
       errors <- c(errors, cli::format_inline(
-        "{.field response_trim} must be NULL or a list with a character {.field trimmed_ids}"
+        "{.field response_trim} must be NULL or a record with a character {.field trimmed_ids}, a positive {.field threshold}, a whole {.field n_training}, a single character {.field skipped}, and single numbers {.field lower} and {.field upper}, finite when rows were trimmed"
       ))
 
     }
@@ -3023,7 +3040,17 @@ summary.horizons_data <- function(object, ...) {
 
       n_train <- nrow(rsample::training(x$models$split))
       n_test  <- nrow(rsample::testing(x$models$split))
-      cat(paste0("   \u251C\u2500 Split: ", n_train, " train / ", n_test, " test\n"))
+
+      ## After a response trim (#77) the CV above ran on trimmed training
+      ## rows and the test metrics on untrimmed ones; say so beside the pair.
+      n_trimmed <- length(x$evaluation$response_trim$trimmed_ids)
+
+      cat(paste0("   \u251C\u2500 Split: ", n_train, " train / ", n_test, " test",
+                 if (n_trimmed > 0) {
+                   paste0(" (", n_trimmed, " training row", if (n_trimmed != 1) "s",
+                          " trimmed)")
+                 } else "",
+                 "\n"))
 
     }
 

@@ -2426,17 +2426,44 @@ test_that("validate_horizons_eval tolerates response_trim absent or NULL, and ch
   obj$evaluation["response_trim"] <- list(NULL)
   expect_identical(validate_horizons_eval(obj), obj)
 
-  obj$evaluation$response_trim <- list(outcome = "SOC", trimmed_ids = c("S001", "S002"))
+  record <- list(outcome = "SOC", method = "iqr", threshold = 1.5,
+                 fences_from = "training", lower = 0.2, upper = 4.1,
+                 n_training = 48L, trimmed_ids = c("S001", "S002"),
+                 skipped = NA_character_)
+
+  obj$evaluation$response_trim <- record
   expect_identical(validate_horizons_eval(obj), obj)
 
-  ## fit() drops the recorded rows, so a record without them is refused
-  obj$evaluation$response_trim <- list(outcome = "SOC", trimmed_ids = 1:2)
-  expect_error(suppressMessages(validate_horizons_eval(obj)), "response_trim",
-               class = "horizons_validation_error")
+  ## No fences drawn: nothing trimmed, NA fences, a reason
+  skipped <- utils::modifyList(record, list(lower = NA_real_, upper = NA_real_,
+                                            trimmed_ids = character(0),
+                                            skipped = "zero_iqr"))
+  obj$evaluation$response_trim <- skipped
+  expect_identical(validate_horizons_eval(obj), obj)
 
-  obj$evaluation$response_trim <- "S001"
-  expect_error(suppressMessages(validate_horizons_eval(obj)), "response_trim",
-               class = "horizons_validation_error")
+  ## fit() drops the recorded rows, reads the fences for its degradation
+  ## check and the rest for its tree, so a record missing any is refused
+  ## rather than read as "nothing trimmed" or crashing the tree
+  broken <- list(
+    ids_not_character = utils::modifyList(record, list(trimmed_ids = 1:2)),
+    no_skipped        = record[setdiff(names(record), "skipped")],
+    no_n_training     = record[setdiff(names(record), "n_training")],
+    fractional_rows   = utils::modifyList(record, list(n_training = 47.5)),
+    no_fences         = record[setdiff(names(record), c("lower", "upper"))],
+    na_fences_trimmed = utils::modifyList(record, list(lower = NA_real_)),
+    skipped_but_trimmed = utils::modifyList(record, list(skipped = "too_few")),
+    no_threshold      = record[setdiff(names(record), "threshold")],
+    not_a_list        = "S001"
+  )
+
+  for (nm in names(broken)) {
+
+    obj$evaluation$response_trim <- broken[[nm]]
+
+    expect_error(suppressMessages(utils::capture.output(validate_horizons_eval(obj))),
+                 "response_trim", class = "horizons_validation_error", info = nm)
+
+  }
 
 })
 
