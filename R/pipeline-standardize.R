@@ -384,7 +384,7 @@ apply_baseline_correction <- function(spectra_matrix, wavelengths) {
       cli::cli_abort(c(
         "Baseline correction failed",
         "i" = "This can happen with constant or near-constant spectra",
-        "x" = "Original error: {e$message}"
+        "x" = "Original error: {condition_summary(e)}"
       ))
 
     }

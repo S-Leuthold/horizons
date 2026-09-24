@@ -98,6 +98,14 @@ evaluate_single_config <- function(config_row,
     }
   }
 
+  ## tune catches the warnings raised inside its resampling (a recipe step
+  ## warning during prep, say) and keeps them in .notes, where
+  ## safely_execute() never sees them. One entry per distinct message (#96).
+  collect_notes_from <- function(tune_results) {
+    notes <- tune_note_messages(tune_results, type = "warning")
+    collected_warnings <<- c(collected_warnings, setdiff(notes, collected_warnings))
+  }
+
   ## -----------------------------------------------------------------------
   ## Step 1: Build recipe
   ## -----------------------------------------------------------------------
@@ -113,7 +121,7 @@ evaluate_single_config <- function(config_row,
   if (!is.null(recipe_result$error)) {
 
     return(create_failed_result(config_id,
-      paste0("Recipe building failed: ", recipe_result$error$message)))
+      paste0("Recipe building failed: ", condition_summary(recipe_result$error))))
 
   }
 
@@ -133,7 +141,7 @@ evaluate_single_config <- function(config_row,
   if (!is.null(model_result$error)) {
 
     return(create_failed_result(config_id,
-      paste0("Model specification failed: ", model_result$error$message)))
+      paste0("Model specification failed: ", condition_summary(model_result$error))))
 
   }
 
@@ -155,7 +163,7 @@ evaluate_single_config <- function(config_row,
   if (!is.null(wflow_result$error)) {
 
     return(create_failed_result(config_id,
-      paste0("Workflow creation failed: ", wflow_result$error$message)))
+      paste0("Workflow creation failed: ", condition_summary(wflow_result$error))))
 
   }
 
@@ -191,7 +199,7 @@ evaluate_single_config <- function(config_row,
     if (!is.null(finalize_result$error)) {
 
       return(create_failed_result(config_id,
-        paste0("Parameter finalization failed: ", finalize_result$error$message)))
+        paste0("Parameter finalization failed: ", condition_summary(finalize_result$error))))
 
     }
 
@@ -240,20 +248,26 @@ evaluate_single_config <- function(config_row,
   if (!is.null(grid_result$error)) {
 
     return(create_failed_result(config_id,
-      paste0("Grid search failed: ", grid_result$error$message)))
+      paste0("Grid search failed: ", condition_summary(grid_result$error))))
 
   }
 
   grid_results <- grid_result$result
   collect_from(grid_result)
 
-  ## Check for "All models failed" warning from tune
+  ## Check for "All models failed" warning from tune. tune_grid() returns
+  ## rather than erroring, and the reason is only in its .notes, so it is
+  ## read back from there (#96).
   if (!is.null(grid_result$warnings)) {
 
     if (any(grepl("All models failed", unlist(grid_result$warnings)))) {
 
-      return(create_failed_result(config_id,
-        "Grid search failed: all models failed during CV"))
+      cause <- tune_failure_cause(grid_results)
+
+      return(create_failed_result(config_id, paste0(
+        "Grid search failed: all models failed during CV",
+        if (!is.null(cause)) paste0(" \u2014 ", cause)
+      )))
 
     }
 
@@ -354,6 +368,10 @@ evaluate_single_config <- function(config_row,
 
   }
 
+  ## Read once, from whichever result is kept: a tune_bayes() result carries
+  ## its initial grid's notes as .iter 0, so this covers both stages.
+  collect_notes_from(final_tune_results)
+
   ## -----------------------------------------------------------------------
   ## Step 9: Select best hyperparameters
   ## -----------------------------------------------------------------------
@@ -367,7 +385,7 @@ evaluate_single_config <- function(config_row,
   if (!is.null(best_result$error)) {
 
     return(create_failed_result(config_id,
-      paste0("Parameter selection failed: ", best_result$error$message)))
+      paste0("Parameter selection failed: ", condition_summary(best_result$error))))
 
   }
 
@@ -405,7 +423,7 @@ evaluate_single_config <- function(config_row,
   if (!is.null(final_wflow_result$error)) {
 
     return(create_failed_result(config_id,
-      paste0("Workflow finalization failed: ", final_wflow_result$error$message)))
+      paste0("Workflow finalization failed: ", condition_summary(final_wflow_result$error))))
 
   }
 
@@ -428,12 +446,13 @@ evaluate_single_config <- function(config_row,
   if (!is.null(lastfit_result$error)) {
 
     return(create_failed_result(config_id,
-      paste0("Test evaluation failed: ", lastfit_result$error$message)))
+      paste0("Test evaluation failed: ", condition_summary(lastfit_result$error))))
 
   }
 
   last_fit_obj <- lastfit_result$result
   collect_from(lastfit_result)
+  collect_notes_from(last_fit_obj)
 
   ## -----------------------------------------------------------------------
   ## Step 12: Extract predictions and back-transform
@@ -454,7 +473,7 @@ evaluate_single_config <- function(config_row,
   if (!is.null(bt_result$error)) {
 
     return(create_failed_result(config_id,
-      paste0("Back-transformation failed: ", bt_result$error$message)))
+      paste0("Back-transformation failed: ", condition_summary(bt_result$error))))
 
   }
 

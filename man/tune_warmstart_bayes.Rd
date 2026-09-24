@@ -38,6 +38,9 @@ List with:
 \item \code{fallback_used}: Logical, TRUE if grid fallback was used
 \item \code{grid_points}: Integer, the number of points in the starting grid
 (the space-filling grid when \code{fallback_used} is TRUE)
+\item \code{error}: Character, present only when the grid failed, in which case
+\code{tune_results} and \code{best_params} are NULL. When every model failed it
+carries the first distinct error from \code{.notes}.
 }
 }
 \description{

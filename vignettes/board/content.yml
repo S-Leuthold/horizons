@@ -826,10 +826,10 @@ verbs:
         source: R/pipeline-evaluate.R#L781
       - name: prune
         touch: Leave TRUE. Since tuning metrics moved to the original response scale (#49), the grid RPD the gate reads is comparable across transformations, which closed the second half of #38. Set FALSE only to spend Bayesian iterations on every configuration regardless of its grid performance; FALSE also leaves below_prune_threshold unrecorded, so fit() cannot warn when no member cleared the threshold.
-        source: R/evaluate-single-config.R#L285
+        source: R/evaluate-single-config.R#L299
       - name: prune_threshold
         touch: The grid-search RPD below which Bayesian optimization is skipped; 1.0 is "no better than the mean".
-        source: R/evaluate-single-config.R#L289
+        source: R/evaluate-single-config.R#L303
       - name: allow_par
         touch: TRUE after registering a future plan; evaluate() never registers one. FALSE ignores any plan.
         source: R/pipeline-evaluate.R#L252
@@ -998,9 +998,9 @@ verbs:
       - step: Per configuration, fit_single_config() rebuilds the recipe, with the same window and PCA threshold evaluate() used (on a cold start, the ones the object's configuration records), and the workflow, re-tunes with Bayesian optimization on its own final budget, warm-started from evaluate()'s best parameters or, with none to use (always, on a cold start), from a space-filling grid of grid_size points, which the tree reports and models$results records, finalizes, generates out-of-fold predictions over the folds and back-transforms them, computes fold-wise metrics, fits the final model on the fit rows, and scores it on the test part.
         source: R/fit-single-config.R#L45
       - step: Flags a configuration as degraded when its test RPD falls below the cross-validated mean minus two standard errors.
-        source: R/fit-single-config.R#L478
+        source: R/fit-single-config.R#L489
       - step: With UQ on, trains a quantile forest on the out-of-fold residuals and computes signed conformal scores on the calibration set; with AD on, estimates the feature-space centroid and a Ledoit-Wolf shrinkage covariance and calibrates the quartile and out-of-domain cutoffs on the same calibration set. Both run before the workflow is butchered for storage.
-        source: R/fit-single-config.R#L498
+        source: R/fit-single-config.R#L509
       - step: Assembles the workflows in best-first order, the stacked out-of-fold predictions keyed to a row index, the results table, the response bound (1.5 times the largest outcome among the fit rows, the ones the final models are trained on), and whether the training object carried a selection record; promotes to horizons_fit and certifies the models slot. On a horizons_ensemble, the ensemble slot is emptied first, since it was built on the members being replaced.
         source: R/pipeline-fit.R#L848
     records:
@@ -1046,7 +1046,7 @@ verbs:
         source: R/pipeline-fit.R#L267
       - when: a configuration fails to re-tune or fit
         does: records the failure and its error message in models$results and continues; butchering failure falls back to storing the unbutchered workflow
-        source: R/fit-single-config.R#L95
+        source: R/fit-single-config.R#L104
       - when: every configuration fails
         does: aborts with class horizons_all_members_failed, listing the first three distinct errors with the configurations that raised them; the per-member results travel on the condition as results
         source: R/pipeline-fit.R#L1098

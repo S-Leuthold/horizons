@@ -279,6 +279,9 @@ point_in_grid <- function(point, grid) {
 #'   - `fallback_used`: Logical, TRUE if grid fallback was used
 #'   - `grid_points`: Integer, the number of points in the starting grid
 #'     (the space-filling grid when `fallback_used` is TRUE)
+#'   - `error`: Character, present only when the grid failed, in which case
+#'     `tune_results` and `best_params` are NULL. When every model failed it
+#'     carries the first distinct error from `.notes`.
 #'
 #' @keywords internal
 #' @export
@@ -320,13 +323,32 @@ tune_warmstart_bayes <- function(workflow,
       best_params   = NULL,
       fallback_used = fallback_used,
       grid_points   = nrow(initial_grid),
-      error         = grid_result$error$message
+      error         = condition_summary(grid_result$error)
     ))
 
   }
 
   tune_results <- grid_result$result
   bayes_failed <- FALSE
+
+  ## Every model failed: tune_grid() returns rather than erroring, with the
+  ## reason only in .notes. Stop here with that reason, as
+  ## evaluate_single_config() does, instead of letting tune_bayes() and
+  ## select_best() fail on an empty grid with "All models failed" (#96).
+  if (any(grepl("All models failed", unlist(grid_result$warnings)))) {
+
+    cause <- tune_failure_cause(tune_results)
+
+    return(list(
+      tune_results  = NULL,
+      best_params   = NULL,
+      fallback_used = fallback_used,
+      grid_points   = nrow(initial_grid),
+      error         = paste0("all models failed during CV",
+                             if (!is.null(cause)) paste0(" \u2014 ", cause))
+    ))
+
+  }
 
   ## --- Phase 2: Bayesian optimization (if requested) ----------------------
 
