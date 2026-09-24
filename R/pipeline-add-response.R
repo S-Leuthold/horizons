@@ -422,22 +422,23 @@ add_response <- function(x,
   }
 
   ## Low match rate (<50%) - warn with pattern detection ----------------------
+  ## The hints print under the Matched line in Step 6, inside the tree; they
+  ## used to print here, above the tree's header (#91).
 
-  if (match_rate < 0.5) {
+  low_match   <- match_rate < 0.5
+  match_hints <- character()
 
-    warn_details <- c(
-      paste0(n_matched, "/", n_horizons, " samples matched")
-    )
+  if (low_match) {
 
     ## Check for case mismatch
     n_case_match <- sum(tolower(horizons_ids) %in% tolower(source_ids))
 
     if (n_case_match > n_matched) {
 
-      warn_details <- c(warn_details,
-                        "This looks like a case mismatch",
-                        paste0("Try: mutate(source, ", by_source,
-                               " = tolower(", by_source, "))"))
+      match_hints <- c(match_hints,
+                       "This looks like a case mismatch",
+                       paste0("Try: mutate(source, ", by_source,
+                              " = tolower(", by_source, "))"))
 
     }
 
@@ -446,17 +447,11 @@ add_response <- function(x,
 
     if (n_ws_match > n_matched) {
 
-      warn_details <- c(warn_details,
-                        "This looks like a whitespace issue",
-                        paste0("Try: mutate(source, ", by_source,
-                               " = trimws(", by_source, "))"))
+      match_hints <- c(match_hints,
+                       "This looks like a whitespace issue",
+                       paste0("Try: mutate(source, ", by_source,
+                              " = trimws(", by_source, "))"))
 
-    }
-
-    cat(cli::col_yellow(paste0("\u2502  \u251C\u2500 ", warn_details[1], "\n")))
-    for (i in seq_along(warn_details)[-1]) {
-      branch <- if (i < length(warn_details)) "\u251C\u2500" else "\u2514\u2500"
-      cat(cli::col_yellow(paste0("\u2502  \u2502     ", branch, " ", warn_details[i], "\n")))
     }
 
     warning(
@@ -551,7 +546,17 @@ add_response <- function(x,
 
   }
 
-  cat(paste0("\u2502  \u251C\u2500 Matched: ", matched_str, "\n"))
+  ## Under half matched: the line is yellow, and Step 3's pattern hints sit
+  ## under it.
+  matched_line <- paste0("Matched: ", matched_str)
+  cat(paste0("\u2502  \u251C\u2500 ",
+             if (low_match) cli::col_yellow(matched_line) else matched_line, "\n"))
+
+  for (i in seq_along(match_hints)) {
+    branch <- if (i < length(match_hints)) "\u251C\u2500" else "\u2514\u2500"
+    cat(paste0("\u2502  \u2502  ", branch, " ", cli::col_yellow(match_hints[i]), "\n"))
+  }
+
   cat("\u2502  \u2514\u2500 Variables:\n")
 
   for (i in seq_along(variable)) {

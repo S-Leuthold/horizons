@@ -185,6 +185,14 @@ SPLIT_PROP <- 0.8
 ### or AD is on; the rest is the calibration set the two share.
 CALIB_PROP <- 0.8
 
+### How every stratified draw bins the outcome: rsample's `breaks` and `pool`,
+### at rsample's own defaults. Passed to the draws and to the
+### outcome_stratifies() check alike, so what the console says about a draw
+### cannot drift from the draw if rsample's defaults change (#91). Doubles, as
+### rsample's formals are, so the split attributes tune reads are unchanged.
+STRATA_BREAKS <- 4
+STRATA_POOL   <- 0.1
+
 ## Applicability Domain (AD) ----------------------------------------------------
 
 ### Coverage level for the out-of-domain (OOD) cutoff: a sample is flagged OOD
