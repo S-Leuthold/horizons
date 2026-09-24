@@ -551,6 +551,71 @@ consequences; the review itself is in
 
 ## Bug Fixes
 
+* `evaluate()` keeps one checkpoint store, a file per config under
+  `checkpoints/` (#42). The whole-table `eval_checkpoint.rds` was written by
+  the sequential path only and read first on resume, so the parallel path
+  left it stale and it shadowed the per-config files: repairing or
+  re-running one config's file changed nothing. It is no longer written. An
+  existing one is read only for configs with no per-config file; those rows
+  are copied into `checkpoints/`, with a message that the legacy file can
+  then be deleted. Every row from either store now passes the same gates in
+  the same order: the training-data fingerprint and the tuning settings
+  (below), where a mismatch aborts, then the scoring schema, where an older
+  row is dropped and re-evaluated. A per-config row with an older schema and
+  different data used to be skipped silently while the same row in the
+  single file aborted; both now abort. A checkpoint file that cannot be used
+  now warns, naming it, where it used to be skipped silently (per-config) or
+  abort `evaluate()` with a bare read error (single file). A file in
+  `checkpoints/` counts only for the config its name says: a leftover
+  `file*.rds` temp file from an interrupted write, which sorted ahead of
+  most model prefixes and shadowed the config's real file, is reported
+  instead. Checkpoints and the manifest are written under a `.rds.tmp` name
+  and renamed into place, so no reader sees a half-written file.
+  `monitor_evaluate()` reads through the same helpers and gates rows against
+  the fingerprint and settings in `eval_manifest.rds`, so it no longer
+  counts or ranks a row `evaluate()` would reject (every `.rds` file used to
+  count as complete); it shows what it ignored and which files it could not
+  use, and returns them as `ignored` and `unreadable`. It picks its best so
+  far by `evaluate()`'s candidate rule, including the `bayesian_iter = 0`
+  relabel of resumed "pruned" rows (#38), so the two name the same config.
+  In watch mode it re-reads the manifest on every poll, where it used to
+  read it once and, after a re-run with other settings, report nothing
+  complete for good.
+  Reading and gating the store is linear in the number of files: about
+  1.5 s for 16,000 files, down from about 6 s. Checkpoint refusals are
+  reported from `evaluate()` rather than from an internal helper.
+
+* `evaluate()` fingerprints the values on the training rows and the tuning
+  settings, and refuses to resume checkpoints that differ in either (#42).
+  The training-data fingerprint covered the sample ids and the outcome name
+  only, so re-standardized spectra on the same samples (the #64 grid change
+  does exactly this), an outcome rescaled under the same name, or another
+  `cv_folds`, `grid_size`, `bayesian_iter`, `prune`, `prune_threshold` or
+  `seed` resumed stale results, silently. Rows now carry `data_fields` (the
+  outcome, the sample ids, the role-map rows with the roles that reach a
+  row's contents, `id`, `outcome`, `predictor` and `covariate`, and the
+  outcome, predictor and covariate values in id order) and `settings`,
+  list-columns that are also in `evaluation$results`, compared field by
+  field on resume. A sibling `response` or a `meta` column never reaches the
+  model, so `add_response()` of another property between two runs still
+  resumes, while a predictor changing role refuses. An abort names what
+  differs: "was computed for outcome clay; this run models SOC" rather than
+  two hashes, "different predictor values for the same samples", or each
+  setting with both values; a data abort also names any settings that
+  differ, since a changed `seed` moves the split. Keep one `output_dir` per
+  outcome. Hashing the predictor values costs about 0.3 s
+  at 17,788 x 1,701, once per run; the parallel worker is sent both records
+  rather than recomputing them. `prune_threshold` is recorded only when
+  `prune = TRUE`, since it is never read otherwise. The ranking `metric` is
+  not recorded: every row carries all six cross-validated metrics and the
+  ranking is recomputed each run, so changing it still resumes. Rows
+  written before this version carry neither record; they resume, counted
+  in the existing once-per-run warning about unverifiable checkpoints. A
+  field or setting added later makes older rows unverified in the same way
+  rather than refused. `eval_manifest.rds` is schema 4, adding
+  `data_fields` and `settings`, and the parallel worker payload gains
+  `data_fp` and `settings`, stamped on each row as sent.
+
 * **Re-running `configure()` on an object that has been through `ensemble()` no longer aborts** (#70). Reconfiguring cleared a hand-kept list of keys that missed `ensemble$model`, and `set_analysis()` counts a non-NULL `ensemble$model` as promotion, so it refused the object. The same list let `models$uq`, `models$ad`, `models$results` and most of `evaluation` survive the demotion, which left `has_uq()` answering `TRUE` on a plain `horizons_data` whenever the fit had calibrated UQ. Reconfiguring now resets the `evaluation`, `models` and `ensemble` slots whole to the constructor's shape, through an internal `reset_promotion()` that sits beside the promotion check so the two stay in step. The list also erased the record of outliers `validate(remove_outliers = TRUE)` had removed, although those rows stayed removed; that record is now kept, and only the verdict and the flagged ids are cleared. A `select_training()` record is kept, as before.
 
 * **`spectra()` now builds its object with the class constructor, `new_horizons_data()`** (#71), rather than a second constructor of its own that had drifted from the contract. A raw object had no `data$n_responses` or `selection` key, carried `models` and `ensemble` stubs that predated the current contract, and its `models$uq` stub was a non-empty list, so `has_uq()` answered `TRUE` before anything was fitted. The constructor itself now declares the `models` keys `fit()` writes (`ad` and `selection_present` were missing) and the `evaluation` keys `evaluate()` writes (it declared `backend` and `runtime`, which nothing writes). `summary()` read `evaluation$runtime`, so its evaluation runtime line never printed; it reads `runtime_secs` now. The tuning defaults on a raw object are integers (`10L`, `15L`, `5L`) rather than doubles. An object saved by an earlier version keeps its old shape until its downstream slots are rewritten: by `configure()` when it runs on an object that already has a grid (not by the first `configure()`), or by `evaluate()` and `fit()`, which now reset the slots after their own.
@@ -727,7 +792,9 @@ consequences; the review itself is in
   `rlang::last_error()$results` recovers them without re-running. The
   message also names any configurations loaded from checkpoints in
   `output_dir`, since calling `evaluate()` again resumes those rather than
-  re-running them, and says which files to delete. The same condition now
+  re-running them, and says which files to delete: `checkpoints/<id>.rds`,
+  and a legacy `eval_checkpoint.rds` only when a resumed row came from it
+  (#42). The same condition now
   covers configurations that succeeded with no cross-validated value of the
   ranking metric (rows checkpointed before the `cv_*` columns existed),
   which `rank_configs_by_cv()` refused unclassed and without the results;
