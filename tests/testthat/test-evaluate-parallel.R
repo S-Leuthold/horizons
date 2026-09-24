@@ -6,12 +6,8 @@
 ## evaluate() refuses to dispatch under devtools::load_all() (see the guard
 ## test below). The dispatching tests therefore run only against an installed
 ## build: R CMD check, or devtools::test() after devtools::install().
-skip_if_dev_package <- function() {
-  testthat::skip_if(
-    exists(".__DEVTOOLS__", envir = asNamespace("horizons"), inherits = FALSE),
-    "parallel dispatch refuses under load_all(); run via R CMD check or an installed build"
-  )
-}
+## skip_if_dev_package() comes from helper-load-all.R, shared with
+## test-pipeline-predict.R's fresh-process round trip.
 
 ## local_plan() and keep_only_warning() come from helper-parallel.R.
 

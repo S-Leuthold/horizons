@@ -61,10 +61,12 @@ Imports:
     yardstick,
     zoo
 Roxygen: list(markdown = TRUE)
-Suggests: 
+Suggests:
     testthat (>= 3.0.0),
     withr,
     Boruta,
+    bonsai,
+    callr,
     circlize,
     covr,
     Cubist,

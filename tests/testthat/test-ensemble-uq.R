@@ -402,10 +402,81 @@ describe("ensemble UQ - degradation and gates", {
 
   })
 
-  it("predict_ensemble_intervals returns NULL for an unrecognized bundle", {
+  it("predict_ensemble_intervals warns and returns NULL for an unrecognized bundle", {
 
-    expect_null(predict_ensemble_intervals(list(method = "bogus"), NULL))
-    expect_null(predict_ensemble_intervals("not a list", NULL))
+    ## #65's interval half, applied to the ensemble path: this used to
+    ## degrade silently (see predict_intervals()/warn_interval_failure() on
+    ## the single-model side for the same fix).
+    result <- NULL
+    expect_warning(
+      result <- predict_ensemble_intervals(list(method = "bogus"), NULL),
+      class = "horizons_interval_warning"
+    )
+    expect_null(result)
+
+    expect_warning(
+      predict_ensemble_intervals("not a list", NULL),
+      class = "horizons_interval_warning"
+    )
+
+  })
+
+  it("predict_ensemble_intervals warns and returns NULL when a fold model cannot predict", {
+
+    members  <- ens_ref$ensemble$weights$member
+    new_spec <- resolve_new_data(test_set)
+    mp       <- predict_members(ens_ref, members, new_spec)
+
+    broken_uq <- ens_ref$ensemble$uq
+    ## "weighted" fold models predict via member_mat %*% coef; a wrong-length
+    ## coef (one row instead of one per member) makes that matrix multiply
+    ## error with "non-conformable arguments". `$coef <- $coef[1]` alone
+    ## would not do it: assigning a length-1 value into a tibble column
+    ## recycles it back to the original row count instead of shortening it.
+    broken_uq$fold_models[[1]] <- broken_uq$fold_models[[1]][1, ]
+
+    result <- NULL
+    expect_warning(
+      result <- predict_ensemble_intervals(broken_uq, mp),
+      class = "horizons_interval_warning"
+    )
+    expect_null(result)
+
+  })
+
+  it("predict_ensemble_intervals warns and returns NULL when the calibration set is too small", {
+
+    members  <- ens_ref$ensemble$weights$member
+    new_spec <- resolve_new_data(test_set)
+    mp       <- predict_members(ens_ref, members, new_spec)
+
+    small_uq <- ens_ref$ensemble$uq
+    ## Below cv_plus_indices()'s validity threshold at level 0.90 (n >= 19).
+    small_uq$calib <- small_uq$calib[1:2, ]
+
+    result <- NULL
+    expect_warning(
+      result <- predict_ensemble_intervals(small_uq, mp),
+      class = "horizons_interval_warning"
+    )
+    expect_null(result)
+
+  })
+
+  it("predict.horizons_ensemble(interval = TRUE) warns end to end and still returns point predictions", {
+
+    broken_ens <- ens_ref
+    broken_ens$ensemble$uq$fold_models[[1]] <-
+      broken_ens$ensemble$uq$fold_models[[1]][1, ]
+
+    p <- NULL
+    expect_warning(
+      p <- predict(broken_ens, test_set, interval = TRUE),
+      class = "horizons_interval_warning"
+    )
+
+    expect_true(".pred" %in% names(p))
+    expect_false(".pred_lower" %in% names(p))
 
   })
 

@@ -678,9 +678,10 @@ predict_ensemble_uq_matrix <- function(uq, wide) {
 #'
 #' Degrades to `NULL` (point-only predictions) when the bundle is not a
 #' recognizable CV+ bundle, when a fold model fails to predict, or when the
-#' calibration set cannot support the requested level. A missing member
-#' column aborts loudly — the fold models are only valid over the exact
-#' member set they trained on.
+#' calibration set cannot support the requested level — warning each time,
+#' via [warn_interval_failure()], rather than degrading silently (#65's
+#' interval half, applied here). A missing member column aborts loudly — the
+#' fold models are only valid over the exact member set they trained on.
 #'
 #' The deployed point prediction may occasionally fall outside its own CV+
 #' interval; this is a known property of jackknife+/CV+ aggregation (the
@@ -701,6 +702,10 @@ predict_ensemble_intervals <- function(uq, member_pred) {
   ## (a corrupt slot, a future bundle format) degrades to point-only.
   if (!is.list(uq) || !identical(uq$method, "cv_plus")) {
 
+    warn_interval_failure(
+      "validating the ensemble UQ bundle",
+      "the stored bundle is not a recognizable CV+ bundle (missing or unexpected $method)"
+    )
     return(NULL)
 
   }
@@ -735,6 +740,7 @@ predict_ensemble_intervals <- function(uq, member_pred) {
 
   if (is.null(matrix_safe$result)) {
 
+    warn_interval_failure("predicting from the retained fold models", matrix_safe$error)
     return(NULL)
 
   }
@@ -748,6 +754,10 @@ predict_ensemble_intervals <- function(uq, member_pred) {
 
   if (is.null(bounds)) {
 
+    warn_interval_failure(
+      "computing CV+ bounds",
+      "the calibration set is too small to support the requested coverage level"
+    )
     return(NULL)
 
   }
