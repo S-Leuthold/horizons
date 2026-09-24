@@ -435,6 +435,41 @@ test_that("add_response() detects case mismatch pattern", {
 
 })
 
+test_that("add_response() prints its low-match hints inside the tree, under the Matched line (#91)", {
+
+  ## Arrange ---------------------------------------------------------------
+
+  ## One of four ids matches exactly and the rest differ only in case: under
+  ## half matched, with a pattern to name
+  hd  <- make_test_hd(c("S001", "S002", "S003", "S004"))
+  lab <- tibble::tibble(
+    sample_id = c("S001", "s002", "s003", "s004"),
+    SOC       = c(1.0, 2.0, 3.0, 4.0)
+  )
+
+  ## Act -------------------------------------------------------------------
+
+  expect_warning(
+    out <- utils::capture.output(add_response(hd, lab, variable = "SOC")),
+    "1/4 samples matched"
+  )
+
+  ## Assert ----------------------------------------------------------------
+
+  ## The hints used to print above the header, as a block of their own
+  header <- grep("Adding response data", out, fixed = TRUE)
+
+  expect_identical(header, 1L)
+  expect_identical(out[header + 1:5], c(
+    "│  ├─ Source: tibble",
+    "│  ├─ Matched: 1/4 samples",
+    "│  │  ├─ This looks like a case mismatch",
+    "│  │  └─ Try: mutate(source, sample_id = tolower(sample_id))",
+    "│  └─ Variables:"
+  ))
+
+})
+
 
 ## ---------------------------------------------------------------------------
 ## add_response() — Provenance tracking

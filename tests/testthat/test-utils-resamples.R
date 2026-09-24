@@ -320,3 +320,200 @@ describe("resample transfer footprint", {
   })
 
 })
+
+
+## ---------------------------------------------------------------------------
+## outcome_stratifies() and draw_stratified(): whether the strata held (#91)
+## ---------------------------------------------------------------------------
+## rsample draws unstratified without an error in several cases, and the
+## returned object's `strata` attribute names the outcome either way, so the
+## console said "stratified" regardless. These pin the cases the helper has to
+## call unstratified, against the rsample the package imports.
+
+describe("outcome_stratifies()", {
+
+  it("is TRUE for a continuous outcome with enough rows to bin", {
+
+    set.seed(1)
+
+    expect_true(outcome_stratifies(rnorm(100)))
+
+    ## 40 to 79 rows: rsample warns and uses fewer bins, but still stratifies
+    expect_true(outcome_stratifies(rnorm(40)))
+
+  })
+
+  it("is FALSE below 40 rows, where rsample warns and draws unstratified", {
+
+    set.seed(1)
+    y <- rnorm(39)
+
+    expect_false(outcome_stratifies(y))
+
+    ## The draw itself says so only as a warning (after one about the bin
+    ## count, muffled here); its strata attribute names the outcome all the same
+    expect_warning(
+      keep_only_warning(
+        split <- rsample::initial_split(data.frame(y = y), prop = 0.8, strata = "y"),
+        "Too little data to stratify"
+      ),
+      "Too little data to stratify"
+    )
+    expect_identical(attr(split, "strata"), "y")
+
+  })
+
+  it("is FALSE when rsample pools a few-valued outcome into one stratum, with no warning", {
+
+    y <- c(rep(1, 46), rep(2, 4))
+
+    expect_false(outcome_stratifies(y))
+    expect_no_warning(rsample::vfold_cv(data.frame(y = y), v = 5, strata = "y"))
+
+  })
+
+  it("is FALSE when tied quantiles leave one bin (a zero-inflated outcome)", {
+
+    set.seed(1)
+
+    expect_false(outcome_stratifies(c(rep(0, 90), runif(10))))
+
+  })
+
+  ## Pooling draws a random stratum for each pooled row inside make_strata().
+  ## 5 is under 10 % of these rows and pools into four strata; pooling into
+  ## one stratum samples from one level and draws nothing, so it would not
+  ## show a missing restore.
+  pooled_y <- c(rep(1:4, each = 23), rep(5, 4))
+
+  it("leaves the caller's RNG stream where it found it", {
+
+    ## Precondition: make_strata() itself moves the stream on this outcome
+    set.seed(42)
+    before <- .Random.seed
+    invisible(rsample::make_strata(pooled_y))
+    expect_false(identical(.Random.seed, before))
+
+    set.seed(42)
+    before <- .Random.seed
+    outcome_stratifies(pooled_y)
+
+    expect_identical(.Random.seed, before)
+
+  })
+
+  it("leaves .Random.seed absent when it was absent", {
+
+    y <- pooled_y
+
+    ## Restore the session's stream after the test, whatever it was
+    had_seed <- exists(".Random.seed", envir = globalenv(), inherits = FALSE)
+    old_seed <- if (had_seed) get(".Random.seed", envir = globalenv())
+    withr::defer(if (had_seed) assign(".Random.seed", old_seed, envir = globalenv()))
+
+    if (had_seed) rm(".Random.seed", envir = globalenv())
+
+    outcome_stratifies(y)
+
+    expect_false(exists(".Random.seed", envir = globalenv(), inherits = FALSE))
+
+  })
+
+})
+
+describe("draw_stratified()", {
+
+  df <- data.frame(y = seq_len(100) / 10)
+
+  it("reports a stratified draw when the strata held", {
+
+    drawn <- draw_stratified(
+      outcome      = df$y,
+      stratified   = function() rsample::vfold_cv(df, v = 5, strata = "y"),
+      unstratified = function() rsample::vfold_cv(df, v = 5)
+    )
+
+    expect_s3_class(drawn$draw, "vfold_cv")
+    expect_true(drawn$stratified)
+    expect_false(drawn$strata_failed)
+
+  })
+
+  it("reports an unstratified draw when rsample dropped the strata, with no failure", {
+
+    small <- df[1:30, , drop = FALSE]
+
+    drawn <- suppressWarnings(draw_stratified(
+      outcome      = small$y,
+      stratified   = function() rsample::vfold_cv(small, v = 5, strata = "y"),
+      unstratified = function() rsample::vfold_cv(small, v = 5)
+    ))
+
+    expect_false(drawn$stratified)
+    expect_false(drawn$strata_failed)
+
+  })
+
+  it("falls back to the unstratified draw when the stratified one fails", {
+
+    drawn <- draw_stratified(
+      outcome      = df$y,
+      stratified   = function() stop("stratification refused"),
+      unstratified = function() "the unstratified draw"
+    )
+
+    expect_identical(drawn$draw, "the unstratified draw")
+    expect_false(drawn$stratified)
+    expect_true(drawn$strata_failed)
+
+  })
+
+  it("draws from the stream the caller seeded, as the inline draws did", {
+
+    ## A pooled outcome (5 is under 10 % of the rows), so make_strata() draws
+    ## random numbers: without the restore, the check would move the stream
+    ## the draw then reads, and the folds would differ.
+    pooled <- data.frame(y = c(rep(1:4, each = 23), rep(5, 4)))
+
+    set.seed(1)
+    before <- .Random.seed
+    invisible(rsample::make_strata(pooled$y))
+    expect_false(identical(.Random.seed, before))
+
+    ## The inline draw as it was, at rsample's defaults
+    set.seed(307)
+    inline <- rsample::vfold_cv(pooled, v = 5, strata = "y")
+
+    set.seed(307)
+    drawn <- draw_stratified(
+      outcome      = pooled$y,
+      stratified   = function() rsample::vfold_cv(pooled, v = 5, strata = "y",
+                                                  breaks = STRATA_BREAKS, pool = STRATA_POOL),
+      unstratified = function() rsample::vfold_cv(pooled, v = 5)
+    )
+
+    expect_true(drawn$stratified)
+    expect_identical(lapply(drawn$draw$splits, `[[`, "in_id"),
+                     lapply(inline$splits, `[[`, "in_id"))
+
+  })
+
+  it("counts an error from the check as unstratified, and still draws", {
+
+    ## The check used to run outside the fallback, so its error aborted where
+    ## the inline draw retried without strata
+    local_mocked_bindings(outcome_stratifies = function(outcome) stop("make_strata refused"))
+
+    drawn <- draw_stratified(
+      outcome      = df$y,
+      stratified   = function() rsample::vfold_cv(df, v = 5, strata = "y"),
+      unstratified = function() rsample::vfold_cv(df, v = 5)
+    )
+
+    expect_s3_class(drawn$draw, "vfold_cv")
+    expect_false(drawn$stratified)
+    expect_false(drawn$strata_failed)
+
+  })
+
+})

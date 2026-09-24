@@ -270,11 +270,19 @@ average <- function(x,
 
   results_list        <- vector("list", n_groups)
   n_dropped           <- 0
-  n_groups_with_drops <- 0L
-  groups_with_drops   <- character()
   all_outlier_samples <- character()
   dropped_samples     <- character()
   qc_details          <- list()
+
+  ## For the report: the groups that lost some replicates to QC and averaged
+  ## the rest, and the groups whose every replicate failed, handled by
+  ## on_all_outliers, with the replicates each kind lost. The report used to
+  ## count groups with drops, and a failed group averaged under "warn" drops
+  ## nothing, so it was reported clean (#89).
+  n_groups_partial <- 0L
+  n_groups_failed  <- 0L
+  n_reps_partial   <- 0
+  n_reps_failed    <- 0
 
   for (i in seq_len(n_groups)) {
 
@@ -301,19 +309,12 @@ average <- function(x,
 
       ## Group was dropped (all outliers + drop mode) ------------------------
 
-      dropped_samples     <- c(dropped_samples, as.character(group_id))
-      n_dropped           <- n_dropped + n_reps
-      n_groups_with_drops <- n_groups_with_drops + 1L
-      groups_with_drops   <- c(groups_with_drops, as.character(group_id))
+      dropped_samples <- c(dropped_samples, as.character(group_id))
+      n_dropped       <- n_dropped + n_reps
 
     } else {
 
       results_list[[i]] <- group_result$averaged
-
-      if (group_result$n_dropped > 0) {
-        n_groups_with_drops <- n_groups_with_drops + 1L
-        groups_with_drops   <- c(groups_with_drops, as.character(group_id))
-      }
 
       n_dropped <- n_dropped + group_result$n_dropped
 
@@ -322,6 +323,20 @@ average <- function(x,
         all_outlier_samples <- c(all_outlier_samples, as.character(group_id))
 
       }
+
+    }
+
+    ## Tally for the report --------------------------------------------------
+
+    if (group_result$all_outliers) {
+
+      n_groups_failed <- n_groups_failed + 1L
+      n_reps_failed   <- n_reps_failed + group_result$n_dropped
+
+    } else if (group_result$n_dropped > 0) {
+
+      n_groups_partial <- n_groups_partial + 1L
+      n_reps_partial   <- n_reps_partial + group_result$n_dropped
 
     }
 
@@ -526,25 +541,53 @@ average <- function(x,
 
     if (quality_check) {
 
-      n_clean <- n_groups - n_groups_with_drops
+      ## One line per kind of group, so the lines add up to n_groups and a
+      ## group whose every replicate failed is never counted clean (#89). A
+      ## group of one scan has nothing to correlate against, so QC never
+      ## looked at it; it is not counted clean either.
 
-      if (n_dropped > 0) {
+      n_single <- sum(reps_per_group < 2)
+      n_clean  <- n_groups - n_single - n_groups_partial - n_groups_failed
+
+      if (n_clean < n_groups) {
 
         cat(paste0("\u2502  \u251C\u2500 QC (r > ", correlation_threshold, ")\n"))
         cat(paste0("\u2502  \u2502  \u251C\u2500 ", n_clean, "/", n_groups,
                    " groups clean\n"))
-        cat(paste0("\u2502  \u2502  \u251C\u2500 ", n_groups_with_drops,
-                   " groups \u2192 ", n_dropped, " replicates removed\n"))
 
-        if (length(dropped_samples) > 0) {
+        if (n_single > 0) {
 
-          cat(paste0("\u2502  \u2502  \u251C\u2500 ", length(dropped_samples),
-                     " groups dropped entirely\n"))
+          cat(paste0("\u2502  \u2502  \u251C\u2500 ", cli::format_inline(
+            "{n_single} single-replicate group{?s} (not QC'd)"
+          ), "\n"))
 
         }
 
-        cat(paste0("\u2502  \u2502  \u2514\u2500 ",
-                   nrow(averaged), " samples retained\n"))
+        if (n_groups_partial > 0) {
+
+          cat(paste0("\u2502  \u2502  \u251C\u2500 ", cli::format_inline(
+            "{n_groups_partial} group{?s} \u2192 {n_reps_partial} replicate{?s} removed"
+          ), "\n"))
+
+        }
+
+        if (n_groups_failed > 0) {
+
+          handled <- switch(on_all_outliers,
+            warn      = "averaged anyway",
+            keep_best = cli::format_inline("{n_groups_failed} replicate{?s} kept, {n_reps_failed} removed"),
+            drop      = cli::format_inline("dropped, {n_reps_failed} replicate{?s} removed")
+          )
+
+          cat(paste0("\u2502  \u2502  \u251C\u2500 ", cli::format_inline(
+            "{n_groups_failed} group{?s} failed QC on every replicate"
+          ), " \u2192 ", handled, " (on_all_outliers = '", on_all_outliers, "')\n"))
+
+        }
+
+        cat(paste0("\u2502  \u2502  \u2514\u2500 ", cli::format_inline(
+          "{nrow(averaged)} sample{?s} retained"
+        ), "\n"))
 
       } else {
 
