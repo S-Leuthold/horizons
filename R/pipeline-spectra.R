@@ -47,6 +47,22 @@ ID_ALIASES <- c(
 #' The `filename` column (role: meta) preserves original filenames for traceability
 #' and later ID parsing via `parse_ids()`.
 #'
+#' **Wavenumber order:** Predictor columns are sorted into decreasing
+#' wavenumber order before the object is returned, whatever order the source
+#' gave them (a KSSL-shaped library, for one, is stored increasing). Names
+#' and values travel together through the sort; only the column order
+#' changes. The console reports it as a "Sorting" step when it happens.
+#'
+#' **Duplicate or missing sample ids:** Bruker's own OPUS naming can collide
+#' at this stage — `S100-1.0` and `S100-1.1` both become `S100-1` once the
+#' extension is stripped — and, for CSV or tibble input, a blank or missing
+#' cell in the detected id column leaves a `sample_id` of `NA`. Both are
+#' legitimate before replicate scans are collapsed, so `spectra()` warns
+#' rather than aborts on a duplicate or `NA` `sample_id`; use [average()] to
+#' collapse replicates before anything that requires unique ids
+#' (`add_response()`, `configure()`, and onward, which refuse the object
+#' instead of warning).
+#'
 #' @param source Path to directory, file(s), or a tibble/data.frame.
 #' @param type Character. One of `"opus"`, `"csv"`, or `NULL` for auto-detect.
 #'   Default: `NULL`.
@@ -143,14 +159,40 @@ spectra <- function(source,
   }
 
   ## -------------------------------------------------------------------------
+  ## Step 2b: Put the axis in decreasing order, then validate
+  ## -------------------------------------------------------------------------
+  ## Every dispatch path above keeps columns in whatever order the source
+  ## gave them (a KSSL-shaped library is stored increasing). standardize()
+  ## and the validator both assume decreasing order, so sort here the same
+  ## way standardize()'s no-op path does, rather than rejecting increasing
+  ## input that `spectra() |> standardize()` is documented to accept.
+  ##
+  ## Raw stage: replicate scans haven't been collapsed by average() yet, so a
+  ## duplicate sample_id here (Bruker's own naming does this: "S100-1.0" and
+  ## "S100-1.1" both become "S100-1" once the extension is stripped) warns
+  ## rather than aborts.
+
+  sorted_result <- sort_axis_decreasing(result)
+  result        <- validate_horizons_data(sorted_result$x, stage = "raw")
+
+  ## -------------------------------------------------------------------------
   ## Step 3: CLI output
   ## -------------------------------------------------------------------------
 
   cat(paste0("\u2500\u2500 ", cli::style_bold("horizons pipeline"),
              " ", paste(rep("\u2500", 46), collapse = ""), "\n"))
   cat(paste0("\u251C\u2500 ", cli::style_bold("Loading spectra"), "...\n"))
-  cat(paste0("\u2502  \u2514\u2500 ", result$data$n_rows, " samples \u00D7 ",
+
+  count_branch <- if (sorted_result$sorted) "\u251C\u2500" else "\u2514\u2500"
+  cat(paste0("\u2502  ", count_branch, " ", result$data$n_rows, " samples \u00D7 ",
              result$data$n_predictors, " predictors\n"))
+
+  if (sorted_result$sorted) {
+
+    cat("\u2502  \u2514\u2500 Sorting: wavenumber columns put in decreasing order\n")
+
+  }
+
   cat("\u2502\n")
 
   result

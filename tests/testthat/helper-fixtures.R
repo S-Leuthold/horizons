@@ -62,7 +62,13 @@ make_eval_object <- function(n = 40, n_wn = 10, n_configs = 2,
       n_rows       = nrow(df),
       n_predictors = n_wn,
       n_covariates = 0L,
-      n_responses  = 1L
+      ## SOC carries role "outcome" above, not "response" — those are
+      ## distinct roles (n_responses counts role == "response", the sibling
+      ## responses add_response()/select_training() can carry alongside the
+      ## one outcome being modeled). evaluate()'s entry-stage
+      ## validate_horizons_data() call (#24) is the first thing to actually
+      ## check this stored count against the role_map.
+      n_responses  = 0L
     ),
 
     provenance = list(

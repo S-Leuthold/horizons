@@ -60,6 +60,12 @@ Named patterns become columns; unnamed patterns are separators.
 
 The special token \code{sampleid} (case-insensitive) overwrites the \code{sample_id}
 column. All other tokens create new metadata columns.
+
+\strong{Duplicate or missing sample ids:} Several filenames parsing to the same
+\code{sampleid} token is normal here — that is what identifies replicate scans
+of one physical sample — and so is an \code{NA} \code{sample_id} left by \code{too_few = "na"}. \code{parse_ids()} warns rather than aborts on either, the same as
+\code{\link[=spectra]{spectra()}}. Use \code{\link[=average]{average()}} to collapse the replicates before anything
+downstream that requires unique ids.
 }
 \examples{
 \dontrun{

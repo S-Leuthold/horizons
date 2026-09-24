@@ -338,6 +338,156 @@ test_that("validate_horizons_data error message includes duplicate sample_ids", 
 
 })
 
+test_that("validate_horizons_data truncates a long duplicate-sample_id list to 5 and a count (#24)", {
+
+  ## Arrange — 8 duplicated ids; at library scale (thousands of replicate
+  ## groups) the full list is unreadable, so the message names the first 5
+  ## and counts the rest.
+  dup_letters <- LETTERS[1:8]
+  test_analysis <- tibble::tibble(
+    sample_id = c(rep(dup_letters, each = 2), "Z"),
+    `4000`    = seq_len(length(dup_letters) * 2 + 1) / 10
+  )
+
+  test_role_map <- tibble::tibble(
+    variable = c("sample_id", "4000"),
+    role     = c("id", "predictor")
+  )
+
+  obj <- new_horizons_data(analysis = test_analysis, role_map = test_role_map)
+
+  err <- tryCatch(validate_horizons_data(obj), error = function(e) e)
+
+  expect_s3_class(err, "horizons_validation_error")
+  msg <- conditionMessage(err)
+
+  ## First 5 named, the remaining 3 counted rather than listed
+  expect_match(msg, paste(dup_letters[1:5], collapse = ", "), fixed = TRUE)
+  expect_match(msg, "and 3 more", fixed = TRUE)
+  expect_false(grepl(dup_letters[6], msg, fixed = TRUE))
+
+})
+
+## ---------------------------------------------------------------------------
+## stage = "raw" vs "full" (#24 rework)
+## ---------------------------------------------------------------------------
+## Duplicate or NA sample ids are the normal state before average() collapses
+## replicate scans, so spectra(), parse_ids() and standardize() validate at
+## stage = "raw", where the same conditions warn instead of aborting. Every
+## other caller (average() onward) keeps the default stage = "full".
+
+test_that("stage = \"raw\" warns instead of aborting on duplicate sample_id", {
+
+  test_analysis <- tibble::tibble(
+    sample_id = c("A", "A", "B"),
+    `4000` = c(0.1, 0.2, 0.3)
+  )
+
+  test_role_map <- tibble::tibble(
+    variable = c("sample_id", "4000"),
+    role = c("id", "predictor")
+  )
+
+  obj <- new_horizons_data(analysis = test_analysis, role_map = test_role_map)
+
+  expect_warning(
+    result <- validate_horizons_data(obj, stage = "raw"),
+    class = "horizons_validation_warning"
+  )
+
+  ## Object is returned unchanged, duplicates and all
+  expect_identical(result$data$analysis$sample_id, c("A", "A", "B"))
+
+})
+
+test_that("stage = \"full\" (the default) still aborts on duplicate sample_id", {
+
+  test_analysis <- tibble::tibble(
+    sample_id = c("A", "A", "B"),
+    `4000` = c(0.1, 0.2, 0.3)
+  )
+
+  test_role_map <- tibble::tibble(
+    variable = c("sample_id", "4000"),
+    role = c("id", "predictor")
+  )
+
+  obj <- new_horizons_data(analysis = test_analysis, role_map = test_role_map)
+
+  expect_error(
+    validate_horizons_data(obj),
+    class = "horizons_validation_error"
+  )
+
+  ## Explicit stage = "full" behaves identically to the default
+  expect_error(
+    validate_horizons_data(obj, stage = "full"),
+    class = "horizons_validation_error"
+  )
+
+})
+
+test_that("NA sample_id warns at stage = \"raw\", aborts at stage = \"full\"", {
+
+  test_analysis <- tibble::tibble(
+    sample_id = c("A", NA_character_, "C"),
+    `4000` = c(0.1, 0.2, 0.3)
+  )
+
+  test_role_map <- tibble::tibble(
+    variable = c("sample_id", "4000"),
+    role = c("id", "predictor")
+  )
+
+  obj <- new_horizons_data(analysis = test_analysis, role_map = test_role_map)
+
+  expect_warning(
+    raw_result <- validate_horizons_data(obj, stage = "raw"),
+    class = "horizons_validation_warning"
+  )
+  expect_true(anyNA(raw_result$data$analysis$sample_id))
+
+  expect_error(
+    validate_horizons_data(obj),
+    class = "horizons_validation_error"
+  )
+
+})
+
+test_that("an NA sample_id is not also reported as a duplicate of itself", {
+
+  ## Two NA ids plus one real duplicate: the NA check and the duplicate
+  ## check should each fire once, not have the NAs double-counted as a
+  ## "duplicate" pair on top of being individually NA.
+  test_analysis <- tibble::tibble(
+    sample_id = c("A", "A", NA_character_, NA_character_, "C"),
+    `4000` = c(0.1, 0.2, 0.3, 0.4, 0.5)
+  )
+
+  test_role_map <- tibble::tibble(
+    variable = c("sample_id", "4000"),
+    role = c("id", "predictor")
+  )
+
+  obj <- new_horizons_data(analysis = test_analysis, role_map = test_role_map)
+
+  err <- tryCatch(validate_horizons_data(obj), error = function(e) e)
+
+  expect_s3_class(err, "horizons_validation_error")
+  expect_match(conditionMessage(err), "2 NA", fixed = TRUE)
+  expect_match(conditionMessage(err), "Duplicate.*A", perl = TRUE)
+  expect_no_match(conditionMessage(err), "NA.*NA", perl = TRUE)
+
+})
+
+test_that("stage must be \"full\" or \"raw\"", {
+
+  obj <- new_horizons_data()
+
+  expect_error(validate_horizons_data(obj, stage = "partial"))
+
+})
+
 ## ---------------------------------------------------------------------------
 ## Wavelength column checks
 ## ---------------------------------------------------------------------------
@@ -396,6 +546,42 @@ test_that("validate_horizons_data errors when wavelength columns contain Inf", {
 
 })
 
+test_that("stage = \"raw\" does not check predictor NA or Inf at all", {
+
+  ## Arrange — same fixture as the NA-predictor test above, but a value
+  ## outside standardize()'s eventual trim range is legitimately still NA
+  ## before spectra()/parse_ids()/standardize() run (#24 rework); raw stage
+  ## skips the check entirely rather than downgrading it to a warning.
+  test_analysis <- tibble::tibble(
+    sample_id = c("A", "B", "C"),
+    `4000` = c(0.1, NA, 0.3),
+    `3998` = c(0.2, 0.3, 0.4)
+  )
+
+  test_role_map <- tibble::tibble(
+    variable = c("sample_id", "4000", "3998"),
+    role = c("id", "predictor", "predictor")
+  )
+
+  obj <- new_horizons_data(analysis = test_analysis, role_map = test_role_map)
+
+  expect_no_warning(expect_no_error(validate_horizons_data(obj, stage = "raw")))
+
+  ## Inf is treated the same as NA at raw stage: a non-finite value outside
+  ## standardize()'s eventual trim range is legitimately still there before
+  ## the trim runs, and standardize() itself aborts on any non-finite value
+  ## that survives trimming and resampling, so this is only enforced from
+  ## average() on (#24 rework).
+  test_analysis$`4000` <- c(0.1, Inf, 0.3)
+  obj_inf <- new_horizons_data(analysis = test_analysis, role_map = test_role_map)
+
+  expect_no_warning(expect_no_error(validate_horizons_data(obj_inf, stage = "raw")))
+
+  ## Full stage (the default) still catches it.
+  expect_error(validate_horizons_data(obj_inf), "Inf|infinite")
+
+})
+
 test_that("validate_horizons_data errors when wavelength columns not decreasing", {
 
   ## Arrange — wavelengths in increasing order (wrong)
@@ -421,6 +607,68 @@ test_that("validate_horizons_data errors when wavelength columns not decreasing"
     validate_horizons_data(obj),
     "decreasing|order"
   )
+
+})
+
+test_that("validate_horizons_data names duplicate wavenumber columns rather than a generic order failure (#24)", {
+
+  ## Arrange — "600" and "600.0" both parse to the same wavenumber; sorted,
+  ## they trivially fail strict decrease, but the message should name them
+  ## rather than just saying "must be strictly decreasing".
+  test_analysis <- tibble::tibble(
+    sample_id  = c("A", "B"),
+    `4000`     = c(0.1, 0.2),
+    `600`      = c(0.3, 0.4),
+    `600.0`    = c(0.5, 0.6)
+  )
+
+  test_role_map <- tibble::tibble(
+    variable = c("sample_id", "4000", "600", "600.0"),
+    role     = c("id", "predictor", "predictor", "predictor")
+  )
+
+  obj <- new_horizons_data(analysis = test_analysis, role_map = test_role_map)
+
+  err <- tryCatch(validate_horizons_data(obj), error = function(e) e)
+
+  expect_s3_class(err, "horizons_validation_error")
+  expect_match(conditionMessage(err), "Duplicate wavenumber", fixed = TRUE)
+
+  ## Both columns of the pair are named, not just the later occurrence
+  ## duplicated() flags — "600" alone would also match as a substring of
+  ## "600.0", so check the exact paired listing rather than each in
+  ## isolation.
+  expect_match(conditionMessage(err), "600, 600.0", fixed = TRUE)
+
+})
+
+test_that("validate_horizons_data names an unparseable wavenumber column rather than crashing (#24)", {
+
+  ## Arrange — "600.600.1" matches the wn_<digits and dots> pattern but does
+  ## not parse as a number. Before this check existed, `as.numeric()` on the
+  ## whole vector produced an NA, and `diff()`/`all()` on that NA raised the
+  ## raw R error "missing value where TRUE/FALSE needed" instead of a
+  ## validator message.
+  test_analysis <- tibble::tibble(
+    sample_id     = c("A", "B"),
+    `4000`        = c(0.1, 0.2),
+    `600.600.1`   = c(0.3, 0.4)
+  )
+
+  test_role_map <- tibble::tibble(
+    variable = c("sample_id", "4000", "600.600.1"),
+    role     = c("id", "predictor", "predictor")
+  )
+
+  obj <- new_horizons_data(analysis = test_analysis, role_map = test_role_map)
+
+  err <- tryCatch(validate_horizons_data(obj), error = function(e) e)
+
+  expect_s3_class(err, "horizons_validation_error")
+  ## Singular subject, singular verb: one unparseable column reads "does not
+  ## parse", not "do not parse" (#24 grammar fix).
+  expect_match(conditionMessage(err), "does not parse", fixed = TRUE)
+  expect_match(conditionMessage(err), "600.600.1", fixed = TRUE)
 
 })
 
@@ -508,6 +756,61 @@ test_that("validate_horizons_data errors when multiple id roles", {
     validate_horizons_data(obj),
     "(?i)multiple.*id|one.*id|exactly.*id"
   )
+
+})
+
+test_that("validate_horizons_data refuses a column with more than one role_map row, naming it", {
+
+  ## Arrange — "elevation" has two role_map rows (meta and covariate). Every
+  ## consumer that reads role_map$role[role_map$variable == "elevation"]
+  ## expecting one value gets an ambiguous answer, and build_recipe()'s
+  ## `outcome ~ .` would silently treat it as an unregistered predictor
+  ## rather than failing loudly. Presence in role_map was already checked;
+  ## this is about uniqueness.
+  test_analysis <- tibble::tibble(
+    sample_id = c("A", "B"),
+    `4000`    = c(0.1, 0.2),
+    elevation = c(100, 200)
+  )
+
+  test_role_map <- tibble::tibble(
+    variable = c("sample_id", "4000", "elevation", "elevation"),
+    role     = c("id", "predictor", "meta", "covariate")
+  )
+
+  obj <- new_horizons_data(analysis = test_analysis, role_map = test_role_map)
+
+  err <- tryCatch(validate_horizons_data(obj), error = function(e) e)
+
+  expect_s3_class(err, "horizons_validation_error")
+  expect_match(conditionMessage(err), "more than one", fixed = TRUE)
+  expect_match(conditionMessage(err), "elevation", fixed = TRUE)
+
+})
+
+test_that("an unregistered analysis column is refused, naming it", {
+
+  ## Arrange — "mystery_col" has zero role_map rows. This is the presence
+  ## check (distinct from the uniqueness check above): a column omitted from
+  ## role_map entirely falls through build_recipe()'s `outcome ~ .` as an
+  ## unintended predictor.
+  test_analysis <- tibble::tibble(
+    sample_id   = c("A", "B"),
+    `4000`      = c(0.1, 0.2),
+    mystery_col = c(1, 2)
+  )
+
+  test_role_map <- tibble::tibble(
+    variable = c("sample_id", "4000"),
+    role     = c("id", "predictor")
+  )
+
+  obj <- new_horizons_data(analysis = test_analysis, role_map = test_role_map)
+
+  err <- tryCatch(validate_horizons_data(obj), error = function(e) e)
+
+  expect_s3_class(err, "horizons_validation_error")
+  expect_match(conditionMessage(err), "mystery_col", fixed = TRUE)
 
 })
 

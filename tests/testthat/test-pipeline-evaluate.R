@@ -59,6 +59,25 @@ describe("evaluate() - gate checks", {
 
   })
 
+  it("refuses a column added after configure() with no role_map entry (#24)", {
+
+    ## validate_horizons_eval() (at return) certifies the evaluation slot,
+    ## not the base data contract, so a column landing in $data$analysis
+    ## after configure() — by a later parse_ids(), or a direct assignment —
+    ## used to reach build_recipe()'s `outcome ~ .` as an unregistered
+    ## predictor, undetected. evaluate()'s entry-stage validate_horizons_data()
+    ## call closes that gap.
+
+    obj <- make_eval_object()
+    obj$data$analysis$stray_column <- seq_len(nrow(obj$data$analysis))
+
+    expect_error(
+      evaluate(obj, verbose = FALSE),
+      "[Mm]issing from.*role_map"
+    )
+
+  })
+
 })
 
 ## =========================================================================
@@ -352,14 +371,22 @@ describe("evaluate() - NA outcome rows", {
 
   it("names an outcome column the analysis table lacks, rather than calling it all NA", {
 
+    ## evaluate()'s own outcome_complete_rows() check has a dedicated "no such
+    ## column" message for exactly this case, distinct from "all NA" — but
+    ## the entry-stage validate_horizons_data() call (#24) now certifies the
+    ## base data contract first, and a role_map row with no matching analysis
+    ## column is a structural defect that check catches before
+    ## outcome_complete_rows() ever runs. Either way the message names SOC
+    ## and never claims the values are all NA.
+
     obj <- make_eval_object()
     obj$data$analysis$SOC <- NULL
 
     err <- expect_error(evaluate(obj, verbose = FALSE),
-                        class = "horizons_input_error")
+                        class = "horizons_validation_error")
 
     expect_match(conditionMessage(err), "SOC", fixed = TRUE)
-    expect_match(conditionMessage(err), "no such column", fixed = TRUE)
+    expect_match(conditionMessage(err), "missing from", fixed = TRUE)
     expect_no_match(conditionMessage(err), "All outcome values are NA", fixed = TRUE)
 
   })
@@ -1171,6 +1198,12 @@ describe("evaluate() - checkpoint data provenance", {
 
     err <- refuses_on(function(o) {
       o$data$role_map$role[o$data$role_map$variable == "wn_3982"] <- "meta"
+      ## Keep the stored count honest so the only thing wrong with this
+      ## object is what the test means to exercise — evaluate()'s own
+      ## fingerprint catching the role change — rather than also tripping
+      ## the entry-stage validate_horizons_data() call (#24) on a stale
+      ## n_predictors.
+      o$data$n_predictors <- sum(o$data$role_map$role == "predictor")
       o
     })
 

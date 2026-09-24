@@ -953,3 +953,50 @@ test_that("average() leaves an object without a record alone", {
   expect_null(result$selection)
 
 })
+
+
+## ---------------------------------------------------------------------------
+## average() — Structural validation on return (#24)
+## ---------------------------------------------------------------------------
+
+test_that("average() catches a corrupt input the verb itself never checks (#24)", {
+
+  ## Arrange — an increasing wavenumber axis. average() neither reads nor
+  ## enforces predictor order, so nothing about grouping or collapsing the
+  ## replicates would ever catch this; the new end-of-verb
+  ## validate_horizons_data() call (#24) is what catches it.
+  hd <- make_test_hd_average(n_samples = 2, n_reps = 2, n_wavelengths = 3)
+
+  pred_rows <- which(hd$data$role_map$role == "predictor")
+  hd$data$role_map[pred_rows, ] <- hd$data$role_map[rev(pred_rows), ]
+
+  ## Act & Assert --------------------------------------------------------------
+  ## average()'s own input-validation abort (Step 1) also carries class
+  ## horizons_validation_error, so the message is checked too — otherwise
+  ## this could pass without ever exercising the new end-of-verb call.
+
+  expect_error(
+    average(hd, quality_check = FALSE, verbose = FALSE),
+    regexp = "strictly decreasing",
+    class  = "horizons_validation_error"
+  )
+
+})
+
+test_that("average() refuses a column with no role_map entry instead of silently dropping it (#24)", {
+
+  ## Arrange — Step 8 rebuilds the averaged table from role_map's predictor,
+  ## meta and response columns; a column present in analysis but absent from
+  ## role_map is referenced by none of them, so it used to disappear from the
+  ## output without a trace. The entry-stage validate_horizons_data(x, stage
+  ## = "raw") call (#24) refuses it instead.
+  hd <- make_test_hd_average(n_samples = 2, n_reps = 2, n_wavelengths = 3)
+  hd$data$analysis$stray_column <- seq_len(nrow(hd$data$analysis))
+
+  expect_error(
+    average(hd, quality_check = FALSE, verbose = FALSE),
+    regexp = "[Mm]issing from.*role_map",
+    class  = "horizons_validation_error"
+  )
+
+})

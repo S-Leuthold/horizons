@@ -19,16 +19,19 @@ library(horizons)
 #' @noRd
 make_single_response_hd <- function() {
 
+  ## Predictor columns are declared in decreasing wavenumber order:
+  ## validate_horizons_data() (invariant I2) requires it, and configure() now
+  ## calls it at the end of every run.
   analysis <- tibble::tibble(
     sample_id = c("S001", "S002", "S003"),
-    `600`     = c(0.10, 0.20, 0.30),
-    `601`     = c(0.11, 0.21, 0.31),
     `602`     = c(0.12, 0.22, 0.32),
+    `601`     = c(0.11, 0.21, 0.31),
+    `600`     = c(0.10, 0.20, 0.30),
     SOC       = c(1.2, 3.4, 5.6)
   )
 
   role_map <- tibble::tibble(
-    variable = c("sample_id", "600", "601", "602", "SOC"),
+    variable = c("sample_id", "602", "601", "600", "SOC"),
     role     = c("id", "predictor", "predictor", "predictor", "response")
   )
 
@@ -73,17 +76,20 @@ make_single_response_hd <- function() {
 #' @noRd
 make_multi_response_hd <- function() {
 
+  ## Predictor columns are declared in decreasing wavenumber order:
+  ## validate_horizons_data() (invariant I2) requires it, and configure() now
+  ## calls it at the end of every run.
   analysis <- tibble::tibble(
     sample_id = c("S001", "S002", "S003"),
-    `600`     = c(0.10, 0.20, 0.30),
-    `601`     = c(0.11, 0.21, 0.31),
     `602`     = c(0.12, 0.22, 0.32),
+    `601`     = c(0.11, 0.21, 0.31),
+    `600`     = c(0.10, 0.20, 0.30),
     SOC       = c(1.2, 3.4, 5.6),
     pH        = c(5.5, 6.0, 6.5)
   )
 
   role_map <- tibble::tibble(
-    variable = c("sample_id", "600", "601", "602", "SOC", "pH"),
+    variable = c("sample_id", "602", "601", "600", "SOC", "pH"),
     role     = c("id", "predictor", "predictor", "predictor", "response", "response")
   )
 
@@ -128,18 +134,21 @@ make_multi_response_hd <- function() {
 #' @noRd
 make_covariate_hd <- function() {
 
+  ## Predictor columns are declared in decreasing wavenumber order:
+  ## validate_horizons_data() (invariant I2) requires it, and configure() now
+  ## calls it at the end of every run.
   analysis <- tibble::tibble(
     sample_id = c("S001", "S002", "S003"),
-    `600`     = c(0.10, 0.20, 0.30),
-    `601`     = c(0.11, 0.21, 0.31),
     `602`     = c(0.12, 0.22, 0.32),
+    `601`     = c(0.11, 0.21, 0.31),
+    `600`     = c(0.10, 0.20, 0.30),
     SOC       = c(1.2, 3.4, 5.6),
     clay      = c(20, 35, 50),
     MAP       = c(800, 1000, 1200)
   )
 
   role_map <- tibble::tibble(
-    variable = c("sample_id", "600", "601", "602", "SOC", "clay", "MAP"),
+    variable = c("sample_id", "602", "601", "600", "SOC", "clay", "MAP"),
     role     = c("id", "predictor", "predictor", "predictor",
                  "response", "covariate", "covariate")
   )
@@ -1485,6 +1494,50 @@ describe("configure() and the object contract", {
     expect_true(any(grepl("drawn by select_training\\(\\) for 'clay'; 'oc' is not one of them", to_oc)))
     expect_false(any(grepl("select_training", to_clay)))
     expect_false(any(grepl("select_training", global_oc)))
+
+  })
+
+
+  test_that("configure() catches a corrupt input the verb itself never checks (#24)", {
+
+    ## Arrange — an increasing wavenumber axis. configure() only touches
+    ## role_map's outcome/response roles and the config$ fields; it never
+    ## reads or reorders the predictor axis, so nothing about building the
+    ## grid would catch this. The new end-of-verb validate_horizons_data()
+    ## call (#24) is what catches it.
+    hd <- make_single_response_hd()
+
+    pred_rows <- which(hd$data$role_map$role == "predictor")
+    hd$data$role_map[pred_rows, ] <- hd$data$role_map[rev(pred_rows), ]
+
+    ## Act & Assert ------------------------------------------------------------
+
+    expect_error(
+      capture.output(configure(hd, models = "rf")),
+      regexp = "strictly decreasing",
+      class  = "horizons_validation_error"
+    )
+
+  })
+
+
+  test_that("configure() aborts on duplicate sample ids that survived to it (#24)", {
+
+    ## Arrange — replicate scans that never went through average(). Duplicate
+    ## sample_id is a legitimate, warned-about state before average() (see
+    ## spectra()/parse_ids()/standardize()); by the time an object reaches
+    ## configure() the full-stage validator treats the same condition as an
+    ## error, since nothing downstream can collapse it.
+    hd <- make_single_response_hd()
+    hd$data$analysis$sample_id <- c("S001", "S001", "S003")
+
+    ## Act & Assert ------------------------------------------------------------
+
+    expect_error(
+      capture.output(configure(hd, models = "rf")),
+      regexp = "Duplicate.*sample_id",
+      class  = "horizons_validation_error"
+    )
 
   })
 
