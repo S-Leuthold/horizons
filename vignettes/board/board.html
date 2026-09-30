@@ -229,8 +229,8 @@
 
 <script type="application/json" id="hz-data">
 {
-  "generated_at": "2026-09-30T16:38:48-0500",
-  "content_md5": "a0af9521b783c3d3ff5326c8d0a7c4c8",
+  "generated_at": "2026-09-30T18:14:38-0500",
+  "content_md5": "78f40e005319b7ec2cd2b09cfc9fc491",
   "horizons": "0.9.0",
   "lanes": [
     {
@@ -937,7 +937,7 @@
       "class_in": "targets + library",
       "class_out": "horizons_data",
       "signature": "select_training (x, library, k = 100L, scope = c(\"batch\", \"cluster\", \"sample\", \"global\"), properties = NULL, snv = TRUE, derivative = 1L, window = SELECT_SG_WINDOW_CM, poly = 2L, mask = NULL, space = c(\"pca\", \"pls\"), ncomp = 0.99, sdev_floor = SELECT_SDEV_FLOOR, metric = c(\"euclidean\", \"mahalanobis\", \"cosine\"), depth = c(\"topsoil\", \"all\"), clusters = NULL, cluster_min = 30L, twin_ratio = SELECT_TWIN_RATIO, chunk_size = 500L, seed = 1L, verbose = TRUE)",
-      "summary": "The library path's answer to \"what is the model trained on\". Takes the batch of spectra to be predicted and a reference library with measured properties, brings the library onto the batch's wavenumber grid, builds a similarity space on the library, and draws each target's k nearest library rows per property. The union is returned as an ordinary horizons_data, so everything downstream runs unchanged, and the record on the object holds every neighbourhood, every target's distance to the library, and every twin it excluded. The only verb where library and unknowns meet before anything is fitted.",
+      "summary": "The library path's answer to \"what is the model trained on\". Takes the batch of spectra to be predicted and a reference library with measured properties, measures distances in the library's own similarity space (cached beside the library), and draws each target's k nearest library rows per property. The union is returned as an ordinary horizons_data, so everything downstream runs unchanged, and the record on the object holds every neighbourhood, every target's distance to the library, and every twin it excluded. The only verb where library and unknowns meet before anything is fitted.",
       "args": [
         {
           "name": "x",
@@ -991,7 +991,7 @@
         {
           "name": "window",
           "default": "SELECT_SG_WINDOW_CM",
-          "text": "`numeric.` Savitzky-Golay window width in cm-1, measured between the outermost points, so the filter means the same thing on any grid: 40 cm-1 is 11 points at 4 cm-1 and 21 at 2 cm-1. It becomes the nearest odd number of points on the targets' grid (ties round up), and the record carries both. Default: `40`.",
+          "text": "`numeric.` Savitzky-Golay window width in cm-1, measured between the outermost points, so the filter means the same thing on any grid: 40 cm-1 is 11 points at 4 cm-1 and 21 at 2 cm-1. It becomes the nearest odd number of points on the grid the space is built on, the library's (ties round up), and the record carries both. Default: `40`.",
           "touch": "Rarely. A width in cm⁻¹, so the filter is the same on any batch; 40 is the experiments' 11 points at 4 cm⁻¹ and becomes 21 at 2 cm⁻¹. The point count it becomes is recorded and printed.",
           "source": "R/pipeline-select-training.R#L528"
         },
@@ -1093,7 +1093,7 @@
           "source": "R/pipeline-select-training.R#L947"
         },
         {
-          "step": "Reconciles the axes. Either grid with a hole (a spacing over three times its median and over 30 cm⁻¹) stops the verb before anything interpolates; a pool that does not cover the targets' range stops it, except within half a pool spacing, where the column is clamped with a warning; finer targets warn. The pool is resampled onto the targets' grid through the same spline standardize() uses.",
+          "step": "Sets up the two axes. The search runs on the library's own grid, with the targets resampled onto it; targets short of the library's range by up to 50 cm⁻¹ at an end search a space built on the overlap, with a warning, and further short stop the verb. The return runs on the targets' grid and is checked up front. Either grid with a hole (a spacing over three times its median and over 30 cm⁻¹) stops the verb before anything interpolates, a library that does not cover the targets' range stops it except within half a spacing, where the column is clamped with a warning, and finer targets warn.",
           "source": "R/select-reconcile.R#L181"
         },
         {
@@ -1101,7 +1101,7 @@
           "source": "R/pipeline-select-training.R#L1019"
         },
         {
-          "step": "Builds the similarity space on every pool row, SNV then Savitzky-Golay derivative then optional mask then PCA to the variance target, drops components under the sdev floor, and projects the targets with the pool's loadings.",
+          "step": "Reads the library's similarity space from the cache, or builds it on every library row and caches it (a registered library or a library file, PCA, the full range; a registered library's default space is built at first use), SNV then Savitzky-Golay derivative then optional mask then PCA to the variance target with components under the sdev floor dropped; then projects the targets with the library's loadings.",
           "source": "R/select-space.R#L250"
         },
         {
@@ -1117,7 +1117,7 @@
           "source": "R/pipeline-select-training.R#L663"
         },
         {
-          "step": "Subsets the reconciled pool to the union, adds .drawn_by and .min_distance as meta columns, plus .group under every scope but sample, and counts rows drawn against rows available per property. Both distance columns are NA under global, and the space is always the whole library's, so every distance shares one scale.",
+          "step": "Subsets the library to the union and resamples only those rows onto the targets' grid through the same spline standardize() uses, adds .drawn_by and .min_distance as meta columns, plus .group under every scope but sample, and counts rows drawn against rows available per property. Both distance columns are NA under global, and the space is always the whole library's, so every distance shares one scale.",
           "source": "R/pipeline-select-training.R#L768"
         },
         {
@@ -1136,8 +1136,8 @@
           "source": "R/pipeline-select-training.R#L798"
         },
         {
-          "field": "selection$settings, selection$reconciliation, selection$pool",
-          "text": "every lever as resolved including the component count and the window width in cm⁻¹; the grids and the operation applied; the pool's row count and id hash",
+          "field": "selection$settings, selection$search, selection$reconciliation, selection$pool",
+          "text": "every lever as resolved including the component count and the window width in cm⁻¹; the search axis (full or overlap, what was missing, whether the targets were resampled, and whether the cached space was used); the return axis's grids and the operation applied; the pool's row count and id hash",
           "source": "R/pipeline-select-training.R#L855"
         },
         {
@@ -1204,7 +1204,7 @@
           "where": "../dev/specs/v1-refactor/select-training-design.md#what-changed-on-2026-09-21-review-and-test-2b"
         },
         {
-          "claim": "the k default of 400 came from the per-sample locality curve; the batch evidence points lower",
+          "claim": "the old k default of 400 came from the per-sample locality curve; the batch evidence pointed lower, and k = 100 is the default since 2026-09-30",
           "where": "../dev/specs/v1-refactor/select-training-design.md#what-changed-on-2026-09-22-the-overnight-run-and-its-follow-up",
           "value": "k = 400 lost to k = 100 on Iowa in three experiments"
         }
@@ -1221,10 +1221,6 @@
         {
           "text": "the residual correction after fit() and its home; if it ships it is off by default, since it hurt every off-instrument batch in the 2026-09-29 read and nothing spectral separates those batches",
           "source": "../dev/specs/v1-refactor/select-training-design.md#what-changed-on-2026-09-22-the-overnight-run-and-its-follow-up"
-        },
-        {
-          "text": "the reconciliation flip and the cached similarity space, so distances are measured in the library's own space and the PCA is not recomputed per call",
-          "source": "../dev/specs/v1-refactor/select-training-design.md#the-library-as-a-noun-added-2026-09-21"
         }
       ]
     },

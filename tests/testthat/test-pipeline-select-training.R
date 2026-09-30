@@ -962,12 +962,12 @@ test_that("the record carries the SG window in cm-1 and the space's floor", {
   s <- out$selection$settings
 
   ## window is a width in cm-1 and becomes the nearest odd point count on
-  ## the targets' grid. The fixture's targets are on an 8 cm-1 grid, where
-  ## 40 cm-1 is 2.5 half-widths, rounded up to 3: 7 points spanning 48.
+  ## the grid the space is built on, the library's. The fixture's pool is on
+  ## a 4 cm-1 grid (its targets on 8), where 40 cm-1 is 11 points exactly.
   expect_equal(s$window, SELECT_SG_WINDOW_CM)
-  expect_identical(s$window_points, 7L)
-  expect_equal(s$window_cm, (7 - 1) * out$selection$reconciliation$target_grid$resolution)
-  expect_equal(s$window_cm, 48)
+  expect_identical(s$window_points, 11L)
+  expect_equal(s$window_cm, (11 - 1) * out$selection$search$library_grid$resolution)
+  expect_equal(s$window_cm, 40)
 
   ## derivative = 0 means no filter and so no width
   flat <- suppressWarnings(quiet_select(fx, k = 10, derivative = 0L))
