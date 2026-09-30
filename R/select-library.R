@@ -531,10 +531,16 @@ build_ossl_library <- function(raw, entry, verbose = TRUE) {
 
   if (verbose) cat("\u251C\u2500 Building the library from the verified sources...\n")
 
+  ## OSSL publishes gzipped CSV. fread() reads .gz only when R.utils is
+  ## installed, which horizons does not depend on, so decompress with base R
+  ## into the raw directory (the cache's volume, not the session tempdir).
+
+  raw <- vapply(raw, decompress_gz, character(1))
+
   ## Site: the upper depth of every layer ------------------------------------
 
-  ## fread() for speed on a 400 MB table, then plain data.frames: the
-  ## package is not data.table-aware, so `[` must not be data.table's.
+  ## fread() for speed, then plain data.frames: the package is not
+  ## data.table-aware, so `[` must not be data.table's.
 
   site <- read_ossl_table(raw[["site"]], c(f$id_col, f$depth_col))
   site <- site[!duplicated(site[[f$id_col]]), , drop = FALSE]
@@ -566,16 +572,22 @@ build_ossl_library <- function(raw, entry, verbose = TRUE) {
 
   }
 
-  mir <- read_ossl_table(raw[["mir"]], c(need, spec_cols))
-  mir <- mir[mir[[f$dataset_col]] %in% f$dataset_value &
-             mir[[f$instrument_col]] %in% f$instrument_value, , drop = FALSE]
-  mir <- mir[!duplicated(mir[[f$id_col]]), , drop = FALSE]
+  ## The MIR table holds every OSSL dataset. Reading it whole peaked near
+  ## 7 GB, so choose the rows from the three filter columns first, then read
+  ## the spectra in chunks and keep only those rows.
 
-  spec     <- as.matrix(mir[, spec_cols, drop = FALSE])
+  meta <- read_ossl_table(raw[["mir"]], need)
+  rows <- which(meta[[f$dataset_col]] %in% f$dataset_value &
+                meta[[f$instrument_col]] %in% f$instrument_value)
+  rows <- rows[!duplicated(meta[[f$id_col]][rows])]
+
+  spec    <- read_mir_rows(raw[["mir"]], hdr, rows, meta[[f$id_col]][rows], f$id_col, spec_cols)
+  mir_ids <- meta[[f$id_col]][rows]
+  rm(meta)
+
   complete <- rowSums(!is.finite(spec)) == 0L
-  mir_ids  <- mir[[f$id_col]][complete]
+  mir_ids  <- mir_ids[complete]
   spec     <- spec[complete, , drop = FALSE]
-  rm(mir)
 
   ## Lab: the mapped properties present in this release ----------------------
 
@@ -630,5 +642,83 @@ build_ossl_library <- function(raw, entry, verbose = TRUE) {
 read_ossl_table <- function(path, cols) {
 
   as.data.frame(data.table::fread(path, select = cols, showProgress = FALSE))
+
+}
+
+
+#' Decompress a .gz file next to itself with base R
+#'
+#' @return The path to read: the decompressed file, or `path` unchanged when
+#'   it is not gzipped. The .gz is removed once the copy is complete.
+#' @noRd
+decompress_gz <- function(path) {
+
+  if (!grepl("\\.gz$", path)) return(path)
+
+  out <- sub("\\.gz$", "", path)
+  inp <- gzfile(path, "rb")
+  on.exit(close(inp), add = TRUE)
+  con <- file(out, "wb")
+  on.exit(close(con), add = TRUE)
+
+  repeat {
+
+    chunk <- readBin(inp, what = "raw", n = 16L * 1024L^2)
+    if (!length(chunk)) break
+    writeBin(chunk, con)
+
+  }
+
+  unlink(path)
+  out
+
+}
+
+
+#' Read the spectra of chosen rows of the MIR table, a chunk at a time
+#'
+#' @param rows Integer data-row numbers (1 is the first row after the
+#'   header), increasing.
+#' @param ids The id of each chosen row, as the first pass read it; every
+#'   chunk's ids are checked against it, so a misaligned read stops rather
+#'   than pairing spectra with the wrong lab rows.
+#'
+#' @return Numeric matrix, `length(rows)` by `length(spec_cols)`, columns in
+#'   `spec_cols` order.
+#' @noRd
+read_mir_rows <- function(path, hdr, rows, ids, id_col, spec_cols, chunk = 5000L) {
+
+  cols <- sort(match(c(id_col, spec_cols), hdr))
+  out  <- matrix(NA_real_, nrow = length(rows), ncol = length(spec_cols))
+
+  n_rows <- max(rows)
+  starts <- seq.int(1L, n_rows, by = chunk)
+
+  for (a in starts) {
+
+    b    <- min(a + chunk - 1L, n_rows)
+    want <- which(rows >= a & rows <= b)
+
+    if (!length(want)) next
+
+    x <- data.table::fread(path, skip = a, nrows = b - a + 1L, header = FALSE,
+                           select = cols, showProgress = FALSE)
+    x <- as.data.frame(x)
+    names(x) <- hdr[cols]
+
+    at <- rows[want] - a + 1L
+
+    if (!identical(as.character(x[[id_col]][at]), as.character(ids[want]))) {
+
+      cli::cli_abort("The MIR table's rows {a} to {b} did not read back in the order the first pass saw",
+                     class = "horizons_build_error")
+
+    }
+
+    out[want, ] <- as.matrix(x[at, spec_cols, drop = FALSE])
+
+  }
+
+  out
 
 }

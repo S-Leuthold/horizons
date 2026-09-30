@@ -333,3 +333,25 @@ test_that("depth rejects anything but topsoil or all", {
     class = "horizons_input_error", regexp = "depth")
 
 })
+
+test_that("the chunked MIR read returns the chosen rows whatever the chunk size", {
+
+  entry <- make_mini_ossl(withr::local_tempdir())
+  gz    <- sub("^file://", "", entry$sources$url[entry$sources$table == "mir"])
+  csv   <- decompress_gz(gz)
+
+  hdr  <- names(data.table::fread(csv, nrows = 0))
+  full <- as.data.frame(data.table::fread(csv))
+  spec <- grep("^scan_mir", hdr, value = TRUE)
+  rows <- c(1L, 4L, 5L, 9L, 11L)
+
+  for (chunk in c(1L, 2L, 3L, 5000L)) {
+
+    got <- read_mir_rows(csv, hdr, rows, full$id.layer_uuid_txt[rows],
+                         "id.layer_uuid_txt", spec, chunk = chunk)
+
+    expect_equal(unname(got), unname(as.matrix(full[rows, spec])))
+
+  }
+
+})
