@@ -352,8 +352,8 @@ verbs:
     summary: >-
       The library path's answer to "what is the model trained on". Takes the
       batch of spectra to be predicted and a reference library with measured
-      properties, brings the library onto the batch's wavenumber grid, builds a
-      similarity space on the library, and draws each target's k nearest library
+      properties, measures distances in the library's own similarity space
+      (cached beside the library), and draws each target's k nearest library
       rows per property. The union is returned as an ordinary horizons_data, so
       everything downstream runs unchanged, and the record on the object holds
       every neighbourhood, every target's distance to the library, and every
@@ -426,11 +426,11 @@ verbs:
     mechanics:
       - step: Validates everything together; refuses a pool that carries validation, evaluation or fitted state, or that is itself a prior selection, because subsetting it would leave that state describing rows it no longer has.
         source: R/pipeline-select-training.R#L947
-      - step: Reconciles the axes. Either grid with a hole (a spacing over three times its median and over 30 cm⁻¹) stops the verb before anything interpolates; a pool that does not cover the targets' range stops it, except within half a pool spacing, where the column is clamped with a warning; finer targets warn. The pool is resampled onto the targets' grid through the same spline standardize() uses.
+      - step: Sets up the two axes. The search runs on the library's own grid, with the targets resampled onto it; targets short of the library's range by up to 50 cm⁻¹ at an end search a space built on the overlap, with a warning, and further short stop the verb. The return runs on the targets' grid and is checked up front. Either grid with a hole (a spacing over three times its median and over 30 cm⁻¹) stops the verb before anything interpolates, a library that does not cover the targets' range stops it except within half a spacing, where the column is clamped with a warning, and finer targets warn.
         source: R/select-reconcile.R#L181
       - step: Compares raw absorbance spread before SNV can hide it, warning when the interquartile ranges differ more than twofold, the size of a natural-log against base-10 mismatch.
         source: R/pipeline-select-training.R#L1019
-      - step: Builds the similarity space on every pool row, SNV then Savitzky-Golay derivative then optional mask then PCA to the variance target, drops components under the sdev floor, and projects the targets with the pool's loadings.
+      - step: Reads the library's similarity space from the cache, or builds it on every library row and caches it (a registered library or a library file, PCA, the full range; a registered library's default space is built at first use), SNV then Savitzky-Golay derivative then optional mask then PCA to the variance target with components under the sdev floor dropped; then projects the targets with the library's loadings.
         source: R/select-space.R#L250
       - step: Per target and per property, finds the k nearest library rows that have the property measured, by the chosen metric, screening with the squared-norm identity and recomputing the kept distances directly so near-identical rows are ranked accurately.
         source: R/select-neighbours.R#L487
@@ -438,7 +438,7 @@ verbs:
         source: R/select-neighbours.R#L526
       - step: Groups targets by scope, clustering them by k-means when asked, and builds one groups row per training set.
         source: R/pipeline-select-training.R#L663
-      - step: Subsets the reconciled pool to the union, adds .drawn_by and .min_distance as meta columns, plus .group under every scope but sample, and counts rows drawn against rows available per property. Both distance columns are NA under global, and the space is always the whole library's, so every distance shares one scale.
+      - step: Subsets the library to the union and resamples only those rows onto the targets' grid through the same spline standardize() uses, adds .drawn_by and .min_distance as meta columns, plus .group under every scope but sample, and counts rows drawn against rows available per property. Both distance columns are NA under global, and the space is always the whole library's, so every distance shares one scale.
         source: R/pipeline-select-training.R#L768
       - step: Runs the resemblance check, naming targets whose nearest-library distance exceeds the 99th percentile of the library's own nearest-neighbour distances on a seeded sample of 2,000 rows; a warning, never a stop.
         source: R/pipeline-select-training.R#L1157
@@ -448,8 +448,8 @@ verbs:
       - field: .drawn_by, .min_distance, .group
         text: the first two on every returned row, .group under every scope but sample; role meta, so recipes ignore them
         source: R/pipeline-select-training.R#L798
-      - field: selection$settings, selection$reconciliation, selection$pool
-        text: every lever as resolved including the component count and the window width in cm⁻¹; the grids and the operation applied; the pool's row count and id hash
+      - field: selection$settings, selection$search, selection$reconciliation, selection$pool
+        text: every lever as resolved including the component count and the window width in cm⁻¹; the search axis (full or overlap, what was missing, whether the targets were resampled, and whether the cached space was used); the return axis's grids and the operation applied; the pool's row count and id hash
         source: R/pipeline-select-training.R#L855
       - field: selection$membership, selection$groups, selection$pool_sizes
         text: one row per target, property and pool row with distance, rank, space and whether it was retained; one row per training set; drawn against available per property
@@ -488,7 +488,7 @@ verbs:
         value: "Iowa cosine 3.140 → 2.827 against global 3.131; MOYS 0.348 against 0.526"
       - claim: the sdev floor is what makes the Mahalanobis ranking stable to the row set; under Euclidean the all-rows and measured-rows spaces agree to a Jaccard of 0.96 to 1.00 at k = 100
         where: ../dev/specs/v1-refactor/select-training-design.md#what-changed-on-2026-09-21-review-and-test-2b
-      - claim: the k default of 400 came from the per-sample locality curve; the batch evidence points lower
+      - claim: the old k default of 400 came from the per-sample locality curve; the batch evidence pointed lower, and k = 100 is the default since 2026-09-30
         where: ../dev/specs/v1-refactor/select-training-design.md#what-changed-on-2026-09-22-the-overnight-run-and-its-follow-up
         value: "k = 400 lost to k = 100 on Iowa in three experiments"
     issues:
@@ -498,8 +498,6 @@ verbs:
     design_ahead:
       - text: the residual correction after fit() and its home; if it ships it is off by default, since it hurt every off-instrument batch in the 2026-09-29 read and nothing spectral separates those batches
         source: ../dev/specs/v1-refactor/select-training-design.md#what-changed-on-2026-09-22-the-overnight-run-and-its-follow-up
-      - text: the reconciliation flip and the cached similarity space, so distances are measured in the library's own space and the PCA is not recomputed per call
-        source: ../dev/specs/v1-refactor/select-training-design.md#the-library-as-a-noun-added-2026-09-21
 
   # ---------------------------------------------------------------------------
   - verb: average

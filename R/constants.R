@@ -359,6 +359,27 @@ SELECT_SG_WINDOW_CM <- 40
 # fall that low, and the check is then recorded as skipped.
 SELECT_RESEMBLANCE_MIN_ROWS <- 30L
 
+# select_training(): how far short of the library's wavenumber range a batch
+# may fall at either end, in cm-1, and still be searched. Distances are
+# measured in the library's own space on the library's grid, and a cached
+# space needs every wavenumber it was built on. A batch within half a grid
+# step of the full range uses it. A batch short by up to this much at an end
+# is searched in a space built fresh on the overlap, with a warning: an ATR
+# crystal cutting off near 650, or a trimmed noisy edge. It is wider than
+# the 40 cm-1 derivative window, so a trimmed edge only costs the outermost
+# filter width, and narrow enough that no diagnostic band region is lost. A
+# batch short by more is refused: it is not the same measurement (Sam's call,
+# 2026-09-30). A shortfall under one of the batch's own grid steps counts as
+# full coverage, since a coarse canonical grid cannot land on 600 or 4000.
+SELECT_COVERAGE_TOLERANCE_CM <- 50
+
+# select_training(): the version of the similarity-space algorithm, part of
+# every cached space's key. Cached spaces live in the user's cache directory
+# and outlive package upgrades, so a change to how the space is built
+# (transform_similarity(), the PCA, the component cap, the sdev floor's rule)
+# must bump this, or old spaces are read as if the new code had built them.
+SELECT_SPACE_CACHE_VERSION <- 1L
+
 ## validate() Heuristics --------------------------------------------------------
 
 # validate()'s P010 check: cubist without dimension reduction on a large

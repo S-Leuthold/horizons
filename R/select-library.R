@@ -378,6 +378,14 @@ resolve_registered <- function(entry, ask = interactive(), verbose = TRUE) {
   dir.create(dirname(path), recursive = TRUE, showWarnings = FALSE)
   clear_stale_builds(entry, dirname(path))
 
+  ## A new build is a new library (its build time is part of every cached
+  ## space's key), so spaces cached for an earlier build of this name and
+  ## version can never be read again.
+
+  unlink(list.files(dirname(path), full.names = TRUE,
+                    pattern = paste0("^", gsub(".", "\\.", paste0(entry$name, "_", entry$version), fixed = TRUE),
+                                     "\\.space-[0-9a-f]+\\.qs2$")))
+
   ## Per-process names, so two sessions building at once never share or
   ## delete each other's files.
 
@@ -428,6 +436,8 @@ resolve_registered <- function(entry, ask = interactive(), verbose = TRUE) {
                format(round(file.size(path) / 1e6)), " MB).\n"))
 
   }
+
+  prime_library_space(lib$pool, lib$record, verbose = verbose)
 
   list(pool = lib$pool, record = lib$record)
 

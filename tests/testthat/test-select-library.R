@@ -5,83 +5,6 @@
 
 
 ## ---------------------------------------------------------------------------
-## Fixture: a miniature OSSL release and a registry entry pointing at it
-## ---------------------------------------------------------------------------
-
-#' Write a three-table OSSL-shaped release and return its registry entry
-#'
-#' @description
-#' Eight KSSL Vertex 70 rows at mixed depths, plus one row from another
-#' dataset, one from another instrument and one with a missing absorbance,
-#' which the recipe must drop. The grid is 600 to 700 cm-1 at 2 cm-1.
-#' @noRd
-make_mini_ossl <- function(dir, seed = 1) {
-
-  set.seed(seed)
-  dir.create(dir, recursive = TRUE, showWarnings = FALSE)
-
-  wn  <- seq(700L, 600L, by = -2L)
-  ids <- sprintf("id%02d", 1:11)
-  n   <- length(ids)
-
-  spec <- matrix(stats::runif(n * length(wn), 0.2, 1.2), nrow = n)
-  spec[11, 5] <- NA
-  colnames(spec) <- sprintf("scan_mir.%d_abs", wn)
-
-  mir <- data.frame(
-    id.layer_uuid_txt            = ids,
-    dataset.code_ascii_txt       = c(rep("KSSL.SSL", 8), "AFSIS1.SSL", "KSSL.SSL", "KSSL.SSL"),
-    scan.mir.model.name_utf8_txt = c(rep("Bruker Vertex 70 with HTS-XT accessory", 9),
-                                     "Bruker Tensor 27", "Bruker Vertex 70 with HTS-XT accessory"),
-    spec, check.names = FALSE, stringsAsFactors = FALSE
-  )
-
-  lab <- data.frame(id.layer_uuid_txt        = ids,
-                    clay.tot_usda.a334_w.pct = stats::runif(n, 5, 50),
-                    oc_usda.c729_w.pct       = c(stats::runif(n - 3, 0.2, 4), NA, NA, NA))
-
-  site <- data.frame(id.layer_uuid_txt         = ids,
-                     layer.upper.depth_usda_cm = c(0, 10, 20, 30, 45, 60, 0, 25, 0, 0, 0))
-
-  paths <- c(mir  = file.path(dir, "mir.csv.gz"),
-             lab  = file.path(dir, "lab.csv.gz"),
-             site = file.path(dir, "site.csv.gz"))
-
-  data.table::fwrite(mir,  paths[["mir"]])
-  data.table::fwrite(lab,  paths[["lab"]])
-  data.table::fwrite(site, paths[["site"]])
-
-  entry <- library_registry()$kssl
-  entry$name    <- "mini"
-  entry$version <- "v0"
-  entry$filters$wn_max <- 700L
-  entry$sources <- data.frame(
-    table = names(paths),
-    file  = basename(paths),
-    url   = paste0("file://", normalizePath(paths)),
-    bytes = unname(file.size(paths)),
-    md5   = unname(tools::md5sum(paths)),
-    stringsAsFactors = FALSE
-  )
-
-  entry
-
-}
-
-
-#' Point the registry at `entry` and the cache at a temporary directory
-#' @noRd
-local_mini_registry <- function(entry, env = parent.frame()) {
-
-  cache <- withr::local_tempdir(.local_envir = env)
-  withr::local_options(horizons.cache_dir = cache, .local_envir = env)
-  local_mocked_bindings(library_registry = function() list(mini = entry), .env = env)
-  cache
-
-}
-
-
-## ---------------------------------------------------------------------------
 ## The three forms
 ## ---------------------------------------------------------------------------
 
@@ -175,7 +98,9 @@ test_that("first use builds and caches; later uses read the cache", {
   res <- suppressMessages(resolve_source("mini", verbose = FALSE))
 
   expect_true(file.exists(file.path(cache, "mini_v0.qs2")))
-  expect_identical(list.files(cache, all.files = TRUE, no.. = TRUE), "mini_v0.qs2")
+  ## The library and its default similarity space, and nothing left over
+  files <- list.files(cache, all.files = TRUE, no.. = TRUE)
+  expect_setequal(sub("space-[0-9a-f]+", "space-KEY", files), c("mini_v0.qs2", "mini_v0.space-KEY.qs2"))
   expect_identical(res$record$form, "registered")
   expect_identical(res$record$name, "mini")
   expect_identical(res$record$license, "CC-BY-4.0")
@@ -376,7 +301,8 @@ test_that("a window too narrow for the polynomial stops in cm-1 terms", {
 
   fx <- make_select_fixture()
 
-  expect_error(select_training(fx$targets, fx$pool, k = 20L, window = 4, verbose = FALSE),
+  ## 2 cm-1 on the fixture pool's 4 cm-1 grid rounds to 1 point
+  expect_error(select_training(fx$targets, fx$pool, k = 20L, window = 2, verbose = FALSE),
                class = "horizons_input_error", regexp = "too few for a polynomial")
   expect_error(suppressMessages(capture.output(
     select_training(fx$targets, fx$pool, k = 20L, window = -1, verbose = FALSE))),
@@ -498,7 +424,7 @@ test_that("the space's levers are checked before a registered library is fetched
   fx    <- make_select_fixture()
 
   bad <- list(list(mask = "bad"), list(derivative = NA), list(poly = -1),
-              list(ncomp = -1), list(chunk_size = 0), list(window = 4))
+              list(ncomp = -1), list(chunk_size = 0), list(window = 1))
 
   for (args in bad) {
 
