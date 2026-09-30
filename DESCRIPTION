@@ -44,6 +44,7 @@ Imports:
     plsmod,
     prospectr,
     purrr,
+    qs2,
     ranger,
     readr,
     recipes,

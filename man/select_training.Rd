@@ -6,7 +6,7 @@
 \usage{
 select_training(
   x,
-  pool,
+  library,
   k = 400L,
   scope = c("batch", "cluster", "sample", "global"),
   properties = NULL,
@@ -20,6 +20,7 @@ select_training(
   sdev_floor = SELECT_SDEV_FLOOR,
   metric = c("mahalanobis", "euclidean", "cosine"),
   space_rows = c("all", "measured"),
+  depth = c("topsoil", "all"),
   clusters = NULL,
   cluster_min = 30L,
   twin_ratio = SELECT_TWIN_RATIO,
@@ -31,8 +32,13 @@ select_training(
 \arguments{
 \item{x}{\code{horizons_data.} The targets: the samples to be predicted.}
 
-\item{pool}{\code{horizons_data.} The reference pool, with one or more
-response columns.}
+\item{library}{\code{horizons_data} or \code{character}. The reference library:
+a \code{horizons_data} with one or more response columns (your own pool,
+\code{spectra() |> standardize() |> add_response()}), the name of a
+registered library (\code{"kssl"}), or a path to a library file. A registered
+library is built on your machine from its public sources the first time
+it is used, after asking, and cached under
+\code{tools::R_user_dir("horizons", "cache")}; see "Registered libraries".}
 
 \item{k}{\code{integer.} Neighbours per target per property; a scalar, or a
 named vector with one entry per property. Default: \code{400}.}
@@ -81,6 +87,15 @@ so the axes and the Mahalanobis scaling come from that population. The
 all-rows space is built in either case and is what the target
 clustering and the resemblance check use. \code{space = "pls"} already fits
 on measured rows. Default: \code{"all"}.}
+
+\item{depth}{\code{character.} \code{"topsoil"} draws only from library rows whose
+upper depth is under 30 cm; \code{"all"} draws from every depth. The space is
+fit on every row either way, as under \code{space_rows = "all"}, so depth
+restricts which rows can be drawn and not the axes they are measured on.
+Rows with no recorded depth are not topsoil. Depth is read from an
+\code{upper_depth_cm} column; a library without one has every row eligible,
+and \code{x$selection$depth} records that. Global returns the eligible rows.
+Default: \code{"topsoil"}.}
 
 \item{clusters}{\verb{integer or NULL.} \code{scope = "cluster"} only: the cluster
 count, or \code{NULL} to choose by silhouette. Default: \code{NULL}.}
@@ -241,6 +256,17 @@ check to make, not this one. The resemblance check below cannot do this
 job either, for the same reason: its space begins with SNV, so a pure unit
 difference leaves the scores identical.
 
+\strong{Registered libraries.} \code{library = "kssl"} is the USDA NRCS Kellogg
+Soil Survey Laboratory's mid-infrared library as published in the Open
+Soil Spectral Library v1.2 (CC-BY 4.0; Safanelli et al. 2025), every depth,
+on its native 600 to 4000 cm-1 grid at 2 cm-1. horizons does not host it.
+The first draw downloads OSSL's public files (about 436 MB), verifies their
+published MD5s, builds the library and caches it; it asks first in an
+interactive session, and a non-interactive one needs
+\code{options(horizons.library_download = TRUE)}. The option
+\code{horizons.cache_dir} moves the cache. Every later draw reads the cache.
+\code{x$selection$library} records which library was drawn from.
+
 \strong{What the record holds} (\code{x$selection}): the settings as resolved, the
 reconciliation, the pool's identity, the membership table (target by
 property by pool row, with the space it was measured in, distance, rank,
@@ -254,7 +280,7 @@ clustering when \code{scope = "cluster"}.
 \examples{
 \dontrun{
 training <- targets |>
-  select_training(pool, k = 400, properties = "clay")
+  select_training("kssl", k = 400, properties = "clay")
 
 model <- training |>
   configure(outcome = "clay") |>

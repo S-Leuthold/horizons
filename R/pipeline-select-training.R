@@ -122,6 +122,17 @@
 #' job either, for the same reason: its space begins with SNV, so a pure unit
 #' difference leaves the scores identical.
 #'
+#' **Registered libraries.** `library = "kssl"` is the USDA NRCS Kellogg
+#' Soil Survey Laboratory's mid-infrared library as published in the Open
+#' Soil Spectral Library v1.2 (CC-BY 4.0; Safanelli et al. 2025), every depth,
+#' on its native 600 to 4000 cm-1 grid at 2 cm-1. horizons does not host it.
+#' The first draw downloads OSSL's public files (about 436 MB), verifies their
+#' published MD5s, builds the library and caches it; it asks first in an
+#' interactive session, and a non-interactive one needs
+#' `options(horizons.library_download = TRUE)`. The option
+#' `horizons.cache_dir` moves the cache. Every later draw reads the cache.
+#' `x$selection$library` records which library was drawn from.
+#'
 #' **What the record holds** (`x$selection`): the settings as resolved, the
 #' reconciliation, the pool's identity, the membership table (target by
 #' property by pool row, with the space it was measured in, distance, rank,
@@ -133,8 +144,13 @@
 #' clustering when `scope = "cluster"`.
 #'
 #' @param x `horizons_data.` The targets: the samples to be predicted.
-#' @param pool `horizons_data.` The reference pool, with one or more
-#'   response columns.
+#' @param library `horizons_data` or `character`. The reference library:
+#'   a `horizons_data` with one or more response columns (your own pool,
+#'   `spectra() |> standardize() |> add_response()`), the name of a
+#'   registered library (`"kssl"`), or a path to a library file. A registered
+#'   library is built on your machine from its public sources the first time
+#'   it is used, after asking, and cached under
+#'   `tools::R_user_dir("horizons", "cache")`; see "Registered libraries".
 #' @param k `integer.` Neighbours per target per property; a scalar, or a
 #'   named vector with one entry per property. Default: `400`.
 #' @param scope `character.` `"batch"`, `"cluster"`, `"sample"` or
@@ -171,6 +187,14 @@
 #'   all-rows space is built in either case and is what the target
 #'   clustering and the resemblance check use. `space = "pls"` already fits
 #'   on measured rows. Default: `"all"`.
+#' @param depth `character.` `"topsoil"` draws only from library rows whose
+#'   upper depth is under 30 cm; `"all"` draws from every depth. The space is
+#'   fit on every row either way, as under `space_rows = "all"`, so depth
+#'   restricts which rows can be drawn and not the axes they are measured on.
+#'   Rows with no recorded depth are not topsoil. Depth is read from an
+#'   `upper_depth_cm` column; a library without one has every row eligible,
+#'   and `x$selection$depth` records that. Global returns the eligible rows.
+#'   Default: `"topsoil"`.
 #' @param clusters `integer or NULL.` `scope = "cluster"` only: the cluster
 #'   count, or `NULL` to choose by silhouette. Default: `NULL`.
 #' @param cluster_min `integer.` `scope = "cluster"` only: the floor on
@@ -215,7 +239,7 @@
 #' @examples
 #' \dontrun{
 #' training <- targets |>
-#'   select_training(pool, k = 400, properties = "clay")
+#'   select_training("kssl", k = 400, properties = "clay")
 #'
 #' model <- training |>
 #'   configure(outcome = "clay") |>
@@ -227,7 +251,7 @@
 #' }
 #'
 #' @export
-select_training <- function(x, pool,
+select_training <- function(x, library,
                             k           = 400L,
                             scope       = c("batch", "cluster", "sample", "global"),
                             properties  = NULL,
@@ -241,6 +265,7 @@ select_training <- function(x, pool,
                             sdev_floor  = SELECT_SDEV_FLOOR,
                             metric      = c("mahalanobis", "euclidean", "cosine"),
                             space_rows  = c("all", "measured"),
+                            depth       = c("topsoil", "all"),
                             clusters    = NULL,
                             cluster_min = 30L,
                             twin_ratio  = SELECT_TWIN_RATIO,
@@ -252,6 +277,13 @@ select_training <- function(x, pool,
   ## Step 0: Input validation
   ## ---------------------------------------------------------------------------
 
+  ## The library first: a name or a path resolves to a pool here, so every
+  ## check below reads the pool whatever form it came in. A registered library
+  ## that is not cached yet is downloaded and built at this point.
+
+  resolved <- resolve_source(library, verbose = verbose)
+  pool     <- resolved$pool
+
   errors <- character()
 
   if (!inherits(x, "horizons_data")) {
@@ -262,7 +294,7 @@ select_training <- function(x, pool,
 
   if (!inherits(pool, "horizons_data")) {
 
-    errors <- c(errors, cli::format_inline("{.arg pool} must be a horizons_data object"))
+    errors <- c(errors, cli::format_inline("{.arg library} must be a horizons_data object"))
 
   } else {
 
@@ -274,16 +306,19 @@ select_training <- function(x, pool,
   space_ok  <- is.character(space)  && all(space  %in% c("pca", "pls"))
   metric_ok <- is.character(metric) && all(metric %in% c("mahalanobis", "euclidean", "cosine"))
   rows_ok   <- is.character(space_rows) && all(space_rows %in% c("all", "measured"))
+  depth_ok  <- is.character(depth) && all(depth %in% c("topsoil", "all"))
 
   if (!scope_ok)  errors <- c(errors, cli::format_inline("{.arg scope} must be one of batch, cluster, sample, global"))
   if (!space_ok)  errors <- c(errors, cli::format_inline("{.arg space} must be pca or pls"))
   if (!metric_ok) errors <- c(errors, cli::format_inline("{.arg metric} must be mahalanobis, euclidean or cosine"))
   if (!rows_ok)   errors <- c(errors, cli::format_inline("{.arg space_rows} must be all or measured"))
+  if (!depth_ok)  errors <- c(errors, cli::format_inline("{.arg depth} must be topsoil or all"))
 
   scope      <- if (scope_ok)  scope[1]      else NA_character_
   space      <- if (space_ok)  space[1]      else NA_character_
   metric     <- if (metric_ok) metric[1]     else NA_character_
   space_rows <- if (rows_ok)   space_rows[1] else NA_character_
+  depth      <- if (depth_ok)  depth[1]      else NA_character_
 
   k_ok <- is.numeric(k) && length(k) >= 1L && all(is.finite(k)) && all(k >= 1) && all(k == round(k))
 
@@ -330,7 +365,7 @@ select_training <- function(x, pool,
 
     if (!length(responses)) {
 
-      errors <- c(errors, cli::format_inline("{.arg pool} has no response columns; add the library's lab values first"))
+      errors <- c(errors, cli::format_inline("{.arg library} has no response columns; add the library's lab values first"))
 
     } else if (is.null(properties)) {
 
@@ -373,7 +408,7 @@ select_training <- function(x, pool,
     if (length(prior)) {
 
       errors <- c(errors, cli::format_inline(
-        "{.arg pool} already carries the provenance column{?s} {.val {prior}}, so it is itself a selection; pass the library as it comes from standardize()"))
+        "{.arg library} already carries the provenance column{?s} {.val {prior}}, so it is itself a selection; pass the library as it comes from standardize()"))
 
     }
 
@@ -445,6 +480,28 @@ select_training <- function(x, pool,
   pool_ids <- pool_rc$data$analysis$sample_id
   resp_tbl <- pool_rc$data$analysis[, c("sample_id", properties), drop = FALSE]
 
+  ## Depth restricts the draw, not the space. A subsoil row stays in the
+  ## all-rows space, so the axes are the library's, but under "topsoil" its
+  ## responses are hidden from the draw, which is how space_rows = "all"
+  ## already treats a row without the property: every step below (the draw,
+  ## the twin reference, a per-property space) sees only eligible rows. A row
+  ## with no recorded depth is not known to be topsoil and is not eligible.
+  ## A library that records no depth at all has nothing to restrict on, and
+  ## the record says so rather than the default refusing a user's own pool.
+
+  depth_recorded <- "upper_depth_cm" %in% names(pool_rc$data$analysis)
+  depth_applied  <- identical(depth, "topsoil") && depth_recorded
+  eligible       <- rep(TRUE, length(pool_ids))
+
+  if (depth_applied) {
+
+    upper    <- pool_rc$data$analysis$upper_depth_cm
+    eligible <- !is.na(upper) & upper < SELECT_TOPSOIL_MAX_CM
+
+    for (p in properties) resp_tbl[[p]][!eligible] <- NA
+
+  }
+
   ## A property no pool row has measured has no rows to draw from and no
   ## rows to check twins against, under any scope; under space_rows =
   ## "measured" a property needs two, because a space fit on one row fails.
@@ -460,11 +517,12 @@ select_training <- function(x, pool,
 
     cli::cli_abort(c(
       if (n_min == 1L) {
-        "{.arg pool} has no measured rows for {.field {unmeasured}}"
+        "{.arg library} has no measured rows for {.field {unmeasured}}"
       } else {
-        "{.arg pool} has fewer than 2 measured rows for {.field {unmeasured}}, and {.code space_rows = \"measured\"} fits a space on each property's measured rows"
+        "{.arg library} has fewer than 2 measured rows for {.field {unmeasured}}, and {.code space_rows = \"measured\"} fits a space on each property's measured rows"
       },
-      "i" = "Drop {cli::qty(unmeasured)}{?it/them} from {.arg properties}, or add the lab values to the pool first"
+      "i" = "Drop {cli::qty(unmeasured)}{?it/them} from {.arg properties}, or add the lab values to the pool first",
+      if (depth_applied) c("i" = "Only topsoil rows (upper depth < {SELECT_TOPSOIL_MAX_CM} cm) count under {.code depth = \"topsoil\"}; {.code depth = \"all\"} draws from every depth")
     ), class = "horizons_input_error")
 
   }
@@ -556,6 +614,17 @@ select_training <- function(x, pool,
     cat(paste0("\u2502  \u251C\u2500 Space: ", paste(chain, collapse = " \u2192 "), ", ",
                sp$ncomp, " components", floored, " on all ", length(pool_ids),
                " rows, ", metric, "\n"))
+
+    depth_line <- if (depth_applied) {
+      paste0("topsoil (upper depth < ", SELECT_TOPSOIL_MAX_CM, " cm), ", sum(eligible), " of ",
+             length(pool_ids), " rows eligible")
+    } else if (identical(depth, "topsoil")) {
+      "not recorded in the library, every row eligible"
+    } else {
+      "all depths"
+    }
+
+    cat(paste0("\u2502  \u251C\u2500 Depth: ", depth_line, "\n"))
 
     if (!is.null(spaces_by_property)) {
 
@@ -698,7 +767,7 @@ select_training <- function(x, pool,
   ## subtracted rows retained = FALSE rather than dropping them.
 
   excluded_ids <- unique(draw$exclusions$pool_id)
-  union_ids    <- if (scope == "global") pool_ids else pool_ids[pool_ids %in% membership$pool_id]
+  union_ids    <- if (scope == "global") pool_ids[eligible] else pool_ids[pool_ids %in% membership$pool_id]
 
   n_excluded_union <- 0L
 
@@ -763,7 +832,7 @@ select_training <- function(x, pool,
   }
 
   groups <- build_groups(group_of_target, membership,
-                         if (scope == "global") pool_ids else union_ids, scope)
+                         if (scope == "global") pool_ids[eligible] else union_ids, scope)
 
   out <- subset_rows(pool_rc, union_ids, record = FALSE)
 
@@ -859,7 +928,7 @@ select_training <- function(x, pool,
       space = space, ncomp = ncomp, sdev_floor = sdev_floor,
       ncomp_retained = sp$ncomp, ncomp_variance = sp$ncomp_variance,
       sdev_ratio = sp$sdev_ratio, variance_retained = sp$variance_retained,
-      space_rows = space_rows,
+      space_rows = space_rows, depth = depth,
       ncomp_by_property = if (is.null(spaces_by_property)) NULL else
         vapply(spaces_by_property, function(s) s$space$ncomp, integer(1)),
       space_n_rows = if (is.null(spaces_by_property)) NULL else
@@ -870,6 +939,10 @@ select_training <- function(x, pool,
     ),
     reconciliation   = rc$record,
     pool             = list(n_rows = length(pool_ids), id_hash = digest::digest(sort(pool_ids))),
+    library          = resolved$record,
+    depth            = list(requested = depth, recorded = depth_recorded, applied = depth_applied,
+                            max_cm = if (depth_applied) SELECT_TOPSOIL_MAX_CM else NULL,
+                            n_eligible = sum(eligible)),
     membership       = membership,
     groups           = groups,
     pool_sizes       = pool_sizes,
@@ -951,7 +1024,7 @@ check_pool_unpromoted <- function(pool) {
   if (!identical(class(pool), c("horizons_data", "list"))) {
 
     msgs <- c(msgs, cli::format_inline(
-      "{.arg pool} is a {.cls {class(pool)[1]}}; it must be a plain horizons_data, as it comes from standardize() or add_response()"))
+      "{.arg library} is a {.cls {class(pool)[1]}}; it must be a plain horizons_data, as it comes from standardize() or add_response()"))
 
   }
 
@@ -965,7 +1038,7 @@ check_pool_unpromoted <- function(pool) {
   if (length(carried)) {
 
     msgs <- c(msgs, cli::format_inline(
-      "{.arg pool} already carries {.val {carried}} from later in the pipeline; selection subsets its rows, which would leave that state describing rows the training set no longer has"))
+      "{.arg library} already carries {.val {carried}} from later in the pipeline; selection subsets its rows, which would leave that state describing rows the training set no longer has"))
 
   }
 
