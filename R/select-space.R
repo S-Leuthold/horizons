@@ -202,7 +202,7 @@ transform_similarity <- function(M, wn,
 #'
 #' `sdev_floor` is the noise floor on the retained set. Cumulative variance
 #' alone keeps a long tail of components whose standard deviation is one to
-#' three orders below the first, and the default Mahalanobis metric divides
+#' three orders below the first, and the Mahalanobis metric divides
 #' by that standard deviation, so the tail ends up carrying as much of the
 #' distance as the dominant chemical axes while being mostly detector and
 #' spline-ringing noise. After the variance rule has chosen its components,

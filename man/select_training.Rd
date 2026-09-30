@@ -59,8 +59,8 @@ similarity space; \code{0} disables the filter. Default: \code{1}.}
 \item{window}{\code{numeric.} Savitzky-Golay window width in cm-1, measured
 between the outermost points, so the filter means the same thing on any
 grid: 40 cm-1 is 11 points at 4 cm-1 and 21 at 2 cm-1. It becomes the
-nearest odd number of points on the targets' grid (ties round up), and
-the record carries both. Default: \code{40}.}
+nearest odd number of points on the grid the space is built on, the
+library's (ties round up), and the record carries both. Default: \code{40}.}
 
 \item{poly}{\code{integer.} Savitzky-Golay polynomial order. Default: \code{2}.}
 
@@ -211,10 +211,11 @@ end to end and the whole library is never copied onto a batch's grid.
 \code{x$selection$reconciliation} the return.
 
 \strong{Coverage.} The targets should span the library's range. Within half
-the library's spacing they do, and the cached space is used. Short by up to
-50 cm-1 at an end (an ATR crystal's cutoff, a trimmed noisy edge), the
-space is built fresh on the overlap, uncached, with a warning. Short by
-more, the verb stops and names the missing range.
+the library's spacing, or less than one of their own grid steps (a coarse
+grid cannot land on 600 or 4000), they do, and the cached space is used.
+Short by up to 50 cm-1 at an end (an ATR crystal's cutoff, a trimmed noisy
+edge), the space is built fresh on the overlap, uncached, with a warning.
+Short by more, the verb stops and names the missing range.
 
 \strong{The cached space.} A registered library's space at the default
 settings is built right after the library itself, at first use, and

@@ -229,8 +229,8 @@
 
 <script type="application/json" id="hz-data">
 {
-  "generated_at": "2026-09-30T16:59:18-0500",
-  "content_md5": "95de5be4ec77d968462b914b8d2ee401",
+  "generated_at": "2026-09-30T18:14:38-0500",
+  "content_md5": "78f40e005319b7ec2cd2b09cfc9fc491",
   "horizons": "0.9.0",
   "lanes": [
     {
@@ -937,7 +937,7 @@
       "class_in": "targets + library",
       "class_out": "horizons_data",
       "signature": "select_training (x, library, k = 100L, scope = c(\"batch\", \"cluster\", \"sample\", \"global\"), properties = NULL, snv = TRUE, derivative = 1L, window = SELECT_SG_WINDOW_CM, poly = 2L, mask = NULL, space = c(\"pca\", \"pls\"), ncomp = 0.99, sdev_floor = SELECT_SDEV_FLOOR, metric = c(\"euclidean\", \"mahalanobis\", \"cosine\"), depth = c(\"topsoil\", \"all\"), clusters = NULL, cluster_min = 30L, twin_ratio = SELECT_TWIN_RATIO, chunk_size = 500L, seed = 1L, verbose = TRUE)",
-      "summary": "The library path's answer to \"what is the model trained on\". Takes the batch of spectra to be predicted and a reference library with measured properties, brings the library onto the batch's wavenumber grid, builds a similarity space on the library, and draws each target's k nearest library rows per property. The union is returned as an ordinary horizons_data, so everything downstream runs unchanged, and the record on the object holds every neighbourhood, every target's distance to the library, and every twin it excluded. The only verb where library and unknowns meet before anything is fitted.",
+      "summary": "The library path's answer to \"what is the model trained on\". Takes the batch of spectra to be predicted and a reference library with measured properties, measures distances in the library's own similarity space (cached beside the library), and draws each target's k nearest library rows per property. The union is returned as an ordinary horizons_data, so everything downstream runs unchanged, and the record on the object holds every neighbourhood, every target's distance to the library, and every twin it excluded. The only verb where library and unknowns meet before anything is fitted.",
       "args": [
         {
           "name": "x",
@@ -991,7 +991,7 @@
         {
           "name": "window",
           "default": "SELECT_SG_WINDOW_CM",
-          "text": "`numeric.` Savitzky-Golay window width in cm-1, measured between the outermost points, so the filter means the same thing on any grid: 40 cm-1 is 11 points at 4 cm-1 and 21 at 2 cm-1. It becomes the nearest odd number of points on the targets' grid (ties round up), and the record carries both. Default: `40`.",
+          "text": "`numeric.` Savitzky-Golay window width in cm-1, measured between the outermost points, so the filter means the same thing on any grid: 40 cm-1 is 11 points at 4 cm-1 and 21 at 2 cm-1. It becomes the nearest odd number of points on the grid the space is built on, the library's (ties round up), and the record carries both. Default: `40`.",
           "touch": "Rarely. A width in cm⁻¹, so the filter is the same on any batch; 40 is the experiments' 11 points at 4 cm⁻¹ and becomes 21 at 2 cm⁻¹. The point count it becomes is recorded and printed.",
           "source": "R/pipeline-select-training.R#L528"
         },
@@ -1204,7 +1204,7 @@
           "where": "../dev/specs/v1-refactor/select-training-design.md#what-changed-on-2026-09-21-review-and-test-2b"
         },
         {
-          "claim": "the k default of 400 came from the per-sample locality curve; the batch evidence points lower",
+          "claim": "the old k default of 400 came from the per-sample locality curve; the batch evidence pointed lower, and k = 100 is the default since 2026-09-30",
           "where": "../dev/specs/v1-refactor/select-training-design.md#what-changed-on-2026-09-22-the-overnight-run-and-its-follow-up",
           "value": "k = 400 lost to k = 100 on Iowa in three experiments"
         }

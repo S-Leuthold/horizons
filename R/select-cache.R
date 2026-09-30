@@ -54,6 +54,10 @@ space_cache_identity <- function(record) {
 
 #' Hash the identity, the space's levers and the grid it is built on
 #'
+#' @description
+#' The key also carries `SELECT_SPACE_CACHE_VERSION` and the PCA component
+#' cap, so a space built by older code is never read as this code's.
+#'
 #' @param identity [Character.] From `space_cache_identity()`.
 #' @param settings [List.] The levers as `build_similarity_space()` takes
 #'   them: `snv`, `derivative`, `window` (points), `poly`, `mask`, `ncomp`,
@@ -64,6 +68,8 @@ space_cache_identity <- function(record) {
 space_cache_key <- function(identity, settings, wn) {
 
   digest::digest(list(
+    version    = SELECT_SPACE_CACHE_VERSION,
+    max_comp   = SELECT_PCA_MAX_COMP,
     identity   = as.character(identity),
     snv        = isTRUE(settings$snv),
     derivative = as.integer(settings$derivative),
@@ -95,15 +101,17 @@ space_cache_key <- function(identity, settings, wn) {
 #' @param settings,wn As for `space_cache_key()`.
 #' @param build [Function.] No arguments; returns the fitted space.
 #' @param verbose [Logical.] Print the tree line for a build.
+#' @param force [Logical.] Rebuild and overwrite even when a matching file
+#'   exists. Default: `FALSE`.
 #' @return [List.] `space`, `hit` (logical), `key`, `path`.
 #' @noRd
-cached_space <- function(identity, settings, wn, build, verbose = TRUE) {
+cached_space <- function(identity, settings, wn, build, verbose = TRUE, force = FALSE) {
 
   key  <- space_cache_key(identity, settings, wn)
   path <- file.path(library_cache_dir(),
                     paste0(attr(identity, "label"), ".space-", substr(key, 1, 16), ".qs2"))
 
-  if (file.exists(path)) {
+  if (!force && file.exists(path)) {
 
     obj <- tryCatch(qs2::qs_read(path), error = function(e) NULL)
 

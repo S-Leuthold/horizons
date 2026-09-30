@@ -352,8 +352,8 @@ verbs:
     summary: >-
       The library path's answer to "what is the model trained on". Takes the
       batch of spectra to be predicted and a reference library with measured
-      properties, brings the library onto the batch's wavenumber grid, builds a
-      similarity space on the library, and draws each target's k nearest library
+      properties, measures distances in the library's own similarity space
+      (cached beside the library), and draws each target's k nearest library
       rows per property. The union is returned as an ordinary horizons_data, so
       everything downstream runs unchanged, and the record on the object holds
       every neighbourhood, every target's distance to the library, and every
@@ -488,7 +488,7 @@ verbs:
         value: "Iowa cosine 3.140 → 2.827 against global 3.131; MOYS 0.348 against 0.526"
       - claim: the sdev floor is what makes the Mahalanobis ranking stable to the row set; under Euclidean the all-rows and measured-rows spaces agree to a Jaccard of 0.96 to 1.00 at k = 100
         where: ../dev/specs/v1-refactor/select-training-design.md#what-changed-on-2026-09-21-review-and-test-2b
-      - claim: the k default of 400 came from the per-sample locality curve; the batch evidence points lower
+      - claim: the old k default of 400 came from the per-sample locality curve; the batch evidence pointed lower, and k = 100 is the default since 2026-09-30
         where: ../dev/specs/v1-refactor/select-training-design.md#what-changed-on-2026-09-22-the-overnight-run-and-its-follow-up
         value: "k = 400 lost to k = 100 on Iowa in three experiments"
     issues:

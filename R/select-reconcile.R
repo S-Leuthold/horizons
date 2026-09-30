@@ -431,9 +431,11 @@ reconciled_standardization <- function(pool_record, target_record, wn, clamp) {
 #'
 #' Coverage decides the grid, in three tiers:
 #' * `"full"`: the targets reach both ends of the library's range, to within
-#'   half its spacing. The search grid is the library's whole grid, the one a
-#'   cached space was built on. Targets overshooting an end are sampled at
-#'   their own endpoint there, the clamp `reconcile_axes()` also applies.
+#'   half its spacing or less than one of their own steps, which is as close
+#'   as a coarse grid can land. The search grid is the library's whole grid,
+#'   the one a cached space was built on. Library columns beyond the targets'
+#'   ends are sampled at the targets' endpoint, the clamp `reconcile_axes()`
+#'   also applies.
 #' * `"overlap"`: the targets fall short of an end by no more than
 #'   `SELECT_COVERAGE_TOLERANCE_CM`. The search grid is the library's columns
 #'   inside the targets' range, the space is built fresh on them, and the
@@ -475,7 +477,15 @@ search_axis <- function(pool_wn, target_m, target_wn) {
 
   }
 
-  mode <- if (all(short <= half)) "full" else "overlap"
+  ## A batch on a coarse grid of its own cannot land on the library's ends:
+  ## standardize()'s canonical grid at 16 cm-1 stops 8 short of 600. A
+  ## shortfall under one of the batch's own steps is as close as that grid
+  ## gets, so it counts as full coverage (Sam's call, 2026-09-30); the
+  ## missing edge is held at the batch's endpoint, inside the width the
+  ## derivative trims anyway.
+
+  full_tol <- max(half, target_grid$resolution * (1 - 1e-8))
+  mode     <- if (all(short <= half | short < full_tol)) "full" else "overlap"
 
   keep <- if (mode == "full") {
     rep(TRUE, length(pool_wn))

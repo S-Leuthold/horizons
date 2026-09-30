@@ -36,8 +36,11 @@
 #'    unless the object came from `select_training()`
 #'
 #' The selection record is a list with `settings` (every lever the draw used),
-#' `reconciliation` (how the pool's axis was brought onto the targets'),
-#' `pool` (row count and an id hash of the source pool), `membership` (one
+#' `reconciliation` (how the drawn rows were brought onto the targets' axis),
+#' `search` (the axis distances were measured on, and whether a cached space
+#' was used), `pool` (row count and an id hash of the source pool),
+#' `library` (where the library came from), `depth` (the depth restriction as
+#' applied), `units` (the photometric comparison), `membership` (one
 #' row per target-property-pool_id draw, with distance and rank), `groups`
 #' (one row per scope group, carrying its target and pool ids), `pool_sizes`
 #' (drawn and available per property), `target_distances`, `resemblance`,

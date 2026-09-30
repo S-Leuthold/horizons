@@ -75,10 +75,11 @@
 #' `x$selection$reconciliation` the return.
 #'
 #' **Coverage.** The targets should span the library's range. Within half
-#' the library's spacing they do, and the cached space is used. Short by up to
-#' 50 cm-1 at an end (an ATR crystal's cutoff, a trimmed noisy edge), the
-#' space is built fresh on the overlap, uncached, with a warning. Short by
-#' more, the verb stops and names the missing range.
+#' the library's spacing, or less than one of their own grid steps (a coarse
+#' grid cannot land on 600 or 4000), they do, and the cached space is used.
+#' Short by up to 50 cm-1 at an end (an ATR crystal's cutoff, a trimmed noisy
+#' edge), the space is built fresh on the overlap, uncached, with a warning.
+#' Short by more, the verb stops and names the missing range.
 #'
 #' **The cached space.** A registered library's space at the default
 #' settings is built right after the library itself, at first use, and
@@ -187,8 +188,8 @@
 #' @param window `numeric.` Savitzky-Golay window width in cm-1, measured
 #'   between the outermost points, so the filter means the same thing on any
 #'   grid: 40 cm-1 is 11 points at 4 cm-1 and 21 at 2 cm-1. It becomes the
-#'   nearest odd number of points on the targets' grid (ties round up), and
-#'   the record carries both. Default: `40`.
+#'   nearest odd number of points on the grid the space is built on, the
+#'   library's (ties round up), and the record carries both. Default: `40`.
 #' @param poly `integer.` Savitzky-Golay polynomial order. Default: `2`.
 #' @param mask `matrix or NULL.` Wavenumber ranges to drop from the
 #'   similarity space after the derivative, one row per range, low then
@@ -705,7 +706,15 @@ select_training <- function(x, library,
     ### cached space that disagrees is not this library's and is rebuilt.
 
     if (!identical(rownames(cs$space$scores), pool_ids)) {
-      cs <- list(space = build_space(), hit = FALSE, key = cs$key, path = NULL)
+
+      cli::cli_warn(c(
+        "The cached similarity space does not match this library's rows, so it was rebuilt",
+        "i" = "The cache file at {.path {cs$path}} is overwritten."
+      ), class = "horizons_select_warning")
+
+      cs <- cached_space(identity, space_settings, sa$wavenumbers, build_space,
+                         verbose = verbose, force = TRUE)
+
     }
 
     sp    <- cs$space

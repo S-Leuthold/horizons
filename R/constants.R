@@ -369,8 +369,16 @@ SELECT_RESEMBLANCE_MIN_ROWS <- 30L
 # the 40 cm-1 derivative window, so a trimmed edge only costs the outermost
 # filter width, and narrow enough that no diagnostic band region is lost. A
 # batch short by more is refused: it is not the same measurement (Sam's call,
-# 2026-09-30).
+# 2026-09-30). A shortfall under one of the batch's own grid steps counts as
+# full coverage, since a coarse canonical grid cannot land on 600 or 4000.
 SELECT_COVERAGE_TOLERANCE_CM <- 50
+
+# select_training(): the version of the similarity-space algorithm, part of
+# every cached space's key. Cached spaces live in the user's cache directory
+# and outlive package upgrades, so a change to how the space is built
+# (transform_similarity(), the PCA, the component cap, the sdev floor's rule)
+# must bump this, or old spaces are read as if the new code had built them.
+SELECT_SPACE_CACHE_VERSION <- 1L
 
 ## validate() Heuristics --------------------------------------------------------
 
