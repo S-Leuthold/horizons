@@ -795,7 +795,7 @@ test_that("the record carries settings, reconciliation, pool identity and distan
 
   s <- out$selection
   expect_identical(s$settings$scope,  "batch")
-  expect_identical(s$settings$metric, "mahalanobis")
+  expect_identical(s$settings$metric, "euclidean")
   expect_identical(s$settings$space,  "pca")
   expect_true(s$settings$ncomp_retained >= 1L)
   expect_identical(s$reconciliation$operation, "resampled")
@@ -1141,13 +1141,14 @@ test_that("metric and space levers change which rows are drawn", {
   fx <- make_select_fixture(n_pool = 100)
 
   base <- quiet_select(fx, k = 10, properties = "clay")
-  eucl <- quiet_select(fx, k = 10, properties = "clay", metric = "euclidean")
+  maha <- quiet_select(fx, k = 10, properties = "clay", metric = "mahalanobis")
   cosn <- quiet_select(fx, k = 10, properties = "clay", metric = "cosine")
   pls  <- quiet_select(fx, k = 10, properties = "clay", space = "pls", ncomp = 3L)
 
   ids <- function(o) o$selection$membership$pool_id
 
-  expect_false(identical(ids(base), ids(eucl)))
+  expect_identical(base$selection$settings$metric, "euclidean")
+  expect_false(identical(ids(base), ids(maha)))
   expect_false(identical(ids(base), ids(cosn)))
   expect_false(identical(ids(base), ids(pls)))
   expect_identical(pls$selection$settings$space, "pls")
