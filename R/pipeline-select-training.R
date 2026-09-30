@@ -186,7 +186,7 @@
 #'   upper depth is under 30 cm; `"all"` draws from every depth. The space is
 #'   fit on every row either way, so depth restricts which rows can be drawn
 #'   and not the axes they are measured on. The resemblance check measures
-#'   targets against the rows the draw can reach.
+#'   targets against the depth-eligible rows.
 #'   Rows with no recorded depth are not topsoil. Depth is read from an
 #'   `upper_depth_cm` column; a library without one has every row eligible,
 #'   and `x$selection$depth` records that. Global returns the eligible rows.
@@ -337,6 +337,91 @@ select_training <- function(x, library,
   if (!is.logical(verbose) || length(verbose) != 1L || is.na(verbose)) {
 
     errors <- c(errors, cli::format_inline("{.arg verbose} must be TRUE or FALSE"))
+
+  }
+
+  ## The similarity space's levers, and the draw's own, are checked here too
+  ## rather than where they are used, so none of them is first found wrong
+  ## after a registered library has been downloaded and built. The space
+  ## functions keep their own checks for callers that reach them directly.
+
+  is_count <- function(v, min = 1) {
+    is.numeric(v) && length(v) == 1L && is.finite(v) && v >= min && v == round(v)
+  }
+
+  if (!is.logical(snv) || length(snv) != 1L || is.na(snv)) {
+
+    errors <- c(errors, cli::format_inline("{.arg snv} must be TRUE or FALSE"))
+
+  }
+
+  deriv_ok <- is_count(derivative, min = 0)
+  poly_ok  <- is_count(poly, min = 0)
+
+  if (!deriv_ok) errors <- c(errors, cli::format_inline("{.arg derivative} must be a single whole number, 0 or more"))
+  if (!poly_ok)  errors <- c(errors, cli::format_inline("{.arg poly} must be a single whole number, 0 or more"))
+
+  if (deriv_ok && poly_ok && derivative > 0 && poly < derivative) {
+
+    errors <- c(errors, cli::format_inline("{.arg poly} ({poly}) must be at least {.arg derivative} ({derivative})"))
+
+  }
+
+  ## The window becomes points on the targets' grid, which x already fixes.
+
+  if (inherits(x, "horizons_data") && window_ok && deriv_ok && poly_ok && derivative > 0) {
+
+    target_res <- tryCatch(grid_summary(predictor_matrix(x)$wavenumbers)$resolution,
+                           error = function(e) NA_real_)
+
+    if (is.finite(target_res)) {
+
+      pts <- window_to_points(window, target_res)
+
+      if (pts <= poly) {
+
+        errors <- c(errors, cli::format_inline(
+          "A {.arg window} of {window} cm\u207B\u00B9 is {pts} point{?s} on the targets' {target_res} cm\u207B\u00B9 grid, too few for a polynomial of order {poly}; widen {.arg window} or lower {.arg poly}"))
+
+      }
+
+    }
+
+  }
+
+  if (!is.null(mask)) {
+
+    mask_ok <- is.matrix(mask) && is.numeric(mask) && ncol(mask) == 2L &&
+               all(is.finite(mask)) && all(mask[, 1] <= mask[, 2])
+
+    if (!mask_ok) {
+
+      errors <- c(errors, cli::format_inline("{.arg mask} must be a numeric matrix with two columns, low then high, e.g. {.code rbind(c(2200, 2400))}"))
+
+    }
+
+  }
+
+  ncomp_ok <- is.numeric(ncomp) && length(ncomp) == 1L && is.finite(ncomp) &&
+              ((ncomp > 0 && ncomp < 1) || (ncomp >= 1 && ncomp == round(ncomp)))
+
+  if (!ncomp_ok) {
+
+    errors <- c(errors, cli::format_inline("{.arg ncomp} must be a proportion in (0, 1) or a positive integer"))
+
+  }
+
+  if (!is.null(clusters) && !is_count(clusters, min = 1)) {
+
+    errors <- c(errors, cli::format_inline("{.arg clusters} must be NULL or a single positive whole number"))
+
+  }
+
+  if (!is_count(cluster_min))  errors <- c(errors, cli::format_inline("{.arg cluster_min} must be a single positive whole number"))
+  if (!is_count(chunk_size))   errors <- c(errors, cli::format_inline("{.arg chunk_size} must be a single positive whole number"))
+  if (!is_count(seed, min = -.Machine$integer.max)) {
+
+    errors <- c(errors, cli::format_inline("{.arg seed} must be a single whole number"))
 
   }
 
@@ -929,9 +1014,6 @@ select_training <- function(x, library,
 ## Internal helpers
 ## =============================================================================
 
-## ---------------------------------------------------------------------------
-## check_pool_unpromoted() — The pool must be data, not a fitted object
-
 
 ## ---------------------------------------------------------------------------
 ## window_to_points() — a filter width in cm-1 as an odd point count
@@ -953,6 +1035,7 @@ window_to_points <- function(width, resolution) {
   2L * as.integer(floor(width / (2 * resolution) + 0.5)) + 1L
 
 }
+
 
 ## ---------------------------------------------------------------------------
 ## abort_select_inputs() — the validation tree, then the error
@@ -977,6 +1060,9 @@ abort_select_inputs <- function(errors) {
 
 }
 
+
+## ---------------------------------------------------------------------------
+## check_pool_unpromoted() — The pool must be data, not a fitted object
 ## ---------------------------------------------------------------------------
 
 #' Refuse a pool that carries state from later in the pipeline
@@ -1199,19 +1285,37 @@ build_groups <- function(group_of_target, membership, pool_ids, scope) {
 #' @param St [Matrix.] Target scores.
 #' @param metric,chunk_size Passed to `nearest_neighbours()`.
 #' @param seed [Integer.] Seed for the reference sample. Default: `1L`.
-#' @param eligible [Logical or NULL.] The pool rows the draw can reach. Both
+#' @param eligible [Logical or NULL.] The depth-eligible pool rows. Both
 #'   the reference distribution and each target's nearest distance are taken
 #'   over these rows only, so a batch that resembles only rows the draw
 #'   cannot take (subsoil, under `depth = "topsoil"`) is still named. `NULL`
 #'   means every row. Default: `NULL`.
 #'
 #' @return [List.] `threshold` (the 99th percentile), `n_reference`,
-#'   `beyond` (tibble: `target_id`, `nearest`).
+#'   `beyond` (tibble: `target_id`, `nearest`), and `skipped`: `NULL`, or
+#'   why the check did not run.
 #' @noRd
 check_resemblance <- function(sp, St, metric, chunk_size, seed = 1L, eligible = NULL) {
 
   Sp  <- if (is.null(eligible)) sp$scores else sp$scores[eligible, , drop = FALSE]
   n   <- nrow(Sp)
+
+  ## The reference is each row's distance to its nearest other row, so it
+  ## needs at least two, and a handful makes a 99th percentile that is only
+  ## the largest of a few gaps. Below the floor the check is recorded as not
+  ## run rather than naming every target, or failing after the whole draw.
+
+  if (n < SELECT_RESEMBLANCE_MIN_ROWS) {
+
+    return(list(
+      threshold   = NA_real_,
+      n_reference = n,
+      beyond      = tibble::tibble(target_id = character(), nearest = numeric()),
+      skipped     = paste0("only ", n, " row", if (n == 1L) "" else "s",
+                           " the draw can reach; the check needs ", SELECT_RESEMBLANCE_MIN_ROWS)
+    ))
+
+  }
 
   ## Preserve the caller's RNG state -----------------------------------------
 
@@ -1247,7 +1351,8 @@ check_resemblance <- function(sp, St, metric, chunk_size, seed = 1L, eligible = 
   list(
     threshold   = threshold,
     n_reference = nrow(ref),
-    beyond      = tibble::tibble(target_id = rownames(St)[beyond], nearest = unname(nearest[beyond]))
+    beyond      = tibble::tibble(target_id = rownames(St)[beyond], nearest = unname(nearest[beyond])),
+    skipped     = NULL
   )
 
 }

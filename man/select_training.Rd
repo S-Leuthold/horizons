@@ -87,7 +87,7 @@ of the decomposition. In [0, 1); \code{0} disables the floor. Default: \code{0.1
 upper depth is under 30 cm; \code{"all"} draws from every depth. The space is
 fit on every row either way, so depth restricts which rows can be drawn
 and not the axes they are measured on. The resemblance check measures
-targets against the rows the draw can reach.
+targets against the depth-eligible rows.
 Rows with no recorded depth are not topsoil. Depth is read from an
 \code{upper_depth_cm} column; a library without one has every row eligible,
 and \code{x$selection$depth} records that. Global returns the eligible rows.

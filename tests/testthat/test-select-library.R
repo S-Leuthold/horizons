@@ -413,6 +413,7 @@ test_that("a horizons_library in memory passes through with its record", {
   res <- resolve_source(lib)
 
   expect_identical(res$record$name, "mini")
+  expect_identical(res$record$form, "object")
   expect_equal(res$pool$data$analysis, lib$pool$data$analysis)
 
 })
@@ -458,5 +459,77 @@ test_that("a k beyond the topsoil rows says depth = 'all' would reach more", {
 
   expect_error(select_training(fx$targets, fx$pool, k = 250L, properties = "clay", verbose = FALSE),
                class = "horizons_input_error", regexp = "depth = \"all\"")
+
+})
+
+
+## ---------------------------------------------------------------------------
+## Re-review fixes (2026-09-30)
+## ---------------------------------------------------------------------------
+
+test_that("the resemblance check is skipped, not failed, when too few rows can be drawn", {
+
+  fx <- make_select_fixture(n_pool = 60)
+  n  <- nrow(fx$pool$data$analysis)
+
+  fx$pool$data$analysis$upper_depth_cm <- c(0, rep(60, n - 1L))
+  fx$pool$data$role_map <- rbind(fx$pool$data$role_map,
+                                 tibble::tibble(variable = "upper_depth_cm", role = "meta"))
+
+  out <- suppressWarnings(select_training(fx$targets, fx$pool, k = 5L, scope = "global",
+                                          properties = "clay", verbose = FALSE))
+
+  r <- out$selection$resemblance
+  expect_true(is.na(r$threshold))
+  expect_identical(nrow(r$beyond), 0L)
+  expect_match(r$skipped, "only 1 row")
+
+  all <- suppressWarnings(select_training(fx$targets, fx$pool, k = 5L, depth = "all",
+                                          properties = "clay", verbose = FALSE))
+  expect_null(all$selection$resemblance$skipped)
+
+})
+
+test_that("the space's levers are checked before a registered library is fetched", {
+
+  entry <- make_mini_ossl(withr::local_tempdir())
+  cache <- local_mini_registry(entry)
+  withr::local_options(horizons.library_download = TRUE)
+  fx    <- make_select_fixture()
+
+  bad <- list(list(mask = "bad"), list(derivative = NA), list(poly = -1),
+              list(ncomp = -1), list(chunk_size = 0), list(window = 4))
+
+  for (args in bad) {
+
+    expect_error(suppressMessages(capture.output(
+      do.call(select_training, c(list(fx$targets, "mini", verbose = FALSE), args)))),
+      class = "horizons_input_error", info = names(args))
+
+  }
+
+  expect_length(list.files(cache, all.files = TRUE, no.. = TRUE), 0L)
+
+})
+
+test_that("a build clears what a killed build left, and only when it is old", {
+
+  entry <- make_mini_ossl(withr::local_tempdir())
+  dir   <- withr::local_tempdir()
+
+  old_raw <- file.path(dir, ".raw-mini-v0-dead"); dir.create(old_raw)
+  old_tmp <- file.path(dir, ".mini-dead.qs2.tmp"); file.create(old_tmp)
+  new_raw <- file.path(dir, ".raw-mini-v0-live"); dir.create(new_raw)
+  keep    <- file.path(dir, "mini_v0.qs2");        file.create(keep)
+
+  day_ago <- Sys.time() - 3 * 24 * 3600
+  Sys.setFileTime(c(old_raw, old_tmp, keep), day_ago)
+
+  clear_stale_builds(entry, dir)
+
+  expect_false(dir.exists(old_raw))
+  expect_false(file.exists(old_tmp))
+  expect_true(dir.exists(new_raw))
+  expect_true(file.exists(keep))
 
 })

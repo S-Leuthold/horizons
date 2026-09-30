@@ -136,7 +136,8 @@ library_registry <- function() {
 #'
 #' @description
 #' Dispatches on the form of `library`. A `horizons_data` is the user's own
-#' pool and passes through, as does a `horizons_library` already in memory. A character string that names a registered
+#' pool and passes through, as does a `horizons_library` already in
+#' memory. A character string that names a registered
 #' library resolves through the registry to the local cache, building the
 #' library on first use. Any other string is a path to a saved library file.
 #'
@@ -181,7 +182,7 @@ resolve_source.horizons_library <- function(library, ask = interactive(), verbos
 
   }
 
-  list(pool = library$pool, record = library$record)
+  list(pool = library$pool, record = utils::modifyList(library$record, list(form = "object")))
 
 }
 
@@ -375,6 +376,7 @@ resolve_registered <- function(entry, ask = interactive(), verbose = TRUE) {
   library_consent(entry, path, ask = ask)
 
   dir.create(dirname(path), recursive = TRUE, showWarnings = FALSE)
+  clear_stale_builds(entry, dirname(path))
 
   ## Per-process names, so two sessions building at once never share or
   ## delete each other's files.
@@ -431,6 +433,34 @@ resolve_registered <- function(entry, ask = interactive(), verbose = TRUE) {
 
 }
 
+
+
+#' Remove what a killed build left behind
+#'
+#' @description
+#' A build writes its raw downloads and its output under per-process names
+#' and removes them on exit, but a process killed outright (out of memory,
+#' most likely, during the build) never runs its exit handlers. Those leave
+#' about 0.9 GB each, and every retry would add another set. Anything of this
+#' entry's with a build name that is over a day old is removed before a new
+#' build starts; a build running in another session is younger than that.
+#'
+#' @return The removed paths, invisibly.
+#' @noRd
+clear_stale_builds <- function(entry, dir, max_age_hours = 24) {
+
+  esc     <- function(v) gsub("([.])", "\\\\\\1", v)
+  pattern <- paste0("^\\.(raw-", esc(entry$name), "-", esc(entry$version), "-|",
+                    esc(entry$name), "-.*\\.qs2\\.tmp$)")
+  found   <- list.files(dir, pattern = pattern, all.files = TRUE, full.names = TRUE)
+
+  age   <- difftime(Sys.time(), file.mtime(found), units = "hours")
+  stale <- found[!is.na(age) & age > max_age_hours]
+
+  unlink(stale, recursive = TRUE)
+  invisible(stale)
+
+}
 
 #' Ask before a registered library's first download
 #'

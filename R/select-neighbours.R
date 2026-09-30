@@ -469,11 +469,9 @@ resolve_k <- function(k, properties) {
 #'   taken over, capped at a quarter of the measured rows so the reference
 #'   stays local. Default: `SELECT_TWIN_REF`.
 #' @param space_label [Character.] Value of the `space` column on the
-#'   distance tables: `"all"` for the all-rows space, or the property name
-#'   when the space was fit on that property's measured rows. Distances from
-#'   two spaces are not comparable, and this is what says so.
-#'   Default: `"all"`.
-#'
+#'   distance tables. `select_training()` has one space, the library's, and
+#'   always passes `"all"`; the column stays so a record names the space its
+#'   distances were measured in. Default: `"all"`.
 #' @param short_hint [Character or NULL.] A further hint for the error when
 #'   a property has fewer measured rows than `k`: the caller knows why rows
 #'   are missing (a depth restriction) and this function does not.

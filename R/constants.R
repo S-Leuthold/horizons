@@ -351,6 +351,14 @@ SELECT_TOPSOIL_MAX_CM <- 30
 # 2026-09-30).
 SELECT_SG_WINDOW_CM <- 40
 
+# select_training(): the fewest library rows the resemblance check will take
+# a reference distribution from. Its threshold is the 99th percentile of each
+# row's distance to its nearest other row; below a few dozen rows that is
+# only the largest of a handful of gaps, and with two rows every target sits
+# beyond it. Under depth = "topsoil" on a small library the eligible rows can
+# fall that low, and the check is then recorded as skipped.
+SELECT_RESEMBLANCE_MIN_ROWS <- 30L
+
 ## validate() Heuristics --------------------------------------------------------
 
 # validate()'s P010 check: cubist without dimension reduction on a large
