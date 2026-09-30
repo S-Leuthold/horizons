@@ -29,7 +29,8 @@
 #' @return `list.` Named by library name. Each entry has `name`, `version`,
 #'   `title`, `sources` (a data.frame of `table`, `file`, `url`, `bytes`,
 #'   `md5`), `filters`, `properties` (short name, source column, unit),
-#'   `topsoil_max_cm`, `license`, `citation`, `credit`, and `recipe`, the
+#'   `topsoil_max_cm`, `license`, `short_cite`, `citation`, `credit`, and
+#'   `recipe`, the
 #'   function that builds the library from the verified source files.
 #' @noRd
 library_registry <- function() {
@@ -99,8 +100,9 @@ library_registry <- function() {
 
       topsoil_max_cm = 30,
 
-      license  = "CC-BY-4.0",
-      citation = paste0(
+      license    = "CC-BY-4.0",
+      short_cite = "Safanelli et al. 2025",
+      citation   = paste0(
         "Safanelli, J.L., Hengl, T., Parente, L.L., Minarik, R., Bloom, D.E., ",
         "Todd-Brown, K., Gholizadeh, A., Mendes, W. de S., Sanderman, J. (2025). ",
         "Open Soil Spectral Library (OSSL): Building reproducible soil calibration ",
@@ -108,7 +110,7 @@ library_registry <- function() {
         "PLOS ONE 20(1): e0296545. https://doi.org/10.1371/journal.pone.0296545"
       ),
 
-      ## DRAFT pending Sam's approval (2026-09-30).
+      ## Wording approved by Sam, 2026-09-30.
       credit = paste0(
         "horizons builds the kssl library from the Open Soil Spectral Library (OSSL v1.2). ",
         "This is only possible because of the hard work of the team at Soil Spectroscopy ",
@@ -349,7 +351,7 @@ resolve_registered <- function(entry, ask = interactive(), verbose = TRUE) {
 
       cat(paste0("\u251C\u2500 Library ", cli::style_bold(entry$name), " ", entry$version,
                  " (cached). Data: ", entry$title, ". Cite: ",
-                 sub("\\. .*", "", entry$citation), ", ", entry$license, ".\n"))
+                 entry$short_cite, ", ", entry$license, ".\n"))
 
     }
 
@@ -416,8 +418,11 @@ library_consent <- function(entry, path, ask = interactive()) {
   cli::cli_inform(c(
     "i" = "The {.val {entry$name}} library is not cached yet.",
     " " = "horizons will download {mb} MB of public source files, verify them, and build the library in {.path {dirname(path)}}. The raw downloads are removed once it is built.",
+    " " = "",
     " " = entry$credit,
-    " " = "Please cite: {entry$citation} ({entry$license})."
+    " " = "",
+    " " = "Please cite: {entry$citation} ({entry$license}).",
+    " " = ""
   ))
 
   if (isTRUE(getOption("horizons.library_download"))) return(invisible(TRUE))
