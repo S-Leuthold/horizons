@@ -336,6 +336,29 @@ SELECT_TWIN_REF <- 50L
 # Set to 0 to disable the floor and recover the pre-2026-09-21 behaviour.
 SELECT_SDEV_FLOOR <- 0.10
 
+# select_training(): depth = "topsoil" draws only from library rows whose
+# upper depth is below this, in cm. It is the cut every experiment's KSSL
+# pool was built on (upper depth < 30 cm, 45,957 rows of OSSL v1.2), so the
+# defaults measured there are defaults for this draw (Sam's call, 2026-09-30:
+# ship every depth, draw topsoil by default).
+SELECT_TOPSOIL_MAX_CM <- 30
+
+# select_training(): Savitzky-Golay window of the similarity space, as a
+# width in cm-1 between the outermost points. It was 11 points, whose width
+# followed whatever grid the targets were on; every experiment ran at
+# 4 cm-1, where 11 points span 40 cm-1, so 40 keeps that filter and carries
+# it to 2 cm-1 (21 points), the grid horizons now runs at (Sam's call,
+# 2026-09-30).
+SELECT_SG_WINDOW_CM <- 40
+
+# select_training(): the fewest library rows the resemblance check will take
+# a reference distribution from. Its threshold is the 99th percentile of each
+# row's distance to its nearest other row; below a few dozen rows that is
+# only the largest of a handful of gaps, and with two rows every target sits
+# beyond it. Under depth = "topsoil" on a small library the eligible rows can
+# fall that low, and the check is then recorded as skipped.
+SELECT_RESEMBLANCE_MIN_ROWS <- 30L
+
 ## validate() Heuristics --------------------------------------------------------
 
 # validate()'s P010 check: cubist without dimension reduction on a large

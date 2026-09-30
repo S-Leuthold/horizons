@@ -2,24 +2,24 @@
 % Please edit documentation in R/pipeline-select-training.R
 \name{select_training}
 \alias{select_training}
-\title{Pipeline: Select a Training Set From a Pool}
+\title{Pipeline: Select a Training Set From a Library}
 \usage{
 select_training(
   x,
-  pool,
+  library,
   k = 400L,
   scope = c("batch", "cluster", "sample", "global"),
   properties = NULL,
   snv = TRUE,
   derivative = 1L,
-  window = 11L,
+  window = SELECT_SG_WINDOW_CM,
   poly = 2L,
   mask = NULL,
   space = c("pca", "pls"),
   ncomp = 0.99,
   sdev_floor = SELECT_SDEV_FLOOR,
   metric = c("mahalanobis", "euclidean", "cosine"),
-  space_rows = c("all", "measured"),
+  depth = c("topsoil", "all"),
   clusters = NULL,
   cluster_min = 30L,
   twin_ratio = SELECT_TWIN_RATIO,
@@ -31,8 +31,13 @@ select_training(
 \arguments{
 \item{x}{\code{horizons_data.} The targets: the samples to be predicted.}
 
-\item{pool}{\code{horizons_data.} The reference pool, with one or more
-response columns.}
+\item{library}{\code{horizons_data} or \code{character}. The reference library:
+a \code{horizons_data} with one or more response columns (your own pool,
+\code{spectra() |> standardize() |> add_response()}), the name of a
+registered library (\code{"kssl"}), or a path to a library file. A registered
+library is built on your machine from its public sources the first time
+it is used, after asking, and cached under
+\code{tools::R_user_dir("horizons", "cache")}; see "Registered libraries".}
 
 \item{k}{\code{integer.} Neighbours per target per property; a scalar, or a
 named vector with one entry per property. Default: \code{400}.}
@@ -49,8 +54,13 @@ pool row, under every scope. Default: \code{NULL}.}
 \item{derivative}{\code{integer.} Savitzky-Golay derivative order in the
 similarity space; \code{0} disables the filter. Default: \code{1}.}
 
-\item{window, poly}{\code{integer.} Savitzky-Golay window and polynomial
-order. Default: \code{11}, \code{2}.}
+\item{window}{\code{numeric.} Savitzky-Golay window width in cm-1, measured
+between the outermost points, so the filter means the same thing on any
+grid: 40 cm-1 is 11 points at 4 cm-1 and 21 at 2 cm-1. It becomes the
+nearest odd number of points on the targets' grid (ties round up), and
+the record carries both. Default: \code{40}.}
+
+\item{poly}{\code{integer.} Savitzky-Golay polynomial order. Default: \code{2}.}
 
 \item{mask}{\verb{matrix or NULL.} Wavenumber ranges to drop from the
 similarity space after the derivative, one row per range, low then
@@ -73,14 +83,15 @@ of the decomposition. In [0, 1); \code{0} disables the floor. Default: \code{0.1
 \item{metric}{\code{character.} \code{"mahalanobis"}, \code{"euclidean"} or
 \code{"cosine"}, on the scores. Default: \code{"mahalanobis"}.}
 
-\item{space_rows}{\code{character.} Which pool rows define the space the
-draw for a property happens in. \code{"all"}: one space fit on every pool
-row, the draw for each property restricted to the rows that have it.
-\code{"measured"}: a space fit per property on only the rows that have it,
-so the axes and the Mahalanobis scaling come from that population. The
-all-rows space is built in either case and is what the target
-clustering and the resemblance check use. \code{space = "pls"} already fits
-on measured rows. Default: \code{"all"}.}
+\item{depth}{\code{character.} \code{"topsoil"} draws only from library rows whose
+upper depth is under 30 cm; \code{"all"} draws from every depth. The space is
+fit on every row either way, so depth restricts which rows can be drawn
+and not the axes they are measured on. The resemblance check measures
+targets against the depth-eligible rows.
+Rows with no recorded depth are not topsoil. Depth is read from an
+\code{upper_depth_cm} column; a library without one has every row eligible,
+and \code{x$selection$depth} records that. Global returns the eligible rows.
+Default: \code{"topsoil"}.}
 
 \item{clusters}{\verb{integer or NULL.} \code{scope = "cluster"} only: the cluster
 count, or \code{NULL} to choose by silhouette. Default: \code{NULL}.}
@@ -172,16 +183,15 @@ after the subtraction.
 "similar soil", not "similar baseline", and it never reaches the model:
 a user who configures \code{preprocessing = "raw"} still gets neighbours
 chosen on derivative spectra. The default chain is SNV, a Savitzky-Golay
-first derivative (window 11, order 2), PCA of the pool to 99 \% of
+first derivative (40 cm-1 wide, order 2), PCA of the pool to 99 \% of
 variance with a standard-deviation floor on the components retained, and
 Mahalanobis distance on the scores. Every step is an argument. A PCA
 space and its Mahalanobis scaling are defined by the population they were
-fit on; \code{space_rows} chooses whether that is the whole pool or, per
-property, only the rows that have it measured. Under
-\code{space_rows = "measured"} with more than one property the distances in
-the record come from different spaces and are not comparable across them,
-which is what the \code{space} column on the distance tables records and why
-\code{.min_distance} is \code{NA} in that case.
+fit on, and that population is always the whole library: one space, fit
+on every row, with each property's draw restricted to the rows that have
+it measured. A space per property, fit on its measured rows alone, was an
+argument until 2026-09-30 and was removed: on KSSL it changed the drawn
+training set by about 6 \% (see the design spec).
 
 \strong{Reconciliation.} The targets' wavenumbers are the grid. The pool is
 resampled onto them through the same routine \code{standardize()} uses, so
@@ -194,10 +204,10 @@ band belongs in \code{mask}, which is applied after the derivative. A pool that
 does not cover the targets' range also stops the verb, except within half
 the pool's spacing, where the overshooting column is taken at the pool's
 endpoint rather than extrapolated and the clamp is recorded and warned
-about. Targets finer than the pool warn. Because the grid is the targets',
-\code{window} is a different physical filter in every batch; the width it works
-out to in cm-1 is recorded in \code{settings$window_cm} and printed in the
-report.
+about. Targets finer than the pool warn. \code{window} is a width in cm-1, so
+the filter is the same physical filter on any batch; the point count it
+becomes on the targets' grid is recorded in \code{settings$window_points}, and
+the width that count actually spans in \code{settings$window_cm}.
 
 \strong{Self-leakage.} A pool row that sits far closer to a target than that
 target's surroundings do — distance zero, or below \code{twin_ratio} times the
@@ -241,6 +251,17 @@ check to make, not this one. The resemblance check below cannot do this
 job either, for the same reason: its space begins with SNV, so a pure unit
 difference leaves the scores identical.
 
+\strong{Registered libraries.} \code{library = "kssl"} is the USDA NRCS Kellogg
+Soil Survey Laboratory's mid-infrared library as published in the Open
+Soil Spectral Library v1.2 (CC-BY 4.0; Safanelli et al. 2025), every depth,
+on its native 600 to 4000 cm-1 grid at 2 cm-1. horizons does not host it.
+The first draw downloads OSSL's public files (about 436 MB), verifies their
+published MD5s, builds the library and caches it; it asks first in an
+interactive session, and a non-interactive one needs
+\code{options(horizons.library_download = TRUE)}. The option
+\code{horizons.cache_dir} moves the cache. Every later draw reads the cache.
+\code{x$selection$library} records which library was drawn from.
+
 \strong{What the record holds} (\code{x$selection}): the settings as resolved, the
 reconciliation, the pool's identity, the membership table (target by
 property by pool row, with the space it was measured in, distance, rank,
@@ -254,7 +275,7 @@ clustering when \code{scope = "cluster"}.
 \examples{
 \dontrun{
 training <- targets |>
-  select_training(pool, k = 400, properties = "clay")
+  select_training("kssl", k = 400, properties = "clay")
 
 model <- training |>
   configure(outcome = "clay") |>
