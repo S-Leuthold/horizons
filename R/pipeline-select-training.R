@@ -411,6 +411,18 @@ select_training <- function(x, library,
 
   }
 
+  if (identical(space, "pls") && ncomp_ok && ncomp < 1) {
+
+    errors <- c(errors, cli::format_inline("{.arg space = \"pls\"} needs a whole-number {.arg ncomp}; a variance proportion has no meaning for PLS"))
+
+  }
+
+  if (identical(space, "pls") && !is.null(properties) && length(properties) != 1L) {
+
+    errors <- c(errors, cli::format_inline("{.arg space = \"pls\"} selects against one property; name exactly one in {.arg properties}"))
+
+  }
+
   if (!is.null(clusters) && !is_count(clusters, min = 1)) {
 
     errors <- c(errors, cli::format_inline("{.arg clusters} must be NULL or a single positive whole number"))
@@ -419,9 +431,9 @@ select_training <- function(x, library,
 
   if (!is_count(cluster_min))  errors <- c(errors, cli::format_inline("{.arg cluster_min} must be a single positive whole number"))
   if (!is_count(chunk_size))   errors <- c(errors, cli::format_inline("{.arg chunk_size} must be a single positive whole number"))
-  if (!is_count(seed, min = -.Machine$integer.max)) {
+  if (!is_count(seed, min = -.Machine$integer.max) || abs(seed) > .Machine$integer.max) {
 
-    errors <- c(errors, cli::format_inline("{.arg seed} must be a single whole number"))
+    errors <- c(errors, cli::format_inline("{.arg seed} must be a single whole number within R's integer range"))
 
   }
 
@@ -567,7 +579,20 @@ select_training <- function(x, library,
 
   if (depth_applied) {
 
-    upper    <- pool_rc$data$analysis$upper_depth_cm
+    upper <- pool_rc$data$analysis$upper_depth_cm
+
+    ## A character column compares as text, where "250" < 30 is TRUE, and
+    ## the cut would silently let every depth through while saying it applied.
+
+    if (!is.numeric(upper)) {
+
+      cli::cli_abort(c(
+        "{.field upper_depth_cm} must be numeric for {.code depth = \"topsoil\"}; it is {.cls {class(upper)[1]}}",
+        "i" = "Convert it to centimetres as numbers, or pass {.code depth = \"all\"}"
+      ), class = "horizons_input_error")
+
+    }
+
     eligible <- !is.na(upper) & upper < SELECT_TOPSOIL_MAX_CM
 
     for (p in properties) resp_tbl[[p]][!eligible] <- NA
@@ -989,6 +1014,15 @@ select_training <- function(x, library,
 
   }
 
+  if (!is.null(resemblance$skipped)) {
+
+    cli::cli_warn(c(
+      "The resemblance check did not run: {resemblance$skipped}",
+      "i" = "Nothing says whether the targets resemble the rows they were drawn from; {.code depth = \"all\"} gives it more rows to measure against"
+    ), class = "horizons_select_warning")
+
+  }
+
   if (nrow(resemblance$beyond)) {
 
     cli::cli_warn(c(
@@ -1032,7 +1066,10 @@ select_training <- function(x, library,
 #' @noRd
 window_to_points <- function(width, resolution) {
 
-  2L * as.integer(floor(width / (2 * resolution) + 0.5)) + 1L
+  ## Rounded first, so a width that sits exactly on a tie in exact
+  ## arithmetic does not flip with floating-point noise in the resolution.
+
+  2L * as.integer(floor(round(width / (2 * resolution), 8) + 0.5)) + 1L
 
 }
 
@@ -1446,9 +1483,18 @@ report_selection <- function(sel, n_targets) {
 
   }
 
+  ## A skipped check has an empty beyond table; printing its count would
+  ## read as "every target resembles the library" when nothing was checked.
+
   n_far <- if (is.data.frame(sel$resemblance$beyond)) nrow(sel$resemblance$beyond) else NA_integer_
-  cat(paste0("\u2502  \u251C\u2500 Targets beyond the pool's spread: ",
-             if (is.na(n_far)) "unknown" else n_far, "\n"))
+  far   <- if (!is.null(sel$resemblance$skipped)) {
+    paste0("not checked (", sel$resemblance$skipped, ")")
+  } else if (is.na(n_far)) {
+    "unknown"
+  } else {
+    n_far
+  }
+  cat(paste0("\u2502  \u251C\u2500 Targets beyond the pool's spread: ", far, "\n"))
 
   n_groups <- n_rows_of(sel$groups)
   n_rows   <- length(unique(unlist(sel$groups$pool_ids)))

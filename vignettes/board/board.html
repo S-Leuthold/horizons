@@ -229,7 +229,7 @@
 
 <script type="application/json" id="hz-data">
 {
-  "generated_at": "2026-09-30T13:58:43-0500",
+  "generated_at": "2026-09-30T16:06:06-0500",
   "content_md5": "7b819052efa29a6ee13cdf4aa6c44972",
   "horizons": "0.9.0",
   "lanes": [
@@ -1040,7 +1040,7 @@
         {
           "name": "depth",
           "default": "c(\"topsoil\", \"all\")",
-          "text": "`character.` `\"topsoil\"` draws only from library rows whose upper depth is under 30 cm; `\"all\"` draws from every depth. The space is fit on every row either way, so depth restricts which rows can be drawn and not the axes they are measured on. The resemblance check measures targets against the rows the draw can reach. Rows with no recorded depth are not topsoil. Depth is read from an `upper_depth_cm` column; a library without one has every row eligible, and `x$selection$depth` records that. Global returns the eligible rows. Default: `\"topsoil\"`.",
+          "text": "`character.` `\"topsoil\"` draws only from library rows whose upper depth is under 30 cm; `\"all\"` draws from every depth. The space is fit on every row either way, so depth restricts which rows can be drawn and not the axes they are measured on. The resemblance check measures targets against the depth-eligible rows. Rows with no recorded depth are not topsoil. Depth is read from an `upper_depth_cm` column; a library without one has every row eligible, and `x$selection$depth` records that. Global returns the eligible rows. Default: `\"topsoil\"`.",
           "touch": "Leave \"topsoil\" (upper depth under 30 cm), the cut every experiment's pool was built on; \"all\" draws from every depth. It restricts the draw, not the space, and a library with no upper_depth_cm column draws from every row.",
           "source": "R/pipeline-select-training.R#L480"
         },

@@ -533,3 +533,67 @@ test_that("a build clears what a killed build left, and only when it is old", {
   expect_true(file.exists(keep))
 
 })
+
+
+## ---------------------------------------------------------------------------
+## Pre-merge fixes (2026-09-30)
+## ---------------------------------------------------------------------------
+
+test_that("a skipped resemblance check warns and never reports zero targets out", {
+
+  fx <- make_select_fixture(n_pool = 60)
+  n  <- nrow(fx$pool$data$analysis)
+  fx$pool$data$analysis$upper_depth_cm <- c(rep(0, 20), rep(60, n - 20L))
+  fx$pool$data$role_map <- rbind(fx$pool$data$role_map,
+                                 tibble::tibble(variable = "upper_depth_cm", role = "meta"))
+
+  expect_warning(
+    printed <- capture.output(select_training(fx$targets, fx$pool, k = 5L, properties = "clay")),
+    "resemblance check did not run", class = "horizons_select_warning"
+  )
+  expect_true(any(grepl("not checked", printed)))
+  expect_false(any(grepl("spread: 0", printed)))
+
+})
+
+test_that("a character depth column is refused rather than compared as text", {
+
+  fx <- with_depth(make_select_fixture())
+  fx$pool$data$analysis$upper_depth_cm <- as.character(fx$pool$data$analysis$upper_depth_cm)
+
+  expect_error(select_training(fx$targets, fx$pool, k = 20L, verbose = FALSE),
+               class = "horizons_input_error", regexp = "must be numeric")
+  expect_no_error(suppressWarnings(
+    select_training(fx$targets, fx$pool, k = 20L, depth = "all", verbose = FALSE)))
+
+})
+
+test_that("seed and PLS mistakes are caught before a registered library is fetched", {
+
+  entry <- make_mini_ossl(withr::local_tempdir())
+  cache <- local_mini_registry(entry)
+  withr::local_options(horizons.library_download = TRUE)
+  fx    <- make_select_fixture()
+
+  bad <- list(list(seed = 2^31),
+              list(space = "pls", properties = "clay"),
+              list(space = "pls", ncomp = 3L, properties = c("clay", "oc")))
+
+  for (args in bad) {
+
+    expect_error(suppressMessages(capture.output(
+      do.call(select_training, c(list(fx$targets, "mini", verbose = FALSE), args)))),
+      class = "horizons_input_error")
+
+  }
+
+  expect_length(list.files(cache, all.files = TRUE, no.. = TRUE), 0L)
+
+})
+
+test_that("the window's point count does not flip with floating-point noise at a tie", {
+
+  expect_identical(window_to_points(40, 8), window_to_points(40, 8 + 1e-12))
+  expect_identical(window_to_points(40, 8), window_to_points(40, 8 - 1e-12))
+
+})
