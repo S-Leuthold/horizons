@@ -7,7 +7,7 @@
 select_training(
   x,
   library,
-  k = 400L,
+  k = 100L,
   scope = c("batch", "cluster", "sample", "global"),
   properties = NULL,
   snv = TRUE,
@@ -18,7 +18,7 @@ select_training(
   space = c("pca", "pls"),
   ncomp = 0.99,
   sdev_floor = SELECT_SDEV_FLOOR,
-  metric = c("mahalanobis", "euclidean", "cosine"),
+  metric = c("euclidean", "mahalanobis", "cosine"),
   depth = c("topsoil", "all"),
   clusters = NULL,
   cluster_min = 30L,
@@ -40,7 +40,9 @@ it is used, after asking, and cached under
 \code{tools::R_user_dir("horizons", "cache")}; see "Registered libraries".}
 
 \item{k}{\code{integer.} Neighbours per target per property; a scalar, or a
-named vector with one entry per property. Default: \code{400}.}
+named vector with one entry per property. 100 is the 2026-09-29 defaults
+read: 400 was worse on every batch from another instrument and no better
+on KSSL. Default: \code{100}.}
 
 \item{scope}{\code{character.} \code{"batch"}, \code{"cluster"}, \code{"sample"} or
 \code{"global"}. Default: \code{"batch"}.}
@@ -80,8 +82,12 @@ magnitude below PC1 would otherwise weigh as much as the dominant
 chemical axes, and those trailing eigenvectors are the least stable part
 of the decomposition. In [0, 1); \code{0} disables the floor. Default: \code{0.1}.}
 
-\item{metric}{\code{character.} \code{"mahalanobis"}, \code{"euclidean"} or
-\code{"cosine"}, on the scores. Default: \code{"mahalanobis"}.}
+\item{metric}{\code{character.} \code{"euclidean"}, \code{"mahalanobis"} or
+\code{"cosine"}, on the scores. Euclidean weights components by their
+variance; Mahalanobis whitens them and won on no batch in the 2026-09
+metric experiments; in the 2026-09-29 read cosine clearly won only on
+one KSSL batch, the Mississippi Delta.
+Default: \code{"euclidean"}.}
 
 \item{depth}{\code{character.} \code{"topsoil"} draws only from library rows whose
 upper depth is under 30 cm; \code{"all"} draws from every depth. The space is
@@ -185,8 +191,8 @@ a user who configures \code{preprocessing = "raw"} still gets neighbours
 chosen on derivative spectra. The default chain is SNV, a Savitzky-Golay
 first derivative (40 cm-1 wide, order 2), PCA of the pool to 99 \% of
 variance with a standard-deviation floor on the components retained, and
-Mahalanobis distance on the scores. Every step is an argument. A PCA
-space and its Mahalanobis scaling are defined by the population they were
+Euclidean distance on the scores. Every step is an argument. A PCA
+space and any scaling on it are defined by the population they were
 fit on, and that population is always the whole library: one space, fit
 on every row, with each property's draw restricted to the rows that have
 it measured. A space per property, fit on its measured rows alone, was an
@@ -275,7 +281,7 @@ clustering when \code{scope = "cluster"}.
 \examples{
 \dontrun{
 training <- targets |>
-  select_training("kssl", k = 400, properties = "clay")
+  select_training("kssl", properties = "clay")
 
 model <- training |>
   configure(outcome = "clay") |>
