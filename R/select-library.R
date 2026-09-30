@@ -429,6 +429,8 @@ resolve_registered <- function(entry, ask = interactive(), verbose = TRUE) {
 
   }
 
+  prime_library_space(lib$pool, lib$record, verbose = verbose)
+
   list(pool = lib$pool, record = lib$record)
 
 }

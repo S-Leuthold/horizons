@@ -175,7 +175,9 @@ test_that("first use builds and caches; later uses read the cache", {
   res <- suppressMessages(resolve_source("mini", verbose = FALSE))
 
   expect_true(file.exists(file.path(cache, "mini_v0.qs2")))
-  expect_identical(list.files(cache, all.files = TRUE, no.. = TRUE), "mini_v0.qs2")
+  ## The library and its default similarity space, and nothing left over
+  files <- list.files(cache, all.files = TRUE, no.. = TRUE)
+  expect_setequal(sub("space-[0-9a-f]+", "space-KEY", files), c("mini_v0.qs2", "mini_v0.space-KEY.qs2"))
   expect_identical(res$record$form, "registered")
   expect_identical(res$record$name, "mini")
   expect_identical(res$record$license, "CC-BY-4.0")
@@ -376,7 +378,8 @@ test_that("a window too narrow for the polynomial stops in cm-1 terms", {
 
   fx <- make_select_fixture()
 
-  expect_error(select_training(fx$targets, fx$pool, k = 20L, window = 4, verbose = FALSE),
+  ## 2 cm-1 on the fixture pool's 4 cm-1 grid rounds to 1 point
+  expect_error(select_training(fx$targets, fx$pool, k = 20L, window = 2, verbose = FALSE),
                class = "horizons_input_error", regexp = "too few for a polynomial")
   expect_error(suppressMessages(capture.output(
     select_training(fx$targets, fx$pool, k = 20L, window = -1, verbose = FALSE))),
@@ -498,7 +501,7 @@ test_that("the space's levers are checked before a registered library is fetched
   fx    <- make_select_fixture()
 
   bad <- list(list(mask = "bad"), list(derivative = NA), list(poly = -1),
-              list(ncomp = -1), list(chunk_size = 0), list(window = 4))
+              list(ncomp = -1), list(chunk_size = 0), list(window = 1))
 
   for (args in bad) {
 

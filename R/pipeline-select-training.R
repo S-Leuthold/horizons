@@ -63,11 +63,33 @@
 #' argument until 2026-09-30 and was removed: on KSSL it changed the drawn
 #' training set by about 6 % (see the design spec).
 #'
-#' **Reconciliation.** The targets' wavenumbers are the grid. The pool is
-#' resampled onto them through the same routine `standardize()` uses, so
-#' the training set and the targets share one axis end to end. Either axis
-#' carrying a hole — a spacing more than three times its own median and more
-#' than 30 cm-1 — stops the verb before anything interpolates, because a
+#' **Two axes.** Distances are measured in the library's own similarity
+#' space, on the library's grid: the targets are resampled onto it for the
+#' search only, so one fitted space serves every batch whatever its grid, and
+#' for a registered library or a library file that space is cached (see
+#' "The cached space"). The training set comes back on the targets' grid:
+#' only the drawn rows are resampled onto it, through the same routine
+#' `standardize()` uses, so the training set and the targets share one axis
+#' end to end and the whole library is never copied onto a batch's grid.
+#' `x$selection$search` records the search axis and
+#' `x$selection$reconciliation` the return.
+#'
+#' **Coverage.** The targets should span the library's range. Within half
+#' the library's spacing they do, and the cached space is used. Short by up to
+#' 50 cm-1 at an end (an ATR crystal's cutoff, a trimmed noisy edge), the
+#' space is built fresh on the overlap, uncached, with a warning. Short by
+#' more, the verb stops and names the missing range.
+#'
+#' **The cached space.** A registered library's space at the default
+#' settings is built right after the library itself, at first use, and
+#' cached beside it; any other setting is built at its first draw and cached
+#' then, one small file per setting under
+#' `tools::R_user_dir("horizons", "cache")`. A library file's space is cached
+#' the same way, keyed by the file's hash. A pool passed in memory, a PLS
+#' space and an overlap space are built every call and not cached.
+#'
+#' **Reconciliation.** Either axis carrying a hole — a spacing more than
+#' three times its own median and more than 30 cm-1 — stops the verb before anything interpolates, because a
 #' resampling spline and a Savitzky-Golay window both run straight across a
 #' gap and invent absorbance at its edges without erroring; a deleted water
 #' band belongs in `mask`, which is applied after the derivative. A pool that
@@ -76,7 +98,7 @@
 #' endpoint rather than extrapolated and the clamp is recorded and warned
 #' about. Targets finer than the pool warn. `window` is a width in cm-1, so
 #' the filter is the same physical filter on any batch; the point count it
-#' becomes on the targets' grid is recorded in `settings$window_points`, and
+#' becomes on the library's grid is recorded in `settings$window_points`, and
 #' the width that count actually spans in `settings$window_cm`.
 #'
 #' **Self-leakage.** A pool row that sits far closer to a target than that
@@ -373,23 +395,21 @@ select_training <- function(x, library,
 
   }
 
-  ## The window becomes points on the targets' grid, which x already fixes.
+  ## The window becomes points on the library's grid. A registered library's
+  ## grid is known from the registry, so a window too narrow for poly is
+  ## caught here, before the download; any other library is in hand already
+  ## and is checked once it resolves (Step 2), before anything is built.
 
-  if (inherits(x, "horizons_data") && window_ok && deriv_ok && poly_ok && derivative > 0) {
+  if (is.character(library) && length(library) == 1L && library %in% names(library_registry()) &&
+      window_ok && deriv_ok && poly_ok && derivative > 0) {
 
-    target_res <- tryCatch(grid_summary(predictor_matrix(x)$wavenumbers)$resolution,
-                           error = function(e) NA_real_)
+    lib_res <- library_registry()[[library]]$filters$wn_step
+    pts     <- window_to_points(window, lib_res)
 
-    if (is.finite(target_res)) {
+    if (pts <= poly) {
 
-      pts <- window_to_points(window, target_res)
-
-      if (pts <= poly) {
-
-        errors <- c(errors, cli::format_inline(
-          "A {.arg window} of {window} cm\u207B\u00B9 is {pts} point{?s} on the targets' {target_res} cm\u207B\u00B9 grid, too few for a polynomial of order {poly}; widen {.arg window} or lower {.arg poly}"))
-
-      }
+      errors <- c(errors, cli::format_inline(
+        "A {.arg window} of {window} cm\u207B\u00B9 is {pts} point{?s} on the {library} library's {lib_res} cm\u207B\u00B9 grid, too few for a polynomial of order {poly}; widen {.arg window} or lower {.arg poly}"))
 
     }
 
@@ -526,33 +546,31 @@ select_training <- function(x, library,
   if (verbose) cat(paste0("\u251C\u2500 ", cli::style_bold("Selecting training set"), "...\n"))
 
   ## ---------------------------------------------------------------------------
-  ## Step 1: Reconcile the axes
+  ## Step 1: The two axes
   ## ---------------------------------------------------------------------------
 
-  rc <- reconcile_axes(pool, x)
+  ## Distances are measured in the library's own space, on the library's
+  ## grid, so one space (cached, for a registered library or a library file)
+  ## serves every batch; the targets are resampled onto it for the search
+  ## only. The training set comes back on the targets' grid, and only the
+  ## drawn rows are put there (Step 4). That return reconciliation is checked
+  ## now, on one library row, so a library that does not cover the targets
+  ## stops before anything is built.
+
+  pm <- predictor_matrix(pool)
   tm <- predictor_matrix(x)
 
-  pool_rc <- rebuild_predictors(pool, rc$matrix, rc$wavenumbers)
-
-  ## The return is subset from pool_rc and carries its provenance, so once the
-  ## pool is resampled its standardization record has to describe the
-  ## targets' axis, not the one it came from (#90).
-
-  if (rc$record$operation == "resampled") {
-
-    pool_rc$provenance$standardization <- reconciled_standardization(
-      pool$provenance$standardization, x$provenance$standardization, rc$wavenumbers,
-      clamp = rc$record$clamp
-    )
-
-  }
+  rc_check <- reconcile_axes(subset_rows(pool, pool$data$analysis$sample_id[1], record = FALSE), x)
+  sa       <- search_axis(pm$wavenumbers, tm$matrix, tm$wavenumbers)
 
   if (verbose) {
 
-    op <- if (rc$record$operation == "none") "already on the targets' grid" else
-      paste0("resampled ", rc$record$pool_grid$resolution, " \u2192 ",
-             rc$record$target_grid$resolution, " cm\u207B\u00B9")
-    cat(paste0("\u2502  \u251C\u2500 Pool: ", nrow(rc$matrix), " rows, ", op, "\n"))
+    search_res <- sa$record$library_grid$resolution
+    cat(paste0("\u2502  \u251C\u2500 Pool: ", nrow(pm$matrix), " rows; searched on its own ",
+               search_res, " cm\u207B\u00B9 grid",
+               if (sa$record$mode == "overlap") " (the overlap with the targets)" else "",
+               ", targets ", if (sa$record$operation == "none") "already on it" else "resampled onto it",
+               "\n"))
 
   }
 
@@ -566,8 +584,8 @@ select_training <- function(x, library,
   ## property on its measured rows (space_rows = "measured") was removed on
   ## 2026-09-30: on KSSL it moved the drawn training set by about 6 %.
 
-  pool_ids <- pool_rc$data$analysis$sample_id
-  resp_tbl <- pool_rc$data$analysis[, c("sample_id", properties), drop = FALSE]
+  pool_ids <- pool$data$analysis$sample_id
+  resp_tbl <- pool$data$analysis[, c("sample_id", properties), drop = FALSE]
 
   ## Depth restricts the draw, not the space. A subsoil row stays in the
   ## space (Sam's call, 2026-09-30: the library is the population, and
@@ -579,13 +597,13 @@ select_training <- function(x, library,
   ## A library that records no depth at all has nothing to restrict on, and
   ## the record says so rather than the default refusing a user's own pool.
 
-  depth_recorded <- "upper_depth_cm" %in% names(pool_rc$data$analysis)
+  depth_recorded <- "upper_depth_cm" %in% names(pool$data$analysis)
   depth_applied  <- identical(depth, "topsoil") && depth_recorded
   eligible       <- rep(TRUE, length(pool_ids))
 
   if (depth_applied) {
 
-    upper <- pool_rc$data$analysis$upper_depth_cm
+    upper <- pool$data$analysis$upper_depth_cm
 
     ## A character column compares as text, where "250" < 30 is TRUE, and
     ## the cut would silently let every depth through while saying it applied.
@@ -625,7 +643,8 @@ select_training <- function(x, library,
 
   ## Units, before SNV erases the evidence ----------------------------------
 
-  units <- check_photometric_units(rc$matrix, tm$matrix)
+  lib_m <- if (sa$record$mode == "full") pm$matrix else pm$matrix[, sa$pool_cols, drop = FALSE]
+  units <- check_photometric_units(lib_m, sa$matrix)
 
   if (units$mismatch) {
 
@@ -639,48 +658,74 @@ select_training <- function(x, library,
   }
 
   ## The window is a width in cm-1; the filter counts points on the grid the
-  ## space is built on, which is the targets'. Nearest odd count, ties up.
+  ## space is built on, which is the library's. Nearest odd count, ties up.
 
-  window_points <- if (derivative > 0) {
-    window_to_points(window, rc$record$target_grid$resolution)
-  } else {
-    NA_integer_
-  }
+  search_res <- sa$record$library_grid$resolution
+
+  window_points <- if (derivative > 0) window_to_points(window, search_res) else NA_integer_
 
   if (derivative > 0 && window_points <= poly) {
 
     cli::cli_abort(c(
-      "A {.arg window} of {window} cm\u207B\u00B9 is {window_points} point{?s} on the targets' {rc$record$target_grid$resolution} cm\u207B\u00B9 grid, too few for a polynomial of order {poly}",
+      "A {.arg window} of {window} cm\u207B\u00B9 is {window_points} point{?s} on the library's {search_res} cm\u207B\u00B9 grid, too few for a polynomial of order {poly}",
       "i" = "Widen {.arg window} or lower {.arg poly}."
     ), class = "horizons_input_error")
 
   }
 
-  build_space_on <- function(rows) {
+  space_settings <- list(snv = snv, derivative = as.integer(derivative),
+                         ## With no derivative the filter never runs and its
+                         ## window is unread; any valid value will do.
+                         window = if (derivative > 0) window_points else 11L,
+                         poly = as.integer(poly), mask = mask, ncomp = ncomp,
+                         sdev_floor = sdev_floor)
 
-    y <- if (space == "pls") pool_rc$data$analysis[[properties]][rows] else NULL
+  build_space <- function() {
 
-    build_similarity_space(rc$matrix[rows, , drop = FALSE], rc$wavenumbers,
-                           snv = snv, derivative = derivative,
-                           ## With no derivative the filter never runs and its
-                           ## window is unread; any valid value will do.
-                           window = if (derivative > 0) window_points else 11L,
-                           poly = poly, mask = mask, space = space, ncomp = ncomp,
-                           sdev_floor = sdev_floor, y = y)
+    build_similarity_space(lib_m, sa$wavenumbers,
+                           snv = space_settings$snv, derivative = space_settings$derivative,
+                           window = space_settings$window, poly = space_settings$poly,
+                           mask = mask, space = space, ncomp = ncomp, sdev_floor = sdev_floor,
+                           y = if (space == "pls") pool$data$analysis[[properties]] else NULL)
 
   }
 
-  sp <- build_space_on(seq_along(pool_ids))
-  St <- project_similarity(sp, tm$matrix, tm$wavenumbers)
+  ## Cached when the space depends on the library alone: a PCA space, on the
+  ## library's whole grid, of a library with an identity to key it by. A PLS
+  ## space is fit against one property, an overlap space is one batch's, and
+  ## a pool passed in memory is not hashed (see R/select-cache.R).
 
+  identity <- if (space == "pca" && sa$record$mode == "full") space_cache_identity(resolved$record) else NULL
+
+  if (!is.null(identity)) {
+
+    cs <- cached_space(identity, space_settings, sa$wavenumbers, build_space, verbose = verbose)
+
+    ### The space's rows are the library's rows in the library's order; a
+    ### cached space that disagrees is not this library's and is rebuilt.
+
+    if (!identical(rownames(cs$space$scores), pool_ids)) {
+      cs <- list(space = build_space(), hit = FALSE, key = cs$key, path = NULL)
+    }
+
+    sp    <- cs$space
+    cache <- list(used = TRUE, hit = cs$hit, key = cs$key, path = cs$path)
+
+  } else {
+
+    sp    <- build_space()
+    cache <- list(used = FALSE, hit = FALSE, key = NULL, path = NULL,
+                  reason = if (space == "pls") "pls space" else if (sa$record$mode != "full") "overlap space" else "pool passed in memory")
+
+  }
+
+  rm(lib_m)
+
+  St <- project_similarity(sp, sa$matrix, sa$wavenumbers)
 
   ## The width the filter actually spans once rounded to whole points.
 
-  window_cm <- if (derivative > 0) {
-    (window_points - 1L) * rc$record$target_grid$resolution
-  } else {
-    NA_real_
-  }
+  window_cm <- if (derivative > 0) (window_points - 1L) * search_res else NA_real_
 
   ## A PLS space is fit against the pool's own responses, so which rows land
   ## in the training set was decided by their y. No target leakage, but the
@@ -901,7 +946,23 @@ select_training <- function(x, library,
   groups <- build_groups(group_of_target, membership,
                          if (scope == "global") pool_ids[eligible] else union_ids, scope)
 
-  out <- subset_rows(pool_rc, union_ids, record = FALSE)
+  ## Only the drawn rows go onto the targets' grid. The returned object
+  ## carries their provenance, so once they are resampled its
+  ## standardization record describes the targets' axis, not the library's
+  ## (#90). The checks and their warnings ran in Step 1.
+
+  drawn <- subset_rows(pool, union_ids, record = FALSE)
+  rc    <- reconcile_axes(drawn, x, quiet = TRUE)
+  out   <- rebuild_predictors(drawn, rc$matrix, rc$wavenumbers)
+
+  if (rc$record$operation == "resampled") {
+
+    out$provenance$standardization <- reconciled_standardization(
+      pool$provenance$standardization, x$provenance$standardization, rc$wavenumbers,
+      clamp = rc$record$clamp
+    )
+
+  }
 
   if (scope == "global") {
 
@@ -984,6 +1045,7 @@ select_training <- function(x, library,
       space_note = space_note
     ),
     reconciliation   = rc$record,
+    search           = c(sa$record, list(cache = cache)),
     pool             = list(n_rows = length(pool_ids), id_hash = digest::digest(sort(pool_ids))),
     library          = resolved$record,
     depth            = list(requested = depth, recorded = depth_recorded, applied = depth_applied,

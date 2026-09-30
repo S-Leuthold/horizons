@@ -199,11 +199,33 @@ it measured. A space per property, fit on its measured rows alone, was an
 argument until 2026-09-30 and was removed: on KSSL it changed the drawn
 training set by about 6 \% (see the design spec).
 
-\strong{Reconciliation.} The targets' wavenumbers are the grid. The pool is
-resampled onto them through the same routine \code{standardize()} uses, so
-the training set and the targets share one axis end to end. Either axis
-carrying a hole — a spacing more than three times its own median and more
-than 30 cm-1 — stops the verb before anything interpolates, because a
+\strong{Two axes.} Distances are measured in the library's own similarity
+space, on the library's grid: the targets are resampled onto it for the
+search only, so one fitted space serves every batch whatever its grid, and
+for a registered library or a library file that space is cached (see
+"The cached space"). The training set comes back on the targets' grid:
+only the drawn rows are resampled onto it, through the same routine
+\code{standardize()} uses, so the training set and the targets share one axis
+end to end and the whole library is never copied onto a batch's grid.
+\code{x$selection$search} records the search axis and
+\code{x$selection$reconciliation} the return.
+
+\strong{Coverage.} The targets should span the library's range. Within half
+the library's spacing they do, and the cached space is used. Short by up to
+50 cm-1 at an end (an ATR crystal's cutoff, a trimmed noisy edge), the
+space is built fresh on the overlap, uncached, with a warning. Short by
+more, the verb stops and names the missing range.
+
+\strong{The cached space.} A registered library's space at the default
+settings is built right after the library itself, at first use, and
+cached beside it; any other setting is built at its first draw and cached
+then, one small file per setting under
+\code{tools::R_user_dir("horizons", "cache")}. A library file's space is cached
+the same way, keyed by the file's hash. A pool passed in memory, a PLS
+space and an overlap space are built every call and not cached.
+
+\strong{Reconciliation.} Either axis carrying a hole — a spacing more than
+three times its own median and more than 30 cm-1 — stops the verb before anything interpolates, because a
 resampling spline and a Savitzky-Golay window both run straight across a
 gap and invent absorbance at its edges without erroring; a deleted water
 band belongs in \code{mask}, which is applied after the derivative. A pool that
@@ -212,7 +234,7 @@ the pool's spacing, where the overshooting column is taken at the pool's
 endpoint rather than extrapolated and the clamp is recorded and warned
 about. Targets finer than the pool warn. \code{window} is a width in cm-1, so
 the filter is the same physical filter on any batch; the point count it
-becomes on the targets' grid is recorded in \code{settings$window_points}, and
+becomes on the library's grid is recorded in \code{settings$window_points}, and
 the width that count actually spans in \code{settings$window_cm}.
 
 \strong{Self-leakage.} A pool row that sits far closer to a target than that
