@@ -452,17 +452,6 @@ test_that("resemblance is measured against the rows the draw can reach", {
 
 })
 
-test_that("under space_rows = 'measured' depth leaves each property's space whole", {
-
-  fx  <- with_depth(make_select_fixture())
-  out <- select_training(fx$targets, fx$pool, k = 20L, space_rows = "measured", verbose = FALSE)
-
-  a <- fx$pool$data$analysis
-  expect_identical(out$selection$settings$space_n_rows[["clay"]], sum(!is.na(a$clay)))
-  expect_identical(out$selection$settings$space_n_rows[["oc"]],   sum(!is.na(a$oc)))
-
-})
-
 test_that("a k beyond the topsoil rows says depth = 'all' would reach more", {
 
   fx <- with_depth(make_select_fixture())

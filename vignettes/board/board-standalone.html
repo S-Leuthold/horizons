@@ -235,8 +235,8 @@
 
 <script type="application/json" id="hz-data">
 {
-  "generated_at": "2026-09-24T15:48:59-0500",
-  "content_md5": "58de575f33a652348cccab3494f38709",
+  "generated_at": "2026-09-30T13:58:43-0500",
+  "content_md5": "7b819052efa29a6ee13cdf4aa6c44972",
   "horizons": "0.9.0",
   "lanes": [
     {
@@ -942,7 +942,7 @@
       "optional": false,
       "class_in": "targets + library",
       "class_out": "horizons_data",
-      "signature": "select_training (x, pool, k = 400L, scope = c(\"batch\", \"cluster\", \"sample\", \"global\"), properties = NULL, snv = TRUE, derivative = 1L, window = 11L, poly = 2L, mask = NULL, space = c(\"pca\", \"pls\"), ncomp = 0.99, sdev_floor = SELECT_SDEV_FLOOR, metric = c(\"mahalanobis\", \"euclidean\", \"cosine\"), space_rows = c(\"all\", \"measured\"), clusters = NULL, cluster_min = 30L, twin_ratio = SELECT_TWIN_RATIO, chunk_size = 500L, seed = 1L, verbose = TRUE)",
+      "signature": "select_training (x, library, k = 400L, scope = c(\"batch\", \"cluster\", \"sample\", \"global\"), properties = NULL, snv = TRUE, derivative = 1L, window = SELECT_SG_WINDOW_CM, poly = 2L, mask = NULL, space = c(\"pca\", \"pls\"), ncomp = 0.99, sdev_floor = SELECT_SDEV_FLOOR, metric = c(\"mahalanobis\", \"euclidean\", \"cosine\"), depth = c(\"topsoil\", \"all\"), clusters = NULL, cluster_min = 30L, twin_ratio = SELECT_TWIN_RATIO, chunk_size = 500L, seed = 1L, verbose = TRUE)",
       "summary": "The library path's answer to \"what is the model trained on\". Takes the batch of spectra to be predicted and a reference library with measured properties, brings the library onto the batch's wavenumber grid, builds a similarity space on the library, and draws each target's k nearest library rows per property. The union is returned as an ordinary horizons_data, so everything downstream runs unchanged, and the record on the object holds every neighbourhood, every target's distance to the library, and every twin it excluded. The only verb where library and unknowns meet before anything is fitted.",
       "args": [
         {
@@ -953,11 +953,11 @@
           "source": "R/pipeline-select-training.R#L257"
         },
         {
-          "name": "pool",
+          "name": "library",
           "default": null,
-          "text": "`horizons_data.` The reference pool, with one or more response columns.",
-          "touch": "Always; a plain horizons_data with response columns, as it comes from standardize() and add_response(). The verb refuses one that has been validated, evaluated or fitted, or that is itself a prior selection; a merely configured pool is not caught, and its grid and outcome role ride along. To become the one routing argument, library, taking a registered name, a path, or an object.",
-          "source": "R/pipeline-select-training.R#L947"
+          "text": "`horizons_data` or `character`. The reference library: a `horizons_data` with one or more response columns (your own pool, `spectra() |> standardize() |> add_response()`), the name of a registered library (`\"kssl\"`), or a path to a library file. A registered library is built on your machine from its public sources the first time it is used, after asking, and cached under `tools::R_user_dir(\"horizons\", \"cache\")`; see \"Registered libraries\".",
+          "touch": "Always. \"kssl\" for the KSSL library from OSSL v1.2, built on your machine the first time after asking (about 436 MB downloaded, a 490 MB cache, 5 GB of memory once) and read from the cache after that; a path to a library file; or your own horizons_data with response columns, as it comes from standardize() and add_response(). The verb refuses a pool that has been validated, evaluated or fitted, or that is itself a prior selection.",
+          "source": "R/select-library.R#L200"
         },
         {
           "name": "k",
@@ -996,15 +996,15 @@
         },
         {
           "name": "window",
-          "default": "11L",
-          "text": "`integer.` Savitzky-Golay window and polynomial order. Default: `11`, `2`.",
-          "touch": "Rarely. The window is in grid points, so its physical width depends on the batch's resolution; the width in cm⁻¹ is recorded and printed.",
-          "source": "R/pipeline-select-training.R#L521"
+          "default": "SELECT_SG_WINDOW_CM",
+          "text": "`numeric.` Savitzky-Golay window width in cm-1, measured between the outermost points, so the filter means the same thing on any grid: 40 cm-1 is 11 points at 4 cm-1 and 21 at 2 cm-1. It becomes the nearest odd number of points on the targets' grid (ties round up), and the record carries both. Default: `40`.",
+          "touch": "Rarely. A width in cm⁻¹, so the filter is the same on any batch; 40 is the experiments' 11 points at 4 cm⁻¹ and becomes 21 at 2 cm⁻¹. The point count it becomes is recorded and printed.",
+          "source": "R/pipeline-select-training.R#L528"
         },
         {
           "name": "poly",
           "default": "2L",
-          "text": "`integer.` Savitzky-Golay window and polynomial order. Default: `11`, `2`.",
+          "text": "`integer.` Savitzky-Golay polynomial order. Default: `2`.",
           "touch": "Rarely; must be at least the derivative order and smaller than the window.",
           "source": "R/select-space.R#L101"
         },
@@ -1044,11 +1044,11 @@
           "source": "R/select-neighbours.R#L69"
         },
         {
-          "name": "space_rows",
-          "default": "c(\"all\", \"measured\")",
-          "text": "`character.` Which pool rows define the space the draw for a property happens in. `\"all\"`: one space fit on every pool row, the draw for each property restricted to the rows that have it. `\"measured\"`: a space fit per property on only the rows that have it, so the axes and the Mahalanobis scaling come from that population. The all-rows space is built in either case and is what the target clustering and the resemblance check use. `space = \"pls\"` already fits on measured rows. Default: `\"all\"`.",
-          "touch": "Leave \"all\". Under Euclidean the two choices rank neighbours almost identically; the difference that appeared under Mahalanobis was the whitening, not the population.",
-          "source": "R/pipeline-select-training.R#L503"
+          "name": "depth",
+          "default": "c(\"topsoil\", \"all\")",
+          "text": "`character.` `\"topsoil\"` draws only from library rows whose upper depth is under 30 cm; `\"all\"` draws from every depth. The space is fit on every row either way, so depth restricts which rows can be drawn and not the axes they are measured on. The resemblance check measures targets against the rows the draw can reach. Rows with no recorded depth are not topsoil. Depth is read from an `upper_depth_cm` column; a library without one has every row eligible, and `x$selection$depth` records that. Global returns the eligible rows. Default: `\"topsoil\"`.",
+          "touch": "Leave \"topsoil\" (upper depth under 30 cm), the cut every experiment's pool was built on; \"all\" draws from every depth. It restricts the draw, not the space, and a library with no upper_depth_cm column draws from every row.",
+          "source": "R/pipeline-select-training.R#L480"
         },
         {
           "name": "clusters",
@@ -1123,7 +1123,7 @@
           "source": "R/pipeline-select-training.R#L663"
         },
         {
-          "step": "Subsets the reconciled pool to the union, adds .drawn_by and .min_distance as meta columns, plus .group under every scope but sample, and counts rows drawn against rows available per property. Both distance columns are NA under global, and .min_distance is NA when space_rows is \"measured\" with more than one property, because distances from different spaces have no shared scale.",
+          "step": "Subsets the reconciled pool to the union, adds .drawn_by and .min_distance as meta columns, plus .group under every scope but sample, and counts rows drawn against rows available per property. Both distance columns are NA under global, and the space is always the whole library's, so every distance shares one scale.",
           "source": "R/pipeline-select-training.R#L768"
         },
         {
@@ -1179,7 +1179,7 @@
           "source": "R/select-reconcile.R#L208"
         },
         {
-          "when": "a property has no measured pool rows, or fewer than 2 under space_rows = \"measured\", under any scope",
+          "when": "a property has no measured pool rows (topsoil rows, under depth = \"topsoil\"), under any scope",
           "does": "aborts before the space is built, naming the property",
           "source": "R/pipeline-select-training.R#L457"
         },
@@ -1224,11 +1224,6 @@
       ],
       "notes": [],
       "design_ahead": [
-        {
-          "text": "one routing argument, library, taking a registered name, a path to a packaged artifact, or a horizons_data; pool goes away and the build recipe is internal",
-          "absent": "library",
-          "source": "../dev/specs/v1-refactor/select-training-design.md#the-library-as-a-noun-added-2026-09-21"
-        },
         {
           "text": "the metric default changes from Mahalanobis to cosine on-library and Euclidean off-library, routed by the nearest-library distance",
           "source": "../dev/specs/v1-refactor/select-training-design.md#what-changed-on-2026-09-22-the-overnight-run-and-its-follow-up"

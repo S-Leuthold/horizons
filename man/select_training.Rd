@@ -19,7 +19,6 @@ select_training(
   ncomp = 0.99,
   sdev_floor = SELECT_SDEV_FLOOR,
   metric = c("mahalanobis", "euclidean", "cosine"),
-  space_rows = c("all", "measured"),
   depth = c("topsoil", "all"),
   clusters = NULL,
   cluster_min = 30L,
@@ -84,22 +83,11 @@ of the decomposition. In [0, 1); \code{0} disables the floor. Default: \code{0.1
 \item{metric}{\code{character.} \code{"mahalanobis"}, \code{"euclidean"} or
 \code{"cosine"}, on the scores. Default: \code{"mahalanobis"}.}
 
-\item{space_rows}{\code{character.} Which pool rows define the space the
-draw for a property happens in. \code{"all"}: one space fit on every pool
-row, the draw for each property restricted to the rows that have it.
-\code{"measured"}: a space fit per property on only the rows that have it,
-so the axes and the Mahalanobis scaling come from that population. The
-all-rows space is built in either case and is what the target
-clustering and the resemblance check use. \code{space = "pls"} already fits
-on measured rows. Default: \code{"all"}.}
-
 \item{depth}{\code{character.} \code{"topsoil"} draws only from library rows whose
 upper depth is under 30 cm; \code{"all"} draws from every depth. The space is
-fit on every row either way, as under \code{space_rows = "all"}, so depth
-restricts which rows can be drawn and not the axes they are measured on;
-under \code{space_rows = "measured"} each property's space is still fit on
-its measured rows at every depth. The resemblance check measures targets
-against the rows the draw can reach.
+fit on every row either way, so depth restricts which rows can be drawn
+and not the axes they are measured on. The resemblance check measures
+targets against the rows the draw can reach.
 Rows with no recorded depth are not topsoil. Depth is read from an
 \code{upper_depth_cm} column; a library without one has every row eligible,
 and \code{x$selection$depth} records that. Global returns the eligible rows.
@@ -195,16 +183,15 @@ after the subtraction.
 "similar soil", not "similar baseline", and it never reaches the model:
 a user who configures \code{preprocessing = "raw"} still gets neighbours
 chosen on derivative spectra. The default chain is SNV, a Savitzky-Golay
-first derivative (window 11, order 2), PCA of the pool to 99 \% of
+first derivative (40 cm-1 wide, order 2), PCA of the pool to 99 \% of
 variance with a standard-deviation floor on the components retained, and
 Mahalanobis distance on the scores. Every step is an argument. A PCA
 space and its Mahalanobis scaling are defined by the population they were
-fit on; \code{space_rows} chooses whether that is the whole pool or, per
-property, only the rows that have it measured. Under
-\code{space_rows = "measured"} with more than one property the distances in
-the record come from different spaces and are not comparable across them,
-which is what the \code{space} column on the distance tables records and why
-\code{.min_distance} is \code{NA} in that case.
+fit on, and that population is always the whole library: one space, fit
+on every row, with each property's draw restricted to the rows that have
+it measured. A space per property, fit on its measured rows alone, was an
+argument until 2026-09-30 and was removed: on KSSL it changed the drawn
+training set by about 6 \% (see the design spec).
 
 \strong{Reconciliation.} The targets' wavenumbers are the grid. The pool is
 resampled onto them through the same routine \code{standardize()} uses, so

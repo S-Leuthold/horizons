@@ -53,16 +53,15 @@
 #' "similar soil", not "similar baseline", and it never reaches the model:
 #' a user who configures `preprocessing = "raw"` still gets neighbours
 #' chosen on derivative spectra. The default chain is SNV, a Savitzky-Golay
-#' first derivative (window 11, order 2), PCA of the pool to 99 % of
+#' first derivative (40 cm-1 wide, order 2), PCA of the pool to 99 % of
 #' variance with a standard-deviation floor on the components retained, and
 #' Mahalanobis distance on the scores. Every step is an argument. A PCA
 #' space and its Mahalanobis scaling are defined by the population they were
-#' fit on; `space_rows` chooses whether that is the whole pool or, per
-#' property, only the rows that have it measured. Under
-#' `space_rows = "measured"` with more than one property the distances in
-#' the record come from different spaces and are not comparable across them,
-#' which is what the `space` column on the distance tables records and why
-#' `.min_distance` is `NA` in that case.
+#' fit on, and that population is always the whole library: one space, fit
+#' on every row, with each property's draw restricted to the rows that have
+#' it measured. A space per property, fit on its measured rows alone, was an
+#' argument until 2026-09-30 and was removed: on KSSL it changed the drawn
+#' training set by about 6 % (see the design spec).
 #'
 #' **Reconciliation.** The targets' wavenumbers are the grid. The pool is
 #' resampled onto them through the same routine `standardize()` uses, so
@@ -183,21 +182,11 @@
 #'   of the decomposition. In [0, 1); `0` disables the floor. Default: `0.1`.
 #' @param metric `character.` `"mahalanobis"`, `"euclidean"` or
 #'   `"cosine"`, on the scores. Default: `"mahalanobis"`.
-#' @param space_rows `character.` Which pool rows define the space the
-#'   draw for a property happens in. `"all"`: one space fit on every pool
-#'   row, the draw for each property restricted to the rows that have it.
-#'   `"measured"`: a space fit per property on only the rows that have it,
-#'   so the axes and the Mahalanobis scaling come from that population. The
-#'   all-rows space is built in either case and is what the target
-#'   clustering and the resemblance check use. `space = "pls"` already fits
-#'   on measured rows. Default: `"all"`.
 #' @param depth `character.` `"topsoil"` draws only from library rows whose
 #'   upper depth is under 30 cm; `"all"` draws from every depth. The space is
-#'   fit on every row either way, as under `space_rows = "all"`, so depth
-#'   restricts which rows can be drawn and not the axes they are measured on;
-#'   under `space_rows = "measured"` each property's space is still fit on
-#'   its measured rows at every depth. The resemblance check measures targets
-#'   against the rows the draw can reach.
+#'   fit on every row either way, so depth restricts which rows can be drawn
+#'   and not the axes they are measured on. The resemblance check measures
+#'   targets against the rows the draw can reach.
 #'   Rows with no recorded depth are not topsoil. Depth is read from an
 #'   `upper_depth_cm` column; a library without one has every row eligible,
 #'   and `x$selection$depth` records that. Global returns the eligible rows.
@@ -271,7 +260,6 @@ select_training <- function(x, library,
                             ncomp       = 0.99,
                             sdev_floor  = SELECT_SDEV_FLOOR,
                             metric      = c("mahalanobis", "euclidean", "cosine"),
-                            space_rows  = c("all", "measured"),
                             depth       = c("topsoil", "all"),
                             clusters    = NULL,
                             cluster_min = 30L,
@@ -295,19 +283,16 @@ select_training <- function(x, library,
   scope_ok  <- is.character(scope)  && all(scope  %in% c("batch", "cluster", "sample", "global"))
   space_ok  <- is.character(space)  && all(space  %in% c("pca", "pls"))
   metric_ok <- is.character(metric) && all(metric %in% c("mahalanobis", "euclidean", "cosine"))
-  rows_ok   <- is.character(space_rows) && all(space_rows %in% c("all", "measured"))
   depth_ok  <- is.character(depth) && all(depth %in% c("topsoil", "all"))
 
   if (!scope_ok)  errors <- c(errors, cli::format_inline("{.arg scope} must be one of batch, cluster, sample, global"))
   if (!space_ok)  errors <- c(errors, cli::format_inline("{.arg space} must be pca or pls"))
   if (!metric_ok) errors <- c(errors, cli::format_inline("{.arg metric} must be mahalanobis, euclidean or cosine"))
-  if (!rows_ok)   errors <- c(errors, cli::format_inline("{.arg space_rows} must be all or measured"))
   if (!depth_ok)  errors <- c(errors, cli::format_inline("{.arg depth} must be topsoil or all"))
 
   scope      <- if (scope_ok)  scope[1]      else NA_character_
   space      <- if (space_ok)  space[1]      else NA_character_
   metric     <- if (metric_ok) metric[1]     else NA_character_
-  space_rows <- if (rows_ok)   space_rows[1] else NA_character_
   depth      <- if (depth_ok)  depth[1]      else NA_character_
 
   k_ok <- is.numeric(k) && length(k) >= 1L && all(is.finite(k)) && all(k >= 1) && all(k == round(k))
@@ -472,26 +457,22 @@ select_training <- function(x, library,
   ## Step 2: Build the similarity space on the pool, project the targets
   ## ---------------------------------------------------------------------------
 
-  ## The all-rows space is always built: it is the draw's space under
-  ## space_rows = "all", and the space clustering and the resemblance check
-  ## use in either mode, so that neither depends on which property is
-  ## being drawn. Under space_rows = "measured" a further space is fit per
-  ## property on the rows that have it, and the draw for that property
-  ## happens there.
+  ## One space, fit on every library row: the draw's space for every
+  ## property, and the one target clustering and the resemblance check use,
+  ## so none of them depends on which property is being drawn. A space per
+  ## property on its measured rows (space_rows = "measured") was removed on
+  ## 2026-09-30: on KSSL it moved the drawn training set by about 6 %.
 
   pool_ids <- pool_rc$data$analysis$sample_id
   resp_tbl <- pool_rc$data$analysis[, c("sample_id", properties), drop = FALSE]
-  resp_all <- resp_tbl
 
-  ## Depth restricts the draw, not the space. A subsoil row stays in every
-  ## space, the all-rows one and under space_rows = "measured" its property's
-  ## (Sam's call, 2026-09-30: the library is the population, and whether a row
-  ## is subsoil should not redefine what similar soil means). Under "topsoil"
-  ## its responses are hidden from the draw, which is how space_rows = "all"
-  ## already treats a row without the property: the draw, the twin reference
-  ## and the resemblance check see only eligible rows. resp_all keeps the
-  ## unmasked responses the spaces are fit on. A row with no recorded depth is
-  ## not known to be topsoil and is not eligible.
+  ## Depth restricts the draw, not the space. A subsoil row stays in the
+  ## space (Sam's call, 2026-09-30: the library is the population, and
+  ## whether a row is subsoil should not redefine what similar soil means).
+  ## Under "topsoil" its responses are hidden from the draw, which is how the
+  ## draw already treats a row without the property: the draw, the twin
+  ## reference and the resemblance check see only eligible rows. A row with
+  ## no recorded depth is not known to be topsoil and is not eligible.
   ## A library that records no depth at all has nothing to restrict on, and
   ## the record says so rather than the default refusing a user's own pool.
 
@@ -509,25 +490,17 @@ select_training <- function(x, library,
   }
 
   ## A property no pool row has measured has no rows to draw from and no
-  ## rows to check twins against, under any scope; under space_rows =
-  ## "measured" a property needs two, because a space fit on one row fails.
-  ## Stop here, before the space build fails with a base-R message naming
-  ## none of that.
+  ## rows to check twins against, under any scope. Stop here, before the
+  ## draw fails with a message naming none of that.
 
   n_measured <- vapply(properties, function(p) sum(!is.na(resp_tbl[[p]])), integer(1))
-  n_all      <- vapply(properties, function(p) sum(!is.na(resp_all[[p]])), integer(1))
-  n_min      <- if (space_rows == "measured") 2L else 1L
 
-  unmeasured <- properties[n_measured < 1L | n_all < n_min]
+  unmeasured <- properties[n_measured < 1L]
 
   if (length(unmeasured)) {
 
     cli::cli_abort(c(
-      if (n_min == 1L) {
-        "{.arg library} has no measured rows for {.field {unmeasured}}"
-      } else {
-        "{.arg library} has fewer than 2 measured rows for {.field {unmeasured}}, and {.code space_rows = \"measured\"} fits a space on each property's measured rows"
-      },
+      "{.arg library} has no measured rows for {.field {unmeasured}}",
       "i" = "Drop {cli::qty(unmeasured)}{?it/them} from {.arg properties}, or add the lab values to the library first",
       if (depth_applied) c("i" = "Only topsoil rows (upper depth < {SELECT_TOPSOIL_MAX_CM} cm) count under {.code depth = \"topsoil\"}; {.code depth = \"all\"} draws from every depth")
     ), class = "horizons_input_error")
@@ -584,22 +557,6 @@ select_training <- function(x, library,
   sp <- build_space_on(seq_along(pool_ids))
   St <- project_similarity(sp, tm$matrix, tm$wavenumbers)
 
-  spaces_by_property <- NULL
-
-  if (space_rows == "measured") {
-
-    spaces_by_property <- lapply(properties, function(p) {
-
-      rows <- which(!is.na(resp_all[[p]]))
-      s    <- build_space_on(rows)
-
-      list(space = s, St = project_similarity(s, tm$matrix, tm$wavenumbers), n_rows = length(rows))
-
-    })
-
-    names(spaces_by_property) <- properties
-
-  }
 
   ## The width the filter actually spans once rounded to whole points.
 
@@ -653,18 +610,6 @@ select_training <- function(x, library,
 
     cat(paste0("\u2502  \u251C\u2500 Depth: ", depth_line, "\n"))
 
-    if (!is.null(spaces_by_property)) {
-
-      for (p in properties) {
-
-        cat(paste0("\u2502  \u251C\u2500 Space for ", p, ": ", spaces_by_property[[p]]$space$ncomp,
-                   " components on its ", spaces_by_property[[p]]$n_rows, " measured rows",
-                   if (depth_applied) " (every depth)" else "", "\n"))
-
-      }
-
-    }
-
     if (!is.null(space_note)) {
 
       cat(paste0("\u2502  \u251C\u2500 ", space_note, "\n"))
@@ -681,7 +626,7 @@ select_training <- function(x, library,
   ## control arm of the batch-versus-global comparison, and a control arm
   ## whose leakage was never measured biases that comparison in a fixed
   ## direction. So global runs the same draw as batch, in the same space
-  ## under either space_rows, for its record and not its rows: the
+  ## for its record and not its rows: the
   ## exclusions and target_distances are kept, row for row the ones batch
   ## records, and the membership and short draws are discarded below. The
   ## flagged rows stay in the return, because global returns the whole pool
@@ -710,38 +655,10 @@ select_training <- function(x, library,
     NULL
   }
 
-  if (is.null(spaces_by_property)) {
-
-    draw <- draw_neighbours(St, sp$scores, responses = resp_tbl, k = k_draw,
-                            properties = properties, metric = metric, sdev = sp$sdev,
-                            chunk_size = chunk_size, twin_ratio = twin_ratio,
-                            space_label = "all", short_hint = short_hint)
-
-  } else {
-
-    ## One draw per property, each in its own space, bound together. The
-    ## space column is what marks the distances as within-property only.
-
-    per_property <- lapply(properties, function(p) {
-
-      s <- spaces_by_property[[p]]
-
-      draw_neighbours(s$St, s$space$scores, responses = resp_tbl, k = k_draw[p],
-                      properties = p, metric = metric, sdev = s$space$sdev,
-                      chunk_size = chunk_size, twin_ratio = twin_ratio,
-                      space_label = p, short_hint = short_hint)
-
-    })
-
-    draw <- list(
-      membership       = dplyr::bind_rows(lapply(per_property, `[[`, "membership")),
-      target_distances = dplyr::bind_rows(lapply(per_property, `[[`, "target_distances")),
-      exclusions       = dplyr::bind_rows(lapply(per_property, `[[`, "exclusions")),
-      short_draws      = dplyr::bind_rows(lapply(per_property, `[[`, "short_draws")),
-      k                = k_by
-    )
-
-  }
+  draw <- draw_neighbours(St, sp$scores, responses = resp_tbl, k = k_draw,
+                          properties = properties, metric = metric, sdev = sp$sdev,
+                          chunk_size = chunk_size, twin_ratio = twin_ratio,
+                          space_label = "all", short_hint = short_hint)
 
   if (scope == "global") {
 
@@ -870,16 +787,6 @@ select_training <- function(x, library,
 
   out <- subset_rows(pool_rc, union_ids, record = FALSE)
 
-  ## Under space_rows = "measured" with more than one property, every
-  ## property's distances come from its own PCA or PLS space, with its own
-  ## rotation, component count and sdev. A minimum taken across them is a
-  ## number with no defined scale, and the "nearest drawing target" it would
-  ## name could be decided by which property happened to get the tighter
-  ## space. Both columns are written NA in that case; the per-property
-  ## distances are in selection$membership, marked by their space column.
-
-  mixed_spaces <- !is.null(spaces_by_property) && length(properties) > 1L
-
   if (scope == "global") {
 
     drawn_by <- rep(NA_integer_, length(union_ids))
@@ -890,11 +797,7 @@ select_training <- function(x, library,
     by_row   <- split(membership, membership$pool_id)
     drawn_by <- vapply(by_row[union_ids], function(d) length(unique(d$target_id)), integer(1))
 
-    min_dist <- if (mixed_spaces) {
-      rep(NA_real_, length(union_ids))
-    } else {
-      vapply(by_row[union_ids], function(d) min(d$distance), numeric(1))
-    }
+    min_dist <- vapply(by_row[union_ids], function(d) min(d$distance), numeric(1))
 
   }
 
@@ -906,10 +809,6 @@ select_training <- function(x, library,
 
       ## batch and global are one group, so no distance comparison is made.
       rep(1L, length(union_ids))
-
-    } else if (mixed_spaces) {
-
-      rep(NA_integer_, length(union_ids))
 
     } else {
 
@@ -963,11 +862,7 @@ select_training <- function(x, library,
       space = space, ncomp = ncomp, sdev_floor = sdev_floor,
       ncomp_retained = sp$ncomp, ncomp_variance = sp$ncomp_variance,
       sdev_ratio = sp$sdev_ratio, variance_retained = sp$variance_retained,
-      space_rows = space_rows, depth = depth,
-      ncomp_by_property = if (is.null(spaces_by_property)) NULL else
-        vapply(spaces_by_property, function(s) s$space$ncomp, integer(1)),
-      space_n_rows = if (is.null(spaces_by_property)) NULL else
-        vapply(spaces_by_property, function(s) s$n_rows, integer(1)),
+      depth = depth,
       metric = metric, clusters = clusters,
       cluster_min = as.integer(cluster_min), twin_ratio = twin_ratio, seed = as.integer(seed),
       space_note = space_note
