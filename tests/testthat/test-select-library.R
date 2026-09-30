@@ -175,7 +175,7 @@ test_that("first use builds and caches; later uses read the cache", {
   res <- suppressMessages(resolve_source("mini", verbose = FALSE))
 
   expect_true(file.exists(file.path(cache, "mini_v0.qs2")))
-  expect_false(dir.exists(file.path(cache, ".raw-mini-v0")))
+  expect_identical(list.files(cache, all.files = TRUE, no.. = TRUE), "mini_v0.qs2")
   expect_identical(res$record$form, "registered")
   expect_identical(res$record$name, "mini")
   expect_identical(res$record$license, "CC-BY-4.0")
@@ -363,10 +363,12 @@ test_that("the chunked MIR read returns the chosen rows whatever the chunk size"
 
 test_that("the default window is 11 points at 4 cm-1 and 21 at 2 cm-1", {
 
-  half <- function(res) 2L * as.integer(floor(SELECT_SG_WINDOW_CM / (2 * res) + 0.5)) + 1L
+  expect_identical(window_to_points(SELECT_SG_WINDOW_CM, 4), 11L)
+  expect_identical(window_to_points(SELECT_SG_WINDOW_CM, 2), 21L)
 
-  expect_identical(half(4), 11L)
-  expect_identical(half(2), 21L)
+  ## Nearest odd count, ties up: 40 at 8 cm-1 is 2.5 half-widths, so 7
+  expect_identical(window_to_points(40, 8), 7L)
+  expect_identical(window_to_points(80, 8), 11L)
 
 })
 
@@ -379,5 +381,93 @@ test_that("a window too narrow for the polynomial stops in cm-1 terms", {
   expect_error(suppressMessages(capture.output(
     select_training(fx$targets, fx$pool, k = 20L, window = -1, verbose = FALSE))),
     class = "horizons_input_error", regexp = "positive width")
+
+})
+
+
+## ---------------------------------------------------------------------------
+## Review fixes (2026-09-30)
+## ---------------------------------------------------------------------------
+
+test_that("a bad argument is reported before a registered library is fetched", {
+
+  entry <- make_mini_ossl(withr::local_tempdir())
+  cache <- local_mini_registry(entry)
+  withr::local_options(horizons.library_download = TRUE)
+
+  expect_error(suppressMessages(capture.output(
+    select_training("not data", "mini", depth = "subsoil", verbose = FALSE))),
+    class = "horizons_input_error", regexp = "depth")
+  expect_length(list.files(cache, all.files = TRUE, no.. = TRUE), 0L)
+
+})
+
+test_that("a horizons_library in memory passes through with its record", {
+
+  entry <- make_mini_ossl(withr::local_tempdir())
+  cache <- local_mini_registry(entry)
+  withr::local_options(horizons.library_download = TRUE)
+  suppressMessages(resolve_source("mini", verbose = FALSE))
+
+  lib <- qs2::qs_read(file.path(cache, "mini_v0.qs2"))
+  res <- resolve_source(lib)
+
+  expect_identical(res$record$name, "mini")
+  expect_equal(res$pool$data$analysis, lib$pool$data$analysis)
+
+})
+
+#' The select fixture with one spectral family entirely subsoil
+#' @noRd
+with_family_depth <- function(fx, deep_family) {
+
+  fam   <- fx$pool$data$analysis$family
+  upper <- ifelse(fam == deep_family, 60, 0)
+
+  fx$pool$data$analysis$upper_depth_cm <- upper
+  fx$pool$data$role_map <- rbind(fx$pool$data$role_map,
+                                 tibble::tibble(variable = "upper_depth_cm", role = "meta"))
+  fx
+
+}
+
+test_that("resemblance is measured against the rows the draw can reach", {
+
+  fx   <- make_select_fixture()
+  deep <- fx$family_of_target[[1]]
+  fx   <- with_family_depth(fx, deep)
+  from_deep <- names(fx$family_of_target)[fx$family_of_target == deep]
+
+  top <- suppressWarnings(select_training(fx$targets, fx$pool, k = 20L, verbose = FALSE))
+  all <- suppressWarnings(select_training(fx$targets, fx$pool, k = 20L, depth = "all", verbose = FALSE))
+
+  ## The deep-family targets resemble rows topsoil cannot draw. Measured
+  ## against the whole library none of them was named; against the drawable
+  ## rows they are (all but a target that happens to sit near the other
+  ## family, on this fixture).
+  flagged <- intersect(top$selection$resemblance$beyond$target_id, from_deep)
+  expect_gte(length(flagged), length(from_deep) - 1L)
+  expect_true(all(top$selection$resemblance$beyond$target_id %in% from_deep))
+  expect_length(intersect(all$selection$resemblance$beyond$target_id, from_deep), 0L)
+
+})
+
+test_that("under space_rows = 'measured' depth leaves each property's space whole", {
+
+  fx  <- with_depth(make_select_fixture())
+  out <- select_training(fx$targets, fx$pool, k = 20L, space_rows = "measured", verbose = FALSE)
+
+  a <- fx$pool$data$analysis
+  expect_identical(out$selection$settings$space_n_rows[["clay"]], sum(!is.na(a$clay)))
+  expect_identical(out$selection$settings$space_n_rows[["oc"]],   sum(!is.na(a$oc)))
+
+})
+
+test_that("a k beyond the topsoil rows says depth = 'all' would reach more", {
+
+  fx <- with_depth(make_select_fixture())
+
+  expect_error(select_training(fx$targets, fx$pool, k = 250L, properties = "clay", verbose = FALSE),
+               class = "horizons_input_error", regexp = "depth = \"all\"")
 
 })

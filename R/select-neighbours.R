@@ -474,6 +474,9 @@ resolve_k <- function(k, properties) {
 #'   two spaces are not comparable, and this is what says so.
 #'   Default: `"all"`.
 #'
+#' @param short_hint [Character or NULL.] A further hint for the error when
+#'   a property has fewer measured rows than `k`: the caller knows why rows
+#'   are missing (a depth restriction) and this function does not.
 #' @return [List.] `membership` (tibble: `target_id`, `property`, `space`,
 #'   `pool_id`, `distance`, `rank`), `target_distances` (tibble:
 #'   `target_id`, `property`, `space`, `nearest`, `mean_k`, after twin
@@ -490,7 +493,8 @@ draw_neighbours <- function(St, Sp, responses, k, properties,
                             chunk_size  = 500L,
                             twin_ratio  = SELECT_TWIN_RATIO,
                             twin_ref    = SELECT_TWIN_REF,
-                            space_label = "all") {
+                            space_label = "all",
+                            short_hint  = NULL) {
 
   k_by <- resolve_k(k, properties)
 
@@ -509,7 +513,8 @@ draw_neighbours <- function(St, Sp, responses, k, properties,
 
       cli::cli_abort(c(
         "Property {.field {p}} has {length(measured)} measured pool rows, fewer than k = {kp}",
-        "i" = "Lower {.arg k} for this property or bring more referenced rows into the pool"
+        "i" = "Lower {.arg k} for this property or bring more referenced rows into the pool",
+        if (!is.null(short_hint)) c("i" = short_hint)
       ), class = "horizons_input_error")
 
     }

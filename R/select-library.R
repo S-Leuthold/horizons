@@ -29,7 +29,7 @@
 #' @return `list.` Named by library name. Each entry has `name`, `version`,
 #'   `title`, `sources` (a data.frame of `table`, `file`, `url`, `bytes`,
 #'   `md5`), `filters`, `properties` (short name, source column, unit),
-#'   `topsoil_max_cm`, `license`, `short_cite`, `citation`, `credit`, and
+#'   `license`, `short_cite`, `citation`, `credit`, and
 #'   `recipe`, the
 #'   function that builds the library from the verified source files.
 #' @noRd
@@ -98,8 +98,6 @@ library_registry <- function() {
         stringsAsFactors = FALSE
       ),
 
-      topsoil_max_cm = 30,
-
       license    = "CC-BY-4.0",
       short_cite = "Safanelli et al. 2025",
       citation   = paste0(
@@ -138,7 +136,7 @@ library_registry <- function() {
 #'
 #' @description
 #' Dispatches on the form of `library`. A `horizons_data` is the user's own
-#' pool and passes through. A character string that names a registered
+#' pool and passes through, as does a `horizons_library` already in memory. A character string that names a registered
 #' library resolves through the registry to the local cache, building the
 #' library on first use. Any other string is a path to a saved library file.
 #'
@@ -169,6 +167,21 @@ resolve_source.default <- function(library, ask = interactive(), verbose = TRUE)
       "i" = "Registered: {.val {names(library_registry())}}."),
     class = "horizons_input_error"
   )
+
+}
+
+
+#' @exportS3Method
+#' @noRd
+resolve_source.horizons_library <- function(library, ask = interactive(), verbose = TRUE) {
+
+  if (!inherits(library$pool, "horizons_data")) {
+
+    cli::cli_abort("A {.cls horizons_library} must hold a horizons_data pool", class = "horizons_input_error")
+
+  }
+
+  list(pool = library$pool, record = library$record)
 
 }
 
@@ -265,8 +278,8 @@ read_library_file <- function(path) {
 
     cli::cli_abort(
       c("Could not read {.path {path}} as a library file",
-        "x" = conditionMessage(obj),
-        "i" = "A library file is written by qs2. A cached library that fails to read can be deleted; the next draw rebuilds it."),
+        "x" = "{conditionMessage(obj)}",
+        "i" = "A library file is written by qs2. If this is a cached registered library, delete it and the next draw rebuilds it."),
       class = "horizons_input_error"
     )
 
@@ -363,7 +376,10 @@ resolve_registered <- function(entry, ask = interactive(), verbose = TRUE) {
 
   dir.create(dirname(path), recursive = TRUE, showWarnings = FALSE)
 
-  raw_dir <- file.path(dirname(path), paste0(".raw-", entry$name, "-", entry$version))
+  ## Per-process names, so two sessions building at once never share or
+  ## delete each other's files.
+
+  raw_dir <- tempfile(paste0(".raw-", entry$name, "-", entry$version, "-"), tmpdir = dirname(path))
   on.exit(unlink(raw_dir, recursive = TRUE), add = TRUE)
 
   raw  <- download_sources(entry, raw_dir, verbose = verbose)
@@ -379,16 +395,29 @@ resolve_registered <- function(entry, ask = interactive(), verbose = TRUE) {
     built_at = format(Sys.time(), "%Y-%m-%dT%H:%M:%S%z")
   )
 
-  lib <- structure(list(pool = pool, record = record,
+  lib <- structure(list(pool    = pool,
+                        record  = record,
                         sources = entry$sources[, c("file", "url", "bytes", "md5")]),
                    class = "horizons_library")
 
   ## Write to a temporary name and rename, so an interrupted write never
-  ## leaves a file the next draw would mistake for a finished library.
+  ## leaves a file the next draw would mistake for a finished library, and a
+  ## failed one never leaves half a gigabyte behind.
 
-  tmp <- paste0(path, ".tmp")
+  tmp <- tempfile(paste0(".", entry$name, "-"), tmpdir = dirname(path), fileext = ".qs2.tmp")
+  on.exit(unlink(tmp), add = TRUE)
   qs2::qs_save(lib, tmp)
-  file.rename(tmp, path)
+
+  if (!file.rename(tmp, path)) {
+
+    cli::cli_abort(
+      c("The {.val {entry$name}} library was built but could not be moved into the cache",
+        "x" = "Rename to {.path {path}} failed.",
+        "i" = "Check that the cache directory is writable, or set {.code options(horizons.cache_dir = )}."),
+      class = "horizons_build_error"
+    )
+
+  }
 
   if (verbose) {
 
@@ -482,7 +511,7 @@ download_sources <- function(entry, dir, verbose = TRUE) {
 
       cli::cli_abort(
         c("Could not download {.file {src$file[i]}}",
-          "x" = why,
+          "x" = "{why}",
           "i" = "Source: {.url {src$url[i]}}"),
         class = "horizons_download_error"
       )

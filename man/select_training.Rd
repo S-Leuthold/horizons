@@ -2,7 +2,7 @@
 % Please edit documentation in R/pipeline-select-training.R
 \name{select_training}
 \alias{select_training}
-\title{Pipeline: Select a Training Set From a Pool}
+\title{Pipeline: Select a Training Set From a Library}
 \usage{
 select_training(
   x,
@@ -96,7 +96,10 @@ on measured rows. Default: \code{"all"}.}
 \item{depth}{\code{character.} \code{"topsoil"} draws only from library rows whose
 upper depth is under 30 cm; \code{"all"} draws from every depth. The space is
 fit on every row either way, as under \code{space_rows = "all"}, so depth
-restricts which rows can be drawn and not the axes they are measured on.
+restricts which rows can be drawn and not the axes they are measured on;
+under \code{space_rows = "measured"} each property's space is still fit on
+its measured rows at every depth. The resemblance check measures targets
+against the rows the draw can reach.
 Rows with no recorded depth are not topsoil. Depth is read from an
 \code{upper_depth_cm} column; a library without one has every row eligible,
 and \code{x$selection$depth} records that. Global returns the eligible rows.
@@ -214,10 +217,10 @@ band belongs in \code{mask}, which is applied after the derivative. A pool that
 does not cover the targets' range also stops the verb, except within half
 the pool's spacing, where the overshooting column is taken at the pool's
 endpoint rather than extrapolated and the clamp is recorded and warned
-about. Targets finer than the pool warn. Because the grid is the targets',
-\code{window} is a different physical filter in every batch; the width it works
-out to in cm-1 is recorded in \code{settings$window_cm} and printed in the
-report.
+about. Targets finer than the pool warn. \code{window} is a width in cm-1, so
+the filter is the same physical filter on any batch; the point count it
+becomes on the targets' grid is recorded in \code{settings$window_points}, and
+the width that count actually spans in \code{settings$window_cm}.
 
 \strong{Self-leakage.} A pool row that sits far closer to a target than that
 target's surroundings do — distance zero, or below \code{twin_ratio} times the
