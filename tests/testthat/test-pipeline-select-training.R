@@ -580,33 +580,6 @@ test_that("scope = 'global' records the exclusions batch records, under the same
 })
 
 
-test_that("scope = 'global' records the exclusions batch records under space_rows = 'measured'", {
-
-  ## Global used to skip the per-property spaces and check every property in
-  ## the all-rows space, so under "measured" the two arms measured twins in
-  ## different spaces: 18 exclusions for batch against 16 for global on this
-  ## fixture at twin_ratio = 0.4.
-
-  fx <- make_select_fixture(n_pool = 120, seed = 3, n_replicates = 6)
-
-  for (ratio in c(SELECT_TWIN_RATIO, 0.4)) {
-
-    b <- quiet_select(fx, k = 10, twin_ratio = ratio, space_rows = "measured")$selection
-    g <- quiet_select(fx, k = 10, twin_ratio = ratio, space_rows = "measured",
-                      scope = "global")$selection
-
-    expect_gt(nrow(b$exclusions), 0L)
-    expect_identical(g$exclusions, b$exclusions)
-    expect_identical(g$target_distances, b$target_distances)
-
-    ## The distances say which space they came from, as batch's do
-    expect_setequal(unique(g$target_distances$space), c("clay", "oc"))
-
-  }
-
-})
-
-
 test_that("at k = 1 batch and global record every twin in the measured pool", {
 
   ## The parity tests cannot see a fault inside draw_neighbours() that both
@@ -659,9 +632,14 @@ test_that("a draw the twin subtraction empties stops with the property and the c
   ## other target's twin. The subset used to fail on an empty keep, naming
   ## neither the property nor the twin rule.
 
+  ## The scenario depends on the fixture's exact geometry, so the filter is
+  ## pinned to the one it was built under: 11 points on the targets' 8 cm-1
+  ## grid, 80 cm-1 now that the window is a width.
+
   fx <- make_select_fixture(n_pool = 60, seed = 3, n_replicates = 3)
 
-  err <- expect_error(quiet_select(fx, k = 1, metric = "cosine", twin_ratio = 0.99, properties = "clay"),
+  err <- expect_error(quiet_select(fx, k = 1, metric = "cosine", twin_ratio = 0.99, properties = "clay",
+                                   window = 80),
                       regexp = "Every row drawn for clay was flagged", class = "horizons_input_error")
 
   ## Ordinary neighbours were flagged, so the ratio is the lever
@@ -669,7 +647,7 @@ test_that("a draw the twin subtraction empties stops with the property and the c
 
   ## Global keeps the pool, so there is nothing to empty
   expect_no_error(quiet_select(fx, k = 1, metric = "cosine", twin_ratio = 0.99,
-                               properties = "clay", scope = "global"))
+                               properties = "clay", scope = "global", window = 80))
 
 })
 
@@ -745,44 +723,17 @@ test_that("a target's own copy is recorded as exact, at distance zero to roundin
 
 test_that("a property with no measured pool row stops every scope", {
 
-  ## Global used to skip such a property; batch failed inside the draw, or
-  ## on a zero-row space under space_rows = "measured".
+  ## Global used to skip such a property; batch failed inside the draw.
 
   fx <- make_select_fixture(n_pool = 60)
   fx$pool$data$analysis$oc <- NA_real_
 
   for (scope in c("batch", "global")) {
-    for (rows in c("all", "measured")) {
 
-      ## "no measured rows", or "fewer than 2" where a space is fit per property
-      expect_error(quiet_select(fx, k = 5, scope = scope, space_rows = rows),
-                   regexp = "measured rows for oc", class = "horizons_input_error")
-
-    }
-  }
-
-})
-
-
-test_that("space_rows = 'measured' needs two measured rows per property, under every scope", {
-
-  ## A space fit on one row failed with a base-R message; global used to
-  ## skip the per-property spaces and so succeeded where batch crashed.
-
-  fx <- make_select_fixture(n_pool = 60)
-  a  <- fx$pool$data$analysis
-  a$oc[-which(!is.na(a$oc))[1]] <- NA_real_
-  fx$pool$data$analysis <- a
-
-  for (scope in c("batch", "global")) {
-
-    expect_error(quiet_select(fx, k = 1, scope = scope, space_rows = "measured"),
-                 regexp = "fewer than 2 measured rows for oc", class = "horizons_input_error")
+    expect_error(quiet_select(fx, k = 5, scope = scope),
+                 regexp = "measured rows for oc", class = "horizons_input_error")
 
   }
-
-  ## In the all-rows space one measured row is enough to check against
-  expect_no_error(quiet_select(fx, k = 1, scope = "global", space_rows = "all"))
 
 })
 
@@ -1010,11 +961,13 @@ test_that("the record carries the SG window in cm-1 and the space's floor", {
 
   s <- out$selection$settings
 
-  ## window is in points and the grid is the targets', so the physical width
-  ## is the product. The fixture's targets are on an 8 cm-1 grid.
-  expect_identical(s$window, 11L)
-  expect_equal(s$window_cm, 11 * out$selection$reconciliation$target_grid$resolution)
-  expect_equal(s$window_cm, 88)
+  ## window is a width in cm-1 and becomes the nearest odd point count on
+  ## the targets' grid. The fixture's targets are on an 8 cm-1 grid, where
+  ## 40 cm-1 is 2.5 half-widths, rounded up to 3: 7 points spanning 48.
+  expect_equal(s$window, SELECT_SG_WINDOW_CM)
+  expect_identical(s$window_points, 7L)
+  expect_equal(s$window_cm, (7 - 1) * out$selection$reconciliation$target_grid$resolution)
+  expect_equal(s$window_cm, 48)
 
   ## derivative = 0 means no filter and so no width
   flat <- suppressWarnings(quiet_select(fx, k = 10, derivative = 0L))
@@ -1202,82 +1155,17 @@ test_that("metric and space levers change which rows are drawn", {
 })
 
 
-test_that("space_rows = 'measured' fits a space per property on its measured rows", {
+test_that("the space is always the library's: space_rows is gone", {
 
-  fx  <- make_select_fixture(n_pool = 100)
-  all <- quiet_select(fx, k = 10)
-  mea <- quiet_select(fx, k = 10, space_rows = "measured")
-
-  s <- mea$selection$settings
-  expect_identical(s$space_rows, "measured")
-  expect_named(s$ncomp_by_property, c("clay", "oc"))
-  expect_named(s$space_n_rows,      c("clay", "oc"))
-  expect_identical(unname(s$space_n_rows["clay"]), 100L)
-  expect_identical(unname(s$space_n_rows["oc"]),   sum(!is.na(fx$pool$data$analysis$oc)))
-  expect_null(all$selection$settings$ncomp_by_property)
-
-  ## clay is measured on every row, so its space is the all-rows space and
-  ## the draw agrees; oc's space is fit on half the rows and can differ
-  ids <- function(o, p) { m <- o$selection$membership; m$pool_id[m$property == p] }
-  expect_identical(ids(mea, "clay"), ids(all, "clay"))
-
-  ## Still k per target per property, every oc row measured
-  m <- mea$selection$membership
-  expect_true(all(table(m$target_id, m$property) == 10L))
-  oc <- fx$pool$data$analysis$oc[match(m$pool_id[m$property == "oc"], fx$pool$data$analysis$sample_id)]
-  expect_false(any(is.na(oc)))
-
-})
-
-
-test_that("space_rows = 'measured' marks the space and refuses to pool distances across them", {
-
-  fx  <- make_select_fixture(n_pool = 100)
-  mea <- quiet_select(fx, k = 10, space_rows = "measured")
-
-  ## Each property's distances come from its own PCA, with its own rotation
-  ## and sdev, so the space column is what says they are not comparable.
-  m <- mea$selection$membership
-  expect_setequal(unique(m$space), c("clay", "oc"))
-  expect_true(all(m$space == m$property))
-  expect_true(all(mea$selection$target_distances$space ==
-                  mea$selection$target_distances$property))
-
-  ## A minimum over two incommensurable scales is a number with no meaning,
-  ## so it is not written at all.
-  expect_true(all(is.na(mea$data$analysis$.min_distance)))
-  expect_true(all(mea$data$analysis$.drawn_by >= 1L))
-
-  ## And .group, which picks the nearest drawing target, is NA under cluster
-  ## for the same reason. Under batch every target is group 1, so no
-  ## comparison is made and the value stands.
-  expect_true(all(mea$data$analysis$.group == 1L))
-
-  cl <- quiet_select(fx, k = 10, space_rows = "measured", scope = "cluster", cluster_min = 2)
-  expect_true(all(is.na(cl$data$analysis$.group)))
-
-  ## One property is one space, so the distances stay comparable
-  one <- quiet_select(fx, k = 10, space_rows = "measured", properties = "clay")
-  expect_true(all(one$selection$membership$space == "clay"))
-  expect_false(any(is.na(one$data$analysis$.min_distance)))
-
-})
-
-
-test_that("space_rows = 'measured' reaches scope = 'global' too, and is rejected when invalid", {
-
-  ## Global runs its twin check in the spaces batch would draw in, so the
-  ## per-property spaces are built and recorded; the return is still the
-  ## whole pool.
+  ## A space per property on its measured rows was removed on 2026-09-30:
+  ## on KSSL it moved the drawn training set by about 6 %.
 
   fx  <- make_select_fixture(n_pool = 60)
-  out <- quiet_select(fx, scope = "global", space_rows = "measured")
+  out <- quiet_select(fx, k = 5)
 
-  expect_named(out$selection$settings$ncomp_by_property, c("clay", "oc"))
-  expect_setequal(unique(out$selection$target_distances$space), c("clay", "oc"))
-  expect_identical(out$data$n_rows, 60L)
-
-  expect_error(quiet_select(fx, k = 5, space_rows = "some"), class = "horizons_input_error")
+  expect_null(out$selection$settings$space_rows)
+  expect_true(all(out$selection$membership$space == "all"))
+  expect_error(quiet_select(fx, k = 5, space_rows = "measured"), "unused argument")
 
 })
 

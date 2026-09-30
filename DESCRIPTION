@@ -44,6 +44,7 @@ Imports:
     plsmod,
     prospectr,
     purrr,
+    qs2,
     ranger,
     readr,
     recipes,
@@ -114,6 +115,7 @@ Collate:
     'step-select-correlation.R'
     'pipeline-spectra.R'
     'pipeline-standardize.R'
+    'select-library.R'
     'select-reconcile.R'
     'select-space.R'
     'select-neighbours.R'
