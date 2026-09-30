@@ -367,7 +367,7 @@ verbs:
         touch: Always. "kssl" for the KSSL library from OSSL v1.2, built on your machine the first time after asking (about 436 MB downloaded, a 490 MB cache, 5 GB of memory once) and read from the cache after that; a path to a library file; or your own horizons_data with response columns, as it comes from standardize() and add_response(). The verb refuses a pool that has been validated, evaluated or fitted, or that is itself a prior selection.
         source: R/select-library.R#L200
       - name: k
-        touch: The main lever. 100 is what every recent experiment ran; larger hurts on-library and the evidence off-library is mixed. A named vector sets it per property.
+        touch: The main lever; 100 by default. 400 was worse on every batch from another instrument in the 2026-09-29 read and no better on KSSL. A named vector sets it per property.
         source: R/pipeline-select-training.R#L288
       - name: scope
         touch: Leave "batch" for one model on the union. "cluster" and "sample" return the same union but record groups for a caller's loop; "global" is the no-selection control.
@@ -400,7 +400,7 @@ verbs:
         touch: Rarely. Components below this fraction of PC1's standard deviation leave the distance; 0.10 keeps 13 of 33 components on KSSL and is what makes Mahalanobis stable. 0 disables it.
         source: R/select-space.R#L349
       - name: metric
-        touch: The default is due to change. Mahalanobis wins nowhere; cosine is worth 11 % on-library and Euclidean 7 % off-library, and both weight components by variance where Mahalanobis equalizes them.
+        touch: Leave "euclidean". Mahalanobis won on no batch in the metric experiments; cosine clearly won only on one KSSL batch in the defaults read. Euclidean and cosine weight components by variance where Mahalanobis equalizes them.
         source: R/select-neighbours.R#L69
       - name: depth
         touch: Leave "topsoil" (upper depth under 30 cm), the cut every experiment's pool was built on; "all" draws from every depth. It restricts the draw, not the space, and a library with no upper_depth_cm column draws from every row.
@@ -496,9 +496,7 @@ verbs:
         text: the twin rule handles a target's own row in the pool but not replicate scans of each other inside the pool; a selected training set is enriched in sibling pairs and the ungrouped folds downstream are optimistic
         source: ../dev/specs/v1-refactor/select-training-design.md#open-questions
     design_ahead:
-      - text: the metric default changes from Mahalanobis to cosine on-library and Euclidean off-library, routed by the nearest-library distance
-        source: ../dev/specs/v1-refactor/select-training-design.md#what-changed-on-2026-09-22-the-overnight-run-and-its-follow-up
-      - text: the residual correction after fit(), gated by the same distance, and its home
+      - text: the residual correction after fit() and its home; if it ships it is off by default, since it hurt every off-instrument batch in the 2026-09-29 read and nothing spectral separates those batches
         source: ../dev/specs/v1-refactor/select-training-design.md#what-changed-on-2026-09-22-the-overnight-run-and-its-follow-up
       - text: the reconciliation flip and the cached similarity space, so distances are measured in the library's own space and the PCA is not recomputed per call
         source: ../dev/specs/v1-refactor/select-training-design.md#the-library-as-a-noun-added-2026-09-21

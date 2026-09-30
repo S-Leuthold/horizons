@@ -229,8 +229,8 @@
 
 <script type="application/json" id="hz-data">
 {
-  "generated_at": "2026-09-30T16:06:06-0500",
-  "content_md5": "7b819052efa29a6ee13cdf4aa6c44972",
+  "generated_at": "2026-09-30T16:38:48-0500",
+  "content_md5": "a0af9521b783c3d3ff5326c8d0a7c4c8",
   "horizons": "0.9.0",
   "lanes": [
     {
@@ -936,7 +936,7 @@
       "optional": false,
       "class_in": "targets + library",
       "class_out": "horizons_data",
-      "signature": "select_training (x, library, k = 400L, scope = c(\"batch\", \"cluster\", \"sample\", \"global\"), properties = NULL, snv = TRUE, derivative = 1L, window = SELECT_SG_WINDOW_CM, poly = 2L, mask = NULL, space = c(\"pca\", \"pls\"), ncomp = 0.99, sdev_floor = SELECT_SDEV_FLOOR, metric = c(\"mahalanobis\", \"euclidean\", \"cosine\"), depth = c(\"topsoil\", \"all\"), clusters = NULL, cluster_min = 30L, twin_ratio = SELECT_TWIN_RATIO, chunk_size = 500L, seed = 1L, verbose = TRUE)",
+      "signature": "select_training (x, library, k = 100L, scope = c(\"batch\", \"cluster\", \"sample\", \"global\"), properties = NULL, snv = TRUE, derivative = 1L, window = SELECT_SG_WINDOW_CM, poly = 2L, mask = NULL, space = c(\"pca\", \"pls\"), ncomp = 0.99, sdev_floor = SELECT_SDEV_FLOOR, metric = c(\"euclidean\", \"mahalanobis\", \"cosine\"), depth = c(\"topsoil\", \"all\"), clusters = NULL, cluster_min = 30L, twin_ratio = SELECT_TWIN_RATIO, chunk_size = 500L, seed = 1L, verbose = TRUE)",
       "summary": "The library path's answer to \"what is the model trained on\". Takes the batch of spectra to be predicted and a reference library with measured properties, brings the library onto the batch's wavenumber grid, builds a similarity space on the library, and draws each target's k nearest library rows per property. The union is returned as an ordinary horizons_data, so everything downstream runs unchanged, and the record on the object holds every neighbourhood, every target's distance to the library, and every twin it excluded. The only verb where library and unknowns meet before anything is fitted.",
       "args": [
         {
@@ -955,9 +955,9 @@
         },
         {
           "name": "k",
-          "default": "400L",
-          "text": "`integer.` Neighbours per target per property; a scalar, or a named vector with one entry per property. Default: `400`.",
-          "touch": "The main lever. 100 is what every recent experiment ran; larger hurts on-library and the evidence off-library is mixed. A named vector sets it per property.",
+          "default": "100L",
+          "text": "`integer.` Neighbours per target per property; a scalar, or a named vector with one entry per property. 100 is the 2026-09-29 defaults read: 400 was worse on every batch from another instrument and no better on KSSL. Default: `100`.",
+          "touch": "The main lever; 100 by default. 400 was worse on every batch from another instrument in the 2026-09-29 read and no better on KSSL. A named vector sets it per property.",
           "source": "R/pipeline-select-training.R#L288"
         },
         {
@@ -1032,9 +1032,9 @@
         },
         {
           "name": "metric",
-          "default": "c(\"mahalanobis\", \"euclidean\", \"cosine\")",
-          "text": "`character.` `\"mahalanobis\"`, `\"euclidean\"` or `\"cosine\"`, on the scores. Default: `\"mahalanobis\"`.",
-          "touch": "The default is due to change. Mahalanobis wins nowhere; cosine is worth 11 % on-library and Euclidean 7 % off-library, and both weight components by variance where Mahalanobis equalizes them.",
+          "default": "c(\"euclidean\", \"mahalanobis\", \"cosine\")",
+          "text": "`character.` `\"euclidean\"`, `\"mahalanobis\"` or `\"cosine\"`, on the scores. Euclidean weights components by their variance; Mahalanobis whitens them and won on no batch in the 2026-09 metric experiments; in the 2026-09-29 read cosine clearly won only on one KSSL batch, the Mississippi Delta. Default: `\"euclidean\"`.",
+          "touch": "Leave \"euclidean\". Mahalanobis won on no batch in the metric experiments; cosine clearly won only on one KSSL batch in the defaults read. Euclidean and cosine weight components by variance where Mahalanobis equalizes them.",
           "source": "R/select-neighbours.R#L69"
         },
         {
@@ -1219,11 +1219,7 @@
       "notes": [],
       "design_ahead": [
         {
-          "text": "the metric default changes from Mahalanobis to cosine on-library and Euclidean off-library, routed by the nearest-library distance",
-          "source": "../dev/specs/v1-refactor/select-training-design.md#what-changed-on-2026-09-22-the-overnight-run-and-its-follow-up"
-        },
-        {
-          "text": "the residual correction after fit(), gated by the same distance, and its home",
+          "text": "the residual correction after fit() and its home; if it ships it is off by default, since it hurt every off-instrument batch in the 2026-09-29 read and nothing spectral separates those batches",
           "source": "../dev/specs/v1-refactor/select-training-design.md#what-changed-on-2026-09-22-the-overnight-run-and-its-follow-up"
         },
         {
