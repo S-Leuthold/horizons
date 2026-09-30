@@ -79,6 +79,10 @@ make_selection_record <- function(pool_ids   = sprintf("P%03d", 1:10),
 
     reconciliation   = list(action = "none"),
     pool             = list(n_rows = length(pool_ids), id_hash = "fixture"),
+    library          = list(form = "object", name = NULL, version = NULL, path = NULL,
+                            citation = NULL, license = NULL, built_at = NULL),
+    depth            = list(requested = "topsoil", recorded = FALSE, applied = FALSE,
+                            max_cm = NULL, n_eligible = length(pool_ids)),
     membership       = membership,
     groups           = groups,
 
