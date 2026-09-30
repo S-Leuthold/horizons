@@ -12,7 +12,7 @@ select_training(
   properties = NULL,
   snv = TRUE,
   derivative = 1L,
-  window = 11L,
+  window = SELECT_SG_WINDOW_CM,
   poly = 2L,
   mask = NULL,
   space = c("pca", "pls"),
@@ -55,8 +55,13 @@ pool row, under every scope. Default: \code{NULL}.}
 \item{derivative}{\code{integer.} Savitzky-Golay derivative order in the
 similarity space; \code{0} disables the filter. Default: \code{1}.}
 
-\item{window, poly}{\code{integer.} Savitzky-Golay window and polynomial
-order. Default: \code{11}, \code{2}.}
+\item{window}{\code{numeric.} Savitzky-Golay window width in cm-1, measured
+between the outermost points, so the filter means the same thing on any
+grid: 40 cm-1 is 11 points at 4 cm-1 and 21 at 2 cm-1. It becomes the
+nearest odd number of points on the targets' grid (ties round up), and
+the record carries both. Default: \code{40}.}
+
+\item{poly}{\code{integer.} Savitzky-Golay polynomial order. Default: \code{2}.}
 
 \item{mask}{\verb{matrix or NULL.} Wavenumber ranges to drop from the
 similarity space after the derivative, one row per range, low then

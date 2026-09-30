@@ -355,3 +355,29 @@ test_that("the chunked MIR read returns the chosen rows whatever the chunk size"
   }
 
 })
+
+
+## ---------------------------------------------------------------------------
+## The window in cm-1
+## ---------------------------------------------------------------------------
+
+test_that("the default window is 11 points at 4 cm-1 and 21 at 2 cm-1", {
+
+  half <- function(res) 2L * as.integer(floor(SELECT_SG_WINDOW_CM / (2 * res) + 0.5)) + 1L
+
+  expect_identical(half(4), 11L)
+  expect_identical(half(2), 21L)
+
+})
+
+test_that("a window too narrow for the polynomial stops in cm-1 terms", {
+
+  fx <- make_select_fixture()
+
+  expect_error(select_training(fx$targets, fx$pool, k = 20L, window = 4, verbose = FALSE),
+               class = "horizons_input_error", regexp = "too few for a polynomial")
+  expect_error(suppressMessages(capture.output(
+    select_training(fx$targets, fx$pool, k = 20L, window = -1, verbose = FALSE))),
+    class = "horizons_input_error", regexp = "positive width")
+
+})

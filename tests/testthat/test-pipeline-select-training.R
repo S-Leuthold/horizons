@@ -659,9 +659,14 @@ test_that("a draw the twin subtraction empties stops with the property and the c
   ## other target's twin. The subset used to fail on an empty keep, naming
   ## neither the property nor the twin rule.
 
+  ## The scenario depends on the fixture's exact geometry, so the filter is
+  ## pinned to the one it was built under: 11 points on the targets' 8 cm-1
+  ## grid, 80 cm-1 now that the window is a width.
+
   fx <- make_select_fixture(n_pool = 60, seed = 3, n_replicates = 3)
 
-  err <- expect_error(quiet_select(fx, k = 1, metric = "cosine", twin_ratio = 0.99, properties = "clay"),
+  err <- expect_error(quiet_select(fx, k = 1, metric = "cosine", twin_ratio = 0.99, properties = "clay",
+                                   window = 80),
                       regexp = "Every row drawn for clay was flagged", class = "horizons_input_error")
 
   ## Ordinary neighbours were flagged, so the ratio is the lever
@@ -669,7 +674,7 @@ test_that("a draw the twin subtraction empties stops with the property and the c
 
   ## Global keeps the pool, so there is nothing to empty
   expect_no_error(quiet_select(fx, k = 1, metric = "cosine", twin_ratio = 0.99,
-                               properties = "clay", scope = "global"))
+                               properties = "clay", scope = "global", window = 80))
 
 })
 
@@ -1010,11 +1015,13 @@ test_that("the record carries the SG window in cm-1 and the space's floor", {
 
   s <- out$selection$settings
 
-  ## window is in points and the grid is the targets', so the physical width
-  ## is the product. The fixture's targets are on an 8 cm-1 grid.
-  expect_identical(s$window, 11L)
-  expect_equal(s$window_cm, 11 * out$selection$reconciliation$target_grid$resolution)
-  expect_equal(s$window_cm, 88)
+  ## window is a width in cm-1 and becomes the nearest odd point count on
+  ## the targets' grid. The fixture's targets are on an 8 cm-1 grid, where
+  ## 40 cm-1 is 2.5 half-widths, rounded up to 3: 7 points spanning 48.
+  expect_equal(s$window, SELECT_SG_WINDOW_CM)
+  expect_identical(s$window_points, 7L)
+  expect_equal(s$window_cm, (7 - 1) * out$selection$reconciliation$target_grid$resolution)
+  expect_equal(s$window_cm, 48)
 
   ## derivative = 0 means no filter and so no width
   flat <- suppressWarnings(quiet_select(fx, k = 10, derivative = 0L))

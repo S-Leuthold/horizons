@@ -161,8 +161,12 @@
 #' @param snv `logical.` SNV in the similarity space. Default: `TRUE`.
 #' @param derivative `integer.` Savitzky-Golay derivative order in the
 #'   similarity space; `0` disables the filter. Default: `1`.
-#' @param window,poly `integer.` Savitzky-Golay window and polynomial
-#'   order. Default: `11`, `2`.
+#' @param window `numeric.` Savitzky-Golay window width in cm-1, measured
+#'   between the outermost points, so the filter means the same thing on any
+#'   grid: 40 cm-1 is 11 points at 4 cm-1 and 21 at 2 cm-1. It becomes the
+#'   nearest odd number of points on the targets' grid (ties round up), and
+#'   the record carries both. Default: `40`.
+#' @param poly `integer.` Savitzky-Golay polynomial order. Default: `2`.
 #' @param mask `matrix or NULL.` Wavenumber ranges to drop from the
 #'   similarity space after the derivative, one row per range, low then
 #'   high. Default: `NULL`.
@@ -257,7 +261,7 @@ select_training <- function(x, library,
                             properties  = NULL,
                             snv         = TRUE,
                             derivative  = 1L,
-                            window      = 11L,
+                            window      = SELECT_SG_WINDOW_CM,
                             poly        = 2L,
                             mask        = NULL,
                             space       = c("pca", "pls"),
@@ -334,6 +338,14 @@ select_training <- function(x, library,
   if (!floor_ok) {
 
     errors <- c(errors, cli::format_inline("{.arg sdev_floor} must be a single number in [0, 1); 0 disables the floor"))
+
+  }
+
+  window_ok <- is.numeric(window) && length(window) == 1L && is.finite(window) && window > 0
+
+  if (!window_ok) {
+
+    errors <- c(errors, cli::format_inline("{.arg window} must be a single positive width in cm\u207B\u00B9"))
 
   }
 
@@ -542,12 +554,33 @@ select_training <- function(x, library,
 
   }
 
+  ## The window is a width in cm-1; the filter counts points on the grid the
+  ## space is built on, which is the targets'. Nearest odd count, ties up.
+
+  window_points <- if (derivative > 0) {
+    2L * as.integer(floor(window / (2 * rc$record$target_grid$resolution) + 0.5)) + 1L
+  } else {
+    NA_integer_
+  }
+
+  if (derivative > 0 && window_points <= poly) {
+
+    cli::cli_abort(c(
+      "A {.arg window} of {window} cm\u207B\u00B9 is {window_points} point{?s} on the targets' {rc$record$target_grid$resolution} cm\u207B\u00B9 grid, too few for a polynomial of order {poly}",
+      "i" = "Widen {.arg window} or lower {.arg poly}."
+    ), class = "horizons_input_error")
+
+  }
+
   build_space_on <- function(rows) {
 
     y <- if (space == "pls") pool_rc$data$analysis[[properties]][rows] else NULL
 
     build_similarity_space(rc$matrix[rows, , drop = FALSE], rc$wavenumbers,
-                           snv = snv, derivative = derivative, window = window,
+                           snv = snv, derivative = derivative,
+                           ## With no derivative the filter never runs and its
+                           ## window is unread; any valid value will do.
+                           window = if (derivative > 0) window_points else 11L,
                            poly = poly, mask = mask, space = space, ncomp = ncomp,
                            sdev_floor = sdev_floor, y = y)
 
@@ -573,11 +606,10 @@ select_training <- function(x, library,
 
   }
 
-  ## The SG window is in points and the grid is the targets', so the filter's
-  ## physical width follows a choice made two verbs earlier. Record it.
+  ## The width the filter actually spans once rounded to whole points.
 
   window_cm <- if (derivative > 0) {
-    as.integer(window) * rc$record$target_grid$resolution
+    (window_points - 1L) * rc$record$target_grid$resolution
   } else {
     NA_real_
   }
@@ -597,7 +629,7 @@ select_training <- function(x, library,
   if (verbose) {
 
     sg <- if (derivative > 0) {
-      paste0("SG d", derivative, " w", window, " (", signif(window_cm, 3), " cm\u207B\u00B9) p", poly)
+      paste0("SG d", derivative, " w", window_points, " (", signif(window_cm, 3), " cm\u207B\u00B9) p", poly)
     } else {
       NULL
     }
@@ -923,7 +955,7 @@ select_training <- function(x, library,
   out$selection <- list(
     settings = list(
       k = k_by, scope = scope, properties = properties,
-      snv = snv, derivative = as.integer(derivative), window = as.integer(window),
+      snv = snv, derivative = as.integer(derivative), window = window, window_points = window_points,
       poly = as.integer(poly), window_cm = window_cm, mask = mask,
       space = space, ncomp = ncomp, sdev_floor = sdev_floor,
       ncomp_retained = sp$ncomp, ncomp_variance = sp$ncomp_variance,
