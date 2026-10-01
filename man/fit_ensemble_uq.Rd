@@ -34,9 +34,11 @@ folds), per-fold refits of the finalized combiner with the fold models
 retained, and the signed residuals CQR-style. Consumed by
 \code{\link[=predict.horizons_ensemble]{predict.horizons_ensemble()}} when \code{interval = TRUE}.
 
-Runs inside \code{\link[=ensemble]{ensemble()}} when \code{compute_uq = TRUE}. It is internal: to add
-UQ to an ensemble built with \code{compute_uq = FALSE}, re-run \code{\link[=ensemble]{ensemble()}}.
-The interval level is chosen at prediction time.
+Runs inside \code{\link[=ensemble]{ensemble()}} when \code{compute_uq = TRUE}, at \code{level}
+(\code{DEFAULT_UQ_LEVEL}, 0.90). It is internal: to add UQ to an ensemble built
+with \code{compute_uq = FALSE}, re-run \code{\link[=ensemble]{ensemble()}}. The level is fixed here, as
+\code{uq$level_default}; \code{\link[=predict.horizons_ensemble]{predict.horizons_ensemble()}} returns intervals at that
+level and takes no level of its own.
 
 Degrades gracefully: when calibration is impossible (fewer than
 \code{N_CALIB_MIN} rows, invalid order-statistic indices, or a fold refit

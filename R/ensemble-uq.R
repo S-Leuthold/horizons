@@ -507,9 +507,11 @@ compute_ensemble_uq <- function(oof,
 #' retained, and the signed residuals CQR-style. Consumed by
 #' [predict.horizons_ensemble()] when `interval = TRUE`.
 #'
-#' Runs inside [ensemble()] when `compute_uq = TRUE`. It is internal: to add
-#' UQ to an ensemble built with `compute_uq = FALSE`, re-run [ensemble()].
-#' The interval level is chosen at prediction time.
+#' Runs inside [ensemble()] when `compute_uq = TRUE`, at `level`
+#' (`DEFAULT_UQ_LEVEL`, 0.90). It is internal: to add UQ to an ensemble built
+#' with `compute_uq = FALSE`, re-run [ensemble()]. The level is fixed here, as
+#' `uq$level_default`; [predict.horizons_ensemble()] returns intervals at that
+#' level and takes no level of its own.
 #'
 #' Degrades gracefully: when calibration is impossible (fewer than
 #' `N_CALIB_MIN` rows, invalid order-statistic indices, or a fold refit
