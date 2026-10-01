@@ -1,3 +1,7 @@
+# horizons (development version)
+
+* `select_training()` validates the targets and the library before drawing. Targets need one row per sample with finite spectra, so replicate scans are averaged first. A library that has been through `configure()` or `validate()` is refused, and the selection record now identifies the targets in `x$selection$targets`: their source, row count and an id hash (#133).
+
 # horizons 0.10.0
 
 First tagged release. It brings `main` up to date with the development branch, where horizons was rebuilt around an S3 approach: a single `horizons_data` object that each verb in the pipeline takes and returns, carrying the spectra, configuration, results and a record of how each step was run, from raw spectra to predictions. It is still pre-1.0, so the API may change between minor versions.

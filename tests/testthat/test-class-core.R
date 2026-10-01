@@ -2507,6 +2507,7 @@ test_that("print.horizons_data shows the selection section", {
   ## Assert
   expect_true(any(grepl("Selection", output)))
   expect_true(any(grepl("Scope: batch", output)))
+  expect_true(any(grepl("Targets: 4 rows", output)))
   expect_true(any(grepl("clay 12/12", output)))
   expect_true(any(grepl("twins excluded: 0", output)))
 
@@ -2536,6 +2537,7 @@ test_that("summary.horizons_data mirrors the selection block", {
 
   expect_true(any(grepl("Selection", output)))
   expect_true(any(grepl("Properties: clay, oc", output)))
+  expect_true(any(grepl("Targets: 4 rows \\(source: tibble\\)", output)))
   expect_true(any(grepl("Drawn per property: clay 12/12", output)))
   expect_true(any(grepl("Twins excluded: 0", output)))
 

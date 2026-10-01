@@ -128,6 +128,98 @@ test_that("select_training() refuses a pool that carries state from later verbs"
 })
 
 
+test_that("select_training() refuses a configured pool and says to use it before configure()", {
+
+  fx <- make_select_fixture(n_pool = 60)
+
+  ## The training set is a subset of the pool, so a configuration or an
+  ## outcome chosen for the library would ride into it.
+  utils::capture.output(configured <- configure(fx$pool, outcome = "clay", models = "plsr"))
+
+  expect_error(select_training(fx$targets, configured, k = 5, verbose = FALSE),
+               regexp = "config\\$configs", class = "horizons_input_error")
+  expect_error(select_training(fx$targets, configured, k = 5, verbose = FALSE),
+               regexp = "before `configure\\(\\)` and `validate\\(\\)`")
+
+  ## An outcome role alone, without a configuration
+  role_map <- fx$pool$data$role_map
+  role_map$role[role_map$variable == "clay"] <- "outcome"
+  outcome_only <- set_analysis(fx$pool, fx$pool$data$analysis, role_map)
+
+  expect_error(select_training(fx$targets, outcome_only, k = 5, verbose = FALSE),
+               regexp = "outcome role \\(clay\\)", class = "horizons_input_error")
+
+})
+
+
+test_that("select_training() refuses a pool whose validation failed or that carries a removal record", {
+
+  fx <- make_select_fixture(n_pool = 60)
+
+  failed <- fx$pool
+  failed$validation$passed <- FALSE
+
+  expect_error(select_training(fx$targets, failed, k = 5, verbose = FALSE),
+               regexp = "validation\\$passed", class = "horizons_input_error")
+
+  removed <- fx$pool
+  removed$validation$outliers$removed_ids <- "P999"
+  removed$validation$outliers$removed     <- TRUE
+
+  expect_error(select_training(fx$targets, removed, k = 5, verbose = FALSE),
+               regexp = "removal record", class = "horizons_input_error")
+
+})
+
+
+test_that("select_training() refuses targets that fail the base contract", {
+
+  fx <- make_select_fixture(n_pool = 60)
+
+  ## Replicate scans sharing an id: the record names targets by sample_id,
+  ## so they would be merged there.
+  replicates <- fx$targets
+  replicates$data$analysis$sample_id[2] <- replicates$data$analysis$sample_id[1]
+
+  utils::capture.output(
+    expect_error(select_training(replicates, fx$pool, k = 5, verbose = FALSE),
+                 regexp = "`x`, the targets.*Duplicate", class = "horizons_validation_error")
+  )
+
+  ## A non-finite spectrum, which the similarity space cannot take
+  non_finite <- fx$targets
+  non_finite$data$analysis$wn_4000[1] <- NA_real_
+
+  utils::capture.output(
+    expect_error(select_training(non_finite, fx$pool, k = 5, verbose = FALSE),
+                 regexp = "NA values in predictor", class = "horizons_validation_error")
+  )
+
+  ## Checked before the library resolves, so a registered library is not
+  ## fetched for targets the verb would refuse.
+  utils::capture.output(
+    expect_error(select_training(replicates, "kssl", k = 5, verbose = FALSE),
+                 regexp = "the targets", class = "horizons_validation_error")
+  )
+
+})
+
+
+test_that("select_training() refuses a pool that fails the base contract", {
+
+  fx <- make_select_fixture(n_pool = 60)
+
+  broken <- fx$pool
+  broken$data$analysis$wn_4000[3] <- Inf
+
+  utils::capture.output(
+    expect_error(select_training(fx$targets, broken, k = 5, verbose = FALSE),
+                 regexp = "`library`, the pool.*Infinite", class = "horizons_validation_error")
+  )
+
+})
+
+
 test_that("select_training() refuses a pool that is itself a selection", {
 
   fx    <- make_select_fixture(n_pool = 60)
@@ -805,6 +897,37 @@ test_that("the record carries settings, reconciliation, pool identity and distan
   expect_identical(nrow(s$target_distances), 16L)
   expect_true(all(s$target_distances$space == "all"))
   expect_s3_class(s$timestamp, "POSIXct")
+
+})
+
+
+test_that("the record carries the targets' source, size and id hash", {
+
+  fx <- make_select_fixture(n_pool = 60)
+  fx$targets$provenance$spectra_source <- "batch_07.csv"
+
+  out <- quiet_select(fx, k = 5)
+
+  ## Hashed the way selection$pool$id_hash is: sorted ids, so row order
+  ## does not change it.
+  ids <- fx$targets$data$analysis$sample_id
+  rec <- out$selection$targets
+
+  expect_named(rec, c("source", "n_rows", "id_hash"))
+  expect_identical(rec$source,  "batch_07.csv")
+  expect_identical(rec$n_rows,  8L)
+  expect_identical(rec$id_hash, digest::digest(sort(ids)))
+
+  reordered <- select_training(subset_rows(fx$targets, rev(ids)), fx$pool, k = 5, verbose = FALSE)
+
+  expect_identical(reordered$selection$targets$id_hash, rec$id_hash)
+
+  ## It describes the draw, so rows leaving afterwards leave it alone; the
+  ## object's provenance stays the library's.
+  kept <- subset_rows(out, out$data$analysis$sample_id[-1])
+
+  expect_identical(kept$selection$targets, rec)
+  expect_identical(out$provenance$spectra_source, "tibble")
 
 })
 

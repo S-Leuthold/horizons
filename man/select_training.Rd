@@ -29,14 +29,19 @@ select_training(
 )
 }
 \arguments{
-\item{x}{\code{horizons_data.} The targets: the samples to be predicted.}
+\item{x}{\code{horizons_data.} The targets: the samples to be predicted. One
+row per sample, with finite spectra: the record names each target by its
+\code{sample_id}, so replicate scans that share one are refused and should be
+averaged first with \code{\link[=average]{average()}}.}
 
 \item{library}{\code{horizons_data} or \code{character}. The reference library:
 a \code{horizons_data} with one or more response columns (your own pool,
 \code{spectra() |> standardize() |> add_response()}), the name of a
-registered library (\code{"kssl"}), or a path to a library file. A registered
-library is built on your machine from its public sources the first time
-it is used, after asking, and cached under
+registered library (\code{"kssl"}), or a path to a library file. A pool that
+has been through \code{\link[=configure]{configure()}} or \code{\link[=validate]{validate()}} is refused, since the
+training set would inherit that state; pass it as it was before. A
+registered library is built on your machine from its public sources the
+first time it is used, after asking, and cached under
 \code{tools::R_user_dir("horizons", "cache")}; see "Registered libraries".}
 
 \item{k}{\code{integer.} Neighbours per target per property; a scalar, or a
@@ -292,7 +297,8 @@ interactive session, and a non-interactive one needs
 \code{x$selection$library} records which library was drawn from.
 
 \strong{What the record holds} (\code{x$selection}): the settings as resolved, the
-reconciliation, the pool's identity, the membership table (target by
+reconciliation, the pool's identity, the targets' identity (their source,
+row count and a hash of their ids), the membership table (target by
 property by pool row, with the space it was measured in, distance, rank,
 and whether the row was \code{retained} in the object after the twin
 subtraction), the groups, pool sizes per property against those available, every
