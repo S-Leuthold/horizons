@@ -229,10 +229,11 @@ test_that("validate_horizons_data errors when analysis exists but role_map missi
 
   obj <- new_horizons_data(analysis = test_analysis)
 
-  ## Act & Assert
+  ## Act & Assert. The gate carries the class the other failures do (#129).
   expect_error(
     validate_horizons_data(obj),
-    "role_map"
+    "role_map",
+    class = "horizons_validation_error"
   )
 
 })
@@ -250,7 +251,8 @@ test_that("validate_horizons_data errors when role_map exists but analysis missi
   ## Act & Assert
   expect_error(
     validate_horizons_data(obj),
-    "analysis"
+    "analysis",
+    class = "horizons_validation_error"
   )
 
 })
@@ -755,6 +757,36 @@ test_that("validate_horizons_data errors when multiple id roles", {
     validate_horizons_data(obj),
     "(?i)multiple.*id|one.*id|exactly.*id"
   )
+
+})
+
+test_that("validate_horizons_data refuses an id role on a column other than sample_id (#129)", {
+
+  ## Arrange — sample_id is present and unique, so the by-name checks pass,
+  ## but the role the recipe, fit() and predict() read points at lab_code.
+  test_analysis <- tibble::tibble(
+    sample_id = c("A", "B"),
+    lab_code  = c("X", "Y"),
+    `4000`    = c(0.1, 0.2)
+  )
+
+  test_role_map <- tibble::tibble(
+    variable = c("sample_id", "lab_code", "4000"),
+    role     = c("meta", "id", "predictor")
+  )
+
+  obj <- new_horizons_data(analysis = test_analysis, role_map = test_role_map)
+
+  ## Act
+  err <- tryCatch(validate_horizons_data(obj), error = function(e) e)
+
+  ## Assert — at both stages, naming the column
+  expect_s3_class(err, "horizons_validation_error")
+  expect_match(conditionMessage(err), "on lab_code; it must be on sample_id", fixed = TRUE)
+
+  expect_error(validate_horizons_data(obj, stage = "raw"),
+               "must be on sample_id",
+               class = "horizons_validation_error")
 
 })
 
@@ -1572,11 +1604,116 @@ test_that("summary.horizons_data shows pipeline status", {
 
 
 ## ----------------------------------------------------------------------------
+## Promoted-class fixtures
+## ----------------------------------------------------------------------------
+## Each class validator runs its parent's first (ensemble -> fit -> eval ->
+## data), so each fixture is built on the one above it. None carries a data
+## slot: an empty one passes the base validator, which the chain tests below
+## exercise with a populated table instead.
+
+## A minimal valid horizons_eval, built inline (the test-class-core idiom). The
+## split slot only needs to satisfy inherits(., "rsplit"); the validator does
+## not inspect its contents, so a classed empty list stands in for a real one.
+make_valid_eval <- function() {
+
+  results <- tibble::tibble(
+    config_id = c("cfg_a", "cfg_b"),
+    status    = c("success", "success"),
+    rmse      = c(1.0, 2.0),  rrmse = c(0.1, 0.2),
+    rsq       = c(0.9, 0.8),  ccc   = c(0.9, 0.8),
+    rpd       = c(2.0, 1.5),  mae   = c(0.8, 1.1),
+    ## cross-validated means at the selected hyperparameters (#50)
+    cv_rmse   = c(1.1, 2.1),  cv_rrmse = c(0.11, 0.21),
+    cv_rsq    = c(0.88, 0.78), cv_ccc  = c(0.88, 0.78),
+    cv_rpd    = c(1.9, 1.4),  cv_mae   = c(0.9, 1.2)
+  )
+
+  obj <- list(
+    config = list(configs = tibble::tibble(config_id = c("cfg_a", "cfg_b"))),
+    evaluation = list(
+      results      = results,
+      best_config  = "cfg_a",
+      rank_metric  = "rpd",
+      split        = structure(list(), class = c("rsplit", "list")),
+      n_train      = 80L,
+      n_test       = 20L,
+      workers      = 4L,
+      parallelize_over = "configs",
+      runtime_secs = 12.3,
+      timestamp    = Sys.time()
+    )
+  )
+
+  class(obj) <- c("horizons_eval", "horizons_data", "list")
+  obj
+
+}
+
+## A minimal valid horizons_fit built on top of make_valid_eval() — a fit is
+## also an eval, so it carries a valid evaluation slot (the validator delegates
+## to validate_horizons_eval first). Workflows are structural stubs: the fit
+## validator checks names + list-ness, not workflow-trained-ness.
+make_valid_fit <- function() {
+
+  obj <- make_valid_eval()
+
+  results <- obj$evaluation$results
+
+  obj$models <- list(
+    workflows        = list(cfg_a = structure(list(), class = "workflow"),
+                            cfg_b = structure(list(), class = "workflow")),
+    n_models         = 2L,
+    best_config      = "cfg_a",
+    rank_metric      = "rpd",
+    predictor_schema = c("4000", "3999", "3998"),
+    response_bound   = 45.2,
+    cv_predictions   = tibble::tibble(),
+    results          = results,
+    split            = obj$evaluation$split,
+    row_index        = tibble::tibble(.row = 1:80,
+                                      sample_id = paste0("S", 1:80)),
+    uq               = list(cfg_a = list(quantile_model = 1)),
+    ad               = list(cfg_a = list(centroid = 1, cov_matrix = 1,
+                                         ad_thresholds = 1:4)),
+    timestamp        = Sys.time(),
+    runtime_secs     = 30.1
+  )
+
+  class(obj) <- c("horizons_fit", "horizons_eval", "horizons_data", "list")
+  obj
+
+}
+
+## A small valid analysis table and role map, for the chain tests: two
+## samples, three wavenumbers, one outcome.
+valid_data_slot <- function() {
+
+  analysis <- tibble::tibble(
+    sample_id = c("A", "B"),
+    `4000`    = c(0.1, 0.2),
+    `3998`    = c(0.2, 0.3),
+    `3996`    = c(0.3, 0.4),
+    SOC       = c(1.0, 2.0)
+  )
+
+  role_map <- tibble::tibble(
+    variable = names(analysis),
+    role     = c("id", "predictor", "predictor", "predictor", "outcome")
+  )
+
+  list(analysis = analysis, role_map = role_map)
+
+}
+
+
+## ----------------------------------------------------------------------------
 ## validate_horizons_ensemble()
 ## ----------------------------------------------------------------------------
 
-## Minimal valid weighted contract, built inline (the test-class-core idiom).
-## A tiny trained workflow for the metamodel checks is fit once below.
+## Minimal valid weighted contract on top of make_valid_fit() — an ensemble is
+## also a fit, so it carries valid models and evaluation slots (the validator
+## delegates to validate_horizons_fit first). A tiny trained workflow for the
+## metamodel checks is fit once below.
 make_valid_ensemble <- function() {
 
   weights <- tibble::tibble(
@@ -1584,30 +1721,30 @@ make_valid_ensemble <- function() {
     coef   = c(0.6, 0.4)
   )
 
-  obj <- list(
-    ensemble = list(
-      method          = "weighted",
-      model           = weights,
-      weights         = weights,
-      predictions     = tibble::tibble(sample_id = c("S1", "S2"),
-                                       .pred     = c(1.1, 2.2),
-                                       truth     = c(1.0, 2.0)),
-      metrics         = tibble::tibble(.metric    = "rmse",
-                                       .estimator = "standard",
-                                       .estimate  = 0.15),
-      member_metrics  = tibble::tibble(.metric   = c("rmse", "rmse"),
-                                       .estimate = c(0.2, 0.3),
-                                       config_id = c("cfg_a", "cfg_b")),
-      improvement     = 0.05,
-      oof_predictions = tibble::tibble(.row  = 1:2,
-                                       .pred = c(1.2, 2.1),
-                                       truth = c(1.0, 2.0)),
-      optimize        = TRUE,
-      seed            = 307L,
-      uq              = NULL,
-      timestamp       = Sys.time(),
-      runtime_secs    = 1.5
-    )
+  obj <- make_valid_fit()
+
+  obj$ensemble <- list(
+    method          = "weighted",
+    model           = weights,
+    weights         = weights,
+    predictions     = tibble::tibble(sample_id = c("S1", "S2"),
+                                     .pred     = c(1.1, 2.2),
+                                     truth     = c(1.0, 2.0)),
+    metrics         = tibble::tibble(.metric    = "rmse",
+                                     .estimator = "standard",
+                                     .estimate  = 0.15),
+    member_metrics  = tibble::tibble(.metric   = c("rmse", "rmse"),
+                                     .estimate = c(0.2, 0.3),
+                                     config_id = c("cfg_a", "cfg_b")),
+    improvement     = 0.05,
+    oof_predictions = tibble::tibble(.row  = 1:2,
+                                     .pred = c(1.2, 2.1),
+                                     truth = c(1.0, 2.0)),
+    optimize        = TRUE,
+    seed            = 307L,
+    uq              = NULL,
+    timestamp       = Sys.time(),
+    runtime_secs    = 1.5
   )
 
   class(obj) <- c("horizons_ensemble", "horizons_fit", "horizons_eval",
@@ -1690,17 +1827,59 @@ test_that("validate_horizons_ensemble accepts a well-formed CV+ uq bundle", {
 
 test_that("validate_horizons_ensemble gates on class and slot presence", {
 
+  ## Every gate aborts with the class the accumulated checks use (#129).
+
   ## Not a horizons_ensemble
-  expect_error(validate_horizons_ensemble(list()), "horizons_ensemble")
+  expect_error(validate_horizons_ensemble(list()), "horizons_ensemble",
+               class = "horizons_validation_error")
 
   ## Classed but no ensemble slot
   hollow <- structure(list(), class = c("horizons_ensemble", "list"))
-  expect_error(validate_horizons_ensemble(hollow), "ensemble")
+  expect_error(validate_horizons_ensemble(hollow), "ensemble",
+               class = "horizons_validation_error")
 
   ## Slot without a method
   no_method <- make_valid_ensemble()
   no_method$ensemble$method <- NULL
-  expect_error(validate_horizons_ensemble(no_method), "method")
+  expect_error(validate_horizons_ensemble(no_method), "method",
+               class = "horizons_validation_error")
+
+})
+
+test_that("validate_horizons_ensemble runs the fit validator first (#129)", {
+
+  ## A broken models slot used to pass: the ensemble validator checked only
+  ## its own slot.
+  no_ad <- make_valid_ensemble()
+  no_ad$models$ad <- NULL
+
+  expect_error(suppressMessages(validate_horizons_ensemble(no_ad)),
+               "missing from models: ad",
+               class = "horizons_validation_error")
+
+  ## A class vector that claims horizons_ensemble without the fit layer
+  ## below it is refused by the fit validator's gate.
+  hollow_fit <- make_valid_ensemble()
+  hollow_fit$models <- NULL
+
+  expect_error(validate_horizons_ensemble(hollow_fit), "models",
+               class = "horizons_validation_error")
+
+  ## And through the fit validator, the evaluation and base contracts.
+  bad_eval <- make_valid_ensemble()
+  bad_eval$evaluation$best_config <- "cfg_ghost"
+
+  expect_error(suppressMessages(validate_horizons_ensemble(bad_eval)),
+               "cfg_ghost",
+               class = "horizons_validation_error")
+
+  bad_data      <- make_valid_ensemble()
+  bad_data$data <- valid_data_slot()
+  bad_data$data$analysis$sample_id <- c("A", "A")
+
+  expect_error(suppressMessages(validate_horizons_ensemble(bad_data)),
+               "Duplicate sample_id",
+               class = "horizons_validation_error")
 
 })
 
@@ -1835,44 +2014,6 @@ test_that("validate_horizons_ensemble rejects a malformed uq bundle", {
 ## validate_horizons_eval()
 ## ----------------------------------------------------------------------------
 
-## A minimal valid horizons_eval, built inline (the test-class-core idiom). The
-## split slot only needs to satisfy inherits(., "rsplit"); the validator does
-## not inspect its contents, so a classed empty list stands in for a real one.
-make_valid_eval <- function() {
-
-  results <- tibble::tibble(
-    config_id = c("cfg_a", "cfg_b"),
-    status    = c("success", "success"),
-    rmse      = c(1.0, 2.0),  rrmse = c(0.1, 0.2),
-    rsq       = c(0.9, 0.8),  ccc   = c(0.9, 0.8),
-    rpd       = c(2.0, 1.5),  mae   = c(0.8, 1.1),
-    ## cross-validated means at the selected hyperparameters (#50)
-    cv_rmse   = c(1.1, 2.1),  cv_rrmse = c(0.11, 0.21),
-    cv_rsq    = c(0.88, 0.78), cv_ccc  = c(0.88, 0.78),
-    cv_rpd    = c(1.9, 1.4),  cv_mae   = c(0.9, 1.2)
-  )
-
-  obj <- list(
-    config = list(configs = tibble::tibble(config_id = c("cfg_a", "cfg_b"))),
-    evaluation = list(
-      results      = results,
-      best_config  = "cfg_a",
-      rank_metric  = "rpd",
-      split        = structure(list(), class = c("rsplit", "list")),
-      n_train      = 80L,
-      n_test       = 20L,
-      workers      = 4L,
-      parallelize_over = "configs",
-      runtime_secs = 12.3,
-      timestamp    = Sys.time()
-    )
-  )
-
-  class(obj) <- c("horizons_eval", "horizons_data", "list")
-  obj
-
-}
-
 test_that("validate_horizons_eval passes a well-formed evaluation slot", {
 
   ## Arrange
@@ -1896,11 +2037,101 @@ test_that("validate_horizons_eval tolerates the optional workers key being absen
 test_that("validate_horizons_eval gates on class and slot presence", {
 
   ## Not a horizons_eval
-  expect_error(validate_horizons_eval(list()), "horizons_eval")
+  expect_error(validate_horizons_eval(list()), "horizons_eval",
+               class = "horizons_validation_error")
 
   ## Classed but no evaluation slot
   hollow <- structure(list(), class = c("horizons_eval", "list"))
-  expect_error(validate_horizons_eval(hollow), "evaluation")
+  expect_error(validate_horizons_eval(hollow), "evaluation",
+               class = "horizons_validation_error")
+
+})
+
+test_that("validate_horizons_eval runs the base validator at the full stage (#129)", {
+
+  ## A valid table passes through the chain.
+  obj      <- make_valid_eval()
+  obj$data <- valid_data_slot()
+
+  expect_identical(validate_horizons_eval(obj), obj)
+
+  ## A duplicate sample_id, which only warns at the raw stage, aborts.
+  dup <- obj
+  dup$data$analysis$sample_id <- c("A", "A")
+
+  expect_error(suppressMessages(validate_horizons_eval(dup)),
+               "Duplicate sample_id",
+               class = "horizons_validation_error")
+
+  ## An analysis table without a role map fails the base validator's gate.
+  unpaired <- obj
+  unpaired$data$role_map <- NULL
+
+  expect_error(validate_horizons_eval(unpaired), "role_map",
+               class = "horizons_validation_error")
+
+})
+
+test_that("validate_horizons_eval requires results to cover the config table exactly (#129)", {
+
+  ## A config with no row: failed, pruned and not-evaluated configs keep
+  ## theirs, so a missing one was lost.
+  lost <- make_valid_eval()
+  lost$config$configs <- tibble::tibble(config_id = c("cfg_a", "cfg_b", "cfg_c"))
+
+  err <- tryCatch(suppressMessages(capture.output(validate_horizons_eval(lost))),
+                  error = function(e) e)
+
+  expect_s3_class(err, "horizons_validation_error")
+  expect_match(conditionMessage(err), "with no row in results: cfg_c", fixed = TRUE)
+
+  ## A row with no config.
+  foreign <- make_valid_eval()
+  foreign$config$configs <- tibble::tibble(config_id = "cfg_a")
+
+  err <- tryCatch(suppressMessages(capture.output(validate_horizons_eval(foreign))),
+                  error = function(e) e)
+
+  expect_s3_class(err, "horizons_validation_error")
+  expect_match(conditionMessage(err), "not in config$configs: cfg_b", fixed = TRUE)
+
+  ## A large loss names five and counts the rest.
+  many <- make_valid_eval()
+  many$config$configs <- tibble::tibble(
+    config_id = c("cfg_a", "cfg_b", sprintf("cfg_%02d", 1:8))
+  )
+
+  err <- tryCatch(suppressMessages(capture.output(validate_horizons_eval(many))),
+                  error = function(e) e)
+
+  expect_match(conditionMessage(err),
+               "cfg_01, cfg_02, cfg_03, cfg_04, cfg_05, and 3 more", fixed = TRUE)
+
+  ## Without a config table there is nothing to cover.
+  no_configs <- make_valid_eval()
+  no_configs$config <- NULL
+
+  expect_identical(validate_horizons_eval(no_configs), no_configs)
+
+})
+
+test_that("validate_horizons_eval checks workers without parallelize_over (#129)", {
+
+  ## workers was checked only inside the parallelize_over branch, so a
+  ## malformed count passed on an object without the axis.
+  obj <- make_valid_eval()
+  obj$evaluation$parallelize_over <- NULL
+  obj$evaluation$workers          <- -2
+
+  expect_error(suppressMessages(validate_horizons_eval(obj)),
+               "workers",
+               class = "horizons_validation_error")
+
+  obj$evaluation$workers <- c(2L, 4L)
+
+  expect_error(suppressMessages(validate_horizons_eval(obj)),
+               "workers",
+               class = "horizons_validation_error")
 
 })
 
@@ -1985,41 +2216,6 @@ test_that("validate_horizons_eval rejects fractional or negative sample counts",
 ## validate_horizons_fit()
 ## ----------------------------------------------------------------------------
 
-## A minimal valid horizons_fit built on top of make_valid_eval() — a fit is
-## also an eval, so it carries a valid evaluation slot (the validator delegates
-## to validate_horizons_eval first). Workflows are structural stubs: the fit
-## validator checks names + list-ness, not workflow-trained-ness.
-make_valid_fit <- function() {
-
-  obj <- make_valid_eval()
-
-  results <- obj$evaluation$results
-
-  obj$models <- list(
-    workflows        = list(cfg_a = structure(list(), class = "workflow"),
-                            cfg_b = structure(list(), class = "workflow")),
-    n_models         = 2L,
-    best_config      = "cfg_a",
-    rank_metric      = "rpd",
-    predictor_schema = c("4000", "3999", "3998"),
-    response_bound   = 45.2,
-    cv_predictions   = tibble::tibble(),
-    results          = results,
-    split            = obj$evaluation$split,
-    row_index        = tibble::tibble(.row = 1:80,
-                                      sample_id = paste0("S", 1:80)),
-    uq               = list(cfg_a = list(quantile_model = 1)),
-    ad               = list(cfg_a = list(centroid = 1, cov_matrix = 1,
-                                         ad_thresholds = 1:4)),
-    timestamp        = Sys.time(),
-    runtime_secs     = 30.1
-  )
-
-  class(obj) <- c("horizons_fit", "horizons_eval", "horizons_data", "list")
-  obj
-
-}
-
 test_that("validate_horizons_fit passes a well-formed models slot", {
 
   obj <- make_valid_fit()
@@ -2076,11 +2272,29 @@ test_that("validate_horizons_fit tolerates a NULL uq slot (compute_uq = FALSE)",
 test_that("validate_horizons_fit gates on class and slot presence", {
 
   ## Not a horizons_fit
-  expect_error(validate_horizons_fit(list()), "horizons_fit")
+  expect_error(validate_horizons_fit(list()), "horizons_fit",
+               class = "horizons_validation_error")
 
   ## Classed but no models slot
   hollow <- structure(list(), class = c("horizons_fit", "list"))
-  expect_error(validate_horizons_fit(hollow), "models")
+  expect_error(validate_horizons_fit(hollow), "models",
+               class = "horizons_validation_error")
+
+})
+
+test_that("validate_horizons_fit reaches the base contract through the eval validator (#129)", {
+
+  obj      <- make_valid_fit()
+  obj$data <- valid_data_slot()
+
+  expect_identical(validate_horizons_fit(obj), obj)
+
+  ## An id role off sample_id, a base-contract failure, surfaces here.
+  obj$data$role_map$role <- c("meta", "predictor", "predictor", "predictor", "id")
+
+  expect_error(suppressMessages(validate_horizons_fit(obj)),
+               "must be on sample_id",
+               class = "horizons_validation_error")
 
 })
 
@@ -2481,13 +2695,14 @@ test_that("validate_horizons_eval rejects a malformed evaluation$recipe", {
 
 test_that("the committed ensemble fixture (evaluated before the slot existed) still validates", {
 
-  ## The fixture also predates the response_bound / ad model slots, so the
-  ## fit-level validator rejects it for reasons unrelated to this contract;
-  ## the eval-level validator is what the tolerance rule governs.
+  ## The eval-level validator is what the tolerance rule governs. The fixture
+  ## also predates response_bound, which the fit-level validator tolerates
+  ## too, and ensemble() runs that validator on entry (#129).
   fx <- readRDS(test_path("fixtures", "ensemble_fit.rds"))
 
   expect_false("parallelize_over" %in% names(fx$evaluation))
   expect_identical(validate_horizons_eval(fx), fx)
+  expect_identical(validate_horizons_fit(fx), fx)
 
 })
 

@@ -1,3 +1,9 @@
+# horizons (development version)
+
+## Bug fixes
+
+* **Each class is checked against everything it promises** (#129). An evaluated object is checked against the base data contract as well as its evaluation, and an ensemble against its fitted models, evaluation and data. `ensemble()` checks the whole fitted object before it fits anything, as `evaluate()` and `fit()` already did. Two rules are new: the column with the `id` role must be `sample_id`, and `evaluation$results` must have exactly one row per configuration in `config$configs`. Every validation failure now aborts with class `horizons_validation_error`, including the checks that run first, which used to abort without it.
+
 # horizons 0.10.0
 
 First tagged release. It brings `main` up to date with the development branch, where horizons was rebuilt around an S3 approach: a single `horizons_data` object that each verb in the pipeline takes and returns, carrying the spectra, configuration, results and a record of how each step was run, from raw spectra to predictions. It is still pre-1.0, so the API may change between minor versions.
