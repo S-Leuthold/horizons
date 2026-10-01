@@ -61,10 +61,6 @@
 #' @param seed Integer. Random seed for train/test split and CV folds.
 #'   Default 307L.
 #' @param verbose Logical. Print progress tree to console. Default TRUE.
-#' @param workers Deprecated (2026-09-14) and ignored, with a warning. The
-#'   earlier design took a core count and auto-split it into outer and inner
-#'   levels while managing its own nested plan. Register a plan and use
-#'   `allow_par` with `parallelize_over` instead.
 #'
 #' @section Parallelism:
 #' The user owns the backend and the topology; `evaluate()` owns only which
@@ -188,12 +184,9 @@ evaluate <- function(x,
                      parallelize_over = "auto",
                      output_dir       = NULL,
                      seed             = 307L,
-                     verbose          = TRUE,
-                     workers          = NULL) {
+                     verbose          = TRUE) {
 
   start_time <- Sys.time()
-
-  deprecate_workers_arg(workers)
 
   ## -----------------------------------------------------------------------
   ## Step 0: Structural validation

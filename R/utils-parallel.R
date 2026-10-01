@@ -329,35 +329,3 @@ pin_parent_threads <- function() {
   }
 
 }
-
-## ---------------------------------------------------------------------------
-## Deprecation of `workers`
-## ---------------------------------------------------------------------------
-
-#' Warn that `workers` is deprecated
-#'
-#' @description
-#' `evaluate(workers = )` took a core count and split it into an outer and
-#' inner level while managing its own nested plan. Deprecated outright on
-#' 2026-09-14: the argument warns and is ignored. The warning carries a
-#' condition class so tests can match on the class rather than the text, and
-#' it fires every time, so a scripted loop cannot hide it.
-#'
-#' @param workers The value passed, or `NULL`.
-#' @return Invisibly, `TRUE` if a warning fired.
-#' @keywords internal
-deprecate_workers_arg <- function(workers) {
-
-  if (is.null(workers)) return(invisible(FALSE))
-
-  cli::cli_warn(
-    c(
-      "!" = "{.arg workers} is deprecated and ignored.",
-      "i" = "Register a backend with {.fn future::plan} before calling, then use {.code allow_par = TRUE} and {.arg parallelize_over}."
-    ),
-    class = "horizons_deprecated_workers"
-  )
-
-  invisible(TRUE)
-
-}

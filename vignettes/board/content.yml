@@ -867,9 +867,6 @@ verbs:
       - name: verbose
         touch: Set FALSE inside loops.
         source: R/pipeline-evaluate.R#L489
-      - name: workers
-        touch: Never; deprecated and ignored with a warning. Register a plan instead.
-        source: R/pipeline-evaluate.R#L196
     mechanics:
       - step: Certifies the base data contract at entry, at the full stage, so a column added after configure() without a role_map entry — by a later parse_ids(), or a direct assignment — cannot reach build_recipe()'s outcome ~ . formula undetected (#24). validate_horizons_eval() at return checks the evaluation slot, not this.
         source: R/pipeline-evaluate.R#L209
