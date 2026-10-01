@@ -1,10 +1,12 @@
 # Workflow derived from https://github.com/r-lib/actions/tree/v2/examples
 # Need help debugging build failures? Start at https://github.com/r-lib/actions#where-to-find-help
+# Coverage runs after merge, not on pull requests: R-CMD-check already runs
+# the full suite on every PR, and running it a second time under covr only
+# doubled runner time.
 on:
   push:
     branches: [main, development]
-  pull_request:
-    branches: [main, development]
+  workflow_dispatch:
 
 name: test-coverage
 
@@ -12,6 +14,8 @@ jobs:
   test-coverage:
     runs-on: ubuntu-latest
     env:
+      # covr records coverage in-process, so the suite runs serially here.
+      TESTTHAT_PARALLEL: false
       GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
 
     steps:
