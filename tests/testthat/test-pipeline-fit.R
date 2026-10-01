@@ -540,8 +540,15 @@ describe("fit() - UQ enabled", {
 
         expected <- c("quantile_model", "scores", "n_calib",
                       "level_default", "oof_coverage", "mean_width",
-                      "prepped_recipe")
+                      "prepped_recipe", "test_coverage", "test_mean_width",
+                      "n_test")
         expect_true(all(expected %in% names(uq_bundle)))
+
+        ## Coverage measured on the held-out test rows (#118)
+        expect_gt(uq_bundle$n_test, 0)
+        expect_gte(uq_bundle$test_coverage, 0)
+        expect_lte(uq_bundle$test_coverage, 1)
+        expect_gt(uq_bundle$test_mean_width, 0)
 
       }
 
@@ -2299,32 +2306,64 @@ describe("fit() - calibration after a response trim (#77)", {
 
 
 ## =========================================================================
-## check_degradation(): within the fences after a trim (#77)
+## check_degradation(): a bootstrap interval for the test RPD (#119, #77)
 ## =========================================================================
 
 describe("check_degradation()", {
 
-  cv <- tibble::tibble(.metric = "rpd", mean = 2, std_err = 0.1)
+  ## 48 test rows from a healthy fit: the point RPD (2.93) sits below the old
+  ## cv_mean - 2 * cv_se band (3.389), but its bootstrap interval reaches the
+  ## CV mean, so it is not flagged (#119)
+  set.seed(11)
+  truth   <- stats::rnorm(48, 15, 3)
+  healthy <- truth + stats::rnorm(48, 0, 3 / 3.2)
+  cv_119  <- tibble::tibble(.metric = "rpd", mean = 3.627, std_err = 0.119)
 
-  ## Twenty test rows inside [0, 10] predicted well, and two extremes far
-  ## outside predicted badly, which sink the RPD over every row
-  set.seed(1)
-  truth <- c(seq(1, 9, length.out = 20), 60, -50)
-  preds <- c(truth[1:20] + stats::rnorm(20, sd = 0.2), 5, 5)
+  ## A fit far worse than its CV estimate
+  set.seed(12)
+  poor  <- truth + stats::rnorm(48, 0, 3 / 1.1)
+  cv_4  <- tibble::tibble(.metric = "rpd", mean = 4, std_err = 0.1)
 
-  it("flags the untrimmed test RPD when there are no fences", {
+  it("does not flag a healthy fit whose point estimate falls below the old band", {
 
-    out <- check_degradation(cv, rpd_vec(truth, preds), truth, preds)
-
-    expect_true(out$degraded)
-    expect_no_match(out$reason, "fences")
+    expect_lt(rpd_vec(truth, healthy), 3.627 - 2 * 0.119)
+    expect_false(check_degradation(cv_119, truth, healthy)$degraded)
 
   })
 
+  it("flags a fit whose whole bootstrap interval lies below the CV mean", {
+
+    out <- check_degradation(cv_4, truth, poor)
+
+    expect_true(out$degraded)
+    expect_match(out$reason, "95% bootstrap interval", fixed = TRUE)
+    expect_match(out$reason, "48 test rows", fixed = TRUE)
+    expect_match(out$reason, "below the CV mean RPD 4.000", fixed = TRUE)
+
+  })
+
+  it("is reproducible and leaves the caller's random stream untouched", {
+
+    first  <- check_degradation(cv_4, truth, poor, seed = 7L)
+    second <- check_degradation(cv_4, truth, poor, seed = 7L)
+    expect_identical(first, second)
+
+    set.seed(9); a <- stats::runif(1)
+    set.seed(9); invisible(check_degradation(cv_4, truth, poor)); b <- stats::runif(1)
+    expect_identical(a, b)
+
+  })
+
+  ## Thirty test rows inside [0, 30] predicted well, and two extremes far
+  ## outside predicted badly
+  set.seed(13)
+  t_fenced <- c(stats::runif(30, 1, 29), 80, -40)
+  p_fenced <- c(t_fenced[1:30] + stats::rnorm(30, 0, 0.5), 15, 15)
+  fences   <- c(lower = 0, upper = 30)
+
   it("compares within the fences when the rows were trimmed", {
 
-    out <- check_degradation(cv, rpd_vec(truth, preds), truth, preds,
-                             response_fences = c(lower = 0, upper = 10))
+    out <- check_degradation(cv_4, t_fenced, p_fenced, response_fences = fences)
 
     expect_false(out$degraded)
     expect_true(is.na(out$reason))
@@ -2333,24 +2372,68 @@ describe("check_degradation()", {
 
   it("says the comparison was within the fences when it flags", {
 
-    bad <- preds
-    bad[1:20] <- 5
-
-    out <- check_degradation(cv, rpd_vec(truth, bad), truth, bad,
-                             response_fences = c(lower = 0, upper = 10))
+    out <- check_degradation(cv_4, t_fenced, rep(15, 32), response_fences = fences)
 
     expect_true(out$degraded)
-    expect_match(out$reason, "within the training fences [0, 10] (20 of 22 test rows)",
+    expect_match(out$reason, "30 test rows of 32 within the training fences [0, 30]",
                  fixed = TRUE)
 
   })
 
-  it("flags nothing with fewer than two test rows inside the fences", {
+  it("flags nothing with too few test rows to bootstrap", {
 
-    out <- check_degradation(cv, rpd_vec(truth, preds), truth, preds,
+    out <- check_degradation(cv_4, truth[1:5], poor[1:5])
+
+    expect_false(out$degraded)
+
+    out <- check_degradation(cv_4, t_fenced, rep(15, 32),
                              response_fences = c(lower = 100, upper = 200))
 
     expect_false(out$degraded)
+
+  })
+
+  it("flags nothing when the test outcomes are constant", {
+
+    expect_false(check_degradation(cv_4, rep(5, 20), stats::rnorm(20, 5))$degraded)
+
+  })
+
+  it("flags nothing without a finite CV RPD", {
+
+    no_rpd <- tibble::tibble(.metric = "rmse", mean = 1, std_err = 0.1)
+
+    expect_false(check_degradation(no_rpd, truth, poor)$degraded)
+
+  })
+
+})
+
+
+## =========================================================================
+## format_test_coverage(): the console line for measured coverage (#118)
+## =========================================================================
+
+describe("format_test_coverage()", {
+
+  it("reports the measured coverage, the row count and the nominal level", {
+
+    uq <- list(level_default = 0.9, test_coverage = 0.875, n_test = 48L,
+               test_mean_width = 3.0412)
+
+    expect_identical(
+      format_test_coverage(uq),
+      "UQ coverage: 87.5% on 48 held-out test rows (nominal 90%, mean width 3.04)"
+    )
+
+  })
+
+  it("says the coverage was not measured when it is missing", {
+
+    expect_match(format_test_coverage(list(level_default = 0.9)),
+                 "not measured (nominal 90%)", fixed = TRUE)
+    expect_match(format_test_coverage(list(level_default = 0.9, test_coverage = NA_real_)),
+                 "not measured", fixed = TRUE)
 
   })
 

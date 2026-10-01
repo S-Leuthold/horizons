@@ -783,14 +783,12 @@ fit <- function(x,
 
         }
 
-        ## UQ coverage
+        ## UQ coverage, measured on the held-out test rows (#118)
         if (!is.null(config_result$uq)) {
 
           cat(paste0(
-            "\u2502  ", cont, "\u251C\u2500 UQ coverage: ",
-            round(config_result$uq$oof_coverage * 100, 1), "% ",
-            "(target ", round(config_result$uq$level_default * 100, 0),
-            "%, width = ", round(config_result$uq$mean_width, 3), ")\n"
+            "\u2502  ", cont, "\u251C\u2500 ",
+            format_test_coverage(config_result$uq), "\n"
           ))
 
         }
@@ -1446,5 +1444,35 @@ warn_members_below_threshold <- function(members, fallback, bayesian_iter = NULL
 calib_split_seed <- function(seed) {
 
   as.integer(seed) + 1L
+
+}
+
+
+## ---------------------------------------------------------------------------
+## format_test_coverage(): the console line for measured interval coverage
+## ---------------------------------------------------------------------------
+
+#' Describe a UQ bundle's measured coverage on the held-out test rows
+#'
+#' @param uq A UQ bundle carrying `test_coverage`, `test_mean_width`,
+#'   `n_test` and `level_default`. Bundles fitted before these fields existed
+#'   read as unmeasured.
+#' @return Character(1).
+#' @keywords internal
+#' @noRd
+format_test_coverage <- function(uq) {
+
+  nominal <- round(uq$level_default * 100, 0)
+
+  if (is.null(uq$test_coverage) || !is.finite(uq$test_coverage)) {
+
+    return(paste0("UQ coverage on held-out test rows: not measured (nominal ",
+                  nominal, "%)"))
+
+  }
+
+  paste0("UQ coverage: ", round(uq$test_coverage * 100, 1), "% on ",
+         uq$n_test, " held-out test rows (nominal ", nominal,
+         "%, mean width ", signif(uq$test_mean_width, 3), ")")
 
 }

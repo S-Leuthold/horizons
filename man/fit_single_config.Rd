@@ -78,7 +78,9 @@ trim: the check reads the test RPD).}
 List with fields: config_id, status, degraded, degraded_reason,
 fitted_workflow, best_params, warm_start, start_grid_size,
 cv_predictions, test_metrics, cv_metrics, uq, warnings, error_message,
-runtime_secs. \code{warm_start} is \code{TRUE} when the re-tune started from
+runtime_secs. \code{uq}, when present, carries the measured coverage on the
+held-out test rows: \code{test_coverage}, \code{test_mean_width} and \code{n_test}.
+\code{warm_start} is \code{TRUE} when the re-tune started from
 \code{best_params_eval}, \code{FALSE} when it fell back to a space-filling grid of
 \code{start_grid_size} points, and \code{NA} (both) when the config failed
 before tuning.

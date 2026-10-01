@@ -116,6 +116,10 @@
 
 ## Breaking / behavioural
 
+* **`fit()` reports interval coverage measured on the held-out test rows** (#118). The console line and `summary()` used to show `oof_coverage`, an in-sample diagnostic for the quantile forest, as if it were validated coverage. Each UQ bundle now carries `test_coverage`, `test_mean_width` and `n_test`, computed with the same interval code `predict()` uses, and the console reads, for example, "UQ coverage: 87.5% on 48 held-out test rows (nominal 90%)". `oof_coverage` is still stored.
+
+* **The DEGRADED flag in `fit()` uses a bootstrap interval for the test RPD** (#119). It used to fire whenever the test RPD fell below the CV mean minus two CV standard errors, a band that ignores the sampling variance of an estimate from a few dozen test rows, so it flagged healthy fits. The test RPD is now bootstrapped (2,000 resamples, seeded), and a config is flagged only when the whole 95% interval lies below the CV mean RPD. With fewer than 10 usable test rows nothing is flagged.
+
 * **The pipeline vignette is withdrawn while it is rewritten.** `inst/examples/end-to-end-pipeline.R` is a runnable walk-through of the whole pipeline on synthetic data in the meantime.
 
 * **`evaluate(workers =)` is removed.** It had been ignored with a warning since the parallel redesign. Register a backend with `future::plan()` and use `allow_par` and `parallelize_over`.

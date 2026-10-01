@@ -177,6 +177,14 @@ DEFAULT_UQ_LEVEL         <- 0.90
 UQ_QUANTILE_TREES        <- 500L
 WARMSTART_GRID_SIZE      <- 25L
 
+### The degradation check bootstraps the test RPD and flags a config only when
+### the whole DEGRADATION_LEVEL interval lies below the CV mean RPD. Below
+### DEGRADATION_MIN_N test rows a bootstrap interval means little, so nothing
+### is flagged.
+DEGRADATION_BOOT_N       <- 2000L
+DEGRADATION_LEVEL        <- 0.95
+DEGRADATION_MIN_N        <- 10L
+
 ### Training share of the train/test split, for evaluate()'s split and fit()'s
 ### Split F alike.
 SPLIT_PROP <- 0.8
