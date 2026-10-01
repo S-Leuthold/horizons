@@ -47,7 +47,9 @@
 #' @return List with fields: config_id, status, degraded, degraded_reason,
 #'   fitted_workflow, best_params, warm_start, start_grid_size,
 #'   cv_predictions, test_metrics, cv_metrics, uq, warnings, error_message,
-#'   runtime_secs. `warm_start` is `TRUE` when the re-tune started from
+#'   runtime_secs. `uq`, when present, carries the measured coverage on the
+#'   held-out test rows: `test_coverage`, `test_mean_width` and `n_test`.
+#'   `warm_start` is `TRUE` when the re-tune started from
 #'   `best_params_eval`, `FALSE` when it fell back to a space-filling grid of
 #'   `start_grid_size` points, and `NA` (both) when the config failed
 #'   before tuning.
@@ -489,8 +491,11 @@ fit_single_config <- function(config_row,
   ## -----------------------------------------------------------------------
   ## Step 12: Degradation detection
   ## -----------------------------------------------------------------------
-  ## Compare test_F RPD to cv_mean_rpd - 2 * cv_se_rpd.
-  ## If test is below that threshold, the model has degraded.
+  ## Bootstrap the test RPD and flag the config only when its whole interval
+  ## lies below the CV mean RPD. The test RPD is one estimate from a few dozen
+  ## rows, so comparing it to a band built from the CV standard error, which
+  ## describes the CV mean and not a single held-out estimate, flagged healthy
+  ## fits (#119).
   ##
   ## After a response trim (#77) the folds ran on rows inside the training
   ## fences while the test rows are untrimmed, so the two RPDs would describe
@@ -498,8 +503,8 @@ fit_single_config <- function(config_row,
   ## extreme. The diagnostic RPD is then taken over the test rows inside the
   ## same fences; test_metrics, which is what is reported, stays untrimmed.
 
-  degradation     <- check_degradation(cv_metrics, test_metrics$rpd, test_truth,
-                                       test_preds, response_fences)
+  degradation     <- check_degradation(cv_metrics, test_truth, test_preds,
+                                       response_fences, seed = seed)
   degraded        <- degradation$degraded
   degraded_reason <- degradation$reason
 
@@ -533,6 +538,30 @@ fit_single_config <- function(config_row,
     }
 
     collect_from(uq_safe)
+
+    ## Measured coverage on the held-out test rows (#118). The intervals are
+    ## built by predict_intervals(), the function predict() serves them with,
+    ## so this is the coverage a user of the fitted object gets on data the
+    ## model never saw. oof_coverage stays on the bundle under its own name:
+    ## it is an in-sample diagnostic for the quantile forest, not coverage.
+    if (!is.null(uq_result)) {
+
+      coverage_safe <- safely_execute(
+        test_interval_coverage(uq_result, test_preds, test_data, test_truth,
+                               config_id, outcome_range),
+        log_error          = FALSE,
+        capture_conditions = TRUE
+      )
+
+      collect_from(coverage_safe)
+
+      uq_result <- c(uq_result, if (is.null(coverage_safe$error)) {
+        coverage_safe$result
+      } else {
+        test_interval_coverage_missing()
+      })
+
+    }
 
   }
 
@@ -618,76 +647,169 @@ fit_single_config <- function(config_row,
 
 
 ## ---------------------------------------------------------------------------
-## check_degradation(): test RPD against the CV band
+## test_interval_coverage(): measured coverage on the held-out test rows
 ## ---------------------------------------------------------------------------
 
-#' Flag a fitted configuration whose test RPD falls below its CV band
+#' Measure interval coverage on the held-out test rows
 #'
 #' @description
-#' Degraded means the test RPD is below the cross-validated mean minus two
-#' standard errors. After a response trim (#77) the folds ran on rows inside
-#' the training fences while the test rows are untrimmed, so the two would
-#' describe two populations and the flag would fire whenever the trim removed
-#' an extreme. With `response_fences`, the RPD compared is therefore the one
-#' over the test rows inside the fences, and the reason says so; the test
-#' metrics `fit()` reports are untouched. Fewer than two test rows inside the
-#' fences leave nothing to compare, and nothing is flagged.
+#' Builds prediction intervals for the test rows with [predict_intervals()],
+#' the function `predict()` serves intervals with, and reports how many of the
+#' test outcomes they contain. This is the honest coverage figure: the test
+#' rows took no part in tuning, the quantile forest or the conformal
+#' calibration (#118). A failure inside [predict_intervals()] warns and
+#' returns `NULL`, which leaves the figures `NA`.
 #'
-#' @param cv_metrics Tibble with `.metric`, `mean` and `std_err`.
-#' @param test_rpd Numeric(1). The RPD over every test row.
+#' @param uq A UQ bundle from [fit_uq()].
+#' @param test_preds Numeric. Back-transformed test predictions, original
+#'   scale.
+#' @param test_data Data frame. The test rows, raw (as passed to `predict()`).
+#' @param test_truth Numeric. The test outcomes, original scale.
+#' @param config_id Character(1). Named in any warning.
+#' @param outcome_range Numeric length 2. The bounds intervals are clamped to.
+#' @return List with `test_coverage`, `test_mean_width` and `n_test`.
+#' @keywords internal
+#' @noRd
+test_interval_coverage <- function(uq, test_preds, test_data, test_truth,
+                                   config_id, outcome_range) {
+
+  intervals <- predict_intervals(uq, test_preds, test_data,
+                                 config_id     = config_id,
+                                 outcome_range = outcome_range)
+
+  if (is.null(intervals)) {
+
+    return(test_interval_coverage_missing())
+
+  }
+
+  scored  <- !is.na(test_truth) & !is.na(intervals$.pred_lower) &
+    !is.na(intervals$.pred_upper)
+
+  covered <- test_truth[scored] >= intervals$.pred_lower[scored] &
+    test_truth[scored] <= intervals$.pred_upper[scored]
+
+  list(
+    test_coverage   = if (any(scored)) mean(covered) else NA_real_,
+    test_mean_width = if (any(scored)) mean(intervals$.interval_width[scored]) else NA_real_,
+    n_test          = sum(scored)
+  )
+
+}
+
+#' @noRd
+test_interval_coverage_missing <- function() {
+
+  list(test_coverage = NA_real_, test_mean_width = NA_real_, n_test = 0L)
+
+}
+
+
+## ---------------------------------------------------------------------------
+## check_degradation(): a bootstrap interval for the test RPD
+## ---------------------------------------------------------------------------
+
+#' Flag a fitted configuration whose test RPD is credibly below its CV RPD
+#'
+#' @description
+#' The test RPD is a single estimate from the held-out rows and carries real
+#' sampling variance; the CV standard error describes the CV mean, not that
+#' estimate. So the test RPD is bootstrapped over the test rows, and the
+#' config is flagged only when the whole `DEGRADATION_LEVEL` interval lies
+#' below the CV mean RPD (#119). The bootstrap draws from its own seed and
+#' restores the caller's RNG state, so it changes nothing downstream.
+#'
+#' After a response trim (#77) the folds ran on rows inside the training
+#' fences while the test rows are untrimmed, so with `response_fences` the
+#' test rows compared are those inside the fences, and the reason says so;
+#' the test metrics `fit()` reports are untouched. Fewer than
+#' `DEGRADATION_MIN_N` usable test rows leave too little to bootstrap, and
+#' nothing is flagged.
+#'
+#' @param cv_metrics Tibble with `.metric` and `mean`.
 #' @param test_truth,test_preds Numeric. Test outcomes and back-transformed
 #'   predictions, original scale.
 #' @param response_fences Numeric `c(lower = , upper = )`, or `NULL` when no
 #'   rows were trimmed.
+#' @param seed Integer. Seed for the bootstrap draws.
+#' @param n_boot Integer. Number of bootstrap resamples.
+#' @param level Numeric. Coverage of the bootstrap interval.
 #' @return List with `degraded` (logical) and `reason` (character, `NA` when
 #'   not degraded).
 #' @keywords internal
 #' @noRd
-check_degradation <- function(cv_metrics, test_rpd, test_truth, test_preds,
-                              response_fences = NULL) {
+check_degradation <- function(cv_metrics, test_truth, test_preds,
+                              response_fences = NULL, seed = 42L,
+                              n_boot = DEGRADATION_BOOT_N,
+                              level  = DEGRADATION_LEVEL) {
 
-  scope <- ""
+  not_flagged <- list(degraded = FALSE, reason = NA_character_)
+  fences_text <- NULL
+  usable      <- !is.na(test_truth) & !is.na(test_preds)
 
   if (!is.null(response_fences)) {
 
-    inside <- !is.na(test_truth) &
+    inside <- usable &
       test_truth >= response_fences[["lower"]] &
       test_truth <= response_fences[["upper"]]
 
-    test_rpd <- if (sum(inside) >= 2) {
-      rpd_vec(test_truth[inside], test_preds[inside])
-    } else {
-      NA_real_
-    }
+    fences_text <- sprintf(" of %d within the training fences [%.4g, %.4g]",
+                           length(test_truth), response_fences[["lower"]],
+                           response_fences[["upper"]])
 
-    scope <- sprintf(" within the training fences [%.4g, %.4g] (%d of %d test rows)",
-                     response_fences[["lower"]], response_fences[["upper"]],
-                     sum(inside), length(test_truth))
+    usable <- inside
 
   }
+
+  truth <- test_truth[usable]
+  preds <- test_preds[usable]
+  n     <- length(truth)
 
   rpd_cv <- cv_metrics[cv_metrics$.metric == "rpd", , drop = FALSE]
 
-  if (nrow(rpd_cv) != 1 || !is.finite(rpd_cv$mean) ||
-      !is.finite(rpd_cv$std_err) || !is.finite(test_rpd)) {
+  if (n < DEGRADATION_MIN_N || nrow(rpd_cv) != 1 || !is.finite(rpd_cv$mean)) {
 
-    return(list(degraded = FALSE, reason = NA_character_))
-
-  }
-
-  rpd_threshold <- rpd_cv$mean - 2 * rpd_cv$std_err
-
-  if (test_rpd >= rpd_threshold) {
-
-    return(list(degraded = FALSE, reason = NA_character_))
+    return(not_flagged)
 
   }
+
+  test_rpd <- rpd_vec(truth, preds)
+
+  if (!is.finite(test_rpd)) return(not_flagged)
+
+  ## Bootstrap with a local seed; the caller's stream is restored on exit.
+  had_seed <- exists(".Random.seed", envir = globalenv(), inherits = FALSE)
+  old_seed <- if (had_seed) get(".Random.seed", envir = globalenv()) else NULL
+  on.exit({
+    if (had_seed) assign(".Random.seed", old_seed, envir = globalenv())
+    else if (exists(".Random.seed", envir = globalenv(), inherits = FALSE)) rm(".Random.seed", envir = globalenv())
+  }, add = TRUE)
+  set.seed(seed, kind = "Mersenne-Twister")
+
+  ## The same RPD as rpd_vec(), inline: SD of the outcomes over the RMSE, Inf
+  ## for a perfect fit, 0 for constant outcomes.
+  boot_rpd <- vapply(seq_len(n_boot), function(b) {
+
+    i    <- sample.int(n, n, replace = TRUE)
+    rmse <- sqrt(mean((truth[i] - preds[i])^2))
+    sdv  <- stats::sd(truth[i])
+
+    if (rmse < .Machine$double.eps) Inf
+    else if (sdv < .Machine$double.eps) 0
+    else sdv / rmse
+
+  }, numeric(1))
+
+  bounds <- stats::quantile(boot_rpd, c((1 - level) / 2, 1 - (1 - level) / 2),
+                            names = FALSE)
+
+  if (bounds[2] >= rpd_cv$mean) return(not_flagged)
 
   list(
     degraded = TRUE,
     reason   = sprintf(
-      "test_rpd%s (%.3f) below cv_mean - 2*cv_se (%.3f - 2*%.3f = %.3f)",
-      scope, test_rpd, rpd_cv$mean, rpd_cv$std_err, rpd_threshold
+      "test RPD %.3f (%g%% bootstrap interval [%.3f, %.3f], %d test rows%s) is below the CV mean RPD %.3f",
+      test_rpd, 100 * level, bounds[1], bounds[2], n, fences_text %||% "", rpd_cv$mean
     )
   )
 

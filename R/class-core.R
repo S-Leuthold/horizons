@@ -3103,8 +3103,10 @@ summary.horizons_data <- function(object, ...) {
     if (uq_present) {
 
       uq_bundle  <- x$models$uq[[1]]
-      coverage   <- if (!is.null(uq_bundle$oof_coverage)) {
-        paste0(", OOF coverage = ", round(uq_bundle$oof_coverage * 100, 1), "%")
+      coverage   <- if (!is.null(uq_bundle$test_coverage) &&
+                        is.finite(uq_bundle$test_coverage)) {
+        paste0(", test coverage = ", round(uq_bundle$test_coverage * 100, 1),
+               "% on ", uq_bundle$n_test, " rows")
       } else {
         ""
       }
