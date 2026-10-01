@@ -1,4 +1,4 @@
-# horizons <img src="man/figures/logo.png" align="right" height="200" alt="horizons logo" />
+# horizons
 
 <!-- badges: start -->
 [![R-CMD-check](https://github.com/S-Leuthold/horizons/actions/workflows/R-CMD-check.yaml/badge.svg)](https://github.com/S-Leuthold/horizons/actions/workflows/R-CMD-check.yaml)
@@ -7,6 +7,8 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE.md)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.23090618.svg)](https://doi.org/10.5281/zenodo.23090618)
 <!-- badges: end -->
+
+<img src="man/figures/logo.png" align="right" height="250" alt="horizons logo" />
 
 horizons is an R package for building and comparing predictive models from mid-infrared (MIR) soil spectra. It reads spectra directly from Bruker OPUS files or CSVs and carries them through a whole modeling workflow. The core of its design is a factorial comparison: every combination of spectral preprocessing, feature selection and model type is evaluated side by side. The best models can then be stacked into ensembles to predict new samples, and horizons attempts to quantify the uncertainty of those predictions.
 
