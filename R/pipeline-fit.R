@@ -22,8 +22,16 @@
 #' must match the split's, value for value and in order, or `fit()` aborts
 #' with class `horizons_input_error`. The trim is reused, not recomputed, so
 #' `fit()` trains without exactly the rows `evaluate()` left out and scores
-#' on the same untrimmed test rows. Columns added since `evaluate()`, such
-#' as a sibling response from `add_response()`, are carried into the fit.
+#' on the same untrimmed test rows. A trim request `validate()` records
+#' after `evaluate()` therefore cannot reach the fit, and `fit()` refuses it
+#' rather than ignore it: when `validation$outliers$response_trim` differs
+#' from the trim `evaluate()` applied (one without the other, or another
+#' outcome, method or threshold), `fit()` aborts with class
+#' `horizons_input_error`, saying which differs. Re-running `evaluate()`
+#' applies the current request. A trim that drew no fences counts as
+#' applied, under the request it ran for. Columns added since `evaluate()`,
+#' such as a sibling response from `add_response()`, are carried into the
+#' fit.
 #' The count of NA-outcome rows, and the response trim, are reported in the
 #' console tree when `verbose = TRUE`. With UQ or AD on, the calibration set
 #' is carved out of Split F's training part. After a response trim it is
@@ -213,6 +221,13 @@ fit <- function(x,
   ## would carry that range's scoring into this fit. A cold start has no
   ## evaluate() rows to compare.
   if (!cold_start) check_evaluated_outcome_range(x, outcome_range)
+
+  ## evaluate() trimmed by the request validate() had recorded then, and
+  ## fit() reuses those rows rather than reading the request. validate() can
+  ## write a new request on an evaluated object, which would then be ignored,
+  ## silently, so a request that differs from the applied trim is refused
+  ## (#137). A cold start reads the request itself.
+  if (!cold_start) check_trim_request(x)
 
   ## Notes on the draws and the member count are printed inside the tree,
   ## after its header in Step 3; they used to print above it (#91).
@@ -1293,6 +1308,105 @@ check_evaluated_outcome_range <- function(x, outcome_range,
     "i" = "The members and their warm-start parameters were chosen on predictions clamped to that range.",
     "i" = "Re-run {.fn evaluate} on the object as it is now."
   ), class = "horizons_input_error", call = call)
+
+}
+
+## ---------------------------------------------------------------------------
+## check_trim_request — the trim evaluate() applied is the one requested
+## ---------------------------------------------------------------------------
+
+#' Refuse a fit whose response-trim request changed after evaluate()
+#'
+#' @description
+#' On the `evaluate()` path `fit()` reuses the trim `evaluate()` applied
+#' (`evaluation$response_trim`): the split already excludes the rows it
+#' trimmed, and fences recomputed here could fall on other rows. `validate()`
+#' writes its request (`validation$outliers$response_trim`) on an object of
+#' any class without resetting `evaluation`, so a request made after
+#' `evaluate()` would be ignored, silently (#137). This compares the two on
+#' what a request carries (`outcome`, `method`, `threshold`) and refuses when
+#' they differ: a request with no trim applied, a trim applied with no
+#' request, or another outcome, method or threshold. No request and no trim
+#' match.
+#'
+#' A trim that drew no fences (`skipped`, so nothing was trimmed) is still
+#' the trim `evaluate()` ran under, and compares like any other: it matches
+#' the request it ran for, and not a missing one, since the record the fit
+#' carries forward says a trim was requested.
+#'
+#' @param x A `horizons_eval` that was screened by `evaluate()`.
+#' @param call The call the condition is attributed to. Default: the caller,
+#'   `fit()`.
+#' @return `NULL`, invisibly. Aborts with class `horizons_input_error`,
+#'   saying what differs.
+#' @keywords internal
+#' @noRd
+check_trim_request <- function(x, call = rlang::caller_env()) {
+
+  requested <- trim_settings(x$validation$outliers$response_trim)
+  applied   <- trim_settings(x$evaluation$response_trim)
+
+  if (identical(requested, applied)) return(invisible(NULL))
+
+  ## What differs, one bullet per field when both exist
+  req_threshold <- format(requested$threshold)
+  app_threshold <- format(applied$threshold)
+
+  differs <- if (is.null(applied)) {
+
+    c("x" = "{.fn validate} requests a trim of {.field {requested$outcome}} at {req_threshold} x IQR, and {.fn evaluate} applied none.")
+
+  } else if (is.null(requested)) {
+
+    skip_note <- if (!is.na(x$evaluation$response_trim$skipped %||% NA_character_)) {
+      " (no fences could be drawn, so it trimmed no rows)"
+    } else {
+      ""
+    }
+
+    c("x" = "{.fn evaluate} applied a trim of {.field {applied$outcome}} at {app_threshold} x IQR{skip_note}, and {.fn validate} now requests none.")
+
+  } else {
+
+    c(
+      if (!identical(requested$outcome, applied$outcome)) {
+        c("x" = "The request is for {.field {requested$outcome}}; {.fn evaluate} trimmed {.field {applied$outcome}}.")
+      },
+      if (!identical(requested$method, applied$method)) {
+        c("x" = "The request's method is {.val {requested$method}}; {.fn evaluate} used {.val {applied$method}}.")
+      },
+      if (!identical(requested$threshold, applied$threshold)) {
+        c("x" = "The request's threshold is {req_threshold} x IQR; {.fn evaluate} trimmed at {app_threshold} x IQR.")
+      }
+    )
+
+  }
+
+  cli::cli_abort(c(
+    "{.fn validate}'s response-trim request differs from the trim {.fn evaluate} applied.",
+    differs,
+    "i" = "{.fn fit} reuses the rows {.fn evaluate} trimmed; it does not apply a request itself.",
+    "i" = "Re-run {.fn evaluate} to apply the current request, then {.fn fit}."
+  ), class = "horizons_input_error", call = call)
+
+}
+
+#' The fields a response-trim request and an applied trim share
+#'
+#' @param trim `validation$outliers$response_trim` or
+#'   `evaluation$response_trim`, or `NULL`.
+#' @return `NULL` when `trim` is, otherwise a list of `outcome`, `method`
+#'   (`"iqr"` when absent, as [response_trim_request()] reads it) and
+#'   `threshold`, normalized so the two records compare with `identical()`.
+#' @keywords internal
+#' @noRd
+trim_settings <- function(trim) {
+
+  if (is.null(trim)) return(NULL)
+
+  list(outcome   = as.character(trim$outcome %||% NA_character_),
+       method    = as.character(trim$method %||% "iqr"),
+       threshold = as.numeric(trim$threshold %||% NA_real_))
 
 }
 

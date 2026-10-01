@@ -105,8 +105,16 @@ as response outliers (\code{evaluation$response_trim$trimmed_ids}; see
 must match the split's, value for value and in order, or \code{fit()} aborts
 with class \code{horizons_input_error}. The trim is reused, not recomputed, so
 \code{fit()} trains without exactly the rows \code{evaluate()} left out and scores
-on the same untrimmed test rows. Columns added since \code{evaluate()}, such
-as a sibling response from \code{add_response()}, are carried into the fit.
+on the same untrimmed test rows. A trim request \code{validate()} records
+after \code{evaluate()} therefore cannot reach the fit, and \code{fit()} refuses it
+rather than ignore it: when \code{validation$outliers$response_trim} differs
+from the trim \code{evaluate()} applied (one without the other, or another
+outcome, method or threshold), \code{fit()} aborts with class
+\code{horizons_input_error}, saying which differs. Re-running \code{evaluate()}
+applies the current request. A trim that drew no fences counts as
+applied, under the request it ran for. Columns added since \code{evaluate()},
+such as a sibling response from \code{add_response()}, are carried into the
+fit.
 The count of NA-outcome rows, and the response trim, are reported in the
 console tree when \code{verbose = TRUE}. With UQ or AD on, the calibration set
 is carved out of Split F's training part. After a response trim it is

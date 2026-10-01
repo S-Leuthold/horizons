@@ -1,3 +1,9 @@
+# horizons (development version)
+
+## Bug fixes
+
+* `fit()` refuses an evaluated object whose response-trim request changed after `evaluate()`, instead of silently fitting with the trim `evaluate()` applied. `validate()` can record a new request on an evaluated object, but `fit()` reuses the rows `evaluate()` trimmed, so the new request never took effect. The error says what differs; re-run `evaluate()` to apply the current request (#137).
+
 # horizons 0.10.0
 
 First tagged release. It brings `main` up to date with the development branch, where horizons was rebuilt around an S3 approach: a single `horizons_data` object that each verb in the pipeline takes and returns, carrying the spectra, configuration, results and a record of how each step was run, from raw spectra to predictions. It is still pre-1.0, so the API may change between minor versions.
