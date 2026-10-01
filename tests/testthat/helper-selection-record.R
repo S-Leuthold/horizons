@@ -154,7 +154,7 @@ make_selected_object <- function(n_rows = 12L) {
   fx  <- make_select_fixture(n_pool = 40)
   ids <- fx$pool$data$analysis$sample_id[seq_len(n_rows)]
 
-  obj <- subset_rows(fx$pool, ids, record = FALSE)
+  obj <- subset_rows(fx$pool, ids)
 
   ## The three per-row meta columns the verb adds -----------------------------
 

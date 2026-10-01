@@ -67,12 +67,13 @@ fit_ensemble_weighted <- function(object,
   raw_weights <- weights$coef
 
   ## -------------------------------------------------------------------------
-  ## Step 2: Combined out-of-fold predictions (the Phase-2 UQ by-product)
+  ## Step 2: Combined out-of-fold predictions
   ## -------------------------------------------------------------------------
 
-  ## Weighted combination of the OOF member predictions. Carried on the
-  ## contract for Phase-2 ensemble UQ (conformal calibrates on these
-  ## residuals); not used for the Phase-1 point predictions.
+  ## Weighted combination of the OOF member predictions, stored as
+  ## ensemble$oof_predictions for inspection. Neither the point predictions
+  ## nor ensemble UQ use them: fit_ensemble_uq() calibrates on a fresh
+  ## partition of the members' CV predictions.
 
   oof_mat        <- as.matrix(oof$predictors[, paste0("member_", oof$members)])
   oof_combined   <- as.numeric(oof_mat %*% raw_weights)

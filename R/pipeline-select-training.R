@@ -561,7 +561,7 @@ select_training <- function(x, library,
   pm <- predictor_matrix(pool)
   tm <- predictor_matrix(x)
 
-  rc_check <- reconcile_axes(subset_rows(pool, pool$data$analysis$sample_id[1], record = FALSE), x)
+  rc_check <- reconcile_axes(subset_rows(pool, pool$data$analysis$sample_id[1]), x)
   sa       <- search_axis(pm$wavenumbers, tm$matrix, tm$wavenumbers)
 
   if (verbose) {
@@ -960,7 +960,7 @@ select_training <- function(x, library,
   ## standardization record describes the targets' axis, not the library's
   ## (#90). The checks and their warnings ran in Step 1.
 
-  drawn <- subset_rows(pool, union_ids, record = FALSE)
+  drawn <- subset_rows(pool, union_ids)
   rc    <- reconcile_axes(drawn, x, quiet = TRUE)
   out   <- rebuild_predictors(drawn, rc$matrix, rc$wavenumbers)
 

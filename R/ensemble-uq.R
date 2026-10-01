@@ -507,9 +507,9 @@ compute_ensemble_uq <- function(oof,
 #' retained, and the signed residuals CQR-style. Consumed by
 #' [predict.horizons_ensemble()] when `interval = TRUE`.
 #'
-#' Runs automatically inside [ensemble()] (`compute_uq = TRUE`); call it
-#' directly only to retrofit UQ onto an ensemble built with
-#' `compute_uq = FALSE` or to recalibrate at a different level.
+#' Runs inside [ensemble()] when `compute_uq = TRUE`. It is internal: to add
+#' UQ to an ensemble built with `compute_uq = FALSE`, re-run [ensemble()].
+#' The interval level is chosen at prediction time.
 #'
 #' Degrades gracefully: when calibration is impossible (fewer than
 #' `N_CALIB_MIN` rows, invalid order-statistic indices, or a fold refit

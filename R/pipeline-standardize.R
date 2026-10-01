@@ -759,14 +759,20 @@ standardize <- function(x,
     prior      <- x$provenance$standardization
     keep_prior <- !is.null(prior) && !sorted$sorted
 
+    ### The axis as it stands, recorded as the full path records it.
+    axis_vars <- x$data$role_map$variable[x$data$role_map$role == "predictor"]
+    axis_wn   <- suppressWarnings(as.numeric(gsub("^wn_", "", axis_vars)))
+
     x$provenance$standardization <- list(
-      resample     = NULL,
-      trim         = NULL,
-      remove_water = FALSE,
-      baseline     = FALSE,
-      resampled    = keep_prior && isTRUE(prior$resampled),
-      grid         = if (keep_prior) prior$grid else NULL,
-      applied_at   = Sys.time()
+      resample         = NULL,
+      trim             = NULL,
+      remove_water     = FALSE,
+      baseline         = FALSE,
+      resampled        = keep_prior && isTRUE(prior$resampled),
+      grid             = if (keep_prior) prior$grid else NULL,
+      applied_at       = Sys.time(),
+      n_wavelengths    = length(axis_vars),
+      wavelength_range = if (any(is.finite(axis_wn))) range(axis_wn, na.rm = TRUE) else c(NA_real_, NA_real_)
     )
 
     ### select_training()'s record of moving a pool onto its targets' axis

@@ -128,7 +128,7 @@ make_eval_object <- function(n = 40, n_wn = 10, n_configs = 2,
 legacy_label_removal <- function(hd, ids, reason = "response", outcome = "SOC",
                                  response_threshold = 1.5) {
 
-  x      <- subset_rows(hd, keep = !hd$data$analysis$sample_id %in% ids, record = FALSE)
+  x      <- subset_rows(hd, keep = !hd$data$analysis$sample_id %in% ids)
   reason <- rep_len(reason, length(ids))
 
   x$validation$outliers["removed_ids"]    <- list(ids)

@@ -59,41 +59,12 @@ test_that("subset_rows() output passes structural validation", {
 })
 
 
-test_that("subset_rows() records provenance by default", {
+test_that("subset_rows() writes no provenance of its own", {
 
   fx  <- make_select_fixture(n_pool = 40)
-  out <- subset_rows(fx$pool, c("P001", "P002"), reason = "test")
+  out <- subset_rows(fx$pool, c("P001", "P002"))
 
-  prov <- out$provenance$subset_rows
-  expect_type(prov, "list")
-  expect_length(prov, 1L)
-  expect_identical(prov[[1]]$n_before, 40L)
-  expect_identical(prov[[1]]$n_after,  2L)
-  expect_identical(prov[[1]]$reason,   "test")
-  expect_s3_class(prov[[1]]$applied_at, "POSIXct")
-
-})
-
-
-test_that("subset_rows() appends a second provenance entry on repeat", {
-
-  fx  <- make_select_fixture(n_pool = 40)
-  out <- subset_rows(fx$pool, sprintf("P%03d", 1:10), reason = "first")
-  out <- subset_rows(out,     sprintf("P%03d", 1:3),  reason = "second")
-
-  expect_length(out$provenance$subset_rows, 2L)
-  expect_identical(out$provenance$subset_rows[[2]]$n_before, 10L)
-  expect_identical(out$provenance$subset_rows[[2]]$reason,   "second")
-
-})
-
-
-test_that("subset_rows(record = FALSE) writes no provenance", {
-
-  fx  <- make_select_fixture(n_pool = 40)
-  out <- subset_rows(fx$pool, c("P001", "P002"), record = FALSE)
-
-  expect_null(out$provenance$subset_rows)
+  expect_identical(out$provenance, fx$pool$provenance)
 
 })
 
@@ -341,7 +312,7 @@ test_that("subset_rows() filters selection membership to surviving rows", {
   keep <- obj$data$analysis$sample_id[1:8]
 
   ## Act
-  out <- subset_rows(obj, keep, record = FALSE)
+  out <- subset_rows(obj, keep)
 
   ## Assert
   expect_setequal(unique(out$selection$membership$pool_id), keep)
@@ -355,7 +326,7 @@ test_that("subset_rows() refilters each group and recounts n_rows", {
   obj  <- make_selected_object(n_rows = 12L)
   keep <- obj$data$analysis$sample_id[1:8]
 
-  out <- subset_rows(obj, keep, record = FALSE)
+  out <- subset_rows(obj, keep)
 
   ## Every group's ids survive, and the count matches what is left of them
   for (i in seq_len(nrow(out$selection$groups))) {
@@ -377,7 +348,7 @@ test_that("subset_rows() recounts pool_sizes$drawn per property", {
   obj  <- make_selected_object(n_rows = 12L)
   keep <- obj$data$analysis$sample_id[1:5]
 
-  out <- subset_rows(obj, keep, record = FALSE)
+  out <- subset_rows(obj, keep)
 
   expect_identical(out$selection$pool_sizes$drawn, c(5L, 5L))
 
@@ -393,7 +364,7 @@ test_that("subset_rows() leaves the draw's own record alone", {
   obj  <- make_selected_object(n_rows = 12L)
   keep <- obj$data$analysis$sample_id[1:6]
 
-  out <- subset_rows(obj, keep, record = FALSE)
+  out <- subset_rows(obj, keep)
 
   expect_identical(out$selection$exclusions,       obj$selection$exclusions)
   expect_identical(out$selection$resemblance,      obj$selection$resemblance)
@@ -409,10 +380,10 @@ test_that("subset_rows() records rows_removed and accumulates it", {
 
   obj <- make_selected_object(n_rows = 12L)
 
-  out <- subset_rows(obj, obj$data$analysis$sample_id[1:9], record = FALSE)
+  out <- subset_rows(obj, obj$data$analysis$sample_id[1:9])
   expect_identical(out$selection$rows_removed, 3L)
 
-  out <- subset_rows(out, out$data$analysis$sample_id[1:5], record = FALSE)
+  out <- subset_rows(out, out$data$analysis$sample_id[1:5])
   expect_identical(out$selection$rows_removed, 7L)
 
 })
@@ -425,7 +396,7 @@ test_that("subset_rows() carries the per-row selection meta columns unchanged", 
   keep <- obj$data$analysis$sample_id[c(2, 5, 9)]
 
   ## Act
-  out <- subset_rows(obj, keep, record = FALSE)
+  out <- subset_rows(obj, keep)
 
   ## Assert — per-row facts, not aggregates, so they survive as they were
   expect_identical(out$data$analysis$.min_distance,
@@ -441,7 +412,7 @@ test_that("subset_rows() carries the per-row selection meta columns unchanged", 
 test_that("subset_rows() leaves a recomputed record that still validates", {
 
   obj <- make_selected_object(n_rows = 12L)
-  out <- subset_rows(obj, obj$data$analysis$sample_id[1:7], record = FALSE)
+  out <- subset_rows(obj, obj$data$analysis$sample_id[1:7])
 
   expect_no_error(validate_horizons_data(out))
 
@@ -458,7 +429,7 @@ test_that("subset_rows() recounts drawn for a global-scope record", {
   obj$selection$membership     <- obj$selection$membership[0, , drop = FALSE]
 
   ## Act
-  out <- subset_rows(obj, obj$data$analysis$sample_id[1:4], record = FALSE)
+  out <- subset_rows(obj, obj$data$analysis$sample_id[1:4])
 
   ## Assert
   expect_identical(out$selection$pool_sizes$drawn, c(4L, 4L))
@@ -487,7 +458,7 @@ test_that("a batch record whose rows have all left is not read as global", {
   obj$selection$membership <- obj$selection$membership[0, , drop = FALSE]
 
   ## Act
-  out <- subset_rows(obj, keep, record = FALSE)
+  out <- subset_rows(obj, keep)
 
   ## Assert — nothing is drawn, rather than all three rows
   expect_identical(out$selection$settings$scope, "batch")
@@ -510,7 +481,7 @@ test_that("subset_selection() keeps membership rows marked retained = FALSE", {
   obj$selection$membership <- dplyr::bind_rows(obj$selection$membership, dropped)
 
   ## Act
-  out <- subset_rows(obj, ids[1:6], record = FALSE)
+  out <- subset_rows(obj, ids[1:6])
 
   ## Assert
   expect_true("P999" %in% out$selection$membership$pool_id)

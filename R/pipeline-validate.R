@@ -515,11 +515,8 @@ validate <- function(x,
 
   if (remove_spectral && length(spectral_outlier_ids) > 0) {
 
-    ## validate() records the removal in x$validation$outliers below, so
-    ## the generic provenance entry is not needed here.
-    x <- subset_rows(x,
-                     keep   = !x$data$analysis$sample_id %in% spectral_outlier_ids,
-                     record = FALSE)
+    ## validate() records the removal in x$validation$outliers below.
+    x <- subset_rows(x, keep = !x$data$analysis$sample_id %in% spectral_outlier_ids)
 
     ## The detail keeps the columns earlier versions wrote, since the record
     ## accumulates across versions: a row removed on labels by one of them
