@@ -319,6 +319,17 @@ test_that("parse_ids() works with explicit patterns", {
 
 })
 
+test_that("parse_ids() with patterns keeps the id_pattern key, set to NULL", {
+
+  hd <- make_test_hd(c("PROJ-A_S100-1_rest", "PROJ-B_S200-2_rest"))
+
+  result <- parse_ids(hd, patterns = c(project = "[^_]+", "_", sampleid = "S\\d+-\\d+", "_.*"))
+
+  expect_true("id_pattern" %in% names(result$provenance))
+  expect_null(result$provenance$id_pattern)
+
+})
+
 test_that("parse_ids() patterns mode ignores unnamed patterns", {
 
   ## Arrange ---------------------------------------------------------------

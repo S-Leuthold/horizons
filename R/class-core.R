@@ -3,7 +3,7 @@
 ## -----------------------------------------------------------------------------
 ##
 ## Class hierarchy:
-##   horizons_data → horizons_eval → horizons_fit
+##   horizons_data → horizons_eval → horizons_fit → horizons_ensemble
 ##
 ## This file contains internal constructors (new_*) that build the object
 ## structure. User-facing constructors (spectra(), etc.) live in pipeline-*.R.
@@ -21,8 +21,8 @@
 #'
 #' @details
 #' The horizons_data class is the base of the class hierarchy (horizons_data →
-#' horizons_eval → horizons_fit). This constructor initializes all 9 sections
-#' with either provided values or NULL defaults:
+#' horizons_eval → horizons_fit → horizons_ensemble). This constructor
+#' initializes all 9 sections with either provided values or NULL defaults:
 #'
 #' 1. **data**: The analysis tibble and role_map
 #' 2. **provenance**: Source files, transforms applied, version info
@@ -44,9 +44,10 @@
 #' row per target-property-pool_id draw, with distance and rank), `groups`
 #' (one row per scope group, carrying its target and pool ids), `pool_sizes`
 #' (drawn and available per property), `target_distances`, `resemblance`,
-#' `exclusions` (twins dropped from a neighbourhood), `clustering` and
-#' `timestamp`. `subset_rows()` recomputes the row-level parts and records
-#' `rows_removed` when rows leave afterwards.
+#' `exclusions` (twins dropped from a neighbourhood), `n_excluded_union` (twin
+#' rows removed from the union), `short_draws` (draws that fell short of `k`),
+#' `clustering` and `timestamp`. When rows leave afterwards, `set_analysis()`
+#' recomputes the row-level parts and records `rows_removed`.
 #'
 #' Derived values (n_rows, n_predictors, n_covariates, n_responses) are
 #' computed from the provided data rather than passed as arguments. This
@@ -58,17 +59,13 @@
 #'
 #' @param analysis `tibble or NULL.` The analysis data in wide format with
 #'   sample_id column and wavelength columns as predictors. Default: `NULL`.
-#' @param role_map `tibble or NULL.` Maps variable names to roles (id, predictor,
-#'   covariate, outcome, meta). Must have columns `variable` and `role`.
-#'   Default: `NULL`.
+#' @param role_map `tibble or NULL.` Maps variable names to roles (id,
+#'   predictor, outcome, response, meta, covariate). Must have columns
+#'   `variable` and `role`. Default: `NULL`.
 #' @param spectra_source `character or NULL.` Path to source spectra files.
 #'   Default: `NULL`.
-#' @param spectra_type `character or NULL.` Type of spectra source (e.g., "opus",
-#'   "csv", "asd"). Default: `NULL`.
-#' @param response_source `character or NULL.` Path to response data file.
-#'   Default: `NULL`.
-#' @param ossl_properties `character vector or NULL.` Properties requested from
-#'   OSSL library predictions. Default: `NULL`.
+#' @param spectra_type `character or NULL.` Type of spectra source: "opus",
+#'   "csv" or "tibble". Default: `NULL`.
 #'
 #' @return `horizons_data`. An unvalidated horizons_data object with class
 #'   `c("horizons_data", "list")`.
@@ -77,12 +74,10 @@
 #'   `spectra()` for user-facing construction.
 #'
 #' @noRd
-new_horizons_data <- function(analysis        = NULL,
-                              role_map        = NULL,
-                              spectra_source  = NULL,
-                              spectra_type    = NULL,
-                              response_source = NULL,
-                              ossl_properties = NULL) {
+new_horizons_data <- function(analysis       = NULL,
+                              role_map       = NULL,
+                              spectra_source = NULL,
+                              spectra_type   = NULL) {
 
  ## ----------------------------------------------------------------------------
  ## Compute derived counts from role_map
@@ -130,18 +125,14 @@ new_horizons_data <- function(analysis        = NULL,
 
     provenance = list(spectra_source   = spectra_source,
                       spectra_type     = spectra_type,
-                      response_source  = response_source,
-                      ossl_properties  = ossl_properties,
                       created          = Sys.time(),
                       horizons_version = utils::packageVersion("horizons"),
                       schema_version   = 1L,
 
     ## Transform provenance (updated by pipeline verbs) ------------------------
 
-                      preprocessing        = NULL,
-                      preprocessing_params = list(),
-                      id_pattern           = NULL,
-                      aggregation_by       = NULL),
+                      id_pattern     = NULL,
+                      aggregation_by = NULL),
 
     ## -------------------------------------------------------------------------
     ## Section 3: CONFIG — Model configurations
@@ -150,12 +141,14 @@ new_horizons_data <- function(analysis        = NULL,
     config = list(configs   = NULL,
                   n_configs = NULL,
 
-                  tuning = list(grid_size     = 10L,
-                                bayesian_iter = 15L,
-                                cv_folds      = 5L),
+                  ## Same shape and defaults as configure() writes.
+                  tuning = list(cv_folds            = 5L,
+                                grid_size           = 10L,
+                                bayesian_iter       = 15L,
+                                final_bayesian_iter = DEFAULT_FINAL_BAYES_ITER),
 
-                  ## Written by configure(): list(sg_window, sg_window_cm,
-                  ## pca_threshold), the settings build_recipe() applies to
+                  ## Written by configure(): list(sg_window, pca_threshold),
+                  ## the settings build_recipe() applies to
                   ## every config. NULL until then, and on objects configured
                   ## before it existed; see recipe_settings().
                   recipe = NULL,
@@ -165,7 +158,12 @@ new_horizons_data <- function(analysis        = NULL,
                   ## NULL until then, and on objects configured before it
                   ## existed, which read as c(0, Inf); see
                   ## outcome_range_setting().
-                  outcome_range = NULL),
+                  outcome_range = NULL,
+
+                  ## Written by configure(): the arguments it was given
+                  ## (outcome, models, transformations, preprocessing,
+                  ## feature_selection, expand_covariates, cov_fusion).
+                  expansion = NULL),
 
     ## -------------------------------------------------------------------------
     ## Section 4: VALIDATION — Pre-flight check results
@@ -215,7 +213,7 @@ new_horizons_data <- function(analysis        = NULL,
                   best_config       = NULL,  ## character: top config_id (best-first order)
                   rank_metric       = NULL,  ## character: metric configs were ranked by
                   predictor_schema  = NULL,  ## character: training-axis predictor columns
-                  response_bound    = NULL,  ## numeric: deploy-time winsorization bound (compute_response_bound(); max training outcome * margin under the default range)
+                  response_bound    = NULL,  ## numeric: deploy-time winsorization bound (compute_response_bound(): max + 0.5 * (max - anchor), capped at a finite upper bound of outcome_range)
                   cv_predictions    = NULL,  ## tibble: .row, .fold, config_id, .pred, .pred_trans, truth
                   results           = NULL,  ## tibble: config_id, status, degraded, metrics, etc.
                   split             = NULL,  ## rsplit: Split F (train_F / test_F)
@@ -2792,11 +2790,9 @@ summary.horizons_data <- function(object, ...) {
   prov_items <- c(
     !is.null(x$provenance$spectra_source),
     !is.null(x$provenance$spectra_type),
-    !is.null(x$provenance$response_source),
     TRUE,  # created (always present)
     TRUE,  # horizons_version (always present)
     TRUE,  # schema_version (always present)
-    !is.null(x$provenance$preprocessing),
     !is.null(x$provenance$aggregation_by)
   )
   n_prov <- sum(prov_items)
@@ -2815,10 +2811,6 @@ summary.horizons_data <- function(object, ...) {
     cat(paste0("   ", get_branch(), " Spectra type: ", x$provenance$spectra_type, "\n"))
   }
 
-  if (!is.null(x$provenance$response_source)) {
-    cat(paste0("   ", get_branch(), " Response source: ", x$provenance$response_source, "\n"))
-  }
-
   # Created timestamp
   created_str <- format(x$provenance$created, "%Y-%m-%d %H:%M:%S")
   cat(paste0("   ", get_branch(), " Created: ", created_str, "\n"))
@@ -2828,10 +2820,6 @@ summary.horizons_data <- function(object, ...) {
 
   # Schema version
   cat(paste0("   ", get_branch(), " Schema version: ", x$provenance$schema_version, "\n"))
-
-  if (!is.null(x$provenance$preprocessing)) {
-    cat(paste0("   ", get_branch(), " Preprocessing: ", x$provenance$preprocessing, "\n"))
-  }
 
   if (!is.null(x$provenance$aggregation_by)) {
     cat(paste0("   ", get_branch(), " Aggregation: ", x$provenance$aggregation_by, "\n"))

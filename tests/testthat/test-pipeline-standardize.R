@@ -648,6 +648,12 @@ test_that("force = TRUE with every operation off keeps the grid an earlier call 
                    on_4$provenance$standardization$grid)
   expect_identical(predictor_names(again), predictor_names(on_4))
 
+  ## The no-op record describes the axis the way the full path does
+  expect_identical(again$provenance$standardization$n_wavelengths,
+                   on_4$provenance$standardization$n_wavelengths)
+  expect_equal(again$provenance$standardization$wavelength_range,
+               on_4$provenance$standardization$wavelength_range)
+
 })
 
 
@@ -909,7 +915,7 @@ test_that("standardize(baseline = TRUE) runs on a single sample, with and withou
   ## Off-grid: stored increasing and off the grid, so resample = 4 really
   ## interpolates; three random spectra, so the rows differ in shape
   batch  <- make_axis_spectra(OFFGRID_WN)
-  single <- subset_rows(batch, "s2", record = FALSE)
+  single <- subset_rows(batch, "s2")
 
   for (res in list(NULL, 4)) {
 
@@ -928,7 +934,7 @@ test_that("standardize(baseline = TRUE) runs on a single sample, with and withou
 test_that("a single sample standardizes as its row of a batch, under every option (#78)", {
 
   batch  <- make_axis_spectra(OFFGRID_WN)
-  single <- subset_rows(batch, "s2", record = FALSE)
+  single <- subset_rows(batch, "s2")
 
   opts <- expand.grid(resample     = c(NA, 4),
                       trim         = c(FALSE, TRUE),

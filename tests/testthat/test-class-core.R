@@ -58,7 +58,6 @@ test_that("new_horizons_data initializes provenance section correctly", {
   expect_true(is.list(obj$provenance))
   expect_true("spectra_source" %in% names(obj$provenance))
   expect_true("spectra_type" %in% names(obj$provenance))
-  expect_true("response_source" %in% names(obj$provenance))
   expect_true("created" %in% names(obj$provenance))
   expect_true("horizons_version" %in% names(obj$provenance))
   expect_true("schema_version" %in% names(obj$provenance))
@@ -1509,8 +1508,7 @@ test_that("summary.horizons_data shows full provenance", {
   ## Arrange
   obj <- new_horizons_data(
     spectra_source = "/path/to/spectra",
-    spectra_type = "opus",
-    response_source = "/path/to/response.csv"
+    spectra_type = "opus"
   )
 
   ## Act
@@ -1520,7 +1518,6 @@ test_that("summary.horizons_data shows full provenance", {
   expect_true(any(grepl("(?i)provenance", output)))
   expect_true(any(grepl("/path/to/spectra", output)))
   expect_true(any(grepl("opus", output)))
-  expect_true(any(grepl("response", output)))
 
 })
 
@@ -2562,7 +2559,7 @@ test_that("summary.horizons_data reports rows removed since the draw", {
   keep <- obj$data$analysis$sample_id[1:10]
 
   ## Act
-  out    <- subset_rows(obj, keep, record = FALSE)
+  out    <- subset_rows(obj, keep)
   output <- capture.output(summary(out))
 
   ## Assert

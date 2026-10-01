@@ -390,7 +390,9 @@ parse_ids <- function(x,
     applied_at    = Sys.time()
   )
 
-  x$provenance$id_pattern <- format
+  ### list() keeps the key when format is NULL (patterns = was used);
+  ### `$<-` with NULL would delete it.
+  x$provenance["id_pattern"] <- list(format)
 
   ## -------------------------------------------------------------------------
   ## Step 8b: Re-validate

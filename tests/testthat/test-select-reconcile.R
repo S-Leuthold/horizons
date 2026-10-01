@@ -103,7 +103,7 @@ test_that("reconcile_axes() passes an identical grid through untouched", {
   fx <- make_select_fixture(n_pool = 20)
 
   ## Targets on the pool's own grid: use pool rows as targets
-  same <- subset_rows(fx$pool, c("P001", "P002"), record = FALSE)
+  same <- subset_rows(fx$pool, c("P001", "P002"))
 
   out <- reconcile_axes(fx$pool, same)
 

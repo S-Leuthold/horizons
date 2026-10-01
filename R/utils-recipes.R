@@ -113,9 +113,9 @@ build_recipe <- function(config_row,
 
   ## Assign roles -----------------------------------------------------------
 
-  ## `id` is the one non-predictor role that stays required at bake. It is the
-  ## key `predict()` joins its output back on, so a batch arriving without it is
-  ## a caller error worth aborting on. The hold roles below are the opposite
+  ## `id` is the one non-predictor role that stays required at bake. It is how
+  ## `predict()` labels each prediction with its sample, so a batch arriving
+  ## without it is a caller error worth aborting on. The hold roles below are the opposite
   ## case: they exist only in the training table, so requiring them would make
   ## every legitimate prediction batch fail.
   rec <- recipes::update_role(rec, dplyr::all_of(id_col), new_role = "id")

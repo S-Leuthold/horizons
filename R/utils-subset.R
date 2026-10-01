@@ -371,14 +371,13 @@ set_analysis <- function(x, analysis, role_map = NULL) {
 #' in `selection$rows_removed`. The per-row `.drawn_by`, `.min_distance` and
 #' `.group` columns are per-row facts and survive the subset unchanged.
 #'
+#' The calling verb records the subset in its own terms (`validate()` in its
+#' removal record, `select_training()` in the selection record); this
+#' function writes no provenance of its own.
+#'
 #' @param x [horizons_data.] The object to subset.
 #' @param keep [Character or logical.] `sample_id`s to keep, or a logical
 #'   vector of length `n_rows`. Every id must exist and none may repeat.
-#' @param reason [Character or NULL.] Why the subset was taken, stored in the
-#'   provenance entry. Default: `NULL`.
-#' @param record [Logical.] Append an entry to `x$provenance$subset_rows`.
-#'   Set `FALSE` when the calling verb records the operation itself.
-#'   Default: `TRUE`.
 #'
 #' @return [horizons_data.] The subset. Errors of class
 #'   `horizons_input_error` on a promoted object, or on unknown, duplicated
@@ -386,7 +385,7 @@ set_analysis <- function(x, analysis, role_map = NULL) {
 #'
 #' @seealso [set_analysis()], [subset_selection()]
 #' @noRd
-subset_rows <- function(x, keep, reason = NULL, record = TRUE) {
+subset_rows <- function(x, keep) {
 
   if (!inherits(x, "horizons_data")) {
 
@@ -460,22 +459,7 @@ subset_rows <- function(x, keep, reason = NULL, record = TRUE) {
   ## Apply ---------------------------------------------------------------------
 
   ## set_analysis() recomputes the selection record for the surviving rows.
-  x <- set_analysis(x, analysis[rows, , drop = FALSE])
-
-  if (isTRUE(record)) {
-
-    entry <- list(
-      n_before   = n_before,
-      n_after    = length(rows),
-      reason     = reason,
-      applied_at = Sys.time()
-    )
-
-    x$provenance$subset_rows <- c(x$provenance$subset_rows, list(entry))
-
-  }
-
-  x
+  set_analysis(x, analysis[rows, , drop = FALSE])
 
 }
 
