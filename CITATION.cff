@@ -1,0 +1,18 @@
+cff-version: 1.2.0
+message: "If you use horizons, please cite it as below."
+type: software
+title: "horizons: Build and compare predictive models for mid-infrared soil spectroscopy in R"
+abstract: "horizons is an R package for building and comparing predictive models from mid-infrared (MIR) soil spectra. It reads spectra from Bruker OPUS files or CSVs, evaluates every combination of spectral preprocessing, feature selection and model type side by side, stacks the best models into ensembles, and quantifies the uncertainty of predictions on new samples."
+authors:
+  - family-names: Leuthold
+    given-names: Sam
+    orcid: "https://orcid.org/0000-0003-4180-7081"
+    affiliation: Colorado State University
+repository-code: "https://github.com/S-Leuthold/horizons"
+license: MIT
+keywords:
+  - soil spectroscopy
+  - mid-infrared
+  - machine learning
+  - tidymodels
+  - R

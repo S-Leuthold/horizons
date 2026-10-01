@@ -1,190 +1,115 @@
-# horizons
+# horizons <img src="man/figures/logo.png" align="right" height="200" alt="horizons logo" />
 
-> Spectral Ensemble Modeling for Soil Property Prediction
-
-<img src="man/figures/logo.png" alt="horizons logo" align="right" width="140"/>
-
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE.md)
+<!-- badges: start -->
 [![R-CMD-check](https://github.com/S-Leuthold/horizons/actions/workflows/R-CMD-check.yaml/badge.svg)](https://github.com/S-Leuthold/horizons/actions/workflows/R-CMD-check.yaml)
 [![Codecov](https://codecov.io/gh/S-Leuthold/horizons/branch/main/graph/badge.svg)](https://codecov.io/gh/S-Leuthold/horizons)
-[![Lifecycle: experimental](https://img.shields.io/badge/lifecycle-experimental-orange.svg)](https://lifecycle.r-lib.org/articles/stages.html)
+[![Project Status: WIP](https://www.repostatus.org/badges/latest/wip.svg)](https://www.repostatus.org/#wip)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE.md)
+<!-- badges: end -->
 
----
+horizons is an R package for building and comparing predictive models from mid-infrared (MIR) soil spectra. It reads spectra directly from Bruker OPUS files or CSVs and carries them through a whole modeling workflow. The core of its design is a factorial comparison: every combination of spectral preprocessing, feature selection and model type is evaluated side by side. The best models can then be stacked into ensembles to predict new samples, and horizons attempts to quantify the uncertainty of those predictions.
 
-## Overview
+This package grew out of my own analysis scripts over the last year and a half. At first it was necessity: running these comparisons in parallel meant the code had to live in a package. Along the way I've spent a lot of time fiddling with it, somewhere between a passion project and my day job. It's the same workflow I use for all my MIR work, and hopefully it's useful to others thinking about the same problems. It's still under active development, and I'll keep maintaining and updating it, but it continues to be a work in progress.
 
-`horizons` is an R package for predicting soil properties from mid-infrared (MIR) spectra. Built on the `tidymodels` ecosystem, it provides end-to-end workflows for spectral preprocessing, model training, hyperparameter tuning, and ensemble stacking.
-
-The package supports two prediction modes:
-
-- **Custom Training**: Build and evaluate models on your own calibration data with systematic hyperparameter optimization and ensemble stacking
-- **Library Prediction** *(in development)*: Predict a batch of unknowns against a reference library without holding lab values of your own. `select_training()` draws a training set out of the library around the batch, and the ordinary fitting pipeline runs on it, with uncertainty quantification. The first registered library is the USDA KSSL soil characterization database
-
-Designed for soil scientists and environmental researchers, `horizons` emphasizes reproducibility, modularity, and scalability from desktop to HPC environments.
-
----
+> [!NOTE]
+> horizons is pre-1.0. The pipeline runs end to end, but the API can still change between minor versions. It is not on CRAN.
 
 ## Installation
 
 ```r
-# Install from GitHub
+# install.packages("remotes")
 remotes::install_github("S-Leuthold/horizons")
 ```
 
-### Dependencies
+Two dependencies are not on CRAN and are pinned in the `Remotes` field of `DESCRIPTION`, so `remotes::install_github()` installs them automatically:
 
-Two dependencies are not on CRAN and are pinned in the `Remotes` field of `DESCRIPTION`, so `remotes::install_github()` picks them up automatically:
+- [`spectral-cockpit/opusreader2`](https://github.com/spectral-cockpit/opusreader2) reads Bruker OPUS files.
+- [`S-Leuthold/plsmod-fork`](https://github.com/S-Leuthold/plsmod-fork) is a fork of `plsmod` with a fix the `plsr` model type needs during tuning.
 
-- **`spectral-cockpit/opusreader2`** — reads Bruker OPUS binary files, which is how `spectra()` ingests raw spectra.
-- **`S-Leuthold/plsmod-fork@fix/plsr-tune-grid-dimension`** — a fork of `plsmod`. The CRAN version drops a dimension when `tune::tune_grid()` passes a single-column matrix, which makes the `plsr` model type fail during tuning; the fork carries the `drop = FALSE` fix.
-
-One further dependency comes from Bioconductor rather than CRAN, and `install.packages()` cannot find it. The PLS similarity space in `select_training(space = "pls")` and the `plsr` model type both route through the `mixOmics` engine, so install it first if you plan to use either:
+The PLS model and the PLS similarity space in `select_training()` use `mixOmics`, which comes from Bioconductor. Install it first if you need either:
 
 ```r
 BiocManager::install("mixOmics")
 ```
 
-Everything else installs from CRAN as an ordinary dependency.
-
----
-
-## Key Features
-
-### Data Ingestion
-
-- Read OPUS files directly with automatic metadata extraction
-- Flexible filename parsing for sample identification
-- Merge spectral data with laboratory measurements
-
-### Spectral Preprocessing
-
-- Standard Normal Variate (SNV) normalization
-- Savitzky-Golay smoothing and derivatives
-- Multiplicative Scatter Correction (MSC)
-- Baseline correction methods
-
-### Training Set Selection
-
-- `select_training()` draws a training set from a reference pool around the batch you actually want to predict, taking each target's nearest pool rows in a spectral similarity space
-- The result is an ordinary `horizons_data`, so `configure()`, `validate()`, `evaluate()`, `fit()` and `predict()` run on it unchanged
-
-### Model Training
-
-- Nine supported algorithms: Random Forest, Cubist, XGBoost, PLSR, Elastic Net, SVM, MARS, MLP, LightGBM
-- Two-stage hyperparameter tuning (grid search + Bayesian optimization)
-- Cross-validation with stratified or grouped folds
-- Parallel execution (local multi-core or HPC clusters)
-
-### Ensemble Methods
-
-- Stacked ensemble models using `stacks`
-- Weighted model averaging
-- Automatic model selection based on performance metrics
-
-### Covariate Integration
-
-- Predict soil covariates (pH, clay, sand) from spectra using OSSL-trained models
-- Fetch climate data (MAT, MAP, GDD) from Daymet API
-- Incorporate covariates into prediction models
-
-### Performance Metrics
-
-- Standard metrics: RMSE, R², MAE
-- Spectroscopy-specific: RPD (Ratio of Performance to Deviation), RPIQ
-- Agreement metrics: Concordance Correlation Coefficient (CCC)
-- Relative metrics: RRMSE (Relative RMSE)
-
----
-
-## Quick Start
+## The pipeline
 
 ```r
 library(horizons)
 
-# Define project structure
-projects <- project_list(
- "my_study" = project_entry(
-   spectra_path        = "path/to/opus_files/",
-   sample_obs          = "path/to/lab_data.csv",
-   file_name_format    = "project_sampleid_replicate",
-   file_name_delimiter = "_"
- )
-)
+hz <- spectra("path/to/opus_files") |>             # read spectra (OPUS files or CSV)
+  parse_ids(format = "{sampleid}_{replicate}") |>  # sample IDs from the file names
+  average() |>                                     # average replicate scans
+  standardize() |>                                 # common wavenumber grid
+  add_response(source = lab_data, variable = "SOC") |>
+  configure(
+    models            = c("rf", "cubist", "plsr"),
+    preprocessing     = c("snv", "snv_deriv1"),
+    feature_selection = c("none", "pca"),
+    transformation    = c("none", "log")
+  ) |>
+  validate() |>                                    # pre-flight checks
+  evaluate() |>                                    # cross-validate every configuration
+  fit(n_best = 3)                                  # refit the best, with intervals
 
-# Load and preprocess data
-project_data <- create_project_data(
- projects  = projects,
- variables = "total_carbon"
-)
+new_spectra <- spectra("path/to/new_files") |>     # prepared like the training spectra
+  parse_ids(format = "{sampleid}_{replicate}") |>
+  average() |>
+  standardize()
 
-# Configure model grid
-configs <- create_project_configurations(
- project_data    = project_data,
- models          = c("random_forest", "cubist", "xgboost"),
- transformations = c("None", "Log"),
- preprocessing   = c("snv", "snv_d1")
-)
-
-# Run evaluation
-evaluate_models_local(
- config     = configs,
- input_data = project_data,
- output_dir = "results/"
-)
-
-# Build ensemble
-ensemble <- build_ensemble_stack(
- results_dir = "results/",
- input_data  = project_data,
- n_best      = 10
-)
+predict(hz, new_spectra)                           # predictions, intervals, flags
 ```
 
----
+To run the whole pipeline on synthetic spectra, with no data of your own, see [`inst/examples/end-to-end-pipeline.R`](inst/examples/end-to-end-pipeline.R).
 
-## Roadmap
+### Main verbs
 
-### Current (v0.9.0)
+- `spectra()` reads spectra from Bruker OPUS files or CSV.
+- `parse_ids()` pulls sample identifiers out of OPUS file names, and `average()` averages replicate scans.
+- `standardize()` puts spectra on a common wavenumber grid.
+- `add_response()` joins laboratory measurements to the spectra.
+- `configure()` sets up the factorial comparison across models (random forest, Cubist, XGBoost, LightGBM, PLS regression, elastic net, SVM, neural network, MARS), spectral preprocessing (raw, Savitzky-Golay, SNV, first and second derivatives), feature selection (PCA, correlation, Boruta, CARS) and response transformations (log, log10, square root).
+- `validate()` checks the data and the grid before anything runs.
+- `evaluate()` tunes and cross-validates every configuration, in parallel on any [future](https://future.futureverse.org) backend.
+- `fit()` refits the best configurations, with conformal prediction intervals and an applicability-domain check.
+- `ensemble()` stacks fitted models into an ensemble.
+- `predict()` predicts new samples, with intervals and applicability flags.
+- `select_training()` draws a training set from a reference spectral library, such as the Kellogg Soil Survey Laboratory MIR library from the Open Soil Spectral Library, for samples without laboratory measurements of their own.
 
-- Custom training mode with full ensemble pipeline
-- Local and HPC execution backends
-- 80%+ test coverage
+## Current development
 
-### In Development
-
-- **Library Prediction Mode**: Training-set selection is built (`select_training()`), and so is the library it draws from: `library =` takes a registered name (`"kssl"`, built on your machine from the Open Soil Spectral Library's public files on first use), a path, or your own `horizons_data`.
-- **Uncertainty Quantification**: Per-sample prediction intervals with conformal calibration
-- **Applicability Domain**: Distance-based reliability metrics for new samples
-
-### Planned
-
-- JOSS publication
-- Vignettes with reproducible examples
-- Instrument calibration transfer methods
-
----
-
-## Citation
-
-If you use `horizons` in your research, please cite:
-
-```text
-Leuthold, S. (2025). horizons: Spectral Ensemble Modeling for Soil Property
-Prediction. R package version 0.9.0. https://github.com/S-Leuthold/horizons
-```
-
----
+- Multiple approaches to cross-validation, including holding out whole sites or fields.
+- Modeling several soil properties at once, including compositional properties such as texture.
+- Training on local samples combined with a reference library.
+- Better parallelism, with lower memory use per worker and nested parallelism across configurations and folds.
 
 ## Contributing
 
-Contributions are welcome. Please open an issue to discuss proposed changes or submit a pull request.
+Contributions to horizons are more than welcome. If you work with mid-infrared spectra, I'd encourage you to try these methods on your own data and tell me where they break, what doesn't make sense, or which methods might be better suited to a given step. Feel free to open an issue, ask a question or open a pull request, or email me at sam.leuthold@colostate.edu. [CONTRIBUTING.md](CONTRIBUTING.md) has the practical details.
 
-### Getting help
+## Citation
 
-If something is broken or unclear, open an issue at https://github.com/S-Leuthold/horizons/issues — that is the fastest route and it leaves a record other users can find. For questions that do not fit an issue, email the maintainer, Sam Leuthold, at sam.leuthold@colostate.edu.
+If you use horizons, please cite the package:
 
----
+```
+Leuthold, S. (2026). horizons: Build and compare predictive models for
+mid-infrared soil spectroscopy in R. https://github.com/S-Leuthold/horizons
+```
+
+GitHub's "Cite this repository" button, under the About section, gives the same citation in other formats.
 
 ## License
 
-MIT © 2025 Sam Leuthold
+MIT. See [`LICENSE.md`](LICENSE.md).
+
+## Acknowledgements
+
+horizons stands on a lot of other people's work.
+
+The spectral side relies on [prospectr](https://github.com/l-ramirez-lopez/prospectr) (Antoine Stevens and Leonardo Ramirez-Lopez) for preprocessing and [opusreader2](https://github.com/spectral-cockpit/opusreader2) (Philipp Baumann, Thomas Knecht and Pierre Roudier) for reading OPUS files. Library mode uses the [Open Soil Spectral Library](https://soilspectroscopy.org) (José Safanelli, Jonathan Sanderman and colleagues) and the MIR library of the [USDA NRCS Kellogg Soil Survey Laboratory](https://ncsslabdatamart.sc.egov.usda.gov).
+
+The modeling is built on [tidymodels](https://www.tidymodels.org) (Max Kuhn and the tidymodels team), and the parallelism on [future](https://future.futureverse.org) (Henrik Bengtsson). Feature selection includes [Boruta](https://gitlab.com/mbq/Boruta/) (Miron Kursa and Witold Rudnicki) and competitive adaptive reweighted sampling (CARS; Li et al., 2009). The prediction intervals use quantile forests from [ranger](https://github.com/imbs-hl/ranger) (Marvin Wright and colleagues) with conformalized quantile regression (Romano, Patterson and Candès, 2019), and the applicability-domain check uses the shrinkage covariance estimator in [corpcor](https://strimmerlab.github.io/software/corpcor/) (Juliane Schäfer, Korbinian Strimmer and colleagues).
+
+Part of the development of horizons was supported by the USDA National Institute of Food and Agriculture and the National Science Foundation National AI Research Institutes Competitive Award no. 2023-67021-39829.
+
+*horizons has been developed using Claude Code to implement, test and review changes. The design of the package, and the architectural decisions that underpin the science, remain mine.*

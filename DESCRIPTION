@@ -1,21 +1,20 @@
 Package: horizons
-Title: Spectral Ensemble Modeling and Covariate Prediction for Soil Data
+Title: Build and Compare Predictive Models for Mid-Infrared Soil Spectroscopy
 Version: 0.9.0
-Author: Sam Leuthold [aut, cre]
-Maintainer: Sam Leuthold <sam.leuthold@colostate.edu>
 Authors@R: 
-    person(given  = "Sam",
-           family = "Leuthold",
-           email  = "sam.leuthold@colostate.edu",
-           role   = c("aut", "cre"))
-Description: Tools for constructing, tuning, and evaluating stacked ensemble models
-    for soil property prediction using mid-infrared (MIR) spectroscopy. Includes
-    modular workflows for spectral preprocessing, response transformation, covariate
-    integration, and model stacking using the 'tidymodels' ecosystem. Covariates can
-    also be predicted directly from spectra using a locally-weighted Cubist modeling
-    approach trained on global OSSL data. Designed for reproducible, high-throughput
-    modeling pipelines with support for clustered calibration, caching, and parallel
-    execution on high-performance systems.
+    person(given   = "Sam",
+           family  = "Leuthold",
+           email   = "sam.leuthold@colostate.edu",
+           role    = c("aut", "cre"),
+           comment = c(ORCID = "0000-0003-4180-7081"))
+Description: Builds and compares predictive models from mid-infrared (MIR)
+    soil spectra. Reads spectra from Bruker OPUS files or tables, evaluates
+    every combination of spectral preprocessing, feature selection, response
+    transformation and model type under one cross-validation design, refits
+    the best configurations with conformal prediction intervals and an
+    applicability-domain check, and stacks them into ensembles. Training sets
+    can also be drawn from a reference spectral library. Built on the
+    'tidymodels' framework, with parallel execution through 'future'.
 License: MIT + file LICENSE
 URL: https://github.com/S-Leuthold/horizons
 BugReports: https://github.com/S-Leuthold/horizons/issues
