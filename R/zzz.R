@@ -17,7 +17,7 @@ NULL
 ## non-standard-evaluation names used inside dplyr/tidyr pipelines. These are
 ## pipeline references (.metric/.estimate = yardstick output columns), not real
 ## globals. The magrittr dot is gone along with magrittr itself — the package
-## uses the base pipe throughout, per .claude/rules/r-analysis.md.
+## uses the base pipe throughout.
 utils::globalVariables(c(".metric", ".estimate"))
 
 

@@ -903,15 +903,15 @@ test_that("targets on an instrument's own axis give the resampled pool a NULL gr
 
   fx <- make_select_fixture(n_pool = 100)
 
-  ## MOYS-shaped, 599.74 + 1.93 k: on no canonical grid, and starting 0.26
+  ## Off-grid, 599.74 + 1.93 k: on no canonical grid, and starting 0.26
   ## cm-1 below the pool's 600, inside half its 4 cm-1 spacing, so the lowest
   ## column is taken at the pool's endpoint and the clamp is recorded
-  moys_wn <- rev(599.74 + 1.93 * (0:1761))
+  offgrid_wn <- rev(599.74 + 1.93 * (0:1761))
 
   set.seed(3)
-  m <- rbind(gaussian_family(4, moys_wn, centres = c(3400, 2920, 1630, 1030)),
-             gaussian_family(4, moys_wn, centres = c(3620, 2515, 1420, 870)))
-  colnames(m) <- paste0("wn_", moys_wn)
+  m <- rbind(gaussian_family(4, offgrid_wn, centres = c(3400, 2920, 1630, 1030)),
+             gaussian_family(4, offgrid_wn, centres = c(3620, 2515, 1420, 870)))
+  colnames(m) <- paste0("wn_", offgrid_wn)
 
   tbl <- dplyr::bind_cols(tibble::tibble(sample_id = sprintf("M%02d", 1:8)),
                           tibble::as_tibble(m))
@@ -940,9 +940,9 @@ test_that("targets on an instrument's own axis give the resampled pool a NULL gr
   expect_true("grid" %in% names(rec))
   expect_null(rec$grid)
   expect_identical(rec$n_wavelengths, length(wn))
-  expect_identical(rec$n_wavelengths, length(moys_wn))
+  expect_identical(rec$n_wavelengths, length(offgrid_wn))
   expect_equal(rec$wavelength_range, range(wn))
-  expect_equal(rec$wavelength_range, c(599.74, max(moys_wn)))
+  expect_equal(rec$wavelength_range, c(599.74, max(offgrid_wn)))
 
   ## The lowest column holds the pool's value at 600, 0.26 cm-1 from the
   ## 599.74 it is named for, and the axis record says so

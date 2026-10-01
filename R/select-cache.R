@@ -7,7 +7,7 @@
 # cache directory, one per combination of levers, and a draw reads it rather
 # than refitting. A user's own horizons_data is not cached: hashing a 1 GB
 # object on every call costs seconds, and arbitrary pools would pile up in the
-# cache (Sam's call, 2026-09-30).
+# cache.
 
 
 ## ---------------------------------------------------------------------------

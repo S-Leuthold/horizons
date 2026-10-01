@@ -152,7 +152,7 @@ ensemble <- build_ensemble_stack(
 
 ### In Development
 
-- **Library Prediction Mode**: Training-set selection is built (`select_training()`), and so is the library it draws from: `library =` takes a registered name (`"kssl"`, built on your machine from the Open Soil Spectral Library's public files on first use), a path, or your own `horizons_data`. Next is caching the similarity space with the library, so a draw does not refit it (`dev/specs/v1-refactor/select-training-design.md`)
+- **Library Prediction Mode**: Training-set selection is built (`select_training()`), and so is the library it draws from: `library =` takes a registered name (`"kssl"`, built on your machine from the Open Soil Spectral Library's public files on first use), a path, or your own `horizons_data`.
 - **Uncertainty Quantification**: Per-sample prediction intervals with conformal calibration
 - **Applicability Domain**: Distance-based reliability metrics for new samples
 

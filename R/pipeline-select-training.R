@@ -589,8 +589,8 @@ select_training <- function(x, library,
   resp_tbl <- pool$data$analysis[, c("sample_id", properties), drop = FALSE]
 
   ## Depth restricts the draw, not the space. A subsoil row stays in the
-  ## space (Sam's call, 2026-09-30: the library is the population, and
-  ## whether a row is subsoil should not redefine what similar soil means).
+  ## space: the library is the population, and whether a row is subsoil
+  ## should not redefine what similar soil means.
   ## Under "topsoil" its responses are hidden from the draw, which is how the
   ## draw already treats a row without the property: the draw, the twin
   ## reference and the resemblance check see only eligible rows. A row with

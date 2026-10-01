@@ -8,13 +8,13 @@
 
 * **`select_training(depth =)`**: `"topsoil"` (the default) draws only from rows whose upper depth is under 30 cm, the cut every experiment's pool was built on; `"all"` draws from every depth. Depth restricts the draw, not the space, which is still fit on the whole library. A library without an `upper_depth_cm` column draws from every row, and `x$selection$depth` says so. The resemblance check measures targets against the depth-eligible rows; when fewer than 30 are eligible it is recorded as skipped (`x$selection$resemblance$skipped`), warned, and reported as "not checked" rather than as zero targets out of range. `upper_depth_cm` must be numeric for the topsoil cut.
 
-* **`select_training()` defaults to `metric = "euclidean"` and `k = 100`** (were `"mahalanobis"` and 400), from the 2026-09-29 defaults read (`dev/experiments/2026-09-factorial/16-defaults.md`). On three batches scanned on an instrument other than KSSL's, k = 400 was worse than 100 on all three (by up to 53 %) and no better on six KSSL regions; Euclidean won or tied on six of nine batches against cosine, and Mahalanobis had won on none in the earlier metric experiments. A quick read on one configuration and one seed, at 4 cm-1: pass `metric = "mahalanobis", k = 400` for the old behaviour.
+* **`select_training()` defaults to `metric = "euclidean"` and `k = 100`** (were `"mahalanobis"` and 400), from a read of the defaults on 2026-09-29. On three batches scanned on an instrument other than KSSL's, k = 400 was worse than 100 on all three (by up to 53 %) and no better on six KSSL regions; Euclidean won or tied on six of nine batches against cosine, and Mahalanobis had won on none in the earlier metric experiments. A quick read on one configuration and one seed, at 4 cm-1: pass `metric = "mahalanobis", k = 400` for the old behaviour.
 
 * **`select_training(space_rows =)` is removed.** The similarity space is always fit on the whole library, and each property's draw is restricted to its measured rows. A space per property on its measured rows alone (`space_rows = "measured"`) was checked on KSSL on 2026-09-30: 200 held-out topsoil targets, k = 100, Euclidean distance. For properties measured on a minority of rows (carbonate, iron) it replaced about one in seven of each target's neighbours, but the training set actually drawn was 94 % the same, calcareous soils diverged no more than a random batch, and each draw was 10 to 35 s slower; it also cannot share one cached space. The 2026-09-21 comparison had already found the two ranking almost identically under Euclidean. Whether per-property spaces improve prediction accuracy was not measured; the design spec lists it as something to explore if a property's measured rows ever prove to be a distinct population.
 
 * **`select_training(window =)` is now a width in cm-1** (default 40), not a point count. It becomes the nearest odd number of points on the grid the space is built on, the library's, so the filter means the same thing at any resolution: 11 points at 4 cm-1, as every experiment ran, and 21 at 2 cm-1. The record carries `window`, `window_points` and the realized `window_cm`, which is now measured between the outermost points ((points - 1) x resolution) rather than points x resolution. A call that passed `window = 11` meaning points now asks for 11 cm-1.
 
-* **`select_training()`**, the training-set selection verb for library mode. Targets and a reference pool in, a `horizons_data` drawn from the pool out, on the targets' wavenumber grid, and the rest of the pipeline runs on it unchanged. The rule is each target's `k` nearest pool rows that have the property measured, drawn per property, rows entering once. Four scopes over one return shape (`batch`, `cluster`, `sample`, `global`): the return is always the union, and the grouping into training sets lives in `x$selection$groups` alongside the full membership table. Every lever of the similarity space is an argument (`snv`, `derivative`, `window`, `poly`, `mask`, `space = "pca"|"pls"`, `ncomp`, `metric`), with the design the 2026-09 experiments ran as the defaults, so the open questions (k on a pool, the metric, tail batches) run as loops over the verb. The verb reconciles the pool onto the targets' axis itself (#64 is why), excludes and reports twins, and warns about targets beyond the pool's own nearest-neighbour spread. A twin is a pool row at distance zero or closer to a target than `twin_ratio` times a reference distance, the 75th percentile of the target's nearest `twin_reference_width()` measured rows: 50, or a quarter of the measured rows when fewer than 200 have the property. Under `global` the twins are recorded in `x$selection$exclusions` but stay in the returned rows, by design, since global is the control and returns the whole pool; a batch-versus-global comparison has to act on the record. Design: `dev/specs/v1-refactor/select-training-design.md`.
+* **`select_training()`**, the training-set selection verb for library mode. Targets and a reference pool in, a `horizons_data` drawn from the pool out, on the targets' wavenumber grid, and the rest of the pipeline runs on it unchanged. The rule is each target's `k` nearest pool rows that have the property measured, drawn per property, rows entering once. Four scopes over one return shape (`batch`, `cluster`, `sample`, `global`): the return is always the union, and the grouping into training sets lives in `x$selection$groups` alongside the full membership table. Every lever of the similarity space is an argument (`snv`, `derivative`, `window`, `poly`, `mask`, `space = "pca"|"pls"`, `ncomp`, `metric`), with the design the 2026-09 experiments ran as the defaults, so the open questions (k on a pool, the metric, tail batches) run as loops over the verb. The verb reconciles the pool onto the targets' axis itself (#64 is why), excludes and reports twins, and warns about targets beyond the pool's own nearest-neighbour spread. A twin is a pool row at distance zero or closer to a target than `twin_ratio` times a reference distance, the 75th percentile of the target's nearest `twin_reference_width()` measured rows: 50, or a quarter of the measured rows when fewer than 200 have the property. Under `global` the twins are recorded in `x$selection$exclusions` but stay in the returned rows, by design, since global is the control and returns the whole pool; a batch-versus-global comparison has to act on the record.
 
 * **`subset_rows()` and `set_analysis()`** (internal) give `horizons_data`
   a row-subset operation (#43). `validate()`'s outlier removal and
@@ -116,6 +116,8 @@
 
 ## Breaking / behavioural
 
+* **The pipeline vignette is withdrawn while it is rewritten.** `inst/examples/end-to-end-pipeline.R` is a runnable walk-through of the whole pipeline on synthetic data in the meantime.
+
 * **`evaluate(workers =)` is removed.** It had been ignored with a warning since the parallel redesign. Register a backend with `future::plan()` and use `allow_par` and `parallelize_over`.
 
 * **An outcome with an observed value outside `outcome_range` is refused before any tuning, and the default range is `c(0, Inf)`** (#76). `configure()`, `evaluate()`, `fit()` and `ensemble()` abort with class `horizons_input_error` on such an outcome, and on an infinite outcome value. A non-negative property with a stray negative value, from a blank correction say, used to be modelled with its predictions floored at zero; it now needs the value corrected or, if the property really is signed, `configure(outcome_range = c(-Inf, Inf))`. Under the default range, checkpoint rows written before the range was recorded resume as unverified, with the warning that says so once per run; under any other range they are refused. The internal `floor_at_zero()` is replaced by `clamp_to_outcome_range()`.
@@ -131,7 +133,7 @@
   of `resample` inside the `trim` bounds (inside the data's own range when
   `trim` is `NULL`, so two sources then share columns only where their
   ranges overlap); it used to start at the data's own maximum wavenumber.
-  At `resample = 4` and the default trim, MOYS scans starting at 599.74 at
+  At `resample = 4` and the default trim, scans starting at 599.74 at
   about 1.93 cm-1 came out on `wn_3999.567 ... wn_603.567` while a library
   at 2 cm-1 came out on `wn_4000 ... wn_600`; both now give
   `wn_4000, wn_3996, ..., wn_600`. The nearest point beyond each trim bound
@@ -302,8 +304,7 @@
 
 A six-reviewer pass over `select_training()` and the code it touches, with
 the findings fixed the same day. The entries below are the user-visible
-consequences; the review itself is in
-`dev/reviews/2026-09-21-horizons-review.md`.
+consequences.
 
 ### The selection verb
 
