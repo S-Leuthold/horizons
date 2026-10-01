@@ -5,6 +5,7 @@
 [![Codecov](https://codecov.io/gh/S-Leuthold/horizons/branch/main/graph/badge.svg)](https://codecov.io/gh/S-Leuthold/horizons)
 [![Project Status: WIP](https://www.repostatus.org/badges/latest/wip.svg)](https://www.repostatus.org/#wip)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE.md)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.23090618.svg)](https://doi.org/10.5281/zenodo.23090618)
 <!-- badges: end -->
 
 horizons is an R package for building and comparing predictive models from mid-infrared (MIR) soil spectra. It reads spectra directly from Bruker OPUS files or CSVs and carries them through a whole modeling workflow. The core of its design is a factorial comparison: every combination of spectral preprocessing, feature selection and model type is evaluated side by side. The best models can then be stacked into ensembles to predict new samples, and horizons attempts to quantify the uncertainty of those predictions.
@@ -93,10 +94,10 @@ If you use horizons, please cite the package:
 
 ```
 Leuthold, S. (2026). horizons: Build and compare predictive models for
-mid-infrared soil spectroscopy in R. https://github.com/S-Leuthold/horizons
+mid-infrared soil spectroscopy in R. https://doi.org/10.5281/zenodo.23090618
 ```
 
-GitHub's "Cite this repository" button, under the About section, gives the same citation in other formats.
+That DOI always resolves to the latest release; each release also has its own DOI on [Zenodo](https://doi.org/10.5281/zenodo.23090618). GitHub's "Cite this repository" button, under the About section, gives the citation in other formats.
 
 ## License
 
