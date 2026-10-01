@@ -822,7 +822,7 @@ test_that("resampling a gapped axis coarser keeps the bands empty and the rest o
 test_that("a CO2 gap in an off-grid axis is dropped, and each side is interpolated on its own", {
 
   co2_cut <- OFFGRID_WN[OFFGRID_WN < 2300 | OFFGRID_WN > 2400]
-  offgrid    <- make_axis_spectra(co2_cut, f = smooth_spectrum, n = 1)
+  offgrid <- make_axis_spectra(co2_cut, f = smooth_spectrum, n = 1)
 
   expect_warning(
     out <- no_output(standardize(offgrid, resample = 4)),

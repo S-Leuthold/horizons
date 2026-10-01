@@ -366,8 +366,9 @@ SELECT_RESEMBLANCE_MIN_ROWS <- 30L
 # crystal cutting off near 650, or a trimmed noisy edge. It is wider than
 # the 40 cm-1 derivative window, so a trimmed edge only costs the outermost
 # filter width, and narrow enough that no diagnostic band region is lost. A
-# batch short by more is refused: it is not the same measurement. A shortfall under one of the batch's own grid steps counts as
-# full coverage, since a coarse canonical grid cannot land on 600 or 4000.
+# batch short by more is refused: it is not the same measurement. A
+# shortfall under one of the batch's own grid steps counts as full coverage,
+# since a coarse canonical grid cannot land on 600 or 4000.
 SELECT_COVERAGE_TOLERANCE_CM <- 50
 
 # select_training(): the version of the similarity-space algorithm, part of

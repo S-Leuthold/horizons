@@ -18,11 +18,12 @@
 ## Keep it fast: one light model (rf/ranger), a small grid, modest n.
 ## ===========================================================================
 
-## Load the package. Prefer load_all() when run from inside the source tree
-## (so the example exercises the working-tree code, not a stale install);
-## fall back to the installed package otherwise.
+## Load the package. From inside the source tree, with devtools installed,
+## use load_all() so the example exercises the working-tree code rather than
+## a stale install; otherwise use the installed package.
 if (file.exists("DESCRIPTION") &&
-    any(grepl("^Package: horizons", readLines("DESCRIPTION")))) {
+    any(grepl("^Package: horizons", readLines("DESCRIPTION"))) &&
+    requireNamespace("devtools", quietly = TRUE)) {
 
   devtools::load_all(quiet = TRUE)
 
