@@ -322,6 +322,130 @@ describe("predict.horizons_fit() - input validation", {
 
 
 ## ---------------------------------------------------------------------------
+## Arguments in `...` (#141)
+## ---------------------------------------------------------------------------
+## predict() has no level argument: intervals are at the level the UQ was
+## calibrated at. A `level` warns that it is ignored, and any other argument
+## (a misspelled one, say) aborts rather than being dropped.
+
+describe("predict.horizons_fit() - arguments in ...", {
+
+  new_df <- make_new_spectra()
+
+  it("warns that level is ignored and returns the calibration-level intervals", {
+
+    ## Precondition: the fixture's bundle was calibrated at 0.90.
+    expect_equal(fitted_fixture$models$uq[["cfg_001"]]$level_default, 0.90)
+
+    reference <- predict(fitted_fixture, new_df)
+
+    w <- expect_warning(
+      p <- predict(fitted_fixture, new_df, level = 0.95),
+      class = "horizons_input_warning"
+    )
+
+    expect_match(conditionMessage(w), "0.9.", fixed = TRUE)
+    expect_equal(p, reference)
+
+  })
+
+  it("names the bundle's calibration level, or the default when there is no bundle", {
+
+    ## The warning reads uq$level_default, not the constant.
+    relevelled <- fitted_fixture
+    relevelled$models$uq[["cfg_001"]]$level_default <- 0.8
+
+    w <- expect_warning(
+      predict(relevelled, new_df, level = 0.95),
+      class = "horizons_input_warning"
+    )
+
+    expect_match(conditionMessage(w), "0.8.", fixed = TRUE)
+
+    no_uq <- fitted_fixture
+    no_uq$models$uq <- NULL
+
+    w <- expect_warning(
+      predict(no_uq, new_df, level = 0.95),
+      class = "horizons_input_warning"
+    )
+
+    expect_match(conditionMessage(w), paste0(DEFAULT_UQ_LEVEL, "."), fixed = TRUE)
+
+  })
+
+  it("errors on any other argument, naming it", {
+
+    expect_error(
+      predict(fitted_fixture, new_df, intervals = FALSE),
+      class  = "horizons_input_error",
+      regexp = "intervals"
+    )
+
+    ## The stats convention's `newdata` is not `new_data`.
+    expect_error(
+      predict(fitted_fixture, newdata = new_df),
+      class  = "horizons_input_error",
+      regexp = "newdata"
+    )
+
+  })
+
+  it("a call with neither is unchanged", {
+
+    expect_no_warning(p <- predict(fitted_fixture, new_df))
+    expect_true(all(c(".pred", ".pred_lower", ".pred_upper") %in% names(p)))
+
+  })
+
+})
+
+describe("check_predict_dots()", {
+
+  it("does not evaluate the dots", {
+
+    expect_warning(
+      check_predict_dots(level = stop("evaluated"), level_default = 0.9),
+      class = "horizons_input_warning"
+    )
+
+    expect_error(
+      check_predict_dots(foo = stop("evaluated"), level_default = 0.9),
+      class  = "horizons_input_error",
+      regexp = "foo"
+    )
+
+  })
+
+  it("refuses unnamed arguments, showing them", {
+
+    expect_error(
+      check_predict_dots(0.95, level_default = 0.9),
+      class  = "horizons_input_error",
+      regexp = "0.95"
+    )
+
+  })
+
+  it("aborts rather than warns when level comes with an unknown argument", {
+
+    expect_error(
+      check_predict_dots(level = 0.95, foo = 1, level_default = 0.9),
+      class = "horizons_input_error"
+    )
+
+  })
+
+  it("is silent on empty dots", {
+
+    expect_no_condition(check_predict_dots(level_default = 0.9))
+
+  })
+
+})
+
+
+## ---------------------------------------------------------------------------
 ## Empirical coverage (the high-value assertion: validates signed CQR + scale)
 ## ---------------------------------------------------------------------------
 

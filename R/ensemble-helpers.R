@@ -700,14 +700,18 @@ build_ensemble_contract <- function(method,
 #' @param interval Logical. Return CV+ conformal prediction intervals when
 #'   ensemble uncertainty quantification is available (`object$ensemble$uq`,
 #'   calibrated by [fit_ensemble_uq()] — on by default in [ensemble()]).
-#'   Default `TRUE`. When no UQ bundle is present, point predictions are
-#'   returned with a one-time note. When the members were fit on a
-#'   response-trimmed training partition (`validate(remove_outliers =
+#'   Default `TRUE`. The intervals are at the level they were calibrated at
+#'   in [ensemble()], 0.90 by default (see Details). When no UQ bundle is
+#'   present, point predictions are returned with a one-time note. When the
+#'   members were fit on a response-trimmed training partition
+#'   (`validate(remove_outliers =
 #'   "response")`, #77), the intervals come from out-of-fold predictions on
 #'   the rows inside the training fences, so this warns once, with class
 #'   `horizons_response_trim_warning`, that they were calibrated within those
 #'   fences and can undercover samples outside them.
-#' @param ... Unused; present for S3 method consistency.
+#' @param ... Not used; present for S3 method consistency. A `level` passed
+#'   here is ignored with a warning (see Details), and any other argument is
+#'   an error.
 #'
 #' @return A tibble, one row per sample:
 #'   \describe{
@@ -731,6 +735,12 @@ build_ensemble_contract <- function(method,
 #' occasionally fall outside its own interval (a known property of
 #' jackknife+/CV+; the bounds come from fold-model predictions, not the
 #' full-data refit). This is deliberate and not repaired.
+#'
+#' **Interval level.** Intervals are at the coverage level the CV+ bundle was
+#' calibrated at in [ensemble()], 0.90 by default. `predict()` has no `level`
+#' argument: a `level` is ignored with a warning of class
+#' `horizons_input_warning`, and any other argument it does not take is an
+#' error of class `horizons_input_error`.
 #'
 #' @examples
 #' \dontrun{
@@ -762,6 +772,10 @@ predict.horizons_ensemble <- function(object,
     cli::cli_abort("No fitted ensemble found on this object.")
 
   }
+
+  ## Nothing in `...` is used. A `level` warns, naming the level the CV+
+  ## bundle was calibrated at; anything else aborts (#141).
+  check_predict_dots(..., level_default = object$ensemble$uq$level_default)
 
   ## -------------------------------------------------------------------------
   ## Step 1: Resolve the authoritative member set
