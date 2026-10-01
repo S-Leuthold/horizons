@@ -229,8 +229,8 @@
 
 <script type="application/json" id="hz-data">
 {
-  "generated_at": "2026-09-30T18:14:38-0500",
-  "content_md5": "78f40e005319b7ec2cd2b09cfc9fc491",
+  "generated_at": "2026-10-01T09:35:20-0500",
+  "content_md5": "6ec2e6a10011a4d8fc5b049c5ff14295",
   "horizons": "0.9.0",
   "lanes": [
     {
@@ -1658,7 +1658,7 @@
       "optional": false,
       "class_in": "horizons_data",
       "class_out": "horizons_eval",
-      "signature": "evaluate (x, metric = \"rpd\", prune = TRUE, prune_threshold = 1, allow_par = FALSE, parallelize_over = \"auto\", output_dir = NULL, seed = 307L, verbose = TRUE, workers = NULL)",
+      "signature": "evaluate (x, metric = \"rpd\", prune = TRUE, prune_threshold = 1, allow_par = FALSE, parallelize_over = \"auto\", output_dir = NULL, seed = 307L, verbose = TRUE)",
       "summary": "Screens every configuration in the grid. Holds out 20 % of the rows as a test set, tunes each configuration on the remaining 80 % by a Latin hypercube grid and then Bayesian optimization, scores it on the test set, and ranks the configurations by the cross-validated metric at each one's chosen hyperparameters. The test-set numbers are reported but never used to choose, so they stay honest. When validate() requested a response trim, the training rows outside Tukey fences computed on the training partition alone are dropped before the folds; test rows are never trimmed on their labels (#77). Checkpoints per configuration when given a directory, and can dispatch configurations or folds onto a future plan the caller registered. Promotes the object to horizons_eval.",
       "args": [
         {
@@ -1723,13 +1723,6 @@
           "text": "Logical. Print progress tree to console. Default TRUE.",
           "touch": "Set FALSE inside loops.",
           "source": "R/pipeline-evaluate.R#L489"
-        },
-        {
-          "name": "workers",
-          "default": "NULL",
-          "text": "Deprecated (2026-09-14) and ignored, with a warning. The earlier design took a core count and auto-split it into outer and inner levels while managing its own nested plan. Register a plan and use `allow_par` with `parallelize_over` instead.",
-          "touch": "Never; deprecated and ignored with a warning. Register a plan instead.",
-          "source": "R/pipeline-evaluate.R#L196"
         }
       ],
       "mechanics": [

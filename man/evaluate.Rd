@@ -13,8 +13,7 @@ evaluate(
   parallelize_over = "auto",
   output_dir = NULL,
   seed = 307L,
-  verbose = TRUE,
-  workers = NULL
+  verbose = TRUE
 )
 }
 \arguments{
@@ -80,11 +79,6 @@ NULL (no checkpointing).}
 Default 307L.}
 
 \item{verbose}{Logical. Print progress tree to console. Default TRUE.}
-
-\item{workers}{Deprecated (2026-09-14) and ignored, with a warning. The
-earlier design took a core count and auto-split it into outer and inner
-levels while managing its own nested plan. Register a plan and use
-\code{allow_par} with \code{parallelize_over} instead.}
 }
 \value{
 A \code{horizons_eval} object (inherits from \code{horizons_data}) with

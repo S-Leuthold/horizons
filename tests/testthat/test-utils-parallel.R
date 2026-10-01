@@ -225,33 +225,3 @@ describe("pin_parent_threads()", {
   })
 
 })
-
-## =========================================================================
-## Deprecation of workers
-## =========================================================================
-
-describe("deprecate_workers_arg()", {
-
-  it("is silent for NULL", {
-
-    expect_silent(res <- deprecate_workers_arg(NULL))
-    expect_false(res)
-
-  })
-
-  it("warns with a stable condition class and names the replacement", {
-
-    expect_warning(deprecate_workers_arg(4L), class = "horizons_deprecated_workers")
-    expect_warning(deprecate_workers_arg(4L), "future::plan")
-    expect_warning(deprecate_workers_arg(4L), "parallelize_over")
-
-  })
-
-  it("fires every time, not once per session", {
-
-    expect_warning(deprecate_workers_arg(2L), class = "horizons_deprecated_workers")
-    expect_warning(deprecate_workers_arg(2L), class = "horizons_deprecated_workers")
-
-  })
-
-})

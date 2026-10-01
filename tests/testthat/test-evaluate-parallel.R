@@ -165,42 +165,16 @@ describe("evaluate() parallel worker footprint", {
 
 
 ## =========================================================================
-## Argument handling: deprecation, backend check, output_dir requirement
+## Argument handling: removed arguments, backend check, output_dir requirement
 ## =========================================================================
 
-describe("evaluate() - workers is deprecated", {
+describe("evaluate() - workers is gone", {
 
-  it("warns with a stable class and runs sequentially regardless of the value", {
-
-    obj <- make_eval_object(n_configs = 2)
-
-    expect_warning(
-      result <- keep_only_warning(
-        evaluate(obj, workers = 10L, verbose = FALSE, seed = 42L),
-        "horizons_deprecated_workers"
-      ),
-      class = "horizons_deprecated_workers"
-    )
-
-    ## The old value is ignored: the run is sequential and the object valid.
-    expect_s3_class(result, "horizons_eval")
-    expect_equal(result$evaluation$parallelize_over, "sequential")
-    expect_identical(result$evaluation$workers, 1L)
-
-  })
-
-  it("no longer validates workers as a core count", {
+  it("is not an argument", {
 
     obj <- make_eval_object(n_configs = 2)
 
-    ## Previously an error ("positive integer"); now only the deprecation.
-    expect_warning(
-      keep_only_warning(
-        evaluate(obj, workers = "two", verbose = FALSE, seed = 42L),
-        "horizons_deprecated_workers"
-      ),
-      class = "horizons_deprecated_workers"
-    )
+    expect_error(evaluate(obj, workers = 2L, verbose = FALSE), "unused argument")
 
   })
 
