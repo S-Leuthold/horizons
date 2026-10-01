@@ -1,66 +1,34 @@
-# macOS system file
+# Allowlist: ignore everything at the top level, then re-include what the
+# package ships or needs to build and test. A new top-level file or directory
+# stays untracked until it is added here on purpose.
+/*
+!/R/
+!/tests/
+!/man/
+!/inst/
+!/.github/
+!/DESCRIPTION
+!/NAMESPACE
+!/NEWS.md
+!/README.md
+!/LICENSE
+!/LICENSE.md
+!/.Rbuildignore
+!/.gitignore
+!/horizons.Rproj
+
+# Inside the allowed directories: local and generated files
 .DS_Store
-
-# RStudio temporary workspace files
-.RDataTmp*
 .Rhistory
-.Rproj.user
-
-# Evaluation results and other large binary artifacts
+.RData
+.RDataTmp*
+.Rproj.user/
 *.qs
+*.qs2
 *.rds
-*.RData
 *.tmp
-
-# ...but committed test fixtures are tracked (small, needed by the suite in CI)
-!tests/testthat/fixtures/*.rds
-
-# Other stuff you don't want tracked
-evaluation_results.qs
-CLAUDE.md
-tests/testthat/Response/
-
-# Temporary output directories
-output/
-scripts/
+tests/testthat/_problems/
 tests/testthat/output/
 
-# Debug scripts (keep in archive/)
-debug_*.R
-
-# Session documentation (keep in archive/)
-SESSION_*.md
-NEXT_SESSION_*.md
-*_SUMMARY.md
-
-# Archive directory for development artifacts
-archive/
-
-# Legacy API files (moved out of R/ during v1 refactor)
-R-legacy/
-
-# Old API tests (archived during v1 refactor)
-tests/testthat/archive_old_api/
-
-# Developer manuals (local reference, not shipped)
-dev/manuals/
-
-# Test data (binary OPUS files + real lab data)
-dev/test-data/
-
-# Examples directory (dev test scripts)
-examples/
-
-# Test clutter (outside testthat/)
-tests/archive/
-tests/spike_results/
-tests/test_*.R
-tests/SESSION_*.txt
-
-# Local-strategy experiment outputs (checkpoints, logs, figures; large)
-dev/experiments/*/results/
-
-# Knitted vignette outputs (the board's generated files under vignettes/board/ ARE tracked)
-vignettes/*.html
-vignettes/*.R
-inst/doc/
+# Committed test fixtures are tracked
+!tests/testthat/fixtures/*.rds

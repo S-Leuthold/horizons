@@ -266,7 +266,7 @@ test_that("standardize() with resample = NULL skips resampling", {
 ## =============================================================================
 ## Synthetic stand-ins for the two sources #64 was found on: a KSSL-shaped
 ## library (600 to 4000 at 2 cm-1, stored increasing, as the snapshot is) and
-## MOYS-shaped scans (from 599.74 at 1.93 cm-1, well past 4000).
+## Off-grid scans (from 599.74 at 1.93 cm-1, well past 4000).
 
 #' Evaluate without the pipeline's console tree
 #' @noRd
@@ -336,7 +336,7 @@ smooth_spectrum <- function(wn) {
 predictor_names <- function(hd) hd$data$role_map$variable[hd$data$role_map$role == "predictor"]
 
 KSSL_WN <- seq(600, 4000, by = 2)
-MOYS_WN <- 599.74 + 1.93 * (0:3574)
+OFFGRID_WN <- 599.74 + 1.93 * (0:3574)
 
 
 test_that("a KSSL-shaped axis stored increasing comes out on wn_4000 ... wn_600", {
@@ -354,17 +354,17 @@ test_that("a KSSL-shaped axis stored increasing comes out on wn_4000 ... wn_600"
 })
 
 
-test_that("a MOYS-shaped axis lands on the same columns as a KSSL-shaped one", {
+test_that("an off-grid axis lands on the same columns as a KSSL-shaped one", {
 
   kssl <- no_output(standardize(make_axis_spectra(KSSL_WN), resample = 4, trim = c(600, 4000)))
-  moys <- no_output(standardize(make_axis_spectra(MOYS_WN), resample = 4, trim = c(600, 4000)))
+  offgrid <- no_output(standardize(make_axis_spectra(OFFGRID_WN), resample = 4, trim = c(600, 4000)))
 
   ## 599.74 sits just below the bound, and it is what lets 600 be a column
-  expect_identical(predictor_names(moys), predictor_names(kssl))
-  expect_identical(predictor_names(moys)[c(1, 851)], c("wn_4000", "wn_600"))
+  expect_identical(predictor_names(offgrid), predictor_names(kssl))
+  expect_identical(predictor_names(offgrid)[c(1, 851)], c("wn_4000", "wn_600"))
 
-  expect_true(moys$provenance$standardization$resampled)
-  expect_identical(moys$provenance$standardization$grid,
+  expect_true(offgrid$provenance$standardization$resampled)
+  expect_identical(offgrid$provenance$standardization$grid,
                    list(min = 600, max = 4000, step = 4, n = 851L))
 
 })
@@ -536,11 +536,11 @@ test_that("increasing-order input with baseline correction gives the decreasing-
 
 test_that("interpolating a smooth spectrum onto the shifted grid stays on the true curve, edges included", {
 
-  moys <- make_axis_spectra(MOYS_WN, f = smooth_spectrum, n = 1)
+  offgrid <- make_axis_spectra(OFFGRID_WN, f = smooth_spectrum, n = 1)
 
   for (res in c(4, 2, 1.5)) {
 
-    out <- no_output(standardize(moys, resample = res, trim = c(600, 4000)))
+    out <- no_output(standardize(offgrid, resample = res, trim = c(600, 4000)))
     wn  <- as.numeric(sub("^wn_", "", predictor_names(out)))
     got <- as.numeric(out$data$analysis[1, predictor_names(out)])
 
@@ -557,15 +557,15 @@ test_that("interpolating a smooth spectrum onto the shifted grid stays on the tr
 
 test_that("non-integer resolutions give clean, stable column names", {
 
-  moys <- make_axis_spectra(MOYS_WN)
+  offgrid <- make_axis_spectra(OFFGRID_WN)
 
   ## 1.5 cm-1: 3999, 3997.5, ..., 600
-  at_1.5 <- no_output(standardize(moys, resample = 1.5, trim = c(600, 4000)))
+  at_1.5 <- no_output(standardize(offgrid, resample = 1.5, trim = c(600, 4000)))
   expect_identical(predictor_names(at_1.5), paste0("wn_", seq(3999, 600, by = -1.5)))
 
   ## 0.1 cm-1: the expected names are built from integers, so no float
   ## arithmetic reaches them
-  at_0.1 <- no_output(standardize(moys, resample = 0.1, trim = c(600, 610)))
+  at_0.1 <- no_output(standardize(offgrid, resample = 0.1, trim = c(600, 610)))
   k      <- 6100:6000
   expect_identical(predictor_names(at_0.1),
                    paste0("wn_", k %/% 10, ifelse(k %% 10 == 0, "", paste0(".", k %% 10))))
@@ -589,8 +589,8 @@ test_that("resample = NULL keeps trim-as-subset but still sorts", {
   expect_null(out$provenance$standardization$grid)
 
   ## A subset, with no margin: 599.74 is outside c(600, 4000) and stays out
-  moys <- no_output(standardize(make_axis_spectra(MOYS_WN), resample = NULL, trim = c(600, 4000)))
-  wn   <- as.numeric(sub("^wn_", "", predictor_names(moys)))
+  offgrid <- no_output(standardize(make_axis_spectra(OFFGRID_WN), resample = NULL, trim = c(600, 4000)))
+  wn   <- as.numeric(sub("^wn_", "", predictor_names(offgrid)))
   expect_gte(min(wn), 600)
   expect_lte(max(wn), 4000)
 
@@ -636,7 +636,7 @@ test_that("a call with every operation off still sorts, validates, and changes n
 
 test_that("force = TRUE with every operation off keeps the grid an earlier call recorded", {
 
-  on_4 <- no_output(standardize(make_axis_spectra(MOYS_WN), resample = 4))
+  on_4 <- no_output(standardize(make_axis_spectra(OFFGRID_WN), resample = 4))
 
   expect_warning(
     again <- no_output(standardize(on_4, resample = NULL, trim = NULL, force = TRUE)),
@@ -655,7 +655,7 @@ test_that("force = TRUE with every operation off keeps a select_training() recon
 
   ## The record select_training() leaves on a pool it moved onto its targets'
   ## axis: the axis history is untouched by a no-op call, like the grid
-  on_4  <- no_output(standardize(make_axis_spectra(MOYS_WN), resample = 4))
+  on_4  <- no_output(standardize(make_axis_spectra(OFFGRID_WN), resample = 4))
   moved <- on_4
   moved$provenance$standardization$reconciliation <- list(
     operation = "resampled",
@@ -686,9 +686,9 @@ test_that("force = TRUE with every operation off keeps a select_training() recon
 
 test_that("the trim line counts the columns inside the bounds, not the interpolation margin", {
 
-  ## MOYS-shaped: 1761 points inside 600-4000, plus 599.74 and one above 4000
+  ## Off-grid: 1761 points inside 600-4000, plus 599.74 and one above 4000
   expect_output(
-    standardize(make_axis_spectra(MOYS_WN), resample = 4, trim = c(600, 4000)),
+    standardize(make_axis_spectra(OFFGRID_WN), resample = 4, trim = c(600, 4000)),
     regexp = "Trimming: 600-4000 cm⁻¹ \\(3575 → 1761\\)"
   )
 
@@ -697,7 +697,7 @@ test_that("the trim line counts the columns inside the bounds, not the interpola
 
 test_that("trim = NULL keeps each source's extent, and two sources share names where they overlap", {
 
-  a_wn <- MOYS_WN[MOYS_WN >= 700 & MOYS_WN <= 3000]
+  a_wn <- OFFGRID_WN[OFFGRID_WN >= 700 & OFFGRID_WN <= 3000]
   b_wn <- seq(3500, 650, by = -2)
 
   a <- no_output(standardize(make_axis_spectra(a_wn), resample = 4, trim = NULL))
@@ -821,11 +821,11 @@ test_that("resampling a gapped axis coarser keeps the bands empty and the rest o
 
 test_that("a CO2 gap in an off-grid axis is dropped, and each side is interpolated on its own", {
 
-  co2_cut <- MOYS_WN[MOYS_WN < 2300 | MOYS_WN > 2400]
-  moys    <- make_axis_spectra(co2_cut, f = smooth_spectrum, n = 1)
+  co2_cut <- OFFGRID_WN[OFFGRID_WN < 2300 | OFFGRID_WN > 2400]
+  offgrid    <- make_axis_spectra(co2_cut, f = smooth_spectrum, n = 1)
 
   expect_warning(
-    out <- no_output(standardize(moys, resample = 4)),
+    out <- no_output(standardize(offgrid, resample = 4)),
     regexp = "gap",
     class  = "horizons_standardize_warning"
   )
@@ -906,9 +906,9 @@ predictor_block <- function(hd) as.matrix(hd$data$analysis[, predictor_names(hd)
 
 test_that("standardize(baseline = TRUE) runs on a single sample, with and without resampling (#78)", {
 
-  ## MOYS-shaped: stored increasing and off the grid, so resample = 4 really
+  ## Off-grid: stored increasing and off the grid, so resample = 4 really
   ## interpolates; three random spectra, so the rows differ in shape
-  batch  <- make_axis_spectra(MOYS_WN)
+  batch  <- make_axis_spectra(OFFGRID_WN)
   single <- subset_rows(batch, "s2", record = FALSE)
 
   for (res in list(NULL, 4)) {
@@ -927,7 +927,7 @@ test_that("standardize(baseline = TRUE) runs on a single sample, with and withou
 
 test_that("a single sample standardizes as its row of a batch, under every option (#78)", {
 
-  batch  <- make_axis_spectra(MOYS_WN)
+  batch  <- make_axis_spectra(OFFGRID_WN)
   single <- subset_rows(batch, "s2", record = FALSE)
 
   opts <- expand.grid(resample     = c(NA, 4),

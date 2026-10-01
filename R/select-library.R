@@ -585,9 +585,8 @@ download_sources <- function(entry, dir, verbose = TRUE) {
 #' Build a library from OSSL's published tables
 #'
 #' @description
-#' The operational definition of an OSSL-derived library, ported from
-#' `dev/experiments/2026-09-local-strategy/01-build-kssl-snapshot.R`, with the
-#' surface-only filter removed: every depth is kept and the upper depth is
+#' The operational definition of an OSSL-derived library, as the defaults
+#' were measured on it, with the surface-only filter removed: every depth is kept and the upper depth is
 #' carried as a `meta` column, `upper_depth_cm`, so the draw can restrict to
 #' topsoil. Rows are the entry's dataset and instrument with a complete
 #' spectrum on the entry's grid and a matching lab row.

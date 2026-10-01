@@ -290,9 +290,8 @@ SCORING_SCHEMA <- 2L
 EVAL_WORKER_PAYLOAD_LIMIT <- 1 * 1024^3
 
 # select_training(): cap on the components retained when ncomp is given as
-# a proportion of variance. 100 was the experiments' cap (EXP_LOCAL in
-# dev/experiments/2026-09-local-strategy/00-config.R); the KSSL pool at 99 %
-# retains far fewer.
+# a proportion of variance. 100 was the cap the defaults were measured
+# with; the KSSL pool at 99 % retains far fewer.
 SELECT_PCA_MAX_COMP <- 100L
 
 # select_training(): a pool row is a target's twin when its distance to that
@@ -339,16 +338,15 @@ SELECT_SDEV_FLOOR <- 0.10
 # select_training(): depth = "topsoil" draws only from library rows whose
 # upper depth is below this, in cm. It is the cut every experiment's KSSL
 # pool was built on (upper depth < 30 cm, 45,957 rows of OSSL v1.2), so the
-# defaults measured there are defaults for this draw (Sam's call, 2026-09-30:
-# ship every depth, draw topsoil by default).
+# defaults measured there are defaults for this draw. The library keeps
+# every depth and draws topsoil by default.
 SELECT_TOPSOIL_MAX_CM <- 30
 
 # select_training(): Savitzky-Golay window of the similarity space, as a
 # width in cm-1 between the outermost points. It was 11 points, whose width
 # followed whatever grid the targets were on; every experiment ran at
 # 4 cm-1, where 11 points span 40 cm-1, so 40 keeps that filter and carries
-# it to 2 cm-1 (21 points), the grid horizons now runs at (Sam's call,
-# 2026-09-30).
+# it to 2 cm-1 (21 points), the grid horizons now runs at.
 SELECT_SG_WINDOW_CM <- 40
 
 # select_training(): the fewest library rows the resemblance check will take
@@ -368,8 +366,7 @@ SELECT_RESEMBLANCE_MIN_ROWS <- 30L
 # crystal cutting off near 650, or a trimmed noisy edge. It is wider than
 # the 40 cm-1 derivative window, so a trimmed edge only costs the outermost
 # filter width, and narrow enough that no diagnostic band region is lost. A
-# batch short by more is refused: it is not the same measurement (Sam's call,
-# 2026-09-30). A shortfall under one of the batch's own grid steps counts as
+# batch short by more is refused: it is not the same measurement. A shortfall under one of the batch's own grid steps counts as
 # full coverage, since a coarse canonical grid cannot land on 600 or 4000.
 SELECT_COVERAGE_TOLERANCE_CM <- 50
 

@@ -106,8 +106,8 @@ test_that("parse_ids() handles complex filenames", {
   ## Arrange ---------------------------------------------------------------
 
   hd <- make_test_hd(c(
-    "AONR-F_S100-1_GroundBulk_S1_A2.0",
-    "AONR-G_S200-2_IntactBulk_S2_B3.0"
+    "SITE-F_S100-1_GroundBulk_S1_A2.0",
+    "SITE-G_S200-2_IntactBulk_S2_B3.0"
   ))
 
   ## Act -------------------------------------------------------------------
@@ -117,7 +117,7 @@ test_that("parse_ids() handles complex filenames", {
   ## Assert ----------------------------------------------------------------
 
   expect_equal(result$data$analysis$sample_id, c("S100-1", "S200-2"))
-  expect_equal(result$data$analysis$project, c("AONR-F", "AONR-G"))
+  expect_equal(result$data$analysis$project, c("SITE-F", "SITE-G"))
   expect_equal(result$data$analysis$fraction, c("GroundBulk", "IntactBulk"))
   expect_equal(result$data$analysis$scan, c("S1", "S2"))
   expect_equal(result$data$analysis$position, c("A2", "B3"))
@@ -593,19 +593,19 @@ test_that("parse_ids() warns (not aborts) when the parsed ids collapse to duplic
 
 test_that("the regression this fixes: parse_ids() |> average() survives replicate scans sharing an id (#24)", {
 
-  ## Arrange — a synthetic stand-in for dev/test-pipeline.R's real chain
-  ## (spectra() |> standardize() |> parse_ids() |> average()) on the AONR
-  ## OPUS fixture: 15 scans, 4 samples, aborting at parse_ids() was the
-  ## critical finding this rework addresses. dev/test-data/opus/ is not
-  ## inside tests/, so this rebuilds the same shape post-spectra(): OPUS
+  ## Arrange — a synthetic stand-in for the real chain
+  ## (spectra() |> standardize() |> parse_ids() |> average()) on a set of
+  ## real OPUS files: 15 scans, 4 samples, aborting at parse_ids() was the
+  ## critical finding this rework addresses. Those files are not shipped,
+  ## so this rebuilds the same shape post-spectra(): OPUS
   ## filenames that share a sampleid token once parsed — replicate scans,
   ## the state average() exists to collapse. standardize() is exercised
   ## separately (test-pipeline-standardize.R); this covers parse_ids() and
   ## average() end to end on the object shape spectra(type = "opus") builds.
   filenames <- c(
-    "AONR-F_S100-1_GroundBulk_S1_A2", "AONR-F_S100-1_GroundBulk_S2_B2",
-    "AONR-F_S100-1_GroundBulk_S3_C2",
-    "AONR-F_S100-2_GroundBulk_S1_E2", "AONR-F_S100-2_GroundBulk_S2_F2"
+    "SITE-F_S100-1_GroundBulk_S1_A2", "SITE-F_S100-1_GroundBulk_S2_B2",
+    "SITE-F_S100-1_GroundBulk_S3_C2",
+    "SITE-F_S100-2_GroundBulk_S1_E2", "SITE-F_S100-2_GroundBulk_S2_F2"
   )
 
   hd <- make_test_hd(filenames)
@@ -613,7 +613,7 @@ test_that("the regression this fixes: parse_ids() |> average() survives replicat
   ## Act -------------------------------------------------------------------
 
   expect_warning(
-    hd_parsed <- parse_ids(hd, patterns = c("AONR-F_", sampleid = "S\\d+-\\d+", "_.*")),
+    hd_parsed <- parse_ids(hd, patterns = c("SITE-F_", sampleid = "S\\d+-\\d+", "_.*")),
     class = "horizons_validation_warning"
   )
 

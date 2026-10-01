@@ -1728,7 +1728,7 @@ eval_data_fingerprint <- function(train_data, role_map = NULL) {
   ## -------------------------------------------------------------------------
   ## The values on those rows, by name
   ## -------------------------------------------------------------------------
-  ## Radix order is locale-independent, so the laptop and the box agree.
+  ## Radix order is locale-independent, so results agree across machines.
 
   by_id <- order(ids, method = "radix")
 

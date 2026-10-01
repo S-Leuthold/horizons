@@ -480,7 +480,7 @@ search_axis <- function(pool_wn, target_m, target_wn) {
   ## A batch on a coarse grid of its own cannot land on the library's ends:
   ## standardize()'s canonical grid at 16 cm-1 stops 8 short of 600. A
   ## shortfall under one of the batch's own steps is as close as that grid
-  ## gets, so it counts as full coverage (Sam's call, 2026-09-30); the
+  ## gets, so it counts as full coverage; the
   ## missing edge is held at the batch's endpoint, inside the width the
   ## derivative trims anyway.
 

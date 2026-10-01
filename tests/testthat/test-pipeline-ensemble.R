@@ -5,7 +5,7 @@
 ## engines (penalized / weighted / xgb).
 ##
 ## Fixture: tests/testthat/fixtures/ensemble_fit.rds — a small horizons_fit on
-## REAL (anonymized) AONR MIR spectra predicting Bulk_C. Real signal matters:
+## REAL (anonymized) MIR spectra predicting Bulk_C. Real signal matters:
 ## a degenerate fixture (members that don't predict) would make every
 ## "did the meta-learner learn something" assertion vacuously pass. The fixture
 ## also spans THREE response transforms (log / sqrt / none) across its members

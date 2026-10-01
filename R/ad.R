@@ -14,8 +14,6 @@
 ## training rows' own distances (distances to a centroid fit to them) is
 ## optimistically small and systematically over-flags fresh in-distribution
 ## samples as OOD; the held-out calibration removes that self-reference.
-##
-## Design: dev/specs/v1-refactor/ad-design.md.
 ## -----------------------------------------------------------------------------
 
 

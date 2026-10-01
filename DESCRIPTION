@@ -77,13 +77,7 @@ Suggests:
     nnet,
     pls,
     RhpcBLASctl,
-    mirai,
-    knitr,
-    rmarkdown,
-    htmltools,
-    jsonlite,
-    yaml
-VignetteBuilder: knitr
+    mirai
 Config/testthat/edition: 3
 Depends:
     R (>= 4.1.0)
