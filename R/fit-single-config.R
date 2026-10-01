@@ -767,7 +767,9 @@ check_degradation <- function(cv_metrics, test_truth, test_preds,
 
   rpd_cv <- cv_metrics[cv_metrics$.metric == "rpd", , drop = FALSE]
 
-  if (n < DEGRADATION_MIN_N || nrow(rpd_cv) != 1 || !is.finite(rpd_cv$mean)) {
+  ## Constant test outcomes give an RPD of 0 that says nothing about the fit
+  if (n < DEGRADATION_MIN_N || nrow(rpd_cv) != 1 || !is.finite(rpd_cv$mean) ||
+      stats::sd(truth) < .Machine$double.eps) {
 
     return(not_flagged)
 

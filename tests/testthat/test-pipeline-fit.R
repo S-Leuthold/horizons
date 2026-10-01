@@ -2393,6 +2393,12 @@ describe("check_degradation()", {
 
   })
 
+  it("flags nothing when the test outcomes are constant", {
+
+    expect_false(check_degradation(cv_4, rep(5, 20), stats::rnorm(20, 5))$degraded)
+
+  })
+
   it("flags nothing without a finite CV RPD", {
 
     no_rpd <- tibble::tibble(.metric = "rmse", mean = 1, std_err = 0.1)

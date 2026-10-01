@@ -3102,11 +3102,20 @@ summary.horizons_data <- function(object, ...) {
 
     if (uq_present) {
 
-      uq_bundle  <- x$models$uq[[1]]
+      ## The best config's measured coverage when it has a UQ bundle, named,
+      ## since the figure belongs to one config and not to all of them
+      best_id    <- x$models$best_config
+      uq_id      <- if (!is.null(best_id) && best_id %in% names(x$models$uq)) {
+        best_id
+      } else {
+        names(x$models$uq)[1]
+      }
+      uq_bundle  <- x$models$uq[[uq_id]]
       coverage   <- if (!is.null(uq_bundle$test_coverage) &&
                         is.finite(uq_bundle$test_coverage)) {
-        paste0(", test coverage = ", round(uq_bundle$test_coverage * 100, 1),
-               "% on ", uq_bundle$n_test, " rows")
+        paste0(", test coverage for ", uq_id, " = ",
+               round(uq_bundle$test_coverage * 100, 1), "% on ",
+               uq_bundle$n_test, " rows")
       } else {
         ""
       }
