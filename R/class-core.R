@@ -158,7 +158,12 @@ new_horizons_data <- function(analysis       = NULL,
                   ## NULL until then, and on objects configured before it
                   ## existed, which read as c(0, Inf); see
                   ## outcome_range_setting().
-                  outcome_range = NULL),
+                  outcome_range = NULL,
+
+                  ## Written by configure(): the arguments it was given
+                  ## (outcome, models, transformations, preprocessing,
+                  ## feature_selection, expand_covariates, cov_fusion).
+                  expansion = NULL),
 
     ## -------------------------------------------------------------------------
     ## Section 4: VALIDATION — Pre-flight check results
