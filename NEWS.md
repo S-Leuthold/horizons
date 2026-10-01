@@ -1,3 +1,9 @@
+# horizons (development version)
+
+## Bug fixes
+
+* `print()` and `summary()` of a fitted object report the member `fit()` selected on cross-validation (`models$best_config`) and its test metrics, as `fit()`'s console does. They reported the member with the lowest test RMSE, a best-of-N on the held-out rows that could name a different configuration (#136).
+
 # horizons 0.10.0
 
 First tagged release. It brings `main` up to date with the development branch, where horizons was rebuilt around an S3 approach: a single `horizons_data` object that each verb in the pipeline takes and returns, carrying the spectra, configuration, results and a record of how each step was run, from raw spectra to predictions. It is still pre-1.0, so the API may change between minor versions.
