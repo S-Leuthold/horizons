@@ -371,13 +371,13 @@ set_analysis <- function(x, analysis, role_map = NULL) {
 #' in `selection$rows_removed`. The per-row `.drawn_by`, `.min_distance` and
 #' `.group` columns are per-row facts and survive the subset unchanged.
 #'
-#' @param x [horizons_data.] The object to subset.
-#' @param keep [Character or logical.] `sample_id`s to keep, or a logical
-#'   vector of length `n_rows`. Every id must exist and none may repeat.
-#'
 #' The calling verb records the subset in its own terms (`validate()` in its
 #' removal record, `select_training()` in the selection record); this
 #' function writes no provenance of its own.
+#'
+#' @param x [horizons_data.] The object to subset.
+#' @param keep [Character or logical.] `sample_id`s to keep, or a logical
+#'   vector of length `n_rows`. Every id must exist and none may repeat.
 #'
 #' @return [horizons_data.] The subset. Errors of class
 #'   `horizons_input_error` on a promoted object, or on unknown, duplicated
