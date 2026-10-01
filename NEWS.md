@@ -120,6 +120,8 @@
 
 * **The DEGRADED flag in `fit()` uses a bootstrap interval for the test RPD** (#119). It used to fire whenever the test RPD fell below the CV mean minus two CV standard errors, a band that ignores the sampling variance of an estimate from a few dozen test rows, so it flagged healthy fits. The test RPD is now bootstrapped (2,000 resamples, seeded), and a config is flagged only when the whole 95% interval lies below the CV mean RPD. With fewer than 10 usable test rows nothing is flagged.
 
+* **`ensemble()` works on a fitted object read into a fresh R session.** Scoring the members on the test rows did not load the packages their predict methods live in, so with horizons installed (rather than loaded with `devtools::load_all()`) and nothing else having loaded `workflows`, it failed with "no applicable method for 'predict'". It now loads them first, as `predict()` already did.
+
 * **The pipeline vignette is withdrawn while it is rewritten.** `inst/examples/end-to-end-pipeline.R` is a runnable walk-through of the whole pipeline on synthetic data in the meantime.
 
 * **`evaluate(workers =)` is removed.** It had been ignored with a warning since the parallel redesign. Register a backend with `future::plan()` and use `allow_par` and `parallelize_over`.

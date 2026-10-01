@@ -240,6 +240,31 @@ describe("ensemble() - preflight validation", {
 
 })
 
+describe("ensemble() - predict namespaces", {
+
+  it("loads the members' predict namespaces before scoring them on the test rows", {
+
+    ## Under an installed package the Imports load lazily, so a fitted object
+    ## read into a fresh session has no workflows predict method registered
+    ## until something loads it. The member scoring must ask for it, as
+    ## predict.horizons_ensemble() does.
+    requested <- NULL
+    local_mocked_bindings(
+      ensure_predict_namespaces = function(object, config_ids) {
+        requested <<- config_ids
+        invisible(NULL)
+      }
+    )
+
+    members <- fitted$models$best_config
+    invisible(tryCatch(predict_members_on_test(fitted, members), error = function(e) NULL))
+
+    expect_identical(requested, members)
+
+  })
+
+})
+
 ## =========================================================================
 ## predict.horizons_ensemble() — output contract
 ## =========================================================================
