@@ -21,6 +21,9 @@ jobs:
     env:
       GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
       R_KEEP_PKG_SOURCE: yes
+      # Test files run in parallel (Config/testthat/parallel); the hosted
+      # runners have 4 cores, and testthat otherwise starts only 2 workers.
+      TESTTHAT_CPUS: 4
 
     steps:
       - uses: actions/checkout@v6
