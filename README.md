@@ -1,4 +1,4 @@
-# horizons <img src="man/figures/logo.png" align="right" height="139" alt="horizons logo" />
+# horizons <img src="man/figures/logo.png" align="right" height="200" alt="horizons logo" />
 
 <!-- badges: start -->
 [![R-CMD-check](https://github.com/S-Leuthold/horizons/actions/workflows/R-CMD-check.yaml/badge.svg)](https://github.com/S-Leuthold/horizons/actions/workflows/R-CMD-check.yaml)
@@ -85,7 +85,7 @@ To run the whole pipeline on synthetic spectra, with no data of your own, see [`
 
 ## Contributing
 
-Contributions are welcome: bug reports, questions, and pull requests. See [CONTRIBUTING.md](CONTRIBUTING.md).
+Contributions to horizons are more than welcome. If you work with mid-infrared spectra, I'd encourage you to try these methods on your own data and tell me where they break, what doesn't make sense, or which methods might be better suited to a given step. Feel free to open an issue, ask a question or open a pull request, or email me at sam.leuthold@colostate.edu. [CONTRIBUTING.md](CONTRIBUTING.md) has the practical details.
 
 ## Citation
 
@@ -110,6 +110,6 @@ The spectral side relies on [prospectr](https://github.com/l-ramirez-lopez/prosp
 
 The modeling is built on [tidymodels](https://www.tidymodels.org) (Max Kuhn and the tidymodels team), and the parallelism on [future](https://future.futureverse.org) (Henrik Bengtsson). Feature selection includes [Boruta](https://gitlab.com/mbq/Boruta/) (Miron Kursa and Witold Rudnicki) and competitive adaptive reweighted sampling (CARS; Li et al., 2009). The prediction intervals use quantile forests from [ranger](https://github.com/imbs-hl/ranger) (Marvin Wright and colleagues) with conformalized quantile regression (Romano, Patterson and Candès, 2019), and the applicability-domain check uses the shrinkage covariance estimator in [corpcor](https://strimmerlab.github.io/software/corpcor/) (Juliane Schäfer, Korbinian Strimmer and colleagues).
 
-Part of the development of horizons was funded by AI-LEAF, which is supported by the USDA National Institute of Food and Agriculture and the National Science Foundation National AI Research Institutes Competitive Award no. 2023-67021-39829.
+Part of the development of horizons was supported by the USDA National Institute of Food and Agriculture and the National Science Foundation National AI Research Institutes Competitive Award no. 2023-67021-39829.
 
-horizons has been developed using Claude Code to implement, test and review changes. The design of the package, and the architectural decisions that underpin the science, remain mine.
+*horizons has been developed using Claude Code to implement, test and review changes. The design of the package, and the architectural decisions that underpin the science, remain mine.*

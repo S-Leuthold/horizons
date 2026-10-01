@@ -4,7 +4,7 @@ Contributions to horizons are more than welcome. If you work with mid-infrared s
 
 ## Issues
 
-[Open an issue](https://github.com/S-Leuthold/horizons/issues) for bugs, questions, confusing behaviour or ideas. For a bug, it helps to include what you ran, what you expected and what happened, plus `sessionInfo()`. A small reproducible example (the [reprex](https://reprex.tidyverse.org) package makes one easy) is great but not required.
+[Open an issue](https://github.com/S-Leuthold/horizons/issues) to report a bug, ask a question or suggest an idea. For a bug, it helps to include what you ran, what you expected and what happened, plus `sessionInfo()`. A small reproducible example also helps (using [reprex](https://reprex.tidyverse.org) is great, but not required).
 
 ## Pull requests
 
@@ -19,4 +19,4 @@ Don't worry about getting all of that right. I'm happy to help get a pull reques
 
 ## Conduct
 
-Be kind and assume good faith.
+Be kind.
