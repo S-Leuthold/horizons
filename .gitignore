@@ -16,6 +16,8 @@
 !/.Rbuildignore
 !/.gitignore
 !/horizons.Rproj
+!/CITATION.cff
+!/CONTRIBUTING.md
 
 # Inside the allowed directories: local and generated files
 .DS_Store

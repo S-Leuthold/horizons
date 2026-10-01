@@ -150,7 +150,7 @@ cat("UQ computed:", !is.null(hz$models$uq), "\n\n")
 unknown_hz <- spectra(unknown_specs, id_col = "sample_id") |>
   standardize()
 
-preds <- predict(hz, unknown_hz, level = 0.90)
+preds <- predict(hz, unknown_hz)
 
 cat("=== Predictions on 10 held-out unknowns (90% intervals) ===\n")
 print(preds)
