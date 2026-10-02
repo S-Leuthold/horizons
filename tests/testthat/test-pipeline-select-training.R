@@ -1217,9 +1217,9 @@ test_that("the return validates and runs through the ordinary chain", {
   expect_s3_class(cfg, "horizons_data")
   expect_true(any(cfg$data$role_map$role == "outcome"))
 
-  ## prune = FALSE: on the synthetic fixture the one config can be pruned,
-  ## leaving fit() nothing to fit; the chain is what is under test, not the
-  ## pruning rule.
+  ## prune = FALSE keeps the chain independent of the pruning rule. With no
+  ## Bayesian stage nothing is pruned today, but the chain is what is under
+  ## test, so it shouldn't start depending on that.
   ev <- suppressWarnings(evaluate(cfg, prune = FALSE, verbose = FALSE))
   expect_s3_class(ev, "horizons_eval")
   expect_true(nrow(ev$evaluation$results) >= 1L)
