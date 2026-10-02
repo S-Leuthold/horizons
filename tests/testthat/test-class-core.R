@@ -1602,6 +1602,40 @@ test_that("summary.horizons_data shows pipeline status", {
 
 })
 
+## validate() is an optional report (#132): summary() suggests it only before
+## evaluate(), and an evaluated or fitted object that skipped it gets its
+## own next step.
+next_step_line <- function(obj) {
+
+  out <- utils::capture.output(summary(obj))
+  sub("^.*Next step: ", "", grep("Next step:", out, value = TRUE))
+
+}
+
+test_that("summary() suggests validate() only before evaluate()", {
+
+  configured <- make_eval_object(add_validation = FALSE)
+  validated  <- make_eval_object(add_validation = TRUE)
+
+  expect_identical(next_step_line(configured), "validate()")
+  expect_identical(next_step_line(validated), "evaluate()")
+
+})
+
+test_that("summary() gives an unvalidated evaluated or fitted object its next step", {
+
+  ## The stored fit never ran validate()
+  fx <- readRDS(test_path("fixtures", "ensemble_fit.rds"))
+  expect_null(fx$validation$passed)
+
+  ev <- reset_slots(fx, c("models", "ensemble"))
+  class(ev) <- c("horizons_eval", "horizons_data", "list")
+
+  expect_identical(next_step_line(ev), "fit()")
+  expect_identical(next_step_line(fx), "predict()")
+
+})
+
 
 ## ----------------------------------------------------------------------------
 ## Promoted-class fixtures

@@ -169,11 +169,17 @@
 #'   `horizons_input_error`, when an observed outcome lies outside
 #'   `outcome_range` or is infinite, or when `metric = "rrmse"` under a range
 #'   whose lower bound is negative (the mean outcome it divides by can then be
-#'   zero or negative) (#76). Checkpoint rows written before the range was
-#'   recorded resume only under the default range. Called on an object that
-#'   has already been through `fit()` or `ensemble()`, it returns a
-#'   `horizons_eval` whose `models` and `ensemble` slots are empty again,
-#'   since both were built on the evaluation it replaces.
+#'   zero or negative) (#76). Also with class `horizons_input_error`, it
+#'   aborts when the outcome has zero variance: before the split, when every
+#'   observed value is the same, and after it, when every training row left
+#'   by the split and the response trim has the same value, since every
+#'   config would then be tuned on a constant. The message names the outcome,
+#'   the value and how many rows have it (#132). Checkpoint rows written
+#'   before the range was recorded resume only under the default range.
+#'   Called on an object that has already been through `fit()` or
+#'   `ensemble()`, it returns a `horizons_eval` whose `models` and
+#'   `ensemble` slots are empty again, since both were built on the
+#'   evaluation it replaces.
 #'
 #' @export
 evaluate <- function(x,
@@ -255,6 +261,15 @@ evaluate <- function(x,
   ## lets be zero or negative; ranking by its minimum would then pick the
   ## worst configuration.
   check_rank_metric_range(metric, outcome_range, verb = "evaluate")
+
+  ## -----------------------------------------------------------------------
+  ## Step 2c: The outcome has to vary
+  ## -----------------------------------------------------------------------
+  ## validate() reports a constant outcome, but nothing gates on its verdict,
+  ## so it is refused here, before any split (#132). The training part is
+  ## checked again in Step 4, once the split and the trim have drawn it.
+
+  check_outcome_variance(x, verb = "evaluate")
 
   ## -----------------------------------------------------------------------
   ## Step 3: Validate minimum sample size
@@ -367,6 +382,22 @@ evaluate <- function(x,
   test_data  <- rsample::testing(split)
   n_train    <- nrow(train_data)
   n_test     <- nrow(test_data)
+
+  ## The modelled rows vary (Step 2c), but when the few rows with another
+  ## value all fall in the test part or are trimmed, every config would be
+  ## tuned on a constant. Refused before the folds are drawn (#132).
+  drawn_rows <- drawn$split$data
+  trim_ids   <- trimmed$record$trimmed_ids %||% character(0)
+
+  check_training_outcome_variance(
+    train_data[[outcome_col]],
+    held_out    = list(
+      "in the test set"              = test_data[[outcome_col]],
+      "trimmed as response outliers" = drawn_rows[[outcome_col]][drawn_rows[[id_column(role_map)]] %in% trim_ids]
+    ),
+    outcome_col = outcome_col,
+    verb        = "evaluate"
+  )
 
   ## -----------------------------------------------------------------------
   ## Step 5: Create CV folds
@@ -2268,6 +2299,137 @@ outcome_complete_rows <- function(analysis, outcome_col) {
     data      = if (any(na_mask)) analysis[!na_mask, , drop = FALSE] else analysis,
     n_dropped = sum(na_mask)
   )
+
+}
+
+## ---------------------------------------------------------------------------
+## Outcome variance: evaluate() and fit() refuse a constant outcome
+## ---------------------------------------------------------------------------
+## validate() reports a constant outcome (check P003), but nothing gates on
+## its verdict and running it is optional, so the modelling verbs refuse one
+## themselves (#132): on the rows they model, before any split, and on the
+## rows a model is fitted on, which the split, a response trim or fit()'s
+## calibration set can leave constant when the modelled rows are not.
+
+#' The one value a constant outcome takes
+#'
+#' @param values Outcome values; `NA`s are dropped.
+#' @return `NULL` when the non-missing values take at least two distinct
+#'   values, or when there are fewer than two of them (the row floors judge
+#'   those). Otherwise a list with `value` (the value every row has) and `n`
+#'   (how many rows have it). Equality is exact, so a near-constant outcome
+#'   is not constant.
+#' @keywords internal
+#' @noRd
+constant_outcome <- function(values) {
+
+  y <- values[!is.na(values)]
+
+  if (length(y) < 2 || any(y != y[1])) return(NULL)
+
+  list(value = y[1], n = length(y))
+
+}
+
+#' Format an outcome value for a message
+#'
+#' @param value A single outcome value.
+#' @return `character(1)`.
+#' @keywords internal
+#' @noRd
+format_outcome_value <- function(value) {
+
+  if (is.numeric(value)) format(signif(value, 4)) else as.character(value)
+
+}
+
+#' Refuse an outcome with zero variance on the rows a verb models
+#'
+#' @description
+#' `evaluate()` and `fit()` (on either path) call this beside
+#' [check_outcome_range()], before they draw a split or fit anything, so a
+#' constant outcome fails in a second rather than after the tuning cost or
+#' with an error from inside a model. The rows are the ones the verbs model:
+#' missing outcomes are ignored.
+#'
+#' @param x A configured `horizons_data` object.
+#' @param verb `character(1)`. The calling verb, named in the message.
+#' @param call The call the condition is attributed to. Default: the caller.
+#' @return `NULL`, invisibly. Aborts with class `horizons_input_error`.
+#' @keywords internal
+#' @noRd
+check_outcome_variance <- function(x, verb, call = rlang::caller_env()) {
+
+  role_map    <- x$data$role_map
+  outcome_col <- role_map$variable[role_map$role == "outcome"]
+
+  ## No single outcome to check: the verbs' own gates say so.
+  if (length(outcome_col) != 1 || !outcome_col %in% names(x$data$analysis)) {
+
+    return(invisible(NULL))
+
+  }
+
+  constant <- constant_outcome(x$data$analysis[[outcome_col]])
+
+  if (is.null(constant)) return(invisible(NULL))
+
+  value_text <- format_outcome_value(constant$value)
+
+  cli::cli_abort(c(
+    "{.fn {verb}} cannot model {.field {outcome_col}}: it has zero variance.",
+    "x" = "All {constant$n} rows with an observed {.field {outcome_col}} have the value {value_text}.",
+    "i" = "A model fitted to a constant learns nothing from the spectra. Check that the outcome role names the right column and that its values were joined to the right samples."
+  ), class = "horizons_input_error", call = call)
+
+}
+
+#' Refuse training rows whose outcome does not vary
+#'
+#' @description
+#' The modelled rows can vary while the rows a model is fitted on do not:
+#' the few rows with another value can all fall in the test set, be trimmed
+#' as response outliers, or be drawn into `fit()`'s calibration set. Every
+#' model would then be fitted to a constant, and when the constant is a
+#' finite lower bound of `outcome_range` the response bound equals that
+#' bound, which the fit validator refused only after every model had been
+#' fitted (#132). `evaluate()` calls this on the training part left after
+#' the split and the trim, before its CV folds; `fit()` on the rows its
+#' models are fitted on, on either path, before its folds.
+#'
+#' @param train_values Outcome values of the rows the models are fitted on.
+#' @param held_out Named list of outcome vectors: the other modelled rows,
+#'   by where they went. Each name completes "<count> ...", e.g.
+#'   `"in the test set"`. A `NULL` element counts as no rows.
+#' @param outcome_col `character(1)`. The outcome column, named in the
+#'   message.
+#' @param verb `character(1)`. The calling verb, named in the message.
+#' @param call The call the condition is attributed to. Default: the caller.
+#' @return `NULL`, invisibly. Aborts with class `horizons_input_error`.
+#' @keywords internal
+#' @noRd
+check_training_outcome_variance <- function(train_values, held_out, outcome_col,
+                                            verb, call = rlang::caller_env()) {
+
+  constant <- constant_outcome(train_values)
+
+  if (is.null(constant)) return(invisible(NULL))
+
+  value_text <- format_outcome_value(constant$value)
+
+  ## Where the modelled rows with another value went
+  n_other <- vapply(held_out, function(v) {
+    sum(!is.na(v) & v != constant$value)
+  }, integer(1))
+  n_other <- n_other[n_other > 0]
+  k_other <- sum(n_other)
+  where   <- paste(n_other, names(n_other), collapse = ", ")
+
+  cli::cli_abort(c(
+    "{.fn {verb}} cannot fit {.field {outcome_col}}: all {constant$n} training rows have the value {value_text}.",
+    "x" = if (k_other > 0) "The {k_other} modelled row{?s} with another value {?is/are all} outside the training rows: {where}.",
+    "i" = "Every model would be fitted to a constant. {.field {outcome_col}} needs more samples where it varies."
+  ), class = "horizons_input_error", call = call)
 
 }
 

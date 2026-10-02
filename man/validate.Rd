@@ -42,7 +42,8 @@ both the whole-table flags and the training-partition fences
 \value{
 \code{horizons_data}. Same object with \code{validation} section populated:
 \itemize{
-\item \code{validation$passed}: \code{TRUE} if no ERROR checks failed
+\item \code{validation$passed}: \code{TRUE} if no ERROR checks failed. A record of
+this report; no modelling verb reads it
 \item \code{validation$checks}: tibble of check results
 \item \code{validation$outliers}: the ids this call flagged (\code{spectral_ids},
 and \code{response_ids}, flagged on the whole table for information and
@@ -68,15 +69,20 @@ expensive model evaluation. Checks sample sufficiency, outcome health,
 predictor quality, and detects spectral and response outliers.
 }
 \details{
-\code{validate()} is the gate between \code{configure()} and \code{evaluate()}. Detection
-is mandatory; outlier removal is opt-in. The function populates the
-\code{validation} section of the object and sets \code{validation$passed} based on
-whether any ERROR-severity checks failed.
+\code{validate()} is an advisory pre-flight report, run between \code{configure()}
+and \code{evaluate()}. Running it is optional and nothing gates on its verdict:
+\code{evaluate()} and \code{fit()} refuse invalid input themselves, including the
+problems its ERROR checks report (too few rows for the CV folds, and an
+outcome with zero variance). Detection is mandatory; outlier removal is
+opt-in. The function populates the \code{validation} section of the object
+and sets \code{validation$passed} based on whether any ERROR-severity checks
+failed.
 
 \strong{Severity levels:}
 \itemize{
-\item \strong{ERROR}: Blocks modeling. \code{validation$passed} set to \code{FALSE}.
-\item \strong{WARNING}: Non-blocking but noteworthy. Does not affect \code{passed}.
+\item \strong{ERROR}: A problem \code{evaluate()} and \code{fit()} refuse. \code{validation$passed}
+set to \code{FALSE}.
+\item \strong{WARNING}: Noteworthy. Does not affect \code{passed}.
 \item \strong{INFO}: Descriptive/detection results. Does not affect \code{passed}.
 }
 

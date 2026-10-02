@@ -78,11 +78,11 @@
 #' `best_config` with status `"not_evaluated"`, its metric and `cv_*` columns
 #' are `NA`, and `runtime_secs` is 0. `evaluation$recipe` records the recipe
 #' settings as `evaluate()` does, and `fit()` applies `evaluate()`'s checks
-#' first: at least twice `cv_folds` rows with an observed outcome, and a
-#' Savitzky-Golay window narrower than the spectrum. Re-fitting a
-#' cold-started fit starts cold again. With more than one configuration
-#' `fit()` aborts with class `horizons_input_error`: choosing among them is
-#' what `evaluate()` is for.
+#' first: an outcome that is not constant, at least twice `cv_folds` rows
+#' with an observed outcome, and a Savitzky-Golay window narrower than the
+#' spectrum. Re-fitting a cold-started fit starts cold again. With more than
+#' one configuration `fit()` aborts with class `horizons_input_error`:
+#' choosing among them is what `evaluate()` is for.
 #'
 #' @param x A `horizons_eval` object (output of `evaluate()`), or a
 #'   configured `horizons_data` with exactly one configuration, which `fit()`
@@ -131,6 +131,16 @@
 #' one `evaluate()` recorded on its results rows (rows from before the range
 #' was recorded count as the default), since the members were chosen on
 #' predictions clamped to that range.
+#'
+#' @section Zero outcome variance:
+#' On either path, before anything is drawn, `fit()` aborts with class
+#' `horizons_input_error` when every observed outcome has the same value, as
+#' `evaluate()` does. It also aborts, before any model is fitted, when the
+#' modelled rows vary but the rows its models are fitted on do not, because
+#' the rows with another value all fell in the test set or the calibration
+#' set, or among the training rows a response trim left out. Every member
+#' would otherwise be fitted to a constant. The message names the outcome,
+#' the value, how many rows have it and where the other rows went (#132).
 #'
 #' @return A `horizons_fit` object (inherits from `horizons_eval`,
 #'   `horizons_data`) with `models$` slot populated. The slot includes
@@ -210,6 +220,13 @@ fit <- function(x,
   ## since; this is the last check before the re-tune pays for itself.
   check_outcome_range(x, verb = "fit")
   outcome_range <- outcome_range_setting(x)
+
+  ## A constant outcome, refused on either path before anything is drawn,
+  ## as evaluate() refuses it (#132): validate() reports one, but nothing
+  ## gates on its verdict. The rows the models are fitted on are checked
+  ## again in Step 1, once the split, the trim and the calibration set have
+  ## drawn them.
+  check_outcome_variance(x, verb = "fit")
 
   ## The metric fit() will rank by, and that the ensemble inherits: rrmse
   ## ranks backwards once the mean outcome can be negative.
@@ -524,6 +541,24 @@ fit <- function(x,
     train_Fit <- train_F
 
   }
+
+  ## The modelled rows vary, but the rows every member is fitted on can
+  ## still be constant: the few rows with another value can all be test
+  ## rows, calibration rows or trimmed rows. When the constant is a finite
+  ## lower bound of outcome_range the response bound equals it, and the fit
+  ## validator refused the object only after every model was fitted (#132).
+  ## The places are disjoint: a trimmed row drawn into the calibration set
+  ## counts there.
+  check_training_outcome_variance(
+    train_Fit[[outcome_col]],
+    held_out    = list(
+      "in the test set"              = test_F[[outcome_col]],
+      "in the calibration set"       = calib_data[[outcome_col]],
+      "trimmed as response outliers" = trimmed_rows[[outcome_col]][!trimmed_rows[[id_col]] %in% calib_data[[id_col]]]
+    ),
+    outcome_col = outcome_col,
+    verb        = "fit"
+  )
 
   ## -----------------------------------------------------------------------
   ## Step 2: Create CV resamples from train_Fit

@@ -3298,13 +3298,12 @@ summary.horizons_data <- function(object, ...) {
 
     next_step <- "configure()"
 
-  } else if (is.null(x$validation$passed)) {
-
-    next_step <- "validate()"
-
   } else if (is.null(x$evaluation$results)) {
 
-    next_step <- "evaluate()"
+    ## validate() is an optional pre-flight report (#132): suggested only
+    ## before evaluate(), never in place of the next step of an evaluated or
+    ## fitted object that skipped it.
+    next_step <- if (is.null(x$validation$passed)) "validate()" else "evaluate()"
 
   } else if (is.null(x$models$workflows)) {
 

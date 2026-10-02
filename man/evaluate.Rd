@@ -97,11 +97,17 @@ which are back-transformed first. Aborts, before any config runs, when
 \code{horizons_input_error}, when an observed outcome lies outside
 \code{outcome_range} or is infinite, or when \code{metric = "rrmse"} under a range
 whose lower bound is negative (the mean outcome it divides by can then be
-zero or negative) (#76). Checkpoint rows written before the range was
-recorded resume only under the default range. Called on an object that
-has already been through \code{fit()} or \code{ensemble()}, it returns a
-\code{horizons_eval} whose \code{models} and \code{ensemble} slots are empty again,
-since both were built on the evaluation it replaces.
+zero or negative) (#76). Also with class \code{horizons_input_error}, it
+aborts when the outcome has zero variance: before the split, when every
+observed value is the same, and after it, when every training row left
+by the split and the response trim has the same value, since every
+config would then be tuned on a constant. The message names the outcome,
+the value and how many rows have it (#132). Checkpoint rows written
+before the range was recorded resume only under the default range.
+Called on an object that has already been through \code{fit()} or
+\code{ensemble()}, it returns a \code{horizons_eval} whose \code{models} and
+\code{ensemble} slots are empty again, since both were built on the
+evaluation it replaces.
 }
 \description{
 Evaluates all model configurations from \code{configure()} against held-out test

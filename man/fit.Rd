@@ -162,11 +162,11 @@ The fit carries an unscreened evaluation record in place of
 \code{best_config} with status \code{"not_evaluated"}, its metric and \verb{cv_*} columns
 are \code{NA}, and \code{runtime_secs} is 0. \code{evaluation$recipe} records the recipe
 settings as \code{evaluate()} does, and \code{fit()} applies \code{evaluate()}'s checks
-first: at least twice \code{cv_folds} rows with an observed outcome, and a
-Savitzky-Golay window narrower than the spectrum. Re-fitting a
-cold-started fit starts cold again. With more than one configuration
-\code{fit()} aborts with class \code{horizons_input_error}: choosing among them is
-what \code{evaluate()} is for.
+first: an outcome that is not constant, at least twice \code{cv_folds} rows
+with an observed outcome, and a Savitzky-Golay window narrower than the
+spectrum. Re-fitting a cold-started fit starts cold again. With more than
+one configuration \code{fit()} aborts with class \code{horizons_input_error}:
+choosing among them is what \code{evaluate()} is for.
 }
 
 \section{Outcome range}{
@@ -182,5 +182,17 @@ negative; and, on the \code{evaluate()} path, when the range differs from the
 one \code{evaluate()} recorded on its results rows (rows from before the range
 was recorded count as the default), since the members were chosen on
 predictions clamped to that range.
+}
+
+\section{Zero outcome variance}{
+
+On either path, before anything is drawn, \code{fit()} aborts with class
+\code{horizons_input_error} when every observed outcome has the same value, as
+\code{evaluate()} does. It also aborts, before any model is fitted, when the
+modelled rows vary but the rows its models are fitted on do not, because
+the rows with another value all fell in the test set or the calibration
+set, or among the training rows a response trim left out. Every member
+would otherwise be fitted to a constant. The message names the outcome,
+the value, how many rows have it and where the other rows went (#132).
 }
 
