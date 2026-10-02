@@ -5,6 +5,7 @@
 * `parse_ids()` refuses an evaluated, fitted or ensembled object. It rewrites `sample_id`, and the stored splits and models are keyed to it (#135).
 * Each class is checked against everything it promises (#129). An evaluated object is checked against the base data contract as well as its evaluation, and an ensemble against its fitted models, evaluation and data. `ensemble()` checks the whole fitted object before it fits anything, as `evaluate()` and `fit()` already did. Two rules are new: the column with the `id` role must be `sample_id`, and `evaluation$results` must have exactly one row per configuration in `config$configs`. Every validation failure now aborts with class `horizons_validation_error`, including the checks that run first, which used to abort without it.
 * `select_training()` validates the targets and the library before drawing. Targets need one row per sample with finite spectra, so replicate scans are averaged first. A library that has been through `configure()` or `validate()` is refused, and the selection record now identifies the targets in `x$selection$targets`: their source, row count and an id hash (#133).
+* `evaluate()` and `fit()`, including the cold start, abort with class `horizons_input_error` when the outcome has zero variance, on the modelled rows or on the rows the models are fitted on; `validate()` is documented as an advisory report, and `summary()` suggests it only before `evaluate()` (#132).
 
 ## Bug fixes
 
