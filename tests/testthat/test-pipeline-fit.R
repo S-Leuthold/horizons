@@ -2129,21 +2129,13 @@ describe("fit() - evaluate()'s response trim (#77)", {
 
   })
 
-  it("reuses the recorded rows rather than re-reading validate()'s request", {
-
-    ## A request changed after evaluate() does not reach the fit: fences
-    ## recomputed at another threshold would trim other rows.
-    changed <- ev
-    changed$validation$outliers$response_trim$threshold <- 3
-
-    expect_identical(seen_by_fit(changed)$train$sample_id, warm$train$sample_id)
-
-  })
-
   it("refuses the split once the record of its trimmed rows is gone", {
 
+    ## The request goes too, so the trim-request check (#137) passes and the
+    ## split check is the one that refuses
     no_record <- ev
     no_record$evaluation["response_trim"] <- list(NULL)
+    no_record$validation$outliers["response_trim"] <- list(NULL)
 
     expect_error(
       suppressWarnings(fit(no_record, compute_uq = FALSE, compute_ad = FALSE,
@@ -2218,6 +2210,161 @@ describe("fit() - evaluate()'s response trim (#77)", {
 
     expect_true(any(vapply(warm_legacy$warnings, inherits, logical(1),
                            "horizons_response_trim_warning")))
+
+  })
+
+})
+
+
+## =========================================================================
+## A trim request changed after evaluate() is refused, not ignored (#137)
+## =========================================================================
+## validate() writes its request on an evaluated object without resetting
+## the evaluation, and fit() reuses the trim evaluate() applied rather than
+## reading the request. A request that differs from that trim never reached
+## the fit, silently; fit() now refuses it before anything is fitted.
+
+describe("fit() - a trim request changed after evaluate() (#137)", {
+
+  obj <- make_eval_object(n = 60, n_configs = 1)
+  obj$data$analysis$SOC[c(1:4, 31:34)] <- c(20, 25, 30, 35, -15, -20, -25, -30)
+  ## The low extremes are negative, so the outcome is signed (#76)
+  obj$config$outcome_range <- c(-Inf, Inf)
+  obj$config$tuning$final_bayesian_iter <- 0L
+
+  quiet_validate <- function(x, ...) {
+
+    utils::capture.output(out <- suppressWarnings(validate(x, ...)))
+    out
+
+  }
+
+  quiet_evaluate <- function(x) {
+
+    suppressWarnings(evaluate(x, prune = FALSE, verbose = FALSE, seed = 307L))
+
+  }
+
+  untrimmed <- quiet_evaluate(obj)
+  trimmed   <- quiet_evaluate(quiet_validate(obj, remove_outliers = "response"))
+
+  ## fit()'s refusal, with its message stripped of styling; NULL if it fitted
+  refusal <- function(x) {
+
+    cnd <- rlang::catch_cnd(
+      suppressWarnings(fit(x, compute_uq = FALSE, compute_ad = FALSE,
+                           verbose = FALSE, seed = 307L)),
+      classes = "horizons_input_error"
+    )
+
+    if (is.null(cnd)) return(NULL)
+
+    list(cnd = cnd, message = cli::ansi_strip(conditionMessage(cnd)))
+
+  }
+
+  it("refuses a trim requested after evaluate()", {
+
+    late <- refusal(quiet_validate(untrimmed, remove_outliers = "response"))
+
+    expect_s3_class(late$cnd, "horizons_input_error")
+    expect_match(late$message, "requests a trim of SOC at 1.5 x IQR", fixed = TRUE)
+    expect_match(late$message, "applied none", fixed = TRUE)
+    expect_match(late$message, "Re-run `evaluate()` to apply the current request", fixed = TRUE)
+
+  })
+
+  it("refuses a trim dropped after evaluate()", {
+
+    dropped <- refusal(quiet_validate(trimmed))
+
+    expect_s3_class(dropped$cnd, "horizons_input_error")
+    expect_match(dropped$message, "applied a trim of SOC at 1.5 x IQR", fixed = TRUE)
+    expect_match(dropped$message, "now requests none", fixed = TRUE)
+
+    ## The cheap way back is offered first, and it works
+    expect_match(dropped$message,
+                 'validate(x, remove_outliers = "response", response_threshold = 1.5)',
+                 fixed = TRUE)
+    expect_match(dropped$message, "Or re-run `evaluate()`", fixed = TRUE)
+
+    restored <- quiet_validate(quiet_validate(trimmed), remove_outliers = "response",
+                               response_threshold = 1.5)
+
+    expect_null(refusal(restored))
+
+  })
+
+  it("refuses a request at another threshold", {
+
+    ## fit() reuses the recorded rows; fences recomputed at the new threshold
+    ## would trim others, so the request used to be ignored
+    other <- refusal(quiet_validate(trimmed, remove_outliers = "response",
+                                    response_threshold = 3))
+
+    expect_s3_class(other$cnd, "horizons_input_error")
+    expect_match(other$message, "threshold is 3 x IQR; `evaluate()` trimmed at 1.5 x IQR",
+                 fixed = TRUE)
+
+  })
+
+  it("refuses a request for another outcome or method, naming each", {
+
+    ## configure() clears the request, so only an edited object gets here
+    edited <- trimmed
+    edited$validation$outliers$response_trim$outcome <- "pH"
+    edited$validation$outliers$response_trim$method  <- "mad"
+
+    out <- refusal(edited)
+
+    expect_s3_class(out$cnd, "horizons_input_error")
+    expect_match(out$message, "The request is for pH; `evaluate()` trimmed SOC", fixed = TRUE)
+    expect_match(out$message, "method is \"mad\"; `evaluate()` used \"iqr\"", fixed = TRUE)
+    expect_no_match(out$message, "threshold is", fixed = TRUE)
+
+  })
+
+  it("compares a trim that drew no fences by the request it ran for", {
+
+    ## Most outcomes equal: the training partition's IQR is zero, so
+    ## evaluate() records a skipped trim and trims nothing
+    flat <- make_eval_object(n = 60, n_configs = 1)
+    flat$data$analysis$SOC[1:48] <- 2
+    flat$config$tuning$final_bayesian_iter <- 0L
+
+    skipped <- quiet_evaluate(quiet_validate(flat, remove_outliers = "response"))
+
+    expect_identical(skipped$evaluation$response_trim$skipped, "zero_iqr")
+    expect_null(check_trim_request(skipped))
+
+    ## The record says a trim was requested; a request withdrawn since does
+    ## not match it
+    withdrawn <- refusal(quiet_validate(skipped))
+
+    expect_s3_class(withdrawn$cnd, "horizons_input_error")
+    expect_match(withdrawn$message, "no fences could be drawn, so it trimmed no rows",
+                 fixed = TRUE)
+
+  })
+
+  it("fits as before when the request matches", {
+
+    ## validate() run again with the same request, and with none on an
+    ## evaluation that trimmed nothing
+    same <- quiet_validate(trimmed, remove_outliers = "response")
+
+    expect_null(check_trim_request(same))
+    expect_null(check_trim_request(quiet_validate(untrimmed)))
+
+    f_before <- suppressWarnings(fit(trimmed, compute_uq = FALSE, compute_ad = FALSE,
+                                     verbose = FALSE, seed = 307L))
+    f_same   <- suppressWarnings(fit(same, compute_uq = FALSE, compute_ad = FALSE,
+                                     verbose = FALSE, seed = 307L))
+
+    expect_s3_class(f_same, "horizons_fit")
+    expect_identical(f_same$models$results$rmse, f_before$models$results$rmse)
+    expect_identical(rsample::training(f_same$models$split)$sample_id,
+                     rsample::training(f_before$models$split)$sample_id)
 
   })
 

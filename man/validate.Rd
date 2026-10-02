@@ -102,7 +102,9 @@ train/test split on the untrimmed rows, computes the fences from the
 training partition's labels alone, and trims the training rows outside
 them before any CV fold is drawn; test rows are never removed on their
 labels. \code{fit()} reuses that split and those trimmed rows, and its cold
-start applies the same rule. A later \code{configure()} clears the request
+start applies the same rule. On an object already evaluated, a request
+that differs from the trim \code{evaluate()} applied makes \code{fit()} refuse until
+\code{evaluate()} runs again. A later \code{configure()} clears the request
 with the rest of the verdict, since it was made for the outcome being
 replaced.
 
