@@ -1,6 +1,12 @@
 # horizons (development version)
 
+## Changes
+
 * `parse_ids()` refuses an evaluated, fitted or ensembled object. It rewrites `sample_id`, and the stored splits and models are keyed to it (#135).
+
+## Bug fixes
+
+* `print()` and `summary()` of a fitted object report the member `fit()` selected on cross-validation (`models$best_config`) and its test metrics, as `fit()`'s console does. They reported the member with the lowest test RMSE, a best-of-N on the held-out rows that could name a different configuration (#136).
 * `add_response()` refuses an `NA` join key on either side and reports how many there are. Before, an `NA` key on one side was matched to an `NA` key on the other (#139).
 
 # horizons 0.10.0
