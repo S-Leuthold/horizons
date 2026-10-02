@@ -237,9 +237,11 @@ test_that("predict_ad returns per-row NA for one bad spectrum and scores the res
   new_df           <- ad_new_spectra(fx$wn, n = 5)
   new_df[3, fx$wn] <- NA_real_                   # one malformed spectrum
 
-  ad <- suppressWarnings(
-    predict_ad(fx$workflow, bundle, new_df)
-  )
+  ## It warns about the degraded rows rather than dropping AD
+  warns <- testthat::capture_warnings(ad <- predict_ad(fx$workflow, bundle, new_df))
+
+  expect_true(any(grepl("Applicability domain is NA for 1 of 5", warns)))
+  expect_false(is.null(ad))
 
   expect_s3_class(ad, "tbl_df")
   expect_equal(nrow(ad), 5L)
@@ -251,23 +253,6 @@ test_that("predict_ad returns per-row NA for one bad spectrum and scores the res
   expect_equal(sum(!is.na(ad$.ad_distance)), 4L)
   expect_true(all(ad$.ad_distance[-3] >= 0))
   expect_true(all(!is.na(ad$.ad_flag[-3])))
-
-})
-
-test_that("predict_ad warns about the degraded rows rather than dropping AD", {
-
-  fx     <- ad_fitted_workflow()
-  bundle <- fit_ad(fx$workflow, calib_data = fx$data)
-
-  expect_false(is.null(bundle))
-
-  new_df           <- ad_new_spectra(fx$wn, n = 5)
-  new_df[3, fx$wn] <- NA_real_
-
-  warns <- testthat::capture_warnings(ad <- predict_ad(fx$workflow, bundle, new_df))
-
-  expect_true(any(grepl("Applicability domain is NA for 1 of 5", warns)))
-  expect_false(is.null(ad))
 
 })
 
@@ -338,32 +323,18 @@ test_that("every predict_ad warning names the config when it is given", {
 
   expect_false(is.null(bundle))
 
-  ad_warnings <- function(workflow, ad_bundle, new_df) {
-    testthat::capture_warnings(
-      predict_ad(workflow, ad_bundle, new_df, config_id = "cfg_ad")
-    )
-  }
-
   new_df     <- ad_new_spectra(fx$wn, n = 5)
   one_bad    <- new_df;  one_bad[3, fx$wn] <- NA_real_
   all_bad    <- new_df;  all_bad[, fx$wn]  <- NA_real_
   bad_bundle <- bundle;  bad_bundle$centroid <- bad_bundle$centroid[-1]
 
-  cases <- list(
-    bake     = ad_warnings(list(), bundle, new_df),
-    one_na   = ad_warnings(fx$workflow, bundle, one_bad),
-    all_na   = ad_warnings(fx$workflow, bundle, all_bad),
-    distance = ad_warnings(fx$workflow, bad_bundle, new_df)
-  )
-
-  for (case in names(cases)) {
-
-    ad_lines <- grep("Applicability domain", cases[[case]], value = TRUE)
-
-    expect_length(ad_lines, 1)
-    expect_match(ad_lines, "Applicability domain for config \"cfg_ad\"",
-                 fixed = TRUE, info = case)
-
-  }
+  ## One warning per case, in full: the bake aborts, one spectrum bakes to NA,
+  ## every spectrum does, and the distance fails
+  expect_snapshot({
+    bake     <- predict_ad(list(), bundle, new_df, config_id = "cfg_ad")
+    one_na   <- predict_ad(fx$workflow, bundle, one_bad, config_id = "cfg_ad")
+    all_na   <- predict_ad(fx$workflow, bundle, all_bad, config_id = "cfg_ad")
+    distance <- predict_ad(fx$workflow, bad_bundle, new_df, config_id = "cfg_ad")
+  })
 
 })
