@@ -549,7 +549,7 @@ describe("ensemble UQ - degradation and gates", {
 
 
 ## ---------------------------------------------------------------------------
-## Review-fix regressions: shared indices, floor semantics, legacy retrofit
+## Review-fix regressions: shared indices, floor semantics
 ## ---------------------------------------------------------------------------
 
 describe("cv_plus_indices()", {
@@ -615,37 +615,6 @@ describe("cv_plus_bounds() - corrupted fold ids fail loudly", {
       ),
       "out of sync"
     )
-
-  })
-
-})
-
-describe("fit_ensemble_uq() - legacy retrofit", {
-
-  it("infers optimize = FALSE from equal weights when the contract predates the field", {
-
-    ## Simulate a pre-contract object: equal-weights ensemble with the
-    ## optimize/seed keys removed entirely (the legacy serialized shape).
-    ens <- suppressWarnings(
-      ensemble(fitted, method = "weighted", optimize = FALSE,
-               compute_uq = FALSE, verbose = FALSE)
-    )
-
-    ens$ensemble$optimize <- NULL   # $<- NULL removes the key
-    ens$ensemble$seed     <- NULL
-
-    retro <- suppressWarnings(fit_ensemble_uq(ens, verbose = FALSE))
-
-    expect_false(is.null(retro$ensemble$uq))
-
-    ## The inference must have re-derived EQUAL fold weights — a blind
-    ## optimize = TRUE default would produce inverse-RMSE (unequal) weights,
-    ## a silent deployed-vs-fold-model rule mismatch.
-    for (fm in retro$ensemble$uq$fold_models) {
-
-      expect_true(all(abs(fm$coef - fm$coef[1]) < 1e-12))
-
-    }
 
   })
 

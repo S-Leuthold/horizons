@@ -1241,8 +1241,8 @@ validate_select_input <- function(obj, arg, what) {
 #' that had been configured, validated, evaluated or fitted would hand that
 #' state to the training set: a configuration and an outcome chosen for the
 #' library, a verdict and a removal record about rows that are mostly not
-#' there, or `models$row_index` and `evaluation$split` keyed to a row order
-#' the subset just destroyed. So the pool has to be data as `standardize()`
+#' there, or `models$split` and `evaluation$split` keyed to a row order the
+#' subset just destroyed. So the pool has to be data as `standardize()`
 #' and `add_response()` leave it, and this refuses rather than silently
 #' clearing.
 #'
@@ -1272,8 +1272,7 @@ check_pool_unpromoted <- function(pool) {
     if (!is.null(pool$validation$passed))    "a verdict in validation$passed",
     if (removal)                             "a removal record in validation$outliers",
     if (!is.null(pool$evaluation$results))   "evaluation$results",
-    if (!is.null(pool$models$workflows))     "models$workflows",
-    if (!is.null(pool$models$row_index))     "models$row_index"
+    if (!is.null(pool$models$workflows))     "models$workflows"
   )
 
   if (length(carried)) {

@@ -921,12 +921,6 @@ fit <- function(x,
 
   }
 
-  ## Build row_index: .row → id mapping from train_Fit
-  row_index <- tibble::tibble(
-    .row      = seq_len(nrow(train_Fit)),
-    sample_id = train_Fit[[id_col]]
-  )
-
   ## Collect UQ bundles (named by config_id)
   uq_list <- NULL
 
@@ -1018,7 +1012,6 @@ fit <- function(x,
     cv_predictions    = all_cv_predictions,
     results           = results_tibble,
     split             = split_F,
-    row_index         = row_index,
     uq                = uq_list,
     ad                = ad_list,
     selection_present = selection_present,

@@ -16,7 +16,7 @@ test_that("new_horizons_data creates object with correct class", {
 
 })
 
-test_that("new_horizons_data creates object with all 9 sections", {
+test_that("new_horizons_data creates object with all 8 sections", {
 
   obj <- new_horizons_data()
 
@@ -28,13 +28,21 @@ test_that("new_horizons_data creates object with all 9 sections", {
     "evaluation",
     "models",
     "ensemble",
-    "artifacts",
     "selection"
   )
 
-  expect_true(all(expected_sections %in% names(obj)))
-  expect_equal(length(obj), 9)
+  expect_identical(names(obj), expected_sections)
   expect_null(obj$selection)
+
+})
+
+test_that("new_horizons_data carries no artifacts slot, row_index or schema_version (#130, #131)", {
+
+  obj <- new_horizons_data()
+
+  expect_false("artifacts" %in% names(obj))
+  expect_false("row_index" %in% names(obj$models))
+  expect_false("schema_version" %in% names(obj$provenance))
 
 })
 
@@ -60,7 +68,6 @@ test_that("new_horizons_data initializes provenance section correctly", {
   expect_true("spectra_type" %in% names(obj$provenance))
   expect_true("created" %in% names(obj$provenance))
   expect_true("horizons_version" %in% names(obj$provenance))
-  expect_true("schema_version" %in% names(obj$provenance))
 
 })
 
@@ -69,7 +76,6 @@ test_that("new_horizons_data sets provenance defaults", {
   obj <- new_horizons_data()
 
   expect_s3_class(obj$provenance$created, "POSIXct")
-  expect_equal(obj$provenance$schema_version, 1L)
   expect_true(inherits(obj$provenance$horizons_version, "package_version"))
 
 })
@@ -1128,6 +1134,34 @@ test_that("I4b exempts membership rows marked retained = FALSE", {
 })
 
 
+test_that("a membership without retained is refused, not read as all retained (#130)", {
+
+  ## Arrange — a foreign pool id that would be a containment finding if the
+  ## rows were read as retained
+  ids      <- sprintf("P%03d", 1:4)
+  analysis <- tibble::tibble(sample_id = ids, wn_4000 = seq(0.1, 0.4, by = 0.1))
+  role_map <- tibble::tibble(variable = c("sample_id", "wn_4000"),
+                             role     = c("id", "predictor"))
+
+  obj <- new_horizons_data(analysis = analysis, role_map = role_map)
+  obj$selection <- make_selection_record(pool_ids = ids)
+
+  obj$selection$membership$pool_id[1] <- "P999"
+  obj$selection$membership$retained   <- NULL
+
+  ## Act
+  msgs <- check_selection_shape(obj$selection, sample_ids = ids)
+
+  ## Assert — the missing column is the one finding
+  expect_length(msgs, 1L)
+  expect_match(msgs, "retained")
+  expect_error(suppressMessages(validate_horizons_data(obj)),
+               regexp = "retained",
+               class  = "horizons_validation_error")
+
+})
+
+
 test_that("validate_horizons_data enforces I4b containment on groups$pool_ids", {
 
   ids      <- sprintf("P%03d", 1:4)
@@ -1567,6 +1601,21 @@ test_that("summary.horizons_data shows version info", {
 
 })
 
+test_that("summary.horizons_data shows no schema version, even on an object carrying one (#130)", {
+
+  ## Arrange: the key older objects carried
+  obj <- new_horizons_data()
+  obj$provenance$schema_version <- 1L
+
+  ## Act
+  output <- capture.output(summary(obj))
+
+  ## Assert: the provenance tree ends at the horizons version
+  expect_false(any(grepl("(?i)schema", output)))
+  expect_true(any(grepl("└─ Horizons version", output)))
+
+})
+
 ## ---------------------------------------------------------------------------
 ## Configuration section
 ## ---------------------------------------------------------------------------
@@ -1631,16 +1680,20 @@ make_valid_eval <- function() {
   obj <- list(
     config = list(configs = tibble::tibble(config_id = c("cfg_a", "cfg_b"))),
     evaluation = list(
-      results      = results,
-      best_config  = "cfg_a",
-      rank_metric  = "rpd",
-      split        = structure(list(), class = c("rsplit", "list")),
-      n_train      = 80L,
-      n_test       = 20L,
-      workers      = 4L,
+      results          = results,
+      best_config      = "cfg_a",
+      rank_metric      = "rpd",
+      screened         = TRUE,
+      split            = structure(list(), class = c("rsplit", "list")),
+      n_train          = 80L,
+      n_test           = 20L,
+      response_trim    = NULL,
+      workers          = 4L,
       parallelize_over = "configs",
-      runtime_secs = 12.3,
-      timestamp    = Sys.time()
+      recipe           = list(sg_window = 9L, sg_window_cm = 18,
+                              pca_threshold = 0.995),
+      runtime_secs     = 12.3,
+      timestamp        = Sys.time()
     )
   )
 
@@ -1660,23 +1713,22 @@ make_valid_fit <- function() {
   results <- obj$evaluation$results
 
   obj$models <- list(
-    workflows        = list(cfg_a = structure(list(), class = "workflow"),
-                            cfg_b = structure(list(), class = "workflow")),
-    n_models         = 2L,
-    best_config      = "cfg_a",
-    rank_metric      = "rpd",
-    predictor_schema = c("4000", "3999", "3998"),
-    response_bound   = 45.2,
-    cv_predictions   = tibble::tibble(),
-    results          = results,
-    split            = obj$evaluation$split,
-    row_index        = tibble::tibble(.row = 1:80,
-                                      sample_id = paste0("S", 1:80)),
-    uq               = list(cfg_a = list(quantile_model = 1)),
-    ad               = list(cfg_a = list(centroid = 1, cov_matrix = 1,
-                                         ad_thresholds = 1:4)),
-    timestamp        = Sys.time(),
-    runtime_secs     = 30.1
+    workflows         = list(cfg_a = structure(list(), class = "workflow"),
+                             cfg_b = structure(list(), class = "workflow")),
+    n_models          = 2L,
+    best_config       = "cfg_a",
+    rank_metric       = "rpd",
+    predictor_schema  = c("4000", "3999", "3998"),
+    response_bound    = 45.2,
+    cv_predictions    = tibble::tibble(),
+    results           = results,
+    split             = obj$evaluation$split,
+    uq                = list(cfg_a = list(quantile_model = 1)),
+    ad                = list(cfg_a = list(centroid = 1, cov_matrix = 1,
+                                          ad_thresholds = 1:4)),
+    selection_present = FALSE,
+    timestamp         = Sys.time(),
+    runtime_secs      = 30.1
   )
 
   class(obj) <- c("horizons_fit", "horizons_eval", "horizons_data", "list")
@@ -1791,7 +1843,7 @@ test_that("validate_horizons_ensemble passes a trained workflow for penalized", 
 
 })
 
-test_that("validate_horizons_ensemble tolerates NULL oof_predictions, uq, optimize, seed", {
+test_that("validate_horizons_ensemble tolerates NULL oof_predictions and uq", {
 
   ## Arrange. `[<-` with list(NULL) sets the value to NULL while KEEPING the
   ## key ($<- NULL would remove it and trip the completeness check) — this is
@@ -1799,11 +1851,25 @@ test_that("validate_horizons_ensemble tolerates NULL oof_predictions, uq, optimi
   obj <- make_valid_ensemble()
   obj$ensemble["oof_predictions"] <- list(NULL)
   obj$ensemble["uq"]              <- list(NULL)
-  obj$ensemble["optimize"]        <- list(NULL)
-  obj$ensemble["seed"]            <- list(NULL)
 
   ## Act & Assert
   expect_identical(validate_horizons_ensemble(obj), obj)
+
+})
+
+test_that("validate_horizons_ensemble refuses a NULL optimize or seed (#130)", {
+
+  ## ensemble() always records both, and fit_ensemble_uq() rebuilds the fold
+  ## models from them, so neither may be NULL.
+  for (key in c("optimize", "seed")) {
+
+    obj <- make_valid_ensemble()
+    obj$ensemble[key] <- list(NULL)
+
+    expect_error(suppressMessages(validate_horizons_ensemble(obj)), key,
+                 class = "horizons_validation_error", info = key)
+
+  }
 
 })
 
@@ -2223,30 +2289,48 @@ test_that("validate_horizons_fit passes a well-formed models slot", {
 
 })
 
-test_that("validate_horizons_fit tolerates a NULL response_bound (pre-clamp objects)", {
+test_that("validate_horizons_fit refuses a missing response_bound or selection_present (#130)", {
 
-  ## Objects fitted before the winsorization guardrail shipped carry no bound
-  ## and predict without a clamp — the validator must accept that. `[<-` with
-  ## list(NULL) sets NULL while KEEPING the key (so the completeness check still
-  ## sees it).
+  ## fit() writes both on every path, so neither is optional.
+  for (key in c("response_bound", "selection_present")) {
+
+    gone <- make_valid_fit()
+    gone$models[[key]] <- NULL   # NULL removes the key
+
+    expect_error(suppressMessages(validate_horizons_fit(gone)),
+                 paste0("missing from models: ", key),
+                 class = "horizons_validation_error", info = key)
+
+    ## Kept as a key but NULL is as good as missing. `[<-` with list(NULL)
+    ## keeps the key, so the completeness check passes and the value check
+    ## has to catch it.
+    null_value <- make_valid_fit()
+    null_value$models[key] <- list(NULL)
+
+    expect_error(suppressMessages(validate_horizons_fit(null_value)), key,
+                 class = "horizons_validation_error", info = key)
+
+  }
+
+})
+
+test_that("validate_horizons_fit refuses a selection_present that is not TRUE or FALSE", {
+
   obj <- make_valid_fit()
-  obj$models["response_bound"] <- list(NULL)
+  obj$models$selection_present <- NA
 
+  expect_error(suppressMessages(validate_horizons_fit(obj)), "selection_present",
+               class = "horizons_validation_error")
+
+  obj$models$selection_present <- TRUE
   expect_identical(validate_horizons_fit(obj), obj)
 
 })
 
 test_that("validate_horizons_fit takes its required keys from the constructor", {
 
-  ## Keys added after objects without them were saved may be absent
-  ## (CONTRACT_KEYS_OPTIONAL); every other key new_horizons_data() declares
-  ## for the slot is required, ad included.
-  old <- make_valid_fit()
-  old$models$response_bound    <- NULL   # NULL removes the key
-  old$models$selection_present <- NULL
-
-  expect_identical(validate_horizons_fit(old), old)
-
+  ## Every key new_horizons_data() declares for the slot is required, ad
+  ## included: fit() writes them all.
   no_ad <- make_valid_fit()
   no_ad$models$ad <- NULL
 
@@ -2254,9 +2338,24 @@ test_that("validate_horizons_fit takes its required keys from the constructor", 
                "missing from models: ad",
                class = "horizons_validation_error")
 
-  expect_identical(contract_keys("models"),
-                   setdiff(names(new_horizons_data()$models),
-                           c("response_bound", "selection_present")))
+  expect_identical(contract_keys("models"), names(new_horizons_data()$models))
+  expect_identical(contract_keys("evaluation"),
+                   setdiff(names(new_horizons_data()$evaluation),
+                           c("workers", "parallelize_over")))
+  expect_identical(contract_keys("ensemble"), names(new_horizons_data()$ensemble))
+
+})
+
+test_that("an object without row_index is a valid fit, and a stray one is not read (#131)", {
+
+  obj <- make_valid_fit()
+
+  expect_false("row_index" %in% names(obj$models))
+  expect_identical(validate_horizons_fit(obj), obj)
+
+  ## A malformed row_index left on an object is not checked: nothing reads it.
+  obj$models$row_index <- "not a map"
+  expect_identical(validate_horizons_fit(obj), obj)
 
 })
 
@@ -2540,11 +2639,11 @@ test_that("has_ad and has_uq are independent", {
 ## (I7c, 2026-09-15)
 ## =========================================================================
 
-test_that("validate_horizons_eval tolerates parallelize_over being absent (pre-2026-09-15 objects)", {
+test_that("validate_horizons_eval tolerates workers and parallelize_over being absent (fit()'s cold start)", {
 
   obj <- make_valid_eval()
   obj$evaluation$parallelize_over <- NULL
-  obj$evaluation$workers          <- 4L      # the OLD meaning: requested count
+  obj$evaluation$workers          <- NULL
 
   expect_identical(validate_horizons_eval(obj), obj)
 
@@ -2583,17 +2682,21 @@ test_that("validate_horizons_eval validates workers under the new meaning when p
 
 })
 
-test_that("validate_horizons_eval tolerates screened being absent and checks it when present (#45)", {
+test_that("validate_horizons_eval requires screened and checks its value (#45, #130)", {
 
-  ## make_valid_eval() carries no `screened`, as objects evaluated before the
-  ## key existed do not.
   obj <- make_valid_eval()
 
-  expect_false("screened" %in% names(obj$evaluation))
-  expect_false("screened" %in% contract_keys("evaluation"))
-  expect_identical(validate_horizons_eval(obj), obj)
+  expect_true("screened" %in% contract_keys("evaluation"))
+
+  gone <- obj
+  gone$evaluation$screened <- NULL
+  expect_error(suppressMessages(validate_horizons_eval(gone)),
+               "missing from evaluation: screened",
+               class = "horizons_validation_error")
 
   ## fit()'s cold start writes FALSE, evaluate() TRUE
+  expect_identical(validate_horizons_eval(obj), obj)
+
   obj$evaluation$screened <- FALSE
   expect_identical(validate_horizons_eval(obj), obj)
 
@@ -2607,14 +2710,22 @@ test_that("validate_horizons_eval tolerates screened being absent and checks it 
 
 })
 
-test_that("validate_horizons_eval accepts evaluation$recipe, and tolerates its absence (#62)", {
+test_that("validate_horizons_eval requires evaluation$recipe and accepts a well-formed one (#62, #130)", {
 
-  ## The fixture has no recipe key, which is every object evaluated before
-  ## evaluate() recorded the recipe settings.
+  ## evaluate() and the cold start both write it, so it is not optional, and
+  ## neither writes NULL.
+  gone <- make_valid_eval()
+  gone$evaluation$recipe <- NULL
+  expect_error(suppressMessages(validate_horizons_eval(gone)),
+               "missing from evaluation: recipe",
+               class = "horizons_validation_error")
+
+  null_value <- make_valid_eval()
+  null_value$evaluation["recipe"] <- list(NULL)
+  expect_error(suppressMessages(validate_horizons_eval(null_value)), "recipe",
+               class = "horizons_validation_error")
+
   obj <- make_valid_eval()
-  expect_false("recipe" %in% names(obj$evaluation))
-  expect_identical(validate_horizons_eval(obj), obj)
-
   obj$evaluation$recipe <- list(sg_window = 9L, sg_window_cm = 18, pca_threshold = 0.995)
   expect_identical(validate_horizons_eval(obj), obj)
 
@@ -2624,14 +2735,18 @@ test_that("validate_horizons_eval accepts evaluation$recipe, and tolerates its a
 
 })
 
-test_that("validate_horizons_eval tolerates response_trim absent or NULL, and checks a record (#77)", {
+test_that("validate_horizons_eval requires response_trim, allows NULL, and checks a record (#77, #130)", {
 
-  ## The fixture has no response_trim key, which is every object evaluated
-  ## before evaluate() trimmed the training partition.
+  ## evaluate() and the cold start both write the key; it is NULL when no
+  ## trim was requested.
   obj <- make_valid_eval()
-  expect_false("response_trim" %in% names(obj$evaluation))
-  expect_false("response_trim" %in% contract_keys("evaluation"))
-  expect_identical(validate_horizons_eval(obj), obj)
+  expect_true("response_trim" %in% contract_keys("evaluation"))
+
+  gone <- obj
+  gone$evaluation$response_trim <- NULL
+  expect_error(suppressMessages(validate_horizons_eval(gone)),
+               "missing from evaluation: response_trim",
+               class = "horizons_validation_error")
 
   ## No trim requested
   obj$evaluation["response_trim"] <- list(NULL)
@@ -2693,14 +2808,19 @@ test_that("validate_horizons_eval rejects a malformed evaluation$recipe", {
 
 })
 
-test_that("the committed ensemble fixture (evaluated before the slot existed) still validates", {
+test_that("the committed ensemble fixture carries the current contract and validates", {
 
-  ## The eval-level validator is what the tolerance rule governs. The fixture
-  ## also predates response_bound, which the fit-level validator tolerates
-  ## too, and ensemble() runs that validator on entry (#129).
+  ## ensemble() runs the fit validator on entry (#129), so the fixture must
+  ## carry every required key and none of the removed ones (#130, #131).
   fx <- readRDS(test_path("fixtures", "ensemble_fit.rds"))
 
-  expect_false("parallelize_over" %in% names(fx$evaluation))
+  expect_true(all(c("screened", "recipe", "response_trim") %in% names(fx$evaluation)))
+  expect_true(all(c("response_bound", "selection_present") %in% names(fx$models)))
+  expect_false("row_index" %in% names(fx$models))
+  expect_false("artifacts" %in% names(fx))
+  expect_false("schema_version" %in% names(fx$provenance))
+  expect_true("sample_id" %in% names(fx$models$cv_predictions))
+
   expect_identical(validate_horizons_eval(fx), fx)
   expect_identical(validate_horizons_fit(fx), fx)
 

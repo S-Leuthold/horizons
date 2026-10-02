@@ -427,7 +427,7 @@ average <- function(x,
 
     ## I2 says sample_id is character. A numeric or factor `by` would pass
     ## the validator's presence and uniqueness checks and then break joins
-    ## against models$row_index and ensemble$predictions much later.
+    ## against models$cv_predictions and ensemble$predictions much later.
     averaged[[by]] <- as.character(averaged[[by]])
 
     if (anyNA(averaged[[by]])) {

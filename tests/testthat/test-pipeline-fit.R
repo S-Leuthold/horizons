@@ -66,8 +66,7 @@ make_fit_object <- function(n = 60, n_wn = 10, n_configs = 2, seed = 42,
     ),
     provenance = list(
       spectra_source = "test",
-      spectra_type   = "mir",
-      schema_version = 1L
+      spectra_type   = "mir"
     ),
     config = list(
       configs   = configs,
@@ -92,8 +91,7 @@ make_fit_object <- function(n = 60, n_wn = 10, n_configs = 2, seed = 42,
     ),
     evaluation = contract$evaluation,
     models     = contract$models,
-    ensemble   = contract$ensemble,
-    artifacts  = list(cache_dir = NULL)
+    ensemble   = contract$ensemble
   )
 
   class(obj) <- c("horizons_data", "list")
@@ -117,14 +115,14 @@ EXPECTED_FIT_RESULT_COLS <- c(
 
 ## Expected columns in cv_predictions
 EXPECTED_FIT_CV_PRED_COLS <- c(
-  ".row", ".fold", "config_id", ".pred", ".pred_trans", "truth"
+  ".row", "sample_id", ".fold", "config_id", ".pred", ".pred_trans", "truth"
 )
 
 ## Expected slots in models$
 EXPECTED_MODEL_SLOTS <- c(
   "workflows", "n_models", "best_config", "rank_metric", "predictor_schema",
-  "response_bound", "cv_predictions", "results", "split", "row_index", "uq",
-  "ad", "selection_present", "timestamp", "runtime_secs"
+  "response_bound", "cv_predictions", "results", "split", "uq", "ad",
+  "selection_present", "timestamp", "runtime_secs"
 )
 
 
@@ -447,31 +445,55 @@ describe("fit() - models$results", {
 
 
 ## =========================================================================
-## Row index mapping
+## Out-of-fold predictions keep their samples (#131)
 ## =========================================================================
+## .row is a position in the rows the final models are fit on, and the
+## object no longer carries a separate map from it; cv_predictions carries
+## sample_id itself.
 
-describe("fit() - row_index", {
+describe("fit() - cv_predictions carries sample_id", {
 
   obj <- make_fit_object(n = 60, n_configs = 2)
 
   result <- suppressWarnings(
-    fit(obj, n_best = 2L, compute_uq = FALSE, verbose = FALSE, seed = 42L)
+    fit(obj, n_best = 2L, compute_uq = FALSE, compute_ad = FALSE,
+        verbose = FALSE, seed = 42L)
   )
 
-  it("is a tibble with .row and sample_id", {
+  cv <- result$models$cv_predictions
 
-    ri <- result$models$row_index
-    expect_s3_class(ri, "tbl_df")
-    expect_true(".row" %in% names(ri))
-    expect_true("sample_id" %in% names(ri))
+  it("names the training row .row indexes", {
+
+    ## With UQ and AD off nothing is carved out for calibration, so the fit
+    ## rows are Split F's training part.
+    train <- rsample::training(result$models$split)
+
+    expect_type(cv$sample_id, "character")
+    expect_false(anyNA(cv$sample_id))
+    expect_identical(cv$sample_id, train$sample_id[cv$.row])
+
+    ## truth comes from tune, independently of the lookup: it is that
+    ## sample's outcome
+    expect_equal(cv$truth, train$SOC[cv$.row])
 
   })
 
-  it("maps to cv_prediction .row values", {
+  it("has one prediction per training sample per config", {
 
-    ri <- result$models$row_index
-    cv_rows <- unique(result$models$cv_predictions$.row)
-    expect_true(all(cv_rows %in% ri$.row))
+    train <- rsample::training(result$models$split)
+
+    for (cfg in unique(cv$config_id)) {
+
+      expect_setequal(cv$sample_id[cv$config_id == cfg], train$sample_id)
+      expect_equal(anyDuplicated(cv$sample_id[cv$config_id == cfg]), 0L)
+
+    }
+
+  })
+
+  it("stores no row_index", {
+
+    expect_false("row_index" %in% names(result$models))
 
   })
 
@@ -810,10 +832,15 @@ describe("fit() - seed reproducibility", {
   r2 <- fit_at(123L, ambient = 2L)
   r3 <- fit_at(124L, ambient = 1L)
 
-  it("same seed produces the same folds and row index", {
+  it("same seed produces the same folds and fit rows", {
+
+    rows_of <- function(r) {
+      cp <- r$models$cv_predictions
+      unique(cp[order(cp$.row), c(".row", "sample_id")])
+    }
 
     expect_identical(fold_of_row(r1), fold_of_row(r2))
-    expect_identical(r1$models$row_index, r2$models$row_index)
+    expect_identical(rows_of(r1), rows_of(r2))
 
   })
 
@@ -867,7 +894,7 @@ describe("fit() - scores on evaluate()'s split", {
 
     test_ids  <- rsample::testing(r$models$split)$sample_id
     calib_ids <- rsample::testing(split_C)$sample_id
-    fit_ids   <- r$models$row_index$sample_id
+    fit_ids   <- unique(r$models$cv_predictions$sample_id)
 
     expect_setequal(rsample::training(split_C)$sample_id, fit_ids)
     expect_equal(r$models$uq[[1]]$n_calib, length(calib_ids))
@@ -978,7 +1005,7 @@ describe("fit() - NA-outcome rows (#67)", {
     expect_length(na_ids, 6L)
     expect_false(any(na_ids %in% r$models$split$data$sample_id))
     expect_false(anyNA(r$models$split$data$SOC))
-    expect_false(any(na_ids %in% r$models$row_index$sample_id))
+    expect_false(any(na_ids %in% unique(r$models$cv_predictions$sample_id)))
 
   })
 
@@ -1011,7 +1038,7 @@ describe("fit() - NA-outcome rows with UQ on (#67)", {
 
   analysis  <- obj$data$analysis
   test_ids  <- rsample::testing(r$models$split)$sample_id
-  fit_ids   <- r$models$row_index$sample_id
+  fit_ids   <- unique(r$models$cv_predictions$sample_id)
   calib_ids <- setdiff(rsample::training(r$models$split)$sample_id, fit_ids)
 
   it("calibrates UQ on the rows left between the fit rows and the test part", {
@@ -1055,7 +1082,7 @@ describe("fit() - response_bound (#68)", {
   it("equals the largest fit-row outcome times RESPONSE_BOUND_MARGIN", {
 
     soc      <- obj$data$analysis$SOC
-    fit_rows <- obj$data$analysis$sample_id %in% r$models$row_index$sample_id
+    fit_rows <- obj$data$analysis$sample_id %in% unique(r$models$cv_predictions$sample_id)
 
     ## Precondition: the fixture discriminates. If a change to the split
     ## moves the maximum back into the fit rows, pick another seed.
@@ -1691,25 +1718,23 @@ describe("fit() - cold start from one configuration (#45)", {
 
   })
 
-  ## An object evaluated before `screened` existed has no such key; it is a
-  ## screened evaluation all the same, and must not be re-drawn.
-  it("takes the warm path for an evaluation that predates `screened`", {
+  ## evaluate() and the cold start both write `screened`, so an evaluation
+  ## without it is not a current object, and the fit it produces is refused
+  ## (#130).
+  it("refuses an evaluation without `screened`", {
 
     legacy <- ev
     legacy$evaluation$screened <- NULL
 
     expect_false("screened" %in% names(legacy$evaluation))
 
-    legacy_out <- utils::capture.output(
-      r <- suppressWarnings(
-        fit(legacy, compute_uq = FALSE, compute_ad = FALSE, verbose = TRUE, seed = 42L)
-      )
+    expect_error(
+      suppressMessages(utils::capture.output(suppressWarnings(
+        fit(legacy, compute_uq = FALSE, compute_ad = FALSE, verbose = FALSE, seed = 42L)
+      ))),
+      "missing from evaluation: screened",
+      class = "horizons_validation_error"
     )
-
-    expect_identical(r$evaluation, legacy$evaluation)
-    expect_identical(r$models$split$in_id, legacy$evaluation$split$in_id)
-    expect_true(r$models$results$warm_start)
-    expect_false(any(grepl("Cold start", legacy_out, fixed = TRUE)))
 
   })
 
@@ -1853,7 +1878,7 @@ describe("fit() - cold start with UQ and AD (#45)", {
 
   modelled_ids <- obj$data$analysis$sample_id[!is.na(obj$data$analysis$SOC)]
   test_ids     <- rsample::testing(cold$models$split)$sample_id
-  fit_ids      <- cold$models$row_index$sample_id
+  fit_ids      <- unique(cold$models$cv_predictions$sample_id)
 
   ## Split C, reproduced from calib_split_seed() and the training part alone
   set.seed(calib_split_seed(42L))
@@ -2153,7 +2178,7 @@ describe("fit() - evaluate()'s response trim (#77)", {
   it("fits and scores end to end on the trimmed split", {
 
     expect_s3_class(f, "horizons_fit")
-    expect_false(any(trimmed %in% f$models$row_index$sample_id))
+    expect_false(any(trimmed %in% unique(f$models$cv_predictions$sample_id)))
     expect_identical(rsample::testing(f$models$split)$sample_id,
                      rsample::testing(ev$evaluation$split)$sample_id)
     expect_true(is.finite(f$models$results$rmse))
@@ -2165,7 +2190,7 @@ describe("fit() - evaluate()'s response trim (#77)", {
     ## The trimmed rows are training-partition rows: a bound below a value
     ## observed there would clamp the extremes the trim set aside.
     analysis <- obj$data$analysis
-    fit_soc  <- analysis$SOC[match(f$models$row_index$sample_id, analysis$sample_id)]
+    fit_soc  <- analysis$SOC[match(unique(f$models$cv_predictions$sample_id), analysis$sample_id)]
     trim_soc <- analysis$SOC[match(trimmed, analysis$sample_id)]
 
     expect_gt(max(trim_soc), max(fit_soc))

@@ -172,7 +172,6 @@ make_test_hd_average <- function(n_samples      = 3,
       spectra_type     = "opus",
       created          = Sys.time(),
       horizons_version = utils::packageVersion("horizons"),
-      schema_version   = 1L,
       aggregation_by   = NULL
     )
   )

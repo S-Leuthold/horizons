@@ -14,7 +14,7 @@
 #' Internal constructor for horizons_data class
 #'
 #' @description
-#' Builds the foundational 9-section object structure for horizons workflows.
+#' Builds the foundational 8-section object structure for horizons workflows.
 #' This is a low-level constructor that assembles the object without validation.
 #' User-facing constructors like `spectra()` call this internally after input
 #' checking.
@@ -22,7 +22,7 @@
 #' @details
 #' The horizons_data class is the base of the class hierarchy (horizons_data →
 #' horizons_eval → horizons_fit → horizons_ensemble). This constructor
-#' initializes all 9 sections with either provided values or NULL defaults:
+#' initializes all 8 sections with either provided values or NULL defaults:
 #'
 #' 1. **data**: The analysis tibble and role_map
 #' 2. **provenance**: Source files, transforms applied, version info
@@ -31,8 +31,7 @@
 #' 5. **evaluation**: Model comparison results (populated by evaluate())
 #' 6. **models**: Fitted workflows and UQ models (populated by fit())
 #' 7. **ensemble**: Optional stacked ensemble (populated by ensemble())
-#' 8. **artifacts**: Paths to disk-backed storage for large objects
-#' 9. **selection**: The record of a draw from a reference pool, `NULL`
+#' 8. **selection**: The record of a draw from a reference pool, `NULL`
 #'    unless the object came from `select_training()`
 #'
 #' The selection record is a list with `settings` (every lever the draw used),
@@ -127,7 +126,6 @@ new_horizons_data <- function(analysis       = NULL,
                       spectra_type     = spectra_type,
                       created          = Sys.time(),
                       horizons_version = utils::packageVersion("horizons"),
-                      schema_version   = 1L,
 
     ## Transform provenance (updated by pipeline verbs) ------------------------
 
@@ -214,10 +212,9 @@ new_horizons_data <- function(analysis       = NULL,
                   rank_metric       = NULL,  ## character: metric configs were ranked by
                   predictor_schema  = NULL,  ## character: training-axis predictor columns
                   response_bound    = NULL,  ## numeric: deploy-time winsorization bound (compute_response_bound(): max + 0.5 * (max - anchor), capped at a finite upper bound of outcome_range)
-                  cv_predictions    = NULL,  ## tibble: .row, .fold, config_id, .pred, .pred_trans, truth
+                  cv_predictions    = NULL,  ## tibble: .row, sample_id, .fold, config_id, .pred_trans, truth, .pred
                   results           = NULL,  ## tibble: config_id, status, degraded, metrics, etc.
                   split             = NULL,  ## rsplit: Split F (train_F / test_F)
-                  row_index         = NULL,  ## tibble: .row \u2192 sample_id mapping
                   uq                = NULL,  ## list of UQ bundles (one per config), or NULL
                   ad                = NULL,  ## list of AD bundles (one per config), or NULL
                   selection_present = NULL,  ## logical: training rows came from select_training()
@@ -244,17 +241,7 @@ new_horizons_data <- function(analysis       = NULL,
                     runtime_secs    = NULL),
 
     ## -------------------------------------------------------------------------
-    ## Section 8: ARTIFACTS — Disk-backed storage paths
-    ## -------------------------------------------------------------------------
-
-    artifacts = list(cv_preds = list(path  = NULL,
-                                     index = NULL),
-                     fit_objects = list(path  = NULL,
-                                        index = NULL),
-                     cache_dir = NULL),
-
-    ## -------------------------------------------------------------------------
-    ## Section 9: SELECTION — The record of a draw from a reference pool
+    ## Section 8: SELECTION — The record of a draw from a reference pool
     ## -------------------------------------------------------------------------
 
     ## Populated by select_training(); NULL on every object that never went
@@ -809,8 +796,8 @@ validate_horizons_data <- function(x, stage = c("full", "raw"), warn_ids = TRUE)
 #'
 #' Membership rows marked `retained = FALSE` are exempt from containment.
 #' They record a neighbour the union subtraction removed, which was never in
-#' `data$analysis` by construction. A membership without the column is read
-#' as all retained.
+#' `data$analysis` by construction. A membership without the column fails
+#' the column check, and its containment is not checked.
 #'
 #' @param selection [List or NULL.] The record to check.
 #' @param sample_ids [Character or NULL.] `data$analysis$sample_id`, for the
@@ -892,15 +879,11 @@ check_selection_shape <- function(selection, sample_ids = NULL) {
 
     membership <- selection$membership
 
-    if (is.data.frame(membership) && "pool_id" %in% names(membership)) {
+    if (is.data.frame(membership) &&
+        all(c("pool_id", "retained") %in% names(membership))) {
 
-      retained <- if ("retained" %in% names(membership)) {
-        !is.na(membership$retained) & membership$retained
-      } else {
-        rep(TRUE, nrow(membership))
-      }
-
-      foreign <- setdiff(membership$pool_id[retained], sample_ids)
+      retained <- !is.na(membership$retained) & membership$retained
+      foreign  <- setdiff(membership$pool_id[retained], sample_ids)
 
       if (length(foreign)) {
 
@@ -1137,25 +1120,20 @@ warn_validation <- function(warnings) {
 ## contract_keys() — The keys a promoted slot must carry
 ## ---------------------------------------------------------------------------
 
-## Keys a slot may lack on objects built by an earlier version of the verb
-## that writes it. Each was added to the contract after objects without it
-## were already saved, so the validators accept its absence. Everything else
-## new_horizons_data() declares for the slot is required.
+## Keys a slot may lack because a current code path that writes the slot
+## leaves them out. Everything else new_horizons_data() declares for the slot
+## is required. Objects built by earlier versions get no allowance: they are
+## re-run.
 CONTRACT_KEYS_OPTIONAL <- list(
 
-  ## evaluate(): run provenance, added 2026-09-15, which fit()'s cold start
-  ## also leaves out because no evaluate() ran; the recipe settings the
-  ## configs ran with, added with configure()'s sg_window (#62); whether
-  ## the configs were screened, added 2026-09-24 (#45); and the
-  ## training-partition response trim, added 2026-09-24 (#77)
-  evaluation = c("workers", "parallelize_over", "recipe", "screened",
-                 "response_trim"),
+  ## evaluate()'s run provenance, which fit()'s cold start leaves out
+  ## because no evaluate() ran
+  evaluation = c("workers", "parallelize_over"),
 
-  ## fit(): the winsorization guardrail (objects fitted before it predict
-  ## without a clamp) and the select_training() flag, added 2026-09-21
-  models     = c("response_bound", "selection_present"),
+  ## fit() writes every key
+  models     = character(),
 
-  ## ensemble(): every key has been written since the contract was built
+  ## ensemble() writes every key
   ensemble   = character()
 
 )
@@ -1164,9 +1142,10 @@ CONTRACT_KEYS_OPTIONAL <- list(
 #'
 #' @description
 #' The keys [new_horizons_data()] declares for `slot`, less the ones
-#' `CONTRACT_KEYS_OPTIONAL` lets older objects lack. The constructor is the
-#' single statement of each slot's shape, so the validators derive their
-#' completeness check from it rather than keeping lists of their own.
+#' `CONTRACT_KEYS_OPTIONAL` lists as left out by a current code path. The
+#' constructor is the single statement of each slot's shape, so the
+#' validators derive their completeness check from it rather than keeping
+#' lists of their own.
 #'
 #' @param slot [Character.] One of `"evaluation"`, `"models"`, `"ensemble"`.
 #'
@@ -1221,8 +1200,8 @@ contract_keys <- function(slot) {
 #'    `config_id`; every `config_id` must be a known member.
 #' 8. **improvement**: single non-NA numeric.
 #' 9. **oof_predictions**: NULL, or data frame with `.row`, `.pred`, `truth`.
-#' 10. **optimize / seed**: NULL (pre-UQ objects), or a logical / numeric
-#'     scalar respectively.
+#' 10. **optimize / seed**: a single logical and a single numeric, the
+#'     build-time settings [fit_ensemble_uq()] rebuilds the fold models with.
 #' 11. **uq**: NULL, or a CV+ bundle — a list with `method == "cv_plus"` and
 #'     the core fields `fold_models`, `calib`, `n_calib`, `level_default`
 #'     (see [fit_ensemble_uq()]).
@@ -1434,19 +1413,17 @@ validate_horizons_ensemble <- function(x) {
 
   }
 
-  ## optimize / seed (NULL tolerated: objects predating ensemble UQ) ------------------
+  ## optimize / seed (read by fit_ensemble_uq() to rebuild the fold models) ----------
 
-  if (!is.null(ens$optimize) &&
-      (!is.logical(ens$optimize) || length(ens$optimize) != 1)) {
+  if (!is.logical(ens$optimize) || length(ens$optimize) != 1) {
 
-    errors <- c(errors, cli::format_inline("{.field optimize} must be NULL or a single logical"))
+    errors <- c(errors, cli::format_inline("{.field optimize} must be a single logical"))
 
   }
 
-  if (!is.null(ens$seed) &&
-      (!is.numeric(ens$seed) || length(ens$seed) != 1)) {
+  if (!is.numeric(ens$seed) || length(ens$seed) != 1) {
 
-    errors <- c(errors, cli::format_inline("{.field seed} must be NULL or a single numeric"))
+    errors <- c(errors, cli::format_inline("{.field seed} must be a single numeric"))
 
   }
 
@@ -1560,25 +1537,23 @@ validate_horizons_ensemble <- function(x) {
 #'
 #' 1. **Slot completeness**: every key [new_horizons_data()] declares for
 #'    the `evaluation` slot is present (see [contract_keys()]): `results`,
-#'    `best_config`, `rank_metric`, `split`, `n_train`, `n_test`,
-#'    `runtime_secs`, `timestamp`. The run-provenance keys added 2026-09-15,
-#'    `parallelize_over` and `workers`, are tolerated when absent (objects
-#'    evaluated earlier still fit, and [fit()]'s cold start writes neither)
+#'    `best_config`, `rank_metric`, `screened`, `split`, `n_train`, `n_test`,
+#'    `response_trim`, `recipe`, `runtime_secs`, `timestamp`. The
+#'    run-provenance keys `parallelize_over` and `workers` are tolerated when
+#'    absent ([fit()]'s cold start writes neither, since no [evaluate()] ran)
 #'    and validated when present: `parallelize_over` one of `"sequential"`,
 #'    `"configs"`, `"resamples"`; `workers` a single positive whole number or
-#'    NA. `recipe` (the recipe settings the configs ran with, #62) is likewise
-#'    tolerated when absent and, when present, must be a list whose
-#'    `sg_window` is a single whole number and whose `pca_threshold` is a
-#'    single number; the cold start writes it too. `screened`, added
-#'    2026-09-24 (#45), is likewise tolerated when absent and, when present,
-#'    must be `TRUE` or `FALSE`. `response_trim` (the training-partition
-#'    response trim, #77) is tolerated when absent and may be `NULL`; when it
-#'    is a record, `fit()` and its console tree read it, so its `trimmed_ids`
-#'    must be a character vector (the rows [fit()] drops to line the split up
-#'    with the object), `threshold` a single positive number, `n_training` a
-#'    single non-negative whole number, `skipped` a single character (`NA`
-#'    when fences were drawn), and `lower` and `upper` single numbers, finite
-#'    whenever rows were trimmed, since the degradation check reads them.
+#'    NA. `recipe` (the recipe settings the configs ran with, #62) must be a
+#'    list whose `sg_window` is a single whole number and whose
+#'    `pca_threshold` is a single number. `screened` (#45) must be `TRUE` or
+#'    `FALSE`. `response_trim` (the training-partition response trim, #77)
+#'    may be `NULL`; when it is a record, `fit()` and its console tree read
+#'    it, so its `trimmed_ids` must be a character vector (the rows [fit()]
+#'    drops to line the split up with the object), `threshold` a single
+#'    positive number, `n_training` a single non-negative whole number,
+#'    `skipped` a single character (`NA` when fences were drawn), and `lower`
+#'    and `upper` single numbers, finite whenever rows were trimmed, since
+#'    the degradation check reads them.
 #' 2. **results**: data frame carrying `config_id`, `status`, and the six
 #'    metric columns (`rmse`, `rrmse`, `rsq`, `ccc`, `rpd`, `mae`); at least
 #'    one row; `config_id` values unique; and, when `x$config$configs` is
@@ -1645,11 +1620,11 @@ validate_horizons_eval <- function(x) {
 
   }
 
-  ## parallelize_over / workers (run provenance, 2026-09-15) ------------------
-  ## Tolerated when ABSENT, so objects evaluated before these slots existed
-  ## still fit (the same rule I7b applies to response_bound). When a key is
-  ## present it must be valid: a present-but-NULL parallelize_over fails.
-  ## Each key is checked on its own presence.
+  ## parallelize_over / workers (run provenance) --------------------------------
+  ## Tolerated when ABSENT, because fit()'s cold start runs no evaluate() and
+  ## writes neither. When a key is present it must be valid: a
+  ## present-but-NULL parallelize_over fails. Each key is checked on its own
+  ## presence.
 
   if ("parallelize_over" %in% names(ev)) {
 
@@ -1685,10 +1660,11 @@ validate_horizons_eval <- function(x) {
 
   }
 
-  ## screened (2026-09-24, #45) -------------------------------------------------
-  ## Tolerated when absent, for objects evaluated before the key existed.
-  ## When present it says whether best_config was chosen by ranking (TRUE) or
-  ## is the one configuration fit() started cold from (FALSE).
+  ## screened (#45) -------------------------------------------------------------
+  ## Whether best_config was chosen by ranking (TRUE) or is the one
+  ## configuration fit() started cold from (FALSE). This check and the two
+  ## below run only when the key is there; the completeness check above has
+  ## already reported a missing one.
 
   if ("screened" %in% names(ev) && !rlang::is_bool(ev$screened)) {
 
@@ -1697,9 +1673,9 @@ validate_horizons_eval <- function(x) {
   }
 
   ## recipe (the settings the configs ran with, #62) ---------------------------
-  ## Tolerated when absent, by the same rule, for objects evaluated before it.
+  ## Both evaluate() and the cold start write it through evaluation_recipe().
 
-  if ("recipe" %in% names(ev) && !is.null(ev$recipe)) {
+  if ("recipe" %in% names(ev)) {
 
     rc <- ev$recipe
     sw <- if (is.list(rc)) rc$sg_window else NULL
@@ -1717,11 +1693,11 @@ validate_horizons_eval <- function(x) {
   }
 
   ## response_trim (the training-partition trim, #77) ---------------------------
-  ## Tolerated when absent, by the same rule, and NULL when no trim was
-  ## requested. fit() reads trimmed_ids to line the split up with the rows
-  ## the object models, the fences for its degradation check, and the rest
-  ## for its console tree, so a malformed record is refused here rather than
-  ## read as "nothing trimmed" or crashing the tree.
+  ## NULL when no trim was requested. fit() reads trimmed_ids to line the
+  ## split up with the rows the object models, the fences for its
+  ## degradation check, and the rest for its console tree, so a malformed
+  ## record is refused here rather than read as "nothing trimmed" or crashing
+  ## the tree.
 
   if ("response_trim" %in% names(ev) && !is.null(ev$response_trim)) {
 
@@ -1941,31 +1917,27 @@ validate_horizons_eval <- function(x) {
 #' Accumulated checks (reported together, tree-style):
 #'
 #' 1. **Slot completeness**: every key [new_horizons_data()] declares for
-#'    the `models` slot is present (see [contract_keys()]), 13 in all:
+#'    the `models` slot is present (see [contract_keys()]), 14 in all:
 #'    `workflows`, `n_models`, `best_config`, `rank_metric`,
-#'    `predictor_schema`, `cv_predictions`, `results`, `split`, `row_index`,
-#'    `uq`, `ad`, `timestamp`, `runtime_secs`. `response_bound` and
-#'    `selection_present` were added after objects without them were saved,
-#'    so they are tolerated when absent. Extra keys are tolerated.
+#'    `predictor_schema`, `response_bound`, `cv_predictions`, `results`,
+#'    `split`, `uq`, `ad`, `selection_present`, `timestamp`, `runtime_secs`.
+#'    [fit()] writes every one. Extra keys are tolerated.
 #' 2. **workflows**: a non-empty named list; `n_models` equals its length.
 #' 3. **best_config**: a length-1 character that is one of the workflow keys.
 #' 4. **rank_metric**: a length-1 character.
 #' 5. **predictor_schema**: a non-empty character vector (the training-axis
 #'    columns the predict() schema gate reads).
-#' 6. **response_bound** (the winsorization guardrail): NULL — tolerated,
-#'    since objects fitted before the guardrail shipped legitimately lack it
-#'    and predict without a clamp — or a single finite numeric consistent
-#'    with the object's `outcome_range` (#76): above its lower bound and no
-#'    higher than its upper bound. Under the default range, `c(0, Inf)`, which
-#'    objects configured before the range existed read as, that is a single
-#'    positive finite numeric, the rule before the range; under
+#' 6. **response_bound** (the winsorization guardrail): a single finite
+#'    numeric consistent with the object's `outcome_range` (#76): above its
+#'    lower bound and no higher than its upper bound. Under the default
+#'    range, `c(0, Inf)`, that is a single positive finite numeric; under
 #'    `c(-Inf, Inf)` any finite bound, negative included.
-#' 7. **I6 — workflow ⊆ config**: when `x$config$configs$config_id` is
+#' 7. **selection_present**: `TRUE` or `FALSE`.
+#' 8. **I6 — workflow ⊆ config**: when `x$config$configs$config_id` is
 #'    reachable, every workflow key is a defined config id.
-#' 8. **I7 — uq ⊆ workflows**: `uq` is NULL, or a named list whose keys are a
+#' 9. **I7 — uq ⊆ workflows**: `uq` is NULL, or a named list whose keys are a
 #'    subset of the workflow keys (not every fitted config earns a UQ bundle —
 #'    only successful ones with sufficient calibration data).
-#' 9. **row_index**: NULL, or a data frame with `.row` and `sample_id` columns.
 #' 10. **runtime_secs**: single non-negative numeric. **timestamp**: POSIXct.
 #'
 #' @param x `horizons_fit`. The object to validate.
@@ -2074,39 +2046,58 @@ validate_horizons_fit <- function(x) {
   }
 
   ## response_bound (the winsorization guardrail) -------------------------------
-  ## NULL is tolerated: objects fitted before the guardrail shipped carry no
-  ## bound and predict without a clamp (documented pre-clamp behavior). When
-  ## present it must be a single finite numeric inside the outcome's range
-  ## (#76): the clamp compares predictions against it, so a bound at or below
-  ## the floor, or a non-finite one, would silently clamp everything or
-  ## nothing. Under the default range that is the positive-finite rule the
-  ## guardrail shipped with; a signed outcome's bound may be negative.
+  ## fit() always writes it. It must be a single finite numeric inside the
+  ## outcome's range (#76): the clamp compares predictions against it, so a
+  ## bound at or below the floor, or a non-finite one, would silently clamp
+  ## everything or nothing. Under the default range that is the
+  ## positive-finite rule the guardrail shipped with; a signed outcome's bound
+  ## may be negative. A missing key is reported by the completeness check.
 
-  ## The range is read only when there is a bound to check against it, and a
-  ## malformed one is collected like any other finding rather than aborting
-  ## past the checks below.
+  ## The range is read only when there is a usable bound to check against
+  ## it, and a malformed one is collected like any other finding rather than
+  ## aborting past the checks below.
 
   rb <- md$response_bound
 
-  if (!is.null(rb)) {
+  if ("response_bound" %in% names(md)) {
 
-    rng <- tryCatch(outcome_range_setting(x),
-                    horizons_validation_error = function(e) NULL)
-
-    if (is.null(rng)) {
+    if (!is.numeric(rb) || length(rb) != 1 || !is.finite(rb)) {
 
       errors <- c(errors, cli::format_inline(
-        "{.field config$outcome_range} is not a usable range (two numbers, lower below upper), so {.field response_bound} cannot be checked against it"
+        "{.field response_bound} must be a single finite numeric"
       ))
 
-    } else if (!is.numeric(rb) || length(rb) != 1 || is.na(rb) ||
-               !is.finite(rb) || rb <= rng[1] || rb > rng[2]) {
+    } else {
 
-      errors <- c(errors, cli::format_inline(
-        "{.field response_bound} must be NULL or a single finite numeric above the lower bound of {.field outcome_range} ({rng[1]}) and no higher than its upper bound ({rng[2]})"
-      ))
+      rng <- tryCatch(outcome_range_setting(x),
+                      horizons_validation_error = function(e) NULL)
+
+      if (is.null(rng)) {
+
+        errors <- c(errors, cli::format_inline(
+          "{.field config$outcome_range} is not a usable range (two numbers, lower below upper), so {.field response_bound} cannot be checked against it"
+        ))
+
+      } else if (rb <= rng[1] || rb > rng[2]) {
+
+        errors <- c(errors, cli::format_inline(
+          "{.field response_bound} must be a single finite numeric above the lower bound of {.field outcome_range} ({rng[1]}) and no higher than its upper bound ({rng[2]})"
+        ))
+
+      }
 
     }
+
+  }
+
+  ## selection_present -----------------------------------------------------------
+  ## Whether the training rows came from select_training(); predict() reads
+  ## it to warn about the intervals. A missing key is reported above.
+
+  if ("selection_present" %in% names(md) &&
+      !rlang::is_bool(md$selection_present)) {
+
+    errors <- c(errors, cli::format_inline("{.field selection_present} must be TRUE or FALSE"))
 
   }
 
@@ -2213,21 +2204,6 @@ validate_horizons_fit <- function(x) {
       }
 
     }
-
-  }
-
-  ## row_index ------------------------------------------------------------------
-  ## The .row -> sample_id join-back map. Both columns are load-bearing: .row is
-  ## the rsample alignment key, sample_id is what predictions re-attach to. fit()
-  ## always writes both (pipeline-fit.R), so require both — a row_index that lost
-  ## sample_id can no longer map integer rows back to sample identifiers.
-
-  ri <- md$row_index
-
-  if (!is.null(ri) &&
-      (!is.data.frame(ri) || !all(c(".row", "sample_id") %in% names(ri)))) {
-
-    errors <- c(errors, cli::format_inline("{.field row_index} must be NULL or a data frame with {.field .row} and {.field sample_id} columns"))
 
   }
 
@@ -2926,7 +2902,6 @@ summary.horizons_data <- function(object, ...) {
     !is.null(x$provenance$spectra_type),
     TRUE,  # created (always present)
     TRUE,  # horizons_version (always present)
-    TRUE,  # schema_version (always present)
     !is.null(x$provenance$aggregation_by)
   )
   n_prov <- sum(prov_items)
@@ -2951,9 +2926,6 @@ summary.horizons_data <- function(object, ...) {
 
   # Horizons version
   cat(paste0("   ", get_branch(), " Horizons version: ", x$provenance$horizons_version, "\n"))
-
-  # Schema version
-  cat(paste0("   ", get_branch(), " Schema version: ", x$provenance$schema_version, "\n"))
 
   if (!is.null(x$provenance$aggregation_by)) {
     cat(paste0("   ", get_branch(), " Aggregation: ", x$provenance$aggregation_by, "\n"))

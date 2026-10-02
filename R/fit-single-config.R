@@ -340,9 +340,16 @@ fit_single_config <- function(config_row,
   ## Extract raw OOF predictions
   oof_raw <- tune::collect_predictions(cv_fit)
 
-  ## Shape cv_predictions: .row, .fold, config_id, .pred, .pred_trans, truth
+  ## Shape cv_predictions: .row, sample_id, .fold, config_id, .pred_trans,
+  ## truth, then .pred below. .row is a position in the frame the folds were
+  ## cut from (train_Fit in fit()), and sample_id is read from that same
+  ## frame, so each prediction keeps its link to a sample and .row is never
+  ## the only key.
+  fold_frame <- cv_resamples$splits[[1]]$data
+
   cv_predictions <- tibble::tibble(
     .row        = oof_raw$.row,
+    sample_id   = fold_frame[[id_column(role_map)]][oof_raw$.row],
     .fold       = oof_raw$id,
     config_id   = config_id,
     .pred_trans  = oof_raw$.pred,

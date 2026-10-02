@@ -227,7 +227,8 @@ test_that("spectra() records provenance for tibble input", {
   expect_equal(result$provenance$spectra_source, "tibble")
   expect_equal(result$provenance$spectra_type, "tibble")
   expect_s3_class(result$provenance$created, "POSIXct")
-  expect_equal(result$provenance$schema_version, 1L)
+  expect_false("schema_version" %in% names(result$provenance))
+  expect_false("artifacts" %in% names(result))
 
 })
 

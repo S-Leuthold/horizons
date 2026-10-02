@@ -407,7 +407,7 @@ describe("a d13C-like outcome with outcome_range = c(-Inf, Inf)", {
     expect_true(all(fitted$models$cv_predictions$.pred < 0))
     expect_lt(fitted$models$results$rmse, 5)
 
-    fit_rows <- hd$data$analysis$sample_id %in% fitted$models$row_index$sample_id
+    fit_rows <- hd$data$analysis$sample_id %in% unique(fitted$models$cv_predictions$sample_id)
     y_fit    <- truth[fit_rows]
 
     expect_identical(fitted$models$response_bound,
@@ -629,7 +629,7 @@ describe("a mixed-sign outcome with outcome_range = c(-5, 5)", {
 
   it("anchors the bound on the finite lower bound", {
 
-    fit_rows <- hd$data$analysis$sample_id %in% cold$models$row_index$sample_id
+    fit_rows <- hd$data$analysis$sample_id %in% unique(cold$models$cv_predictions$sample_id)
     top      <- max(y[fit_rows])
 
     expect_identical(cold$models$response_bound,
@@ -669,7 +669,7 @@ describe("a non-negative outcome under the default range", {
 
   it("stores max * RESPONSE_BOUND_MARGIN as the bound, to the bit", {
 
-    fit_rows <- obj$data$analysis$sample_id %in% fitted$models$row_index$sample_id
+    fit_rows <- obj$data$analysis$sample_id %in% unique(fitted$models$cv_predictions$sample_id)
 
     expect_null(fitted$config$outcome_range)
     expect_identical(fitted$models$response_bound,
@@ -986,13 +986,20 @@ describe("validate_horizons_fit() - a malformed outcome range", {
     fit(obj, compute_uq = FALSE, compute_ad = FALSE, verbose = FALSE, seed = 42L)
   )
 
-  it("is not read, and not fatal, when there is no bound to check", {
+  it("is not read when there is no usable bound, which is the finding instead", {
 
+    ## fit() always writes a bound (#130), so a NULL one is refused on its
+    ## own, and the range is not checked against it
     no_bound <- fitted
     no_bound$models["response_bound"] <- list(NULL)
     no_bound$config$outcome_range <- c(5, 1)
 
-    expect_no_error(validate_horizons_fit(no_bound))
+    err <- expect_error(suppressMessages(utils::capture.output(validate_horizons_fit(no_bound))),
+                        class = "horizons_validation_error")
+
+    expect_match(flat_message(err), "response_bound", fixed = TRUE)
+    expect_match(flat_message(err), "single finite numeric", fixed = TRUE)
+    expect_false(grepl("outcome_range", flat_message(err), fixed = TRUE))
 
   })
 
