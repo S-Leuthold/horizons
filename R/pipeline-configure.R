@@ -1242,12 +1242,15 @@ check_outcome_variance <- function(x, verb, call = rlang::caller_env()) {
 #' @param outcome_col `character(1)`. The outcome column, named in the
 #'   message.
 #' @param verb `character(1)`. The calling verb, named in the message.
+#' @param rerun `character(1)`. The verb that applies the trim, named in the
+#'   advice to drop it: `"evaluate"`, or `"fit"` on a cold start.
 #' @param call The call the condition is attributed to. Default: the caller.
 #' @return `NULL`, invisibly. Aborts with class `horizons_input_error`.
 #' @keywords internal
 #' @noRd
 check_training_outcome_variance <- function(train_values, held_out, outcome_col,
-                                            verb, call = rlang::caller_env()) {
+                                            verb, rerun = "evaluate",
+                                            call = rlang::caller_env()) {
 
   constant <- constant_outcome(train_values)
 
@@ -1267,7 +1270,7 @@ check_training_outcome_variance <- function(train_values, held_out, outcome_col,
   ## draw can be undone; rows in the test set only come back with more data
   remedies <- c(
     if ("trimmed as response outliers" %in% names(n_other)) {
-      c("i" = "To keep the trimmed rows in training, re-run {.fn validate} without {.code remove_outliers = \"response\"}, then {.fn evaluate}.")
+      c("i" = "To keep the trimmed rows in training, re-run {.fn validate} without {.code remove_outliers = \"response\"}, then {.fn {rerun}}.")
     },
     if ("in the calibration set" %in% names(n_other)) {
       c("i" = "To keep the calibration rows in training, fit with {.code compute_uq = FALSE, compute_ad = FALSE}.")

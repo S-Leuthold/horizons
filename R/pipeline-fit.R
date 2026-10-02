@@ -548,16 +548,20 @@ fit <- function(x,
   ## lower bound of outcome_range the response bound equals it, and the fit
   ## validator refused the object only after every model was fitted (#132).
   ## The places are disjoint: a trimmed row drawn into the calibration set
-  ## counts there.
+  ## counts as trimmed, since turning UQ and AD off would not bring it back
+  ## into training; only dropping the trim would.
+  calib_kept <- !calib_data[[id_col]] %in% trimmed_rows[[id_col]]
+
   check_training_outcome_variance(
     train_Fit[[outcome_col]],
     held_out    = list(
       "in the test set"              = test_F[[outcome_col]],
-      "in the calibration set"       = calib_data[[outcome_col]],
-      "trimmed as response outliers" = trimmed_rows[[outcome_col]][!trimmed_rows[[id_col]] %in% calib_data[[id_col]]]
+      "in the calibration set"       = calib_data[[outcome_col]][calib_kept],
+      "trimmed as response outliers" = trimmed_rows[[outcome_col]]
     ),
     outcome_col = outcome_col,
-    verb        = "fit"
+    verb        = "fit",
+    rerun       = if (cold_start) "fit" else "evaluate"
   )
 
   ## -----------------------------------------------------------------------

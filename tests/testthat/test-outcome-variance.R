@@ -314,6 +314,32 @@ describe("an outcome whose only other value is drawn into the calibration set", 
 
   })
 
+  it("counts a trimmed row the calibration draw picked up as trimmed, on a cold start", {
+
+    ## Turning UQ and AD off would not bring a trimmed row back into
+    ## training, so the calibration remedy must not be offered for it.
+    obj <- make_eval_object(n = 200, n_configs = 1)
+    obj$data$analysis$SOC <- c(rep(10, 50), rep(0, 150))
+    utils::capture.output(
+      obj <- suppressWarnings(validate(obj, remove_outliers = "response"))
+    )
+
+    reached <- mock_expensive_steps(split = FALSE)
+
+    err <- expect_error(
+      suppressWarnings(fit(obj, seed = 307L, verbose = FALSE)),
+      class = "horizons_input_error"
+    )
+
+    msg <- one_line(err)
+    expect_match(msg, "trimmed as response outliers", fixed = TRUE)
+    expect_no_match(msg, "in the calibration set", fixed = TRUE)
+    expect_no_match(msg, "compute_uq", fixed = TRUE)
+    expect_match(msg, "then fit()", fixed = TRUE)
+    expect_length(reached$steps, 0)
+
+  })
+
 })
 
 
