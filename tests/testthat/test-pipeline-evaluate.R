@@ -10,6 +10,85 @@ EXPECTED_EVAL_COLS <- c(
 )
 
 ## =========================================================================
+## Shared fixtures (helper-memo.R)
+## =========================================================================
+## Built on first use and shared by every test in this file that needs them.
+
+## EV60: a finished evaluate() with no output_dir, at n = 60 and two configs.
+build_ev60 <- function() {
+
+  obj <- make_eval_object(n = 60, n_configs = 2)
+  suppressWarnings(evaluate(obj, verbose = FALSE, seed = 42L))
+
+}
+
+ev60 <- function() memo_fixture("ev60", build_ev60)
+
+## Checkpoint templates. Most checkpoint tests start from the same first run
+## into an output_dir and then edit or resume it. That run is built once per
+## settings variant as a template directory, and each test gets its own copy
+## in `$dir` (deleted when the test ends), so a test that edits checkpoint
+## rows cannot reach another. `$value` holds the object the template was run
+## on (`obj`) and the first run's result (`first`); a test resumes that
+## object from its copy.
+##
+##   CK-A  two configs, prune = FALSE
+##   CK-B  two configs, prune = TRUE at the default threshold of 1
+##   CK-C  as CK-A, on twelve predictors
+##   CK-D  as CK-A, on twenty predictors
+build_checkpoints <- function(dir, prune = FALSE, n_wn = 10) {
+
+  obj   <- make_eval_object(n_wn = n_wn, n_configs = 2)
+  first <- suppressWarnings(evaluate(obj, output_dir = dir, prune = prune,
+                                     prune_threshold = 1, verbose = FALSE,
+                                     seed = 42L))
+
+  list(obj = obj, first = first)
+
+}
+
+## CK-D's object has no recipe record, and one of its users resumes it with
+## an explicit sg_window = 9 and pca_threshold = 0.995. Those are the values
+## the recipe runs without a record, so both stamp the same settings; the
+## build checks the rows it wrote, so that a change to the defaults fails
+## here rather than turning that test's refusals into refusals of something
+## else.
+build_checkpoints_d <- function(dir) {
+
+  out <- build_checkpoints(dir, n_wn = 20)
+
+  rows    <- lapply(list.files(file.path(dir, "checkpoints"), full.names = TRUE),
+                    readRDS)
+  stamped <- lapply(rows, function(r) r$settings[[1]][c("sg_window", "pca_threshold")])
+
+  if (length(rows) != 2L ||
+      !all(vapply(stamped, identical, logical(1),
+                  eval_settings(sg_window = 9L, pca_threshold = 0.995)))) {
+    stop("CK-D's checkpoint rows are not stamped sg_window = 9, pca_threshold = 0.995.",
+         call. = FALSE)
+  }
+
+  out
+
+}
+
+ck_a <- function(.env = parent.frame()) {
+  memo_dir("ck_a", build_checkpoints, prune = FALSE, .env = .env)
+}
+
+ck_b <- function(.env = parent.frame()) {
+  memo_dir("ck_b", build_checkpoints, prune = TRUE, .env = .env)
+}
+
+ck_c <- function(.env = parent.frame()) {
+  memo_dir("ck_c", build_checkpoints, n_wn = 12, .env = .env)
+}
+
+ck_d <- function(.env = parent.frame()) {
+  memo_dir("ck_d", build_checkpoints_d, .env = .env)
+}
+
+## =========================================================================
 ## Gate checks
 ## =========================================================================
 
@@ -86,11 +165,12 @@ describe("evaluate() - gate checks", {
 
 describe("evaluate() - success path", {
 
+  ## The object EV60 evaluates
   obj <- make_eval_object(n = 60, n_configs = 2)
 
-  result <- suppressWarnings(evaluate(obj, verbose = FALSE, seed = 42L))
-
   it("returns a horizons_eval object", {
+
+    result <- ev60()
 
     expect_s3_class(result, "horizons_eval")
     expect_s3_class(result, "horizons_data")
@@ -99,17 +179,23 @@ describe("evaluate() - success path", {
 
   it("has evaluation$results with one row per config", {
 
+    result <- ev60()
+
     expect_equal(nrow(result$evaluation$results), 2)
 
   })
 
   it("has all expected columns in results", {
 
+    result <- ev60()
+
     expect_true(all(EXPECTED_EVAL_COLS %in% names(result$evaluation$results)))
 
   })
 
   it("sets best_config to a valid config_id", {
+
+    result <- ev60()
 
     expect_true(result$evaluation$best_config %in%
                   result$config$configs$config_id)
@@ -118,17 +204,23 @@ describe("evaluate() - success path", {
 
   it("stores rank_metric", {
 
+    result <- ev60()
+
     expect_equal(result$evaluation$rank_metric, "rpd")
 
   })
 
   it("stores the train/test split", {
 
+    result <- ev60()
+
     expect_s3_class(result$evaluation$split, "rsplit")
 
   })
 
   it("records n_train and n_test", {
+
+    result <- ev60()
 
     expect_true(result$evaluation$n_train > 0)
     expect_true(result$evaluation$n_test > 0)
@@ -139,17 +231,23 @@ describe("evaluate() - success path", {
 
   it("records positive runtime", {
 
+    result <- ev60()
+
     expect_true(result$evaluation$runtime_secs > 0)
 
   })
 
   it("records a timestamp", {
 
+    result <- ev60()
+
     expect_s3_class(result$evaluation$timestamp, "POSIXct")
 
   })
 
   it("writes exactly the evaluation keys new_horizons_data() declares (#71)", {
+
+    result <- ev60()
 
     ## The constructor's empty slot is what configure() resets to, so it has
     ## to name what evaluate() actually writes.
@@ -159,12 +257,16 @@ describe("evaluate() - success path", {
 
   it("records that it screened the configurations (#45)", {
 
+    result <- ev60()
+
     ## fit()'s cold start writes FALSE; evaluate() ranked, so TRUE.
     expect_true(result$evaluation$screened)
 
   })
 
   it("has non-NA metrics for successful configs", {
+
+    result <- ev60()
 
     success_rows <- result$evaluation$results$status == "success"
     expect_true(any(success_rows))
@@ -203,8 +305,7 @@ describe("evaluate() - metric ranking", {
 
   it("records the cv_* columns on every result row", {
 
-    obj <- make_eval_object(n_configs = 2)
-    result <- suppressWarnings(evaluate(obj, verbose = FALSE, seed = 42L))
+    result <- ev60()
 
     cv_cols <- paste0("cv_", c("rmse", "rrmse", "rsq", "ccc", "rpd", "mae"))
     res     <- result$evaluation$results
@@ -925,14 +1026,11 @@ describe("evaluate() - checkpointing", {
 
   it("writes one checkpoint file per config, and no single-file checkpoint", {
 
-    obj <- make_eval_object(n_configs = 2)
-    tmpdir <- tempfile("eval_ckpt_write_")
-    dir.create(tmpdir)
-    on.exit(unlink(tmpdir, recursive = TRUE))
+    ck     <- ck_b()
+    obj    <- ck$value$obj
+    tmpdir <- ck$dir
 
     checkpoint_dir <- file.path(tmpdir, "checkpoints")
-
-    result <- suppressWarnings(evaluate(obj, output_dir = tmpdir, verbose = FALSE, seed = 42L))
 
     ## The per-config files are the only store (#42)
     expect_setequal(list.files(checkpoint_dir),
@@ -943,13 +1041,12 @@ describe("evaluate() - checkpointing", {
 
   it("resumes from checkpoint on re-run", {
 
-    obj <- make_eval_object(n_configs = 2)
-    tmpdir <- tempfile("eval_ckpt_resume_")
-    dir.create(tmpdir)
-    on.exit(unlink(tmpdir, recursive = TRUE))
+    ck     <- ck_b()
+    obj    <- ck$value$obj
+    tmpdir <- ck$dir
 
     ## First run
-    result1 <- suppressWarnings(evaluate(obj, output_dir = tmpdir, verbose = FALSE, seed = 42L))
+    result1 <- ck$value$first
 
     ## Second run should load from checkpoint (same results)
     result2 <- suppressWarnings(evaluate(obj, output_dir = tmpdir, verbose = FALSE, seed = 42L))
@@ -1012,13 +1109,9 @@ describe("evaluate() - checkpointing", {
   ## the results, and re-running evaluate() resumes them rather than re-running.
   it("signals horizons_all_configs_failed when no success has a cv_<metric>, naming the checkpoints", {
 
-    obj <- make_eval_object(n_configs = 2)
-
-    tmpdir <- tempfile("eval_ckpt_nocv_")
-    dir.create(tmpdir)
-    on.exit(unlink(tmpdir, recursive = TRUE))
-
-    suppressWarnings(evaluate(obj, output_dir = tmpdir, verbose = FALSE, seed = 42L))
+    ck     <- ck_b()
+    obj    <- ck$value$obj
+    tmpdir <- ck$dir
 
     cv_cols <- paste0("cv_", c("rmse", "rrmse", "rsq", "ccc", "rpd", "mae"))
 
@@ -1301,8 +1394,7 @@ describe("checkpoint scoring schema", {
 
   it("stamps every result row with the current schema", {
 
-    obj <- make_eval_object(n_configs = 2)
-    res <- suppressWarnings(evaluate(obj, verbose = FALSE, seed = 42L))
+    res <- ev60()
 
     expect_true(all(res$evaluation$results$scoring_schema == SCORING_SCHEMA))
 
@@ -1310,10 +1402,11 @@ describe("checkpoint scoring schema", {
 
   it("on resume, re-evaluates configs whose checkpoint was written under schema 1", {
 
-    obj    <- make_eval_object(n_configs = 2)
-    tmpdir <- withr::local_tempdir()
+    ck     <- ck_b()
+    obj    <- ck$value$obj
+    tmpdir <- ck$dir
 
-    first <- suppressWarnings(evaluate(obj, output_dir = tmpdir, verbose = FALSE, seed = 42L))
+    first <- ck$value$first
 
     ## Rewrite one per-config checkpoint as a legacy (schema-1) row
     f   <- file.path(tmpdir, "checkpoints", "cfg_001.rds")
@@ -1334,11 +1427,10 @@ describe("checkpoint scoring schema", {
 
   it("prints the checkpoint notes inside the tree, under the Configs line (#91)", {
 
-    obj    <- make_eval_object(n_configs = 2)
-    tmpdir <- withr::local_tempdir()
+    ck     <- ck_b()
+    obj    <- ck$value$obj
+    tmpdir <- ck$dir
     ckpt   <- file.path(tmpdir, "checkpoints")
-
-    suppressWarnings(evaluate(obj, output_dir = tmpdir, verbose = FALSE, seed = 42L))
 
     ## cfg_002 rewritten as a schema-1 row, and a copy of cfg_001 filed under
     ## a config the grid does not have
@@ -1530,11 +1622,10 @@ describe("evaluate() - checkpoint data provenance", {
 
   it("stamps the fingerprint and settings on results, checkpoints and the manifest", {
 
-    obj    <- make_eval_object(n_configs = 2)
-    tmpdir <- withr::local_tempdir()
+    ck     <- ck_a()
+    tmpdir <- ck$dir
 
-    res <- suppressWarnings(evaluate(obj, output_dir = tmpdir, prune = FALSE,
-                                     verbose = FALSE, seed = 42L))
+    res <- ck$value$first
 
     expect_true(all(!is.na(res$evaluation$results$data_hash)))
     expect_true(all(res$evaluation$results$data_n_rows ==
@@ -1567,11 +1658,11 @@ describe("evaluate() - checkpoint data provenance", {
 
   it("resumes silently when the training rows are unchanged", {
 
-    obj    <- make_eval_object(n_configs = 2)
-    tmpdir <- withr::local_tempdir()
+    ck     <- ck_a()
+    obj    <- ck$value$obj
+    tmpdir <- ck$dir
 
-    first  <- suppressWarnings(evaluate(obj, output_dir = tmpdir, prune = FALSE,
-                                        verbose = FALSE, seed = 42L))
+    first  <- ck$value$first
     second <- suppressWarnings(evaluate(obj, output_dir = tmpdir, prune = FALSE,
                                         verbose = FALSE, seed = 42L))
 
@@ -1583,11 +1674,8 @@ describe("evaluate() - checkpoint data provenance", {
 
   it("aborts when the same output_dir is resumed on a different row set", {
 
-    tmpdir <- withr::local_tempdir()
-
-    suppressWarnings(evaluate(make_eval_object(n = 40, n_configs = 2),
-                              output_dir = tmpdir, prune = FALSE,
-                              verbose = FALSE, seed = 42L))
+    ## CK-A's object has 40 rows
+    tmpdir <- ck_a()$dir
 
     expect_error(
       suppressWarnings(evaluate(make_eval_object(n = 60, n_configs = 2),
@@ -1617,18 +1705,16 @@ describe("evaluate() - checkpoint data provenance", {
 
   it("aborts when the same rows are re-run under a different outcome", {
 
-    tmpdir <- withr::local_tempdir()
+    ck     <- ck_a()
+    tmpdir <- ck$dir
 
     ## Same rows, same config ids, different response. Only the outcome name
     ## differs, which is the collision generate_config_id() cannot see.
-    obj_soc <- make_eval_object(n_configs = 2)
+    obj_soc <- ck$value$obj
 
     obj_clay <- obj_soc
     names(obj_clay$data$analysis)[names(obj_clay$data$analysis) == "SOC"] <- "clay"
     obj_clay$data$role_map$variable[obj_clay$data$role_map$variable == "SOC"] <- "clay"
-
-    suppressWarnings(evaluate(obj_soc, output_dir = tmpdir, prune = FALSE,
-                              verbose = FALSE, seed = 42L))
 
     err <- tryCatch(
       suppressWarnings(evaluate(obj_clay, output_dir = tmpdir, prune = FALSE,
@@ -1649,14 +1735,12 @@ describe("evaluate() - checkpoint data provenance", {
   ## covers the ids and the outcome name only (#42).
   refuses_on <- function(edit) {
 
-    ## Twelve predictors, so demoting one still leaves the spectrum wider than
-    ## the default window of 9 and evaluate()'s window check (#62) does not
-    ## refuse ahead of the checkpoint gate under test.
-    obj    <- make_eval_object(n_wn = 12, n_configs = 2)
-    tmpdir <- withr::local_tempdir(.local_envir = parent.frame())
-
-    suppressWarnings(evaluate(obj, output_dir = tmpdir, prune = FALSE,
-                              verbose = FALSE, seed = 42L))
+    ## Twelve predictors (CK-C), so demoting one still leaves the spectrum
+    ## wider than the default window of 9 and evaluate()'s window check (#62)
+    ## does not refuse ahead of the checkpoint gate under test.
+    ck     <- ck_c(.env = parent.frame())
+    obj    <- ck$value$obj
+    tmpdir <- ck$dir
 
     tryCatch(
       suppressWarnings(evaluate(edit(obj), output_dir = tmpdir, prune = FALSE,
@@ -1715,11 +1799,11 @@ describe("evaluate() - checkpoint data provenance", {
 
     ## A sibling response is held out of the model (response_hold), so it
     ## cannot change what a row holds, and must not refuse the resume.
-    obj    <- make_eval_object(n_configs = 2)
-    tmpdir <- withr::local_tempdir()
+    ck     <- ck_a()
+    obj    <- ck$value$obj
+    tmpdir <- ck$dir
 
-    first <- suppressWarnings(evaluate(obj, output_dir = tmpdir, prune = FALSE,
-                                       verbose = FALSE, seed = 42L))
+    first <- ck$value$first
 
     lab <- tibble::tibble(sample_id = obj$data$analysis$sample_id,
                           clay      = seq_len(nrow(obj$data$analysis)))
@@ -1738,11 +1822,11 @@ describe("evaluate() - checkpoint data provenance", {
 
   it("warns once and proceeds for legacy checkpoints with no fingerprint", {
 
-    obj    <- make_eval_object(n_configs = 2)
-    tmpdir <- withr::local_tempdir()
+    ck     <- ck_a()
+    obj    <- ck$value$obj
+    tmpdir <- ck$dir
 
-    first <- suppressWarnings(evaluate(obj, output_dir = tmpdir, prune = FALSE,
-                                       verbose = FALSE, seed = 42L))
+    first <- ck$value$first
 
     ## Hand-write the pre-provenance shape: no fingerprint columns.
     for (f in list.files(file.path(tmpdir, "checkpoints"), full.names = TRUE)) {
@@ -1770,11 +1854,11 @@ describe("evaluate() - checkpoint data provenance", {
 
   it("warns once and resumes rows with the id hash but no value fields", {
 
-    obj    <- make_eval_object(n_configs = 2)
-    tmpdir <- withr::local_tempdir()
+    ck     <- ck_a()
+    obj    <- ck$value$obj
+    tmpdir <- ck$dir
 
-    first <- suppressWarnings(evaluate(obj, output_dir = tmpdir, prune = FALSE,
-                                       verbose = FALSE, seed = 42L))
+    first <- ck$value$first
 
     ## The shape every row written before the value fields has: unverified,
     ## not refused, even though the values cannot be checked.
@@ -1835,11 +1919,9 @@ describe("evaluate() - one checkpoint store (#42)", {
 
   it("reads a repaired per-config file over a legacy single file", {
 
-    obj    <- make_eval_object(n_configs = 2)
-    tmpdir <- withr::local_tempdir()
-
-    suppressWarnings(evaluate(obj, output_dir = tmpdir, prune = FALSE,
-                              verbose = FALSE, seed = 42L))
+    ck     <- ck_a()
+    obj    <- ck$value$obj
+    tmpdir <- ck$dir
 
     rows <- read_per_config_rows(tmpdir)
 
@@ -1861,11 +1943,9 @@ describe("evaluate() - one checkpoint store (#42)", {
 
   it("reads a legacy single file only for configs with no per-config file, and says so", {
 
-    obj    <- make_eval_object(n_configs = 2)
-    tmpdir <- withr::local_tempdir()
-
-    suppressWarnings(evaluate(obj, output_dir = tmpdir, prune = FALSE,
-                              verbose = FALSE, seed = 42L))
+    ck     <- ck_a()
+    obj    <- ck$value$obj
+    tmpdir <- ck$dir
 
     ## Mark every legacy row so its origin shows in the results.
     legacy <- lapply(read_per_config_rows(tmpdir), function(r) {
@@ -1896,11 +1976,9 @@ describe("evaluate() - one checkpoint store (#42)", {
 
   it("warns naming a per-config file it cannot read, and re-evaluates that config", {
 
-    obj    <- make_eval_object(n_configs = 2)
-    tmpdir <- withr::local_tempdir()
-
-    suppressWarnings(evaluate(obj, output_dir = tmpdir, prune = FALSE,
-                              verbose = FALSE, seed = 42L))
+    ck     <- ck_a()
+    obj    <- ck$value$obj
+    tmpdir <- ck$dir
 
     ## Only the per-config store, so nothing else can stand in for the file.
     unlink(file.path(tmpdir, "eval_checkpoint.rds"))
@@ -1959,11 +2037,10 @@ describe("evaluate() - one checkpoint store (#42)", {
 
   it("refuses a foreign-schema row written on other data from either store", {
 
-    obj    <- make_eval_object(n_configs = 2)
-    tmpdir <- withr::local_tempdir()
+    ck     <- ck_a()
+    obj    <- ck$value$obj
+    tmpdir <- ck$dir
 
-    suppressWarnings(evaluate(obj, output_dir = tmpdir, prune = FALSE,
-                              verbose = FALSE, seed = 42L))
     unlink(file.path(tmpdir, "eval_checkpoint.rds"))
 
     f       <- file.path(tmpdir, "checkpoints", "cfg_001.rds")
@@ -2038,11 +2115,9 @@ describe("evaluate() - tuning-settings provenance", {
 
   it("refuses to resume checkpoints tuned under a different grid_size, naming it", {
 
-    obj    <- make_eval_object(n_configs = 2)
-    tmpdir <- withr::local_tempdir()
-
-    suppressWarnings(evaluate(obj, output_dir = tmpdir, prune = FALSE,
-                              verbose = FALSE, seed = 42L))
+    ck     <- ck_a()
+    obj    <- ck$value$obj
+    tmpdir <- ck$dir
 
     changed <- obj
     changed$config$tuning$grid_size <- obj$config$tuning$grid_size + 1L
@@ -2065,11 +2140,10 @@ describe("evaluate() - tuning-settings provenance", {
 
   it("refuses a changed prune threshold while pruning, and ignores it when not", {
 
-    obj    <- make_eval_object(n_configs = 2)
-    tmpdir <- withr::local_tempdir()
-
-    suppressWarnings(evaluate(obj, output_dir = tmpdir, prune = TRUE,
-                              prune_threshold = 1, verbose = FALSE, seed = 42L))
+    ## CK-B was run with prune = TRUE, prune_threshold = 1
+    ck     <- ck_b()
+    obj    <- ck$value$obj
+    tmpdir <- ck$dir
 
     expect_error(
       suppressWarnings(evaluate(obj, output_dir = tmpdir, prune = TRUE,
@@ -2079,11 +2153,12 @@ describe("evaluate() - tuning-settings provenance", {
     )
 
     ## With pruning off the threshold is never read, so it cannot have
-    ## changed what a row holds.
-    off <- withr::local_tempdir()
+    ## changed what a row holds. CK-A was run with prune = FALSE,
+    ## prune_threshold = 1.
+    ck_off <- ck_a()
+    off    <- ck_off$dir
 
-    first  <- suppressWarnings(evaluate(obj, output_dir = off, prune = FALSE,
-                                        prune_threshold = 1, verbose = FALSE, seed = 42L))
+    first  <- ck_off$value$first
     second <- suppressWarnings(evaluate(obj, output_dir = off, prune = FALSE,
                                         prune_threshold = 2, verbose = FALSE, seed = 42L))
 
@@ -2094,11 +2169,12 @@ describe("evaluate() - tuning-settings provenance", {
 
   it("resumes when only the ranking metric changes", {
 
-    obj    <- make_eval_object(n_configs = 2)
-    tmpdir <- withr::local_tempdir()
+    ## CK-A was ranked on the default metric, rpd
+    ck     <- ck_a()
+    obj    <- ck$value$obj
+    tmpdir <- ck$dir
 
-    first  <- suppressWarnings(evaluate(obj, output_dir = tmpdir, prune = FALSE,
-                                        metric = "rpd", verbose = FALSE, seed = 42L))
+    first  <- ck$value$first
     second <- suppressWarnings(evaluate(obj, output_dir = tmpdir, prune = FALSE,
                                         metric = "rmse", verbose = FALSE, seed = 42L))
 
@@ -2112,11 +2188,11 @@ describe("evaluate() - tuning-settings provenance", {
 
   it("counts rows with no settings stamp as unverified, warns once, and resumes", {
 
-    obj    <- make_eval_object(n_configs = 2)
-    tmpdir <- withr::local_tempdir()
+    ck     <- ck_a()
+    obj    <- ck$value$obj
+    tmpdir <- ck$dir
 
-    first <- suppressWarnings(evaluate(obj, output_dir = tmpdir, prune = FALSE,
-                                       verbose = FALSE, seed = 42L))
+    first <- ck$value$first
     unlink(file.path(tmpdir, "eval_checkpoint.rds"))
 
     ## The shape every row written before the settings stamp has.
@@ -2145,12 +2221,12 @@ describe("evaluate() - tuning-settings provenance", {
 
   it("refuses to resume checkpoints built with a different sg_window or pca_threshold, naming it", {
 
-    obj    <- make_eval_object(n_wn = 20, n_configs = 2)
+    ## CK-D was run with no recipe record, which stamps the same settings as
+    ## this one (checked when CK-D is built)
+    ck     <- ck_d()
+    obj    <- ck$value$obj
     obj$config$recipe <- list(sg_window = 9L, pca_threshold = 0.995)
-    tmpdir <- withr::local_tempdir()
-
-    suppressWarnings(evaluate(obj, output_dir = tmpdir, prune = FALSE,
-                              verbose = FALSE, seed = 42L))
+    tmpdir <- ck$dir
 
     wider <- obj
     wider$config$recipe$sg_window <- 11L
@@ -2179,11 +2255,11 @@ describe("evaluate() - tuning-settings provenance", {
 
   it("counts rows written before the recipe settings were recorded as unverified, and resumes", {
 
-    obj    <- make_eval_object(n_wn = 20, n_configs = 2)
-    tmpdir <- withr::local_tempdir()
+    ck     <- ck_d()
+    obj    <- ck$value$obj
+    tmpdir <- ck$dir
 
-    first <- suppressWarnings(evaluate(obj, output_dir = tmpdir, prune = FALSE,
-                                       verbose = FALSE, seed = 42L))
+    first <- ck$value$first
 
     ## The shape rows have when a version recorded the tuning settings but not
     ## yet sg_window and pca_threshold: a record, lacking the two.
