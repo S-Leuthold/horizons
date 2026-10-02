@@ -285,10 +285,13 @@ test_that("validate_horizons_data errors when sample_id column missing", {
     role_map = test_role_map
   )
 
-  ## Act & Assert
+  ## Act & Assert. The id role on `id` is also reported ("it must be on
+  ## sample_id"), so the pattern names the presence finding itself.
   expect_error(
     validate_horizons_data(obj),
-    "sample_id"
+    "Column sample_id missing from analysis",
+    fixed = TRUE,
+    class = "horizons_validation_error"
   )
 
 })
@@ -423,12 +426,16 @@ test_that("stage = \"full\" (the default) still aborts on duplicate sample_id", 
 
   expect_error(
     validate_horizons_data(obj),
+    "Duplicate sample_id values",
+    fixed = TRUE,
     class = "horizons_validation_error"
   )
 
   ## Explicit stage = "full" behaves identically to the default
   expect_error(
     validate_horizons_data(obj, stage = "full"),
+    "Duplicate sample_id values",
+    fixed = TRUE,
     class = "horizons_validation_error"
   )
 
@@ -456,6 +463,8 @@ test_that("NA sample_id warns at stage = \"raw\", aborts at stage = \"full\"", {
 
   expect_error(
     validate_horizons_data(obj),
+    "1 NA sample_id value",
+    fixed = TRUE,
     class = "horizons_validation_error"
   )
 
@@ -491,7 +500,7 @@ test_that("stage must be \"full\" or \"raw\"", {
 
   obj <- new_horizons_data()
 
-  expect_error(validate_horizons_data(obj, stage = "partial"))
+  expect_error(validate_horizons_data(obj, stage = "partial"), "should be one of")
 
 })
 
@@ -848,6 +857,33 @@ test_that("an unregistered analysis column is refused, naming it", {
 
   expect_s3_class(err, "horizons_validation_error")
   expect_match(conditionMessage(err), "mystery_col", fixed = TRUE)
+
+})
+
+test_that("a non-predictor role_map row with no analysis column is refused, naming it", {
+
+  ## Arrange — the reverse of the presence check above: role_map registers
+  ## an outcome and a meta column the table does not have. Predictors have
+  ## their own check; this is the one for every other role.
+  test_analysis <- tibble::tibble(
+    sample_id = c("A", "B"),
+    `4000`    = c(0.1, 0.2)
+  )
+
+  test_role_map <- tibble::tibble(
+    variable = c("sample_id", "4000", "clay", "plot"),
+    role     = c("id", "predictor", "outcome", "meta")
+  )
+
+  obj <- new_horizons_data(analysis = test_analysis, role_map = test_role_map)
+
+  ## Act & Assert
+  expect_error(
+    validate_horizons_data(obj),
+    "Non-predictor columns in role_map missing from analysis: clay, plot",
+    fixed = TRUE,
+    class = "horizons_validation_error"
+  )
 
 })
 
@@ -1989,10 +2025,12 @@ test_that("validate_horizons_ensemble names a missing contract key", {
   obj <- make_valid_ensemble()
   obj$ensemble$weights <- NULL   # NULL removes the key from the list
 
-  ## Act & Assert
+  ## Act & Assert. A missing weights key also fails the weights checks, so
+  ## the pattern names the completeness finding.
   expect_error(
     suppressMessages(validate_horizons_ensemble(obj)),
-    "weights",
+    "missing from ensemble: weights",
+    fixed = TRUE,
     class = "horizons_validation_error"
   )
 
@@ -2004,6 +2042,7 @@ test_that("validate_horizons_ensemble rejects an unknown method", {
   obj$ensemble$method <- "bogus"
 
   expect_error(validate_horizons_ensemble(obj),
+               "method must be one of: weighted, penalized, xgb", fixed = TRUE,
                class = "horizons_validation_error")
 
 })
@@ -2014,12 +2053,14 @@ test_that("validate_horizons_ensemble enforces per-method model typing", {
   wrong_weighted <- make_valid_ensemble()
   wrong_weighted$ensemble$model <- make_tiny_workflow()
   expect_error(validate_horizons_ensemble(wrong_weighted),
+               "must be the weights tibble", fixed = TRUE,
                class = "horizons_validation_error")
 
   ## penalized carrying a tibble
   wrong_penalized <- make_valid_ensemble()
   wrong_penalized$ensemble$method <- "penalized"
   expect_error(validate_horizons_ensemble(wrong_penalized),
+               "must be a trained <workflow>", fixed = TRUE,
                class = "horizons_validation_error")
 
   ## penalized carrying an untrained workflow
@@ -2030,36 +2071,50 @@ test_that("validate_horizons_ensemble enforces per-method model typing", {
                            parsnip::set_engine("lm")) %>%
     workflows::add_formula(.truth ~ .)
   expect_error(validate_horizons_ensemble(untrained),
+               "must be a trained <workflow>", fixed = TRUE,
                class = "horizons_validation_error")
 
 })
 
 test_that("validate_horizons_ensemble rejects malformed weights", {
 
-  ## Missing coef column
+  ## For the weighted method model and weights are the same object, so each
+  ## case edits both; otherwise "model and weights must be identical" fires
+  ## as well. Each pattern names the weights finding the case targets.
+
+  ## Missing coef column (the model-typing check also refuses this model)
   no_coef <- make_valid_ensemble()
   no_coef$ensemble$weights <- tibble::tibble(member = c("a", "b"))
+  no_coef$ensemble$model   <- no_coef$ensemble$weights
   expect_error(validate_horizons_ensemble(no_coef),
-               class = "horizons_validation_error")
+               "weights must be a data frame with member and coef columns",
+               fixed = TRUE, class = "horizons_validation_error")
 
-  ## Single member
+  ## Single member, with member_metrics kept to that member
   one_row <- make_valid_ensemble()
-  one_row$ensemble$weights <- tibble::tibble(member = "a", coef = 1)
+  one_row$ensemble$weights <- tibble::tibble(member = "cfg_a", coef = 1)
+  one_row$ensemble$model   <- one_row$ensemble$weights
+  one_row$ensemble$member_metrics <- one_row$ensemble$member_metrics[1, ]
   expect_error(validate_horizons_ensemble(one_row),
-               class = "horizons_validation_error")
+               "weights needs at least 2 members; found 1",
+               fixed = TRUE, class = "horizons_validation_error")
 
   ## NA coefficient
   na_coef <- make_valid_ensemble()
   na_coef$ensemble$weights$coef[1] <- NA_real_
+  na_coef$ensemble$model <- na_coef$ensemble$weights
   expect_error(validate_horizons_ensemble(na_coef),
-               class = "horizons_validation_error")
+               "weights$coef must be numeric with no NAs",
+               fixed = TRUE, class = "horizons_validation_error")
 
   ## Duplicate members
   dup <- make_valid_ensemble()
   dup$ensemble$weights$member <- c("a", "a")
+  dup$ensemble$model <- dup$ensemble$weights
   dup$ensemble$member_metrics$config_id <- c("a", "a")
   expect_error(validate_horizons_ensemble(dup),
-               class = "horizons_validation_error")
+               "Duplicate members in weights",
+               fixed = TRUE, class = "horizons_validation_error")
 
 })
 
@@ -2069,19 +2124,22 @@ test_that("validate_horizons_ensemble rejects malformed data-frame slots", {
   no_truth <- make_valid_ensemble()
   no_truth$ensemble$predictions <- tibble::tibble(sample_id = "S1", .pred = 1)
   expect_error(validate_horizons_ensemble(no_truth),
-               class = "horizons_validation_error")
+               "predictions must be a data frame with sample_id, .pred, truth",
+               fixed = TRUE, class = "horizons_validation_error")
 
   ## oof_predictions missing .row
   no_row <- make_valid_ensemble()
   no_row$ensemble$oof_predictions <- tibble::tibble(.pred = 1, truth = 1)
   expect_error(validate_horizons_ensemble(no_row),
-               class = "horizons_validation_error")
+               "oof_predictions must be NULL or a data frame with .row, .pred, truth",
+               fixed = TRUE, class = "horizons_validation_error")
 
   ## member_metrics referencing a non-member
   stranger <- make_valid_ensemble()
   stranger$ensemble$member_metrics$config_id[1] <- "cfg_zz"
   expect_error(validate_horizons_ensemble(stranger),
-               class = "horizons_validation_error")
+               "member_metrics references non-member config_ids: cfg_zz",
+               fixed = TRUE, class = "horizons_validation_error")
 
 })
 
@@ -2091,6 +2149,7 @@ test_that("validate_horizons_ensemble rejects a malformed uq bundle", {
   not_list <- make_valid_ensemble()
   not_list$ensemble$uq <- "not a list"
   expect_error(validate_horizons_ensemble(not_list),
+               "uq must be NULL or a CV+ bundle", fixed = TRUE,
                class = "horizons_validation_error")
 
   ## Wrong discriminator
@@ -2099,12 +2158,14 @@ test_that("validate_horizons_ensemble rejects a malformed uq bundle", {
                                    fold_models = list(), calib = NULL,
                                    n_calib = 0L, level_default = 0.9)
   expect_error(validate_horizons_ensemble(wrong_method),
+               "uq must be NULL or a CV+ bundle", fixed = TRUE,
                class = "horizons_validation_error")
 
   ## Missing core fields
   hollow_uq <- make_valid_ensemble()
   hollow_uq$ensemble$uq <- list(method = "cv_plus")
   expect_error(validate_horizons_ensemble(hollow_uq),
+               "uq must be NULL or a CV+ bundle", fixed = TRUE,
                class = "horizons_validation_error")
 
 })
@@ -2237,20 +2298,29 @@ test_that("validate_horizons_eval checks workers without parallelize_over (#129)
 
 test_that("validate_horizons_eval enforces I5: best_config names a real config", {
 
-  ## best_config absent from results
+  ## best_config absent from results (and from the config catalog, which is
+  ## reported too)
   ghost_result <- make_valid_eval()
   ghost_result$evaluation$best_config <- "cfg_ghost"
   expect_error(
     suppressMessages(validate_horizons_eval(ghost_result)),
+    "best_config (cfg_ghost) is not present in results$config_id",
+    fixed = TRUE,
     class = "horizons_validation_error"
   )
 
-  ## best_config present in results but not in the config catalog
+  ## best_config present in results but not in the config catalog. With a
+  ## well-formed results table the coverage check reports the same mismatch
+  ## first, so the table is missing a metric column: that skips coverage and
+  ## leaves the catalog check as the one that names best_config.
   ghost_config <- make_valid_eval()
   ghost_config$evaluation$results$config_id <- c("cfg_x", "cfg_b")
+  ghost_config$evaluation$results$rpd       <- NULL
   ghost_config$evaluation$best_config       <- "cfg_x"
   expect_error(
     suppressMessages(validate_horizons_eval(ghost_config)),
+    "best_config (cfg_x) is not present in config$configs$config_id",
+    fixed = TRUE,
     class = "horizons_validation_error"
   )
 
@@ -2262,20 +2332,26 @@ test_that("validate_horizons_eval rejects a malformed results table", {
   no_rpd <- make_valid_eval()
   no_rpd$evaluation$results$rpd <- NULL
   expect_error(suppressMessages(validate_horizons_eval(no_rpd)),
-               class = "horizons_validation_error")
+               "results must be a data frame with config_id, status, and the six metric columns",
+               fixed = TRUE, class = "horizons_validation_error")
 
-  ## Zero rows
+  ## Zero rows. An empty table also leaves the configs and best_config
+  ## without a row, which is reported too.
   empty <- make_valid_eval()
   empty$evaluation$results <- empty$evaluation$results[0, ]
   empty$evaluation$best_config <- "cfg_a"
   expect_error(suppressMessages(validate_horizons_eval(empty)),
-               class = "horizons_validation_error")
+               "results has no rows",
+               fixed = TRUE, class = "horizons_validation_error")
 
-  ## Duplicate config_id
+  ## Duplicate config_id, against a one-config table so the rows still
+  ## cover it and the duplicate is the only finding
   dup <- make_valid_eval()
   dup$evaluation$results$config_id <- c("cfg_a", "cfg_a")
+  dup$config$configs <- tibble::tibble(config_id = "cfg_a")
   expect_error(suppressMessages(validate_horizons_eval(dup)),
-               class = "horizons_validation_error")
+               "Duplicate config_id values in results",
+               fixed = TRUE, class = "horizons_validation_error")
 
 })
 
@@ -2284,7 +2360,8 @@ test_that("validate_horizons_eval rejects an unknown rank_metric", {
   obj <- make_valid_eval()
   obj$evaluation$rank_metric <- "banana"
   expect_error(suppressMessages(validate_horizons_eval(obj)),
-               class = "horizons_validation_error")
+               "rank_metric must be one of: rmse, rrmse, rsq, ccc, rpd, mae",
+               fixed = TRUE, class = "horizons_validation_error")
 
 })
 
@@ -2293,7 +2370,8 @@ test_that("validate_horizons_eval rejects a non-rsplit split", {
   obj <- make_valid_eval()
   obj$evaluation$split <- list()
   expect_error(suppressMessages(validate_horizons_eval(obj)),
-               class = "horizons_validation_error")
+               "split must be an <rsplit> object",
+               fixed = TRUE, class = "horizons_validation_error")
 
 })
 
@@ -2302,12 +2380,14 @@ test_that("validate_horizons_eval rejects fractional or negative sample counts",
   frac <- make_valid_eval()
   frac$evaluation$n_train <- 80.5
   expect_error(suppressMessages(validate_horizons_eval(frac)),
-               class = "horizons_validation_error")
+               "n_train must be a single non-negative whole number",
+               fixed = TRUE, class = "horizons_validation_error")
 
   neg <- make_valid_eval()
   neg$evaluation$n_test <- -1L
   expect_error(suppressMessages(validate_horizons_eval(neg)),
-               class = "horizons_validation_error")
+               "n_test must be a single non-negative whole number",
+               fixed = TRUE, class = "horizons_validation_error")
 
 })
 
@@ -2437,7 +2517,8 @@ test_that("validate_horizons_fit delegates to the evaluation contract", {
   obj <- make_valid_fit()
   obj$evaluation$best_config <- "cfg_ghost"
   expect_error(suppressMessages(validate_horizons_fit(obj)),
-               class = "horizons_validation_error")
+               "best_config (cfg_ghost) is not present in results$config_id",
+               fixed = TRUE, class = "horizons_validation_error")
 
 })
 
@@ -2448,19 +2529,23 @@ test_that("validate_horizons_fit enforces the response_bound guardrail contract"
   neg <- make_valid_fit()
   neg$models$response_bound <- -5
   expect_error(suppressMessages(validate_horizons_fit(neg)),
-               class = "horizons_validation_error")
+               "above the lower bound of outcome_range (0)",
+               fixed = TRUE, class = "horizons_validation_error")
 
-  ## Non-finite bound
+  ## Non-finite bound. The range finding above starts with the same words,
+  ## so the pattern is anchored to the end of the finding's line.
   inf <- make_valid_fit()
   inf$models$response_bound <- Inf
   expect_error(suppressMessages(validate_horizons_fit(inf)),
-               class = "horizons_validation_error")
+               "(?m)^response_bound must be a single finite numeric$",
+               perl = TRUE, class = "horizons_validation_error")
 
   ## Length > 1
   vec <- make_valid_fit()
   vec$models$response_bound <- c(45.2, 90.4)
   expect_error(suppressMessages(validate_horizons_fit(vec)),
-               class = "horizons_validation_error")
+               "(?m)^response_bound must be a single finite numeric$",
+               perl = TRUE, class = "horizons_validation_error")
 
 })
 
@@ -2470,7 +2555,8 @@ test_that("validate_horizons_fit enforces I6: workflow keys are a subset of conf
   names(obj$models$workflows) <- c("cfg_a", "cfg_ghost")
   obj$models$n_models <- 2L
   expect_error(suppressMessages(validate_horizons_fit(obj)),
-               class = "horizons_validation_error")
+               "workflows keys not present in config$configs$config_id: cfg_ghost",
+               fixed = TRUE, class = "horizons_validation_error")
 
 })
 
@@ -2481,7 +2567,8 @@ test_that("validate_horizons_fit enforces I7: uq keys are a subset of workflow k
   obj <- make_valid_fit()
   obj$models$uq <- list(cfg_ghost = list(quantile_model = 1))
   expect_error(suppressMessages(validate_horizons_fit(obj)),
-               class = "horizons_validation_error")
+               "uq keys not present in workflows: cfg_ghost",
+               fixed = TRUE, class = "horizons_validation_error")
 
 })
 
@@ -2502,7 +2589,8 @@ test_that("validate_horizons_fit enforces the AD-subset invariant", {
   obj$models$ad <- list(cfg_ghost = list(centroid = 1, cov_matrix = 1,
                                          ad_thresholds = 1:4))
   expect_error(suppressMessages(validate_horizons_fit(obj)),
-               class = "horizons_validation_error")
+               "ad keys not present in workflows: cfg_ghost",
+               fixed = TRUE, class = "horizons_validation_error")
 
 })
 
@@ -2511,7 +2599,8 @@ test_that("validate_horizons_fit rejects a non-list ad slot", {
   obj <- make_valid_fit()
   obj$models$ad <- "not a list"
   expect_error(suppressMessages(validate_horizons_fit(obj)),
-               class = "horizons_validation_error")
+               "ad must be NULL or a named list keyed by config_id",
+               fixed = TRUE, class = "horizons_validation_error")
 
 })
 
@@ -2520,7 +2609,8 @@ test_that("validate_horizons_fit rejects an n_models / workflows mismatch", {
   obj <- make_valid_fit()
   obj$models$n_models <- 5L
   expect_error(suppressMessages(validate_horizons_fit(obj)),
-               class = "horizons_validation_error")
+               "n_models must equal",
+               fixed = TRUE, class = "horizons_validation_error")
 
 })
 
@@ -2529,18 +2619,22 @@ test_that("validate_horizons_fit rejects an empty predictor_schema", {
   obj <- make_valid_fit()
   obj$models$predictor_schema <- character(0)
   expect_error(suppressMessages(validate_horizons_fit(obj)),
-               class = "horizons_validation_error")
+               "predictor_schema must be a non-empty character vector",
+               fixed = TRUE, class = "horizons_validation_error")
 
 })
 
 test_that("validate_horizons_fit rejects a best_config not among workflows", {
 
+  ## One fitted workflow, cfg_a, which uq and ad are keyed by and the config
+  ## table holds, so best_config is the only thing wrong.
   obj <- make_valid_fit()
+  obj$models$workflows <- obj$models$workflows["cfg_a"]
+  obj$models$n_models  <- 1L
   obj$models$best_config <- "cfg_b"
-  names(obj$models$workflows) <- c("cfg_a", "cfg_c")   # cfg_b now absent
-  obj$models$uq <- NULL                                # avoid an unrelated I7 hit
   expect_error(suppressMessages(validate_horizons_fit(obj)),
-               class = "horizons_validation_error")
+               "best_config (cfg_b) is not among the fitted workflows",
+               fixed = TRUE, class = "horizons_validation_error")
 
 })
 
