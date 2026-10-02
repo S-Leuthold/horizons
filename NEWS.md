@@ -10,6 +10,7 @@
 * `print()` and `summary()` of a fitted object report the member `fit()` selected on cross-validation (`models$best_config`) and its test metrics, as `fit()`'s console does. They reported the member with the lowest test RMSE, a best-of-N on the held-out rows that could name a different configuration (#136).
 * `add_response()` refuses an `NA` join key on either side and reports how many there are. Before, an `NA` key on one side was matched to an `NA` key on the other (#139).
 * `predict()` no longer drops arguments it does not take without saying so. A `level` warns, with class `horizons_input_warning`, that it is ignored: intervals are at the level they were calibrated at, 0.90 by default. Any other unknown argument, such as a misspelled one, is an error (#141).
+* `fit()` refuses an evaluated object whose response-trim request changed after `evaluate()`, instead of silently fitting with the trim `evaluate()` applied. `validate()` can record a new request on an evaluated object, but `fit()` reuses the rows `evaluate()` trimmed, so the new request never took effect. The error says what differs; re-run `evaluate()` to apply the current request (#137).
 
 # horizons 0.10.0
 
