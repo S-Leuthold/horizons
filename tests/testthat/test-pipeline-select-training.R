@@ -908,15 +908,15 @@ test_that("the record carries the targets' source, size and id hash", {
 
   out <- quiet_select(fx, k = 5)
 
-  ## Hashed the way selection$pool$id_hash is: sorted ids, so row order
-  ## does not change it.
+  ## Hashed the way selection$pool$id_hash is: ids in radix order, so
+  ## neither row order nor the session's collation locale changes it.
   ids <- fx$targets$data$analysis$sample_id
   rec <- out$selection$targets
 
   expect_named(rec, c("source", "n_rows", "id_hash"))
   expect_identical(rec$source,  "batch_07.csv")
   expect_identical(rec$n_rows,  8L)
-  expect_identical(rec$id_hash, digest::digest(sort(ids)))
+  expect_identical(rec$id_hash, digest::digest(sort(ids, method = "radix")))
 
   reordered <- select_training(subset_rows(fx$targets, rev(ids)), fx$pool, k = 5, verbose = FALSE)
 
