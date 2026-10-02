@@ -14,8 +14,10 @@
 ## invisible.
 ##
 ## Built once by dev-build-fixture.R; see fixtures/README.md.
-
-fitted <- readRDS(test_path("fixtures", "ensemble_fit.rds"))
+##
+## ens_fitted(), ens_test_set() and ens_built() come from helper-ensemble.R:
+## the fixture is read once, and each ensemble the tests only read is built
+## once, on first use.
 
 ## Sanity: the fixture is what the tests assume (real signal, >= 2 members,
 ## transform diversity). If this block fails, rebuild the fixture — the tests
@@ -24,6 +26,8 @@ describe("ensemble() fixture preconditions", {
 
   it("is a horizons_fit with at least 2 members carrying cv_predictions", {
 
+    fitted <- ens_fitted()
+
     expect_true(inherits(fitted, "horizons_fit"))
     expect_gte(length(unique(fitted$models$cv_predictions$config_id)), 2)
 
@@ -31,6 +35,7 @@ describe("ensemble() fixture preconditions", {
 
   it("spans more than one response transform across members", {
 
+    fitted       <- ens_fitted()
     members      <- unique(fitted$models$cv_predictions$config_id)
     member_cfg   <- fitted$config$configs[
       fitted$config$configs$config_id %in% members, ]
@@ -54,12 +59,9 @@ describe("ensemble() fixture preconditions", {
 
 describe("ensemble() penalized - non-degenerate on real signal", {
 
-  ens <- suppressWarnings(
-    ensemble(fitted, method = "penalized", optimize = TRUE, verbose = FALSE)
-  )
-
   it("learns at least one non-zero member coefficient", {
 
+    ens   <- ens_built("penalized", optimize = TRUE)
     coefs <- ens$ensemble$weights$coef
     expect_gt(sum(abs(coefs) > 1e-8), 0)
 
@@ -67,7 +69,8 @@ describe("ensemble() penalized - non-degenerate on real signal", {
 
   it("produces ensemble test predictions correlated with truth", {
 
-    ep <- ens$ensemble$predictions
+    ens <- ens_built("penalized", optimize = TRUE)
+    ep  <- ens$ensemble$predictions
     expect_gt(stats::cor(ep$.pred, ep$truth), 0.3)
 
   })
@@ -85,13 +88,10 @@ describe("ensemble() penalized - non-degenerate on real signal", {
 
 describe("ensemble() oof_predictions - correct row alignment", {
 
-  ens <- suppressWarnings(
-    ensemble(fitted, method = "penalized", optimize = FALSE, verbose = FALSE)
-  )
-  oof <- ens$ensemble$oof_predictions
-
   it("has one OOF prediction per training row, keyed to the object's .row", {
 
+    fitted  <- ens_fitted()
+    oof     <- ens_built("penalized")$ensemble$oof_predictions
     members <- unique(fitted$models$cv_predictions$config_id)
     truth_rows <- unique(
       fitted$models$cv_predictions[
@@ -105,6 +105,8 @@ describe("ensemble() oof_predictions - correct row alignment", {
 
   it("carries the truth value that belongs to each .row (not a scramble)", {
 
+    fitted  <- ens_fitted()
+    oof     <- ens_built("penalized")$ensemble$oof_predictions
     members <- unique(fitted$models$cv_predictions$config_id)
     ref <- unique(
       fitted$models$cv_predictions[
@@ -119,6 +121,8 @@ describe("ensemble() oof_predictions - correct row alignment", {
   })
 
   it("OOF predictions correlate with truth (a scrambled .pred would not)", {
+
+    oof <- ens_built("penalized")$ensemble$oof_predictions
 
     expect_gt(stats::cor(oof$.pred, oof$truth), 0.3)
 
@@ -136,13 +140,10 @@ describe("ensemble() oof_predictions - correct row alignment", {
 
 describe("ensemble() - no double back-transformation", {
 
-  ens <- suppressWarnings(
-    ensemble(fitted, method = "penalized", optimize = FALSE, verbose = FALSE)
-  )
-
   it("ensemble test predictions stay in physical range for Bulk_C", {
 
-    p <- ens$ensemble$predictions$.pred
+    ens <- ens_built("penalized")
+    p   <- ens$ensemble$predictions$.pred
     expect_true(all(p >= 0))
     expect_true(all(p < 1000))   # Bulk_C g/kg is O(10); 1000 = clear blow-up
 
@@ -150,7 +151,8 @@ describe("ensemble() - no double back-transformation", {
 
   it("OOF predictions stay in physical range", {
 
-    p <- ens$ensemble$oof_predictions$.pred
+    ens <- ens_built("penalized")
+    p   <- ens$ensemble$oof_predictions$.pred
     expect_true(all(p >= 0))
     expect_true(all(p < 1000))
 
@@ -167,15 +169,16 @@ describe("ensemble() - no double back-transformation", {
 ## fit_resamples. The fix builds the spec with an explicit if/else BRANCH. These
 ## cases guard it — if anyone re-inlines the conditional, optimize = FALSE breaks
 ## here. Do NOT replace this with a reimplementation of the spec construction;
-## drive it through the real engines.
+## drive it through the real engines. The builds are the shared ones the other
+## tests read, made on first use inside a test, so a regression fails these
+## two by name (and every other test that reads them), not the file.
 
 describe("ensemble() - optimize = FALSE runs (lazy-quosure regression guard)", {
 
   it("penalized fixed-spec path completes and yields genuine OOF", {
 
-    ens <- suppressWarnings(
-      ensemble(fitted, method = "penalized", optimize = FALSE, verbose = FALSE)
-    )
+    fitted <- ens_fitted()
+    ens    <- ens_built("penalized")
     expect_true(inherits(ens, "horizons_ensemble"))
     expect_equal(nrow(ens$ensemble$oof_predictions),
                  length(unique(fitted$models$cv_predictions$.row)))
@@ -184,9 +187,7 @@ describe("ensemble() - optimize = FALSE runs (lazy-quosure regression guard)", {
 
   it("xgb fixed-spec path completes", {
 
-    ens <- suppressWarnings(
-      ensemble(fitted, method = "xgb", optimize = FALSE, verbose = FALSE)
-    )
+    ens <- ens_built("xgb")
     expect_true(inherits(ens, "horizons_ensemble"))
 
   })
@@ -205,9 +206,7 @@ describe("ensemble() - engine x mode dispatch", {
 
       it(paste0(method, " optimize=", optimize, " returns a horizons_ensemble"), {
 
-        ens <- suppressWarnings(
-          ensemble(fitted, method = method, optimize = optimize, verbose = FALSE)
-        )
+        ens <- ens_built(method, optimize = optimize)
         expect_true(inherits(ens, "horizons_ensemble"))
         expect_true(inherits(ens, "horizons_fit"))
         expect_false(is.null(ens$ensemble))
@@ -234,11 +233,15 @@ describe("ensemble() - preflight validation", {
 
   it("aborts on an unknown method", {
 
+    fitted <- ens_fitted()
+
     expect_error(ensemble(fitted, method = "bogus"), class = "rlang_error")
 
   })
 
   it("refuses a fitted object that breaks its contract, before fitting (#129)", {
+
+    fitted <- ens_fitted()
 
     ## ensemble() used to check only the class and the outcome range, so
     ## each of these reached the meta-learner.
@@ -275,6 +278,8 @@ describe("ensemble() - preflight validation", {
   })
 
   it("refuses a bad seed or optimize before any engine runs (#130)", {
+
+    fitted <- ens_fitted()
 
     ## Both are recorded on the ensemble and must not be NULL there, so a bad
     ## value is refused on entry rather than by the validator once the
@@ -317,6 +322,8 @@ describe("ensemble() - predict namespaces", {
 
   it("loads the members' predict namespaces before scoring them on the test rows", {
 
+    fitted <- ens_fitted()
+
     ## Under an installed package the Imports load lazily, so a fitted object
     ## read into a fresh session has no workflows predict method registered
     ## until something loads it. The member scoring must ask for it, as
@@ -346,17 +353,15 @@ describe("ensemble() - predict namespaces", {
 ## the stored ensemble predictions. test_F also carries truth, but predict()
 ## must IGNORE it and return only sample_id + .pred (no config_id, no truth).
 
-test_set <- rsample::assessment(fitted$models$split)
-
 describe("predict.horizons_ensemble() - output contract", {
 
   it("returns sample_id + .pred only, one row per sample, for every method", {
 
+    test_set <- ens_test_set()
+
     for (m in c("weighted", "penalized", "xgb")) {
 
-      ens <- suppressWarnings(
-        ensemble(fitted, method = m, optimize = FALSE, verbose = FALSE)
-      )
+      ens <- ens_built(m)
 
       p <- predict(ens, test_set, interval = FALSE)
 
@@ -390,9 +395,8 @@ describe("predict.horizons_ensemble() - round-trips the stored predictions", {
 
     it(paste0("method = '", m, "' reproduces $ensemble$predictions on test_F"), {
 
-      ens <- suppressWarnings(
-        ensemble(fitted, method = m, optimize = FALSE, verbose = FALSE)
-      )
+      test_set <- ens_test_set()
+      ens      <- ens_built(m)
 
       p      <- predict(ens, test_set, interval = FALSE)
       stored <- ens$ensemble$predictions
@@ -422,9 +426,8 @@ describe("predict.horizons_ensemble() - weighted combine is the documented sum",
 
   it("equals sum(member .pred * coef) per sample, floored at 0", {
 
-    ens <- suppressWarnings(
-      ensemble(fitted, method = "weighted", optimize = FALSE, verbose = FALSE)
-    )
+    test_set <- ens_test_set()
+    ens      <- ens_built("weighted")
 
     members  <- ens$ensemble$weights$member
     new_spec <- resolve_new_data(test_set)
@@ -457,9 +460,9 @@ describe("predict.horizons_ensemble() - schema gate", {
 
   it("aborts when new_data is missing training-axis predictor columns", {
 
-    ens <- suppressWarnings(
-      ensemble(fitted, method = "weighted", optimize = FALSE, verbose = FALSE)
-    )
+    fitted   <- ens_fitted()
+    test_set <- ens_test_set()
+    ens      <- ens_built("weighted")
 
     pred_cols <- fitted$models$predictor_schema
     broken    <- test_set[, setdiff(names(test_set), pred_cols[1]),
@@ -483,9 +486,8 @@ describe("predict.horizons_ensemble() - intervals and degradation", {
 
   it("default build returns interval columns with no note", {
 
-    ens <- suppressWarnings(
-      ensemble(fitted, method = "weighted", optimize = FALSE, verbose = FALSE)
-    )
+    test_set <- ens_test_set()
+    ens      <- ens_built("weighted")
 
     expect_no_message(p <- predict(ens, test_set, interval = TRUE))
 
@@ -498,10 +500,8 @@ describe("predict.horizons_ensemble() - intervals and degradation", {
 
   it("compute_uq = FALSE returns point-only with an informative message", {
 
-    ens0 <- suppressWarnings(
-      ensemble(fitted, method = "weighted", optimize = FALSE,
-               compute_uq = FALSE, verbose = FALSE)
-    )
+    test_set <- ens_test_set()
+    ens0     <- ens_built("weighted", compute_uq = FALSE)
 
     expect_message(
       p <- predict(ens0, test_set, interval = TRUE),
@@ -513,9 +513,8 @@ describe("predict.horizons_ensemble() - intervals and degradation", {
 
   it("a corrupt uq bundle warns and degrades to point-only without erroring", {
 
-    ens <- suppressWarnings(
-      ensemble(fitted, method = "weighted", optimize = FALSE, verbose = FALSE)
-    )
+    test_set <- ens_test_set()
+    ens      <- ens_built("weighted")
 
     ens$ensemble$uq$method <- "bogus"
 
@@ -534,9 +533,8 @@ describe("predict.horizons_ensemble() - intervals and degradation", {
 
   it("interval = FALSE returns point-only with no message", {
 
-    ens <- suppressWarnings(
-      ensemble(fitted, method = "weighted", optimize = FALSE, verbose = FALSE)
-    )
+    test_set <- ens_test_set()
+    ens      <- ens_built("weighted")
 
     expect_no_message(predict(ens, test_set, interval = FALSE))
 
@@ -556,9 +554,8 @@ describe("predict.horizons_ensemble() - aborts on a failing member", {
 
   it("does not renormalize; aborts when a member workflow cannot predict", {
 
-    ens <- suppressWarnings(
-      ensemble(fitted, method = "weighted", optimize = FALSE, verbose = FALSE)
-    )
+    test_set <- ens_test_set()
+    ens      <- ens_built("weighted")
 
     broken_member <- ens$ensemble$weights$member[1]
     ens$models$workflows[[broken_member]] <- "not a workflow"
@@ -581,6 +578,9 @@ describe("predict.horizons_ensemble() - aborts on a failing member", {
 describe("ensemble() and predict.horizons_ensemble() - member AD", {
 
   it("raises no AD warning from a broken member AD bundle", {
+
+    fitted   <- ens_fitted()
+    test_set <- ens_test_set()
 
     broken <- fitted
     member <- names(broken$models$workflows)[1]
@@ -616,6 +616,9 @@ describe("predict.horizons_ensemble() - preflight", {
 
   it("aborts on a non-ensemble object", {
 
+    fitted   <- ens_fitted()
+    test_set <- ens_test_set()
+
     expect_error(predict.horizons_ensemble(fitted, test_set),
                  class = "rlang_error")
 
@@ -635,10 +638,7 @@ describe("predict.horizons_ensemble() - selected training set", {
 
   ens_selected <- function(uq = TRUE) {
 
-    ens <- suppressWarnings(
-      ensemble(fitted, method = "weighted", optimize = FALSE,
-               compute_uq = uq, verbose = FALSE)
-    )
+    ens <- ens_built("weighted", compute_uq = uq)
 
     ens$models$selection_present <- TRUE
     ens
@@ -647,7 +647,8 @@ describe("predict.horizons_ensemble() - selected training set", {
 
   it("warns once when intervals are requested on a selected ensemble", {
 
-    ens <- ens_selected()
+    test_set <- ens_test_set()
+    ens      <- ens_selected()
 
     warns <- testthat::capture_warnings(
       p <- suppressMessages(predict(ens, test_set, interval = TRUE))
@@ -661,6 +662,8 @@ describe("predict.horizons_ensemble() - selected training set", {
 
   it("is silent when intervals are not requested", {
 
+    test_set <- ens_test_set()
+
     warns <- testthat::capture_warnings(
       predict(ens_selected(), test_set, interval = FALSE)
     )
@@ -670,6 +673,8 @@ describe("predict.horizons_ensemble() - selected training set", {
   })
 
   it("is silent with no ensemble UQ, where no intervals are returned", {
+
+    test_set <- ens_test_set()
 
     warns <- testthat::capture_warnings(
       suppressMessages(predict(ens_selected(uq = FALSE), test_set,
@@ -682,9 +687,8 @@ describe("predict.horizons_ensemble() - selected training set", {
 
   it("is silent on an unselected ensemble", {
 
-    ens <- suppressWarnings(
-      ensemble(fitted, method = "weighted", optimize = FALSE, verbose = FALSE)
-    )
+    test_set <- ens_test_set()
+    ens      <- ens_built("weighted")
 
     warns <- testthat::capture_warnings(
       suppressMessages(predict(ens, test_set, interval = TRUE))
@@ -707,10 +711,7 @@ describe("predict.horizons_ensemble() - trimmed members (#77)", {
 
   trimmed_ensemble <- function(uq = TRUE, trimmed_ids = c("S001", "S002")) {
 
-    ens <- suppressWarnings(
-      ensemble(fitted, method = "weighted", optimize = FALSE,
-               compute_uq = uq, verbose = FALSE)
-    )
+    ens <- ens_built("weighted", compute_uq = uq)
 
     ens$evaluation$response_trim <- list(
       outcome = "SOC", method = "iqr", threshold = 1.5, fences_from = "training",
@@ -724,7 +725,8 @@ describe("predict.horizons_ensemble() - trimmed members (#77)", {
 
   it("warns once that the intervals were calibrated within the training fences", {
 
-    caught <- list()
+    test_set <- ens_test_set()
+    caught   <- list()
 
     withCallingHandlers(
       suppressMessages(predict(trimmed_ensemble(), test_set, interval = TRUE)),
@@ -743,6 +745,8 @@ describe("predict.horizons_ensemble() - trimmed members (#77)", {
   })
 
   it("is silent without intervals, without ensemble UQ, or without a trim", {
+
+    test_set <- ens_test_set()
 
     quiet <- function(ens, interval) {
       warns <- testthat::capture_warnings(
@@ -770,9 +774,8 @@ describe("predict.horizons_ensemble() - member-set gate order", {
 
   it("reports the missing member set, not a covariate problem", {
 
-    ens <- suppressWarnings(
-      ensemble(fitted, method = "weighted", optimize = FALSE, verbose = FALSE)
-    )
+    test_set <- ens_test_set()
+    ens      <- ens_built("weighted")
 
     ens$ensemble$weights <- ens$ensemble$weights[0, ]
 
@@ -796,9 +799,8 @@ describe("predict.horizons_ensemble() - response bound guardrail", {
 
   it("clamps the combined output exactly once, one row per sample", {
 
-    ens <- suppressWarnings(
-      ensemble(fitted, method = "weighted", optimize = FALSE, verbose = FALSE)
-    )
+    test_set <- ens_test_set()
+    ens      <- ens_built("weighted")
 
     p_raw <- predict(ens, test_set, interval = FALSE)
     bound <- stats::median(p_raw$.pred)   # force the clamp
@@ -824,6 +826,8 @@ describe("predict.horizons_ensemble() - response bound guardrail", {
   })
 
   it("member features and build-time scoring stay unclamped", {
+
+    fitted <- ens_fitted()
 
     ## Inject a bound BEFORE building the ensemble: build-time member scoring
     ## must not warn (raw path), and the stored member_metrics must equal the
@@ -857,9 +861,7 @@ describe("validate_horizons_ensemble() - real fixture contracts", {
 
     it(paste0("method = '", m, "' contract validates (uq populated)"), {
 
-      ens <- suppressWarnings(
-        ensemble(fitted, method = m, optimize = FALSE, verbose = FALSE)
-      )
+      ens <- ens_built(m)
 
       expect_identical(validate_horizons_ensemble(ens), ens)
       expect_false(is.null(ens$ensemble$uq))
@@ -870,10 +872,7 @@ describe("validate_horizons_ensemble() - real fixture contracts", {
 
   it("a compute_uq = FALSE contract validates (uq NULL)", {
 
-    ens0 <- suppressWarnings(
-      ensemble(fitted, method = "weighted", optimize = FALSE,
-               compute_uq = FALSE, verbose = FALSE)
-    )
+    ens0 <- ens_built("weighted", compute_uq = FALSE)
 
     expect_identical(validate_horizons_ensemble(ens0), ens0)
 
@@ -919,6 +918,7 @@ describe("ensemble() - allow_par", {
 
   it("warns and runs sequentially when allow_par = TRUE has no backend", {
 
+    fitted <- ens_fitted()
     local_plan(future::sequential)
 
     expect_warning(
@@ -979,6 +979,8 @@ describe("combine_ensemble_metamodel() - row alignment", {
 
   it("aborts at fit time when the meta-model's test predictions are short", {
 
+    fitted <- ens_fitted()
+
     ## fit_tuned_meta_learner() binds the meta-model's test_F predictions to
     ## the test samples and their truth the same way; one prediction would be
     ## recycled and the ensemble's test metrics scored on a constant. Only the
@@ -1005,6 +1007,8 @@ describe("combine_ensemble_metamodel() - row alignment", {
   })
 
   it("aborts at fit time when the meta-model's out-of-fold predictions are short", {
+
+    fitted <- ens_fitted()
 
     ## The OOF predictions are bound to oof$row and truth by position; a
     ## single collected prediction used to be recycled across every row.

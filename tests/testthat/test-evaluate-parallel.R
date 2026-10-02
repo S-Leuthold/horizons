@@ -9,7 +9,9 @@
 ## skip_if_dev_package() comes from helper-load-all.R, shared with
 ## test-pipeline-predict.R's fresh-process round trip.
 
-## local_plan() and keep_only_warning() come from helper-parallel.R.
+## local_plan() and keep_only_warning() come from helper-parallel.R. Runs that
+## several tests read are built once, on first use, through helper-memo.R;
+## each accessor is defined just above the tests that read it.
 
 ## =========================================================================
 ## Worker closure footprint — regression guard
@@ -50,9 +52,14 @@ describe("evaluate() parallel worker footprint", {
     testthat::skip_if(identical(Sys.getenv("R_COVR"), "true"),
                       "covr instrumentation inflates the serialized function")
 
+    ## Source references are not data either, and they are what varies by
+    ## build: under load_all() they carry the whole source file, which puts
+    ## the worker at 0.96 MB, just under this limit, where an installed build
+    ## has 14 KB. With them removed the worker is about 3 KB in both, and a
+    ## closure over a frame holding data still serializes at that data's size.
     worker <- horizons:::evaluate_config_worker
 
-    expect_lt(length(serialize(worker, NULL)), 1e6)
+    expect_lt(length(serialize(utils::removeSource(worker), NULL)), 1e6)
 
   })
 
@@ -180,16 +187,74 @@ describe("evaluate() - workers is gone", {
 
 })
 
+## future::plan("list") as a record that holds no live state, for the shared
+## runs below to keep. Each level's backend is an environment that counts the
+## futures run under it, so a stored plan list would change whenever the plan
+## was used again, and a memoised value must not change. The record keeps
+## each level's strategy and backend by identity, as identical() compares
+## them, and its class and set-up state, so a failure says what moved.
+plan_record <- function() {
+
+  lapply(future::plan("list"), function(strategy) {
+    list(strategy = rlang::obj_address(strategy),
+         class    = class(strategy),
+         init     = attr(strategy, "init"),
+         backend  = rlang::obj_address(attr(strategy, "backend")))
+  })
+
+}
+
+## One allow_par = TRUE run under a sequential plan, read by the three tests
+## below (helper-memo.R). The builder registers the sequential plan itself and
+## puts the caller's back, recording the plan as the run found it and left
+## it. future sets a registered plan up on its first use (nbrOfWorkers() is
+## one), which marks it as set up; the builder takes that step before it
+## records the plan, so the records compare the plan as a user who has used
+## it holds it, and only a change evaluate() makes shows. Builders must be
+## quiet, so the warnings evaluate() gave are kept (their messages, in order)
+## rather than shown, and replay_warnings() signals them again inside the
+## test that expects one.
+allow_par_run <- function() memo_fixture("allow_par_run", build_allow_par_run)
+
+build_allow_par_run <- function() {
+
+  old <- future::plan(future::sequential)
+  on.exit(future::plan(old), add = TRUE)
+  future::nbrOfWorkers()
+
+  plan_before <- plan_record()
+  obj         <- make_eval_object(n_configs = 2)
+  warnings    <- list()
+
+  result <- withCallingHandlers(
+    evaluate(obj, allow_par = TRUE, verbose = FALSE, seed = 42L),
+    warning = function(w) {
+      warnings[[length(warnings) + 1L]] <<- simpleWarning(conditionMessage(w))
+      invokeRestart("muffleWarning")
+    }
+  )
+
+  list(obj = obj, result = result, warnings = warnings,
+       plan_before = plan_before, plan_after = plan_record())
+
+}
+
+replay_warnings <- function(run) {
+
+  for (w in run$warnings) warning(w)
+  run$result
+
+}
+
 describe("evaluate() - allow_par without a usable backend", {
 
   it("warns naming the plan and runs sequentially", {
 
-    local_plan(future::sequential)
-    obj <- make_eval_object(n_configs = 2)
+    run <- allow_par_run()
 
     expect_warning(
       result <- keep_only_warning(
-        evaluate(obj, allow_par = TRUE, verbose = FALSE, seed = 42L),
+        replay_warnings(run),
         "offers 1 worker"
       ),
       "offers 1 worker"
@@ -203,15 +268,14 @@ describe("evaluate() - allow_par without a usable backend", {
 
   it("gives the same results as allow_par = FALSE", {
 
+    run <- allow_par_run()
     local_plan(future::sequential)
-    obj <- make_eval_object(n_configs = 2)
+    obj <- run$obj
 
     seq_result <- suppressWarnings(
       evaluate(obj, allow_par = FALSE, verbose = FALSE, seed = 42L)
     )
-    par_result <- suppressWarnings(
-      evaluate(obj, allow_par = TRUE, verbose = FALSE, seed = 42L)
-    )
+    par_result <- run$result
 
     expect_equal(par_result$evaluation$results$rmse,
                  seq_result$evaluation$results$rmse)
@@ -222,13 +286,9 @@ describe("evaluate() - allow_par without a usable backend", {
 
   it("never registers or alters the plan", {
 
-    local_plan(future::sequential)
-    before <- future::plan("list")
-    obj <- make_eval_object(n_configs = 2)
+    run <- allow_par_run()
 
-    suppressWarnings(evaluate(obj, allow_par = TRUE, verbose = FALSE, seed = 42L))
-
-    expect_identical(future::plan("list"), before)
+    expect_identical(run$plan_after, run$plan_before)
 
   })
 
@@ -301,21 +361,47 @@ describe("evaluate() - resamples axis", {
 ## Configs axis (installed build only)
 ## =========================================================================
 
+## One four-config run on a two-worker plan, parallelize_over = "auto"
+## (4 configs >= 3 folds, so the configs axis), read by three of the tests
+## below; each gets a private copy of its output_dir (helper-memo.R). The
+## builder registers the plan itself and puts the caller's back, recording the
+## plan (plan_record(), set up first, as in allow_par_run() above) and the
+## worker count as the run found and left them. It muffles the plan's
+## warnings as well as the run's: a warning in a build would fail every test
+## that reads it.
+configs_axis_run <- function(.env = parent.frame()) {
+  memo_dir("configs_axis_run", build_configs_axis_run, .env = .env)
+}
+
+build_configs_axis_run <- function(dir) {
+
+  old <- suppressWarnings(future::plan(future::multisession, workers = 2))
+  on.exit(suppressWarnings(future::plan(old)), add = TRUE)
+  future::nbrOfWorkers()
+
+  plan_before <- plan_record()
+  obj         <- make_eval_object(n_configs = 4)
+
+  result <- suppressWarnings(
+    evaluate(obj, allow_par = TRUE, output_dir = dir, verbose = FALSE,
+             seed = 42L)
+  )
+
+  list(obj = obj, result = result, plan_before = plan_before,
+       plan_after = plan_record(), workers_after = future::nbrOfWorkers())
+
+}
+
 describe("evaluate() - configs axis", {
 
   it("writes a schema-4 manifest describing the plan, the axis, the data and the settings", {
 
     skip_on_cran()
     skip_if_dev_package()
-    local_plan(future::multisession, workers = 2)
 
-    obj    <- make_eval_object(n_configs = 4)
-    tmpdir <- withr::local_tempdir()
-
-    result <- suppressWarnings(
-      evaluate(obj, allow_par = TRUE, output_dir = tmpdir, verbose = FALSE,
-               seed = 42L)
-    )
+    run    <- configs_axis_run()
+    tmpdir <- run$dir
+    result <- run$value$result
 
     manifest <- readRDS(file.path(tmpdir, "eval_manifest.rds"))
     expect_identical(manifest$schema_version, 4L)
@@ -342,15 +428,10 @@ describe("evaluate() - configs axis", {
 
     skip_on_cran()
     skip_if_dev_package()
-    local_plan(future::multisession, workers = 2)
 
-    obj    <- make_eval_object(n_configs = 4)
-    tmpdir <- withr::local_tempdir()
-
-    result <- suppressWarnings(
-      evaluate(obj, allow_par = TRUE, parallelize_over = "configs",
-               output_dir = tmpdir, verbose = FALSE, seed = 42L)
-    )
+    run    <- configs_axis_run()
+    tmpdir <- run$dir
+    result <- run$value$result
 
     expect_s3_class(result, "horizons_eval")
     expect_equal(nrow(result$evaluation$results), 4)
@@ -396,19 +477,11 @@ describe("evaluate() - configs axis", {
 
     skip_on_cran()
     skip_if_dev_package()
-    local_plan(future::multisession, workers = 2)
-    before <- future::plan("list")
 
-    obj    <- make_eval_object(n_configs = 4)
-    tmpdir <- withr::local_tempdir()
+    run <- configs_axis_run()$value
 
-    suppressWarnings(
-      evaluate(obj, allow_par = TRUE, output_dir = tmpdir, verbose = FALSE,
-               seed = 42L)
-    )
-
-    expect_identical(future::plan("list"), before)
-    expect_identical(future::nbrOfWorkers(), 2L)
+    expect_identical(run$plan_after, run$plan_before)
+    expect_identical(run$workers_after, 2L)
 
   })
 
@@ -419,6 +492,26 @@ describe("evaluate() - configs axis", {
 ## Cross-mode resume
 ## =========================================================================
 
+## One sequential four-config run with an output_dir, at the defaults
+## (prune = TRUE, which at bayesian_iter = 0 skips nothing). The resume test
+## below and the two monitor tests further down each get a private copy of
+## its directory to resume, read or doctor (helper-memo.R), and the object
+## it was run on.
+seq_checkpoints <- function(.env = parent.frame()) {
+  memo_dir("seq_checkpoints", build_seq_checkpoints, .env = .env)
+}
+
+build_seq_checkpoints <- function(dir) {
+
+  obj    <- make_eval_object(n = 60, n_configs = 4)
+  result <- suppressWarnings(
+    evaluate(obj, output_dir = dir, verbose = FALSE, seed = 42L)
+  )
+
+  list(obj = obj, result = result)
+
+}
+
 describe("evaluate() - cross-mode checkpoint resume", {
 
   it("resumes a configs-axis run from sequential checkpoints", {
@@ -426,12 +519,10 @@ describe("evaluate() - cross-mode checkpoint resume", {
     skip_on_cran()
     skip_if_dev_package()
 
-    obj    <- make_eval_object(n_configs = 4)
-    tmpdir <- withr::local_tempdir()
-
-    seq_result <- suppressWarnings(
-      evaluate(obj, output_dir = tmpdir, verbose = FALSE, seed = 42L)
-    )
+    run        <- seq_checkpoints()
+    obj        <- run$value$obj
+    tmpdir     <- run$dir
+    seq_result <- run$value$result
 
     ## Both axes share the one store (#42): no single file to go stale.
     expect_false(file.exists(file.path(tmpdir, "eval_checkpoint.rds")))
@@ -611,23 +702,36 @@ describe("monitor_evaluate()", {
 ## last_fit() drew from a different position on the resamples axis. This
 ## fixture uses rf (deterministic given a seed) with Bayesian iterations ON,
 ## which is exactly where the axes used to diverge, and asserts the whole
-## result row is identical.
+## result row is identical. The sequential run both tests compare against is
+## built once, by whichever of them runs first (helper-memo.R), so a skipped
+## test costs nothing.
 
-describe("evaluate() - results are identical across axes", {
+axes_seq_run <- function() memo_fixture("axes_seq_run", build_axes_seq_run)
+
+build_axes_seq_run <- function() {
 
   obj <- make_eval_object(n = 60, n_configs = 1)      # rf only
   obj$config$tuning$bayesian_iter <- 2L
 
-  row_cols <- c("rmse", "rrmse", "rsq", "ccc", "rpd", "mae",
-                "cv_rmse", "cv_rrmse", "cv_rsq", "cv_ccc", "cv_rpd", "cv_mae")
-
-  seq_result <- suppressWarnings(
+  result <- suppressWarnings(
     evaluate(obj, allow_par = FALSE, verbose = FALSE, seed = 42L)
   )
+
+  list(obj = obj, result = result)
+
+}
+
+describe("evaluate() - results are identical across axes", {
+
+  row_cols <- c("rmse", "rrmse", "rsq", "ccc", "rpd", "mae",
+                "cv_rmse", "cv_rrmse", "cv_rsq", "cv_ccc", "cv_rpd", "cv_mae")
 
   it("resamples axis on a real two-worker plan matches the sequential run exactly", {
 
     skip_on_cran()
+    run        <- axes_seq_run()
+    obj        <- run$obj
+    seq_result <- run$result
     local_plan(future::multisession, workers = 2)
 
     par_result <- suppressWarnings(
@@ -647,6 +751,9 @@ describe("evaluate() - results are identical across axes", {
 
     skip_on_cran()
     skip_if_dev_package()
+    run        <- axes_seq_run()
+    obj        <- run$obj
+    seq_result <- run$result
     local_plan(future::multisession, workers = 2)
     tmpdir <- withr::local_tempdir()
 
@@ -724,12 +831,9 @@ describe("monitor_evaluate() - agrees with evaluate()", {
   it("reports evaluate()'s best_config from the same checkpoints", {
 
     skip_on_cran()
-    obj    <- make_eval_object(n = 60, n_configs = 4)
-    tmpdir <- withr::local_tempdir()
-
-    result <- suppressWarnings(
-      evaluate(obj, output_dir = tmpdir, verbose = FALSE, seed = 42L)
-    )
+    run    <- seq_checkpoints()
+    tmpdir <- run$dir
+    result <- run$value$result
 
     ## The manifest is written on every run with an output_dir now
     expect_true(file.exists(file.path(tmpdir, "eval_manifest.rds")))
@@ -752,13 +856,9 @@ describe("monitor_evaluate() - applies evaluate()'s checkpoint gates", {
   it("neither counts nor ranks a row evaluate() would reject", {
 
     skip_on_cran()
-    obj    <- make_eval_object(n = 60, n_configs = 4)
-    tmpdir <- withr::local_tempdir()
-
-    result <- suppressWarnings(
-      evaluate(obj, output_dir = tmpdir, prune = FALSE, verbose = FALSE,
-               seed = 42L)
-    )
+    run    <- seq_checkpoints()
+    tmpdir <- run$dir
+    result <- run$value$result
 
     res <- result$evaluation$results
     expect_equal(res$status[res$config_id == "cfg_003"], "success")

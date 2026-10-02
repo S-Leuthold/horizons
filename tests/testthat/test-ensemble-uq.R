@@ -8,20 +8,12 @@
 ## real fixture as test-pipeline-ensemble.R: a small horizons_fit on real
 ## (anonymized) MIR spectra (43 meta rows — clears N_CALIB_MIN — and a 12-row
 ## held-out test set).
+##
+## ens_fitted(), ens_test_set() and ens_built() come from helper-ensemble.R.
+## The reference ensemble the read-only tests share, ens_ref, is
+## ens_built("weighted") (weighted at optimize = FALSE: fast, deterministic),
+## built once, on first use.
 ## ---------------------------------------------------------------------------
-
-fitted   <- readRDS(test_path("fixtures", "ensemble_fit.rds"))
-test_set <- rsample::assessment(fitted$models$split)
-
-outcome_col <- fitted$data$role_map$variable[
-  fitted$data$role_map$role == "outcome"
-]
-
-## One reference ensemble reused across read-only tests (weighted: fast,
-## deterministic).
-ens_ref <- suppressWarnings(
-  ensemble(fitted, method = "weighted", optimize = FALSE, verbose = FALSE)
-)
 
 
 ## ---------------------------------------------------------------------------
@@ -113,9 +105,9 @@ describe("cv_plus_bounds()", {
 
 describe("fit_ensemble_uq() - bundle contract", {
 
-  uq <- ens_ref$ensemble$uq
-
   it("populates $ensemble$uq with the exact field set", {
+
+    uq <- ens_built("weighted")$ensemble$uq
 
     expect_setequal(
       names(uq),
@@ -128,6 +120,9 @@ describe("fit_ensemble_uq() - bundle contract", {
 
   it("carries the CV+ discriminator and build facts", {
 
+    ens_ref <- ens_built("weighted")
+    uq      <- ens_ref$ensemble$uq
+
     expect_identical(uq$method, "cv_plus")
     expect_identical(uq$ensemble_method, "weighted")
     expect_equal(length(uq$fold_models), 5)
@@ -139,6 +134,8 @@ describe("fit_ensemble_uq() - bundle contract", {
 
   it("calib carries signed original-scale residuals for every meta row", {
 
+    uq <- ens_built("weighted")$ensemble$uq
+
     expect_setequal(names(uq$calib),
                     c(".row", "fold", ".pred_oof", "truth", "residual"))
     expect_equal(uq$n_calib, nrow(uq$calib))
@@ -148,6 +145,8 @@ describe("fit_ensemble_uq() - bundle contract", {
   })
 
   it("records optimize and seed on the ensemble contract", {
+
+    ens_ref <- ens_built("weighted")
 
     expect_identical(ens_ref$ensemble$optimize, FALSE)
     expect_identical(ens_ref$ensemble$seed, 307L)
@@ -165,6 +164,7 @@ describe("fit_ensemble_uq() - fold honesty and Route B", {
 
   it("calib partitions every meta row into exactly one fold", {
 
+    ens_ref <- ens_built("weighted")
     uq  <- ens_ref$ensemble$uq
     oof <- build_oof_matrix(ens_ref, ens_ref$ensemble$weights$member)
 
@@ -176,6 +176,7 @@ describe("fit_ensemble_uq() - fold honesty and Route B", {
 
   it("the stored seed reproduces the fold assignment exactly", {
 
+    ens_ref <- ens_built("weighted")
     uq  <- ens_ref$ensemble$uq
     oof <- build_oof_matrix(ens_ref, ens_ref$ensemble$weights$member)
 
@@ -204,9 +205,7 @@ describe("fit_ensemble_uq() - fold honesty and Route B", {
     ## xgboost overfits its training frame hard, so in-sample residuals of
     ## the deployed meta-model are much smaller than honest fold-held-out
     ## residuals. In-sample gave 7% coverage at nominal 90% once; never again.
-    ens_xgb <- suppressWarnings(
-      ensemble(fitted, method = "xgb", optimize = FALSE, verbose = FALSE)
-    )
+    ens_xgb <- ens_built("xgb")
 
     uq  <- ens_xgb$ensemble$uq
     oof <- build_oof_matrix(ens_xgb, ens_xgb$ensemble$weights$member)
@@ -227,6 +226,7 @@ describe("fit_ensemble_uq() - fold honesty and Route B", {
 
   it("the calibration partition differs from the tuning partition (Route B)", {
 
+    ens_ref <- ens_built("weighted")
     uq  <- ens_ref$ensemble$uq
     oof <- build_oof_matrix(ens_ref, ens_ref$ensemble$weights$member)
 
@@ -267,6 +267,8 @@ describe("fit_ensemble_uq() - coverage", {
     ## at level .90, coverage collapsing toward 0 (the in-sample failure
     ## mode) or far below nominal fails here. 43 points is noisy; the band
     ## is wide but a real break lands far outside it.
+    ens_ref <- ens_built("weighted")
+
     expect_gt(ens_ref$ensemble$uq$oof_coverage, 0.70)
     expect_lte(ens_ref$ensemble$uq$oof_coverage, 1.00)
     expect_gt(ens_ref$ensemble$uq$mean_width, 0)
@@ -276,6 +278,14 @@ describe("fit_ensemble_uq() - coverage", {
   it("end-to-end coverage on the held-out test set is plausible", {
 
     ## Only 12 held-out points — a loose sanity band, not a coverage claim.
+    fitted   <- ens_fitted()
+    test_set <- ens_test_set()
+    ens_ref  <- ens_built("weighted")
+
+    outcome_col <- fitted$data$role_map$variable[
+      fitted$data$role_map$role == "outcome"
+    ]
+
     p <- suppressWarnings(predict(ens_ref, test_set, interval = TRUE))
 
     joined <- dplyr::inner_join(
@@ -303,6 +313,9 @@ describe("predict.horizons_ensemble() - CV+ intervals", {
 
   it("interval columns key by sample_id: shuffled rows give identical bounds", {
 
+    test_set <- ens_test_set()
+    ens_ref  <- ens_built("weighted")
+
     p1 <- suppressWarnings(predict(ens_ref, test_set, interval = TRUE))
 
     set.seed(7)
@@ -320,6 +333,9 @@ describe("predict.horizons_ensemble() - CV+ intervals", {
 
   it("bounds are ordered, non-negative, and width-consistent", {
 
+    test_set <- ens_test_set()
+    ens_ref  <- ens_built("weighted")
+
     p <- suppressWarnings(predict(ens_ref, test_set, interval = TRUE))
 
     expect_true(all(p$.pred_upper >= p$.pred_lower))
@@ -335,9 +351,8 @@ describe("predict.horizons_ensemble() - CV+ intervals", {
       it(paste0("method = '", m, "', optimize = ", opt,
                 " produces a bundle and interval columns"), {
 
-        ens <- suppressWarnings(
-          ensemble(fitted, method = m, optimize = opt, verbose = FALSE)
-        )
+        test_set <- ens_test_set()
+        ens      <- ens_built(m, optimize = opt)
 
         expect_false(is.null(ens$ensemble$uq))
         expect_identical(ens$ensemble$uq$method, "cv_plus")
@@ -355,9 +370,7 @@ describe("predict.horizons_ensemble() - CV+ intervals", {
 
   it("weighted optimize = FALSE fold models are equal weights summing to 1", {
 
-    ens <- suppressWarnings(
-      ensemble(fitted, method = "weighted", optimize = FALSE, verbose = FALSE)
-    )
+    ens <- ens_built("weighted")
 
     for (fm in ens$ensemble$uq$fold_models) {
 
@@ -382,6 +395,9 @@ describe("predict.horizons_ensemble() - arguments in ...", {
 
   it("warns that level is ignored and returns the calibration-level intervals", {
 
+    test_set <- ens_test_set()
+    ens_ref  <- ens_built("weighted")
+
     expect_equal(ens_ref$ensemble$uq$level_default, 0.90)
 
     reference <- predict(ens_ref, test_set)
@@ -398,6 +414,9 @@ describe("predict.horizons_ensemble() - arguments in ...", {
 
   it("names the default level when the ensemble has no UQ bundle", {
 
+    test_set <- ens_test_set()
+    ens_ref  <- ens_built("weighted")
+
     no_uq <- ens_ref
     no_uq$ensemble$uq <- NULL
 
@@ -412,6 +431,9 @@ describe("predict.horizons_ensemble() - arguments in ...", {
 
   it("errors on any other argument, naming it", {
 
+    test_set <- ens_test_set()
+    ens_ref  <- ens_built("weighted")
+
     expect_error(
       predict(ens_ref, test_set, config = "all"),
       class  = "horizons_input_error",
@@ -421,6 +443,9 @@ describe("predict.horizons_ensemble() - arguments in ...", {
   })
 
   it("a call with neither is unchanged", {
+
+    test_set <- ens_test_set()
+    ens_ref  <- ens_built("weighted")
 
     expect_no_warning(p <- predict(ens_ref, test_set))
     expect_true(all(c(".pred", ".pred_lower", ".pred_upper") %in% names(p)))
@@ -438,7 +463,8 @@ describe("ensemble UQ - degradation and gates", {
 
   it("compute_ensemble_uq returns NULL below N_CALIB_MIN", {
 
-    oof <- build_oof_matrix(ens_ref, ens_ref$ensemble$weights$member)
+    ens_ref <- ens_built("weighted")
+    oof     <- build_oof_matrix(ens_ref, ens_ref$ensemble$weights$member)
 
     keep <- seq_len(N_CALIB_MIN - 5L)
 
@@ -481,6 +507,8 @@ describe("ensemble UQ - degradation and gates", {
 
   it("predict_ensemble_intervals warns and returns NULL when a fold model cannot predict", {
 
+    test_set <- ens_test_set()
+    ens_ref  <- ens_built("weighted")
     members  <- ens_ref$ensemble$weights$member
     new_spec <- resolve_new_data(test_set)
     mp       <- predict_members(ens_ref, members, new_spec)
@@ -504,6 +532,8 @@ describe("ensemble UQ - degradation and gates", {
 
   it("predict_ensemble_intervals warns and returns NULL when the calibration set is too small", {
 
+    test_set <- ens_test_set()
+    ens_ref  <- ens_built("weighted")
     members  <- ens_ref$ensemble$weights$member
     new_spec <- resolve_new_data(test_set)
     mp       <- predict_members(ens_ref, members, new_spec)
@@ -523,6 +553,9 @@ describe("ensemble UQ - degradation and gates", {
 
   it("predict.horizons_ensemble(interval = TRUE) warns end to end and still returns point predictions", {
 
+    test_set <- ens_test_set()
+    ens_ref  <- ens_built("weighted")
+
     broken_ens <- ens_ref
     broken_ens$ensemble$uq$fold_models[[1]] <-
       broken_ens$ensemble$uq$fold_models[[1]][1, ]
@@ -539,6 +572,9 @@ describe("ensemble UQ - degradation and gates", {
   })
 
   it("fit_ensemble_uq validates its inputs", {
+
+    fitted  <- ens_fitted()
+    ens_ref <- ens_built("weighted")
 
     expect_error(fit_ensemble_uq(fitted), class = "rlang_error")
     expect_error(fit_ensemble_uq(ens_ref, level = 1.5), class = "rlang_error")
