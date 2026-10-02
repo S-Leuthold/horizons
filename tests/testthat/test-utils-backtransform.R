@@ -316,10 +316,35 @@ describe("needs_back_transformation()", {
 
   })
 
-  it("returns FALSE for NULL and NA", {
+  it("returns FALSE for NULL", {
 
     expect_false(needs_back_transformation(NULL))
-    expect_false(needs_back_transformation(NA))
+
+  })
+
+  it("treats \"notrans\", \"na\", \"\" and NA as unknown, as back_transform_predictions() does", {
+
+    ## "none" is the only spelling of no transformation. These are unknown
+    ## values like any other, so both functions handle them as they handle
+    ## "boxcox": not mistaken for none, returned unchanged with a warning.
+    preds <- c(1, 2, 3)
+
+    for (trans in list("notrans", "NoTrans", "na", "NA", "", NA)) {
+
+      label <- deparse(trans)
+
+      expect_true(needs_back_transformation(trans), label = label)
+
+      expect_warning(
+        result <- back_transform_predictions(preds, trans),
+        "Unknown transformation",
+        label = label
+      )
+      expect_equal(result, preds, label = label)
+
+      expect_silent(back_transform_predictions(preds, trans, warn = FALSE))
+
+    }
 
   })
 
@@ -327,6 +352,7 @@ describe("needs_back_transformation()", {
 
     expect_true(needs_back_transformation("LOG"))
     expect_true(needs_back_transformation("Sqrt"))
+    expect_false(needs_back_transformation("None"))
 
   })
 

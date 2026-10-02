@@ -7,12 +7,18 @@
 needs_back_transformation(transformation)
 }
 \arguments{
-\item{transformation}{Character string indicating transformation type.}
+\item{transformation}{Character string indicating transformation type,
+matched case-insensitively.}
 }
 \value{
-Logical.
+Logical: \code{FALSE} for \code{"none"} and \code{NULL}, \code{TRUE} otherwise.
 }
 \description{
-Check Whether a Transformation Requires Back-transformation
+\code{"none"} is the only value that means no transformation. \code{"log"},
+\code{"log10"} and \code{"sqrt"} return \code{TRUE}, and so does any other value,
+including \code{""} and \code{NA}, so an unknown transformation is never mistaken for
+none. \code{\link[=back_transform_predictions]{back_transform_predictions()}} treats the same values as unknown: it
+does not back-transform the predictions (they are still clamped to
+\code{outcome_range}), and warns when \code{warn = TRUE}.
 }
 \keyword{internal}
