@@ -12,6 +12,7 @@
 * `add_response()` refuses an `NA` join key on either side and reports how many there are. Before, an `NA` key on one side was matched to an `NA` key on the other (#139).
 * `predict()` no longer drops arguments it does not take without saying so. A `level` warns, with class `horizons_input_warning`, that it is ignored: intervals are at the level they were calibrated at, 0.90 by default. Any other unknown argument, such as a misspelled one, is an error (#141).
 * `fit()` refuses an evaluated object whose response-trim request changed after `evaluate()`, instead of silently fitting with the trim `evaluate()` applied. `validate()` can record a new request on an evaluated object, but `fit()` reuses the rows `evaluate()` trimmed, so the new request never took effect. The error says what differs; re-run `evaluate()` to apply the current request (#137).
+* `predict()`, `ensemble()` and `select_training()` now check that values attached to samples by position line up with their rows, and stop with a `horizons_internal_error` instead of mislabelling samples if a step upstream dropped or reordered rows. In `fit()` the same check keeps misaligned uncertainty scores from being stored; the member is then fitted without intervals (#140).
 
 # horizons 0.10.0
 
