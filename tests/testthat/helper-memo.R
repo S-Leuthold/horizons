@@ -17,6 +17,13 @@
 ##   1. Define each accessor as a top-level function, so that sourcing a test
 ##      file builds nothing:
 ##        fit60 <- function() memo_fixture("fit60", build_fit60)
+##      A memo_dir() accessor must forward the caller's frame. The private
+##      copy is deleted when the frame in `.env` exits, and without the
+##      forwarding that frame is the accessor's own, so the copy would be
+##      gone before the test saw it:
+##        ck_a <- function(.env = parent.frame()) {
+##          memo_dir("ck_a", build_ck_a, .env = .env)
+##        }
 ##   2. Call accessors only inside it() or test_that(), after any skip_*(),
 ##      and before local_mocked_bindings(), local_options() or anything else
 ##      that would change what the builder does. A fixture built under a mock
@@ -29,12 +36,22 @@
 ##      names the fixture, so that output does not land on whichever test
 ##      happens to build first. Muffle expected noise inside the builder.
 ##      Package startup messages are let through, since they depend on which
-##      test loaded the package first.
+##      test loaded the package first. The same goes for warnings a package
+##      gives once per process: parallelly warns the first time it reads the
+##      CPU set (on some Linux machines, about the cgroups CPU set), so a
+##      builder that starts a parallel plan would abort only when it made
+##      the first parallel call in its process, and the cached error would
+##      then fail every user. The helper therefore calls
+##      future::availableCores() once, muffled, before the first build in a
+##      process. Muffle any other once-per-process warning in the builder.
 ##   5. Returned values are read-only. Lists and tibbles copy on modify, but
 ##      environments are modified in place: never modify an environment
 ##      inside a returned object. With HORIZONS_MEMO_VERIFY=true, every hit
 ##      checks the value (and a memo_dir() template's files) against a hash
-##      taken at build time and aborts on any change.
+##      taken at build time and aborts on any change. Verify mode turns R's
+##      JIT compiler off for the rest of the process (memo_reset() turns it
+##      back on), because compiling a stored closure when a test first calls
+##      it changes how the closure serialises.
 ##   6. A memo_dir() builder writes into the directory it is given. Paths in
 ##      the returned value point at the shared template, so tests work in
 ##      `$dir`, their own copy, and never write through `$value`.
@@ -50,9 +67,11 @@
 ## worker has its own cache, so a fixture is shared only among the files that
 ## worker runs. Keep a fixture's users in one file.
 
-.horizons_memo       <- new.env(parent = emptyenv())
-.horizons_memo$cache <- new.env(parent = emptyenv())
-.horizons_memo$root  <- NULL
+.horizons_memo           <- new.env(parent = emptyenv())
+.horizons_memo$cache     <- new.env(parent = emptyenv())
+.horizons_memo$root      <- NULL
+.horizons_memo$jit_level <- NULL
+.horizons_memo$primed    <- FALSE
 
 
 ## ---------------------------------------------------------------------------
@@ -94,7 +113,8 @@ memo_fixture <- function(.name, .build, ...) {
 #'   `dir` is an empty template directory the builder fills.
 #' @param ... Arguments for `.build`. Part of the cache key.
 #' @param .env [Environment.] Frame that owns the copy; it is deleted when
-#'   that frame exits. Default: the caller's.
+#'   that frame exits. Default: the caller's. An accessor wrapping memo_dir()
+#'   must pass its own caller's frame here (header, rule 1).
 #'
 #' @return [List.] `dir`, a private copy of the template inside a
 #'   `withr::local_tempdir()`, and `value`, what `.build()` returned.
@@ -127,6 +147,9 @@ memo_dir <- function(.name, .build, ..., .env = parent.frame()) {
 
 #' Clear every memoised fixture and template directory in this process
 #'
+#' @description
+#' Also turns the JIT compiler back on if verify mode turned it off.
+#'
 #' @return `NULL`, invisibly.
 #' @noRd
 memo_reset <- function() {
@@ -138,6 +161,11 @@ memo_reset <- function() {
     unlink(.horizons_memo$root, recursive = TRUE)
   }
   .horizons_memo$root <- NULL
+
+  if (!is.null(.horizons_memo$jit_level)) {
+    compiler::enableJIT(.horizons_memo$jit_level)
+    .horizons_memo$jit_level <- NULL
+  }
 
   invisible(NULL)
 
@@ -183,6 +211,12 @@ memo_build <- function(name, build, run, template = NULL) {
     on.exit(if (!finished) unlink(template, recursive = TRUE), add = TRUE)
   }
 
+  memo_prime_process()
+
+  if (memo_verify_on()) {
+    memo_jit_off()
+  }
+
   seed_before <- memo_get_seed()
 
   outcome <- tryCatch(
@@ -216,6 +250,21 @@ memo_build <- function(name, build, run, template = NULL) {
 
   finished <- outcome$ok
   entry
+
+}
+
+memo_prime_process <- function() {
+
+  if (.horizons_memo$primed) {
+    return(invisible(NULL))
+  }
+  .horizons_memo$primed <- TRUE
+
+  ### parallelly warns once per process when it first reads the CPU set
+  ### (rule 4); take that warning here, outside any build.
+  suppressWarnings(future::availableCores())
+
+  invisible(NULL)
 
 }
 
@@ -314,6 +363,21 @@ memo_verify_on <- function() {
 
 }
 
+memo_jit_off <- function() {
+
+  ## The JIT compiles a closure in place on an early call, replacing its body
+  ## with bytecode and setting flags that serialize() writes, so a stored
+  ## closure a test merely calls would read as modified. With the JIT off a
+  ## closure serialises the same before and after a call. The level before
+  ## the first switch-off is kept for memo_reset().
+  old <- compiler::enableJIT(0)
+
+  if (is.null(.horizons_memo$jit_level)) {
+    .horizons_memo$jit_level <- old
+  }
+
+}
+
 memo_take_digests <- function(entry) {
 
   entry$digest <- memo_digest_value(entry$value, entry$build_env)
@@ -329,6 +393,8 @@ memo_verify <- function(entry) {
   if (!entry$ok || !memo_verify_on()) {
     return(invisible(NULL))
   }
+
+  memo_jit_off()
 
   ### Verify switched on after this entry was built: take the baseline now.
   if (is.null(entry$digest)) {

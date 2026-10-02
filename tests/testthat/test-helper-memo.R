@@ -8,14 +8,19 @@ local_memo_sandbox <- function(.env = parent.frame()) {
 
   saved_cache <- .horizons_memo$cache
   saved_root  <- .horizons_memo$root
+  saved_jit   <- .horizons_memo$jit_level
 
-  .horizons_memo$cache <- new.env(parent = emptyenv())
-  .horizons_memo$root  <- NULL
+  .horizons_memo$cache     <- new.env(parent = emptyenv())
+  .horizons_memo$root      <- NULL
+  .horizons_memo$jit_level <- NULL
 
+  ## memo_reset() also restores the JIT level if a verify-mode test here
+  ## turned the JIT off.
   withr::defer({
     memo_reset()
-    .horizons_memo$cache <- saved_cache
-    .horizons_memo$root  <- saved_root
+    .horizons_memo$cache     <- saved_cache
+    .horizons_memo$root      <- saved_root
+    .horizons_memo$jit_level <- saved_jit
   }, envir = .env)
 
 }
@@ -215,10 +220,15 @@ describe("memo_fixture()", {
 
     value <- memo_fixture("stateful", build)
 
-    ## Copy-on-modify leaves the cached list alone, and new objects in the
-    ## builder's enclosing environment are context, not part of the value.
+    ## Copy-on-modify leaves the cached list alone, new objects in the
+    ## builder's enclosing environment are context, not part of the value,
+    ## and calling a stored closure (which the JIT would compile in place)
+    ## changes nothing.
     value$x[1] <- 99L
     defined_later <- TRUE
+    for (i in 1:3) expect_identical(value$scale(2), 2)
+    expect_no_error(memo_fixture("stateful", build))
+    expect_identical(memo_fixture("stateful", build)$scale(3), 3)
     expect_no_error(memo_fixture("stateful", build))
 
     value$state$n <- 2
@@ -288,6 +298,30 @@ describe("memo_dir()", {
 
   })
 
+  it("keeps a copy made through an accessor alive in the test that called it", {
+
+    local_memo_sandbox()
+
+    build <- function(dir) {
+      writeLines("template", file.path(dir, "a.txt"))
+      "built"
+    }
+
+    ## The accessor form in the header's rule 1.
+    checkpoints <- function(.env = parent.frame()) {
+      memo_dir("checkpoints", build, .env = .env)
+    }
+
+    copy <- checkpoints()$dir
+    expect_true(dir.exists(copy))
+    expect_identical(readLines(file.path(copy, "a.txt")), "template")
+
+    ## ... and it goes when that test's frame exits.
+    in_a_test <- function() checkpoints()$dir
+    expect_false(dir.exists(in_a_test()))
+
+  })
+
   it("in verify mode, aborts when a test wrote into the template", {
 
     local_memo_sandbox()
@@ -305,6 +339,35 @@ describe("memo_dir()", {
     writeLines("changed", file.path(first$value, "a.txt"))
     expect_error(memo_dir("checkpoints", build),
                  class = "horizons_fixture_modified", regexp = "template")
+
+  })
+
+})
+
+
+describe("parallel builds", {
+
+  it("are not aborted by parallelly's once-per-process warning on the first parallel call", {
+
+    skip_on_cran()
+    skip_if_not_installed("callr")
+
+    ## A fresh process, so this build makes its first parallel call. On a
+    ## machine where parallelly warns about the cgroups CPU set, the build
+    ## would abort without the helper's priming call; elsewhere the test
+    ## passes either way.
+    helper <- normalizePath(test_path("helper-memo.R"))
+
+    worker_pid <- callr::r(function(helper) {
+      source(helper)
+      memo_fixture("first-parallel-call", function() {
+        old <- future::plan(future::multisession, workers = 2)
+        on.exit(future::plan(old))
+        future::value(future::future(Sys.getpid()))
+      })
+    }, args = list(helper = helper))
+
+    expect_type(worker_pid, "integer")
 
   })
 
@@ -330,6 +393,25 @@ describe("memo_reset()", {
     expect_false(dir.exists(template))
     memo_dir("checkpoints", build)
     expect_identical(calls$n, 2L)
+
+  })
+
+  it("turns the JIT back on after verify mode turned it off", {
+
+    local_memo_sandbox()
+    withr::local_envvar(HORIZONS_MEMO_VERIFY = "true")
+
+    ## Start from R's default level whatever earlier tests left, and put
+    ## the old level back afterwards. enableJIT(-1) reports the level
+    ## without changing it.
+    jit_outside <- compiler::enableJIT(3)
+    withr::defer(compiler::enableJIT(jit_outside))
+
+    memo_fixture("verified", function() 1)
+    expect_identical(compiler::enableJIT(-1), 0L)
+
+    memo_reset()
+    expect_identical(compiler::enableJIT(-1), 3L)
 
   })
 
