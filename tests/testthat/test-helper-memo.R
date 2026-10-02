@@ -237,6 +237,40 @@ describe("memo_fixture()", {
 
   })
 
+  it("in verify mode, ignores a source reference filled in after the build, but not an environment modified in place", {
+
+    local_memo_sandbox()
+    withr::local_envvar(HORIZONS_MEMO_VERIFY = "true")
+
+    ## A package installed with its source kept holds each file's lines as a
+    ## promise in the function's srcfile environment, forced the first time
+    ## anything reads the source (print(), an error message). The builder
+    ## gives its function's srcfile the same lazy lines.
+    build <- function() {
+      f       <- eval(parse(text = "function(v) v + 1", keep.source = TRUE)[[1]])
+      srcfile <- attr(attr(f, "srcref"), "srcfile")
+      lines   <- srcfile$lines
+      rm("lines", envir = srcfile)
+      delayedAssign("lines", lines, assign.env = srcfile)
+      state   <- new.env()
+      state$n <- 1
+      list(f = f, state = state)
+    }
+
+    value   <- memo_fixture("sourced", build)
+    srcfile <- attr(attr(value$f, "srcref"), "srcfile")
+
+    expect_true(rlang::env_binding_are_lazy(srcfile, "lines"))
+    expect_identical(as.character(attr(value$f, "srcref")), "function(v) v + 1")
+    expect_false(rlang::env_binding_are_lazy(srcfile, "lines"))
+    expect_no_error(memo_fixture("sourced", build))
+
+    value$state$n <- 2
+    expect_error(memo_fixture("sourced", build),
+                 class = "horizons_fixture_modified", regexp = "sourced")
+
+  })
+
   it("outside verify mode, serves a value modified in place without checking", {
 
     local_memo_sandbox()

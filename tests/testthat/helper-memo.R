@@ -441,6 +441,9 @@ memo_digest_value <- function(value, build_env) {
   }
 
   hook <- function(e) {
+    ### Source references are not part of the value either: an installed
+    ### package's srcfile holds its lines as a promise, forced on first read.
+    if (inherits(e, "srcfile")) return("memo-srcfile")
     for (ctx in context) {
       if (identical(e, ctx)) return("memo-context")
     }
