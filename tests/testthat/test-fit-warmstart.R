@@ -162,15 +162,23 @@ describe("build_warmstart_grid() - integer params", {
 
 describe("build_warmstart_grid() - range clamping", {
 
+  ## Best params on the range edges (mtry at its upper bound of 20, min_n at
+  ## its lower bound of 2, trees at its lower bound of 1), so the +/- 2
+  ## candidates around each fall outside the range unless they are clamped.
   param_set   <- make_warmstart_param_set()
-  best_params <- make_best_params()
+  best_params <- make_best_params(mtry = 20L, trees = 1L, min_n = 2L)
 
   grid <- build_warmstart_grid(best_params, param_set, max_points = 50)
+
+  param_range <- function(name) {
+    param_set$object[[which(param_set$name == name)]]$range
+  }
 
   it("keeps mtry within valid range", {
 
     ## Extract the finalized mtry param from our param_set
     mtry_param <- param_set$object[[which(param_set$name == "mtry")]]
+    expect_equal(best_params$mtry, mtry_param$range$upper)
     expect_true(all(grid$mtry >= mtry_param$range$lower))
     expect_true(all(grid$mtry <= mtry_param$range$upper))
 
@@ -178,12 +186,15 @@ describe("build_warmstart_grid() - range clamping", {
 
   it("keeps min_n >= 1", {
 
+    expect_equal(best_params$min_n, param_range("min_n")$lower)
     expect_true(all(grid$min_n >= 1))
+    expect_true(all(grid$min_n >= param_range("min_n")$lower))
 
   })
 
   it("keeps trees >= 1", {
 
+    expect_equal(best_params$trees, param_range("trees")$lower)
     expect_true(all(grid$trees >= 1))
 
   })
@@ -206,12 +217,20 @@ describe("build_warmstart_grid() - log-scale params (xgboost)", {
 
   it("keeps learn_rate within dials range (original scale)", {
 
-    ## learn_rate range is stored in log10 space; inverse to get original
-    lr_param <- dials::learn_rate()
+    ## learn_rate range is stored in log10 space; inverse to get original.
+    ## Read from the param set, which carries the engine's tuning range and is
+    ## the range the grid is clamped to.
+    lr_param <- param_set$object[[which(param_set$name == "learn_rate")]]
     orig_lower <- lr_param$trans$inverse(lr_param$range$lower)
     orig_upper <- lr_param$trans$inverse(lr_param$range$upper)
-    expect_true(all(grid$learn_rate >= orig_lower))
-    expect_true(all(grid$learn_rate <= orig_upper))
+
+    ## Best learn_rate at the upper bound, so the candidates above it in log10
+    ## space fall outside the range unless they are clamped
+    edge_params <- make_xgb_best_params(learn_rate = orig_upper)
+    edge_grid <- build_warmstart_grid(edge_params, param_set, max_points = 25)
+
+    expect_true(all(edge_grid$learn_rate >= orig_lower))
+    expect_true(all(edge_grid$learn_rate <= orig_upper))
 
   })
 
@@ -419,6 +438,51 @@ describe("tune_warmstart_bayes() - fallback behavior", {
     expect_s3_class(result$best_params, "tbl_df")
     expect_equal(nrow(result$best_params), 1)
     expect_true(result$fallback_used)
+
+  })
+
+})
+
+
+describe("tune_warmstart_bayes() - Bayesian stage", {
+
+  it("runs Bayesian iterations after the grid when bayesian_iter > 0", {
+
+    ts <- make_tune_setup()
+
+    best_params <- tibble::tibble(
+      mtry  = 2L,
+      trees = 100L,
+      min_n = 5L
+    )
+
+    ## tune's control seed and the model fits draw from the session's random
+    ## stream, so pin it
+    result <- withr::with_seed(42, tune_warmstart_bayes(
+      workflow      = ts$wf,
+      cv_resamples  = ts$folds,
+      best_params   = best_params,
+      param_set     = ts$param_set,
+      bayesian_iter = 2L,
+      grid_size     = 5L,
+      metric_set    = ts$metric_set,
+      allow_par     = FALSE
+    ))
+
+    ## The Bayesian stage neither errored back to the grid results nor started
+    ## from a fallback grid
+    expect_false(result$bayes_failed)
+    expect_false(result$fallback_used)
+
+    ## Its results replaced the grid's: tune_bayes() returns iteration results,
+    ## with .iter 0 for the starting grid and 1 onwards for each iteration
+    expect_s3_class(result$tune_results, "iteration_results")
+    metrics <- tune::collect_metrics(result$tune_results)
+    expect_true(".iter" %in% names(metrics))
+    expect_gte(max(metrics$.iter), 1)
+
+    expect_s3_class(result$best_params, "tbl_df")
+    expect_equal(nrow(result$best_params), 1)
 
   })
 
