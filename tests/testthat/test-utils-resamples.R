@@ -183,18 +183,19 @@ describe("rebuilt resamples satisfy the partition invariants", {
   it("never puts an outer test row inside a fold", {
 
     ## The load-bearing invariant: the held-out test set must not reach the
-    ## tuning resamples through the reconstruction.
+    ## tuning resamples through the reconstruction. Each fold's rows are read
+    ## with analysis(), from the data the fold carries: mapping its indices
+    ## through the training frame would pass folds that index the full data.
     fx <- make_resample_fixture()
     rb <- rebuild_resamples(fx$split$data,
                             resample_indices(fx$split, fx$folds))
 
-    test_ids  <- rsample::testing(rb$split)$sample_id
-    train_ids <- rsample::training(rb$split)$sample_id
+    test_ids <- rsample::testing(rb$split)$sample_id
 
     for (s in rb$cv_folds$splits) {
 
-      fold_ids <- train_ids[s$in_id]
-      expect_length(intersect(fold_ids, test_ids), 0)
+      expect_length(intersect(rsample::analysis(s)$sample_id, test_ids), 0)
+      expect_length(intersect(rsample::assessment(s)$sample_id, test_ids), 0)
 
     }
 

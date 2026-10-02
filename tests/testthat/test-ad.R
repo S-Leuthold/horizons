@@ -190,7 +190,9 @@ test_that("far-out-of-distribution samples are flagged OOD", {
 ## ---------------------------------------------------------------------------
 
 ## A fitted workflow whose recipe carries the real transform step, so the NA
-## path under test is the production one rather than a hand-built matrix.
+## path under test is the production one rather than a hand-built matrix. Its
+## 60 rows clear N_CALIB_MIN, so fit_ad() must return a bundle; the tests below
+## assert it.
 ad_fitted_workflow <- function(n = 60, n_wn = 12, seed = 41) {
 
   set.seed(seed)
@@ -230,7 +232,7 @@ test_that("predict_ad returns per-row NA for one bad spectrum and scores the res
   fx     <- ad_fitted_workflow()
   bundle <- fit_ad(fx$workflow, calib_data = fx$data)
 
-  skip_if(is.null(bundle), "AD bundle could not be fit on the tiny fixture")
+  expect_false(is.null(bundle))
 
   new_df           <- ad_new_spectra(fx$wn, n = 5)
   new_df[3, fx$wn] <- NA_real_                   # one malformed spectrum
@@ -257,7 +259,7 @@ test_that("predict_ad warns about the degraded rows rather than dropping AD", {
   fx     <- ad_fitted_workflow()
   bundle <- fit_ad(fx$workflow, calib_data = fx$data)
 
-  skip_if(is.null(bundle), "AD bundle could not be fit on the tiny fixture")
+  expect_false(is.null(bundle))
 
   new_df           <- ad_new_spectra(fx$wn, n = 5)
   new_df[3, fx$wn] <- NA_real_
@@ -274,7 +276,7 @@ test_that("predict_ad warns and returns NULL when the bake aborts", {
   fx     <- ad_fitted_workflow()
   bundle <- fit_ad(fx$workflow, calib_data = fx$data)
 
-  skip_if(is.null(bundle), "AD bundle could not be fit on the tiny fixture")
+  expect_false(is.null(bundle))
 
   new_df <- ad_new_spectra(fx$wn, n = 5)
 
@@ -293,7 +295,7 @@ test_that("predict_ad returns NULL, with a warning, when every spectrum is bad",
   fx     <- ad_fitted_workflow()
   bundle <- fit_ad(fx$workflow, calib_data = fx$data)
 
-  skip_if(is.null(bundle), "AD bundle could not be fit on the tiny fixture")
+  expect_false(is.null(bundle))
 
   new_df         <- ad_new_spectra(fx$wn, n = 5)
   new_df[, fx$wn] <- NA_real_
@@ -310,7 +312,7 @@ test_that("predict_ad warns with the cause and returns NULL when the distance fa
   fx     <- ad_fitted_workflow()
   bundle <- fit_ad(fx$workflow, calib_data = fx$data)
 
-  skip_if(is.null(bundle), "AD bundle could not be fit on the tiny fixture")
+  expect_false(is.null(bundle))
 
   ## The bake succeeds, but the bundle's centroid no longer matches the
   ## recipe's features, so calculate_ad_distance() aborts. This used to
@@ -334,7 +336,7 @@ test_that("every predict_ad warning names the config when it is given", {
   fx     <- ad_fitted_workflow()
   bundle <- fit_ad(fx$workflow, calib_data = fx$data)
 
-  skip_if(is.null(bundle), "AD bundle could not be fit on the tiny fixture")
+  expect_false(is.null(bundle))
 
   ad_warnings <- function(workflow, ad_bundle, new_df) {
     testthat::capture_warnings(
