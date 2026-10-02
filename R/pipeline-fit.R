@@ -1382,11 +1382,21 @@ check_trim_request <- function(x, call = rlang::caller_env()) {
 
   }
 
+  ## The cheap way back to the trim evaluate() applied: restore its request.
+  ## Offered only when the outcome matches, since validate() requests a trim
+  ## of the configured outcome.
+  restore <- if (!is.null(applied) &&
+                 (is.null(requested) || identical(requested$outcome, applied$outcome))) {
+    c("i" = "To fit with the trim {.fn evaluate} applied, restore its request: {.code validate(x, remove_outliers = \"response\", response_threshold = {app_threshold})}.")
+  }
+
   cli::cli_abort(c(
     "{.fn validate}'s response-trim request differs from the trim {.fn evaluate} applied.",
     differs,
     "i" = "{.fn fit} reuses the rows {.fn evaluate} trimmed; it does not apply a request itself.",
-    "i" = "Re-run {.fn evaluate} to apply the current request, then {.fn fit}."
+    restore,
+    "i" = paste(if (is.null(restore)) "Re-run" else "Or re-run",
+                "{.fn evaluate} to apply the current request, then {.fn fit}.")
   ), class = "horizons_input_error", call = call)
 
 }

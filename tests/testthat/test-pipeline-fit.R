@@ -2282,6 +2282,17 @@ describe("fit() - a trim request changed after evaluate() (#137)", {
     expect_match(dropped$message, "applied a trim of SOC at 1.5 x IQR", fixed = TRUE)
     expect_match(dropped$message, "now requests none", fixed = TRUE)
 
+    ## The cheap way back is offered first, and it works
+    expect_match(dropped$message,
+                 'validate(x, remove_outliers = "response", response_threshold = 1.5)',
+                 fixed = TRUE)
+    expect_match(dropped$message, "Or re-run `evaluate()`", fixed = TRUE)
+
+    restored <- quiet_validate(quiet_validate(trimmed), remove_outliers = "response",
+                               response_threshold = 1.5)
+
+    expect_null(refusal(restored))
+
   })
 
   it("refuses a request at another threshold", {
