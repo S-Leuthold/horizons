@@ -50,26 +50,18 @@ space_files <- function(cache) list.files(cache, pattern = "\\.space-", all.file
 ## The cache
 ## ---------------------------------------------------------------------------
 
-test_that("the default space is built at first use, and a default draw reads it", {
-
-  m <- use_mini()
-  expect_length(space_files(m$cache), 1L)
-
-  x   <- mini_targets(m$pool)
-  out <- suppressWarnings(select_training(x, "mini", k = 5L, verbose = FALSE))
-
-  expect_true(out$selection$search$cache$used)
-  expect_true(out$selection$search$cache$hit)
-  expect_length(space_files(m$cache), 1L)
-
-})
-
 test_that("a cached space draws exactly what a fresh one does", {
 
+  ## The default space is built at first use, and a default draw reads it
   m <- use_mini()
+  expect_length(space_files(m$cache), 1L)
+
   x <- mini_targets(m$pool)
 
   cached <- suppressWarnings(select_training(x, "mini", k = 5L, verbose = FALSE))
+  expect_true(cached$selection$search$cache$used)
+  expect_length(space_files(m$cache), 1L)
+
   fresh  <- suppressWarnings(select_training(x, m$pool, k = 5L, verbose = FALSE))
 
   expect_true(cached$selection$search$cache$hit)
