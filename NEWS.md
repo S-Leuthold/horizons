@@ -7,6 +7,7 @@
 * `select_training()` validates the targets and the library before drawing. Targets need one row per sample with finite spectra, so replicate scans are averaged first. A library that has been through `configure()` or `validate()` is refused, and the selection record now identifies the targets in `x$selection$targets`: their source, row count and an id hash (#133).
 * `evaluate()` and `fit()`, including the cold start, abort with class `horizons_input_error` when the outcome has zero variance, on the modelled rows or on the rows the models are fitted on; `validate()` is documented as an advisory report, and `summary()` suggests it only before `evaluate()` (#132).
 * The object no longer carries the unused `artifacts` slot, `models$row_index` or `provenance$schema_version`, and `models$cv_predictions` gains `sample_id`. The validators no longer accept objects missing keys that current versions always write, so objects saved by earlier versions need a re-run.
+* Attaching a development build says so and names the command that installs the latest release (`remotes::install_github("S-Leuthold/horizons@main")`); development builds carry a `.9000` version suffix.
 
 ## Bug fixes
 
