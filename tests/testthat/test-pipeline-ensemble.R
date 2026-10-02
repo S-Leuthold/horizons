@@ -967,4 +967,23 @@ describe("combine_ensemble_metamodel() - row alignment", {
 
   })
 
+  it("aborts at fit time when the meta-model's out-of-fold predictions are short", {
+
+    ## The OOF predictions are bound to oof$row and truth by position; a
+    ## single collected prediction used to be recycled across every row.
+    collect_predictions <- tune::collect_predictions
+
+    local_mocked_bindings(
+      collect_predictions = function(x, ...) collect_predictions(x, ...)[1, ],
+      .package = "tune"
+    )
+
+    expect_error(
+      suppressWarnings(ensemble(fitted, method = "penalized", optimize = FALSE,
+                                compute_uq = FALSE, verbose = FALSE)),
+      "Meta-model out-of-fold predictions", class = "horizons_internal_error"
+    )
+
+  })
+
 })

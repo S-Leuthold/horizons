@@ -50,7 +50,8 @@ Default \code{FALSE}.}
 \value{
 The ensemble contract list from \code{\link[=build_ensemble_contract]{build_ensemble_contract()}}.
 Aborts with class \code{horizons_internal_error} when the meta-model returns
-a different number of \code{test_F} predictions than there are test samples.
+a different number of out-of-fold predictions than there are OOF rows,
+or of \code{test_F} predictions than there are test samples.
 }
 \description{
 The shared scaffold behind the \code{penalized} and \code{xgb} engines: build the

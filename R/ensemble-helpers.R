@@ -349,7 +349,8 @@ predict_members_on_test <- function(object, members) {
 #'
 #' @return The ensemble contract list from [build_ensemble_contract()].
 #'   Aborts with class `horizons_internal_error` when the meta-model returns
-#'   a different number of `test_F` predictions than there are test samples.
+#'   a different number of out-of-fold predictions than there are OOF rows,
+#'   or of `test_F` predictions than there are test samples.
 #'
 #' @keywords internal
 fit_tuned_meta_learner <- function(object,
@@ -497,6 +498,16 @@ fit_tuned_meta_learner <- function(object,
   ## order. collect_predictions$.row is the meta_frame position; oof$row[pos]
   ## recovers the real id, and a position-keyed lookup reorders to oof$row.
   oof_by_pos <- oof_collected$.pred[order(oof_collected$.row)]
+
+  ## Bound to oof$row and oof$truth by position below. A fold that failed to
+  ## predict would leave the vector short, and a single value would be
+  ## recycled across every row.
+  check_rows_aligned(
+    what       = "Meta-model out-of-fold predictions",
+    to         = "the out-of-fold rows",
+    n          = length(oof_by_pos),
+    n_expected = length(oof$row)
+  )
 
   ## Combined predictions are clamped to the outcome's range, as every served
   ## prediction is (#76); a floor at 0 under the default range.
