@@ -69,26 +69,40 @@ EXPECTED_RESULT_COLS <- c(
 )
 
 ## =========================================================================
-## Success path (single model fit shared across tests)
+## Shared evaluation (helper-memo.R)
 ## =========================================================================
+## One plain successful evaluate_single_config() result (rf, grid of 2, no
+## Bayesian stage, prune gate off), built on its first use in a process and
+## read by every block below that asserts on that run.
 
-describe("evaluate_single_config() - success path", {
+build_esc <- function() {
 
-  setup  <- make_eval_setup()
-  config <- make_eval_config()
+  setup <- make_eval_setup()
 
-  result <- evaluate_single_config(
-    config_row    = config,
+  evaluate_single_config(
+    config_row    = make_eval_config(),
     split         = setup$split,
     cv_folds      = setup$folds,
     role_map      = setup$role_map,
     grid_size     = 2,
     bayesian_iter = 0,
+    prune         = FALSE,
     seed          = 42L
   )
 
+}
+
+esc <- function() memo_fixture("esc", build_esc)
+
+## =========================================================================
+## Success path
+## =========================================================================
+
+describe("evaluate_single_config() - success path", {
+
   it("returns a single-row tibble", {
 
+    result <- esc()
     expect_s3_class(result, "tbl_df")
     expect_equal(nrow(result), 1)
 
@@ -96,18 +110,21 @@ describe("evaluate_single_config() - success path", {
 
   it("has all expected columns", {
 
+    result <- esc()
     expect_true(all(EXPECTED_RESULT_COLS %in% names(result)))
 
   })
 
   it("sets status to 'success'", {
 
+    result <- esc()
     expect_equal(result$status, "success")
 
   })
 
   it("has non-NA values for all six metrics", {
 
+    result <- esc()
     expect_false(is.na(result$rmse))
     expect_false(is.na(result$rrmse))
     expect_false(is.na(result$rsq))
@@ -119,6 +136,7 @@ describe("evaluate_single_config() - success path", {
 
   it("stores best_params as a list", {
 
+    result <- esc()
     expect_true(is.list(result$best_params))
     expect_false(is.null(result$best_params[[1]]))
 
@@ -126,24 +144,28 @@ describe("evaluate_single_config() - success path", {
 
   it("has NA error_message on success", {
 
+    result <- esc()
     expect_true(is.na(result$error_message))
 
   })
 
   it("records positive runtime", {
 
+    result <- esc()
     expect_true(result$runtime_secs > 0)
 
   })
 
   it("preserves the config_id", {
 
+    result <- esc()
     expect_equal(result$config_id, "test_cfg_001")
 
   })
 
   it("records the six cross-validated means at the selected hyperparameters (#50)", {
 
+    result  <- esc()
     cv_cols <- paste0("cv_", c("rmse", "rrmse", "rsq", "ccc", "rpd", "mae"))
 
     expect_true(all(cv_cols %in% names(result)))
@@ -160,6 +182,7 @@ describe("evaluate_single_config() - success path", {
 
   it("keeps .config on best_params so the CV panel can be looked up", {
 
+    result <- esc()
     expect_true(".config" %in% names(result$best_params[[1]]))
 
   })
@@ -476,21 +499,10 @@ describe("evaluate_single_config() - tuning on the original scale", {
 
 describe("evaluate_single_config() - bayesian_iter = 0", {
 
-  setup  <- make_eval_setup()
-  config <- make_eval_config()
-
-  result <- evaluate_single_config(
-    config_row    = config,
-    split         = setup$split,
-    cv_folds      = setup$folds,
-    role_map      = setup$role_map,
-    grid_size     = 2,
-    bayesian_iter = 0,
-    seed          = 42L
-  )
-
   it("succeeds with grid results only", {
 
+    ## The shared evaluation runs at bayesian_iter = 0
+    result <- esc()
     expect_equal(result$status, "success")
     expect_false(is.na(result$rmse))
 
@@ -543,16 +555,9 @@ describe("evaluate_single_config() - prune gate at bayesian_iter = 0 (#38)", {
 
   it("records no reading when prune = FALSE", {
 
-    unpruned <- suppressWarnings(evaluate_single_config(
-      config_row    = config,
-      split         = setup$split,
-      cv_folds      = setup$folds,
-      role_map      = setup$role_map,
-      grid_size     = 2,
-      bayesian_iter = 0,
-      prune         = FALSE,
-      seed          = 42L
-    ))
+    ## The shared evaluation is this config at bayesian_iter = 0 with
+    ## prune = FALSE
+    unpruned <- esc()
 
     expect_identical(unpruned$below_prune_threshold, NA)
     expect_identical(unpruned$prune_threshold, NA_real_)
