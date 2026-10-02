@@ -18,6 +18,7 @@ Logical: \code{FALSE} for \code{"none"} and \code{NULL}, \code{TRUE} otherwise.
 \code{"log10"} and \code{"sqrt"} return \code{TRUE}, and so does any other value,
 including \code{""} and \code{NA}, so an unknown transformation is never mistaken for
 none. \code{\link[=back_transform_predictions]{back_transform_predictions()}} treats the same values as unknown: it
-returns the predictions unchanged, with a warning when \code{warn = TRUE}.
+does not back-transform the predictions (they are still clamped to
+\code{outcome_range}), and warns when \code{warn = TRUE}.
 }
 \keyword{internal}
