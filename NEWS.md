@@ -3,7 +3,6 @@
 ## Changes
 
 * `parse_ids()` refuses an evaluated, fitted or ensembled object. It rewrites `sample_id`, and the stored splits and models are keyed to it (#135).
-* `select_training()` validates the targets and the library before drawing. Targets need one row per sample with finite spectra, so replicate scans are averaged first. A library that has been through `configure()` or `validate()` is refused, and the selection record now identifies the targets in `x$selection$targets`: their source, row count and an id hash (#133).
 
 ## Bug fixes
 
