@@ -126,6 +126,67 @@ EXPECTED_MODEL_SLOTS <- c(
 )
 
 
+## ---------------------------------------------------------------------------
+## Shared fixtures, built on first use (helper-memo.R)
+## ---------------------------------------------------------------------------
+## Read-only: a test that needs a changed object changes its own copy.
+
+## make_fit_object() at its defaults: 60 rows, two configs, evaluated
+mfo <- function() memo_fixture("mfo", make_fit_object)
+
+## The two-member fit. Its re-tune runs two Bayesian iterations after the
+## warm-start grid, so fit() runs tune_warmstart_bayes()'s Bayesian stage end
+## to end here. At n = 60 the calibration set is under N_CALIB_MIN, so UQ and
+## AD would be off whatever the flags said.
+build_fit60 <- function() {
+
+  obj <- make_fit_object(n = 60, n_configs = 2)
+  obj$config$tuning$final_bayesian_iter <- 2L
+
+  result <- suppressWarnings(
+    fit(obj, n_best = 2L, compute_uq = FALSE, compute_ad = FALSE,
+        verbose = FALSE, seed = 42L)
+  )
+
+  list(obj = obj, fit = result)
+
+}
+
+fit60 <- function() memo_fixture("fit60", build_fit60)
+
+## The same object fitted with one member, with no Bayesian stage
+build_fit60_one <- function() {
+
+  obj <- make_fit_object(n = 60, n_configs = 2)
+  obj$config$tuning$final_bayesian_iter <- 0L
+
+  suppressWarnings(
+    fit(obj, n_best = 1L, compute_uq = FALSE, verbose = FALSE, seed = 42L)
+  )
+
+}
+
+fit60_one <- function() memo_fixture("fit60_one", build_fit60_one)
+
+## One member at n = 250 with UQ on: the calibration split clears N_CALIB_MIN
+## (calib = 0.2 * 0.8 * n = 40), so UQ actually runs.
+build_fit250_uq <- function() {
+
+  obj <- make_fit_object(n = 250, n_configs = 1, seed = 42)
+  obj$config$tuning$final_bayesian_iter <- 0L
+
+  result <- suppressWarnings(
+    fit(obj, n_best = 1L, compute_uq = TRUE, compute_ad = FALSE,
+        verbose = FALSE, seed = 42L)
+  )
+
+  list(obj = obj, fit = result)
+
+}
+
+fit250_uq <- function() memo_fixture("fit250_uq", build_fit250_uq)
+
+
 ## =========================================================================
 ## Preflight validation
 ## =========================================================================
@@ -143,7 +204,7 @@ describe("fit() - preflight validation", {
 
   it("aborts on horizons_data without evaluation", {
 
-    obj <- make_fit_object()
+    obj <- mfo()
     class(obj) <- c("horizons_data", "list")
     obj$evaluation$results <- NULL
 
@@ -156,7 +217,7 @@ describe("fit() - preflight validation", {
 
   it("aborts when no successful configs in evaluation", {
 
-    obj <- make_fit_object()
+    obj <- mfo()
     obj$evaluation$results$status <- "failed"
 
     expect_error(
@@ -170,7 +231,7 @@ describe("fit() - preflight validation", {
 
     ## The key is present, so the missing-keys check passes, but the table is
     ## NULL or has no rows.
-    obj <- make_fit_object()
+    obj <- mfo()
 
     no_results <- obj
     no_results$evaluation["results"] <- list(NULL)
@@ -199,7 +260,7 @@ describe("fit() - preflight validation", {
     ## undetected. fit()'s entry-stage validate_horizons_data() call closes
     ## that gap.
 
-    obj <- make_fit_object()
+    obj <- mfo()
     obj$data$analysis$stray_column <- seq_len(nrow(obj$data$analysis))
 
     expect_error(
@@ -218,19 +279,17 @@ describe("fit() - preflight validation", {
 
 describe("fit() - success path", {
 
-  obj <- make_fit_object(n = 60, n_configs = 2)
-
-  result <- suppressWarnings(
-    fit(obj, n_best = 2L, compute_uq = FALSE, verbose = FALSE, seed = 42L)
-  )
-
   it("returns a horizons_fit object", {
+
+    result <- fit60()$fit
 
     expect_true(inherits(result, "horizons_fit"))
 
   })
 
   it("inherits from horizons_eval and horizons_data", {
+
+    result <- fit60()$fit
 
     expect_true(inherits(result, "horizons_eval"))
     expect_true(inherits(result, "horizons_data"))
@@ -239,11 +298,15 @@ describe("fit() - success path", {
 
   it("has all expected models$ slots", {
 
+    result <- fit60()$fit
+
     expect_true(all(EXPECTED_MODEL_SLOTS %in% names(result$models)))
 
   })
 
   it("writes exactly the models keys new_horizons_data() declares (#71)", {
+
+    result <- fit60()$fit
 
     ## The constructor's empty slot is what configure() resets to, so it has
     ## to name what fit() actually writes.
@@ -252,6 +315,8 @@ describe("fit() - success path", {
   })
 
   it("records best_config as the top fitted config and the rank metric used", {
+
+    result <- fit60()$fit
 
     ## best_config is the durable ranking fact predict() reads; it must be the
     ## first config in best-first workflow order, and a real fitted config.
@@ -263,6 +328,8 @@ describe("fit() - success path", {
 
   it("models$workflows is a named list", {
 
+    result <- fit60()$fit
+
     wfs <- result$models$workflows
     expect_true(is.list(wfs))
     expect_true(length(wfs) > 0)
@@ -272,11 +339,15 @@ describe("fit() - success path", {
 
   it("models$n_models matches workflow count", {
 
+    result <- fit60()$fit
+
     expect_equal(result$models$n_models, length(result$models$workflows))
 
   })
 
   it("models$split is an rsplit", {
+
+    result <- fit60()$fit
 
     expect_true(inherits(result$models$split, "rsplit"))
 
@@ -284,11 +355,15 @@ describe("fit() - success path", {
 
   it("models$timestamp is POSIXct", {
 
+    result <- fit60()$fit
+
     expect_true(inherits(result$models$timestamp, "POSIXct"))
 
   })
 
   it("models$runtime_secs is positive", {
+
+    result <- fit60()$fit
 
     expect_true(result$models$runtime_secs > 0)
 
@@ -296,8 +371,11 @@ describe("fit() - success path", {
 
   it("re-running evaluate() on it empties models and ensemble (#70)", {
 
-    ## compute_uq = FALSE above, so carry a bundle the way compute_uq = TRUE
-    ## leaves one; otherwise has_uq() is FALSE before and after
+    result <- fit60()$fit
+
+    ## The shared fit has compute_uq = FALSE, so carry a bundle the way
+    ## compute_uq = TRUE leaves one; otherwise has_uq() is FALSE before and
+    ## after
     fitted <- result
     fitted$models$uq <- stats::setNames(list(list(quantile_model = "a UQ bundle")),
                                         names(fitted$models$workflows)[1])
@@ -317,6 +395,8 @@ describe("fit() - success path", {
   })
 
   it("re-running fit() on an ensemble empties the ensemble (#70)", {
+
+    result <- fit60()$fit
 
     ens <- suppressWarnings(
       ensemble(result, method = "weighted", optimize = FALSE,
@@ -344,15 +424,9 @@ describe("fit() - success path", {
 
 describe("fit() - cv_predictions", {
 
-  obj <- make_fit_object(n = 60, n_configs = 2)
-
-  result <- suppressWarnings(
-    fit(obj, n_best = 2L, compute_uq = FALSE, verbose = FALSE, seed = 42L)
-  )
-
-  cv_preds <- result$models$cv_predictions
-
   it("is a tibble", {
+
+    cv_preds <- fit60()$fit$models$cv_predictions
 
     expect_s3_class(cv_preds, "tbl_df")
 
@@ -360,11 +434,16 @@ describe("fit() - cv_predictions", {
 
   it("has all expected columns", {
 
+    cv_preds <- fit60()$fit$models$cv_predictions
+
     expect_true(all(EXPECTED_FIT_CV_PRED_COLS %in% names(cv_preds)))
 
   })
 
   it("contains predictions from all successful configs", {
+
+    result   <- fit60()$fit
+    cv_preds <- result$models$cv_predictions
 
     successful <- result$models$results %>%
       dplyr::filter(status == "success") %>%
@@ -376,11 +455,15 @@ describe("fit() - cv_predictions", {
 
   it(".row is integer", {
 
+    cv_preds <- fit60()$fit$models$cv_predictions
+
     expect_true(is.integer(cv_preds$.row) || is.numeric(cv_preds$.row))
 
   })
 
   it("truth values are finite", {
+
+    cv_preds <- fit60()$fit$models$cv_predictions
 
     expect_true(all(is.finite(cv_preds$truth)))
 
@@ -395,15 +478,9 @@ describe("fit() - cv_predictions", {
 
 describe("fit() - models$results", {
 
-  obj <- make_fit_object(n = 60, n_configs = 2)
-
-  result <- suppressWarnings(
-    fit(obj, n_best = 2L, compute_uq = FALSE, verbose = FALSE, seed = 42L)
-  )
-
-  res <- result$models$results
-
   it("is a tibble", {
+
+    res <- fit60()$fit$models$results
 
     expect_s3_class(res, "tbl_df")
 
@@ -411,11 +488,17 @@ describe("fit() - models$results", {
 
   it("has all expected columns", {
 
+    res <- fit60()$fit$models$results
+
     expect_true(all(EXPECTED_FIT_RESULT_COLS %in% names(res)))
 
   })
 
   it("has one row per config attempted", {
+
+    shared <- fit60()
+    obj    <- shared$obj
+    res    <- shared$fit$models$results
 
     expect_equal(nrow(res), min(2L, sum(obj$evaluation$results$status == "success")))
 
@@ -423,6 +506,7 @@ describe("fit() - models$results", {
 
   it("test metrics are finite for successful configs", {
 
+    res       <- fit60()$fit$models$results
     successes <- dplyr::filter(res, status == "success")
 
     expect_gt(nrow(successes), 0)
@@ -433,6 +517,7 @@ describe("fit() - models$results", {
 
   it("degraded is logical (never NA for success)", {
 
+    res       <- fit60()$fit$models$results
     successes <- dplyr::filter(res, status == "success")
 
     expect_gt(nrow(successes), 0)
@@ -442,6 +527,7 @@ describe("fit() - models$results", {
 
   it("cv_rmse_mean and cv_rpd_mean are present", {
 
+    res       <- fit60()$fit$models$results
     successes <- dplyr::filter(res, status == "success")
 
     expect_gt(nrow(successes), 0)
@@ -451,6 +537,8 @@ describe("fit() - models$results", {
   })
 
   it("best_params is a list column", {
+
+    res <- fit60()$fit$models$results
 
     expect_true(is.list(res$best_params))
 
@@ -468,16 +556,10 @@ describe("fit() - models$results", {
 
 describe("fit() - cv_predictions carries sample_id", {
 
-  obj <- make_fit_object(n = 60, n_configs = 2)
-
-  result <- suppressWarnings(
-    fit(obj, n_best = 2L, compute_uq = FALSE, compute_ad = FALSE,
-        verbose = FALSE, seed = 42L)
-  )
-
-  cv <- result$models$cv_predictions
-
   it("names the training row .row indexes", {
+
+    result <- fit60()$fit
+    cv     <- result$models$cv_predictions
 
     ## With UQ and AD off nothing is carved out for calibration, so the fit
     ## rows are Split F's training part.
@@ -495,6 +577,9 @@ describe("fit() - cv_predictions carries sample_id", {
 
   it("has one prediction per training sample per config", {
 
+    result <- fit60()$fit
+    cv     <- result$models$cv_predictions
+
     train <- rsample::training(result$models$split)
 
     for (cfg in unique(cv$config_id)) {
@@ -507,6 +592,8 @@ describe("fit() - cv_predictions carries sample_id", {
   })
 
   it("stores no row_index", {
+
+    result <- fit60()$fit
 
     expect_false("row_index" %in% names(result$models))
 
@@ -521,13 +608,9 @@ describe("fit() - cv_predictions carries sample_id", {
 
 describe("fit() - UQ disabled", {
 
-  obj <- make_fit_object(n = 60, n_configs = 2)
-
-  result <- suppressWarnings(
-    fit(obj, n_best = 2L, compute_uq = FALSE, verbose = FALSE, seed = 42L)
-  )
-
   it("models$uq is NULL when compute_uq = FALSE", {
+
+    result <- fit60()$fit
 
     expect_null(result$models$uq)
 
@@ -538,18 +621,13 @@ describe("fit() - UQ disabled", {
 
 describe("fit() - UQ enabled", {
 
-  ## n = 250 so the calibration split clears N_CALIB_MIN = 30
-  ## (calib = 0.2 * 0.8 * n = 40) and UQ actually runs. The same object and
-  ## fit as the "scores on evaluate()'s split" block below.
-  obj <- make_fit_object(n = 250, n_configs = 1, seed = 42)
-  obj$config$tuning$final_bayesian_iter <- 0L
-
-  result <- suppressWarnings(
-    fit(obj, n_best = 1L, compute_uq = TRUE, compute_ad = FALSE,
-        verbose = FALSE, seed = 42L)
-  )
+  ## fit250_uq(): n = 250, so the calibration split clears N_CALIB_MIN = 30
+  ## and UQ actually runs. Shared with the "scores on evaluate()'s split"
+  ## block below.
 
   it("models$uq is a list when compute_uq = TRUE and enough data", {
+
+    result <- fit250_uq()$fit
 
     expect_false(is.null(result$models$uq))
     expect_true(is.list(result$models$uq))
@@ -558,6 +636,8 @@ describe("fit() - UQ enabled", {
 
   it("UQ bundles are named by config_id", {
 
+    result <- fit250_uq()$fit
+
     expect_false(is.null(result$models$uq))
     expect_true(length(result$models$uq) > 0)
     expect_true(!is.null(names(result$models$uq)))
@@ -565,6 +645,8 @@ describe("fit() - UQ enabled", {
   })
 
   it("UQ bundles have expected fields", {
+
+    result <- fit250_uq()$fit
 
     expect_false(is.null(result$models$uq))
 
@@ -586,6 +668,8 @@ describe("fit() - UQ enabled", {
 
   it("measures coverage on the held-out test rows with the intervals predict() serves (#118)", {
 
+    result <- fit250_uq()$fit
+
     expect_false(is.null(result$models$uq))
 
     uq_bundle <- result$models$uq[[result$models$best_config]]
@@ -605,14 +689,10 @@ describe("fit() - UQ enabled", {
 describe("fit() - AD disabled", {
 
   ## n = 60 -> calib split below N_CALIB_MIN, so AD is disabled even if asked.
-  obj <- make_fit_object(n = 60, n_configs = 2)
-
-  result <- suppressWarnings(
-    fit(obj, n_best = 2L, compute_uq = FALSE, compute_ad = FALSE,
-        verbose = FALSE, seed = 42L)
-  )
 
   it("models$ad is NULL when compute_ad = FALSE", {
+
+    result <- fit60()$fit
 
     expect_null(result$models$ad)
 
@@ -625,8 +705,10 @@ describe("fit() - AD enabled", {
 
   ## n = 250 so the shared calibration split clears N_CALIB_MIN = 30
   ## (calib = 0.2 * 0.8 * n = 40). AD must ACTUALLY compute here, not just be
-  ## NULL-tolerated — the assertions below require a populated bundle.
+  ## NULL-tolerated — the assertions below require a populated bundle. The
+  ## re-tune budget is not under test.
   obj <- make_fit_object(n = 250, n_configs = 1)
+  obj$config$tuning$final_bayesian_iter <- 0L
 
   result <- suppressWarnings(
     fit(obj, n_best = 1L, compute_uq = FALSE, compute_ad = TRUE,
@@ -678,13 +760,9 @@ describe("fit() - AD enabled", {
 
 describe("fit() - n_best = 1", {
 
-  obj <- make_fit_object(n = 60, n_configs = 2)
-
-  result <- suppressWarnings(
-    fit(obj, n_best = 1L, compute_uq = FALSE, verbose = FALSE, seed = 42L)
-  )
-
   it("works with n_best = 1", {
+
+    result <- fit60_one()
 
     expect_true(inherits(result, "horizons_fit"))
     expect_equal(result$models$n_models, 1L)
@@ -696,9 +774,10 @@ describe("fit() - n_best = 1", {
 
 describe("fit() - n_best exceeds available successes", {
 
-  obj <- make_fit_object(n = 60, n_configs = 2)
-
   it("caps n_best at available successes (with warning)", {
+
+    obj <- mfo()
+    obj$config$tuning$final_bayesian_iter <- 0L
 
     result <- suppressWarnings(
       fit(obj, n_best = 100L, compute_uq = FALSE, verbose = FALSE, seed = 42L)
@@ -885,16 +964,14 @@ describe("fit() - seed reproducibility", {
 
 describe("fit() - scores on evaluate()'s split", {
 
-  ## n = 250 so the calibration split clears N_CALIB_MIN and UQ runs.
-  obj <- make_fit_object(n = 250, n_configs = 1, seed = 42)
-  obj$config$tuning$final_bayesian_iter <- 0L
-
-  r <- suppressWarnings(
-    fit(obj, n_best = 1L, compute_uq = TRUE, compute_ad = FALSE,
-        verbose = FALSE, seed = 42L)
-  )
+  ## fit250_uq(): n = 250, so the calibration split clears N_CALIB_MIN and UQ
+  ## runs.
 
   it("reuses evaluate()'s split, so its test rows are evaluate()'s", {
+
+    shared <- fit250_uq()
+    obj    <- shared$obj
+    r      <- shared$fit
 
     expect_identical(r$models$split$data, obj$evaluation$split$data)
     expect_identical(rsample::testing(r$models$split)$sample_id,
@@ -903,6 +980,10 @@ describe("fit() - scores on evaluate()'s split", {
   })
 
   it("partitions the modelled rows into test, calibration and fit rows", {
+
+    shared <- fit250_uq()
+    obj    <- shared$obj
+    r      <- shared$fit
 
     expect_false(is.null(r$models$uq))
 
@@ -936,6 +1017,8 @@ describe("fit() - scores on evaluate()'s split", {
   })
 
   it("refuses an object whose split no longer matches its rows", {
+
+    obj <- fit250_uq()$obj
 
     stale <- obj
     stale$data$analysis <- stale$data$analysis[-1, ]
@@ -988,6 +1071,8 @@ describe("fit() - scores on evaluate()'s split", {
   })
 
   it("still fits after add_response() adds a sibling response", {
+
+    obj <- fit250_uq()$obj
 
     lab <- tibble::tibble(sample_id = obj$data$analysis$sample_id,
                           clay      = seq_len(nrow(obj$data$analysis)))
@@ -1135,14 +1220,11 @@ describe("fit() - response_bound (#68)", {
 
 describe("fit() - member ranking on cv_<metric>", {
 
-  obj <- make_fit_object(n = 60, n_configs = 2)
-
-  r <- suppressWarnings(
-    fit(obj, n_best = 2L, compute_uq = FALSE, compute_ad = FALSE,
-        verbose = FALSE, seed = 123L)
-  )
-
   it("orders members by cv_<rank_metric> from evaluation$results", {
+
+    shared <- fit60()
+    obj    <- shared$obj
+    r      <- shared$fit
 
     successes <- obj$evaluation$results[obj$evaluation$results$status == "success", ]
     expected  <- rank_configs_by_cv(successes, obj$evaluation$rank_metric)$config_id
@@ -1443,6 +1525,7 @@ describe("fit() - allow_par without a usable backend", {
 
     local_plan(future::sequential)
     obj <- make_fit_object(n = 60, n_configs = 1)
+    obj$config$tuning$final_bayesian_iter <- 0L
 
     expect_warning(
       r <- keep_only_warning(
@@ -1512,11 +1595,7 @@ describe("fit() - selection provenance", {
 
   it("records FALSE when the training object carried no selection", {
 
-    obj    <- make_fit_object(n_configs = 1)
-    result <- suppressWarnings(
-      fit(obj, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE,
-          verbose = FALSE, seed = 42L)
-    )
+    result <- fit60()$fit
 
     expect_false(result$models$selection_present)
 
@@ -1526,6 +1605,7 @@ describe("fit() - selection provenance", {
 
     obj           <- make_fit_object(n_configs = 1)
     obj$selection <- make_selection_stub()
+    obj$config$tuning$final_bayesian_iter <- 0L
 
     result <- suppressWarnings(
       fit(obj, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE,
