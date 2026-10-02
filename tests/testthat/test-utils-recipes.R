@@ -1330,6 +1330,115 @@ describe("prepped recipes bake identical predictor names on train and new data",
 ## bake() and print() must never come to need `terms`, or every stored
 ## pre-#52 fit stops predicting.
 
+## The step under test is always the recipe's last step. The selection
+## steps sit on the transform step's output, as build_recipe() puts them.
+## The transform step here selects through dplyr::all_of() on a local
+## vector, a selector that needs its environment, so a test can see whether
+## that environment was cut loose. build_recipe() itself now injects the
+## names as a literal vector, which needs none; the re-prep of its own
+## recipe is tested after the loop below.
+step_recipe <- function(step, data) {
+
+  wn_cols <- grep("^wn_", names(data), value = TRUE)
+
+  rec <- recipes::recipe(SOC ~ ., data = data) |>
+    step_transform_spectra(dplyr::all_of(wn_cols), preprocessing = "snv")
+
+  switch(step,
+    transform   = rec,
+    correlation = step_select_correlation(rec, dplyr::matches("^spec[0-9]+$"),
+                                          outcome = "SOC"),
+    boruta      = step_select_boruta(rec, dplyr::matches("^spec[0-9]+$"),
+                                     outcome = "SOC"),
+    cars        = step_select_cars(rec, dplyr::matches("^spec[0-9]+$"),
+                                   outcome = "SOC")
+  )
+
+}
+
+step_data <- function(n = 40) {
+
+  dplyr::select(make_test_data(n = n, n_wn = 60)$data, -sample_id)
+
+}
+
+## A stand-in for Boruta::Boruta() whose decisions follow the outcome: it
+## confirms the five attributes most correlated with `y` and rejects the
+## rest. What the real engine keeps on these noise spectra is down to chance
+## (on the first draw at seed 52 it rejects every attribute, so the step
+## keeps every column), and the lifecycle tests should not rest on it. Under
+## the stand-in every prep selects, and other rows select other columns, so
+## a selection carried over from an earlier prep shows. The real engine runs
+## in test-step-select-boruta.R and in the round trip above.
+mock_boruta_by_y <- function(x, y, ...) {
+
+  r    <- abs(stats::cor(x, y))[, 1]
+  keep <- names(sort(r, decreasing = TRUE))[1:5]
+
+  decision <- factor(ifelse(colnames(x) %in% keep, "Confirmed", "Rejected"),
+                     levels = c("Tentative", "Confirmed", "Rejected"))
+  names(decision) <- colnames(x)
+
+  structure(list(finalDecision = decision), class = "Boruta")
+
+}
+
+## The step's engine for the lifecycle tests: the stand-in for Boruta, the
+## real one for every other step. Local to `env`.
+local_step_engine <- function(step, env = parent.frame()) {
+
+  if (step == "boruta") {
+    local_mocked_bindings(Boruta = mock_boruta_by_y, .package = "Boruta",
+                          .env = env)
+  }
+
+  invisible(NULL)
+
+}
+
+## Fixtures: the prep and the fit the lifecycle tests read, built once per
+## step (helper-memo.R). The prep is the step's recipe on step_data() drawn
+## at seed 52, prepped at seed 1; the fit is a linear model through the
+## recipe on 80 rows drawn at seed 52, fitted at seed 1, with the 10 rows
+## drawn after them to predict. For CARS each takes most of a second.
+build_step_prepped <- function(step) {
+
+  local_step_engine(step)
+
+  set.seed(52)
+  d   <- step_data()
+  rec <- step_recipe(step, d)
+
+  ## CARS says, as a message, that it clusters fewer columns than it asks
+  ## for; a fixture's build must be quiet.
+  set.seed(1)
+  prepped <- suppressMessages(recipes::prep(rec, training = d))
+
+  list(data = d, rec = rec, prepped = prepped)
+
+}
+
+step_prepped <- function(step) memo_fixture("step_prepped", build_step_prepped, step = step)
+
+build_step_fitted <- function(step) {
+
+  local_step_engine(step)
+
+  set.seed(52)
+  train <- step_data(n = 80)
+  new   <- step_data(n = 10)
+
+  wf <- workflows::workflow(step_recipe(step, train), parsnip::linear_reg())
+
+  set.seed(1)
+  fitted <- suppressMessages(parsnip::fit(wf, data = train))
+
+  list(new = new, fitted = fitted)
+
+}
+
+step_fitted <- function(step) memo_fixture("step_fitted", build_step_fitted, step = step)
+
 describe("custom steps keep their selectors through prep (#52)", {
 
   steps <- c("transform", "correlation", "boruta", "cars")
@@ -1362,52 +1471,10 @@ describe("custom steps keep their selectors through prep (#52)", {
 
   }
 
-  ## The step under test is always the recipe's last step. The selection
-  ## steps sit on the transform step's output, as build_recipe() puts them.
-  ## The transform step here selects through dplyr::all_of() on a local
-  ## vector, a selector that needs its environment, so a test can see whether
-  ## that environment was cut loose. build_recipe() itself now injects the
-  ## names as a literal vector, which needs none; the re-prep of its own
-  ## recipe is tested after this loop.
-  step_recipe <- function(step, data) {
-
-    wn_cols <- grep("^wn_", names(data), value = TRUE)
-
-    rec <- recipes::recipe(SOC ~ ., data = data) |>
-      step_transform_spectra(dplyr::all_of(wn_cols), preprocessing = "snv")
-
-    switch(step,
-      transform   = rec,
-      correlation = step_select_correlation(rec, dplyr::matches("^spec[0-9]+$"),
-                                            outcome = "SOC"),
-      boruta      = step_select_boruta(rec, dplyr::matches("^spec[0-9]+$"),
-                                       outcome = "SOC"),
-      cars        = step_select_cars(rec, dplyr::matches("^spec[0-9]+$"),
-                                     outcome = "SOC")
-    )
-
-  }
-
-  step_data <- function(n = 40) {
-
-    dplyr::select(make_test_data(n = n, n_wn = 60)$data, -sample_id)
-
-  }
-
   skip_if_step_unavailable <- function(step) {
 
     if (step == "boruta") skip_if_not_installed("Boruta")
     if (step == "cars")   skip_if_not_installed("pls")
-
-  }
-
-  ## Boruta finds nothing on these noise spectra and says so with a
-  ## horizons_boruta_warning (#75). That is the step working, and not what
-  ## these lifecycle tests check, so that one class is muffled around each
-  ## prep and fit; any other warning still surfaces.
-  quiet_boruta <- function(expr) {
-
-    suppressWarnings(expr, classes = "horizons_boruta_warning")
 
   }
 
@@ -1417,23 +1484,24 @@ describe("custom steps keep their selectors through prep (#52)", {
 
       skip_if_step_unavailable(step)
 
+      ## Prepped on d1, the first draw at seed 52
+      trained <- step_prepped(step)$prepped
+      local_step_engine(step)
+
       set.seed(52)
       d1 <- step_data()
       d2 <- step_data()
 
       rec <- step_recipe(step, d1)
 
-      set.seed(1)
-      trained <- quiet_boruta(recipes::prep(rec, training = d1))
-
       ## Re-prepped on other rows, the recipe has to land exactly where a
       ## first prep on those rows does: selectors re-resolved, state
       ## re-estimated, nothing carried over from d1.
       set.seed(2)
-      refreshed <- quiet_boruta(recipes::prep(trained, training = d2, fresh = TRUE))
+      refreshed <- recipes::prep(trained, training = d2, fresh = TRUE)
 
       set.seed(2)
-      direct <- quiet_boruta(recipes::prep(rec, training = d2))
+      direct <- recipes::prep(rec, training = d2)
 
       expect_identical(recipes::bake(refreshed, new_data = NULL),
                        recipes::bake(direct,    new_data = NULL))
@@ -1444,9 +1512,8 @@ describe("custom steps keep their selectors through prep (#52)", {
 
       skip_if_step_unavailable(step)
 
-      set.seed(52)
-      d    <- step_data()
-      rec  <- step_recipe(step, d)
+      fx   <- step_prepped(step)
+      rec  <- fx$rec
       last <- length(rec$steps)
 
       untrained <- rec$steps[[last]]
@@ -1454,8 +1521,7 @@ describe("custom steps keep their selectors through prep (#52)", {
       expect_true(rlang::is_quosures(untrained$terms))
       expect_null(untrained$columns)
 
-      set.seed(1)
-      trained <- quiet_boruta(recipes::prep(rec, training = d))$steps[[last]]
+      trained <- fx$prepped$steps[[last]]
 
       expect_identical(trained$terms, untrained$terms)
       expect_type(trained$columns, "character")
@@ -1471,13 +1537,10 @@ describe("custom steps keep their selectors through prep (#52)", {
 
       skip_if_step_unavailable(step)
 
-      set.seed(52)
-      d    <- step_data()
-      rec  <- step_recipe(step, d)
-      last <- length(rec$steps)
-
-      set.seed(1)
-      prepped <- quiet_boruta(recipes::prep(rec, training = d))
+      fx      <- step_prepped(step)
+      rec     <- fx$rec
+      prepped <- fx$prepped
+      last    <- length(rec$steps)
 
       untrained_says <- if (step == "transform") "Spectral transformation" else "not yet trained"
       trained_says   <- if (step == "transform") "Spectral transformation" else "retained"
@@ -1495,14 +1558,9 @@ describe("custom steps keep their selectors through prep (#52)", {
 
       skip_if_step_unavailable(step)
 
-      set.seed(52)
-      train <- step_data(n = 80)
-      new   <- step_data(n = 10)
-
-      wf <- workflows::workflow(step_recipe(step, train), parsnip::linear_reg())
-
-      set.seed(1)
-      fitted   <- quiet_boruta(parsnip::fit(wf, data = train))
+      fx       <- step_fitted(step)
+      fitted   <- fx$fitted
+      new      <- fx$new
       expected <- predict(fitted, new_data = new)
 
       butchered <- butcher::butcher(fitted)
@@ -1526,14 +1584,9 @@ describe("custom steps keep their selectors through prep (#52)", {
 
       skip_if_step_unavailable(step)
 
-      set.seed(52)
-      train <- step_data(n = 80)
-      new   <- step_data(n = 10)
-
-      wf <- workflows::workflow(step_recipe(step, train), parsnip::linear_reg())
-
-      set.seed(1)
-      fitted    <- quiet_boruta(parsnip::fit(wf, data = train))
+      fx        <- step_fitted(step)
+      fitted    <- fx$fitted
+      new       <- fx$new
       expected  <- predict(fitted, new_data = new)
       baked     <- recipes::bake(workflows::extract_recipe(fitted), new_data = new)
       butchered <- butcher::butcher(fitted)
@@ -1567,13 +1620,14 @@ describe("custom steps keep their selectors through prep (#52)", {
 
       skip_if_step_unavailable(step)
 
-      set.seed(52)
-      d    <- step_data()
-      rec  <- step_recipe(step, d)
+      fx <- step_prepped(step)
+      local_step_engine(step)
+
+      d    <- fx$data
+      rec  <- fx$rec
       last <- length(rec$steps)
 
-      set.seed(1)
-      reference <- recipes::bake(quiet_boruta(recipes::prep(rec, training = d)), new_data = NULL)
+      reference <- recipes::bake(fx$prepped, new_data = NULL)
 
       ## Selectors in `columns` and no `terms`, as the old release built it,
       ## and the same with the empty `terms` a butchered workflow's
@@ -1586,13 +1640,13 @@ describe("custom steps keep their selectors through prep (#52)", {
         expect_true(rlang::is_quosures(old$steps[[last]]$columns))
 
         set.seed(1)
-        prepped <- quiet_boruta(recipes::prep(old, training = d))
+        prepped <- recipes::prep(old, training = d)
 
         expect_identical(recipes::bake(prepped, new_data = NULL), reference)
 
         ## It comes out in the current layout, so it can be re-prepped.
         expect_identical(prepped$steps[[last]]$terms, rec$steps[[last]]$terms)
-        expect_no_error(quiet_boruta(recipes::prep(prepped, training = d, fresh = TRUE)))
+        expect_no_error(recipes::prep(prepped, training = d, fresh = TRUE))
 
       }
 
@@ -1602,11 +1656,11 @@ describe("custom steps keep their selectors through prep (#52)", {
 
       skip_if_step_unavailable(step)
 
-      set.seed(52)
-      d <- step_data()
+      fx <- step_prepped(step)
+      local_step_engine(step)
 
-      set.seed(1)
-      trained <- quiet_boruta(recipes::prep(step_recipe(step, d), training = d))
+      d       <- fx$data
+      trained <- fx$prepped
       last    <- length(trained$steps)
 
       ## Only the step under test is old, so the error is its own and not
@@ -1628,6 +1682,28 @@ describe("custom steps keep their selectors through prep (#52)", {
     })
 
   }
+
+  it("boruta: the stand-in selects by the outcome, so a carried-over selection would show", {
+
+    skip_if_step_unavailable("boruta")
+
+    trained <- step_prepped("boruta")$prepped
+    local_step_engine("boruta")
+
+    set.seed(52)
+    d1 <- step_data()
+    d2 <- step_data()
+
+    direct <- recipes::prep(step_recipe("boruta", d1), training = d2)
+
+    on_d1 <- trained$steps[[2]]$selected_vars
+    on_d2 <- direct$steps[[2]]$selected_vars
+
+    ## A selection, not every column, and a different one on other rows
+    expect_lt(length(on_d1), length(trained$steps[[2]]$columns))
+    expect_false(setequal(on_d1, on_d2))
+
+  })
 
   it("a recipe build_recipe() made, literal selector and all, re-preps with fresh = TRUE", {
 

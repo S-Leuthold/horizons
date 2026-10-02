@@ -54,6 +54,105 @@ to_d13c <- function(soc) -22 + 3 * (soc - 2)
 flat_message <- function(e) gsub("\\s+", " ", conditionMessage(e))
 
 
+## ---------------------------------------------------------------------------
+## Fitted fixtures, built once on first use (helper-memo.R)
+## ---------------------------------------------------------------------------
+## Each is built by the first test that asks for it, not when the file is
+## sourced, so a failed build fails the tests that read it rather than the
+## whole file. Tests read them and never modify them.
+
+#' The signed outcome end to end: configured for c(-Inf, Inf), evaluated with
+#' checkpoints written to `dir`, fitted with UQ, and eight rows predicted with
+#' intervals. n = 250 leaves enough rows for the calibration split to clear
+#' N_CALIB_MIN, so the intervals are exercised too.
+#' @noRd
+build_signed_run <- function(dir) {
+
+  hd  <- make_range_hd(n = 250, value = to_d13c)
+  cfg <- configure_small(hd, outcome_range = c(-Inf, Inf))
+
+  ev <- suppressWarnings(
+    evaluate(cfg, prune = FALSE, verbose = FALSE, seed = 42L, output_dir = dir)
+  )
+
+  fitted <- suppressWarnings(
+    fit(ev, n_best = 1L, compute_uq = TRUE, compute_ad = FALSE,
+        verbose = FALSE, seed = 42L)
+  )
+
+  new_data <- hd$data$analysis[1:8, setdiff(names(hd$data$analysis), "SOC")]
+  p        <- predict(fitted, new_data, interval = TRUE)
+
+  list(hd = hd, cfg = cfg, ev = ev, fitted = fitted, p = p)
+
+}
+
+#' The signed run's objects, with `outdir`, the caller's own copy of its
+#' checkpoint directory
+#' @noRd
+signed_run <- function(.env = parent.frame()) {
+
+  run <- memo_dir("signed_run", build_signed_run, .env = .env)
+  c(run$value, list(outdir = run$dir))
+
+}
+
+#' A mixed-sign outcome under c(-5, 5), cold-started
+#' @noRd
+build_mixed_sign_fit <- function() {
+
+  hd  <- make_range_hd(n = 60, value = function(soc) soc - 2)
+  cfg <- configure_small(hd, outcome_range = c(-5, 5))
+
+  cold <- suppressWarnings(
+    fit(cfg, compute_uq = FALSE, compute_ad = FALSE, verbose = FALSE, seed = 42L)
+  )
+
+  list(hd = hd, cold = cold)
+
+}
+
+mixed_sign_fit <- function() memo_fixture("mixed_sign_fit", build_mixed_sign_fit)
+
+#' The non-negative fixture as make_eval_object() builds it, with no
+#' config$outcome_range (an object from before the range existed),
+#' cold-started at no Bayesian budget
+#' @noRd
+build_nonneg_fit <- function() {
+
+  obj <- make_eval_object(n = 60, n_configs = 1)
+  obj$config$tuning$final_bayesian_iter <- 0L
+
+  fitted <- suppressWarnings(
+    fit(obj, compute_uq = FALSE, compute_ad = FALSE, verbose = FALSE, seed = 42L)
+  )
+
+  list(obj = obj, fitted = fitted)
+
+}
+
+nonneg_fit <- function() memo_fixture("nonneg_fit", build_nonneg_fit)
+
+#' A non-negative outcome whose range is capped at its largest value,
+#' cold-started
+#' @noRd
+build_capped_fit <- function() {
+
+  hd  <- make_range_hd(n = 60)
+  top <- max(hd$data$analysis$SOC)
+  cfg <- configure_small(hd, outcome_range = c(0, top))
+
+  cold <- suppressWarnings(
+    fit(cfg, compute_uq = FALSE, compute_ad = FALSE, verbose = FALSE, seed = 42L)
+  )
+
+  list(hd = hd, top = top, cold = cold)
+
+}
+
+capped_fit <- function() memo_fixture("capped_fit", build_capped_fit)
+
+
 ## ===========================================================================
 ## The rule, the accessor and the clamp
 ## ===========================================================================
@@ -360,26 +459,12 @@ describe("configure() - outcome_range", {
 
 describe("a d13C-like outcome with outcome_range = c(-Inf, Inf)", {
 
-  ## n = 250 leaves enough rows for the calibration split to clear
-  ## N_CALIB_MIN, so the intervals are exercised too.
-  hd     <- make_range_hd(n = 250, value = to_d13c)
-  cfg    <- configure_small(hd, outcome_range = c(-Inf, Inf))
-  outdir <- withr::local_tempdir()
-
-  ev <- suppressWarnings(
-    evaluate(cfg, prune = FALSE, verbose = FALSE, seed = 42L, output_dir = outdir)
-  )
-
-  fitted <- suppressWarnings(
-    fit(ev, n_best = 1L, compute_uq = TRUE, compute_ad = FALSE,
-        verbose = FALSE, seed = 42L)
-  )
-
-  truth    <- hd$data$analysis$SOC
-  new_data <- hd$data$analysis[1:8, setdiff(names(hd$data$analysis), "SOC")]
-  p        <- predict(fitted, new_data, interval = TRUE)
+  ## The run is signed_run(): configure, evaluate with checkpoints, fit with
+  ## UQ, and predict with intervals, built once for the block.
 
   it("has an all-negative outcome (the fixture discriminates)", {
+
+    truth <- signed_run()$hd$data$analysis$SOC
 
     expect_true(all(truth < 0))
     expect_true(all(truth > -30 & truth < -15))
@@ -388,6 +473,7 @@ describe("a d13C-like outcome with outcome_range = c(-Inf, Inf)", {
 
   it("evaluates, scoring test-set predictions that were not floored at zero", {
 
+    ev  <- signed_run()$ev
     res <- ev$evaluation$results
 
     expect_identical(res$status, "success")
@@ -402,6 +488,11 @@ describe("a d13C-like outcome with outcome_range = c(-Inf, Inf)", {
   })
 
   it("fits, with negative out-of-fold predictions and a negative bound above the maximum", {
+
+    run    <- signed_run()
+    hd     <- run$hd
+    fitted <- run$fitted
+    truth  <- hd$data$analysis$SOC
 
     expect_s3_class(fitted, "horizons_fit")
     expect_true(all(fitted$models$cv_predictions$.pred < 0))
@@ -419,6 +510,8 @@ describe("a d13C-like outcome with outcome_range = c(-Inf, Inf)", {
 
   it("predicts negative points and negative interval bounds", {
 
+    p <- signed_run()$p
+
     expect_true(all(p$.pred < 0))
     expect_true(all(c(".pred_lower", ".pred_upper") %in% names(p)))
     expect_true(all(p$.pred_upper < 0))
@@ -427,6 +520,10 @@ describe("a d13C-like outcome with outcome_range = c(-Inf, Inf)", {
   })
 
   it("fingerprints the range: a resume under another range refuses", {
+
+    run    <- signed_run()
+    cfg    <- run$cfg
+    outdir <- run$outdir
 
     other <- cfg
     other$config$outcome_range <- c(-40, 0)
@@ -441,6 +538,8 @@ describe("a d13C-like outcome with outcome_range = c(-Inf, Inf)", {
   })
 
   it("refuses to re-fit the evaluated object under the default range, before fitting", {
+
+    ev <- signed_run()$ev
 
     stale <- ev
     stale$config$outcome_range <- DEFAULT_OUTCOME_RANGE
@@ -459,6 +558,7 @@ describe("a d13C-like outcome with outcome_range = c(-Inf, Inf)", {
 
     ## c(-40, 0) contains the data, so only the comparison with the range
     ## evaluate() recorded on its rows can refuse it
+    ev    <- signed_run()$ev
     moved <- ev
     moved$config$outcome_range <- c(-40, 0)
 
@@ -476,6 +576,10 @@ describe("a d13C-like outcome with outcome_range = c(-Inf, Inf)", {
   })
 
   it("refuses to rank by rrmse, in evaluate() and in fit(), before tuning", {
+
+    run <- signed_run()
+    cfg <- run$cfg
+    ev  <- run$ev
 
     local_mocked_bindings(
       evaluate_single_config = function(...) stop("evaluate_single_config() was reached"),
@@ -501,6 +605,10 @@ describe("a d13C-like outcome with outcome_range = c(-Inf, Inf)", {
     ## A copy of one row as it would have been written before #76: the same
     ## data and settings, less the outcome_range. Under c(-Inf, Inf) it was
     ## scored differently (floored at zero), so it is refused, naming it.
+    run    <- signed_run()
+    cfg    <- run$cfg
+    outdir <- run$outdir
+
     row <- readRDS(list.files(file.path(outdir, "checkpoints"), full.names = TRUE)[1])
     row$settings[[1]]$outcome_range <- NULL
 
@@ -524,6 +632,8 @@ describe("a d13C-like outcome with outcome_range = c(-Inf, Inf)", {
 
   it("ensemble() refuses an outcome outside the range at entry", {
 
+    fitted <- signed_run()$fitted
+
     stale <- fitted
     stale$config$outcome_range <- DEFAULT_OUTCOME_RANGE
 
@@ -534,6 +644,8 @@ describe("a d13C-like outcome with outcome_range = c(-Inf, Inf)", {
   })
 
   it("summary() shows the range when it is not the default", {
+
+    cfg <- signed_run()$cfg
 
     out <- utils::capture.output(summary(cfg))
     expect_true(any(grepl("Outcome range: c(-Inf, Inf)", out, fixed = TRUE)))
@@ -612,22 +724,22 @@ describe("a negative outcome under the default range", {
 
 describe("a mixed-sign outcome with outcome_range = c(-5, 5)", {
 
-  hd  <- make_range_hd(n = 60, value = function(soc) soc - 2)
-  cfg <- configure_small(hd, outcome_range = c(-5, 5))
-
-  cold <- suppressWarnings(
-    fit(cfg, compute_uq = FALSE, compute_ad = FALSE, verbose = FALSE, seed = 42L)
-  )
-
-  y <- hd$data$analysis$SOC
+  ## The fit is mixed_sign_fit(), cold-started once for the block.
 
   it("has both signs (the fixture discriminates)", {
+
+    y <- mixed_sign_fit()$hd$data$analysis$SOC
 
     expect_true(any(y < 0) && any(y > 0))
 
   })
 
   it("anchors the bound on the finite lower bound", {
+
+    fx   <- mixed_sign_fit()
+    hd   <- fx$hd
+    cold <- fx$cold
+    y    <- hd$data$analysis$SOC
 
     fit_rows <- hd$data$analysis$sample_id %in% unique(cold$models$cv_predictions$sample_id)
     top      <- max(y[fit_rows])
@@ -638,6 +750,10 @@ describe("a mixed-sign outcome with outcome_range = c(-5, 5)", {
   })
 
   it("serves predictions of both signs", {
+
+    fx   <- mixed_sign_fit()
+    hd   <- fx$hd
+    cold <- fx$cold
 
     p <- predict(cold, hd$data$analysis[, setdiff(names(hd$data$analysis), "SOC")],
                  interval = FALSE)
@@ -658,16 +774,13 @@ describe("a non-negative outcome under the default range", {
 
   ## make_eval_object() carries no config$outcome_range: an object from
   ## before the range existed. The bound and the floor must be what they were.
-  obj <- make_eval_object(n = 60, n_configs = 1)
-  obj$config$tuning$final_bayesian_iter <- 0L
-
-  fitted <- suppressWarnings(
-    fit(obj, compute_uq = FALSE, compute_ad = FALSE, verbose = FALSE, seed = 42L)
-  )
-
-  new_data <- obj$data$analysis[1:5, setdiff(names(obj$data$analysis), "SOC")]
+  ## The fit is nonneg_fit(), shared with the malformed-range block below.
 
   it("stores max * RESPONSE_BOUND_MARGIN as the bound, to the bit", {
+
+    fx     <- nonneg_fit()
+    obj    <- fx$obj
+    fitted <- fx$fitted
 
     fit_rows <- obj$data$analysis$sample_id %in% unique(fitted$models$cv_predictions$sample_id)
 
@@ -679,6 +792,8 @@ describe("a non-negative outcome under the default range", {
 
   it("validates without the key, and with it removed from a fitted object", {
 
+    fitted <- nonneg_fit()$fitted
+
     expect_no_error(validate_horizons_fit(fitted))
 
     ## the constructor's shape with the key present but NULL
@@ -689,6 +804,11 @@ describe("a non-negative outcome under the default range", {
   })
 
   it("floors a negative prediction at zero, as predict() always has", {
+
+    fx       <- nonneg_fit()
+    obj      <- fx$obj
+    fitted   <- fx$fitted
+    new_data <- obj$data$analysis[1:5, setdiff(names(obj$data$analysis), "SOC")]
 
     ## The fitted forest cannot predict below its training range, so the
     ## stored workflow's predict method is replaced with one that does.
@@ -707,6 +827,8 @@ describe("a non-negative outcome under the default range", {
   })
 
   it("rejects a bound at or below the floor, as the validator always has", {
+
+    fitted <- nonneg_fit()$fitted
 
     neg <- fitted
     neg$models$response_bound <- -5
@@ -731,16 +853,14 @@ describe("a finite upper bound", {
   ## A cap test only, not a way to choose a range: a range comes from the
   ## property's physical bounds, never from the data. Here the upper bound is
   ## the largest observed value so the bound formula (1.5 times the fit rows'
-  ## maximum) lands above it and is capped.
-  hd  <- make_range_hd(n = 60)
-  top <- max(hd$data$analysis$SOC)
-  cfg <- configure_small(hd, outcome_range = c(0, top))
-
-  cold <- suppressWarnings(
-    fit(cfg, compute_uq = FALSE, compute_ad = FALSE, verbose = FALSE, seed = 42L)
-  )
+  ## maximum) lands above it and is capped. The fit is capped_fit(),
+  ## cold-started once for the block.
 
   it("caps the response bound", {
+
+    fx   <- capped_fit()
+    top  <- fx$top
+    cold <- fx$cold
 
     expect_identical(cold$models$response_bound, top)
     expect_no_error(validate_horizons_fit(cold))
@@ -748,6 +868,11 @@ describe("a finite upper bound", {
   })
 
   it("caps served predictions at the range, silently", {
+
+    fx   <- capped_fit()
+    hd   <- fx$hd
+    top  <- fx$top
+    cold <- fx$cold
 
     local_mocked_s3_method("predict", "workflow", function(object, new_data, ...) {
       tibble::tibble(.pred = rep(1e3, nrow(new_data)))
@@ -761,6 +886,10 @@ describe("a finite upper bound", {
   })
 
   it("refuses a bound above the upper bound", {
+
+    fx   <- capped_fit()
+    top  <- fx$top
+    cold <- fx$cold
 
     over <- cold
     over$models$response_bound <- top + 1
@@ -978,15 +1107,12 @@ describe("check_evaluated_outcome_range()", {
 
 describe("validate_horizons_fit() - a malformed outcome range", {
 
-  ## A fitted object from the non-negative fixture, cold-started and cheap
-  obj <- make_eval_object(n = 60, n_configs = 1)
-  obj$config$tuning$final_bayesian_iter <- 0L
-
-  fitted <- suppressWarnings(
-    fit(obj, compute_uq = FALSE, compute_ad = FALSE, verbose = FALSE, seed = 42L)
-  )
+  ## A fitted object from the non-negative fixture, cold-started and cheap:
+  ## nonneg_fit(), the same fit the default-range block reads.
 
   it("is not read when there is no usable bound, which is the finding instead", {
+
+    fitted <- nonneg_fit()$fitted
 
     ## fit() always writes a bound (#130), so a NULL one is refused on its
     ## own, and the range is not checked against it
@@ -1004,6 +1130,8 @@ describe("validate_horizons_fit() - a malformed outcome range", {
   })
 
   it("is collected with the other findings when there is a bound", {
+
+    fitted <- nonneg_fit()$fitted
 
     broken <- fitted
     broken$config$outcome_range <- c(5, 1)

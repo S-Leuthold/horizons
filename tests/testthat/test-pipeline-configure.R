@@ -1411,10 +1411,12 @@ describe("configure() and the object contract", {
   test_that("evaluating a re-configured fit matches evaluating the plain object (#70)", {
 
     ## What the reset promises: nothing the clay fit earned leaks into the oc
-    ## evaluation. rf, because cubist is not bit-reproducible (#51).
+    ## evaluation. elastic_net, because glmnet is in Imports, so the test
+    ## needs no optional engine, and it is fast and bit-reproducible; cubist
+    ## is not (#51).
     fx    <- make_select_fixture(n_pool = 60)
     plain <- fx$pool
-    args  <- list(models = "rf", grid_size = 2L, bayesian_iter = 0L,
+    args  <- list(models = "elastic_net", grid_size = 2L, bayesian_iter = 0L,
                   final_bayesian_iter = 0L, cv_folds = 3L)
 
     run_configure <- function(x, outcome) do.call(quiet_configure, c(list(x, outcome = outcome), args))
@@ -1424,6 +1426,13 @@ describe("configure() and the object contract", {
       fit(run_evaluate(run_configure(plain, "clay")),
           n_best = 1L, compute_uq = FALSE, verbose = FALSE, seed = 7L)
     )
+
+    ## The fit really earned state for the reset to drop
+    expect_s3_class(fit_clay, "horizons_fit")
+
+    ## Re-configured, the fit is the plain object configured the same way,
+    ## in every slot, so nothing is left for the evaluation to read
+    expect_identical(run_configure(fit_clay, "oc"), run_configure(plain, "oc"))
 
     via_fit   <- run_evaluate(run_configure(fit_clay, "oc"))
     via_plain <- run_evaluate(run_configure(plain, "oc"))
