@@ -166,6 +166,30 @@ describe("fit() - preflight validation", {
 
   })
 
+  it("aborts when the evaluation record has no results", {
+
+    ## The key is present, so the missing-keys check passes, but the table is
+    ## NULL or has no rows.
+    obj <- make_fit_object()
+
+    no_results <- obj
+    no_results$evaluation["results"] <- list(NULL)
+
+    expect_error(
+      fit(no_results, verbose = FALSE),
+      "No evaluation results found"
+    )
+
+    no_rows <- obj
+    no_rows$evaluation$results <- no_rows$evaluation$results[0, ]
+
+    expect_error(
+      fit(no_rows, verbose = FALSE),
+      "No evaluation results found"
+    )
+
+  })
+
   it("refuses a column added after configure() with no role_map entry (#24)", {
 
     ## validate_horizons_fit() (at return) certifies the models slot, not the
@@ -401,12 +425,9 @@ describe("fit() - models$results", {
 
     successes <- dplyr::filter(res, status == "success")
 
-    if (nrow(successes) > 0) {
-
-      expect_true(all(is.finite(successes$rmse)))
-      expect_true(all(is.finite(successes$rpd)))
-
-    }
+    expect_gt(nrow(successes), 0)
+    expect_true(all(is.finite(successes$rmse)))
+    expect_true(all(is.finite(successes$rpd)))
 
   })
 
@@ -414,11 +435,8 @@ describe("fit() - models$results", {
 
     successes <- dplyr::filter(res, status == "success")
 
-    if (nrow(successes) > 0) {
-
-      expect_true(all(!is.na(successes$degraded)))
-
-    }
+    expect_gt(nrow(successes), 0)
+    expect_true(all(!is.na(successes$degraded)))
 
   })
 
@@ -426,12 +444,9 @@ describe("fit() - models$results", {
 
     successes <- dplyr::filter(res, status == "success")
 
-    if (nrow(successes) > 0) {
-
-      expect_true(all(is.finite(successes$cv_rmse_mean)))
-      expect_true(all(is.finite(successes$cv_rpd_mean)))
-
-    }
+    expect_gt(nrow(successes), 0)
+    expect_true(all(is.finite(successes$cv_rmse_mean)))
+    expect_true(all(is.finite(successes$cv_rpd_mean)))
 
   })
 
@@ -523,58 +538,64 @@ describe("fit() - UQ disabled", {
 
 describe("fit() - UQ enabled", {
 
-  ## Need more data for UQ (calib split needs N_CALIB_MIN = 30)
-  obj <- make_fit_object(n = 120, n_configs = 1)
+  ## n = 250 so the calibration split clears N_CALIB_MIN = 30
+  ## (calib = 0.2 * 0.8 * n = 40) and UQ actually runs. The same object and
+  ## fit as the "scores on evaluate()'s split" block below.
+  obj <- make_fit_object(n = 250, n_configs = 1, seed = 42)
+  obj$config$tuning$final_bayesian_iter <- 0L
 
   result <- suppressWarnings(
-    fit(obj, n_best = 1L, compute_uq = TRUE, verbose = FALSE, seed = 42L)
+    fit(obj, n_best = 1L, compute_uq = TRUE, compute_ad = FALSE,
+        verbose = FALSE, seed = 42L)
   )
 
   it("models$uq is a list when compute_uq = TRUE and enough data", {
 
-    ## May be NULL if calib set too small after splits — that's OK
-    if (!is.null(result$models$uq)) {
-
-      expect_true(is.list(result$models$uq))
-
-    }
+    expect_false(is.null(result$models$uq))
+    expect_true(is.list(result$models$uq))
 
   })
 
   it("UQ bundles are named by config_id", {
 
-    if (!is.null(result$models$uq)) {
-
-      expect_true(length(result$models$uq) > 0)
-      expect_true(!is.null(names(result$models$uq)))
-
-    }
+    expect_false(is.null(result$models$uq))
+    expect_true(length(result$models$uq) > 0)
+    expect_true(!is.null(names(result$models$uq)))
 
   })
 
   it("UQ bundles have expected fields", {
 
-    if (!is.null(result$models$uq) && length(result$models$uq) > 0) {
+    expect_false(is.null(result$models$uq))
 
-      uq_bundle <- result$models$uq[[1]]
+    uq_bundle <- result$models$uq[[1]]
 
-      if (!is.null(uq_bundle)) {
+    expected <- c("quantile_model", "scores", "n_calib",
+                  "level_default", "oof_coverage", "mean_width",
+                  "prepped_recipe", "test_coverage", "test_mean_width",
+                  "n_test")
+    expect_true(all(expected %in% names(uq_bundle)))
 
-        expected <- c("quantile_model", "scores", "n_calib",
-                      "level_default", "oof_coverage", "mean_width",
-                      "prepped_recipe", "test_coverage", "test_mean_width",
-                      "n_test")
-        expect_true(all(expected %in% names(uq_bundle)))
+    ## Coverage measured on the held-out test rows (#118)
+    expect_gt(uq_bundle$n_test, 0)
+    expect_gte(uq_bundle$test_coverage, 0)
+    expect_lte(uq_bundle$test_coverage, 1)
+    expect_gt(uq_bundle$test_mean_width, 0)
 
-        ## Coverage measured on the held-out test rows (#118)
-        expect_gt(uq_bundle$n_test, 0)
-        expect_gte(uq_bundle$test_coverage, 0)
-        expect_lte(uq_bundle$test_coverage, 1)
-        expect_gt(uq_bundle$test_mean_width, 0)
+  })
 
-      }
+  it("measures coverage on the held-out test rows with the intervals predict() serves (#118)", {
 
-    }
+    expect_false(is.null(result$models$uq))
+
+    uq_bundle <- result$models$uq[[result$models$best_config]]
+    held_out  <- rsample::testing(result$models$split)
+    p         <- predict(result, held_out, interval = TRUE)
+    covered   <- held_out$SOC >= p$.pred_lower & held_out$SOC <= p$.pred_upper
+
+    expect_identical(uq_bundle$n_test, nrow(held_out))
+    expect_equal(uq_bundle$test_coverage, mean(covered))
+    expect_equal(uq_bundle$test_mean_width, mean(p$.interval_width))
 
   })
 
