@@ -217,8 +217,11 @@ describe("fit_uq() - return contract", {
 
     ## Signed nonconformity scores (Romano et al. 2019): may be negative
     ## where the predicted quantile band already brackets the residual.
-    ## They must be finite (NA scores are dropped upstream).
+    ## They must be finite (NA scores are dropped upstream). Most calibration
+    ## residuals at this fixture fall inside the band, so some scores are
+    ## negative; scores taken as absolute values would have none.
     expect_true(all(is.finite(result$scores)))
+    expect_true(any(result$scores < 0))
 
   })
 

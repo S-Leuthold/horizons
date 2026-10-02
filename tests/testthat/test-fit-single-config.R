@@ -8,7 +8,9 @@
 ## Helper: build minimal data, split, folds, and role_map for fit testing
 ## ---------------------------------------------------------------------------
 
-make_fit_setup <- function(n = 60, n_wn = 10, seed = 42) {
+make_fit_setup <- function(n = 60, n_wn = 10, seed = 42,
+                           signal_cols = seq_len(min(3, n_wn)),
+                           signal = 0.5, noise_sd = 0.5) {
 
   set.seed(seed)
 
@@ -19,8 +21,10 @@ make_fit_setup <- function(n = 60, n_wn = 10, seed = 42) {
   df <- tibble::as_tibble(spec_mat)
   df$sample_id <- paste0("S", sprintf("%03d", seq_len(n)))
 
-  ## Outcome with weak signal from first 3 predictors
-  df$SOC <- 2 + rowMeans(spec_mat[, 1:min(3, n_wn)]) * 0.5 + rnorm(n, sd = 0.5)
+  ## Outcome with signal from signal_cols (by default, weak signal from the
+  ## first 3 predictors)
+  df$SOC <- 2 + rowMeans(spec_mat[, signal_cols, drop = FALSE]) * signal +
+    rnorm(n, sd = noise_sd)
 
   role_map <- tibble::tibble(
     variable = c("sample_id", wn_names, "SOC"),
@@ -538,7 +542,11 @@ describe("fit_single_config() - failure paths", {
 
 describe("fit_single_config() - degradation detection", {
 
-  setup  <- make_fit_setup()
+  ## A fixture that learns: strong signal carried by columns 5 and 6, the two
+  ## that survive the raw step's edge trim at 10 points. The bootstrap
+  ## interval of its test RPD reaches well past its CV mean RPD, so the fit is
+  ## not flagged.
+  setup  <- make_fit_setup(signal_cols = 5:6, signal = 1, noise_sd = 0.1)
   config <- make_fit_config()
   best_p <- make_fit_best_params()
 
@@ -564,22 +572,43 @@ describe("fit_single_config() - degradation detection", {
 
   it("degraded_reason is NA when not degraded", {
 
-    if (!result$degraded) {
-
-      expect_true(is.na(result$degraded_reason))
-
-    }
+    expect_false(result$degraded)
+    expect_true(is.na(result$degraded_reason))
 
   })
 
   it("degraded_reason is a string when degraded", {
 
-    if (result$degraded) {
+    ## The same fixture with its test rows' outcomes replaced by noise, so the
+    ## test RPD falls well below the CV RPD
+    deg_setup <- setup
 
-      expect_true(is.character(result$degraded_reason))
-      expect_true(nchar(result$degraded_reason) > 0)
+    test_rows <- rsample::complement(deg_setup$split_F)
+    train_soc <- deg_setup$train_F$SOC
+    deg_setup$split_F$data$SOC[test_rows] <- withr::with_seed(
+      7, stats::rnorm(length(test_rows), mean(train_soc), stats::sd(train_soc))
+    )
 
-    }
+    degraded_result <- fit_single_config(
+      config_row       = config,
+      split_F          = deg_setup$split_F,
+      cv_resamples     = deg_setup$folds,
+      calib_data       = NULL,
+      role_map         = deg_setup$role_map,
+      best_params_eval = best_p,
+      final_bayesian_iter = 0L,
+      grid_size        = 2L,
+      compute_uq       = FALSE,
+      allow_par        = FALSE,
+      seed             = 42L
+    )
+
+    expect_equal(degraded_result$status, "success")
+    expect_true(degraded_result$degraded)
+    expect_true(is.character(degraded_result$degraded_reason))
+    expect_true(nchar(degraded_result$degraded_reason) > 0)
+    expect_match(degraded_result$degraded_reason, "below the CV mean RPD",
+                 fixed = TRUE)
 
   })
 
