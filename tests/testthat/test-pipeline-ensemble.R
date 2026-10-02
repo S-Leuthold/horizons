@@ -940,4 +940,31 @@ describe("combine_ensemble_metamodel() - row alignment", {
 
   })
 
+  it("aborts at fit time when the meta-model's test predictions are short", {
+
+    ## fit_tuned_meta_learner() binds the meta-model's test_F predictions to
+    ## the test samples and their truth the same way; one prediction would be
+    ## recycled and the ensemble's test metrics scored on a constant. Only the
+    ## meta-model's call is shortened: its new_data is the member_ matrix,
+    ## while the members themselves predict spectra.
+    predict_workflow <- utils::getS3method("predict", "workflow")
+
+    local_mocked_s3_method("predict", "workflow", function(object, new_data, ...) {
+      if (all(startsWith(names(new_data), "member_"))) {
+        tibble::tibble(.pred = 3)
+      } else {
+        predict_workflow(object, new_data, ...)
+      }
+    })
+
+    ## suppressWarnings(): rsample's note that the fixture is too small for
+    ## the default strata breaks is not what this test is about.
+    expect_error(
+      suppressWarnings(ensemble(fitted, method = "penalized", optimize = FALSE,
+                                compute_uq = FALSE, verbose = FALSE)),
+      "Meta-model predictions", class = "horizons_internal_error"
+    )
+
+  })
+
 })

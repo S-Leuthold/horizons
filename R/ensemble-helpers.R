@@ -348,6 +348,8 @@ predict_members_on_test <- function(object, members) {
 #'   the tuning resamples and the genuine meta-OOF are reproducible.
 #'
 #' @return The ensemble contract list from [build_ensemble_contract()].
+#'   Aborts with class `horizons_internal_error` when the meta-model returns
+#'   a different number of `test_F` predictions than there are test samples.
 #'
 #' @keywords internal
 fit_tuned_meta_learner <- function(object,
@@ -522,6 +524,16 @@ fit_tuned_meta_learner <- function(object,
     meta_fit,
     new_data = test_wide[, member_cols, drop = FALSE]
   )$.pred
+
+  ## Attached to test_wide$sample_id and truth by position, as at predict
+  ## time in combine_ensemble_metamodel(): a short prediction would be
+  ## recycled and the test metrics scored on the wrong samples.
+  check_rows_aligned(
+    what       = "Meta-model predictions",
+    to         = "the test samples the members predicted",
+    n          = length(combined),
+    n_expected = nrow(test_wide)
+  )
 
   ensemble_pred <- tibble::tibble(
     sample_id = test_wide$sample_id,
