@@ -239,7 +239,7 @@ describe("predict.horizons_fit() - intervals", {
     ## and a winsorized .pred can fall outside, so only the bounds' order,
     ## width and range are promised.
     p     <- predict(fitted_fixture, new_df)
-    range <- fitted_fixture$config$outcome_range
+    range <- outcome_range_setting(fitted_fixture)
 
     expect_length(range, 2)
     expect_true(all(c(".pred_lower", ".pred_upper", ".interval_width") %in% names(p)))
