@@ -1200,6 +1200,7 @@ test_that("a PLS space records and prints that it selected on the pool's own res
 
 test_that("the return validates and runs through the ordinary chain", {
 
+  skip_unless_slow_tier()
   skip_on_cran()
 
   fx  <- select_fixture(n_pool = 300)
@@ -1390,6 +1391,8 @@ test_that("verbose = TRUE reports the pool, the space and the draw", {
 ## =============================================================================
 
 test_that("permuting the pool's responses collapses the evaluated CV", {
+
+  skip_unless_slow_tier()
 
   ## The single highest-leverage leakage detector on this path: if the
   ## selection or the recipe were carrying any information about the outcome

@@ -1,8 +1,10 @@
 # Workflow derived from https://github.com/r-lib/actions/tree/v2/examples
 # Need help debugging build failures? Start at https://github.com/r-lib/actions#where-to-find-help
 # Coverage runs after merge, not on pull requests: R-CMD-check already runs
-# the full suite on every PR, and running it a second time under covr only
-# doubled runner time.
+# the suite on every PR, and running it a second time under covr only
+# doubled runner time. Coverage always includes the slow tier
+# (tests/testthat/helper-tier.R), so tiered tests still count, and the job
+# fails unless the test output shows the tier ran.
 on:
   push:
     branches: [main, development]
@@ -17,6 +19,7 @@ jobs:
       # covr records coverage in-process, so the suite runs serially here.
       TESTTHAT_PARALLEL: false
       GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
+      HORIZONS_SLOW_TESTS: true
 
     steps:
       - uses: actions/checkout@v4
@@ -41,6 +44,27 @@ jobs:
           )
           covr::to_cobertura(cov)
         shell: Rscript {0}
+
+      - name: Check the slow tier ran
+        shell: bash
+        run: |
+          ## --------------------------------------------------------------------
+          ## Fails closed, as in R-CMD-check.yaml: the tier counts as run only
+          ## if tests/testthat.R reported it on and no test skipped for it.
+          mapfile -t routs < <(find '${{ runner.temp }}/package' -name 'testthat.Rout*' -type f)
+          if [ "${#routs[@]}" -eq 0 ]; then
+            echo "::error::No testthat.Rout under the coverage install, so the slow tier cannot be shown to have run."
+            exit 1
+          fi
+          if ! grep -qx 'horizons slow tier: on' "${routs[@]}"; then
+            echo "::error::Coverage should include the slow tier, but the tests ran with it off. Is HORIZONS_SLOW_TESTS set to true?"
+            exit 1
+          fi
+          if grep -q 'slow tier (set HORIZONS_SLOW_TESTS' "${routs[@]}"; then
+            echo "::error::Coverage should include the slow tier, but tests skipped for it."
+            exit 1
+          fi
+          echo "The slow tier ran: the tests reported it on, and no test skipped for it."
 
       - uses: codecov/codecov-action@v4
         with:

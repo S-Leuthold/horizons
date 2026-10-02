@@ -314,6 +314,7 @@ describe("evaluate() - output_dir requirement", {
 
   it("is not required on the resamples axis", {
 
+    skip_unless_slow_tier()
     skip_on_cran()
     local_plan(future::multisession, workers = 2)
     obj <- make_eval_object(n_configs = 2)
@@ -340,6 +341,7 @@ describe("evaluate() - resamples axis", {
 
   it("runs on the registered plan and records the axis", {
 
+    skip_unless_slow_tier()
     skip_on_cran()
     local_plan(future::multisession, workers = 2)
     obj <- make_eval_object(n_configs = 2)   # 2 < cv_folds (3) -> auto = resamples
@@ -396,6 +398,7 @@ describe("evaluate() - configs axis", {
 
   it("writes a schema-4 manifest describing the plan, the axis, the data and the settings", {
 
+    skip_unless_slow_tier()
     skip_on_cran()
     skip_if_dev_package()
 
@@ -426,6 +429,7 @@ describe("evaluate() - configs axis", {
 
   it("produces one result and one checkpoint per config", {
 
+    skip_unless_slow_tier()
     skip_on_cran()
     skip_if_dev_package()
 
@@ -446,6 +450,7 @@ describe("evaluate() - configs axis", {
 
   it("matches the sequential run in structure", {
 
+    skip_unless_slow_tier()
     skip_on_cran()
     skip_if_dev_package()
 
@@ -475,6 +480,7 @@ describe("evaluate() - configs axis", {
 
   it("leaves the user's plan exactly as it found it", {
 
+    skip_unless_slow_tier()
     skip_on_cran()
     skip_if_dev_package()
 
@@ -516,6 +522,7 @@ describe("evaluate() - cross-mode checkpoint resume", {
 
   it("resumes a configs-axis run from sequential checkpoints", {
 
+    skip_unless_slow_tier()
     skip_on_cran()
     skip_if_dev_package()
 
@@ -728,6 +735,7 @@ describe("evaluate() - results are identical across axes", {
 
   it("resamples axis on a real two-worker plan matches the sequential run exactly", {
 
+    skip_unless_slow_tier()
     skip_on_cran()
     run        <- axes_seq_run()
     obj        <- run$obj
@@ -749,6 +757,7 @@ describe("evaluate() - results are identical across axes", {
 
   it("configs axis matches the sequential run exactly (installed build)", {
 
+    skip_unless_slow_tier()
     skip_on_cran()
     skip_if_dev_package()
     run        <- axes_seq_run()
@@ -784,6 +793,7 @@ describe("evaluate() - recipe settings on the configs axis", {
 
   it("runs configure()'s window in the worker, as the sequential run does (installed build)", {
 
+    skip_unless_slow_tier()
     skip_on_cran()
     skip_if_dev_package()
 
@@ -910,6 +920,7 @@ describe("monitor_evaluate() - applies evaluate()'s checkpoint gates", {
 
   it("relabels resumed 'pruned' rows at bayesian_iter = 0, naming evaluate()'s best", {
 
+    skip_unless_slow_tier()
     skip_on_cran()
     obj    <- make_eval_object(n = 60, n_configs = 2)   # bayesian_iter = 0
     tmpdir <- withr::local_tempdir()
@@ -1002,6 +1013,7 @@ describe("monitor_evaluate() - applies evaluate()'s checkpoint gates", {
 
   it("reads a legacy single file exactly where evaluate() would", {
 
+    skip_unless_slow_tier()
     skip_on_cran()
     obj    <- make_eval_object(n = 60, n_configs = 2)
     tmpdir <- withr::local_tempdir()

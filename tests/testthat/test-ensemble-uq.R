@@ -351,6 +351,8 @@ describe("predict.horizons_ensemble() - CV+ intervals", {
       it(paste0("method = '", m, "', optimize = ", opt,
                 " produces a bundle and interval columns"), {
 
+        if (opt && m != "weighted") skip_unless_slow_tier()
+
         test_set <- ens_test_set()
         ens      <- ens_built(m, optimize = opt)
 

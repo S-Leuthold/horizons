@@ -1618,6 +1618,7 @@ describe("custom steps keep their selectors through prep (#52)", {
 
     it(paste0(step, ": an untrained step from before #52 preps into the current layout"), {
 
+      if (step == "cars") skip_unless_slow_tier()
       skip_if_step_unavailable(step)
 
       fx <- step_prepped(step)

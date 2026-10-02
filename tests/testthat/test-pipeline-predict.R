@@ -1638,6 +1638,8 @@ describe("predict.horizons_fit() - fresh-process round trip", {
 
   it("predicts point estimates with no namespace preloaded in the caller", {
 
+    skip_unless_slow_tier()
+
     p <- run_in_fresh_process(interval = FALSE)
 
     expect_true(".pred" %in% names(p))

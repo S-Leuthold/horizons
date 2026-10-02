@@ -61,6 +61,8 @@ describe("ensemble() penalized - non-degenerate on real signal", {
 
   it("learns at least one non-zero member coefficient", {
 
+    skip_unless_slow_tier()
+
     ens   <- ens_built("penalized", optimize = TRUE)
     coefs <- ens$ensemble$weights$coef
     expect_gt(sum(abs(coefs) > 1e-8), 0)
@@ -68,6 +70,8 @@ describe("ensemble() penalized - non-degenerate on real signal", {
   })
 
   it("produces ensemble test predictions correlated with truth", {
+
+    skip_unless_slow_tier()
 
     ens <- ens_built("penalized", optimize = TRUE)
     ep  <- ens$ensemble$predictions
@@ -205,6 +209,8 @@ describe("ensemble() - engine x mode dispatch", {
     for (optimize in c(TRUE, FALSE)) {
 
       it(paste0(method, " optimize=", optimize, " returns a horizons_ensemble"), {
+
+        if (optimize && method != "weighted") skip_unless_slow_tier()
 
         ens <- ens_built(method, optimize = optimize)
         expect_true(inherits(ens, "horizons_ensemble"))
