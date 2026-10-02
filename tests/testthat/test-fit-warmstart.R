@@ -430,12 +430,14 @@ describe("tune_warmstart_bayes() - fallback behavior", {
 
   it("still returns results when best_params is NULL (fallback grid)", {
 
+    ## A three-point fallback grid: the fallback does not depend on its size
     result <- tune_warmstart_bayes(
       workflow      = ts$wf,
       cv_resamples  = ts$folds,
       best_params   = NULL,
       param_set     = ts$param_set,
       bayesian_iter = 0L,
+      grid_size     = 3L,
       metric_set    = ts$metric_set,
       allow_par     = FALSE
     )

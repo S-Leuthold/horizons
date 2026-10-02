@@ -98,22 +98,27 @@ EXPECTED_CV_PRED_COLS <- c(
 
 
 ## =========================================================================
-## Success path
+## Shared fit (helper-memo.R)
 ## =========================================================================
+## One successful fit_single_config() result, built on its first use in a
+## process and read by every block below that asserts on a successful fit.
+## The fixture learns: its strong signal sits on columns 5 and 6, the two
+## that survive the raw step's edge trim at 10 points, so the bootstrap
+## interval of its test RPD reaches well past its CV mean RPD and the fit is
+## not flagged as degraded. Returns the setup with the result, since some
+## tests read the split.
 
-describe("fit_single_config() - success path", {
+build_fsc <- function() {
 
-  setup  <- make_fit_setup()
-  config <- make_fit_config()
-  best_p <- make_fit_best_params()
+  setup <- make_fit_setup(signal_cols = 5:6, signal = 1, noise_sd = 0.1)
 
   result <- fit_single_config(
-    config_row       = config,
+    config_row       = make_fit_config(),
     split_F          = setup$split_F,
     cv_resamples     = setup$folds,
     calib_data       = NULL,
     role_map         = setup$role_map,
-    best_params_eval = best_p,
+    best_params_eval = make_fit_best_params(),
     final_bayesian_iter = 0L,
     grid_size        = 2L,
     compute_uq       = FALSE,
@@ -121,44 +126,64 @@ describe("fit_single_config() - success path", {
     seed             = 42L
   )
 
+  list(setup = setup, result = result)
+
+}
+
+fsc <- function() memo_fixture("fsc", build_fsc)
+
+
+## =========================================================================
+## Success path
+## =========================================================================
+
+describe("fit_single_config() - success path", {
+
   it("returns a list", {
 
+    result <- fsc()$result
     expect_true(is.list(result))
 
   })
 
   it("has all expected fields", {
 
+    result <- fsc()$result
     expect_true(all(EXPECTED_FIT_FIELDS %in% names(result)))
 
   })
 
   it("sets status to 'success'", {
 
+    result <- fsc()$result
     expect_equal(result$status, "success")
 
   })
 
   it("preserves config_id", {
 
+    result <- fsc()$result
     expect_equal(result$config_id, "fit_test_001")
 
   })
 
   it("degraded is logical", {
 
+    result <- fsc()$result
     expect_true(is.logical(result$degraded))
 
   })
 
   it("records positive runtime", {
 
+    result <- fsc()$result
     expect_true(result$runtime_secs > 0)
 
   })
 
   it("has NA error_message on success", {
 
+    result <- fsc()$result
     expect_true(is.na(result$error_message))
 
   })
@@ -172,33 +197,19 @@ describe("fit_single_config() - success path", {
 
 describe("fit_single_config() - fitted workflow", {
 
-  setup  <- make_fit_setup()
-  config <- make_fit_config()
-  best_p <- make_fit_best_params()
-
-  result <- fit_single_config(
-    config_row       = config,
-    split_F          = setup$split_F,
-    cv_resamples     = setup$folds,
-    calib_data       = NULL,
-    role_map         = setup$role_map,
-    best_params_eval = best_p,
-    final_bayesian_iter = 0L,
-    grid_size        = 2L,
-    compute_uq       = FALSE,
-    allow_par        = FALSE,
-    seed             = 42L
-  )
-
   it("returns a fitted workflow (butchered)", {
 
+    result <- fsc()$result
     expect_true(!is.null(result$fitted_workflow))
 
   })
 
   it("fitted workflow can still predict on new data", {
 
-    test_data <- rsample::testing(setup$split_F)
+    shared <- fsc()
+    result <- shared$result
+
+    test_data <- rsample::testing(shared$setup$split_F)
     preds <- stats::predict(result$fitted_workflow, new_data = test_data)
 
     expect_s3_class(preds, "tbl_df")
@@ -216,39 +227,23 @@ describe("fit_single_config() - fitted workflow", {
 
 describe("fit_single_config() - cv_predictions", {
 
-  setup  <- make_fit_setup()
-  config <- make_fit_config()
-  best_p <- make_fit_best_params()
-
-  result <- fit_single_config(
-    config_row       = config,
-    split_F          = setup$split_F,
-    cv_resamples     = setup$folds,
-    calib_data       = NULL,
-    role_map         = setup$role_map,
-    best_params_eval = best_p,
-    final_bayesian_iter = 0L,
-    grid_size        = 2L,
-    compute_uq       = FALSE,
-    allow_par        = FALSE,
-    seed             = 42L
-  )
-
-  cv_preds <- result$cv_predictions
-
   it("is a tibble", {
 
+    cv_preds <- fsc()$result$cv_predictions
     expect_s3_class(cv_preds, "tbl_df")
 
   })
 
   it("has all expected columns", {
 
+    cv_preds <- fsc()$result$cv_predictions
     expect_true(all(EXPECTED_CV_PRED_COLS %in% names(cv_preds)))
 
   })
 
   it(".pred is on original scale (not transformed)", {
+
+    cv_preds <- fsc()$result$cv_predictions
 
     ## With transformation = "none", .pred == .pred_trans
     expect_equal(cv_preds$.pred, cv_preds$.pred_trans)
@@ -257,6 +252,8 @@ describe("fit_single_config() - cv_predictions", {
 
   it("truth is on original scale", {
 
+    cv_preds <- fsc()$result$cv_predictions
+
     ## truth should be positive SOC values (our test data has SOC > 0)
     expect_true(all(is.finite(cv_preds$truth)))
 
@@ -264,26 +261,32 @@ describe("fit_single_config() - cv_predictions", {
 
   it(".row is integer", {
 
+    cv_preds <- fsc()$result$cv_predictions
     expect_true(is.integer(cv_preds$.row) || is.numeric(cv_preds$.row))
 
   })
 
   it(".fold is character", {
 
+    cv_preds <- fsc()$result$cv_predictions
     expect_true(is.character(cv_preds$.fold))
 
   })
 
   it("config_id is consistent", {
 
+    cv_preds <- fsc()$result$cv_predictions
     expect_true(all(cv_preds$config_id == "fit_test_001"))
 
   })
 
   it("has one row per sample in training data (each sample appears once)", {
 
+    shared   <- fsc()
+    cv_preds <- shared$result$cv_predictions
+
     ## OOF: each training sample appears exactly once across folds
-    n_train <- nrow(rsample::training(setup$split_F))
+    n_train <- nrow(rsample::training(shared$setup$split_F))
     expect_equal(nrow(cv_preds), n_train)
 
   })
@@ -297,28 +300,9 @@ describe("fit_single_config() - cv_predictions", {
 
 describe("fit_single_config() - cv_metrics", {
 
-  setup  <- make_fit_setup()
-  config <- make_fit_config()
-  best_p <- make_fit_best_params()
-
-  result <- fit_single_config(
-    config_row       = config,
-    split_F          = setup$split_F,
-    cv_resamples     = setup$folds,
-    calib_data       = NULL,
-    role_map         = setup$role_map,
-    best_params_eval = best_p,
-    final_bayesian_iter = 0L,
-    grid_size        = 2L,
-    compute_uq       = FALSE,
-    allow_par        = FALSE,
-    seed             = 42L
-  )
-
-  cv_met <- result$cv_metrics
-
   it("is a tibble with mean and std_err columns", {
 
+    cv_met <- fsc()$result$cv_metrics
     expect_s3_class(cv_met, "tbl_df")
     expect_true("mean" %in% names(cv_met))
     expect_true("std_err" %in% names(cv_met))
@@ -327,6 +311,7 @@ describe("fit_single_config() - cv_metrics", {
 
   it("contains the standard 6 metrics", {
 
+    cv_met <- fsc()$result$cv_metrics
     expected_metrics <- c("rmse", "rrmse", "rsq", "ccc", "rpd", "mae")
     expect_true(all(expected_metrics %in% cv_met$.metric))
 
@@ -334,12 +319,14 @@ describe("fit_single_config() - cv_metrics", {
 
   it("mean values are finite", {
 
+    cv_met <- fsc()$result$cv_metrics
     expect_true(all(is.finite(cv_met$mean)))
 
   })
 
   it("std_err values are non-negative", {
 
+    cv_met <- fsc()$result$cv_metrics
     expect_true(all(cv_met$std_err >= 0))
 
   })
@@ -353,28 +340,9 @@ describe("fit_single_config() - cv_metrics", {
 
 describe("fit_single_config() - test_metrics", {
 
-  setup  <- make_fit_setup()
-  config <- make_fit_config()
-  best_p <- make_fit_best_params()
-
-  result <- fit_single_config(
-    config_row       = config,
-    split_F          = setup$split_F,
-    cv_resamples     = setup$folds,
-    calib_data       = NULL,
-    role_map         = setup$role_map,
-    best_params_eval = best_p,
-    final_bayesian_iter = 0L,
-    grid_size        = 2L,
-    compute_uq       = FALSE,
-    allow_par        = FALSE,
-    seed             = 42L
-  )
-
-  test_met <- result$test_metrics
-
   it("is a single-row tibble with 6 metrics", {
 
+    test_met <- fsc()$result$test_metrics
     expect_s3_class(test_met, "tbl_df")
     expect_equal(nrow(test_met), 1)
 
@@ -382,6 +350,7 @@ describe("fit_single_config() - test_metrics", {
 
   it("has all 6 standard metric columns", {
 
+    test_met <- fsc()$result$test_metrics
     expected <- c("rmse", "rrmse", "rsq", "ccc", "rpd", "mae")
     expect_true(all(expected %in% names(test_met)))
 
@@ -389,6 +358,7 @@ describe("fit_single_config() - test_metrics", {
 
   it("metrics are on original scale (finite, reasonable)", {
 
+    test_met <- fsc()$result$test_metrics
     expect_true(is.finite(test_met$rmse))
     expect_true(test_met$rmse > 0)
 
@@ -542,36 +512,20 @@ describe("fit_single_config() - failure paths", {
 
 describe("fit_single_config() - degradation detection", {
 
-  ## A fixture that learns: strong signal carried by columns 5 and 6, the two
-  ## that survive the raw step's edge trim at 10 points. The bootstrap
-  ## interval of its test RPD reaches well past its CV mean RPD, so the fit is
-  ## not flagged.
-  setup  <- make_fit_setup(signal_cols = 5:6, signal = 1, noise_sd = 0.1)
+  ## The shared fit learns, so it is not flagged (see build_fsc())
   config <- make_fit_config()
   best_p <- make_fit_best_params()
 
-  result <- fit_single_config(
-    config_row       = config,
-    split_F          = setup$split_F,
-    cv_resamples     = setup$folds,
-    calib_data       = NULL,
-    role_map         = setup$role_map,
-    best_params_eval = best_p,
-    final_bayesian_iter = 0L,
-    grid_size        = 2L,
-    compute_uq       = FALSE,
-    allow_par        = FALSE,
-    seed             = 42L
-  )
-
   it("degraded is FALSE or TRUE (never NA for success)", {
 
+    result <- fsc()$result
     expect_true(!is.na(result$degraded))
 
   })
 
   it("degraded_reason is NA when not degraded", {
 
+    result <- fsc()$result
     expect_false(result$degraded)
     expect_true(is.na(result$degraded_reason))
 
@@ -579,9 +533,9 @@ describe("fit_single_config() - degradation detection", {
 
   it("degraded_reason is a string when degraded", {
 
-    ## The same fixture with its test rows' outcomes replaced by noise, so the
-    ## test RPD falls well below the CV RPD
-    deg_setup <- setup
+    ## The shared fit's setup with its test rows' outcomes replaced by noise,
+    ## so the test RPD falls well below the CV RPD
+    deg_setup <- fsc()$setup
 
     test_rows <- rsample::complement(deg_setup$split_F)
     train_soc <- deg_setup$train_F$SOC
@@ -621,26 +575,9 @@ describe("fit_single_config() - degradation detection", {
 
 describe("fit_single_config() - UQ disabled", {
 
-  setup  <- make_fit_setup()
-  config <- make_fit_config()
-  best_p <- make_fit_best_params()
-
-  result <- fit_single_config(
-    config_row       = config,
-    split_F          = setup$split_F,
-    cv_resamples     = setup$folds,
-    calib_data       = NULL,
-    role_map         = setup$role_map,
-    best_params_eval = best_p,
-    final_bayesian_iter = 0L,
-    grid_size        = 2L,
-    compute_uq       = FALSE,
-    allow_par        = FALSE,
-    seed             = 42L
-  )
-
   it("uq is NULL when compute_uq = FALSE", {
 
+    result <- fsc()$result
     expect_null(result$uq)
 
   })
