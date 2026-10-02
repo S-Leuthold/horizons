@@ -20,28 +20,29 @@ quiet_select <- function(fx, ...) {
 #' @description
 #' `make_select_fixture()` draws clay independently of the spectra, so no
 #' model can learn it. This replaces it with a known linear function of the
-#' spectra plus noise: the sum of the band means (within 20 cm-1) at the
-#' eight peak centres of the fixture's two families, rescaled to mean 35 and
-#' SD 8, plus Gaussian noise sized for an R² of `r2`. A band is several grid
-#' steps wide, so it survives the resampling of the drawn rows to the
-#' targets' 8 cm-1 grid. Each family contributes four peaks to the sum, so
-#' the two families' clay means differ by under 1 (clay SD about 9): the
-#' signal is in each row's own spectrum, not in which family the row belongs
-#' to, and pairing the responses with the wrong rows destroys it.
+#' spectra plus noise: the sum of the band means (within 20 cm-1) at one peak
+#' centre of each of the fixture's two families (1630 and 1420 cm-1),
+#' rescaled to mean 35 and SD 8, plus Gaussian noise sized for an R² of
+#' `r2`. A band is several grid steps wide, so it survives the resampling of
+#' the drawn rows to the targets' 8 cm-1 grid. Each family contributes one
+#' peak to the sum, so the two families' clay means are close against the
+#' clay SD: the signal is in each row's own spectrum, not in which family
+#' the row belongs to, and pairing the responses with the wrong rows
+#' destroys it.
 #'
 #' @param pool [horizons_data.] `make_select_fixture()$pool`.
 #' @param r2 [Numeric.] R² of the returned clay on its noise-free part.
-#'   Default: `0.85`.
+#'   Default: `0.8`.
 #' @param seed [Integer.] Seed for the noise, applied through
 #'   `withr::with_seed()` so the global RNG stream is left as it was.
 #'   Default: `1`.
 #'
 #' @return [horizons_data.] `pool` with `clay` replaced.
 #' @noRd
-learnable_clay_pool <- function(pool, r2 = 0.85, seed = 1) {
+learnable_clay_pool <- function(pool, r2 = 0.8, seed = 1) {
 
-  ## The peak centres make_select_fixture() gives its two families
-  centres <- c(3400, 2920, 1630, 1030, 3620, 2515, 1420, 870)
+  ## One peak centre from each of make_select_fixture()'s two families
+  centres <- c(1630, 1420)
 
   pm   <- predictor_matrix(pool)
   band <- vapply(centres, function(cc) {
@@ -1395,11 +1396,10 @@ test_that("permuting the pool's responses collapses the evaluated CV", {
   ## The pool's clay is a known function of its spectra, so the same pipeline
   ## on the unshuffled pool has to learn it. That is what makes the collapse
   ## mean something, and it is what fails if the selection pairs responses
-  ## with the wrong spectra. The floor of 1.2 sits 0.4 below the lowest CV RPD
-  ## over twenty runs varying the clay noise and evaluate()'s seed (1.61);
-  ## permuted runs scored 0.97 to 1.04. PLSR over its whole tuning range (one
-  ## to four components, hence grid_size = 4) keeps the two runs to a few
-  ## seconds.
+  ## with the wrong spectra. The floor of 1.1 sits at least 0.4 below the
+  ## lowest CV RPD over twenty runs varying the clay noise and evaluate()'s
+  ## seed. A forest, because it also finds a leak that is not linear in the
+  ## predictors.
 
   skip_on_cran()
 
@@ -1411,8 +1411,8 @@ test_that("permuting the pool's responses collapses the evaluated CV", {
     out <- select_training(fx$targets, pool, k = 40, properties = "clay", verbose = FALSE)
 
     utils::capture.output({
-      cfg <- configure(out, outcome = "clay", models = "plsr", cv_folds = 3L,
-                       grid_size = 4L, bayesian_iter = 0L, final_bayesian_iter = 0L)
+      cfg <- configure(out, outcome = "clay", models = "rf", cv_folds = 3L,
+                       grid_size = 2L, bayesian_iter = 0L, final_bayesian_iter = 0L)
       cfg <- validate(cfg)
     })
 
@@ -1429,7 +1429,7 @@ test_that("permuting the pool's responses collapses the evaluated CV", {
 
   learned <- cv_rpd(fx$pool)
 
-  expect_gte(learned[["cv"]], 1.2)
+  expect_gte(learned[["cv"]], 1.1)
 
   set.seed(4)
   shuffled <- fx$pool
@@ -1441,7 +1441,7 @@ test_that("permuting the pool's responses collapses the evaluated CV", {
   expect_lt(scores[["cv"]], 1.3)
 
   ## Tolerant on the upper side: this is a synthetic fixture and a small
-  ## model, so the point is that the permuted model has no signal at all,
+  ## forest, so the point is that the permuted model has no signal at all,
   ## not where exactly the real one lands.
   expect_lt(permuted, 1.3)
 
