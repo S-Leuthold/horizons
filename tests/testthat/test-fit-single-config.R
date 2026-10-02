@@ -542,7 +542,11 @@ describe("fit_single_config() - failure paths", {
 
 describe("fit_single_config() - degradation detection", {
 
-  setup  <- make_fit_setup()
+  ## A fixture that learns: strong signal carried by columns 5 and 6, the two
+  ## that survive the raw step's edge trim at 10 points. The bootstrap
+  ## interval of its test RPD reaches well past its CV mean RPD, so the fit is
+  ## not flagged.
+  setup  <- make_fit_setup(signal_cols = 5:6, signal = 1, noise_sd = 0.1)
   config <- make_fit_config()
   best_p <- make_fit_best_params()
 
@@ -575,10 +579,9 @@ describe("fit_single_config() - degradation detection", {
 
   it("degraded_reason is a string when degraded", {
 
-    ## Strong signal in training, carried by columns 5 and 6, the two that
-    ## survive the raw step's edge trim at 10 points. The test rows' outcomes
-    ## are then replaced by noise, so the test RPD falls well below the CV RPD.
-    deg_setup <- make_fit_setup(signal_cols = 5:6, signal = 1, noise_sd = 0.1)
+    ## The same fixture with its test rows' outcomes replaced by noise, so the
+    ## test RPD falls well below the CV RPD
+    deg_setup <- setup
 
     test_rows <- rsample::complement(deg_setup$split_F)
     train_soc <- deg_setup$train_F$SOC

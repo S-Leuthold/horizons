@@ -224,13 +224,19 @@ describe("build_warmstart_grid() - log-scale params (xgboost)", {
     orig_lower <- lr_param$trans$inverse(lr_param$range$lower)
     orig_upper <- lr_param$trans$inverse(lr_param$range$upper)
 
-    ## Best learn_rate at the upper bound, so the candidates above it in log10
-    ## space fall outside the range unless they are clamped
-    edge_params <- make_xgb_best_params(learn_rate = orig_upper)
-    edge_grid <- build_warmstart_grid(edge_params, param_set, max_points = 25)
+    ## Best learn_rate at each bound in turn, so the candidates beyond it in
+    ## log10 space fall outside the range unless they are clamped
+    upper_params <- make_xgb_best_params(learn_rate = orig_upper)
+    upper_grid <- build_warmstart_grid(upper_params, param_set, max_points = 25)
 
-    expect_true(all(edge_grid$learn_rate >= orig_lower))
-    expect_true(all(edge_grid$learn_rate <= orig_upper))
+    expect_true(all(upper_grid$learn_rate >= orig_lower))
+    expect_true(all(upper_grid$learn_rate <= orig_upper))
+
+    lower_params <- make_xgb_best_params(learn_rate = orig_lower)
+    lower_grid <- build_warmstart_grid(lower_params, param_set, max_points = 25)
+
+    expect_true(all(lower_grid$learn_rate >= orig_lower))
+    expect_true(all(lower_grid$learn_rate <= orig_upper))
 
   })
 
@@ -456,6 +462,8 @@ describe("tune_warmstart_bayes() - Bayesian stage", {
       min_n = 5L
     )
 
+    budget <- 2L
+
     ## tune's control seed and the model fits draw from the session's random
     ## stream, so pin it
     result <- withr::with_seed(42, tune_warmstart_bayes(
@@ -463,7 +471,7 @@ describe("tune_warmstart_bayes() - Bayesian stage", {
       cv_resamples  = ts$folds,
       best_params   = best_params,
       param_set     = ts$param_set,
-      bayesian_iter = 2L,
+      bayesian_iter = budget,
       grid_size     = 5L,
       metric_set    = ts$metric_set,
       allow_par     = FALSE
@@ -475,11 +483,12 @@ describe("tune_warmstart_bayes() - Bayesian stage", {
     expect_false(result$fallback_used)
 
     ## Its results replaced the grid's: tune_bayes() returns iteration results,
-    ## with .iter 0 for the starting grid and 1 onwards for each iteration
+    ## with .iter 0 for the starting grid and 1 onwards for each iteration. The
+    ## whole budget runs, since it is well under the no-improvement limit.
     expect_s3_class(result$tune_results, "iteration_results")
     metrics <- tune::collect_metrics(result$tune_results)
     expect_true(".iter" %in% names(metrics))
-    expect_gte(max(metrics$.iter), 1)
+    expect_equal(max(metrics$.iter), budget)
 
     expect_s3_class(result$best_params, "tbl_df")
     expect_equal(nrow(result$best_params), 1)
