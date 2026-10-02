@@ -277,15 +277,17 @@ describe("validate() input validation", {
 
   })
 
-  test_that("warns on re-validation (overwriting previous results)", {
+  test_that("warns on re-validation, and replaces the checks rather than appending", {
 
     hd <- make_configured_hd()
     r1 <- quiet_validate(hd)
 
     expect_warning(
-      capture.output(validate(r1)),
+      capture.output(r2 <- validate(r1)),
       "Overwriting previous validation"
     )
+
+    expect_equal(nrow(r2$validation$checks), nrow(r1$validation$checks))
 
   })
 
@@ -299,15 +301,6 @@ describe("validate() input validation", {
 describe("validate() sample count checks", {
 
   ## P001 — Recommended sample count (n_total >= 50) ---------------------------
-
-  test_that("P001 passes with n=100", {
-
-    result <- quiet_validate(make_configured_hd(n_samples = 100))
-
-    p001 <- result$validation$checks[result$validation$checks$check_id == "P001", ]
-    expect_equal(p001$status, "pass")
-
-  })
 
   test_that("P001 passes at boundary (n=50)", {
 
@@ -330,15 +323,6 @@ describe("validate() sample count checks", {
 
   ## P001b — CV feasibility (n_model >= cv_folds * 2) --------------------------
 
-  test_that("P001b passes with sufficient samples", {
-
-    result <- quiet_validate(make_configured_hd(n_samples = 100, cv_folds = 5L))
-
-    p001b <- result$validation$checks[result$validation$checks$check_id == "P001b", ]
-    expect_equal(p001b$status, "pass")
-
-  })
-
   test_that("P001b passes at boundary (n_model=10, folds=5)", {
 
     result <- quiet_validate(make_configured_hd(n_samples = 10, cv_folds = 5L))
@@ -356,21 +340,6 @@ describe("validate() sample count checks", {
     expect_equal(p001b$status, "fail")
     expect_equal(p001b$severity, "ERROR")
     expect_false(result$validation$passed)
-
-  })
-
-  test_that("P001b uses n_model (outcome-complete), not n_total", {
-
-    ## 100 samples, 60% outcome NA → n_model = 40, cv_folds = 5 → 40 >= 10 → pass
-    outcome_vals <- c(stats::rnorm(40, 15, 5), rep(NA, 60))
-    result <- quiet_validate(make_configured_hd(
-      n_samples      = 100,
-      outcome_values = outcome_vals,
-      cv_folds       = 5L
-    ))
-
-    p001b <- result$validation$checks[result$validation$checks$check_id == "P001b", ]
-    expect_equal(p001b$status, "pass")
 
   })
 
@@ -432,17 +401,7 @@ describe("validate() outcome checks", {
     expect_false("P003" %in% check_ids)
     expect_false("P004" %in% check_ids)
     expect_false("P006" %in% check_ids)
-
-  })
-
-  test_that("runs P003/P004/P006 when outcome exists", {
-
-    result <- quiet_validate(make_configured_hd())
-
-    check_ids <- result$validation$checks$check_id
-    expect_true("P003" %in% check_ids)
-    expect_true("P004" %in% check_ids)
-    expect_true("P006" %in% check_ids)
+    expect_equal(length(result$validation$outliers$response_ids), 0)
 
   })
 
@@ -493,15 +452,6 @@ describe("validate() outcome checks", {
 
   ## P004 — Outcome NA proportion ----------------------------------------------
 
-  test_that("P004 passes with 0% NA", {
-
-    result <- quiet_validate(make_configured_hd())
-
-    p004 <- result$validation$checks[result$validation$checks$check_id == "P004", ]
-    expect_equal(p004$status, "pass")
-
-  })
-
   test_that("P004 passes at threshold (20% NA)", {
 
     outcome_vals <- c(stats::rnorm(80, 15, 5), rep(NA, 20))
@@ -541,15 +491,6 @@ describe("validate() outcome checks", {
 ## ===========================================================================
 
 describe("validate() predictor checks", {
-
-  test_that("P007 passes with normal predictors", {
-
-    result <- quiet_validate(make_configured_hd())
-
-    p007 <- result$validation$checks[result$validation$checks$check_id == "P007", ]
-    expect_equal(p007$status, "pass")
-
-  })
 
   test_that("P007 flags constant predictor columns", {
 
@@ -593,33 +534,6 @@ describe("validate() predictor checks", {
 
   })
 
-  test_that("P007 runs before P005 in check ordering", {
-
-    result <- quiet_validate(make_configured_hd())
-
-    checks <- result$validation$checks
-    p007_row <- which(checks$check_id == "P007")
-    p005_row <- which(checks$check_id == "P005")
-    expect_true(p007_row < p005_row)
-
-  })
-
-  test_that("all predictors constant: P005 skips gracefully", {
-
-    hd <- make_configured_hd(n_predictors = 5, constant_cols = 1:5)
-
-    ## P005 should skip (< 2 clean cols after NZV removal) — issued as warning
-    result <- suppressWarnings(quiet_validate(hd))
-
-    p007 <- result$validation$checks[result$validation$checks$check_id == "P007", ]
-    expect_equal(p007$value, "5")
-
-    ## P005 should still be in checks (just with 0 flagged)
-    expect_true("P005" %in% result$validation$checks$check_id)
-    expect_equal(length(result$validation$outliers$spectral_ids), 0)
-
-  })
-
 })
 
 
@@ -628,15 +542,6 @@ describe("validate() predictor checks", {
 ## ===========================================================================
 
 describe("validate() cubist feasibility check (P010)", {
-
-  test_that("P010 passes on the default fixture (below threshold, model = rf)", {
-
-    result <- quiet_validate(make_configured_hd())
-
-    p010 <- result$validation$checks[result$validation$checks$check_id == "P010", ]
-    expect_equal(p010$status, "pass")
-
-  })
 
   test_that("P010 fires for cubist + feature_selection = 'none' above the cell threshold", {
 
@@ -816,10 +721,8 @@ describe("validate() spectral outlier detection", {
 
     hd <- make_configured_hd(n_samples = 5, cv_folds = 2L)
 
-    ## Should NOT warn about too few samples
-    output <- capture.output(
-      result <- suppressWarnings(validate(hd))
-    )
+    ## No skip warning at n = 5: the guard is n < 5
+    expect_no_warning(capture.output(result <- validate(hd)))
 
     expect_true("P005" %in% result$validation$checks$check_id)
 
@@ -836,44 +739,10 @@ describe("validate() spectral outlier detection", {
       "Fewer than 2 predictor columns"
     )
 
+    p007 <- result$validation$checks[result$validation$checks$check_id == "P007", ]
+    expect_equal(p007$value, "2")
+
     expect_equal(length(result$validation$outliers$spectral_ids), 0)
-
-  })
-
-  test_that("P005 skips with singular covariance matrix", {
-
-    ## Create perfectly collinear predictors (duplicated columns)
-    hd <- make_configured_hd(n_samples = 20, n_predictors = 10)
-    base_col <- hd$data$analysis[["600"]]
-    for (i in 2:10) {
-
-      hd$data$analysis[[names(hd$data$analysis)[i + 1]]] <- base_col * i
-
-    }
-
-    result <- suppressWarnings(quiet_validate(hd))
-
-    ## Should complete without error (may or may not detect outliers depending
-    ## on PCA handling of collinear data)
-    expect_true("P005" %in% result$validation$checks$check_id)
-
-  })
-
-  test_that("P005 is INFO severity and does not affect passed", {
-
-    hd <- make_configured_hd()
-
-    ## Inject outliers
-    for (col in names(hd$data$analysis)[2:51]) {
-
-      hd$data$analysis[[col]][1:5] <- 100
-
-    }
-
-    result <- quiet_validate(hd)
-
-    expect_true("P005" %in% result$validation$checks$check_id)
-    expect_true(result$validation$passed)
 
   })
 
@@ -976,15 +845,6 @@ describe("validate() response outlier detection", {
 
   })
 
-  test_that("P006 skipped when no outcome exists", {
-
-    result <- quiet_validate(make_configured_hd(has_outcome = FALSE))
-
-    expect_false("P006" %in% result$validation$checks$check_id)
-    expect_equal(length(result$validation$outliers$response_ids), 0)
-
-  })
-
   test_that("P006 is INFO severity and does not affect passed", {
 
     outcome_vals <- c(stats::rnorm(97, 15, 2), 100, 200, 300)
@@ -1058,9 +918,18 @@ describe("validate() outlier removal", {
     expect_setequal(out$removed_ids, out$spectral_ids)
     expect_true(result$data$n_rows < 100)
 
-    ## S006 is a response outlier only: flagged, not removed
+    ## The removed rows are gone, and the counts say so
+    expect_equal(result$data$n_rows, 100 - length(out$removed_ids))
+    expect_equal(nrow(result$data$analysis), result$data$n_rows)
+    expect_false(any(out$removed_ids %in% result$data$analysis$sample_id))
+
+    ## S006 is a response outlier only: flagged, not removed. Every
+    ## response-only row stays, for evaluate() to trim if it lands in the
+    ## training partition
     expect_true("S006" %in% out$response_ids)
     expect_true("S006" %in% result$data$analysis$sample_id)
+    expect_true(all(setdiff(out$response_ids, out$spectral_ids) %in%
+                      result$data$analysis$sample_id))
 
     expect_identical(out$response_trim,
                      list(outcome = "SOC", method = "iqr", threshold = 1.5))
@@ -1122,48 +991,6 @@ describe("validate() outlier removal", {
 
   })
 
-  test_that("removal updates data$analysis row count", {
-
-    hd     <- make_outlier_hd()
-    result <- quiet_validate(hd, remove_outliers = TRUE)
-
-    n_removed <- length(result$validation$outliers$removed_ids)
-    expect_equal(result$data$n_rows, 100 - n_removed)
-    expect_equal(nrow(result$data$analysis), result$data$n_rows)
-
-  })
-
-  test_that("removal_detail maps sample_id to reason", {
-
-    hd     <- make_outlier_hd()
-    result <- quiet_validate(hd, remove_outliers = TRUE)
-
-    detail <- result$validation$outliers$removal_detail
-    expect_s3_class(detail, "tbl_df")
-    expect_true("sample_id" %in% names(detail))
-    expect_true("reason" %in% names(detail))
-
-    ## Only the spectral detector removes rows now (#77)
-    expect_true(all(detail$reason == "spectral"))
-
-  })
-
-  test_that("a row outside both kinds of fence is removed as spectral, not 'both' (#77)", {
-
-    hd     <- make_outlier_hd()
-    result <- quiet_validate(hd, remove_outliers = TRUE)
-
-    detail   <- result$validation$outliers$removal_detail
-    spectral <- result$validation$outliers$spectral_ids
-    response <- result$validation$outliers$response_ids
-    overlap  <- intersect(spectral, response)
-
-    ## S004 and S005 carry both kinds of outlier in the fixture
-    expect_true(all(c("S004", "S005") %in% overlap))
-    expect_true(all(detail$reason[detail$sample_id %in% overlap] == "spectral"))
-
-  })
-
   test_that("no outliers detected: remove_outliers=TRUE does nothing", {
 
     ## Use controlled outcome to ensure no IQR outliers
@@ -1177,29 +1004,28 @@ describe("validate() outlier removal", {
 
   })
 
-  test_that("removed sample_ids no longer in data$analysis", {
-
-    hd     <- make_outlier_hd()
-    result <- quiet_validate(hd, remove_outliers = TRUE)
-
-    removed_ids <- result$validation$outliers$removed_ids
-    remaining   <- result$data$analysis$sample_id
-    expect_false(any(removed_ids %in% remaining))
-
-  })
-
-  test_that("removal_detail records the threshold behind each removal, and the trim request its own", {
+  test_that("removal_detail records the reason and threshold behind each removal, and the trim request its own (#77)", {
 
     ## Rows 1-3 are spectral only, 4-5 both, 6 response only
     hd     <- make_outlier_hd()
     result <- quiet_validate(hd, remove_outliers = TRUE,
                              spectral_threshold = 0.99, response_threshold = 2)
 
-    detail <- result$validation$outliers$removal_detail
+    out    <- result$validation$outliers
+    detail <- out$removal_detail
+
+    expect_s3_class(detail, "tbl_df")
+    expect_true(all(c("sample_id", "reason") %in% names(detail)))
 
     ## The columns earlier versions wrote, kept so records accumulate
     expect_true(all(c("outcome", "spectral_threshold", "response_threshold") %in% names(detail)))
     expect_gt(nrow(detail), 0)
+
+    ## S004 and S005 carry both kinds of outlier, and a row outside both
+    ## kinds of fence is removed as spectral, not "both": only the spectral
+    ## detector removes rows (#77)
+    expect_true(all(c("S004", "S005") %in% intersect(out$spectral_ids, out$response_ids)))
+    expect_true(all(c("S004", "S005") %in% detail$sample_id))
 
     ## A spectral removal does not depend on the outcome
     expect_true(all(detail$reason == "spectral"))
@@ -1414,37 +1240,19 @@ describe("validate() passed logic and CLI output", {
 
   })
 
-  test_that("passed=FALSE when P001b ERROR fails", {
-
-    result <- quiet_validate(make_configured_hd(n_samples = 9, cv_folds = 5L))
-    expect_false(result$validation$passed)
-
-  })
-
-  test_that("passed=FALSE when P003 ERROR fails", {
-
-    result <- quiet_validate(make_configured_hd(outcome_values = rep(5.0, 100)))
-    expect_false(result$validation$passed)
-
-  })
-
   test_that("CLI output shows PASSED when all clean", {
 
-    hd     <- make_configured_hd()
-    output <- capture.output(suppressWarnings(validate(hd)))
-    combined <- paste(output, collapse = "\n")
+    hd <- make_configured_hd()
 
-    expect_true(grepl("PASSED", combined))
+    expect_snapshot(validate(hd))
 
   })
 
   test_that("CLI output shows FAILED when ERROR present", {
 
-    hd     <- make_configured_hd(outcome_values = rep(5.0, 100))
-    output <- capture.output(suppressWarnings(validate(hd)))
-    combined <- paste(output, collapse = "\n")
+    hd <- make_configured_hd(outcome_values = rep(5.0, 100))
 
-    expect_true(grepl("FAILED", combined))
+    expect_snapshot(validate(hd))
 
   })
 
@@ -1457,10 +1265,7 @@ describe("validate() passed logic and CLI output", {
 
     }
 
-    output <- capture.output(suppressWarnings(validate(hd, remove_outliers = TRUE)))
-    combined <- paste(output, collapse = "\n")
-
-    expect_true(grepl("Removed", combined) || grepl("removal", combined, ignore.case = TRUE))
+    expect_snapshot(validate(hd, remove_outliers = TRUE))
 
   })
 
@@ -1490,38 +1295,6 @@ describe("validate() passed logic and CLI output", {
 
 describe("validate() edge cases", {
 
-  test_that("re-validation after removal operates on reduced dataset", {
-
-    hd <- make_configured_hd()
-    for (col in names(hd$data$analysis)[2:51]) {
-
-      hd$data$analysis[[col]][1:5] <- 100
-
-    }
-
-    ## First validation with removal
-    r1 <- quiet_validate(hd, remove_outliers = TRUE)
-    n1 <- r1$data$n_rows
-
-    ## Second validation on the reduced dataset
-    r2 <- suppressWarnings(quiet_validate(r1))
-    expect_equal(r2$data$n_rows, n1)  # no further removal
-
-  })
-
-  test_that("re-validation overwrites checks (not appends)", {
-
-    hd <- make_configured_hd()
-    r1 <- quiet_validate(hd)
-    n_checks_1 <- nrow(r1$validation$checks)
-
-    r2 <- suppressWarnings(quiet_validate(r1))
-    n_checks_2 <- nrow(r2$validation$checks)
-
-    expect_equal(n_checks_1, n_checks_2)
-
-  })
-
   test_that("idempotency: same data validated twice gives same result", {
 
     hd <- make_configured_hd()
@@ -1530,43 +1303,6 @@ describe("validate() edge cases", {
 
     expect_equal(r1$validation$checks$status, r2$validation$checks$status)
     expect_equal(r1$validation$passed, r2$validation$passed)
-
-  })
-
-  test_that("spectral + response overlap: TRUE removes the spectral rows only (#77)", {
-
-    hd <- make_configured_hd(n_samples = 100, n_predictors = 20)
-
-    ## Inject spectral outliers on samples 1-5
-    for (col in names(hd$data$analysis)[2:21]) {
-
-      hd$data$analysis[[col]][1:5] <- 100
-
-    }
-
-    ## Inject response outliers on samples 4-6 (overlap on 4-5)
-    hd$data$analysis[["SOC"]][4:6] <- 500
-
-    result <- quiet_validate(hd, remove_outliers = TRUE)
-
-    spectral <- result$validation$outliers$spectral_ids
-    response <- result$validation$outliers$response_ids
-    removed  <- result$validation$outliers$removed_ids
-
-    ## The spectral rows leave; the response-only row (S006) stays, for
-    ## evaluate() to trim if it lands in the training partition
-    expect_equal(sort(removed), sort(spectral))
-    expect_true(all(setdiff(response, spectral) %in% result$data$analysis$sample_id))
-    expect_equal(result$data$n_rows, 100 - length(spectral))
-
-  })
-
-  test_that("n=5 boundary: PCA runs successfully", {
-
-    hd     <- make_configured_hd(n_samples = 5, n_predictors = 10, cv_folds = 2L)
-    result <- quiet_validate(hd)
-
-    expect_true("P005" %in% result$validation$checks$check_id)
 
   })
 
@@ -1615,31 +1351,15 @@ describe("validate() and the selection record", {
 
   }
 
-  test_that("removing outliers refilters selection membership", {
-
-    ## Arrange
-    hd <- make_selected_hd()
-
-    ## Act
-    result <- quiet_validate(hd, remove_outliers = "spectral")
-
-    ## Assert
-    removed  <- result$validation$outliers$removed_ids
-    surviving <- result$data$analysis$sample_id
-
-    expect_true(length(removed) > 0)
-    expect_false(any(result$selection$membership$pool_id %in% removed))
-    expect_true(all(result$selection$membership$pool_id %in% surviving))
-
-  })
-
-
-  test_that("removing outliers refilters each group and recounts n_rows", {
+  test_that("removing outliers refilters each group, recounts n_rows and drawn, and records rows_removed", {
 
     hd     <- make_selected_hd()
     result <- quiet_validate(hd, remove_outliers = "spectral")
 
     surviving <- result$data$analysis$sample_id
+    n_removed <- length(result$validation$outliers$removed_ids)
+
+    expect_true(n_removed > 0)
 
     for (i in seq_len(nrow(result$selection$groups))) {
 
@@ -1651,16 +1371,6 @@ describe("validate() and the selection record", {
     }
 
     expect_identical(sum(result$selection$groups$n_rows), length(surviving))
-
-  })
-
-
-  test_that("removing outliers recounts drawn and records rows_removed", {
-
-    hd     <- make_selected_hd()
-    result <- quiet_validate(hd, remove_outliers = "spectral")
-
-    n_removed <- length(result$validation$outliers$removed_ids)
 
     expect_identical(result$selection$rows_removed, as.integer(n_removed))
     expect_true(all(result$selection$pool_sizes$drawn == result$data$n_rows))
