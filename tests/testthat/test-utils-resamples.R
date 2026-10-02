@@ -195,6 +195,7 @@ describe("rebuilt resamples satisfy the partition invariants", {
     for (s in rb$cv_folds$splits) {
 
       expect_length(intersect(rsample::analysis(s)$sample_id, test_ids), 0)
+      expect_length(intersect(rsample::assessment(s)$sample_id, test_ids), 0)
 
     }
 
