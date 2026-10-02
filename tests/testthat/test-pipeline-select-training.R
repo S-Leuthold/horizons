@@ -15,6 +15,50 @@ quiet_select <- function(fx, ...) {
 }
 
 
+#' Give the fixture pool a clay its spectra predict
+#'
+#' @description
+#' `make_select_fixture()` draws clay independently of the spectra, so no
+#' model can learn it. This replaces it with a known linear function of the
+#' spectra plus noise: the sum of the band means (within 20 cm-1) at the
+#' eight peak centres of the fixture's two families, rescaled to mean 35 and
+#' SD 8, plus Gaussian noise sized for an R² of `r2`. A band is several grid
+#' steps wide, so it survives the resampling of the drawn rows to the
+#' targets' 8 cm-1 grid. Each family contributes four peaks to the sum, so
+#' the two families' clay means differ by under 1 (clay SD about 9): the
+#' signal is in each row's own spectrum, not in which family the row belongs
+#' to, and pairing the responses with the wrong rows destroys it.
+#'
+#' @param pool [horizons_data.] `make_select_fixture()$pool`.
+#' @param r2 [Numeric.] R² of the returned clay on its noise-free part.
+#'   Default: `0.85`.
+#' @param seed [Integer.] Seed for the noise, applied through
+#'   `withr::with_seed()` so the global RNG stream is left as it was.
+#'   Default: `1`.
+#'
+#' @return [horizons_data.] `pool` with `clay` replaced.
+#' @noRd
+learnable_clay_pool <- function(pool, r2 = 0.85, seed = 1) {
+
+  ## The peak centres make_select_fixture() gives its two families
+  centres <- c(3400, 2920, 1630, 1030, 3620, 2515, 1420, 870)
+
+  pm   <- predictor_matrix(pool)
+  band <- vapply(centres, function(cc) {
+    rowMeans(pm$matrix[, abs(pm$wavenumbers - cc) <= 20, drop = FALSE])
+  }, numeric(nrow(pm$matrix)))
+
+  f      <- rowSums(band)
+  signal <- 35 + 8 * (f - mean(f)) / stats::sd(f)
+  noise  <- withr::with_seed(seed, stats::rnorm(length(f), sd = 8 * sqrt((1 - r2) / r2)))
+
+  pool$data$analysis$clay <- round(signal + noise, 1)
+
+  pool
+
+}
+
+
 ## =============================================================================
 ## Input validation
 ## =============================================================================
@@ -1347,17 +1391,28 @@ test_that("permuting the pool's responses collapses the evaluated CV", {
   ## selection or the recipe were carrying any information about the outcome
   ## that it should not, a model trained on shuffled labels would still
   ## score. It must not. RPD near 1 is the honest answer for noise.
+  ##
+  ## The pool's clay is a known function of its spectra, so the same pipeline
+  ## on the unshuffled pool has to learn it. That is what makes the collapse
+  ## mean something, and it is what fails if the selection pairs responses
+  ## with the wrong spectra. The floor of 1.2 sits 0.4 below the lowest CV RPD
+  ## over twenty runs varying the clay noise and evaluate()'s seed (1.61);
+  ## permuted runs scored 0.97 to 1.04. PLSR over its whole tuning range (one
+  ## to four components, hence grid_size = 4) keeps the two runs to a few
+  ## seconds.
 
   skip_on_cran()
 
-  fx <- make_select_fixture(n_pool = 300)
+  fx      <- make_select_fixture(n_pool = 300)
+  fx$pool <- learnable_clay_pool(fx$pool)
 
   cv_rpd <- function(pool) {
 
     out <- select_training(fx$targets, pool, k = 40, properties = "clay", verbose = FALSE)
 
     utils::capture.output({
-      cfg <- configure(out, outcome = "clay", models = "rf", cv_folds = 3L)
+      cfg <- configure(out, outcome = "clay", models = "plsr", cv_folds = 3L,
+                       grid_size = 4L, bayesian_iter = 0L, final_bayesian_iter = 0L)
       cfg <- validate(cfg)
     })
 
@@ -1365,20 +1420,28 @@ test_that("permuting the pool's responses collapses the evaluated CV", {
     res <- ev$evaluation$results
     res <- res[res$status == "success", , drop = FALSE]
 
-    if (!nrow(res) || !"rpd" %in% names(res)) skip("evaluate() did not return an rpd column")
+    expect_identical(nrow(res), 1L)
+    expect_true(all(c("rpd", "cv_rpd") %in% names(res)))
 
-    max(res$rpd, na.rm = TRUE)
+    c(cv = max(res$cv_rpd, na.rm = TRUE), test = max(res$rpd, na.rm = TRUE))
 
   }
+
+  learned <- cv_rpd(fx$pool)
+
+  expect_gte(learned[["cv"]], 1.2)
 
   set.seed(4)
   shuffled <- fx$pool
   shuffled$data$analysis$clay <- sample(shuffled$data$analysis$clay)
 
-  permuted <- cv_rpd(shuffled)
+  scores   <- cv_rpd(shuffled)
+  permuted <- scores[["test"]]
+
+  expect_lt(scores[["cv"]], 1.3)
 
   ## Tolerant on the upper side: this is a synthetic fixture and a small
-  ## forest, so the point is that the permuted model has no signal at all,
+  ## model, so the point is that the permuted model has no signal at all,
   ## not where exactly the real one lands.
   expect_lt(permuted, 1.3)
 
