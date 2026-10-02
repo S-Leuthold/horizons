@@ -6,15 +6,20 @@
 #' predictor quality, and detects spectral and response outliers.
 #'
 #' @details
-#' `validate()` is the gate between `configure()` and `evaluate()`. Detection
-#' is mandatory; outlier removal is opt-in. The function populates the
-#' `validation` section of the object and sets `validation$passed` based on
-#' whether any ERROR-severity checks failed.
+#' `validate()` is an advisory pre-flight report, run between `configure()`
+#' and `evaluate()`. Running it is optional and nothing gates on its verdict:
+#' `evaluate()` and `fit()` refuse invalid input themselves, including the
+#' problems its ERROR checks report (too few rows for the CV folds, and an
+#' outcome with zero variance). Detection is mandatory; outlier removal is
+#' opt-in. The function populates the `validation` section of the object
+#' and sets `validation$passed` based on whether any ERROR-severity checks
+#' failed.
 #'
 #' **Severity levels:**
 #'
-#' - **ERROR**: Blocks modeling. `validation$passed` set to `FALSE`.
-#' - **WARNING**: Non-blocking but noteworthy. Does not affect `passed`.
+#' - **ERROR**: A problem `evaluate()` and `fit()` refuse. `validation$passed`
+#'   set to `FALSE`.
+#' - **WARNING**: Noteworthy. Does not affect `passed`.
 #' - **INFO**: Descriptive/detection results. Does not affect `passed`.
 #'
 #' **Outlier detection:**
@@ -74,7 +79,8 @@
 #'   `evaluate()` trims by. Default: `1.5`.
 #'
 #' @return `horizons_data`. Same object with `validation` section populated:
-#'   - `validation$passed`: `TRUE` if no ERROR checks failed
+#'   - `validation$passed`: `TRUE` if no ERROR checks failed. A record of
+#'     this report; no modelling verb reads it
 #'   - `validation$checks`: tibble of check results
 #'   - `validation$outliers`: the ids this call flagged (`spectral_ids`,
 #'     and `response_ids`, flagged on the whole table for information and

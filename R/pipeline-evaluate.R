@@ -169,11 +169,17 @@
 #'   `horizons_input_error`, when an observed outcome lies outside
 #'   `outcome_range` or is infinite, or when `metric = "rrmse"` under a range
 #'   whose lower bound is negative (the mean outcome it divides by can then be
-#'   zero or negative) (#76). Checkpoint rows written before the range was
-#'   recorded resume only under the default range. Called on an object that
-#'   has already been through `fit()` or `ensemble()`, it returns a
-#'   `horizons_eval` whose `models` and `ensemble` slots are empty again,
-#'   since both were built on the evaluation it replaces.
+#'   zero or negative) (#76). Also with class `horizons_input_error`, it
+#'   aborts when the outcome has zero variance: before the split, when every
+#'   observed value is the same, and after it, when every training row left
+#'   by the split and the response trim has the same value, since every
+#'   config would then be tuned on a constant. The message names the outcome,
+#'   the value and how many rows have it (#132). Checkpoint rows written
+#'   before the range was recorded resume only under the default range.
+#'   Called on an object that has already been through `fit()` or
+#'   `ensemble()`, it returns a `horizons_eval` whose `models` and
+#'   `ensemble` slots are empty again, since both were built on the
+#'   evaluation it replaces.
 #'
 #' @export
 evaluate <- function(x,
@@ -255,6 +261,15 @@ evaluate <- function(x,
   ## lets be zero or negative; ranking by its minimum would then pick the
   ## worst configuration.
   check_rank_metric_range(metric, outcome_range, verb = "evaluate")
+
+  ## -----------------------------------------------------------------------
+  ## Step 2c: The outcome has to vary
+  ## -----------------------------------------------------------------------
+  ## validate() reports a constant outcome, but nothing gates on its verdict,
+  ## so it is refused here, before any split (#132). The training part is
+  ## checked again in Step 4, once the split and the trim have drawn it.
+
+  check_outcome_variance(x, verb = "evaluate")
 
   ## -----------------------------------------------------------------------
   ## Step 3: Validate minimum sample size
@@ -367,6 +382,22 @@ evaluate <- function(x,
   test_data  <- rsample::testing(split)
   n_train    <- nrow(train_data)
   n_test     <- nrow(test_data)
+
+  ## The modelled rows vary (Step 2c), but when the few rows with another
+  ## value all fall in the test part or are trimmed, every config would be
+  ## tuned on a constant. Refused before the folds are drawn (#132).
+  drawn_rows <- drawn$split$data
+  trim_ids   <- trimmed$record$trimmed_ids %||% character(0)
+
+  check_training_outcome_variance(
+    train_data[[outcome_col]],
+    held_out    = list(
+      "in the test set"              = test_data[[outcome_col]],
+      "trimmed as response outliers" = drawn_rows[[outcome_col]][drawn_rows[[id_column(role_map)]] %in% trim_ids]
+    ),
+    outcome_col = outcome_col,
+    verb        = "evaluate"
+  )
 
   ## -----------------------------------------------------------------------
   ## Step 5: Create CV folds
