@@ -2580,3 +2580,115 @@ test_that("summary.horizons_data has no selection block without a record", {
   expect_false(any(grepl("drawn from a pool", output)))
 
 })
+
+
+## ---------------------------------------------------------------------------
+## The selected member in print() and summary() (#136)
+## ---------------------------------------------------------------------------
+
+## The Models section of print() or summary(): the lines after its heading,
+## up to the blank line that ends it.
+models_section <- function(out, heading) {
+
+  start <- which(out == heading)[1]
+  end   <- start + which(out[-seq_len(start)] == "")[1]
+  out[(start + 1):(end - 1)]
+
+}
+
+## The fitted fixture, with a member other than models$best_config given the
+## lowest test RMSE, so a best-of-N on the test rows would name it instead.
+make_fit_with_lower_test_rival <- function() {
+
+  fx    <- readRDS(test_path("fixtures", "ensemble_fit.rds"))
+  rival <- setdiff(fx$models$results$config_id, fx$models$best_config)[1]
+
+  fx$models$results$rmse[fx$models$results$config_id == rival] <-
+    min(fx$models$results$rmse) - 0.5
+
+  list(fit = fx, rival = rival)
+
+}
+
+
+test_that("print() reports models$best_config, not the lowest test RMSE", {
+
+  ## Arrange
+  case     <- make_fit_with_lower_test_rival()
+  fx       <- case$fit
+  best_row <- fx$models$results[fx$models$results$config_id == fx$models$best_config, ]
+
+  ## Act
+  section <- models_section(utils::capture.output(print(fx)), "Models")
+
+  ## Assert
+  expect_true(any(grepl(paste0("CV-selected: ", fx$models$best_config,
+                               " — test RMSE = ", round(best_row$rmse, 3),
+                               ", RPD = ", round(best_row$rpd, 2)),
+                        section, fixed = TRUE)))
+  expect_false(any(grepl(case$rival, section, fixed = TRUE)))
+  expect_false(any(grepl("Best test", section, fixed = TRUE)))
+
+})
+
+
+test_that("summary() reports models$best_config and its test and CV metrics", {
+
+  ## Arrange
+  case     <- make_fit_with_lower_test_rival()
+  fx       <- case$fit
+  best_row <- fx$models$results[fx$models$results$config_id == fx$models$best_config, ]
+
+  ## Act
+  section <- models_section(utils::capture.output(summary(fx)), "Models (fit)")
+
+  ## Assert
+  at <- which(section == paste0("   ├─ CV-selected: ", fx$models$best_config))
+  expect_length(at, 1)
+  expect_identical(
+    section[at + 1:2],
+    c(paste0("   │     ├─ Test RMSE = ", round(best_row$rmse, 3),
+             ", RPD = ", round(best_row$rpd, 2),
+             ", R² = ", round(best_row$rsq, 3)),
+      paste0("   │     └─ CV RMSE = ", round(best_row$cv_rmse_mean, 3),
+             " ± ", round(best_row$cv_rmse_se, 3)))
+  )
+  expect_false(any(grepl(case$rival, section, fixed = TRUE)))
+
+})
+
+
+test_that("print() and summary() label a cold-started member as such", {
+
+  ## fit()'s cold start ranks nothing, so its one member is not CV-selected
+  fx <- make_fit_with_lower_test_rival()$fit
+  fx$evaluation$screened <- FALSE
+
+  expect_true(any(grepl(paste0("Cold-started: ", fx$models$best_config),
+                        models_section(utils::capture.output(print(fx)), "Models"),
+                        fixed = TRUE)))
+  expect_true(any(grepl(paste0("Cold-started: ", fx$models$best_config),
+                        models_section(utils::capture.output(summary(fx)), "Models (fit)"),
+                        fixed = TRUE)))
+
+})
+
+
+test_that("print() and summary() name no member when best_config has no results row", {
+
+  ## Nothing to report is reported as nothing, never as the lowest test RMSE
+  case <- make_fit_with_lower_test_rival()
+  fx   <- case$fit
+  fx$models$best_config <- "cfg_not_fitted"
+
+  print_section   <- models_section(utils::capture.output(print(fx)), "Models")
+  summary_section <- models_section(utils::capture.output(summary(fx)), "Models (fit)")
+
+  for (section in list(print_section, summary_section)) {
+
+    expect_false(any(grepl("CV-selected|Best test", section)))
+    expect_false(any(grepl(case$rival, section, fixed = TRUE)))
+
+  }
+
+})
