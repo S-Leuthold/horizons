@@ -998,6 +998,8 @@ combine_ensemble_weighted <- function(member_pred, weights,
 #' @param outcome_range Numeric length-2 vector from
 #'   [outcome_range_setting()]. Default `DEFAULT_OUTCOME_RANGE`.
 #' @return A tibble: `sample_id`, `.pred` (ensemble point prediction).
+#'   Aborts with class `horizons_internal_error` when the meta-model returns
+#'   a different number of predictions than there are samples.
 #' @noRd
 combine_ensemble_metamodel <- function(member_pred, members, model,
                                        outcome_range = DEFAULT_OUTCOME_RANGE) {
@@ -1026,6 +1028,15 @@ combine_ensemble_metamodel <- function(member_pred, members, model,
     model,
     new_data = wide[, member_cols, drop = FALSE]
   )$.pred
+
+  ## Attached to wide$sample_id by position: the meta-model's predictions
+  ## carry no key of their own.
+  check_rows_aligned(
+    what       = "Meta-model predictions",
+    to         = "the samples the members predicted",
+    n          = length(combined),
+    n_expected = nrow(wide)
+  )
 
   tibble::tibble(
     sample_id = wide$sample_id,

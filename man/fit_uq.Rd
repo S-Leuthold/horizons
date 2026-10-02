@@ -45,6 +45,9 @@ around. Default \code{c(0, Inf)}.}
 Named list with fields: \code{quantile_model}, \code{scores}, \code{n_calib},
 \code{level_default}, \code{oof_coverage}, \code{mean_width}, \code{prepped_recipe}.
 Returns NULL if calibration set is too small (\code{n < N_CALIB_MIN}).
+Aborts with class \code{horizons_internal_error} when an out-of-fold \code{.row}
+falls outside the rows the model was fit on, or when the calibration
+predictions or features do not have one row per row of \code{calib_data}.
 }
 \description{
 Trains a quantile random forest on OOF residuals from the point model,

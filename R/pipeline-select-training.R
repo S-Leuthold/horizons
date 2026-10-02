@@ -1024,6 +1024,16 @@ select_training <- function(x, library,
 
   }
 
+  ## The meta columns were computed in union_ids order and are attached by
+  ## position, which holds while subset_rows() returns rows in keep order and
+  ## the reconciliation keeps them there.
+  check_rows_aligned(
+    what         = paste0("Provenance columns (", paste(names(meta), collapse = ", "), ")"),
+    to           = "the drawn rows",
+    ids          = out$data$analysis$sample_id,
+    expected_ids = union_ids
+  )
+
   analysis <- dplyr::bind_cols(out$data$analysis, meta)
   role_map <- dplyr::bind_rows(out$data$role_map,
                                tibble::tibble(variable = names(meta), role = "meta"))
@@ -1376,15 +1386,29 @@ check_photometric_units <- function(pool_m, target_m, ratio = 2) {
 #' `standardize()` uses after resampling.
 #'
 #' @param x [horizons_data.] The object.
-#' @param m [Matrix.] New spectra, one row per analysis row.
+#' @param m [Matrix.] New spectra, one row per analysis row in the table's
+#'   order. Row names, when present, are the rows' `sample_id`s.
 #' @param wn [Numeric.] Wavenumbers of `m`'s columns, decreasing.
 #'
-#' @return [horizons_data.] `x` with the predictor block replaced.
+#' @return [horizons_data.] `x` with the predictor block replaced. Aborts
+#'   with class `horizons_internal_error` when `m`'s rows do not line up with
+#'   the analysis rows (see [check_rows_aligned()]).
 #' @noRd
 rebuild_predictors <- function(x, m, wn) {
 
   role_map <- x$data$role_map
   analysis <- x$data$analysis
+
+  ## The matrix rows replace the spectra of the analysis rows by position.
+  ## reconcile_axes() names them by sample_id, so the order is checked too.
+  check_rows_aligned(
+    what         = "Reconciled spectra",
+    to           = "the analysis rows",
+    n            = nrow(m),
+    n_expected   = nrow(analysis),
+    ids          = rownames(m),
+    expected_ids = analysis$sample_id
+  )
 
   new_names <- paste0("wn_", wn)
   colnames(m) <- new_names

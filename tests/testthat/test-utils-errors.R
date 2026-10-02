@@ -463,3 +463,107 @@ describe("distinct_config_errors()", {
   })
 
 })
+
+
+## ---------------------------------------------------------------------------
+## check_rows_aligned() / abort_misaligned() — positional binds (#140)
+## ---------------------------------------------------------------------------
+
+describe("check_rows_aligned()", {
+
+  it("is silent when the counts match", {
+
+    expect_no_error(check_rows_aligned("Values", "the rows", n = 5L, n_expected = 5L))
+    expect_null(check_rows_aligned("Values", "the rows", n = 5L, n_expected = 5L))
+
+  })
+
+  it("is silent when the ids match position by position", {
+
+    ids <- c("a", "b", "c")
+
+    expect_no_error(check_rows_aligned("Values", "the rows",
+                                       ids = ids, expected_ids = ids))
+
+  })
+
+  it("aborts with an internal error naming the bind and both counts", {
+
+    err <- expect_error(
+      check_rows_aligned("Interval columns for config 'cfg_1'", "the rows of new_data",
+                         n = 7L, n_expected = 8L),
+      class = "horizons_internal_error"
+    )
+
+    msg <- conditionMessage(err)
+    expect_match(msg, "Interval columns for config 'cfg_1'", fixed = TRUE)
+    expect_match(msg, "the rows of new_data", fixed = TRUE)
+    expect_match(msg, "Got 7 rows for 8", fixed = TRUE)
+    expect_match(msg, "bug in horizons", fixed = TRUE)
+
+  })
+
+  it("aborts when the same ids are in a different order, naming the first", {
+
+    err <- expect_error(
+      check_rows_aligned("Provenance columns", "the drawn rows",
+                         ids = c("a", "c", "b"), expected_ids = c("a", "b", "c")),
+      class = "horizons_internal_error"
+    )
+
+    msg <- conditionMessage(err)
+    expect_match(msg, "2 of 3 positions", fixed = TRUE)
+    expect_match(msg, "row 2", fixed = TRUE)
+
+  })
+
+  it("checks the count before the order", {
+
+    expect_error(
+      check_rows_aligned("Values", "the rows", ids = c("a", "b"),
+                         expected_ids = c("a", "b", "c")),
+      "Got 2 rows for 3", class = "horizons_internal_error"
+    )
+
+  })
+
+  it("treats an NA id against a real one as a difference", {
+
+    expect_error(
+      check_rows_aligned("Values", "the rows", ids = c("a", NA),
+                         expected_ids = c("a", "b")),
+      class = "horizons_internal_error"
+    )
+
+  })
+
+  it("checks the count alone when either side has no ids", {
+
+    expect_no_error(check_rows_aligned("Values", "the rows", n = 2L, n_expected = 2L,
+                                       ids = NULL, expected_ids = c("a", "b")))
+
+  })
+
+  it("reports the caller's frame, not its own", {
+
+    caller <- function() check_rows_aligned("Values", "the rows", n = 1L, n_expected = 2L)
+    err    <- tryCatch(caller(), error = function(e) e)
+
+    expect_identical(as.character(err$call[[1]]), "caller")
+
+  })
+
+  it("interpolates ids and labels as values, so braces survive", {
+
+    err <- expect_error(
+      check_rows_aligned("Values for config '{x}'", "the rows",
+                         ids = c("{a}", "b"), expected_ids = c("b", "{a}")),
+      class = "horizons_internal_error"
+    )
+
+    expect_match(conditionMessage(err), "config '{x}'", fixed = TRUE)
+    expect_match(conditionMessage(err), "{a}", fixed = TRUE)
+
+  })
+
+})

@@ -82,6 +82,9 @@ compute_c_alpha <- function(scores, level) {
 #' @return Named list with fields: `quantile_model`, `scores`, `n_calib`,
 #'   `level_default`, `oof_coverage`, `mean_width`, `prepped_recipe`.
 #'   Returns NULL if calibration set is too small (`n < N_CALIB_MIN`).
+#'   Aborts with class `horizons_internal_error` when an out-of-fold `.row`
+#'   falls outside the rows the model was fit on, or when the calibration
+#'   predictions or features do not have one row per row of `calib_data`.
 #'
 #' @keywords internal
 #' @export
@@ -122,8 +125,29 @@ fit_uq <- function(fitted_workflow,
   ## OOF residuals: truth - .pred (original scale, standard sign convention)
   oof_residuals <- oof_predictions$truth - oof_predictions$.pred
 
+  ## .row indexes the rows the resamples were cut from, which are the rows
+  ## the final model was fit on, so it only lands on the right sample while
+  ## the mold keeps one row per row of them. A recipe step that dropped rows
+  ## at fit time shifts every later row; the folds between them cover every
+  ## training row, so a .row past the end of the mold is the sign of it.
+  oof_rows <- oof_predictions$.row
+  n_mold   <- nrow(train_data_for_bake)
+  bad_rows <- is.na(oof_rows) | oof_rows < 1L | oof_rows > n_mold
+
+  if (any(bad_rows)) {
+
+    abort_misaligned(
+      what   = "Out-of-fold rows",
+      to     = "the rows the model was fit on",
+      detail = cli::format_inline(
+        "{.field .row} falls outside the {n_mold} row{?s} the model was fit on for {sum(bad_rows)} of {length(oof_rows)} out-of-fold prediction{?s}; the first is {.val {oof_rows[bad_rows][1]}}."
+      )
+    )
+
+  }
+
   ## Match OOF features to OOF rows
-  oof_features <- train_data_for_bake[oof_predictions$.row, , drop = FALSE]
+  oof_features <- train_data_for_bake[oof_rows, , drop = FALSE]
 
   ## Train quantile forest
   qrf_result <- safely_execute(
@@ -173,6 +197,17 @@ fit_uq <- function(fitted_workflow,
 
   calib_point_preds <- calib_point_result$result$.pred
 
+  ## The predictions, the baked features below and the truth are paired by
+  ## position to form the scores. A recipe step that dropped rows at bake
+  ## would leave the vectors short, and the arithmetic recycles them without
+  ## an error when one length divides the other.
+  check_rows_aligned(
+    what       = "Calibration predictions",
+    to         = "the rows of the calibration data",
+    n          = length(calib_point_preds),
+    n_expected = nrow(calib_data)
+  )
+
   ## Back-transform, unconditionally: the clamp to the outcome's range inside
   ## back_transform_predictions() must reach the calibration residuals too,
   ## since the intervals are served around clamped point predictions (#53,
@@ -197,6 +232,13 @@ fit_uq <- function(fitted_workflow,
     prepped_recipe,
     new_data = calib_data,
     recipes::all_predictors()
+  )
+
+  check_rows_aligned(
+    what       = "Calibration features baked through the recipe",
+    to         = "the rows of the calibration data",
+    n          = nrow(calib_features),
+    n_expected = nrow(calib_data)
   )
 
   ## Quantile predictions on calibration set

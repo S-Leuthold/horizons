@@ -898,3 +898,46 @@ describe("ensemble() - allow_par", {
   })
 
 })
+
+
+## ---------------------------------------------------------------------------
+## combine_ensemble_metamodel() - row alignment before the positional bind (#140)
+## ---------------------------------------------------------------------------
+## The meta-model's predictions carry no key and are attached to the widened
+## frame's sample_id by position. A single prediction used to be recycled
+## across every sample by tibble() without a word.
+
+describe("combine_ensemble_metamodel() - row alignment", {
+
+  member_pred <- tibble::tibble(
+    config_id = rep(c("a", "b"), each = 4),
+    sample_id = rep(paste0("s", 1:4), 2),
+    .pred     = c(1, 2, 3, 4, 2, 3, 4, 5)
+  )
+  meta <- structure(list(), class = "horizons_test_meta")
+
+  it("aborts when the meta-model returns fewer predictions than samples", {
+
+    local_mocked_s3_method("predict", "horizons_test_meta", function(object, new_data, ...) {
+      tibble::tibble(.pred = 3)
+    })
+
+    expect_error(combine_ensemble_metamodel(member_pred, c("a", "b"), meta),
+                 "Meta-model predictions", class = "horizons_internal_error")
+
+  })
+
+  it("is silent when there is one prediction per sample", {
+
+    local_mocked_s3_method("predict", "horizons_test_meta", function(object, new_data, ...) {
+      tibble::tibble(.pred = rowMeans(new_data))
+    })
+
+    out <- combine_ensemble_metamodel(member_pred, c("a", "b"), meta)
+
+    expect_identical(out$sample_id, paste0("s", 1:4))
+    expect_equal(out$.pred, c(1.5, 2.5, 3.5, 4.5))
+
+  })
+
+})

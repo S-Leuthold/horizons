@@ -1015,3 +1015,105 @@ tune_failure_cause <- function(tune_results) {
          if (n_other > 1) "s")
 
 }
+
+## ---------------------------------------------------------------------------
+## check_rows_aligned
+## ---------------------------------------------------------------------------
+
+#' Assert that values attached by position line up with their rows
+#'
+#' @description
+#' Several steps attach values to samples by position: point predictions,
+#' interval bounds and applicability-domain columns to the rows of
+#' `new_data`, calibration predictions to their truth, provenance columns to
+#' the rows `select_training()` drew. Position is only right while every step
+#' in between keeps the rows' count and order, and nothing promises that: a
+#' recipe step that filters rows at bake drops rows from `predict()` and
+#' `bake()` alike, without an error. This checks the invariant just before
+#' the values are attached, so a change upstream fails loudly instead of
+#' labelling samples with another sample's values.
+#'
+#' Called with `n` and `n_expected`, it checks the count. Called with `ids`
+#' and `expected_ids` (`sample_id`s), it checks the count and the order. When
+#' the rows line up it does nothing; otherwise it aborts through
+#' [abort_misaligned()].
+#'
+#' @param what Character(1). The values being attached, for the message,
+#'   e.g. `"Interval columns for config 'cfg_001'"`.
+#' @param to Character(1). The rows they are attached to, e.g.
+#'   `"the rows of new_data"`.
+#' @param n Integer(1). Rows (or length) of the values. Defaults to
+#'   `length(ids)`.
+#' @param n_expected Integer(1). Number of rows they are attached to.
+#'   Defaults to `length(expected_ids)`.
+#' @param ids,expected_ids Character or `NULL`. Row keys of the values and of
+#'   the rows. When both are given they must agree position by position.
+#' @param call The frame the abort reports, the caller's by default.
+#'
+#' @return Invisibly `NULL`. Aborts with class `horizons_internal_error`.
+#' @keywords internal
+#' @noRd
+check_rows_aligned <- function(what,
+                               to,
+                               n            = length(ids),
+                               n_expected   = length(expected_ids),
+                               ids          = NULL,
+                               expected_ids = NULL,
+                               call         = rlang::caller_env()) {
+
+  ## Count -----------------------------------------------------------------
+
+  if (!identical(as.integer(n), as.integer(n_expected))) {
+
+    abort_misaligned(what, to,
+                     cli::format_inline("Got {n} row{?s} for {n_expected}."),
+                     call = call)
+
+  }
+
+  ## Order, when both sides carry a key --------------------------------------
+
+  if (is.null(ids) || is.null(expected_ids)) return(invisible(NULL))
+
+  ids          <- as.character(ids)
+  expected_ids <- as.character(expected_ids)
+
+  if (identical(ids, expected_ids)) return(invisible(NULL))
+
+  differs <- which(is.na(ids) != is.na(expected_ids) |
+                   (!is.na(ids) & !is.na(expected_ids) & ids != expected_ids))
+  first   <- differs[1]
+
+  abort_misaligned(what, to, cli::format_inline(
+    "The {.field sample_id}s differ at {length(differs)} of {n} position{?s}; the first is row {first}, {.val {ids[first]}} where {.val {expected_ids[first]}} was expected."
+  ), call = call)
+
+}
+
+#' Abort because values attached by position do not line up with their rows
+#'
+#' @description
+#' The one abort behind [check_rows_aligned()] and the out-of-fold row check
+#' in [fit_uq()]. A misalignment is a broken internal invariant, a bug in
+#' horizons rather than something the user did, so the class is
+#' `horizons_internal_error` and the message asks for a report.
+#'
+#' @param what,to Character(1). The values, and the rows they are attached
+#'   to, as in [check_rows_aligned()].
+#' @param detail Character(1). What does not line up, already formatted
+#'   (with [cli::format_inline()]); it is interpolated as a value.
+#' @param call The frame the abort reports.
+#'
+#' @return Does not return.
+#' @keywords internal
+#' @noRd
+abort_misaligned <- function(what, to, detail, call = rlang::caller_env()) {
+
+  cli::cli_abort(c(
+    "Internal error: {what} do not line up with {to}.",
+    "x" = "{detail}",
+    "i" = "Values are attached by position here, so a step upstream dropped, added or reordered rows.",
+    "i" = "This is a bug in horizons. Please report it at {.url https://github.com/S-Leuthold/horizons/issues}."
+  ), class = "horizons_internal_error", call = call)
+
+}

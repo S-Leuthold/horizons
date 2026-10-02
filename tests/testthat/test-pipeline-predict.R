@@ -1339,6 +1339,113 @@ describe("predict_intervals() - failure warns instead of degrading silently", {
 
 
 ## ---------------------------------------------------------------------------
+## Row alignment before positional binds (#140)
+## ---------------------------------------------------------------------------
+## predict_one_config() attaches .pred, the interval columns and the AD columns
+## to new_data's sample_id by position, and abstain_ood blanks rows by the same
+## alignment. A step upstream that dropped a row has to stop predict(), not
+## shift every later value onto another sample. bind_cols() and tibble() already
+## refused most size mismatches with an unrelated error, but recycled a single
+## row across the batch, and the interval arithmetic recycled any vector whose
+## length divides the batch.
+
+describe("predict() - row alignment before positional binds", {
+
+  new_df <- make_new_spectra()
+  n_new  <- nrow(new_df)
+  cfg_id <- names(fitted_fixture$models$workflows)[1]
+
+  it("aborts when the point predictions are a row short", {
+
+    ## A recipe step that filtered rows at bake would do this.
+    local_mocked_s3_method("predict", "workflow", function(object, new_data, ...) {
+      tibble::tibble(.pred = rep(5, nrow(new_data) - 1L))
+    })
+
+    expect_error(predict(fitted_fixture, new_df, interval = FALSE),
+                 "Point predictions for config", class = "horizons_internal_error")
+
+  })
+
+  it("aborts when the interval columns are a row short", {
+
+    local_mocked_bindings(predict_intervals = function(...) {
+      tibble::tibble(.pred_lower = rep(1, n_new - 1L), .pred_upper = rep(9, n_new - 1L),
+                     .interval_width = rep(8, n_new - 1L))
+    })
+
+    expect_error(predict(fitted_fixture, new_df, interval = TRUE),
+                 "Interval columns for config", class = "horizons_internal_error")
+
+  })
+
+  it("aborts when a single AD row would be recycled across the batch and abstained on", {
+
+    skip_if_not(has_ad(fitted_fixture))
+
+    ## One OOD row recycled by bind_cols() used to blank every prediction.
+    local_mocked_bindings(predict_ad = function(...) {
+      tibble::tibble(.ad_distance = 99,
+                     .ad_flag     = factor("OOD", levels = c("Q1", "Q2", "Q3", "Q4", "OOD")))
+    })
+
+    expect_error(predict(fitted_fixture, new_df, interval = FALSE, abstain_ood = TRUE),
+                 "Applicability-domain columns for config",
+                 class = "horizons_internal_error")
+
+  })
+
+  it("is silent when every bind lines up", {
+
+    expect_no_error(p <- predict(fitted_fixture, new_df, interval = TRUE))
+    expect_identical(p$sample_id, new_df$sample_id)
+
+  })
+
+})
+
+describe("predict_intervals() - row alignment before the bounds are assembled", {
+
+  new_df <- make_new_spectra()
+  cfg_id <- names(fitted_fixture$models$workflows)[1]
+  uq     <- fitted_fixture$models$uq[[cfg_id]]
+
+  it("aborts when point_pred does not have one value per row of new_data", {
+
+    ## Half the rows: point_pred + q_low recycled this without an error.
+    expect_error(predict_intervals(uq, rep(5, nrow(new_df) / 2), new_df, config_id = cfg_id),
+                 "Point predictions for config", class = "horizons_internal_error")
+
+  })
+
+  it("aborts when the bake through the UQ recipe drops rows, rather than degrading", {
+
+    real_bake <- recipes::bake
+
+    local_mocked_bindings(
+      bake = function(object, new_data, ...) {
+        real_bake(object, new_data = new_data[seq_len(nrow(new_data) / 2), ], ...)
+      },
+      .package = "recipes"
+    )
+
+    expect_error(predict_intervals(uq, rep(5, nrow(new_df)), new_df),
+                 "Features baked through the UQ recipe",
+                 class = "horizons_internal_error")
+
+  })
+
+  it("is silent on the ordinary path", {
+
+    expect_no_error(out <- predict_intervals(uq, rep(5, nrow(new_df)), new_df))
+    expect_identical(nrow(out), nrow(new_df))
+
+  })
+
+})
+
+
+## ---------------------------------------------------------------------------
 ## warn_interval_failure() — config naming and brace-safety (#65 review)
 ## ---------------------------------------------------------------------------
 ## `detail` (the upstream error message) is untrusted, possibly data-derived

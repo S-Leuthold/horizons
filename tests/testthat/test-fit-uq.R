@@ -91,7 +91,10 @@ describe("compute_c_alpha() - finite-sample correction", {
 ## Helper: create a minimal setup for UQ testing.
 ## We need: (1) a fitted workflow, (2) OOF predictions in the right shape,
 ## (3) calibration data, (4) role_map.
-make_uq_setup <- function(n_train = 60, n_calib = 40, n_wn = 10, seed = 42) {
+## `edit_recipe` takes the built recipe and returns the one to fit, for tests
+## that need a step build_recipe() never adds.
+make_uq_setup <- function(n_train = 60, n_calib = 40, n_wn = 10, seed = 42,
+                          edit_recipe = identity) {
 
   set.seed(seed)
 
@@ -129,7 +132,7 @@ make_uq_setup <- function(n_train = 60, n_calib = 40, n_wn = 10, seed = 42) {
     covariates = NA_character_
   )
 
-  recipe <- build_recipe(config, train_data, role_map)
+  recipe <- edit_recipe(build_recipe(config, train_data, role_map))
   spec   <- parsnip::rand_forest(mtry = 5L, trees = 50L, min_n = 5L) %>%
     parsnip::set_engine("ranger") %>%
     parsnip::set_mode("regression")
@@ -362,6 +365,90 @@ describe("fit_uq() - quantile forest thread pinning", {
 
     expect_false(is.null(captured))
     expect_identical(captured$num.threads, 1L)
+
+  })
+
+})
+
+
+## =========================================================================
+## Row alignment before positional pairing (#140)
+## =========================================================================
+## The OOF features are indexed by .row into the mold, and the calibration
+## predictions, features and truth are paired by position. A recipe step that
+## dropped rows would misalign them; the length mismatch recycled with at most
+## a base R warning and produced a bundle with wrong scores.
+
+describe("fit_uq() - row alignment", {
+
+  ## suppressWarnings() around the setup only: the fixture's forest asks for
+  ## more mtry than the recipe leaves predictors, and ranger says so.
+
+  it("aborts when an out-of-fold .row falls past the rows the model was fit on", {
+
+    setup <- suppressWarnings(make_uq_setup())
+    oof   <- setup$oof_predictions
+    oof$.row[1] <- nrow(setup$train_data) + 1L
+
+    expect_error(
+      fit_uq(
+        fitted_workflow = setup$fitted_wf,
+        oof_predictions = oof,
+        calib_data      = setup$calib_data,
+        role_map        = setup$role_map
+      ),
+      "Out-of-fold rows", class = "horizons_internal_error"
+    )
+
+  })
+
+  it("aborts when the recipe drops a calibration row at bake", {
+
+    ## The filter keeps every training row (ids "T...") and drops one
+    ## calibration row, from predict() and bake() alike.
+    setup <- suppressWarnings(make_uq_setup(edit_recipe = function(rec) {
+      recipes::step_filter(rec, sample_id != "C001", skip = FALSE)
+    }))
+
+    expect_error(
+      fit_uq(
+        fitted_workflow = setup$fitted_wf,
+        oof_predictions = setup$oof_predictions,
+        calib_data      = setup$calib_data,
+        role_map        = setup$role_map
+      ),
+      "Calibration predictions", class = "horizons_internal_error"
+    )
+
+  })
+
+  it("aborts when the calibration features are baked a row short", {
+
+    ## Predictions served whole, so only the feature bake is short.
+    setup     <- suppressWarnings(make_uq_setup())
+    real_bake <- recipes::bake
+
+    local_mocked_s3_method("predict", "workflow", function(object, new_data, ...) {
+      tibble::tibble(.pred = rep(2, nrow(new_data)))
+    })
+
+    local_mocked_bindings(
+      bake = function(object, new_data, ...) {
+        real_bake(object, new_data = new_data[-1, ], ...)
+      },
+      .package = "recipes"
+    )
+
+    expect_error(
+      fit_uq(
+        fitted_workflow = setup$fitted_wf,
+        oof_predictions = setup$oof_predictions,
+        calib_data      = setup$calib_data,
+        role_map        = setup$role_map
+      ),
+      "Calibration features baked through the recipe",
+      class = "horizons_internal_error"
+    )
 
   })
 
