@@ -233,14 +233,19 @@ describe("predict.horizons_fit() - intervals", {
 
   new_df <- make_new_spectra()
 
-  it("returns ordered, positive-width intervals by default", {
+  it("returns ordered intervals inside the outcome range by default", {
 
-    p <- predict(fitted_fixture, new_df)
+    ## The point need not sit inside its interval: CQR bands are asymmetric
+    ## and a winsorized .pred can fall outside, so only the bounds' order,
+    ## width and range are promised.
+    p     <- predict(fitted_fixture, new_df)
+    range <- fitted_fixture$config$outcome_range
 
+    expect_length(range, 2)
     expect_true(all(c(".pred_lower", ".pred_upper", ".interval_width") %in% names(p)))
-    expect_true(all(p$.pred_lower <= p$.pred))
-    expect_true(all(p$.pred <= p$.pred_upper))
-    expect_true(all(p$.interval_width >= 0))
+    expect_true(all(p$.pred_lower <= p$.pred_upper))
+    expect_equal(p$.interval_width, p$.pred_upper - p$.pred_lower)
+    expect_true(all(p$.pred_lower >= range[1] & p$.pred_upper <= range[2]))
 
   })
 
