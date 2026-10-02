@@ -94,10 +94,7 @@ utils::globalVariables(c(".metric", ".estimate"))
 
   ## Display version and thread control status ----
 
-  packageStartupMessage(
-    "horizons v", utils::packageVersion("horizons"), " loaded. ",
-    "Please flag bugs on Github (www.github.com/S-Leuthold/horizons)"
-  )
+  packageStartupMessage(startup_message(utils::packageVersion("horizons")))
 
   ## Reported here rather than in .onLoad, where R CMD check flags
   ## packageStartupMessage() as a NOTE. The thread pinning itself stays in
@@ -113,4 +110,40 @@ utils::globalVariables(c(".metric", ".estimate"))
   }
 
   invisible()
+}
+
+## ---------------------------------------------------------------------------
+## startup_message() — which build is attached, and where the release lives
+## ---------------------------------------------------------------------------
+
+#' The message printed when horizons is attached
+#'
+#' Development builds carry a fourth version component of 9000 or more
+#' (`0.10.0.9000`), the R convention for an unreleased version. A development
+#' build says so and names the command that installs the latest release;
+#' `install_github("S-Leuthold/horizons")` installs the development branch.
+#'
+#' @param version A `package_version`, normally
+#'   `utils::packageVersion("horizons")`.
+#' @return A single string.
+#' @keywords internal
+#' @noRd
+startup_message <- function(version) {
+
+  version <- package_version(version)
+  parts   <- unlist(version)
+  is_dev  <- length(parts) >= 4 && parts[4] >= 9000
+
+  bugs <- "Please flag bugs at https://github.com/S-Leuthold/horizons/issues"
+
+  if (!is_dev) {
+    return(paste0("horizons ", version, ". ", bugs))
+  }
+
+  paste0(
+    "horizons ", version, " (development version). Fixes land here first; ",
+    "for the latest release, install with ",
+    "remotes::install_github(\"S-Leuthold/horizons@main\"). ", bugs
+  )
+
 }
