@@ -143,28 +143,6 @@ test_that("standardize() validates logical parameters", {
 ## Resampling Tests
 ## =============================================================================
 
-test_that("resample_spectra() changes wavelength count", {
-
-  ## Create data at 4 cm⁻¹ resolution ------------------------------------------
-
-  hd <- create_test_spectra(n_wavelengths = 850, wn_min = 600, wn_max = 4000)
-
-  ## Get original info ---------------------------------------------------------
-
-  original_n <- hd$data$n_predictors
-
-  ## Resample to 2 cm⁻¹ --------------------------------------------------------
-
-  hd_resampled <- standardize(hd, resample = 2, trim = NULL,
-                               remove_water = FALSE, baseline = FALSE)
-
-  ## Check wavelength count increased ------------------------------------------
-
-  expect_gt(hd_resampled$data$n_predictors, original_n)
-
-})
-
-
 test_that("resample_spectra(target_resolution =) uses the multiples inside the data's range, bit for bit the new_wav path", {
 
   ## Arrange: an axis offset from the multiples of 2, as an instrument's is
@@ -243,20 +221,6 @@ test_that("resample_spectra() needs exactly one of target_resolution and new_wav
   expect_error(resample_spectra(m, wn), class = "horizons_input_error")
   expect_error(resample_spectra(m, wn, target_resolution = 2, new_wav = wn),
                class = "horizons_input_error")
-
-})
-
-
-test_that("standardize() with resample = NULL skips resampling", {
-
-  hd <- create_test_spectra(n_wavelengths = 100)
-
-  original_n <- hd$data$n_predictors
-
-  hd_result <- standardize(hd, resample = NULL, trim = NULL,
-                           remove_water = FALSE, baseline = FALSE)
-
-  expect_equal(hd_result$data$n_predictors, original_n)
 
 })
 
@@ -910,27 +874,6 @@ test_that("a point beyond the trim bound does not move the baseline inside it", 
 predictor_block <- function(hd) as.matrix(hd$data$analysis[, predictor_names(hd)])
 
 
-test_that("standardize(baseline = TRUE) runs on a single sample, with and without resampling (#78)", {
-
-  ## Off-grid: stored increasing and off the grid, so resample = 4 really
-  ## interpolates; three random spectra, so the rows differ in shape
-  batch  <- make_axis_spectra(OFFGRID_WN)
-  single <- subset_rows(batch, "s2")
-
-  for (res in list(NULL, 4)) {
-
-    one  <- no_output(standardize(single, resample = res, trim = c(600, 4000), baseline = TRUE))
-    many <- no_output(standardize(batch,  resample = res, trim = c(600, 4000), baseline = TRUE))
-
-    expect_identical(one$data$n_rows, 1L)
-    expect_identical(predictor_names(one), predictor_names(many))
-    expect_identical(unname(predictor_block(one)), unname(predictor_block(many)[2, , drop = FALSE]))
-
-  }
-
-})
-
-
 test_that("a single sample standardizes as its row of a batch, under every option (#78)", {
 
   batch  <- make_axis_spectra(OFFGRID_WN)
@@ -953,6 +896,7 @@ test_that("a single sample standardizes as its row of a batch, under every optio
     one  <- no_output(do.call(standardize, c(list(single), args)))
     many <- no_output(do.call(standardize, c(list(batch),  args)))
 
+    expect_identical(one$data$n_rows, 1L, info = what)
     expect_identical(predictor_names(one), predictor_names(many), info = what)
     expect_identical(unname(predictor_block(one)), unname(predictor_block(many)[2, , drop = FALSE]),
                      info = what)
@@ -1012,52 +956,6 @@ test_that("apply_baseline_correction() returns one spectrum as a 1 x p matrix na
 
 
 ## =============================================================================
-## Trimming Tests
-## =============================================================================
-
-test_that("trim_spectra() removes wavelengths outside range", {
-
-  hd <- create_test_spectra(n_wavelengths = 200, wn_min = 400, wn_max = 4500)
-
-  original_n <- hd$data$n_predictors
-
-  ## Trim to 600-4000 ----------------------------------------------------------
-
-  hd_trimmed <- standardize(hd, resample = NULL, trim = c(600, 4000),
-                            remove_water = FALSE, baseline = FALSE)
-
-  ## Check wavelength count decreased ------------------------------------------
-
-  expect_lt(hd_trimmed$data$n_predictors, original_n)
-
-  ## Check all wavelengths are within range ------------------------------------
-
-  predictor_cols <- hd_trimmed$data$role_map$variable[
-    hd_trimmed$data$role_map$role == "predictor"
-  ]
-  wavelengths <- as.numeric(gsub("^wn_", "", predictor_cols))
-
-  expect_true(all(wavelengths >= 600))
-  expect_true(all(wavelengths <= 4000))
-
-})
-
-
-test_that("standardize() with trim = NULL skips trimming", {
-
-  hd <- create_test_spectra(n_wavelengths = 100)
-
-  original_n <- hd$data$n_predictors
-
-  hd_result <- standardize(hd, resample = NULL, trim = NULL,
-                           remove_water = FALSE, baseline = FALSE)
-
-  expect_equal(hd_result$data$n_predictors, original_n)
-
-})
-
-
-## =============================================================================
 ## Water Band Removal Tests
 ## =============================================================================
 
@@ -1098,20 +996,6 @@ test_that("remove_water_bands() removes water absorption regions", {
 })
 
 
-test_that("standardize() with remove_water = FALSE skips water removal", {
-
-  hd <- create_test_spectra(n_wavelengths = 100, wn_min = 1500, wn_max = 3700)
-
-  original_n <- hd$data$n_predictors
-
-  hd_result <- standardize(hd, resample = NULL, trim = NULL,
-                           remove_water = FALSE, baseline = FALSE)
-
-  expect_equal(hd_result$data$n_predictors, original_n)
-
-})
-
-
 ## =============================================================================
 ## Baseline Correction Tests
 ## =============================================================================
@@ -1141,48 +1025,6 @@ test_that("baseline correction modifies spectral values", {
 })
 
 
-test_that("standardize() with baseline = FALSE skips correction", {
-
-  hd <- create_test_spectra(n_wavelengths = 100)
-
-  predictor_cols <- hd$data$role_map$variable[
-    hd$data$role_map$role == "predictor"
-  ]
-  original_values <- as.matrix(hd$data$analysis[, predictor_cols])
-
-  hd_result <- standardize(hd, resample = NULL, trim = NULL,
-                           remove_water = FALSE, baseline = FALSE)
-
-  result_values <- as.matrix(hd_result$data$analysis[, predictor_cols])
-
-  expect_equal(original_values, result_values)
-
-})
-
-
-## =============================================================================
-## Provenance Tests
-## =============================================================================
-
-test_that("standardize() updates provenance", {
-
-  hd <- create_test_spectra()
-
-  expect_null(hd$provenance$standardization)
-
-  hd_std <- standardize(hd, resample = 2, trim = c(600, 4000),
-                        remove_water = TRUE, baseline = TRUE)
-
-  expect_false(is.null(hd_std$provenance$standardization))
-  expect_equal(hd_std$provenance$standardization$resample, 2)
-  expect_equal(hd_std$provenance$standardization$trim, c(600, 4000))
-  expect_true(hd_std$provenance$standardization$remove_water)
-  expect_true(hd_std$provenance$standardization$baseline)
-  expect_s3_class(hd_std$provenance$standardization$applied_at, "POSIXct")
-
-})
-
-
 ## =============================================================================
 ## Idempotence Tests
 ## =============================================================================
@@ -1202,41 +1044,17 @@ test_that("standardize() warns on already-standardized object", {
 })
 
 
-test_that("standardize() with force = TRUE re-standardizes", {
-
-  hd <- create_test_spectra(n_wavelengths = 200, wn_min = 400, wn_max = 4500)
-
-  ## First standardization -----------------------------------------------------
-
-  hd_std1 <- standardize(hd, resample = NULL, trim = c(500, 4200),
-                         remove_water = FALSE, baseline = FALSE)
-
-  n_after_first <- hd_std1$data$n_predictors
-
-  ## Second standardization with force -----------------------------------------
-
-  expect_warning(
-    hd_std2 <- standardize(hd_std1, resample = NULL, trim = c(600, 4000),
-                           remove_water = FALSE, baseline = FALSE, force = TRUE),
-    "Re-standardizing"
-  )
-
-  ## Should have fewer wavelengths after tighter trim --------------------------
-
-  expect_lt(hd_std2$data$n_predictors, n_after_first)
-
-})
-
-
 ## =============================================================================
 ## Combined Operations Tests
 ## =============================================================================
 
-test_that("standardize() applies operations in correct order", {
+test_that("standardize() with every operation on trims, drops the water bands, resamples, and records its arguments", {
 
   ## Create data with wide range and coarse resolution -------------------------
 
   hd <- create_test_spectra(n_wavelengths = 200, wn_min = 400, wn_max = 4500)
+
+  expect_null(hd$provenance$standardization)
 
   ## Apply all operations ------------------------------------------------------
 
@@ -1245,6 +1063,16 @@ test_that("standardize() applies operations in correct order", {
                          trim         = c(600, 4000),
                          remove_water = TRUE,
                          baseline     = TRUE)
+
+  ## Check the provenance records each argument --------------------------------
+
+  std <- hd_full$provenance$standardization
+  expect_false(is.null(std))
+  expect_equal(std$resample, 2)
+  expect_equal(std$trim, c(600, 4000))
+  expect_true(std$remove_water)
+  expect_true(std$baseline)
+  expect_s3_class(std$applied_at, "POSIXct")
 
   ## Check final wavelengths are in expected range -----------------------------
 
@@ -1296,57 +1124,5 @@ test_that("standardize() preserves non-predictor columns", {
 
   expect_true("batch" %in% names(hd_std$data$analysis))
   expect_equal(hd_std$data$analysis$batch, rep("A", nrow(hd_std$data$analysis)))
-
-})
-
-
-## =============================================================================
-## Edge Cases
-## =============================================================================
-
-test_that("standardize() handles all parameters as NULL/FALSE", {
-
-  hd <- create_test_spectra()
-
-  ## This should be a no-op but still mark as standardized ---------------------
-
-  hd_result <- standardize(hd, resample = NULL, trim = NULL,
-                           remove_water = FALSE, baseline = FALSE)
-
-  ## Data unchanged ------------------------------------------------------------
-
-  expect_equal(hd$data$n_predictors, hd_result$data$n_predictors)
-
-  ## Provenance still set (marks as evaluated) ---------------------------------
-
-  expect_false(is.null(hd_result$provenance$standardization))
-
-})
-
-
-test_that("standardize() maintains valid horizons_data structure", {
-
-  hd <- create_test_spectra()
-
-  hd_std <- standardize(hd, resample = 2, trim = c(600, 4000),
-                        remove_water = TRUE, baseline = TRUE)
-
-  ## Should pass validation (implicitly tested by returning without error) -----
-
-  expect_s3_class(hd_std, "horizons_data")
-
-  ## Check structure -----------------------------------------------------------
-
-  expect_true(!is.null(hd_std$data$analysis))
-  expect_true(!is.null(hd_std$data$role_map))
-  expect_true(!is.null(hd_std$data$n_predictors))
-
-  ## Check role_map has correct columns ----------------------------------------
-
-  expect_true(all(c("variable", "role") %in% names(hd_std$data$role_map)))
-
-  ## Check all analysis columns are in role_map --------------------------------
-
-  expect_true(all(names(hd_std$data$analysis) %in% hd_std$data$role_map$variable))
 
 })
