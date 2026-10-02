@@ -18,14 +18,18 @@ alignment limitation.}
 \item{interval}{Logical. Return CV+ conformal prediction intervals when
 ensemble uncertainty quantification is available (\code{object$ensemble$uq},
 calibrated by \code{\link[=fit_ensemble_uq]{fit_ensemble_uq()}} — on by default in \code{\link[=ensemble]{ensemble()}}).
-Default \code{TRUE}. When no UQ bundle is present, point predictions are
-returned with a one-time note. When the members were fit on a
-response-trimmed training partition (\code{validate(remove_outliers = "response")}, #77), the intervals come from out-of-fold predictions on
+Default \code{TRUE}. The intervals are at the level they were calibrated at
+in \code{\link[=ensemble]{ensemble()}}, 0.90 by default (see Details). When no UQ bundle is
+present, point predictions are returned with a one-time note. When the
+members were fit on a response-trimmed training partition
+(\code{validate(remove_outliers = "response")}, #77), the intervals come from out-of-fold predictions on
 the rows inside the training fences, so this warns once, with class
 \code{horizons_response_trim_warning}, that they were calibrated within those
 fences and can undercover samples outside them.}
 
-\item{...}{Unused; present for S3 method consistency.}
+\item{...}{Not used; present for S3 method consistency. A \code{level} passed
+here is ignored with a warning (see Details), and any other argument is
+an error.}
 }
 \value{
 A tibble, one row per sample:
@@ -59,6 +63,12 @@ predicted.
 occasionally fall outside its own interval (a known property of
 jackknife+/CV+; the bounds come from fold-model predictions, not the
 full-data refit). This is deliberate and not repaired.
+
+\strong{Interval level.} Intervals are at the coverage level the CV+ bundle was
+calibrated at in \code{\link[=ensemble]{ensemble()}}, 0.90 by default. \code{predict()} has no \code{level}
+argument: a \code{level} is ignored with a warning of class
+\code{horizons_input_warning}, and any other argument it does not take is an
+error of class \code{horizons_input_error}.
 }
 \examples{
 \dontrun{
