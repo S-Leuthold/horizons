@@ -24,6 +24,14 @@ This package grew out of my own analysis scripts over the last year and a half. 
 remotes::install_github("S-Leuthold/horizons")
 ```
 
+That installs the `development` branch, which is where fixes land first. If you'd rather have the latest tagged release, install from `main`:
+
+```r
+remotes::install_github("S-Leuthold/horizons@main")
+```
+
+Both are pre-1.0 and both will have bugs; `development` is simply more up to date. Releases are listed on the [releases page](https://github.com/S-Leuthold/horizons/releases).
+
 Two dependencies are not on CRAN and are pinned in the `Remotes` field of `DESCRIPTION`, so `remotes::install_github()` installs them automatically:
 
 - [`spectral-cockpit/opusreader2`](https://github.com/spectral-cockpit/opusreader2) reads Bruker OPUS files.
