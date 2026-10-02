@@ -111,6 +111,33 @@ make_new_spectra <- function(n = 8, n_wn = 10, seed = 99) {
 fitted_fixture <- fit(make_predict_eval(), n_best = 1L, compute_uq = TRUE,
                       verbose = FALSE)
 
+## A two-member copy of a fitted object, with no new fit: the best member's
+## workflow, UQ and AD bundles, config row and evaluation row filed again under
+## a second config_id. A claim about "each config" needs more than one config
+## to fail.
+add_member_copy <- function(fit, config_id = "cfg_002") {
+
+  from <- fit$models$best_config
+
+  fit$models$workflows[[config_id]] <- fit$models$workflows[[from]]
+  fit$models$uq[[config_id]]        <- fit$models$uq[[from]]
+  fit$models$ad[[config_id]]        <- fit$models$ad[[from]]
+  fit$models$n_models               <- length(fit$models$workflows)
+
+  copy_row <- function(tbl) {
+    row           <- tbl[tbl$config_id == from, ]
+    row$config_id <- config_id
+    dplyr::bind_rows(tbl, row)
+  }
+
+  fit$config$configs     <- copy_row(fit$config$configs)
+  fit$config$n_configs   <- nrow(fit$config$configs)
+  fit$evaluation$results <- copy_row(fit$evaluation$results)
+
+  validate_horizons_fit(fit)
+
+}
+
 
 ## ---------------------------------------------------------------------------
 ## Point predictions
@@ -176,11 +203,13 @@ describe("predict.horizons_fit() - config selection", {
 
   it("config = 'all' returns a block per config with a config_id column", {
 
-    p <- predict(fitted_fixture, new_df, config = "all", interval = FALSE)
+    two <- add_member_copy(fitted_fixture)
+    p   <- predict(two, new_df, config = "all", interval = FALSE)
 
     expect_true("config_id" %in% names(p))
-    n_configs <- length(fitted_fixture$models$workflows)
-    expect_equal(nrow(p), nrow(new_df) * n_configs)
+    expect_equal(nrow(p), nrow(new_df) * 2L)
+    expect_equal(p$config_id,
+                 rep(names(two$models$workflows), each = nrow(new_df)))
 
   })
 
@@ -217,8 +246,14 @@ describe("predict.horizons_fit() - intervals", {
 
   it("no quantile crossings even with signed conformal margins", {
 
+    ## A margin this negative pulls each raw bound past the other, so the
+    ## ordering below holds only through the crossing repair.
+    local_mocked_bindings(compute_c_alpha = function(scores, level) -1e6)
+
     p <- predict(fitted_fixture, new_df)
+
     expect_true(all(p$.pred_lower <= p$.pred_upper))
+    expect_true(all(p$.interval_width >= 0))
 
   })
 
@@ -275,9 +310,12 @@ describe("predict.horizons_fit() - non-negativity floor", {
   ## Soil properties from MIR are non-negative; predictions and bounds floor at 0.
   it("floors predictions and interval bounds at 0", {
 
+    ## A margin this large takes every raw lower bound far below 0
+    local_mocked_bindings(compute_c_alpha = function(scores, level) 1e6)
+
     p <- predict(fitted_fixture, make_new_spectra())
     expect_true(all(p$.pred >= 0))
-    expect_true(all(p$.pred_lower >= 0))
+    expect_equal(p$.pred_lower, rep(0, nrow(p)))
 
   })
 
@@ -844,11 +882,14 @@ describe("predict.horizons_fit() - selected training set", {
 
   it("warns once per call, not once per config", {
 
+    two <- add_member_copy(selected_fixture)
+
     warns <- testthat::capture_warnings(
-      predict(selected_fixture, new_df, config = "all", interval = TRUE)
+      p <- predict(two, new_df, config = "all", interval = TRUE)
     )
 
     expect_equal(sum(grepl("Conformal coverage is not guaranteed", warns)), 1L)
+    expect_equal(nrow(p), nrow(new_df) * 2L)
 
   })
 

@@ -513,9 +513,13 @@ test_that("add_response() detects case mismatch pattern", {
 
   ## Act & Assert — should mention case ------------------------------------
 
-  expect_error(
-    add_response(hd, lab, variable = "SOC"),
-    "No matching samples"
+  ## The hint is printed in the tree under the error, not raised with it
+  expect_output(
+    expect_error(
+      add_response(hd, lab, variable = "SOC"),
+      "No matching samples"
+    ),
+    "case mismatch"
   )
 
 })

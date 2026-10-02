@@ -891,9 +891,9 @@ describe("validate() spectral outlier detection", {
     result_strict <- quiet_validate(hd, spectral_threshold = 0.95)
     result_loose  <- quiet_validate(hd, spectral_threshold = 0.999)
 
-    ## Stricter threshold should flag more or equal outliers
-    expect_true(
-      length(result_strict$validation$outliers$spectral_ids) >=
+    ## The stricter threshold flags more rows (8 against 3 on this fixture)
+    expect_gt(
+      length(result_strict$validation$outliers$spectral_ids),
       length(result_loose$validation$outliers$spectral_ids)
     )
 
@@ -959,14 +959,18 @@ describe("validate() response outlier detection", {
 
   test_that("P006 respects response_threshold parameter", {
 
-    outcome_vals <- c(stats::rnorm(95, 15, 2), 30, 35, 40, 45, 50)
+    ## Seeded: about one unseeded draw in fourteen puts no row between the two
+    ## fences, so the counts would tie
+    outcome_vals <- c(withr::with_seed(42, stats::rnorm(95, 15, 2)),
+                      30, 35, 40, 45, 50)
     hd <- make_configured_hd(outcome_values = outcome_vals)
 
     result_strict <- quiet_validate(hd, response_threshold = 1.0)
     result_loose  <- quiet_validate(hd, response_threshold = 3.0)
 
-    expect_true(
-      length(result_strict$validation$outliers$response_ids) >=
+    ## The stricter fence flags more rows (11 against 5 on this draw)
+    expect_gt(
+      length(result_strict$validation$outliers$response_ids),
       length(result_loose$validation$outliers$response_ids)
     )
 
