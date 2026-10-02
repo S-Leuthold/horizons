@@ -1411,11 +1411,12 @@ describe("configure() and the object contract", {
   test_that("evaluating a re-configured fit matches evaluating the plain object (#70)", {
 
     ## What the reset promises: nothing the clay fit earned leaks into the oc
-    ## evaluation. plsr, because it is fast and bit-reproducible; cubist is
-    ## not (#51).
+    ## evaluation. elastic_net, because glmnet is in Imports, so the test
+    ## needs no optional engine, and it is fast and bit-reproducible; cubist
+    ## is not (#51).
     fx    <- make_select_fixture(n_pool = 60)
     plain <- fx$pool
-    args  <- list(models = "plsr", grid_size = 2L, bayesian_iter = 0L,
+    args  <- list(models = "elastic_net", grid_size = 2L, bayesian_iter = 0L,
                   final_bayesian_iter = 0L, cv_folds = 3L)
 
     run_configure <- function(x, outcome) do.call(quiet_configure, c(list(x, outcome = outcome), args))
