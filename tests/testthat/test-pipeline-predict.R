@@ -233,14 +233,37 @@ describe("predict.horizons_fit() - intervals", {
 
   new_df <- make_new_spectra()
 
-  it("returns ordered, positive-width intervals by default", {
+  it("returns ordered intervals by default", {
 
+    ## The point need not sit inside its interval: CQR bands are asymmetric
+    ## and a winsorized .pred can fall outside, so only the bounds' order and
+    ## width are promised here; the outcome range is checked below.
     p <- predict(fitted_fixture, new_df)
 
     expect_true(all(c(".pred_lower", ".pred_upper", ".interval_width") %in% names(p)))
-    expect_true(all(p$.pred_lower <= p$.pred))
-    expect_true(all(p$.pred <= p$.pred_upper))
-    expect_true(all(p$.interval_width >= 0))
+    expect_true(all(p$.pred_lower <= p$.pred_upper))
+    expect_equal(p$.interval_width, p$.pred_upper - p$.pred_lower)
+
+  })
+
+  it("clamps both interval bounds to a recorded outcome range", {
+
+    ## A range set inside the unclamped bounds, so both ends bind. No refit:
+    ## predict() reads the range at serving time.
+    p0 <- predict(fitted_fixture, new_df)
+    r  <- c(stats::median(p0$.pred_lower), stats::median(p0$.pred_upper))
+
+    expect_true(any(p0$.pred_lower < r[1]))
+    expect_true(any(p0$.pred_upper > r[2]))
+
+    capped <- fitted_fixture
+    capped$config$outcome_range <- r
+
+    p <- predict(capped, new_df)
+
+    expect_true(all(p$.pred_lower >= r[1] & p$.pred_upper <= r[2]))
+    expect_true(all(p$.pred_lower <= p$.pred_upper))
+    expect_equal(p$.interval_width, p$.pred_upper - p$.pred_lower)
 
   })
 
