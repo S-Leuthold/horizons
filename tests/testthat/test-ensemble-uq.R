@@ -373,6 +373,64 @@ describe("predict.horizons_ensemble() - CV+ intervals", {
 
 
 ## ---------------------------------------------------------------------------
+## Predict side: arguments in `...` (#141)
+## ---------------------------------------------------------------------------
+## The CV+ intervals are at the level fit_ensemble_uq() calibrated. A `level`
+## warns that it is ignored, and any other argument aborts.
+
+describe("predict.horizons_ensemble() - arguments in ...", {
+
+  it("warns that level is ignored and returns the calibration-level intervals", {
+
+    expect_equal(ens_ref$ensemble$uq$level_default, 0.90)
+
+    reference <- predict(ens_ref, test_set)
+
+    w <- expect_warning(
+      p <- predict(ens_ref, test_set, level = 0.95),
+      class = "horizons_input_warning"
+    )
+
+    expect_match(conditionMessage(w), "0.9.", fixed = TRUE)
+    expect_equal(p, reference)
+
+  })
+
+  it("names the default level when the ensemble has no UQ bundle", {
+
+    no_uq <- ens_ref
+    no_uq$ensemble$uq <- NULL
+
+    w <- expect_warning(
+      suppressMessages(predict(no_uq, test_set, level = 0.95)),
+      class = "horizons_input_warning"
+    )
+
+    expect_match(conditionMessage(w), paste0(DEFAULT_UQ_LEVEL, "."), fixed = TRUE)
+
+  })
+
+  it("errors on any other argument, naming it", {
+
+    expect_error(
+      predict(ens_ref, test_set, config = "all"),
+      class  = "horizons_input_error",
+      regexp = "config"
+    )
+
+  })
+
+  it("a call with neither is unchanged", {
+
+    expect_no_warning(p <- predict(ens_ref, test_set))
+    expect_true(all(c(".pred", ".pred_lower", ".pred_upper") %in% names(p)))
+
+  })
+
+})
+
+
+## ---------------------------------------------------------------------------
 ## Degradation and gates
 ## ---------------------------------------------------------------------------
 

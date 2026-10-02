@@ -36,9 +36,11 @@ NULL
 #'   - `"all"`: every successfully fitted model (long output, one block per
 #'     config, with a `config_id` column).
 #' @param interval Logical. Return conformal prediction intervals when UQ is
-#'   available? Default `TRUE`. Ignored (with a note) for configs that have no
-#'   UQ bundle. When intervals are actually available and the model was fit on
-#'   a training object carrying a `$selection` (from `select_training()`), this
+#'   available? Default `TRUE`. The intervals are at the level they were
+#'   calibrated at in `fit()`, 0.90 by default (see Details). Ignored (with a
+#'   note) for configs that have no UQ bundle. When intervals are actually
+#'   available and the model was fit on a training object carrying a
+#'   `$selection` (from `select_training()`), this
 #'   warns once that conformal coverage is not guaranteed: the calibration rows
 #'   were chosen for proximity to the targets, so they are not exchangeable
 #'   with arbitrary prediction data.
@@ -47,7 +49,9 @@ NULL
 #'   while `.ad_distance`/`.ad_flag` are preserved so the caller can see how far
 #'   out each sample was. Default `FALSE` (report AD, predict for all samples).
 #'   Has no effect on configs without an AD bundle.
-#' @param ... Unused; present for S3 method consistency.
+#' @param ... Not used; present for S3 method consistency. A `level` passed
+#'   here is ignored with a warning (see Details), and any other argument is
+#'   an error.
 #'
 #' @return A tibble in long format, one row per sample (per config when
 #'   `config = "all"`):
@@ -78,6 +82,12 @@ NULL
 #' distance is a squared Mahalanobis distance in the model's feature space; the
 #' flag bins it against held-out-calibrated thresholds. Set `abstain_ood = TRUE`
 #' to `NA` predictions for out-of-domain samples while keeping the AD columns.
+#'
+#' **Interval level.** Intervals are at the coverage level the uncertainty was
+#' calibrated at in `fit()`, 0.90 by default. `predict()` has no `level`
+#' argument: a `level` is ignored with a warning of class
+#' `horizons_input_warning`, and any other argument it does not take is an
+#' error of class `horizons_input_error`.
 #'
 #' **Outcome range.** Point predictions and interval bounds are clamped to
 #' the `outcome_range` given to [configure()], silently, since the range is
@@ -159,6 +169,15 @@ predict.horizons_fit <- function(object,
   ## needs no namespace loading itself, so it runs first.
   config_ids <- resolve_config_ids(object, config)
 
+  ## Nothing in `...` is used. A `level` warns, naming the level the predicted
+  ## configs' UQ bundles were calibrated at; anything else aborts (#141).
+  ## Checked here, once the configs are known and before any work is done.
+  check_predict_dots(
+    ...,
+    .level_default = unlist(lapply(object$models$uq[config_ids],
+                                  function(uq) uq$level_default))
+  )
+
   ## `library(horizons)` does not load workflows, most modeling engines, or
   ## ranger (#65) — none of them are referenced via NAMESPACE import
   ## directives, only `::`. A stored workflow's S3 predict method therefore
@@ -227,6 +246,79 @@ predict.horizons_fit <- function(object,
     out[, setdiff(names(out), "config_id"), drop = FALSE]
 
   }
+
+}
+
+## ---------------------------------------------------------------------------
+## check_predict_dots() — a level is ignored, any other argument is refused
+## ---------------------------------------------------------------------------
+
+#' Check the arguments that reached predict()'s dots
+#'
+#' Both predict methods take `...` because the [stats::predict()] generic
+#' does, and neither uses it. Unchecked, anything passed there is dropped
+#' silently: a misspelled argument, or a `level`, which looks like it should
+#' choose the interval level and does not (#141). Intervals are at the level
+#' the uncertainty was calibrated at, so a `level` warns that it is ignored
+#' and names that level, and any other argument aborts, naming it. The dots
+#' are read by name and never evaluated.
+#'
+#' @param ... The predict method's dots, forwarded.
+#' @param .level_default Numeric or `NULL`. The level the returned intervals
+#'   are at: `uq$level_default` of the bundle(s) in use. `NULL` (no bundle)
+#'   names `DEFAULT_UQ_LEVEL`.
+#' @param .call The predict method's frame, for the error's call. Both
+#'   arguments are dot-prefixed so a user argument named `level_default` or
+#'   `call` lands in `...` and is checked, not bound to them.
+#' @return Invisibly `NULL`. Warns with class `horizons_input_warning`; aborts
+#'   with class `horizons_input_error`.
+#' @keywords internal
+#' @noRd
+check_predict_dots <- function(..., .level_default = NULL,
+                               .call = rlang::caller_env()) {
+
+  dots      <- rlang::enquos(...)
+  dot_names <- names(dots) %||% rep("", length(dots))
+
+  ## -------------------------------------------------------------------------
+  ## Anything but `level` is an error
+  ## -------------------------------------------------------------------------
+
+  unknown <- dots[dot_names != "level"]
+
+  if (length(unknown) > 0) {
+
+    unknown_names <- dot_names[dot_names != "level"]
+
+    named   <- unknown_names[nzchar(unknown_names)]
+    unnamed <- vapply(unknown[!nzchar(unknown_names)], rlang::as_label,
+                      character(1), USE.NAMES = FALSE)
+
+    cli::cli_abort(c(
+      "{.fn predict} got {length(unknown)} argument{?s} it does not take.",
+      "x" = if (length(named) > 0) "Unknown: {.arg {named}}.",
+      "x" = if (length(unnamed) > 0) "Unnamed: {.code {unnamed}}.",
+      "i" = "Did you misspell an argument name?"
+    ), class = "horizons_input_error", call = .call)
+
+  }
+
+  ## -------------------------------------------------------------------------
+  ## `level` is ignored, and says so
+  ## -------------------------------------------------------------------------
+
+  if ("level" %in% dot_names) {
+
+    level <- unique(.level_default) %||% DEFAULT_UQ_LEVEL
+
+    cli::cli_warn(c(
+      "!" = "{.arg level} is ignored. Prediction intervals are at the level they were calibrated at, {.val {level}}.",
+      "i" = "{.fn predict} has no {.arg level} argument."
+    ), class = "horizons_input_warning")
+
+  }
+
+  invisible(NULL)
 
 }
 
@@ -1073,6 +1165,11 @@ predict_members <- function(object, members, new_spectra) {
 #' warns naming the failing step rather than degrading silently, via
 #' [warn_interval_failure()].
 #'
+#' The intervals are at the level the bundle was calibrated at,
+#' `uq$level_default`. There is no `level` argument: the body sets `level`
+#' from the bundle on its first line, which is where a level chosen at
+#' predict time would enter (#142).
+#'
 #' @param uq A UQ bundle from `models$uq[[config_id]]`.
 #' @param point_pred Numeric point predictions, original scale.
 #' @param new_spectra Tibble of new data (sample_id + predictors).
@@ -1080,7 +1177,6 @@ predict_members <- function(object, members, new_spectra) {
 #'   to, named in the warning on failure. `NULL` (default) omits it.
 #' @param outcome_range Numeric length-2 vector the bounds are clamped to,
 #'   from [outcome_range_setting()]. Default `DEFAULT_OUTCOME_RANGE`.
-#' @param level Coverage level or NULL (-> `uq$level_default`).
 #' @return Tibble of interval columns, or NULL if quantile prediction fails.
 #' @keywords internal
 #' @noRd
