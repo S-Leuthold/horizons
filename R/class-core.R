@@ -2403,6 +2403,53 @@ has_ad <- function(x) {
 }
 
 
+## ---------------------------------------------------------------------------
+## selected_member() \u2014 The fitted member print() and summary() report
+## ---------------------------------------------------------------------------
+
+#' Find the member fit() selected, for print() and summary()
+#'
+#' @description
+#' Returns the `models$results` row of `models$best_config`, the member
+#' `fit()` chose on cross-validated ranks and the one `predict()` uses by
+#' default, with the label `fit()`'s console gives it. The member with the
+#' lowest test error is never reported in its place: that is a best of N on
+#' the held-out rows, optimistic, and can name a different configuration.
+#'
+#' @param x A `horizons_fit`.
+#'
+#' @return `NULL` when `models$best_config` is unset or has no row in
+#'   `models$results`; otherwise a list with `id`, `row` (its results row)
+#'   and `label`: `"Cold-started"` after `fit()`'s cold start, where nothing
+#'   was ranked, else `"CV-selected"`.
+#'
+#' @seealso [print.horizons_data()], [summary.horizons_data()]
+#' @noRd
+selected_member <- function(x) {
+
+  best_id <- x$models$best_config
+  fit_res <- x$models$results
+
+  if (!is.character(best_id) || length(best_id) != 1L || is.na(best_id) ||
+      !is.data.frame(fit_res)) {
+
+    return(NULL)
+
+  }
+
+  row <- fit_res[fit_res$config_id %in% best_id, ]
+
+  if (nrow(row) == 0) return(NULL)
+
+  list(
+    id    = best_id,
+    row   = row[1, ],
+    label = if (isFALSE(x$evaluation$screened)) "Cold-started" else "CV-selected"
+  )
+
+}
+
+
 #' Print method for horizons_data objects
 #'
 #' @description
@@ -2659,23 +2706,16 @@ print.horizons_data <- function(x, ...) {
     n_models <- x$models$n_models %||% length(x$models$workflows)
     cat(paste0("   \u251C\u2500 Fitted: ", n_models, "\n"))
 
-    ## Best test performance
-    if (!is.null(x$models$results)) {
+    ## The member fit() selected on CV ranks, with its test metrics (#136)
+    sel <- selected_member(x)
 
-      fit_res   <- x$models$results
-      successes <- fit_res[fit_res$status == "success", ]
+    if (!is.null(sel)) {
 
-      if (nrow(successes) > 0) {
-
-        best_idx <- which.min(successes$rmse)
-        best     <- successes[best_idx, ]
-        cat(paste0(
-          "   \u251C\u2500 Best test: ", best$config_id,
-          " \u2014 RMSE = ", round(best$rmse, 3),
-          ", RPD = ", round(best$rpd, 2), "\n"
-        ))
-
-      }
+      cat(paste0(
+        "   \u251C\u2500 ", sel$label, ": ", sel$id,
+        " \u2014 test RMSE = ", round(sel$row$rmse, 3),
+        ", RPD = ", round(sel$row$rpd, 2), "\n"
+      ))
 
     }
 
@@ -3137,21 +3177,18 @@ summary.horizons_data <- function(object, ...) {
                  if (n_failed > 0) paste0(", ", cli::col_red(paste0(n_failed, " failed"))) else "",
                  "\n"))
 
-      ## Best test performance
-      successes <- fit_res[fit_res$status == "success", ]
+      ## The member fit() selected on CV ranks, with its test metrics (#136)
+      sel <- selected_member(x)
 
-      if (nrow(successes) > 0) {
+      if (!is.null(sel)) {
 
-        best_idx <- which.min(successes$rmse)
-        best     <- successes[best_idx, ]
-
-        cat(paste0("   \u251C\u2500 Best test: ", best$config_id, "\n"))
-        cat(paste0("   \u2502     \u251C\u2500 RMSE = ", round(best$rmse, 3),
-                   ", RPD = ", round(best$rpd, 2),
-                   ", R\u00B2 = ", round(best$rsq, 3), "\n"))
+        cat(paste0("   \u251C\u2500 ", sel$label, ": ", sel$id, "\n"))
+        cat(paste0("   \u2502     \u251C\u2500 Test RMSE = ", round(sel$row$rmse, 3),
+                   ", RPD = ", round(sel$row$rpd, 2),
+                   ", R\u00B2 = ", round(sel$row$rsq, 3), "\n"))
         cat(paste0("   \u2502     \u2514\u2500 CV RMSE = ",
-                   round(best$cv_rmse_mean, 3), " \u00B1 ",
-                   round(best$cv_rmse_se, 3), "\n"))
+                   round(sel$row$cv_rmse_mean, 3), " \u00B1 ",
+                   round(sel$row$cv_rmse_se, 3), "\n"))
 
       }
 

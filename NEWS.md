@@ -2,6 +2,7 @@
 
 ## Bug fixes
 
+* `print()` and `summary()` of a fitted object report the member `fit()` selected on cross-validation (`models$best_config`) and its test metrics, as `fit()`'s console does. They reported the member with the lowest test RMSE, a best-of-N on the held-out rows that could name a different configuration (#136).
 * **Each class is checked against everything it promises** (#129). An evaluated object is checked against the base data contract as well as its evaluation, and an ensemble against its fitted models, evaluation and data. `ensemble()` checks the whole fitted object before it fits anything, as `evaluate()` and `fit()` already did. Two rules are new: the column with the `id` role must be `sample_id`, and `evaluation$results` must have exactly one row per configuration in `config$configs`. Every validation failure now aborts with class `horizons_validation_error`, including the checks that run first, which used to abort without it.
 
 # horizons 0.10.0
