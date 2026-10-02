@@ -11,7 +11,9 @@
 ^R/pipeline-select-training\.R$
 ^R/select-[a-z]+\.R$
 ^R/(ad|ensemble-[a-z]+|pipeline-ensemble)\.R$
+^R/step-[a-z-]+\.R$
 ^tests/testthat/helper-.*\.R$
+^tests/testthat/fixtures/
 ^tests/testthat\.R$
 ^DESCRIPTION$
 ^\.github/
