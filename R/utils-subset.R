@@ -1,8 +1,9 @@
 # R/utils-subset.R
-# Row-level operations on horizons_data (issue #43). Two internals: replace
-# the analysis table and recompute every derived count, and select rows by
-# sample_id. Both refuse to run on a promoted object, because everything a
-# promotion earns is keyed to a row order these functions destroy.
+# Writes to the analysis table of horizons_data (issues #43, #135). Three
+# internals: replace the table and recompute every derived count, select rows
+# by sample_id, and append columns. The first two refuse to run on a promoted
+# object, because everything a promotion earns is keyed to a row order they
+# can change; appending columns moves no rows and runs on any class.
 
 
 ## ---------------------------------------------------------------------------
@@ -233,7 +234,8 @@ check_unpromoted <- function(x, fn) {
 #' Sets `x$data$analysis` (and optionally `x$data$role_map`) and recomputes
 #' `n_rows`, `n_predictors`, `n_covariates` and `n_responses` from the role
 #' map, so the counts have one source of truth. Every verb that changes the
-#' shape of the analysis table goes through here.
+#' rows of the analysis table, or rebuilds it, goes through here; a verb that
+#' only adds columns uses [add_columns()].
 #'
 #' @details
 #' The role map and the analysis columns must agree exactly; a mismatch is
@@ -295,12 +297,9 @@ set_analysis <- function(x, analysis, role_map = NULL) {
 
   old_ids <- x$data$analysis$sample_id
 
-  x$data$analysis     <- analysis
-  x$data$role_map     <- role_map
-  x$data$n_rows       <- nrow(analysis)
-  x$data$n_predictors <- sum(role_map$role == "predictor", na.rm = TRUE)
-  x$data$n_covariates <- sum(role_map$role == "covariate", na.rm = TRUE)
-  x$data$n_responses  <- sum(role_map$role == "response",  na.rm = TRUE)
+  x$data$analysis <- analysis
+  x$data$role_map <- role_map
+  x               <- recount_data(x)
 
   ## Keep the selection record describing the rows that are actually here ------
 
@@ -329,6 +328,179 @@ set_analysis <- function(x, analysis, role_map = NULL) {
     }
 
   }
+
+  x
+
+}
+
+
+## ---------------------------------------------------------------------------
+## add_columns() — Append columns without moving rows
+## ---------------------------------------------------------------------------
+
+#' Append columns to the analysis table of a horizons object
+#'
+#' @description
+#' Adds new columns to `x$data$analysis`, a role-map row for each, and
+#' recomputes the stored counts. The table keeps its rows, in their order,
+#' so this runs on any class: unlike [set_analysis()], it does not refuse a
+#' promoted object.
+#'
+#' @details
+#' The analysis table changes in two ways only: rows, or a rebuilt table,
+#' through [set_analysis()], and new columns through here. Nothing a
+#' promotion earns is keyed to a column that did not exist when it was
+#' earned, so a new column strands nothing as long as no modelling verb reads
+#' it by role. `role` is therefore `"response"` or `"meta"`. A new predictor,
+#' outcome, id or covariate column would change what `configure()`,
+#' `evaluate()` and `fit()` see, and is written through [set_analysis()] on
+#' an unpromoted object instead.
+#'
+#' `columns` holds one row per row of the table, in the table's order. The
+#' row count is checked. A caller that built `columns` by joining onto the
+#' table also passes the table's `sample_id` in it, as the row key: the key
+#' must equal the table's `sample_id` row for row, so a join that dropped,
+#' duplicated or reordered rows is refused instead of being attached to the
+#' wrong samples. The key is dropped, not added. A caller that passes no key
+#' vouches for the order itself, as `parse_ids()` does when it parses the
+#' table's own `filename` column in place.
+#'
+#' A name already in the table or the role map is refused, so a column is
+#' never overwritten here. Structural validation is the caller's job, as for
+#' [set_analysis()].
+#'
+#' @param x [horizons_data.] The object to update, of any class.
+#' @param columns [Data frame.] The new columns, one row per row of
+#'   `x$data$analysis` in the same order, optionally with the table's
+#'   `sample_id` as the row key.
+#' @param role [Character.] The role of every new column: `"response"` or
+#'   `"meta"`.
+#' @param after [Character or NULL.] An existing column to place the new
+#'   columns after, or `NULL` to append them at the end. Default: `NULL`.
+#'
+#' @return [horizons_data.] `x` with the columns, their roles and the counts
+#'   updated. The input is not modified. Errors of class
+#'   `horizons_input_error` on a wrong row count, a key out of step with the
+#'   table, a name already present, or a role other than the two above.
+#'
+#' @seealso [set_analysis()], [validate_horizons_data()]
+#' @noRd
+add_columns <- function(x, columns, role, after = NULL) {
+
+  if (!inherits(x, "horizons_data")) {
+
+    cli::cli_abort("{.arg x} must be a {.cls horizons_data}, not {.cls {class(x)[1]}}",
+                   class = "horizons_input_error")
+
+  }
+
+  if (!is.data.frame(columns)) {
+
+    cli::cli_abort("{.arg columns} must be a data frame, not {.cls {class(columns)[1]}}",
+                   class = "horizons_input_error")
+
+  }
+
+  if (!is.character(role) || length(role) != 1 || !role %in% c("response", "meta")) {
+
+    cli::cli_abort(c(
+      "{.arg role} must be {.val response} or {.val meta}",
+      "i" = "A new predictor, outcome, id or covariate column changes what modelling reads; write it with {.fn set_analysis}"
+    ), class = "horizons_input_error")
+
+  }
+
+  analysis <- x$data$analysis
+  n_rows   <- nrow(analysis)
+
+  ## Rows: the same count, and the same order when a key is given --------------
+
+  if (nrow(columns) != n_rows) {
+
+    cli::cli_abort(c(
+      "{.arg columns} must have one row per row of the analysis table",
+      "x" = "Got {nrow(columns)} row{?s} for {n_rows}"
+    ), class = "horizons_input_error")
+
+  }
+
+  if ("sample_id" %in% names(columns)) {
+
+    if (!identical(columns$sample_id, analysis$sample_id)) {
+
+      cli::cli_abort(c(
+        "{.arg columns} are not in the analysis table's row order",
+        "x" = "Their {.field sample_id} key differs from the table's, row for row",
+        "i" = "New columns attach by position, so they must keep the table's rows in its order"
+      ), class = "horizons_input_error")
+
+    }
+
+    columns$sample_id <- NULL
+
+  }
+
+  ## Names: new, never an overwrite ---------------------------------------------
+
+  present <- intersect(names(columns), c(names(analysis), x$data$role_map$variable))
+
+  if (length(present)) {
+
+    cli::cli_abort(c(
+      "{cli::qty(present)}Column{?s} {.field {present}} {?is/are} already in the analysis table",
+      "i" = "New columns are added, never overwritten"
+    ), class = "horizons_input_error")
+
+  }
+
+  if (!is.null(after) &&
+      !(is.character(after) && length(after) == 1 && after %in% names(analysis))) {
+
+    cli::cli_abort("{.arg after} must name one column of the analysis table",
+                   class = "horizons_input_error")
+
+  }
+
+  ## Append ---------------------------------------------------------------------
+
+  new_roles <- tibble::tibble(
+    variable = names(columns),
+    role     = rep(role, ncol(columns))
+  )
+
+  x$data$analysis <- tibble::add_column(analysis, columns, .after = after)
+  x$data$role_map <- dplyr::bind_rows(x$data$role_map, new_roles)
+
+  recount_data(x)
+
+}
+
+
+## ---------------------------------------------------------------------------
+## recount_data() — Recompute the counts stored beside the table
+## ---------------------------------------------------------------------------
+
+#' Recompute the stored counts from the analysis table and role map
+#'
+#' @description
+#' Sets `n_rows` from the analysis table and `n_predictors`, `n_covariates`
+#' and `n_responses` from the role map. [set_analysis()] and [add_columns()]
+#' both end here, so the counts are computed in one place.
+#'
+#' @param x [horizons_data.] The object, with its table and role map already
+#'   written.
+#'
+#' @return [horizons_data.] `x` with the four counts replaced.
+#'
+#' @noRd
+recount_data <- function(x) {
+
+  role_map <- x$data$role_map
+
+  x$data$n_rows       <- nrow(x$data$analysis)
+  x$data$n_predictors <- sum(role_map$role == "predictor", na.rm = TRUE)
+  x$data$n_covariates <- sum(role_map$role == "covariate", na.rm = TRUE)
+  x$data$n_responses  <- sum(role_map$role == "response",  na.rm = TRUE)
 
   x
 

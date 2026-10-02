@@ -1,5 +1,5 @@
 # tests/testthat/test-utils-subset.R
-# Tests for subset_rows() and set_analysis() (issue #43)
+# Tests for subset_rows(), set_analysis() (issue #43) and add_columns() (#135)
 
 
 ## =============================================================================
@@ -539,5 +539,122 @@ test_that("set_analysis() refuses to carry a record onto renamed rows", {
   expect_error(set_analysis(obj, analysis),
                regexp = "selection record",
                class  = "horizons_input_error")
+
+})
+
+
+## =============================================================================
+## add_columns() — New columns, rows unchanged
+## =============================================================================
+
+test_that("add_columns() appends columns with their roles and recounts", {
+
+  ## Arrange
+  fx  <- make_select_fixture(n_pool = 40)
+  new <- tibble::tibble(site = rep("A", 40), ph = seq_len(40) / 10)
+
+  ## Act
+  out <- add_columns(fx$pool, new, role = "response")
+
+  ## Assert — appended at the end, one response row each, counts recomputed
+  n_old <- ncol(fx$pool$data$analysis)
+
+  expect_identical(names(out$data$analysis)[n_old + 1:2], c("site", "ph"))
+  expect_identical(out$data$role_map$role[out$data$role_map$variable %in% c("site", "ph")],
+                   c("response", "response"))
+  expect_identical(out$data$n_responses, fx$pool$data$n_responses + 2L)
+  expect_identical(out$data$n_rows, fx$pool$data$n_rows)
+  expect_identical(out$data$analysis$sample_id, fx$pool$data$analysis$sample_id)
+  expect_no_error(validate_horizons_data(out))
+
+})
+
+
+test_that("add_columns() places the columns after a named column", {
+
+  fx  <- make_select_fixture(n_pool = 40)
+  out <- add_columns(fx$pool, tibble::tibble(site = rep("A", 40)),
+                     role = "meta", after = "sample_id")
+
+  expect_identical(names(out$data$analysis)[1:2], c("sample_id", "site"))
+  expect_identical(out$data$role_map$role[out$data$role_map$variable == "site"], "meta")
+
+})
+
+
+test_that("add_columns() runs on a promoted object and leaves its state alone", {
+
+  ## Arrange — new columns move no rows, so nothing a promotion earned is
+  ## stranded
+  fx <- make_select_fixture(n_pool = 40)
+  ft <- fx$pool
+  ft$models$workflows <- list(cfg_a = "a fitted workflow")
+  class(ft) <- c("horizons_fit", "horizons_eval", "horizons_data", "list")
+
+  ## Act
+  out <- add_columns(ft, tibble::tibble(site = rep("A", 40)), role = "meta")
+
+  ## Assert
+  expect_true("site" %in% names(out$data$analysis))
+  expect_identical(class(out), class(ft))
+  expect_identical(out$models, ft$models)
+
+})
+
+
+test_that("add_columns() checks a sample_id key against the table and drops it", {
+
+  fx  <- make_select_fixture(n_pool = 40)
+  ids <- fx$pool$data$analysis$sample_id
+
+  ## In order: accepted, and the key is not added as a column
+  out <- add_columns(fx$pool, tibble::tibble(sample_id = ids, site = "A"), role = "meta")
+
+  expect_identical(sum(names(out$data$analysis) == "sample_id"), 1L)
+  expect_identical(out$data$analysis$sample_id, ids)
+
+  ## Out of order: refused, so values never attach to the wrong samples
+  expect_error(add_columns(fx$pool, tibble::tibble(sample_id = rev(ids), site = "A"),
+                           role = "meta"),
+               regexp = "row order",
+               class  = "horizons_input_error")
+
+})
+
+
+test_that("add_columns() refuses columns with the wrong row count", {
+
+  fx <- make_select_fixture(n_pool = 40)
+
+  expect_error(add_columns(fx$pool, tibble::tibble(site = rep("A", 39)), role = "meta"),
+               regexp = "one row per row",
+               class  = "horizons_input_error")
+
+})
+
+
+test_that("add_columns() refuses a column name already present", {
+
+  fx <- make_select_fixture(n_pool = 40)
+
+  expect_error(add_columns(fx$pool, tibble::tibble(family = rep(9L, 40)), role = "meta"),
+               regexp = "already in the analysis table",
+               class  = "horizons_input_error")
+
+})
+
+
+test_that("add_columns() refuses roles that modelling reads", {
+
+  fx  <- make_select_fixture(n_pool = 40)
+  new <- tibble::tibble(extra = rep(1, 40))
+
+  for (role in c("predictor", "outcome", "id", "covariate", "nonsense")) {
+
+    expect_error(add_columns(fx$pool, new, role = role),
+                 class = "horizons_input_error",
+                 info  = role)
+
+  }
 
 })

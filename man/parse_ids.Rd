@@ -66,6 +66,11 @@ column. All other tokens create new metadata columns.
 of one physical sample — and so is an \code{NA} \code{sample_id} left by \code{too_few = "na"}. \code{parse_ids()} warns rather than aborts on either, the same as
 \code{\link[=spectra]{spectra()}}. Use \code{\link[=average]{average()}} to collapse the replicates before anything
 downstream that requires unique ids.
+
+\strong{Before modelling only:} \code{parse_ids()} rewrites \code{sample_id}, and the
+splits and models that \code{\link[=evaluate]{evaluate()}}, \code{\link[=fit]{fit()}} and \code{\link[=ensemble]{ensemble()}} store are
+keyed to it, so an evaluated, fitted or ensembled object is refused. Parse
+the ids before \code{evaluate()}.
 }
 \examples{
 \dontrun{
