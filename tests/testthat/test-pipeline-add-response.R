@@ -394,6 +394,93 @@ test_that("add_response() errors on duplicate keys in horizons (pre-average)", {
 
 
 ## ---------------------------------------------------------------------------
+## add_response() — NA join keys (#139)
+## ---------------------------------------------------------------------------
+
+#' Add a meta column to join on, for keys other than sample_id
+#' @noRd
+with_site <- function(hd, site) {
+
+  hd$data$analysis$site <- site
+  hd$data$role_map      <- dplyr::bind_rows(hd$data$role_map,
+                                            tibble::tibble(variable = "site", role = "meta"))
+  hd
+
+}
+
+test_that("add_response() refuses NA keys on both sides rather than matching them (#139)", {
+
+  ## Arrange — one NA key on each side passes both duplicate checks, and a
+  ## default left_join() would join the two NA rows to each other
+  hd  <- with_site(make_test_hd(), c("A", NA, "C"))
+  lab <- tibble::tibble(site = c("A", NA, "C"), SOC = c(1.2, 3.4, 5.6))
+
+  ## Act & Assert — refused, with the count on each side
+  err <- expect_error(add_response(hd, lab, variable = "SOC", by = "site"),
+                      class = "horizons_input_error")
+
+  expect_match(conditionMessage(err), "1 in horizons data")
+  expect_match(conditionMessage(err), "1 in source")
+
+})
+
+test_that("add_response() refuses NA keys on one side, counting them (#139)", {
+
+  ## Source side only
+  hd  <- with_site(make_test_hd(), c("A", "B", "C"))
+  lab <- tibble::tibble(site = c("A", "B", NA, NA), SOC = c(1.2, 3.4, 5.6, 7.8))
+
+  err <- expect_error(add_response(hd, lab, variable = "SOC", by = "site"),
+                      class = "horizons_input_error")
+
+  expect_match(conditionMessage(err), "2 in source")
+  expect_no_match(conditionMessage(err), "horizons data")
+
+  ## Horizons side only, on the default sample_id key
+  hd  <- make_test_hd(c("S001", NA, "S003"))
+  lab <- tibble::tibble(sample_id = c("S001", "S002", "S003"), SOC = c(1.2, 3.4, 5.6))
+
+  err <- expect_error(add_response(hd, lab, variable = "SOC"),
+                      class = "horizons_input_error")
+
+  expect_match(conditionMessage(err), "1 in horizons data")
+
+})
+
+test_that("add_response() attaches values by key when the source is in another order", {
+
+  hd  <- make_test_hd(c("S001", "S002", "S003"))
+  lab <- tibble::tibble(sample_id = c("S003", "S001", "S002"), SOC = c(5.6, 1.2, 3.4))
+
+  result <- add_response(hd, lab, variable = "SOC")
+
+  expect_identical(result$data$analysis$sample_id, c("S001", "S002", "S003"))
+  expect_equal(result$data$analysis$SOC, c(1.2, 3.4, 5.6))
+
+})
+
+test_that("add_response() adds columns to a promoted object and keeps its state", {
+
+  ## Arrange — new columns move no rows, so add_response() runs on any class
+  hd <- make_test_hd()
+  hd$evaluation <- list(results = tibble::tibble(config_id = "cfg_a"))
+  class(hd) <- c("horizons_eval", "horizons_data", "list")
+
+  lab <- tibble::tibble(sample_id = c("S001", "S002", "S003"), SOC = c(1.2, 3.4, 5.6))
+
+  ## Act
+  result <- add_response(hd, lab, variable = "SOC")
+
+  ## Assert
+  expect_identical(class(result), class(hd))
+  expect_identical(result$evaluation, hd$evaluation)
+  expect_equal(result$data$analysis$SOC, c(1.2, 3.4, 5.6))
+  expect_identical(result$data$n_responses, 1L)
+
+})
+
+
+## ---------------------------------------------------------------------------
 ## add_response() — Diagnostics (match quality)
 ## ---------------------------------------------------------------------------
 

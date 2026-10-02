@@ -36,14 +36,14 @@
 #' object), and a row missing one of them may carry another. `evaluate()` and
 #' `fit()` drop the rows whose outcome is `NA` when they model it.
 #'
-#' An `NA` join key on the horizons side — left by `parse_ids(too_few =
-#' "na")`, say — is refused, not joined. `add_response()` validates the
-#' returned object at the structural validator's "full" stage, where an `NA`
-#' `sample_id` aborts the call (a duplicate one does too; see "Duplicate
-#' detection" below). Resolve it with `parse_ids()` before joining, or drop
-#' the row; `average()` (also full stage) refuses an `NA` grouping value for
-#' the same reason, so a chain that already ran `average()` cannot reach
-#' `add_response()` with one.
+#' An `NA` join key on either side is refused before anything is joined, and
+#' the error gives the number of `NA` keys on each side. An `NA` key
+#' identifies no sample; left in, it would be matched to an `NA` key on the
+#' other side. On the horizons side one is usually left by `parse_ids(too_few
+#' = "na")`: resolve it with `parse_ids()` or drop the row. `average()`
+#' refuses an `NA` grouping value for the same reason, so a chain that
+#' already ran `average()` cannot reach `add_response()` with an `NA`
+#' `sample_id`. On the source side, drop the rows that have no key.
 #'
 #' **Duplicate detection:**
 #'
@@ -317,7 +317,29 @@ add_response <- function(x,
 
   }
 
-  ## 1.8 No duplicate keys in source ------------------------------------------
+  ## 1.8 No NA keys on either side --------------------------------------------
+  ## An NA key identifies no sample. Left in, an NA on each side would pass
+  ## the duplicate checks below and be joined to each other.
+
+  n_na_horizons <- sum(is.na(x$data$analysis[[by_horizons]]))
+  n_na_source   <- sum(is.na(source[[by_source]]))
+
+  if (n_na_horizons > 0 || n_na_source > 0) {
+
+    na_counts <- c(
+      if (n_na_horizons > 0) paste0(n_na_horizons, " in horizons data ('", by_horizons, "')"),
+      if (n_na_source > 0)   paste0(n_na_source, " in source ('", by_source, "')")
+    )
+
+    abort_nested(
+      paste0("NA values in join key: ", paste(na_counts, collapse = ", ")),
+      c("An NA key identifies no sample, so it cannot be joined",
+        "Drop the rows without a key, or fill their keys in, then join")
+    )
+
+  }
+
+  ## 1.9 No duplicate keys in source ------------------------------------------
 
   source_keys    <- source[[by_source]]
   source_dup_idx <- duplicated(source_keys)
@@ -336,7 +358,7 @@ add_response <- function(x,
 
   }
 
-  ## 1.9 No duplicate keys in horizons (suggests average()) --------------------
+  ## 1.10 No duplicate keys in horizons (suggests average()) -------------------
 
   horizons_keys    <- x$data$analysis[[by_horizons]]
   horizons_dup_idx <- duplicated(horizons_keys)
@@ -470,10 +492,16 @@ add_response <- function(x,
 
   join_by <- stats::setNames(by_source, by_horizons)
 
-  x$data$analysis <- dplyr::left_join(
-    x$data$analysis,
+  ## Join onto the key columns only; the table itself is written below -------
+  ### NA keys were refused in 1.8; na_matches = "never" states the same rule.
+
+  key_cols <- intersect(c("sample_id", by_horizons), names(x$data$analysis))
+
+  joined <- dplyr::left_join(
+    x$data$analysis[, key_cols, drop = FALSE],
     source_slim,
-    by = join_by
+    by         = join_by,
+    na_matches = "never"
   )
 
   ## ---------------------------------------------------------------------------
@@ -485,18 +513,16 @@ add_response <- function(x,
   ## is matched but unmeasured. Count what each variable actually carries.
 
   n_non_missing <- vapply(variable,
-                          function(v) sum(!is.na(x$data$analysis[[v]])),
+                          function(v) sum(!is.na(joined[[v]])),
                           integer(1))
 
-  ## Add response variables to role_map ----------------------------------------
+  ## Add the response columns, their roles and the counts ----------------------
+  ### sample_id rides along as the row key: add_columns() refuses the columns
+  ### unless the join kept the table's rows in order, then drops it.
 
-  new_roles <- tibble::tibble(
-    variable = variable,
-    role     = rep("response", length(variable))
-  )
-
-  x$data$role_map  <- dplyr::bind_rows(x$data$role_map, new_roles)
-  x$data$n_responses <- sum(x$data$role_map$role == "response")
+  x <- add_columns(x,
+                   columns = joined[, intersect(c("sample_id", variable), names(joined)), drop = FALSE],
+                   role    = "response")
 
   ## Record provenance ---------------------------------------------------------
 

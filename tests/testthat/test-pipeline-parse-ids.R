@@ -647,6 +647,64 @@ test_that("the regression this fixes: parse_ids() |> average() survives replicat
 
 
 ## ---------------------------------------------------------------------------
+## parse_ids() — Writing the analysis table (#135)
+## ---------------------------------------------------------------------------
+
+test_that("parse_ids() refuses an evaluated, fitted or ensembled object (#135)", {
+
+  ## Arrange — rewriting sample_id would leave the stored splits keyed to ids
+  ## the object no longer has
+  hd <- make_test_hd(c("PROJ_S001_bulk", "PROJ_S002_bulk"))
+
+  ev <- hd
+  ev$evaluation <- list(results = tibble::tibble(config_id = "cfg_a"))
+
+  ft <- hd
+  class(ft) <- c("horizons_fit", "horizons_eval", "horizons_data", "list")
+
+  ## Act & Assert
+  expect_error(parse_ids(ev, format = "{project}_{sampleid}_{fraction}"),
+               regexp = "evaluation results",
+               class  = "horizons_input_error")
+
+  expect_error(parse_ids(ft, format = "{project}_{sampleid}_{fraction}"),
+               regexp = "horizons_fit",
+               class  = "horizons_input_error")
+
+})
+
+test_that("parse_ids() puts new columns after filename and recomputes the counts", {
+
+  ## Arrange
+  hd <- make_test_hd(c("PROJ_S001_bulk", "PROJ_S002_bulk"))
+
+  ## Act
+  result <- parse_ids(hd, format = "{project}_{sampleid}_{fraction}")
+
+  ## Assert — meta columns ahead of the spectra, counts from the role map
+  expect_identical(names(result$data$analysis),
+                   c("sample_id", "filename", "project", "fraction", "wn_4000", "wn_3000"))
+  expect_identical(result$data$n_rows,       2L)
+  expect_identical(result$data$n_predictors, 2L)
+  expect_identical(result$data$n_responses,  0L)
+
+})
+
+test_that("parse_ids() refuses a token that names an existing column (#135)", {
+
+  ## Arrange — a second parse with the same format would overwrite project
+  hd     <- make_test_hd(c("PROJ_S001_bulk", "PROJ_S002_bulk"))
+  parsed <- parse_ids(hd, format = "{project}_{sampleid}_{fraction}")
+
+  ## Act & Assert
+  expect_error(parse_ids(parsed, format = "{project}_{sampleid}_{fraction}"),
+               regexp = "already in the analysis table",
+               class  = "horizons_input_error")
+
+})
+
+
+## ---------------------------------------------------------------------------
 ## Helper function tests
 ## ---------------------------------------------------------------------------
 
