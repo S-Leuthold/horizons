@@ -10,7 +10,7 @@
 
 test_that("a horizons_data passes through as the object form", {
 
-  fx  <- make_select_fixture()
+  fx  <- select_fixture()
   res <- resolve_source(fx$pool)
 
   expect_identical(res$pool, fx$pool)
@@ -41,7 +41,7 @@ test_that("anything else is refused with the forms listed", {
 
 test_that("a saved horizons_data reads back through the path form", {
 
-  fx   <- make_select_fixture()
+  fx   <- select_fixture()
   path <- withr::local_tempfile(fileext = ".qs2")
   qs2::qs_save(fx$pool, path)
 
@@ -166,7 +166,7 @@ test_that("the cache file also resolves through the path form", {
 
 test_that("select_training() records which library it drew from", {
 
-  fx  <- make_select_fixture()
+  fx  <- select_fixture()
   out <- select_training(fx$targets, fx$pool, k = 20L, verbose = FALSE)
 
   expect_identical(out$selection$library$form, "object")
@@ -175,7 +175,7 @@ test_that("select_training() records which library it drew from", {
 
 test_that("select_training() resolves a library name before anything else", {
 
-  expect_error(select_training(make_select_fixture()$targets, "ksl", verbose = FALSE),
+  expect_error(select_training(select_fixture()$targets, "ksl", verbose = FALSE),
                class = "horizons_input_error", regexp = "not a registered library")
 
 })
@@ -203,7 +203,7 @@ with_depth <- function(fx) {
 
 test_that("topsoil, the default, draws only rows under 30 cm and records it", {
 
-  fx  <- with_depth(make_select_fixture())
+  fx  <- with_depth(select_fixture())
   out <- select_training(fx$targets, fx$pool, k = 20L, verbose = FALSE)
 
   upper <- fx$pool$data$analysis$upper_depth_cm
@@ -218,7 +218,7 @@ test_that("topsoil, the default, draws only rows under 30 cm and records it", {
 
 test_that("depth = 'all' can draw deep rows", {
 
-  fx  <- with_depth(make_select_fixture())
+  fx  <- with_depth(select_fixture())
   out <- select_training(fx$targets, fx$pool, k = 60L, depth = "all", verbose = FALSE)
 
   upper <- fx$pool$data$analysis$upper_depth_cm[match(out$data$analysis$sample_id,
@@ -231,7 +231,7 @@ test_that("depth = 'all' can draw deep rows", {
 
 test_that("a library with no depth column draws from every row and says so", {
 
-  fx  <- make_select_fixture()
+  fx  <- select_fixture()
   out <- select_training(fx$targets, fx$pool, k = 20L, verbose = FALSE)
 
   expect_false(out$selection$depth$recorded)
@@ -242,7 +242,7 @@ test_that("a library with no depth column draws from every row and says so", {
 
 test_that("global under topsoil returns the eligible rows, not the whole pool", {
 
-  fx  <- with_depth(make_select_fixture())
+  fx  <- with_depth(select_fixture())
   out <- select_training(fx$targets, fx$pool, k = 20L, scope = "global", verbose = FALSE)
 
   expect_identical(nrow(out$data$analysis), out$selection$depth$n_eligible)
@@ -251,7 +251,7 @@ test_that("global under topsoil returns the eligible rows, not the whole pool", 
 
 test_that("depth rejects anything but topsoil or all", {
 
-  fx <- make_select_fixture()
+  fx <- select_fixture()
 
   expect_error(suppressMessages(capture.output(
     select_training(fx$targets, fx$pool, depth = "subsoil", verbose = FALSE))),
@@ -299,7 +299,7 @@ test_that("the default window is 11 points at 4 cm-1 and 21 at 2 cm-1", {
 
 test_that("a window too narrow for the polynomial stops in cm-1 terms", {
 
-  fx <- make_select_fixture()
+  fx <- select_fixture()
 
   ## 2 cm-1 on the fixture pool's 4 cm-1 grid rounds to 1 point
   expect_error(select_training(fx$targets, fx$pool, k = 20L, window = 2, verbose = FALSE),
@@ -360,7 +360,7 @@ with_family_depth <- function(fx, deep_family) {
 
 test_that("resemblance is measured against the rows the draw can reach", {
 
-  fx   <- make_select_fixture()
+  fx   <- select_fixture()
   deep <- fx$family_of_target[[1]]
   fx   <- with_family_depth(fx, deep)
   from_deep <- names(fx$family_of_target)[fx$family_of_target == deep]
@@ -381,7 +381,7 @@ test_that("resemblance is measured against the rows the draw can reach", {
 
 test_that("a k beyond the topsoil rows says depth = 'all' would reach more", {
 
-  fx <- with_depth(make_select_fixture())
+  fx <- with_depth(select_fixture())
 
   expect_error(select_training(fx$targets, fx$pool, k = 250L, properties = "clay", verbose = FALSE),
                class = "horizons_input_error", regexp = "depth = \"all\"")
@@ -395,7 +395,7 @@ test_that("a k beyond the topsoil rows says depth = 'all' would reach more", {
 
 test_that("the resemblance check is skipped, not failed, when too few rows can be drawn", {
 
-  fx <- make_select_fixture(n_pool = 60)
+  fx <- select_fixture(n_pool = 60)
   n  <- nrow(fx$pool$data$analysis)
 
   fx$pool$data$analysis$upper_depth_cm <- c(0, rep(60, n - 1L))
@@ -418,10 +418,10 @@ test_that("the resemblance check is skipped, not failed, when too few rows can b
 
 test_that("the space's levers are checked before a registered library is fetched", {
 
+  fx    <- select_fixture()
   entry <- make_mini_ossl(withr::local_tempdir())
   cache <- local_mini_registry(entry)
   withr::local_options(horizons.library_download = TRUE)
-  fx    <- make_select_fixture()
 
   bad <- list(list(mask = "bad"), list(derivative = NA), list(poly = -1),
               list(ncomp = -1), list(chunk_size = 0), list(window = 1))
@@ -467,7 +467,7 @@ test_that("a build clears what a killed build left, and only when it is old", {
 
 test_that("a skipped resemblance check warns and never reports zero targets out", {
 
-  fx <- make_select_fixture(n_pool = 60)
+  fx <- select_fixture(n_pool = 60)
   n  <- nrow(fx$pool$data$analysis)
   fx$pool$data$analysis$upper_depth_cm <- c(rep(0, 20), rep(60, n - 20L))
   fx$pool$data$role_map <- rbind(fx$pool$data$role_map,
@@ -484,7 +484,7 @@ test_that("a skipped resemblance check warns and never reports zero targets out"
 
 test_that("a character depth column is refused rather than compared as text", {
 
-  fx <- with_depth(make_select_fixture())
+  fx <- with_depth(select_fixture())
   fx$pool$data$analysis$upper_depth_cm <- as.character(fx$pool$data$analysis$upper_depth_cm)
 
   expect_error(select_training(fx$targets, fx$pool, k = 20L, verbose = FALSE),
@@ -496,10 +496,10 @@ test_that("a character depth column is refused rather than compared as text", {
 
 test_that("seed and PLS mistakes are caught before a registered library is fetched", {
 
+  fx    <- select_fixture()
   entry <- make_mini_ossl(withr::local_tempdir())
   cache <- local_mini_registry(entry)
   withr::local_options(horizons.library_download = TRUE)
-  fx    <- make_select_fixture()
 
   bad <- list(list(seed = 2^31),
               list(space = "pls", properties = "clay"),

@@ -9,7 +9,7 @@
 test_that("subset_rows() keeps the named ids in the order given", {
 
   ## Arrange
-  fx   <- make_select_fixture(n_pool = 40)
+  fx   <- select_fixture(n_pool = 40)
   keep <- c("P010", "P003", "P025")
 
   ## Act
@@ -25,7 +25,7 @@ test_that("subset_rows() keeps the named ids in the order given", {
 
 test_that("subset_rows() accepts a logical keep of length n_rows", {
 
-  fx   <- make_select_fixture(n_pool = 40)
+  fx   <- select_fixture(n_pool = 40)
   keep <- fx$pool$data$analysis$family == 1L
 
   out <- subset_rows(fx$pool, keep)
@@ -38,7 +38,7 @@ test_that("subset_rows() accepts a logical keep of length n_rows", {
 
 test_that("subset_rows() leaves role_map and column counts untouched", {
 
-  fx  <- make_select_fixture(n_pool = 40)
+  fx  <- select_fixture(n_pool = 40)
   out <- subset_rows(fx$pool, c("P001", "P002"))
 
   expect_identical(out$data$role_map,     fx$pool$data$role_map)
@@ -51,7 +51,7 @@ test_that("subset_rows() leaves role_map and column counts untouched", {
 
 test_that("subset_rows() output passes structural validation", {
 
-  fx  <- make_select_fixture(n_pool = 40)
+  fx  <- select_fixture(n_pool = 40)
   out <- subset_rows(fx$pool, c("P005", "P006", "P007"))
 
   expect_no_error(validate_horizons_data(out))
@@ -61,7 +61,7 @@ test_that("subset_rows() output passes structural validation", {
 
 test_that("subset_rows() writes no provenance of its own", {
 
-  fx  <- make_select_fixture(n_pool = 40)
+  fx  <- select_fixture(n_pool = 40)
   out <- subset_rows(fx$pool, c("P001", "P002"))
 
   expect_identical(out$provenance, fx$pool$provenance)
@@ -83,7 +83,7 @@ test_that("subset_rows() rejects non-horizons_data input", {
 
 test_that("subset_rows() aborts on unknown ids and names them", {
 
-  fx <- make_select_fixture(n_pool = 40)
+  fx <- select_fixture(n_pool = 40)
 
   expect_error(subset_rows(fx$pool, c("P001", "nope", "also_nope")),
                regexp = "nope", class = "horizons_input_error")
@@ -93,7 +93,7 @@ test_that("subset_rows() aborts on unknown ids and names them", {
 
 test_that("subset_rows() aborts on duplicated ids in keep", {
 
-  fx <- make_select_fixture(n_pool = 40)
+  fx <- select_fixture(n_pool = 40)
 
   expect_error(subset_rows(fx$pool, c("P001", "P001")),
                class = "horizons_input_error")
@@ -103,7 +103,7 @@ test_that("subset_rows() aborts on duplicated ids in keep", {
 
 test_that("subset_rows() aborts on a logical keep of the wrong length", {
 
-  fx <- make_select_fixture(n_pool = 40)
+  fx <- select_fixture(n_pool = 40)
 
   expect_error(subset_rows(fx$pool, c(TRUE, FALSE)),
                class = "horizons_input_error")
@@ -113,7 +113,7 @@ test_that("subset_rows() aborts on a logical keep of the wrong length", {
 
 test_that("subset_rows() aborts when keep selects no rows", {
 
-  fx <- make_select_fixture(n_pool = 40)
+  fx <- select_fixture(n_pool = 40)
 
   expect_error(subset_rows(fx$pool, character(0)),
                class = "horizons_input_error")
@@ -127,7 +127,7 @@ test_that("subset_rows() aborts when keep selects no rows", {
 
 test_that("set_analysis() recomputes every count from the role_map", {
 
-  fx <- make_select_fixture(n_pool = 40)
+  fx <- select_fixture(n_pool = 40)
 
   ## Drop the family column and the oc response
   analysis <- fx$pool$data$analysis
@@ -148,7 +148,7 @@ test_that("set_analysis() recomputes every count from the role_map", {
 
 test_that("set_analysis() keeps the existing role_map when none is given", {
 
-  fx  <- make_select_fixture(n_pool = 40)
+  fx  <- select_fixture(n_pool = 40)
   out <- set_analysis(fx$pool, fx$pool$data$analysis[1:3, ])
 
   expect_identical(out$data$role_map, fx$pool$data$role_map)
@@ -159,7 +159,7 @@ test_that("set_analysis() keeps the existing role_map when none is given", {
 
 test_that("set_analysis() aborts when analysis columns and role_map disagree", {
 
-  fx       <- make_select_fixture(n_pool = 40)
+  fx       <- select_fixture(n_pool = 40)
   analysis <- fx$pool$data$analysis
   analysis$extra <- 1
 
@@ -176,7 +176,7 @@ test_that("set_analysis() aborts when analysis columns and role_map disagree", {
 test_that("subset_rows() aborts on an object carrying evaluation results", {
 
   ## Arrange
-  fx <- make_select_fixture(n_pool = 40)
+  fx <- select_fixture(n_pool = 40)
   ev <- fx$pool
   ev$evaluation$results <- tibble::tibble(config_id = "cfg_a", status = "success")
 
@@ -190,7 +190,7 @@ test_that("subset_rows() aborts on an object carrying evaluation results", {
 
 test_that("subset_rows() aborts on an object carrying fitted models", {
 
-  fx <- make_select_fixture(n_pool = 40)
+  fx <- select_fixture(n_pool = 40)
   ft <- fx$pool
   ft$models$workflows <- list(cfg_a = "a fitted workflow")
 
@@ -203,7 +203,7 @@ test_that("subset_rows() aborts on an object carrying fitted models", {
 
 test_that("subset_rows() aborts on an object carrying an ensemble", {
 
-  fx <- make_select_fixture(n_pool = 40)
+  fx <- select_fixture(n_pool = 40)
   en <- fx$pool
   en$ensemble$method <- "weighted"
 
@@ -219,7 +219,7 @@ test_that("subset_rows() aborts on a stored split", {
   ## The slots the verbs actually write: evaluate() fills evaluation$split,
   ## fit() fills models$split.
 
-  fx <- make_select_fixture(n_pool = 40)
+  fx <- select_fixture(n_pool = 40)
 
   ev <- fx$pool
   ev$evaluation$split <- "an rsplit"
@@ -240,7 +240,7 @@ test_that("subset_rows() aborts on a stored split", {
 
 test_that("promoted_state() reads models$workflows, not a stray row_index (#131)", {
 
-  fx <- make_select_fixture(n_pool = 40)
+  fx <- select_fixture(n_pool = 40)
 
   ## A row_index left on an otherwise plain object marks nothing
   ri <- fx$pool
@@ -265,7 +265,7 @@ test_that("subset_rows() refuses an object whose class claims a promotion", {
 
   ## Arrange — the class alone, with every slot this function knows about
   ## left empty. The claim is enough.
-  fx <- make_select_fixture(n_pool = 40)
+  fx <- select_fixture(n_pool = 40)
   ev <- fx$pool
   class(ev) <- c("horizons_eval", "horizons_data", "list")
 
@@ -279,7 +279,7 @@ test_that("subset_rows() refuses an object whose class claims a promotion", {
 
 test_that("subset_rows() names every promoted state it found", {
 
-  fx <- make_select_fixture(n_pool = 40)
+  fx <- select_fixture(n_pool = 40)
   pr <- fx$pool
   pr$evaluation$results <- tibble::tibble(config_id = "cfg_a")
   pr$models$workflows   <- list(cfg_a = "a fitted workflow")
@@ -294,7 +294,7 @@ test_that("subset_rows() names every promoted state it found", {
 
 test_that("set_analysis() aborts on a promoted object", {
 
-  fx <- make_select_fixture(n_pool = 40)
+  fx <- select_fixture(n_pool = 40)
   ft <- fx$pool
   ft$models$workflows <- list(cfg_a = "a fitted workflow")
 
@@ -307,7 +307,7 @@ test_that("set_analysis() aborts on a promoted object", {
 test_that("a freshly loaded object is not treated as promoted", {
 
   ## Arrange — the constructor's defaults must not read as promotion
-  fx <- make_select_fixture(n_pool = 40)
+  fx <- select_fixture(n_pool = 40)
 
   ## Act & Assert
   expect_identical(promoted_state(fx$pool), character())
@@ -324,7 +324,7 @@ test_that("a freshly loaded object is not treated as promoted", {
 test_that("subset_rows() filters selection membership to surviving rows", {
 
   ## Arrange
-  obj  <- make_selected_object(n_rows = 12L)
+  obj  <- selected_object(n_rows = 12L)
   keep <- obj$data$analysis$sample_id[1:8]
 
   ## Act
@@ -339,7 +339,7 @@ test_that("subset_rows() filters selection membership to surviving rows", {
 
 test_that("subset_rows() refilters each group and recounts n_rows", {
 
-  obj  <- make_selected_object(n_rows = 12L)
+  obj  <- selected_object(n_rows = 12L)
   keep <- obj$data$analysis$sample_id[1:8]
 
   out <- subset_rows(obj, keep)
@@ -361,7 +361,7 @@ test_that("subset_rows() refilters each group and recounts n_rows", {
 
 test_that("subset_rows() recounts pool_sizes$drawn per property", {
 
-  obj  <- make_selected_object(n_rows = 12L)
+  obj  <- selected_object(n_rows = 12L)
   keep <- obj$data$analysis$sample_id[1:5]
 
   out <- subset_rows(obj, keep)
@@ -377,7 +377,7 @@ test_that("subset_rows() recounts pool_sizes$drawn per property", {
 
 test_that("subset_rows() leaves the draw's own record alone", {
 
-  obj  <- make_selected_object(n_rows = 12L)
+  obj  <- selected_object(n_rows = 12L)
   keep <- obj$data$analysis$sample_id[1:6]
 
   out <- subset_rows(obj, keep)
@@ -394,7 +394,7 @@ test_that("subset_rows() leaves the draw's own record alone", {
 
 test_that("subset_rows() records rows_removed and accumulates it", {
 
-  obj <- make_selected_object(n_rows = 12L)
+  obj <- selected_object(n_rows = 12L)
 
   out <- subset_rows(obj, obj$data$analysis$sample_id[1:9])
   expect_identical(out$selection$rows_removed, 3L)
@@ -408,7 +408,7 @@ test_that("subset_rows() records rows_removed and accumulates it", {
 test_that("subset_rows() carries the per-row selection meta columns unchanged", {
 
   ## Arrange
-  obj  <- make_selected_object(n_rows = 12L)
+  obj  <- selected_object(n_rows = 12L)
   keep <- obj$data$analysis$sample_id[c(2, 5, 9)]
 
   ## Act
@@ -427,7 +427,7 @@ test_that("subset_rows() carries the per-row selection meta columns unchanged", 
 
 test_that("subset_rows() leaves a recomputed record that still validates", {
 
-  obj <- make_selected_object(n_rows = 12L)
+  obj <- selected_object(n_rows = 12L)
   out <- subset_rows(obj, obj$data$analysis$sample_id[1:7])
 
   expect_no_error(validate_horizons_data(out))
@@ -439,7 +439,7 @@ test_that("subset_rows() recounts drawn for a global-scope record", {
 
   ## Arrange — scope = "global" leaves membership empty by construction, so
   ## the survivors are the draw
-  obj <- make_selected_object(n_rows = 12L)
+  obj <- selected_object(n_rows = 12L)
 
   obj$selection$settings$scope <- "global"
   obj$selection$membership     <- obj$selection$membership[0, , drop = FALSE]
@@ -456,7 +456,7 @@ test_that("subset_rows() recounts drawn for a global-scope record", {
 
 test_that("subset_rows() leaves an object without a record alone", {
 
-  fx  <- make_select_fixture(n_pool = 40)
+  fx  <- select_fixture(n_pool = 40)
   out <- subset_rows(fx$pool, c("P001", "P002"))
 
   expect_null(out$selection)
@@ -468,7 +468,7 @@ test_that("a batch record whose rows have all left is not read as global", {
 
   ## Arrange — an empty membership is also what a batch draw looks like once
   ## its rows are gone, so scope has to come from settings
-  obj <- make_selected_object(n_rows = 12L)
+  obj <- selected_object(n_rows = 12L)
   keep <- obj$data$analysis$sample_id[1:3]
 
   obj$selection$membership <- obj$selection$membership[0, , drop = FALSE]
@@ -487,7 +487,7 @@ test_that("subset_selection() keeps membership rows marked retained = FALSE", {
 
   ## Arrange — the union subtraction removed this neighbour, and the record
   ## keeps it on purpose; it was never a row of the analysis table
-  obj <- make_selected_object(n_rows = 12L)
+  obj <- selected_object(n_rows = 12L)
   ids <- obj$data$analysis$sample_id
 
   dropped <- obj$selection$membership[1, , drop = FALSE]
@@ -515,7 +515,7 @@ test_that("subset_selection() refuses a membership without retained (#130)", {
   ## Arrange — without the column there is no telling the rows that must
   ## survive from the neighbours the union subtraction already dropped, so
   ## the record is refused rather than read as all retained
-  obj <- make_selected_object(n_rows = 12L)
+  obj <- selected_object(n_rows = 12L)
   ids <- obj$data$analysis$sample_id
 
   obj$selection$membership$retained <- NULL
@@ -539,7 +539,7 @@ test_that("subset_selection() refuses a membership without retained (#130)", {
 test_that("set_analysis() recomputes the record when the row set shrinks", {
 
   ## Arrange — collapsing rows outside subset_rows(), the way average() does
-  obj  <- make_selected_object(n_rows = 12L)
+  obj  <- selected_object(n_rows = 12L)
   keep <- obj$data$analysis$sample_id[1:5]
 
   ## Act
@@ -556,7 +556,7 @@ test_that("set_analysis() recomputes the record when the row set shrinks", {
 
 test_that("set_analysis() leaves the record alone when the row set is unchanged", {
 
-  obj <- make_selected_object(n_rows = 12L)
+  obj <- selected_object(n_rows = 12L)
 
   out <- set_analysis(obj, obj$data$analysis)
 
@@ -569,7 +569,7 @@ test_that("set_analysis() refuses to carry a record onto renamed rows", {
 
   ## Arrange — new ids are not a subset of the drawn ids, so the record
   ## cannot be refiltered; it can only be wrong
-  obj      <- make_selected_object(n_rows = 12L)
+  obj      <- selected_object(n_rows = 12L)
   analysis <- obj$data$analysis
   analysis$sample_id <- paste0("NEW_", seq_len(nrow(analysis)))
 
@@ -588,7 +588,7 @@ test_that("set_analysis() refuses to carry a record onto renamed rows", {
 test_that("add_columns() appends columns with their roles and recounts", {
 
   ## Arrange
-  fx  <- make_select_fixture(n_pool = 40)
+  fx  <- select_fixture(n_pool = 40)
   new <- tibble::tibble(site = rep("A", 40), ph = seq_len(40) / 10)
 
   ## Act
@@ -610,7 +610,7 @@ test_that("add_columns() appends columns with their roles and recounts", {
 
 test_that("add_columns() places the columns after a named column", {
 
-  fx  <- make_select_fixture(n_pool = 40)
+  fx  <- select_fixture(n_pool = 40)
   out <- add_columns(fx$pool, tibble::tibble(site = rep("A", 40)),
                      role = "meta", after = "sample_id")
 
@@ -624,7 +624,7 @@ test_that("add_columns() runs on a promoted object and leaves its state alone", 
 
   ## Arrange — new columns move no rows, so nothing a promotion earned is
   ## stranded
-  fx <- make_select_fixture(n_pool = 40)
+  fx <- select_fixture(n_pool = 40)
   ft <- fx$pool
   ft$models$workflows <- list(cfg_a = "a fitted workflow")
   class(ft) <- c("horizons_fit", "horizons_eval", "horizons_data", "list")
@@ -642,7 +642,7 @@ test_that("add_columns() runs on a promoted object and leaves its state alone", 
 
 test_that("add_columns() checks a sample_id key against the table and drops it", {
 
-  fx  <- make_select_fixture(n_pool = 40)
+  fx  <- select_fixture(n_pool = 40)
   ids <- fx$pool$data$analysis$sample_id
 
   ## In order: accepted, and the key is not added as a column
@@ -662,7 +662,7 @@ test_that("add_columns() checks a sample_id key against the table and drops it",
 
 test_that("add_columns() refuses columns with the wrong row count", {
 
-  fx <- make_select_fixture(n_pool = 40)
+  fx <- select_fixture(n_pool = 40)
 
   expect_error(add_columns(fx$pool, tibble::tibble(site = rep("A", 39)), role = "meta"),
                regexp = "one row per row",
@@ -673,7 +673,7 @@ test_that("add_columns() refuses columns with the wrong row count", {
 
 test_that("add_columns() refuses a column name already present", {
 
-  fx <- make_select_fixture(n_pool = 40)
+  fx <- select_fixture(n_pool = 40)
 
   expect_error(add_columns(fx$pool, tibble::tibble(family = rep(9L, 40)), role = "meta"),
                regexp = "already in the analysis table",
@@ -684,7 +684,7 @@ test_that("add_columns() refuses a column name already present", {
 
 test_that("add_columns() refuses roles that modelling reads", {
 
-  fx  <- make_select_fixture(n_pool = 40)
+  fx  <- select_fixture(n_pool = 40)
   new <- tibble::tibble(extra = rep(1, 40))
 
   for (role in c("predictor", "outcome", "id", "covariate", "nonsense")) {

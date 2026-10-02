@@ -11,7 +11,7 @@
 #' @noRd
 fixture_scores <- function(n_pool = 60, ncomp = 4L, seed = 1) {
 
-  fx <- make_select_fixture(n_pool = n_pool, seed = seed)
+  fx <- select_fixture(n_pool = n_pool, seed = seed)
   rc <- reconcile_axes(fx$pool, fx$targets)
   tm <- predictor_matrix(fx$targets)
   sp <- build_similarity_space(rc$matrix, rc$wavenumbers, ncomp = ncomp)
@@ -448,7 +448,7 @@ test_that("draw_neighbours() flags the whole replicate cluster at k below its si
   ## wider than the cluster and independent of k, so the same four rows are
   ## flagged whether k is 3, 5 or 10.
 
-  fxr <- make_select_fixture(n_pool = 60, seed = 3, n_replicates = 3)
+  fxr <- select_fixture(n_pool = 60, seed = 3, n_replicates = 3)
   rc  <- reconcile_axes(fxr$pool, fxr$targets)
   tm  <- predictor_matrix(fxr$targets)
   sp  <- build_similarity_space(rc$matrix, rc$wavenumbers, ncomp = 4L)
@@ -525,7 +525,7 @@ test_that("draw_neighbours() drops a whole replicate cluster and still reaches k
   ## Arrange: three replicate scans of the twinned pool row, so the gap rule
   ## has nothing to see and the neighbourhood-relative rule has everything.
   s   <- fixture_scores(n_pool = 60, seed = 3)
-  fxr <- make_select_fixture(n_pool = 60, seed = 3, n_replicates = 3)
+  fxr <- select_fixture(n_pool = 60, seed = 3, n_replicates = 3)
   rc  <- reconcile_axes(fxr$pool, fxr$targets)
   tm  <- predictor_matrix(fxr$targets)
   sp  <- build_similarity_space(rc$matrix, rc$wavenumbers, ncomp = 4L)

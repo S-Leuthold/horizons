@@ -45,7 +45,7 @@ make_axis_object <- function(wn, n = 6L, prefix = "A", seed = 7L) {
 
 test_that("predictor_matrix() returns the spectra with decreasing wavenumbers", {
 
-  fx  <- make_select_fixture(n_pool = 20)
+  fx  <- select_fixture(n_pool = 20)
   out <- predictor_matrix(fx$pool)
 
   expect_type(out, "list")
@@ -64,7 +64,7 @@ test_that("predictor_matrix() returns the spectra with decreasing wavenumbers", 
 test_that("reconcile_axes() puts the pool on the targets' wavenumbers", {
 
   ## Arrange: pool at 4 cm-1, targets at 8 cm-1
-  fx <- make_select_fixture(n_pool = 20)
+  fx <- select_fixture(n_pool = 20)
 
   ## Act
   out <- reconcile_axes(fx$pool, fx$targets)
@@ -87,7 +87,7 @@ test_that("reconcile_axes() reproduces the twin exactly on a nested grid", {
 
   ## The target grid is every other pool column, so the spline passes
   ## through the pool's own values at those knots.
-  fx  <- make_select_fixture(n_pool = 20)
+  fx  <- select_fixture(n_pool = 20)
   out <- reconcile_axes(fx$pool, fx$targets)
 
   twin_target <- predictor_matrix(fx$targets)$matrix[fx$twin_id, ]
@@ -100,7 +100,7 @@ test_that("reconcile_axes() reproduces the twin exactly on a nested grid", {
 
 test_that("reconcile_axes() passes an identical grid through untouched", {
 
-  fx <- make_select_fixture(n_pool = 20)
+  fx <- select_fixture(n_pool = 20)
 
   ## Targets on the pool's own grid: use pool rows as targets
   same <- subset_rows(fx$pool, c("P001", "P002"))
@@ -116,7 +116,7 @@ test_that("reconcile_axes() passes an identical grid through untouched", {
 
 test_that("reconcile_axes() stops when the pool does not cover the targets' high end", {
 
-  fx <- make_select_fixture(n_pool = 20, target_range = c(4096, 600))
+  fx <- select_fixture(n_pool = 20, target_range = c(4096, 600))
 
   expect_error(reconcile_axes(fx$pool, fx$targets),
                regexp = "high end.*4000", class = "horizons_input_error")
@@ -126,7 +126,7 @@ test_that("reconcile_axes() stops when the pool does not cover the targets' high
 
 test_that("reconcile_axes() stops when the pool does not cover the targets' low end", {
 
-  fx <- make_select_fixture(n_pool = 20, target_range = c(4000, 504))
+  fx <- select_fixture(n_pool = 20, target_range = c(4000, 504))
 
   expect_error(reconcile_axes(fx$pool, fx$targets),
                regexp = "low end.*600", class = "horizons_input_error")
@@ -138,7 +138,7 @@ test_that("reconcile_axes() warns when the targets are finer than the pool", {
 
   ## Arrange: swap roles so the 4 cm-1 pool becomes the targets of an
   ## 8 cm-1 pool. Give the coarse side responses so it is a valid pool.
-  fx <- make_select_fixture(n_pool = 20)
+  fx <- select_fixture(n_pool = 20)
 
   coarse <- fx$targets
   lab    <- tibble::tibble(sample_id = coarse$data$analysis$sample_id,
@@ -163,7 +163,7 @@ test_that("reconcile_axes() warns when the targets are finer than the pool", {
 
 test_that("grid_summary() reports a contiguous grid as contiguous", {
 
-  fx  <- make_select_fixture(n_pool = 20)
+  fx  <- select_fixture(n_pool = 20)
   out <- reconcile_axes(fx$pool, fx$targets)
 
   expect_true(out$record$pool_grid$contiguous)
@@ -179,7 +179,7 @@ test_that("reconcile_axes() stops on a gapped pool axis and names the gap", {
 
   ## A 140 cm-1 hole, the narrower of the two ranges standardize(remove_water)
   ## deletes. It clears the endpoint coverage test and would be spline-filled.
-  fx      <- make_select_fixture(n_pool = 20)
+  fx      <- select_fixture(n_pool = 20)
   gapped  <- seq(4000, 600, by = -4)
   gapped  <- gapped[!(gapped >= 1580 & gapped <= 1720)]
 
@@ -197,7 +197,7 @@ test_that("reconcile_axes() stops on a gapped pool axis and names the gap", {
 
 test_that("reconcile_axes() stops on a gapped target axis too", {
 
-  fx     <- make_select_fixture(n_pool = 20)
+  fx     <- select_fixture(n_pool = 20)
   gapped <- seq(4000, 600, by = -8)
   gapped <- gapped[!(gapped >= 1580 & gapped <= 1720)]
 
@@ -272,7 +272,7 @@ test_that("reconcile_axes() clamps a target grid overshooting by less than half 
   ## with resample = NULL, overshooting the pool's end by a fraction.
   ## The pool is at 4 cm-1, so the tolerance is 2 cm-1 and a 1 cm-1
   ## overshoot at the high end is inside it.
-  fx      <- make_select_fixture(n_pool = 20)
+  fx      <- select_fixture(n_pool = 20)
   over_wn <- seq(4001, 601, by = -8)
   targets <- make_axis_object(over_wn, prefix = "O")
 
@@ -296,7 +296,7 @@ test_that("reconcile_axes() clamps a target grid overshooting by less than half 
 
 test_that("reconcile_axes() still stops beyond the tolerance, stating the overshoot", {
 
-  fx      <- make_select_fixture(n_pool = 20)
+  fx      <- select_fixture(n_pool = 20)
   targets <- make_axis_object(seq(4005, 605, by = -8), prefix = "P")
 
   expect_error(reconcile_axes(fx$pool, targets),
@@ -309,7 +309,7 @@ test_that("reconcile_axes() still stops beyond the tolerance, stating the oversh
 
 test_that("reconcile_axes() clamps the low end the same way", {
 
-  fx      <- make_select_fixture(n_pool = 20)
+  fx      <- select_fixture(n_pool = 20)
   under   <- seq(3999, 599, by = -8)
   targets <- make_axis_object(under, prefix = "Q")
 
@@ -325,7 +325,7 @@ test_that("reconcile_axes() clamps the low end the same way", {
 
 test_that("reconcile_axes() rejects inputs that are not horizons_data", {
 
-  fx <- make_select_fixture(n_pool = 20)
+  fx <- select_fixture(n_pool = 20)
 
   expect_error(reconcile_axes(data.frame(a = 1), fx$targets),
                class = "horizons_input_error")

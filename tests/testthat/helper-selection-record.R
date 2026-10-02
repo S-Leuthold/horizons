@@ -178,3 +178,26 @@ make_selected_object <- function(n_rows = 12L) {
   obj
 
 }
+
+
+## ---------------------------------------------------------------------------
+## selected_object() — make_selected_object(), built once per argument set
+## ---------------------------------------------------------------------------
+
+#' The selected object, shared through memo_fixture()
+#'
+#' @description
+#' As `select_fixture()` (helper-select.R): built on the first call with a
+#' given set of arguments, the same value after that, read-only, called
+#' inside a test. Its record's `timestamp` is the time of that first build.
+#' Use `make_selected_object()` for a build of the test's own.
+#'
+#' @param ... Arguments for `make_selected_object()`.
+#'
+#' @return The object `make_selected_object()` returns.
+#' @noRd
+selected_object <- function(...) {
+
+  memo_fixture("selected_object", make_selected_object, ...)
+
+}
