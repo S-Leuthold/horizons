@@ -122,8 +122,7 @@ make_configured_hd <- function(n_samples      = 100L,
       spectra_source   = "test",
       spectra_type     = "mir",
       created          = Sys.time(),
-      horizons_version = utils::packageVersion("horizons"),
-      schema_version   = 1L
+      horizons_version = utils::packageVersion("horizons")
     ),
     config = list(
       configs   = configs,
@@ -144,8 +143,7 @@ make_configured_hd <- function(n_samples      = 100L,
     ),
     evaluation = contract$evaluation,
     models     = contract$models,
-    ensemble   = contract$ensemble,
-    artifacts  = list(cache_dir = NULL)
+    ensemble   = contract$ensemble
   )
 
   class(obj) <- c("horizons_data", "list")

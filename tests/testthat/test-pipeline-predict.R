@@ -62,8 +62,7 @@ make_predict_eval <- function(n = 300, n_wn = 10, transformation = "none",
                 ## validate_horizons_data() call (#24) is the first thing to
                 ## actually check this stored count against the role_map.
                 n_covariates = length(covariates), n_responses = 0L),
-    provenance = list(spectra_source = "test", spectra_type = "mir",
-                      schema_version = 1L),
+    provenance = list(spectra_source = "test", spectra_type = "mir"),
     config = list(configs = configs, n_configs = 1L,
                   tuning = list(cv_folds = 3L, grid_size = 3L,
                                 bayesian_iter = 0L, final_bayesian_iter = 0L)),
@@ -77,14 +76,18 @@ make_predict_eval <- function(n = 300, n_wn = 10, transformation = "none",
                                    cv_ccc = 0.83, cv_rpd = 1.4, cv_mae = 0.33),
       best_config = "cfg_001",
       rank_metric = "rpd",
+      screened    = TRUE,
       parallelize_over = "sequential",
       split        = rsample::initial_split(df, prop = 0.8),
       n_train      = as.integer(round(nrow(df) * 0.8)),
       n_test       = nrow(df) - as.integer(round(nrow(df) * 0.8)),
+      response_trim = NULL,
+      recipe       = list(sg_window = DEFAULT_SG_WINDOW, sg_window_cm = NA_real_,
+                          pca_threshold = DEFAULT_PCA_THRESHOLD),
       runtime_secs = 1,
       timestamp    = Sys.time()
     ),
-    models = NULL, ensemble = NULL, artifacts = NULL
+    models = NULL, ensemble = NULL
   )
 
   class(obj) <- c("horizons_eval", "horizons_data", "list")
@@ -509,11 +512,12 @@ describe("predict.horizons_fit() - response bound guardrail", {
 
   it("fit() stores models$response_bound = max(training outcome) * RESPONSE_BOUND_MARGIN", {
 
-    ## The training rows are the ones the final model was fit on, which
-    ## row_index records (#68); UQ is on here, so the calibration rows are out.
+    ## The training rows are the ones the final model was fit on, whose ids
+    ## the out-of-fold predictions carry (#68); UQ is on here, so the
+    ## calibration rows are out.
     eval_obj <- make_predict_eval()
     analysis <- eval_obj$data$analysis
-    fit_rows <- analysis$sample_id %in% fitted_fixture$models$row_index$sample_id
+    fit_rows <- analysis$sample_id %in% unique(fitted_fixture$models$cv_predictions$sample_id)
     expected <- max(analysis$SOC[fit_rows]) * RESPONSE_BOUND_MARGIN
 
     ## Precondition: the fixture discriminates. The largest training-part

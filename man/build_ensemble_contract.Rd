@@ -13,8 +13,8 @@ build_ensemble_contract(
   rank_metric,
   runtime_secs,
   oof_pred = NULL,
-  optimize = NULL,
-  seed = NULL
+  optimize,
+  seed
 )
 }
 \arguments{
@@ -46,13 +46,12 @@ diagnostics and the fold-honesty regression tests; ensemble UQ calibrates
 on its own fresh-partition residuals (see \code{\link[=fit_ensemble_uq]{fit_ensemble_uq()}}), not on
 these. Default NULL.}
 
-\item{optimize}{Logical or NULL. The build-time optimize flag, recorded so
+\item{optimize}{Logical. The build-time optimize flag, recorded so
 ensemble UQ can re-derive fold weights (weighted method) by the same
-rule. Default NULL.}
+rule.}
 
-\item{seed}{Integer or NULL. The build-time seed, recorded so ensemble UQ
-can derive a calibration partition disjoint from the tuning folds.
-Default NULL.}
+\item{seed}{Integer. The build-time seed, recorded so ensemble UQ can
+derive a calibration partition disjoint from the tuning folds.}
 }
 \value{
 A list matching the \code{ensemble} slot contract: \code{method}, \code{model},

@@ -45,8 +45,7 @@ make_test_hd <- function(sample_ids = c("S001", "S002", "S003")) {
       spectra_source   = "test",
       spectra_type     = "opus",
       created          = Sys.time(),
-      horizons_version = utils::packageVersion("horizons"),
-      schema_version   = 1L
+      horizons_version = utils::packageVersion("horizons")
     )
   )
 
@@ -373,8 +372,7 @@ test_that("add_response() errors on duplicate keys in horizons (pre-average)", {
     ),
     provenance = list(spectra_source = "test", spectra_type = "opus",
                       created = Sys.time(),
-                      horizons_version = utils::packageVersion("horizons"),
-                      schema_version = 1L)
+                      horizons_version = utils::packageVersion("horizons"))
   )
   class(hd) <- c("horizons_data", "list")
 

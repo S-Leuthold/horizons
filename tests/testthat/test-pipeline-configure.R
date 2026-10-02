@@ -51,8 +51,7 @@ make_single_response_hd <- function() {
       spectra_source   = "test",
       spectra_type     = "mir",
       created          = Sys.time(),
-      horizons_version = utils::packageVersion("horizons"),
-      schema_version   = 1L
+      horizons_version = utils::packageVersion("horizons")
     ),
     config = list(
       configs   = NULL,
@@ -62,8 +61,7 @@ make_single_response_hd <- function() {
     validation = list(passed = NULL, checks = NULL, timestamp = NULL),
     evaluation = contract$evaluation,
     models     = contract$models,
-    ensemble   = contract$ensemble,
-    artifacts  = list(cache_dir = NULL)
+    ensemble   = contract$ensemble
   )
 
   class(obj) <- c("horizons_data", "list")
@@ -109,8 +107,7 @@ make_multi_response_hd <- function() {
       spectra_source   = "test",
       spectra_type     = "mir",
       created          = Sys.time(),
-      horizons_version = utils::packageVersion("horizons"),
-      schema_version   = 1L
+      horizons_version = utils::packageVersion("horizons")
     ),
     config = list(
       configs   = NULL,
@@ -120,8 +117,7 @@ make_multi_response_hd <- function() {
     validation = list(passed = NULL, checks = NULL, timestamp = NULL),
     evaluation = contract$evaluation,
     models     = contract$models,
-    ensemble   = contract$ensemble,
-    artifacts  = list(cache_dir = NULL)
+    ensemble   = contract$ensemble
   )
 
   class(obj) <- c("horizons_data", "list")
@@ -169,8 +165,7 @@ make_covariate_hd <- function() {
       spectra_source   = "test",
       spectra_type     = "mir",
       created          = Sys.time(),
-      horizons_version = utils::packageVersion("horizons"),
-      schema_version   = 1L
+      horizons_version = utils::packageVersion("horizons")
     ),
     config = list(
       configs   = NULL,
@@ -180,8 +175,7 @@ make_covariate_hd <- function() {
     validation = list(passed = NULL, checks = NULL, timestamp = NULL),
     evaluation = contract$evaluation,
     models     = contract$models,
-    ensemble   = contract$ensemble,
-    artifacts  = list(cache_dir = NULL)
+    ensemble   = contract$ensemble
   )
 
   class(obj) <- c("horizons_data", "list")
@@ -237,12 +231,11 @@ describe("configure() validation", {
       ),
       provenance = list(spectra_source = "test", spectra_type = "mir",
                         created = Sys.time(),
-                        horizons_version = utils::packageVersion("horizons"),
-                        schema_version = 1L),
+                        horizons_version = utils::packageVersion("horizons")),
       config = list(configs = NULL, n_configs = NULL,
                     tuning = list(grid_size = 10L, bayesian_iter = 15L, cv_folds = 5L)),
       validation = list(), evaluation = list(), models = list(),
-      ensemble = list(), artifacts = list()
+      ensemble = list()
     )
     class(hd) <- c("horizons_data", "list")
 
@@ -1290,8 +1283,7 @@ describe("configure() and the object contract", {
     obj$models$workflows        <- list(cfg_a = "a fitted workflow")
     obj$models$n_models         <- 1L
     obj$models$split            <- "an rsplit"
-    obj$models$row_index        <- tibble::tibble(.row = 1L, sample_id = "P001")
-    obj$models$cv_predictions   <- tibble::tibble(.row = 1L, .pred = 1)
+    obj$models$cv_predictions   <- tibble::tibble(.row = 1L, sample_id = "P001", .pred = 1)
     obj$models$predictor_schema <- c("wn_4000")
     obj$ensemble$method         <- "weighted"
 

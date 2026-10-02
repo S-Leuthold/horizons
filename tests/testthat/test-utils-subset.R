@@ -214,10 +214,10 @@ test_that("subset_rows() aborts on an object carrying an ensemble", {
 })
 
 
-test_that("subset_rows() aborts on a stored split or row index", {
+test_that("subset_rows() aborts on a stored split", {
 
   ## The slots the verbs actually write: evaluate() fills evaluation$split,
-  ## fit() fills models$split and models$row_index.
+  ## fit() fills models$split.
 
   fx <- make_select_fixture(n_pool = 40)
 
@@ -235,11 +235,27 @@ test_that("subset_rows() aborts on a stored split or row index", {
                regexp = "model split",
                class  = "horizons_input_error")
 
+})
+
+
+test_that("promoted_state() reads models$workflows, not a stray row_index (#131)", {
+
+  fx <- make_select_fixture(n_pool = 40)
+
+  ## A row_index left on an otherwise plain object marks nothing
   ri <- fx$pool
   ri$models$row_index <- tibble::tibble(.row = 1L, sample_id = "P001")
 
-  expect_error(subset_rows(ri, c("P001", "P002")),
-               regexp = "row index",
+  expect_identical(promoted_state(ri), character())
+  expect_no_error(subset_rows(ri, c("P001", "P002")))
+
+  ## Fitted workflows do
+  wf <- fx$pool
+  wf$models$workflows <- list(cfg_a = "a fitted workflow")
+
+  expect_identical(promoted_state(wf), "fitted models")
+  expect_error(subset_rows(wf, c("P001", "P002")),
+               regexp = "fitted models",
                class  = "horizons_input_error")
 
 })
@@ -490,6 +506,28 @@ test_that("subset_selection() keeps membership rows marked retained = FALSE", {
 
   ## drawn counts retained rows only, so the exempt row does not inflate it
   expect_identical(out$selection$pool_sizes$drawn, c(6L, 6L))
+
+})
+
+
+test_that("subset_selection() refuses a membership without retained (#130)", {
+
+  ## Arrange — without the column there is no telling the rows that must
+  ## survive from the neighbours the union subtraction already dropped, so
+  ## the record is refused rather than read as all retained
+  obj <- make_selected_object(n_rows = 12L)
+  ids <- obj$data$analysis$sample_id
+
+  obj$selection$membership$retained <- NULL
+
+  ## Act & Assert
+  expect_error(subset_selection(obj$selection, keep_ids = ids[1:6], n_removed = 6L),
+               regexp = "retained",
+               class  = "horizons_validation_error")
+
+  expect_error(set_analysis(obj, obj$data$analysis[1:6, , drop = FALSE]),
+               regexp = "retained",
+               class  = "horizons_validation_error")
 
 })
 

@@ -233,6 +233,27 @@ fit <- function(x,
   check_rank_metric_range(metric %||% x$evaluation$rank_metric, outcome_range,
                           verb = "fit")
 
+  ## On the evaluate() path the evaluation record is reused as it is, and the
+  ## fit validator at return requires every key evaluate() writes. Checked
+  ## here, so a record from an earlier version is refused before anything is
+  ## re-tuned rather than after every member has been fitted, and before the
+  ## checks below read it.
+  if (!cold_start) {
+
+    missing_keys <- setdiff(contract_keys("evaluation"), names(x$evaluation))
+
+    if (length(missing_keys) > 0) {
+
+      cli::cli_abort(c(
+        "{.fn fit} needs the evaluation record {.fn evaluate} writes.",
+        "x" = "{.field evaluation} is missing {.field {missing_keys}}.",
+        "i" = "The object was evaluated by an earlier version of horizons, or built by hand. Re-run {.fn evaluate} on it."
+      ), class = "horizons_validation_error")
+
+    }
+
+  }
+
   ## evaluate() scored and ranked the configurations under the range it
   ## stamped on each row; members chosen and warm-started under another range
   ## would carry that range's scoring into this fit. A cold start has no
@@ -960,12 +981,6 @@ fit <- function(x,
 
   }
 
-  ## Build row_index: .row → id mapping from train_Fit
-  row_index <- tibble::tibble(
-    .row      = seq_len(nrow(train_Fit)),
-    sample_id = train_Fit[[id_col]]
-  )
-
   ## Collect UQ bundles (named by config_id)
   uq_list <- NULL
 
@@ -1057,7 +1072,6 @@ fit <- function(x,
     cv_predictions    = all_cv_predictions,
     results           = results_tibble,
     split             = split_F,
-    row_index         = row_index,
     uq                = uq_list,
     ad                = ad_list,
     selection_present = selection_present,

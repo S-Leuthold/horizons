@@ -23,12 +23,11 @@
 #' object, carrying constructor defaults, so the presence of a slot is not
 #' evidence of promotion. The test is on the specific fields a verb writes
 #' when it earns the promotion: `evaluation$results` and `evaluation$split`
-#' from `evaluate()`, `models$workflows`, `models$split` and
-#' `models$row_index` from `fit()`, `ensemble$method` or `ensemble$model`
-#' from `ensemble()`. Anything narrower would miss a promotion; anything
-#' broader trips on a default (`models$uq` is `list(enabled = FALSE)` on
-#' objects `spectra()` built before it used `new_horizons_data()`, which is
-#' not a fitted model).
+#' from `evaluate()`, `models$workflows` and `models$split` from `fit()`,
+#' `ensemble$method` or `ensemble$model` from `ensemble()`. Anything
+#' narrower would miss a promotion; anything broader trips on a default
+#' (`models$uq` is `list(enabled = FALSE)` on objects `spectra()` built
+#' before it used `new_horizons_data()`, which is not a fitted model).
 #'
 #' [reset_promotion()] clears everything this function names, and lives
 #' beside it so the two stay in step.
@@ -53,7 +52,6 @@ promoted_state <- function(x) {
   if (!is.null(x$evaluation$split))     states <- c(states, "an evaluation split")
   if (!is.null(x$models$workflows))     states <- c(states, "fitted models")
   if (!is.null(x$models$split))         states <- c(states, "a model split")
-  if (!is.null(x$models$row_index))     states <- c(states, "a row index")
 
   if (!is.null(x$ensemble$method) || !is.null(x$ensemble$model)) {
 
@@ -254,8 +252,8 @@ check_unpromoted <- function(x, fn) {
 #'
 #' The object must be unpromoted. An object carrying evaluation results,
 #' fitted models or an ensemble is refused by name, because `models$split`,
-#' `models$row_index` and `evaluation$results` are keyed to a row order this
-#' function is free to change, and nothing downstream would notice.
+#' `models$cv_predictions` and `evaluation$results` are keyed to a row order
+#' this function is free to change, and nothing downstream would notice.
 #'
 #' @param x [horizons_data.] The object to update.
 #' @param analysis [Tibble.] The new analysis table.
@@ -668,11 +666,16 @@ subset_rows <- function(x, keep) {
 #' repeated subsets so the gap between the record and the object is visible
 #' rather than inferred.
 #'
+#' A `membership` without the `retained` column is refused: the validator
+#' requires the column, and without it there is no telling the rows that
+#' must survive from the ones the union subtraction already dropped.
+#'
 #' @param selection [List.] The record from `x$selection`.
 #' @param keep_ids [Character.] `sample_id`s still in the object.
 #' @param n_removed [Integer.] Rows dropped by this subset.
 #'
-#' @return [List.] The recomputed record.
+#' @return [List.] The recomputed record. Aborts with class
+#'   `horizons_validation_error` when `membership` has no `retained` column.
 #'
 #' @seealso [subset_rows()]
 #' @noRd
@@ -683,12 +686,16 @@ subset_selection <- function(selection, keep_ids, n_removed) {
 
   if (!is.null(membership)) {
 
-    ## A membership without the column predates it; every row is retained.
-    is_retained <- if ("retained" %in% names(membership)) {
-      !is.na(membership$retained) & membership$retained
-    } else {
-      rep(TRUE, nrow(membership))
+    if (!"retained" %in% names(membership)) {
+
+      cli::cli_abort(c(
+        "The selection record cannot be refiltered for the rows that remain",
+        "x" = "{.field selection$membership} has no {.field retained} column"
+      ), class = "horizons_validation_error")
+
     }
+
+    is_retained <- !is.na(membership$retained) & membership$retained
 
     keep_row             <- !is_retained | membership$pool_id %in% keep_ids
     membership           <- membership[keep_row, , drop = FALSE]

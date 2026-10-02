@@ -582,18 +582,11 @@ fit_ensemble_uq <- function(x,
   base_seed      <- seed %||% x$ensemble$seed %||% DEFAULT_ENSEMBLE_SEED
   conformal_seed <- base_seed + 1000L
 
-  ## Legacy retrofit: ensembles built before optimize was recorded on the
-  ## contract carry optimize = NULL. Defaulting blindly to TRUE would
-  ## re-derive fold weights under the WRONG rule for an equal-weights
-  ## (optimize = FALSE) weighted ensemble — a silent deployed-vs-fold-model
-  ## mismatch. Infer from the stored weights instead: all-equal coefficients
-  ## can only come from the equal-weights rule. For penalized/xgb the flag is
-  ## unused by the fold refit (the finalized spec already encodes tuning), so
-  ## the inference is only load-bearing for weighted.
-  optimize <- x$ensemble$optimize %||% {
-    coefs <- x$ensemble$weights$coef
-    !all(abs(coefs - coefs[1]) < 1e-12)
-  }
+  ## The build-time flag, so a weighted ensemble's fold weights are
+  ## re-derived by the rule the deployed weights came from. For
+  ## penalized/xgb the fold refit does not read it (the finalized spec
+  ## already encodes tuning).
+  optimize <- x$ensemble$optimize
 
   ## Read outside the capture below, so a malformed stored range aborts
   ## rather than silently leaving the ensemble without intervals.

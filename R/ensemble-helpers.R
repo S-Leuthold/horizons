@@ -605,12 +605,11 @@ fit_tuned_meta_learner <- function(object,
 #'   diagnostics and the fold-honesty regression tests; ensemble UQ calibrates
 #'   on its own fresh-partition residuals (see [fit_ensemble_uq()]), not on
 #'   these. Default NULL.
-#' @param optimize Logical or NULL. The build-time optimize flag, recorded so
+#' @param optimize Logical. The build-time optimize flag, recorded so
 #'   ensemble UQ can re-derive fold weights (weighted method) by the same
-#'   rule. Default NULL.
-#' @param seed Integer or NULL. The build-time seed, recorded so ensemble UQ
-#'   can derive a calibration partition disjoint from the tuning folds.
-#'   Default NULL.
+#'   rule.
+#' @param seed Integer. The build-time seed, recorded so ensemble UQ can
+#'   derive a calibration partition disjoint from the tuning folds.
 #'
 #' @return A list matching the `ensemble` slot contract: `method`, `model`,
 #'   `weights`, `predictions`, `metrics`, `member_metrics`, `improvement`,
@@ -639,8 +638,8 @@ build_ensemble_contract <- function(method,
                                     rank_metric,
                                     runtime_secs,
                                     oof_pred = NULL,
-                                    optimize = NULL,
-                                    seed     = NULL) {
+                                    optimize,
+                                    seed) {
 
   ## Ensemble performance on test_F (original scale, shared metric computer) --
 

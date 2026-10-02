@@ -47,7 +47,6 @@ make_test_hd <- function(filenames, spectra_type = "opus") {
       spectra_type     = spectra_type,
       created          = Sys.time(),
       horizons_version = utils::packageVersion("horizons"),
-      schema_version   = 1L,
       id_pattern       = NULL
     )
   )

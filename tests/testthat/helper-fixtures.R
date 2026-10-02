@@ -73,8 +73,7 @@ make_eval_object <- function(n = 40, n_wn = 10, n_configs = 2,
 
     provenance = list(
       spectra_source = "test",
-      spectra_type   = "mir",
-      schema_version = 1L
+      spectra_type   = "mir"
     ),
 
     config = list(
@@ -103,8 +102,7 @@ make_eval_object <- function(n = 40, n_wn = 10, n_configs = 2,
     ## Downstream slots in the constructor's shape
     evaluation = contract$evaluation,
     models     = contract$models,
-    ensemble   = contract$ensemble,
-    artifacts  = list(cache_dir = NULL)
+    ensemble   = contract$ensemble
 
   )
 

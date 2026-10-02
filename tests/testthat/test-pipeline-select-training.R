@@ -111,8 +111,8 @@ test_that("select_training() refuses a pool that carries state from later verbs"
 
   ## Selection subsets the pool's rows, and a subset keeps the pool's class
   ## and sections. A promoted pool would come out still claiming to be
-  ## validated or fitted, with row_index and split keyed to a row order that
-  ## no longer exists.
+  ## validated or fitted, with predictions and a split keyed to a row order
+  ## that no longer exists.
   fitted <- fx$pool
   class(fitted) <- c("horizons_fit", "horizons_eval", "horizons_data", "list")
 
@@ -124,6 +124,23 @@ test_that("select_training() refuses a pool that carries state from later verbs"
 
   expect_error(select_training(fx$targets, validated, k = 5, verbose = FALSE),
                regexp = "validation\\$passed", class = "horizons_input_error")
+
+})
+
+
+test_that("the pool check reads models$workflows, not a stray row_index (#131)", {
+
+  fx <- make_select_fixture(n_pool = 60)
+
+  stray <- fx$pool
+  stray$models$row_index <- tibble::tibble(.row = 1L, sample_id = "P001")
+
+  expect_length(check_pool_unpromoted(stray), 0L)
+
+  fitted <- fx$pool
+  fitted$models$workflows <- list(cfg_a = "a fitted workflow")
+
+  expect_match(check_pool_unpromoted(fitted), "models$workflows", fixed = TRUE)
 
 })
 
