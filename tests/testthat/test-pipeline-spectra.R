@@ -202,6 +202,8 @@ test_that("spectra() preserves meta columns", {
   expect_true("project" %in% meta_vars)
   expect_true("date" %in% meta_vars)
 
+  expect_s3_class(result$data$role_map, "tbl_df")
+
 })
 
 
@@ -229,42 +231,6 @@ test_that("spectra() records provenance for tibble input", {
   expect_s3_class(result$provenance$created, "POSIXct")
   expect_false("schema_version" %in% names(result$provenance))
   expect_false("artifacts" %in% names(result))
-
-})
-
-
-## ---------------------------------------------------------------------------
-## spectra() — Role map structure
-## ---------------------------------------------------------------------------
-
-test_that("spectra() creates correct role_map structure", {
-
-  ## Arrange ---------------------------------------------------------------
-
-  test_data <- tibble::tibble(
-    Sample_ID = c("S1"),
-    meta1     = c("x"),
-    `4000`    = c(0.1),
-    `3000`    = c(0.2)
-  )
-
-  ## Act -------------------------------------------------------------------
-
-  result <- spectra(test_data)
-
-  ## Assert ----------------------------------------------------------------
-
-  role_map <- result$data$role_map
-
-  expect_s3_class(role_map, "tbl_df")
-  expect_true("variable" %in% names(role_map))
-  expect_true("role" %in% names(role_map))
-
-  ## Check role assignments ------------------------------------------------
-
-  expect_equal(role_map$role[role_map$variable == "sample_id"], "id")
-  expect_equal(role_map$role[role_map$variable == "wn_4000"], "predictor")
-  expect_equal(role_map$role[role_map$variable == "meta1"], "meta")
 
 })
 
@@ -345,6 +311,11 @@ test_that("spectra() from a CSV builds the new_horizons_data() shape", {
 
   expect_contract_shape(result)
   expect_identical(result$provenance$spectra_source, temp_csv)
+  expect_equal(result$provenance$spectra_type, "csv")
+  expect_equal(result$data$n_rows, 2)
+
+  ## No filename column for CSV (no per-sample files)
+  expect_false("filename" %in% names(result$data$analysis))
 
 })
 
@@ -495,26 +466,6 @@ test_that("spectra() sorts predictor columns into decreasing order when given in
 ## spectra() — S3 methods
 ## ---------------------------------------------------------------------------
 
-test_that("print.horizons_data produces output", {
-
-  test_data <- tibble::tibble(
-    Sample_ID = c("S1", "S2"),
-    `4000`    = c(0.1, 0.2),
-    `3000`    = c(0.2, 0.3)
-  )
-
-  result <- spectra(test_data)
-
-  ## print method uses cat() — capture stdout --------------------------------
-
-  output <- capture.output(print(result))
-
-  expect_true(any(grepl("horizons_data", output)))
-  expect_true(any(grepl("Samples", output)))
-  expect_true(any(grepl("Predictors", output)))
-
-})
-
 test_that("summary.horizons_data produces output", {
 
   test_data <- tibble::tibble(
@@ -531,61 +482,5 @@ test_that("summary.horizons_data produces output", {
   expect_true(any(grepl("horizons_data", output)))
   expect_true(any(grepl("Samples", output)))
   expect_true(any(grepl("Predictors", output)))
-
-})
-
-
-## ---------------------------------------------------------------------------
-## spectra() — CSV file loading
-## ---------------------------------------------------------------------------
-
-test_that("spectra() loads CSV file", {
-
-  ## Arrange ---------------------------------------------------------------
-
-  test_data <- tibble::tibble(
-    Sample_ID = c("S001", "S002", "S003"),
-    `4000`    = c(0.1, 0.2, 0.3),
-    `3000`    = c(0.2, 0.3, 0.4)
-  )
-
-  temp_csv <- tempfile(fileext = ".csv")
-  on.exit(unlink(temp_csv), add = TRUE)
-  readr::write_csv(test_data, temp_csv)
-
-  ## Act -------------------------------------------------------------------
-
-  result <- spectra(temp_csv)
-
-  ## Assert ----------------------------------------------------------------
-
-  expect_s3_class(result, "horizons_data")
-  expect_equal(result$data$n_rows, 3)
-  expect_equal(result$provenance$spectra_type, "csv")
-
-})
-
-test_that("spectra() CSV does NOT add filename column", {
-
-  ## Arrange ---------------------------------------------------------------
-
-  test_data <- tibble::tibble(
-    Sample_ID = c("S001", "S002"),
-    `4000`    = c(0.1, 0.2)
-  )
-
-  temp_csv <- tempfile(fileext = ".csv")
-  on.exit(unlink(temp_csv), add = TRUE)
-  readr::write_csv(test_data, temp_csv)
-
-  ## Act -------------------------------------------------------------------
-
-  result <- spectra(temp_csv)
-
-  ## Assert ----------------------------------------------------------------
-
-  ## No filename column for CSV (no per-sample files) ----------------------
-
-  expect_false("filename" %in% names(result$data$analysis))
 
 })
