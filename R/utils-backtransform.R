@@ -127,10 +127,11 @@ back_transform_predictions <- function(predictions, transformation, warn = TRUE,
 
     },
 
-    ## Default: unrecognized transformation → return unchanged
+    ## Default: any other value, "" and NA included, is unknown → return
+    ## unchanged
     {
 
-      if (warn && transformation != "") {
+      if (warn) {
 
         cli::cli_warn("Unknown transformation {.val {transformation}}. Returning predictions unchanged.")
 
@@ -284,17 +285,25 @@ compute_response_bound <- function(y, outcome_range = DEFAULT_OUTCOME_RANGE) {
 
 #' Check Whether a Transformation Requires Back-transformation
 #'
-#' @param transformation Character string indicating transformation type.
-#' @return Logical.
+#' @description
+#' `"none"` is the only value that means no transformation. `"log"`,
+#' `"log10"` and `"sqrt"` return `TRUE`, and so does any other value,
+#' including `""` and `NA`, so an unknown transformation is never mistaken for
+#' none. [back_transform_predictions()] treats the same values as unknown: it
+#' returns the predictions unchanged, with a warning when `warn = TRUE`.
+#'
+#' @param transformation Character string indicating transformation type,
+#'   matched case-insensitively.
+#' @return Logical: `FALSE` for `"none"` and `NULL`, `TRUE` otherwise.
 #' @keywords internal
 #' @export
 needs_back_transformation <- function(transformation) {
 
-  if (is.null(transformation) || is.na(transformation)) return(FALSE)
+  if (is.null(transformation)) return(FALSE)
 
   trans_lower <- tolower(as.character(transformation))
 
-  !trans_lower %in% c("none", "notrans", "na", "")
+  !trans_lower %in% "none"
 
 }
 
