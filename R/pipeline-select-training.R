@@ -156,7 +156,8 @@
 #' `x$selection$library` records which library was drawn from.
 #'
 #' **What the record holds** (`x$selection`): the settings as resolved, the
-#' reconciliation, the pool's identity, the membership table (target by
+#' reconciliation, the pool's identity, the targets' identity (their source,
+#' row count and a hash of their ids), the membership table (target by
 #' property by pool row, with the space it was measured in, distance, rank,
 #' and whether the row was `retained` in the object after the twin
 #' subtraction), the groups, pool sizes per property against those available, every
@@ -165,13 +166,18 @@
 #' them left the union, any target that could not reach `k`, and the
 #' clustering when `scope = "cluster"`.
 #'
-#' @param x `horizons_data.` The targets: the samples to be predicted.
+#' @param x `horizons_data.` The targets: the samples to be predicted. One
+#'   row per sample, with finite spectra: the record names each target by its
+#'   `sample_id`, so replicate scans that share one are refused and should be
+#'   averaged first with [average()].
 #' @param library `horizons_data` or `character`. The reference library:
 #'   a `horizons_data` with one or more response columns (your own pool,
 #'   `spectra() |> standardize() |> add_response()`), the name of a
-#'   registered library (`"kssl"`), or a path to a library file. A registered
-#'   library is built on your machine from its public sources the first time
-#'   it is used, after asking, and cached under
+#'   registered library (`"kssl"`), or a path to a library file. A pool that
+#'   has been through [configure()] or [validate()] is refused, since the
+#'   training set would inherit that state; pass it as it was before. A
+#'   registered library is built on your machine from its public sources the
+#'   first time it is used, after asking, and cached under
 #'   `tools::R_user_dir("horizons", "cache")`; see "Registered libraries".
 #' @param k `integer.` Neighbours per target per property; a scalar, or a
 #'   named vector with one entry per property. 100 is the 2026-09-29 defaults
@@ -470,6 +476,15 @@ select_training <- function(x, library,
 
   if (length(errors) > 0) abort_select_inputs(errors)
 
+  ## The targets are certified before the library resolves, so a target set
+  ## the verb cannot use does not cost a download. At the full stage, not
+  ## raw: the similarity space needs finite spectra, and the record names
+  ## each target by its sample_id (membership, target_distances, groups), so
+  ## replicate scans sharing an id would be merged there; average() them
+  ## first.
+
+  x <- validate_select_input(x, arg = "x", what = "the targets")
+
   resolved <- resolve_source(library, verbose = isTRUE(verbose))
   pool     <- resolved$pool
 
@@ -479,6 +494,7 @@ select_training <- function(x, library,
 
   } else {
 
+    pool   <- validate_select_input(pool, arg = "library", what = "the pool")
     errors <- c(errors, check_pool_unpromoted(pool))
 
   }
@@ -1055,7 +1071,10 @@ select_training <- function(x, library,
     ),
     reconciliation   = rc$record,
     search           = c(sa$record, list(cache = cache)),
-    pool             = list(n_rows = length(pool_ids), id_hash = digest::digest(sort(pool_ids))),
+    pool             = list(n_rows = length(pool_ids), id_hash = digest::digest(sort(pool_ids, method = "radix"))),
+    targets          = list(source  = x$provenance$spectra_source,
+                            n_rows  = nrow(x$data$analysis),
+                            id_hash = digest::digest(sort(x$data$analysis$sample_id, method = "radix"))),
     library          = resolved$record,
     depth            = list(requested = depth, recorded = depth_recorded, applied = depth_applied,
                             max_cm = if (depth_applied) SELECT_TOPSOIL_MAX_CM else NULL,
@@ -1176,18 +1195,56 @@ abort_select_inputs <- function(errors) {
 
 
 ## ---------------------------------------------------------------------------
-## check_pool_unpromoted() — The pool must be data, not a fitted object
+## validate_select_input() — The base contract, naming the argument
+## ---------------------------------------------------------------------------
+
+#' Certify one of select_training()'s inputs against the base contract
+#'
+#' @description
+#' Runs `validate_horizons_data()` at the full stage and, when it fails,
+#' re-raises its error naming the argument: the verb takes two objects, and
+#' the validator's report does not say which one it was handed.
+#'
+#' @param obj [horizons_data.] The targets or the pool.
+#' @param arg [Character.] The argument name, `"x"` or `"library"`.
+#' @param what [Character.] What the argument is, for the message.
+#'
+#' @return [horizons_data.] `obj`, unchanged. Aborts with class
+#'   `horizons_validation_error`, the validator's error as its parent.
+#' @noRd
+validate_select_input <- function(obj, arg, what) {
+
+  call <- rlang::caller_env()
+
+  tryCatch(
+    validate_horizons_data(obj),
+    horizons_validation_error = function(e) {
+
+      cli::cli_abort("{.arg {arg}}, {what}, failed validation",
+                     parent = e, call = call, class = "horizons_validation_error")
+
+    }
+  )
+
+}
+
+
+## ---------------------------------------------------------------------------
+## check_pool_unpromoted() — The pool must be data, not a modelling object
 ## ---------------------------------------------------------------------------
 
 #' Refuse a pool that carries state from later in the pipeline
 #'
 #' @description
 #' `select_training()` builds its return by subsetting the pool, and a subset
-#' keeps the pool's class and every section the pool was carrying. A promoted
-#' pool would come out the other side still claiming to be validated,
-#' evaluated or fitted, with `models$row_index` and `evaluation$split` keyed
-#' to a row order the subset just destroyed. Promotion is meant to be earned,
-#' so this refuses rather than silently clearing.
+#' keeps the pool's class and every section the pool was carrying. A pool
+#' that had been configured, validated, evaluated or fitted would hand that
+#' state to the training set: a configuration and an outcome chosen for the
+#' library, a verdict and a removal record about rows that are mostly not
+#' there, or `models$row_index` and `evaluation$split` keyed to a row order
+#' the subset just destroyed. So the pool has to be data as `standardize()`
+#' and `add_response()` leave it, and this refuses rather than silently
+#' clearing.
 #'
 #' @param pool [horizons_data.] The candidate pool.
 #'
@@ -1204,8 +1261,16 @@ check_pool_unpromoted <- function(pool) {
 
   }
 
+  outcome  <- pool$data$role_map$variable[pool$data$role_map$role == "outcome"]
+  outliers <- pool$validation$outliers
+  removal  <- isTRUE(outliers$removed) || length(outliers$removed_ids) > 0L ||
+              NROW(outliers$removal_detail) > 0L
+
   carried <- c(
-    if (isTRUE(pool$validation$passed))      "validation$passed",
+    if (!is.null(pool$config$configs))       "config$configs",
+    if (length(outcome))                     paste0("an outcome role (", paste(outcome, collapse = ", "), ")"),
+    if (!is.null(pool$validation$passed))    "a verdict in validation$passed",
+    if (removal)                             "a removal record in validation$outliers",
     if (!is.null(pool$evaluation$results))   "evaluation$results",
     if (!is.null(pool$models$workflows))     "models$workflows",
     if (!is.null(pool$models$row_index))     "models$row_index"
@@ -1214,7 +1279,7 @@ check_pool_unpromoted <- function(pool) {
   if (length(carried)) {
 
     msgs <- c(msgs, cli::format_inline(
-      "{.arg library} already carries {.val {carried}} from later in the pipeline; selection subsets its rows, which would leave that state describing rows the training set no longer has"))
+      "{.arg library} already carries {carried} from later in the pipeline, which the training set drawn from it would inherit; use the library as it was before {.fn configure} and {.fn validate}"))
 
   }
 

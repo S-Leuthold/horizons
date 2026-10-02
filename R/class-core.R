@@ -955,9 +955,9 @@ check_selection_shape <- function(selection, sample_ids = NULL) {
 #'
 #' @param selection [List.] The record from `x$selection`.
 #'
-#' @return [List.] Character fields: `scope`, `groups`, `k`, `pool_rows`,
-#'   `drawn`, `space`, `metric`, `twins`, `removed_suffix`,
-#'   `properties`, `n_membership`.
+#' @return [List.] Character fields: `scope`, `groups`, `k`, `target_rows`,
+#'   `target_source`, `pool_rows`, `drawn`, `space`, `metric`, `twins`,
+#'   `removed_suffix`, `properties`, `n_membership`.
 #'
 #' @seealso [print.horizons_data()], [summary.horizons_data()]
 #' @noRd
@@ -1030,6 +1030,8 @@ describe_selection <- function(selection) {
     scope          = or_unknown(s$scope),
     groups         = groups,
     k              = k_str,
+    target_rows    = or_unknown(selection$targets$n_rows),
+    target_source  = or_unknown(selection$targets$source),
     pool_rows      = or_unknown(selection$pool$n_rows),
     drawn          = drawn,
     space          = space,
@@ -2615,6 +2617,7 @@ print.horizons_data <- function(x, ...) {
     cat(cli::style_bold("Selection\n"))
     cat(paste0("   \u251c\u2500 Scope: ", sel$scope, " (", sel$groups, ")\n"))
     cat(paste0("   \u251c\u2500 k: ", sel$k, "\n"))
+    cat(paste0("   \u251c\u2500 Targets: ", sel$target_rows, " rows\n"))
     cat(paste0("   \u251c\u2500 Pool: ", sel$pool_rows, " rows; drawn per property: ", sel$drawn, "\n"))
     cat(paste0("   \u2514\u2500 Space: ", sel$space, ", ", sel$metric,
                "; twins excluded: ", sel$twins, sel$removed_suffix, "\n"))
@@ -2970,6 +2973,7 @@ summary.horizons_data <- function(object, ...) {
     cat(paste0("   \u251c\u2500 Scope: ", sel$scope, " (", sel$groups, ")\n"))
     cat(paste0("   \u251c\u2500 Properties: ", sel$properties, "\n"))
     cat(paste0("   \u251c\u2500 k: ", sel$k, "\n"))
+    cat(paste0("   \u251c\u2500 Targets: ", sel$target_rows, " rows (source: ", sel$target_source, ")\n"))
     cat(paste0("   \u251c\u2500 Pool: ", sel$pool_rows, " rows\n"))
     cat(paste0("   \u2502     \u251c\u2500 Drawn per property: ", sel$drawn, "\n"))
     cat(paste0("   \u2502     \u2514\u2500 Membership rows: ", sel$n_membership, "\n"))
