@@ -348,6 +348,9 @@ predict_members_on_test <- function(object, members) {
 #'   the tuning resamples and the genuine meta-OOF are reproducible.
 #'
 #' @return The ensemble contract list from [build_ensemble_contract()].
+#'   Aborts with class `horizons_internal_error` when the meta-model returns
+#'   a different number of out-of-fold predictions than there are OOF rows,
+#'   or of `test_F` predictions than there are test samples.
 #'
 #' @keywords internal
 fit_tuned_meta_learner <- function(object,
@@ -496,6 +499,16 @@ fit_tuned_meta_learner <- function(object,
   ## recovers the real id, and a position-keyed lookup reorders to oof$row.
   oof_by_pos <- oof_collected$.pred[order(oof_collected$.row)]
 
+  ## Bound to oof$row and oof$truth by position below. A fold that failed to
+  ## predict would leave the vector short, and a single value would be
+  ## recycled across every row.
+  check_rows_aligned(
+    what       = "Meta-model out-of-fold predictions",
+    to         = "the out-of-fold rows",
+    n          = length(oof_by_pos),
+    n_expected = length(oof$row)
+  )
+
   ## Combined predictions are clamped to the outcome's range, as every served
   ## prediction is (#76); a floor at 0 under the default range.
   outcome_range <- outcome_range_setting(object)
@@ -522,6 +535,16 @@ fit_tuned_meta_learner <- function(object,
     meta_fit,
     new_data = test_wide[, member_cols, drop = FALSE]
   )$.pred
+
+  ## Attached to test_wide$sample_id and truth by position, as at predict
+  ## time in combine_ensemble_metamodel(): a short prediction would be
+  ## recycled and the test metrics scored on the wrong samples.
+  check_rows_aligned(
+    what       = "Meta-model predictions",
+    to         = "the test samples the members predicted",
+    n          = length(combined),
+    n_expected = nrow(test_wide)
+  )
 
   ensemble_pred <- tibble::tibble(
     sample_id = test_wide$sample_id,
@@ -998,6 +1021,8 @@ combine_ensemble_weighted <- function(member_pred, weights,
 #' @param outcome_range Numeric length-2 vector from
 #'   [outcome_range_setting()]. Default `DEFAULT_OUTCOME_RANGE`.
 #' @return A tibble: `sample_id`, `.pred` (ensemble point prediction).
+#'   Aborts with class `horizons_internal_error` when the meta-model returns
+#'   a different number of predictions than there are samples.
 #' @noRd
 combine_ensemble_metamodel <- function(member_pred, members, model,
                                        outcome_range = DEFAULT_OUTCOME_RANGE) {
@@ -1026,6 +1051,15 @@ combine_ensemble_metamodel <- function(member_pred, members, model,
     model,
     new_data = wide[, member_cols, drop = FALSE]
   )$.pred
+
+  ## Attached to wide$sample_id by position: the meta-model's predictions
+  ## carry no key of their own.
+  check_rows_aligned(
+    what       = "Meta-model predictions",
+    to         = "the samples the members predicted",
+    n          = length(combined),
+    n_expected = nrow(wide)
+  )
 
   tibble::tibble(
     sample_id = wide$sample_id,

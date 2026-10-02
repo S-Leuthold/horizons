@@ -898,3 +898,92 @@ describe("ensemble() - allow_par", {
   })
 
 })
+
+
+## ---------------------------------------------------------------------------
+## combine_ensemble_metamodel() - row alignment before the positional bind (#140)
+## ---------------------------------------------------------------------------
+## The meta-model's predictions carry no key and are attached to the widened
+## frame's sample_id by position. A single prediction used to be recycled
+## across every sample by tibble() without a word.
+
+describe("combine_ensemble_metamodel() - row alignment", {
+
+  member_pred <- tibble::tibble(
+    config_id = rep(c("a", "b"), each = 4),
+    sample_id = rep(paste0("s", 1:4), 2),
+    .pred     = c(1, 2, 3, 4, 2, 3, 4, 5)
+  )
+  meta <- structure(list(), class = "horizons_test_meta")
+
+  it("aborts when the meta-model returns fewer predictions than samples", {
+
+    local_mocked_s3_method("predict", "horizons_test_meta", function(object, new_data, ...) {
+      tibble::tibble(.pred = 3)
+    })
+
+    expect_error(combine_ensemble_metamodel(member_pred, c("a", "b"), meta),
+                 "Meta-model predictions", class = "horizons_internal_error")
+
+  })
+
+  it("is silent when there is one prediction per sample", {
+
+    local_mocked_s3_method("predict", "horizons_test_meta", function(object, new_data, ...) {
+      tibble::tibble(.pred = rowMeans(new_data))
+    })
+
+    out <- combine_ensemble_metamodel(member_pred, c("a", "b"), meta)
+
+    expect_identical(out$sample_id, paste0("s", 1:4))
+    expect_equal(out$.pred, c(1.5, 2.5, 3.5, 4.5))
+
+  })
+
+  it("aborts at fit time when the meta-model's test predictions are short", {
+
+    ## fit_tuned_meta_learner() binds the meta-model's test_F predictions to
+    ## the test samples and their truth the same way; one prediction would be
+    ## recycled and the ensemble's test metrics scored on a constant. Only the
+    ## meta-model's call is shortened: its new_data is the member_ matrix,
+    ## while the members themselves predict spectra.
+    predict_workflow <- utils::getS3method("predict", "workflow")
+
+    local_mocked_s3_method("predict", "workflow", function(object, new_data, ...) {
+      if (all(startsWith(names(new_data), "member_"))) {
+        tibble::tibble(.pred = 3)
+      } else {
+        predict_workflow(object, new_data, ...)
+      }
+    })
+
+    ## suppressWarnings(): rsample's note that the fixture is too small for
+    ## the default strata breaks is not what this test is about.
+    expect_error(
+      suppressWarnings(ensemble(fitted, method = "penalized", optimize = FALSE,
+                                compute_uq = FALSE, verbose = FALSE)),
+      "Meta-model predictions", class = "horizons_internal_error"
+    )
+
+  })
+
+  it("aborts at fit time when the meta-model's out-of-fold predictions are short", {
+
+    ## The OOF predictions are bound to oof$row and truth by position; a
+    ## single collected prediction used to be recycled across every row.
+    collect_predictions <- tune::collect_predictions
+
+    local_mocked_bindings(
+      collect_predictions = function(x, ...) collect_predictions(x, ...)[1, ],
+      .package = "tune"
+    )
+
+    expect_error(
+      suppressWarnings(ensemble(fitted, method = "penalized", optimize = FALSE,
+                                compute_uq = FALSE, verbose = FALSE)),
+      "Meta-model out-of-fold predictions", class = "horizons_internal_error"
+    )
+
+  })
+
+})

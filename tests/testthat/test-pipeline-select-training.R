@@ -1379,3 +1379,42 @@ test_that("print() shows a Selection section", {
   expect_true(any(grepl("k: 5", txt)))
 
 })
+
+
+## =============================================================================
+## Row alignment before positional binds (#140)
+## =============================================================================
+
+test_that("select_training() refuses to bind the provenance columns to reordered rows", {
+
+  fx               <- make_select_fixture(n_pool = 60)
+  real_subset_rows <- subset_rows
+
+  ## A subset that returned the drawn rows out of keep order would put each
+  ## row's .drawn_by, .min_distance and .group on another row, silently.
+  local_mocked_bindings(subset_rows = function(x, keep) {
+    real_subset_rows(x, if (is.character(keep)) rev(keep) else keep)
+  })
+
+  expect_error(quiet_select(fx, k = 5), "Provenance columns",
+               class = "horizons_internal_error")
+
+})
+
+
+test_that("rebuild_predictors() refuses a matrix whose rows are not the analysis rows", {
+
+  fx <- make_select_fixture(n_pool = 60)
+  pm <- predictor_matrix(fx$pool)
+  n  <- nrow(pm$matrix)
+
+  expect_error(rebuild_predictors(fx$pool, pm$matrix[rev(seq_len(n)), ], pm$wavenumbers),
+               "Reconciled spectra", class = "horizons_internal_error")
+
+  expect_error(rebuild_predictors(fx$pool, pm$matrix[-1, ], pm$wavenumbers),
+               "Got 59 rows for 60", class = "horizons_internal_error")
+
+  out <- rebuild_predictors(fx$pool, pm$matrix, pm$wavenumbers)
+  expect_identical(out$data$analysis$sample_id, fx$pool$data$analysis$sample_id)
+
+})

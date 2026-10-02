@@ -931,6 +931,9 @@ resolve_config_ids <- function(object, config) {
 #'   returns. With `ad = FALSE` there is nothing to abstain on, so
 #'   `abstain_ood` is not applied.
 #' @return A tibble: sample_id, config_id, .pred (+ interval + AD columns).
+#'   Aborts with class `horizons_internal_error` when the predictions, the
+#'   interval columns or the AD columns do not have one row per row of
+#'   `new_spectra`, since all three are attached to its rows by position.
 #' @keywords internal
 #' @noRd
 predict_one_config <- function(object, config_id, new_spectra, interval,
@@ -968,6 +971,17 @@ predict_one_config <- function(object, config_id, new_spectra, interval,
     pred_safe,
     error_title = paste0("Prediction failed for config '", config_id, "'.")
   )$.pred
+
+  ## Everything below is attached to new_spectra$sample_id by position: .pred,
+  ## the interval columns and the AD columns, and abstain_ood blanks rows by
+  ## the same alignment. parsnip returns one prediction per baked row, so a
+  ## recipe step that dropped rows at bake would shift every label silently.
+  check_rows_aligned(
+    what       = paste0("Point predictions for config '", config_id, "'"),
+    to         = "the rows of new_data",
+    n          = length(point_trans),
+    n_expected = nrow(new_spectra)
+  )
 
   ## Unconditional funnel call: the "none" branch is a passthrough, and the
   ## funnel clamps to the outcome's range, a floor at 0 under the default and
@@ -1021,6 +1035,13 @@ predict_one_config <- function(object, config_id, new_spectra, interval,
     ## gracefully to point-only rather than erroring.
     if (!is.null(interval_cols)) {
 
+      check_rows_aligned(
+        what       = paste0("Interval columns for config '", config_id, "'"),
+        to         = "the rows of new_data",
+        n          = nrow(interval_cols),
+        n_expected = nrow(new_spectra)
+      )
+
       out <- dplyr::bind_cols(out, interval_cols)
 
     }
@@ -1046,6 +1067,14 @@ predict_one_config <- function(object, config_id, new_spectra, interval,
   )
 
   if (!is.null(ad_cols)) {
+
+    ## Checked before the bind, and so before abstention blanks rows by it.
+    check_rows_aligned(
+      what       = paste0("Applicability-domain columns for config '", config_id, "'"),
+      to         = "the rows of new_data",
+      n          = nrow(ad_cols),
+      n_expected = nrow(new_spectra)
+    )
 
     out <- dplyr::bind_cols(out, ad_cols)
 
@@ -1178,6 +1207,8 @@ predict_members <- function(object, members, new_spectra) {
 #' @param outcome_range Numeric length-2 vector the bounds are clamped to,
 #'   from [outcome_range_setting()]. Default `DEFAULT_OUTCOME_RANGE`.
 #' @return Tibble of interval columns, or NULL if quantile prediction fails.
+#'   Aborts with class `horizons_internal_error` when `point_pred` or the
+#'   baked features do not have one row per row of `new_spectra`.
 #' @keywords internal
 #' @noRd
 predict_intervals <- function(uq, point_pred, new_spectra, config_id = NULL,
@@ -1186,6 +1217,19 @@ predict_intervals <- function(uq, point_pred, new_spectra, config_id = NULL,
   ## Intervals are returned at the coverage level the UQ was calibrated for.
   level <- uq$level_default
   alpha <- 1 - level
+
+  ## The bounds are point_pred + q_low and point_pred + q_high, by position,
+  ## and the result is attached to new_data's rows by the caller. Vectors of
+  ## different lengths recycle without an error when one length divides the
+  ## other, so both sides are checked against new_data before they meet.
+  for_config <- if (is.null(config_id)) "" else paste0(" for config '", config_id, "'")
+
+  check_rows_aligned(
+    what       = paste0("Point predictions", for_config),
+    to         = "the rows of new_data",
+    n          = length(point_pred),
+    n_expected = nrow(new_spectra)
+  )
 
   ## Bake new_data through the UQ recipe (predictors only — the same feature
   ## space the quantile forest was trained on).
@@ -1205,6 +1249,15 @@ predict_intervals <- function(uq, point_pred, new_spectra, config_id = NULL,
   }
 
   new_features <- as.data.frame(bake_result$result)
+
+  ## Outside the degrade path above: a bake that ran but dropped rows is a
+  ## bug, not a reason to return point predictions only.
+  check_rows_aligned(
+    what       = paste0("Features baked through the UQ recipe", for_config),
+    to         = "the rows of new_data",
+    n          = nrow(new_features),
+    n_expected = nrow(new_spectra)
+  )
 
   ## Residual quantiles from the quantile forest (original scale).
   q_result <- safely_execute(
