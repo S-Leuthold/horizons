@@ -1207,17 +1207,19 @@ test_that("the return validates and runs through the ordinary chain", {
 
   expect_no_error(validate_horizons_data(out))
 
+  ## A small tuning budget: the chain is under test, not the search.
   utils::capture.output({
-    cfg <- configure(out, outcome = "clay", models = "rf", cv_folds = 3L)
+    cfg <- configure(out, outcome = "clay", models = "rf", cv_folds = 3L,
+                     grid_size = 2L, bayesian_iter = 0L, final_bayesian_iter = 0L)
     cfg <- validate(cfg)
   })
 
   expect_s3_class(cfg, "horizons_data")
   expect_true(any(cfg$data$role_map$role == "outcome"))
 
-  ## prune = FALSE: on the synthetic fixture the one config can be pruned,
-  ## leaving fit() nothing to fit; the chain is what is under test, not the
-  ## pruning rule.
+  ## prune = FALSE keeps the chain independent of the pruning rule. With no
+  ## Bayesian stage nothing is pruned today, but the chain is what is under
+  ## test, so it shouldn't start depending on that.
   ev <- suppressWarnings(evaluate(cfg, prune = FALSE, verbose = FALSE))
   expect_s3_class(ev, "horizons_eval")
   expect_true(nrow(ev$evaluation$results) >= 1L)
@@ -1228,6 +1230,7 @@ test_that("the return validates and runs through the ordinary chain", {
   ## require them: the recipe's meta role is not baked (2026-09-21).
   f <- suppressWarnings(fit(ev, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE, verbose = FALSE))
   expect_s3_class(f, "horizons_fit")
+  expect_identical(f$models$results$status, "success")
   expect_false(any(c(".drawn_by", ".min_distance", ".group") %in% names(fx$targets$data$analysis)))
 
   p <- predict(f, fx$targets, interval = FALSE)
