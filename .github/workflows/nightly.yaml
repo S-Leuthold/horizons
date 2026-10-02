@@ -1,0 +1,21 @@
+# Nightly check of the default branch (development): the full R-CMD-check job
+# with the slow tier on and the memoised test fixtures in verify mode
+# (HORIZONS_MEMO_VERIFY, tests/testthat/helper-memo.R), which fails any test
+# that modifies a shared fixture in place. Scheduled runs always use the
+# default branch's copy of this file and check out its latest commit; on a
+# quiet day this also catches breakage from dependency updates.
+on:
+  schedule:
+    - cron: '23 7 * * *'
+  workflow_dispatch:
+
+name: nightly
+
+permissions: read-all
+
+jobs:
+  R-CMD-check:
+    uses: ./.github/workflows/R-CMD-check.yaml
+    with:
+      slow: true
+      memo_verify: true

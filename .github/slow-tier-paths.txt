@@ -1,0 +1,19 @@
+# Paths whose change turns the slow tier on for a pull request (R-CMD-check.yaml,
+# "Decide tier"). One extended regular expression per line, matched against
+# each changed file's path from the repository root. Lines starting with # and
+# blank lines are ignored.
+^R/pipeline-fit\.R$
+^R/fit-(single-config|uq|warmstart)\.R$
+^R/pipeline-evaluate\.R$
+^R/evaluate-single-config\.R$
+^R/monitor-evaluate\.R$
+^R/utils-(parallel|resamples|recipes)\.R$
+^R/pipeline-select-training\.R$
+^R/select-[a-z]+\.R$
+^R/(ad|ensemble-[a-z]+|pipeline-ensemble)\.R$
+^R/step-[a-z-]+\.R$
+^tests/testthat/helper-.*\.R$
+^tests/testthat/fixtures/
+^tests/testthat\.R$
+^DESCRIPTION$
+^\.github/

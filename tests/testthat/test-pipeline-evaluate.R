@@ -288,6 +288,8 @@ describe("evaluate() - metric ranking", {
 
   it("selects best config by specified metric", {
 
+    skip_unless_slow_tier()
+
     obj <- make_eval_object(n_configs = 2)
     result <- suppressWarnings(evaluate(obj, metric = "rsq", verbose = FALSE, seed = 42L))
 
@@ -435,6 +437,8 @@ describe("evaluate() - all configs fail", {
 describe("evaluate() - NA outcome rows", {
 
   it("drops rows with NA outcome and still succeeds", {
+
+    skip_unless_slow_tier()
 
     obj <- make_eval_object(n = 40)
     outcome <- obj$data$role_map$variable[obj$data$role_map$role == "outcome"]
@@ -1310,6 +1314,8 @@ describe("evaluate() - reproducibility", {
 
   it("produces identical results with the same seed", {
 
+    skip_unless_slow_tier()
+
     obj <- make_eval_object(n_configs = 1)
 
     r1 <- suppressWarnings(evaluate(obj, verbose = FALSE, seed = 123L))
@@ -1999,6 +2005,8 @@ describe("evaluate() - one checkpoint store (#42)", {
   })
 
   it("never lets a leftover temp file stand in for a config's own file", {
+
+    skip_unless_slow_tier()
 
     ## Older versions wrote each row to file*.rds before renaming it; a
     ## leftover one sorted ahead of most model prefixes and shadowed the real

@@ -4,11 +4,45 @@
 # Single-job check (Ubuntu, R release) for active development. When prepping
 # the JOSS / CRAN submission, widen to the full cross-platform matrix from
 # r-lib/actions check-standard.yaml (macOS + Windows + Ubuntu x release/devel/oldrel-1).
+#
+# Slow tier (tests/testthat/helper-tier.R): the "Decide tier" step turns it on
+# for every push, manual run and nightly run (nightly.yaml), and for a pull
+# request that has the slow-tests label, changes a path listed in
+# .github/slow-tier-paths.txt, or changes a test file that holds tiered tests.
+# Other pull requests run the fast tier. When the tier is on, the job fails
+# unless the test output shows it ran.
 on:
   push:
     branches: [main, development]
   pull_request:
     branches: [main, development]
+    # labeled: adding the slow-tests label re-runs the check with the tier on.
+    types: [opened, synchronize, reopened, labeled]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Branch, tag or SHA to check (empty: the branch the run starts from)'
+        type: string
+        default: ''
+      slow:
+        description: 'Run the slow tier'
+        type: boolean
+        default: true
+      memo_verify:
+        description: 'Fail any test that modifies a shared test fixture (HORIZONS_MEMO_VERIFY)'
+        type: boolean
+        default: false
+  workflow_call:
+    inputs:
+      ref:
+        type: string
+        default: ''
+      slow:
+        type: boolean
+        default: true
+      memo_verify:
+        type: boolean
+        default: false
 
 name: R-CMD-check
 
@@ -24,9 +58,69 @@ jobs:
       # Test files run in parallel (Config/testthat/parallel); the hosted
       # runners have 4 cores, and testthat otherwise starts only 2 workers.
       TESTTHAT_CPUS: 4
+      HORIZONS_MEMO_VERIFY: ${{ inputs.memo_verify && 'true' || 'false' }}
 
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref }}
+          # On a pull request the checkout is GitHub's merge commit; two
+          # commits deep gives its first parent, the base, for "Decide tier".
+          fetch-depth: 2
+
+      - name: Decide tier
+        id: tier
+        shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
+          SLOW_INPUT: ${{ inputs.slow }}
+          SLOW_LABEL: ${{ contains(github.event.pull_request.labels.*.name, 'slow-tests') }}
+        run: |
+          ## --------------------------------------------------------------------
+          slow=false
+          listed=""
+
+          if [ "$EVENT" != "pull_request" ]; then
+            if [ "$SLOW_INPUT" = "false" ]; then
+              why="This $EVENT run was started with slow set to false."
+            else
+              slow=true
+              why="Every $EVENT run includes the slow tier."
+            fi
+          elif [ "$SLOW_LABEL" = "true" ]; then
+            slow=true
+            why="The pull request has the slow-tests label."
+          elif ! git rev-parse -q --verify 'HEAD^2' > /dev/null ||
+               ! changed=$(git diff --name-only 'HEAD^1' HEAD); then
+            slow=true
+            why="The pull request's changed files could not be listed, so the slow tier runs."
+          else
+            path_hits=$(printf '%s\n' "$changed" |
+              grep -E -f <(grep -v -e '^#' -e '^[[:space:]]*$' .github/slow-tier-paths.txt) || true)
+            tiered_tests=$(printf '%s\n' "$changed" | grep -E '^tests/testthat/test-[^/]+\.R$' |
+              while read -r file; do
+                if [ -f "$file" ] && grep -q 'skip_unless_slow_tier' "$file"; then echo "$file"; fi
+              done || true)
+            listed=$(printf '%s\n' $path_hits $tiered_tests | sort -u)
+            if [ -n "$listed" ]; then
+              slow=true
+              why="The pull request changes files on .github/slow-tier-paths.txt or test files that hold tiered tests:"
+            else
+              why="The pull request changes no file on .github/slow-tier-paths.txt and no test file that holds tiered tests, and has no slow-tests label."
+            fi
+          fi
+
+          tier=$([ "$slow" = true ] && echo on || echo off)
+          echo "Slow tier: $tier. $why"
+          if [ -n "$listed" ]; then printf '  %s\n' $listed; fi
+          {
+            echo "### Slow tier: $tier"
+            echo
+            echo "$why"
+            if [ -n "$listed" ]; then echo; printf -- '- `%s`\n' $listed; fi
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "HORIZONS_SLOW_TESTS=$slow" >> "$GITHUB_ENV"
+          echo "slow=$slow" >> "$GITHUB_OUTPUT"
 
       - uses: r-lib/actions/setup-pandoc@v2
 
@@ -47,3 +141,25 @@ jobs:
           # (non-ASCII chars, unused Imports, roxygen gaps) is cleared, so the
           # build should stay warning-free; this keeps it that way for JOSS.
           error-on: '"warning"'
+
+      - name: Check the slow tier ran
+        if: steps.tier.outputs.slow == 'true'
+        shell: bash
+        run: |
+          ## --------------------------------------------------------------------
+          ## Fails closed: the tier counts as run only if tests/testthat.R
+          ## reported it on and no test skipped for it (helper-tier.R).
+          mapfile -t routs < <(find check -name 'testthat.Rout*' -type f)
+          if [ "${#routs[@]}" -eq 0 ]; then
+            echo "::error::No testthat.Rout under check/, so the slow tier cannot be shown to have run."
+            exit 1
+          fi
+          if ! grep -qx 'horizons slow tier: on' "${routs[@]}"; then
+            echo "::error::The slow tier should have run, but the tests ran with it off. Is HORIZONS_SLOW_TESTS set to true?"
+            exit 1
+          fi
+          if grep -q 'slow tier (set HORIZONS_SLOW_TESTS' "${routs[@]}"; then
+            echo "::error::The slow tier should have run, but tests skipped for it."
+            exit 1
+          fi
+          echo "The slow tier ran: the tests reported it on, and no test skipped for it."

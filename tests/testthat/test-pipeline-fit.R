@@ -371,6 +371,8 @@ describe("fit() - success path", {
 
   it("re-running evaluate() on it empties models and ensemble (#70)", {
 
+    skip_unless_slow_tier()
+
     result <- fit60()$fit
 
     ## The shared fit has compute_uq = FALSE, so carry a bundle the way
@@ -775,6 +777,8 @@ describe("fit() - n_best = 1", {
 describe("fit() - n_best exceeds available successes", {
 
   it("caps n_best at available successes (with warning)", {
+
+    skip_unless_slow_tier()
 
     obj <- mfo()
     obj$config$tuning$final_bayesian_iter <- 0L
@@ -1258,6 +1262,8 @@ describe("fit() - an evaluation with only pruned configs (#38)", {
 
   it("fits the pruned configs in evaluate()'s order, and warns that it fell back", {
 
+    skip_unless_slow_tier()
+
     ## Precondition: nothing succeeded, and evaluate() still named a winner
     expect_true(all(pruned$evaluation$results$status == "pruned"))
 
@@ -1346,6 +1352,8 @@ describe("fit() - members below the prune threshold at bayesian_iter = 0 (#38)",
 
   it("warns, naming the threshold and the members' cv RPD", {
 
+    skip_unless_slow_tier()
+
     ## Precondition: both are successes, and both fell below the threshold
     expect_true(all(below$evaluation$results$status == "success"))
     expect_true(all(below$evaluation$results$below_prune_threshold))
@@ -1378,6 +1386,8 @@ describe("fit() - members below the prune threshold at bayesian_iter = 0 (#38)",
   })
 
   it("is quiet when a member cleared the threshold", {
+
+    skip_unless_slow_tier()
 
     cleared <- below
     cleared$evaluation$results$below_prune_threshold[1] <- FALSE
@@ -1487,6 +1497,8 @@ describe("fit() - member failures", {
 
   it("keeps each member's error_message in models$results", {
 
+    skip_unless_slow_tier()
+
     real_fit_single_config <- fit_single_config
 
     r <- testthat::with_mocked_bindings(
@@ -1522,6 +1534,8 @@ describe("fit() - member failures", {
 describe("fit() - allow_par without a usable backend", {
 
   it("warns naming fit() and the plan, then runs sequentially", {
+
+    skip_unless_slow_tier()
 
     local_plan(future::sequential)
     obj <- make_fit_object(n = 60, n_configs = 1)
@@ -1602,6 +1616,8 @@ describe("fit() - selection provenance", {
   })
 
   it("records TRUE when the training object carried a selection", {
+
+    skip_unless_slow_tier()
 
     obj           <- make_fit_object(n_configs = 1)
     obj$selection <- make_selection_stub()
@@ -1688,6 +1704,8 @@ describe("fit() - cold start from one configuration (#45)", {
   })
 
   it("holds out evaluate()'s rows when some outcomes are NA", {
+
+    skip_unless_slow_tier()
 
     with_na <- obj
     with_na$data$analysis$SOC[c(2, 9, 30)] <- NA_real_
@@ -1807,6 +1825,8 @@ describe("fit() - cold start from one configuration (#45)", {
   })
 
   it("re-fits a cold-started fit as a cold start, keeping its recorded metric", {
+
+    skip_unless_slow_tier()
 
     cold_rmse <- suppressWarnings(
       fit(obj, metric = "rmse", compute_uq = FALSE, compute_ad = FALSE,
@@ -2182,6 +2202,8 @@ describe("fit() - the draw lines and the notes (#91)", {
 
   it("prints the n_best note inside the tree, under the member count", {
 
+    skip_unless_slow_tier()
+
     ev <- make_fit_object(n = 60, n_configs = 1)
 
     out <- fit_header(ev, n_best = 3L, compute_uq = FALSE, compute_ad = FALSE)
@@ -2515,6 +2537,8 @@ describe("fit() - a trim request changed after evaluate() (#137)", {
   })
 
   it("fits as before when the request matches", {
+
+    skip_unless_slow_tier()
 
     ## validate() run again with the same request, and with none on an
     ## evaluation that trimmed nothing

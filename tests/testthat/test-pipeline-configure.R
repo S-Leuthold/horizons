@@ -1410,6 +1410,8 @@ describe("configure() and the object contract", {
 
   test_that("evaluating a re-configured fit matches evaluating the plain object (#70)", {
 
+    skip_unless_slow_tier()
+
     ## What the reset promises: nothing the clay fit earned leaks into the oc
     ## evaluation. elastic_net, because glmnet is in Imports, so the test
     ## needs no optional engine, and it is fast and bit-reproducible; cubist
