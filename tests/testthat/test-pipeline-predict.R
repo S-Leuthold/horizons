@@ -405,12 +405,12 @@ describe("check_predict_dots()", {
   it("does not evaluate the dots", {
 
     expect_warning(
-      check_predict_dots(level = stop("evaluated"), level_default = 0.9),
+      check_predict_dots(level = stop("evaluated"), .level_default = 0.9),
       class = "horizons_input_warning"
     )
 
     expect_error(
-      check_predict_dots(foo = stop("evaluated"), level_default = 0.9),
+      check_predict_dots(foo = stop("evaluated"), .level_default = 0.9),
       class  = "horizons_input_error",
       regexp = "foo"
     )
@@ -420,7 +420,7 @@ describe("check_predict_dots()", {
   it("refuses unnamed arguments, showing them", {
 
     expect_error(
-      check_predict_dots(0.95, level_default = 0.9),
+      check_predict_dots(0.95, .level_default = 0.9),
       class  = "horizons_input_error",
       regexp = "0.95"
     )
@@ -430,7 +430,7 @@ describe("check_predict_dots()", {
   it("aborts rather than warns when level comes with an unknown argument", {
 
     expect_error(
-      check_predict_dots(level = 0.95, foo = 1, level_default = 0.9),
+      check_predict_dots(level = 0.95, foo = 1, .level_default = 0.9),
       class = "horizons_input_error"
     )
 
@@ -438,7 +438,23 @@ describe("check_predict_dots()", {
 
   it("is silent on empty dots", {
 
-    expect_no_condition(check_predict_dots(level_default = 0.9))
+    expect_no_condition(check_predict_dots(.level_default = 0.9))
+
+  })
+
+  it("checks user arguments that share a name with its own", {
+
+    expect_error(
+      check_predict_dots(call = 1, .level_default = 0.9),
+      class  = "horizons_input_error",
+      regexp = "call"
+    )
+
+    expect_error(
+      check_predict_dots(level_default = 0.95, .level_default = 0.9),
+      class  = "horizons_input_error",
+      regexp = "level_default"
+    )
 
   })
 

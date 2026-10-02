@@ -775,7 +775,7 @@ predict.horizons_ensemble <- function(object,
 
   ## Nothing in `...` is used. A `level` warns, naming the level the CV+
   ## bundle was calibrated at; anything else aborts (#141).
-  check_predict_dots(..., level_default = object$ensemble$uq$level_default)
+  check_predict_dots(..., .level_default = object$ensemble$uq$level_default)
 
   ## -------------------------------------------------------------------------
   ## Step 1: Resolve the authoritative member set

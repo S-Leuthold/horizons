@@ -174,7 +174,7 @@ predict.horizons_fit <- function(object,
   ## Checked here, once the configs are known and before any work is done.
   check_predict_dots(
     ...,
-    level_default = unlist(lapply(object$models$uq[config_ids],
+    .level_default = unlist(lapply(object$models$uq[config_ids],
                                   function(uq) uq$level_default))
   )
 
@@ -264,16 +264,18 @@ predict.horizons_fit <- function(object,
 #' are read by name and never evaluated.
 #'
 #' @param ... The predict method's dots, forwarded.
-#' @param level_default Numeric or `NULL`. The level the returned intervals
+#' @param .level_default Numeric or `NULL`. The level the returned intervals
 #'   are at: `uq$level_default` of the bundle(s) in use. `NULL` (no bundle)
 #'   names `DEFAULT_UQ_LEVEL`.
-#' @param call The predict method's frame, for the error's call.
+#' @param .call The predict method's frame, for the error's call. Both
+#'   arguments are dot-prefixed so a user argument named `level_default` or
+#'   `call` lands in `...` and is checked, not bound to them.
 #' @return Invisibly `NULL`. Warns with class `horizons_input_warning`; aborts
 #'   with class `horizons_input_error`.
 #' @keywords internal
 #' @noRd
-check_predict_dots <- function(..., level_default = NULL,
-                               call = rlang::caller_env()) {
+check_predict_dots <- function(..., .level_default = NULL,
+                               .call = rlang::caller_env()) {
 
   dots      <- rlang::enquos(...)
   dot_names <- names(dots) %||% rep("", length(dots))
@@ -297,7 +299,7 @@ check_predict_dots <- function(..., level_default = NULL,
       "x" = if (length(named) > 0) "Unknown: {.arg {named}}.",
       "x" = if (length(unnamed) > 0) "Unnamed: {.code {unnamed}}.",
       "i" = "Did you misspell an argument name?"
-    ), class = "horizons_input_error", call = call)
+    ), class = "horizons_input_error", call = .call)
 
   }
 
@@ -307,7 +309,7 @@ check_predict_dots <- function(..., level_default = NULL,
 
   if ("level" %in% dot_names) {
 
-    level <- unique(level_default) %||% DEFAULT_UQ_LEVEL
+    level <- unique(.level_default) %||% DEFAULT_UQ_LEVEL
 
     cli::cli_warn(c(
       "!" = "{.arg level} is ignored. Prediction intervals are at the level they were calibrated at, {.val {level}}.",
