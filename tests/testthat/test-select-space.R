@@ -202,16 +202,7 @@ test_that("build_similarity_space() default reproduces the experiment's PCA spac
   expect_equal(abs(unname(sp$scores)), abs(unname(ref$scores)), tolerance = 1e-10)
   expect_identical(rownames(sp$scores), rownames(pm$matrix))
 
-})
-
-
-test_that("build_similarity_space() records its settings and the variance retained", {
-
-  fx <- select_fixture(n_pool = 60)
-  pm <- predictor_matrix(fx$pool)
-
-  sp <- build_similarity_space(pm$matrix, pm$wavenumbers, sdev_floor = 0)
-
+  ## It records its settings and the variance retained
   expect_identical(sp$settings$space, "pca")
   expect_identical(sp$settings$snv, TRUE)
   expect_identical(sp$settings$derivative, 1L)

@@ -136,17 +136,6 @@ test_that("nearest_neighbours() aborts when k exceeds the pool", {
 })
 
 
-test_that("nearest_neighbours() puts the exact twin at distance zero", {
-
-  s  <- fixture_scores()
-  nn <- nearest_neighbours(s$St, s$Sp, k = 3L, metric = "euclidean")
-
-  expect_identical(unname(nn$ids[s$fx$twin_id, 1]), s$fx$twin_pool_id)
-  expect_lt(unname(nn$dist[s$fx$twin_id, 1]), 1e-8)
-
-})
-
-
 test_that("nearest_neighbours() returns accurate small distances, not the identity's", {
 
   ## Arrange: score vectors far from the origin but a hair apart. The
@@ -207,6 +196,10 @@ test_that("find_twins() flags the exact twin and nothing else", {
 
   s  <- fixture_scores()
   nn <- nearest_neighbours(s$St, s$Sp, k = 6L, metric = "euclidean")
+
+  ## nearest_neighbours() puts the exact twin first, at distance zero
+  expect_identical(unname(nn$ids[s$fx$twin_id, 1]), s$fx$twin_pool_id)
+  expect_lt(unname(nn$dist[s$fx$twin_id, 1]), 1e-8)
 
   tw <- find_twins(nn, ratio = 0.05)
 
@@ -446,7 +439,8 @@ test_that("draw_neighbours() flags the whole replicate cluster at k below its si
   ## reference the rule used to take was itself a replicate distance, and one
   ## row was flagged instead of four. The reference is now a fixed width,
   ## wider than the cluster and independent of k, so the same four rows are
-  ## flagged whether k is 3, 5 or 10.
+  ## flagged whether k is 3, 5 or 10, none of them is in the twin target's
+  ## neighbourhood, and the draw still reaches k with no short draw.
 
   fxr <- select_fixture(n_pool = 60, seed = 3, n_replicates = 3)
   rc  <- reconcile_axes(fxr$pool, fxr$targets)
@@ -466,6 +460,7 @@ test_that("draw_neighbours() flags the whole replicate cluster at k below its si
     expect_setequal(out$exclusions$pool_id[out$exclusions$target_id == fxr$twin_id], self)
     expect_identical(nrow(mine), k)
     expect_false(any(self %in% mine$pool_id))
+    expect_identical(nrow(out$short_draws), 0L)
 
   }
 
@@ -516,37 +511,6 @@ test_that("draw_neighbours() records the nearest and mean-of-k distance per targ
   expect_named(td, c("target_id", "property", "space", "nearest", "mean_k"))
   expect_identical(nrow(td), nrow(s$St))
   expect_true(all(td$nearest <= td$mean_k))
-
-})
-
-
-test_that("draw_neighbours() drops a whole replicate cluster and still reaches k", {
-
-  ## Arrange: three replicate scans of the twinned pool row, so the gap rule
-  ## has nothing to see and the neighbourhood-relative rule has everything.
-  s   <- fixture_scores(n_pool = 60, seed = 3)
-  fxr <- select_fixture(n_pool = 60, seed = 3, n_replicates = 3)
-  rc  <- reconcile_axes(fxr$pool, fxr$targets)
-  tm  <- predictor_matrix(fxr$targets)
-  sp  <- build_similarity_space(rc$matrix, rc$wavenumbers, ncomp = 4L)
-  st  <- project_similarity(sp, tm$matrix, tm$wavenumbers)
-  rsp <- fxr$pool$data$analysis[, c("sample_id", "clay")]
-
-  ## Act
-  out <- draw_neighbours(st, sp$scores, responses = rsp, k = 10L,
-                         properties = "clay", metric = "euclidean", twin_ratio = 0.05)
-
-  ## Assert: every replicate and the source row are flagged for the twin
-  ## target, none of them is in its neighbourhood, and it still has 10 rows.
-  self <- c(fxr$twin_pool_id, fxr$replicate_pool_ids)
-  mine <- out$membership[out$membership$target_id == fxr$twin_id, ]
-
-  expect_identical(nrow(mine), 10L)
-  expect_false(any(self %in% mine$pool_id))
-
-  flagged <- out$exclusions$pool_id[out$exclusions$target_id == fxr$twin_id]
-  expect_setequal(flagged, self)
-  expect_identical(nrow(out$short_draws), 0L)
 
 })
 
