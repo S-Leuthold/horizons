@@ -490,6 +490,18 @@ describe("tune_warmstart_bayes() - Bayesian stage", {
     expect_true(".iter" %in% names(metrics))
     expect_equal(max(metrics$.iter), budget)
 
+    ## The Bayesian stage started from the warm-start grid, which carries the
+    ## best point, not from a starting design of its own
+    tuned <- ts$param_set$name
+    start <- dplyr::distinct(metrics[metrics$.iter == 0, tuned])
+    warm  <- build_warmstart_grid(best_params, ts$param_set, max_points = 5L)
+    expect_true(any(start$mtry == 2L & start$min_n == 5L))
+    expect_equal(
+      dplyr::arrange(start, dplyr::across(dplyr::all_of(tuned))),
+      dplyr::arrange(warm[, tuned], dplyr::across(dplyr::all_of(tuned))),
+      ignore_attr = TRUE
+    )
+
     expect_s3_class(result$best_params, "tbl_df")
     expect_equal(nrow(result$best_params), 1)
 
