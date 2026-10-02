@@ -54,6 +54,21 @@ mock_boruta_deciding <- function(decide) {
 
 }
 
+## Fixture: the real Boruta engine's prep of the signal data at seed 1. It
+## takes most of a second and is identical every time, so the tests that read
+## it share one build. A build that warns aborts (helper-memo.R), so a prep
+## that starts warning still fails the no-warning test below.
+build_boruta_prepped <- function() {
+
+  d <- boruta_signal_data()
+
+  set.seed(1)
+  recipes::prep(boruta_recipe(d), training = d)
+
+}
+
+boruta_prepped <- function() memo_fixture("boruta_prepped", build_boruta_prepped)
+
 ## =========================================================================
 ## Boruta's decisions are the selection
 ## =========================================================================
@@ -64,10 +79,7 @@ describe("step_select_boruta() selects by Boruta (#75)", {
 
     skip_if_not_installed("Boruta")
 
-    d <- boruta_signal_data()
-
-    set.seed(1)
-    expect_no_warning(prepped <- recipes::prep(boruta_recipe(d), training = d))
+    expect_no_warning(prepped <- boruta_prepped())
 
     step <- prepped$steps[[1]]
     b    <- step$boruta
@@ -95,10 +107,8 @@ describe("step_select_boruta() selects by Boruta (#75)", {
 
     skip_if_not_installed("Boruta")
 
-    d <- boruta_signal_data()
-
-    set.seed(1)
-    prepped <- recipes::prep(boruta_recipe(d), training = d)
+    d       <- boruta_signal_data()
+    prepped <- boruta_prepped()
 
     step <- prepped$steps[[1]]
     b    <- step$boruta
@@ -123,10 +133,7 @@ describe("step_select_boruta() selects by Boruta (#75)", {
 
     skip_if_not_installed("Boruta")
 
-    d <- boruta_signal_data()
-
-    set.seed(1)
-    prepped <- recipes::prep(boruta_recipe(d), training = d)
+    prepped <- boruta_prepped()
 
     expect_output(print(prepped$steps[[1]]), "3 confirmed")
     expect_output(print(prepped$steps[[1]]), "of 50 cluster representatives")
@@ -137,10 +144,8 @@ describe("step_select_boruta() selects by Boruta (#75)", {
 
     skip_if_not_installed("Boruta")
 
-    d <- boruta_signal_data()
-
-    set.seed(1)
-    prepped <- recipes::prep(boruta_recipe(d), training = d)
+    d       <- boruta_signal_data()
+    prepped <- boruta_prepped()
     baked   <- recipes::bake(prepped, new_data = d)
 
     old <- prepped
