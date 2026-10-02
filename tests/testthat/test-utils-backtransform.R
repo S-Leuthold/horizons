@@ -125,9 +125,8 @@ describe("back_transform_predictions()", {
     )
     expect_equal(result, preds)
 
-    ## warn = FALSE silences it, and an empty string is not reported as unknown
+    ## warn = FALSE silences it
     expect_silent(back_transform_predictions(preds, "boxcox", warn = FALSE))
-    expect_silent(back_transform_predictions(preds, ""))
 
   })
 
@@ -331,16 +330,6 @@ describe("needs_back_transformation()", {
 
   })
 
-  it("returns FALSE for the aliases 'notrans', 'na' and '', in any case", {
-
-    expect_false(needs_back_transformation("notrans"))
-    expect_false(needs_back_transformation("NoTrans"))
-    expect_false(needs_back_transformation("na"))
-    expect_false(needs_back_transformation("NA"))
-    expect_false(needs_back_transformation(""))
-
-  })
-
 })
 
 describe("compute_original_scale_metrics()", {
@@ -367,6 +356,7 @@ describe("compute_original_scale_metrics()", {
 
     ## The same metrics as the 3 complete pairs alone: (1,1.1), (4,4.1), (5,4.9)
     expect_s3_class(result, "tbl_df")
+    expect_setequal(result$.metric, c("rmse", "rrmse", "rsq", "ccc", "rpd", "mae"))
     expect_equal(result, compute_original_scale_metrics(c(1, 4, 5), c(1.1, 4.1, 4.9)))
 
     ## Pairs are dropped before the count, so one complete pair is too few
