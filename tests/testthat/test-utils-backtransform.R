@@ -104,6 +104,33 @@ describe("back_transform_predictions()", {
 
   })
 
+  it("warns for very large log10-scale predictions, and only for those", {
+
+    expect_warning(
+      back_transform_predictions(c(1, 2, 60), "log10", warn = TRUE),
+      "large values detected in log10-scale"
+    )
+
+    expect_silent(back_transform_predictions(c(1, 2, 3), "log10", warn = TRUE))
+
+  })
+
+  it("passes an unknown transformation through unchanged, with a warning", {
+
+    preds <- c(1, 2, 3)
+
+    expect_warning(
+      result <- back_transform_predictions(preds, "boxcox"),
+      "Unknown transformation"
+    )
+    expect_equal(result, preds)
+
+    ## warn = FALSE silences it, and an empty string is not reported as unknown
+    expect_silent(back_transform_predictions(preds, "boxcox", warn = FALSE))
+    expect_silent(back_transform_predictions(preds, ""))
+
+  })
+
   it("clamps negative sqrt predictions to 0 with warning", {
 
     preds <- c(1, -0.5, 3)
@@ -123,7 +150,12 @@ describe("back_transform_predictions()", {
     preds_sqrt <- c(1, -0.5, 3)
 
     expect_silent(back_transform_predictions(preds_log, "log", warn = FALSE))
+    expect_silent(back_transform_predictions(preds_log, "log10", warn = FALSE))
     expect_silent(back_transform_predictions(preds_sqrt, "sqrt", warn = FALSE))
+
+    ## upper_bound = NULL (the default) applies no bound, so nothing is winsorized
+    expect_silent(back_transform_predictions(c(1, 2, 7), "log", warn = FALSE,
+                                             upper_bound = NULL))
 
   })
 
@@ -221,23 +253,6 @@ describe("back_transform_predictions()", {
 
   })
 
-  it("upper_bound = NULL preserves current behavior exactly (regression)", {
-
-    preds <- c(1, 2, 7)
-
-    for (trans in c("none", "log", "sqrt", "log10")) {
-
-      expect_identical(
-        back_transform_predictions(preds, trans, warn = FALSE),
-        back_transform_predictions(preds, trans, warn = FALSE, upper_bound = NULL)
-      )
-
-    }
-
-    expect_silent(back_transform_predictions(preds, "log", warn = FALSE))
-
-  })
-
   it("round-trip stays exact when nothing exceeds a generous bound", {
 
     y <- c(0.1, 1, 5, 42, 100)
@@ -275,11 +290,12 @@ describe("back_transform_predictions()", {
   it("aborts on invalid upper_bound values", {
 
     preds <- c(1, 2)
+    msg   <- "must be a single finite numeric"
 
-    expect_error(back_transform_predictions(preds, "log", upper_bound = -5))
-    expect_error(back_transform_predictions(preds, "log", upper_bound = Inf))
-    expect_error(back_transform_predictions(preds, "log", upper_bound = c(1, 2)))
-    expect_error(back_transform_predictions(preds, "log", upper_bound = "100"))
+    expect_error(back_transform_predictions(preds, "log", upper_bound = -5),      msg)
+    expect_error(back_transform_predictions(preds, "log", upper_bound = Inf),     msg)
+    expect_error(back_transform_predictions(preds, "log", upper_bound = c(1, 2)), msg)
+    expect_error(back_transform_predictions(preds, "log", upper_bound = "100"),   msg)
 
   })
 
@@ -315,6 +331,16 @@ describe("needs_back_transformation()", {
 
   })
 
+  it("returns FALSE for the aliases 'notrans', 'na' and '', in any case", {
+
+    expect_false(needs_back_transformation("notrans"))
+    expect_false(needs_back_transformation("NoTrans"))
+    expect_false(needs_back_transformation("na"))
+    expect_false(needs_back_transformation("NA"))
+    expect_false(needs_back_transformation(""))
+
+  })
+
 })
 
 describe("compute_original_scale_metrics()", {
@@ -339,9 +365,16 @@ describe("compute_original_scale_metrics()", {
 
     result <- compute_original_scale_metrics(truth, estimate)
 
-    ## Should compute on the 3 complete pairs: (1,1.1), (4,4.1), (5,4.9)
+    ## The same metrics as the 3 complete pairs alone: (1,1.1), (4,4.1), (5,4.9)
     expect_s3_class(result, "tbl_df")
-    expect_true(nrow(result) > 0)
+    expect_equal(result, compute_original_scale_metrics(c(1, 4, 5), c(1.1, 4.1, 4.9)))
+
+    ## Pairs are dropped before the count, so one complete pair is too few
+    expect_warning(
+      short <- compute_original_scale_metrics(c(1, 2, NA), c(1.1, NA, 3)),
+      "Insufficient data"
+    )
+    expect_equal(nrow(short), 0)
 
   })
 
@@ -350,7 +383,10 @@ describe("compute_original_scale_metrics()", {
     truth    <- c(NA)
     estimate <- c(NA)
 
-    result <- compute_original_scale_metrics(truth, estimate)
+    expect_warning(
+      result <- compute_original_scale_metrics(truth, estimate),
+      "Insufficient data"
+    )
 
     expect_equal(nrow(result), 0)
 

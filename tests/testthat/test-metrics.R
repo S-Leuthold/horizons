@@ -111,6 +111,24 @@ describe("rrmse_vec()", {
 
   })
 
+  it("returns NA when na_rm = FALSE and NAs present", {
+
+    truth    <- c(1, 2, NA, 4, 5)
+    estimate <- c(1.1, 2.2, 2.8, 4.1, 4.9)
+
+    expect_identical(rrmse_vec(truth, estimate, na_rm = FALSE), NA_real_)
+
+  })
+
+  it("returns NA when mean(truth) is zero, rather than dividing by it", {
+
+    truth    <- c(-2, -1, 0, 1, 2)
+    estimate <- c(-1.8, -1.1, 0.2, 0.9, 2.1)
+
+    expect_identical(rrmse_vec(truth, estimate), NA_real_)
+
+  })
+
 })
 
 describe("ccc_vec()", {
@@ -362,6 +380,17 @@ describe("tuning_metric_set()", {
 
     expect_error(tuning_metric_set("log", metrics = c("rmse", "mape")), "mape")
     expect_error(tuning_metric_set("log", metrics = character(0)), "at least one")
+
+  })
+
+  it("aborts on an invalid outcome_range", {
+
+    msg <- "must be a numeric vector of length 2"
+
+    expect_error(tuning_metric_set("log", outcome_range = c(5, 1)),     msg)
+    expect_error(tuning_metric_set("log", outcome_range = c(0, NA)),    msg)
+    expect_error(tuning_metric_set("log", outcome_range = 0),           msg)
+    expect_error(tuning_metric_set("log", outcome_range = c("0", "1")), msg)
 
   })
 
