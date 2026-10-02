@@ -8,6 +8,7 @@
 * `evaluate()` and `fit()`, including the cold start, abort with class `horizons_input_error` when the outcome has zero variance, on the modelled rows or on the rows the models are fitted on; `validate()` is documented as an advisory report, and `summary()` suggests it only before `evaluate()` (#132).
 * The object no longer carries the unused `artifacts` slot, `models$row_index` or `provenance$schema_version`, and `models$cv_predictions` gains `sample_id`. The validators no longer accept objects missing keys that current versions always write, so objects saved by earlier versions need a re-run.
 * Attaching a development build says so and names the command that installs the latest release (`remotes::install_github("S-Leuthold/horizons@main")`); development builds carry a `.9000` version suffix.
+* `needs_back_transformation()` no longer treats `"notrans"`, `"na"` or `""` as no transformation; `"none"` is the only such value, and every other value, `""` and `NA` included, returns `TRUE`. `back_transform_predictions()` treats `""` and `NA` as unknown transformations, as it already did `"notrans"` and `"na"`: the predictions are not back-transformed (they are still clamped to `outcome_range`), with a warning when `warn = TRUE`.
 
 ## Bug fixes
 
