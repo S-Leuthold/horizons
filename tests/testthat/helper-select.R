@@ -205,3 +205,32 @@ make_select_fixture <- function(n_pool          = 300,
   )
 
 }
+
+
+## ---------------------------------------------------------------------------
+## select_fixture() — make_select_fixture(), built once per argument set
+## ---------------------------------------------------------------------------
+
+#' The select fixture, shared through memo_fixture()
+#'
+#' @description
+#' The first call with a given set of arguments builds the fixture; later
+#' calls in the same R process return the same value, and leave the RNG where
+#' a fresh build would (see `helper-memo.R`). The value is read-only. It holds
+#' no environments, so a test that edits it (`fx$pool$... <- ...`) edits its
+#' own copy. Call it inside a test, after any skip. Use
+#' `make_select_fixture()` for a build of the test's own.
+#'
+#' The key is the arguments as written, so `select_fixture()` and
+#' `select_fixture(n_pool = 300)` are two entries: spell an argument set the
+#' same way throughout a file.
+#'
+#' @param ... Arguments for `make_select_fixture()`.
+#'
+#' @return The list `make_select_fixture()` returns.
+#' @noRd
+select_fixture <- function(...) {
+
+  memo_fixture("select_fixture", make_select_fixture, ...)
+
+}

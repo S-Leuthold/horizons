@@ -66,7 +66,7 @@ learnable_clay_pool <- function(pool, r2 = 0.8, seed = 1) {
 
 test_that("select_training() rejects inputs that are not horizons_data", {
 
-  fx <- make_select_fixture(n_pool = 60)
+  fx <- select_fixture(n_pool = 60)
 
   expect_error(select_training(data.frame(a = 1), fx$pool, verbose = FALSE),
                class = "horizons_input_error")
@@ -78,7 +78,7 @@ test_that("select_training() rejects inputs that are not horizons_data", {
 
 test_that("select_training() needs a pool with at least one response", {
 
-  fx <- make_select_fixture(n_pool = 60)
+  fx <- select_fixture(n_pool = 60)
 
   expect_error(select_training(fx$targets, fx$targets, verbose = FALSE),
                regexp = "response", class = "horizons_input_error")
@@ -88,7 +88,7 @@ test_that("select_training() needs a pool with at least one response", {
 
 test_that("select_training() rejects unknown properties", {
 
-  fx <- make_select_fixture(n_pool = 60)
+  fx <- select_fixture(n_pool = 60)
 
   expect_error(quiet_select(fx, properties = "ph"),
                regexp = "ph", class = "horizons_input_error")
@@ -98,7 +98,7 @@ test_that("select_training() rejects unknown properties", {
 
 test_that("select_training() rejects a bad k", {
 
-  fx <- make_select_fixture(n_pool = 60)
+  fx <- select_fixture(n_pool = 60)
 
   expect_error(quiet_select(fx, k = 0),           class = "horizons_input_error")
   expect_error(quiet_select(fx, k = 2.5),         class = "horizons_input_error")
@@ -109,7 +109,7 @@ test_that("select_training() rejects a bad k", {
 
 test_that("select_training() rejects bad scope, metric and space", {
 
-  fx <- make_select_fixture(n_pool = 60)
+  fx <- select_fixture(n_pool = 60)
 
   expect_error(quiet_select(fx, k = 5, scope  = "nope"), class = "horizons_input_error")
   expect_error(quiet_select(fx, k = 5, metric = "nope"), class = "horizons_input_error")
@@ -124,7 +124,7 @@ test_that("select_training() rejects a twin_ratio outside (0, 1)", {
   ## ordinary neighbours; global's claim to see every twin rests on it
   ## sitting below.
 
-  fx <- make_select_fixture(n_pool = 60)
+  fx <- select_fixture(n_pool = 60)
 
   for (bad in list(1, 1.5, NA_real_, NA, c(0.05, 0.1))) {
 
@@ -140,7 +140,7 @@ test_that("select_training() rejects a twin_ratio outside (0, 1)", {
 
 test_that("select_training(space = 'pls') needs exactly one property and an integer ncomp", {
 
-  fx <- make_select_fixture(n_pool = 60)
+  fx <- select_fixture(n_pool = 60)
 
   expect_error(quiet_select(fx, k = 5, space = "pls", ncomp = 3L),
                regexp = "one property", class = "horizons_input_error")
@@ -152,7 +152,7 @@ test_that("select_training(space = 'pls') needs exactly one property and an inte
 
 test_that("select_training() refuses a pool that carries state from later verbs", {
 
-  fx <- make_select_fixture(n_pool = 60)
+  fx <- select_fixture(n_pool = 60)
 
   ## Selection subsets the pool's rows, and a subset keeps the pool's class
   ## and sections. A promoted pool would come out still claiming to be
@@ -175,7 +175,7 @@ test_that("select_training() refuses a pool that carries state from later verbs"
 
 test_that("the pool check reads models$workflows, not a stray row_index (#131)", {
 
-  fx <- make_select_fixture(n_pool = 60)
+  fx <- select_fixture(n_pool = 60)
 
   stray <- fx$pool
   stray$models$row_index <- tibble::tibble(.row = 1L, sample_id = "P001")
@@ -192,7 +192,7 @@ test_that("the pool check reads models$workflows, not a stray row_index (#131)",
 
 test_that("select_training() refuses a configured pool and says to use it before configure()", {
 
-  fx <- make_select_fixture(n_pool = 60)
+  fx <- select_fixture(n_pool = 60)
 
   ## The training set is a subset of the pool, so a configuration or an
   ## outcome chosen for the library would ride into it.
@@ -216,7 +216,7 @@ test_that("select_training() refuses a configured pool and says to use it before
 
 test_that("select_training() refuses a pool whose validation failed or that carries a removal record", {
 
-  fx <- make_select_fixture(n_pool = 60)
+  fx <- select_fixture(n_pool = 60)
 
   failed <- fx$pool
   failed$validation$passed <- FALSE
@@ -236,7 +236,7 @@ test_that("select_training() refuses a pool whose validation failed or that carr
 
 test_that("select_training() refuses targets that fail the base contract", {
 
-  fx <- make_select_fixture(n_pool = 60)
+  fx <- select_fixture(n_pool = 60)
 
   ## Replicate scans sharing an id: the record names targets by sample_id,
   ## so they would be merged there.
@@ -269,7 +269,7 @@ test_that("select_training() refuses targets that fail the base contract", {
 
 test_that("select_training() refuses a pool that fails the base contract", {
 
-  fx <- make_select_fixture(n_pool = 60)
+  fx <- select_fixture(n_pool = 60)
 
   broken <- fx$pool
   broken$data$analysis$wn_4000[3] <- Inf
@@ -284,7 +284,7 @@ test_that("select_training() refuses a pool that fails the base contract", {
 
 test_that("select_training() refuses a pool that is itself a selection", {
 
-  fx    <- make_select_fixture(n_pool = 60)
+  fx    <- select_fixture(n_pool = 60)
   prior <- quiet_select(fx, k = 5, properties = "clay")
 
   ## The provenance columns would collide under bind_cols and then surface as
@@ -300,7 +300,7 @@ test_that("select_training() warns when pool and targets are in different units"
   ## Arrange: the same targets scaled by 100, the fractional-against-percent
   ## absorbance mismatch. SNV removes exactly this, so the resemblance check
   ## downstream is structurally blind to it.
-  fx <- make_select_fixture(n_pool = 60, target_scale = 100)
+  fx <- select_fixture(n_pool = 60, target_scale = 100)
 
   expect_warning(out <- select_training(fx$targets, fx$pool, k = 5, verbose = FALSE),
                  regexp = "photometric units", class = "horizons_select_warning")
@@ -312,7 +312,7 @@ test_that("select_training() warns when pool and targets are in different units"
   ## The same fixture in its own units does not warn. Its spectra carry a
   ## per-sample baseline offset straddling zero, so the pooled median's sign
   ## is a coin flip; only the scale is load-bearing here.
-  same <- make_select_fixture(n_pool = 60)
+  same <- select_fixture(n_pool = 60)
   u_ok <- suppressWarnings(select_training(same$targets, same$pool, k = 5,
                                            verbose = FALSE))$selection$units
 
@@ -331,7 +331,7 @@ test_that("the unit check catches a log-base difference and lets an instrument g
 
   ## One matrix against a scaled copy of itself, so the fold difference is
   ## the scale factor and nothing else.
-  fx <- make_select_fixture(n_pool = 30)
+  fx <- select_fixture(n_pool = 30)
   M  <- predictor_matrix(fx$pool)$matrix
 
   expect_true(check_photometric_units(M,  M * 100)$mismatch)
@@ -344,7 +344,7 @@ test_that("the unit check catches a log-base difference and lets an instrument g
   expect_true(check_photometric_units(M,  M * 1.5, ratio = 1.2)$mismatch)
 
   ## And the verb warns on a log-base mismatch end to end
-  log_base <- make_select_fixture(n_pool = 30, target_scale = 2.303)
+  log_base <- select_fixture(n_pool = 30, target_scale = 2.303)
 
   expect_warning(select_training(log_base$targets, log_base$pool, k = 5, verbose = FALSE),
                  regexp = "photometric units", class = "horizons_select_warning")
@@ -356,7 +356,7 @@ test_that("the resemblance check is seeded and leaves the caller's RNG alone", {
 
   ## Arrange: a pool over the 2,000-row reference cap would be slow to build,
   ## so exercise the helper directly on a pool that is over it.
-  fx <- make_select_fixture(n_pool = 60)
+  fx <- select_fixture(n_pool = 60)
   rc <- reconcile_axes(fx$pool, fx$targets)
   tm <- predictor_matrix(fx$targets)
   sp <- build_similarity_space(rc$matrix, rc$wavenumbers, ncomp = 4L)
@@ -393,7 +393,7 @@ test_that("the resemblance check is seeded and leaves the caller's RNG alone", {
 test_that("a draw that cannot reach k is recorded and warned about once", {
 
   ## Arrange: k equal to the measured rows leaves no spare to replace a twin.
-  fx <- make_select_fixture(n_pool = 60)
+  fx <- select_fixture(n_pool = 60)
   k  <- 60L
 
   expect_warning(out <- select_training(fx$targets, fx$pool, k = k, properties = "clay",
@@ -420,7 +420,7 @@ test_that("a draw that cannot reach k is recorded and warned about once", {
 
 test_that("scope = 'global' returns every pool row on the targets' grid", {
 
-  fx  <- make_select_fixture(n_pool = 60)
+  fx  <- select_fixture(n_pool = 60)
   out <- quiet_select(fx, scope = "global")
 
   expect_s3_class(out, "horizons_data")
@@ -447,7 +447,7 @@ test_that("scope = 'global' returns every pool row on the targets' grid", {
 
 test_that("scope = 'batch' draws k per target per property into one training set", {
 
-  fx  <- make_select_fixture(n_pool = 100)
+  fx  <- select_fixture(n_pool = 100)
   out <- quiet_select(fx, k = 10)
 
   m <- out$selection$membership
@@ -469,7 +469,7 @@ test_that("scope = 'batch' draws k per target per property into one training set
 
 test_that("provenance columns are meta and agree with the membership", {
 
-  fx  <- make_select_fixture(n_pool = 100)
+  fx  <- select_fixture(n_pool = 100)
   out <- quiet_select(fx, k = 10)
 
   rm <- out$data$role_map
@@ -491,7 +491,7 @@ test_that("provenance columns are meta and agree with the membership", {
 
 test_that("the return keeps every pool response and carries no similarity columns", {
 
-  fx  <- make_select_fixture(n_pool = 100)
+  fx  <- select_fixture(n_pool = 100)
   out <- quiet_select(fx, k = 10, properties = "clay")
 
   expect_true(all(c("clay", "oc") %in% names(out$data$analysis)))
@@ -507,7 +507,7 @@ test_that("the return keeps every pool response and carries no similarity column
 
 test_that("the sparse property draws k rows that all have it measured", {
 
-  fx  <- make_select_fixture(n_pool = 100)
+  fx  <- select_fixture(n_pool = 100)
   out <- quiet_select(fx, k = 10, properties = "oc")
 
   m  <- out$selection$membership
@@ -524,7 +524,7 @@ test_that("the sparse property draws k rows that all have it measured", {
 
 test_that("a named k is honoured per property", {
 
-  fx  <- make_select_fixture(n_pool = 100)
+  fx  <- select_fixture(n_pool = 100)
   out <- quiet_select(fx, k = c(clay = 12, oc = 6))
 
   m <- out$selection$membership
@@ -537,7 +537,7 @@ test_that("a named k is honoured per property", {
 
 test_that("the twin is excluded from its target's rows, reported, and out of the union", {
 
-  fx  <- make_select_fixture(n_pool = 100)
+  fx  <- select_fixture(n_pool = 100)
   out <- quiet_select(fx, k = 10, properties = "clay")
 
   m    <- out$selection$membership
@@ -569,7 +569,7 @@ test_that("a replicate cluster is excluded entirely and absent from the union", 
   ## Arrange: three replicate scans of the twinned pool row. Under the old
   ## first-to-second-nearest gap rule none of these was flagged, because
   ## every replicate distance is tiny and no gap opens.
-  fx  <- make_select_fixture(n_pool = 100, seed = 3, n_replicates = 3)
+  fx  <- select_fixture(n_pool = 100, seed = 3, n_replicates = 3)
   out <- quiet_select(fx, k = 10, properties = "clay")
 
   self <- c(fx$twin_pool_id, fx$replicate_pool_ids)
@@ -592,7 +592,7 @@ test_that("a replicate cluster is excluded entirely and absent from the union", 
 
 test_that("scope = 'cluster' subtracts twins from the union too", {
 
-  fx  <- make_select_fixture(n_pool = 100, seed = 3, n_replicates = 3)
+  fx  <- select_fixture(n_pool = 100, seed = 3, n_replicates = 3)
   out <- quiet_select(fx, k = 10, scope = "cluster", cluster_min = 2, properties = "clay")
 
   self <- c(fx$twin_pool_id, fx$replicate_pool_ids)
@@ -613,7 +613,7 @@ test_that("scope = 'sample' subtracts the twins from the returned object too", {
   ## twins in it under sample would train the default pipeline on every
   ## target's own replicates.
 
-  fx  <- make_select_fixture(n_pool = 100, seed = 3, n_replicates = 3)
+  fx  <- select_fixture(n_pool = 100, seed = 3, n_replicates = 3)
   out <- quiet_select(fx, k = 10, scope = "sample", properties = "clay")
 
   self <- c(fx$twin_pool_id, fx$replicate_pool_ids)
@@ -637,7 +637,7 @@ test_that("membership keeps the subtracted twins, marked retained = FALSE", {
   ## rather than marked would take the evidence with it the first time
   ## anything filters the object's rows.
 
-  fx  <- make_select_fixture(n_pool = 100, seed = 3, n_replicates = 3)
+  fx  <- select_fixture(n_pool = 100, seed = 3, n_replicates = 3)
   out <- quiet_select(fx, k = 10, properties = "clay")
 
   m    <- out$selection$membership
@@ -659,7 +659,7 @@ test_that("membership keeps the subtracted twins, marked retained = FALSE", {
 
 test_that("scope = 'global' runs the twin check, reports it, and keeps the rows", {
 
-  fx  <- make_select_fixture(n_pool = 60, seed = 3, n_replicates = 3)
+  fx  <- select_fixture(n_pool = 60, seed = 3, n_replicates = 3)
   out <- quiet_select(fx, k = 10, scope = "global")
 
   self <- c(fx$twin_pool_id, fx$replicate_pool_ids)
@@ -688,7 +688,7 @@ test_that("scope = 'global' records mean_k as the mean of k, not the nearest aga
   ## the first column, so mean_k equalled nearest and the applicability
   ## signal the control arm reports was not the one batch reports.
 
-  fx <- make_select_fixture(n_pool = 60, seed = 3)
+  fx <- select_fixture(n_pool = 60, seed = 3)
 
   g <- quiet_select(fx, k = 10, scope = "global", properties = "clay")$selection$target_distances
   b <- quiet_select(fx, k = 10, scope = "batch",  properties = "clay")$selection$target_distances
@@ -712,7 +712,7 @@ test_that("scope = 'global' records the exclusions batch records, under the same
   ## take max(k, 50) with no cap, a wider reference and so a looser rule,
   ## which at twin_ratio = 0.4 flagged three rows batch does not (#72).
 
-  fx <- make_select_fixture(n_pool = 60, seed = 3, n_replicates = 3)
+  fx <- select_fixture(n_pool = 60, seed = 3, n_replicates = 3)
 
   for (ratio in c(SELECT_TWIN_RATIO, 0.4)) {
 
@@ -742,7 +742,7 @@ test_that("at k = 1 batch and global record every twin in the measured pool", {
   ## where the fetch is narrowest: the reference width, 15 of the 63 rows for
   ## clay and 8 of the 32 for oc.
 
-  fx <- make_select_fixture(n_pool = 60, seed = 3, n_replicates = 3)
+  fx <- select_fixture(n_pool = 60, seed = 3, n_replicates = 3)
   rc <- reconcile_axes(fx$pool, fx$targets)
   tm <- predictor_matrix(fx$targets)
   sp <- build_similarity_space(rc$matrix, rc$wavenumbers, sdev_floor = SELECT_SDEV_FLOOR)
@@ -790,7 +790,7 @@ test_that("a draw the twin subtraction empties stops with the property and the c
   ## pinned to the one it was built under: 11 points on the targets' 8 cm-1
   ## grid, 80 cm-1 now that the window is a width.
 
-  fx <- make_select_fixture(n_pool = 60, seed = 3, n_replicates = 3)
+  fx <- select_fixture(n_pool = 60, seed = 3, n_replicates = 3)
 
   err <- expect_error(quiet_select(fx, k = 1, metric = "cosine", twin_ratio = 0.99, properties = "clay",
                                    window = 80),
@@ -828,7 +828,7 @@ test_that("a draw emptied by the targets' own copies says so, not twin_ratio", {
   ## another target's copy, at distance zero to rounding, and no twin_ratio
   ## brings it back.
 
-  fx      <- make_select_fixture(n_pool = 60, seed = 3)
+  fx      <- select_fixture(n_pool = 60, seed = 3)
   targets <- pool_as_targets(fx)
 
   err <- expect_error(select_training(targets, fx$pool, k = 1, properties = "clay", verbose = FALSE),
@@ -851,7 +851,7 @@ test_that("a target's own copy is recorded as exact, at distance zero to roundin
   ## the outcome, not the distance. On the replicate fixture's first eight
   ## rows seven copies land above 0 on the reference box.
 
-  fx <- make_select_fixture(n_pool = 60, seed = 3, n_replicates = 3)
+  fx <- select_fixture(n_pool = 60, seed = 3, n_replicates = 3)
 
   for (rows in list(NULL, 1:8)) {
 
@@ -879,7 +879,7 @@ test_that("a property with no measured pool row stops every scope", {
 
   ## Global used to skip such a property; batch failed inside the draw.
 
-  fx <- make_select_fixture(n_pool = 60)
+  fx <- select_fixture(n_pool = 60)
   fx$pool$data$analysis$oc <- NA_real_
 
   for (scope in c("batch", "global")) {
@@ -894,7 +894,7 @@ test_that("a property with no measured pool row stops every scope", {
 
 test_that("scope = 'global' records each exclusion with its property, on that property's rows", {
 
-  fx  <- make_select_fixture(n_pool = 60, seed = 3, n_replicates = 3)
+  fx  <- select_fixture(n_pool = 60, seed = 3, n_replicates = 3)
   out <- quiet_select(fx, k = 10, scope = "global")
 
   ex   <- out$selection$exclusions
@@ -944,7 +944,7 @@ test_that("report_selection() prints a record with missing tables rather than er
 
 test_that("the record carries settings, reconciliation, pool identity and distances", {
 
-  fx  <- make_select_fixture(n_pool = 100)
+  fx  <- select_fixture(n_pool = 100)
   out <- quiet_select(fx, k = 10)
 
   s <- out$selection
@@ -965,7 +965,7 @@ test_that("the record carries settings, reconciliation, pool identity and distan
 
 test_that("the record carries the targets' source, size and id hash", {
 
-  fx <- make_select_fixture(n_pool = 60)
+  fx <- select_fixture(n_pool = 60)
   fx$targets$provenance$spectra_source <- "batch_07.csv"
 
   out <- quiet_select(fx, k = 5)
@@ -1000,7 +1000,7 @@ test_that("the record carries the targets' source, size and id hash", {
 
 test_that("a pool resampled onto the targets' grid records that grid, and the pool's (#90)", {
 
-  fx <- make_select_fixture(n_pool = 100)
+  fx <- select_fixture(n_pool = 100)
 
   utils::capture.output({
     pool    <- standardize(fx$pool,    resample = 4, trim = c(600, 4000))
@@ -1045,7 +1045,7 @@ test_that("a pool resampled onto the targets' grid records that grid, and the po
 
 test_that("a pool already on the targets' grid keeps its standardization record (#90)", {
 
-  fx <- make_select_fixture(n_pool = 100)
+  fx <- select_fixture(n_pool = 100)
 
   utils::capture.output({
     pool    <- standardize(fx$pool,    resample = 8, trim = c(600, 4000))
@@ -1062,7 +1062,7 @@ test_that("a pool already on the targets' grid keeps its standardization record 
 
 test_that("targets with no grid record give the resampled pool a NULL grid, and an unstandardized pool no record (#90)", {
 
-  fx <- make_select_fixture(n_pool = 100)
+  fx <- select_fixture(n_pool = 100)
 
   ## The targets' axis is the 8 cm-1 lattice, but resample = NULL records
   ## no grid for it, so there is none to copy
@@ -1086,7 +1086,7 @@ test_that("targets with no grid record give the resampled pool a NULL grid, and 
 
 test_that("targets on an instrument's own axis give the resampled pool a NULL grid, and the clamp (#90)", {
 
-  fx <- make_select_fixture(n_pool = 100)
+  fx <- select_fixture(n_pool = 100)
 
   ## Off-grid, 599.74 + 1.93 k: on no canonical grid, and starting 0.26
   ## cm-1 below the pool's 600, inside half its 4 cm-1 spacing, so the lowest
@@ -1141,7 +1141,7 @@ test_that("targets on an instrument's own axis give the resampled pool a NULL gr
 
 test_that("the record carries the SG window in cm-1 and the space's floor", {
 
-  fx  <- make_select_fixture(n_pool = 100)
+  fx  <- select_fixture(n_pool = 100)
   out <- suppressWarnings(quiet_select(fx, k = 10))
 
   s <- out$selection$settings
@@ -1180,7 +1180,7 @@ test_that("the record carries the SG window in cm-1 and the space's floor", {
 
 test_that("a PLS space records and prints that it selected on the pool's own responses", {
 
-  fx  <- make_select_fixture(n_pool = 100)
+  fx  <- select_fixture(n_pool = 100)
   out <- quiet_select(fx, k = 10, properties = "clay", space = "pls", ncomp = 3L)
 
   note <- out$selection$settings$space_note
@@ -1202,7 +1202,7 @@ test_that("the return validates and runs through the ordinary chain", {
 
   skip_on_cran()
 
-  fx  <- make_select_fixture(n_pool = 300)
+  fx  <- select_fixture(n_pool = 300)
   out <- quiet_select(fx, k = 30, properties = "clay")
 
   expect_no_error(validate_horizons_data(out))
@@ -1246,7 +1246,7 @@ test_that("the return validates and runs through the ordinary chain", {
 
 test_that("scope = 'cluster' yields one group per target cluster", {
 
-  fx  <- make_select_fixture(n_pool = 100)
+  fx  <- select_fixture(n_pool = 100)
   out <- quiet_select(fx, k = 10, scope = "cluster", cluster_min = 2)
 
   g <- out$selection$groups
@@ -1274,7 +1274,7 @@ test_that("scope = 'cluster' yields one group per target cluster", {
 
 test_that("scope = 'cluster' falls back to one group below the floor, through the tree", {
 
-  fx <- make_select_fixture(n_pool = 100)
+  fx <- select_fixture(n_pool = 100)
 
   ## The fallback goes through the verb's own console layer, so it obeys
   ## verbose. Routing it through cli made select_training(verbose = FALSE)
@@ -1299,7 +1299,7 @@ test_that("scope = 'cluster' falls back to one group below the floor, through th
 
 test_that("scope = 'sample' gives one group per target over the same union", {
 
-  fx    <- make_select_fixture(n_pool = 100)
+  fx    <- select_fixture(n_pool = 100)
   batch <- quiet_select(fx, k = 10)
   samp  <- quiet_select(fx, k = 10, scope = "sample")
 
@@ -1326,7 +1326,7 @@ test_that("scope = 'sample' gives one group per target over the same union", {
 
 test_that("metric and space levers change which rows are drawn", {
 
-  fx <- make_select_fixture(n_pool = 100)
+  fx <- select_fixture(n_pool = 100)
 
   base <- quiet_select(fx, k = 10, properties = "clay")
   maha <- quiet_select(fx, k = 10, properties = "clay", metric = "mahalanobis")
@@ -1349,7 +1349,7 @@ test_that("the space is always the library's: space_rows is gone", {
   ## A space per property on its measured rows was removed on 2026-09-30:
   ## on KSSL it moved the drawn training set by about 6 %.
 
-  fx  <- make_select_fixture(n_pool = 60)
+  fx  <- select_fixture(n_pool = 60)
   out <- quiet_select(fx, k = 5)
 
   expect_null(out$selection$settings$space_rows)
@@ -1365,7 +1365,7 @@ test_that("the space is always the library's: space_rows is gone", {
 
 test_that("verbose = FALSE prints nothing", {
 
-  fx <- make_select_fixture(n_pool = 60)
+  fx <- select_fixture(n_pool = 60)
 
   expect_silent(select_training(fx$targets, fx$pool, k = 5, verbose = FALSE))
 
@@ -1374,7 +1374,7 @@ test_that("verbose = FALSE prints nothing", {
 
 test_that("verbose = TRUE reports the pool, the space and the draw", {
 
-  fx  <- make_select_fixture(n_pool = 60)
+  fx  <- select_fixture(n_pool = 60)
   txt <- utils::capture.output(out <- select_training(fx$targets, fx$pool, k = 5))
 
   expect_true(any(grepl("Selecting", txt)))
@@ -1406,7 +1406,7 @@ test_that("permuting the pool's responses collapses the evaluated CV", {
 
   skip_on_cran()
 
-  fx      <- make_select_fixture(n_pool = 300)
+  fx      <- select_fixture(n_pool = 300)
   fx$pool <- learnable_clay_pool(fx$pool)
 
   cv_rpd <- function(pool) {
@@ -1453,7 +1453,7 @@ test_that("permuting the pool's responses collapses the evaluated CV", {
 
 test_that("print() shows a Selection section", {
 
-  fx  <- make_select_fixture(n_pool = 60)
+  fx  <- select_fixture(n_pool = 60)
   out <- quiet_select(fx, k = 5)
   txt <- utils::capture.output(print(out))
 
@@ -1470,7 +1470,7 @@ test_that("print() shows a Selection section", {
 
 test_that("select_training() refuses to bind the provenance columns to reordered rows", {
 
-  fx               <- make_select_fixture(n_pool = 60)
+  fx               <- select_fixture(n_pool = 60)
   real_subset_rows <- subset_rows
 
   ## A subset that returned the drawn rows out of keep order would put each
@@ -1487,7 +1487,7 @@ test_that("select_training() refuses to bind the provenance columns to reordered
 
 test_that("rebuild_predictors() refuses a matrix whose rows are not the analysis rows", {
 
-  fx <- make_select_fixture(n_pool = 60)
+  fx <- select_fixture(n_pool = 60)
   pm <- predictor_matrix(fx$pool)
   n  <- nrow(pm$matrix)
 
