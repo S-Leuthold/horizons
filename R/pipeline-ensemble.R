@@ -33,6 +33,11 @@
 #' `horizons_input_error` before fitting anything when an observed outcome
 #' lies outside it (#76).
 #'
+#' After the outcome-range check and before it fits anything, `ensemble()`
+#' checks that `x` still holds what a fitted object promises (its data,
+#' evaluation and fitted models), and aborts with class
+#' `horizons_validation_error` when it does not.
+#'
 #' @param x A `horizons_fit` object (output of [fit()]).
 #' @param method Character. Meta-learner to use: `"penalized"` (default),
 #'   `"weighted"`, or `"xgb"`.
@@ -113,6 +118,12 @@ ensemble <- function(x,
     ))
 
   }
+
+  ## The fit contract, and through it the evaluation and base contracts at
+  ## the full stage, before anything is gathered or trained. As in fit(), the
+  ## argument and outcome-range checks come first, so an outcome outside the
+  ## range is reported as such rather than as the response bound it breaks.
+  x <- validate_horizons_fit(x)
 
   ## -------------------------------------------------------------------------
   ## Step 0b: Parallel backend

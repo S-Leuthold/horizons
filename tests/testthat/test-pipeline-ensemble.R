@@ -238,6 +238,42 @@ describe("ensemble() - preflight validation", {
 
   })
 
+  it("refuses a fitted object that breaks its contract, before fitting (#129)", {
+
+    ## ensemble() used to check only the class and the outcome range, so
+    ## each of these reached the meta-learner.
+
+    ## The base contract: the id role moved off sample_id
+    off_id <- fitted
+    rm     <- off_id$data$role_map
+    rm$role[rm$variable == "sample_id"] <- "meta"
+    rm$role[rm$variable == "project"]   <- "id"
+    off_id$data$role_map <- rm
+
+    expect_error(
+      suppressMessages(capture.output(
+        ensemble(off_id, method = "weighted", optimize = FALSE,
+                 compute_uq = FALSE, verbose = FALSE)
+      )),
+      "must be on sample_id",
+      class = "horizons_validation_error"
+    )
+
+    ## The fit contract: a models slot missing a key
+    no_ad <- fitted
+    no_ad$models$ad <- NULL
+
+    expect_error(
+      suppressMessages(capture.output(
+        ensemble(no_ad, method = "weighted", optimize = FALSE,
+                 compute_uq = FALSE, verbose = FALSE)
+      )),
+      "missing from models: ad",
+      class = "horizons_validation_error"
+    )
+
+  })
+
 })
 
 describe("ensemble() - predict namespaces", {

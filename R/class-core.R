@@ -316,8 +316,9 @@ new_horizons_data <- function(analysis       = NULL,
 #' **Validation checks performed:**
 #'
 #' 1. **Pairing**: If `analysis` exists, `role_map` must also exist (and vice
-#'    versa). This is a gate check — failure here aborts immediately since
-#'    subsequent checks depend on both being present.
+#'    versa). This is a gate check — failure here aborts immediately, with
+#'    class `horizons_validation_error`, since subsequent checks depend on
+#'    both being present.
 #'
 #' 2. **sample_id presence**: The column must exist in `analysis`. Always an
 #'    error, in both stages.
@@ -361,8 +362,11 @@ new_horizons_data <- function(analysis       = NULL,
 #'    `build_recipe()`'s `outcome ~ .` as an unintended predictor. Always
 #'    checked.
 #'
-#' 9. **Single id role**: Exactly one variable must have role = "id".
-#'    Zero or multiple id roles both fail.
+#' 9. **Single id role, on `sample_id`**: Exactly one variable must have
+#'    role = "id", and it must be `sample_id`. Zero or multiple id roles
+#'    both fail, as does an id role on any other column: the recipe, `fit()`
+#'    and `predict()` find the id column by role, while this validator and
+#'    the row writers read `sample_id` by name.
 #'
 #' 10. **Role vocabulary**: Every role is one of `id`, `predictor`,
 #'     `covariate`, `outcome`, `response`, `meta`. A typo'd role makes a
@@ -436,13 +440,15 @@ validate_horizons_data <- function(x, stage = c("full", "raw"), warn_ids = TRUE)
 
   if (has_analysis && !has_role_map) {
 
-    cli::cli_abort("Object has {.field analysis} but no {.field role_map}")
+    cli::cli_abort("Object has {.field analysis} but no {.field role_map}",
+                   class = "horizons_validation_error")
 
   }
 
   if (has_role_map && !has_analysis) {
 
-    cli::cli_abort("Object has {.field role_map} but no {.field analysis}")
+    cli::cli_abort("Object has {.field role_map} but no {.field analysis}",
+                   class = "horizons_validation_error")
 
   }
 
@@ -683,6 +689,20 @@ validate_horizons_data <- function(x, stage = c("full", "raw"), warn_ids = TRUE)
   } else if (n_id_roles > 1) {
 
     errors <- c(errors, cli::format_inline("Multiple {.field id} roles in {.field role_map} (exactly one required)"))
+
+  } else {
+
+    ## The recipe, fit() and predict() find the id column by its role; this
+    ## validator, the row writers and the joins read it by name. Requiring
+    ## the role to sit on sample_id is what makes the two the same column.
+
+    id_var <- role_map$variable[role_map$role == "id"]
+
+    if (!isTRUE(id_var == "sample_id")) {
+
+      errors <- c(errors, cli::format_inline("The {.field id} role is on {.field {id_var}}; it must be on {.field sample_id}"))
+
+    }
 
   }
 
@@ -1168,11 +1188,16 @@ contract_keys <- function(slot) {
 #' field list and the per-method `$model` table). Called once at the end of
 #' [ensemble()] so every returned object is certified; all checks are
 #' structural (types, columns, key sets) — nothing predicts, so the cost is
-#' microseconds.
+#' the base validator's one pass over the table.
 #'
 #' @details
-#' Gate checks (abort immediately): the object inherits `horizons_ensemble`,
-#' `$ensemble` is a list, and `$ensemble$method` is present.
+#' Gate checks (abort immediately, with class `horizons_validation_error`):
+#' the object inherits `horizons_ensemble`, `$ensemble` is a list, and
+#' `$ensemble$method` is present.
+#'
+#' A `horizons_ensemble` is also a `horizons_fit`, so after the gates this
+#' delegates to [validate_horizons_fit()], which runs the evaluation and base
+#' validators in turn; the parent slots must still hold.
 #'
 #' Accumulated checks (reported together, tree-style):
 #'
@@ -1218,21 +1243,28 @@ validate_horizons_ensemble <- function(x) {
 
   if (!inherits(x, "horizons_ensemble")) {
 
-    cli::cli_abort("{.arg x} must be a {.cls horizons_ensemble} object")
+    cli::cli_abort("{.arg x} must be a {.cls horizons_ensemble} object",
+                   class = "horizons_validation_error")
 
   }
 
   if (!is.list(x$ensemble)) {
 
-    cli::cli_abort("Object has no {.field ensemble} slot to validate")
+    cli::cli_abort("Object has no {.field ensemble} slot to validate",
+                   class = "horizons_validation_error")
 
   }
 
   if (is.null(x$ensemble$method)) {
 
-    cli::cli_abort("The {.field ensemble} slot carries no {.field method}")
+    cli::cli_abort("The {.field ensemble} slot carries no {.field method}",
+                   class = "horizons_validation_error")
 
   }
+
+  ## The fit contract is inherited, and through it the evaluation and base
+  ## contracts: enforce them first, so a bad parent slot surfaces here.
+  x <- validate_horizons_fit(x)
 
   ## ---------------------------------------------------------------------------
   ## Collect errors for remaining checks
@@ -1511,11 +1543,16 @@ validate_horizons_ensemble <- function(x) {
 #' the end of [evaluate()] so every promoted `horizons_eval` is certified
 #' against invariant I5 (`evaluation$results` complete; `best_config` is a
 #' real config). All checks are structural (types, columns, key membership) —
-#' nothing refits, so the cost is microseconds.
+#' nothing refits, so the cost is the base validator's one pass over the
+#' table.
 #'
 #' @details
-#' Gate checks (abort immediately): the object inherits `horizons_eval` and
-#' `$evaluation` is a list.
+#' Gate checks (abort immediately, with class `horizons_validation_error`):
+#' the object inherits `horizons_eval` and `$evaluation` is a list.
+#'
+#' A `horizons_eval` is also a `horizons_data`, so after the gates this
+#' delegates to [validate_horizons_data()] at `stage = "full"`; the base
+#' contract must still hold.
 #'
 #' Accumulated checks (reported together, tree-style):
 #'
@@ -1542,7 +1579,10 @@ validate_horizons_ensemble <- function(x) {
 #'    whenever rows were trimmed, since the degradation check reads them.
 #' 2. **results**: data frame carrying `config_id`, `status`, and the six
 #'    metric columns (`rmse`, `rrmse`, `rsq`, `ccc`, `rpd`, `mae`); at least
-#'    one row; `config_id` values unique.
+#'    one row; `config_id` values unique; and, when `x$config$configs` is
+#'    set, `config_id` set-equal to its `config_id`. Failed, pruned and
+#'    not-evaluated configs keep their rows, so a config with no row was
+#'    lost, and a row with no config describes a config that isn't there.
 #' 3. **best_config** (I5): a length-1 character present in
 #'    `results$config_id` — and, when the config table is reachable at
 #'    `x$config$configs$config_id`, present there too.
@@ -1568,22 +1608,29 @@ validate_horizons_eval <- function(x) {
 
   if (!inherits(x, "horizons_eval")) {
 
-    cli::cli_abort("{.arg x} must be a {.cls horizons_eval} object")
+    cli::cli_abort("{.arg x} must be a {.cls horizons_eval} object",
+                   class = "horizons_validation_error")
 
   }
 
   if (!is.list(x$evaluation)) {
 
-    cli::cli_abort("Object has no {.field evaluation} slot to validate")
+    cli::cli_abort("Object has no {.field evaluation} slot to validate",
+                   class = "horizons_validation_error")
 
   }
+
+  ## The base contract is inherited: enforce it first, at the full stage,
+  ## so a bad data slot surfaces here.
+  x <- validate_horizons_data(x)
 
   ## ---------------------------------------------------------------------------
   ## Collect errors for remaining checks
   ## ---------------------------------------------------------------------------
 
-  errors <- character()
-  ev     <- x$evaluation
+  errors  <- character()
+  ev      <- x$evaluation
+  cfg_ids <- x$config$configs$config_id
 
   ## Slot completeness ----------------------------------------------------------
 
@@ -1598,8 +1645,9 @@ validate_horizons_eval <- function(x) {
 
   ## parallelize_over / workers (run provenance, 2026-09-15) ------------------
   ## Tolerated when ABSENT, so objects evaluated before these slots existed
-  ## still fit (the same rule I7b applies to response_bound). When the key is
+  ## still fit (the same rule I7b applies to response_bound). When a key is
   ## present it must be valid: a present-but-NULL parallelize_over fails.
+  ## Each key is checked on its own presence.
 
   if ("parallelize_over" %in% names(ev)) {
 
@@ -1614,21 +1662,22 @@ validate_horizons_eval <- function(x) {
 
     }
 
-    ## Under the new contract `workers` is the count the registered plan
-    ## offered (observed): a single positive whole number, or NA when the
-    ## backend reported an unbounded count.
-    if ("workers" %in% names(ev)) {
+  }
 
-      w <- ev$workers
+  ## `workers` is the count the registered plan offered (observed): a single
+  ## positive whole number, or NA when the backend reported an unbounded
+  ## count.
 
-      if (!is.numeric(w) || length(w) != 1 ||
-          (!is.na(w) && (w < 1 || w != as.integer(w)))) {
+  if ("workers" %in% names(ev)) {
 
-        errors <- c(errors, cli::format_inline(
-          "{.field workers} must be a single positive whole number (or NA for an unbounded backend)"
-        ))
+    w <- ev$workers
 
-      }
+    if (!is.numeric(w) || length(w) != 1 ||
+        (!is.na(w) && (w < 1 || w != as.integer(w)))) {
+
+      errors <- c(errors, cli::format_inline(
+        "{.field workers} must be a single positive whole number (or NA for an unbounded backend)"
+      ))
 
     }
 
@@ -1725,6 +1774,44 @@ validate_horizons_eval <- function(x) {
 
   }
 
+  ## results cover the config table exactly -------------------------------------
+  ## Failed, pruned and not-evaluated configs keep their rows with a status, so
+  ## a config with no row was lost, and a row with no config describes one the
+  ## table no longer holds. Ids are listed five at a time: a lost batch of a
+  ## large grid would otherwise flood the report.
+
+  if (res_valid && !is.null(x$config$configs) &&
+      !setequal(res$config_id, cfg_ids)) {
+
+    show_ids <- function(ids) {
+
+      shown <- paste(utils::head(ids, 5), collapse = ", ")
+
+      if (length(ids) > 5) paste0(shown, ", and ", length(ids) - 5, " more") else shown
+
+    }
+
+    lost    <- setdiff(cfg_ids, res$config_id)
+    foreign <- setdiff(res$config_id, cfg_ids)
+
+    if (length(lost) > 0) {
+
+      errors <- c(errors, cli::format_inline(
+        "{cli::qty(length(lost))}Config{?s} in {.field config$configs} with no row in {.field results}: {show_ids(lost)}"
+      ))
+
+    }
+
+    if (length(foreign) > 0) {
+
+      errors <- c(errors, cli::format_inline(
+        "{cli::qty(length(foreign))}{.field results} row{?s} for config{?s} not in {.field config$configs}: {show_ids(foreign)}"
+      ))
+
+    }
+
+  }
+
   ## best_config (I5: names a real config) --------------------------------------
 
   bc <- ev$best_config
@@ -1744,8 +1831,6 @@ validate_horizons_eval <- function(x) {
     ## Cross-check against the config catalog when it is reachable — a
     ## best_config that names no defined config means the ranking pointed at a
     ## row that the config table never held.
-    cfg_ids <- x$config$configs$config_id
-
     if (!is.null(cfg_ids) && !bc %in% cfg_ids) {
 
       errors <- c(errors, cli::format_inline("{.field best_config} ({bc}) is not present in {.field config$configs$config_id}"))
@@ -1838,15 +1923,18 @@ validate_horizons_eval <- function(x) {
 #' promoted `horizons_fit` is certified against invariants I6 (workflow keys
 #' are a subset of config ids) and I7 (UQ keys are a subset of workflow
 #' keys), plus the `response_bound` guardrail contract the winsorization work
-#' introduced. All checks are structural — nothing predicts — so the cost is
-#' microseconds.
+#' introduced; [ensemble()] calls it on entry, and
+#' [validate_horizons_ensemble()] runs it first. All checks are structural —
+#' nothing predicts — so the cost is the base validator's one pass over the
+#' table.
 #'
 #' @details
-#' A `horizons_fit` is also a `horizons_eval`, so this first delegates to
-#' [validate_horizons_eval()]; the evaluation slot must still hold.
+#' A `horizons_fit` is also a `horizons_eval`, so after the gates this
+#' delegates to [validate_horizons_eval()], which runs the base validator in
+#' turn; the evaluation and data slots must still hold.
 #'
-#' Gate checks (abort immediately): the object inherits `horizons_fit` and
-#' `$models` is a list.
+#' Gate checks (abort immediately, with class `horizons_validation_error`):
+#' the object inherits `horizons_fit` and `$models` is a list.
 #'
 #' Accumulated checks (reported together, tree-style):
 #'
@@ -1895,18 +1983,21 @@ validate_horizons_fit <- function(x) {
 
   if (!inherits(x, "horizons_fit")) {
 
-    cli::cli_abort("{.arg x} must be a {.cls horizons_fit} object")
+    cli::cli_abort("{.arg x} must be a {.cls horizons_fit} object",
+                   class = "horizons_validation_error")
 
   }
 
   if (!is.list(x$models)) {
 
-    cli::cli_abort("Object has no {.field models} slot to validate")
+    cli::cli_abort("Object has no {.field models} slot to validate",
+                   class = "horizons_validation_error")
 
   }
 
-  ## The evaluation contract is inherited — enforce it first. It aborts with
-  ## the same condition class on failure, so a bad parent slot surfaces here.
+  ## The evaluation contract is inherited, and through it the base contract —
+  ## enforce them first. They abort with the same condition class on failure,
+  ## so a bad parent slot surfaces here.
   x <- validate_horizons_eval(x)
 
   ## ---------------------------------------------------------------------------

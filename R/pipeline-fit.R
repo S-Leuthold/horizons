@@ -224,12 +224,12 @@ fit <- function(x,
 
   }
 
-  ## validate_horizons_fit() (at return) checks the models slot, not the base
-  ## data contract, so a column added after configure() without a role_map
-  ## entry reached build_recipe()'s `outcome ~ .` as an unregistered
-  ## predictor, undetected, until this call closed that gap (#24). Full
-  ## stage: an object this far into the pipeline is expected to have unique,
-  ## non-NA sample ids.
+  ## validate_horizons_fit() (at return) runs the base validator too, but
+  ## only after every model is fitted. Checking here refuses a malformed
+  ## table first: a column added after configure() without a role_map entry
+  ## would otherwise reach build_recipe()'s `outcome ~ .` as an unregistered
+  ## predictor (#24). Full stage: an object this far into the pipeline is
+  ## expected to have unique, non-NA sample ids.
 
   x <- validate_horizons_data(x)
 
