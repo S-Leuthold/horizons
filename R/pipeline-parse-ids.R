@@ -70,6 +70,11 @@ SAMPLEID_VARIANTS <- c("sampleid", "sample_id", "SampleID", "Sample_ID", "sample
 #' [spectra()]. Use [average()] to collapse the replicates before anything
 #' downstream that requires unique ids.
 #'
+#' **Before modelling only:** `parse_ids()` rewrites `sample_id`, and the
+#' splits and models that [evaluate()], [fit()] and [ensemble()] store are
+#' keyed to it, so an evaluated, fitted or ensembled object is refused. Parse
+#' the ids before `evaluate()`.
+#'
 #' @return The input `horizons_data` object with:
 #'   * `sample_id` updated from the `sampleid` token (if present)
 #'   * New metadata columns added to `data$analysis`
@@ -112,6 +117,12 @@ parse_ids <- function(x,
     ))
 
   }
+
+  ## Refuse a promoted object ------------------------------------------------
+  ## Rewriting sample_id is a row change: evaluation and model splits are
+  ## keyed to the ids this would rewrite.
+
+  check_unpromoted(x, "parse_ids")
 
   ## Warn if not OPUS source -------------------------------------------------
 
@@ -278,7 +289,10 @@ parse_ids <- function(x,
   sampleid_matches  <- which(tolower(extracted_cols) %in% tolower(SAMPLEID_VARIANTS))
   sampleid_col      <- if (length(sampleid_matches) > 0) extracted_cols[sampleid_matches[1]] else NULL
 
-  ## Update sample_id from sampleid token ------------------------------------
+  ## New sample_id from the sampleid token -----------------------------------
+
+  old_sample_id <- x$data$analysis$sample_id
+  new_sample_id <- old_sample_id
 
   if (!is.null(sampleid_col)) {
 
@@ -300,8 +314,6 @@ parse_ids <- function(x,
 
     }
 
-    x$data$analysis$sample_id <- new_sample_id
-
     ## Remove sampleid column from extracted (don't duplicate) ---------------
 
     extracted[[sampleid_col]] <- NULL
@@ -313,9 +325,19 @@ parse_ids <- function(x,
 
     if (n_unmatched > 0 && too_few == "na") {
 
-      x$data$analysis$sample_id[non_matches] <- NA_character_
+      new_sample_id[non_matches] <- NA_character_
 
     }
+
+  }
+
+  ## A sample_id rewrite is a row change, so it goes through set_analysis() --
+
+  if (!identical(new_sample_id, old_sample_id)) {
+
+    analysis           <- x$data$analysis
+    analysis$sample_id <- new_sample_id
+    x                  <- set_analysis(x, analysis)
 
   }
 
@@ -331,49 +353,14 @@ parse_ids <- function(x,
 
   cols_to_add <- setdiff(names(extracted), c(".matched", sampleid_col))
 
+  ## New meta columns sit after filename, ahead of the spectra ---------------
+
   if (length(cols_to_add) > 0) {
 
-    ## Find position after filename column -----------------------------------
-
-    filename_pos <- which(names(x$data$analysis) == "filename")
-
-    ## Add new columns to existing tibble ------------------------------------
-
-    for (col in cols_to_add) {
-
-      x$data$analysis[[col]] <- extracted[[col]]
-
-    }
-
-    ## Reorder columns: before filename, filename, new cols, after filename --
-    ## Using column index selection is more memory-efficient than copying ----
-
-    before_cols <- names(x$data$analysis)[seq_len(filename_pos)]
-
-    if (filename_pos < ncol(x$data$analysis)) {
-
-      after_cols <- setdiff(
-        names(x$data$analysis)[(filename_pos + 1):ncol(x$data$analysis)],
-        cols_to_add
-      )
-
-    } else {
-
-      after_cols <- character(0)
-
-    }
-
-    col_order       <- c(before_cols, cols_to_add, after_cols)
-    x$data$analysis <- x$data$analysis[, col_order, drop = FALSE]
-
-    ## Update role_map -------------------------------------------------------
-
-    new_roles <- tibble::tibble(
-      variable = cols_to_add,
-      role     = rep("meta", length(cols_to_add))
-    )
-
-    x$data$role_map <- dplyr::bind_rows(x$data$role_map, new_roles)
+    x <- add_columns(x,
+                     columns = extracted[, cols_to_add, drop = FALSE],
+                     role    = "meta",
+                     after   = "filename")
 
   }
 
