@@ -274,6 +274,43 @@ describe("ensemble() - preflight validation", {
 
   })
 
+  it("refuses a bad seed or optimize before any engine runs (#130)", {
+
+    ## Both are recorded on the ensemble and must not be NULL there, so a bad
+    ## value is refused on entry rather than by the validator once the
+    ## meta-learner is built.
+    local_mocked_bindings(
+      fit_ensemble_weighted = function(...) stop("fit_ensemble_weighted() was called")
+    )
+
+    bad_seeds <- list(NULL, NA_real_, c(1, 2), "307")
+
+    for (s in bad_seeds) {
+
+      expect_error(
+        ensemble(fitted, method = "weighted", optimize = FALSE, seed = s,
+                 compute_uq = FALSE, verbose = FALSE),
+        "seed",
+        class = "horizons_input_error"
+      )
+
+    }
+
+    bad_optimize <- list(NULL, NA, c(TRUE, FALSE), "yes")
+
+    for (o in bad_optimize) {
+
+      expect_error(
+        ensemble(fitted, method = "weighted", optimize = o,
+                 compute_uq = FALSE, verbose = FALSE),
+        "optimize",
+        class = "horizons_input_error"
+      )
+
+    }
+
+  })
+
 })
 
 describe("ensemble() - predict namespaces", {

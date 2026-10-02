@@ -119,6 +119,28 @@ ensemble <- function(x,
 
   }
 
+  ## Both are recorded on the ensemble, which the validator checks only after
+  ## the meta-learner is built, and fit_ensemble_uq() rebuilds the fold
+  ## models from them; checked here so a bad value is refused before any
+  ## engine runs.
+  if (!rlang::is_bool(optimize)) {
+
+    cli::cli_abort(c(
+      "{.arg optimize} must be TRUE or FALSE.",
+      "x" = "Got {.obj_type_friendly {optimize}}."
+    ), class = "horizons_input_error")
+
+  }
+
+  if (!is.numeric(seed) || length(seed) != 1 || is.na(seed)) {
+
+    cli::cli_abort(c(
+      "{.arg seed} must be a single number.",
+      "x" = "Got {.obj_type_friendly {seed}}."
+    ), class = "horizons_input_error")
+
+  }
+
   ## The fit contract, and through it the evaluation and base contracts at
   ## the full stage, before anything is gathered or trained. As in fit(), the
   ## argument and outcome-range checks come first, so an outcome outside the
