@@ -1263,10 +1263,27 @@ check_training_outcome_variance <- function(train_values, held_out, outcome_col,
   k_other <- sum(n_other)
   where   <- paste(n_other, names(n_other), collapse = ", ")
 
+  ## The remedy depends on where those rows went: a trim or the calibration
+  ## draw can be undone; rows in the test set only come back with more data
+  remedies <- c(
+    if ("trimmed as response outliers" %in% names(n_other)) {
+      c("i" = "To keep the trimmed rows in training, re-run {.fn validate} without {.code remove_outliers = \"response\"}, then {.fn evaluate}.")
+    },
+    if ("in the calibration set" %in% names(n_other)) {
+      c("i" = "To keep the calibration rows in training, fit with {.code compute_uq = FALSE, compute_ad = FALSE}.")
+    }
+  )
+  remedies <- c(remedies, c("i" = if (length(remedies) > 0) {
+    "Otherwise {.field {outcome_col}} needs more samples where it varies."
+  } else {
+    "{.field {outcome_col}} needs more samples where it varies."
+  }))
+
   cli::cli_abort(c(
     "{.fn {verb}} cannot fit {.field {outcome_col}}: all {constant$n} training rows have the value {value_text}.",
     "x" = if (k_other > 0) "The {k_other} modelled row{?s} with another value {?is/are all} outside the training rows: {where}.",
-    "i" = "Every model would be fitted to a constant. {.field {outcome_col}} needs more samples where it varies."
+    "i" = "Every model would be fitted to a constant.",
+    remedies
   ), class = "horizons_input_error", call = call)
 
 }

@@ -136,6 +136,43 @@ describe("check_training_outcome_variance()", {
     expect_match(msg, "The 3 modelled rows with another value are all outside the training rows: 1 in the test set, 2 in the calibration set", fixed = TRUE)
     expect_no_match(msg, "trimmed")
 
+    ## The remedy follows where the rows went
+    expect_match(msg, "compute_uq = FALSE, compute_ad = FALSE", fixed = TRUE)
+    expect_match(msg, "Otherwise SOC needs more samples", fixed = TRUE)
+    expect_no_match(msg, "remove_outliers")
+
+  })
+
+  it("offers undoing the trim when the trim holds the other rows, and only more data when the test set does", {
+
+    trimmed <- one_line(expect_error(
+      check_training_outcome_variance(
+        rep(0, 12),
+        held_out = list("in the test set"              = c(0, 0),
+                        "trimmed as response outliers" = c(9)),
+        outcome_col = "SOC",
+        verb        = "evaluate"
+      ),
+      class = "horizons_input_error"
+    ))
+
+    expect_match(trimmed, 'without remove_outliers = "response"', fixed = TRUE)
+    expect_no_match(trimmed, "compute_uq")
+
+    test_only <- one_line(expect_error(
+      check_training_outcome_variance(
+        rep(0, 12),
+        held_out = list("in the test set" = c(0, 4)),
+        outcome_col = "SOC",
+        verb        = "evaluate"
+      ),
+      class = "horizons_input_error"
+    ))
+
+    expect_match(test_only, "SOC needs more samples where it varies", fixed = TRUE)
+    expect_no_match(test_only, "Otherwise")
+    expect_no_match(test_only, "remove_outliers")
+
   })
 
 })
