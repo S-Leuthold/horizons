@@ -943,11 +943,23 @@ describe("fit() - scores on evaluate()'s split", {
       class = "horizons_input_error"
     )
 
+    ## A record without the key is refused with the other missing evaluation
+    ## keys; one whose split is not an rsplit, by the split check itself.
     no_split <- obj
     no_split$evaluation$split <- NULL
 
     expect_error(
       fit(no_split, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE,
+          verbose = FALSE),
+      "missing split",
+      class = "horizons_validation_error"
+    )
+
+    bad_split <- obj
+    bad_split$evaluation$split <- "an rsplit"
+
+    expect_error(
+      fit(bad_split, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE,
           verbose = FALSE),
       class = "horizons_input_error"
     )
@@ -1719,22 +1731,51 @@ describe("fit() - cold start from one configuration (#45)", {
   })
 
   ## evaluate() and the cold start both write `screened`, so an evaluation
-  ## without it is not a current object, and the fit it produces is refused
-  ## (#130).
-  it("refuses an evaluation without `screened`", {
+  ## without it is not a current object (#130). It is refused before any
+  ## member is re-tuned, not by the fit validator after all of them are.
+  it("refuses an evaluation without `screened` before fitting anything", {
 
     legacy <- ev
     legacy$evaluation$screened <- NULL
 
     expect_false("screened" %in% names(legacy$evaluation))
 
-    expect_error(
-      suppressMessages(utils::capture.output(suppressWarnings(
-        fit(legacy, compute_uq = FALSE, compute_ad = FALSE, verbose = FALSE, seed = 42L)
-      ))),
-      "missing from evaluation: screened",
+    local_mocked_bindings(
+      fit_single_config = function(...) stop("fit_single_config() was called")
+    )
+
+    err <- expect_error(
+      fit(legacy, compute_uq = FALSE, compute_ad = FALSE, verbose = FALSE, seed = 42L),
       class = "horizons_validation_error"
     )
+
+    msg <- gsub("\\s+", " ", conditionMessage(err))
+
+    expect_match(msg, "missing", fixed = TRUE)
+    expect_match(msg, "screened", fixed = TRUE)
+    expect_match(msg, "Re-run `evaluate()`", fixed = TRUE)
+
+  })
+
+  it("names every missing evaluation key in the refusal", {
+
+    legacy <- ev
+    legacy$evaluation$recipe        <- NULL
+    legacy$evaluation$response_trim <- NULL
+
+    local_mocked_bindings(
+      fit_single_config = function(...) stop("fit_single_config() was called")
+    )
+
+    err <- expect_error(
+      fit(legacy, compute_uq = FALSE, compute_ad = FALSE, verbose = FALSE, seed = 42L),
+      class = "horizons_validation_error"
+    )
+
+    msg <- gsub("\\s+", " ", conditionMessage(err))
+
+    expect_match(msg, "response_trim", fixed = TRUE)
+    expect_match(msg, "recipe", fixed = TRUE)
 
   })
 
