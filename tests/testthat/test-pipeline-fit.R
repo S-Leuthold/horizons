@@ -203,21 +203,6 @@ describe("fit() - preflight validation", {
 
   })
 
-  it("aborts on horizons_data without evaluation", {
-
-    ## Two configurations, so there is no cold start to fall back on
-    obj <- mfo()
-    class(obj) <- c("horizons_data", "list")
-    obj$evaluation$results <- NULL
-
-    expect_error(
-      fit(obj, verbose = FALSE),
-      "can start without `evaluate()` only from a single configuration", fixed = TRUE,
-      class = "horizons_input_error"
-    )
-
-  })
-
   it("aborts when no successful configs in evaluation", {
 
     obj <- mfo()
@@ -1917,8 +1902,25 @@ describe("fit() - cold start from one configuration (#45)", {
     err <- expect_error(fit(two, verbose = FALSE), class = "horizons_input_error")
 
     msg <- gsub("\\s+", " ", conditionMessage(err))   # undo cli line wrapping
+    expect_match(msg, "can start without `evaluate()` only from a single configuration", fixed = TRUE)
     expect_match(msg, "2 configurations", fixed = TRUE)
-    expect_match(msg, "evaluate()", fixed = TRUE)
+
+  })
+
+  it("names an outcome column the analysis table lacks", {
+
+    ## The cold start reads the outcome before fit() validates the object, so
+    ## this is the refusal a user meets, not the validator's or "All outcome
+    ## values are NA".
+    gone <- make_eval_object(n = 60, n_configs = 1)
+    outcome <- gone$data$role_map$variable[gone$data$role_map$role == "outcome"]
+    gone$data$analysis[[outcome]] <- NULL
+
+    err <- expect_error(fit(gone, verbose = FALSE), class = "horizons_input_error")
+
+    msg <- gsub("\\s+", " ", conditionMessage(err))
+    expect_match(msg, "The analysis table has no outcome column to model.", fixed = TRUE)
+    expect_match(msg, paste0("names ", outcome, " as the outcome"), fixed = TRUE)
 
   })
 
@@ -2518,6 +2520,7 @@ describe("fit() - a trim request changed after evaluate() (#137)", {
     ## validate() requests a trim of the configured outcome only, so restoring
     ## the applied request is not offered when the outcomes differ
     expect_no_match(out$message, "restore its request", fixed = TRUE)
+    expect_match(out$message, "Re-run `evaluate()` to apply the current request", fixed = TRUE)
 
   })
 

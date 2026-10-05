@@ -413,10 +413,9 @@ fit_tuned_meta_learner <- function(object,
                            " ensemble.")
     )
 
-    ## Guard rank_metric before select_best(): if it is not one of the metrics
-    ## actually collected during tuning, select_best() aborts with an opaque
-    ## "no results with metric X" error. Fail with a clear, actionable message
-    ## naming the available metrics instead.
+    ## Guard rank_metric before select_best(): the fit's validator checks only
+    ## that it is a single string, so it may not be one of the metrics tuning
+    ## collected. Refuse in the ensemble's terms, naming the ones that were.
     available_metrics <- unique(tune::collect_metrics(tune_res)$.metric)
 
     if (!rank_metric %in% available_metrics) {

@@ -56,4 +56,30 @@ describe("step_select_correlation() refuses input it cannot use", {
 
   })
 
+  it("aborts at bake when new data lacks a wavenumber it selected", {
+
+    ## Arrange: recipes refuses new data missing an original predictor before
+    ## any step bakes, so the step selects the transform step's output, and
+    ## the transform is skipped at bake. The step used to keep whichever
+    ## selected columns were present and return the rest of the data as is.
+    withr::local_seed(1)
+    d <- correlation_data()
+
+    rec <- recipes::recipe(SOC ~ ., data = d) |>
+      step_transform_spectra(dplyr::starts_with("wn_"), preprocessing = "raw",
+                             skip = TRUE) |>
+      step_select_correlation(dplyr::matches("^spec[0-9]+$"), outcome = "SOC")
+
+    prepped  <- recipes::prep(rec, training = d)
+    selected <- prepped$steps[[2]]$selected_vars
+
+    expect_gt(length(selected), 0L)
+    expect_true(all(grepl("^spec[0-9]+$", selected)))
+
+    ## Act & Assert
+    expect_error(recipes::bake(prepped, new_data = d),
+                 "Some selected wavenumbers are missing in new_data.", fixed = TRUE)
+
+  })
+
 })
