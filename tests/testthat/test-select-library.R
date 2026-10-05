@@ -145,6 +145,42 @@ test_that("a source that fails its MD5 stops and caches nothing", {
 
 })
 
+## A mini release whose MIR table has been through `edit`, a function of the
+## table as a data frame, with the raw paths build_ossl_library() takes.
+mini_release_with_mir <- function(edit, env = parent.frame()) {
+
+  dir   <- withr::local_tempdir(.local_envir = env)
+  entry <- make_mini_ossl(dir)
+  mir   <- file.path(dir, "mir.csv.gz")
+
+  data.table::fwrite(edit(utils::read.csv(gzfile(mir), check.names = FALSE)), mir)
+
+  list(entry = entry,
+       raw   = c(mir  = mir,
+                 lab  = file.path(dir, "lab.csv.gz"),
+                 site = file.path(dir, "site.csv.gz")))
+
+}
+
+test_that("the recipe refuses a MIR table that lacks a filter column", {
+
+  rel <- mini_release_with_mir(function(mir) mir[, names(mir) != "scan.mir.model.name_utf8_txt"])
+
+  expect_error(build_ossl_library(rel$raw, rel$entry, verbose = FALSE),
+               "The MIR table lacks", fixed = TRUE, class = "horizons_build_error")
+
+})
+
+test_that("the recipe refuses a MIR table that is not on the entry's grid", {
+
+  rel <- mini_release_with_mir(function(mir) mir[, names(mir) != "scan_mir.650_abs"])
+
+  expect_error(build_ossl_library(rel$raw, rel$entry, verbose = FALSE),
+               "The MIR table's grid is not 600 to 700 by 2 cm-1 (50 columns found)",
+               fixed = TRUE, class = "horizons_build_error")
+
+})
+
 test_that("the cache file also resolves through the path form", {
 
   entry <- make_mini_ossl(withr::local_tempdir())

@@ -467,6 +467,34 @@ test_that("draw_neighbours() flags the whole replicate cluster at k below its si
 })
 
 
+test_that("draw_neighbours() fetches past an excluded twin so its target still reaches k", {
+
+  ## Arrange: k at least the twin reference's width, so the first pass
+  ## fetches exactly k columns, and the twin among them leaves its target one
+  ## short. The pool has measured rows to spare.
+  s   <- fixture_scores(n_pool = 60)
+  rsp <- s$fx$pool$data$analysis[, c("sample_id", "clay")]
+  k   <- 20L
+
+  expect_gte(k, twin_reference_width(nrow(rsp)))
+  expect_lt(k, nrow(rsp))
+
+  ## Act
+  out <- draw_neighbours(s$St, s$Sp, responses = rsp, k = k,
+                         properties = "clay", metric = "euclidean", twin_ratio = 0.05)
+
+  ## Assert: the twin is excluded, and its target still drew k rows
+  mine <- out$membership[out$membership$target_id == s$fx$twin_id, ]
+
+  expect_identical(out$exclusions$pool_id[out$exclusions$target_id == s$fx$twin_id],
+                   s$fx$twin_pool_id)
+  expect_identical(nrow(mine), k)
+  expect_false(s$fx$twin_pool_id %in% mine$pool_id)
+  expect_identical(nrow(out$short_draws), 0L)
+
+})
+
+
 test_that("draw_neighbours() treats an undefined cosine target as a failed draw", {
 
   ## A target sitting on the pool's centroid has no defined angle to any pool

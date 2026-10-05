@@ -455,6 +455,22 @@ test_that("build_similarity_space() rejects a nonsense sdev_floor", {
 })
 
 
+test_that("build_similarity_space() rejects an ncomp that is neither a proportion nor a count", {
+
+  fx <- select_fixture(n_pool = 30)
+  pm <- predictor_matrix(fx$pool)
+
+  for (bad in list(0, -1, 1.5, "5", c(2, 3))) {
+
+    expect_error(build_similarity_space(pm$matrix, pm$wavenumbers, ncomp = bad),
+                 "must be a proportion in (0, 1) or a positive integer", fixed = TRUE,
+                 class = "horizons_input_error", info = paste("ncomp =", deparse(bad)))
+
+  }
+
+})
+
+
 ## =============================================================================
 ## build_similarity_space() — PLS
 ## =============================================================================
@@ -468,6 +484,19 @@ test_that("build_similarity_space(space = 'pls') needs y and an integer ncomp", 
                class = "horizons_input_error")
   expect_error(build_similarity_space(pm$matrix, pm$wavenumbers, space = "pls", ncomp = 0.99,
                                       y = fx$pool$data$analysis$clay),
+               class = "horizons_input_error")
+
+})
+
+
+test_that("build_similarity_space(space = 'pls') refuses a y that is not one value per pool row", {
+
+  fx <- select_fixture(n_pool = 60)
+  pm <- predictor_matrix(fx$pool)
+
+  expect_error(build_similarity_space(pm$matrix, pm$wavenumbers, space = "pls", ncomp = 3L,
+                                      y = fx$pool$data$analysis$clay[-1]),
+               "must have one value per pool row (60), got 59", fixed = TRUE,
                class = "horizons_input_error")
 
 })
@@ -582,5 +611,19 @@ test_that("project_similarity() aborts on a wavenumber mismatch", {
 
   expect_error(project_similarity(sp, tm$matrix, tm$wavenumbers),
                class = "horizons_input_error")
+
+})
+
+
+test_that("project_similarity() refuses a space build_similarity_space() did not return", {
+
+  fx <- select_fixture(n_pool = 60)
+  pm <- predictor_matrix(fx$pool)
+
+  sp <- build_similarity_space(pm$matrix, pm$wavenumbers)
+
+  ## The contents are a fitted space's; only the class is missing.
+  expect_error(project_similarity(unclass(sp), pm$matrix, pm$wavenumbers),
+               "must come from", fixed = TRUE, class = "horizons_input_error")
 
 })
