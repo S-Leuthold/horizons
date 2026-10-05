@@ -439,6 +439,31 @@ test_that("spectra() refuses a directory with no OPUS files", {
 
 })
 
+test_that("spectra() refuses OPUS files that hold no spectral block", {
+
+  ## Arrange ---------------------------------------------------------------
+
+  ## A file opusreader2 reads but that carries only metadata cannot be cut
+  ## from a real scan cheaply, so read_opus() is stubbed to return that.
+  local_mocked_bindings(
+    read_opus = function(dsn, ...) {
+      list(file = list(basic_metadata = data.frame(dsn_filename = basename(dsn))))
+    },
+    .package = "opusreader2"
+  )
+
+  ## Act and assert --------------------------------------------------------
+
+  ## Each file warns that it has no data block; then the read is refused.
+  ## This abort carries no package class, so the message is the check.
+  expect_error(
+    suppressWarnings(spectra(opus_dir(), type = "opus")),
+    "No valid spectral data could be extracted",
+    fixed = TRUE
+  )
+
+})
+
 
 ## ---------------------------------------------------------------------------
 ## spectra() — Validation and errors

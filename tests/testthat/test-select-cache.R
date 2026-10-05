@@ -223,14 +223,15 @@ test_that("a library whose default space cannot be built is still cached, with a
   withr::local_options(horizons.library_download = TRUE)
 
   ## Act
-  expect_warning(
+  w <- expect_warning(
     res <- suppressMessages(resolve_source("mini", verbose = FALSE)),
     "similarity space could not be built now", fixed = TRUE,
     class = "horizons_select_warning"
   )
 
-  ## Assert: the library is built and cached; its space is left to the
-  ## first draw
+  ## Assert: the build failed for the reason arranged, not another; the
+  ## library is built and cached; its space is left to the first draw
+  expect_match(conditionMessage(w), "is wider than the 16 columns of the spectra", fixed = TRUE)
   expect_s3_class(res$pool, "horizons_data")
   expect_true(file.exists(file.path(cache, "mini_v0.qs2")))
   expect_length(space_files(cache), 0L)

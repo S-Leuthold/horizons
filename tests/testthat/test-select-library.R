@@ -145,6 +145,23 @@ test_that("a source that fails its MD5 stops and caches nothing", {
 
 })
 
+test_that("a library built but not moved into the cache stops, classed, and caches nothing", {
+
+  ## The rename after a successful write fails only on a locked or network
+  ## filesystem; a qs_save() that writes nothing makes it fail here for want
+  ## of a source file.
+  entry <- make_mini_ossl(withr::local_tempdir())
+  cache <- local_mini_registry(entry)
+  withr::local_options(horizons.library_download = TRUE)
+  local_mocked_bindings(qs_save = function(...) invisible(NULL), .package = "qs2")
+
+  expect_error(suppressMessages(resolve_source("mini", verbose = FALSE)),
+               "library was built but could not be moved into the cache", fixed = TRUE,
+               class = "horizons_build_error")
+  expect_false(file.exists(file.path(cache, "mini_v0.qs2")))
+
+})
+
 ## A mini release whose MIR table has been through `edit`, a function of the
 ## table as a data frame, with the raw paths build_ossl_library() takes.
 mini_release_with_mir <- function(edit, env = parent.frame()) {

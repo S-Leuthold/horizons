@@ -1083,13 +1083,16 @@ describe("selection steps abort on a zero-column selector", {
 
   }
 
-  it("step_select_correlation aborts naming itself", {
+  it("step_select_correlation aborts naming itself, classed", {
 
+    ## The three steps share one gate, check_selection_columns(), so this
+    ## step's class check stands for all of them.
     rec <- base_recipe() |>
       step_select_correlation(dplyr::matches(no_match), outcome = "SOC")
 
-    expect_error(recipes::prep(rec), "step_select_correlation")
-    expect_error(recipes::prep(rec), "selected zero columns")
+    err <- expect_error(recipes::prep(rec), "selected zero columns", fixed = TRUE,
+                        class = "horizons_input_error")
+    expect_match(conditionMessage(err), "step_select_correlation", fixed = TRUE)
 
   })
 
@@ -1108,18 +1111,6 @@ describe("selection steps abort on a zero-column selector", {
       step_select_boruta(dplyr::matches(no_match), outcome = "SOC")
 
     expect_error(recipes::prep(rec), "selected zero columns")
-
-  })
-
-  it("the abort carries horizons_input_error", {
-
-    ## The three steps share one gate, check_selection_columns(), so one
-    ## step stands for all of them.
-    rec <- base_recipe() |>
-      step_select_correlation(dplyr::matches(no_match), outcome = "SOC")
-
-    expect_error(recipes::prep(rec), "selected zero columns", fixed = TRUE,
-                 class = "horizons_input_error")
 
   })
 
