@@ -553,6 +553,24 @@ describe("ensemble UQ - degradation and gates", {
 
   })
 
+  it("predict_ensemble_intervals aborts when a member's predictions are missing", {
+
+    test_set <- ens_test_set()
+    ens_ref  <- ens_built("weighted")
+    members  <- ens_ref$ensemble$weights$member
+    new_spec <- resolve_new_data(test_set)
+    mp       <- predict_members(ens_ref, members, new_spec)
+
+    ## The fold models are valid only over the exact member set, so a member
+    ## with no predictions is an error, not a degraded interval.
+    short <- mp[mp$config_id != members[1], ]
+
+    ## The abort carries no package class.
+    expect_error(predict_ensemble_intervals(ens_ref$ensemble$uq, short),
+                 "Member prediction missing for 1 ensemble member", fixed = TRUE)
+
+  })
+
   it("predict.horizons_ensemble(interval = TRUE) warns end to end and still returns point predictions", {
 
     test_set <- ens_test_set()
@@ -578,8 +596,11 @@ describe("ensemble UQ - degradation and gates", {
     fitted  <- ens_fitted()
     ens_ref <- ens_built("weighted")
 
-    expect_error(fit_ensemble_uq(fitted), class = "rlang_error")
-    expect_error(fit_ensemble_uq(ens_ref, level = 1.5), class = "rlang_error")
+    ## The aborts carry no package class.
+    expect_error(fit_ensemble_uq(fitted),
+                 "`x` must be a <horizons_ensemble> object", fixed = TRUE)
+    expect_error(fit_ensemble_uq(ens_ref, level = 1.5),
+                 "`level` must be a single numeric in (0, 1)", fixed = TRUE)
 
   })
 

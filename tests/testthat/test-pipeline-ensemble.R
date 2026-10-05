@@ -233,7 +233,13 @@ describe("ensemble() - preflight validation", {
 
   it("aborts on non-horizons_fit input", {
 
-    expect_error(ensemble(list(a = 1)), class = "rlang_error")
+    ## The abort carries no package class. validate_horizons_fit() refuses
+    ## the same input with the same headline but no hint, so the hint is what
+    ## shows this check fired.
+    err <- expect_error(ensemble(list(a = 1)),
+                        "`x` must be a <horizons_fit> object", fixed = TRUE)
+    expect_match(conditionMessage(err), "Run `fit()` first to produce a fitted object",
+                 fixed = TRUE)
 
   })
 
@@ -241,7 +247,9 @@ describe("ensemble() - preflight validation", {
 
     fitted <- ens_fitted()
 
-    expect_error(ensemble(fitted, method = "bogus"), class = "rlang_error")
+    ## The abort carries no package class.
+    expect_error(ensemble(fitted, method = "bogus"),
+                 "`method` must be one of", fixed = TRUE)
 
   })
 
@@ -474,8 +482,9 @@ describe("predict.horizons_ensemble() - schema gate", {
     broken    <- test_set[, setdiff(names(test_set), pred_cols[1]),
                           drop = FALSE]
 
+    ## The abort carries no package class.
     expect_error(predict(ens, broken, interval = FALSE),
-                 class = "rlang_error")
+                 "is missing 1 predictor column the model expects", fixed = TRUE)
 
   })
 
@@ -566,8 +575,10 @@ describe("predict.horizons_ensemble() - aborts on a failing member", {
     broken_member <- ens$ensemble$weights$member[1]
     ens$models$workflows[[broken_member]] <- "not a workflow"
 
+    ## The abort carries no package class.
     expect_error(predict(ens, test_set, interval = FALSE),
-                 class = "rlang_error")
+                 paste0("Prediction failed for config '", broken_member, "'"),
+                 fixed = TRUE)
 
   })
 
@@ -625,8 +636,28 @@ describe("predict.horizons_ensemble() - preflight", {
     fitted   <- ens_fitted()
     test_set <- ens_test_set()
 
+    ## The abort carries no package class.
     expect_error(predict.horizons_ensemble(fitted, test_set),
-                 class = "rlang_error")
+                 "`object` must be a <horizons_ensemble> object", fixed = TRUE)
+
+  })
+
+  it("aborts when the object carries no fitted ensemble", {
+
+    test_set <- ens_test_set()
+    ens      <- ens_built("weighted")
+
+    no_model <- ens
+    no_model$ensemble$model <- NULL
+
+    no_slot <- ens
+    no_slot$ensemble <- NULL
+
+    ## The abort carries no package class.
+    expect_error(predict(no_model, test_set, interval = FALSE),
+                 "No fitted ensemble found on this object", fixed = TRUE)
+    expect_error(predict(no_slot, test_set, interval = FALSE),
+                 "No fitted ensemble found on this object", fixed = TRUE)
 
   })
 
@@ -934,6 +965,55 @@ describe("ensemble() - allow_par", {
         "offers 1 worker"
       ),
       "ensemble\\(\\).*offers 1 worker"
+    )
+
+    expect_true(inherits(ens, "horizons_ensemble"))
+
+  })
+
+  it("refuses an allow_par that is not TRUE or FALSE", {
+
+    fitted <- ens_fitted()
+
+    ## The abort carries no package class.
+    expect_error(
+      ensemble(fitted, method = "weighted", allow_par = "yes", verbose = FALSE),
+      "`allow_par` must be TRUE or FALSE", fixed = TRUE
+    )
+
+  })
+
+  it("warns when a mirai daemon pool would take the run from the future plan", {
+
+    skip_on_cran()
+    skip_if_not_installed("mirai")
+
+    if (isTRUE(tryCatch(mirai::status()$connections >= 1, error = function(e) FALSE))) {
+      skip("mirai daemons are live in this session")
+    }
+
+    fitted <- ens_fitted()
+    local_plan(future::multisession, workers = 2)
+    mirai::daemons(2)
+    withr::defer(mirai::daemons(0))
+
+    ## The daemons dial in shortly after launch; the warning reads the live
+    ## connection count.
+    for (i in seq_len(100)) {
+      if (isTRUE(mirai::status()$connections >= 2)) break
+      Sys.sleep(0.05)
+    }
+    expect_gte(mirai::status()$connections, 2)
+
+    ## The warning carries no package class. The weighted engine at
+    ## optimize = FALSE tunes nothing, so neither pool is given any work.
+    expect_warning(
+      ens <- keep_only_warning(
+        ensemble(fitted, method = "weighted", optimize = FALSE,
+                 allow_par = TRUE, compute_uq = FALSE, verbose = FALSE),
+        "A mirai daemon pool"
+      ),
+      "A mirai daemon pool", fixed = TRUE
     )
 
     expect_true(inherits(ens, "horizons_ensemble"))
