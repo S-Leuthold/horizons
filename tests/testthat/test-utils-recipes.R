@@ -1111,6 +1111,18 @@ describe("selection steps abort on a zero-column selector", {
 
   })
 
+  it("the abort carries horizons_input_error", {
+
+    ## The three steps share one gate, check_selection_columns(), so one
+    ## step stands for all of them.
+    rec <- base_recipe() |>
+      step_select_correlation(dplyr::matches(no_match), outcome = "SOC")
+
+    expect_error(recipes::prep(rec), "selected zero columns", fixed = TRUE,
+                 class = "horizons_input_error")
+
+  })
+
   it("the pca branch aborts too, in the selector recipes::step_pca lacks", {
 
     ## step_pca() treats an empty selection as a pass-through no-op, so the
