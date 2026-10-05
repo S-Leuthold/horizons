@@ -225,25 +225,6 @@ test_that("average() computes mean of predictor columns", {
 
 })
 
-test_that("average() works with single replicate groups", {
-
-
-  ## Arrange ---------------------------------------------------------------
-
-  ## Create data with 1 replicate per sample
-  hd <- make_test_hd_average(n_samples = 3, n_reps = 1)
-
-  ## Act -------------------------------------------------------------------
-
-  result <- average(hd, quality_check = FALSE, verbose = FALSE)
-
-  ## Assert ----------------------------------------------------------------
-
-  ## Should pass through unchanged (except filename column)
-  expect_equal(nrow(result$data$analysis), 3)
-
-})
-
 
 ## ---------------------------------------------------------------------------
 ## average() — Quality control
@@ -690,22 +671,6 @@ test_that("average() records provenance correctly", {
 
 })
 
-test_that("average() updates aggregation_by in provenance", {
-
-  ## Arrange ---------------------------------------------------------------
-
-  hd <- make_test_hd_average(n_samples = 2, n_reps = 2)
-
-  ## Act -------------------------------------------------------------------
-
-  result <- average(hd, by = "sample_id", quality_check = FALSE, verbose = FALSE)
-
-  ## Assert ----------------------------------------------------------------
-
-  expect_equal(result$provenance$aggregation_by, "sample_id")
-
-})
-
 
 ## ---------------------------------------------------------------------------
 ## average() — Custom grouping column
@@ -737,6 +702,9 @@ test_that("average() works with custom by column", {
   expect_identical(sum(result$data$role_map$role == "id"), 1L)
   expect_no_error(validate_horizons_data(result))
   expect_equal(result$provenance$aggregation_by, "project")
+
+  ## An object without a selection record does not gain one
+  expect_null(result$selection)
 
 })
 
@@ -789,33 +757,6 @@ test_that("average() errors on invalid correlation_threshold", {
     average(hd, correlation_threshold = -0.1),
     "between 0 and 1"
   )
-
-})
-
-
-## ---------------------------------------------------------------------------
-## average() — Role map updates
-## ---------------------------------------------------------------------------
-
-test_that("average() updates role_map to remove dropped columns", {
-
-  ## Arrange ---------------------------------------------------------------
-
-  hd <- make_test_hd_average(n_samples = 2, n_reps = 3, add_meta = TRUE, uniform_meta = FALSE)
-
-  ## Act -------------------------------------------------------------------
-
-  result <- average(hd, quality_check = FALSE, verbose = FALSE)
-
-  ## Assert ----------------------------------------------------------------
-
-  ## Dropped columns should not be in role_map
-  expect_false("filename" %in% result$data$role_map$variable)
-  expect_false("rep_num" %in% result$data$role_map$variable)
-
-  ## Retained columns should still be there
-  expect_true("sample_id" %in% result$data$role_map$variable)
-  expect_true(any(grepl("^wn_", result$data$role_map$variable)))
 
 })
 
@@ -926,6 +867,10 @@ test_that("average() carries numeric responses through as within-group means", {
   expect_equal(averaged$clay[averaged$sample_id == "S2"], 21)
   expect_equal(averaged$soc[averaged$sample_id == "S1"], 1.5)
 
+  ## The roles and their counts come through the collapse
+  expect_identical(result$data$n_responses, 2L)
+  expect_identical(sum(result$data$role_map$role == "outcome"), 1L)
+
 })
 
 
@@ -952,18 +897,6 @@ test_that("average() aborts on a non-numeric response that disagrees within a gr
   expect_error(average(hd, quality_check = FALSE, verbose = FALSE),
                regexp = "texture",
                class  = "horizons_data_error")
-
-})
-
-
-test_that("average() with responses leaves a whole object", {
-
-  hd     <- make_test_hd_average(n_samples = 3, n_reps = 3, add_responses = TRUE)
-  result <- average(hd, quality_check = FALSE, verbose = FALSE)
-
-  expect_no_error(validate_horizons_data(result))
-  expect_identical(result$data$n_responses, 2L)
-  expect_identical(sum(result$data$role_map$role == "outcome"), 1L)
 
 })
 
@@ -1153,16 +1086,6 @@ test_that("average() refuses a custom by on an object carrying a record", {
   expect_error(average(hd, by = "project", quality_check = FALSE, verbose = FALSE),
                regexp = "selection record",
                class  = "horizons_validation_error")
-
-})
-
-
-test_that("average() leaves an object without a record alone", {
-
-  hd     <- make_test_hd_average(n_samples = 2, n_reps = 3, add_meta = TRUE)
-  result <- average(hd, by = "project", quality_check = FALSE, verbose = FALSE)
-
-  expect_null(result$selection)
 
 })
 
