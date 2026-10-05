@@ -403,6 +403,18 @@ describe("configure() validation", {
 
   })
 
+  test_that("errors for final_bayesian_iter < 0", {
+
+    hd <- make_single_response_hd()
+
+    expect_error(
+      capture.output(configure(hd, final_bayesian_iter = -1)),
+      "`final_bayesian_iter` must be a non-negative integer", fixed = TRUE,
+      class = "horizons_configure_error"
+    )
+
+  })
+
   test_that("rejects an sg_window that is even, below 5, fractional or not a scalar (#62)", {
 
     hd <- make_single_response_hd()

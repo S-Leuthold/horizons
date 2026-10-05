@@ -451,6 +451,20 @@ test_that("parse_ids() errors when both format and patterns provided", {
 
 })
 
+test_that("parse_ids() refuses patterns that are not a character vector", {
+
+  ## Arrange — a list where c() was meant
+  hd <- make_test_hd(c("PROJ_S1-1_a", "PROJ_S2-1_b"))
+
+  ## Act & Assert. The abort carries no package class, so the message is
+  ## the check.
+  expect_error(
+    parse_ids(hd, patterns = list(sampleid = "S\\d+-\\d+")),
+    "`patterns` must be a character vector", fixed = TRUE
+  )
+
+})
+
 test_that("parse_ids() errors on empty format string", {
 
   hd <- make_test_hd(c("test"))
