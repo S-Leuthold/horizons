@@ -184,6 +184,59 @@ test_that("an unreadable or foreign cache file is rebuilt, not trusted", {
 
 })
 
+test_that("a space that cannot be cached is still returned, with a warning", {
+
+  ## Arrange: a cache directory under a regular file cannot be created by any
+  ## user, so the write fails whatever the permissions. cached_space() stores
+  ## whatever build() returns, so a stand-in keeps the test off a PCA.
+  blocker <- withr::local_tempfile()
+  file.create(blocker)
+  withr::local_options(horizons.cache_dir = file.path(blocker, "cache"))
+
+  space    <- structure(list(), class = "horizons_similarity_space")
+  settings <- list(snv = TRUE, derivative = 1L, window = 21L, poly = 2L, mask = NULL,
+                   ncomp = 0.99, sdev_floor = 0.1)
+
+  ## Act
+  expect_warning(
+    out <- cached_space(structure("lib", label = "lib"), settings, seq(700, 600, by = -2),
+                        build = function() space, verbose = FALSE),
+    "The similarity space was built but could not be cached", fixed = TRUE,
+    class = "horizons_select_warning"
+  )
+
+  ## Assert
+  expect_identical(out$space, space)
+  expect_false(out$hit)
+  expect_null(out$path)
+
+})
+
+test_that("a library whose default space cannot be built is still cached, with a warning", {
+
+  ## Arrange: a library from 670 to 700 cm-1 has 16 columns, fewer than the
+  ## default space's 21-point window at 2 cm-1, so the space built at first
+  ## use fails.
+  entry <- make_mini_ossl(withr::local_tempdir(), seed = 3, extras = FALSE, n_kssl = 30L)
+  entry$filters$wn_min <- 670L
+  cache <- local_mini_registry(entry)
+  withr::local_options(horizons.library_download = TRUE)
+
+  ## Act
+  expect_warning(
+    res <- suppressMessages(resolve_source("mini", verbose = FALSE)),
+    "similarity space could not be built now", fixed = TRUE,
+    class = "horizons_select_warning"
+  )
+
+  ## Assert: the library is built and cached; its space is left to the
+  ## first draw
+  expect_s3_class(res$pool, "horizons_data")
+  expect_true(file.exists(file.path(cache, "mini_v0.qs2")))
+  expect_length(space_files(cache), 0L)
+
+})
+
 
 ## ---------------------------------------------------------------------------
 ## Review fixes (2026-09-30)
