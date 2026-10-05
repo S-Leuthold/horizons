@@ -1101,6 +1101,13 @@ describe("check_evaluated_outcome_range()", {
                         class = "horizons_input_error")
     expect_match(flat_message(err), "unrecorded", fixed = TRUE)
 
+    ## Evaluations from before the settings stamp carry no settings column;
+    ## they count as the default too
+    bare <- tibble::tibble(config_id = "c1")
+    expect_error(check_evaluated_outcome_range(x_with(bare), c(-Inf, Inf)),
+                 "recorded unrecorded (the zero floor) on 1 results row",
+                 fixed = TRUE, class = "horizons_input_error")
+
   })
 
 })

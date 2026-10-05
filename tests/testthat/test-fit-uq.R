@@ -36,6 +36,17 @@ describe("compute_c_alpha() - basic contract", {
 
   })
 
+  it("refuses scores with no finite value", {
+
+    ## The abort carries no package class. Without it the quantile of an
+    ## empty set is NA, returned as the correction.
+    expect_error(
+      compute_c_alpha(c(NA, NaN, Inf, -Inf), level = 0.90),
+      "No finite scores available for conformal calibration", fixed = TRUE
+    )
+
+  })
+
 })
 
 

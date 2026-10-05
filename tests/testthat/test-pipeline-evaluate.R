@@ -362,8 +362,11 @@ describe("rank_configs_by_cv()", {
     all_na$cv_rpd <- NA_real_
 
     expect_error(rank_configs_by_cv(all_na, "rpd"), "[Rr]e-run evaluate")
+
+    ## The abort carries no package class. The all-NA abort above also says
+    ## to re-run evaluate(), so the missing column is matched by its own text.
     expect_error(rank_configs_by_cv(rows[, c("config_id", "status", "rpd")], "rpd"),
-                 "[Rr]e-run evaluate")
+                 "Evaluation results carry no `cv_rpd` column", fixed = TRUE)
 
   })
 
@@ -493,6 +496,22 @@ describe("evaluate() - NA outcome rows", {
     expect_match(conditionMessage(err), "SOC", fixed = TRUE)
     expect_match(conditionMessage(err), "missing from", fixed = TRUE)
     expect_no_match(conditionMessage(err), "All outcome values are NA", fixed = TRUE)
+
+  })
+
+  it("outcome_complete_rows() refuses an outcome column that is absent or unnamed", {
+
+    ## Called directly, since through evaluate() the validator refuses the
+    ## object first (the test above). Without this check an absent column
+    ## reads as NULL and is reported as all NA.
+    df <- tibble::tibble(sample_id = c("A", "B"), y = c(1, 2))
+
+    expect_error(outcome_complete_rows(df, "z"),
+                 "names z as the outcome, and data$analysis has no such column",
+                 fixed = TRUE, class = "horizons_input_error")
+    expect_error(outcome_complete_rows(df, character(0)),
+                 "The role map gives no column the \"outcome\" role",
+                 fixed = TRUE, class = "horizons_input_error")
 
   })
 

@@ -747,11 +747,12 @@ describe("predict.horizons_fit() - applicability domain", {
     no_ad <- fitted_fixture
     no_ad$models$ad <- NULL
 
-    warns <- testthat::capture_warnings(
-      p <- predict(no_ad, new_df, interval = FALSE, abstain_ood = TRUE)
+    expect_warning(
+      p <- predict(no_ad, new_df, interval = FALSE, abstain_ood = TRUE),
+      "`abstain_ood` was requested but no applicability-domain information is available",
+      fixed = TRUE, class = "horizons_ad_warning"
     )
 
-    expect_true(any(grepl("abstain_ood.*no applicability-domain", warns)))
     expect_false(".ad_flag" %in% names(p))
     expect_true(all(!is.na(p$.pred)))          # nothing was abstained
 

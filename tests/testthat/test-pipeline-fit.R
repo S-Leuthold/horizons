@@ -197,20 +197,23 @@ describe("fit() - preflight validation", {
 
     expect_error(
       fit(list(a = 1), verbose = FALSE),
-      class = "rlang_error"
+      "needs a <horizons_eval> from `evaluate()`", fixed = TRUE,
+      class = "horizons_input_error"
     )
 
   })
 
   it("aborts on horizons_data without evaluation", {
 
+    ## Two configurations, so there is no cold start to fall back on
     obj <- mfo()
     class(obj) <- c("horizons_data", "list")
     obj$evaluation$results <- NULL
 
     expect_error(
       fit(obj, verbose = FALSE),
-      class = "rlang_error"
+      "can start without `evaluate()` only from a single configuration", fixed = TRUE,
+      class = "horizons_input_error"
     )
 
   })
@@ -222,7 +225,8 @@ describe("fit() - preflight validation", {
 
     expect_error(
       fit(obj, verbose = FALSE),
-      class = "rlang_error"
+      "No configuration in evaluation$results can be fitted", fixed = TRUE,
+      class = "horizons_input_error"
     )
 
   })
@@ -2510,6 +2514,10 @@ describe("fit() - a trim request changed after evaluate() (#137)", {
     expect_match(out$message, "The request is for pH; `evaluate()` trimmed SOC", fixed = TRUE)
     expect_match(out$message, "method is \"mad\"; `evaluate()` used \"iqr\"", fixed = TRUE)
     expect_no_match(out$message, "threshold is", fixed = TRUE)
+
+    ## validate() requests a trim of the configured outcome only, so restoring
+    ## the applied request is not offered when the outcomes differ
+    expect_no_match(out$message, "restore its request", fixed = TRUE)
 
   })
 

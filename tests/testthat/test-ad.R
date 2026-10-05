@@ -92,6 +92,19 @@ test_that("calculate_ad_distance validates feature alignment", {
 
 })
 
+test_that("calculate_ad_distance refuses input that is not a numeric matrix", {
+
+  md <- compute_ad_metadata(ad_matrix(100, 10, seed = 11))
+
+  chars <- matrix(as.character(stats::rnorm(50)), 5, 10)
+  colnames(chars) <- paste0("f", 1:10)
+
+  ## The abort carries no package class.
+  expect_error(calculate_ad_distance(chars, md),
+               "`new_matrix` must be a numeric matrix", fixed = TRUE)
+
+})
+
 ## ---------------------------------------------------------------------------
 ## assign_ad_bin()
 ## ---------------------------------------------------------------------------
@@ -111,7 +124,10 @@ test_that("assign_ad_bin categorizes distances into Q1-Q4/OOD", {
 test_that("assign_ad_bin validates inputs", {
 
   thr <- c(10, 20, 30, 40)
-  expect_error(assign_ad_bin(c("a", "b"), thr), "numeric")
+
+  ## The abort carries no package class. Without it cut() refuses the
+  ## strings with its own "must be numeric".
+  expect_error(assign_ad_bin(c("a", "b"), thr), "`distances` must be numeric", fixed = TRUE)
   expect_error(assign_ad_bin(c(-5, 10), thr), "non-negative")
   expect_error(assign_ad_bin(c(5, 15), c(10, 20)), "length 4")
 
@@ -268,7 +284,8 @@ test_that("predict_ad warns and returns NULL when the bake aborts", {
   ## Not a workflow: extract_recipe() aborts, which is the bug / schema case.
   expect_warning(
     ad <- predict_ad(list(), bundle, new_df),
-    "baking"
+    "baking `new_data` through the fitted recipe failed", fixed = TRUE,
+    class = "horizons_ad_warning"
   )
 
   expect_null(ad)
@@ -285,9 +302,12 @@ test_that("predict_ad returns NULL, with a warning, when every spectrum is bad",
   new_df         <- ad_new_spectra(fx$wn, n = 5)
   new_df[, fx$wn] <- NA_real_
 
-  warns <- testthat::capture_warnings(ad <- predict_ad(fx$workflow, bundle, new_df))
+  expect_warning(
+    ad <- predict_ad(fx$workflow, bundle, new_df),
+    "is unavailable for all 5 samples", fixed = TRUE,
+    class = "horizons_ad_warning"
+  )
 
-  expect_true(any(grepl("unavailable for all 5", warns)))
   expect_null(ad)
 
 })
