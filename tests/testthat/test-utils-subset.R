@@ -1,5 +1,6 @@
 # tests/testthat/test-utils-subset.R
-# Tests for subset_rows(), set_analysis() (issue #43) and add_columns() (#135)
+# Tests for subset_rows(), set_analysis() (issue #43), add_columns() (#135)
+# and reset_slots()
 
 
 ## =============================================================================
@@ -66,7 +67,23 @@ test_that("subset_rows() writes no provenance of its own", {
 
 test_that("subset_rows() rejects non-horizons_data input", {
 
+  ## The promotion check would refuse a data frame too, with the same class,
+  ## so the message is what shows this guard caught it
   expect_error(subset_rows(data.frame(sample_id = "a"), "a"),
+               "must be a <horizons_data>, not <data.frame>", fixed = TRUE,
+               class = "horizons_input_error")
+
+})
+
+
+test_that("subset_rows() refuses a keep that is neither ids nor logical", {
+
+  ## Arrange — row numbers are not a way to name rows here
+  fx <- select_fixture(n_pool = 40)
+
+  ## Act & Assert
+  expect_error(subset_rows(fx$pool, 1:3),
+               "must be character ids or a logical vector, not <integer>", fixed = TRUE,
                class = "horizons_input_error")
 
 })
@@ -155,6 +172,21 @@ test_that("set_analysis() aborts when analysis columns and role_map disagree", {
   analysis$extra <- 1
 
   expect_error(set_analysis(fx$pool, analysis),
+               class = "horizons_input_error")
+
+})
+
+
+test_that("set_analysis() rejects non-horizons_data input", {
+
+  ## Arrange
+  fx       <- select_fixture(n_pool = 40)
+  analysis <- fx$pool$data$analysis
+
+  ## Act & Assert — the promotion check would refuse a data frame too, with
+  ## the same class, so the message is what shows this guard caught it
+  expect_error(set_analysis(analysis, analysis),
+               "must be a <horizons_data>, not <tbl_df>", fixed = TRUE,
                class = "horizons_input_error")
 
 })
@@ -657,5 +689,63 @@ test_that("add_columns() refuses roles that modelling reads", {
                  info  = role)
 
   }
+
+})
+
+
+test_that("add_columns() rejects non-horizons_data input", {
+
+  ## Arrange
+  fx       <- select_fixture(n_pool = 40)
+  analysis <- fx$pool$data$analysis
+
+  ## Act & Assert
+  expect_error(add_columns(analysis, tibble::tibble(site = rep("A", 40)), role = "meta"),
+               "must be a <horizons_data>, not <tbl_df>", fixed = TRUE,
+               class = "horizons_input_error")
+
+})
+
+
+test_that("add_columns() refuses columns that are not a data frame", {
+
+  ## Arrange — a named list has the right shape but no row count to check
+  fx <- select_fixture(n_pool = 40)
+
+  ## Act & Assert
+  expect_error(add_columns(fx$pool, list(site = rep("A", 40)), role = "meta"),
+               "must be a data frame, not <list>", fixed = TRUE,
+               class = "horizons_input_error")
+
+})
+
+
+test_that("add_columns() refuses an after that names no column of the table", {
+
+  ## Arrange
+  fx <- select_fixture(n_pool = 40)
+
+  ## Act & Assert
+  expect_error(add_columns(fx$pool, tibble::tibble(site = rep("A", 40)),
+                           role = "meta", after = "not_a_column"),
+               "must name one column of the analysis table", fixed = TRUE,
+               class = "horizons_input_error")
+
+})
+
+
+## =============================================================================
+## reset_slots() — Return slots to the constructor's shape
+## =============================================================================
+
+test_that("reset_slots() refuses a slot the constructor does not have", {
+
+  ## Arrange — a misspelt slot would otherwise be added as a new, empty key
+  fx <- select_fixture(n_pool = 40)
+
+  ## Act & Assert
+  expect_error(reset_slots(fx$pool, c("models", "ensembel")),
+               "does not know ensembel", fixed = TRUE,
+               class = "horizons_input_error")
 
 })
