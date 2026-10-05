@@ -159,51 +159,10 @@ test_that("add_response() assigns role = 'response' in role_map", {
 
 })
 
-test_that("add_response() updates n_responses count", {
-
-  ## Arrange ---------------------------------------------------------------
-
-  hd  <- make_test_hd()
-  lab <- tibble::tibble(
-    sample_id = c("S001", "S002", "S003"),
-    SOC       = c(1.2, 3.4, 5.6),
-    POM_C     = c(0.5, 1.0, 1.5)
-  )
-
-  ## Act -------------------------------------------------------------------
-
-  result <- add_response(hd, lab, variable = c("SOC", "POM_C"))
-
-  ## Assert ----------------------------------------------------------------
-
-  expect_equal(result$data$n_responses, 2)
-
-})
-
 
 ## ---------------------------------------------------------------------------
 ## add_response() — Join key mechanics
 ## ---------------------------------------------------------------------------
-
-test_that("add_response() uses default by = 'sample_id'", {
-
-  ## Arrange ---------------------------------------------------------------
-
-  hd  <- make_test_hd()
-  lab <- tibble::tibble(
-    sample_id = c("S001", "S002", "S003"),
-    SOC       = c(1.2, 3.4, 5.6)
-  )
-
-  ## Act -------------------------------------------------------------------
-
-  result <- add_response(hd, lab, variable = "SOC")
-
-  ## Assert ----------------------------------------------------------------
-
-  expect_equal(result$data$analysis$SOC, c(1.2, 3.4, 5.6))
-
-})
 
 test_that("add_response() supports named vector for by", {
 
@@ -231,7 +190,7 @@ test_that("add_response() supports named vector for by", {
 ## add_response() — Path source (CSV)
 ## ---------------------------------------------------------------------------
 
-test_that("add_response() reads CSV path source", {
+test_that("add_response() reads CSV path source, and records the path", {
 
   ## Arrange ---------------------------------------------------------------
 
@@ -252,6 +211,7 @@ test_that("add_response() reads CSV path source", {
   ## Assert ----------------------------------------------------------------
 
   expect_equal(result$data$analysis$SOC, c(1.2, 3.4, 5.6))
+  expect_equal(result$provenance$add_response[[1]]$source, temp_csv)
 
 })
 
@@ -590,55 +550,6 @@ test_that("add_response() records provenance (tibble source)", {
 
 })
 
-test_that("add_response() records provenance (CSV path source)", {
-
-  ## Arrange ---------------------------------------------------------------
-
-  hd  <- make_test_hd()
-  lab <- tibble::tibble(
-    sample_id = c("S001", "S002", "S003"),
-    SOC       = c(1.2, 3.4, 5.6)
-  )
-
-  temp_csv <- tempfile(fileext = ".csv")
-  on.exit(unlink(temp_csv), add = TRUE)
-  readr::write_csv(lab, temp_csv)
-
-  ## Act -------------------------------------------------------------------
-
-  result <- add_response(hd, temp_csv, variable = "SOC")
-
-  ## Assert ----------------------------------------------------------------
-
-  prov <- result$provenance$add_response[[1]]
-
-  expect_equal(prov$source, temp_csv)
-
-})
-
-test_that("add_response() appends provenance on repeated calls", {
-
-  ## Arrange ---------------------------------------------------------------
-
-  hd  <- make_test_hd()
-  lab1 <- tibble::tibble(sample_id = c("S001", "S002", "S003"),
-                         SOC       = c(1.2, 3.4, 5.6))
-  lab2 <- tibble::tibble(sample_id = c("S001", "S002", "S003"),
-                         pH        = c(5.5, 6.0, 6.5))
-
-  ## Act -------------------------------------------------------------------
-
-  result <- add_response(hd, lab1, variable = "SOC")
-  result <- add_response(result, lab2, variable = "pH")
-
-  ## Assert ----------------------------------------------------------------
-
-  expect_length(result$provenance$add_response, 2)
-  expect_equal(result$provenance$add_response[[1]]$variables, "SOC")
-  expect_equal(result$provenance$add_response[[2]]$variables, "pH")
-
-})
-
 
 ## ---------------------------------------------------------------------------
 ## add_response() — Non-missing counts (#39)
@@ -702,6 +613,11 @@ test_that("add_response() allows joining from multiple sources", {
   expect_true("SOC" %in% names(result$data$analysis))
   expect_true("pH" %in% names(result$data$analysis))
   expect_equal(result$data$n_responses, 2)
+
+  ## Each call appends its own provenance entry
+  expect_length(result$provenance$add_response, 2)
+  expect_equal(result$provenance$add_response[[1]]$variables, "SOC")
+  expect_equal(result$provenance$add_response[[2]]$variables, "pH")
 
 })
 
@@ -818,28 +734,6 @@ test_that("add_response() errors on multi-column by", {
   expect_error(
     add_response(hd, lab, variable = "SOC",
                  by = c("sample_id" = "sample_id", "site" = "site")),
-    "Multi-column joins not supported"
-  )
-
-})
-
-test_that("add_response() errors on partially named by", {
-
-  ## Partial naming only possible with length > 1, which hits the
-
-  ## multi-column guard first. So we check the guard order is correct:
-  ## length > 1 → multi-column error (not partial naming error).
-  ## The partial-naming check exists for defensive completeness if
-  ## multi-column joins are ever supported.
-
-  hd  <- make_test_hd()
-  lab <- tibble::tibble(sample_id = c("S001", "S002", "S003"),
-                        SOC       = c(1.2, 2.3, 3.4))
-
-  ## Length-2 partially-named by hits multi-column guard first
-  expect_error(
-    add_response(hd, lab, variable = "SOC",
-                 by = c("sample_id" = "sample_id", "extra")),
     "Multi-column joins not supported"
   )
 
