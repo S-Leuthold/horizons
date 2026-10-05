@@ -345,7 +345,8 @@ test_that("add_response() errors on duplicate keys in horizons (pre-average)", {
 
   expect_error(
     add_response(hd, lab, variable = "SOC"),
-    "Duplicate.*horizons|average"
+    "Duplicate sample IDs found in horizons data", fixed = TRUE,
+    class = "horizons_input_error"
   )
 
 })

@@ -760,6 +760,21 @@ test_that("average() errors on invalid correlation_threshold", {
 
 })
 
+test_that("average() refuses a grouping column with NA values", {
+
+  ## Arrange — a scan whose sample id could not be parsed
+  hd <- make_test_hd_average(n_samples = 2, n_reps = 2)
+  hd$data$analysis$sample_id[1] <- NA
+
+  ## Act & Assert
+  expect_error(
+    average(hd, quality_check = FALSE, verbose = FALSE),
+    "Grouping column 'sample_id' contains NA values", fixed = TRUE,
+    class = "horizons_data_error"
+  )
+
+})
+
 
 ## ---------------------------------------------------------------------------
 ## Helper function tests
@@ -1114,6 +1129,25 @@ test_that("average() catches a corrupt input the verb itself never checks (#24)"
     average(hd, quality_check = FALSE, verbose = FALSE),
     regexp = "strictly decreasing",
     class  = "horizons_validation_error"
+  )
+
+})
+
+test_that("average() validates the averaged object on return (#24)", {
+
+  ## Arrange — one replicate per sample, so the NA reaches the output as it
+  ## was. The entry check runs at the raw stage, where an NA predictor is
+  ## allowed before replicates are collapsed; only the full check on return
+  ## refuses it.
+  hd <- make_test_hd_average(n_samples = 2, n_reps = 1)
+  hd$data$analysis$wn_500[1] <- NA
+
+  ## Act & Assert --------------------------------------------------------------
+
+  expect_error(
+    average(hd, quality_check = FALSE, verbose = FALSE),
+    "NA values in predictor columns", fixed = TRUE,
+    class = "horizons_validation_error"
   )
 
 })

@@ -236,9 +236,12 @@ test_that("validate_horizons_data errors when analysis exists but role_map missi
   obj <- new_horizons_data(analysis = test_analysis)
 
   ## Act & Assert. The gate carries the class the other failures do (#129).
+  ## The checks after it also name role_map, with the same class, so the
+  ## gate's own message is matched.
   expect_error(
     validate_horizons_data(obj),
-    "role_map",
+    "Object has analysis but no role_map",
+    fixed = TRUE,
     class = "horizons_validation_error"
   )
 
@@ -254,10 +257,11 @@ test_that("validate_horizons_data errors when role_map exists but analysis missi
 
   obj <- new_horizons_data(role_map = test_role_map)
 
-  ## Act & Assert
+  ## Act & Assert. The checks after the gate also name analysis, with the
+  ## same class, so the gate's own message is matched.
   expect_error(
     validate_horizons_data(obj),
-    "analysis",
+    "Object has role_map but no analysis", fixed = TRUE,
     class = "horizons_validation_error"
   )
 

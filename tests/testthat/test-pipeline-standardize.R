@@ -363,6 +363,21 @@ test_that("grid points the data does not reach are dropped with a warning, never
 })
 
 
+test_that("a trim window holding no multiple of the resample step is refused", {
+
+  ## Arrange — 1001 to 1003 holds no multiple of 4, so the grid is empty
+  kssl <- make_axis_spectra(KSSL_WN)
+
+  ## Act & Assert
+  expect_error(
+    no_output(standardize(kssl, resample = 4, trim = c(1001, 1003))),
+    "No multiple of 4 cm-1 between 1001 and 1003 cm-1", fixed = TRUE,
+    class = "horizons_input_error"
+  )
+
+})
+
+
 test_that("an axis already on the canonical grid is not re-interpolated", {
 
   kssl <- make_axis_spectra(rev(KSSL_WN))
