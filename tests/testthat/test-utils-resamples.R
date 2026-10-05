@@ -161,25 +161,6 @@ describe("resample_indices() / rebuild_resamples()", {
 
 describe("rebuilt resamples satisfy the partition invariants", {
 
-  it("keeps analysis and assessment disjoint at both levels", {
-
-    fx <- make_resample_fixture()
-    rb <- rebuild_resamples(fx$split$data,
-                            resample_indices(fx$split, fx$folds))
-
-    expect_length(intersect(rb$split$in_id,
-                            setdiff(seq_len(nrow(fx$data)), rb$split$in_id)), 0)
-
-    n_train <- nrow(rsample::training(rb$split))
-
-    for (s in rb$cv_folds$splits) {
-
-      expect_length(intersect(s$in_id, setdiff(seq_len(n_train), s$in_id)), 0)
-
-    }
-
-  })
-
   it("never puts an outer test row inside a fold", {
 
     ## The load-bearing invariant: the held-out test set must not reach the
