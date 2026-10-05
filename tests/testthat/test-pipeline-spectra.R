@@ -321,6 +321,145 @@ test_that("spectra() from a CSV builds the new_horizons_data() shape", {
 
 
 ## ---------------------------------------------------------------------------
+## spectra() — OPUS files
+## ---------------------------------------------------------------------------
+## fixtures/opus/ holds three real scans (see fixtures/README.md): S01-1.0 and
+## S01-1.1 are two scans of one sample, S02-1.0 a scan of another. Their ids
+## repeat once the extension is stripped, so reading the directory warns about
+## the duplicate, as it does for any Bruker run before average().
+
+opus_dir <- function() testthat::test_path("fixtures", "opus")
+
+read_opus_dir <- function() {
+  expect_warning(
+    result <- spectra(opus_dir(), type = "opus"),
+    "Found duplicate sample_id values: S01-1",
+    fixed = TRUE,
+    class = "horizons_validation_warning"
+  )
+  result
+}
+
+predictor_names <- function(x) {
+  x$data$role_map$variable[x$data$role_map$role == "predictor"]
+}
+
+test_that("spectra() reads a directory of OPUS files, one row per file", {
+
+  ## Act -------------------------------------------------------------------
+
+  result <- read_opus_dir()
+
+  ## Assert ----------------------------------------------------------------
+
+  expect_contract_shape(result)
+  expect_equal(result$provenance$spectra_type, "opus")
+  expect_identical(result$data$analysis$sample_id, c("S01-1", "S01-1", "S02-1"))
+  expect_identical(result$data$analysis$filename, c("S01-1", "S01-1", "S02-1"))
+
+  wavenumbers <- as.numeric(sub("^wn_", "", predictor_names(result)))
+
+  expect_length(wavenumbers, 3578L)
+  expect_false(is.unsorted(rev(wavenumbers), strictly = TRUE))
+  expect_equal(range(wavenumbers), c(599.742, 7497.741), tolerance = 1e-6)
+
+})
+
+test_that("spectra() takes each OPUS file's absorbance block, not a single-channel one", {
+
+  ## Arrange ---------------------------------------------------------------
+
+  ## The absorbance block in this instrument's files is not named "ab", so
+  ## spectra() has to pick it out from the single-channel and interferogram
+  ## blocks beside it.
+  blocks <- opusreader2::read_opus(file.path(opus_dir(), "S02-1.0"))[[1]]
+  absorbance <- stats::setNames(as.numeric(blocks$ab_no_atm_comp$data),
+                                paste0("wn_", blocks$ab_no_atm_comp$wavenumbers))
+  single_channel <- as.numeric(blocks$sc_sample$data)
+
+  ## Act -------------------------------------------------------------------
+
+  result <- read_opus_dir()
+  row <- unlist(result$data$analysis[result$data$analysis$sample_id == "S02-1", names(absorbance)])
+
+  ## Assert ----------------------------------------------------------------
+
+  expect_equal(row, absorbance)
+  expect_false(isTRUE(all.equal(unname(row), single_channel)))
+
+})
+
+test_that("spectra() reads a single OPUS file and detects its type", {
+
+  ## Act -------------------------------------------------------------------
+
+  result <- spectra(file.path(opus_dir(), "S02-1.0"))
+
+  ## Assert ----------------------------------------------------------------
+
+  expect_equal(result$provenance$spectra_type, "opus")
+  expect_identical(result$data$analysis$sample_id, "S02-1")
+  expect_equal(result$data$n_rows, 1)
+
+})
+
+test_that("spectra() detects a directory of OPUS files without being told the type", {
+
+  ## Act -------------------------------------------------------------------
+
+  expect_warning(
+    result <- spectra(opus_dir()),
+    "Found duplicate sample_id values: S01-1",
+    fixed = TRUE,
+    class = "horizons_validation_warning"
+  )
+
+  ## Assert ----------------------------------------------------------------
+
+  expect_equal(result$provenance$spectra_type, "opus")
+  expect_equal(result$data$n_rows, 3)
+
+})
+
+test_that("spectra() refuses a directory with no OPUS files", {
+
+  ## Arrange ---------------------------------------------------------------
+
+  empty <- withr::local_tempdir()
+  writeLines("not a spectrum", file.path(empty, "notes.txt"))
+
+  ## Act and assert --------------------------------------------------------
+
+  ## This abort carries no package class, so the message is the check.
+  expect_error(
+    spectra(empty, type = "opus"),
+    "No OPUS files found in directory",
+    fixed = TRUE
+  )
+
+})
+
+test_that("average() collapses the two scans of one OPUS sample into their mean", {
+
+  ## Arrange ---------------------------------------------------------------
+
+  scans <- read_opus_dir()
+  wn    <- predictor_names(scans)[c(1, 1789, 3578)]
+  s01   <- scans$data$analysis[scans$data$analysis$sample_id == "S01-1", wn]
+
+  ## Act -------------------------------------------------------------------
+
+  result <- average(scans, quality_check = FALSE, verbose = FALSE)
+
+  ## Assert ----------------------------------------------------------------
+
+  expect_identical(result$data$analysis$sample_id, c("S01-1", "S02-1"))
+  expect_equal(unlist(result$data$analysis[1, wn]), colMeans(s01))
+
+})
+
+
+## ---------------------------------------------------------------------------
 ## spectra() — Validation and errors
 ## ---------------------------------------------------------------------------
 
