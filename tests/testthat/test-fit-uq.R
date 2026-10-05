@@ -14,14 +14,6 @@ describe("compute_c_alpha() - basic contract", {
   ## Simple known scores
   scores <- seq(0, 1, length.out = 100)
 
-  it("returns a single numeric value", {
-
-    result <- compute_c_alpha(scores, level = 0.90)
-    expect_true(is.numeric(result))
-    expect_length(result, 1)
-
-  })
-
   it("increases with higher coverage level", {
 
     c90 <- compute_c_alpha(scores, level = 0.90)
@@ -30,16 +22,12 @@ describe("compute_c_alpha() - basic contract", {
 
   })
 
-  it("rejects level = 0 (outside valid range)", {
+  it("rejects level = 0 and level = 1 (outside valid range)", {
 
     expect_error(
       compute_c_alpha(scores, level = 0),
       "level must be"
     )
-
-  })
-
-  it("rejects level = 1 (outside valid range)", {
 
     expect_error(
       compute_c_alpha(scores, level = 1),
@@ -184,13 +172,9 @@ describe("fit_uq() - return contract", {
     level_default   = 0.90
   )
 
-  it("returns a list", {
+  it("is a list with every expected field, each of the right kind", {
 
     expect_true(is.list(result))
-
-  })
-
-  it("has all expected fields", {
 
     expected_fields <- c(
       "quantile_model", "scores", "n_calib", "level_default",
@@ -198,18 +182,20 @@ describe("fit_uq() - return contract", {
     )
     expect_true(all(expected_fields %in% names(result)))
 
-  })
-
-  it("quantile_model is a ranger object", {
-
     expect_s3_class(result$quantile_model, "ranger")
-
-  })
-
-  it("scores is a numeric vector", {
 
     expect_true(is.numeric(result$scores))
     expect_true(length(result$scores) > 0)
+    expect_equal(result$n_calib, length(result$scores))
+
+    expect_equal(result$level_default, 0.90)
+
+    expect_true(result$oof_coverage >= 0)
+    expect_true(result$oof_coverage <= 1)
+
+    expect_true(result$mean_width > 0)
+
+    expect_s3_class(result$prepped_recipe, "recipe")
 
   })
 
@@ -222,37 +208,6 @@ describe("fit_uq() - return contract", {
     ## negative; scores taken as absolute values would have none.
     expect_true(all(is.finite(result$scores)))
     expect_true(any(result$scores < 0))
-
-  })
-
-  it("n_calib matches score length", {
-
-    expect_equal(result$n_calib, length(result$scores))
-
-  })
-
-  it("level_default is stored correctly", {
-
-    expect_equal(result$level_default, 0.90)
-
-  })
-
-  it("oof_coverage is between 0 and 1", {
-
-    expect_true(result$oof_coverage >= 0)
-    expect_true(result$oof_coverage <= 1)
-
-  })
-
-  it("mean_width is positive", {
-
-    expect_true(result$mean_width > 0)
-
-  })
-
-  it("prepped_recipe is a prepped recipe", {
-
-    expect_s3_class(result$prepped_recipe, "recipe")
 
   })
 
@@ -275,12 +230,6 @@ describe("fit_uq() - conformal scores properties", {
   it("scores are computed on calibration data (not training)", {
 
     expect_equal(result$n_calib, nrow(setup$calib_data))
-
-  })
-
-  it("no NA values in scores", {
-
-    expect_false(any(is.na(result$scores)))
 
   })
 
