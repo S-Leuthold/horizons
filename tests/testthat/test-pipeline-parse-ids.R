@@ -128,26 +128,6 @@ test_that("parse_ids() handles complex filenames", {
 ## parse_ids() — sampleid token handling
 ## ---------------------------------------------------------------------------
 
-test_that("parse_ids() sampleid token overwrites sample_id column", {
-
-  ## Arrange ---------------------------------------------------------------
-
-  hd <- make_test_hd(c("PROJ_ABC123_extra", "PROJ_DEF456_extra"))
-
-  ## Assert original sample_id ----------------------------------------------
-
-  expect_equal(hd$data$analysis$sample_id, c("PROJ_ABC123_extra", "PROJ_DEF456_extra"))
-
-  ## Act -------------------------------------------------------------------
-
-  result <- parse_ids(hd, format = "{project}_{sampleid}_{other}")
-
-  ## Assert updated sample_id ----------------------------------------------
-
-  expect_equal(result$data$analysis$sample_id, c("ABC123", "DEF456"))
-
-})
-
 test_that("parse_ids() case-insensitive sampleid variants work", {
 
   variants <- c(
@@ -165,56 +145,6 @@ test_that("parse_ids() case-insensitive sampleid variants work", {
                  info = paste("Failed for format:", fmt))
 
   }
-
-})
-
-test_that("parse_ids() removes sampleid column from meta (no duplicate)", {
-
-  ## Arrange ---------------------------------------------------------------
-
-  hd <- make_test_hd(c("PROJ_S001"))
-
-  ## Act -------------------------------------------------------------------
-
-  result <- parse_ids(hd, format = "{project}_{sampleid}")
-
-  ## Assert ----------------------------------------------------------------
-
-  ## sampleid should not appear as separate column
-
-  expect_false("sampleid" %in% names(result$data$analysis))
-  expect_true("sample_id" %in% names(result$data$analysis))
-
-})
-
-
-## ---------------------------------------------------------------------------
-## parse_ids() — Other tokens create new meta columns
-## ---------------------------------------------------------------------------
-
-test_that("parse_ids() adds new columns to meta", {
-
-  ## Arrange ---------------------------------------------------------------
-
-  hd <- make_test_hd(c("A_B_C"))
-
-  ## Act -------------------------------------------------------------------
-
-  result <- parse_ids(hd, format = "{first}_{second}_{third}")
-
-  ## Assert ----------------------------------------------------------------
-
-  expect_true("first" %in% names(result$data$analysis))
-  expect_true("second" %in% names(result$data$analysis))
-  expect_true("third" %in% names(result$data$analysis))
-
-  ## Check role_map --------------------------------------------------------
-
-  roles <- result$data$role_map
-
-  expect_equal(roles$role[roles$variable == "first"], "meta")
-  expect_equal(roles$role[roles$variable == "second"], "meta")
-  expect_equal(roles$role[roles$variable == "third"], "meta")
 
 })
 
@@ -455,33 +385,19 @@ test_that("parse_ids() strips file extensions before parsing", {
 ## parse_ids() — Warns on non-OPUS sources
 ## ---------------------------------------------------------------------------
 
-test_that("parse_ids() warns when used with CSV source", {
+test_that("parse_ids() warns when used with a CSV or tibble source", {
 
-  ## Arrange ---------------------------------------------------------------
+  for (type in c("csv", "tibble")) {
 
-  hd <- make_test_hd(c("A_B"), spectra_type = "csv")
+    hd <- make_test_hd(c("A_B"), spectra_type = type)
 
-  ## Act & Assert ----------------------------------------------------------
+    expect_warning(
+      parse_ids(hd, format = "{first}_{second}"),
+      "designed for OPUS",
+      info = type
+    )
 
-  expect_warning(
-    parse_ids(hd, format = "{first}_{second}"),
-    "designed for OPUS"
-  )
-
-})
-
-test_that("parse_ids() warns when used with tibble source", {
-
-  ## Arrange ---------------------------------------------------------------
-
-  hd <- make_test_hd(c("A_B"), spectra_type = "tibble")
-
-  ## Act & Assert ----------------------------------------------------------
-
-  expect_warning(
-    parse_ids(hd, format = "{first}_{second}"),
-    "designed for OPUS"
-  )
+  }
 
 })
 
@@ -687,6 +603,11 @@ test_that("parse_ids() puts new columns after filename and recomputes the counts
   expect_identical(result$data$n_predictors, 2L)
   expect_identical(result$data$n_responses,  0L)
 
+  ## The token columns are meta
+  roles <- result$data$role_map
+  expect_identical(roles$role[match(c("project", "fraction"), roles$variable)],
+                   c("meta", "meta"))
+
 })
 
 test_that("parse_ids() refuses a token that names an existing column (#135)", {
@@ -707,30 +628,19 @@ test_that("parse_ids() refuses a token that names an existing column (#135)", {
 ## Helper function tests
 ## ---------------------------------------------------------------------------
 
-test_that("format_to_patterns() converts simple format", {
-
-  ## Act -------------------------------------------------------------------
-  patterns <- horizons:::format_to_patterns("{a}_{b}")
-
-  ## Assert ----------------------------------------------------------------
-
-  expect_length(patterns, 3)
-  expect_equal(names(patterns)[1], "a")
-  expect_equal(names(patterns)[3], "b")
-
-  ## Separator should be "_" (may or may not have name) --------------------
-
-  expect_equal(as.character(patterns[2]), "_")
-
-})
-
-test_that("format_to_patterns() uses non-greedy except last token", {
+test_that("format_to_patterns() names each token, keeps the separators, and is non-greedy except the last token", {
 
   ## Act -------------------------------------------------------------------
 
   patterns <- horizons:::format_to_patterns("{a}_{b}_{c}")
 
   ## Assert ----------------------------------------------------------------
+
+  ## Tokens named by their placeholders, separators in between -------------
+
+  expect_length(patterns, 5)
+  expect_identical(names(patterns)[c(1, 3, 5)], c("a", "b", "c"))
+  expect_identical(as.character(patterns[c(2, 4)]), c("_", "_"))
 
   ## First two tokens should be non-greedy (.+?) ---------------------------
 
@@ -740,25 +650,6 @@ test_that("format_to_patterns() uses non-greedy except last token", {
   ## Last token should be greedy (.+) --------------------------------------
 
   expect_equal(as.character(patterns[5]), "(.+)")
-
-})
-
-test_that("apply_patterns() extracts named groups", {
-
-  ## Arrange ---------------------------------------------------------------
-
-  filenames <- c("A_B_C", "X_Y_Z")
-  patterns  <- c(first = "(.+?)", "_", second = "(.+?)", "_", third = "(.+)")
-
-  ## Act -------------------------------------------------------------------
-
-  result <- horizons:::apply_patterns(filenames, patterns)
-
-  ## Assert ----------------------------------------------------------------
-
-  expect_equal(result$first, c("A", "X"))
-  expect_equal(result$second, c("B", "Y"))
-  expect_equal(result$third, c("C", "Z"))
 
 })
 
