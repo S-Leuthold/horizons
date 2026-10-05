@@ -164,15 +164,6 @@ test_that("the cache file also resolves through the path form", {
 ## Through the verb
 ## ---------------------------------------------------------------------------
 
-test_that("select_training() records which library it drew from", {
-
-  fx  <- select_fixture()
-  out <- select_training(fx$targets, fx$pool, k = 20L, verbose = FALSE)
-
-  expect_identical(out$selection$library$form, "object")
-
-})
-
 test_that("select_training() resolves a library name before anything else", {
 
   expect_error(select_training(select_fixture()$targets, "ksl", verbose = FALSE),
@@ -237,6 +228,9 @@ test_that("a library with no depth column draws from every row and says so", {
   expect_false(out$selection$depth$recorded)
   expect_false(out$selection$depth$applied)
   expect_identical(out$selection$depth$n_eligible, nrow(fx$pool$data$analysis))
+
+  ## The record says which library the draw came from
+  expect_identical(out$selection$library$form, "object")
 
 })
 
@@ -314,19 +308,6 @@ test_that("a window too narrow for the polynomial stops in cm-1 terms", {
 ## ---------------------------------------------------------------------------
 ## Review fixes (2026-09-30)
 ## ---------------------------------------------------------------------------
-
-test_that("a bad argument is reported before a registered library is fetched", {
-
-  entry <- make_mini_ossl(withr::local_tempdir())
-  cache <- local_mini_registry(entry)
-  withr::local_options(horizons.library_download = TRUE)
-
-  expect_error(suppressMessages(capture.output(
-    select_training("not data", "mini", depth = "subsoil", verbose = FALSE))),
-    class = "horizons_input_error", regexp = "depth")
-  expect_length(list.files(cache, all.files = TRUE, no.. = TRUE), 0L)
-
-})
 
 test_that("a horizons_library in memory passes through with its record", {
 
@@ -416,21 +397,36 @@ test_that("the resemblance check is skipped, not failed, when too few rows can b
 
 })
 
-test_that("the space's levers are checked before a registered library is fetched", {
+test_that("a bad argument is reported before a registered library is fetched", {
 
   fx    <- select_fixture()
   entry <- make_mini_ossl(withr::local_tempdir())
   cache <- local_mini_registry(entry)
   withr::local_options(horizons.library_download = TRUE)
 
-  bad <- list(list(mask = "bad"), list(derivative = NA), list(poly = -1),
-              list(ncomp = -1), list(chunk_size = 0), list(window = 1))
+  ## Each case is one mistake. A case may name its own targets and the
+  ## pattern the refusal must carry; the rest draw for the fixture's targets.
+  ## depth is reported even when the targets are wrong too.
+  bad <- list(
+    list(targets = "not data", args = list(depth = "subsoil"), regexp = "depth"),
+    ## the space's levers
+    list(args = list(mask = "bad")), list(args = list(derivative = NA)),
+    list(args = list(poly = -1)), list(args = list(ncomp = -1)),
+    list(args = list(chunk_size = 0)), list(args = list(window = 1)),
+    ## seed and PLS mistakes
+    list(args = list(seed = 2^31)),
+    list(args = list(space = "pls", properties = "clay")),
+    list(args = list(space = "pls", ncomp = 3L, properties = c("clay", "oc")))
+  )
 
-  for (args in bad) {
+  for (case in bad) {
+
+    targets <- if (is.null(case$targets)) fx$targets else case$targets
 
     expect_error(suppressMessages(capture.output(
-      do.call(select_training, c(list(fx$targets, "mini", verbose = FALSE), args)))),
-      class = "horizons_input_error", info = names(args))
+      do.call(select_training, c(list(targets, "mini", verbose = FALSE), case$args)))),
+      class = "horizons_input_error", regexp = case$regexp,
+      info = paste(names(case$args), collapse = ", "))
 
   }
 
@@ -491,29 +487,6 @@ test_that("a character depth column is refused rather than compared as text", {
                class = "horizons_input_error", regexp = "must be numeric")
   expect_no_error(suppressWarnings(
     select_training(fx$targets, fx$pool, k = 20L, depth = "all", verbose = FALSE)))
-
-})
-
-test_that("seed and PLS mistakes are caught before a registered library is fetched", {
-
-  fx    <- select_fixture()
-  entry <- make_mini_ossl(withr::local_tempdir())
-  cache <- local_mini_registry(entry)
-  withr::local_options(horizons.library_download = TRUE)
-
-  bad <- list(list(seed = 2^31),
-              list(space = "pls", properties = "clay"),
-              list(space = "pls", ncomp = 3L, properties = c("clay", "oc")))
-
-  for (args in bad) {
-
-    expect_error(suppressMessages(capture.output(
-      do.call(select_training, c(list(fx$targets, "mini", verbose = FALSE), args)))),
-      class = "horizons_input_error")
-
-  }
-
-  expect_length(list.files(cache, all.files = TRUE, no.. = TRUE), 0L)
 
 })
 
