@@ -145,20 +145,23 @@ test_that("a source that fails its MD5 stops and caches nothing", {
 
 })
 
-test_that("a library built but not moved into the cache stops, classed, and caches nothing", {
+test_that("a library built but not moved into the cache stops, classed, and leaves the cache empty", {
 
   ## The rename after a successful write fails only on a locked or network
   ## filesystem; a qs_save() that writes nothing makes it fail here for want
-  ## of a source file.
+  ## of a source file (base R warns that the rename failed).
   entry <- make_mini_ossl(withr::local_tempdir())
   cache <- local_mini_registry(entry)
   withr::local_options(horizons.library_download = TRUE)
   local_mocked_bindings(qs_save = function(...) invisible(NULL), .package = "qs2")
 
-  expect_error(suppressMessages(resolve_source("mini", verbose = FALSE)),
+  expect_error(suppressWarnings(suppressMessages(resolve_source("mini", verbose = FALSE))),
                "library was built but could not be moved into the cache", fixed = TRUE,
                class = "horizons_build_error")
-  expect_false(file.exists(file.path(cache, "mini_v0.qs2")))
+
+  ## The build downloads into a raw directory in the cache; a failed build
+  ## removes it rather than leaving the downloads behind.
+  expect_length(list.files(cache, all.files = TRUE, no.. = TRUE), 0L)
 
 })
 
