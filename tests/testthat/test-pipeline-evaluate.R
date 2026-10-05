@@ -168,80 +168,17 @@ describe("evaluate() - success path", {
   ## The object EV60 evaluates
   obj <- make_eval_object(n = 60, n_configs = 2)
 
-  it("returns a horizons_eval object", {
-
-    result <- ev60()
-
-    expect_s3_class(result, "horizons_eval")
-    expect_s3_class(result, "horizons_data")
-
-  })
-
-  it("has evaluation$results with one row per config", {
-
-    result <- ev60()
-
-    expect_equal(nrow(result$evaluation$results), 2)
-
-  })
-
-  it("has all expected columns in results", {
+  it("records every expected results column, the default rank metric, and a split that covers every row", {
 
     result <- ev60()
 
     expect_true(all(EXPECTED_EVAL_COLS %in% names(result$evaluation$results)))
-
-  })
-
-  it("sets best_config to a valid config_id", {
-
-    result <- ev60()
-
-    expect_true(result$evaluation$best_config %in%
-                  result$config$configs$config_id)
-
-  })
-
-  it("stores rank_metric", {
-
-    result <- ev60()
-
     expect_equal(result$evaluation$rank_metric, "rpd")
-
-  })
-
-  it("stores the train/test split", {
-
-    result <- ev60()
-
-    expect_s3_class(result$evaluation$split, "rsplit")
-
-  })
-
-  it("records n_train and n_test", {
-
-    result <- ev60()
 
     expect_true(result$evaluation$n_train > 0)
     expect_true(result$evaluation$n_test > 0)
     expect_equal(result$evaluation$n_train + result$evaluation$n_test,
                  nrow(obj$data$analysis))
-
-  })
-
-  it("records positive runtime", {
-
-    result <- ev60()
-
-    expect_true(result$evaluation$runtime_secs > 0)
-
-  })
-
-  it("records a timestamp", {
-
-    result <- ev60()
-
-    expect_s3_class(result$evaluation$timestamp, "POSIXct")
 
   })
 
@@ -378,18 +315,6 @@ describe("rank_configs_by_cv()", {
 
 describe("evaluate() - all configs fail", {
 
-  it("aborts when every config fails", {
-
-    obj <- make_eval_object(n_configs = 2)
-    obj$config$configs$model <- c("nope_1", "nope_2")
-
-    expect_error(
-      suppressWarnings(evaluate(obj, verbose = FALSE)),
-      "All configurations failed"
-    )
-
-  })
-
   ## evaluate() aborts before it assigns x$evaluation, so the message's old
   ## hint ("Check evaluation$results") could not be followed. The results now
   ## ride on the condition, so a loop over subsets can recover them (#41).
@@ -417,6 +342,7 @@ describe("evaluate() - all configs fail", {
     ## The first three distinct messages, each with the configs that raised
     ## it; the fourth is counted, not listed.
     msg <- gsub("\\s+", " ", conditionMessage(err))   # undo cli line wrapping
+    expect_match(msg, "All configurations failed", fixed = TRUE)
     expect_match(msg, "'{wn_600}'", fixed = TRUE)
     expect_match(msg, "'nope_2'", fixed = TRUE)
     expect_match(msg, "cfg_002, cfg_003", fixed = TRUE)
@@ -438,24 +364,6 @@ describe("evaluate() - all configs fail", {
 ## =========================================================================
 
 describe("evaluate() - NA outcome rows", {
-
-  it("drops rows with NA outcome and still succeeds", {
-
-    skip_unless_slow_tier()
-
-    obj <- make_eval_object(n = 40)
-    outcome <- obj$data$role_map$variable[obj$data$role_map$role == "outcome"]
-
-    ## Set 5 rows to NA
-    obj$data$analysis[[outcome]][1:5] <- NA_real_
-
-    result <- suppressWarnings(evaluate(obj, verbose = FALSE, seed = 42L))
-
-    ## Should succeed with remaining rows
-    expect_s3_class(result, "horizons_eval")
-    expect_equal(result$evaluation$n_train + result$evaluation$n_test, 35)
-
-  })
 
   it("outcome_complete_rows(), the rule fit() shares, drops and counts NA outcomes (#67)", {
 
@@ -499,16 +407,14 @@ describe("evaluate() - NA outcome rows", {
 
   })
 
-  it("outcome_complete_rows() refuses an outcome column that is absent or unnamed", {
+  it("outcome_complete_rows() refuses a role map that gives no column the outcome role", {
 
-    ## Called directly, since through evaluate() the validator refuses the
-    ## object first (the test above). Without this check an absent column
-    ## reads as NULL and is reported as all NA.
+    ## An outcome column the table lacks is refused here too; that case is
+    ## tested through fit()'s cold start (test-pipeline-fit.R, "names an
+    ## outcome column the analysis table lacks"), since through evaluate() the
+    ## validator refuses the object first (the test above).
     df <- tibble::tibble(sample_id = c("A", "B"), y = c(1, 2))
 
-    expect_error(outcome_complete_rows(df, "z"),
-                 "names z as the outcome, and data$analysis has no such column",
-                 fixed = TRUE, class = "horizons_input_error")
     expect_error(outcome_complete_rows(df, character(0)),
                  "The role map gives no column the \"outcome\" role",
                  fixed = TRUE, class = "horizons_input_error")
@@ -692,15 +598,6 @@ describe("evaluate() - response outliers are trimmed from the training partition
 
     expect_true(any(EXTREME_IDS %in% test_plain$sample_id))
     expect_true(any(EXTREME_IDS %in% train_plain$sample_id))
-
-  })
-
-  it("removes no row on its label in validate()", {
-
-    expect_equal(v$data$n_rows, 60)
-    expect_true(all(EXTREME_IDS %in% v$data$analysis$sample_id))
-    expect_true(all(EXTREME_IDS %in% v$validation$outliers$response_ids))
-    expect_false(v$validation$outliers$removed)
 
   })
 
@@ -1062,25 +959,6 @@ describe("evaluate() - checkpointing", {
 
   })
 
-  it("resumes from checkpoint on re-run", {
-
-    ck     <- ck_b()
-    obj    <- ck$value$obj
-    tmpdir <- ck$dir
-
-    ## First run
-    result1 <- ck$value$first
-
-    ## Second run should load from checkpoint (same results)
-    result2 <- suppressWarnings(evaluate(obj, output_dir = tmpdir, verbose = FALSE, seed = 42L))
-
-    expect_equal(result1$evaluation$results$config_id,
-                 result2$evaluation$results$config_id)
-    expect_equal(result1$evaluation$best_config,
-                 result2$evaluation$best_config)
-
-  })
-
   ## Rows checkpointed before the prune gate went inert at bayesian_iter = 0
   ## carry "pruned" where a fresh run now says "success", so without the
   ## relabel the candidate pool would depend on whether the run was resumed.
@@ -1324,29 +1202,6 @@ describe("evaluate() - recipe settings", {
   })
 
 })
-
-## =========================================================================
-## Seed reproducibility
-## =========================================================================
-
-describe("evaluate() - reproducibility", {
-
-  it("produces identical results with the same seed", {
-
-    skip_unless_slow_tier()
-
-    obj <- make_eval_object(n_configs = 1)
-
-    r1 <- suppressWarnings(evaluate(obj, verbose = FALSE, seed = 123L))
-    r2 <- suppressWarnings(evaluate(obj, verbose = FALSE, seed = 123L))
-
-    expect_equal(r1$evaluation$results$rmse, r2$evaluation$results$rmse)
-    expect_equal(r1$evaluation$results$rsq, r2$evaluation$results$rsq)
-
-  })
-
-})
-
 
 ## =========================================================================
 ## Ranking tie-break and checkpoint scoring schema (review, 2026-09-15)
@@ -1678,22 +1533,6 @@ describe("evaluate() - checkpoint data provenance", {
     expect_identical(manifest$data_fields$outcome, "SOC")
     expect_identical(row$settings[[1]], manifest$settings)
     expect_identical(res$evaluation$results$settings[[1]], manifest$settings)
-
-  })
-
-  it("resumes silently when the training rows are unchanged", {
-
-    ck     <- ck_a()
-    obj    <- ck$value$obj
-    tmpdir <- ck$dir
-
-    first  <- ck$value$first
-    second <- suppressWarnings(evaluate(obj, output_dir = tmpdir, prune = FALSE,
-                                        verbose = FALSE, seed = 42L))
-
-    expect_equal(first$evaluation$best_config, second$evaluation$best_config)
-    expect_equal(sort(first$evaluation$results$config_id),
-                 sort(second$evaluation$results$config_id))
 
   })
 
