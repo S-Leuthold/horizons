@@ -181,6 +181,10 @@ bake.step_select_correlation <- function(object, new_data, ...) {
     cli::cli_abort("This step has not been trained yet. Please call `prep()` first.")
   }
 
+  if (!all(object$selected_vars %in% names(new_data))) {
+    cli::cli_abort("Some selected wavenumbers are missing in new_data.")
+  }
+
   original_predictors <- object$columns
   other_cols          <- setdiff(names(new_data), original_predictors)
   keep_cols           <- c(object$selected_vars, other_cols)
