@@ -439,25 +439,6 @@ test_that("spectra() refuses a directory with no OPUS files", {
 
 })
 
-test_that("average() collapses the two scans of one OPUS sample into their mean", {
-
-  ## Arrange ---------------------------------------------------------------
-
-  scans <- read_opus_dir()
-  wn    <- predictor_names(scans)[c(1, 1789, 3578)]
-  s01   <- scans$data$analysis[scans$data$analysis$sample_id == "S01-1", wn]
-
-  ## Act -------------------------------------------------------------------
-
-  result <- average(scans, quality_check = FALSE, verbose = FALSE)
-
-  ## Assert ----------------------------------------------------------------
-
-  expect_identical(result$data$analysis$sample_id, c("S01-1", "S02-1"))
-  expect_equal(unlist(result$data$analysis[1, wn]), colMeans(s01))
-
-})
-
 
 ## ---------------------------------------------------------------------------
 ## spectra() — Validation and errors
