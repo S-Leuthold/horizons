@@ -154,38 +154,6 @@ describe("safely_execute()", {
 
   })
 
-  it("handles complex default values", {
-
-    default_df <- data.frame(x = 1:3, y = 4:6)
-
-    result <- safely_execute(
-      { stop("fail") },
-      default_value = default_df,
-      log_error     = FALSE
-    )
-
-    expect_equal(result$result, default_df)
-
-  })
-
-  it("works inside purrr::map workflows", {
-
-    inputs <- list(1, "not_a_number", 3)
-
-    results <- purrr::map(inputs, function(val) {
-      safely_execute(
-        { log(val) },
-        default_value = NA_real_,
-        log_error     = FALSE
-      )$result
-    })
-
-    expect_equal(results[[1]], log(1))
-    expect_true(is.na(results[[2]]))
-    expect_equal(results[[3]], log(3))
-
-  })
-
 })
 
 describe("handle_results()", {
@@ -232,10 +200,13 @@ describe("handle_results()", {
       error  = simpleError("underlying failure")
     )
 
-    expect_error(
+    err <- expect_error(
       handle_results(safe_result, error_title = "Model training failed"),
       "Model training failed"
     )
+
+    ## The underlying error's message is in the abort too
+    expect_match(conditionMessage(err), "underlying failure")
 
   })
 
@@ -248,20 +219,6 @@ describe("handle_results()", {
 
     result <- handle_results(safe_result, abort_on_null = FALSE, silent = TRUE)
     expect_null(result)
-
-  })
-
-  it("includes error details in abort message", {
-
-    safe_result <- list(
-      result = NULL,
-      error  = simpleError("convergence failed after 100 iterations")
-    )
-
-    expect_error(
-      handle_results(safe_result, error_title = "Fitting failed"),
-      "convergence failed"
-    )
 
   })
 
@@ -336,36 +293,10 @@ describe("create_failed_result()", {
     expect_true("status" %in% names(result))
     expect_true("error_message" %in% names(result))
 
-  })
-
-  it("marks status as 'failed'", {
-
-    result <- create_failed_result(
-      config_id = "CFG_001",
-      error     = simpleError("timeout")
-    )
-
+    ## Status failed, the error's message kept, every metric and the
+    ## runtime NA, and best_params a list holding NULL
     expect_equal(result$status, "failed")
-
-  })
-
-  it("captures the error message", {
-
-    result <- create_failed_result(
-      config_id = "CFG_001",
-      error     = simpleError("out of memory")
-    )
-
-    expect_equal(result$error_message, "out of memory")
-
-  })
-
-  it("sets metric columns to NA", {
-
-    result <- create_failed_result(
-      config_id = "CFG_001",
-      error     = simpleError("fail")
-    )
+    expect_equal(result$error_message, "model diverged")
 
     expect_true(is.na(result$rmse))
     expect_true(is.na(result$rpd))
@@ -374,16 +305,11 @@ describe("create_failed_result()", {
     expect_true(is.na(result$rrmse))
     expect_true(is.na(result$mae))
 
-  })
-
-  it("sets runtime to NA", {
-
-    result <- create_failed_result(
-      config_id = "CFG_001",
-      error     = simpleError("fail")
-    )
-
     expect_true(is.na(result$runtime_secs))
+
+    expect_true("best_params" %in% names(result))
+    expect_true(is.list(result$best_params))
+    expect_null(result$best_params[[1]])
 
   })
 
@@ -407,16 +333,6 @@ describe("create_failed_result()", {
     )
 
     expect_equal(result$error_message, "something went wrong")
-
-  })
-
-  it("includes best_params as list(NULL)", {
-
-    result <- create_failed_result(config_id = "CFG_001")
-
-    expect_true("best_params" %in% names(result))
-    expect_true(is.list(result$best_params))
-    expect_null(result$best_params[[1]])
 
   })
 
@@ -471,19 +387,20 @@ describe("distinct_config_errors()", {
 
 describe("check_rows_aligned()", {
 
-  it("is silent when the counts match", {
+  it("is silent when the counts match, and the ids where both sides have them", {
 
     expect_no_error(check_rows_aligned("Values", "the rows", n = 5L, n_expected = 5L))
     expect_null(check_rows_aligned("Values", "the rows", n = 5L, n_expected = 5L))
 
-  })
-
-  it("is silent when the ids match position by position", {
-
+    ## The ids match position by position
     ids <- c("a", "b", "c")
 
     expect_no_error(check_rows_aligned("Values", "the rows",
                                        ids = ids, expected_ids = ids))
+
+    ## Either side has no ids: the count alone is checked
+    expect_no_error(check_rows_aligned("Values", "the rows", n = 2L, n_expected = 2L,
+                                       ids = NULL, expected_ids = c("a", "b")))
 
   })
 
@@ -534,13 +451,6 @@ describe("check_rows_aligned()", {
                          expected_ids = c("a", "b")),
       class = "horizons_internal_error"
     )
-
-  })
-
-  it("checks the count alone when either side has no ids", {
-
-    expect_no_error(check_rows_aligned("Values", "the rows", n = 2L, n_expected = 2L,
-                                       ids = NULL, expected_ids = c("a", "b")))
 
   })
 

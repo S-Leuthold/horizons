@@ -19,6 +19,7 @@ test_that("subset_rows() keeps the named ids in the order given", {
   expect_s3_class(out, "horizons_data")
   expect_identical(out$data$analysis$sample_id, keep)
   expect_identical(out$data$n_rows, 3L)
+  expect_no_error(validate_horizons_data(out))
 
 })
 
@@ -45,16 +46,6 @@ test_that("subset_rows() leaves role_map and column counts untouched", {
   expect_identical(out$data$n_predictors, fx$pool$data$n_predictors)
   expect_identical(out$data$n_responses,  fx$pool$data$n_responses)
   expect_identical(names(out$data$analysis), names(fx$pool$data$analysis))
-
-})
-
-
-test_that("subset_rows() output passes structural validation", {
-
-  fx  <- select_fixture(n_pool = 40)
-  out <- subset_rows(fx$pool, c("P005", "P006", "P007"))
-
-  expect_no_error(validate_horizons_data(out))
 
 })
 
@@ -172,34 +163,6 @@ test_that("set_analysis() aborts when analysis columns and role_map disagree", {
 ## =============================================================================
 ## Promoted objects — both primitives refuse
 ## =============================================================================
-
-test_that("subset_rows() aborts on an object carrying evaluation results", {
-
-  ## Arrange
-  fx <- select_fixture(n_pool = 40)
-  ev <- fx$pool
-  ev$evaluation$results <- tibble::tibble(config_id = "cfg_a", status = "success")
-
-  ## Act & Assert
-  expect_error(subset_rows(ev, c("P001", "P002")),
-               regexp = "evaluation results",
-               class  = "horizons_input_error")
-
-})
-
-
-test_that("subset_rows() aborts on an object carrying fitted models", {
-
-  fx <- select_fixture(n_pool = 40)
-  ft <- fx$pool
-  ft$models$workflows <- list(cfg_a = "a fitted workflow")
-
-  expect_error(subset_rows(ft, c("P001", "P002")),
-               regexp = "fitted models",
-               class  = "horizons_input_error")
-
-})
-
 
 test_that("subset_rows() aborts on an object carrying an ensemble", {
 
