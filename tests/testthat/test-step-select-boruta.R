@@ -361,3 +361,71 @@ describe("step_select_boruta() inside resampling (#75)", {
   })
 
 })
+
+## =========================================================================
+## Input the step cannot use
+## =========================================================================
+##
+## These aborts carry no package class, so each test matches the finding's
+## own text.
+
+describe("step_select_boruta() refuses input it cannot use", {
+
+  it("aborts at prep when the outcome is not in the training data", {
+
+    ## Arrange
+    d   <- boruta_signal_data()
+    rec <- recipes::recipe(SOC ~ ., data = d) |>
+      step_select_boruta(dplyr::matches("^spec[0-9]+$"), outcome = "clay")
+
+    ## Act & Assert
+    expect_error(recipes::prep(rec, training = d),
+                 "not found in training data", fixed = TRUE)
+
+  })
+
+  it("aborts at bake when the step has not been trained", {
+
+    ## Arrange
+    d   <- boruta_signal_data()
+    rec <- boruta_recipe(d)
+
+    ## Act & Assert. bake() on the recipe refuses an untrained recipe before
+    ## any step runs, so the step itself is baked.
+    expect_error(recipes::bake(rec$steps[[1]], new_data = d),
+                 "This step has not been trained yet", fixed = TRUE)
+
+  })
+
+  it("aborts at bake when new data lacks a wavenumber it selected", {
+
+    skip_if_not_installed("Boruta")
+
+    ## Arrange: recipes refuses new data missing an original predictor before
+    ## any step bakes, so the step selects the transform step's output, and
+    ## the transform is skipped at bake. The stand-in confirms every
+    ## attribute.
+    local_mocked_bindings(
+      Boruta = mock_boruta_deciding(function(nm) rep("Confirmed", length(nm))),
+      .package = "Boruta"
+    )
+
+    d        <- boruta_signal_data(n = 30, p = 36)
+    names(d) <- sub("^spec", "wn_", names(d))
+
+    rec <- recipes::recipe(SOC ~ ., data = d) |>
+      step_transform_spectra(dplyr::starts_with("wn_"), preprocessing = "raw",
+                             skip = TRUE) |>
+      step_select_boruta(dplyr::matches("^spec[0-9]+$"), outcome = "SOC")
+
+    prepped <- recipes::prep(rec, training = d)
+
+    expect_length(prepped$steps[[2]]$selected_vars, 28L)
+
+    ## Act & Assert
+    expect_error(recipes::bake(prepped, new_data = d),
+                 "Some selected wavenumbers are missing in new_data.", fixed = TRUE)
+
+  })
+
+})
