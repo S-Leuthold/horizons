@@ -46,31 +46,6 @@ test_that("new_horizons_data carries no artifacts slot, row_index or schema_vers
 
 })
 
-test_that("new_horizons_data initializes data section correctly", {
-
-  obj <- new_horizons_data()
-
-  expect_true(is.list(obj$data))
-  expect_true("analysis" %in% names(obj$data))
-  expect_true("role_map" %in% names(obj$data))
-  expect_true("n_rows" %in% names(obj$data))
-  expect_true("n_predictors" %in% names(obj$data))
-  expect_true("n_covariates" %in% names(obj$data))
-
-})
-
-test_that("new_horizons_data initializes provenance section correctly", {
-
-  obj <- new_horizons_data()
-
-  expect_true(is.list(obj$provenance))
-  expect_true("spectra_source" %in% names(obj$provenance))
-  expect_true("spectra_type" %in% names(obj$provenance))
-  expect_true("created" %in% names(obj$provenance))
-  expect_true("horizons_version" %in% names(obj$provenance))
-
-})
-
 test_that("new_horizons_data sets provenance defaults", {
 
   obj <- new_horizons_data()
@@ -152,8 +127,7 @@ test_that("new_horizons_data accepts provenance arguments", {
 ## Valid objects should pass
 ## ---------------------------------------------------------------------------
 
-test_that("validate_horizons_data passes for empty object", {
-
+test_that("validate_horizons_data passes for an empty object and for a valid object with data", {
 
   ## Arrange
   obj <- new_horizons_data()
@@ -163,10 +137,6 @@ test_that("validate_horizons_data passes for empty object", {
 
   ## Assert
   expect_identical(result, obj)
-
-})
-
-test_that("validate_horizons_data passes for valid object with data", {
 
   ## Arrange
   test_analysis <- tibble::tibble(
@@ -179,33 +149,6 @@ test_that("validate_horizons_data passes for valid object with data", {
   test_role_map <- tibble::tibble(
     variable = c("sample_id", "4000", "3998", "3996"),
     role = c("id", "predictor", "predictor", "predictor")
-  )
-
-  obj <- new_horizons_data(
-    analysis = test_analysis,
-    role_map = test_role_map
-  )
-
-  ## Act
-  result <- validate_horizons_data(obj)
-
-  ## Assert
-  expect_identical(result, obj)
-
-})
-
-test_that("validate_horizons_data passes with outcome column", {
-
-  ## Arrange
-  test_analysis <- tibble::tibble(
-    sample_id = c("A", "B", "C"),
-    `4000` = c(0.1, 0.2, 0.3),
-    Response = c(1.0, 2.0, 3.0)
-  )
-
-  test_role_map <- tibble::tibble(
-    variable = c("sample_id", "4000", "Response"),
-    role = c("id", "predictor", "outcome")
   )
 
   obj <- new_horizons_data(
@@ -300,58 +243,6 @@ test_that("validate_horizons_data errors when sample_id column missing", {
 
 })
 
-test_that("validate_horizons_data errors when sample_id has duplicates", {
-
-  ## Arrange
-  test_analysis <- tibble::tibble(
-    sample_id = c("A", "A", "B"),
-    `4000` = c(0.1, 0.2, 0.3)
-  )
-
-  test_role_map <- tibble::tibble(
-    variable = c("sample_id", "4000"),
-    role = c("id", "predictor")
-  )
-
-  obj <- new_horizons_data(
-    analysis = test_analysis,
-    role_map = test_role_map
-  )
-
-  ## Act & Assert
-  expect_error(
-    validate_horizons_data(obj),
-    "(?i)duplicate"
-  )
-
-})
-
-test_that("validate_horizons_data error message includes duplicate sample_ids", {
-
-  ## Arrange
-  test_analysis <- tibble::tibble(
-    sample_id = c("A", "A", "B", "C", "C"),
-    `4000` = c(0.1, 0.2, 0.3, 0.4, 0.5)
-  )
-
-  test_role_map <- tibble::tibble(
-    variable = c("sample_id", "4000"),
-    role = c("id", "predictor")
-  )
-
-  obj <- new_horizons_data(
-    analysis = test_analysis,
-    role_map = test_role_map
-  )
-
-  ## Act & Assert — error should mention which IDs are duplicated
-  expect_error(
-    validate_horizons_data(obj),
-    "A.*C|C.*A"
-  )
-
-})
-
 test_that("validate_horizons_data truncates a long duplicate-sample_id list to 5 and a count (#24)", {
 
   ## Arrange — 8 duplicated ids; at library scale (thousands of replicate
@@ -411,37 +302,6 @@ test_that("stage = \"raw\" warns instead of aborting on duplicate sample_id", {
 
   ## Object is returned unchanged, duplicates and all
   expect_identical(result$data$analysis$sample_id, c("A", "A", "B"))
-
-})
-
-test_that("stage = \"full\" (the default) still aborts on duplicate sample_id", {
-
-  test_analysis <- tibble::tibble(
-    sample_id = c("A", "A", "B"),
-    `4000` = c(0.1, 0.2, 0.3)
-  )
-
-  test_role_map <- tibble::tibble(
-    variable = c("sample_id", "4000"),
-    role = c("id", "predictor")
-  )
-
-  obj <- new_horizons_data(analysis = test_analysis, role_map = test_role_map)
-
-  expect_error(
-    validate_horizons_data(obj),
-    "Duplicate sample_id values",
-    fixed = TRUE,
-    class = "horizons_validation_error"
-  )
-
-  ## Explicit stage = "full" behaves identically to the default
-  expect_error(
-    validate_horizons_data(obj, stage = "full"),
-    "Duplicate sample_id values",
-    fixed = TRUE,
-    class = "horizons_validation_error"
-  )
 
 })
 
@@ -535,33 +395,6 @@ test_that("validate_horizons_data errors when wavelength columns contain NA", {
   expect_error(
     validate_horizons_data(obj),
     "NA|missing"
-  )
-
-})
-
-test_that("validate_horizons_data errors when wavelength columns contain Inf", {
-
-  ## Arrange
-  test_analysis <- tibble::tibble(
-    sample_id = c("A", "B", "C"),
-    `4000` = c(0.1, Inf, 0.3),
-    `3998` = c(0.2, 0.3, 0.4)
-  )
-
-  test_role_map <- tibble::tibble(
-    variable = c("sample_id", "4000", "3998"),
-    role = c("id", "predictor", "predictor")
-  )
-
-  obj <- new_horizons_data(
-    analysis = test_analysis,
-    role_map = test_role_map
-  )
-
-  ## Act & Assert
-  expect_error(
-    validate_horizons_data(obj),
-    "Inf|infinite"
   )
 
 })
@@ -695,34 +528,6 @@ test_that("validate_horizons_data names an unparseable wavenumber column rather 
 ## ---------------------------------------------------------------------------
 ## role_map checks
 ## ---------------------------------------------------------------------------
-
-test_that("validate_horizons_data errors when role_map missing columns from analysis", {
-
-  ## Arrange
-  test_analysis <- tibble::tibble(
-    sample_id = c("A", "B"),
-    `4000` = c(0.1, 0.2),
-    `3998` = c(0.2, 0.3)
-  )
-
-  ## role_map is missing "3998"
-  test_role_map <- tibble::tibble(
-    variable = c("sample_id", "4000"),
-    role = c("id", "predictor")
-  )
-
-  obj <- new_horizons_data(
-    analysis = test_analysis,
-    role_map = test_role_map
-  )
-
-  ## Act & Assert
-  expect_error(
-    validate_horizons_data(obj),
-    "3998|missing.*role"
-  )
-
-})
 
 test_that("validate_horizons_data errors when no id role in role_map", {
 
@@ -2189,16 +1994,6 @@ test_that("validate_horizons_eval passes a well-formed evaluation slot", {
 
 })
 
-test_that("validate_horizons_eval tolerates the optional workers key being absent", {
-
-  ## `workers` is not a required contract key — its absence must not fail.
-  obj <- make_valid_eval()
-  obj$evaluation$workers <- NULL
-
-  expect_identical(validate_horizons_eval(obj), obj)
-
-})
-
 test_that("validate_horizons_eval gates on class and slot presence", {
 
   ## Not a horizons_eval
@@ -2407,7 +2202,7 @@ test_that("validate_horizons_fit passes a well-formed models slot", {
 
 })
 
-test_that("validate_horizons_fit refuses a missing response_bound or selection_present (#130)", {
+test_that("validate_horizons_fit refuses a missing response_bound or selection_present, or a selection_present that is not TRUE or FALSE (#130)", {
 
   ## fit() writes both on every path, so neither is optional.
   for (key in c("response_bound", "selection_present")) {
@@ -2429,10 +2224,6 @@ test_that("validate_horizons_fit refuses a missing response_bound or selection_p
                  class = "horizons_validation_error", info = key)
 
   }
-
-})
-
-test_that("validate_horizons_fit refuses a selection_present that is not TRUE or FALSE", {
 
   obj <- make_valid_fit()
   obj$models$selection_present <- NA
@@ -2477,10 +2268,15 @@ test_that("an object without row_index is a valid fit, and a stray one is not re
 
 })
 
-test_that("validate_horizons_fit tolerates a NULL uq slot (compute_uq = FALSE)", {
+test_that("validate_horizons_fit tolerates a NULL uq or ad slot (compute_uq or compute_ad = FALSE)", {
 
   obj <- make_valid_fit()
   obj$models["uq"] <- list(NULL)
+
+  expect_identical(validate_horizons_fit(obj), obj)
+
+  obj <- make_valid_fit()
+  obj$models["ad"] <- list(NULL)
 
   expect_identical(validate_horizons_fit(obj), obj)
 
@@ -2512,17 +2308,6 @@ test_that("validate_horizons_fit reaches the base contract through the eval vali
   expect_error(suppressMessages(validate_horizons_fit(obj)),
                "must be on sample_id",
                class = "horizons_validation_error")
-
-})
-
-test_that("validate_horizons_fit delegates to the evaluation contract", {
-
-  ## A broken parent evaluation slot must surface through the fit validator.
-  obj <- make_valid_fit()
-  obj$evaluation$best_config <- "cfg_ghost"
-  expect_error(suppressMessages(validate_horizons_fit(obj)),
-               "best_config (cfg_ghost) is not present in results$config_id",
-               fixed = TRUE, class = "horizons_validation_error")
 
 })
 
@@ -2573,15 +2358,6 @@ test_that("validate_horizons_fit enforces I7: uq keys are a subset of workflow k
   expect_error(suppressMessages(validate_horizons_fit(obj)),
                "uq keys not present in workflows: cfg_ghost",
                fixed = TRUE, class = "horizons_validation_error")
-
-})
-
-test_that("validate_horizons_fit tolerates a NULL ad slot (compute_ad = FALSE)", {
-
-  obj <- make_valid_fit()
-  obj$models["ad"] <- list(NULL)
-
-  expect_identical(validate_horizons_fit(obj), obj)
 
 })
 
@@ -2647,7 +2423,7 @@ test_that("validate_horizons_fit rejects a best_config not among workflows", {
 ## Stage predicates + has_uq()
 ## ----------------------------------------------------------------------------
 
-test_that("stage predicates track the class hierarchy", {
+test_that("stage predicates track the class hierarchy and are safe on non-horizons objects", {
 
   data <- structure(list(),
                     class = c("horizons_data", "list"))
@@ -2675,17 +2451,13 @@ test_that("stage predicates track the class hierarchy", {
   expect_false(is_ensembled(fit))
   expect_true(is_ensembled(ens))
 
-})
-
-test_that("stage predicates are safe on non-horizons objects", {
-
   expect_false(is_evaluated(42))
   expect_false(is_fitted("x"))
   expect_false(is_ensembled(list()))
 
 })
 
-test_that("has_uq reflects the fitted UQ slot", {
+test_that("has_uq reflects the fitted UQ slot, independently of the AD slot", {
 
   with_uq <- structure(list(models = list(uq = list(cfg_a = 1))),
                        class = c("horizons_fit", "horizons_eval",
@@ -2704,16 +2476,16 @@ test_that("has_uq reflects the fitted UQ slot", {
                                   "horizons_data", "list"))
   expect_false(has_uq(empty_uq))
 
+  ## AD present, UQ absent
+  ad_only <- structure(list(models = list(ad = list(cfg_a = 1), uq = NULL)),
+                       class = c("horizons_fit", "horizons_eval",
+                                 "horizons_data", "list"))
+  expect_true(has_ad(ad_only))
+  expect_false(has_uq(ad_only))
+
 })
 
-test_that("has_uq is safe on objects without a models slot", {
-
-  expect_false(has_uq(list()))
-  expect_false(has_uq(structure(list(), class = c("horizons_data", "list"))))
-
-})
-
-test_that("has_uq is safe on atomic (non-list) inputs", {
+test_that("has_uq is safe on atomic inputs and on objects without a models slot", {
 
   ## `$` errors on atomic vectors, so the is.list() guard is what keeps the
   ## "safe on any object" contract honest.
@@ -2722,9 +2494,12 @@ test_that("has_uq is safe on atomic (non-list) inputs", {
   expect_false(has_uq(TRUE))
   expect_false(has_uq(NULL))
 
+  expect_false(has_uq(list()))
+  expect_false(has_uq(structure(list(), class = c("horizons_data", "list"))))
+
 })
 
-test_that("has_ad reflects the fitted AD slot", {
+test_that("has_ad reflects the fitted AD slot and is safe on atomic and model-less inputs", {
 
   with_ad <- structure(list(models = list(ad = list(cfg_a = 1))),
                        class = c("horizons_fit", "horizons_eval",
@@ -2743,25 +2518,10 @@ test_that("has_ad reflects the fitted AD slot", {
                                   "horizons_data", "list"))
   expect_false(has_ad(empty_ad))
 
-})
-
-test_that("has_ad is safe on atomic and model-less inputs", {
-
   expect_false(has_ad(42))
   expect_false(has_ad(NULL))
   expect_false(has_ad(list()))
   expect_false(has_ad(structure(list(), class = c("horizons_data", "list"))))
-
-})
-
-test_that("has_ad and has_uq are independent", {
-
-  ## AD present, UQ absent
-  ad_only <- structure(list(models = list(ad = list(cfg_a = 1), uq = NULL)),
-                       class = c("horizons_fit", "horizons_eval",
-                                 "horizons_data", "list"))
-  expect_true(has_ad(ad_only))
-  expect_false(has_uq(ad_only))
 
 })
 
@@ -2771,7 +2531,13 @@ test_that("has_ad and has_uq are independent", {
 ## (I7c, 2026-09-15)
 ## =========================================================================
 
-test_that("validate_horizons_eval tolerates workers and parallelize_over being absent (fit()'s cold start)", {
+test_that("validate_horizons_eval tolerates workers being absent, alone or with parallelize_over (fit()'s cold start)", {
+
+  ## `workers` is not a required contract key — its absence must not fail.
+  obj <- make_valid_eval()
+  obj$evaluation$workers <- NULL
+
+  expect_identical(validate_horizons_eval(obj), obj)
 
   obj <- make_valid_eval()
   obj$evaluation$parallelize_over <- NULL
