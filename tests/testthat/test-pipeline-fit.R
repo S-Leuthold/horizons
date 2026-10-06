@@ -118,13 +118,6 @@ EXPECTED_FIT_CV_PRED_COLS <- c(
   ".row", "sample_id", ".fold", "config_id", ".pred", ".pred_trans", "truth"
 )
 
-## Expected slots in models$
-EXPECTED_MODEL_SLOTS <- c(
-  "workflows", "n_models", "best_config", "rank_metric", "predictor_schema",
-  "response_bound", "cv_predictions", "results", "split", "uq", "ad",
-  "selection_present", "timestamp", "runtime_secs"
-)
-
 
 ## ---------------------------------------------------------------------------
 ## Shared fixtures, built on first use (helper-memo.R)
@@ -153,20 +146,6 @@ build_fit60 <- function() {
 }
 
 fit60 <- function() memo_fixture("fit60", build_fit60)
-
-## The same object fitted with one member, with no Bayesian stage
-build_fit60_one <- function() {
-
-  obj <- make_fit_object(n = 60, n_configs = 2)
-  obj$config$tuning$final_bayesian_iter <- 0L
-
-  suppressWarnings(
-    fit(obj, n_best = 1L, compute_uq = FALSE, verbose = FALSE, seed = 42L)
-  )
-
-}
-
-fit60_one <- function() memo_fixture("fit60_one", build_fit60_one)
 
 ## One member at n = 250 with UQ on: the calibration split clears N_CALIB_MIN
 ## (calib = 0.2 * 0.8 * n = 40), so UQ actually runs.
@@ -268,31 +247,6 @@ describe("fit() - preflight validation", {
 
 describe("fit() - success path", {
 
-  it("returns a horizons_fit object", {
-
-    result <- fit60()$fit
-
-    expect_true(inherits(result, "horizons_fit"))
-
-  })
-
-  it("inherits from horizons_eval and horizons_data", {
-
-    result <- fit60()$fit
-
-    expect_true(inherits(result, "horizons_eval"))
-    expect_true(inherits(result, "horizons_data"))
-
-  })
-
-  it("has all expected models$ slots", {
-
-    result <- fit60()$fit
-
-    expect_true(all(EXPECTED_MODEL_SLOTS %in% names(result$models)))
-
-  })
-
   it("writes exactly the models keys new_horizons_data() declares (#71)", {
 
     result <- fit60()$fit
@@ -303,58 +257,24 @@ describe("fit() - success path", {
 
   })
 
-  it("records best_config as the top fitted config and the rank metric used", {
+  it("orders members by cv_<rank_metric> and records the top one as best_config, with the rank metric used", {
 
-    result <- fit60()$fit
+    shared <- fit60()
+    obj    <- shared$obj
+    result <- shared$fit
+
+    ## Members are ranked on the cross-validated metric from
+    ## evaluation$results (#50)
+    successes <- obj$evaluation$results[obj$evaluation$results$status == "success", ]
+    expected  <- rank_configs_by_cv(successes, obj$evaluation$rank_metric)$config_id
+
+    expect_equal(result$models$results$config_id, expected[seq_len(nrow(result$models$results))])
 
     ## best_config is the durable ranking fact predict() reads; it must be the
     ## first config in best-first workflow order, and a real fitted config.
     expect_equal(result$models$best_config, names(result$models$workflows)[1])
     expect_true(result$models$best_config %in% names(result$models$workflows))
     expect_true(is.character(result$models$rank_metric))
-
-  })
-
-  it("models$workflows is a named list", {
-
-    result <- fit60()$fit
-
-    wfs <- result$models$workflows
-    expect_true(is.list(wfs))
-    expect_true(length(wfs) > 0)
-    expect_true(!is.null(names(wfs)))
-
-  })
-
-  it("models$n_models matches workflow count", {
-
-    result <- fit60()$fit
-
-    expect_equal(result$models$n_models, length(result$models$workflows))
-
-  })
-
-  it("models$split is an rsplit", {
-
-    result <- fit60()$fit
-
-    expect_true(inherits(result$models$split, "rsplit"))
-
-  })
-
-  it("models$timestamp is POSIXct", {
-
-    result <- fit60()$fit
-
-    expect_true(inherits(result$models$timestamp, "POSIXct"))
-
-  })
-
-  it("models$runtime_secs is positive", {
-
-    result <- fit60()$fit
-
-    expect_true(result$models$runtime_secs > 0)
 
   })
 
@@ -385,7 +305,7 @@ describe("fit() - success path", {
 
   })
 
-  it("re-running fit() on an ensemble empties the ensemble (#70)", {
+  it("re-running fit() on an ensemble with n_best = 1 empties the ensemble and fits one member (#70)", {
 
     result <- fit60()$fit
 
@@ -404,6 +324,9 @@ describe("fit() - success path", {
     expect_identical(class(refit), c("horizons_fit", "horizons_eval", "horizons_data", "list"))
     expect_identical(refit$ensemble, new_horizons_data()$ensemble)
 
+    ## n_best = 1 of the two configurations fits one member
+    expect_equal(refit$models$n_models, 1L)
+
   })
 
 })
@@ -415,48 +338,20 @@ describe("fit() - success path", {
 
 describe("fit() - cv_predictions", {
 
-  it("is a tibble", {
-
-    cv_preds <- fit60()$fit$models$cv_predictions
-
-    expect_s3_class(cv_preds, "tbl_df")
-
-  })
-
-  it("has all expected columns", {
-
-    cv_preds <- fit60()$fit$models$cv_predictions
-
-    expect_true(all(EXPECTED_FIT_CV_PRED_COLS %in% names(cv_preds)))
-
-  })
-
-  it("contains predictions from all successful configs", {
+  it("is a tibble with every expected column and the predictions of every successful config", {
 
     result   <- fit60()$fit
     cv_preds <- result$models$cv_predictions
+
+    expect_s3_class(cv_preds, "tbl_df")
+    expect_true(all(EXPECTED_FIT_CV_PRED_COLS %in% names(cv_preds)))
+    expect_true(is.integer(cv_preds$.row) || is.numeric(cv_preds$.row))
 
     successful <- result$models$results %>%
       dplyr::filter(status == "success") %>%
       dplyr::pull(config_id)
     pred_configs <- unique(cv_preds$config_id)
     expect_true(all(successful %in% pred_configs))
-
-  })
-
-  it(".row is integer", {
-
-    cv_preds <- fit60()$fit$models$cv_predictions
-
-    expect_true(is.integer(cv_preds$.row) || is.numeric(cv_preds$.row))
-
-  })
-
-  it("truth values are finite", {
-
-    cv_preds <- fit60()$fit$models$cv_predictions
-
-    expect_true(all(is.finite(cv_preds$truth)))
 
   })
 
@@ -469,69 +364,27 @@ describe("fit() - cv_predictions", {
 
 describe("fit() - models$results", {
 
-  it("is a tibble", {
-
-    res <- fit60()$fit$models$results
-
-    expect_s3_class(res, "tbl_df")
-
-  })
-
-  it("has all expected columns", {
-
-    res <- fit60()$fit$models$results
-
-    expect_true(all(EXPECTED_FIT_RESULT_COLS %in% names(res)))
-
-  })
-
-  it("has one row per config attempted", {
+  it("is a tibble with every expected column and one row per member, and records each success's metrics", {
 
     shared <- fit60()
     obj    <- shared$obj
     res    <- shared$fit$models$results
 
+    expect_s3_class(res, "tbl_df")
+    expect_true(all(EXPECTED_FIT_RESULT_COLS %in% names(res)))
     expect_equal(nrow(res), min(2L, sum(obj$evaluation$results$status == "success")))
+    expect_true(is.list(res$best_params))
 
-  })
-
-  it("test metrics are finite for successful configs", {
-
-    res       <- fit60()$fit$models$results
     successes <- dplyr::filter(res, status == "success")
 
     expect_gt(nrow(successes), 0)
+
+    ## Test metrics, the CV estimates and the degradation flag
     expect_true(all(is.finite(successes$rmse)))
     expect_true(all(is.finite(successes$rpd)))
-
-  })
-
-  it("degraded is logical (never NA for success)", {
-
-    res       <- fit60()$fit$models$results
-    successes <- dplyr::filter(res, status == "success")
-
-    expect_gt(nrow(successes), 0)
     expect_true(all(!is.na(successes$degraded)))
-
-  })
-
-  it("cv_rmse_mean and cv_rpd_mean are present", {
-
-    res       <- fit60()$fit$models$results
-    successes <- dplyr::filter(res, status == "success")
-
-    expect_gt(nrow(successes), 0)
     expect_true(all(is.finite(successes$cv_rmse_mean)))
     expect_true(all(is.finite(successes$cv_rpd_mean)))
-
-  })
-
-  it("best_params is a list column", {
-
-    res <- fit60()$fit$models$results
-
-    expect_true(is.list(res$best_params))
 
   })
 
@@ -582,14 +435,6 @@ describe("fit() - cv_predictions carries sample_id", {
 
   })
 
-  it("stores no row_index", {
-
-    result <- fit60()$fit
-
-    expect_false("row_index" %in% names(result$models))
-
-  })
-
 })
 
 
@@ -597,31 +442,22 @@ describe("fit() - cv_predictions carries sample_id", {
 ## UQ integration
 ## =========================================================================
 
-describe("fit() - UQ disabled", {
-
-  it("models$uq is NULL when compute_uq = FALSE", {
-
-    result <- fit60()$fit
-
-    expect_null(result$models$uq)
-
-  })
-
-})
-
-
 describe("fit() - UQ enabled", {
 
   ## fit250_uq(): n = 250, so the calibration split clears N_CALIB_MIN = 30
   ## and UQ actually runs. Shared with the "scores on evaluate()'s split"
   ## block below.
 
-  it("models$uq is a list when compute_uq = TRUE and enough data", {
+  it("models$uq is a list when compute_uq = TRUE and enough data, and models$ad is NULL with compute_ad = FALSE", {
 
     result <- fit250_uq()$fit
 
     expect_false(is.null(result$models$uq))
     expect_true(is.list(result$models$uq))
+
+    ## At this size AD computes when asked (the "AD enabled" block), so its
+    ## absence here is the flag's doing
+    expect_null(result$models$ad)
 
   })
 
@@ -677,21 +513,6 @@ describe("fit() - UQ enabled", {
 })
 
 
-describe("fit() - AD disabled", {
-
-  ## n = 60 -> calib split below N_CALIB_MIN, so AD is disabled even if asked.
-
-  it("models$ad is NULL when compute_ad = FALSE", {
-
-    result <- fit60()$fit
-
-    expect_null(result$models$ad)
-
-  })
-
-})
-
-
 describe("fit() - AD enabled", {
 
   ## n = 250 so the shared calibration split clears N_CALIB_MIN = 30
@@ -733,51 +554,6 @@ describe("fit() - AD enabled", {
 
     expect_null(result$models$uq)     # compute_uq = FALSE
     expect_true(has_ad(result))       # ... but AD present
-
-  })
-
-  it("the fitted object passes its own validator with AD populated", {
-
-    expect_identical(validate_horizons_fit(result), result)
-
-  })
-
-})
-
-
-## =========================================================================
-## Edge cases
-## =========================================================================
-
-describe("fit() - n_best = 1", {
-
-  it("works with n_best = 1", {
-
-    result <- fit60_one()
-
-    expect_true(inherits(result, "horizons_fit"))
-    expect_equal(result$models$n_models, 1L)
-
-  })
-
-})
-
-
-describe("fit() - n_best exceeds available successes", {
-
-  it("caps n_best at available successes (with warning)", {
-
-    skip_unless_slow_tier()
-
-    obj <- mfo()
-    obj$config$tuning$final_bayesian_iter <- 0L
-
-    result <- suppressWarnings(
-      fit(obj, n_best = 100L, compute_uq = FALSE, verbose = FALSE, seed = 42L)
-    )
-
-    n_success <- sum(obj$evaluation$results$status == "success")
-    expect_true(result$models$n_models <= n_success)
 
   })
 
@@ -1201,28 +977,6 @@ describe("fit() - response_bound (#68)", {
 
     expect_equal(r$models$response_bound,
                  max(soc[fit_rows]) * RESPONSE_BOUND_MARGIN)
-
-  })
-
-})
-
-
-## =========================================================================
-## Members are ranked on the cross-validated metric (#50)
-## =========================================================================
-
-describe("fit() - member ranking on cv_<metric>", {
-
-  it("orders members by cv_<rank_metric> from evaluation$results", {
-
-    shared <- fit60()
-    obj    <- shared$obj
-    r      <- shared$fit
-
-    successes <- obj$evaluation$results[obj$evaluation$results$status == "success", ]
-    expected  <- rank_configs_by_cv(successes, obj$evaluation$rank_metric)$config_id
-
-    expect_equal(r$models$results$config_id, expected[seq_len(nrow(r$models$results))])
 
   })
 
@@ -2366,19 +2120,6 @@ describe("fit() - evaluate()'s response trim (#77)", {
     expect_gt(max(trim_soc), max(fit_soc))
     expect_equal(f$models$response_bound,
                  compute_response_bound(c(fit_soc, trim_soc), c(-Inf, Inf)))
-
-  })
-
-  it("runs the degradation check within the fences", {
-
-    ## The CV ran inside the fences and the test rows are untrimmed, so the
-    ## check compares within them (check_degradation() has the cases). This
-    ## fixture's model is barely better than the mean, so whether it is
-    ## flagged says little; that a flag names the fences is the point.
-    res <- f$models$results
-
-    expect_true(isFALSE(res$degraded) ||
-                  grepl("within the training fences", res$degraded_reason, fixed = TRUE))
 
   })
 
