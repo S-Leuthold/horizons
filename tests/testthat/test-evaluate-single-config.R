@@ -100,18 +100,17 @@ esc <- function() memo_fixture("esc", build_esc)
 
 describe("evaluate_single_config() - success path", {
 
-  it("returns a single-row tibble", {
+  it("is a single-row tibble with every expected column, a best_params list, no error, a positive runtime and its config_id", {
 
     result <- esc()
     expect_s3_class(result, "tbl_df")
     expect_equal(nrow(result), 1)
-
-  })
-
-  it("has all expected columns", {
-
-    result <- esc()
     expect_true(all(EXPECTED_RESULT_COLS %in% names(result)))
+    expect_true(is.list(result$best_params))
+    expect_false(is.null(result$best_params[[1]]))
+    expect_true(is.na(result$error_message))
+    expect_true(result$runtime_secs > 0)
+    expect_equal(result$config_id, "test_cfg_001")
 
   })
 
@@ -131,35 +130,6 @@ describe("evaluate_single_config() - success path", {
     expect_false(is.na(result$ccc))
     expect_false(is.na(result$rpd))
     expect_false(is.na(result$mae))
-
-  })
-
-  it("stores best_params as a list", {
-
-    result <- esc()
-    expect_true(is.list(result$best_params))
-    expect_false(is.null(result$best_params[[1]]))
-
-  })
-
-  it("has NA error_message on success", {
-
-    result <- esc()
-    expect_true(is.na(result$error_message))
-
-  })
-
-  it("records positive runtime", {
-
-    result <- esc()
-    expect_true(result$runtime_secs > 0)
-
-  })
-
-  it("preserves the config_id", {
-
-    result <- esc()
-    expect_equal(result$config_id, "test_cfg_001")
 
   })
 
@@ -313,7 +283,7 @@ describe("evaluate_single_config() - failure paths", {
 
   })
 
-  it("has NA metrics on failure", {
+  it("returns matching column structure and NA metrics on failure", {
 
     config <- make_eval_config(model = "nope")
 
@@ -329,22 +299,6 @@ describe("evaluate_single_config() - failure paths", {
     expect_true(is.na(result$rmse))
     expect_true(is.na(result$rpd))
     expect_true(is.na(result$rsq))
-
-  })
-
-  it("returns matching column structure on failure", {
-
-    config <- make_eval_config(model = "nope")
-
-    result <- evaluate_single_config(
-      config_row    = config,
-      split         = setup$split,
-      cv_folds      = setup$folds,
-      role_map      = setup$role_map,
-      grid_size     = 2,
-      bayesian_iter = 0
-    )
-
     expect_true(all(EXPECTED_RESULT_COLS %in% names(result)))
 
     ## cv_* columns exist on failure too, as NA, so bind_rows() is clean
@@ -402,40 +356,6 @@ describe("evaluate_single_config() - pruning", {
 })
 
 ## =========================================================================
-## Back-transformation
-## =========================================================================
-
-describe("evaluate_single_config() - back-transformation", {
-
-  setup  <- make_eval_setup()
-  config <- make_eval_config(transformation = "log")
-
-  result <- evaluate_single_config(
-    config_row    = config,
-    split         = setup$split,
-    cv_folds      = setup$folds,
-    role_map      = setup$role_map,
-    grid_size     = 2,
-    bayesian_iter = 0,
-    seed          = 42L
-  )
-
-  it("succeeds with log transformation", {
-
-    expect_equal(result$status, "success")
-
-  })
-
-  it("computes metrics on original scale (positive RMSE)", {
-
-    expect_false(is.na(result$rmse))
-    expect_true(result$rmse > 0)
-
-  })
-
-})
-
-## =========================================================================
 ## Tuning metrics are on the original scale (#49 / #38)
 ## =========================================================================
 ## The response transform is a skip = TRUE recipe step, so tune never applies
@@ -443,6 +363,8 @@ describe("evaluate_single_config() - back-transformation", {
 ## compared original-scale truth to log-scale predictions and stamped healthy
 ## log models "pruned". This fixture has a strong log-linear signal, so a
 ## correctly scored grid search must clear prune_threshold = 1.0 comfortably.
+## It is also this file's only log-transformed run: test predictions scored
+## without the back-transform fail the original-scale RPD check below.
 
 describe("evaluate_single_config() - tuning on the original scale", {
 
@@ -492,24 +414,6 @@ describe("evaluate_single_config() - tuning on the original scale", {
   })
 
 })
-
-## =========================================================================
-## Bayesian optimization skipped (bayesian_iter = 0)
-## =========================================================================
-
-describe("evaluate_single_config() - bayesian_iter = 0", {
-
-  it("succeeds with grid results only", {
-
-    ## The shared evaluation runs at bayesian_iter = 0
-    result <- esc()
-    expect_equal(result$status, "success")
-    expect_false(is.na(result$rmse))
-
-  })
-
-})
-
 
 ## =========================================================================
 ## The prune gate is a no-op without a Bayesian stage (#38)
