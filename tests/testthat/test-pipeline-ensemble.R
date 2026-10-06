@@ -51,7 +51,7 @@ describe("ensemble() fixture preconditions", {
 })
 
 ## =========================================================================
-## TEETH #2 — the .row -> oof$row mapping is correct, not just shaped
+## TEETH — the .row -> oof$row mapping is correct, not just shaped
 ## =========================================================================
 ## collect_predictions()$.row indexes meta_frame positions; the engine maps it
 ## back to the object's true .row. A row-count check passes on a fully
@@ -104,7 +104,7 @@ describe("ensemble() oof_predictions - correct row alignment", {
 })
 
 ## =========================================================================
-## TEETH #3 — no double back-transform (§9 regression)
+## TEETH — no double back-transform (§9 regression)
 ## =========================================================================
 ## Members are fit under log / sqrt / none. If any stage back-transforms an
 ## already-back-transformed prediction, values explode out of physical range.

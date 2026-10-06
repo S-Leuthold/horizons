@@ -388,7 +388,7 @@ describe("predict.horizons_ensemble() - CV+ intervals", {
 
 
 ## ---------------------------------------------------------------------------
-## TEETH #1 — non-degeneracy: the meta-learner learns a real combination
+## TEETH — non-degeneracy: the meta-learner learns a real combination
 ## ---------------------------------------------------------------------------
 ## On real signal the penalized engine must assign non-zero member weights;
 ## intercept-only (all coefs 0) is the degenerate failure the synthetic data

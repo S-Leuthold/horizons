@@ -319,14 +319,15 @@ describe("predict.horizons_fit() - schema gate", {
 
 describe("predict.horizons_fit() - non-negativity floor", {
 
-  ## Soil properties from MIR are non-negative; predictions and bounds floor at 0.
-  it("floors predictions and interval bounds at 0", {
+  ## Soil properties from MIR are non-negative; interval bounds floor at 0.
+  ## The point floor cannot bind on this fixture (its predictions sit near 5);
+  ## test-outcome-range.R forces a negative prediction to test it.
+  it("floors interval bounds at 0", {
 
     ## A margin this large takes every raw lower bound far below 0
     local_mocked_bindings(compute_c_alpha = function(scores, level) 1e6)
 
     p <- predict(fitted_fixture, make_new_spectra())
-    expect_true(all(p$.pred >= 0))
     expect_equal(p$.pred_lower, rep(0, nrow(p)))
 
   })

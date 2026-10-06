@@ -415,3 +415,45 @@ describe("fit_single_config() - degradation detection", {
   })
 
 })
+
+
+## =========================================================================
+## UQ skipped when compute_uq = FALSE
+## =========================================================================
+## fit_single_config() fits UQ only when compute_uq is TRUE and a calibration
+## set is given. fit() also drops the bundles when compute_uq is FALSE, so
+## this gate is visible only here, with a calibration set present.
+
+describe("fit_single_config() - UQ disabled", {
+
+  it("uq is NULL when compute_uq = FALSE, even with a calibration set", {
+
+    shared <- fsc()
+
+    ## fit_uq() returns a sentinel, so a gate that let it run would leave a
+    ## bundle whatever the calibration set's size. The test rows stand in
+    ## for the calibration set: nothing else reads them with AD off.
+    local_mocked_bindings(fit_uq = function(...) list(sentinel = "fit_uq() ran"))
+
+    result <- fit_single_config(
+      config_row       = make_fit_config(),
+      split_F          = shared$setup$split_F,
+      cv_resamples     = shared$setup$folds,
+      calib_data       = rsample::testing(shared$setup$split_F),
+      role_map         = shared$setup$role_map,
+      best_params_eval = make_fit_best_params(),
+      final_bayesian_iter = 0L,
+      grid_size        = 2L,
+      compute_uq       = FALSE,
+      compute_ad       = FALSE,
+      allow_par        = FALSE,
+      seed             = 42L
+    )
+
+    ## The fit reached the UQ step, so only the gate kept the bundle out
+    expect_equal(result$status, "success")
+    expect_null(result$uq)
+
+  })
+
+})
