@@ -984,6 +984,54 @@ describe("fit() - response_bound (#68)", {
 
 
 ## =========================================================================
+## Members are ranked on the cross-validated metric, not the test set (#50)
+## =========================================================================
+
+describe("fit() - member ranking (#50)", {
+
+  ## The shared fit's two configurations rank the same on either metric, so
+  ## it cannot tell the two rules apart. Here the evaluation's CV and test
+  ## RPDs disagree, and mocked members record the order fit() re-tunes them in.
+  it("re-tunes members in cv_<rank_metric> order when the test-set metric disagrees", {
+
+    obj <- mfo()
+    res <- obj$evaluation$results
+
+    expect_identical(obj$evaluation$rank_metric, "rpd")
+    expect_identical(res$status, c("success", "success"))
+
+    ## Best first by CV, worst first by the test set
+    res$cv_rpd <- c(2.0, 1.5)
+    res$rpd    <- c(1.0, 3.0)
+    obj$evaluation$results <- res
+
+    seen <- character(0)
+
+    testthat::with_mocked_bindings(
+      tryCatch(
+        suppressWarnings(
+          fit(obj, n_best = 2L, compute_uq = FALSE, compute_ad = FALSE,
+              verbose = FALSE, seed = 42L)
+        ),
+        horizons_all_members_failed = function(e) NULL
+      ),
+      fit_single_config = function(...) {
+        cfg  <- list(...)$config_row
+        seen <<- c(seen, cfg$config_id)
+        list(config_id = cfg$config_id, status = "failed", error_message = "mocked",
+             runtime_secs = 0)
+      },
+      .package = "horizons"
+    )
+
+    expect_identical(seen, res$config_id)
+
+  })
+
+})
+
+
+## =========================================================================
 ## No config passed the prune gate: fit() takes evaluate()'s fallback (#38)
 ## =========================================================================
 ## evaluate() takes best_config from the pruned configs when none succeeded.

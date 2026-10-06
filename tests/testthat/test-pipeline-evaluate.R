@@ -122,11 +122,22 @@ describe("evaluate() - gate checks", {
 
   })
 
-  it("aborts when sample size is too small for CV", {
+  it("aborts when sample size is too small for CV, counting only rows with an observed outcome", {
 
+    ## The abort carries no condition class yet, so its text is asserted
     obj <- make_eval_object(n = 4)
 
-    expect_error(evaluate(obj, verbose = FALSE), "sample size")
+    expect_error(evaluate(obj, verbose = FALSE),
+                 "Need at least 6 samples (cv_folds * 2), but only 4 available.",
+                 fixed = TRUE)
+
+    ## Eight rows, three without an outcome: five can be modelled
+    obj <- make_eval_object(n = 8)
+    obj$data$analysis$SOC[1:3] <- NA_real_
+
+    expect_error(evaluate(obj, verbose = FALSE),
+                 "Need at least 6 samples (cv_folds * 2), but only 5 available.",
+                 fixed = TRUE)
 
   })
 
