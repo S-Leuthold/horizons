@@ -305,7 +305,7 @@ describe("fit() - success path", {
 
   })
 
-  it("re-running fit() on an ensemble empties the ensemble (#70)", {
+  it("re-running fit() on an ensemble with n_best = 1 empties the ensemble and fits one member (#70)", {
 
     result <- fit60()$fit
 

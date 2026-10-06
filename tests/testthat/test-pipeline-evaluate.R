@@ -168,9 +168,13 @@ describe("evaluate() - success path", {
   ## The object EV60 evaluates
   obj <- make_eval_object(n = 60, n_configs = 2)
 
-  it("records every expected results column, the default rank metric, and a split that covers every row", {
+  it("is a horizons_eval with every expected results column, the default rank metric, and a split that covers every row", {
 
     result <- ev60()
+
+    ## The validator gates on horizons_eval alone; the rest of the class is
+    ## asserted here
+    expect_identical(class(result), c("horizons_eval", "horizons_data", "list"))
 
     expect_true(all(EXPECTED_EVAL_COLS %in% names(result$evaluation$results)))
     expect_equal(result$evaluation$rank_metric, "rpd")
