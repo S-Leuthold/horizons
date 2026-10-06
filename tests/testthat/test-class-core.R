@@ -1069,95 +1069,55 @@ test_that("validate_horizons_data checks the selection record alongside the data
 ## print.horizons_data() — Print Method
 ## ---------------------------------------------------------------------------
 
-## ---------------------------------------------------------------------------
-## Empty object display
-## ---------------------------------------------------------------------------
+## A small populated object for the print() and summary() snapshots: four
+## samples, so summary()'s preview is cut short, three wavenumbers, an
+## outcome, and both provenance fields.
+console_object <- function() {
 
-test_that("print.horizons_data shows empty state for empty object", {
+  analysis <- tibble::tibble(
+    sample_id = c("SAMPLE_001", "SAMPLE_002", "SAMPLE_003", "SAMPLE_004"),
+    `4000`    = c(0.1, 0.2, 0.3, 0.4),
+    `3998`    = c(0.2, 0.3, 0.4, 0.5),
+    `3996`    = c(0.3, 0.4, 0.5, 0.6),
+    SOC       = c(1.5, 2.5, 3.5, 4.5)
+  )
 
-  ## Arrange
+  role_map <- tibble::tibble(
+    variable = names(analysis),
+    role     = c("id", "predictor", "predictor", "predictor", "outcome")
+  )
+
+  new_horizons_data(analysis       = analysis,
+                    role_map       = role_map,
+                    spectra_source = "/path/to/spectra",
+                    spectra_type   = "opus")
+
+}
+
+## summary() prints the creation time, the package version and the table's
+## size in memory, which change between runs, releases and R versions. The
+## snapshots keep each line and replace its value.
+scrub_summary <- function(lines) {
+
+  lines <- sub("(Created:) .*$", "\\1 <time>", lines)
+  lines <- sub("(Horizons version:) .*$", "\\1 <version>", lines)
+  sub("(Memory:) .*$", "\\1 <size>", lines)
+
+}
+
+test_that("print.horizons_data shows the empty state and the spectra() hint", {
+
   obj <- new_horizons_data()
 
-  ## Act
-  output <- capture.output(print(obj))
-
-  ## Assert
-  expect_true(any(grepl("horizons_data", output)))
-  expect_true(any(grepl("(?i)empty", output)))
+  expect_snapshot(print(obj))
 
 })
 
-test_that("print.horizons_data shows hint for empty object", {
+test_that("print.horizons_data shows the counts, the outcome and the provenance", {
 
-  ## Arrange
-  obj <- new_horizons_data()
+  obj <- console_object()
 
-  ## Act
-  output <- capture.output(print(obj))
-
-  ## Assert
-  expect_true(any(grepl("spectra", output)))
-
-})
-
-## ---------------------------------------------------------------------------
-## Object with data
-## ---------------------------------------------------------------------------
-
-test_that("print.horizons_data shows sample count", {
-
-  ## Arrange
-  test_analysis <- tibble::tibble(
-    sample_id = c("A", "B", "C"),
-    `4000` = c(0.1, 0.2, 0.3),
-    `3998` = c(0.2, 0.3, 0.4)
-  )
-
-  test_role_map <- tibble::tibble(
-    variable = c("sample_id", "4000", "3998"),
-    role = c("id", "predictor", "predictor")
-  )
-
-  obj <- new_horizons_data(
-    analysis = test_analysis,
-    role_map = test_role_map
-  )
-
-  ## Act
-  output <- capture.output(print(obj))
-
-  ## Assert
-  expect_true(any(grepl("(?i)sample", output)))
-  expect_true(any(grepl("3", output)))
-
-})
-
-test_that("print.horizons_data shows predictor count", {
-
-  ## Arrange
-  test_analysis <- tibble::tibble(
-    sample_id = c("A", "B", "C"),
-    `4000` = c(0.1, 0.2, 0.3),
-    `3998` = c(0.2, 0.3, 0.4),
-    `3996` = c(0.3, 0.4, 0.5)
-  )
-
-  test_role_map <- tibble::tibble(
-    variable = c("sample_id", "4000", "3998", "3996"),
-    role = c("id", "predictor", "predictor", "predictor")
-  )
-
-  obj <- new_horizons_data(
-    analysis = test_analysis,
-    role_map = test_role_map
-  )
-
-  ## Act
-  output <- capture.output(print(obj))
-
-  ## Assert
-  expect_true(any(grepl("(?i)predictor", output)))
-  expect_true(any(grepl("3", output)))
+  expect_snapshot(print(obj))
 
 })
 
@@ -1190,31 +1150,6 @@ test_that("print.horizons_data shows covariate count when present", {
 
 })
 
-## ---------------------------------------------------------------------------
-## Provenance display
-## ---------------------------------------------------------------------------
-
-test_that("print.horizons_data shows provenance when present", {
-
-  ## Arrange
-  obj <- new_horizons_data(
-    spectra_source = "/path/to/spectra",
-    spectra_type = "opus"
-  )
-
-  ## Act
-  output <- capture.output(print(obj))
-
-  ## Assert
-  expect_true(any(grepl("(?i)provenance|source", output)))
-  expect_true(any(grepl("opus", output)))
-
-})
-
-## ---------------------------------------------------------------------------
-## Return behavior
-## ---------------------------------------------------------------------------
-
 test_that("print.horizons_data returns object invisibly", {
 
   ## Arrange
@@ -1234,21 +1169,11 @@ test_that("print.horizons_data returns object invisibly", {
 ## summary.horizons_data() — Summary Method
 ## ---------------------------------------------------------------------------
 
-## ---------------------------------------------------------------------------
-## Header and structure
-## ---------------------------------------------------------------------------
+test_that("summary.horizons_data of an empty object shows the tuning defaults, the version and spectra() as the next step", {
 
-test_that("summary.horizons_data shows header", {
-
-  ## Arrange
   obj <- new_horizons_data()
 
-  ## Act
-  output <- capture.output(summary(obj))
-
-  ## Assert
-  expect_true(any(grepl("horizons_data", output)))
-  expect_true(any(grepl("summary", output)))
+  expect_snapshot(summary(obj), transform = scrub_summary)
 
 })
 
@@ -1266,64 +1191,11 @@ test_that("summary.horizons_data returns object invisibly", {
 
 })
 
-## ---------------------------------------------------------------------------
-## Data section details
-## ---------------------------------------------------------------------------
+test_that("summary.horizons_data shows the data, provenance, configuration and validation blocks, and configure() as the next step", {
 
-test_that("summary.horizons_data shows sample IDs preview", {
+  obj <- console_object()
 
-  ## Arrange
-  test_analysis <- tibble::tibble(
-    sample_id = c("SAMPLE_001", "SAMPLE_002", "SAMPLE_003"),
-    `4000` = c(0.1, 0.2, 0.3)
-  )
-
-  test_role_map <- tibble::tibble(
-    variable = c("sample_id", "4000"),
-    role = c("id", "predictor")
-  )
-
-  obj <- new_horizons_data(
-    analysis = test_analysis,
-    role_map = test_role_map
-  )
-
-  ## Act
-  output <- capture.output(summary(obj))
-
-  ## Assert
-  expect_true(any(grepl("SAMPLE_001", output)))
-
-})
-
-test_that("summary.horizons_data shows wavenumber range and step", {
-
-  ## Arrange
-  test_analysis <- tibble::tibble(
-    sample_id = c("A", "B"),
-    `4000` = c(0.1, 0.2),
-    `3998` = c(0.2, 0.3),
-    `3996` = c(0.3, 0.4)
-  )
-
-  test_role_map <- tibble::tibble(
-    variable = c("sample_id", "4000", "3998", "3996"),
-    role = c("id", "predictor", "predictor", "predictor")
-  )
-
-  obj <- new_horizons_data(
-    analysis = test_analysis,
-    role_map = test_role_map
-  )
-
-  ## Act
-  output <- capture.output(summary(obj))
-
-  ## Assert
-  expect_true(any(grepl("(?i)range", output)))
-  expect_true(any(grepl("4000", output)))
-  expect_true(any(grepl("3996", output)))
-  expect_true(any(grepl("(?i)step", output)))
+  expect_snapshot(summary(obj), transform = scrub_summary)
 
 })
 
@@ -1356,96 +1228,6 @@ test_that("summary.horizons_data shows covariate names", {
 
 })
 
-test_that("summary.horizons_data shows outcome when present", {
-
-  ## Arrange
-  test_analysis <- tibble::tibble(
-    sample_id = c("A", "B"),
-    `4000` = c(0.1, 0.2),
-    SOC = c(1.5, 2.5)
-  )
-
-  test_role_map <- tibble::tibble(
-    variable = c("sample_id", "4000", "SOC"),
-    role = c("id", "predictor", "outcome")
-  )
-
-  obj <- new_horizons_data(
-    analysis = test_analysis,
-    role_map = test_role_map
-  )
-
-  ## Act
-  output <- capture.output(summary(obj))
-
-  ## Assert
-  expect_true(any(grepl("(?i)outcome", output)))
-  expect_true(any(grepl("SOC", output)))
-
-})
-
-test_that("summary.horizons_data shows memory footprint", {
-
-  ## Arrange
-  test_analysis <- tibble::tibble(
-    sample_id = c("A", "B"),
-    `4000` = c(0.1, 0.2)
-  )
-
-  test_role_map <- tibble::tibble(
-    variable = c("sample_id", "4000"),
-    role = c("id", "predictor")
-  )
-
-  obj <- new_horizons_data(
-    analysis = test_analysis,
-    role_map = test_role_map
-  )
-
-  ## Act
-  output <- capture.output(summary(obj))
-
-  ## Assert
-  expect_true(any(grepl("(?i)memory|size|bytes|KB|MB", output)))
-
-})
-
-## ---------------------------------------------------------------------------
-## Provenance section details
-## ---------------------------------------------------------------------------
-
-test_that("summary.horizons_data shows full provenance", {
-
-  ## Arrange
-  obj <- new_horizons_data(
-    spectra_source = "/path/to/spectra",
-    spectra_type = "opus"
-  )
-
-  ## Act
-  output <- capture.output(summary(obj))
-
-  ## Assert
-  expect_true(any(grepl("(?i)provenance", output)))
-  expect_true(any(grepl("/path/to/spectra", output)))
-  expect_true(any(grepl("opus", output)))
-
-})
-
-test_that("summary.horizons_data shows version info", {
-
-  ## Arrange
-  obj <- new_horizons_data()
-
-  ## Act
-  output <- capture.output(summary(obj))
-
-  ## Assert
-  expect_true(any(grepl("(?i)version", output)))
-  expect_true(any(grepl("(?i)created", output)))
-
-})
-
 test_that("summary.horizons_data shows no schema version, even on an object carrying one (#130)", {
 
   ## Arrange: the key older objects carried
@@ -1458,41 +1240,6 @@ test_that("summary.horizons_data shows no schema version, even on an object carr
   ## Assert: the provenance tree ends at the horizons version
   expect_false(any(grepl("(?i)schema", output)))
   expect_true(any(grepl("└─ Horizons version", output)))
-
-})
-
-## ---------------------------------------------------------------------------
-## Configuration section
-## ---------------------------------------------------------------------------
-
-test_that("summary.horizons_data shows tuning defaults", {
-
-  ## Arrange
-  obj <- new_horizons_data()
-
-  ## Act
-  output <- capture.output(summary(obj))
-
-  ## Assert
-  expect_true(any(grepl("(?i)config", output)))
-  expect_true(any(grepl("(?i)grid|tuning", output)))
-
-})
-
-## ---------------------------------------------------------------------------
-## Pipeline status
-## ---------------------------------------------------------------------------
-
-test_that("summary.horizons_data shows pipeline status", {
-
-  ## Arrange
-  obj <- new_horizons_data()
-
-  ## Act
-  output <- capture.output(summary(obj))
-
-  ## Assert
-  expect_true(any(grepl("(?i)status|next|step", output)))
 
 })
 
@@ -2731,18 +2478,9 @@ test_that("the committed ensemble fixture carries the current contract and valid
 
 test_that("print.horizons_data shows the selection section", {
 
-  ## Arrange
   obj <- make_selected_object()
 
-  ## Act
-  output <- capture.output(print(obj))
-
-  ## Assert
-  expect_true(any(grepl("Selection", output)))
-  expect_true(any(grepl("Scope: batch", output)))
-  expect_true(any(grepl("Targets: 4 rows", output)))
-  expect_true(any(grepl("clay 12/12", output)))
-  expect_true(any(grepl("twins excluded: 0", output)))
+  expect_snapshot(print(obj))
 
 })
 
@@ -2763,26 +2501,11 @@ test_that("print.horizons_data survives a partially-formed selection record", {
 })
 
 
-test_that("summary.horizons_data mirrors the selection block", {
+test_that("summary.horizons_data mirrors the selection block and names it in the pipeline status", {
 
-  obj    <- make_selected_object()
-  output <- capture.output(summary(obj))
+  obj <- make_selected_object()
 
-  expect_true(any(grepl("Selection", output)))
-  expect_true(any(grepl("Properties: clay, oc", output)))
-  expect_true(any(grepl("Targets: 4 rows \\(source: tibble\\)", output)))
-  expect_true(any(grepl("Drawn per property: clay 12/12", output)))
-  expect_true(any(grepl("Twins excluded: 0", output)))
-
-})
-
-
-test_that("summary.horizons_data pipeline status names the selection", {
-
-  obj    <- make_selected_object()
-  output <- capture.output(summary(obj))
-
-  expect_true(any(grepl("drawn from a pool by select_training", output)))
+  expect_snapshot(summary(obj), transform = scrub_summary)
 
 })
 
