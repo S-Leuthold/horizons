@@ -141,7 +141,7 @@
          ├─ Predictors: 851
          │     ├─ Range: 4000–600 cm⁻¹
          │     └─ Step: 4 cm⁻¹
-         └─ Responses: clay, oc
+         ├─ Responses: clay, oc
          └─ Memory: <size>
       
       Provenance

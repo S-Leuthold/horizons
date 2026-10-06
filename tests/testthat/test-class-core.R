@@ -1968,6 +1968,29 @@ test_that("validate_horizons_fit passes a well-formed models slot", {
 
 })
 
+test_that("validate_horizons_fit refuses a results column of the wrong type, naming each (#203)", {
+
+  ## A member that lacks a field records a typed NA, so a wrong default
+  ## shows only on fits where a member failed
+  obj <- make_valid_fit()
+  obj$models$results$degraded        <- c(FALSE, NA_integer_)
+  obj$models$results$start_grid_size <- c(9, NA_real_)
+
+  err <- expect_error(suppressMessages(validate_horizons_fit(obj)),
+                      class = "horizons_validation_error")
+
+  msg <- gsub("\\s+", " ", conditionMessage(err))   # undo cli line wrapping
+  expect_match(msg, "degraded is integer, not logical", fixed = TRUE)
+  expect_match(msg, "start_grid_size is double, not integer", fixed = TRUE)
+
+  ## The same columns with the types fit() writes pass
+  obj$models$results$degraded        <- c(FALSE, NA)
+  obj$models$results$start_grid_size <- c(9L, NA_integer_)
+
+  expect_identical(validate_horizons_fit(obj), obj)
+
+})
+
 test_that("validate_horizons_fit refuses a missing response_bound or selection_present, or a selection_present that is not TRUE or FALSE (#130)", {
 
   ## fit() writes both on every path, so neither is optional.
@@ -2524,7 +2547,6 @@ test_that("summary.horizons_data mirrors the selection block and names it in the
 
   obj <- make_selected_object()
 
-  ## The Data tree's "└─ Responses" then "└─ Memory" records #205; its fix is that one-line diff.
   expect_snapshot(summary(obj), transform = scrub_summary)
 
 })
