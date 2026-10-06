@@ -2153,7 +2153,8 @@ validate_horizons_fit <- function(x) {
 
     if (length(wrong) > 0) {
 
-      details <- paste0(wrong, " is ", actual[wrong], ", not ", col_types[wrong])
+      details <- paste(paste0(wrong, " is ", actual[wrong], ", not ", col_types[wrong]),
+                       collapse = "; ")
       errors  <- c(errors, cli::format_inline("{.field results} has columns of the wrong type: {details}"))
 
     }

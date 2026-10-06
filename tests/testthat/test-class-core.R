@@ -1979,7 +1979,7 @@ test_that("validate_horizons_fit refuses a results column of the wrong type, nam
   err <- expect_error(suppressMessages(validate_horizons_fit(obj)),
                       class = "horizons_validation_error")
 
-  msg <- gsub("\\s+", " ", conditionMessage(err))   # undo cli line wrapping
+  msg <- conditionMessage(err)
   expect_match(msg, "degraded is integer, not logical", fixed = TRUE)
   expect_match(msg, "start_grid_size is double, not integer", fixed = TRUE)
 
