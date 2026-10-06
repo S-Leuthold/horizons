@@ -243,7 +243,7 @@ test_that("validate_horizons_data errors when sample_id column missing", {
 
 })
 
-test_that("validate_horizons_data truncates a long duplicate-sample_id list to 5 and a count (#24)", {
+test_that("validate_horizons_data lists up to 5 duplicate sample_ids in full and truncates a longer list to 5 and a count (#24)", {
 
   ## Arrange — 8 duplicated ids; at library scale (thousands of replicate
   ## groups) the full list is unreadable, so the message names the first 5
@@ -270,6 +270,17 @@ test_that("validate_horizons_data truncates a long duplicate-sample_id list to 5
   expect_match(msg, paste(dup_letters[1:5], collapse = ", "), fixed = TRUE)
   expect_match(msg, "and 3 more", fixed = TRUE)
   expect_false(grepl(dup_letters[6], msg, fixed = TRUE))
+
+  ## Exactly 5 duplicated ids, the most listed in full: all named, no count
+  five <- new_horizons_data(
+    analysis = tibble::tibble(sample_id = c(rep(dup_letters[1:5], each = 2), "Z"),
+                              `4000`    = seq_len(11) / 10),
+    role_map = test_role_map
+  )
+
+  expect_error(validate_horizons_data(five),
+               "Duplicate sample_id values: A, B, C, D, E.",
+               fixed = TRUE, class = "horizons_validation_error")
 
 })
 
@@ -1071,7 +1082,8 @@ test_that("validate_horizons_data checks the selection record alongside the data
 
 ## A small populated object for the print() and summary() snapshots: four
 ## samples, so summary()'s preview is cut short, three wavenumbers, an
-## outcome, and both provenance fields.
+## outcome, and both provenance fields. Validated, so the snapshots show a
+## well-formed object.
 console_object <- function() {
 
   analysis <- tibble::tibble(
@@ -1087,29 +1099,36 @@ console_object <- function() {
     role     = c("id", "predictor", "predictor", "predictor", "outcome")
   )
 
-  new_horizons_data(analysis       = analysis,
-                    role_map       = role_map,
-                    spectra_source = "/path/to/spectra",
-                    spectra_type   = "opus")
+  obj <- new_horizons_data(analysis       = analysis,
+                           role_map       = role_map,
+                           spectra_source = "/path/to/spectra",
+                           spectra_type   = "opus")
+
+  validate_horizons_data(obj)
 
 }
 
 ## summary() prints the creation time, the package version and the table's
 ## size in memory, which change between runs, releases and R versions. The
-## snapshots keep each line and replace its value.
+## snapshots keep each line and replace its value. Each pattern matches the
+## value's own form, so a value printed in some other form fails the snapshot.
 scrub_summary <- function(lines) {
 
-  lines <- sub("(Created:) .*$", "\\1 <time>", lines)
-  lines <- sub("(Horizons version:) .*$", "\\1 <version>", lines)
-  sub("(Memory:) .*$", "\\1 <size>", lines)
+  lines <- sub("(Created:) [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}$",
+               "\\1 <time>", lines)
+  lines <- sub("(Horizons version:) [0-9]+(\\.[0-9]+)+$", "\\1 <version>", lines)
+  sub("(Memory:) [0-9.]+ (bytes|Kb|Mb|Gb)$", "\\1 <size>", lines)
 
 }
 
-test_that("print.horizons_data shows the empty state and the spectra() hint", {
+test_that("print.horizons_data shows the empty state and the spectra() hint, and an object with only provenance as not empty", {
 
   obj <- new_horizons_data()
 
-  expect_snapshot(print(obj))
+  expect_snapshot({
+    print(obj)
+    print(new_horizons_data(spectra_source = "/path/to/spectra", spectra_type = "opus"))
+  })
 
 })
 
@@ -2505,6 +2524,7 @@ test_that("summary.horizons_data mirrors the selection block and names it in the
 
   obj <- make_selected_object()
 
+  ## The Data tree's "└─ Responses" then "└─ Memory" records #205; its fix is that one-line diff.
   expect_snapshot(summary(obj), transform = scrub_summary)
 
 })

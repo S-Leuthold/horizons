@@ -1,4 +1,4 @@
-# print.horizons_data shows the empty state and the spectra() hint
+# print.horizons_data shows the empty state and the spectra() hint, and an object with only provenance as not empty
 
     Code
       print(obj)
@@ -8,6 +8,16 @@
       (empty)
       
       Use spectra() to load data.
+    Code
+      print(new_horizons_data(spectra_source = "/path/to/spectra", spectra_type = "opus"))
+    Output
+      ── horizons_data ──
+      
+      Provenance
+         ├─ Source: /path/to/spectra
+         └─ Type: opus
+      
+      Use summary() for details.
 
 # print.horizons_data shows the counts, the outcome and the provenance
 
