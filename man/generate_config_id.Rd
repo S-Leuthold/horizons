@@ -4,13 +4,7 @@
 \alias{generate_config_id}
 \title{Generate a deterministic config ID}
 \usage{
-generate_config_id(
-  model,
-  preprocessing,
-  transformation,
-  feature_selection,
-  covariates
-)
+generate_config_id(model, preprocessing, transformation, feature_selection)
 }
 \arguments{
 \item{model}{Character. Model short name.}
@@ -20,8 +14,6 @@ generate_config_id(
 \item{transformation}{Character. Response transformation.}
 
 \item{feature_selection}{Character. Feature selection method.}
-
-\item{covariates}{Character. Canonicalized covariate string or NA.}
 }
 \value{
 Character. Config ID in format \verb{\{model\}_\{preprocessing\}_\{transformation\}_\{feature_selection\}_\{6-char hash\}}.

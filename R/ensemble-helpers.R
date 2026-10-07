@@ -807,12 +807,9 @@ predict.horizons_ensemble <- function(object,
   ## gather_members(), which intersects train-time slots (cv_predictions) and
   ## could disagree with what the fitted meta-model saw.
   ##
-  ## Gated before the covariate resolution below, not after: every downstream
-  ## step reads this member set, and fitted_extra_predictors() on a malformed
-  ## ensemble reports a covariate problem for what is really a missing member
-  ## set. Diagnose the object first. Also gated ahead of
-  ## ensure_predict_namespaces() immediately below, which needs the member
-  ## set to know which engines are actually in play.
+  ## Gated first: every step below reads this member set, starting with
+  ## ensure_predict_namespaces(), which needs it to know which engines are
+  ## actually in play. Diagnose a malformed ensemble before anything else.
   members <- object$ensemble$weights$member
 
   if (is.null(members) || length(members) < 2) {
@@ -829,23 +826,16 @@ predict.horizons_ensemble <- function(object,
   ## why. Scoped to the member set, not every config the underlying fit
   ## stored — gather_members() can drop a stored config that lacks
   ## out-of-fold predictions, so "stored" and "member" are not always the
-  ## same set. Also has to run before fitted_extra_predictors() below — its
-  ## extract_mold() call silently returns nothing when workflows is not yet
-  ## loaded.
+  ## same set.
   ensure_predict_namespaces(object, members)
 
   ## -------------------------------------------------------------------------
   ## Step 2: Resolve new_data, then validate it carries the training axis
   ## -------------------------------------------------------------------------
 
-  ## Members that use covariates need them on new data; keep exactly those
-  ## (same rule as predict.horizons_fit()).
-  extra_keep  <- fitted_extra_predictors(object, members)
-  extra_need  <- fitted_extra_predictors(object, members, include_blueprint = FALSE)
+  new_spectra <- resolve_new_data(new_data)
 
-  new_spectra <- resolve_new_data(new_data, keep_extra = extra_keep)
-
-  check_predictor_schema(object, new_spectra, required_extra = extra_need)
+  check_predictor_schema(object, new_spectra)
 
   ## -------------------------------------------------------------------------
   ## Step 2b: Conformal coverage on a selected training set

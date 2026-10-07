@@ -230,8 +230,8 @@ check_unpromoted <- function(x, fn) {
 #'
 #' @description
 #' Sets `x$data$analysis` (and optionally `x$data$role_map`) and recomputes
-#' `n_rows`, `n_predictors`, `n_covariates` and `n_responses` from the role
-#' map, so the counts have one source of truth. Every verb that changes the
+#' `n_rows`, `n_predictors` and `n_responses` from the role map, so the
+#' counts have one source of truth. Every verb that changes the
 #' rows of the analysis table, or rebuilds it, goes through here; a verb that
 #' only adds columns uses [add_columns()].
 #'
@@ -350,9 +350,9 @@ set_analysis <- function(x, analysis, role_map = NULL) {
 #' promotion earns is keyed to a column that did not exist when it was
 #' earned, so a new column strands nothing as long as no modelling verb reads
 #' it by role. `role` is therefore `"response"` or `"meta"`. A new predictor,
-#' outcome, id or covariate column would change what `configure()`,
-#' `evaluate()` and `fit()` see, and is written through [set_analysis()] on
-#' an unpromoted object instead.
+#' outcome or id column would change what `configure()`, `evaluate()` and
+#' `fit()` see, and is written through [set_analysis()] on an unpromoted
+#' object instead.
 #'
 #' `columns` holds one row per row of the table, in the table's order. The
 #' row count is checked. A caller that built `columns` by joining onto the
@@ -403,7 +403,7 @@ add_columns <- function(x, columns, role, after = NULL) {
 
     cli::cli_abort(c(
       "{.arg role} must be {.val response} or {.val meta}",
-      "i" = "A new predictor, outcome, id or covariate column changes what modelling reads; write it with {.fn set_analysis}"
+      "i" = "A new predictor, outcome or id column changes what modelling reads; write it with {.fn set_analysis}"
     ), class = "horizons_input_error")
 
   }
@@ -481,14 +481,14 @@ add_columns <- function(x, columns, role, after = NULL) {
 #' Recompute the stored counts from the analysis table and role map
 #'
 #' @description
-#' Sets `n_rows` from the analysis table and `n_predictors`, `n_covariates`
-#' and `n_responses` from the role map. [set_analysis()] and [add_columns()]
-#' both end here, so the counts are computed in one place.
+#' Sets `n_rows` from the analysis table and `n_predictors` and
+#' `n_responses` from the role map. [set_analysis()] and [add_columns()] both
+#' end here, so the counts are computed in one place.
 #'
 #' @param x [horizons_data.] The object, with its table and role map already
 #'   written.
 #'
-#' @return [horizons_data.] `x` with the four counts replaced.
+#' @return [horizons_data.] `x` with the three counts replaced.
 #'
 #' @noRd
 recount_data <- function(x) {
@@ -497,7 +497,6 @@ recount_data <- function(x) {
 
   x$data$n_rows       <- nrow(x$data$analysis)
   x$data$n_predictors <- sum(role_map$role == "predictor", na.rm = TRUE)
-  x$data$n_covariates <- sum(role_map$role == "covariate", na.rm = TRUE)
   x$data$n_responses  <- sum(role_map$role == "response",  na.rm = TRUE)
 
   x

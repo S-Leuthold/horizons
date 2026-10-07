@@ -55,8 +55,8 @@ written to \verb{<output_dir>/checkpoints/<config_id>.rds} as it finishes, and
 a rerun into the same directory resumes from those files. Required when
 configs are dispatched to workers. A resumed row must have been scored on
 this run's training data (the outcome, the sample ids, which columns hold
-the \code{id}, \code{outcome}, \code{predictor} and \code{covariate} roles, and the outcome,
-predictor and covariate values) and tuned with this run's settings
+the \code{id}, \code{outcome} and \code{predictor} roles, and the outcome and predictor
+values) and tuned with this run's settings
 (\code{cv_folds}, \code{grid_size}, \code{bayesian_iter}, \code{prune}, \code{prune_threshold}
 when pruning, \code{seed}, and \code{configure()}'s \code{sg_window}, \code{pca_threshold}
 and \code{outcome_range}) and this run's response trim
@@ -66,14 +66,12 @@ So re-standardized spectra, a rescaled outcome, or another outcome on the
 same samples is refused rather than resumed, while adding a sibling
 response with \code{add_response()} or a \code{meta} column resumes. Keep one
 \code{output_dir} per outcome. The ranking \code{metric} is not checked, since
-every row carries all six cross-validated metrics. Rows scored under an
-earlier scoring schema are dropped and re-evaluated; rows for configs no
-longer in the grid are dropped; a file that cannot be used warns and its
-config is re-evaluated; rows written before a fingerprint field existed
-warn once and resume. A whole-table \code{eval_checkpoint.rds} from earlier
-versions is read only for configs with no per-config file, and its rows
-are copied into \verb{checkpoints/}, after which it can be deleted. Default
-NULL (no checkpointing).}
+every row carries all six cross-validated metrics. A row scored under an
+earlier scoring schema, or recording less of the training data and
+settings than this run does, was written by an earlier version: it is
+dropped and its config re-evaluated. Rows for configs no longer in the
+grid are dropped; a file that cannot be used warns and its config is
+re-evaluated. Default NULL (no checkpointing).}
 
 \item{seed}{Integer. Random seed for train/test split and CV folds.
 Default 307L.}
@@ -102,12 +100,10 @@ aborts when the outcome has zero variance: before the split, when every
 observed value is the same, and after it, when every training row left
 by the split and the response trim has the same value, since every
 config would then be tuned on a constant. The message names the outcome,
-the value and how many rows have it (#132). Checkpoint rows written
-before the range was recorded resume only under the default range.
-Called on an object that has already been through \code{fit()} or
-\code{ensemble()}, it returns a \code{horizons_eval} whose \code{models} and
-\code{ensemble} slots are empty again, since both were built on the
-evaluation it replaces.
+the value and how many rows have it (#132). Called on an object that
+has already been through \code{fit()} or \code{ensemble()}, it returns a
+\code{horizons_eval} whose \code{models} and \code{ensemble} slots are empty again,
+since both were built on the evaluation it replaces.
 }
 \description{
 Evaluates all model configurations from \code{configure()} against held-out test
@@ -175,12 +171,6 @@ which case nothing is trimmed and \code{evaluate()} warns). \code{fit()} reuses
 the split and those ids. The CV assessment folds are drawn from the
 trimmed training rows, so the cross-validated metrics (and the ranking
 on them) describe the trimmed population; the test metrics do not.
-
-An object validated by an earlier version, which removed response
-outliers on whole-table fences before any split, still evaluates. Its
-removal record says which rows went on their labels (\code{reason}
-\code{"response"}), and \code{evaluate()} warns, with class
-\code{horizons_response_trim_warning}, that its test metrics exclude them.
 }
 
 \section{When every configuration fails}{

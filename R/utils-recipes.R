@@ -5,19 +5,16 @@
 #' to identify columns by role — no hard-coded wavenumber ranges. This is
 #' the recipe constructor for `evaluate_single_config()`.
 #'
-#' Recipe step order (early fusion):
+#' Recipe step order:
 #' 1. Response transformation (step_log/step_sqrt with skip = TRUE)
 #' 2. Spectral preprocessing (step_transform_spectra on predictor_cols only)
 #' 3. Feature selection (pca/boruta/cars/correlation/none), on spectral
 #'    columns only
-#' 4. Covariate inclusion (promote requested covariates to predictor; the rest
-#'    stay in a non-predictor hold role)
 #'
 #' Columns that are neither the outcome nor spectral predictors are given an
-#' explicit non-predictor role — `id`, `meta`, `response_hold` (sibling lab
-#' responses) and `covariate_hold`. Nothing is left to the `outcome ~ .`
-#' default, which would make a predictor of any column the role map did not
-#' name.
+#' explicit non-predictor role — `id`, `meta` and `response_hold` (sibling lab
+#' responses). Nothing is left to the `outcome ~ .` default, which would make
+#' a predictor of any column the role map did not name.
 #'
 #' A final pass re-points the step selector quosures away from this function's
 #' frame, which would otherwise be serialized to every parallel worker. See
@@ -71,12 +68,6 @@ build_recipe <- function(config_row,
     role_map$variable[role_map$role == "response"],
     outcome_col
   )
-
-  ## Covariate columns: all covariates available in the data
-  all_covariate_cols <- role_map$variable[role_map$role == "covariate"]
-
-  ## Config-specific covariates: which ones this config wants
-  config_covariates <- parse_config_covariates(config_row$covariates)
 
   ## -----------------------------------------------------------------------
   ## Column ordering invariant
@@ -150,20 +141,6 @@ build_recipe <- function(config_row,
 
   }
 
-  ## Mark covariates with a non-predictor role initially
-  ## They'll be added back as predictors in Step 5 if this config uses them.
-  ## Relaxed at bake for the same reason as meta: resolve_new_data() strips
-  ## covariates from new data unconditionally, so requiring them would break
-  ## predict() for any object that carries covariate columns at all.
-  if (length(all_covariate_cols) > 0) {
-
-    rec <- recipes::update_role(rec, dplyr::all_of(all_covariate_cols),
-                                new_role = "covariate_hold")
-    rec <- recipes::update_role_requirements(rec, role = "covariate_hold",
-                                             bake = FALSE)
-
-  }
-
   ## -----------------------------------------------------------------------
   ## Step 2: Response transformation
   ## -----------------------------------------------------------------------
@@ -192,8 +169,8 @@ build_recipe <- function(config_row,
   ## -----------------------------------------------------------------------
   ## Step 3: Spectral preprocessing
   ## -----------------------------------------------------------------------
-  ## Targets predictor_cols by name (NOT all_predictors()), so covariates
-  ## in covariate_hold role are never touched by spectral operations.
+  ## Targets predictor_cols by name (NOT all_predictors()), so only the
+  ## spectral columns are touched by spectral operations.
   ##
   ## The names go in as a literal vector (`!!`), not through dplyr::all_of().
   ## tune reads every step argument with recipes:::find_tune_id(), which
@@ -218,16 +195,12 @@ build_recipe <- function(config_row,
   ## -----------------------------------------------------------------------
   ## Step 4: Feature selection
   ## -----------------------------------------------------------------------
-  ## Operates on spectral features only. Covariates bypass this step.
+  ## Operates on spectral features only.
   ##
-  ## Selection is by name pattern, not `all_predictors()`. `update_role()` is
-  ## not sequenced with the steps — it rewrites `var_info` for the whole
-  ## recipe — so a covariate promoted to predictor in Step 5 would be inside
-  ## `all_predictors()` when these steps prep, folding a non-spectral column
-  ## into the PCA rotation or into step_select_correlation()'s 3-wide
-  ## contiguity window. Selecting by name is the same approach
-  ## step_transform_spectra takes, and it makes the bypass true regardless of
-  ## the order roles happen to be assigned in.
+  ## Selection is by name pattern, not `all_predictors()`, the same approach
+  ## step_transform_spectra takes: whatever else holds the predictor role when
+  ## these steps prep, only the transform step's output is folded into the PCA
+  ## rotation or into step_select_correlation()'s 3-wide contiguity window.
   ##
   ## The pattern is "spec" + digits because that is what the transform step's
   ## prep() renames its output to (`recipes::names0(prefix = "spec")`), so by
@@ -280,44 +253,7 @@ build_recipe <- function(config_row,
   )
 
   ## -----------------------------------------------------------------------
-  ## Step 5: Covariate inclusion
-  ## -----------------------------------------------------------------------
-  ## Covariates are already in the data (from add_covariates()). Per-config
-  ## handling decides which ones to include as predictors.
-  ##
-  ## Unrequested covariates are left in `covariate_hold` rather than removed by
-  ## a step. The role alone is sufficient — a held column is outside
-  ## `all_predictors()`, outside the spectral selectors above, and outside the
-  ## workflow blueprint's predictor ptype, so it never reaches a model. A
-  ## step_rm() would additionally require those columns at bake time
-  ## (`recipes::step_rm`'s bake calls `check_new_data()` on its removals), and
-  ## `resolve_new_data()` strips covariates from new data unconditionally, so
-  ## the step aborted predict() for covariates the config did not even use.
-
-  if (length(all_covariate_cols) > 0 &&
-      !is.null(config_covariates) && length(config_covariates) > 0) {
-
-    ## Validate requested covariates exist in the data
-    missing_covs <- setdiff(config_covariates, all_covariate_cols)
-
-    if (length(missing_covs) > 0) {
-
-      rlang::abort(paste0(
-        "Config requests covariates not available in data: ",
-        paste(missing_covs, collapse = ", "),
-        ". Available: ", paste(all_covariate_cols, collapse = ", ")
-      ))
-
-    }
-
-    ## Promote requested covariates to predictor role
-    rec <- recipes::update_role(rec, dplyr::all_of(config_covariates),
-                                new_role = "predictor")
-
-  }
-
-  ## -----------------------------------------------------------------------
-  ## Step 6: Drop the heavy environment captured by the step selectors
+  ## Step 5: Drop the heavy environment captured by the step selectors
   ## -----------------------------------------------------------------------
   ## This frame holds `train_data` and the recipe under construction, both of
   ## which every step's selector quosure would otherwise carry to a parallel
@@ -620,37 +556,5 @@ step_selectors <- function(x, step) {
     "x" = "The step was built by an earlier version of horizons, which replaced its selectors with the resolved column names at {.fn prep} (#52).",
     "i" = "Rebuild the recipe with this version of horizons. A trained recipe from the earlier version still bakes; only re-prepping it needs the rebuild."
   ), class = "horizons_input_error")
-
-}
-
-## ---------------------------------------------------------------------------
-## parse_config_covariates
-## ---------------------------------------------------------------------------
-
-#' Parse Covariate String from Config Row
-#'
-#' @description
-#' Converts the `covariates` field in a config row (comma-separated string
-#' or NA) into a character vector of covariate names.
-#'
-#' @param covariates_field Character or NA. The covariates column value from
-#'   a config row, e.g. "pH,clay" or NA.
-#'
-#' @return Character vector of covariate names, or NULL if none.
-#' @keywords internal
-parse_config_covariates <- function(covariates_field) {
-
-  if (is.null(covariates_field) || is.na(covariates_field) || covariates_field == "") {
-
-    return(NULL)
-
-  }
-
-  covs <- trimws(strsplit(as.character(covariates_field), ",")[[1]])
-  covs <- covs[nzchar(covs)]
-
-  if (length(covs) == 0) return(NULL)
-
-  covs
 
 }

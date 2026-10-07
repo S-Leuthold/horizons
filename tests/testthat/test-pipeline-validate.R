@@ -96,8 +96,7 @@ make_configured_hd <- function(n_samples      = 100L,
       model             = "rf",
       transformation    = "none",
       preprocessing     = "raw",
-      feature_selection = "none",
-      covariates        = NA_character_
+      feature_selection = "none"
     )
 
   } else {
@@ -115,7 +114,6 @@ make_configured_hd <- function(n_samples      = 100L,
       role_map     = role_map,
       n_rows       = n_samples,
       n_predictors = n_predictors,
-      n_covariates = 0L,
       n_responses  = if (has_outcome) 0L else 0L
     ),
     provenance = list(
@@ -618,8 +616,7 @@ describe("validate() cubist feasibility check (P010)", {
       model             = c("cubist", "rf"),
       transformation    = "none",
       preprocessing     = "raw",
-      feature_selection = "none",
-      covariates        = NA_character_
+      feature_selection = "none"
     )
 
     local_mocked_bindings(CUBIST_MAX_CELLS = 100, .package = "horizons")
@@ -1015,10 +1012,7 @@ describe("validate() outlier removal", {
     detail <- out$removal_detail
 
     expect_s3_class(detail, "tbl_df")
-    expect_true(all(c("sample_id", "reason") %in% names(detail)))
-
-    ## The columns earlier versions wrote, kept so records accumulate
-    expect_true(all(c("outcome", "spectral_threshold", "response_threshold") %in% names(detail)))
+    expect_named(detail, c("sample_id", "reason", "spectral_threshold"))
     expect_gt(nrow(detail), 0)
 
     ## S004 and S005 carry both kinds of outlier, and a row outside both
@@ -1027,10 +1021,7 @@ describe("validate() outlier removal", {
     expect_true(all(c("S004", "S005") %in% intersect(out$spectral_ids, out$response_ids)))
     expect_true(all(c("S004", "S005") %in% detail$sample_id))
 
-    ## A spectral removal does not depend on the outcome
     expect_true(all(detail$reason == "spectral"))
-    expect_true(all(is.na(detail$outcome)))
-    expect_true(all(is.na(detail$response_threshold)))
     expect_true(all(detail$spectral_threshold == 0.99))
 
     ## The response threshold travels with the request instead
@@ -1120,30 +1111,14 @@ describe("validate() keeps the removal record", {
     expect_true(out$removed)
 
     ## One detail row per removed id, the earlier rows unchanged, the new
-    ## ones spectral, with no outcome
+    ## ones spectral
     expect_identical(sort(out$removal_detail$sample_id), sort(out$removed_ids))
     expect_identical(out$removal_detail[seq_len(nrow(first$removal_detail)), ],
                      first$removal_detail)
     new_rows <- out$removal_detail[out$removal_detail$sample_id %in% added, ]
     expect_true(all(new_rows$reason == "spectral"))
-    expect_true(all(is.na(new_rows$outcome)))
 
     expect_false(any(out$removed_ids %in% v3$data$analysis$sample_id))
-
-  })
-
-  test_that("the record an earlier version wrote keeps accumulating (#77)", {
-
-    ## Rows 4-6 removed on SOC's labels by a version before #77
-    legacy <- legacy_label_removal(make_two_response_hd(), c("S004", "S005", "S006"),
-                                   reason = c("both", "both", "response"))
-
-    v2  <- quiet_validate(quiet_reconfigure(legacy, "pH"), remove_outliers = "spectral")
-    out <- v2$validation$outliers
-
-    expect_true(all(c("S004", "S005", "S006") %in% out$removed_ids))
-    expect_identical(out$removal_detail[1:3, ], legacy$validation$outliers$removal_detail)
-    expect_true(out$removed)
 
   })
 
@@ -1159,45 +1134,6 @@ describe("validate() keeps the removal record", {
 
     expect_null(reconfigured$validation$outliers$response_trim)
     expect_identical(reconfigured$data$n_rows, v1$data$n_rows)
-
-  })
-
-  test_that("a spectral-only removal is not attributed to the outcome", {
-
-    ## Rows 4 and 5 sit outside SOC's fences too, but "spectral" did not
-    ## remove them for that, so they are "spectral" rows with no outcome
-    v1     <- quiet_validate(make_two_response_hd(), remove_outliers = "spectral")
-    detail <- v1$validation$outliers$removal_detail
-
-    expect_true(all(c("S004", "S005") %in% detail$sample_id))
-    expect_true(all(detail$reason == "spectral"))
-    expect_true(all(is.na(detail$outcome)))
-    expect_true(all(is.na(detail$response_threshold)))
-
-    ## So changing the outcome has nothing stale to warn about
-    warned <- testthat::capture_warnings(utils::capture.output(configure(v1, outcome = "pH")))
-
-    expect_false(any(grepl("response outliers", warned)))
-
-  })
-
-  test_that("a row removed as both is not counted as a stale response removal", {
-
-    ## Only a version before #77 removed rows on their labels, so the record
-    ## is that version's: rows 4 and 5 "both" (they would go as spectral
-    ## outliers whatever the outcome) and row 6 "response"
-    v1     <- legacy_label_removal(make_two_response_hd(), c("S004", "S005", "S006"),
-                                   reason = c("both", "both", "response"))
-    detail <- v1$validation$outliers$removal_detail
-
-    n_response <- sum(detail$reason == "response")
-
-    expect_identical(n_response, 1L)
-
-    warned <- testthat::capture_warnings(utils::capture.output(configure(v1, outcome = "pH")))
-
-    expect_true(any(grepl(paste0("^", n_response, " row\\(s\\) were removed .*'SOC' \\(",
-                                 n_response, "\\)"), warned)))
 
   })
 

@@ -162,11 +162,9 @@ predict.horizons_fit <- function(object,
   ## Step 0b: Resolve new_data, then validate it carries the training axis
   ## -------------------------------------------------------------------------
 
-  ## Which configs are being predicted decides which covariates are required:
-  ## a covariate a config uses is a genuine predictor in that workflow's
-  ## blueprint, so it must survive into new_spectra and be validated. Resolved
-  ## here, ahead of the data gate, rather than in Step 1. resolve_config_ids()
-  ## needs no namespace loading itself, so it runs first.
+  ## The configs being predicted, resolved first: the check of `...` names
+  ## their UQ level, and the namespace check loads their engines.
+  ## resolve_config_ids() needs no namespace loading itself.
   config_ids <- resolve_config_ids(object, config)
 
   ## Nothing in `...` is used. A `level` warns, naming the level the predicted
@@ -184,24 +182,13 @@ predict.horizons_fit <- function(object,
   ## fails to dispatch in a fresh session unless the caller has separately
   ## loaded the right namespace. Scoped to config_ids (not every config the
   ## object stores): a fit holding both an rf and a mars config should not
-  ## need earth installed just to predict the rf one. Also has to run before
-  ## fitted_extra_predictors() below — its extract_mold() call silently
-  ## returns nothing (via a tryCatch) when workflows is not yet loaded.
+  ## need earth installed just to predict the rf one.
   ensure_predict_namespaces(object, config_ids)
 
-  keep_extra <- fitted_extra_predictors(object, config_ids)
+  new_spectra <- resolve_new_data(new_data)
 
-  new_spectra <- resolve_new_data(new_data, keep_extra = keep_extra)
-
-  ## Validate new_data carries the training-axis predictor columns fit() stored,
-  ## plus any covariate those configs promoted to predictor. What is *required*
-  ## comes from the config rows only; see fitted_extra_predictors().
-  check_predictor_schema(
-    object,
-    new_spectra,
-    required_extra = fitted_extra_predictors(object, config_ids,
-                                             include_blueprint = FALSE)
-  )
+  ## Validate new_data carries the training-axis predictor columns fit() stored.
+  check_predictor_schema(object, new_spectra)
 
   ## -------------------------------------------------------------------------
   ## Step 0c: Conformal coverage on a selected training set
@@ -339,10 +326,7 @@ check_predict_dots <- function(..., .level_default = NULL,
 #' top of [predict.horizons_fit()] and [predict.horizons_ensemble()], with
 #' `config_ids` already resolved to the configs actually being predicted (not
 #' every config the object stores — a fit holding both an `rf` and a `mars`
-#' config should not need `earth` installed just to predict the `rf` one),
-#' and before [fitted_extra_predictors()] — its `extract_mold()` call
-#' silently returns nothing (via a `tryCatch`) when `workflows` is not yet
-#' loaded, so this has to run first for that function's answer to be right.
+#' config should not need `earth` installed just to predict the `rf` one).
 #'
 #' Most of this is an availability preflight, not a dispatch fix. Once
 #' `workflows`/`parsnip` are loaded, `parsnip`'s own `predict.model_fit()`
@@ -534,22 +518,12 @@ predict_package_install_hint <- function(pkg) {
 #' predictor columns by role (the accessor API does not exist yet, so this is
 #' done inline via the role map).
 #'
-#' Columns named in `keep_extra` are carried through even when their role in
-#' `new_data` is `covariate`. A covariate a config requested is promoted to
-#' `predictor` inside that config's recipe, so it is a genuine predictor in the
-#' workflow's blueprint and is required at forge time; stripping it here on the
-#' strength of its role in the *new* object aborted `predict()` for every
-#' config that used one. Covariates the fitted configs do not use are still
-#' dropped.
-#'
 #' @param new_data A `horizons_data` or tibble/data.frame.
-#' @param keep_extra Character vector of non-`predictor` columns the fitted
-#'   models need. Default none, which is the historical behaviour.
-#' @return A tibble with `sample_id`, the predictor columns, and any
-#'   `keep_extra` columns present in `new_data`.
+#' @return A tibble with `sample_id` and the predictor columns; a bare
+#'   data frame is returned whole, with a `sample_id` added when it has none.
 #' @keywords internal
 #' @noRd
-resolve_new_data <- function(new_data, keep_extra = character(0)) {
+resolve_new_data <- function(new_data) {
 
   if (inherits(new_data, "horizons_data")) {
 
@@ -565,12 +539,8 @@ resolve_new_data <- function(new_data, keep_extra = character(0)) {
 
     }
 
-    ## Missing ones are not backfilled here; check_predictor_schema() names
-    ## them, which is a better error than hardhat's forge failure.
-    extra_cols <- intersect(setdiff(keep_extra, pred_cols), names(analysis))
-
     tibble::as_tibble(
-      analysis[, c(id_col, pred_cols, extra_cols), drop = FALSE]
+      analysis[, c(id_col, pred_cols), drop = FALSE]
     ) |>
       dplyr::rename(sample_id = dplyr::all_of(id_col))
 
@@ -712,40 +682,14 @@ warn_trimmed_ensemble_intervals <- function(object, interval) {
 #'
 #' @param object A `horizons_fit` carrying `models$predictor_schema`.
 #' @param new_spectra Tibble from [resolve_new_data()].
-#' @param required_extra Character vector of non-spectral columns the configs
-#'   being predicted need (covariates promoted to predictor). Default none.
 #' @return Invisibly TRUE; aborts on mismatch.
 #' @keywords internal
 #' @noRd
-check_predictor_schema <- function(object, new_spectra,
-                                   required_extra = character(0)) {
+check_predictor_schema <- function(object, new_spectra) {
 
   ## fit() stored the training-axis predictor columns; validate against them
   ## directly (no recipe re-introspection, which a butchered workflow can break).
   expected <- object$models$predictor_schema
-
-  supplied <- setdiff(names(new_spectra), "sample_id")
-
-  ## Covariates a config promoted to predictor are required at forge time but
-  ## are not in predictor_schema, which records the spectral axis only. Name
-  ## them here rather than letting hardhat's forge error surface instead.
-  ##
-  ## Checked BEFORE the predictor_schema NULL escape below: the covariate
-  ## requirement comes from the config rows, not from the schema, so it holds
-  ## for objects written before predictor_schema existed too. Behind the escape
-  ## it silently did not run on exactly those objects.
-  missing_extra <- setdiff(required_extra, supplied)
-
-  if (length(missing_extra) > 0) {
-
-    cli::cli_abort(c(
-      "{.arg new_data} is missing {length(missing_extra)} covariate column{?s} the fitted model uses as a predictor.",
-      "x" = "Missing: {.val {missing_extra}}",
-      "i" = "{cli::qty(length(missing_extra))}The config being predicted was trained with {?this covariate/these covariates}, so {?it is/they are} part of its predictor set.",
-      "i" = "{cli::qty(length(missing_extra))}Supply {?it/them} in {.arg new_data} (see {.fn add_covariates}), or predict with a config that does not use {?it/them}."
-    ))
-
-  }
 
   ## Objects written before predictor_schema existed: skip the axis gate, let
   ## bake() surface any mismatch.
@@ -755,7 +699,8 @@ check_predictor_schema <- function(object, new_spectra,
 
   }
 
-  missing <- setdiff(expected, supplied)
+  supplied <- setdiff(names(new_spectra), "sample_id")
+  missing  <- setdiff(expected, supplied)
 
   if (length(missing) > 0) {
 
@@ -769,85 +714,6 @@ check_predictor_schema <- function(object, new_spectra,
   }
 
   invisible(TRUE)
-
-}
-
-## ---------------------------------------------------------------------------
-## fitted_extra_predictors() — covariates a fitted config needs at predict time
-## ---------------------------------------------------------------------------
-
-#' Non-spectral predictor columns the fitted configs require
-#'
-#' `fit()` records `models$predictor_schema` from the role map's `predictor`
-#' role, which is the spectral axis; a covariate this config requested carries
-#' the `covariate` role there and is promoted to `predictor` only inside
-#' `build_recipe()`. It is nonetheless in the workflow blueprint's predictor
-#' ptype and required at forge time, so `predict()` has to know about it.
-#'
-#' Two sources, unioned. The blueprint is authoritative but often unavailable:
-#' `butcher()` strips the mold from a stored workflow. The config row's
-#' `covariates` field is what `build_recipe()` promoted in the first place, and
-#' survives butchering, so it is the dependable one.
-#'
-#' @param object A `horizons_fit`.
-#' @param config_ids Configs being predicted. Default all fitted workflows.
-#' @param include_blueprint Read the blueprint too? `TRUE` when deciding which
-#'   columns to keep, where being generous costs nothing. `FALSE` when deciding
-#'   what to *require*, so a blueprint listing something unexpected cannot
-#'   abort a prediction that would have worked.
-#' @return Character vector of required columns outside `predictor_schema`.
-#' @keywords internal
-#' @noRd
-fitted_extra_predictors <- function(object, config_ids = NULL,
-                                    include_blueprint = TRUE) {
-
-  ids    <- config_ids %||% names(object$models$workflows)
-  schema <- object$models$predictor_schema
-
-  from_blueprint <- if (include_blueprint) {
-
-    unlist(
-      lapply(object$models$workflows[ids], function(wf) {
-
-        tryCatch(
-          names(hardhat::extract_mold(wf)$blueprint$ptypes$predictors),
-          error = function(e) character(0)
-        )
-
-      }),
-      use.names = FALSE
-    )
-
-  } else {
-
-    character(0)
-
-  }
-
-  configs <- object$config$configs
-
-  from_configs <- if (!is.null(configs) && "covariates" %in% names(configs)) {
-
-    rows <- configs[configs$config_id %in% ids, , drop = FALSE]
-
-    unlist(
-      lapply(rows$covariates, function(v) {
-
-        tryCatch(parse_config_covariates(v), error = function(e) NULL)
-
-      }),
-      use.names = FALSE
-    )
-
-  } else {
-
-    character(0)
-
-  }
-
-  extra <- setdiff(unique(c(from_blueprint, from_configs)), schema)
-
-  extra[!is.na(extra)]
 
 }
 

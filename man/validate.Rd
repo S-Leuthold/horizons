@@ -21,10 +21,7 @@ only (default). \code{"spectral"} removes the spectral outliers from the
 object. \code{"response"} removes nothing here: it asks \code{evaluate()} (and
 \code{fit()}'s cold start) to trim, from the training partition only, the
 training rows outside Tukey fences computed on that partition's labels,
-with \code{response_threshold} as the multiplier. \code{TRUE} does both. Objects
-validated by versions before this contract had their response outliers
-removed here, on whole-table fences; they still evaluate, with a
-warning that their test metrics exclude those rows.}
+with \code{response_threshold} as the multiplier. \code{TRUE} does both.}
 
 \item{spectral_method}{\code{character(1)}. Spectral outlier detection method.
 Currently only \code{"mahalanobis"}. Default: \code{"mahalanobis"}.}
@@ -51,15 +48,9 @@ never removed here); \code{response_trim}, the request for \code{evaluate()}
 when \code{remove_outliers} is \code{TRUE} or \code{"response"} (a list of the
 \code{outcome}, the \code{method} and the \code{threshold}), otherwise \code{NULL}; and
 the record of every removal so far (\code{removed_ids}, \code{removed}, and
-\code{removal_detail}, one row per removed sample with \code{sample_id},
-\code{reason}, the \code{outcome} whose fences flagged it, and the
-\code{spectral_threshold} and \code{response_threshold} in force). This version
-removes spectral outliers only, so its rows have \code{reason}
-\code{"spectral"}, an \code{NA} outcome and an \code{NA} \code{response_threshold};
-\code{"response"} and \code{"both"} rows, with the outcome and threshold filled
-in, are records carried from an earlier version that removed rows on
-their labels (a \code{"both"} row was a spectral outlier too, and would
-have gone anyway).
+\code{removal_detail}, one row per removed sample with \code{sample_id}, the
+\code{reason} it was removed for, and the \code{spectral_threshold} in force).
+Only spectral outliers are removed, so \code{reason} is \code{"spectral"}.
 \item \code{validation$timestamp}: when validation ran
 }
 }

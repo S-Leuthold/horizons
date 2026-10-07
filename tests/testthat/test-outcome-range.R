@@ -600,36 +600,6 @@ describe("a d13C-like outcome with outcome_range = c(-Inf, Inf)", {
 
   })
 
-  it("refuses to resume checkpoint rows that record no range", {
-
-    ## A copy of one row as it would have been written before #76: the same
-    ## data and settings, less the outcome_range. Under c(-Inf, Inf) it was
-    ## scored differently (floored at zero), so it is refused, naming it.
-    run    <- signed_run()
-    cfg    <- run$cfg
-    outdir <- run$outdir
-
-    row <- readRDS(list.files(file.path(outdir, "checkpoints"), full.names = TRUE)[1])
-    row$settings[[1]]$outcome_range <- NULL
-
-    legacy <- withr::local_tempdir()
-    dir.create(file.path(legacy, "checkpoints"))
-    saveRDS(row, file.path(legacy, "checkpoints", paste0(row$config_id, ".rds")))
-
-    local_mocked_bindings(
-      evaluate_single_config = function(...) stop("evaluate_single_config() was reached"),
-      .package = "horizons"
-    )
-
-    err <- expect_error(
-      suppressWarnings(evaluate(cfg, prune = FALSE, verbose = FALSE, seed = 42L,
-                                output_dir = legacy)),
-      class = "horizons_input_error"
-    )
-    expect_match(flat_message(err), "outcome_range = unset", fixed = TRUE)
-
-  })
-
   it("ensemble() refuses an outcome outside the range at entry", {
 
     fitted <- signed_run()$fitted
@@ -1000,68 +970,28 @@ describe("check_rank_metric_range()", {
 
 })
 
-describe("checkpoint rows that record no outcome_range", {
+describe("checkpoint rows and the outcome range", {
 
-  ## As written before #76: settings stamped, but without the range
-  row <- tibble::tibble(config_id = "a", scoring_schema = SCORING_SCHEMA)
-  row <- stamp_eval_settings(row, eval_settings(cv_folds = 3L, grid_size = 2L))
+  it("compare a recorded range as any setting is, and name it", {
 
-  no_stamp <- tibble::tibble(config_id = "a", scoring_schema = SCORING_SCHEMA)
-  data_fp  <- list(data_hash = NA_character_, data_n_rows = 10L)
+    data_fp <- list(data_hash = "h", data_n_rows = 10L, data_fields = list(ids = "i"))
+    signed  <- eval_settings(cv_folds = 3L, grid_size = 2L, outcome_range = c(-Inf, Inf))
 
-  it("are refused under a range other than the default, naming the range", {
+    row <- tibble::tibble(config_id = "a", scoring_schema = SCORING_SCHEMA)
+    row <- stamp_eval_settings(stamp_data_fingerprint(row, data_fp), signed)
 
-    v <- checkpoint_row_verdict(
-      row, data_fp,
-      eval_settings(cv_folds = 3L, grid_size = 2L, outcome_range = c(-Inf, Inf))
-    )
-
-    expect_identical(v$verdict, "settings_mismatch")
-    expect_identical(v$settings_differ, "outcome_range")
-    expect_identical(
-      describe_settings_diff(v$stored_settings,
-                             eval_settings(outcome_range = c(-Inf, Inf)),
-                             v$settings_differ),
-      "outcome_range = unset (this run: -Inf, Inf)"
-    )
-
-    ## A row with no settings record at all, the same
-    v0 <- checkpoint_row_verdict(no_stamp, data_fp,
-                                 eval_settings(outcome_range = c(-10, 10)))
-    expect_identical(v0$verdict, "settings_mismatch")
-
-  })
-
-  it("resume as unverified under the default, as before", {
-
-    v <- checkpoint_row_verdict(
-      row, data_fp,
-      eval_settings(cv_folds = 3L, grid_size = 2L, outcome_range = DEFAULT_OUTCOME_RANGE)
-    )
-
-    expect_identical(v$verdict, "keep")
-    expect_false(v$settings_verified)
-
-  })
-
-  it("a row that records a range is compared as any setting is", {
-
-    stamped <- stamp_eval_settings(
-      row, eval_settings(cv_folds = 3L, grid_size = 2L, outcome_range = c(-Inf, Inf))
-    )
-
-    keep <- checkpoint_row_verdict(
-      stamped, data_fp,
-      eval_settings(cv_folds = 3L, grid_size = 2L, outcome_range = c(-Inf, Inf))
-    )
+    keep <- checkpoint_row_verdict(row, data_fp, signed)
     expect_identical(keep$verdict, "keep")
-    expect_true(keep$settings_verified)
 
-    moved <- checkpoint_row_verdict(
-      stamped, data_fp,
-      eval_settings(cv_folds = 3L, grid_size = 2L, outcome_range = c(-40, 0))
-    )
+    moved_range <- eval_settings(cv_folds = 3L, grid_size = 2L, outcome_range = c(-40, 0))
+    moved       <- checkpoint_row_verdict(row, data_fp, moved_range)
+
     expect_identical(moved$verdict, "settings_mismatch")
+    expect_identical(moved$settings_differ, "outcome_range")
+    expect_identical(
+      describe_settings_diff(moved$stored_settings, moved_range, moved$settings_differ),
+      "outcome_range = -Inf, Inf (this run: -40, 0)"
+    )
 
   })
 

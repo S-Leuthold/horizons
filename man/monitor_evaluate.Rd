@@ -20,8 +20,9 @@ Default 10.}
 Invisibly returns a list with completion stats (n_complete,
 n_total, rate, eta, best_config, best_metric), \code{ignored} (the number of
 rows refused, by reason: \code{other_data}, \code{other_settings},
-\code{earlier_schema}, \code{not_in_grid}) and \code{unreadable} (checkpoint files that
-could not be read, relative to \code{output_dir}).
+\code{earlier_schema} (another scoring schema, or recording less than the
+manifest), \code{not_in_grid}) and \code{unreadable} (checkpoint files that could
+not be read, relative to \code{output_dir}).
 }
 \description{
 Displays progress for a parallel \code{evaluate()} run by reading checkpoint
@@ -29,13 +30,13 @@ files from the output directory. Run this from a separate R session while
 \code{evaluate()} is running.
 
 The monitor reads the checkpoints through the same helpers and gates as
-\code{evaluate()}: the per-config files under \verb{checkpoints/}, plus the rows of
-a legacy \code{eval_checkpoint.rds} for configs with no per-config file. A row
-is neither counted nor ranked unless \code{evaluate()} would resume it: it must
-match the training-data fingerprint and the tuning settings recorded in
-\code{eval_manifest.rds} (which \code{evaluate()} writes at the start of each run),
-be scored under the current scoring schema, and belong to a config in the
-manifest's grid. A manifest written before a fingerprint or the settings
-were recorded cannot be checked against them, so rows are not refused on
-that count. Refused rows and unreadable files are shown, not hidden.
+\code{evaluate()}: the per-config files under \verb{checkpoints/}. A row is neither
+counted nor ranked unless \code{evaluate()} would resume it: it must record,
+and match, the training-data fingerprint and the tuning settings recorded
+in \code{eval_manifest.rds} (which \code{evaluate()} writes at the start of each
+run), be scored under the current scoring schema, and belong to a config
+in the manifest's grid. Refused rows and unreadable files are shown, not
+hidden.
+A manifest written by another version of horizons is refused;
+\code{evaluate()} rewrites it when a run starts in the directory.
 }

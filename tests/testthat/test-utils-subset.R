@@ -147,7 +147,6 @@ test_that("set_analysis() recomputes every count from the role_map", {
 
   expect_identical(out$data$n_rows,       5L)
   expect_identical(out$data$n_responses,  1L)
-  expect_identical(out$data$n_covariates, 0L)
   expect_identical(out$data$n_predictors, sum(role_map$role == "predictor"))
   expect_no_error(validate_horizons_data(out))
 
@@ -682,7 +681,7 @@ test_that("add_columns() refuses roles that modelling reads", {
   fx  <- select_fixture(n_pool = 40)
   new <- tibble::tibble(extra = rep(1, 40))
 
-  for (role in c("predictor", "outcome", "id", "covariate", "nonsense")) {
+  for (role in c("predictor", "outcome", "id", "nonsense")) {
 
     expect_error(add_columns(fx$pool, new, role = role),
                  class = "horizons_input_error",

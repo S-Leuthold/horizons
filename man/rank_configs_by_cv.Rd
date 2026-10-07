@@ -22,9 +22,8 @@ each config's selected hyperparameters. This is the single ranking rule for
 \code{evaluate()}'s \code{best_config} and \code{fit()}'s member selection, so the two can
 never disagree, and neither touches a test-set column (#50).
 
-Rows whose \verb{cv_<metric>} is \code{NA} (checkpoints written before the column
-existed, or a config whose CV panel could not be recovered) are dropped
-with a warning naming them. If no row can be ranked, aborts with the
-remedy: re-run \code{evaluate()}.
+Rows whose \verb{cv_<metric>} is \code{NA} (a config whose CV panel could not be
+recovered) are dropped with a warning naming them. If no row can be
+ranked, aborts with the remedy: re-run \code{evaluate()}.
 }
 \keyword{internal}

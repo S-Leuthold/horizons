@@ -3,7 +3,7 @@
 ## ---------------------------------------------------------------------------
 
 ## Helper: create minimal data + split + folds + role_map for evaluation
-make_eval_setup <- function(n = 40, n_wn = 10, covariates = NULL) {
+make_eval_setup <- function(n = 40, n_wn = 10) {
 
   set.seed(42)
 
@@ -24,16 +24,6 @@ make_eval_setup <- function(n = 40, n_wn = 10, covariates = NULL) {
     role     = c("id", rep("predictor", n_wn), "outcome")
   )
 
-  ## Optionally add covariates
-  if (!is.null(covariates)) {
-
-    for (cov in covariates) {
-      df[[cov]] <- runif(n, 0, 100)
-      roles <- rbind(roles, tibble::tibble(variable = cov, role = "covariate"))
-    }
-
-  }
-
   ## Create split and folds (suppress stratification warnings for tiny data)
   split <- suppressWarnings(rsample::initial_split(df, prop = 0.75, strata = "SOC"))
   train <- rsample::training(split)
@@ -48,7 +38,6 @@ make_eval_config <- function(model             = "rf",
                              transformation    = "none",
                              preprocessing     = "raw",
                              feature_selection = "none",
-                             covariates        = NA_character_,
                              config_id         = "test_cfg_001") {
 
   tibble::tibble(
@@ -56,8 +45,7 @@ make_eval_config <- function(model             = "rf",
     model             = model,
     transformation    = transformation,
     preprocessing     = preprocessing,
-    feature_selection = feature_selection,
-    covariates        = covariates
+    feature_selection = feature_selection
   )
 
 }

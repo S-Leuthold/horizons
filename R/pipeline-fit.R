@@ -438,7 +438,7 @@ fit <- function(x,
   ## data, so the same rows are dropped here before the comparison. They are
   ## the rows evaluate() recorded, not a fresh trim: fences recomputed here
   ## could fall on another set. An evaluation without the record (no trim
-  ## requested, or evaluated before it existed) trimmed nothing.
+  ## requested) trimmed nothing.
   trimmed_ids   <- x$evaluation$response_trim$trimmed_ids %||% character(0)
   is_trimmed    <- modelled$data[[id_col]] %in% trimmed_ids
   modelled_rows <- if (length(trimmed_ids) > 0) {
@@ -485,16 +485,6 @@ fit <- function(x,
   }
 
   split_F$data <- modelled_rows
-
-  ## Rows an earlier version's validate() removed on whole-table fences are
-  ## gone from both parts, so this fit's test metrics exclude them too.
-  legacy_removed <- legacy_response_removals(x)
-
-  if (length(legacy_removed) > 0) {
-
-    warn_legacy_response_removals(legacy_removed, "fit")
-
-  }
 
   train_F <- rsample::training(split_F)
   test_F  <- rsample::testing(split_F)
@@ -672,7 +662,7 @@ fit <- function(x,
 
     }
 
-    render_response_trim(x$evaluation$response_trim, legacy_removed)
+    render_response_trim(x$evaluation$response_trim)
 
     ## The calibration set UQ and AD share, named for whichever it serves;
     ## with AD alone it went unreported. Both flags are FALSE here when the
@@ -748,17 +738,9 @@ fit <- function(x,
     cfg <- all_configs[all_configs$config_id == config_id, ]
 
     ## Pretty config description
-    model_name <- MODEL_DISPLAY_NAMES[cfg$model] %||% cfg$model
-    desc_parts <- c(model_name, cfg$transformation, cfg$preprocessing,
-                    cfg$feature_selection)
-
-    if (!is.na(cfg$covariates)) {
-
-      desc_parts <- c(desc_parts, paste0("+", cfg$covariates))
-
-    }
-
-    config_desc <- paste(desc_parts, collapse = " + ")
+    model_name  <- MODEL_DISPLAY_NAMES[cfg$model] %||% cfg$model
+    config_desc <- paste(model_name, cfg$transformation, cfg$preprocessing,
+                         cfg$feature_selection, sep = " + ")
     is_last     <- i == n_best
     branch      <- if (is_last) "\u2514\u2500" else "\u251C\u2500"
     cont        <- if (is_last) "   " else "\u2502  "
@@ -1313,10 +1295,10 @@ cold_start_evaluation <- function(x, metric, seed, call = rlang::caller_env()) {
 #' `evaluate()` stamps the range it clamped with on every results row, in the
 #' `settings` record (#76). `fit()` takes its members and their warm-start
 #' parameters from those rows, so a range changed since `evaluate()` would
-#' carry the old range's scoring into the new fit. The comparison is the
-#' checkpoint gate's: a recorded range must equal this object's, and a row
-#' with no recorded range (evaluated before the range existed, under the
-#' zero floor) passes only under the default range.
+#' carry the old range's scoring into the new fit. A recorded range must
+#' equal this object's. A row with no recorded range (evaluated before the
+#' range existed, or built by hand) was scored under the zero floor, so it
+#' passes only under the default range.
 #'
 #' @param x A `horizons_eval` that was screened by `evaluate()`.
 #' @param outcome_range `numeric(2)`. The object's range, from
@@ -1339,12 +1321,8 @@ check_evaluated_outcome_range <- function(x, outcome_range,
     rep(list(NULL), nrow(results))
   }
 
-  differs <- vapply(stamps, function(s) {
-    if (is.null(s$outcome_range)) {
-      outcome_range_unrecorded(s, outcome_range)
-    } else {
-      !identical(s$outcome_range, as.double(outcome_range))
-    }
+  differs <- !vapply(stamps, function(s) {
+    identical(s$outcome_range %||% DEFAULT_OUTCOME_RANGE, as.double(outcome_range))
   }, logical(1))
 
   if (!any(differs)) return(invisible(NULL))

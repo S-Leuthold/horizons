@@ -153,7 +153,7 @@ prep.step_transform_spectra <- function(x, training, info = NULL, ...) {
   new_colnames <- recipes::names0(out_len, prefix = "spec")
 
   ## The generated names must not collide with a column this step passes
-  ## through (a covariate literally named `spec01`, say). bake() binds the two
+  ## through (a meta column literally named `spec01`, say). bake() binds the two
   ## blocks side by side, so a collision is repaired positionally: at training
   ## a spectral band is silently displaced from everything downstream, and at
   ## predict time the bind dies inside vctrs with no mention of the column at
@@ -282,7 +282,7 @@ check_transform_name_collision <- function(generated, passthrough) {
     cli::cli_abort(c(
       "{.fn step_transform_spectra} would generate {length(collisions)} column name{?s} that {?is/are} already in the data.",
       "x" = "Colliding: {.val {collisions}}",
-      "i" = "The step names its output {.code spec1}, {.code spec2}, ... , so a non-spectral column using that pattern (a covariate, an id, a meta column) cannot be carried through alongside it.",
+      "i" = "The step names its output {.code spec1}, {.code spec2}, ... , so a non-spectral column using that pattern (an id or a meta column) cannot be carried through alongside it.",
       "i" = "{cli::qty(length(collisions))}Rename the offending column{?s} before building the recipe."
     ), class = "horizons_input_error")
 

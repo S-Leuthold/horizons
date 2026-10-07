@@ -20,10 +20,10 @@ step_select_cars(
 \item{...}{Selector functions choosing the spectral columns CARS runs on,
 e.g. \code{dplyr::matches("^spec[0-9]+$")} — the names
 \code{step_transform_spectra()} gives its output. Select by name pattern rather
-than \code{all_predictors()}: a covariate promoted to the predictor role is
-inside \code{all_predictors()} by the time this step preps, and would then be
-clustered and resampled as if it were a wavenumber. A selector matching
-nothing aborts at \code{prep()}.}
+than \code{all_predictors()}, so that only spectral columns are clustered and
+resampled: any other column holding the predictor role when this step
+preps would be treated as a wavenumber. A selector matching nothing
+aborts at \code{prep()}.}
 
 \item{outcome}{Character. Name of the outcome variable to use for model fitting.}
 

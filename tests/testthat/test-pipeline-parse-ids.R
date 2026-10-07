@@ -39,8 +39,7 @@ make_test_hd <- function(filenames, spectra_type = "opus") {
       analysis     = analysis,
       role_map     = role_map,
       n_rows       = n,
-      n_predictors = 2,
-      n_covariates = 0
+      n_predictors = 2
     ),
     provenance = list(
       spectra_source   = "test",

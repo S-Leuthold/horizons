@@ -221,7 +221,7 @@ average <- function(x,
 
   ## Meta columns (excluding by column and filename) -------------------------
 
-  meta_cols <- role_map$variable[role_map$role %in% c("meta", "covariate")]
+  meta_cols <- role_map$variable[role_map$role == "meta"]
   meta_cols <- setdiff(meta_cols, c(by, "filename"))
 
   ## Response and outcome columns --------------------------------------------

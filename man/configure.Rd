@@ -11,8 +11,6 @@ configure(
   transformations = "none",
   preprocessing = "raw",
   feature_selection = "none",
-  expand_covariates = NULL,
-  cov_fusion = NULL,
   cv_folds = 5L,
   grid_size = 10L,
   bayesian_iter = 15L,
@@ -40,16 +38,6 @@ Default \code{"raw"}.}
 
 \item{feature_selection}{\code{character}. Feature selection methods to test.
 Default \code{"none"}.}
-
-\item{expand_covariates}{\verb{logical(1), character, or NULL}. Covariate
-expansion strategy. NULL = all covariates in every config (no expansion).
-TRUE = power set of all covariate columns. Character vector = power set
-of named covariates only. FALSE = exclude all covariates.}
-
-\item{cov_fusion}{\verb{character(1) or NULL}. Covariate fusion strategy:
-NULL (no covariates) or \code{"early"}, which adds the covariates as
-predictors beside the spectral features. Required when covariates are
-present. \code{"late"} aborts: late fusion is designed but not built.}
 
 \item{cv_folds}{\code{integer}. Number of cross-validation folds. Default 5.
 Minimum 2.}
@@ -84,7 +72,7 @@ Outcome range.}
 A modified \code{horizons_data} object with:
 \itemize{
 \item Outcome variable promoted to \code{role = "outcome"} in \code{data$role_map}
-\item \code{config$configs} — tibble of configuration grid (6 columns)
+\item \code{config$configs} — tibble of configuration grid (5 columns)
 \item \code{config$n_configs} — integer count
 \item \code{config$tuning} — list of tuning parameters
 \item \code{config$expansion} — list of original inputs (for reproducibility)
@@ -111,12 +99,6 @@ and model evaluation (\code{evaluate()}).
 \code{configure()} promotes exactly one response to \code{role = "outcome"} for
 modeling. If only one response exists, it's auto-selected. Multiple
 responses require explicit \code{outcome} specification.
-
-\strong{Covariate expansion:}
-
-When covariates are present, \code{expand_covariates} controls whether to
-benchmark across different covariate subsets (power-set expansion) or
-use all covariates in every configuration.
 
 \strong{Reconfiguration:}
 

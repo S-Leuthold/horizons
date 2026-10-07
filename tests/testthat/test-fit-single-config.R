@@ -57,7 +57,6 @@ make_fit_config <- function(model             = "rf",
                             transformation    = "none",
                             preprocessing     = "raw",
                             feature_selection = "none",
-                            covariates        = NA_character_,
                             config_id         = "fit_test_001") {
 
   tibble::tibble(
@@ -65,8 +64,7 @@ make_fit_config <- function(model             = "rf",
     model             = model,
     transformation    = transformation,
     preprocessing     = preprocessing,
-    feature_selection = feature_selection,
-    covariates        = covariates
+    feature_selection = feature_selection
   )
 
 }

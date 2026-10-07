@@ -8,7 +8,6 @@
 
 #' Build a minimal horizons_data object ready for evaluate()
 make_eval_object <- function(n = 40, n_wn = 10, n_configs = 2,
-                             covariates = NULL,
                              add_validation = TRUE) {
 
   set.seed(42)
@@ -30,16 +29,6 @@ make_eval_object <- function(n = 40, n_wn = 10, n_configs = 2,
     role     = c("id", rep("predictor", n_wn), "outcome")
   )
 
-  ## Optionally add covariates
-  if (!is.null(covariates)) {
-
-    for (cov in covariates) {
-      df[[cov]] <- runif(n, 0, 100)
-      roles <- rbind(roles, tibble::tibble(variable = cov, role = "covariate"))
-    }
-
-  }
-
   ## Build configs
   models <- rep(c("rf", "cubist"), length.out = n_configs)
   configs <- tibble::tibble(
@@ -47,8 +36,7 @@ make_eval_object <- function(n = 40, n_wn = 10, n_configs = 2,
     model             = models,
     transformation    = "none",
     preprocessing     = "raw",
-    feature_selection = "none",
-    covariates        = NA_character_
+    feature_selection = "none"
   )
 
   ## Build horizons_data-like structure
@@ -61,7 +49,6 @@ make_eval_object <- function(n = 40, n_wn = 10, n_configs = 2,
       role_map     = roles,
       n_rows       = nrow(df),
       n_predictors = n_wn,
-      n_covariates = 0L,
       ## SOC carries role "outcome" above, not "response" — those are
       ## distinct roles (n_responses counts role == "response", the sibling
       ## responses add_response()/select_training() can carry alongside the
@@ -108,38 +95,5 @@ make_eval_object <- function(n = 40, n_wn = 10, n_configs = 2,
 
   class(obj) <- c("horizons_data", "list")
   obj
-
-}
-
-## ---------------------------------------------------------------------------
-## An object validated before #77
-## ---------------------------------------------------------------------------
-
-#' Remove rows the way validate(remove_outliers = "response") did before #77
-#'
-#' Versions before #77 removed response outliers from the object, on fences
-#' over the whole table, and recorded them in removal_detail with reason
-#' "response" (or "both" when the row was a spectral outlier too), the
-#' outcome whose fences flagged them and the response threshold. They wrote
-#' no response_trim request. This builds that record shape on an unpromoted
-#' object.
-legacy_label_removal <- function(hd, ids, reason = "response", outcome = "SOC",
-                                 response_threshold = 1.5) {
-
-  x      <- subset_rows(hd, keep = !hd$data$analysis$sample_id %in% ids)
-  reason <- rep_len(reason, length(ids))
-
-  x$validation$outliers["removed_ids"]    <- list(ids)
-  x$validation$outliers["removal_detail"] <- list(tibble::tibble(
-    sample_id          = ids,
-    reason             = reason,
-    outcome            = outcome,
-    spectral_threshold = ifelse(reason == "both", 0.975, NA_real_),
-    response_threshold = response_threshold
-  ))
-  x$validation$outliers["removed"]        <- list(TRUE)
-  x$validation$outliers$response_trim     <- NULL   # NULL removes the key
-
-  x
 
 }

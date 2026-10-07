@@ -41,8 +41,7 @@ make_fit_object <- function(n = 60, n_wn = 10, n_configs = 2, seed = 42,
     model             = models[seq_len(n_configs)],
     transformation    = "none",
     preprocessing     = "raw",
-    feature_selection = "none",
-    covariates        = NA_character_
+    feature_selection = "none"
   )
 
   ## Build horizons_data-like structure; downstream slots in the
@@ -55,7 +54,6 @@ make_fit_object <- function(n = 60, n_wn = 10, n_configs = 2, seed = 42,
       role_map     = roles,
       n_rows       = nrow(df),
       n_predictors = n_wn,
-      n_covariates = 0L,
       ## SOC carries role "outcome" below, not "response" — those are
       ## distinct roles (n_responses counts role == "response", the sibling
       ## responses add_response()/select_training() can carry alongside the
@@ -2177,23 +2175,6 @@ describe("fit() - evaluate()'s response trim (#77)", {
 
     expect_true(any(grepl(paste0("Split: .* test \\(", length(trimmed),
                                  " training rows trimmed\\)"), out)))
-
-  })
-
-  it("warns about an object an earlier version validated, on either path", {
-
-    legacy <- legacy_label_removal(obj, sprintf("S%03d", c(1:4, 31:34)))
-
-    cold_legacy <- seen_by_fit(legacy)
-
-    expect_true(any(vapply(cold_legacy$warnings, inherits, logical(1),
-                           "horizons_response_trim_warning")))
-
-    ev_legacy   <- suppressWarnings(evaluate(legacy, prune = FALSE, verbose = FALSE, seed = 307L))
-    warm_legacy <- seen_by_fit(ev_legacy)
-
-    expect_true(any(vapply(warm_legacy$warnings, inherits, logical(1),
-                           "horizons_response_trim_warning")))
 
   })
 

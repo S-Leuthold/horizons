@@ -24,7 +24,7 @@ evaluate_single_config(
 \arguments{
 \item{config_row}{Single-row tibble from \code{config$configs}. Must contain:
 \code{config_id}, \code{model}, \code{transformation}, \code{preprocessing},
-\code{feature_selection}, \code{covariates}.}
+\code{feature_selection}.}
 
 \item{split}{An \code{rsplit} object from \code{rsample::initial_split()}.}
 

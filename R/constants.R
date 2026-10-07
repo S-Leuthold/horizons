@@ -148,27 +148,6 @@ DEFAULT_PCA_THRESHOLD <- 0.995
 # window wider than the polynomial order. See is_valid_sg_window().
 SG_WINDOW_MIN <- 5L
 
-## Covariate Types ------------------------------------------------------------
-
-# Known soil covariate types
-KNOWN_SOIL_COVARIATES <- c(
-  "clay", "sand", "silt", "ph", "phh2o", "oc", "ocd",
-  "n", "nitrogen", "cec", "bdod", "ca", "mg", "k", "na",
-  "p", "fe", "al", "mn", "zn", "cu"
-)
-
-# Known climate covariate types
-KNOWN_CLIMATE_COVARIATES <- c(
-  "MAT", "MAP", "PET", "AI", "GDD", "Precip_Seasonality",
-  "Temperature_Range", "Frost_Days"
-)
-
-# Known spatial covariate types
-KNOWN_SPATIAL_COVARIATES <- c(
-  "elevation", "slope", "aspect", "twi", "curvature",
-  "hillshade", "roughness"
-)
-
 ## fit() Parameters ------------------------------------------------------------
 
 DEFAULT_FINAL_BAYES_ITER <- 25L
@@ -241,11 +220,6 @@ RESPONSE_BOUND_MARGIN <- 1.5
 ### outcome_range_setting().
 DEFAULT_OUTCOME_RANGE <- c(0, Inf)
 
-## DAYMET Constants ------------------------------------------------------------
-
-DAYMET_RESOLUTION_DEG <- 1/24
-DAYMET_TIMEOUT        <- 60
-
 ## Parallel Worker Contract ----------------------------------------------------
 
 # The keys evaluate()'s parallel branch sends to evaluate_config_worker().
@@ -285,8 +259,14 @@ PARALLELIZE_OVER_VALUES <- c("auto", "configs", "resamples")
 #      per candidate x fold, so each candidate drew its own feature selection).
 #   2  2026-09-15: parallel_over = "resamples" (one prep per fold shared by
 #      all candidates); seed re-pinned before every stochastic stage.
-# Rows without the column are schema 1.
 SCORING_SCHEMA <- 2L
+
+# Schema of eval_manifest.rds, which evaluate() writes at the start of every
+# run with an output_dir and monitor_evaluate() reads. Schema 4 (#42) records
+# the axis and the user's plan, the training-data fingerprint and its fields,
+# and the tuning settings. Bump it when a field the monitor reads changes; the
+# monitor refuses a manifest of any other schema.
+EVAL_MANIFEST_SCHEMA <- 4L
 
 # future.globals.maxSize for the configs-axis dispatch, set by evaluate() for
 # the duration of the call. Declared rather than inherited so a payload

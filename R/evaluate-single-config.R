@@ -12,7 +12,7 @@
 #'
 #' @param config_row Single-row tibble from `config$configs`. Must contain:
 #'   `config_id`, `model`, `transformation`, `preprocessing`,
-#'   `feature_selection`, `covariates`.
+#'   `feature_selection`.
 #' @param split An `rsplit` object from `rsample::initial_split()`.
 #' @param cv_folds A `vfold_cv` object created from the training set.
 #' @param role_map Tibble with `variable` and `role` columns.
@@ -582,12 +582,11 @@ evaluate_single_config <- function(config_row,
 #' @details
 #' The roles come from the recipe rather than from subtracting the known
 #' non-predictors off the baked frame. `build_recipe()` holds sibling lab
-#' measurements at role `response_hold` and unused covariates at
-#' `covariate_hold`; both survive into the baked frame and neither is a
-#' predictor, so subtraction counts them and the ceiling lands above the real
-#' predictor count. `tune_grid()` can then sample an `mtry` larger than the
-#' model matrix is wide, which fails the config for a reason that has nothing
-#' to do with the config.
+#' measurements at role `response_hold`; they survive into the baked frame
+#' and are not predictors, so subtraction counts them and the ceiling lands
+#' above the real predictor count. `tune_grid()` can then sample an `mtry`
+#' larger than the model matrix is wide, which fails the config for a reason
+#' that has nothing to do with the config.
 #'
 #' @param prepped A prepped `recipe`.
 #' @param baked The frame from `recipes::bake(prepped, new_data = NULL)`.
