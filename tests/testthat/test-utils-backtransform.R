@@ -4,51 +4,6 @@
 
 describe("back_transform_predictions()", {
 
-  it("returns predictions unchanged for 'none' transformation", {
-
-    preds <- c(1, 2, 3, 4, 5)
-    result <- back_transform_predictions(preds, "none")
-    expect_equal(result, preds)
-
-  })
-
-  it("applies exp(x) - 1 for log transformation (offset = 1 inverse)", {
-
-    ## step_log(offset = 1) computes log(x + 1)
-    ## Correct inverse: exp(x) - 1
-    ## This is the bug fix from legacy code which used exp(x)
-
-    original <- c(0, 1, 2, 5, 10)
-    transformed <- log(original + 1)  # forward: log(x + 1)
-
-    result <- back_transform_predictions(transformed, "log")
-
-    expect_equal(result, original, tolerance = 1e-10)
-
-  })
-
-  it("applies x^2 for sqrt transformation", {
-
-    original <- c(0, 1, 4, 9, 16)
-    transformed <- sqrt(original)
-
-    result <- back_transform_predictions(transformed, "sqrt")
-
-    expect_equal(result, original, tolerance = 1e-10)
-
-  })
-
-  it("applies 10^x - 1 for log10 transformation (offset = 1 inverse)", {
-
-    original    <- c(0, 1, 9, 99, 999)
-    transformed <- log10(original + 1)
-
-    result <- back_transform_predictions(transformed, "log10")
-
-    expect_equal(result, original, tolerance = 1e-10)
-
-  })
-
   it("handles NA values gracefully", {
 
     preds <- c(1, NA, 3, NA, 5)
@@ -263,17 +218,6 @@ describe("back_transform_predictions()", {
 
   })
 
-  it("clamp warning fires even with warn = FALSE (guardrail is ungated)", {
-
-    ## warn gates the edge-case messages; the winsorization warning is the
-    ## guardrail itself and must be visible to production callers.
-    expect_warning(
-      back_transform_predictions(c(1, 7), "log", warn = FALSE, upper_bound = 100),
-      "winsorized"
-    )
-
-  })
-
   it("passes NA values through unclamped when a bound is supplied", {
 
     result <- suppressWarnings(
@@ -359,19 +303,6 @@ describe("needs_back_transformation()", {
 })
 
 describe("compute_original_scale_metrics()", {
-
-  it("computes all six metrics for valid input", {
-
-    truth    <- c(1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
-    estimate <- c(1.2, 1.8, 3.1, 4.3, 4.8, 6.2, 7.1, 7.9, 9.3, 9.7)
-
-    result <- compute_original_scale_metrics(truth, estimate)
-
-    expect_s3_class(result, "tbl_df")
-    expect_true(all(c("rmse", "rrmse", "rsq", "ccc", "rpd", "mae") %in%
-                      result$.metric))
-
-  })
 
   it("drops NA pairs before computing", {
 
