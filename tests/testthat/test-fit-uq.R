@@ -222,6 +222,47 @@ describe("fit_uq() - return contract", {
 
   })
 
+  it("oof_coverage and mean_width describe the out-of-fold bands, recomputed from the bundle", {
+
+    ## At the fixture's own calibration set the bands cover every out-of-fold
+    ## truth, and a coverage of 1 cannot tell the two-sided check from one
+    ## that accepts a truth inside either bound. Calibration truths close to
+    ## the point predictions give negative scores, so c_alpha narrows the
+    ## bands until some truths fall outside them.
+    calib <- setup$calib_data
+    calib[[setup$outcome_col]] <- withr::with_seed(1, {
+      stats::predict(setup$fitted_wf, new_data = calib)$.pred +
+        stats::rnorm(nrow(calib), sd = 0.1)
+    })
+
+    narrow <- fit_uq(
+      fitted_workflow = setup$fitted_wf,
+      oof_predictions = setup$oof_predictions,
+      calib_data      = calib,
+      role_map        = setup$role_map,
+      transformation  = "none",
+      level_default   = 0.90
+    )
+
+    oof      <- setup$oof_predictions
+    features <- workflows::extract_mold(setup$fitted_wf)$predictors[oof$.row, , drop = FALSE]
+    alpha    <- 1 - 0.90
+    q        <- stats::predict(narrow$quantile_model, data = as.data.frame(features),
+                               type = "quantiles",
+                               quantiles = c(alpha / 2, 1 - alpha / 2))$predictions
+    c_alpha  <- compute_c_alpha(narrow$scores, 0.90)
+    lower    <- oof$.pred + q[, 1] - c_alpha
+    upper    <- oof$.pred + q[, 2] + c_alpha
+    covered  <- oof$truth >= lower & oof$truth <= upper
+
+    expect_true(any(covered))
+    expect_true(any(!covered))
+
+    expect_equal(narrow$oof_coverage, mean(covered))
+    expect_equal(narrow$mean_width, mean(upper - lower))
+
+  })
+
 })
 
 
@@ -241,6 +282,70 @@ describe("fit_uq() - conformal scores properties", {
   it("scores are computed on calibration data (not training)", {
 
     expect_equal(result$n_calib, nrow(setup$calib_data))
+
+  })
+
+  it("scores are the signed CQR scores of the calibration residuals, taken after the clamp to the outcome range", {
+
+    ## The intervals are served around clamped point predictions, so the
+    ## clamp must reach the calibration residuals too. An upper bound at the
+    ## median calibration prediction binds on half the set. The scores are
+    ## recomputed from the bundle's own quantile model on the baked
+    ## calibration features.
+    preds <- stats::predict(setup$fitted_wf, new_data = setup$calib_data)$.pred
+    cap   <- stats::median(preds)
+
+    expect_true(any(preds > cap))
+
+    clamped <- fit_uq(
+      fitted_workflow = setup$fitted_wf,
+      oof_predictions = setup$oof_predictions,
+      calib_data      = setup$calib_data,
+      role_map        = setup$role_map,
+      transformation  = "none",
+      level_default   = 0.90,
+      outcome_range   = c(0, cap)
+    )
+
+    features <- recipes::bake(clamped$prepped_recipe, new_data = setup$calib_data,
+                              recipes::all_predictors())
+    alpha    <- 1 - 0.90
+    q        <- stats::predict(clamped$quantile_model, data = as.data.frame(features),
+                               type = "quantiles",
+                               quantiles = c(alpha / 2, 1 - alpha / 2))$predictions
+    r        <- setup$calib_data[[setup$outcome_col]] - pmin(preds, cap)
+
+    expect_equal(clamped$scores, pmax(q[, 1] - r, r - q[, 2]))
+
+  })
+
+  it("scores leave out calibration rows with no outcome, in n_calib and in the minimum", {
+
+    ## Of the 40 rows, ten missing outcomes leave exactly N_CALIB_MIN to
+    ## score, which is enough; eleven leave one fewer, which is not.
+    fit_missing <- function(n_missing) {
+      calib <- setup$calib_data
+      calib[[setup$outcome_col]][seq_len(n_missing)] <- NA_real_
+      fit_uq(
+        fitted_workflow = setup$fitted_wf,
+        oof_predictions = setup$oof_predictions,
+        calib_data      = calib,
+        role_map        = setup$role_map
+      )
+    }
+
+    n_missing <- nrow(setup$calib_data) - N_CALIB_MIN
+
+    expect_gt(n_missing, 0L)
+
+    at_min <- fit_missing(n_missing)
+
+    expect_false(is.null(at_min))
+    expect_equal(at_min$n_calib, N_CALIB_MIN)
+    expect_length(at_min$scores, N_CALIB_MIN)
+    expect_false(anyNA(at_min$scores))
+
+    expect_null(fit_missing(n_missing + 1L))
 
   })
 
@@ -301,6 +406,83 @@ describe("fit_uq() - prepped recipe can bake new data", {
 
 
 ## =========================================================================
+## A prediction step that fails
+## =========================================================================
+## Each failing step is caught: a calibration prediction that fails returns
+## NULL (the config degrades to no UQ), and an out-of-fold one leaves the
+## diagnostics NA. The quantile predictions go through ranger's predict()
+## method, which the point model also calls, so the mock below fails only
+## the quantile prediction on the rows it is given.
+
+quantile_prediction_failing_on <- function(n_rows) {
+
+  real_predict <- getS3method("predict", "ranger")
+
+  function(object, data, ...) {
+
+    if (identical(list(...)$type, "quantiles") && nrow(data) == n_rows) {
+      stop("quantile prediction failed")
+    }
+
+    real_predict(object, data, ...)
+
+  }
+
+}
+
+describe("fit_uq() - a prediction step that fails", {
+
+  ## suppressWarnings() around the setup only, as in the row-alignment block
+  setup <- suppressWarnings(make_uq_setup())
+
+  it("returns NULL, rather than aborting, when a calibration prediction fails", {
+
+    ## Each call mocks one method for its own duration
+    fit_mocked <- function(class, method) {
+      local_mocked_s3_method("predict", class, method)
+      fit_uq(
+        fitted_workflow = setup$fitted_wf,
+        oof_predictions = setup$oof_predictions,
+        calib_data      = setup$calib_data,
+        role_map        = setup$role_map
+      )
+    }
+
+    ## The point prediction on the calibration set
+    expect_null(fit_mocked("workflow", function(object, new_data, ...) {
+      stop("point prediction failed")
+    }))
+
+    ## The quantile prediction on the calibration set
+    expect_null(fit_mocked("ranger", quantile_prediction_failing_on(nrow(setup$calib_data))))
+
+  })
+
+  it("keeps the bundle, with NA diagnostics, when the out-of-fold quantile prediction fails", {
+
+    local_mocked_s3_method(
+      "predict", "ranger",
+      quantile_prediction_failing_on(nrow(setup$oof_predictions))
+    )
+
+    result <- fit_uq(
+      fitted_workflow = setup$fitted_wf,
+      oof_predictions = setup$oof_predictions,
+      calib_data      = setup$calib_data,
+      role_map        = setup$role_map
+    )
+
+    expect_false(is.null(result))
+    expect_equal(result$n_calib, nrow(setup$calib_data))
+    expect_identical(result$oof_coverage, NA_real_)
+    expect_identical(result$mean_width, NA_real_)
+
+  })
+
+})
+
+
+## =========================================================================
 ## Thread pinning at the call site (M6, 2026-09-15)
 ## =========================================================================
 
@@ -347,7 +529,7 @@ describe("fit_uq() - row alignment", {
   ## suppressWarnings() around the setup only: the fixture's forest asks for
   ## more mtry than the recipe leaves predictors, and ranger says so.
 
-  it("aborts when an out-of-fold .row falls past the rows the model was fit on", {
+  it("aborts when an out-of-fold .row is past the rows the model was fit on, below 1 or NA", {
 
     setup <- suppressWarnings(make_uq_setup())
     oof   <- setup$oof_predictions
@@ -362,6 +544,24 @@ describe("fit_uq() - row alignment", {
       ),
       "Out-of-fold rows", class = "horizons_internal_error"
     )
+
+    ## A zero or NA .row indexes no row of the mold, so the forest's features
+    ## would come out a row short of its residuals or blank
+    fit_with_row <- function(row) {
+      oof <- setup$oof_predictions
+      oof$.row[1] <- row
+      fit_uq(
+        fitted_workflow = setup$fitted_wf,
+        oof_predictions = oof,
+        calib_data      = setup$calib_data,
+        role_map        = setup$role_map
+      )
+    }
+
+    expect_error(fit_with_row(0L), "Out-of-fold rows",
+                 class = "horizons_internal_error")
+    expect_error(fit_with_row(NA_integer_), "Out-of-fold rows",
+                 class = "horizons_internal_error")
 
   })
 

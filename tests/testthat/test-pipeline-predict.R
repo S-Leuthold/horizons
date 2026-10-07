@@ -683,19 +683,28 @@ describe("predict.horizons_fit() - applicability domain", {
 
   })
 
-  it("abstain_ood = TRUE NAs the prediction but preserves .ad_distance", {
+  it("abstain_ood = TRUE NAs only the OOD rows' predictions and preserves .ad_distance", {
 
     skip_if_not(has_ad(fitted_fixture))
 
-    ood_df <- new_df
-    wn     <- grep("^wn_", names(ood_df))
-    ood_df[, wn] <- ood_df[, wn] + 10
+    ## Half the batch shifted far off the training axis, half left in domain
+    ood_df  <- new_df
+    wn      <- grep("^wn_", names(ood_df))
+    shifted <- 1:6
+    ood_df[shifted, wn] <- ood_df[shifted, wn] + 10
 
     p <- predict(fitted_fixture, ood_df, interval = FALSE, abstain_ood = TRUE)
 
     ood <- p$.ad_flag == "OOD"
+    expect_true(any(ood))
+    expect_true(any(!ood))
+
     expect_true(all(is.na(p$.pred[ood])))          # abstained
     expect_true(all(!is.na(p$.ad_distance)))       # distance always preserved
+
+    ## The in-domain rows keep the predictions they get without abstention
+    kept <- predict(fitted_fixture, ood_df, interval = FALSE)
+    expect_equal(p$.pred[!ood], kept$.pred[!ood])
 
   })
 
