@@ -148,27 +148,6 @@ DEFAULT_PCA_THRESHOLD <- 0.995
 # window wider than the polynomial order. See is_valid_sg_window().
 SG_WINDOW_MIN <- 5L
 
-## Covariate Types ------------------------------------------------------------
-
-# Known soil covariate types
-KNOWN_SOIL_COVARIATES <- c(
-  "clay", "sand", "silt", "ph", "phh2o", "oc", "ocd",
-  "n", "nitrogen", "cec", "bdod", "ca", "mg", "k", "na",
-  "p", "fe", "al", "mn", "zn", "cu"
-)
-
-# Known climate covariate types
-KNOWN_CLIMATE_COVARIATES <- c(
-  "MAT", "MAP", "PET", "AI", "GDD", "Precip_Seasonality",
-  "Temperature_Range", "Frost_Days"
-)
-
-# Known spatial covariate types
-KNOWN_SPATIAL_COVARIATES <- c(
-  "elevation", "slope", "aspect", "twi", "curvature",
-  "hillshade", "roughness"
-)
-
 ## fit() Parameters ------------------------------------------------------------
 
 DEFAULT_FINAL_BAYES_ITER <- 25L

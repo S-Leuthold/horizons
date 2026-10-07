@@ -160,7 +160,7 @@ new_horizons_data <- function(analysis       = NULL,
 
                   ## Written by configure(): the arguments it was given
                   ## (outcome, models, transformations, preprocessing,
-                  ## feature_selection, expand_covariates, cov_fusion).
+                  ## feature_selection).
                   expansion = NULL),
 
     ## -------------------------------------------------------------------------

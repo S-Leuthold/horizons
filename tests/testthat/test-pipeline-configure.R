@@ -126,64 +126,6 @@ make_multi_response_hd <- function() {
 }
 
 
-#' Create horizons_data with covariates (clay and MAP)
-#' @noRd
-make_covariate_hd <- function() {
-
-  ## Predictor columns are declared in decreasing wavenumber order:
-  ## validate_horizons_data() (invariant I2) requires it, and configure() now
-  ## calls it at the end of every run.
-  analysis <- tibble::tibble(
-    sample_id = c("S001", "S002", "S003"),
-    `602`     = c(0.12, 0.22, 0.32),
-    `601`     = c(0.11, 0.21, 0.31),
-    `600`     = c(0.10, 0.20, 0.30),
-    SOC       = c(1.2, 3.4, 5.6),
-    clay      = c(20, 35, 50),
-    MAP       = c(800, 1000, 1200)
-  )
-
-  role_map <- tibble::tibble(
-    variable = c("sample_id", "602", "601", "600", "SOC", "clay", "MAP"),
-    role     = c("id", "predictor", "predictor", "predictor",
-                 "response", "covariate", "covariate")
-  )
-
-  ## Downstream slots in the constructor's shape
-  contract <- new_horizons_data()
-
-  obj <- list(
-    data = list(
-      analysis     = analysis,
-      role_map     = role_map,
-      n_rows       = 3L,
-      n_predictors = 3L,
-      n_covariates = 2L,
-      n_responses  = 1L
-    ),
-    provenance = list(
-      spectra_source   = "test",
-      spectra_type     = "mir",
-      created          = Sys.time(),
-      horizons_version = utils::packageVersion("horizons")
-    ),
-    config = list(
-      configs   = NULL,
-      n_configs = NULL,
-      tuning    = list(grid_size = 10L, bayesian_iter = 15L, cv_folds = 5L)
-    ),
-    validation = list(passed = NULL, checks = NULL, timestamp = NULL),
-    evaluation = contract$evaluation,
-    models     = contract$models,
-    ensemble   = contract$ensemble
-  )
-
-  class(obj) <- c("horizons_data", "list")
-  obj
-
-}
-
-
 #' Silently run configure() — suppresses CLI tree output
 #' @noRd
 quiet_configure <- function(...) {
@@ -343,30 +285,6 @@ describe("configure() validation", {
 
   })
 
-  test_that("errors for invalid cov_fusion values", {
-
-    hd <- make_single_response_hd()
-
-    expect_error(
-      capture.output(configure(hd, cov_fusion = "middle")),
-      "middle",
-      class = "horizons_configure_error"
-    )
-
-  })
-
-  test_that("errors when covariates exist but cov_fusion is NULL", {
-
-    hd <- make_covariate_hd()
-
-    expect_error(
-      capture.output(configure(hd, cov_fusion = NULL)),
-      "fusion",
-      class = "horizons_configure_error"
-    )
-
-  })
-
   test_that("errors for cv_folds < 2", {
 
     hd <- make_single_response_hd()
@@ -458,19 +376,6 @@ describe("configure() validation", {
 
     expect_identical(result$config$recipe$sg_window, 5L)
     expect_identical(result$config$recipe$pca_threshold, 1)
-
-  })
-
-  test_that("errors for expand_covariates with invalid covariate names", {
-
-    hd <- make_covariate_hd()
-
-    expect_error(
-      capture.output(configure(hd, cov_fusion = "early",
-                               expand_covariates = c("clay", "sand"))),
-      "Covariate.*not found",
-      class = "horizons_configure_error"
-    )
 
   })
 
@@ -568,12 +473,12 @@ describe("configure() config grid", {
                               preprocessing   = c("raw", "snv"),
                               feature_selection = "none")
 
-    ## 2 models x 2 transforms x 2 preproc x 1 fs x 1 cov_set = 8
+    ## 2 models x 2 transforms x 2 preproc x 1 fs = 8
     expect_equal(nrow(result$config$configs), 8)
 
   })
 
-  test_that("all 6 columns present, and no per-config parameter columns (#62)", {
+  test_that("all 5 columns present, and no per-config parameter columns (#62)", {
 
     hd     <- make_single_response_hd()
     result <- quiet_configure(hd)
@@ -581,7 +486,7 @@ describe("configure() config grid", {
     ## The three list-columns that stood here were never read by the recipe
     ## builder, so they claimed per-config overrides that did not exist.
     expected_cols <- c("config_id", "model", "transformation", "preprocessing",
-                       "feature_selection", "covariates")
+                       "feature_selection")
 
     expect_equal(sort(names(result$config$configs)), sort(expected_cols))
 
@@ -625,15 +530,6 @@ describe("configure() config grid", {
 
   })
 
-  test_that("covariates column is NA when no covariates", {
-
-    hd     <- make_single_response_hd()
-    result <- quiet_configure(hd)
-
-    expect_true(all(is.na(result$config$configs$covariates)))
-
-  })
-
   test_that("single-everything config produces 1 row", {
 
     hd     <- make_single_response_hd()
@@ -664,129 +560,7 @@ describe("configure() config grid", {
 
 
 ## ===========================================================================
-## 4. Covariate expansion tests
-## ===========================================================================
-
-describe("configure() covariate expansion", {
-
-  test_that("no covariates: covariates column all NA, single set", {
-
-    hd     <- make_single_response_hd()
-    result <- quiet_configure(hd, models = "rf")
-
-    expect_true(all(is.na(result$config$configs$covariates)))
-    expect_equal(nrow(result$config$configs), 1)
-
-  })
-
-  test_that("expand_covariates = NULL with covariates: all covariates in every config", {
-
-    hd     <- make_covariate_hd()
-    result <- quiet_configure(hd,
-                              models            = "rf",
-                              cov_fusion        = "early",
-                              expand_covariates = NULL)
-
-    ## All configs should have the same covariate string (sorted: MAP,clay)
-    expect_true(all(result$config$configs$covariates == "MAP,clay"))
-
-  })
-
-  test_that("expand_covariates = TRUE: power set (2^n sets)", {
-
-    hd     <- make_covariate_hd()
-    result <- quiet_configure(hd,
-                              models            = "rf",
-                              cov_fusion        = "early",
-                              expand_covariates = TRUE)
-
-    ## 2 covariates → power set = 2^2 = 4 sets (NA, MAP, clay, MAP+clay)
-    ## 1 model x 1 transform x 1 preproc x 1 fs x 4 cov_sets = 4
-    expect_equal(nrow(result$config$configs), 4)
-
-  })
-
-  test_that("expand_covariates = TRUE with 1 covariate: 2 sets", {
-
-    ## Build a fixture with only 1 covariate
-    hd <- make_covariate_hd()
-    hd$data$role_map$role[hd$data$role_map$variable == "MAP"] <- "predictor"
-    hd$data$n_covariates <- 1L
-
-    result <- quiet_configure(hd,
-                              models            = "rf",
-                              cov_fusion        = "early",
-                              expand_covariates = TRUE)
-
-    ## 1 covariate → power set = 2 sets (NA, clay)
-    expect_equal(nrow(result$config$configs), 2)
-
-  })
-
-  test_that("expand_covariates = c('clay'): selective expansion, others fixed", {
-
-    hd     <- make_covariate_hd()
-    result <- quiet_configure(hd,
-                              models            = "rf",
-                              cov_fusion        = "early",
-                              expand_covariates = c("clay"))
-
-    ## Expanding "clay" only: power set of {clay} = {NA, clay}
-    ## Fixed covariate: MAP
-    ## Sets: {MAP} and {MAP,clay} → 2 unique sets
-    cov_vals <- sort(unique(result$config$configs$covariates))
-    expect_equal(length(cov_vals), 2)
-    expect_true("MAP" %in% cov_vals)
-    expect_true("MAP,clay" %in% cov_vals)
-
-  })
-
-  test_that("expand_covariates = FALSE: all NA, covariates excluded", {
-
-    hd     <- make_covariate_hd()
-    result <- quiet_configure(hd,
-                              models            = "rf",
-                              cov_fusion        = "early",
-                              expand_covariates = FALSE)
-
-    expect_true(all(is.na(result$config$configs$covariates)))
-
-  })
-
-  test_that("covariate strings are canonicalized (sorted)", {
-
-    hd     <- make_covariate_hd()
-    result <- quiet_configure(hd,
-                              models            = "rf",
-                              cov_fusion        = "early",
-                              expand_covariates = NULL)
-
-    ## MAP comes before clay alphabetically
-    expect_equal(result$config$configs$covariates[1], "MAP,clay")
-
-  })
-
-  test_that("total config count = base grid x covariate sets", {
-
-    hd     <- make_covariate_hd()
-    result <- quiet_configure(hd,
-                              models            = c("rf", "cubist"),
-                              transformations   = c("none", "log"),
-                              cov_fusion        = "early",
-                              expand_covariates = TRUE)
-
-    ## 2 models x 2 transforms x 1 preproc x 1 fs = 4 base
-    ## 2 covariates → 4 covariate sets
-    ## 4 x 4 = 16
-    expect_equal(nrow(result$config$configs), 16)
-
-  })
-
-})
-
-
-## ===========================================================================
-## 5. Storage tests
+## 4. Storage tests
 ## ===========================================================================
 
 describe("configure() storage", {
@@ -835,6 +609,8 @@ describe("configure() storage", {
                               feature_selection = "pca")
 
     exp <- result$config$expansion
+    expect_named(exp, c("outcome", "models", "transformations", "preprocessing",
+                        "feature_selection"))
     expect_equal(exp$outcome, "SOC")
     expect_equal(exp$models, c("rf", "cubist"))
     expect_equal(exp$transformations, "log")
@@ -962,107 +738,7 @@ describe("configure() storage", {
 
 
 ## ===========================================================================
-## 6. Covariate fusion tests
-## ===========================================================================
-
-describe("configure() covariate fusion", {
-
-  test_that("cov_fusion = NULL when no covariates -> stored as NULL", {
-
-    hd     <- make_single_response_hd()
-    result <- quiet_configure(hd, cov_fusion = NULL)
-
-    expect_null(result$config$expansion$cov_fusion)
-
-  })
-
-  test_that("cov_fusion = 'early' with no covariates -> warns, stored as NULL", {
-
-    hd <- make_single_response_hd()
-
-    expect_warning(
-      capture.output(result <- configure(hd, cov_fusion = "early")),
-      "cov_fusion ignored"
-    )
-
-    expect_null(result$config$expansion$cov_fusion)
-
-  })
-
-  test_that("cov_fusion stored correctly when covariates present", {
-
-    hd     <- make_covariate_hd()
-    result <- quiet_configure(hd, cov_fusion = "early")
-
-    expect_equal(result$config$expansion$cov_fusion, "early")
-
-  })
-
-  test_that("cov_fusion = 'late' aborts: late fusion is not built (#69)", {
-
-    ## build_recipe() only fuses early, so accepting "late" ran early fusion
-    ## under the other name. Refused with or without covariates present, and
-    ## caught by a handler for either class.
-    expect_error(
-      capture.output(configure(make_covariate_hd(), cov_fusion = "late")),
-      "not built",
-      class = "horizons_configure_error"
-    )
-
-    expect_error(
-      capture.output(configure(make_covariate_hd(), cov_fusion = "late")),
-      class = "horizons_input_error"
-    )
-
-    expect_error(
-      capture.output(configure(make_single_response_hd(), cov_fusion = "late")),
-      class = "horizons_configure_error"
-    )
-
-  })
-
-  test_that("cov_fusion must be NULL or a single string (#69)", {
-
-    hd <- make_covariate_hd()
-
-    expect_error(
-      capture.output(configure(hd, cov_fusion = c("early", "late"))),
-      "single string",
-      class = "horizons_configure_error"
-    )
-
-    expect_error(
-      capture.output(configure(hd, cov_fusion = NA_character_)),
-      "single string",
-      class = "horizons_configure_error"
-    )
-
-    expect_error(
-      capture.output(configure(hd, cov_fusion = TRUE)),
-      "single string",
-      class = "horizons_configure_error"
-    )
-
-  })
-
-  test_that("expand_covariates with no covariates -> warns, stored as NULL", {
-
-    hd <- make_single_response_hd()
-
-    expect_warning(
-      capture.output(result <- configure(hd, expand_covariates = TRUE)),
-      "expand_covariates ignored"
-    )
-
-    expect_null(result$config$expansion$expand_covariates)
-
-  })
-
-})
-
-
-## ===========================================================================
-## 7. Reconfiguration tests
+## 5. Reconfiguration tests
 ## ===========================================================================
 
 describe("configure() reconfiguration", {
@@ -1122,7 +798,7 @@ describe("configure() reconfiguration", {
 
 
 ## ===========================================================================
-## 8. CLI output tests
+## 6. CLI output tests
 ## ===========================================================================
 
 describe("configure() CLI output", {
@@ -1139,24 +815,6 @@ describe("configure() CLI output", {
     expect_true(grepl("rf", combined))
     expect_true(grepl("cubist", combined))
     expect_true(grepl("2", combined))
-
-  })
-
-  test_that("covariate expansion info displayed when relevant", {
-
-    hd     <- make_covariate_hd()
-    output <- capture.output(
-      suppressWarnings(
-        result <- configure(hd,
-                            cov_fusion        = "early",
-                            expand_covariates = TRUE)
-      )
-    )
-
-    combined <- paste(output, collapse = "\n")
-    expect_true(grepl("Covariate", combined, ignore.case = TRUE))
-    expect_true(grepl("clay", combined))
-    expect_true(grepl("MAP", combined))
 
   })
 
@@ -1180,7 +838,7 @@ describe("configure() CLI output", {
 
 
 ## ===========================================================================
-## 9. Edge case tests
+## 7. Edge case tests
 ## ===========================================================================
 
 describe("configure() edge cases", {

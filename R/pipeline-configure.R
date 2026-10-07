@@ -19,12 +19,6 @@
 #' modeling. If only one response exists, it's auto-selected. Multiple
 #' responses require explicit `outcome` specification.
 #'
-#' **Covariate expansion:**
-#'
-#' When covariates are present, `expand_covariates` controls whether to
-#' benchmark across different covariate subsets (power-set expansion) or
-#' use all covariates in every configuration.
-#'
 #' **Reconfiguration:**
 #'
 #' Can be called multiple times on the same object. Previous configuration
@@ -156,14 +150,6 @@
 #'   Default `"raw"`.
 #' @param feature_selection `character`. Feature selection methods to test.
 #'   Default `"none"`.
-#' @param expand_covariates `logical(1), character, or NULL`. Covariate
-#'   expansion strategy. NULL = all covariates in every config (no expansion).
-#'   TRUE = power set of all covariate columns. Character vector = power set
-#'   of named covariates only. FALSE = exclude all covariates.
-#' @param cov_fusion `character(1) or NULL`. Covariate fusion strategy:
-#'   NULL (no covariates) or `"early"`, which adds the covariates as
-#'   predictors beside the spectral features. Required when covariates are
-#'   present. `"late"` aborts: late fusion is designed but not built.
 #' @param cv_folds `integer`. Number of cross-validation folds. Default 5.
 #'   Minimum 2.
 #' @param grid_size `integer`. Hyperparameter grid size (Latin hypercube).
@@ -190,7 +176,7 @@
 #'
 #' @return A modified `horizons_data` object with:
 #'   * Outcome variable promoted to `role = "outcome"` in `data$role_map`
-#'   * `config$configs` — tibble of configuration grid (6 columns)
+#'   * `config$configs` — tibble of configuration grid (5 columns)
 #'   * `config$n_configs` — integer count
 #'   * `config$tuning` — list of tuning parameters
 #'   * `config$expansion` — list of original inputs (for reproducibility)
@@ -240,8 +226,6 @@ configure <- function(x,
                       transformations    = "none",
                       preprocessing      = "raw",
                       feature_selection  = "none",
-                      expand_covariates  = NULL,
-                      cov_fusion         = NULL,
                       cv_folds              = 5L,
                       grid_size             = 10L,
                       bayesian_iter         = 15L,
@@ -356,47 +340,7 @@ configure <- function(x,
 
   }
 
-  ## 1.4 Validate cov_fusion ---------------------------------------------------
-
-  if (!is.null(cov_fusion)) {
-
-    if (!is.character(cov_fusion) || length(cov_fusion) != 1 || is.na(cov_fusion)) {
-
-      abort_nested(
-        "`cov_fusion` must be NULL or a single string",
-        c(paste0("Got: ", paste(deparse(cov_fusion), collapse = " ")),
-          "Use 'early'")
-      )
-
-    }
-
-    ## Late fusion is designed (two models per config, the second fitted to
-    ## the first's residuals) but not built; build_recipe() only fuses early.
-    ## Accepting "late" would run early fusion under the other name.
-
-    if (cov_fusion == "late") {
-
-      abort_nested(
-        "Late covariate fusion (`cov_fusion = 'late'`) is not built",
-        c("Only early fusion is implemented: covariates join the spectral features as predictors",
-          "Use `cov_fusion = 'early'`"),
-        error_class = c("horizons_configure_error", "horizons_input_error")
-      )
-
-    }
-
-    if (cov_fusion != "early") {
-
-      abort_nested(
-        paste0("Invalid `cov_fusion` value: '", cov_fusion, "'"),
-        c("Use 'early'")
-      )
-
-    }
-
-  }
-
-  ## 1.5 Validate tuning parameters --------------------------------------------
+  ## 1.4 Validate tuning parameters --------------------------------------------
 
   if (!is.numeric(cv_folds) || length(cv_folds) != 1 || is.na(cv_folds) ||
       cv_folds != as.integer(cv_folds) || cv_folds < 2) {
@@ -440,7 +384,7 @@ configure <- function(x,
 
   }
 
-  ## 1.6 Validate recipe settings ----------------------------------------------
+  ## 1.5 Validate recipe settings ----------------------------------------------
 
   ## The window is centred on a point, so it is odd. Its floor is 5 because
   ## deriv2 and snv_deriv2 fit a cubic, and prospectr::savitzkyGolay() needs
@@ -472,7 +416,7 @@ configure <- function(x,
 
   }
 
-  ## 1.7 Validate outcome_range ------------------------------------------------
+  ## 1.6 Validate outcome_range ------------------------------------------------
 
   ## Checked against the outcome's values in Step 2, once the outcome is
   ## known. The rule is is_valid_outcome_range(), which every reader of the
@@ -612,129 +556,18 @@ configure <- function(x,
   warn_selection_properties(x, outcome_var)
 
   ## ---------------------------------------------------------------------------
-  ## Step 3: Handle covariates
-  ## ---------------------------------------------------------------------------
-
-  covariate_cols <- x$data$role_map$variable[x$data$role_map$role == "covariate"]
-
-  if (length(covariate_cols) == 0) {
-
-    ## No covariates in object -------------------------------------------------
-
-    if (!is.null(cov_fusion)) {
-
-      warning("cov_fusion ignored: no covariates in object", call. = FALSE)
-      cov_fusion <- NULL
-
-    }
-
-    if (!is.null(expand_covariates)) {
-
-      warning("expand_covariates ignored: no covariates in object", call. = FALSE)
-      expand_covariates <- NULL
-
-    }
-
-    covariate_sets <- NA_character_
-
-  } else {
-
-    ## Covariates exist --------------------------------------------------------
-
-    if (is.null(cov_fusion)) {
-
-      abort_nested(
-        "Covariates detected but no fusion strategy specified",
-        c(paste0("Covariates: ", paste(covariate_cols, collapse = ", ")),
-          "Use `cov_fusion = 'early'`")
-      )
-
-    }
-
-    ## Generate covariate sets based on expand_covariates ----------------------
-
-    if (is.null(expand_covariates)) {
-
-      ## NULL: all covariates in every config
-      covariate_sets <- paste(sort(covariate_cols), collapse = ",")
-
-    } else if (is.logical(expand_covariates) && isTRUE(expand_covariates)) {
-
-      ## TRUE: power set of all covariate columns
-      covariate_sets <- generate_power_set(covariate_cols)
-
-    } else if (is.logical(expand_covariates) && isFALSE(expand_covariates)) {
-
-      ## FALSE: exclude all covariates
-      covariate_sets <- NA_character_
-
-    } else if (is.character(expand_covariates)) {
-
-      ## Character vector: selective expansion
-      bad_covs <- setdiff(expand_covariates, covariate_cols)
-
-      if (length(bad_covs) > 0) {
-
-        abort_nested(
-          "Covariate(s) not found",
-          c(paste0("Not found: ", paste(bad_covs, collapse = ", ")),
-            paste0("Available: ", paste(covariate_cols, collapse = ", ")))
-        )
-
-      }
-
-      fixed_covs    <- setdiff(covariate_cols, expand_covariates)
-      expanded_sets <- generate_power_set(expand_covariates)
-
-      ## Merge fixed covariates into each expanded set
-      covariate_sets <- vapply(expanded_sets, function(set) {
-
-        if (is.na(set)) {
-
-          ## "none" from power set — still include fixed covariates
-          if (length(fixed_covs) > 0) {
-            paste(sort(fixed_covs), collapse = ",")
-          } else {
-            NA_character_
-          }
-
-        } else {
-
-          all_covs <- sort(unique(c(strsplit(set, ",")[[1]], fixed_covs)))
-          paste(all_covs, collapse = ",")
-
-        }
-
-      }, character(1))
-
-      ## Deduplicate (fixed-only set may appear twice)
-      covariate_sets <- unique(covariate_sets)
-
-    } else {
-
-      abort_nested(
-        "Invalid `expand_covariates` value",
-        c("Must be NULL, TRUE, FALSE, or a character vector of covariate names")
-      )
-
-    }
-
-  }
-
-  ## ---------------------------------------------------------------------------
-  ## Step 4: Build configuration grid
+  ## Step 3: Build configuration grid
   ## ---------------------------------------------------------------------------
 
   config_grid <- tidyr::crossing(
     model             = models,
     transformation    = transformations,
     preprocessing     = preprocessing,
-    feature_selection = feature_selection,
-    covariates        = covariate_sets
+    feature_selection = feature_selection
   )
 
   ## ---------------------------------------------------------------------------
-  ## Step 5: Generate config IDs
+  ## Step 4: Generate config IDs
   ## ---------------------------------------------------------------------------
 
   config_grid$config_id <- mapply(
@@ -743,7 +576,6 @@ configure <- function(x,
     preprocessing     = config_grid$preprocessing,
     transformation    = config_grid$transformation,
     feature_selection = config_grid$feature_selection,
-    covariates        = config_grid$covariates,
     USE.NAMES         = FALSE
   )
 
@@ -751,7 +583,7 @@ configure <- function(x,
 
   config_grid <- config_grid[, c(
     "config_id", "model", "transformation", "preprocessing",
-    "feature_selection", "covariates"
+    "feature_selection"
   )]
 
   ## Deduplicate (defensive) ---------------------------------------------------
@@ -763,7 +595,7 @@ configure <- function(x,
   config_grid <- tibble::as_tibble(config_grid)
 
   ## ---------------------------------------------------------------------------
-  ## Step 6: Store configuration
+  ## Step 5: Store configuration
   ## ---------------------------------------------------------------------------
 
   x$config$configs   <- config_grid
@@ -781,9 +613,7 @@ configure <- function(x,
     models            = models,
     transformations   = transformations,
     preprocessing     = preprocessing,
-    feature_selection = feature_selection,
-    expand_covariates = expand_covariates,
-    cov_fusion        = cov_fusion
+    feature_selection = feature_selection
   )
 
   ## One value of each for the whole object, read by build_recipe() for every
@@ -809,13 +639,13 @@ configure <- function(x,
   x$config$defaults <- NULL
 
   ## ---------------------------------------------------------------------------
-  ## Step 6b: Re-validate
+  ## Step 5b: Re-validate
   ## ---------------------------------------------------------------------------
 
   x <- validate_horizons_data(x)
 
   ## ---------------------------------------------------------------------------
-  ## Step 7: CLI output
+  ## Step 6: CLI output
   ## ---------------------------------------------------------------------------
 
   cat(paste0("\u251C\u2500 ", cli::style_bold("Configuring pipelines"), "...\n"))
@@ -835,18 +665,11 @@ configure <- function(x,
              if ("pca" %in% feature_selection) paste0(", PCA threshold ", pca_threshold),
              "\n"))
 
-  if (length(covariate_cols) > 0) {
-
-    cat(paste0("\u2502  \u251C\u2500 Covariates: ",
-               paste(covariate_cols, collapse = ", "), "\n"))
-
-  }
-
   cat(paste0("\u2502  \u2514\u2500 Configs: ", nrow(config_grid), " total\n"))
   cat("\u2502\n")
 
   ## ---------------------------------------------------------------------------
-  ## Step 8: Return
+  ## Step 7: Return
   ## ---------------------------------------------------------------------------
 
   x
@@ -864,13 +687,12 @@ configure <- function(x,
 #' @param preprocessing Character. Preprocessing method.
 #' @param transformation Character. Response transformation.
 #' @param feature_selection Character. Feature selection method.
-#' @param covariates Character. Canonicalized covariate string or NA.
 #'
 #' @return Character. Config ID in format `{model}_{preprocessing}_{transformation}_{feature_selection}_{6-char hash}`.
 #' @keywords internal
 
 generate_config_id <- function(model, preprocessing, transformation,
-                               feature_selection, covariates) {
+                               feature_selection) {
 
   base <- paste(model, preprocessing, transformation,
                 feature_selection, sep = "_")
@@ -879,8 +701,7 @@ generate_config_id <- function(model, preprocessing, transformation,
     model             = model,
     preprocessing     = preprocessing,
     transformation    = transformation,
-    feature_selection = feature_selection,
-    covariates        = covariates
+    feature_selection = feature_selection
   )
 
   hash <- substr(digest::digest(hash_input), 1, 6)
@@ -1390,31 +1211,5 @@ warn_selection_properties <- function(x, outcome_var) {
   ), call. = FALSE)
 
   invisible(NULL)
-
-}
-
-
-#' Generate power set of covariate combinations
-#'
-#' @param covariates Character vector. Covariate column names.
-#'
-#' @return Character vector. Each element is a comma-separated canonicalized
-#'   string of covariate names, or `NA_character_` for the empty set.
-#' @keywords internal
-
-generate_power_set <- function(covariates) {
-
-  covariates <- sort(covariates)
-  n          <- length(covariates)
-  sets       <- list(NA_character_)
-
-  for (k in seq_len(n)) {
-
-    combos <- utils::combn(covariates, k, simplify = FALSE)
-    sets   <- c(sets, lapply(combos, function(x) paste(x, collapse = ",")))
-
-  }
-
-  unlist(sets)
 
 }

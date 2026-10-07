@@ -12,7 +12,7 @@
 #'
 #' @param config_row Single-row tibble from `config$configs`. Must contain:
 #'   `config_id`, `model`, `transformation`, `preprocessing`,
-#'   `feature_selection`, `covariates`.
+#'   `feature_selection`.
 #' @param split An `rsplit` object from `rsample::initial_split()`.
 #' @param cv_folds A `vfold_cv` object created from the training set.
 #' @param role_map Tibble with `variable` and `role` columns.
