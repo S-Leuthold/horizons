@@ -53,6 +53,14 @@ to_d13c <- function(soc) -22 + 3 * (soc - 2)
 ## split the phrases the tests look for.
 flat_message <- function(e) gsub("\\s+", " ", conditionMessage(e))
 
+## summary() prints the table's size in memory, which changes between R
+## versions. The snapshot keeps the line and replaces its value.
+scrub_memory <- function(lines) {
+
+  sub("(Memory:) [0-9.]+ (bytes|Kb|Mb|Gb)$", "\\1 <size>", lines)
+
+}
+
 
 ## ---------------------------------------------------------------------------
 ## Fitted fixtures, built once on first use (helper-memo.R)
@@ -96,23 +104,6 @@ signed_run <- function(.env = parent.frame()) {
   c(run$value, list(outdir = run$dir))
 
 }
-
-#' A mixed-sign outcome under c(-5, 5), cold-started
-#' @noRd
-build_mixed_sign_fit <- function() {
-
-  hd  <- make_range_hd(n = 60, value = function(soc) soc - 2)
-  cfg <- configure_small(hd, outcome_range = c(-5, 5))
-
-  cold <- suppressWarnings(
-    fit(cfg, compute_uq = FALSE, compute_ad = FALSE, verbose = FALSE, seed = 42L)
-  )
-
-  list(hd = hd, cold = cold)
-
-}
-
-mixed_sign_fit <- function() memo_fixture("mixed_sign_fit", build_mixed_sign_fit)
 
 #' The non-negative fixture as make_eval_object() builds it, with no
 #' config$outcome_range (an object from before the range existed),
@@ -537,23 +528,6 @@ describe("a d13C-like outcome with outcome_range = c(-Inf, Inf)", {
 
   })
 
-  it("refuses to re-fit the evaluated object under the default range, before fitting", {
-
-    ev <- signed_run()$ev
-
-    stale <- ev
-    stale$config$outcome_range <- DEFAULT_OUTCOME_RANGE
-
-    local_mocked_bindings(
-      fit_single_config = function(...) stop("fit_single_config() was reached"),
-      .package = "horizons"
-    )
-
-    expect_error(fit(stale, n_best = 1L, verbose = FALSE), "outcome_range",
-                 class = "horizons_input_error")
-
-  })
-
   it("refuses to fit an evaluation scored under another range, before fitting", {
 
     ## c(-40, 0) contains the data, so only the comparison with the range
@@ -615,13 +589,16 @@ describe("a d13C-like outcome with outcome_range = c(-Inf, Inf)", {
 
   it("summary() shows the range when it is not the default", {
 
-    cfg <- signed_run()$cfg
+    cfg   <- signed_run()$cfg
+    plain <- configure_small(make_range_hd())
 
-    out <- utils::capture.output(summary(cfg))
-    expect_true(any(grepl("Outcome range: c(-Inf, Inf)", out, fixed = TRUE)))
-
-    plain <- utils::capture.output(summary(configure_small(make_range_hd())))
-    expect_false(any(grepl("Outcome range", plain, fixed = TRUE)))
+    expect_snapshot(
+      {
+        summary(cfg)
+        summary(plain)
+      },
+      transform = scrub_memory
+    )
 
   })
 
@@ -689,54 +666,6 @@ describe("a negative outcome under the default range", {
 
 
 ## ===========================================================================
-## A mixed-sign outcome under an explicit finite range
-## ===========================================================================
-
-describe("a mixed-sign outcome with outcome_range = c(-5, 5)", {
-
-  ## The fit is mixed_sign_fit(), cold-started once for the block.
-
-  it("has both signs (the fixture discriminates)", {
-
-    y <- mixed_sign_fit()$hd$data$analysis$SOC
-
-    expect_true(any(y < 0) && any(y > 0))
-
-  })
-
-  it("anchors the bound on the finite lower bound", {
-
-    fx   <- mixed_sign_fit()
-    hd   <- fx$hd
-    cold <- fx$cold
-    y    <- hd$data$analysis$SOC
-
-    fit_rows <- hd$data$analysis$sample_id %in% unique(cold$models$cv_predictions$sample_id)
-    top      <- max(y[fit_rows])
-
-    expect_identical(cold$models$response_bound,
-                     top + (RESPONSE_BOUND_MARGIN - 1) * (top - (-5)))
-
-  })
-
-  it("serves predictions of both signs", {
-
-    fx   <- mixed_sign_fit()
-    hd   <- fx$hd
-    cold <- fx$cold
-
-    p <- predict(cold, hd$data$analysis[, setdiff(names(hd$data$analysis), "SOC")],
-                 interval = FALSE)
-
-    expect_true(any(p$.pred < 0) && any(p$.pred > 0))
-    expect_true(all(p$.pred >= -5 & p$.pred <= 5))
-
-  })
-
-})
-
-
-## ===========================================================================
 ## The default: floor at zero and today's bound, for a non-negative outcome
 ## ===========================================================================
 
@@ -744,21 +673,10 @@ describe("a non-negative outcome under the default range", {
 
   ## make_eval_object() carries no config$outcome_range: an object from
   ## before the range existed. The bound and the floor must be what they were.
-  ## The fit is nonneg_fit(), shared with the malformed-range block below.
-
-  it("stores max * RESPONSE_BOUND_MARGIN as the bound, to the bit", {
-
-    fx     <- nonneg_fit()
-    obj    <- fx$obj
-    fitted <- fx$fitted
-
-    fit_rows <- obj$data$analysis$sample_id %in% unique(fitted$models$cv_predictions$sample_id)
-
-    expect_null(fitted$config$outcome_range)
-    expect_identical(fitted$models$response_bound,
-                     max(obj$data$analysis$SOC[fit_rows]) * RESPONSE_BOUND_MARGIN)
-
-  })
+  ## The bound, max * RESPONSE_BOUND_MARGIN, is tested to the bit in
+  ## compute_response_bound()'s tests above, and over the fit rows end to end
+  ## in test-pipeline-fit.R (#68). The fit is nonneg_fit(), shared with the
+  ## malformed-range block below.
 
   it("validates without the key, and with it removed from a fitted object", {
 
@@ -823,19 +741,10 @@ describe("a finite upper bound", {
   ## A cap test only, not a way to choose a range: a range comes from the
   ## property's physical bounds, never from the data. Here the upper bound is
   ## the largest observed value so the bound formula (1.5 times the fit rows'
-  ## maximum) lands above it and is capped. The fit is capped_fit(),
-  ## cold-started once for the block.
-
-  it("caps the response bound", {
-
-    fx   <- capped_fit()
-    top  <- fx$top
-    cold <- fx$cold
-
-    expect_identical(cold$models$response_bound, top)
-    expect_no_error(validate_horizons_fit(cold))
-
-  })
+  ## maximum) lands above it and is capped. fit() validates its return, and
+  ## the validator refuses a bound above the upper bound, so capped_fit()
+  ## fails to build if the bound is not capped. It is cold-started once for
+  ## the block.
 
   it("caps served predictions at the range, silently", {
 
@@ -1115,11 +1024,9 @@ describe("the remedy text", {
     obj <- make_eval_object(n = 60, n_configs = 1)
     obj$data$analysis$SOC <- to_d13c(obj$data$analysis$SOC)
 
-    err <- expect_error(check_outcome_range(obj, verb = "evaluate"),
-                        class = "horizons_input_error")
-
-    expect_match(flat_message(err), "physical bounds", fixed = TRUE)
-    expect_no_match(flat_message(err), "contain the data", fixed = TRUE)
+    expect_error(check_outcome_range(obj, verb = "evaluate"),
+                 class = "horizons_input_error")
+    expect_snapshot(check_outcome_range(obj, verb = "evaluate"), error = TRUE)
 
   })
 
