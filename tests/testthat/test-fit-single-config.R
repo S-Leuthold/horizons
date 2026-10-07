@@ -418,22 +418,26 @@ describe("fit_single_config() - degradation detection", {
 
 
 ## =========================================================================
-## UQ skipped when compute_uq = FALSE
+## UQ and AD skipped when compute_uq and compute_ad are FALSE
 ## =========================================================================
 ## fit_single_config() fits UQ only when compute_uq is TRUE and a calibration
-## set is given. fit() also drops the bundles when compute_uq is FALSE, so
-## this gate is visible only here, with a calibration set present.
+## set is given, and AD only when compute_ad is TRUE and one is given. fit()
+## also drops the bundles when its flags are FALSE, so these gates are visible
+## only here, with a calibration set present.
 
-describe("fit_single_config() - UQ disabled", {
+describe("fit_single_config() - UQ and AD disabled", {
 
-  it("uq is NULL when compute_uq = FALSE, even with a calibration set", {
+  it("uq and ad are NULL when compute_uq and compute_ad are FALSE, even with a calibration set", {
 
     shared <- fsc()
 
-    ## fit_uq() returns a sentinel, so a gate that let it run would leave a
-    ## bundle whatever the calibration set's size. The test rows stand in
-    ## for the calibration set: nothing else reads them with AD off.
-    local_mocked_bindings(fit_uq = function(...) list(sentinel = "fit_uq() ran"))
+    ## fit_uq() and fit_ad() return sentinels, so a gate that let either run
+    ## would leave a bundle whatever the calibration set's size. The test rows
+    ## stand in for the calibration set: with both mocked, nothing reads them.
+    local_mocked_bindings(
+      fit_uq = function(...) list(sentinel = "fit_uq() ran"),
+      fit_ad = function(...) list(sentinel = "fit_ad() ran")
+    )
 
     result <- fit_single_config(
       config_row       = make_fit_config(),
@@ -450,9 +454,11 @@ describe("fit_single_config() - UQ disabled", {
       seed             = 42L
     )
 
-    ## The fit reached the UQ step, so only the gate kept the bundle out
+    ## The fit reached the UQ and AD steps, so only the gates kept the
+    ## bundles out
     expect_equal(result$status, "success")
     expect_null(result$uq)
+    expect_null(result$ad)
 
   })
 
