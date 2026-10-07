@@ -620,6 +620,12 @@ test_that("cluster_targets() recovers the two families with a low floor", {
   expect_identical(length(unique(paste(fam, out$assignment))), 2L)
   expect_identical(out$reason, "silhouette")
 
+  ## Nothing merged, so the count chosen is the count returned, and the
+  ## silhouette reported is the mean silhouette of the returned assignment
+  expect_identical(out$k_chosen, 2L)
+  expect_equal(out$silhouette,
+               mean(cluster::silhouette(out$assignment, stats::dist(s$St))[, 3]))
+
 })
 
 
@@ -630,6 +636,12 @@ test_that("cluster_targets(clusters = ) forces the count before merging", {
 
   expect_identical(out$k, 3L)
   expect_identical(out$k_chosen, 3L)
+  expect_identical(names(out$assignment), rownames(s$St))
+  expect_identical(sort(unique(unname(out$assignment))), 1:3)
+
+  ## No search, so no silhouette
+  expect_identical(out$silhouette, NA_real_)
+  expect_identical(out$reason, "specified")
 
 })
 
@@ -639,9 +651,29 @@ test_that("cluster_targets() merges clusters under the floor into the nearest", 
   s   <- fixture_scores(n_pool = 100)
   out <- cluster_targets(s$St, clusters = 3L, cluster_min = 3L, seed = 1L)
 
-  expect_lt(out$k, 3L)
+  expect_identical(out$k, 2L)
+  expect_identical(out$k_chosen, 3L)
   expect_match(out$reason, "merg")
   expect_true(all(table(out$assignment) >= 3L))
+
+  ## The target left alone joins the rest of its family, the nearest
+  ## centroid, and the labels run 1 to k again after the merge
+  fam <- s$fx$family_of_target[names(out$assignment)]
+  expect_identical(length(unique(paste(fam, out$assignment))), 2L)
+  expect_identical(sort(unique(unname(out$assignment))), 1:2)
+
+  ## A one-component space, where the nearest centroid is plain to see: two
+  ## groups of four and two singletons, c nearer group b and d nearer group a
+  St1 <- matrix(c(0, 0.1, 0.2, 0.3, 10, 10.1, 10.2, 10.3, 7, -3), ncol = 1,
+                dimnames = list(c(paste0("a", 1:4), paste0("b", 1:4), "c", "d"), NULL))
+  out1 <- cluster_targets(St1, clusters = 4L, cluster_min = 2L, seed = 1L)
+
+  expect_identical(out1$k_chosen, 4L)
+  expect_identical(out1$k, 2L)
+  expect_identical(sort(unique(unname(out1$assignment))), 1:2)
+  expect_true(all(out1$assignment[c(paste0("a", 1:4), "d")] == out1$assignment[["a1"]]))
+  expect_true(all(out1$assignment[c(paste0("b", 1:4), "c")] == out1$assignment[["b1"]]))
+  expect_false(out1$assignment[["a1"]] == out1$assignment[["b1"]])
 
 })
 
@@ -654,5 +686,50 @@ test_that("cluster_targets() returns one cluster when the batch is too small", {
   expect_identical(out$k, 1L)
   expect_true(all(out$assignment == 1L))
   expect_match(out$reason, "too few")
+  expect_identical(names(out$assignment), rownames(s$St))
+  expect_identical(out$k_chosen, 1L)
+  expect_identical(out$silhouette, NA_real_)
+
+  ## The same when the count is fixed, rather than k-means run and every
+  ## cluster folded into one
+  expect_identical(cluster_targets(s$St, clusters = 3L, cluster_min = 5L, seed = 1L), out)
+
+  ## and when a batch large enough for two clusters has a search bound
+  ## below two
+  expect_identical(cluster_targets(s$St, cluster_min = 2L, seed = 1L, k_max = 1L), out)
+
+})
+
+
+test_that("cluster_targets() seeds its k-means and leaves the caller's RNG state as it found it", {
+
+  withr::local_preserve_seed()
+  s <- fixture_scores(n_pool = 100)
+
+  ## The caller's stream continues as if the call had not happened
+  set.seed(11)
+  before <- get(".Random.seed", envir = globalenv())
+  cluster_targets(s$St, cluster_min = 2L, seed = 1L)
+  expect_identical(get0(".Random.seed", envir = globalenv(), inherits = FALSE), before)
+
+  ## and a session with no stream yet is left without one
+  rm(".Random.seed", envir = globalenv())
+  cluster_targets(s$St, cluster_min = 2L, seed = 1L)
+  expect_false(exists(".Random.seed", envir = globalenv(), inherits = FALSE))
+
+  ## The assignment follows `seed`, not the caller's state, on both paths.
+  ## Unseeded, k-means labels this fixture's clusters differently under
+  ## these two caller states.
+  set.seed(1)
+  search_1 <- cluster_targets(s$St, cluster_min = 2L, seed = 1L)$assignment
+  set.seed(3)
+  search_3 <- cluster_targets(s$St, cluster_min = 2L, seed = 1L)$assignment
+  expect_identical(search_3, search_1)
+
+  set.seed(1)
+  fixed_1 <- cluster_targets(s$St, clusters = 3L, cluster_min = 1L, seed = 1L)$assignment
+  set.seed(3)
+  fixed_3 <- cluster_targets(s$St, clusters = 3L, cluster_min = 1L, seed = 1L)$assignment
+  expect_identical(fixed_3, fixed_1)
 
 })

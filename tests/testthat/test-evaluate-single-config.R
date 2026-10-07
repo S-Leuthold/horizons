@@ -389,21 +389,42 @@ describe("evaluate_single_config() - tuning on the original scale", {
 
   ## bayesian_iter = 1: the prune gate only runs when there is a Bayesian
   ## stage to skip (#38), and this test is about the gate.
-  result <- evaluate_single_config(
-    config_row      = config,
-    split           = setup$split,
-    cv_folds        = setup$folds,
-    role_map        = setup$role_map,
-    grid_size       = 3,
-    bayesian_iter   = 1,
-    prune           = TRUE,
-    prune_threshold = 1.0,
-    seed            = 42L
+  ##
+  ## select_best() is wrapped, passing through, to record the results the
+  ## hyperparameters are chosen from. The returned row cannot show whether
+  ## the Bayesian stage ran here: the grid already holds plsr's best
+  ## num_comp, so the stage's one candidate does not change the choice.
+  real_select_best <- tune::select_best
+  selected_from    <- NULL
+
+  result <- with_mocked_bindings(
+    evaluate_single_config(
+      config_row      = config,
+      split           = setup$split,
+      cv_folds        = setup$folds,
+      role_map        = setup$role_map,
+      grid_size       = 3,
+      bayesian_iter   = 1,
+      prune           = TRUE,
+      prune_threshold = 1.0,
+      seed            = 42L
+    ),
+    select_best = function(x, ...) {
+      selected_from <<- x
+      real_select_best(x, ...)
+    },
+    .package = "tune"
   )
 
   it("does not prune a healthy log-transformed config at prune_threshold = 1.0", {
 
     expect_equal(result$status, "success")
+
+    ## Not pruned, so the Bayesian stage ran and its results were kept: the
+    ## choice was made from tune_bayes() iteration results, the grid's
+    ## candidates at .iter 0 and the one iteration's at .iter 1.
+    expect_s3_class(selected_from, "iteration_results")
+    expect_equal(sort(unique(tune::collect_metrics(selected_from)$.iter)), c(0, 1))
 
   })
 
