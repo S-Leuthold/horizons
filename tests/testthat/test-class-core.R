@@ -78,31 +78,6 @@ test_that("new_horizons_data accepts data argument", {
   expect_equal(obj$data$role_map, test_role_map)
   expect_equal(obj$data$n_rows, 3L)
   expect_equal(obj$data$n_predictors, 2L)
-  expect_equal(obj$data$n_covariates, 0L)
-
-})
-
-test_that("new_horizons_data counts covariates correctly", {
-
-  test_analysis <- tibble::tibble(
-    sample_id = c("A", "B"),
-    `4000` = c(0.1, 0.2),
-    pH = c(6.5, 7.0),
-    clay = c(20, 30)
-  )
-
-  test_role_map <- tibble::tibble(
-    variable = c("sample_id", "4000", "pH", "clay"),
-    role = c("id", "predictor", "covariate", "covariate")
-  )
-
-  obj <- new_horizons_data(
-    analysis = test_analysis,
-    role_map = test_role_map
-  )
-
-  expect_equal(obj$data$n_predictors, 1L)
-  expect_equal(obj$data$n_covariates, 2L)
 
 })
 
@@ -627,7 +602,7 @@ test_that("validate_horizons_data refuses an id role on a column other than samp
 
 test_that("validate_horizons_data refuses a column with more than one role_map row, naming it", {
 
-  ## Arrange — "elevation" has two role_map rows (meta and covariate). Every
+  ## Arrange — "elevation" has two role_map rows (meta and response). Every
   ## consumer that reads role_map$role[role_map$variable == "elevation"]
   ## expecting one value gets an ambiguous answer, and build_recipe()'s
   ## `outcome ~ .` would silently treat it as an unregistered predictor
@@ -641,7 +616,7 @@ test_that("validate_horizons_data refuses a column with more than one role_map r
 
   test_role_map <- tibble::tibble(
     variable = c("sample_id", "4000", "elevation", "elevation"),
-    role     = c("id", "predictor", "meta", "covariate")
+    role     = c("id", "predictor", "meta", "response")
   )
 
   obj <- new_horizons_data(analysis = test_analysis, role_map = test_role_map)
@@ -758,7 +733,7 @@ test_that("validate_horizons_data accepts wn_ prefixed predictors in decreasing 
 ## Role vocabulary, outcome cardinality and stored counts
 ## ---------------------------------------------------------------------------
 
-test_that("validate_horizons_data rejects a role outside the vocabulary", {
+test_that("validate_horizons_data rejects a role outside the vocabulary, pointing a covariate at meta", {
 
   ## Arrange — a typo'd role would otherwise make the column invisible
   test_analysis <- tibble::tibble(
@@ -779,6 +754,18 @@ test_that("validate_horizons_data rejects a role outside the vocabulary", {
                regexp = "responce",
                class  = "horizons_validation_error")
 
+  ## horizons does not model covariates: the role gets its own finding,
+  ## naming the column and the role that carries it, not the unknown-role one.
+  obj$data$role_map$role[obj$data$role_map$variable == "clay"] <- "covariate"
+
+  err <- tryCatch(validate_horizons_data(obj), error = function(e) e)
+
+  expect_s3_class(err, "horizons_validation_error")
+  expect_match(conditionMessage(err),
+               "Column with the covariate role, which horizons does not model: clay. Give it the meta role",
+               fixed = TRUE)
+  expect_no_match(conditionMessage(err), "Unknown roles", fixed = TRUE)
+
 })
 
 
@@ -789,13 +776,12 @@ test_that("validate_horizons_data accepts every role in the vocabulary", {
     wn_4000   = c(0.1, 0.2),
     clay      = c(10, 20),
     oc        = c(1.1, 1.2),
-    elevation = c(300, 310),
     plot      = c("p1", "p2")
   )
 
   test_role_map <- tibble::tibble(
-    variable = c("sample_id", "wn_4000", "clay", "oc", "elevation", "plot"),
-    role     = c("id", "predictor", "outcome", "response", "covariate", "meta")
+    variable = c("sample_id", "wn_4000", "clay", "oc", "plot"),
+    role     = c("id", "predictor", "outcome", "response", "meta")
   )
 
   obj <- new_horizons_data(analysis = test_analysis, role_map = test_role_map)
@@ -871,8 +857,7 @@ test_that("validate_horizons_data tolerates absent stored counts", {
 
   obj <- new_horizons_data(analysis = test_analysis, role_map = test_role_map)
 
-  obj$data$n_covariates <- NULL
-  obj$data$n_responses  <- NULL
+  obj$data$n_responses <- NULL
 
   expect_no_error(validate_horizons_data(obj))
 
@@ -1140,35 +1125,6 @@ test_that("print.horizons_data shows the counts, the outcome and the provenance"
 
 })
 
-test_that("print.horizons_data shows covariate count when present", {
-
-  ## Arrange
-  test_analysis <- tibble::tibble(
-    sample_id = c("A", "B", "C"),
-    `4000` = c(0.1, 0.2, 0.3),
-    clay = c(20, 30, 40),
-    pH = c(6.5, 7.0, 7.5)
-  )
-
-  test_role_map <- tibble::tibble(
-    variable = c("sample_id", "4000", "clay", "pH"),
-    role = c("id", "predictor", "covariate", "covariate")
-  )
-
-  obj <- new_horizons_data(
-    analysis = test_analysis,
-    role_map = test_role_map
-  )
-
-  ## Act
-  output <- capture.output(print(obj))
-
-  ## Assert
-  expect_true(any(grepl("(?i)covariate", output)))
-  expect_true(any(grepl("2", output)))
-
-})
-
 test_that("print.horizons_data returns object invisibly", {
 
   ## Arrange
@@ -1215,35 +1171,6 @@ test_that("summary.horizons_data shows the data, provenance, configuration and v
   obj <- console_object()
 
   expect_snapshot(summary(obj), transform = scrub_summary)
-
-})
-
-test_that("summary.horizons_data shows covariate names", {
-
-  ## Arrange
-  test_analysis <- tibble::tibble(
-    sample_id = c("A", "B"),
-    `4000` = c(0.1, 0.2),
-    clay = c(20, 30),
-    pH = c(6.5, 7.0)
-  )
-
-  test_role_map <- tibble::tibble(
-    variable = c("sample_id", "4000", "clay", "pH"),
-    role = c("id", "predictor", "covariate", "covariate")
-  )
-
-  obj <- new_horizons_data(
-    analysis = test_analysis,
-    role_map = test_role_map
-  )
-
-  ## Act
-  output <- capture.output(summary(obj))
-
-  ## Assert
-  expect_true(any(grepl("clay", output)))
-  expect_true(any(grepl("pH", output)))
 
 })
 
@@ -1795,6 +1722,19 @@ test_that("validate_horizons_eval runs the base validator at the full stage (#12
 
   expect_error(validate_horizons_eval(unpaired), "role_map",
                class = "horizons_validation_error")
+
+  ## A config grid with a covariates column was written by an earlier
+  ## version of configure(), so the evaluation built on it is refused too.
+  old_grid <- obj
+  old_grid$config$configs$covariates <- NA_character_
+
+  err <- tryCatch(suppressMessages(capture.output(validate_horizons_eval(old_grid))),
+                  error = function(e) e)
+
+  expect_s3_class(err, "horizons_validation_error")
+  expect_match(conditionMessage(err),
+               "config$configs has a covariates column: the object was configured by an earlier version of horizons. Re-run `configure()` on it",
+               fixed = TRUE)
 
 })
 

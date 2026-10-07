@@ -48,7 +48,7 @@
 #' `clustering` and `timestamp`. When rows leave afterwards, `set_analysis()`
 #' recomputes the row-level parts and records `rows_removed`.
 #'
-#' Derived values (n_rows, n_predictors, n_covariates, n_responses) are
+#' Derived values (n_rows, n_predictors, n_responses) are
 #' computed from the provided data rather than passed as arguments. This
 #' ensures consistency and prevents mismatches between metadata and actual
 #' data.
@@ -59,8 +59,8 @@
 #' @param analysis `tibble or NULL.` The analysis data in wide format with
 #'   sample_id column and wavelength columns as predictors. Default: `NULL`.
 #' @param role_map `tibble or NULL.` Maps variable names to roles (id,
-#'   predictor, outcome, response, meta, covariate). Must have columns
-#'   `variable` and `role`. Default: `NULL`.
+#'   predictor, outcome, response, meta). Must have columns `variable` and
+#'   `role`. Default: `NULL`.
 #' @param spectra_source `character or NULL.` Path to source spectra files.
 #'   Default: `NULL`.
 #' @param spectra_type `character or NULL.` Type of spectra source: "opus",
@@ -85,13 +85,11 @@ new_horizons_data <- function(analysis       = NULL,
   if (!is.null(role_map)) {
 
     n_predictors <- sum(role_map$role == "predictor", na.rm = TRUE)
-    n_covariates <- sum(role_map$role == "covariate", na.rm = TRUE)
     n_responses  <- sum(role_map$role == "response", na.rm = TRUE)
 
   } else {
 
     n_predictors <- NULL
-    n_covariates <- NULL
     n_responses  <- NULL
 
   }
@@ -113,7 +111,6 @@ new_horizons_data <- function(analysis       = NULL,
                 role_map     = role_map,
                 n_rows       = n_rows,
                 n_predictors = n_predictors,
-                n_covariates = n_covariates,
                 n_responses  = n_responses),
 
     ## -------------------------------------------------------------------------
@@ -356,17 +353,19 @@ new_horizons_data <- function(analysis       = NULL,
 #'    the row writers read `sample_id` by name.
 #'
 #' 10. **Role vocabulary**: Every role is one of `id`, `predictor`,
-#'     `covariate`, `outcome`, `response`, `meta`. A typo'd role makes a
-#'     column invisible to every consumer, so it fails here rather than
-#'     silently.
+#'     `outcome`, `response`, `meta`. A typo'd role makes a column invisible
+#'     to every consumer, so it fails here rather than silently. A
+#'     `covariate` role is refused with its own message, which points at
+#'     `meta`: horizons does not model covariates, and `meta` carries a
+#'     column without modelling it.
 #'
 #' 11. **Outcome cardinality**: At most one variable has role = "outcome"
 #'     (invariant I3).
 #'
-#' 12. **Stored counts**: `n_rows`, `n_predictors`, `n_covariates` and
-#'     `n_responses`, when present, equal the values recomputed from
-#'     `analysis` and `role_map`. The contract treats these as derived; the
-#'     implementation stores them, so they are checked.
+#' 12. **Stored counts**: `n_rows`, `n_predictors` and `n_responses`, when
+#'     present, equal the values recomputed from `analysis` and `role_map`.
+#'     The contract treats these as derived; the implementation stores them,
+#'     so they are checked.
 #'
 #' 13. **Selection record**: when `x$selection` is non-NULL it must be a list
 #'     carrying `settings` (a list) plus `membership`, `groups`,
@@ -374,6 +373,12 @@ new_horizons_data <- function(analysis       = NULL,
 #'     with the columns its consumers index by name), and every retained
 #'     `pool_id` it names must be a `sample_id` in `analysis` (I4b). Shape
 #'     and containment only — the contents are the verb's business.
+#'
+#' 14. **Config grid**: `config$configs` has no `covariates` column. A grid
+#'     with one was written by an earlier version of `configure()`, whose
+#'     config ids hashed it, so the object is refused and named as needing
+#'     `configure()` again. This is the check every class validator reaches,
+#'     through the chain, for every object that carries a config grid.
 #'
 #' Empty objects (both analysis and role_map NULL) pass validation — this
 #' allows for incremental object construction. The selection record is
@@ -695,8 +700,24 @@ validate_horizons_data <- function(x, stage = c("full", "raw"), warn_ids = TRUE)
 
   ## Role vocabulary checks ----------------------------------------------------
 
-  valid_roles   <- c("id", "predictor", "covariate", "outcome", "response", "meta")
-  unknown_roles <- setdiff(unique(role_map$role), valid_roles)
+  valid_roles   <- c("id", "predictor", "outcome", "response", "meta")
+
+  ## horizons does not model covariates. A column given that role is refused
+  ## by name, pointing at the role that carries it, rather than reported as
+  ## one more unknown role.
+  covariate_vars <- role_map$variable[role_map$role %in% "covariate"]
+
+  if (length(covariate_vars) > 0) {
+
+    n_cov    <- length(covariate_vars)
+    col_list <- paste(covariate_vars, collapse = ", ")
+    errors   <- c(errors, cli::format_inline(
+      "{cli::qty(n_cov)}Column{?s} with the {.field covariate} role, which horizons does not model: {col_list}. Give {cli::qty(n_cov)}{?it/them} the {.field meta} role, which carries a column without modelling it."
+    ))
+
+  }
+
+  unknown_roles <- setdiff(unique(role_map$role), c(valid_roles, "covariate"))
 
   if (length(unknown_roles) > 0) {
 
@@ -723,12 +744,10 @@ validate_horizons_data <- function(x, stage = c("full", "raw"), warn_ids = TRUE)
 
   stored <- list(n_rows       = x$data$n_rows,
                  n_predictors = x$data$n_predictors,
-                 n_covariates = x$data$n_covariates,
                  n_responses  = x$data$n_responses)
 
   actual <- list(n_rows       = nrow(analysis),
                  n_predictors = sum(role_map$role == "predictor", na.rm = TRUE),
-                 n_covariates = sum(role_map$role == "covariate", na.rm = TRUE),
                  n_responses  = sum(role_map$role == "response",  na.rm = TRUE))
 
   for (count_name in names(stored)) {
@@ -748,6 +767,19 @@ validate_horizons_data <- function(x, stage = c("full", "raw"), warn_ids = TRUE)
       ))
 
     }
+  }
+
+  ## Config grid --------------------------------------------------------------
+  ## configure() writes no covariates column. A grid with one was written by
+  ## an earlier version, whose config ids hashed it, so nothing evaluated or
+  ## fitted on that grid lines up with a grid configure() writes now.
+
+  if ("covariates" %in% names(x$config$configs)) {
+
+    errors <- c(errors, cli::format_inline(
+      "{.field config$configs} has a {.field covariates} column: the object was configured by an earlier version of horizons. Re-run {.fn configure} on it, then the verbs after it."
+    ))
+
   }
 
   ## ---------------------------------------------------------------------------
@@ -2472,7 +2504,7 @@ selected_member <- function(x) {
 #'
 #' - **Empty objects**: Shows "(empty)" with a hint to use `spectra()`
 #' - **Objects with data**: Shows sample count, predictor count, wavenumber
-#'   range, and covariate count if present
+#'   range, and the outcome and responses if present
 #' - **Objects with provenance**: Shows source path and spectra type
 #'
 #' The output uses tree-style formatting consistent with error messages
@@ -2533,7 +2565,6 @@ print.horizons_data <- function(x, ...) {
 
     # Determine which optional sections follow Samples
     has_responses <- !is.null(x$data$n_responses) && x$data$n_responses > 0
-    has_covars    <- !is.null(x$data$n_covariates) && x$data$n_covariates > 0
     has_outcome   <- any(x$data$role_map$role == "outcome")
 
     # Predictors with wavenumber range
@@ -2543,7 +2574,7 @@ print.horizons_data <- function(x, ...) {
       wn_candidates  <- predictor_vars[grepl("^(wn_)?[0-9.]+$", predictor_vars)]
       wn_values      <- as.numeric(gsub("^wn_", "", wn_candidates))
 
-      has_more <- has_outcome || has_responses || has_covars
+      has_more <- has_outcome || has_responses
       branch   <- if (has_more) "\u251C\u2500" else "\u2514\u2500"
 
       if (length(wn_values) > 0) {
@@ -2563,8 +2594,7 @@ print.horizons_data <- function(x, ...) {
     if (has_outcome) {
 
       outcome_var <- x$data$role_map$variable[x$data$role_map$role == "outcome"]
-      has_more    <- has_responses || has_covars
-      branch      <- if (has_more) "\u251C\u2500" else "\u2514\u2500"
+      branch      <- if (has_responses) "\u251C\u2500" else "\u2514\u2500"
       cat(paste0("   ", branch, " Outcome: ", outcome_var, "\n"))
 
     }
@@ -2573,15 +2603,7 @@ print.horizons_data <- function(x, ...) {
     if (has_responses) {
 
       response_vars <- x$data$role_map$variable[x$data$role_map$role == "response"]
-      branch        <- if (has_covars) "\u251C\u2500" else "\u2514\u2500"
-      cat(paste0("   ", branch, " Responses: ", paste(response_vars, collapse = ", "), "\n"))
-
-    }
-
-    # Covariates
-    if (has_covars) {
-
-      cat(paste0("   \u2514\u2500 Covariates: ", x$data$n_covariates, "\n"))
+      cat(paste0("   \u2514\u2500 Responses: ", paste(response_vars, collapse = ", "), "\n"))
 
     }
 
@@ -2772,7 +2794,7 @@ print.horizons_data <- function(x, ...) {
 #' The summary output provides significantly more detail than `print()`:
 #'
 #' - **Data section**: Sample ID preview, wavenumber range and step size,
-#'   covariate names (not just count), outcome variable, memory footprint
+#'   response names, outcome variable, memory footprint
 #' - **Provenance section**: Full source paths, timestamps, version info,
 #'   preprocessing history, aggregation settings
 #' - **Selection section**: Scope and groups, properties, k, pool size, rows
@@ -2842,7 +2864,6 @@ summary.horizons_data <- function(object, ...) {
     ## Determine which optional sections exist ----
 
     has_responses  <- !is.null(x$data$n_responses) && x$data$n_responses > 0
-    has_covariates <- !is.null(x$data$n_covariates) && x$data$n_covariates > 0
     has_outcome    <- any(x$data$role_map$role == "outcome")
 
     ## Predictors with range and step ----
@@ -2875,18 +2896,6 @@ summary.horizons_data <- function(object, ...) {
       resp_list     <- paste(response_vars, collapse = ", ")
 
       cat(paste0("   \u251C\u2500 Responses: ", resp_list, "\n"))
-
-    }
-
-    ## Covariates with names ----
-
-    if (has_covariates) {
-
-      covariate_vars <- x$data$role_map$variable[x$data$role_map$role == "covariate"]
-      covar_list     <- paste(covariate_vars, collapse = ", ")
-
-      cat(paste0("   \u251C\u2500 Covariates: ", x$data$n_covariates, "\n"))
-      cat(paste0("   \u2502     \u2514\u2500 Names: ", covar_list, "\n"))
 
     }
 
@@ -3024,10 +3033,6 @@ summary.horizons_data <- function(object, ...) {
     cat(paste0("   \u251C\u2500 Preprocessing: ", paste(exp$preprocessing, collapse = ", "), "\n"))
     cat(paste0("   \u251C\u2500 Transformations: ", paste(exp$transformations, collapse = ", "), "\n"))
     cat(paste0("   \u251C\u2500 Feature selection: ", paste(exp$feature_selection, collapse = ", "), "\n"))
-
-    if (!is.null(exp$cov_fusion)) {
-      cat(paste0("   \u251C\u2500 Covariate fusion: ", exp$cov_fusion, "\n"))
-    }
 
     cat(paste0("   \u2514\u2500 Tuning:\n"))
     cat(paste0("         \u251C\u2500 Grid size: ", x$config$tuning$grid_size, "\n"))

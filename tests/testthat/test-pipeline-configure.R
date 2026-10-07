@@ -719,7 +719,7 @@ describe("configure() storage", {
 
   })
 
-  test_that("re-configuring an object from an earlier version drops its config$defaults", {
+  test_that("re-configuring an object from an earlier version drops its config$defaults and covariates column", {
 
     hd <- make_single_response_hd()
     hd$config$defaults <- list(
@@ -729,6 +729,13 @@ describe("configure() storage", {
     )
 
     expect_null(quiet_configure(hd)$config$defaults)
+
+    ## The validator refuses a grid with a covariates column and names
+    ## configure() as the remedy, so configure() must accept one and replace it.
+    old <- quiet_configure(hd)
+    old$config$configs$covariates <- NA_character_
+
+    expect_false("covariates" %in% names(quiet_configure(old)$config$configs))
 
   })
 

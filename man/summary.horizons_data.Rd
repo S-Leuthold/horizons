@@ -23,7 +23,7 @@ state. Designed for scientists who want to see the complete picture.
 The summary output provides significantly more detail than \code{print()}:
 \itemize{
 \item \strong{Data section}: Sample ID preview, wavenumber range and step size,
-covariate names (not just count), outcome variable, memory footprint
+response names, outcome variable, memory footprint
 \item \strong{Provenance section}: Full source paths, timestamps, version info,
 preprocessing history, aggregation settings
 \item \strong{Selection section}: Scope and groups, properties, k, pool size, rows

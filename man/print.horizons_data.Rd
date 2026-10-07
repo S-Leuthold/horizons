@@ -23,7 +23,7 @@ The print output adapts based on what's populated in the object:
 \itemize{
 \item \strong{Empty objects}: Shows "(empty)" with a hint to use \code{spectra()}
 \item \strong{Objects with data}: Shows sample count, predictor count, wavenumber
-range, and covariate count if present
+range, and the outcome and responses if present
 \item \strong{Objects with provenance}: Shows source path and spectra type
 }
 
