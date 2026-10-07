@@ -443,25 +443,18 @@ describe("fit_single_config() records the warnings tune kept in .notes", {
 
   setup <- make_failure_setup()
 
-  it("carries a recipe step's prep warning from the re-tune into the member's warnings", {
-
-    local_mocked_bindings(build_recipe = warning_recipe, .package = "horizons")
-
-    result <- run_fit("elastic_net", setup)
-
-    expect_identical(result$status, "success")
-    expect_true(any(grepl("Non-positive values in selected variable.*of 3 folds",
-                          result$warnings)))
-
-  })
-
-  it("records each message once across the captured warnings, re-tune and OOF folds", {
+  it("carries a recipe step's prep warning from the re-tune into the member's warnings, recording each message once across the captured warnings, re-tune and OOF folds", {
 
     local_mocked_bindings(build_recipe = warning_recipe, .package = "horizons")
 
     ## Step 9's fold metrics run outside the capture, so yardstick's
     ## constant-estimate warning reaches the caller; it is not under test.
-    warns <- suppressWarnings(run_fit("rf", setup))$warnings
+    result <- suppressWarnings(run_fit("rf", setup))
+    warns  <- result$warnings
+
+    expect_identical(result$status, "success")
+    expect_true(any(grepl("Non-positive values in selected variable.*of 3 folds",
+                          result$warnings)))
 
     non_positive <- grep("Non-positive values in selected variable", warns, fixed = TRUE)
 
