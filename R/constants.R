@@ -220,11 +220,6 @@ RESPONSE_BOUND_MARGIN <- 1.5
 ### outcome_range_setting().
 DEFAULT_OUTCOME_RANGE <- c(0, Inf)
 
-## DAYMET Constants ------------------------------------------------------------
-
-DAYMET_RESOLUTION_DEG <- 1/24
-DAYMET_TIMEOUT        <- 60
-
 ## Parallel Worker Contract ----------------------------------------------------
 
 # The keys evaluate()'s parallel branch sends to evaluate_config_worker().
