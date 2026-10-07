@@ -959,7 +959,7 @@ describe("evaluate() - the split line and the fallback notes (#91)", {
 
 describe("evaluate() - checkpointing", {
 
-  it("writes one checkpoint file per config, and no single-file checkpoint", {
+  it("writes one checkpoint file per config, and no other store", {
 
     ck     <- ck_b()
     obj    <- ck$value$obj
@@ -967,10 +967,11 @@ describe("evaluate() - checkpointing", {
 
     checkpoint_dir <- file.path(tmpdir, "checkpoints")
 
-    ## The per-config files are the only store (#42)
+    ## The per-config files are the only store (#42); the manifest is for
+    ## monitor_evaluate()
     expect_setequal(list.files(checkpoint_dir),
                     paste0(obj$config$configs$config_id, ".rds"))
-    expect_false(file.exists(file.path(tmpdir, "eval_checkpoint.rds")))
+    expect_setequal(list.files(tmpdir), c("checkpoints", "eval_manifest.rds"))
 
   })
 
@@ -1051,26 +1052,8 @@ describe("evaluate() - checkpointing", {
     expect_match(msg, "2 configurations were loaded from checkpoints", fixed = TRUE)
     expect_match(msg, "cfg_001, cfg_002", fixed = TRUE)
 
-    ## One store (#42): the per-config files, and the legacy file only when a
-    ## resumed row came from it.
+    ## One store (#42): the per-config files
     expect_match(msg, "delete their files, checkpoints/<config_id>.rds.", fixed = TRUE)
-    expect_no_match(msg, "eval_checkpoint.rds", fixed = TRUE)
-
-    ## cfg_002 now comes from a legacy single file, which the loader copies
-    ## into checkpoints/ but which would be read again once the copy is gone.
-    legacy <- readRDS(file.path(tmpdir, "checkpoints", "cfg_002.rds"))
-    saveRDS(legacy, file.path(tmpdir, "eval_checkpoint.rds"))
-    unlink(file.path(tmpdir, "checkpoints", "cfg_002.rds"))
-
-    err <- tryCatch(
-      suppressMessages(suppressWarnings(
-        evaluate(obj, output_dir = tmpdir, verbose = FALSE, seed = 42L)
-      )),
-      horizons_all_configs_failed = function(e) e
-    )
-
-    msg <- gsub("\\s+", " ", conditionMessage(err))
-    expect_match(msg, "and eval_checkpoint.rds, which 1 of them was read from", fixed = TRUE)
 
   })
 
@@ -1765,93 +1748,10 @@ describe("evaluate() - checkpoint data provenance", {
 ## =========================================================================
 ## One checkpoint store (#42)
 ## =========================================================================
-## evaluate() used to keep two stores: a whole-table eval_checkpoint.rds,
-## written only by the sequential path, and one file per config under
-## checkpoints/. The single file was read first and shadowed the per-config
-## rows, so repairing a per-config file changed nothing, and the two stores
-## ran their gates in different orders. The per-config files are now the only
-## store; a legacy single file is read only for configs with no per-config
-## file.
-
-## The per-config rows of a finished run, named by config id.
-read_per_config_rows <- function(output_dir) {
-
-  files <- list.files(file.path(output_dir, "checkpoints"),
-                      pattern = "\\.rds$", full.names = TRUE)
-
-  stats::setNames(lapply(files, readRDS), sub("\\.rds$", "", basename(files)))
-
-}
-
-## A single-file checkpoint in the shape the old sequential path wrote: the
-## whole table, with the fingerprint also carried in attributes.
-write_legacy_checkpoint <- function(output_dir, rows) {
-
-  tbl <- dplyr::bind_rows(rows)
-  attr(tbl, "data_hash")   <- rows[[1]]$data_hash
-  attr(tbl, "data_n_rows") <- rows[[1]]$data_n_rows
-  saveRDS(tbl, file.path(output_dir, "eval_checkpoint.rds"))
-
-}
+## One file per config under checkpoints/, named by its config id, is the
+## store; a file counts only for the config its name says.
 
 describe("evaluate() - one checkpoint store (#42)", {
-
-  it("reads a repaired per-config file over a legacy single file", {
-
-    ck     <- ck_a()
-    obj    <- ck$value$obj
-    tmpdir <- ck$dir
-
-    rows <- read_per_config_rows(tmpdir)
-
-    ## The legacy file carries a bad cfg_001; the per-config file, as if it
-    ## had been repaired, carries the good one.
-    stale <- rows
-    stale$cfg_001$cv_rpd <- 999
-    write_legacy_checkpoint(tmpdir, stale)
-
-    second <- suppressMessages(suppressWarnings(
-      evaluate(obj, output_dir = tmpdir, prune = FALSE, verbose = FALSE,
-               seed = 42L)
-    ))
-
-    got <- second$evaluation$results
-    expect_equal(got$cv_rpd[got$config_id == "cfg_001"], rows$cfg_001$cv_rpd)
-
-  })
-
-  it("reads a legacy single file only for configs with no per-config file, and says so", {
-
-    ck     <- ck_a()
-    obj    <- ck$value$obj
-    tmpdir <- ck$dir
-
-    ## Mark every legacy row so its origin shows in the results.
-    legacy <- lapply(read_per_config_rows(tmpdir), function(r) {
-      r$runtime_secs <- -1
-      r
-    })
-    write_legacy_checkpoint(tmpdir, legacy)
-    unlink(file.path(tmpdir, "checkpoints", "cfg_002.rds"))
-
-    expect_message(
-      second <- suppressWarnings(
-        evaluate(obj, output_dir = tmpdir, prune = FALSE, verbose = FALSE,
-                 seed = 42L)
-      ),
-      "eval_checkpoint.rds",
-      class = "horizons_checkpoint_message"
-    )
-
-    got <- second$evaluation$results
-    expect_equal(got$runtime_secs[got$config_id == "cfg_002"], -1)
-    expect_false(got$runtime_secs[got$config_id == "cfg_001"] == -1)
-
-    ## The legacy row is copied into the per-config store, so deleting the
-    ## legacy file afterwards loses nothing.
-    expect_true(file.exists(file.path(tmpdir, "checkpoints", "cfg_002.rds")))
-
-  })
 
   it("warns naming a per-config file it cannot read, and re-evaluates that config", {
 
@@ -1859,8 +1759,6 @@ describe("evaluate() - one checkpoint store (#42)", {
     obj    <- ck$value$obj
     tmpdir <- ck$dir
 
-    ## Only the per-config store, so nothing else can stand in for the file.
-    unlink(file.path(tmpdir, "eval_checkpoint.rds"))
     writeLines("not an rds file", file.path(tmpdir, "checkpoints", "cfg_001.rds"))
 
     warns <- testthat::capture_warnings(
@@ -1877,14 +1775,14 @@ describe("evaluate() - one checkpoint store (#42)", {
 
   })
 
-  it("never lets a leftover temp file stand in for a config's own file", {
+  it("never lets a stray file stand in for a config's own file", {
 
     skip_unless_slow_tier()
 
-    ## Older versions wrote each row to file*.rds before renaming it; a
-    ## leftover one sorted ahead of most model prefixes and shadowed the real
-    ## file (review finding, #42). Config ids with a model prefix reproduce
-    ## the order.
+    ## A stray row file named like a temp file sorts ahead of most model
+    ## prefixes, so a reader taking the first row per config would let it
+    ## shadow the real file (review finding, #42). Config ids with a model
+    ## prefix reproduce the order.
     obj <- make_eval_object(n_configs = 2)
     obj$config$configs$config_id <- c("rf_001", "rf_002")
     tmpdir <- withr::local_tempdir()
@@ -1916,43 +1814,28 @@ describe("evaluate() - one checkpoint store (#42)", {
 
   })
 
-  it("refuses a foreign-schema row written on other data from either store", {
+  it("refuses a foreign-schema row written on other data", {
 
     ck     <- ck_a()
     obj    <- ck$value$obj
     tmpdir <- ck$dir
 
-    unlink(file.path(tmpdir, "eval_checkpoint.rds"))
-
     f       <- file.path(tmpdir, "checkpoints", "cfg_001.rds")
     foreign <- readRDS(f)
     foreign$scoring_schema <- 1L
     foreign$data_hash      <- "0000deadbeef"
-
-    refusal <- function() {
-      tryCatch(
-        suppressMessages(suppressWarnings(
-          evaluate(obj, output_dir = tmpdir, prune = FALSE, verbose = FALSE,
-                   seed = 42L)
-        )),
-        horizons_input_error = function(e) e
-      )
-    }
-
-    ## In the per-config store: the fingerprint is checked before the
-    ## schema, so the row aborts rather than being dropped silently.
     saveRDS(foreign, f)
-    err <- refusal()
+
+    ## The fingerprint is checked before the schema, so the row aborts rather
+    ## than being dropped silently.
+    err <- tryCatch(
+      suppressWarnings(evaluate(obj, output_dir = tmpdir, prune = FALSE,
+                                verbose = FALSE, seed = 42L)),
+      horizons_input_error = function(e) e
+    )
+
     expect_s3_class(err, "horizons_input_error")
     expect_match(flat_message(err), "cfg_001.rds", fixed = TRUE)
-
-    ## In a legacy single file, for a config with no per-config file: the
-    ## same verdict.
-    unlink(f)
-    write_legacy_checkpoint(tmpdir, list(cfg_001 = foreign))
-    err <- refusal()
-    expect_s3_class(err, "horizons_input_error")
-    expect_match(flat_message(err), "eval_checkpoint.rds", fixed = TRUE)
 
   })
 
@@ -2074,7 +1957,6 @@ describe("evaluate() - tuning-settings provenance", {
     tmpdir <- ck$dir
 
     first <- ck$value$first
-    unlink(file.path(tmpdir, "eval_checkpoint.rds"))
 
     ## The shape every row written before the settings stamp has.
     for (f in list.files(file.path(tmpdir, "checkpoints"), full.names = TRUE)) {

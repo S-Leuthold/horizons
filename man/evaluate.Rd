@@ -70,10 +70,7 @@ every row carries all six cross-validated metrics. Rows scored under an
 earlier scoring schema are dropped and re-evaluated; rows for configs no
 longer in the grid are dropped; a file that cannot be used warns and its
 config is re-evaluated; rows written before a fingerprint field existed
-warn once and resume. A whole-table \code{eval_checkpoint.rds} from earlier
-versions is read only for configs with no per-config file, and its rows
-are copied into \verb{checkpoints/}, after which it can be deleted. Default
-NULL (no checkpointing).}
+warn once and resume. Default NULL (no checkpointing).}
 
 \item{seed}{Integer. Random seed for train/test split and CV folds.
 Default 307L.}

@@ -531,8 +531,8 @@ describe("evaluate() - cross-mode checkpoint resume", {
     tmpdir     <- run$dir
     seq_result <- run$value$result
 
-    ## Both axes share the one store (#42): no single file to go stale.
-    expect_false(file.exists(file.path(tmpdir, "eval_checkpoint.rds")))
+    ## Both axes share the one store (#42): the per-config files.
+    expect_setequal(list.files(tmpdir), c("checkpoints", "eval_manifest.rds"))
 
     local_plan(future::multisession, workers = 2)
 
@@ -1008,36 +1008,6 @@ describe("monitor_evaluate() - applies evaluate()'s checkpoint gates", {
 
     expect_equal(stats$n_complete, 1)
     expect_equal(polls, 2L)
-
-  })
-
-  it("reads a legacy single file exactly where evaluate() would", {
-
-    skip_unless_slow_tier()
-    skip_on_cran()
-    obj    <- make_eval_object(n = 60, n_configs = 2)
-    tmpdir <- withr::local_tempdir()
-
-    result <- suppressWarnings(
-      evaluate(obj, output_dir = tmpdir, prune = FALSE, verbose = FALSE,
-               seed = 42L)
-    )
-
-    ## A legacy file holding both configs, where cfg_002 won by a mile.
-    files <- list.files(file.path(tmpdir, "checkpoints"), full.names = TRUE)
-    stale <- dplyr::bind_rows(lapply(files, readRDS))
-    stale$cv_rpd[stale$config_id == "cfg_002"] <- 999
-    saveRDS(stale, file.path(tmpdir, "eval_checkpoint.rds"))
-
-    ## cfg_001 has no per-config file, so its legacy row counts; cfg_002's
-    ## per-config file shadows the legacy row.
-    unlink(file.path(tmpdir, "checkpoints", "cfg_001.rds"))
-
-    invisible(capture.output(stats <- monitor_evaluate(tmpdir)))
-
-    expect_equal(stats$n_complete, 2)
-    expect_equal(stats$best_config, result$evaluation$best_config)
-    expect_false(isTRUE(stats$best_metric == 999))
 
   })
 

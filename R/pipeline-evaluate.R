@@ -54,10 +54,7 @@
 #'   earlier scoring schema are dropped and re-evaluated; rows for configs no
 #'   longer in the grid are dropped; a file that cannot be used warns and its
 #'   config is re-evaluated; rows written before a fingerprint field existed
-#'   warn once and resume. A whole-table `eval_checkpoint.rds` from earlier
-#'   versions is read only for configs with no per-config file, and its rows
-#'   are copied into `checkpoints/`, after which it can be deleted. Default
-#'   NULL (no checkpointing).
+#'   warn once and resume. Default NULL (no checkpointing).
 #' @param seed Integer. Random seed for train/test split and CV folds.
 #'   Default 307L.
 #' @param verbose Logical. Print progress tree to console. Default TRUE.
@@ -467,13 +464,11 @@ evaluate <- function(x,
   ## -----------------------------------------------------------------------
   ## Step 6: Load checkpoints (if any)
   ## -----------------------------------------------------------------------
-  ## One store: a file per config under checkpoints/. Every row, from it or
-  ## from a legacy eval_checkpoint.rds, passes the same gates in the same
-  ## order (see load_eval_checkpoints()).
+  ## One store: a file per config under checkpoints/. Every row passes the
+  ## same gates in the same order (see load_eval_checkpoints()).
 
   checkpoint_dir     <- NULL
   checkpoint_results <- list()
-  legacy_ids         <- character(0)
   checkpoint_notes   <- character(0)
 
   if (!is.null(output_dir)) {
@@ -495,7 +490,6 @@ evaluate <- function(x,
     ## and the notes on dropped rows print under it: both used to print
     ## here, above the tree's header (#91).
     checkpoint_results <- loaded$rows
-    legacy_ids         <- loaded$legacy_ids
     checkpoint_notes   <- loaded$notes
 
   }
@@ -908,7 +902,6 @@ evaluate <- function(x,
     abort_all_configs_failed(
       all_results, metric,
       checkpoint_ids = intersect(all_results$config_id, completed_ids),
-      legacy_ids     = intersect(all_results$config_id, legacy_ids),
       output_dir     = output_dir
     )
 
@@ -1022,15 +1015,11 @@ checkpoint_row_schema <- function(row) {
 ## ---------------------------------------------------------------------------
 ## Checkpoint store
 ## ---------------------------------------------------------------------------
-## One file per config under <output_dir>/checkpoints/ is the only store
-## (#42). Earlier versions also kept a whole-table eval_checkpoint.rds, written
-## by the sequential path alone, read first, and left stale by the parallel
-## path; it shadowed the per-config rows, and the two stores ran their gates
-## in different orders. That file is still read, but only for configs with no
-## per-config file. Every row from either store passes one gate order:
-## training-data fingerprint, then tuning settings, then scoring schema.
-## evaluate() and monitor_evaluate() both read through these helpers, so the
-## monitor never counts or ranks a row evaluate() would reject.
+## One file per config under <output_dir>/checkpoints/ is the store (#42),
+## written by the sequential path and the workers alike. Every row passes one
+## gate order: training-data fingerprint, then tuning settings, then scoring
+## schema. evaluate() and monitor_evaluate() both read through these helpers,
+## so the monitor never counts or ranks a row evaluate() would reject.
 
 #' Read one per-config checkpoint file
 #'
@@ -1061,22 +1050,17 @@ read_checkpoint_file <- function(path) {
 
 #' Read every checkpoint row in an output directory
 #'
-#' Reads the per-config files, then the rows of a legacy single-file
-#' checkpoint whose config has no per-config file. A per-config file counts
-#' only for the config its name says: `<config_id>.rds` holding that config's
-#' row. Anything else is reported, never read as a checkpoint, because older
-#' versions wrote each row to a `file*.rds` temp name before renaming it, and
-#' a leftover one sorted ahead of the real file and shadowed it. A config
-#' counts as covered by its file name whether or not the file can be read, so
-#' a legacy row never stands in for a damaged file: the config is
-#' re-evaluated instead. Nothing is gated here; see [gate_checkpoint_rows()].
+#' Reads the per-config files. A file counts only for the config its name
+#' says: `<config_id>.rds` holding that config's row. Anything else is
+#' reported, never read as a checkpoint, so a stray or copied file cannot
+#' stand in for a config's own; the config is re-evaluated instead. Nothing
+#' is gated here; see [gate_checkpoint_rows()].
 #'
 #' @param output_dir The directory passed to `evaluate(output_dir = )`.
 #' @return List with `rows`, a list of candidates, each a list of `row` (the
 #'   one-row result), `source` (the file, relative to `output_dir`) and `path`
-#'   (the per-config file, or `NA` for a legacy row); and `unreadable`, the
-#'   reason each unusable file was refused, named by the file relative to
-#'   `output_dir`.
+#'   (the file); and `unreadable`, the reason each unusable file was refused,
+#'   named by the file relative to `output_dir`.
 #' @keywords internal
 #' @noRd
 read_checkpoint_store <- function(output_dir) {
@@ -1091,7 +1075,7 @@ read_checkpoint_store <- function(output_dir) {
 
   ## Pre-allocated and filled in place: a monitor polls a store of thousands
   ## of files, and growing a list per file is quadratic.
-  covered <- sub("\\.rds$", "", basename(files))
+  named   <- sub("\\.rds$", "", basename(files))
   sources <- file.path("checkpoints", basename(files))
   rows    <- vector("list", length(files))
   reasons <- rep(NA_character_, length(files))
@@ -1109,7 +1093,7 @@ read_checkpoint_store <- function(output_dir) {
 
     id <- as.character(got$row$config_id)
 
-    if (!identical(id, covered[i])) {
+    if (!identical(id, named[i])) {
 
       reasons[i] <- paste0("holds config ", id, "; not a checkpoint name")
       next
@@ -1120,50 +1104,10 @@ read_checkpoint_store <- function(output_dir) {
 
   }
 
-  refused    <- !is.na(reasons)
-  rows       <- rows[!refused]
-  unreadable <- stats::setNames(reasons[refused], sources[refused])
+  refused <- !is.na(reasons)
 
-  ## -------------------------------------------------------------------------
-  ## Legacy single file: only its rows for configs with no per-config file
-  ## -------------------------------------------------------------------------
-
-  legacy_file <- "eval_checkpoint.rds"
-  legacy_path <- file.path(output_dir, legacy_file)
-
-  if (!file.exists(legacy_path)) {
-
-    return(list(rows = rows, unreadable = unreadable))
-
-  }
-
-  legacy <- tryCatch(readRDS(legacy_path), error = function(e) e)
-
-  if (inherits(legacy, "error") || !is.data.frame(legacy) ||
-      !"config_id" %in% names(legacy)) {
-
-    unreadable[[legacy_file]] <- if (inherits(legacy, "error")) {
-      condition_summary(legacy)
-    } else {
-      "not a checkpoint table with a config_id"
-    }
-
-    return(list(rows = rows, unreadable = unreadable))
-
-  }
-
-  ### The file may carry its fingerprint only as table attributes, which do
-  ### not survive splitting it into rows; move it onto the rows first.
-  fps                <- checkpoint_tibble_fingerprints(legacy)
-  legacy$data_hash   <- fps$data_hash
-  legacy$data_n_rows <- fps$data_n_rows
-
-  from_legacy <- lapply(which(!legacy$config_id %in% covered), function(j) {
-    list(row = legacy[j, , drop = FALSE], source = legacy_file,
-         path = NA_character_)
-  })
-
-  list(rows = c(rows, from_legacy), unreadable = unreadable)
+  list(rows       = rows[!refused],
+       unreadable = stats::setNames(reasons[refused], sources[refused]))
 
 }
 
@@ -1241,8 +1185,8 @@ checkpoint_row_verdict <- function(row, data_fp, settings) {
 #'   [checkpoint_row_verdict()].
 #' @param config_ids The configs in this run's grid, or `NULL` to keep every
 #'   id.
-#' @return List with `kept` (surviving candidates named by config id, the
-#'   first per id), `refused` (candidates that failed a fingerprint, each with
+#' @return List with `kept` (surviving candidates named by config id),
+#'   `refused` (candidates that failed a fingerprint, each with
 #'   its verdict fields added), and the counts `n_foreign` (earlier scoring
 #'   schema), `n_stale` (config not in the grid), `n_unverified_data` and
 #'   `n_unverified_settings` (among the kept rows).
@@ -1262,10 +1206,9 @@ gate_checkpoint_rows <- function(candidates, data_fp, settings, config_ids = NUL
   in_grid <- if (is.null(config_ids)) rep(TRUE, length(ids)) else ids %in% config_ids
   passed  <- verdict == "keep"
 
-  ## First candidate per id: per-config files come before legacy rows.
-  keep <- which(passed & in_grid)
-  keep <- keep[!duplicated(ids[keep])]
-
+  ## One candidate per id: read_checkpoint_store() takes a file only under
+  ## its own config's name.
+  keep    <- which(passed & in_grid)
   refused <- which(verdict %in% c("data_mismatch", "settings_mismatch"))
 
   list(
@@ -1285,20 +1228,16 @@ gate_checkpoint_rows <- function(candidates, data_fp, settings, config_ids = NUL
 #' written on other training data or under other settings, returns the drops
 #' as notes for `evaluate()` to print inside its tree (they used to print
 #' here, above the tree's header; #91), warns naming any file it could not
-#' read, copies rows adopted from a legacy single file into the per-config
-#' store (so the legacy file can then be deleted), and warns once for rows it
-#' cannot verify.
+#' read, and warns once for rows it cannot verify.
 #'
 #' @param output_dir The run's output directory.
 #' @param config_ids The configs in this run's grid.
 #' @param data_fp,settings This run's fingerprint and settings.
 #' @param call The frame to report a refusal from; the default is the
 #'   caller's, so the error reads as `evaluate()`'s.
-#' @return List with `rows` (one-row results named by config id),
-#'   `legacy_ids` (the ids among them read from a legacy
-#'   `eval_checkpoint.rds`, which still holds them after they are copied) and
-#'   `notes` (character, one tree line per kind of dropped row; empty when
-#'   none were dropped).
+#' @return List with `rows` (one-row results named by config id) and `notes`
+#'   (character, one tree line per kind of dropped row; empty when none were
+#'   dropped).
 #' @keywords internal
 #' @noRd
 load_eval_checkpoints <- function(output_dir, config_ids, data_fp, settings,
@@ -1368,26 +1307,6 @@ load_eval_checkpoints <- function(output_dir, config_ids, data_fp, settings,
 
   }
 
-  ## -------------------------------------------------------------------------
-  ## Move adopted legacy rows into the per-config store
-  ## -------------------------------------------------------------------------
-
-  from_legacy <- Filter(function(k) is.na(k$path), gated$kept)
-
-  if (length(from_legacy) > 0) {
-
-    for (k in from_legacy) {
-      write_checkpoint_row(k$row, file.path(output_dir, "checkpoints"))
-    }
-
-    n_legacy <- length(from_legacy)
-
-    cli::cli_inform(c(
-      "i" = "Resumed {n_legacy} config{?s} from the legacy {.file eval_checkpoint.rds} and copied {?it/them} into {.path checkpoints/}; delete {.file eval_checkpoint.rds} once this run has resumed."
-    ), class = "horizons_checkpoint_message")
-
-  }
-
   ## One warning per run, whatever the mix of old rows: they keep resuming,
   ## but never silently.
   if (gated$n_unverified_data > 0 || gated$n_unverified_settings > 0) {
@@ -1399,9 +1318,8 @@ load_eval_checkpoints <- function(output_dir, config_ids, data_fp, settings,
   }
 
   list(
-    rows       = lapply(gated$kept, `[[`, "row"),
-    legacy_ids = names(from_legacy) %||% character(0),
-    notes      = notes
+    rows  = lapply(gated$kept, `[[`, "row"),
+    notes = notes
   )
 
 }
@@ -1862,47 +1780,6 @@ checkpoint_row_fingerprint <- function(row) {
 
 }
 
-#' Per-row fingerprints carried by a single-file checkpoint
-#'
-#' Reads the per-row columns when present, and falls back to the tibble's
-#' attributes, which is how a checkpoint written wholesale (rather than row by
-#' row) carries its provenance. Rows with neither are `NA`.
-#'
-#' @param results Checkpoint tibble (a legacy `eval_checkpoint.rds`).
-#' @return List of two vectors, `data_hash` and `data_n_rows`, each of length
-#'   `nrow(results)`.
-#' @keywords internal
-#' @noRd
-checkpoint_tibble_fingerprints <- function(results) {
-
-  n <- nrow(results)
-
-  hashes <- if ("data_hash" %in% names(results)) {
-    as.character(results$data_hash)
-  } else {
-    rep(attr(results, "data_hash") %||% NA_character_, n)
-  }
-
-  rows <- if ("data_n_rows" %in% names(results)) {
-    as.integer(results$data_n_rows)
-  } else {
-    rep(as.integer(attr(results, "data_n_rows") %||% NA_integer_), n)
-  }
-
-  ## Rows written before the columns existed bind in as NA; the tibble-level
-  ## attribute is the only provenance they can have.
-  attr_hash <- attr(results, "data_hash")
-
-  if (!is.null(attr_hash) && any(is.na(hashes))) {
-
-    hashes[is.na(hashes)] <- attr_hash
-
-  }
-
-  list(data_hash = hashes, data_n_rows = rows)
-
-}
-
 #' Abort on a checkpoint written against different training data
 #'
 #' @param stored,current Fingerprints from [checkpoint_row_fingerprint()] and
@@ -1997,17 +1874,12 @@ describe_data_diff <- function(stored, current, differ) {
 #' again, so the message names them and the files to delete. They are
 #' identified by `evaluate()` from the ids its loader returned, without
 #' reading the checkpoint files again. Each lives in
-#' `checkpoints/<config_id>.rds`; a row read from a legacy
-#' `eval_checkpoint.rds` was copied there, but the legacy file still holds
-#' it and would be read again once the copy is gone, so that file is named
-#' too, and only then.
+#' `checkpoints/<config_id>.rds`.
 #'
 #' @param results The aggregated result rows (`evaluation$results` shape).
 #' @param metric Bare ranking metric name.
 #' @param checkpoint_ids Character. Config ids among `results` that were
 #'   loaded from checkpoints rather than run. Default none.
-#' @param legacy_ids Character. The ids among `checkpoint_ids` read from a
-#'   legacy `eval_checkpoint.rds`. Default none.
 #' @param output_dir The checkpoint directory, or `NULL`.
 #' @param call The call the condition is attributed to. Default: the caller,
 #'   `evaluate()`.
@@ -2016,7 +1888,6 @@ describe_data_diff <- function(stored, current, differ) {
 #' @noRd
 abort_all_configs_failed <- function(results, metric,
                                      checkpoint_ids = character(0),
-                                     legacy_ids     = character(0),
                                      output_dir     = NULL,
                                      call           = rlang::caller_env()) {
 
@@ -2050,22 +1921,11 @@ abort_all_configs_failed <- function(results, metric,
       "their files, checkpoints/<config_id>.rds"
     }
 
-    n_legacy    <- length(legacy_ids)
-    legacy_note <- if (n_legacy == 0) {
-      ""
-    } else if (n_legacy == n_ckpt) {
-      paste0(", and eval_checkpoint.rds, which ",
-             if (n_ckpt == 1) "it was" else "they were", " read from")
-    } else {
-      paste0(", and eval_checkpoint.rds, which ", n_legacy, " of them ",
-             if (n_legacy == 1) "was" else "were", " read from")
-    }
-
     checkpoint_note <- c("i" = cli_escape(paste0(
       n_ckpt, if (n_ckpt == 1) " configuration was" else " configurations were",
       " loaded from checkpoints in ", output_dir, " rather than run (",
       ids_shown, "). To re-run ", if (n_ckpt == 1) "it" else "them",
-      ", delete ", files, legacy_note, "."
+      ", delete ", files, "."
     )))
 
   }

@@ -6,9 +6,8 @@
 #' `evaluate()` is running.
 #'
 #' The monitor reads the checkpoints through the same helpers and gates as
-#' `evaluate()`: the per-config files under `checkpoints/`, plus the rows of
-#' a legacy `eval_checkpoint.rds` for configs with no per-config file. A row
-#' is neither counted nor ranked unless `evaluate()` would resume it: it must
+#' `evaluate()`: the per-config files under `checkpoints/`. A row is neither
+#' counted nor ranked unless `evaluate()` would resume it: it must
 #' match the training-data fingerprint and the tuning settings recorded in
 #' `eval_manifest.rds` (which `evaluate()` writes at the start of each run),
 #' be scored under the current scoring schema, and belong to a config in the
@@ -201,14 +200,12 @@ monitor_evaluate <- function(output_dir, watch = FALSE, interval = 10) {
 
   }
 
-  ## Recent completions (last 5), among the per-config files that passed the
-  ## gate; rows adopted from a legacy single file have no completion time.
+  ## Recent completions (last 5), among the files that passed the gate.
   recent <- character(0)
 
-  on_disk <- Filter(function(k) !is.na(k$path), gated$kept)
-  mtimes  <- file.mtime(vapply(on_disk, `[[`, character(1), "path"))
+  mtimes <- file.mtime(vapply(gated$kept, `[[`, character(1), "path"))
 
-  for (k in utils::head(on_disk[order(mtimes, decreasing = TRUE)], 5)) {
+  for (k in utils::head(gated$kept[order(mtimes, decreasing = TRUE)], 5)) {
 
     row <- k$row
 
