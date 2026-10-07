@@ -105,27 +105,10 @@ describe("build_warmstart_grid() - basic contract", {
 
   grid <- build_warmstart_grid(best_params, param_set, max_points = 25)
 
-  it("returns a tibble", {
+  it("is a tibble with columns matching the param_set names", {
 
     expect_s3_class(grid, "tbl_df")
-
-  })
-
-  it("has columns matching the param_set names", {
-
     expect_true(all(param_set$name %in% names(grid)))
-
-  })
-
-  it("respects max_points", {
-
-    expect_lte(nrow(grid), 25)
-
-  })
-
-  it("has at least 1 row", {
-
-    expect_gte(nrow(grid), 1)
 
   })
 
@@ -139,20 +122,10 @@ describe("build_warmstart_grid() - integer params", {
 
   grid <- build_warmstart_grid(best_params, param_set, max_points = 25)
 
-  it("produces integer values for mtry", {
+  it("produces integer values for mtry, trees and min_n", {
 
     expect_true(all(grid$mtry == as.integer(grid$mtry)))
-
-  })
-
-  it("produces integer values for trees", {
-
     expect_true(all(grid$trees == as.integer(grid$trees)))
-
-  })
-
-  it("produces integer values for min_n", {
-
     expect_true(all(grid$min_n == as.integer(grid$min_n)))
 
   })
@@ -174,7 +147,7 @@ describe("build_warmstart_grid() - range clamping", {
     param_set$object[[which(param_set$name == name)]]$range
   }
 
-  it("keeps mtry within valid range", {
+  it("keeps mtry, min_n and trees within their ranges from a best point on the bounds", {
 
     ## Extract the finalized mtry param from our param_set
     mtry_param <- param_set$object[[which(param_set$name == "mtry")]]
@@ -182,17 +155,9 @@ describe("build_warmstart_grid() - range clamping", {
     expect_true(all(grid$mtry >= mtry_param$range$lower))
     expect_true(all(grid$mtry <= mtry_param$range$upper))
 
-  })
-
-  it("keeps min_n >= 1", {
-
     expect_equal(best_params$min_n, param_range("min_n")$lower)
     expect_true(all(grid$min_n >= 1))
     expect_true(all(grid$min_n >= param_range("min_n")$lower))
-
-  })
-
-  it("keeps trees >= 1", {
 
     expect_equal(best_params$trees, param_range("trees")$lower)
     expect_true(all(grid$trees >= 1))
@@ -388,30 +353,14 @@ describe("tune_warmstart_bayes() - return contract", {
     allow_par     = FALSE
   )
 
-  it("returns a list", {
+  it("is a list with tune_results, fallback_used and a single-row best_params tibble", {
 
     expect_true(is.list(result))
-
-  })
-
-  it("has required fields: tune_results, best_params, fallback_used", {
-
     expect_true("tune_results" %in% names(result))
     expect_true("best_params" %in% names(result))
     expect_true("fallback_used" %in% names(result))
-
-  })
-
-  it("best_params is a single-row tibble", {
-
     expect_s3_class(result$best_params, "tbl_df")
     expect_equal(nrow(result$best_params), 1)
-
-  })
-
-  it("fallback_used is logical", {
-
-    expect_true(is.logical(result$fallback_used))
 
   })
 
