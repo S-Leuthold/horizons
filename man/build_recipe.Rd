@@ -35,21 +35,18 @@ Translates a single config row into a tidymodels recipe. Uses \code{role_map}
 to identify columns by role — no hard-coded wavenumber ranges. This is
 the recipe constructor for \code{evaluate_single_config()}.
 
-Recipe step order (early fusion):
+Recipe step order:
 \enumerate{
 \item Response transformation (step_log/step_sqrt with skip = TRUE)
 \item Spectral preprocessing (step_transform_spectra on predictor_cols only)
 \item Feature selection (pca/boruta/cars/correlation/none), on spectral
 columns only
-\item Covariate inclusion (promote requested covariates to predictor; the rest
-stay in a non-predictor hold role)
 }
 
 Columns that are neither the outcome nor spectral predictors are given an
-explicit non-predictor role — \code{id}, \code{meta}, \code{response_hold} (sibling lab
-responses) and \code{covariate_hold}. Nothing is left to the \code{outcome ~ .}
-default, which would make a predictor of any column the role map did not
-name.
+explicit non-predictor role — \code{id}, \code{meta} and \code{response_hold} (sibling lab
+responses). Nothing is left to the \code{outcome ~ .} default, which would make
+a predictor of any column the role map did not name.
 
 A final pass re-points the step selector quosures away from this function's
 frame, which would otherwise be serialized to every parallel worker. See

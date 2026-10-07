@@ -8,10 +8,10 @@
 #' @param ... Selector functions choosing the spectral columns Boruta runs on,
 #'   e.g. `dplyr::matches("^spec[0-9]+$")` — the names
 #'   `step_transform_spectra()` gives its output. Select by name pattern rather
-#'   than `all_predictors()`: a covariate promoted to the predictor role is
-#'   inside `all_predictors()` by the time this step preps, and would then be
-#'   clustered and shadow-tested as if it were a wavenumber. A selector
-#'   matching nothing aborts at `prep()`.
+#'   than `all_predictors()`, so that only spectral columns are clustered and
+#'   shadow-tested: any other column holding the predictor role when this
+#'   step preps would be treated as a wavenumber. A selector matching nothing
+#'   aborts at `prep()`.
 #' @param outcome Character. Name of the outcome variable to use for model fitting.
 #' @param role Character. Role for retained variables. Default is `"predictor"`.
 #' @param trained Logical. Required by `recipes`; indicates if the step has been prepped.

@@ -8,11 +8,11 @@
 #' @param recipe A `recipes::recipe()` object.
 #' @param ... Selector functions choosing the spectral columns to score, e.g.
 #'   `dplyr::matches("^spec[0-9]+$")` — the names `step_transform_spectra()`
-#'   gives its output. Select by name pattern rather than `all_predictors()`:
-#'   a covariate promoted to the predictor role is inside `all_predictors()`
-#'   by the time this step preps, and would then be folded into the 3-wide
-#'   contiguity window as if it were a wavenumber. A selector matching nothing
-#'   aborts at `prep()`.
+#'   gives its output. Select by name pattern rather than `all_predictors()`,
+#'   so that only spectral columns enter the 3-wide contiguity window: any
+#'   other column holding the predictor role when this step preps would be
+#'   folded in as if it were a wavenumber. A selector matching nothing aborts
+#'   at `prep()`.
 #' @param outcome Character. Name of the outcome variable to use for correlation scoring.
 #' @param role Character. Role for retained variables. Default is `"predictor"`.
 #' @param trained Logical. Required by `recipes`; indicates if the step has been prepped.
