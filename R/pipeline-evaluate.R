@@ -1059,7 +1059,9 @@ read_checkpoint_store <- function(output_dir) {
 #' config re-evaluated; so is every row when the run has no fingerprint of its
 #' own (no sample id column). Every other row passes a fixed gate order: the
 #' training-data fingerprint, then the tuning settings, then the scoring
-#' schema. A recorded value that differs is refused whatever the row's
+#' schema. The fingerprint is compared field by field: the fields carry
+#' everything `data_hash` does, and the hash sorts the ids in the session's
+#' collation, so the same rows can hash differently under another locale. A recorded value that differs is refused whatever the row's
 #' scoring schema, because it means another run's results are in the
 #' directory; a row scored under another `SCORING_SCHEMA` is dropped and
 #' re-evaluated.
@@ -1087,8 +1089,7 @@ checkpoint_row_verdict <- function(row, data_fp, settings) {
 
   verdict <- if (!checkable) {
     "foreign_schema"
-  } else if (!identical(row_fp$data_hash, data_fp$data_hash) ||
-             length(data_cmp$differ) > 0) {
+  } else if (length(data_cmp$differ) > 0) {
     "data_mismatch"
   } else if (length(cmp$differ) > 0) {
     "settings_mismatch"
@@ -1509,8 +1510,10 @@ eval_data_fingerprint <- function(train_data, role_map = NULL) {
 
   ids <- as.character(train_data[[id_col]])
 
-  ## Unchanged from its first version: every existing checkpoint carries it,
-  ## so any change here would refuse them all.
+  ## Unchanged from its first version, which every checkpoint and manifest
+  ## records. Its presence marks a fingerprinted row; its value is not
+  ## compared, since sort() follows the session's collation and the fields
+  ## below carry the same ids in a fixed order.
   data_hash <- digest::digest(list(
     ids     = sort(ids),
     outcome = outcome_col
@@ -1643,9 +1646,9 @@ abort_checkpoint_data_mismatch <- function(stored, current, output_dir, source,
   what <- describe_data_diff(stored$data_fields, current$data_fields, differ)
 
   ## Descriptions are substituted, not inlined, so a brace in an outcome name
-  ## is never read as cli markup. The gate refuses only a row recording every
-  ## field, and the hash covers the ids and the outcome, so a differing row
-  ## always names at least one field.
+  ## is never read as cli markup. The gate refuses only on a field the row and
+  ## the run both record with different values, so a refused row always names
+  ## at least one.
   found <- stats::setNames(
     sprintf("{.file {source}} %s", sprintf("{what[%d]}", seq_along(what))),
     rep("x", length(what))

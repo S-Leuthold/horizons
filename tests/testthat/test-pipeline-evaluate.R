@@ -1181,17 +1181,30 @@ describe("checkpoint scoring schema", {
 
   })
 
-  it("checks the fingerprint before the schema", {
+  it("checks the fingerprint before the schema, field by field", {
+
+    run_fp <- list(data_hash = "this", data_n_rows = 10L,
+                   data_fields = list(ids = "i", outcome = "SOC"))
 
     ## Written on other rows AND under an earlier schema: refused, not
     ## quietly dropped.
-    row <- tibble::tibble(config_id = "a", scoring_schema = 1L,
-                          data_hash = "other", data_n_rows = 10L)
+    other <- tibble::tibble(config_id = "a", scoring_schema = 1L,
+                            data_hash = "other", data_n_rows = 10L,
+                            data_fields = list(list(ids = "j", outcome = "SOC")))
 
-    v <- checkpoint_row_verdict(row, list(data_hash = "this", data_n_rows = 10L),
-                                settings = NULL)
+    v <- checkpoint_row_verdict(other, run_fp, settings = NULL)
 
     expect_identical(v$verdict, "data_mismatch")
+    expect_identical(v$data_differ, "ids")
+
+    ## The same fields under another hash, as when the ids were sorted in
+    ## another locale's collation: resumed, not refused.
+    same <- other
+    same$scoring_schema <- SCORING_SCHEMA
+    same$data_fields    <- list(run_fp$data_fields)
+
+    expect_identical(checkpoint_row_verdict(same, run_fp, settings = NULL)$verdict,
+                     "keep")
 
   })
 
