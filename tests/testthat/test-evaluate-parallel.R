@@ -805,6 +805,7 @@ describe("monitor_evaluate() - applies evaluate()'s checkpoint gates", {
     ## Each rejected row is made to look like the winner.
     doctor("cfg_001", function(r) {        # scored on other training rows
       r$data_hash <- "0000deadbeef"
+      r$data_fields[[1]]$ids <- "0000deadbeef"
       r$cv_rpd    <- 999
       r
     })
