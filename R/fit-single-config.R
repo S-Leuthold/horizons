@@ -297,6 +297,18 @@ fit_single_config <- function(config_row,
 
   best_params <- warmstart$best_params
 
+  ## A warm-start search that failed, or ran without producing a result,
+  ## leaves the starting grid's choice; the member's warnings say so (#209).
+  if (isTRUE(warmstart$bayes_failed)) {
+
+    warning_log <- dplyr::bind_rows(warning_log, text_records(
+      paste0("The warm-start Bayesian search failed, so the hyperparameters were chosen from its starting grid alone: ",
+             warmstart$bayes_error %||% "unknown error"),
+      pinned = TRUE
+    ))
+
+  }
+
   ## -----------------------------------------------------------------------
   ## Step 7: Finalize workflow
   ## -----------------------------------------------------------------------

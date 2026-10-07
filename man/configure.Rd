@@ -43,7 +43,9 @@ Default \code{"none"}.}
 Minimum 2.}
 
 \item{grid_size}{\code{integer}. Hyperparameter grid size (Latin hypercube).
-Default 10. Minimum 1.}
+Default 10. Minimum 1, and at least 2 when \code{bayesian_iter} or
+\code{final_bayesian_iter} is above 0, since both Bayesian searches start
+from the grid.}
 
 \item{bayesian_iter}{\code{integer}. Bayesian optimization iterations.
 Default 15. Minimum 0.}

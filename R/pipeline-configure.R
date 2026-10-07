@@ -153,7 +153,9 @@
 #' @param cv_folds `integer`. Number of cross-validation folds. Default 5.
 #'   Minimum 2.
 #' @param grid_size `integer`. Hyperparameter grid size (Latin hypercube).
-#'   Default 10. Minimum 1.
+#'   Default 10. Minimum 1, and at least 2 when `bayesian_iter` or
+#'   `final_bayesian_iter` is above 0, since both Bayesian searches start
+#'   from the grid.
 #' @param bayesian_iter `integer`. Bayesian optimization iterations.
 #'   Default 15. Minimum 0.
 #' @param final_bayesian_iter `integer`. Bayesian optimization iterations for
@@ -372,18 +374,6 @@ configure <- function(x,
 
   }
 
-  ## The Bayesian search starts from the grid's results, and tune_bayes()
-  ## needs at least two of them to fit its Gaussian process, so on a grid of
-  ## one the stage could never run (#209).
-  if (bayesian_iter > 0 && grid_size < 2) {
-
-    abort_nested(
-      "`grid_size` must be at least 2 when `bayesian_iter` is above 0",
-      c(paste0("Got: grid_size = ", grid_size, ", bayesian_iter = ", bayesian_iter),
-        "The Bayesian search starts from the grid and needs at least two of its points; raise grid_size, or set bayesian_iter = 0")
-    )
-
-  }
 
   if (!is.numeric(final_bayesian_iter) || length(final_bayesian_iter) != 1 ||
       is.na(final_bayesian_iter) ||
@@ -393,6 +383,25 @@ configure <- function(x,
     abort_nested(
       "`final_bayesian_iter` must be a non-negative integer",
       c(paste0("Got: ", deparse(final_bayesian_iter)))
+    )
+
+  }
+
+  ## Both Bayesian searches start from a grid of grid_size points: evaluate()'s
+  ## from its grid, fit()'s warm start capped at it. tune_bayes() needs at
+  ## least two of them to fit its Gaussian process, so on a grid of one neither
+  ## search could run (#209).
+  if (grid_size < 2 && (bayesian_iter > 0 || final_bayesian_iter > 0)) {
+
+    searches <- c(
+      if (bayesian_iter > 0)       paste0("bayesian_iter = ", bayesian_iter),
+      if (final_bayesian_iter > 0) paste0("final_bayesian_iter = ", final_bayesian_iter)
+    )
+
+    abort_nested(
+      "`grid_size` must be at least 2 when a Bayesian search runs",
+      c(paste0("Got: grid_size = ", grid_size, ", with ", paste(searches, collapse = " and ")),
+        "The Bayesian searches start from the grid and need at least two of its points; raise grid_size, or set bayesian_iter and final_bayesian_iter to 0")
     )
 
   }

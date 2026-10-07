@@ -331,18 +331,27 @@ describe("configure() validation", {
 
   })
 
-  test_that("refuses a grid of one when a Bayesian stage would start from it (#209)", {
+  test_that("refuses a grid of one when either Bayesian search would start from it (#209)", {
 
     hd <- make_single_response_hd()
 
     expect_error(
-      capture.output(configure(hd, grid_size = 1, bayesian_iter = 5)),
-      "`grid_size` must be at least 2 when `bayesian_iter` is above 0", fixed = TRUE,
+      capture.output(configure(hd, grid_size = 1, bayesian_iter = 5, final_bayesian_iter = 0)),
+      "`grid_size` must be at least 2 when a Bayesian search runs", fixed = TRUE,
       class = "horizons_configure_error"
     )
 
-    ## With no Bayesian stage, a grid of one is still a valid request.
-    expect_no_error(capture.output(configure(hd, grid_size = 1, bayesian_iter = 0)))
+    ## fit()'s warm start caps its grid at grid_size too
+    expect_error(
+      capture.output(configure(hd, grid_size = 1, bayesian_iter = 0, final_bayesian_iter = 25)),
+      "`grid_size` must be at least 2 when a Bayesian search runs", fixed = TRUE,
+      class = "horizons_configure_error"
+    )
+
+    ## With no Bayesian search at either stage, a grid of one is still valid.
+    expect_no_error(capture.output(
+      configure(hd, grid_size = 1, bayesian_iter = 0, final_bayesian_iter = 0)
+    ))
 
   })
 
@@ -886,17 +895,21 @@ describe("configure() edge cases", {
 
   })
 
-  test_that("tuning param boundaries: cv_folds = 2, grid_size = 1, bayesian_iter = 0", {
+  test_that("tuning param boundaries: cv_folds = 2, grid_size = 1, no Bayesian search at either stage", {
 
+    ## A grid of one is valid only with no Bayesian search to start from it
+    ## (#209), so both iteration counts are 0.
     hd     <- make_single_response_hd()
     result <- quiet_configure(hd,
-                              cv_folds      = 2L,
-                              grid_size     = 1L,
-                              bayesian_iter = 0L)
+                              cv_folds            = 2L,
+                              grid_size           = 1L,
+                              bayesian_iter       = 0L,
+                              final_bayesian_iter = 0L)
 
     expect_equal(result$config$tuning$cv_folds, 2L)
     expect_equal(result$config$tuning$grid_size, 1L)
     expect_equal(result$config$tuning$bayesian_iter, 0L)
+    expect_equal(result$config$tuning$final_bayesian_iter, 0L)
 
   })
 

@@ -363,10 +363,20 @@ evaluate_single_config <- function(config_row,
         pinned = TRUE
       ))
 
+    } else if (!bayes_iterations_ran(bayes_result$result)) {
+
+      ## The search returned without an iteration past the grid: its loop
+      ## errored, or every candidate failed in every fold (tune drops those
+      ## without a note).
+      warning_log <- dplyr::bind_rows(warning_log, text_records(
+        "The Bayesian search produced no results, so the hyperparameters were chosen from the grid alone.",
+        pinned = TRUE
+      ))
+
     } else {
 
-      ## Iterations that failed inside a search that completed leave their
-      ## reasons in .notes, which collect_notes_from() reads below.
+      ## Candidates that failed in some folds leave their reasons in .notes,
+      ## which collect_notes_from() reads below.
       collect_from(bayes_result)
       final_tune_results <- bayes_result$result
 

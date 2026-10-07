@@ -38,6 +38,11 @@ List with:
 \item \code{fallback_used}: Logical, TRUE if grid fallback was used
 \item \code{grid_points}: Integer, the number of points in the starting grid
 (the space-filling grid when \code{fallback_used} is TRUE)
+\item \code{bayes_failed}: Logical, TRUE when \code{bayesian_iter > 0} and the
+Bayesian search errored or produced no iteration past the grid, so the
+grid's choice is kept
+\item \code{bayes_error}: Character, why, when \code{bayes_failed} is TRUE; NULL
+otherwise
 \item \code{error}: Character, present only when the grid failed, in which case
 \code{tune_results} and \code{best_params} are NULL. When every model failed it
 carries the most frequent distinct error note from \code{.notes}.

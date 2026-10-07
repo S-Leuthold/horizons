@@ -423,6 +423,38 @@ describe("fit_single_config() - degradation detection", {
 ## also drops the bundles when its flags are FALSE, so these gates are visible
 ## only here, with a calibration set present.
 
+describe("fit_single_config() - a warm-start search that fails (#209)", {
+
+  it("keeps the starting grid's choice and records on the member that the search failed", {
+
+    shared <- fsc()
+
+    ## A starting grid of one point: the warm-start search cannot start.
+    result <- suppressWarnings(fit_single_config(
+      config_row          = make_fit_config(),
+      split_F             = shared$setup$split_F,
+      cv_resamples        = shared$setup$folds,
+      calib_data          = NULL,
+      role_map            = shared$setup$role_map,
+      best_params_eval    = make_fit_best_params(),
+      final_bayesian_iter = 2L,
+      grid_size           = 1L,
+      compute_uq          = FALSE,
+      compute_ad          = FALSE,
+      allow_par           = FALSE,
+      seed                = 42L
+    ))
+
+    expect_equal(result$status, "success")
+    expect_true(any(grepl(
+      "The warm-start Bayesian search failed, so the hyperparameters were chosen from its starting grid alone",
+      result$warnings, fixed = TRUE
+    )))
+
+  })
+
+})
+
 describe("fit_single_config() - UQ and AD disabled", {
 
   it("uq and ad are NULL when compute_uq and compute_ad are FALSE, even with a calibration set", {

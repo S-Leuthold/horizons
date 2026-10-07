@@ -279,6 +279,11 @@ point_in_grid <- function(point, grid) {
 #'   - `fallback_used`: Logical, TRUE if grid fallback was used
 #'   - `grid_points`: Integer, the number of points in the starting grid
 #'     (the space-filling grid when `fallback_used` is TRUE)
+#'   - `bayes_failed`: Logical, TRUE when `bayesian_iter > 0` and the
+#'     Bayesian search errored or produced no iteration past the grid, so the
+#'     grid's choice is kept
+#'   - `bayes_error`: Character, why, when `bayes_failed` is TRUE; NULL
+#'     otherwise
 #'   - `error`: Character, present only when the grid failed, in which case
 #'     `tune_results` and `best_params` are NULL. When every model failed it
 #'     carries the most frequent distinct error note from `.notes`.
@@ -330,6 +335,7 @@ tune_warmstart_bayes <- function(workflow,
 
   tune_results <- grid_result$result
   bayes_failed <- FALSE
+  bayes_error  <- NULL
 
   ## Every model failed: tune_grid() returns rather than erroring, with the
   ## reason only in .notes. Stop here with that reason, as
@@ -372,14 +378,21 @@ tune_warmstart_bayes <- function(workflow,
       capture_conditions = TRUE
     )
 
-    ## If Bayes fails, fall back to grid results
-    if (is.null(bayes_result$error)) {
+    ## If the search fails, or returns without an iteration past the grid,
+    ## fall back to the grid results and say why (#209).
+    if (!is.null(bayes_result$error)) {
 
-      tune_results <- bayes_result$result
+      bayes_failed <- TRUE
+      bayes_error  <- condition_summary(bayes_result$error)
+
+    } else if (!bayes_iterations_ran(bayes_result$result)) {
+
+      bayes_failed <- TRUE
+      bayes_error  <- "the search produced no results"
 
     } else {
 
-      bayes_failed <- TRUE
+      tune_results <- bayes_result$result
 
     }
 
@@ -394,7 +407,27 @@ tune_warmstart_bayes <- function(workflow,
     best_params   = final_best,
     fallback_used = fallback_used,
     grid_points   = nrow(initial_grid),
-    bayes_failed  = bayes_failed
+    bayes_failed  = bayes_failed,
+    bayes_error   = bayes_error
   )
+
+}
+
+
+#' Whether a Bayesian search produced any iteration past its grid
+#'
+#' tune_bayes() returns, rather than erroring, when the search loop errors
+#' (its on.exit() hands back the results so far) or when every candidate fails
+#' in every fold (it drops such a candidate without a note). Either way the
+#' result holds only the initial grid, as `.iter` 0, so a search that kept
+#' nothing is told apart by having no row with `.iter` above 0.
+#'
+#' @param results A `tune_results` object from [tune::tune_bayes()].
+#' @return Logical(1).
+#' @keywords internal
+#' @noRd
+bayes_iterations_ran <- function(results) {
+
+  ".iter" %in% names(results) && any(results$.iter > 0, na.rm = TRUE)
 
 }

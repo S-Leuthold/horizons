@@ -489,27 +489,33 @@ describe("evaluate_single_config() - prune gate at bayesian_iter = 0 (#38)", {
 
 
 ## =========================================================================
-## mtry ceiling — the predictor count comes from the recipe's roles
+## A Bayesian search that fails keeps the grid's choice, and the row says so
+## (#209)
 ## =========================================================================
 
 describe("evaluate_single_config() - a Bayesian search that fails (#209)", {
+
+  setup <- make_eval_setup()
+
+  run <- function(grid_size) {
+    suppressWarnings(evaluate_single_config(
+      config_row    = make_eval_config(),
+      split         = setup$split,
+      cv_folds      = setup$folds,
+      role_map      = setup$role_map,
+      grid_size     = grid_size,
+      bayesian_iter = 2,
+      prune         = FALSE,
+      seed          = 42L
+    ))
+  }
 
   it("keeps the grid's choice and records on the row that the search failed", {
 
     ## A grid of one gives tune_bayes() a single initial point; it needs two,
     ## so the search aborts every time. configure() refuses this combination,
     ## but the unit takes its sizes directly.
-    setup  <- make_eval_setup()
-    result <- suppressWarnings(evaluate_single_config(
-      config_row    = make_eval_config(),
-      split         = setup$split,
-      cv_folds      = setup$folds,
-      role_map      = setup$role_map,
-      grid_size     = 1,
-      bayesian_iter = 2,
-      prune         = FALSE,
-      seed          = 42L
-    ))
+    result <- run(grid_size = 1)
 
     expect_equal(result$status, "success")
     expect_true(any(grepl(
@@ -519,7 +525,30 @@ describe("evaluate_single_config() - a Bayesian search that fails (#209)", {
 
   })
 
+  it("records it when the search returns without an iteration past the grid", {
+
+    ## tune drops a candidate that fails in every fold, as this one does, and
+    ## returns rather than erroring: the result holds only the grid.
+    local_mocked_bindings(
+      more_results = function(...) simpleError("All models failed for: x"),
+      .package     = "tune"
+    )
+
+    result <- run(grid_size = 2)
+
+    expect_equal(result$status, "success")
+    expect_true(any(grepl(
+      "The Bayesian search produced no results, so the hyperparameters were chosen from the grid alone.",
+      result$warnings[[1]], fixed = TRUE
+    )))
+
+  })
+
 })
+
+## =========================================================================
+## mtry ceiling — the predictor count comes from the recipe's roles
+## =========================================================================
 
 describe("the mtry upper bound", {
 
