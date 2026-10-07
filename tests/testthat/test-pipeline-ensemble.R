@@ -724,15 +724,12 @@ describe("predict.horizons_ensemble() - trimmed members (#77)", {
 })
 
 ## =========================================================================
-## predict.horizons_ensemble() — a malformed ensemble is diagnosed as such
+## predict.horizons_ensemble() — an ensemble with no members
 ## =========================================================================
-## The member-set gate runs before every step that reads the member set, so
-## an ensemble with no members reports the missing member set rather than a
-## failure further down that the empty set caused.
 
-describe("predict.horizons_ensemble() - member-set gate order", {
+describe("predict.horizons_ensemble() - no member set", {
 
-  it("reports the missing member set before any step reads it", {
+  it("aborts naming the missing member set when the ensemble has no weights", {
 
     test_set <- ens_test_set()
     ens      <- ens_built("weighted")
