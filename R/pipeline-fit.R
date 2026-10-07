@@ -438,7 +438,7 @@ fit <- function(x,
   ## data, so the same rows are dropped here before the comparison. They are
   ## the rows evaluate() recorded, not a fresh trim: fences recomputed here
   ## could fall on another set. An evaluation without the record (no trim
-  ## requested, or evaluated before it existed) trimmed nothing.
+  ## requested) trimmed nothing.
   trimmed_ids   <- x$evaluation$response_trim$trimmed_ids %||% character(0)
   is_trimmed    <- modelled$data[[id_col]] %in% trimmed_ids
   modelled_rows <- if (length(trimmed_ids) > 0) {
@@ -485,16 +485,6 @@ fit <- function(x,
   }
 
   split_F$data <- modelled_rows
-
-  ## Rows an earlier version's validate() removed on whole-table fences are
-  ## gone from both parts, so this fit's test metrics exclude them too.
-  legacy_removed <- legacy_response_removals(x)
-
-  if (length(legacy_removed) > 0) {
-
-    warn_legacy_response_removals(legacy_removed, "fit")
-
-  }
 
   train_F <- rsample::training(split_F)
   test_F  <- rsample::testing(split_F)
@@ -672,7 +662,7 @@ fit <- function(x,
 
     }
 
-    render_response_trim(x$evaluation$response_trim, legacy_removed)
+    render_response_trim(x$evaluation$response_trim)
 
     ## The calibration set UQ and AD share, named for whichever it serves;
     ## with AD alone it went unreported. Both flags are FALSE here when the

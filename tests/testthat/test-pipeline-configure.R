@@ -1125,36 +1125,6 @@ describe("configure() and the object contract", {
   })
 
 
-  test_that("configure() warns when rows were removed as response outliers of another outcome", {
-
-    ## Arrange — a clay configuration after validate() removed one row as a
-    ## clay response outlier, one as both, and one as a spectral outlier
-    fx  <- make_select_fixture(n_pool = 40)
-    obj <- quiet_configure(fx$pool, outcome = "clay")
-
-    obj$validation$outliers["removed_ids"]    <- list(c("P097", "P098", "P099"))
-    obj$validation$outliers["removed"]        <- list(TRUE)
-    obj$validation$outliers["removal_detail"] <- list(tibble::tibble(
-      sample_id          = c("P097", "P098", "P099"),
-      reason             = c("response", "both", "spectral"),
-      outcome            = c("clay", "clay", NA_character_),
-      spectral_threshold = c(NA, 0.975, 0.975),
-      response_threshold = c(1.5, 1.5, NA)
-    ))
-
-    ## Act
-    to_oc   <- testthat::capture_warnings(utils::capture.output(configure(obj, outcome = "oc")))
-    to_clay <- testthat::capture_warnings(utils::capture.output(configure(obj, outcome = "clay")))
-
-    ## Assert — only the response-only row counts: the spectral removal does
-    ## not depend on the outcome, and the "both" row would have gone as a
-    ## spectral outlier anyway. The same outcome is silent.
-    expect_true(any(grepl("1 row\\(s\\) were removed .*'clay' \\(1\\).*'oc'", to_oc)))
-    expect_false(any(grepl("response outliers", to_clay)))
-
-  })
-
-
   test_that("configure() warns when a selection was drawn for other properties", {
 
     ## Arrange — a select_training() record drawn for clay only

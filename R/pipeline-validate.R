@@ -64,10 +64,7 @@
 #'   object. `"response"` removes nothing here: it asks `evaluate()` (and
 #'   `fit()`'s cold start) to trim, from the training partition only, the
 #'   training rows outside Tukey fences computed on that partition's labels,
-#'   with `response_threshold` as the multiplier. `TRUE` does both. Objects
-#'   validated by versions before this contract had their response outliers
-#'   removed here, on whole-table fences; they still evaluate, with a
-#'   warning that their test metrics exclude those rows.
+#'   with `response_threshold` as the multiplier. `TRUE` does both.
 #' @param spectral_method `character(1)`. Spectral outlier detection method.
 #'   Currently only `"mahalanobis"`. Default: `"mahalanobis"`.
 #' @param spectral_threshold `numeric(1)`. Chi-squared quantile for
@@ -88,15 +85,9 @@
 #'     when `remove_outliers` is `TRUE` or `"response"` (a list of the
 #'     `outcome`, the `method` and the `threshold`), otherwise `NULL`; and
 #'     the record of every removal so far (`removed_ids`, `removed`, and
-#'     `removal_detail`, one row per removed sample with `sample_id`,
-#'     `reason`, the `outcome` whose fences flagged it, and the
-#'     `spectral_threshold` and `response_threshold` in force). This version
-#'     removes spectral outliers only, so its rows have `reason`
-#'     `"spectral"`, an `NA` outcome and an `NA` `response_threshold`;
-#'     `"response"` and `"both"` rows, with the outcome and threshold filled
-#'     in, are records carried from an earlier version that removed rows on
-#'     their labels (a `"both"` row was a spectral outlier too, and would
-#'     have gone anyway).
+#'     `removal_detail`, one row per removed sample with `sample_id`, the
+#'     `reason` it was removed for, and the `spectral_threshold` in force).
+#'     Only spectral outliers are removed, so `reason` is `"spectral"`.
 #'   - `validation$timestamp`: when validation ran
 #'
 #' @examples
@@ -526,17 +517,10 @@ validate <- function(x,
     ## validate() records the removal in x$validation$outliers below.
     x <- subset_rows(x, keep = !x$data$analysis$sample_id %in% spectral_outlier_ids)
 
-    ## The detail keeps the columns earlier versions wrote, since the record
-    ## accumulates across versions: a row removed on labels by one of them
-    ## carries its reason ("response" or "both"), outcome and response
-    ## threshold, and configure() warns about those when the outcome changes.
-    ## Rows removed here are spectral, with no outcome.
     removal_detail <- tibble::tibble(
       sample_id          = spectral_outlier_ids,
       reason             = "spectral",
-      outcome            = NA_character_,
-      spectral_threshold = as.numeric(spectral_threshold),
-      response_threshold = NA_real_
+      spectral_threshold = as.numeric(spectral_threshold)
     )
 
     removed_ids <- spectral_outlier_ids

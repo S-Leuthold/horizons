@@ -548,11 +548,11 @@ configure <- function(x,
 
   ## 2.5 Name what the rows carry from an earlier outcome ----------------------
 
-  ## Both describe rows, so both survive a re-configure; neither was chosen
-  ## with this outcome in mind. Warn rather than abort: the object is usable,
-  ## and starting again from an earlier object is the user's call.
+  ## The selection record describes rows, so it survives a re-configure, but
+  ## it was not drawn with this outcome in mind. Warn rather than abort: the
+  ## object is usable, and starting again from an earlier object is the
+  ## user's call.
 
-  warn_stale_removals(x, outcome_var)
   warn_selection_properties(x, outcome_var)
 
   ## ---------------------------------------------------------------------------
@@ -1122,57 +1122,6 @@ check_training_outcome_variance <- function(train_values, held_out, outcome_col,
 format_outcome_range <- function(outcome_range) {
 
   paste0("c(", paste(as.character(outcome_range), collapse = ", "), ")")
-
-}
-
-
-#' Warn when rows were removed as response outliers of another outcome
-#'
-#' @description
-#' `validate(remove_outliers = )` records, per removed row, the outcome whose
-#' Tukey fences flagged it. Those rows stay removed across a re-configure, so
-#' an outcome configured afterwards is modelled without rows that were judged
-#' against a different variable. Only `reason == "response"` rows count:
-#' spectral removals do not depend on the outcome, and a `"both"` row would
-#' have been removed as a spectral outlier anyway. Rows recorded before the
-#' `outcome` column existed cannot be attributed and are not counted either.
-#'
-#' @param x `horizons_data`. The object being configured.
-#' @param outcome_var `character(1)`. The outcome being configured.
-#'
-#' @return `NULL`, invisibly. Called for its warning.
-#' @noRd
-
-warn_stale_removals <- function(x, outcome_var) {
-
-  detail <- x$validation$outliers$removal_detail
-
-  if (is.null(detail) || !"outcome" %in% names(detail)) {
-
-    return(invisible(NULL))
-
-  }
-
-  stale <- detail$outcome[detail$reason %in% "response" &
-                          !is.na(detail$outcome) &
-                          detail$outcome != outcome_var]
-
-  if (length(stale) == 0) {
-
-    return(invisible(NULL))
-
-  }
-
-  counts <- table(stale)
-
-  warning(paste0(
-    length(stale), " row(s) were removed by validate() as response outliers of ",
-    paste0("'", names(counts), "' (", as.integer(counts), ")", collapse = ", "),
-    " and stay removed while modelling '", outcome_var, "'. ",
-    "Start from the object before validate() to model them."
-  ), call. = FALSE)
-
-  invisible(NULL)
 
 }
 

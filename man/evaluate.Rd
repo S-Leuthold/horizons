@@ -171,12 +171,6 @@ which case nothing is trimmed and \code{evaluate()} warns). \code{fit()} reuses
 the split and those ids. The CV assessment folds are drawn from the
 trimmed training rows, so the cross-validated metrics (and the ranking
 on them) describe the trimmed population; the test metrics do not.
-
-An object validated by an earlier version, which removed response
-outliers on whole-table fences before any split, still evaluates. Its
-removal record says which rows went on their labels (\code{reason}
-\code{"response"}), and \code{evaluate()} warns, with class
-\code{horizons_response_trim_warning}, that its test metrics exclude them.
 }
 
 \section{When every configuration fails}{

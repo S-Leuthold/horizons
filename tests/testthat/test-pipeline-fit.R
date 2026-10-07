@@ -2178,23 +2178,6 @@ describe("fit() - evaluate()'s response trim (#77)", {
 
   })
 
-  it("warns about an object an earlier version validated, on either path", {
-
-    legacy <- legacy_label_removal(obj, sprintf("S%03d", c(1:4, 31:34)))
-
-    cold_legacy <- seen_by_fit(legacy)
-
-    expect_true(any(vapply(cold_legacy$warnings, inherits, logical(1),
-                           "horizons_response_trim_warning")))
-
-    ev_legacy   <- suppressWarnings(evaluate(legacy, prune = FALSE, verbose = FALSE, seed = 307L))
-    warm_legacy <- seen_by_fit(ev_legacy)
-
-    expect_true(any(vapply(warm_legacy$warnings, inherits, logical(1),
-                           "horizons_response_trim_warning")))
-
-  })
-
 })
 
 

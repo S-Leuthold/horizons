@@ -117,12 +117,6 @@
 #' trimmed training rows, so the cross-validated metrics (and the ranking
 #' on them) describe the trimmed population; the test metrics do not.
 #'
-#' An object validated by an earlier version, which removed response
-#' outliers on whole-table fences before any split, still evaluates. Its
-#' removal record says which rows went on their labels (`reason`
-#' `"response"`), and `evaluate()` warns, with class
-#' `horizons_response_trim_warning`, that its test metrics exclude them.
-#'
 #' @section When every configuration fails:
 #' `best_config` is chosen from the configs that succeeded or, when none did,
 #' from the pruned configs that carry a cross-validated value of `metric`.
@@ -364,16 +358,6 @@ evaluate <- function(x,
                                      id_col = id_column(role_map))
   split   <- trimmed$split
 
-  ## Rows an earlier version removed on whole-table fences are gone before
-  ## any split; say so, since the test metrics are conditional on it.
-  legacy_removed <- legacy_response_removals(x)
-
-  if (length(legacy_removed) > 0) {
-
-    warn_legacy_response_removals(legacy_removed, "evaluate")
-
-  }
-
   train_data <- rsample::training(split)
   test_data  <- rsample::testing(split)
   n_train    <- nrow(train_data)
@@ -532,7 +516,7 @@ evaluate <- function(x,
 
     }
 
-    render_response_trim(trimmed$record, legacy_removed)
+    render_response_trim(trimmed$record)
 
     cat(paste0("\u2502  Tuning: ", cv_folds, "-fold CV (",
                if (cv_drawn$stratified) "stratified" else "unstratified",
@@ -2059,8 +2043,8 @@ id_column <- function(role_map) {
 #' @description
 #' Returns the request `validate(remove_outliers = TRUE or "response")`
 #' recorded in `x$validation$outliers$response_trim`, or `NULL` when there
-#' is none (not requested, cleared by a re-configure, or an object validated
-#' before the request existed). A request recorded for another outcome is
+#' is none (not requested, or cleared by a re-configure). A request recorded
+#' for another outcome is
 #' refused rather than applied to this one's labels: `configure()` clears
 #' the request, so that only happens to an object edited by hand.
 #'
@@ -2201,68 +2185,14 @@ trim_training_responses <- function(split, outcome_col, trim, id_col) {
 
 }
 
-#' Rows an earlier validate() removed on their labels
-#'
-#' @description
-#' Versions before #77 removed response outliers in `validate()`, on fences
-#' over the whole table, before any split. Their removal record carries
-#' those rows with `reason` `"response"`, which this version never writes,
-#' so its presence identifies an object validated the old way. A `"both"`
-#' row is not counted: that version wrote it only under
-#' `remove_outliers = TRUE`, where the row went as a spectral outlier
-#' whatever its label, the rule `configure()`'s stale-removal warning
-#' applies. Records written before the `reason` column existed cannot be
-#' read this way and count as none.
-#'
-#' @param x A `horizons_data`.
-#' @return Character. The ids removed on their labels, possibly empty.
-#' @keywords internal
-#' @noRd
-legacy_response_removals <- function(x) {
-
-  detail <- x$validation$outliers$removal_detail
-
-  if (is.null(detail) || !all(c("sample_id", "reason") %in% names(detail))) {
-
-    return(character(0))
-
-  }
-
-  as.character(detail$sample_id[detail$reason %in% "response"])
-
-}
-
-#' Warn that an earlier validate() removed rows on their labels
-#'
-#' @param ids Character. The ids from [legacy_response_removals()].
-#' @param verb Character. The verb whose test metrics are affected.
-#' @return `NULL`, invisibly; warns with class
-#'   `horizons_response_trim_warning`.
-#' @keywords internal
-#' @noRd
-warn_legacy_response_removals <- function(ids, verb) {
-
-  n_rows <- length(ids)
-
-  cli::cli_warn(c(
-    "!" = "{n_rows} row{?s} {?was/were} removed as response outliers by an earlier {.fn validate}, before any train/test split existed.",
-    "i" = "That version drew its fences over the whole table, so the rows {.fn {verb}} holds out as its test set lost their extremes by their own labels. Its test metrics describe the table without {cli::qty(n_rows)}{?that row/those rows}, and are optimistic for samples like {cli::qty(n_rows)}{?it/them}.",
-    "i" = "The rows cannot be restored to this object. To score on untrimmed test rows, start from the object before that {.fn validate} and run {.code validate(remove_outliers = \"response\")} again, which now trims the training partition only."
-  ), class = "horizons_response_trim_warning")
-
-  invisible(NULL)
-
-}
-
 #' Print the response-trim lines of a console tree
 #'
 #' @param trim The record from [trim_training_responses()], or `NULL`.
-#' @param legacy_removed Character. Ids from [legacy_response_removals()].
-#' @return `NULL`, invisibly; prints tree lines, or nothing when there is
-#'   neither a trim nor a legacy removal.
+#' @return `NULL`, invisibly; prints tree lines, or nothing when there is no
+#'   trim.
 #' @keywords internal
 #' @noRd
-render_response_trim <- function(trim, legacy_removed = character(0)) {
+render_response_trim <- function(trim) {
 
   if (!is.null(trim) && is.na(trim$skipped)) {
 
@@ -2279,15 +2209,6 @@ render_response_trim <- function(trim, legacy_removed = character(0)) {
 
     cat(paste0("\u2502  ", cli::col_yellow(
       "Response outliers: trim requested, but no fences on the training partition; nothing trimmed"
-    ), "\n"))
-
-  }
-
-  if (length(legacy_removed) > 0) {
-
-    cat(paste0("\u2502  ", cli::col_yellow(
-      "Response outliers: ", length(legacy_removed),
-      " rows removed by an earlier validate() before the split; test metrics exclude them"
     ), "\n"))
 
   }
