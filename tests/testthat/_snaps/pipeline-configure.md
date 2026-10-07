@@ -20,7 +20,7 @@
       │  ├─ Outcome: SOC
       │  ├─ Models: rf, cubist
       │  ├─ Tuning: 5-fold CV, grid = 10
-      │  ├─ Recipe: SG window 9 (9 cm⁻¹)
+      │  ├─ Recipe: SG window 9 (36 cm⁻¹)
       │  └─ Configs: 2 total
       │
     Code
@@ -30,7 +30,7 @@
       │  ├─ Outcome: SOC
       │  ├─ Models: rf, cubist, plsr
       │  ├─ Tuning: 5-fold CV, grid = 10
-      │  ├─ Recipe: SG window 11 (11 cm⁻¹)
+      │  ├─ Recipe: SG window 11 (44 cm⁻¹)
       │  └─ Configs: 3 total
       │
     Code
@@ -40,7 +40,7 @@
       │  ├─ Outcome: SOC
       │  ├─ Models: rf, cubist, plsr
       │  ├─ Tuning: 5-fold CV, grid = 10
-      │  ├─ Recipe: SG window 9 (9 cm⁻¹), PCA threshold 0.9
+      │  ├─ Recipe: SG window 9 (36 cm⁻¹), PCA threshold 0.9
       │  └─ Configs: 3 total
       │
 

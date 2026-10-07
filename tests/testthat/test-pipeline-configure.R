@@ -766,7 +766,15 @@ describe("configure() CLI output", {
 
     hd <- make_single_response_hd()
 
-    ## The window's width in cm-1 is read from the fixture's axis, 1 cm-1 apart.
+    ## The window's width in cm-1 is read from the axis. The fixture's
+    ## predictors are 1 cm-1 apart, where the width equals the window in
+    ## points, so they are renamed 4 cm-1 apart and the printed width shows
+    ## the conversion.
+    old <- c("600", "601", "602")
+    new <- paste0("wn_", c(600, 604, 608))
+    names(hd$data$analysis)[match(old, names(hd$data$analysis))] <- new
+    hd$data$role_map$variable[match(old, hd$data$role_map$variable)] <- new
+
     expect_snapshot({
       result <- configure(hd, models = c("rf", "cubist"))
       result <- configure(hd, sg_window = 11L)
