@@ -2,6 +2,8 @@
 
 ## Changes
 
+* The covariate API is removed (#134). No verb ever gave a column the `covariate` role, so it could be reached only by editing the role map by hand. `configure()` loses `expand_covariates` and `cov_fusion`, `config$configs` its `covariates` column and `config$expansion` its covariate entries, and `data$n_covariates` goes; `build_recipe()`, `predict()`, `print()`, `summary()` and `evaluate()`'s checkpoint fingerprint no longer handle covariates. Config ids change, so a checkpoint directory written by 0.10.0 is evaluated again rather than resumed. A `covariate` role, and an object whose `config$configs` still has a `covariates` column, are refused with class `horizons_validation_error`: give the column the `meta` role, or re-run `configure()` and the verbs after it.
+* Checkpoint stores, run manifests and records written before 0.10.0 are evaluated again, not resumed (#201). `evaluate()` no longer reads the single-file `eval_checkpoint.rds`; a checkpoint row that does not record the training-data fingerprint and every setting the run records is re-evaluated instead of resumed with a warning; `monitor_evaluate()` refuses a manifest written by another version; and `validate()`'s `removal_detail` drops its always-`NA` `outcome` and `response_threshold` columns.
 * `validate_horizons_fit()` checks the type of every column `fit()` writes to `models$results`, where the column is present, and names each column of the wrong type ("degraded is integer, not logical") (#203).
 * `parse_ids()` refuses an evaluated, fitted or ensembled object. It rewrites `sample_id`, and the stored splits and models are keyed to it (#135).
 * Each class is checked against everything it promises (#129). An evaluated object is checked against the base data contract as well as its evaluation, and an ensemble against its fitted models, evaluation and data. `ensemble()` checks the whole fitted object before it fits anything, as `evaluate()` and `fit()` already did. Two rules are new: the column with the `id` role must be `sample_id`, and `evaluation$results` must have exactly one row per configuration in `config$configs`. Every validation failure now aborts with class `horizons_validation_error`, including the checks that run first, which used to abort without it.
@@ -13,6 +15,7 @@
 
 ## Bug fixes
 
+* `evaluate()` no longer refuses to resume a checkpoint written on the same data under another locale. The check compared a hash of the sample ids sorted in the session's collation; it now compares the recorded data fields (#213).
 * `summary()` no longer closes the Data tree twice for an object with no outcome (#205).
 * `step_select_correlation()` errors at `bake()` when new data lacks a wavenumber it selected, as `step_select_cars()` and `step_select_boruta()` do. It returned the data without its selected columns (#200).
 * `print()` and `summary()` of a fitted object report the member `fit()` selected on cross-validation (`models$best_config`) and its test metrics, as `fit()`'s console does. They reported the member with the lowest test RMSE, a best-of-N on the held-out rows that could name a different configuration (#136).
