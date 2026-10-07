@@ -233,7 +233,7 @@ describe("handle_results()", {
       handle_results(
         safe_result,
         error_title = "Training failed",
-        error_hints = c("Reduce grid size", "Try fewer covariates")
+        error_hints = c("Reduce grid size", "Try fewer models")
       ),
       "Training failed"
     )

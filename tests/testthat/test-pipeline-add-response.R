@@ -38,7 +38,6 @@ make_test_hd <- function(sample_ids = c("S001", "S002", "S003")) {
       role_map     = role_map,
       n_rows       = n,
       n_predictors = 2,
-      n_covariates = 0,
       n_responses  = 0
     ),
     provenance = list(
@@ -327,7 +326,6 @@ test_that("add_response() errors on duplicate keys in horizons (pre-average)", {
       role_map     = role_map,
       n_rows       = 3,
       n_predictors = 2,
-      n_covariates = 0,
       n_responses  = 0
     ),
     provenance = list(spectra_source = "test", spectra_type = "opus",

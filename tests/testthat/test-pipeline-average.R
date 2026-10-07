@@ -164,8 +164,7 @@ make_test_hd_average <- function(n_samples      = 3,
       analysis     = analysis,
       role_map     = role_map,
       n_rows       = n_total,
-      n_predictors = n_wavelengths,
-      n_covariates = 0
+      n_predictors = n_wavelengths
     ),
     provenance = list(
       spectra_source   = "test",

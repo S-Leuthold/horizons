@@ -109,8 +109,7 @@ make_failure_config <- function(model) {
     model             = model,
     transformation    = "none",
     preprocessing     = "raw",
-    feature_selection = "none",
-    covariates        = NA_character_
+    feature_selection = "none"
   )
 
 }

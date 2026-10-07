@@ -41,8 +41,7 @@ make_fit_object <- function(n = 60, n_wn = 10, n_configs = 2, seed = 42,
     model             = models[seq_len(n_configs)],
     transformation    = "none",
     preprocessing     = "raw",
-    feature_selection = "none",
-    covariates        = NA_character_
+    feature_selection = "none"
   )
 
   ## Build horizons_data-like structure; downstream slots in the
@@ -55,7 +54,6 @@ make_fit_object <- function(n = 60, n_wn = 10, n_configs = 2, seed = 42,
       role_map     = roles,
       n_rows       = nrow(df),
       n_predictors = n_wn,
-      n_covariates = 0L,
       ## SOC carries role "outcome" below, not "response" — those are
       ## distinct roles (n_responses counts role == "response", the sibling
       ## responses add_response()/select_training() can carry alongside the

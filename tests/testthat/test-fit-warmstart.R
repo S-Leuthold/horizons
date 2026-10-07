@@ -305,8 +305,7 @@ make_tune_setup <- function(n = 40, n_wn = 10, seed = 42) {
     model             = "rf",
     transformation    = "none",
     preprocessing     = "raw",
-    feature_selection = "none",
-    covariates        = NA_character_
+    feature_selection = "none"
   )
 
   recipe    <- build_recipe(config, train, role_map)

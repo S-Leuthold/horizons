@@ -127,8 +127,7 @@ make_uq_setup <- function(n_train = 60, n_calib = 40, n_wn = 10, seed = 42,
   ## --- Build and fit a simple workflow ---
   config <- tibble::tibble(
     config_id = "uq_test", model = "rf", transformation = "none",
-    preprocessing = "raw", feature_selection = "none",
-    covariates = NA_character_
+    preprocessing = "raw", feature_selection = "none"
   )
 
   recipe <- edit_recipe(build_recipe(config, train_data, role_map))

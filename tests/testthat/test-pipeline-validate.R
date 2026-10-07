@@ -96,8 +96,7 @@ make_configured_hd <- function(n_samples      = 100L,
       model             = "rf",
       transformation    = "none",
       preprocessing     = "raw",
-      feature_selection = "none",
-      covariates        = NA_character_
+      feature_selection = "none"
     )
 
   } else {
@@ -115,7 +114,6 @@ make_configured_hd <- function(n_samples      = 100L,
       role_map     = role_map,
       n_rows       = n_samples,
       n_predictors = n_predictors,
-      n_covariates = 0L,
       n_responses  = if (has_outcome) 0L else 0L
     ),
     provenance = list(
@@ -618,8 +616,7 @@ describe("validate() cubist feasibility check (P010)", {
       model             = c("cubist", "rf"),
       transformation    = "none",
       preprocessing     = "raw",
-      feature_selection = "none",
-      covariates        = NA_character_
+      feature_selection = "none"
     )
 
     local_mocked_bindings(CUBIST_MAX_CELLS = 100, .package = "horizons")

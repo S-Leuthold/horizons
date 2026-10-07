@@ -8,7 +8,6 @@
 
 #' Build a minimal horizons_data object ready for evaluate()
 make_eval_object <- function(n = 40, n_wn = 10, n_configs = 2,
-                             covariates = NULL,
                              add_validation = TRUE) {
 
   set.seed(42)
@@ -30,16 +29,6 @@ make_eval_object <- function(n = 40, n_wn = 10, n_configs = 2,
     role     = c("id", rep("predictor", n_wn), "outcome")
   )
 
-  ## Optionally add covariates
-  if (!is.null(covariates)) {
-
-    for (cov in covariates) {
-      df[[cov]] <- runif(n, 0, 100)
-      roles <- rbind(roles, tibble::tibble(variable = cov, role = "covariate"))
-    }
-
-  }
-
   ## Build configs
   models <- rep(c("rf", "cubist"), length.out = n_configs)
   configs <- tibble::tibble(
@@ -47,8 +36,7 @@ make_eval_object <- function(n = 40, n_wn = 10, n_configs = 2,
     model             = models,
     transformation    = "none",
     preprocessing     = "raw",
-    feature_selection = "none",
-    covariates        = NA_character_
+    feature_selection = "none"
   )
 
   ## Build horizons_data-like structure
@@ -61,7 +49,6 @@ make_eval_object <- function(n = 40, n_wn = 10, n_configs = 2,
       role_map     = roles,
       n_rows       = nrow(df),
       n_predictors = n_wn,
-      n_covariates = 0L,
       ## SOC carries role "outcome" above, not "response" — those are
       ## distinct roles (n_responses counts role == "response", the sibling
       ## responses add_response()/select_training() can carry alongside the

@@ -44,7 +44,6 @@ make_single_response_hd <- function() {
       role_map     = role_map,
       n_rows       = 3L,
       n_predictors = 3L,
-      n_covariates = 0L,
       n_responses  = 1L
     ),
     provenance = list(
@@ -100,7 +99,6 @@ make_multi_response_hd <- function() {
       role_map     = role_map,
       n_rows       = 3L,
       n_predictors = 3L,
-      n_covariates = 0L,
       n_responses  = 2L
     ),
     provenance = list(
@@ -169,7 +167,7 @@ describe("configure() validation", {
     hd <- list(
       data = list(
         analysis = analysis, role_map = role_map,
-        n_rows = 2L, n_predictors = 1L, n_covariates = 0L, n_responses = 0L
+        n_rows = 2L, n_predictors = 1L, n_responses = 0L
       ),
       provenance = list(spectra_source = "test", spectra_type = "mir",
                         created = Sys.time(),
