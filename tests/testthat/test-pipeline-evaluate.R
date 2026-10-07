@@ -1446,7 +1446,7 @@ describe("eval_data_fingerprint()", {
     fp2 <- eval_data_fingerprint(df_xy[c(2, 3, 1), ], roles_xy)
 
     expect_named(fp1$data_fields, c("outcome", "ids", "roles", "outcome_values",
-                                    "predictors", "covariates"))
+                                    "predictors"))
     expect_identical(fp1$data_fields$outcome, "y")
     expect_identical(fp1$data_fields, fp2$data_fields)
 

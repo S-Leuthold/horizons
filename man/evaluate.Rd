@@ -55,8 +55,8 @@ written to \verb{<output_dir>/checkpoints/<config_id>.rds} as it finishes, and
 a rerun into the same directory resumes from those files. Required when
 configs are dispatched to workers. A resumed row must have been scored on
 this run's training data (the outcome, the sample ids, which columns hold
-the \code{id}, \code{outcome}, \code{predictor} and \code{covariate} roles, and the outcome,
-predictor and covariate values) and tuned with this run's settings
+the \code{id}, \code{outcome} and \code{predictor} roles, and the outcome and predictor
+values) and tuned with this run's settings
 (\code{cv_folds}, \code{grid_size}, \code{bayesian_iter}, \code{prune}, \code{prune_threshold}
 when pruning, \code{seed}, and \code{configure()}'s \code{sg_window}, \code{pca_threshold}
 and \code{outcome_range}) and this run's response trim

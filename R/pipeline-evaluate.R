@@ -39,8 +39,8 @@
 #'   a rerun into the same directory resumes from those files. Required when
 #'   configs are dispatched to workers. A resumed row must have been scored on
 #'   this run's training data (the outcome, the sample ids, which columns hold
-#'   the `id`, `outcome`, `predictor` and `covariate` roles, and the outcome,
-#'   predictor and covariate values) and tuned with this run's settings
+#'   the `id`, `outcome` and `predictor` roles, and the outcome and predictor
+#'   values) and tuned with this run's settings
 #'   (`cv_folds`, `grid_size`, `bayesian_iter`, `prune`, `prune_threshold`
 #'   when pruning, `seed`, and `configure()`'s `sg_window`, `pca_threshold`
 #'   and `outcome_range`) and this run's response trim
@@ -638,14 +638,8 @@ evaluate <- function(x,
 
       ## Pretty config description — always show full pipeline
       model_name  <- MODEL_DISPLAY_NAMES[cfg$model] %||% cfg$model
-      desc_parts  <- c(model_name, cfg$transformation, cfg$preprocessing,
-                       cfg$feature_selection)
-
-      if (!is.na(cfg$covariates)) {
-        desc_parts <- c(desc_parts, paste0("+", cfg$covariates))
-      }
-
-      config_desc <- paste(desc_parts, collapse = " + ")
+      config_desc <- paste(model_name, cfg$transformation, cfg$preprocessing,
+                           cfg$feature_selection, sep = " + ")
       is_last     <- i == nrow(configs)
       branch      <- if (is_last) "\u2514\u2500" else "\u251C\u2500"
       cont        <- if (is_last) "   " else "\u2502  "
@@ -1698,8 +1692,8 @@ abort_checkpoint_settings_mismatch <- function(diffs, output_dir, source,
 #' spectra (#64 moved the grid for the same samples) or a rescaled outcome
 #' under the same name resumed stale results silently (#42). `data_fields`
 #' records them by name: the outcome, the sample ids, the role-map rows whose
-#' roles shape a row (`id`, `outcome`, `predictor`, `covariate`), and the
-#' outcome, predictor and covariate values in id order. They are compared
+#' roles shape a row (`id`, `outcome`, `predictor`), and the outcome and
+#' predictor values in id order. They are compared
 #' field by field, like the tuning settings, so a row written before a field
 #' existed is unverified (warned) rather than refused, and a refusal can say
 #' what changed. Each value field hashes column by column, so the cost is one
@@ -1710,11 +1704,11 @@ abort_checkpoint_settings_mismatch <- function(diffs, output_dir, source,
 #' @param train_data Training rows (the analysis half of the split).
 #' @param role_map The object's role map; the `"id"` role names the identifier
 #'   column (falling back to `sample_id`), the `"outcome"` role the response,
-#'   and the `"predictor"` and `"covariate"` roles the value columns hashed.
+#'   and the `"predictor"` role the value columns hashed.
 #' @return List with `data_hash` (character, `NA` when no identifier column is
 #'   available), `data_n_rows` (integer) and `data_fields` (named list of
-#'   character: `outcome`, `ids`, `roles`, `outcome_values`, `predictors`,
-#'   `covariates`; `NULL` when no identifier column is available).
+#'   character: `outcome`, `ids`, `roles`, `outcome_values`, `predictors`;
+#'   `NULL` when no identifier column is available).
 #' @keywords internal
 #' @noRd
 eval_data_fingerprint <- function(train_data, role_map = NULL) {
@@ -1768,13 +1762,12 @@ eval_data_fingerprint <- function(train_data, role_map = NULL) {
   }
 
   ## Only the roles that shape a row's contents. build_recipe() models the
-  ## outcome on the predictors and on covariates (held, then promoted per
-  ## config), and the id names the rows; a sibling `response` becomes
-  ## `response_hold` and `meta` stays `meta`, neither reaching the model. So
-  ## add_response() of another property, or a new meta column, between two
-  ## runs does not refuse a resume.
+  ## outcome on the predictors, and the id names the rows; a sibling
+  ## `response` becomes `response_hold` and `meta` stays `meta`, neither
+  ## reaching the model. So add_response() of another property, or a new meta
+  ## column, between two runs does not refuse a resume.
   roles <- if (has_roles) {
-    shaping <- role_map$role %in% c("id", "outcome", "predictor", "covariate")
+    shaping <- role_map$role %in% c("id", "outcome", "predictor")
     data.frame(variable = as.character(role_map$variable[shaping]),
                role     = as.character(role_map$role[shaping]))
   } else {
@@ -1786,8 +1779,7 @@ eval_data_fingerprint <- function(train_data, role_map = NULL) {
     ids            = digest::digest(ids[by_id], algo = "xxhash64"),
     roles          = digest::digest(roles, algo = "xxhash64"),
     outcome_values = hash_columns(train_data, role_cols("outcome"), by_id),
-    predictors     = hash_columns(train_data, role_cols("predictor"), by_id),
-    covariates     = hash_columns(train_data, role_cols("covariate"), by_id)
+    predictors     = hash_columns(train_data, role_cols("predictor"), by_id)
   )
 
   list(
@@ -1966,10 +1958,9 @@ describe_data_diff <- function(stored, current, differ) {
 
   clauses <- c(
     ids            = "was scored on a different set of training samples.",
-    roles          = "was scored with different id, outcome, predictor or covariate columns (role_map).",
+    roles          = "was scored with different id, outcome or predictor columns (role_map).",
     outcome_values = "was scored on different outcome values for the same samples.",
-    predictors     = "was scored on different predictor values for the same samples (re-standardized or re-processed spectra, for example).",
-    covariates     = "was scored on different covariate values for the same samples."
+    predictors     = "was scored on different predictor values for the same samples (re-standardized or re-processed spectra, for example)."
   )
 
   out <- character(0)

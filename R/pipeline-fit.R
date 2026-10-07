@@ -748,17 +748,9 @@ fit <- function(x,
     cfg <- all_configs[all_configs$config_id == config_id, ]
 
     ## Pretty config description
-    model_name <- MODEL_DISPLAY_NAMES[cfg$model] %||% cfg$model
-    desc_parts <- c(model_name, cfg$transformation, cfg$preprocessing,
-                    cfg$feature_selection)
-
-    if (!is.na(cfg$covariates)) {
-
-      desc_parts <- c(desc_parts, paste0("+", cfg$covariates))
-
-    }
-
-    config_desc <- paste(desc_parts, collapse = " + ")
+    model_name  <- MODEL_DISPLAY_NAMES[cfg$model] %||% cfg$model
+    config_desc <- paste(model_name, cfg$transformation, cfg$preprocessing,
+                         cfg$feature_selection, sep = " + ")
     is_last     <- i == n_best
     branch      <- if (is_last) "\u2514\u2500" else "\u251C\u2500"
     cont        <- if (is_last) "   " else "\u2502  "
