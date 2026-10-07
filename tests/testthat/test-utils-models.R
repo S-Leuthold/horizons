@@ -12,29 +12,7 @@ is_tune_arg <- function(arg) {
 
 describe("define_model_spec()", {
 
-  it("returns a parsnip model_spec for each valid model", {
-
-    for (model in VALID_MODELS) {
-
-      spec <- define_model_spec(model)
-      expect_s3_class(spec, "model_spec")
-
-    }
-
-  })
-
-  it("sets mode to regression for all models", {
-
-    for (model in VALID_MODELS) {
-
-      spec <- define_model_spec(model)
-      expect_equal(spec$mode, "regression")
-
-    }
-
-  })
-
-  it("sets the correct engine for each model", {
+  it("returns a regression model_spec with the correct engine and tune() placeholders for each valid model", {
 
     expected_engines <- list(
       rf          = "ranger",
@@ -48,20 +26,12 @@ describe("define_model_spec()", {
       mlp         = "nnet"
     )
 
-    for (model in names(expected_engines)) {
-
-      spec <- define_model_spec(model)
-      expect_equal(spec$engine, expected_engines[[model]])
-
-    }
-
-  })
-
-  it("includes tune() placeholders in all tunable specs", {
-
     for (model in VALID_MODELS) {
 
       spec <- define_model_spec(model)
+      expect_s3_class(spec, "model_spec")
+      expect_equal(spec$mode, "regression")
+      expect_equal(spec$engine, expected_engines[[model]])
 
       has_tune <- any(vapply(spec$args, is_tune_arg, logical(1)))
       expect_true(has_tune, info = paste("Model", model, "should have tune() params"))
