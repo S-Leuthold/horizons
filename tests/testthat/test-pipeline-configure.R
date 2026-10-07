@@ -203,21 +203,27 @@ describe("configure() validation", {
 
     hd <- make_multi_response_hd()
 
-    expect_error(
-      capture.output(configure(hd)),
-      "Multiple response variables",
-      class = "horizons_configure_error"
-    )
+    ## The condition carries only the header (asserted above); the list of
+    ## responses is printed to the console before it.
+    expect_snapshot(configure(hd), error = TRUE)
 
   })
 
-  test_that("errors when specified outcome doesn't exist", {
+  test_that("errors when specified outcome doesn't exist, matching it case-sensitively", {
 
     hd <- make_multi_response_hd()
 
     expect_error(
       capture.output(configure(hd, outcome = "TotalN")),
       "TotalN.*not found",
+      class = "horizons_configure_error"
+    )
+
+    hd <- make_single_response_hd()
+
+    expect_error(
+      capture.output(configure(hd, outcome = "soc")),
+      "not found",
       class = "horizons_configure_error"
     )
 
@@ -266,18 +272,6 @@ describe("configure() validation", {
     expect_error(
       capture.output(configure(hd, feature_selection = "rfe")),
       "Invalid feature selection",
-      class = "horizons_configure_error"
-    )
-
-  })
-
-  test_that("error messages include both invalid and valid options", {
-
-    hd <- make_single_response_hd()
-
-    expect_error(
-      capture.output(configure(hd, models = "bogus")),
-      "Invalid model",
       class = "horizons_configure_error"
     )
 
@@ -417,42 +411,6 @@ describe("configure() outcome promotion", {
 
   })
 
-  test_that("reconfiguring resets previous outcome to 'response'", {
-
-    hd <- make_multi_response_hd()
-    r1 <- quiet_configure(hd, outcome = "SOC")
-    r2 <- quiet_configure(r1, outcome = "pH")
-
-    soc_role <- r2$data$role_map$role[r2$data$role_map$variable == "SOC"]
-    ph_role  <- r2$data$role_map$role[r2$data$role_map$variable == "pH"]
-
-    expect_equal(soc_role, "response")
-    expect_equal(ph_role, "outcome")
-
-  })
-
-  test_that("outcome appears in role_map exactly once as 'outcome'", {
-
-    hd     <- make_single_response_hd()
-    result <- quiet_configure(hd)
-
-    n_outcome <- sum(result$data$role_map$role == "outcome")
-    expect_equal(n_outcome, 1)
-
-  })
-
-  test_that("case sensitivity: outcome = 'soc' fails if response is 'SOC'", {
-
-    hd <- make_single_response_hd()
-
-    expect_error(
-      capture.output(configure(hd, outcome = "soc")),
-      "not found",
-      class = "horizons_configure_error"
-    )
-
-  })
-
 })
 
 
@@ -473,6 +431,15 @@ describe("configure() config grid", {
 
     ## 2 models x 2 transforms x 2 preproc x 1 fs = 8
     expect_equal(nrow(result$config$configs), 8)
+
+    ## 4 x 2 x 3 x 2 = 48, with the feature_selection axis varied too
+    result <- quiet_configure(hd,
+                              models            = c("rf", "cubist", "plsr", "xgboost"),
+                              transformations   = c("none", "log"),
+                              preprocessing     = c("raw", "snv", "sg"),
+                              feature_selection = c("none", "pca"))
+
+    expect_equal(nrow(result$config$configs), 48)
 
   })
 
@@ -538,19 +505,6 @@ describe("configure() config grid", {
                               feature_selection = "none")
 
     expect_equal(nrow(result$config$configs), 1)
-
-  })
-
-  test_that("large grid: 4 x 2 x 3 x 2 = 48 configs", {
-
-    hd     <- make_single_response_hd()
-    result <- quiet_configure(hd,
-                              models            = c("rf", "cubist", "plsr", "xgboost"),
-                              transformations   = c("none", "log"),
-                              preprocessing     = c("raw", "snv", "sg"),
-                              feature_selection = c("none", "pca"))
-
-    expect_equal(nrow(result$config$configs), 48)
 
   })
 
@@ -808,34 +762,16 @@ describe("configure() reconfiguration", {
 
 describe("configure() CLI output", {
 
-  test_that("output contains outcome name, model count, and config count", {
-
-    hd     <- make_single_response_hd()
-    output <- capture.output(
-      suppressWarnings(result <- configure(hd, models = c("rf", "cubist")))
-    )
-
-    combined <- paste(output, collapse = "\n")
-    expect_true(grepl("SOC", combined))
-    expect_true(grepl("rf", combined))
-    expect_true(grepl("cubist", combined))
-    expect_true(grepl("2", combined))
-
-  })
-
-  test_that("prints the window with its width in cm-1, and the PCA threshold when PCA runs", {
+  test_that("prints the outcome, models, tuning, recipe settings and config count, with the PCA threshold only when PCA runs", {
 
     hd <- make_single_response_hd()
 
-    plain <- paste(capture.output(suppressWarnings(configure(hd, sg_window = 11L))),
-                   collapse = "\n")
-    pca   <- paste(capture.output(suppressWarnings(
-      configure(hd, feature_selection = "pca", pca_threshold = 0.9)
-    )), collapse = "\n")
-
-    expect_match(plain, "SG window 11 (11 cm", fixed = TRUE)
-    expect_no_match(plain, "PCA threshold")
-    expect_match(pca, "PCA threshold 0.9", fixed = TRUE)
+    ## The window's width in cm-1 is read from the fixture's axis, 1 cm-1 apart.
+    expect_snapshot({
+      result <- configure(hd, models = c("rf", "cubist"))
+      result <- configure(hd, sg_window = 11L)
+      result <- configure(hd, feature_selection = "pca", pca_threshold = 0.9)
+    })
 
   })
 
@@ -847,19 +783,6 @@ describe("configure() CLI output", {
 ## ===========================================================================
 
 describe("configure() edge cases", {
-
-  test_that("single model, single everything -> 1 config", {
-
-    hd     <- make_single_response_hd()
-    result <- quiet_configure(hd,
-                              models            = "rf",
-                              transformations   = "none",
-                              preprocessing     = "raw",
-                              feature_selection = "none")
-
-    expect_equal(result$config$n_configs, 1)
-
-  })
 
   test_that("all defaults (only outcome specified) -> 3 configs (rf, cubist, plsr)", {
 
@@ -907,8 +830,9 @@ describe("configure() edge cases", {
 
 describe("configure() and the object contract", {
 
-  test_that("configure() recounts n_responses after promoting the outcome", {
+  test_that("configure() recounts n_responses after promoting the outcome, so the object survives the validator the next verb runs", {
 
+    ## configure() |> standardize() is the chain that used to abort.
     ## Arrange — two responses, one of which is about to become the outcome
     fx <- make_select_fixture(n_pool = 40)
 
@@ -924,17 +848,6 @@ describe("configure() and the object contract", {
       result$data$n_responses,
       sum(result$data$role_map$role == "response")
     )
-    expect_no_error(validate_horizons_data(result))
-
-  })
-
-
-  test_that("a configured object survives the validator the next verb runs", {
-
-    ## configure() |> standardize() is the chain that used to abort
-    fx     <- make_select_fixture(n_pool = 40)
-    result <- quiet_configure(fx$pool, outcome = "clay")
-
     expect_no_error(validate_horizons_data(result))
 
     ## And again after the outcome moves
@@ -1147,7 +1060,7 @@ describe("configure() and the object contract", {
   })
 
 
-  test_that("configure() catches a corrupt input the verb itself never checks (#24)", {
+  test_that("configure() catches a corrupt input the verb itself never checks: an increasing axis or duplicate sample ids (#24)", {
 
     ## Arrange — an increasing wavenumber axis. configure() only touches
     ## role_map's outcome/response roles and the config$ fields; it never
@@ -1166,11 +1079,6 @@ describe("configure() and the object contract", {
       regexp = "strictly decreasing",
       class  = "horizons_validation_error"
     )
-
-  })
-
-
-  test_that("configure() aborts on duplicate sample ids that survived to it (#24)", {
 
     ## Arrange — replicate scans that never went through average(). Duplicate
     ## sample_id is a legitimate, warned-about state before average() (see
