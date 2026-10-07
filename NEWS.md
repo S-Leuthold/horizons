@@ -2,6 +2,7 @@
 
 ## Changes
 
+* `validate_horizons_fit()` checks the type of every column `fit()` writes to `models$results`, where the column is present, and names each column of the wrong type ("degraded is integer, not logical") (#203).
 * `parse_ids()` refuses an evaluated, fitted or ensembled object. It rewrites `sample_id`, and the stored splits and models are keyed to it (#135).
 * Each class is checked against everything it promises (#129). An evaluated object is checked against the base data contract as well as its evaluation, and an ensemble against its fitted models, evaluation and data. `ensemble()` checks the whole fitted object before it fits anything, as `evaluate()` and `fit()` already did. Two rules are new: the column with the `id` role must be `sample_id`, and `evaluation$results` must have exactly one row per configuration in `config$configs`. Every validation failure now aborts with class `horizons_validation_error`, including the checks that run first, which used to abort without it.
 * `select_training()` validates the targets and the library before drawing. Targets need one row per sample with finite spectra, so replicate scans are averaged first. A library that has been through `configure()` or `validate()` is refused, and the selection record now identifies the targets in `x$selection$targets`: their source, row count and an id hash (#133).
@@ -12,6 +13,7 @@
 
 ## Bug fixes
 
+* `summary()` no longer closes the Data tree twice for an object with no outcome (#205).
 * `step_select_correlation()` errors at `bake()` when new data lacks a wavenumber it selected, as `step_select_cars()` and `step_select_boruta()` do. It returned the data without its selected columns (#200).
 * `print()` and `summary()` of a fitted object report the member `fit()` selected on cross-validation (`models$best_config`) and its test metrics, as `fit()`'s console does. They reported the member with the lowest test RMSE, a best-of-N on the held-out rows that could name a different configuration (#136).
 * `add_response()` refuses an `NA` join key on either side and reports how many there are. Before, an `NA` key on one side was matched to an `NA` key on the other (#139).
