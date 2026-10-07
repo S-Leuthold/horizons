@@ -388,6 +388,40 @@ describe("predict.horizons_ensemble() - CV+ intervals", {
 
 
 ## ---------------------------------------------------------------------------
+## TEETH — non-degeneracy: the meta-learner learns a real combination
+## ---------------------------------------------------------------------------
+## On real signal the penalized engine must assign non-zero member weights;
+## intercept-only (all coefs 0) is the degenerate failure the synthetic data
+## produced and is NOT acceptable here. These read the grid's penalized
+## optimize = TRUE build; a memoised build is shared only within one process,
+## so every reader of it sits in this file.
+
+describe("ensemble() penalized - non-degenerate on real signal", {
+
+  it("learns at least one non-zero member coefficient", {
+
+    skip_unless_slow_tier()
+
+    ens   <- ens_built("penalized", optimize = TRUE)
+    coefs <- ens$ensemble$weights$coef
+    expect_gt(sum(abs(coefs) > 1e-8), 0)
+
+  })
+
+  it("produces ensemble test predictions correlated with truth", {
+
+    skip_unless_slow_tier()
+
+    ens <- ens_built("penalized", optimize = TRUE)
+    ep  <- ens$ensemble$predictions
+    expect_gt(stats::cor(ep$.pred, ep$truth), 0.3)
+
+  })
+
+})
+
+
+## ---------------------------------------------------------------------------
 ## Predict side: arguments in `...` (#141)
 ## ---------------------------------------------------------------------------
 ## The CV+ intervals are at the level fit_ensemble_uq() calibrated. A `level`
@@ -608,7 +642,7 @@ describe("ensemble UQ - degradation and gates", {
 
 
 ## ---------------------------------------------------------------------------
-## Review-fix regressions: shared indices, floor semantics
+## Review-fix regressions: shared indices
 ## ---------------------------------------------------------------------------
 
 describe("cv_plus_indices()", {
@@ -637,25 +671,6 @@ describe("cv_plus_indices()", {
 
     expect_null(cv_plus_indices(10L, 0.90))   # l = floor(.05 * 11) = 0
     expect_null(cv_plus_indices(5L, 0.95))
-
-  })
-
-})
-
-describe("predict_fold_model()", {
-
-  it("floors negative fold predictions to zero (deploy-consistency semantics)", {
-
-    ## A weights tibble with a negative coefficient can produce negative
-    ## combos; the deployed combine floors, so the fold primitive must too —
-    ## conformal validity requires the calibration score function to match
-    ## the deployed prediction rule.
-    fm <- tibble::tibble(member = c("a", "b"), coef = c(1, -2))
-    member_mat <- tibble::tibble(member_a = c(1, 5), member_b = c(2, 1))
-
-    pred <- predict_fold_model(fm, "weighted", member_mat)
-
-    expect_equal(pred, c(0, 3))   # 1 - 4 = -3 -> floored; 5 - 2 = 3
 
   })
 

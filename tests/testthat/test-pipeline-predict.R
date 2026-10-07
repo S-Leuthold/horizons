@@ -147,7 +147,7 @@ describe("predict.horizons_fit() - point predictions", {
 
   new_df <- make_new_spectra()
 
-  it("returns one row per sample with a .pred column", {
+  it("returns one finite .pred per row of new_data, keyed by its sample_id", {
 
     p <- predict(fitted_fixture, new_df, interval = FALSE)
 
@@ -156,20 +156,9 @@ describe("predict.horizons_fit() - point predictions", {
     expect_true(".pred" %in% names(p))
     expect_true("sample_id" %in% names(p))
 
-  })
-
-  it("predictions are finite and on the original (non-negative) scale", {
-
-    p <- predict(fitted_fixture, new_df, interval = FALSE)
-
+    ## The zero floor cannot bind here (these predictions sit near 5);
+    ## test-outcome-range.R forces a negative prediction to test it.
     expect_true(all(is.finite(p$.pred)))
-    expect_true(all(p$.pred >= 0))
-
-  })
-
-  it("preserves sample_id keys from new_data", {
-
-    p <- predict(fitted_fixture, new_df, interval = FALSE)
     expect_equal(p$sample_id, new_df$sample_id)
 
   })
@@ -330,14 +319,15 @@ describe("predict.horizons_fit() - schema gate", {
 
 describe("predict.horizons_fit() - non-negativity floor", {
 
-  ## Soil properties from MIR are non-negative; predictions and bounds floor at 0.
-  it("floors predictions and interval bounds at 0", {
+  ## Soil properties from MIR are non-negative; interval bounds floor at 0.
+  ## The point floor cannot bind on this fixture (its predictions sit near 5);
+  ## test-outcome-range.R forces a negative prediction to test it.
+  it("floors interval bounds at 0", {
 
     ## A margin this large takes every raw lower bound far below 0
     local_mocked_bindings(compute_c_alpha = function(scores, level) 1e6)
 
     p <- predict(fitted_fixture, make_new_spectra())
-    expect_true(all(p$.pred >= 0))
     expect_equal(p$.pred_lower, rep(0, nrow(p)))
 
   })
@@ -677,7 +667,7 @@ describe("predict.horizons_fit() - applicability domain", {
 
   })
 
-  it("flags far-shifted spectra as OOD", {
+  it("flags far-shifted spectra as OOD, and by default still predicts them", {
 
     skip_if_not(has_ad(fitted_fixture))
 
@@ -687,6 +677,9 @@ describe("predict.horizons_fit() - applicability domain", {
 
     p <- predict(fitted_fixture, ood_df, interval = FALSE)
     expect_true(mean(p$.ad_flag == "OOD") > 0.5)
+
+    ## abstain_ood = FALSE is the default, so the OOD rows keep their predictions
+    expect_true(all(!is.na(p$.pred)))
 
   })
 
@@ -703,15 +696,6 @@ describe("predict.horizons_fit() - applicability domain", {
     ood <- p$.ad_flag == "OOD"
     expect_true(all(is.na(p$.pred[ood])))          # abstained
     expect_true(all(!is.na(p$.ad_distance)))       # distance always preserved
-
-  })
-
-  it("abstain_ood = FALSE (default) leaves predictions intact", {
-
-    skip_if_not(has_ad(fitted_fixture))
-
-    p <- predict(fitted_fixture, new_df, interval = FALSE)
-    expect_true(all(!is.na(p$.pred)))
 
   })
 
@@ -758,7 +742,7 @@ describe("predict.horizons_fit() - applicability domain", {
 
   })
 
-  it("is silent about abstention when abstain_ood is not requested", {
+  it("is silent about abstention and about AD when the object has no AD bundle and abstain_ood is not requested", {
 
     no_ad <- fitted_fixture
     no_ad$models$ad <- NULL
@@ -768,6 +752,9 @@ describe("predict.horizons_fit() - applicability domain", {
     )
 
     expect_false(any(grepl("abstain_ood", warns)))
+
+    expect_no_warning(predict(no_ad, new_df, interval = FALSE),
+                      class = "horizons_ad_warning")
 
   })
 
@@ -796,16 +783,6 @@ describe("predict.horizons_fit() - applicability domain", {
     expect_false(any(c(".ad_distance", ".ad_flag") %in% names(p)))
     expect_equal(nrow(p), nrow(new_df))
     expect_true(all(!is.na(p$.pred)))
-
-  })
-
-  it("says nothing about AD when the object has no AD bundle", {
-
-    no_ad <- fitted_fixture
-    no_ad$models$ad <- NULL
-
-    expect_no_warning(predict(no_ad, new_df, interval = FALSE),
-                      class = "horizons_ad_warning")
 
   })
 
@@ -890,7 +867,7 @@ describe("predict.horizons_fit() - selected training set", {
 
   })
 
-  it("warns once when intervals are requested on a selected fit", {
+  it("warns once, with its class, when intervals are requested on a selected fit", {
 
     warns <- testthat::capture_warnings(
       p <- predict(selected_fixture, new_df, interval = TRUE)
@@ -901,6 +878,11 @@ describe("predict.horizons_fit() - selected training set", {
     expect_equal(sum(hits), 1L)
     expect_true(any(grepl("target_distances", warns)))
     expect_equal(nrow(p), nrow(new_df))
+
+    expect_warning(
+      predict(selected_fixture, new_df, interval = TRUE),
+      class = "horizons_select_warning"
+    )
 
   })
 
@@ -945,15 +927,6 @@ describe("predict.horizons_fit() - selected training set", {
     )
 
     expect_false(any(grepl("Conformal coverage", warns)))
-
-  })
-
-  it("carries the warning class", {
-
-    expect_warning(
-      predict(selected_fixture, new_df, interval = TRUE),
-      class = "horizons_select_warning"
-    )
 
   })
 
@@ -1304,9 +1277,15 @@ describe("ensure_predict_namespaces() - per-model coverage", {
   it("scopes the engine check to the configs actually being predicted", {
 
     ## A fit that stores both an rf config (being predicted) and a mars
-    ## config (not) must not require earth just because the object also
-    ## holds a mars config somewhere — predict(fit, config = "cfg_rf") must
-    ## not need earth installed to predict the rf one.
+    ## config (not) must not require mars's engine just because the object
+    ## also holds a mars config somewhere — predict(fit, config = "cfg_rf")
+    ## must not need it installed to predict the rf one. mars is mapped to a
+    ## package that is never installed, so the check below sees a missing
+    ## package wherever it runs, whether or not earth is installed.
+    unavailable <- MODEL_PREDICT_PACKAGES
+    unavailable[["mars"]] <- "horizonsFakePkgXYZ123"
+    local_mocked_bindings(MODEL_PREDICT_PACKAGES = unavailable)
+
     obj <- make_ns_probe_fit(
       "rf", config_id = "cfg_rf",
       extra_configs = tibble::tibble(config_id = "cfg_mars", model = "mars")
@@ -1316,17 +1295,13 @@ describe("ensure_predict_namespaces() - per-model coverage", {
     ## regardless of what else the object stores.
     expect_no_error(ensure_predict_namespaces(obj, config_ids = "cfg_rf"))
 
-    ## The discriminating half, gated on earth genuinely being absent here:
-    ## an unscoped check (every stored config, the pre-fix behaviour) would
-    ## abort naming earth even though only cfg_rf was ever requested.
-    if (!requireNamespace("earth", quietly = TRUE)) {
-
-      expect_error(
-        ensure_predict_namespaces(obj, config_ids = c("cfg_rf", "cfg_mars")),
-        class = "horizons_missing_predict_package"
-      )
-
-    }
+    ## An unscoped check (every stored config, the pre-fix behaviour) aborts
+    ## naming mars's package even though only cfg_rf was ever requested.
+    expect_error(
+      ensure_predict_namespaces(obj, config_ids = c("cfg_rf", "cfg_mars")),
+      "horizonsFakePkgXYZ123",
+      class = "horizons_missing_predict_package"
+    )
 
   })
 

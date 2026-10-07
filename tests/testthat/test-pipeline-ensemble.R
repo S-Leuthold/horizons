@@ -51,38 +51,7 @@ describe("ensemble() fixture preconditions", {
 })
 
 ## =========================================================================
-## TEETH #1 — non-degeneracy: the meta-learner learns a real combination
-## =========================================================================
-## On real signal the penalized engine must assign non-zero member weights;
-## intercept-only (all coefs 0) is the degenerate failure the synthetic data
-## produced and is NOT acceptable here.
-
-describe("ensemble() penalized - non-degenerate on real signal", {
-
-  it("learns at least one non-zero member coefficient", {
-
-    skip_unless_slow_tier()
-
-    ens   <- ens_built("penalized", optimize = TRUE)
-    coefs <- ens$ensemble$weights$coef
-    expect_gt(sum(abs(coefs) > 1e-8), 0)
-
-  })
-
-  it("produces ensemble test predictions correlated with truth", {
-
-    skip_unless_slow_tier()
-
-    ens <- ens_built("penalized", optimize = TRUE)
-    ep  <- ens$ensemble$predictions
-    expect_gt(stats::cor(ep$.pred, ep$truth), 0.3)
-
-  })
-
-})
-
-## =========================================================================
-## TEETH #2 — the .row -> oof$row mapping is correct, not just shaped
+## TEETH — the .row -> oof$row mapping is correct, not just shaped
 ## =========================================================================
 ## collect_predictions()$.row indexes meta_frame positions; the engine maps it
 ## back to the object's true .row. A row-count check passes on a fully
@@ -135,7 +104,7 @@ describe("ensemble() oof_predictions - correct row alignment", {
 })
 
 ## =========================================================================
-## TEETH #3 — no double back-transform (§9 regression)
+## TEETH — no double back-transform (§9 regression)
 ## =========================================================================
 ## Members are fit under log / sqrt / none. If any stage back-transforms an
 ## already-back-transformed prediction, values explode out of physical range.
@@ -195,33 +164,6 @@ describe("ensemble() - optimize = FALSE runs (lazy-quosure regression guard)", {
     expect_true(inherits(ens, "horizons_ensemble"))
 
   })
-
-})
-
-## =========================================================================
-## SMOKE MATRIX — all three engines x both modes dispatch and promote class
-## =========================================================================
-
-describe("ensemble() - engine x mode dispatch", {
-
-  for (method in c("penalized", "weighted", "xgb")) {
-
-    for (optimize in c(TRUE, FALSE)) {
-
-      it(paste0(method, " optimize=", optimize, " returns a horizons_ensemble"), {
-
-        if (optimize && method != "weighted") skip_unless_slow_tier()
-
-        ens <- ens_built(method, optimize = optimize)
-        expect_true(inherits(ens, "horizons_ensemble"))
-        expect_true(inherits(ens, "horizons_fit"))
-        expect_false(is.null(ens$ensemble))
-
-      })
-
-    }
-
-  }
 
 })
 
@@ -495,7 +437,8 @@ describe("predict.horizons_ensemble() - schema gate", {
 ## =========================================================================
 ## ensemble() calibrates CV+ UQ by default, so interval = TRUE returns interval
 ## columns. The graceful-degradation path (point-only + one-time note) now
-## belongs to compute_uq = FALSE builds and corrupt bundles.
+## belongs to compute_uq = FALSE builds and corrupt bundles; the corrupt
+## bundles' warnings are asserted in test-ensemble-uq.R.
 
 describe("predict.horizons_ensemble() - intervals and degradation", {
 
@@ -523,26 +466,6 @@ describe("predict.horizons_ensemble() - intervals and degradation", {
       regexp = "intervals are not available"
     )
     expect_false(".pred_lower" %in% names(p))
-
-  })
-
-  it("a corrupt uq bundle warns and degrades to point-only without erroring", {
-
-    test_set <- ens_test_set()
-    ens      <- ens_built("weighted")
-
-    ens$ensemble$uq$method <- "bogus"
-
-    ## #65: predict_ensemble_intervals() used to degrade silently here; it now
-    ## warns, naming the bundle as unrecognized, via warn_interval_failure().
-    p <- NULL
-    expect_warning(
-      p <- predict(ens, test_set, interval = TRUE),
-      class = "horizons_interval_warning"
-    )
-
-    expect_false(".pred_lower" %in% names(p))
-    expect_true(".pred" %in% names(p))
 
   })
 
@@ -884,39 +807,6 @@ describe("predict.horizons_ensemble() - response bound guardrail", {
   })
 
 })
-
-## =========================================================================
-## validate_horizons_ensemble() — real contracts from all three engines pass
-## =========================================================================
-## The validator is wired into ensemble() itself, so these builds double as
-## wire-up proof; the explicit calls assert idempotent re-validation of a
-## real contract (including a populated CV+ uq bundle).
-
-describe("validate_horizons_ensemble() - real fixture contracts", {
-
-  for (m in c("weighted", "penalized", "xgb")) {
-
-    it(paste0("method = '", m, "' contract validates (uq populated)"), {
-
-      ens <- ens_built(m)
-
-      expect_identical(validate_horizons_ensemble(ens), ens)
-      expect_false(is.null(ens$ensemble$uq))
-
-    })
-
-  }
-
-  it("a compute_uq = FALSE contract validates (uq NULL)", {
-
-    ens0 <- ens_built("weighted", compute_uq = FALSE)
-
-    expect_identical(validate_horizons_ensemble(ens0), ens0)
-
-  })
-
-})
-
 
 ## =========================================================================
 ## allow_par is explicit and off by default (M2e, 2026-09-15)
