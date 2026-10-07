@@ -364,10 +364,13 @@ test_that("every predict_ad warning names the config when it is given", {
 ## fit_ad() — every exit returns NULL, never a partial bundle
 ## ---------------------------------------------------------------------------
 ## fit_ad() returns NULL whenever a step cannot run, so the config degrades to
-## no AD. Two of its checks are backed by a later step that refuses the same
-## input: compute_ad_metadata() refuses a short or NA training matrix, and the
-## threshold quantile refuses NA distances. Their tests mock that later step to
-## succeed, so only fit_ad()'s own check keeps the bundle out.
+## no AD. Three of its checks are backed by a later step that refuses the same
+## input. The training-matrix guard repeats compute_ad_metadata()'s own refusal,
+## so its test asserts the NULL whichever of the two refuses. The covariance
+## and calibration-bake checks are backed only incidentally, by the threshold
+## step: calculate_ad_distance() refuses NULL metadata or a NULL matrix, and the
+## threshold quantile refuses NA distances. Their test mocks the threshold step
+## to succeed, so only fit_ad()'s own check keeps the bundle out.
 ## ---------------------------------------------------------------------------
 
 test_that("fit_ad returns NULL for a calibration set under N_CALIB_MIN rows", {
@@ -384,12 +387,9 @@ test_that("fit_ad returns NULL for a training matrix under N_AD_TRAIN_MIN rows",
 
   fx    <- ad_fitted_workflow()
   short <- ad_fitted_workflow(n = N_AD_TRAIN_MIN - 1L)
-  md    <- compute_ad_metadata(as.matrix(workflows::extract_mold(fx$workflow)$predictors))
 
-  local_mocked_bindings(compute_ad_metadata = function(feature_matrix) md)
-
-  ## With the covariance mocked, a full training matrix still gets a bundle
-  expect_false(is.null(fit_ad(fx$workflow, calib_data = fx$data)))
+  expect_equal(nrow(workflows::extract_mold(short$workflow)$predictors),
+               N_AD_TRAIN_MIN - 1L)
   expect_null(fit_ad(short$workflow, calib_data = fx$data))
 
 })

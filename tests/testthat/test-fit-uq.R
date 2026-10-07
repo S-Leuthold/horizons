@@ -321,8 +321,8 @@ describe("fit_uq() - conformal scores properties", {
 
   it("scores leave out calibration rows with no outcome, in n_calib and in the minimum", {
 
-    ## Five missing outcomes leave 35 rows to score; eleven leave 29, under
-    ## N_CALIB_MIN, though the set itself still has 40 rows.
+    ## Of the 40 rows, ten missing outcomes leave exactly N_CALIB_MIN to
+    ## score, which is enough; eleven leave one fewer, which is not.
     fit_missing <- function(n_missing) {
       calib <- setup$calib_data
       calib[[setup$outcome_col]][seq_len(n_missing)] <- NA_real_
@@ -334,17 +334,18 @@ describe("fit_uq() - conformal scores properties", {
       )
     }
 
-    some <- fit_missing(5L)
+    n_missing <- nrow(setup$calib_data) - N_CALIB_MIN
 
-    expect_false(is.null(some))
-    expect_equal(some$n_calib, nrow(setup$calib_data) - 5L)
-    expect_length(some$scores, nrow(setup$calib_data) - 5L)
-    expect_false(anyNA(some$scores))
+    expect_gt(n_missing, 0L)
 
-    n_missing <- nrow(setup$calib_data) - N_CALIB_MIN + 1L
+    at_min <- fit_missing(n_missing)
 
-    expect_gte(nrow(setup$calib_data), N_CALIB_MIN)
-    expect_null(fit_missing(n_missing))
+    expect_false(is.null(at_min))
+    expect_equal(at_min$n_calib, N_CALIB_MIN)
+    expect_length(at_min$scores, N_CALIB_MIN)
+    expect_false(anyNA(at_min$scores))
+
+    expect_null(fit_missing(n_missing + 1L))
 
   })
 
