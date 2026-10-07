@@ -2128,6 +2128,39 @@ validate_horizons_fit <- function(x) {
 
   }
 
+  ## The type of every column fit() writes, checked where the column is
+  ## present. A member that lacks a field records a typed NA, so a wrong
+  ## default changes a column's type only on fits where a member failed.
+
+  if (is.data.frame(fit_res)) {
+
+    double_cols <- c(metric_cols, "cv_rmse_mean", "cv_rmse_se", "cv_rpd_mean",
+                     "cv_rpd_se", "runtime_secs")
+
+    col_types <- c(config_id       = "character",
+                   status          = "character",
+                   degraded        = "logical",
+                   degraded_reason = "character",
+                   stats::setNames(rep("double", length(double_cols)), double_cols),
+                   best_params     = "list",
+                   warm_start      = "logical",
+                   start_grid_size = "integer",
+                   error_message   = "character")
+
+    present <- intersect(names(col_types), names(fit_res))
+    actual  <- vapply(present, function(col) typeof(fit_res[[col]]), character(1))
+    wrong   <- present[actual != col_types[present]]
+
+    if (length(wrong) > 0) {
+
+      details <- paste(paste0(wrong, " is ", actual[wrong], ", not ", col_types[wrong]),
+                       collapse = "; ")
+      errors  <- c(errors, cli::format_inline("{.field results} has columns of the wrong type: {details}"))
+
+    }
+
+  }
+
   ## I6: workflow keys are a subset of config ids -------------------------------
 
   cfg_ids <- x$config$configs$config_id
@@ -2820,10 +2853,7 @@ summary.horizons_data <- function(object, ...) {
       wn_candidates  <- predictor_vars[grepl("^(wn_)?[0-9.]+$", predictor_vars)]
       wn_values      <- as.numeric(gsub("^wn_", "", wn_candidates))
 
-      has_more <- has_responses || has_covariates || has_outcome
-      branch   <- if (has_more) "\u251C\u2500" else "\u2514\u2500"
-
-      cat(paste0("   ", branch, " Predictors: ", x$data$n_predictors, "\n"))
+      cat(paste0("   \u251C\u2500 Predictors: ", x$data$n_predictors, "\n"))
 
       if (length(wn_values) > 1) {
 
@@ -2843,10 +2873,8 @@ summary.horizons_data <- function(object, ...) {
 
       response_vars <- x$data$role_map$variable[x$data$role_map$role == "response"]
       resp_list     <- paste(response_vars, collapse = ", ")
-      has_more      <- has_covariates || has_outcome
-      branch        <- if (has_more) "\u251C\u2500" else "\u2514\u2500"
 
-      cat(paste0("   ", branch, " Responses: ", resp_list, "\n"))
+      cat(paste0("   \u251C\u2500 Responses: ", resp_list, "\n"))
 
     }
 
@@ -2856,9 +2884,8 @@ summary.horizons_data <- function(object, ...) {
 
       covariate_vars <- x$data$role_map$variable[x$data$role_map$role == "covariate"]
       covar_list     <- paste(covariate_vars, collapse = ", ")
-      branch         <- if (has_outcome) "\u251C\u2500" else "\u2514\u2500"
 
-      cat(paste0("   ", branch, " Covariates: ", x$data$n_covariates, "\n"))
+      cat(paste0("   \u251C\u2500 Covariates: ", x$data$n_covariates, "\n"))
       cat(paste0("   \u2502     \u2514\u2500 Names: ", covar_list, "\n"))
 
     }
@@ -2875,6 +2902,7 @@ summary.horizons_data <- function(object, ...) {
     }
 
     ## Memory footprint ----
+    ## The tree's last line, so every line above it is a middle branch.
 
     mem_bytes <- object.size(x$data$analysis)
     mem_str   <- format(mem_bytes, units = "auto")
