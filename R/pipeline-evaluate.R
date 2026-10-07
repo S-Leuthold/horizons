@@ -50,11 +50,12 @@
 #'   same samples is refused rather than resumed, while adding a sibling
 #'   response with `add_response()` or a `meta` column resumes. Keep one
 #'   `output_dir` per outcome. The ranking `metric` is not checked, since
-#'   every row carries all six cross-validated metrics. Rows scored under an
-#'   earlier scoring schema are dropped and re-evaluated; rows for configs no
-#'   longer in the grid are dropped; a file that cannot be used warns and its
-#'   config is re-evaluated; rows written before a fingerprint field existed
-#'   warn once and resume. Default NULL (no checkpointing).
+#'   every row carries all six cross-validated metrics. A row scored under an
+#'   earlier scoring schema, or recording less of the training data and
+#'   settings than this run does, was written by an earlier version: it is
+#'   dropped and its config re-evaluated. Rows for configs no longer in the
+#'   grid are dropped; a file that cannot be used warns and its config is
+#'   re-evaluated. Default NULL (no checkpointing).
 #' @param seed Integer. Random seed for train/test split and CV folds.
 #'   Default 307L.
 #' @param verbose Logical. Print progress tree to console. Default TRUE.
@@ -171,12 +172,10 @@
 #'   observed value is the same, and after it, when every training row left
 #'   by the split and the response trim has the same value, since every
 #'   config would then be tuned on a constant. The message names the outcome,
-#'   the value and how many rows have it (#132). Checkpoint rows written
-#'   before the range was recorded resume only under the default range.
-#'   Called on an object that has already been through `fit()` or
-#'   `ensemble()`, it returns a `horizons_eval` whose `models` and
-#'   `ensemble` slots are empty again, since both were built on the
-#'   evaluation it replaces.
+#'   the value and how many rows have it (#132). Called on an object that
+#'   has already been through `fit()` or `ensemble()`, it returns a
+#'   `horizons_eval` whose `models` and `ensemble` slots are empty again,
+#'   since both were built on the evaluation it replaces.
 #'
 #' @export
 evaluate <- function(x,
@@ -859,24 +858,6 @@ evaluate <- function(x,
 
   all_results <- dplyr::bind_rows(results_list)
 
-  ## Checkpoint rows written before the cv_* columns existed bind without
-  ## them. Materialise the columns as NA so ranking can name what it skips
-  ## rather than failing on a missing column.
-  for (cv_col in paste0("cv_", c("rmse", "rrmse", "rsq", "ccc", "rpd", "mae"))) {
-
-    if (!cv_col %in% names(all_results)) all_results[[cv_col]] <- NA_real_
-
-  }
-
-  ## Likewise the prune gate's reading, which rows written before it was
-  ## recorded (#38) do not carry.
-  if (!"below_prune_threshold" %in% names(all_results)) all_results$below_prune_threshold <- NA
-  if (!"prune_threshold" %in% names(all_results)) all_results$prune_threshold <- NA_real_
-
-  ## Once checkpointed and new rows are combined, rather than in the loader;
-  ## monitor_evaluate() applies the same helper to the same rows.
-  all_results <- relabel_inert_pruned(all_results, tuning$bayesian_iter)
-
   ## -----------------------------------------------------------------------
   ## Step 10: Determine best config
   ## -----------------------------------------------------------------------
@@ -988,30 +969,6 @@ evaluate <- function(x,
 }
 
 ## ---------------------------------------------------------------------------
-## Checkpoint scoring schema
-## ---------------------------------------------------------------------------
-
-#' Scoring schema of a checkpoint row
-#'
-#' Rows written before the column existed are schema 1 (see `SCORING_SCHEMA`
-#' in `R/constants.R`).
-#' @param row One-row result tibble.
-#' @return Integer schema.
-#' @keywords internal
-#' @noRd
-checkpoint_row_schema <- function(row) {
-
-  ## `[[` rather than `$`: tibble's `$` warns on a missing column, and rows
-  ## written before the column existed are exactly the ones read here.
-  s <- if ("scoring_schema" %in% names(row)) row[["scoring_schema"]] else NULL
-
-  if (is.null(s) || length(s) != 1 || is.na(s)) return(1L)
-
-  as.integer(s)
-
-}
-
-## ---------------------------------------------------------------------------
 ## Checkpoint store
 ## ---------------------------------------------------------------------------
 ## One file per config under <output_dir>/checkpoints/ is the store (#42),
@@ -1112,19 +1069,23 @@ read_checkpoint_store <- function(output_dir) {
 
 #' Judge one checkpoint row against the run that would resume it
 #'
-#' The gate order is fixed and shared by both stores: the training-data
-#' fingerprint, then the tuning settings, then the scoring schema. A row that
-#' fails a fingerprint is refused whatever its schema, because it means
-#' another run's results are in the directory.
+#' A row that does not record everything this run records (the fingerprint,
+#' every data field and every setting) was written by another version of
+#' horizons and cannot be checked against this run, so it is dropped and its
+#' config re-evaluated; so is every row when the run has no fingerprint of its
+#' own (no sample id column). Every other row passes a fixed gate order: the
+#' training-data fingerprint, then the tuning settings, then the scoring
+#' schema. A recorded value that differs is refused whatever the row's
+#' scoring schema, because it means another run's results are in the
+#' directory; a row scored under another `SCORING_SCHEMA` is dropped and
+#' re-evaluated.
 #'
 #' @param row One-row result.
-#' @param data_fp This run's fingerprint from [eval_data_fingerprint()]. A
-#'   `NA` hash, or `NULL` fields, means the run cannot be checked on that
-#'   count, and the row counts as unverified.
+#' @param data_fp This run's fingerprint from [eval_data_fingerprint()].
 #' @param settings This run's [eval_settings()].
 #' @return List with `verdict` (`"keep"`, `"data_mismatch"`,
-#'   `"settings_mismatch"` or `"foreign_schema"`), `data_verified` and
-#'   `settings_verified` (logical), `fingerprint` (the row's, from
+#'   `"settings_mismatch"` or `"foreign_schema"`, the last for either kind of
+#'   dropped row), `fingerprint` (the row's, from
 #'   [checkpoint_row_fingerprint()]), `data_differ` (names of data fields
 #'   recorded with another value), `stored_settings` (the row's, or `NULL`)
 #'   and `settings_differ` (names of settings recorded with another value).
@@ -1133,45 +1094,32 @@ read_checkpoint_store <- function(output_dir) {
 checkpoint_row_verdict <- function(row, data_fp, settings) {
 
   row_fp   <- checkpoint_row_fingerprint(row)
-  expected <- data_fp$data_hash %||% NA_character_
   data_cmp <- compare_record(row_fp$data_fields, data_fp$data_fields)
   stored   <- checkpoint_row_settings(row)
   cmp      <- compare_record(stored, settings)
 
-  ## A row stamped before #76 records no outcome_range, and was scored with
-  ## the zero floor. Under the default range that is this run's scoring, so
-  ## the row is only unverified; under any other range it was clamped
-  ## differently, and ranking it beside this run's rows, or warm-starting
-  ## fit() from it, would mix the two. Refused like a changed setting.
-  if (outcome_range_unrecorded(stored, settings$outcome_range)) {
+  checkable <- !is.na(row_fp$data_hash) && !is.na(data_fp$data_hash) &&
+    length(data_cmp$missing) == 0 && length(cmp$missing) == 0
 
-    cmp$differ  <- c(cmp$differ, "outcome_range")
-    cmp$missing <- setdiff(cmp$missing, "outcome_range")
-
-  }
-
-  hash_known <- !is.na(row_fp$data_hash) && !is.na(expected)
-
-  verdict <- if ((hash_known && !identical(row_fp$data_hash, expected)) ||
-                 length(data_cmp$differ) > 0) {
+  verdict <- if (!checkable) {
+    "foreign_schema"
+  } else if (!identical(row_fp$data_hash, data_fp$data_hash) ||
+             length(data_cmp$differ) > 0) {
     "data_mismatch"
   } else if (length(cmp$differ) > 0) {
     "settings_mismatch"
-  } else if (!identical(checkpoint_row_schema(row), SCORING_SCHEMA)) {
+  } else if (!isTRUE(row[["scoring_schema"]] == SCORING_SCHEMA)) {
     "foreign_schema"
   } else {
     "keep"
   }
 
   list(
-    verdict           = verdict,
-    data_verified     = hash_known && !is.null(data_fp$data_fields) &&
-                          length(data_cmp$missing) == 0,
-    settings_verified = !is.null(settings) && length(cmp$missing) == 0,
-    fingerprint       = row_fp,
-    data_differ       = data_cmp$differ,
-    stored_settings   = stored,
-    settings_differ   = cmp$differ
+    verdict         = verdict,
+    fingerprint     = row_fp,
+    data_differ     = data_cmp$differ,
+    stored_settings = stored,
+    settings_differ = cmp$differ
   )
 
 }
@@ -1184,10 +1132,9 @@ checkpoint_row_verdict <- function(row, data_fp, settings) {
 #' @param config_ids The configs in this run's grid, or `NULL` to keep every
 #'   id.
 #' @return List with `kept` (surviving candidates named by config id),
-#'   `refused` (candidates that failed a fingerprint, each with
-#'   its verdict fields added), and the counts `n_foreign` (earlier scoring
-#'   schema), `n_stale` (config not in the grid), `n_unverified_data` and
-#'   `n_unverified_settings` (among the kept rows).
+#'   `refused` (candidates that failed a fingerprint, each with its verdict
+#'   fields added), and the counts `n_foreign` (another schema) and
+#'   `n_stale` (config not in the grid).
 #' @keywords internal
 #' @noRd
 gate_checkpoint_rows <- function(candidates, data_fp, settings, config_ids = NULL) {
@@ -1210,12 +1157,10 @@ gate_checkpoint_rows <- function(candidates, data_fp, settings, config_ids = NUL
   refused <- which(verdict %in% c("data_mismatch", "settings_mismatch"))
 
   list(
-    kept                  = stats::setNames(candidates[keep], ids[keep]),
-    refused               = Map(c, candidates[refused], verdicts[refused]),
-    n_foreign             = sum(verdict == "foreign_schema"),
-    n_stale               = sum(passed & !in_grid),
-    n_unverified_data     = sum(!vapply(verdicts[keep], `[[`, logical(1), "data_verified")),
-    n_unverified_settings = sum(!vapply(verdicts[keep], `[[`, logical(1), "settings_verified"))
+    kept      = stats::setNames(candidates[keep], ids[keep]),
+    refused   = Map(c, candidates[refused], verdicts[refused]),
+    n_foreign = sum(verdict == "foreign_schema"),
+    n_stale   = sum(passed & !in_grid)
   )
 
 }
@@ -1225,8 +1170,8 @@ gate_checkpoint_rows <- function(candidates, data_fp, settings, config_ids = NUL
 #' Reads the store, gates every row, and reports: aborts on the first row
 #' written on other training data or under other settings, returns the drops
 #' as notes for `evaluate()` to print inside its tree (they used to print
-#' here, above the tree's header; #91), warns naming any file it could not
-#' read, and warns once for rows it cannot verify.
+#' here, above the tree's header; #91), and warns naming any file it could
+#' not read.
 #'
 #' @param output_dir The run's output directory.
 #' @param config_ids The configs in this run's grid.
@@ -1288,13 +1233,14 @@ load_eval_checkpoints <- function(output_dir, config_ids, data_fp, settings,
 
   ## Rows scored under a different regime (SCORING_SCHEMA) are not comparable
   ## to what this run produces, and ranking them together would make
-  ## best_config an artifact of which regime scored each config.
+  ## best_config an artifact of which regime scored each config. Rows that
+  ## record less than this run cannot be checked against it.
   if (gated$n_foreign > 0) {
 
     notes <- c(notes, paste0(
       "Dropped ", gated$n_foreign, " checkpoint row",
       if (gated$n_foreign > 1) "s" else "",
-      " scored under an earlier scoring schema (will be re-evaluated)"
+      " written under an earlier schema (will be re-evaluated)"
     ))
 
   }
@@ -1302,16 +1248,6 @@ load_eval_checkpoints <- function(output_dir, config_ids, data_fp, settings,
   if (length(store$unreadable) > 0) {
 
     warn_unreadable_checkpoints(store$unreadable, output_dir)
-
-  }
-
-  ## One warning per run, whatever the mix of old rows: they keep resuming,
-  ## but never silently.
-  if (gated$n_unverified_data > 0 || gated$n_unverified_settings > 0) {
-
-    warn_unverified_checkpoints(gated$n_unverified_data,
-                                gated$n_unverified_settings,
-                                output_dir, data_fp, settings)
 
   }
 
@@ -1368,58 +1304,13 @@ warn_unreadable_checkpoints <- function(unreadable, output_dir) {
 
 }
 
-#' Warn once about resumed rows that cannot be verified
-#'
-#' @param n_data Rows whose training-data fingerprint is absent or does not
-#'   cover every field this run records.
-#' @param n_settings Rows whose settings stamp is absent or does not cover
-#'   every setting this run records.
-#' @param output_dir The run's output directory.
-#' @param data_fp,settings This run's fingerprint and settings.
-#' @return `NULL`, invisibly; warns with class `horizons_checkpoint_warning`.
-#' @keywords internal
-#' @noRd
-warn_unverified_checkpoints <- function(n_data, n_settings, output_dir,
-                                        data_fp, settings) {
-
-  n_rows      <- data_fp$data_n_rows
-  data_nms    <- names(data_fp$data_fields)
-  setting_nms <- names(settings)
-
-  bullets <- c("!" = "Some resumed checkpoints in {.path {output_dir}} cannot be verified against this run.")
-
-  if (n_data > 0) {
-
-    bullets <- c(bullets, "*" = if (length(data_nms) > 0) {
-      "{n_data} {?has/have} no training-data fingerprint covering {.field {data_nms}}, so {cli::qty(n_data)}{?it/they} cannot be confirmed to come from these {n_rows} training rows and their values."
-    } else {
-      "{n_data} {?has/have} no training-data fingerprint, or this run has no sample id column to check one against, so {cli::qty(n_data)}{?it/they} cannot be confirmed to come from these {n_rows} training rows."
-    })
-
-  }
-
-  if (n_settings > 0) {
-
-    bullets <- c(bullets, "*" = "{n_settings} {?has/have} no tuning-settings fingerprint covering {.field {setting_nms}}, so {cli::qty(n_settings)}{?it/they} cannot be confirmed to have been tuned the way this run tunes.")
-
-  }
-
-  bullets <- c(bullets, "i" = "Written before provenance was recorded. Resuming anyway; delete them, or use a fresh {.arg output_dir}, if the rows or settings may differ.")
-
-  cli::cli_warn(bullets, class = "horizons_checkpoint_warning")
-
-  invisible(NULL)
-
-}
-
 ## ---------------------------------------------------------------------------
 ## Checkpoint settings provenance
 ## ---------------------------------------------------------------------------
 ## The data fingerprint identifies the rows a checkpoint was scored on; this
 ## records how it was tuned. Settings are compared by name rather than hashed
-## whole, so a setting added to the list later makes older rows unverified
-## (warned) rather than mismatched (refused), and a refusal can name what
-## changed.
+## whole, so a refusal can name what changed, and a row that records no value
+## for a setting added to the list later is re-evaluated rather than refused.
 
 #' Record the settings a result row depends on
 #'
@@ -1459,7 +1350,7 @@ stamp_eval_settings <- function(row, settings) {
 #' Settings record carried by one checkpoint row
 #'
 #' @param row One-row result read back from a checkpoint.
-#' @return Named list, or `NULL` for rows written before the stamp existed.
+#' @return Named list, or `NULL` when the row carries none.
 #' @keywords internal
 #' @noRd
 checkpoint_row_settings <- function(row) {
@@ -1505,29 +1396,6 @@ compare_record <- function(stored, current) {
 
 }
 
-#' Is a result row's range unrecorded under a range other than the default?
-#'
-#' @description
-#' Rows stamped before the outcome range existed (#76) carry no
-#' `outcome_range` in their settings record; they were scored with the zero
-#' floor, which is the default range. Under the default such a row is merely
-#' unverified. Under any other range it was scored differently, and the
-#' checkpoint gate and `fit()` refuse it.
-#'
-#' @param stored The row's settings record, or `NULL` when it has none.
-#' @param current_range This run's range, or `NULL` when unknown (a manifest
-#'   older than the range).
-#' @return `TRUE` when the row has no recorded range and `current_range` is
-#'   not `DEFAULT_OUTCOME_RANGE`.
-#' @keywords internal
-#' @noRd
-outcome_range_unrecorded <- function(stored, current_range) {
-
-  !is.null(current_range) && is.null(stored$outcome_range) &&
-    !identical(as.double(current_range), DEFAULT_OUTCOME_RANGE)
-
-}
-
 #' Describe differing settings for a message
 #'
 #' @param stored,current Settings records.
@@ -1551,8 +1419,6 @@ describe_settings_diff <- function(stored, current, differ) {
 #' @keywords internal
 #' @noRd
 format_setting_value <- function(v) {
-
-  if (is.null(v)) return("unset")
 
   if (length(v) == 1 && is.na(v)) return("NA")
 
@@ -1609,11 +1475,11 @@ abort_checkpoint_settings_mismatch <- function(diffs, output_dir, source,
 #' under the same name resumed stale results silently (#42). `data_fields`
 #' records them by name: the outcome, the sample ids, the role-map rows whose
 #' roles shape a row (`id`, `outcome`, `predictor`), and the outcome and
-#' predictor values in id order. They are compared
-#' field by field, like the tuning settings, so a row written before a field
-#' existed is unverified (warned) rather than refused, and a refusal can say
-#' what changed. Each value field hashes column by column, so the cost is one
-#' pass over the matrix (about 0.3 s at 17,788 x 1,701) with one column in
+#' predictor values in id order. They are compared field by field, like the
+#' tuning settings, so a refusal can say what changed, and a row with no
+#' value for a field this run records is re-evaluated rather than refused.
+#' Each value field hashes column by column, so the cost is one pass over
+#' the matrix (about 0.3 s at 17,788 x 1,701) with one column in
 #' memory at a time; it runs once per run, and the parallel worker is sent
 #' the result rather than recomputing it.
 #'
@@ -1646,7 +1512,7 @@ eval_data_fingerprint <- function(train_data, role_map = NULL) {
   }
 
   ## No identifier column: the run is unverifiable rather than wrongly
-  ## verified. Resume then behaves as it does for a legacy checkpoint.
+  ## verified, so the checkpoint gate resumes no row into it.
   if (!id_col %in% names(train_data)) {
 
     return(list(
@@ -1749,17 +1615,15 @@ stamp_data_fingerprint <- function(row, fp) {
 #' Fingerprint carried by one checkpoint row
 #'
 #' @param row One-row result tibble read back from a checkpoint.
-#' @return List with `data_hash` and `data_n_rows`, both `NA` for rows written
-#'   before the fingerprint existed, and `data_fields`, `NULL` for rows
-#'   written before the fields existed.
+#' @return List with `data_hash`, `NA` when the row carries none, and
+#'   `data_fields`, `NULL` when the row carries none.
 #' @keywords internal
 #' @noRd
 checkpoint_row_fingerprint <- function(row) {
 
-  ## `[[`, as in checkpoint_row_schema(): tibble's `$` warns on the missing
-  ## columns of the old rows this reads.
+  ## `[[` rather than `$`: tibble's `$` warns on a missing column, and a row
+  ## from another version may lack these.
   h <- if ("data_hash" %in% names(row)) row[["data_hash"]] else NULL
-  n <- if ("data_n_rows" %in% names(row)) row[["data_n_rows"]] else NULL
   f <- if ("data_fields" %in% names(row)) row[["data_fields"]][[1]] else NULL
 
   list(
@@ -1767,11 +1631,6 @@ checkpoint_row_fingerprint <- function(row) {
       NA_character_
     } else {
       as.character(h)
-    },
-    data_n_rows = if (is.null(n) || length(n) != 1 || is.na(n)) {
-      NA_integer_
-    } else {
-      as.integer(n)
     },
     data_fields = if (is.list(f)) f else NULL
   )
@@ -1784,8 +1643,7 @@ checkpoint_row_fingerprint <- function(row) {
 #'   [eval_data_fingerprint()].
 #' @param output_dir The checkpoint directory being resumed.
 #' @param source Which file carried the mismatching fingerprint.
-#' @param differ Names of the `data_fields` that differ. Rows written before
-#'   the fields existed can name none; the message then shows the two hashes.
+#' @param differ Names of the `data_fields` that differ.
 #' @param settings_diff Settings the same row records with another value,
 #'   from [describe_settings_diff()]. A changed `seed` moves the split, so it
 #'   surfaces here as a data mismatch; naming it says why.
@@ -1801,14 +1659,13 @@ abort_checkpoint_data_mismatch <- function(stored, current, output_dir, source,
   what <- describe_data_diff(stored$data_fields, current$data_fields, differ)
 
   ## Descriptions are substituted, not inlined, so a brace in an outcome name
-  ## is never read as cli markup.
-  found <- if (length(what) > 0) {
-    stats::setNames(sprintf("{.file {source}} %s", sprintf("{what[%d]}", seq_along(what))),
-                    rep("x", length(what)))
-  } else {
-    c("x" = "{.file {source}} carries hash {.val {stored$data_hash}} over {stored$data_n_rows} training row{?s}.",
-      "i" = "This run's training rows hash to {.val {current$data_hash}} over {current$data_n_rows} row{?s}.")
-  }
+  ## is never read as cli markup. The gate refuses only a row recording every
+  ## field, and the hash covers the ids and the outcome, so a differing row
+  ## always names at least one field.
+  found <- stats::setNames(
+    sprintf("{.file {source}} %s", sprintf("{what[%d]}", seq_along(what))),
+    rep("x", length(what))
+  )
 
   cli::cli_abort(c(
     "Checkpoints in {.path {output_dir}} were written on different training data.",
@@ -1860,8 +1717,8 @@ describe_data_diff <- function(stored, current, differ) {
 #' @description
 #' Raised by `evaluate()` when no configuration can be ranked: every one
 #' failed, or was pruned without a cross-validated value of the ranking
-#' metric (#41), or succeeded without one (rows checkpointed before the
-#' `cv_*` columns existed). `evaluate()` aborts before it assigns
+#' metric (#41), or succeeded without one (its cross-validated metrics could
+#' not be recovered). `evaluate()` aborts before it assigns
 #' `x$evaluation`, so the results table travels on the condition as
 #' `results`, and the message lists the distinct error messages (the first
 #' three, each with the configs that raised it, and a count of the rest). A
@@ -1939,43 +1796,6 @@ abort_all_configs_failed <- function(results, metric,
 }
 
 ## ---------------------------------------------------------------------------
-## relabel_inert_pruned \u2014 the one relabel evaluate() and the monitor share
-## ---------------------------------------------------------------------------
-
-#' Relabel "pruned" rows as successes when there was nothing to prune
-#'
-#' @description
-#' At `bayesian_iter = 0` the prune gate skips nothing, so a "pruned" row ran
-#' exactly what a success runs (#38). Rows checkpointed before that fix still
-#' carry the label, and a resumed run would rank them only as a fallback
-#' where a fresh run ranks them with the rest. `evaluate()` applies this once
-#' checkpointed and new rows are combined, rather than in the loader, and
-#' `monitor_evaluate()` applies it to the same rows with `bayesian_iter` from
-#' the manifest's settings, so the two name the same best config.
-#' `below_prune_threshold` keeps what the label said about quality.
-#'
-#' @param results Result rows.
-#' @param bayesian_iter The run's Bayesian iterations; `NULL` (a manifest
-#'   that does not record it) leaves the rows as they are.
-#' @return `results`, relabelled when `bayesian_iter` is 0.
-#' @keywords internal
-#' @noRd
-relabel_inert_pruned <- function(results, bayesian_iter) {
-
-  if (!isTRUE(bayesian_iter == 0)) return(results)
-
-  if (!"below_prune_threshold" %in% names(results)) results$below_prune_threshold <- NA
-
-  inert_pruned <- results$status %in% "pruned"
-
-  results$below_prune_threshold[inert_pruned] <- TRUE
-  results$status[inert_pruned]                <- "success"
-
-  results
-
-}
-
-## ---------------------------------------------------------------------------
 ## ranking_candidates \u2014 the one candidate rule evaluate() and fit() share
 ## ---------------------------------------------------------------------------
 
@@ -2024,10 +1844,9 @@ ranking_candidates <- function(results, metric) {
 #' `evaluate()`'s `best_config` and `fit()`'s member selection, so the two can
 #' never disagree, and neither touches a test-set column (#50).
 #'
-#' Rows whose `cv_<metric>` is `NA` (checkpoints written before the column
-#' existed, or a config whose CV panel could not be recovered) are dropped
-#' with a warning naming them. If no row can be ranked, aborts with the
-#' remedy: re-run `evaluate()`.
+#' Rows whose `cv_<metric>` is `NA` (a config whose CV panel could not be
+#' recovered) are dropped with a warning naming them. If no row can be
+#' ranked, aborts with the remedy: re-run `evaluate()`.
 #'
 #' @param results Tibble of evaluation result rows (`evaluation$results`
 #'   shape).
@@ -2068,7 +1887,7 @@ rank_configs_by_cv <- function(results, metric) {
     cli::cli_warn(c(
       "!" = "{n_skipped} config{?s} skipped in ranking: `{rank_column}` is NA.",
       "i" = "Skipped: {.val {skipped}}.",
-      "i" = "Usually a checkpoint from before cv_* columns existed; re-run evaluate() to include those configs."
+      "i" = "Their cross-validated value could not be recovered after tuning."
     ))
 
     results <- results[!is.na(vals), , drop = FALSE]

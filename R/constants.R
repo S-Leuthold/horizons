@@ -264,7 +264,6 @@ PARALLELIZE_OVER_VALUES <- c("auto", "configs", "resamples")
 #      per candidate x fold, so each candidate drew its own feature selection).
 #   2  2026-09-15: parallel_over = "resamples" (one prep per fold shared by
 #      all candidates); seed re-pinned before every stochastic stage.
-# Rows without the column are schema 1.
 SCORING_SCHEMA <- 2L
 
 # Schema of eval_manifest.rds, which evaluate() writes at the start of every

@@ -1305,10 +1305,10 @@ cold_start_evaluation <- function(x, metric, seed, call = rlang::caller_env()) {
 #' `evaluate()` stamps the range it clamped with on every results row, in the
 #' `settings` record (#76). `fit()` takes its members and their warm-start
 #' parameters from those rows, so a range changed since `evaluate()` would
-#' carry the old range's scoring into the new fit. The comparison is the
-#' checkpoint gate's: a recorded range must equal this object's, and a row
-#' with no recorded range (evaluated before the range existed, under the
-#' zero floor) passes only under the default range.
+#' carry the old range's scoring into the new fit. A recorded range must
+#' equal this object's. A row with no recorded range (evaluated before the
+#' range existed, or built by hand) was scored under the zero floor, so it
+#' passes only under the default range.
 #'
 #' @param x A `horizons_eval` that was screened by `evaluate()`.
 #' @param outcome_range `numeric(2)`. The object's range, from
@@ -1331,12 +1331,8 @@ check_evaluated_outcome_range <- function(x, outcome_range,
     rep(list(NULL), nrow(results))
   }
 
-  differs <- vapply(stamps, function(s) {
-    if (is.null(s$outcome_range)) {
-      outcome_range_unrecorded(s, outcome_range)
-    } else {
-      !identical(s$outcome_range, as.double(outcome_range))
-    }
+  differs <- !vapply(stamps, function(s) {
+    identical(s$outcome_range %||% DEFAULT_OUTCOME_RANGE, as.double(outcome_range))
   }, logical(1))
 
   if (!any(differs)) return(invisible(NULL))

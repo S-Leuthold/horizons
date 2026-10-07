@@ -66,11 +66,12 @@ So re-standardized spectra, a rescaled outcome, or another outcome on the
 same samples is refused rather than resumed, while adding a sibling
 response with \code{add_response()} or a \code{meta} column resumes. Keep one
 \code{output_dir} per outcome. The ranking \code{metric} is not checked, since
-every row carries all six cross-validated metrics. Rows scored under an
-earlier scoring schema are dropped and re-evaluated; rows for configs no
-longer in the grid are dropped; a file that cannot be used warns and its
-config is re-evaluated; rows written before a fingerprint field existed
-warn once and resume. Default NULL (no checkpointing).}
+every row carries all six cross-validated metrics. A row scored under an
+earlier scoring schema, or recording less of the training data and
+settings than this run does, was written by an earlier version: it is
+dropped and its config re-evaluated. Rows for configs no longer in the
+grid are dropped; a file that cannot be used warns and its config is
+re-evaluated. Default NULL (no checkpointing).}
 
 \item{seed}{Integer. Random seed for train/test split and CV folds.
 Default 307L.}
@@ -99,12 +100,10 @@ aborts when the outcome has zero variance: before the split, when every
 observed value is the same, and after it, when every training row left
 by the split and the response trim has the same value, since every
 config would then be tuned on a constant. The message names the outcome,
-the value and how many rows have it (#132). Checkpoint rows written
-before the range was recorded resume only under the default range.
-Called on an object that has already been through \code{fit()} or
-\code{ensemble()}, it returns a \code{horizons_eval} whose \code{models} and
-\code{ensemble} slots are empty again, since both were built on the
-evaluation it replaces.
+the value and how many rows have it (#132). Called on an object that
+has already been through \code{fit()} or \code{ensemble()}, it returns a
+\code{horizons_eval} whose \code{models} and \code{ensemble} slots are empty again,
+since both were built on the evaluation it replaces.
 }
 \description{
 Evaluates all model configurations from \code{configure()} against held-out test

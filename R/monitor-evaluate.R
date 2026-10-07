@@ -7,11 +7,12 @@
 #'
 #' The monitor reads the checkpoints through the same helpers and gates as
 #' `evaluate()`: the per-config files under `checkpoints/`. A row is neither
-#' counted nor ranked unless `evaluate()` would resume it: it must
-#' match the training-data fingerprint and the tuning settings recorded in
-#' `eval_manifest.rds` (which `evaluate()` writes at the start of each run),
-#' be scored under the current scoring schema, and belong to a config in the
-#' manifest's grid. Refused rows and unreadable files are shown, not hidden.
+#' counted nor ranked unless `evaluate()` would resume it: it must record,
+#' and match, the training-data fingerprint and the tuning settings recorded
+#' in `eval_manifest.rds` (which `evaluate()` writes at the start of each
+#' run), be scored under the current scoring schema, and belong to a config
+#' in the manifest's grid. Refused rows and unreadable files are shown, not
+#' hidden.
 #' A manifest written by another version of horizons is refused;
 #' `evaluate()` rewrites it when a run starts in the directory.
 #'
@@ -25,8 +26,9 @@
 #' @return Invisibly returns a list with completion stats (n_complete,
 #'   n_total, rate, eta, best_config, best_metric), `ignored` (the number of
 #'   rows refused, by reason: `other_data`, `other_settings`,
-#'   `earlier_schema`, `not_in_grid`) and `unreadable` (checkpoint files that
-#'   could not be read, relative to `output_dir`).
+#'   `earlier_schema` (another scoring schema, or recording less than the
+#'   manifest), `not_in_grid`) and `unreadable` (checkpoint files that could
+#'   not be read, relative to `output_dir`).
 #'
 #' @export
 monitor_evaluate <- function(output_dir, watch = FALSE, interval = 10) {
@@ -125,7 +127,7 @@ monitor_evaluate <- function(output_dir, watch = FALSE, interval = 10) {
   ## The expected fingerprint and settings come from the manifest, which
   ## evaluate() writes after its own gate has passed.
 
-  data_fp <- manifest[c("data_hash", "data_n_rows", "data_fields")]
+  data_fp <- manifest[c("data_hash", "data_fields")]
 
   store <- read_checkpoint_store(output_dir)
   gated <- gate_checkpoint_rows(store$rows, data_fp, manifest$settings,
@@ -155,46 +157,27 @@ monitor_evaluate <- function(output_dir, watch = FALSE, interval = 10) {
 
   pct <- round(100 * n_complete / manifest$n_total, 1)
 
-  ## Find best so far, by the SAME rule evaluate() will use: the relabel of
-  ## inert "pruned" rows at bayesian_iter = 0 (from the manifest's settings),
-  ## then ranking_candidates() (successes, or pruned rows with a cv value when
+  ## Find best so far, by the SAME rule evaluate() will use:
+  ## ranking_candidates() (successes, or pruned rows with a cv value when
   ## none succeeded), ranked on cv_<metric> through rank_configs_by_cv() with
-  ## its config_id tie-break, falling back to the test-set column for
-  ## checkpoint rows written before cv_* existed.
-  best_config   <- NA_character_
-  best_metric   <- NA_real_
-  metric_name   <- manifest$metric
-  higher_better <- metric_name %in% HIGHER_BETTER_METRICS
+  ## its config_id tie-break. When no candidate has a cv value, evaluate()
+  ## ranks none either.
+  best_config <- NA_character_
+  best_metric <- NA_real_
+  metric_name <- manifest$metric
+  cv_col      <- paste0("cv_", metric_name)
 
   rows <- unname(lapply(gated$kept, `[[`, "row"))
 
   if (length(rows) > 0) {
 
-    all_rows   <- relabel_inert_pruned(dplyr::bind_rows(rows),
-                                       manifest$settings$bayesian_iter)
-    candidates <- ranking_candidates(all_rows, metric_name)$rows
+    candidates <- ranking_candidates(dplyr::bind_rows(rows), metric_name)$rows
 
-    cv_col <- paste0("cv_", metric_name)
-
-    if (nrow(candidates) > 0 && cv_col %in% names(candidates) &&
-        any(!is.na(candidates[[cv_col]]))) {
+    if (any(!is.na(candidates[[cv_col]]))) {
 
       ranked      <- suppressWarnings(rank_configs_by_cv(candidates, metric_name))
       best_config <- ranked$config_id[1]
       best_metric <- ranked[[cv_col]][1]
-
-    } else if (nrow(candidates) > 0 && metric_name %in% names(candidates) &&
-               any(!is.na(candidates[[metric_name]]))) {
-
-      ## Legacy rows: same ordering rule on the test-set column
-      vals        <- candidates[[metric_name]]
-      keep        <- !is.na(vals)
-      candidates  <- candidates[keep, , drop = FALSE]
-      vals        <- vals[keep]
-      key         <- if (higher_better) -vals else vals
-      ord         <- order(key, candidates$config_id)
-      best_config <- candidates$config_id[ord[1]]
-      best_metric <- vals[ord[1]]
 
     }
 
@@ -216,9 +199,9 @@ monitor_evaluate <- function(output_dir, watch = FALSE, interval = 10) {
     } else {
       ""
     }
-    metric_val <- if (!is.na(.monitor_metric_value(row, metric_name))) {
-      paste0(toupper(metric_name), " = ",
-             round(.monitor_metric_value(row, metric_name), 3))
+    ## The cross-validated value evaluate() ranks on (#50)
+    metric_val <- if (!is.na(row[[cv_col]])) {
+      paste0(toupper(metric_name), " = ", round(row[[cv_col]], 3))
     } else {
       row$status
     }
@@ -238,28 +221,6 @@ monitor_evaluate <- function(output_dir, watch = FALSE, interval = 10) {
     ignored     = ignored,
     unreadable  = names(store$unreadable)
   )
-
-}
-
-
-#' The value the monitor ranks a checkpoint row on
-#'
-#' evaluate() ranks on the cross-validated metric (`cv_<metric>`, #50), so
-#' the monitor's "best so far" reads the same column. Checkpoint rows written
-#' before that column existed fall back to the test-set metric, so an old run
-#' can still be monitored.
-#' @noRd
-.monitor_metric_value <- function(row, metric_name) {
-
-  cv_col <- paste0("cv_", metric_name)
-
-  if (cv_col %in% names(row) && !is.na(row[[cv_col]])) {
-
-    return(row[[cv_col]])
-
-  }
-
-  if (metric_name %in% names(row)) row[[metric_name]] else NA_real_
 
 }
 
@@ -299,7 +260,7 @@ monitor_evaluate <- function(output_dir, watch = FALSE, interval = 10) {
 
     reasons <- c(other_data     = "other training data",
                  other_settings = "other tuning settings",
-                 earlier_schema = "earlier scoring schema",
+                 earlier_schema = "earlier schema",
                  not_in_grid    = "config not in this grid")
     shown   <- stats$ignored[stats$ignored > 0]
 
