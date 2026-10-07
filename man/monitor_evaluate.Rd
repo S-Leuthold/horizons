@@ -34,7 +34,7 @@ counted nor ranked unless \code{evaluate()} would resume it: it must
 match the training-data fingerprint and the tuning settings recorded in
 \code{eval_manifest.rds} (which \code{evaluate()} writes at the start of each run),
 be scored under the current scoring schema, and belong to a config in the
-manifest's grid. A manifest written before a fingerprint or the settings
-were recorded cannot be checked against them, so rows are not refused on
-that count. Refused rows and unreadable files are shown, not hidden.
+manifest's grid. Refused rows and unreadable files are shown, not hidden.
+A manifest written by another version of horizons is refused;
+\code{evaluate()} rewrites it when a run starts in the directory.
 }

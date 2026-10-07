@@ -579,17 +579,16 @@ evaluate <- function(x,
   ## Written on EVERY run with an output_dir, whichever axis, and refreshed
   ## each time, so the monitor can watch a resamples-axis or sequential run
   ## and never reports a stale axis from an earlier run in the same
-  ## directory. Schema 2 (2026-09-15) records the axis and the user's plan;
-  ## schema 3 (2026-09-21) records the training-data fingerprint, so the
-  ## monitor can say which rows the run in this directory is scoring; schema
-  ## 4 (#42) records the data fields and the tuning settings. The monitor
+  ## directory. It records the axis and the user's plan, and the training-data
+  ## fingerprint, so the monitor can say which rows the run in this directory
+  ## is scoring, with the data fields and the tuning settings. The monitor
   ## gates checkpoint rows against them, as evaluate() does, and re-reads the
   ## manifest on every poll, so it is written atomically.
 
   if (!is.null(output_dir)) {
 
     manifest <- list(
-      schema_version               = 4L,
+      schema_version               = EVAL_MANIFEST_SCHEMA,
       n_total                      = n_total,
       n_pending                    = n_pending,
       config_ids                   = configs$config_id,
@@ -1122,8 +1121,7 @@ read_checkpoint_store <- function(output_dir) {
 #' @param data_fp This run's fingerprint from [eval_data_fingerprint()]. A
 #'   `NA` hash, or `NULL` fields, means the run cannot be checked on that
 #'   count, and the row counts as unverified.
-#' @param settings This run's [eval_settings()], or `NULL` when unknown (a
-#'   manifest older than schema 4).
+#' @param settings This run's [eval_settings()].
 #' @return List with `verdict` (`"keep"`, `"data_mismatch"`,
 #'   `"settings_mismatch"` or `"foreign_schema"`), `data_verified` and
 #'   `settings_verified` (logical), `fingerprint` (the row's, from

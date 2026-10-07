@@ -11,9 +11,9 @@
 #' match the training-data fingerprint and the tuning settings recorded in
 #' `eval_manifest.rds` (which `evaluate()` writes at the start of each run),
 #' be scored under the current scoring schema, and belong to a config in the
-#' manifest's grid. A manifest written before a fingerprint or the settings
-#' were recorded cannot be checked against them, so rows are not refused on
-#' that count. Refused rows and unreadable files are shown, not hidden.
+#' manifest's grid. Refused rows and unreadable files are shown, not hidden.
+#' A manifest written by another version of horizons is refused;
+#' `evaluate()` rewrites it when a run starts in the directory.
 #'
 #' @param output_dir Character. Path to the output directory passed to
 #'   `evaluate()`.
@@ -97,13 +97,18 @@ monitor_evaluate <- function(output_dir, watch = FALSE, interval = 10) {
 
   manifest <- readRDS(manifest_path)
 
-  ## Schema 1 (pre-2026-09-15) manifests carry workers/outer/inner from the
-  ## auto-split design; schema 2 carries the axis and the user's plan; schema
-  ## 3 (2026-09-21) adds the training-data fingerprint; schema 4 (#42) the
-  ## data fields and tuning settings. All are read: the monitor needs only
-  ## n_total, metric and start_time to work, so a run started before M2 can
-  ## still be watched.
-  manifest$schema_version <- manifest$schema_version %||% 1L
+  ## The gate below reads this schema's fields. evaluate() rewrites the
+  ## manifest at the start of every run, so one of another schema is from a
+  ## run by another version of horizons.
+  if (!identical(manifest$schema_version, EVAL_MANIFEST_SCHEMA)) {
+
+    rlang::abort(paste0(
+      "The eval_manifest.rds in '", output_dir, "' was written by another ",
+      "version of horizons. evaluate() rewrites it when a run starts in this ",
+      "directory; monitor that run."
+    ))
+
+  }
 
   manifest
 
@@ -118,14 +123,9 @@ monitor_evaluate <- function(output_dir, watch = FALSE, interval = 10) {
   ## Read and gate the store as evaluate() does
   ## -------------------------------------------------------------------------
   ## The expected fingerprint and settings come from the manifest, which
-  ## evaluate() writes after its own gate has passed. What an older manifest
-  ## does not record is NA or NULL, which the gate treats as uncheckable.
+  ## evaluate() writes after its own gate has passed.
 
-  data_fp <- list(
-    data_hash   = manifest$data_hash %||% NA_character_,
-    data_n_rows = manifest$data_n_rows %||% NA_integer_,
-    data_fields = manifest$data_fields
-  )
+  data_fp <- manifest[c("data_hash", "data_n_rows", "data_fields")]
 
   store <- read_checkpoint_store(output_dir)
   gated <- gate_checkpoint_rows(store$rows, data_fp, manifest$settings,
@@ -272,42 +272,23 @@ monitor_evaluate <- function(output_dir, watch = FALSE, interval = 10) {
   cat(paste0(paste(rep("\u2500", 50), collapse = ""), "\n"))
   cat(paste0("  evaluate() monitor \u2014 ", format(Sys.time(), "%H:%M:%S"), "\n"))
 
-  if ((manifest$schema_version %||% 1L) >= 2L) {
-
-    cat(paste0("  Parallel:  over ", manifest$axis, " on ", manifest$plan,
-               " (", manifest$workers, " worker",
-               if (!identical(manifest$workers, 1L)) "s" else "", ")\n"))
-
-  } else {
-
-    cat(paste0("  Parallel:  legacy manifest (workers = ",
-               manifest$workers %||% "?", ")\n"))
-
-  }
+  cat(paste0("  Parallel:  over ", manifest$axis, " on ", manifest$plan,
+             " (", manifest$workers, " worker",
+             if (!identical(manifest$workers, 1L)) "s" else "", ")\n"))
 
   ## Which rows this directory is scoring. Without it, two runs pointed at
   ## one output_dir are indistinguishable in the monitor.
-  if (!is.null(manifest$data_hash) && !is.na(manifest$data_hash)) {
+  cat(paste0("  Data:      ", manifest$data_n_rows, " training rows of ",
+             manifest$data_fields$outcome, ", hash ",
+             substr(manifest$data_hash, 1, 12), "\n"))
 
-    outcome <- manifest$data_fields$outcome
+  cat(paste0("  Settings:  ",
+             paste0(names(manifest$settings), " = ",
+                    vapply(manifest$settings, format_setting_value,
+                           character(1)),
+                    collapse = ", "),
+             "\n"))
 
-    cat(paste0("  Data:      ", manifest$data_n_rows %||% "?",
-               " training rows",
-               if (!is.null(outcome)) paste0(" of ", outcome) else "",
-               ", hash ", substr(manifest$data_hash, 1, 12), "\n"))
-
-  }
-
-  if (!is.null(manifest$settings)) {
-
-    cat(paste0("  Settings:  ",
-               paste0(names(manifest$settings), " = ",
-                      vapply(manifest$settings, format_setting_value,
-                             character(1)),
-                      collapse = ", "),
-               "\n"))
-
-  }
   cat(paste0(paste(rep("\u2500", 50), collapse = ""), "\n\n"))
 
   cat(paste0("  Progress:  ", stats$n_complete, " / ", stats$n_total,

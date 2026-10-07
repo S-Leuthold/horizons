@@ -267,6 +267,13 @@ PARALLELIZE_OVER_VALUES <- c("auto", "configs", "resamples")
 # Rows without the column are schema 1.
 SCORING_SCHEMA <- 2L
 
+# Schema of eval_manifest.rds, which evaluate() writes at the start of every
+# run with an output_dir and monitor_evaluate() reads. Schema 4 (#42) records
+# the axis and the user's plan, the training-data fingerprint and its fields,
+# and the tuning settings. Bump it when a field the monitor reads changes; the
+# monitor refuses a manifest of any other schema.
+EVAL_MANIFEST_SCHEMA <- 4L
+
 # future.globals.maxSize for the configs-axis dispatch, set by evaluate() for
 # the duration of the call. Declared rather than inherited so a payload
 # regression fails loudly with future's "size of the globals ... exceeds"
