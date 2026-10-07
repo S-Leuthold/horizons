@@ -352,24 +352,25 @@ evaluate_single_config <- function(config_row,
       capture_conditions = TRUE
     )
 
-    if (is.null(bayes_result$error)) {
+    ## When the search fails, final_tune_results stays as grid_results and
+    ## the row records why, so a config whose Bayesian budget did nothing
+    ## does not read as an ordinary success (#209).
+    if (!is.null(bayes_result$error)) {
 
+      warning_log <- dplyr::bind_rows(warning_log, text_records(
+        paste0("The Bayesian search failed, so the hyperparameters were chosen from the grid alone: ",
+               condition_summary(bayes_result$error)),
+        pinned = TRUE
+      ))
+
+    } else {
+
+      ## Iterations that failed inside a search that completed leave their
+      ## reasons in .notes, which collect_notes_from() reads below.
       collect_from(bayes_result)
-
-      ## Check for all-models-failed
-      all_failed <- FALSE
-
-      if (!is.null(bayes_result$warnings)) {
-        all_failed <- any(grepl("All models failed", unlist(bayes_result$warnings)))
-      }
-
-      if (!all_failed) {
-        final_tune_results <- bayes_result$result
-      }
+      final_tune_results <- bayes_result$result
 
     }
-
-    ## On failure or all-models-failed: final_tune_results stays as grid_results
     gc(verbose = FALSE)
 
   }

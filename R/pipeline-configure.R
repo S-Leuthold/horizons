@@ -372,6 +372,19 @@ configure <- function(x,
 
   }
 
+  ## The Bayesian search starts from the grid's results, and tune_bayes()
+  ## needs at least two of them to fit its Gaussian process, so on a grid of
+  ## one the stage could never run (#209).
+  if (bayesian_iter > 0 && grid_size < 2) {
+
+    abort_nested(
+      "`grid_size` must be at least 2 when `bayesian_iter` is above 0",
+      c(paste0("Got: grid_size = ", grid_size, ", bayesian_iter = ", bayesian_iter),
+        "The Bayesian search starts from the grid and needs at least two of its points; raise grid_size, or set bayesian_iter = 0")
+    )
+
+  }
+
   if (!is.numeric(final_bayesian_iter) || length(final_bayesian_iter) != 1 ||
       is.na(final_bayesian_iter) ||
       final_bayesian_iter != as.integer(final_bayesian_iter) ||

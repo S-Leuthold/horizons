@@ -492,6 +492,35 @@ describe("evaluate_single_config() - prune gate at bayesian_iter = 0 (#38)", {
 ## mtry ceiling — the predictor count comes from the recipe's roles
 ## =========================================================================
 
+describe("evaluate_single_config() - a Bayesian search that fails (#209)", {
+
+  it("keeps the grid's choice and records on the row that the search failed", {
+
+    ## A grid of one gives tune_bayes() a single initial point; it needs two,
+    ## so the search aborts every time. configure() refuses this combination,
+    ## but the unit takes its sizes directly.
+    setup  <- make_eval_setup()
+    result <- suppressWarnings(evaluate_single_config(
+      config_row    = make_eval_config(),
+      split         = setup$split,
+      cv_folds      = setup$folds,
+      role_map      = setup$role_map,
+      grid_size     = 1,
+      bayesian_iter = 2,
+      prune         = FALSE,
+      seed          = 42L
+    ))
+
+    expect_equal(result$status, "success")
+    expect_true(any(grepl(
+      "The Bayesian search failed, so the hyperparameters were chosen from the grid alone",
+      result$warnings[[1]], fixed = TRUE
+    )))
+
+  })
+
+})
+
 describe("the mtry upper bound", {
 
   ## A sibling lab measurement is held at role `response_hold`: it is in the

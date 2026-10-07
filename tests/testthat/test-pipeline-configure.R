@@ -331,6 +331,21 @@ describe("configure() validation", {
 
   })
 
+  test_that("refuses a grid of one when a Bayesian stage would start from it (#209)", {
+
+    hd <- make_single_response_hd()
+
+    expect_error(
+      capture.output(configure(hd, grid_size = 1, bayesian_iter = 5)),
+      "`grid_size` must be at least 2 when `bayesian_iter` is above 0", fixed = TRUE,
+      class = "horizons_configure_error"
+    )
+
+    ## With no Bayesian stage, a grid of one is still a valid request.
+    expect_no_error(capture.output(configure(hd, grid_size = 1, bayesian_iter = 0)))
+
+  })
+
   test_that("rejects an sg_window that is even, below 5, fractional or not a scalar (#62)", {
 
     hd <- make_single_response_hd()
