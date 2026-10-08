@@ -15,6 +15,7 @@
 
 ## Bug fixes
 
+* `evaluate()` and `fit()` record when a Bayesian search fails or returns without running an iteration past the grid, and the grid's choice is kept, instead of reporting an ordinary success. `configure()` refuses `grid_size = 1` when `bayesian_iter` or `final_bayesian_iter` is above 0, where the search could never start (#209).
 * `evaluate()` no longer refuses to resume a checkpoint written on the same data under another locale. The check compared a hash of the sample ids sorted in the session's collation; it now compares the recorded data fields (#213).
 * `summary()` no longer closes the Data tree twice for an object with no outcome (#205).
 * `step_select_correlation()` errors at `bake()` when new data lacks a wavenumber it selected, as `step_select_cars()` and `step_select_boruta()` do. It returned the data without its selected columns (#200).
