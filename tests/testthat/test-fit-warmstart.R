@@ -372,6 +372,33 @@ describe("tune_warmstart_bayes() - return contract", {
 })
 
 
+describe("tune_warmstart_bayes() - a Bayesian search that fails (#209)", {
+
+  it("keeps the grid's choice and says why", {
+
+    ts <- make_tune_setup()
+
+    ## A starting grid of one point: tune_bayes() needs two, so it aborts.
+    result <- suppressWarnings(tune_warmstart_bayes(
+      workflow      = ts$wf,
+      cv_resamples  = ts$folds,
+      best_params   = tibble::tibble(mtry = 5L, trees = 100L, min_n = 5L),
+      param_set     = ts$param_set,
+      bayesian_iter = 2L,
+      grid_size     = 1L,
+      metric_set    = ts$metric_set,
+      allow_par     = FALSE
+    ))
+
+    expect_true(result$bayes_failed)
+    expect_type(result$bayes_error, "character")
+    expect_equal(nrow(result$best_params), 1)
+
+  })
+
+})
+
+
 describe("tune_warmstart_bayes() - fallback behavior", {
 
   ts <- make_tune_setup()
