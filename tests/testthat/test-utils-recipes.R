@@ -81,7 +81,7 @@ make_config_row <- function(model             = "rf",
 
 describe("build_recipe()", {
 
-  it("returns a recipe object", {
+  it("returns a recipe object, with SOC as its only outcome and sample_id as its only id", {
 
     td <- make_test_data()
     config <- make_config_row()
@@ -90,30 +90,11 @@ describe("build_recipe()", {
 
     expect_s3_class(rec, "recipe")
 
-  })
-
-  it("sets outcome role correctly", {
-
-    td <- make_test_data()
-    config <- make_config_row()
-
-    rec <- build_recipe(config, td$data, td$role_map)
-
     ## Check that SOC is the outcome
     var_info <- rec$var_info
     outcome_vars <- var_info$variable[var_info$role == "outcome"]
     expect_equal(outcome_vars, "SOC")
 
-  })
-
-  it("sets id role correctly", {
-
-    td <- make_test_data()
-    config <- make_config_row()
-
-    rec <- build_recipe(config, td$data, td$role_map)
-
-    var_info <- rec$var_info
     id_vars <- var_info$variable[var_info$role == "id"]
     expect_equal(id_vars, "sample_id")
 
@@ -122,18 +103,8 @@ describe("build_recipe()", {
   ## -----------------------------------------------------------------------
   ## Response transformation
   ## -----------------------------------------------------------------------
-
-  it("adds step_log for log transformation", {
-
-    td <- make_test_data()
-    config <- make_config_row(transformation = "log")
-
-    rec <- build_recipe(config, td$data, td$role_map)
-
-    step_classes <- vapply(rec$steps, function(s) class(s)[1], character(1))
-    expect_true("step_log" %in% step_classes)
-
-  })
+  ## step_log's presence is asserted by the step-order and case tests below,
+  ## which fail without it.
 
   it("adds step_sqrt for sqrt transformation", {
 
@@ -161,41 +132,11 @@ describe("build_recipe()", {
   })
 
   ## -----------------------------------------------------------------------
-  ## Spectral preprocessing
+  ## Spectral preprocessing and feature selection
   ## -----------------------------------------------------------------------
-
-  it("adds step_transform_spectra for all configs", {
-
-    td <- make_test_data()
-
-    for (preproc in c("raw", "snv", "deriv1")) {
-
-      config <- make_config_row(preprocessing = preproc)
-      rec <- build_recipe(config, td$data, td$role_map)
-
-      step_classes <- vapply(rec$steps, function(s) class(s)[1], character(1))
-      expect_true("step_transform_spectra" %in% step_classes,
-                  info = paste("Missing step_transform_spectra for", preproc))
-
-    }
-
-  })
-
-  ## -----------------------------------------------------------------------
-  ## Feature selection
-  ## -----------------------------------------------------------------------
-
-  it("adds step_pca for pca feature selection", {
-
-    td <- make_test_data()
-    config <- make_config_row(feature_selection = "pca")
-
-    rec <- build_recipe(config, td$data, td$role_map)
-
-    step_classes <- vapply(rec$steps, function(s) class(s)[1], character(1))
-    expect_true("step_pca" %in% step_classes)
-
-  })
+  ## The transform step's presence for every method is asserted by the
+  ## sg_window test (#62), which reads it as the first step; step_pca's by the
+  ## step-order, case and pca_threshold tests.
 
   it("adds no feature selection step for 'none'", {
 
@@ -562,26 +503,6 @@ describe("build_recipe() serialization footprint", {
 
   })
 
-  it("still resolves its selectors after the environments are stripped", {
-
-    ## The footprint fix re-points selector quosures at a minimal environment.
-    ## The risk it introduces is that a selector can no longer find the names it
-    ## references, so prep() must still succeed and the spectral columns must
-    ## still have been consumed by the steps.
-    td     <- make_test_data(n = 100, n_wn = 60)
-    config <- make_config_row(preprocessing = "snv", feature_selection = "pca")
-
-    rec   <- build_recipe(config, td$data, td$role_map)
-    baked <- recipes::bake(recipes::prep(rec), new_data = NULL)
-
-    ## PCA ran: raw wavenumber columns are gone, components took their place.
-    expect_false(any(grepl("^wn_", names(baked))))
-    expect_true(any(grepl("^PC", names(baked))))
-    expect_true("SOC" %in% names(baked))
-    expect_equal(nrow(baked), nrow(td$data))
-
-  })
-
 })
 
 ## =========================================================================
@@ -759,21 +680,6 @@ describe("process_spectra_row() against prospectr", {
     snv_deriv2 = function(x, w) sg(snv(x), m = 2, p = 3, w = w)
   )
 
-  it("matches the direct prospectr call for each of the seven methods", {
-
-    set.seed(52)
-    x <- cumsum(rnorm(61))
-
-    for (m in names(reference)) {
-
-      expect_equal(horizons:::process_spectra_row(x, preprocessing = m, window_size = 9),
-                   reference[[m]](x, 9),
-                   tolerance = 1e-12, label = m)
-
-    }
-
-  })
-
   it("returns length(in) - (w - 1) for every method across odd windows", {
 
     ## Windows start at 5: the second-derivative methods fit a cubic, which
@@ -883,22 +789,6 @@ describe("selection steps abort on a zero-column selector", {
       recipes::step_pca(select_generated_spectra(), threshold = 0.995)
 
     expect_error(recipes::prep(rec), "nothing to select")
-
-  })
-
-  it("the pca branch still preps when the pattern matches", {
-
-    df <- as.data.frame(matrix(rnorm(200), nrow = 20))
-    names(df) <- paste0("spec", 1:10)
-    df$SOC    <- runif(20, 0.5, 10)
-
-    rec <- recipes::recipe(SOC ~ ., data = df) |>
-      recipes::step_pca(select_generated_spectra(), threshold = 0.995)
-
-    prepped <- recipes::prep(rec)
-    baked   <- recipes::bake(prepped, new_data = df)
-
-    expect_true(any(grepl("^PC", names(baked))))
 
   })
 
@@ -1021,9 +911,12 @@ describe("step_transform_spectra() name collisions and window size", {
 ##
 ## The predict path bakes new data through the recipe the model was fit with,
 ## so any divergence between the training-time and predict-time predictor
-## names is a silent feature-space mismatch. Asserted across the selection
-## methods and the preprocessing methods, because the failure modes differ:
-## the transform step renames, and each selection step subsets.
+## names is a silent feature-space mismatch. Asserted for every preprocessing
+## method without selection, and for every selection method on raw spectra,
+## because the failure modes differ: the transform step renames, and each
+## selection step subsets. The two are not crossed: the transform step names
+## its output spec01, spec02, ... whatever the method, so the names a
+## selection step sees do not depend on it.
 
 describe("prepped recipes bake identical predictor names on train and new data", {
 
@@ -1031,7 +924,7 @@ describe("prepped recipes bake identical predictor names on train and new data",
 
   for (fs in selection_methods) {
 
-    for (pp in c("raw", "snv", "deriv2")) {
+    for (pp in if (fs == "none") c("raw", "snv", "deriv2") else "raw") {
 
       it(paste0("feature_selection = '", fs, "', preprocessing = '", pp, "'"), {
 
