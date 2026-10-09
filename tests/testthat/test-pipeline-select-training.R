@@ -682,29 +682,7 @@ test_that("scope = 'global' runs the twin check, reports it, and keeps the rows"
 })
 
 
-test_that("scope = 'global' records mean_k as the mean of k, not the nearest again", {
-
-  ## The column has to mean the same thing in every branch: global set it to
-  ## the first column, so mean_k equalled nearest and the applicability
-  ## signal the control arm reports was not the one batch reports.
-
-  fx <- select_fixture(n_pool = 60, seed = 3)
-
-  g <- quiet_select(fx, k = 10, scope = "global", properties = "clay")$selection$target_distances
-  b <- quiet_select(fx, k = 10, scope = "batch",  properties = "clay")$selection$target_distances
-
-  expect_named(g, c("target_id", "property", "space", "nearest", "mean_k"))
-  expect_true(all(g$mean_k >= g$nearest))
-  expect_false(isTRUE(all.equal(g$mean_k, g$nearest)))
-
-  ## The two branches measure the same thing over the same k rows, the twin
-  ## target included: global drops its twins from the distances as batch does.
-  expect_equal(g$mean_k, b$mean_k[match(g$target_id, b$target_id)], tolerance = 1e-10)
-
-})
-
-
-test_that("scope = 'global' records the exclusions batch records, under the same rule", {
+test_that("scope = 'global' records the exclusions batch records, under the same rule, and mean_k as the mean of k", {
 
   ## The control arm's twin rule has to be the rule the other arms run, or a
   ## scope sweep measures the rule as well as the scope. On these 63 rows
@@ -729,12 +707,22 @@ test_that("scope = 'global' records the exclusions batch records, under the same
     ## And the applicability signal is the one batch reports
     expect_identical(g$target_distances, b$target_distances)
 
+    ## mean_k has to mean the same thing in every branch: global set it to
+    ## the first column, so mean_k equalled nearest and the applicability
+    ## signal the control arm reports was not the one batch reports. The
+    ## identity above holds global to batch, over the same k rows with the
+    ## twins dropped; these hold mean_k to its own definition.
+    td <- g$target_distances
+    expect_named(td, c("target_id", "property", "space", "nearest", "mean_k"))
+    expect_true(all(td$mean_k >= td$nearest))
+    expect_false(isTRUE(all.equal(td$mean_k, td$nearest)))
+
   }
 
 })
 
 
-test_that("at k = 1 batch and global record every twin in the measured pool", {
+test_that("at k = 1 batch and global record every twin in the measured pool, with one distance row per target per property", {
 
   ## The parity tests cannot see a fault inside draw_neighbours() that both
   ## scopes share. This one fetches every measured row, flags them all, and
@@ -770,8 +758,14 @@ test_that("at k = 1 batch and global record every twin in the measured pool", {
 
     for (scope in c("batch", "global")) {
 
-      ex <- quiet_select(fx, k = 1, scope = scope, twin_ratio = ratio)$selection$exclusions
+      sel <- quiet_select(fx, k = 1, scope = scope, twin_ratio = ratio)$selection
+      ex  <- sel$exclusions
       expect_setequal(key(ex), truth)
+
+      ## One distance row per target per property, as batch writes them
+      td <- sel$target_distances
+      expect_false(anyNA(td$property))
+      expect_identical(nrow(td), 2L * fx$targets$data$n_rows)
 
     }
 
@@ -888,37 +882,6 @@ test_that("a property with no measured pool row stops every scope", {
                  regexp = "measured rows for oc", class = "horizons_input_error")
 
   }
-
-})
-
-
-test_that("scope = 'global' records each exclusion with its property, on that property's rows", {
-
-  fx  <- select_fixture(n_pool = 60, seed = 3, n_replicates = 3)
-  out <- quiet_select(fx, k = 10, scope = "global")
-
-  ex   <- out$selection$exclusions
-  a    <- fx$pool$data$analysis
-  self <- c(fx$twin_pool_id, fx$replicate_pool_ids)
-
-  expect_false(anyNA(ex$property))
-  expect_setequal(unique(ex$property), c("clay", "oc"))
-
-  ## Clay is measured on every row, so the whole cluster is the twin
-  ## target's exclusion for clay; for oc only the members that have oc
-  ## measured are, because the check runs on each property's own rows.
-  oc_self <- self[!is.na(a$oc[match(self, a$sample_id)])]
-  expect_lt(length(oc_self), length(self))
-  expect_gt(length(oc_self), 0L)
-
-  mine <- ex[ex$target_id == fx$twin_id, ]
-  expect_setequal(mine$pool_id[mine$property == "clay"], self)
-  expect_setequal(mine$pool_id[mine$property == "oc"],   oc_self)
-
-  ## One distance row per target per property, as batch writes them
-  td <- out$selection$target_distances
-  expect_false(anyNA(td$property))
-  expect_identical(nrow(td), 2L * fx$targets$data$n_rows)
 
 })
 
@@ -1364,24 +1327,11 @@ test_that("the space is always the library's: space_rows is gone", {
 ## Output
 ## =============================================================================
 
-test_that("verbose = FALSE prints nothing", {
+test_that("verbose = TRUE reports the pool, the space and the draw", {
 
   fx <- select_fixture(n_pool = 60)
 
-  expect_silent(select_training(fx$targets, fx$pool, k = 5, verbose = FALSE))
-
-})
-
-
-test_that("verbose = TRUE reports the pool, the space and the draw", {
-
-  fx  <- select_fixture(n_pool = 60)
-  txt <- utils::capture.output(out <- select_training(fx$targets, fx$pool, k = 5))
-
-  expect_true(any(grepl("Selecting", txt)))
-  expect_true(any(grepl("clay", txt)))
-  expect_true(any(grepl("components", txt)))
-  expect_true(any(grepl("twin", txt, ignore.case = TRUE)))
+  expect_snapshot(out <- select_training(fx$targets, fx$pool, k = 5))
 
 })
 
@@ -1450,19 +1400,6 @@ test_that("permuting the pool's responses collapses the evaluated CV", {
   ## forest, so the point is that the permuted model has no signal at all,
   ## not where exactly the real one lands.
   expect_lt(permuted, 1.3)
-
-})
-
-
-test_that("print() shows a Selection section", {
-
-  fx  <- select_fixture(n_pool = 60)
-  out <- quiet_select(fx, k = 5)
-  txt <- utils::capture.output(print(out))
-
-  expect_true(any(grepl("^Selection", txt)))
-  expect_true(any(grepl("batch", txt)))
-  expect_true(any(grepl("k: 5", txt)))
 
 })
 

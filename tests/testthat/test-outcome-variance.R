@@ -117,61 +117,40 @@ describe("check_training_outcome_variance()", {
 
   })
 
+  ## One snapshot per remedy branch. The remedy follows where the other rows
+  ## went: the calibration draw and the trim can be undone, rows in the test
+  ## set only come back with more data. The class is asserted beside each
+  ## snapshot, not in it.
+
   it("names the outcome, the value, the count, and where the other rows went", {
 
-    err <- expect_error(
-      check_training_outcome_variance(
-        rep(0, 12),
-        held_out = list("in the test set"              = c(0, 4, 0),
-                        "in the calibration set"       = c(2, 3),
-                        "trimmed as response outliers" = NULL),
-        outcome_col = "SOC",
-        verb        = "fit"
-      ),
-      class = "horizons_input_error"
-    )
+    to_calibration <- list("in the test set"              = c(0, 4, 0),
+                           "in the calibration set"       = c(2, 3),
+                           "trimmed as response outliers" = NULL)
 
-    msg <- one_line(err)
-    expect_match(msg, "fit() cannot fit SOC: all 12 training rows have the value 0", fixed = TRUE)
-    expect_match(msg, "The 3 modelled rows with another value are all outside the training rows: 1 in the test set, 2 in the calibration set", fixed = TRUE)
-    expect_no_match(msg, "trimmed")
-
-    ## The remedy follows where the rows went
-    expect_match(msg, "compute_uq = FALSE, compute_ad = FALSE", fixed = TRUE)
-    expect_match(msg, "Otherwise SOC needs more samples", fixed = TRUE)
-    expect_no_match(msg, "remove_outliers")
+    expect_error(check_training_outcome_variance(rep(0, 12), to_calibration, "SOC", "fit"),
+                 class = "horizons_input_error")
+    expect_snapshot(check_training_outcome_variance(rep(0, 12), to_calibration, "SOC", "fit"),
+                    error = TRUE)
 
   })
 
   it("offers undoing the trim when the trim holds the other rows, and only more data when the test set does", {
 
-    trimmed <- one_line(expect_error(
-      check_training_outcome_variance(
-        rep(0, 12),
-        held_out = list("in the test set"              = c(0, 0),
-                        "trimmed as response outliers" = c(9)),
-        outcome_col = "SOC",
-        verb        = "evaluate"
-      ),
-      class = "horizons_input_error"
-    ))
+    to_trim <- list("in the test set"              = c(0, 0),
+                    "trimmed as response outliers" = c(9))
 
-    expect_match(trimmed, 'without remove_outliers = "response"', fixed = TRUE)
-    expect_no_match(trimmed, "compute_uq")
+    expect_error(check_training_outcome_variance(rep(0, 12), to_trim, "SOC", "evaluate"),
+                 class = "horizons_input_error")
+    expect_snapshot(check_training_outcome_variance(rep(0, 12), to_trim, "SOC", "evaluate"),
+                    error = TRUE)
 
-    test_only <- one_line(expect_error(
-      check_training_outcome_variance(
-        rep(0, 12),
-        held_out = list("in the test set" = c(0, 4)),
-        outcome_col = "SOC",
-        verb        = "evaluate"
-      ),
-      class = "horizons_input_error"
-    ))
+    to_test_set <- list("in the test set" = c(0, 4))
 
-    expect_match(test_only, "SOC needs more samples where it varies", fixed = TRUE)
-    expect_no_match(test_only, "Otherwise")
-    expect_no_match(test_only, "remove_outliers")
+    expect_error(check_training_outcome_variance(rep(0, 12), to_test_set, "SOC", "evaluate"),
+                 class = "horizons_input_error")
+    expect_snapshot(check_training_outcome_variance(rep(0, 12), to_test_set, "SOC", "evaluate"),
+                    error = TRUE)
 
   })
 

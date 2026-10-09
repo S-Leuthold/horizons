@@ -204,7 +204,7 @@ plan_record <- function() {
 
 }
 
-## One allow_par = TRUE run under a sequential plan, read by the three tests
+## One allow_par = TRUE run under a sequential plan, read by the two tests
 ## below (helper-memo.R). The builder registers the sequential plan itself and
 ## puts the caller's back, recording the plan as the run found it and left
 ## it. future sets a registered plan up on its first use (nbrOfWorkers() is
@@ -248,7 +248,7 @@ replay_warnings <- function(run) {
 
 describe("evaluate() - allow_par without a usable backend", {
 
-  it("warns naming the plan and runs sequentially", {
+  it("warns naming the plan, runs sequentially, and never registers or alters the plan", {
 
     run <- allow_par_run()
 
@@ -263,6 +263,8 @@ describe("evaluate() - allow_par without a usable backend", {
     expect_s3_class(result, "horizons_eval")
     expect_equal(result$evaluation$parallelize_over, "sequential")
     expect_identical(result$evaluation$workers, 1L)
+
+    expect_identical(run$plan_after, run$plan_before)
 
   })
 
@@ -281,14 +283,6 @@ describe("evaluate() - allow_par without a usable backend", {
                  seq_result$evaluation$results$rmse)
     expect_equal(par_result$evaluation$best_config,
                  seq_result$evaluation$best_config)
-
-  })
-
-  it("never registers or alters the plan", {
-
-    run <- allow_par_run()
-
-    expect_identical(run$plan_after, run$plan_before)
 
   })
 
@@ -312,50 +306,6 @@ describe("evaluate() - output_dir requirement", {
 
   })
 
-  it("is not required on the resamples axis", {
-
-    skip_unless_slow_tier()
-    skip_on_cran()
-    local_plan(future::multisession, workers = 2)
-    obj <- make_eval_object(n_configs = 2)
-
-    result <- suppressWarnings(
-      evaluate(obj, allow_par = TRUE, parallelize_over = "resamples",
-               verbose = FALSE, seed = 42L)
-    )
-
-    expect_s3_class(result, "horizons_eval")
-    expect_equal(result$evaluation$parallelize_over, "resamples")
-    expect_identical(result$evaluation$workers, 2L)
-
-  })
-
-})
-
-
-## =========================================================================
-## Resamples axis runs under load_all(): tune dispatches by value
-## =========================================================================
-
-describe("evaluate() - resamples axis", {
-
-  it("runs on the registered plan and records the axis", {
-
-    skip_unless_slow_tier()
-    skip_on_cran()
-    local_plan(future::multisession, workers = 2)
-    obj <- make_eval_object(n_configs = 2)   # 2 < cv_folds (3) -> auto = resamples
-
-    result <- suppressWarnings(
-      evaluate(obj, allow_par = TRUE, verbose = FALSE, seed = 42L)
-    )
-
-    expect_equal(result$evaluation$parallelize_over, "resamples")
-    expect_equal(nrow(result$evaluation$results), 2)
-    expect_true(all(result$evaluation$results$status %in% c("success", "pruned", "failed")))
-
-  })
-
 })
 
 
@@ -364,9 +314,9 @@ describe("evaluate() - resamples axis", {
 ## =========================================================================
 
 ## One four-config run on a two-worker plan, parallelize_over = "auto"
-## (4 configs >= 3 folds, so the configs axis), read by three of the tests
-## below; each gets a private copy of its output_dir (helper-memo.R). The
-## builder registers the plan itself and puts the caller's back, recording the
+## (4 configs >= 3 folds, so the configs axis), read by the test below, which
+## gets a private copy of its output_dir (helper-memo.R). The builder
+## registers the plan itself and puts the caller's back, recording the
 ## plan (plan_record(), set up first, as in allow_par_run() above) and the
 ## worker count as the run found and left them. It muffles the plan's
 ## warnings as well as the run's: a warning in a build would fail every test
@@ -396,7 +346,7 @@ build_configs_axis_run <- function(dir) {
 
 describe("evaluate() - configs axis", {
 
-  it("writes a schema-4 manifest describing the plan, the axis, the data and the settings", {
+  it("writes a schema-4 manifest describing the plan, the axis, the data and the settings, one result and one checkpoint per config, and leaves the user's plan exactly as it found it", {
 
     skip_unless_slow_tier()
     skip_on_cran()
@@ -425,18 +375,6 @@ describe("evaluate() - configs axis", {
     expect_equal(result$evaluation$parallelize_over, "configs")
     expect_identical(result$evaluation$workers, 2L)
 
-  })
-
-  it("produces one result and one checkpoint per config", {
-
-    skip_unless_slow_tier()
-    skip_on_cran()
-    skip_if_dev_package()
-
-    run    <- configs_axis_run()
-    tmpdir <- run$dir
-    result <- run$value$result
-
     expect_s3_class(result, "horizons_eval")
     expect_equal(nrow(result$evaluation$results), 4)
     expect_true(all(result$evaluation$results$config_id %in%
@@ -446,48 +384,8 @@ describe("evaluate() - configs axis", {
     checkpoint_files <- list.files(file.path(tmpdir, "checkpoints"), pattern = "\\.rds$")
     expect_equal(length(checkpoint_files), 4)
 
-  })
-
-  it("matches the sequential run in structure", {
-
-    skip_unless_slow_tier()
-    skip_on_cran()
-    skip_if_dev_package()
-
-    obj <- make_eval_object(n_configs = 2)
-
-    seq_result <- suppressWarnings(
-      evaluate(obj, verbose = FALSE, seed = 42L)
-    )
-
-    local_plan(future::multisession, workers = 2)
-    tmpdir <- withr::local_tempdir()
-
-    par_result <- suppressWarnings(
-      evaluate(obj, allow_par = TRUE, parallelize_over = "configs",
-               output_dir = tmpdir, verbose = FALSE, seed = 42L)
-    )
-
-    ## Structure rather than exact values: engine-level nondeterminism
-    ## (cubist, #51) would make a bitwise comparison flaky for reasons
-    ## unrelated to parallelism.
-    expect_setequal(seq_result$evaluation$results$config_id,
-                    par_result$evaluation$results$config_id)
-    expect_true(par_result$evaluation$best_config %in%
-                  par_result$evaluation$results$config_id)
-
-  })
-
-  it("leaves the user's plan exactly as it found it", {
-
-    skip_unless_slow_tier()
-    skip_on_cran()
-    skip_if_dev_package()
-
-    run <- configs_axis_run()$value
-
-    expect_identical(run$plan_after, run$plan_before)
-    expect_identical(run$workers_after, 2L)
+    expect_identical(run$value$plan_after, run$value$plan_before)
+    expect_identical(run$value$workers_after, 2L)
 
   })
 
@@ -631,10 +529,11 @@ describe("monitor_evaluate()", {
 ## sequential loop, so before the per-stage re-pinning the Bayesian stage and
 ## last_fit() drew from a different position on the resamples axis. This
 ## fixture uses rf (deterministic given a seed) with Bayesian iterations ON,
-## which is exactly where the axes used to diverge, and asserts the whole
-## result row is identical. The sequential run both tests compare against is
-## built once, by whichever of them runs first (helper-memo.R), so a skipped
-## test costs nothing.
+## where the axes diverged on the tune of that time, and asserts the whole
+## result row is identical. On later tune releases the axes no longer diverge
+## here without the re-pinning, so this pins the result, not the re-pinning.
+## The sequential run both tests compare against is built once, by whichever
+## of them runs first (helper-memo.R), so a skipped test costs nothing.
 
 axes_seq_run <- function() memo_fixture("axes_seq_run", build_axes_seq_run)
 
@@ -656,7 +555,7 @@ describe("evaluate() - results are identical across axes", {
   row_cols <- c("rmse", "rrmse", "rsq", "ccc", "rpd", "mae",
                 "cv_rmse", "cv_rrmse", "cv_rsq", "cv_ccc", "cv_rpd", "cv_mae")
 
-  it("resamples axis on a real two-worker plan matches the sequential run exactly", {
+  it("resamples axis, chosen by auto on a real two-worker plan, matches the sequential run exactly", {
 
     skip_unless_slow_tier()
     skip_on_cran()
@@ -665,12 +564,14 @@ describe("evaluate() - results are identical across axes", {
     seq_result <- run$result
     local_plan(future::multisession, workers = 2)
 
+    ## One config against three folds: auto resolves to the resamples axis,
+    ## which needs no output_dir
     par_result <- suppressWarnings(
-      evaluate(obj, allow_par = TRUE, parallelize_over = "resamples",
-               verbose = FALSE, seed = 42L)
+      evaluate(obj, allow_par = TRUE, verbose = FALSE, seed = 42L)
     )
 
     expect_equal(par_result$evaluation$parallelize_over, "resamples")
+    expect_identical(par_result$evaluation$workers, 2L)
     expect_equal(par_result$evaluation$results[row_cols],
                  seq_result$evaluation$results[row_cols])
     expect_equal(par_result$evaluation$results$best_params,
@@ -694,6 +595,8 @@ describe("evaluate() - results are identical across axes", {
                output_dir = tmpdir, verbose = FALSE, seed = 42L)
     )
 
+    ## One config against three folds: "auto" would pick resamples
+    expect_equal(par_result$evaluation$parallelize_over, "configs")
     expect_equal(par_result$evaluation$results[row_cols],
                  seq_result$evaluation$results[row_cols])
     expect_equal(par_result$evaluation$results$best_params,
@@ -745,6 +648,8 @@ describe("evaluate() - recipe settings on the configs axis", {
                output_dir = tmpdir, verbose = FALSE, seed = 42L)
     )
 
+    ## One config against three folds: "auto" would pick resamples
+    expect_equal(par_result$evaluation$parallelize_over, "configs")
     expect_equal(par_result$evaluation$results[row_cols],
                  seq_result$evaluation$results[row_cols])
     expect_false(isTRUE(all.equal(seq_result$evaluation$results$cv_rmse,

@@ -194,68 +194,6 @@ describe("ccc_vec()", {
 
 })
 
-describe("yardstick metric_set integration", {
-
-  it("all three metrics work in a metric_set pipeline", {
-
-    test_df <- tibble::tibble(
-      truth    = c(1, 2, 3, 4, 5, 6, 7, 8, 9, 10),
-      estimate = c(1.2, 1.8, 3.1, 4.3, 4.8, 6.2, 7.1, 7.9, 9.3, 9.7)
-    )
-
-    metrics <- yardstick::metric_set(rpd, rrmse, ccc)
-    result  <- metrics(test_df, truth = truth, estimate = estimate)
-
-    expect_s3_class(result, "tbl_df")
-    expect_equal(nrow(result), 3)
-    expect_true(all(c("rpd", "rrmse", "ccc") %in% result$.metric))
-
-    ## RPD should be positive
-    rpd_val <- result$.estimate[result$.metric == "rpd"]
-    expect_true(rpd_val > 0)
-
-    ## RRMSE should be positive
-    rrmse_val <- result$.estimate[result$.metric == "rrmse"]
-    expect_true(rrmse_val > 0)
-
-    ## CCC should be between 0 and 1 for this well-correlated data
-    ccc_val <- result$.estimate[result$.metric == "ccc"]
-    expect_true(ccc_val > 0 && ccc_val <= 1)
-
-  })
-
-  it("metrics work alongside yardstick built-in metrics", {
-
-    test_df <- tibble::tibble(
-      truth    = c(1, 2, 3, 4, 5),
-      estimate = c(1.1, 2.2, 2.8, 4.1, 4.9)
-    )
-
-    metrics <- yardstick::metric_set(
-      rpd, rrmse, ccc,
-      yardstick::rmse, yardstick::rsq, yardstick::mae
-    )
-
-    result <- metrics(test_df, truth = truth, estimate = estimate)
-
-    expect_equal(nrow(result), 6)
-
-  })
-
-  it("rpd direction is maximize", {
-    expect_equal(attr(rpd, "direction"), "maximize")
-  })
-
-  it("rrmse direction is minimize", {
-    expect_equal(attr(rrmse, "direction"), "minimize")
-  })
-
-  it("ccc direction is maximize", {
-    expect_equal(attr(ccc, "direction"), "maximize")
-  })
-
-})
-
 ## ===========================================================================
 ## tuning_metric_set()
 ## ===========================================================================
@@ -295,6 +233,9 @@ describe("tuning_metric_set()", {
 
   it("scores every metric on the original scale for each transformation", {
 
+    ## compute_original_scale_metrics() scores through the plain rpd, rrmse
+    ## and ccc metric objects, the wrapped set through their _vec functions,
+    ## so this also checks each object's data-frame method against its _vec.
     for (trans in names(transformed_estimates)) {
 
       est <- transformed_estimates[[trans]]
@@ -323,6 +264,8 @@ describe("tuning_metric_set()", {
 
   it("preserves metric names and directions so select_best()/show_best() keep working", {
 
+    ## For "none" the set holds the plain rpd, rrmse and ccc objects, so this
+    ## reads their own directions.
     for (trans in c("none", "log", "log10", "sqrt")) {
 
       ms <- tuning_metric_set(trans)

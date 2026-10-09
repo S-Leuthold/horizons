@@ -97,13 +97,17 @@ describe("registered_plan_label() / registered_workers()", {
 
   })
 
-  it("describes a flat multisession plan with its worker count", {
+  it("describes a flat multisession plan with its worker count, which check_parallel_backend() passes silently", {
 
     skip_on_cran()
     local_plan(future::multisession, workers = 2)
 
     expect_equal(registered_plan_label(), "multisession")
     expect_identical(registered_workers(), 2L)
+
+    ## Two workers are enough: no warning, and TRUE
+    expect_silent(ok <- check_parallel_backend("evaluate()"))
+    expect_true(ok)
 
   })
 
@@ -140,16 +144,6 @@ describe("check_parallel_backend()", {
 
     expect_warning(ok <- check_parallel_backend("fit()"), "fit\\(\\).*1 worker")
     expect_false(ok)
-
-  })
-
-  it("is silent and returns TRUE with two or more workers", {
-
-    skip_on_cran()
-    local_plan(future::multisession, workers = 2)
-
-    expect_silent(ok <- check_parallel_backend("evaluate()"))
-    expect_true(ok)
 
   })
 
