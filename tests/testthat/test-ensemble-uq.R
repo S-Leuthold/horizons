@@ -275,6 +275,56 @@ describe("fit_ensemble_uq() - coverage", {
 
   })
 
+  it("computes the leave-self-out coverage and width from its own calibration set, row by row", {
+
+    ## Each calibration row stands in for a new point: its CV+ bound is
+    ## formed from the other rows' fold models and residuals, at the
+    ## n_calib - 1 indices, and the bundle's figures are the means
+    ens_ref <- ens_built("weighted")
+    uq      <- ens_ref$ensemble$uq
+    oof     <- build_oof_matrix(ens_ref, uq$members)
+
+    member_mat <- oof$predictors[, paste0("member_", uq$members), drop = FALSE]
+    P <- vapply(uq$fold_models, function(fm) {
+      predict_fold_model(fm, uq$ensemble_method, member_mat,
+                         outcome_range_setting(ens_ref))
+    }, numeric(nrow(member_mat)))
+
+    pos <- match(uq$calib$.row, oof$row)
+    idx <- cv_plus_indices(uq$n_calib - 1L, uq$level_default)
+
+    covered <- logical(uq$n_calib)
+    width   <- numeric(uq$n_calib)
+
+    for (i in seq_len(uq$n_calib)) {
+      s <- sort(P[pos[i], uq$calib$fold[-i]] + uq$calib$residual[-i])
+      covered[i] <- uq$calib$truth[i] >= s[idx$l] && uq$calib$truth[i] <= s[idx$u]
+      width[i]   <- s[idx$u] - s[idx$l]
+    }
+
+    expect_equal(uq$oof_coverage, mean(covered))
+    expect_equal(uq$mean_width, mean(width))
+
+  })
+
+  it("warns when the leave-self-out coverage is far from the target, and only then", {
+
+    ## The guardrail added after the 7%-coverage bug: a bundle whose own
+    ## diagnostic sits more than 0.15 from the level still ships, with a warning
+    ens_ref <- ens_built("weighted")
+    bundle  <- ens_ref$ensemble$uq
+
+    bundle$oof_coverage <- 0.60
+    local_mocked_bindings(compute_ensemble_uq = function(...) bundle)
+
+    expect_warning(fit_ensemble_uq(ens_ref, level = 0.90, verbose = FALSE),
+                   "is far from the target level")
+
+    bundle$oof_coverage <- 0.80
+    expect_no_warning(fit_ensemble_uq(ens_ref, level = 0.90, verbose = FALSE))
+
+  })
+
   it("end-to-end coverage on the held-out test set is plausible", {
 
     ## Only 12 held-out points — a loose sanity band, not a coverage claim.
@@ -519,6 +569,50 @@ describe("ensemble UQ - degradation and gates", {
     )
 
     expect_null(result)
+
+  })
+
+  it("compute_ensemble_uq drops non-finite residuals, and returns NULL when too few are left", {
+
+    ens_ref <- ens_built("weighted")
+    oof     <- build_oof_matrix(ens_ref, ens_ref$ensemble$weights$member)
+
+    ## The real fold pass, with chosen calibration residuals made non-finite
+    real_folds <- fit_uq_fold_models
+    spoil      <- NULL
+    local_mocked_bindings(fit_uq_fold_models = function(...) {
+      out <- real_folds(...)
+      out$calib$residual[spoil] <- c(Inf, NaN, NA)[(seq_along(spoil) - 1L) %% 3L + 1L]
+      out
+    })
+
+    run <- function() {
+      compute_ensemble_uq(oof = oof, contract = ens_ref$ensemble,
+                          optimize = FALSE, conformal_seed = 1307L)
+    }
+
+    spoil  <- 1:3
+    result <- run()
+    expect_identical(result$n_calib, length(oof$truth) - 3L)
+    expect_identical(nrow(result$calib), result$n_calib)
+    expect_true(all(is.finite(result$calib$residual)))
+
+    ## One more than the rows above the minimum: the size gate runs again
+    ## after the drop
+    spoil <- seq_len(length(oof$truth) - N_CALIB_MIN + 1L)
+    expect_null(run())
+
+  })
+
+  it("compute_ensemble_uq returns NULL, rather than erroring, when the fold pass fails", {
+
+    ens_ref <- ens_built("weighted")
+    oof     <- build_oof_matrix(ens_ref, ens_ref$ensemble$weights$member)
+
+    local_mocked_bindings(fit_uq_fold_models = function(...) stop("a fold refit failed"))
+
+    expect_null(compute_ensemble_uq(oof = oof, contract = ens_ref$ensemble,
+                                    optimize = FALSE, conformal_seed = 1307L))
 
   })
 
