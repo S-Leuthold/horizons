@@ -460,6 +460,33 @@ describe("evaluate() - cross-mode checkpoint resume", {
 
 describe("monitor_evaluate()", {
 
+  it("renders every line of its display", {
+
+    ## Every optional line is present: ignored and unreadable checkpoints, a
+    ## rate, an ETA, the best config and recent completions. The clock and
+    ## the screen-clearing form feed are scrubbed.
+    manifest <- list(
+      axis = "configs", plan = "multisession", workers = 4L,
+      data_n_rows = 120, data_fields = list(outcome = "SOC"),
+      data_hash = "0123456789abcdef0123",
+      settings = list(grid_size = 10L, outcome_range = c(-Inf, Inf)),
+      metric = "rpd"
+    )
+    stats <- list(
+      n_complete = 3, n_total = 4, pct = 75,
+      ignored = c(other_data = 1, other_settings = 0, earlier_schema = 2, not_in_grid = 0),
+      unreadable = "cfg_009.rds", rate = 12.34, eta = "5 min",
+      best_config = "cfg_002", best_metric = 2.3456,
+      recent = c("cfg_002 (rpd 2.35)", "cfg_003 (rpd 1.90)")
+    )
+
+    expect_snapshot(
+      .render_monitor(stats, manifest),
+      transform = function(x) sub("monitor \u2014 [0-9:]+", "monitor \u2014 <time>", gsub("\014", "", x, fixed = TRUE))
+    )
+
+  })
+
   it("errors on missing directory", {
 
     expect_error(monitor_evaluate("/nonexistent/path"), "not found")
