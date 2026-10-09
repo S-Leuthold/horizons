@@ -79,6 +79,10 @@ Suggests:
     mirai
 Config/testthat/edition: 3
 Config/testthat/parallel: true
+Config/testthat/start-first: pipeline-fit, pipeline-evaluate,
+    pipeline-select-training, evaluate-parallel, pipeline-fit-outcome,
+    fit-single-config, evaluate-single-config, pipeline-fit-members,
+    ensemble-uq, pipeline-fit-cold-start
 Depends:
     R (>= 4.1.0)
 Collate:

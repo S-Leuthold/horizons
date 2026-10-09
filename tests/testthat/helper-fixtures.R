@@ -97,3 +97,101 @@ make_eval_object <- function(n = 40, n_wn = 10, n_configs = 2,
   obj
 
 }
+
+
+## ---------------------------------------------------------------------------
+## Fit Test Object: a minimal horizons_eval object ready for fit()
+## ---------------------------------------------------------------------------
+
+make_fit_object <- function(n = 60, n_wn = 10, n_configs = 2, seed = 42,
+                            n_na = 0L) {
+
+  set.seed(seed)
+
+  ## Spectral data
+  wn_names <- paste0("wn_", seq(4000, by = -2, length.out = n_wn))
+  spec_mat <- matrix(rnorm(n * n_wn), nrow = n)
+  colnames(spec_mat) <- wn_names
+
+  df <- tibble::as_tibble(spec_mat)
+  df$sample_id <- paste0("S", sprintf("%03d", seq_len(n)))
+
+  ## Outcome with weak signal from first 3 predictors
+  df$SOC <- 2 + rowMeans(spec_mat[, 1:min(3, n_wn)]) * 0.5 + rnorm(n, sd = 0.5)
+
+  ## Rows with no measured outcome, as add_response() leaves them (#67)
+  if (n_na > 0) df$SOC[seq_len(n_na)] <- NA_real_
+
+  ## Role map
+  roles <- tibble::tibble(
+    variable = c("sample_id", wn_names, "SOC"),
+    role     = c("id", rep("predictor", n_wn), "outcome")
+  )
+
+  ## Configs: rf + cubist (fast, tunable)
+  models <- c("rf", "cubist")
+  configs <- tibble::tibble(
+    config_id         = paste0("cfg_", sprintf("%03d", seq_len(n_configs))),
+    model             = models[seq_len(n_configs)],
+    transformation    = "none",
+    preprocessing     = "raw",
+    feature_selection = "none"
+  )
+
+  ## Build horizons_data-like structure; downstream slots in the
+  ## constructor's shape
+  contract <- new_horizons_data()
+
+  obj <- list(
+    data = list(
+      analysis     = df,
+      role_map     = roles,
+      n_rows       = nrow(df),
+      n_predictors = n_wn,
+      ## SOC carries role "outcome" below, not "response" — those are
+      ## distinct roles (n_responses counts role == "response", the sibling
+      ## responses add_response()/select_training() can carry alongside the
+      ## one outcome being modeled). evaluate()'s new entry-stage
+      ## validate_horizons_data() call (#24) is the first thing to actually
+      ## check this stored count against the role_map.
+      n_responses  = 0L
+    ),
+    provenance = list(
+      spectra_source = "test",
+      spectra_type   = "mir"
+    ),
+    config = list(
+      configs   = configs,
+      n_configs = n_configs,
+      tuning    = list(
+        cv_folds      = 3L,
+        grid_size     = 2L,
+        bayesian_iter = 0L
+      )
+    ),
+    validation = list(
+      passed    = TRUE,
+      checks    = NULL,
+      timestamp = Sys.time(),
+      outliers  = list(
+        spectral_ids   = NULL,
+        response_ids   = NULL,
+        removed_ids    = NULL,
+        removal_detail = NULL,
+        removed        = FALSE
+      )
+    ),
+    evaluation = contract$evaluation,
+    models     = contract$models,
+    ensemble   = contract$ensemble
+  )
+
+  class(obj) <- c("horizons_data", "list")
+
+  ## Run evaluate() to populate evaluation slot
+  ## prune = FALSE ensures configs get status "success" even with weak signal
+  suppressWarnings(
+    evaluate(obj, prune = FALSE, verbose = FALSE, seed = seed)
+  )
+
+}
