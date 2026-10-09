@@ -198,7 +198,7 @@ test_that("a space that cannot be cached is still returned, with a warning", {
                    ncomp = 0.99, sdev_floor = 0.1)
 
   ## Act
-  expect_warning(
+  w <- expect_warning(
     out <- cached_space(structure("lib", label = "lib"), settings, seq(700, 600, by = -2),
                         build = function() space, verbose = FALSE),
     "The similarity space was built but could not be cached", fixed = TRUE,
@@ -209,6 +209,62 @@ test_that("a space that cannot be cached is still returned, with a warning", {
   expect_identical(out$space, space)
   expect_false(out$hit)
   expect_null(out$path)
+  expect_match(conditionMessage(w), "options(horizons.cache_dir = )", fixed = TRUE)
+
+})
+
+test_that("a space is cached into a directory that does not exist yet, and rewritten over one that does", {
+
+  ## cached_space() stores whatever build() returns, so a stand-in keeps the
+  ## test off a PCA; the cache directory is two levels below a fresh one
+  withr::local_options(horizons.cache_dir = file.path(withr::local_tempdir(), "a", "b"))
+
+  space    <- structure(list(id = 1), class = "horizons_similarity_space")
+  settings <- list(snv = TRUE, derivative = 1L, window = 21L, poly = 2L, mask = NULL,
+                   ncomp = 0.99, sdev_floor = 0.1)
+  wn       <- seq(700, 600, by = -2)
+  lib      <- structure("lib", label = "lib")
+
+  expect_output(
+    first <- cached_space(lib, settings, wn, build = function() space, verbose = TRUE),
+    "Building the similarity space on the whole library", fixed = TRUE
+  )
+  expect_true(file.exists(first$path))
+  expect_identical(qs2::qs_read(first$path)$space, space)
+
+  ## The directory exists now; a forced rebuild writes over the file, quietly
+  space2 <- structure(list(id = 2), class = "horizons_similarity_space")
+  expect_silent(
+    again <- cached_space(lib, settings, wn, build = function() space2,
+                          verbose = FALSE, force = TRUE)
+  )
+  expect_identical(again$path, first$path)
+  expect_identical(qs2::qs_read(again$path)$space, space2)
+
+})
+
+test_that("a cache file that holds another key is rebuilt over, not trusted", {
+
+  withr::local_options(horizons.cache_dir = withr::local_tempdir())
+
+  settings <- list(snv = TRUE, derivative = 1L, window = 21L, poly = 2L, mask = NULL,
+                   ncomp = 0.99, sdev_floor = 0.1)
+  wn       <- seq(700, 600, by = -2)
+  lib      <- structure("lib", label = "lib")
+  stale    <- structure(list(id = "stale"), class = "horizons_similarity_space")
+  fresh    <- structure(list(id = "fresh"), class = "horizons_similarity_space")
+
+  ## A well-formed cache file at this key's path, holding a space built
+  ## under another key
+  first <- cached_space(lib, settings, wn, build = function() stale, verbose = FALSE)
+  obj   <- qs2::qs_read(first$path)
+  obj$key <- "another key"
+  qs2::qs_save(obj, first$path)
+
+  out <- cached_space(lib, settings, wn, build = function() fresh, verbose = FALSE)
+
+  expect_false(out$hit)
+  expect_identical(out$space, fresh)
 
 })
 
