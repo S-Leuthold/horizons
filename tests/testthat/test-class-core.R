@@ -915,18 +915,54 @@ test_that("validate_horizons_data rejects a selection record of the wrong type",
 })
 
 
-test_that("validate_horizons_data names a selection table missing a column", {
+test_that("validate_horizons_data names each required column a selection table lacks", {
 
-  ## Arrange — a membership without pool_id is indexed by name by every
-  ## consumer of the record
+  ## Every consumer of the record indexes these columns by name. One column
+  ## dropped at a time, each must be named as missing from its own table.
+  required <- list(
+    membership       = c("target_id", "property", "pool_id", "distance", "rank",
+                         "space", "retained"),
+    groups           = c("group", "n_targets", "n_rows", "target_ids", "pool_ids"),
+    pool_sizes       = c("property", "available", "drawn"),
+    target_distances = c("target_id", "property", "nearest", "mean_k", "space"),
+    exclusions       = c("property", "target_id", "pool_id", "distance", "rank",
+                         "reference_distance", "reason")
+  )
+
+  for (table in names(required)) {
+    for (column in required[[table]]) {
+
+      obj <- new_horizons_data()
+      obj$selection <- make_selection_record()
+      obj$selection[[table]][[column]] <- NULL
+
+      err <- expect_error(validate_horizons_data(obj),
+                          class = "horizons_validation_error")
+      expect_match(conditionMessage(err),
+                   paste0("selection$", table, " is missing column ", column),
+                   fixed = TRUE, label = paste0(table, "$", column))
+
+    }
+  }
+
+})
+
+
+test_that("validate_horizons_data refuses a selection that is not a list, or has no settings", {
+
+  ## A selection of the wrong type is a finding, not an error from reading it
   obj <- new_horizons_data()
-  obj$selection <- make_selection_record()
-  obj$selection$membership$pool_id <- NULL
+  obj$selection <- "batch"
 
-  ## Act & Assert
-  expect_error(validate_horizons_data(obj),
-               regexp = "pool_id",
-               class  = "horizons_validation_error")
+  err <- expect_error(validate_horizons_data(obj), class = "horizons_validation_error")
+  expect_match(conditionMessage(err), "selection must be a list, not <character>",
+               fixed = TRUE)
+
+  obj$selection <- make_selection_record()
+  obj$selection$settings <- NULL
+
+  err <- expect_error(validate_horizons_data(obj), class = "horizons_validation_error")
+  expect_match(conditionMessage(err), "selection$settings is missing", fixed = TRUE)
 
 })
 

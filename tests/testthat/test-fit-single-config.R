@@ -170,10 +170,12 @@ describe("fit_single_config() - success path", {
 
 describe("fit_single_config() - fitted workflow", {
 
-  it("fitted workflow can still predict on new data", {
+  it("is butchered for storage and can still predict on new data", {
 
     shared <- fsc()
     result <- shared$result
+
+    expect_s3_class(result$fitted_workflow, "butchered_workflow")
 
     test_data <- rsample::testing(shared$setup$split_F)
     preds <- stats::predict(result$fitted_workflow, new_data = test_data)
@@ -234,16 +236,29 @@ describe("fit_single_config() - cv_predictions", {
 
 describe("fit_single_config() - cv_metrics", {
 
-  it("is a tibble of the standard 6 metrics with finite means and non-negative std_err", {
+  it("holds each of the 6 metrics' mean over the folds and its standard error", {
 
-    cv_met <- fsc()$result$cv_metrics
+    result <- fsc()$result
+    cv_met <- result$cv_metrics
     expect_s3_class(cv_met, "tbl_df")
-    expect_true("mean" %in% names(cv_met))
-    expect_true("std_err" %in% names(cv_met))
-    expected_metrics <- c("rmse", "rrmse", "rsq", "ccc", "rpd", "mae")
-    expect_true(all(expected_metrics %in% cv_met$.metric))
-    expect_true(all(is.finite(cv_met$mean)))
-    expect_true(all(cv_met$std_err >= 0))
+    expect_setequal(cv_met$.metric, c("rmse", "rrmse", "rsq", "ccc", "rpd", "mae"))
+
+    ## Recomputed from the OOF predictions, fold by fold: the standard error
+    ## is the folds' sd over sqrt(folds). fit() reports it as cv_rmse_se and
+    ## cv_rpd_se.
+    cv_preds <- result$cv_predictions
+    per_fold <- purrr::map_dfr(
+      split(cv_preds, cv_preds$.fold),
+      ~ compute_original_scale_metrics(.x$truth, .x$.pred)
+    )
+    expected <- per_fold |>
+      dplyr::group_by(.metric) |>
+      dplyr::summarise(mean    = mean(.estimate),
+                       std_err = stats::sd(.estimate) / sqrt(dplyr::n()))
+
+    cv_met <- cv_met[match(expected$.metric, cv_met$.metric), ]
+    expect_equal(cv_met$mean, expected$mean)
+    expect_equal(cv_met$std_err, expected$std_err)
 
   })
 
@@ -316,6 +331,15 @@ describe("fit_single_config() - log transformation", {
 
   })
 
+  it("scores the test rows on the original scale, from the back-transformed predictions", {
+
+    preds <- stats::predict(result$fitted_workflow, new_data = test_data)$.pred
+    preds <- back_transform_predictions(preds, "log", warn = FALSE)
+
+    expect_equal(result$test_metrics$rmse, yardstick::rmse_vec(test_data$SOC, preds))
+
+  })
+
   it("selects best_params through the original-scale tuning metric set (#49)", {
 
     ## tune_warmstart_bayes() selects on metric = "rmse" by name. The
@@ -333,35 +357,177 @@ describe("fit_single_config() - log transformation", {
 ## Failure paths
 ## =========================================================================
 
+## Every stage runs inside safely_execute() and, when it errors, returns the
+## failed result naming the stage. With a stage's exit removed the config
+## still fails, but at a later stage and under that stage's name, so each
+## case asserts the stage and the cause. Stages are made to fail by mocking a
+## horizons step or tune::fit_resamples(), or, for the final fit, by missing
+## predictor values that only train_data holds (the folds carry their own
+## copy of the rows).
+
 describe("fit_single_config() - failure paths", {
 
-  setup <- make_fit_setup()
+  ## The runner on the shared fit's setup. Each test reads fsc() before it
+  ## mocks anything, so the shared fit is never built under a mock
+  ## (helper-memo.R).
+  run_on_shared <- function(setup,
+                            config_row       = make_fit_config(),
+                            train_data       = NULL,
+                            best_params_eval = make_fit_best_params()) {
 
-  it("returns 'failed' for invalid model name, with every expected field and no fitted parts", {
-
-    config <- make_fit_config(model = "deep_learning_9000")
-    best_p <- make_fit_best_params()
-
-    result <- fit_single_config(
-      config_row       = config,
-      split_F          = setup$split_F,
-      cv_resamples     = setup$folds,
-      calib_data       = NULL,
-      role_map         = setup$role_map,
-      best_params_eval = best_p,
+    fit_single_config(
+      config_row          = config_row,
+      split_F             = setup$split_F,
+      cv_resamples        = setup$folds,
+      calib_data          = NULL,
+      train_data          = train_data,
+      role_map            = setup$role_map,
+      best_params_eval    = best_params_eval,
       final_bayesian_iter = 0L,
-      grid_size        = 2L,
-      compute_uq       = FALSE,
-      allow_par        = FALSE
+      grid_size           = 2L,
+      compute_uq          = FALSE,
+      allow_par           = FALSE,
+      seed                = 42L
     )
 
+  }
+
+  ## The failed result: the stage named ahead of the cause, the documented
+  ## values of a failed config (warm_start and start_grid_size NA when it
+  ## failed before the re-tune), and no fitted parts
+  expect_failed_at <- function(result, stage, cause, warm_start) {
+
     expect_equal(result$status, "failed")
-    expect_false(is.na(result$error_message))
+    expect_match(result$error_message, paste0("^", stage, " failed: "))
+    expect_match(result$error_message, cause, fixed = TRUE)
     expect_true(all(EXPECTED_FIT_FIELDS %in% names(result)))
+    expect_identical(result$degraded, NA)
+    expect_identical(result$degraded_reason, NA_character_)
+    expect_identical(result$warm_start, warm_start)
+
+    if (is.na(warm_start)) {
+      expect_identical(result$start_grid_size, NA_integer_)
+    } else {
+      expect_true(is.integer(result$start_grid_size) && !is.na(result$start_grid_size))
+    }
+
     expect_null(result$fitted_workflow)
     expect_null(result$cv_predictions)
     expect_null(result$test_metrics)
     expect_null(result$cv_metrics)
+
+  }
+
+  it("names the recipe stage when the recipe cannot be built", {
+
+    setup <- fsc()$setup
+    local_mocked_bindings(build_recipe = function(...) stop("no recipe for this config"))
+
+    expect_failed_at(run_on_shared(setup), "Recipe building", "no recipe for this config",
+                     warm_start = NA)
+
+  })
+
+  it("returns 'failed' for invalid model name, with every expected field and no fitted parts", {
+
+    setup <- fsc()$setup
+    expect_failed_at(run_on_shared(setup, make_fit_config(model = "deep_learning_9000")),
+                     "Model specification", "Unknown model type: 'deep_learning_9000'",
+                     warm_start = NA)
+
+  })
+
+  it("names the workflow stage when the model cannot join the workflow", {
+
+    setup <- fsc()$setup
+    local_mocked_bindings(define_model_spec = function(...) "not a model specification")
+
+    expect_failed_at(run_on_shared(setup), "Workflow creation", "model_spec", warm_start = NA)
+
+  })
+
+  it("names the re-tune when the warm-start search errors", {
+
+    setup <- fsc()$setup
+    local_mocked_bindings(tune_warmstart_bayes = function(...) stop("the search broke"))
+
+    expect_failed_at(run_on_shared(setup), "Warm-start tuning", "the search broke",
+                     warm_start = NA)
+
+  })
+
+  it("names the OOF stage when the resampled fits error", {
+
+    setup <- fsc()$setup
+    local_mocked_bindings(fit_resamples = function(...) stop("the resampled fits broke"),
+                          .package = "tune")
+
+    expect_failed_at(run_on_shared(setup), "OOF predictions", "the resampled fits broke",
+                     warm_start = TRUE)
+
+  })
+
+  it("names the OOF back-transformation when it errors", {
+
+    setup <- fsc()$setup
+    ## The OOF call is the only one with a prediction per training row; the
+    ## tuning metrics back-transform one fold's assessment rows at a time
+    n_train <- nrow(setup$train_F)
+    real_bt <- back_transform_predictions
+    local_mocked_bindings(back_transform_predictions = function(predictions, ...) {
+      if (length(predictions) == n_train) stop("the OOF inverse broke")
+      real_bt(predictions, ...)
+    })
+
+    expect_failed_at(run_on_shared(setup), "OOF back-transformation", "the OOF inverse broke",
+                     warm_start = TRUE)
+
+  })
+
+  it("names the final fit when it errors", {
+
+    setup <- fsc()$setup
+    ## glmnet refuses missing predictor values; the column is one the raw
+    ## step's edge trim keeps
+    train <- rsample::training(setup$split_F)
+    train[[grep("^wn_", names(train), value = TRUE)[5]]][1:3] <- NA
+
+    expect_failed_at(run_on_shared(setup, make_fit_config(model = "elastic_net"),
+                                   train_data = train, best_params_eval = NULL),
+                     "Final model fit", "missing values", warm_start = FALSE)
+
+  })
+
+  it("names the test prediction when it errors", {
+
+    setup <- fsc()$setup
+    ## The runner's call is the only one that predicts from a whole workflow
+    real_predict <- stats::predict
+    local_mocked_bindings(predict = function(object, ...) {
+      if (inherits(object, "workflow")) stop("the test rows could not be predicted")
+      real_predict(object, ...)
+    }, .package = "stats")
+
+    expect_failed_at(run_on_shared(setup), "Test prediction",
+                     "the test rows could not be predicted", warm_start = TRUE)
+
+  })
+
+  it("names the test back-transformation when it errors", {
+
+    setup <- fsc()$setup
+    ## The next back-transformation after the OOF one is the test rows'
+    n_train  <- nrow(fsc()$setup$train_F)
+    oof_done <- FALSE
+    real_bt  <- back_transform_predictions
+    local_mocked_bindings(back_transform_predictions = function(predictions, ...) {
+      if (oof_done) stop("the test inverse broke")
+      if (length(predictions) == n_train) oof_done <<- TRUE
+      real_bt(predictions, ...)
+    })
+
+    expect_failed_at(run_on_shared(setup), "Test back-transformation", "the test inverse broke",
+                     warm_start = TRUE)
 
   })
 
@@ -493,3 +659,228 @@ describe("fit_single_config() - UQ and AD disabled", {
   })
 
 })
+
+
+## =========================================================================
+## A run whose stages warn and whose last steps fail
+## =========================================================================
+## One run, read by three tests: every stage's warnings reach the member's
+## log (#96); test metrics that cannot be computed come back as six NAs; a
+## butcher() failure stores the unbutchered workflow. render_warning_log()
+## shows five lines, most frequent first; each stage's warning is raised ten
+## times, more than any of tune's notes can arrive, and mtry is the two
+## predictors the raw step keeps, so tune adds no note of its own.
+
+build_fsc_mocked <- function() {
+
+  setup      <- make_fit_setup(signal_cols = 5:6, signal = 1, noise_sd = 0.1)
+  test_truth <- rsample::testing(setup$split_F)$SOC
+
+  real_recipe    <- build_recipe
+  real_spec      <- define_model_spec
+  real_preds     <- prepped_predictors
+  real_tune      <- tune_warmstart_bayes
+  real_resamples <- tune::fit_resamples
+  real_metrics   <- compute_original_scale_metrics
+
+  warn_then <- function(message, f) {
+    function(...) {
+      for (i in 1:10) warning(message, call. = FALSE)
+      f(...)
+    }
+  }
+
+  run <- function() {
+    fit_single_config(
+      config_row          = make_fit_config(),
+      split_F             = setup$split_F,
+      cv_resamples        = setup$folds,
+      calib_data          = NULL,
+      role_map            = setup$role_map,
+      best_params_eval    = make_fit_best_params(mtry = 2L),
+      final_bayesian_iter = 0L,
+      grid_size           = 2L,
+      compute_uq          = FALSE,
+      allow_par           = FALSE,
+      seed                = 42L
+    )
+  }
+
+  result <- testthat::with_mocked_bindings(
+    testthat::with_mocked_bindings(
+      testthat::with_mocked_bindings(
+        run(),
+        fit_resamples = warn_then("the OOF stage warned", real_resamples),
+        .package = "tune"
+      ),
+      butcher = function(x, ...) stop("butcher failed"),
+      .package = "butcher"
+    ),
+    build_recipe         = warn_then("the recipe stage warned", real_recipe),
+    define_model_spec    = warn_then("the model stage warned", real_spec),
+    prepped_predictors   = warn_then("the finalize stage warned", real_preds),
+    tune_warmstart_bayes = warn_then("the tuning stage warned", real_tune),
+    ## What compute_original_scale_metrics() returns, with a warning, when
+    ## fewer than two test rows have both a truth and a prediction
+    compute_original_scale_metrics = function(truth, estimate) {
+      if (identical(truth, test_truth)) return(tibble::tibble())
+      real_metrics(truth, estimate)
+    }
+  )
+
+  list(setup = setup, result = result)
+
+}
+
+fsc_mocked <- function() memo_fixture("fsc_mocked", build_fsc_mocked)
+
+describe("fit_single_config() - a run whose stages warn and whose last steps fail", {
+
+  it("carries every stage's warnings into the member's log (#96)", {
+
+    result <- fsc_mocked()$result
+    expect_equal(result$status, "success")
+
+    for (message in c("the recipe stage warned", "the model stage warned",
+                      "the finalize stage warned", "the tuning stage warned",
+                      "the OOF stage warned")) {
+      expect_true(any(grepl(message, result$warnings, fixed = TRUE)), label = message)
+    }
+
+  })
+
+  it("reports all six test metrics as NA when they cannot be computed", {
+
+    expect_identical(
+      fsc_mocked()$result$test_metrics,
+      tibble::tibble(rmse = NA_real_, rrmse = NA_real_, rsq = NA_real_,
+                     ccc  = NA_real_, rpd   = NA_real_, mae = NA_real_)
+    )
+
+  })
+
+  it("stores the unbutchered workflow when butcher() fails, and it predicts", {
+
+    shared <- fsc_mocked()
+    wf     <- shared$result$fitted_workflow
+
+    expect_s3_class(wf, "workflow")
+    expect_false(inherits(wf, "butchered_workflow"))
+
+    test_data <- rsample::testing(shared$setup$split_F)
+    expect_equal(nrow(stats::predict(wf, new_data = test_data)), nrow(test_data))
+
+  })
+
+})
+
+
+## =========================================================================
+## Measured coverage when it cannot be measured (#118)
+## =========================================================================
+## fit_uq() returns a sentinel bundle, so the coverage step is reached without
+## a quantile forest; the test rows stand in for the calibration set.
+
+describe("fit_single_config() - measured coverage when it cannot be measured (#118)", {
+
+  run_with_uq <- function(setup) {
+
+    fit_single_config(
+      config_row          = make_fit_config(),
+      split_F             = setup$split_F,
+      cv_resamples        = setup$folds,
+      calib_data          = rsample::testing(setup$split_F),
+      role_map            = setup$role_map,
+      best_params_eval    = make_fit_best_params(mtry = 2L),
+      final_bayesian_iter = 0L,
+      grid_size           = 2L,
+      compute_uq          = TRUE,
+      allow_par           = FALSE,
+      seed                = 42L
+    )
+
+  }
+
+  no_coverage <- list(test_coverage = NA_real_, test_mean_width = NA_real_, n_test = 0L)
+
+  it("leaves the figures NA and records the warning when no intervals can be built", {
+
+    setup <- fsc()$setup
+    ## predict_intervals() warns and returns NULL when it fails
+    local_mocked_bindings(
+      fit_uq            = function(...) list(sentinel = "fit_uq() ran"),
+      predict_intervals = function(...) {
+        warning("intervals could not be built", call. = FALSE)
+        NULL
+      }
+    )
+
+    result <- run_with_uq(setup)
+
+    expect_identical(result$uq[names(no_coverage)], no_coverage)
+    expect_true(any(grepl("intervals could not be built", result$warnings, fixed = TRUE)))
+
+  })
+
+  it("leaves the figures NA, and keeps the bundle, when measuring errors", {
+
+    setup <- fsc()$setup
+    local_mocked_bindings(
+      fit_uq                 = function(...) list(sentinel = "fit_uq() ran"),
+      test_interval_coverage = function(...) stop("coverage could not be measured")
+    )
+
+    result <- run_with_uq(setup)
+
+    expect_equal(result$uq$sentinel, "fit_uq() ran")
+    expect_identical(result$uq[names(no_coverage)], no_coverage)
+
+  })
+
+})
+
+
+## =========================================================================
+## The RNG pin
+## =========================================================================
+
+describe("fit_single_config() - the RNG pin", {
+
+  it("returns the same fit whatever the caller's RNG kind and state", {
+
+    skip_unless_slow_tier()
+
+    ## A worker started under furrr_options(seed = TRUE) is on L'Ecuyer-CMRG.
+    ## The runner pins kind and seed on entry. The OOF fits and the final fit
+    ## re-pin, so the pin shows only through the re-tune's choice: a cold
+    ## start's Bayesian stage draws its candidates from the stream.
+    setup <- fsc()$setup
+
+    run <- function() {
+      fit_single_config(
+        config_row          = make_fit_config(),
+        split_F             = setup$split_F,
+        cv_resamples        = setup$folds,
+        calib_data          = NULL,
+        role_map            = setup$role_map,
+        best_params_eval    = NULL,
+        final_bayesian_iter = 1L,
+        grid_size           = 2L,
+        compute_uq          = FALSE,
+        allow_par           = FALSE,
+        seed                = 42L
+      )
+    }
+
+    mersenne <- withr::with_seed(1, run())
+    lecuyer  <- withr::with_seed(99, .rng_kind = "L'Ecuyer-CMRG", run())
+
+    ## The test sees the pin only if the Bayesian candidate is the one chosen
+    expect_match(mersenne$best_params$.config, "^iter")
+    expect_identical(lecuyer$best_params, mersenne$best_params)
+    expect_identical(lecuyer$cv_predictions, mersenne$cv_predictions)
+
+  })
+
+})
+

@@ -307,22 +307,34 @@ describe("evaluate_single_config() - pruning", {
   setup  <- make_eval_setup()
   config <- make_eval_config()
 
-  ## Prune threshold of 9999 will prune any realistic model (RPD < 9999)
-  result <- evaluate_single_config(
-    config_row      = config,
-    split           = setup$split,
-    cv_folds        = setup$folds,
-    role_map        = setup$role_map,
-    grid_size       = 2,
-    bayesian_iter   = 5,
-    prune           = TRUE,
-    prune_threshold = 9999,
-    seed            = 42L
+  ## Prune threshold of 9999 will prune any realistic model (RPD < 9999).
+  ## tune_bayes() is wrapped to record whether the Bayesian stage ran.
+  bayes_ran  <- FALSE
+  real_bayes <- tune::tune_bayes
+
+  result <- testthat::with_mocked_bindings(
+    evaluate_single_config(
+      config_row      = config,
+      split           = setup$split,
+      cv_folds        = setup$folds,
+      role_map        = setup$role_map,
+      grid_size       = 2,
+      bayesian_iter   = 5,
+      prune           = TRUE,
+      prune_threshold = 9999,
+      seed            = 42L
+    ),
+    tune_bayes = function(...) {
+      bayes_ran <<- TRUE
+      real_bayes(...)
+    },
+    .package = "tune"
   )
 
-  it("returns 'pruned' status when grid RPD is below threshold", {
+  it("returns 'pruned' status when grid RPD is below threshold, and skips the Bayesian stage", {
 
     expect_equal(result$status, "pruned")
+    expect_false(bayes_ran)
 
   })
 
@@ -514,9 +526,18 @@ describe("evaluate_single_config() - a Bayesian search that fails (#209)", {
 
     ## A grid of one gives tune_bayes() a single initial point; it needs two,
     ## so the search aborts every time. configure() refuses this combination,
-    ## but the unit takes its sizes directly.
+    ## but the unit takes its sizes directly. The recorder is the pruning
+    ## test's, shown here to see a search that does run.
+    bayes_ran  <- FALSE
+    real_bayes <- tune::tune_bayes
+    local_mocked_bindings(tune_bayes = function(...) {
+      bayes_ran <<- TRUE
+      real_bayes(...)
+    }, .package = "tune")
+
     result <- run(grid_size = 1)
 
+    expect_true(bayes_ran)
     expect_equal(result$status, "success")
     expect_true(any(grepl(
       "The Bayesian search failed, so the hyperparameters were chosen from the grid alone",
@@ -545,6 +566,268 @@ describe("evaluate_single_config() - a Bayesian search that fails (#209)", {
   })
 
 })
+
+## =========================================================================
+## Each stage's failure exit
+## =========================================================================
+## The recipe and model stages' exits are pinned by the failure-path tests
+## above. Each later stage runs inside safely_execute() and, when it errors,
+## returns the failed row naming the stage; with its exit removed the config
+## still fails, at a later stage under that stage's name, so each case asserts
+## the stage and the cause.
+
+describe("evaluate_single_config() - each stage's failure exit", {
+
+  run_on_shared <- function() {
+
+    setup <- make_eval_setup()
+
+    evaluate_single_config(
+      config_row    = make_eval_config(),
+      split         = setup$split,
+      cv_folds      = setup$folds,
+      role_map      = setup$role_map,
+      grid_size     = 2,
+      bayesian_iter = 0,
+      prune         = FALSE,
+      seed          = 42L
+    )
+
+  }
+
+  expect_failed_at <- function(result, stage, cause) {
+
+    expect_equal(result$status, "failed")
+    expect_match(result$error_message, paste0("^", stage, " failed: "))
+    expect_match(result$error_message, cause, fixed = TRUE)
+    expect_true(all(is.na(unlist(result[c("rmse", "rpd", "cv_rmse", "cv_rpd")]))))
+
+  }
+
+  it("names the workflow stage when the model cannot join the workflow", {
+
+    local_mocked_bindings(define_model_spec = function(...) "not a model specification")
+
+    expect_failed_at(run_on_shared(), "Workflow creation", "model_spec")
+
+  })
+
+  it("names the grid search when tune_grid() errors", {
+
+    local_mocked_bindings(tune_grid = function(...) stop("the grid broke"),
+                          .package = "tune")
+
+    expect_failed_at(run_on_shared(), "Grid search", "the grid broke")
+
+  })
+
+  it("names the parameter selection when select_best() errors", {
+
+    local_mocked_bindings(select_best = function(...) stop("nothing to select"),
+                          .package = "tune")
+
+    expect_failed_at(run_on_shared(), "Parameter selection", "nothing to select")
+
+  })
+
+  it("names the workflow finalization when it errors", {
+
+    local_mocked_bindings(finalize_workflow = function(...) stop("cannot finalize"),
+                          .package = "tune")
+
+    expect_failed_at(run_on_shared(), "Workflow finalization", "cannot finalize")
+
+  })
+
+  it("names the test-set evaluation when last_fit() errors", {
+
+    local_mocked_bindings(last_fit = function(...) stop("the last fit broke"),
+                          .package = "tune")
+
+    expect_failed_at(run_on_shared(), "Test evaluation", "the last fit broke")
+
+  })
+
+  it("names the back-transformation when it errors", {
+
+    ## The tuning metrics back-transform inside tune; the runner's own call
+    ## comes after last_fit()
+    last_fit_done <- FALSE
+    real_last_fit <- tune::last_fit
+    real_bt       <- back_transform_predictions
+
+    local_mocked_bindings(last_fit = function(...) {
+      last_fit_done <<- TRUE
+      real_last_fit(...)
+    }, .package = "tune")
+    local_mocked_bindings(back_transform_predictions = function(...) {
+      if (last_fit_done) stop("the inverse broke")
+      real_bt(...)
+    })
+
+    expect_failed_at(run_on_shared(), "Back-transformation", "the inverse broke")
+
+  })
+
+})
+
+
+## =========================================================================
+## A run whose stages warn and whose test metrics cannot be computed
+## =========================================================================
+## One run, read by four tests: every stage's warnings reach the row's log
+## (#96); test metrics that cannot be computed come back as six NAs; a CV
+## panel that cannot be recovered leaves a note; and tune's
+## parallel_over = "everything" is accepted (a refusal would fail the build,
+## and every test below with it). render_warning_log() shows five lines
+## besides pinned notes, most frequent first, and tune adds notes of its own,
+## so each stage's warning is raised ten times, more than any note can arrive.
+
+build_esc_mocked <- function() {
+
+  setup <- make_eval_setup()
+
+  real_recipe   <- build_recipe
+  real_spec     <- define_model_spec
+  real_preds    <- prepped_predictors
+  real_grid     <- tune::tune_grid
+  real_last_fit <- tune::last_fit
+
+  warn_then <- function(message, f) {
+    function(...) {
+      for (i in 1:10) warning(message, call. = FALSE)
+      f(...)
+    }
+  }
+
+  result <- testthat::with_mocked_bindings(
+    testthat::with_mocked_bindings(
+      evaluate_single_config(
+        config_row    = make_eval_config(),
+        split         = setup$split,
+        cv_folds      = setup$folds,
+        role_map      = setup$role_map,
+        grid_size     = 2,
+        bayesian_iter = 0,
+        prune         = FALSE,
+        parallel_over = "everything",
+        seed          = 42L
+      ),
+      tune_grid = warn_then("the grid stage warned", real_grid),
+      last_fit  = warn_then("the test-set stage warned", real_last_fit),
+      .package  = "tune"
+    ),
+    build_recipe       = warn_then("the recipe stage warned", real_recipe),
+    define_model_spec  = warn_then("the model stage warned", real_spec),
+    prepped_predictors = warn_then("the finalize stage warned", real_preds),
+    ## What compute_original_scale_metrics() returns, with a warning, when
+    ## fewer than two test rows have both a truth and a prediction; the
+    ## runner calls it for the test rows only
+    compute_original_scale_metrics = function(...) tibble::tibble(),
+    cv_panel_at = function(...) {
+      tibble::as_tibble(stats::setNames(
+        as.list(rep(NA_real_, 6)),
+        paste0("cv_", c("rmse", "rrmse", "rsq", "ccc", "rpd", "mae"))
+      ))
+    }
+  )
+
+  list(setup = setup, result = result)
+
+}
+
+esc_mocked <- function() memo_fixture("esc_mocked", build_esc_mocked)
+
+describe("evaluate_single_config() - a run on parallel_over = 'everything' whose stages warn and whose test metrics cannot be computed", {
+
+  it("carries every stage's warnings into the row's log (#96)", {
+
+    result <- esc_mocked()$result
+    expect_equal(result$status, "success")
+
+    for (message in c("the recipe stage warned", "the model stage warned",
+                      "the finalize stage warned", "the grid stage warned",
+                      "the test-set stage warned")) {
+      expect_true(any(grepl(message, result$warnings[[1]], fixed = TRUE)), label = message)
+    }
+
+  })
+
+  it("reports all six test metrics as NA when they cannot be computed", {
+
+    result <- esc_mocked()$result
+    expect_true(all(is.na(unlist(result[c("rmse", "rrmse", "rsq", "ccc", "rpd", "mae")]))))
+    expect_true(all(vapply(result[c("rmse", "rrmse", "rsq", "ccc", "rpd", "mae")],
+                           is.double, logical(1))))
+
+  })
+
+  it("notes on the row when the CV panel at the selected parameters cannot be recovered", {
+
+    expect_true(any(grepl(
+      "CV metrics at the selected hyperparameters could not be recovered; cv_* columns are NA.",
+      esc_mocked()$result$warnings[[1]], fixed = TRUE
+    )))
+
+  })
+
+})
+
+
+describe("evaluate_single_config() - parallel_over", {
+
+  it("refuses anything but 'resamples' or 'everything', naming the argument", {
+
+    ## The abort carries no package class (DECISIONS 2026-10-05), so its text
+    ## is the check.
+    setup <- make_eval_setup()
+
+    expect_error(
+      evaluate_single_config(
+        config_row    = make_eval_config(),
+        split         = setup$split,
+        cv_folds      = setup$folds,
+        role_map      = setup$role_map,
+        parallel_over = "folds"
+      ),
+      "`parallel_over` must be one of"
+    )
+
+  })
+
+})
+
+
+## =========================================================================
+## The RNG pin
+## =========================================================================
+
+describe("evaluate_single_config() - the RNG pin", {
+
+  it("returns the shared run whatever the caller's RNG kind and state", {
+
+    ## The grid's rf fits draw from the stream the runner pins on entry, and
+    ## the CV panel reads them
+    setup <- make_eval_setup()
+
+    result <- withr::with_seed(99, .rng_kind = "L'Ecuyer-CMRG", evaluate_single_config(
+      config_row    = make_eval_config(),
+      split         = setup$split,
+      cv_folds      = setup$folds,
+      role_map      = setup$role_map,
+      grid_size     = 2,
+      bayesian_iter = 0,
+      prune         = FALSE,
+      seed          = 42L
+    ))
+
+    cols <- c("rmse", "rpd", "cv_rmse", "cv_rpd")
+    expect_identical(result[cols], esc()[cols])
+
+  })
+
+})
+
 
 ## =========================================================================
 ## mtry ceiling — the predictor count comes from the recipe's roles
