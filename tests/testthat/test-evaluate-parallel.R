@@ -529,10 +529,11 @@ describe("monitor_evaluate()", {
 ## sequential loop, so before the per-stage re-pinning the Bayesian stage and
 ## last_fit() drew from a different position on the resamples axis. This
 ## fixture uses rf (deterministic given a seed) with Bayesian iterations ON,
-## which is exactly where the axes used to diverge, and asserts the whole
-## result row is identical. The sequential run both tests compare against is
-## built once, by whichever of them runs first (helper-memo.R), so a skipped
-## test costs nothing.
+## where the axes diverged on the tune of that time, and asserts the whole
+## result row is identical. On later tune releases the axes no longer diverge
+## here without the re-pinning, so this pins the result, not the re-pinning.
+## The sequential run both tests compare against is built once, by whichever
+## of them runs first (helper-memo.R), so a skipped test costs nothing.
 
 axes_seq_run <- function() memo_fixture("axes_seq_run", build_axes_seq_run)
 
@@ -594,6 +595,8 @@ describe("evaluate() - results are identical across axes", {
                output_dir = tmpdir, verbose = FALSE, seed = 42L)
     )
 
+    ## One config against three folds: "auto" would pick resamples
+    expect_equal(par_result$evaluation$parallelize_over, "configs")
     expect_equal(par_result$evaluation$results[row_cols],
                  seq_result$evaluation$results[row_cols])
     expect_equal(par_result$evaluation$results$best_params,
@@ -645,6 +648,8 @@ describe("evaluate() - recipe settings on the configs axis", {
                output_dir = tmpdir, verbose = FALSE, seed = 42L)
     )
 
+    ## One config against three folds: "auto" would pick resamples
+    expect_equal(par_result$evaluation$parallelize_over, "configs")
     expect_equal(par_result$evaluation$results[row_cols],
                  seq_result$evaluation$results[row_cols])
     expect_false(isTRUE(all.equal(seq_result$evaluation$results$cv_rmse,
