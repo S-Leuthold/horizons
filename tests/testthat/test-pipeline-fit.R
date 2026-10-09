@@ -1345,6 +1345,41 @@ describe("fit() - allow_par without a usable backend", {
 
 })
 
+## On a real two-worker plan tune runs the re-tune and the OOF fits on
+## workers, which advances the parent's RNG stream differently from the
+## sequential loop. fit_single_config() re-pins the seed before each
+## stochastic stage so the result does not depend on that; without the
+## re-pin before the OOF fits, the rf member's CV metrics differ between the
+## two runs. The sequential run is the shared fit60().
+
+describe("fit() - on a two-worker plan", {
+
+  it("matches the sequential fit exactly (installed build)", {
+
+    skip_unless_slow_tier()
+    skip_on_cran()
+    skip_if_dev_package()
+
+    shared <- fit60()
+    local_plan(future::multisession, workers = 2)
+
+    par_fit <- suppressWarnings(
+      fit(shared$obj, n_best = 2L, compute_uq = FALSE, compute_ad = FALSE,
+          allow_par = TRUE, verbose = FALSE, seed = 42L)
+    )
+
+    cols <- c("config_id", "status", "rmse", "rrmse", "rsq", "ccc", "rpd", "mae",
+              "cv_rmse_mean", "cv_rmse_se", "cv_rpd_mean", "cv_rpd_se")
+
+    expect_equal(par_fit$models$results[cols], shared$fit$models$results[cols])
+    expect_equal(par_fit$models$results$best_params,
+                 shared$fit$models$results$best_params)
+    expect_equal(par_fit$models$cv_predictions, shared$fit$models$cv_predictions)
+
+  })
+
+})
+
 
 ## =========================================================================
 ## Selection provenance (2026-09-21)
