@@ -469,7 +469,8 @@ abort_on_missing_predict_packages <- function(needed) {
   bullets <- vapply(missing, function(pkg) {
 
     reasons <- paste(needed[[pkg]], collapse = ", ")
-    hint    <- predict_package_install_hint(pkg)
+    ## Every predict-time package is on CRAN
+    hint    <- sprintf('install.packages("%s")', pkg)
 
     paste0("{.pkg ", pkg, "}, needed for ", reasons, ": {.code ", hint, "}")
 
@@ -481,29 +482,6 @@ abort_on_missing_predict_packages <- function(needed) {
     "Predicting from this object needs {length(missing)} package{?s} that {?is/are} not installed.",
     bullets
   ), class = "horizons_missing_predict_package")
-
-}
-
-## ---------------------------------------------------------------------------
-## predict_package_install_hint() — CRAN vs. Bioconductor install() call
-## ---------------------------------------------------------------------------
-
-#' Install hint for a missing predict-time package
-#'
-#' Nearly every predict-time package installs with `install.packages()`.
-#' `mixOmics` (the `plsr` engine) is the one exception, on Bioconductor
-#' rather than CRAN — `install.packages("mixOmics")` cannot find it, so the
-#' generic hint would be actively wrong there (see README.md's Dependencies
-#' section for the same guidance).
-#'
-#' @param pkg Character(1). Package name.
-#' @return Character(1). An `install.packages()` or `BiocManager::install()`
-#'   call, as a string.
-#' @keywords internal
-#' @noRd
-predict_package_install_hint <- function(pkg) {
-
-  PREDICT_PACKAGE_INSTALL_HINT[[pkg]] %||% sprintf('install.packages("%s")', pkg)
 
 }
 

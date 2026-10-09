@@ -946,42 +946,6 @@ describe("abort_on_missing_predict_packages() - missing package gate", {
 
 
 ## ---------------------------------------------------------------------------
-## predict_package_install_hint() — CRAN vs. Bioconductor (#65)
-## ---------------------------------------------------------------------------
-## mixOmics is on Bioconductor; install.packages() cannot find it. Tested
-## directly (a pure function) rather than through the abort path, since
-## mixOmics may well be installed wherever this runs, which would make the
-## abort path never fire and prove nothing either way.
-
-describe("predict_package_install_hint()", {
-
-  it("gives mixOmics a BiocManager install hint", {
-
-    expect_identical(predict_package_install_hint("mixOmics"),
-                     'BiocManager::install("mixOmics")')
-
-  })
-
-  it("gives an ordinary CRAN package the install.packages() hint", {
-
-    expect_identical(predict_package_install_hint("ranger"),
-                     'install.packages("ranger")')
-
-  })
-
-  it("gives bonsai the ordinary CRAN hint, not a Bioconductor one", {
-
-    ## bonsai (lightgbm's engine-registering package) is on CRAN, unlike
-    ## mixOmics — confirm it is not accidentally special-cased.
-    expect_identical(predict_package_install_hint("bonsai"),
-                     'install.packages("bonsai")')
-
-  })
-
-})
-
-
-## ---------------------------------------------------------------------------
 ## compute_needed_predict_packages() — pure model -> package mapping (#65)
 ## ---------------------------------------------------------------------------
 

@@ -205,7 +205,8 @@ fit_single_config <- function(config_row,
   wflow <- wflow_result$result
 
   ## -----------------------------------------------------------------------
-  ## Step 4: Finalize parameter set (mtry / num_comp upper bound)
+  ## Step 4: Finalize parameter set (mtry / num_comp upper bound; num_comp
+  ## also by the smallest fold's rows, #216)
   ## -----------------------------------------------------------------------
 
   param_set <- workflows::extract_parameter_set_dials(wflow)
@@ -220,6 +221,7 @@ fit_single_config <- function(config_row,
       eval_data <- baked[, prepped_predictors(prepped, baked), drop = FALSE]
 
       result <- dials::finalize(param_set, eval_data)
+      result <- cap_pls_components(result, ncol(eval_data), min_analysis_rows(cv_resamples))
 
       rm(prepped, baked, eval_data)
       invisible(gc(verbose = FALSE))

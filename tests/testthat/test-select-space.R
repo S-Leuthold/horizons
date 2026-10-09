@@ -504,8 +504,6 @@ test_that("build_similarity_space(space = 'pls') refuses a y that is not one val
 
 test_that("build_similarity_space(space = 'pls') fits on measured rows and scores every row", {
 
-  skip_if_not_installed("mixOmics")
-
   fx <- select_fixture(n_pool = 60)
   pm <- predictor_matrix(fx$pool)
   y  <- fx$pool$data$analysis$oc   # half NA
@@ -526,8 +524,6 @@ test_that("build_similarity_space(space = 'pls') fits on measured rows and score
 
 
 test_that("the PLS branch records the decay but is not floored by it", {
-
-  skip_if_not_installed("mixOmics")
 
   fx <- select_fixture(n_pool = 60)
   pm <- predictor_matrix(fx$pool)
@@ -572,8 +568,6 @@ test_that("project_similarity() of the pool onto its own space returns the store
 
 
 test_that("project_similarity() works for the PLS space too", {
-
-  skip_if_not_installed("mixOmics")
 
   fx <- select_fixture(n_pool = 60)
   pm <- predictor_matrix(fx$pool)

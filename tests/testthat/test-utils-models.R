@@ -18,7 +18,7 @@ describe("define_model_spec()", {
       rf          = "ranger",
       cubist      = "Cubist",
       xgboost     = "xgboost",
-      plsr        = "mixOmics",
+      plsr        = "pls",
       elastic_net = "glmnet",
       svm_rbf     = "kernlab",
       mars        = "earth",

@@ -884,3 +884,46 @@ describe("fit_single_config() - the RNG pin", {
 
 })
 
+
+
+## =========================================================================
+## A PLS config's component range (#216)
+## =========================================================================
+
+describe("fit_single_config() - a PLS config", {
+
+  it("tunes num_comp up to the predictors and the smallest fold's rows less one, at most 30", {
+
+    ## 60 wavenumbers keep 52 predictors past the raw step's edge trim; the
+    ## 45 training rows make analysis sets of 29 to 31 rows, so the smallest
+    ## set's rows less one bind, below 30. The re-tune is stopped once it has
+    ## the parameter set.
+    setup     <- make_fit_setup(n_wn = 60)
+    param_set <- NULL
+    local_mocked_bindings(tune_warmstart_bayes = function(..., param_set) {
+      param_set <<- param_set
+      stop("stopped after the parameter set")
+    })
+
+    fit_single_config(
+      config_row          = make_fit_config(model = "plsr"),
+      split_F             = setup$split_F,
+      cv_resamples        = setup$folds,
+      calib_data          = NULL,
+      role_map            = setup$role_map,
+      best_params_eval    = NULL,
+      final_bayesian_iter = 0L,
+      grid_size           = 2L,
+      compute_uq          = FALSE,
+      allow_par           = FALSE,
+      seed                = 42L
+    )
+
+    num_comp <- param_set$object[[which(param_set$name == "num_comp")]]
+    expect_equal(c(num_comp$range$lower, num_comp$range$upper),
+                 c(1, min_analysis_rows(setup$folds) - 1))
+    expect_lt(min_analysis_rows(setup$folds) - 1, 30)
+
+  })
+
+})

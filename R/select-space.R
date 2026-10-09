@@ -197,8 +197,8 @@ transform_similarity <- function(M, wn,
 #' proportion of variance, capped at `max_comp`; an integer retains that
 #' many. For `space = "pls"`, `ncomp` must be an integer and `y` must be
 #' given; the fit uses the rows where `y` is measured and every row is
-#' scored by projection. `mixOmics::pls()` is used because it is already
-#' the package's PLS engine.
+#' scored by projection. The fit is [pls::plsr()] by NIPALS on centred,
+#' unscaled spectra.
 #'
 #' `sdev_floor` is the noise floor on the retained set. Cumulative variance
 #' alone keeps a long tail of components whose standard deviation is one to
@@ -302,8 +302,6 @@ build_similarity_space <- function(M, wn,
 
     }
 
-    rlang::check_installed("mixOmics", reason = "for space = \"pls\"")
-
   }
 
   ### The most components either rule could ask for; it bounds what prcomp()
@@ -370,10 +368,15 @@ build_similarity_space <- function(M, wn,
     colnames(X) <- paste0("v", seq_len(ncol(X)))
     k    <- as.integer(ncomp)
 
-    fit <- mixOmics::pls(X[keep, , drop = FALSE], y[keep], ncomp = k,
-                         mode = "regression", scale = FALSE)
+    ### NIPALS on centred, unscaled spectra: the transform has put them on
+    ### one scale already. model = FALSE keeps the library's rows out of the
+    ### stored fit.
+    fit_data   <- data.frame(y = y[keep])
+    fit_data$x <- X[keep, , drop = FALSE]
+    fit <- pls::plsr(y ~ x, data = fit_data, ncomp = k, scale = FALSE,
+                     method = "oscorespls", model = FALSE)
 
-    scores <- stats::predict(fit, newdata = X)$variates[, seq_len(k), drop = FALSE]
+    scores <- pls_space_scores(fit, X, k)
 
     sdev <- apply(scores, 2, stats::sd)
 
@@ -392,6 +395,24 @@ build_similarity_space <- function(M, wn,
   dimnames(out$scores) <- list(rownames(M), NULL)
 
   structure(out, class = c("horizons_similarity_space", "list"))
+
+}
+
+
+#' Score rows in a PLS similarity space
+#'
+#' @param fit The `mvr` object a PLS space stores.
+#' @param X [Matrix.] Transformed spectra, the space's columns.
+#' @param k [Integer.] Components.
+#' @return [Matrix.] `nrow(X)` rows, `k` columns.
+#' @noRd
+pls_space_scores <- function(fit, X, k) {
+
+  newdata   <- data.frame(row = seq_len(nrow(X)))
+  newdata$x <- X
+
+  scores <- stats::predict(fit, newdata = newdata, type = "scores")
+  unclass(scores)[, seq_len(k), drop = FALSE]
 
 }
 
@@ -448,7 +469,7 @@ project_similarity <- function(space, M, wn) {
 
     X <- tr$matrix
     colnames(X) <- paste0("v", seq_len(ncol(X)))
-    scores <- stats::predict(space$fit, newdata = X)$variates[, seq_len(space$ncomp), drop = FALSE]
+    scores <- pls_space_scores(space$fit, X, space$ncomp)
 
   }
 

@@ -175,15 +175,17 @@ evaluate_single_config <- function(config_row,
   wflow <- wflow_result$result
 
   ## -----------------------------------------------------------------------
-  ## Step 4: Finalize parameter set (mtry upper bound)
+  ## Step 4: Finalize parameter set (mtry and num_comp upper bounds)
   ## -----------------------------------------------------------------------
   ## Models with mtry (rf, xgboost, lightgbm) need the upper bound set from
   ## the actual predictor count after recipe preprocessing. Without this,
   ## tune_grid() may sample mtry values larger than the number of predictors.
+  ## plsr's num_comp is capped by the same count and by the smallest fold's
+  ## rows (#216).
 
   param_set <- workflows::extract_parameter_set_dials(wflow)
 
-  if ("mtry" %in% param_set$name) {
+  if (any(c("mtry", "num_comp") %in% param_set$name)) {
 
     finalize_result <- safely_execute({
 
@@ -193,6 +195,7 @@ evaluate_single_config <- function(config_row,
       eval_data <- baked[, prepped_predictors(prepped, baked), drop = FALSE]
 
       result <- dials::finalize(param_set, eval_data)
+      result <- cap_pls_components(result, ncol(eval_data), min_analysis_rows(cv_folds))
 
       rm(prepped, baked, eval_data)
       invisible(gc(verbose = FALSE))
