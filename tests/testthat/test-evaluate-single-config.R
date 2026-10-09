@@ -526,9 +526,18 @@ describe("evaluate_single_config() - a Bayesian search that fails (#209)", {
 
     ## A grid of one gives tune_bayes() a single initial point; it needs two,
     ## so the search aborts every time. configure() refuses this combination,
-    ## but the unit takes its sizes directly.
+    ## but the unit takes its sizes directly. The recorder is the pruning
+    ## test's, shown here to see a search that does run.
+    bayes_ran  <- FALSE
+    real_bayes <- tune::tune_bayes
+    local_mocked_bindings(tune_bayes = function(...) {
+      bayes_ran <<- TRUE
+      real_bayes(...)
+    }, .package = "tune")
+
     result <- run(grid_size = 1)
 
+    expect_true(bayes_ran)
     expect_equal(result$status, "success")
     expect_true(any(grepl(
       "The Bayesian search failed, so the hyperparameters were chosen from the grid alone",
@@ -669,10 +678,10 @@ describe("evaluate_single_config() - each stage's failure exit", {
 ## One run, read by four tests: every stage's warnings reach the row's log
 ## (#96); test metrics that cannot be computed come back as six NAs; a CV
 ## panel that cannot be recovered leaves a note; and tune's
-## parallel_over = "everything" is accepted. render_warning_log() shows five
-## lines besides pinned notes, most frequent first, and tune adds two notes of
-## its own (three folds each), so each stage's warning is raised four times to
-## rank among the five.
+## parallel_over = "everything" is accepted (a refusal would fail the build,
+## and every test below with it). render_warning_log() shows five lines
+## besides pinned notes, most frequent first, and tune adds notes of its own,
+## so each stage's warning is raised ten times, more than any note can arrive.
 
 build_esc_mocked <- function() {
 
@@ -686,7 +695,7 @@ build_esc_mocked <- function() {
 
   warn_then <- function(message, f) {
     function(...) {
-      for (i in 1:4) warning(message, call. = FALSE)
+      for (i in 1:10) warning(message, call. = FALSE)
       f(...)
     }
   }
@@ -729,7 +738,7 @@ build_esc_mocked <- function() {
 
 esc_mocked <- function() memo_fixture("esc_mocked", build_esc_mocked)
 
-describe("evaluate_single_config() - a run whose stages warn and whose test metrics cannot be computed", {
+describe("evaluate_single_config() - a run on parallel_over = 'everything' whose stages warn and whose test metrics cannot be computed", {
 
   it("carries every stage's warnings into the row's log (#96)", {
 
@@ -762,12 +771,6 @@ describe("evaluate_single_config() - a run whose stages warn and whose test metr
 
   })
 
-  it("accepts tune's parallel_over = 'everything'", {
-
-    expect_equal(esc_mocked()$result$status, "success")
-
-  })
-
 })
 
 
@@ -775,6 +778,8 @@ describe("evaluate_single_config() - parallel_over", {
 
   it("refuses anything but 'resamples' or 'everything', naming the argument", {
 
+    ## The abort carries no package class (DECISIONS 2026-10-05), so its text
+    ## is the check.
     setup <- make_eval_setup()
 
     expect_error(

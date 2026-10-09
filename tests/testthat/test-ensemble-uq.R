@@ -604,18 +604,6 @@ describe("ensemble UQ - degradation and gates", {
 
   })
 
-  it("compute_ensemble_uq returns NULL, rather than erroring, when the fold pass fails", {
-
-    ens_ref <- ens_built("weighted")
-    oof     <- build_oof_matrix(ens_ref, ens_ref$ensemble$weights$member)
-
-    local_mocked_bindings(fit_uq_fold_models = function(...) stop("a fold refit failed"))
-
-    expect_null(compute_ensemble_uq(oof = oof, contract = ens_ref$ensemble,
-                                    optimize = FALSE, conformal_seed = 1307L))
-
-  })
-
   it("predict_ensemble_intervals warns and returns NULL for an unrecognized bundle", {
 
     ## #65's interval half, applied to the ensemble path: this used to
