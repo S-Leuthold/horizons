@@ -95,6 +95,45 @@ make_xgb_best_params <- function(mtry = 10L, trees = 200L, min_n = 5L,
 
 
 ## =========================================================================
+## generate_candidates() — one parameter's candidates
+## =========================================================================
+
+describe("generate_candidates()", {
+
+  ## The order is part of the result: expand.grid() lays the grid out in it,
+  ## and a grid over max_points is sampled by row position.
+  it("spreads around the best value in the parameter's own space, clamped, in order", {
+
+    lr   <- dials::learn_rate()
+    mtry <- dials::mtry(c(1L, 20L))
+    prop <- dials::sample_prop()
+
+    ## log10 space for a transformed parameter
+    expect_equal(generate_candidates(0.01, lr), 10^(-2 + c(-0.5, -0.25, 0, 0.25, 0.5)))
+
+    ## whole steps for an integer one, kept integer
+    expect_identical(generate_candidates(10L, mtry), 8:12)
+    expect_identical(generate_candidates(20L, mtry), 18:20)
+
+    ## proportional steps for a continuous one, clamped and deduplicated
+    expect_equal(generate_candidates(0.5, prop), 0.5 * c(0.8, 0.9, 1, 1.1, 1.2))
+    expect_equal(generate_candidates(1, prop), c(0.8, 0.9, 1))
+    expect_equal(generate_candidates(0.11, prop), c(0.1, 0.11, 0.121, 0.132))
+
+  })
+
+  it("spreads five points across the range when the best value is missing", {
+
+    expect_equal(generate_candidates(NA, dials::learn_rate()), 10^seq(-10, -1, length.out = 5))
+    expect_identical(generate_candidates(NA, dials::mtry(c(1L, 20L))), c(1L, 6L, 10L, 15L, 20L))
+    expect_equal(generate_candidates(NA, dials::sample_prop()), seq(0.1, 1, length.out = 5))
+
+  })
+
+})
+
+
+## =========================================================================
 ## build_warmstart_grid() — grid construction
 ## =========================================================================
 

@@ -31,3 +31,54 @@ describe("startup_message()", {
   })
 
 })
+
+
+## ===========================================================================
+## .onLoad(): opt-in thread control, and the engines it loads
+## ===========================================================================
+
+describe(".onLoad()", {
+
+  thread_vars <- c("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS")
+
+  it("sets one thread for workers when HORIZONS_THREAD_CONTROL is TRUE, and nothing otherwise", {
+
+    withr::local_options(ranger.num.threads = NULL)
+    withr::local_envvar(HORIZONS_THREAD_CONTROL = "TRUE", OMP_NUM_THREADS = NA,
+                        OPENBLAS_NUM_THREADS = NA, MKL_NUM_THREADS = NA)
+
+    .onLoad(NULL, "horizons")
+
+    expect_identical(unname(Sys.getenv(thread_vars)), rep("1", 3))
+    expect_equal(getOption("ranger.num.threads"), 1)
+
+    withr::local_envvar(HORIZONS_THREAD_CONTROL = NA, OMP_NUM_THREADS = NA,
+                        OPENBLAS_NUM_THREADS = NA, MKL_NUM_THREADS = NA)
+    options(ranger.num.threads = NULL)
+
+    .onLoad(NULL, "horizons")
+
+    expect_identical(unname(Sys.getenv(thread_vars, unset = NA)), rep(NA_character_, 3))
+    expect_null(getOption("ranger.num.threads"))
+
+  })
+
+  it("loads rules, so an installed horizons can fit a cubist config", {
+
+    ## load_all() loads every Import itself, so only an installed build
+    ## shows a missing load
+    skip_if_dev_package()
+    skip_on_cran()
+    skip_if_not_installed("callr")
+
+    has_cubist <- callr::r(function() {
+      library(horizons)
+      "Cubist" %in% parsnip::show_engines("cubist_rules")$engine
+    })
+
+    expect_true(has_cubist)
+
+  })
+
+})
+

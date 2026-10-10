@@ -20,7 +20,7 @@ cluster_spectral_predictors(
 \value{
 A list with three elements:
 \describe{
-\item{reduced_mat}{A matrix with one representative column per cluster.}
+\item{reduced_mat}{A data frame with one representative column per cluster.}
 \item{cluster_map}{A named list mapping representative wavenumbers to all members of their cluster.}
 \item{selected_vars}{Character vector of retained wavenumber names.}
 }

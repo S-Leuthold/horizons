@@ -2,8 +2,9 @@
 ## Tests: step_select_cars()
 ## ---------------------------------------------------------------------------
 ##
-## What the step refuses. Its selection, re-prep and round trip through
-## build_recipe() are tested in test-utils-recipes.R. These aborts carry no
+## What the step refuses, and that it keeps the bands carrying the outcome.
+## Its re-prep and round trip through build_recipe() are tested in
+## test-utils-recipes.R. These aborts carry no
 ## package class, so each test matches the finding's own text.
 
 ## Helper: n spectra of p bands named wn_<wavenumber>, and an outcome
@@ -94,6 +95,33 @@ describe("step_select_cars() refuses input it cannot use", {
     ## Act & Assert
     expect_error(recipes::bake(prepped, new_data = d),
                  "Some selected wavenumbers are missing in new_data.", fixed = TRUE)
+
+  })
+
+})
+
+
+describe("step_select_cars() selects", {
+
+  it("keeps both bands that carry the outcome and drops some of the rest", {
+
+    skip_if_not_installed("pls")
+
+    ## 40 noise bands, the outcome on two of them. The original keeps both
+    ## at every one of 20 seeds, with 6 to 29 bands.
+    d <- withr::with_seed(1, {
+      m <- matrix(stats::rnorm(60 * 40), 60)
+      colnames(m) <- paste0("wn_", seq(4000, by = -2, length.out = 40))
+      d <- tibble::as_tibble(m)
+      d$SOC <- 2 * d$wn_3980 - 2 * d$wn_3950 + stats::rnorm(60, sd = 0.3)
+      d
+    })
+
+    prepped  <- withr::with_seed(1, suppressMessages(recipes::prep(cars_recipe(d), training = d)))
+    selected <- prepped$steps[[1]]$selected_vars
+
+    expect_true(all(c("wn_3980", "wn_3950") %in% selected))
+    expect_lt(length(selected), 40L)
 
   })
 

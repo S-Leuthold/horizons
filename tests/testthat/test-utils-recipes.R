@@ -755,9 +755,8 @@ describe("selection steps abort on a zero-column selector", {
     rec <- base_recipe() |>
       step_select_correlation(dplyr::matches(no_match), outcome = "SOC")
 
-    err <- expect_error(recipes::prep(rec), "selected zero columns", fixed = TRUE,
-                        class = "horizons_input_error")
-    expect_match(conditionMessage(err), "step_select_correlation", fixed = TRUE)
+    expect_error(recipes::prep(rec), "`step_select_correlation()` selected zero columns",
+                 fixed = TRUE, class = "horizons_input_error")
 
   })
 
@@ -766,7 +765,8 @@ describe("selection steps abort on a zero-column selector", {
     rec <- base_recipe() |>
       step_select_cars(dplyr::matches(no_match), outcome = "SOC")
 
-    expect_error(recipes::prep(rec), "selected zero columns")
+    ## The step's own headline: recipes' wrapper names the step anyway
+    expect_error(recipes::prep(rec), "`step_select_cars()` selected zero columns", fixed = TRUE)
 
   })
 
@@ -775,7 +775,7 @@ describe("selection steps abort on a zero-column selector", {
     rec <- base_recipe() |>
       step_select_boruta(dplyr::matches(no_match), outcome = "SOC")
 
-    expect_error(recipes::prep(rec), "selected zero columns")
+    expect_error(recipes::prep(rec), "`step_select_boruta()` selected zero columns", fixed = TRUE)
 
   })
 
@@ -1331,7 +1331,7 @@ describe("custom steps keep their selectors through prep (#52)", {
         expect_error(recipes::prep(old, training = d, fresh = TRUE),
                      "earlier version of horizons")
         expect_error(recipes::prep(old, training = d, fresh = TRUE),
-                     step_fn(step), fixed = TRUE)
+                     sprintf("`%s()` has no stored selectors", step_fn(step)), fixed = TRUE)
 
       }
 
