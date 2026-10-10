@@ -93,6 +93,7 @@ test_that("a pool in memory is not cached, a library file is", {
 
   obj <- suppressWarnings(select_training(x, m$pool, k = 5L, verbose = FALSE))
   expect_false(obj$selection$search$cache$used)
+  expect_false(obj$selection$search$cache$hit)
   expect_identical(obj$selection$search$cache$reason, "pool passed in memory")
   expect_length(space_files(m$cache), 1L)
 
@@ -156,6 +157,7 @@ test_that("targets short of the library by up to 50 cm-1 search the overlap, unc
   expect_identical(out$selection$search$mode, "overlap")
   expect_equal(out$selection$search$missing[["low"]], 30)
   expect_false(out$selection$search$cache$used)
+  expect_identical(out$selection$search$cache$reason, "overlap space")
   expect_length(space_files(m$cache), 1L)
 
 })

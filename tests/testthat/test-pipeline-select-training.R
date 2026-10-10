@@ -290,7 +290,22 @@ test_that("select_training() refuses a pool that is itself a selection", {
   ## The provenance columns would collide under bind_cols and then surface as
   ## a confusing role-map abort. Say what is actually wrong instead.
   expect_error(select_training(fx$targets, prior, k = 5, verbose = FALSE),
-               regexp = "\\.drawn_by", class = "horizons_input_error")
+               regexp = "itself a selection", class = "horizons_input_error")
+
+  ## Any one of the three is enough, and is named
+  for (col in c(".drawn_by", ".min_distance", ".group")) {
+
+    pool <- fx$pool
+    pool$data$analysis[[col]] <- NA
+    pool$data$role_map <- rbind(pool$data$role_map, tibble::tibble(variable = col, role = "meta"))
+
+    err <- expect_error(select_training(fx$targets, pool, k = 5, verbose = FALSE),
+                        class = "horizons_input_error")
+    expect_match(gsub("\\s+", " ", conditionMessage(err)),
+                 sprintf("provenance column \"%s\", so it is itself a selection", col),
+                 fixed = TRUE, info = col)
+
+  }
 
 })
 
@@ -302,12 +317,19 @@ test_that("select_training() warns when pool and targets are in different units"
   ## downstream is structurally blind to it.
   fx <- select_fixture(n_pool = 60, target_scale = 100)
 
-  expect_warning(out <- select_training(fx$targets, fx$pool, k = 5, verbose = FALSE),
-                 regexp = "photometric units", class = "horizons_select_warning")
+  w <- expect_warning(out <- select_training(fx$targets, fx$pool, k = 5, verbose = FALSE),
+                      regexp = "photometric units", class = "horizons_select_warning")
 
   u <- out$selection$units
   expect_true(u$mismatch)
   expect_gt(u$target_iqr / u$pool_iqr, 30)
+
+  ## The warning carries both scales
+  msg <- gsub("\\s+", " ", conditionMessage(w))
+  expect_match(msg, paste0("Pool absorbance: median ", signif(u$pool_median, 3),
+                           ", IQR ", signif(u$pool_iqr, 3)), fixed = TRUE)
+  expect_match(msg, paste0("Targets: median ", signif(u$target_median, 3),
+                           ", IQR ", signif(u$target_iqr, 3)), fixed = TRUE)
 
   ## The same fixture in its own units does not warn. Its spectra carry a
   ## per-sample baseline offset straddling zero, so the pooled median's sign
@@ -396,9 +418,9 @@ test_that("a draw that cannot reach k is recorded and warned about once", {
   fx <- select_fixture(n_pool = 60)
   k  <- 60L
 
-  expect_warning(out <- select_training(fx$targets, fx$pool, k = k, properties = "clay",
-                                        verbose = FALSE),
-                 regexp = "could not reach k", class = "horizons_select_warning")
+  w <- expect_warning(out <- select_training(fx$targets, fx$pool, k = k, properties = "clay",
+                                             verbose = FALSE),
+                      regexp = "could not reach k", class = "horizons_select_warning")
 
   sd_tbl <- out$selection$short_draws
   expect_named(sd_tbl, c("target_id", "property", "k_requested", "k_drawn", "reason"))
@@ -407,9 +429,18 @@ test_that("a draw that cannot reach k is recorded and warned about once", {
   expect_true(all(sd_tbl$k_requested == k))
   expect_true(all(sd_tbl$k_drawn < k))
 
+  ## The warning names the shortest draw
+  expect_match(gsub("\\s+", " ", conditionMessage(w)),
+               sprintf("Smallest: %d of %d rows, on clay", min(sd_tbl$k_drawn), k), fixed = TRUE)
+
   ## An ordinary draw records nothing and warns not at all
   ok <- quiet_select(fx, k = 10, properties = "clay")
   expect_identical(nrow(ok$selection$short_draws), 0L)
+
+  ## Nor does global, which draws nothing, at the same k
+  expect_no_warning(all_rows <- select_training(fx$targets, fx$pool, k = k, scope = "global",
+                                                properties = "clay", verbose = FALSE))
+  expect_identical(nrow(all_rows$selection$short_draws), 0L)
 
 })
 
@@ -436,7 +467,11 @@ test_that("scope = 'global' returns every pool row on the targets' grid", {
   expect_identical(nrow(out$selection$groups), 1L)
   expect_identical(out$selection$groups$n_rows, 60L)
   expect_identical(nrow(out$selection$membership), 0L)
+
+  ## The provenance columns are there, and empty: global draws nothing
+  expect_true(all(c(".drawn_by", ".min_distance") %in% names(out$data$analysis)))
   expect_true(all(is.na(out$data$analysis$.drawn_by)))
+  expect_true(all(is.na(out$data$analysis$.min_distance)))
 
 })
 
@@ -878,10 +913,26 @@ test_that("a property with no measured pool row stops every scope", {
 
   for (scope in c("batch", "global")) {
 
-    expect_error(quiet_select(fx, k = 5, scope = scope),
-                 regexp = "measured rows for oc", class = "horizons_input_error")
+    err <- expect_error(quiet_select(fx, k = 5, scope = scope),
+                        regexp = "measured rows for oc", class = "horizons_input_error")
+
+    ## No depth column, so no depth was applied and no hint about it
+    expect_no_match(conditionMessage(err), "depth = \"all\"", fixed = TRUE)
 
   }
+
+  ## oc measured only below 30 cm: topsoil leaves it unmeasured, and the
+  ## refusal says depth = "all" would reach it
+  deep <- select_fixture(n_pool = 60)
+  upper <- rep(c(0, 60), length.out = 60)
+  deep$pool$data$analysis$upper_depth_cm <- upper
+  deep$pool$data$analysis$oc[upper < 30] <- NA_real_
+  deep$pool$data$role_map <- rbind(deep$pool$data$role_map,
+                                   tibble::tibble(variable = "upper_depth_cm", role = "meta"))
+
+  err <- expect_error(quiet_select(deep, k = 5),
+                      regexp = "measured rows for oc", class = "horizons_input_error")
+  expect_match(conditionMessage(err), "depth = \"all\"", fixed = TRUE)
 
 })
 
@@ -946,6 +997,25 @@ test_that("the record carries the targets' source, size and id hash", {
   reordered <- select_training(subset_rows(fx$targets, rev(ids)), fx$pool, k = 5, verbose = FALSE)
 
   expect_identical(reordered$selection$targets$id_hash, rec$id_hash)
+
+  ## Under a collation that orders case apart from radix, both hashes still
+  ## take radix order
+  mixed <- fx
+  lower_every_other <- function(x) ifelse(seq_along(x) %% 2 == 0, tolower(x), x)
+  mixed$targets$data$analysis$sample_id <- lower_every_other(ids)
+  mixed$pool$data$analysis$sample_id    <- lower_every_other(fx$pool$data$analysis$sample_id)
+
+  t_ids <- mixed$targets$data$analysis$sample_id
+  p_ids <- mixed$pool$data$analysis$sample_id
+
+  withr::local_collate("en_US.UTF-8")
+  skip_if(identical(sort(c(t_ids, p_ids)), sort(c(t_ids, p_ids), method = "radix")),
+          "no locale here that collates case apart from radix order")
+
+  hashed <- quiet_select(mixed, k = 5)
+
+  expect_identical(hashed$selection$targets$id_hash, digest::digest(sort(t_ids, method = "radix")))
+  expect_identical(hashed$selection$pool$id_hash, digest::digest(sort(p_ids, method = "radix")))
 
   ## It describes the draw, so rows leaving afterwards leave it alone; the
   ## object's provenance stays the library's.
@@ -1120,6 +1190,7 @@ test_that("the record carries the SG window in cm-1 and the space's floor", {
   ## derivative = 0 means no filter and so no width
   flat <- suppressWarnings(quiet_select(fx, k = 10, derivative = 0L))
   expect_true(is.na(flat$selection$settings$window_cm))
+  expect_true(is.na(flat$selection$settings$window_points))
 
   ## The similarity space's noise floor, as applied
   expect_equal(s$sdev_floor, SELECT_SDEV_FLOOR)
@@ -1305,6 +1376,14 @@ test_that("metric and space levers change which rows are drawn", {
   expect_false(identical(ids(base), ids(pls)))
   expect_identical(pls$selection$settings$space, "pls")
 
+  ## A mask over the fixture's two peaks, drawing for two properties
+  mask   <- rbind(c(1350, 1700))
+  both   <- quiet_select(fx, k = 10, properties = c("clay", "oc"))
+  masked <- quiet_select(fx, k = 10, properties = c("clay", "oc"), mask = mask)
+
+  expect_identical(masked$selection$settings$mask, mask)
+  expect_false(identical(ids(both), ids(masked)))
+
 })
 
 
@@ -1421,6 +1500,21 @@ test_that("select_training() refuses to bind the provenance columns to reordered
 
   expect_error(quiet_select(fx, k = 5), "Provenance columns",
                class = "horizons_internal_error")
+
+})
+
+
+test_that("select_training() refuses to return a record of the wrong shape", {
+
+  ## The exit validation holds the verb's own output to the record's shape
+  fx <- select_fixture(n_pool = 60)
+
+  local_mocked_bindings(build_groups = function(...) tibble::tibble(group = 1L))
+
+  utils::capture.output(
+    expect_error(quiet_select(fx, k = 5), "selection\\$groups",
+                 class = "horizons_validation_error")
+  )
 
 })
 
