@@ -158,10 +158,25 @@ describe("ensemble() - optimize = FALSE runs (lazy-quosure regression guard)", {
 
   })
 
-  it("xgb fixed-spec path completes", {
+  it("xgb fixed-spec path completes, with its fixed settings", {
 
     ens <- ens_built("xgb")
     expect_true(inherits(ens, "horizons_ensemble"))
+
+    ## Built here rather than read from the memo: the mutation tool's
+    ## coverage map credits a memoised build only to the first file that
+    ## builds it
+    fixed <- suppressWarnings(
+      ensemble(ens_fitted(), method = "xgb", optimize = FALSE, compute_uq = FALSE,
+               verbose = FALSE)
+    )
+
+    booster <- hardhat::extract_fit_engine(fixed$ensemble$model)
+    tree    <- xgboost::xgb.config(booster)$learner$gradient_booster$tree_train_param
+
+    expect_equal(xgboost::xgb.get.num.boosted.rounds(booster), 500)
+    expect_equal(as.numeric(tree$max_depth), 3)
+    expect_equal(as.numeric(tree$eta), 0.05)
 
   })
 
