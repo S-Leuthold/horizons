@@ -63,10 +63,20 @@ build_warmstart_grid <- function(best_params, param_set, max_points = 25L) {
     expand.grid(candidate_lists, stringsAsFactors = FALSE)
   )
 
-  ## Always include the exact best point
+  ## Always include the best point, clamped into this range as its candidates
+  ## are: fit()'s range can be narrower than the one evaluate() searched (a
+  ## PLS num_comp capped by fewer training rows), and an out-of-range point
+  ## would be fitted at the engine's own cap, tying it with the clamp.
   best_row <- tibble::as_tibble(
     best_params[, param_set$name, drop = FALSE]
   )
+
+  for (i in seq_len(nrow(param_set))) {
+
+    p_name <- param_set$name[i]
+    best_row[[p_name]] <- clamp_to_range(best_row[[p_name]], param_set$object[[i]])
+
+  }
 
   if (nrow(full_grid) > max_points) {
 
@@ -220,6 +230,33 @@ generate_candidates <- function(best_val, param_obj) {
   }
 
   unique(candidates)
+
+}
+
+#' Clamp a parameter value into its range
+#'
+#' In the space where the range lives, as `generate_candidates()` does. A
+#' value inside the range, `NA`, and a non-numeric value (a qualitative
+#' parameter's) are returned as given.
+#'
+#' @keywords internal
+#' @noRd
+clamp_to_range <- function(value, param_obj) {
+
+  if (!is.numeric(value) || is.na(value)) return(value)
+
+  lower <- param_obj$range$lower
+  upper <- param_obj$range$upper
+  trans <- param_obj$trans
+
+  t_value <- if (is.null(trans)) value else trans$transform(value)
+
+  if (t_value >= lower && t_value <= upper) return(value)
+
+  t_value <- min(max(t_value, lower), upper)
+  clamped <- if (is.null(trans)) t_value else trans$inverse(t_value)
+
+  if (isTRUE(param_obj$type == "integer")) as.integer(round(clamped)) else clamped
 
 }
 

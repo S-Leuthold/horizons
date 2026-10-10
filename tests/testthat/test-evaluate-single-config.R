@@ -902,3 +902,40 @@ describe("the mtry upper bound", {
   })
 
 })
+
+
+## =========================================================================
+## A PLS config's component range (#216)
+## =========================================================================
+
+describe("evaluate_single_config() - a PLS config", {
+
+  it("hands tune_grid() num_comp up to the predictors and the smallest fold's rows less one, at most 30", {
+
+    ## 20 wavenumbers keep 12 predictors past the raw step's edge trim, and
+    ## the 60 training rows make 39-row analysis sets at the smallest, so the
+    ## predictors set the cap. The grid search is stopped once it has the set.
+    setup      <- make_eval_setup(n = 80, n_wn = 20)
+    param_info <- NULL
+    local_mocked_bindings(tune_grid = function(..., param_info) {
+      param_info <<- param_info
+      stop("stopped after the parameter set")
+    }, .package = "tune")
+
+    evaluate_single_config(
+      config_row    = make_eval_config(model = "plsr"),
+      split         = setup$split,
+      cv_folds      = setup$folds,
+      role_map      = setup$role_map,
+      grid_size     = 2,
+      bayesian_iter = 0,
+      seed          = 42L
+    )
+
+    num_comp <- param_info$object[[which(param_info$name == "num_comp")]]
+    expect_equal(c(num_comp$range$lower, num_comp$range$upper), c(1, 12))
+    expect_gt(min_analysis_rows(setup$folds) - 1, 12)
+
+  })
+
+})

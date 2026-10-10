@@ -77,10 +77,9 @@ define_model_spec <- function(model) {
       parsnip::set_mode("regression"),
 
     "plsr" = parsnip::pls(
-      num_comp       = tune::tune(),
-      predictor_prop = 1
+      num_comp = tune::tune()
     ) |>
-      parsnip::set_engine("mixOmics") |>
+      parsnip::set_engine("pls") |>
       parsnip::set_mode("regression"),
 
     "mlp" = parsnip::mlp(

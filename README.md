@@ -32,16 +32,7 @@ remotes::install_github("S-Leuthold/horizons@main")
 
 Both are pre-1.0 and both will have bugs; `development` is simply more up to date. Releases are listed on the [releases page](https://github.com/S-Leuthold/horizons/releases).
 
-Two dependencies are not on CRAN and are pinned in the `Remotes` field of `DESCRIPTION`, so `remotes::install_github()` installs them automatically:
-
-- [`spectral-cockpit/opusreader2`](https://github.com/spectral-cockpit/opusreader2) reads Bruker OPUS files.
-- [`S-Leuthold/plsmod-fork`](https://github.com/S-Leuthold/plsmod-fork) is a fork of `plsmod` with a fix the `plsr` model type needs during tuning.
-
-The PLS model and the PLS similarity space in `select_training()` use `mixOmics`, which comes from Bioconductor. Install it first if you need either:
-
-```r
-BiocManager::install("mixOmics")
-```
+One dependency is not on CRAN and is pinned in the `Remotes` field of `DESCRIPTION`, so `remotes::install_github()` installs it automatically: [`spectral-cockpit/opusreader2`](https://github.com/spectral-cockpit/opusreader2), which reads Bruker OPUS files.
 
 ## The pipeline
 

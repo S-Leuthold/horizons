@@ -21,8 +21,7 @@ BugReports: https://github.com/S-Leuthold/horizons/issues
 Encoding: UTF-8
 LazyData: false
 Remotes:
-    spectral-cockpit/opusreader2,
-    plsmod=S-Leuthold/plsmod-fork@fix/plsr-tune-grid-dimension
+    spectral-cockpit/opusreader2
 Imports:
     butcher,
     cli,
@@ -40,7 +39,7 @@ Imports:
     hardhat,
     opusreader2,
     parsnip,
-    plsmod,
+    pls,
     prospectr,
     purrr,
     qs2,
@@ -72,9 +71,7 @@ Suggests:
     earth,
     kernlab,
     lightgbm,
-    mixOmics,
     nnet,
-    pls,
     RhpcBLASctl,
     mirai
 Config/testthat/edition: 3
@@ -94,6 +91,7 @@ Collate:
     'utils-backtransform.R'
     'utils-clustering.R'
     'utils-models.R'
+    'pls-engine.R'
     'utils-recipes.R'
     'utils-resamples.R'
     'utils-parallel.R'

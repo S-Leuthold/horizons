@@ -43,9 +43,9 @@ utils::globalVariables(c(".metric", ".estimate"))
   ## ---------------------------------------------------------------------------
 
   ## These register parsnip engines the pipeline selects by string
-  ## (`set_engine("glmnet")`, the `pls` model via plsmod, `cubist_rules()` via
-  ## rules). They are never called through `::`, so they must be loaded here for
-  ## the engines to resolve at fit time. Soft-loaded: a missing extension means
+  ## (`set_engine("glmnet")`, `cubist_rules()` via rules). They are never
+  ## called through `::`, so they must be loaded here for the engines to
+  ## resolve at fit time. Soft-loaded: a missing extension means
   ## that engine is unavailable, not a package load failure.
   ##
   ## Written out literally rather than looped. R CMD check's "unused Imports"
@@ -55,8 +55,10 @@ utils::globalVariables(c(".metric", ".estimate"))
   ## though the packages are genuinely used.
 
   requireNamespace("glmnet", quietly = TRUE)
-  requireNamespace("plsmod", quietly = TRUE)
   requireNamespace("rules",  quietly = TRUE)
+
+  ## The plsr model's engine, which horizons provides (R/pls-engine.R)
+  register_pls_engine()
 
   ## ---------------------------------------------------------------------------
   ## Trust the user - no automatic thread control

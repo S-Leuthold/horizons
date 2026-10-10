@@ -164,6 +164,27 @@ describe("build_warmstart_grid() - range clamping", {
 
   })
 
+  it("clamps a best point outside the range into it, rather than adding it as found", {
+
+    ## fit()'s range can be narrower than the one evaluate() chose from: a
+    ## best mtry of 27 against fit()'s 1 to 20, and a learn_rate above its
+    ## log10 range
+    outside <- build_warmstart_grid(make_best_params(mtry = 27L), param_set, max_points = 50)
+
+    expect_true(all(outside$mtry <= param_range("mtry")$upper))
+    expect_true(any(outside$mtry == param_range("mtry")$upper))
+    expect_type(outside$mtry, "integer")
+
+    xgb_set  <- make_xgb_param_set()
+    lr_param <- xgb_set$object[[which(xgb_set$name == "learn_rate")]]
+    lr_upper <- lr_param$trans$inverse(lr_param$range$upper)
+    xgb_grid <- build_warmstart_grid(make_xgb_best_params(learn_rate = lr_upper * 10), xgb_set,
+                                     max_points = 25)
+
+    expect_true(all(xgb_grid$learn_rate <= lr_upper * (1 + 1e-8)))
+
+  })
+
 })
 
 

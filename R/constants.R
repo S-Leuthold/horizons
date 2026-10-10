@@ -23,7 +23,7 @@ MODEL_SPECS <- list(
   rf          = list(fn = "rand_forest",  engine = "ranger"),
   cubist      = list(fn = "cubist_rules", engine = "Cubist"),
   xgboost     = list(fn = "boost_tree",   engine = "xgboost"),
-  plsr        = list(fn = "pls",          engine = "mixOmics"),
+  plsr        = list(fn = "pls",          engine = "pls"),
   elastic_net = list(fn = "linear_reg",   engine = "glmnet"),
   svm_rbf     = list(fn = "svm_rbf",      engine = "kernlab"),
   mlp         = list(fn = "mlp",          engine = "nnet"),
@@ -54,7 +54,7 @@ MODEL_PREDICT_PACKAGES <- list(
   rf          = "ranger",
   cubist      = c("rules", "Cubist"),
   xgboost     = "xgboost",
-  plsr        = c("plsmod", "mixOmics"),
+  plsr        = "pls",
   elastic_net = "glmnet",
   svm_rbf     = "kernlab",
   mlp         = "nnet",
@@ -62,13 +62,12 @@ MODEL_PREDICT_PACKAGES <- list(
   mars        = "earth"
 )
 
-# Predict-time packages that are not on CRAN, so an install.packages() hint
-# would be actively wrong. mixOmics (the plsr engine) is on Bioconductor; see
-# README.md's Dependencies section for the same guidance. Read by
-# predict_package_install_hint() (R/pipeline-predict.R).
-PREDICT_PACKAGE_INSTALL_HINT <- list(
-  mixOmics = 'BiocManager::install("mixOmics")'
-)
+# The most components the plsr model tunes over (#216). The runners cap it
+# further at the predictors the recipe keeps and the smallest fold's rows less
+# one (cap_pls_components(), R/pls-engine.R). MIR models often want more than
+# the handful a default range allows, and 30 keeps a grid's points where
+# models land.
+PLS_MAX_COMP <- 30L
 
 # Human-readable model names for CLI tree output
 MODEL_DISPLAY_NAMES <- c(
