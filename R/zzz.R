@@ -43,8 +43,9 @@ utils::globalVariables(c(".metric", ".estimate"))
   ## ---------------------------------------------------------------------------
 
   ## These register parsnip engines the pipeline selects by string
-  ## (`set_engine("glmnet")`, `cubist_rules()` via rules). They are never called through `::`, so they must be loaded here for
-  ## the engines to resolve at fit time. Soft-loaded: a missing extension means
+  ## (`set_engine("glmnet")`, `cubist_rules()` via rules). They are never
+  ## called through `::`, so they must be loaded here for the engines to
+  ## resolve at fit time. Soft-loaded: a missing extension means
   ## that engine is unavailable, not a package load failure.
   ##
   ## Written out literally rather than looped. R CMD check's "unused Imports"

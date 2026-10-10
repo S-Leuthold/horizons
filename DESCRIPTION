@@ -72,7 +72,6 @@ Suggests:
     kernlab,
     lightgbm,
     nnet,
-    pls,
     RhpcBLASctl,
     mirai
 Config/testthat/edition: 3

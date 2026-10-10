@@ -20,8 +20,10 @@ used in \code{horizons_ncomp}.
 \description{
 The fit function of the \code{"pls"} engine horizons registers for
 \code{\link[parsnip:pls]{parsnip::pls()}}: \code{\link[pls:plsr]{pls::plsr()}} by NIPALS, with the predictors centred and
-scaled. \code{ncomp} is capped at the number of predictors and at the rows less
-one, the most components the data can hold, so a fit asked for more uses
-that many; the tuning range is capped the same way before a grid is drawn.
+scaled (a constant column is left unscaled, so it contributes nothing).
+\code{ncomp} is capped at the number of predictors and at the rows less one, the
+most components the data can hold. A fit asked for more uses that many and
+warns: the runners cap the tuning range from the whole training set, so a
+fold whose recipe selects fewer predictors can still reach this cap.
 }
 \keyword{internal}

@@ -369,11 +369,13 @@ build_similarity_space <- function(M, wn,
     k    <- as.integer(ncomp)
 
     ### NIPALS on centred, unscaled spectra: the transform has put them on
-    ### one scale already. model = FALSE keeps the library's rows out of the
-    ### stored fit.
+    ### one scale already. model = FALSE and a formula outside this frame
+    ### keep the library's rows out of the stored fit.
+    fml <- y ~ x
+    environment(fml) <- baseenv()
     fit_data   <- data.frame(y = y[keep])
     fit_data$x <- X[keep, , drop = FALSE]
-    fit <- pls::plsr(y ~ x, data = fit_data, ncomp = k, scale = FALSE,
+    fit <- pls::plsr(fml, data = fit_data, ncomp = k, scale = FALSE,
                      method = "oscorespls", model = FALSE)
 
     scores <- pls_space_scores(fit, X, k)

@@ -43,13 +43,47 @@ describe("the pls engine", {
 
   })
 
-  it("caps the components at the predictors and at the rows less one", {
+  it("caps the components at the predictors and at the rows less one, and says so", {
 
     d <- make_pls_data(n = 12, p = 40)
-    expect_identical(pls_fit(d$x, d$y, ncomp = 30L)$horizons_ncomp, 11L)
+    expect_warning(fit <- pls_fit(d$x, d$y, ncomp = 30L),
+                   "11 components, not the 30", class = "horizons_pls_warning")
+    expect_identical(fit$horizons_ncomp, 11L)
 
     d <- make_pls_data(n = 60, p = 6)
-    expect_identical(pls_fit(d$x, d$y, ncomp = 30L)$horizons_ncomp, 6L)
+    expect_warning(fit <- pls_fit(d$x, d$y, ncomp = 30L),
+                   "6 components, not the 30", class = "horizons_pls_warning")
+    expect_identical(fit$horizons_ncomp, 6L)
+
+    expect_no_warning(pls_fit(d$x, d$y, ncomp = 6L))
+
+  })
+
+  it("predicts finitely with a constant predictor, which it leaves unscaled", {
+
+    d <- make_pls_data()
+    d$x[, 3] <- 0.5
+
+    expect_no_warning(fit <- pls_fit(d$x, d$y, ncomp = 5L))
+
+    expect_false(anyNA(pls_predict(fit, d$x)))
+    expect_equal(unname(fit$scale[3]), 1)
+
+  })
+
+  it("keeps the training data out of the fit", {
+
+    ## The formula's environment would carry x into the fit's terms
+    d   <- make_pls_data(n = 200, p = 400)
+    fit <- pls_fit(d$x, d$y, ncomp = 5L)
+
+    expect_lt(length(serialize(fit, NULL)), length(serialize(d$x, NULL)))
+
+  })
+
+  it("names horizons as a package the fit needs, so tune's workers load the engine", {
+
+    expect_true("horizons" %in% parsnip::required_pkgs(define_model_spec("plsr")))
 
   })
 
@@ -64,8 +98,8 @@ describe("the pls engine", {
     range <- workflows::extract_parameter_set_dials(wf)$object[[1]]$range
     expect_equal(c(range$lower, range$upper), c(1, PLS_MAX_COMP))
 
-    ## The cap the runners apply: 40 predictors, 40-row analysis sets
-    params <- cap_pls_components(workflows::extract_parameter_set_dials(wf), 40L,
+    ## A cap that binds, as the runners apply it: 8 predictors' worth
+    params <- cap_pls_components(workflows::extract_parameter_set_dials(wf), 8L,
                                  min_analysis_rows(folds))
 
     grid  <- withr::with_seed(5, tune::tune_grid(wf, folds, grid = 3, param_info = params))
@@ -73,7 +107,7 @@ describe("the pls engine", {
       tune::tune_bayes(wf, folds, initial = grid, iter = 1, param_info = params)
     ))
 
-    expect_true(all(tune::collect_metrics(grid)$num_comp <= 30))
+    expect_true(all(tune::collect_metrics(bayes)$num_comp <= 8))
     expect_gt(max(tune::collect_metrics(bayes)$.iter), 0)
     expect_false(anyNA(tune::collect_metrics(bayes)$mean))
 

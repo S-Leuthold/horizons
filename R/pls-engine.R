@@ -87,9 +87,11 @@ register_pls_engine <- function() {
 #' @description
 #' The fit function of the `"pls"` engine horizons registers for
 #' [parsnip::pls()]: [pls::plsr()] by NIPALS, with the predictors centred and
-#' scaled. `ncomp` is capped at the number of predictors and at the rows less
-#' one, the most components the data can hold, so a fit asked for more uses
-#' that many; the tuning range is capped the same way before a grid is drawn.
+#' scaled (a constant column is left unscaled, so it contributes nothing).
+#' `ncomp` is capped at the number of predictors and at the rows less one, the
+#' most components the data can hold. A fit asked for more uses that many and
+#' warns: the runners cap the tuning range from the whole training set, so a
+#' fold whose recipe selects fewer predictors can still reach this cap.
 #'
 #' @param x Numeric matrix or data frame of predictors.
 #' @param y Numeric vector, the outcome.
@@ -101,13 +103,33 @@ register_pls_engine <- function() {
 #' @export
 pls_fit <- function(x, y, ncomp = 2L) {
 
-  x     <- as.matrix(x)
-  ncomp <- as.integer(max(1L, min(ncomp, ncol(x), nrow(x) - 1L)))
+  x         <- as.matrix(x)
+  requested <- as.integer(ncomp)
+  ncomp     <- as.integer(max(1L, min(ncomp, ncol(x), nrow(x) - 1L)))
+
+  if (ncomp < requested) {
+
+    cli::cli_warn(
+      "PLS fitted {ncomp} component{?s}, not the {requested} asked for: the data have {ncol(x)} predictor{?s} and {nrow(x)} row{?s}.",
+      class = "horizons_pls_warning"
+    )
+
+  }
+
+  ### scale = TRUE divides a constant column by a zero sd, which makes every
+  ### prediction NaN.
+  sds <- apply(x, 2, stats::sd)
+  sds[!is.finite(sds) | sds < sqrt(.Machine$double.eps)] <- 1
+
+  ### A formula made here would carry this frame, x included, into the fit's
+  ### terms and every saved copy of it.
+  fml <- y ~ x
+  environment(fml) <- baseenv()
 
   data   <- data.frame(y = y)
   data$x <- x
 
-  fit <- pls::plsr(y ~ x, data = data, ncomp = ncomp, scale = TRUE,
+  fit <- pls::plsr(fml, data = data, ncomp = ncomp, scale = sds,
                    method = "oscorespls", model = FALSE)
 
   fit$horizons_ncomp <- ncomp

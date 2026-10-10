@@ -517,6 +517,9 @@ test_that("build_similarity_space(space = 'pls') fits on measured rows and score
   expect_true(all(is.finite(sp$scores)))
   expect_length(sp$sdev, 4L)
 
+  ## The stored fit holds loadings, not the library's rows
+  expect_lt(length(serialize(sp$fit, NULL)), length(serialize(pm$matrix, NULL)))
+
   pca <- build_similarity_space(pm$matrix, pm$wavenumbers, ncomp = 4L)
   expect_false(isTRUE(all.equal(abs(unname(sp$scores)), abs(unname(pca$scores)))))
 
