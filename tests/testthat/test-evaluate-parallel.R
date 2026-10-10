@@ -159,12 +159,22 @@ describe("evaluate() parallel worker footprint", {
     obj    <- make_eval_object(n_configs = 4)   # 4 >= cv_folds (3) -> configs
     tmpdir <- withr::local_tempdir()
 
-    expect_error(
-      suppressWarnings(
-        evaluate(obj, allow_par = TRUE, output_dir = tmpdir, verbose = FALSE)
-      ),
+    withr::local_options(future.globals.maxSize = 12345)
+
+    out <- utils::capture.output(expect_error(
+      suppressWarnings(evaluate(obj, allow_par = TRUE, output_dir = tmpdir)),
       "load_all"
+    ))
+
+    ## The lines printed before the guard, and the globals ceiling the
+    ## dispatch raised put back
+    expect_identical(
+      sub(tmpdir, "<dir>", utils::tail(out, 3), fixed = TRUE),
+      c("│  Processing 4 pending configs...",
+        "│  Monitor: horizons::monitor_evaluate(\"<dir>\")",
+        "│")
     )
+    expect_identical(getOption("future.globals.maxSize"), 12345)
 
   })
 
@@ -283,6 +293,74 @@ describe("evaluate() - allow_par without a usable backend", {
                  seq_result$evaluation$results$rmse)
     expect_equal(par_result$evaluation$best_config,
                  seq_result$evaluation$best_config)
+
+  })
+
+})
+
+describe("evaluate() - the parallel axis's setup", {
+
+  it("names the axis, plan and workers, records them, and pins the threads only while it runs", {
+
+    ## The backend and the runner mocked: the runner records the thread
+    ## option it sees and stops the run once the header is out
+    run <- function(allow_par, workers) {
+
+      dir         <- withr::local_tempdir()
+      inside      <- NULL
+      mirai_calls <- 0L
+
+      out <- utils::capture.output(testthat::with_mocked_bindings(
+        tryCatch(
+          suppressWarnings(suppressMessages(
+            evaluate(make_eval_object(n = 60, n_configs = 1), allow_par = allow_par,
+                     parallelize_over = "resamples", output_dir = dir, seed = 42L)
+          )),
+          header_rendered = function(e) NULL
+        ),
+        check_parallel_backend  = function(...) TRUE,
+        registered_workers      = function() workers,
+        registered_plan_label   = function() "multisession",
+        warn_if_mirai_preferred = function() {
+          mirai_calls <<- mirai_calls + 1L
+          invisible(FALSE)
+        },
+        evaluate_single_config  = function(...) {
+          inside <<- getOption("ranger.num.threads")
+          rlang::abort("stop", class = "header_rendered")
+        },
+        .package = "horizons"
+      ))
+
+      manifest <- readRDS(file.path(dir, "eval_manifest.rds"))
+
+      list(line        = grep("Parallel:", out, value = TRUE, fixed = TRUE),
+           manifest    = manifest[c("plan", "workers", "axis")],
+           inside      = inside,
+           mirai_calls = mirai_calls)
+
+    }
+
+    withr::local_options(ranger.num.threads = 7L)
+
+    two        <- run(TRUE, 2L)
+    unbounded  <- run(TRUE, NA_integer_)
+    sequential <- run(FALSE, 2L)
+
+    expect_identical(two$line, "│  Parallel: over resamples on multisession (2 workers)")
+    expect_identical(unbounded$line, "│  Parallel: over resamples on multisession (unbounded)")
+    expect_identical(sequential$line, character())
+
+    ## allow_par = FALSE never inspects the plan
+    expect_identical(two$manifest, list(plan = "multisession", workers = 2L, axis = "resamples"))
+    expect_identical(unbounded$manifest$workers, NA_integer_)
+    expect_identical(sequential$manifest,
+                     list(plan = "sequential", workers = 1L, axis = "sequential"))
+
+    expect_identical(c(two$inside, unbounded$inside, sequential$inside), c(1L, 1L, 7L))
+    expect_identical(getOption("ranger.num.threads"), 7L)
+    expect_identical(c(two$mirai_calls, unbounded$mirai_calls, sequential$mirai_calls),
+                     c(1L, 1L, 0L))
 
   })
 

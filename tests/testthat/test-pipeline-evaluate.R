@@ -24,6 +24,31 @@ build_ev60 <- function() {
 
 ev60 <- function() memo_fixture("ev60", build_ev60)
 
+## A result row for a mocked evaluate_single_config(): a real row with its
+## status, metrics, error, warnings and runtime replaced, so the tree is
+## rendered from the shape the runner returns.
+mock_eval_row <- function(template, config_id, status, rpd = 1.5,
+                          warnings = NULL, error = NA_character_,
+                          runtime = 1.25) {
+
+  row <- template
+  row$config_id <- config_id
+  row$status    <- status
+
+  metrics <- c(rmse = 0.5, rrmse = 20, rsq = 0.6, ccc = 0.7, rpd = rpd, mae = 0.4)
+
+  for (m in names(metrics)) {
+    row[[m]]                  <- if (status == "failed") NA_real_ else unname(metrics[m])
+    row[[paste0("cv_", m)]]   <- if (status == "failed") NA_real_ else unname(metrics[m]) + 0.25
+  }
+
+  row$error_message <- error
+  row$warnings      <- list(warnings)
+  row$runtime_secs  <- runtime
+  row
+
+}
+
 ## Checkpoint templates. Most checkpoint tests start from the same first run
 ## into an output_dir and then edit or resume it. That run is built once per
 ## settings variant as a template directory, and each test gets its own copy
@@ -227,6 +252,28 @@ describe("evaluate() - success path", {
       expect_false(any(is.na(result$evaluation$results[[m]][success_rows])),
                    info = paste("NA found in", m))
     }
+
+  })
+
+  it("refuses to return results that break the results contract", {
+
+    ## Read the fixture before the runner is mocked (helper-memo.R). Nothing
+    ## reads rmse before the validator does.
+    template <- ev60()$evaluation$results[1, ]
+
+    local_mocked_bindings(
+      evaluate_single_config = function(config_row, ...) {
+        row <- mock_eval_row(template, config_row$config_id, "success")
+        row$rmse <- NULL
+        row
+      }
+    )
+
+    expect_error(
+      suppressWarnings(evaluate(make_eval_object(n = 60, n_configs = 2), seed = 42L,
+                                verbose = FALSE)),
+      class = "horizons_validation_error"
+    )
 
   })
 
@@ -864,6 +911,8 @@ describe("evaluate() - the split line and the fallback notes (#91)", {
     expect_identical(out[cv_line], "│  Tuning: 3-fold CV (unstratified), grid = 2, bayesian = 0")
     expect_identical(split_note, split_line + 1L)
     expect_identical(cv_note, cv_line + 1L)
+    expect_identical(out[split_note], "│  Stratified split failed, retrying without strata")
+    expect_identical(out[cv_note], "│  Stratified CV failed, retrying without strata")
     expect_true(all(c(split_note, cv_note) > header))
 
   })
@@ -909,6 +958,59 @@ describe("evaluate() - the split line and the fallback notes (#91)", {
 })
 
 ## =========================================================================
+## The progress tree
+## =========================================================================
+
+describe("evaluate() - the progress tree", {
+
+  it("prints each config's result, the counts and the best config, fresh and resumed, and nothing when quiet", {
+
+    ## Read the fixture before the runner is mocked (helper-memo.R)
+    template <- ev60()$evaluation$results[1, ]
+
+    ## One config of each status, so each count differs from the others
+    rows <- list(
+      cfg_001 = mock_eval_row(template, "cfg_001", "success", rpd = 2.1234, runtime = 3.21),
+      cfg_002 = mock_eval_row(template, "cfg_002", "pruned", rpd = 0.8765,
+                              warnings = "Pruned config warned", runtime = 0.54),
+      cfg_003 = mock_eval_row(template, "cfg_003", "failed",
+                              warnings = "Failed config warned",
+                              error = "Grid search failed: mocked", runtime = 0.07)
+    )
+
+    local_mocked_bindings(
+      evaluate_single_config = function(config_row, ...) rows[[config_row$config_id]]
+    )
+
+    ## Two outcomes missing, for the dropped-rows line
+    obj <- make_eval_object(n = 60, n_configs = 3)
+    obj$data$analysis$SOC[c(5, 9)] <- NA_real_
+
+    dir    <- withr::local_tempdir()
+    failed <- file.path(dir, "checkpoints", "cfg_003.rds")
+    run    <- function(verbose = TRUE) {
+      suppressWarnings(evaluate(obj, output_dir = dir, seed = 42L, verbose = verbose))
+    }
+
+    expect_snapshot(invisible(run()))
+
+    ## Quiet: nothing on stdout, and nothing on stderr (no GC report either)
+    unlink(failed)
+    err <- utils::capture.output(type = "message",
+      out <- utils::capture.output(invisible(run(verbose = FALSE)))
+    )
+    expect_identical(out, character())
+    expect_identical(err, character())
+
+    ## Resumed: two configs from their checkpoints, the failed one run again
+    unlink(failed)
+    expect_snapshot(invisible(run()))
+
+  })
+
+})
+
+## =========================================================================
 ## Checkpointing
 ## =========================================================================
 
@@ -927,6 +1029,25 @@ describe("evaluate() - checkpointing", {
     expect_setequal(list.files(checkpoint_dir),
                     paste0(obj$config$configs$config_id, ".rds"))
     expect_setequal(list.files(tmpdir), c("checkpoints", "eval_manifest.rds"))
+
+  })
+
+  it("creates an output_dir that does not exist yet, however deep", {
+
+    obj <- make_eval_object(n = 60, n_configs = 1)
+    dir <- file.path(withr::local_tempdir(), "runs", "soc")
+
+    testthat::with_mocked_bindings(
+      tryCatch(
+        suppressWarnings(evaluate(obj, output_dir = dir, seed = 42L, verbose = FALSE)),
+        header_rendered = function(e) NULL
+      ),
+      evaluate_single_config = function(...) rlang::abort("stop", class = "header_rendered"),
+      .package = "horizons"
+    )
+
+    expect_true(dir.exists(file.path(dir, "checkpoints")))
+    expect_true(file.exists(file.path(dir, "eval_manifest.rds")))
 
   })
 
