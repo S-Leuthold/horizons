@@ -33,6 +33,22 @@ test_that("spectra() creates horizons_data from tibble", {
 
 })
 
+test_that("spectra() prints its banner, with the sorting line only when it sorts", {
+
+  test_data <- tibble::tibble(
+    Sample_ID = c("S001", "S002", "S003"),
+    `4000`    = c(0.1, 0.2, 0.3),
+    `3000`    = c(0.2, 0.3, 0.4),
+    `2000`    = c(0.3, 0.4, 0.5)
+  )
+
+  expect_snapshot({
+    invisible(spectra(test_data))
+    invisible(spectra(test_data[, c("Sample_ID", "2000", "4000", "3000")]))
+  })
+
+})
+
 test_that("spectra() does NOT add filename column for tibble input", {
 
   ## Arrange ---------------------------------------------------------------

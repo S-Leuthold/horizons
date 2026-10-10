@@ -159,12 +159,24 @@ describe("evaluate() parallel worker footprint", {
     obj    <- make_eval_object(n_configs = 4)   # 4 >= cv_folds (3) -> configs
     tmpdir <- withr::local_tempdir()
 
-    expect_error(
-      suppressWarnings(
-        evaluate(obj, allow_par = TRUE, output_dir = tmpdir, verbose = FALSE)
-      ),
+    withr::local_options(future.globals.maxSize = 12345)
+
+    out <- utils::capture.output(expect_error(
+      suppressWarnings(evaluate(obj, allow_par = TRUE, output_dir = tmpdir)),
       "load_all"
+    ))
+
+    ## The lines printed before the guard, and the globals ceiling the
+    ## dispatch raised put back. This pins the guard where it sits today,
+    ## after those lines; if it moves ahead of them, these assertions move
+    ## to an installed-build test of the configs axis.
+    expect_identical(
+      sub(tmpdir, "<dir>", utils::tail(out, 3), fixed = TRUE),
+      c("│  Processing 4 pending configs...",
+        "│  Monitor: horizons::monitor_evaluate(\"<dir>\")",
+        "│")
     )
+    expect_identical(getOption("future.globals.maxSize"), 12345)
 
   })
 
@@ -283,6 +295,74 @@ describe("evaluate() - allow_par without a usable backend", {
                  seq_result$evaluation$results$rmse)
     expect_equal(par_result$evaluation$best_config,
                  seq_result$evaluation$best_config)
+
+  })
+
+})
+
+describe("evaluate() - the parallel axis's setup", {
+
+  it("names the axis, plan and workers, records them, and pins the threads only while it runs", {
+
+    ## The backend and the runner mocked: the runner records the thread
+    ## option it sees and stops the run once the header is out
+    run <- function(allow_par, workers) {
+
+      dir         <- withr::local_tempdir()
+      inside      <- NULL
+      mirai_calls <- 0L
+
+      out <- utils::capture.output(testthat::with_mocked_bindings(
+        tryCatch(
+          suppressWarnings(suppressMessages(
+            evaluate(make_eval_object(n = 60, n_configs = 1), allow_par = allow_par,
+                     parallelize_over = "resamples", output_dir = dir, seed = 42L)
+          )),
+          header_rendered = function(e) NULL
+        ),
+        check_parallel_backend  = function(...) TRUE,
+        registered_workers      = function() workers,
+        registered_plan_label   = function() "multisession",
+        warn_if_mirai_preferred = function() {
+          mirai_calls <<- mirai_calls + 1L
+          invisible(FALSE)
+        },
+        evaluate_single_config  = function(...) {
+          inside <<- getOption("ranger.num.threads")
+          rlang::abort("stop", class = "header_rendered")
+        },
+        .package = "horizons"
+      ))
+
+      manifest <- readRDS(file.path(dir, "eval_manifest.rds"))
+
+      list(line        = grep("Parallel:", out, value = TRUE, fixed = TRUE),
+           manifest    = manifest[c("plan", "workers", "axis")],
+           inside      = inside,
+           mirai_calls = mirai_calls)
+
+    }
+
+    withr::local_options(ranger.num.threads = 7L)
+
+    two        <- run(TRUE, 2L)
+    unbounded  <- run(TRUE, NA_integer_)
+    sequential <- run(FALSE, 2L)
+
+    expect_identical(two$line, "│  Parallel: over resamples on multisession (2 workers)")
+    expect_identical(unbounded$line, "│  Parallel: over resamples on multisession (unbounded)")
+    expect_identical(sequential$line, character())
+
+    ## allow_par = FALSE never inspects the plan
+    expect_identical(two$manifest, list(plan = "multisession", workers = 2L, axis = "resamples"))
+    expect_identical(unbounded$manifest$workers, NA_integer_)
+    expect_identical(sequential$manifest,
+                     list(plan = "sequential", workers = 1L, axis = "sequential"))
+
+    expect_identical(c(two$inside, unbounded$inside, sequential$inside), c(1L, 1L, 7L))
+    expect_identical(getOption("ranger.num.threads"), 7L)
+    expect_identical(c(two$mirai_calls, unbounded$mirai_calls, sequential$mirai_calls),
+                     c(1L, 1L, 0L))
 
   })
 
@@ -459,6 +539,33 @@ describe("evaluate() - cross-mode checkpoint resume", {
 ## =========================================================================
 
 describe("monitor_evaluate()", {
+
+  it("renders every line of its display", {
+
+    ## Every optional line is present: ignored and unreadable checkpoints, a
+    ## rate, an ETA, the best config and recent completions. The clock and
+    ## the screen-clearing form feed are scrubbed.
+    manifest <- list(
+      axis = "configs", plan = "multisession", workers = 4L,
+      data_n_rows = 120, data_fields = list(outcome = "SOC"),
+      data_hash = "0123456789abcdef0123",
+      settings = list(grid_size = 10L, outcome_range = c(-Inf, Inf)),
+      metric = "rpd"
+    )
+    stats <- list(
+      n_complete = 3, n_total = 4, pct = 75,
+      ignored = c(other_data = 1, other_settings = 0, earlier_schema = 2, not_in_grid = 0),
+      unreadable = "cfg_009.rds", rate = 12.34, eta = "5 min",
+      best_config = "cfg_002", best_metric = 2.3456,
+      recent = c("cfg_002 RPD = 2.346", "cfg_003 failed")
+    )
+
+    expect_snapshot(
+      .render_monitor(stats, manifest),
+      transform = function(x) sub("monitor \u2014 [0-9:]+", "monitor \u2014 <time>", gsub("\014", "", x, fixed = TRUE))
+    )
+
+  })
 
   it("errors on missing directory", {
 

@@ -225,6 +225,11 @@ test_that("select_training() resolves a library name before anything else", {
   expect_error(select_training(select_fixture()$targets, "ksl", verbose = FALSE),
                class = "horizons_input_error", regexp = "not a registered library")
 
+  ## Two names are refused as a library form, before R's own error for a
+  ## condition of length two
+  expect_error(select_training(select_fixture()$targets, c("kssl", "kssl"), verbose = FALSE),
+               class = "horizons_input_error", regexp = "a single name or path")
+
 })
 
 
@@ -259,6 +264,7 @@ test_that("topsoil, the default, draws only rows under 30 cm and records it", {
   expect_true(all(out$data$analysis$sample_id %in% top))
   expect_identical(out$selection$settings$depth, "topsoil")
   expect_true(out$selection$depth$applied)
+  expect_identical(out$selection$depth$max_cm, SELECT_TOPSOIL_MAX_CM)
   expect_identical(out$selection$depth$n_eligible, length(top))
 
 })
@@ -402,7 +408,14 @@ test_that("resemblance is measured against the rows the draw can reach", {
   fx   <- with_family_depth(fx, deep)
   from_deep <- names(fx$family_of_target)[fx$family_of_target == deep]
 
-  top <- suppressWarnings(select_training(fx$targets, fx$pool, k = 20L, verbose = FALSE))
+  warned <- list()
+  top <- withCallingHandlers(
+    select_training(fx$targets, fx$pool, k = 20L, verbose = FALSE),
+    warning = function(w) {
+      warned[[length(warned) + 1L]] <<- w
+      invokeRestart("muffleWarning")
+    }
+  )
   all <- suppressWarnings(select_training(fx$targets, fx$pool, k = 20L, depth = "all", verbose = FALSE))
 
   ## The deep-family targets resemble rows topsoil cannot draw. Measured
@@ -413,6 +426,17 @@ test_that("resemblance is measured against the rows the draw can reach", {
   expect_gte(length(flagged), length(from_deep) - 1L)
   expect_true(all(top$selection$resemblance$beyond$target_id %in% from_deep))
   expect_length(intersect(all$selection$resemblance$beyond$target_id, from_deep), 0L)
+
+  ## The warning says how many targets and names the first five
+  beyond   <- top$selection$resemblance$beyond
+  beyond_w <- Filter(function(w) grepl("beyond the pool", conditionMessage(w)), warned)
+
+  expect_length(beyond_w, 1L)
+  expect_s3_class(beyond_w[[1]], "horizons_select_warning")
+
+  msg <- gsub("\\s+", " ", conditionMessage(beyond_w[[1]]))
+  expect_match(msg, sprintf("%d targets sit beyond", nrow(beyond)), fixed = TRUE)
+  for (id in utils::head(beyond$target_id, 5)) expect_match(msg, id, fixed = TRUE)
 
 })
 
@@ -460,28 +484,52 @@ test_that("a bad argument is reported before a registered library is fetched", {
   cache <- local_mini_registry(entry)
   withr::local_options(horizons.library_download = TRUE)
 
-  ## Each case is one mistake. A case may name its own targets and the
-  ## pattern the refusal must carry; the rest draw for the fixture's targets.
-  ## depth is reported even when the targets are wrong too.
+  ## Each case is one mistake, and its refusal must name the argument. A case
+  ## may name its own targets; the rest draw for the fixture's targets. depth
+  ## is reported even when the targets are wrong too.
   bad <- list(
     list(targets = "not data", args = list(depth = "subsoil"), regexp = "depth"),
+    list(targets = "not data", args = list(), regexp = "`x`"),
+    ## the verb's choices
+    list(args = list(scope = "nope"), regexp = "`scope`"),
+    list(args = list(space = "nope"), regexp = "`space`"),
+    list(args = list(metric = "nope"), regexp = "`metric`"),
+    list(args = list(k = 0), regexp = "`k`"),
+    list(args = list(k = numeric(0)), regexp = "`k`"),
+    list(args = list(k = TRUE), regexp = "`k`"),
+    list(args = list(k = Inf), regexp = "`k`"),
+    list(args = list(sdev_floor = FALSE), regexp = "`sdev_floor`"),
+    list(args = list(verbose = "yes"), regexp = "`verbose`"),
+    list(args = list(clusters = 0), regexp = "`clusters`"),
+    list(args = list(cluster_min = TRUE), regexp = "`cluster_min`"),
     ## the space's levers
-    list(args = list(mask = "bad")), list(args = list(derivative = NA)),
-    list(args = list(poly = -1)), list(args = list(ncomp = -1)),
-    list(args = list(chunk_size = 0)), list(args = list(window = 1)),
+    list(args = list(snv = "yes"), regexp = "`snv`"),
+    list(args = list(derivative = NA), regexp = "`derivative`"),
+    list(args = list(poly = -1), regexp = "`poly`"),
+    list(args = list(derivative = 2, poly = 1), regexp = "at least `derivative`"),
+    list(args = list(window = 1), regexp = "`window`"),
+    list(args = list(window = c(40, 40)), regexp = "`window`"),
+    list(args = list(mask = "bad"), regexp = "`mask`"),
+    list(args = list(mask = c(2200, 2400)), regexp = "`mask`"),
+    list(args = list(mask = rbind(c(2400, 2200))), regexp = "`mask`"),
+    list(args = list(ncomp = -1), regexp = "`ncomp`"),
+    list(args = list(ncomp = TRUE), regexp = "`ncomp`"),
+    list(args = list(chunk_size = 0), regexp = "`chunk_size`"),
     ## seed and PLS mistakes
-    list(args = list(seed = 2^31)),
-    list(args = list(space = "pls", properties = "clay")),
-    list(args = list(space = "pls", ncomp = 3L, properties = c("clay", "oc")))
+    list(args = list(seed = 2^31), regexp = "`seed`"),
+    list(args = list(space = "pls", properties = "clay"), regexp = "whole-number `ncomp`"),
+    list(args = list(space = "pls", ncomp = 3L, properties = c("clay", "oc")),
+         regexp = "one property")
   )
 
   for (case in bad) {
 
     targets <- if (is.null(case$targets)) fx$targets else case$targets
+    args    <- utils::modifyList(list(verbose = FALSE), case$args)
 
     expect_error(suppressMessages(capture.output(
-      do.call(select_training, c(list(targets, "mini", verbose = FALSE), case$args)))),
-      class = "horizons_input_error", regexp = case$regexp,
+      do.call(select_training, c(list(targets, "mini"), args)))),
+      class = "horizons_input_error", regexp = case$regexp, fixed = TRUE,
       info = paste(names(case$args), collapse = ", "))
 
   }

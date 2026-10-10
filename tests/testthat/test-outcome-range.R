@@ -1006,6 +1006,33 @@ describe("infinite outcome values", {
 
   })
 
+  it("are named with each other kind of breach, one line each, with the count and the extreme", {
+
+    ## The lines are the refusal's bullets (check_outcome_range()); the
+    ## snapshot below shows a breach of the lower bound only.
+    b <- outcome_range_breach(c(-1, 2, 12, 15, Inf, NA), c(0, 10))
+
+    expect_identical(b$lines, c(
+      "1 of 5 values below the lower bound 0 (minimum -1)",
+      "2 of 5 values above the upper bound 10 (maximum 15)",
+      "1 of 5 values infinite, which no range admits; correct or drop it"
+    ))
+
+    expect_identical(
+      outcome_range_breach(c(Inf, -Inf), c(-Inf, Inf))$lines,
+      "2 of 2 values infinite, which no range admits; correct or drop them"
+    )
+
+  })
+
+  it("leave a non-numeric outcome to other checks", {
+
+    ## is.finite() is FALSE for every string, so without the type check a
+    ## character outcome would read as all infinite
+    expect_null(outcome_range_breach(c("a", "b"), DEFAULT_OUTCOME_RANGE))
+
+  })
+
   it("are refused by configure() before the bound could become Inf", {
 
     hd <- make_range_hd(value = function(v) { v[2] <- Inf; v })

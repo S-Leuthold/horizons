@@ -1001,3 +1001,36 @@ describe("combine_ensemble_metamodel() - row alignment", {
   })
 
 })
+
+
+## ---------------------------------------------------------------------------
+## The summary ensemble() prints
+## ---------------------------------------------------------------------------
+
+describe("ensemble() - the summary it prints", {
+
+  it("shows the top members, the score, the improvement over the best member, the UQ and the runtime", {
+
+    ## render_ensemble_summary() is what ensemble(verbose = TRUE) ends with;
+    ## the shared ensemble was built quietly, so its contract is rendered
+    ## here. The second call takes the branches the fixture does not: members
+    ## ordered by the size of their weight, sign aside; an ensemble worse
+    ## than its best member; no UQ bundle; a runtime in minutes.
+    contract    <- ens_built("weighted")$ensemble
+    rank_metric <- ens_fitted()$models$rank_metric
+
+    expect_snapshot(
+      render_ensemble_summary(contract, rank_metric),
+      transform = function(x) sub("Runtime: [0-9.]+s", "Runtime: <time>", x)
+    )
+
+    contract$weights$coef <- c(0.2, -0.5, 0.3)
+    contract$improvement  <- -0.0123
+    contract$uq           <- NULL
+    contract$runtime_secs <- 125
+
+    expect_snapshot(render_ensemble_summary(contract, rank_metric))
+
+  })
+
+})
