@@ -167,7 +167,9 @@ describe("evaluate() parallel worker footprint", {
     ))
 
     ## The lines printed before the guard, and the globals ceiling the
-    ## dispatch raised put back
+    ## dispatch raised put back. This pins the guard where it sits today,
+    ## after those lines; if it moves ahead of them, these assertions move
+    ## to an installed-build test of the configs axis.
     expect_identical(
       sub(tmpdir, "<dir>", utils::tail(out, 3), fixed = TRUE),
       c("│  Processing 4 pending configs...",
@@ -555,7 +557,7 @@ describe("monitor_evaluate()", {
       ignored = c(other_data = 1, other_settings = 0, earlier_schema = 2, not_in_grid = 0),
       unreadable = "cfg_009.rds", rate = 12.34, eta = "5 min",
       best_config = "cfg_002", best_metric = 2.3456,
-      recent = c("cfg_002 (rpd 2.35)", "cfg_003 (rpd 1.90)")
+      recent = c("cfg_002 RPD = 2.346", "cfg_003 failed")
     )
 
     expect_snapshot(

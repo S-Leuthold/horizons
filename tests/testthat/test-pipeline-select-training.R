@@ -69,8 +69,10 @@ test_that("select_training() rejects inputs that are not horizons_data", {
   fx <- select_fixture(n_pool = 60)
 
   expect_error(select_training(data.frame(a = 1), fx$pool, verbose = FALSE),
+               regexp = "`x` must be a horizons_data object", fixed = TRUE,
                class = "horizons_input_error")
   expect_error(select_training(fx$targets, data.frame(a = 1), verbose = FALSE),
+               regexp = "`library` must be a horizons_data", fixed = TRUE,
                class = "horizons_input_error")
 
 })
@@ -100,8 +102,10 @@ test_that("select_training() rejects a bad k", {
 
   fx <- select_fixture(n_pool = 60)
 
-  expect_error(quiet_select(fx, k = 0),           class = "horizons_input_error")
-  expect_error(quiet_select(fx, k = 2.5),         class = "horizons_input_error")
+  expect_error(quiet_select(fx, k = 0),   regexp = "`k` must be", fixed = TRUE,
+               class = "horizons_input_error")
+  expect_error(quiet_select(fx, k = 2.5), regexp = "`k` must be", fixed = TRUE,
+               class = "horizons_input_error")
   expect_error(quiet_select(fx, k = c(clay = 5)), regexp = "oc", class = "horizons_input_error")
 
 })
@@ -111,9 +115,12 @@ test_that("select_training() rejects bad scope, metric and space", {
 
   fx <- select_fixture(n_pool = 60)
 
-  expect_error(quiet_select(fx, k = 5, scope  = "nope"), class = "horizons_input_error")
-  expect_error(quiet_select(fx, k = 5, metric = "nope"), class = "horizons_input_error")
-  expect_error(quiet_select(fx, k = 5, space  = "nope"), class = "horizons_input_error")
+  expect_error(quiet_select(fx, k = 5, scope  = "nope"), regexp = "`scope` must be",
+               fixed = TRUE, class = "horizons_input_error")
+  expect_error(quiet_select(fx, k = 5, metric = "nope"), regexp = "`metric` must be",
+               fixed = TRUE, class = "horizons_input_error")
+  expect_error(quiet_select(fx, k = 5, space  = "nope"), regexp = "`space` must be",
+               fixed = TRUE, class = "horizons_input_error")
 
 })
 
@@ -145,6 +152,7 @@ test_that("select_training(space = 'pls') needs exactly one property and an inte
   expect_error(quiet_select(fx, k = 5, space = "pls", ncomp = 3L),
                regexp = "one property", class = "horizons_input_error")
   expect_error(quiet_select(fx, k = 5, space = "pls", ncomp = 0.99, properties = "clay"),
+               regexp = "needs a whole-number `ncomp`", fixed = TRUE,
                class = "horizons_input_error")
 
 })
@@ -998,8 +1006,21 @@ test_that("the record carries the targets' source, size and id hash", {
 
   expect_identical(reordered$selection$targets$id_hash, rec$id_hash)
 
-  ## Under a collation that orders case apart from radix, both hashes still
-  ## take radix order
+  ## It describes the draw, so rows leaving afterwards leave it alone; the
+  ## object's provenance stays the library's.
+  kept <- subset_rows(out, out$data$analysis$sample_id[-1])
+
+  expect_identical(kept$selection$targets, rec)
+  expect_identical(out$provenance$spectra_source, "tibble")
+
+})
+
+
+test_that("the id hashes take radix order under a collation that orders case otherwise", {
+
+  fx  <- select_fixture(n_pool = 60)
+  ids <- fx$targets$data$analysis$sample_id
+
   mixed <- fx
   lower_every_other <- function(x) ifelse(seq_along(x) %% 2 == 0, tolower(x), x)
   mixed$targets$data$analysis$sample_id <- lower_every_other(ids)
@@ -1008,7 +1029,7 @@ test_that("the record carries the targets' source, size and id hash", {
   t_ids <- mixed$targets$data$analysis$sample_id
   p_ids <- mixed$pool$data$analysis$sample_id
 
-  withr::local_collate("en_US.UTF-8")
+  suppressWarnings(withr::local_collate("en_US.UTF-8"))
   skip_if(identical(sort(c(t_ids, p_ids)), sort(c(t_ids, p_ids), method = "radix")),
           "no locale here that collates case apart from radix order")
 
@@ -1016,13 +1037,6 @@ test_that("the record carries the targets' source, size and id hash", {
 
   expect_identical(hashed$selection$targets$id_hash, digest::digest(sort(t_ids, method = "radix")))
   expect_identical(hashed$selection$pool$id_hash, digest::digest(sort(p_ids, method = "radix")))
-
-  ## It describes the draw, so rows leaving afterwards leave it alone; the
-  ## object's provenance stays the library's.
-  kept <- subset_rows(out, out$data$analysis$sample_id[-1])
-
-  expect_identical(kept$selection$targets, rec)
-  expect_identical(out$provenance$spectra_source, "tibble")
 
 })
 
@@ -1206,8 +1220,10 @@ test_that("the record carries the SG window in cm-1 and the space's floor", {
   expect_equal(off$selection$settings$sdev_floor, 0)
   expect_gt(off$selection$settings$ncomp_retained, s$ncomp_retained)
 
-  expect_error(quiet_select(fx, k = 10, sdev_floor = 1),   class = "horizons_input_error")
-  expect_error(quiet_select(fx, k = 10, sdev_floor = -0.1), class = "horizons_input_error")
+  expect_error(quiet_select(fx, k = 10, sdev_floor = 1),   regexp = "`sdev_floor` must be",
+               fixed = TRUE, class = "horizons_input_error")
+  expect_error(quiet_select(fx, k = 10, sdev_floor = -0.1), regexp = "`sdev_floor` must be",
+               fixed = TRUE, class = "horizons_input_error")
 
 })
 

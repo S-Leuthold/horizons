@@ -18,8 +18,8 @@
         Best:      cfg_002 — RPD = 2.346
       
         Recent completions:
-          • cfg_002 (rpd 2.35)
-          • cfg_003 (rpd 1.90)
+          • cfg_002 RPD = 2.346
+          • cfg_003 failed
       
       ──────────────────────────────────────────────────
 

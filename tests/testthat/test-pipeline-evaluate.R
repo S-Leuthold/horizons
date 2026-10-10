@@ -272,7 +272,7 @@ describe("evaluate() - success path", {
     expect_error(
       suppressWarnings(evaluate(make_eval_object(n = 60, n_configs = 2), seed = 42L,
                                 verbose = FALSE)),
-      class = "horizons_validation_error"
+      regexp = "the six metric columns", fixed = TRUE, class = "horizons_validation_error"
     )
 
   })
