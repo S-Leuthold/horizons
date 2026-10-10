@@ -163,9 +163,8 @@ describe("ensemble() - optimize = FALSE runs (lazy-quosure regression guard)", {
     ens <- ens_built("xgb")
     expect_true(inherits(ens, "horizons_ensemble"))
 
-    ## Built here rather than read from the memo: the mutation tool's
-    ## coverage map credits a memoised build only to the first file that
-    ## builds it
+    ## Built here rather than read from the shared build, so that this file
+    ## fits the meta-learner itself
     fixed <- suppressWarnings(
       ensemble(ens_fitted(), method = "xgb", optimize = FALSE, compute_uq = FALSE,
                verbose = FALSE)

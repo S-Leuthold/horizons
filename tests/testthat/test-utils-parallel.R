@@ -184,6 +184,20 @@ describe("warn_if_mirai_preferred()", {
 ## Thread pinning
 ## =========================================================================
 
+## RhpcBLASctl looks uninstalled to the caller's frame; every other package
+## resolves as usual
+without_rhpcblasctl <- function(env = parent.frame()) {
+
+  real <- base::requireNamespace
+  testthat::local_mocked_bindings(
+    requireNamespace = function(package, ...) {
+      !identical(package, "RhpcBLASctl") && real(package, ...)
+    },
+    .package = "base", .env = env
+  )
+
+}
+
 describe("pin_parent_threads()", {
 
   it("pins ranger's threads and restores them", {
@@ -243,37 +257,13 @@ describe("pin_parent_threads()", {
 
   })
 
-  it("without RhpcBLASctl, says how to pin BLAS unless a thread variable is set, and still pins data.table", {
-
-    skip_if_not_installed("data.table")
+  it("without RhpcBLASctl, says how to pin BLAS, unless a thread variable is set", {
 
     withr::local_envvar(OPENBLAS_NUM_THREADS = NA, OMP_NUM_THREADS = NA)
-
-    old_dt <- data.table::getDTthreads()
-    withr::defer(data.table::setDTthreads(old_dt))
-
-    if (requireNamespace("RhpcBLASctl", quietly = TRUE)) {
-      old_omp <- RhpcBLASctl::omp_get_max_threads()
-      withr::defer(RhpcBLASctl::omp_set_num_threads(old_omp))
-      RhpcBLASctl::omp_set_num_threads(2L)
-    }
-
-    data.table::setDTthreads(2L)
-    skip_if_not(data.table::getDTthreads() == 2L, "data.table's threads cannot be raised here")
-
-    real <- base::requireNamespace
-    local_mocked_bindings(
-      requireNamespace = function(package, ...) {
-        !identical(package, "RhpcBLASctl") && real(package, ...)
-      },
-      .package = "base"
-    )
+    without_rhpcblasctl()
 
     msgs <- paste(capture_messages(unpin <- pin_parent_threads()), collapse = "")
-    expect_identical(data.table::getDTthreads(), 1L)
-
     unpin()
-    expect_identical(data.table::getDTthreads(), 2L)
 
     expect_match(msgs, "is not installed, so BLAS threads cannot be pinned at runtime", fixed = TRUE)
     expect_match(msgs, "OPENBLAS_NUM_THREADS=1", fixed = TRUE)
@@ -285,6 +275,35 @@ describe("pin_parent_threads()", {
         unpin()
       })
     }
+
+  })
+
+  it("without RhpcBLASctl, still pins data.table and restores it", {
+
+    skip_if_not_installed("data.table")
+
+    withr::local_envvar(OPENBLAS_NUM_THREADS = NA, OMP_NUM_THREADS = NA)
+
+    old_dt <- data.table::getDTthreads()
+    withr::defer(data.table::setDTthreads(old_dt))
+
+    ## data.table caps at OpenMP's count, so that goes up first
+    if (requireNamespace("RhpcBLASctl", quietly = TRUE)) {
+      old_omp <- RhpcBLASctl::omp_get_max_threads()
+      withr::defer(RhpcBLASctl::omp_set_num_threads(old_omp))
+      RhpcBLASctl::omp_set_num_threads(2L)
+    }
+
+    data.table::setDTthreads(2L)
+    skip_if_not(data.table::getDTthreads() == 2L, "data.table's threads cannot be raised here")
+
+    without_rhpcblasctl()
+
+    suppressMessages(unpin <- pin_parent_threads())
+    expect_identical(data.table::getDTthreads(), 1L)
+
+    unpin()
+    expect_identical(data.table::getDTthreads(), 2L)
 
   })
 

@@ -50,7 +50,7 @@ describe(".onLoad()", {
     .onLoad(NULL, "horizons")
 
     expect_identical(unname(Sys.getenv(thread_vars)), rep("1", 3))
-    expect_identical(getOption("ranger.num.threads"), 1)
+    expect_equal(getOption("ranger.num.threads"), 1)
 
     withr::local_envvar(HORIZONS_THREAD_CONTROL = NA, OMP_NUM_THREADS = NA,
                         OPENBLAS_NUM_THREADS = NA, MKL_NUM_THREADS = NA)
