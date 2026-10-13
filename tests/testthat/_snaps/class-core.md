@@ -103,6 +103,51 @@
       
       ──────────────────────────────────────────────────────────────────────────────── 
 
+# each class validator prints its findings as a tree before it aborts
+
+    Code
+      validate_horizons_eval(eval_obj)
+    Output
+      ! The horizons_eval object failed validation:
+         ├─ rank_metric must be one of: rmse, rrmse, rsq, ccc, rpd, mae
+         └─ n_train must be a single non-negative whole number
+      
+    Condition
+      Error in `validate_horizons_eval()`:
+      ! Validation failed:
+      rank_metric must be one of: rmse, rrmse, rsq, ccc, rpd, mae
+      n_train must be a single non-negative whole number
+
+---
+
+    Code
+      validate_horizons_fit(fit_obj)
+    Output
+      ! The horizons_fit object failed validation:
+         ├─ n_models must equal `length(workflows)` (2)
+         └─ predictor_schema must be a non-empty character vector of training-axis columns
+      
+    Condition
+      Error in `validate_horizons_fit()`:
+      ! Validation failed:
+      n_models must equal `length(workflows)` (2)
+      predictor_schema must be a non-empty character vector of training-axis columns
+
+---
+
+    Code
+      validate_horizons_ensemble(ens_obj)
+    Output
+      ! The horizons_ensemble object failed validation:
+         ├─ improvement must be a single non-NA numeric
+         └─ runtime_secs must be a single non-negative numeric
+      
+    Condition
+      Error in `validate_horizons_ensemble()`:
+      ! Validation failed:
+      improvement must be a single non-NA numeric
+      runtime_secs must be a single non-negative numeric
+
 # print.horizons_data shows the selection section
 
     Code

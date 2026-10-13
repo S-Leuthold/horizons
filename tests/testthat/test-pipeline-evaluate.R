@@ -419,6 +419,23 @@ describe("evaluate() - all configs fail", {
 
   })
 
+  it("names three of the configurations loaded from checkpoints and counts the rest", {
+
+    results <- tibble::tibble(config_id = sprintf("cfg_%03d", 1:5), status = "failed",
+                              error_message = "mocked")
+
+    err <- expect_error(
+      abort_all_configs_failed(results, "rpd", checkpoint_ids = results$config_id,
+                               output_dir = "runs/soc"),
+      class = "horizons_all_configs_failed"
+    )
+
+    msg <- gsub("\\s+", " ", conditionMessage(err))   # undo cli line wrapping
+    expect_match(msg, "5 configurations were loaded from checkpoints in runs/soc rather than run (cfg_001, cfg_002, cfg_003 and 2 more).",
+                 fixed = TRUE)
+
+  })
+
 })
 
 ## =========================================================================
@@ -808,6 +825,21 @@ describe("evaluate() - response outliers are trimmed from the training partition
 
   })
 
+  it("refuses a request without a single positive threshold", {
+
+    for (bad in list(0, -1, NA_real_, "1.5", c(1.5, 3))) {
+
+      edited <- v
+      edited$validation$outliers$response_trim$threshold <- bad
+
+      expect_error(response_trim_request(edited, "SOC"),
+                   "response-trim request has no usable threshold", fixed = TRUE,
+                   class = "horizons_input_error")
+
+    }
+
+  })
+
   it("warns and trims nothing when the training partition has no fences", {
 
     flat <- plain
@@ -819,6 +851,21 @@ describe("evaluate() - response outliers are trimmed from the training partition
     expect_identical(caught$value$record$skipped, "zero_iqr")
     expect_length(caught$value$record$trimmed_ids, 0)
     expect_identical(caught$value$split, flat)
+
+    ## The warning gives the reason, which differs with three outcome values
+    reason <- function(caught) gsub("\\s+", " ", conditionMessage(caught$warnings[[1]]))
+
+    expect_match(reason(caught), "be drawn on the training partition: its outcome has a zero interquartile range.",
+                 fixed = TRUE)
+
+    few <- plain
+    few$data$SOC[few$in_id[-(1:3)]] <- NA_real_
+
+    caught <- collect_warnings(trim_training_responses(few, "SOC", request, "sample_id"))
+
+    expect_identical(caught$value$record$skipped, "too_few")
+    expect_match(reason(caught), "be drawn on the training partition: it has fewer than four outcome values (3).",
+                 fixed = TRUE)
 
   })
 
@@ -1463,13 +1510,17 @@ describe("eval_data_fingerprint()", {
     ## runs share config ids AND a fingerprint.
     expect_false(identical(clay$data_hash, oc$data_hash))
 
+    ## The outcome's role-map row is one of the rows that shape a row
+    expect_setequal(compare_record(clay$data_fields, oc$data_fields)$differ,
+                    c("outcome", "roles", "outcome_values"))
+
   })
 
   it("returns NA when no identifier column is available", {
 
     fp <- eval_data_fingerprint(tibble::tibble(x = 1:3), NULL)
 
-    expect_true(is.na(fp$data_hash))
+    expect_identical(fp$data_hash, NA_character_)
     expect_identical(fp$data_n_rows, 3L)
     expect_null(fp$data_fields)
 
@@ -1491,6 +1542,22 @@ describe("eval_data_fingerprint()", {
                                     "predictors"))
     expect_identical(fp1$data_fields$outcome, "y")
     expect_identical(fp1$data_fields, fp2$data_fields)
+
+  })
+
+  it("records the same fields whatever the session's collation", {
+
+    ## Radix order puts "A" before "a"; a locale's collation puts "a" first
+    mixed <- df_xy
+    mixed$sample_id <- c("b", "A", "a")
+
+    in_c <- withr::with_collate("C", eval_data_fingerprint(mixed, roles_xy)$data_fields)
+
+    suppressWarnings(withr::local_collate("en_US.UTF-8"))
+    skip_if(identical(sort(mixed$sample_id), sort(mixed$sample_id, method = "radix")),
+            "no locale here that collates case apart from radix order")
+
+    expect_identical(eval_data_fingerprint(mixed, roles_xy)$data_fields, in_c)
 
   })
 
@@ -1808,6 +1875,27 @@ describe("evaluate() - one checkpoint store (#42)", {
     flat <- gsub("\\s+", " ", warns)
     expect_true(any(grepl("file1a2b3c.rds: holds config rf_001; not a checkpoint name",
                           flat, fixed = TRUE)))
+
+  })
+
+  it("reads a file as a checkpoint only when it holds one result row with a config_id", {
+
+    dir   <- withr::local_tempdir()
+    write <- function(x) {
+      f <- tempfile(tmpdir = dir, fileext = ".rds")
+      saveRDS(x, f)
+      f
+    }
+
+    row <- tibble::tibble(config_id = "cfg_001", status = "success")
+
+    expect_identical(read_checkpoint_file(write(row)), list(row = row, error = NULL))
+
+    ## Two rows, the row as a list, and a row with no config_id
+    for (bad in list(rbind(row, row), as.list(row), row["status"])) {
+      expect_identical(read_checkpoint_file(write(bad)),
+                       list(row = NULL, error = "not a one-row result with a config_id"))
+    }
 
   })
 

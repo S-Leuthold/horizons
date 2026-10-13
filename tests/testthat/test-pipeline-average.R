@@ -888,6 +888,24 @@ test_that("average() carries numeric responses through as within-group means", {
 })
 
 
+test_that("average() averages a response over the replicates that measured it, NA when none did", {
+
+  ## Arrange — clay is 10, 11, 12 for S1 and 20, 21, 22 for S2; S1 loses one
+  ## measurement and S2 all three
+  hd <- make_test_hd_average(n_samples = 2, n_reps = 3, add_responses = TRUE)
+  hd$data$analysis$clay[c(1, 4, 5, 6)] <- NA_real_
+
+  ## Act
+  result <- average(hd, quality_check = FALSE, verbose = FALSE)
+
+  ## Assert
+  averaged <- result$data$analysis
+  expect_equal(averaged$clay[averaged$sample_id == "S1"], 11.5)
+  expect_identical(averaged$clay[averaged$sample_id == "S2"], NA_real_)
+
+})
+
+
 test_that("average() keeps a uniform non-numeric response", {
 
   hd     <- make_test_hd_average(n_samples = 2, n_reps = 3, add_responses = TRUE)

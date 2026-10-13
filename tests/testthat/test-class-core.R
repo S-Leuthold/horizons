@@ -807,9 +807,10 @@ test_that("validate_horizons_data rejects more than one outcome role", {
 
   obj <- new_horizons_data(analysis = test_analysis, role_map = test_role_map)
 
-  expect_error(validate_horizons_data(obj),
-               regexp = "(?i)outcome",
-               class  = "horizons_validation_error")
+  expect_error(suppressMessages(validate_horizons_data(obj)),
+               "Multiple outcome roles in role_map (at most one allowed): clay, oc",
+               fixed = TRUE,
+               class = "horizons_validation_error")
 
 })
 
@@ -1594,6 +1595,13 @@ test_that("validate_horizons_ensemble enforces per-method model typing", {
                "must be the weights tibble", fixed = TRUE,
                class = "horizons_validation_error")
 
+  ## weighted carrying a tibble of coefficients without member names
+  no_member <- make_valid_ensemble()
+  no_member$ensemble$model <- no_member$ensemble$weights["coef"]
+  expect_error(validate_horizons_ensemble(no_member),
+               "must be the weights tibble", fixed = TRUE,
+               class = "horizons_validation_error")
+
   ## penalized carrying a tibble
   wrong_penalized <- make_valid_ensemble()
   wrong_penalized$ensemble$method <- "penalized"
@@ -1679,6 +1687,19 @@ test_that("validate_horizons_ensemble rejects malformed data-frame slots", {
                "member_metrics references non-member config_ids: cfg_zz",
                fixed = TRUE, class = "horizons_validation_error")
 
+  ## metrics and member_metrics each missing the metric name
+  no_metric <- make_valid_ensemble()
+  no_metric$ensemble$metrics$.metric <- NULL
+  expect_error(validate_horizons_ensemble(no_metric),
+               "metrics must be a data frame with .metric, .estimator, .estimate",
+               fixed = TRUE, class = "horizons_validation_error")
+
+  no_member_metric <- make_valid_ensemble()
+  no_member_metric$ensemble$member_metrics$.metric <- NULL
+  expect_error(validate_horizons_ensemble(no_member_metric),
+               "member_metrics must be a data frame with .metric, .estimate, config_id",
+               fixed = TRUE, class = "horizons_validation_error")
+
 })
 
 test_that("validate_horizons_ensemble rejects a malformed uq bundle", {
@@ -1706,6 +1727,63 @@ test_that("validate_horizons_ensemble rejects a malformed uq bundle", {
                "uq must be NULL or a CV+ bundle", fixed = TRUE,
                class = "horizons_validation_error")
 
+  ## A well-formed bundle (as accepted above) less one piece at a time
+  bundle <- list(
+    method        = "cv_plus",
+    fold_models   = list(tibble::tibble(member = "cfg_a", coef = 1)),
+    calib         = tibble::tibble(.row = 1L, fold = 1L, .pred_oof = 1,
+                                   truth = 1, residual = 0),
+    n_calib       = 1L,
+    level_default = 0.90
+  )
+
+  for (key in c("n_calib", "level_default")) {
+
+    obj <- make_valid_ensemble()
+    obj$ensemble$uq <- bundle[setdiff(names(bundle), key)]
+    expect_error(validate_horizons_ensemble(obj),
+                 "uq must be NULL or a CV+ bundle", fixed = TRUE,
+                 class = "horizons_validation_error", info = key)
+
+  }
+
+  no_pred_oof <- make_valid_ensemble()
+  no_pred_oof$ensemble$uq <- bundle
+  no_pred_oof$ensemble$uq$calib$.pred_oof <- NULL
+  expect_error(validate_horizons_ensemble(no_pred_oof),
+               "uq$calib must be a data frame with .row, fold, .pred_oof, truth, residual",
+               fixed = TRUE, class = "horizons_validation_error")
+
+  ## A members list naming another member set: stale or foreign
+  foreign <- make_valid_ensemble()
+  foreign$ensemble$uq <- c(bundle, list(members = c("cfg_a", "cfg_c")))
+  expect_error(validate_horizons_ensemble(foreign),
+               "uq$members does not match weights$member", fixed = TRUE,
+               class = "horizons_validation_error")
+
+})
+
+
+test_that("the fit and ensemble validators refuse a runtime that is not a single non-negative number", {
+
+  for (runtime in list(-1, NA_real_, "1.5", c(1, 2))) {
+
+    label <- paste(deparse(runtime), collapse = "")
+
+    fit_obj <- make_valid_fit()
+    fit_obj$models$runtime_secs <- runtime
+    expect_error(suppressMessages(validate_horizons_fit(fit_obj)),
+                 "runtime_secs must be a single non-negative numeric", fixed = TRUE,
+                 class = "horizons_validation_error", info = paste("models", label))
+
+    ens_obj <- make_valid_ensemble()
+    ens_obj$ensemble$runtime_secs <- runtime
+    expect_error(suppressMessages(validate_horizons_ensemble(ens_obj)),
+                 "runtime_secs must be a single non-negative numeric", fixed = TRUE,
+                 class = "horizons_validation_error", info = paste("ensemble", label))
+
+  }
+
 })
 
 
@@ -1729,9 +1807,11 @@ test_that("validate_horizons_eval gates on class and slot presence", {
   expect_error(validate_horizons_eval(list()), "horizons_eval",
                class = "horizons_validation_error")
 
-  ## Classed but no evaluation slot
+  ## Classed but no evaluation slot: refused by the gate itself, before the
+  ## key checks below it, which would name evaluation too
   hollow <- structure(list(), class = c("horizons_eval", "list"))
-  expect_error(validate_horizons_eval(hollow), "evaluation",
+  expect_error(validate_horizons_eval(hollow),
+               "Object has no evaluation slot to validate", fixed = TRUE,
                class = "horizons_validation_error")
 
 })
@@ -1951,6 +2031,11 @@ test_that("validate_horizons_fit refuses a results column of the wrong type, nam
   obj <- make_valid_fit()
   obj$models$results$degraded        <- c(FALSE, NA_integer_)
   obj$models$results$start_grid_size <- c(9, NA_real_)
+  obj$models$results$config_id       <- c(1, 2)
+
+  for (col in c("cv_rmse_mean", "cv_rmse_se", "cv_rpd_mean", "cv_rpd_se")) {
+    obj$models$results[[col]] <- c(1L, NA_integer_)
+  }
 
   err <- expect_error(suppressMessages(validate_horizons_fit(obj)),
                       class = "horizons_validation_error")
@@ -1958,10 +2043,20 @@ test_that("validate_horizons_fit refuses a results column of the wrong type, nam
   msg <- conditionMessage(err)
   expect_match(msg, "degraded is integer, not logical", fixed = TRUE)
   expect_match(msg, "start_grid_size is double, not integer", fixed = TRUE)
+  expect_match(msg, "config_id is double, not character", fixed = TRUE)
+
+  for (col in c("cv_rmse_mean", "cv_rmse_se", "cv_rpd_mean", "cv_rpd_se")) {
+    expect_match(msg, paste0(col, " is integer, not double"), fixed = TRUE, info = col)
+  }
 
   ## The same columns with the types fit() writes pass
   obj$models$results$degraded        <- c(FALSE, NA)
   obj$models$results$start_grid_size <- c(9L, NA_integer_)
+  obj$models$results$config_id       <- c("cfg_a", "cfg_b")
+
+  for (col in c("cv_rmse_mean", "cv_rmse_se", "cv_rpd_mean", "cv_rpd_se")) {
+    obj$models$results[[col]] <- c(1.1, NA_real_)
+  }
 
   expect_identical(validate_horizons_fit(obj), obj)
 
@@ -2139,12 +2234,43 @@ test_that("validate_horizons_fit enforces the AD-subset invariant", {
 
 })
 
-test_that("validate_horizons_fit rejects a non-list ad slot", {
+test_that("validate_horizons_fit rejects a uq or ad slot that is not a named list", {
+
+  for (slot in c("uq", "ad")) {
+
+    for (value in list("not a list", list(1))) {
+
+      obj <- make_valid_fit()
+      obj$models[[slot]] <- value
+      expect_error(suppressMessages(validate_horizons_fit(obj)),
+                   paste0(slot, " must be NULL or a named list keyed by config_id"),
+                   fixed = TRUE, class = "horizons_validation_error",
+                   info = paste(slot, class(value)))
+
+    }
+
+  }
+
+})
+
+test_that("validate_horizons_fit requires the six metrics in results and an rsplit split", {
+
+  ## The fit slot's own copies, not the evaluation's: a broken models slot
+  ## must not pass while evaluation stays clean
+  for (metric in c("rmse", "rrmse", "rsq", "ccc", "rpd", "mae")) {
+
+    obj <- make_valid_fit()
+    obj$models$results[[metric]] <- NULL
+    expect_error(suppressMessages(validate_horizons_fit(obj)),
+                 "results must be a data frame with config_id, status, and the six metric columns (rmse, rrmse, rsq, ccc, rpd, mae)",
+                 fixed = TRUE, class = "horizons_validation_error", info = metric)
+
+  }
 
   obj <- make_valid_fit()
-  obj$models$ad <- "not a list"
+  obj$models$split <- list()
   expect_error(suppressMessages(validate_horizons_fit(obj)),
-               "ad must be NULL or a named list keyed by config_id",
+               "split must be an <rsplit> object",
                fixed = TRUE, class = "horizons_validation_error")
 
 })
@@ -2180,6 +2306,27 @@ test_that("validate_horizons_fit rejects a best_config not among workflows", {
   expect_error(suppressMessages(validate_horizons_fit(obj)),
                "best_config (cfg_b) is not among the fitted workflows",
                fixed = TRUE, class = "horizons_validation_error")
+
+})
+
+test_that("each class validator prints its findings as a tree before it aborts", {
+
+  ## Two findings each, so both branch glyphs show
+  eval_obj <- make_valid_eval()
+  eval_obj$evaluation$rank_metric <- "banana"
+  eval_obj$evaluation$n_train     <- 80.5
+
+  fit_obj <- make_valid_fit()
+  fit_obj$models$n_models         <- 5L
+  fit_obj$models$predictor_schema <- character(0)
+
+  ens_obj <- make_valid_ensemble()
+  ens_obj$ensemble$improvement  <- NA_real_
+  ens_obj$ensemble$runtime_secs <- -1
+
+  expect_snapshot(validate_horizons_eval(eval_obj), error = TRUE)
+  expect_snapshot(validate_horizons_fit(fit_obj), error = TRUE)
+  expect_snapshot(validate_horizons_ensemble(ens_obj), error = TRUE)
 
 })
 
@@ -2606,12 +2753,19 @@ test_that("print() reports models$best_config, not the lowest test RMSE", {
 })
 
 
-test_that("summary() reports models$best_config and its test and CV metrics", {
+test_that("summary() reports models$best_config, its test and CV metrics, and its interval coverage", {
 
-  ## Arrange
+  ## Arrange: UQ bundles for both, the rival's listed first, so the coverage
+  ## shown is the selected member's and not simply the first bundle's
   case     <- make_fit_with_lower_test_rival()
   fx       <- case$fit
   best_row <- fx$models$results[fx$models$results$config_id == fx$models$best_config, ]
+
+  fx$models$uq <- stats::setNames(
+    list(list(test_coverage = 0.5, n_test = 40L),
+         list(test_coverage = 0.915, n_test = 40L)),
+    c(case$rival, fx$models$best_config)
+  )
 
   ## Act
   section <- models_section(utils::capture.output(summary(fx)), "Models (fit)")
@@ -2627,6 +2781,8 @@ test_that("summary() reports models$best_config and its test and CV metrics", {
       paste0("   │     └─ CV RMSE = ", round(best_row$cv_rmse_mean, 3),
              " ± ", round(best_row$cv_rmse_se, 3)))
   )
+  expect_true(paste0("   ├─ UQ: enabled (2 configs, test coverage for ",
+                     fx$models$best_config, " = 91.5% on 40 rows)") %in% section)
   expect_false(any(grepl(case$rival, section, fixed = TRUE)))
 
 })
@@ -2648,20 +2804,34 @@ test_that("print() and summary() label a cold-started member as such", {
 })
 
 
-test_that("print() and summary() name no member when best_config has no results row", {
+test_that("print() and summary() name no member when best_config has no results row, or no single one", {
 
-  ## Nothing to report is reported as nothing, never as the lowest test RMSE
+  ## Nothing to report is reported as nothing, never as the lowest test RMSE,
+  ## and a partly formed fit prints rather than erroring
   case <- make_fit_with_lower_test_rival()
-  fx   <- case$fit
-  fx$models$best_config <- "cfg_not_fitted"
+  ids  <- case$fit$models$results$config_id
 
-  print_section   <- models_section(utils::capture.output(print(fx)), "Models")
-  summary_section <- models_section(utils::capture.output(summary(fx)), "Models (fit)")
+  edits <- list(
+    no_row     = function(fx) { fx$models$best_config <- "cfg_not_fitted"; fx },
+    unset      = function(fx) { fx$models["best_config"] <- list(NULL); fx },
+    two_ids    = function(fx) { fx$models$best_config <- ids[1:2]; fx },
+    no_results = function(fx) { fx$models["results"] <- list(NULL); fx }
+  )
 
-  for (section in list(print_section, summary_section)) {
+  for (edit in names(edits)) {
 
-    expect_false(any(grepl("CV-selected|Best test", section)))
-    expect_false(any(grepl(case$rival, section, fixed = TRUE)))
+    fx <- edits[[edit]](case$fit)
+
+    print_section   <- models_section(utils::capture.output(print(fx)), "Models")
+    summary_section <- models_section(utils::capture.output(summary(fx)), "Models (fit)")
+
+    for (section in list(print_section, summary_section)) {
+
+      expect_true(any(grepl("Fitted", section, fixed = TRUE)), info = edit)
+      expect_false(any(grepl("CV-selected|Best test", section)), info = edit)
+      expect_false(any(grepl(case$rival, section, fixed = TRUE)), info = edit)
+
+    }
 
   }
 

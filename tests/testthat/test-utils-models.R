@@ -61,7 +61,7 @@ describe("define_model_spec()", {
 
   })
 
-  it("creates xgboost with 500 fixed trees and 6 tunable params", {
+  it("creates xgboost with 500 fixed trees and 6 tunable params, and lightgbm with 500 fixed trees", {
 
     spec <- define_model_spec("xgboost")
     trees_arg <- rlang::eval_tidy(spec$args$trees)
@@ -69,6 +69,8 @@ describe("define_model_spec()", {
 
     tune_count <- sum(vapply(spec$args, is_tune_arg, logical(1)))
     expect_equal(tune_count, 6)
+
+    expect_identical(rlang::eval_tidy(define_model_spec("lightgbm")$args$trees), 500)
 
   })
 

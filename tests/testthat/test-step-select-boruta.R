@@ -9,7 +9,8 @@
 ## with the outcome instead. A config labelled "boruta" then ran a correlation
 ## filter with nothing saying so (#75). These tests pin what the step does
 ## now: Boruta runs to completion and its decisions are the selection, a
-## failed run fails the step, and a run that confirms nothing says so.
+## failed run fails the step, and a run that confirms nothing says so. Others
+## check what Boruta is handed and how its forests run.
 
 ## Helper: noise columns with the outcome carried by three of them. Fifty
 ## columns is the most the step's clustering hands Boruta, so mtry sits at its
@@ -154,6 +155,74 @@ describe("step_select_boruta() selects by Boruta (#75)", {
     expect_false("boruta" %in% names(old$steps[[1]]))
     expect_identical(recipes::bake(old, new_data = d), baked)
     expect_output(print(old$steps[[1]]), "wavenumbers retained after Boruta")
+
+  })
+
+})
+
+## =========================================================================
+## What Boruta is handed, and the forests it grows
+## =========================================================================
+
+describe("step_select_boruta() - Boruta's input and its forests", {
+
+  it("drops near-constant columns, says so, and hands Boruta at most 50 cluster representatives", {
+
+    skip_if_not_installed("Boruta")
+
+    ## Sixty columns, one of them constant
+    d         <- boruta_signal_data(p = 60)
+    d$spec060 <- 0.5
+
+    seen <- NULL
+    local_mocked_bindings(
+      Boruta = function(x, y, ...) {
+        seen <<- colnames(x)
+        mock_boruta_deciding(function(nm) rep("Confirmed", length(nm)))(x, y)
+      },
+      .package = "Boruta"
+    )
+
+    expect_message(prepped <- recipes::prep(boruta_recipe(d), training = d),
+                   "Filtering 1 near-constant features before clustering", fixed = TRUE)
+
+    step <- prepped$steps[[1]]
+
+    ## The 59 that vary cluster to 50; every one of them is selected
+    expect_length(seen, 50L)
+    expect_identical(step$boruta$n_attributes, 50L)
+    expect_false("spec060" %in% seen)
+    expect_setequal(step$selected_vars, sprintf("spec%03d", 1:59))
+
+  })
+
+  it("fits each importance forest on one thread", {
+
+    skip_if_not_installed("Boruta")
+
+    ## Unset, ranger takes every core, which oversubscribes when the step
+    ## preps inside parallel tuning. The stand-in Boruta asks for one
+    ## importance, and the stand-in forest records its thread count.
+    threads <- list()
+    local_mocked_bindings(
+      ranger = function(x, y, ..., num.threads = NULL) {
+        threads <<- c(threads, list(num.threads))
+        list(variable.importance = stats::setNames(rep(1, ncol(x)), colnames(x)))
+      },
+      .package = "ranger"
+    )
+    local_mocked_bindings(
+      Boruta = function(x, y, getImp, ...) {
+        getImp(x, y)
+        mock_boruta_deciding(function(nm) rep("Confirmed", length(nm)))(x, y)
+      },
+      .package = "Boruta"
+    )
+
+    d <- boruta_signal_data()
+    recipes::prep(boruta_recipe(d), training = d)
+
+    expect_identical(threads, list(1))
 
   })
 
@@ -371,16 +440,20 @@ describe("step_select_boruta() inside resampling (#75)", {
 
 describe("step_select_boruta() refuses input it cannot use", {
 
-  it("aborts at prep when the outcome is not in the training data", {
+  it("aborts at prep when the outcome is not one column of the training data", {
 
     ## Arrange
     d   <- boruta_signal_data()
-    rec <- recipes::recipe(SOC ~ ., data = d) |>
-      step_select_boruta(dplyr::matches("^spec[0-9]+$"), outcome = "clay")
+    rec <- function(outcome) {
+      recipes::recipe(SOC ~ ., data = d) |>
+        step_select_boruta(dplyr::matches("^spec[0-9]+$"), outcome = outcome)
+    }
 
     ## Act & Assert
-    expect_error(recipes::prep(rec, training = d),
+    expect_error(recipes::prep(rec("clay"), training = d),
                  "not found in training data", fixed = TRUE)
+    expect_error(recipes::prep(rec(c("SOC", "clay")), training = d),
+                 "must be a single character string", fixed = TRUE)
 
   })
 

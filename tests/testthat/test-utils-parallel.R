@@ -78,6 +78,13 @@ describe("resolve_parallel_axis()", {
     expect_error(resolve_parallel_axis("auto", TRUE, 0, 5), "n_configs")
     expect_error(resolve_parallel_axis("auto", TRUE, 10, NA), "cv_folds")
 
+    ## The abort carries no package class, so its text is the check: a missing
+    ## count otherwise reaches R's own error, and a string none at all
+    for (bad in list(NA_real_, "10")) {
+      expect_error(resolve_parallel_axis("auto", TRUE, bad, 5),
+                   "`n_configs` must be a single positive number", fixed = TRUE)
+    }
+
   })
 
 })
@@ -147,6 +154,24 @@ describe("check_parallel_backend()", {
 
   })
 
+  it("refuses a usable plan when future.apply, which tune's future backend calls, is not installed", {
+
+    real <- base::requireNamespace
+    local_mocked_bindings(
+      requireNamespace = function(package, ...) {
+        !identical(package, "future.apply") && real(package, ...)
+      },
+      .package = "base"
+    )
+    local_mocked_bindings(registered_workers = function() 2L)
+
+    ## The abort carries no package class, so its text is the check
+    expect_error(check_parallel_backend("evaluate()"),
+                 "future.apply is not installed, but tune's future backend calls it.",
+                 fixed = TRUE)
+
+  })
+
   it("never registers or alters the plan", {
 
     local_plan(future::sequential)
@@ -175,6 +200,28 @@ describe("warn_if_mirai_preferred()", {
 
     expect_silent(res <- warn_if_mirai_preferred())
     expect_false(res)
+
+  })
+
+  it("warns, returning TRUE, when daemons and a plan of two or more workers are both live, and not on a one-worker plan", {
+
+    skip_if_not_installed("mirai")
+
+    ## Two daemon connections, without starting any
+    local_mocked_bindings(status = function(...) list(connections = 2L), .package = "mirai")
+    local_mocked_bindings(registered_plan_label = function() "multisession")
+
+    local_mocked_bindings(registered_workers = function() 1L)
+    expect_no_warning(res <- warn_if_mirai_preferred())
+    expect_false(res)
+
+    ## Two workers, or an unbounded count
+    for (n in list(2L, NA_integer_)) {
+      local_mocked_bindings(registered_workers = function() n)
+      expect_warning(res <- warn_if_mirai_preferred(),
+                     "A mirai daemon pool (2 connections)", fixed = TRUE)
+      expect_true(res)
+    }
 
   })
 

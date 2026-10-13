@@ -495,6 +495,33 @@ test_that("draw_neighbours() fetches past an excluded twin so its target still r
 })
 
 
+test_that("draw_neighbours() fetches enough spares for a target whose copies fill its reference", {
+
+  ## Arrange: four exact copies of the one target in a 20-row pool. The twin
+  ## reference is a quarter of the rows wide, 5, so it holds the four copies
+  ## and one ordinary row, and its 75th percentile is zero: the copies are
+  ## flagged on distance zero alone. At k = 5 the first pass keeps one row of
+  ## five, so the second has to fetch the four copies' worth again.
+  St <- matrix(c(0, 0), nrow = 1, dimnames = list("T1", NULL))
+  Sp <- rbind(matrix(0, nrow = 4, ncol = 2), cbind(seq_len(16), 0))
+  rownames(Sp) <- c(sprintf("C%d", 1:4), sprintf("P%02d", 1:16))
+  rsp <- tibble::tibble(sample_id = rownames(Sp), clay = seq_len(20))
+
+  expect_identical(twin_reference_width(20L), 5L)
+
+  ## Act
+  out <- draw_neighbours(St, Sp, responses = rsp, k = 5L, properties = "clay",
+                         metric = "euclidean")
+
+  ## Assert: every copy excluded as exact, and the five nearest others drawn
+  expect_setequal(out$exclusions$pool_id, sprintf("C%d", 1:4))
+  expect_true(all(out$exclusions$reason == "exact"))
+  expect_identical(out$membership$pool_id, sprintf("P%02d", 1:5))
+  expect_identical(nrow(out$short_draws), 0L)
+
+})
+
+
 test_that("draw_neighbours() treats an undefined cosine target as a failed draw", {
 
   ## A target sitting on the pool's centroid has no defined angle to any pool

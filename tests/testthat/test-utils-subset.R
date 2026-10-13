@@ -164,13 +164,22 @@ test_that("set_analysis() keeps the existing role_map when none is given", {
 })
 
 
-test_that("set_analysis() aborts when analysis columns and role_map disagree", {
+test_that("set_analysis() aborts when analysis columns and role_map disagree, naming them", {
 
   fx       <- select_fixture(n_pool = 40)
   analysis <- fx$pool$data$analysis
   analysis$extra <- 1
 
   expect_error(set_analysis(fx$pool, analysis),
+               "Columns without a role: extra", fixed = TRUE,
+               class = "horizons_input_error")
+
+  ## And the other way round: a role whose column is gone
+  no_family <- fx$pool$data$analysis
+  no_family$family <- NULL
+
+  expect_error(set_analysis(fx$pool, no_family),
+               "Roles without a column: family", fixed = TRUE,
                class = "horizons_input_error")
 
 })
@@ -201,9 +210,13 @@ test_that("subset_rows() aborts on an object carrying an ensemble", {
   en <- fx$pool
   en$ensemble$method <- "weighted"
 
-  expect_error(subset_rows(en, c("P001", "P002")),
-               regexp = "ensemble",
-               class  = "horizons_input_error")
+  err <- expect_error(subset_rows(en, c("P001", "P002")),
+                      regexp = "ensemble",
+                      class  = "horizons_input_error")
+
+  ## The refusal names the operation that refused
+  expect_match(conditionMessage(err), "`subset_rows()` needs an unpromoted <horizons_data>",
+               fixed = TRUE)
 
 })
 
@@ -293,6 +306,7 @@ test_that("set_analysis() aborts on a promoted object", {
   ft$models$workflows <- list(cfg_a = "a fitted workflow")
 
   expect_error(set_analysis(ft, ft$data$analysis[1:3, ]),
+               "`set_analysis()` needs an unpromoted <horizons_data>", fixed = TRUE,
                class = "horizons_input_error")
 
 })
@@ -358,9 +372,15 @@ test_that("subset_rows() recounts pool_sizes$drawn per property", {
   obj  <- selected_object(n_rows = 12L)
   keep <- obj$data$analysis$sample_id[1:5]
 
+  ## oc was drawn for two fewer of the surviving rows than clay, so each
+  ## property's count is its own
+  m <- obj$selection$membership
+  obj$selection$membership <- m[!(m$property == "oc" & m$pool_id %in% keep[1:2]), ]
+
   out <- subset_rows(obj, keep)
 
-  expect_identical(out$selection$pool_sizes$drawn, c(5L, 5L))
+  expect_identical(out$selection$pool_sizes$property, c("clay", "oc"))
+  expect_identical(out$selection$pool_sizes$drawn, c(5L, 3L))
 
   ## available describes the source pool and does not move
   expect_identical(out$selection$pool_sizes$available,
@@ -526,6 +546,44 @@ test_that("subset_selection() refuses a membership without retained (#130)", {
 })
 
 
+test_that("subset_selection() leaves a part the record lacks for the validator to name", {
+
+  ## Arrange — a record damaged in four ways the validator refuses. The
+  ## refilter recomputes only the parts it can, neither failing on nor
+  ## repairing the rest, so the validator still names the damage.
+  obj <- selected_object(n_rows = 12L)
+  ids <- obj$data$analysis$sample_id
+  rec <- obj$selection
+
+  no_membership <- rec; no_membership$membership       <- NULL
+  no_pool_ids   <- rec; no_pool_ids$groups$pool_ids     <- NULL
+  no_drawn      <- rec; no_drawn$pool_sizes$drawn       <- NULL
+  no_property   <- rec; no_property$pool_sizes$property <- NULL
+
+  cases <- list(
+    list(rec = no_membership, part = "pool_sizes", finding = "selection$membership is missing"),
+    list(rec = no_pool_ids,   part = "groups",     finding = "selection$groups is missing column pool_ids"),
+    list(rec = no_drawn,      part = "pool_sizes", finding = "selection$pool_sizes is missing column drawn"),
+    list(rec = no_property,   part = "pool_sizes", finding = "selection$pool_sizes is missing column property")
+  )
+
+  for (case in cases) {
+
+    ## Act
+    out <- subset_selection(case$rec, keep_ids = ids[1:6], n_removed = 6L)
+
+    ## Assert — the refilter ran, left the part as it was, and the damage is
+    ## still there to be named
+    expect_identical(out$rows_removed, 6L, info = case$finding)
+    expect_identical(out[[case$part]], case$rec[[case$part]], info = case$finding)
+    expect_match(check_selection_shape(out), case$finding, fixed = TRUE, all = FALSE,
+                 info = case$finding)
+
+  }
+
+})
+
+
 ## =============================================================================
 ## set_analysis() — Maintaining the selection record
 ## =============================================================================
@@ -676,16 +734,18 @@ test_that("add_columns() refuses a column name already present", {
 })
 
 
-test_that("add_columns() refuses roles that modelling reads", {
+test_that("add_columns() refuses roles that modelling reads, and anything but one role", {
 
   fx  <- select_fixture(n_pool = 40)
   new <- tibble::tibble(extra = rep(1, 40))
 
-  for (role in c("predictor", "outcome", "id", "nonsense")) {
+  ## And anything that is not one role named as a string
+  for (role in list("predictor", "outcome", "id", "nonsense", c("response", "meta"), character(0), 1)) {
 
     expect_error(add_columns(fx$pool, new, role = role),
+                 "`role` must be \"response\" or \"meta\"", fixed = TRUE,
                  class = "horizons_input_error",
-                 info  = role)
+                 info  = paste(role, collapse = ", "))
 
   }
 
@@ -724,11 +784,16 @@ test_that("add_columns() refuses an after that names no column of the table", {
   ## Arrange
   fx <- select_fixture(n_pool = 40)
 
-  ## Act & Assert
-  expect_error(add_columns(fx$pool, tibble::tibble(site = rep("A", 40)),
-                           role = "meta", after = "not_a_column"),
-               "must name one column of the analysis table", fixed = TRUE,
-               class = "horizons_input_error")
+  ## Act & Assert — a name not in the table, and two names that both are
+  for (after in list("not_a_column", c("sample_id", "family"))) {
+
+    expect_error(add_columns(fx$pool, tibble::tibble(site = rep("A", 40)),
+                             role = "meta", after = after),
+                 "must name one column of the analysis table", fixed = TRUE,
+                 class = "horizons_input_error",
+                 info = paste(after, collapse = ", "))
+
+  }
 
 })
 

@@ -2,9 +2,11 @@
 ## Tests: the plsr model's engine (R/pls-engine.R)
 ## ---------------------------------------------------------------------------
 ## horizons registers a "pls" engine for parsnip's pls() model, fitting with
-## pls::plsr(). These check the fit against pls::plsr() directly, the
-## component cap, tuning through tune, and the num_comp range the runners
-## hand to tune (#216).
+## pls::plsr(). These check the registration beside another package's engine,
+## a fit with horizons loaded but not attached, the fit against pls::plsr()
+## directly, the component cap, tuning through tune, and the num_comp range
+## the runners hand to tune (#216). That the load registers the engine is
+## tested in test-zzz.R.
 
 
 ## Predictors with signal in a handful of columns, so several components help
@@ -23,10 +25,62 @@ make_pls_data <- function(n = 60, p = 40, seed = 11) {
 
 describe("the pls engine", {
 
-  it("is registered for parsnip's pls() model, in regression", {
+  it("registers its engine when another package has registered one for pls() first", {
+
+    ## plsmod, for one, registers a mixOmics engine for pls(). parsnip's
+    ## tables are shared by the session, so they are put back afterwards.
+    env    <- parsnip::get_model_env()
+    tables <- c("pls", "pls_fit", "pls_predict", "pls_args", "pls_pkgs", "pls_encoding")
+    saved  <- mget(tables, envir = env)
+    withr::defer(list2env(saved, envir = env))
+
+    ## As if the other package had loaded first and horizons not yet
+    assign("pls", tibble::tibble(engine = "mixOmics", mode = c("classification", "regression")),
+           envir = env)
+    for (tb in tables[-1]) {
+      assign(tb, saved[[tb]][saved[[tb]]$engine != "pls", ], envir = env)
+    }
+
+    register_pls_engine()
 
     engines <- parsnip::show_engines("pls")
     expect_true(any(engines$engine == "pls" & engines$mode == "regression"))
+    expect_true(any(engines$engine == "mixOmics" & engines$mode == "regression"))
+
+    d    <- make_pls_data(n = 30, p = 6)
+    spec <- parsnip::pls(num_comp = 2) |>
+      parsnip::set_engine("pls") |>
+      parsnip::set_mode("regression")
+
+    expect_equal(predict(parsnip::fit_xy(spec, x = d$x, y = d$y), new_data = as.data.frame(d$x))$.pred,
+                 pls_predict(pls_fit(d$x, d$y, ncomp = 2L), d$x))
+
+  })
+
+  it("fits and predicts with horizons loaded but not attached", {
+
+    ## The engine names horizons' namespace for its fit and predict
+    ## functions, so it works for horizons:: calls and in workers that load
+    ## the namespace without attaching it. Only an installed build can show
+    ## it: load_all() attaches the package it loads.
+    skip_if_dev_package()
+    skip_on_cran()
+    skip_if_not_installed("callr")
+
+    d <- make_pls_data(n = 30, p = 6)
+
+    out <- callr::r(function(x, y) {
+      loadNamespace("horizons")
+      spec <- parsnip::pls(num_comp = 2) |>
+        parsnip::set_engine("pls") |>
+        parsnip::set_mode("regression")
+      fit <- parsnip::fit_xy(spec, x = x, y = y)
+      list(attached = "package:horizons" %in% search(),
+           pred     = predict(fit, new_data = as.data.frame(x))$.pred)
+    }, args = list(x = d$x, y = d$y))
+
+    expect_false(out$attached)
+    expect_equal(out$pred, pls_predict(pls_fit(d$x, d$y, ncomp = 2L), d$x))
 
   })
 
@@ -40,6 +94,10 @@ describe("the pls engine", {
     expect_identical(fit$horizons_ncomp, 5L)
     expect_equal(pls_predict(fit, d$x[1:10, ]),
                  as.numeric(stats::predict(ref, newdata = data.frame(x = I(d$x[1:10, ])), ncomp = 5)))
+
+    ## The predictors may come as a data frame
+    expect_equal(pls_predict(pls_fit(as.data.frame(d$x), d$y, ncomp = 5L), d$x[1:10, ]),
+                 pls_predict(fit, d$x[1:10, ]))
 
   })
 

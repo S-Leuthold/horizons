@@ -170,7 +170,8 @@ test_that("select_training() refuses a pool that carries state from later verbs"
   class(fitted) <- c("horizons_fit", "horizons_eval", "horizons_data", "list")
 
   expect_error(select_training(fx$targets, fitted, k = 5, verbose = FALSE),
-               regexp = "horizons_fit", class = "horizons_input_error")
+               "`library` is a <horizons_fit>; it must be a plain horizons_data", fixed = TRUE,
+               class = "horizons_input_error")
 
   validated <- fx$pool
   validated$validation$passed <- TRUE
@@ -238,6 +239,23 @@ test_that("select_training() refuses a pool whose validation failed or that carr
 
   expect_error(select_training(fx$targets, removed, k = 5, verbose = FALSE),
                regexp = "removal record", class = "horizons_input_error")
+
+  ## Any one part of a removal record is enough
+  parts <- list(
+    removed        = TRUE,
+    removed_ids    = "P999",
+    removal_detail = tibble::tibble(sample_id = "P999", reason = "spectral", spectral_threshold = 1)
+  )
+
+  for (part in names(parts)) {
+
+    one <- fx$pool
+    one$validation$outliers[part] <- parts[part]
+
+    expect_match(check_pool_unpromoted(one), "a removal record in validation$outliers",
+                 fixed = TRUE, info = part)
+
+  }
 
 })
 
@@ -373,6 +391,17 @@ test_that("the unit check catches a log-base difference and lets an instrument g
   expect_false(check_photometric_units(M, M * 2.303, ratio = 3)$mismatch)
   expect_true(check_photometric_units(M,  M * 1.5, ratio = 1.2)$mismatch)
 
+  ## Medians that dominate their spread are compared as well, by fold and by
+  ## sign. Offset by 10, the fixture's median sits far clear of its IQR, and
+  ## the offsets below leave every IQR as it was.
+  L    <- M + 10
+  same <- check_photometric_units(L, L)
+
+  expect_identical(same$basis, "median and iqr")
+  expect_false(same$mismatch)
+  expect_true(check_photometric_units(L, M + 30)$mismatch)
+  expect_true(check_photometric_units(L, M - 10)$mismatch)
+
   ## And the verb warns on a log-base mismatch end to end
   log_base <- select_fixture(n_pool = 30, target_scale = 2.303)
 
@@ -416,6 +445,33 @@ test_that("the resemblance check is seeded and leaves the caller's RNG alone", {
   ## And the seed is a real lever
   c2 <- check_resemblance(big, st, metric = "euclidean", chunk_size = 500L, seed = 7L)
   expect_false(isTRUE(all.equal(a$threshold, c2$threshold)))
+
+  ## A session with no RNG state is left with none, whether the reference was
+  ## sampled (over the cap) or not
+  withr::local_preserve_seed()
+
+  for (space in list(big, sp)) {
+
+    rm(list = intersect(".Random.seed", ls(globalenv(), all.names = TRUE)), envir = globalenv())
+
+    expect_no_warning(r <- check_resemblance(space, st, metric = "euclidean",
+                                             chunk_size = 500L, seed = 1L))
+    expect_identical(r$n_reference, min(nrow(space$scores), 2000L))
+    expect_false(exists(".Random.seed", envir = globalenv(), inherits = FALSE))
+
+  }
+
+  ## A one-component space over the cap: the sampled reference is still a
+  ## matrix of rows
+  one        <- big
+  one$scores <- big$scores[, 1, drop = FALSE]
+  one$sdev   <- big$sdev[1]
+
+  r1 <- check_resemblance(one, st[, 1, drop = FALSE], metric = "euclidean",
+                          chunk_size = 500L, seed = 1L)
+
+  expect_identical(r1$n_reference, 2000L)
+  expect_true(is.finite(r1$threshold))
 
 })
 
@@ -476,10 +532,11 @@ test_that("scope = 'global' returns every pool row on the targets' grid", {
   expect_identical(out$selection$groups$n_rows, 60L)
   expect_identical(nrow(out$selection$membership), 0L)
 
-  ## The provenance columns are there, and empty: global draws nothing
+  ## The provenance columns are there, and empty: global draws nothing. They
+  ## keep the drawing scopes' types, so the control arm binds with them.
   expect_true(all(c(".drawn_by", ".min_distance") %in% names(out$data$analysis)))
-  expect_true(all(is.na(out$data$analysis$.drawn_by)))
-  expect_true(all(is.na(out$data$analysis$.min_distance)))
+  expect_identical(out$data$analysis$.drawn_by,     rep(NA_integer_, 60L))
+  expect_identical(out$data$analysis$.min_distance, rep(NA_real_,    60L))
 
 })
 

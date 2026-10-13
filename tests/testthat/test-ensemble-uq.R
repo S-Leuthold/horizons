@@ -76,6 +76,9 @@ describe("cv_plus_bounds()", {
       level = 0.90
     )
 
+    ## One bound per new point, the last one included
+    expect_length(result$lower, 2L)
+    expect_length(result$upper, 2L)
     expect_false(is.na(result$lower[1]))
     expect_true(is.na(result$lower[2]))
     expect_true(is.na(result$upper[2]))
@@ -448,13 +451,21 @@ describe("predict.horizons_ensemble() - CV+ intervals", {
 
 describe("ensemble() penalized - non-degenerate on real signal", {
 
-  it("learns at least one non-zero member coefficient", {
+  it("learns at least one non-zero member coefficient, at a tuned penalty glmnet can use", {
 
     skip_unless_slow_tier()
 
     ens   <- ens_built("penalized", optimize = TRUE)
     coefs <- ens$ensemble$weights$coef
     expect_gt(sum(abs(coefs) > 1e-8), 0)
+
+    ## The tuning chose a real amount of regularization and a mixing share
+    args    <- workflows::extract_spec_parsnip(ens$ensemble$model)$args
+    penalty <- rlang::eval_tidy(args$penalty)
+    mixture <- rlang::eval_tidy(args$mixture)
+
+    expect_true(is.finite(penalty) && penalty > 0)
+    expect_true(mixture >= 0 && mixture <= 1)
 
   })
 
@@ -601,6 +612,43 @@ describe("ensemble UQ - degradation and gates", {
     ## after the drop
     spoil <- seq_len(length(oof$truth) - N_CALIB_MIN + 1L)
     expect_null(run())
+
+  })
+
+  it("compute_ensemble_uq returns NULL, rather than an error, when the fold refit fails", {
+
+    ens_ref <- ens_built("weighted")
+    oof     <- build_oof_matrix(ens_ref, ens_ref$ensemble$weights$member)
+
+    local_mocked_bindings(fit_uq_fold_models = function(...) stop("a fold refit failed"))
+
+    ## suppressWarnings(): rsample's note that the 43 meta rows are too few
+    ## for its default strata breaks
+    expect_null(suppressWarnings(compute_ensemble_uq(oof = oof, contract = ens_ref$ensemble,
+                                                     optimize = FALSE, conformal_seed = 1307L)))
+
+  })
+
+  it("fit_ensemble_uq leaves the ensemble point-only, with one note, when calibration fails or errors", {
+
+    ## UQ never fails the ensemble: a NULL bundle and an error inside the
+    ## calibration both leave $ensemble$uq empty, and verbose says so once
+    ens_ref <- ens_built("weighted")
+    no_uq   <- ens_ref
+    no_uq$ensemble$uq <- NULL
+
+    for (calibration in list(function(...) NULL, function(...) stop("calibration broke"))) {
+
+      local_mocked_bindings(compute_ensemble_uq = calibration)
+
+      msgs <- testthat::capture_messages(out <- fit_ensemble_uq(no_uq, verbose = TRUE))
+
+      expect_null(out$ensemble$uq)
+      expect_length(msgs, 1L)
+      expect_match(msgs, "Ensemble UQ could not be calibrated", fixed = TRUE)
+      expect_no_message(fit_ensemble_uq(no_uq, verbose = FALSE))
+
+    }
 
   })
 
@@ -760,8 +808,9 @@ describe("cv_plus_indices()", {
 
 describe("cv_plus_bounds() - corrupted fold ids fail loudly", {
 
-  it("aborts when fold ids exceed the retained fold models", {
+  it("aborts when fold ids fall outside the retained fold models", {
 
+    ## The abort carries no package class.
     expect_error(
       cv_plus_bounds(
         matrix(rnorm(10), nrow = 2),          # 5 fold-model columns
@@ -770,6 +819,17 @@ describe("cv_plus_bounds() - corrupted fold ids fail loudly", {
         level = 0.90
       ),
       "out of sync"
+    )
+
+    ## Fold 0 would select no column, silently
+    expect_error(
+      cv_plus_bounds(
+        matrix(rnorm(10), nrow = 2),
+        rep(c(0, 2), length.out = 39),
+        rnorm(39),
+        level = 0.90
+      ),
+      "fold_id range: 0..2", fixed = TRUE
     )
 
   })

@@ -165,6 +165,9 @@ describe("ccc_vec()", {
     expect_equal(r_val, 1.0)
     expect_true(ccc_val < r_val)
 
+    ## By how much: Lin's coefficient, as yardstick computes it
+    expect_equal(ccc_val, yardstick::ccc_vec(truth, estimate))
+
   })
 
   it("returns NA with fewer than 2 observations", {
@@ -213,14 +216,19 @@ describe("tuning_metric_set()", {
     sqrt  = sqrt(truth) + noise
   )
 
+  ## One prediction below zero on the sqrt scale, which back-transforms to 0
+  transformed_estimates$sqrt[1] <- -0.1
+
   directions <- function(ms) {
     vapply(attributes(ms)$metrics, function(m) attr(m, "direction"), character(1))
   }
 
   it("returns the plain metric set for transformation = 'none'", {
 
+    ## One estimate below zero: the plain set scores it as it is, with no
+    ## clamp to the outcome range
     ms   <- tuning_metric_set("none")
-    df   <- tibble::tibble(truth = truth, estimate = truth + noise)
+    df   <- tibble::tibble(truth = truth, estimate = c(-0.5, (truth + noise)[-1]))
     got  <- ms(df, truth = truth, estimate = estimate)
     want <- yardstick::metric_set(yardstick::rmse, rrmse, yardstick::rsq,
                                   yardstick::mae, rpd, ccc)(df, truth = truth,

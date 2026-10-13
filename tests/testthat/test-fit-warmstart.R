@@ -214,6 +214,13 @@ describe("build_warmstart_grid() - range clamping", {
     expect_true(any(outside$mtry == param_range("mtry")$upper))
     expect_type(outside$mtry, "integer")
 
+    ## An integer parameter's clamped value is a whole number of integer type,
+    ## whatever type the best point gave it; at max_points = 10 the grid
+    ## overflows, so the best point's own row is bound to the sampled ones
+    as_double <- build_warmstart_grid(tibble::tibble(mtry = 27, trees = 500, min_n = 5),
+                                      param_set, max_points = 10)
+    expect_type(as_double$mtry, "integer")
+
     xgb_set  <- make_xgb_param_set()
     lr_param <- xgb_set$object[[which(xgb_set$name == "learn_rate")]]
     lr_upper <- lr_param$trans$inverse(lr_param$range$upper)
@@ -303,6 +310,33 @@ describe("build_warmstart_grid() - NULL/NA fallback", {
 })
 
 
+describe("build_warmstart_grid() - the caller's random stream (#51)", {
+
+  it("samples an overflowing grid without moving the caller's random stream", {
+
+    ## 125 combinations against max_points = 10, so the grid is sampled
+    param_set   <- make_warmstart_param_set()
+    best_params <- make_best_params()
+
+    set.seed(9)
+    expected <- stats::runif(3)
+
+    set.seed(9)
+    grid  <- build_warmstart_grid(best_params, param_set, max_points = 10)
+    after <- stats::runif(3)
+
+    expect_identical(nrow(grid), 10L)
+    expect_identical(after, expected)
+
+    ## The sample is the same whatever the caller's stream
+    set.seed(10)
+    expect_identical(build_warmstart_grid(best_params, param_set, max_points = 10), grid)
+
+  })
+
+})
+
+
 describe("build_warmstart_grid() - max_points truncation", {
 
   param_set   <- make_warmstart_param_set()
@@ -327,6 +361,33 @@ describe("build_warmstart_grid() - max_points truncation", {
       grid$min_n == best_params$min_n
     )
     expect_true(has_best)
+
+    ## A best value inside its range is kept exactly as given, not as its
+    ## round trip through the log10 scale its candidates are spread on
+    xgb_best <- make_xgb_best_params(learn_rate = 0.05)
+    xgb_grid <- build_warmstart_grid(xgb_best, make_xgb_param_set(), max_points = 25)
+
+    expect_identical(as.list(xgb_grid[1, names(xgb_best)]), as.list(xgb_best))
+
+  })
+
+  it("adds a best point its candidates miss, and still holds at most max_points", {
+
+    ## fit() passes tune::select_best() output, which always lies on its own
+    ## candidate lattice; a direct call to this exported function need not.
+    ## mtry = 10.5 rounds to the candidates 8, 10 and 12, so the 75 combinations
+    ## lack the best point. At max_points = 75 they are not sampled, and the
+    ## best point bound to them makes 76 rows, one over.
+    off_lattice <- make_best_params()
+    off_lattice$mtry <- 10.5
+
+    grid <- build_warmstart_grid(off_lattice, param_set, max_points = 75)
+
+    expect_identical(nrow(grid), 75L)
+    has_best <- grid$mtry == off_lattice$mtry &
+      grid$trees == off_lattice$trees &
+      grid$min_n == off_lattice$min_n
+    expect_true(any(has_best))
 
   })
 
@@ -453,6 +514,61 @@ describe("tune_warmstart_bayes() - a Bayesian search that fails (#209)", {
     expect_true(result$bayes_failed)
     expect_type(result$bayes_error, "character")
     expect_equal(nrow(result$best_params), 1)
+
+  })
+
+  it("keeps the grid's choice and says why when the search returns no iteration", {
+
+    ts <- make_tune_setup()
+
+    ## What tune_bayes() returns when its loop errors or every candidate
+    ## fails: the starting grid's results alone
+    local_mocked_bindings(tune_bayes = function(object, resamples, initial, ...) initial,
+                          .package = "tune")
+
+    result <- tune_warmstart_bayes(
+      workflow      = ts$wf,
+      cv_resamples  = ts$folds,
+      best_params   = tibble::tibble(mtry = 5L, trees = 100L, min_n = 5L),
+      param_set     = ts$param_set,
+      bayesian_iter = 2L,
+      grid_size     = 3L,
+      metric_set    = ts$metric_set,
+      allow_par     = FALSE
+    )
+
+    expect_identical(result$bayes_failed, TRUE)
+    expect_identical(result$bayes_error, "the search produced no results")
+    expect_equal(nrow(result$best_params), 1)
+
+  })
+
+})
+
+
+describe("tune_warmstart_bayes() - a starting grid that errors", {
+
+  it("returns the cause with no results, and the grid's size", {
+
+    ts <- make_tune_setup()
+
+    local_mocked_bindings(tune_grid = function(...) stop("the grid broke"), .package = "tune")
+
+    result <- tune_warmstart_bayes(
+      workflow      = ts$wf,
+      cv_resamples  = ts$folds,
+      best_params   = tibble::tibble(mtry = 5L, trees = 100L, min_n = 5L),
+      param_set     = ts$param_set,
+      bayesian_iter = 0L,
+      grid_size     = 3L,
+      metric_set    = ts$metric_set,
+      allow_par     = FALSE
+    )
+
+    expect_null(result$tune_results)
+    expect_null(result$best_params)
+    expect_identical(result$grid_points, 3L)
+    expect_match(result$error, "the grid broke", fixed = TRUE)
 
   })
 

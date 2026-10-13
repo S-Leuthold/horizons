@@ -125,9 +125,11 @@ test_that("spectra() preserves existing wn_ prefix", {
 
 test_that("spectra() detects ID column from aliases", {
 
-  ## Test different aliases ------------------------------------------------
+  ## Every alias, each on its own ------------------------------------------
 
-  aliases_to_test <- c("sample_id", "Sample_ID", "ID", "id", "Sample", "filename")
+  aliases_to_test <- c("sample_id", "Sample_ID", "SampleID", "sampleid",
+                       "id", "ID", "Id", "sample", "Sample",
+                       "filename", "Filename", "name", "Name")
 
   for (alias in aliases_to_test) {
 
@@ -188,6 +190,37 @@ test_that("spectra() detects wavelength columns with numeric names", {
   ]
 
   expect_setequal(predictor_cols, c("wn_4000", "wn_3500", "wn_3000"))
+
+})
+
+test_that("spectra() takes the wavelength columns it is given, and refuses one the data lacks", {
+
+  ## Arrange ---------------------------------------------------------------
+
+  test_data <- tibble::tibble(
+    Sample_ID = c("S1", "S2"),
+    `4000`    = c(0.1, 0.2),
+    `3500`    = c(0.2, 0.3),
+    `3000`    = c(0.3, 0.4)
+  )
+
+  ## Act -------------------------------------------------------------------
+
+  result <- spectra(test_data, wavelength_cols = c("4000", "3000"))
+
+  ## Assert ----------------------------------------------------------------
+
+  predictor_cols <- result$data$role_map$variable[result$data$role_map$role == "predictor"]
+
+  expect_identical(predictor_cols, c("wn_4000", "wn_3000"))
+  expect_identical(result$data$analysis$wn_3000, c(0.3, 0.4))
+
+  ## This abort carries no package class, so the message is the check.
+  expect_error(
+    spectra(test_data, wavelength_cols = c("4000", "9999")),
+    "Specified wavelength columns not found in data",
+    fixed = TRUE
+  )
 
 })
 
@@ -311,6 +344,7 @@ test_that("spectra() from a CSV builds the new_horizons_data() shape", {
 
   test_data <- tibble::tibble(
     Sample_ID = c("S001", "S002"),
+    site      = c("north", "south"),
     `4000`    = c(0.1, 0.2),
     `3000`    = c(0.2, 0.3)
   )
@@ -332,6 +366,15 @@ test_that("spectra() from a CSV builds the new_horizons_data() shape", {
 
   ## No filename column for CSV (no per-sample files)
   expect_false("filename" %in% names(result$data$analysis))
+
+  ## Other columns are carried as meta
+  expect_identical(result$data$analysis$site, c("north", "south"))
+  expect_identical(result$data$role_map$role[result$data$role_map$variable == "site"], "meta")
+
+  ## Wavelength columns named by the caller are the ones taken
+  picked <- spectra(temp_csv, wavelength_cols = "4000")
+  expect_identical(picked$data$role_map$variable[picked$data$role_map$role == "predictor"],
+                   "wn_4000")
 
 })
 
@@ -480,6 +523,54 @@ test_that("spectra() refuses OPUS files that hold no spectral block", {
 
 })
 
+test_that("spectra() refuses OPUS input when opusreader2 is not installed, saying so", {
+
+  ## Arrange ---------------------------------------------------------------
+
+  real <- base::requireNamespace
+  local_mocked_bindings(
+    requireNamespace = function(package, ...) {
+      !identical(package, "opusreader2") && real(package, ...)
+    },
+    .package = "base"
+  )
+
+  ## Act and assert --------------------------------------------------------
+
+  ## This abort carries no package class, so the message is the check.
+  expect_error(
+    spectra(opus_dir(), type = "opus"),
+    "Package opusreader2 required for OPUS files",
+    fixed = TRUE
+  )
+
+})
+
+test_that("spectra() reads OPUS files in a fresh session, loading opusreader2 itself", {
+
+  ## load_all() loads opusreader2 up front, and an earlier test in the same
+  ## session may have too, so only a fresh process shows the first load
+  skip_if_dev_package()
+  skip_on_cran()
+  skip_if_not_installed("callr")
+  skip_if_not_installed("opusreader2")
+
+  ## Act -------------------------------------------------------------------
+
+  read <- callr::r(function(dir) {
+    suppressPackageStartupMessages(library(horizons))
+    loaded_before <- "opusreader2" %in% loadedNamespaces()
+    x <- suppressWarnings(spectra(dir, type = "opus"))
+    list(loaded_before = loaded_before, ids = x$data$analysis$sample_id)
+  }, args = list(normalizePath(opus_dir())))
+
+  ## Assert ----------------------------------------------------------------
+
+  expect_false(read$loaded_before)
+  expect_identical(read$ids, c("S01-1", "S01-1", "S02-1"))
+
+})
+
 
 ## ---------------------------------------------------------------------------
 ## spectra() — Validation and errors
@@ -499,6 +590,23 @@ test_that("spectra() errors on non-existent file", {
   expect_error(
     spectra("/nonexistent/path/to/file.csv"),
     "does not exist"
+  )
+
+})
+
+test_that("spectra() refuses a vector of paths, and a directory read as a CSV", {
+
+  ## These aborts carry no package class, so the message is the check.
+  expect_error(
+    spectra(c("a.csv", "b.csv")),
+    "`source` must be a single path, not a vector of length 2",
+    fixed = TRUE
+  )
+
+  expect_error(
+    spectra(withr::local_tempdir(), type = "csv"),
+    "Expected CSV file, got directory",
+    fixed = TRUE
   )
 
 })

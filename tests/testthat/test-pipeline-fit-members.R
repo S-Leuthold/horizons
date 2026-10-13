@@ -74,6 +74,7 @@ describe("fit() - an evaluation with only pruned configs (#38)", {
     expect_error(
       fit(unranked, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE,
           verbose = FALSE),
+      "None succeeded, and no pruned configuration has a cv_rpd value.", fixed = TRUE,
       class = "horizons_input_error"
     )
 
@@ -204,6 +205,26 @@ describe("fit() - members below the prune threshold at bayesian_iter = 0 (#38)",
 
   })
 
+  ## Rows written without the gate's reading: a pruned row is below the
+  ## threshold all the same, since the gate pruned it, and a success is not
+  it("counts a pruned member without a reading as below the threshold, and a success without one as not", {
+
+    unread <- tibble::tibble(config_id = c("cfg_001", "cfg_002"), cv_rpd = c(0.93, 0.88))
+
+    pruned <- unread
+    pruned$status <- "pruned"
+
+    expect_warning(warn_members_below_threshold(pruned, fallback = TRUE),
+                   "prune threshold (not recorded on these rows)", fixed = TRUE,
+                   class = "horizons_pruned_fallback_warning")
+
+    succeeded <- unread
+    succeeded$status <- "success"
+
+    expect_no_warning(warn_members_below_threshold(succeeded, fallback = FALSE))
+
+  })
+
 })
 
 
@@ -258,6 +279,13 @@ describe("fit() - member failures", {
     expect_s3_class(err$results, "tbl_df")
     expect_setequal(err$results$config_id, c("cfg_001", "cfg_002"))
     expect_true(all(err$results$status == "failed"))
+
+    ## The metric and CV columns are present and double, though no member
+    ## filled them (the fit validator holds the full column table, #203)
+    metric_cols <- c("rmse", "rrmse", "rsq", "ccc", "rpd", "mae",
+                     "cv_rmse_mean", "cv_rmse_se", "cv_rpd_mean", "cv_rpd_se")
+    expect_true(all(metric_cols %in% names(err$results)))
+    expect_true(all(vapply(err$results[metric_cols], is.double, logical(1))))
 
   })
 

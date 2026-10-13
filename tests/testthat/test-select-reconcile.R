@@ -1,7 +1,8 @@
 # tests/testthat/test-select-reconcile.R
 # Tests for predictor_matrix(), reconcile_axes() and
 # reconciled_standardization(), the first act of select_training(): bring the
-# pool onto the targets' wavenumber axis, and its record with it.
+# pool onto the targets' wavenumber axis, and its record with it. And
+# search_axis(), which puts the targets on the library's grid for the search.
 
 
 ## =============================================================================
@@ -418,15 +419,20 @@ test_that("reconciled_standardization() writes a NULL grid when the targets' gri
   expect_identical(reconciled_standardization(pool, std_record(8), wn, clamp = NULL)$grid,
                    std_record(8)$grid)
 
-  ## One whose count, range or shape disagrees is not
+  ## One whose count, range or shape disagrees is not, nor one whose count is
+  ## not a number or that is not a list at all
   short  <- std_record(8)
   short$grid$n <- short$grid$n - 1L
   wide   <- std_record(8)
   wide$grid$max <- 4008
   broken <- std_record(8)
   broken$grid$n <- NULL
+  text   <- std_record(8)
+  text$grid$n <- as.character(text$grid$n)
+  atomic <- std_record(8)
+  atomic$grid <- "canonical"
 
-  for (target in list(short = short, wide = wide, broken = broken)) {
+  for (target in list(short = short, wide = wide, broken = broken, text = text, atomic = atomic)) {
 
     rec <- reconciled_standardization(pool, target, wn, clamp = NULL)
 
@@ -435,5 +441,64 @@ test_that("reconciled_standardization() writes a NULL grid when the targets' gri
     expect_identical(rec$n_wavelengths, length(wn))
 
   }
+
+})
+
+
+## =============================================================================
+## search_axis(): the targets on the library's grid, for the search only
+## =============================================================================
+
+test_that("search_axis() records each coverage tier with its shortfall and its grid", {
+
+  ## A library at 2 cm-1 from 600 to 700, so half its spacing is 1 cm-1
+  lib_wn <- seq(700, 600, by = -2)
+  on     <- function(wn) outer(c(T1 = 1, T2 = 2), wn, function(i, w) i + sin(w / 25))
+
+  ## On the library's own grid: the whole grid, nothing resampled
+  wn  <- lib_wn
+  out <- search_axis(lib_wn, on(wn), wn)
+
+  expect_identical(out$record$mode, "full")
+  expect_identical(out$record$operation, "none")
+  expect_identical(out$record$missing, c(low = 0, high = 0))
+  expect_identical(out$wavenumbers, lib_wn)
+  expect_identical(out$matrix, on(wn))
+
+  ## Overshooting the low end within half a spacing: full, and nothing missing
+  ## there
+  wn  <- seq(699.5, 599.5, by = -4)
+  out <- search_axis(lib_wn, on(wn), wn)
+
+  expect_identical(out$record$mode, "full")
+  expect_identical(out$record$operation, "resampled")
+  expect_identical(out$record$missing, c(low = 0, high = 0.5))
+
+  ## 30 cm-1 short at the high end: the overlap, the library's columns inside
+  ## the targets' range only
+  wn <- seq(670, 600, by = -2)
+
+  expect_warning(out <- search_axis(lib_wn, on(wn), wn),
+                 "short of the library's range", class = "horizons_select_warning")
+  expect_identical(out$record$mode, "overlap")
+  expect_identical(out$record$missing, c(low = 0, high = 30))
+  expect_identical(out$wavenumbers, seq(670, 600, by = -2))
+  expect_identical(out$pool_cols, which(lib_wn <= 670))
+
+  ## A coarse batch short by exactly one of its own 16 cm-1 steps is not
+  ## within it, so it is the overlap too (under one step is full)
+  wn <- seq(696, 616, by = -16)
+
+  expect_warning(out <- search_axis(lib_wn, on(wn), wn),
+                 "short of the library's range", class = "horizons_select_warning")
+  expect_identical(out$record$mode, "overlap")
+  expect_identical(out$record$missing, c(low = 16, high = 4))
+
+  ## A library with a hole in its axis is refused, as the targets' would be
+  gapped <- lib_wn[!(lib_wn > 640 & lib_wn < 680)]
+
+  expect_error(search_axis(gapped, on(lib_wn), lib_wn),
+               "The wavenumber axis of the pool has 1 gap in it", fixed = TRUE,
+               class = "horizons_input_error")
 
 })

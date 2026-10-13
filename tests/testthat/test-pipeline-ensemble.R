@@ -290,14 +290,16 @@ describe("ensemble() - preflight validation", {
 
 describe("ensemble() - predict namespaces", {
 
-  it("loads the members' predict namespaces before scoring them on the test rows", {
+  it("loads the members' predict namespaces before scoring them on the test rows, and before predicting", {
 
-    fitted <- ens_fitted()
+    fitted   <- ens_fitted()
+    ens      <- ens_built("weighted")
+    test_set <- ens_test_set()
 
     ## Under an installed package the Imports load lazily, so a fitted object
     ## read into a fresh session has no workflows predict method registered
-    ## until something loads it. The member scoring must ask for it, as
-    ## predict.horizons_ensemble() does.
+    ## until something loads it. The member scoring and
+    ## predict.horizons_ensemble() must both ask for it.
     requested <- NULL
     local_mocked_bindings(
       ensure_predict_namespaces = function(object, config_ids) {
@@ -310,6 +312,11 @@ describe("ensemble() - predict namespaces", {
     invisible(tryCatch(predict_members_on_test(fitted, members), error = function(e) NULL))
 
     expect_identical(requested, members)
+
+    requested <- NULL
+    predict(ens, test_set, interval = FALSE)
+
+    expect_identical(requested, ens$ensemble$weights$member)
 
   })
 
@@ -522,16 +529,18 @@ describe("predict.horizons_ensemble() - aborts on a failing member", {
 })
 
 ## =========================================================================
-## Members' applicability domain is not computed
+## Members' applicability domain and intervals are not computed
 ## =========================================================================
 ## The member helpers keep only .pred, so a member's AD was baked, scored and
 ## dropped: wasted work, and AD warnings about columns the ensemble never
 ## returns. A member AD bundle that no longer matches the member's features
-## makes the distance fail, which is what would warn if it were computed.
+## makes the distance fail, which is what would warn if it were computed. A
+## member's UQ bundle is likewise never read: the ensemble's intervals come
+## from its own CV+ bundle.
 
-describe("ensemble() and predict.horizons_ensemble() - member AD", {
+describe("ensemble() and predict.horizons_ensemble() - member AD and intervals", {
 
-  it("raises no AD warning from a broken member AD bundle", {
+  it("raises no AD warning from a broken member AD bundle, and never reads a member's UQ bundle", {
 
     fitted   <- ens_fitted()
     test_set <- ens_test_set()
@@ -544,6 +553,9 @@ describe("ensemble() and predict.horizons_ensemble() - member AD", {
       cov_matrix    = matrix(1, dimnames = list("wn_0", "wn_0")),
       ad_thresholds = c(q25 = 1, q50 = 2, q75 = 3, ood = 4)
     )), member)
+
+    ## Not a UQ bundle. Member scoring asks for no intervals, so it is never read.
+    broken$models$uq <- stats::setNames(list(list(method = "not a bundle")), member)
 
     expect_no_warning(
       ens <- keep_only_warning(
@@ -756,6 +768,49 @@ describe("predict.horizons_ensemble() - no member set", {
   })
 
 })
+
+## =========================================================================
+## ensemble() weighted — the test-set combine is clamped to the outcome's range
+## =========================================================================
+## The members' test predictions stay raw (they are scored as members); the
+## weighted sum the ensemble is scored on is clamped, as every served
+## prediction is (#76).
+
+describe("ensemble() weighted - test-set combine", {
+
+  it("clamps the combined test predictions to the outcome's range", {
+
+    fitted <- ens_fitted()
+
+    ## The members predict the test rows 20 lower, so some combined
+    ## predictions fall below the floor at 0 and some stay above it
+    real_members <- predict_members_on_test
+    shifted      <- NULL
+    local_mocked_bindings(predict_members_on_test = function(object, members) {
+      mp       <- real_members(object, members)
+      mp$.pred <- mp$.pred - 20
+      shifted <<- mp
+      mp
+    })
+
+    ens <- ensemble(fitted, method = "weighted", optimize = FALSE, compute_uq = FALSE,
+                    verbose = FALSE)
+
+    by_hand <- shifted |>
+      dplyr::left_join(ens$ensemble$weights, by = c("config_id" = "member")) |>
+      dplyr::summarise(by_hand = sum(.data$.pred * .data$coef), .by = "sample_id")
+
+    expect_true(any(by_hand$by_hand < 0) && any(by_hand$by_hand > 0))
+
+    joined <- dplyr::inner_join(ens$ensemble$predictions, by_hand, by = "sample_id")
+
+    expect_identical(nrow(joined), nrow(by_hand))
+    expect_equal(joined$.pred, pmax(joined$by_hand, 0))
+
+  })
+
+})
+
 
 ## =========================================================================
 ## predict.horizons_ensemble() — response bound guardrail at the OUTPUT
@@ -1038,12 +1093,26 @@ describe("ensemble() - the summary it prints", {
       transform = function(x) sub("Runtime: [0-9.]+s", "Runtime: <time>", x)
     )
 
+    ## Snapshots record no colour, so the improvement line is also read with
+    ## colours on: yellow when the ensemble does not beat its best member
+    improvement_line <- function(contract) {
+      withr::local_options(cli.num_colors = 256L)
+      out <- utils::capture.output(render_ensemble_summary(contract, rank_metric))
+      grep("Improvement over best member", out, value = TRUE, fixed = TRUE)
+    }
+
+    expect_gt(contract$improvement, 0)
+    expect_false(cli::ansi_has_any(improvement_line(contract)))
+
     contract$weights$coef <- c(0.2, -0.5, 0.3)
     contract$improvement  <- -0.0123
     contract$uq           <- NULL
     contract$runtime_secs <- 125
 
     expect_snapshot(render_ensemble_summary(contract, rank_metric))
+
+    expect_match(improvement_line(contract), "\033[33mImprovement over best member: -0.0123",
+                 fixed = TRUE)
 
   })
 

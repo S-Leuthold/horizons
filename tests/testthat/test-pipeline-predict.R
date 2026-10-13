@@ -219,6 +219,23 @@ describe("predict.horizons_fit() - intervals", {
     expect_true(all(p$.pred_lower <= p$.pred_upper))
     expect_equal(p$.interval_width, p$.pred_upper - p$.pred_lower)
 
+    ## The bounds are CQR's: the quantile forest's alpha / 2 and 1 - alpha / 2
+    ## residual quantiles about the point, each widened by the conformal
+    ## margin, put in order and floored at the outcome range's 0. Neither the
+    ## floor nor the response bound binds on this fixture's points.
+    uq       <- fitted_fixture$models$uq[["cfg_001"]]
+    alpha    <- 1 - uq$level_default
+    features <- as.data.frame(recipes::bake(uq$prepped_recipe, new_data = new_df,
+                                            recipes::all_predictors()))
+    q        <- stats::predict(uq$quantile_model, data = features, type = "quantiles",
+                               quantiles = c(alpha / 2, 1 - alpha / 2))$predictions
+    margin   <- compute_c_alpha(uq$scores, uq$level_default)
+    lower    <- p$.pred + q[, 1] - margin
+    upper    <- p$.pred + q[, 2] + margin
+
+    expect_equal(p$.pred_lower, pmax(pmin(lower, upper), 0))
+    expect_equal(p$.pred_upper, pmax(pmax(lower, upper), 0))
+
   })
 
   it("clamps both interval bounds to a recorded outcome range", {
@@ -658,7 +675,7 @@ describe("predict.horizons_fit() - applicability domain", {
 
   it("emits .ad_distance and .ad_flag when the object has an AD bundle", {
 
-    skip_if_not(has_ad(fitted_fixture))
+    expect_true(has_ad(fitted_fixture))
 
     p <- predict(fitted_fixture, new_df, interval = FALSE)
 
@@ -672,7 +689,7 @@ describe("predict.horizons_fit() - applicability domain", {
 
   it("flags far-shifted spectra as OOD, and by default still predicts them", {
 
-    skip_if_not(has_ad(fitted_fixture))
+    expect_true(has_ad(fitted_fixture))
 
     ood_df <- new_df
     wn     <- grep("^wn_", names(ood_df))
@@ -688,7 +705,7 @@ describe("predict.horizons_fit() - applicability domain", {
 
   it("abstain_ood = TRUE NAs only the OOD rows' predictions and preserves .ad_distance", {
 
-    skip_if_not(has_ad(fitted_fixture))
+    expect_true(has_ad(fitted_fixture))
 
     ## Half the batch shifted far off the training axis, half left in domain
     ood_df  <- new_df
@@ -709,11 +726,19 @@ describe("predict.horizons_fit() - applicability domain", {
     kept <- predict(fitted_fixture, ood_df, interval = FALSE)
     expect_equal(p$.pred[!ood], kept$.pred[!ood])
 
+    ## With intervals, an abstained row loses its bounds and width too
+    with_pi <- predict(fitted_fixture, ood_df, abstain_ood = TRUE)
+    pi_cols <- c(".pred", ".pred_lower", ".pred_upper", ".interval_width")
+
+    expect_identical(with_pi$.ad_flag, p$.ad_flag)
+    expect_true(all(is.na(as.matrix(with_pi[ood, pi_cols]))))
+    expect_false(anyNA(as.matrix(with_pi[!ood, pi_cols])))
+
   })
 
   it("one malformed spectrum costs that row its AD, not the whole batch", {
 
-    skip_if_not(has_ad(fitted_fixture))
+    expect_true(has_ad(fitted_fixture))
 
     ## Four out-of-domain spectra plus one that bakes to NA (the documented
     ## step_transform_spectra failure path). Previously the single NA row made
@@ -772,7 +797,7 @@ describe("predict.horizons_fit() - applicability domain", {
 
   it("warns, naming the config and the cause, when the AD distance fails", {
 
-    skip_if_not(has_ad(fitted_fixture))
+    expect_true(has_ad(fitted_fixture))
 
     ## A bundle that no longer matches the recipe's features: the distance
     ## aborts inside predict_ad(), which used to drop the AD columns silently.
@@ -985,10 +1010,11 @@ describe("compute_needed_predict_packages()", {
 ## ensure_predict_namespaces() — per-model coverage and scoping (#65)
 ## ---------------------------------------------------------------------------
 ## Every model horizons supports maps to at least one predict-time namespace
-## (MODEL_PREDICT_PACKAGES, R/constants.R). Those packages are Suggests, so
-## whether they are installed varies by machine — assert clean success when
-## installed, and an informative, package-naming abort when not, rather than
-## assuming a fully-installed environment.
+## (MODEL_PREDICT_PACKAGES, R/constants.R). Some of those packages are
+## Suggests, so whether they are installed varies by machine. The tests below
+## read what ensure_predict_namespaces() asks the missing-package gate for,
+## which does not vary; the gate's own tests above, and the scoping test, cover
+## the abort that names a missing package.
 
 make_ns_probe_fit <- function(model, config_id = "cfg1", with_uq = FALSE,
                               extra_configs = NULL) {
@@ -1019,6 +1045,23 @@ make_ns_probe_fit <- function(model, config_id = "cfg1", with_uq = FALSE,
 
 }
 
+## The packages ensure_predict_namespaces() hands the missing-package gate,
+## which loads each one or aborts naming those missing (its tests above, and
+## the scoping test below). The gate is replaced, so this reads the same
+## whatever is installed.
+requested_packages <- function(obj, config_ids) {
+
+  needed <- NULL
+
+  testthat::with_mocked_bindings(
+    ensure_predict_namespaces(obj, config_ids = config_ids),
+    abort_on_missing_predict_packages = function(needed_pkgs) needed <<- needed_pkgs
+  )
+
+  needed
+
+}
+
 describe("ensure_predict_namespaces() - per-model coverage", {
 
   it("MODEL_PREDICT_PACKAGES covers exactly the supported models", {
@@ -1029,44 +1072,21 @@ describe("ensure_predict_namespaces() - per-model coverage", {
 
   for (m in VALID_MODELS) {
 
-    pkgs          <- MODEL_PREDICT_PACKAGES[[m]]
-    all_installed <- all(vapply(pkgs, requireNamespace, logical(1), quietly = TRUE))
+    pkgs <- MODEL_PREDICT_PACKAGES[[m]]
 
-    it(paste0("model '", m, "' loads its engine package(s), or aborts naming them"), {
+    it(paste0("model '", m, "' requires its engine package(s)"), {
 
-      obj <- make_ns_probe_fit(m)
-
-      if (all_installed) {
-
-        expect_no_error(ensure_predict_namespaces(obj, config_ids = "cfg1"))
-        for (pkg in pkgs) expect_true(requireNamespace(pkg, quietly = TRUE))
-
-      } else {
-
-        err <- tryCatch(
-          ensure_predict_namespaces(obj, config_ids = "cfg1"),
-          horizons_missing_predict_package = function(e) e
-        )
-
-        expect_s3_class(err, "horizons_missing_predict_package")
-        expect_true(any(vapply(
-          pkgs, function(p) grepl(p, conditionMessage(err), fixed = TRUE), logical(1)
-        )))
-
-      }
+      expect_true(all(pkgs %in% names(requested_packages(make_ns_probe_fit(m), "cfg1"))))
 
     })
 
   }
 
-  it("also loads ranger when the object carries a per-config UQ bundle", {
+  it("also requires ranger, for prediction intervals, when the object carries a per-config UQ bundle", {
 
-    skip_if_not_installed("ranger")
+    needed <- requested_packages(make_ns_probe_fit("elastic_net", with_uq = TRUE), "cfg1")
 
-    obj <- make_ns_probe_fit("elastic_net", with_uq = TRUE)
-
-    expect_no_error(ensure_predict_namespaces(obj, config_ids = "cfg1"))
-    expect_true(requireNamespace("ranger", quietly = TRUE))
+    expect_identical(needed$ranger, "prediction intervals")
 
   })
 
@@ -1236,7 +1256,7 @@ describe("predict() - row alignment before positional binds", {
 
   it("aborts when a single AD row would be recycled across the batch and abstained on", {
 
-    skip_if_not(has_ad(fitted_fixture))
+    expect_true(has_ad(fitted_fixture))
 
     ## One OOD row recycled by bind_cols() used to blank every prediction.
     local_mocked_bindings(predict_ad = function(...) {
@@ -1351,6 +1371,43 @@ describe("warn_interval_failure() - config naming and brace-safety", {
 })
 
 
+describe("warn_interval_failure() - its reason", {
+
+  it("words each kind of reason: none, an error, a plain string, with and without a config", {
+
+    expect_snapshot({
+      warn_interval_failure("baking new data through the UQ recipe", NULL)
+      warn_interval_failure("baking new data through the UQ recipe", simpleError("the bake broke"))
+      warn_interval_failure("predicting quantiles from the UQ model", "a plain reason")
+      warn_interval_failure("predicting quantiles from the UQ model", "a plain reason",
+                            config_id = "cfg_001")
+    })
+
+  })
+
+})
+
+
+## ---------------------------------------------------------------------------
+## predict_members() — one row per sample before members are combined
+## ---------------------------------------------------------------------------
+
+describe("predict_members() - repeated sample ids", {
+
+  it("refuses new_data whose sample_ids repeat, before predicting any member", {
+
+    ## The abort carries no package class, so its text is the check. The
+    ## object holds no member, so the refusal must come first.
+    expect_error(
+      predict_members(list(), "cfg_001", tibble::tibble(sample_id = c("A", "A"))),
+      "Duplicate keys would fan out the member-prediction combine.", fixed = TRUE
+    )
+
+  })
+
+})
+
+
 ## ---------------------------------------------------------------------------
 ## Fresh-process round trip (#65)
 ## ---------------------------------------------------------------------------
@@ -1401,8 +1458,6 @@ describe("predict.horizons_fit() - fresh-process round trip", {
   elastic_net_fixture <- fit(make_predict_eval(model = "elastic_net"),
                              n_best = 1L, compute_uq = TRUE, verbose = FALSE)
 
-  skip_if_not(has_uq(elastic_net_fixture), "fixture carries no UQ bundle")
-
   fit_path <- tempfile(fileext = ".rds")
   saveRDS(elastic_net_fixture, fit_path)
 
@@ -1436,6 +1491,8 @@ describe("predict.horizons_fit() - fresh-process round trip", {
   })
 
   it("predicts intervals with no namespace preloaded in the caller", {
+
+    expect_true(has_uq(elastic_net_fixture))
 
     p <- run_in_fresh_process(interval = TRUE)
 
