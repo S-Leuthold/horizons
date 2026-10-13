@@ -174,7 +174,7 @@ test_that("parse_ids() too_few='keep_original' keeps filename as sample_id", {
 
 })
 
-test_that("parse_ids() too_few='na' sets sample_id to NA", {
+test_that("parse_ids() too_few='na' sets sample_id to NA, with or without a sampleid token", {
 
   ## Arrange ---------------------------------------------------------------
 
@@ -196,10 +196,22 @@ test_that("parse_ids() too_few='na' sets sample_id to NA", {
     class = "horizons_validation_warning"
   )
 
+  ## Without a sampleid token the matched rows keep their ids and the
+  ## unmatched one still loses its own
+  expect_warning(
+    expect_warning(
+      no_token <- parse_ids(hd, format = "{project}_{plate}", too_few = "na"),
+      "did not match"
+    ),
+    class = "horizons_validation_warning"
+  )
+
   ## Assert ----------------------------------------------------------------
 
   expect_equal(result$data$analysis$sample_id[1], "S001")
   expect_true(is.na(result$data$analysis$sample_id[2]))
+
+  expect_identical(no_token$data$analysis$sample_id, c("PROJ_S001", NA))
 
 })
 
@@ -311,7 +323,7 @@ test_that("parse_ids() records provenance", {
 
 })
 
-test_that("parse_ids() provenance tracks unmatched count", {
+test_that("parse_ids() records and reports the unmatched count", {
 
   ## Arrange ---------------------------------------------------------------
 
@@ -319,10 +331,8 @@ test_that("parse_ids() provenance tracks unmatched count", {
 
   ## Act -------------------------------------------------------------------
 
-  expect_warning(
-    result <- parse_ids(hd, format = "{first}_{second}"),
-    "did not match"
-  )
+  ## The warning and the tree line both carry the count
+  expect_snapshot(result <- parse_ids(hd, format = "{first}_{second}"))
 
   ## Assert ----------------------------------------------------------------
 
@@ -663,6 +673,13 @@ test_that("format_to_patterns() names each token, keeps the separators, and is n
   ## Last token should be greedy (.+) --------------------------------------
 
   expect_equal(as.character(patterns[5]), "(.+)")
+
+  ## Text after the last token is kept, escaped ----------------------------
+
+  trailing <- horizons:::format_to_patterns("{a}_{b}.raw")
+
+  expect_identical(unname(trailing), c("(.+?)", "_", "(.+)", "\\.raw"))
+  expect_identical(names(trailing), c("a", "", "b", ""))
 
 })
 
