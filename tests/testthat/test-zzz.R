@@ -34,12 +34,46 @@ describe("startup_message()", {
 
 
 ## ===========================================================================
+## .onAttach(): the startup message, and the thread-control notice
+## ===========================================================================
+
+describe(".onAttach()", {
+
+  it("announces the version, and says so when thread control is on", {
+
+    withr::local_envvar(HORIZONS_THREAD_CONTROL = NA)
+
+    msgs <- testthat::capture_messages(horizons:::.onAttach(NULL, "horizons"))
+
+    expect_identical(msgs, paste0(startup_message(utils::packageVersion("horizons")), "\n"))
+
+    withr::local_envvar(HORIZONS_THREAD_CONTROL = "TRUE")
+
+    msgs <- testthat::capture_messages(horizons:::.onAttach(NULL, "horizons"))
+
+    expect_length(msgs, 2L)
+    expect_match(msgs[2], "thread control enabled via HORIZONS_THREAD_CONTROL", fixed = TRUE)
+
+  })
+
+})
+
+
+## ===========================================================================
 ## .onLoad(): opt-in thread control, and the engines it loads
 ## ===========================================================================
 
 describe(".onLoad()", {
 
   thread_vars <- c("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS")
+
+  it("registers the pls engine for parsnip's pls() model, in regression", {
+
+    ## Read what the load did: the registration is the plsr model's only one
+    engines <- parsnip::show_engines("pls")
+    expect_true(any(engines$engine == "pls" & engines$mode == "regression"))
+
+  })
 
   it("sets one thread for workers when HORIZONS_THREAD_CONTROL is TRUE, and nothing otherwise", {
 
