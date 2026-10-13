@@ -321,11 +321,19 @@ test_that("a batch on a coarse canonical grid counts as full coverage", {
 
 })
 
-test_that("the cache key carries the space algorithm's version", {
+test_that("the cache key carries the space algorithm's version and tells masks apart", {
 
   s  <- list(snv = TRUE, derivative = 1L, window = 21L, poly = 2L, mask = NULL,
              ncomp = 0.99, sdev_floor = 0.1)
   k1 <- space_cache_key("lib", s, 600:700)
+
+  ## Two masks of the same shape are two spaces, and a mask in whole numbers
+  ## is the same mask in doubles
+  key <- function(mask) space_cache_key("lib", utils::modifyList(s, list(mask = mask)), 600:700)
+
+  expect_false(identical(key(rbind(c(620, 640))), key(rbind(c(650, 680)))))
+  expect_false(identical(key(rbind(c(620, 640))), k1))
+  expect_identical(key(rbind(c(620L, 640L))), key(rbind(c(620, 640))))
 
   local_mocked_bindings(SELECT_SPACE_CACHE_VERSION = SELECT_SPACE_CACHE_VERSION + 1L)
   expect_false(identical(space_cache_key("lib", s, 600:700), k1))
