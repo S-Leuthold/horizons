@@ -280,18 +280,12 @@ describe("fit() - member failures", {
     expect_setequal(err$results$config_id, c("cfg_001", "cfg_002"))
     expect_true(all(err$results$status == "failed"))
 
-    ## Every column models$results carries, of the type it has there, though
-    ## no member filled the metric and CV columns
-    expect_identical(
-      vapply(err$results, typeof, character(1)),
-      c(config_id = "character", status = "character", degraded = "logical",
-        degraded_reason = "character", rmse = "double", rrmse = "double",
-        rsq = "double", ccc = "double", rpd = "double", mae = "double",
-        cv_rmse_mean = "double", cv_rmse_se = "double", cv_rpd_mean = "double",
-        cv_rpd_se = "double", best_params = "list", warm_start = "logical",
-        start_grid_size = "integer", error_message = "character",
-        runtime_secs = "double")
-    )
+    ## The metric and CV columns are present and double, though no member
+    ## filled them (the fit validator holds the full column table, #203)
+    metric_cols <- c("rmse", "rrmse", "rsq", "ccc", "rpd", "mae",
+                     "cv_rmse_mean", "cv_rmse_se", "cv_rpd_mean", "cv_rpd_se")
+    expect_true(all(metric_cols %in% names(err$results)))
+    expect_true(all(vapply(err$results[metric_cols], is.double, logical(1))))
 
   })
 

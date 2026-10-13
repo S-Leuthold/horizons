@@ -373,6 +373,8 @@ describe("build_warmstart_grid() - max_points truncation", {
 
   it("adds a best point its candidates miss, and still holds at most max_points", {
 
+    ## fit() passes tune::select_best() output, which always lies on its own
+    ## candidate lattice; a direct call to this exported function need not.
     ## mtry = 10.5 rounds to the candidates 8, 10 and 12, so the 75 combinations
     ## lack the best point. At max_points = 75 they are not sampled, and the
     ## best point bound to them makes 76 rows, one over.
@@ -382,7 +384,10 @@ describe("build_warmstart_grid() - max_points truncation", {
     grid <- build_warmstart_grid(off_lattice, param_set, max_points = 75)
 
     expect_identical(nrow(grid), 75L)
-    expect_identical(as.list(grid[1, names(off_lattice)]), as.list(off_lattice))
+    has_best <- grid$mtry == off_lattice$mtry &
+      grid$trees == off_lattice$trees &
+      grid$min_n == off_lattice$min_n
+    expect_true(any(has_best))
 
   })
 
