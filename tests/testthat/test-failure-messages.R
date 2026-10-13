@@ -169,6 +169,25 @@ describe("condition_summary()", {
 
   })
 
+  it("passes over a handler frame or an operator to name the wrapper outside it", {
+
+    ## The outermost wrapper's call says nothing useful: a handler frame,
+    ## whose call has no plain function name, or an operator
+    root <- simpleError("the real reason")
+    step <- rlang::error_cnd(message = "step failed", call = quote(step_foo(x)),
+                             parent = root)
+
+    for (call in list(quote(value[[3L]](cond)), quote(x[[i]]))) {
+
+      outer <- rlang::error_cnd(message = "rethrown", call = call, parent = step)
+
+      expect_identical(condition_summary(outer), "the real reason (in `step_foo()`)",
+                       info = deparse(call))
+
+    }
+
+  })
+
   it("keeps an rlang error without a parent whole", {
 
     e <- tryCatch(rlang::abort("no parent here"), error = function(e) e)

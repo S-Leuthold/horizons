@@ -294,18 +294,16 @@ describe("create_failed_result()", {
     expect_true("error_message" %in% names(result))
 
     ## Status failed, the error's message kept, every metric and the
-    ## runtime NA, and best_params a list holding NULL
+    ## runtime a double NA (so the row binds with evaluate()'s scored rows),
+    ## and best_params a list holding NULL
     expect_equal(result$status, "failed")
     expect_equal(result$error_message, "model diverged")
 
-    expect_true(is.na(result$rmse))
-    expect_true(is.na(result$rpd))
-    expect_true(is.na(result$rsq))
-    expect_true(is.na(result$ccc))
-    expect_true(is.na(result$rrmse))
-    expect_true(is.na(result$mae))
-
-    expect_true(is.na(result$runtime_secs))
+    for (col in c("rmse", "rrmse", "rsq", "ccc", "rpd", "mae",
+                  "cv_rmse", "cv_rrmse", "cv_rsq", "cv_ccc", "cv_rpd", "cv_mae",
+                  "runtime_secs")) {
+      expect_identical(result[[col]], NA_real_, info = col)
+    }
 
     expect_true("best_params" %in% names(result))
     expect_true(is.list(result$best_params))
@@ -321,11 +319,11 @@ describe("create_failed_result()", {
     )
 
     expect_equal(result$status, "failed")
-    expect_true(is.na(result$error_message))
+    expect_identical(result$error_message, NA_character_)
 
   })
 
-  it("handles string error messages", {
+  it("records a string error as it is, and any other value as text", {
 
     result <- create_failed_result(
       config_id = "CFG_001",
@@ -333,6 +331,8 @@ describe("create_failed_result()", {
     )
 
     expect_equal(result$error_message, "something went wrong")
+
+    expect_identical(create_failed_result("CFG_001", 42)$error_message, "42")
 
   })
 
