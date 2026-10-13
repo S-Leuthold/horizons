@@ -47,7 +47,7 @@ describe(".onLoad()", {
     withr::local_envvar(HORIZONS_THREAD_CONTROL = "TRUE", OMP_NUM_THREADS = NA,
                         OPENBLAS_NUM_THREADS = NA, MKL_NUM_THREADS = NA)
 
-    .onLoad(NULL, "horizons")
+    horizons:::.onLoad(NULL, "horizons")
 
     expect_identical(unname(Sys.getenv(thread_vars)), rep("1", 3))
     expect_equal(getOption("ranger.num.threads"), 1)
@@ -56,7 +56,7 @@ describe(".onLoad()", {
                         OPENBLAS_NUM_THREADS = NA, MKL_NUM_THREADS = NA)
     options(ranger.num.threads = NULL)
 
-    .onLoad(NULL, "horizons")
+    horizons:::.onLoad(NULL, "horizons")
 
     expect_identical(unname(Sys.getenv(thread_vars, unset = NA)), rep(NA_character_, 3))
     expect_null(getOption("ranger.num.threads"))
