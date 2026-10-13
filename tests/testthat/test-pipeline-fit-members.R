@@ -74,6 +74,7 @@ describe("fit() - an evaluation with only pruned configs (#38)", {
     expect_error(
       fit(unranked, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE,
           verbose = FALSE),
+      "None succeeded, and no pruned configuration has a cv_rpd value.", fixed = TRUE,
       class = "horizons_input_error"
     )
 
@@ -204,6 +205,26 @@ describe("fit() - members below the prune threshold at bayesian_iter = 0 (#38)",
 
   })
 
+  ## Rows written without the gate's reading: a pruned row is below the
+  ## threshold all the same, since the gate pruned it, and a success is not
+  it("counts a pruned member without a reading as below the threshold, and a success without one as not", {
+
+    unread <- tibble::tibble(config_id = c("cfg_001", "cfg_002"), cv_rpd = c(0.93, 0.88))
+
+    pruned <- unread
+    pruned$status <- "pruned"
+
+    expect_warning(warn_members_below_threshold(pruned, fallback = TRUE),
+                   "prune threshold (not recorded on these rows)", fixed = TRUE,
+                   class = "horizons_pruned_fallback_warning")
+
+    succeeded <- unread
+    succeeded$status <- "success"
+
+    expect_no_warning(warn_members_below_threshold(succeeded, fallback = FALSE))
+
+  })
+
 })
 
 
@@ -258,6 +279,19 @@ describe("fit() - member failures", {
     expect_s3_class(err$results, "tbl_df")
     expect_setequal(err$results$config_id, c("cfg_001", "cfg_002"))
     expect_true(all(err$results$status == "failed"))
+
+    ## Every column models$results carries, of the type it has there, though
+    ## no member filled the metric and CV columns
+    expect_identical(
+      vapply(err$results, typeof, character(1)),
+      c(config_id = "character", status = "character", degraded = "logical",
+        degraded_reason = "character", rmse = "double", rrmse = "double",
+        rsq = "double", ccc = "double", rpd = "double", mae = "double",
+        cv_rmse_mean = "double", cv_rmse_se = "double", cv_rpd_mean = "double",
+        cv_rpd_se = "double", best_params = "list", warm_start = "logical",
+        start_grid_size = "integer", error_message = "character",
+        runtime_secs = "double")
+    )
 
   })
 

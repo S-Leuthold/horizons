@@ -1098,6 +1098,67 @@ describe("fit() - the draw lines and the notes (#91)", {
 
 
 ## =========================================================================
+## The progress tree
+## =========================================================================
+
+describe("fit() - the progress tree", {
+
+  it("prints each member's result, the counts, the selected member and the runtime", {
+
+    ## Read the fixture before the runner is mocked (helper-memo.R)
+    obj <- mfo()
+
+    ## The runner's results for the two members: one that succeeded, degraded
+    ## and warned, and one that failed. The fitted workflow is a stand-in;
+    ## nothing past the validator, which does not check its class, reads it.
+    members <- list(
+      cfg_001 = list(
+        config_id = "cfg_001", status = "success", degraded = TRUE,
+        degraded_reason = "test RPD 1.100 (95% bootstrap interval [0.900, 1.300], 12 test rows) is below the CV mean RPD 2.000",
+        fitted_workflow = "fitted workflow", best_params = tibble::tibble(mtry = 2L, min_n = 5L),
+        warm_start = TRUE, start_grid_size = 2L, cv_predictions = NULL,
+        test_metrics = tibble::tibble(rmse = 0.512, rrmse = 20.4, rsq = 0.61,
+                                      ccc = 0.72, rpd = 1.1, mae = 0.41),
+        cv_metrics = tibble::tibble(.metric = c("rmse", "rpd"), mean = c(0.4567, 2.0),
+                                    std_err = c(0.0321, 0.1234)),
+        uq = NULL, ad = NULL, warnings = "The final fit warned",
+        error_message = NA_character_, runtime_secs = 12.34
+      ),
+      cfg_002 = list(
+        config_id = "cfg_002", status = "failed", degraded = NA, degraded_reason = NA_character_,
+        fitted_workflow = NULL, best_params = NULL, warm_start = TRUE, start_grid_size = 2L,
+        cv_predictions = NULL, test_metrics = NULL, cv_metrics = NULL, uq = NULL, ad = NULL,
+        warnings = NULL, error_message = "Warm-start tuning failed: mocked", runtime_secs = 3.4
+      )
+    )
+
+    local_mocked_bindings(fit_single_config = function(config_row, ...) members[[config_row$config_id]])
+
+    ## The clock reads a minute and a half after the start, so the runtime
+    ## line is in minutes
+    start <- as.POSIXct("2026-01-01 12:00:00", tz = "UTC")
+    ticks <- 0L
+    clock <- function() {
+      ticks <<- ticks + 1L
+      if (ticks == 1L) start else start + 90
+    }
+
+    run <- function() {
+      testthat::with_mocked_bindings(
+        suppressWarnings(fit(obj, n_best = 2L, compute_uq = FALSE, compute_ad = FALSE,
+                             seed = 42L)),
+        Sys.time = clock, .package = "base"
+      )
+    }
+
+    expect_snapshot(invisible(run()))
+
+  })
+
+})
+
+
+## =========================================================================
 ## check_degradation(): a bootstrap interval for the test RPD (#119, #77)
 ## =========================================================================
 
@@ -1143,6 +1204,29 @@ describe("check_degradation()", {
     set.seed(9); a <- stats::runif(1)
     set.seed(9); invisible(check_degradation(cv_4, truth, poor)); b <- stats::runif(1)
     expect_identical(a, b)
+
+    ## A caller with no stream yet is left with none
+    withr::with_preserve_seed({
+      rm(".Random.seed", envir = globalenv())
+      invisible(check_degradation(cv_4, truth, poor))
+      expect_false(exists(".Random.seed", envir = globalenv(), inherits = FALSE))
+    })
+
+  })
+
+  it("scores a bootstrap resample of tied test outcomes as an RPD of 0", {
+
+    ## Eight of ten outcomes tie, so about one resample in ten draws only the
+    ## tied rows: its SD is 0 while its RMSE is not, and its RPD is 0, which
+    ## then sets the interval's lower bound. Every error is 1 and no
+    ## resample's SD reaches 2.2, so the whole interval lies below 4 whatever
+    ## the draws.
+    tied <- c(rep(5, 8), 6, 9)
+
+    out <- check_degradation(cv_4, tied, tied + c(1, -1, 1, -1, 1, -1, 1, -1, 1, -1))
+
+    expect_true(out$degraded)
+    expect_match(out$reason, "95% bootstrap interval [0.000, ", fixed = TRUE)
 
   })
 

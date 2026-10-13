@@ -837,6 +837,23 @@ describe("fit_single_config() - measured coverage when it cannot be measured (#1
 
   })
 
+  it("leaves the figures NA when no test row has both bounds", {
+
+    ## Intervals come back, but every bound is NA, as they are when every test
+    ## prediction is: no row can be scored
+    local_mocked_bindings(predict_intervals = function(uq, point_pred, ...) {
+      tibble::tibble(.pred_lower = NA_real_, .pred_upper = NA_real_,
+                     .interval_width = NA_real_)[rep(1L, length(point_pred)), ]
+    })
+
+    coverage <- test_interval_coverage(uq = list(), test_preds = rep(NA_real_, 4),
+                                       test_data = NULL, test_truth = c(1, 2, 3, 4),
+                                       config_id = "cfg_001", outcome_range = c(0, Inf))
+
+    expect_identical(coverage, no_coverage)
+
+  })
+
 })
 
 

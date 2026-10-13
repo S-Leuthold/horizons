@@ -146,6 +146,10 @@ test_that("compute_ad_thresholds returns 4 increasing thresholds on held-out dat
   expect_length(thr, 4)
   expect_true(all(diff(thr) > 0))       # Q1 < Q2 < Q3 < OOD
 
+  ## The OOD cutoff is the conformal ceiling(level * (n + 1))-th smallest
+  ## calibration distance: the 199th of 200 here
+  expect_identical(thr[4], sort(calculate_ad_distance(calib, md))[199])
+
 })
 
 ## ---------------------------------------------------------------------------

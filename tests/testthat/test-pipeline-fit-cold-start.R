@@ -56,10 +56,14 @@ describe("fit() - cold start from one configuration (#45)", {
     expect_false(rec$screened)
     expect_identical(rec$best_config, "cfg_001")
     expect_identical(rec$rank_metric, "rpd")
-    expect_identical(rec$results$config_id, "cfg_001")
-    expect_identical(rec$results$status, "not_evaluated")
-    expect_true(all(is.na(unlist(rec$results[paste0("cv_", c("rmse", "rrmse", "rsq", "ccc", "rpd", "mae"))]))))
-    expect_null(rec$results$best_params[[1]])
+    ## The row of a config that failed in evaluate(), less the scoring schema
+    ## (nothing was scored): every metric, CV value and runtime a typed NA,
+    ## no parameters and no error
+    unmeasured <- create_failed_result("cfg_001")
+    unmeasured$status         <- "not_evaluated"
+    unmeasured$scoring_schema <- NULL
+
+    expect_identical(rec$results, unmeasured)
     expect_equal(rec$n_train + rec$n_test, 60)
 
   })

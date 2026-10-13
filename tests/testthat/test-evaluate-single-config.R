@@ -96,7 +96,9 @@ describe("evaluate_single_config() - success path", {
     expect_true(all(EXPECTED_RESULT_COLS %in% names(result)))
     expect_true(is.list(result$best_params))
     expect_false(is.null(result$best_params[[1]]))
-    expect_true(is.na(result$error_message))
+    ## A character NA, as a failed row's message is a string, so rows bind
+    ## into one character column whatever their statuses
+    expect_identical(result$error_message, NA_character_)
     expect_true(result$runtime_secs > 0)
     expect_equal(result$config_id, "test_cfg_001")
 

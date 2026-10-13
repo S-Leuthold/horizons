@@ -33,6 +33,38 @@
 ## an argument — so the guard has to be structural too. These assertions fail if
 ## the body is ever inlined back into evaluate().
 
+## A worker's payload for one rf config on 40 rows, as evaluate() builds it,
+## with no checkpoint directory
+worker_payload <- function() {
+
+  obj   <- make_eval_object(n = 40, n_wn = 20, n_configs = 1)
+  set.seed(1)
+  split <- rsample::initial_split(obj$data$analysis, prop = 0.8)
+  folds <- rsample::vfold_cv(rsample::training(split), v = 3)
+
+  list(
+    data            = split$data,
+    resample_idx    = horizons:::resample_indices(split, folds),
+    configs         = obj$config$configs,
+    role_map        = obj$data$role_map,
+    grid_size       = 2L,
+    bayesian_iter   = 0L,
+    prune           = FALSE,
+    prune_threshold = 1,
+    seed            = 42L,
+    sg_window       = 13L,
+    pca_threshold   = 0.9,
+    outcome_range   = c(-Inf, Inf),
+    data_fp         = horizons:::eval_data_fingerprint(rsample::training(split),
+                                                       obj$data$role_map),
+    settings        = horizons:::eval_settings(sg_window = 13L, pca_threshold = 0.9,
+                                               outcome_range = c(-Inf, Inf)),
+    checkpoint_dir  = NULL,
+    pkg_version     = as.character(utils::packageVersion("horizons"))
+  )
+
+}
+
 describe("evaluate() parallel worker footprint", {
 
   it("keeps the worker body out of evaluate()'s frame", {
@@ -103,31 +135,7 @@ describe("evaluate() parallel worker footprint", {
     expect_true(all(c("sg_window", "pca_threshold", "outcome_range") %in%
                       horizons:::SHARED_ARG_NAMES))
 
-    obj   <- make_eval_object(n = 40, n_wn = 20, n_configs = 1)
-    set.seed(1)
-    split <- rsample::initial_split(obj$data$analysis, prop = 0.8)
-    folds <- rsample::vfold_cv(rsample::training(split), v = 3)
-
-    shared <- list(
-      data            = split$data,
-      resample_idx    = horizons:::resample_indices(split, folds),
-      configs         = obj$config$configs,
-      role_map        = obj$data$role_map,
-      grid_size       = 2L,
-      bayesian_iter   = 0L,
-      prune           = FALSE,
-      prune_threshold = 1,
-      seed            = 42L,
-      sg_window       = 13L,
-      pca_threshold   = 0.9,
-      outcome_range   = c(-Inf, Inf),
-      data_fp         = horizons:::eval_data_fingerprint(rsample::training(split),
-                                                         obj$data$role_map),
-      settings        = horizons:::eval_settings(sg_window = 13L, pca_threshold = 0.9,
-                                                 outcome_range = c(-Inf, Inf)),
-      checkpoint_dir  = NULL,
-      pkg_version     = as.character(utils::packageVersion("horizons"))
-    )
+    shared <- worker_payload()
 
     seen <- NULL
 
@@ -144,6 +152,31 @@ describe("evaluate() parallel worker footprint", {
     ## The outcome range rides the same payload (#76)
     expect_identical(seen, list(sg_window = 13L, pca_threshold = 0.9,
                                 outcome_range = c(-Inf, Inf)))
+
+  })
+
+  it("writes the checkpoint of the row it returns, stamped, and refuses a worker on another version", {
+
+    shared <- worker_payload()
+    shared$checkpoint_dir <- withr::local_tempdir()
+
+    testthat::local_mocked_bindings(
+      evaluate_single_config = function(...) tibble::tibble(config_id = "cfg_001", status = "failed"),
+      .package = "horizons"
+    )
+
+    row <- horizons:::evaluate_config_worker(1L, shared)
+
+    expect_identical(row$data_hash, shared$data_fp$data_hash)
+    expect_identical(row$settings[[1]], shared$settings)
+    expect_identical(readRDS(file.path(shared$checkpoint_dir, "cfg_001.rds")), row)
+
+    ## The abort carries no package class, so its text is the check
+    shared$pkg_version <- "0.0.0"
+
+    expect_error(horizons:::evaluate_config_worker(1L, shared),
+                 "but the parent is 0.0.0. Reinstall the package so workers run matching code.",
+                 fixed = TRUE)
 
   })
 
@@ -609,6 +642,75 @@ describe("monitor_evaluate()", {
     expect_true(any(grepl(paste0(manifest$data_n_rows, " training rows of SOC"),
                           output, fixed = TRUE)))
     expect_true(any(grepl(substr(manifest$data_hash, 1, 12), output, fixed = TRUE)))
+
+  })
+
+  it("reports the share done, the rate, the ETA, the best value and the recent completions, and no rate or ETA it cannot know", {
+
+    skip_on_cran()
+    run    <- seq_checkpoints()
+    tmpdir <- run$dir
+    res    <- run$value$result$evaluation$results
+    ckpt   <- file.path(tmpdir, "checkpoints")
+    path   <- file.path(tmpdir, "eval_manifest.rds")
+
+    snapshot_at <- function(start_time) {
+      manifest <- readRDS(path)
+      manifest$start_time <- start_time
+      saveRDS(manifest, path)
+      invisible(utils::capture.output(stats <- monitor_evaluate(tmpdir)))
+      stats
+    }
+
+    cv_text <- function(id) paste0(id, " RPD = ", round(res$cv_rpd[res$config_id == id], 3))
+
+    ## A start in the future, as a monitor whose clock runs behind the
+    ## machine running evaluate() reads it: no rate and no ETA
+    ahead <- snapshot_at(Sys.time() + 3600)
+
+    expect_identical(ahead$n_complete, 4L)
+    expect_identical(ahead$rate, NA_real_)
+    expect_identical(ahead$eta, NA_character_)
+
+    ## Started an hour ago, with three of the four configs done and one of
+    ## them failed. Under a second passes between writing the start and
+    ## reading it; the rate stays within 1% of 3 for half a minute, and the
+    ## ETAs below round as expected for a minute.
+    unlink(file.path(ckpt, "cfg_004.rds"))
+    failed <- readRDS(file.path(ckpt, "cfg_002.rds"))
+    failed$status <- "failed"
+    failed[paste0("cv_", c("rmse", "rrmse", "rsq", "ccc", "rpd", "mae"))] <- NA_real_
+    saveRDS(failed, file.path(ckpt, "cfg_002.rds"))
+
+    three <- snapshot_at(Sys.time() - 3600)
+    best  <- rank_configs_by_cv(res[res$config_id %in% c("cfg_001", "cfg_003"), ], "rpd")
+
+    expect_identical(three$pct, 75)
+    expect_equal(three$rate, 3, tolerance = 0.01)
+    expect_identical(three$eta, "20 min")
+    expect_identical(three$best_config, best$config_id[1])
+    expect_identical(three$best_metric, best$cv_rpd[1])
+    expect_setequal(three$recent, c(cv_text("cfg_001"), "cfg_002 failed", cv_text("cfg_003")))
+
+    ## One done, three to go, so the ETA is in hours; the failed config has
+    ## no value to rank
+    unlink(file.path(ckpt, c("cfg_001.rds", "cfg_003.rds")))
+
+    one <- snapshot_at(Sys.time() - 3600)
+
+    expect_identical(one$eta, "3 hr")
+    expect_identical(one$best_config, NA_character_)
+    expect_identical(one$best_metric, NA_real_)
+    expect_identical(one$recent, "cfg_002 failed")
+
+    ## Nothing done: a rate of zero gives no ETA
+    unlink(file.path(ckpt, "cfg_002.rds"))
+
+    none <- snapshot_at(Sys.time() - 3600)
+
+    expect_identical(none$rate, 0)
+    expect_identical(none$eta, NA_character_)
+    expect_identical(none$recent, character(0))
 
   })
 
