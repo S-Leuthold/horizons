@@ -2827,6 +2827,7 @@ test_that("print() and summary() name no member when best_config has no results 
 
     for (section in list(print_section, summary_section)) {
 
+      expect_true(any(grepl("Fitted", section, fixed = TRUE)), info = edit)
       expect_false(any(grepl("CV-selected|Best test", section)), info = edit)
       expect_false(any(grepl(case$rival, section, fixed = TRUE)), info = edit)
 
