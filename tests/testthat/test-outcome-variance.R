@@ -216,6 +216,32 @@ describe("an outcome with zero variance on the modelled rows", {
 
 
 ## ===========================================================================
+## No outcome yet: left to the verb's own refusal
+## ===========================================================================
+
+describe("an object with no outcome", {
+
+  it("passes the range and variance checks to fit()'s own refusal", {
+
+    ## Straight from spectra(), before configure(): there is no single
+    ## outcome for the two checks to read, so they leave it to fit()
+    spec <- tibble::tibble(sample_id = sprintf("S%02d", 1:10),
+                           `4000` = seq(0.1, 1, length.out = 10),
+                           `3998` = seq(0.2, 1.1, length.out = 10))
+    utils::capture.output(obj <- spectra(spec))
+
+    expect_false("outcome" %in% obj$data$role_map$role)
+
+    expect_error(fit(obj, verbose = FALSE),
+                 "There is no configuration to fit.", fixed = TRUE,
+                 class = "horizons_input_error")
+
+  })
+
+})
+
+
+## ===========================================================================
 ## Training rows left constant by the split (the bound-at-the-floor case)
 ## ===========================================================================
 

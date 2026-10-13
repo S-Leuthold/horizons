@@ -481,7 +481,7 @@ describe("configure() config grid", {
 
   })
 
-  test_that("config IDs are unique", {
+  test_that("config IDs are unique and name their configuration", {
 
     hd     <- make_single_response_hd()
     result <- quiet_configure(hd,
@@ -490,6 +490,13 @@ describe("configure() config grid", {
 
     ids <- result$config$configs$config_id
     expect_equal(length(ids), length(unique(ids)))
+
+    ## model_preprocessing_transformation_featureselection_<6-character hash>
+    cfg <- result$config$configs
+    expect_true(all(grepl("_[0-9a-f]{6}$", ids)))
+    expect_identical(sub("_[0-9a-f]{6}$", "", ids),
+                     paste(cfg$model, cfg$preprocessing, cfg$transformation,
+                           cfg$feature_selection, sep = "_"))
 
   })
 
