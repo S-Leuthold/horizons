@@ -1,4 +1,4 @@
-# horizons (development version)
+# horizons 0.11.0
 
 ## Changes
 
@@ -25,6 +25,15 @@
 * `predict()` no longer drops arguments it does not take without saying so. A `level` warns, with class `horizons_input_warning`, that it is ignored: intervals are at the level they were calibrated at, 0.90 by default. Any other unknown argument, such as a misspelled one, is an error (#141).
 * `fit()` refuses an evaluated object whose response-trim request changed after `evaluate()`, instead of silently fitting with the trim `evaluate()` applied. `validate()` can record a new request on an evaluated object, but `fit()` reuses the rows `evaluate()` trimmed, so the new request never took effect. The error says what differs; re-run `evaluate()` to apply the current request (#137).
 * `predict()`, `ensemble()` and `select_training()` now check that values attached to samples by position line up with their rows, and stop with a `horizons_internal_error` instead of mislabelling samples if a step upstream dropped or reordered rows. In `fit()` the same check keeps misaligned uncertainty scores from being stored; the member is then fitted without intervals (#140).
+
+## Tests
+
+Most of the work in this release went into the test suite. The aim was for every test to fail when the behaviour it checks breaks, and for the suite to show that it does.
+
+* An audit of every test, made as 0.10.0 was released, found 43 tests that could not fail, six validator checks whose tests still passed with the check removed, and a leakage test whose outcome was random noise, so it could not see leakage. These have been fixed or replaced.
+* All tests were then subjected to mutation testing, which makes small changes to the package's code and checks whether the tests catch them, and were updated based on the results. Across a sample of changes drawn from each of the package's files, the initial tests caught 64% of the mutations; the revised tests catch 81%.
+* The test suite is also significantly faster. R CMD check on CI took 15 to 17 minutes at 0.10.0 and takes about 7 now. Fixtures that are slow to build are built once per R process, and tests that take 3 seconds or more run in a slow tier, which CI runs on pushes, nightly and before a release.
+* Evaluating the tests also revealed a handful of latent bugs. These are documented (#226 to #229) and slated for fixes in 0.12.0. None are breaking, but they can affect averaging replicate scans when a metadata column varies within some samples, the spectral outlier check in `validate()` on small datasets, and the size of the warm-start grid `fit()` searches.
 
 # horizons 0.10.0
 
