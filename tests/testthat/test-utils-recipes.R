@@ -215,9 +215,22 @@ describe("build_recipe()", {
 
   })
 
-  ## Predictor columns out of wavenumber order are refused by the door
-  ## validator at evaluate() and fit() (test-class-core.R), before a recipe
-  ## is built.
+  it("refuses an axis out of order whose names the validator does not parse (#121)", {
+
+    ## The door validator checks the order of names like wn_4000; one named
+    ## wn_X4000 reaches the recipe unchecked until #121
+    withr::local_seed(1)
+    td   <- make_test_data(n_wn = 10)
+    pred <- td$role_map$role == "predictor"
+    olds <- td$role_map$variable[pred]
+    news <- sub("^wn_", "wn_X", olds)
+    names(td$data)[match(olds, names(td$data))] <- news
+    td$role_map$variable[pred] <- sample(news)
+
+    expect_error(build_recipe(make_config_row(), td$data, td$role_map),
+                 "not monotonically ordered", class = "horizons_error_input")
+
+  })
 
   ## -----------------------------------------------------------------------
   ## Case insensitivity

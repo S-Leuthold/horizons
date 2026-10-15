@@ -68,9 +68,32 @@ build_recipe <- function(config_row,
     outcome_col
   )
 
-  ### Savitzky-Golay windows need the bands in order. The door validator at
-  ### evaluate() and fit() refuses predictor columns that are not in strictly
-  ### decreasing wavenumber order, on the same role map.
+  ## -----------------------------------------------------------------------
+  ## Column ordering invariant
+  ## -----------------------------------------------------------------------
+  ## Savitzky-Golay windows need the bands in order. The door validator at
+  ## evaluate() and fit() checks the order of names that parse as wavenumbers;
+  ## this reads the digits of any name, so an axis named like `wn_X4000`
+  ## (#121) is checked too until the validator requires every name to parse.
+
+  predictor_nums <- suppressWarnings(
+    as.numeric(gsub("[^0-9.\\-]", "", predictor_cols))
+  )
+
+  if (!any(is.na(predictor_nums)) && length(predictor_nums) > 1) {
+
+    diffs <- diff(predictor_nums)
+
+    if (!all(diffs < 0) && !all(diffs > 0)) {
+
+      abort_horizons(
+        "Predictor columns are not monotonically ordered. Spectral preprocessing requires ordered wavelengths.",
+        kind = "input"
+      )
+
+    }
+
+  }
 
   ## -----------------------------------------------------------------------
   ## Step 1: Initialize recipe with roles
