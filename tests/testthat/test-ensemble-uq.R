@@ -651,41 +651,61 @@ describe("ensemble UQ - degradation and gates", {
 
   })
 
-  it("serves the CV+ bounds of the calibration residuals, wired through predict()", {
+  ## The bounds are recomputed by hand from the bundle and the member
+  ## predictions predict() passed to the assembler: each fold model's
+  ## predictions, then CV+'s order statistics. The penalized bundle's fold
+  ## models differ, so a fault in the residuals, the fold ids or the fold
+  ## models' order shows as a mismatch; the weighted bundle's, built without
+  ## tuning, are all the same average.
+  for (method in c("weighted", "penalized")) {
 
-    ## The bounds are recomputed here from the bundle and the member
-    ## predictions predict() passed to the assembler, so a wiring fault inside
-    ## it (the wrong residuals, folds or level) shows as a mismatch.
-    ens      <- ens_built("weighted")
-    test_set <- ens_test_set()
-    uq       <- ens$ensemble$uq
-    expect_false(is.null(uq))
+    it(paste("serves the CV+ bounds of the calibration residuals, wired through predict(), for", method), {
 
-    seen     <- NULL
-    assemble <- predict_ensemble_intervals
-    local_mocked_bindings(predict_ensemble_intervals = function(uq, member_pred, outcome_range) {
-      seen <<- list(member_pred = member_pred, outcome_range = outcome_range)
-      assemble(uq, member_pred, outcome_range)
+      ens      <- ens_built(method)
+      test_set <- ens_test_set()
+      uq       <- ens$ensemble$uq
+      range    <- outcome_range_setting(ens)
+      expect_false(is.null(uq))
+
+      seen     <- NULL
+      assemble <- predict_ensemble_intervals
+      local_mocked_bindings(predict_ensemble_intervals = function(uq, member_pred, outcome_range) {
+        seen <<- list(member_pred = member_pred, outcome_range = outcome_range)
+        assemble(uq, member_pred, outcome_range)
+      })
+
+      p <- suppressWarnings(suppressMessages(predict(ens, test_set, interval = TRUE)))
+      expect_identical(seen$outcome_range, range)
+
+      wide <- tidyr::pivot_wider(
+        dplyr::select(seen$member_pred, "sample_id", "config_id", ".pred"),
+        names_from = "config_id", values_from = ".pred", names_prefix = "member_"
+      )
+      member_mat <- as.matrix(wide[, paste0("member_", uq$members)])
+
+      P   <- vapply(uq$fold_models, function(fm) {
+        predict_fold_model(fm, uq$ensemble_method, member_mat, range)
+      }, numeric(nrow(wide)))
+      idx <- cv_plus_indices(uq$n_calib, uq$level_default)
+
+      lo <- hi <- numeric(nrow(wide))
+      for (i in seq_len(nrow(wide))) {
+        sorted <- sort(P[i, uq$calib$fold] + uq$calib$residual)
+        lo[i]  <- sorted[idx$l]
+        hi[i]  <- sorted[idx$u]
+      }
+
+      got <- p[match(wide$sample_id, p$sample_id), ]
+      expect_equal(got$.pred_lower, clamp_to_outcome_range(lo, range))
+      expect_equal(got$.pred_upper, clamp_to_outcome_range(hi, range))
+
+      if (method == "penalized") {
+        expect_gt(max(apply(P, 1, function(r) diff(range(r)))), 0)
+      }
+
     })
 
-    p <- suppressMessages(predict(ens, test_set, interval = TRUE))
-
-    wide <- tidyr::pivot_wider(
-      dplyr::select(seen$member_pred, "sample_id", "config_id", ".pred"),
-      names_from = "config_id", values_from = ".pred", names_prefix = "member_"
-    )
-    b  <- cv_plus_bounds(predict_ensemble_uq_matrix(uq, wide, seen$outcome_range),
-                         fold_id = uq$calib$fold, residuals = uq$calib$residual,
-                         level = uq$level_default)
-    lo <- clamp_to_outcome_range(pmin(b$lower, b$upper), seen$outcome_range)
-    hi <- clamp_to_outcome_range(pmax(b$lower, b$upper), seen$outcome_range)
-
-    got <- p[match(wide$sample_id, p$sample_id), ]
-    expect_equal(got$.pred_lower, lo)
-    expect_equal(got$.pred_upper, hi)
-    expect_true(all(hi > lo))
-
-  })
+  }
 
   it("refuses at predict()'s door a UQ bundle it cannot use (#65, #234)", {
 
