@@ -7,7 +7,10 @@
 ^R/pipeline-evaluate\.R$
 ^R/evaluate-single-config\.R$
 ^R/monitor-evaluate\.R$
-^R/utils-(parallel|resamples|recipes)\.R$
+^R/utils-(parallel|resamples|recipes|errors|log|backtransform)\.R$
+^R/class-core\.R$
+^R/pipeline-predict\.R$
+^R/constants\.R$
 ^R/pipeline-select-training\.R$
 ^R/select-[a-z]+\.R$
 ^R/(ad|ensemble-[a-z]+|pipeline-ensemble)\.R$
