@@ -1015,7 +1015,7 @@ test_that("average() refuses to promote `by` over an existing sample_id column",
   ## tested past the validator.
   expect_error(average(hd, by = "project", quality_check = FALSE, verbose = FALSE),
                regexp = "must be on sample_id",
-               class  = "horizons_validation_error")
+               class  = "horizons_error_validation")
 
   local_mocked_bindings(validate_horizons_data = function(x, ...) x)
 
@@ -1139,13 +1139,13 @@ test_that("average() catches a corrupt input the verb itself never checks (#24)"
 
   ## Act & Assert --------------------------------------------------------------
   ## average()'s own input-validation abort (Step 1) also carries class
-  ## horizons_validation_error, so the message is checked too — otherwise
+  ## horizons_error_validation, so the message is checked too — otherwise
   ## this could pass without ever exercising the new end-of-verb call.
 
   expect_error(
     average(hd, quality_check = FALSE, verbose = FALSE),
     regexp = "strictly decreasing",
-    class  = "horizons_validation_error"
+    class  = "horizons_error_validation"
   )
 
 })
@@ -1164,7 +1164,7 @@ test_that("average() validates the averaged object on return (#24)", {
   expect_error(
     average(hd, quality_check = FALSE, verbose = FALSE),
     "NA values in predictor columns", fixed = TRUE,
-    class = "horizons_validation_error"
+    class = "horizons_error_validation"
   )
 
 })
@@ -1182,7 +1182,7 @@ test_that("average() refuses a column with no role_map entry instead of silently
   expect_error(
     average(hd, quality_check = FALSE, verbose = FALSE),
     regexp = "[Mm]issing from.*role_map",
-    class  = "horizons_validation_error"
+    class  = "horizons_error_validation"
   )
 
 })

@@ -1120,7 +1120,7 @@ describe("configure() and the object contract", {
     expect_error(
       capture.output(configure(hd, models = "rf")),
       regexp = "strictly decreasing",
-      class  = "horizons_validation_error"
+      class  = "horizons_error_validation"
     )
 
     ## Arrange — replicate scans that never went through average(). Duplicate
@@ -1136,7 +1136,7 @@ describe("configure() and the object contract", {
     expect_error(
       capture.output(configure(hd, models = "rf")),
       regexp = "Duplicate.*sample_id",
-      class  = "horizons_validation_error"
+      class  = "horizons_error_validation"
     )
 
   })

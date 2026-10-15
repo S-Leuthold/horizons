@@ -36,7 +36,7 @@
 #' After the outcome-range check and before it fits anything, `ensemble()`
 #' checks that `x` still holds what a fitted object promises (its data,
 #' evaluation and fitted models), and aborts with class
-#' `horizons_validation_error` when it does not.
+#' `horizons_error_validation` when it does not.
 #'
 #' @param x A `horizons_fit` object (output of [fit()]).
 #' @param method Character. Meta-learner to use: `"penalized"` (default),

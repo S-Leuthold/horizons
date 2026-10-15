@@ -454,7 +454,7 @@ test_that("standardize() refuses a column with no role_map entry instead of sile
   expect_error(
     standardize(hd, resample = 2, trim = c(600, 4000)),
     regexp = "[Mm]issing from.*role_map",
-    class  = "horizons_validation_error"
+    class  = "horizons_error_validation"
   )
 
 })

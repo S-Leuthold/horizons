@@ -272,7 +272,7 @@ describe("evaluate() - success path", {
     expect_error(
       suppressWarnings(evaluate(make_eval_object(n = 60, n_configs = 2), seed = 42L,
                                 verbose = FALSE)),
-      regexp = "the six metric columns", fixed = TRUE, class = "horizons_validation_error"
+      regexp = "the six metric columns", fixed = TRUE, class = "horizons_error_validation"
     )
 
   })
@@ -478,7 +478,7 @@ describe("evaluate() - NA outcome rows", {
     obj$data$analysis$SOC <- NULL
 
     err <- expect_error(evaluate(obj, verbose = FALSE),
-                        class = "horizons_validation_error")
+                        class = "horizons_error_validation")
 
     expect_match(conditionMessage(err), "SOC", fixed = TRUE)
     expect_match(conditionMessage(err), "missing from", fixed = TRUE)

@@ -721,7 +721,7 @@ describe("a non-negative outcome under the default range", {
     neg <- fitted
     neg$models$response_bound <- -5
     expect_error(suppressMessages(validate_horizons_fit(neg)),
-                 class = "horizons_validation_error")
+                 class = "horizons_error_validation")
 
     ## ...which a signed range accepts
     neg$config$outcome_range <- c(-Inf, Inf)
@@ -773,7 +773,7 @@ describe("a finite upper bound", {
     over <- cold
     over$models$response_bound <- top + 1
     expect_error(suppressMessages(validate_horizons_fit(over)),
-                 class = "horizons_validation_error")
+                 class = "horizons_error_validation")
 
   })
 
@@ -967,7 +967,7 @@ describe("validate_horizons_fit() - a malformed outcome range", {
     no_bound$config$outcome_range <- c(5, 1)
 
     err <- expect_error(suppressMessages(utils::capture.output(validate_horizons_fit(no_bound))),
-                        class = "horizons_validation_error")
+                        class = "horizons_error_validation")
 
     expect_match(flat_message(err), "response_bound", fixed = TRUE)
     expect_match(flat_message(err), "single finite numeric", fixed = TRUE)
@@ -984,7 +984,7 @@ describe("validate_horizons_fit() - a malformed outcome range", {
     broken$models$n_models      <- 99L
 
     err <- expect_error(suppressMessages(utils::capture.output(validate_horizons_fit(broken))),
-                        class = "horizons_validation_error")
+                        class = "horizons_error_validation")
 
     expect_match(flat_message(err), "config$outcome_range", fixed = TRUE)
     expect_match(flat_message(err), "n_models", fixed = TRUE)

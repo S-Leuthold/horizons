@@ -816,7 +816,7 @@ test_that("add_response() catches a corrupt input the verb itself never checks (
 
   expect_error(
     add_response(hd, lab, variable = "SOC"),
-    class = "horizons_validation_error"
+    class = "horizons_error_validation"
   )
 
 })

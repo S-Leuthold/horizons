@@ -384,18 +384,13 @@ test_that("spectra() from a CSV builds the new_horizons_data() shape", {
 ## ---------------------------------------------------------------------------
 ## fixtures/opus/ holds three real scans (see fixtures/README.md): S01-1.0 and
 ## S01-1.1 are two scans of one sample, S02-1.0 a scan of another. Their ids
-## repeat once the extension is stripped, so reading the directory warns about
-## the duplicate, as it does for any Bruker run before average().
+## repeat once the extension is stripped, which spectra() passes silently, as
+## it does for any Bruker run before average() collapses the replicates.
 
 opus_dir <- function() testthat::test_path("fixtures", "opus")
 
 read_opus_dir <- function() {
-  expect_warning(
-    result <- spectra(opus_dir(), type = "opus"),
-    "Found duplicate sample_id values: S01-1",
-    fixed = TRUE,
-    class = "horizons_validation_warning"
-  )
+  expect_no_warning(result <- spectra(opus_dir(), type = "opus"))
   result
 }
 
@@ -466,12 +461,7 @@ test_that("spectra() detects a directory of OPUS files without being told the ty
 
   ## Act -------------------------------------------------------------------
 
-  expect_warning(
-    result <- spectra(opus_dir()),
-    "Found duplicate sample_id values: S01-1",
-    fixed = TRUE,
-    class = "horizons_validation_warning"
-  )
+  expect_no_warning(result <- spectra(opus_dir()))
 
   ## Assert ----------------------------------------------------------------
 
@@ -678,25 +668,22 @@ test_that("spectra() errors when wavelength columns contain non-numeric data", {
 ## spectra() — Structural validation at construction (#24)
 ## ---------------------------------------------------------------------------
 
-test_that("spectra() warns (not aborts) on duplicate sample ids", {
+test_that("spectra() passes duplicate sample ids silently, rather than aborting", {
 
   ## Arrange — two rows share the same id. This is normal at spectra(): two
   ## Bruker OPUS filenames like "S100-1.0" and "S100-1.1" both become
   ## "S100-1" once the extension is stripped, and average() is what collapses
   ## replicates. A hard error here would break the documented
   ## spectra() |> standardize() |> parse_ids() |> average() chain, so
-  ## validate_horizons_data(stage = "raw") warns rather than aborts (#24
-  ## rework; matches the validation spec's A004 check).
+  ## validate_horizons_data(stage = "raw") lets them pass (#24), and a later
+  ## verb's refusal is not warned about here.
   test_data <- tibble::tibble(
     Sample_ID = c("A", "A"),
     `4000`    = c(0.1, 0.2),
     `3000`    = c(0.2, 0.3)
   )
 
-  expect_warning(
-    result <- spectra(test_data),
-    class = "horizons_validation_warning"
-  )
+  expect_no_warning(result <- spectra(test_data))
 
   ## The duplicates are kept, not dropped — average() is what resolves them
   expect_identical(result$data$analysis$sample_id, c("A", "A"))

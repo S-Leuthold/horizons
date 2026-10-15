@@ -229,7 +229,7 @@ describe("ensemble() - preflight validation", {
                  compute_uq = FALSE, verbose = FALSE)
       )),
       "must be on sample_id",
-      class = "horizons_validation_error"
+      class = "horizons_error_validation"
     )
 
     ## The fit contract: a models slot missing a key
@@ -242,7 +242,7 @@ describe("ensemble() - preflight validation", {
                  compute_uq = FALSE, verbose = FALSE)
       )),
       "missing from models: ad",
-      class = "horizons_validation_error"
+      class = "horizons_error_validation"
     )
 
   })

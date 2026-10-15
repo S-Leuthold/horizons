@@ -1364,7 +1364,7 @@ describe("validate() and the structural validator", {
 
     expect_error(
       capture.output(validate(hd)),
-      class = "horizons_validation_error"
+      class = "horizons_error_validation"
     )
 
   })

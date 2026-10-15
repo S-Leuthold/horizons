@@ -261,11 +261,9 @@ new_horizons_data <- function(analysis       = NULL,
 #' Structural validator for horizons_data objects
 #'
 #' @description
-#' Checks structural integrity of a horizons_data object. Silent on success,
-#' collects all validation errors and reports them together with tree-style
-#' formatting on failure. Some checks are downgraded to warnings at
-#' `stage = "raw"` (see Details); those are reported the same way, tree-style,
-#' but do not abort.
+#' Checks structural integrity of a horizons_data object. Silent on success;
+#' on failure it collects every finding and aborts once with all of them in
+#' the condition (`horizons_error_validation`, see [abort_validation()]).
 #'
 #' @details
 #' This validator checks structural requirements, not data quality. It ensures
@@ -278,45 +276,30 @@ new_horizons_data <- function(analysis       = NULL,
 #' one row can legitimately share a `sample_id` (Bruker's own OPUS naming
 #' does this: `S100-1.0` and `S100-1.1` both become `S100-1` once the
 #' extension is stripped). Those three verbs call this validator with
-#' `stage = "raw"`, which downgrades the sample_id checks below to warnings.
-#' `average()` is where replicates actually collapse, so from `average()`
+#' `stage = "raw"`, where a duplicate or `NA` `sample_id` passes silently:
+#' data legal at one stage is not warned about for what a later verb will
+#' refuse. `average()` is where replicates collapse, so from `average()`
 #' onward (`average()`, `add_response()`, `configure()`, `validate()`,
 #' `select_training()`, and every other caller) the default `stage = "full"`
-#' applies: the same conditions abort.
-#'
-#' **`warn_ids`.** A duplicate or `NA` `sample_id` first appears at
-#' `spectra()` or `parse_ids()`, and that is where it is worth a warning.
-#' `standardize()` and `average()` also call this validator at
-#' `stage = "raw"` — to certify the base contract before rebuilding
-#' `data$analysis` from `role_map`, and (for `standardize()`) once more
-#' before returning — but by then the same duplicate has already been
-#' warned about, and `average()` exists specifically to collapse it, so
-#' warning about it again on every call would be noise about the verb's own
-#' designed input. Those call sites pass `warn_ids = FALSE`, which skips
-#' checks 3 and 4 below entirely at `stage = "raw"` (every other check,
-#' unregistered columns included, still runs). `warn_ids` has no effect at
-#' `stage = "full"`, where an id problem is always an abort.
+#' applies, and the same conditions abort.
 #'
 #' **Validation checks performed:**
 #'
 #' 1. **Pairing**: If `analysis` exists, `role_map` must also exist (and vice
-#'    versa). This is a gate check — failure here aborts immediately, with
-#'    class `horizons_validation_error`, since subsequent checks depend on
-#'    both being present.
+#'    versa). This is a gate check — failure here aborts immediately, since
+#'    subsequent checks depend on both being present.
 #'
 #' 2. **sample_id presence**: The column must exist in `analysis`. Always an
 #'    error, in both stages.
 #'
 #' 3. **sample_id missingness**: NA values in `sample_id`. An error at
-#'    `stage = "full"`; a warning at `stage = "raw"` (skipped entirely when
-#'    `warn_ids = FALSE`), where `parse_ids(too_few = "na")` documents
-#'    leaving unmatched filenames unresolved.
+#'    `stage = "full"`; not checked at `stage = "raw"`, where
+#'    `parse_ids(too_few = "na")` documents leaving unmatched filenames
+#'    unresolved.
 #'
 #' 4. **sample_id uniqueness**: Duplicate `sample_id` values (NAs excluded;
 #'    see check 3). An error at `stage = "full"`, naming the duplicates and
-#'    pointing at [average()]; a warning at `stage = "raw"` (skipped
-#'    entirely when `warn_ids = FALSE`), matching the A004 check in the
-#'    validation spec.
+#'    pointing at [average()]; not checked at `stage = "raw"`.
 #'
 #' 5. **Predictor columns**: Wavelength/predictor columns (role = "predictor")
 #'    must not contain `NA` or `Inf` values. Checked only at `stage =
@@ -386,18 +369,15 @@ new_horizons_data <- function(analysis       = NULL,
 #'
 #' @param x `horizons_data`. The object to validate.
 #' @param stage `character(1)`. `"full"` (default) or `"raw"`. See Details.
-#' @param warn_ids `logical(1)`. Default `TRUE`. At `stage = "raw"`, whether
-#'   a duplicate or `NA` `sample_id` is reported at all. See the `warn_ids`
-#'   section in Details.
+#' @param call The frame the error reports: the verb that validated.
 #'
-#' @return `horizons_data`. The input object, unchanged, if validation passes
-#'   (whether or not it printed warnings). Aborts with class
-#'   `horizons_validation_error` if validation fails.
+#' @return `horizons_data`. The input object, unchanged, if validation
+#'   passes. Aborts with class `horizons_error_validation` if it fails.
 #'
 #' @seealso [new_horizons_data()] for object construction.
 #'
 #' @noRd
-validate_horizons_data <- function(x, stage = c("full", "raw"), warn_ids = TRUE) {
+validate_horizons_data <- function(x, stage = c("full", "raw"), call = rlang::caller_env()) {
 
   stage <- match.arg(stage)
 
@@ -415,7 +395,7 @@ validate_horizons_data <- function(x, stage = c("full", "raw"), warn_ids = TRUE)
 
     if (length(selection_errors) > 0) {
 
-      abort_validation(selection_errors)
+      abort_validation(selection_errors, call = call)
 
     }
 
@@ -432,106 +412,69 @@ validate_horizons_data <- function(x, stage = c("full", "raw"), warn_ids = TRUE)
 
   if (has_analysis && !has_role_map) {
 
-    cli::cli_abort("Object has {.field analysis} but no {.field role_map}",
-                   class = "horizons_validation_error")
+    abort_validation(cli::format_inline("Object has {.field analysis} but no {.field role_map}"),
+                     call = call)
 
   }
 
   if (has_role_map && !has_analysis) {
 
-    cli::cli_abort("Object has {.field role_map} but no {.field analysis}",
-                   class = "horizons_validation_error")
+    abort_validation(cli::format_inline("Object has {.field role_map} but no {.field analysis}"),
+                     call = call)
 
   }
 
   ## ---------------------------------------------------------------------------
-  ## Collect errors (both stages) and warnings (downgraded, "raw" only)
+  ## Collect findings
   ## ---------------------------------------------------------------------------
 
   errors   <- selection_errors
-  warnings <- character()
   analysis <- x$data$analysis
   role_map <- x$data$role_map
 
   ## sample_id checks ----
+  ## Replicate scans share an id until average() collapses them, so at the raw
+  ## stage a duplicate or NA id is the designed input and passes silently; the
+  ## verbs that need unique ids (average(), then every verb at the full stage)
+  ## refuse them at their door.
 
   if (!"sample_id" %in% names(analysis)) {
 
     errors <- c(errors, cli::format_inline("Column {.field sample_id} missing from {.field analysis}"))
 
-    } else if (stage == "raw" && !warn_ids) {
-
-    ## spectra() and parse_ids() already warned about a duplicate or NA
-    ## sample_id when it first appeared; standardize() and average() call
-    ## this validator with warn_ids = FALSE at both entry and exit so their
-    ## own structural checks (unregistered columns, wavelength order, ...)
-    ## still run at stage = "raw" without re-warning about the same rows —
-    ## average() in particular exists to collapse those very duplicates, so
-    ## warning about its own designed input on every call was noise.
-
-    } else {
-
-    ## NA sample_id: full stage aborts; raw stage warns (parse_ids(too_few =
-    ## "na") documents leaving unmatched filenames as NA).
+  } else if (stage == "full") {
 
     na_id_count <- sum(is.na(analysis$sample_id))
 
     if (na_id_count > 0) {
 
-      na_msg <- cli::format_inline("{na_id_count} NA {.field sample_id} value{?s}")
-
-      if (stage == "raw") {
-
-        warnings <- c(warnings, na_msg)
-
-      } else {
-
-        errors <- c(errors, na_msg)
-
-      }
+      errors <- c(errors, cli::format_inline("{na_id_count} NA {.field sample_id} value{?s}"))
 
     }
 
-    ## Duplicate sample_id, NAs excluded (handled above so they are not also
-    ## reported as duplicates of each other). Full stage aborts and points at
-    ## average(); raw stage warns, matching the validation spec's A004 check
-    ## ("Found {n} duplicate sample IDs") — replicate scans share an id until
-    ## average() collapses them.
+    ## Duplicates, NAs excluded (reported above, not also as duplicates of
+    ## each other). The first 5 are named: at library scale the full list is
+    ## unreadable.
 
     non_na_ids <- analysis$sample_id[!is.na(analysis$sample_id)]
-    dup_ids    <- non_na_ids[duplicated(non_na_ids)]
+    dup_ids    <- unique(non_na_ids[duplicated(non_na_ids)])
 
     if (length(dup_ids) > 0) {
 
-      ## First 5, like the other checks in this function — at library scale
-      ## (thousands of replicate groups) the full list is unreadable and, in
-      ## the raw-stage warning, would make the console message itself
-      ## enormous.
-      unique_dups <- unique(dup_ids)
-      shown       <- unique_dups[seq_len(min(5, length(unique_dups)))]
-      dup_str     <- paste(shown, collapse = ", ")
+      dup_str <- paste(utils::head(dup_ids, 5), collapse = ", ")
 
-      if (length(unique_dups) > 5) {
+      if (length(dup_ids) > 5) {
 
-        dup_str <- paste0(dup_str, ", and ", length(unique_dups) - 5, " more")
+        dup_str <- paste0(dup_str, ", and ", length(dup_ids) - 5, " more")
 
       }
 
-      if (stage == "raw") {
-
-        warnings <- c(warnings, cli::format_inline(
-          "Found duplicate {.field sample_id} values: {dup_str}"
-        ))
-
-      } else {
-
-        errors <- c(errors, cli::format_inline(
-          "Duplicate {.field sample_id} values: {dup_str}. Use {.fn average} to aggregate replicates, or check your data."
-        ))
-
-      }
+      errors <- c(errors, cli::format_inline(
+        "Duplicate {.field sample_id} values: {dup_str}. Use {.fn average} to aggregate replicates, or check your data."
+      ))
 
     }
+
   }
 
   ## Wavelength column checks --------------------------------------------------
@@ -783,18 +726,12 @@ validate_horizons_data <- function(x, stage = c("full", "raw"), warn_ids = TRUE)
   }
 
   ## ---------------------------------------------------------------------------
-  ## Report warnings, then errors, or return
+  ## Abort on any finding, or return
   ## ---------------------------------------------------------------------------
-
-  if (length(warnings) > 0) {
-
-    warn_validation(warnings)
-
-  }
 
   if (length(errors) > 0) {
 
-    abort_validation(errors)
+    abort_validation(errors, call = call)
 
   }
 
@@ -1072,80 +1009,65 @@ describe_selection <- function(selection) {
 
 
 ## ---------------------------------------------------------------------------
-## abort_validation() \u2014 Report accumulated validation errors and abort
+## abort_validation() — Report accumulated validation findings and abort
 ## ---------------------------------------------------------------------------
 
-#' Print accumulated validation errors tree-style and abort
+#' Abort because an object breaks its class contract
 #'
-#' @param errors [Character.] One message per failed check.
+#' @description
+#' The one abort behind every validator. Each finding is an `x` bullet, the
+#' first five shown and the rest counted, with every finding kept on the
+#' condition as `findings`; the closing `i` bullet is the remedy. The
+#' findings are text the validator has already rendered, so they go in as
+#' values and their braces are never read as a cli template.
+#'
+#' @param findings [Character.] One message per failed check.
+#' @param class_name [Character.] The class whose contract failed, for the
+#'   header.
+#' @param remedy [Character.] What the user can do about it.
+#' @param call The frame the error reports: the verb that validated.
 #'
 #' @return [NULL.] Never returns; aborts with class
-#'   `horizons_validation_error`.
+#'   `horizons_error_validation`.
 #'
 #' @seealso [validate_horizons_data()]
 #' @noRd
-abort_validation <- function(errors) {
+abort_validation <- function(findings,
+                             class_name = "horizons_data",
+                             remedy     = VALIDATION_REMEDY,
+                             call       = rlang::caller_env()) {
 
-  cat(cli::col_red(cli::style_bold("! The horizons_data object failed validation:\n")))
+  shown  <- utils::head(findings, 5L)
+  n_more <- length(findings) - length(shown)
 
-  for (i in seq_along(errors)) {
-
-    branch <- if (i < length(errors)) "\u251C\u2500" else "\u2514\u2500"
-    cat(cli::col_red(paste0("   ", branch, " ", errors[i], "\n")))
-
-  }
-
-  cat("\n")
-
-  rlang::abort(
-    paste(c("Validation failed:", errors), collapse = "\n"),
-    class = "horizons_validation_error"
+  abort_horizons(
+    c("The {.cls {class_name}} object failed validation.",
+      stats::setNames(cli_escape(shown), rep("x", length(shown))),
+      if (n_more > 0) c("i" = paste0(n_more, " more finding", if (n_more > 1) "s", " not shown; all are in the error's `findings` field.")),
+      "i" = remedy),
+    kind     = "validation",
+    findings = findings,
+    call     = call
   )
 
 }
 
-
-## ---------------------------------------------------------------------------
-## warn_validation() — Report accumulated validation warnings, non-fatally
-## ---------------------------------------------------------------------------
-
-#' Print accumulated validation warnings tree-style and warn
+#' What to do about an object that fails the base contract
 #'
-#' @description
-#' The `stage = "raw"` counterpart to [abort_validation()]: the same
-#' tree-style report, in yellow rather than red, followed by a warning
-#' rather than an abort. Used for checks `validate_horizons_data()`
-#' downgrades before `average()` has had a chance to collapse replicate
-#' scans (duplicate or NA `sample_id`).
-#'
-#' @param warnings [Character.] One message per downgraded check.
-#'
-#' @return [NULL.] Invisibly. Warns with class
-#'   `horizons_validation_warning`; does not abort.
-#'
-#' @seealso [validate_horizons_data()], [abort_validation()]
+#' @keywords internal
 #' @noRd
-warn_validation <- function(warnings) {
+VALIDATION_REMEDY <- paste(
+  "Rebuild the object with the verbs that wrote it: one edited by hand, or",
+  "saved by an older version of horizons, cannot be repaired in place."
+)
 
-  cat(cli::col_yellow(cli::style_bold("! The horizons_data object has validation warnings:\n")))
-
-  for (i in seq_along(warnings)) {
-
-    branch <- if (i < length(warnings)) "\u251C\u2500" else "\u2514\u2500"
-    cat(cli::col_yellow(paste0("   ", branch, " ", warnings[i], "\n")))
-
-  }
-
-  cat("\n")
-
-  rlang::warn(
-    paste(c("Validation warnings:", warnings), collapse = "\n"),
-    class = "horizons_validation_warning"
-  )
-
-  invisible(NULL)
-
-}
+#' What to do about an object that fails a class contract
+#'
+#' @keywords internal
+#' @noRd
+EVAL_REMEDY     <- "Re-run evaluate() on the object, which rewrites its evaluation record."
+FIT_REMEDY      <- "Re-run fit() on the object, which rewrites its fitted models."
+ENSEMBLE_REMEDY <- "Re-run ensemble() on the fitted object, which rebuilds the ensemble."
 
 
 ## ---------------------------------------------------------------------------
@@ -1204,7 +1126,7 @@ contract_keys <- function(slot) {
 #' the base validator's one pass over the table.
 #'
 #' @details
-#' Gate checks (abort immediately, with class `horizons_validation_error`):
+#' Gate checks (abort immediately, with class `horizons_error_validation`):
 #' the object inherits `horizons_ensemble`, `$ensemble` is a list, and
 #' `$ensemble$method` is present.
 #'
@@ -1240,15 +1162,16 @@ contract_keys <- function(slot) {
 #' 12. **timestamp**: POSIXct. **runtime_secs**: single non-negative numeric.
 #'
 #' @param x `horizons_ensemble`. The object to validate.
+#' @param call The frame the error reports: the verb that validated.
 #'
 #' @return `horizons_ensemble`. The input object, unchanged, if validation
-#'   passes. Aborts with class `horizons_validation_error` on failure.
+#'   passes. Aborts with class `horizons_error_validation` on failure.
 #'
 #' @seealso [build_ensemble_contract()] for contract assembly,
 #'   [fit_ensemble_uq()] for the uq bundle.
 #'
 #' @noRd
-validate_horizons_ensemble <- function(x) {
+validate_horizons_ensemble <- function(x, call = rlang::caller_env()) {
 
   ## ---------------------------------------------------------------------------
   ## Gate checks
@@ -1256,28 +1179,28 @@ validate_horizons_ensemble <- function(x) {
 
   if (!inherits(x, "horizons_ensemble")) {
 
-    cli::cli_abort("{.arg x} must be a {.cls horizons_ensemble} object",
-                   class = "horizons_validation_error")
+    abort_validation(cli::format_inline("{.arg x} is not a {.cls horizons_ensemble} object"),
+                     "horizons_ensemble", ENSEMBLE_REMEDY, call = call)
 
   }
 
   if (!is.list(x$ensemble)) {
 
-    cli::cli_abort("Object has no {.field ensemble} slot to validate",
-                   class = "horizons_validation_error")
+    abort_validation(cli::format_inline("Object has no {.field ensemble} slot to validate"),
+                     "horizons_ensemble", ENSEMBLE_REMEDY, call = call)
 
   }
 
   if (is.null(x$ensemble$method)) {
 
-    cli::cli_abort("The {.field ensemble} slot carries no {.field method}",
-                   class = "horizons_validation_error")
+    abort_validation(cli::format_inline("The {.field ensemble} slot carries no {.field method}"),
+                     "horizons_ensemble", ENSEMBLE_REMEDY, call = call)
 
   }
 
   ## The fit contract is inherited, and through it the evaluation and base
   ## contracts: enforce them first, so a bad parent slot surfaces here.
-  x <- validate_horizons_fit(x)
+  x <- validate_horizons_fit(x, call = call)
 
   ## ---------------------------------------------------------------------------
   ## Collect errors for remaining checks
@@ -1524,20 +1447,7 @@ validate_horizons_ensemble <- function(x) {
 
   if (length(errors) > 0) {
 
-    cat(cli::col_red(cli::style_bold("! The horizons_ensemble object failed validation:\n")))
-
-    for (i in seq_along(errors)) {
-
-      branch <- if (i < length(errors)) "\u251C\u2500" else "\u2514\u2500"
-      cat(cli::col_red(paste0("   ", branch, " ", errors[i], "\n")))
-
-    }
-
-    cat("\n")
-    rlang::abort(
-      paste(c("Validation failed:", errors), collapse = "\n"),
-      class = "horizons_validation_error"
-    )
+    abort_validation(errors, "horizons_ensemble", ENSEMBLE_REMEDY, call = call)
 
   }
 
@@ -1558,7 +1468,7 @@ validate_horizons_ensemble <- function(x) {
 #' table.
 #'
 #' @details
-#' Gate checks (abort immediately, with class `horizons_validation_error`):
+#' Gate checks (abort immediately, with class `horizons_error_validation`):
 #' the object inherits `horizons_eval` and `$evaluation` is a list.
 #'
 #' A `horizons_eval` is also a `horizons_data`, so after the gates this
@@ -1601,15 +1511,16 @@ validate_horizons_ensemble <- function(x) {
 #' 7. **runtime_secs**: single non-negative numeric. **timestamp**: POSIXct.
 #'
 #' @param x `horizons_eval`. The object to validate.
+#' @param call The frame the error reports: the verb that validated.
 #'
 #' @return `horizons_eval`. The input object, unchanged, if validation passes.
-#'   Aborts with class `horizons_validation_error` on failure.
+#'   Aborts with class `horizons_error_validation` on failure.
 #'
 #' @seealso [validate_horizons_fit()] for the finalized-model contract,
 #'   [validate_horizons_data()] for the base contract.
 #'
 #' @noRd
-validate_horizons_eval <- function(x) {
+validate_horizons_eval <- function(x, call = rlang::caller_env()) {
 
   ## ---------------------------------------------------------------------------
   ## Gate checks
@@ -1617,21 +1528,21 @@ validate_horizons_eval <- function(x) {
 
   if (!inherits(x, "horizons_eval")) {
 
-    cli::cli_abort("{.arg x} must be a {.cls horizons_eval} object",
-                   class = "horizons_validation_error")
+    abort_validation(cli::format_inline("{.arg x} is not a {.cls horizons_eval} object"),
+                     "horizons_eval", EVAL_REMEDY, call = call)
 
   }
 
   if (!is.list(x$evaluation)) {
 
-    cli::cli_abort("Object has no {.field evaluation} slot to validate",
-                   class = "horizons_validation_error")
+    abort_validation(cli::format_inline("Object has no {.field evaluation} slot to validate"),
+                     "horizons_eval", EVAL_REMEDY, call = call)
 
   }
 
   ## The base contract is inherited: enforce it first, at the full stage,
   ## so a bad data slot surfaces here.
-  x <- validate_horizons_data(x)
+  x <- validate_horizons_data(x, call = call)
 
   ## ---------------------------------------------------------------------------
   ## Collect errors for remaining checks
@@ -1903,20 +1814,7 @@ validate_horizons_eval <- function(x) {
 
   if (length(errors) > 0) {
 
-    cat(cli::col_red(cli::style_bold("! The horizons_eval object failed validation:\n")))
-
-    for (i in seq_along(errors)) {
-
-      branch <- if (i < length(errors)) "\u251C\u2500" else "\u2514\u2500"
-      cat(cli::col_red(paste0("   ", branch, " ", errors[i], "\n")))
-
-    }
-
-    cat("\n")
-    rlang::abort(
-      paste(c("Validation failed:", errors), collapse = "\n"),
-      class = "horizons_validation_error"
-    )
+    abort_validation(errors, "horizons_eval", EVAL_REMEDY, call = call)
 
   }
 
@@ -1943,7 +1841,7 @@ validate_horizons_eval <- function(x) {
 #' delegates to [validate_horizons_eval()], which runs the base validator in
 #' turn; the evaluation and data slots must still hold.
 #'
-#' Gate checks (abort immediately, with class `horizons_validation_error`):
+#' Gate checks (abort immediately, with class `horizons_error_validation`):
 #' the object inherits `horizons_fit` and `$models` is a list.
 #'
 #' Accumulated checks (reported together, tree-style):
@@ -1973,15 +1871,16 @@ validate_horizons_eval <- function(x) {
 #' 10. **runtime_secs**: single non-negative numeric. **timestamp**: POSIXct.
 #'
 #' @param x `horizons_fit`. The object to validate.
+#' @param call The frame the error reports: the verb that validated.
 #'
 #' @return `horizons_fit`. The input object, unchanged, if validation passes.
-#'   Aborts with class `horizons_validation_error` on failure.
+#'   Aborts with class `horizons_error_validation` on failure.
 #'
 #' @seealso [validate_horizons_eval()] for the parent contract,
 #'   [validate_horizons_ensemble()] for the ensemble contract.
 #'
 #' @noRd
-validate_horizons_fit <- function(x) {
+validate_horizons_fit <- function(x, call = rlang::caller_env()) {
 
   ## ---------------------------------------------------------------------------
   ## Gate checks
@@ -1989,22 +1888,22 @@ validate_horizons_fit <- function(x) {
 
   if (!inherits(x, "horizons_fit")) {
 
-    cli::cli_abort("{.arg x} must be a {.cls horizons_fit} object",
-                   class = "horizons_validation_error")
+    abort_validation(cli::format_inline("{.arg x} is not a {.cls horizons_fit} object"),
+                     "horizons_fit", FIT_REMEDY, call = call)
 
   }
 
   if (!is.list(x$models)) {
 
-    cli::cli_abort("Object has no {.field models} slot to validate",
-                   class = "horizons_validation_error")
+    abort_validation(cli::format_inline("Object has no {.field models} slot to validate"),
+                     "horizons_fit", FIT_REMEDY, call = call)
 
   }
 
   ## The evaluation contract is inherited, and through it the base contract —
   ## enforce them first. They abort with the same condition class on failure,
   ## so a bad parent slot surfaces here.
-  x <- validate_horizons_eval(x)
+  x <- validate_horizons_eval(x, call = call)
 
   ## ---------------------------------------------------------------------------
   ## Collect errors for remaining checks
@@ -2293,20 +2192,7 @@ validate_horizons_fit <- function(x) {
 
   if (length(errors) > 0) {
 
-    cat(cli::col_red(cli::style_bold("! The horizons_fit object failed validation:\n")))
-
-    for (i in seq_along(errors)) {
-
-      branch <- if (i < length(errors)) "\u251C\u2500" else "\u2514\u2500"
-      cat(cli::col_red(paste0("   ", branch, " ", errors[i], "\n")))
-
-    }
-
-    cat("\n")
-    rlang::abort(
-      paste(c("Validation failed:", errors), collapse = "\n"),
-      class = "horizons_validation_error"
-    )
+    abort_validation(errors, "horizons_fit", FIT_REMEDY, call = call)
 
   }
 

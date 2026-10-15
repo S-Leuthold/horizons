@@ -1586,7 +1586,7 @@ test_that("select_training() refuses to return a record of the wrong shape", {
 
   utils::capture.output(
     expect_error(quiet_select(fx, k = 5), "selection\\$groups",
-                 class = "horizons_validation_error")
+                 class = "horizons_error_validation")
   )
 
 })
