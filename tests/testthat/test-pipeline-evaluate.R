@@ -448,34 +448,52 @@ describe("evaluate() - all configs fail", {
 
 describe("evaluate() - NA outcome rows", {
 
-  it("outcome_complete_rows(), the rule fit() shares, drops and counts NA outcomes (#67)", {
+  it("modelling_rows(), the rule fit() shares, drops and counts NA outcomes (#67)", {
 
     df <- tibble::tibble(sample_id = c("A", "B", "C", "D"),
                          y         = c(1, NA, 3, NA))
 
-    kept <- outcome_complete_rows(df, "y")
+    kept <- modelling_rows(df, "y")
 
     expect_identical(kept$data$sample_id, c("A", "C"))
     expect_identical(kept$n_dropped, 2L)
 
     ## Nothing to drop: the table comes back untouched
     complete <- df[c(1, 3), ]
-    expect_identical(outcome_complete_rows(complete, "y")$data, complete)
-    expect_identical(outcome_complete_rows(complete, "y")$n_dropped, 0L)
+    expect_identical(modelling_rows(complete, "y")$data, complete)
+    expect_identical(modelling_rows(complete, "y")$n_dropped, 0L)
 
-    expect_error(outcome_complete_rows(df[c(2, 4), ], "y"),
+    expect_error(modelling_rows(df[c(2, 4), ], "y"),
+                 class = "horizons_input_error")
+
+  })
+
+  it("modelling_rows() leaves out the rows a step flagged, counted apart from the NA outcomes", {
+
+    df <- tibble::tibble(sample_id = c("A", "B", "C", "D"),
+                         y         = c(1, NA, 3, 4),
+                         .flag     = c(NA, NA, "standardize", NA))
+
+    kept <- modelling_rows(df, "y")
+
+    expect_identical(kept$data$sample_id, c("A", "D"))
+    expect_identical(kept$n_dropped, 1L)
+    expect_identical(kept$n_flagged, 1L)
+
+    ## No row left once the flagged and the unobserved are out
+    expect_error(modelling_rows(df[2:3, ], "y"), "Every row with an outcome is flagged",
                  class = "horizons_input_error")
 
   })
 
   it("names an outcome column the analysis table lacks, rather than calling it all NA", {
 
-    ## evaluate()'s own outcome_complete_rows() check has a dedicated "no such
+    ## evaluate()'s own modelling_rows() check has a dedicated "no such
     ## column" message for exactly this case, distinct from "all NA" — but
     ## the entry-stage validate_horizons_data() call (#24) now certifies the
     ## base data contract first, and a role_map row with no matching analysis
     ## column is a structural defect that check catches before
-    ## outcome_complete_rows() ever runs. Either way the message names SOC
+    ## modelling_rows() ever runs. Either way the message names SOC
     ## and never claims the values are all NA.
 
     obj <- make_eval_object()
@@ -491,7 +509,7 @@ describe("evaluate() - NA outcome rows", {
   })
 
   ## A configured object with no outcome role is refused at the door
-  ## (config_findings(), test-class-core.R), so outcome_complete_rows() is
+  ## (config_findings(), test-class-core.R), so modelling_rows() is
   ## only reached with an outcome column the table holds.
 
 })
@@ -513,7 +531,7 @@ describe("draw_eval_split()", {
   ## an unstratified one.
   draw_before <- function(analysis, seed) {
 
-    modelled <- outcome_complete_rows(analysis, "SOC")$data
+    modelled <- modelling_rows(analysis, "SOC")$data
 
     set.seed(seed)
 

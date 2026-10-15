@@ -662,6 +662,7 @@ build_ensemble_contract <- function(method,
     optimize        = optimize,
     seed            = seed,
     uq              = NULL,
+    control         = NULL,
     timestamp       = Sys.time(),
     runtime_secs    = runtime_secs
   )

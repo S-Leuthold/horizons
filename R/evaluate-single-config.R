@@ -574,6 +574,7 @@ evaluate_single_config <- function(config_row,
     scoring_schema = SCORING_SCHEMA,
     best_params   = list(best_params),
     error_message = NA_character_,
+    class         = NA_character_,
     warnings      = list(render_warning_log(warning_log)),
     runtime_secs  = runtime
   )

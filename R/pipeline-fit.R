@@ -371,7 +371,7 @@ fit <- function(x,
   recipe_cfg   <- recipe_settings(x)
 
   ## The rows evaluate() modelled: the same rule on the same table (#67).
-  modelled  <- outcome_complete_rows(x$data$analysis, outcome_col)
+  modelled  <- modelling_rows(x$data$analysis, outcome_col)
   n_dropped <- modelled$n_dropped
 
   ## -----------------------------------------------------------------------
@@ -916,6 +916,7 @@ fit <- function(x,
       warm_start      = res$warm_start %||% NA,
       start_grid_size = res$start_grid_size %||% NA_integer_,
       error_message   = res$error_message %||% NA_character_,
+      class           = res$class %||% NA_character_,
       runtime_secs    = res$runtime_secs
     )
 
@@ -1024,6 +1025,7 @@ fit <- function(x,
     uq                = uq_list,
     ad                = ad_list,
     selection_present = selection_present,
+    control           = NULL,
     timestamp         = Sys.time(),
     runtime_secs      = total_runtime
   )
@@ -1185,7 +1187,7 @@ cold_start_evaluation <- function(x, metric, seed, call = rlang::caller_env()) {
   role_map    <- x$data$role_map
   outcome_col <- role_map$variable[role_map$role == "outcome"]
   cv_folds    <- x$config$tuning$cv_folds
-  modelled    <- outcome_complete_rows(x$data$analysis, outcome_col)
+  modelled    <- modelling_rows(x$data$analysis, outcome_col)
   n_modelled  <- nrow(modelled$data)
 
   if (n_modelled < cv_folds * 2) {
@@ -1228,6 +1230,7 @@ cold_start_evaluation <- function(x, metric, seed, call = rlang::caller_env()) {
     cv_ccc  = NA_real_, cv_rpd   = NA_real_, cv_mae = NA_real_,
     best_params           = list(NULL),
     error_message         = NA_character_,
+    class                 = NA_character_,
     warnings              = list(NULL),
     runtime_secs          = NA_real_
   )
@@ -1243,6 +1246,8 @@ cold_start_evaluation <- function(x, metric, seed, call = rlang::caller_env()) {
       n_test        = nrow(rsample::testing(split)),
       response_trim = trimmed$record,
       recipe        = recipe_record,
+      ## No evaluate() ran, so there is no control it ran with
+      control       = NULL,
       runtime_secs  = 0,
       timestamp     = Sys.time()
     ),

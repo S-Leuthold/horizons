@@ -195,6 +195,7 @@ new_horizons_data <- function(analysis       = NULL,
                       workers          = NULL,  ## integer or NA: worker count of the plan
                       parallelize_over = NULL,  ## character: axis actually parallelized
                       recipe           = NULL,  ## list: sg_window, sg_window_cm, pca_threshold the configs ran with
+                      control          = NULL,  ## horizons_control evaluate() ran with, or NULL
                       runtime_secs     = NULL,  ## numeric
                       timestamp        = NULL), ## POSIXct
 
@@ -215,6 +216,7 @@ new_horizons_data <- function(analysis       = NULL,
                   uq                = NULL,  ## list of UQ bundles (one per config), or NULL
                   ad                = NULL,  ## list of AD bundles (one per config), or NULL
                   selection_present = NULL,  ## logical: training rows came from select_training()
+                  control           = NULL,  ## horizons_control fit() ran with, or NULL
                   timestamp         = NULL,  ## POSIXct
                   runtime_secs      = NULL), ## numeric
 
@@ -234,6 +236,7 @@ new_horizons_data <- function(analysis       = NULL,
                     optimize        = NULL,   ## build-time optimize flag (for UQ fold re-derivation)
                     seed            = NULL,   ## build-time seed (UQ partitions at seed + 1000)
                     uq              = NULL,   ## CV+ conformal bundle from fit_ensemble_uq(), or NULL
+                    control         = NULL,   ## horizons_control ensemble() ran with, or NULL
                     timestamp       = NULL,
                     runtime_secs    = NULL),
 
@@ -243,7 +246,15 @@ new_horizons_data <- function(analysis       = NULL,
 
     ## Populated by select_training(); NULL on every object that never went
     ## through the verb. Shape is checked by validate_horizons_data().
-    selection = NULL
+    selection = NULL,
+
+    ## -------------------------------------------------------------------------
+    ## Section 9: LOG — What the verbs reported
+    ## -------------------------------------------------------------------------
+
+    ## Every verb appends the warnings it raised and the notes it reported;
+    ## nothing resets it (see ?horizons_conditions).
+    log = new_log()
   )
 
 
@@ -438,6 +449,43 @@ validate_horizons_data <- function(x,
 
   errors   <- selection_errors
   analysis <- x$data$analysis
+
+  ## The log ----
+  ## Every object carries one from spectra() on; nothing resets it.
+
+  if (!is.data.frame(x$log) || !all(names(new_log()) %in% names(x$log))) {
+
+    errors <- c(errors, cli::format_inline(
+      "The object has no {.field log}, or its log is not the table the verbs write ({.field {names(new_log())}})"
+    ))
+
+  }
+
+  ## Flagged rows ----
+  ## A step that keeps a sample it cannot use marks it in .flag (NA for a
+  ## clean row, else the step), a meta column that exists once a row is
+  ## flagged. Flagged rows may hold non-finite predictors; the modelling
+  ## verbs leave them out (modelling_rows()).
+
+  flagged <- rep(FALSE, nrow(analysis))
+
+  if (".flag" %in% names(analysis)) {
+
+    flag_role <- x$data$role_map$role[x$data$role_map$variable %in% ".flag"]
+
+    if (!identical(flag_role, "meta") || !is.character(analysis$.flag)) {
+
+      errors <- c(errors, cli::format_inline(
+        "{.field .flag} must be a character column with the {.field meta} role"
+      ))
+
+    } else {
+
+      flagged <- !is.na(analysis$.flag)
+
+    }
+
+  }
   role_map <- x$data$role_map
 
   ## sample_id checks ----
@@ -501,7 +549,8 @@ validate_horizons_data <- function(x,
 
   }
 
-  predictor_cols <- analysis[, predictor_vars, drop = FALSE]
+  ### Flagged rows are left out of the non-finite check below.
+  predictor_cols <- analysis[!flagged, predictor_vars, drop = FALSE]
 
   # Check for NA and Inf — full stage only --------------------------------------
   # A non-finite value outside standardize()'s trim range is legitimately
@@ -742,6 +791,25 @@ validate_horizons_data <- function(x,
   }
 
   x
+
+}
+
+
+## ---------------------------------------------------------------------------
+## control_finding() — The control a verb recorded
+## ---------------------------------------------------------------------------
+
+#' A finding when a slot's recorded control is not one
+#'
+#' @param control The slot's `control` key.
+#' @param slot Character(1). The slot, for the message.
+#' @return Character, empty when `control` is `NULL` or a `horizons_control`.
+#' @noRd
+control_finding <- function(control, slot) {
+
+  if (is.null(control) || inherits(control, "horizons_control")) return(character())
+
+  cli::format_inline("{.field {slot}$control} must be NULL or a {.cls horizons_control}")
 
 }
 
@@ -1612,6 +1680,10 @@ validate_horizons_ensemble <- function(x, call = rlang::caller_env()) {
 
   }
 
+  ## control ----------------------------------------------------------------------------
+
+  errors <- c(errors, control_finding(ens$control, "ensemble"))
+
   ## timestamp / runtime ---------------------------------------------------------------
 
   if (!inherits(ens$timestamp, "POSIXct")) {
@@ -1880,6 +1952,15 @@ validate_horizons_eval <- function(x, call = rlang::caller_env()) {
 
     }
 
+    ## The root class of each failure, NA for a row that succeeded
+    if (!"class" %in% names(res) || !is.character(res$class)) {
+
+      errors <- c(errors, cli::format_inline(
+        "{.field results} has no character {.field class} column for its failures"
+      ))
+
+    }
+
     ## fit() ranks the configs by their cross-validated metrics
     missing_cv <- setdiff(paste0("cv_", metric_cols), names(res))
 
@@ -1959,6 +2040,10 @@ validate_horizons_eval <- function(x, call = rlang::caller_env()) {
     }
 
   }
+
+  ## control ----------------------------------------------------------------------
+
+  errors <- c(errors, control_finding(ev$control, "evaluation"))
 
   ## rank_metric ----------------------------------------------------------------
 
@@ -2157,6 +2242,10 @@ validate_horizons_fit <- function(x, call = rlang::caller_env()) {
 
   }
 
+  ## control ----------------------------------------------------------------------
+
+  errors <- c(errors, control_finding(md$control, "models"))
+
   ## rank_metric ----------------------------------------------------------------
 
   if (!is.character(md$rank_metric) || length(md$rank_metric) != 1 ||
@@ -2252,6 +2341,10 @@ validate_horizons_fit <- function(x, call = rlang::caller_env()) {
 
     errors <- c(errors, cli::format_inline("{.field results} must be a data frame with {.field config_id}, {.field status}, and the six metric columns ({paste(metric_cols, collapse = ', ')})"))
 
+  } else if (!"class" %in% names(fit_res)) {
+
+    errors <- c(errors, cli::format_inline("{.field results} has no {.field class} column for its members' failures"))
+
   }
 
   ## The type of every column fit() writes, checked where the column is
@@ -2271,7 +2364,8 @@ validate_horizons_fit <- function(x, call = rlang::caller_env()) {
                    best_params     = "list",
                    warm_start      = "logical",
                    start_grid_size = "integer",
-                   error_message   = "character")
+                   error_message   = "character",
+                   class           = "character")
 
     present <- intersect(names(col_types), names(fit_res))
     actual  <- vapply(present, function(col) typeof(fit_res[[col]]), character(1))

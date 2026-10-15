@@ -230,7 +230,7 @@ evaluate <- function(x,
   ## fit() applies the same rule to the same table, so the two verbs model
   ## the same rows (#67).
 
-  modelled  <- outcome_complete_rows(analysis, outcome_col)
+  modelled  <- modelling_rows(analysis, outcome_col)
   analysis  <- modelled$data
   n_dropped <- modelled$n_dropped
 
@@ -901,6 +901,7 @@ evaluate <- function(x,
     ## What every config's recipe ran with, the window's width included, so
     ## the results of an sg_window sweep can be told apart after the fact.
     recipe           = recipe_cfg,
+    control          = NULL,
     runtime_secs     = total_runtime,
     timestamp        = Sys.time()
   )
@@ -1884,37 +1885,38 @@ rank_configs_by_cv <- function(results, metric) {
 }
 
 ## ---------------------------------------------------------------------------
-## outcome_complete_rows — the one row rule evaluate() and fit() share
+## modelling_rows — the one row rule every modelling verb shares
 ## ---------------------------------------------------------------------------
 
-#' Keep the analysis rows whose outcome is observed
+#' Keep the analysis rows a model can be fitted on
 #'
 #' @description
-#' Drops the rows whose outcome is `NA`. This is the single rule for which
-#' rows `evaluate()` and `fit()` model (#67). `evaluate()` draws its split
-#' from the rows it returns; `fit()` reuses that split and applies the same
-#' rule to check that the split's ids and outcomes still match the object's.
-#' Before this, `fit()` split the unfiltered table: its partition was over
-#' different rows from `evaluate()`'s, and NA-outcome rows reached the fit.
+#' Leaves out the rows whose outcome is `NA` and the rows a step flagged
+#' (`.flag` not `NA`), keeping both in the object. This is the single rule for
+#' which rows the modelling verbs model (#67): `evaluate()` draws its split
+#' from the rows it returns, and `fit()` reuses that split and applies the
+#' same rule to check that the split's ids and outcomes still match the
+#' object's. A flagged row is a sample a step kept but could not use, so it is
+#' left out wherever a model is fitted, as a row without an outcome is.
 #'
 #' Rows are dropped per outcome, here, rather than when responses are joined.
 #' An object can carry several responses (`select_training()` puts every pool
 #' response on one object), and a row missing one of them may carry another.
 #'
 #' @param analysis Data frame. The object's analysis table.
-#' @param outcome_col Character. Name of the outcome column.
-#' @return List with `data` (the rows whose outcome is not `NA`, in their
-#'   original order) and `n_dropped` (integer, the rows removed). Aborts with
-#'   class `horizons_input_error` when the outcome column is absent from
-#'   `analysis` or every outcome is `NA`.
+#' @param outcome_col Character. Name of the outcome column, which the door
+#'   validator has checked is in `analysis`.
+#' @return List with `data` (the rows kept, in their original order),
+#'   `n_dropped` (integer, the rows without an outcome) and `n_flagged`
+#'   (integer, the flagged rows with an outcome). Aborts with class
+#'   `horizons_input_error` when no row is left.
 #' @keywords internal
 #' @noRd
-outcome_complete_rows <- function(analysis, outcome_col) {
-
-  ### The door validator refuses a configured object with no outcome role, or
-  ### one whose outcome column is not in the analysis table.
+modelling_rows <- function(analysis, outcome_col) {
 
   na_mask <- is.na(analysis[[outcome_col]])
+  flagged <- if (".flag" %in% names(analysis)) !is.na(analysis$.flag) else rep(FALSE, nrow(analysis))
+  drop    <- na_mask | flagged
 
   if (all(na_mask)) {
 
@@ -1925,11 +1927,21 @@ outcome_complete_rows <- function(analysis, outcome_col) {
 
   }
 
+  if (all(drop)) {
+
+    cli::cli_abort(c(
+      "Every row with an outcome is flagged, so there are no rows to model.",
+      "i" = "{.field .flag} names the step that could not use each one."
+    ), class = "horizons_input_error")
+
+  }
+
   ## Return the table untouched when nothing is dropped, so an object without
-  ## NA outcomes splits exactly as it did before this helper existed.
+  ## NA outcomes or flags splits exactly as it did before this helper existed.
   list(
-    data      = if (any(na_mask)) analysis[!na_mask, , drop = FALSE] else analysis,
-    n_dropped = sum(na_mask)
+    data      = if (any(drop)) analysis[!drop, , drop = FALSE] else analysis,
+    n_dropped = sum(na_mask),
+    n_flagged = sum(flagged & !na_mask)
   )
 
 }
@@ -1942,7 +1954,7 @@ outcome_complete_rows <- function(analysis, outcome_col) {
 #'
 #' @description
 #' The split `evaluate()` scores on and `fit()` reuses: the rows with an
-#' observed outcome ([outcome_complete_rows()]), then `set.seed(seed)`, then
+#' observed outcome ([modelling_rows()]), then `set.seed(seed)`, then
 #' a `SPLIT_PROP` split stratified on the outcome, falling back to an
 #' unstratified one when the stratified draw fails. The split can also come
 #' out unstratified with no failure: rsample drops the strata itself when it
@@ -1969,12 +1981,12 @@ outcome_complete_rows <- function(analysis, outcome_col) {
 #'   unstratified, because rsample dropped the strata or the stratified draw
 #'   failed; see [draw_stratified()]) and `strata_failed` (`TRUE` when the
 #'   stratified draw failed and was retried without strata). Aborts as
-#'   [outcome_complete_rows()] does.
+#'   [modelling_rows()] does.
 #' @keywords internal
 #' @noRd
 draw_eval_split <- function(analysis, outcome_col, seed) {
 
-  modelled <- outcome_complete_rows(analysis, outcome_col)
+  modelled <- modelling_rows(analysis, outcome_col)
 
   set.seed(seed)
 

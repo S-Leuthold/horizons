@@ -16,7 +16,7 @@ test_that("new_horizons_data creates object with correct class", {
 
 })
 
-test_that("new_horizons_data creates object with all 8 sections", {
+test_that("new_horizons_data creates object with all 9 sections, the log among them", {
 
   obj <- new_horizons_data()
 
@@ -28,11 +28,13 @@ test_that("new_horizons_data creates object with all 8 sections", {
     "evaluation",
     "models",
     "ensemble",
-    "selection"
+    "selection",
+    "log"
   )
 
   expect_identical(names(obj), expected_sections)
   expect_null(obj$selection)
+  expect_identical(obj$log, new_log())
 
 })
 
@@ -1278,7 +1280,8 @@ make_valid_eval <- function() {
     ## cross-validated means at the selected hyperparameters (#50)
     cv_rmse   = c(1.1, 2.1),  cv_rrmse = c(0.11, 0.21),
     cv_rsq    = c(0.88, 0.78), cv_ccc  = c(0.88, 0.78),
-    cv_rpd    = c(1.9, 1.4),  cv_mae   = c(0.9, 1.2)
+    cv_rpd    = c(1.9, 1.4),  cv_mae   = c(0.9, 1.2),
+    class     = NA_character_
   )
 
   obj <- list(
@@ -1304,9 +1307,11 @@ make_valid_eval <- function() {
       parallelize_over = "configs",
       recipe           = list(sg_window = 9L, sg_window_cm = 18,
                               pca_threshold = 0.995),
+      control          = NULL,
       runtime_secs     = 12.3,
       timestamp        = Sys.time()
-    )
+    ),
+    log = new_log()
   )
 
   class(obj) <- c("horizons_eval", "horizons_data", "list")
@@ -1339,6 +1344,7 @@ make_valid_fit <- function() {
     ad                = list(cfg_a = list(centroid = c(f1 = 0), cov_matrix = matrix(1),
                                           ad_thresholds = c(1, 2, 3, 4))),
     selection_present = FALSE,
+    control           = NULL,
     timestamp         = Sys.time(),
     runtime_secs      = 30.1
   )
@@ -1407,6 +1413,7 @@ make_valid_ensemble <- function() {
     optimize        = TRUE,
     seed            = 307L,
     uq              = NULL,
+    control         = NULL,
     timestamp       = Sys.time(),
     runtime_secs    = 1.5
   )
@@ -2998,6 +3005,44 @@ describe("the class validators' new checks (#234)", {
 
     expect_true(any(grepl("do not carry unique sample_ids", finding_of(validate_horizons_fit(obj)),
                           fixed = TRUE)))
+
+  })
+
+})
+
+
+describe("the log and flagged rows in the base validator", {
+
+  it("requires the log every verb appends to", {
+
+    obj <- configured_object()
+    obj$log <- NULL
+    expect_true(any(grepl("has no log", finding_of(validate_horizons_data(obj)), fixed = TRUE)))
+
+    obj <- configured_object()
+    obj$log <- tibble::tibble(verb = character(0))
+    expect_true(any(grepl("has no log", finding_of(validate_horizons_data(obj)), fixed = TRUE)))
+
+  })
+
+  it("admits non-finite predictors only in flagged rows, and only a meta .flag", {
+
+    obj <- configured_object()
+    obj$data$analysis$`4000`[1] <- NA
+
+    expect_true(any(grepl("NA values in predictor columns", finding_of(validate_horizons_data(obj)),
+                          fixed = TRUE)))
+
+    ## The same row, flagged by the step that could not use it
+    obj$data$analysis$.flag <- c("standardize", NA)
+    obj$data$role_map <- rbind(obj$data$role_map, tibble::tibble(variable = ".flag", role = "meta"))
+    expect_identical(validate_horizons_data(obj), obj)
+
+    ## A .flag that is not a meta column is not a flag
+    not_meta <- obj
+    not_meta$data$role_map$role[not_meta$data$role_map$variable == ".flag"] <- "response"
+    expect_true(any(grepl(".flag must be a character column with the meta role",
+                          finding_of(validate_horizons_data(not_meta)), fixed = TRUE)))
 
   })
 
