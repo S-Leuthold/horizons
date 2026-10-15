@@ -34,24 +34,8 @@ make_test_hd <- function(filenames, spectra_type = "opus") {
     role     = c("id", "meta", "predictor", "predictor")
   )
 
-  obj <- list(
-    data = list(
-      analysis     = analysis,
-      role_map     = role_map,
-      n_rows       = n,
-      n_predictors = 2
-    ),
-    provenance = list(
-      spectra_source   = "test",
-      spectra_type     = spectra_type,
-      created          = Sys.time(),
-      horizons_version = utils::packageVersion("horizons"),
-      id_pattern       = NULL
-    )
-  )
-
-  class(obj) <- c("horizons_data", "list")
-  obj
+  new_horizons_data(analysis = analysis, role_map = role_map,
+                    spectra_source = "test", spectra_type = spectra_type)
 
 }
 
@@ -493,15 +477,11 @@ test_that("parse_ids() errors when filename column missing", {
 
   ## Create broken horizons_data without filename column --------------------
 
-  obj <- list(
-    data = list(
-      analysis = tibble::tibble(sample_id = "A", wn_4000 = 0.1),
-      role_map = tibble::tibble(variable = c("sample_id", "wn_4000"),
-                                role = c("id", "predictor"))
-    ),
-    provenance = list()
+  obj <- new_horizons_data(
+    analysis = tibble::tibble(sample_id = "A", wn_4000 = 0.1),
+    role_map = tibble::tibble(variable = c("sample_id", "wn_4000"),
+                              role = c("id", "predictor"))
   )
-  class(obj) <- c("horizons_data", "list")
 
   ## Act & Assert ----------------------------------------------------------
 

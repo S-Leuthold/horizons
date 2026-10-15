@@ -35,36 +35,8 @@ make_single_response_hd <- function() {
     role     = c("id", "predictor", "predictor", "predictor", "response")
   )
 
-  ## Downstream slots in the constructor's shape
-  contract <- new_horizons_data()
-
-  obj <- list(
-    data = list(
-      analysis     = analysis,
-      role_map     = role_map,
-      n_rows       = 3L,
-      n_predictors = 3L,
-      n_responses  = 1L
-    ),
-    provenance = list(
-      spectra_source   = "test",
-      spectra_type     = "mir",
-      created          = Sys.time(),
-      horizons_version = utils::packageVersion("horizons")
-    ),
-    config = list(
-      configs   = NULL,
-      n_configs = NULL,
-      tuning    = list(grid_size = 10L, bayesian_iter = 15L, cv_folds = 5L)
-    ),
-    validation = list(passed = NULL, checks = NULL, timestamp = NULL),
-    evaluation = contract$evaluation,
-    models     = contract$models,
-    ensemble   = contract$ensemble
-  )
-
-  class(obj) <- c("horizons_data", "list")
-  obj
+  new_horizons_data(analysis = analysis, role_map = role_map,
+                    spectra_source = "test", spectra_type = "mir")
 
 }
 
@@ -90,36 +62,8 @@ make_multi_response_hd <- function() {
     role     = c("id", "predictor", "predictor", "predictor", "response", "response")
   )
 
-  ## Downstream slots in the constructor's shape
-  contract <- new_horizons_data()
-
-  obj <- list(
-    data = list(
-      analysis     = analysis,
-      role_map     = role_map,
-      n_rows       = 3L,
-      n_predictors = 3L,
-      n_responses  = 2L
-    ),
-    provenance = list(
-      spectra_source   = "test",
-      spectra_type     = "mir",
-      created          = Sys.time(),
-      horizons_version = utils::packageVersion("horizons")
-    ),
-    config = list(
-      configs   = NULL,
-      n_configs = NULL,
-      tuning    = list(grid_size = 10L, bayesian_iter = 15L, cv_folds = 5L)
-    ),
-    validation = list(passed = NULL, checks = NULL, timestamp = NULL),
-    evaluation = contract$evaluation,
-    models     = contract$models,
-    ensemble   = contract$ensemble
-  )
-
-  class(obj) <- c("horizons_data", "list")
-  obj
+  new_horizons_data(analysis = analysis, role_map = role_map,
+                    spectra_source = "test", spectra_type = "mir")
 
 }
 
@@ -164,20 +108,8 @@ describe("configure() validation", {
       role     = c("id", "predictor")
     )
 
-    hd <- list(
-      data = list(
-        analysis = analysis, role_map = role_map,
-        n_rows = 2L, n_predictors = 1L, n_responses = 0L
-      ),
-      provenance = list(spectra_source = "test", spectra_type = "mir",
-                        created = Sys.time(),
-                        horizons_version = utils::packageVersion("horizons")),
-      config = list(configs = NULL, n_configs = NULL,
-                    tuning = list(grid_size = 10L, bayesian_iter = 15L, cv_folds = 5L)),
-      validation = list(), evaluation = list(), models = list(),
-      ensemble = list()
-    )
-    class(hd) <- c("horizons_data", "list")
+    hd <- new_horizons_data(analysis = analysis, role_map = role_map,
+                            spectra_source = "test", spectra_type = "mir")
 
     expect_error(
       capture.output(configure(hd)),

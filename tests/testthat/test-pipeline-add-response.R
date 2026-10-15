@@ -32,24 +32,8 @@ make_test_hd <- function(sample_ids = c("S001", "S002", "S003")) {
     role     = c("id", "predictor", "predictor")
   )
 
-  obj <- list(
-    data = list(
-      analysis     = analysis,
-      role_map     = role_map,
-      n_rows       = n,
-      n_predictors = 2,
-      n_responses  = 0
-    ),
-    provenance = list(
-      spectra_source   = "test",
-      spectra_type     = "opus",
-      created          = Sys.time(),
-      horizons_version = utils::packageVersion("horizons")
-    )
-  )
-
-  class(obj) <- c("horizons_data", "list")
-  obj
+  new_horizons_data(analysis = analysis, role_map = role_map,
+                    spectra_source = "test", spectra_type = "opus")
 
 }
 
@@ -320,19 +304,8 @@ test_that("add_response() errors on duplicate keys in horizons (pre-average)", {
     role     = c("id", "predictor", "predictor")
   )
 
-  hd <- list(
-    data = list(
-      analysis     = analysis,
-      role_map     = role_map,
-      n_rows       = 3,
-      n_predictors = 2,
-      n_responses  = 0
-    ),
-    provenance = list(spectra_source = "test", spectra_type = "opus",
-                      created = Sys.time(),
-                      horizons_version = utils::packageVersion("horizons"))
-  )
-  class(hd) <- c("horizons_data", "list")
+  hd <- new_horizons_data(analysis = analysis, role_map = role_map,
+                          spectra_source = "test", spectra_type = "opus")
 
   lab <- tibble::tibble(
     sample_id = c("S001", "S002"),

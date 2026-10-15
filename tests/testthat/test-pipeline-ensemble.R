@@ -5,15 +5,14 @@
 ## engines (penalized / weighted / xgb).
 ##
 ## Fixture: tests/testthat/fixtures/ensemble_fit.rds — a small horizons_fit on
-## REAL (anonymized) MIR spectra predicting Bulk_C. Real signal matters:
-## a degenerate fixture (members that don't predict) would make every
-## "did the meta-learner learn something" assertion vacuously pass. The fixture
-## also spans THREE response transforms (log / sqrt / none) across its members
-## so the back-transform double-application regression is actually exercisable —
+## REAL (anonymized) MIR spectra predicting Bulk_C, so its members carry real
+## signal. Its members span two response transforms (log / sqrt), so the
+## back-transform double-application regression is actually exercisable —
 ## under transformation = "none" the inverse is identity and a double-apply is
-## invisible.
+## invisible. Whether the meta-learner learns is tested on synthetic data made
+## for it, not on this fixture.
 ##
-## Built once by dev-build-fixture.R; see fixtures/README.md.
+## See fixtures/README.md.
 ##
 ## ens_fitted(), ens_test_set() and ens_built() come from helper-ensemble.R:
 ## the fixture is read once, and each ensemble the tests only read is built

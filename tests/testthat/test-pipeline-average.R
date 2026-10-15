@@ -159,24 +159,8 @@ make_test_hd_average <- function(n_samples      = 3,
 
   ## Build horizons_data -----------------------------------------------------
 
-  obj <- list(
-    data = list(
-      analysis     = analysis,
-      role_map     = role_map,
-      n_rows       = n_total,
-      n_predictors = n_wavelengths
-    ),
-    provenance = list(
-      spectra_source   = "test",
-      spectra_type     = "opus",
-      created          = Sys.time(),
-      horizons_version = utils::packageVersion("horizons"),
-      aggregation_by   = NULL
-    )
-  )
-
-  class(obj) <- c("horizons_data", "list")
-  obj
+  new_horizons_data(analysis = analysis, role_map = role_map,
+                    spectra_source = "test", spectra_type = "opus")
 
 }
 

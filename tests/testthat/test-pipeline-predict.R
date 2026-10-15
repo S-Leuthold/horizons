@@ -40,41 +40,40 @@ make_predict_eval <- function(n = 300, n_wn = 10, transformation = "none",
     feature_selection = "none"
   )
 
-  obj <- list(
-    data = list(analysis = df, role_map = roles, n_rows = nrow(df),
-                n_predictors = n_wn,
-                ## SOC carries role "outcome" above, not "response" (n_responses
-                ## counts role == "response"); fit()'s entry-stage
-                ## validate_horizons_data() call (#24) is the first thing to
-                ## actually check this stored count against the role_map.
-                n_responses = 0L),
-    provenance = list(spectra_source = "test", spectra_type = "mir"),
-    config = list(configs = configs, n_configs = 1L,
-                  tuning = list(cv_folds = 3L, grid_size = 3L,
-                                bayesian_iter = 0L, final_bayesian_iter = 0L)),
-    validation = list(passed = TRUE, outliers = list(removed = FALSE)),
-    evaluation = list(
-      results     = tibble::tibble(config_id = "cfg_001", status = "success",
-                                   rmse = 0.4, rrmse = 0.1, rsq = 0.8,
-                                   ccc = 0.85, rpd = 1.5, mae = 0.3,
-                                   ## fit() ranks on the CV panel (#50)
-                                   cv_rmse = 0.45, cv_rrmse = 0.11, cv_rsq = 0.78,
-                                   cv_ccc = 0.83, cv_rpd = 1.4, cv_mae = 0.33),
-      best_config = "cfg_001",
-      rank_metric = "rpd",
-      screened    = TRUE,
-      parallelize_over = "sequential",
-      split        = rsample::initial_split(df, prop = 0.8),
-      n_train      = as.integer(round(nrow(df) * 0.8)),
-      n_test       = nrow(df) - as.integer(round(nrow(df) * 0.8)),
-      response_trim = NULL,
-      recipe       = list(sg_window = DEFAULT_SG_WINDOW, sg_window_cm = NA_real_,
-                          pca_threshold = DEFAULT_PCA_THRESHOLD),
-      runtime_secs = 1,
-      timestamp    = Sys.time()
-    ),
-    models = NULL, ensemble = NULL
+  ## Built from the constructor, so every key the contract declares (the log
+  ## among them) arrives on its own; only what the tests set is written here.
+  obj <- new_horizons_data(analysis = df, role_map = roles,
+                           spectra_source = "test", spectra_type = "mir")
+
+  obj$config$configs   <- configs
+  obj$config$n_configs <- 1L
+  obj$config$tuning    <- list(cv_folds = 3L, grid_size = 3L,
+                               bayesian_iter = 0L, final_bayesian_iter = 0L)
+
+  obj$validation$passed <- TRUE
+
+  evaluation <- list(
+    results     = tibble::tibble(config_id = "cfg_001", status = "success",
+                                 rmse = 0.4, rrmse = 0.1, rsq = 0.8,
+                                 ccc = 0.85, rpd = 1.5, mae = 0.3,
+                                 ## fit() ranks on the CV panel (#50)
+                                 cv_rmse = 0.45, cv_rrmse = 0.11, cv_rsq = 0.78,
+                                 cv_ccc = 0.83, cv_rpd = 1.4, cv_mae = 0.33,
+                                 class = NA_character_),
+    best_config = "cfg_001",
+    rank_metric = "rpd",
+    screened    = TRUE,
+    parallelize_over = "sequential",
+    workers      = 1L,
+    split        = rsample::initial_split(df, prop = 0.8),
+    n_train      = as.integer(round(nrow(df) * 0.8)),
+    n_test       = nrow(df) - as.integer(round(nrow(df) * 0.8)),
+    recipe       = list(sg_window = DEFAULT_SG_WINDOW, sg_window_cm = NA_real_,
+                        pca_threshold = DEFAULT_PCA_THRESHOLD),
+    runtime_secs = 1,
+    timestamp    = Sys.time()
   )
+  obj$evaluation[names(evaluation)] <- evaluation
 
   class(obj) <- c("horizons_eval", "horizons_data", "list")
   obj
@@ -377,16 +376,13 @@ describe("predict.horizons_fit() - input validation", {
     wn          <- setdiff(names(new_df), "sample_id")
     new_df$site <- "plot_1"
 
-    hd <- list(
-      data = list(
-        analysis = new_df,
-        role_map = tibble::tibble(
-          variable = c("sample_id", wn, "site"),
-          role     = c("id", rep("predictor", length(wn)), "meta")
-        )
+    hd <- new_horizons_data(
+      analysis = new_df,
+      role_map = tibble::tibble(
+        variable = c("sample_id", wn, "site"),
+        role     = c("id", rep("predictor", length(wn)), "meta")
       )
     )
-    class(hd) <- c("horizons_data", "list")
 
     expect_named(resolve_new_data(hd), c("sample_id", wn))
 
