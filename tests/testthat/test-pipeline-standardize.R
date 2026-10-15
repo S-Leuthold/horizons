@@ -1058,6 +1058,19 @@ test_that("standardize() warns on already-standardized object", {
 
 })
 
+test_that("standardize() validates an already-standardized object before returning it (#234)", {
+
+  hd_std <- standardize(create_test_spectra(), resample = NULL, trim = NULL,
+                        remove_water = FALSE, baseline = FALSE)
+
+  ## A column with no role_map row, as a hand edit leaves it
+  hd_std$data$analysis$stray <- 1
+
+  err <- expect_error(standardize(hd_std), class = "horizons_error_validation")
+  expect_true(any(grepl("stray", err$findings, fixed = TRUE)))
+
+})
+
 
 ## =============================================================================
 ## Combined Operations Tests

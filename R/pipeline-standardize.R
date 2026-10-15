@@ -703,6 +703,10 @@ standardize <- function(x,
 
   if (!is.null(x$provenance$standardization) && !force) {
 
+    ## Returned as it arrived, so validated as it arrived (#234). A
+    ## standardized object is already on a decreasing axis.
+    x <- validate_horizons_data(x, stage = "raw")
+
     cli::cli_warn(c(
       "Spectra already standardized",
       "i" = "Returning unchanged. Use {.arg force = TRUE} to re-standardize."
