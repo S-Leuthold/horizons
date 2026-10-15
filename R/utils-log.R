@@ -577,7 +577,10 @@ run_unit <- function(expr, unit, id, debug = FALSE, keep_traces = FALSE) {
       rlang::zap()
     },
     error = function(e) {
-      if (rlang::cnd_inherits(e, NEVER_CONTAINED)) return(rlang::zap())
+      ### Raised again as it is, class, chain and trace intact. Declining with
+      ### zap() is not enough: try_fetch() then offers the condition's parent
+      ### to the same handler, and an upstream parent would be contained.
+      if (rlang::cnd_inherits(e, NEVER_CONTAINED)) stop(e)
       record(e, "failure")
       structure(list(), class = "horizons_unit_failed")
     }

@@ -310,6 +310,38 @@ describe("run_unit()", {
 
   })
 
+  it("never contains one that was chained to an upstream parent", {
+
+    ## try_fetch() offers a declined condition's parent to the same handler,
+    ## so a dependency error chained to a simpleError must still propagate
+    upstream <- simpleError("could not find function \"xgb.train\"")
+
+    err <- expect_error(
+      run_unit(abort_horizons("Missing on a worker.", kind = "dependency", parent = upstream),
+               "configuration", "cfg_7"),
+      class = "horizons_error_dependency", inherit = FALSE
+    )
+    expect_identical(err$parent, upstream)
+
+    expect_error(
+      run_unit(run_unit(abort_horizons("Broken.", kind = "internal", parent = upstream), "uq", "m1"),
+               "member", "m1"),
+      class = "horizons_error_internal", inherit = FALSE
+    )
+
+  })
+
+  it("raises an internal error, rather than a unit failure, when a record cannot be built", {
+
+    local_mocked_bindings(condition_summary = function(...) stop("summary broke"))
+
+    expect_error(run_unit({ warning("noted"); 1 }, "configuration", "cfg_1"),
+                 "Recording a warning", class = "horizons_error_internal")
+    expect_error(run_unit(stop("model failed"), "configuration", "cfg_1"),
+                 "Recording a failure", class = "horizons_error_internal")
+
+  })
+
   it("contains an add-on unit's failure inside its member, and lets a bug through both", {
 
     member <- function(addon) {
