@@ -1,5 +1,12 @@
 # horizons (development version)
 
+## Changes
+
+* The custom recipe steps (`step_transform_spectra()`, `step_select_boruta()`, `step_select_cars()`, `step_select_correlation()`) declare the packages a parallel worker needs, so resampling them on a multisession plan no longer fails every fold with "no applicable method" (#238).
+* Breaking: fifteen internal helpers are no longer exported, among them `safely_execute()`, `build_recipe()` and `fit_uq()`. Reach one with `horizons:::` if you relied on it.
+* `?horizons_conditions` documents the classes of horizons' errors and warnings: every error carries `horizons_error` and one kind (`input`, `validation`, `dependency`, `run`, `internal`), and every warning `horizons_warning` and one topic. The row-alignment check, a broken internal invariant, now raises `horizons_error_internal`.
+* horizons now requires rlang 1.2.0 and cli 3.4.0.
+
 # horizons 0.11.0
 
 ## Changes
