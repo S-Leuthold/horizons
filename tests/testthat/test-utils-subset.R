@@ -524,24 +524,19 @@ test_that("subset_selection() keeps membership rows marked retained = FALSE", {
 })
 
 
-test_that("subset_selection() refuses a membership without retained (#130)", {
+test_that("a membership without retained is refused at the door, before a subset reads it (#130)", {
 
   ## Arrange — without the column there is no telling the rows that must
   ## survive from the neighbours the union subtraction already dropped, so
-  ## the record is refused rather than read as all retained
+  ## the record is refused rather than read as all retained. Every verb
+  ## validates the object at its door, so subset_selection() never sees it.
   obj <- selected_object(n_rows = 12L)
-  ids <- obj$data$analysis$sample_id
 
   obj$selection$membership$retained <- NULL
 
   ## Act & Assert
-  expect_error(subset_selection(obj$selection, keep_ids = ids[1:6], n_removed = 6L),
-               regexp = "retained",
-               class  = "horizons_validation_error")
-
-  expect_error(set_analysis(obj, obj$data$analysis[1:6, , drop = FALSE]),
-               regexp = "retained",
-               class  = "horizons_validation_error")
+  err <- expect_error(validate_horizons_data(obj), class = "horizons_error_validation")
+  expect_true(any(grepl("retained", err$findings, fixed = TRUE)))
 
 })
 

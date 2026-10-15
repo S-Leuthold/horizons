@@ -350,7 +350,7 @@ evaluate <- function(x,
   ## The trim draws nothing from the RNG, so the folds follow the stream they
   ## always did; without a request the split is the draw.
 
-  trim_request <- response_trim_request(x, outcome_col)
+  trim_request <- response_trim_request(x)
 
   drawn <- draw_eval_split(analysis, outcome_col, seed)
 
@@ -1843,16 +1843,8 @@ ranking_candidates <- function(results, metric) {
 #' @keywords internal
 rank_configs_by_cv <- function(results, metric) {
 
+  ### The eval validator at fit()'s door requires the cv_ columns.
   rank_column <- paste0("cv_", metric)
-
-  if (!rank_column %in% names(results)) {
-
-    rlang::abort(paste0(
-      "Evaluation results carry no `", rank_column, "` column. ",
-      "Ranking uses the cross-validated metric; re-run evaluate() to record it."
-    ))
-
-  }
 
   vals <- results[[rank_column]]
 
@@ -1919,23 +1911,8 @@ rank_configs_by_cv <- function(results, metric) {
 #' @noRd
 outcome_complete_rows <- function(analysis, outcome_col) {
 
-  ## An absent column reads as NULL, and is.na(NULL) is empty, so without
-  ## this check a missing outcome was reported as "All outcome values are NA".
-  absent <- setdiff(outcome_col, names(analysis))
-
-  if (length(outcome_col) == 0 || length(absent) > 0) {
-
-    cli::cli_abort(c(
-      "The analysis table has no outcome column to model.",
-      "x" = if (length(outcome_col) == 0) {
-        "The role map gives no column the {.val outcome} role."
-      } else {
-        "The role map names {.field {absent}} as the outcome, and {.field data$analysis} has no such column."
-      },
-      "i" = "Add the column to the analysis table, or correct the role map."
-    ), class = "horizons_input_error")
-
-  }
+  ### The door validator refuses a configured object with no outcome role, or
+  ### one whose outcome column is not in the analysis table.
 
   na_mask <- is.na(analysis[[outcome_col]])
 
@@ -2046,51 +2023,26 @@ id_column <- function(role_map) {
 #' @description
 #' Returns the request `validate(remove_outliers = TRUE or "response")`
 #' recorded in `x$validation$outliers$response_trim`, or `NULL` when there
-#' is none (not requested, or cleared by a re-configure). A request recorded
-#' for another outcome is
-#' refused rather than applied to this one's labels: `configure()` clears
-#' the request, so that only happens to an object edited by hand.
+#' is none (not requested, or cleared by a re-configure). The door
+#' validator has refused a request for another outcome, or one without a
+#' single positive threshold, rather than let it apply to this outcome's
+#' labels.
 #'
-#' @param x A `horizons_data`.
-#' @param outcome_col Character. The outcome being modelled.
-#' @param call The call the condition is attributed to. Default: the caller.
-#' @return `NULL`, or a list with `outcome`, `method` and `threshold`. Aborts
-#'   with class `horizons_input_error` on a request for another outcome, or
-#'   one without a single positive threshold.
+#' @param x A `horizons_data` that passed its door validation.
+#' @return `NULL`, or a list with `outcome`, `method` and `threshold`.
 #' @keywords internal
 #' @noRd
-response_trim_request <- function(x, outcome_col, call = rlang::caller_env()) {
+response_trim_request <- function(x) {
 
   request <- x$validation$outliers$response_trim
 
   if (is.null(request)) return(NULL)
 
-  if (!identical(as.character(request$outcome), as.character(outcome_col))) {
-
-    cli::cli_abort(c(
-      "{.fn validate}'s response-trim request is for another outcome.",
-      "x" = "It was recorded for {.field {request$outcome}}; this object models {.field {outcome_col}}.",
-      "i" = "Run {.fn validate} again on the object as configured."
-    ), class = "horizons_input_error", call = call)
-
-  }
-
-  threshold <- request$threshold
-
-  if (!is.numeric(threshold) || length(threshold) != 1 || is.na(threshold) ||
-      threshold <= 0) {
-
-    cli::cli_abort(c(
-      "{.fn validate}'s response-trim request has no usable threshold.",
-      "x" = "{.field validation$outliers$response_trim$threshold} must be a single positive number.",
-      "i" = "Run {.fn validate} again."
-    ), class = "horizons_input_error", call = call)
-
-  }
-
+  ### The door validator has checked that the request is for this outcome and
+  ### has a single positive threshold.
   list(outcome   = as.character(request$outcome),
        method    = request$method %||% "iqr",
-       threshold = as.numeric(threshold))
+       threshold = as.numeric(request$threshold))
 
 }
 

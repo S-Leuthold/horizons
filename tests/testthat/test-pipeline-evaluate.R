@@ -362,10 +362,8 @@ describe("rank_configs_by_cv()", {
 
     expect_error(rank_configs_by_cv(all_na, "rpd"), "[Rr]e-run evaluate")
 
-    ## The abort carries no package class. The all-NA abort above also says
-    ## to re-run evaluate(), so the missing column is matched by its own text.
-    expect_error(rank_configs_by_cv(rows[, c("config_id", "status", "rpd")], "rpd"),
-                 "Evaluation results carry no `cv_rpd` column", fixed = TRUE)
+    ## Results with no cv_ column are refused by the eval validator at fit()'s
+    ## door (test-class-core.R), before anything is ranked.
 
   })
 
@@ -384,9 +382,15 @@ describe("evaluate() - all configs fail", {
 
     obj <- make_eval_object(n_configs = 5)
 
-    ## Four distinct messages; one carries braces, which must reach the
-    ## message as text rather than be read as a cli template.
-    obj$config$configs$model <- c("{wn_600}", "nope_2", "nope_2", "nope_4", "nope_5")
+    ## Every configuration fails as it runs, with four distinct messages; one
+    ## carries braces, which must reach the message as text rather than be
+    ## read as a cli template. (An unknown model would now be refused at the
+    ## door, before any configuration runs.)
+    tags <- stats::setNames(c("{wn_600}", "nope_2", "nope_2", "nope_4", "nope_5"),
+                            obj$config$configs$config_id)
+    local_mocked_bindings(build_recipe = function(config, ...) {
+      stop("recipe broke for '", tags[[config$config_id]], "'", call. = FALSE)
+    })
 
     err <- tryCatch(
       suppressWarnings(evaluate(obj, verbose = FALSE)),
@@ -399,7 +403,7 @@ describe("evaluate() - all configs fail", {
     expect_s3_class(err$results, "tbl_df")
     expect_identical(err$results$config_id, obj$config$configs$config_id)
     expect_true(all(err$results$status == "failed"))
-    expect_true(all(grepl("Unknown model type", err$results$error_message)))
+    expect_true(all(grepl("recipe broke for", err$results$error_message, fixed = TRUE)))
 
     ## The first three distinct messages, each with the configs that raised
     ## it; the fourth is counted, not listed.
@@ -486,19 +490,9 @@ describe("evaluate() - NA outcome rows", {
 
   })
 
-  it("outcome_complete_rows() refuses a role map that gives no column the outcome role", {
-
-    ## An outcome column the table lacks is refused here too; that case is
-    ## tested through fit()'s cold start (test-pipeline-fit.R, "names an
-    ## outcome column the analysis table lacks"), since through evaluate() the
-    ## validator refuses the object first (the test above).
-    df <- tibble::tibble(sample_id = c("A", "B"), y = c(1, 2))
-
-    expect_error(outcome_complete_rows(df, character(0)),
-                 "The role map gives no column the \"outcome\" role",
-                 fixed = TRUE, class = "horizons_input_error")
-
-  })
+  ## A configured object with no outcome role is refused at the door
+  ## (config_findings(), test-class-core.R), so outcome_complete_rows() is
+  ## only reached with an outcome column the table holds.
 
 })
 
@@ -658,7 +652,7 @@ describe("evaluate() - response outliers are trimmed from the training partition
   utils::capture.output(
     v <- suppressWarnings(validate(obj, remove_outliers = "response"))
   )
-  request <- response_trim_request(v, "SOC")
+  request <- response_trim_request(v)
 
   ## The split as drawn, before any trim
   plain       <- suppressWarnings(draw_eval_split(v$data$analysis, "SOC", 307L))$split
@@ -818,10 +812,13 @@ describe("evaluate() - response outliers are trimmed from the training partition
     other <- v
     other$validation$outliers$response_trim$outcome <- "pH"
 
+    ## Refused at the door, as an object configure() and validate() could
+    ## not have written
     err <- expect_error(evaluate(other, verbose = FALSE),
-                        class = "horizons_input_error")
+                        class = "horizons_error_validation")
 
-    expect_match(conditionMessage(err), "another outcome", fixed = TRUE)
+    expect_true(any(grepl("response-trim request is for pH, but the object models SOC",
+                          err$findings, fixed = TRUE)))
 
   })
 
@@ -832,9 +829,10 @@ describe("evaluate() - response outliers are trimmed from the training partition
       edited <- v
       edited$validation$outliers$response_trim$threshold <- bad
 
-      expect_error(response_trim_request(edited, "SOC"),
-                   "response-trim request has no usable threshold", fixed = TRUE,
-                   class = "horizons_input_error")
+      err <- expect_error(validate_horizons_data(edited), class = "horizons_error_validation")
+
+      expect_true(any(grepl("response_trim$threshold must be a single positive number",
+                            err$findings, fixed = TRUE)), label = deparse(bad))
 
     }
 

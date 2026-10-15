@@ -190,12 +190,8 @@ describe("outcome_range_setting()", {
 
   })
 
-  it("refuses a stored range configure() could not have written", {
-
-    x <- list(config = list(outcome_range = c(5, 1)))
-    expect_error(outcome_range_setting(x), class = "horizons_validation_error")
-
-  })
+  ## A stored range configure() could not have written is refused at every
+  ## verb's door (config_findings(), test-class-core.R), so this only reads.
 
 })
 
@@ -276,12 +272,8 @@ describe("back_transform_predictions() - outcome_range", {
 
   })
 
-  it("refuses a malformed range", {
-
-    expect_error(back_transform_predictions(1, "none", outcome_range = c(1, 0)),
-                 "outcome_range")
-
-  })
+  ## The range comes from outcome_range_setting(), which reads a value the
+  ## door validators have checked.
 
 })
 
@@ -956,26 +948,7 @@ describe("validate_horizons_fit() - a malformed outcome range", {
   ## A fitted object from the non-negative fixture, cold-started and cheap:
   ## nonneg_fit(), the same fit the default-range block reads.
 
-  it("is not read when there is no usable bound, which is the finding instead", {
-
-    fitted <- nonneg_fit()$fitted
-
-    ## fit() always writes a bound (#130), so a NULL one is refused on its
-    ## own, and the range is not checked against it
-    no_bound <- fitted
-    no_bound$models["response_bound"] <- list(NULL)
-    no_bound$config$outcome_range <- c(5, 1)
-
-    err <- expect_error(suppressMessages(utils::capture.output(validate_horizons_fit(no_bound))),
-                        class = "horizons_error_validation")
-
-    expect_match(flat_message(err), "response_bound", fixed = TRUE)
-    expect_match(flat_message(err), "single finite numeric", fixed = TRUE)
-    expect_false(grepl("outcome_range", flat_message(err), fixed = TRUE))
-
-  })
-
-  it("is collected with the other findings when there is a bound", {
+  it("is refused by the base validator, before the fit's own findings are read", {
 
     fitted <- nonneg_fit()$fitted
 
@@ -983,11 +956,10 @@ describe("validate_horizons_fit() - a malformed outcome range", {
     broken$config$outcome_range <- c(5, 1)
     broken$models$n_models      <- 99L
 
-    err <- expect_error(suppressMessages(utils::capture.output(validate_horizons_fit(broken))),
-                        class = "horizons_error_validation")
+    err <- expect_error(validate_horizons_fit(broken), class = "horizons_error_validation")
 
-    expect_match(flat_message(err), "config$outcome_range", fixed = TRUE)
-    expect_match(flat_message(err), "n_models", fixed = TRUE)
+    expect_true(any(grepl("config$outcome_range is not a usable range", err$findings, fixed = TRUE)))
+    expect_false(any(grepl("n_models", err$findings, fixed = TRUE)))
 
   })
 

@@ -76,7 +76,9 @@ describe("resolve_parallel_axis()", {
     expect_error(resolve_parallel_axis("folds", TRUE, 10, 5), "parallelize_over")
     expect_error(resolve_parallel_axis("auto", NA, 10, 5), "allow_par")
     expect_error(resolve_parallel_axis("auto", TRUE, 0, 5), "n_configs")
-    expect_error(resolve_parallel_axis("auto", TRUE, 10, NA), "cv_folds")
+
+    ## cv_folds is read from config$tuning, which the door validator checks
+    ## is a whole number of at least 2 (test-class-core.R).
 
     ## The abort carries no package class, so its text is the check: a missing
     ## count otherwise reaches R's own error, and a string none at all

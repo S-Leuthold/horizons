@@ -70,18 +70,13 @@ describe("back_transform_predictions()", {
 
   })
 
-  it("passes an unknown transformation through unchanged, with a warning", {
+  it("refuses an unknown transformation as a bug, since the doors refuse one first (#234)", {
 
-    preds <- c(1, 2, 3)
-
-    expect_warning(
-      result <- back_transform_predictions(preds, "boxcox"),
-      "Unknown transformation"
-    )
-    expect_equal(result, preds)
-
-    ## warn = FALSE silences it
-    expect_silent(back_transform_predictions(preds, "boxcox", warn = FALSE))
+    ## Serving it untransformed was the defect: predictions on the wrong scale
+    expect_error(back_transform_predictions(c(1, 2, 3), "boxcox"),
+                 "boxcox", class = "horizons_error_internal")
+    expect_error(back_transform_predictions(c(1, 2, 3), "boxcox", warn = FALSE),
+                 class = "horizons_error_internal")
 
   })
 
@@ -270,7 +265,7 @@ describe("needs_back_transformation()", {
 
     ## "none" is the only spelling of no transformation. These are unknown
     ## values like any other, so both functions handle them as they handle
-    ## "boxcox": not mistaken for none, returned unchanged with a warning.
+    ## "boxcox": never mistaken for none, and refused as a bug.
     preds <- c(1, 2, 3)
 
     for (trans in list("notrans", "NoTrans", "na", "NA", "", NA)) {
@@ -279,14 +274,8 @@ describe("needs_back_transformation()", {
 
       expect_true(needs_back_transformation(trans), label = label)
 
-      expect_warning(
-        result <- back_transform_predictions(preds, trans),
-        "Unknown transformation",
-        label = label
-      )
-      expect_equal(result, preds, label = label)
-
-      expect_silent(back_transform_predictions(preds, trans, warn = FALSE))
+      expect_error(back_transform_predictions(preds, trans),
+                   class = "horizons_error_internal", label = label)
 
     }
 

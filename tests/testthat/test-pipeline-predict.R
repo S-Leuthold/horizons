@@ -248,8 +248,11 @@ describe("predict.horizons_fit() - intervals", {
     expect_true(any(p0$.pred_lower < r[1]))
     expect_true(any(p0$.pred_upper > r[2]))
 
+    ## The response bound has to lie inside the range the door validator
+    ## checks it against, so it moves with the range.
     capped <- fitted_fixture
-    capped$config$outcome_range <- r
+    capped$config$outcome_range  <- r
+    capped$models$response_bound <- r[2]
 
     p <- predict(capped, new_df)
 
@@ -284,7 +287,7 @@ describe("predict.horizons_fit() - intervals", {
 
     ## Strip the UQ bundle to simulate compute_uq = FALSE for this config.
     no_uq <- fitted_fixture
-    no_uq$models$uq <- NULL
+    no_uq$models["uq"] <- list(NULL)
 
     p <- predict(no_uq, new_df, interval = TRUE)
     expect_false(".pred_lower" %in% names(p))
@@ -437,7 +440,7 @@ describe("predict.horizons_fit() - arguments in ...", {
     expect_match(conditionMessage(w), "0.8.", fixed = TRUE)
 
     no_uq <- fitted_fixture
-    no_uq$models$uq <- NULL
+    no_uq$models["uq"] <- list(NULL)
 
     w <- expect_warning(
       predict(no_uq, new_df, level = 0.95),
@@ -620,18 +623,9 @@ describe("predict.horizons_fit() - response bound guardrail", {
 
   })
 
-  it("objects without response_bound predict silently and identically (backward compat)", {
-
-    legacy_fixture <- fitted_fixture
-    legacy_fixture$models$response_bound <- NULL
-
-    expect_no_warning(p_legacy <- predict(legacy_fixture, new_df, interval = FALSE))
-
-    p_current <- predict(fitted_fixture, new_df, interval = FALSE)
-
-    expect_identical(p_legacy$.pred, p_current$.pred)
-
-  })
+  ## A fit without a response_bound was written by an earlier version; the
+  ## door validator refuses it (#234), so there is no backward-compatible
+  ## path to test.
 
   it("does not clamp interval bounds (only the point prediction)", {
 
@@ -766,7 +760,7 @@ describe("predict.horizons_fit() - applicability domain", {
   it("warns when abstain_ood is asked for and no AD is available", {
 
     no_ad <- fitted_fixture
-    no_ad$models$ad <- NULL
+    no_ad$models["ad"] <- list(NULL)
 
     expect_warning(
       p <- predict(no_ad, new_df, interval = FALSE, abstain_ood = TRUE),
@@ -782,7 +776,7 @@ describe("predict.horizons_fit() - applicability domain", {
   it("is silent about abstention and about AD when the object has no AD bundle and abstain_ood is not requested", {
 
     no_ad <- fitted_fixture
-    no_ad$models$ad <- NULL
+    no_ad$models["ad"] <- list(NULL)
 
     warns <- testthat::capture_warnings(
       predict(no_ad, new_df, interval = FALSE)
@@ -795,31 +789,22 @@ describe("predict.horizons_fit() - applicability domain", {
 
   })
 
-  it("warns, naming the config and the cause, when the AD distance fails", {
+  it("refuses at its door an AD bundle whose centroid no longer matches its covariance (#234)", {
 
     expect_true(has_ad(fitted_fixture))
 
-    ## A bundle that no longer matches the recipe's features: the distance
-    ## aborts inside predict_ad(), which used to drop the AD columns silently.
+    ## A bundle edited out of shape: predict() used to fail inside
+    ## predict_ad() and drop the AD columns with a warning; the door now
+    ## refuses the object, naming the bundle.
     broken <- fitted_fixture
     cid    <- names(broken$models$ad)[1]
     broken$models$ad[[cid]]$centroid <- broken$models$ad[[cid]]$centroid[-1]
 
-    w <- expect_warning(
-      p <- keep_only_warning(
-        predict(broken, new_df, config = cid, interval = FALSE),
-        "horizons_ad_warning"
-      ),
-      class = "horizons_ad_warning"
-    )
+    err <- expect_error(predict(broken, new_df, config = cid, interval = FALSE),
+                        class = "horizons_error_validation")
 
-    expect_match(conditionMessage(w), cid, fixed = TRUE)
-    expect_match(conditionMessage(w), "Number of features must match", fixed = TRUE)
-
-    ## Point predictions are unaffected
-    expect_false(any(c(".ad_distance", ".ad_flag") %in% names(p)))
-    expect_equal(nrow(p), nrow(new_df))
-    expect_true(all(!is.na(p$.pred)))
+    expect_true(any(grepl(cid, err$findings, fixed = TRUE) &
+                    grepl("a square cov_matrix of its length", err$findings, fixed = TRUE)))
 
   })
 
@@ -845,7 +830,7 @@ describe("predict.horizons_fit() - selected training set", {
   ## The same object with no UQ bundle: intervals are not returned at all, so
   ## there is no coverage claim to qualify.
   selected_no_uq <- selected_fixture
-  selected_no_uq$models$uq <- NULL
+  selected_no_uq$models["uq"] <- list(NULL)
 
   it("the fixture carries UQ, so the gate is exercised", {
 

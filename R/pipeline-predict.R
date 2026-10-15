@@ -141,22 +141,13 @@ predict.horizons_fit <- function(object,
   ## Step 0: Preflight
   ## -------------------------------------------------------------------------
 
-  if (!inherits(object, "horizons_fit")) {
-
-    cli::cli_abort(c(
-      "{.arg object} must be a {.cls horizons_fit} object.",
-      "i" = "Run {.fn fit} first to produce a fitted object."
-    ))
-
-  }
+  ## The object as it arrives (#234): a fit edited by hand, or saved by an
+  ## earlier version, is refused with the remedy rather than served. The
+  ## validator's gate covers the class, and it refuses an empty or unnamed
+  ## workflows slot.
+  object <- validate_horizons_fit(object)
 
   workflows_list <- object$models$workflows
-
-  if (is.null(workflows_list) || length(workflows_list) == 0) {
-
-    cli::cli_abort("No fitted workflows found on this object.")
-
-  }
 
   ## -------------------------------------------------------------------------
   ## Step 0b: Resolve new_data, then validate it carries the training axis
@@ -660,34 +651,29 @@ warn_trimmed_ensemble_intervals <- function(object, interval) {
 #'
 #' @param object A `horizons_fit` carrying `models$predictor_schema`.
 #' @param new_spectra Tibble from [resolve_new_data()].
-#' @return Invisibly TRUE; aborts on mismatch.
+#' @param call The frame the error reports: `predict()`'s.
+#' @return Invisibly TRUE; aborts with class `horizons_error_input` on a
+#'   mismatch.
 #' @keywords internal
 #' @noRd
-check_predictor_schema <- function(object, new_spectra) {
+check_predictor_schema <- function(object, new_spectra, call = rlang::caller_env()) {
 
-  ## fit() stored the training-axis predictor columns; validate against them
-  ## directly (no recipe re-introspection, which a butchered workflow can break).
+  ## fit() stored the training-axis predictor columns, which the fit validator
+  ## at predict()'s door requires; check against them directly (no recipe
+  ## re-introspection, which a butchered workflow can break).
   expected <- object$models$predictor_schema
-
-  ## Objects written before predictor_schema existed: skip the axis gate, let
-  ## bake() surface any mismatch.
-  if (is.null(expected)) {
-
-    return(invisible(TRUE))
-
-  }
 
   supplied <- setdiff(names(new_spectra), "sample_id")
   missing  <- setdiff(expected, supplied)
 
   if (length(missing) > 0) {
 
-    cli::cli_abort(c(
+    abort_horizons(c(
       "{.arg new_data} is missing {length(missing)} predictor column{?s} the model expects.",
       "x" = "Missing (first few): {.val {utils::head(missing, 5)}}",
       "i" = "new_data must be on the training wavenumber axis. Run {.fn standardize} \\
              to the same grid the model was trained on (e.g. 600-4000 at 2 cm^-1) before predicting."
-    ))
+    ), kind = "input", call = call)
 
   }
 

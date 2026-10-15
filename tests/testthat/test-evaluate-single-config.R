@@ -206,9 +206,12 @@ describe("evaluate_single_config() - failure paths", {
 
   setup <- make_eval_setup()
 
-  it("returns 'failed' for invalid model name", {
+  it("returns 'failed', naming the stage, when the model spec cannot be built", {
 
-    config <- make_eval_config(model = "deep_learning_9000")
+    ## An unknown model is refused at the door; this is a spec that fails as
+    ## it is built
+    local_mocked_bindings(define_model_spec = function(...) stop("no spec for this model"))
+    config <- make_eval_config()
 
     result <- evaluate_single_config(
       config_row    = config,
@@ -221,12 +224,14 @@ describe("evaluate_single_config() - failure paths", {
 
     expect_equal(result$status, "failed")
     expect_true(grepl("Model specification failed", result$error_message))
+    expect_true(grepl("no spec for this model", result$error_message, fixed = TRUE))
 
   })
 
-  it("returns 'failed' for invalid feature_selection", {
+  it("returns 'failed', naming the stage, when the recipe cannot be built", {
 
-    config <- make_eval_config(feature_selection = "quantum_entanglement")
+    local_mocked_bindings(build_recipe = function(...) stop("no recipe for this config"))
+    config <- make_eval_config()
 
     result <- evaluate_single_config(
       config_row    = config,
@@ -239,6 +244,7 @@ describe("evaluate_single_config() - failure paths", {
 
     expect_equal(result$status, "failed")
     expect_true(grepl("Recipe building failed", result$error_message))
+    expect_true(grepl("no recipe for this config", result$error_message, fixed = TRUE))
 
   })
 

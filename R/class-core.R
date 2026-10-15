@@ -357,11 +357,13 @@ new_horizons_data <- function(analysis       = NULL,
 #'     `pool_id` it names must be a `sample_id` in `analysis` (I4b). Shape
 #'     and containment only — the contents are the verb's business.
 #'
-#' 14. **Config grid**: `config$configs` has no `covariates` column. A grid
-#'     with one was written by an earlier version of `configure()`, whose
-#'     config ids hashed it, so the object is refused and named as needing
-#'     `configure()` again. This is the check every class validator reaches,
-#'     through the chain, for every object that carries a config grid.
+#' 14. **Configuration**: on a configured object (unless `config = FALSE`),
+#'     the checks in [config_findings()]: no `covariates` column (a grid
+#'     written by an earlier version), known models, transformations,
+#'     preprocessing and feature selection, a usable outcome range, a whole
+#'     number of folds of at least 2, one outcome, and a response-trim
+#'     request for that outcome with a usable threshold. Every class
+#'     validator reaches these through the chain.
 #'
 #' Empty objects (both analysis and role_map NULL) pass validation — this
 #' allows for incremental object construction. The selection record is
@@ -369,6 +371,9 @@ new_horizons_data <- function(analysis       = NULL,
 #'
 #' @param x `horizons_data`. The object to validate.
 #' @param stage `character(1)`. `"full"` (default) or `"raw"`. See Details.
+#' @param config `logical(1)`. Check the configuration of a configured
+#'   object (see [config_findings()]). `configure()` passes `FALSE`, since
+#'   rewriting the configuration is the remedy for a bad one.
 #' @param call The frame the error reports: the verb that validated.
 #'
 #' @return `horizons_data`. The input object, unchanged, if validation
@@ -377,7 +382,10 @@ new_horizons_data <- function(analysis       = NULL,
 #' @seealso [new_horizons_data()] for object construction.
 #'
 #' @noRd
-validate_horizons_data <- function(x, stage = c("full", "raw"), call = rlang::caller_env()) {
+validate_horizons_data <- function(x,
+                                   stage  = c("full", "raw"),
+                                   config = TRUE,
+                                   call   = rlang::caller_env()) {
 
   stage <- match.arg(stage)
 
@@ -712,16 +720,14 @@ validate_horizons_data <- function(x, stage = c("full", "raw"), call = rlang::ca
     }
   }
 
-  ## Config grid --------------------------------------------------------------
-  ## configure() writes no covariates column. A grid with one was written by
-  ## an earlier version, whose config ids hashed it, so nothing evaluated or
-  ## fitted on that grid lines up with a grid configure() writes now.
+  ## Configuration --------------------------------------------------------------
+  ## Checked once the object is configured. configure() validates with
+  ## config = FALSE, since rewriting the configuration is the remedy for a bad
+  ## one.
 
-  if ("covariates" %in% names(x$config$configs)) {
+  if (isTRUE(config) && !is.null(x$config$configs)) {
 
-    errors <- c(errors, cli::format_inline(
-      "{.field config$configs} has a {.field covariates} column: the object was configured by an earlier version of horizons. Re-run {.fn configure} on it, then the verbs after it."
-    ))
+    errors <- c(errors, config_findings(x))
 
   }
 
@@ -736,6 +742,162 @@ validate_horizons_data <- function(x, stage = c("full", "raw"), call = rlang::ca
   }
 
   x
+
+}
+
+
+## ---------------------------------------------------------------------------
+## ad_bundle_ok() — The shape predict() needs of an AD bundle
+## ---------------------------------------------------------------------------
+
+#' Whether an applicability-domain bundle has the shape predict() reads
+#'
+#' @param bundle One entry of `models$ad`.
+#' @return `TRUE` or `FALSE`.
+#' @seealso [validate_horizons_fit()]
+#' @noRd
+ad_bundle_ok <- function(bundle) {
+
+  if (!is.list(bundle)) return(FALSE)
+
+  centroid   <- bundle$centroid
+  cov_matrix <- bundle$cov_matrix
+  thresholds <- bundle$ad_thresholds
+
+  is.numeric(centroid) && length(centroid) > 0 && !anyNA(centroid) &&
+    is.matrix(cov_matrix) && is.numeric(cov_matrix) &&
+    nrow(cov_matrix) == length(centroid) && ncol(cov_matrix) == length(centroid) &&
+    is.numeric(thresholds) && length(thresholds) == 4 && !anyNA(thresholds) &&
+    !is.unsorted(thresholds)
+
+}
+
+
+## ---------------------------------------------------------------------------
+## config_findings() — The configuration a configured object must carry
+## ---------------------------------------------------------------------------
+
+#' Findings on a configured object's configuration
+#'
+#' @description
+#' What every verb after `configure()` reads from `config` and `validation`,
+#' checked once at the door instead of where each value is used: a usable
+#' outcome range, a whole number of folds, a configuration grid whose models,
+#' transformations, preprocessing and feature selection are all known, one
+#' outcome, and a response-trim request that is for that outcome and has a
+#' usable threshold.
+#'
+#' @param x A `horizons_data` with `config$configs` set.
+#' @return [Character.] Validation messages, possibly empty.
+#' @seealso [validate_horizons_data()]
+#' @noRd
+config_findings <- function(x) {
+
+  findings <- character()
+  configs  <- x$config$configs
+
+  ## The grid ------------------------------------------------------------------
+
+  ### configure() writes no covariates column. A grid with one was written by
+  ### an earlier version, whose config ids hashed it, so nothing evaluated or
+  ### fitted on that grid lines up with a grid configure() writes now.
+  if ("covariates" %in% names(configs)) {
+
+    findings <- c(findings, cli::format_inline(
+      "{.field config$configs} has a {.field covariates} column: the object was configured by an earlier version of horizons. Re-run {.fn configure} on it, then the verbs after it."
+    ))
+
+  }
+
+  vocabularies <- list(model             = VALID_MODELS,
+                       transformation    = VALID_TRANSFORMATIONS,
+                       preprocessing     = VALID_PREPROCESSING,
+                       feature_selection = VALID_FEATURE_SELECTION)
+
+  for (column in names(vocabularies)) {
+
+    if (!column %in% names(configs)) {
+
+      findings <- c(findings, cli::format_inline(
+        "{.field config$configs} has no {.field {column}} column"
+      ))
+      next
+
+    }
+
+    unknown <- setdiff(unique(as.character(configs[[column]])), vocabularies[[column]])
+
+    if (length(unknown) > 0) {
+
+      findings <- c(findings, cli::format_inline(
+        "{.field config$configs} has {cli::qty(length(unknown))}{?an/} unknown {.field {column}} value{?s} {.val {unknown}} (known: {.val {vocabularies[[column]]}})"
+      ))
+
+    }
+
+  }
+
+  ## Settings every later verb reads -------------------------------------------
+
+  range <- x$config$outcome_range
+
+  if (!is.null(range) && !is_valid_outcome_range(range)) {
+
+    findings <- c(findings, cli::format_inline(
+      "{.field config$outcome_range} is not a usable range (two numbers, lower below upper): it is {.val {range}}"
+    ))
+
+  }
+
+  cv_folds <- x$config$tuning$cv_folds
+
+  if (!(is.numeric(cv_folds) && length(cv_folds) == 1 && !is.na(cv_folds) &&
+        cv_folds >= 2 && cv_folds == round(cv_folds))) {
+
+    findings <- c(findings, cli::format_inline(
+      "{.field config$tuning$cv_folds} must be a whole number of at least 2, not {.val {cv_folds}}"
+    ))
+
+  }
+
+  ## The outcome and its trim request --------------------------------------------
+
+  outcome <- x$data$role_map$variable[x$data$role_map$role %in% "outcome"]
+
+  if (length(outcome) == 0) {
+
+    findings <- c(findings, cli::format_inline(
+      "The object is configured but has no {.field outcome} role"
+    ))
+
+  }
+
+  request <- x$validation$outliers$response_trim
+
+  if (!is.null(request)) {
+
+    if (length(outcome) == 1 && !identical(as.character(request$outcome), outcome)) {
+
+      findings <- c(findings, cli::format_inline(
+        "{.fn validate}'s response-trim request is for {.field {request$outcome}}, but the object models {.field {outcome}}; run {.fn validate} again on the object as configured"
+      ))
+
+    }
+
+    threshold <- request$threshold
+
+    if (!(is.numeric(threshold) && length(threshold) == 1 && !is.na(threshold) &&
+          threshold > 0)) {
+
+      findings <- c(findings, cli::format_inline(
+        "{.field validation$outliers$response_trim$threshold} must be a single positive number; run {.fn validate} again"
+      ))
+
+    }
+
+  }
+
+  findings
 
 }
 
@@ -1158,7 +1320,8 @@ contract_keys <- function(slot) {
 #'     build-time settings [fit_ensemble_uq()] rebuilds the fold models with.
 #' 11. **uq**: NULL, or a CV+ bundle — a list with `method == "cv_plus"` and
 #'     the core fields `fold_models`, `calib`, `n_calib`, `level_default`
-#'     (see [fit_ensemble_uq()]).
+#'     (see [fit_ensemble_uq()]), whose `members` match the weights' and
+#'     whose calibration set supports intervals at `level_default`.
 #' 12. **timestamp**: POSIXct. **runtime_secs**: single non-negative numeric.
 #'
 #' @param x `horizons_ensemble`. The object to validate.
@@ -1402,8 +1565,12 @@ validate_horizons_ensemble <- function(x, call = rlang::caller_env()) {
       ## against the wrong columns; an out-of-range fold id degrades to NA
       ## bounds via R's NA-on-out-of-range matrix indexing — both are silent
       ## at predict time, so catch them here.
-      if (!is.null(uq$members) && w_valid &&
-          !setequal(uq$members, w$member)) {
+      ## predict() needs every member's prediction to build the bounds
+      if (is.null(uq$members)) {
+
+        errors <- c(errors, cli::format_inline("{.field uq} names no {.field members}"))
+
+      } else if (w_valid && !setequal(uq$members, w$member)) {
 
         errors <- c(errors, cli::format_inline("{.field uq$members} does not match {.field weights$member} (stale or foreign uq bundle)"))
 
@@ -1419,6 +1586,25 @@ validate_horizons_ensemble <- function(x, call = rlang::caller_env()) {
       } else if (!all(uq$calib$fold %in% seq_along(uq$fold_models))) {
 
         errors <- c(errors, cli::format_inline("{.field uq$calib$fold} references fold models that do not exist ({length(uq$fold_models)} retained)"))
+
+      } else {
+
+        ## The bounds are order statistics of the calibration set, so it has
+        ## to hold enough rows for the default level
+        level   <- uq$level_default
+        n_calib <- nrow(uq$calib)
+
+        if (!identical(as.integer(uq$n_calib), as.integer(n_calib))) {
+
+          errors <- c(errors, cli::format_inline("{.field uq$n_calib} ({uq$n_calib}) does not match the rows of {.field uq$calib} ({n_calib})"))
+
+        } else if (!(is.numeric(level) && length(level) == 1 && !is.na(level) &&
+                     level > 0 && level < 1) ||
+                   is.null(cv_plus_indices(n_calib, level))) {
+
+          errors <- c(errors, cli::format_inline("{.field uq$calib} ({n_calib} row{?s}) cannot support intervals at {.field level_default} {.val {level}}"))
+
+        }
 
       }
 
@@ -1502,7 +1688,8 @@ validate_horizons_ensemble <- function(x, call = rlang::caller_env()) {
 #'    set, `config_id` set-equal to its `config_id`. Failed, pruned and
 #'    not-evaluated configs keep their rows, so a config with no row was
 #'    lost, and a row with no config describes a config that isn't there.
-#' 3. **best_config** (I5): a length-1 character present in
+#' 3. **best_config** (I5): a length-1 character, `NA` when no
+#'    configuration has the ranking metric, otherwise present in
 #'    `results$config_id` — and, when the config table is reachable at
 #'    `x$config$configs$config_id`, present there too.
 #' 4. **rank_metric**: a length-1 character naming one of the six metrics.
@@ -1693,6 +1880,17 @@ validate_horizons_eval <- function(x, call = rlang::caller_env()) {
 
     }
 
+    ## fit() ranks the configs by their cross-validated metrics
+    missing_cv <- setdiff(paste0("cv_", metric_cols), names(res))
+
+    if (length(missing_cv) > 0) {
+
+      errors <- c(errors, cli::format_inline(
+        "{.field results} has no cross-validated {cli::qty(length(missing_cv))}column{?s} {.field {missing_cv}}, which {.fn fit} ranks by"
+      ))
+
+    }
+
   }
 
   ## results cover the config table exactly -------------------------------------
@@ -1735,13 +1933,15 @@ validate_horizons_eval <- function(x, call = rlang::caller_env()) {
 
   ## best_config (I5: names a real config) --------------------------------------
 
+  ## NA when no configuration has the ranking metric: the evaluation is
+  ## returned, and fit() has nothing to choose from.
   bc <- ev$best_config
 
-  if (!is.character(bc) || length(bc) != 1 || is.na(bc)) {
+  if (!is.character(bc) || length(bc) != 1) {
 
-    errors <- c(errors, cli::format_inline("{.field best_config} must be a single {.cls character} config_id"))
+    errors <- c(errors, cli::format_inline("{.field best_config} must be a single {.cls character} config_id, or {.val {NA}}"))
 
-  } else {
+  } else if (!is.na(bc)) {
 
     if (res_valid && !bc %in% res$config_id) {
 
@@ -1960,9 +2160,9 @@ validate_horizons_fit <- function(x, call = rlang::caller_env()) {
   ## rank_metric ----------------------------------------------------------------
 
   if (!is.character(md$rank_metric) || length(md$rank_metric) != 1 ||
-      is.na(md$rank_metric)) {
+      !md$rank_metric %in% VALID_RANK_METRICS) {
 
-    errors <- c(errors, cli::format_inline("{.field rank_metric} must be a single {.cls character}"))
+    errors <- c(errors, cli::format_inline("{.field rank_metric} must be one of {.val {VALID_RANK_METRICS}}"))
 
   }
 
@@ -1984,10 +2184,6 @@ validate_horizons_fit <- function(x, call = rlang::caller_env()) {
   ## positive-finite rule the guardrail shipped with; a signed outcome's bound
   ## may be negative. A missing key is reported by the completeness check.
 
-  ## The range is read only when there is a usable bound to check against
-  ## it, and a malformed one is collected like any other finding rather than
-  ## aborting past the checks below.
-
   rb <- md$response_bound
 
   if ("response_bound" %in% names(md)) {
@@ -2000,16 +2196,10 @@ validate_horizons_fit <- function(x, call = rlang::caller_env()) {
 
     } else {
 
-      rng <- tryCatch(outcome_range_setting(x),
-                      horizons_validation_error = function(e) NULL)
+      ### The base validator, run first, has refused an unusable range.
+      rng <- outcome_range_setting(x)
 
-      if (is.null(rng)) {
-
-        errors <- c(errors, cli::format_inline(
-          "{.field config$outcome_range} is not a usable range (two numbers, lower below upper), so {.field response_bound} cannot be checked against it"
-        ))
-
-      } else if (rb <= rng[1] || rb > rng[2]) {
+      if (rb <= rng[1] || rb > rng[2]) {
 
         errors <- c(errors, cli::format_inline(
           "{.field response_bound} must be a single finite numeric above the lower bound of {.field outcome_range} ({rng[1]}) and no higher than its upper bound ({rng[2]})"
@@ -2041,6 +2231,11 @@ validate_horizons_fit <- function(x, call = rlang::caller_env()) {
   if (!inherits(md$split, "rsplit")) {
 
     errors <- c(errors, cli::format_inline("{.field split} must be an {.cls rsplit} object"))
+
+  } else if (anyDuplicated(md$split$data$sample_id) > 0) {
+
+    ## The ensemble keys the members' test predictions by sample_id
+    errors <- c(errors, cli::format_inline("{.field split}'s rows do not carry unique {.field sample_id}s"))
 
   }
 
@@ -2138,6 +2333,25 @@ validate_horizons_fit <- function(x, call = rlang::caller_env()) {
 
     }
 
+    ## predict() computes each config's interval width at the bundle's
+    ## default level
+    if (is.list(uq)) {
+
+      bad_level <- names(uq)[!vapply(uq, function(b) {
+        level <- if (is.list(b)) b$level_default
+        is.numeric(level) && length(level) == 1 && !is.na(level) && level > 0 && level < 1
+      }, logical(1))]
+
+      if (length(bad_level) > 0) {
+
+        errors <- c(errors, cli::format_inline(
+          "{.field uq} {cli::qty(length(bad_level))}bundle{?s} {.val {bad_level}} {?has/have} no {.field level_default} in (0, 1)"
+        ))
+
+      }
+
+    }
+
   }
 
   ## AD keys are a subset of workflow keys --------------------------------------
@@ -2164,6 +2378,22 @@ validate_horizons_fit <- function(x, call = rlang::caller_env()) {
 
         id_list <- paste(orphan, collapse = ", ")
         errors  <- c(errors, cli::format_inline("{.field ad} keys not present in {.field workflows}: {id_list}"))
+
+      }
+
+    }
+
+    ## predict() measures distances with the centroid and covariance and bins
+    ## them by the thresholds, so each bundle's shape is checked here
+    if (is.list(ad)) {
+
+      bad_shape <- names(ad)[!vapply(ad, ad_bundle_ok, logical(1))]
+
+      if (length(bad_shape) > 0) {
+
+        errors <- c(errors, cli::format_inline(
+          "{.field ad} {cli::qty(length(bad_shape))}bundle{?s} {.val {bad_shape}} {?does/do} not carry a numeric {.field centroid}, a square {.field cov_matrix} of its length, and four non-decreasing {.field ad_thresholds}"
+        ))
 
       }
 

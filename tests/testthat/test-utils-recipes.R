@@ -186,17 +186,8 @@ describe("build_recipe()", {
 
   })
 
-  it("aborts on invalid feature selection method", {
-
-    td <- make_test_data()
-    config <- make_config_row(feature_selection = "deep_learning")
-
-    expect_error(
-      build_recipe(config, td$data, td$role_map),
-      "Unsupported feature selection"
-    )
-
-  })
+  ## An unknown feature selection method is refused at every verb's door
+  ## (config_findings(), test-class-core.R), before a recipe is built.
 
   ## -----------------------------------------------------------------------
   ## Step ordering
@@ -224,27 +215,9 @@ describe("build_recipe()", {
 
   })
 
-  ## -----------------------------------------------------------------------
-  ## Column ordering assertion
-  ## -----------------------------------------------------------------------
-
-  it("aborts when predictor columns are not monotonically ordered", {
-
-    td <- make_test_data(n_wn = 10)
-
-    ## Scramble the predictor order in role_map
-    pred_rows <- td$role_map$role == "predictor"
-    pred_vars <- td$role_map$variable[pred_rows]
-    td$role_map$variable[pred_rows] <- sample(pred_vars)
-
-    config <- make_config_row()
-
-    expect_error(
-      build_recipe(config, td$data, td$role_map),
-      "monotonically ordered"
-    )
-
-  })
+  ## Predictor columns out of wavenumber order are refused by the door
+  ## validator at evaluate() and fit() (test-class-core.R), before a recipe
+  ## is built.
 
   ## -----------------------------------------------------------------------
   ## Case insensitivity

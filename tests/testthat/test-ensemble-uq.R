@@ -515,7 +515,7 @@ describe("predict.horizons_ensemble() - arguments in ...", {
     ens_ref  <- ens_built("weighted")
 
     no_uq <- ens_ref
-    no_uq$ensemble$uq <- NULL
+    no_uq$ensemble["uq"] <- list(NULL)
 
     w <- expect_warning(
       suppressMessages(predict(no_uq, test_set, level = 0.95)),
@@ -635,7 +635,7 @@ describe("ensemble UQ - degradation and gates", {
     ## calibration both leave $ensemble$uq empty, and verbose says so once
     ens_ref <- ens_built("weighted")
     no_uq   <- ens_ref
-    no_uq$ensemble$uq <- NULL
+    no_uq$ensemble["uq"] <- list(NULL)
 
     for (calibration in list(function(...) NULL, function(...) stop("calibration broke"))) {
 
@@ -652,22 +652,38 @@ describe("ensemble UQ - degradation and gates", {
 
   })
 
-  it("predict_ensemble_intervals warns and returns NULL for an unrecognized bundle", {
+  it("refuses at predict()'s door a UQ bundle it cannot use (#65, #234)", {
 
-    ## #65's interval half, applied to the ensemble path: this used to
-    ## degrade silently (see predict_intervals()/warn_interval_failure() on
-    ## the single-model side for the same fix).
-    result <- NULL
-    expect_warning(
-      result <- predict_ensemble_intervals(list(method = "bogus"), NULL),
-      class = "horizons_interval_warning"
-    )
-    expect_null(result)
+    ## These used to degrade to point predictions inside the assembler, or
+    ## index fold models that are not there; the ensemble validator now
+    ## refuses each at the door, naming it.
+    test_set <- ens_test_set()
+    ens_ref  <- ens_built("weighted")
 
-    expect_warning(
-      predict_ensemble_intervals("not a list", NULL),
-      class = "horizons_interval_warning"
-    )
+    refuses <- function(edit, finding) {
+      broken <- ens_ref
+      broken$ensemble$uq <- edit(broken$ensemble$uq)
+      err <- expect_error(predict(broken, test_set, interval = TRUE),
+                          class = "horizons_error_validation")
+      expect_true(any(grepl(finding, err$findings, fixed = TRUE)), label = finding)
+    }
+
+    ## Not a CV+ bundle
+    refuses(function(uq) { uq$method <- "bogus"; uq }, "must be NULL or a CV+ bundle")
+
+    ## A calibration set too small for the default level (n >= 19 at 0.90)
+    refuses(function(uq) { uq$calib <- uq$calib[1:2, ]; uq$n_calib <- 2L; uq },
+            "cannot support intervals at level_default")
+
+    ## A member set that is not the weights'
+    refuses(function(uq) { uq$members <- uq$members[-1]; uq }, "does not match weights$member")
+    refuses(function(uq) { uq$members <- NULL; uq }, "names no members")
+
+    ## Calibration folds that name no retained fold model, fold 0 included
+    refuses(function(uq) { uq$calib$fold[1] <- length(uq$fold_models) + 1L; uq },
+            "references fold models that do not exist")
+    refuses(function(uq) { uq$calib$fold[1] <- 0L; uq },
+            "references fold models that do not exist")
 
   })
 
@@ -693,45 +709,6 @@ describe("ensemble UQ - degradation and gates", {
       class = "horizons_interval_warning"
     )
     expect_null(result)
-
-  })
-
-  it("predict_ensemble_intervals warns and returns NULL when the calibration set is too small", {
-
-    test_set <- ens_test_set()
-    ens_ref  <- ens_built("weighted")
-    members  <- ens_ref$ensemble$weights$member
-    new_spec <- resolve_new_data(test_set)
-    mp       <- predict_members(ens_ref, members, new_spec)
-
-    small_uq <- ens_ref$ensemble$uq
-    ## Below cv_plus_indices()'s validity threshold at level 0.90 (n >= 19).
-    small_uq$calib <- small_uq$calib[1:2, ]
-
-    result <- NULL
-    expect_warning(
-      result <- predict_ensemble_intervals(small_uq, mp),
-      class = "horizons_interval_warning"
-    )
-    expect_null(result)
-
-  })
-
-  it("predict_ensemble_intervals aborts when a member's predictions are missing", {
-
-    test_set <- ens_test_set()
-    ens_ref  <- ens_built("weighted")
-    members  <- ens_ref$ensemble$weights$member
-    new_spec <- resolve_new_data(test_set)
-    mp       <- predict_members(ens_ref, members, new_spec)
-
-    ## The fold models are valid only over the exact member set, so a member
-    ## with no predictions is an error, not a degraded interval.
-    short <- mp[mp$config_id != members[1], ]
-
-    ## The abort carries no package class.
-    expect_error(predict_ensemble_intervals(ens_ref$ensemble$uq, short),
-                 "Member prediction missing for 1 ensemble member", fixed = TRUE)
 
   })
 
@@ -806,32 +783,5 @@ describe("cv_plus_indices()", {
 
 })
 
-describe("cv_plus_bounds() - corrupted fold ids fail loudly", {
-
-  it("aborts when fold ids fall outside the retained fold models", {
-
-    ## The abort carries no package class.
-    expect_error(
-      cv_plus_bounds(
-        matrix(rnorm(10), nrow = 2),          # 5 fold-model columns
-        rep(c(1, 7), length.out = 39),        # fold 7 does not exist
-        rnorm(39),
-        level = 0.90
-      ),
-      "out of sync"
-    )
-
-    ## Fold 0 would select no column, silently
-    expect_error(
-      cv_plus_bounds(
-        matrix(rnorm(10), nrow = 2),
-        rep(c(0, 2), length.out = 39),
-        rnorm(39),
-        level = 0.90
-      ),
-      "fold_id range: 0..2", fixed = TRUE
-    )
-
-  })
-
-})
+## Fold ids outside the retained fold models are refused at predict()'s door
+## (the test above), so cv_plus_bounds() no longer checks them.

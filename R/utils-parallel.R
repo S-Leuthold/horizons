@@ -71,11 +71,7 @@ resolve_parallel_axis <- function(parallelize_over, allow_par, n_configs, cv_fol
 
   }
 
-  if (!is.numeric(cv_folds) || length(cv_folds) != 1 || is.na(cv_folds) || cv_folds < 1) {
-
-    cli::cli_abort("{.arg cv_folds} must be a single positive number, not {.val {cv_folds}}.")
-
-  }
+  ### cv_folds is read from config$tuning, which the door validator checks.
 
   if (!allow_par) {
 

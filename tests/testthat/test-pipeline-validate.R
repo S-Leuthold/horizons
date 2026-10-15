@@ -390,16 +390,13 @@ describe("validate() outcome checks", {
 
   ## Gating behavior -----------------------------------------------------------
 
-  test_that("skips P003/P004/P006 when no outcome in role_map", {
+  test_that("refuses at its door a configured object with no outcome role", {
 
-    hd     <- make_configured_hd(has_outcome = FALSE)
-    result <- quiet_validate(hd)
+    ## configure() always assigns one, so the object was edited by hand
+    hd  <- make_configured_hd(has_outcome = FALSE)
+    err <- expect_error(quiet_validate(hd), class = "horizons_error_validation")
 
-    check_ids <- result$validation$checks$check_id
-    expect_false("P003" %in% check_ids)
-    expect_false("P004" %in% check_ids)
-    expect_false("P006" %in% check_ids)
-    expect_equal(length(result$validation$outliers$response_ids), 0)
+    expect_true(any(grepl("configured but has no outcome role", err$findings, fixed = TRUE)))
 
   })
 

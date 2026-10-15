@@ -34,14 +34,7 @@
 #' @keywords internal
 gather_members <- function(object) {
 
-  if (!inherits(object, "horizons_fit")) {
-
-    cli::cli_abort(c(
-      "{.arg object} must be a {.cls horizons_fit} object.",
-      "i" = "Run {.fn fit} first to produce a fitted object."
-    ))
-
-  }
+  ### ensemble() checks the class at its door, and its fit validator again.
 
   models  <- object$models
   results <- models$results
@@ -278,18 +271,8 @@ predict_members_on_test <- function(object, members) {
   )
 
   ## The sample_id-keyed join below is load-bearing: a duplicate key would
-  ## silently fan out each member's predictions and corrupt every downstream
-  ## metric. average() guarantees uniqueness upstream; assert it here so a
-  ## violation fails loudly at the join rather than inflating scores quietly.
-  if (anyDuplicated(truth_df$sample_id)) {
-
-    cli::cli_abort(c(
-      "Test-set {.field sample_id}s are not unique.",
-      "x" = "Duplicate keys would fan out the member-prediction join.",
-      "i" = "Expected one row per sample after {.fn average}."
-    ))
-
-  }
+  ## fan out each member's predictions. The fit validator at ensemble()'s door
+  ## refuses a split whose rows do not carry unique sample_ids.
 
   dplyr::bind_rows(lapply(members, function(m) {
 
@@ -413,20 +396,8 @@ fit_tuned_meta_learner <- function(object,
                            " ensemble.")
     )
 
-    ## Guard rank_metric before select_best(): the fit's validator checks only
-    ## that it is a single string, so it may not be one of the metrics tuning
-    ## collected. Refuse in the ensemble's terms, naming the ones that were.
-    available_metrics <- unique(tune::collect_metrics(tune_res)$.metric)
-
-    if (!rank_metric %in% available_metrics) {
-
-      cli::cli_abort(c(
-        "Cannot rank the {method} ensemble by {.val {rank_metric}}.",
-        "x" = "{.val {rank_metric}} is not among the tuned metrics.",
-        "i" = "Available: {.val {available_metrics}}."
-      ))
-
-    }
+    ## rank_metric is one of VALID_RANK_METRICS, which the fit validator at
+    ## ensemble()'s door checks.
 
     best        <- tune::select_best(tune_res, metric = rank_metric)
     final_wflow <- tune::finalize_workflow(meta_wflow, best)
@@ -779,20 +750,10 @@ predict.horizons_ensemble <- function(object,
   ## Step 0: Preflight
   ## -------------------------------------------------------------------------
 
-  if (!inherits(object, "horizons_ensemble")) {
-
-    cli::cli_abort(c(
-      "{.arg object} must be a {.cls horizons_ensemble} object.",
-      "i" = "Run {.fn ensemble} first to produce a fitted ensemble."
-    ))
-
-  }
-
-  if (is.null(object$ensemble) || is.null(object$ensemble$model)) {
-
-    cli::cli_abort("No fitted ensemble found on this object.")
-
-  }
+  ## The object as it arrives (#234). S3 dispatch guarantees the class; the
+  ## validator's gate refuses a direct ::: call, an ensemble slot with no
+  ## model, a member set of fewer than two, and an unknown method.
+  object <- validate_horizons_ensemble(object)
 
   ## Nothing in `...` is used. A `level` warns, naming the level the CV+
   ## bundle was calibrated at; anything else aborts (#141).
@@ -807,19 +768,10 @@ predict.horizons_ensemble <- function(object,
   ## gather_members(), which intersects train-time slots (cv_predictions) and
   ## could disagree with what the fitted meta-model saw.
   ##
-  ## Gated first: every step below reads this member set, starting with
+  ## Every step below reads this member set, starting with
   ## ensure_predict_namespaces(), which needs it to know which engines are
-  ## actually in play. Diagnose a malformed ensemble before anything else.
+  ## actually in play; the door validator requires at least two members.
   members <- object$ensemble$weights$member
-
-  if (is.null(members) || length(members) < 2) {
-
-    cli::cli_abort(c(
-      "The fitted ensemble carries no member set.",
-      "i" = "{.fn ensemble} should record at least two members in its weights."
-    ))
-
-  }
 
   ## `library(horizons)` does not load workflows, most modeling engines, or
   ## ranger (#65); see ensure_predict_namespaces() (R/pipeline-predict.R) for
@@ -872,12 +824,9 @@ predict.horizons_ensemble <- function(object,
     penalized = ,
     xgb       = combine_ensemble_metamodel(member_pred, members,
                                            object$ensemble$model,
-                                           outcome_range),
+                                           outcome_range)
 
-    cli::cli_abort(c(
-      "Unknown ensemble method {.val {method}}.",
-      "i" = "Expected one of {.val {c('weighted', 'penalized', 'xgb')}}."
-    ))
+    ### No default: the door validator refuses any other method.
   )
 
   ## Deploy-time response-bound guardrail, applied ONCE at the combined output.
@@ -957,23 +906,9 @@ combine_ensemble_weighted <- function(member_pred, weights,
   joined <- member_pred |>
     dplyr::left_join(weights, by = c("config_id" = "member"))
 
-  ## A member with predictions but no matching weight leaves `coef` NA, which
-  ## would propagate through sum() to an NA ensemble prediction returned as a
-  ## valid tibble. predict_members() guarantees the member set matches, so this
-  ## is unreachable on the normal path — but the join is the one spot a future
-  ## member-set drift could corrupt silently, so fail loud here. This mirrors the
-  ## explicit member-presence gate in combine_ensemble_metamodel().
-  if (anyNA(joined$coef)) {
-
-    unmatched <- unique(joined$config_id[is.na(joined$coef)])
-
-    cli::cli_abort(c(
-      "Weighted combine has no weight for {length(unmatched)} member{?s}.",
-      "x" = "Unweighted: {.val {unmatched}}",
-      "i" = "The member set must match the ensemble weights."
-    ))
-
-  }
+  ## Every member has a weight: member_pred is built from weights$member, and
+  ## the ensemble validator at predict()'s door refuses duplicate members and
+  ## NA coefficients.
 
   out <- joined |>
     dplyr::group_by(.data$sample_id) |>

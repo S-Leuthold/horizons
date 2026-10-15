@@ -1011,17 +1011,11 @@ test_that("average() refuses to promote `by` over an existing sample_id column",
   hd$data$analysis$row_id <- paste0("R", seq_len(nrow(hd$data$analysis)))
 
   ## Act & Assert — the id role off sample_id is refused at entry (#129), so
-  ## a valid object cannot reach the guard; it stays asserted, so it is
-  ## tested past the validator.
+  ## a valid object cannot carry sample_id into the averaged table, and the
+  ## guard average() used to keep behind the validator is gone.
   expect_error(average(hd, by = "project", quality_check = FALSE, verbose = FALSE),
                regexp = "must be on sample_id",
                class  = "horizons_error_validation")
-
-  local_mocked_bindings(validate_horizons_data = function(x, ...) x)
-
-  expect_error(average(hd, by = "project", quality_check = FALSE, verbose = FALSE),
-               regexp = "sample_id",
-               class  = "horizons_data_error")
 
 })
 

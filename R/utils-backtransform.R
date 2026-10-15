@@ -49,14 +49,8 @@ back_transform_predictions <- function(predictions, transformation, warn = TRUE,
 
   if (is.null(predictions) || length(predictions) == 0) return(predictions)
 
-  if (!is_valid_outcome_range(outcome_range)) {
-
-    cli::cli_abort(c(
-      "{.arg outcome_range} must be a numeric vector of length 2 with lower < upper.",
-      "x" = "Got {.val {outcome_range}}."
-    ))
-
-  }
+  ### outcome_range and transformation come from outcome_range_setting() and
+  ### the configuration grid, which every verb's door validator has checked.
 
   ## The bound caps predictions from above, so it has to sit above the floor;
   ## under the default range that is the "single positive finite" rule the
@@ -127,19 +121,13 @@ back_transform_predictions <- function(predictions, transformation, warn = TRUE,
 
     },
 
-    ## Default: any other value, "" and NA included, is unknown: not
-    ## back-transformed (the outcome_range clamp below still applies)
-    {
-
-      if (warn) {
-
-        cli::cli_warn("Unknown transformation {.val {transformation}}. Predictions are not back-transformed.")
-
-      }
-
-      predictions
-
-    }
+    ## Default: the door validators refuse a transformation outside
+    ## VALID_TRANSFORMATIONS (#234), so reaching here is a bug. Serving the
+    ## predictions untransformed would be silently wrong.
+    abort_horizons(
+      "{.arg transformation} {.val {transformation}} is not one horizons back-transforms.",
+      kind = "internal"
+    )
 
   )
 

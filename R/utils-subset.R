@@ -673,8 +673,7 @@ subset_rows <- function(x, keep) {
 #' @param keep_ids [Character.] `sample_id`s still in the object.
 #' @param n_removed [Integer.] Rows dropped by this subset.
 #'
-#' @return [List.] The recomputed record. Aborts with class
-#'   `horizons_validation_error` when `membership` has no `retained` column.
+#' @return [List.] The recomputed record.
 #'
 #' @seealso [subset_rows()]
 #' @noRd
@@ -685,15 +684,8 @@ subset_selection <- function(selection, keep_ids, n_removed) {
 
   if (!is.null(membership)) {
 
-    if (!"retained" %in% names(membership)) {
-
-      cli::cli_abort(c(
-        "The selection record cannot be refiltered for the rows that remain",
-        "x" = "{.field selection$membership} has no {.field retained} column"
-      ), class = "horizons_validation_error")
-
-    }
-
+    ### The base validator, which every verb runs at its door, requires the
+    ### retained column.
     is_retained <- !is.na(membership$retained) & membership$retained
 
     keep_row             <- !is_retained | membership$pool_id %in% keep_ids

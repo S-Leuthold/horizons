@@ -213,6 +213,13 @@ fit <- function(x,
 
   }
 
+  ## The object as it arrives (#234): on the evaluate() path its evaluation
+  ## record, and through it the base contract; on a cold start the base
+  ## contract. A record from an earlier version, or one edited by hand, is
+  ## refused here, before the checks below read it and before anything is
+  ## re-tuned.
+  x <- if (cold_start) validate_horizons_data(x) else validate_horizons_eval(x)
+
   ## The outcome has to lie inside the range every prediction is clamped to,
   ## checked on either path before anything is drawn or fitted (#76).
   ## configure() and evaluate() check it too, but an object configured before
@@ -232,27 +239,6 @@ fit <- function(x,
   ## ranks backwards once the mean outcome can be negative.
   check_rank_metric_range(metric %||% x$evaluation$rank_metric, outcome_range,
                           verb = "fit")
-
-  ## On the evaluate() path the evaluation record is reused as it is, and the
-  ## fit validator at return requires every key evaluate() writes. Checked
-  ## here, so a record from an earlier version is refused before anything is
-  ## re-tuned rather than after every member has been fitted, and before the
-  ## checks below read it.
-  if (!cold_start) {
-
-    missing_keys <- setdiff(contract_keys("evaluation"), names(x$evaluation))
-
-    if (length(missing_keys) > 0) {
-
-      cli::cli_abort(c(
-        "{.fn fit} needs the evaluation record {.fn evaluate} writes.",
-        "x" = "{.field evaluation} is missing {.field {missing_keys}}.",
-        "i" = "The object was evaluated by an earlier version of horizons, or built by hand. Re-run {.fn evaluate} on it."
-      ), class = "horizons_validation_error")
-
-    }
-
-  }
 
   ## evaluate() scored and ranked the configurations under the range it
   ## stamped on each row; members chosen and warm-started under another range
@@ -277,24 +263,13 @@ fit <- function(x,
 
   }
 
-  ## validate_horizons_fit() (at return) runs the base validator too, but
-  ## only after every model is fitted. Checking here refuses a malformed
-  ## table first: a column added after configure() without a role_map entry
-  ## would otherwise reach build_recipe()'s `outcome ~ .` as an unregistered
-  ## predictor (#24). Full stage: an object this far into the pipeline is
-  ## expected to have unique, non-NA sample ids.
-
-  x <- validate_horizons_data(x)
+  ## The door validation above has refused a malformed table (a column added
+  ## after configure() without a role_map entry would otherwise reach
+  ## build_recipe()'s `outcome ~ .` as an unregistered predictor, #24), and,
+  ## on the evaluate() path, results with no rows; a cold start builds its
+  ## one row.
 
   eval_results <- x$evaluation$results
-
-  if (is.null(eval_results) || nrow(eval_results) == 0) {
-
-    rlang::abort(
-      "No evaluation results found. Run `evaluate()` before `fit()`."
-    )
-
-  }
 
   ## -----------------------------------------------------------------------
   ## Step 0b: Parallel backend
@@ -420,17 +395,9 @@ fit <- function(x,
   ## object's columns as they are now. On a cold start the split was drawn in
   ## Step 0 from these rows, by the draw evaluate() uses, so it passes.
 
+  ### An rsplit: the eval validator at the door refuses anything else, and a
+  ### cold start draws one.
   split_F <- x$evaluation$split
-
-  if (!inherits(split_F, "rsplit")) {
-
-    cli::cli_abort(c(
-      "{.fn fit} scores on {.fn evaluate}'s split, and this object has none.",
-      "x" = "{.field evaluation$split} is {.obj_type_friendly {split_F}}, not an {.cls rsplit}.",
-      "i" = "Run {.fn evaluate} on the object before {.fn fit}."
-    ), class = "horizons_input_error")
-
-  }
 
   id_col <- id_column(role_map)
 
@@ -1240,7 +1207,7 @@ cold_start_evaluation <- function(x, metric, seed, call = rlang::caller_env()) {
   ## same helper, so a cold start leaves out the rows evaluate() would. The
   ## request is read first, as evaluate() reads it, so one that cannot apply
   ## is refused before anything is drawn.
-  trim_request <- response_trim_request(x, outcome_col, call = call)
+  trim_request <- response_trim_request(x)
 
   drawn <- draw_eval_split(modelled$data, outcome_col, seed)
 

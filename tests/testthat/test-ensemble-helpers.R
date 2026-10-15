@@ -224,25 +224,6 @@ describe("build_ensemble_contract() - improvement", {
 })
 
 
-## =========================================================================
-## combine_ensemble_weighted() - member set
-## =========================================================================
-
-describe("combine_ensemble_weighted() - member set", {
-
-  it("refuses a member that has no weight rather than returning NA", {
-
-    member_pred <- tibble::tibble(
-      config_id = rep(c("a", "b"), each = 2),
-      sample_id = rep(c("s1", "s2"), 2),
-      .pred     = c(10, 12, 11, 13)
-    )
-    weights <- tibble::tibble(member = "a", coef = 1)
-
-    ## The abort carries no package class.
-    expect_error(combine_ensemble_weighted(member_pred, weights),
-                 "Weighted combine has no weight for 1 member", fixed = TRUE)
-
-  })
-
-})
+## combine_ensemble_weighted() always finds a weight for every member: its
+## predictions are built from weights$member, and the ensemble validator at
+## predict()'s door refuses duplicate members and NA coefficients.

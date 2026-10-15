@@ -234,7 +234,7 @@ describe("ensemble() - preflight validation", {
 
     ## The fit contract: a models slot missing a key
     no_ad <- fitted
-    no_ad$models$ad <- NULL
+    no_ad$models["ad"] <- list(NULL)
 
     expect_error(
       suppressMessages(capture.output(
@@ -554,8 +554,9 @@ describe("ensemble() and predict.horizons_ensemble() - member AD and intervals",
       ad_thresholds = c(q25 = 1, q50 = 2, q75 = 3, ood = 4)
     )), member)
 
-    ## Not a UQ bundle. Member scoring asks for no intervals, so it is never read.
-    broken$models$uq <- stats::setNames(list(list(method = "not a bundle")), member)
+    ## Not a UQ bundle beyond the level the fit validator checks. Member
+    ## scoring asks for no intervals, so it is never read.
+    broken$models$uq <- stats::setNames(list(list(method = "not a bundle", level_default = 0.9)), member)
 
     expect_no_warning(
       ens <- keep_only_warning(
@@ -585,9 +586,10 @@ describe("predict.horizons_ensemble() - preflight", {
     fitted   <- ens_fitted()
     test_set <- ens_test_set()
 
-    ## The abort carries no package class.
-    expect_error(predict.horizons_ensemble(fitted, test_set),
-                 "`object` must be a <horizons_ensemble> object", fixed = TRUE)
+    ## A direct call skips S3 dispatch; the door's gate still refuses it
+    err <- expect_error(predict.horizons_ensemble(fitted, test_set),
+                        class = "horizons_error_validation")
+    expect_true(any(grepl("is not a <horizons_ensemble> object", err$findings, fixed = TRUE)))
 
   })
 
@@ -602,11 +604,14 @@ describe("predict.horizons_ensemble() - preflight", {
     no_slot <- ens
     no_slot$ensemble <- NULL
 
-    ## The abort carries no package class.
-    expect_error(predict(no_model, test_set, interval = FALSE),
-                 "No fitted ensemble found on this object", fixed = TRUE)
-    expect_error(predict(no_slot, test_set, interval = FALSE),
-                 "No fitted ensemble found on this object", fixed = TRUE)
+    ## Refused at the door, naming what is missing (#234)
+    err <- expect_error(predict(no_model, test_set, interval = FALSE),
+                        class = "horizons_error_validation")
+    expect_true(any(grepl("Contract keys missing from ensemble: model", err$findings, fixed = TRUE)))
+
+    err <- expect_error(predict(no_slot, test_set, interval = FALSE),
+                        class = "horizons_error_validation")
+    expect_true(any(grepl("no ensemble slot", err$findings, fixed = TRUE)))
 
   })
 
@@ -762,8 +767,9 @@ describe("predict.horizons_ensemble() - no member set", {
 
     ens$ensemble$weights <- ens$ensemble$weights[0, ]
 
-    expect_error(predict(ens, test_set, interval = FALSE),
-                 "carries no member set")
+    err <- expect_error(predict(ens, test_set, interval = FALSE),
+                        class = "horizons_error_validation")
+    expect_true(any(grepl("weights needs at least 2 members; found 0", err$findings, fixed = TRUE)))
 
   })
 

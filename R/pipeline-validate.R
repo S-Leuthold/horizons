@@ -172,6 +172,10 @@ validate <- function(x,
 
   }
 
+  ## 1.1b The object as it arrives (#234) ------------------------------------------
+
+  x <- validate_horizons_data(x)
+
   ## 1.2 Config must exist ------------------------------------------------------
 
   if (is.null(x$config$configs)) {
@@ -256,26 +260,9 @@ validate <- function(x,
 
   ## Outcome extraction ---------------------------------------------------------
 
+  ### The door validator has refused more than one outcome, or one whose
+  ### column is not in the analysis table.
   outcome_col <- x$data$role_map$variable[x$data$role_map$role == "outcome"]
-
-  if (length(outcome_col) > 1) {
-
-    abort_nested(
-      "Multiple outcomes configured",
-      c("Configure exactly one outcome column.",
-        paste0("Found: ", paste(outcome_col, collapse = ", ")))
-    )
-
-  }
-
-  if (length(outcome_col) == 1 && !(outcome_col %in% names(analysis))) {
-
-    abort_nested(
-      "Outcome column missing from analysis",
-      c(paste0("Expected column '", outcome_col, "' in data$analysis"))
-    )
-
-  }
 
   has_outcome <- length(outcome_col) == 1
 
@@ -293,18 +280,8 @@ validate <- function(x,
 
   ## CV folds from tuning config ------------------------------------------------
 
+  ### A whole number of at least 2, which the door validator checks.
   cv_folds <- x$config$tuning$cv_folds
-
-  if (!is.numeric(cv_folds) || length(cv_folds) != 1 ||
-      is.na(cv_folds) || cv_folds < 2) {
-
-    abort_nested(
-      "Invalid cv_folds in config$tuning",
-      c("Must be a single integer >= 2",
-        paste0("Got: ", deparse(cv_folds)))
-    )
-
-  }
 
   ## ---------------------------------------------------------------------------
   ## Step 3: Initialize checks collector

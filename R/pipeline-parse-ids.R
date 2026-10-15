@@ -118,6 +118,11 @@ parse_ids <- function(x,
 
   }
 
+  ## The object as it arrives (#234), at the raw stage: replicate scans share
+  ## ids until average() collapses them.
+
+  x <- validate_horizons_data(x, stage = "raw")
+
   ## Refuse a promoted object ------------------------------------------------
   ## Rewriting sample_id is a row change: evaluation and model splits are
   ## keyed to the ids this would rewrite.

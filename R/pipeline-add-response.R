@@ -148,6 +148,10 @@ add_response <- function(x,
 
   }
 
+  ## 1.1b The object as it arrives (#234) ------------------------------------------
+
+  x <- validate_horizons_data(x)
+
   ## 1.2 source type check -----------------------------------------------------
 
   is_path   <- is.character(source) && length(source) == 1

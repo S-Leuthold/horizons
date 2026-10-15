@@ -97,25 +97,21 @@ describe("fit() - preflight validation", {
 
   it("aborts when the evaluation record has no results", {
 
-    ## The key is present, so the missing-keys check passes, but the table is
-    ## NULL or has no rows.
+    ## The key is present, but the table is NULL or has no rows: the eval
+    ## validator at fit()'s door refuses both.
     obj <- mfo()
 
     no_results <- obj
     no_results$evaluation["results"] <- list(NULL)
 
-    expect_error(
-      fit(no_results, verbose = FALSE),
-      "No evaluation results found"
-    )
+    err <- expect_error(fit(no_results, verbose = FALSE), class = "horizons_error_validation")
+    expect_true(any(grepl("results must be a data frame", err$findings, fixed = TRUE)))
 
     no_rows <- obj
     no_rows$evaluation$results <- no_rows$evaluation$results[0, ]
 
-    expect_error(
-      fit(no_rows, verbose = FALSE),
-      "No evaluation results found"
-    )
+    err <- expect_error(fit(no_rows, verbose = FALSE), class = "horizons_error_validation")
+    expect_true(any(grepl("results has no rows", err$findings, fixed = TRUE)))
 
   })
 
@@ -716,26 +712,27 @@ describe("fit() - scores on evaluate()'s split", {
       class = "horizons_input_error"
     )
 
-    ## A record without the key is refused with the other missing evaluation
-    ## keys; one whose split is not an rsplit, by the split check itself.
+    ## A record without the key, or with a split that is not an rsplit, is
+    ## refused by the eval validator at fit()'s door.
     no_split <- obj
     no_split$evaluation$split <- NULL
 
-    expect_error(
+    err <- expect_error(
       fit(no_split, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE,
           verbose = FALSE),
-      "missing split",
-      class = "horizons_validation_error"
+      class = "horizons_error_validation"
     )
+    expect_true(any(grepl("Metadata keys missing from evaluation: split", err$findings, fixed = TRUE)))
 
     bad_split <- obj
     bad_split$evaluation$split <- "an rsplit"
 
-    expect_error(
+    err <- expect_error(
       fit(bad_split, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE,
           verbose = FALSE),
-      class = "horizons_input_error"
+      class = "horizons_error_validation"
     )
+    expect_true(any(grepl("split must be an <rsplit> object", err$findings, fixed = TRUE)))
 
   })
 

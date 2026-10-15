@@ -341,11 +341,11 @@ test_that("add_response() errors on duplicate keys in horizons (pre-average)", {
 
   ## Act & Assert ----------------------------------------------------------
 
-  expect_error(
-    add_response(hd, lab, variable = "SOC"),
-    "Duplicate sample IDs found in horizons data", fixed = TRUE,
-    class = "horizons_input_error"
-  )
+  ## Refused at the door: average() collapses replicates before responses
+  ## are joined
+  err <- expect_error(add_response(hd, lab, variable = "SOC"),
+                      class = "horizons_error_validation")
+  expect_true(any(grepl("Duplicate sample_id values: S001", err$findings, fixed = TRUE)))
 
 })
 
@@ -393,14 +393,16 @@ test_that("add_response() refuses NA keys on one side, counting them (#139)", {
   expect_match(conditionMessage(err), "2 in source")
   expect_no_match(conditionMessage(err), "horizons data")
 
-  ## Horizons side only, on the default sample_id key
-  hd  <- make_test_hd(c("S001", NA, "S003"))
-  lab <- tibble::tibble(sample_id = c("S001", "S002", "S003"), SOC = c(1.2, 3.4, 5.6))
+  ## Horizons side only, on a meta key (an NA sample_id is refused at the
+  ## door, before the join)
+  hd  <- with_site(make_test_hd(), c("A", NA, "C"))
+  lab <- tibble::tibble(site = c("A", "B", "C"), SOC = c(1.2, 3.4, 5.6))
 
-  err <- expect_error(add_response(hd, lab, variable = "SOC"),
+  err <- expect_error(add_response(hd, lab, variable = "SOC", by = "site"),
                       class = "horizons_input_error")
 
   expect_match(conditionMessage(err), "1 in horizons data")
+  expect_no_match(conditionMessage(err), "in source")
 
 })
 

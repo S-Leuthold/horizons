@@ -319,13 +319,8 @@ describe("tuning_metric_set()", {
 
   })
 
-  it("aborts on an unknown transformation instead of scoring cross-scale", {
-
-    expect_error(tuning_metric_set("boxcox"), "Unknown")
-    expect_error(tuning_metric_set(NA_character_), "single non-missing")
-    expect_error(tuning_metric_set(c("log", "sqrt")), "single non-missing")
-
-  })
+  ## An unknown transformation is refused at every verb's door, before a
+  ## metric set is built (config_findings(), test-class-core.R; #234).
 
   it("aborts on an unknown metric name", {
 

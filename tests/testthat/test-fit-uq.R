@@ -22,26 +22,8 @@ describe("compute_c_alpha() - basic contract", {
 
   })
 
-  it("rejects level = 0 and level = 1 (outside valid range), and a level that is not a single number", {
-
-    expect_error(
-      compute_c_alpha(scores, level = 0),
-      "level must be"
-    )
-
-    expect_error(
-      compute_c_alpha(scores, level = 1),
-      "level must be"
-    )
-
-    ## The abort carries no package class, so its text is the check: R's own
-    ## errors for these inputs say something else, or nothing at all.
-    expect_error(compute_c_alpha(scores, level = c(0.9, 0.95)),
-                 "level must be a single numeric value in (0, 1).", fixed = TRUE)
-    expect_error(compute_c_alpha(scores, level = "0.9"),
-                 "level must be a single numeric value in (0, 1).", fixed = TRUE)
-
-  })
+  ## A level outside (0, 1) is refused at predict()'s door, where the stored
+  ## level_default is checked (test-class-core.R); fit_uq() passes a constant.
 
   it("refuses scores with no finite value", {
 

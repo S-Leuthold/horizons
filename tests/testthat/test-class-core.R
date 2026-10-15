@@ -1282,7 +1282,15 @@ make_valid_eval <- function() {
   )
 
   obj <- list(
-    config = list(configs = tibble::tibble(config_id = c("cfg_a", "cfg_b"))),
+    ## A grid and tuning the door validator accepts (config_findings())
+    config = list(
+      configs = tibble::tibble(config_id         = c("cfg_a", "cfg_b"),
+                               model             = c("rf", "plsr"),
+                               transformation    = "none",
+                               preprocessing     = "raw",
+                               feature_selection = "none"),
+      tuning  = list(cv_folds = 5L)
+    ),
     evaluation = list(
       results          = results,
       best_config      = "cfg_a",
@@ -1327,9 +1335,9 @@ make_valid_fit <- function() {
     cv_predictions    = tibble::tibble(),
     results           = results,
     split             = obj$evaluation$split,
-    uq                = list(cfg_a = list(quantile_model = 1)),
-    ad                = list(cfg_a = list(centroid = 1, cov_matrix = 1,
-                                          ad_thresholds = 1:4)),
+    uq                = list(cfg_a = list(quantile_model = 1, level_default = 0.9)),
+    ad                = list(cfg_a = list(centroid = c(f1 = 0), cov_matrix = matrix(1),
+                                          ad_thresholds = c(1, 2, 3, 4))),
     selection_present = FALSE,
     timestamp         = Sys.time(),
     runtime_secs      = 30.1
@@ -1481,12 +1489,14 @@ test_that("validate_horizons_ensemble accepts a well-formed CV+ uq bundle", {
 
   ## Arrange
   obj <- make_valid_ensemble()
+  ## 20 calibration rows, enough for intervals at 0.90 (n >= 19)
   obj$ensemble$uq <- list(
     method        = "cv_plus",
+    members       = obj$ensemble$weights$member,
     fold_models   = list(tibble::tibble(member = "cfg_a", coef = 1)),
-    calib         = tibble::tibble(.row = 1L, fold = 1L, .pred_oof = 1,
+    calib         = tibble::tibble(.row = 1:20, fold = 1L, .pred_oof = 1,
                                    truth = 1, residual = 0),
-    n_calib       = 1L,
+    n_calib       = 20L,
     level_default = 0.90
   )
 
@@ -2829,5 +2839,166 @@ test_that("print() and summary() name no member when best_config has no results 
     }
 
   }
+
+})
+
+
+## ----------------------------------------------------------------------------
+## The checks every verb's door makes (#234)
+## ----------------------------------------------------------------------------
+## Each was a check downstream, at the point a value was used; the validator
+## now refuses it at every verb's door, so predict() included. Each test
+## matches the finding's own text, since one condition carries every finding.
+
+## A configured horizons_data that passes the base validator
+configured_object <- function() {
+
+  obj <- make_valid_eval()
+  obj$data <- valid_data_slot()
+  class(obj) <- c("horizons_data", "list")
+  obj$evaluation <- NULL
+  obj
+
+}
+
+finding_of <- function(expr) {
+
+  err <- tryCatch(expr, horizons_error_validation = function(e) e)
+  if (!inherits(err, "horizons_error_validation")) return(character(0))
+  err$findings
+
+}
+
+describe("config_findings() at every verb's door", {
+
+  it("passes a configuration configure() could have written", {
+
+    obj <- configured_object()
+    expect_identical(validate_horizons_data(obj), obj)
+
+  })
+
+  it("refuses a model, transformation, preprocessing or feature selection it does not know (#199, #234)", {
+
+    for (column in c("model", "transformation", "preprocessing", "feature_selection")) {
+
+      obj <- configured_object()
+      obj$config$configs[[column]][1] <- "bogus"
+
+      expect_true(any(grepl(paste0("unknown ", column, " value \"bogus\""),
+                            finding_of(validate_horizons_data(obj)), fixed = TRUE)),
+                  label = column)
+
+    }
+
+    obj <- configured_object()
+    obj$config$configs$preprocessing <- NULL
+    expect_true(any(grepl("has no preprocessing column", finding_of(validate_horizons_data(obj)),
+                          fixed = TRUE)))
+
+  })
+
+  it("refuses an unusable outcome range and a fold count that is not a whole number of at least 2", {
+
+    obj <- configured_object()
+    obj$config$outcome_range <- c(5, 1)
+    expect_true(any(grepl("config$outcome_range is not a usable range",
+                          finding_of(validate_horizons_data(obj)), fixed = TRUE)))
+
+    for (bad in list(1, 2.5, NA_real_, "5", NULL)) {
+
+      obj <- configured_object()
+      obj$config$tuning["cv_folds"] <- list(bad)
+      expect_true(any(grepl("cv_folds must be a whole number of at least 2",
+                            finding_of(validate_horizons_data(obj)), fixed = TRUE)),
+                  label = deparse(bad))
+
+    }
+
+  })
+
+  it("refuses a configured object with no outcome role", {
+
+    obj <- configured_object()
+    obj$data$role_map$role[obj$data$role_map$role == "outcome"] <- "response"
+
+    expect_true(any(grepl("configured but has no outcome role",
+                          finding_of(validate_horizons_data(obj)), fixed = TRUE)))
+
+  })
+
+  it("leaves the configuration to configure(), which is the remedy for a bad one", {
+
+    obj <- configured_object()
+    obj$config$configs$model[1] <- "bogus"
+
+    expect_identical(validate_horizons_data(obj, config = FALSE), obj)
+
+  })
+
+})
+
+describe("the class validators' new checks (#234)", {
+
+  it("require the cross-validated columns fit() ranks by, and allow an NA best_config", {
+
+    obj <- make_valid_eval()
+    obj$evaluation$results$cv_rpd <- NULL
+    expect_true(any(grepl("no cross-validated column cv_rpd",
+                          finding_of(validate_horizons_eval(obj)), fixed = TRUE)))
+
+    ## No configuration has the ranking metric: the evaluation is returned
+    obj <- make_valid_eval()
+    obj$evaluation$best_config <- NA_character_
+    expect_identical(validate_horizons_eval(obj), obj)
+
+  })
+
+  it("refuse a fit whose rank metric, split ids, UQ level or AD bundle predict() cannot use", {
+
+    obj <- make_valid_fit()
+    obj$models$rank_metric <- "rpiq"
+    expect_true(any(grepl("rank_metric must be one of", finding_of(validate_horizons_fit(obj)),
+                          fixed = TRUE)))
+
+    for (bad in list(0, 1, NA_real_, NULL, "0.9")) {
+      obj <- make_valid_fit()
+      obj$models$uq$cfg_a["level_default"] <- list(bad)
+      expect_true(any(grepl("has no level_default in (0, 1)", finding_of(validate_horizons_fit(obj)),
+                            fixed = TRUE)), label = deparse(bad))
+    }
+
+    shapes <- list(
+      short_centroid = function(b) { b$centroid <- numeric(0); b },
+      cov_mismatch   = function(b) { b$cov_matrix <- diag(2); b },
+      three_thresh   = function(b) { b$ad_thresholds <- c(1, 2, 3); b },
+      unsorted       = function(b) { b$ad_thresholds <- c(1, 3, 2, 4); b }
+    )
+
+    for (name in names(shapes)) {
+      obj <- make_valid_fit()
+      obj$models$ad$cfg_a <- shapes[[name]](obj$models$ad$cfg_a)
+      expect_true(any(grepl("four non-decreasing ad_thresholds", finding_of(validate_horizons_fit(obj)),
+                            fixed = TRUE)), label = name)
+    }
+
+    ## Ties are allowed: quartiles of calibration distances can coincide
+    obj <- make_valid_fit()
+    obj$models$ad$cfg_a$ad_thresholds <- c(1, 2, 2, 4)
+    expect_identical(validate_horizons_fit(obj), obj)
+
+  })
+
+  it("refuse a split whose rows do not carry unique sample_ids", {
+
+    obj <- make_valid_fit()
+    obj$models$split <- structure(list(data = tibble::tibble(sample_id = c("A", "A")),
+                                       in_id = 1L, out_id = NA),
+                                  class = c("rsplit", "list"))
+
+    expect_true(any(grepl("do not carry unique sample_ids", finding_of(validate_horizons_fit(obj)),
+                          fixed = TRUE)))
+
+  })
 
 })
