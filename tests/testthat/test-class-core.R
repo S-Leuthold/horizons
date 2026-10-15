@@ -2339,6 +2339,8 @@ test_that("a refusal shows five findings, counts the rest, and keeps every one v
 
   err <- expect_error(abort_validation(findings), class = "horizons_error_validation")
   expect_identical(err$findings, findings)
+  expect_match(conditionMessage(err), "1 more finding not shown", fixed = TRUE)
+  expect_false(grepl("finding 6", conditionMessage(err), fixed = TRUE))
   expect_snapshot(abort_validation(findings), error = TRUE)
 
   ## The same through the validator, from a real column
