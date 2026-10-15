@@ -3008,6 +3008,52 @@ describe("the class validators' new checks (#234)", {
 
   })
 
+  it("require the failure class column on the evaluation and the members' results", {
+
+    obj <- make_valid_fit()
+    obj$evaluation$results$class <- NULL
+    expect_true(any(grepl("results has no character class column", finding_of(validate_horizons_eval(obj)),
+                          fixed = TRUE)))
+
+    obj <- make_valid_fit()
+    obj$models$results$class <- NULL
+    expect_true(any(grepl("results has no class column for its members' failures",
+                          finding_of(validate_horizons_fit(obj)), fixed = TRUE)))
+
+  })
+
+  it("take a recorded control only as NULL or a horizons_control", {
+
+    control <- structure(list(), class = "horizons_control")
+
+    obj <- make_valid_ensemble()
+    obj$evaluation$control <- control
+    obj$models$control     <- control
+    obj$ensemble$control   <- control
+    expect_identical(validate_horizons_ensemble(obj), obj)
+
+    for (slot in c("evaluation", "models", "ensemble")) {
+      obj <- make_valid_ensemble()
+      obj[[slot]]$control <- list(verbose = TRUE)
+      expect_true(any(grepl(paste0(slot, "$control must be NULL or a <horizons_control>"),
+                            finding_of(validate_horizons_ensemble(obj)), fixed = TRUE)), label = slot)
+    }
+
+  })
+
+  it("refuse an ensemble UQ bundle whose n_calib is not its calibration rows", {
+
+    obj <- make_valid_ensemble()
+    obj$ensemble$uq <- list(method = "cv_plus", members = obj$ensemble$weights$member,
+                            fold_models = list(tibble::tibble(member = "cfg_a", coef = 1)),
+                            calib = tibble::tibble(.row = 1:20, fold = 1L, .pred_oof = 1, truth = 1, residual = 0),
+                            n_calib = 19L, level_default = 0.9)
+
+    expect_true(any(grepl("uq$n_calib (19) does not match the rows of uq$calib (20)",
+                          finding_of(validate_horizons_ensemble(obj)), fixed = TRUE)))
+
+  })
+
 })
 
 
