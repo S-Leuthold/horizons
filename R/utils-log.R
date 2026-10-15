@@ -386,7 +386,7 @@ flatten_message <- function(message) {
   if (length(message) <= 1L) return(clean_message_text(message))
 
   bullets <- message[-1]
-  clean_message_text(c(message[1], paste0("• ", bullets)))
+  clean_message_text(c(message[1], paste0("\u2022 ", bullets)))
 
 }
 
