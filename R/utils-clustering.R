@@ -23,7 +23,7 @@
 #' @importFrom stats cor as.dist hclust cutree
 #' @importFrom purrr map_lgl map_chr
 #' @importFrom cli cli_abort cli_alert_warning
-#' @export
+#' @keywords internal
 
 cluster_spectral_predictors <- function(spectra_mat,
                                         k      = 300,

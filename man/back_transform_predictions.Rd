@@ -60,3 +60,4 @@ differs from it wherever a model extrapolated past the range (#53). The
 \code{upper_bound} guardrail is deliberately not applied the same way, because
 fit-time ranking must see raw upper-tail behaviour.
 }
+\keyword{internal}

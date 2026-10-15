@@ -19,7 +19,6 @@
 #' type = 7)`. The ceiling ensures conservative coverage for finite samples.
 #'
 #' @keywords internal
-#' @export
 compute_c_alpha <- function(scores, level) {
 
   if (!is.numeric(level) || length(level) != 1 || level <= 0 || level >= 1) {
@@ -87,7 +86,6 @@ compute_c_alpha <- function(scores, level) {
 #'   predictions or features do not have one row per row of `calib_data`.
 #'
 #' @keywords internal
-#' @export
 fit_uq <- function(fitted_workflow,
                    oof_predictions,
                    calib_data,

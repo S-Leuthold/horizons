@@ -147,7 +147,7 @@ check_arg <- function(check,
 #'   - `n_warnings`: Integer count of captured warnings.
 #'   - `n_messages`: Integer count of captured messages.
 #'
-#' @export
+#' @keywords internal
 safely_execute <- function(expr,
                            default_value      = NULL,
                            error_message      = NULL,
@@ -249,7 +249,7 @@ safely_execute <- function(expr,
 #' @param silent Logical. Suppress re-emitted warnings/messages? Default FALSE.
 #'
 #' @return The result from `safe_result`, or NULL if `abort_on_null = FALSE`.
-#' @export
+#' @keywords internal
 handle_results <- function(safe_result,
                            error_title   = "Operation failed",
                            error_hints   = NULL,
@@ -335,7 +335,6 @@ handle_results <- function(safe_result,
 #' @return Single-row tibble with config_id, status, error_message, metric
 #'   columns (all NA), and runtime_secs (NA).
 #' @keywords internal
-#' @export
 create_failed_result <- function(config_id, error = NULL) {
 
   ## Extract error message --------------------------------------------------

@@ -12,7 +12,6 @@
 #'
 #' @return A `parsnip` model specification with `mode = "regression"`.
 #' @keywords internal
-#' @export
 define_model_spec <- function(model) {
 
   switch(model,

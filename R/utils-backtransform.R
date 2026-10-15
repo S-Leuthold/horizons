@@ -42,7 +42,7 @@
 #'
 #' @return Numeric vector on the original response scale, clamped to
 #'   `outcome_range`.
-#' @export
+#' @keywords internal
 back_transform_predictions <- function(predictions, transformation, warn = TRUE,
                                        upper_bound   = NULL,
                                        outcome_range = c(0, Inf)) {
@@ -297,7 +297,6 @@ compute_response_bound <- function(y, outcome_range = DEFAULT_OUTCOME_RANGE) {
 #'   matched case-insensitively.
 #' @return Logical: `FALSE` for `"none"` and `NULL`, `TRUE` otherwise.
 #' @keywords internal
-#' @export
 needs_back_transformation <- function(transformation) {
 
   if (is.null(transformation)) return(FALSE)
@@ -325,7 +324,6 @@ needs_back_transformation <- function(transformation) {
 #' @return Tibble with `.metric`, `.estimator`, `.estimate` columns (6 rows).
 #'   Returns empty tibble if fewer than 2 complete cases.
 #' @keywords internal
-#' @export
 compute_original_scale_metrics <- function(truth, estimate) {
 
   ## Drop NA pairs --------------------------------------------------------

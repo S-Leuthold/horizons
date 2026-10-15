@@ -55,7 +55,6 @@
 #'   before tuning.
 #'
 #' @keywords internal
-#' @export
 fit_single_config <- function(config_row,
                               split_F,
                               cv_resamples,

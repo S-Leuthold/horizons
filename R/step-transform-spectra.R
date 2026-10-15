@@ -482,3 +482,26 @@ process_spectra_row <- function(input_vector, preprocessing, window_size = 9) {
   )
 
 }
+
+## ---------------------------------------------------------------------------
+## required_pkgs
+## ---------------------------------------------------------------------------
+
+#' Packages a worker needs to run step_transform_spectra()
+#'
+#' tune asks a workflow's steps which packages to load on each worker before
+#' it preps and bakes the recipe there. Without this method a worker that has
+#' not loaded horizons cannot find the step's prep() and bake() methods.
+#'
+#' @param x A `step_transform_spectra` step.
+#' @param ... Not used.
+#' @return Character: the packages the step calls, and horizons.
+#' @importFrom recipes required_pkgs
+#' @keywords internal
+#' @noRd
+#' @export
+required_pkgs.step_transform_spectra <- function(x, ...) {
+
+  c("prospectr", "horizons")
+
+}
