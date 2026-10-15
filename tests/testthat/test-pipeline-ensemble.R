@@ -1002,7 +1002,7 @@ describe("combine_ensemble_metamodel() - row alignment", {
     })
 
     expect_error(combine_ensemble_metamodel(member_pred, c("a", "b"), meta),
-                 "Meta-model predictions", class = "horizons_internal_error")
+                 "Meta-model predictions", class = "horizons_error_internal")
 
   })
 
@@ -1043,7 +1043,7 @@ describe("combine_ensemble_metamodel() - row alignment", {
     expect_error(
       suppressWarnings(ensemble(fitted, method = "penalized", optimize = FALSE,
                                 compute_uq = FALSE, verbose = FALSE)),
-      "Meta-model predictions", class = "horizons_internal_error"
+      "Meta-model predictions", class = "horizons_error_internal"
     )
 
   })
@@ -1064,7 +1064,7 @@ describe("combine_ensemble_metamodel() - row alignment", {
     expect_error(
       suppressWarnings(ensemble(fitted, method = "penalized", optimize = FALSE,
                                 compute_uq = FALSE, verbose = FALSE)),
-      "Meta-model out-of-fold predictions", class = "horizons_internal_error"
+      "Meta-model out-of-fold predictions", class = "horizons_error_internal"
     )
 
   })

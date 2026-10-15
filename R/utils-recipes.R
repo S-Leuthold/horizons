@@ -47,7 +47,6 @@
 #'
 #' @return A `recipes::recipe` object ready for `workflows::add_recipe()`.
 #' @keywords internal
-#' @export
 build_recipe <- function(config_row,
                          train_data,
                          role_map,

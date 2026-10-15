@@ -19,7 +19,6 @@
 #' type = 7)`. The ceiling ensures conservative coverage for finite samples.
 #'
 #' @keywords internal
-#' @export
 compute_c_alpha <- function(scores, level) {
 
   if (!is.numeric(level) || length(level) != 1 || level <= 0 || level >= 1) {
@@ -82,12 +81,11 @@ compute_c_alpha <- function(scores, level) {
 #' @return Named list with fields: `quantile_model`, `scores`, `n_calib`,
 #'   `level_default`, `oof_coverage`, `mean_width`, `prepped_recipe`.
 #'   Returns NULL if calibration set is too small (`n < N_CALIB_MIN`).
-#'   Aborts with class `horizons_internal_error` when an out-of-fold `.row`
+#'   Aborts with class `horizons_error_internal` when an out-of-fold `.row`
 #'   falls outside the rows the model was fit on, or when the calibration
 #'   predictions or features do not have one row per row of `calib_data`.
 #'
 #' @keywords internal
-#' @export
 fit_uq <- function(fitted_workflow,
                    oof_predictions,
                    calib_data,

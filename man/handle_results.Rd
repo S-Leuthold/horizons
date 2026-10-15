@@ -34,3 +34,4 @@ result (optionally re-emitting captured warnings). On failure, either
 returns NULL or aborts with a structured error message, depending on
 \code{abort_on_null}.
 }
+\keyword{internal}

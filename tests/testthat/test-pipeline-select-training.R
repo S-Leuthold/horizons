@@ -1572,7 +1572,7 @@ test_that("select_training() refuses to bind the provenance columns to reordered
   })
 
   expect_error(quiet_select(fx, k = 5), "Provenance columns",
-               class = "horizons_internal_error")
+               class = "horizons_error_internal")
 
 })
 
@@ -1599,10 +1599,10 @@ test_that("rebuild_predictors() refuses a matrix whose rows are not the analysis
   n  <- nrow(pm$matrix)
 
   expect_error(rebuild_predictors(fx$pool, pm$matrix[rev(seq_len(n)), ], pm$wavenumbers),
-               "Reconciled spectra", class = "horizons_internal_error")
+               "Reconciled spectra", class = "horizons_error_internal")
 
   expect_error(rebuild_predictors(fx$pool, pm$matrix[-1, ], pm$wavenumbers),
-               "Got 59 rows for 60", class = "horizons_internal_error")
+               "Got 59 rows for 60", class = "horizons_error_internal")
 
   out <- rebuild_predictors(fx$pool, pm$matrix, pm$wavenumbers)
   expect_identical(out$data$analysis$sample_id, fx$pool$data$analysis$sample_id)

@@ -36,3 +36,4 @@ head(result$reduced_mat)
 }
 
 }
+\keyword{internal}

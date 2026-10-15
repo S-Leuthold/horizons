@@ -775,7 +775,7 @@ resolve_config_ids <- function(object, config) {
 #'   returns. With `ad = FALSE` there is nothing to abstain on, so
 #'   `abstain_ood` is not applied.
 #' @return A tibble: sample_id, config_id, .pred (+ interval + AD columns).
-#'   Aborts with class `horizons_internal_error` when the predictions, the
+#'   Aborts with class `horizons_error_internal` when the predictions, the
 #'   interval columns or the AD columns do not have one row per row of
 #'   `new_spectra`, since all three are attached to its rows by position.
 #' @keywords internal
@@ -1051,7 +1051,7 @@ predict_members <- function(object, members, new_spectra) {
 #' @param outcome_range Numeric length-2 vector the bounds are clamped to,
 #'   from [outcome_range_setting()]. Default `DEFAULT_OUTCOME_RANGE`.
 #' @return Tibble of interval columns, or NULL if quantile prediction fails.
-#'   Aborts with class `horizons_internal_error` when `point_pred` or the
+#'   Aborts with class `horizons_error_internal` when `point_pred` or the
 #'   baked features do not have one row per row of `new_spectra`.
 #' @keywords internal
 #' @noRd

@@ -30,15 +30,6 @@ utils::globalVariables(c(".metric", ".estimate"))
 .onLoad <- function(libname, pkgname) {
 
   ## ---------------------------------------------------------------------------
-  ## Ensure recipes selectors resolve
-  ## ---------------------------------------------------------------------------
-
-  ## all_outcomes() / all_predictors() quosures resolve against recipes, which
-  ## is a declared Import. Loading it here keeps those selectors available.
-
-  requireNamespace("recipes", quietly = TRUE)
-
-  ## ---------------------------------------------------------------------------
   ## Ensure parsnip engine-extension packages are available
   ## ---------------------------------------------------------------------------
 

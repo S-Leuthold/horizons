@@ -24,7 +24,7 @@ Remotes:
     spectral-cockpit/opusreader2
 Imports:
     butcher,
-    cli,
+    cli (>= 3.4.0),
     cluster,
     corpcor,
     data.table,
@@ -46,7 +46,7 @@ Imports:
     ranger,
     readr,
     recipes,
-    rlang,
+    rlang (>= 1.2.0),
     rsample (>= 1.3.2),
     rules,
     stats,
@@ -61,7 +61,7 @@ Imports:
     zoo
 Roxygen: list(markdown = TRUE)
 Suggests:
-    testthat (>= 3.0.0),
+    testthat (>= 3.3.0),
     withr,
     Boruta,
     bonsai,
@@ -88,6 +88,7 @@ Collate:
     'class-core.R'
     'metrics.R'
     'utils-errors.R'
+    'utils-log.R'
     'utils-backtransform.R'
     'utils-clustering.R'
     'utils-models.R'

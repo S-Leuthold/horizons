@@ -396,3 +396,26 @@ print.step_select_boruta <- function(x,
 }
 
 
+
+## ---------------------------------------------------------------------------
+## required_pkgs
+## ---------------------------------------------------------------------------
+
+#' Packages a worker needs to run step_select_boruta()
+#'
+#' tune asks a workflow's steps which packages to load on each worker before
+#' it preps and bakes the recipe there. Without this method a worker that has
+#' not loaded horizons cannot find the step's prep() and bake() methods.
+#'
+#' @param x A `step_select_boruta` step.
+#' @param ... Not used.
+#' @return Character: the packages the step calls, and horizons.
+#' @importFrom recipes required_pkgs
+#' @keywords internal
+#' @noRd
+#' @export
+required_pkgs.step_select_boruta <- function(x, ...) {
+
+  c("Boruta", "ranger", "horizons")
+
+}

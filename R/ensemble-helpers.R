@@ -348,7 +348,7 @@ predict_members_on_test <- function(object, members) {
 #'   the tuning resamples and the genuine meta-OOF are reproducible.
 #'
 #' @return The ensemble contract list from [build_ensemble_contract()].
-#'   Aborts with class `horizons_internal_error` when the meta-model returns
+#'   Aborts with class `horizons_error_internal` when the meta-model returns
 #'   a different number of out-of-fold predictions than there are OOF rows,
 #'   or of `test_F` predictions than there are test samples.
 #'
@@ -1009,7 +1009,7 @@ combine_ensemble_weighted <- function(member_pred, weights,
 #' @param outcome_range Numeric length-2 vector from
 #'   [outcome_range_setting()]. Default `DEFAULT_OUTCOME_RANGE`.
 #' @return A tibble: `sample_id`, `.pred` (ensemble point prediction).
-#'   Aborts with class `horizons_internal_error` when the meta-model returns
+#'   Aborts with class `horizons_error_internal` when the meta-model returns
 #'   a different number of predictions than there are samples.
 #' @noRd
 combine_ensemble_metamodel <- function(member_pred, members, model,

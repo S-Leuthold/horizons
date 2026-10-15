@@ -548,7 +548,7 @@ describe("fit_uq() - row alignment", {
         calib_data      = setup$calib_data,
         role_map        = setup$role_map
       ),
-      "Out-of-fold rows", class = "horizons_internal_error"
+      "Out-of-fold rows", class = "horizons_error_internal"
     )
 
     ## A zero or NA .row indexes no row of the mold, so the forest's features
@@ -565,9 +565,9 @@ describe("fit_uq() - row alignment", {
     }
 
     expect_error(fit_with_row(0L), "Out-of-fold rows",
-                 class = "horizons_internal_error")
+                 class = "horizons_error_internal")
     expect_error(fit_with_row(NA_integer_), "Out-of-fold rows",
-                 class = "horizons_internal_error")
+                 class = "horizons_error_internal")
 
   })
 
@@ -586,7 +586,7 @@ describe("fit_uq() - row alignment", {
         calib_data      = setup$calib_data,
         role_map        = setup$role_map
       ),
-      "Calibration predictions", class = "horizons_internal_error"
+      "Calibration predictions", class = "horizons_error_internal"
     )
 
   })
@@ -616,7 +616,7 @@ describe("fit_uq() - row alignment", {
         role_map        = setup$role_map
       ),
       "Calibration features baked through the recipe",
-      class = "horizons_internal_error"
+      class = "horizons_error_internal"
     )
 
   })

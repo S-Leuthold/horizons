@@ -753,3 +753,12 @@ test_that("summary.horizons_data produces output", {
   expect_true(any(grepl("Predictors", output)))
 
 })
+
+test_that("wn_values() reads wavenumber names, with or without the prefix, and NA for the rest without warning", {
+
+  names <- c("wn_600", "4000", "wn_600.5", "wn_1e3", "Sample_ID", "wn_", "wn_abc", NA)
+
+  expect_no_warning(values <- wn_values(names))
+  expect_identical(values, c(600, 4000, 600.5, 1000, NA, NA, NA, NA))
+
+})

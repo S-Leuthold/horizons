@@ -30,7 +30,6 @@
 #' @return A tibble of hyperparameter combinations.
 #'
 #' @keywords internal
-#' @export
 build_warmstart_grid <- function(best_params, param_set, max_points = 25L) {
 
   ## --- Fallback: if best_params is unusable, return space-filling grid ------
@@ -326,7 +325,6 @@ point_in_grid <- function(point, grid) {
 #'     carries the most frequent distinct error note from `.notes`.
 #'
 #' @keywords internal
-#' @export
 tune_warmstart_bayes <- function(workflow,
                                   cv_resamples,
                                   best_params,

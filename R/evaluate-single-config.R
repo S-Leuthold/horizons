@@ -62,7 +62,6 @@
 #'   `warnings`, `runtime_secs`.
 #'
 #' @keywords internal
-#' @export
 evaluate_single_config <- function(config_row,
                                    split,
                                    cv_folds,

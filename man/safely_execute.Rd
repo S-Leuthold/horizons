@@ -43,3 +43,4 @@ optionally captured warnings/messages. This is the workhorse for
 evaluate()'s config loop — each model fit is wrapped in safely_execute()
 so one failure doesn't kill the batch.
 }
+\keyword{internal}
