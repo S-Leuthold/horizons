@@ -17,8 +17,8 @@
       Provenance
          ├─ Spectra source: test
          ├─ Spectra type: mir
-         ├─ Created: NULL
-         └─ Horizons version: 
+         ├─ Created: <time>
+         └─ Horizons version: <version>
       
       Configuration
          ├─ Configs defined: 1
@@ -57,8 +57,8 @@
       Provenance
          ├─ Spectra source: test
          ├─ Spectra type: mir
-         ├─ Created: NULL
-         └─ Horizons version: 
+         ├─ Created: <time>
+         └─ Horizons version: <version>
       
       Configuration
          ├─ Configs defined: 1

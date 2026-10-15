@@ -54,10 +54,13 @@ to_d13c <- function(soc) -22 + 3 * (soc - 2)
 flat_message <- function(e) gsub("\\s+", " ", conditionMessage(e))
 
 ## summary() prints the table's size in memory, which changes between R
-## versions. The snapshot keeps the line and replaces its value.
+## versions, and when and by which version the object was made. The snapshot
+## keeps those lines and replaces their values.
 scrub_memory <- function(lines) {
 
-  sub("(Memory:) [0-9.]+ (bytes|Kb|Mb|Gb)$", "\\1 <size>", lines)
+  lines <- sub("(Memory:) [0-9.]+ (bytes|Kb|Mb|Gb)$", "\\1 <size>", lines)
+  lines <- sub("(Created:) .*$", "\\1 <time>", lines)
+  sub("(Horizons version:) .*$", "\\1 <version>", lines)
 
 }
 
@@ -603,10 +606,10 @@ describe("a d13C-like outcome with outcome_range = c(-Inf, Inf)", {
 
 describe("a negative outcome under the default range", {
 
-  ## make_eval_object() builds its object by hand, with no
-  ## config$outcome_range, like an object configured before the range
-  ## existed. configure() would have refused the outcome; evaluate() and a
-  ## cold-start fit() must refuse it before they draw or tune anything.
+  ## make_eval_object() sets no config$outcome_range, like an object
+  ## configured before the range existed. configure() would have refused the
+  ## outcome; evaluate() and a cold-start fit() must refuse it before they
+  ## draw or tune anything.
   obj <- make_eval_object(n = 60, n_configs = 1)
   obj$data$analysis$SOC <- to_d13c(obj$data$analysis$SOC)
 

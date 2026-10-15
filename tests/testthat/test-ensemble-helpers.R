@@ -6,9 +6,8 @@
 ## metric where lower is better (the fixture ranks by rpd), the weights of the
 ## weighted engine's tuned rule and of a member xgboost never splits on, and
 ## the run time of an engine that runs past a minute. All are called
-## directly: ensemble() reaches the rank-metric check only through a full
-## tuning run, and predict() always hands the combine a member set that
-## matches the weights. ensemble() and predict.horizons_ensemble() are tested
+## directly: predict() always hands the combine a member set that matches the
+## weights. ensemble() and predict.horizons_ensemble() are tested
 ## in test-pipeline-ensemble.R.
 ##
 ## ens_fitted() comes from helper-ensemble.R.
@@ -20,31 +19,16 @@
 
 describe("fit_tuned_meta_learner() - refusals", {
 
-  it("refuses a rank metric the tuning did not collect", {
+  it("is never handed a rank metric the tuning did not collect: ensemble() refuses it at the door", {
 
-    fitted  <- ens_fitted()
-    members <- gather_members(fitted)$members
-    oof     <- build_oof_matrix(fitted, members)
+    ## The check that sat between tuning and select_best() moved to the fit
+    ## validator, which ensemble() runs before anything is gathered (#234).
+    fitted <- ens_fitted()
+    fitted$models$rank_metric <- "rpiq"
 
-    ## One grid point is enough: the check sits between tuning and
-    ## select_best().
-    spec <- parsnip::linear_reg(penalty = tune::tune(), mixture = 1) |>
-      parsnip::set_engine("glmnet")
-
-    ## The abort carries no package class. suppressWarnings(): rsample's note
-    ## that the 43 meta rows are too few for its default strata breaks.
-    expect_error(
-      suppressWarnings(fit_tuned_meta_learner(
-        fitted, members, oof,
-        rank_metric     = "rpiq",
-        optimize        = TRUE,
-        method          = "penalized",
-        spec            = spec,
-        grid            = tibble::tibble(penalty = 0.01),
-        extract_weights = extract_weights_penalized
-      )),
-      'Cannot rank the penalized ensemble by "rpiq"', fixed = TRUE
-    )
+    err <- expect_error(ensemble(fitted, method = "penalized", verbose = FALSE),
+                        class = "horizons_error_validation")
+    expect_true(any(grepl("rank_metric must be one of", err$findings, fixed = TRUE)))
 
   })
 
