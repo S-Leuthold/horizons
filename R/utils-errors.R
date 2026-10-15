@@ -119,6 +119,94 @@ check_arg <- function(check,
 }
 
 ## ---------------------------------------------------------------------------
+## horizons_conditions: the classes, documented in one place
+## ---------------------------------------------------------------------------
+
+#' Errors and warnings horizons raises
+#'
+#' @description
+#' Every error horizons raises carries the base class `horizons_error`,
+#' exactly one kind, and sometimes one more specific class in front of the
+#' kind. Every warning carries the base class `horizons_warning` and one
+#' topic. A handler can catch all of horizons' errors, one kind of them, or
+#' one specific refusal, and filter warnings by what happened.
+#'
+#' @section Error kinds:
+#' \describe{
+#'   \item{`horizons_error_input`}{The call cannot run as written: an
+#'     argument outside its domain, a required input missing, or data that
+#'     breaks a stated requirement. Raised before any work starts.}
+#'   \item{`horizons_error_validation`}{An object breaks its class contract,
+#'     because it was edited by hand or written by an older version. Re-run
+#'     the verb that wrote the field, or start again from [configure()].}
+#'   \item{`horizons_error_dependency`}{A needed package is missing, or the
+#'     environment cannot run the call (a parallel run under
+#'     `devtools::load_all()`, whose workers load the installed build).}
+#'   \item{`horizons_error_run`}{The work was attempted and failed: every
+#'     configuration or member failed, a download failed, or the run stopped
+#'     on a failure that would hit every unit the same way.}
+#'   \item{`horizons_error_internal`}{A bug in horizons: something the code
+#'     guarantees has not held. Please report it.}
+#' }
+#'
+#' @section Specific errors:
+#' \describe{
+#'   \item{`horizons_error_all_configs_failed`}{(run) Every configuration
+#'     failed in [evaluate()]. The per-configuration results travel on the
+#'     condition as `results`.}
+#'   \item{`horizons_error_all_members_failed`}{(run) Every member failed in
+#'     `fit()`. The per-member results travel as `results`.}
+#'   \item{`horizons_error_promoted_warnings`}{(run) A verb ended with
+#'     warnings under `options(warn = 2)`. Instead of turning the first warning
+#'     into an error that loses the result, the verb aborts with the finished
+#'     result as `object` and its warnings as `log`.}
+#'   \item{`horizons_error_download`}{(run) A spectral library could not be
+#'     downloaded.}
+#'   \item{`horizons_error_boruta`}{(run) [step_select_boruta()] failed.}
+#'   \item{`horizons_error_qc`}{(run) A quality check failed once it had been
+#'     computed.}
+#'   \item{`horizons_error_consent`}{(input) A library download was declined.}
+#'   \item{`horizons_error_missing_predict_package`}{(dependency) `predict()`
+#'     needs a model package that is not installed.}
+#' }
+#'
+#' @section Warning topics:
+#' \describe{
+#'   \item{`horizons_warning_substitution`}{Something other than what was
+#'     asked ran, under a documented fallback.}
+#'   \item{`horizons_warning_quality`}{Everything ran as asked, but the result
+#'     is weaker than its output shows (small folds, every member below the
+#'     prune threshold).}
+#'   \item{`horizons_warning_skipped`}{Something asked for did not run, such
+#'     as a member's prediction intervals.}
+#'   \item{`horizons_warning_flagged`}{A step kept samples it could not use;
+#'     modelling leaves them out.}
+#'   \item{`horizons_warning_partial_failure`}{Some units failed and the rest
+#'     returned.}
+#'   \item{`horizons_warning_coverage`}{The data only partly covers what is
+#'     asked of it, such as a wavenumber range.}
+#'   \item{`horizons_warning_applicability`}{Predictions outside the
+#'     applicability domain.}
+#'   \item{`horizons_warning_input`}{A request that is legal but risky enough
+#'     to say so.}
+#' }
+#'
+#' @section Where the record lives:
+#' Each verb raises a topic at most once per call, at its end, and only after
+#' writing it to the object's log, so a warning that is silenced or never
+#' seen is still on the object. `predict()`, which changes no object, carries
+#' each warning's record as the field `log`.
+#'
+#' @section Catching errors raised inside a recipe step:
+#' recipes wraps every error raised inside a step in `recipes_error_step`,
+#' with the original as its parent. A base [tryCatch()] on a horizons class
+#' does not see through the wrapper; [rlang::try_fetch()] and
+#' [rlang::cnd_inherits()] do.
+#'
+#' @name horizons_conditions
+NULL
+
+## ---------------------------------------------------------------------------
 ## safely_execute
 ## ---------------------------------------------------------------------------
 

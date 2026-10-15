@@ -1052,6 +1052,32 @@ ensure_wn_prefix <- function(col_names) {
 
 }
 
+#' The wavenumbers a set of column names stand for
+#'
+#' @description
+#' The one parser for wavenumber column names. A name is read as a number
+#' once its `wn_` prefix, if it has one, is set aside (`"wn_600"` and
+#' `"600"` are both 600, `"wn_600.5"` is 600.5). A name that is not a number
+#' (`"Sample_ID"`, `"wn_"`) is `NA`, with no warning: the callers ask which
+#' columns are wavenumbers, so a name that is not one is an answer, not a
+#' problem.
+#'
+#' @param col_names Character.
+#' @return Numeric, one per name.
+#' @keywords internal
+#' @noRd
+wn_values <- function(col_names) {
+
+  text   <- sub("^wn_", "", as.character(col_names))
+  number <- grepl("^[+-]?([0-9]+[.]?[0-9]*|[.][0-9]+)([eE][+-]?[0-9]+)?$", text)
+
+  out         <- rep(NA_real_, length(text))
+  out[number] <- as.numeric(text[number])
+
+  out
+
+}
+
 
 ## ---------------------------------------------------------------------------
 ## build_role_map() — Create role mapping tibble
