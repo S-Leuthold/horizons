@@ -2913,6 +2913,17 @@ describe("config_findings() at every verb's door", {
 
   })
 
+  it("refuses a duplicate configuration id, which every later verb looks up", {
+
+    obj <- configured_object()
+    expect_gte(nrow(obj$config$configs), 2)
+    obj$config$configs$config_id[2] <- obj$config$configs$config_id[1]
+
+    expect_true(any(grepl(paste0("a duplicate config_id \"", obj$config$configs$config_id[1], "\""),
+                          finding_of(validate_horizons_data(obj)), fixed = TRUE)))
+
+  })
+
   it("refuses an unusable outcome range and a fold count that is not a whole number of at least 2", {
 
     obj <- configured_object()
