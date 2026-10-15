@@ -142,9 +142,10 @@ ensemble <- function(x,
   }
 
   ## The fit contract, and through it the evaluation and base contracts at
-  ## the full stage, before anything is gathered or trained. As in fit(), the
-  ## argument and outcome-range checks come first, so an outcome outside the
-  ## range is reported as such rather than as the response bound it breaks.
+  ## the full stage, before anything is gathered or trained. The argument and
+  ## outcome-range checks come first, so an outcome outside the range is
+  ## reported as such rather than as the response bound it breaks; an unusable
+  ## range is the validator's finding (check_outcome_range() leaves it).
   x <- validate_horizons_fit(x)
 
   ## -------------------------------------------------------------------------

@@ -373,6 +373,7 @@ fit <- function(x,
   ## The rows evaluate() modelled: the same rule on the same table (#67).
   modelled  <- modelling_rows(x$data$analysis, outcome_col)
   n_dropped <- modelled$n_dropped
+  n_flagged <- modelled$n_flagged
 
   ## -----------------------------------------------------------------------
   ## Step 1: Data partitioning — Split F is evaluate()'s split
@@ -575,6 +576,14 @@ fit <- function(x,
       cat(paste0("\u2502  ",
                  cli::col_yellow("Dropped ", n_dropped,
                                   " rows with NA outcome"), "\n"))
+
+    }
+
+    if (n_flagged > 0) {
+
+      cat(paste0("\u2502  ",
+                 cli::col_yellow("Left out ", n_flagged,
+                                  " flagged rows (see .flag)"), "\n"))
 
     }
 

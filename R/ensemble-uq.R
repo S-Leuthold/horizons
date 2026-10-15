@@ -579,8 +579,8 @@ fit_ensemble_uq <- function(x,
   ## already encodes tuning).
   optimize <- x$ensemble$optimize
 
-  ## Read outside the capture below, so a malformed stored range aborts
-  ## rather than silently leaving the ensemble without intervals.
+  ## Read outside the capture below. The door validator has refused an
+  ## unusable stored range.
   outcome_range <- outcome_range_setting(x)
 
   uq_safe <- safely_execute(
@@ -685,12 +685,11 @@ predict_ensemble_uq_matrix <- function(uq, wide,
 #' columns are keyed by `sample_id` so the caller joins them to point
 #' predictions — never a positional bind.
 #'
-#' Degrades to `NULL` (point-only predictions) when the bundle is not a
-#' recognizable CV+ bundle, when a fold model fails to predict, or when the
-#' calibration set cannot support the requested level — warning each time,
-#' via [warn_interval_failure()], rather than degrading silently (#65's
-#' interval half, applied here). A missing member column aborts loudly — the
-#' fold models are only valid over the exact member set they trained on.
+#' The ensemble validator at `predict()`'s door has refused a bundle that is
+#' not a CV+ bundle, whose members are not the weights', or whose
+#' calibration set cannot support the default level (#65, #234). Degrades to
+#' `NULL` (point-only predictions), with a warning through
+#' [warn_interval_failure()], only when a fold model fails to predict.
 #'
 #' The deployed point prediction may occasionally fall outside its own CV+
 #' interval; this is a known property of jackknife+/CV+ aggregation (the

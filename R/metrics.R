@@ -255,8 +255,8 @@ ccc <- yardstick::new_numeric_metric(
 #' `tune_bayes()` optimises; keep `"rmse"` first where that matters.
 #'
 #' @param transformation Character scalar: `"none"`, `"log"`, `"log10"` or
-#'   `"sqrt"`. The same vocabulary as [back_transform_predictions()]. Unknown
-#'   values abort rather than silently scoring cross-scale.
+#'   `"sqrt"`. The same vocabulary as [back_transform_predictions()]; the door
+#'   validators refuse any other.
 #' @param metrics Character vector naming the metrics to include, in order.
 #'   Any of `"rmse"`, `"rrmse"`, `"rsq"`, `"mae"`, `"rpd"`, `"ccc"`.
 #' @param outcome_range Numeric length-2 vector. The outcome's physical range,

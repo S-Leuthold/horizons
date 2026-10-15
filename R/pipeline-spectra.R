@@ -170,6 +170,18 @@ spectra <- function(source,
   ## duplicate sample_id here (Bruker's own naming does this: "S100-1.0" and
   ## "S100-1.1" both become "S100-1" once the extension is stripped) passes.
 
+  ## `.flag` is the steps' record of a row they could not use, and the
+  ## validators let non-finite predictors through in flagged rows, so a source
+  ## column of that name is refused rather than read as one.
+  if (".flag" %in% names(result$data$analysis)) {
+
+    abort_horizons(c(
+      "The source has a column named {.field .flag}, which horizons reserves for the rows its steps flag.",
+      "i" = "Rename the column before reading it with {.fn spectra}."
+    ), kind = "input")
+
+  }
+
   sorted_result <- sort_axis_decreasing(result)
   result        <- validate_horizons_data(sorted_result$x, stage = "raw")
 

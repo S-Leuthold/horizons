@@ -369,8 +369,8 @@ new_horizons_data <- function(analysis       = NULL,
 #'     and containment only — the contents are the verb's business.
 #'
 #' 14. **Configuration**: on a configured object (unless `config = FALSE`),
-#'     the checks in [config_findings()]: no `covariates` column (a grid
-#'     written by an earlier version), known models, transformations,
+#'     the checks in [config_findings()]: unique configuration ids, known
+#'     models, transformations,
 #'     preprocessing and feature selection, a usable outcome range, a whole
 #'     number of folds of at least 2, one outcome, and a response-trim
 #'     request for that outcome with a usable threshold. Every class
@@ -504,7 +504,7 @@ validate_horizons_data <- function(x,
 
     if (na_id_count > 0) {
 
-      errors <- c(errors, cli::format_inline("{na_id_count} NA {.field sample_id} value{?s}"))
+      errors <- c(errors, cli::format_inline("{na_id_count} NA {.field sample_id} value{?s}; give every row an id in the source, or with {.fn parse_ids}"))
 
     }
 
@@ -566,7 +566,7 @@ validate_horizons_data <- function(x,
 
       na_cols  <- names(na_check)[na_check]
       col_list <- paste(na_cols[1:min(3, length(na_cols))], collapse = ", ")
-      errors   <- c(errors, cli::format_inline("NA values in predictor columns: {col_list}"))
+      errors   <- c(errors, cli::format_inline("NA values in predictor columns: {col_list}; trim them off with {.fn standardize}, or fix the source spectra"))
 
     }
 
@@ -576,7 +576,7 @@ validate_horizons_data <- function(x,
 
       inf_cols <- names(inf_check)[inf_check]
       col_list <- paste(inf_cols[1:min(3, length(inf_cols))], collapse = ", ")
-      errors   <- c(errors, cli::format_inline("Infinite values in predictor columns: {col_list}"))
+      errors   <- c(errors, cli::format_inline("Infinite values in predictor columns: {col_list}; trim them off with {.fn standardize}, or fix the source spectra"))
 
     }
 
@@ -849,8 +849,9 @@ ad_bundle_ok <- function(bundle) {
 #' @description
 #' What every verb after `configure()` reads from `config` and `validation`,
 #' checked once at the door instead of where each value is used: a usable
-#' outcome range, a whole number of folds, a configuration grid whose models,
-#' transformations, preprocessing and feature selection are all known, one
+#' outcome range, a whole number of folds, a configuration grid with unique
+#' ids whose models, transformations, preprocessing and feature selection are
+#' all known, one
 #' outcome, and a response-trim request that is for that outcome and has a
 #' usable threshold.
 #'
@@ -865,13 +866,13 @@ config_findings <- function(x) {
 
   ## The grid ------------------------------------------------------------------
 
-  ### configure() writes no covariates column. A grid with one was written by
-  ### an earlier version, whose config ids hashed it, so nothing evaluated or
-  ### fitted on that grid lines up with a grid configure() writes now.
-  if ("covariates" %in% names(configs)) {
+  ### Every later verb looks a configuration up by its id
+  dup_ids <- unique(configs$config_id[duplicated(configs$config_id)])
+
+  if (length(dup_ids) > 0) {
 
     findings <- c(findings, cli::format_inline(
-      "{.field config$configs} has a {.field covariates} column: the object was configured by an earlier version of horizons. Re-run {.fn configure} on it, then the verbs after it."
+      "{.field config$configs} has {cli::qty(length(dup_ids))}{?a /}duplicate {.field config_id}{cli::qty(length(dup_ids))}{?s} {.val {dup_ids}}"
     ))
 
   }
@@ -897,7 +898,7 @@ config_findings <- function(x) {
     if (length(unknown) > 0) {
 
       findings <- c(findings, cli::format_inline(
-        "{.field config$configs} has {cli::qty(length(unknown))}{?an/} unknown {.field {column}} value{?s} {.val {unknown}} (known: {.val {vocabularies[[column]]}})"
+        "{.field config$configs} has {cli::qty(length(unknown))}{?an /}unknown {.field {column}} {cli::qty(length(unknown))}value{?s} {.val {unknown}} (known: {.val {vocabularies[[column]]}})"
       ))
 
     }
@@ -946,7 +947,7 @@ config_findings <- function(x) {
     if (length(outcome) == 1 && !identical(as.character(request$outcome), outcome)) {
 
       findings <- c(findings, cli::format_inline(
-        "{.fn validate}'s response-trim request is for {.field {request$outcome}}, but the object models {.field {outcome}}; run {.fn validate} again on the object as configured"
+        "{.fn validate}'s response-trim request is for {.field {request$outcome}}, but the object models {.field {outcome}}; re-run {.fn configure}, which clears the request, then {.fn validate}"
       ))
 
     }
@@ -957,7 +958,7 @@ config_findings <- function(x) {
           threshold > 0)) {
 
       findings <- c(findings, cli::format_inline(
-        "{.field validation$outliers$response_trim$threshold} must be a single positive number; run {.fn validate} again"
+        "{.field validation$outliers$response_trim$threshold} must be a single positive number; re-run {.fn configure}, which clears the request, then {.fn validate}"
       ))
 
     }
@@ -1275,7 +1276,9 @@ abort_validation <- function(findings,
       if (n_more > 0) c("i" = paste0(n_more, " more finding", if (n_more > 1) "s", " not shown; all are in the error's `findings` field.")),
       "i" = remedy),
     kind     = "validation",
-    findings = findings,
+    ## Plain text: cli styles the findings in a colour session, and a field
+    ## is data a handler matches or writes out
+    findings = cli::ansi_strip(findings),
     call     = call
   )
 
@@ -1286,8 +1289,8 @@ abort_validation <- function(findings,
 #' @keywords internal
 #' @noRd
 VALIDATION_REMEDY <- paste(
-  "Rebuild the object with the verbs that wrote it: one edited by hand, or",
-  "saved by an older version of horizons, cannot be repaired in place."
+  "If the object was edited by hand or saved by an older version of horizons,",
+  "rebuild it with the verbs that wrote it: it cannot be repaired in place."
 )
 
 #' What to do about an object that fails a class contract
@@ -1363,7 +1366,7 @@ contract_keys <- function(slot) {
 #' delegates to [validate_horizons_fit()], which runs the evaluation and base
 #' validators in turn; the parent slots must still hold.
 #'
-#' Accumulated checks (reported together, tree-style):
+#' Accumulated checks (reported together, in one condition):
 #'
 #' 1. **Slot completeness**: every key [new_horizons_data()] declares for
 #'    the `ensemble` slot is present (see [contract_keys()]): `method`,
@@ -1732,7 +1735,7 @@ validate_horizons_ensemble <- function(x, call = rlang::caller_env()) {
 #' delegates to [validate_horizons_data()] at `stage = "full"`; the base
 #' contract must still hold.
 #'
-#' Accumulated checks (reported together, tree-style):
+#' Accumulated checks (reported together, in one condition):
 #'
 #' 1. **Slot completeness**: every key [new_horizons_data()] declares for
 #'    the `evaluation` slot is present (see [contract_keys()]): `results`,
@@ -2128,7 +2131,7 @@ validate_horizons_eval <- function(x, call = rlang::caller_env()) {
 #' Gate checks (abort immediately, with class `horizons_error_validation`):
 #' the object inherits `horizons_fit` and `$models` is a list.
 #'
-#' Accumulated checks (reported together, tree-style):
+#' Accumulated checks (reported together, in one condition):
 #'
 #' 1. **Slot completeness**: every key [new_horizons_data()] declares for
 #'    the `models` slot is present (see [contract_keys()]), 14 in all:
@@ -2716,8 +2719,7 @@ selected_member <- function(x) {
 #'   range, and the outcome and responses if present
 #' - **Objects with provenance**: Shows source path and spectra type
 #'
-#' The output uses tree-style formatting consistent with error messages
-#' throughout the package.
+#' The output uses the tree-style formatting of the verbs' progress output.
 #'
 #' @param x `horizons_data`. The object to print.
 #' @param ... Additional arguments (ignored, for S3 compatibility).
@@ -3304,11 +3306,12 @@ summary.horizons_data <- function(object, ...) {
     metric <- x$evaluation$rank_metric %||% "rmse"
     cat(paste0("   \u251C\u2500 Rank metric: ", toupper(metric), "\n"))
 
-    ## Best config with metrics
-    if (n_success > 0 && !is.null(x$evaluation$best_config)) {
+    ## Best config with metrics. NA when no configuration has the ranking
+    ## metric, which the eval validator allows.
+    if (n_success > 0 && !is.null(x$evaluation$best_config) && !is.na(x$evaluation$best_config)) {
 
       best_id  <- x$evaluation$best_config
-      best_row <- eval_res[eval_res$config_id == best_id, ]
+      best_row <- eval_res[eval_res$config_id %in% best_id, ]
 
       if (nrow(best_row) > 0) {
 

@@ -311,6 +311,16 @@ expect_contract_shape <- function(result) {
 
 }
 
+test_that("spectra() refuses a source column named .flag, which the steps reserve", {
+
+  df <- tibble::tibble(sample_id = c("A", "B"), .flag = c(NA, "mine"),
+                       `4000` = c(0.1, 0.2), `3998` = c(0.2, 0.3))
+
+  err <- expect_error(utils::capture.output(spectra(df)), class = "horizons_error_input")
+  expect_match(conditionMessage(err), "column named .flag", fixed = TRUE)
+
+})
+
 test_that("spectra() from a tibble builds the new_horizons_data() shape", {
 
   ## Arrange ---------------------------------------------------------------

@@ -233,6 +233,7 @@ evaluate <- function(x,
   modelled  <- modelling_rows(analysis, outcome_col)
   analysis  <- modelled$data
   n_dropped <- modelled$n_dropped
+  n_flagged <- modelled$n_flagged
 
   ## -----------------------------------------------------------------------
   ## Step 2b: The outcome has to lie inside its range
@@ -498,6 +499,14 @@ evaluate <- function(x,
       cat(paste0("\u2502  ",
                  cli::col_yellow("Dropped ", n_dropped,
                                   " rows with NA outcome"), "\n"))
+
+    }
+
+    if (n_flagged > 0) {
+
+      cat(paste0("\u2502  ",
+                 cli::col_yellow("Left out ", n_flagged,
+                                  " flagged rows (see .flag)"), "\n"))
 
     }
 
@@ -1906,13 +1915,14 @@ rank_configs_by_cv <- function(results, metric) {
 #' @param analysis Data frame. The object's analysis table.
 #' @param outcome_col Character. Name of the outcome column, which the door
 #'   validator has checked is in `analysis`.
+#' @param call The frame a refusal reports: the verb's.
 #' @return List with `data` (the rows kept, in their original order),
 #'   `n_dropped` (integer, the rows without an outcome) and `n_flagged`
 #'   (integer, the flagged rows with an outcome). Aborts with class
 #'   `horizons_input_error` when no row is left.
 #' @keywords internal
 #' @noRd
-modelling_rows <- function(analysis, outcome_col) {
+modelling_rows <- function(analysis, outcome_col, call = rlang::caller_env()) {
 
   na_mask <- is.na(analysis[[outcome_col]])
   flagged <- if (".flag" %in% names(analysis)) !is.na(analysis$.flag) else rep(FALSE, nrow(analysis))
@@ -1929,10 +1939,10 @@ modelling_rows <- function(analysis, outcome_col) {
 
   if (all(drop)) {
 
-    cli::cli_abort(c(
+    abort_horizons(c(
       "Every row with an outcome is flagged, so there are no rows to model.",
       "i" = "{.field .flag} names the step that could not use each one."
-    ), class = "horizons_input_error")
+    ), kind = "input", call = call)
 
   }
 

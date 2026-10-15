@@ -136,6 +136,21 @@
       x runtime_secs must be a single non-negative numeric
       i Re-run ensemble() on the fitted object, which rebuilds the ensemble.
 
+# a refusal shows five findings, counts the rest, and keeps every one verbatim in the field
+
+    Code
+      abort_validation(findings)
+    Condition
+      Error:
+      ! The <horizons_data> object failed validation.
+      x Columns missing from role_map: {x}
+      x finding 2
+      x finding 3
+      x finding 4
+      x finding 5
+      i 1 more finding not shown; all are in the error's `findings` field.
+      i If the object was edited by hand or saved by an older version of horizons, rebuild it with the verbs that wrote it: it cannot be repaired in place.
+
 # print.horizons_data shows the selection section
 
     Code

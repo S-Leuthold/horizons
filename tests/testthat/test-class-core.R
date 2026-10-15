@@ -1815,9 +1815,10 @@ test_that("validate_horizons_eval passes a well-formed evaluation slot", {
 
 test_that("validate_horizons_eval gates on class and slot presence", {
 
-  ## Not a horizons_eval
-  expect_error(validate_horizons_eval(list()), "horizons_eval",
-               class = "horizons_error_validation")
+  ## Not a horizons_eval: the gate's own finding, since the header names the
+  ## class on every refusal
+  err <- expect_error(validate_horizons_eval(list()), class = "horizons_error_validation")
+  expect_true(any(grepl("is not a <horizons_eval> object", err$findings, fixed = TRUE)))
 
   ## Classed but no evaluation slot: refused by the gate itself, before the
   ## key checks below it, which would name evaluation too
@@ -1850,19 +1851,6 @@ test_that("validate_horizons_eval runs the base validator at the full stage (#12
 
   expect_error(validate_horizons_eval(unpaired), "role_map",
                class = "horizons_error_validation")
-
-  ## A config grid with a covariates column was written by an earlier
-  ## version of configure(), so the evaluation built on it is refused too.
-  old_grid <- obj
-  old_grid$config$configs$covariates <- NA_character_
-
-  err <- tryCatch(suppressMessages(capture.output(validate_horizons_eval(old_grid))),
-                  error = function(e) e)
-
-  expect_s3_class(err, "horizons_error_validation")
-  expect_match(conditionMessage(err),
-               "config$configs has a covariates column: the object was configured by an earlier version of horizons. Re-run `configure()` on it",
-               fixed = TRUE)
 
 })
 
@@ -2156,9 +2144,10 @@ test_that("validate_horizons_fit tolerates a NULL uq or ad slot (compute_uq or c
 
 test_that("validate_horizons_fit gates on class and slot presence", {
 
-  ## Not a horizons_fit
-  expect_error(validate_horizons_fit(list()), "horizons_fit",
-               class = "horizons_error_validation")
+  ## Not a horizons_fit: the gate's own finding, since the header names the
+  ## class on every refusal
+  err <- expect_error(validate_horizons_fit(list()), class = "horizons_error_validation")
+  expect_true(any(grepl("is not a <horizons_fit> object", err$findings, fixed = TRUE)))
 
   ## Classed but no models slot
   hollow <- structure(list(), class = c("horizons_fit", "list"))
@@ -2339,6 +2328,25 @@ test_that("each class validator puts its findings in the condition, with the rem
   expect_snapshot(validate_horizons_eval(eval_obj), error = TRUE)
   expect_snapshot(validate_horizons_fit(fit_obj), error = TRUE)
   expect_snapshot(validate_horizons_ensemble(ens_obj), error = TRUE)
+
+})
+
+test_that("a refusal shows five findings, counts the rest, and keeps every one verbatim in the field", {
+
+  ## A column name with braces reaches the findings as text; it must print as
+  ## written rather than be read as a cli expression
+  findings <- c("Columns missing from role_map: {x}", paste("finding", 2:6))
+
+  err <- expect_error(abort_validation(findings), class = "horizons_error_validation")
+  expect_identical(err$findings, findings)
+  expect_snapshot(abort_validation(findings), error = TRUE)
+
+  ## The same through the validator, from a real column
+  obj <- make_valid_eval()
+  obj$data <- valid_data_slot()
+  obj$data$analysis[["{x}"]] <- 1
+  err <- expect_error(validate_horizons_data(obj), class = "horizons_error_validation")
+  expect_true(any(grepl("{x}", err$findings, fixed = TRUE)))
 
 })
 
@@ -2954,10 +2962,12 @@ describe("the class validators' new checks (#234)", {
     expect_true(any(grepl("no cross-validated column cv_rpd",
                           finding_of(validate_horizons_eval(obj)), fixed = TRUE)))
 
-    ## No configuration has the ranking metric: the evaluation is returned
+    ## No configuration has the ranking metric: the evaluation is returned,
+    ## and it prints and summarises without a best configuration
     obj <- make_valid_eval()
     obj$evaluation$best_config <- NA_character_
     expect_identical(validate_horizons_eval(obj), obj)
+    expect_no_error(utils::capture.output(print(obj), summary(obj)))
 
   })
 
@@ -2979,6 +2989,7 @@ describe("the class validators' new checks (#234)", {
       short_centroid = function(b) { b$centroid <- numeric(0); b },
       cov_mismatch   = function(b) { b$cov_matrix <- diag(2); b },
       three_thresh   = function(b) { b$ad_thresholds <- c(1, 2, 3); b },
+      na_centroid    = function(b) { b$centroid[1] <- NA; b },
       unsorted       = function(b) { b$ad_thresholds <- c(1, 3, 2, 4); b }
     )
 

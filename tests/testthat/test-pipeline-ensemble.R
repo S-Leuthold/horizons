@@ -246,6 +246,29 @@ describe("ensemble() - preflight validation", {
 
   })
 
+  it("refuses an unusable stored outcome range as a validation finding, not by reading it", {
+
+    fitted <- ens_fitted()
+
+    for (bad in list(c(0, NA), c(5, 1), "a")) {
+
+      broken <- fitted
+      broken$config$outcome_range <- bad
+
+      err <- expect_error(
+        suppressMessages(capture.output(
+          ensemble(broken, method = "weighted", optimize = FALSE,
+                   compute_uq = FALSE, verbose = FALSE)
+        )),
+        class = "horizons_error_validation"
+      )
+      expect_true(any(grepl("is not a usable range", err$findings, fixed = TRUE)),
+                  label = deparse(bad))
+
+    }
+
+  })
+
   it("refuses a bad seed or optimize before any engine runs (#130)", {
 
     fitted <- ens_fitted()
@@ -1134,10 +1157,12 @@ describe("ensemble() - the summary it prints", {
 ## =========================================================================
 ## The weighted meta-learner learns
 ## =========================================================================
-## The summary tests above read contracts built by hand, so this is the one
-## that shows a meta-learner doing its job: members whose errors are
-## independent average to a better predictor than any one of them. Over 50
-## seeds the improvement in test RMSE was at least 0.092 (median 0.54).
+## The summary tests above read contracts built by hand; this one checks the
+## weighted rule end to end on data where averaging should help: members
+## whose errors are independent. The most accurate member is listed last, so
+## equal weights would fail the argmax check. Over 50 seeds the improvement in
+## test RMSE was at least 0.027 (median 0.61), and the most accurate member
+## weighed most in 47; the seed below is one of those.
 
 describe("the weighted meta-learner", {
 
@@ -1147,7 +1172,7 @@ describe("the weighted meta-learner", {
     n_oof <- 60; n_test <- 30
     truth_oof  <- stats::runif(n_oof, 10, 30)
     truth_test <- stats::runif(n_test, 10, 30)
-    sds        <- c(a = 2, b = 2.5, c = 3)
+    sds        <- c(c = 3, b = 2.5, a = 2)
 
     oof  <- vapply(sds, function(s) truth_oof + stats::rnorm(n_oof, sd = s), numeric(n_oof))
     test <- vapply(sds, function(s) truth_test + stats::rnorm(n_test, sd = s), numeric(n_test))

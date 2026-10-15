@@ -651,6 +651,42 @@ describe("ensemble UQ - degradation and gates", {
 
   })
 
+  it("serves the CV+ bounds of the calibration residuals, wired through predict()", {
+
+    ## The bounds are recomputed here from the bundle and the member
+    ## predictions predict() passed to the assembler, so a wiring fault inside
+    ## it (the wrong residuals, folds or level) shows as a mismatch.
+    ens      <- ens_built("weighted")
+    test_set <- ens_test_set()
+    uq       <- ens$ensemble$uq
+    expect_false(is.null(uq))
+
+    seen     <- NULL
+    assemble <- predict_ensemble_intervals
+    local_mocked_bindings(predict_ensemble_intervals = function(uq, member_pred, outcome_range) {
+      seen <<- list(member_pred = member_pred, outcome_range = outcome_range)
+      assemble(uq, member_pred, outcome_range)
+    })
+
+    p <- suppressMessages(predict(ens, test_set, interval = TRUE))
+
+    wide <- tidyr::pivot_wider(
+      dplyr::select(seen$member_pred, "sample_id", "config_id", ".pred"),
+      names_from = "config_id", values_from = ".pred", names_prefix = "member_"
+    )
+    b  <- cv_plus_bounds(predict_ensemble_uq_matrix(uq, wide, seen$outcome_range),
+                         fold_id = uq$calib$fold, residuals = uq$calib$residual,
+                         level = uq$level_default)
+    lo <- clamp_to_outcome_range(pmin(b$lower, b$upper), seen$outcome_range)
+    hi <- clamp_to_outcome_range(pmax(b$lower, b$upper), seen$outcome_range)
+
+    got <- p[match(wide$sample_id, p$sample_id), ]
+    expect_equal(got$.pred_lower, lo)
+    expect_equal(got$.pred_upper, hi)
+    expect_true(all(hi > lo))
+
+  })
+
   it("refuses at predict()'s door a UQ bundle it cannot use (#65, #234)", {
 
     ## These used to degrade to point predictions inside the assembler, or

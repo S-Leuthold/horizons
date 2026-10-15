@@ -524,23 +524,6 @@ test_that("subset_selection() keeps membership rows marked retained = FALSE", {
 })
 
 
-test_that("a membership without retained is refused at the door, before a subset reads it (#130)", {
-
-  ## Arrange — without the column there is no telling the rows that must
-  ## survive from the neighbours the union subtraction already dropped, so
-  ## the record is refused rather than read as all retained. Every verb
-  ## validates the object at its door, so subset_selection() never sees it.
-  obj <- selected_object(n_rows = 12L)
-
-  obj$selection$membership$retained <- NULL
-
-  ## Act & Assert
-  err <- expect_error(validate_horizons_data(obj), class = "horizons_error_validation")
-  expect_true(any(grepl("retained", err$findings, fixed = TRUE)))
-
-})
-
-
 test_that("subset_selection() leaves a part the record lacks for the validator to name", {
 
   ## Arrange — a record damaged in four ways the validator refuses. The
@@ -806,5 +789,20 @@ test_that("reset_slots() refuses a slot the constructor does not have", {
   expect_error(reset_slots(fx$pool, c("models", "ensembel")),
                "does not know ensembel", fixed = TRUE,
                class = "horizons_input_error")
+
+})
+
+
+test_that("the log survives a re-configure's reset, a slot reset and a row change", {
+
+  ## Nothing resets the log: it is the object's whole history
+  fx  <- select_fixture(n_pool = 40)
+  obj <- fx$pool
+  obj$log <- tibble::add_row(new_log(), verb = "spectra", type = "note", topic = NA_character_,
+                             message = "a note", ids = list("P001"), n = 1L)
+
+  expect_identical(reset_promotion(obj)$log, obj$log)
+  expect_identical(reset_slots(obj, c("evaluation", "models", "ensemble"))$log, obj$log)
+  expect_identical(subset_rows(obj, obj$data$analysis$sample_id[1:10])$log, obj$log)
 
 })

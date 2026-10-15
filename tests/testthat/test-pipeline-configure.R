@@ -647,8 +647,8 @@ describe("configure() storage", {
 
     expect_null(quiet_configure(hd)$config$defaults)
 
-    ## The validator refuses a grid with a covariates column and names
-    ## configure() as the remedy, so configure() must accept one and replace it.
+    ## configure() writes a fresh grid, so a covariates column an earlier
+    ## version wrote does not survive it.
     old <- quiet_configure(hd)
     old$config$configs$covariates <- NA_character_
 

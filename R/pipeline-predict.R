@@ -771,17 +771,11 @@ predict_one_config <- function(object, config_id, new_spectra, interval,
 
   workflow <- object$models$workflows[[config_id]]
 
-  ## Per-config response transformation (for back-transforming to original scale)
+  ## Per-config response transformation (for back-transforming to original
+  ## scale). The fit validator at predict()'s door requires every workflow to
+  ## name a configuration, and the configuration ids to be unique.
   cfg_row        <- object$config$configs[object$config$configs$config_id == config_id, ]
-  transformation <- if (nrow(cfg_row) == 1) {
-
-    tolower(as.character(cfg_row$transformation))
-
-  } else {
-
-    "none"
-
-  }
+  transformation <- tolower(as.character(cfg_row$transformation))
 
   ## -------------------------------------------------------------------------
   ## Point prediction (transformed scale → back-transform ONCE to original)

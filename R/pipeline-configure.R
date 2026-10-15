@@ -914,6 +914,15 @@ check_outcome_range <- function(x, verb, call = rlang::caller_env()) {
 
   }
 
+  ## An unusable stored range is the door validator's finding. ensemble()
+  ## runs this check before its validator, so it is left to the validator here
+  ## rather than read.
+  if (!is_valid_outcome_range(x$config$outcome_range %||% DEFAULT_OUTCOME_RANGE)) {
+
+    return(invisible(NULL))
+
+  }
+
   outcome_range <- outcome_range_setting(x)
   breach        <- outcome_range_breach(x$data$analysis[[outcome_col]], outcome_range)
 

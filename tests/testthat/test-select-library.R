@@ -260,6 +260,29 @@ test_that("the cache is the user cache directory unless horizons.cache_dir names
 
 })
 
+test_that("a cached library that no longer meets the object contract stops, naming the file to delete", {
+
+  entry <- make_mini_ossl(withr::local_tempdir())
+  local_mini_registry(entry)
+  withr::local_options(horizons.library_download = TRUE)
+
+  suppressMessages(resolve_source("mini", verbose = FALSE))
+
+  ## As a library cached before the pool carried a log
+  path <- library_cache_path(entry)
+  lib  <- qs2::qs_read(path)
+  lib$pool$log <- NULL
+  qs2::qs_save(lib, path)
+
+  err <- expect_error(suppressMessages(resolve_source("mini", verbose = FALSE)),
+                      class = "horizons_input_error")
+
+  expect_match(conditionMessage(err), "no longer meets the object contract", fixed = TRUE)
+  expect_match(conditionMessage(err), "Delete it; the next draw rebuilds it.", fixed = TRUE)
+  expect_s3_class(err$parent, "horizons_error_validation")
+
+})
+
 test_that("a library built but not moved into the cache stops, classed, and leaves the cache empty", {
 
   ## The rename after a successful write fails only on a locked or network

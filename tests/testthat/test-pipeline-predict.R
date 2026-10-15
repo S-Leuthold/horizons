@@ -361,10 +361,9 @@ describe("predict.horizons_fit() - input validation", {
 
   it("rejects a non-horizons_fit object", {
 
-    expect_error(
-      predict.horizons_fit(list(), make_new_spectra()),
-      "horizons_fit"
-    )
+    err <- expect_error(predict.horizons_fit(list(), make_new_spectra()),
+                        class = "horizons_error_validation")
+    expect_true(any(grepl("is not a <horizons_fit> object", err$findings, fixed = TRUE)))
 
   })
 

@@ -135,7 +135,7 @@ back_transform_predictions <- function(predictions, transformation, warn = TRUE,
   ## behaviour worth scoring or serving. The default range is non-negative,
   ## the floor #53 applied; a signed property configures a range with no
   ## floor (#76). Applied uniformly after the switch so every transform
-  ## (including "none" and the unknown-transform passthrough) is covered, and
+  ## (including "none") is covered, and
   ## applied here rather than at each caller so evaluation scores exactly what
   ## predict() serves (#53). The sqrt clamp above is a different thing: it
   ## prevents a negative sqrt-scale value from squaring into a wrong positive.
