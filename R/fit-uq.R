@@ -82,7 +82,7 @@ compute_c_alpha <- function(scores, level) {
 #' @return Named list with fields: `quantile_model`, `scores`, `n_calib`,
 #'   `level_default`, `oof_coverage`, `mean_width`, `prepped_recipe`.
 #'   Returns NULL if calibration set is too small (`n < N_CALIB_MIN`).
-#'   Aborts with class `horizons_internal_error` when an out-of-fold `.row`
+#'   Aborts with class `horizons_error_internal` when an out-of-fold `.row`
 #'   falls outside the rows the model was fit on, or when the calibration
 #'   predictions or features do not have one row per row of `calib_data`.
 #'

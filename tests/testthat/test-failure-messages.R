@@ -258,6 +258,22 @@ describe("condition_summary()", {
 
   })
 
+  it("falls back to the class when neither the message method nor the raw field can be read", {
+
+    ## The last fallback in condition_own_text(): a conditionMessage() method
+    ## that errors, and a field that cannot be read either.
+    unreadable <- structure(class = c("unreadable_error", "error", "condition"),
+                            list(message = "hidden", call = NULL))
+
+    local_mocked_s3_method("conditionMessage", "unreadable_error",
+                           function(c) stop("no message method"))
+    local_mocked_s3_method("[[", "unreadable_error",
+                           function(x, i, ...) stop("no field access"))
+
+    expect_identical(condition_summary(unreadable), "unreadable_error (no message)")
+
+  })
+
   it("keeps a message whose bytes are not valid in the session encoding", {
 
     ## Invalid UTF-8 in a UTF-8 session, which made strsplit() and nchar()

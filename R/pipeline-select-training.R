@@ -1390,7 +1390,7 @@ check_photometric_units <- function(pool_m, target_m, ratio = 2) {
 #' @param wn [Numeric.] Wavenumbers of `m`'s columns, decreasing.
 #'
 #' @return [horizons_data.] `x` with the predictor block replaced. Aborts
-#'   with class `horizons_internal_error` when `m`'s rows do not line up with
+#'   with class `horizons_error_internal` when `m`'s rows do not line up with
 #'   the analysis rows (see [check_rows_aligned()]).
 #' @noRd
 rebuild_predictors <- function(x, m, wn) {

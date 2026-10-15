@@ -1238,7 +1238,7 @@ describe("predict() - row alignment before positional binds", {
     })
 
     expect_error(predict(fitted_fixture, new_df, interval = FALSE),
-                 "Point predictions for config", class = "horizons_internal_error")
+                 "Point predictions for config", class = "horizons_error_internal")
 
   })
 
@@ -1250,7 +1250,7 @@ describe("predict() - row alignment before positional binds", {
     })
 
     expect_error(predict(fitted_fixture, new_df, interval = TRUE),
-                 "Interval columns for config", class = "horizons_internal_error")
+                 "Interval columns for config", class = "horizons_error_internal")
 
   })
 
@@ -1266,7 +1266,7 @@ describe("predict() - row alignment before positional binds", {
 
     expect_error(predict(fitted_fixture, new_df, interval = FALSE, abstain_ood = TRUE),
                  "Applicability-domain columns for config",
-                 class = "horizons_internal_error")
+                 class = "horizons_error_internal")
 
   })
 
@@ -1289,7 +1289,7 @@ describe("predict_intervals() - row alignment before the bounds are assembled", 
 
     ## Half the rows: point_pred + q_low recycled this without an error.
     expect_error(predict_intervals(uq, rep(5, nrow(new_df) / 2), new_df, config_id = cfg_id),
-                 "Point predictions for config", class = "horizons_internal_error")
+                 "Point predictions for config", class = "horizons_error_internal")
 
   })
 
@@ -1306,7 +1306,7 @@ describe("predict_intervals() - row alignment before the bounds are assembled", 
 
     expect_error(predict_intervals(uq, rep(5, nrow(new_df)), new_df),
                  "Features baked through the UQ recipe",
-                 class = "horizons_internal_error")
+                 class = "horizons_error_internal")
 
   })
 

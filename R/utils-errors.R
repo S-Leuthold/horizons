@@ -1,3 +1,127 @@
+## ---------------------------------------------------------------------------
+## abort_horizons
+## ---------------------------------------------------------------------------
+
+#' The kinds a horizons error can be
+#'
+#' @description
+#' Every horizons error carries exactly one of these, as the class
+#' `horizons_error_<kind>` (see [horizons_conditions]).
+#'
+#' @keywords internal
+#' @noRd
+CONDITION_KINDS <- c("input", "validation", "dependency", "run", "internal")
+
+#' Raise a horizons error of one kind
+#'
+#' @description
+#' The one constructor every horizons error goes through. The condition
+#' carries the base class `horizons_error`, exactly one kind
+#' (`horizons_error_<kind>`), and at most one specific subclass in front of
+#' the kind, so a handler can catch all of horizons' errors, one kind of
+#' them, or one refusal (`dev/design/conditions.md`, Classes).
+#'
+#' An `"internal"` error is a broken invariant, a bug in horizons. It is
+#' raised with `.internal = TRUE`, which adds rlang's footer naming the
+#' package and its issue tracker; the class is what handlers and tests
+#' match on, since the flag adds none.
+#'
+#' @param message Character. A cli message: the problem statement, then
+#'   bullets. Interpolated in `.envir`, so `{x}` reads the caller's `x`.
+#' @param kind Character(1). One of `"input"`, `"validation"`,
+#'   `"dependency"`, `"run"` or `"internal"`. Required: a horizons error
+#'   always says which kind it is.
+#' @param class Character(1) or `NULL`. A specific subclass, written in full
+#'   (`"horizons_error_all_configs_failed"`), when the refusal earns one.
+#' @param ... Passed to [cli::cli_abort()]: fields, `parent`, `body`.
+#' @param call The frame the error reports, the caller's by default.
+#' @param .envir The environment the message is interpolated in.
+#'
+#' @return Does not return.
+#' @keywords internal
+#' @noRd
+abort_horizons <- function(message,
+                           kind,
+                           class  = NULL,
+                           ...,
+                           call   = rlang::caller_env(),
+                           .envir = rlang::caller_env()) {
+
+  ## Check the class arguments ------------------------------------------------
+
+  ### Only horizons calls this, so a bad kind or subclass is a bug in the
+  ### caller, reported as one rather than raised under a made-up class.
+  if (!rlang::is_string(kind) || !kind %in% CONDITION_KINDS) {
+
+    cli::cli_abort(
+      "{.arg kind} must be one of {.or {.val {CONDITION_KINDS}}}, not {.obj_type_friendly {kind}}.",
+      class = c("horizons_error_internal", "horizons_error"),
+      .internal = TRUE
+    )
+
+  }
+
+  if (!is.null(class) &&
+      (!rlang::is_string(class) || !startsWith(class, "horizons_error_") ||
+       class %in% paste0("horizons_error_", CONDITION_KINDS))) {
+
+    cli::cli_abort(
+      "{.arg class} must be one specific subclass named {.val horizons_error_<type>}, not a kind.",
+      class = c("horizons_error_internal", "horizons_error"),
+      .internal = TRUE
+    )
+
+  }
+
+  ## Raise ---------------------------------------------------------------------
+
+  cli::cli_abort(
+    message,
+    class     = c(class, paste0("horizons_error_", kind), "horizons_error"),
+    ...,
+    call      = call,
+    .envir    = .envir,
+    .internal = identical(kind, "internal")
+  )
+
+}
+
+#' Check a user's argument with one of rlang's checkers
+#'
+#' @description
+#' rlang's exported checkers ([rlang::check_bool()], [rlang::check_string()],
+#' [rlang::check_number_whole()], [rlang::check_number_decimal()],
+#' [rlang::check_data_frame()]) write the message the tidyverse uses for a
+#' value of the wrong type. This runs one of them with horizons' input class,
+#' so the refusal is a `horizons_error_input` like every other door check,
+#' and passes on the argument's name and the verb's frame, so the message
+#' names the user's argument and call rather than this helper.
+#'
+#' @param check A checker from rlang, e.g. `rlang::check_bool`.
+#' @param x The value to check.
+#' @param ... Passed to `check`, e.g. `allow_null = TRUE`, `min = 1`.
+#' @param arg The argument's name, as the user wrote it.
+#' @param call The frame the error reports, the caller's by default.
+#'
+#' @return `NULL` invisibly when `x` passes; otherwise an error of class
+#'   `horizons_error_input`.
+#' @keywords internal
+#' @noRd
+check_arg <- function(check,
+                      x,
+                      ...,
+                      arg  = rlang::caller_arg(x),
+                      call = rlang::caller_env()) {
+
+  check(x, ..., arg = arg, call = call,
+        class = c("horizons_error_input", "horizons_error"))
+
+}
+
+## ---------------------------------------------------------------------------
+## safely_execute
+## ---------------------------------------------------------------------------
+
 #' Safely Evaluate an Expression
 #'
 #' @description
@@ -892,7 +1016,10 @@ summarise_warning_records <- function(records) {
 
     cv      <- i[records$scope[i] %in% "cv"]
     cv_ids  <- unique(unlist(records$folds[cv]))
-    n_folds <- suppressWarnings(max(records$n_folds[cv], na.rm = TRUE))
+    ### No cross-validation record, or none that knows its fold count, has no
+    ### fold count to show.
+    known   <- records$n_folds[cv][!is.na(records$n_folds[cv])]
+    n_folds <- if (length(known) > 0) max(known) else NA_integer_
 
     detail <- c(
       if (length(cv_ids) > 0 && is.finite(n_folds) && n_folds > 1) {
@@ -1050,7 +1177,7 @@ tune_failure_cause <- function(tune_results) {
 #'   the rows. When both are given they must agree position by position.
 #' @param call The frame the abort reports, the caller's by default.
 #'
-#' @return Invisibly `NULL`. Aborts with class `horizons_internal_error`.
+#' @return Invisibly `NULL`. Aborts with class `horizons_error_internal`.
 #' @keywords internal
 #' @noRd
 check_rows_aligned <- function(what,
@@ -1095,8 +1222,8 @@ check_rows_aligned <- function(what,
 #' @description
 #' The one abort behind [check_rows_aligned()] and the out-of-fold row check
 #' in [fit_uq()]. A misalignment is a broken internal invariant, a bug in
-#' horizons rather than something the user did, so the class is
-#' `horizons_internal_error` and the message asks for a report.
+#' horizons rather than something the user did, so it is an `"internal"`
+#' error, whose footer asks for a report.
 #'
 #' @param what,to Character(1). The values, and the rows they are attached
 #'   to, as in [check_rows_aligned()].
@@ -1109,11 +1236,10 @@ check_rows_aligned <- function(what,
 #' @noRd
 abort_misaligned <- function(what, to, detail, call = rlang::caller_env()) {
 
-  cli::cli_abort(c(
-    "Internal error: {what} do not line up with {to}.",
+  abort_horizons(c(
+    "{what} do not line up with {to}.",
     "x" = "{detail}",
-    "i" = "Values are attached by position here, so a step upstream dropped, added or reordered rows.",
-    "i" = "This is a bug in horizons. Please report it at {.url https://github.com/S-Leuthold/horizons/issues}."
-  ), class = "horizons_internal_error", call = call)
+    "i" = "Values are attached by position here, so a step upstream dropped, added or reordered rows."
+  ), kind = "internal", call = call)
 
 }

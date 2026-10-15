@@ -409,14 +409,14 @@ describe("check_rows_aligned()", {
     err <- expect_error(
       check_rows_aligned("Interval columns for config 'cfg_1'", "the rows of new_data",
                          n = 7L, n_expected = 8L),
-      class = "horizons_internal_error"
+      class = "horizons_error_internal"
     )
 
     msg <- conditionMessage(err)
     expect_match(msg, "Interval columns for config 'cfg_1'", fixed = TRUE)
     expect_match(msg, "the rows of new_data", fixed = TRUE)
     expect_match(msg, "Got 7 rows for 8", fixed = TRUE)
-    expect_match(msg, "bug in horizons", fixed = TRUE)
+    expect_match(msg, "internal error that was detected in the horizons package", fixed = TRUE)
 
   })
 
@@ -425,7 +425,7 @@ describe("check_rows_aligned()", {
     err <- expect_error(
       check_rows_aligned("Provenance columns", "the drawn rows",
                          ids = c("a", "c", "b"), expected_ids = c("a", "b", "c")),
-      class = "horizons_internal_error"
+      class = "horizons_error_internal"
     )
 
     msg <- conditionMessage(err)
@@ -439,7 +439,7 @@ describe("check_rows_aligned()", {
     expect_error(
       check_rows_aligned("Values", "the rows", ids = c("a", "b"),
                          expected_ids = c("a", "b", "c")),
-      "Got 2 rows for 3", class = "horizons_internal_error"
+      "Got 2 rows for 3", class = "horizons_error_internal"
     )
 
   })
@@ -449,7 +449,7 @@ describe("check_rows_aligned()", {
     expect_error(
       check_rows_aligned("Values", "the rows", ids = c("a", NA),
                          expected_ids = c("a", "b")),
-      class = "horizons_internal_error"
+      class = "horizons_error_internal"
     )
 
   })
@@ -468,11 +468,96 @@ describe("check_rows_aligned()", {
     err <- expect_error(
       check_rows_aligned("Values for config '{x}'", "the rows",
                          ids = c("{a}", "b"), expected_ids = c("b", "{a}")),
-      class = "horizons_internal_error"
+      class = "horizons_error_internal"
     )
 
     expect_match(conditionMessage(err), "config '{x}'", fixed = TRUE)
     expect_match(conditionMessage(err), "{a}", fixed = TRUE)
+
+  })
+
+})
+
+describe("abort_horizons()", {
+
+  it("raises the kind's class under the base class, with a subclass in front", {
+
+    err <- expect_error(
+      abort_horizons("No configurations scored.", kind = "run",
+                     class = "horizons_error_all_configs_failed"),
+      class = "horizons_error_all_configs_failed", inherit = FALSE
+    )
+
+    expect_equal(class(err)[1:3], c("horizons_error_all_configs_failed",
+                                     "horizons_error_run", "horizons_error"))
+
+  })
+
+  it("interpolates the message in the caller's environment", {
+
+    n_rows <- 7L
+    report <- function() abort_horizons("Got {n_rows} rows.", kind = "input")
+
+    expect_error(report(), "Got 7 rows.", class = "horizons_error_input")
+
+  })
+
+  it("passes fields through to the condition", {
+
+    err <- expect_error(
+      abort_horizons("Failed.", kind = "run", records = data.frame(id = "a")),
+      class = "horizons_error_run"
+    )
+
+    expect_equal(err$records$id, "a")
+
+  })
+
+  it("adds rlang's internal-error footer only to the internal kind", {
+
+    internal <- expect_error(abort_horizons("Broken.", kind = "internal"),
+                             class = "horizons_error_internal")
+    input    <- expect_error(abort_horizons("Wrong.", kind = "input"),
+                             class = "horizons_error_input")
+
+    expect_match(conditionMessage(internal), "internal error", fixed = TRUE)
+    expect_no_match(conditionMessage(input), "internal error", fixed = TRUE)
+
+  })
+
+  it("refuses a kind or subclass it does not know, as a bug in its caller", {
+
+    expect_error(abort_horizons("x", kind = "user"), "kind",
+                 class = "horizons_error_internal")
+    expect_error(abort_horizons("x", kind = "run", class = "my_error"), "class",
+                 class = "horizons_error_internal")
+    expect_error(abort_horizons("x", kind = "run", class = "horizons_error_input"),
+                 "class", class = "horizons_error_internal")
+
+  })
+
+})
+
+describe("check_arg()", {
+
+  it("raises rlang's message with horizons' input class, naming the user's argument", {
+
+    verb <- function(allow_par) check_arg(rlang::check_bool, allow_par)
+
+    err <- expect_error(verb("yes"), class = "horizons_error_input")
+
+    expect_match(conditionMessage(err), "`allow_par` must be `TRUE` or `FALSE`",
+                 fixed = TRUE)
+    expect_equal(rlang::call_name(err$call), "verb")
+
+  })
+
+  it("passes the checker's options through and returns quietly on a valid value", {
+
+    expect_no_error(check_arg(rlang::check_number_whole, 3, min = 1))
+    expect_no_error(check_arg(rlang::check_bool, NULL, allow_null = TRUE))
+    expect_error(check_arg(rlang::check_number_whole, 0, min = 1),
+                 class = "horizons_error_input")
 
   })
 
