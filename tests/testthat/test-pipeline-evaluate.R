@@ -482,7 +482,7 @@ describe("evaluate() - NA outcome rows", {
 
     ## No row left once the flagged and the unobserved are out
     expect_error(modelling_rows(df[2:3, ], "y"), "Every row with an outcome is flagged",
-                 class = "horizons_input_error")
+                 class = "horizons_error_input")
 
   })
 

@@ -2348,6 +2348,12 @@ test_that("a refusal shows five findings, counts the rest, and keeps every one v
   err <- expect_error(validate_horizons_data(obj), class = "horizons_error_validation")
   expect_true(any(grepl("{x}", err$findings, fixed = TRUE)))
 
+  ## Plain text in a colour session, where cli styles the findings
+  withr::local_options(cli.num_colors = 256)
+  err <- expect_error(validate_horizons_data(obj), class = "horizons_error_validation")
+  expect_false(any(grepl("\033[", err$findings, fixed = TRUE)))
+  expect_true(any(grepl("Columns missing from role_map: {x}", err$findings, fixed = TRUE)))
+
 })
 
 
