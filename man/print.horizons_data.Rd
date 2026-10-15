@@ -27,6 +27,5 @@ range, and the outcome and responses if present
 \item \strong{Objects with provenance}: Shows source path and spectra type
 }
 
-The output uses tree-style formatting consistent with error messages
-throughout the package.
+The output uses the tree-style formatting of the verbs' progress output.
 }

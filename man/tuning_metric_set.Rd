@@ -12,8 +12,8 @@ tuning_metric_set(
 }
 \arguments{
 \item{transformation}{Character scalar: \code{"none"}, \code{"log"}, \code{"log10"} or
-\code{"sqrt"}. The same vocabulary as \code{\link[=back_transform_predictions]{back_transform_predictions()}}. Unknown
-values abort rather than silently scoring cross-scale.}
+\code{"sqrt"}. The same vocabulary as \code{\link[=back_transform_predictions]{back_transform_predictions()}}; the door
+validators refuse any other.}
 
 \item{metrics}{Character vector naming the metrics to include, in order.
 Any of \code{"rmse"}, \code{"rrmse"}, \code{"rsq"}, \code{"mae"}, \code{"rpd"}, \code{"ccc"}.}
