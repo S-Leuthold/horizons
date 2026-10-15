@@ -175,16 +175,25 @@ test_that("select_training() takes the resemblance check's minimum and the chunk
   fx <- select_fixture(n_pool = 60)
 
   seen <- NULL
-  real <- check_resemblance
-  local_mocked_bindings(check_resemblance = function(sp, St, metric, chunk_size, seed, eligible, min_rows) {
-    seen <<- c(chunk_size = chunk_size, min_rows = min_rows)
-    real(sp, St, metric, chunk_size, seed = seed, eligible = eligible, min_rows = min_rows)
-  })
+  draw_chunk <- NULL
+  real       <- check_resemblance
+  real_draw  <- draw_neighbours
+  local_mocked_bindings(
+    check_resemblance = function(sp, St, metric, chunk_size, seed, eligible, min_rows) {
+      seen <<- c(chunk_size = chunk_size, min_rows = min_rows)
+      real(sp, St, metric, chunk_size, seed = seed, eligible = eligible, min_rows = min_rows)
+    },
+    draw_neighbours = function(..., chunk_size) {
+      draw_chunk <<- chunk_size
+      real_draw(..., chunk_size = chunk_size)
+    }
+  )
 
   out <- suppressWarnings(quiet_select(fx, k = 5, properties = "clay",
                                        control = control_horizons(chunk_size = 7L, min_resemblance_rows = 1000L)))
 
   expect_identical(seen, c(chunk_size = 7L, min_rows = 1000L))
+  expect_identical(draw_chunk, 7L)
   expect_match(out$selection$resemblance$skipped, "the check needs 1000", fixed = TRUE)
 
 })

@@ -310,16 +310,17 @@ describe("evaluate() - its control", {
 
     local_plan(future::sequential)
 
-    w <- expect_warning(
-      ev <- keep_only_warning(
-        evaluate(make_eval_object(n = 60, n_configs = 1), prune = FALSE, seed = 42L,
-                 control = control_horizons(allow_par = TRUE)),
-        "offers 1 worker"
-      ),
-      "evaluate\\(\\).*offers 1 worker",
-      class = "horizons_warning_substitution"
+    got <- collect_warnings(
+      evaluate(make_eval_object(n = 60, n_configs = 1), prune = FALSE, seed = 42L,
+               control = control_horizons(allow_par = TRUE)),
+      "offers 1 worker"
     )
+    ev <- got$value
+    w  <- got$warnings[[1]]
 
+    expect_length(got$warnings, 1L)
+    expect_s3_class(w, "horizons_warning_substitution")
+    expect_match(conditionMessage(w), "evaluate\\(\\).*offers 1 worker")
     expect_identical(ev$log$verb, "evaluate")
     expect_identical(ev$log$topic, "substitution")
     expect_identical(w$log, ev$log)

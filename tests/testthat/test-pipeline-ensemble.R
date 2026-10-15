@@ -195,7 +195,7 @@ describe("ensemble() - its control", {
 
   })
 
-  it("passes min_calib_rows to the CV+ calibration", {
+  it("hands min_calib_rows to fit_ensemble_uq()", {
 
     seen <- NULL
     local_mocked_bindings(fit_ensemble_uq = function(x, ..., min_calib_rows) {
@@ -969,20 +969,53 @@ describe("ensemble() - allow_par", {
     fitted <- ens_fitted()
     local_plan(future::sequential)
 
-    w <- expect_warning(
-      ens <- keep_only_warning(
-        ensemble(fitted, method = "penalized", optimize = FALSE, compute_uq = FALSE,
-                 control = control_horizons(allow_par = TRUE)),
-        "offers 1 worker"
-      ),
-      "ensemble\\(\\).*offers 1 worker",
-      class = "horizons_warning_substitution"
+    got <- collect_warnings(
+      ensemble(fitted, method = "penalized", optimize = FALSE, compute_uq = FALSE,
+               control = control_horizons(allow_par = TRUE)),
+      "offers 1 worker"
     )
+    ens <- got$value
+    w   <- got$warnings[[1]]
 
+    expect_length(got$warnings, 1L)
+    expect_s3_class(w, "horizons_warning_substitution")
+    expect_match(conditionMessage(w), "ensemble\\(\\).*offers 1 worker")
     expect_true(inherits(ens, "horizons_ensemble"))
     expect_identical(ens$log$verb, "ensemble")
     expect_identical(ens$log$topic, "substitution")
     expect_identical(w$log, ens$log)
+
+  })
+
+  it("pins the parent's threads while a backend it can use runs, and restores them on exit", {
+
+    fitted <- ens_fitted()
+    local_plan(future::sequential)
+
+    calls     <- character()
+    tune_par  <- logical()
+    real_ctrl <- meta_tune_control
+    local_mocked_bindings(
+      check_parallel_backend = function(...) TRUE,
+      pin_parent_threads     = function() {
+        calls <<- c(calls, "pin")
+        function() calls <<- c(calls, "restore")
+      },
+      meta_tune_control      = function(kind, allow_par = FALSE) {
+        tune_par <<- c(tune_par, allow_par)
+        real_ctrl(kind, allow_par)
+      }
+    )
+
+    ens <- ensemble(fitted, method = "penalized", optimize = FALSE, compute_uq = FALSE,
+                    control = control_horizons(allow_par = TRUE))
+
+    expect_true(inherits(ens, "horizons_ensemble"))
+    expect_identical(calls, c("pin", "restore"))
+
+    ## The engines' tune control is told to use the plan
+    expect_gt(length(tune_par), 0)
+    expect_true(all(tune_par))
 
   })
 

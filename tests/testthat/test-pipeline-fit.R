@@ -253,10 +253,10 @@ describe("fit() - its control", {
     expect_error(
       suppressWarnings(fit(mfo(), n_best = 1L, compute_uq = FALSE, compute_ad = FALSE,
                            control = control_horizons(min_calib_rows = 12L, min_ad_rows = 5L,
-                                                      min_degradation_rows = 4L))),
+                                                      min_degradation_rows = 6L))),
       class = "member_reached"
     )
-    expect_identical(seen, c(12L, 5L, 4L))
+    expect_identical(seen, c(12L, 5L, 6L))
 
   })
 
@@ -276,7 +276,7 @@ describe("fit() - its control", {
     }
 
     expect_null(run(N_CALIB_MIN))
-    expect_false(is.null(run(5L)))
+    expect_false(is.null(run(9L)))
 
   })
 
@@ -857,7 +857,7 @@ describe("fit() - member ranking (#50)", {
 
 describe("fit() - allow_par without a usable backend", {
 
-  it("warns naming fit() and the plan, then runs sequentially", {
+  it("warns once naming fit() and the plan, on the log too, then runs sequentially", {
 
     skip_unless_slow_tier()
 
@@ -865,15 +865,19 @@ describe("fit() - allow_par without a usable backend", {
     obj <- make_fit_object(n = 60, n_configs = 1)
     obj$config$tuning$final_bayesian_iter <- 0L
 
-    expect_warning(
-      r <- keep_only_warning(
-        fit(obj, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE, seed = 123L, control = control_horizons(allow_par = TRUE)),
-        "offers 1 worker"
-      ),
-      "fit\\(\\).*offers 1 worker"
+    got <- collect_warnings(
+      fit(obj, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE, seed = 123L,
+          control = control_horizons(allow_par = TRUE)),
+      "offers 1 worker"
     )
+    r <- got$value
+    w <- got$warnings[[1]]
 
+    expect_length(got$warnings, 1L)
+    expect_s3_class(w, "horizons_warning_substitution")
+    expect_match(conditionMessage(w), "fit\\(\\).*offers 1 worker")
     expect_s3_class(r, "horizons_fit")
+    expect_true("substitution" %in% r$log$topic[r$log$verb == "fit"])
 
   })
 

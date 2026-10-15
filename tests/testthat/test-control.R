@@ -14,7 +14,7 @@ describe("control_horizons()", {
     ctrl <- control_horizons()
 
     expect_s3_class(ctrl, "horizons_control")
-    expect_identical(names(formals(control_horizons)), names(CONTROL_FIELDS))
+    expect_identical(names(formals(control_horizons)), c("...", names(CONTROL_FIELDS)))
     expect_identical(names(ctrl), names(CONTROL_FIELDS))
     expect_true(all(vapply(unclass(ctrl), is.null, logical(1))))
 
@@ -62,9 +62,32 @@ describe("control_horizons()", {
 
   })
 
+  it("takes its fields by name only", {
+
+    expect_error(control_horizons(TRUE), "1 value was passed by position",
+                 class = "horizons_error_input")
+    expect_error(control_horizons(alow_par = TRUE), "no field alow_par",
+                 class = "horizons_error_input")
+
+  })
+
   it("refuses parallelize_over = 'both' with the nesting hint", {
 
     expect_error(control_horizons(parallelize_over = "both"), "Nested parallelism",
+                 class = "horizons_error_input")
+
+  })
+
+  it("floors each row minimum at what its computation needs", {
+
+    ## A 90% split-conformal interval needs 9 calibration rows
+    expect_error(control_horizons(min_calib_rows = 8L), "larger than or equal to 9",
+                 class = "horizons_error_input")
+    expect_identical(control_horizons(min_calib_rows = 9L)$min_calib_rows, 9L)
+
+    expect_error(control_horizons(min_degradation_rows = 4L), "larger than or equal to 5",
+                 class = "horizons_error_input")
+    expect_error(control_horizons(min_ad_rows = 1L), "larger than or equal to 2",
                  class = "horizons_error_input")
 
   })
@@ -75,6 +98,14 @@ describe("control_horizons()", {
     expect_identical(control_horizons(breaker = 5L)$breaker, 5L)
     expect_error(control_horizons(breaker = TRUE), "whole number of at least 2",
                  class = "horizons_error_input")
+
+  })
+
+  it("words a refusal as the user's call, naming the field", {
+
+    expect_snapshot(control_horizons(min_calib_rows = 8L), error = TRUE)
+    expect_snapshot(evaluate(make_eval_object(), control = control_horizons(chunk_size = 10L)),
+                    error = TRUE)
 
   })
 
@@ -128,9 +159,15 @@ describe("resolve_control()", {
 
   })
 
-  it("refuses anything that is not a horizons_control", {
+  it("refuses anything that is not a horizons_control, and a field it does not know", {
 
     expect_error(resolve_control(list(allow_par = TRUE), "evaluate"), "control_horizons",
+                 class = "horizons_error_input")
+
+    ## An edit after the constructor, with a typo
+    ctrl <- control_horizons()
+    ctrl$alow_par <- TRUE
+    expect_error(resolve_control(ctrl, "evaluate"), "field alow_par",
                  class = "horizons_error_input")
 
   })
@@ -144,15 +181,21 @@ describe("resolve_control()", {
     expect_false(resolve_control(NULL, "evaluate")$verbose)
     expect_true(resolve_control(control_horizons(verbose = TRUE), "evaluate")$verbose)
 
+    ## A bad option is reported as the option's, and a set field still wins
     withr::local_options(horizons.verbose = "loud")
-    expect_error(resolve_control(NULL, "evaluate"), "verbose",
-                 class = "horizons_error_input")
+    expect_error(resolve_control(NULL, "evaluate"), "getOption(\"horizons.verbose\")",
+                 fixed = TRUE, class = "horizons_error_input")
+    expect_false(resolve_control(control_horizons(verbose = FALSE), "evaluate")$verbose)
 
   })
 
-  it("leaves a future.globals.maxSize the user set as the payload limit", {
+  it("keeps a larger future.globals.maxSize as the payload limit, and not tune's smaller one", {
 
     withr::local_options(future.globals.maxSize = NULL)
+    expect_identical(resolve_control(NULL, "evaluate")$max_worker_payload, EVAL_WORKER_PAYLOAD_LIMIT)
+
+    ## What tune sets when it loads
+    withr::local_options(future.globals.maxSize = 1e9)
     expect_identical(resolve_control(NULL, "evaluate")$max_worker_payload, EVAL_WORKER_PAYLOAD_LIMIT)
 
     withr::local_options(future.globals.maxSize = 2 * 1024^3)

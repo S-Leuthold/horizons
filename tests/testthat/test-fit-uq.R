@@ -372,6 +372,22 @@ describe("fit_uq() - too few calibration points", {
 
   })
 
+  it("refuses fewer scores than its level's order statistic needs, whatever the minimum", {
+
+    ## 8 rows: the 90% correction would need the 9th smallest of 8 scores
+    for (n_calib in c(8, 9)) {
+
+      small  <- make_uq_setup(n_calib = n_calib)
+      result <- fit_uq(fitted_workflow = small$fitted_wf, oof_predictions = small$oof_predictions,
+                       calib_data = small$calib_data, role_map = small$role_map,
+                       transformation = "none", level_default = 0.90, min_calib_rows = 2L)
+
+      expect_identical(is.null(result), n_calib == 8, label = paste(n_calib, "rows"))
+
+    }
+
+  })
+
 })
 
 

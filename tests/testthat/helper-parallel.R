@@ -23,3 +23,15 @@ keep_only_warning <- function(expr, keep) {
     if (!matches) invokeRestart("muffleWarning")
   })
 }
+
+## Evaluate `expr`, muffling every warning, and return its value with the
+## warnings whose message matches `pattern`, as conditions: for a test that a
+## warning is raised once, with its class.
+collect_warnings <- function(expr, pattern) {
+  warned <- list()
+  value  <- withCallingHandlers(expr, warning = function(w) {
+    if (grepl(pattern, conditionMessage(w))) warned[[length(warned) + 1L]] <<- w
+    invokeRestart("muffleWarning")
+  })
+  list(value = value, warnings = warned)
+}
