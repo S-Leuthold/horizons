@@ -436,6 +436,48 @@ describe("evaluate() - output_dir and the configs axis (#233)", {
 })
 
 
+describe("evaluate() - the worker payload limit", {
+
+  it("dispatches under max_worker_payload, or a future.globals.maxSize the user set, and restores it", {
+
+    ## The configs axis runs only on an installed build
+    skip_if_dev_package()
+
+    obj <- make_eval_object(n_configs = 4)
+
+    run <- function(control) {
+      seen <- NULL
+      testthat::with_mocked_bindings(
+        testthat::with_mocked_bindings(
+          tryCatch(suppressWarnings(evaluate(obj, seed = 42L, control = control)),
+                   dispatched = function(e) NULL),
+          future_map = function(...) {
+            seen <<- getOption("future.globals.maxSize")
+            rlang::abort("stop", class = "dispatched")
+          },
+          .package = "furrr"
+        ),
+        check_parallel_backend = function(...) TRUE,
+        registered_workers     = function() 2L,
+        registered_plan_label  = function() "multisession",
+        .package = "horizons"
+      )
+      seen
+    }
+
+    withr::local_options(future.globals.maxSize = 2 * 1024^3)
+
+    expect_identical(run(control_horizons(allow_par = TRUE, output_dir = withr::local_tempdir(),
+                                          max_worker_payload = 7e8)), 7e8)
+    expect_identical(run(control_horizons(allow_par = TRUE, output_dir = withr::local_tempdir())),
+                     2 * 1024^3)
+    expect_identical(getOption("future.globals.maxSize"), 2 * 1024^3)
+
+  })
+
+})
+
+
 ## =========================================================================
 ## Configs axis (installed build only)
 ## =========================================================================
