@@ -63,9 +63,10 @@ column. All other tokens create new metadata columns.
 
 \strong{Duplicate or missing sample ids:} Several filenames parsing to the same
 \code{sampleid} token is normal here — that is what identifies replicate scans
-of one physical sample — and so is an \code{NA} \code{sample_id} left by \code{too_few = "na"}. \code{parse_ids()} warns rather than aborts on either, the same as
-\code{\link[=spectra]{spectra()}}. Use \code{\link[=average]{average()}} to collapse the replicates before anything
-downstream that requires unique ids.
+of one physical sample — and so is an \code{NA} \code{sample_id} left by \code{too_few = "na"}. \code{parse_ids()} passes either silently, as \code{\link[=spectra]{spectra()}} does (the
+filenames that did not match still warn, under \code{too_few = "na"}). Use
+\code{\link[=average]{average()}} to collapse the replicates before anything downstream that
+requires unique ids.
 
 \strong{Before modelling only:} \code{parse_ids()} rewrites \code{sample_id}, and the
 splits and models that \code{\link[=evaluate]{evaluate()}}, \code{\link[=fit]{fit()}} and \code{\link[=ensemble]{ensemble()}} store are

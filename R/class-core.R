@@ -592,15 +592,14 @@ validate_horizons_data <- function(x,
 
   if (length(numeric_predictors) > 1) {
 
-    wn_raw    <- gsub("^wn_", "", numeric_predictors)
-    wn_values <- suppressWarnings(as.numeric(wn_raw))
+    wn_num <- wn_values(numeric_predictors)
 
     ## A name that matches the wn_<digits> pattern but does not parse (e.g.
     ## two decimal points) would otherwise reach `diff()`/`all()` as NA and
     ## either crash ("missing value where TRUE/FALSE needed") or disappear
     ## into a generic message; name it directly instead.
 
-    unparseable <- numeric_predictors[is.na(wn_values)]
+    unparseable <- numeric_predictors[is.na(wn_num)]
 
     if (length(unparseable) > 0) {
 
@@ -616,14 +615,14 @@ validate_horizons_data <- function(x,
       ## the pair (not just the later occurrence duplicated() flags) rather
       ## than reporting the generic order failure.
 
-      dup_wn <- numeric_predictors[wn_values %in% wn_values[duplicated(wn_values)]]
+      dup_wn <- numeric_predictors[wn_num %in% wn_num[duplicated(wn_num)]]
 
       if (length(dup_wn) > 0) {
 
         dup_list <- paste(dup_wn, collapse = ", ")
         errors   <- c(errors, cli::format_inline("Duplicate wavenumber columns: {dup_list}"))
 
-      } else if (!all(diff(wn_values) < 0)) {
+      } else if (!all(diff(wn_num) < 0)) {
 
         errors <- c(errors, cli::format_inline("Wavelength columns must be in strictly decreasing order"))
 
