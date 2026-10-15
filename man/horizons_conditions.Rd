@@ -80,8 +80,15 @@ to say so.}
 
 Each verb raises a topic at most once per call, at its end, and only after
 writing it to the object's log, so a warning that is silenced or never
-seen is still on the object. \code{predict()}, which changes no object, carries
-each warning's record as the field \code{log}.
+seen is still on the object. The log also keeps the notes a verb reports
+without warning, such as samples dropped as the user asked, so a
+pipeline's history is in one place. \code{predict()}, which changes no object,
+carries each warning's record as the field \code{log}.
+
+Under \code{options(warn = 2)}, a warning that no handler takes ends the call
+with \code{horizons_error_promoted_warnings}, which carries the finished result
+as \code{object}; a warning the caller muffles or catches is handled as R
+handles any warning.
 }
 
 \section{Catching errors raised inside a recipe step}{

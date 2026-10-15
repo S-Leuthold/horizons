@@ -19,7 +19,7 @@ CONDITION_KINDS <- c("input", "validation", "dependency", "run", "internal")
 #' carries the base class `horizons_error`, exactly one kind
 #' (`horizons_error_<kind>`), and at most one specific subclass in front of
 #' the kind, so a handler can catch all of horizons' errors, one kind of
-#' them, or one refusal (`dev/design/conditions.md`, Classes).
+#' them, or one refusal (see [horizons_conditions]).
 #'
 #' An `"internal"` error is a broken invariant, a bug in horizons. It is
 #' raised with `.internal = TRUE`, which adds rlang's footer naming the
@@ -194,8 +194,15 @@ check_arg <- function(check,
 #' @section Where the record lives:
 #' Each verb raises a topic at most once per call, at its end, and only after
 #' writing it to the object's log, so a warning that is silenced or never
-#' seen is still on the object. `predict()`, which changes no object, carries
-#' each warning's record as the field `log`.
+#' seen is still on the object. The log also keeps the notes a verb reports
+#' without warning, such as samples dropped as the user asked, so a
+#' pipeline's history is in one place. `predict()`, which changes no object,
+#' carries each warning's record as the field `log`.
+#'
+#' Under `options(warn = 2)`, a warning that no handler takes ends the call
+#' with `horizons_error_promoted_warnings`, which carries the finished result
+#' as `object`; a warning the caller muffles or catches is handled as R
+#' handles any warning.
 #'
 #' @section Catching errors raised inside a recipe step:
 #' recipes wraps every error raised inside a step in `recipes_error_step`,

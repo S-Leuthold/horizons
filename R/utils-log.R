@@ -1,12 +1,15 @@
 ## ---------------------------------------------------------------------------
 ## The log: the warnings an object's verbs raised
 ## ---------------------------------------------------------------------------
-## Every object carries one log, the warnings its verbs raised, kept: one row
-## per warning, holding what the warning carried (`dev/design/conditions.md`,
-## The log). A verb collects its warnings in a per-call collector as it runs,
-## and at its end writes one row per topic and only then raises that topic's
-## warning, once. No site raises a warning itself, so "recorded before raised"
-## and "once per topic per call" hold by construction.
+## Every object carries one log of what its verbs reported (see
+## ?horizons_conditions): each warning a verb raised, one row per topic per
+## call, and each note, an event a verb reports without warning (samples
+## dropped as the user asked, a cache rebuilt), one row each. A verb collects
+## both in a per-call collector as it runs; at its end log_close() writes the
+## rows, and only then does signal_log() raise each warning row, once. No site
+## raises a warning itself, and signal_log() raises only what log_close()
+## wrote, so "recorded before raised" and "once per topic per call" hold by
+## construction.
 ##
 ## The collector is an environment, so the helpers a verb calls can add to it
 ## without threading it back. It is never sent to a worker: work that runs on a
@@ -25,16 +28,19 @@ LOG_TOPICS <- c("substitution", "quality", "skipped", "flagged",
 
 #' An empty log
 #'
-#' @return Tibble with one row per warning a verb raised: `verb`, `topic` (one
-#'   of `LOG_TOPICS`), `message` (the warning's text on one line), `ids` (a
-#'   list of the configurations, members, samples, files or properties it is
-#'   about) and `n` (how many times it arose).
+#' @return Tibble with one row per thing a verb reported: `verb`, `type`
+#'   (`"warning"`, raised once per topic per call, or `"note"`, recorded and
+#'   shown in verbose output but not raised), `topic` (one of `LOG_TOPICS`
+#'   for a warning, `NA` for a note), `message` (the text on one line), `ids`
+#'   (a list of the configurations, members, samples, files or properties it
+#'   is about) and `n` (how many times it arose).
 #' @keywords internal
 #' @noRd
 new_log <- function() {
 
   tibble::tibble(
     verb    = character(0),
+    type    = character(0),
     topic   = character(0),
     message = character(0),
     ids     = list(),
@@ -84,17 +90,64 @@ log_open <- function(verb) {
 #' @return `collector`, invisibly.
 #' @keywords internal
 #' @noRd
-log_add <- function(collector,
-                    topic,
-                    message,
-                    ids    = character(0),
-                    n      = max(length(ids), 1L),
-                    .envir = rlang::caller_env()) {
+log_warning <- function(collector,
+                        topic,
+                        message,
+                        ids    = character(0),
+                        n      = max(length(ids), 1L),
+                        .envir = rlang::caller_env()) {
 
   if (!rlang::is_string(topic) || !topic %in% LOG_TOPICS) {
 
     abort_horizons(
       "{.arg topic} must be one of {.or {.val {LOG_TOPICS}}}, not {.obj_type_friendly {topic}}.",
+      kind = "internal"
+    )
+
+  }
+
+  log_event(collector, "warning", topic, message, ids, n, .envir)
+
+}
+
+#' Add a note to a verb call's collector
+#'
+#' @description
+#' Records an event the verb reports without warning: something the user
+#' asked for that changed the data (samples dropped under
+#' `on_all_outliers = "drop"`), or a recovery that cost only time (a stale
+#' cache rebuilt). The verb shows it in its verbose output; the log keeps it
+#' with the warnings, so a pipeline's history is in one place. A note is
+#' never raised.
+#'
+#' @inheritParams log_warning
+#' @return `collector`, invisibly.
+#' @keywords internal
+#' @noRd
+log_note <- function(collector,
+                     message,
+                     ids    = character(0),
+                     n      = max(length(ids), 1L),
+                     .envir = rlang::caller_env()) {
+
+  log_event(collector, "note", NA_character_, message, ids, n, .envir)
+
+}
+
+#' Record one event in a collector
+#'
+#' @param type Character(1). `"warning"` or `"note"`.
+#' @param topic Character(1). The warning's topic, or `NA` for a note.
+#' @inheritParams log_warning
+#' @return `collector`, invisibly.
+#' @keywords internal
+#' @noRd
+log_event <- function(collector, type, topic, message, ids, n, .envir) {
+
+  if (isTRUE(collector$closed)) {
+
+    abort_horizons(
+      "An event was added to {.fn {collector$verb}}'s collector after it was closed.",
       kind = "internal"
     )
 
@@ -110,6 +163,7 @@ log_add <- function(collector,
   names(rendered) <- names(message)
 
   collector$events[[length(collector$events) + 1L]] <- list(
+    type    = type,
     topic   = topic,
     message = rendered,
     ids     = unique(as.character(ids)),
@@ -123,13 +177,15 @@ log_add <- function(collector,
 #' The log rows a verb call's collector holds
 #'
 #' @description
-#' One row per topic, in the order each topic first arose. A topic added once
-#' keeps its message; a topic added several times is one warning whose
-#' message lists each, so the row and the warning say the same thing.
+#' Warnings are one row per topic, in the order each topic first arose: a
+#' topic added once keeps its message, and a topic added several times is
+#' one warning whose message lists each, so the row and the warning say the
+#' same thing. Notes are one row each. Rows keep the order in which their
+#' first event arose.
 #'
 #' @param collector From [log_open()].
-#' @return Rows shaped like [new_log()]'s, with the cli message each row's
-#'   warning raises as the attribute `"messages"` (a list, one per row).
+#' @return Rows shaped like [new_log()]'s, with the cli message of each row
+#'   as the attribute `"messages"` (a list, one per row).
 #' @keywords internal
 #' @noRd
 log_rows <- function(collector) {
@@ -144,19 +200,23 @@ log_rows <- function(collector) {
 
   }
 
-  topics <- vapply(events, `[[`, character(1), "topic")
-  order  <- unique(topics)
+  ### A warning's key is its topic, so a topic's events share a row; a note's
+  ### key is its position, so each note is a row of its own.
+  keys  <- vapply(seq_along(events), function(i) {
+    e <- events[[i]]
+    if (identical(e$type, "warning")) paste0("warning:", e$topic) else paste0("note:", i)
+  }, character(1))
+  order <- unique(keys)
+  group <- lapply(order, function(k) events[keys == k])
 
-  messages <- lapply(order, function(topic) {
-
-    these <- events[topics == topic]
+  messages <- lapply(group, function(these) {
 
     if (length(these) == 1L) return(these[[1]]$message)
 
     ### Each event's statement becomes a bullet under one header; any bullets
     ### an event carried are folded into its line.
     lines <- vapply(these, function(e) clean_message_text(e$message), character(1))
-    c(paste0(length(these), " ", gsub("_", " ", topic), " warnings in `",
+    c(paste0(length(these), " ", gsub("_", " ", these[[1]]$topic), " warnings in `",
              collector$verb, "()`:"),
       stats::setNames(lines, rep("*", length(lines))))
 
@@ -164,14 +224,11 @@ log_rows <- function(collector) {
 
   rows <- tibble::tibble(
     verb    = collector$verb,
-    topic   = order,
+    type    = vapply(group, function(g) g[[1]]$type, character(1)),
+    topic   = vapply(group, function(g) g[[1]]$topic, character(1)),
     message = vapply(messages, flatten_message, character(1)),
-    ids     = lapply(order, function(topic) {
-      unique(unlist(lapply(events[topics == topic], `[[`, "ids")))
-    }),
-    n       = vapply(order, function(topic) {
-      sum(vapply(events[topics == topic], `[[`, integer(1), "n"))
-    }, integer(1), USE.NAMES = FALSE)
+    ids     = lapply(group, function(g) unique(unlist(lapply(g, `[[`, "ids")))),
+    n       = vapply(group, function(g) sum(vapply(g, `[[`, integer(1), "n")), integer(1))
   )
 
   attr(rows, "messages") <- messages
@@ -181,6 +238,10 @@ log_rows <- function(collector) {
 
 #' Close a verb call's collector onto a log
 #'
+#' @description
+#' Writes this call's rows, one per topic, and closes the collector: nothing
+#' more can be added, and [signal_log()] raises exactly these rows.
+#'
 #' @param collector From [log_open()].
 #' @param log The object's log so far, shaped like [new_log()]'s.
 #' @return `log` with this call's rows appended.
@@ -188,7 +249,17 @@ log_rows <- function(collector) {
 #' @noRd
 log_close <- function(collector, log = new_log()) {
 
-  rows <- log_rows(collector)
+  if (isTRUE(collector$closed)) {
+
+    abort_horizons("{.fn {collector$verb}}'s collector was closed twice.",
+                   kind = "internal")
+
+  }
+
+  collector$rows   <- log_rows(collector)
+  collector$closed <- TRUE
+
+  rows <- collector$rows
   attr(rows, "messages") <- NULL
 
   dplyr::bind_rows(log, rows)
@@ -198,44 +269,88 @@ log_close <- function(collector, log = new_log()) {
 #' Raise a verb call's warnings, once per topic
 #'
 #' @description
-#' Run at the end of a verb, after [log_close()] has written the rows. Each
-#' topic is raised once, as `horizons_warning_<topic>`, carrying its log row
-#' as the field `log`.
+#' Run at the end of a verb, after [log_close()]. Raises each warning row
+#' [log_close()] wrote as `horizons_warning_<topic>`, once, carrying the row
+#' as the field `log`; notes are not raised. It refuses, as a bug in the verb, to run before the
+#' collector is closed or a second time, so a warning is never raised that
+#' the log does not hold.
 #'
-#' Under `options(warn = 2)` nothing is raised as a warning, because R would
-#' turn the first into a plain error that drops its fields and loses the
-#' object the verb was about to return. The verb aborts instead with
-#' `horizons_error_promoted_warnings`, carrying the rows as `log` and the
-#' finished result as `object`, so the call ends in an error as the user
-#' asked and no work is lost.
+#' Under `options(warn = 2)`, R turns an unhandled warning into a plain error
+#' that drops its fields and loses the object the verb was about to return.
+#' So each warning is first offered to the caller's handlers, as R would
+#' offer it: one that a handler muffles (`suppressWarnings()`,
+#' `expect_warning()`) is done with, and one that a handler catches
+#' (`tryCatch(warning = )`) unwinds as usual. The warnings no handler took
+#' are then raised together as `horizons_error_promoted_warnings`, carrying
+#' their rows as `log` and the finished result as `object`, so the call ends
+#' in an error as the user asked and no work is lost.
 #'
-#' @param collector From [log_open()].
+#' @param collector From [log_open()], closed by [log_close()].
 #' @param object What the verb returns, carried on the error under
 #'   `warn = 2`.
-#' @return `NULL`, invisibly, when there is nothing to raise or every
-#'   warning has been raised.
+#' @return `NULL`, invisibly.
 #' @keywords internal
 #' @noRd
 signal_log <- function(collector, object = NULL) {
 
-  rows     <- log_rows(collector)
-  messages <- attr(rows, "messages")
+  if (!isTRUE(collector$closed)) {
+
+    abort_horizons("{.fn signal_log} ran before {.fn {collector$verb}}'s collector was closed.",
+                   kind = "internal")
+
+  }
+
+  if (isTRUE(collector$signalled)) {
+
+    abort_horizons("{.fn {collector$verb}}'s warnings were raised twice.",
+                   kind = "internal")
+
+  }
+
+  collector$signalled <- TRUE
+
+  ### Notes are recorded, never raised.
+  is_warning <- collector$rows$type == "warning"
+  messages   <- attr(collector$rows, "messages")[is_warning]
+  rows       <- collector$rows[is_warning, , drop = FALSE]
+  attr(rows, "messages") <- NULL
 
   if (nrow(rows) == 0) return(invisible(NULL))
 
-  ## warn = 2: one error that keeps the records and the work -----------------
+  warning_for <- function(i) {
+    rlang::catch_cnd(
+      cli::cli_warn(
+        cli_escape(messages[[i]]),
+        class = c(paste0("horizons_warning_", rows$topic[i]), "horizons_warning"),
+        log   = rows[i, , drop = FALSE],
+        call  = NULL
+      ),
+      classes = "warning"
+    )
+  }
+
+  ## warn = 2: what no handler takes is one error that keeps the work ---------
 
   if (getOption("warn", 0L) >= 2L) {
 
-    attr(rows, "messages") <- NULL
+    unhandled <- vapply(seq_len(nrow(rows)), function(i) {
+      withRestarts(
+        { signalCondition(warning_for(i)); TRUE },
+        muffleWarning = function() FALSE
+      )
+    }, logical(1))
+
+    if (!any(unhandled)) return(invisible(NULL))
+
+    promoted <- rows[unhandled, , drop = FALSE]
 
     abort_horizons(
-      c("{.fn {collector$verb}} raised {nrow(rows)} warning{?s}, and {.code options(warn = 2)} turns warnings into errors.",
-        stats::setNames(cli_escape(rows$message), rep("*", nrow(rows))),
+      c("{.fn {collector$verb}} raised {nrow(promoted)} warning{?s}, and {.code options(warn = 2)} turns warnings into errors.",
+        stats::setNames(cli_escape(promoted$message), rep("*", nrow(promoted))),
         "i" = "The finished result is in this error's {.field object} field, and the warnings in its {.field log} field."),
       kind   = "run",
       class  = "horizons_error_promoted_warnings",
-      log    = rows,
+      log    = promoted,
       object = object,
       call   = NULL
     )
@@ -246,13 +361,10 @@ signal_log <- function(collector, object = NULL) {
 
   for (i in seq_len(nrow(rows))) {
 
-    row <- rows[i, , drop = FALSE]
-    attr(row, "messages") <- NULL
-
     cli::cli_warn(
       cli_escape(messages[[i]]),
       class = c(paste0("horizons_warning_", rows$topic[i]), "horizons_warning"),
-      log   = row,
+      log   = rows[i, , drop = FALSE],
       call  = NULL
     )
 
@@ -379,8 +491,9 @@ new_unit_records <- function() {
 #' @param unit Character(1). What kind of unit this is, e.g.
 #'   `"configuration"` or `"member"`.
 #' @param id Character(1). The unit's id.
-#' @param debug Logical(1). When `TRUE`, `expr` runs with no containment, so
-#'   the first failure stops the call with its full backtrace.
+#' @param debug Logical(1). When `TRUE`, no failure is contained, so the
+#'   first one stops the call with its full backtrace. Warnings are still
+#'   recorded: debug turns off containment, not the record.
 #' @param keep_traces Logical(1). Keep a failure's backtrace, as text.
 #'
 #' @return List: `value` (the value of `expr`, or `NULL` when it failed),
@@ -390,9 +503,13 @@ new_unit_records <- function() {
 #' @noRd
 run_unit <- function(expr, unit, id, debug = FALSE, keep_traces = FALSE) {
 
-  if (isTRUE(debug)) {
+  ### A record is built from these, so they are checked before anything runs:
+  ### a bad one would otherwise fail inside an outer unit and read as that
+  ### unit's failure.
+  if (!rlang::is_string(unit) || !rlang::is_string(id)) {
 
-    return(list(value = expr, failed = FALSE, records = new_unit_records()))
+    abort_horizons("{.arg unit} and {.arg id} must each be a single string.",
+                   kind = "internal")
 
   }
 
@@ -406,11 +523,20 @@ run_unit <- function(expr, unit, id, debug = FALSE, keep_traces = FALSE) {
     if (length(stack) <= depth) NA_character_ else stack[length(stack)]
   }
 
-  record <- function(cnd, type, trace = NULL) {
-    tryCatch(
-      list(unit = unit, id = id, step = current_step(), type = type,
-           class = root_class(cnd), message = condition_summary(cnd),
-           n = 1L, trace = trace),
+  ### Everything that builds a record runs inside the guard, so a record that
+  ### cannot be built is a horizons bug, which propagates, rather than this
+  ### unit's failure.
+  record <- function(cnd, type) {
+    records[[length(records) + 1L]] <<- tryCatch(
+      {
+        trace <- if (identical(type, "failure") && isTRUE(keep_traces)) {
+          traced <- rlang::cnd_entrace(cnd)
+          if (!is.null(traced$trace)) format(traced$trace)
+        }
+        list(unit = unit, id = id, step = current_step(), type = type,
+             class = root_class(cnd), message = condition_summary(cnd),
+             n = 1L, trace = trace)
+      },
       error = function(e) abort_horizons(
         "Recording a {type} in {unit} {.val {id}} failed.",
         kind = "internal", parent = e
@@ -422,17 +548,37 @@ run_unit <- function(expr, unit, id, debug = FALSE, keep_traces = FALSE) {
   ### unit's code did to it.
   on.exit(unit_steps$stack <- utils::head(unit_steps$stack, depth), add = TRUE)
 
+  ## Debug: record warnings, contain nothing --------------------------------------
+
+  if (isTRUE(debug)) {
+
+    value <- withCallingHandlers(
+      expr,
+      warning = function(w) {
+        record(w, "warning")
+        rlang::cnd_muffle(w)
+      }
+    )
+
+    return(list(value = value, failed = FALSE, records = unit_records(records)))
+
+  }
+
+  ## Contain run failures, record warnings ---------------------------------------
+
   value <- rlang::try_fetch(
     expr,
     warning = function(w) {
-      records[[length(records) + 1L]] <<- record(w, "warning")
+      record(w, "warning")
+      ### A warning signalled without a muffle restart cannot be muffled;
+      ### declining lets it go on to the caller instead of becoming the
+      ### unit's value.
       rlang::cnd_muffle(w)
+      rlang::zap()
     },
     error = function(e) {
       if (rlang::cnd_inherits(e, NEVER_CONTAINED)) return(rlang::zap())
-      e <- rlang::cnd_entrace(e)
-      trace <- if (isTRUE(keep_traces) && !is.null(e$trace)) format(e$trace)
-      records[[length(records) + 1L]] <<- record(e, "failure", trace)
+      record(e, "failure")
       structure(list(), class = "horizons_unit_failed")
     }
   )

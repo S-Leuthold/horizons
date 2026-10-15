@@ -1,7 +1,7 @@
 # signal_log() / words a multi-warning topic and the warn = 2 error readably
 
     Code
-      signal_log(col)
+      signal_log(do.call(closed, c("evaluate", events)))
     Condition
       Warning:
       3 of 40 configurations failed.
@@ -13,7 +13,8 @@
 ---
 
     Code
-      withr::with_options(list(warn = 2), signal_log(col))
+      withr::with_options(list(warn = 2), signal_log(do.call(closed, c("evaluate",
+        events))))
     Condition
       Error:
       ! `evaluate()` raised 2 warnings, and `options(warn = 2)` turns warnings into errors.
