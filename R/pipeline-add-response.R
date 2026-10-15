@@ -362,7 +362,9 @@ add_response <- function(x,
 
   }
 
-  ## 1.10 No duplicate keys in horizons (suggests average()) -------------------
+  ## 1.10 No duplicate keys in horizons ------------------------------------------
+  ## The door validator refuses duplicate sample_ids, with average() as the
+  ## remedy, so this is reached only by a meta key.
 
   horizons_keys    <- x$data$analysis[[by_horizons]]
   horizons_dup_idx <- duplicated(horizons_keys)
@@ -374,10 +376,9 @@ add_response <- function(x,
     dup_strs   <- paste0('"', names(dup_counts), '" (', dup_counts, "x)")
 
     abort_nested(
-      "Duplicate sample IDs found in horizons data",
+      paste0("Duplicate values in horizons join key '", by_horizons, "'"),
       c(paste0("Duplicated: ", paste(dup_strs, collapse = ", ")),
-        "This usually means replicate scans haven't been averaged yet",
-        "Try: x |> average() |> add_response(...)")
+        "Each sample must have its own key value to join on")
     )
 
   }

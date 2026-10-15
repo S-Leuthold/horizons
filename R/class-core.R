@@ -2908,28 +2908,15 @@ print.horizons_data <- function(x, ...) {
 
       cv_col <- paste0("cv_", metric)
 
-      ## Ranking is on the CV metric (#50); show it first when present,
-      ## with the held-out test value beside it. Objects evaluated before
-      ## the cv_* columns existed print the test value alone.
-      if (cv_col %in% names(best_row) && !is.na(best_row[[cv_col]])) {
-
-        cat(paste0(
-          "   \u2514\u2500 Best: ", best_id,
-          " \u2014 CV ", toupper(metric), " = ",
-          round(best_row[[cv_col]], 3),
-          " (test ", toupper(metric), " = ",
-          round(best_row[[metric]], 3), ")\n"
-        ))
-
-      } else {
-
-        cat(paste0(
-          "   \u2514\u2500 Best: ", best_id,
-          " \u2014 ", toupper(metric), " = ",
-          round(best_row[[metric]], 3), "\n"
-        ))
-
-      }
+      ## Ranking is on the CV metric (#50), which the eval validator
+      ## requires; the held-out test value goes beside it.
+      cat(paste0(
+        "   \u2514\u2500 Best: ", best_id,
+        " \u2014 CV ", toupper(metric), " = ",
+        round(best_row[[cv_col]], 3),
+        " (test ", toupper(metric), " = ",
+        round(best_row[[metric]], 3), ")\n"
+      ))
 
     }
 

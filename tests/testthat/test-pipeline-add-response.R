@@ -379,6 +379,19 @@ test_that("add_response() refuses NA keys on one side, counting them (#139)", {
 
 })
 
+test_that("add_response() refuses a meta join key that repeats in the horizons data", {
+
+  ## Duplicate sample_ids are refused at the door; a meta key can repeat
+  hd  <- with_site(make_test_hd(), c("A", "A", "C"))
+  lab <- tibble::tibble(site = c("A", "C"), SOC = c(1.2, 5.6))
+
+  err <- expect_error(utils::capture.output(add_response(hd, lab, variable = "SOC", by = "site")),
+                      class = "horizons_input_error")
+
+  expect_match(conditionMessage(err), "Duplicate values in horizons join key 'site'", fixed = TRUE)
+
+})
+
 test_that("add_response() attaches values by key when the source is in another order", {
 
   hd  <- make_test_hd(c("S001", "S002", "S003"))

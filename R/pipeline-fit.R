@@ -1283,9 +1283,8 @@ cold_start_evaluation <- function(x, metric, seed, call = rlang::caller_env()) {
 check_evaluated_outcome_range <- function(x, outcome_range,
                                           call = rlang::caller_env()) {
 
+  ### The eval validator at fit()'s door requires results with rows.
   results <- x$evaluation$results
-
-  if (!is.data.frame(results) || nrow(results) == 0) return(invisible(NULL))
 
   stamps <- if ("settings" %in% names(results)) {
     lapply(results$settings, function(s) if (is.list(s)) normalize_eval_settings(s) else NULL)
@@ -1371,10 +1370,9 @@ check_trim_request <- function(x, call = rlang::caller_env()) {
 
   } else {
 
+    ### The door validator refuses a request for another outcome than the
+    ### one modelled, which is the one evaluate() trimmed.
     c(
-      if (!identical(requested$outcome, applied$outcome)) {
-        c("x" = "The request is for {.field {requested$outcome}}; {.fn evaluate} trimmed {.field {applied$outcome}}.")
-      },
       if (!identical(requested$method, applied$method)) {
         c("x" = "The request's method is {.val {requested$method}}; {.fn evaluate} used {.val {applied$method}}.")
       },
