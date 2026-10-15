@@ -9,11 +9,8 @@ evaluate(
   metric = "rpd",
   prune = TRUE,
   prune_threshold = 1,
-  allow_par = FALSE,
-  parallelize_over = "auto",
-  output_dir = NULL,
   seed = 307L,
-  verbose = TRUE
+  control = control_horizons()
 )
 }
 \arguments{
@@ -40,43 +37,15 @@ grid-search RPD below this value skip Bayesian optimization but still
 receive test-set metrics from grid-search best. Default 1.0 (the
 "no better than the mean" line).}
 
-\item{allow_par}{Logical. If \code{TRUE}, dispatch onto whatever
-\code{future::plan()} the caller has registered. If no usable backend is
-registered (fewer than two workers), warns naming the plan it found and
-runs sequentially. \code{FALSE} (the default) runs in the calling process and
-never inspects the plan. \code{evaluate()} never registers or alters a plan.}
-
-\item{parallelize_over}{Character. Which axis of the work the registered
-plan is applied to; ignored when \code{allow_par = FALSE}. See the
-Parallelism section. Default \code{"auto"}.}
-
-\item{output_dir}{Character or NULL. If provided, each config's result is
-written to \verb{<output_dir>/checkpoints/<config_id>.rds} as it finishes, and
-a rerun into the same directory resumes from those files. Required when
-configs are dispatched to workers. A resumed row must have been scored on
-this run's training data (the outcome, the sample ids, which columns hold
-the \code{id}, \code{outcome} and \code{predictor} roles, and the outcome and predictor
-values) and tuned with this run's settings
-(\code{cv_folds}, \code{grid_size}, \code{bayesian_iter}, \code{prune}, \code{prune_threshold}
-when pruning, \code{seed}, and \code{configure()}'s \code{sg_window}, \code{pca_threshold}
-and \code{outcome_range}) and this run's response trim
-(\code{response_threshold}, \code{NA} when none was requested); either mismatch
-aborts, naming what differs.
-So re-standardized spectra, a rescaled outcome, or another outcome on the
-same samples is refused rather than resumed, while adding a sibling
-response with \code{add_response()} or a \code{meta} column resumes. Keep one
-\code{output_dir} per outcome. The ranking \code{metric} is not checked, since
-every row carries all six cross-validated metrics. A row scored under an
-earlier scoring schema, or recording less of the training data and
-settings than this run does, was written by an earlier version: it is
-dropped and its config re-evaluated. Rows for configs no longer in the
-grid are dropped; a file that cannot be used warns and its config is
-re-evaluated. Default NULL (no checkpointing).}
-
 \item{seed}{Integer. Random seed for train/test split and CV folds.
 Default 307L.}
 
-\item{verbose}{Logical. Print progress tree to console. Default TRUE.}
+\item{control}{A \code{\link[=control_horizons]{control_horizons()}} object: how the run goes, not what
+it computes. \code{evaluate()} reads \code{allow_par}, \code{parallelize_over},
+\code{output_dir}, \code{verbose}, \code{debug}, \code{breaker}, \code{keep_traces} and
+\code{max_worker_payload}, and refuses any other field that is set. The
+control it ran with, defaults filled in, is recorded as
+\code{evaluation$control}.}
 }
 \value{
 A \code{horizons_eval} object (inherits from \code{horizons_data}) with
@@ -112,10 +81,44 @@ Bayesian optimization), evaluated on the test set, and ranked by the
 specified metric. The best configuration is stored for downstream use by
 \code{fit()}.
 }
+\section{Checkpoints}{
+
+With \code{control_horizons(output_dir = )}, each config's result is
+written to \verb{<output_dir>/checkpoints/<config_id>.rds} as it finishes, and
+a rerun into the same directory resumes from those files. Required when
+configs are dispatched to workers. A resumed row must have been scored on
+this run's training data (the outcome, the sample ids, which columns hold
+the \code{id}, \code{outcome} and \code{predictor} roles, and the outcome and predictor
+values) and tuned with this run's settings
+(\code{cv_folds}, \code{grid_size}, \code{bayesian_iter}, \code{prune}, \code{prune_threshold}
+when pruning, \code{seed}, and \code{configure()}'s \code{sg_window}, \code{pca_threshold}
+and \code{outcome_range}) and this run's response trim
+(\code{response_threshold}, \code{NA} when none was requested); either mismatch
+aborts, naming what differs.
+So re-standardized spectra, a rescaled outcome, or another outcome on the
+same samples is refused rather than resumed, while adding a sibling
+response with \code{add_response()} or a \code{meta} column resumes. Keep one
+\code{output_dir} per outcome. The ranking \code{metric} is not checked, since
+every row carries all six cross-validated metrics. A row scored under an
+earlier scoring schema, or recording less of the training data and
+settings than this run does, was written by an earlier version: it is
+dropped and its config re-evaluated. Rows for configs no longer in the
+grid are dropped; a file that cannot be used warns and its config is
+re-evaluated.
+}
+
 \section{Parallelism}{
 
+With \code{control_horizons(allow_par = TRUE)}, \code{evaluate()} dispatches onto
+whatever \code{future::plan()} the caller has registered. If no usable backend
+is registered (fewer than two workers), it runs sequentially and warns,
+with class \code{horizons_warning_substitution}, naming the plan it found; the
+warning is also a row of the object's \code{log}. Without it, \code{evaluate()} runs
+in the calling process and never inspects the plan. It never registers or
+alters a plan.
+
 The user owns the backend and the topology; \code{evaluate()} owns only which
-axis the plan is applied to.
+axis the plan is applied to, through \code{control_horizons(parallelize_over = )}.
 \itemize{
 \item \code{"configs"}: one future per config on the registered plan, with tune
 running sequentially inside each. The per-worker payload is one config's
@@ -125,10 +128,12 @@ config grid on a many-core machine.
 the CV folds on the registered plan. Useful width is capped at
 \code{cv_folds}. The mode for a few cores and a short grid.
 \item \code{"auto"} (default): \code{"configs"} when the number of configs is at least
-\code{cv_folds}, otherwise \code{"resamples"}. Derived from the measured cost
-model: configs wins whenever \code{n_configs} exceeds the effective inner
-speedup, which is bounded by \code{cv_folds}, and always once it exceeds the
-worker count, so the worker count cancels.
+\code{cv_folds} and there is an \code{output_dir} to checkpoint into, otherwise
+\code{"resamples"}. Derived from the measured cost model: configs wins
+whenever \code{n_configs} exceeds the effective inner speedup, which is
+bounded by \code{cv_folds}, and always once it exceeds the worker count, so
+the worker count cancels. \code{"configs"} asked for explicitly without an
+\code{output_dir} is refused before anything runs (#233).
 }
 
 A nested plan (configs across an outer level, folds across an inner one)
@@ -138,11 +143,11 @@ wants one registers it with \code{future::plan(list(...))} and uses
 
 \if{html}{\out{<div class="sourceCode">}}\preformatted{# Laptop: four cores, parallelise the folds inside each config.
 future::plan(future::multisession, workers = 4)
-hd |> evaluate(allow_par = TRUE, parallelize_over = "resamples")
+hd |> evaluate(control = control_horizons(allow_par = TRUE, parallelize_over = "resamples"))
 
 # Thirty cores, one config per worker, checkpointed.
 future::plan(future::multisession, workers = 30)
-hd |> evaluate(allow_par = TRUE, output_dir = "output/run")
+hd |> evaluate(control = control_horizons(allow_par = TRUE, output_dir = "output/run"))
 }\if{html}{\out{</div>}}
 
 Before dispatch, BLAS, OpenMP, data.table and ranger threads are pinned to
@@ -191,7 +196,7 @@ config fails, and keep its errors:
 
 \if{html}{\out{<div class="sourceCode">}}\preformatted{runs <- lapply(subsets, function(hd) \{
   tryCatch(
-    evaluate(hd, verbose = FALSE),
+    evaluate(hd, control = control_horizons(verbose = FALSE)),
     horizons_all_configs_failed = function(e) e$results
   )
 \})

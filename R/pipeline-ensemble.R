@@ -55,14 +55,15 @@
 #'   consumed by `predict(..., interval = TRUE)`. Mirrors the `compute_uq`
 #'   argument of [fit()]. Placed after `seed` so pre-existing positional
 #'   callers (`method`, `optimize`, `seed`) are unaffected. Default `TRUE`.
-#' @param allow_par Logical. If `TRUE`, the meta-learner's CV tuning and its
+#' @param control A [control_horizons()] object: how the run goes, not what
+#'   it computes. `ensemble()` reads `allow_par`, `verbose`, `debug`,
+#'   `keep_traces` and `min_calib_rows`, and refuses any other field that is
+#'   set. With `allow_par = TRUE`, the meta-learner's CV tuning and its
 #'   out-of-fold pass parallelise over folds on whatever `future::plan()` the
-#'   caller has registered; `ensemble()` never registers a plan, and warns and
-#'   runs sequentially if the plan offers fewer than two workers. Default
-#'   `FALSE`. Before 2026-09-15 these calls took tune's own default of
-#'   `allow_par = TRUE` and dispatched onto any registered plan silently.
-#' @param verbose Logical. Print the progress tree to the console. Default
-#'   `TRUE`.
+#'   caller has registered; `ensemble()` never registers a plan, and runs
+#'   sequentially, warning with class `horizons_warning_substitution`, if the
+#'   plan offers fewer than two workers. The control it ran with, defaults
+#'   filled in, is recorded as `ensemble$control`.
 #'
 #' @return A `horizons_ensemble` object (inherits from `horizons_fit`) with the
 #'   fitted ensemble in the `ensemble` slot.
@@ -87,12 +88,19 @@ ensemble <- function(x,
                      optimize   = TRUE,
                      seed       = DEFAULT_ENSEMBLE_SEED,
                      compute_uq = TRUE,
-                     allow_par  = FALSE,
-                     verbose    = TRUE) {
+                     control    = control_horizons()) {
 
   ## -------------------------------------------------------------------------
   ## Step 0: Preflight
   ## -------------------------------------------------------------------------
+
+  ## How the run goes: the fields ensemble() reads, defaults filled in, and
+  ## the record of it on the ensemble
+  control   <- resolve_control(control, "ensemble")
+  allow_par <- control$allow_par
+  verbose   <- control$verbose
+
+  collector <- log_open("ensemble")
 
   if (!inherits(x, "horizons_fit")) {
 
@@ -154,19 +162,12 @@ ensemble <- function(x,
   ## The user owns the backend; confirm there is one and pin threads here
   ## before tune spawns anything. Never touch the plan.
 
-  if (!rlang::is_bool(allow_par)) {
-
-    cli::cli_abort("{.arg allow_par} must be TRUE or FALSE, not {.val {allow_par}}.")
-
-  }
-
   if (allow_par) {
 
-    allow_par <- check_parallel_backend("ensemble()")
+    allow_par <- check_parallel_backend("ensemble", collector)
 
     if (allow_par) {
 
-      warn_if_mirai_preferred()
       unpin_threads <- pin_parent_threads()
       on.exit(unpin_threads(), add = TRUE)
 
@@ -223,7 +224,8 @@ ensemble <- function(x,
   ## Step 3: Promote class and attach the ensemble
   ## -------------------------------------------------------------------------
 
-  x$ensemble <- contract
+  x$ensemble         <- contract
+  x$ensemble$control <- control
 
   class(x) <- c("horizons_ensemble", "horizons_fit", "horizons_eval",
                 "horizons_data", "list")
@@ -236,9 +238,12 @@ ensemble <- function(x,
   ## one-line note — UQ never fails the ensemble.
   if (compute_uq) {
 
-    x <- fit_ensemble_uq(x, verbose = verbose)
+    x <- fit_ensemble_uq(x, verbose = verbose, min_calib_rows = control$min_calib_rows)
 
   }
+
+  ## What the run reported goes on the object's log before it is certified
+  x$log <- log_close(collector, x$log)
 
   ## Certify the contract before returning: structural checks only (see
   ## validate_horizons_ensemble), so every ensemble() return is guaranteed to
@@ -254,6 +259,9 @@ ensemble <- function(x,
     render_ensemble_summary(x$ensemble, rank_metric)
 
   }
+
+  ## Each warning the run recorded, raised once, after the summary
+  signal_log(collector, x)
 
   x
 

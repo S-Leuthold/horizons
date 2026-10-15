@@ -246,8 +246,8 @@ SHARED_ARG_NAMES <- c(
   "pkg_version"
 )
 
-# Vocabulary of evaluate(parallelize_over = ). "both" (a nested plan) is
-# deliberately absent for v1; see resolve_parallel_axis().
+# Vocabulary of control_horizons(parallelize_over = ). "both" (a nested plan) is
+# deliberately absent for v1; control_horizons() refuses it with a hint.
 PARALLELIZE_OVER_VALUES <- c("auto", "configs", "resamples")
 
 # Scoring schema stamped into every evaluate() result row and checked when
@@ -277,6 +277,11 @@ EVAL_MANIFEST_SCHEMA <- 4L
 # after the three serialization fixes. 1 GiB is ~2.4x headroom. The footprint
 # tests in test-evaluate-parallel.R are the upstream guard.
 EVAL_WORKER_PAYLOAD_LIMIT <- 1 * 1024^3
+
+# The circuit breaker's default (control_horizons(breaker = )): this many of
+# the first configurations to finish failing with the same cause stop
+# evaluate() or fit(), since every other configuration would fail the same way.
+BREAKER_FAILURES <- 3L
 
 # select_training(): cap on the components retained when ncomp is given as
 # a proportion of variance. 100 was the cap the defaults were measured
@@ -345,6 +350,11 @@ SELECT_SG_WINDOW_CM <- 40
 # beyond it. Under depth = "topsoil" on a small library the eligible rows can
 # fall that low, and the check is then recorded as skipped.
 SELECT_RESEMBLANCE_MIN_ROWS <- 30L
+
+# select_training(): targets per chunk in the neighbour search, the memory
+# the distance block takes against the calls it makes
+# (control_horizons(chunk_size = )).
+SELECT_CHUNK_SIZE <- 500L
 
 # select_training(): how far short of the library's wavenumber range a batch
 # may fall at either end, in cm-1, and still be searched. Distances are

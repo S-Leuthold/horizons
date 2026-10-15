@@ -4,16 +4,25 @@
 \alias{resolve_parallel_axis}
 \title{Resolve the parallel axis for a run}
 \usage{
-resolve_parallel_axis(parallelize_over, allow_par, n_configs, cv_folds)
+resolve_parallel_axis(
+  parallelize_over,
+  allow_par,
+  n_configs,
+  cv_folds,
+  has_output_dir
+)
 }
 \arguments{
-\item{parallelize_over}{One of \code{"auto"}, \code{"configs"}, \code{"resamples"}.}
+\item{parallelize_over}{One of \code{"auto"}, \code{"configs"}, \code{"resamples"}, as
+\code{control_horizons()} checked it.}
 
 \item{allow_par}{Logical. \code{FALSE} short-circuits to sequential.}
 
 \item{n_configs}{Integer. Number of configs to evaluate.}
 
 \item{cv_folds}{Integer. CV folds per config.}
+
+\item{has_output_dir}{Logical. Whether the run checkpoints.}
 }
 \value{
 A list: \code{axis} (\code{"sequential"}, \code{"configs"} or \code{"resamples"}),
@@ -34,13 +43,11 @@ ceiling(n_configs / workers) * T, on the resamples axis roughly
 n_configs * T / k with k the effective inner speedup, which is capped at
 \code{cv_folds}. Configs wins whenever \code{n_configs >= k}, and always once
 \code{n_configs} exceeds the worker count, so the worker count cancels and the
-rule is \code{n_configs >= cv_folds}.
+rule is \code{n_configs >= cv_folds}. Dispatching configs needs a checkpoint
+directory, so \code{"auto"} chooses it only when there is one (#233).
 
-\code{"both"} (a nested plan, configs across the outer level and folds across
-the inner) is not in the vocabulary for v1, and a nested plan registered
-by the caller does not enable it either: on the configs axis the worker
-runs tune sequentially, so a second plan level is never used. The package
-does not build or endorse nesting until the topology bake-off (S1) shows
-it is worth it.
+A nested plan registered by the caller does not change the axis: on the
+configs axis the worker runs tune sequentially, so a second plan level is
+never used. \code{control_horizons()} refuses \code{"both"} with that hint.
 }
 \keyword{internal}

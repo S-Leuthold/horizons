@@ -238,13 +238,18 @@
 #'   Currently `0.05`, an internal constant carried over from an earlier rule
 #'   and still to be calibrated on replicate scans, so treat the value as
 #'   provisional rather than settled.
-#' @param chunk_size `integer.` Targets per distance chunk. Default: `500`.
 #' @param seed `integer.` Seed for every stochastic step of the verb: the
 #'   target clustering under `scope = "cluster"`, and the pool sample the
 #'   resemblance check draws its reference distribution from. The caller's
 #'   RNG state is saved and restored, so the verb does not advance it.
-#'   Default: `1`.
-#' @param verbose `logical.` Print the report. Default: `TRUE`.
+#'   Default: `307`, as the other verbs'.
+#' @param control A [control_horizons()] object: how the run goes, not what
+#'   it computes. `select_training()` reads `verbose`, `debug`,
+#'   `keep_traces`, `chunk_size` (targets per distance chunk) and
+#'   `min_resemblance_rows` (the fewest library rows the resemblance check
+#'   takes its reference distribution from), and refuses any other field
+#'   that is set. The control it ran with, defaults filled in, is recorded
+#'   as `selection$settings$control`.
 #'
 #' @return `horizons_data.` Rows drawn from `pool`, on the targets'
 #'   wavenumber grid, with every response column the pool carried, three
@@ -299,13 +304,18 @@ select_training <- function(x, library,
                             clusters    = NULL,
                             cluster_min = 30L,
                             twin_ratio  = SELECT_TWIN_RATIO,
-                            chunk_size  = 500L,
-                            seed        = 1L,
-                            verbose     = TRUE) {
+                            seed        = 307L,
+                            control     = control_horizons()) {
 
   ## ---------------------------------------------------------------------------
   ## Step 0: Input validation
   ## ---------------------------------------------------------------------------
+
+  ## How the run goes: the fields select_training() reads, defaults filled
+  ## in, and the record of it on the selection
+  control    <- resolve_control(control, "select_training")
+  chunk_size <- control$chunk_size
+  verbose    <- control$verbose
 
   errors <- character()
 
@@ -366,12 +376,6 @@ select_training <- function(x, library,
   if (!ratio_ok) {
 
     errors <- c(errors, cli::format_inline("{.arg twin_ratio} must be a single number in (0, 1), a fraction of the reference distance"))
-
-  }
-
-  if (!is.logical(verbose) || length(verbose) != 1L || is.na(verbose)) {
-
-    errors <- c(errors, cli::format_inline("{.arg verbose} must be TRUE or FALSE"))
 
   }
 
@@ -463,7 +467,6 @@ select_training <- function(x, library,
   }
 
   if (!is_count(cluster_min))  errors <- c(errors, cli::format_inline("{.arg cluster_min} must be a single positive whole number"))
-  if (!is_count(chunk_size))   errors <- c(errors, cli::format_inline("{.arg chunk_size} must be a single positive whole number"))
   if (!is_count(seed, min = -.Machine$integer.max) || abs(seed) > .Machine$integer.max) {
 
     errors <- c(errors, cli::format_inline("{.arg seed} must be a single whole number within R's integer range"))
@@ -1062,7 +1065,7 @@ select_training <- function(x, library,
   ## Resemblance: targets beyond the pool's own nearest-neighbour spread ----
 
   resemblance <- check_resemblance(sp, St, metric = metric, chunk_size = chunk_size, seed = seed,
-                                   eligible = eligible)
+                                   eligible = eligible, min_rows = control$min_resemblance_rows)
 
   ## The record -------------------------------------------------------------
 
@@ -1077,7 +1080,8 @@ select_training <- function(x, library,
       depth = depth,
       metric = metric, clusters = clusters,
       cluster_min = as.integer(cluster_min), twin_ratio = twin_ratio, seed = as.integer(seed),
-      space_note = space_note
+      space_note = space_note,
+      control = control
     ),
     reconciliation   = rc$record,
     search           = c(sa$record, list(cache = cache)),
@@ -1487,6 +1491,9 @@ build_groups <- function(group_of_target, membership, pool_ids, scope) {
 #' @param St [Matrix.] Target scores.
 #' @param metric,chunk_size Passed to `nearest_neighbours()`.
 #' @param seed [Integer.] Seed for the reference sample. Default: `1L`.
+#' @param min_rows [Integer.] The fewest rows the reference distribution is
+#'   taken from; below it the check is skipped and says why. Default:
+#'   `SELECT_RESEMBLANCE_MIN_ROWS`.
 #' @param eligible [Logical or NULL.] The depth-eligible pool rows. Both
 #'   the reference distribution and each target's nearest distance are taken
 #'   over these rows only, so a batch that resembles only rows the draw
@@ -1497,7 +1504,8 @@ build_groups <- function(group_of_target, membership, pool_ids, scope) {
 #'   `beyond` (tibble: `target_id`, `nearest`), and `skipped`: `NULL`, or
 #'   why the check did not run.
 #' @noRd
-check_resemblance <- function(sp, St, metric, chunk_size, seed = 1L, eligible = NULL) {
+check_resemblance <- function(sp, St, metric, chunk_size, seed = 1L, eligible = NULL,
+                              min_rows = SELECT_RESEMBLANCE_MIN_ROWS) {
 
   Sp  <- if (is.null(eligible)) sp$scores else sp$scores[eligible, , drop = FALSE]
   n   <- nrow(Sp)
@@ -1507,14 +1515,14 @@ check_resemblance <- function(sp, St, metric, chunk_size, seed = 1L, eligible = 
   ## the largest of a few gaps. Below the floor the check is recorded as not
   ## run rather than naming every target, or failing after the whole draw.
 
-  if (n < SELECT_RESEMBLANCE_MIN_ROWS) {
+  if (n < min_rows) {
 
     return(list(
       threshold   = NA_real_,
       n_reference = n,
       beyond      = tibble::tibble(target_id = character(), nearest = numeric()),
       skipped     = paste0("only ", n, " row", if (n == 1L) "" else "s",
-                           " the draw can reach; the check needs ", SELECT_RESEMBLANCE_MIN_ROWS)
+                           " the draw can reach; the check needs ", min_rows)
     ))
 
   }

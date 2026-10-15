@@ -928,7 +928,7 @@ describe("configure() and the object contract", {
     fitted <- readRDS(test_path("fixtures", "ensemble_fit.rds"))
     ens    <- suppressWarnings(
       ensemble(fitted, method = "weighted", optimize = FALSE,
-               compute_uq = FALSE, verbose = FALSE)
+               compute_uq = FALSE)
     )
 
     ## The fixture was fitted without UQ bundles; carry one the way
@@ -985,11 +985,11 @@ describe("configure() and the object contract", {
                   final_bayesian_iter = 0L, cv_folds = 3L)
 
     run_configure <- function(x, outcome) do.call(quiet_configure, c(list(x, outcome = outcome), args))
-    run_evaluate  <- function(x) suppressWarnings(evaluate(x, prune = FALSE, verbose = FALSE, seed = 7L))
+    run_evaluate  <- function(x) suppressWarnings(evaluate(x, prune = FALSE, seed = 7L))
 
     fit_clay <- suppressWarnings(
       fit(run_evaluate(run_configure(plain, "clay")),
-          n_best = 1L, compute_uq = FALSE, verbose = FALSE, seed = 7L)
+          n_best = 1L, compute_uq = FALSE, seed = 7L)
     )
 
     ## The fit really earned state for the reset to drop

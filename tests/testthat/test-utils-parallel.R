@@ -16,7 +16,8 @@ describe("resolve_parallel_axis()", {
   it("is sequential whenever allow_par = FALSE, regardless of the request", {
 
     for (req in c("auto", "configs", "resamples")) {
-      r <- resolve_parallel_axis(req, allow_par = FALSE, n_configs = 100, cv_folds = 5)
+      r <- resolve_parallel_axis(req, allow_par = FALSE, n_configs = 100, cv_folds = 5,
+                                 has_output_dir = TRUE)
       expect_equal(r$axis, "sequential", info = req)
       expect_false(r$dispatch_configs)
       expect_false(r$tune_allow_par)
@@ -27,13 +28,13 @@ describe("resolve_parallel_axis()", {
 
   it("maps configs and resamples to their dispatch and tune settings", {
 
-    cfg <- resolve_parallel_axis("configs", TRUE, n_configs = 2, cv_folds = 5)
+    cfg <- resolve_parallel_axis("configs", TRUE, n_configs = 2, cv_folds = 5, has_output_dir = TRUE)
     expect_equal(cfg$axis, "configs")
     expect_true(cfg$dispatch_configs)
     expect_false(cfg$tune_allow_par)          # tune ships nothing inward
     expect_null(cfg$tune_parallel_over)
 
-    res <- resolve_parallel_axis("resamples", TRUE, n_configs = 200, cv_folds = 5)
+    res <- resolve_parallel_axis("resamples", TRUE, n_configs = 200, cv_folds = 5, has_output_dir = TRUE)
     expect_equal(res$axis, "resamples")
     expect_false(res$dispatch_configs)
     expect_true(res$tune_allow_par)
@@ -56,7 +57,8 @@ describe("resolve_parallel_axis()", {
     )
 
     for (i in seq_len(nrow(table))) {
-      r <- resolve_parallel_axis("auto", TRUE, table$n_configs[i], table$cv_folds[i])
+      r <- resolve_parallel_axis("auto", TRUE, table$n_configs[i], table$cv_folds[i],
+                                 has_output_dir = TRUE)
       expect_equal(r$axis, table$expected[i],
                    info = sprintf("n_configs = %d, cv_folds = %d",
                                   table$n_configs[i], table$cv_folds[i]))
@@ -64,30 +66,18 @@ describe("resolve_parallel_axis()", {
 
   })
 
-  it("refuses 'both' with a pointer to the nested-plan note", {
+  it("auto never chooses the configs axis without an output_dir to checkpoint into (#233)", {
 
-    expect_error(resolve_parallel_axis("both", TRUE, 10, 5), "not supported")
-    expect_error(resolve_parallel_axis("both", TRUE, 10, 5), "nested")
+    r <- resolve_parallel_axis("auto", TRUE, n_configs = 240, cv_folds = 5, has_output_dir = FALSE)
 
-  })
-
-  it("rejects unknown axes and malformed inputs", {
-
-    expect_error(resolve_parallel_axis("folds", TRUE, 10, 5), "parallelize_over")
-    expect_error(resolve_parallel_axis("auto", NA, 10, 5), "allow_par")
-    expect_error(resolve_parallel_axis("auto", TRUE, 0, 5), "n_configs")
-
-    ## cv_folds is read from config$tuning, which the door validator checks
-    ## is a whole number of at least 2 (test-class-core.R).
-
-    ## The abort carries no package class, so its text is the check: a missing
-    ## count otherwise reaches R's own error, and a string none at all
-    for (bad in list(NA_real_, "10")) {
-      expect_error(resolve_parallel_axis("auto", TRUE, bad, 5),
-                   "`n_configs` must be a single positive number", fixed = TRUE)
-    }
+    expect_equal(r$axis, "resamples")
+    expect_false(r$dispatch_configs)
 
   })
+
+  ## "both", an unknown axis and a malformed allow_par are refused by
+  ## control_horizons() (test-control.R); n_configs is the configured grid's
+  ## row count, and cv_folds config$tuning's, which the door validator checks.
 
 })
 
@@ -137,22 +127,30 @@ describe("registered_plan_label() / registered_workers()", {
 
 describe("check_parallel_backend()", {
 
-  it("warns and returns FALSE when nothing useful is registered", {
+  it("records a substitution and returns FALSE when nothing useful is registered", {
 
     local_plan(future::sequential)
+    collector <- log_open("evaluate")
 
-    expect_warning(ok <- check_parallel_backend("evaluate()"), "offers 1 worker")
+    expect_no_warning(ok <- check_parallel_backend("evaluate", collector))
     expect_false(ok)
+
+    rows <- log_close(collector)
+    expect_identical(rows$topic, "substitution")
+    expect_match(rows$message, "offers 1 worker", fixed = TRUE)
+    expect_match(rows$message, "so it ran sequentially", fixed = TRUE)
 
   })
 
-  it("warns for a multisession plan with a single worker (the #37 shape)", {
+  it("records it for a multisession plan with a single worker (the #37 shape)", {
 
     skip_on_cran()
     local_plan(future::multisession, workers = 1)
+    collector <- log_open("fit")
 
-    expect_warning(ok <- check_parallel_backend("fit()"), "fit\\(\\).*1 worker")
-    expect_false(ok)
+    expect_false(check_parallel_backend("fit", collector))
+    rows <- log_close(collector)
+    expect_match(rows$message, "fit().*1 worker")
 
   })
 
@@ -167,10 +165,9 @@ describe("check_parallel_backend()", {
     )
     local_mocked_bindings(registered_workers = function() 2L)
 
-    ## The abort carries no package class, so its text is the check
-    expect_error(check_parallel_backend("evaluate()"),
+    expect_error(check_parallel_backend("evaluate", log_open("evaluate")),
                  "future.apply is not installed, but tune's future backend calls it.",
-                 fixed = TRUE)
+                 fixed = TRUE, class = "horizons_error_dependency")
 
   })
 
@@ -179,51 +176,9 @@ describe("check_parallel_backend()", {
     local_plan(future::sequential)
     before <- future::plan("list")
 
-    suppressWarnings(check_parallel_backend())
+    check_parallel_backend("evaluate", log_open("evaluate"))
 
     expect_identical(future::plan("list"), before)
-
-  })
-
-})
-
-describe("warn_if_mirai_preferred()", {
-
-  it("is silent when no mirai daemons are running", {
-
-    skip_if_not_installed("mirai")
-    skip_on_cran()
-
-    if (isTRUE(tryCatch(mirai::status()$connections >= 1, error = function(e) FALSE))) {
-      skip("mirai daemons are live in this session")
-    }
-
-    local_plan(future::multisession, workers = 2)
-
-    expect_silent(res <- warn_if_mirai_preferred())
-    expect_false(res)
-
-  })
-
-  it("warns, returning TRUE, when daemons and a plan of two or more workers are both live, and not on a one-worker plan", {
-
-    skip_if_not_installed("mirai")
-
-    ## Two daemon connections, without starting any
-    local_mocked_bindings(status = function(...) list(connections = 2L), .package = "mirai")
-    local_mocked_bindings(registered_plan_label = function() "multisession")
-
-    local_mocked_bindings(registered_workers = function() 1L)
-    expect_no_warning(res <- warn_if_mirai_preferred())
-    expect_false(res)
-
-    ## Two workers, or an unbounded count
-    for (n in list(2L, NA_integer_)) {
-      local_mocked_bindings(registered_workers = function() n)
-      expect_warning(res <- warn_if_mirai_preferred(),
-                     "A mirai daemon pool (2 connections)", fixed = TRUE)
-      expect_true(res)
-    }
 
   })
 
@@ -306,24 +261,13 @@ describe("pin_parent_threads()", {
 
   })
 
-  it("without RhpcBLASctl, says how to pin BLAS, unless a thread variable is set", {
+  it("without RhpcBLASctl, pins quietly: the environment variables are the user's to set", {
 
     withr::local_envvar(OPENBLAS_NUM_THREADS = NA, OMP_NUM_THREADS = NA)
     without_rhpcblasctl()
 
-    msgs <- paste(capture_messages(unpin <- pin_parent_threads()), collapse = "")
+    expect_no_message(unpin <- pin_parent_threads())
     unpin()
-
-    expect_match(msgs, "is not installed, so BLAS threads cannot be pinned at runtime", fixed = TRUE)
-    expect_match(msgs, "OPENBLAS_NUM_THREADS=1", fixed = TRUE)
-
-    ## Either variable set means the user has pinned BLAS already
-    for (set in list(c(OPENBLAS_NUM_THREADS = "1"), c(OMP_NUM_THREADS = "1"))) {
-      withr::with_envvar(set, {
-        expect_no_message(unpin <- pin_parent_threads())
-        unpin()
-      })
-    }
 
   })
 

@@ -18,7 +18,7 @@ EXPECTED_EVAL_COLS <- c(
 build_ev60 <- function() {
 
   obj <- make_eval_object(n = 60, n_configs = 2)
-  suppressWarnings(evaluate(obj, verbose = FALSE, seed = 42L))
+  suppressWarnings(evaluate(obj, seed = 42L))
 
 }
 
@@ -64,9 +64,9 @@ mock_eval_row <- function(template, config_id, status, rpd = 1.5,
 build_checkpoints <- function(dir, prune = FALSE, n_wn = 10) {
 
   obj   <- make_eval_object(n_wn = n_wn, n_configs = 2)
-  first <- suppressWarnings(evaluate(obj, output_dir = dir, prune = prune,
-                                     prune_threshold = 1, verbose = FALSE,
-                                     seed = 42L))
+  first <- suppressWarnings(evaluate(obj, prune = prune,
+                                     prune_threshold = 1,
+                                     seed = 42L, control = control_horizons(output_dir = dir)))
 
   list(obj = obj, first = first)
 
@@ -124,7 +124,7 @@ describe("evaluate() - gate checks", {
     obj <- make_eval_object()
     obj$config$configs <- NULL
 
-    expect_error(evaluate(obj, verbose = FALSE), "No configurations found")
+    expect_error(evaluate(obj), "No configurations found")
 
   })
 
@@ -133,7 +133,7 @@ describe("evaluate() - gate checks", {
     obj <- make_eval_object()
     obj$config$configs <- obj$config$configs[0, ]
 
-    expect_error(evaluate(obj, verbose = FALSE), "No configurations found")
+    expect_error(evaluate(obj), "No configurations found")
 
   })
 
@@ -143,7 +143,7 @@ describe("evaluate() - gate checks", {
     outcome <- obj$data$role_map$variable[obj$data$role_map$role == "outcome"]
     obj$data$analysis[[outcome]] <- NA_real_
 
-    expect_error(evaluate(obj, verbose = FALSE), "outcome.*NA")
+    expect_error(evaluate(obj), "outcome.*NA")
 
   })
 
@@ -152,7 +152,7 @@ describe("evaluate() - gate checks", {
     ## The abort carries no condition class yet, so its text is asserted
     obj <- make_eval_object(n = 4)
 
-    expect_error(evaluate(obj, verbose = FALSE),
+    expect_error(evaluate(obj),
                  "Need at least 6 samples (cv_folds * 2), but only 4 available.",
                  fixed = TRUE)
 
@@ -160,7 +160,7 @@ describe("evaluate() - gate checks", {
     obj <- make_eval_object(n = 8)
     obj$data$analysis$SOC[1:3] <- NA_real_
 
-    expect_error(evaluate(obj, verbose = FALSE),
+    expect_error(evaluate(obj),
                  "Need at least 6 samples (cv_folds * 2), but only 5 available.",
                  fixed = TRUE)
 
@@ -170,7 +170,7 @@ describe("evaluate() - gate checks", {
 
     obj <- make_eval_object()
 
-    expect_error(evaluate(obj, metric = "accuracy", verbose = FALSE), "metric")
+    expect_error(evaluate(obj, metric = "accuracy"), "metric")
 
   })
 
@@ -187,7 +187,7 @@ describe("evaluate() - gate checks", {
     obj$data$analysis$stray_column <- seq_len(nrow(obj$data$analysis))
 
     expect_error(
-      evaluate(obj, verbose = FALSE),
+      evaluate(obj),
       "[Mm]issing from.*role_map"
     )
 
@@ -270,8 +270,7 @@ describe("evaluate() - success path", {
     )
 
     expect_error(
-      suppressWarnings(evaluate(make_eval_object(n = 60, n_configs = 2), seed = 42L,
-                                verbose = FALSE)),
+      suppressWarnings(evaluate(make_eval_object(n = 60, n_configs = 2), seed = 42L)),
       regexp = "the six metric columns", fixed = TRUE, class = "horizons_error_validation"
     )
 
@@ -283,6 +282,54 @@ describe("evaluate() - success path", {
 ## Metric ranking
 ## =========================================================================
 
+describe("evaluate() - its control", {
+
+  it("records the control it ran with, defaults filled in", {
+
+    ctrl <- ev60()$evaluation$control
+
+    expect_s3_class(ctrl, "horizons_control")
+    expect_identical(names(ctrl), names(resolve_control(NULL, "evaluate")))
+    expect_false(ctrl$allow_par)
+    expect_identical(ctrl$parallelize_over, "auto")
+    expect_identical(ctrl$breaker, BREAKER_FAILURES)
+
+  })
+
+  it("refuses a control field it does not use, before anything runs", {
+
+    local_mocked_bindings(evaluate_single_config = function(...) stop("a configuration ran"))
+
+    expect_error(evaluate(make_eval_object(n = 60, n_configs = 1),
+                          control = control_horizons(min_calib_rows = 10L)),
+                 "min_calib_rows: fit(), ensemble()", fixed = TRUE, class = "horizons_error_input")
+
+  })
+
+  it("runs sequentially when allow_par = TRUE has no backend, and says so once, on the log too", {
+
+    local_plan(future::sequential)
+
+    w <- expect_warning(
+      ev <- keep_only_warning(
+        evaluate(make_eval_object(n = 60, n_configs = 1), prune = FALSE, seed = 42L,
+                 control = control_horizons(allow_par = TRUE)),
+        "offers 1 worker"
+      ),
+      "evaluate\\(\\).*offers 1 worker",
+      class = "horizons_warning_substitution"
+    )
+
+    expect_identical(ev$log$verb, "evaluate")
+    expect_identical(ev$log$topic, "substitution")
+    expect_identical(w$log, ev$log)
+    expect_identical(ev$evaluation$parallelize_over, "sequential")
+
+  })
+
+})
+
+
 describe("evaluate() - metric ranking", {
 
   it("selects best config by specified metric", {
@@ -290,7 +337,7 @@ describe("evaluate() - metric ranking", {
     skip_unless_slow_tier()
 
     obj <- make_eval_object(n_configs = 2)
-    result <- suppressWarnings(evaluate(obj, metric = "rsq", verbose = FALSE, seed = 42L))
+    result <- suppressWarnings(evaluate(obj, metric = "rsq", seed = 42L))
 
     expect_equal(result$evaluation$rank_metric, "rsq")
 
@@ -393,7 +440,7 @@ describe("evaluate() - all configs fail", {
     })
 
     err <- tryCatch(
-      suppressWarnings(evaluate(obj, verbose = FALSE)),
+      suppressWarnings(evaluate(obj)),
       horizons_all_configs_failed = function(e) e
     )
 
@@ -499,7 +546,7 @@ describe("evaluate() - NA outcome rows", {
     obj <- make_eval_object()
     obj$data$analysis$SOC <- NULL
 
-    err <- expect_error(evaluate(obj, verbose = FALSE),
+    err <- expect_error(evaluate(obj),
                         class = "horizons_error_validation")
 
     expect_match(conditionMessage(err), "SOC", fixed = TRUE)
@@ -594,7 +641,7 @@ describe("draw_eval_split()", {
 
   it("is the split evaluate() stores", {
 
-    ev    <- suppressWarnings(evaluate(obj, prune = FALSE, verbose = FALSE, seed = 42L))
+    ev    <- suppressWarnings(evaluate(obj, prune = FALSE, seed = 42L))
     drawn <- suppressWarnings(draw_eval_split(obj$data$analysis, "SOC", 42L))
 
     expect_identical(ev$evaluation$split$in_id, drawn$split$in_id)
@@ -681,7 +728,7 @@ describe("evaluate() - response outliers are trimmed from the training partition
   expected_trim <- train_plain$sample_id[train_plain$SOC < fences[1] | train_plain$SOC > fences[2]]
 
   out <- utils::capture.output(
-    ev <- suppressWarnings(evaluate(v, prune = FALSE, verbose = TRUE, seed = 307L))
+    ev <- suppressWarnings(evaluate(v, prune = FALSE, seed = 307L, control = control_horizons(verbose = TRUE)))
   )
   trim <- ev$evaluation$response_trim
 
@@ -745,7 +792,7 @@ describe("evaluate() - response outliers are trimmed from the training partition
         tibble::tibble(config_id = list(...)$config_row$config_id,
                        status = "failed", error_message = "mocked")
       },
-      tryCatch(suppressWarnings(evaluate(v, verbose = FALSE, seed = 307L)),
+      tryCatch(suppressWarnings(evaluate(v, seed = 307L)),
                error = function(e) NULL),
       .package = "horizons"
     )
@@ -794,15 +841,13 @@ describe("evaluate() - response outliers are trimmed from the training partition
 
     tmpdir <- withr::local_tempdir()
 
-    untrimmed <- suppressWarnings(evaluate(obj, output_dir = tmpdir, prune = FALSE,
-                                           verbose = FALSE, seed = 307L))
+    untrimmed <- suppressWarnings(evaluate(obj, prune = FALSE, seed = 307L, control = control_horizons(output_dir = tmpdir)))
 
     expect_true(is.na(untrimmed$evaluation$results$settings[[1]]$response_threshold))
     expect_identical(ev$evaluation$results$settings[[1]]$response_threshold, 1.5)
 
     err <- expect_error(
-      suppressWarnings(evaluate(v, output_dir = tmpdir, prune = FALSE,
-                                verbose = FALSE, seed = 307L)),
+      suppressWarnings(evaluate(v, prune = FALSE, seed = 307L, control = control_horizons(output_dir = tmpdir))),
       class = "horizons_input_error"
     )
 
@@ -832,7 +877,7 @@ describe("evaluate() - response outliers are trimmed from the training partition
 
     ## Refused at the door, as an object configure() and validate() could
     ## not have written
-    err <- expect_error(evaluate(other, verbose = FALSE),
+    err <- expect_error(evaluate(other),
                         class = "horizons_error_validation")
 
     expect_true(any(grepl("response-trim request is for pH, but the object models SOC",
@@ -900,7 +945,7 @@ evaluate_header <- function(obj) {
   utils::capture.output(
     testthat::with_mocked_bindings(
       tryCatch(
-        suppressWarnings(evaluate(obj, prune = FALSE, seed = 42L)),
+        suppressWarnings(evaluate(obj, prune = FALSE, seed = 42L, control = control_horizons(verbose = TRUE))),
         header_rendered = function(e) NULL
       ),
       evaluate_single_config = function(...) rlang::abort("stop", class = "header_rendered"),
@@ -995,7 +1040,7 @@ describe("evaluate() - the split line and the fallback notes (#91)", {
 
     testthat::with_mocked_bindings(
       tryCatch(
-        suppressWarnings(evaluate(obj, prune = FALSE, verbose = FALSE, seed = 42L)),
+        suppressWarnings(evaluate(obj, prune = FALSE, seed = 42L)),
         header_rendered = function(e) NULL
       ),
       evaluate_single_config = function(config_row, split, cv_folds, ...) {
@@ -1052,7 +1097,7 @@ describe("evaluate() - the progress tree", {
     dir    <- withr::local_tempdir()
     failed <- file.path(dir, "checkpoints", "cfg_003.rds")
     run    <- function(verbose = TRUE) {
-      suppressWarnings(evaluate(obj, output_dir = dir, seed = 42L, verbose = verbose))
+      suppressWarnings(evaluate(obj, seed = 42L, control = control_horizons(output_dir = dir, verbose = verbose)))
     }
 
     expect_snapshot(invisible(run()))
@@ -1102,7 +1147,7 @@ describe("evaluate() - checkpointing", {
 
     testthat::with_mocked_bindings(
       tryCatch(
-        suppressWarnings(evaluate(obj, output_dir = dir, seed = 42L, verbose = FALSE)),
+        suppressWarnings(evaluate(obj, seed = 42L, control = control_horizons(output_dir = dir))),
         header_rendered = function(e) NULL
       ),
       evaluate_single_config = function(...) rlang::abort("stop", class = "header_rendered"),
@@ -1133,8 +1178,8 @@ describe("evaluate() - checkpointing", {
     }
 
     err <- tryCatch(
-      suppressWarnings(evaluate(obj, output_dir = tmpdir, verbose = FALSE,
-                                seed = 42L)),
+      suppressWarnings(evaluate(obj,
+                                seed = 42L, control = control_horizons(output_dir = tmpdir))),
       horizons_all_configs_failed = function(e) e
     )
 
@@ -1167,8 +1212,7 @@ describe("evaluate() - pruning", {
     obj$config$tuning$bayesian_iter <- 1L
 
     ## Set a very high prune threshold — RPD must be above 9999
-    result <- suppressWarnings(evaluate(obj, prune = TRUE, prune_threshold = 9999,
-                                        verbose = FALSE, seed = 42L))
+    result <- suppressWarnings(evaluate(obj, prune = TRUE, prune_threshold = 9999, seed = 42L))
 
     ## The single config should be pruned
     expect_equal(result$evaluation$results$status, "pruned")
@@ -1194,7 +1238,7 @@ describe("evaluate() - recipe settings", {
         tibble::tibble(config_id = list(...)$config_row$config_id,
                        status = "failed", error_message = "mocked")
       },
-      tryCatch(suppressWarnings(evaluate(obj, verbose = FALSE, seed = 42L)),
+      tryCatch(suppressWarnings(evaluate(obj, seed = 42L)),
                error = function(e) NULL),
       .package = "horizons"
     )
@@ -1238,7 +1282,7 @@ describe("evaluate() - recipe settings", {
         ran <<- ran + 1L
         tibble::tibble(config_id = "cfg_001", status = "failed")
       },
-      tryCatch(evaluate(obj, verbose = FALSE, seed = 42L),
+      tryCatch(evaluate(obj, seed = 42L),
                error = function(e) e),
       .package = "horizons"
     )
@@ -1286,7 +1330,7 @@ describe("evaluate() - recipe settings", {
     coarse$data$role_map$variable[match(wn_old, coarse$data$role_map$variable)] <- wn_new
     coarse$config$recipe <- list(sg_window = 7L, pca_threshold = 0.9)
 
-    result <- suppressWarnings(evaluate(coarse, verbose = FALSE, seed = 42L))
+    result <- suppressWarnings(evaluate(coarse, seed = 42L))
 
     expect_identical(result$evaluation$recipe,
                      list(sg_window = 7L, sg_window_cm = 28, pca_threshold = 0.9))
@@ -1416,7 +1460,7 @@ describe("checkpoint scoring schema", {
     saveRDS(row, f)
 
     out <- capture.output(
-      second <- suppressWarnings(evaluate(obj, output_dir = tmpdir, verbose = TRUE, seed = 42L))
+      second <- suppressWarnings(evaluate(obj, seed = 42L, control = control_horizons(output_dir = tmpdir, verbose = TRUE)))
     )
 
     expect_true(any(grepl("written under an earlier schema", out)))
@@ -1446,7 +1490,7 @@ describe("checkpoint scoring schema", {
     out <- utils::capture.output(
       testthat::with_mocked_bindings(
         tryCatch(
-          suppressWarnings(evaluate(obj, output_dir = tmpdir, seed = 42L)),
+          suppressWarnings(evaluate(obj, seed = 42L, control = control_horizons(output_dir = tmpdir, verbose = TRUE))),
           header_rendered = function(e) NULL
         ),
         evaluate_single_config = function(...) rlang::abort("stop", class = "header_rendered"),
@@ -1682,16 +1726,12 @@ describe("evaluate() - checkpoint data provenance", {
     tmpdir <- ck_a()$dir
 
     expect_error(
-      suppressWarnings(evaluate(make_eval_object(n = 60, n_configs = 2),
-                                output_dir = tmpdir, prune = FALSE,
-                                verbose = FALSE, seed = 42L)),
+      suppressWarnings(evaluate(make_eval_object(n = 60, n_configs = 2), prune = FALSE, seed = 42L, control = control_horizons(output_dir = tmpdir))),
       class = "horizons_input_error"
     )
 
     err <- tryCatch(
-      suppressWarnings(evaluate(make_eval_object(n = 60, n_configs = 2),
-                                output_dir = tmpdir, prune = FALSE,
-                                verbose = FALSE, seed = 42L)),
+      suppressWarnings(evaluate(make_eval_object(n = 60, n_configs = 2), prune = FALSE, seed = 42L, control = control_horizons(output_dir = tmpdir))),
       horizons_input_error = function(e) e
     )
 
@@ -1721,8 +1761,7 @@ describe("evaluate() - checkpoint data provenance", {
     obj_clay$data$role_map$variable[obj_clay$data$role_map$variable == "SOC"] <- "clay"
 
     err <- tryCatch(
-      suppressWarnings(evaluate(obj_clay, output_dir = tmpdir, prune = FALSE,
-                                verbose = FALSE, seed = 42L)),
+      suppressWarnings(evaluate(obj_clay, prune = FALSE, seed = 42L, control = control_horizons(output_dir = tmpdir))),
       horizons_input_error = function(e) e
     )
 
@@ -1747,8 +1786,7 @@ describe("evaluate() - checkpoint data provenance", {
     tmpdir <- ck$dir
 
     tryCatch(
-      suppressWarnings(evaluate(edit(obj), output_dir = tmpdir, prune = FALSE,
-                                verbose = FALSE, seed = 42L)),
+      suppressWarnings(evaluate(edit(obj), prune = FALSE, seed = 42L, control = control_horizons(output_dir = tmpdir))),
       horizons_input_error = function(e) e
     )
 
@@ -1814,8 +1852,8 @@ describe("evaluate() - checkpoint data provenance", {
     invisible(capture.output(wider <- add_response(obj, lab, variable = "clay")))
 
     caught <- collect_warnings(
-      evaluate(wider, output_dir = tmpdir, prune = FALSE, verbose = FALSE,
-               seed = 42L)
+      evaluate(wider, prune = FALSE,
+               seed = 42L, control = control_horizons(output_dir = tmpdir))
     )
 
     expect_false(has_warning_class(caught$warnings, "horizons_checkpoint_warning"))
@@ -1843,8 +1881,7 @@ describe("evaluate() - one checkpoint store (#42)", {
     writeLines("not an rds file", file.path(tmpdir, "checkpoints", "cfg_001.rds"))
 
     warns <- testthat::capture_warnings(
-      second <- evaluate(obj, output_dir = tmpdir, prune = FALSE,
-                         verbose = FALSE, seed = 42L)
+      second <- evaluate(obj, prune = FALSE, seed = 42L, control = control_horizons(output_dir = tmpdir))
     )
 
     expect_true(any(grepl("cfg_001.rds", warns, fixed = TRUE)))
@@ -1868,8 +1905,7 @@ describe("evaluate() - one checkpoint store (#42)", {
     obj$config$configs$config_id <- c("rf_001", "rf_002")
     tmpdir <- withr::local_tempdir()
 
-    suppressWarnings(evaluate(obj, output_dir = tmpdir, prune = FALSE,
-                              verbose = FALSE, seed = 42L))
+    suppressWarnings(evaluate(obj, prune = FALSE, seed = 42L, control = control_horizons(output_dir = tmpdir)))
 
     real     <- readRDS(file.path(tmpdir, "checkpoints", "rf_001.rds"))
     leftover <- real
@@ -1881,8 +1917,7 @@ describe("evaluate() - one checkpoint store (#42)", {
     )
 
     warns <- testthat::capture_warnings(
-      second <- evaluate(obj, output_dir = tmpdir, prune = FALSE,
-                         verbose = FALSE, seed = 42L)
+      second <- evaluate(obj, prune = FALSE, seed = 42L, control = control_horizons(output_dir = tmpdir))
     )
 
     got <- second$evaluation$results
@@ -1932,8 +1967,7 @@ describe("evaluate() - one checkpoint store (#42)", {
     ## The fingerprint is checked before the schema, so the row aborts rather
     ## than being dropped silently.
     err <- tryCatch(
-      suppressWarnings(evaluate(obj, output_dir = tmpdir, prune = FALSE,
-                                verbose = FALSE, seed = 42L)),
+      suppressWarnings(evaluate(obj, prune = FALSE, seed = 42L, control = control_horizons(output_dir = tmpdir))),
       horizons_input_error = function(e) e
     )
 
@@ -1990,8 +2024,7 @@ describe("evaluate() - tuning-settings provenance", {
     changed$config$tuning$grid_size <- obj$config$tuning$grid_size + 1L
 
     err <- tryCatch(
-      suppressWarnings(evaluate(changed, output_dir = tmpdir, prune = FALSE,
-                                verbose = FALSE, seed = 42L)),
+      suppressWarnings(evaluate(changed, prune = FALSE, seed = 42L, control = control_horizons(output_dir = tmpdir))),
       horizons_input_error = function(e) e
     )
 
@@ -2013,8 +2046,8 @@ describe("evaluate() - tuning-settings provenance", {
     tmpdir <- ck$dir
 
     expect_error(
-      suppressWarnings(evaluate(obj, output_dir = tmpdir, prune = TRUE,
-                                prune_threshold = 2, verbose = FALSE, seed = 42L)),
+      suppressWarnings(evaluate(obj, prune = TRUE,
+                                prune_threshold = 2, seed = 42L, control = control_horizons(output_dir = tmpdir))),
       "prune_threshold",
       class = "horizons_input_error"
     )
@@ -2026,8 +2059,8 @@ describe("evaluate() - tuning-settings provenance", {
     off    <- ck_off$dir
 
     first  <- ck_off$value$first
-    second <- suppressWarnings(evaluate(obj, output_dir = off, prune = FALSE,
-                                        prune_threshold = 2, verbose = FALSE, seed = 42L))
+    second <- suppressWarnings(evaluate(obj, prune = FALSE,
+                                        prune_threshold = 2, seed = 42L, control = control_horizons(output_dir = off)))
 
     expect_equal(second$evaluation$results$runtime_secs,
                  first$evaluation$results$runtime_secs)
@@ -2043,8 +2076,7 @@ describe("evaluate() - tuning-settings provenance", {
 
     first  <- ck$value$first
     caught <- collect_warnings(
-      evaluate(obj, output_dir = tmpdir, prune = FALSE, metric = "rmse",
-               verbose = FALSE, seed = 42L)
+      evaluate(obj, prune = FALSE, metric = "rmse", seed = 42L, control = control_horizons(output_dir = tmpdir))
     )
     second <- caught$value
 
@@ -2086,8 +2118,7 @@ describe("evaluate() - tuning-settings provenance", {
     wider$config$recipe$sg_window <- 11L
 
     err <- tryCatch(
-      suppressWarnings(evaluate(wider, output_dir = tmpdir, prune = FALSE,
-                                verbose = FALSE, seed = 42L)),
+      suppressWarnings(evaluate(wider, prune = FALSE, seed = 42L, control = control_horizons(output_dir = tmpdir))),
       horizons_input_error = function(e) e
     )
 
@@ -2099,8 +2130,7 @@ describe("evaluate() - tuning-settings provenance", {
     tighter$config$recipe$pca_threshold <- 0.9
 
     expect_error(
-      suppressWarnings(evaluate(tighter, output_dir = tmpdir, prune = FALSE,
-                                verbose = FALSE, seed = 42L)),
+      suppressWarnings(evaluate(tighter, prune = FALSE, seed = 42L, control = control_horizons(output_dir = tmpdir))),
       "pca_threshold",
       class = "horizons_input_error"
     )

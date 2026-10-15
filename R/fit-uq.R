@@ -74,10 +74,13 @@ compute_c_alpha <- function(scores, level) {
 #'   which the back-transformed calibration predictions are clamped to, as
 #'   `predict()` clamps the point predictions the intervals are served
 #'   around. Default `c(0, Inf)`.
+#' @param min_calib_rows Integer. The fewest calibration rows the bundle is
+#'   computed from, before and after rows without an outcome are dropped;
+#'   `control_horizons(min_calib_rows = )`. Default `N_CALIB_MIN`.
 #'
 #' @return Named list with fields: `quantile_model`, `scores`, `n_calib`,
 #'   `level_default`, `oof_coverage`, `mean_width`, `prepped_recipe`.
-#'   Returns NULL if calibration set is too small (`n < N_CALIB_MIN`).
+#'   Returns NULL if calibration set is too small (`n < min_calib_rows`).
 #'   Aborts with class `horizons_error_internal` when an out-of-fold `.row`
 #'   falls outside the rows the model was fit on, or when the calibration
 #'   predictions or features do not have one row per row of `calib_data`.
@@ -90,13 +93,14 @@ fit_uq <- function(fitted_workflow,
                    transformation  = "none",
                    level_default   = DEFAULT_UQ_LEVEL,
                    seed            = NULL,
-                   outcome_range   = DEFAULT_OUTCOME_RANGE) {
+                   outcome_range   = DEFAULT_OUTCOME_RANGE,
+                   min_calib_rows  = N_CALIB_MIN) {
 
   outcome_col <- role_map$variable[role_map$role == "outcome"]
 
   ## --- Guard: NULL or insufficient calibration data -------------------------
 
-  if (is.null(calib_data) || nrow(calib_data) < N_CALIB_MIN) {
+  if (is.null(calib_data) || nrow(calib_data) < min_calib_rows) {
 
     return(NULL)
 
@@ -279,7 +283,7 @@ fit_uq <- function(fitted_workflow,
   n_calib <- length(scores)
 
   ## Re-check minimum after NA removal
-  if (n_calib < N_CALIB_MIN) {
+  if (n_calib < min_calib_rows) {
 
     return(NULL)
 

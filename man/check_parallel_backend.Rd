@@ -4,14 +4,18 @@
 \alias{check_parallel_backend}
 \title{Check that a parallel run has a backend to run on}
 \usage{
-check_parallel_backend(where = "evaluate()")
+check_parallel_backend(verb, collector, call = rlang::caller_env())
 }
 \arguments{
-\item{where}{Character. The verb, for the message (\code{"evaluate()"}).}
+\item{verb}{Character. The verb, for the message (\code{"evaluate"}).}
+
+\item{collector}{The verb's collector, from \code{\link[=log_open]{log_open()}}.}
+
+\item{call}{The frame a refusal reports: the verb's.}
 }
 \value{
-\code{TRUE} if parallel dispatch is possible, else \code{FALSE} after a
-warning.
+\code{TRUE} if parallel dispatch is possible, else \code{FALSE}, with the
+warning recorded.
 }
 \description{
 Called only when the caller asked for parallelism. The gate is
@@ -21,5 +25,9 @@ returns \code{"sequential"} for it silently. That silence was issue #37.
 A fresh session and an explicit \code{plan(sequential)} are indistinguishable
 (same class, same recorded call), so the message is written to be true of
 both.
+
+Running sequentially is a substitution (something other than what was
+asked ran), so it is recorded on the verb's collector as a
+\code{substitution} warning, which the verb raises at its end.
 }
 \keyword{internal}

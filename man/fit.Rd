@@ -10,9 +10,8 @@ fit(
   metric = NULL,
   compute_uq = TRUE,
   compute_ad = TRUE,
-  allow_par = FALSE,
   seed = 307L,
-  verbose = TRUE
+  control = control_horizons()
 )
 }
 \arguments{
@@ -41,22 +40,18 @@ shrinkage covariance + held-out OOD thresholds) per config, so \code{predict()}
 can emit \code{.ad_distance} / \code{.ad_flag}. Shares the UQ calibration split.
 Default TRUE.}
 
-\item{allow_par}{Logical. If \code{TRUE}, tune parallelises the CV folds
-inside each member's re-tune and OOF pass on whatever \code{future::plan()}
-the caller has registered; \code{fit()} never registers a plan. If the plan
-offers fewer than two workers, warns naming it and runs sequentially.
-\code{fit()} parallelises folds only in this version; a configs axis across
-the \code{n_best} members is gated on the fitted-object memory contract (a
-fitted object is hundreds of MB and would cross to workers). Default
-FALSE.}
-
 \item{seed}{Integer. Random seed for the CV folds and, through
 \code{calib_split_seed()} (\code{seed + 1L}), for the calibration split. The
 train/test split is \code{evaluate()}'s, so it does not depend on this seed,
 except on a cold start, where \code{fit()} draws that split at this seed as
 \code{evaluate()} would. Default 307L.}
 
-\item{verbose}{Logical. Print progress tree to console. Default TRUE.}
+\item{control}{A \code{\link[=control_horizons]{control_horizons()}} object: how the run goes, not what
+it computes. \code{fit()} reads \code{allow_par}, \code{verbose}, \code{debug}, \code{breaker},
+\code{keep_traces}, \code{min_calib_rows}, \code{min_ad_rows} and
+\code{min_degradation_rows}, and refuses any other field that is set. The
+control it ran with, defaults filled in, is recorded as
+\code{models$control}.}
 }
 \value{
 A \code{horizons_fit} object (inherits from \code{horizons_eval},
@@ -167,6 +162,18 @@ with an observed outcome, and a Savitzky-Golay window narrower than the
 spectrum. Re-fitting a cold-started fit starts cold again. With more than
 one configuration \code{fit()} aborts with class \code{horizons_input_error}:
 choosing among them is what \code{evaluate()} is for.
+}
+
+\section{Parallelism}{
+
+With \code{control_horizons(allow_par = TRUE)}, tune parallelises the CV folds
+inside each member's re-tune and OOF pass on whatever \code{future::plan()} the
+caller has registered; \code{fit()} never registers a plan. If the plan offers
+fewer than two workers, \code{fit()} runs sequentially and warns, with class
+\code{horizons_warning_substitution}; the warning is also a row of the object's
+\code{log}. \code{fit()} parallelises folds only in this version; a configs axis
+across the \code{n_best} members is gated on the fitted-object memory contract
+(a fitted object is hundreds of MB and would cross to workers).
 }
 
 \section{Outcome range}{

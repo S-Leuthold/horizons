@@ -381,7 +381,7 @@ test_that("average() on_all_outliers='warn' reports the failed group as averaged
   ## Act -------------------------------------------------------------------
 
   expect_warning(
-    out <- utils::capture.output(average(hd, on_all_outliers = "warn")),
+    out <- utils::capture.output(average(hd, verbose = TRUE, on_all_outliers = "warn")),
     "All replicates failed QC"
   )
 
@@ -407,7 +407,7 @@ test_that("average() on_all_outliers='keep_best' reports the failed group and th
 
   ## Act -------------------------------------------------------------------
 
-  out <- utils::capture.output(average(hd, on_all_outliers = "keep_best"))
+  out <- utils::capture.output(average(hd, verbose = TRUE, on_all_outliers = "keep_best"))
 
   ## Assert ----------------------------------------------------------------
 
@@ -428,7 +428,7 @@ test_that("average() on_all_outliers='drop' reports the failed group as dropped 
 
   ## Act -------------------------------------------------------------------
 
-  out <- utils::capture.output(average(hd, on_all_outliers = "drop"))
+  out <- utils::capture.output(average(hd, verbose = TRUE, on_all_outliers = "drop"))
 
   ## Assert ----------------------------------------------------------------
 
@@ -454,7 +454,7 @@ test_that("average() reports a partly failed group apart from a wholly failed on
   ## Act -------------------------------------------------------------------
 
   expect_warning(
-    out <- utils::capture.output(average(hd, on_all_outliers = "warn")),
+    out <- utils::capture.output(average(hd, verbose = TRUE, on_all_outliers = "warn")),
     "All replicates failed QC"
   )
 
@@ -501,7 +501,7 @@ test_that("average() counts every wholly failed group, in each on_all_outliers m
     ## Act -----------------------------------------------------------------
 
     out <- utils::capture.output(
-      result <- suppressWarnings(average(hd, on_all_outliers = mode))
+      result <- suppressWarnings(average(hd, on_all_outliers = mode, verbose = TRUE))
     )
 
     ## Assert --------------------------------------------------------------
@@ -530,7 +530,7 @@ test_that("average() reports single-replicate groups as not QC'd, not clean (#89
 
   ## Act -------------------------------------------------------------------
 
-  out <- utils::capture.output(average(hd))
+  out <- utils::capture.output(average(hd, verbose = TRUE))
 
   ## Assert ----------------------------------------------------------------
 
@@ -552,7 +552,7 @@ test_that("average() still reports all groups clean when none failed", {
 
   ## Act -------------------------------------------------------------------
 
-  out <- utils::capture.output(average(hd))
+  out <- utils::capture.output(average(hd, verbose = TRUE))
 
   ## Assert ----------------------------------------------------------------
 
@@ -565,6 +565,20 @@ test_that("average() still reports all groups clean when none failed", {
 ## ---------------------------------------------------------------------------
 ## average() — Metadata handling
 ## ---------------------------------------------------------------------------
+
+test_that("average() is quiet under horizons.verbose = FALSE, and prints when asked", {
+
+  hd <- make_test_hd_average(n_samples = 2, n_reps = 2)
+
+  withr::local_options(horizons.verbose = FALSE)
+  expect_silent(average(hd, quality_check = FALSE))
+  expect_output(average(hd, quality_check = FALSE, verbose = TRUE), "Averaging replicates")
+
+  withr::local_options(horizons.verbose = TRUE)
+  expect_output(average(hd, quality_check = FALSE), "Averaging replicates")
+
+})
+
 
 test_that("average() preserves uniform metadata", {
 

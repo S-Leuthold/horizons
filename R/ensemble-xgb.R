@@ -35,7 +35,7 @@
 #' @param rank_metric Character. Metric the object was ranked by.
 #' @param optimize Logical. Tune the xgboost hyperparameters (`TRUE`) or use
 #'   conservative fixed defaults (`FALSE`). Default `TRUE`.
-#' @param allow_par Logical. Passed through from `ensemble(allow_par = )` to
+#' @param allow_par Logical. Passed through from `ensemble()`'s control to
 #'   the meta-learner's tune controls; folds parallelise on the registered
 #'   plan when `TRUE`. Default `FALSE`.
 #' @param seed Integer. Seed for the CV folds (passed through to

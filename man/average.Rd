@@ -10,7 +10,7 @@ average(
   quality_check = TRUE,
   correlation_threshold = 0.996,
   on_all_outliers = c("warn", "drop", "keep_best"),
-  verbose = TRUE
+  verbose = getOption("horizons.verbose", TRUE)
 )
 }
 \arguments{
@@ -39,7 +39,8 @@ a replicate to pass QC. Default: \code{0.996}. Changing this is rarely needed.}
 \item \code{"keep_best"}: Keep only the replicate with highest mean correlation
 }}
 
-\item{verbose}{Logical. Print progress messages. Default: \code{TRUE}.}
+\item{verbose}{Logical. Print progress messages. Default:
+\code{getOption("horizons.verbose", TRUE)}, as every verb's.}
 }
 \value{
 The input \code{horizons_data} object with:

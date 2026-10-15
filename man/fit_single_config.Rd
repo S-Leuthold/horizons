@@ -21,7 +21,10 @@ fit_single_config(
   sg_window = DEFAULT_SG_WINDOW,
   pca_threshold = DEFAULT_PCA_THRESHOLD,
   outcome_range = DEFAULT_OUTCOME_RANGE,
-  response_fences = NULL
+  response_fences = NULL,
+  min_calib_rows = N_CALIB_MIN,
+  min_ad_rows = N_AD_TRAIN_MIN,
+  min_degradation_rows = DEGRADATION_MIN_N
 )
 }
 \arguments{
@@ -73,6 +76,11 @@ run on rows inside the fences while the test rows are untrimmed, so the
 degradation check takes its test RPD over the test rows inside the
 fences; the reported test metrics stay untrimmed. Default \code{NULL} (no
 trim: the check reads the test RPD).}
+
+\item{min_calib_rows, min_ad_rows, min_degradation_rows}{Integer. The
+control fields of the same names: the fewest rows UQ and AD calibrate
+on, AD's covariance is estimated from, and the degradation check
+bootstraps from.}
 }
 \value{
 List with fields: config_id, status, degraded, degraded_reason,

@@ -360,6 +360,8 @@ fit_uq_fold_models <- function(meta_frame, oof_row, folds, contract, optimize,
 #'   `level_default`.
 #' @param outcome_range Numeric length-2 vector the fold predictions are
 #'   clamped to. Default `DEFAULT_OUTCOME_RANGE`.
+#' @param min_calib_rows Integer. The fewest rows the bundle calibrates on;
+#'   `control_horizons(min_calib_rows = )`. Default `N_CALIB_MIN`.
 #'
 #' @return The uq bundle list (see [fit_ensemble_uq()]), or `NULL`.
 #'
@@ -368,14 +370,15 @@ compute_ensemble_uq <- function(oof,
                                 contract,
                                 optimize,
                                 conformal_seed,
-                                level         = DEFAULT_UQ_LEVEL,
-                                outcome_range = DEFAULT_OUTCOME_RANGE) {
+                                level          = DEFAULT_UQ_LEVEL,
+                                outcome_range  = DEFAULT_OUTCOME_RANGE,
+                                min_calib_rows = N_CALIB_MIN) {
 
   meta_frame        <- oof$predictors
   meta_frame$.truth <- oof$truth
 
   ## Gate 1: enough rows to calibrate at all.
-  if (nrow(meta_frame) < N_CALIB_MIN) {
+  if (nrow(meta_frame) < min_calib_rows) {
 
     return(NULL)
 
@@ -416,7 +419,7 @@ compute_ensemble_uq <- function(oof,
   calib   <- calib[is.finite(calib$residual), ]
   n_calib <- nrow(calib)
 
-  if (n_calib < N_CALIB_MIN || is.null(cv_plus_indices(n_calib, level))) {
+  if (n_calib < min_calib_rows || is.null(cv_plus_indices(n_calib, level))) {
 
     return(NULL)
 
@@ -505,7 +508,7 @@ compute_ensemble_uq <- function(oof,
 #' level and takes no level of its own.
 #'
 #' Degrades gracefully: when calibration is impossible (fewer than
-#' `N_CALIB_MIN` rows, invalid order-statistic indices, or a fold refit
+#' `min_calib_rows` rows, invalid order-statistic indices, or a fold refit
 #' failure), the bundle stays `NULL`, a one-line note is emitted, and the
 #' ensemble continues to predict point-only.
 #'
@@ -529,6 +532,8 @@ compute_ensemble_uq <- function(oof,
 #'   recorded on the ensemble contract.
 #' @param verbose Logical. Emit the degradation note when UQ cannot be
 #'   computed. Default `TRUE`.
+#' @param min_calib_rows Integer. The fewest rows the bundle calibrates on;
+#'   `control_horizons(min_calib_rows = )`. Default `N_CALIB_MIN`.
 #'
 #' @return `x` with `$ensemble$uq` populated (or unchanged when calibration
 #'   is not possible). The bundle carries: `method` (`"cv_plus"`),
@@ -538,9 +543,10 @@ compute_ensemble_uq <- function(oof,
 #'
 #' @keywords internal
 fit_ensemble_uq <- function(x,
-                            level   = DEFAULT_UQ_LEVEL,
-                            seed    = NULL,
-                            verbose = TRUE) {
+                            level          = DEFAULT_UQ_LEVEL,
+                            seed           = NULL,
+                            verbose        = TRUE,
+                            min_calib_rows = N_CALIB_MIN) {
 
   if (!inherits(x, "horizons_ensemble")) {
 
@@ -590,7 +596,8 @@ fit_ensemble_uq <- function(x,
       optimize       = optimize,
       conformal_seed = conformal_seed,
       level          = level,
-      outcome_range  = outcome_range
+      outcome_range  = outcome_range,
+      min_calib_rows = min_calib_rows
     ),
     log_error = FALSE
   )
@@ -600,7 +607,7 @@ fit_ensemble_uq <- function(x,
     if (verbose) {
 
       cli::cli_inform(c(
-        "i" = "Ensemble UQ could not be calibrated (needs >= {N_CALIB_MIN} \\
+        "i" = "Ensemble UQ could not be calibrated (needs >= {min_calib_rows} \\
                calibration rows and a successful fold refit); predictions \\
                will be point-only."
       ))

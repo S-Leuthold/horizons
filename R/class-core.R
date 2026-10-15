@@ -1033,6 +1033,10 @@ check_selection_shape <- function(selection, sample_ids = NULL) {
 
     errors <- c(errors, cli::format_inline("{.field selection$settings} must be a list, not {.cls {class(selection$settings)[1]}}"))
 
+  } else {
+
+    errors <- c(errors, control_finding(selection$settings$control, "selection$settings"))
+
   }
 
   tables <- list(

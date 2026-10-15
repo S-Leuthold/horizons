@@ -104,20 +104,27 @@
 #'   shrinkage covariance + held-out OOD thresholds) per config, so `predict()`
 #'   can emit `.ad_distance` / `.ad_flag`. Shares the UQ calibration split.
 #'   Default TRUE.
-#' @param allow_par Logical. If `TRUE`, tune parallelises the CV folds
-#'   inside each member's re-tune and OOF pass on whatever `future::plan()`
-#'   the caller has registered; `fit()` never registers a plan. If the plan
-#'   offers fewer than two workers, warns naming it and runs sequentially.
-#'   `fit()` parallelises folds only in this version; a configs axis across
-#'   the `n_best` members is gated on the fitted-object memory contract (a
-#'   fitted object is hundreds of MB and would cross to workers). Default
-#'   FALSE.
 #' @param seed Integer. Random seed for the CV folds and, through
 #'   `calib_split_seed()` (`seed + 1L`), for the calibration split. The
 #'   train/test split is `evaluate()`'s, so it does not depend on this seed,
 #'   except on a cold start, where `fit()` draws that split at this seed as
 #'   `evaluate()` would. Default 307L.
-#' @param verbose Logical. Print progress tree to console. Default TRUE.
+#' @param control A [control_horizons()] object: how the run goes, not what
+#'   it computes. `fit()` reads `allow_par`, `verbose`, `debug`, `breaker`,
+#'   `keep_traces`, `min_calib_rows`, `min_ad_rows` and
+#'   `min_degradation_rows`, and refuses any other field that is set. The
+#'   control it ran with, defaults filled in, is recorded as
+#'   `models$control`.
+#'
+#' @section Parallelism:
+#' With `control_horizons(allow_par = TRUE)`, tune parallelises the CV folds
+#' inside each member's re-tune and OOF pass on whatever `future::plan()` the
+#' caller has registered; `fit()` never registers a plan. If the plan offers
+#' fewer than two workers, `fit()` runs sequentially and warns, with class
+#' `horizons_warning_substitution`; the warning is also a row of the object's
+#' `log`. `fit()` parallelises folds only in this version; a configs axis
+#' across the `n_best` members is gated on the fitted-object memory contract
+#' (a fitted object is hundreds of MB and would cross to workers).
 #'
 #' @section Outcome range:
 #' Every prediction `fit()` scores (out-of-fold, test and calibration) is
@@ -172,11 +179,18 @@ fit <- function(x,
                 metric     = NULL,
                 compute_uq = TRUE,
                 compute_ad = TRUE,
-                allow_par  = FALSE,
                 seed       = 307L,
-                verbose    = TRUE) {
+                control    = control_horizons()) {
 
   start_time <- Sys.time()
+
+  ## How the run goes: the fields fit() reads, defaults filled in, and the
+  ## record of it on the models
+  control   <- resolve_control(control, "fit")
+  allow_par <- control$allow_par
+  verbose   <- control$verbose
+
+  collector <- log_open("fit")
 
   ## -----------------------------------------------------------------------
   ## Step 0: Preflight validation
@@ -277,19 +291,12 @@ fit <- function(x,
   ## The user owns the backend. Confirm there is one to run on, pin threads
   ## in this process before tune spawns anything, and never touch the plan.
 
-  if (!rlang::is_bool(allow_par)) {
-
-    rlang::abort("`allow_par` must be TRUE or FALSE.")
-
-  }
-
   if (allow_par) {
 
-    allow_par <- check_parallel_backend("fit()")
+    allow_par <- check_parallel_backend("fit", collector)
 
     if (allow_par) {
 
-      warn_if_mirai_preferred()
       unpin_threads <- pin_parent_threads()
       on.exit(unpin_threads(), add = TRUE)
 
@@ -501,12 +508,12 @@ fit <- function(x,
 
     ## Guard: minimum calibration size. Too small disables BOTH capabilities
     ## that needed it \u2014 neither UQ nor AD can calibrate on an undersized set.
-    if (nrow(calib_data) < N_CALIB_MIN) {
+    if (nrow(calib_data) < control$min_calib_rows) {
 
       disabled   <- paste(c(if (compute_uq) "UQ", if (compute_ad) "AD"),
                           collapse = " and ")
       calib_note <- paste0("Calibration set too small (", nrow(calib_data),
-                           " < ", N_CALIB_MIN, "). Disabling ", disabled, ".")
+                           " < ", control$min_calib_rows, "). Disabling ", disabled, ".")
 
       compute_uq <- FALSE
       compute_ad <- FALSE
@@ -752,7 +759,10 @@ fit <- function(x,
       sg_window           = recipe_cfg$sg_window,
       pca_threshold       = recipe_cfg$pca_threshold,
       outcome_range       = outcome_range,
-      response_fences     = response_fences
+      response_fences     = response_fences,
+      min_calib_rows       = control$min_calib_rows,
+      min_ad_rows          = control$min_ad_rows,
+      min_degradation_rows = control$min_degradation_rows
     )
 
     results_list[[i]] <- config_result
@@ -1034,12 +1044,15 @@ fit <- function(x,
     uq                = uq_list,
     ad                = ad_list,
     selection_present = selection_present,
-    control           = NULL,
+    control           = control,
     timestamp         = Sys.time(),
     runtime_secs      = total_runtime
   )
 
   class(x) <- c("horizons_fit", "horizons_eval", "horizons_data", "list")
+
+  ## What the run reported goes on the object's log before it is certified
+  x$log <- log_close(collector, x$log)
 
   ## Certify the contract before returning: structural checks only (see
   ## validate_horizons_fit), so every fit() return matches invariants I6/I7
@@ -1121,6 +1134,9 @@ fit <- function(x,
     ))
 
   }
+
+  ## Each warning the run recorded, raised once, after the tree
+  signal_log(collector, x)
 
   x
 

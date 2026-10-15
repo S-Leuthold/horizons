@@ -407,12 +407,12 @@ test_that("the cache file also resolves through the path form", {
 
 test_that("select_training() resolves a library name before anything else", {
 
-  expect_error(select_training(select_fixture()$targets, "ksl", verbose = FALSE),
+  expect_error(select_training(select_fixture()$targets, "ksl"),
                class = "horizons_input_error", regexp = "not a registered library")
 
   ## Two names are refused as a library form, before R's own error for a
   ## condition of length two
-  expect_error(select_training(select_fixture()$targets, c("kssl", "kssl"), verbose = FALSE),
+  expect_error(select_training(select_fixture()$targets, c("kssl", "kssl")),
                class = "horizons_input_error", regexp = "a single name or path")
 
 })
@@ -441,7 +441,7 @@ with_depth <- function(fx) {
 test_that("topsoil, the default, draws only rows under 30 cm and records it", {
 
   fx  <- with_depth(select_fixture())
-  out <- select_training(fx$targets, fx$pool, k = 20L, verbose = FALSE)
+  out <- select_training(fx$targets, fx$pool, k = 20L)
 
   upper <- fx$pool$data$analysis$upper_depth_cm
   top   <- fx$pool$data$analysis$sample_id[!is.na(upper) & upper < 30]
@@ -457,7 +457,7 @@ test_that("topsoil, the default, draws only rows under 30 cm and records it", {
 test_that("depth = 'all' can draw deep rows", {
 
   fx  <- with_depth(select_fixture())
-  out <- select_training(fx$targets, fx$pool, k = 60L, depth = "all", verbose = FALSE)
+  out <- select_training(fx$targets, fx$pool, k = 60L, depth = "all")
 
   upper <- fx$pool$data$analysis$upper_depth_cm[match(out$data$analysis$sample_id,
                                                      fx$pool$data$analysis$sample_id)]
@@ -470,7 +470,7 @@ test_that("depth = 'all' can draw deep rows", {
 test_that("a library with no depth column draws from every row and says so", {
 
   fx  <- select_fixture()
-  out <- select_training(fx$targets, fx$pool, k = 20L, verbose = FALSE)
+  out <- select_training(fx$targets, fx$pool, k = 20L)
 
   expect_false(out$selection$depth$recorded)
   expect_false(out$selection$depth$applied)
@@ -484,7 +484,7 @@ test_that("a library with no depth column draws from every row and says so", {
 test_that("global under topsoil returns the eligible rows, not the whole pool", {
 
   fx  <- with_depth(select_fixture())
-  out <- select_training(fx$targets, fx$pool, k = 20L, scope = "global", verbose = FALSE)
+  out <- select_training(fx$targets, fx$pool, k = 20L, scope = "global")
 
   expect_identical(nrow(out$data$analysis), out$selection$depth$n_eligible)
 
@@ -495,7 +495,7 @@ test_that("depth rejects anything but topsoil or all", {
   fx <- select_fixture()
 
   expect_error(suppressMessages(capture.output(
-    select_training(fx$targets, fx$pool, depth = "subsoil", verbose = FALSE))),
+    select_training(fx$targets, fx$pool, depth = "subsoil"))),
     class = "horizons_input_error", regexp = "depth")
 
 })
@@ -543,10 +543,10 @@ test_that("a window too narrow for the polynomial stops in cm-1 terms", {
   fx <- select_fixture()
 
   ## 2 cm-1 on the fixture pool's 4 cm-1 grid rounds to 1 point
-  expect_error(select_training(fx$targets, fx$pool, k = 20L, window = 2, verbose = FALSE),
+  expect_error(select_training(fx$targets, fx$pool, k = 20L, window = 2),
                class = "horizons_input_error", regexp = "too few for a polynomial")
   expect_error(suppressMessages(capture.output(
-    select_training(fx$targets, fx$pool, k = 20L, window = -1, verbose = FALSE))),
+    select_training(fx$targets, fx$pool, k = 20L, window = -1))),
     class = "horizons_input_error", regexp = "positive width")
 
 })
@@ -595,13 +595,13 @@ test_that("resemblance is measured against the rows the draw can reach", {
 
   warned <- list()
   top <- withCallingHandlers(
-    select_training(fx$targets, fx$pool, k = 20L, verbose = FALSE),
+    select_training(fx$targets, fx$pool, k = 20L),
     warning = function(w) {
       warned[[length(warned) + 1L]] <<- w
       invokeRestart("muffleWarning")
     }
   )
-  all <- suppressWarnings(select_training(fx$targets, fx$pool, k = 20L, depth = "all", verbose = FALSE))
+  all <- suppressWarnings(select_training(fx$targets, fx$pool, k = 20L, depth = "all"))
 
   ## The deep-family targets resemble rows topsoil cannot draw. Measured
   ## against the whole library none of them was named; against the drawable
@@ -629,7 +629,7 @@ test_that("a k beyond the topsoil rows says depth = 'all' would reach more", {
 
   fx <- with_depth(select_fixture())
 
-  expect_error(select_training(fx$targets, fx$pool, k = 250L, properties = "clay", verbose = FALSE),
+  expect_error(select_training(fx$targets, fx$pool, k = 250L, properties = "clay"),
                class = "horizons_input_error", regexp = "depth = \"all\"")
 
 })
@@ -649,7 +649,7 @@ test_that("the resemblance check is skipped, not failed, when too few rows can b
                                  tibble::tibble(variable = "upper_depth_cm", role = "meta"))
 
   out <- suppressWarnings(select_training(fx$targets, fx$pool, k = 5L, scope = "global",
-                                          properties = "clay", verbose = FALSE))
+                                          properties = "clay"))
 
   ## The threshold is a number whether or not the check ran
   r <- out$selection$resemblance
@@ -658,7 +658,7 @@ test_that("the resemblance check is skipped, not failed, when too few rows can b
   expect_identical(r$skipped, "only 1 row the draw can reach; the check needs 30")
 
   all <- suppressWarnings(select_training(fx$targets, fx$pool, k = 5L, depth = "all",
-                                          properties = "clay", verbose = FALSE))
+                                          properties = "clay"))
   expect_null(all$selection$resemblance$skipped)
 
 })
@@ -685,7 +685,6 @@ test_that("a bad argument is reported before a registered library is fetched", {
     list(args = list(k = TRUE), regexp = "`k`"),
     list(args = list(k = Inf), regexp = "`k`"),
     list(args = list(sdev_floor = FALSE), regexp = "`sdev_floor`"),
-    list(args = list(verbose = "yes"), regexp = "`verbose`"),
     list(args = list(clusters = 0), regexp = "`clusters`"),
     list(args = list(cluster_min = TRUE), regexp = "`cluster_min`"),
     ## the space's levers
@@ -700,7 +699,6 @@ test_that("a bad argument is reported before a registered library is fetched", {
     list(args = list(mask = rbind(c(2400, 2200))), regexp = "`mask`"),
     list(args = list(ncomp = -1), regexp = "`ncomp`"),
     list(args = list(ncomp = TRUE), regexp = "`ncomp`"),
-    list(args = list(chunk_size = 0), regexp = "`chunk_size`"),
     ## seed and PLS mistakes
     list(args = list(seed = 2^31), regexp = "`seed`"),
     list(args = list(space = "pls", properties = "clay"), regexp = "whole-number `ncomp`"),
@@ -711,7 +709,7 @@ test_that("a bad argument is reported before a registered library is fetched", {
   for (case in bad) {
 
     targets <- if (is.null(case$targets)) fx$targets else case$targets
-    args    <- utils::modifyList(list(verbose = FALSE), case$args)
+    args    <- case$args
 
     expect_error(suppressMessages(capture.output(
       do.call(select_training, c(list(targets, "mini"), args)))),
@@ -719,6 +717,12 @@ test_that("a bad argument is reported before a registered library is fetched", {
       info = paste(names(case$args), collapse = ", "))
 
   }
+
+  ## The control object is checked before the library is fetched too
+  expect_error(select_training(fx$targets, "mini", control = "yes"),
+               class = "horizons_error_input", regexp = "control_horizons", fixed = TRUE)
+  expect_error(select_training(fx$targets, "mini", control = control_horizons(allow_par = TRUE)),
+               class = "horizons_error_input", regexp = "allow_par: evaluate(), fit(), ensemble()", fixed = TRUE)
 
   expect_length(list.files(cache, all.files = TRUE, no.. = TRUE), 0L)
 
@@ -760,7 +764,8 @@ test_that("a skipped resemblance check warns and never reports zero targets out"
                                  tibble::tibble(variable = "upper_depth_cm", role = "meta"))
 
   expect_warning(
-    printed <- capture.output(out <- select_training(fx$targets, fx$pool, k = 5L, properties = "clay")),
+    printed <- capture.output(out <- select_training(fx$targets, fx$pool, k = 5L, properties = "clay",
+                                                     control = control_horizons(verbose = TRUE))),
     "resemblance check did not run", class = "horizons_select_warning"
   )
   expect_identical(out$selection$resemblance$skipped,
@@ -775,10 +780,10 @@ test_that("a character depth column is refused rather than compared as text", {
   fx <- with_depth(select_fixture())
   fx$pool$data$analysis$upper_depth_cm <- as.character(fx$pool$data$analysis$upper_depth_cm)
 
-  expect_error(select_training(fx$targets, fx$pool, k = 20L, verbose = FALSE),
+  expect_error(select_training(fx$targets, fx$pool, k = 20L),
                class = "horizons_input_error", regexp = "must be numeric")
   expect_no_error(suppressWarnings(
-    select_training(fx$targets, fx$pool, k = 20L, depth = "all", verbose = FALSE)))
+    select_training(fx$targets, fx$pool, k = 20L, depth = "all")))
 
 })
 

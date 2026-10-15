@@ -171,7 +171,7 @@ describe("an outcome with zero variance on the modelled rows", {
 
     reached <- mock_expensive_steps()
 
-    err <- expect_error(evaluate(obj, verbose = FALSE), class = "horizons_input_error")
+    err <- expect_error(evaluate(obj), class = "horizons_input_error")
 
     msg <- one_line(err)
     expect_match(msg, "evaluate() cannot model SOC: it has zero variance", fixed = TRUE)
@@ -184,7 +184,7 @@ describe("an outcome with zero variance on the modelled rows", {
 
     reached <- mock_expensive_steps()
 
-    err <- expect_error(fit(obj, verbose = FALSE), class = "horizons_input_error")
+    err <- expect_error(fit(obj), class = "horizons_input_error")
 
     expect_match(one_line(err), "fit() cannot model SOC: it has zero variance", fixed = TRUE)
     expect_match(one_line(err), "All 37 rows", fixed = TRUE)
@@ -202,7 +202,7 @@ describe("an outcome with zero variance on the modelled rows", {
 
     reached <- mock_expensive_steps()
 
-    err <- expect_error(fit(fx, n_best = 1L, verbose = FALSE),
+    err <- expect_error(fit(fx, n_best = 1L),
                         class = "horizons_input_error")
 
     expect_false(isFALSE(fx$evaluation$screened))
@@ -232,7 +232,7 @@ describe("an object with no outcome", {
 
     expect_false("outcome" %in% obj$data$role_map$role)
 
-    expect_error(fit(obj, verbose = FALSE),
+    expect_error(fit(obj),
                  "There is no configuration to fit.", fixed = TRUE,
                  class = "horizons_input_error")
 
@@ -254,7 +254,7 @@ describe("an outcome whose only other value falls in the test set", {
 
     reached <- mock_expensive_steps(split = FALSE)
 
-    err <- expect_error(suppressWarnings(evaluate(obj, seed = seed, verbose = FALSE)),
+    err <- expect_error(suppressWarnings(evaluate(obj, seed = seed)),
                         class = "horizons_input_error")
 
     msg <- one_line(err)
@@ -269,8 +269,7 @@ describe("an outcome whose only other value falls in the test set", {
     reached <- mock_expensive_steps(split = FALSE)
 
     err <- expect_error(
-      suppressWarnings(fit(obj, seed = seed, compute_uq = FALSE, compute_ad = FALSE,
-                           verbose = FALSE)),
+      suppressWarnings(fit(obj, seed = seed, compute_uq = FALSE, compute_ad = FALSE)),
       class = "horizons_input_error"
     )
 
@@ -299,8 +298,7 @@ describe("an outcome whose only other value is drawn into the calibration set", 
     for (seed in 1:200) {
 
       err <- tryCatch(
-        suppressWarnings(fit(obj, seed = seed, compute_uq = TRUE, compute_ad = FALSE,
-                             verbose = FALSE)),
+        suppressWarnings(fit(obj, seed = seed, compute_uq = TRUE, compute_ad = FALSE)),
         horizons_input_error = function(e) e,
         error                = function(e) NULL
       )
@@ -332,7 +330,7 @@ describe("an outcome whose only other value is drawn into the calibration set", 
     reached <- mock_expensive_steps(split = FALSE)
 
     err <- expect_error(
-      suppressWarnings(fit(obj, seed = 307L, verbose = FALSE)),
+      suppressWarnings(fit(obj, seed = 307L)),
       class = "horizons_input_error"
     )
 
@@ -361,7 +359,7 @@ describe("an outcome whose only other value falls in the training rows", {
 
     reached <- mock_expensive_steps(split = FALSE)
 
-    expect_error(suppressWarnings(evaluate(obj, seed = seed, verbose = FALSE)),
+    expect_error(suppressWarnings(evaluate(obj, seed = seed)),
                  "evaluate_single_config")
     expect_identical(reached$steps, "evaluate_single_config")
 
@@ -372,8 +370,7 @@ describe("an outcome whose only other value falls in the training rows", {
     reached <- mock_expensive_steps(split = FALSE)
 
     expect_error(
-      suppressWarnings(fit(obj, seed = seed, compute_uq = FALSE, compute_ad = FALSE,
-                           verbose = FALSE)),
+      suppressWarnings(fit(obj, seed = seed, compute_uq = FALSE, compute_ad = FALSE)),
       "fit_single_config"
     )
     expect_identical(reached$steps, "fit_single_config")
@@ -391,7 +388,7 @@ describe("an outcome with a tiny spread on every row", {
 
   it("evaluate() runs", {
 
-    ev <- suppressWarnings(evaluate(obj, verbose = FALSE))
+    ev <- suppressWarnings(evaluate(obj))
 
     expect_s3_class(ev, "horizons_eval")
 
@@ -399,7 +396,7 @@ describe("an outcome with a tiny spread on every row", {
 
   it("a cold-start fit() runs", {
 
-    fx <- suppressWarnings(fit(obj, compute_uq = FALSE, compute_ad = FALSE, verbose = FALSE))
+    fx <- suppressWarnings(fit(obj, compute_uq = FALSE, compute_ad = FALSE))
 
     expect_s3_class(fx, "horizons_fit")
     expect_gt(fx$models$response_bound, max(obj$data$analysis$SOC))

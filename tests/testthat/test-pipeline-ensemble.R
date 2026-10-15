@@ -165,8 +165,7 @@ describe("ensemble() - optimize = FALSE runs (lazy-quosure regression guard)", {
     ## Built here rather than read from the shared build, so that this file
     ## fits the meta-learner itself
     fixed <- suppressWarnings(
-      ensemble(ens_fitted(), method = "xgb", optimize = FALSE, compute_uq = FALSE,
-               verbose = FALSE)
+      ensemble(ens_fitted(), method = "xgb", optimize = FALSE, compute_uq = FALSE)
     )
 
     booster <- hardhat::extract_fit_engine(fixed$ensemble$model)
@@ -183,6 +182,35 @@ describe("ensemble() - optimize = FALSE runs (lazy-quosure regression guard)", {
 ## =========================================================================
 ## PREFLIGHT — input validation
 ## =========================================================================
+
+describe("ensemble() - its control", {
+
+  it("records the control it ran with, defaults filled in", {
+
+    ctrl <- ens_built("weighted")$ensemble$control
+
+    expect_s3_class(ctrl, "horizons_control")
+    expect_identical(names(ctrl), names(resolve_control(NULL, "ensemble")))
+    expect_identical(ctrl$min_calib_rows, N_CALIB_MIN)
+
+  })
+
+  it("passes min_calib_rows to the CV+ calibration", {
+
+    seen <- NULL
+    local_mocked_bindings(fit_ensemble_uq = function(x, ..., min_calib_rows) {
+      seen <<- min_calib_rows
+      x
+    })
+
+    suppressWarnings(ensemble(ens_fitted(), method = "weighted", optimize = FALSE,
+                              control = control_horizons(min_calib_rows = 40L)))
+    expect_identical(seen, 40L)
+
+  })
+
+})
+
 
 describe("ensemble() - preflight validation", {
 
@@ -225,7 +253,7 @@ describe("ensemble() - preflight validation", {
     expect_error(
       suppressMessages(capture.output(
         ensemble(off_id, method = "weighted", optimize = FALSE,
-                 compute_uq = FALSE, verbose = FALSE)
+                 compute_uq = FALSE)
       )),
       "must be on sample_id",
       class = "horizons_error_validation"
@@ -238,7 +266,7 @@ describe("ensemble() - preflight validation", {
     expect_error(
       suppressMessages(capture.output(
         ensemble(no_ad, method = "weighted", optimize = FALSE,
-                 compute_uq = FALSE, verbose = FALSE)
+                 compute_uq = FALSE)
       )),
       "missing from models: ad",
       class = "horizons_error_validation"
@@ -258,7 +286,7 @@ describe("ensemble() - preflight validation", {
       err <- expect_error(
         suppressMessages(capture.output(
           ensemble(broken, method = "weighted", optimize = FALSE,
-                   compute_uq = FALSE, verbose = FALSE)
+                   compute_uq = FALSE)
         )),
         class = "horizons_error_validation"
       )
@@ -286,7 +314,7 @@ describe("ensemble() - preflight validation", {
 
       expect_error(
         ensemble(fitted, method = "weighted", optimize = FALSE, seed = s,
-                 compute_uq = FALSE, verbose = FALSE),
+                 compute_uq = FALSE),
         "seed",
         class = "horizons_input_error"
       )
@@ -299,7 +327,7 @@ describe("ensemble() - preflight validation", {
 
       expect_error(
         ensemble(fitted, method = "weighted", optimize = o,
-                 compute_uq = FALSE, verbose = FALSE),
+                 compute_uq = FALSE),
         "optimize",
         class = "horizons_input_error"
       )
@@ -582,7 +610,7 @@ describe("ensemble() and predict.horizons_ensemble() - member AD and intervals",
 
     expect_no_warning(
       ens <- keep_only_warning(
-        ensemble(broken, method = "weighted", optimize = FALSE, verbose = FALSE),
+        ensemble(broken, method = "weighted", optimize = FALSE),
         "horizons_ad_warning"
       ),
       class = "horizons_ad_warning"
@@ -821,8 +849,7 @@ describe("ensemble() weighted - test-set combine", {
       mp
     })
 
-    ens <- ensemble(fitted, method = "weighted", optimize = FALSE, compute_uq = FALSE,
-                    verbose = FALSE)
+    ens <- ensemble(fitted, method = "weighted", optimize = FALSE, compute_uq = FALSE)
 
     by_hand <- shifted |>
       dplyr::left_join(ens$ensemble$weights, by = c("config_id" = "member")) |>
@@ -891,7 +918,7 @@ describe("predict.horizons_ensemble() - response bound guardrail", {
 
     expect_no_warning(
       ens <- ensemble(low_fit, method = "weighted", optimize = FALSE,
-                      compute_uq = FALSE, verbose = FALSE)
+                      compute_uq = FALSE)
     )
 
     ## Stored test_F predictions are raw combine output (values far above the
@@ -937,70 +964,34 @@ describe("ensemble() - allow_par", {
 
   })
 
-  it("warns and runs sequentially when allow_par = TRUE has no backend", {
+  it("runs sequentially when allow_par = TRUE has no backend, and says so once, on the log too", {
 
     fitted <- ens_fitted()
     local_plan(future::sequential)
 
-    expect_warning(
+    w <- expect_warning(
       ens <- keep_only_warning(
-        ensemble(fitted, method = "penalized", optimize = FALSE,
-                 allow_par = TRUE, compute_uq = FALSE, verbose = FALSE),
+        ensemble(fitted, method = "penalized", optimize = FALSE, compute_uq = FALSE,
+                 control = control_horizons(allow_par = TRUE)),
         "offers 1 worker"
       ),
-      "ensemble\\(\\).*offers 1 worker"
+      "ensemble\\(\\).*offers 1 worker",
+      class = "horizons_warning_substitution"
     )
 
     expect_true(inherits(ens, "horizons_ensemble"))
+    expect_identical(ens$log$verb, "ensemble")
+    expect_identical(ens$log$topic, "substitution")
+    expect_identical(w$log, ens$log)
 
   })
 
-  it("refuses an allow_par that is not TRUE or FALSE", {
+  it("refuses a control field it does not use", {
 
-    fitted <- ens_fitted()
-
-    ## The abort carries no package class.
     expect_error(
-      ensemble(fitted, method = "weighted", allow_par = "yes", verbose = FALSE),
-      "`allow_par` must be TRUE or FALSE", fixed = TRUE
+      ensemble(ens_fitted(), method = "weighted", control = control_horizons(output_dir = "out")),
+      "output_dir: evaluate()", fixed = TRUE, class = "horizons_error_input"
     )
-
-  })
-
-  it("warns when a mirai daemon pool would take the run from the future plan", {
-
-    skip_on_cran()
-    skip_if_not_installed("mirai")
-
-    if (isTRUE(tryCatch(mirai::status()$connections >= 1, error = function(e) FALSE))) {
-      skip("mirai daemons are live in this session")
-    }
-
-    fitted <- ens_fitted()
-    local_plan(future::multisession, workers = 2)
-    mirai::daemons(2)
-    withr::defer(mirai::daemons(0))
-
-    ## The daemons dial in shortly after launch; the warning reads the live
-    ## connection count.
-    for (i in seq_len(100)) {
-      if (isTRUE(mirai::status()$connections >= 2)) break
-      Sys.sleep(0.05)
-    }
-    expect_gte(mirai::status()$connections, 2)
-
-    ## The warning carries no package class. The weighted engine at
-    ## optimize = FALSE tunes nothing, so neither pool is given any work.
-    expect_warning(
-      ens <- keep_only_warning(
-        ensemble(fitted, method = "weighted", optimize = FALSE,
-                 allow_par = TRUE, compute_uq = FALSE, verbose = FALSE),
-        "A mirai daemon pool"
-      ),
-      "A mirai daemon pool", fixed = TRUE
-    )
-
-    expect_true(inherits(ens, "horizons_ensemble"))
 
   })
 
@@ -1070,7 +1061,7 @@ describe("combine_ensemble_metamodel() - row alignment", {
     ## the default strata breaks is not what this test is about.
     expect_error(
       suppressWarnings(ensemble(fitted, method = "penalized", optimize = FALSE,
-                                compute_uq = FALSE, verbose = FALSE)),
+                                compute_uq = FALSE)),
       "Meta-model predictions", class = "horizons_error_internal"
     )
 
@@ -1091,7 +1082,7 @@ describe("combine_ensemble_metamodel() - row alignment", {
 
     expect_error(
       suppressWarnings(ensemble(fitted, method = "penalized", optimize = FALSE,
-                                compute_uq = FALSE, verbose = FALSE)),
+                                compute_uq = FALSE)),
       "Meta-model out-of-fold predictions", class = "horizons_error_internal"
     )
 

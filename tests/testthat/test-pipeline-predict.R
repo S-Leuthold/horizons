@@ -93,8 +93,7 @@ make_new_spectra <- function(n = 8, n_wn = 10, seed = 99) {
 }
 
 ## Fit once, reuse across tests (UQ on; n large enough that calib >= N_CALIB_MIN).
-fitted_fixture <- fit(make_predict_eval(), n_best = 1L, compute_uq = TRUE,
-                      verbose = FALSE)
+fitted_fixture <- fit(make_predict_eval(), n_best = 1L, compute_uq = TRUE)
 
 ## A two-member copy of a fitted object, with no new fit: the best member's
 ## workflow, UQ and AD bundles, config row and evaluation row filed again under
@@ -1436,7 +1435,7 @@ describe("predict.horizons_fit() - fresh-process round trip", {
   skip_if_dev_package()
 
   elastic_net_fixture <- fit(make_predict_eval(model = "elastic_net"),
-                             n_best = 1L, compute_uq = TRUE, verbose = FALSE)
+                             n_best = 1L, compute_uq = TRUE)
 
   fit_path <- tempfile(fileext = ".rds")
   saveRDS(elastic_net_fixture, fit_path)

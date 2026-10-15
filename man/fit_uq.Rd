@@ -12,7 +12,8 @@ fit_uq(
   transformation = "none",
   level_default = DEFAULT_UQ_LEVEL,
   seed = NULL,
-  outcome_range = DEFAULT_OUTCOME_RANGE
+  outcome_range = DEFAULT_OUTCOME_RANGE,
+  min_calib_rows = N_CALIB_MIN
 )
 }
 \arguments{
@@ -40,11 +41,15 @@ default of drawing a seed from that stream.}
 which the back-transformed calibration predictions are clamped to, as
 \code{predict()} clamps the point predictions the intervals are served
 around. Default \code{c(0, Inf)}.}
+
+\item{min_calib_rows}{Integer. The fewest calibration rows the bundle is
+computed from, before and after rows without an outcome are dropped;
+\code{control_horizons(min_calib_rows = )}. Default \code{N_CALIB_MIN}.}
 }
 \value{
 Named list with fields: \code{quantile_model}, \code{scores}, \code{n_calib},
 \code{level_default}, \code{oof_coverage}, \code{mean_width}, \code{prepped_recipe}.
-Returns NULL if calibration set is too small (\code{n < N_CALIB_MIN}).
+Returns NULL if calibration set is too small (\code{n < min_calib_rows}).
 Aborts with class \code{horizons_error_internal} when an out-of-fold \code{.row}
 falls outside the rows the model was fit on, or when the calibration
 predictions or features do not have one row per row of \code{calib_data}.
