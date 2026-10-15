@@ -113,8 +113,10 @@ utils::globalVariables(c(".metric", ".estimate"))
 #'
 #' Development builds carry a fourth version component of 9000 or more
 #' (`0.10.0.9000`), the R convention for an unreleased version. A development
-#' build says so and names the command that installs the latest release;
-#' `install_github("S-Leuthold/horizons")` installs the development branch.
+#' build says so, says it can be part way through a release's changes, and
+#' names the command that installs the latest release, which is what analysis
+#' should run on; `install_github("S-Leuthold/horizons")` installs the
+#' development branch.
 #'
 #' @param version A `package_version`, normally
 #'   `utils::packageVersion("horizons")`.
@@ -134,9 +136,9 @@ startup_message <- function(version) {
   }
 
   paste0(
-    "horizons ", version, " (development version). Fixes land here first; ",
-    "for the latest release, install with ",
-    "remotes::install_github(\"S-Leuthold/horizons@main\"). ", bugs
+    "horizons ", version, " (development version). This build can be part way ",
+    "through the next release's changes, so for analysis install the latest ",
+    "release: remotes::install_github(\"S-Leuthold/horizons@main\"). ", bugs
   )
 
 }
