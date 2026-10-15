@@ -164,7 +164,7 @@ registered_workers <- function() {
 #' `substitution` warning, which the verb raises at its end.
 #'
 #' @param verb Character. The verb, for the message (`"evaluate"`).
-#' @param collector The verb's collector, from [log_open()].
+#' @param collector The verb's collector, from `log_open()`.
 #' @param call The frame a refusal reports: the verb's.
 #' @return `TRUE` if parallel dispatch is possible, else `FALSE`, with the
 #'   warning recorded.

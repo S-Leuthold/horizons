@@ -9,7 +9,7 @@ check_parallel_backend(verb, collector, call = rlang::caller_env())
 \arguments{
 \item{verb}{Character. The verb, for the message (\code{"evaluate"}).}
 
-\item{collector}{The verb's collector, from \code{\link[=log_open]{log_open()}}.}
+\item{collector}{The verb's collector, from \code{log_open()}.}
 
 \item{call}{The frame a refusal reports: the verb's.}
 }
