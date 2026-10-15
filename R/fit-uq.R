@@ -1,4 +1,28 @@
 ## ===========================================================================
+## conformal_min_rows() — the fewest scores a split-conformal level needs
+## ===========================================================================
+
+#' The fewest calibration scores a split-conformal interval needs
+#'
+#' The correction takes the `ceiling(level * (n + 1))`-th smallest score,
+#' which exists only when that index is at most `n`, that is when
+#' `n >= level / (1 - level)`: 9 scores at 0.90. Below it the conformal
+#' interval is unbounded, and `compute_c_alpha()`'s clamp to the largest score
+#' would serve an interval that covers less than `level`.
+#'
+#' @param level Numeric in (0, 1).
+#' @return Integer.
+#' @keywords internal
+#' @noRd
+conformal_min_rows <- function(level) {
+
+  ### The same epsilon guard as cv_plus_indices(): 0.9 / 0.1 is 8.999...
+  as.integer(ceiling(level / (1 - level) - 1e-9))
+
+}
+
+
+## ===========================================================================
 ## compute_c_alpha() — conformal finite-sample correction
 ## ===========================================================================
 
@@ -282,8 +306,9 @@ fit_uq <- function(fitted_workflow,
   scores  <- scores[!is.na(scores)]
   n_calib <- length(scores)
 
-  ## Re-check minimum after NA removal
-  if (n_calib < min_calib_rows) {
+  ## Re-check minimum after NA removal, and the order statistic's own floor,
+  ## below which the interval would cover less than its level
+  if (n_calib < max(min_calib_rows, conformal_min_rows(level_default))) {
 
     return(NULL)
 

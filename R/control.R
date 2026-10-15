@@ -4,9 +4,11 @@
 ##
 ## Arguments say what a verb computes; a control object says how it runs.
 ## Every field is a row of CONTROL_FIELDS: its default, its check, and the
-## verbs that use it. The constructor, the refusal of a field set but unused,
-## the per-verb resolution and the documentation all read that table, so a new
-## field is a row there and an argument of control_horizons().
+## verbs that use it. The constructor, the refusal of a field set but unused
+## and the per-verb resolution read that table, so a new field is a row there
+## and an argument of control_horizons(); its documentation (the argument's
+## @param, and the list of fields in each verb's `control` @param) is kept by
+## hand.
 
 ## ---------------------------------------------------------------------------
 ## The field table
@@ -21,9 +23,17 @@ control_check_bool <- function(x, arg, call) {
 
 }
 
-control_check_rows <- function(x, arg, call) {
+### A row minimum is a whole number of at least `floor`, the fewest rows the
+### computation it gates can use.
+control_check_rows <- function(floor) {
 
-  check_arg(rlang::check_number_whole, x, min = 2, arg = arg, call = call)
+  force(floor)
+
+  function(x, arg, call) {
+
+    check_arg(rlang::check_number_whole, x, min = as.numeric(floor), arg = arg, call = call)
+
+  }
 
 }
 
@@ -89,7 +99,8 @@ control_check_bytes <- function(x, arg, call) {
 CONTROL_VERBS <- c("evaluate", "fit", "ensemble", "select_training")
 
 ### `default` is a function, so a default read from an option is read when the
-### verb runs, not when the package loads.
+### verb runs, not when the package loads. `option` names that option, so a
+### bad value of it is reported as the option's.
 CONTROL_FIELDS <- list(
 
   allow_par = list(
@@ -106,6 +117,7 @@ CONTROL_FIELDS <- list(
 
   verbose = list(
     default = function() getOption("horizons.verbose", TRUE),
+    option  = "horizons.verbose",
     check   = control_check_bool,
     verbs   = CONTROL_VERBS
   ),
@@ -140,33 +152,42 @@ CONTROL_FIELDS <- list(
     verbs   = "select_training"
   ),
 
+  ### The split-conformal order statistic exists from this many rows at the
+  ### calibration level; ensemble()'s CV+ needs more, and checks it itself.
   min_calib_rows = list(
     default = function() N_CALIB_MIN,
-    check   = control_check_rows,
+    check   = function(x, arg, call) {
+      control_check_rows(conformal_min_rows(DEFAULT_UQ_LEVEL))(x, arg, call)
+    },
     verbs   = c("fit", "ensemble")
   ),
 
   min_ad_rows = list(
     default = function() N_AD_TRAIN_MIN,
-    check   = control_check_rows,
+    check   = control_check_rows(2),
     verbs   = "fit"
   ),
 
+  ### Below five rows a bootstrap of the test RPD mostly redraws the same
+  ### rows, and the interval no longer says anything
   min_degradation_rows = list(
     default = function() DEGRADATION_MIN_N,
-    check   = control_check_rows,
+    check   = control_check_rows(5),
     verbs   = "fit"
   ),
 
+  ### The reference is each row's distance to its nearest other row
   min_resemblance_rows = list(
     default = function() SELECT_RESEMBLANCE_MIN_ROWS,
-    check   = control_check_rows,
+    check   = control_check_rows(2),
     verbs   = "select_training"
   ),
 
-  ### A future.globals.maxSize the user has set is theirs, and wins.
+  ### A larger future.globals.maxSize the user set is kept. A smaller one is
+  ### not read as the user's: tune raises the option to 1e9 when it loads.
   max_worker_payload = list(
-    default = function() getOption("future.globals.maxSize", EVAL_WORKER_PAYLOAD_LIMIT),
+    default = function() max(getOption("future.globals.maxSize", 0), EVAL_WORKER_PAYLOAD_LIMIT),
+    option  = "future.globals.maxSize",
     check   = control_check_bytes,
     verbs   = "evaluate"
   )
@@ -193,6 +214,7 @@ CONTROL_FIELDS <- list(
 #' writes (`evaluation$control`, `models$control`, `ensemble$control`,
 #' `selection$settings$control`).
 #'
+#' @param ... Not used: every field is set by name.
 #' @param allow_par `logical(1)`. Run on the registered `future` plan. The
 #'   user owns the plan; the verb never sets one. Default `FALSE`.
 #'   [evaluate()], [fit()], [ensemble()].
@@ -201,8 +223,8 @@ CONTROL_FIELDS <- list(
 #'   `"auto"` never chooses `"configs"` without `output_dir`, and
 #'   `"configs"` asked for explicitly needs one.
 #' @param verbose `logical(1)`. Print the verb's progress tree. Default
-#'   `getOption("horizons.verbose", TRUE)`, so a script can quiet every verb
-#'   at once. All four verbs.
+#'   `getOption("horizons.verbose", TRUE)`, so a script can quiet the four
+#'   verbs, and [average()], at once. All four verbs.
 #' @param output_dir `character(1)`. A directory where [evaluate()] writes
 #'   each configuration's result as it finishes, and from which it resumes.
 #'   Default none.
@@ -219,19 +241,28 @@ CONTROL_FIELDS <- list(
 #'   of the results. Default `FALSE`. All four verbs.
 #' @param chunk_size A whole number. Targets per chunk in
 #'   [select_training()]'s neighbour search. Default 500.
-#' @param min_calib_rows A whole number of at least 2. The fewest calibration
+#' @param min_calib_rows A whole number of at least 9. The fewest calibration
 #'   rows [fit()]'s intervals and applicability domain, and [ensemble()]'s
 #'   CV+ intervals, are computed from; below it they are skipped. Default 30.
+#'   Nine is the fewest from which a 90% split-conformal interval exists;
+#'   [ensemble()]'s CV+ intervals need 19 whatever this is set to. The
+#'   applicability domain's out-of-domain cutoff is the largest calibration
+#'   distance below 99 rows, so about one in `n + 1` in-domain samples is
+#'   flagged out of domain: 3% at the default, 10% at 9.
 #' @param min_ad_rows A whole number of at least 2. The fewest training rows
 #'   [fit()] estimates the applicability domain's covariance from. Default 10.
-#' @param min_degradation_rows A whole number of at least 2. The fewest test
-#'   rows [fit()]'s degradation check bootstraps from. Default 10.
+#' @param min_degradation_rows A whole number of at least 5. The fewest test
+#'   rows [fit()]'s degradation check bootstraps from. Default 10. Below the
+#'   default the bootstrap interval widens and a healthy fit is flagged more
+#'   often.
 #' @param min_resemblance_rows A whole number of at least 2. The fewest library
 #'   rows [select_training()]'s resemblance check takes its reference
 #'   distribution from. Default 30.
 #' @param max_worker_payload A number of bytes. The largest payload
-#'   [evaluate()] sends a worker on the configs axis. Default the
-#'   `future.globals.maxSize` option when you have set it, otherwise 1 GiB.
+#'   [evaluate()] sends a worker on the configs axis. Default 1 GiB, or the
+#'   `future.globals.maxSize` option when it is larger. To lower the limit,
+#'   set this field: the option is raised to 1e9 whenever tune loads, so a
+#'   smaller value of it cannot be told from tune's.
 #'
 #' @return A `horizons_control` object.
 #'
@@ -245,7 +276,8 @@ CONTROL_FIELDS <- list(
 #' }
 #'
 #' @export
-control_horizons <- function(allow_par            = NULL,
+control_horizons <- function(...,
+                             allow_par            = NULL,
                              parallelize_over     = NULL,
                              verbose              = NULL,
                              output_dir           = NULL,
@@ -258,6 +290,21 @@ control_horizons <- function(allow_par            = NULL,
                              min_degradation_rows = NULL,
                              min_resemblance_rows = NULL,
                              max_worker_payload   = NULL) {
+
+  ### By name only, so a value never lands on a field by its position
+  if (...length() > 0) {
+
+    passed  <- names(list(...)) %||% rep("", ...length())
+    unknown <- passed[passed != ""]
+
+    abort_horizons(c(
+      "{.fn control_horizons} takes its fields by name.",
+      "x" = if (length(unknown) > 0) "It has no {cli::qty(length(unknown))}field{?s} {.field {unknown}}.",
+      "x" = if (any(passed == "")) "{sum(passed == '')} value{?s} {?was/were} passed by position.",
+      "i" = "Its arguments are the fields, e.g. {.code control_horizons(allow_par = TRUE)}."
+    ), kind = "input")
+
+  }
 
   fields <- mget(names(CONTROL_FIELDS), envir = environment())
 
@@ -307,6 +354,18 @@ resolve_control <- function(control, verb, call = rlang::caller_env()) {
 
   }
 
+  ### A name the table does not know is a typo or an edit, never a setting
+  unknown <- setdiff(names(control), names(CONTROL_FIELDS))
+
+  if (length(unknown) > 0) {
+
+    abort_horizons(c(
+      "{.arg control} has {cli::qty(length(unknown))}{?a field/fields} {.field {unknown}} that {.fn control_horizons} does not know.",
+      "i" = "Make it with {.fn control_horizons}, whose arguments are the fields."
+    ), kind = "input", call = call)
+
+  }
+
   used   <- names(CONTROL_FIELDS)[vapply(CONTROL_FIELDS, function(f) verb %in% f$verbs, logical(1))]
   set    <- names(CONTROL_FIELDS)[!vapply(names(CONTROL_FIELDS), function(f) is.null(control[[f]]), logical(1))]
   unused <- setdiff(set, used)
@@ -328,11 +387,17 @@ resolve_control <- function(control, verb, call = rlang::caller_env()) {
     control[[f]] %||% CONTROL_FIELDS[[f]]$default()
   })
 
-  ### A default read from an option is the user's to set, so it is checked too
+  ### A default read from an option is the user's to set, so it is checked
+  ### too, and a bad one is reported as the option's
   for (f in used) {
 
     if (!is.null(resolved[[f]])) {
-      CONTROL_FIELDS[[f]]$check(resolved[[f]], arg = f, call = call)
+
+      option <- if (is.null(control[[f]])) CONTROL_FIELDS[[f]]$option
+      arg    <- if (is.null(option)) f else paste0("getOption(\"", option, "\")")
+
+      CONTROL_FIELDS[[f]]$check(resolved[[f]], arg = arg, call = call)
+
     }
 
   }

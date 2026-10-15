@@ -1128,7 +1128,7 @@ select_training <- function(x, library,
 
     cli::cli_warn(c(
       "The resemblance check did not run: {resemblance$skipped}",
-      "i" = "Nothing says whether the targets resemble the rows they were drawn from; {.code depth = \"all\"} gives it more rows to measure against"
+      "i" = "Nothing says whether the targets resemble the rows they were drawn from; {.code depth = \"all\"} gives it more rows to measure against, and {.code control_horizons(min_resemblance_rows = )} sets how many it needs"
     ), class = "horizons_select_warning")
 
   }

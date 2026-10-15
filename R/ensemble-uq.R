@@ -22,6 +22,23 @@
 ## cv_plus_indices()
 ## ---------------------------------------------------------------------------
 
+#' The fewest calibration rows CV+ needs at a level
+#'
+#' The smallest `n` for which [cv_plus_indices()] gives both order
+#' statistics: 19 at 0.90.
+#'
+#' @param level Numeric in (0, 1).
+#' @return Integer.
+#' @keywords internal
+#' @noRd
+cv_plus_min_rows <- function(level) {
+
+  n <- 2L
+  while (is.null(cv_plus_indices(n, level))) n <- n + 1L
+  n
+
+}
+
 #' Finite-Sample Order-Statistic Indices for the CV+ Aggregation
 #'
 #' @description
@@ -606,8 +623,10 @@ fit_ensemble_uq <- function(x,
 
     if (verbose) {
 
+      needed <- max(min_calib_rows, cv_plus_min_rows(level))
+
       cli::cli_inform(c(
-        "i" = "Ensemble UQ could not be calibrated (needs >= {min_calib_rows} \\
+        "i" = "Ensemble UQ could not be calibrated (needs >= {needed} \\
                calibration rows and a successful fold refit); predictions \\
                will be point-only."
       ))

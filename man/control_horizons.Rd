@@ -5,6 +5,7 @@
 \title{Control how evaluate(), fit(), ensemble() and select_training() run}
 \usage{
 control_horizons(
+  ...,
   allow_par = NULL,
   parallelize_over = NULL,
   verbose = NULL,
@@ -21,6 +22,8 @@ control_horizons(
 )
 }
 \arguments{
+\item{...}{Not used: every field is set by name.}
+
 \item{allow_par}{\code{logical(1)}. Run on the registered \code{future} plan. The
 user owns the plan; the verb never sets one. Default \code{FALSE}.
 \code{\link[=evaluate]{evaluate()}}, \code{\link[=fit]{fit()}}, \code{\link[=ensemble]{ensemble()}}.}
@@ -31,8 +34,8 @@ plan is applied to: \code{"auto"} (the default), \code{"configs"} or \code{"resa
 \code{"configs"} asked for explicitly needs one.}
 
 \item{verbose}{\code{logical(1)}. Print the verb's progress tree. Default
-\code{getOption("horizons.verbose", TRUE)}, so a script can quiet every verb
-at once. All four verbs.}
+\code{getOption("horizons.verbose", TRUE)}, so a script can quiet the four
+verbs, and \code{\link[=average]{average()}}, at once. All four verbs.}
 
 \item{output_dir}{\code{character(1)}. A directory where \code{\link[=evaluate]{evaluate()}} writes
 each configuration's result as it finishes, and from which it resumes.
@@ -55,23 +58,32 @@ of the results. Default \code{FALSE}. All four verbs.}
 \item{chunk_size}{A whole number. Targets per chunk in
 \code{\link[=select_training]{select_training()}}'s neighbour search. Default 500.}
 
-\item{min_calib_rows}{A whole number of at least 2. The fewest calibration
+\item{min_calib_rows}{A whole number of at least 9. The fewest calibration
 rows \code{\link[=fit]{fit()}}'s intervals and applicability domain, and \code{\link[=ensemble]{ensemble()}}'s
-CV+ intervals, are computed from; below it they are skipped. Default 30.}
+CV+ intervals, are computed from; below it they are skipped. Default 30.
+Nine is the fewest from which a 90\% split-conformal interval exists;
+\code{\link[=ensemble]{ensemble()}}'s CV+ intervals need 19 whatever this is set to. The
+applicability domain's out-of-domain cutoff is the largest calibration
+distance below 99 rows, so about one in \code{n + 1} in-domain samples is
+flagged out of domain: 3\% at the default, 10\% at 9.}
 
 \item{min_ad_rows}{A whole number of at least 2. The fewest training rows
 \code{\link[=fit]{fit()}} estimates the applicability domain's covariance from. Default 10.}
 
-\item{min_degradation_rows}{A whole number of at least 2. The fewest test
-rows \code{\link[=fit]{fit()}}'s degradation check bootstraps from. Default 10.}
+\item{min_degradation_rows}{A whole number of at least 5. The fewest test
+rows \code{\link[=fit]{fit()}}'s degradation check bootstraps from. Default 10. Below the
+default the bootstrap interval widens and a healthy fit is flagged more
+often.}
 
 \item{min_resemblance_rows}{A whole number of at least 2. The fewest library
 rows \code{\link[=select_training]{select_training()}}'s resemblance check takes its reference
 distribution from. Default 30.}
 
 \item{max_worker_payload}{A number of bytes. The largest payload
-\code{\link[=evaluate]{evaluate()}} sends a worker on the configs axis. Default the
-\code{future.globals.maxSize} option when you have set it, otherwise 1 GiB.}
+\code{\link[=evaluate]{evaluate()}} sends a worker on the configs axis. Default 1 GiB, or the
+\code{future.globals.maxSize} option when it is larger. To lower the limit,
+set this field: the option is raised to 1e9 whenever tune loads, so a
+smaller value of it cannot be told from tune's.}
 }
 \value{
 A \code{horizons_control} object.
