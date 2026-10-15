@@ -1230,6 +1230,14 @@ describe("check_degradation()", {
 
   })
 
+  it("takes its minimum number of test rows from min_n", {
+
+    ## Twelve of the poor fit's test rows: flagged at a minimum of 10, not at 20
+    expect_true(check_degradation(cv_4, truth[1:12], poor[1:12])$degraded)
+    expect_false(check_degradation(cv_4, truth[1:12], poor[1:12], min_n = 20L)$degraded)
+
+  })
+
   it("is reproducible and leaves the caller's random stream untouched", {
 
     first  <- check_degradation(cv_4, truth, poor, seed = 7L)

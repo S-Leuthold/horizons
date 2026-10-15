@@ -360,6 +360,18 @@ describe("fit_uq() - too few calibration points", {
 
   })
 
+  it("takes its minimum from min_calib_rows", {
+
+    ## 10 rows: refused at the default 30, used at a minimum of 8
+    args <- list(fitted_workflow = setup$fitted_wf, oof_predictions = setup$oof_predictions,
+                 calib_data = setup$calib_data, role_map = setup$role_map,
+                 transformation = "none", level_default = 0.90)
+
+    expect_null(do.call(fit_uq, args))
+    expect_false(is.null(do.call(fit_uq, c(args, min_calib_rows = 8L))))
+
+  })
+
 })
 
 

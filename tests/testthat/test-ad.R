@@ -251,6 +251,17 @@ ad_new_spectra <- function(wn, n = 5, shift = 0, seed = 42) {
 
 }
 
+test_that("fit_ad() takes its minimums from min_calib_rows and min_ad_rows", {
+
+  fx <- ad_fitted_workflow()
+
+  ## The 60 rows clear the defaults; a minimum above them turns AD off
+  expect_false(is.null(fit_ad(fx$workflow, calib_data = fx$data)))
+  expect_null(fit_ad(fx$workflow, calib_data = fx$data, min_calib_rows = 61L))
+  expect_null(fit_ad(fx$workflow, calib_data = fx$data, min_ad_rows = 61L))
+
+})
+
 test_that("predict_ad returns per-row NA for one bad spectrum and scores the rest", {
 
   fx     <- ad_fitted_workflow()
