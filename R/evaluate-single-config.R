@@ -151,10 +151,12 @@ evaluate_single_config <- function(config_row,
     ## plsr's num_comp is capped by the same count and by the smallest fold's
     ## rows (#216).
     ##
-    ## That prep is the only one before tuning, since it costs nothing extra
-    ## (DECISIONS 2026-10-16): a step's error there ends the configuration
-    ## with its class. Every other model's recipe is prepped only when tune's
-    ## notes show a step failed (check_tune_result()).
+    ## That prep is the only one before tuning, since it costs nothing extra:
+    ## a step's error there ends the configuration with its class. Every
+    ## other model's recipe is prepped only when tune's notes show a step
+    ## failed (check_tune_result()), since a prep with feature selection can
+    ## take minutes (CARS on 2,000 rows took over five) and would otherwise
+    ## be paid by every configuration that does not fail.
 
     param_set   <- workflows::extract_parameter_set_dials(wflow)
     prepped_now <- any(c("mtry", "num_comp") %in% param_set$name)

@@ -1140,8 +1140,8 @@ describe("evaluate_single_config() - parallel_over", {
 
   it("refuses anything but 'resamples' or 'everything', naming the argument", {
 
-    ## The abort carries no package class (DECISIONS 2026-10-05), so its text
-    ## is the check.
+    ## The abort is rlang's own, from arg_match0(), which takes no class, so
+    ## its text is the check.
     setup <- make_eval_setup()
 
     expect_error(

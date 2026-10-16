@@ -1392,7 +1392,9 @@ tune_failure_cause <- function(tune_results) {
 #'   the recipe once on the training part: the step's error then ends the
 #'   unit with its own class, or propagates for the kinds no unit contains. A
 #'   failure that does not reproduce there (one fold's rows only) is read
-#'   from the notes, as below (DECISIONS 2026-10-16).
+#'   from the notes, as below. Prepping only on failure costs a run that
+#'   does not fail nothing, where a prep with feature selection can take
+#'   minutes.
 #' * A result in which every model failed ([tune::.is_cataclysmic()]) ends the
 #'   unit: `failure` and the most frequent error note are its message, and it
 #'   carries the trace tune kept for the first error (tune keeps one for an

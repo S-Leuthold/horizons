@@ -654,7 +654,8 @@ unit_records <- function(records) {
 ## run_unit() records it with its class like any other warning, and the verb
 ## lifts it onto its log, from where it is raised once, at the verb's end. A
 ## warning another package raises in a unit (ranger, yardstick) stays on the
-## unit's row (DECISIONS 2026-10-16).
+## unit's row: it has no topic to file it under, and the row is where a
+## unit's detail is read.
 
 #' Raise a horizons warning from inside a unit
 #'
