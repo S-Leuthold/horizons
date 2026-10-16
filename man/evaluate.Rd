@@ -181,9 +181,14 @@ on them) describe the trimmed population; the test metrics do not.
 \section{When every configuration fails}{
 
 \code{best_config} is chosen from the configs that succeeded or, when none did,
-from the pruned configs that carry a cross-validated value of \code{metric}.
-When there are neither, or none of them has a value of \code{metric} to rank
-on, \code{evaluate()} aborts with class \code{horizons_all_configs_failed}. The
+from the pruned configs that carry a cross-validated value of \code{metric}. A
+config without a value of \code{metric} is left out of the ranking, with one
+\code{horizons_warning_skipped} naming it. When configs were evaluated but none
+has a value of \code{metric}, \code{evaluate()} returns with \code{best_config} \code{NA} and
+that warning, and \code{fit()} asks for another \code{metric}.
+
+When every config failed, \code{evaluate()} aborts with class
+\code{horizons_error_all_configs_failed} (and \code{horizons_error_run}). The
 message lists the distinct error messages (the first three, each with the
 configs that raised it) and names any configs that were loaded from
 checkpoints in \code{output_dir} rather than run, since calling \code{evaluate()}
@@ -197,7 +202,7 @@ config fails, and keep its errors:
 \if{html}{\out{<div class="sourceCode">}}\preformatted{runs <- lapply(subsets, function(hd) \{
   tryCatch(
     evaluate(hd, control = control_horizons(verbose = FALSE)),
-    horizons_all_configs_failed = function(e) e$results
+    horizons_error_all_configs_failed = function(e) e$results
   )
 \})
 

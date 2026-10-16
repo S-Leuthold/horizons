@@ -175,7 +175,7 @@ monitor_evaluate <- function(output_dir, watch = FALSE, interval = 10) {
 
     if (any(!is.na(candidates[[cv_col]]))) {
 
-      ranked      <- suppressWarnings(rank_configs_by_cv(candidates, metric_name))
+      ranked      <- rank_configs_by_cv(candidates, metric_name)
       best_config <- ranked$config_id[1]
       best_metric <- ranked[[cv_col]][1]
 
@@ -192,20 +192,13 @@ monitor_evaluate <- function(output_dir, watch = FALSE, interval = 10) {
 
     row <- k$row
 
-    ## Checkpoint rows are evaluate_single_config() result rows, which carry
-    ## no `model` column; only show the model when something wrote one.
-    model_label <- if ("model" %in% names(row) && !is.na(row$model)) {
-      paste0(" (", MODEL_DISPLAY_NAMES[row$model] %||% row$model, ")")
-    } else {
-      ""
-    }
     ## The cross-validated value evaluate() ranks on (#50)
     metric_val <- if (!is.na(row[[cv_col]])) {
       paste0(toupper(metric_name), " = ", round(row[[cv_col]], 3))
     } else {
       row$status
     }
-    recent <- c(recent, paste0(row$config_id, model_label, " ", metric_val))
+    recent <- c(recent, paste0(row$config_id, " ", metric_val))
 
   }
 

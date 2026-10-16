@@ -329,6 +329,13 @@ fit <- function(x,
   if (!cold_start &&
       (n_candidates == 0 || all(is.na(candidates$rows[[rank_column]])))) {
 
+    ## evaluate() returns such an evaluation, so re-running it would not help;
+    ## a metric the evaluated configurations hold would
+    evaluated <- eval_results[eval_results$status %in% c("success", "pruned"), , drop = FALSE]
+    held      <- VALID_RANK_METRICS[vapply(VALID_RANK_METRICS, function(m) {
+      any(!is.na(evaluated[[paste0("cv_", m)]]))
+    }, logical(1))]
+
     cli::cli_abort(c(
       "No configuration in {.field evaluation$results} can be fitted.",
       "x" = if (n_candidates == 0) {
@@ -336,12 +343,19 @@ fit <- function(x,
       } else {
         "{n_candidates} succeeded, but none has a {.field {rank_column}} value."
       },
-      "i" = "Re-run {.fn evaluate} to record the cross-validated metrics; when every configuration fails it aborts and lists the errors."
+      "i" = if (length(held) > 0) {
+        "Rank by a metric the results hold: {.code fit(x, metric = )} with one of {.val {held}}."
+      } else {
+        "No cross-validated metric was recorded; re-run {.fn evaluate}."
+      }
     ), class = "horizons_input_error")
 
   }
 
   ranked <- if (cold_start) candidates$rows else rank_configs_by_cv(candidates$rows, rank_metric)
+
+  ## A candidate without a value of the ranking metric is left out, said once
+  if (!cold_start) log_unranked(collector, candidates$rows, ranked, rank_metric)
 
   ## Cap n_best at available candidates. A cold start has one configuration
   ## by construction, so the default n_best is no request worth a note.

@@ -128,9 +128,14 @@
 #'
 #' @section When every configuration fails:
 #' `best_config` is chosen from the configs that succeeded or, when none did,
-#' from the pruned configs that carry a cross-validated value of `metric`.
-#' When there are neither, or none of them has a value of `metric` to rank
-#' on, `evaluate()` aborts with class `horizons_all_configs_failed`. The
+#' from the pruned configs that carry a cross-validated value of `metric`. A
+#' config without a value of `metric` is left out of the ranking, with one
+#' `horizons_warning_skipped` naming it. When configs were evaluated but none
+#' has a value of `metric`, `evaluate()` returns with `best_config` `NA` and
+#' that warning, and `fit()` asks for another `metric`.
+#'
+#' When every config failed, `evaluate()` aborts with class
+#' `horizons_error_all_configs_failed` (and `horizons_error_run`). The
 #' message lists the distinct error messages (the first three, each with the
 #' configs that raised it) and names any configs that were loaded from
 #' checkpoints in `output_dir` rather than run, since calling `evaluate()`
@@ -145,7 +150,7 @@
 #' runs <- lapply(subsets, function(hd) {
 #'   tryCatch(
 #'     evaluate(hd, control = control_horizons(verbose = FALSE)),
-#'     horizons_all_configs_failed = function(e) e$results
+#'     horizons_error_all_configs_failed = function(e) e$results
 #'   )
 #' })
 #'
@@ -884,27 +889,42 @@ evaluate <- function(x,
 
   rank_column <- paste0("cv_", metric)
 
-  ## The successes, or the pruned configs when none succeeded: the rule
-  ## fit() applies to the same table.
-  candidates <- ranking_candidates(all_results, metric)
+  ## Nothing usable: every configuration failed. Rows resumed from
+  ## checkpoints are named, since re-running evaluate() does not re-run them.
+  evaluated <- all_results$config_id[all_results$status %in% c("success", "pruned")]
 
-  ## Nothing to rank: no candidates, or candidates none of which has a
-  ## cv_<metric> value, which rank_configs_by_cv() would refuse unclassed and
-  ## without the results. Rows resumed from checkpoints are named, since
-  ## re-running evaluate() does not re-run them.
-  if (nrow(candidates$rows) == 0 || all(is.na(candidates$rows[[rank_column]]))) {
+  if (length(evaluated) == 0) {
 
     abort_all_configs_failed(
-      all_results, metric,
+      all_results,
       checkpoint_ids = intersect(all_results$config_id, completed_ids),
       output_dir     = output_dir
     )
 
   }
 
-  ranked <- rank_configs_by_cv(candidates$rows, metric)
+  ## The successes, or the pruned configs when none succeeded: the rule
+  ## fit() applies to the same table. A configuration without a value of the
+  ## ranking metric is left out of the ranking, and said so once; when none
+  ## has one, the evaluation is returned without a best_config, since the
+  ## configurations were scored, and fit() asks for another metric.
+  candidates <- ranking_candidates(all_results, metric)
+  ranked     <- rank_configs_by_cv(candidates$rows, metric)
 
-  best_config_id <- ranked$config_id[1]
+  best_config_id <- if (nrow(ranked) > 0) ranked$config_id[1] else NA_character_
+
+  if (is.na(best_config_id)) {
+
+    log_warning(collector, "skipped", c(
+      "No configuration could be ranked: none of the {length(evaluated)} evaluated has a {.field {rank_column}} value, so the evaluation has no {.field best_config}.",
+      "i" = "Rank by another cross-validated metric with {.code evaluate(metric = )} or {.code fit(metric = )}."
+    ), ids = evaluated)
+
+  } else {
+
+    log_unranked(collector, candidates$rows, ranked, metric)
+
+  }
 
   ## -----------------------------------------------------------------------
   ## Step 11: Store evaluation metadata
@@ -961,22 +981,32 @@ evaluate <- function(x,
     n_pruned  <- sum(all_results$status == "pruned")
     n_failed  <- sum(all_results$status == "failed")
 
-    ## Best config description
-    best_cfg   <- configs[configs$config_id == best_config_id, ]
-    best_model <- MODEL_DISPLAY_NAMES[best_cfg$model] %||% best_cfg$model
-    best_row   <- all_results[all_results$config_id == best_config_id, ]
-
     cat("\u2502\n")
     cat(paste0(
       "\u2502  Results: ", n_success, " success, ",
       n_pruned, " pruned, ", n_failed, " failed\n"
     ))
-    cat(paste0(
-      "\u2514\u2500 Best: ", best_config_id, " (", best_model, ")",
-      " \u2014 CV ", toupper(metric), " = ",
-      round(best_row[[rank_column]], 3),
-      " (test ", toupper(metric), " = ", round(best_row[[metric]], 3), ")\n"
-    ))
+
+    if (is.na(best_config_id)) {
+
+      cat(paste0("\u2514\u2500 Best: none, since no configuration has a CV ",
+                 toupper(metric), "\n"))
+
+    } else {
+
+      ## Best config description
+      best_cfg   <- configs[configs$config_id == best_config_id, ]
+      best_model <- MODEL_DISPLAY_NAMES[best_cfg$model] %||% best_cfg$model
+      best_row   <- all_results[all_results$config_id == best_config_id, ]
+
+      cat(paste0(
+        "\u2514\u2500 Best: ", best_config_id, " (", best_model, ")",
+        " \u2014 CV ", toupper(metric), " = ",
+        round(best_row[[rank_column]], 3),
+        " (test ", toupper(metric), " = ", round(best_row[[metric]], 3), ")\n"
+      ))
+
+    }
     cat(paste0(
       paste(rep("\u2500", 62), collapse = ""), "\n"
     ))
@@ -1734,21 +1764,21 @@ describe_data_diff <- function(stored, current, differ) {
 }
 
 ## ---------------------------------------------------------------------------
-## abort_all_configs_failed — nothing to rank, with the reasons attached
+## abort_all_configs_failed — every configuration failed, with the reasons attached
 ## ---------------------------------------------------------------------------
 
-#' Abort because no configuration can be ranked
+#' Abort because every configuration failed
 #'
 #' @description
-#' Raised by `evaluate()` when no configuration can be ranked: every one
-#' failed, or was pruned without a cross-validated value of the ranking
-#' metric (#41), or succeeded without one (its cross-validated metrics could
-#' not be recovered). `evaluate()` aborts before it assigns
-#' `x$evaluation`, so the results table travels on the condition as
-#' `results`, and the message lists the distinct error messages (the first
-#' three, each with the configs that raised it, and a count of the rest). A
-#' caller looping over subsets can catch the class and keep the per-config
-#' errors; see `evaluate()`'s "When every configuration fails" section.
+#' Raised by `evaluate()` when nothing usable came out: every configuration
+#' failed (#41). A configuration that was evaluated but has no value of the
+#' ranking metric is usable, so `evaluate()` returns instead. `evaluate()`
+#' aborts before it assigns `x$evaluation`, so the results table travels on
+#' the condition as `results`, and the message lists the distinct error
+#' messages (the first three, each with the configs that raised it, and a
+#' count of the rest). A caller looping over subsets can catch the class and
+#' keep the per-config errors; see `evaluate()`'s "When every configuration
+#' fails" section.
 #'
 #' Rows resumed from checkpoints are not re-run by calling `evaluate()`
 #' again, so the message names them and the files to delete. They are
@@ -1757,31 +1787,21 @@ describe_data_diff <- function(stored, current, differ) {
 #' `checkpoints/<config_id>.rds`.
 #'
 #' @param results The aggregated result rows (`evaluation$results` shape).
-#' @param metric Bare ranking metric name.
 #' @param checkpoint_ids Character. Config ids among `results` that were
 #'   loaded from checkpoints rather than run. Default none.
 #' @param output_dir The checkpoint directory, or `NULL`.
 #' @param call The call the condition is attributed to. Default: the caller,
 #'   `evaluate()`.
-#' @return Never returns; aborts with class `horizons_all_configs_failed`.
+#' @return Never returns; aborts with class
+#'   `horizons_error_all_configs_failed` (kind `run`).
 #' @keywords internal
 #' @noRd
-abort_all_configs_failed <- function(results, metric,
+abort_all_configs_failed <- function(results,
                                      checkpoint_ids = character(0),
                                      output_dir     = NULL,
                                      call           = rlang::caller_env()) {
 
-  rank_column <- paste0("cv_", metric)
-  n_total     <- nrow(results)
-  n_success   <- sum(results$status == "success")
-  n_failed    <- sum(results$status == "failed")
-  n_pruned    <- sum(results$status == "pruned")
-
-  header <- if (n_success > 0) {
-    "No configuration can be ranked: {n_success} succeeded, but none has a {.field {rank_column}} value."
-  } else {
-    "All configurations failed or were pruned without a {.field {rank_column}} value, so none can be ranked."
-  }
+  n_total <- nrow(results)
 
   ## Resumed rows are not re-run by calling evaluate() again, so a failure
   ## loaded from a checkpoint persists until its files are deleted. Built as
@@ -1810,13 +1830,14 @@ abort_all_configs_failed <- function(results, metric,
 
   }
 
-  cli::cli_abort(c(
-    header,
-    "i" = "Of {n_total} configuration{?s}: {n_success} succeeded, {n_failed} failed, {n_pruned} pruned.",
+  abort_horizons(c(
+    "All configurations failed, so none can be ranked.",
+    "i" = "{n_total} configuration{?s} failed.",
     distinct_config_errors(results),
     checkpoint_note,
-    "i" = "The per-config results, error messages included, are on this condition as {.field results}. Recover them without re-running with {.code rlang::last_error()$results}, or catch the class: {.code tryCatch(evaluate(x), horizons_all_configs_failed = function(e) e$results)}."
-  ), class = "horizons_all_configs_failed", results = results, call = call)
+    "i" = "The per-config results, error messages included, are on this condition as {.field results}. Recover them without re-running with {.code rlang::last_error()$results}, or catch the class: {.code tryCatch(evaluate(x), horizons_error_all_configs_failed = function(e) e$results)}."
+  ), kind = "run", class = "horizons_error_all_configs_failed", results = results,
+  call = call)
 
 }
 
@@ -1869,9 +1890,9 @@ ranking_candidates <- function(results, metric) {
 #' `evaluate()`'s `best_config` and `fit()`'s member selection, so the two can
 #' never disagree, and neither touches a test-set column (#50).
 #'
-#' Rows whose `cv_<metric>` is `NA` (a config whose CV panel could not be
-#' recovered) are dropped with a warning naming them. If no row can be
-#' ranked, aborts with the remedy: re-run `evaluate()`.
+#' Rows whose `cv_<metric>` is `NA` cannot be ranked and are left out,
+#' silently: the verbs that rank say so once, with the ids, and the monitor
+#' only displays the ranking. When no row has a value the result has no rows.
 #'
 #' @param results Tibble of evaluation result rows (`evaluation$results`
 #'   shape).
@@ -1884,33 +1905,8 @@ rank_configs_by_cv <- function(results, metric) {
   ### The eval validator at fit()'s door requires the cv_ columns.
   rank_column <- paste0("cv_", metric)
 
-  vals <- results[[rank_column]]
-
-  if (all(is.na(vals))) {
-
-    rlang::abort(paste0(
-      "All values of `", rank_column, "` are NA, so no config can be ranked. ",
-      "Re-run evaluate() to record cross-validated metrics."
-    ))
-
-  }
-
-  if (any(is.na(vals))) {
-
-    skipped <- results$config_id[is.na(vals)]
-
-    n_skipped <- length(skipped)
-
-    cli::cli_warn(c(
-      "!" = "{n_skipped} config{?s} skipped in ranking: `{rank_column}` is NA.",
-      "i" = "Skipped: {.val {skipped}}.",
-      "i" = "Their cross-validated value could not be recovered after tuning."
-    ))
-
-    results <- results[!is.na(vals), , drop = FALSE]
-    vals    <- results[[rank_column]]
-
-  }
+  results <- results[!is.na(results[[rank_column]]), , drop = FALSE]
+  vals    <- results[[rank_column]]
 
   ## Explicit tie-break on config_id so a fresh run, a resumed run (whose row
   ## order follows the checkpoint directory) and monitor_evaluate() all name
@@ -1918,6 +1914,38 @@ rank_configs_by_cv <- function(results, metric) {
   key <- if (metric %in% HIGHER_BETTER_METRICS) -vals else vals
 
   results[order(key, results$config_id), , drop = FALSE]
+
+}
+
+#' Record the configurations a ranking left out
+#'
+#' @description
+#' The one record of [rank_configs_by_cv()]'s left-out rows, which
+#' `evaluate()` and `fit()` both write: a `skipped` warning naming them, raised
+#' at the verb's end.
+#'
+#' @param collector The verb's collector, from `log_open()`.
+#' @param candidates The rows that were ranked.
+#' @param ranked What [rank_configs_by_cv()] returned for them.
+#' @param metric Bare metric name.
+#' @return The ids left out, invisibly.
+#' @keywords internal
+#' @noRd
+log_unranked <- function(collector, candidates, ranked, metric) {
+
+  rank_column <- paste0("cv_", metric)
+  unranked    <- setdiff(candidates$config_id, ranked$config_id)
+
+  if (length(unranked) > 0) {
+
+    log_warning(collector, "skipped", c(
+      "{length(unranked)} configuration{?s} left out of the ranking, with no {.field {rank_column}} value.",
+      "i" = "Left out: {.val {unranked}}."
+    ), ids = unranked)
+
+  }
+
+  invisible(unranked)
 
 }
 

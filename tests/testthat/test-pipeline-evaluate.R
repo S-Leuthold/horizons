@@ -393,22 +393,21 @@ describe("rank_configs_by_cv()", {
 
   })
 
-  it("drops rows with NA cv_<metric> with a warning naming them", {
+  it("leaves out rows with NA cv_<metric>, silently: the verbs that rank say so", {
 
     unranked <- rows
     unranked$cv_rpd[1] <- NA_real_
 
-    expect_warning(ranked <- rank_configs_by_cv(unranked, "rpd"), "skipped")
+    expect_no_warning(ranked <- rank_configs_by_cv(unranked, "rpd"))
     expect_equal(ranked$config_id, c("b", "c"))
 
-  })
-
-  it("aborts with a re-run remedy when nothing can be ranked", {
-
+    ## Nothing to rank: no rows, and the caller decides what that means
     all_na <- rows
     all_na$cv_rpd <- NA_real_
 
-    expect_error(rank_configs_by_cv(all_na, "rpd"), "[Rr]e-run evaluate")
+    expect_no_warning(none <- rank_configs_by_cv(all_na, "rpd"))
+    expect_identical(nrow(none), 0L)
+    expect_named(none, names(rows))
 
     ## Results with no cv_ column are refused by the eval validator at fit()'s
     ## door (test-class-core.R), before anything is ranked.
@@ -426,7 +425,7 @@ describe("evaluate() - all configs fail", {
   ## evaluate() aborts before it assigns x$evaluation, so the message's old
   ## hint ("Check evaluation$results") could not be followed. The results now
   ## ride on the condition, so a loop over subsets can recover them (#41).
-  it("signals horizons_all_configs_failed, carrying the results and naming the errors", {
+  it("signals horizons_error_all_configs_failed, carrying the results and naming the errors", {
 
     obj <- make_eval_object(n_configs = 5)
 
@@ -442,10 +441,11 @@ describe("evaluate() - all configs fail", {
 
     err <- tryCatch(
       suppressWarnings(evaluate(obj)),
-      horizons_all_configs_failed = function(e) e
+      horizons_error_all_configs_failed = function(e) e
     )
 
-    expect_s3_class(err, "horizons_all_configs_failed")
+    expect_s3_class(err, "horizons_error_all_configs_failed")
+    expect_s3_class(err, "horizons_error_run")
 
     ## The per-config results, error messages included
     expect_s3_class(err$results, "tbl_df")
@@ -477,9 +477,9 @@ describe("evaluate() - all configs fail", {
                               error_message = "mocked")
 
     err <- expect_error(
-      abort_all_configs_failed(results, "rpd", checkpoint_ids = results$config_id,
+      abort_all_configs_failed(results, checkpoint_ids = results$config_id,
                                output_dir = "runs/soc"),
-      class = "horizons_all_configs_failed"
+      class = "horizons_error_all_configs_failed"
     )
 
     msg <- gsub("\\s+", " ", conditionMessage(err))   # undo cli line wrapping
@@ -1160,40 +1160,74 @@ describe("evaluate() - checkpointing", {
 
   })
 
-  ## A config whose CV panel could not be recovered succeeds with no value to
-  ## rank on. rank_configs_by_cv() refused such rows unclassed and without
-  ## the results, and re-running evaluate() resumes them rather than
-  ## re-running.
-  it("signals horizons_all_configs_failed when no success has a cv_<metric>, naming the checkpoints", {
+  ## A config can succeed with no value to rank on. rank_configs_by_cv()
+  ## refused such rows unclassed and without the results, then evaluate()
+  ## aborted; the configurations were scored, so the evaluation is returned,
+  ## without a best_config, and says so once.
+  it("returns without a best_config when no success has a cv_<metric>, says so once, and fit() asks for another metric", {
 
     ck     <- ck_b()
     obj    <- ck$value$obj
     tmpdir <- ck$dir
 
-    cv_cols <- paste0("cv_", c("rmse", "rrmse", "rsq", "ccc", "rpd", "mae"))
-
     for (f in list.files(file.path(tmpdir, "checkpoints"), full.names = TRUE)) {
       row <- readRDS(f)
-      row[cv_cols] <- NA_real_
+      row$cv_rpd <- NA_real_
       saveRDS(row, f)
     }
 
-    err <- tryCatch(
-      suppressWarnings(evaluate(obj,
-                                seed = 42L, control = control_horizons(output_dir = tmpdir))),
-      horizons_all_configs_failed = function(e) e
+    got <- collect_warnings(
+      evaluate(obj, seed = 42L, control = control_horizons(output_dir = tmpdir))
+    )
+    ev  <- got$value
+
+    expect_s3_class(ev, "horizons_eval")
+    expect_identical(ev$evaluation$best_config, NA_character_)
+    expect_setequal(ev$evaluation$results$config_id, obj$config$configs$config_id)
+
+    skipped <- Filter(function(w) inherits(w, "horizons_warning_skipped"), got$warnings)
+    expect_length(skipped, 1L)
+    expect_match(conditionMessage(skipped[[1]]), "none of the 2 evaluated has a cv_rpd value", fixed = TRUE)
+    expect_identical(ev$log$topic[ev$log$verb == "evaluate"], "skipped")
+    expect_setequal(ev$log$ids[[1]], obj$config$configs$config_id)
+
+    ## fit() refuses it at its door, naming a metric the results hold
+    err <- expect_error(fit(ev, compute_uq = FALSE, compute_ad = FALSE),
+                        "2 succeeded, but none has a cv_rpd value.", fixed = TRUE,
+                        class = "horizons_input_error")
+    msg <- gsub("\\s+", " ", conditionMessage(err))   # undo cli line wrapping
+    expect_match(msg, "fit(x, metric = )", fixed = TRUE)
+    expect_match(msg, "\"rmse\"", fixed = TRUE)
+    expect_no_match(msg, "\"rpd\"", fixed = TRUE)
+
+  })
+
+  it("leaves a configuration without the ranking metric out of the ranking, and says so once", {
+
+    ## Read the fixture before the runner is mocked (helper-memo.R)
+    template <- ev60()$evaluation$results[1, ]
+
+    rows <- list(
+      cfg_001 = mock_eval_row(template, "cfg_001", "success", rpd = 2.1),
+      cfg_002 = mock_eval_row(template, "cfg_002", "success", rpd = 1.4)
+    )
+    rows$cfg_001$cv_rpd <- NA_real_
+
+    local_mocked_bindings(
+      evaluate_single_config = function(config_row, ...) rows[[config_row$config_id]]
     )
 
-    expect_s3_class(err, "horizons_all_configs_failed")
-    expect_setequal(err$results$config_id, obj$config$configs$config_id)
+    got <- collect_warnings(evaluate(make_eval_object(n = 60, n_configs = 2), seed = 42L))
+    ev  <- got$value
 
-    msg <- gsub("\\s+", " ", conditionMessage(err))   # undo cli line wrapping
-    expect_match(msg, "2 succeeded, but none has a cv_rpd value", fixed = TRUE)
-    expect_match(msg, "2 configurations were loaded from checkpoints", fixed = TRUE)
-    expect_match(msg, "cfg_001, cfg_002", fixed = TRUE)
+    expect_identical(ev$evaluation$best_config, "cfg_002")
 
-    ## One store (#42): the per-config files
-    expect_match(msg, "delete their files, checkpoints/<config_id>.rds.", fixed = TRUE)
+    skipped <- Filter(function(w) inherits(w, "horizons_warning_skipped"), got$warnings)
+    expect_length(skipped, 1L)
+    expect_match(conditionMessage(skipped[[1]]), "1 configuration left out of the ranking, with no cv_rpd value.",
+                 fixed = TRUE)
+    expect_identical(ev$log$ids[[1]], "cfg_001")
+    expect_identical(skipped[[1]]$log, ev$log)
 
   })
 
