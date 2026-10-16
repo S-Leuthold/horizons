@@ -1023,13 +1023,25 @@ unit_warning_records <- function(records) {
 #' @param type Character. Note types to keep: `"warning"`, `"error"`, or both.
 #' @param scope Character(1). `"cv"` for notes from cross-validation
 #'   resamples, `"test set"` for `last_fit()`'s.
+#' @param candidate `NULL`, or the candidate the notes are read for, from
+#'   [candidate_of()]: only the notes that belong to it are kept (#109).
 #' @return Records shaped like [new_warning_log()]'s, one per distinct note
-#'   text; empty when there are none or the notes cannot be read.
+#'   text; empty when there are none. Notes that cannot be read are one
+#'   pinned record saying so, with the cause, so a row never reads as clean
+#'   when its notes were lost.
 #' @keywords internal
 #' @noRd
-tune_note_records <- function(tune_results, type = "warning", scope = "cv") {
+tune_note_records <- function(tune_results, type = "warning", scope = "cv",
+                              candidate = NULL) {
 
-  notes <- tryCatch(tune::collect_notes(tune_results), error = function(e) NULL)
+  notes <- tryCatch(tune::collect_notes(tune_results), error = function(e) e)
+
+  if (inherits(notes, "error")) {
+
+    return(text_records(paste0("tune's notes could not be read: ", condition_summary(notes)),
+                        pinned = TRUE))
+
+  }
 
   if (!is.data.frame(notes) || !all(c("type", "note") %in% names(notes))) {
 
@@ -1038,6 +1050,8 @@ tune_note_records <- function(tune_results, type = "warning", scope = "cv") {
   }
 
   notes <- notes[notes$type %in% type, , drop = FALSE]
+
+  if (!is.null(candidate)) notes <- notes[notes_of(notes, candidate), , drop = FALSE]
 
   if (nrow(notes) == 0) return(new_warning_log())
 
@@ -1062,8 +1076,7 @@ tune_note_records <- function(tune_results, type = "warning", scope = "cv") {
 
   }
 
-  n_folds <- tryCatch(length(unique(resample_ids(tune_results))),
-                      error = function(e) NA_integer_)
+  n_folds <- length(unique(resample_ids(tune_results)))
 
   tibble::tibble(
     cause   = vapply(parts, `[[`, character(1), "cause"),
@@ -1074,6 +1087,96 @@ tune_note_records <- function(tune_results, type = "warning", scope = "cv") {
     n_folds = as.integer(n_folds),
     pinned  = FALSE
   )
+
+}
+
+#' The candidate a tune result's notes are read for
+#'
+#' @description
+#' tune keeps the notes of every candidate it tuned, so without a filter a
+#' configuration reports the warnings of hyperparameters it did not choose,
+#' such as an `mtry` above the predictor count on a candidate that lost
+#' (#109). A note belongs to the chosen candidate when:
+#'
+#' * its location has no model part (the recipe's prep, or its bake of the
+#'   assessment rows), since the recipe is the same for every candidate;
+#' * it is a grid note (`.iter` 0) at a model stage that holds the candidate.
+#'   tune numbers the model stages of `tune::schedule_grid()` in the order
+#'   of the grid it was given, which is why `evaluate_single_config()` draws
+#'   the grid itself; one stage holds every candidate that differs only in a
+#'   submodel parameter (glmnet's `penalty`, PLS's `num_comp`);
+#' * it is a Bayesian note of the candidate's own iteration;
+#' * it is tune's `internal` note (yardstick's, on a metric it could not
+#'   compute) of the candidate's iteration, on a fold where the candidate has
+#'   a metric missing.
+#'
+#' @param results The tune result the candidate was chosen from.
+#' @param best_params One-row tibble of the chosen hyperparameters, with
+#'   `.config`.
+#' @param grid The grid `tune_grid()` was given.
+#' @param workflow The workflow it tuned.
+#' @return List: `iter` (the candidate's Bayesian iteration, 0 for a grid
+#'   candidate), `model_stages` (the grid's model stages that hold it, or
+#'   `NULL` for every stage) and `na_folds` (the resamples where one of its
+#'   metrics is missing).
+#' @keywords internal
+#' @noRd
+candidate_of <- function(results, best_params, grid, workflow) {
+
+  config   <- best_params$.config[[1]]
+  per_fold <- tune::collect_metrics(results, summarize = FALSE)
+  mine     <- per_fold[per_fold$.config == config, , drop = FALSE]
+  iter     <- if (".iter" %in% names(mine)) as.integer(mine$.iter[1]) else 0L
+
+  ## The model stages of the grid that hold it, matched on the parameters
+  ## that are not submodels (a stage carries a submodel's largest value)
+  stages   <- NULL
+  schedule <- if (iter == 0L) tune::schedule_grid(grid, workflow)
+
+  if (!is.null(schedule) && nrow(schedule) == 1L) {
+
+    model_stage <- schedule$model_stage[[1]]
+    params      <- setdiff(names(model_stage),
+                           c("predict_stage", names(model_stage$predict_stage[[1]])))
+    holds       <- rep(TRUE, nrow(model_stage))
+
+    for (p in params) holds <- holds & model_stage[[p]] == best_params[[p]][[1]]
+
+    stages <- which(holds)
+
+  }
+
+  list(
+    iter         = iter,
+    model_stages = stages,
+    na_folds     = unique(resample_ids(mine[is.na(mine$.estimate), , drop = FALSE]))
+  )
+
+}
+
+#' Which notes belong to a candidate
+#'
+#' @param notes `tune::collect_notes()`'s table.
+#' @param candidate From [candidate_of()].
+#' @return Logical, one per note.
+#' @keywords internal
+#' @noRd
+notes_of <- function(notes, candidate) {
+
+  if (nrow(notes) == 0) return(logical(0))
+
+  iter  <- if (".iter" %in% names(notes)) as.integer(notes$.iter) else rep(0L, nrow(notes))
+  found <- regmatches(notes$location, regexec("model ([0-9]+)/[0-9]+", notes$location))
+  stage <- vapply(found, function(x) if (length(x) == 2L) as.integer(x[2]) else NA_integer_,
+                  integer(1))
+
+  own_iter <- iter == candidate$iter
+  internal <- notes$location %in% "internal"
+  in_stage <- is.null(candidate$model_stages) | stage %in% candidate$model_stages
+
+  ifelse(internal, own_iter & resample_ids(notes) %in% candidate$na_folds,
+         ifelse(is.na(stage), TRUE,
+                own_iter & (iter > 0L | in_stage)))
 
 }
 

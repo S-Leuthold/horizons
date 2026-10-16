@@ -120,8 +120,9 @@ evaluate_single_config <- function(config_row,
   ## tune catches the warnings raised inside its resampling (a recipe step
   ## warning during prep, say) and keeps them in .notes, where run_unit()
   ## never sees them.
-  collect_notes_from <- function(tune_results, scope = "cv") {
-    notes <- tune_note_records(tune_results, type = "warning", scope = scope)
+  collect_notes_from <- function(tune_results, scope = "cv", candidate = NULL) {
+    notes <- tune_note_records(tune_results, type = "warning", scope = scope,
+                               candidate = candidate)
     warning_log <<- dplyr::bind_rows(warning_log, notes)
   }
 
@@ -193,11 +194,17 @@ evaluate_single_config <- function(config_row,
 
     grid_results <- unit_step("tune_grid", {
 
+      ## Drawn here rather than by tune_grid(), with the same draw: tune
+      ## numbers a note's model stage in the order of this grid, which is how
+      ## a configuration's warnings are read for the candidate it chose
+      ## (#109; candidate_of()).
+      grid <- tune::.check_grid(grid = grid_size, workflow = wflow, pset = param_set)
+
       results <- suppressMessages(
         tune::tune_grid(
           object     = wflow,
           resamples  = cv_folds,
-          grid       = grid_size,
+          grid       = grid,
           metrics    = tune_metrics,
           param_info = param_set,
           control    = tune::control_grid(
@@ -346,10 +353,6 @@ evaluate_single_config <- function(config_row,
 
     }
 
-    ## Read once, from whichever result is kept: a tune_bayes() result carries
-    ## its initial grid's notes as .iter 0, so this covers both stages.
-    collect_notes_from(final_tune_results)
-
     ## -----------------------------------------------------------------------
     ## Step 7: Select best hyperparameters, and the CV panel there
     ## -----------------------------------------------------------------------
@@ -364,6 +367,13 @@ evaluate_single_config <- function(config_row,
 
     best_params <- unit_step("select_best",
                              select_complete(final_tune_results, "rmse", n_folds, debug))
+
+    ## The warnings tune kept for the chosen candidate (#109), read once from
+    ## whichever result is kept: a tune_bayes() result carries its initial
+    ## grid's notes as .iter 0, so this covers both stages.
+    collect_notes_from(final_tune_results, candidate = unit_step(
+      "select_best", candidate_of(final_tune_results, best_params, grid, wflow)
+    ))
 
     left_out <- unit_step("select_best", incomplete_note(final_tune_results, n_folds))
 

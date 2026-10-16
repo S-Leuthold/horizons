@@ -749,7 +749,85 @@ describe("tune_note_messages() and tune_failure_cause()", {
 
     expect_identical(tune_note_messages(quiet, type = "error"), character(0))
     expect_null(tune_failure_cause(quiet))
-    expect_identical(tune_note_messages(list(), type = "warning"), character(0))
+
+  })
+
+  it("says so, rather than reading as clean, when the notes cannot be read", {
+
+    lines <- tune_note_messages(list(), type = "warning")
+
+    expect_length(lines, 1L)
+    expect_match(lines, "^tune's notes could not be read: ")
+
+  })
+
+})
+
+describe("the notes of the chosen candidate (#109)", {
+
+  it("keeps the recipe's notes, the grid notes of the candidate's model stages, and its iteration's", {
+
+    notes <- tibble::tibble(
+      id       = c("Fold1", "Fold1", "Fold2", "Fold1", "Fold2", "Fold1", "Fold3"),
+      .iter    = c(0L, 0L, 0L, 2L, 1L, 2L, 2L),
+      location = c("preprocessor 1/1", "preprocessor 1/1, model 1/3", "preprocessor 1/1, model 2/3",
+                   "preprocessor 1/1, model 1/1", "preprocessor 1/1, model 1/1",
+                   "internal", "internal"),
+      type     = "warning",
+      note     = paste("note", 1:7)
+    )
+
+    ## A grid candidate in model stage 2, with a metric missing on Fold1
+    grid_candidate <- list(iter = 0L, model_stages = 2L, na_folds = "Fold1")
+    expect_identical(notes_of(notes, grid_candidate),
+                     c(TRUE, FALSE, TRUE, FALSE, FALSE, FALSE, FALSE))
+
+    ## The candidate of the second Bayesian iteration, missing a metric on Fold3
+    bayes_candidate <- list(iter = 2L, model_stages = NULL, na_folds = "Fold3")
+    expect_identical(notes_of(notes, bayes_candidate),
+                     c(TRUE, FALSE, FALSE, TRUE, FALSE, FALSE, TRUE))
+
+  })
+
+  it("maps a grid note to its candidate through the grid's own order, which tune numbers its model stages by", {
+
+    ## The canary for tune's numbering: the grid's input order differs from
+    ## .config's (mtry = 50, min_n = 5 is model 1/4 and pre0_mod4_post0), and
+    ## only the mtry = 50 candidates warn, ranger capping mtry at the six
+    ## predictors. If tune numbered stages in .config order, the warning
+    ## would land on mtry = 2.
+    set.seed(1)
+    d <- as.data.frame(matrix(stats::rnorm(60 * 6), 60, 6,
+                              dimnames = list(NULL, paste0("x", 1:6))))
+    d$y   <- d$x1 + stats::rnorm(60, sd = 0.5)
+    folds <- rsample::vfold_cv(d, v = 3)
+
+    wf <- workflows::workflow() |>
+      workflows::add_recipe(recipes::recipe(y ~ ., data = d)) |>
+      workflows::add_model(parsnip::rand_forest(mtry = tune::tune(), min_n = tune::tune(), trees = 20) |>
+                             parsnip::set_engine("ranger") |>
+                             parsnip::set_mode("regression"))
+
+    grid <- tibble::tibble(mtry = c(50L, 2L, 50L, 3L), min_n = c(5L, 5L, 2L, 2L))
+    res  <- suppressWarnings(suppressMessages(
+      tune::tune_grid(wf, folds, grid = grid, control = tune::control_grid(verbose = FALSE))
+    ))
+
+    cm     <- tune::collect_metrics(res)
+    params <- function(mtry, min_n) {
+      unique(cm[cm$mtry == mtry & cm$min_n == min_n, c("mtry", "min_n", ".config")])
+    }
+    warned <- function(mtry, min_n) {
+      cand  <- candidate_of(res, params(mtry, min_n), grid, wf)
+      lines <- render_warning_log(tune_note_records(res, candidate = cand))
+      any(grepl("columns were requested", lines, fixed = TRUE))
+    }
+
+    expect_identical(params(50L, 5L)$.config, "pre0_mod4_post0")
+    expect_true(warned(50L, 5L))
+    expect_true(warned(50L, 2L))
+    expect_false(warned(2L, 5L))
+    expect_false(warned(3L, 2L))
 
   })
 

@@ -996,6 +996,60 @@ describe("the mtry upper bound", {
 
 
 ## =========================================================================
+## A configuration's warnings are its chosen candidate's (#109)
+## =========================================================================
+
+describe("evaluate_single_config() - the warnings of the chosen candidate (#109)", {
+
+  it("leaves out the warnings of candidates it did not choose, and keeps the recipe's", {
+
+    ## The grid is fixed, its order unlike .config's, with mtry = 50 above
+    ## the predictors: ranger warns for those candidates only. The choice is
+    ## fixed at mtry = 2, and the recipe warns at every prep.
+    setup <- make_eval_setup()
+    fixed <- tibble::tibble(mtry = c(50L, 2L, 50L, 3L), min_n = c(5L, 5L, 2L, 2L))
+
+    ## The size evaluate_single_config() asks for becomes the fixed grid;
+    ## tune_grid()'s own check of that grid passes through
+    real_check_grid <- tune::.check_grid
+    local_mocked_bindings(.check_grid = function(grid, ...) {
+      real_check_grid(if (is.numeric(grid)) fixed else grid, ...)
+    }, .package = "tune")
+
+    warn_recipe <- function(config_row, train_data, role_map, ...) {
+      recipes::recipe(SOC ~ ., data = train_data) |>
+        recipes::update_role("sample_id", new_role = "id") |>
+        recipes::step_BoxCox(recipes::all_predictors())
+    }
+
+    local_mocked_bindings(
+      build_recipe    = warn_recipe,
+      select_complete = function(results, ...) {
+        cm <- tune::collect_metrics(results)
+        utils::head(cm[cm$mtry == 2L, c("mtry", "min_n", ".config")], 1)
+      }
+    )
+
+    result <- evaluate_single_config(
+      config_row    = make_eval_config(),
+      split         = setup$split,
+      cv_folds      = setup$folds,
+      role_map      = setup$role_map,
+      bayesian_iter = 0,
+      seed          = 42L
+    )
+
+    expect_identical(result$status, "success")
+    expect_identical(result$best_params[[1]]$mtry, 2L)
+    expect_false(any(grepl("columns were requested", result$warnings[[1]], fixed = TRUE)))
+    expect_true(any(grepl("Non-positive values in selected variable", result$warnings[[1]], fixed = TRUE)))
+
+  })
+
+})
+
+
+## =========================================================================
 ## A PLS config's component range (#216)
 ## =========================================================================
 
