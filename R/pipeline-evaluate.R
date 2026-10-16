@@ -838,8 +838,14 @@ evaluate <- function(x,
 
       if (breaker$tripped) {
 
+        ## A stop saves the configurations still to run; with none left it
+        ## saves nothing, so the held failures are ordinary ones and the
+        ## call ends as any other whose configurations all failed
         not_run <- setdiff(configs$config_id[-seq_len(i)], completed_ids)
-        abort_breaker_trip(breaker, results_list, length(not_run))
+
+        if (length(not_run) > 0) abort_breaker_trip(breaker, results_list, length(not_run))
+
+        released <- breaker_release(breaker)
 
       }
 
@@ -1514,7 +1520,9 @@ drop_unit_records <- function(rows) {
 #' the rows loaded from checkpoints. A success, a pruned configuration, or a
 #' failure unlike those before it disarms it for the rest of the call. While
 #' armed it holds back the rows of the identical failures so far, and it
-#' trips once there are `limit` of them across at least two models:
+#' trips once there are `limit` of them across at least two models, while
+#' configurations remain to be run (with none left, `evaluate()` releases the
+#' rows instead):
 #' `configure()`'s grid runs a model's configurations together, so a failure
 #' local to one model fills the run first and never trips it.
 #'

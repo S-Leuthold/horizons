@@ -2588,6 +2588,24 @@ describe("evaluate() - the circuit breaker", {
 
   })
 
+  it("does not stop when nothing is left to run: the last identical failures end in the all-failed abort, checkpointed", {
+
+    template <- ev60()$evaluation$results[1, ]
+    ran      <- new.env()
+    local_mocked_bindings(evaluate_single_config = failing_runner(template, ran))
+
+    dir <- withr::local_tempdir()
+    err <- expect_error(suppressWarnings(evaluate(make_eval_object(n = 60, n_configs = 3), seed = 42L,
+                                                  control = control_horizons(output_dir = dir))),
+                        class = "horizons_error_all_configs_failed")
+
+    expect_false(inherits(err, "horizons_error_systemic"))
+    expect_length(ran$ids, 3L)
+    expect_identical(err$results$config_id, c("cfg_001", "cfg_002", "cfg_003"))
+    expect_length(list.files(file.path(dir, "checkpoints")), 3L)
+
+  })
+
   it("waits for its limit", {
 
     template <- ev60()$evaluation$results[1, ]
