@@ -270,11 +270,23 @@ evaluate_single_config <- function(config_row,
     ## -----------------------------------------------------------------------
     ## Step 6: Bayesian optimization
     ## -----------------------------------------------------------------------
-    ## A search that fails, or returns without an iteration past the grid,
-    ## keeps the grid's choice, and says so with a substitution warning that
-    ## the row shows and evaluate() puts on the log (#209). That fallback is
-    ## containment, so the kinds no unit contains still propagate, and under
-    ## debug nothing is fallen back from.
+    ## A search that fails keeps what it finished: the iterations that ran,
+    ## or the grid's choice when none did, and says so with a substitution
+    ## warning that the row shows and evaluate() puts on the log (#209). That
+    ## fallback is containment, so the kinds no unit contains still
+    ## propagate, and under debug nothing is fallen back from.
+    ##
+    ## tune recovers from an error inside its search loop itself: an
+    ## on.exit() returns the iterations finished so far, and that return
+    ## cancels the unwind of any handler outside it. So the first error to
+    ## leave tune's own catches is recorded as it is raised, with its trace,
+    ## and what to do about it is decided once tune_bayes() has returned. A
+    ## proposed candidate that fails in every fold leaves no note and raises
+    ## nothing: tune drops it and says only "All models failed for: ..." in
+    ## its iteration log, which is read under debug, so that debug stops
+    ## there too. A worker that dies during an iteration on the resamples
+    ## axis is caught by tune's try() around each fit and is never raised
+    ## here; it reads as a candidate that failed.
 
     final_tune_results <- grid_results
 
@@ -289,61 +301,91 @@ evaluate_single_config <- function(config_row,
 
       unit_step("tune_bayes", {
 
-        search <- function() {
+        stopped    <- NULL
+        all_failed <- NULL
 
-          results <- suppressMessages(
-            tune::tune_bayes(
-              object     = wflow,
-              resamples  = cv_folds,
-              initial    = grid_results,
-              iter       = bayesian_iter,
-              param_info = param_set,
-              metrics    = tune_metrics,
-              control    = tune::control_bayes(
-                save_pred     = FALSE,
-                save_workflow = FALSE,
-                verbose       = FALSE,
-                no_improve    = BAYES_NO_IMPROVE_LIMIT,
-                allow_par     = allow_par,
-                parallel_over = parallel_over
-              )
-            )
-          )
+        read_log <- function(m) {
+          text <- cli::ansi_strip(conditionMessage(m))
+          if (is.null(all_failed) && grepl("All models failed for:", text, fixed = TRUE)) {
+            all_failed <<- trimws(sub("^.*?(All models failed for:)", "\\1", text, perl = TRUE))
+          }
+        }
 
-          check_tune_result(results, failure = NULL, debug = debug)
+        bayes_results <- tryCatch(
+          withCallingHandlers(
+            suppressMessages(withCallingHandlers(
+              tune::tune_bayes(
+                object     = wflow,
+                resamples  = cv_folds,
+                initial    = grid_results,
+                iter       = bayesian_iter,
+                param_info = param_set,
+                metrics    = tune_metrics,
+                control    = tune::control_bayes(
+                  save_pred     = FALSE,
+                  save_workflow = FALSE,
+                  verbose       = FALSE,
+                  verbose_iter  = debug,
+                  no_improve    = BAYES_NO_IMPROVE_LIMIT,
+                  allow_par     = allow_par,
+                  parallel_over = parallel_over
+                )
+              ),
+              message = read_log
+            )),
+            error = function(e) if (is.null(stopped)) stopped <<- rlang::cnd_entrace(e)
+          ),
+          ## An error tune did not recover from (before its loop starts):
+          ## recorded above, nothing to keep
+          error = function(e) NULL
+        )
 
-          results
+        if (!is.null(stopped) && (debug || rlang::cnd_inherits(stopped, NEVER_CONTAINED))) {
+
+          stop(stopped)
 
         }
 
-        search_cause   <- NULL
-        bayes_results  <- if (debug) search() else rlang::try_fetch(
-          search(),
-          error = function(e) {
-            if (rlang::cnd_inherits(e, NEVER_CONTAINED)) stop(e)
-            search_cause <<- condition_summary(e)
-            NULL
-          }
-        )
+        if (debug && !is.null(all_failed)) {
 
-        if (!is.null(search_cause)) {
+          abort_horizons(
+            "a candidate the Bayesian search proposed failed in every fold, and tune keeps no record of why: {all_failed}",
+            kind = "run"
+          )
 
-          warn_in_unit("substitution",
-                       "The Bayesian search failed, so the hyperparameters were chosen from the grid alone: {search_cause}")
+        }
 
-        } else if (!bayes_iterations_ran(bayes_results)) {
+        if (!is.null(bayes_results)) check_tune_result(bayes_results, failure = NULL, debug = debug)
 
-          ## The search returned without an iteration past the grid: its loop
-          ## errored, or every candidate failed in every fold (tune drops those
-          ## without a note).
-          warn_in_unit("substitution",
-                       "The Bayesian search produced no results, so the hyperparameters were chosen from the grid alone.")
+        cause  <- if (!is.null(stopped)) condition_summary(stopped)
+        n_iter <- if (!is.null(bayes_results) && bayes_iterations_ran(bayes_results)) {
+          max(bayes_results$.iter, na.rm = TRUE)
+        } else 0L
 
-        } else {
+        if (n_iter > 0) {
 
           ## Candidates that failed in some folds leave their reasons in .notes,
           ## which collect_notes_from() reads below.
           final_tune_results <- bayes_results
+
+          if (!is.null(cause)) {
+
+            warn_in_unit("substitution",
+                         "The Bayesian search stopped early, after {n_iter} iteration{?s}, so the hyperparameters were chosen from those and the grid: {cause}")
+
+          }
+
+        } else if (!is.null(cause)) {
+
+          warn_in_unit("substitution",
+                       "The Bayesian search failed, so the hyperparameters were chosen from the grid alone: {cause}")
+
+        } else {
+
+          ## The search returned without an iteration past the grid: every
+          ## candidate failed in every fold, which tune drops without a note.
+          warn_in_unit("substitution",
+                       "The Bayesian search produced no results, so the hyperparameters were chosen from the grid alone.")
 
         }
 

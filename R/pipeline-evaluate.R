@@ -151,11 +151,15 @@
 #' as its `results` (`control_horizons(breaker = )`, 3 by default, `FALSE` to
 #' run every configuration; the configs axis has no breaker), and their
 #' failures are not checkpointed. A parallel worker that dies stops the run
-#' the same way. When some configurations failed and
+#' the same way, except during a Bayesian iteration on the resamples axis:
+#' tune catches each fit's failure there, so the iteration's candidate reads
+#' as one that failed. When some configurations failed and
 #' the rest are returned, one `horizons_warning_partial_failure` names them
-#' with each distinct cause. A configuration whose Bayesian search failed, or
-#' added nothing to the grid, keeps the grid's choice, says so in its
-#' `warnings`, and is named in one `horizons_warning_substitution`. With
+#' with each distinct cause. A configuration whose Bayesian search stopped
+#' early keeps the iterations it finished; one whose search failed before any
+#' iteration, or added nothing to the grid, keeps the grid's choice. Either
+#' says so in its `warnings` and is named in one
+#' `horizons_warning_substitution`. With
 #' `control_horizons(debug = TRUE)` nothing is contained: the first failure,
 #' inside tuning included, stops the call with its backtrace, and the
 #' Bayesian search is not fallen back from.

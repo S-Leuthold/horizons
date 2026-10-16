@@ -754,6 +754,117 @@ describe("evaluate_single_config() - a Bayesian search that fails (#209)", {
 
   })
 
+  ## tune recovers from an error in its search loop by returning the
+  ## iterations finished so far; here the second Gaussian-process
+  ## prediction fails, so one iteration has finished
+  gp_fails_at <- function(n, raise = function() stop("the GP broke")) {
+    real_pred_gp <- tune:::pred_gp
+    calls        <- 0L
+    function(...) {
+      calls <<- calls + 1L
+      if (calls == n) raise()
+      real_pred_gp(...)
+    }
+  }
+
+  it("keeps the iterations a search finished before it stopped, and says so with the cause", {
+
+    local_mocked_bindings(pred_gp = gp_fails_at(2L), .package = "tune")
+
+    real_select <- select_complete
+    chosen_from <- NULL
+    local_mocked_bindings(select_complete = function(results, ...) {
+      chosen_from <<- results
+      real_select(results, ...)
+    })
+
+    result <- run(grid_size = 2)
+
+    expect_equal(result$status, "success")
+    expect_identical(max(chosen_from$.iter), 1L)
+    expect_true(any(grepl(
+      "The Bayesian search stopped early, after 1 iteration, so the hyperparameters were chosen from those and the grid: the GP broke",
+      result$warnings[[1]], fixed = TRUE
+    )))
+
+    records <- attr(result, "unit_records")
+    expect_identical(records$class[startsWith(records$cause, "The Bayesian search stopped early")],
+                     "horizons_warning_substitution")
+
+  })
+
+  it("stops at an error in the search loop under debug, with that error", {
+
+    local_mocked_bindings(pred_gp = gp_fails_at(2L), .package = "tune")
+
+    expect_error(evaluate_single_config(
+      config_row    = make_eval_config(),
+      split         = setup$split,
+      cv_folds      = setup$folds,
+      role_map      = setup$role_map,
+      grid_size     = 2,
+      bayesian_iter = 2,
+      seed          = 42L,
+      debug         = TRUE
+    ), "the GP broke", fixed = TRUE)
+
+  })
+
+  it("lets a bug or a worker's death in the search loop through, which tune would have recovered from", {
+
+    local_mocked_bindings(pred_gp = gp_fails_at(2L, function() {
+      abort_horizons("Broken in the search loop.", kind = "internal")
+    }), .package = "tune")
+    expect_error(run(grid_size = 2), "Broken in the search loop.", fixed = TRUE,
+                 class = "horizons_error_internal")
+
+    local_mocked_bindings(pred_gp = gp_fails_at(2L, function() {
+      stop(structure(class = c("FutureInterruptError", "FutureError", "error", "condition"),
+                     list(message = "A future worker died.", call = NULL)))
+    }), .package = "tune")
+    expect_error(run(grid_size = 2), "A future worker died.", fixed = TRUE, class = "FutureError")
+
+  })
+
+  it("stops under debug when a candidate the search proposed fails in every fold", {
+
+    ## The engine fails on every Bayesian candidate and on none of the grid's:
+    ## tune drops such a candidate without a note, and the search returns
+    in_search   <- FALSE
+    real_glmnet <- glmnet::glmnet
+    real_bayes  <- tune::tune_bayes
+    local_mocked_bindings(glmnet = function(...) {
+      if (in_search) stop("the engine broke on a Bayesian candidate")
+      real_glmnet(...)
+    }, .package = "glmnet")
+    local_mocked_bindings(tune_bayes = function(...) {
+      in_search <<- TRUE
+      on.exit(in_search <<- FALSE)
+      real_bayes(...)
+    }, .package = "tune")
+
+    search <- function(debug) {
+      suppressWarnings(evaluate_single_config(
+        config_row    = make_eval_config(model = "elastic_net"),
+        split         = setup$split,
+        cv_folds      = setup$folds,
+        role_map      = setup$role_map,
+        grid_size     = 3,
+        bayesian_iter = 2,
+        seed          = 42L,
+        debug         = debug
+      ))
+    }
+
+    contained <- search(debug = FALSE)
+    expect_equal(contained$status, "success")
+    expect_true(any(grepl("The Bayesian search produced no results", contained$warnings[[1]], fixed = TRUE)))
+
+    expect_error(search(debug = TRUE), "failed in every fold, and tune keeps no record of why: All models failed for:",
+                 fixed = TRUE, class = "horizons_error_run")
+
+  })
+
   it("falls back only from a run failure: a bug inside the search still stops the call", {
 
     local_mocked_bindings(tune_bayes = function(...) {
