@@ -846,6 +846,20 @@ describe("the notes of the chosen candidate (#109)", {
     expect_identical(candidate_of(res, params(2L, 5L), grid, wf)$unmapped,
                      "tune's grid schedule has no predict_stage column")
 
+    stage <- tibble::tibble(mtry = 2L, trees = 20L,
+                            predict_stage = list(tibble::tibble(post_stage = list(tibble::tibble()))))
+    local_mocked_bindings(schedule_grid = function(...) tibble::tibble(model_stage = list(stage)),
+                          .package = "tune")
+    expect_identical(candidate_of(res, params(2L, 5L), grid, wf)$unmapped,
+                     "tune's grid schedule has parameters the candidate lacks: trees")
+
+    ## A tuned recipe makes several preprocessor stages: every model note kept
+    local_mocked_bindings(schedule_grid = function(...) tibble::tibble(model_stage = list(stage, stage)),
+                          .package = "tune")
+    cand <- candidate_of(res, params(2L, 5L), grid, wf)
+    expect_null(cand$model_stages)
+    expect_null(cand$unmapped)
+
   })
 
 })
