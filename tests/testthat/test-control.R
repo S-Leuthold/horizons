@@ -71,9 +71,11 @@ describe("control_horizons()", {
 
   })
 
-  it("refuses parallelize_over = 'both' with the nesting hint", {
+  it("refuses parallelize_over = 'both' with the nesting hint, and anything but one axis", {
 
     expect_error(control_horizons(parallelize_over = "both"), "Nested parallelism",
+                 class = "horizons_error_input")
+    expect_error(control_horizons(parallelize_over = c("configs", "resamples")), "parallelize_over",
                  class = "horizons_error_input")
 
   })
@@ -96,7 +98,12 @@ describe("control_horizons()", {
 
     expect_false(control_horizons(breaker = FALSE)$breaker)
     expect_identical(control_horizons(breaker = 5L)$breaker, 5L)
-    expect_error(control_horizons(breaker = TRUE), "whole number of at least 2",
+
+    ## Each refusal names what it was given
+    expect_error(control_horizons(breaker = TRUE), "whole number of at least 2, not TRUE\\.",
+                 class = "horizons_error_input")
+    expect_error(control_horizons(breaker = 2.5), "not 2\\.5\\.", class = "horizons_error_input")
+    expect_error(control_horizons(breaker = c(3, 4)), "not a double\\s+vector",
                  class = "horizons_error_input")
 
   })
@@ -104,15 +111,27 @@ describe("control_horizons()", {
   it("words a refusal as the user's call, naming the field", {
 
     expect_snapshot(control_horizons(min_calib_rows = 8L), error = TRUE)
+    expect_snapshot(control_horizons(TRUE, alow_par = TRUE), error = TRUE)
+    expect_snapshot(control_horizons(parallelize_over = "both"), error = TRUE)
     expect_snapshot(evaluate(make_eval_object(), control = control_horizons(chunk_size = 10L)),
                     error = TRUE)
+    expect_snapshot(evaluate(make_eval_object(), control = list(allow_par = TRUE)), error = TRUE)
+
+    ctrl <- control_horizons()
+    ctrl$alow_par <- TRUE
+    expect_snapshot(evaluate(make_eval_object(), control = ctrl), error = TRUE)
 
   })
 
-  it("prints the fields that are set", {
+  it("prints the fields that are set, and returns the control invisibly", {
 
     expect_output(print(control_horizons()), "every field at its default")
     expect_output(print(control_horizons(allow_par = TRUE)), "allow_par: TRUE")
+    expect_snapshot(print(control_horizons(allow_par = TRUE, parallelize_over = "resamples", chunk_size = 10L)))
+
+    ctrl <- control_horizons(allow_par = TRUE)
+    expect_invisible(out <- withr::with_output_sink(nullfile(), print(ctrl)))
+    expect_identical(out, ctrl)
 
   })
 
