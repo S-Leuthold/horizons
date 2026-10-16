@@ -272,7 +272,7 @@ fit <- function(x,
 
   if (cold_start) {
 
-    cold         <- cold_start_evaluation(x, metric, seed)
+    cold         <- cold_start_evaluation(x, metric, seed, collector)
     x$evaluation <- cold$evaluation
 
   }
@@ -1183,6 +1183,8 @@ fit <- function(x,
 #'   keeps the `rank_metric` a cold-started fit recorded, or `"rpd"`.
 #'   Recorded as `rank_metric`; with one configuration it ranks nothing.
 #' @param seed The `seed` passed to `fit()`.
+#' @param collector `fit()`'s collector, from `log_open()`, which records a
+#'   response trim that could not run.
 #' @param call The call the conditions are attributed to. Default: the
 #'   caller, `fit()`.
 #' @return List with `evaluation` (the record), `stratified` (`FALSE` when
@@ -1195,7 +1197,7 @@ fit <- function(x,
 #'   another outcome ([response_trim_request()]).
 #' @keywords internal
 #' @noRd
-cold_start_evaluation <- function(x, metric, seed, call = rlang::caller_env()) {
+cold_start_evaluation <- function(x, metric, seed, collector, call = rlang::caller_env()) {
 
   configs   <- x$config$configs
   n_configs <- if (is.data.frame(configs)) nrow(configs) else 0L
@@ -1253,7 +1255,7 @@ cold_start_evaluation <- function(x, metric, seed, call = rlang::caller_env()) {
   drawn <- draw_eval_split(modelled$data, outcome_col, seed, call = call)
 
   trimmed <- trim_training_responses(drawn$split, outcome_col, trim_request,
-                                     id_col = id_column(role_map))
+                                     id_col = id_column(role_map), collector = collector)
   split   <- trimmed$split
 
   ## The shape of an evaluate() results row (create_failed_result()'s

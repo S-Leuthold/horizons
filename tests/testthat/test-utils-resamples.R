@@ -418,6 +418,7 @@ describe("draw_stratified()", {
     expect_s3_class(drawn$draw, "vfold_cv")
     expect_true(drawn$stratified)
     expect_false(drawn$strata_failed)
+    expect_identical(drawn$strata_error, NA_character_)
 
   })
 
@@ -447,6 +448,7 @@ describe("draw_stratified()", {
     expect_identical(drawn$draw, "the unstratified draw")
     expect_false(drawn$stratified)
     expect_true(drawn$strata_failed)
+    expect_identical(drawn$strata_error, "stratification refused")
 
   })
 

@@ -56,8 +56,8 @@
 #'   earlier scoring schema, or recording less of the training data and
 #'   settings than this run does, was written by an earlier version: it is
 #'   dropped and its config re-evaluated. Rows for configs no longer in the
-#'   grid are dropped; a file that cannot be used warns and its config is
-#'   re-evaluated.
+#'   grid are dropped; a file that cannot be used is a note in the object's
+#'   `log` and a line in the progress tree, and its config is re-evaluated.
 #'
 #' @section Parallelism:
 #' With `control_horizons(allow_par = TRUE)`, `evaluate()` dispatches onto
@@ -371,7 +371,7 @@ evaluate <- function(x,
   drawn <- draw_eval_split(analysis, outcome_col, seed)
 
   trimmed <- trim_training_responses(drawn$split, outcome_col, trim_request,
-                                     id_col = id_column(role_map))
+                                     id_col = id_column(role_map), collector = collector)
   split   <- trimmed$split
 
   train_data <- rsample::training(split)
@@ -415,6 +415,11 @@ evaluate <- function(x,
     unstratified = function() rsample::vfold_cv(train_data, v = cv_folds)
   )
   cv_fold_obj <- cv_drawn$draw
+
+  ## A stratified draw that failed fell back to an unstratified one: what
+  ## ran is not what was asked, so each draw that did says so once.
+  log_strata_fallback(collector, drawn, "train/test split")
+  log_strata_fallback(collector, cv_drawn, "cross-validation folds")
 
   ## A small assessment fold is weak, not wrong: it runs, with one warning.
   ## Metrics undefined on a fold that small are NA.
@@ -491,7 +496,8 @@ evaluate <- function(x,
       output_dir = output_dir,
       config_ids = configs$config_id,
       data_fp    = data_fp,
-      settings   = settings
+      settings   = settings,
+      collector  = collector
     )
 
     ## The count of loaded results is the Configs line's "from checkpoint",
@@ -1219,23 +1225,26 @@ gate_checkpoint_rows <- function(candidates, data_fp, settings, config_ids = NUL
 #' Load the checkpoint rows evaluate() may resume
 #'
 #' Reads the store, gates every row, and reports: aborts on the first row
-#' written on other training data or under other settings, returns the drops
-#' as notes for `evaluate()` to print inside its tree (they used to print
-#' here, above the tree's header; #91), and warns naming any file it could
-#' not read.
+#' written on other training data or under other settings, and returns the
+#' drops, and the files it could not use, as notes for `evaluate()` to print
+#' inside its tree (they used to print here, above the tree's header; #91).
+#' A file it could not use costs only time, since its configuration is
+#' evaluated again, so it is a note in the log, not a warning.
 #'
 #' @param output_dir The run's output directory.
 #' @param config_ids The configs in this run's grid.
 #' @param data_fp,settings This run's fingerprint and settings.
 #' @param call The frame to report a refusal from; the default is the
 #'   caller's, so the error reads as `evaluate()`'s.
+#' @param collector The verb's collector, from `log_open()`, which records
+#'   the files it could not use.
 #' @return List with `rows` (one-row results named by config id) and `notes`
-#'   (character, one tree line per kind of dropped row; empty when none were
-#'   dropped).
+#'   (character, one tree line per kind of dropped row and per file it could
+#'   not use; empty when there were none).
 #' @keywords internal
 #' @noRd
 load_eval_checkpoints <- function(output_dir, config_ids, data_fp, settings,
-                                  call = rlang::caller_env()) {
+                                  collector, call = rlang::caller_env()) {
 
   store <- read_checkpoint_store(output_dir)
   gated <- gate_checkpoint_rows(store$rows, data_fp, settings, config_ids)
@@ -1298,7 +1307,10 @@ load_eval_checkpoints <- function(output_dir, config_ids, data_fp, settings,
 
   if (length(store$unreadable) > 0) {
 
-    warn_unreadable_checkpoints(store$unreadable, output_dir)
+    log_unreadable_checkpoints(collector, store$unreadable, output_dir)
+
+    notes <- c(notes, paste0("Could not use ", names(store$unreadable), ": ",
+                             unname(store$unreadable), " (will be re-evaluated)"))
 
   }
 
@@ -1329,27 +1341,27 @@ write_checkpoint_row <- function(row, checkpoint_dir) {
 
 }
 
-#' Warn about files in the store that could not be used
+#' Record the files in the store that could not be used
 #'
+#' @param collector The verb's collector, from `log_open()`.
 #' @param unreadable Reasons, named by file relative to `output_dir`: a read
 #'   error, not a result row, or a row under a name other than its config's.
 #' @param output_dir The run's output directory.
-#' @return `NULL`, invisibly; warns with class `horizons_checkpoint_warning`.
+#' @return `NULL`, invisibly; adds one note to the collector, its ids the
+#'   files.
 #' @keywords internal
 #' @noRd
-warn_unreadable_checkpoints <- function(unreadable, output_dir) {
+log_unreadable_checkpoints <- function(collector, unreadable, output_dir) {
 
   n_files <- length(unreadable)
   details <- paste0(names(unreadable), ": ", unname(unreadable))
 
   ## Each detail is substituted, not inlined, so braces in upstream error
   ## text are never read as cli markup.
-  cli::cli_warn(c(
-    "!" = "{n_files} file{?s} in {.path {output_dir}} could not be used as {cli::qty(n_files)}{?a checkpoint/checkpoints}.",
-    stats::setNames(sprintf("{details[%d]}", seq_len(n_files)),
-                    rep("x", n_files)),
-    "i" = "A config with no usable checkpoint of its own is re-evaluated. Delete or replace {cli::qty(n_files)}{?the file/these files} once the run has finished."
-  ), class = "horizons_checkpoint_warning")
+  log_note(collector, c(
+    "{n_files} file{?s} in {.path {output_dir}} could not be used as {cli::qty(n_files)}{?a checkpoint/checkpoints}, so {cli::qty(n_files)}{?its configuration was/their configurations were} evaluated again.",
+    stats::setNames(sprintf("{details[%d]}", seq_len(n_files)), rep("x", n_files))
+  ), ids = names(unreadable))
 
   invisible(NULL)
 
@@ -2128,9 +2140,10 @@ check_rank_metric_arg <- function(metric, call = rlang::caller_env()) {
 #' @return List with `split` (the `rsplit`), `n_dropped` (integer, the rows
 #'   whose outcome is `NA`), `stratified` (`FALSE` when the split is
 #'   unstratified, because rsample dropped the strata or the stratified draw
-#'   failed; see [draw_stratified()]) and `strata_failed` (`TRUE` when the
-#'   stratified draw failed and was retried without strata). Aborts as
-#'   [modelling_rows()] does.
+#'   failed; see [draw_stratified()]), `strata_failed` (`TRUE` when the
+#'   stratified draw failed and was retried without strata) and
+#'   `strata_error` (why it failed, or `NA`). Aborts as [modelling_rows()]
+#'   does.
 #' @keywords internal
 #' @noRd
 draw_eval_split <- function(analysis, outcome_col, seed, call = rlang::caller_env()) {
@@ -2150,7 +2163,8 @@ draw_eval_split <- function(analysis, outcome_col, seed, call = rlang::caller_en
   list(split         = drawn$draw,
        n_dropped     = modelled$n_dropped,
        stratified    = drawn$stratified,
-       strata_failed = drawn$strata_failed)
+       strata_failed = drawn$strata_failed,
+       strata_error  = drawn$strata_error)
 
 }
 
@@ -2227,14 +2241,17 @@ response_trim_request <- function(x) {
 #' rows in their original order.
 #'
 #' When no fences can be drawn (fewer than four training values, or a zero
-#' IQR), nothing is trimmed and a warning with class
-#' `horizons_response_trim_warning` says so; the record carries the reason.
+#' IQR), nothing is trimmed, the record carries the reason, and the verb
+#' warns once at its end (`horizons_warning_skipped`): the trim asked for
+#' did not run.
 #'
 #' @param split The `rsplit` from [draw_eval_split()].
 #' @param outcome_col Character. The outcome column.
 #' @param trim The request from [response_trim_request()], or `NULL` for none.
 #' @param id_col Character. The identifier column the trimmed rows are
 #'   recorded by.
+#' @param collector The verb's collector, from `log_open()`, which records
+#'   the skipped trim.
 #' @return List with `split` (the trimmed split; `split` itself when `trim`
 #'   is `NULL`) and `record`: `NULL` when `trim` is, otherwise a list of
 #'   `outcome`, `method`, `threshold`, `fences_from` (`"training"`), `lower`
@@ -2243,7 +2260,7 @@ response_trim_request <- function(x) {
 #'   `skipped` (`NA`, `"too_few"` or `"zero_iqr"`).
 #' @keywords internal
 #' @noRd
-trim_training_responses <- function(split, outcome_col, trim, id_col) {
+trim_training_responses <- function(split, outcome_col, trim, id_col, collector) {
 
   if (is.null(trim)) return(list(split = split, record = NULL))
 
@@ -2279,10 +2296,10 @@ trim_training_responses <- function(split, outcome_col, trim, id_col) {
       "its outcome has a zero interquartile range"
     }
 
-    cli::cli_warn(c(
-      "!" = "Response trimming was requested, but no fences can be drawn on the training partition: {why}.",
+    log_warning(collector, "skipped", c(
+      "Response trimming was requested, but no fences can be drawn on the training partition: {why}.",
       "i" = "No training rows were trimmed."
-    ), class = "horizons_response_trim_warning")
+    ))
 
   }
 

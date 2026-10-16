@@ -193,7 +193,7 @@ describe("evaluate() - gate checks", {
     expect_length(quality, 1L)
     expect_match(conditionMessage(quality[[1]]), "The smallest cross-validation fold has 1 row to assess",
                  fixed = TRUE)
-    expect_identical(got$value$log$topic, "quality")
+    expect_identical(sum(got$value$log$topic == "quality"), 1L)
     expect_identical(got$value$evaluation$n_train, 4L)
 
     ## Folds of ten or more rows are not small
@@ -962,14 +962,26 @@ describe("evaluate() - response outliers are trimmed from the training partition
 
   })
 
-  it("warns and trims nothing when the training partition has no fences", {
+  it("records a skipped trim and trims nothing when the training partition has no fences", {
+
+    ## The trim runs inside the verb, which records it and warns once at its
+    ## end; here the verb's collector stands in
+    trim_with <- function(split) {
+      collector <- log_open("evaluate")
+      out       <- trim_training_responses(split, "SOC", request, "sample_id", collector)
+      log       <- log_close(collector)
+      caught    <- collect_warnings(signal_log(collector))
+      list(value = out, log = log, warnings = caught$warnings)
+    }
 
     flat <- plain
     flat$data$SOC[flat$in_id] <- 2
 
-    caught <- collect_warnings(trim_training_responses(flat, "SOC", request, "sample_id"))
+    caught <- trim_with(flat)
 
-    expect_true(has_warning_class(caught$warnings, "horizons_response_trim_warning"))
+    expect_identical(caught$log$topic, "skipped")
+    expect_length(caught$warnings, 1L)
+    expect_s3_class(caught$warnings[[1]], "horizons_warning_skipped")
     expect_identical(caught$value$record$skipped, "zero_iqr")
     expect_length(caught$value$record$trimmed_ids, 0)
     expect_identical(caught$value$split, flat)
@@ -979,15 +991,19 @@ describe("evaluate() - response outliers are trimmed from the training partition
 
     expect_match(reason(caught), "be drawn on the training partition: its outcome has a zero interquartile range.",
                  fixed = TRUE)
+    expect_match(caught$log$message, "No training rows were trimmed.", fixed = TRUE)
 
     few <- plain
     few$data$SOC[few$in_id[-(1:3)]] <- NA_real_
 
-    caught <- collect_warnings(trim_training_responses(few, "SOC", request, "sample_id"))
+    caught <- trim_with(few)
 
     expect_identical(caught$value$record$skipped, "too_few")
     expect_match(reason(caught), "be drawn on the training partition: it has fewer than four outcome values (3).",
                  fixed = TRUE)
+
+    ## Fences drawn: nothing recorded
+    expect_identical(nrow(trim_with(plain)$log), 0L)
 
   })
 
@@ -1083,6 +1099,48 @@ describe("evaluate() - the split line and the fallback notes (#91)", {
     expect_identical(out[split_note], "│  Stratified split failed, retrying without strata")
     expect_identical(out[cv_note], "│  Stratified CV failed, retrying without strata")
     expect_true(all(c(split_note, cv_note) > header))
+
+  })
+
+  it("warns once, recorded first, that a failed stratified draw fell back, with why", {
+
+    ## Read the fixture before anything is mocked (helper-memo.R)
+    template <- ev60()$evaluation$results[1, ]
+
+    real_initial_split <- rsample::initial_split
+    real_vfold_cv      <- rsample::vfold_cv
+
+    local_mocked_bindings(
+      initial_split = function(data, prop = 3 / 4, strata = NULL, ...) {
+        if (!missing(strata)) stop("stratification refused")
+        real_initial_split(data, prop = prop, ...)
+      },
+      vfold_cv = function(data, v = 10, repeats = 1, strata = NULL, ...) {
+        if (!missing(strata)) stop("stratification refused")
+        real_vfold_cv(data, v = v, repeats = repeats, ...)
+      },
+      .package = "rsample"
+    )
+    local_mocked_bindings(
+      evaluate_single_config = function(config_row, ...) {
+        mock_eval_row(template, config_row$config_id, "success")
+      }
+    )
+
+    got <- collect_warnings(evaluate(make_eval_object(n = 60, n_configs = 1), seed = 42L))
+    sub <- Filter(function(w) inherits(w, "horizons_warning_substitution"), got$warnings)
+
+    expect_length(sub, 1L)
+    msg <- gsub("\\s+", " ", conditionMessage(sub[[1]]))
+    expect_match(msg, "The stratified draw of the train/test split failed, so it was drawn without strata",
+                 fixed = TRUE)
+    expect_match(msg, "The stratified draw of the cross-validation folds failed", fixed = TRUE)
+    expect_match(msg, "stratification refused", fixed = TRUE)
+
+    log <- got$value$log
+    expect_identical(log$topic, "substitution")
+    expect_identical(log$n, 2L)
+    expect_identical(sub[[1]]$log, log)
 
   })
 
@@ -1951,7 +2009,9 @@ describe("evaluate() - checkpoint data provenance", {
                seed = 42L, control = control_horizons(output_dir = tmpdir))
     )
 
-    expect_false(has_warning_class(caught$warnings, "horizons_checkpoint_warning"))
+    ## Nothing unusable in the store: no note on the log
+    expect_named(caught$value$log, names(new_log()))
+    expect_false(any(caught$value$log$type == "note"))
     expect_equal(caught$value$evaluation$results$runtime_secs,
                  first$evaluation$results$runtime_secs)
 
@@ -1967,7 +2027,7 @@ describe("evaluate() - checkpoint data provenance", {
 
 describe("evaluate() - one checkpoint store (#42)", {
 
-  it("warns naming a per-config file it cannot read, and re-evaluates that config", {
+  it("notes a per-config file it cannot read, without warning, and re-evaluates that config", {
 
     ck     <- ck_a()
     obj    <- ck$value$obj
@@ -1975,11 +2035,20 @@ describe("evaluate() - one checkpoint store (#42)", {
 
     writeLines("not an rds file", file.path(tmpdir, "checkpoints", "cfg_001.rds"))
 
-    warns <- testthat::capture_warnings(
-      second <- evaluate(obj, prune = FALSE, seed = 42L, control = control_horizons(output_dir = tmpdir))
-    )
+    ## Only time is lost, so it is a note on the log and a line in the tree
+    out <- utils::capture.output(warns <- testthat::capture_warnings(
+      second <- evaluate(obj, prune = FALSE, seed = 42L,
+                         control = control_horizons(output_dir = tmpdir, verbose = TRUE))
+    ))
 
-    expect_true(any(grepl("cfg_001.rds", warns, fixed = TRUE)))
+    ## (rsample's own warnings about the small strata are not under test)
+    expect_false(any(grepl("cfg_001.rds", warns, fixed = TRUE)))
+    note <- second$log[second$log$type == "note", ]
+    expect_identical(nrow(note), 1L)
+    expect_identical(note$ids[[1]], "checkpoints/cfg_001.rds")
+    expect_match(note$message, "1 file in .* could not be used as a checkpoint, so its configuration was evaluated again.")
+    expect_match(note$message, "checkpoints/cfg_001.rds: ", fixed = TRUE)
+    expect_true(any(grepl("Could not use checkpoints/cfg_001.rds: .* \\(will be re-evaluated\\)$", out)))
     expect_setequal(second$evaluation$results$config_id, c("cfg_001", "cfg_002"))
 
     ## Re-evaluated and rewritten, so the next resume can read it.
@@ -2011,16 +2080,17 @@ describe("evaluate() - one checkpoint store (#42)", {
       list.files(file.path(tmpdir, "checkpoints"))[1], "file1a2b3c.rds"
     )
 
-    warns <- testthat::capture_warnings(
-      second <- evaluate(obj, prune = FALSE, seed = 42L, control = control_horizons(output_dir = tmpdir))
+    second <- suppressWarnings(
+      evaluate(obj, prune = FALSE, seed = 42L, control = control_horizons(output_dir = tmpdir))
     )
 
     got <- second$evaluation$results
     expect_equal(got$cv_rpd[got$config_id == "rf_001"], real$cv_rpd)
 
-    flat <- gsub("\\s+", " ", warns)
-    expect_true(any(grepl("file1a2b3c.rds: holds config rf_001; not a checkpoint name",
-                          flat, fixed = TRUE)))
+    note <- second$log$message[second$log$type == "note"]
+    expect_length(note, 1L)
+    expect_true(grepl("file1a2b3c.rds: holds config rf_001; not a checkpoint name",
+                      note, fixed = TRUE))
 
   })
 
@@ -2182,9 +2252,9 @@ describe("evaluate() - tuning-settings provenance", {
     expect_equal(second$evaluation$rank_metric, "rmse")
 
     ## A clean store reports nothing unreadable: these per-config files, so
-    ## the resume raises no checkpoint warning, and a directory with no
-    ## checkpoints/.
-    expect_false(has_warning_class(caught$warnings, "horizons_checkpoint_warning"))
+    ## the resume records no note, and a directory with no checkpoints/.
+    expect_named(second$log, names(new_log()))
+    expect_false(any(second$log$type == "note"))
 
     store <- read_checkpoint_store(tmpdir)
     expect_length(store$rows, 2L)

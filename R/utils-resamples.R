@@ -266,8 +266,9 @@ outcome_stratifies <- function(outcome) {
 #'   STRATA_BREAKS, pool = STRATA_POOL`, the values the check uses.
 #' @return List with `draw` (the `rsplit` or `rset`), `stratified` (`FALSE`
 #'   when the draw is unstratified, whether rsample dropped the strata or the
-#'   stratified call failed) and `strata_failed` (`TRUE` when the stratified
-#'   call failed and `unstratified()` was run).
+#'   stratified call failed), `strata_failed` (`TRUE` when the stratified
+#'   call failed and `unstratified()` was run) and `strata_error` (why it
+#'   failed, one line, or `NA`).
 #' @keywords internal
 #' @noRd
 
@@ -275,12 +276,14 @@ draw_stratified <- function(outcome, stratified, unstratified) {
 
   held          <- tryCatch(outcome_stratifies(outcome), error = function(e) FALSE)
   strata_failed <- FALSE
+  strata_error  <- NA_character_
 
   draw <- tryCatch(
     stratified(),
     error = function(e) {
 
       strata_failed <<- TRUE
+      strata_error  <<- condition_summary(e)
       unstratified()
 
     }
@@ -288,6 +291,38 @@ draw_stratified <- function(outcome, stratified, unstratified) {
 
   list(draw          = draw,
        stratified    = held && !strata_failed,
-       strata_failed = strata_failed)
+       strata_failed = strata_failed,
+       strata_error  = strata_error)
+
+}
+
+
+#' Record a stratified draw that fell back to an unstratified one
+#'
+#' @description
+#' The documented fallback is a substitution: what ran is not what was
+#' asked. Each draw that fell back is recorded once, with why, and the verb
+#' raises one `horizons_warning_substitution` at its end. A draw rsample
+#' itself left unstratified, without a failure, is not a fallback and is not
+#' recorded here.
+#'
+#' @param collector The verb's collector, from `log_open()`.
+#' @param drawn A result of [draw_stratified()].
+#' @param what Character(1). The draw, for the message, e.g.
+#'   `"train/test split"`.
+#' @return `NULL`, invisibly.
+#' @keywords internal
+#' @noRd
+
+log_strata_fallback <- function(collector, drawn, what) {
+
+  if (!isTRUE(drawn$strata_failed)) return(invisible(NULL))
+
+  log_warning(collector, "substitution", c(
+    "The stratified draw of the {what} failed, so it was drawn without strata.",
+    "x" = "{drawn$strata_error}"
+  ))
+
+  invisible(NULL)
 
 }

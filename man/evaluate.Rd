@@ -103,8 +103,8 @@ every row carries all six cross-validated metrics. A row scored under an
 earlier scoring schema, or recording less of the training data and
 settings than this run does, was written by an earlier version: it is
 dropped and its config re-evaluated. Rows for configs no longer in the
-grid are dropped; a file that cannot be used warns and its config is
-re-evaluated.
+grid are dropped; a file that cannot be used is a note in the object's
+\code{log} and a line in the progress tree, and its config is re-evaluated.
 }
 
 \section{Parallelism}{
