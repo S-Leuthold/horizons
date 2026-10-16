@@ -17,6 +17,6 @@ OpenBLAS reads its thread count when it loads, so setting
 code (proven 2026-09-15: the environment variable changed nothing, the
 runtime call did). \code{RhpcBLASctl} provides the runtime call and is a
 Suggests; without it the parent relies on the environment variables being
-set before R starts, which this function says once.
+set before R starts.
 }
 \keyword{internal}

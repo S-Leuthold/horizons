@@ -37,8 +37,7 @@ build_fit60 <- function() {
   obj$config$tuning$final_bayesian_iter <- 2L
 
   result <- suppressWarnings(
-    fit(obj, n_best = 2L, compute_uq = FALSE, compute_ad = FALSE,
-        verbose = FALSE, seed = 42L)
+    fit(obj, n_best = 2L, compute_uq = FALSE, compute_ad = FALSE, seed = 42L)
   )
 
   list(obj = obj, fit = result)
@@ -55,8 +54,7 @@ build_fit250_uq <- function() {
   obj$config$tuning$final_bayesian_iter <- 0L
 
   result <- suppressWarnings(
-    fit(obj, n_best = 1L, compute_uq = TRUE, compute_ad = FALSE,
-        verbose = FALSE, seed = 42L)
+    fit(obj, n_best = 1L, compute_uq = TRUE, compute_ad = FALSE, seed = 42L)
   )
 
   list(obj = obj, fit = result)
@@ -75,7 +73,7 @@ describe("fit() - preflight validation", {
   it("aborts on non-horizons_eval input", {
 
     expect_error(
-      fit(list(a = 1), verbose = FALSE),
+      fit(list(a = 1)),
       "needs a <horizons_eval> from `evaluate()`", fixed = TRUE,
       class = "horizons_input_error"
     )
@@ -88,7 +86,7 @@ describe("fit() - preflight validation", {
     obj$evaluation$results$status <- "failed"
 
     expect_error(
-      fit(obj, verbose = FALSE),
+      fit(obj),
       "No configuration in evaluation$results can be fitted", fixed = TRUE,
       class = "horizons_input_error"
     )
@@ -104,13 +102,13 @@ describe("fit() - preflight validation", {
     no_results <- obj
     no_results$evaluation["results"] <- list(NULL)
 
-    err <- expect_error(fit(no_results, verbose = FALSE), class = "horizons_error_validation")
+    err <- expect_error(fit(no_results), class = "horizons_error_validation")
     expect_true(any(grepl("results must be a data frame", err$findings, fixed = TRUE)))
 
     no_rows <- obj
     no_rows$evaluation$results <- no_rows$evaluation$results[0, ]
 
-    err <- expect_error(fit(no_rows, verbose = FALSE), class = "horizons_error_validation")
+    err <- expect_error(fit(no_rows), class = "horizons_error_validation")
     expect_true(any(grepl("results has no rows", err$findings, fixed = TRUE)))
 
   })
@@ -128,7 +126,7 @@ describe("fit() - preflight validation", {
     obj$data$analysis$stray_column <- seq_len(nrow(obj$data$analysis))
 
     expect_error(
-      fit(obj, verbose = FALSE),
+      fit(obj),
       "[Mm]issing from.*role_map"
     )
 
@@ -190,7 +188,7 @@ describe("fit() - success path", {
 
     expect_true(has_uq(fitted))
 
-    re <- suppressWarnings(evaluate(fitted, prune = FALSE, verbose = FALSE, seed = 42L))
+    re <- suppressWarnings(evaluate(fitted, prune = FALSE, seed = 42L))
 
     blank <- new_horizons_data()
 
@@ -207,14 +205,14 @@ describe("fit() - success path", {
 
     ens <- suppressWarnings(
       ensemble(result, method = "weighted", optimize = FALSE,
-               compute_uq = FALSE, verbose = FALSE)
+               compute_uq = FALSE)
     )
 
     ## Keep the re-fit cheap; the budget is not what is under test
     ens$config$tuning$final_bayesian_iter <- 0L
 
     refit <- suppressWarnings(
-      fit(ens, n_best = 1L, compute_uq = FALSE, verbose = FALSE, seed = 42L)
+      fit(ens, n_best = 1L, compute_uq = FALSE, seed = 42L)
     )
 
     expect_identical(class(refit), c("horizons_fit", "horizons_eval", "horizons_data", "list"))
@@ -231,6 +229,59 @@ describe("fit() - success path", {
 ## =========================================================================
 ## CV predictions
 ## =========================================================================
+
+describe("fit() - its control", {
+
+  it("records the control it ran with, defaults filled in", {
+
+    ctrl <- fit60()$fit$models$control
+
+    expect_s3_class(ctrl, "horizons_control")
+    expect_identical(names(ctrl), names(resolve_control(NULL, "fit")))
+    expect_identical(ctrl$min_calib_rows, N_CALIB_MIN)
+
+  })
+
+  it("passes its row minimums to every member's fit", {
+
+    seen <- NULL
+    local_mocked_bindings(fit_single_config = function(..., min_calib_rows, min_ad_rows, min_degradation_rows) {
+      seen <<- c(min_calib_rows, min_ad_rows, min_degradation_rows)
+      rlang::abort("stop", class = "member_reached")
+    })
+
+    expect_error(
+      suppressWarnings(fit(mfo(), n_best = 1L, compute_uq = FALSE, compute_ad = FALSE,
+                           control = control_horizons(min_calib_rows = 12L, min_ad_rows = 5L,
+                                                      min_degradation_rows = 6L))),
+      class = "member_reached"
+    )
+    expect_identical(seen, c(12L, 5L, 6L))
+
+  })
+
+  it("gates UQ and AD on the calibration rows it is given as the minimum", {
+
+    ## 60 rows: 48 in Split F's training part, 10 of them calibration rows
+    obj <- mfo()
+    run <- function(min_calib_rows) {
+      calib <- NULL
+      local_mocked_bindings(fit_single_config = function(..., calib_data) {
+        calib <<- calib_data
+        rlang::abort("stop", class = "member_reached")
+      })
+      try(suppressWarnings(fit(obj, n_best = 1L, control = control_horizons(min_calib_rows = min_calib_rows))),
+          silent = TRUE)
+      calib
+    }
+
+    expect_null(run(N_CALIB_MIN))
+    expect_false(is.null(run(9L)))
+
+  })
+
+})
+
 
 describe("fit() - cv_predictions", {
 
@@ -419,8 +470,7 @@ describe("fit() - AD enabled", {
   obj$config$tuning$final_bayesian_iter <- 0L
 
   result <- suppressWarnings(
-    fit(obj, n_best = 1L, compute_uq = FALSE, compute_ad = TRUE,
-        verbose = FALSE, seed = 42L)
+    fit(obj, n_best = 1L, compute_uq = FALSE, compute_ad = TRUE, seed = 42L)
   )
 
   it("models$ad populates as a named list keyed by config_id", {
@@ -478,8 +528,7 @@ describe("fit() - final_bayesian_iter", {
              error_message = "mocked", runtime_secs = 0)
       },
       tryCatch(
-        fit(obj, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE,
-            verbose = FALSE),
+        fit(obj, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE),
         error = function(e) NULL
       ),
       .package = "horizons"
@@ -533,8 +582,7 @@ describe("fit() - recipe settings", {
       },
       tryCatch(
         suppressWarnings(
-          fit(obj, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE,
-              verbose = FALSE)
+          fit(obj, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE)
         ),
         error = function(e) NULL
       ),
@@ -580,8 +628,7 @@ describe("fit() - seed reproducibility", {
   fit_at <- function(seed, ambient) {
     set.seed(ambient)
     suppressWarnings(
-      fit(obj, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE,
-          verbose = FALSE, seed = seed)
+      fit(obj, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE, seed = seed)
     )
   }
 
@@ -694,8 +741,7 @@ describe("fit() - scores on evaluate()'s split", {
     stale$data$n_rows <- nrow(stale$data$analysis)
 
     expect_error(
-      fit(stale, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE,
-          verbose = FALSE),
+      fit(stale, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE),
       "does not index the rows this object models",
       class = "horizons_input_error"
     )
@@ -706,8 +752,7 @@ describe("fit() - scores on evaluate()'s split", {
     relabelled$data$analysis$SOC[1] <- relabelled$data$analysis$SOC[1] + 1
 
     expect_error(
-      fit(relabelled, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE,
-          verbose = FALSE),
+      fit(relabelled, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE),
       "does not index the rows this object models",
       class = "horizons_input_error"
     )
@@ -718,8 +763,7 @@ describe("fit() - scores on evaluate()'s split", {
     no_split$evaluation$split <- NULL
 
     err <- expect_error(
-      fit(no_split, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE,
-          verbose = FALSE),
+      fit(no_split, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE),
       class = "horizons_error_validation"
     )
     expect_true(any(grepl("Metadata keys missing from evaluation: split", err$findings, fixed = TRUE)))
@@ -728,8 +772,7 @@ describe("fit() - scores on evaluate()'s split", {
     bad_split$evaluation$split <- "an rsplit"
 
     err <- expect_error(
-      fit(bad_split, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE,
-          verbose = FALSE),
+      fit(bad_split, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE),
       class = "horizons_error_validation"
     )
     expect_true(any(grepl("split must be an <rsplit> object", err$findings, fixed = TRUE)))
@@ -748,8 +791,7 @@ describe("fit() - scores on evaluate()'s split", {
     )
 
     r_clay <- suppressWarnings(
-      fit(with_clay, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE,
-          verbose = FALSE, seed = 42L)
+      fit(with_clay, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE, seed = 42L)
     )
 
     expect_s3_class(r_clay, "horizons_fit")
@@ -789,8 +831,7 @@ describe("fit() - member ranking (#50)", {
     testthat::with_mocked_bindings(
       tryCatch(
         suppressWarnings(
-          fit(obj, n_best = 2L, compute_uq = FALSE, compute_ad = FALSE,
-              verbose = FALSE, seed = 42L)
+          fit(obj, n_best = 2L, compute_uq = FALSE, compute_ad = FALSE, seed = 42L)
         ),
         horizons_all_members_failed = function(e) NULL
       ),
@@ -816,7 +857,7 @@ describe("fit() - member ranking (#50)", {
 
 describe("fit() - allow_par without a usable backend", {
 
-  it("warns naming fit() and the plan, then runs sequentially", {
+  it("warns once naming fit() and the plan, on the log too, then runs sequentially", {
 
     skip_unless_slow_tier()
 
@@ -824,16 +865,19 @@ describe("fit() - allow_par without a usable backend", {
     obj <- make_fit_object(n = 60, n_configs = 1)
     obj$config$tuning$final_bayesian_iter <- 0L
 
-    expect_warning(
-      r <- keep_only_warning(
-        fit(obj, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE,
-            allow_par = TRUE, verbose = FALSE, seed = 123L),
-        "offers 1 worker"
-      ),
-      "fit\\(\\).*offers 1 worker"
+    got <- collect_warnings(
+      fit(obj, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE, seed = 123L,
+          control = control_horizons(allow_par = TRUE)),
+      "offers 1 worker"
     )
+    r <- got$value
+    w <- got$warnings[[1]]
 
+    expect_length(got$warnings, 1L)
+    expect_s3_class(w, "horizons_warning_substitution")
+    expect_match(conditionMessage(w), "fit\\(\\).*offers 1 worker")
     expect_s3_class(r, "horizons_fit")
+    expect_true("substitution" %in% r$log$topic[r$log$verb == "fit"])
 
   })
 
@@ -858,8 +902,7 @@ describe("fit() - on a two-worker plan", {
     local_plan(future::multisession, workers = 2)
 
     par_fit <- suppressWarnings(
-      fit(shared$obj, n_best = 2L, compute_uq = FALSE, compute_ad = FALSE,
-          allow_par = TRUE, verbose = FALSE, seed = 42L)
+      fit(shared$obj, n_best = 2L, compute_uq = FALSE, compute_ad = FALSE, seed = 42L, control = control_horizons(allow_par = TRUE))
     )
 
     cols <- c("config_id", "status", "rmse", "rrmse", "rsq", "ccc", "rpd", "mae",
@@ -942,8 +985,7 @@ describe("fit() - selection provenance", {
     obj$config$tuning$final_bayesian_iter <- 0L
 
     result <- suppressWarnings(
-      fit(obj, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE,
-          verbose = FALSE, seed = 42L)
+      fit(obj, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE, seed = 42L)
     )
 
     expect_true(result$models$selection_present)
@@ -967,7 +1009,7 @@ fit_header <- function(obj, ...) {
   utils::capture.output(
     testthat::with_mocked_bindings(
       tryCatch(
-        suppressWarnings(fit(obj, seed = 42L, ...)),
+        suppressWarnings(fit(obj, seed = 42L, control = control_horizons(verbose = TRUE), ...)),
         horizons_all_members_failed = function(e) NULL
       ),
       fit_single_config = function(...) {
@@ -1143,7 +1185,7 @@ describe("fit() - the progress tree", {
     run <- function() {
       testthat::with_mocked_bindings(
         suppressWarnings(fit(obj, n_best = 2L, compute_uq = FALSE, compute_ad = FALSE,
-                             seed = 42L)),
+                             seed = 42L, control = control_horizons(verbose = TRUE))),
         Sys.time = clock, .package = "base"
       )
     }
@@ -1189,6 +1231,14 @@ describe("check_degradation()", {
     expect_match(out$reason, "95% bootstrap interval", fixed = TRUE)
     expect_match(out$reason, "48 test rows", fixed = TRUE)
     expect_match(out$reason, "below the CV mean RPD 4.000", fixed = TRUE)
+
+  })
+
+  it("takes its minimum number of test rows from min_n", {
+
+    ## Twelve of the poor fit's test rows: flagged at a minimum of 10, not at 20
+    expect_true(check_degradation(cv_4, truth[1:12], poor[1:12])$degraded)
+    expect_false(check_degradation(cv_4, truth[1:12], poor[1:12], min_n = 20L)$degraded)
 
   })
 

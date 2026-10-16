@@ -22,7 +22,7 @@ describe("fit() - an evaluation with only pruned configs (#38)", {
   obj$config$tuning$final_bayesian_iter <- 0L
 
   pruned <- suppressWarnings(
-    evaluate(obj, prune = TRUE, prune_threshold = 9999, verbose = FALSE,
+    evaluate(obj, prune = TRUE, prune_threshold = 9999,
              seed = 42L)
   )
 
@@ -35,8 +35,7 @@ describe("fit() - an evaluation with only pruned configs (#38)", {
 
     w <- expect_warning(
       r <- keep_only_warning(
-        fit(pruned, n_best = 2L, compute_uq = FALSE, compute_ad = FALSE,
-            verbose = FALSE, seed = 42L),
+        fit(pruned, n_best = 2L, compute_uq = FALSE, compute_ad = FALSE, seed = 42L),
         "horizons_pruned_fallback_warning"
       ),
       class = "horizons_pruned_fallback_warning"
@@ -72,8 +71,7 @@ describe("fit() - an evaluation with only pruned configs (#38)", {
     unranked$evaluation$results$cv_rpd <- NA_real_
 
     expect_error(
-      fit(unranked, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE,
-          verbose = FALSE),
+      fit(unranked, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE),
       "None succeeded, and no pruned configuration has a cv_rpd value.", fixed = TRUE,
       class = "horizons_input_error"
     )
@@ -88,8 +86,7 @@ describe("fit() - an evaluation with only pruned configs (#38)", {
     unranked$evaluation$results$cv_rpd <- NA_real_
 
     expect_error(
-      fit(unranked, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE,
-          verbose = FALSE),
+      fit(unranked, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE),
       "succeeded, but none has",
       class = "horizons_input_error"
     )
@@ -113,7 +110,7 @@ describe("fit() - members below the prune threshold at bayesian_iter = 0 (#38)",
   obj$config$tuning$final_bayesian_iter <- 0L
 
   below <- suppressWarnings(
-    evaluate(obj, prune = TRUE, prune_threshold = 9999, verbose = FALSE,
+    evaluate(obj, prune = TRUE, prune_threshold = 9999,
              seed = 42L)
   )
 
@@ -127,8 +124,7 @@ describe("fit() - members below the prune threshold at bayesian_iter = 0 (#38)",
 
     w <- expect_warning(
       r <- keep_only_warning(
-        fit(below, n_best = 2L, compute_uq = FALSE, compute_ad = FALSE,
-            verbose = FALSE, seed = 42L),
+        fit(below, n_best = 2L, compute_uq = FALSE, compute_ad = FALSE, seed = 42L),
         "horizons_below_threshold_warning"
       ),
       class = "horizons_below_threshold_warning"
@@ -161,8 +157,7 @@ describe("fit() - members below the prune threshold at bayesian_iter = 0 (#38)",
 
     expect_no_warning(
       keep_only_warning(
-        fit(cleared, n_best = 2L, compute_uq = FALSE, compute_ad = FALSE,
-            verbose = FALSE, seed = 42L),
+        fit(cleared, n_best = 2L, compute_uq = FALSE, compute_ad = FALSE, seed = 42L),
         "horizons_below_threshold_warning"
       ),
       class = "horizons_below_threshold_warning"
@@ -261,8 +256,7 @@ describe("fit() - member failures", {
     err <- testthat::with_mocked_bindings(
       tryCatch(
         suppressWarnings(
-          fit(obj, n_best = 2L, compute_uq = FALSE, compute_ad = FALSE,
-              verbose = FALSE)
+          fit(obj, n_best = 2L, compute_uq = FALSE, compute_ad = FALSE)
         ),
         horizons_all_members_failed = function(e) e
       ),
@@ -297,8 +291,7 @@ describe("fit() - member failures", {
 
     r <- testthat::with_mocked_bindings(
       suppressWarnings(
-        fit(obj, n_best = 2L, compute_uq = FALSE, compute_ad = FALSE,
-            verbose = FALSE, seed = 42L)
+        fit(obj, n_best = 2L, compute_uq = FALSE, compute_ad = FALSE, seed = 42L)
       ),
       fit_single_config = function(...) {
         if (list(...)$config_row$config_id == "cfg_002") {

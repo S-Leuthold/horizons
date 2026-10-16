@@ -83,12 +83,11 @@ build_signed_run <- function(dir) {
   cfg <- configure_small(hd, outcome_range = c(-Inf, Inf))
 
   ev <- suppressWarnings(
-    evaluate(cfg, prune = FALSE, verbose = FALSE, seed = 42L, output_dir = dir)
+    evaluate(cfg, prune = FALSE, seed = 42L, control = control_horizons(output_dir = dir))
   )
 
   fitted <- suppressWarnings(
-    fit(ev, n_best = 1L, compute_uq = TRUE, compute_ad = FALSE,
-        verbose = FALSE, seed = 42L)
+    fit(ev, n_best = 1L, compute_uq = TRUE, compute_ad = FALSE, seed = 42L)
   )
 
   new_data <- hd$data$analysis[1:8, setdiff(names(hd$data$analysis), "SOC")]
@@ -118,7 +117,7 @@ build_nonneg_fit <- function() {
   obj$config$tuning$final_bayesian_iter <- 0L
 
   fitted <- suppressWarnings(
-    fit(obj, compute_uq = FALSE, compute_ad = FALSE, verbose = FALSE, seed = 42L)
+    fit(obj, compute_uq = FALSE, compute_ad = FALSE, seed = 42L)
   )
 
   list(obj = obj, fitted = fitted)
@@ -137,7 +136,7 @@ build_capped_fit <- function() {
   cfg <- configure_small(hd, outcome_range = c(0, top))
 
   cold <- suppressWarnings(
-    fit(cfg, compute_uq = FALSE, compute_ad = FALSE, verbose = FALSE, seed = 42L)
+    fit(cfg, compute_uq = FALSE, compute_ad = FALSE, seed = 42L)
   )
 
   list(hd = hd, top = top, cold = cold)
@@ -515,8 +514,8 @@ describe("a d13C-like outcome with outcome_range = c(-Inf, Inf)", {
     other$config$outcome_range <- c(-40, 0)
 
     expect_error(
-      suppressWarnings(evaluate(other, prune = FALSE, verbose = FALSE,
-                                seed = 42L, output_dir = outdir)),
+      suppressWarnings(evaluate(other, prune = FALSE,
+                                seed = 42L, control = control_horizons(output_dir = outdir))),
       "outcome_range",
       class = "horizons_input_error"
     )
@@ -536,7 +535,7 @@ describe("a d13C-like outcome with outcome_range = c(-Inf, Inf)", {
       .package = "horizons"
     )
 
-    err <- expect_error(fit(moved, n_best = 1L, verbose = FALSE),
+    err <- expect_error(fit(moved, n_best = 1L),
                         class = "horizons_input_error")
     expect_match(flat_message(err), "outcome_range")
     expect_match(flat_message(err), "c(-Inf, Inf)", fixed = TRUE)
@@ -556,15 +555,15 @@ describe("a d13C-like outcome with outcome_range = c(-Inf, Inf)", {
       .package = "horizons"
     )
 
-    expect_error(evaluate(cfg, metric = "rrmse", verbose = FALSE), "rrmse",
+    expect_error(evaluate(cfg, metric = "rrmse"), "rrmse",
                  class = "horizons_input_error")
-    expect_error(fit(ev, metric = "rrmse", verbose = FALSE), "rrmse",
+    expect_error(fit(ev, metric = "rrmse"), "rrmse",
                  class = "horizons_input_error")
 
     ## ...and when the rrmse comes from the evaluation fit() would re-tune
     by_rrmse <- ev
     by_rrmse$evaluation$rank_metric <- "rrmse"
-    expect_error(fit(by_rrmse, verbose = FALSE), "rrmse",
+    expect_error(fit(by_rrmse), "rrmse",
                  class = "horizons_input_error")
 
   })
@@ -577,7 +576,7 @@ describe("a d13C-like outcome with outcome_range = c(-Inf, Inf)", {
     stale$config$outcome_range <- DEFAULT_OUTCOME_RANGE
 
     ## One member would also be refused, later; the range check comes first
-    expect_error(ensemble(stale, verbose = FALSE), "outcome_range",
+    expect_error(ensemble(stale), "outcome_range",
                  class = "horizons_input_error")
 
   })
@@ -636,7 +635,7 @@ describe("a negative outcome under the default range", {
     reached <- mock_expensive_steps()
 
     elapsed <- system.time(
-      err <- expect_error(evaluate(obj, verbose = FALSE), class = "horizons_input_error")
+      err <- expect_error(evaluate(obj), class = "horizons_input_error")
     )[["elapsed"]]
 
     expect_match(conditionMessage(err), "outcome_range")
@@ -650,7 +649,7 @@ describe("a negative outcome under the default range", {
 
     reached <- mock_expensive_steps()
 
-    err <- expect_error(fit(obj, verbose = FALSE), class = "horizons_input_error")
+    err <- expect_error(fit(obj), class = "horizons_input_error")
 
     expect_match(conditionMessage(err), "outcome_range")
     expect_length(reached$steps, 0)

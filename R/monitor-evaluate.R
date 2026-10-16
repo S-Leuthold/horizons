@@ -16,8 +16,8 @@
 #' A manifest written by another version of horizons is refused;
 #' `evaluate()` rewrites it when a run starts in the directory.
 #'
-#' @param output_dir Character. Path to the output directory passed to
-#'   `evaluate()`.
+#' @param output_dir Character. Path to the output directory given to
+#'   `evaluate()` as `control_horizons(output_dir = )`.
 #' @param watch Logical. If TRUE, continuously poll for updates. Default FALSE
 #'   (single snapshot).
 #' @param interval Numeric. Seconds between polls when `watch = TRUE`.

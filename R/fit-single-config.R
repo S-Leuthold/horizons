@@ -43,6 +43,10 @@
 #'   degradation check takes its test RPD over the test rows inside the
 #'   fences; the reported test metrics stay untrimmed. Default `NULL` (no
 #'   trim: the check reads the test RPD).
+#' @param min_calib_rows,min_ad_rows,min_degradation_rows Integer. The
+#'   control fields of the same names: the fewest rows UQ and AD calibrate
+#'   on, AD's covariance is estimated from, and the degradation check
+#'   bootstraps from.
 #'
 #' @return List with fields: config_id, status, degraded, degraded_reason,
 #'   fitted_workflow, best_params, warm_start, start_grid_size,
@@ -71,7 +75,10 @@ fit_single_config <- function(config_row,
                               sg_window           = DEFAULT_SG_WINDOW,
                               pca_threshold       = DEFAULT_PCA_THRESHOLD,
                               outcome_range       = DEFAULT_OUTCOME_RANGE,
-                              response_fences     = NULL) {
+                              response_fences     = NULL,
+                              min_calib_rows       = N_CALIB_MIN,
+                              min_ad_rows          = N_AD_TRAIN_MIN,
+                              min_degradation_rows = DEGRADATION_MIN_N) {
 
   start_time <- Sys.time()
 
@@ -524,7 +531,8 @@ fit_single_config <- function(config_row,
   ## same fences; test_metrics, which is what is reported, stays untrimmed.
 
   degradation     <- check_degradation(cv_metrics, test_truth, test_preds,
-                                       response_fences, seed = seed)
+                                       response_fences, seed = seed,
+                                       min_n = min_degradation_rows)
   degraded        <- degradation$degraded
   degraded_reason <- degradation$reason
 
@@ -545,7 +553,8 @@ fit_single_config <- function(config_row,
         transformation  = transformation,
         level_default   = DEFAULT_UQ_LEVEL,
         seed            = seed,
-        outcome_range   = outcome_range
+        outcome_range   = outcome_range,
+        min_calib_rows  = min_calib_rows
       ),
       log_error          = FALSE,
       capture_conditions = TRUE
@@ -599,7 +608,9 @@ fit_single_config <- function(config_row,
       fit_ad(
         fitted_workflow = final_fit,
         calib_data      = calib_data,
-        level           = DEFAULT_AD_LEVEL
+        level           = DEFAULT_AD_LEVEL,
+        min_calib_rows  = min_calib_rows,
+        min_ad_rows     = min_ad_rows
       ),
       log_error          = FALSE,
       capture_conditions = TRUE
@@ -742,9 +753,8 @@ test_interval_coverage_missing <- function() {
 #' After a response trim (#77) the folds ran on rows inside the training
 #' fences while the test rows are untrimmed, so with `response_fences` the
 #' test rows compared are those inside the fences, and the reason says so;
-#' the test metrics `fit()` reports are untouched. Fewer than
-#' `DEGRADATION_MIN_N` usable test rows leave too little to bootstrap, and
-#' nothing is flagged.
+#' the test metrics `fit()` reports are untouched. Fewer than `min_n` usable
+#' test rows leave too little to bootstrap, and nothing is flagged.
 #'
 #' @param cv_metrics Tibble with `.metric` and `mean`.
 #' @param test_truth,test_preds Numeric. Test outcomes and back-transformed
@@ -754,6 +764,9 @@ test_interval_coverage_missing <- function() {
 #' @param seed Integer. Seed for the bootstrap draws.
 #' @param n_boot Integer. Number of bootstrap resamples.
 #' @param level Numeric. Coverage of the bootstrap interval.
+#' @param min_n Integer. The fewest usable test rows the check bootstraps
+#'   from; `control_horizons(min_degradation_rows = )`. Default
+#'   `DEGRADATION_MIN_N`.
 #' @return List with `degraded` (logical) and `reason` (character, `NA` when
 #'   not degraded).
 #' @keywords internal
@@ -761,7 +774,8 @@ test_interval_coverage_missing <- function() {
 check_degradation <- function(cv_metrics, test_truth, test_preds,
                               response_fences = NULL, seed = 42L,
                               n_boot = DEGRADATION_BOOT_N,
-                              level  = DEGRADATION_LEVEL) {
+                              level  = DEGRADATION_LEVEL,
+                              min_n  = DEGRADATION_MIN_N) {
 
   not_flagged <- list(degraded = FALSE, reason = NA_character_)
   fences_text <- NULL
@@ -788,7 +802,7 @@ check_degradation <- function(cv_metrics, test_truth, test_preds,
   rpd_cv <- cv_metrics[cv_metrics$.metric == "rpd", , drop = FALSE]
 
   ## Constant test outcomes give an RPD of 0 that says nothing about the fit
-  if (n < DEGRADATION_MIN_N || nrow(rpd_cv) != 1 || !is.finite(rpd_cv$mean) ||
+  if (n < min_n || nrow(rpd_cv) != 1 || !is.finite(rpd_cv$mean) ||
       stats::sd(truth) < .Machine$double.eps) {
 
     return(not_flagged)

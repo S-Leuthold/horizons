@@ -7,8 +7,8 @@
 monitor_evaluate(output_dir, watch = FALSE, interval = 10)
 }
 \arguments{
-\item{output_dir}{Character. Path to the output directory passed to
-\code{evaluate()}.}
+\item{output_dir}{Character. Path to the output directory given to
+\code{evaluate()} as \code{control_horizons(output_dir = )}.}
 
 \item{watch}{Logical. If TRUE, continuously poll for updates. Default FALSE
 (single snapshot).}

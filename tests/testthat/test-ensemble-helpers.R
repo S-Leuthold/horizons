@@ -26,7 +26,7 @@ describe("fit_tuned_meta_learner() - refusals", {
     fitted <- ens_fitted()
     fitted$models$rank_metric <- "rpiq"
 
-    err <- expect_error(ensemble(fitted, method = "penalized", verbose = FALSE),
+    err <- expect_error(ensemble(fitted, method = "penalized"),
                         class = "horizons_error_validation")
     expect_true(any(grepl("rank_metric must be one of", err$findings, fixed = TRUE)))
 

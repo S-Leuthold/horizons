@@ -4,7 +4,13 @@
 \alias{fit_ensemble_uq}
 \title{Fit CV+ Conformal Uncertainty Quantification for a Stacked Ensemble}
 \usage{
-fit_ensemble_uq(x, level = DEFAULT_UQ_LEVEL, seed = NULL, verbose = TRUE)
+fit_ensemble_uq(
+  x,
+  level = DEFAULT_UQ_LEVEL,
+  seed = NULL,
+  verbose = TRUE,
+  min_calib_rows = N_CALIB_MIN
+)
 }
 \arguments{
 \item{x}{A \code{horizons_ensemble} object (output of \code{\link[=ensemble]{ensemble()}}).}
@@ -18,6 +24,9 @@ recorded on the ensemble contract.}
 
 \item{verbose}{Logical. Emit the degradation note when UQ cannot be
 computed. Default \code{TRUE}.}
+
+\item{min_calib_rows}{Integer. The fewest rows the bundle calibrates on;
+\code{control_horizons(min_calib_rows = )}. Default \code{N_CALIB_MIN}.}
 }
 \value{
 \code{x} with \verb{$ensemble$uq} populated (or unchanged when calibration
@@ -41,7 +50,7 @@ with \code{compute_uq = FALSE}, re-run \code{\link[=ensemble]{ensemble()}}. The 
 level and takes no level of its own.
 
 Degrades gracefully: when calibration is impossible (fewer than
-\code{N_CALIB_MIN} rows, invalid order-statistic indices, or a fold refit
+\code{min_calib_rows} rows, invalid order-statistic indices, or a fold refit
 failure), the bundle stays \code{NULL}, a one-line note is emitted, and the
 ensemble continues to predict point-only.
 }

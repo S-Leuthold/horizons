@@ -26,15 +26,17 @@
 #'   grid-search RPD below this value skip Bayesian optimization but still
 #'   receive test-set metrics from grid-search best. Default 1.0 (the
 #'   "no better than the mean" line).
-#' @param allow_par Logical. If `TRUE`, dispatch onto whatever
-#'   `future::plan()` the caller has registered. If no usable backend is
-#'   registered (fewer than two workers), warns naming the plan it found and
-#'   runs sequentially. `FALSE` (the default) runs in the calling process and
-#'   never inspects the plan. `evaluate()` never registers or alters a plan.
-#' @param parallelize_over Character. Which axis of the work the registered
-#'   plan is applied to; ignored when `allow_par = FALSE`. See the
-#'   Parallelism section. Default `"auto"`.
-#' @param output_dir Character or NULL. If provided, each config's result is
+#' @param seed Integer. Random seed for train/test split and CV folds.
+#'   Default 307L.
+#' @param control A [control_horizons()] object: how the run goes, not what
+#'   it computes. `evaluate()` reads `allow_par`, `parallelize_over`,
+#'   `output_dir`, `verbose`, `debug`, `breaker`, `keep_traces` and
+#'   `max_worker_payload`, and refuses any other field that is set. The
+#'   control it ran with, defaults filled in, is recorded as
+#'   `evaluation$control`.
+#'
+#' @section Checkpoints:
+#' With `control_horizons(output_dir = )`, each config's result is
 #'   written to `<output_dir>/checkpoints/<config_id>.rds` as it finishes, and
 #'   a rerun into the same directory resumes from those files. Required when
 #'   configs are dispatched to workers. A resumed row must have been scored on
@@ -55,14 +57,19 @@
 #'   settings than this run does, was written by an earlier version: it is
 #'   dropped and its config re-evaluated. Rows for configs no longer in the
 #'   grid are dropped; a file that cannot be used warns and its config is
-#'   re-evaluated. Default NULL (no checkpointing).
-#' @param seed Integer. Random seed for train/test split and CV folds.
-#'   Default 307L.
-#' @param verbose Logical. Print progress tree to console. Default TRUE.
+#'   re-evaluated.
 #'
 #' @section Parallelism:
+#' With `control_horizons(allow_par = TRUE)`, `evaluate()` dispatches onto
+#' whatever `future::plan()` the caller has registered. If no usable backend
+#' is registered (fewer than two workers), it runs sequentially and warns,
+#' with class `horizons_warning_substitution`, naming the plan it found; the
+#' warning is also a row of the object's `log`. Without it, `evaluate()` runs
+#' in the calling process and never inspects the plan. It never registers or
+#' alters a plan.
+#'
 #' The user owns the backend and the topology; `evaluate()` owns only which
-#' axis the plan is applied to.
+#' axis the plan is applied to, through `control_horizons(parallelize_over = )`.
 #'
 #' * `"configs"`: one future per config on the registered plan, with tune
 #'   running sequentially inside each. The per-worker payload is one config's
@@ -72,10 +79,12 @@
 #'   the CV folds on the registered plan. Useful width is capped at
 #'   `cv_folds`. The mode for a few cores and a short grid.
 #' * `"auto"` (default): `"configs"` when the number of configs is at least
-#'   `cv_folds`, otherwise `"resamples"`. Derived from the measured cost
-#'   model: configs wins whenever `n_configs` exceeds the effective inner
-#'   speedup, which is bounded by `cv_folds`, and always once it exceeds the
-#'   worker count, so the worker count cancels.
+#'   `cv_folds` and there is an `output_dir` to checkpoint into, otherwise
+#'   `"resamples"`. Derived from the measured cost model: configs wins
+#'   whenever `n_configs` exceeds the effective inner speedup, which is
+#'   bounded by `cv_folds`, and always once it exceeds the worker count, so
+#'   the worker count cancels. `"configs"` asked for explicitly without an
+#'   `output_dir` is refused before anything runs (#233).
 #'
 #' A nested plan (configs across an outer level, folds across an inner one)
 #' is not built or endorsed by the package in this version. A caller who
@@ -85,11 +94,11 @@
 #' ```
 #' # Laptop: four cores, parallelise the folds inside each config.
 #' future::plan(future::multisession, workers = 4)
-#' hd |> evaluate(allow_par = TRUE, parallelize_over = "resamples")
+#' hd |> evaluate(control = control_horizons(allow_par = TRUE, parallelize_over = "resamples"))
 #'
 #' # Thirty cores, one config per worker, checkpointed.
 #' future::plan(future::multisession, workers = 30)
-#' hd |> evaluate(allow_par = TRUE, output_dir = "output/run")
+#' hd |> evaluate(control = control_horizons(allow_par = TRUE, output_dir = "output/run"))
 #' ```
 #'
 #' Before dispatch, BLAS, OpenMP, data.table and ranger threads are pinned to
@@ -135,7 +144,7 @@
 #' ```
 #' runs <- lapply(subsets, function(hd) {
 #'   tryCatch(
-#'     evaluate(hd, verbose = FALSE),
+#'     evaluate(hd, control = control_horizons(verbose = FALSE)),
 #'     horizons_all_configs_failed = function(e) e$results
 #'   )
 #' })
@@ -173,16 +182,35 @@
 #'
 #' @export
 evaluate <- function(x,
-                     metric           = "rpd",
-                     prune            = TRUE,
-                     prune_threshold  = 1.0,
-                     allow_par        = FALSE,
-                     parallelize_over = "auto",
-                     output_dir       = NULL,
-                     seed             = 307L,
-                     verbose          = TRUE) {
+                     metric          = "rpd",
+                     prune           = TRUE,
+                     prune_threshold = 1.0,
+                     seed            = 307L,
+                     control         = control_horizons()) {
 
   start_time <- Sys.time()
+
+  ## How the run goes: the fields evaluate() reads, defaults filled in, and
+  ## the record of it on the evaluation
+  control          <- resolve_control(control, "evaluate")
+  allow_par        <- control$allow_par
+  parallelize_over <- control$parallelize_over
+  output_dir       <- control$output_dir
+  verbose          <- control$verbose
+
+  ## Dispatching configs needs a checkpoint directory; "auto" never chooses
+  ## the configs axis without one, so only an explicit request is refused
+  ## (#233).
+  if (allow_par && parallelize_over == "configs" && is.null(output_dir)) {
+
+    abort_horizons(c(
+      "{.code parallelize_over = \"configs\"} needs an {.arg output_dir} to checkpoint each configuration into.",
+      "i" = "Set {.code control_horizons(output_dir = )}, or use {.code parallelize_over = \"resamples\"}."
+    ), kind = "input")
+
+  }
+
+  collector <- log_open("evaluate")
 
   ## -----------------------------------------------------------------------
   ## Step 0: Structural validation
@@ -304,12 +332,16 @@ evaluate <- function(x,
   ## sequential, with a warning, when there is nothing to run on.
 
   axis <- resolve_parallel_axis(parallelize_over, allow_par,
-                                n_configs = nrow(configs), cv_folds = cv_folds)
+                                n_configs      = nrow(configs),
+                                cv_folds       = cv_folds,
+                                has_output_dir = !is.null(output_dir))
 
-  if (allow_par && !check_parallel_backend("evaluate()")) {
+  if (allow_par && !check_parallel_backend("evaluate", collector)) {
 
     axis <- resolve_parallel_axis(parallelize_over, allow_par = FALSE,
-                                  n_configs = nrow(configs), cv_folds = cv_folds)
+                                  n_configs      = nrow(configs),
+                                  cv_folds       = cv_folds,
+                                  has_output_dir = !is.null(output_dir))
 
   }
 
@@ -318,20 +350,8 @@ evaluate <- function(x,
 
   if (axis$axis != "sequential") {
 
-    warn_if_mirai_preferred()
-
     unpin_threads <- pin_parent_threads()
     on.exit(unpin_threads(), add = TRUE)
-
-  }
-
-  if (axis$dispatch_configs && is.null(output_dir)) {
-
-    rlang::abort(paste0(
-      "Dispatching configs to workers (parallelize_over = \"", axis$axis,
-      "\") requires `output_dir` for checkpoint safety. ",
-      "Provide an output directory or use parallelize_over = \"resamples\"."
-    ))
 
   }
 
@@ -760,11 +780,13 @@ evaluate <- function(x,
     ## -------------------------------------------------------------------
 
     ## The plan is the user's: evaluate() neither sets nor restores one.
-    ## The globals ceiling is declared (EVAL_WORKER_PAYLOAD_LIMIT, from the
-    ## measured payload) so a payload regression aborts with future's clear
-    ## "size of the globals" error rather than R's long-vector message.
+    ## The globals ceiling is declared (max_worker_payload: the user's
+    ## future.globals.maxSize when they set one, else EVAL_WORKER_PAYLOAD_LIMIT,
+    ## from the measured payload) so a payload regression aborts with
+    ## future's clear "size of the globals" error rather than R's long-vector
+    ## message.
     old_max_size <- getOption("future.globals.maxSize")
-    options(future.globals.maxSize = EVAL_WORKER_PAYLOAD_LIMIT)
+    options(future.globals.maxSize = control$max_worker_payload)
     on.exit(options(future.globals.maxSize = old_max_size), add = TRUE)
 
     if (verbose) {
@@ -910,7 +932,7 @@ evaluate <- function(x,
     ## What every config's recipe ran with, the window's width included, so
     ## the results of an sg_window sweep can be told apart after the fact.
     recipe           = recipe_cfg,
-    control          = NULL,
+    control          = control,
     runtime_secs     = total_runtime,
     timestamp        = Sys.time()
   )
@@ -920,6 +942,9 @@ evaluate <- function(x,
   ## -----------------------------------------------------------------------
 
   class(x) <- c("horizons_eval", "horizons_data", "list")
+
+  ## What the run reported goes on the object's log before it is certified
+  x$log <- log_close(collector, x$log)
 
   ## Certify the contract before returning: structural checks only (see
   ## validate_horizons_eval), so every evaluate() return matches invariant I5
@@ -957,6 +982,9 @@ evaluate <- function(x,
     ))
 
   }
+
+  ## Each warning the run recorded, raised once, after the tree
+  signal_log(collector, x)
 
   x
 

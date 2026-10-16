@@ -1065,7 +1065,7 @@ test_that("the synthetic selection record matches the real one", {
 
   ## Arrange
   fx  <- make_select_fixture()
-  out <- suppressWarnings(select_training(fx$targets, fx$pool, k = 5, verbose = FALSE))
+  out <- suppressWarnings(select_training(fx$targets, fx$pool, k = 5))
 
   ## Act
   synthetic <- make_selection_record()
@@ -3068,6 +3068,16 @@ describe("the class validators' new checks (#234)", {
       expect_true(any(grepl(paste0(slot, "$control must be NULL or a <horizons_control>"),
                             finding_of(validate_horizons_ensemble(obj)), fixed = TRUE)), label = slot)
     }
+
+  })
+
+  it("take a recorded selection control only as NULL or a horizons_control", {
+
+    obj <- selected_object(n_rows = 12L)
+    obj$selection$settings$control <- list(chunk_size = 500L)
+
+    expect_true(any(grepl("selection$settings$control must be NULL or a <horizons_control>",
+                          finding_of(validate_horizons_data(obj)), fixed = TRUE)))
 
   })
 

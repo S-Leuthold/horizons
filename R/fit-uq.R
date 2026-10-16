@@ -1,4 +1,28 @@
 ## ===========================================================================
+## conformal_min_rows() — the fewest scores a split-conformal level needs
+## ===========================================================================
+
+#' The fewest calibration scores a split-conformal interval needs
+#'
+#' The correction takes the `ceiling(level * (n + 1))`-th smallest score,
+#' which exists only when that index is at most `n`, that is when
+#' `n >= level / (1 - level)`: 9 scores at 0.90. Below it the conformal
+#' interval is unbounded, and `compute_c_alpha()`'s clamp to the largest score
+#' would serve an interval that covers less than `level`.
+#'
+#' @param level Numeric in (0, 1).
+#' @return Integer.
+#' @keywords internal
+#' @noRd
+conformal_min_rows <- function(level) {
+
+  ### The same epsilon guard as cv_plus_indices(): 0.9 / 0.1 is 8.999...
+  as.integer(ceiling(level / (1 - level) - 1e-9))
+
+}
+
+
+## ===========================================================================
 ## compute_c_alpha() — conformal finite-sample correction
 ## ===========================================================================
 
@@ -74,10 +98,13 @@ compute_c_alpha <- function(scores, level) {
 #'   which the back-transformed calibration predictions are clamped to, as
 #'   `predict()` clamps the point predictions the intervals are served
 #'   around. Default `c(0, Inf)`.
+#' @param min_calib_rows Integer. The fewest calibration rows the bundle is
+#'   computed from, before and after rows without an outcome are dropped;
+#'   `control_horizons(min_calib_rows = )`. Default `N_CALIB_MIN`.
 #'
 #' @return Named list with fields: `quantile_model`, `scores`, `n_calib`,
 #'   `level_default`, `oof_coverage`, `mean_width`, `prepped_recipe`.
-#'   Returns NULL if calibration set is too small (`n < N_CALIB_MIN`).
+#'   Returns NULL if calibration set is too small (`n < min_calib_rows`).
 #'   Aborts with class `horizons_error_internal` when an out-of-fold `.row`
 #'   falls outside the rows the model was fit on, or when the calibration
 #'   predictions or features do not have one row per row of `calib_data`.
@@ -90,13 +117,14 @@ fit_uq <- function(fitted_workflow,
                    transformation  = "none",
                    level_default   = DEFAULT_UQ_LEVEL,
                    seed            = NULL,
-                   outcome_range   = DEFAULT_OUTCOME_RANGE) {
+                   outcome_range   = DEFAULT_OUTCOME_RANGE,
+                   min_calib_rows  = N_CALIB_MIN) {
 
   outcome_col <- role_map$variable[role_map$role == "outcome"]
 
   ## --- Guard: NULL or insufficient calibration data -------------------------
 
-  if (is.null(calib_data) || nrow(calib_data) < N_CALIB_MIN) {
+  if (is.null(calib_data) || nrow(calib_data) < min_calib_rows) {
 
     return(NULL)
 
@@ -278,8 +306,9 @@ fit_uq <- function(fitted_workflow,
   scores  <- scores[!is.na(scores)]
   n_calib <- length(scores)
 
-  ## Re-check minimum after NA removal
-  if (n_calib < N_CALIB_MIN) {
+  ## Re-check minimum after NA removal, and the order statistic's own floor,
+  ## below which the interval would cover less than its level
+  if (n_calib < max(min_calib_rows, conformal_min_rows(level_default))) {
 
     return(NULL)
 

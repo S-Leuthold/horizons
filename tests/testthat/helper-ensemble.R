@@ -72,7 +72,7 @@ build_ens <- function(method, compute_uq, optimize) {
   ### for its default strata breaks, which no test here is about.
   suppressWarnings(
     ensemble(ens_fitted(), method = method, optimize = optimize,
-             compute_uq = compute_uq, verbose = FALSE)
+             compute_uq = compute_uq)
   )
 
 }

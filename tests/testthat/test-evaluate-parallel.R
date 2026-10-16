@@ -195,7 +195,8 @@ describe("evaluate() parallel worker footprint", {
     withr::local_options(future.globals.maxSize = 12345)
 
     out <- utils::capture.output(expect_error(
-      suppressWarnings(evaluate(obj, allow_par = TRUE, output_dir = tmpdir)),
+      suppressWarnings(evaluate(obj, control = control_horizons(allow_par = TRUE, output_dir = tmpdir,
+                                                                verbose = TRUE))),
       "load_all"
     ))
 
@@ -226,7 +227,7 @@ describe("evaluate() - workers is gone", {
 
     obj <- make_eval_object(n_configs = 2)
 
-    expect_error(evaluate(obj, workers = 2L, verbose = FALSE), "unused argument")
+    expect_error(evaluate(obj, workers = 2L), "unused argument")
 
   })
 
@@ -272,7 +273,7 @@ build_allow_par_run <- function() {
   warnings    <- list()
 
   result <- withCallingHandlers(
-    evaluate(obj, allow_par = TRUE, verbose = FALSE, seed = 42L),
+    evaluate(obj, seed = 42L, control = control_horizons(allow_par = TRUE)),
     warning = function(w) {
       warnings[[length(warnings) + 1L]] <<- simpleWarning(conditionMessage(w))
       invokeRestart("muffleWarning")
@@ -320,7 +321,7 @@ describe("evaluate() - allow_par without a usable backend", {
     obj <- run$obj
 
     seq_result <- suppressWarnings(
-      evaluate(obj, allow_par = FALSE, verbose = FALSE, seed = 42L)
+      evaluate(obj, seed = 42L, control = control_horizons(allow_par = FALSE))
     )
     par_result <- run$result
 
@@ -341,25 +342,19 @@ describe("evaluate() - the parallel axis's setup", {
     ## option it sees and stops the run once the header is out
     run <- function(allow_par, workers) {
 
-      dir         <- withr::local_tempdir()
-      inside      <- NULL
-      mirai_calls <- 0L
+      dir    <- withr::local_tempdir()
+      inside <- NULL
 
       out <- utils::capture.output(testthat::with_mocked_bindings(
         tryCatch(
           suppressWarnings(suppressMessages(
-            evaluate(make_eval_object(n = 60, n_configs = 1), allow_par = allow_par,
-                     parallelize_over = "resamples", output_dir = dir, seed = 42L)
+            evaluate(make_eval_object(n = 60, n_configs = 1), seed = 42L, control = control_horizons(allow_par = allow_par, parallelize_over = "resamples", output_dir = dir, verbose = TRUE))
           )),
           header_rendered = function(e) NULL
         ),
         check_parallel_backend  = function(...) TRUE,
         registered_workers      = function() workers,
         registered_plan_label   = function() "multisession",
-        warn_if_mirai_preferred = function() {
-          mirai_calls <<- mirai_calls + 1L
-          invisible(FALSE)
-        },
         evaluate_single_config  = function(...) {
           inside <<- getOption("ranger.num.threads")
           rlang::abort("stop", class = "header_rendered")
@@ -369,10 +364,9 @@ describe("evaluate() - the parallel axis's setup", {
 
       manifest <- readRDS(file.path(dir, "eval_manifest.rds"))
 
-      list(line        = grep("Parallel:", out, value = TRUE, fixed = TRUE),
-           manifest    = manifest[c("plan", "workers", "axis")],
-           inside      = inside,
-           mirai_calls = mirai_calls)
+      list(line     = grep("Parallel:", out, value = TRUE, fixed = TRUE),
+           manifest = manifest[c("plan", "workers", "axis")],
+           inside   = inside)
 
     }
 
@@ -394,28 +388,90 @@ describe("evaluate() - the parallel axis's setup", {
 
     expect_identical(c(two$inside, unbounded$inside, sequential$inside), c(1L, 1L, 7L))
     expect_identical(getOption("ranger.num.threads"), 7L)
-    expect_identical(c(two$mirai_calls, unbounded$mirai_calls, sequential$mirai_calls),
-                     c(1L, 1L, 0L))
 
   })
 
 })
 
-describe("evaluate() - output_dir requirement", {
+describe("evaluate() - output_dir and the configs axis (#233)", {
 
-  it("is required when configs are dispatched to workers", {
+  it("refuses an explicit configs axis without an output_dir before anything runs", {
 
-    skip_on_cran()
-    local_plan(future::multisession, workers = 2)
-    obj <- make_eval_object(n_configs = 4)   # auto -> configs
+    obj <- make_eval_object(n_configs = 4)
+
+    local_mocked_bindings(
+      check_parallel_backend = function(...) stop("the plan was inspected"),
+      evaluate_single_config = function(...) stop("a configuration ran")
+    )
 
     expect_error(
-      suppressWarnings(
-        evaluate(obj, allow_par = TRUE, parallelize_over = "configs",
-                 output_dir = NULL, verbose = FALSE)
-      ),
-      "output_dir"
+      evaluate(obj, control = control_horizons(allow_par = TRUE, parallelize_over = "configs")),
+      "needs an `output_dir`", fixed = TRUE, class = "horizons_error_input"
     )
+
+  })
+
+  it("chooses the resamples axis on auto when there is no output_dir, however many configs", {
+
+    obj <- make_eval_object(n_configs = 4)   # 4 >= 3 folds: auto would choose configs with one
+
+    out <- utils::capture.output(testthat::with_mocked_bindings(
+      tryCatch(
+        suppressWarnings(evaluate(obj, seed = 42L,
+                                  control = control_horizons(allow_par = TRUE, verbose = TRUE))),
+        header_rendered = function(e) NULL
+      ),
+      check_parallel_backend = function(...) TRUE,
+      registered_workers     = function() 2L,
+      registered_plan_label  = function() "multisession",
+      evaluate_single_config = function(...) rlang::abort("stop", class = "header_rendered"),
+      .package = "horizons"
+    ))
+
+    expect_identical(grep("Parallel:", out, value = TRUE, fixed = TRUE),
+                     "│  Parallel: over resamples on multisession (2 workers)")
+
+  })
+
+})
+
+
+describe("evaluate() - the worker payload limit", {
+
+  it("dispatches under max_worker_payload, or a future.globals.maxSize the user set, and restores it", {
+
+    ## The configs axis runs only on an installed build
+    skip_if_dev_package()
+
+    obj <- make_eval_object(n_configs = 4)
+
+    run <- function(control) {
+      seen <- NULL
+      testthat::with_mocked_bindings(
+        testthat::with_mocked_bindings(
+          tryCatch(suppressWarnings(evaluate(obj, seed = 42L, control = control)),
+                   dispatched = function(e) NULL),
+          future_map = function(...) {
+            seen <<- getOption("future.globals.maxSize")
+            rlang::abort("stop", class = "dispatched")
+          },
+          .package = "furrr"
+        ),
+        check_parallel_backend = function(...) TRUE,
+        registered_workers     = function() 2L,
+        registered_plan_label  = function() "multisession",
+        .package = "horizons"
+      )
+      seen
+    }
+
+    withr::local_options(future.globals.maxSize = 2 * 1024^3)
+
+    expect_identical(run(control_horizons(allow_par = TRUE, output_dir = withr::local_tempdir(),
+                                          max_worker_payload = 7e8)), 7e8)
+    expect_identical(run(control_horizons(allow_par = TRUE, output_dir = withr::local_tempdir())),
+                     2 * 1024^3)
+    expect_identical(getOption("future.globals.maxSize"), 2 * 1024^3)
 
   })
 
@@ -448,8 +504,8 @@ build_configs_axis_run <- function(dir) {
   obj         <- make_eval_object(n_configs = 4)
 
   result <- suppressWarnings(
-    evaluate(obj, allow_par = TRUE, output_dir = dir, verbose = FALSE,
-             seed = 42L)
+    evaluate(obj,
+             seed = 42L, control = control_horizons(allow_par = TRUE, output_dir = dir))
   )
 
   list(obj = obj, result = result, plan_before = plan_before,
@@ -522,7 +578,7 @@ build_seq_checkpoints <- function(dir) {
 
   obj    <- make_eval_object(n = 60, n_configs = 4)
   result <- suppressWarnings(
-    evaluate(obj, output_dir = dir, verbose = FALSE, seed = 42L)
+    evaluate(obj, seed = 42L, control = control_horizons(output_dir = dir))
   )
 
   list(obj = obj, result = result)
@@ -548,8 +604,8 @@ describe("evaluate() - cross-mode checkpoint resume", {
     local_plan(future::multisession, workers = 2)
 
     par_result <- suppressWarnings(
-      evaluate(obj, allow_par = TRUE, output_dir = tmpdir, verbose = FALSE,
-               seed = 42L)
+      evaluate(obj,
+               seed = 42L, control = control_horizons(allow_par = TRUE, output_dir = tmpdir))
     )
 
     expect_equal(seq_result$evaluation$best_config,
@@ -752,7 +808,7 @@ build_axes_seq_run <- function() {
   obj$config$tuning$bayesian_iter <- 2L
 
   result <- suppressWarnings(
-    evaluate(obj, allow_par = FALSE, verbose = FALSE, seed = 42L)
+    evaluate(obj, seed = 42L, control = control_horizons(allow_par = FALSE))
   )
 
   list(obj = obj, result = result)
@@ -776,7 +832,7 @@ describe("evaluate() - results are identical across axes", {
     ## One config against three folds: auto resolves to the resamples axis,
     ## which needs no output_dir
     par_result <- suppressWarnings(
-      evaluate(obj, allow_par = TRUE, verbose = FALSE, seed = 42L)
+      evaluate(obj, seed = 42L, control = control_horizons(allow_par = TRUE))
     )
 
     expect_equal(par_result$evaluation$parallelize_over, "resamples")
@@ -800,8 +856,7 @@ describe("evaluate() - results are identical across axes", {
     tmpdir <- withr::local_tempdir()
 
     par_result <- suppressWarnings(
-      evaluate(obj, allow_par = TRUE, parallelize_over = "configs",
-               output_dir = tmpdir, verbose = FALSE, seed = 42L)
+      evaluate(obj, seed = 42L, control = control_horizons(allow_par = TRUE, parallelize_over = "configs", output_dir = tmpdir))
     )
 
     ## One config against three folds: "auto" would pick resamples
@@ -839,22 +894,21 @@ describe("evaluate() - recipe settings on the configs axis", {
     obj$config$recipe <- list(sg_window = 13L, pca_threshold = 0.995)
 
     seq_result <- suppressWarnings(
-      evaluate(obj, allow_par = FALSE, verbose = FALSE, seed = 42L)
+      evaluate(obj, seed = 42L, control = control_horizons(allow_par = FALSE))
     )
 
     default_obj <- obj
     default_obj$config$recipe <- NULL
 
     seq_default <- suppressWarnings(
-      evaluate(default_obj, allow_par = FALSE, verbose = FALSE, seed = 42L)
+      evaluate(default_obj, seed = 42L, control = control_horizons(allow_par = FALSE))
     )
 
     local_plan(future::multisession, workers = 2)
     tmpdir <- withr::local_tempdir()
 
     par_result <- suppressWarnings(
-      evaluate(obj, allow_par = TRUE, parallelize_over = "configs",
-               output_dir = tmpdir, verbose = FALSE, seed = 42L)
+      evaluate(obj, seed = 42L, control = control_horizons(allow_par = TRUE, parallelize_over = "configs", output_dir = tmpdir))
     )
 
     ## One config against three folds: "auto" would pick resamples

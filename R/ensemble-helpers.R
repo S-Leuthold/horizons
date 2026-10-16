@@ -182,12 +182,12 @@ build_oof_matrix <- function(object, members) {
 #' tune's control constructors default to `allow_par = TRUE`, so before
 #' 2026-09-15 the meta-learner tuning and OOF pass dispatched onto any
 #' registered `future::plan()` with no argument to say otherwise. Both calls
-#' now build their control here, from `ensemble(allow_par = )`, and the
-#' result is what the tests assert on.
+#' now build their control here, from the `allow_par` field of `ensemble()`'s
+#' control, and the result is what the tests assert on.
 #'
 #' @param kind `"grid"` (for `tune_grid()`) or `"resamples"` (for
 #'   `fit_resamples()`).
-#' @param allow_par Logical, from `ensemble()`.
+#' @param allow_par Logical, from `ensemble()`'s control.
 #' @return A `control_grid` or `control_resamples` object.
 #' @keywords internal
 #' @noRd
@@ -323,7 +323,7 @@ predict_members_on_test <- function(object, members) {
 #' @param grid The tuning grid (ignored when `optimize = FALSE`).
 #' @param extract_weights A function `(meta_fit, members) -> tibble(member,
 #'   coef)` that reads the member weighting from the fitted model.
-#' @param allow_par Logical. From `ensemble(allow_par = )`; both tune calls
+#' @param allow_par Logical. From `ensemble()`'s control; both tune calls
 #'   build their control through `meta_tune_control()` with it, so the
 #'   meta-learner never dispatches onto a registered plan unless asked.
 #'   Default `FALSE`.
@@ -348,7 +348,7 @@ fit_tuned_meta_learner <- function(object,
                                    seed      = DEFAULT_ENSEMBLE_SEED,
                                    allow_par = FALSE) {
 
-  ## `allow_par` (from `ensemble(allow_par = )`) reaches both tune calls via
+  ## `allow_par` (from `ensemble()`'s control) reaches both tune calls via
   ## meta_tune_control(); documented on the roxygen block above.
 
   started <- Sys.time()

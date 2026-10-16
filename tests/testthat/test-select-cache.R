@@ -58,11 +58,11 @@ test_that("a cached space draws exactly what a fresh one does", {
 
   x <- mini_targets(m$pool)
 
-  cached <- suppressWarnings(select_training(x, "mini", k = 5L, verbose = FALSE))
+  cached <- suppressWarnings(select_training(x, "mini", k = 5L))
   expect_true(cached$selection$search$cache$used)
   expect_length(space_files(m$cache), 1L)
 
-  fresh  <- suppressWarnings(select_training(x, m$pool, k = 5L, verbose = FALSE))
+  fresh  <- suppressWarnings(select_training(x, m$pool, k = 5L))
 
   expect_true(cached$selection$search$cache$hit)
   expect_false(fresh$selection$search$cache$used)
@@ -76,12 +76,12 @@ test_that("changing a lever misses the cache and keeps a second space", {
   m <- use_mini()
   x <- mini_targets(m$pool)
 
-  out <- suppressWarnings(select_training(x, "mini", k = 5L, window = 20, verbose = FALSE))
+  out <- suppressWarnings(select_training(x, "mini", k = 5L, window = 20))
 
   expect_false(out$selection$search$cache$hit)
   expect_length(space_files(m$cache), 2L)
 
-  again <- suppressWarnings(select_training(x, "mini", k = 5L, window = 20, verbose = FALSE))
+  again <- suppressWarnings(select_training(x, "mini", k = 5L, window = 20))
   expect_true(again$selection$search$cache$hit)
 
 })
@@ -91,7 +91,7 @@ test_that("a pool in memory is not cached, a library file is", {
   m <- use_mini()
   x <- mini_targets(m$pool)
 
-  obj <- suppressWarnings(select_training(x, m$pool, k = 5L, verbose = FALSE))
+  obj <- suppressWarnings(select_training(x, m$pool, k = 5L))
   expect_false(obj$selection$search$cache$used)
   expect_false(obj$selection$search$cache$hit)
   expect_identical(obj$selection$search$cache$reason, "pool passed in memory")
@@ -100,8 +100,8 @@ test_that("a pool in memory is not cached, a library file is", {
   path <- file.path(withr::local_tempdir(), "mine.qs2")
   qs2::qs_save(m$pool, path)
 
-  first  <- suppressWarnings(select_training(x, path, k = 5L, verbose = FALSE))
-  second <- suppressWarnings(select_training(x, path, k = 5L, verbose = FALSE))
+  first  <- suppressWarnings(select_training(x, path, k = 5L))
+  second <- suppressWarnings(select_training(x, path, k = 5L))
   expect_true(first$selection$search$cache$used)
   expect_false(first$selection$search$cache$hit)
   expect_true(second$selection$search$cache$hit)
@@ -115,7 +115,7 @@ test_that("a PLS space is never cached", {
   x <- mini_targets(m$pool)
 
   out <- suppressWarnings(select_training(x, "mini", k = 5L, space = "pls", ncomp = 2L,
-                                          properties = "clay", verbose = FALSE))
+                                          properties = "clay"))
   expect_false(out$selection$search$cache$used)
   expect_identical(out$selection$search$cache$reason, "pls space")
 
@@ -131,7 +131,7 @@ test_that("targets on another grid are searched on the library's and returned on
   m <- use_mini()
   x <- mini_targets(m$pool, wn = seq(700, 600, by = -4))
 
-  out <- suppressWarnings(select_training(x, "mini", k = 5L, verbose = FALSE))
+  out <- suppressWarnings(select_training(x, "mini", k = 5L))
 
   expect_identical(out$selection$search$mode, "full")
   expect_identical(out$selection$search$operation, "resampled")
@@ -150,7 +150,7 @@ test_that("targets short of the library by up to 50 cm-1 search the overlap, unc
   x <- mini_targets(m$pool, wn = seq(700, 630, by = -2))
 
   expect_warning(
-    out <- select_training(x, "mini", k = 5L, verbose = FALSE),
+    out <- select_training(x, "mini", k = 5L),
     "short of the library's range", class = "horizons_select_warning"
   )
 
@@ -167,7 +167,7 @@ test_that("targets short by more than 50 cm-1 are refused, naming the end", {
   m <- use_mini()
   x <- mini_targets(m$pool, wn = seq(700, 660, by = -2))
 
-  expect_error(select_training(x, "mini", k = 5L, verbose = FALSE),
+  expect_error(select_training(x, "mini", k = 5L),
                class = "horizons_input_error", regexp = "low end")
 
 })
@@ -179,7 +179,7 @@ test_that("an unreadable or foreign cache file is rebuilt, not trusted", {
   writeLines("not a space", f)
 
   x   <- mini_targets(m$pool)
-  out <- suppressWarnings(select_training(x, "mini", k = 5L, verbose = FALSE))
+  out <- suppressWarnings(select_training(x, "mini", k = 5L))
 
   expect_false(out$selection$search$cache$hit)
   expect_s3_class(qs2::qs_read(f), "horizons_space_cache")
@@ -311,7 +311,7 @@ test_that("a batch on a coarse canonical grid counts as full coverage", {
 
   warned <- character()
   out <- withCallingHandlers(
-    select_training(x, "mini", k = 5L, verbose = FALSE),
+    select_training(x, "mini", k = 5L),
     warning = function(w) { warned <<- c(warned, conditionMessage(w)); invokeRestart("muffleWarning") }
   )
 
@@ -350,7 +350,7 @@ test_that("a cached space whose rows are not the library's is rebuilt over, with
   qs2::qs_save(obj, f)
 
   x <- mini_targets(m$pool)
-  expect_warning(select_training(x, "mini", k = 5L, verbose = FALSE),
+  expect_warning(select_training(x, "mini", k = 5L),
                  "does not match this library's rows", class = "horizons_select_warning")
 
   fixed <- qs2::qs_read(f)

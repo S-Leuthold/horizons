@@ -23,9 +23,8 @@ select_training(
   clusters = NULL,
   cluster_min = 30L,
   twin_ratio = SELECT_TWIN_RATIO,
-  chunk_size = 500L,
-  seed = 1L,
-  verbose = TRUE
+  seed = 307L,
+  control = control_horizons()
 )
 }
 \arguments{
@@ -119,15 +118,19 @@ Currently \code{0.05}, an internal constant carried over from an earlier rule
 and still to be calibrated on replicate scans, so treat the value as
 provisional rather than settled.}
 
-\item{chunk_size}{\code{integer.} Targets per distance chunk. Default: \code{500}.}
-
 \item{seed}{\code{integer.} Seed for every stochastic step of the verb: the
 target clustering under \code{scope = "cluster"}, and the pool sample the
 resemblance check draws its reference distribution from. The caller's
 RNG state is saved and restored, so the verb does not advance it.
-Default: \code{1}.}
+Default: \code{307}, as the other verbs'.}
 
-\item{verbose}{\code{logical.} Print the report. Default: \code{TRUE}.}
+\item{control}{A \code{\link[=control_horizons]{control_horizons()}} object: how the run goes, not what
+it computes. \code{select_training()} reads \code{verbose}, \code{debug},
+\code{keep_traces}, \code{chunk_size} (targets per distance chunk) and
+\code{min_resemblance_rows} (the fewest library rows the resemblance check
+takes its reference distribution from), and refuses any other field
+that is set. The control it ran with, defaults filled in, is recorded
+as \code{selection$settings$control}.}
 }
 \value{
 \code{horizons_data.} Rows drawn from \code{pool}, on the targets'

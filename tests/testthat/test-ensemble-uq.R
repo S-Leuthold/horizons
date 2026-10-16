@@ -580,6 +580,13 @@ describe("ensemble UQ - degradation and gates", {
 
     expect_null(result)
 
+    ## The same rows calibrate at a minimum below them. suppressWarnings():
+    ## rsample's note that 25 rows are too few for its default strata breaks
+    expect_false(is.null(suppressWarnings(compute_ensemble_uq(
+      oof = oof_small, contract = ens_ref$ensemble, optimize = FALSE,
+      conformal_seed = 1307L, min_calib_rows = 10L
+    ))))
+
   })
 
   it("compute_ensemble_uq drops non-finite residuals, and returns NULL when too few are left", {
@@ -647,7 +654,28 @@ describe("ensemble UQ - degradation and gates", {
       expect_match(msgs, "Ensemble UQ could not be calibrated", fixed = TRUE)
       expect_no_message(fit_ensemble_uq(no_uq, verbose = FALSE))
 
+      ## Below CV+'s own floor, the note names the floor rather than the minimum
+      expect_match(testthat::capture_messages(fit_ensemble_uq(no_uq, min_calib_rows = 9L)),
+                   "needs >= 19", fixed = TRUE)
+
     }
+
+  })
+
+  it("fit_ensemble_uq hands its minimum to the calibration", {
+
+    ens_ref <- ens_built("weighted")
+    no_uq   <- ens_ref
+    no_uq$ensemble["uq"] <- list(NULL)
+
+    seen <- NULL
+    local_mocked_bindings(compute_ensemble_uq = function(..., min_calib_rows) {
+      seen <<- min_calib_rows
+      NULL
+    })
+
+    fit_ensemble_uq(no_uq, verbose = FALSE, min_calib_rows = 12L)
+    expect_identical(seen, 12L)
 
   })
 

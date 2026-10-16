@@ -24,8 +24,7 @@ describe("fit() - NA-outcome rows (#67)", {
   ## One verbose run, keeping the console tree for the drop report.
   out <- utils::capture.output(
     r <- suppressWarnings(
-      fit(obj, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE,
-          verbose = TRUE, seed = 42L)
+      fit(obj, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE, seed = 42L, control = control_horizons(verbose = TRUE))
     )
   )
 
@@ -61,8 +60,7 @@ describe("fit() - NA-outcome rows with UQ on (#67)", {
   obj$config$tuning$final_bayesian_iter <- 0L
 
   r <- suppressWarnings(
-    fit(obj, n_best = 1L, compute_uq = TRUE, compute_ad = FALSE,
-        verbose = FALSE, seed = 42L)
+    fit(obj, n_best = 1L, compute_uq = TRUE, compute_ad = FALSE, seed = 42L)
   )
 
   analysis  <- obj$data$analysis
@@ -104,8 +102,7 @@ describe("fit() - response_bound (#68)", {
   obj$config$tuning$final_bayesian_iter <- 0L
 
   r <- suppressWarnings(
-    fit(obj, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE,
-        verbose = FALSE, seed = 12L)
+    fit(obj, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE, seed = 12L)
   )
 
   it("equals the largest fit-row outcome times RESPONSE_BOUND_MARGIN", {
@@ -145,7 +142,7 @@ describe("fit() - evaluate()'s response trim (#77)", {
     v <- suppressWarnings(validate(obj, remove_outliers = "response"))
   )
 
-  ev      <- suppressWarnings(evaluate(v, prune = FALSE, verbose = FALSE, seed = 307L))
+  ev      <- suppressWarnings(evaluate(v, prune = FALSE, seed = 307L))
   trimmed <- ev$evaluation$response_trim$trimmed_ids
 
   ## What fit() hands its member, without tuning: the split, the rows it fits
@@ -160,7 +157,7 @@ describe("fit() - evaluate()'s response trim (#77)", {
       withCallingHandlers(
         testthat::with_mocked_bindings(
           tryCatch(
-            fit(x, compute_uq = FALSE, compute_ad = FALSE, verbose = verbose, seed = 307L),
+            fit(x, compute_uq = FALSE, compute_ad = FALSE, seed = 307L, control = control_horizons(verbose = verbose)),
             horizons_all_members_failed = function(e) NULL
           ),
           fit_single_config = function(...) {
@@ -230,8 +227,7 @@ describe("fit() - evaluate()'s response trim (#77)", {
     no_record$validation$outliers["response_trim"] <- list(NULL)
 
     expect_error(
-      suppressWarnings(fit(no_record, compute_uq = FALSE, compute_ad = FALSE,
-                           verbose = FALSE)),
+      suppressWarnings(fit(no_record, compute_uq = FALSE, compute_ad = FALSE)),
       "does not index the rows this object models",
       class = "horizons_input_error"
     )
@@ -239,7 +235,7 @@ describe("fit() - evaluate()'s response trim (#77)", {
   })
 
   f <- suppressWarnings(
-    fit(ev, compute_uq = FALSE, compute_ad = FALSE, verbose = FALSE, seed = 307L)
+    fit(ev, compute_uq = FALSE, compute_ad = FALSE, seed = 307L)
   )
 
   it("fits and scores end to end on the trimmed split", {
@@ -303,7 +299,7 @@ describe("fit() - a trim request changed after evaluate() (#137)", {
 
   quiet_evaluate <- function(x) {
 
-    suppressWarnings(evaluate(x, prune = FALSE, verbose = FALSE, seed = 307L))
+    suppressWarnings(evaluate(x, prune = FALSE, seed = 307L))
 
   }
 
@@ -314,8 +310,7 @@ describe("fit() - a trim request changed after evaluate() (#137)", {
   refusal <- function(x) {
 
     cnd <- rlang::catch_cnd(
-      suppressWarnings(fit(x, compute_uq = FALSE, compute_ad = FALSE,
-                           verbose = FALSE, seed = 307L)),
+      suppressWarnings(fit(x, compute_uq = FALSE, compute_ad = FALSE, seed = 307L)),
       classes = "horizons_input_error"
     )
 
@@ -379,7 +374,7 @@ describe("fit() - a trim request changed after evaluate() (#137)", {
     other_outcome$validation$outliers$response_trim$outcome <- "pH"
 
     err <- expect_error(
-      fit(other_outcome, compute_uq = FALSE, compute_ad = FALSE, verbose = FALSE, seed = 307L),
+      fit(other_outcome, compute_uq = FALSE, compute_ad = FALSE, seed = 307L),
       class = "horizons_error_validation"
     )
     expect_true(any(grepl("response-trim request is for pH, but the object models SOC",
@@ -432,10 +427,8 @@ describe("fit() - a trim request changed after evaluate() (#137)", {
     expect_null(check_trim_request(same))
     expect_null(check_trim_request(quiet_validate(untrimmed)))
 
-    f_before <- suppressWarnings(fit(trimmed, compute_uq = FALSE, compute_ad = FALSE,
-                                     verbose = FALSE, seed = 307L))
-    f_same   <- suppressWarnings(fit(same, compute_uq = FALSE, compute_ad = FALSE,
-                                     verbose = FALSE, seed = 307L))
+    f_before <- suppressWarnings(fit(trimmed, compute_uq = FALSE, compute_ad = FALSE, seed = 307L))
+    f_same   <- suppressWarnings(fit(same, compute_uq = FALSE, compute_ad = FALSE, seed = 307L))
 
     expect_s3_class(f_same, "horizons_fit")
     expect_identical(f_same$models$results$rmse, f_before$models$results$rmse)
@@ -474,8 +467,7 @@ describe("fit() - calibration after a response trim (#77)", {
 
   testthat::with_mocked_bindings(
     tryCatch(
-      suppressWarnings(fit(v, compute_uq = TRUE, compute_ad = TRUE,
-                           verbose = FALSE, seed = 307L)),
+      suppressWarnings(fit(v, compute_uq = TRUE, compute_ad = TRUE, seed = 307L)),
       horizons_all_members_failed = function(e) NULL
     ),
     fit_single_config = function(...) {

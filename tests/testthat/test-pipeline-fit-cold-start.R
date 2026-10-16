@@ -22,16 +22,16 @@ describe("fit() - cold start from one configuration (#45)", {
 
   cold_out <- utils::capture.output(
     cold <- suppressWarnings(
-      fit(obj, compute_uq = FALSE, compute_ad = FALSE, verbose = TRUE, seed = 42L)
+      fit(obj, compute_uq = FALSE, compute_ad = FALSE, seed = 42L, control = control_horizons(verbose = TRUE))
     )
   )
 
   ## The same configuration through evaluate(), at the same seed
-  ev <- suppressWarnings(evaluate(obj, prune = FALSE, verbose = FALSE, seed = 42L))
+  ev <- suppressWarnings(evaluate(obj, prune = FALSE, seed = 42L))
 
   warm_out <- utils::capture.output(
     warm <- suppressWarnings(
-      fit(ev, compute_uq = FALSE, compute_ad = FALSE, verbose = TRUE, seed = 42L)
+      fit(ev, compute_uq = FALSE, compute_ad = FALSE, seed = 42L, control = control_horizons(verbose = TRUE))
     )
   )
 
@@ -86,10 +86,10 @@ describe("fit() - cold start from one configuration (#45)", {
     with_na$data$analysis$SOC[c(2, 9, 30)] <- NA_real_
 
     cold_na <- suppressWarnings(
-      fit(with_na, compute_uq = FALSE, compute_ad = FALSE, verbose = FALSE, seed = 7L)
+      fit(with_na, compute_uq = FALSE, compute_ad = FALSE, seed = 7L)
     )
     ev_na <- suppressWarnings(
-      evaluate(with_na, prune = FALSE, verbose = FALSE, seed = 7L)
+      evaluate(with_na, prune = FALSE, seed = 7L)
     )
 
     expect_identical(cold_na$models$split$data, ev_na$evaluation$split$data)
@@ -169,7 +169,7 @@ describe("fit() - cold start from one configuration (#45)", {
       testthat::with_mocked_bindings(
         tryCatch(
           suppressWarnings(
-            fit(budget, compute_uq = FALSE, compute_ad = FALSE, verbose = TRUE)
+            fit(budget, compute_uq = FALSE, compute_ad = FALSE, control = control_horizons(verbose = TRUE))
           ),
           horizons_all_members_failed = function(e) NULL
         ),
@@ -204,13 +204,12 @@ describe("fit() - cold start from one configuration (#45)", {
     skip_unless_slow_tier()
 
     cold_rmse <- suppressWarnings(
-      fit(obj, metric = "rmse", compute_uq = FALSE, compute_ad = FALSE,
-          verbose = FALSE, seed = 42L)
+      fit(obj, metric = "rmse", compute_uq = FALSE, compute_ad = FALSE, seed = 42L)
     )
 
     again_out <- utils::capture.output(
       again <- suppressWarnings(
-        fit(cold_rmse, compute_uq = FALSE, compute_ad = FALSE, verbose = TRUE, seed = 42L)
+        fit(cold_rmse, compute_uq = FALSE, compute_ad = FALSE, seed = 42L, control = control_horizons(verbose = TRUE))
       )
     )
 
@@ -241,7 +240,7 @@ describe("fit() - cold start from one configuration (#45)", {
     )
 
     err <- expect_error(
-      fit(legacy, compute_uq = FALSE, compute_ad = FALSE, verbose = FALSE, seed = 42L),
+      fit(legacy, compute_uq = FALSE, compute_ad = FALSE, seed = 42L),
       class = "horizons_error_validation"
     )
 
@@ -264,7 +263,7 @@ describe("fit() - cold start from one configuration (#45)", {
     )
 
     err <- expect_error(
-      fit(legacy, compute_uq = FALSE, compute_ad = FALSE, verbose = FALSE, seed = 42L),
+      fit(legacy, compute_uq = FALSE, compute_ad = FALSE, seed = 42L),
       class = "horizons_error_validation"
     )
 
@@ -277,7 +276,7 @@ describe("fit() - cold start from one configuration (#45)", {
 
   it("is refused by ensemble(), as any single-member fit is", {
 
-    expect_error(ensemble(cold, verbose = FALSE), "at least 2 members")
+    expect_error(ensemble(cold), "at least 2 members")
 
   })
 
@@ -285,7 +284,7 @@ describe("fit() - cold start from one configuration (#45)", {
 
     two <- make_eval_object(n = 60, n_configs = 2)
 
-    err <- expect_error(fit(two, verbose = FALSE), class = "horizons_input_error")
+    err <- expect_error(fit(two), class = "horizons_input_error")
 
     msg <- gsub("\\s+", " ", conditionMessage(err))   # undo cli line wrapping
     expect_match(msg, "can start without `evaluate()` only from a single configuration", fixed = TRUE)
@@ -302,7 +301,7 @@ describe("fit() - cold start from one configuration (#45)", {
     outcome <- gone$data$role_map$variable[gone$data$role_map$role == "outcome"]
     gone$data$analysis[[outcome]] <- NULL
 
-    err <- expect_error(fit(gone, verbose = FALSE), class = "horizons_error_validation")
+    err <- expect_error(fit(gone), class = "horizons_error_validation")
 
     expect_true(any(grepl(paste0("missing from analysis: ", outcome), err$findings, fixed = TRUE)))
 
@@ -321,7 +320,7 @@ describe("fit() - cold start from one configuration (#45)", {
     testthat::with_mocked_bindings(
       tryCatch(
         suppressWarnings(
-          fit(tuned, compute_uq = FALSE, compute_ad = FALSE, verbose = FALSE)
+          fit(tuned, compute_uq = FALSE, compute_ad = FALSE)
         ),
         horizons_all_members_failed = function(e) NULL
       ),
@@ -351,7 +350,7 @@ describe("fit() - cold start from one configuration (#45)", {
     ran <- 0L
 
     err <- testthat::with_mocked_bindings(
-      tryCatch(fit(wide, verbose = FALSE, seed = 42L), error = function(e) e),
+      tryCatch(fit(wide, seed = 42L), error = function(e) e),
       fit_single_config = function(...) { ran <<- ran + 1L; NULL },
       .package = "horizons"
     )
@@ -368,7 +367,7 @@ describe("fit() - cold start from one configuration (#45)", {
     none <- obj
     none$config$configs <- obj$config$configs[0, ]
 
-    expect_error(fit(none, verbose = FALSE), "configure()", class = "horizons_input_error")
+    expect_error(fit(none), "configure()", class = "horizons_input_error")
 
   })
 
@@ -383,7 +382,7 @@ describe("fit() - cold start from one configuration (#45)", {
     stray$data$analysis$stray_column <- seq_len(nrow(stray$data$analysis))
 
     expect_error(
-      fit(stray, compute_uq = FALSE, compute_ad = FALSE, verbose = FALSE, seed = 42L),
+      fit(stray, compute_uq = FALSE, compute_ad = FALSE, seed = 42L),
       "[Mm]issing from.*role_map"
     )
 
@@ -395,7 +394,7 @@ describe("fit() - cold start from one configuration (#45)", {
 
     for (x in list(obj, ev)) {
 
-      err <- expect_error(fit(x, metric = "accuracy", verbose = FALSE),
+      err <- expect_error(fit(x, metric = "accuracy"),
                           class = "horizons_input_error")
 
       msg <- gsub("\\s+", " ", conditionMessage(err))   # undo cli line wrapping
@@ -425,7 +424,7 @@ describe("fit() - cold start with UQ and AD (#45)", {
   obj$data$analysis$SOC[seq(5, 50, by = 5)] <- NA_real_
 
   cold <- suppressWarnings(
-    fit(obj, compute_uq = TRUE, compute_ad = TRUE, verbose = FALSE, seed = 42L)
+    fit(obj, compute_uq = TRUE, compute_ad = TRUE, seed = 42L)
   )
 
   modelled_ids <- obj$data$analysis$sample_id[!is.na(obj$data$analysis$SOC)]

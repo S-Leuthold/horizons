@@ -24,19 +24,19 @@
 #' n_configs * T / k with k the effective inner speedup, which is capped at
 #' `cv_folds`. Configs wins whenever `n_configs >= k`, and always once
 #' `n_configs` exceeds the worker count, so the worker count cancels and the
-#' rule is `n_configs >= cv_folds`.
+#' rule is `n_configs >= cv_folds`. Dispatching configs needs a checkpoint
+#' directory, so `"auto"` chooses it only when there is one (#233).
 #'
-#' `"both"` (a nested plan, configs across the outer level and folds across
-#' the inner) is not in the vocabulary for v1, and a nested plan registered
-#' by the caller does not enable it either: on the configs axis the worker
-#' runs tune sequentially, so a second plan level is never used. The package
-#' does not build or endorse nesting until the topology bake-off (S1) shows
-#' it is worth it.
+#' A nested plan registered by the caller does not change the axis: on the
+#' configs axis the worker runs tune sequentially, so a second plan level is
+#' never used. `control_horizons()` refuses `"both"` with that hint.
 #'
-#' @param parallelize_over One of `"auto"`, `"configs"`, `"resamples"`.
+#' @param parallelize_over One of `"auto"`, `"configs"`, `"resamples"`, as
+#'   `control_horizons()` checked it.
 #' @param allow_par Logical. `FALSE` short-circuits to sequential.
 #' @param n_configs Integer. Number of configs to evaluate.
 #' @param cv_folds Integer. CV folds per config.
+#' @param has_output_dir Logical. Whether the run checkpoints.
 #'
 #' @return A list: `axis` (`"sequential"`, `"configs"` or `"resamples"`),
 #'   `dispatch_configs` (logical; use the furrr branch), `tune_allow_par`
@@ -45,33 +45,12 @@
 #'   tune, which may rewrite it, see the note on `tune:::.update_parallel_over`
 #'   in the spec).
 #' @keywords internal
-resolve_parallel_axis <- function(parallelize_over, allow_par, n_configs, cv_folds) {
+resolve_parallel_axis <- function(parallelize_over, allow_par, n_configs, cv_folds,
+                                  has_output_dir) {
 
-  if (identical(parallelize_over, "both")) {
-
-    cli::cli_abort(c(
-      "{.arg parallelize_over} = {.val both} is not supported.",
-      "i" = "Nested parallelism is the user's to register: set a nested {.fn future::plan} and use {.val configs}. See evaluate-design.md, Parallelism."
-    ))
-
-  }
-
-  parallelize_over <- rlang::arg_match0(parallelize_over, PARALLELIZE_OVER_VALUES,
-                                        arg_nm = "parallelize_over")
-
-  if (!rlang::is_bool(allow_par)) {
-
-    cli::cli_abort("{.arg allow_par} must be TRUE or FALSE, not {.val {allow_par}}.")
-
-  }
-
-  if (!is.numeric(n_configs) || length(n_configs) != 1 || is.na(n_configs) || n_configs < 1) {
-
-    cli::cli_abort("{.arg n_configs} must be a single positive number, not {.val {n_configs}}.")
-
-  }
-
-  ### cv_folds is read from config$tuning, which the door validator checks.
+  ### control_horizons() checked parallelize_over and allow_par; n_configs is
+  ### the configured grid's row count, and cv_folds config$tuning's, both of
+  ### which the door validator checks.
 
   if (!allow_par) {
 
@@ -86,7 +65,7 @@ resolve_parallel_axis <- function(parallelize_over, allow_par, n_configs, cv_fol
 
   axis <- if (parallelize_over == "auto") {
 
-    if (n_configs >= cv_folds) "configs" else "resamples"
+    if (n_configs >= cv_folds && has_output_dir) "configs" else "resamples"
 
   } else {
 
@@ -180,11 +159,17 @@ registered_workers <- function() {
 #' (same class, same recorded call), so the message is written to be true of
 #' both.
 #'
-#' @param where Character. The verb, for the message (`"evaluate()"`).
-#' @return `TRUE` if parallel dispatch is possible, else `FALSE` after a
-#'   warning.
+#' Running sequentially is a substitution (something other than what was
+#' asked ran), so it is recorded on the verb's collector as a
+#' `substitution` warning, which the verb raises at its end.
+#'
+#' @param verb Character. The verb, for the message (`"evaluate"`).
+#' @param collector The verb's collector, from `log_open()`.
+#' @param call The frame a refusal reports: the verb's.
+#' @return `TRUE` if parallel dispatch is possible, else `FALSE`, with the
+#'   warning recorded.
 #' @keywords internal
-check_parallel_backend <- function(where = "evaluate()") {
+check_parallel_backend <- function(verb, collector, call = rlang::caller_env()) {
 
   n     <- registered_workers()
   label <- registered_plan_label()
@@ -199,10 +184,10 @@ check_parallel_backend <- function(where = "evaluate()") {
     ## recognises, and it is a real guard for a broken library.
     if (!requireNamespace("future.apply", quietly = TRUE)) {
 
-      cli::cli_abort(c(
+      abort_horizons(c(
         "{.pkg future.apply} is not installed, but tune's future backend calls it.",
         "i" = "Install it with {.code install.packages(\"future.apply\")}."
-      ))
+      ), kind = "dependency", call = call)
 
     }
 
@@ -210,49 +195,12 @@ check_parallel_backend <- function(where = "evaluate()") {
 
   }
 
-  cli::cli_warn(c(
-    "!" = "{where} was asked to run in parallel ({.code allow_par = TRUE}) but the registered future plan offers {n} worker{?s} ({.val {label}}).",
-    "i" = "Running sequentially instead.",
+  log_warning(collector, "substitution", c(
+    "{.fn {verb}} was asked to run in parallel ({.code allow_par = TRUE}) but the registered future plan offers {n} worker{?s} ({.val {label}}), so it ran sequentially.",
     "i" = "Register a backend before calling, for example {.code future::plan(future::multisession, workers = 4)}."
   ))
 
   FALSE
-
-}
-
-#' Warn when tune would silently prefer a mirai daemon pool
-#'
-#' @description
-#' `tune:::choose_framework()` defaults to mirai whenever both a future plan
-#' and a mirai daemon pool have two or more workers, and the message that
-#' would say so fires only under a verbose flag tune's internals never pass.
-#' Detect the situation so the run, and the manifest, do not describe a plan
-#' that was not used.
-#'
-#' @return Invisibly, `TRUE` if the warning fired.
-#' @keywords internal
-warn_if_mirai_preferred <- function() {
-
-  if (!requireNamespace("mirai", quietly = TRUE)) return(invisible(FALSE))
-
-  connections <- tryCatch(mirai::status()$connections, error = function(e) 0L)
-
-  if (is.null(connections) || is.na(connections) || connections < 2L) {
-
-    return(invisible(FALSE))
-
-  }
-
-  n_future <- registered_workers()
-
-  if (!is.na(n_future) && n_future < 2L) return(invisible(FALSE))
-
-  cli::cli_warn(c(
-    "!" = "A mirai daemon pool ({connections} connections) and a future plan ({.val {registered_plan_label()}}) are both registered.",
-    "i" = "tune prefers mirai when both are live and does not say so. Stop the daemons ({.code mirai::daemons(0)}) to run on the future plan."
-  ))
-
-  invisible(TRUE)
 
 }
 
@@ -269,7 +217,7 @@ warn_if_mirai_preferred <- function() {
 #' code (proven 2026-09-15: the environment variable changed nothing, the
 #' runtime call did). `RhpcBLASctl` provides the runtime call and is a
 #' Suggests; without it the parent relies on the environment variables being
-#' set before R starts, which this function says once.
+#' set before R starts.
 #'
 #' @return A function that restores the previous settings; call it from
 #'   `on.exit()`.
@@ -285,14 +233,6 @@ pin_parent_threads <- function() {
 
     tryCatch(RhpcBLASctl::blas_set_num_threads(1L), error = function(e) NULL)
     tryCatch(RhpcBLASctl::omp_set_num_threads(1L),  error = function(e) NULL)
-
-  } else if (!nzchar(Sys.getenv("OPENBLAS_NUM_THREADS")) &&
-             !nzchar(Sys.getenv("OMP_NUM_THREADS"))) {
-
-    cli::cli_inform(c(
-      "i" = "{.pkg RhpcBLASctl} is not installed, so BLAS threads cannot be pinned at runtime.",
-      "i" = "Set {.envvar OPENBLAS_NUM_THREADS=1} and {.envvar OMP_NUM_THREADS=1} before starting R to avoid oversubscription."
-    ))
 
   }
 

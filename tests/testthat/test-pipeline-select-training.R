@@ -10,7 +10,7 @@
 #' @noRd
 quiet_select <- function(fx, ...) {
 
-  select_training(fx$targets, fx$pool, ..., verbose = FALSE)
+  select_training(fx$targets, fx$pool, ...)
 
 }
 
@@ -68,10 +68,10 @@ test_that("select_training() rejects inputs that are not horizons_data", {
 
   fx <- select_fixture(n_pool = 60)
 
-  expect_error(select_training(data.frame(a = 1), fx$pool, verbose = FALSE),
+  expect_error(select_training(data.frame(a = 1), fx$pool),
                regexp = "`x` must be a horizons_data object", fixed = TRUE,
                class = "horizons_input_error")
-  expect_error(select_training(fx$targets, data.frame(a = 1), verbose = FALSE),
+  expect_error(select_training(fx$targets, data.frame(a = 1)),
                regexp = "`library` must be a horizons_data", fixed = TRUE,
                class = "horizons_input_error")
 
@@ -82,7 +82,7 @@ test_that("select_training() needs a pool with at least one response", {
 
   fx <- select_fixture(n_pool = 60)
 
-  expect_error(select_training(fx$targets, fx$targets, verbose = FALSE),
+  expect_error(select_training(fx$targets, fx$targets),
                regexp = "response", class = "horizons_input_error")
 
 })
@@ -158,6 +158,47 @@ test_that("select_training(space = 'pls') needs exactly one property and an inte
 })
 
 
+test_that("select_training() records its control and its seed, 307 by default", {
+
+  fx  <- select_fixture(n_pool = 60)
+  out <- quiet_select(fx, k = 5, properties = "clay")
+
+  expect_s3_class(out$selection$settings$control, "horizons_control")
+  expect_identical(names(out$selection$settings$control), names(resolve_control(NULL, "select_training")))
+  expect_identical(out$selection$settings$seed, 307L)
+
+})
+
+
+test_that("select_training() takes the resemblance check's minimum and the chunk size from its control", {
+
+  fx <- select_fixture(n_pool = 60)
+
+  seen <- NULL
+  draw_chunk <- NULL
+  real       <- check_resemblance
+  real_draw  <- draw_neighbours
+  local_mocked_bindings(
+    check_resemblance = function(sp, St, metric, chunk_size, seed, eligible, min_rows) {
+      seen <<- c(chunk_size = chunk_size, min_rows = min_rows)
+      real(sp, St, metric, chunk_size, seed = seed, eligible = eligible, min_rows = min_rows)
+    },
+    draw_neighbours = function(..., chunk_size) {
+      draw_chunk <<- chunk_size
+      real_draw(..., chunk_size = chunk_size)
+    }
+  )
+
+  out <- suppressWarnings(quiet_select(fx, k = 5, properties = "clay",
+                                       control = control_horizons(chunk_size = 7L, min_resemblance_rows = 1000L)))
+
+  expect_identical(seen, c(chunk_size = 7L, min_rows = 1000L))
+  expect_identical(draw_chunk, 7L)
+  expect_match(out$selection$resemblance$skipped, "the check needs 1000", fixed = TRUE)
+
+})
+
+
 test_that("select_training() returns the pool's log", {
 
   fx <- select_fixture(n_pool = 60)
@@ -180,14 +221,14 @@ test_that("select_training() refuses a pool that carries state from later verbs"
   fitted <- fx$pool
   class(fitted) <- c("horizons_fit", "horizons_eval", "horizons_data", "list")
 
-  expect_error(select_training(fx$targets, fitted, k = 5, verbose = FALSE),
+  expect_error(select_training(fx$targets, fitted, k = 5),
                "`library` is a <horizons_fit>; it must be a plain horizons_data", fixed = TRUE,
                class = "horizons_input_error")
 
   validated <- fx$pool
   validated$validation$passed <- TRUE
 
-  expect_error(select_training(fx$targets, validated, k = 5, verbose = FALSE),
+  expect_error(select_training(fx$targets, validated, k = 5),
                regexp = "validation\\$passed", class = "horizons_input_error")
 
 })
@@ -218,9 +259,9 @@ test_that("select_training() refuses a configured pool and says to use it before
   ## outcome chosen for the library would ride into it.
   utils::capture.output(configured <- configure(fx$pool, outcome = "clay", models = "plsr"))
 
-  expect_error(select_training(fx$targets, configured, k = 5, verbose = FALSE),
+  expect_error(select_training(fx$targets, configured, k = 5),
                regexp = "config\\$configs", class = "horizons_input_error")
-  expect_error(select_training(fx$targets, configured, k = 5, verbose = FALSE),
+  expect_error(select_training(fx$targets, configured, k = 5),
                regexp = "before `configure\\(\\)` and `validate\\(\\)`")
 
   ## An outcome role alone, without a configuration
@@ -228,7 +269,7 @@ test_that("select_training() refuses a configured pool and says to use it before
   role_map$role[role_map$variable == "clay"] <- "outcome"
   outcome_only <- set_analysis(fx$pool, fx$pool$data$analysis, role_map)
 
-  expect_error(select_training(fx$targets, outcome_only, k = 5, verbose = FALSE),
+  expect_error(select_training(fx$targets, outcome_only, k = 5),
                regexp = "outcome role \\(clay\\)", class = "horizons_input_error")
 
 })
@@ -241,14 +282,14 @@ test_that("select_training() refuses a pool whose validation failed or that carr
   failed <- fx$pool
   failed$validation$passed <- FALSE
 
-  expect_error(select_training(fx$targets, failed, k = 5, verbose = FALSE),
+  expect_error(select_training(fx$targets, failed, k = 5),
                regexp = "validation\\$passed", class = "horizons_input_error")
 
   removed <- fx$pool
   removed$validation$outliers$removed_ids <- "P999"
   removed$validation$outliers$removed     <- TRUE
 
-  expect_error(select_training(fx$targets, removed, k = 5, verbose = FALSE),
+  expect_error(select_training(fx$targets, removed, k = 5),
                regexp = "removal record", class = "horizons_input_error")
 
   ## Any one part of a removal record is enough
@@ -281,7 +322,7 @@ test_that("select_training() refuses targets that fail the base contract", {
   replicates$data$analysis$sample_id[2] <- replicates$data$analysis$sample_id[1]
 
   utils::capture.output(
-    expect_error(select_training(replicates, fx$pool, k = 5, verbose = FALSE),
+    expect_error(select_training(replicates, fx$pool, k = 5),
                  regexp = "`x`, the targets.*Duplicate", class = "horizons_validation_error")
   )
 
@@ -290,14 +331,14 @@ test_that("select_training() refuses targets that fail the base contract", {
   non_finite$data$analysis$wn_4000[1] <- NA_real_
 
   utils::capture.output(
-    expect_error(select_training(non_finite, fx$pool, k = 5, verbose = FALSE),
+    expect_error(select_training(non_finite, fx$pool, k = 5),
                  regexp = "NA values in predictor", class = "horizons_validation_error")
   )
 
   ## Checked before the library resolves, so a registered library is not
   ## fetched for targets the verb would refuse.
   utils::capture.output(
-    expect_error(select_training(replicates, "kssl", k = 5, verbose = FALSE),
+    expect_error(select_training(replicates, "kssl", k = 5),
                  regexp = "the targets", class = "horizons_validation_error")
   )
 
@@ -312,7 +353,7 @@ test_that("select_training() refuses a pool that fails the base contract", {
   broken$data$analysis$wn_4000[3] <- Inf
 
   utils::capture.output(
-    expect_error(select_training(fx$targets, broken, k = 5, verbose = FALSE),
+    expect_error(select_training(fx$targets, broken, k = 5),
                  regexp = "`library`, the pool.*Infinite", class = "horizons_validation_error")
   )
 
@@ -326,7 +367,7 @@ test_that("select_training() refuses a pool that is itself a selection", {
 
   ## The provenance columns would collide under bind_cols and then surface as
   ## a confusing role-map abort. Say what is actually wrong instead.
-  expect_error(select_training(fx$targets, prior, k = 5, verbose = FALSE),
+  expect_error(select_training(fx$targets, prior, k = 5),
                regexp = "itself a selection", class = "horizons_input_error")
 
   ## Any one of the three is enough, and is named
@@ -336,7 +377,7 @@ test_that("select_training() refuses a pool that is itself a selection", {
     pool$data$analysis[[col]] <- NA
     pool$data$role_map <- rbind(pool$data$role_map, tibble::tibble(variable = col, role = "meta"))
 
-    err <- expect_error(select_training(fx$targets, pool, k = 5, verbose = FALSE),
+    err <- expect_error(select_training(fx$targets, pool, k = 5),
                         class = "horizons_input_error")
     expect_match(gsub("\\s+", " ", conditionMessage(err)),
                  sprintf("provenance column \"%s\", so it is itself a selection", col),
@@ -354,7 +395,7 @@ test_that("select_training() warns when pool and targets are in different units"
   ## downstream is structurally blind to it.
   fx <- select_fixture(n_pool = 60, target_scale = 100)
 
-  w <- expect_warning(out <- select_training(fx$targets, fx$pool, k = 5, verbose = FALSE),
+  w <- expect_warning(out <- select_training(fx$targets, fx$pool, k = 5),
                       regexp = "photometric units", class = "horizons_select_warning")
 
   u <- out$selection$units
@@ -372,8 +413,7 @@ test_that("select_training() warns when pool and targets are in different units"
   ## per-sample baseline offset straddling zero, so the pooled median's sign
   ## is a coin flip; only the scale is load-bearing here.
   same <- select_fixture(n_pool = 60)
-  u_ok <- suppressWarnings(select_training(same$targets, same$pool, k = 5,
-                                           verbose = FALSE))$selection$units
+  u_ok <- suppressWarnings(select_training(same$targets, same$pool, k = 5))$selection$units
 
   expect_false(u_ok$mismatch)
   expect_identical(u_ok$basis, "iqr")
@@ -416,7 +456,7 @@ test_that("the unit check catches a log-base difference and lets an instrument g
   ## And the verb warns on a log-base mismatch end to end
   log_base <- select_fixture(n_pool = 30, target_scale = 2.303)
 
-  expect_warning(select_training(log_base$targets, log_base$pool, k = 5, verbose = FALSE),
+  expect_warning(select_training(log_base$targets, log_base$pool, k = 5),
                  regexp = "photometric units", class = "horizons_select_warning")
 
 })
@@ -493,8 +533,7 @@ test_that("a draw that cannot reach k is recorded and warned about once", {
   fx <- select_fixture(n_pool = 60)
   k  <- 60L
 
-  w <- expect_warning(out <- select_training(fx$targets, fx$pool, k = k, properties = "clay",
-                                             verbose = FALSE),
+  w <- expect_warning(out <- select_training(fx$targets, fx$pool, k = k, properties = "clay"),
                       regexp = "could not reach k", class = "horizons_select_warning")
 
   sd_tbl <- out$selection$short_draws
@@ -514,7 +553,7 @@ test_that("a draw that cannot reach k is recorded and warned about once", {
 
   ## Nor does global, which draws nothing, at the same k
   expect_no_warning(all_rows <- select_training(fx$targets, fx$pool, k = k, scope = "global",
-                                                properties = "clay", verbose = FALSE))
+                                                properties = "clay"))
   expect_identical(nrow(all_rows$selection$short_draws), 0L)
 
 })
@@ -786,7 +825,8 @@ test_that("scope = 'global' runs the twin check, reports it, and keeps the rows"
   expect_true(all(self %in% out$data$analysis$sample_id))
   expect_identical(out$data$n_rows, 63L)
 
-  txt <- utils::capture.output(select_training(fx$targets, fx$pool, k = 10, scope = "global"))
+  txt <- utils::capture.output(select_training(fx$targets, fx$pool, k = 10, scope = "global",
+                                               control = control_horizons(verbose = TRUE)))
   expect_true(any(grepl("Twins flagged", txt)))
   expect_true(any(grepl("scope = global", txt)))
 
@@ -936,7 +976,7 @@ test_that("a draw emptied by the targets' own copies says so, not twin_ratio", {
   fx      <- select_fixture(n_pool = 60, seed = 3)
   targets <- pool_as_targets(fx)
 
-  err <- expect_error(select_training(targets, fx$pool, k = 1, properties = "clay", verbose = FALSE),
+  err <- expect_error(select_training(targets, fx$pool, k = 1, properties = "clay"),
                       regexp = "Every row drawn for clay was flagged", class = "horizons_input_error")
 
   expect_match(conditionMessage(err), "targets are in the pool")
@@ -963,8 +1003,7 @@ test_that("a target's own copy is recorded as exact, at distance zero to roundin
     targets <- pool_as_targets(fx, rows)
     n_t     <- targets$data$n_rows
 
-    ex <- select_training(targets, fx$pool, k = 1, properties = "clay", scope = "global",
-                          verbose = FALSE)$selection$exclusions
+    ex <- select_training(targets, fx$pool, k = 1, properties = "clay", scope = "global")$selection$exclusions
 
     own <- ex$pool_id == sub("^T", "", ex$target_id)
 
@@ -1070,7 +1109,7 @@ test_that("the record carries the targets' source, size and id hash", {
   expect_identical(rec$n_rows,  8L)
   expect_identical(rec$id_hash, digest::digest(sort(ids, method = "radix")))
 
-  reordered <- select_training(subset_rows(fx$targets, rev(ids)), fx$pool, k = 5, verbose = FALSE)
+  reordered <- select_training(subset_rows(fx$targets, rev(ids)), fx$pool, k = 5)
 
   expect_identical(reordered$selection$targets$id_hash, rec$id_hash)
 
@@ -1122,7 +1161,7 @@ test_that("a pool resampled onto the targets' grid records that grid, and the po
     targets <- standardize(fx$targets, resample = 8, trim = c(600, 4000))
   })
 
-  out <- select_training(targets, pool, k = 10, verbose = FALSE)
+  out <- select_training(targets, pool, k = 10)
   rec <- out$provenance$standardization
   wn  <- predictor_matrix(out)$wavenumbers
 
@@ -1167,7 +1206,7 @@ test_that("a pool already on the targets' grid keeps its standardization record 
     targets <- standardize(fx$targets, resample = 8, trim = c(600, 4000))
   })
 
-  out <- select_training(targets, pool, k = 10, verbose = FALSE)
+  out <- select_training(targets, pool, k = 10)
 
   expect_identical(out$selection$reconciliation$operation, "none")
   expect_identical(out$provenance$standardization, pool$provenance$standardization)
@@ -1186,7 +1225,7 @@ test_that("targets with no grid record give the resampled pool a NULL grid, and 
     targets <- standardize(fx$targets, resample = NULL, trim = c(600, 4000))
   })
 
-  rec <- select_training(targets, pool, k = 10, verbose = FALSE)$provenance$standardization
+  rec <- select_training(targets, pool, k = 10)$provenance$standardization
 
   expect_true("grid" %in% names(rec))
   expect_null(rec$grid)
@@ -1225,7 +1264,7 @@ test_that("targets on an instrument's own axis give the resampled pool a NULL gr
   ## The clamp and the finer targets both warn; the record is under test here
   warned <- character()
   out <- withCallingHandlers(
-    select_training(targets, pool, k = 10, verbose = FALSE),
+    select_training(targets, pool, k = 10),
     horizons_select_warning = function(w) {
       warned <<- c(warned, conditionMessage(w))
       invokeRestart("muffleWarning")
@@ -1310,7 +1349,8 @@ test_that("a PLS space records and prints that it selected on the pool's own res
   expect_null(quiet_select(fx, k = 10, properties = "clay")$selection$settings$space_note)
 
   txt <- utils::capture.output(select_training(fx$targets, fx$pool, k = 10, properties = "clay",
-                                               space = "pls", ncomp = 3L))
+                                               space = "pls", ncomp = 3L,
+                                               control = control_horizons(verbose = TRUE)))
   expect_true(any(grepl("optimistic", txt)))
 
 })
@@ -1339,7 +1379,7 @@ test_that("the return validates and runs through the ordinary chain", {
   ## prune = FALSE keeps the chain independent of the pruning rule. With no
   ## Bayesian stage nothing is pruned today, but the chain is what is under
   ## test, so it shouldn't start depending on that.
-  ev <- suppressWarnings(evaluate(cfg, prune = FALSE, verbose = FALSE))
+  ev <- suppressWarnings(evaluate(cfg, prune = FALSE))
   expect_s3_class(ev, "horizons_eval")
   expect_true(nrow(ev$evaluation$results) >= 1L)
   expect_true(any(ev$evaluation$results$status == "success"))
@@ -1347,7 +1387,7 @@ test_that("the return validates and runs through the ordinary chain", {
   ## The targets carry none of the provenance columns (.drawn_by,
   ## .min_distance, .group) the training set does. predict() must not
   ## require them: the recipe's meta role is not baked (2026-09-21).
-  f <- suppressWarnings(fit(ev, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE, verbose = FALSE))
+  f <- suppressWarnings(fit(ev, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE))
   expect_s3_class(f, "horizons_fit")
   expect_identical(f$models$results$status, "success")
   expect_false(any(c(".drawn_by", ".min_distance", ".group") %in% names(fx$targets$data$analysis)))
@@ -1399,7 +1439,8 @@ test_that("scope = 'cluster' falls back to one group below the floor, through th
   ## verbose. Routing it through cli made select_training(verbose = FALSE)
   ## print regardless.
   txt <- utils::capture.output(
-    out <- select_training(fx$targets, fx$pool, k = 10, scope = "cluster", cluster_min = 5)
+    out <- select_training(fx$targets, fx$pool, k = 10, scope = "cluster", cluster_min = 5,
+                           control = control_horizons(verbose = TRUE))
   )
 
   expect_true(any(grepl("one group", txt)))
@@ -1407,7 +1448,7 @@ test_that("scope = 'cluster' falls back to one group below the floor, through th
   expect_identical(out$selection$clustering$k, 1L)
 
   expect_silent(select_training(fx$targets, fx$pool, k = 10, scope = "cluster",
-                                cluster_min = 5, verbose = FALSE))
+                                cluster_min = 5))
 
 })
 
@@ -1494,7 +1535,8 @@ test_that("verbose = TRUE reports the pool, the space and the draw", {
 
   fx <- select_fixture(n_pool = 60)
 
-  expect_snapshot(out <- select_training(fx$targets, fx$pool, k = 5))
+  expect_snapshot(out <- select_training(fx$targets, fx$pool, k = 5,
+                                         control = control_horizons(verbose = TRUE)))
 
 })
 
@@ -1527,7 +1569,7 @@ test_that("permuting the pool's responses collapses the evaluated CV", {
 
   cv_rpd <- function(pool) {
 
-    out <- select_training(fx$targets, pool, k = 40, properties = "clay", verbose = FALSE)
+    out <- select_training(fx$targets, pool, k = 40, properties = "clay")
 
     utils::capture.output({
       cfg <- configure(out, outcome = "clay", models = "rf", cv_folds = 3L,
@@ -1535,7 +1577,7 @@ test_that("permuting the pool's responses collapses the evaluated CV", {
       cfg <- validate(cfg)
     })
 
-    ev  <- suppressWarnings(evaluate(cfg, prune = FALSE, verbose = FALSE))
+    ev  <- suppressWarnings(evaluate(cfg, prune = FALSE))
     res <- ev$evaluation$results
     res <- res[res$status == "success", , drop = FALSE]
 

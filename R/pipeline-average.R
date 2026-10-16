@@ -64,7 +64,8 @@
 #'   * `"warn"` (default): Keep all replicates and average
 #'   * `"drop"`: Remove the sample entirely
 #'   * `"keep_best"`: Keep only the replicate with highest mean correlation
-#' @param verbose Logical. Print progress messages. Default: `TRUE`.
+#' @param verbose Logical. Print progress messages. Default:
+#'   `getOption("horizons.verbose", TRUE)`, as every verb's.
 #'
 #' @return The input `horizons_data` object with:
 #'   * `data$analysis`: One row per unique value in `by`. With a custom `by`
@@ -105,7 +106,7 @@ average <- function(x,
                     quality_check         = TRUE,
                     correlation_threshold = 0.996,
                     on_all_outliers       = c("warn", "drop", "keep_best"),
-                    verbose               = TRUE) {
+                    verbose               = getOption("horizons.verbose", TRUE)) {
 
   ## -------------------------------------------------------------------------
   ## Step 1: Input validation

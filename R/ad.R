@@ -42,6 +42,8 @@
 #'
 #' @param feature_matrix Numeric matrix (n x p) of baked predictors, with
 #'   column names. Rows are samples, columns the model's features. No NA/NaN/Inf.
+#' @param min_rows Integer. The fewest rows the covariance is estimated from.
+#'   Default `N_AD_TRAIN_MIN`.
 #'
 #' @return List with `centroid` (numeric length p, named), `cov_matrix`
 #'   (p x p shrinkage covariance). Aborts on invalid input.
@@ -49,7 +51,7 @@
 #' @seealso [compute_ad_thresholds()], [calculate_ad_distance()].
 #'
 #' @noRd
-compute_ad_metadata <- function(feature_matrix) {
+compute_ad_metadata <- function(feature_matrix, min_rows = N_AD_TRAIN_MIN) {
 
   ## Validate inputs ------------------------------------------------------------
 
@@ -74,10 +76,10 @@ compute_ad_metadata <- function(feature_matrix) {
   n_samples  <- nrow(feature_matrix)
   n_features <- ncol(feature_matrix)
 
-  if (n_samples < N_AD_TRAIN_MIN) {
+  if (n_samples < min_rows) {
 
     cli::cli_abort(
-      "{.arg feature_matrix} needs at least {N_AD_TRAIN_MIN} samples (has {n_samples})"
+      "{.arg feature_matrix} needs at least {min_rows} samples (has {n_samples})"
     )
 
   }
@@ -305,15 +307,21 @@ assign_ad_bin <- function(distances, thresholds) {
 #' before the workflow is butchered (the mold is stripped by `butcher()`).
 #'
 #' Returns `NULL` (no bundle) when any of these hold: `calib_data` is `NULL` or
-#' under `N_CALIB_MIN` rows; the training feature matrix has fewer than
-#' `N_AD_TRAIN_MIN` rows or any NA; or the covariance / bake / threshold steps
+#' under `min_calib_rows` rows; the training feature matrix has fewer than
+#' `min_ad_rows` rows or any NA; or the covariance / bake / threshold steps
 #' error. NULL degrades the config to no-AD rather than aborting the fit.
 #'
 #' @param fitted_workflow A trained `workflows::workflow` (pre-butcher).
 #' @param calib_data Data frame for threshold calibration — the same held-out
-#'   `calib_Fit` split UQ uses. `NULL` or under `N_CALIB_MIN` rows returns
+#'   `calib_Fit` split UQ uses. `NULL` or under `min_calib_rows` rows returns
 #'   `NULL`.
 #' @param level Numeric in (0, 1). OOD coverage level. Default `DEFAULT_AD_LEVEL`.
+#' @param min_calib_rows Integer. The fewest calibration rows the thresholds
+#'   are computed from; `control_horizons(min_calib_rows = )`. Default
+#'   `N_CALIB_MIN`.
+#' @param min_ad_rows Integer. The fewest training rows the covariance is
+#'   estimated from; `control_horizons(min_ad_rows = )`. Default
+#'   `N_AD_TRAIN_MIN`.
 #'
 #' @return List `list(centroid, cov_matrix, ad_thresholds, n_calib)`, or `NULL`.
 #'
@@ -323,11 +331,13 @@ assign_ad_bin <- function(distances, thresholds) {
 #' @noRd
 fit_ad <- function(fitted_workflow,
                    calib_data,
-                   level = DEFAULT_AD_LEVEL) {
+                   level          = DEFAULT_AD_LEVEL,
+                   min_calib_rows = N_CALIB_MIN,
+                   min_ad_rows    = N_AD_TRAIN_MIN) {
 
   ## Guard: NULL or insufficient calibration data -------------------------------
 
-  if (is.null(calib_data) || nrow(calib_data) < N_CALIB_MIN) {
+  if (is.null(calib_data) || nrow(calib_data) < min_calib_rows) {
 
     return(NULL)
 
@@ -337,7 +347,7 @@ fit_ad <- function(fitted_workflow,
 
   train_matrix <- as.matrix(workflows::extract_mold(fitted_workflow)$predictors)
 
-  if (nrow(train_matrix) < N_AD_TRAIN_MIN || anyNA(train_matrix)) {
+  if (nrow(train_matrix) < min_ad_rows || anyNA(train_matrix)) {
 
     return(NULL)
 
@@ -346,7 +356,7 @@ fit_ad <- function(fitted_workflow,
   ## Centroid + shrinkage covariance (safely — degenerate matrices return NULL) -
 
   md_safe <- safely_execute(
-    suppressWarnings(compute_ad_metadata(train_matrix)),
+    suppressWarnings(compute_ad_metadata(train_matrix, min_rows = min_ad_rows)),
     log_error          = FALSE,
     capture_conditions = TRUE
   )

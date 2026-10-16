@@ -664,6 +664,54 @@ describe("fit_single_config() - UQ and AD disabled", {
 
 
 ## =========================================================================
+## Row minimums
+## =========================================================================
+
+describe("fit_single_config() - row minimums", {
+
+  it("hands its minimums to the UQ, AD and degradation steps", {
+
+    shared <- fsc()
+
+    seen <- list()
+    local_mocked_bindings(
+      fit_uq            = function(..., min_calib_rows) { seen$uq <<- min_calib_rows; NULL },
+      fit_ad            = function(..., min_calib_rows, min_ad_rows) {
+        seen$ad <<- c(min_calib_rows, min_ad_rows)
+        NULL
+      },
+      check_degradation = function(..., min_n) {
+        seen$degradation <<- min_n
+        list(degraded = FALSE, reason = NA_character_)
+      }
+    )
+
+    fit_single_config(
+      config_row          = make_fit_config(),
+      split_F             = shared$setup$split_F,
+      cv_resamples        = shared$setup$folds,
+      calib_data          = rsample::testing(shared$setup$split_F),
+      role_map            = shared$setup$role_map,
+      best_params_eval    = make_fit_best_params(),
+      final_bayesian_iter = 0L,
+      grid_size           = 2L,
+      compute_uq          = TRUE,
+      compute_ad          = TRUE,
+      allow_par           = FALSE,
+      seed                = 42L,
+      min_calib_rows      = 12L,
+      min_ad_rows         = 5L,
+      min_degradation_rows = 6L
+    )
+
+    expect_identical(seen, list(degradation = 6L, uq = 12L, ad = c(12L, 5L)))
+
+  })
+
+})
+
+
+## =========================================================================
 ## A run whose stages warn and whose last steps fail
 ## =========================================================================
 ## One run, read by three tests: every stage's warnings reach the member's
