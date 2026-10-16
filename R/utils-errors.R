@@ -1000,13 +1000,15 @@ text_records <- function(x, pinned = FALSE) {
 #' which every model failed, and [check_tune_result()] records that as the
 #' failure, with its cause.
 #'
+#' A note ([note_in_unit()]) is a package notice too, pinned the same way.
+#'
 #' @param records Records shaped like [new_unit_records()]'s.
-#' @return Records shaped like [new_warning_log()]'s, one per warning.
+#' @return Records shaped like [new_warning_log()]'s, one per warning or note.
 #' @keywords internal
 #' @noRd
 unit_warning_records <- function(records) {
 
-  warnings <- records[records$type == "warning" &
+  warnings <- records[records$type %in% c("warning", "note") &
                         !startsWith(records$cause, "All models failed"), , drop = FALSE]
 
   tibble::tibble(
@@ -1016,7 +1018,7 @@ unit_warning_records <- function(records) {
     scope   = rep(NA_character_, nrow(warnings)),
     folds   = rep(list(character(0)), nrow(warnings)),
     n_folds = rep(NA_integer_, nrow(warnings)),
-    pinned  = startsWith(warnings$class, "horizons_warning_")
+    pinned  = startsWith(warnings$class, "horizons_warning_") | warnings$type == "note"
   )
 
 }
@@ -1513,6 +1515,222 @@ abort_tune_failure <- function(results, what, call = rlang::caller_env()) {
     trace = Find(Negate(is.null), errors[["trace"]]),
     call  = call
   )
+
+}
+
+## ---------------------------------------------------------------------------
+## The fold rule (#101): only candidates scored on every fold are compared
+## ---------------------------------------------------------------------------
+## tune averages a candidate's metric over the folds it was scored on, so a
+## candidate that failed on one fold is compared with the others on the folds
+## that survived, which is a different and easier test. A candidate missing a
+## fold is left out instead, as scikit-learn leaves out one whose mean is NaN.
+## A recipe step that fails on a fold fails every candidate there, so its
+## configuration then has none to choose from and fails.
+
+#' A metric's mean and standard error over the folds
+#'
+#' @description
+#' One row per group of per-fold estimates: the mean over the folds with a
+#' value, its standard error (`sd / sqrt(n)`, as tune's), and `n`, the
+#' distinct resamples with a value. Both verbs summarise their folds through
+#' it: `evaluate()` a tune result's ([config_metrics()]), `fit()` a member's
+#' out-of-fold predictions scored fold by fold.
+#'
+#' @param per_fold Data frame with `.metric`, `.estimate` and the resample's
+#'   `id` (and `id2` for repeated folds), one row per fold and metric.
+#' @param by Character. The columns a group is keyed by.
+#' @return Tibble with the `by` columns, `mean` (`NA` when no fold has a
+#'   value), `std_err` (`NA` below two) and `n`.
+#' @keywords internal
+#' @noRd
+summarise_folds <- function(per_fold, by) {
+
+  resample <- resample_ids(per_fold)
+  scored   <- !is.na(per_fold$.estimate)
+  groups   <- split(seq_len(nrow(per_fold)), unname(as.list(per_fold[by])), drop = TRUE)
+
+  out <- lapply(by, function(col) {
+    vapply(groups, function(i) as.character(per_fold[[col]][i[1]]), character(1), USE.NAMES = FALSE)
+  })
+  names(out) <- by
+
+  estimates <- lapply(groups, function(i) per_fold$.estimate[i][scored[i]])
+
+  tibble::as_tibble(c(out, list(
+    mean    = vapply(estimates, function(e) if (length(e) > 0) mean(e) else NA_real_,
+                     numeric(1), USE.NAMES = FALSE),
+    std_err = vapply(estimates, function(e) {
+      if (length(e) > 1) stats::sd(e) / sqrt(length(e)) else NA_real_
+    }, numeric(1), USE.NAMES = FALSE),
+    n       = vapply(groups, function(i) length(unique(resample[i][scored[i]])), integer(1),
+                     USE.NAMES = FALSE)
+  )))
+
+}
+
+#' Each candidate's metrics over its own folds
+#'
+#' @description
+#' `tune::collect_metrics()` pools the folds of candidates with equal
+#' hyperparameters, so a Bayesian iteration that proposes a grid point again
+#' reports both on twice the folds. Read from the per-fold metrics instead
+#' ([summarise_folds()]), each `.config` is counted on the resamples it was
+#' scored on, and its mean is its own.
+#'
+#' @param results A tune result (grid or Bayesian).
+#' @return Tibble with one row per `.config` and metric: `.config`,
+#'   `.metric`, `mean` (over the folds with a value; `NA` when none has one),
+#'   `std_err` and `n` (the distinct resamples with a value).
+#' @keywords internal
+#' @noRd
+config_metrics <- function(results) {
+
+  summarise_folds(tune::collect_metrics(results, summarize = FALSE), c(".config", ".metric"))
+
+}
+
+#' Keep a cross-validated mean only where it covers every fold
+#'
+#' @description
+#' The rule both verbs rank and report by: a mean over fewer folds than were
+#' drawn (a correlation undefined on a fold whose predictions were constant,
+#' say) would compare unlike quantities, so it is `NA`, and so is its
+#' standard error.
+#'
+#' @param summary From [summarise_folds()].
+#' @param n_folds Integer(1). The folds drawn.
+#' @return `summary`, with `mean` and `std_err` `NA` where `n` is not
+#'   `n_folds`.
+#' @keywords internal
+#' @noRd
+over_every_fold <- function(summary, n_folds) {
+
+  short <- is.na(summary$n) | summary$n != as.integer(n_folds)
+
+  summary$mean[short]    <- NA_real_
+  summary$std_err[short] <- NA_real_
+
+  summary
+
+}
+
+#' The row's line on cross-validated metrics left NA
+#'
+#' @param metrics Character. The metrics whose cross-validated mean is `NA`.
+#' @param n_metrics Integer(1). How many there are in all.
+#' @return Character(1), or `NULL` when none is `NA`.
+#' @keywords internal
+#' @noRd
+cv_na_line <- function(metrics, n_metrics) {
+
+  if (length(metrics) == 0) return(NULL)
+
+  if (length(metrics) == n_metrics) {
+    return("CV metrics at the selected hyperparameters could not be recovered; cv_* columns are NA.")
+  }
+
+  one   <- length(metrics) == 1L
+  named <- if (one) metrics else {
+    paste0(paste(utils::head(metrics, -1), collapse = ", "), " and ", utils::tail(metrics, 1))
+  }
+
+  paste0("Cross-validated ", named, if (one) " is" else " are",
+         " NA: ", if (one) "it" else "they", " could not be computed on every fold, and a",
+         " cross-validated mean is kept only over every fold.")
+
+}
+
+#' The candidates of a tune result scored on every fold
+#'
+#' @param results A tune result (grid or Bayesian).
+#' @param n_folds Integer(1). The folds drawn.
+#' @return Character: their `.config`s. Counted on `rmse`, which is `NA` on a
+#'   fold only when the fit made no predictions there; a metric undefined on
+#'   a fold whose predictions were constant (`rsq`) is not a failure.
+#' @keywords internal
+#' @noRd
+complete_configs <- function(results, n_folds) {
+
+  panel <- config_metrics(results)
+
+  panel$.config[panel$.metric == "rmse" & panel$n == n_folds]
+
+}
+
+#' The candidates scored on every fold, best first
+#'
+#' @description
+#' tune's own order and tie rule, as `tune::select_best()` applies them
+#' (`tune::show_best()` with every candidate), restricted to the candidates
+#' scored on every fold. Under `debug` a candidate missing a fold stops the
+#' call rather than being left out, since leaving it out is containment.
+#'
+#' @param results A tune result (grid or Bayesian).
+#' @param metric Character(1). The metric to order by.
+#' @param n_folds Integer(1). The folds drawn.
+#' @param debug Logical(1).
+#' @return `tune::show_best()`'s rows, possibly none.
+#' @keywords internal
+#' @noRd
+rank_complete <- function(results, metric, n_folds, debug = FALSE) {
+
+  ranked   <- tune::show_best(results, metric = metric, n = Inf)
+  complete <- ranked$.config %in% complete_configs(results, n_folds)
+
+  if (debug && !all(complete)) {
+
+    abort_tune_failure(results, "a candidate was not scored on every fold")
+
+  }
+
+  ranked[complete, , drop = FALSE]
+
+}
+
+#' The best hyperparameters among the candidates scored on every fold
+#'
+#' @description
+#' What `tune::select_best()` returns, chosen by [rank_complete()]: the
+#' hyperparameters and `.config` of the first candidate.
+#'
+#' @inheritParams rank_complete
+#' @return One-row tibble, or zero rows when no candidate was scored on every
+#'   fold.
+#' @keywords internal
+#' @noRd
+select_complete <- function(results, metric, n_folds, debug = FALSE) {
+
+  ranked <- rank_complete(results, metric, n_folds, debug)
+
+  utils::head(ranked[, c(tune::.get_tune_parameter_names(results), ".config"), drop = FALSE], 1)
+
+}
+
+#' The row's note on candidates left out for a missing fold
+#'
+#' @param results The tune result the hyperparameters were chosen from.
+#' @param n_folds Integer(1). The folds drawn.
+#' @param n_dropped Integer(1). Candidates the Bayesian search proposed and
+#'   tune dropped, scored on no fold, which `results` does not hold.
+#' @return Character(1), or `NULL` when every candidate was scored on every
+#'   fold.
+#' @keywords internal
+#' @noRd
+incomplete_note <- function(results, n_folds, n_dropped = 0L) {
+
+  all   <- unique(config_metrics(results)$.config)
+  n_out <- length(setdiff(all, complete_configs(results, n_folds))) + n_dropped
+  n_all <- length(all) + n_dropped
+
+  if (n_out == 0) return(NULL)
+
+  cause <- tune_failure_cause(results)
+
+  paste0(n_out, " of ", n_all, " candidate", if (n_all != 1) "s",
+         if (n_out == 1) " was" else " were",
+         " left out of the choice of hyperparameters, not being scored on every fold",
+         if (!is.null(cause)) paste0(": ", cause), ".")
 
 }
 

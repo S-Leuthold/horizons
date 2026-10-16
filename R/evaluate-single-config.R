@@ -11,7 +11,7 @@
 #' the responsibility of the calling `evaluate()` function.
 #'
 #' The configuration is one unit (`run_unit()`): a run failure in any step
-#' ends it, and the row records the step (`EVAL_STEPS`), the cause, its root
+#' ends it, and the row records the step (`UNIT_STEPS`), the cause, its root
 #' class and, with `keep_traces`, its backtrace. A door, internal or
 #' dependency error is not the configuration's and propagates.
 #'
@@ -287,34 +287,8 @@ evaluate_single_config <- function(config_row,
     ## or the grid's choice when none did, and says so with a substitution
     ## warning that the row shows and evaluate() puts on the log (#209). That
     ## fallback is containment, so the kinds no unit contains still
-    ## propagate, and under debug nothing is fallen back from.
-    ##
-    ## tune recovers from an error inside its search loop itself: an
-    ## on.exit() returns the iterations finished so far, and that return
-    ## cancels the unwind of any handler outside it. So the first error to
-    ## leave tune's own catches is recorded as it is raised, with its trace,
-    ## and what to do about it is decided once tune_bayes() has returned.
-    ##
-    ## A proposed candidate that fails in every fold leaves no note and raises
-    ## nothing: tune drops it and says only "All models failed for: ..." in
-    ## its iteration log, or "Couldn't estimate performance" when its
-    ## resampling errored as a whole. The log is on in every mode, its output
-    ## muffled, and read: the candidates it drops are counted in the row's
-    ## note on candidates left out, and under debug the first stops the call.
-    ##
-    ## A worker that dies during an iteration on the resamples axis never
-    ## reaches here as future's error: tune's try() around the candidate's
-    ## resampling catches it. future.apply reports it first, "Caught
-    ## FutureInterruptError. Canceling all iterations ...", unclassed, as a
-    ## warning before 1.21.0 and as a message since, so the death is read
-    ## from that text in either (worker_death_signal()) and stops the run as
-    ## systemic once tune_bayes() has returned, as a death in the grid stage
-    ## does.
-    ##
-    ## The same on.exit() return swallows a Ctrl-C during the search, so the
-    ## interrupt is recorded as it arrives and raised again once tune has
-    ## returned: the search the user stopped is not kept as a result, nor
-    ## its configuration checkpointed as complete.
+    ## propagate, and under debug nothing is fallen back from. The search and
+    ## what it keeps are bayes_search()'s, which fit()'s re-tune shares.
 
     final_tune_results <- grid_results
     n_dropped          <- 0L
@@ -328,122 +302,20 @@ evaluate_single_config <- function(config_row,
       ## the axis a pure performance choice (review finding, 2026-09-15).
       set.seed(seed, kind = "Mersenne-Twister")
 
-      unit_step("tune_bayes", {
+      search <- unit_step("tune_bayes", bayes_search(
+        workflow      = wflow,
+        resamples     = cv_folds,
+        initial       = grid_results,
+        iter          = search_iter,
+        param_info    = param_set,
+        metrics       = tune_metrics,
+        allow_par     = allow_par,
+        parallel_over = parallel_over,
+        debug         = debug
+      ))
 
-        stopped     <- NULL
-        all_failed  <- NULL
-        worker_died <- NULL
-        interrupted <- FALSE
-
-        read_death <- function(cnd) {
-          if (is.null(worker_died) && worker_death_signal(cnd)) worker_died <<- cnd
-        }
-
-        read_log <- function(m) {
-          read_death(m)
-          text <- cli::ansi_strip(conditionMessage(m))
-          if (grepl("All models failed for:", text, fixed = TRUE)) {
-            n_dropped <<- n_dropped + 1L
-            if (is.null(all_failed)) {
-              all_failed <<- trimws(sub("^.*?(All models failed for:)", "\\1", text, perl = TRUE))
-            }
-          } else if (grepl("Couldn't estimate performance", text, fixed = TRUE)) {
-            n_dropped <<- n_dropped + 1L
-          }
-        }
-
-        bayes_results <- tryCatch(
-          withCallingHandlers(
-            suppressMessages(withCallingHandlers(
-              tune::tune_bayes(
-                object     = wflow,
-                resamples  = cv_folds,
-                initial    = grid_results,
-                iter       = search_iter,
-                param_info = param_set,
-                metrics    = tune_metrics,
-                control    = tune::control_bayes(
-                  save_pred     = FALSE,
-                  save_workflow = FALSE,
-                  verbose       = FALSE,
-                  verbose_iter  = TRUE,
-                  no_improve    = BAYES_NO_IMPROVE_LIMIT,
-                  allow_par     = allow_par,
-                  parallel_over = parallel_over
-                )
-              ),
-              message = read_log
-            )),
-            warning   = read_death,
-            error     = function(e) if (is.null(stopped)) stopped <<- rlang::cnd_entrace(e),
-            interrupt = function(i) interrupted <<- TRUE
-          ),
-          ## An error tune did not recover from (before its loop starts):
-          ## recorded above, nothing to keep
-          error = function(e) NULL
-        )
-
-        if (interrupted) rlang::interrupt()
-
-        if (!is.null(worker_died)) {
-
-          abort_horizons(
-            "A parallel worker stopped during the Bayesian search.",
-            kind = "run", class = "horizons_error_systemic", parent = worker_died
-          )
-
-        }
-
-        if (!is.null(stopped) && (debug || rlang::cnd_inherits(stopped, NEVER_CONTAINED))) {
-
-          stop(stopped)
-
-        }
-
-        if (debug && !is.null(all_failed)) {
-
-          abort_horizons(
-            "a candidate the Bayesian search proposed failed in every fold, and tune keeps no record of why: {all_failed}",
-            kind = "run"
-          )
-
-        }
-
-        if (!is.null(bayes_results)) check_tune_result(bayes_results, failure = NULL, debug = debug)
-
-        cause  <- if (!is.null(stopped)) condition_summary(stopped)
-        n_iter <- if (!is.null(bayes_results) && bayes_iterations_ran(bayes_results)) {
-          max(bayes_results$.iter, na.rm = TRUE)
-        } else 0L
-
-        if (n_iter > 0) {
-
-          ## Candidates that failed in some folds leave their reasons in .notes,
-          ## which collect_notes_from() reads below.
-          final_tune_results <- bayes_results
-
-          if (!is.null(cause)) {
-
-            warn_in_unit("substitution",
-                         "The Bayesian search stopped early, after {n_iter} iteration{?s}, so the hyperparameters were chosen from those and the grid: {cause}")
-
-          }
-
-        } else if (!is.null(cause)) {
-
-          warn_in_unit("substitution",
-                       "The Bayesian search failed, so the hyperparameters were chosen from the grid alone: {cause}")
-
-        } else {
-
-          ## The search returned without an iteration past the grid: every
-          ## candidate failed in every fold, which tune drops without a note.
-          warn_in_unit("substitution",
-                       "The Bayesian search produced no results, so the hyperparameters were chosen from the grid alone.")
-
-        }
-
-      })
+      final_tune_results <- search$results
+      n_dropped          <- search$n_dropped
 
       gc(verbose = FALSE)
 
@@ -488,23 +360,12 @@ evaluate_single_config <- function(config_row,
     }
 
     cv_panel <- unit_step("cv_panel", cv_panel_at(final_tune_results, best_params, n_folds))
-    cv_na    <- names(cv_panel)[is.na(unlist(cv_panel))]
+    cv_na    <- cv_na_line(sub("^cv_", "", names(cv_panel)[is.na(unlist(cv_panel))]),
+                           length(cv_panel))
 
-    if (length(cv_na) == length(cv_panel)) {
+    if (!is.null(cv_na)) {
 
-      warning_log <- dplyr::bind_rows(warning_log, text_records(
-        "CV metrics at the selected hyperparameters could not be recovered; cv_* columns are NA.",
-        pinned = TRUE
-      ))
-
-    } else if (length(cv_na) > 0) {
-
-      warning_log <- dplyr::bind_rows(warning_log, text_records(paste0(
-        paste(cv_na, collapse = ", "), if (length(cv_na) == 1) " is" else " are",
-        " NA: the selected hyperparameters were not scored on every fold for ",
-        if (length(cv_na) == 1) "it" else "them",
-        ", and a cross-validated mean is kept only over every fold."
-      ), pinned = TRUE))
+      warning_log <- dplyr::bind_rows(warning_log, text_records(cv_na, pinned = TRUE))
 
     }
 
@@ -600,11 +461,8 @@ evaluate_single_config <- function(config_row,
   row <- if (unit$failed) {
 
     failure <- unit$records[unit$records$type == "failure", , drop = FALSE]
-    step    <- failure$step[1]
 
-    failed <- create_failed_result(config_id, paste0(
-      if (is.na(step)) "Evaluation" else EVAL_STEPS[[step]], " failed: ", failure$message[1]
-    ))
+    failed <- create_failed_result(config_id, unit_failure_message(unit$records, "Evaluation"))
     failed$class <- failure$class[1]
     failed$trace <- failure$trace[1]
     failed
@@ -621,89 +479,6 @@ evaluate_single_config <- function(config_row,
   attr(row, "unit_records") <- unit$records
 
   row
-
-}
-
-#' The steps of a configuration's unit, and how a failed row names each
-#'
-#' @description
-#' The [unit_step()] labels inside [evaluate_single_config()], each with the
-#' words its failed row's `error_message` starts with ("Grid search failed:
-#' ..."). A failure outside every step reads "Evaluation failed: ...".
-#'
-#' @keywords internal
-#' @noRd
-EVAL_STEPS <- c(
-  recipe              = "Recipe building",
-  model_spec          = "Model specification",
-  workflow            = "Workflow creation",
-  prep                = "Recipe preparation",
-  finalize_parameters = "Parameter finalization",
-  tune_grid           = "Grid search",
-  prune               = "Prune check",
-  tune_bayes          = "Bayesian search",
-  select_best         = "Parameter selection",
-  cv_panel            = "Cross-validated metrics",
-  finalize_workflow   = "Workflow finalization",
-  last_fit            = "Test evaluation",
-  back_transform      = "Back-transformation",
-  test_metrics        = "Test metrics"
-)
-
-## ---------------------------------------------------------------------------
-## exhaustive_grid — a search space small enough to try whole
-## ---------------------------------------------------------------------------
-
-#' Every point of a search space that fits a budget
-#'
-#' @description
-#' When every tuned parameter takes whole-number values over a known range
-#' and the space has no more points than `budget`, the whole space as a grid;
-#' otherwise `NULL`. A search whose budget covers the space is then
-#' exhaustive: the grid is every point and no Bayesian stage runs, since
-#' tune's search, once it has no value left to propose, errors inside its
-#' loop rather than stopping.
-#'
-#' @param param_set A finalized `dials` parameter set.
-#' @param budget Numeric(1). The points the search would try: the grid's
-#'   size and the Bayesian iterations together.
-#' @return A tibble with one column per parameter (named by its id) and one
-#'   row per point, or `NULL`.
-#' @keywords internal
-#' @noRd
-exhaustive_grid <- function(param_set, budget) {
-
-  if (nrow(param_set) == 0) return(NULL)
-
-  values <- lapply(param_set$object, function(p) {
-
-    if (!inherits(p, "quant_param") || !identical(p$type, "integer") || !is.null(p$trans)) {
-      return(NULL)
-    }
-
-    lower <- p$range$lower
-    upper <- p$range$upper
-
-    ### unknown() until finalized
-    if (!is.numeric(lower) || !is.numeric(upper) || !is.finite(lower) || !is.finite(upper)) {
-      return(NULL)
-    }
-
-    if (!isTRUE(p$inclusive[[1]])) lower <- lower + 1
-    if (!isTRUE(p$inclusive[[2]])) upper <- upper - 1
-
-    if (upper < lower) return(NULL)
-
-    seq.int(as.integer(lower), as.integer(upper))
-
-  })
-
-  if (any(vapply(values, is.null, logical(1)))) return(NULL)
-  if (prod(lengths(values)) > budget) return(NULL)
-
-  names(values) <- param_set$id
-
-  tibble::as_tibble(expand.grid(values, KEEP.OUT.ATTRS = FALSE))
 
 }
 
@@ -783,152 +558,16 @@ cv_panel_at <- function(tune_results, best_params, n_folds = NULL,
   panel <- config_metrics(tune_results)
   panel <- panel[panel$.config == best_params$.config[[1]], , drop = FALSE]
 
+  if (!is.null(n_folds)) panel <- over_every_fold(panel, n_folds)
+
   for (m in metrics) {
 
-    v       <- panel$mean[panel$.metric == m]
-    covered <- is.null(n_folds) || identical(panel$n[panel$.metric == m], as.integer(n_folds))
+    v <- panel$mean[panel$.metric == m]
 
-    if (length(v) == 1 && is.finite(v) && covered) out[[paste0("cv_", m)]] <- v
+    if (length(v) == 1 && is.finite(v)) out[[paste0("cv_", m)]] <- v
 
   }
 
   tibble::as_tibble(out)
-
-}
-
-## ---------------------------------------------------------------------------
-## The fold rule (#101): only candidates scored on every fold are compared
-## ---------------------------------------------------------------------------
-## tune averages a candidate's metric over the folds it was scored on, so a
-## candidate that failed on one fold is compared with the others on the folds
-## that survived, which is a different and easier test. A candidate missing a
-## fold is left out instead, as scikit-learn leaves out one whose mean is NaN.
-## A recipe step that fails on a fold fails every candidate there, so its
-## configuration then has none to choose from and fails.
-
-#' Each candidate's metrics over its own folds
-#'
-#' @description
-#' `tune::collect_metrics()` pools the folds of candidates with equal
-#' hyperparameters, so a Bayesian iteration that proposes a grid point again
-#' reports both on twice the folds. Read from the per-fold metrics instead,
-#' each `.config` is counted on the resamples it was scored on, and its mean
-#' is its own.
-#'
-#' @param results A tune result (grid or Bayesian).
-#' @return Tibble with one row per `.config` and metric: `.config`,
-#'   `.metric`, `mean` (over the folds with a value; `NA` when none has one)
-#'   and `n` (the distinct resamples with a value).
-#' @keywords internal
-#' @noRd
-config_metrics <- function(results) {
-
-  per_fold <- tune::collect_metrics(results, summarize = FALSE)
-  resample <- resample_ids(per_fold)
-  scored   <- !is.na(per_fold$.estimate)
-  groups   <- split(seq_len(nrow(per_fold)), list(per_fold$.config, per_fold$.metric), drop = TRUE)
-
-  tibble::tibble(
-    .config = vapply(groups, function(i) per_fold$.config[i[1]], character(1), USE.NAMES = FALSE),
-    .metric = vapply(groups, function(i) per_fold$.metric[i[1]], character(1), USE.NAMES = FALSE),
-    mean    = vapply(groups, function(i) {
-      if (any(scored[i])) mean(per_fold$.estimate[i][scored[i]]) else NA_real_
-    }, numeric(1), USE.NAMES = FALSE),
-    n       = vapply(groups, function(i) length(unique(resample[i][scored[i]])), integer(1),
-                     USE.NAMES = FALSE)
-  )
-
-}
-
-#' The candidates of a tune result scored on every fold
-#'
-#' @param results A tune result (grid or Bayesian).
-#' @param n_folds Integer(1). The folds drawn.
-#' @return Character: their `.config`s. Counted on `rmse`, which is `NA` on a
-#'   fold only when the fit made no predictions there; a metric undefined on
-#'   a fold whose predictions were constant (`rsq`) is not a failure.
-#' @keywords internal
-#' @noRd
-complete_configs <- function(results, n_folds) {
-
-  panel <- config_metrics(results)
-
-  panel$.config[panel$.metric == "rmse" & panel$n == n_folds]
-
-}
-
-#' The candidates scored on every fold, best first
-#'
-#' @description
-#' tune's own order and tie rule, as `tune::select_best()` applies them
-#' (`tune::show_best()` with every candidate), restricted to the candidates
-#' scored on every fold. Under `debug` a candidate missing a fold stops the
-#' call rather than being left out, since leaving it out is containment.
-#'
-#' @param results A tune result (grid or Bayesian).
-#' @param metric Character(1). The metric to order by.
-#' @param n_folds Integer(1). The folds drawn.
-#' @param debug Logical(1).
-#' @return `tune::show_best()`'s rows, possibly none.
-#' @keywords internal
-#' @noRd
-rank_complete <- function(results, metric, n_folds, debug = FALSE) {
-
-  ranked   <- tune::show_best(results, metric = metric, n = Inf)
-  complete <- ranked$.config %in% complete_configs(results, n_folds)
-
-  if (debug && !all(complete)) {
-
-    abort_tune_failure(results, "a candidate was not scored on every fold")
-
-  }
-
-  ranked[complete, , drop = FALSE]
-
-}
-
-#' The best hyperparameters among the candidates scored on every fold
-#'
-#' @description
-#' What `tune::select_best()` returns, chosen by [rank_complete()]: the
-#' hyperparameters and `.config` of the first candidate.
-#'
-#' @inheritParams rank_complete
-#' @return One-row tibble, or zero rows when no candidate was scored on every
-#'   fold.
-#' @keywords internal
-#' @noRd
-select_complete <- function(results, metric, n_folds, debug = FALSE) {
-
-  ranked <- rank_complete(results, metric, n_folds, debug)
-
-  utils::head(ranked[, c(tune::.get_tune_parameter_names(results), ".config"), drop = FALSE], 1)
-
-}
-
-#' The row's note on candidates left out for a missing fold
-#'
-#' @param results The tune result the hyperparameters were chosen from.
-#' @param n_folds Integer(1). The folds drawn.
-#' @param n_dropped Integer(1). Candidates the Bayesian search proposed and
-#'   tune dropped, scored on no fold, which `results` does not hold.
-#' @return Character(1), or `NULL` when every candidate was scored on every
-#'   fold.
-#' @keywords internal
-#' @noRd
-incomplete_note <- function(results, n_folds, n_dropped = 0L) {
-
-  all   <- unique(config_metrics(results)$.config)
-  n_out <- length(setdiff(all, complete_configs(results, n_folds))) + n_dropped
-  n_all <- length(all) + n_dropped
-
-  if (n_out == 0) return(NULL)
-
-  cause <- tune_failure_cause(results)
-
-  paste0(n_out, " of ", n_all, " candidate", if (n_all != 1) "s",
-         if (n_out == 1) " was" else " were",
-         " left out of the choice of hyperparameters, not being scored on every fold",
-         if (!is.null(cause)) paste0(": ", cause), ".")
 
 }
