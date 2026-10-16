@@ -24,7 +24,7 @@ A cold start has one.}
 
 \item{metric}{Character or NULL. Metric for ranking the candidate
 configs, by bare name: one of \code{"rpd"}, \code{"rsq"}, \code{"rmse"}, \code{"rrmse"},
-\code{"ccc"}, \code{"mae"}, or \code{fit()} aborts with class \code{horizons_input_error}.
+\code{"ccc"}, \code{"mae"}, or \code{fit()} aborts with class \code{horizons_error_input}.
 If NULL, uses the rank_metric from \code{evaluate()}; on a cold start, where
 there is nothing to rank and the metric is only recorded, the one a
 cold-started fit recorded, else \code{"rpd"}. Ranking reads the
@@ -98,14 +98,14 @@ the rows this object models: after dropping the rows whose outcome is \code{NA}
 as response outliers (\code{evaluation$response_trim$trimmed_ids}; see
 \code{evaluate()}'s "Response outliers" section), the id and outcome columns
 must match the split's, value for value and in order, or \code{fit()} aborts
-with class \code{horizons_input_error}. The trim is reused, not recomputed, so
+with class \code{horizons_error_input}. The trim is reused, not recomputed, so
 \code{fit()} trains without exactly the rows \code{evaluate()} left out and scores
 on the same untrimmed test rows. A trim request \code{validate()} records
 after \code{evaluate()} therefore cannot reach the fit, and \code{fit()} refuses it
 rather than ignore it: when \code{validation$outliers$response_trim} differs
 from the trim \code{evaluate()} applied (one without the other, or another
 outcome, method or threshold), \code{fit()} aborts with class
-\code{horizons_input_error}, saying which differs. Re-running \code{evaluate()}
+\code{horizons_error_input}, saying which differs. Re-running \code{evaluate()}
 applies the current request. A trim that drew no fences counts as
 applied, under the request it ran for. Columns added since \code{evaluate()},
 such as a sibling response from \code{add_response()}, are carried into the
@@ -132,7 +132,8 @@ when none did, the pruned ones that carry a cross-validated value of
 cross-validated RPD; that includes \code{bayesian_iter = 0}, where nothing is
 pruned. When the members are pruned configurations the warning also
 carries class \code{horizons_pruned_fallback_warning}. If every member fails,
-\code{fit()} aborts with class \code{horizons_all_members_failed}, listing the
+\code{fit()} aborts with class \code{horizons_error_all_members_failed} (with
+\code{horizons_error_run}), listing the
 distinct error messages; the
 per-member results travel on the condition as \code{results}, and
 \code{models$results} keeps each member's \code{error_message} when some succeed.
@@ -160,7 +161,7 @@ settings as \code{evaluate()} does, and \code{fit()} applies \code{evaluate()}'s
 first: an outcome that is not constant, at least twice \code{cv_folds} rows
 with an observed outcome, and a Savitzky-Golay window narrower than the
 spectrum. Re-fitting a cold-started fit starts cold again. With more than
-one configuration \code{fit()} aborts with class \code{horizons_input_error}:
+one configuration \code{fit()} aborts with class \code{horizons_error_input}:
 choosing among them is what \code{evaluate()} is for.
 }
 
@@ -185,10 +186,10 @@ with class \code{horizons_input_error} when an observed outcome lies outside
 the range or is infinite, naming \code{outcome_range} and how to set it (#76);
 when the ranking metric is \code{"rrmse"} and the range's lower bound is
 negative, since the mean outcome it divides by can then be zero or
-negative; and, on the \code{evaluate()} path, when the range differs from the
-one \code{evaluate()} recorded on its results rows (rows from before the range
-was recorded count as the default), since the members were chosen on
-predictions clamped to that range.
+negative; and, on the \code{evaluate()} path, with class \code{horizons_error_input},
+when the range differs from the one \code{evaluate()} recorded on its results
+rows (rows from before the range was recorded count as the default), since
+the members were chosen on predictions clamped to that range.
 }
 
 \section{Zero outcome variance}{

@@ -171,7 +171,7 @@ describe("fit() - cold start from one configuration (#45)", {
           suppressWarnings(
             fit(budget, compute_uq = FALSE, compute_ad = FALSE, control = control_horizons(verbose = TRUE))
           ),
-          horizons_all_members_failed = function(e) NULL
+          horizons_error_all_members_failed = function(e) NULL
         ),
         fit_single_config = function(...) {
           list(config_id = "cfg_001", status = "failed", error_message = "mocked",
@@ -284,7 +284,7 @@ describe("fit() - cold start from one configuration (#45)", {
 
     two <- make_eval_object(n = 60, n_configs = 2)
 
-    err <- expect_error(fit(two), class = "horizons_input_error")
+    err <- expect_error(fit(two), class = "horizons_error_input")
 
     msg <- gsub("\\s+", " ", conditionMessage(err))   # undo cli line wrapping
     expect_match(msg, "can start without `evaluate()` only from a single configuration", fixed = TRUE)
@@ -322,7 +322,7 @@ describe("fit() - cold start from one configuration (#45)", {
         suppressWarnings(
           fit(tuned, compute_uq = FALSE, compute_ad = FALSE)
         ),
-        horizons_all_members_failed = function(e) NULL
+        horizons_error_all_members_failed = function(e) NULL
       ),
       fit_single_config = function(...) {
         seen <<- list(...)[c("sg_window", "pca_threshold")]
@@ -379,7 +379,7 @@ describe("fit() - cold start from one configuration (#45)", {
     none <- obj
     none$config$configs <- obj$config$configs[0, ]
 
-    expect_error(fit(none), "configure()", class = "horizons_input_error")
+    expect_error(fit(none), "configure()", class = "horizons_error_input")
 
   })
 
@@ -407,7 +407,7 @@ describe("fit() - cold start from one configuration (#45)", {
     for (x in list(obj, ev)) {
 
       err <- expect_error(fit(x, metric = "accuracy"),
-                          class = "horizons_input_error")
+                          class = "horizons_error_input")
 
       msg <- gsub("\\s+", " ", conditionMessage(err))   # undo cli line wrapping
       expect_match(msg, "accuracy", fixed = TRUE)

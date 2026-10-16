@@ -46,15 +46,14 @@ test_that("compute_ad_metadata handles p > n via shrinkage (with a warning)", {
 
 test_that("compute_ad_metadata validates inputs", {
 
+  ## The mold's predictors come named; a matrix without names is a broken
+  ## invariant, not the user's input
   no_names <- matrix(stats::rnorm(100), 10, 10)
-  expect_error(compute_ad_metadata(no_names), "column names")
+  expect_error(compute_ad_metadata(no_names), "column names",
+               class = "horizons_error_internal")
 
   small <- ad_matrix(3, 10, seed = 1)
   expect_error(compute_ad_metadata(small), "at least")
-
-  chars <- matrix(as.character(stats::rnorm(100)), 10, 10)
-  colnames(chars) <- paste0("f", 1:10)
-  expect_error(compute_ad_metadata(chars), "numeric")
 
   ## NA is caught, not silently propagated to an all-NA centroid.
   na_mat <- ad_matrix(20, 10, seed = 2); na_mat[1, 1] <- NA
@@ -85,25 +84,14 @@ test_that("calculate_ad_distance validates feature alignment", {
 
   wrong_names <- ad_matrix(5, 10, seed = 12)
   colnames(wrong_names) <- paste0("z", 1:10)
-  expect_error(calculate_ad_distance(wrong_names, md), "column names")
+  expect_error(calculate_ad_distance(wrong_names, md), "column names",
+               class = "horizons_error_internal")
 
   ## A matrix with fewer columns is refused by the same names check; the
   ## saved bundle's own shape is checked at predict()'s door.
   wrong_count <- ad_matrix(5, 8, seed = 13)
-  expect_error(calculate_ad_distance(wrong_count, md), "column names")
-
-})
-
-test_that("calculate_ad_distance refuses input that is not a numeric matrix", {
-
-  md <- compute_ad_metadata(ad_matrix(100, 10, seed = 11))
-
-  chars <- matrix(as.character(stats::rnorm(50)), 5, 10)
-  colnames(chars) <- paste0("f", 1:10)
-
-  ## The abort carries no package class.
-  expect_error(calculate_ad_distance(chars, md),
-               "`new_matrix` must be a numeric matrix", fixed = TRUE)
+  expect_error(calculate_ad_distance(wrong_count, md), "column names",
+               class = "horizons_error_internal")
 
 })
 
@@ -127,10 +115,9 @@ test_that("assign_ad_bin validates inputs", {
 
   thr <- c(10, 20, 30, 40)
 
-  ## The abort carries no package class. Without it cut() refuses the
-  ## strings with its own "must be numeric".
-  expect_error(assign_ad_bin(c("a", "b"), thr), "`distances` must be numeric", fixed = TRUE)
-  expect_error(assign_ad_bin(c(-5, 10), thr), "non-negative")
+  ## A negative squared distance would bin to NA silently, so it stops the
+  ## call; a non-numeric one cut() refuses itself
+  expect_error(assign_ad_bin(c(-5, 10), thr), "non-negative", class = "horizons_error_internal")
 
   ## The thresholds come from a saved bundle, whose four non-decreasing
   ## values predict()'s door validator checks (ad_bundle_ok()).

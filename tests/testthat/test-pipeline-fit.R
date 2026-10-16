@@ -75,7 +75,7 @@ describe("fit() - preflight validation", {
     expect_error(
       fit(list(a = 1)),
       "needs a <horizons_eval> from `evaluate()`", fixed = TRUE,
-      class = "horizons_input_error"
+      class = "horizons_error_input"
     )
 
   })
@@ -88,7 +88,7 @@ describe("fit() - preflight validation", {
     expect_error(
       fit(obj),
       "No configuration in evaluation$results can be fitted", fixed = TRUE,
-      class = "horizons_input_error"
+      class = "horizons_error_input"
     )
 
   })
@@ -110,6 +110,27 @@ describe("fit() - preflight validation", {
 
     err <- expect_error(fit(no_rows), class = "horizons_error_validation")
     expect_true(any(grepl("results has no rows", err$findings, fixed = TRUE)))
+
+  })
+
+  it("refuses a predictor axis out of order at its door, before anything is drawn (#121)", {
+
+    ## Names the validator's wavenumber pattern does not parse, so only the
+    ## band-order check can see the order
+    obj <- mfo()
+    wn  <- obj$data$role_map$variable[obj$data$role_map$role == "predictor"]
+    new <- paste0("wn_X", c(3990, 4000, rev(seq(3900, by = 2, length.out = length(wn) - 2))))
+
+    names(obj$data$analysis)[match(wn, names(obj$data$analysis))] <- new
+    obj$data$role_map$variable[match(wn, obj$data$role_map$variable)] <- new
+
+    local_mocked_bindings(
+      draw_stratified   = function(...) stop("a draw was made"),
+      fit_single_config = function(...) stop("a member was fitted")
+    )
+
+    expect_error(fit(obj, n_best = 1L), "not monotonically ordered",
+                 class = "horizons_error_input")
 
   })
 
@@ -743,7 +764,7 @@ describe("fit() - scores on evaluate()'s split", {
     expect_error(
       fit(stale, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE),
       "does not index the rows this object models",
-      class = "horizons_input_error"
+      class = "horizons_error_input"
     )
 
     ## Same ids, one outcome changed: the split's rows no longer carry the
@@ -754,7 +775,7 @@ describe("fit() - scores on evaluate()'s split", {
     expect_error(
       fit(relabelled, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE),
       "does not index the rows this object models",
-      class = "horizons_input_error"
+      class = "horizons_error_input"
     )
 
     ## A record without the key, or with a split that is not an rsplit, is
@@ -833,7 +854,7 @@ describe("fit() - member ranking (#50)", {
         suppressWarnings(
           fit(obj, n_best = 2L, compute_uq = FALSE, compute_ad = FALSE, seed = 42L)
         ),
-        horizons_all_members_failed = function(e) NULL
+        horizons_error_all_members_failed = function(e) NULL
       ),
       fit_single_config = function(...) {
         cfg  <- list(...)$config_row
@@ -1010,7 +1031,7 @@ fit_header <- function(obj, ...) {
     testthat::with_mocked_bindings(
       tryCatch(
         suppressWarnings(fit(obj, seed = 42L, control = control_horizons(verbose = TRUE), ...)),
-        horizons_all_members_failed = function(e) NULL
+        horizons_error_all_members_failed = function(e) NULL
       ),
       fit_single_config = function(...) {
         list(config_id = "cfg_001", status = "failed", error_message = "mocked",

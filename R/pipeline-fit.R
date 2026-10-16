@@ -20,14 +20,14 @@
 #' as response outliers (`evaluation$response_trim$trimmed_ids`; see
 #' `evaluate()`'s "Response outliers" section), the id and outcome columns
 #' must match the split's, value for value and in order, or `fit()` aborts
-#' with class `horizons_input_error`. The trim is reused, not recomputed, so
+#' with class `horizons_error_input`. The trim is reused, not recomputed, so
 #' `fit()` trains without exactly the rows `evaluate()` left out and scores
 #' on the same untrimmed test rows. A trim request `validate()` records
 #' after `evaluate()` therefore cannot reach the fit, and `fit()` refuses it
 #' rather than ignore it: when `validation$outliers$response_trim` differs
 #' from the trim `evaluate()` applied (one without the other, or another
 #' outcome, method or threshold), `fit()` aborts with class
-#' `horizons_input_error`, saying which differs. Re-running `evaluate()`
+#' `horizons_error_input`, saying which differs. Re-running `evaluate()`
 #' applies the current request. A trim that drew no fences counts as
 #' applied, under the request it ran for. Columns added since `evaluate()`,
 #' such as a sibling response from `add_response()`, are carried into the
@@ -54,7 +54,8 @@
 #' cross-validated RPD; that includes `bayesian_iter = 0`, where nothing is
 #' pruned. When the members are pruned configurations the warning also
 #' carries class `horizons_pruned_fallback_warning`. If every member fails,
-#' `fit()` aborts with class `horizons_all_members_failed`, listing the
+#' `fit()` aborts with class `horizons_error_all_members_failed` (with
+#' `horizons_error_run`), listing the
 #' distinct error messages; the
 #' per-member results travel on the condition as `results`, and
 #' `models$results` keeps each member's `error_message` when some succeed.
@@ -81,7 +82,7 @@
 #' first: an outcome that is not constant, at least twice `cv_folds` rows
 #' with an observed outcome, and a Savitzky-Golay window narrower than the
 #' spectrum. Re-fitting a cold-started fit starts cold again. With more than
-#' one configuration `fit()` aborts with class `horizons_input_error`:
+#' one configuration `fit()` aborts with class `horizons_error_input`:
 #' choosing among them is what `evaluate()` is for.
 #'
 #' @param x A `horizons_eval` object (output of `evaluate()`), or a
@@ -91,7 +92,7 @@
 #'   A cold start has one.
 #' @param metric Character or NULL. Metric for ranking the candidate
 #'   configs, by bare name: one of `"rpd"`, `"rsq"`, `"rmse"`, `"rrmse"`,
-#'   `"ccc"`, `"mae"`, or `fit()` aborts with class `horizons_input_error`.
+#'   `"ccc"`, `"mae"`, or `fit()` aborts with class `horizons_error_input`.
 #'   If NULL, uses the rank_metric from `evaluate()`; on a cold start, where
 #'   there is nothing to rank and the metric is only recorded, the one a
 #'   cold-started fit recorded, else `"rpd"`. Ranking reads the
@@ -134,10 +135,10 @@
 #' the range or is infinite, naming `outcome_range` and how to set it (#76);
 #' when the ranking metric is `"rrmse"` and the range's lower bound is
 #' negative, since the mean outcome it divides by can then be zero or
-#' negative; and, on the `evaluate()` path, when the range differs from the
-#' one `evaluate()` recorded on its results rows (rows from before the range
-#' was recorded count as the default), since the members were chosen on
-#' predictions clamped to that range.
+#' negative; and, on the `evaluate()` path, with class `horizons_error_input`,
+#' when the range differs from the one `evaluate()` recorded on its results
+#' rows (rows from before the range was recorded count as the default), since
+#' the members were chosen on predictions clamped to that range.
 #'
 #' @section Zero outcome variance:
 #' On either path, before anything is drawn, `fit()` aborts with class
@@ -206,10 +207,10 @@ fit <- function(x,
 
   if (cold_start && !inherits(x, "horizons_data")) {
 
-    cli::cli_abort(c(
+    abort_horizons(c(
       "{.fn fit} needs a {.cls horizons_eval} from {.fn evaluate}, or a configured {.cls horizons_data} with one configuration.",
       "x" = "{.arg x} is {.obj_type_friendly {x}}."
-    ), class = "horizons_input_error")
+    ), kind = "input")
 
   }
 
@@ -217,15 +218,7 @@ fit <- function(x,
   ## evaluate() path an unknown name used to surface as a missing cv_<metric>
   ## column with the advice to re-run evaluate(); on a cold start the record
   ## would fail validation only after every model had been fitted.
-  if (!is.null(metric) &&
-      (!rlang::is_string(metric) || !metric %in% VALID_RANK_METRICS)) {
-
-    cli::cli_abort(c(
-      "{.arg metric} must be one of {.val {VALID_RANK_METRICS}}.",
-      "x" = "Got {.val {metric}}."
-    ), class = "horizons_input_error")
-
-  }
+  if (!is.null(metric)) check_rank_metric_arg(metric)
 
   ## The object as it arrives (#234): on the evaluate() path its evaluation
   ## record, and through it the base contract; on a cold start the base
@@ -266,6 +259,11 @@ fit <- function(x,
   ## silently, so a request that differs from the applied trim is refused
   ## (#137). A cold start reads the request itself.
   if (!cold_start) check_trim_request(x)
+
+  ## The axis has to be in order for the spectral steps; the same for every
+  ## member, so checked once, before anything is drawn, as evaluate() checks
+  ## it (#121)
+  check_band_order(x$data$role_map$variable[x$data$role_map$role == "predictor"])
 
   ## Notes on the draws and the member count are printed inside the tree,
   ## after its header in Step 3; they used to print above it (#91).
@@ -335,11 +333,11 @@ fit <- function(x,
     ## already, so each is substituted as text.
     reason <- unranked_reason(eval_results, rank_metric, "`fit(x, metric = )`")
 
-    cli::cli_abort(c(
+    abort_horizons(c(
       "No configuration in {.field evaluation$results} can be fitted.",
       "x" = "{reason[1]}",
       stats::setNames(sprintf("{reason[%d]}", seq_along(reason)[-1]), names(reason)[-1])
-    ), class = "horizons_input_error")
+    ), kind = "input")
 
   }
 
@@ -455,12 +453,12 @@ fit <- function(x,
       ""
     }
 
-    cli::cli_abort(c(
+    abort_horizons(c(
       "{.fn evaluate}'s split does not index the rows this object models.",
       "x" = "{.field evaluation$split} was drawn on {nrow(split_F$data)} row{?s}; the analysis table has {nrow(modelled_rows)} with an observed {.field {outcome_col}}{trim_note}, and their {.field {id_col}} or {.field {outcome_col}} values differ.",
       "i" = "The rows or outcomes changed after {.fn evaluate}, or the object was built by hand.",
       "i" = "Re-run {.fn evaluate} on the object as it is now."
-    ), class = "horizons_input_error")
+    ), kind = "input")
 
   }
 
@@ -1182,7 +1180,7 @@ fit <- function(x,
 #'   the split is unstratified) and `strata_failed` (`TRUE` when the
 #'   stratified draw failed and was retried without strata), as
 #'   [draw_eval_split()] returns them. Aborts with class
-#'   `horizons_input_error` when the object has no configuration or more than
+#'   `horizons_error_input` when the object has no configuration or more than
 #'   one, too few rows have an observed outcome, the window is at least as
 #'   wide as the spectrum, or `validate()`'s response-trim request is for
 #'   another outcome ([response_trim_request()]).
@@ -1195,19 +1193,19 @@ cold_start_evaluation <- function(x, metric, seed, collector, call = rlang::call
 
   if (n_configs == 0) {
 
-    cli::cli_abort(c(
+    abort_horizons(c(
       "There is no configuration to fit.",
       "i" = "Run {.fn configure} first."
-    ), class = "horizons_input_error", call = call)
+    ), kind = "input", call = call)
 
   }
 
   if (n_configs > 1) {
 
-    cli::cli_abort(c(
+    abort_horizons(c(
       "{.fn fit} can start without {.fn evaluate} only from a single configuration, and this object has {n_configs} configurations.",
       "i" = "Choosing among configurations is what {.fn evaluate} is for. Run it first, and {.fn fit} re-tunes the best of them."
-    ), class = "horizons_input_error", call = call)
+    ), kind = "input", call = call)
 
   }
 
@@ -1310,7 +1308,7 @@ cold_start_evaluation <- function(x, metric, seed, collector, call = rlang::call
 #'   [outcome_range_setting()].
 #' @param call The call the condition is attributed to. Default: the caller,
 #'   `fit()`.
-#' @return `NULL`, invisibly. Aborts with class `horizons_input_error`.
+#' @return `NULL`, invisibly. Aborts with class `horizons_error_input`.
 #' @keywords internal
 #' @noRd
 check_evaluated_outcome_range <- function(x, outcome_range,
@@ -1337,12 +1335,12 @@ check_evaluated_outcome_range <- function(x, outcome_range,
 
   range_text <- format_outcome_range(outcome_range)
 
-  cli::cli_abort(c(
+  abort_horizons(c(
     "{.fn evaluate} scored these configurations under another {.arg outcome_range}.",
     "x" = "{.fn evaluate} recorded {recorded} on {sum(differs)} results row{?s}; this object's range is {range_text}.",
     "i" = "The members and their warm-start parameters were chosen on predictions clamped to that range.",
     "i" = "Re-run {.fn evaluate} on the object as it is now."
-  ), class = "horizons_input_error", call = call)
+  ), kind = "input", call = call)
 
 }
 
@@ -1372,7 +1370,7 @@ check_evaluated_outcome_range <- function(x, outcome_range,
 #' @param x A `horizons_eval` that was screened by `evaluate()`.
 #' @param call The call the condition is attributed to. Default: the caller,
 #'   `fit()`.
-#' @return `NULL`, invisibly. Aborts with class `horizons_input_error`,
+#' @return `NULL`, invisibly. Aborts with class `horizons_error_input`,
 #'   saying what differs.
 #' @keywords internal
 #' @noRd
@@ -1424,14 +1422,14 @@ check_trim_request <- function(x, call = rlang::caller_env()) {
     c("i" = "To fit with the trim {.fn evaluate} applied, restore its request: {.code validate(x, remove_outliers = \"response\", response_threshold = {app_threshold})}.")
   }
 
-  cli::cli_abort(c(
+  abort_horizons(c(
     "{.fn validate}'s response-trim request differs from the trim {.fn evaluate} applied.",
     differs,
     "i" = "{.fn fit} reuses the rows {.fn evaluate} trimmed; it does not apply a request itself.",
     restore,
     "i" = paste(if (is.null(restore)) "Re-run" else "Or re-run",
                 "{.fn evaluate} to apply the current request, then {.fn fit}.")
-  ), class = "horizons_input_error", call = call)
+  ), kind = "input", call = call)
 
 }
 
@@ -1469,7 +1467,8 @@ trim_settings <- function(trim) {
 #' @param results `fit()`'s per-member results tibble, with `error_message`.
 #' @param call The call the condition is attributed to. Default: the caller,
 #'   `fit()`.
-#' @return Never returns; aborts with class `horizons_all_members_failed`.
+#' @return Never returns; aborts with class
+#'   `horizons_error_all_members_failed` (kind `run`).
 #' @keywords internal
 #' @noRd
 abort_all_members_failed <- function(results, call = rlang::caller_env()) {
@@ -1478,11 +1477,12 @@ abort_all_members_failed <- function(results, call = rlang::caller_env()) {
 
   ## distinct_config_errors() returns the bullets brace-escaped, so upstream
   ## error text cannot be read as a cli template.
-  cli::cli_abort(c(
+  abort_horizons(c(
     "All {n_members} configuration{?s} {.fn fit} re-tuned failed, so there is no model to return.",
     distinct_config_errors(results),
     "i" = "The per-member results, error messages included, are on this condition as {.field results}. Recover them with {.code rlang::last_error()$results}."
-  ), class = "horizons_all_members_failed", results = results, call = call)
+  ), kind = "run", class = "horizons_error_all_members_failed", results = results,
+  call = call)
 
 }
 

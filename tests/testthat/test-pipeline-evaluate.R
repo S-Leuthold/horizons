@@ -1366,7 +1366,7 @@ describe("evaluate() - checkpointing", {
     ## fit() refuses it at its door, naming a metric the results hold
     err <- expect_error(fit(ev, compute_uq = FALSE, compute_ad = FALSE),
                         "2 succeeded, but none has a cv_rpd value.", fixed = TRUE,
-                        class = "horizons_input_error")
+                        class = "horizons_error_input")
     msg <- gsub("\\s+", " ", conditionMessage(err))   # undo cli line wrapping
     expect_match(msg, "fit(x, metric = )", fixed = TRUE)
     expect_match(msg, "\"rmse\"", fixed = TRUE)

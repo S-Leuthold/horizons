@@ -74,7 +74,7 @@ describe("fit() - an evaluation with only pruned configs (#38)", {
       fit(unranked, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE),
       paste0("None succeeded, and none of the ", nrow(unranked$evaluation$results),
              " pruned configurations has a cv_rpd value."), fixed = TRUE,
-      class = "horizons_input_error"
+      class = "horizons_error_input"
     )
 
   })
@@ -89,7 +89,7 @@ describe("fit() - an evaluation with only pruned configs (#38)", {
     err <- expect_error(
       fit(unranked, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE),
       "succeeded, but none has",
-      class = "horizons_input_error"
+      class = "horizons_error_input"
     )
 
     ## evaluate() returns such an evaluation, so the remedy is another metric
@@ -280,20 +280,20 @@ describe("fit() - member failures", {
 
   }
 
-  it("aborts with horizons_all_members_failed when every member fails, naming the errors", {
+  it("aborts with horizons_error_all_members_failed when every member fails, naming the errors", {
 
     err <- testthat::with_mocked_bindings(
       tryCatch(
         suppressWarnings(
           fit(obj, n_best = 2L, compute_uq = FALSE, compute_ad = FALSE)
         ),
-        horizons_all_members_failed = function(e) e
+        horizons_error_all_members_failed = function(e) e
       ),
       fit_single_config = failed_member,
       .package = "horizons"
     )
 
-    expect_s3_class(err, "horizons_all_members_failed")
+    expect_s3_class(err, "horizons_error_all_members_failed")
 
     msg <- gsub("\\s+", " ", conditionMessage(err))   # undo cli line wrapping
     expect_match(msg, "{rf} diverged", fixed = TRUE)

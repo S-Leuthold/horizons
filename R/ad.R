@@ -53,17 +53,13 @@
 #' @noRd
 compute_ad_metadata <- function(feature_matrix, min_rows = N_AD_TRAIN_MIN) {
 
-  ## Validate inputs ------------------------------------------------------------
-
-  if (!is.matrix(feature_matrix) || !is.numeric(feature_matrix)) {
-
-    cli::cli_abort("{.arg feature_matrix} must be a numeric matrix")
-
-  }
+  ## The mold's predictors, which hardhat builds: without names the centroid
+  ## is unnamed and calculate_ad_distance()'s name check is skipped, silently.
+  ## A matrix that is not numeric fails loudly in the covariance below.
 
   if (is.null(colnames(feature_matrix))) {
 
-    cli::cli_abort("{.arg feature_matrix} must have column names")
+    abort_horizons("{.arg feature_matrix} must have column names", kind = "internal")
 
   }
 
@@ -202,13 +198,7 @@ compute_ad_thresholds <- function(calib_matrix,
 #' @noRd
 calculate_ad_distance <- function(new_matrix, ad_metadata) {
 
-  ## Validate inputs ------------------------------------------------------------
-
-  if (!is.matrix(new_matrix) || !is.numeric(new_matrix)) {
-
-    cli::cli_abort("{.arg new_matrix} must be a numeric matrix")
-
-  }
+  ### A matrix that is not numeric fails loudly in mahalanobis().
 
   ### Both callers build ad_metadata with both fields, and predict()'s door
   ### validator checks each saved bundle's shape; a feature count that does
@@ -220,7 +210,8 @@ calculate_ad_distance <- function(new_matrix, ad_metadata) {
   if (!is.null(new_names) && !is.null(train_names) &&
       !identical(new_names, train_names)) {
 
-    cli::cli_abort("Feature column names must match training data")
+    ### Same count, other order would bind distances to the wrong features
+    abort_horizons("Feature column names must match training data", kind = "internal")
 
   }
 
@@ -260,17 +251,13 @@ calculate_ad_distance <- function(new_matrix, ad_metadata) {
 #' @noRd
 assign_ad_bin <- function(distances, thresholds) {
 
-  ## Validate inputs ------------------------------------------------------------
-
-  if (!is.numeric(distances)) {
-
-    cli::cli_abort("{.arg distances} must be numeric")
-
-  }
+  ## A negative squared distance falls outside cut()'s breaks and bins to NA,
+  ## silently, and an NA flag is never abstained on; cut() itself refuses a
+  ## non-numeric.
 
   if (any(distances < 0, na.rm = TRUE)) {
 
-    cli::cli_abort("{.arg distances} must be non-negative")
+    abort_horizons("{.arg distances} must be non-negative", kind = "internal")
 
   }
 

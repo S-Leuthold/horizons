@@ -25,6 +25,6 @@
     Condition
       Warning:
       ! Applicability domain for config "cfg_ad" could not be computed: the distance to the training centroid failed.
-      x Feature column names must match training data
+      x Feature column names must match training data; This is an internal error that was detected in the horizons package. Please report it at <https://github.com/S-Leuthold/horizons/issues> with a reprex (<https://tidyverse.org/help/>) and the full backtrace.
       i Point predictions are returned without .ad_distance and .ad_flag, so out-of-domain abstention cannot be applied to this batch.
 

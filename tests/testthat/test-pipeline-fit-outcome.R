@@ -158,7 +158,7 @@ describe("fit() - evaluate()'s response trim (#77)", {
         testthat::with_mocked_bindings(
           tryCatch(
             fit(x, compute_uq = FALSE, compute_ad = FALSE, seed = 307L, control = control_horizons(verbose = verbose)),
-            horizons_all_members_failed = function(e) NULL
+            horizons_error_all_members_failed = function(e) NULL
           ),
           fit_single_config = function(...) {
             args <- list(...)
@@ -229,7 +229,7 @@ describe("fit() - evaluate()'s response trim (#77)", {
     expect_error(
       suppressWarnings(fit(no_record, compute_uq = FALSE, compute_ad = FALSE)),
       "does not index the rows this object models",
-      class = "horizons_input_error"
+      class = "horizons_error_input"
     )
 
   })
@@ -311,7 +311,7 @@ describe("fit() - a trim request changed after evaluate() (#137)", {
 
     cnd <- rlang::catch_cnd(
       suppressWarnings(fit(x, compute_uq = FALSE, compute_ad = FALSE, seed = 307L)),
-      classes = "horizons_input_error"
+      classes = "horizons_error_input"
     )
 
     if (is.null(cnd)) return(NULL)
@@ -324,7 +324,7 @@ describe("fit() - a trim request changed after evaluate() (#137)", {
 
     late <- refusal(quiet_validate(untrimmed, remove_outliers = "response"))
 
-    expect_s3_class(late$cnd, "horizons_input_error")
+    expect_s3_class(late$cnd, "horizons_error_input")
     expect_match(late$message, "requests a trim of SOC at 1.5 x IQR", fixed = TRUE)
     expect_match(late$message, "applied none", fixed = TRUE)
     expect_match(late$message, "Re-run `evaluate()` to apply the current request", fixed = TRUE)
@@ -335,7 +335,7 @@ describe("fit() - a trim request changed after evaluate() (#137)", {
 
     dropped <- refusal(quiet_validate(trimmed))
 
-    expect_s3_class(dropped$cnd, "horizons_input_error")
+    expect_s3_class(dropped$cnd, "horizons_error_input")
     expect_match(dropped$message, "applied a trim of SOC at 1.5 x IQR", fixed = TRUE)
     expect_match(dropped$message, "now requests none", fixed = TRUE)
 
@@ -359,7 +359,7 @@ describe("fit() - a trim request changed after evaluate() (#137)", {
     other <- refusal(quiet_validate(trimmed, remove_outliers = "response",
                                     response_threshold = 3))
 
-    expect_s3_class(other$cnd, "horizons_input_error")
+    expect_s3_class(other$cnd, "horizons_error_input")
     expect_match(other$message, "threshold is 3 x IQR; `evaluate()` trimmed at 1.5 x IQR",
                  fixed = TRUE)
 
@@ -387,7 +387,7 @@ describe("fit() - a trim request changed after evaluate() (#137)", {
 
     out <- refusal(other_method)
 
-    expect_s3_class(out$cnd, "horizons_input_error")
+    expect_s3_class(out$cnd, "horizons_error_input")
     expect_match(out$message, "method is \"mad\"; `evaluate()` used \"iqr\"", fixed = TRUE)
     expect_no_match(out$message, "threshold is", fixed = TRUE)
 
@@ -410,7 +410,7 @@ describe("fit() - a trim request changed after evaluate() (#137)", {
     ## not match it
     withdrawn <- refusal(quiet_validate(skipped))
 
-    expect_s3_class(withdrawn$cnd, "horizons_input_error")
+    expect_s3_class(withdrawn$cnd, "horizons_error_input")
     expect_match(withdrawn$message, "no fences could be drawn, so it trimmed no rows",
                  fixed = TRUE)
 
@@ -468,7 +468,7 @@ describe("fit() - calibration after a response trim (#77)", {
   testthat::with_mocked_bindings(
     tryCatch(
       suppressWarnings(fit(v, compute_uq = TRUE, compute_ad = TRUE, seed = 307L)),
-      horizons_all_members_failed = function(e) NULL
+      horizons_error_all_members_failed = function(e) NULL
     ),
     fit_single_config = function(...) {
       args <- list(...)
