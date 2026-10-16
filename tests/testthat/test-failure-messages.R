@@ -179,7 +179,7 @@ run_evaluate <- function(model, setup, ...) {
 
 }
 
-run_fit <- function(model, setup) {
+run_fit <- function(model, setup, ...) {
 
   fit_single_config(
     config_row          = make_failure_config(model),
@@ -189,7 +189,8 @@ run_fit <- function(model, setup) {
     best_params_eval    = NULL,
     final_bayesian_iter = 0,
     grid_size           = 2,
-    seed                = 42L
+    seed                = 42L,
+    ...
   )
 
 }
@@ -640,7 +641,7 @@ describe("fit_single_config() records the cause of a recipe step error", {
 
   setup <- make_failure_setup()
 
-  it("names the cause when the step fails at mtry finalization", {
+  it("names the cause and its class when the step fails as the recipe is prepped to bound mtry", {
 
     local_mocked_bindings(build_recipe = failing_recipe, .package = "horizons")
 
@@ -648,25 +649,105 @@ describe("fit_single_config() records the cause of a recipe step error", {
 
     expect_identical(result$status, "failed")
     expect_identical(result$error_message,
-                     "Parameter finalization failed: boom from step (in `step_mutate()`)")
+                     "Recipe preparation failed: boom from step (in `step_mutate()`)")
+    expect_identical(result$class, "simpleError")
 
   })
 
-  it("names the cause from tune's notes when every warm-start model failed", {
+  it("reproduces a step's failure inside the re-tune by prepping the recipe, so it fails with its class", {
 
+    ## elastic_net has no mtry, so its recipe is prepped only inside tune;
+    ## tune's notes show the step failed, and the prep outside tune raises
+    ## the step's own error
     local_mocked_bindings(build_recipe = failing_recipe, .package = "horizons")
 
     result <- run_fit("elastic_net", setup)
 
     expect_identical(result$status, "failed")
-    expect_match(result$error_message,
-                 "^Warm-start tuning failed: all models failed during CV \u2014 ")
-    expect_match(result$error_message,
-                 "boom from step (in `step_mutate()`; 3 of 3 folds)", fixed = TRUE)
+    expect_identical(result$error_message,
+                     "Recipe preparation failed: boom from step (in `step_mutate()`)")
+    expect_identical(result$class, "simpleError")
 
     ## The re-tune started before it failed, so how it started is recorded.
     expect_false(result$warm_start)
     expect_false(is.na(result$start_grid_size))
+
+  })
+
+  it("names the cause from tune's notes when every warm-start model failed on a failure the prep does not reproduce (#96)", {
+
+    local_mocked_bindings(build_recipe = fold_failing_recipe, .package = "horizons")
+
+    result <- run_fit("elastic_net", setup)
+
+    expect_identical(result$status, "failed")
+    expect_match(result$error_message,
+                 "^Warm-start grid search failed: all models failed during CV \u2014 ")
+    expect_match(result$error_message,
+                 "boom on a fold (in `step_mutate()`; 3 of 3 folds)", fixed = TRUE)
+
+    ## tune keeps only the text, so the failure is a run failure; and its
+    ## own "All models failed" warning is not repeated as a warning
+    expect_identical(result$class, "horizons_error_run")
+    expect_false(any(grepl("All models failed", result$warnings, fixed = TRUE)))
+
+  })
+
+  it("lets a tripwire in a step through, whether the recipe is prepped before tuning or inside it", {
+
+    local_mocked_bindings(build_recipe = tripwire_recipe, .package = "horizons")
+
+    for (model in c("rf", "elastic_net")) {
+
+      err <- expect_error(run_fit(model, setup), "Rows misaligned.", fixed = TRUE)
+      expect_true(rlang::cnd_inherits(err, "horizons_error_internal"), label = model)
+
+    }
+
+  })
+
+  it("keeps the failure's backtrace on the member only under keep_traces", {
+
+    local_mocked_bindings(build_recipe = failing_recipe, .package = "horizons")
+
+    kept <- run_fit("rf", setup, keep_traces = TRUE)
+    expect_type(kept$trace, "character")
+    expect_gt(length(kept$trace), 0L)
+
+    expect_null(run_fit("rf", setup)$trace)
+
+  })
+
+  it("stops at the first failure inside tune under debug, carrying the trace tune kept", {
+
+    ## An engine's error, for which tune keeps a backtrace, on the first fit
+    ## only: one candidate on one fold, which outside debug the member
+    ## survives
+    real_glmnet <- glmnet::glmnet
+    calls       <- 0L
+    local_mocked_bindings(glmnet = function(...) {
+      calls <<- calls + 1L
+      if (calls == 1L) stop("the engine broke")
+      real_glmnet(...)
+    }, .package = "glmnet")
+
+    contained <- suppressWarnings(run_fit("elastic_net", setup))
+    expect_identical(contained$status, "success")
+
+    calls <- 0L
+    err <- expect_error(run_fit("elastic_net", setup, debug = TRUE),
+                        "a fit failed inside tune", class = "horizons_error_run")
+    expect_match(conditionMessage(err), "the engine broke", fixed = TRUE)
+    expect_true(any(grepl("glmnet", format(err$trace), fixed = TRUE)))
+
+  })
+
+  it("stops at a step's failure under debug, with the step's own error", {
+
+    local_mocked_bindings(build_recipe = failing_recipe, .package = "horizons")
+
+    expect_error(run_fit("rf", setup, debug = TRUE), "boom from step", fixed = TRUE,
+                 class = "recipes_error_step")
 
   })
 
@@ -680,10 +761,10 @@ describe("fit_single_config() records the warnings tune kept in .notes", {
 
     local_mocked_bindings(build_recipe = warning_recipe, .package = "horizons")
 
-    ## Step 9's fold metrics run outside the capture, so yardstick's
-    ## constant-estimate warning reaches the caller; it is not under test.
-    result <- suppressWarnings(run_fit("rf", setup))
-    warns  <- result$warnings
+    ## Every warning of the member is recorded on it, the fold metrics' too
+    ## (#102): none reaches the caller
+    expect_no_warning(result <- run_fit("rf", setup))
+    warns <- result$warnings
 
     expect_identical(result$status, "success")
     expect_true(any(grepl("Non-positive values in selected variable.*of 3 folds",

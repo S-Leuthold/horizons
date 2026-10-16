@@ -78,7 +78,9 @@ fit_single_config <- function(config_row,
                               response_fences     = NULL,
                               min_calib_rows       = N_CALIB_MIN,
                               min_ad_rows          = N_AD_TRAIN_MIN,
-                              min_degradation_rows = DEGRADATION_MIN_N) {
+                              min_degradation_rows = DEGRADATION_MIN_N,
+                              debug                = FALSE,
+                              keep_traces          = FALSE) {
 
   start_time <- Sys.time()
 
@@ -93,35 +95,408 @@ fit_single_config <- function(config_row,
   transformation <- tolower(as.character(config_row$transformation))
   train_data     <- train_data %||% rsample::training(split_F)
   test_data      <- rsample::testing(split_F)
+  n_folds        <- nrow(cv_resamples)
 
-  ## Accumulate warnings from all steps, as records that render_warning_log()
-  ## reduces to one line per distinct message (#96)
+  ## The member's warnings, as records that render_warning_log() reduces to
+  ## one line per distinct message (#96): tune's notes and the package's own
+  ## lines, gathered as the unit runs, and, once it returns, the warnings the
+  ## unit caught as they were raised.
   warning_log <- new_warning_log()
 
-  collect_from <- function(safe_result) {
-
-    warning_log <<- dplyr::bind_rows(warning_log, text_records(safe_result$warnings))
-
+  ## tune catches the warnings raised inside its resampling and keeps them in
+  ## .notes, where run_unit() never sees them. Both the re-tune and the
+  ## out-of-fold predictions resample cv_resamples, so their fold counts
+  ## merge.
+  collect_notes_from <- function(tune_results, candidate = NULL) {
+    notes <- tune_note_records(tune_results, type = "warning", scope = "cv",
+                               candidate = candidate)
+    warning_log <<- dplyr::bind_rows(warning_log, notes)
   }
 
-  ## Warnings tune caught inside its resampling and kept in .notes, which
-  ## safely_execute() never sees. Both the re-tune and the out-of-fold
-  ## predictions resample cv_resamples, so their fold counts merge.
-  collect_notes_from <- function(tune_results) {
+  pin <- function(text) {
+    warning_log <<- dplyr::bind_rows(warning_log, text_records(text, pinned = TRUE))
+  }
 
-    notes <- tune_note_records(tune_results, type = "warning", scope = "cv")
-    warning_log <<- dplyr::bind_rows(warning_log, notes)
-
+  ## The safely_execute() steps that remain carry their warnings as text
+  collect_from <- function(safe_result) {
+    warning_log <<- dplyr::bind_rows(warning_log, text_records(safe_result$warnings))
   }
 
   ## How the re-tune started, once it has: from evaluate()'s parameters, or
   ## from a space-filling grid when there were none to use (#45)
-  warm_start        <- NA
-  start_grid_size   <- NA_integer_
+  warm_start      <- NA
+  start_grid_size <- NA_integer_
 
-  ## --- Failed result helper ------------------------------------------------
+  unit <- run_unit({
 
-  make_failed <- function(error_msg) {
+    ## -----------------------------------------------------------------------
+    ## Step 1: Build recipe, model specification and workflow
+    ## -----------------------------------------------------------------------
+
+    recipe <- unit_step("recipe", build_recipe(config_row, train_data, role_map,
+                                               sg_window     = sg_window,
+                                               pca_threshold = pca_threshold))
+
+    model_spec <- unit_step("model_spec", define_model_spec(config_row$model))
+
+    wflow <- unit_step("workflow", workflows::workflow() |>
+                         workflows::add_recipe(recipe) |>
+                         workflows::add_model(model_spec))
+
+    ## -----------------------------------------------------------------------
+    ## Step 2: Finalize parameter set (mtry / num_comp upper bound; num_comp
+    ## also by the smallest fold's rows, #216)
+    ## -----------------------------------------------------------------------
+    ## The prep rule evaluate_single_config() follows: that prep is the only
+    ## one before tuning, so a step's error there ends the member with its
+    ## class, and every other model's recipe is prepped only when tune's notes
+    ## show a step failed (check_tune_result()).
+
+    param_set   <- workflows::extract_parameter_set_dials(wflow)
+    prepped_now <- any(c("mtry", "num_comp") %in% param_set$name)
+
+    if (prepped_now) {
+
+      prepped <- unit_step("prep", recipes::prep(recipe))
+      baked   <- unit_step("prep", recipes::bake(prepped, new_data = NULL))
+
+      param_set <- unit_step("finalize_parameters", {
+        eval_data <- baked[, prepped_predictors(prepped, baked), drop = FALSE]
+        finalized <- dials::finalize(param_set, eval_data)
+        cap_pls_components(finalized, ncol(eval_data), min_analysis_rows(cv_resamples))
+      })
+
+      rm(prepped, baked)
+      invisible(gc(verbose = FALSE))
+
+    }
+
+    ## -----------------------------------------------------------------------
+    ## Step 3: Define tuning metric set
+    ## -----------------------------------------------------------------------
+
+    ## Scored on the original response scale, for the same reason as in
+    ## evaluate_single_config(): the skip = TRUE transform never reaches tune's
+    ## assessment set. The re-tune selects on "rmse" by name, which the
+    ## factory preserves. See #49. Clamped to the outcome's range (#76).
+    tune_metrics <- tuning_metric_set(transformation, metrics = c("rmse", "rsq"),
+                                      outcome_range = outcome_range)
+
+    ## -----------------------------------------------------------------------
+    ## Step 4: Warm-start re-tuning
+    ## -----------------------------------------------------------------------
+    ## The grid is centred on evaluate()'s parameters, or space-filling when
+    ## there are none to use; how it started is recorded before it runs, so a
+    ## re-tune that fails still says.
+
+    initial_grid    <- unit_step("warm_start_tune", build_warmstart_grid(
+      best_params_eval, param_set, max_points = grid_size
+    ))
+    warm_start      <- usable_best_params(best_params_eval, param_set)
+    start_grid_size <- nrow(initial_grid)
+
+    retune <- unit_step("warm_start_tune", tune_warmstart_bayes(
+      workflow      = wflow,
+      cv_resamples  = cv_resamples,
+      initial_grid  = initial_grid,
+      param_set     = param_set,
+      bayesian_iter = final_bayesian_iter,
+      metric_set    = tune_metrics,
+      allow_par     = allow_par,
+      recipe        = if (!prepped_now) recipe,
+      debug         = debug
+    ))
+
+    best_params <- retune$best_params
+
+    ## The warnings tune kept for the chosen candidate (#109)
+    collect_notes_from(retune$tune_results)
+
+    ## -----------------------------------------------------------------------
+    ## Step 5: Finalize workflow and generate OOF predictions
+    ## -----------------------------------------------------------------------
+
+    finalized_wf <- unit_step("finalize_workflow", tune::finalize_workflow(wflow, best_params))
+
+    ## Re-pin before every stochastic stage so results do not depend on which
+    ## axis the previous stage ran on (see evaluate_single_config(), Step 8).
+    set.seed(seed, kind = "Mersenne-Twister")
+
+    ## Messages muffled, as around the tuning calls: tune reports its notes
+    ## on the console as it goes, and the member records them instead.
+    cv_fit <- unit_step("oof_predictions", {
+      results <- suppressMessages(tune::fit_resamples(
+        finalized_wf,
+        resamples = cv_resamples,
+        control   = tune::control_resamples(
+          save_pred     = TRUE,
+          allow_par     = allow_par,
+          parallel_over = "resamples"
+        )
+      ))
+      check_tune_result(results, "every out-of-fold fit failed",
+                        recipe = if (!prepped_now) recipe, debug = debug)
+      results
+    })
+
+    collect_notes_from(cv_fit)
+
+    oof_raw <- unit_step("oof_predictions", tune::collect_predictions(cv_fit))
+
+    ## Shape cv_predictions: .row, sample_id, .fold, config_id, .pred_trans,
+    ## truth, then .pred below. .row is a position in the frame the folds were
+    ## cut from (train_Fit in fit()), and sample_id is read from that same
+    ## frame, so each prediction keeps its link to a sample and .row is never
+    ## the only key.
+    fold_frame <- cv_resamples$splits[[1]]$data
+
+    cv_predictions <- tibble::tibble(
+      .row        = as.integer(oof_raw$.row),
+      sample_id   = fold_frame[[id_column(role_map)]][oof_raw$.row],
+      .fold       = oof_raw$id,
+      config_id   = config_id,
+      .pred_trans = oof_raw$.pred,
+      truth       = oof_raw[[outcome_col]]
+    )
+
+    ## Back-transform .pred to original scale. Unconditional, like predict():
+    ## "none" is a passthrough, and the clamp to the outcome's range inside
+    ## back_transform_predictions() must reach these OOF predictions because
+    ## they are the meta-learner's training features, and predict() clamps the
+    ## same members at serve time (#53, #76). truth from collect_predictions()
+    ## is already on the original scale: the outcome transform is a skip =
+    ## TRUE step, skipped at assessment.
+    cv_predictions$.pred <- unit_step("oof_back_transform", back_transform_predictions(
+      cv_predictions$.pred_trans, transformation, warn = FALSE, outcome_range = outcome_range
+    ))
+
+    ## -----------------------------------------------------------------------
+    ## Step 6: Fold-wise CV metrics (original scale)
+    ## -----------------------------------------------------------------------
+    ## Inside the unit, so a warning yardstick raises here is the member's
+    ## (#102).
+
+    cv_metrics <- unit_step("cv_panel", {
+
+      fold_metrics <- split(cv_predictions, cv_predictions$`.fold`) |>
+        purrr::map_dfr(
+          ~ compute_original_scale_metrics(.x$truth, .x$.pred),
+          .id = "fold"
+        )
+
+      ## A fold whose metric is NA (fewer than two complete pairs, or a metric
+      ## undefined there) is left out of the mean, so it is left out of the
+      ## count the standard error divides by too.
+      fold_metrics |>
+        dplyr::group_by(.metric) |>
+        dplyr::summarize(
+          mean    = mean(.estimate, na.rm = TRUE),
+          std_err = stats::sd(.estimate, na.rm = TRUE) / sqrt(sum(!is.na(.estimate))),
+          .groups = "drop"
+        )
+
+    })
+
+    ## -----------------------------------------------------------------------
+    ## Step 7: Fit final model on full training data
+    ## -----------------------------------------------------------------------
+
+    set.seed(seed, kind = "Mersenne-Twister")
+
+    final_fit <- unit_step("final_fit", suppressMessages(
+      workflows::fit(finalized_wf, data = train_data)
+    ))
+
+    ## -----------------------------------------------------------------------
+    ## Step 8: Evaluate on test_F (original scale)
+    ## -----------------------------------------------------------------------
+
+    test_preds <- unit_step("test_predict", stats::predict(final_fit, new_data = test_data)$.pred)
+
+    ## Back-transform, unconditionally (see the OOF block above, #53 and #76)
+    test_preds <- unit_step("test_back_transform", back_transform_predictions(
+      test_preds, transformation, warn = FALSE, outcome_range = outcome_range
+    ))
+
+    ## test_truth is already on the original scale: test_data is raw (never
+    ## passed through the recipe)
+    test_truth <- test_data[[outcome_col]]
+
+    ## Six NAs when fewer than two test rows have a prediction, and the
+    ## member's warnings say why
+    scored       <- unit_step("test_metrics", compute_original_scale_metrics(test_truth, test_preds))
+    test_metrics <- metrics_row(scored)
+    na_reason    <- metrics_na_reason(scored)
+
+    if (!is.null(na_reason)) pin(na_reason)
+
+    ## -----------------------------------------------------------------------
+    ## Step 9: Degradation detection
+    ## -----------------------------------------------------------------------
+    ## Bootstrap the test RPD and flag the config only when its whole interval
+    ## lies below the CV mean RPD. The test RPD is one estimate from a few dozen
+    ## rows, so comparing it to a band built from the CV standard error, which
+    ## describes the CV mean and not a single held-out estimate, flagged healthy
+    ## fits (#119).
+    ##
+    ## After a response trim (#77) the folds ran on rows inside the training
+    ## fences while the test rows are untrimmed, so the two RPDs would describe
+    ## two populations and the flag would fire whenever a trim removed an
+    ## extreme. The diagnostic RPD is then taken over the test rows inside the
+    ## same fences; test_metrics, which is what is reported, stays untrimmed.
+
+    degradation <- unit_step("degradation", check_degradation(
+      cv_metrics, test_truth, test_preds, response_fences, seed = seed,
+      min_n = min_degradation_rows
+    ))
+
+    ## -----------------------------------------------------------------------
+    ## Step 10: UQ (must run BEFORE butchering — needs extract_mold())
+    ## -----------------------------------------------------------------------
+
+    uq_result <- NULL
+
+    if (compute_uq && !is.null(calib_data)) {
+
+      uq_safe <- safely_execute(
+        fit_uq(
+          fitted_workflow = final_fit,
+          oof_predictions = cv_predictions,
+          calib_data      = calib_data,
+          role_map        = role_map,
+          transformation  = transformation,
+          level_default   = DEFAULT_UQ_LEVEL,
+          seed            = seed,
+          outcome_range   = outcome_range,
+          min_calib_rows  = min_calib_rows
+        ),
+        log_error          = FALSE,
+        capture_conditions = TRUE
+      )
+
+      if (is.null(uq_safe$error)) {
+
+        uq_result <- uq_safe$result
+
+      }
+
+      collect_from(uq_safe)
+
+      ## Measured coverage on the held-out test rows (#118). The intervals are
+      ## built by predict_intervals(), the function predict() serves them with,
+      ## so this is the coverage a user of the fitted object gets on data the
+      ## model never saw. oof_coverage stays on the bundle under its own name:
+      ## it is an in-sample diagnostic for the quantile forest, not coverage.
+      if (!is.null(uq_result)) {
+
+        coverage_safe <- safely_execute(
+          test_interval_coverage(uq_result, test_preds, test_data, test_truth,
+                                 config_id, outcome_range),
+          log_error          = FALSE,
+          capture_conditions = TRUE
+        )
+
+        collect_from(coverage_safe)
+
+        uq_result <- c(uq_result, if (is.null(coverage_safe$error)) {
+          coverage_safe$result
+        } else {
+          test_interval_coverage_missing()
+        })
+
+      }
+
+    }
+
+    ## -----------------------------------------------------------------------
+    ## Step 10b: AD (must also run BEFORE butchering — needs extract_mold())
+    ## -----------------------------------------------------------------------
+    ## Shares the UQ calibration split (D7). Independent of UQ: fit_ad() returns
+    ## NULL on any failure, so AD degrades without touching the config's fit.
+
+    ad_result <- NULL
+
+    if (compute_ad && !is.null(calib_data)) {
+
+      ad_safe <- safely_execute(
+        fit_ad(
+          fitted_workflow = final_fit,
+          calib_data      = calib_data,
+          level           = DEFAULT_AD_LEVEL,
+          min_calib_rows  = min_calib_rows,
+          min_ad_rows     = min_ad_rows
+        ),
+        log_error          = FALSE,
+        capture_conditions = TRUE
+      )
+
+      if (is.null(ad_safe$error)) {
+
+        ad_result <- ad_safe$result
+
+      }
+
+      collect_from(ad_safe)
+
+    }
+
+    ## -----------------------------------------------------------------------
+    ## Step 11: Butcher the final fit for storage
+    ## -----------------------------------------------------------------------
+
+    butchered <- safely_execute(
+      butcher::butcher(final_fit),
+      log_error          = FALSE,
+      capture_conditions = TRUE
+    )
+
+    fitted_workflow <- if (is.null(butchered$error)) {
+
+      result <- butchered$result
+      rm(final_fit, butchered)
+      invisible(gc(verbose = FALSE))
+      result
+
+    } else {
+
+      final_fit  ## fall back to unbutchered if butcher fails
+
+    }
+
+    list(
+      config_id        = config_id,
+      status           = "success",
+      degraded         = degradation$degraded,
+      degraded_reason  = degradation$reason,
+      fitted_workflow  = fitted_workflow,
+      best_params      = best_params,
+      warm_start       = warm_start,
+      start_grid_size  = start_grid_size,
+      cv_predictions   = cv_predictions,
+      test_metrics     = test_metrics,
+      cv_metrics       = cv_metrics,
+      uq               = uq_result,
+      ad               = ad_result,
+      warnings         = NULL,
+      error_message    = NA_character_,
+      class            = NA_character_,
+      trace            = NULL,
+      runtime_secs     = NA_real_
+    )
+
+  }, unit = "member", id = config_id, debug = debug, keep_traces = keep_traces)
+
+  ## -------------------------------------------------------------------------
+  ## The member, fitted or failed
+  ## -------------------------------------------------------------------------
+  ## The warnings the unit caught join the notes, so a warning caught as it
+  ## was raised and the same warning in tune's notes are one line.
+
+  warning_log <- dplyr::bind_rows(unit_warning_records(unit$records), warning_log)
+
+  result <- if (unit$failed) {
+
+    failure <- unit$records[unit$records$type == "failure", , drop = FALSE]
 
     list(
       config_id        = config_id,
@@ -131,541 +506,32 @@ fit_single_config <- function(config_row,
       fitted_workflow  = NULL,
       best_params      = NULL,
       warm_start       = warm_start,
-      start_grid_size  = start_grid_size,
+      start_grid_size  = as.integer(start_grid_size),
       cv_predictions   = NULL,
       test_metrics     = NULL,
       cv_metrics       = NULL,
       uq               = NULL,
       ad               = NULL,
-      warnings         = render_warning_log(warning_log),
-      error_message    = error_msg,
-      runtime_secs     = as.numeric(difftime(Sys.time(), start_time, units = "secs"))
+      warnings         = NULL,
+      error_message    = unit_failure_message(unit$records, "Fit"),
+      class            = failure$class[1],
+      trace            = failure$trace[[1]],
+      runtime_secs     = NA_real_
     )
-
-  }
-
-  ## -----------------------------------------------------------------------
-  ## Step 1: Build recipe
-  ## -----------------------------------------------------------------------
-
-  recipe_result <- safely_execute(
-    build_recipe(config_row, train_data, role_map,
-                 sg_window     = sg_window,
-                 pca_threshold = pca_threshold),
-    log_error          = FALSE,
-    capture_conditions = TRUE
-  )
-
-  if (!is.null(recipe_result$error)) {
-
-    return(make_failed(
-      paste0("Recipe building failed: ", condition_summary(recipe_result$error))
-    ))
-
-  }
-
-  recipe <- recipe_result$result
-  collect_from(recipe_result)
-
-  ## -----------------------------------------------------------------------
-  ## Step 2: Define model specification
-  ## -----------------------------------------------------------------------
-
-  model_result <- safely_execute(
-    define_model_spec(config_row$model),
-    log_error          = FALSE,
-    capture_conditions = TRUE
-  )
-
-  if (!is.null(model_result$error)) {
-
-    return(make_failed(
-      paste0("Model specification failed: ", condition_summary(model_result$error))
-    ))
-
-  }
-
-  model_spec <- model_result$result
-  collect_from(model_result)
-
-  ## -----------------------------------------------------------------------
-  ## Step 3: Create workflow and finalize param_set
-  ## -----------------------------------------------------------------------
-
-  wflow_result <- safely_execute(
-    workflows::workflow() |>
-      workflows::add_recipe(recipe) |>
-      workflows::add_model(model_spec),
-    log_error          = FALSE,
-    capture_conditions = TRUE
-  )
-
-  if (!is.null(wflow_result$error)) {
-
-    return(make_failed(
-      paste0("Workflow creation failed: ", condition_summary(wflow_result$error))
-    ))
-
-  }
-
-  wflow <- wflow_result$result
-
-  ## -----------------------------------------------------------------------
-  ## Step 4: Finalize parameter set (mtry / num_comp upper bound; num_comp
-  ## also by the smallest fold's rows, #216)
-  ## -----------------------------------------------------------------------
-
-  param_set <- workflows::extract_parameter_set_dials(wflow)
-
-  if ("mtry" %in% param_set$name || "num_comp" %in% param_set$name) {
-
-    finalize_result <- safely_execute({
-
-      prepped <- recipes::prep(recipe)
-      baked   <- recipes::bake(prepped, new_data = NULL)
-
-      eval_data <- baked[, prepped_predictors(prepped, baked), drop = FALSE]
-
-      result <- dials::finalize(param_set, eval_data)
-      result <- cap_pls_components(result, ncol(eval_data), min_analysis_rows(cv_resamples))
-
-      rm(prepped, baked, eval_data)
-      invisible(gc(verbose = FALSE))
-
-      result
-
-    }, log_error = FALSE, capture_conditions = TRUE)
-
-    if (!is.null(finalize_result$error)) {
-
-      return(make_failed(
-        paste0("Parameter finalization failed: ", condition_summary(finalize_result$error))
-      ))
-
-    }
-
-    param_set <- finalize_result$result
-    collect_from(finalize_result)
-
-  }
-
-  ## -----------------------------------------------------------------------
-  ## Step 5: Define tuning metric set
-  ## -----------------------------------------------------------------------
-
-  ## Scored on the original response scale, for the same reason as in
-  ## evaluate_single_config(): the skip = TRUE transform never reaches tune's
-  ## assessment set. tune_warmstart_bayes() selects on "rmse" by name, which
-  ## the factory preserves. See #49. Clamped to the outcome's range (#76).
-  tune_metrics <- tuning_metric_set(transformation, metrics = c("rmse", "rsq"),
-                                    outcome_range = outcome_range)
-
-  ## -----------------------------------------------------------------------
-  ## Step 6: Warm-start Bayesian re-tuning
-  ## -----------------------------------------------------------------------
-
-  tune_result <- safely_execute(
-    tune_warmstart_bayes(
-      workflow      = wflow,
-      cv_resamples  = cv_resamples,
-      best_params   = best_params_eval,
-      param_set     = param_set,
-      bayesian_iter = final_bayesian_iter,
-      grid_size     = grid_size,
-      metric_set    = tune_metrics,
-      allow_par     = allow_par
-    ),
-    log_error          = FALSE,
-    capture_conditions = TRUE
-  )
-
-  if (!is.null(tune_result$error)) {
-
-    return(make_failed(
-      paste0("Warm-start tuning failed: ", condition_summary(tune_result$error))
-    ))
-
-  }
-
-  warmstart <- tune_result$result
-  collect_from(tune_result)
-  collect_notes_from(warmstart$tune_results)
-
-  warm_start        <- !isTRUE(warmstart$fallback_used)
-  start_grid_size   <- as.integer(warmstart$grid_points %||% NA_integer_)
-
-  ## Check for complete tuning failure (grid failed)
-  if (is.null(warmstart$best_params)) {
-
-    return(make_failed(
-      paste0("Warm-start tuning failed: ", warmstart$error %||% "unknown error")
-    ))
-
-  }
-
-  best_params <- warmstart$best_params
-
-  ## A warm-start search that failed, or ran without producing a result,
-  ## leaves the starting grid's choice; the member's warnings say so (#209).
-  if (isTRUE(warmstart$bayes_failed)) {
-
-    warning_log <- dplyr::bind_rows(warning_log, text_records(
-      paste0("The warm-start Bayesian search failed, so the hyperparameters were chosen from its starting grid alone: ",
-             warmstart$bayes_error %||% "unknown error"),
-      pinned = TRUE
-    ))
-
-  }
-
-  ## -----------------------------------------------------------------------
-  ## Step 7: Finalize workflow
-  ## -----------------------------------------------------------------------
-
-  finalized_wf <- tune::finalize_workflow(wflow, best_params)
-
-  ## -----------------------------------------------------------------------
-  ## Step 8: Generate OOF predictions via fit_resamples
-  ## -----------------------------------------------------------------------
-
-  ## Re-pin before every stochastic stage so results do not depend on which
-  ## axis the previous stage ran on (see evaluate_single_config(), Step 8).
-  set.seed(seed, kind = "Mersenne-Twister")
-
-  resample_result <- safely_execute(
-    tune::fit_resamples(
-      finalized_wf,
-      resamples = cv_resamples,
-      control   = tune::control_resamples(
-        save_pred     = TRUE,
-        allow_par     = allow_par,
-        parallel_over = "resamples"
-      )
-    ),
-    log_error          = FALSE,
-    capture_conditions = TRUE
-  )
-
-  if (!is.null(resample_result$error)) {
-
-    return(make_failed(
-      paste0("OOF predictions failed: ", condition_summary(resample_result$error))
-    ))
-
-  }
-
-  cv_fit <- resample_result$result
-  collect_from(resample_result)
-  collect_notes_from(cv_fit)
-
-  ## Extract raw OOF predictions
-  oof_raw <- tune::collect_predictions(cv_fit)
-
-  ## Shape cv_predictions: .row, sample_id, .fold, config_id, .pred_trans,
-  ## truth, then .pred below. .row is a position in the frame the folds were
-  ## cut from (train_Fit in fit()), and sample_id is read from that same
-  ## frame, so each prediction keeps its link to a sample and .row is never
-  ## the only key.
-  fold_frame <- cv_resamples$splits[[1]]$data
-
-  cv_predictions <- tibble::tibble(
-    .row        = oof_raw$.row,
-    sample_id   = fold_frame[[id_column(role_map)]][oof_raw$.row],
-    .fold       = oof_raw$id,
-    config_id   = config_id,
-    .pred_trans  = oof_raw$.pred,
-    truth       = oof_raw[[outcome_col]]
-  )
-
-  ## Back-transform .pred to original scale. Unconditional, like predict():
-  ## "none" is a passthrough, and the clamp to the outcome's range inside
-  ## back_transform_predictions() must reach these OOF predictions because
-  ## they are the meta-learner's training features, and predict() clamps the
-  ## same members at serve time (#53, #76).
-  bt_result <- safely_execute(
-    back_transform_predictions(cv_predictions$.pred_trans, transformation,
-                               warn = FALSE, outcome_range = outcome_range),
-    log_error          = FALSE,
-    capture_conditions = TRUE
-  )
-
-  if (!is.null(bt_result$error)) {
-
-    return(make_failed(
-      paste0("OOF back-transformation failed: ", condition_summary(bt_result$error))
-    ))
-
-  }
-
-  cv_predictions$.pred <- bt_result$result
-
-  ## Note: truth from collect_predictions() is already on original scale.
-  ## The recipe uses step_log/step_sqrt with skip = TRUE, so the outcome
-  ## transformation is skipped during assessment baking.
-
-  ## Ensure .row is integer
-  cv_predictions$.row <- as.integer(cv_predictions$.row)
-
-  ## -----------------------------------------------------------------------
-  ## Step 9: Compute fold-wise CV metrics (original scale)
-  ## -----------------------------------------------------------------------
-
-  fold_metrics <- split(cv_predictions, cv_predictions$`.fold`) |>
-    purrr::map_dfr(
-      ~ compute_original_scale_metrics(.x$truth, .x$.pred),
-      .id = "fold"
-    )
-
-  ## A fold whose metric is NA (fewer than two complete pairs, or a metric
-  ## undefined there) is left out of the mean, so it is left out of the count
-  ## the standard error divides by too.
-  cv_metrics <- fold_metrics |>
-    dplyr::group_by(.metric) |>
-    dplyr::summarize(
-      mean    = mean(.estimate, na.rm = TRUE),
-      std_err = stats::sd(.estimate, na.rm = TRUE) / sqrt(sum(!is.na(.estimate))),
-      .groups = "drop"
-    )
-
-  ## -----------------------------------------------------------------------
-  ## Step 10: Fit final model on full training data
-  ## -----------------------------------------------------------------------
-
-  set.seed(seed, kind = "Mersenne-Twister")
-
-  final_fit_result <- safely_execute(
-    workflows::fit(finalized_wf, data = train_data),
-    log_error          = FALSE,
-    capture_conditions = TRUE
-  )
-
-  if (!is.null(final_fit_result$error)) {
-
-    return(make_failed(
-      paste0("Final model fit failed: ", condition_summary(final_fit_result$error))
-    ))
-
-  }
-
-  final_fit <- final_fit_result$result
-  collect_from(final_fit_result)
-
-  ## -----------------------------------------------------------------------
-  ## Step 11: Evaluate on test_F (original scale)
-  ## -----------------------------------------------------------------------
-
-  test_pred_result <- safely_execute(
-    stats::predict(final_fit, new_data = test_data),
-    log_error          = FALSE,
-    capture_conditions = TRUE
-  )
-
-  if (!is.null(test_pred_result$error)) {
-
-    return(make_failed(
-      paste0("Test prediction failed: ", condition_summary(test_pred_result$error))
-    ))
-
-  }
-
-  test_preds <- test_pred_result$result$.pred
-
-  ## Back-transform, unconditionally (see the OOF block above, #53 and #76)
-  bt_test <- safely_execute(
-    back_transform_predictions(test_preds, transformation, warn = FALSE,
-                               outcome_range = outcome_range),
-    log_error          = FALSE,
-    capture_conditions = TRUE
-  )
-
-  if (!is.null(bt_test$error)) {
-
-    return(make_failed(
-      paste0("Test back-transformation failed: ", condition_summary(bt_test$error))
-    ))
-
-  }
-
-  test_preds <- bt_test$result
-
-  test_truth <- test_data[[outcome_col]]
-
-  ## Note: test_truth is already on original scale — test_data is raw
-  ## (never passed through the recipe), so no back-transformation needed.
-
-  ## Six NAs when fewer than two test rows have a prediction, and the
-  ## member's warnings say why
-  scored       <- compute_original_scale_metrics(test_truth, test_preds)
-  test_metrics <- metrics_row(scored)
-  na_reason    <- metrics_na_reason(scored)
-
-  if (!is.null(na_reason)) {
-
-    warning_log <- dplyr::bind_rows(warning_log, text_records(na_reason, pinned = TRUE))
-
-  }
-
-  required <- c("rmse", "rrmse", "rsq", "ccc", "rpd", "mae")
-  missing  <- setdiff(required, names(test_metrics))
-  for (m in missing) test_metrics[[m]] <- NA_real_
-
-  ## -----------------------------------------------------------------------
-  ## Step 12: Degradation detection
-  ## -----------------------------------------------------------------------
-  ## Bootstrap the test RPD and flag the config only when its whole interval
-  ## lies below the CV mean RPD. The test RPD is one estimate from a few dozen
-  ## rows, so comparing it to a band built from the CV standard error, which
-  ## describes the CV mean and not a single held-out estimate, flagged healthy
-  ## fits (#119).
-  ##
-  ## After a response trim (#77) the folds ran on rows inside the training
-  ## fences while the test rows are untrimmed, so the two RPDs would describe
-  ## two populations and the flag would fire whenever a trim removed an
-  ## extreme. The diagnostic RPD is then taken over the test rows inside the
-  ## same fences; test_metrics, which is what is reported, stays untrimmed.
-
-  degradation     <- check_degradation(cv_metrics, test_truth, test_preds,
-                                       response_fences, seed = seed,
-                                       min_n = min_degradation_rows)
-  degraded        <- degradation$degraded
-  degraded_reason <- degradation$reason
-
-  ## -----------------------------------------------------------------------
-  ## Step 13: UQ (must run BEFORE butchering — needs extract_mold())
-  ## -----------------------------------------------------------------------
-
-  uq_result <- NULL
-
-  if (compute_uq && !is.null(calib_data)) {
-
-    uq_safe <- safely_execute(
-      fit_uq(
-        fitted_workflow = final_fit,
-        oof_predictions = cv_predictions,
-        calib_data      = calib_data,
-        role_map        = role_map,
-        transformation  = transformation,
-        level_default   = DEFAULT_UQ_LEVEL,
-        seed            = seed,
-        outcome_range   = outcome_range,
-        min_calib_rows  = min_calib_rows
-      ),
-      log_error          = FALSE,
-      capture_conditions = TRUE
-    )
-
-    if (is.null(uq_safe$error)) {
-
-      uq_result <- uq_safe$result
-
-    }
-
-    collect_from(uq_safe)
-
-    ## Measured coverage on the held-out test rows (#118). The intervals are
-    ## built by predict_intervals(), the function predict() serves them with,
-    ## so this is the coverage a user of the fitted object gets on data the
-    ## model never saw. oof_coverage stays on the bundle under its own name:
-    ## it is an in-sample diagnostic for the quantile forest, not coverage.
-    if (!is.null(uq_result)) {
-
-      coverage_safe <- safely_execute(
-        test_interval_coverage(uq_result, test_preds, test_data, test_truth,
-                               config_id, outcome_range),
-        log_error          = FALSE,
-        capture_conditions = TRUE
-      )
-
-      collect_from(coverage_safe)
-
-      uq_result <- c(uq_result, if (is.null(coverage_safe$error)) {
-        coverage_safe$result
-      } else {
-        test_interval_coverage_missing()
-      })
-
-    }
-
-  }
-
-  ## -----------------------------------------------------------------------
-  ## Step 13b: AD (must also run BEFORE butchering — needs extract_mold())
-  ## -----------------------------------------------------------------------
-  ## Shares the UQ calibration split (D7). Independent of UQ: fit_ad() returns
-  ## NULL on any failure, so AD degrades without touching the config's fit.
-
-  ad_result <- NULL
-
-  if (compute_ad && !is.null(calib_data)) {
-
-    ad_safe <- safely_execute(
-      fit_ad(
-        fitted_workflow = final_fit,
-        calib_data      = calib_data,
-        level           = DEFAULT_AD_LEVEL,
-        min_calib_rows  = min_calib_rows,
-        min_ad_rows     = min_ad_rows
-      ),
-      log_error          = FALSE,
-      capture_conditions = TRUE
-    )
-
-    if (is.null(ad_safe$error)) {
-
-      ad_result <- ad_safe$result
-
-    }
-
-    collect_from(ad_safe)
-
-  }
-
-  ## -----------------------------------------------------------------------
-  ## Step 14: Butcher the final fit for storage
-  ## -----------------------------------------------------------------------
-
-  butchered <- safely_execute(
-    butcher::butcher(final_fit),
-    log_error          = FALSE,
-    capture_conditions = TRUE
-  )
-
-  fitted_workflow <- if (is.null(butchered$error)) {
-
-    result <- butchered$result
-    rm(final_fit, butchered)
-    invisible(gc(verbose = FALSE))
-    result
 
   } else {
 
-    final_fit  ## fall back to unbutchered if butcher fails
+    unit$value
 
   }
 
-  ## -----------------------------------------------------------------------
-  ## Step 15: Return structured result
-  ## -----------------------------------------------------------------------
+  ### `[<-` with a list, so a member without warnings keeps the field as NULL
+  result["warnings"]  <- list(render_warning_log(warning_log))
+  result$runtime_secs <- as.numeric(difftime(Sys.time(), start_time, units = "secs"))
 
-  runtime <- as.numeric(difftime(Sys.time(), start_time, units = "secs"))
+  attr(result, "unit_records") <- unit$records
 
-  list(
-    config_id        = config_id,
-    status           = "success",
-    degraded         = degraded,
-    degraded_reason  = degraded_reason,
-    fitted_workflow  = fitted_workflow,
-    best_params      = best_params,
-    warm_start       = warm_start,
-    start_grid_size  = start_grid_size,
-    cv_predictions   = cv_predictions,
-    test_metrics     = test_metrics,
-    cv_metrics       = cv_metrics,
-    uq               = uq_result,
-    ad               = ad_result,
-    warnings         = render_warning_log(warning_log),
-    error_message    = NA_character_,
-    runtime_secs     = runtime
-  )
+  result
 
 }
 

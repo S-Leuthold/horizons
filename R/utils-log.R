@@ -483,7 +483,16 @@ UNIT_STEPS <- c(
   finalize_workflow   = "Workflow finalization",
   last_fit            = "Test evaluation",
   back_transform      = "Back-transformation",
-  test_metrics        = "Test metrics"
+  test_metrics        = "Test metrics",
+  warm_start_tune     = "Warm-start tuning",
+  warm_start_grid     = "Warm-start grid search",
+  warm_start_bayes    = "Warm-start Bayesian search",
+  oof_predictions     = "OOF predictions",
+  oof_back_transform  = "OOF back-transformation",
+  final_fit           = "Final model fit",
+  test_predict        = "Test prediction",
+  test_back_transform = "Test back-transformation",
+  degradation         = "Degradation check"
 )
 
 #' The message of a failed unit

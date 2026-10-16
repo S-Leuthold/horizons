@@ -146,9 +146,35 @@ cold start's split) that fell back to an unstratified one
 (\code{horizons_warning_substitution}); a smallest assessment fold under
 \code{SMALL_FOLD_ROWS} rows, or every member below \code{evaluate()}'s prune
 threshold (\code{horizons_warning_quality}); UQ and AD switched off because the
-calibration set is under \code{min_calib_rows} (\code{horizons_warning_skipped}).
-The folds are drawn from the rows the members are fitted on, which must
-outnumber the folds, or \code{fit()} refuses, as \code{evaluate()} does.
+calibration set is under \code{min_calib_rows} (\code{horizons_warning_skipped}); a
+member whose warm-start Bayesian search failed and kept what it finished
+(\code{horizons_warning_substitution}, #209); some members failed and the rest
+are returned (\code{horizons_warning_partial_failure}, naming them with each
+distinct cause). The folds are drawn from the rows the members are fitted
+on, which must outnumber the folds, or \code{fit()} refuses, as \code{evaluate()}
+does.
+}
+
+\section{Members that fail}{
+
+Each member is one unit: a failure in any step of its re-tune, its
+out-of-fold predictions, its final fit or its test scoring fails that
+member alone, and \code{models$results} records the step and the cause in
+\code{error_message}, the root cause's class in \code{class}, and, with
+\code{control_horizons(keep_traces = TRUE)}, its backtrace as text in \code{trace}.
+A member's own warnings, from the engines and from tune, are in
+\code{models$results$warnings}. A bug, a refusal or a missing package is not
+the member's and stops the call. When the first members fail the same
+way across at least two models, \code{fit()} stops with
+\code{horizons_error_systemic} and the members so far as \code{results}
+(\code{control_horizons(breaker = )}, 3 by default, \code{FALSE} to fit every
+member), and it stops the same way when a parallel worker dies. With
+\code{control_horizons(debug = TRUE)} the re-tunes run in this session and the
+first failure, inside tuning included, stops the call with its backtrace.
+Before a parallel run \code{fit()} refuses a session loaded with
+\code{devtools::load_all()}, and one whose workers load another version of
+horizons (\code{horizons_error_dependency}), since tune's workers run horizons'
+recipe steps.
 }
 
 \section{Cold start from one configuration}{

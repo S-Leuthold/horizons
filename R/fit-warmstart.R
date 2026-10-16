@@ -294,54 +294,51 @@ point_in_grid <- function(point, grid) {
 
 #' Warm-Start Bayesian Optimization
 #'
-#' Orchestrates the re-tuning sequence for fit():
-#' 1. Build warm-start grid via `build_warmstart_grid()`
-#' 2. Evaluate grid via `tune::tune_grid()`
-#' 3. If `bayesian_iter > 0`, refine via `tune::tune_bayes()` seeded from
-#'    the grid results
-#' 4. Select best params via `tune::select_best(metric = "rmse")`
+#' The re-tuning sequence of a `fit()` member, run inside its unit:
+#' 1. Evaluate the starting grid ([build_warmstart_grid()]) with
+#'    `tune::tune_grid()`. A result in which every model failed fails the
+#'    member, with tune's cause ([check_tune_result()]), and so does a grid
+#'    with no candidate scored on every fold (#101).
+#' 2. If `bayesian_iter > 0`, refine with [bayes_search()], which keeps what
+#'    it finished when it fails, and says so (#209).
+#' 3. Choose the hyperparameters by RMSE among the candidates scored on every
+#'    fold ([select_complete()]).
 #'
 #' @param workflow A tidymodels workflow (recipe + model spec, not fitted).
 #' @param cv_resamples A `vfold_cv` object.
-#' @param best_params Single-row tibble from evaluate's `select_best()`.
+#' @param initial_grid The starting grid, from [build_warmstart_grid()].
 #' @param param_set Finalized `parameters` object.
 #' @param bayesian_iter Integer. Bayesian iterations after grid. 0 = grid only.
 #' @param metric_set A `yardstick::metric_set`.
 #' @param allow_par Logical. Passed to tune control functions.
+#' @param recipe The member's untrained recipe, to reproduce a step's failure
+#'   inside tune with its class; `NULL` when it was prepped before tuning.
+#' @param debug Logical. Stop at the first failure rather than fall back.
 #'
-#' @return List with:
-#'   - `tune_results`: The final tuning result object
-#'   - `best_params`: Single-row tibble of best hyperparameters
-#'   - `fallback_used`: Logical, TRUE if grid fallback was used
-#'   - `grid_points`: Integer, the number of points in the starting grid
-#'     (the space-filling grid when `fallback_used` is TRUE)
-#'   - `bayes_failed`: Logical, TRUE when `bayesian_iter > 0` and the
-#'     Bayesian search errored or produced no iteration past the grid, so the
-#'     grid's choice is kept
-#'   - `bayes_error`: Character, why, when `bayes_failed` is TRUE; NULL
-#'     otherwise
-#'   - `error`: Character, present only when the grid failed, in which case
-#'     `tune_results` and `best_params` are NULL. When every model failed it
-#'     carries the most frequent distinct error note from `.notes`.
+#' @return List with `tune_results` (the result the hyperparameters were
+#'   chosen from), `best_params` (single-row tibble, with `.config`), `grid`
+#'   (`initial_grid`, which the member reads its notes through, #109) and
+#'   `n_dropped` (the candidates the Bayesian search proposed and tune
+#'   dropped, scored on no fold).
 #'
 #' @keywords internal
 tune_warmstart_bayes <- function(workflow,
-                                  cv_resamples,
-                                  best_params,
-                                  param_set,
-                                  bayesian_iter,
-                                  grid_size  = WARMSTART_GRID_SIZE,
-                                  metric_set,
-                                  allow_par = FALSE) {
+                                 cv_resamples,
+                                 initial_grid,
+                                 param_set,
+                                 bayesian_iter,
+                                 metric_set,
+                                 allow_par = FALSE,
+                                 recipe    = NULL,
+                                 debug     = FALSE) {
 
-  ## --- Phase 1: Build warm-start grid and run tune_grid -------------------
+  n_folds <- nrow(cv_resamples)
 
-  initial_grid <- build_warmstart_grid(best_params, param_set,
-                                       max_points = grid_size)
-  fallback_used <- !usable_best_params(best_params, param_set)
+  ## --- Phase 1: the starting grid --------------------------------------------
 
-  grid_result <- safely_execute(
-    tune::tune_grid(
+  grid_results <- unit_step("warm_start_grid", {
+
+    results <- suppressMessages(tune::tune_grid(
       workflow,
       resamples = cv_resamples,
       grid      = initial_grid,
@@ -351,99 +348,56 @@ tune_warmstart_bayes <- function(workflow,
         allow_par     = allow_par,
         parallel_over = "resamples"   # what tune resolves NULL to here; explicit for visibility, no behaviour change
       )
-    ),
-    log_error          = FALSE,
-    capture_conditions = TRUE
-  )
-
-  if (!is.null(grid_result$error)) {
-
-    return(list(
-      tune_results  = NULL,
-      best_params   = NULL,
-      fallback_used = fallback_used,
-      grid_points   = nrow(initial_grid),
-      error         = condition_summary(grid_result$error)
     ))
 
-  }
+    check_tune_result(results, "all models failed during CV", recipe = recipe, debug = debug)
 
-  tune_results <- grid_result$result
-  bayes_failed <- FALSE
-  bayes_error  <- NULL
+    ## A candidate scored on fewer folds than were drawn takes no part in the
+    ## choice (#101), so a grid with none scored on every fold has nothing to
+    ## choose from.
+    if (nrow(rank_complete(results, "rmse", n_folds, debug)) == 0) {
 
-  ## Every model failed: tune_grid() returns rather than erroring, with the
-  ## reason only in .notes. Stop here with that reason, as
-  ## evaluate_single_config() does, instead of letting tune_bayes() and
-  ## select_best() fail on an empty grid with "All models failed" (#96).
-  if (any(grepl("All models failed", unlist(grid_result$warnings)))) {
+      abort_tune_failure(results, "no grid candidate was scored on every fold")
 
-    cause <- tune_failure_cause(tune_results)
+    }
 
-    return(list(
-      tune_results  = NULL,
-      best_params   = NULL,
-      fallback_used = fallback_used,
-      grid_points   = nrow(initial_grid),
-      error         = paste0("all models failed during CV",
-                             if (!is.null(cause)) paste0(" \u2014 ", cause))
-    ))
+    results
 
-  }
+  })
 
-  ## --- Phase 2: Bayesian optimization (if requested) ----------------------
+  ## --- Phase 2: Bayesian optimization (if requested) -----------------------
+
+  tune_results <- grid_results
+  n_dropped    <- 0L
 
   if (bayesian_iter > 0) {
 
-    bayes_result <- safely_execute(
-      tune::tune_bayes(
-        workflow,
-        resamples  = cv_resamples,
-        initial    = tune_results,
-        iter       = as.integer(bayesian_iter),
-        metrics    = metric_set,
-        param_info = param_set,
-        control    = tune::control_bayes(
-          no_improve    = BAYES_NO_IMPROVE_LIMIT,
-          allow_par     = allow_par,
-          parallel_over = "resamples"
-        )
-      ),
-      log_error          = FALSE,
-      capture_conditions = TRUE
-    )
+    search <- unit_step("warm_start_bayes", bayes_search(
+      workflow      = workflow,
+      resamples     = cv_resamples,
+      initial       = grid_results,
+      iter          = bayesian_iter,
+      param_info    = param_set,
+      metrics       = metric_set,
+      allow_par     = allow_par,
+      parallel_over = "resamples",
+      debug         = debug,
+      search        = "the warm-start Bayesian search",
+      grid          = "its starting grid"
+    ))
 
-    ## If the search fails, or returns without an iteration past the grid,
-    ## fall back to the grid results and say why (#209).
-    if (!is.null(bayes_result$error)) {
-
-      bayes_failed <- TRUE
-      bayes_error  <- condition_summary(bayes_result$error)
-
-    } else if (!bayes_iterations_ran(bayes_result$result)) {
-
-      bayes_failed <- TRUE
-      bayes_error  <- "the search produced no results"
-
-    } else {
-
-      tune_results <- bayes_result$result
-
-    }
+    tune_results <- search$results
+    n_dropped    <- search$n_dropped
 
   }
 
   ## --- Phase 3: Select best -----------------------------------------------
 
-  final_best <- tune::select_best(tune_results, metric = "rmse")
-
   list(
-    tune_results  = tune_results,
-    best_params   = final_best,
-    fallback_used = fallback_used,
-    grid_points   = nrow(initial_grid),
-    bayes_failed  = bayes_failed,
-    bayes_error   = bayes_error
+    tune_results = tune_results,
+    best_params  = unit_step("select_best", select_complete(tune_results, "rmse", n_folds, debug)),
+    grid         = initial_grid,
+    n_dropped    = n_dropped
   )
 
 }

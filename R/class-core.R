@@ -2373,7 +2373,9 @@ validate_horizons_fit <- function(x, call = rlang::caller_env()) {
                    warm_start      = "logical",
                    start_grid_size = "integer",
                    error_message   = "character",
-                   class           = "character")
+                   class           = "character",
+                   trace           = "list",
+                   warnings        = "list")
 
     present <- intersect(names(col_types), names(fit_res))
     actual  <- vapply(present, function(col) typeof(fit_res[[col]]), character(1))

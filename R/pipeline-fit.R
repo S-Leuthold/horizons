@@ -67,9 +67,33 @@
 #' (`horizons_warning_substitution`); a smallest assessment fold under
 #' `SMALL_FOLD_ROWS` rows, or every member below `evaluate()`'s prune
 #' threshold (`horizons_warning_quality`); UQ and AD switched off because the
-#' calibration set is under `min_calib_rows` (`horizons_warning_skipped`).
-#' The folds are drawn from the rows the members are fitted on, which must
-#' outnumber the folds, or `fit()` refuses, as `evaluate()` does.
+#' calibration set is under `min_calib_rows` (`horizons_warning_skipped`); a
+#' member whose warm-start Bayesian search failed and kept what it finished
+#' (`horizons_warning_substitution`, #209); some members failed and the rest
+#' are returned (`horizons_warning_partial_failure`, naming them with each
+#' distinct cause). The folds are drawn from the rows the members are fitted
+#' on, which must outnumber the folds, or `fit()` refuses, as `evaluate()`
+#' does.
+#'
+#' @section Members that fail:
+#' Each member is one unit: a failure in any step of its re-tune, its
+#' out-of-fold predictions, its final fit or its test scoring fails that
+#' member alone, and `models$results` records the step and the cause in
+#' `error_message`, the root cause's class in `class`, and, with
+#' `control_horizons(keep_traces = TRUE)`, its backtrace as text in `trace`.
+#' A member's own warnings, from the engines and from tune, are in
+#' `models$results$warnings`. A bug, a refusal or a missing package is not
+#' the member's and stops the call. When the first members fail the same
+#' way across at least two models, `fit()` stops with
+#' `horizons_error_systemic` and the members so far as `results`
+#' (`control_horizons(breaker = )`, 3 by default, `FALSE` to fit every
+#' member), and it stops the same way when a parallel worker dies. With
+#' `control_horizons(debug = TRUE)` the re-tunes run in this session and the
+#' first failure, inside tuning included, stops the call with its backtrace.
+#' Before a parallel run `fit()` refuses a session loaded with
+#' `devtools::load_all()`, and one whose workers load another version of
+#' horizons (`horizons_error_dependency`), since tune's workers run horizons'
+#' recipe steps.
 #'
 #' @section Cold start from one configuration:
 #' With one configuration there is nothing for `evaluate()` to choose, so a
@@ -299,12 +323,24 @@ fit <- function(x,
   ## -----------------------------------------------------------------------
   ## The user owns the backend. Confirm there is one to run on, pin threads
   ## in this process before tune spawns anything, and never touch the plan.
+  ##
+  ## Debug runs in this session: a backtrace from a worker shows the worker's
+  ## plumbing, and no debugger attaches there. The user asked for debug, so
+  ## the tree says so rather than a warning.
+
+  debug       <- control$debug
+  par_by_user <- allow_par
+  allow_par   <- allow_par && !debug
 
   if (allow_par) {
 
     allow_par <- check_parallel_backend("fit", collector)
 
     if (allow_par) {
+
+      ## tune's workers run horizons' recipe steps and the PLS engine, so
+      ## they must run this session's horizons
+      check_parallel_workers("fit")
 
       unpin_threads <- pin_parent_threads()
       on.exit(unpin_threads(), add = TRUE)
@@ -737,6 +773,13 @@ fit <- function(x,
       "\u2502  Bayesian: ", final_bayesian_iter,
       if (cold_start) " iterations from a space-filling grid\n" else " iterations with warm-start\n"
     ))
+
+    if (par_by_user && debug) {
+
+      cat("\u2502  Parallel: off, since debug runs in this session\n")
+
+    }
+
     cat("\u2502\n")
 
   }
@@ -744,8 +787,14 @@ fit <- function(x,
   ## -----------------------------------------------------------------------
   ## Step 4: Config loop
   ## -----------------------------------------------------------------------
+  ## Each member is one unit (fit_single_config()). The circuit breaker
+  ## watches the first members, so a failure every member would share stops
+  ## the call early (control_horizons(breaker = )), and a parallel worker
+  ## that dies stops it at once; either way the members so far are the
+  ## error's results.
 
   results_list <- list()
+  breaker      <- new_breaker(control$breaker)
 
   for (i in seq_len(n_best)) {
 
@@ -777,7 +826,7 @@ fit <- function(x,
     best_params_eval <- top_row$best_params[[1]]
 
     ## Call capture layer
-    config_result <- fit_single_config(
+    config_result <- stop_on_worker_death(fit_single_config(
       config_row          = cfg,
       split_F             = split_F,
       cv_resamples        = cv_resamples,
@@ -797,8 +846,10 @@ fit <- function(x,
       response_fences     = response_fences,
       min_calib_rows       = control$min_calib_rows,
       min_ad_rows          = control$min_ad_rows,
-      min_degradation_rows = control$min_degradation_rows
-    )
+      min_degradation_rows = control$min_degradation_rows,
+      debug                = debug,
+      keep_traces          = control$keep_traces
+    ), member_results(results_list), verb = "fit")
 
     results_list[[i]] <- config_result
 
@@ -851,7 +902,7 @@ fit <- function(x,
         }
 
         ## Degradation flag
-        if (config_result$degraded) {
+        if (isTRUE(config_result$degraded)) {
 
           cat(paste0(
             "\u2502  ", cont, "\u251C\u2500 ",
@@ -907,10 +958,28 @@ fit <- function(x,
 
     }
 
+    ## A run of identical failures across two models stops the call while
+    ## members remain; with none left they are ordinary failures
+    breaker_feed(breaker, config_result, cfg$model)
+
+    if (breaker$tripped) {
+
+      if (i < n_best) {
+        abort_breaker_trip(breaker, member_results(results_list), n_best - i,
+                           verb = "fit", units = "members", checkpoints = FALSE)
+      }
+
+      breaker_release(breaker)
+
+    }
+
     ## Memory cleanup after each config
     gc(verbose = FALSE)
 
   }
+
+  ## What the members reported goes on the call's log, from their records
+  results_list <- lift_unit_records(results_list, collector)
 
   ## -----------------------------------------------------------------------
   ## Step 5: Assemble results
@@ -942,39 +1011,7 @@ fit <- function(x,
   }
 
   ## Build results tibble
-  results_tibble <- purrr::map_dfr(results_list, function(res) {
-
-    tm <- res$test_metrics
-    cv <- res$cv_metrics
-
-    ## Extract CV summary metrics
-    cv_rmse <- if (!is.null(cv)) cv[cv$.metric == "rmse", ] else NULL
-    cv_rpd  <- if (!is.null(cv)) cv[cv$.metric == "rpd", ]  else NULL
-
-    tibble::tibble(
-      config_id       = res$config_id,
-      status          = res$status,
-      degraded        = res$degraded %||% NA,
-      degraded_reason = res$degraded_reason %||% NA_character_,
-      rmse            = if (!is.null(tm)) tm$rmse  else NA_real_,
-      rrmse           = if (!is.null(tm)) tm$rrmse else NA_real_,
-      rsq             = if (!is.null(tm)) tm$rsq   else NA_real_,
-      ccc             = if (!is.null(tm)) tm$ccc   else NA_real_,
-      rpd             = if (!is.null(tm)) tm$rpd   else NA_real_,
-      mae             = if (!is.null(tm)) tm$mae   else NA_real_,
-      cv_rmse_mean    = if (!is.null(cv_rmse) && nrow(cv_rmse) == 1) cv_rmse$mean    else NA_real_,
-      cv_rmse_se      = if (!is.null(cv_rmse) && nrow(cv_rmse) == 1) cv_rmse$std_err else NA_real_,
-      cv_rpd_mean     = if (!is.null(cv_rpd)  && nrow(cv_rpd)  == 1) cv_rpd$mean     else NA_real_,
-      cv_rpd_se       = if (!is.null(cv_rpd)  && nrow(cv_rpd)  == 1) cv_rpd$std_err  else NA_real_,
-      best_params     = list(res$best_params),
-      warm_start      = res$warm_start %||% NA,
-      start_grid_size = res$start_grid_size %||% NA_integer_,
-      error_message   = res$error_message %||% NA_character_,
-      class           = res$class %||% NA_character_,
-      runtime_secs    = res$runtime_secs
-    )
-
-  })
+  results_tibble <- member_results(results_list)
 
   ## Every member failed. Abort here with the members' errors; carrying on
   ## reached validate_horizons_fit(), which refused the empty workflows slot
@@ -982,6 +1019,19 @@ fit <- function(x,
   if (length(workflows_list) == 0) {
 
     abort_all_members_failed(results_tibble)
+
+  }
+
+  ## Some members failed and the rest are returned: one summary, with each
+  ## distinct cause and the members it failed
+  failed_rows <- results_tibble[results_tibble$status == "failed", , drop = FALSE]
+
+  if (nrow(failed_rows) > 0) {
+
+    log_warning(collector, "partial_failure", c(
+      "{nrow(failed_rows)} of {nrow(results_tibble)} member{?s} failed, so the fit holds the rest.",
+      distinct_config_errors(failed_rows)
+    ), ids = failed_rows$config_id)
 
   }
 
@@ -1176,6 +1226,67 @@ fit <- function(x,
   x
 
 }
+
+## ---------------------------------------------------------------------------
+## member_results — the members table
+## ---------------------------------------------------------------------------
+
+#' The members table of a fit
+#'
+#' @description
+#' One row per member `fit_single_config()` returned, fitted or failed:
+#' `models$results`, and the `results` a stop carries. A member list
+#' without a field (a failed one, or one built by hand) records a typed `NA`.
+#'
+#' @param results_list List of members, as `fit_single_config()` returns them.
+#' @return Tibble.
+#' @keywords internal
+#' @noRd
+member_results <- function(results_list) {
+
+  rows <- purrr::map_dfr(results_list, function(res) {
+
+    tm <- res$test_metrics
+    cv <- res$cv_metrics
+
+    ## Extract CV summary metrics
+    cv_rmse <- if (!is.null(cv)) cv[cv$.metric == "rmse", ] else NULL
+    cv_rpd  <- if (!is.null(cv)) cv[cv$.metric == "rpd", ]  else NULL
+
+    tibble::tibble(
+      config_id       = res$config_id,
+      status          = res$status,
+      degraded        = res$degraded %||% NA,
+      degraded_reason = res$degraded_reason %||% NA_character_,
+      rmse            = if (!is.null(tm)) tm$rmse  else NA_real_,
+      rrmse           = if (!is.null(tm)) tm$rrmse else NA_real_,
+      rsq             = if (!is.null(tm)) tm$rsq   else NA_real_,
+      ccc             = if (!is.null(tm)) tm$ccc   else NA_real_,
+      rpd             = if (!is.null(tm)) tm$rpd   else NA_real_,
+      mae             = if (!is.null(tm)) tm$mae   else NA_real_,
+      cv_rmse_mean    = if (!is.null(cv_rmse) && nrow(cv_rmse) == 1) cv_rmse$mean    else NA_real_,
+      cv_rmse_se      = if (!is.null(cv_rmse) && nrow(cv_rmse) == 1) cv_rmse$std_err else NA_real_,
+      cv_rpd_mean     = if (!is.null(cv_rpd)  && nrow(cv_rpd)  == 1) cv_rpd$mean     else NA_real_,
+      cv_rpd_se       = if (!is.null(cv_rpd)  && nrow(cv_rpd)  == 1) cv_rpd$std_err  else NA_real_,
+      best_params     = list(res$best_params),
+      warm_start      = res$warm_start %||% NA,
+      start_grid_size = as.integer(res$start_grid_size %||% NA_integer_),
+      error_message   = res$error_message %||% NA_character_,
+      class           = res$class %||% NA_character_,
+      trace           = list(res$trace),
+      warnings        = list(res$warnings),
+      runtime_secs    = as.numeric(res$runtime_secs %||% NA_real_)
+    )
+
+  })
+
+  if (nrow(rows) > 0) return(rows)
+
+  ## No member yet: the table's columns, without rows
+  tibble::tibble(config_id = character(0), status = character(0), error_message = character(0))
+
+}
+
 
 ## ---------------------------------------------------------------------------
 ## cold_start_evaluation \u2014 the evaluation record fit() writes without evaluate()

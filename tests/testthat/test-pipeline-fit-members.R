@@ -347,3 +347,240 @@ describe("fit() - member failures", {
   })
 
 })
+
+
+## =========================================================================
+## Each member is one unit
+## =========================================================================
+## The members are mocked (the fitted workflow is a stand-in, which the
+## validator does not read), so each test pays only for fit()'s own draws.
+
+describe("fit() - each member is one unit", {
+
+  ## make_fit_object() with four evaluated configurations on two models, the
+  ## copies tied with their originals, so ranking orders them rf, rf, cubist,
+  ## cubist
+  four_members <- function(models = c("rf", "cubist")) {
+
+    obj  <- make_fit_object(n = 60, n_configs = 2)
+    more <- obj$config$configs
+    more$config_id <- c("cfg_003", "cfg_004")
+
+    res <- obj$evaluation$results
+    add <- res
+    add$config_id <- more$config_id
+
+    obj$config$configs    <- dplyr::bind_rows(obj$config$configs, more)
+    obj$config$configs$model <- rep(models, length.out = 4L)[order(c(1, 3, 2, 4))]
+    obj$config$n_configs  <- 4L
+    obj$evaluation$results <- dplyr::bind_rows(res, add)
+
+    obj
+
+  }
+
+  fitted_member <- function(config_row, ...) {
+
+    list(
+      config_id = config_row$config_id, status = "success", degraded = FALSE,
+      degraded_reason = NA_character_, fitted_workflow = "fitted workflow",
+      best_params = tibble::tibble(mtry = 2L), warm_start = TRUE, start_grid_size = 2L,
+      cv_predictions = NULL,
+      test_metrics = tibble::tibble(rmse = 0.5, rrmse = 20, rsq = 0.6, ccc = 0.7, rpd = 1.5, mae = 0.4),
+      cv_metrics = tibble::tibble(.metric = c("rmse", "rpd"), mean = c(0.45, 1.6), std_err = c(0.03, 0.1)),
+      uq = NULL, ad = NULL, warnings = "The member's engine warned", error_message = NA_character_,
+      class = NA_character_, trace = NULL, runtime_secs = 1
+    )
+
+  }
+
+  failed_member <- function(config_row, ...) {
+
+    list(
+      config_id = config_row$config_id, status = "failed", degraded = NA,
+      degraded_reason = NA_character_, fitted_workflow = NULL, best_params = NULL,
+      warm_start = TRUE, start_grid_size = 2L, cv_predictions = NULL, test_metrics = NULL,
+      cv_metrics = NULL, uq = NULL, ad = NULL, warnings = NULL,
+      error_message = "Final model fit failed: the engine broke on 12 rows",
+      class = "simpleError", trace = "the backtrace, as text", runtime_secs = 1
+    )
+
+  }
+
+  it("records each member's failure class, backtrace and warnings, and warns partial_failure once", {
+
+    obj <- mfo_two <- make_fit_object(n = 60, n_configs = 2)
+
+    got <- collect_warnings(
+      testthat::with_mocked_bindings(
+        fit(obj, n_best = 2L, compute_uq = FALSE, compute_ad = FALSE, seed = 42L),
+        fit_single_config = function(config_row, ...) {
+          if (config_row$config_id == "cfg_002") failed_member(config_row) else fitted_member(config_row)
+        },
+        .package = "horizons"
+      ),
+      "."
+    )
+
+    res <- got$value$models$results
+
+    expect_identical(res$class, c(NA_character_, "simpleError"))
+    expect_identical(res$trace, list(NULL, "the backtrace, as text"))
+    expect_identical(res$warnings[[1]], "The member's engine warned")
+
+    partial <- Filter(function(w) inherits(w, "horizons_warning_partial_failure"), got$warnings)
+    expect_length(partial, 1L)
+    expect_match(conditionMessage(partial[[1]]), "1 of 2 members failed, so the fit holds the rest",
+                 fixed = TRUE)
+    expect_match(conditionMessage(partial[[1]]), "Final model fit failed: the engine broke", fixed = TRUE)
+
+    log <- got$value$log[got$value$log$verb == "fit" & got$value$log$topic %in% "partial_failure", ]
+    expect_identical(log$ids[[1]], "cfg_002")
+
+  })
+
+  it("passes debug and keep_traces to every member, and with debug runs them in this session", {
+
+    seen <- list()
+    out  <- utils::capture.output(
+      ## rsample's own stratification notice is not under test
+      fitted <- testthat::with_mocked_bindings(
+        suppressWarnings(fit(make_fit_object(n = 60, n_configs = 1), n_best = 1L,
+                             compute_uq = FALSE, compute_ad = FALSE, seed = 42L,
+                             control = control_horizons(allow_par = TRUE, debug = TRUE,
+                                                        keep_traces = TRUE, verbose = TRUE))),
+        fit_single_config = function(config_row, ..., allow_par, debug, keep_traces) {
+          seen <<- list(allow_par = allow_par, debug = debug, keep_traces = keep_traces)
+          fitted_member(config_row)
+        },
+        check_parallel_backend = function(...) stop("the backend was checked"),
+        .package = "horizons"
+      )
+    )
+
+    expect_identical(seen, list(allow_par = FALSE, debug = TRUE, keep_traces = TRUE))
+    expect_true("│  Parallel: off, since debug runs in this session" %in% out)
+    expect_s3_class(fitted, "horizons_fit")
+
+  })
+
+  it("stops early, with the members so far, when the first ones fail the same way across two models", {
+
+    obj   <- four_members()
+    calls <- 0L
+
+    err <- expect_error(
+      testthat::with_mocked_bindings(
+        suppressWarnings(fit(obj, n_best = 4L, compute_uq = FALSE, compute_ad = FALSE, seed = 42L)),
+        fit_single_config = function(config_row, ...) {
+          calls <<- calls + 1L
+          failed_member(config_row)
+        },
+        .package = "horizons"
+      ),
+      class = "horizons_error_systemic"
+    )
+
+    expect_identical(calls, 3L)
+    expect_identical(nrow(err$results), 3L)
+    expect_match(conditionMessage(err), "The first 3 members to run all failed the same way, across 2 models",
+                 fixed = TRUE)
+    expect_match(conditionMessage(err), "`fit()` stopped rather than run the other 1", fixed = TRUE)
+
+  })
+
+  it("does not stop for failures on one model, nor when the breaker is off", {
+
+    one_model <- four_members(models = "rf")
+
+    expect_error(
+      testthat::with_mocked_bindings(
+        suppressWarnings(fit(one_model, n_best = 4L, compute_uq = FALSE, compute_ad = FALSE, seed = 42L)),
+        fit_single_config = failed_member, .package = "horizons"
+      ),
+      class = "horizons_error_all_members_failed"
+    )
+
+    expect_error(
+      testthat::with_mocked_bindings(
+        suppressWarnings(fit(four_members(), n_best = 4L, compute_uq = FALSE, compute_ad = FALSE,
+                             seed = 42L, control = control_horizons(breaker = FALSE))),
+        fit_single_config = failed_member, .package = "horizons"
+      ),
+      class = "horizons_error_all_members_failed"
+    )
+
+  })
+
+  it("ends as all-failed rather than systemic when the breaker's run fills the last members", {
+
+    ## Three members, all failing the same way across two models: nothing is
+    ## left to save by stopping
+    obj <- four_members()
+
+    expect_error(
+      testthat::with_mocked_bindings(
+        suppressWarnings(fit(obj, n_best = 3L, compute_uq = FALSE, compute_ad = FALSE, seed = 42L)),
+        fit_single_config = failed_member, .package = "horizons"
+      ),
+      class = "horizons_error_all_members_failed"
+    )
+
+  })
+
+  it("stops with the members so far when a parallel worker dies", {
+
+    calls <- 0L
+
+    err <- expect_error(
+      testthat::with_mocked_bindings(
+        suppressWarnings(fit(make_fit_object(n = 60, n_configs = 2), n_best = 2L,
+                             compute_uq = FALSE, compute_ad = FALSE, seed = 42L)),
+        fit_single_config = function(config_row, ...) {
+          calls <<- calls + 1L
+          if (calls == 2L) {
+            stop(structure(class = c("FutureInterruptError", "FutureError", "error", "condition"),
+                           list(message = "worker died", call = NULL)))
+          }
+          fitted_member(config_row)
+        },
+        .package = "horizons"
+      ),
+      class = "horizons_error_systemic"
+    )
+
+    expect_match(conditionMessage(err), "A parallel worker stopped while `fit()` was running",
+                 fixed = TRUE)
+    expect_identical(err$results$config_id, "cfg_001")
+    expect_s3_class(err$parent, "FutureError")
+
+  })
+
+  it("refuses a parallel run its workers cannot match, before anything is drawn", {
+
+    obj <- make_fit_object(n = 60, n_configs = 1)
+
+    run <- function(...) {
+      testthat::with_mocked_bindings(
+        fit(obj, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE, seed = 42L,
+            control = control_horizons(allow_par = TRUE)),
+        check_parallel_backend = function(...) TRUE,
+        draw_stratified        = function(...) stop("a draw was made"),
+        fit_single_config      = function(...) stop("a member was fitted"),
+        ...,
+        .package = "horizons"
+      )
+    }
+
+    expect_error(run(running_under_load_all = function() TRUE),
+                 "Parallel `fit()` cannot run under `devtools::load_all()`", fixed = TRUE,
+                 class = "horizons_error_dependency")
+
+    expect_error(run(running_under_load_all = function() FALSE,
+                     worker_horizons_version = function() "0.0.1"),
+                 "A parallel worker loads horizons 0.0.1", fixed = TRUE,
+                 class = "horizons_error_dependency")
+
+  })
+
+})

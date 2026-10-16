@@ -492,8 +492,9 @@ describe("fit_single_config() - failure paths", {
     setup <- fsc()$setup
     local_mocked_bindings(tune_warmstart_bayes = function(...) stop("the search broke"))
 
+    ## Its starting grid was built, so how the re-tune started is recorded
     expect_failed_at(run_on_shared(setup), "Warm-start tuning", "the search broke",
-                     warm_start = NA)
+                     warm_start = TRUE)
 
   })
 

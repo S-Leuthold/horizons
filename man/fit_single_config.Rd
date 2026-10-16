@@ -24,7 +24,9 @@ fit_single_config(
   response_fences = NULL,
   min_calib_rows = N_CALIB_MIN,
   min_ad_rows = N_AD_TRAIN_MIN,
-  min_degradation_rows = DEGRADATION_MIN_N
+  min_degradation_rows = DEGRADATION_MIN_N,
+  debug = FALSE,
+  keep_traces = FALSE
 )
 }
 \arguments{
