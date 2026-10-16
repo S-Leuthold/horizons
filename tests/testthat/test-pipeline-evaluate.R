@@ -149,7 +149,7 @@ describe("evaluate() - gate checks", {
 
   })
 
-  it("refuses a training part with fewer rows than folds, counting only rows with an observed outcome", {
+  it("refuses a training part without more rows than folds, counting only rows with an observed outcome", {
 
     local_mocked_bindings(evaluate_single_config = function(...) stop("a configuration ran"))
 
@@ -157,7 +157,8 @@ describe("evaluate() - gate checks", {
     err <- expect_error(evaluate(make_eval_object(n = 3)), class = "horizons_error_input")
     msg <- gsub("\\s+", " ", conditionMessage(err))   # undo cli line wrapping
 
-    expect_match(msg, "The training part has 2 rows, fewer than the 3 cross-validation folds", fixed = TRUE)
+    expect_match(msg, "The training part has 2 rows, but 3-fold cross-validation needs more training rows than folds.",
+                 fixed = TRUE)
     expect_match(msg, "3 rows have an observed outcome; the test set holds 1.", fixed = TRUE)
     expect_match(msg, "fewer `cv_folds`", fixed = TRUE)
 
@@ -631,11 +632,14 @@ describe("evaluate() - NA outcome rows", {
 
 describe("check_fold_rows() and log_small_folds()", {
 
-  it("refuses fewer training rows than folds, and no more", {
+  it("refuses as many training rows as folds or fewer, and no more", {
 
-    expect_no_error(check_fold_rows(3L, 3L, n_modelled = 4L, n_test = 1L))
-    expect_error(check_fold_rows(2L, 3L, n_modelled = 3L, n_test = 1L),
-                 "The training part has 2 rows, fewer than the 3 cross-validation folds",
+    ## rsample refuses as many folds as rows
+    expect_error(rsample::vfold_cv(data.frame(x = 1:3), v = 3))
+
+    expect_no_error(check_fold_rows(4L, 3L, n_modelled = 5L, n_test = 1L))
+    expect_error(check_fold_rows(3L, 3L, n_modelled = 4L, n_test = 1L),
+                 "The training part has 3 rows, but 3-fold cross-validation needs more training rows than folds.",
                  fixed = TRUE, class = "horizons_error_input")
 
   })
@@ -928,21 +932,21 @@ describe("evaluate() - response outliers are trimmed from the training partition
 
   })
 
-  it("counts the training rows left by the trim when it refuses fewer rows than folds", {
+  it("counts the training rows left by the trim when it refuses too few rows for the folds", {
 
-    ## One more fold than the trimmed training part has rows, and fewer than
+    ## As many folds as the trimmed training part has rows, and fewer than
     ## the rows as drawn: the refusal counts what the folds would be drawn on
     n_left <- nrow(train_plain) - length(expected_trim)
     short  <- v
-    short$config$tuning$cv_folds <- n_left + 1L
+    short$config$tuning$cv_folds <- n_left
 
     local_mocked_bindings(evaluate_single_config = function(...) stop("a configuration ran"))
 
     err <- expect_error(suppressWarnings(evaluate(short, seed = 307L)), class = "horizons_error_input")
     msg <- gsub("\\s+", " ", conditionMessage(err))
 
-    expect_match(msg, paste0("The training part has ", n_left, " rows, fewer than the ",
-                             n_left + 1L, " cross-validation folds"), fixed = TRUE)
+    expect_match(msg, paste0("The training part has ", n_left, " rows, but ", n_left,
+                             "-fold cross-validation needs more training rows than folds."), fixed = TRUE)
     expect_match(msg, paste0("the response trim left out ", length(expected_trim)), fixed = TRUE)
 
   })

@@ -434,8 +434,9 @@ evaluate <- function(x,
   drawn_rows <- drawn$split$data
   trim_ids   <- trimmed$record$trimmed_ids %||% character(0)
 
-  ## Every fold needs a row to assess on. Fewer training rows than folds is
-  ## the one sample size refused, here, before anything is tuned.
+  ## Every fold needs rows to fit on and a row to assess, and rsample refuses
+  ## as many folds as rows. That is the one sample size refused, here,
+  ## before anything is tuned.
   check_fold_rows(n_train, cv_folds, n_modelled = nrow(analysis),
                   n_test = n_test, n_trimmed = length(trim_ids))
 
@@ -2395,11 +2396,12 @@ modelling_rows <- function(analysis, outcome_col, call = rlang::caller_env()) {
 ## The small-sample rule evaluate() and fit() share
 ## ---------------------------------------------------------------------------
 ## Small n is weak, not wrong, so it runs. The one sample size refused is a
-## training part with fewer rows than folds, where a fold has nothing to
-## assess on; a small assessment fold warns. The trigger is the realised
+## training part without more rows than folds, which rsample cannot split
+## into folds that each have rows to fit on and to assess; a small
+## assessment fold warns. The trigger is the realised
 ## folds, not the total n.
 
-#' Refuse a training part with fewer rows than cross-validation folds
+#' Refuse a training part without more rows than cross-validation folds
 #'
 #' @param n_train Integer. Rows of the training part, after the split and
 #'   any response trim.
@@ -2414,13 +2416,13 @@ modelling_rows <- function(analysis, outcome_col, call = rlang::caller_env()) {
 check_fold_rows <- function(n_train, cv_folds, n_modelled, n_test, n_trimmed = 0L,
                             call = rlang::caller_env()) {
 
-  if (n_train >= cv_folds) return(invisible(NULL))
+  if (n_train > cv_folds) return(invisible(NULL))
 
   elsewhere <- paste0("the test set holds ", n_test,
                       if (n_trimmed > 0) paste0(" and the response trim left out ", n_trimmed))
 
   abort_horizons(c(
-    "The training part has {n_train} row{?s}, fewer than the {cv_folds} cross-validation folds, so a fold would have nothing to assess.",
+    "The training part has {n_train} row{?s}, but {cv_folds}-fold cross-validation needs more training rows than folds.",
     "i" = "{n_modelled} row{?s} {?has/have} an observed outcome; {elsewhere}.",
     "i" = "Add rows, or {.fn configure} fewer {.arg cv_folds}."
   ), kind = "input", call = call)
