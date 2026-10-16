@@ -834,6 +834,18 @@ describe("the notes of the chosen candidate (#109)", {
     expect_false(warned(2L, 5L))
     expect_false(warned(3L, 2L))
 
+    ## A schedule of another shape keeps every grid note, with the reason,
+    ## rather than failing: the schedule is tune's developer interface
+    local_mocked_bindings(schedule_grid = function(...) tibble::tibble(stage = 1L), .package = "tune")
+    cand <- candidate_of(res, params(2L, 5L), grid, wf)
+    expect_null(cand$model_stages)
+    expect_identical(cand$unmapped, "tune's grid schedule has no model_stage column")
+
+    local_mocked_bindings(schedule_grid = function(...) tibble::tibble(model_stage = list(tibble::tibble(mtry = 2L))),
+                          .package = "tune")
+    expect_identical(candidate_of(res, params(2L, 5L), grid, wf)$unmapped,
+                     "tune's grid schedule has no predict_stage column")
+
   })
 
 })

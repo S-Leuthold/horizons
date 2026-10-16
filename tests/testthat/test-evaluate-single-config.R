@@ -1272,11 +1272,13 @@ describe("the mtry upper bound", {
 
 describe("evaluate_single_config() - the warnings of the chosen candidate (#109)", {
 
-  it("leaves out the warnings of candidates it did not choose, and keeps the recipe's", {
+  ## The grid is fixed, its order unlike .config's, with mtry = 50 above the
+  ## predictors: ranger warns for those candidates only. The choice is fixed
+  ## at mtry = 2, and the recipe warns at every prep. `stages` stands in for
+  ## the reading of tune's grid schedule when given (tune_grid() reads the
+  ## schedule too, so the schedule itself cannot be replaced here).
+  run_fixed_grid <- function(stages = NULL) {
 
-    ## The grid is fixed, its order unlike .config's, with mtry = 50 above
-    ## the predictors: ranger warns for those candidates only. The choice is
-    ## fixed at mtry = 2, and the recipe warns at every prep.
     setup <- make_eval_setup()
     fixed <- tibble::tibble(mtry = c(50L, 2L, 50L, 3L), min_n = c(5L, 5L, 2L, 2L))
 
@@ -1286,6 +1288,8 @@ describe("evaluate_single_config() - the warnings of the chosen candidate (#109)
     local_mocked_bindings(.check_grid = function(grid, ...) {
       real_check_grid(if (is.numeric(grid)) fixed else grid, ...)
     }, .package = "tune")
+
+    if (!is.null(stages)) local_mocked_bindings(grid_model_stages = stages)
 
     warn_recipe <- function(config_row, train_data, role_map, ...) {
       recipes::recipe(SOC ~ ., data = train_data) |>
@@ -1301,7 +1305,7 @@ describe("evaluate_single_config() - the warnings of the chosen candidate (#109)
       }
     )
 
-    result <- evaluate_single_config(
+    evaluate_single_config(
       config_row    = make_eval_config(),
       split         = setup$split,
       cv_folds      = setup$folds,
@@ -1310,10 +1314,29 @@ describe("evaluate_single_config() - the warnings of the chosen candidate (#109)
       seed          = 42L
     )
 
+  }
+
+  it("leaves out the warnings of candidates it did not choose, and keeps the recipe's", {
+
+    result <- run_fixed_grid()
+
     expect_identical(result$status, "success")
     expect_identical(result$best_params[[1]]$mtry, 2L)
     expect_false(any(grepl("columns were requested", result$warnings[[1]], fixed = TRUE)))
     expect_true(any(grepl("Non-positive values in selected variable", result$warnings[[1]], fixed = TRUE)))
+
+  })
+
+  it("keeps every grid candidate's warnings, and says why, when tune's grid schedule has another shape", {
+
+    result <- run_fixed_grid(stages = function(...) {
+      stop("tune's grid schedule has no model_stage column", call. = FALSE)
+    })
+
+    expect_identical(result$status, "success")
+    expect_true(any(grepl("columns were requested", result$warnings[[1]], fixed = TRUE)))
+    expect_true(paste0("The warnings of every grid candidate are shown, not only the chosen one's: ",
+                       "tune's grid schedule has no model_stage column.") %in% result$warnings[[1]])
 
   })
 

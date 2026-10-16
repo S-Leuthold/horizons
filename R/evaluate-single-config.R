@@ -415,9 +415,17 @@ evaluate_single_config <- function(config_row,
     ## The warnings tune kept for the chosen candidate (#109), read once from
     ## whichever result is kept: a tune_bayes() result carries its initial
     ## grid's notes as .iter 0, so this covers both stages.
-    collect_notes_from(final_tune_results, candidate = unit_step(
-      "select_best", candidate_of(final_tune_results, best_params, grid, wflow)
-    ))
+    candidate <- unit_step("select_best", candidate_of(final_tune_results, best_params, grid, wflow))
+    collect_notes_from(final_tune_results, candidate = candidate)
+
+    if (!is.null(candidate$unmapped)) {
+
+      warning_log <- dplyr::bind_rows(warning_log, text_records(paste0(
+        "The warnings of every grid candidate are shown, not only the chosen one's: ",
+        candidate$unmapped, "."
+      ), pinned = TRUE))
+
+    }
 
     left_out <- unit_step("select_best", incomplete_note(final_tune_results, n_folds))
 

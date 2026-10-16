@@ -1119,8 +1119,9 @@ tune_note_records <- function(tune_results, type = "warning", scope = "cv",
 #' @param workflow The workflow it tuned.
 #' @return List: `iter` (the candidate's Bayesian iteration, 0 for a grid
 #'   candidate), `model_stages` (the grid's model stages that hold it, or
-#'   `NULL` for every stage) and `na_folds` (the resamples where one of its
-#'   metrics is missing).
+#'   `NULL` for every stage), `na_folds` (the resamples where one of its
+#'   metrics is missing) and `unmapped` (why the grid's schedule could not be
+#'   read, so every grid note is kept; `NULL` when it was, or not needed).
 #' @keywords internal
 #' @noRd
 candidate_of <- function(results, best_params, grid, workflow) {
@@ -1130,29 +1131,76 @@ candidate_of <- function(results, best_params, grid, workflow) {
   mine     <- per_fold[per_fold$.config == config, , drop = FALSE]
   iter     <- if (".iter" %in% names(mine)) as.integer(mine$.iter[1]) else 0L
 
-  ## The model stages of the grid that hold it, matched on the parameters
-  ## that are not submodels (a stage carries a submodel's largest value)
+  ## The model stages of the grid that hold it. The schedule is tune's
+  ## developer interface, so a shape it no longer has keeps every grid note,
+  ## with the reason, rather than failing the configuration: the filter is
+  ## for reading the row, and the row is still right without it.
   stages   <- NULL
-  schedule <- if (iter == 0L) tune::schedule_grid(grid, workflow)
+  unmapped <- NULL
 
-  if (!is.null(schedule) && nrow(schedule) == 1L) {
+  if (iter == 0L) {
 
-    model_stage <- schedule$model_stage[[1]]
-    params      <- setdiff(names(model_stage),
-                           c("predict_stage", names(model_stage$predict_stage[[1]])))
-    holds       <- rep(TRUE, nrow(model_stage))
+    mapped <- tryCatch(grid_model_stages(grid, workflow, best_params),
+                       error = function(e) structure(condition_summary(e), class = "unmapped"))
 
-    for (p in params) holds <- holds & model_stage[[p]] == best_params[[p]][[1]]
-
-    stages <- which(holds)
+    if (inherits(mapped, "unmapped")) unmapped <- unclass(mapped) else stages <- mapped
 
   }
 
   list(
     iter         = iter,
     model_stages = stages,
-    na_folds     = unique(resample_ids(mine[is.na(mine$.estimate), , drop = FALSE]))
+    na_folds     = unique(resample_ids(mine[is.na(mine$.estimate), , drop = FALSE])),
+    unmapped     = unmapped
   )
+
+}
+
+#' The model stages of a grid that hold a candidate
+#'
+#' @description
+#' Matched on the parameters that are not submodels, since a stage carries a
+#' submodel's largest value and covers every candidate that differs only in
+#' it (glmnet's `penalty`, PLS's `num_comp`).
+#'
+#' @param grid The grid `tune_grid()` was given.
+#' @param workflow The workflow it tuned.
+#' @param best_params One-row tibble of the candidate's hyperparameters.
+#' @return Integer: the stages, in the order tune numbers them; `NULL` when
+#'   the recipe is tuned too (several preprocessor stages), for every stage.
+#'   Errors when `tune::schedule_grid()` returns a shape it does not read.
+#' @keywords internal
+#' @noRd
+grid_model_stages <- function(grid, workflow, best_params) {
+
+  schedule <- tune::schedule_grid(grid, workflow)
+
+  if (!is.data.frame(schedule) || !"model_stage" %in% names(schedule)) {
+    stop("tune's grid schedule has no model_stage column", call. = FALSE)
+  }
+
+  if (nrow(schedule) != 1L) return(NULL)
+
+  model_stage <- schedule$model_stage[[1]]
+
+  if (!is.data.frame(model_stage) || !"predict_stage" %in% names(model_stage)) {
+    stop("tune's grid schedule has no predict_stage column", call. = FALSE)
+  }
+
+  params  <- setdiff(names(model_stage),
+                     c("predict_stage", names(model_stage$predict_stage[[1]])))
+  missing <- setdiff(params, names(best_params))
+
+  if (length(missing) > 0) {
+    stop("tune's grid schedule has parameters the candidate lacks: ",
+         paste(missing, collapse = ", "), call. = FALSE)
+  }
+
+  holds <- rep(TRUE, nrow(model_stage))
+
+  for (p in params) holds <- holds & model_stage[[p]] == best_params[[p]][[1]]
+
+  which(holds)
 
 }
 
