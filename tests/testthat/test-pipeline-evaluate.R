@@ -629,6 +629,36 @@ describe("evaluate() - NA outcome rows", {
 ## the split itself, so the draw moved out of evaluate() into a helper both
 ## verbs call. It has to give the split evaluate() drew before the move.
 
+describe("check_fold_rows() and log_small_folds()", {
+
+  it("refuses fewer training rows than folds, and no more", {
+
+    expect_no_error(check_fold_rows(3L, 3L, n_modelled = 4L, n_test = 1L))
+    expect_error(check_fold_rows(2L, 3L, n_modelled = 3L, n_test = 1L),
+                 "The training part has 2 rows, fewer than the 3 cross-validation folds",
+                 fixed = TRUE, class = "horizons_error_input")
+
+  })
+
+  it("warns when the smallest fold has fewer than SMALL_FOLD_ROWS rows to assess, and only then", {
+
+    folds_of <- function(n) rsample::vfold_cv(data.frame(x = seq_len(n)), v = 3)
+
+    at <- log_open("evaluate")
+    expect_identical(log_small_folds(at, folds_of(3L * SMALL_FOLD_ROWS)), SMALL_FOLD_ROWS)
+    expect_identical(nrow(log_close(at)), 0L)
+
+    under <- log_open("evaluate")
+    log_small_folds(under, folds_of(3L * (SMALL_FOLD_ROWS - 1L)))
+    log <- log_close(under)
+    expect_identical(log$topic, "quality")
+    expect_match(log$message, paste0("The smallest cross-validation fold has ", SMALL_FOLD_ROWS - 1L, " rows"),
+                 fixed = TRUE)
+
+  })
+
+})
+
 describe("draw_eval_split()", {
 
   obj <- make_eval_object(n = 60, n_configs = 1)
@@ -895,6 +925,25 @@ describe("evaluate() - response outliers are trimmed from the training partition
     expect_identical(rsample::testing(b$split)$sample_id,
                      rsample::testing(drawn$split)$sample_id)
     expect_identical(rsample::testing(b$split)$SOC, relabelled$data$SOC[is_test])
+
+  })
+
+  it("counts the training rows left by the trim when it refuses fewer rows than folds", {
+
+    ## One more fold than the trimmed training part has rows, and fewer than
+    ## the rows as drawn: the refusal counts what the folds would be drawn on
+    n_left <- nrow(train_plain) - length(expected_trim)
+    short  <- v
+    short$config$tuning$cv_folds <- n_left + 1L
+
+    local_mocked_bindings(evaluate_single_config = function(...) stop("a configuration ran"))
+
+    err <- expect_error(suppressWarnings(evaluate(short, seed = 307L)), class = "horizons_error_input")
+    msg <- gsub("\\s+", " ", conditionMessage(err))
+
+    expect_match(msg, paste0("The training part has ", n_left, " rows, fewer than the ",
+                             n_left + 1L, " cross-validation folds"), fixed = TRUE)
+    expect_match(msg, paste0("the response trim left out ", length(expected_trim)), fixed = TRUE)
 
   })
 
@@ -2409,9 +2458,12 @@ describe("evaluate() - the configurations' warnings and failures on the log", {
 
     local_mocked_bindings(build_recipe = function(...) stop("no recipe for this config"))
 
-    expect_error(suppressWarnings(evaluate(make_eval_object(n = 60, n_configs = 2), seed = 42L,
-                                           control = control_horizons(debug = TRUE))),
-                 "no recipe for this config", fixed = TRUE)
+    ## The configuration's own error, not a contained failure: without debug
+    ## both configurations fail and the call ends in the all-failed abort
+    err <- expect_error(suppressWarnings(evaluate(make_eval_object(n = 60, n_configs = 2), seed = 42L,
+                                                  control = control_horizons(debug = TRUE))),
+                        "no recipe for this config", fixed = TRUE, class = "simpleError")
+    expect_false(inherits(err, "horizons_error"))
 
   })
 
@@ -2555,11 +2607,15 @@ describe("evaluate() - the circuit breaker", {
       tibble::tibble(config_id = id, status = "failed", error_message = message, class = class)
     }
 
-    same <- breaker_key(row("cfg_001", "Grid search failed: boom in cfg_001 at 12  rows"))
+    ## Ids as configure() writes them: the model, the recipe and a hash
+    a <- "rf_raw_none_none_a3f91c"
+    b <- "cubist_snv_log_pca_0b7e2d"
 
-    expect_identical(breaker_key(row("cfg_002", "Grid search failed: boom in cfg_002 at 15 rows")), same)
-    expect_false(identical(breaker_key(row("cfg_002", "Recipe building failed: boom in cfg_002 at 15 rows")), same))
-    expect_false(identical(breaker_key(row("cfg_002", "Grid search failed: boom in cfg_002 at 15 rows",
+    same <- breaker_key(row(a, paste0("Grid search failed: boom in ", a, " at 12  rows")))
+
+    expect_identical(breaker_key(row(b, paste0("Grid search failed: boom in ", b, " at 15 rows"))), same)
+    expect_false(identical(breaker_key(row(b, paste0("Recipe building failed: boom in ", b, " at 15 rows"))), same))
+    expect_false(identical(breaker_key(row(b, paste0("Grid search failed: boom in ", b, " at 15 rows"),
                                            class = "horizons_error_run")), same))
 
   })
@@ -2598,22 +2654,23 @@ describe("evaluate() - a worker's death", {
     local_plan(future::multisession, workers = 2)
 
     ## A recipe step that kills the worker it runs on, on an analysis set;
-    ## never the parent, which preps the whole training part
-    parent <- Sys.getpid()
-    killer <- function(x) {
-      if (length(x) < 45 && Sys.getpid() != parent) tools::pskill(Sys.getpid(), tools::SIGKILL)
+    ## never the parent, which preps the whole training part. The function
+    ## is written into the step, so the worker needs nothing from here.
+    kill <- bquote((function(x) {
+      if (length(x) < 45 && Sys.getpid() != .(Sys.getpid())) tools::pskill(Sys.getpid(), tools::SIGKILL)
       x
-    }
+    })(sample_id))
     real_recipe <- build_recipe
     local_mocked_bindings(build_recipe = function(...) {
-      real_recipe(...) |> recipes::step_mutate(wn_4000 = killer(wn_4000))
+      real_recipe(...) |> recipes::step_mutate(sample_id = !!kill)
     })
 
-    expect_error(
+    err <- expect_error(
       suppressWarnings(evaluate(make_eval_object(n = 60, n_configs = 1), seed = 42L,
                                 control = control_horizons(allow_par = TRUE, parallelize_over = "resamples"))),
       class = "horizons_error_systemic"
     )
+    expect_true(rlang::cnd_inherits(err, "FutureError"))
 
   })
 

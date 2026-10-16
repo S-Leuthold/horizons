@@ -393,6 +393,67 @@ describe("evaluate_single_config() - pruning", {
 })
 
 ## =========================================================================
+## The prune gate reads only candidates scored on every fold (#101)
+## =========================================================================
+
+describe("evaluate_single_config() - the prune gate under the fold rule (#101)", {
+
+  it("reads the best candidate scored on every fold, not one that missed a fold", {
+
+    setup <- make_eval_setup()
+
+    run <- function(...) {
+      suppressWarnings(evaluate_single_config(
+        config_row      = make_eval_config(),
+        split           = setup$split,
+        cv_folds        = setup$folds,
+        role_map        = setup$role_map,
+        grid_size       = 3,
+        bayesian_iter   = 1,
+        prune           = TRUE,
+        seed            = 42L,
+        ...
+      ))
+    }
+
+    ## The grid's candidates by RPD, from a run that keeps its grid result
+    ## (the first tune_grid() call; the Bayesian search makes its own)
+    real_grid <- tune::tune_grid
+    grid      <- NULL
+    local_mocked_bindings(tune_grid = function(...) {
+      res <- real_grid(...)
+      if (is.null(grid)) grid <<- res
+      res
+    }, .package = "tune")
+    run(prune_threshold = 0)
+
+    cm  <- tune::collect_metrics(grid)
+    rpd <- cm[cm$.metric == "rpd", ]
+    rpd <- rpd[order(-rpd$mean), ]
+    skip_if(rpd$mean[1] == rpd$mean[2], "the two best candidates tie")
+
+    ## The best candidate is marked as missing a fold, and the threshold sits
+    ## between it and the next: read alone, the next is below it
+    real_metrics <- tune::collect_metrics
+    local_mocked_bindings(collect_metrics = function(x, ...) {
+      out <- real_metrics(x, ...)
+      if (!isTRUE(list(...)$summarize == FALSE) && ".config" %in% names(out)) {
+        out$n[out$.config == rpd$.config[1]] <- 2L
+      }
+      out
+    }, .package = "tune")
+
+    result <- run(prune_threshold = mean(rpd$mean[1:2]))
+
+    expect_identical(result$below_prune_threshold, TRUE)
+    expect_identical(result$status, "pruned")
+
+  })
+
+})
+
+
+## =========================================================================
 ## Tuning metrics are on the original scale (#49 / #38)
 ## =========================================================================
 ## The response transform is a skip = TRUE recipe step, so tune never applies
@@ -602,6 +663,17 @@ describe("evaluate_single_config() - a Bayesian search that fails (#209)", {
       seed          = 42L,
       debug         = TRUE
     ))
+
+  })
+
+  it("falls back only from a run failure: a bug inside the search still stops the call", {
+
+    local_mocked_bindings(tune_bayes = function(...) {
+      abort_horizons("Broken inside the search.", kind = "internal")
+    }, .package = "tune")
+
+    expect_error(run(grid_size = 2), "Broken inside the search.", fixed = TRUE,
+                 class = "horizons_error_internal")
 
   })
 
