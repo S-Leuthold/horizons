@@ -1462,6 +1462,17 @@ test_that("validate_horizons_ensemble passes a trained workflow for penalized", 
 
 })
 
+test_that("validate_horizons_ensemble accepts an improvement of NA, which no rank metric to compare leaves", {
+
+  ## build_ensemble_contract() writes NA when the ensemble or every member
+  ## has no value of the rank metric
+  obj <- make_valid_ensemble()
+  obj$ensemble$improvement <- NA_real_
+
+  expect_identical(validate_horizons_ensemble(obj), obj)
+
+})
+
 test_that("validate_horizons_ensemble tolerates NULL oof_predictions and uq", {
 
   ## Arrange. `[<-` with list(NULL) sets the value to NULL while KEEPING the
@@ -2322,7 +2333,7 @@ test_that("each class validator puts its findings in the condition, with the rem
   fit_obj$models$predictor_schema <- character(0)
 
   ens_obj <- make_valid_ensemble()
-  ens_obj$ensemble$improvement  <- NA_real_
+  ens_obj$ensemble$improvement  <- "high"
   ens_obj$ensemble$runtime_secs <- -1
 
   expect_snapshot(validate_horizons_eval(eval_obj), error = TRUE)

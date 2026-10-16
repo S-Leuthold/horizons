@@ -132,7 +132,7 @@
     Condition
       Error:
       ! The <horizons_ensemble> object failed validation.
-      x improvement must be a single non-NA numeric
+      x improvement must be a single numeric
       x runtime_secs must be a single non-negative numeric
       i Re-run ensemble() on the fitted object, which rebuilds the ensemble.
 

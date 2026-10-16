@@ -1176,6 +1176,16 @@ describe("ensemble() - the summary it prints", {
 
   })
 
+  it("says there is no improvement to measure when it is NA, in yellow", {
+
+    unmeasured <- summary_contract(improvement = NA_real_, coef = c(0.5, 0.3, 0.2))
+
+    expect_match(improvement_line(unmeasured),
+                 "\033[33mImprovement over best member: none to measure, without a rpd to compare",
+                 fixed = TRUE)
+
+  })
+
 })
 
 ## =========================================================================
