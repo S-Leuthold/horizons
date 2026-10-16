@@ -428,11 +428,13 @@ describe("fit_single_config() - failure paths", {
 
   })
 
-  it("returns 'failed' for invalid model name, with every expected field and no fitted parts", {
+  it("returns 'failed' when the model spec cannot be built, with every expected field and no fitted parts", {
 
+    ## An unknown model is refused at the door; this is a spec that fails as
+    ## it is built
     setup <- fsc()$setup
-    expect_failed_at(run_on_shared(setup, make_fit_config(model = "deep_learning_9000")),
-                     "Model specification", "Unknown model type: 'deep_learning_9000'",
+    local_mocked_bindings(define_model_spec = function(...) stop("no spec for this model"))
+    expect_failed_at(run_on_shared(setup), "Model specification", "no spec for this model",
                      warm_start = NA)
 
   })

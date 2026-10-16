@@ -71,8 +71,10 @@ build_recipe <- function(config_row,
   ## -----------------------------------------------------------------------
   ## Column ordering invariant
   ## -----------------------------------------------------------------------
-  ## Spectral data must be in monotonic order (decreasing wavenumber) for
-  ## Savitzky-Golay windows. Check BEFORE passing to step_transform_spectra.
+  ## Savitzky-Golay windows need the bands in order. The door validator at
+  ## evaluate() and fit() checks the order of names that parse as wavenumbers;
+  ## this reads the digits of any name, so an axis named like `wn_X4000`
+  ## (#121) is checked too until the validator requires every name to parse.
 
   predictor_nums <- suppressWarnings(
     as.numeric(gsub("[^0-9.\\-]", "", predictor_cols))
@@ -84,8 +86,9 @@ build_recipe <- function(config_row,
 
     if (!all(diffs < 0) && !all(diffs > 0)) {
 
-      rlang::abort(
-        "Predictor columns are not monotonically ordered. Spectral preprocessing requires ordered wavelengths."
+      abort_horizons(
+        "Predictor columns are not monotonically ordered. Spectral preprocessing requires ordered wavelengths.",
+        kind = "input"
       )
 
     }
@@ -242,12 +245,10 @@ build_recipe <- function(config_row,
       step_select_cars(
         dplyr::matches("^spec[0-9]+$"),
         outcome = outcome_col
-      ),
+      )
 
-    rlang::abort(paste0(
-      "Unsupported feature selection method: '", feature_selection, "'. ",
-      "Valid methods: ", paste(VALID_FEATURE_SELECTION, collapse = ", ")
-    ))
+    ### No default: the door validators refuse a method outside
+    ### VALID_FEATURE_SELECTION, and a NULL recipe fails loudly downstream.
 
   )
 

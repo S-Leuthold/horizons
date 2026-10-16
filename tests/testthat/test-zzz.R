@@ -9,6 +9,8 @@ describe("startup_message()", {
     msg <- startup_message(package_version("0.10.0.9000"))
 
     expect_match(msg, "horizons 0.10.0.9000 (development version)", fixed = TRUE)
+    expect_match(msg, "part way through the next release's changes, so for analysis install the latest release",
+                 fixed = TRUE)
     expect_match(msg, 'remotes::install_github("S-Leuthold/horizons@main")', fixed = TRUE)
     expect_match(msg, "github.com/S-Leuthold/horizons/issues", fixed = TRUE)
 

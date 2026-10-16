@@ -76,7 +76,7 @@ lies outside it (#76).
 After the outcome-range check and before it fits anything, \code{ensemble()}
 checks that \code{x} still holds what a fitted object promises (its data,
 evaluation and fitted models), and aborts with class
-\code{horizons_validation_error} when it does not.
+\code{horizons_error_validation} when it does not.
 }
 \examples{
 \dontrun{

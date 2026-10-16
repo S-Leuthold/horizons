@@ -103,50 +103,53 @@
       
       ──────────────────────────────────────────────────────────────────────────────── 
 
-# each class validator prints its findings as a tree before it aborts
+# each class validator puts its findings in the condition, with the remedy
 
     Code
       validate_horizons_eval(eval_obj)
-    Output
-      ! The horizons_eval object failed validation:
-         ├─ rank_metric must be one of: rmse, rrmse, rsq, ccc, rpd, mae
-         └─ n_train must be a single non-negative whole number
-      
     Condition
-      Error in `validate_horizons_eval()`:
-      ! Validation failed:
-      rank_metric must be one of: rmse, rrmse, rsq, ccc, rpd, mae
-      n_train must be a single non-negative whole number
+      Error:
+      ! The <horizons_eval> object failed validation.
+      x rank_metric must be one of: rmse, rrmse, rsq, ccc, rpd, mae
+      x n_train must be a single non-negative whole number
+      i Re-run evaluate() on the object, which rewrites its evaluation record.
 
 ---
 
     Code
       validate_horizons_fit(fit_obj)
-    Output
-      ! The horizons_fit object failed validation:
-         ├─ n_models must equal `length(workflows)` (2)
-         └─ predictor_schema must be a non-empty character vector of training-axis columns
-      
     Condition
-      Error in `validate_horizons_fit()`:
-      ! Validation failed:
-      n_models must equal `length(workflows)` (2)
-      predictor_schema must be a non-empty character vector of training-axis columns
+      Error:
+      ! The <horizons_fit> object failed validation.
+      x n_models must equal `length(workflows)` (2)
+      x predictor_schema must be a non-empty character vector of training-axis columns
+      i Re-run fit() on the object, which rewrites its fitted models.
 
 ---
 
     Code
       validate_horizons_ensemble(ens_obj)
-    Output
-      ! The horizons_ensemble object failed validation:
-         ├─ improvement must be a single non-NA numeric
-         └─ runtime_secs must be a single non-negative numeric
-      
     Condition
-      Error in `validate_horizons_ensemble()`:
-      ! Validation failed:
-      improvement must be a single non-NA numeric
-      runtime_secs must be a single non-negative numeric
+      Error:
+      ! The <horizons_ensemble> object failed validation.
+      x improvement must be a single non-NA numeric
+      x runtime_secs must be a single non-negative numeric
+      i Re-run ensemble() on the fitted object, which rebuilds the ensemble.
+
+# a refusal shows five findings, counts the rest, and keeps every one verbatim in the field
+
+    Code
+      abort_validation(findings)
+    Condition
+      Error:
+      ! The <horizons_data> object failed validation.
+      x Columns missing from role_map: {x}
+      x finding 2
+      x finding 3
+      x finding 4
+      x finding 5
+      i 1 more finding not shown; all are in the error's `findings` field.
+      i If the object was edited by hand or saved by an older version of horizons, rebuild it with the verbs that wrote it: it cannot be repaired in place.
 
 # print.horizons_data shows the selection section
 

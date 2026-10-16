@@ -5,15 +5,14 @@
 ## engines (penalized / weighted / xgb).
 ##
 ## Fixture: tests/testthat/fixtures/ensemble_fit.rds — a small horizons_fit on
-## REAL (anonymized) MIR spectra predicting Bulk_C. Real signal matters:
-## a degenerate fixture (members that don't predict) would make every
-## "did the meta-learner learn something" assertion vacuously pass. The fixture
-## also spans THREE response transforms (log / sqrt / none) across its members
-## so the back-transform double-application regression is actually exercisable —
+## REAL (anonymized) MIR spectra predicting Bulk_C, so its members carry real
+## signal. Its members span two response transforms (log / sqrt), so the
+## back-transform double-application regression is actually exercisable —
 ## under transformation = "none" the inverse is identity and a double-apply is
-## invisible.
+## invisible. Whether the meta-learner learns is tested on synthetic data made
+## for it, not on this fixture.
 ##
-## Built once by dev-build-fixture.R; see fixtures/README.md.
+## See fixtures/README.md.
 ##
 ## ens_fitted(), ens_test_set() and ens_built() come from helper-ensemble.R:
 ## the fixture is read once, and each ensemble the tests only read is built
@@ -229,7 +228,7 @@ describe("ensemble() - preflight validation", {
                  compute_uq = FALSE, verbose = FALSE)
       )),
       "must be on sample_id",
-      class = "horizons_validation_error"
+      class = "horizons_error_validation"
     )
 
     ## The fit contract: a models slot missing a key
@@ -242,8 +241,31 @@ describe("ensemble() - preflight validation", {
                  compute_uq = FALSE, verbose = FALSE)
       )),
       "missing from models: ad",
-      class = "horizons_validation_error"
+      class = "horizons_error_validation"
     )
+
+  })
+
+  it("refuses an unusable stored outcome range as a validation finding, not by reading it", {
+
+    fitted <- ens_fitted()
+
+    for (bad in list(c(0, NA), c(5, 1), "a")) {
+
+      broken <- fitted
+      broken$config$outcome_range <- bad
+
+      err <- expect_error(
+        suppressMessages(capture.output(
+          ensemble(broken, method = "weighted", optimize = FALSE,
+                   compute_uq = FALSE, verbose = FALSE)
+        )),
+        class = "horizons_error_validation"
+      )
+      expect_true(any(grepl("is not a usable range", err$findings, fixed = TRUE)),
+                  label = deparse(bad))
+
+    }
 
   })
 
@@ -554,8 +576,9 @@ describe("ensemble() and predict.horizons_ensemble() - member AD and intervals",
       ad_thresholds = c(q25 = 1, q50 = 2, q75 = 3, ood = 4)
     )), member)
 
-    ## Not a UQ bundle. Member scoring asks for no intervals, so it is never read.
-    broken$models$uq <- stats::setNames(list(list(method = "not a bundle")), member)
+    ## Not a UQ bundle beyond the level the fit validator checks. Member
+    ## scoring asks for no intervals, so it is never read.
+    broken$models$uq <- stats::setNames(list(list(method = "not a bundle", level_default = 0.9)), member)
 
     expect_no_warning(
       ens <- keep_only_warning(
@@ -585,9 +608,10 @@ describe("predict.horizons_ensemble() - preflight", {
     fitted   <- ens_fitted()
     test_set <- ens_test_set()
 
-    ## The abort carries no package class.
-    expect_error(predict.horizons_ensemble(fitted, test_set),
-                 "`object` must be a <horizons_ensemble> object", fixed = TRUE)
+    ## A direct call skips S3 dispatch; the door's gate still refuses it
+    err <- expect_error(predict.horizons_ensemble(fitted, test_set),
+                        class = "horizons_error_validation")
+    expect_true(any(grepl("is not a <horizons_ensemble> object", err$findings, fixed = TRUE)))
 
   })
 
@@ -602,11 +626,14 @@ describe("predict.horizons_ensemble() - preflight", {
     no_slot <- ens
     no_slot$ensemble <- NULL
 
-    ## The abort carries no package class.
-    expect_error(predict(no_model, test_set, interval = FALSE),
-                 "No fitted ensemble found on this object", fixed = TRUE)
-    expect_error(predict(no_slot, test_set, interval = FALSE),
-                 "No fitted ensemble found on this object", fixed = TRUE)
+    ## Refused at the door, naming what is missing (#234)
+    err <- expect_error(predict(no_model, test_set, interval = FALSE),
+                        class = "horizons_error_validation")
+    expect_true(any(grepl("Contract keys missing from ensemble: model", err$findings, fixed = TRUE)))
+
+    err <- expect_error(predict(no_slot, test_set, interval = FALSE),
+                        class = "horizons_error_validation")
+    expect_true(any(grepl("no ensemble slot", err$findings, fixed = TRUE)))
 
   })
 
@@ -762,8 +789,9 @@ describe("predict.horizons_ensemble() - no member set", {
 
     ens$ensemble$weights <- ens$ensemble$weights[0, ]
 
-    expect_error(predict(ens, test_set, interval = FALSE),
-                 "carries no member set")
+    err <- expect_error(predict(ens, test_set, interval = FALSE),
+                        class = "horizons_error_validation")
+    expect_true(any(grepl("weights needs at least 2 members; found 0", err$findings, fixed = TRUE)))
 
   })
 
@@ -1078,41 +1106,94 @@ describe("combine_ensemble_metamodel() - row alignment", {
 
 describe("ensemble() - the summary it prints", {
 
-  it("shows the top members, the score, the improvement over the best member, the UQ and the runtime", {
-
-    ## render_ensemble_summary() is what ensemble(verbose = TRUE) ends with;
-    ## the shared ensemble was built quietly, so its contract is rendered
-    ## here. The second call takes the branches the fixture does not: members
-    ## ordered by the size of their weight, sign aside; an ensemble worse
-    ## than its best member; no UQ bundle; a runtime in minutes.
-    contract    <- ens_built("weighted")$ensemble
-    rank_metric <- ens_fitted()$models$rank_metric
-
-    expect_snapshot(
-      render_ensemble_summary(contract, rank_metric),
-      transform = function(x) sub("Runtime: [0-9.]+s", "Runtime: <time>", x)
+  ## render_ensemble_summary() is what ensemble(verbose = TRUE) ends with. It
+  ## renders what a contract holds, so it is read on contracts built here,
+  ## which take every branch whatever members a fit happens to choose: an
+  ## ensemble that beats its best member and one that does not, members
+  ## ordered by the size of their weight with signs mixed, with and without a
+  ## UQ bundle, a runtime in seconds and in minutes.
+  summary_contract <- function(improvement, coef, uq = TRUE, runtime_secs = 12.4) {
+    list(
+      weights      = tibble::tibble(member = c("cubist_log", "plsr_log", "plsr_sqrt"),
+                                    coef   = coef),
+      metrics      = tibble::tibble(.metric = c("rmse", "rpd"), .estimator = "standard",
+                                    .estimate = c(2.31, 1.87)),
+      improvement  = improvement,
+      uq           = if (uq) list(level_default = 0.9, n_calib = 24L),
+      runtime_secs = runtime_secs
     )
+  }
 
-    ## Snapshots record no colour, so the improvement line is also read with
-    ## colours on: yellow when the ensemble does not beat its best member
-    improvement_line <- function(contract) {
-      withr::local_options(cli.num_colors = 256L)
-      out <- utils::capture.output(render_ensemble_summary(contract, rank_metric))
-      grep("Improvement over best member", out, value = TRUE, fixed = TRUE)
-    }
+  ## Snapshots record no colour, so the improvement line is also read with
+  ## colours on: yellow when the ensemble does not beat its best member
+  improvement_line <- function(contract) {
+    withr::local_options(cli.num_colors = 256L)
+    out <- utils::capture.output(render_ensemble_summary(contract, "rpd"))
+    grep("Improvement over best member", out, value = TRUE, fixed = TRUE)
+  }
+
+  it("shows the top members, the score, an improvement over the best member, the UQ and the runtime", {
+
+    better <- summary_contract(improvement = 0.0412, coef = c(0.5, 0.3, 0.2))
+
+    expect_snapshot(render_ensemble_summary(better, "rpd"))
+    expect_false(cli::ansi_has_any(improvement_line(better)))
+
+  })
+
+  it("orders members by the size of their weight, and flags an ensemble worse than its best member", {
+
+    worse <- summary_contract(improvement = -0.0123, coef = c(0.2, -0.5, 0.3),
+                              uq = FALSE, runtime_secs = 125)
+
+    expect_snapshot(render_ensemble_summary(worse, "rpd"))
+    expect_match(improvement_line(worse), "\033[33mImprovement over best member: -0.0123",
+                 fixed = TRUE)
+
+  })
+
+})
+
+## =========================================================================
+## The weighted meta-learner learns
+## =========================================================================
+## The summary tests above read contracts built by hand; this one checks the
+## weighted rule end to end on data where averaging should help: members
+## whose errors are independent. The most accurate member is listed last, so
+## equal weights would fail the argmax check. Over 50 seeds the improvement in
+## test RMSE was at least 0.027 (median 0.61), and the most accurate member
+## weighed most in 47; the seed below is one of those.
+
+describe("the weighted meta-learner", {
+
+  it("beats its best member when the members' errors are independent", {
+
+    withr::local_seed(11)
+    n_oof <- 60; n_test <- 30
+    truth_oof  <- stats::runif(n_oof, 10, 30)
+    truth_test <- stats::runif(n_test, 10, 30)
+    sds        <- c(c = 3, b = 2.5, a = 2)
+
+    oof  <- vapply(sds, function(s) truth_oof + stats::rnorm(n_oof, sd = s), numeric(n_oof))
+    test <- vapply(sds, function(s) truth_test + stats::rnorm(n_test, sd = s), numeric(n_test))
+
+    oof_tbl <- tibble::as_tibble(stats::setNames(as.data.frame(oof), paste0("member_", names(sds))))
+    weights <- derive_member_weights(oof_tbl, truth_oof, names(sds), optimize = TRUE)
+
+    ## The most accurate member weighs most
+    expect_identical(weights$member[which.max(weights$coef)], "a")
+
+    member_pred <- do.call(rbind, lapply(names(sds), function(m) {
+      tibble::tibble(config_id = m, truth = truth_test, .pred = test[, m])
+    }))
+    ensemble_pred <- tibble::tibble(truth = truth_test,
+                                    .pred = as.vector(test[, weights$member] %*% weights$coef))
+
+    contract <- build_ensemble_contract("weighted", weights, weights, ensemble_pred,
+                                        member_pred, rank_metric = "rmse",
+                                        runtime_secs = 0, optimize = TRUE, seed = 1L)
 
     expect_gt(contract$improvement, 0)
-    expect_false(cli::ansi_has_any(improvement_line(contract)))
-
-    contract$weights$coef <- c(0.2, -0.5, 0.3)
-    contract$improvement  <- -0.0123
-    contract$uq           <- NULL
-    contract$runtime_secs <- 125
-
-    expect_snapshot(render_ensemble_summary(contract, rank_metric))
-
-    expect_match(improvement_line(contract), "\033[33mImprovement over best member: -0.0123",
-                 fixed = TRUE)
 
   })
 

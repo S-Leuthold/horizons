@@ -361,6 +361,20 @@ resolve_registered <- function(entry, ask = interactive(), verbose = TRUE) {
 
     }
 
+    ## A library cached by an earlier version of horizons can lack a field the
+    ## object contract now requires. The cache is keyed on the library's name
+    ## and version only, so it is never rebuilt on its own.
+    tryCatch(
+      validate_horizons_data(lib$pool),
+      horizons_error_validation = function(e) {
+        cli::cli_abort(
+          c("The cached library at {.path {path}} was built by an earlier version of horizons and no longer meets the object contract.",
+            "i" = "Delete it; the next draw rebuilds it."),
+          class = "horizons_input_error", parent = e
+        )
+      }
+    )
+
     if (verbose) {
 
       cat(paste0("\u251C\u2500 Library ", cli::style_bold(entry$name), " ", entry$version,

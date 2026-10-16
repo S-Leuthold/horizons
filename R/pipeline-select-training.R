@@ -1228,7 +1228,7 @@ validate_select_input <- function(obj, arg, what) {
 
   tryCatch(
     validate_horizons_data(obj),
-    horizons_validation_error = function(e) {
+    horizons_error_validation = function(e) {
 
       cli::cli_abort("{.arg {arg}}, {what}, failed validation",
                      parent = e, call = call, class = "horizons_validation_error")

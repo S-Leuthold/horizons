@@ -32,24 +32,8 @@ make_test_hd <- function(sample_ids = c("S001", "S002", "S003")) {
     role     = c("id", "predictor", "predictor")
   )
 
-  obj <- list(
-    data = list(
-      analysis     = analysis,
-      role_map     = role_map,
-      n_rows       = n,
-      n_predictors = 2,
-      n_responses  = 0
-    ),
-    provenance = list(
-      spectra_source   = "test",
-      spectra_type     = "opus",
-      created          = Sys.time(),
-      horizons_version = utils::packageVersion("horizons")
-    )
-  )
-
-  class(obj) <- c("horizons_data", "list")
-  obj
+  new_horizons_data(analysis = analysis, role_map = role_map,
+                    spectra_source = "test", spectra_type = "opus")
 
 }
 
@@ -320,19 +304,8 @@ test_that("add_response() errors on duplicate keys in horizons (pre-average)", {
     role     = c("id", "predictor", "predictor")
   )
 
-  hd <- list(
-    data = list(
-      analysis     = analysis,
-      role_map     = role_map,
-      n_rows       = 3,
-      n_predictors = 2,
-      n_responses  = 0
-    ),
-    provenance = list(spectra_source = "test", spectra_type = "opus",
-                      created = Sys.time(),
-                      horizons_version = utils::packageVersion("horizons"))
-  )
-  class(hd) <- c("horizons_data", "list")
+  hd <- new_horizons_data(analysis = analysis, role_map = role_map,
+                          spectra_source = "test", spectra_type = "opus")
 
   lab <- tibble::tibble(
     sample_id = c("S001", "S002"),
@@ -341,11 +314,11 @@ test_that("add_response() errors on duplicate keys in horizons (pre-average)", {
 
   ## Act & Assert ----------------------------------------------------------
 
-  expect_error(
-    add_response(hd, lab, variable = "SOC"),
-    "Duplicate sample IDs found in horizons data", fixed = TRUE,
-    class = "horizons_input_error"
-  )
+  ## Refused at the door: average() collapses replicates before responses
+  ## are joined
+  err <- expect_error(add_response(hd, lab, variable = "SOC"),
+                      class = "horizons_error_validation")
+  expect_true(any(grepl("Duplicate sample_id values: S001", err$findings, fixed = TRUE)))
 
 })
 
@@ -393,14 +366,29 @@ test_that("add_response() refuses NA keys on one side, counting them (#139)", {
   expect_match(conditionMessage(err), "2 in source")
   expect_no_match(conditionMessage(err), "horizons data")
 
-  ## Horizons side only, on the default sample_id key
-  hd  <- make_test_hd(c("S001", NA, "S003"))
-  lab <- tibble::tibble(sample_id = c("S001", "S002", "S003"), SOC = c(1.2, 3.4, 5.6))
+  ## Horizons side only, on a meta key (an NA sample_id is refused at the
+  ## door, before the join)
+  hd  <- with_site(make_test_hd(), c("A", NA, "C"))
+  lab <- tibble::tibble(site = c("A", "B", "C"), SOC = c(1.2, 3.4, 5.6))
 
-  err <- expect_error(add_response(hd, lab, variable = "SOC"),
+  err <- expect_error(add_response(hd, lab, variable = "SOC", by = "site"),
                       class = "horizons_input_error")
 
   expect_match(conditionMessage(err), "1 in horizons data")
+  expect_no_match(conditionMessage(err), "in source")
+
+})
+
+test_that("add_response() refuses a meta join key that repeats in the horizons data", {
+
+  ## Duplicate sample_ids are refused at the door; a meta key can repeat
+  hd  <- with_site(make_test_hd(), c("A", "A", "C"))
+  lab <- tibble::tibble(site = c("A", "C"), SOC = c(1.2, 5.6))
+
+  err <- expect_error(utils::capture.output(add_response(hd, lab, variable = "SOC", by = "site")),
+                      class = "horizons_input_error")
+
+  expect_match(conditionMessage(err), "Duplicate values in horizons join key 'site'", fixed = TRUE)
 
 })
 
@@ -816,7 +804,7 @@ test_that("add_response() catches a corrupt input the verb itself never checks (
 
   expect_error(
     add_response(hd, lab, variable = "SOC"),
-    class = "horizons_validation_error"
+    class = "horizons_error_validation"
   )
 
 })

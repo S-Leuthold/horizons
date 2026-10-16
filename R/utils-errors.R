@@ -427,8 +427,9 @@ handle_results <- function(safe_result,
 #' @param config_id Character. The config hash identifier.
 #' @param error Error condition object, character string, or NULL.
 #'
-#' @return Single-row tibble with config_id, status, error_message, metric
-#'   columns (all NA), and runtime_secs (NA).
+#' @return Single-row tibble with config_id, status, error_message, the
+#'   failure's root class (`NA` for an error given as text), metric columns
+#'   (all NA), and runtime_secs (NA).
 #' @keywords internal
 create_failed_result <- function(config_id, error = NULL) {
 
@@ -474,6 +475,9 @@ create_failed_result <- function(config_id, error = NULL) {
     scoring_schema = SCORING_SCHEMA,
     best_params   = list(NULL),
     error_message = error_msg,
+    ## The root cause's class, so a script can tell one kind of failure from
+    ## another without reading the message
+    class         = if (inherits(error, "condition")) root_class(error) else NA_character_,
     warnings      = list(NULL),
     runtime_secs  = NA_real_
   )

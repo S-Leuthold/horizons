@@ -186,17 +186,8 @@ describe("build_recipe()", {
 
   })
 
-  it("aborts on invalid feature selection method", {
-
-    td <- make_test_data()
-    config <- make_config_row(feature_selection = "deep_learning")
-
-    expect_error(
-      build_recipe(config, td$data, td$role_map),
-      "Unsupported feature selection"
-    )
-
-  })
+  ## An unknown feature selection method is refused at every verb's door
+  ## (config_findings(), test-class-core.R), before a recipe is built.
 
   ## -----------------------------------------------------------------------
   ## Step ordering
@@ -224,25 +215,20 @@ describe("build_recipe()", {
 
   })
 
-  ## -----------------------------------------------------------------------
-  ## Column ordering assertion
-  ## -----------------------------------------------------------------------
+  it("refuses an axis out of order whose names the validator does not parse (#121)", {
 
-  it("aborts when predictor columns are not monotonically ordered", {
+    ## The door validator checks the order of names like wn_4000; one named
+    ## wn_X4000 reaches the recipe unchecked until #121
+    withr::local_seed(1)
+    td   <- make_test_data(n_wn = 10)
+    pred <- td$role_map$role == "predictor"
+    olds <- td$role_map$variable[pred]
+    news <- sub("^wn_", "wn_X", olds)
+    names(td$data)[match(olds, names(td$data))] <- news
+    td$role_map$variable[pred] <- sample(news)
 
-    td <- make_test_data(n_wn = 10)
-
-    ## Scramble the predictor order in role_map
-    pred_rows <- td$role_map$role == "predictor"
-    pred_vars <- td$role_map$variable[pred_rows]
-    td$role_map$variable[pred_rows] <- sample(pred_vars)
-
-    config <- make_config_row()
-
-    expect_error(
-      build_recipe(config, td$data, td$role_map),
-      "monotonically ordered"
-    )
+    expect_error(build_recipe(make_config_row(), td$data, td$role_map),
+                 "not monotonically ordered", class = "horizons_error_input")
 
   })
 

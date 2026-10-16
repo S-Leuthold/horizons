@@ -12,8 +12,9 @@ create_failed_result(config_id, error = NULL)
 \item{error}{Error condition object, character string, or NULL.}
 }
 \value{
-Single-row tibble with config_id, status, error_message, metric
-columns (all NA), and runtime_secs (NA).
+Single-row tibble with config_id, status, error_message, the
+failure's root class (\code{NA} for an error given as text), metric columns
+(all NA), and runtime_secs (NA).
 }
 \description{
 When a config fails during evaluate()'s inner loop, this creates a

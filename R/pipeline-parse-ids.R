@@ -66,9 +66,10 @@ SAMPLEID_VARIANTS <- c("sampleid", "sample_id", "SampleID", "Sample_ID", "sample
 #' **Duplicate or missing sample ids:** Several filenames parsing to the same
 #' `sampleid` token is normal here — that is what identifies replicate scans
 #' of one physical sample — and so is an `NA` `sample_id` left by `too_few =
-#' "na"`. `parse_ids()` warns rather than aborts on either, the same as
-#' [spectra()]. Use [average()] to collapse the replicates before anything
-#' downstream that requires unique ids.
+#' "na"`. `parse_ids()` passes either silently, as [spectra()] does (the
+#' filenames that did not match still warn, under `too_few = "na"`). Use
+#' [average()] to collapse the replicates before anything downstream that
+#' requires unique ids.
 #'
 #' **Before modelling only:** `parse_ids()` rewrites `sample_id`, and the
 #' splits and models that [evaluate()], [fit()] and [ensemble()] store are
@@ -117,6 +118,11 @@ parse_ids <- function(x,
     ))
 
   }
+
+  ## The object as it arrives (#234), at the raw stage: replicate scans share
+  ## ids until average() collapses them.
+
+  x <- validate_horizons_data(x, stage = "raw")
 
   ## Refuse a promoted object ------------------------------------------------
   ## Rewriting sample_id is a row change: evaluation and model splits are
@@ -386,7 +392,7 @@ parse_ids <- function(x,
   ## -------------------------------------------------------------------------
   ## Raw stage: parse_ids() runs before average() collapses replicates, so a
   ## duplicate parsed sample_id (several filenames parsing to the same id) or
-  ## an NA one (too_few = "na") warns rather than aborts here.
+  ## an NA one (too_few = "na") passes here.
 
   x <- validate_horizons_data(x, stage = "raw")
 

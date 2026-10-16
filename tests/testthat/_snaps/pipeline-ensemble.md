@@ -1,33 +1,33 @@
-# ensemble() - the summary it prints / shows the top members, the score, the improvement over the best member, the UQ and the runtime
+# ensemble() - the summary it prints / shows the top members, the score, an improvement over the best member, the UQ and the runtime
 
     Code
-      render_ensemble_summary(contract, rank_metric)
+      render_ensemble_summary(better, "rpd")
     Output
       │  Top members (by weight)
-      │  ├─ cubist_raw_log_none_d2a226: 0.3333
-      │  ├─ cubist_raw_none_none_7b491d: 0.3333
-      │  └─ rf_raw_none_none_d572c9: 0.3333
+      │  ├─ cubist_log: 0.5
+      │  ├─ plsr_log: 0.3
+      │  └─ plsr_sqrt: 0.2
       │
       │  Summary
-      │  ├─ Ensemble rpd: 1.192
-      │  ├─ Improvement over best member: +0.0227
-      │  ├─ UQ: CV+ conformal (level 0.9, n_calib = 43)
-      │  └─ Runtime: <time>
+      │  ├─ Ensemble rpd: 1.87
+      │  ├─ Improvement over best member: +0.0412
+      │  ├─ UQ: CV+ conformal (level 0.9, n_calib = 24)
+      │  └─ Runtime: 12.4s
       │
       └─ Class: horizons_fit → horizons_ensemble
 
----
+# ensemble() - the summary it prints / orders members by the size of their weight, and flags an ensemble worse than its best member
 
     Code
-      render_ensemble_summary(contract, rank_metric)
+      render_ensemble_summary(worse, "rpd")
     Output
       │  Top members (by weight)
-      │  ├─ cubist_raw_none_none_7b491d: -0.5
-      │  ├─ rf_raw_none_none_d572c9: 0.3
-      │  └─ cubist_raw_log_none_d2a226: 0.2
+      │  ├─ plsr_log: -0.5
+      │  ├─ plsr_sqrt: 0.3
+      │  └─ cubist_log: 0.2
       │
       │  Summary
-      │  ├─ Ensemble rpd: 1.192
+      │  ├─ Ensemble rpd: 1.87
       │  ├─ Improvement over best member: -0.0123
       │  ├─ UQ: not computed
       │  └─ Runtime: 2.1 min

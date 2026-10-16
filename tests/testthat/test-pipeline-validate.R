@@ -105,46 +105,15 @@ make_configured_hd <- function(n_samples      = 100L,
 
   }
 
-  ## Assemble object; downstream slots in the constructor's shape
-  contract <- new_horizons_data()
+  ## Built from the constructor, so every key the contract declares arrives
+  ## on its own; only what the tests set is written here.
+  obj <- new_horizons_data(analysis = analysis, role_map = role_map,
+                           spectra_source = "test", spectra_type = "mir")
 
-  obj <- list(
-    data = list(
-      analysis     = analysis,
-      role_map     = role_map,
-      n_rows       = n_samples,
-      n_predictors = n_predictors,
-      n_responses  = if (has_outcome) 0L else 0L
-    ),
-    provenance = list(
-      spectra_source   = "test",
-      spectra_type     = "mir",
-      created          = Sys.time(),
-      horizons_version = utils::packageVersion("horizons")
-    ),
-    config = list(
-      configs   = configs,
-      n_configs = if (!is.null(configs)) nrow(configs) else NULL,
-      tuning    = list(grid_size = 10L, bayesian_iter = 15L, cv_folds = cv_folds)
-    ),
-    validation = list(
-      passed    = NULL,
-      checks    = NULL,
-      timestamp = NULL,
-      outliers  = list(
-        spectral_ids   = NULL,
-        response_ids   = NULL,
-        removed_ids    = character(0),
-        removal_detail = NULL,
-        removed        = FALSE
-      )
-    ),
-    evaluation = contract$evaluation,
-    models     = contract$models,
-    ensemble   = contract$ensemble
-  )
+  obj$config$configs          <- configs
+  obj$config$n_configs        <- if (!is.null(configs)) nrow(configs)
+  obj$config$tuning$cv_folds  <- cv_folds
 
-  class(obj) <- c("horizons_data", "list")
   obj
 
 }
@@ -390,16 +359,13 @@ describe("validate() outcome checks", {
 
   ## Gating behavior -----------------------------------------------------------
 
-  test_that("skips P003/P004/P006 when no outcome in role_map", {
+  test_that("refuses at its door a configured object with no outcome role", {
 
-    hd     <- make_configured_hd(has_outcome = FALSE)
-    result <- quiet_validate(hd)
+    ## configure() always assigns one, so the object was edited by hand
+    hd  <- make_configured_hd(has_outcome = FALSE)
+    err <- expect_error(quiet_validate(hd), class = "horizons_error_validation")
 
-    check_ids <- result$validation$checks$check_id
-    expect_false("P003" %in% check_ids)
-    expect_false("P004" %in% check_ids)
-    expect_false("P006" %in% check_ids)
-    expect_equal(length(result$validation$outliers$response_ids), 0)
+    expect_true(any(grepl("configured but has no outcome role", err$findings, fixed = TRUE)))
 
   })
 
@@ -1364,7 +1330,7 @@ describe("validate() and the structural validator", {
 
     expect_error(
       capture.output(validate(hd)),
-      class = "horizons_validation_error"
+      class = "horizons_error_validation"
     )
 
   })

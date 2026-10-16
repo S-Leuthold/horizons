@@ -242,14 +242,14 @@ describe("fit() - cold start from one configuration (#45)", {
 
     err <- expect_error(
       fit(legacy, compute_uq = FALSE, compute_ad = FALSE, verbose = FALSE, seed = 42L),
-      class = "horizons_validation_error"
+      class = "horizons_error_validation"
     )
 
     msg <- gsub("\\s+", " ", conditionMessage(err))
 
     expect_match(msg, "missing", fixed = TRUE)
     expect_match(msg, "screened", fixed = TRUE)
-    expect_match(msg, "Re-run `evaluate()`", fixed = TRUE)
+    expect_match(msg, "Re-run evaluate()", fixed = TRUE)
 
   })
 
@@ -265,7 +265,7 @@ describe("fit() - cold start from one configuration (#45)", {
 
     err <- expect_error(
       fit(legacy, compute_uq = FALSE, compute_ad = FALSE, verbose = FALSE, seed = 42L),
-      class = "horizons_validation_error"
+      class = "horizons_error_validation"
     )
 
     msg <- gsub("\\s+", " ", conditionMessage(err))
@@ -295,18 +295,16 @@ describe("fit() - cold start from one configuration (#45)", {
 
   it("names an outcome column the analysis table lacks", {
 
-    ## The cold start reads the outcome before fit() validates the object, so
-    ## this is the refusal a user meets, not the validator's or "All outcome
+    ## fit() validates the object at its door, before the cold start reads
+    ## the outcome, so this is the refusal a user meets, not "All outcome
     ## values are NA".
     gone <- make_eval_object(n = 60, n_configs = 1)
     outcome <- gone$data$role_map$variable[gone$data$role_map$role == "outcome"]
     gone$data$analysis[[outcome]] <- NULL
 
-    err <- expect_error(fit(gone, verbose = FALSE), class = "horizons_input_error")
+    err <- expect_error(fit(gone, verbose = FALSE), class = "horizons_error_validation")
 
-    msg <- gsub("\\s+", " ", conditionMessage(err))
-    expect_match(msg, "The analysis table has no outcome column to model.", fixed = TRUE)
-    expect_match(msg, paste0("names ", outcome, " as the outcome"), fixed = TRUE)
+    expect_true(any(grepl(paste0("missing from analysis: ", outcome), err$findings, fixed = TRUE)))
 
   })
 

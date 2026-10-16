@@ -39,61 +39,18 @@ make_eval_object <- function(n = 40, n_wn = 10, n_configs = 2,
     feature_selection = "none"
   )
 
-  ## Build horizons_data-like structure
-  contract <- new_horizons_data()
+  ## Built from the constructor, so every key the contract declares (the log
+  ## among them) arrives on its own; only what the tests set is written here.
+  obj <- new_horizons_data(analysis = df, role_map = roles,
+                           spectra_source = "test", spectra_type = "mir")
 
-  obj <- list(
+  obj$config$configs   <- configs
+  obj$config$n_configs <- n_configs
+  obj$config$tuning    <- list(cv_folds = 3L, grid_size = 2L, bayesian_iter = 0L)
 
-    data = list(
-      analysis     = df,
-      role_map     = roles,
-      n_rows       = nrow(df),
-      n_predictors = n_wn,
-      ## SOC carries role "outcome" above, not "response" — those are
-      ## distinct roles (n_responses counts role == "response", the sibling
-      ## responses add_response()/select_training() can carry alongside the
-      ## one outcome being modeled). evaluate()'s entry-stage
-      ## validate_horizons_data() call (#24) is the first thing to actually
-      ## check this stored count against the role_map.
-      n_responses  = 0L
-    ),
+  obj$validation["passed"]    <- list(if (add_validation) TRUE)
+  obj$validation["timestamp"] <- list(if (add_validation) Sys.time())
 
-    provenance = list(
-      spectra_source = "test",
-      spectra_type   = "mir"
-    ),
-
-    config = list(
-      configs   = configs,
-      n_configs = n_configs,
-      tuning    = list(
-        cv_folds      = 3L,
-        grid_size     = 2L,
-        bayesian_iter = 0L
-      )
-    ),
-
-    validation = list(
-      passed    = if (add_validation) TRUE else NULL,
-      checks    = NULL,
-      timestamp = if (add_validation) Sys.time() else NULL,
-      outliers  = list(
-        spectral_ids   = NULL,
-        response_ids   = NULL,
-        removed_ids    = NULL,
-        removal_detail = NULL,
-        removed        = FALSE
-      )
-    ),
-
-    ## Downstream slots in the constructor's shape
-    evaluation = contract$evaluation,
-    models     = contract$models,
-    ensemble   = contract$ensemble
-
-  )
-
-  class(obj) <- c("horizons_data", "list")
   obj
 
 }
@@ -138,55 +95,17 @@ make_fit_object <- function(n = 60, n_wn = 10, n_configs = 2, seed = 42,
     feature_selection = "none"
   )
 
-  ## Build horizons_data-like structure; downstream slots in the
-  ## constructor's shape
-  contract <- new_horizons_data()
+  ## Built from the constructor, so every key the contract declares (the log
+  ## among them) arrives on its own; only what the tests set is written here.
+  obj <- new_horizons_data(analysis = df, role_map = roles,
+                           spectra_source = "test", spectra_type = "mir")
 
-  obj <- list(
-    data = list(
-      analysis     = df,
-      role_map     = roles,
-      n_rows       = nrow(df),
-      n_predictors = n_wn,
-      ## SOC carries role "outcome" below, not "response" — those are
-      ## distinct roles (n_responses counts role == "response", the sibling
-      ## responses add_response()/select_training() can carry alongside the
-      ## one outcome being modeled). evaluate()'s new entry-stage
-      ## validate_horizons_data() call (#24) is the first thing to actually
-      ## check this stored count against the role_map.
-      n_responses  = 0L
-    ),
-    provenance = list(
-      spectra_source = "test",
-      spectra_type   = "mir"
-    ),
-    config = list(
-      configs   = configs,
-      n_configs = n_configs,
-      tuning    = list(
-        cv_folds      = 3L,
-        grid_size     = 2L,
-        bayesian_iter = 0L
-      )
-    ),
-    validation = list(
-      passed    = TRUE,
-      checks    = NULL,
-      timestamp = Sys.time(),
-      outliers  = list(
-        spectral_ids   = NULL,
-        response_ids   = NULL,
-        removed_ids    = NULL,
-        removal_detail = NULL,
-        removed        = FALSE
-      )
-    ),
-    evaluation = contract$evaluation,
-    models     = contract$models,
-    ensemble   = contract$ensemble
-  )
+  obj$config$configs   <- configs
+  obj$config$n_configs <- n_configs
+  obj$config$tuning    <- list(cv_folds = 3L, grid_size = 2L, bayesian_iter = 0L)
 
-  class(obj) <- c("horizons_data", "list")
+  obj$validation$passed    <- TRUE
+  obj$validation$timestamp <- Sys.time()
 
   ## Run evaluate() to populate evaluation slot
   ## prune = FALSE ensures configs get status "success" even with weak signal

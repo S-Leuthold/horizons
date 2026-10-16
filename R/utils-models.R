@@ -87,11 +87,10 @@ define_model_spec <- function(model) {
       epochs       = tune::tune()
     ) |>
       parsnip::set_engine("nnet", MaxNWts = 10000) |>
-      parsnip::set_mode("regression"),
+      parsnip::set_mode("regression")
 
-    ## Default: unknown model
-    rlang::abort(paste0("Unknown model type: '", model, "'. ",
-                        "Valid models: ", paste(VALID_MODELS, collapse = ", ")))
+    ### No default: the door validators refuse a model outside VALID_MODELS,
+    ### and a NULL spec fails loudly in add_model().
 
   )
 

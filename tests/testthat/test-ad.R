@@ -87,8 +87,10 @@ test_that("calculate_ad_distance validates feature alignment", {
   colnames(wrong_names) <- paste0("z", 1:10)
   expect_error(calculate_ad_distance(wrong_names, md), "column names")
 
+  ## A matrix with fewer columns is refused by the same names check; the
+  ## saved bundle's own shape is checked at predict()'s door.
   wrong_count <- ad_matrix(5, 8, seed = 13)
-  expect_error(calculate_ad_distance(wrong_count, md), "features must match")
+  expect_error(calculate_ad_distance(wrong_count, md), "column names")
 
 })
 
@@ -129,7 +131,9 @@ test_that("assign_ad_bin validates inputs", {
   ## strings with its own "must be numeric".
   expect_error(assign_ad_bin(c("a", "b"), thr), "`distances` must be numeric", fixed = TRUE)
   expect_error(assign_ad_bin(c(-5, 10), thr), "non-negative")
-  expect_error(assign_ad_bin(c(5, 15), c(10, 20)), "length 4")
+
+  ## The thresholds come from a saved bundle, whose four non-decreasing
+  ## values predict()'s door validator checks (ad_bundle_ok()).
 
 })
 
@@ -335,7 +339,7 @@ test_that("predict_ad warns with the cause and returns NULL when the distance fa
     class = "horizons_ad_warning"
   )
 
-  expect_match(conditionMessage(w), "Number of features must match", fixed = TRUE)
+  expect_match(conditionMessage(w), "Feature column names must match", fixed = TRUE)
   expect_null(ad)
 
 })

@@ -370,24 +370,31 @@ describe("fit() - a trim request changed after evaluate() (#137)", {
 
   })
 
-  it("refuses a request for another outcome or method, naming each", {
+  it("refuses a request for another outcome at the door, and one for another method by name", {
 
-    ## configure() clears the request, so only an edited object gets here
-    edited <- trimmed
-    edited$validation$outliers$response_trim$outcome <- "pH"
-    edited$validation$outliers$response_trim$method  <- "mad"
+    ## configure() clears the request, so only an edited object carries one
+    ## for another outcome: the door validator refuses it, as an object the
+    ## verbs could not have written
+    other_outcome <- trimmed
+    other_outcome$validation$outliers$response_trim$outcome <- "pH"
 
-    out <- refusal(edited)
+    err <- expect_error(
+      fit(other_outcome, compute_uq = FALSE, compute_ad = FALSE, verbose = FALSE, seed = 307L),
+      class = "horizons_error_validation"
+    )
+    expect_true(any(grepl("response-trim request is for pH, but the object models SOC",
+                          err$findings, fixed = TRUE)))
+
+    ## Another method for the same outcome is a request validate() can write,
+    ## so fit() refuses it against the trim evaluate() applied
+    other_method <- trimmed
+    other_method$validation$outliers$response_trim$method <- "mad"
+
+    out <- refusal(other_method)
 
     expect_s3_class(out$cnd, "horizons_input_error")
-    expect_match(out$message, "The request is for pH; `evaluate()` trimmed SOC", fixed = TRUE)
     expect_match(out$message, "method is \"mad\"; `evaluate()` used \"iqr\"", fixed = TRUE)
     expect_no_match(out$message, "threshold is", fixed = TRUE)
-
-    ## validate() requests a trim of the configured outcome only, so restoring
-    ## the applied request is not offered when the outcomes differ
-    expect_no_match(out$message, "restore its request", fixed = TRUE)
-    expect_match(out$message, "Re-run `evaluate()` to apply the current request", fixed = TRUE)
 
   })
 

@@ -196,11 +196,9 @@ average <- function(x,
   ## from role_map is referenced by none of them and would be silently
   ## dropped rather than carried through or refused. Catch it here, before
   ## that happens (#24). Raw stage: replicate scans sharing a sample_id are
-  ## exactly the input average() exists to collapse — warn_ids = FALSE
-  ## because that duplicate was already warned about at spectra() or
-  ## parse_ids(), and average() collapsing it is not news.
+  ## exactly the input average() exists to collapse.
 
-  x <- validate_horizons_data(x, stage = "raw", warn_ids = FALSE)
+  x <- validate_horizons_data(x, stage = "raw")
 
   ## -------------------------------------------------------------------------
   ## Step 2: Identify column roles
@@ -408,22 +406,12 @@ average <- function(x,
   ## With a custom `by`, the averaged rows ARE the samples now and the
   ## grouping value is their identity, so the `by` column becomes
   ## `sample_id`: every downstream verb, and validate_horizons_data(), reads
-  ## that column by name. The original sample_id column should not have been
-  ## carried into the averaged table (only `by`, retained meta, responses and
-  ## predictors are), but that is asserted rather than assumed — if it ever
-  ## stops holding, the rename would mint a duplicate column name instead of
-  ## an error. `provenance$aggregation_by` keeps the name.
+  ## that column by name. The original sample_id column is never carried into
+  ## the averaged table (only `by`, retained meta, responses and predictors
+  ## are): the door validator requires the id role on sample_id, so it is
+  ## neither meta nor a response. `provenance$aggregation_by` keeps the name.
 
   if (by != "sample_id") {
-
-    if ("sample_id" %in% names(averaged)) {
-
-      rlang::abort(
-        paste0("Cannot promote '", by, "' to sample_id: the averaged table already has a sample_id column"),
-        class = "horizons_data_error"
-      )
-
-    }
 
     ## I2 says sample_id is character. A numeric or factor `by` would pass
     ## the validator's presence and uniqueness checks and then break joins

@@ -180,18 +180,9 @@ cv_plus_bounds <- function(fold_matrix, fold_id, residuals, level) {
   l <- idx$l
   u <- idx$u
 
-  ## Fail clearly on a corrupted fold vector: out-of-range matrix indexing in
-  ## R returns NA columns rather than erroring, which would silently degrade
-  ## every bound to NA instead of surfacing the corruption.
-  if (max(fold_id) > ncol(fold_matrix) || min(fold_id) < 1) {
-
-    cli::cli_abort(c(
-      "Calibration fold ids exceed the retained fold models.",
-      "x" = "fold_id range: {min(fold_id)}..{max(fold_id)}; fold models: {ncol(fold_matrix)}.",
-      "i" = "The uq bundle's calib$fold and fold_models are out of sync."
-    ))
-
-  }
+  ## Out-of-range matrix indexing returns NA columns rather than erroring, so
+  ## the fold ids matter: the ensemble validator at predict()'s door refuses
+  ## calibration folds that name no retained fold model.
 
   ## Column i of P is the prediction, for every new point, from the fold model
   ## that never saw calibration sample i. Adding r_i per column yields the
@@ -588,8 +579,8 @@ fit_ensemble_uq <- function(x,
   ## already encodes tuning).
   optimize <- x$ensemble$optimize
 
-  ## Read outside the capture below, so a malformed stored range aborts
-  ## rather than silently leaving the ensemble without intervals.
+  ## Read outside the capture below. The door validator has refused an
+  ## unusable stored range.
   outcome_range <- outcome_range_setting(x)
 
   uq_safe <- safely_execute(
@@ -694,12 +685,11 @@ predict_ensemble_uq_matrix <- function(uq, wide,
 #' columns are keyed by `sample_id` so the caller joins them to point
 #' predictions — never a positional bind.
 #'
-#' Degrades to `NULL` (point-only predictions) when the bundle is not a
-#' recognizable CV+ bundle, when a fold model fails to predict, or when the
-#' calibration set cannot support the requested level — warning each time,
-#' via [warn_interval_failure()], rather than degrading silently (#65's
-#' interval half, applied here). A missing member column aborts loudly — the
-#' fold models are only valid over the exact member set they trained on.
+#' The ensemble validator at `predict()`'s door has refused a bundle that is
+#' not a CV+ bundle, whose members are not the weights', or whose
+#' calibration set cannot support the default level (#65, #234). Degrades to
+#' `NULL` (point-only predictions), with a warning through
+#' [warn_interval_failure()], only when a fold model fails to predict.
 #'
 #' The deployed point prediction may occasionally fall outside its own CV+
 #' interval; this is a known property of jackknife+/CV+ aggregation (the
@@ -720,17 +710,9 @@ predict_ensemble_uq_matrix <- function(uq, wide,
 predict_ensemble_intervals <- function(uq, member_pred,
                                        outcome_range = DEFAULT_OUTCOME_RANGE) {
 
-  ## Guard: only consume a bundle this assembler understands. Anything else
-  ## (a corrupt slot, a future bundle format) degrades to point-only.
-  if (!is.list(uq) || !identical(uq$method, "cv_plus")) {
-
-    warn_interval_failure(
-      "validating the ensemble UQ bundle",
-      "the stored bundle is not a recognizable CV+ bundle (missing or unexpected $method)"
-    )
-    return(NULL)
-
-  }
+  ## The ensemble validator at predict()'s door has checked the bundle: a CV+
+  ## bundle whose members match the weights' and whose calibration set
+  ## supports intervals at level_default.
 
   ## Widen member predictions by sample_id into the canonical member order.
   wide <- member_pred |>
@@ -739,18 +721,7 @@ predict_ensemble_intervals <- function(uq, member_pred,
                        values_from  = ".pred",
                        names_prefix = "member_")
 
-  member_cols <- paste0("member_", uq$members)
-  missing     <- setdiff(member_cols, names(wide))
-
-  if (length(missing) > 0) {
-
-    cli::cli_abort(c(
-      "Member prediction{?s} missing for {length(missing)} ensemble member{?s}.",
-      "x" = "Absent: {.val {sub('^member_', '', missing)}}",
-      "i" = "Ensemble UQ fold models are only valid over the exact member set."
-    ))
-
-  }
+  ### member_pred holds every weighted member, and uq$members is that set.
 
   ## Fold-model predictions on the new points. A fold model that cannot
   ## predict degrades the whole interval request rather than erroring the
@@ -773,16 +744,6 @@ predict_ensemble_intervals <- function(uq, member_pred,
     residuals   = uq$calib$residual,
     level       = uq$level_default
   )
-
-  if (is.null(bounds)) {
-
-    warn_interval_failure(
-      "computing CV+ bounds",
-      "the calibration set is too small to support the requested coverage level"
-    )
-    return(NULL)
-
-  }
 
   ## Crossing repair then clamp to the outcome's range (repair-then-clamp,
   ## mirroring the single-model assembler; a floor at 0 under the default

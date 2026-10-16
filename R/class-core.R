@@ -195,6 +195,7 @@ new_horizons_data <- function(analysis       = NULL,
                       workers          = NULL,  ## integer or NA: worker count of the plan
                       parallelize_over = NULL,  ## character: axis actually parallelized
                       recipe           = NULL,  ## list: sg_window, sg_window_cm, pca_threshold the configs ran with
+                      control          = NULL,  ## horizons_control evaluate() ran with, or NULL
                       runtime_secs     = NULL,  ## numeric
                       timestamp        = NULL), ## POSIXct
 
@@ -215,6 +216,7 @@ new_horizons_data <- function(analysis       = NULL,
                   uq                = NULL,  ## list of UQ bundles (one per config), or NULL
                   ad                = NULL,  ## list of AD bundles (one per config), or NULL
                   selection_present = NULL,  ## logical: training rows came from select_training()
+                  control           = NULL,  ## horizons_control fit() ran with, or NULL
                   timestamp         = NULL,  ## POSIXct
                   runtime_secs      = NULL), ## numeric
 
@@ -234,6 +236,7 @@ new_horizons_data <- function(analysis       = NULL,
                     optimize        = NULL,   ## build-time optimize flag (for UQ fold re-derivation)
                     seed            = NULL,   ## build-time seed (UQ partitions at seed + 1000)
                     uq              = NULL,   ## CV+ conformal bundle from fit_ensemble_uq(), or NULL
+                    control         = NULL,   ## horizons_control ensemble() ran with, or NULL
                     timestamp       = NULL,
                     runtime_secs    = NULL),
 
@@ -243,7 +246,15 @@ new_horizons_data <- function(analysis       = NULL,
 
     ## Populated by select_training(); NULL on every object that never went
     ## through the verb. Shape is checked by validate_horizons_data().
-    selection = NULL
+    selection = NULL,
+
+    ## -------------------------------------------------------------------------
+    ## Section 9: LOG — What the verbs reported
+    ## -------------------------------------------------------------------------
+
+    ## Every verb appends the warnings it raised and the notes it reported;
+    ## nothing resets it (see ?horizons_conditions).
+    log = new_log()
   )
 
 
@@ -261,11 +272,9 @@ new_horizons_data <- function(analysis       = NULL,
 #' Structural validator for horizons_data objects
 #'
 #' @description
-#' Checks structural integrity of a horizons_data object. Silent on success,
-#' collects all validation errors and reports them together with tree-style
-#' formatting on failure. Some checks are downgraded to warnings at
-#' `stage = "raw"` (see Details); those are reported the same way, tree-style,
-#' but do not abort.
+#' Checks structural integrity of a horizons_data object. Silent on success;
+#' on failure it collects every finding and aborts once with all of them in
+#' the condition (`horizons_error_validation`, see [abort_validation()]).
 #'
 #' @details
 #' This validator checks structural requirements, not data quality. It ensures
@@ -278,45 +287,30 @@ new_horizons_data <- function(analysis       = NULL,
 #' one row can legitimately share a `sample_id` (Bruker's own OPUS naming
 #' does this: `S100-1.0` and `S100-1.1` both become `S100-1` once the
 #' extension is stripped). Those three verbs call this validator with
-#' `stage = "raw"`, which downgrades the sample_id checks below to warnings.
-#' `average()` is where replicates actually collapse, so from `average()`
+#' `stage = "raw"`, where a duplicate or `NA` `sample_id` passes silently:
+#' data legal at one stage is not warned about for what a later verb will
+#' refuse. `average()` is where replicates collapse, so from `average()`
 #' onward (`average()`, `add_response()`, `configure()`, `validate()`,
 #' `select_training()`, and every other caller) the default `stage = "full"`
-#' applies: the same conditions abort.
-#'
-#' **`warn_ids`.** A duplicate or `NA` `sample_id` first appears at
-#' `spectra()` or `parse_ids()`, and that is where it is worth a warning.
-#' `standardize()` and `average()` also call this validator at
-#' `stage = "raw"` — to certify the base contract before rebuilding
-#' `data$analysis` from `role_map`, and (for `standardize()`) once more
-#' before returning — but by then the same duplicate has already been
-#' warned about, and `average()` exists specifically to collapse it, so
-#' warning about it again on every call would be noise about the verb's own
-#' designed input. Those call sites pass `warn_ids = FALSE`, which skips
-#' checks 3 and 4 below entirely at `stage = "raw"` (every other check,
-#' unregistered columns included, still runs). `warn_ids` has no effect at
-#' `stage = "full"`, where an id problem is always an abort.
+#' applies, and the same conditions abort.
 #'
 #' **Validation checks performed:**
 #'
 #' 1. **Pairing**: If `analysis` exists, `role_map` must also exist (and vice
-#'    versa). This is a gate check — failure here aborts immediately, with
-#'    class `horizons_validation_error`, since subsequent checks depend on
-#'    both being present.
+#'    versa). This is a gate check — failure here aborts immediately, since
+#'    subsequent checks depend on both being present.
 #'
 #' 2. **sample_id presence**: The column must exist in `analysis`. Always an
 #'    error, in both stages.
 #'
 #' 3. **sample_id missingness**: NA values in `sample_id`. An error at
-#'    `stage = "full"`; a warning at `stage = "raw"` (skipped entirely when
-#'    `warn_ids = FALSE`), where `parse_ids(too_few = "na")` documents
-#'    leaving unmatched filenames unresolved.
+#'    `stage = "full"`; not checked at `stage = "raw"`, where
+#'    `parse_ids(too_few = "na")` documents leaving unmatched filenames
+#'    unresolved.
 #'
 #' 4. **sample_id uniqueness**: Duplicate `sample_id` values (NAs excluded;
 #'    see check 3). An error at `stage = "full"`, naming the duplicates and
-#'    pointing at [average()]; a warning at `stage = "raw"` (skipped
-#'    entirely when `warn_ids = FALSE`), matching the A004 check in the
-#'    validation spec.
+#'    pointing at [average()]; not checked at `stage = "raw"`.
 #'
 #' 5. **Predictor columns**: Wavelength/predictor columns (role = "predictor")
 #'    must not contain `NA` or `Inf` values. Checked only at `stage =
@@ -374,11 +368,13 @@ new_horizons_data <- function(analysis       = NULL,
 #'     `pool_id` it names must be a `sample_id` in `analysis` (I4b). Shape
 #'     and containment only — the contents are the verb's business.
 #'
-#' 14. **Config grid**: `config$configs` has no `covariates` column. A grid
-#'     with one was written by an earlier version of `configure()`, whose
-#'     config ids hashed it, so the object is refused and named as needing
-#'     `configure()` again. This is the check every class validator reaches,
-#'     through the chain, for every object that carries a config grid.
+#' 14. **Configuration**: on a configured object (unless `config = FALSE`),
+#'     the checks in [config_findings()]: unique configuration ids, known
+#'     models, transformations,
+#'     preprocessing and feature selection, a usable outcome range, a whole
+#'     number of folds of at least 2, one outcome, and a response-trim
+#'     request for that outcome with a usable threshold. Every class
+#'     validator reaches these through the chain.
 #'
 #' Empty objects (both analysis and role_map NULL) pass validation — this
 #' allows for incremental object construction. The selection record is
@@ -386,18 +382,21 @@ new_horizons_data <- function(analysis       = NULL,
 #'
 #' @param x `horizons_data`. The object to validate.
 #' @param stage `character(1)`. `"full"` (default) or `"raw"`. See Details.
-#' @param warn_ids `logical(1)`. Default `TRUE`. At `stage = "raw"`, whether
-#'   a duplicate or `NA` `sample_id` is reported at all. See the `warn_ids`
-#'   section in Details.
+#' @param config `logical(1)`. Check the configuration of a configured
+#'   object (see [config_findings()]). `configure()` passes `FALSE`, since
+#'   rewriting the configuration is the remedy for a bad one.
+#' @param call The frame the error reports: the verb that validated.
 #'
-#' @return `horizons_data`. The input object, unchanged, if validation passes
-#'   (whether or not it printed warnings). Aborts with class
-#'   `horizons_validation_error` if validation fails.
+#' @return `horizons_data`. The input object, unchanged, if validation
+#'   passes. Aborts with class `horizons_error_validation` if it fails.
 #'
 #' @seealso [new_horizons_data()] for object construction.
 #'
 #' @noRd
-validate_horizons_data <- function(x, stage = c("full", "raw"), warn_ids = TRUE) {
+validate_horizons_data <- function(x,
+                                   stage  = c("full", "raw"),
+                                   config = TRUE,
+                                   call   = rlang::caller_env()) {
 
   stage <- match.arg(stage)
 
@@ -415,7 +414,7 @@ validate_horizons_data <- function(x, stage = c("full", "raw"), warn_ids = TRUE)
 
     if (length(selection_errors) > 0) {
 
-      abort_validation(selection_errors)
+      abort_validation(selection_errors, call = call)
 
     }
 
@@ -432,106 +431,106 @@ validate_horizons_data <- function(x, stage = c("full", "raw"), warn_ids = TRUE)
 
   if (has_analysis && !has_role_map) {
 
-    cli::cli_abort("Object has {.field analysis} but no {.field role_map}",
-                   class = "horizons_validation_error")
+    abort_validation(cli::format_inline("Object has {.field analysis} but no {.field role_map}"),
+                     call = call)
 
   }
 
   if (has_role_map && !has_analysis) {
 
-    cli::cli_abort("Object has {.field role_map} but no {.field analysis}",
-                   class = "horizons_validation_error")
+    abort_validation(cli::format_inline("Object has {.field role_map} but no {.field analysis}"),
+                     call = call)
 
   }
 
   ## ---------------------------------------------------------------------------
-  ## Collect errors (both stages) and warnings (downgraded, "raw" only)
+  ## Collect findings
   ## ---------------------------------------------------------------------------
 
   errors   <- selection_errors
-  warnings <- character()
   analysis <- x$data$analysis
+
+  ## The log ----
+  ## Every object carries one from spectra() on; nothing resets it.
+
+  if (!is.data.frame(x$log) || !all(names(new_log()) %in% names(x$log))) {
+
+    errors <- c(errors, cli::format_inline(
+      "The object has no {.field log}, or its log is not the table the verbs write ({.field {names(new_log())}})"
+    ))
+
+  }
+
+  ## Flagged rows ----
+  ## A step that keeps a sample it cannot use marks it in .flag (NA for a
+  ## clean row, else the step), a meta column that exists once a row is
+  ## flagged. Flagged rows may hold non-finite predictors; the modelling
+  ## verbs leave them out (modelling_rows()).
+
+  flagged <- rep(FALSE, nrow(analysis))
+
+  if (".flag" %in% names(analysis)) {
+
+    flag_role <- x$data$role_map$role[x$data$role_map$variable %in% ".flag"]
+
+    if (!identical(flag_role, "meta") || !is.character(analysis$.flag)) {
+
+      errors <- c(errors, cli::format_inline(
+        "{.field .flag} must be a character column with the {.field meta} role"
+      ))
+
+    } else {
+
+      flagged <- !is.na(analysis$.flag)
+
+    }
+
+  }
   role_map <- x$data$role_map
 
   ## sample_id checks ----
+  ## Replicate scans share an id until average() collapses them, so at the raw
+  ## stage a duplicate or NA id is the designed input and passes silently; the
+  ## verbs that need unique ids (average(), then every verb at the full stage)
+  ## refuse them at their door.
 
   if (!"sample_id" %in% names(analysis)) {
 
     errors <- c(errors, cli::format_inline("Column {.field sample_id} missing from {.field analysis}"))
 
-    } else if (stage == "raw" && !warn_ids) {
-
-    ## spectra() and parse_ids() already warned about a duplicate or NA
-    ## sample_id when it first appeared; standardize() and average() call
-    ## this validator with warn_ids = FALSE at both entry and exit so their
-    ## own structural checks (unregistered columns, wavelength order, ...)
-    ## still run at stage = "raw" without re-warning about the same rows —
-    ## average() in particular exists to collapse those very duplicates, so
-    ## warning about its own designed input on every call was noise.
-
-    } else {
-
-    ## NA sample_id: full stage aborts; raw stage warns (parse_ids(too_few =
-    ## "na") documents leaving unmatched filenames as NA).
+  } else if (stage == "full") {
 
     na_id_count <- sum(is.na(analysis$sample_id))
 
     if (na_id_count > 0) {
 
-      na_msg <- cli::format_inline("{na_id_count} NA {.field sample_id} value{?s}")
-
-      if (stage == "raw") {
-
-        warnings <- c(warnings, na_msg)
-
-      } else {
-
-        errors <- c(errors, na_msg)
-
-      }
+      errors <- c(errors, cli::format_inline("{na_id_count} NA {.field sample_id} value{?s}; give every row an id in the source, or with {.fn parse_ids}"))
 
     }
 
-    ## Duplicate sample_id, NAs excluded (handled above so they are not also
-    ## reported as duplicates of each other). Full stage aborts and points at
-    ## average(); raw stage warns, matching the validation spec's A004 check
-    ## ("Found {n} duplicate sample IDs") — replicate scans share an id until
-    ## average() collapses them.
+    ## Duplicates, NAs excluded (reported above, not also as duplicates of
+    ## each other). The first 5 are named: at library scale the full list is
+    ## unreadable.
 
     non_na_ids <- analysis$sample_id[!is.na(analysis$sample_id)]
-    dup_ids    <- non_na_ids[duplicated(non_na_ids)]
+    dup_ids    <- unique(non_na_ids[duplicated(non_na_ids)])
 
     if (length(dup_ids) > 0) {
 
-      ## First 5, like the other checks in this function — at library scale
-      ## (thousands of replicate groups) the full list is unreadable and, in
-      ## the raw-stage warning, would make the console message itself
-      ## enormous.
-      unique_dups <- unique(dup_ids)
-      shown       <- unique_dups[seq_len(min(5, length(unique_dups)))]
-      dup_str     <- paste(shown, collapse = ", ")
+      dup_str <- paste(utils::head(dup_ids, 5), collapse = ", ")
 
-      if (length(unique_dups) > 5) {
+      if (length(dup_ids) > 5) {
 
-        dup_str <- paste0(dup_str, ", and ", length(unique_dups) - 5, " more")
+        dup_str <- paste0(dup_str, ", and ", length(dup_ids) - 5, " more")
 
       }
 
-      if (stage == "raw") {
-
-        warnings <- c(warnings, cli::format_inline(
-          "Found duplicate {.field sample_id} values: {dup_str}"
-        ))
-
-      } else {
-
-        errors <- c(errors, cli::format_inline(
-          "Duplicate {.field sample_id} values: {dup_str}. Use {.fn average} to aggregate replicates, or check your data."
-        ))
-
-      }
+      errors <- c(errors, cli::format_inline(
+        "Duplicate {.field sample_id} values: {dup_str}. Use {.fn average} to aggregate replicates, or check your data."
+      ))
 
     }
+
   }
 
   ## Wavelength column checks --------------------------------------------------
@@ -550,7 +549,8 @@ validate_horizons_data <- function(x, stage = c("full", "raw"), warn_ids = TRUE)
 
   }
 
-  predictor_cols <- analysis[, predictor_vars, drop = FALSE]
+  ### Flagged rows are left out of the non-finite check below.
+  predictor_cols <- analysis[!flagged, predictor_vars, drop = FALSE]
 
   # Check for NA and Inf — full stage only --------------------------------------
   # A non-finite value outside standardize()'s trim range is legitimately
@@ -566,7 +566,7 @@ validate_horizons_data <- function(x, stage = c("full", "raw"), warn_ids = TRUE)
 
       na_cols  <- names(na_check)[na_check]
       col_list <- paste(na_cols[1:min(3, length(na_cols))], collapse = ", ")
-      errors   <- c(errors, cli::format_inline("NA values in predictor columns: {col_list}"))
+      errors   <- c(errors, cli::format_inline("NA values in predictor columns: {col_list}; trim them off with {.fn standardize}, or fix the source spectra"))
 
     }
 
@@ -576,7 +576,7 @@ validate_horizons_data <- function(x, stage = c("full", "raw"), warn_ids = TRUE)
 
       inf_cols <- names(inf_check)[inf_check]
       col_list <- paste(inf_cols[1:min(3, length(inf_cols))], collapse = ", ")
-      errors   <- c(errors, cli::format_inline("Infinite values in predictor columns: {col_list}"))
+      errors   <- c(errors, cli::format_inline("Infinite values in predictor columns: {col_list}; trim them off with {.fn standardize}, or fix the source spectra"))
 
     }
 
@@ -592,15 +592,14 @@ validate_horizons_data <- function(x, stage = c("full", "raw"), warn_ids = TRUE)
 
   if (length(numeric_predictors) > 1) {
 
-    wn_raw    <- gsub("^wn_", "", numeric_predictors)
-    wn_values <- suppressWarnings(as.numeric(wn_raw))
+    wn_num <- wn_values(numeric_predictors)
 
     ## A name that matches the wn_<digits> pattern but does not parse (e.g.
     ## two decimal points) would otherwise reach `diff()`/`all()` as NA and
     ## either crash ("missing value where TRUE/FALSE needed") or disappear
     ## into a generic message; name it directly instead.
 
-    unparseable <- numeric_predictors[is.na(wn_values)]
+    unparseable <- numeric_predictors[is.na(wn_num)]
 
     if (length(unparseable) > 0) {
 
@@ -616,14 +615,14 @@ validate_horizons_data <- function(x, stage = c("full", "raw"), warn_ids = TRUE)
       ## the pair (not just the later occurrence duplicated() flags) rather
       ## than reporting the generic order failure.
 
-      dup_wn <- numeric_predictors[wn_values %in% wn_values[duplicated(wn_values)]]
+      dup_wn <- numeric_predictors[wn_num %in% wn_num[duplicated(wn_num)]]
 
       if (length(dup_wn) > 0) {
 
         dup_list <- paste(dup_wn, collapse = ", ")
         errors   <- c(errors, cli::format_inline("Duplicate wavenumber columns: {dup_list}"))
 
-      } else if (!all(diff(wn_values) < 0)) {
+      } else if (!all(diff(wn_num) < 0)) {
 
         errors <- c(errors, cli::format_inline("Wavelength columns must be in strictly decreasing order"))
 
@@ -769,36 +768,204 @@ validate_horizons_data <- function(x, stage = c("full", "raw"), warn_ids = TRUE)
     }
   }
 
-  ## Config grid --------------------------------------------------------------
-  ## configure() writes no covariates column. A grid with one was written by
-  ## an earlier version, whose config ids hashed it, so nothing evaluated or
-  ## fitted on that grid lines up with a grid configure() writes now.
+  ## Configuration --------------------------------------------------------------
+  ## Checked once the object is configured. configure() validates with
+  ## config = FALSE, since rewriting the configuration is the remedy for a bad
+  ## one.
 
-  if ("covariates" %in% names(x$config$configs)) {
+  if (isTRUE(config) && !is.null(x$config$configs)) {
 
-    errors <- c(errors, cli::format_inline(
-      "{.field config$configs} has a {.field covariates} column: the object was configured by an earlier version of horizons. Re-run {.fn configure} on it, then the verbs after it."
-    ))
+    errors <- c(errors, config_findings(x))
 
   }
 
   ## ---------------------------------------------------------------------------
-  ## Report warnings, then errors, or return
+  ## Abort on any finding, or return
   ## ---------------------------------------------------------------------------
-
-  if (length(warnings) > 0) {
-
-    warn_validation(warnings)
-
-  }
 
   if (length(errors) > 0) {
 
-    abort_validation(errors)
+    abort_validation(errors, call = call)
 
   }
 
   x
+
+}
+
+
+## ---------------------------------------------------------------------------
+## control_finding() — The control a verb recorded
+## ---------------------------------------------------------------------------
+
+#' A finding when a slot's recorded control is not one
+#'
+#' @param control The slot's `control` key.
+#' @param slot Character(1). The slot, for the message.
+#' @return Character, empty when `control` is `NULL` or a `horizons_control`.
+#' @noRd
+control_finding <- function(control, slot) {
+
+  if (is.null(control) || inherits(control, "horizons_control")) return(character())
+
+  cli::format_inline("{.field {slot}$control} must be NULL or a {.cls horizons_control}")
+
+}
+
+
+## ---------------------------------------------------------------------------
+## ad_bundle_ok() — The shape predict() needs of an AD bundle
+## ---------------------------------------------------------------------------
+
+#' Whether an applicability-domain bundle has the shape predict() reads
+#'
+#' @param bundle One entry of `models$ad`.
+#' @return `TRUE` or `FALSE`.
+#' @seealso [validate_horizons_fit()]
+#' @noRd
+ad_bundle_ok <- function(bundle) {
+
+  if (!is.list(bundle)) return(FALSE)
+
+  centroid   <- bundle$centroid
+  cov_matrix <- bundle$cov_matrix
+  thresholds <- bundle$ad_thresholds
+
+  is.numeric(centroid) && length(centroid) > 0 && !anyNA(centroid) &&
+    is.matrix(cov_matrix) && is.numeric(cov_matrix) &&
+    nrow(cov_matrix) == length(centroid) && ncol(cov_matrix) == length(centroid) &&
+    is.numeric(thresholds) && length(thresholds) == 4 && !anyNA(thresholds) &&
+    !is.unsorted(thresholds)
+
+}
+
+
+## ---------------------------------------------------------------------------
+## config_findings() — The configuration a configured object must carry
+## ---------------------------------------------------------------------------
+
+#' Findings on a configured object's configuration
+#'
+#' @description
+#' What every verb after `configure()` reads from `config` and `validation`,
+#' checked once at the door instead of where each value is used: a usable
+#' outcome range, a whole number of folds, a configuration grid with unique
+#' ids whose models, transformations, preprocessing and feature selection are
+#' all known, one
+#' outcome, and a response-trim request that is for that outcome and has a
+#' usable threshold.
+#'
+#' @param x A `horizons_data` with `config$configs` set.
+#' @return [Character.] Validation messages, possibly empty.
+#' @seealso [validate_horizons_data()]
+#' @noRd
+config_findings <- function(x) {
+
+  findings <- character()
+  configs  <- x$config$configs
+
+  ## The grid ------------------------------------------------------------------
+
+  ### Every later verb looks a configuration up by its id
+  dup_ids <- unique(configs$config_id[duplicated(configs$config_id)])
+
+  if (length(dup_ids) > 0) {
+
+    findings <- c(findings, cli::format_inline(
+      "{.field config$configs} has {cli::qty(length(dup_ids))}{?a /}duplicate {.field config_id}{cli::qty(length(dup_ids))}{?s} {.val {dup_ids}}"
+    ))
+
+  }
+
+  vocabularies <- list(model             = VALID_MODELS,
+                       transformation    = VALID_TRANSFORMATIONS,
+                       preprocessing     = VALID_PREPROCESSING,
+                       feature_selection = VALID_FEATURE_SELECTION)
+
+  for (column in names(vocabularies)) {
+
+    if (!column %in% names(configs)) {
+
+      findings <- c(findings, cli::format_inline(
+        "{.field config$configs} has no {.field {column}} column"
+      ))
+      next
+
+    }
+
+    unknown <- setdiff(unique(as.character(configs[[column]])), vocabularies[[column]])
+
+    if (length(unknown) > 0) {
+
+      findings <- c(findings, cli::format_inline(
+        "{.field config$configs} has {cli::qty(length(unknown))}{?an /}unknown {.field {column}} {cli::qty(length(unknown))}value{?s} {.val {unknown}} (known: {.val {vocabularies[[column]]}})"
+      ))
+
+    }
+
+  }
+
+  ## Settings every later verb reads -------------------------------------------
+
+  range <- x$config$outcome_range
+
+  if (!is.null(range) && !is_valid_outcome_range(range)) {
+
+    findings <- c(findings, cli::format_inline(
+      "{.field config$outcome_range} is not a usable range (two numbers, lower below upper): it is {.val {range}}"
+    ))
+
+  }
+
+  cv_folds <- x$config$tuning$cv_folds
+
+  if (!(is.numeric(cv_folds) && length(cv_folds) == 1 && !is.na(cv_folds) &&
+        cv_folds >= 2 && cv_folds == round(cv_folds))) {
+
+    findings <- c(findings, cli::format_inline(
+      "{.field config$tuning$cv_folds} must be a whole number of at least 2, not {.val {cv_folds}}"
+    ))
+
+  }
+
+  ## The outcome and its trim request --------------------------------------------
+
+  outcome <- x$data$role_map$variable[x$data$role_map$role %in% "outcome"]
+
+  if (length(outcome) == 0) {
+
+    findings <- c(findings, cli::format_inline(
+      "The object is configured but has no {.field outcome} role"
+    ))
+
+  }
+
+  request <- x$validation$outliers$response_trim
+
+  if (!is.null(request)) {
+
+    if (length(outcome) == 1 && !identical(as.character(request$outcome), outcome)) {
+
+      findings <- c(findings, cli::format_inline(
+        "{.fn validate}'s response-trim request is for {.field {request$outcome}}, but the object models {.field {outcome}}; re-run {.fn configure}, which clears the request, then {.fn validate}"
+      ))
+
+    }
+
+    threshold <- request$threshold
+
+    if (!(is.numeric(threshold) && length(threshold) == 1 && !is.na(threshold) &&
+          threshold > 0)) {
+
+      findings <- c(findings, cli::format_inline(
+        "{.field validation$outliers$response_trim$threshold} must be a single positive number; re-run {.fn configure}, which clears the request, then {.fn validate}"
+      ))
+
+    }
+
+  }
+
+  findings
 
 }
 
@@ -1072,80 +1239,67 @@ describe_selection <- function(selection) {
 
 
 ## ---------------------------------------------------------------------------
-## abort_validation() \u2014 Report accumulated validation errors and abort
+## abort_validation() — Report accumulated validation findings and abort
 ## ---------------------------------------------------------------------------
 
-#' Print accumulated validation errors tree-style and abort
+#' Abort because an object breaks its class contract
 #'
-#' @param errors [Character.] One message per failed check.
+#' @description
+#' The one abort behind every validator. Each finding is an `x` bullet, the
+#' first five shown and the rest counted, with every finding kept on the
+#' condition as `findings`; the closing `i` bullet is the remedy. The
+#' findings are text the validator has already rendered, so they go in as
+#' values and their braces are never read as a cli template.
+#'
+#' @param findings [Character.] One message per failed check.
+#' @param class_name [Character.] The class whose contract failed, for the
+#'   header.
+#' @param remedy [Character.] What the user can do about it.
+#' @param call The frame the error reports: the verb that validated.
 #'
 #' @return [NULL.] Never returns; aborts with class
-#'   `horizons_validation_error`.
+#'   `horizons_error_validation`.
 #'
 #' @seealso [validate_horizons_data()]
 #' @noRd
-abort_validation <- function(errors) {
+abort_validation <- function(findings,
+                             class_name = "horizons_data",
+                             remedy     = VALIDATION_REMEDY,
+                             call       = rlang::caller_env()) {
 
-  cat(cli::col_red(cli::style_bold("! The horizons_data object failed validation:\n")))
+  shown  <- utils::head(findings, 5L)
+  n_more <- length(findings) - length(shown)
 
-  for (i in seq_along(errors)) {
-
-    branch <- if (i < length(errors)) "\u251C\u2500" else "\u2514\u2500"
-    cat(cli::col_red(paste0("   ", branch, " ", errors[i], "\n")))
-
-  }
-
-  cat("\n")
-
-  rlang::abort(
-    paste(c("Validation failed:", errors), collapse = "\n"),
-    class = "horizons_validation_error"
+  abort_horizons(
+    c("The {.cls {class_name}} object failed validation.",
+      stats::setNames(cli_escape(shown), rep("x", length(shown))),
+      if (n_more > 0) c("i" = paste0(n_more, " more finding", if (n_more > 1) "s", " not shown; all are in the error's `findings` field.")),
+      "i" = remedy),
+    kind     = "validation",
+    ## Plain text: cli styles the findings in a colour session, and a field
+    ## is data a handler matches or writes out
+    findings = cli::ansi_strip(findings),
+    call     = call
   )
 
 }
 
-
-## ---------------------------------------------------------------------------
-## warn_validation() — Report accumulated validation warnings, non-fatally
-## ---------------------------------------------------------------------------
-
-#' Print accumulated validation warnings tree-style and warn
+#' What to do about an object that fails the base contract
 #'
-#' @description
-#' The `stage = "raw"` counterpart to [abort_validation()]: the same
-#' tree-style report, in yellow rather than red, followed by a warning
-#' rather than an abort. Used for checks `validate_horizons_data()`
-#' downgrades before `average()` has had a chance to collapse replicate
-#' scans (duplicate or NA `sample_id`).
-#'
-#' @param warnings [Character.] One message per downgraded check.
-#'
-#' @return [NULL.] Invisibly. Warns with class
-#'   `horizons_validation_warning`; does not abort.
-#'
-#' @seealso [validate_horizons_data()], [abort_validation()]
+#' @keywords internal
 #' @noRd
-warn_validation <- function(warnings) {
+VALIDATION_REMEDY <- paste(
+  "If the object was edited by hand or saved by an older version of horizons,",
+  "rebuild it with the verbs that wrote it: it cannot be repaired in place."
+)
 
-  cat(cli::col_yellow(cli::style_bold("! The horizons_data object has validation warnings:\n")))
-
-  for (i in seq_along(warnings)) {
-
-    branch <- if (i < length(warnings)) "\u251C\u2500" else "\u2514\u2500"
-    cat(cli::col_yellow(paste0("   ", branch, " ", warnings[i], "\n")))
-
-  }
-
-  cat("\n")
-
-  rlang::warn(
-    paste(c("Validation warnings:", warnings), collapse = "\n"),
-    class = "horizons_validation_warning"
-  )
-
-  invisible(NULL)
-
-}
+#' What to do about an object that fails a class contract
+#'
+#' @keywords internal
+#' @noRd
+EVAL_REMEDY     <- "Re-run evaluate() on the object, which rewrites its evaluation record."
+FIT_REMEDY      <- "Re-run fit() on the object, which rewrites its fitted models."
+ENSEMBLE_REMEDY <- "Re-run ensemble() on the fitted object, which rebuilds the ensemble."
 
 
 ## ---------------------------------------------------------------------------
@@ -1204,7 +1358,7 @@ contract_keys <- function(slot) {
 #' the base validator's one pass over the table.
 #'
 #' @details
-#' Gate checks (abort immediately, with class `horizons_validation_error`):
+#' Gate checks (abort immediately, with class `horizons_error_validation`):
 #' the object inherits `horizons_ensemble`, `$ensemble` is a list, and
 #' `$ensemble$method` is present.
 #'
@@ -1212,7 +1366,7 @@ contract_keys <- function(slot) {
 #' delegates to [validate_horizons_fit()], which runs the evaluation and base
 #' validators in turn; the parent slots must still hold.
 #'
-#' Accumulated checks (reported together, tree-style):
+#' Accumulated checks (reported together, in one condition):
 #'
 #' 1. **Slot completeness**: every key [new_horizons_data()] declares for
 #'    the `ensemble` slot is present (see [contract_keys()]): `method`,
@@ -1236,19 +1390,21 @@ contract_keys <- function(slot) {
 #'     build-time settings [fit_ensemble_uq()] rebuilds the fold models with.
 #' 11. **uq**: NULL, or a CV+ bundle — a list with `method == "cv_plus"` and
 #'     the core fields `fold_models`, `calib`, `n_calib`, `level_default`
-#'     (see [fit_ensemble_uq()]).
+#'     (see [fit_ensemble_uq()]), whose `members` match the weights' and
+#'     whose calibration set supports intervals at `level_default`.
 #' 12. **timestamp**: POSIXct. **runtime_secs**: single non-negative numeric.
 #'
 #' @param x `horizons_ensemble`. The object to validate.
+#' @param call The frame the error reports: the verb that validated.
 #'
 #' @return `horizons_ensemble`. The input object, unchanged, if validation
-#'   passes. Aborts with class `horizons_validation_error` on failure.
+#'   passes. Aborts with class `horizons_error_validation` on failure.
 #'
 #' @seealso [build_ensemble_contract()] for contract assembly,
 #'   [fit_ensemble_uq()] for the uq bundle.
 #'
 #' @noRd
-validate_horizons_ensemble <- function(x) {
+validate_horizons_ensemble <- function(x, call = rlang::caller_env()) {
 
   ## ---------------------------------------------------------------------------
   ## Gate checks
@@ -1256,28 +1412,28 @@ validate_horizons_ensemble <- function(x) {
 
   if (!inherits(x, "horizons_ensemble")) {
 
-    cli::cli_abort("{.arg x} must be a {.cls horizons_ensemble} object",
-                   class = "horizons_validation_error")
+    abort_validation(cli::format_inline("{.arg x} is not a {.cls horizons_ensemble} object"),
+                     "horizons_ensemble", ENSEMBLE_REMEDY, call = call)
 
   }
 
   if (!is.list(x$ensemble)) {
 
-    cli::cli_abort("Object has no {.field ensemble} slot to validate",
-                   class = "horizons_validation_error")
+    abort_validation(cli::format_inline("Object has no {.field ensemble} slot to validate"),
+                     "horizons_ensemble", ENSEMBLE_REMEDY, call = call)
 
   }
 
   if (is.null(x$ensemble$method)) {
 
-    cli::cli_abort("The {.field ensemble} slot carries no {.field method}",
-                   class = "horizons_validation_error")
+    abort_validation(cli::format_inline("The {.field ensemble} slot carries no {.field method}"),
+                     "horizons_ensemble", ENSEMBLE_REMEDY, call = call)
 
   }
 
   ## The fit contract is inherited, and through it the evaluation and base
   ## contracts: enforce them first, so a bad parent slot surfaces here.
-  x <- validate_horizons_fit(x)
+  x <- validate_horizons_fit(x, call = call)
 
   ## ---------------------------------------------------------------------------
   ## Collect errors for remaining checks
@@ -1479,8 +1635,12 @@ validate_horizons_ensemble <- function(x) {
       ## against the wrong columns; an out-of-range fold id degrades to NA
       ## bounds via R's NA-on-out-of-range matrix indexing — both are silent
       ## at predict time, so catch them here.
-      if (!is.null(uq$members) && w_valid &&
-          !setequal(uq$members, w$member)) {
+      ## predict() needs every member's prediction to build the bounds
+      if (is.null(uq$members)) {
+
+        errors <- c(errors, cli::format_inline("{.field uq} names no {.field members}"))
+
+      } else if (w_valid && !setequal(uq$members, w$member)) {
 
         errors <- c(errors, cli::format_inline("{.field uq$members} does not match {.field weights$member} (stale or foreign uq bundle)"))
 
@@ -1497,11 +1657,34 @@ validate_horizons_ensemble <- function(x) {
 
         errors <- c(errors, cli::format_inline("{.field uq$calib$fold} references fold models that do not exist ({length(uq$fold_models)} retained)"))
 
+      } else {
+
+        ## The bounds are order statistics of the calibration set, so it has
+        ## to hold enough rows for the default level
+        level   <- uq$level_default
+        n_calib <- nrow(uq$calib)
+
+        if (!identical(as.integer(uq$n_calib), as.integer(n_calib))) {
+
+          errors <- c(errors, cli::format_inline("{.field uq$n_calib} ({uq$n_calib}) does not match the rows of {.field uq$calib} ({n_calib})"))
+
+        } else if (!(is.numeric(level) && length(level) == 1 && !is.na(level) &&
+                     level > 0 && level < 1) ||
+                   is.null(cv_plus_indices(n_calib, level))) {
+
+          errors <- c(errors, cli::format_inline("{.field uq$calib} ({n_calib} row{?s}) cannot support intervals at {.field level_default} {.val {level}}"))
+
+        }
+
       }
 
     }
 
   }
+
+  ## control ----------------------------------------------------------------------------
+
+  errors <- c(errors, control_finding(ens$control, "ensemble"))
 
   ## timestamp / runtime ---------------------------------------------------------------
 
@@ -1524,20 +1707,7 @@ validate_horizons_ensemble <- function(x) {
 
   if (length(errors) > 0) {
 
-    cat(cli::col_red(cli::style_bold("! The horizons_ensemble object failed validation:\n")))
-
-    for (i in seq_along(errors)) {
-
-      branch <- if (i < length(errors)) "\u251C\u2500" else "\u2514\u2500"
-      cat(cli::col_red(paste0("   ", branch, " ", errors[i], "\n")))
-
-    }
-
-    cat("\n")
-    rlang::abort(
-      paste(c("Validation failed:", errors), collapse = "\n"),
-      class = "horizons_validation_error"
-    )
+    abort_validation(errors, "horizons_ensemble", ENSEMBLE_REMEDY, call = call)
 
   }
 
@@ -1558,14 +1728,14 @@ validate_horizons_ensemble <- function(x) {
 #' table.
 #'
 #' @details
-#' Gate checks (abort immediately, with class `horizons_validation_error`):
+#' Gate checks (abort immediately, with class `horizons_error_validation`):
 #' the object inherits `horizons_eval` and `$evaluation` is a list.
 #'
 #' A `horizons_eval` is also a `horizons_data`, so after the gates this
 #' delegates to [validate_horizons_data()] at `stage = "full"`; the base
 #' contract must still hold.
 #'
-#' Accumulated checks (reported together, tree-style):
+#' Accumulated checks (reported together, in one condition):
 #'
 #' 1. **Slot completeness**: every key [new_horizons_data()] declares for
 #'    the `evaluation` slot is present (see [contract_keys()]): `results`,
@@ -1592,7 +1762,8 @@ validate_horizons_ensemble <- function(x) {
 #'    set, `config_id` set-equal to its `config_id`. Failed, pruned and
 #'    not-evaluated configs keep their rows, so a config with no row was
 #'    lost, and a row with no config describes a config that isn't there.
-#' 3. **best_config** (I5): a length-1 character present in
+#' 3. **best_config** (I5): a length-1 character, `NA` when no
+#'    configuration has the ranking metric, otherwise present in
 #'    `results$config_id` — and, when the config table is reachable at
 #'    `x$config$configs$config_id`, present there too.
 #' 4. **rank_metric**: a length-1 character naming one of the six metrics.
@@ -1601,15 +1772,16 @@ validate_horizons_ensemble <- function(x) {
 #' 7. **runtime_secs**: single non-negative numeric. **timestamp**: POSIXct.
 #'
 #' @param x `horizons_eval`. The object to validate.
+#' @param call The frame the error reports: the verb that validated.
 #'
 #' @return `horizons_eval`. The input object, unchanged, if validation passes.
-#'   Aborts with class `horizons_validation_error` on failure.
+#'   Aborts with class `horizons_error_validation` on failure.
 #'
 #' @seealso [validate_horizons_fit()] for the finalized-model contract,
 #'   [validate_horizons_data()] for the base contract.
 #'
 #' @noRd
-validate_horizons_eval <- function(x) {
+validate_horizons_eval <- function(x, call = rlang::caller_env()) {
 
   ## ---------------------------------------------------------------------------
   ## Gate checks
@@ -1617,21 +1789,21 @@ validate_horizons_eval <- function(x) {
 
   if (!inherits(x, "horizons_eval")) {
 
-    cli::cli_abort("{.arg x} must be a {.cls horizons_eval} object",
-                   class = "horizons_validation_error")
+    abort_validation(cli::format_inline("{.arg x} is not a {.cls horizons_eval} object"),
+                     "horizons_eval", EVAL_REMEDY, call = call)
 
   }
 
   if (!is.list(x$evaluation)) {
 
-    cli::cli_abort("Object has no {.field evaluation} slot to validate",
-                   class = "horizons_validation_error")
+    abort_validation(cli::format_inline("Object has no {.field evaluation} slot to validate"),
+                     "horizons_eval", EVAL_REMEDY, call = call)
 
   }
 
   ## The base contract is inherited: enforce it first, at the full stage,
   ## so a bad data slot surfaces here.
-  x <- validate_horizons_data(x)
+  x <- validate_horizons_data(x, call = call)
 
   ## ---------------------------------------------------------------------------
   ## Collect errors for remaining checks
@@ -1782,6 +1954,26 @@ validate_horizons_eval <- function(x) {
 
     }
 
+    ## The root class of each failure, NA for a row that succeeded
+    if (!"class" %in% names(res) || !is.character(res$class)) {
+
+      errors <- c(errors, cli::format_inline(
+        "{.field results} has no character {.field class} column for its failures"
+      ))
+
+    }
+
+    ## fit() ranks the configs by their cross-validated metrics
+    missing_cv <- setdiff(paste0("cv_", metric_cols), names(res))
+
+    if (length(missing_cv) > 0) {
+
+      errors <- c(errors, cli::format_inline(
+        "{.field results} has no cross-validated {cli::qty(length(missing_cv))}column{?s} {.field {missing_cv}}, which {.fn fit} ranks by"
+      ))
+
+    }
+
   }
 
   ## results cover the config table exactly -------------------------------------
@@ -1824,13 +2016,15 @@ validate_horizons_eval <- function(x) {
 
   ## best_config (I5: names a real config) --------------------------------------
 
+  ## NA when no configuration has the ranking metric: the evaluation is
+  ## returned, and fit() has nothing to choose from.
   bc <- ev$best_config
 
-  if (!is.character(bc) || length(bc) != 1 || is.na(bc)) {
+  if (!is.character(bc) || length(bc) != 1) {
 
-    errors <- c(errors, cli::format_inline("{.field best_config} must be a single {.cls character} config_id"))
+    errors <- c(errors, cli::format_inline("{.field best_config} must be a single {.cls character} config_id, or {.val {NA}}"))
 
-  } else {
+  } else if (!is.na(bc)) {
 
     if (res_valid && !bc %in% res$config_id) {
 
@@ -1848,6 +2042,10 @@ validate_horizons_eval <- function(x) {
     }
 
   }
+
+  ## control ----------------------------------------------------------------------
+
+  errors <- c(errors, control_finding(ev$control, "evaluation"))
 
   ## rank_metric ----------------------------------------------------------------
 
@@ -1903,20 +2101,7 @@ validate_horizons_eval <- function(x) {
 
   if (length(errors) > 0) {
 
-    cat(cli::col_red(cli::style_bold("! The horizons_eval object failed validation:\n")))
-
-    for (i in seq_along(errors)) {
-
-      branch <- if (i < length(errors)) "\u251C\u2500" else "\u2514\u2500"
-      cat(cli::col_red(paste0("   ", branch, " ", errors[i], "\n")))
-
-    }
-
-    cat("\n")
-    rlang::abort(
-      paste(c("Validation failed:", errors), collapse = "\n"),
-      class = "horizons_validation_error"
-    )
+    abort_validation(errors, "horizons_eval", EVAL_REMEDY, call = call)
 
   }
 
@@ -1943,10 +2128,10 @@ validate_horizons_eval <- function(x) {
 #' delegates to [validate_horizons_eval()], which runs the base validator in
 #' turn; the evaluation and data slots must still hold.
 #'
-#' Gate checks (abort immediately, with class `horizons_validation_error`):
+#' Gate checks (abort immediately, with class `horizons_error_validation`):
 #' the object inherits `horizons_fit` and `$models` is a list.
 #'
-#' Accumulated checks (reported together, tree-style):
+#' Accumulated checks (reported together, in one condition):
 #'
 #' 1. **Slot completeness**: every key [new_horizons_data()] declares for
 #'    the `models` slot is present (see [contract_keys()]), 14 in all:
@@ -1973,15 +2158,16 @@ validate_horizons_eval <- function(x) {
 #' 10. **runtime_secs**: single non-negative numeric. **timestamp**: POSIXct.
 #'
 #' @param x `horizons_fit`. The object to validate.
+#' @param call The frame the error reports: the verb that validated.
 #'
 #' @return `horizons_fit`. The input object, unchanged, if validation passes.
-#'   Aborts with class `horizons_validation_error` on failure.
+#'   Aborts with class `horizons_error_validation` on failure.
 #'
 #' @seealso [validate_horizons_eval()] for the parent contract,
 #'   [validate_horizons_ensemble()] for the ensemble contract.
 #'
 #' @noRd
-validate_horizons_fit <- function(x) {
+validate_horizons_fit <- function(x, call = rlang::caller_env()) {
 
   ## ---------------------------------------------------------------------------
   ## Gate checks
@@ -1989,22 +2175,22 @@ validate_horizons_fit <- function(x) {
 
   if (!inherits(x, "horizons_fit")) {
 
-    cli::cli_abort("{.arg x} must be a {.cls horizons_fit} object",
-                   class = "horizons_validation_error")
+    abort_validation(cli::format_inline("{.arg x} is not a {.cls horizons_fit} object"),
+                     "horizons_fit", FIT_REMEDY, call = call)
 
   }
 
   if (!is.list(x$models)) {
 
-    cli::cli_abort("Object has no {.field models} slot to validate",
-                   class = "horizons_validation_error")
+    abort_validation(cli::format_inline("Object has no {.field models} slot to validate"),
+                     "horizons_fit", FIT_REMEDY, call = call)
 
   }
 
   ## The evaluation contract is inherited, and through it the base contract —
   ## enforce them first. They abort with the same condition class on failure,
   ## so a bad parent slot surfaces here.
-  x <- validate_horizons_eval(x)
+  x <- validate_horizons_eval(x, call = call)
 
   ## ---------------------------------------------------------------------------
   ## Collect errors for remaining checks
@@ -2058,12 +2244,16 @@ validate_horizons_fit <- function(x) {
 
   }
 
+  ## control ----------------------------------------------------------------------
+
+  errors <- c(errors, control_finding(md$control, "models"))
+
   ## rank_metric ----------------------------------------------------------------
 
   if (!is.character(md$rank_metric) || length(md$rank_metric) != 1 ||
-      is.na(md$rank_metric)) {
+      !md$rank_metric %in% VALID_RANK_METRICS) {
 
-    errors <- c(errors, cli::format_inline("{.field rank_metric} must be a single {.cls character}"))
+    errors <- c(errors, cli::format_inline("{.field rank_metric} must be one of {.val {VALID_RANK_METRICS}}"))
 
   }
 
@@ -2085,10 +2275,6 @@ validate_horizons_fit <- function(x) {
   ## positive-finite rule the guardrail shipped with; a signed outcome's bound
   ## may be negative. A missing key is reported by the completeness check.
 
-  ## The range is read only when there is a usable bound to check against
-  ## it, and a malformed one is collected like any other finding rather than
-  ## aborting past the checks below.
-
   rb <- md$response_bound
 
   if ("response_bound" %in% names(md)) {
@@ -2101,16 +2287,10 @@ validate_horizons_fit <- function(x) {
 
     } else {
 
-      rng <- tryCatch(outcome_range_setting(x),
-                      horizons_validation_error = function(e) NULL)
+      ### The base validator, run first, has refused an unusable range.
+      rng <- outcome_range_setting(x)
 
-      if (is.null(rng)) {
-
-        errors <- c(errors, cli::format_inline(
-          "{.field config$outcome_range} is not a usable range (two numbers, lower below upper), so {.field response_bound} cannot be checked against it"
-        ))
-
-      } else if (rb <= rng[1] || rb > rng[2]) {
+      if (rb <= rng[1] || rb > rng[2]) {
 
         errors <- c(errors, cli::format_inline(
           "{.field response_bound} must be a single finite numeric above the lower bound of {.field outcome_range} ({rng[1]}) and no higher than its upper bound ({rng[2]})"
@@ -2143,6 +2323,11 @@ validate_horizons_fit <- function(x) {
 
     errors <- c(errors, cli::format_inline("{.field split} must be an {.cls rsplit} object"))
 
+  } else if (anyDuplicated(md$split$data$sample_id) > 0) {
+
+    ## The ensemble keys the members' test predictions by sample_id
+    errors <- c(errors, cli::format_inline("{.field split}'s rows do not carry unique {.field sample_id}s"))
+
   }
 
   ## results --------------------------------------------------------------------
@@ -2157,6 +2342,10 @@ validate_horizons_fit <- function(x) {
       !all(c("config_id", "status", metric_cols) %in% names(fit_res))) {
 
     errors <- c(errors, cli::format_inline("{.field results} must be a data frame with {.field config_id}, {.field status}, and the six metric columns ({paste(metric_cols, collapse = ', ')})"))
+
+  } else if (!"class" %in% names(fit_res)) {
+
+    errors <- c(errors, cli::format_inline("{.field results} has no {.field class} column for its members' failures"))
 
   }
 
@@ -2177,7 +2366,8 @@ validate_horizons_fit <- function(x) {
                    best_params     = "list",
                    warm_start      = "logical",
                    start_grid_size = "integer",
-                   error_message   = "character")
+                   error_message   = "character",
+                   class           = "character")
 
     present <- intersect(names(col_types), names(fit_res))
     actual  <- vapply(present, function(col) typeof(fit_res[[col]]), character(1))
@@ -2239,6 +2429,25 @@ validate_horizons_fit <- function(x) {
 
     }
 
+    ## predict() computes each config's interval width at the bundle's
+    ## default level
+    if (is.list(uq)) {
+
+      bad_level <- names(uq)[!vapply(uq, function(b) {
+        level <- if (is.list(b)) b$level_default
+        is.numeric(level) && length(level) == 1 && !is.na(level) && level > 0 && level < 1
+      }, logical(1))]
+
+      if (length(bad_level) > 0) {
+
+        errors <- c(errors, cli::format_inline(
+          "{.field uq} {cli::qty(length(bad_level))}bundle{?s} {.val {bad_level}} {?has/have} no {.field level_default} in (0, 1)"
+        ))
+
+      }
+
+    }
+
   }
 
   ## AD keys are a subset of workflow keys --------------------------------------
@@ -2270,6 +2479,22 @@ validate_horizons_fit <- function(x) {
 
     }
 
+    ## predict() measures distances with the centroid and covariance and bins
+    ## them by the thresholds, so each bundle's shape is checked here
+    if (is.list(ad)) {
+
+      bad_shape <- names(ad)[!vapply(ad, ad_bundle_ok, logical(1))]
+
+      if (length(bad_shape) > 0) {
+
+        errors <- c(errors, cli::format_inline(
+          "{.field ad} {cli::qty(length(bad_shape))}bundle{?s} {.val {bad_shape}} {?does/do} not carry a numeric {.field centroid}, a square {.field cov_matrix} of its length, and four non-decreasing {.field ad_thresholds}"
+        ))
+
+      }
+
+    }
+
   }
 
   ## runtime / timestamp --------------------------------------------------------
@@ -2293,20 +2518,7 @@ validate_horizons_fit <- function(x) {
 
   if (length(errors) > 0) {
 
-    cat(cli::col_red(cli::style_bold("! The horizons_fit object failed validation:\n")))
-
-    for (i in seq_along(errors)) {
-
-      branch <- if (i < length(errors)) "\u251C\u2500" else "\u2514\u2500"
-      cat(cli::col_red(paste0("   ", branch, " ", errors[i], "\n")))
-
-    }
-
-    cat("\n")
-    rlang::abort(
-      paste(c("Validation failed:", errors), collapse = "\n"),
-      class = "horizons_validation_error"
-    )
+    abort_validation(errors, "horizons_fit", FIT_REMEDY, call = call)
 
   }
 
@@ -2507,8 +2719,7 @@ selected_member <- function(x) {
 #'   range, and the outcome and responses if present
 #' - **Objects with provenance**: Shows source path and spectra type
 #'
-#' The output uses tree-style formatting consistent with error messages
-#' throughout the package.
+#' The output uses the tree-style formatting of the verbs' progress output.
 #'
 #' @param x `horizons_data`. The object to print.
 #' @param ... Additional arguments (ignored, for S3 compatibility).
@@ -2698,28 +2909,15 @@ print.horizons_data <- function(x, ...) {
 
       cv_col <- paste0("cv_", metric)
 
-      ## Ranking is on the CV metric (#50); show it first when present,
-      ## with the held-out test value beside it. Objects evaluated before
-      ## the cv_* columns existed print the test value alone.
-      if (cv_col %in% names(best_row) && !is.na(best_row[[cv_col]])) {
-
-        cat(paste0(
-          "   \u2514\u2500 Best: ", best_id,
-          " \u2014 CV ", toupper(metric), " = ",
-          round(best_row[[cv_col]], 3),
-          " (test ", toupper(metric), " = ",
-          round(best_row[[metric]], 3), ")\n"
-        ))
-
-      } else {
-
-        cat(paste0(
-          "   \u2514\u2500 Best: ", best_id,
-          " \u2014 ", toupper(metric), " = ",
-          round(best_row[[metric]], 3), "\n"
-        ))
-
-      }
+      ## Ranking is on the CV metric (#50), which the eval validator
+      ## requires; the held-out test value goes beside it.
+      cat(paste0(
+        "   \u2514\u2500 Best: ", best_id,
+        " \u2014 CV ", toupper(metric), " = ",
+        round(best_row[[cv_col]], 3),
+        " (test ", toupper(metric), " = ",
+        round(best_row[[metric]], 3), ")\n"
+      ))
 
     }
 
@@ -3108,11 +3306,12 @@ summary.horizons_data <- function(object, ...) {
     metric <- x$evaluation$rank_metric %||% "rmse"
     cat(paste0("   \u251C\u2500 Rank metric: ", toupper(metric), "\n"))
 
-    ## Best config with metrics
-    if (n_success > 0 && !is.null(x$evaluation$best_config)) {
+    ## Best config with metrics. NA when no configuration has the ranking
+    ## metric, which the eval validator allows.
+    if (n_success > 0 && !is.null(x$evaluation$best_config) && !is.na(x$evaluation$best_config)) {
 
       best_id  <- x$evaluation$best_config
-      best_row <- eval_res[eval_res$config_id == best_id, ]
+      best_row <- eval_res[eval_res$config_id %in% best_id, ]
 
       if (nrow(best_row) > 0) {
 

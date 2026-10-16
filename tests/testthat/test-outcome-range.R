@@ -54,10 +54,13 @@ to_d13c <- function(soc) -22 + 3 * (soc - 2)
 flat_message <- function(e) gsub("\\s+", " ", conditionMessage(e))
 
 ## summary() prints the table's size in memory, which changes between R
-## versions. The snapshot keeps the line and replaces its value.
+## versions, and when and by which version the object was made. The snapshot
+## keeps those lines and replaces their values.
 scrub_memory <- function(lines) {
 
-  sub("(Memory:) [0-9.]+ (bytes|Kb|Mb|Gb)$", "\\1 <size>", lines)
+  lines <- sub("(Memory:) [0-9.]+ (bytes|Kb|Mb|Gb)$", "\\1 <size>", lines)
+  lines <- sub("(Created:) .*$", "\\1 <time>", lines)
+  sub("(Horizons version:) .*$", "\\1 <version>", lines)
 
 }
 
@@ -190,12 +193,8 @@ describe("outcome_range_setting()", {
 
   })
 
-  it("refuses a stored range configure() could not have written", {
-
-    x <- list(config = list(outcome_range = c(5, 1)))
-    expect_error(outcome_range_setting(x), class = "horizons_validation_error")
-
-  })
+  ## A stored range configure() could not have written is refused at every
+  ## verb's door (config_findings(), test-class-core.R), so this only reads.
 
 })
 
@@ -276,12 +275,8 @@ describe("back_transform_predictions() - outcome_range", {
 
   })
 
-  it("refuses a malformed range", {
-
-    expect_error(back_transform_predictions(1, "none", outcome_range = c(1, 0)),
-                 "outcome_range")
-
-  })
+  ## The range comes from outcome_range_setting(), which reads a value the
+  ## door validators have checked.
 
 })
 
@@ -611,10 +606,10 @@ describe("a d13C-like outcome with outcome_range = c(-Inf, Inf)", {
 
 describe("a negative outcome under the default range", {
 
-  ## make_eval_object() builds its object by hand, with no
-  ## config$outcome_range, like an object configured before the range
-  ## existed. configure() would have refused the outcome; evaluate() and a
-  ## cold-start fit() must refuse it before they draw or tune anything.
+  ## make_eval_object() sets no config$outcome_range, like an object
+  ## configured before the range existed. configure() would have refused the
+  ## outcome; evaluate() and a cold-start fit() must refuse it before they
+  ## draw or tune anything.
   obj <- make_eval_object(n = 60, n_configs = 1)
   obj$data$analysis$SOC <- to_d13c(obj$data$analysis$SOC)
 
@@ -721,7 +716,7 @@ describe("a non-negative outcome under the default range", {
     neg <- fitted
     neg$models$response_bound <- -5
     expect_error(suppressMessages(validate_horizons_fit(neg)),
-                 class = "horizons_validation_error")
+                 class = "horizons_error_validation")
 
     ## ...which a signed range accepts
     neg$config$outcome_range <- c(-Inf, Inf)
@@ -773,7 +768,7 @@ describe("a finite upper bound", {
     over <- cold
     over$models$response_bound <- top + 1
     expect_error(suppressMessages(validate_horizons_fit(over)),
-                 class = "horizons_validation_error")
+                 class = "horizons_error_validation")
 
   })
 
@@ -956,26 +951,7 @@ describe("validate_horizons_fit() - a malformed outcome range", {
   ## A fitted object from the non-negative fixture, cold-started and cheap:
   ## nonneg_fit(), the same fit the default-range block reads.
 
-  it("is not read when there is no usable bound, which is the finding instead", {
-
-    fitted <- nonneg_fit()$fitted
-
-    ## fit() always writes a bound (#130), so a NULL one is refused on its
-    ## own, and the range is not checked against it
-    no_bound <- fitted
-    no_bound$models["response_bound"] <- list(NULL)
-    no_bound$config$outcome_range <- c(5, 1)
-
-    err <- expect_error(suppressMessages(utils::capture.output(validate_horizons_fit(no_bound))),
-                        class = "horizons_validation_error")
-
-    expect_match(flat_message(err), "response_bound", fixed = TRUE)
-    expect_match(flat_message(err), "single finite numeric", fixed = TRUE)
-    expect_false(grepl("outcome_range", flat_message(err), fixed = TRUE))
-
-  })
-
-  it("is collected with the other findings when there is a bound", {
+  it("is refused by the base validator, before the fit's own findings are read", {
 
     fitted <- nonneg_fit()$fitted
 
@@ -983,11 +959,10 @@ describe("validate_horizons_fit() - a malformed outcome range", {
     broken$config$outcome_range <- c(5, 1)
     broken$models$n_models      <- 99L
 
-    err <- expect_error(suppressMessages(utils::capture.output(validate_horizons_fit(broken))),
-                        class = "horizons_validation_error")
+    err <- expect_error(validate_horizons_fit(broken), class = "horizons_error_validation")
 
-    expect_match(flat_message(err), "config$outcome_range", fixed = TRUE)
-    expect_match(flat_message(err), "n_models", fixed = TRUE)
+    expect_true(any(grepl("config$outcome_range is not a usable range", err$findings, fixed = TRUE)))
+    expect_false(any(grepl("n_models", err$findings, fixed = TRUE)))
 
   })
 

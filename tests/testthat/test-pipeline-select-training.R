@@ -158,6 +158,17 @@ test_that("select_training(space = 'pls') needs exactly one property and an inte
 })
 
 
+test_that("select_training() returns the pool's log", {
+
+  fx <- select_fixture(n_pool = 60)
+  fx$pool$log <- tibble::add_row(new_log(), verb = "spectra", type = "note", topic = NA_character_,
+                                 message = "a note", ids = list("P001"), n = 1L)
+
+  expect_identical(quiet_select(fx, k = 5, properties = "clay")$log, fx$pool$log)
+
+})
+
+
 test_that("select_training() refuses a pool that carries state from later verbs", {
 
   fx <- select_fixture(n_pool = 60)
@@ -1586,7 +1597,7 @@ test_that("select_training() refuses to return a record of the wrong shape", {
 
   utils::capture.output(
     expect_error(quiet_select(fx, k = 5), "selection\\$groups",
-                 class = "horizons_validation_error")
+                 class = "horizons_error_validation")
   )
 
 })

@@ -57,11 +57,10 @@ ID_ALIASES <- c(
 #' at this stage — `S100-1.0` and `S100-1.1` both become `S100-1` once the
 #' extension is stripped — and, for CSV or tibble input, a blank or missing
 #' cell in the detected id column leaves a `sample_id` of `NA`. Both are
-#' legitimate before replicate scans are collapsed, so `spectra()` warns
-#' rather than aborts on a duplicate or `NA` `sample_id`; use [average()] to
-#' collapse replicates before anything that requires unique ids
-#' (`add_response()`, `configure()`, and onward, which refuse the object
-#' instead of warning).
+#' legitimate before replicate scans are collapsed, so `spectra()` passes a
+#' duplicate or `NA` `sample_id` silently; use [average()] to collapse
+#' replicates before anything that requires unique ids (`average()` itself,
+#' `add_response()`, `configure()`, and onward, which refuse the object).
 #'
 #' @param source Path to directory, file(s), or a tibble/data.frame.
 #' @param type Character. One of `"opus"`, `"csv"`, or `NULL` for auto-detect.
@@ -169,8 +168,19 @@ spectra <- function(source,
   ##
   ## Raw stage: replicate scans haven't been collapsed by average() yet, so a
   ## duplicate sample_id here (Bruker's own naming does this: "S100-1.0" and
-  ## "S100-1.1" both become "S100-1" once the extension is stripped) warns
-  ## rather than aborts.
+  ## "S100-1.1" both become "S100-1" once the extension is stripped) passes.
+
+  ## `.flag` is the steps' record of a row they could not use, and the
+  ## validators let non-finite predictors through in flagged rows, so a source
+  ## column of that name is refused rather than read as one.
+  if (".flag" %in% names(result$data$analysis)) {
+
+    abort_horizons(c(
+      "The source has a column named {.field .flag}, which horizons reserves for the rows its steps flag.",
+      "i" = "Rename the column before reading it with {.fn spectra}."
+    ), kind = "input")
+
+  }
 
   sorted_result <- sort_axis_decreasing(result)
   result        <- validate_horizons_data(sorted_result$x, stage = "raw")

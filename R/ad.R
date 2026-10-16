@@ -208,25 +208,9 @@ calculate_ad_distance <- function(new_matrix, ad_metadata) {
 
   }
 
-  if (!is.list(ad_metadata) ||
-      !all(c("centroid", "cov_matrix") %in% names(ad_metadata))) {
-
-    cli::cli_abort("{.arg ad_metadata} must be a list with {.field centroid} and {.field cov_matrix}")
-
-  }
-
-  ## Feature alignment ----------------------------------------------------------
-
-  n_features_new   <- ncol(new_matrix)
-  n_features_train <- length(ad_metadata$centroid)
-
-  if (n_features_new != n_features_train) {
-
-    cli::cli_abort(
-      "Number of features must match: new has {n_features_new}, training has {n_features_train}"
-    )
-
-  }
+  ### Both callers build ad_metadata with both fields, and predict()'s door
+  ### validator checks each saved bundle's shape; a feature count that does
+  ### not match fails loudly in mahalanobis().
 
   new_names   <- colnames(new_matrix)
   train_names <- names(ad_metadata$centroid)
@@ -288,11 +272,8 @@ assign_ad_bin <- function(distances, thresholds) {
 
   }
 
-  if (!is.numeric(thresholds) || length(thresholds) != 4) {
-
-    cli::cli_abort("{.arg thresholds} must be a numeric vector of length 4")
-
-  }
+  ### The thresholds come from a saved AD bundle, whose shape predict()'s door
+  ### validator checks.
 
   cut(
     distances,

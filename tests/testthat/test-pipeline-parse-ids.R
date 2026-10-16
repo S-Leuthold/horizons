@@ -34,24 +34,8 @@ make_test_hd <- function(filenames, spectra_type = "opus") {
     role     = c("id", "meta", "predictor", "predictor")
   )
 
-  obj <- list(
-    data = list(
-      analysis     = analysis,
-      role_map     = role_map,
-      n_rows       = n,
-      n_predictors = 2
-    ),
-    provenance = list(
-      spectra_source   = "test",
-      spectra_type     = spectra_type,
-      created          = Sys.time(),
-      horizons_version = utils::packageVersion("horizons"),
-      id_pattern       = NULL
-    )
-  )
-
-  class(obj) <- c("horizons_data", "list")
-  obj
+  new_horizons_data(analysis = analysis, role_map = role_map,
+                    spectra_source = "test", spectra_type = spectra_type)
 
 }
 
@@ -183,27 +167,20 @@ test_that("parse_ids() too_few='na' sets sample_id to NA, with or without a samp
   hd <- make_test_hd(c("PROJ_S001", "nomatch"))
 
   ## Act -------------------------------------------------------------------
-  ## Two warnings fire here: parse_ids()'s own "did not match" (unmatched
-  ## filename) and, since the resulting sample_id is NA, the raw-stage
-  ## validator's NA warning (#24 rework) — both are expected.
+  ## parse_ids() warns that a filename did not match. The NA id it leaves
+  ## passes the raw-stage validator silently: average() and the full stage
+  ## refuse it.
 
   expect_warning(
-    expect_warning(
-      result <- parse_ids(hd, format = "{project}_{sampleid}",
-                          too_few = "na"),
-      "did not match"
-    ),
-    class = "horizons_validation_warning"
+    result <- parse_ids(hd, format = "{project}_{sampleid}", too_few = "na"),
+    "did not match"
   )
 
   ## Without a sampleid token the matched rows keep their ids and the
   ## unmatched one still loses its own
   expect_warning(
-    expect_warning(
-      no_token <- parse_ids(hd, format = "{project}_{plate}", too_few = "na"),
-      "did not match"
-    ),
-    class = "horizons_validation_warning"
+    no_token <- parse_ids(hd, format = "{project}_{plate}", too_few = "na"),
+    "did not match"
   )
 
   ## Assert ----------------------------------------------------------------
@@ -500,15 +477,11 @@ test_that("parse_ids() errors when filename column missing", {
 
   ## Create broken horizons_data without filename column --------------------
 
-  obj <- list(
-    data = list(
-      analysis = tibble::tibble(sample_id = "A", wn_4000 = 0.1),
-      role_map = tibble::tibble(variable = c("sample_id", "wn_4000"),
-                                role = c("id", "predictor"))
-    ),
-    provenance = list()
+  obj <- new_horizons_data(
+    analysis = tibble::tibble(sample_id = "A", wn_4000 = 0.1),
+    role_map = tibble::tibble(variable = c("sample_id", "wn_4000"),
+                              role = c("id", "predictor"))
   )
-  class(obj) <- c("horizons_data", "list")
 
   ## Act & Assert ----------------------------------------------------------
 
@@ -519,22 +492,21 @@ test_that("parse_ids() errors when filename column missing", {
 
 })
 
-test_that("parse_ids() warns (not aborts) when the parsed ids collapse to duplicates (#24)", {
+test_that("parse_ids() passes ids that collapse to duplicates silently, rather than aborting (#24)", {
 
   ## Arrange — two distinct filenames whose sampleid token is identical once
   ## the trailing replicate marker is discarded. That is exactly what
   ## replicate scans look like before average() collapses them, so
-  ## parse_ids() (raw stage) warns rather than aborts — a hard error here
+  ## parse_ids() (raw stage) neither aborts nor warns: a hard error here
   ## would break the documented
-  ## spectra() |> standardize() |> parse_ids() |> average() chain (#24 rework).
+  ## spectra() |> standardize() |> parse_ids() |> average() chain (#24), and
+  ## data legal at one stage is not warned about for what a later verb
+  ## refuses.
   hd <- make_test_hd(c("A_rep1", "A_rep2"))
 
   ## Act & Assert ------------------------------------------------------------
 
-  expect_warning(
-    result <- parse_ids(hd, format = "{sampleid}_{junk}"),
-    class = "horizons_validation_warning"
-  )
+  expect_no_warning(result <- parse_ids(hd, format = "{sampleid}_{junk}"))
 
   expect_identical(result$data$analysis$sample_id, c("A", "A"))
 
@@ -561,9 +533,8 @@ test_that("the regression this fixes: parse_ids() |> average() survives replicat
 
   ## Act -------------------------------------------------------------------
 
-  expect_warning(
-    hd_parsed <- parse_ids(hd, patterns = c("SITE-F_", sampleid = "S\\d+-\\d+", "_.*")),
-    class = "horizons_validation_warning"
+  expect_no_warning(
+    hd_parsed <- parse_ids(hd, patterns = c("SITE-F_", sampleid = "S\\d+-\\d+", "_.*"))
   )
 
   expect_identical(hd_parsed$data$analysis$sample_id,

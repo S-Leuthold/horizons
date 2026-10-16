@@ -703,6 +703,10 @@ standardize <- function(x,
 
   if (!is.null(x$provenance$standardization) && !force) {
 
+    ## Returned as it arrived, so validated as it arrived (#234). A
+    ## standardized object is already on a decreasing axis.
+    x <- validate_horizons_data(x, stage = "raw")
+
     cli::cli_warn(c(
       "Spectra already standardized",
       "i" = "Returning unchanged. Use {.arg force = TRUE} to re-standardize."
@@ -744,13 +748,12 @@ standardize <- function(x,
   ## Nothing but the column order changes here: no values, no names. The
   ## object is validated (stage = "raw") before it is marked, so a
   ## structurally invalid one stops here rather than travelling on as
-  ## standardized — though at this stage a duplicate or NA sample_id is not
-  ## even warned about here (warn_ids = FALSE: spectra() or parse_ids()
-  ## already did), and predictor NA is not checked at all (#24).
+  ## standardized — though at this stage a duplicate or NA sample_id passes,
+  ## and predictor NA is not checked at all (#24).
 
   if (is.null(resample) && is.null(trim) && !remove_water && !baseline) {
 
-    x <- validate_horizons_data(x, stage = "raw", warn_ids = FALSE)
+    x <- validate_horizons_data(x, stage = "raw")
 
     ## Still mark as standardized so downstream steps know it was evaluated -----
 
@@ -811,10 +814,9 @@ standardize <- function(x,
   ## non-predictor columns; a column present in analysis but missing from
   ## role_map is referenced by neither set and would be silently dropped
   ## rather than carried through or refused. Catch it here, before that
-  ## happens (#24). warn_ids = FALSE: a duplicate or NA sample_id here was
-  ## already warned about at spectra() or parse_ids().
+  ## happens (#24).
 
-  x <- validate_horizons_data(x, stage = "raw", warn_ids = FALSE)
+  x <- validate_horizons_data(x, stage = "raw")
 
   ## ---------------------------------------------------------------------------
   ## Step 2: Extract spectral matrix
@@ -1150,10 +1152,9 @@ standardize <- function(x,
   ## a duplicate sample_id is still legitimate here. The Inf/NA-after-trim
   ## check above (Step 6b) already aborts on anything non-finite, so
   ## full-mode predictor-NA checking would never fire differently at this
-  ## point. warn_ids = FALSE: spectra() or parse_ids() already warned about
-  ## a duplicate or NA sample_id when it first appeared.
+  ## point.
 
-  x <- validate_horizons_data(x, stage = "raw", warn_ids = FALSE)
+  x <- validate_horizons_data(x, stage = "raw")
 
   ## ---------------------------------------------------------------------------
   ## Step 11: Report

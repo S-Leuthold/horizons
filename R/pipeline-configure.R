@@ -281,6 +281,11 @@ configure <- function(x,
 
   }
 
+  ## 1.1b The object as it arrives (#234) ------------------------------------------
+  ## Its configuration is not checked: rewriting it is the remedy for a bad one.
+
+  x <- validate_horizons_data(x, config = FALSE)
+
   ## 1.2 Response data must exist -----------------------------------------------
 
   responses <- x$data$role_map$variable[x$data$role_map$role == "response"]
@@ -816,8 +821,8 @@ is_valid_outcome_range <- function(r) {
 #' deserialized now, carries no record and gets `DEFAULT_OUTCOME_RANGE`, the
 #' zero floor it was scored and served under, so it evaluates, fits and
 #' predicts exactly as before. A stored range that breaks
-#' [is_valid_outcome_range()] was not written by `configure()`, and aborts
-#' rather than clamping by it.
+#' [is_valid_outcome_range()] was not written by `configure()`; every verb's
+#' door validator refuses it, so this never reads one.
 #'
 #' @param x A `horizons_data` object, or any subclass.
 #'
@@ -826,21 +831,9 @@ is_valid_outcome_range <- function(r) {
 #' @noRd
 outcome_range_setting <- function(x) {
 
-  recorded <- x$config$outcome_range
-
-  if (is.null(recorded)) return(DEFAULT_OUTCOME_RANGE)
-
-  if (!is_valid_outcome_range(recorded)) {
-
-    cli::cli_abort(c(
-      "The object's {.field config$outcome_range} is not a usable range.",
-      "x" = "It is {.val {recorded}}; a range is two numbers, lower below upper.",
-      "i" = "Re-run {.fn configure} to record one."
-    ), class = "horizons_validation_error")
-
-  }
-
-  recorded
+  ### Every verb's door validator refuses an unusable recorded range (#234),
+  ### so this only reads it.
+  x$config$outcome_range %||% DEFAULT_OUTCOME_RANGE
 
 }
 
@@ -916,6 +909,15 @@ check_outcome_range <- function(x, verb, call = rlang::caller_env()) {
 
   ## No single outcome to check: the verbs' own gates say so.
   if (length(outcome_col) != 1 || !outcome_col %in% names(x$data$analysis)) {
+
+    return(invisible(NULL))
+
+  }
+
+  ## An unusable stored range is the door validator's finding. ensemble()
+  ## runs this check before its validator, so it is left to the validator here
+  ## rather than read.
+  if (!is_valid_outcome_range(x$config$outcome_range %||% DEFAULT_OUTCOME_RANGE)) {
 
     return(invisible(NULL))
 

@@ -96,23 +96,7 @@ describe("define_model_spec()", {
 
   })
 
-  ## -------------------------------------------------------------------------
-  ## Error handling
-  ## -------------------------------------------------------------------------
-
-  it("aborts on unknown model name", {
-
-    expect_error(
-      define_model_spec("deep_forest"),
-      "Unknown model"
-    )
-
-  })
-
-  it("aborts on NULL model name", {
-
-    expect_error(define_model_spec(NULL))
-
-  })
+  ## An unknown model is refused at every verb's door (config_findings(),
+  ## test-class-core.R), before a spec is built.
 
 })

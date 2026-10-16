@@ -21,11 +21,8 @@
 #' @keywords internal
 compute_c_alpha <- function(scores, level) {
 
-  if (!is.numeric(level) || length(level) != 1 || level <= 0 || level >= 1) {
-
-    rlang::abort("level must be a single numeric value in (0, 1).")
-
-  }
+  ### fit_uq() passes DEFAULT_UQ_LEVEL and predict_intervals() a stored
+  ### level_default, which predict()'s door validator checks is in (0, 1).
 
   scores <- scores[is.finite(scores)]
   n      <- length(scores)

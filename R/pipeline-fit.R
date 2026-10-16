@@ -213,6 +213,13 @@ fit <- function(x,
 
   }
 
+  ## The object as it arrives (#234): on the evaluate() path its evaluation
+  ## record, and through it the base contract; on a cold start the base
+  ## contract. A record from an earlier version, or one edited by hand, is
+  ## refused here, before the checks below read it and before anything is
+  ## re-tuned.
+  x <- if (cold_start) validate_horizons_data(x) else validate_horizons_eval(x)
+
   ## The outcome has to lie inside the range every prediction is clamped to,
   ## checked on either path before anything is drawn or fitted (#76).
   ## configure() and evaluate() check it too, but an object configured before
@@ -232,27 +239,6 @@ fit <- function(x,
   ## ranks backwards once the mean outcome can be negative.
   check_rank_metric_range(metric %||% x$evaluation$rank_metric, outcome_range,
                           verb = "fit")
-
-  ## On the evaluate() path the evaluation record is reused as it is, and the
-  ## fit validator at return requires every key evaluate() writes. Checked
-  ## here, so a record from an earlier version is refused before anything is
-  ## re-tuned rather than after every member has been fitted, and before the
-  ## checks below read it.
-  if (!cold_start) {
-
-    missing_keys <- setdiff(contract_keys("evaluation"), names(x$evaluation))
-
-    if (length(missing_keys) > 0) {
-
-      cli::cli_abort(c(
-        "{.fn fit} needs the evaluation record {.fn evaluate} writes.",
-        "x" = "{.field evaluation} is missing {.field {missing_keys}}.",
-        "i" = "The object was evaluated by an earlier version of horizons, or built by hand. Re-run {.fn evaluate} on it."
-      ), class = "horizons_validation_error")
-
-    }
-
-  }
 
   ## evaluate() scored and ranked the configurations under the range it
   ## stamped on each row; members chosen and warm-started under another range
@@ -277,24 +263,13 @@ fit <- function(x,
 
   }
 
-  ## validate_horizons_fit() (at return) runs the base validator too, but
-  ## only after every model is fitted. Checking here refuses a malformed
-  ## table first: a column added after configure() without a role_map entry
-  ## would otherwise reach build_recipe()'s `outcome ~ .` as an unregistered
-  ## predictor (#24). Full stage: an object this far into the pipeline is
-  ## expected to have unique, non-NA sample ids.
-
-  x <- validate_horizons_data(x)
+  ## The door validation above has refused a malformed table (a column added
+  ## after configure() without a role_map entry would otherwise reach
+  ## build_recipe()'s `outcome ~ .` as an unregistered predictor, #24), and,
+  ## on the evaluate() path, results with no rows; a cold start builds its
+  ## one row.
 
   eval_results <- x$evaluation$results
-
-  if (is.null(eval_results) || nrow(eval_results) == 0) {
-
-    rlang::abort(
-      "No evaluation results found. Run `evaluate()` before `fit()`."
-    )
-
-  }
 
   ## -----------------------------------------------------------------------
   ## Step 0b: Parallel backend
@@ -396,8 +371,9 @@ fit <- function(x,
   recipe_cfg   <- recipe_settings(x)
 
   ## The rows evaluate() modelled: the same rule on the same table (#67).
-  modelled  <- outcome_complete_rows(x$data$analysis, outcome_col)
+  modelled  <- modelling_rows(x$data$analysis, outcome_col)
   n_dropped <- modelled$n_dropped
+  n_flagged <- modelled$n_flagged
 
   ## -----------------------------------------------------------------------
   ## Step 1: Data partitioning — Split F is evaluate()'s split
@@ -420,17 +396,9 @@ fit <- function(x,
   ## object's columns as they are now. On a cold start the split was drawn in
   ## Step 0 from these rows, by the draw evaluate() uses, so it passes.
 
+  ### An rsplit: the eval validator at the door refuses anything else, and a
+  ### cold start draws one.
   split_F <- x$evaluation$split
-
-  if (!inherits(split_F, "rsplit")) {
-
-    cli::cli_abort(c(
-      "{.fn fit} scores on {.fn evaluate}'s split, and this object has none.",
-      "x" = "{.field evaluation$split} is {.obj_type_friendly {split_F}}, not an {.cls rsplit}.",
-      "i" = "Run {.fn evaluate} on the object before {.fn fit}."
-    ), class = "horizons_input_error")
-
-  }
 
   id_col <- id_column(role_map)
 
@@ -608,6 +576,14 @@ fit <- function(x,
       cat(paste0("\u2502  ",
                  cli::col_yellow("Dropped ", n_dropped,
                                   " rows with NA outcome"), "\n"))
+
+    }
+
+    if (n_flagged > 0) {
+
+      cat(paste0("\u2502  ",
+                 cli::col_yellow("Left out ", n_flagged,
+                                  " flagged rows (see .flag)"), "\n"))
 
     }
 
@@ -949,6 +925,7 @@ fit <- function(x,
       warm_start      = res$warm_start %||% NA,
       start_grid_size = res$start_grid_size %||% NA_integer_,
       error_message   = res$error_message %||% NA_character_,
+      class           = res$class %||% NA_character_,
       runtime_secs    = res$runtime_secs
     )
 
@@ -1057,6 +1034,7 @@ fit <- function(x,
     uq                = uq_list,
     ad                = ad_list,
     selection_present = selection_present,
+    control           = NULL,
     timestamp         = Sys.time(),
     runtime_secs      = total_runtime
   )
@@ -1218,7 +1196,7 @@ cold_start_evaluation <- function(x, metric, seed, call = rlang::caller_env()) {
   role_map    <- x$data$role_map
   outcome_col <- role_map$variable[role_map$role == "outcome"]
   cv_folds    <- x$config$tuning$cv_folds
-  modelled    <- outcome_complete_rows(x$data$analysis, outcome_col)
+  modelled    <- modelling_rows(x$data$analysis, outcome_col)
   n_modelled  <- nrow(modelled$data)
 
   if (n_modelled < cv_folds * 2) {
@@ -1240,7 +1218,7 @@ cold_start_evaluation <- function(x, metric, seed, call = rlang::caller_env()) {
   ## same helper, so a cold start leaves out the rows evaluate() would. The
   ## request is read first, as evaluate() reads it, so one that cannot apply
   ## is refused before anything is drawn.
-  trim_request <- response_trim_request(x, outcome_col, call = call)
+  trim_request <- response_trim_request(x)
 
   drawn <- draw_eval_split(modelled$data, outcome_col, seed)
 
@@ -1261,6 +1239,7 @@ cold_start_evaluation <- function(x, metric, seed, call = rlang::caller_env()) {
     cv_ccc  = NA_real_, cv_rpd   = NA_real_, cv_mae = NA_real_,
     best_params           = list(NULL),
     error_message         = NA_character_,
+    class                 = NA_character_,
     warnings              = list(NULL),
     runtime_secs          = NA_real_
   )
@@ -1276,6 +1255,8 @@ cold_start_evaluation <- function(x, metric, seed, call = rlang::caller_env()) {
       n_test        = nrow(rsample::testing(split)),
       response_trim = trimmed$record,
       recipe        = recipe_record,
+      ## No evaluate() ran, so there is no control it ran with
+      control       = NULL,
       runtime_secs  = 0,
       timestamp     = Sys.time()
     ),
@@ -1311,9 +1292,8 @@ cold_start_evaluation <- function(x, metric, seed, call = rlang::caller_env()) {
 check_evaluated_outcome_range <- function(x, outcome_range,
                                           call = rlang::caller_env()) {
 
+  ### The eval validator at fit()'s door requires results with rows.
   results <- x$evaluation$results
-
-  if (!is.data.frame(results) || nrow(results) == 0) return(invisible(NULL))
 
   stamps <- if ("settings" %in% names(results)) {
     lapply(results$settings, function(s) if (is.list(s)) normalize_eval_settings(s) else NULL)
@@ -1399,10 +1379,9 @@ check_trim_request <- function(x, call = rlang::caller_env()) {
 
   } else {
 
+    ### The door validator refuses a request for another outcome than the
+    ### one modelled, which is the one evaluate() trimmed.
     c(
-      if (!identical(requested$outcome, applied$outcome)) {
-        c("x" = "The request is for {.field {requested$outcome}}; {.fn evaluate} trimmed {.field {applied$outcome}}.")
-      },
       if (!identical(requested$method, applied$method)) {
         c("x" = "The request's method is {.val {requested$method}}; {.fn evaluate} used {.val {applied$method}}.")
       },
