@@ -190,21 +190,43 @@ describe("cv_panel_at()", {
 
   it("keeps a mean only when it covers every fold, given the folds drawn", {
 
-    ## rsq undefined on one fold (constant predictions there): tune averages
-    ## the other two, and the panel leaves it out rather than rank on them
-    cm <- tune::collect_metrics(tr)
-    cm <- cm[cm$.config == best$.config, ]
-    cm$n[cm$.metric == "rsq"] <- 2L
+    ## rsq undefined on one fold (constant predictions there): the mean over
+    ## the other two is left out rather than ranked on
+    per_fold <- tune::collect_metrics(tr, summarize = FALSE)
+    mine     <- per_fold$.config == best$.config
+    per_fold$.estimate[mine & per_fold$.metric == "rsq" & per_fold$id == "Fold1"] <- NA_real_
 
-    local_mocked_bindings(collect_metrics = function(...) cm, .package = "tune")
+    real_metrics <- tune::collect_metrics
+    local_mocked_bindings(collect_metrics = function(x, ..., summarize = TRUE) {
+      if (summarize) real_metrics(x, ...) else per_fold
+    }, .package = "tune")
 
     panel <- cv_panel_at(tr, best, n_folds = 3L)
 
     expect_true(is.na(panel$cv_rsq))
-    expect_equal(panel$cv_rmse, cm$mean[cm$.metric == "rmse"])
+    expect_equal(panel$cv_rmse, mean(per_fold$.estimate[mine & per_fold$.metric == "rmse"]))
 
-    ## Without the folds drawn, tune's mean is kept as it is
-    expect_equal(cv_panel_at(tr, best)$cv_rsq, cm$mean[cm$.metric == "rsq"])
+    ## Without the folds drawn, the mean over the folds with a value is kept
+    expect_equal(cv_panel_at(tr, best)$cv_rsq,
+                 mean(per_fold$.estimate[mine & per_fold$.metric == "rsq"], na.rm = TRUE))
+
+  })
+
+  it("counts each candidate on its own folds, as tune's summary does not when two share their values", {
+
+    ## tune pools the folds of candidates with equal hyperparameters, so a
+    ## Bayesian iteration that proposes a grid point again reports both on
+    ## twice the folds; the per-fold metrics count each on its own three
+    real_metrics <- tune::collect_metrics
+    local_mocked_bindings(collect_metrics = function(x, ..., summarize = TRUE) {
+      out <- real_metrics(x, ..., summarize = summarize)
+      if (summarize) out$n <- 2L * out$n
+      out
+    }, .package = "tune")
+
+    expect_setequal(complete_configs(tr, 3L), unique(tune::collect_metrics(tr)$.config))
+    expect_null(incomplete_note(tr, 3L))
+    expect_true(is.finite(cv_panel_at(tr, best, n_folds = 3L)$cv_rmse))
 
   })
 
@@ -435,10 +457,10 @@ describe("evaluate_single_config() - the prune gate under the fold rule (#101)",
     ## The best candidate is marked as missing a fold, and the threshold sits
     ## between it and the next: read alone, the next is below it
     real_metrics <- tune::collect_metrics
-    local_mocked_bindings(collect_metrics = function(x, ...) {
-      out <- real_metrics(x, ...)
-      if (!isTRUE(list(...)$summarize == FALSE) && ".config" %in% names(out)) {
-        out$n[out$.config == rpd$.config[1]] <- 2L
+    local_mocked_bindings(collect_metrics = function(x, ..., summarize = TRUE) {
+      out <- real_metrics(x, ..., summarize = summarize)
+      if (!summarize && ".config" %in% names(out)) {
+        out$.estimate[out$.config == rpd$.config[1] & out$id == "Fold1"] <- NA_real_
       }
       out
     }, .package = "tune")
@@ -452,6 +474,67 @@ describe("evaluate_single_config() - the prune gate under the fold rule (#101)",
     ## it out is containment
     expect_error(run(prune_threshold = 0, debug = TRUE), "a candidate was not scored on every fold",
                  fixed = TRUE, class = "horizons_error_run")
+
+  })
+
+})
+
+
+## =========================================================================
+## A Bayesian search that proposes a grid point again
+## =========================================================================
+## tune pools the folds of candidates with equal hyperparameters, so both the
+## grid point and the iteration that repeated it report twice the folds drawn.
+## Counted that way, both were left out as incomplete and the choice moved
+## (a plsr search on 150 rows: 2 of 8 seeds). This is one of those seeds.
+
+describe("evaluate_single_config() - a Bayesian search that repeats a grid point", {
+
+  it("chooses as tune does, counting each candidate on its own folds", {
+
+    skip_unless_slow_tier()
+
+    obj <- make_eval_object(n = 150, n_wn = 40, n_configs = 1)
+    set.seed(8)
+    X <- as.matrix(obj$data$analysis[, grep("^wn_", names(obj$data$analysis))])
+    obj$data$analysis$SOC <- 3 + as.numeric(X %*% stats::rnorm(40, sd = 0.3)) + stats::rnorm(150, sd = 0.5)
+    obj$data$analysis$SOC <- obj$data$analysis$SOC - min(obj$data$analysis$SOC) + 0.1
+
+    set.seed(42)
+    split <- rsample::initial_split(obj$data$analysis, prop = 0.8)
+    folds <- rsample::vfold_cv(rsample::training(split), v = 5)
+    train <- rsample::training(split)
+
+    config <- obj$config$configs[1, ]
+    config$model <- "plsr"
+
+    set.seed(42, kind = "Mersenne-Twister")
+    rec <- build_recipe(config, train, obj$data$role_map)
+    wf  <- workflows::workflow() |> workflows::add_recipe(rec) |>
+      workflows::add_model(define_model_spec("plsr"))
+    prepped <- recipes::prep(rec)
+    baked   <- recipes::bake(prepped, NULL)
+    preds   <- baked[, prepped_predictors(prepped, baked)]
+    ps <- cap_pls_components(dials::finalize(workflows::extract_parameter_set_dials(wf), preds),
+                             ncol(preds), min_analysis_rows(folds))
+    tm <- tuning_metric_set("none", outcome_range = c(0, Inf))
+
+    grid    <- tune::.check_grid(grid = 10L, workflow = wf, pset = ps)
+    grid_rs <- suppressMessages(tune::tune_grid(wf, folds, grid = grid, metrics = tm, param_info = ps,
+                                                control = tune::control_grid(verbose = FALSE)))
+    set.seed(42, kind = "Mersenne-Twister")
+    bayes <- suppressMessages(tune::tune_bayes(wf, folds, initial = grid_rs, iter = 15, param_info = ps,
+                                               metrics = tm, control = tune::control_bayes(verbose = FALSE,
+                                                                                           no_improve = 10)))
+
+    ## The fixture repeats a proposal: tune reports some candidate on ten folds
+    summary <- tune::collect_metrics(bayes)
+    expect_true(any(summary$.metric == "rmse" & summary$n == 10L))
+
+    chosen <- select_complete(bayes, "rmse", 5L)
+    expect_identical(chosen$.config, tune::select_best(bayes, metric = "rmse")$.config)
+    expect_null(incomplete_note(bayes, 5L))
+    expect_false(anyNA(unlist(cv_panel_at(bayes, chosen, 5L)[c("cv_rmse", "cv_rpd")])))
 
   })
 

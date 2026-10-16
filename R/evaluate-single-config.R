@@ -589,8 +589,8 @@ prepped_predictors <- function(prepped, baked) {
 #' Cross-validated metric means at the selected hyperparameters
 #'
 #' @description
-#' Reads `tune::collect_metrics()` for the tuning result and returns the mean
-#' of each metric at the `.config` that was chosen. These are the `cv_*`
+#' Returns the mean of each metric at the `.config` that was chosen, over
+#' that candidate's own folds ([config_metrics()]). These are the `cv_*`
 #' columns of `evaluation$results`, the quantities `evaluate()` and `fit()`
 #' rank on. A value that is missing or not finite is `NA_real_`, and so is
 #' every value when there is nothing to look up; a failure to read the
@@ -619,21 +619,13 @@ cv_panel_at <- function(tune_results, best_params, n_folds = NULL,
 
   if (!usable) return(tibble::as_tibble(out))
 
-  panel <- tune::collect_metrics(tune_results)
-
-  if (!all(c(".config", ".metric", "mean") %in% names(panel))) {
-
-    return(tibble::as_tibble(out))
-
-  }
-
+  panel <- config_metrics(tune_results)
   panel <- panel[panel$.config == best_params$.config[[1]], , drop = FALSE]
 
   for (m in metrics) {
 
     v       <- panel$mean[panel$.metric == m]
-    covered <- is.null(n_folds) || identical(as.integer(panel$n[panel$.metric == m]),
-                                             as.integer(n_folds))
+    covered <- is.null(n_folds) || identical(panel$n[panel$.metric == m], as.integer(n_folds))
 
     if (length(v) == 1 && is.finite(v) && covered) out[[paste0("cv_", m)]] <- v
 
@@ -653,6 +645,40 @@ cv_panel_at <- function(tune_results, best_params, n_folds = NULL,
 ## A recipe step that fails on a fold fails every candidate there, so its
 ## configuration then has none to choose from and fails.
 
+#' Each candidate's metrics over its own folds
+#'
+#' @description
+#' `tune::collect_metrics()` pools the folds of candidates with equal
+#' hyperparameters, so a Bayesian iteration that proposes a grid point again
+#' reports both on twice the folds. Read from the per-fold metrics instead,
+#' each `.config` is counted on the resamples it was scored on, and its mean
+#' is its own.
+#'
+#' @param results A tune result (grid or Bayesian).
+#' @return Tibble with one row per `.config` and metric: `.config`,
+#'   `.metric`, `mean` (over the folds with a value; `NA` when none has one)
+#'   and `n` (the distinct resamples with a value).
+#' @keywords internal
+#' @noRd
+config_metrics <- function(results) {
+
+  per_fold <- tune::collect_metrics(results, summarize = FALSE)
+  resample <- resample_ids(per_fold)
+  scored   <- !is.na(per_fold$.estimate)
+  groups   <- split(seq_len(nrow(per_fold)), list(per_fold$.config, per_fold$.metric), drop = TRUE)
+
+  tibble::tibble(
+    .config = vapply(groups, function(i) per_fold$.config[i[1]], character(1), USE.NAMES = FALSE),
+    .metric = vapply(groups, function(i) per_fold$.metric[i[1]], character(1), USE.NAMES = FALSE),
+    mean    = vapply(groups, function(i) {
+      if (any(scored[i])) mean(per_fold$.estimate[i][scored[i]]) else NA_real_
+    }, numeric(1), USE.NAMES = FALSE),
+    n       = vapply(groups, function(i) length(unique(resample[i][scored[i]])), integer(1),
+                     USE.NAMES = FALSE)
+  )
+
+}
+
 #' The candidates of a tune result scored on every fold
 #'
 #' @param results A tune result (grid or Bayesian).
@@ -664,7 +690,7 @@ cv_panel_at <- function(tune_results, best_params, n_folds = NULL,
 #' @noRd
 complete_configs <- function(results, n_folds) {
 
-  panel <- tune::collect_metrics(results)
+  panel <- config_metrics(results)
 
   panel$.config[panel$.metric == "rmse" & panel$n == n_folds]
 
@@ -729,8 +755,7 @@ select_complete <- function(results, metric, n_folds, debug = FALSE) {
 #' @noRd
 incomplete_note <- function(results, n_folds) {
 
-  panel <- tune::collect_metrics(results)
-  all   <- unique(panel$.config)
+  all   <- unique(config_metrics(results)$.config)
   n_out <- length(setdiff(all, complete_configs(results, n_folds)))
 
   if (n_out == 0) return(NULL)
