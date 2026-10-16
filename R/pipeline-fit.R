@@ -1225,7 +1225,7 @@ cold_start_evaluation <- function(x, metric, seed, collector, call = rlang::call
 
     cli::cli_abort(c(
       "Too few rows to fit: {n_modelled} ha{?s/ve} an observed {.field {outcome_col}}.",
-      "i" = "{.fn fit} needs at least {cv_folds * 2} (twice {.field cv_folds}), the floor {.fn evaluate} applies."
+      "i" = "{.fn fit} needs at least {cv_folds * 2} (twice {.field cv_folds})."
     ), class = "horizons_input_error", call = call)
 
   }

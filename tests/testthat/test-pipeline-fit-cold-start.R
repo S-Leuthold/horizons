@@ -362,6 +362,18 @@ describe("fit() - cold start from one configuration (#45)", {
 
   })
 
+  it("refuses too few rows to fit, naming its own floor", {
+
+    few <- make_eval_object(n = 5, n_configs = 1)
+
+    err <- expect_error(fit(few, seed = 42L), "Too few rows to fit: 5 have an observed",
+                        fixed = TRUE, class = "horizons_input_error")
+    msg <- gsub("\\s+", " ", conditionMessage(err))
+    expect_match(msg, "`fit()` needs at least 6 (twice cv_folds).", fixed = TRUE)
+    expect_no_match(msg, "evaluate()", fixed = TRUE)
+
+  })
+
   it("refuses a configured object with no configuration", {
 
     none <- obj
