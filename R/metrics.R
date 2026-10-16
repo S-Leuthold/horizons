@@ -285,34 +285,13 @@ tuning_metric_set <- function(transformation,
     ccc   = list(vec = ccc_vec,             direction = "maximize", plain = ccc)
   )
 
-  unknown_metrics <- setdiff(metrics, names(registry))
+  ### Both callers pass constant metric names, and every caller reads the range
+  ### through outcome_range_setting(), which the door validators guarantee.
 
-  if (length(unknown_metrics) > 0) {
-
-    cli::cli_abort(c(
-      "Unknown metric{?s} {.val {unknown_metrics}} in {.arg metrics}.",
-      "i" = "Available: {.val {names(registry)}}."
-    ))
-
-  }
-
-  if (length(metrics) == 0) {
-
-    cli::cli_abort("{.arg metrics} must name at least one metric.")
-
-  }
-
-  ## Checking the range also forces it. The wrapped metrics close over it, and
-  ## tune may serialize them to workers: an unforced promise would carry the
+  ## Forced here: the wrapped metrics close over the range, and tune may
+  ## serialize them to workers, so an unforced promise would carry the
   ## caller's frame, training data and all, along with it.
-  if (!is_valid_outcome_range(outcome_range)) {
-
-    cli::cli_abort(c(
-      "{.arg outcome_range} must be a numeric vector of length 2 with lower < upper.",
-      "x" = "Got {.val {outcome_range}}."
-    ))
-
-  }
+  force(outcome_range)
 
   ## -------------------------------------------------------------------------
   ## No transformation: the plain metric set, exactly as before

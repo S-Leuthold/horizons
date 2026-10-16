@@ -80,11 +80,10 @@ resample_indices <- function(split, cv_folds) {
 
   if (!all(vapply(all_splits, function(s) all(is.na(s$out_id)), logical(1)))) {
 
-    rlang::abort(paste0(
-      "`resample_indices()` supports only resamples whose assessment set is ",
-      "the complement of its analysis set (`out_id` is NA). Got a split with ",
-      "explicit `out_id`, which this transport would silently re-partition."
-    ))
+    abort_horizons(c(
+      "{.fn resample_indices} supports only resamples whose assessment set is the complement of its analysis set ({.field out_id} is NA).",
+      "x" = "Got a split with an explicit {.field out_id}, which this transport would silently re-partition."
+    ), kind = "internal")
 
   }
 
@@ -92,11 +91,10 @@ resample_indices <- function(split, cv_folds) {
 
   if (length(id_cols) != 1L) {
 
-    rlang::abort(paste0(
-      "`resample_indices()` supports only single-id resamples. Got ",
-      length(id_cols), " id columns (", paste(id_cols, collapse = ", "),
-      "), which indicates repeats > 1; the extra identifiers would be lost."
-    ))
+    abort_horizons(c(
+      "{.fn resample_indices} supports only single-id resamples.",
+      "x" = "Got {length(id_cols)} id column{?s} ({.field {id_cols}}), which indicates repeats > 1; the extra identifiers would be lost."
+    ), kind = "internal")
 
   }
 
@@ -140,11 +138,10 @@ rebuild_resamples <- function(data, idx) {
   ## index surfaces as "Grid search failed" for every config, from a worker.
   if (nrow(data) != idx$n_rows) {
 
-    rlang::abort(paste0(
-      "`rebuild_resamples()` got ", nrow(data), " rows but the indices were ",
-      "computed against ", idx$n_rows, ". The data and indices must come from ",
-      "the same split."
-    ))
+    abort_horizons(c(
+      "{.fn rebuild_resamples} got {nrow(data)} row{?s} but the indices were computed against {idx$n_rows}.",
+      "x" = "The data and indices must come from the same split."
+    ), kind = "internal")
 
   }
 

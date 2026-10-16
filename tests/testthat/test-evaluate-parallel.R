@@ -107,15 +107,17 @@ describe("evaluate() parallel worker footprint", {
     good <- setNames(vector("list", length(horizons:::SHARED_ARG_NAMES)),
                      horizons:::SHARED_ARG_NAMES)
 
-    expect_error(
+    err <- expect_error(
       horizons:::evaluate_config_worker(1L, good[setdiff(names(good), "seed")]),
-      "Malformed worker payload"
+      "Malformed worker payload", class = "horizons_error_internal"
     )
+    expect_match(conditionMessage(err), "Missing: seed; unexpected: -", fixed = TRUE)
 
     typo        <- good
     names(typo)[names(typo) == "grid_size"] <- "gridsize"
-    expect_error(horizons:::evaluate_config_worker(1L, typo),
-                 "Malformed worker payload")
+    err <- expect_error(horizons:::evaluate_config_worker(1L, typo),
+                        "Malformed worker payload", class = "horizons_error_internal")
+    expect_match(conditionMessage(err), "Missing: grid_size; unexpected: gridsize", fixed = TRUE)
 
   })
 
@@ -171,11 +173,16 @@ describe("evaluate() parallel worker footprint", {
     expect_identical(row$settings[[1]], shared$settings)
     expect_identical(readRDS(file.path(shared$checkpoint_dir, "cfg_001.rds")), row)
 
-    ## The abort carries no package class, so its text is the check
+    ## Another version's worker is a dependency error, which no unit
+    ## contains, and it is checked before the payload's keys: another
+    ## version's keys may differ, and that is not a bug
     shared$pkg_version <- "0.0.0"
+    shared$seed        <- NULL
 
-    expect_error(horizons:::evaluate_config_worker(1L, shared),
-                 "but the parent is 0.0.0. Reinstall the package so workers run matching code.",
+    err <- expect_error(horizons:::evaluate_config_worker(1L, shared),
+                        "but the parent runs 0.0.0.", fixed = TRUE,
+                        class = "horizons_error_dependency")
+    expect_match(conditionMessage(err), "Reinstall the package so workers run matching code.",
                  fixed = TRUE)
 
   })
@@ -658,14 +665,20 @@ describe("monitor_evaluate()", {
 
   it("errors on missing directory", {
 
-    expect_error(monitor_evaluate("/nonexistent/path"), "not found")
+    err <- expect_error(monitor_evaluate("/nonexistent/path"), "does not exist",
+                        class = "horizons_error_input")
+    expect_match(conditionMessage(err), "control_horizons(output_dir = )", fixed = TRUE)
+    expect_identical(rlang::call_name(err$call), "monitor_evaluate")
+
+    expect_error(monitor_evaluate(c("a", "b")), "output_dir", class = "horizons_error_input")
 
   })
 
   it("errors on missing manifest", {
 
     tmpdir <- withr::local_tempdir()
-    expect_error(monitor_evaluate(tmpdir), "eval_manifest")
+    err <- expect_error(monitor_evaluate(tmpdir), "eval_manifest", class = "horizons_error_input")
+    expect_identical(rlang::call_name(err$call), "monitor_evaluate")
 
   })
 
@@ -776,11 +789,10 @@ describe("monitor_evaluate()", {
     saveRDS(list(schema_version = 3L, n_total = 10, metric = "rpd"),
             file.path(tmpdir, "eval_manifest.rds"))
 
-    ## The abort carries no package class (DECISIONS 2026-10-05), so its text
-    ## is the check.
     err <- expect_error(monitor_evaluate(tmpdir),
-                        "was written by another version of horizons", fixed = TRUE)
-    expect_match(conditionMessage(err), "evaluate() rewrites it", fixed = TRUE)
+                        "was written by another version of horizons", fixed = TRUE,
+                        class = "horizons_error_validation")
+    expect_match(conditionMessage(err), "rewrites it when a run starts in this directory", fixed = TRUE)
 
   })
 

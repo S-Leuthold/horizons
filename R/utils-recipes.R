@@ -71,29 +71,10 @@ build_recipe <- function(config_row,
   ## -----------------------------------------------------------------------
   ## Column ordering invariant
   ## -----------------------------------------------------------------------
-  ## Savitzky-Golay windows need the bands in order. The door validator at
-  ## evaluate() and fit() checks the order of names that parse as wavenumbers;
-  ## this reads the digits of any name, so an axis named like `wn_X4000`
-  ## (#121) is checked too until the validator requires every name to parse.
+  ## Savitzky-Golay windows need the bands in order. evaluate() checks it at
+  ## its door; fit() reaches it here.
 
-  predictor_nums <- suppressWarnings(
-    as.numeric(gsub("[^0-9.\\-]", "", predictor_cols))
-  )
-
-  if (!any(is.na(predictor_nums)) && length(predictor_nums) > 1) {
-
-    diffs <- diff(predictor_nums)
-
-    if (!all(diffs < 0) && !all(diffs > 0)) {
-
-      abort_horizons(
-        "Predictor columns are not monotonically ordered. Spectral preprocessing requires ordered wavelengths.",
-        kind = "input"
-      )
-
-    }
-
-  }
+  check_band_order(predictor_cols)
 
   ## -----------------------------------------------------------------------
   ## Step 1: Initialize recipe with roles
@@ -260,6 +241,49 @@ build_recipe <- function(config_row,
   ## worker. Passing environment() explicitly keeps that dependency visible.
 
   strip_selector_envs(rec, environment())
+
+}
+
+
+## ---------------------------------------------------------------------------
+## check_band_order
+## ---------------------------------------------------------------------------
+
+#' Refuse a spectral axis whose bands are out of order
+#'
+#' @description
+#' Savitzky-Golay windows need the bands in order. The door validator checks
+#' the order of names that parse as wavenumbers; this reads the digits of any
+#' name, so an axis named like `wn_X4000` (#121) is checked too until the
+#' validator requires every name to parse. A name whose digits do not make a
+#' number skips the check.
+#'
+#' @param predictor_cols Character. The predictor columns, in table order.
+#' @param call The frame the refusal reports: the verb's, or
+#'   `build_recipe()`'s.
+#' @return `NULL`, invisibly; aborts with class `horizons_error_input`.
+#' @keywords internal
+#' @noRd
+check_band_order <- function(predictor_cols, call = rlang::caller_env()) {
+
+  predictor_nums <- wn_values(gsub("[^0-9.\\-]", "", predictor_cols))
+
+  if (!any(is.na(predictor_nums)) && length(predictor_nums) > 1) {
+
+    diffs <- diff(predictor_nums)
+
+    if (!all(diffs < 0) && !all(diffs > 0)) {
+
+      abort_horizons(
+        "Predictor columns are not monotonically ordered. Spectral preprocessing requires ordered wavelengths.",
+        kind = "input", call = call
+      )
+
+    }
+
+  }
+
+  invisible(NULL)
 
 }
 
@@ -442,7 +466,8 @@ strip_selector_envs <- function(rec, frame) {
 #'   `recipes::names0(prefix = "spec")` pattern.
 #'
 #' @return Integer column positions, as tidyselect helpers return. Aborts on an
-#'   empty match. Must be called inside a selection context.
+#'   empty match, with class `horizons_error_internal`: the pattern is
+#'   horizons' own naming. Must be called inside a selection context.
 #' @keywords internal
 #' @noRd
 select_generated_spectra <- function(pattern = "^spec[0-9]+$") {
@@ -451,11 +476,11 @@ select_generated_spectra <- function(pattern = "^spec[0-9]+$") {
 
   if (length(matched) == 0) {
 
-    cli::cli_abort(c(
+    abort_horizons(c(
       "No column matches {.val {pattern}}, so the selection step has nothing to select.",
       "i" = "That pattern is the naming {.fn step_transform_spectra} gives its output; a zero match means the naming changed or the transform step did not run.",
       "i" = "Aborting rather than letting the step prep as a silent pass-through."
-    ), class = "horizons_input_error")
+    ), kind = "internal")
 
   }
 
@@ -484,19 +509,21 @@ select_generated_spectra <- function(pattern = "^spec[0-9]+$") {
 #' @param col_names Character vector from `recipes::recipes_eval_select()`.
 #' @param step Character. The step's user-facing name, for the message.
 #'
-#' @return Invisibly `TRUE`; aborts when `col_names` is empty.
+#' @return Invisibly `TRUE`; aborts with class `horizons_error_input` when
+#'   `col_names` is empty. Raised inside a step's `prep()`, it arrives
+#'   wrapped in `recipes_error_step`.
 #' @keywords internal
 #' @noRd
 check_selection_columns <- function(col_names, step) {
 
   if (length(col_names) == 0) {
 
-    cli::cli_abort(c(
+    abort_horizons(c(
       "{.fn {step}} selected zero columns.",
       "x" = "The step's selector matched no column in the training data.",
       "i" = "Inside {.fn build_recipe} the selector is {.code dplyr::matches(\"^spec[0-9]+$\")}, the names {.fn step_transform_spectra} gives its output. A zero match means that naming changed.",
       "i" = "A selection step with nothing to select cannot train; fix the selector rather than letting the step become a silent no-op."
-    ), class = "horizons_input_error")
+    ), kind = "input")
 
   }
 

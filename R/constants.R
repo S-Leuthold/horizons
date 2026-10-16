@@ -278,6 +278,12 @@ EVAL_MANIFEST_SCHEMA <- 4L
 # tests in test-evaluate-parallel.R are the upstream guard.
 EVAL_WORKER_PAYLOAD_LIMIT <- 1 * 1024^3
 
+# evaluate()'s smallest cross-validation assessment fold, in rows, below which
+# it warns (quality) that the cross-validated metrics rest on few rows. A
+# warning only, so no override: small samples run. Judgement, not a published
+# standard; an RMSE over fewer than ten rows is a weak estimate.
+SMALL_FOLD_ROWS <- 10L
+
 # The circuit breaker's default (control_horizons(breaker = )): this many of
 # the first configurations to finish failing with the same cause stop
 # evaluate() or fit(), since every other configuration would fail the same way.

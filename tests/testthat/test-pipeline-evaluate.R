@@ -124,7 +124,7 @@ describe("evaluate() - gate checks", {
     obj <- make_eval_object()
     obj$config$configs <- NULL
 
-    expect_error(evaluate(obj), "No configurations found")
+    expect_error(evaluate(obj), "No configurations found", class = "horizons_error_input")
 
   })
 
@@ -133,36 +133,72 @@ describe("evaluate() - gate checks", {
     obj <- make_eval_object()
     obj$config$configs <- obj$config$configs[0, ]
 
-    expect_error(evaluate(obj), "No configurations found")
+    expect_error(evaluate(obj), "No configurations found", class = "horizons_error_input")
 
   })
 
-  it("aborts when outcome column has no non-NA values", {
+  it("aborts when outcome column has no non-NA values, naming the remedy", {
 
     obj <- make_eval_object()
     outcome <- obj$data$role_map$variable[obj$data$role_map$role == "outcome"]
     obj$data$analysis[[outcome]] <- NA_real_
 
-    expect_error(evaluate(obj), "outcome.*NA")
+    err <- expect_error(evaluate(obj), "outcome.*NA", class = "horizons_error_input")
+    expect_match(conditionMessage(err), "another outcome", fixed = TRUE)
+    expect_identical(rlang::call_name(err$call), "evaluate")
 
   })
 
-  it("aborts when sample size is too small for CV, counting only rows with an observed outcome", {
+  it("refuses a training part with fewer rows than folds, counting only rows with an observed outcome", {
 
-    ## The abort carries no condition class yet, so its text is asserted
-    obj <- make_eval_object(n = 4)
+    local_mocked_bindings(evaluate_single_config = function(...) stop("a configuration ran"))
 
-    expect_error(evaluate(obj),
-                 "Need at least 6 samples (cv_folds * 2), but only 4 available.",
-                 fixed = TRUE)
+    ## Three rows: the split leaves two to train on, under the three folds
+    err <- expect_error(evaluate(make_eval_object(n = 3)), class = "horizons_error_input")
+    msg <- gsub("\\s+", " ", conditionMessage(err))   # undo cli line wrapping
 
-    ## Eight rows, three without an outcome: five can be modelled
+    expect_match(msg, "The training part has 2 rows, fewer than the 3 cross-validation folds", fixed = TRUE)
+    expect_match(msg, "3 rows have an observed outcome; the test set holds 1.", fixed = TRUE)
+    expect_match(msg, "fewer `cv_folds`", fixed = TRUE)
+
+    ## Eight rows, five without an outcome: three can be modelled
+    obj <- make_eval_object(n = 8)
+    obj$data$analysis$SOC[1:5] <- NA_real_
+
+    expect_error(evaluate(obj), "The training part has 2 rows", fixed = TRUE,
+                 class = "horizons_error_input")
+
+  })
+
+  it("runs a small sample, warning once that its folds are small", {
+
+    ## Read the fixture before the runner is mocked (helper-memo.R)
+    template <- ev60()$evaluation$results[1, ]
+
+    local_mocked_bindings(
+      evaluate_single_config = function(config_row, ...) {
+        mock_eval_row(template, config_row$config_id, "success")
+      }
+    )
+
+    ## Eight rows, three without an outcome: five modelled, four to train on
+    ## in three folds of one or two. Refused under 2 * cv_folds until 0.12.0.
     obj <- make_eval_object(n = 8)
     obj$data$analysis$SOC[1:3] <- NA_real_
 
-    expect_error(evaluate(obj),
-                 "Need at least 6 samples (cv_folds * 2), but only 5 available.",
+    ## (helper-parallel.R's collect_warnings(): this file's own is defined below)
+    got <- collect_warnings(evaluate(obj, seed = 42L), "")
+
+    quality <- Filter(function(w) inherits(w, "horizons_warning_quality"), got$warnings)
+    expect_length(quality, 1L)
+    expect_match(conditionMessage(quality[[1]]), "The smallest cross-validation fold has 1 row to assess",
                  fixed = TRUE)
+    expect_identical(got$value$log$topic, "quality")
+    expect_identical(got$value$evaluation$n_train, 4L)
+
+    ## Folds of ten or more rows are not small
+    quiet <- collect_warnings(evaluate(make_eval_object(n = 40), seed = 42L), "")
+    expect_false(any(vapply(quiet$warnings, inherits, logical(1), "horizons_warning_quality")))
 
   })
 
@@ -170,7 +206,31 @@ describe("evaluate() - gate checks", {
 
     obj <- make_eval_object()
 
-    expect_error(evaluate(obj, metric = "accuracy"), "metric")
+    err <- expect_error(evaluate(obj, metric = "accuracy"), "`metric` must be one of",
+                        class = "horizons_error_input")
+    expect_match(conditionMessage(err), "\"accuracy\"", fixed = TRUE)
+
+  })
+
+  it("refuses an axis whose bands are out of order before anything is drawn (#121)", {
+
+    ## Names the door validator does not parse as wavenumbers, so only the
+    ## band-order check sees them
+    local_mocked_bindings(
+      draw_eval_split = function(...) stop("a split was drawn"),
+      evaluate_single_config = function(...) stop("a configuration ran")
+    )
+
+    obj  <- make_eval_object()
+    pred <- obj$data$role_map$role == "predictor"
+    olds <- obj$data$role_map$variable[pred]
+    news <- sub("^wn_", "wn_X", olds)
+    names(obj$data$analysis)[match(olds, names(obj$data$analysis))] <- news
+
+    ## The first two bands swapped
+    obj$data$role_map$variable[pred] <- news[c(2, 1, 3:length(news))]
+
+    expect_error(evaluate(obj), "not monotonically ordered", class = "horizons_error_input")
 
   })
 
@@ -512,7 +572,7 @@ describe("evaluate() - NA outcome rows", {
     expect_identical(modelling_rows(complete, "y")$n_dropped, 0L)
 
     expect_error(modelling_rows(df[c(2, 4), ], "y"),
-                 class = "horizons_input_error")
+                 class = "horizons_error_input")
 
   })
 
@@ -849,7 +909,7 @@ describe("evaluate() - response outliers are trimmed from the training partition
 
     err <- expect_error(
       suppressWarnings(evaluate(v, prune = FALSE, seed = 307L, control = control_horizons(output_dir = tmpdir))),
-      class = "horizons_input_error"
+      class = "horizons_error_input"
     )
 
     msg <- gsub("\\s+", " ", conditionMessage(err))   # undo cli line wrapping
@@ -1333,7 +1393,7 @@ describe("evaluate() - recipe settings", {
 
     out <- refused_without_running(narrow)
 
-    expect_s3_class(out$error, "horizons_input_error")
+    expect_s3_class(out$error, "horizons_error_input")
     expect_match(conditionMessage(out$error), "9 grid points (18 cm", fixed = TRUE)
     expect_match(conditionMessage(out$error), "9 spectral columns", fixed = TRUE)
     expect_identical(out$ran, 0L)
@@ -1346,7 +1406,7 @@ describe("evaluate() - recipe settings", {
 
     out <- refused_without_running(obj)
 
-    expect_s3_class(out$error, "horizons_input_error")
+    expect_s3_class(out$error, "horizons_error_input")
     expect_match(conditionMessage(out$error), "21 grid points (42 cm", fixed = TRUE)
     expect_match(conditionMessage(out$error), "20 spectral columns", fixed = TRUE)
     expect_identical(out$ran, 0L)
@@ -1762,12 +1822,12 @@ describe("evaluate() - checkpoint data provenance", {
 
     expect_error(
       suppressWarnings(evaluate(make_eval_object(n = 60, n_configs = 2), prune = FALSE, seed = 42L, control = control_horizons(output_dir = tmpdir))),
-      class = "horizons_input_error"
+      class = "horizons_error_input"
     )
 
     err <- tryCatch(
       suppressWarnings(evaluate(make_eval_object(n = 60, n_configs = 2), prune = FALSE, seed = 42L, control = control_horizons(output_dir = tmpdir))),
-      horizons_input_error = function(e) e
+      horizons_error_input = function(e) e
     )
 
     msg <- flat_message(err)
@@ -1797,10 +1857,10 @@ describe("evaluate() - checkpoint data provenance", {
 
     err <- tryCatch(
       suppressWarnings(evaluate(obj_clay, prune = FALSE, seed = 42L, control = control_horizons(output_dir = tmpdir))),
-      horizons_input_error = function(e) e
+      horizons_error_input = function(e) e
     )
 
-    expect_s3_class(err, "horizons_input_error")
+    expect_s3_class(err, "horizons_error_input")
 
     ## Named, not two opaque hashes.
     msg <- flat_message(err)
@@ -1822,7 +1882,7 @@ describe("evaluate() - checkpoint data provenance", {
 
     tryCatch(
       suppressWarnings(evaluate(edit(obj), prune = FALSE, seed = 42L, control = control_horizons(output_dir = tmpdir))),
-      horizons_input_error = function(e) e
+      horizons_error_input = function(e) e
     )
 
   }
@@ -1834,7 +1894,7 @@ describe("evaluate() - checkpoint data provenance", {
       o
     })
 
-    expect_s3_class(err, "horizons_input_error")
+    expect_s3_class(err, "horizons_error_input")
     msg <- flat_message(err)
     expect_match(msg, "different predictor values")
     expect_no_match(msg, "different outcome values")
@@ -1848,7 +1908,7 @@ describe("evaluate() - checkpoint data provenance", {
       o
     })
 
-    expect_s3_class(err, "horizons_input_error")
+    expect_s3_class(err, "horizons_error_input")
     expect_match(flat_message(err),
                  "different outcome values")
 
@@ -1867,7 +1927,7 @@ describe("evaluate() - checkpoint data provenance", {
       o
     })
 
-    expect_s3_class(err, "horizons_input_error")
+    expect_s3_class(err, "horizons_error_input")
     expect_match(flat_message(err), "role_map")
 
   })
@@ -2003,10 +2063,10 @@ describe("evaluate() - one checkpoint store (#42)", {
     ## than being dropped silently.
     err <- tryCatch(
       suppressWarnings(evaluate(obj, prune = FALSE, seed = 42L, control = control_horizons(output_dir = tmpdir))),
-      horizons_input_error = function(e) e
+      horizons_error_input = function(e) e
     )
 
-    expect_s3_class(err, "horizons_input_error")
+    expect_s3_class(err, "horizons_error_input")
     expect_match(flat_message(err), "cfg_001.rds", fixed = TRUE)
 
   })
@@ -2060,10 +2120,10 @@ describe("evaluate() - tuning-settings provenance", {
 
     err <- tryCatch(
       suppressWarnings(evaluate(changed, prune = FALSE, seed = 42L, control = control_horizons(output_dir = tmpdir))),
-      horizons_input_error = function(e) e
+      horizons_error_input = function(e) e
     )
 
-    expect_s3_class(err, "horizons_input_error")
+    expect_s3_class(err, "horizons_error_input")
 
     msg <- flat_message(err)
     expect_match(msg, "grid_size")
@@ -2084,7 +2144,7 @@ describe("evaluate() - tuning-settings provenance", {
       suppressWarnings(evaluate(obj, prune = TRUE,
                                 prune_threshold = 2, seed = 42L, control = control_horizons(output_dir = tmpdir))),
       "prune_threshold",
-      class = "horizons_input_error"
+      class = "horizons_error_input"
     )
 
     ## With pruning off the threshold is never read, so it cannot have
@@ -2154,10 +2214,10 @@ describe("evaluate() - tuning-settings provenance", {
 
     err <- tryCatch(
       suppressWarnings(evaluate(wider, prune = FALSE, seed = 42L, control = control_horizons(output_dir = tmpdir))),
-      horizons_input_error = function(e) e
+      horizons_error_input = function(e) e
     )
 
-    expect_s3_class(err, "horizons_input_error")
+    expect_s3_class(err, "horizons_error_input")
     expect_match(flat_message(err), "sg_window")
     expect_match(flat_message(err), "settings")
 
@@ -2167,7 +2227,7 @@ describe("evaluate() - tuning-settings provenance", {
     expect_error(
       suppressWarnings(evaluate(tighter, prune = FALSE, seed = 42L, control = control_horizons(output_dir = tmpdir))),
       "pca_threshold",
-      class = "horizons_input_error"
+      class = "horizons_error_input"
     )
 
   })

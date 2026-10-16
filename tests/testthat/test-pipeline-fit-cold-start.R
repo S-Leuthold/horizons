@@ -355,7 +355,7 @@ describe("fit() - cold start from one configuration (#45)", {
       .package = "horizons"
     )
 
-    expect_s3_class(err, "horizons_input_error")
+    expect_s3_class(err, "horizons_error_input")
     expect_match(conditionMessage(err), "11 grid points (22 cm", fixed = TRUE)
     expect_match(conditionMessage(err), "10 spectral columns", fixed = TRUE)
     expect_identical(ran, 0L)

@@ -234,28 +234,26 @@ evaluate <- function(x,
   ## Step 1: Gate checks
   ## -----------------------------------------------------------------------
 
-  if (!metric %in% VALID_RANK_METRICS) {
-
-    rlang::abort(paste0(
-      "Invalid `metric`: '", metric, "'. ",
-      "Must be one of: ", paste(VALID_RANK_METRICS, collapse = ", ")
-    ))
-
-  }
+  check_rank_metric_arg(metric)
 
   configs <- x$config$configs
 
   if (is.null(configs) || nrow(configs) == 0) {
 
-    rlang::abort(
-      "No configurations found. Run `configure()` before `evaluate()`."
-    )
+    abort_horizons(c(
+      "No configurations found.",
+      "i" = "Run {.fn configure} before {.fn evaluate}."
+    ), kind = "input")
 
   }
 
   role_map    <- x$data$role_map
   outcome_col <- role_map$variable[role_map$role == "outcome"]
   analysis    <- x$data$analysis
+
+  ## The axis has to be in order for the spectral steps; the same for every
+  ## configuration, so checked once, before anything is drawn (#121)
+  check_band_order(role_map$variable[role_map$role == "predictor"])
 
   ## -----------------------------------------------------------------------
   ## Step 2: Handle NA outcome rows
@@ -296,22 +294,14 @@ evaluate <- function(x,
   check_outcome_variance(x, verb = "evaluate")
 
   ## -----------------------------------------------------------------------
-  ## Step 3: Validate minimum sample size
+  ## Step 3: The tuning settings
   ## -----------------------------------------------------------------------
+  ## Small samples are weak, not wrong, so they run: the folds' row count is
+  ## checked once the split and the trim have drawn the training part (Step
+  ## 4), and a small assessment fold warns (Step 5).
 
-  tuning    <- x$config$tuning
-  cv_folds  <- tuning$cv_folds
-  n_samples <- nrow(analysis)
-
-  if (n_samples < cv_folds * 2) {
-
-    rlang::abort(paste0(
-      "Insufficient sample size for evaluation. ",
-      "Need at least ", cv_folds * 2, " samples (cv_folds * 2), ",
-      "but only ", n_samples, " available."
-    ))
-
-  }
+  tuning   <- x$config$tuning
+  cv_folds <- tuning$cv_folds
 
   ## -----------------------------------------------------------------------
   ## Step 3a: The window has to fit the spectrum
@@ -395,6 +385,11 @@ evaluate <- function(x,
   drawn_rows <- drawn$split$data
   trim_ids   <- trimmed$record$trimmed_ids %||% character(0)
 
+  ## Every fold needs a row to assess on. Fewer training rows than folds is
+  ## the one sample size refused, here, before anything is tuned.
+  check_fold_rows(n_train, cv_folds, n_modelled = nrow(analysis),
+                  n_test = n_test, n_trimmed = length(trim_ids))
+
   check_training_outcome_variance(
     train_data[[outcome_col]],
     held_out    = list(
@@ -420,6 +415,10 @@ evaluate <- function(x,
     unstratified = function() rsample::vfold_cv(train_data, v = cv_folds)
   )
   cv_fold_obj <- cv_drawn$draw
+
+  ## A small assessment fold is weak, not wrong: it runs, with one warning.
+  ## Metrics undefined on a fold that small are NA.
+  log_small_folds(collector, cv_fold_obj)
 
   ## -----------------------------------------------------------------------
   ## Step 5b: Fingerprint the training rows
@@ -577,9 +576,8 @@ evaluate <- function(x,
 
     if (axis$axis != "sequential") {
 
-      workers_label <- if (is.na(plan_workers)) "unbounded" else {
-        paste0(plan_workers, " worker", if (plan_workers != 1) "s" else "")
-      }
+      ## A parallel axis has two workers or more, or an unbounded count
+      workers_label <- if (is.na(plan_workers)) "unbounded" else paste0(plan_workers, " workers")
 
       cat(paste0("\u2502  Parallel: over ", axis$axis, " on ", plan_label,
                  " (", workers_label, ")\n"))
@@ -1487,18 +1485,18 @@ format_setting_value <- function(v) {
 #' @param output_dir The checkpoint directory being resumed.
 #' @param source Which file carried the mismatching settings.
 #' @param call The frame to report the error from (`evaluate()`'s).
-#' @return Never returns; aborts with class `horizons_input_error`.
+#' @return Never returns; aborts with class `horizons_error_input`.
 #' @keywords internal
 #' @noRd
 abort_checkpoint_settings_mismatch <- function(diffs, output_dir, source,
                                                call = rlang::caller_env()) {
 
-  cli::cli_abort(c(
+  abort_horizons(c(
     "Checkpoints in {.path {output_dir}} were tuned under different settings.",
     "x" = "{.file {source}} was tuned with {diffs}.",
     "i" = "Resuming would rank results tuned under two sets of settings together, and warm-start {.fn fit} from them.",
     "i" = "Use a different {.arg output_dir}, or delete the stale checkpoints in {.path {output_dir}}."
-  ), class = "horizons_input_error", call = call)
+  ), kind = "input", call = call)
 
 }
 
@@ -1703,7 +1701,7 @@ checkpoint_row_fingerprint <- function(row) {
 #'   from [describe_settings_diff()]. A changed `seed` moves the split, so it
 #'   surfaces here as a data mismatch; naming it says why.
 #' @param call The frame to report the error from (`evaluate()`'s).
-#' @return Never returns; aborts with class `horizons_input_error`.
+#' @return Never returns; aborts with class `horizons_error_input`.
 #' @keywords internal
 #' @noRd
 abort_checkpoint_data_mismatch <- function(stored, current, output_dir, source,
@@ -1722,14 +1720,14 @@ abort_checkpoint_data_mismatch <- function(stored, current, output_dir, source,
     rep("x", length(what))
   )
 
-  cli::cli_abort(c(
+  abort_horizons(c(
     "Checkpoints in {.path {output_dir}} were written on different training data.",
     found,
     if (length(settings_diff) > 0) c("i" = "That checkpoint was also tuned with {settings_diff}, which may be why."),
     "i" = "Resuming would reuse cross-validated results, and warm-start {.fn fit}, from hyperparameters tuned on the wrong rows.",
     if ("outcome" %in% differ) c("i" = "Keep one {.arg output_dir} per outcome."),
     "i" = "Use a different {.arg output_dir}, or delete the stale checkpoints in {.path {output_dir}}."
-  ), class = "horizons_input_error", call = call)
+  ), kind = "input", call = call)
 
 }
 
@@ -1975,7 +1973,7 @@ log_unranked <- function(collector, candidates, ranked, metric) {
 #' @return List with `data` (the rows kept, in their original order),
 #'   `n_dropped` (integer, the rows without an outcome) and `n_flagged`
 #'   (integer, the flagged rows with an outcome). Aborts with class
-#'   `horizons_input_error` when no row is left.
+#'   `horizons_error_input` when no row is left.
 #' @keywords internal
 #' @noRd
 modelling_rows <- function(analysis, outcome_col, call = rlang::caller_env()) {
@@ -1986,10 +1984,11 @@ modelling_rows <- function(analysis, outcome_col, call = rlang::caller_env()) {
 
   if (all(na_mask)) {
 
-    cli::cli_abort(c(
+    abort_horizons(c(
       "All outcome values are NA, so there are no rows to model.",
-      "i" = "Outcome column: {.field {outcome_col}}."
-    ), class = "horizons_input_error")
+      "i" = "Outcome column: {.field {outcome_col}}.",
+      "i" = "Add measured values of it, or {.fn configure} another outcome."
+    ), kind = "input", call = call)
 
   }
 
@@ -2009,6 +2008,89 @@ modelling_rows <- function(analysis, outcome_col, call = rlang::caller_env()) {
     n_dropped = sum(na_mask),
     n_flagged = sum(flagged & !na_mask)
   )
+
+}
+
+## ---------------------------------------------------------------------------
+## The small-sample rule evaluate() and fit() share
+## ---------------------------------------------------------------------------
+## Small n is weak, not wrong, so it runs. The one sample size refused is a
+## training part with fewer rows than folds, where a fold has nothing to
+## assess on; a small assessment fold warns. The trigger is the realised
+## folds, not the total n.
+
+#' Refuse a training part with fewer rows than cross-validation folds
+#'
+#' @param n_train Integer. Rows of the training part, after the split and
+#'   any response trim.
+#' @param cv_folds Integer. `config$tuning$cv_folds`.
+#' @param n_modelled,n_test,n_trimmed Integer. The modelled rows, and those
+#'   the split held out for the test set or the trim left out, for the
+#'   message.
+#' @param call The frame the refusal reports: the verb's.
+#' @return `NULL`, invisibly; aborts with class `horizons_error_input`.
+#' @keywords internal
+#' @noRd
+check_fold_rows <- function(n_train, cv_folds, n_modelled, n_test, n_trimmed = 0L,
+                            call = rlang::caller_env()) {
+
+  if (n_train >= cv_folds) return(invisible(NULL))
+
+  elsewhere <- paste0("the test set holds ", n_test,
+                      if (n_trimmed > 0) paste0(" and the response trim left out ", n_trimmed))
+
+  abort_horizons(c(
+    "The training part has {n_train} row{?s}, fewer than the {cv_folds} cross-validation folds, so a fold would have nothing to assess.",
+    "i" = "{n_modelled} row{?s} {?has/have} an observed outcome; {elsewhere}.",
+    "i" = "Add rows, or {.fn configure} fewer {.arg cv_folds}."
+  ), kind = "input", call = call)
+
+}
+
+#' Warn once when the smallest assessment fold is small
+#'
+#' @param collector The verb's collector, from `log_open()`.
+#' @param folds The `rset` the verb tunes on.
+#' @return The smallest fold's assessment rows, invisibly.
+#' @keywords internal
+#' @noRd
+log_small_folds <- function(collector, folds) {
+
+  n_rows   <- nrow(folds$splits[[1]]$data)
+  smallest <- min(vapply(folds$splits, function(s) n_rows - length(s$in_id), integer(1)))
+
+  if (smallest < SMALL_FOLD_ROWS) {
+
+    log_warning(collector, "quality", c(
+      "The smallest cross-validation fold has {smallest} row{?s} to assess, so the cross-validated metrics rest on few rows.",
+      "i" = "{n_rows} training rows in {nrow(folds)} folds; a metric undefined on a fold is NA."
+    ))
+
+  }
+
+  invisible(smallest)
+
+}
+
+#' Check a verb's ranking metric
+#'
+#' @param metric The verb's `metric` argument.
+#' @param call The frame the refusal reports: the verb's.
+#' @return `NULL`, invisibly; aborts with class `horizons_error_input`.
+#' @keywords internal
+#' @noRd
+check_rank_metric_arg <- function(metric, call = rlang::caller_env()) {
+
+  if (rlang::is_string(metric) && metric %in% VALID_RANK_METRICS) {
+
+    return(invisible(NULL))
+
+  }
+
+  abort_horizons(c(
+    "{.arg metric} must be one of {.val {VALID_RANK_METRICS}}.",
+    "x" = "Got {.val {metric}}."
+  ), kind = "input", call = call)
 
 }
 
@@ -2042,6 +2124,7 @@ modelling_rows <- function(analysis, outcome_col, call = rlang::caller_env()) {
 #' @param outcome_col Character. Name of the outcome column.
 #' @param seed Integer. The seed passed to `evaluate()` (or to `fit()` on a
 #'   cold start).
+#' @param call The frame a refusal reports: the verb's.
 #' @return List with `split` (the `rsplit`), `n_dropped` (integer, the rows
 #'   whose outcome is `NA`), `stratified` (`FALSE` when the split is
 #'   unstratified, because rsample dropped the strata or the stratified draw
@@ -2050,9 +2133,9 @@ modelling_rows <- function(analysis, outcome_col, call = rlang::caller_env()) {
 #'   [modelling_rows()] does.
 #' @keywords internal
 #' @noRd
-draw_eval_split <- function(analysis, outcome_col, seed) {
+draw_eval_split <- function(analysis, outcome_col, seed, call = rlang::caller_env()) {
 
-  modelled <- modelling_rows(analysis, outcome_col)
+  modelled <- modelling_rows(analysis, outcome_col, call = call)
 
   set.seed(seed)
 
@@ -2272,7 +2355,7 @@ render_response_trim <- function(trim) {
 #'   `evaluate()` or `fit()`.
 #' @return List with `sg_window`, `sg_window_cm` (`NA` when the axis spacing
 #'   cannot be read) and `pca_threshold`. Aborts with class
-#'   `horizons_input_error` when the window does not fit the spectrum.
+#'   `horizons_error_input` when the window does not fit the spectrum.
 #' @keywords internal
 #' @noRd
 evaluation_recipe <- function(x, call = rlang::caller_env()) {
@@ -2287,11 +2370,11 @@ evaluation_recipe <- function(x, call = rlang::caller_env()) {
       paste0(" (", signif(window_cm, 3), " cm\u207B\u00B9)")
     }
 
-    cli::cli_abort(c(
+    abort_horizons(c(
       "The Savitzky-Golay window is at least as wide as the spectrum.",
       "x" = "{.arg sg_window} is {recipe_cfg$sg_window} grid points{width}; the object has {n_spectral} spectral column{?s}.",
       "i" = "The window must be narrower than the spectrum. Re-run {.fn configure} with a smaller {.arg sg_window}, or keep more of the spectrum."
-    ), class = "horizons_input_error", call = call)
+    ), kind = "input", call = call)
 
   }
 
@@ -2347,35 +2430,41 @@ evaluation_recipe <- function(x, call = rlang::caller_env()) {
 evaluate_config_worker <- function(config_i, shared) {
 
   ## -------------------------------------------------------------------------
-  ## Validate the cross-process contract
+  ## The worker's horizons, then the cross-process contract
   ## -------------------------------------------------------------------------
-  ## A mis-keyed entry arrives as NULL. Most then error, but `seed` and
-  ## `grid_size` do not: set.seed(NULL) reseeds from the clock and
-  ## tune_grid(grid = NULL) invents its own grid, so the run would succeed
-  ## while being unreproducible or tuned over the wrong space.
+  ## A partial guard on the installed-vs-source hazard: it catches a worker
+  ## loading a different horizons VERSION than the parent. It cannot catch
+  ## same-version source edits, which is why evaluate() also refuses to
+  ## dispatch under pkgload. Checked first, since another version's payload
+  ## keys may differ, and that is a version skew, not a bug. A payload
+  ## without the parent's version is malformed, below.
+  worker_version <- as.character(utils::packageVersion("horizons"))
 
-  if (!setequal(names(shared), SHARED_ARG_NAMES)) {
+  if (rlang::is_string(shared$pkg_version) &&
+      !identical(worker_version, shared$pkg_version)) {
 
-    rlang::abort(paste0(
-      "Malformed worker payload. Missing: ",
-      paste(setdiff(SHARED_ARG_NAMES, names(shared)), collapse = ", ") %||% "-",
-      "; unexpected: ",
-      paste(setdiff(names(shared), SHARED_ARG_NAMES), collapse = ", ") %||% "-"
-    ))
+    abort_horizons(c(
+      "A parallel worker loaded horizons {worker_version}, but the parent runs {shared$pkg_version}.",
+      "i" = "Reinstall the package so workers run matching code."
+    ), kind = "dependency")
 
   }
 
-  ## Partial guard on the installed-vs-source hazard: catches a worker loading a
-  ## different horizons VERSION than the parent. It cannot catch same-version
-  ## source edits, which is why evaluate() also refuses to dispatch under pkgload.
-  worker_version <- as.character(utils::packageVersion("horizons"))
+  ## A mis-keyed entry arrives as NULL. Most then error, but `seed` and
+  ## `grid_size` do not: set.seed(NULL) reseeds from the clock and
+  ## tune_grid(grid = NULL) invents its own grid, so the run would succeed
+  ## while being unreproducible or tuned over the wrong space. The parent
+  ## asserts the same keys before dispatch, so a mismatch here means the
+  ## transport changed the payload.
+  if (!setequal(names(shared), SHARED_ARG_NAMES)) {
 
-  if (!identical(worker_version, shared$pkg_version)) {
+    missing    <- setdiff(SHARED_ARG_NAMES, names(shared))
+    unexpected <- setdiff(names(shared), SHARED_ARG_NAMES)
 
-    rlang::abort(paste0(
-      "Worker loaded horizons ", worker_version, " but the parent is ",
-      shared$pkg_version, ". Reinstall the package so workers run matching code."
-    ))
+    abort_horizons(c(
+      "Malformed worker payload.",
+      "x" = "Missing: {if (length(missing)) paste(missing, collapse = ', ') else '-'}; unexpected: {if (length(unexpected)) paste(unexpected, collapse = ', ') else '-'}."
+    ), kind = "internal")
 
   }
 

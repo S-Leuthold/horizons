@@ -1226,7 +1226,7 @@ cold_start_evaluation <- function(x, metric, seed, call = rlang::caller_env()) {
   role_map    <- x$data$role_map
   outcome_col <- role_map$variable[role_map$role == "outcome"]
   cv_folds    <- x$config$tuning$cv_folds
-  modelled    <- modelling_rows(x$data$analysis, outcome_col)
+  modelled    <- modelling_rows(x$data$analysis, outcome_col, call = call)
   n_modelled  <- nrow(modelled$data)
 
   if (n_modelled < cv_folds * 2) {
@@ -1250,7 +1250,7 @@ cold_start_evaluation <- function(x, metric, seed, call = rlang::caller_env()) {
   ## is refused before anything is drawn.
   trim_request <- response_trim_request(x)
 
-  drawn <- draw_eval_split(modelled$data, outcome_col, seed)
+  drawn <- draw_eval_split(modelled$data, outcome_col, seed, call = call)
 
   trimmed <- trim_training_responses(drawn$split, outcome_col, trim_request,
                                      id_col = id_column(role_map))

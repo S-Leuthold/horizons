@@ -33,9 +33,15 @@
 #' @export
 monitor_evaluate <- function(output_dir, watch = FALSE, interval = 10) {
 
+  check_arg(rlang::check_string, output_dir)
+
   if (!dir.exists(output_dir)) {
 
-    rlang::abort(paste0("Output directory not found: ", output_dir))
+    abort_horizons(c(
+      "{.arg output_dir} must be a directory an {.fn evaluate} run writes to.",
+      "x" = "{.path {output_dir}} does not exist.",
+      "i" = "Pass the directory given to {.code control_horizons(output_dir = )}."
+    ), kind = "input")
 
   }
 
@@ -83,17 +89,25 @@ monitor_evaluate <- function(output_dir, watch = FALSE, interval = 10) {
 
 
 #' Read the run manifest evaluate() writes
+#'
+#' @description
+#' Re-read on every poll in watch mode, so its refusals report as
+#' `monitor_evaluate()`: the directory is the user's argument, and the
+#' manifest the state it has to hold.
+#'
+#' @param output_dir The directory `monitor_evaluate()` was given.
+#' @param call The frame a refusal reports: `monitor_evaluate()`'s.
 #' @noRd
-.read_monitor_manifest <- function(output_dir) {
+.read_monitor_manifest <- function(output_dir, call = rlang::caller_env()) {
 
   manifest_path <- file.path(output_dir, "eval_manifest.rds")
 
   if (!file.exists(manifest_path)) {
 
-    rlang::abort(paste0(
-      "No eval_manifest.rds found in '", output_dir, "'. ",
-      "evaluate() writes it when called with output_dir; has the run started?"
-    ))
+    abort_horizons(c(
+      "No {.file eval_manifest.rds} in {.path {output_dir}}.",
+      "i" = "{.fn evaluate} writes it when a run with {.arg output_dir} starts; has the run started?"
+    ), kind = "input", call = call)
 
   }
 
@@ -104,11 +118,10 @@ monitor_evaluate <- function(output_dir, watch = FALSE, interval = 10) {
   ## run by another version of horizons.
   if (!identical(manifest$schema_version, EVAL_MANIFEST_SCHEMA)) {
 
-    rlang::abort(paste0(
-      "The eval_manifest.rds in '", output_dir, "' was written by another ",
-      "version of horizons. evaluate() rewrites it when a run starts in this ",
-      "directory; monitor that run."
-    ))
+    abort_horizons(c(
+      "The {.file eval_manifest.rds} in {.path {output_dir}} was written by another version of horizons.",
+      "i" = "{.fn evaluate} rewrites it when a run starts in this directory; monitor that run."
+    ), kind = "validation", call = call)
 
   }
 
