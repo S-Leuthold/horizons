@@ -97,6 +97,21 @@ log_warning <- function(collector,
                         n      = max(length(ids), 1L),
                         .envir = rlang::caller_env()) {
 
+  check_log_topic(topic)
+
+  log_event(collector, "warning", topic, message, ids, n, .envir)
+
+}
+
+#' Refuse a warning topic horizons does not define
+#'
+#' @param topic The topic a caller asked for.
+#' @return `NULL`, invisibly; aborts with `horizons_error_internal`, since
+#'   only horizons names a topic.
+#' @keywords internal
+#' @noRd
+check_log_topic <- function(topic) {
+
   if (!rlang::is_string(topic) || !topic %in% LOG_TOPICS) {
 
     abort_horizons(
@@ -106,7 +121,7 @@ log_warning <- function(collector,
 
   }
 
-  log_event(collector, "warning", topic, message, ids, n, .envir)
+  invisible(NULL)
 
 }
 
@@ -445,7 +460,9 @@ unit_step <- function(step, expr) {
 #'   kind of unit, e.g. `"configuration"`), `id`, `step` (the innermost
 #'   [unit_step()] label, or `NA`), `type` (`"failure"` or `"warning"`),
 #'   `class` (the root cause's class), `message` (one line, from
-#'   [condition_summary()]), `n` and `trace` (a list holding the backtrace as
+#'   [condition_summary()]), `cause` and `where` (the two parts `message`
+#'   joins, from [condition_parts()], so a record can be merged with the same
+#'   text from tune's notes), `n` and `trace` (a list holding the backtrace as
 #'   text, or `NULL`).
 #' @keywords internal
 #' @noRd
@@ -458,6 +475,8 @@ new_unit_records <- function() {
     type    = character(0),
     class   = character(0),
     message = character(0),
+    cause   = character(0),
+    where   = character(0),
     n       = integer(0),
     trace   = list()
   )
@@ -530,11 +549,14 @@ run_unit <- function(expr, unit, id, debug = FALSE, keep_traces = FALSE) {
     records[[length(records) + 1L]] <<- tryCatch(
       {
         trace <- if (identical(type, "failure") && isTRUE(keep_traces)) {
-          traced <- rlang::cnd_entrace(cnd)
-          if (!is.null(traced$trace)) format(traced$trace)
+          traced <- chain_trace(rlang::cnd_entrace(cnd))
+          if (!is.null(traced)) format(traced)
         }
+        parts <- condition_parts(cnd)
         list(unit = unit, id = id, step = current_step(), type = type,
-             class = root_class(cnd), message = condition_summary(cnd),
+             class   = root_class(cnd),
+             message = format_condition(parts$cause, parts$where),
+             cause   = parts$cause, where = parts$where,
              n = 1L, trace = trace)
       },
       error = function(e) abort_horizons(
@@ -613,9 +635,128 @@ unit_records <- function(records) {
     type    = vapply(records, `[[`, character(1), "type"),
     class   = vapply(records, `[[`, character(1), "class"),
     message = vapply(records, `[[`, character(1), "message"),
+    cause   = vapply(records, `[[`, character(1), "cause"),
+    where   = vapply(records, `[[`, character(1), "where"),
     n       = vapply(records, `[[`, integer(1), "n"),
     trace   = lapply(records, `[[`, "trace")
   )
+
+}
+
+## ---------------------------------------------------------------------------
+## A unit's own horizons warnings
+## ---------------------------------------------------------------------------
+## A unit cannot reach its verb's collector, which never goes to a worker, so a
+## horizons warning that arises inside one is raised as a classed condition.
+## run_unit() records it with its class like any other warning, and the verb
+## lifts it onto its log, from where it is raised once, at the verb's end. A
+## warning another package raises in a unit (ranger, yardstick) stays on the
+## unit's row (DECISIONS 2026-10-16).
+
+#' Raise a horizons warning from inside a unit
+#'
+#' @description
+#' Signals `horizons_warning_<topic>`. Inside [run_unit()] it is recorded with
+#' that class and muffled, and the verb lifts it to its log with
+#' [log_unit_warnings()]; outside a unit it is an ordinary warning.
+#'
+#' @param topic Character(1). One of `LOG_TOPICS`.
+#' @param message Character. A cli message, interpolated in `.envir`.
+#' @param .envir The environment the message is interpolated in.
+#' @return `NULL`, invisibly.
+#' @keywords internal
+#' @noRd
+warn_in_unit <- function(topic, message, .envir = rlang::caller_env()) {
+
+  check_log_topic(topic)
+
+  cli::cli_warn(
+    message,
+    class  = c(paste0("horizons_warning_", topic), "horizons_warning"),
+    call   = NULL,
+    .envir = .envir
+  )
+
+  invisible(NULL)
+
+}
+
+#' Lift the horizons warnings units raised onto a verb call's log
+#'
+#' @description
+#' Of the units' records, the warnings raised with [warn_in_unit()] go to the
+#' collector under their topic, one event per distinct message, its ids the
+#' units that raised it. Every other record stays where it is: a failure on
+#' its unit's row, and another package's warning in the row's warnings.
+#'
+#' @param collector From [log_open()].
+#' @param records Records shaped like [new_unit_records()]'s, or `NULL`.
+#' @return `collector`, invisibly.
+#' @keywords internal
+#' @noRd
+log_unit_warnings <- function(collector, records) {
+
+  if (is.null(records) || !"class" %in% names(records)) return(invisible(collector))
+
+  topic  <- sub("^horizons_warning_", "", records$class)
+  lifted <- records$type == "warning" &
+    startsWith(records$class, "horizons_warning_") & topic %in% LOG_TOPICS
+
+  if (!any(lifted)) return(invisible(collector))
+
+  records <- records[lifted, , drop = FALSE]
+  topic   <- topic[lifted]
+  key     <- paste0(topic, "\r", records$message)
+
+  for (k in unique(key)) {
+
+    these   <- key == k
+    text    <- records$message[these][1]
+    unit    <- records$unit[these][1]
+    ids     <- unique(records$id[these])
+    n_units <- length(ids)
+
+    ### The text is substituted, not inlined, so braces in it stay text.
+    log_warning(collector, topic[these][1], c(
+      "{text}",
+      "i" = "In {n_units} {unit}{cli::qty(n_units)}{?s}: {.val {ids}}."
+    ), ids = ids)
+
+  }
+
+  invisible(collector)
+
+}
+
+#' The backtrace a condition's chain holds
+#'
+#' @description
+#' [rlang::cnd_entrace()] adds no trace to a condition when one of its parents
+#' already has one, which is the case for a wrapped error (a recipe step's
+#' `recipes_error_step` around the step's own), so the trace is read from the
+#' first condition in the chain that has one.
+#'
+#' @param cnd A condition.
+#' @return An `rlang_trace`, or `NULL`.
+#' @keywords internal
+#' @noRd
+chain_trace <- function(cnd) {
+
+  node <- cnd
+
+  ### Bounded, as in root_class(), so a chain that loops cannot hang.
+  for (i in seq_len(50L)) {
+
+    if (!inherits(node, "condition")) return(NULL)
+
+    trace <- tryCatch(node[["trace"]], error = function(e) NULL)
+    if (!is.null(trace)) return(trace)
+
+    node <- tryCatch(node[["parent"]], error = function(e) NULL)
+
+  }
+
+  NULL
 
 }
 

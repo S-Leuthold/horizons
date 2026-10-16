@@ -10,6 +10,11 @@
 #' structured data. All console output (tree rendering, progress messages) is
 #' the responsibility of the calling `evaluate()` function.
 #'
+#' The configuration is one unit ([run_unit()]): a run failure in any step
+#' ends it, and the row records the step (`EVAL_STEPS`), the cause, its root
+#' class and, with `keep_traces`, its backtrace. A door, internal or
+#' dependency error is not the configuration's and propagates.
+#'
 #' @param config_row Single-row tibble from `config$configs`. Must contain:
 #'   `config_id`, `model`, `transformation`, `preprocessing`,
 #'   `feature_selection`.
@@ -50,6 +55,11 @@
 #'   response, the tuning predictions) are clamped to before scoring.
 #'   `evaluate()` reads it from `configure()`'s `config$outcome_range`.
 #'   Default `c(0, Inf)`.
+#' @param debug Logical. Contain nothing: the first failure, inside tune
+#'   included, stops the call with its backtrace, and the Bayesian search's
+#'   failure is not fallen back from. Warnings are still recorded.
+#' @param keep_traces Logical. Keep a failure's backtrace, as text, in the
+#'   row's `trace`.
 #'
 #' @return Single-row tibble with columns: `config_id`, `status` (`"pruned"`
 #'   means Bayesian refinement was skipped), `below_prune_threshold` (logical;
@@ -58,8 +68,12 @@
 #'   test-set metrics `rmse`, `rrmse`, `rsq`, `ccc`, `rpd`, `mae`, the six
 #'   cross-validated means at the selected hyperparameters `cv_rmse`,
 #'   `cv_rrmse`, `cv_rsq`, `cv_ccc`, `cv_rpd`, `cv_mae` (what `evaluate()` and
-#'   `fit()` rank on), `best_params` (list-column), `error_message`,
-#'   `warnings`, `runtime_secs`.
+#'   `fit()` rank on), `best_params` (list-column), `error_message` (the
+#'   failed step and the cause), `class` (the failure's root class), `trace`
+#'   (list-column: the backtrace as text under `keep_traces`, else `NULL`),
+#'   `warnings`, `runtime_secs`. The unit's records ride on the row as the
+#'   attribute `"unit_records"`, for `evaluate()` to lift its horizons
+#'   warnings onto the log.
 #'
 #' @keywords internal
 evaluate_single_config <- function(config_row,
@@ -75,7 +89,9 @@ evaluate_single_config <- function(config_row,
                                    seed            = 42L,
                                    sg_window       = DEFAULT_SG_WINDOW,
                                    pca_threshold   = DEFAULT_PCA_THRESHOLD,
-                                   outcome_range   = DEFAULT_OUTCOME_RANGE) {
+                                   outcome_range   = DEFAULT_OUTCOME_RANGE,
+                                   debug           = FALSE,
+                                   keep_traces     = FALSE) {
 
   start_time <- Sys.time()
 
@@ -94,476 +110,407 @@ evaluate_single_config <- function(config_row,
   transformation <- tolower(as.character(config_row$transformation))
   train_data     <- rsample::training(split)
 
-  ## Accumulate warnings from all steps for tree rendering, as records that
-  ## render_warning_log() reduces to one line per distinct message (#96)
+  ## The row's warnings, as records that render_warning_log() reduces to one
+  ## line per distinct message (#96): tune's notes and the package's own
+  ## lines, gathered as the unit runs, and, once it returns, the warnings the
+  ## unit caught as they were raised.
   warning_log <- new_warning_log()
 
-  collect_from <- function(safe_result) {
-    warning_log <<- dplyr::bind_rows(warning_log, text_records(safe_result$warnings))
-  }
-
   ## tune catches the warnings raised inside its resampling (a recipe step
-  ## warning during prep, say) and keeps them in .notes, where
-  ## safely_execute() never sees them.
+  ## warning during prep, say) and keeps them in .notes, where run_unit()
+  ## never sees them.
   collect_notes_from <- function(tune_results, scope = "cv") {
     notes <- tune_note_records(tune_results, type = "warning", scope = scope)
     warning_log <<- dplyr::bind_rows(warning_log, notes)
   }
 
-  ## -----------------------------------------------------------------------
-  ## Step 1: Build recipe
-  ## -----------------------------------------------------------------------
+  unit <- run_unit({
 
-  recipe_result <- safely_execute(
-    build_recipe(config_row, train_data, role_map,
-                 sg_window     = sg_window,
-                 pca_threshold = pca_threshold),
-    log_error          = FALSE,
-    capture_conditions = TRUE
-  )
+    ## -----------------------------------------------------------------------
+    ## Step 1: Build recipe, model specification and workflow
+    ## -----------------------------------------------------------------------
 
-  if (!is.null(recipe_result$error)) {
+    recipe <- unit_step("recipe", build_recipe(config_row, train_data, role_map,
+                                               sg_window     = sg_window,
+                                               pca_threshold = pca_threshold))
 
-    return(create_failed_result(config_id,
-      paste0("Recipe building failed: ", condition_summary(recipe_result$error))))
+    model_spec <- unit_step("model_spec", define_model_spec(config_row$model))
 
-  }
+    wflow <- unit_step("workflow", workflows::workflow() |>
+                         workflows::add_recipe(recipe) |>
+                         workflows::add_model(model_spec))
 
-  recipe <- recipe_result$result
-  collect_from(recipe_result)
+    ## -----------------------------------------------------------------------
+    ## Step 2: Finalize parameter set (mtry and num_comp upper bounds)
+    ## -----------------------------------------------------------------------
+    ## Models with mtry (rf, xgboost, lightgbm) need the upper bound set from
+    ## the actual predictor count after recipe preprocessing. Without this,
+    ## tune_grid() may sample mtry values larger than the number of predictors.
+    ## plsr's num_comp is capped by the same count and by the smallest fold's
+    ## rows (#216).
+    ##
+    ## That prep is the only one before tuning, since it costs nothing extra
+    ## (DECISIONS 2026-10-16): a step's error there ends the configuration
+    ## with its class. Every other model's recipe is prepped only when tune's
+    ## notes show a step failed (check_tune_result()).
 
-  ## -----------------------------------------------------------------------
-  ## Step 2: Define model specification
-  ## -----------------------------------------------------------------------
+    param_set   <- workflows::extract_parameter_set_dials(wflow)
+    prepped_now <- any(c("mtry", "num_comp") %in% param_set$name)
 
-  model_result <- safely_execute(
-    define_model_spec(config_row$model),
-    log_error          = FALSE,
-    capture_conditions = TRUE
-  )
+    if (prepped_now) {
 
-  if (!is.null(model_result$error)) {
+      prepped <- unit_step("prep", recipes::prep(recipe))
+      baked   <- unit_step("prep", recipes::bake(prepped, new_data = NULL))
 
-    return(create_failed_result(config_id,
-      paste0("Model specification failed: ", condition_summary(model_result$error))))
+      param_set <- unit_step("finalize_parameters", {
+        eval_data <- baked[, prepped_predictors(prepped, baked), drop = FALSE]
+        finalized <- dials::finalize(param_set, eval_data)
+        cap_pls_components(finalized, ncol(eval_data), min_analysis_rows(cv_folds))
+      })
 
-  }
-
-  model_spec <- model_result$result
-  collect_from(model_result)
-
-  ## -----------------------------------------------------------------------
-  ## Step 3: Create workflow
-  ## -----------------------------------------------------------------------
-
-  wflow_result <- safely_execute(
-    workflows::workflow() |>
-      workflows::add_recipe(recipe) |>
-      workflows::add_model(model_spec),
-    log_error          = FALSE,
-    capture_conditions = TRUE
-  )
-
-  if (!is.null(wflow_result$error)) {
-
-    return(create_failed_result(config_id,
-      paste0("Workflow creation failed: ", condition_summary(wflow_result$error))))
-
-  }
-
-  wflow <- wflow_result$result
-
-  ## -----------------------------------------------------------------------
-  ## Step 4: Finalize parameter set (mtry and num_comp upper bounds)
-  ## -----------------------------------------------------------------------
-  ## Models with mtry (rf, xgboost, lightgbm) need the upper bound set from
-  ## the actual predictor count after recipe preprocessing. Without this,
-  ## tune_grid() may sample mtry values larger than the number of predictors.
-  ## plsr's num_comp is capped by the same count and by the smallest fold's
-  ## rows (#216).
-
-  param_set <- workflows::extract_parameter_set_dials(wflow)
-
-  if (any(c("mtry", "num_comp") %in% param_set$name)) {
-
-    finalize_result <- safely_execute({
-
-      prepped <- recipes::prep(recipe)
-      baked   <- recipes::bake(prepped, new_data = NULL)
-
-      eval_data <- baked[, prepped_predictors(prepped, baked), drop = FALSE]
-
-      result <- dials::finalize(param_set, eval_data)
-      result <- cap_pls_components(result, ncol(eval_data), min_analysis_rows(cv_folds))
-
-      rm(prepped, baked, eval_data)
+      rm(prepped, baked)
       invisible(gc(verbose = FALSE))
 
-      result
-
-    }, log_error = FALSE, capture_conditions = TRUE)
-
-    if (!is.null(finalize_result$error)) {
-
-      return(create_failed_result(config_id,
-        paste0("Parameter finalization failed: ", condition_summary(finalize_result$error))))
-
     }
 
-    param_set <- finalize_result$result
-    collect_from(finalize_result)
+    ## -----------------------------------------------------------------------
+    ## Step 3: Define tuning metric set
+    ## -----------------------------------------------------------------------
 
-  }
+    ## Scored on the original response scale. The response transform is a
+    ## skip = TRUE recipe step, so tune never applies it to the assessment set;
+    ## tuning_metric_set() back-transforms the estimate inside each metric so
+    ## select_best(), tune_bayes() and the prune gate all see the same scale the
+    ## leaderboard reports. rmse stays first: tune_bayes() optimises the first
+    ## metric in the set. See #49. The back-transform clamps to the outcome's
+    ## range, as the test-set scoring below does (#76).
+    tune_metrics <- tuning_metric_set(transformation, outcome_range = outcome_range)
 
-  ## -----------------------------------------------------------------------
-  ## Step 5: Define tuning metric set
-  ## -----------------------------------------------------------------------
+    ## -----------------------------------------------------------------------
+    ## Step 4: Grid search
+    ## -----------------------------------------------------------------------
 
-  ## Scored on the original response scale. The response transform is a
-  ## skip = TRUE recipe step, so tune never applies it to the assessment set;
-  ## tuning_metric_set() back-transforms the estimate inside each metric so
-  ## select_best(), tune_bayes() and the prune gate all see the same scale the
-  ## leaderboard reports. rmse stays first: tune_bayes() optimises the first
-  ## metric in the set. See #49. The back-transform clamps to the outcome's
-  ## range, as the test-set scoring below does (#76).
-  tune_metrics <- tuning_metric_set(transformation, outcome_range = outcome_range)
+    grid_results <- unit_step("tune_grid", {
 
-  ## -----------------------------------------------------------------------
-  ## Step 6: Grid search
-  ## -----------------------------------------------------------------------
-
-  grid_result <- safely_execute(
-    suppressMessages(
-      tune::tune_grid(
-        object     = wflow,
-        resamples  = cv_folds,
-        grid       = grid_size,
-        metrics    = tune_metrics,
-        param_info = param_set,
-        control    = tune::control_grid(
-          save_pred     = FALSE,
-          save_workflow = FALSE,
-          verbose       = FALSE,
-          allow_par     = allow_par,
-          parallel_over = parallel_over
-        )
-      )
-    ),
-    log_error          = FALSE,
-    capture_conditions = TRUE
-  )
-
-  if (!is.null(grid_result$error)) {
-
-    return(create_failed_result(config_id,
-      paste0("Grid search failed: ", condition_summary(grid_result$error))))
-
-  }
-
-  grid_results <- grid_result$result
-  collect_from(grid_result)
-
-  ## Check for "All models failed" warning from tune. tune_grid() returns
-  ## rather than erroring, and the reason is only in its .notes, so it is
-  ## read back from there (#96).
-  if (!is.null(grid_result$warnings)) {
-
-    if (any(grepl("All models failed", unlist(grid_result$warnings)))) {
-
-      cause <- tune_failure_cause(grid_results)
-
-      return(create_failed_result(config_id, paste0(
-        "Grid search failed: all models failed during CV",
-        if (!is.null(cause)) paste0(" \u2014 ", cause)
-      )))
-
-    }
-
-  }
-
-  gc(verbose = FALSE)
-
-  ## -----------------------------------------------------------------------
-  ## Step 7: Prune check
-  ## -----------------------------------------------------------------------
-  ## If the best grid-search RPD is below threshold, skip Bayesian
-  ## optimization. RPD < 1.0 means the model is no better than the mean
-  ## predictor — no point spending Bayesian iterations on it. This RPD is on
-  ## the original response scale (tuning_metric_set()), so the threshold means
-  ## the same thing for every transformation.
-  ## The config still gets last_fit metrics from grid-search best.
-  ##
-  ## The quality signal and the status label are kept apart (#38). Whenever
-  ## prune = TRUE the gate's reading is recorded as below_prune_threshold,
-  ## which fit() reads to warn when every member it fits fell below it. The
-  ## "pruned" status means only that Bayesian refinement was skipped, so with
-  ## bayesian_iter = 0, where there is nothing to skip, a config below the
-  ## threshold is a success. It used to be labelled "pruned" anyway, which
-  ## evaluate() and fit() rank only as a fallback.
-
-  skip_bayesian         <- FALSE
-  below_prune_threshold <- NA
-
-  if (prune) {
-
-    best_grid <- tune::show_best(grid_results, metric = "rpd", n = 1)
-
-    below_prune_threshold <- !is.finite(best_grid$mean[1]) ||
-      best_grid$mean[1] < prune_threshold
-
-    skip_bayesian <- below_prune_threshold && bayesian_iter > 0
-
-  }
-
-  ## -----------------------------------------------------------------------
-  ## Step 8: Bayesian optimization
-  ## -----------------------------------------------------------------------
-  ## Falls back to grid results on failure — never aborts the config.
-
-  final_tune_results <- grid_results
-
-  if (!skip_bayesian && bayesian_iter > 0) {
-
-    ## Re-pin before every stochastic stage. tune's future path advances the
-    ## parent stream past where the sequential loop leaves it (future_lapply()
-    ## draws worker seeds from it), so a stage seeded only by what came before
-    ## would differ between allow_par = TRUE and FALSE. Pinning here makes
-    ## the axis a pure performance choice (review finding, 2026-09-15).
-    set.seed(seed, kind = "Mersenne-Twister")
-
-    bayes_result <- safely_execute(
-      suppressMessages(suppressWarnings(
-        tune::tune_bayes(
+      results <- suppressMessages(
+        tune::tune_grid(
           object     = wflow,
           resamples  = cv_folds,
-          initial    = grid_results,
-          iter       = bayesian_iter,
-          param_info = param_set,
+          grid       = grid_size,
           metrics    = tune_metrics,
-          control    = tune::control_bayes(
+          param_info = param_set,
+          control    = tune::control_grid(
             save_pred     = FALSE,
             save_workflow = FALSE,
             verbose       = FALSE,
-            no_improve    = BAYES_NO_IMPROVE_LIMIT,
             allow_par     = allow_par,
             parallel_over = parallel_over
           )
         )
-      )),
-      log_error          = FALSE,
-      capture_conditions = TRUE
-    )
+      )
 
-    ## When the search fails, final_tune_results stays as grid_results and
-    ## the row records why, so a config whose Bayesian budget did nothing
-    ## does not read as an ordinary success (#209).
-    if (!is.null(bayes_result$error)) {
+      check_tune_result(results, "all models failed during CV",
+                        recipe = if (!prepped_now) recipe, debug = debug)
 
-      warning_log <- dplyr::bind_rows(warning_log, text_records(
-        paste0("The Bayesian search failed, so the hyperparameters were chosen from the grid alone: ",
-               condition_summary(bayes_result$error)),
-        pinned = TRUE
-      ))
+      results
 
-    } else if (!bayes_iterations_ran(bayes_result$result)) {
+    })
 
-      ## The search returned without an iteration past the grid: its loop
-      ## errored, or every candidate failed in every fold (tune drops those
-      ## without a note).
-      warning_log <- dplyr::bind_rows(warning_log, text_records(
-        "The Bayesian search produced no results, so the hyperparameters were chosen from the grid alone.",
-        pinned = TRUE
-      ))
-
-    } else {
-
-      ## Candidates that failed in some folds leave their reasons in .notes,
-      ## which collect_notes_from() reads below.
-      collect_from(bayes_result)
-      final_tune_results <- bayes_result$result
-
-    }
     gc(verbose = FALSE)
 
-  }
+    ## -----------------------------------------------------------------------
+    ## Step 5: Prune check
+    ## -----------------------------------------------------------------------
+    ## If the best grid-search RPD is below threshold, skip Bayesian
+    ## optimization. RPD < 1.0 means the model is no better than the mean
+    ## predictor — no point spending Bayesian iterations on it. This RPD is on
+    ## the original response scale (tuning_metric_set()), so the threshold means
+    ## the same thing for every transformation.
+    ## The config still gets last_fit metrics from grid-search best.
+    ##
+    ## The quality signal and the status label are kept apart (#38). Whenever
+    ## prune = TRUE the gate's reading is recorded as below_prune_threshold,
+    ## which fit() reads to warn when every member it fits fell below it. The
+    ## "pruned" status means only that Bayesian refinement was skipped, so with
+    ## bayesian_iter = 0, where there is nothing to skip, a config below the
+    ## threshold is a success. It used to be labelled "pruned" anyway, which
+    ## evaluate() and fit() rank only as a fallback.
 
-  ## Read once, from whichever result is kept: a tune_bayes() result carries
-  ## its initial grid's notes as .iter 0, so this covers both stages.
-  collect_notes_from(final_tune_results)
+    skip_bayesian         <- FALSE
+    below_prune_threshold <- NA
 
-  ## -----------------------------------------------------------------------
-  ## Step 9: Select best hyperparameters
-  ## -----------------------------------------------------------------------
+    if (prune) {
 
-  best_result <- safely_execute(
-    tune::select_best(final_tune_results, metric = "rmse"),
-    log_error          = FALSE,
-    capture_conditions = TRUE
-  )
+      best_grid <- unit_step("prune", tune::show_best(grid_results, metric = "rpd", n = 1))
 
-  if (!is.null(best_result$error)) {
+      below_prune_threshold <- !is.finite(best_grid$mean[1]) ||
+        best_grid$mean[1] < prune_threshold
 
-    return(create_failed_result(config_id,
-      paste0("Parameter selection failed: ", condition_summary(best_result$error))))
+      skip_bayesian <- below_prune_threshold && bayesian_iter > 0
 
-  }
+    }
 
-  best_params <- best_result$result
+    ## -----------------------------------------------------------------------
+    ## Step 6: Bayesian optimization
+    ## -----------------------------------------------------------------------
+    ## A search that fails, or returns without an iteration past the grid,
+    ## keeps the grid's choice, and says so with a substitution warning that
+    ## the row shows and evaluate() puts on the log (#209). That fallback is
+    ## containment, so the kinds no unit contains still propagate, and under
+    ## debug nothing is fallen back from.
 
-  ## -----------------------------------------------------------------------
-  ## Step 9b: Record the CV panel at the selected hyperparameters
-  ## -----------------------------------------------------------------------
-  ## The cross-validated means tune scored for the chosen config, on the
-  ## original scale via tuning_metric_set(). evaluate() and fit() rank on
-  ## these rather than on the test-set metrics computed below, so the test
-  ## set stays held out from selection and its metrics are honest (#50).
+    final_tune_results <- grid_results
 
-  cv_panel <- cv_panel_at(final_tune_results, best_params)
+    if (!skip_bayesian && bayesian_iter > 0) {
 
-  if (all(is.na(unlist(cv_panel)))) {
+      ## Re-pin before every stochastic stage. tune's future path advances the
+      ## parent stream past where the sequential loop leaves it (future_lapply()
+      ## draws worker seeds from it), so a stage seeded only by what came before
+      ## would differ between allow_par = TRUE and FALSE. Pinning here makes
+      ## the axis a pure performance choice (review finding, 2026-09-15).
+      set.seed(seed, kind = "Mersenne-Twister")
 
-    warning_log <- dplyr::bind_rows(warning_log, text_records(
-      "CV metrics at the selected hyperparameters could not be recovered; cv_* columns are NA.",
-      pinned = TRUE
+      unit_step("tune_bayes", {
+
+        search <- function() {
+
+          results <- suppressMessages(
+            tune::tune_bayes(
+              object     = wflow,
+              resamples  = cv_folds,
+              initial    = grid_results,
+              iter       = bayesian_iter,
+              param_info = param_set,
+              metrics    = tune_metrics,
+              control    = tune::control_bayes(
+                save_pred     = FALSE,
+                save_workflow = FALSE,
+                verbose       = FALSE,
+                no_improve    = BAYES_NO_IMPROVE_LIMIT,
+                allow_par     = allow_par,
+                parallel_over = parallel_over
+              )
+            )
+          )
+
+          check_tune_result(results, failure = NULL, debug = debug)
+
+          results
+
+        }
+
+        search_cause   <- NULL
+        bayes_results  <- if (debug) search() else rlang::try_fetch(
+          search(),
+          error = function(e) {
+            if (rlang::cnd_inherits(e, NEVER_CONTAINED)) stop(e)
+            search_cause <<- condition_summary(e)
+            NULL
+          }
+        )
+
+        if (!is.null(search_cause)) {
+
+          warn_in_unit("substitution",
+                       "The Bayesian search failed, so the hyperparameters were chosen from the grid alone: {search_cause}")
+
+        } else if (!bayes_iterations_ran(bayes_results)) {
+
+          ## The search returned without an iteration past the grid: its loop
+          ## errored, or every candidate failed in every fold (tune drops those
+          ## without a note).
+          warn_in_unit("substitution",
+                       "The Bayesian search produced no results, so the hyperparameters were chosen from the grid alone.")
+
+        } else {
+
+          ## Candidates that failed in some folds leave their reasons in .notes,
+          ## which collect_notes_from() reads below.
+          final_tune_results <- bayes_results
+
+        }
+
+      })
+
+      gc(verbose = FALSE)
+
+    }
+
+    ## Read once, from whichever result is kept: a tune_bayes() result carries
+    ## its initial grid's notes as .iter 0, so this covers both stages.
+    collect_notes_from(final_tune_results)
+
+    ## -----------------------------------------------------------------------
+    ## Step 7: Select best hyperparameters, and the CV panel there
+    ## -----------------------------------------------------------------------
+    ## The cross-validated means tune scored for the chosen config, on the
+    ## original scale via tuning_metric_set(). evaluate() and fit() rank on
+    ## these rather than on the test-set metrics computed below, so the test
+    ## set stays held out from selection and its metrics are honest (#50).
+
+    best_params <- unit_step("select_best", tune::select_best(final_tune_results, metric = "rmse"))
+
+    cv_panel <- unit_step("cv_panel", cv_panel_at(final_tune_results, best_params))
+
+    if (all(is.na(unlist(cv_panel)))) {
+
+      warning_log <- dplyr::bind_rows(warning_log, text_records(
+        "CV metrics at the selected hyperparameters could not be recovered; cv_* columns are NA.",
+        pinned = TRUE
+      ))
+
+    }
+
+    ## -----------------------------------------------------------------------
+    ## Step 8: Finalize workflow and fit it on the training part, scoring the
+    ## held-out test set
+    ## -----------------------------------------------------------------------
+
+    final_wflow <- unit_step("finalize_workflow", tune::finalize_workflow(wflow, best_params))
+
+    ## Re-pin: last_fit() draws the engine seed from the parent stream, whose
+    ## position now depends on which axis the tuning ran on (see Step 6).
+    set.seed(seed, kind = "Mersenne-Twister")
+
+    ## Messages muffled, as around the two tuning calls: tune reports its
+    ## notes on the console as it goes, and the row records them instead.
+    last_fit_obj <- unit_step("last_fit", suppressMessages(
+      tune::last_fit(final_wflow, split = split)
+    ))
+    collect_notes_from(last_fit_obj, scope = "test set")
+
+    ## A final fit that failed inside last_fit() leaves its reason only in
+    ## .notes, and the row below still reads as a success with NA test
+    ## metrics. The reason is recorded so the row says why (#96).
+    test_set_cause <- tune_failure_cause(last_fit_obj)
+
+    if (!is.null(test_set_cause)) {
+
+      warning_log <- dplyr::bind_rows(warning_log, text_records(
+        paste0("Test-set fit failed: ", test_set_cause),
+        pinned = TRUE
+      ))
+
+    }
+
+    test_predictions <- unit_step("last_fit", tune::collect_predictions(last_fit_obj))
+
+    ## -----------------------------------------------------------------------
+    ## Step 9: Back-transform the predictions and score them
+    ## -----------------------------------------------------------------------
+
+    ## Unconditional, like predict(): the "none" branch is a passthrough, and
+    ## the clamp to the outcome's range inside back_transform_predictions()
+    ## must apply to every transformation so evaluation scores what deploy
+    ## serves (#53, #76).
+    test_predictions$.pred <- unit_step("back_transform", back_transform_predictions(
+      test_predictions$.pred, transformation, warn = FALSE, outcome_range = outcome_range
     ))
 
-  }
-
-  ## -----------------------------------------------------------------------
-  ## Step 10: Finalize workflow and evaluate on test set
-  ## -----------------------------------------------------------------------
-
-  final_wflow_result <- safely_execute(
-    tune::finalize_workflow(wflow, best_params),
-    log_error          = FALSE,
-    capture_conditions = TRUE
-  )
-
-  if (!is.null(final_wflow_result$error)) {
-
-    return(create_failed_result(config_id,
-      paste0("Workflow finalization failed: ", condition_summary(final_wflow_result$error))))
-
-  }
-
-  final_wflow <- final_wflow_result$result
-
-  ## -----------------------------------------------------------------------
-  ## Step 11: Last fit on the held-out test set
-  ## -----------------------------------------------------------------------
-
-  ## Re-pin: last_fit() draws the engine seed from the parent stream, whose
-  ## position now depends on which axis the tuning ran on (see Step 8).
-  set.seed(seed, kind = "Mersenne-Twister")
-
-  lastfit_result <- safely_execute(
-    tune::last_fit(final_wflow, split = split),
-    log_error          = FALSE,
-    capture_conditions = TRUE
-  )
-
-  if (!is.null(lastfit_result$error)) {
-
-    return(create_failed_result(config_id,
-      paste0("Test evaluation failed: ", condition_summary(lastfit_result$error))))
-
-  }
-
-  last_fit_obj <- lastfit_result$result
-  collect_from(lastfit_result)
-  collect_notes_from(last_fit_obj, scope = "test set")
-
-  ## A final fit that failed inside last_fit() leaves its reason only in
-  ## .notes, and the row below still reads as a success with NA test
-  ## metrics. The reason is recorded so the row says why (#96).
-  test_set_cause <- tune_failure_cause(last_fit_obj)
-
-  if (!is.null(test_set_cause)) {
-
-    warning_log <- dplyr::bind_rows(warning_log, text_records(
-      paste0("Test-set fit failed: ", test_set_cause),
-      pinned = TRUE
+    ## Six NAs when fewer than two test rows have a prediction, and the row
+    ## says why
+    scored <- unit_step("test_metrics", compute_original_scale_metrics(
+      truth    = test_predictions[[outcome_col]],
+      estimate = test_predictions$.pred
     ))
 
+    test_metrics <- metrics_row(scored)
+    na_reason    <- metrics_na_reason(scored)
+
+    if (!is.null(na_reason)) {
+
+      warning_log <- dplyr::bind_rows(warning_log, text_records(na_reason, pinned = TRUE))
+
+    }
+
+    tibble::tibble(
+      config_id     = config_id,
+      status        = if (skip_bayesian) "pruned" else "success",
+      below_prune_threshold = below_prune_threshold,
+      prune_threshold       = if (prune) as.numeric(prune_threshold) else NA_real_,
+      rmse          = test_metrics$rmse,
+      rrmse         = test_metrics$rrmse,
+      rsq           = test_metrics$rsq,
+      ccc           = test_metrics$ccc,
+      rpd           = test_metrics$rpd,
+      mae           = test_metrics$mae,
+      cv_rmse       = cv_panel$cv_rmse,
+      cv_rrmse      = cv_panel$cv_rrmse,
+      cv_rsq        = cv_panel$cv_rsq,
+      cv_ccc        = cv_panel$cv_ccc,
+      cv_rpd        = cv_panel$cv_rpd,
+      cv_mae        = cv_panel$cv_mae,
+      scoring_schema = SCORING_SCHEMA,
+      best_params   = list(best_params),
+      error_message = NA_character_,
+      class         = NA_character_,
+      trace         = list(NULL),
+      warnings      = list(NULL),
+      runtime_secs  = NA_real_
+    )
+
+  }, unit = "configuration", id = config_id, debug = debug, keep_traces = keep_traces)
+
+  ## -------------------------------------------------------------------------
+  ## Step 10: The row, succeeded or failed
+  ## -------------------------------------------------------------------------
+  ## The warnings the unit caught join the notes, so a warning caught as it
+  ## was raised and the same warning in tune's notes are one line.
+
+  warning_log <- dplyr::bind_rows(unit_warning_records(unit$records), warning_log)
+
+  row <- if (unit$failed) {
+
+    failure <- unit$records[unit$records$type == "failure", , drop = FALSE]
+    step    <- failure$step[1]
+
+    failed <- create_failed_result(config_id, paste0(
+      if (is.na(step)) "Evaluation" else EVAL_STEPS[[step]], " failed: ", failure$message[1]
+    ))
+    failed$class <- failure$class[1]
+    failed$trace <- failure$trace[1]
+    failed
+
+  } else {
+
+    unit$value
+
   }
 
-  ## -----------------------------------------------------------------------
-  ## Step 12: Extract predictions and back-transform
-  ## -----------------------------------------------------------------------
+  row$warnings     <- list(render_warning_log(warning_log))
+  row$runtime_secs <- as.numeric(difftime(Sys.time(), start_time, units = "secs"))
 
-  test_predictions <- tune::collect_predictions(last_fit_obj)
+  attr(row, "unit_records") <- unit$records
 
-  ## Unconditional, like predict(): the "none" branch is a passthrough, and
-  ## the clamp to the outcome's range inside back_transform_predictions()
-  ## must apply to every transformation so evaluation scores what deploy
-  ## serves (#53, #76).
-  bt_result <- safely_execute(
-    back_transform_predictions(test_predictions$.pred, transformation,
-                               warn = FALSE, outcome_range = outcome_range),
-    log_error          = FALSE,
-    capture_conditions = TRUE
-  )
-
-  if (!is.null(bt_result$error)) {
-
-    return(create_failed_result(config_id,
-      paste0("Back-transformation failed: ", condition_summary(bt_result$error))))
-
-  }
-
-  test_predictions$.pred <- bt_result$result
-
-  ## -----------------------------------------------------------------------
-  ## Step 13: Compute original-scale metrics
-  ## -----------------------------------------------------------------------
-
-  ## Six NAs when fewer than two test rows have a prediction, and the row
-  ## says why
-  scored       <- compute_original_scale_metrics(
-    truth    = test_predictions[[outcome_col]],
-    estimate = test_predictions$.pred
-  )
-  test_metrics <- metrics_row(scored)
-  na_reason    <- metrics_na_reason(scored)
-
-  if (!is.null(na_reason)) {
-
-    warning_log <- dplyr::bind_rows(warning_log, text_records(na_reason, pinned = TRUE))
-
-  }
-
-  ## -----------------------------------------------------------------------
-  ## Step 14: Return result row
-  ## -----------------------------------------------------------------------
-
-  runtime <- as.numeric(difftime(Sys.time(), start_time, units = "secs"))
-
-  tibble::tibble(
-    config_id     = config_id,
-    status        = if (skip_bayesian) "pruned" else "success",
-    below_prune_threshold = below_prune_threshold,
-    prune_threshold       = if (prune) as.numeric(prune_threshold) else NA_real_,
-    rmse          = test_metrics$rmse,
-    rrmse         = test_metrics$rrmse,
-    rsq           = test_metrics$rsq,
-    ccc           = test_metrics$ccc,
-    rpd           = test_metrics$rpd,
-    mae           = test_metrics$mae,
-    cv_rmse       = cv_panel$cv_rmse,
-    cv_rrmse      = cv_panel$cv_rrmse,
-    cv_rsq        = cv_panel$cv_rsq,
-    cv_ccc        = cv_panel$cv_ccc,
-    cv_rpd        = cv_panel$cv_rpd,
-    cv_mae        = cv_panel$cv_mae,
-    scoring_schema = SCORING_SCHEMA,
-    best_params   = list(best_params),
-    error_message = NA_character_,
-    class         = NA_character_,
-    warnings      = list(render_warning_log(warning_log)),
-    runtime_secs  = runtime
-  )
+  row
 
 }
+
+#' The steps of a configuration's unit, and how a failed row names each
+#'
+#' @description
+#' The [unit_step()] labels inside [evaluate_single_config()], each with the
+#' words its failed row's `error_message` starts with ("Grid search failed:
+#' ..."). A failure outside every step reads "Evaluation failed: ...".
+#'
+#' @keywords internal
+#' @noRd
+EVAL_STEPS <- c(
+  recipe              = "Recipe building",
+  model_spec          = "Model specification",
+  workflow            = "Workflow creation",
+  prep                = "Recipe preparation",
+  finalize_parameters = "Parameter finalization",
+  tune_grid           = "Grid search",
+  prune               = "Prune check",
+  tune_bayes          = "Bayesian search",
+  select_best         = "Parameter selection",
+  cv_panel            = "Cross-validated metrics",
+  finalize_workflow   = "Workflow finalization",
+  last_fit            = "Test evaluation",
+  back_transform      = "Back-transformation",
+  test_metrics        = "Test metrics"
+)
 
 ## ---------------------------------------------------------------------------
 ## prepped_predictors — the columns dials::finalize() may count
@@ -611,9 +558,9 @@ prepped_predictors <- function(prepped, baked) {
 #' Reads `tune::collect_metrics()` for the tuning result and returns the mean
 #' of each metric at the `.config` that `tune::select_best()` chose. These are
 #' the `cv_*` columns of `evaluation$results`, the quantities `evaluate()` and
-#' `fit()` rank on. Missing or unrecoverable values are `NA_real_`; the
-#' function never errors, so a bookkeeping failure cannot fail a config whose
-#' fit succeeded.
+#' `fit()` rank on. A value that is missing or not finite is `NA_real_`, and
+#' so is every value when there is nothing to look up; a failure to read the
+#' metrics is the configuration's failure, at its `cv_panel` step.
 #'
 #' @param tune_results A `tune_results` object (grid or Bayesian).
 #' @param best_params One-row tibble from `tune::select_best()`, carrying
@@ -633,9 +580,9 @@ cv_panel_at <- function(tune_results, best_params,
 
   if (!usable) return(tibble::as_tibble(out))
 
-  panel <- tryCatch(tune::collect_metrics(tune_results), error = function(e) NULL)
+  panel <- tune::collect_metrics(tune_results)
 
-  if (is.null(panel) || !all(c(".config", ".metric", "mean") %in% names(panel))) {
+  if (!all(c(".config", ".metric", "mean") %in% names(panel))) {
 
     return(tibble::as_tibble(out))
 

@@ -2303,3 +2303,136 @@ describe("evaluate() - tuning-settings provenance", {
   })
 
 })
+
+
+## =========================================================================
+## What the configurations report on the log
+## =========================================================================
+
+describe("evaluate() - the configurations' warnings and failures on the log", {
+
+  it("lifts a configuration's horizons warning onto the log once, naming the configurations, and stores no records", {
+
+    template <- ev60()$evaluation$results[1, ]
+
+    ## Each row as evaluate_single_config() returns it: its unit's records
+    ## on it, a substitution warning among them, and another package's
+    ## warning, which stays on the row
+    local_mocked_bindings(
+      evaluate_single_config = function(config_row, ...) {
+        id  <- config_row$config_id
+        row <- mock_eval_row(template, id, "success", warnings = "Kept the grid's choice.")
+        attr(row, "unit_records") <- run_unit({
+          warn_in_unit("substitution", "Kept the grid's choice.")
+          warning("ranger warned")
+        }, "configuration", id)$records
+        row
+      }
+    )
+
+    dir <- withr::local_tempdir()
+    got <- collect_warnings(evaluate(make_eval_object(n = 60, n_configs = 2), seed = 42L,
+                                     control = control_horizons(output_dir = dir)))
+    ev  <- got$value
+
+    subs <- Filter(function(w) inherits(w, "horizons_warning_substitution"), got$warnings)
+    expect_length(subs, 1L)
+    expect_false(any(vapply(got$warnings, function(w) grepl("ranger warned", conditionMessage(w)),
+                            logical(1))))
+
+    row <- ev$log[ev$log$topic %in% "substitution", ]
+    expect_identical(row$ids[[1]], c("cfg_001", "cfg_002"))
+    expect_match(row$message, "Kept the grid's choice. In 2 configurations", fixed = TRUE)
+    expect_identical(subs[[1]]$log, row)
+
+    expect_null(attr(readRDS(file.path(dir, "checkpoints", "cfg_001.rds")), "unit_records"))
+
+  })
+
+  it("says which configurations failed in one partial_failure warning, with each distinct cause", {
+
+    template <- ev60()$evaluation$results[1, ]
+
+    rows <- list(
+      cfg_001 = mock_eval_row(template, "cfg_001", "success"),
+      cfg_002 = mock_eval_row(template, "cfg_002", "failed", error = "Grid search failed: mocked {cause}"),
+      cfg_003 = mock_eval_row(template, "cfg_003", "failed", error = "Grid search failed: mocked {cause}")
+    )
+
+    local_mocked_bindings(
+      evaluate_single_config = function(config_row, ...) rows[[config_row$config_id]]
+    )
+
+    got <- collect_warnings(evaluate(make_eval_object(n = 60, n_configs = 3), seed = 42L))
+    ev  <- got$value
+
+    partial <- Filter(function(w) inherits(w, "horizons_warning_partial_failure"), got$warnings)
+    expect_length(partial, 1L)
+
+    row <- ev$log[ev$log$topic %in% "partial_failure", ]
+    expect_identical(row$ids[[1]], c("cfg_002", "cfg_003"))
+    expect_identical(row$n, 2L)
+    expect_match(row$message, "2 of 3 configurations failed, so the evaluation holds the rest.",
+                 fixed = TRUE)
+    expect_match(row$message, "Grid search failed: mocked {cause} (cfg_002, cfg_003)", fixed = TRUE)
+
+  })
+
+  it("raises no partial_failure warning when every configuration succeeded", {
+
+    expect_false("partial_failure" %in% ev60()$log$topic)
+
+  })
+
+  it("names a configuration whose Bayesian search failed in one substitution warning (#209)", {
+
+    ## A grid of one gives tune_bayes() a single initial point, so the search
+    ## fails; configure() refuses this, the object here is set by hand
+    obj <- make_eval_object(n = 60, n_configs = 1)
+    obj$config$tuning$grid_size     <- 1L
+    obj$config$tuning$bayesian_iter <- 2L
+
+    got <- collect_warnings(evaluate(obj, prune = FALSE, seed = 42L))
+    ev  <- got$value
+
+    subs <- Filter(function(w) inherits(w, "horizons_warning_substitution"), got$warnings)
+    expect_length(subs, 1L)
+    expect_match(conditionMessage(subs[[1]]), "The Bayesian search failed", fixed = TRUE)
+
+    row <- ev$log[ev$log$topic %in% "substitution", ]
+    expect_identical(row$ids[[1]], "cfg_001")
+    expect_identical(ev$evaluation$results$status, "success")
+
+  })
+
+  it("stops at the first configuration's failure under debug, with its own error", {
+
+    local_mocked_bindings(build_recipe = function(...) stop("no recipe for this config"))
+
+    expect_error(suppressWarnings(evaluate(make_eval_object(n = 60, n_configs = 2), seed = 42L,
+                                           control = control_horizons(debug = TRUE))),
+                 "no recipe for this config", fixed = TRUE)
+
+  })
+
+  it("keeps a failed configuration's class, and its backtrace under keep_traces", {
+
+    local_mocked_bindings(build_recipe = function(...) stop("no recipe for this config"))
+
+    run <- function(keep_traces) {
+      suppressWarnings(tryCatch(
+        evaluate(make_eval_object(n = 60, n_configs = 1), seed = 42L,
+                 control = control_horizons(keep_traces = keep_traces)),
+        horizons_error_all_configs_failed = function(e) e$results
+      ))
+    }
+
+    kept <- run(TRUE)
+    expect_identical(kept$class, "simpleError")
+    expect_type(kept$trace[[1]], "character")
+
+    expect_null(run(FALSE)$trace[[1]])
+
+  })
+
+})

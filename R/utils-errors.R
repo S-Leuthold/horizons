@@ -141,7 +141,8 @@ check_arg <- function(check,
 #'     the verb that wrote the field, or start again from [configure()].}
 #'   \item{`horizons_error_dependency`}{A needed package is missing, or the
 #'     environment cannot run the call (a parallel run under
-#'     `devtools::load_all()`, whose workers load the installed build).}
+#'     `devtools::load_all()`, whose workers load the installed build, or one
+#'     whose workers load another version of horizons).}
 #'   \item{`horizons_error_run`}{The work was attempted and failed: every
 #'     configuration or member failed, a download failed, or the run stopped
 #'     on a failure that would hit every unit the same way.}
@@ -428,8 +429,8 @@ handle_results <- function(safe_result,
 #' @param error Error condition object, character string, or NULL.
 #'
 #' @return Single-row tibble with config_id, status, error_message, the
-#'   failure's root class (`NA` for an error given as text), metric columns
-#'   (all NA), and runtime_secs (NA).
+#'   failure's root class (`NA` for an error given as text), `trace` (a list
+#'   holding `NULL`), metric columns (all NA), and runtime_secs (NA).
 #' @keywords internal
 create_failed_result <- function(config_id, error = NULL) {
 
@@ -478,6 +479,7 @@ create_failed_result <- function(config_id, error = NULL) {
     ## The root cause's class, so a script can tell one kind of failure from
     ## another without reading the message
     class         = if (inherits(error, "condition")) root_class(error) else NA_character_,
+    trace         = list(NULL),
     warnings      = list(NULL),
     runtime_secs  = NA_real_
   )
@@ -982,6 +984,38 @@ text_records <- function(x, pinned = FALSE) {
 
 }
 
+#' Warning records from what a unit recorded
+#'
+#' @description
+#' The warnings [run_unit()] caught in a unit, as records that merge with
+#' tune's notes: a warning caught as it was raised and the same warning kept
+#' in tune's notes are one line on the row. A horizons warning (one raised
+#' with [warn_in_unit()]) is a package notice, so it is pinned. tune's own
+#' "All models failed" warning is left out: it is raised beside a result in
+#' which every model failed, and [check_tune_result()] records that as the
+#' failure, with its cause.
+#'
+#' @param records Records shaped like [new_unit_records()]'s.
+#' @return Records shaped like [new_warning_log()]'s, one per warning.
+#' @keywords internal
+#' @noRd
+unit_warning_records <- function(records) {
+
+  warnings <- records[records$type == "warning" &
+                        !startsWith(records$cause, "All models failed"), , drop = FALSE]
+
+  tibble::tibble(
+    cause   = warnings$cause,
+    where   = warnings$where,
+    n       = warnings$n,
+    scope   = rep(NA_character_, nrow(warnings)),
+    folds   = rep(list(character(0)), nrow(warnings)),
+    n_folds = rep(NA_integer_, nrow(warnings)),
+    pinned  = startsWith(warnings$class, "horizons_warning_")
+  )
+
+}
+
 #' Warning or error records from the notes of a tune result
 #'
 #' @param tune_results A `tune_results` object (grid, Bayesian, resamples or
@@ -1238,6 +1272,74 @@ tune_failure_cause <- function(tune_results) {
 
   paste0(causes[1], ", plus ", n_other, " other distinct error",
          if (n_other > 1) "s")
+
+}
+
+#' Fail a unit on what a tune call kept as text
+#'
+#' @description
+#' tune catches every error raised inside its resampling and returns, so a
+#' failure there reaches the unit only as notes and an unclassed warning. Run
+#' after each tune call, inside the call's step:
+#'
+#' * A recipe step that failed inside tune (an error note at a preprocessor
+#'   location) is reproduced outside it, when `recipe` is given, by prepping
+#'   the recipe once on the training part: the step's error then ends the
+#'   unit with its own class, or propagates for the kinds no unit contains. A
+#'   failure that does not reproduce there (one fold's rows only) is read
+#'   from the notes, as below (DECISIONS 2026-10-16).
+#' * A result in which every model failed ([tune::.is_cataclysmic()]) ends the
+#'   unit: `failure` and the most frequent error note are its message, and it
+#'   carries the trace tune kept for the first error (tune keeps one for an
+#'   engine's error and none for a recipe step's).
+#' * Under `debug` any error note ends the unit the same way, so the first
+#'   failure inside tune stops the call.
+#'
+#' @param results A tune result.
+#' @param failure Character(1). What a result in which every model failed
+#'   means, e.g. `"all models failed during CV"`; `NULL` when the caller falls
+#'   back instead (the Bayesian search).
+#' @param recipe The unit's untrained recipe, to reproduce a step's failure;
+#'   `NULL` when it was prepped before tuning.
+#' @param debug Logical(1).
+#' @param call The frame the failure reports.
+#' @return `NULL`, invisibly; aborts with class `horizons_error_run`.
+#' @keywords internal
+#' @noRd
+check_tune_result <- function(results,
+                              failure,
+                              recipe = NULL,
+                              debug  = FALSE,
+                              call   = rlang::caller_env()) {
+
+  notes  <- tune::collect_notes(results)
+  errors <- notes[notes$type %in% "error", , drop = FALSE]
+
+  ## A recipe step that failed inside tune, reproduced outside it --------------
+
+  ### A preprocessor location without a model part is the recipe's prep, or
+  ### its bake of the assessment rows ("(prediction data)").
+  step_failed <- any(grepl("^preprocessor [0-9]+/[0-9]+( \\(prediction data\\))?$",
+                           errors[["location"]]))
+
+  if (!is.null(recipe) && step_failed) unit_step("prep", recipes::prep(recipe))
+
+  ## Every model failed, or, under debug, any did ---------------------------------
+
+  every_model <- !is.null(failure) && tune::.is_cataclysmic(results)
+
+  if (!every_model && !(debug && nrow(errors) > 0)) return(invisible(NULL))
+
+  what  <- if (every_model) failure else "a fit failed inside tune"
+  cause <- tune_failure_cause(results)
+  trace <- Find(Negate(is.null), errors[["trace"]])
+
+  abort_horizons(
+    if (is.null(cause)) "{what}" else "{what} \u2014 {cause}",
+    kind  = "run",
+    trace = trace,
+    call  = call
+  )
 
 }
 

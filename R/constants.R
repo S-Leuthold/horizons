@@ -243,6 +243,7 @@ SHARED_ARG_NAMES <- c(
   "data_fp",
   "settings",
   "checkpoint_dir",
+  "keep_traces",
   "pkg_version"
 )
 
@@ -260,7 +261,10 @@ PARALLELIZE_OVER_VALUES <- c("auto", "configs", "resamples")
 #      all candidates); seed re-pinned before every stochastic stage.
 #   3  2026-10-15: every row carries the class of its failure (NA when it
 #      succeeded), so rows checkpointed without it are re-evaluated.
-SCORING_SCHEMA <- 3L
+#   4  2026-10-16: each configuration runs as one unit: a failed row names
+#      its step, its root class and, under keep_traces, its backtrace, and a
+#      recipe step's failure inside tune is reproduced with its class.
+SCORING_SCHEMA <- 4L
 
 # Schema of eval_manifest.rds, which evaluate() writes at the start of every
 # run with an output_dir and monitor_evaluate() reads. Schema 4 (#42) records

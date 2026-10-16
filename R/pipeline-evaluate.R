@@ -129,6 +129,25 @@
 #' trimmed training rows, so the cross-validated metrics (and the ranking
 #' on them) describe the trimmed population; the test metrics do not.
 #'
+#' @section Failed configurations:
+#' Each configuration runs as one unit. A failure in any of its steps fails
+#' that configuration alone: its row has `status` `"failed"`, an
+#' `error_message` naming the step and the cause ("Grid search failed:
+#' ..."), the root `class` of the failure, and, with
+#' `control_horizons(keep_traces = TRUE)`, the backtrace as text in `trace`.
+#' A recipe step that fails inside tuning is reproduced by prepping the
+#' recipe once on the training part, so the step's own error is recorded with
+#' its class; a failure tune keeps only as text is `horizons_error_run`. An
+#' error that is not the configuration's own (an input or dependency error,
+#' or a bug in horizons) stops the call. When some configurations failed and
+#' the rest are returned, one `horizons_warning_partial_failure` names them
+#' with each distinct cause. A configuration whose Bayesian search failed, or
+#' added nothing to the grid, keeps the grid's choice, says so in its
+#' `warnings`, and is named in one `horizons_warning_substitution`. With
+#' `control_horizons(debug = TRUE)` nothing is contained: the first failure,
+#' inside tuning included, stops the call with its backtrace, and the
+#' Bayesian search is not fallen back from.
+#'
 #' @section When every configuration fails:
 #' `best_config` is chosen from the configs that succeeded or, when none did,
 #' from the pruned configs that carry a cross-validated value of `metric`. A
@@ -720,7 +739,9 @@ evaluate <- function(x,
         seed            = seed,
         sg_window       = recipe_cfg$sg_window,
         pca_threshold   = recipe_cfg$pca_threshold,
-        outcome_range   = outcome_range
+        outcome_range   = outcome_range,
+        debug           = debug,
+        keep_traces     = control$keep_traces
       )
 
       ## Stamp before anything else sees the row, so the in-memory results and
@@ -861,6 +882,7 @@ evaluate <- function(x,
       data_fp         = data_fp,
       settings        = settings,
       checkpoint_dir  = checkpoint_dir,
+      keep_traces     = control$keep_traces,
       pkg_version     = as.character(utils::packageVersion("horizons"))
     )
 
@@ -885,7 +907,8 @@ evaluate <- function(x,
   ## Step 9: Aggregate results
   ## -----------------------------------------------------------------------
 
-  all_results <- dplyr::bind_rows(results_list)
+  results_list <- lift_unit_warnings(results_list, collector)
+  all_results  <- dplyr::bind_rows(results_list)
 
   ## -----------------------------------------------------------------------
   ## Step 10: Determine best config
@@ -932,6 +955,21 @@ evaluate <- function(x,
   } else {
 
     log_unranked(collector, candidates$rows, ranked, metric)
+
+  }
+
+  ## Some configurations failed and the rest are returned: one summary, with
+  ## each distinct cause and the configurations it failed
+  failed_rows <- all_results[all_results$status == "failed", , drop = FALSE]
+
+  if (nrow(failed_rows) > 0) {
+
+    n_failed <- nrow(failed_rows)
+
+    log_warning(collector, "partial_failure", c(
+      "{n_failed} of {nrow(all_results)} configuration{?s} failed, so the evaluation holds the rest.",
+      distinct_config_errors(failed_rows)
+    ), ids = failed_rows$config_id)
 
   }
 
@@ -1338,6 +1376,10 @@ load_eval_checkpoints <- function(output_dir, config_ids, data_fp, settings,
 #' @noRd
 write_checkpoint_row <- function(row, checkpoint_dir) {
 
+  ## A unit's records are lifted onto the call's log, not stored: a resumed
+  ## row's warnings are read on the row (lift_unit_warnings()).
+  attr(row, "unit_records") <- NULL
+
   tmp <- tempfile(tmpdir = checkpoint_dir, fileext = ".rds.tmp")
   saveRDS(row, tmp)
   file.rename(tmp, file.path(checkpoint_dir, paste0(row$config_id, ".rds")))
@@ -1369,6 +1411,34 @@ log_unreadable_checkpoints <- function(collector, unreadable, output_dir) {
   ), ids = names(unreadable))
 
   invisible(NULL)
+
+}
+
+#' Lift the configurations' horizons warnings onto the call's log
+#'
+#' @description
+#' [evaluate_single_config()] returns its unit's records on the row, as the
+#' attribute `"unit_records"`, since records are data and cross from a worker
+#' with the row. The horizons warnings among them go to the call's collector
+#' in one pass ([log_unit_warnings()]), so a message several configurations
+#' raised is one event naming them all, and the attribute is dropped, so
+#' neither the results nor a checkpoint keeps it. Only rows evaluated in this
+#' call carry it: a row resumed from a checkpoint reports its warnings on the
+#' row.
+#'
+#' @param rows List of result rows.
+#' @param collector The call's collector, from [log_open()].
+#' @return `rows`, without the attribute.
+#' @keywords internal
+#' @noRd
+lift_unit_warnings <- function(rows, collector) {
+
+  log_unit_warnings(collector, dplyr::bind_rows(lapply(rows, attr, "unit_records")))
+
+  lapply(rows, function(row) {
+    attr(row, "unit_records") <- NULL
+    row
+  })
 
 }
 
@@ -2524,10 +2594,12 @@ abort_worker_version <- function(worker, parent, call = rlang::caller_env()) {
 #'   `outcome_range` (the range scored predictions are clamped to), `data_fp`
 #'   and `settings` (the parent's [eval_data_fingerprint()] and
 #'   [eval_settings()] records, stamped on the row as-is), `checkpoint_dir`,
-#'   and `pkg_version`. There is no `allow_par`: on
-#'   the configs axis tune always runs sequentially inside the worker.
+#'   `keep_traces` and `pkg_version`. There is no `allow_par`: on
+#'   the configs axis tune always runs sequentially inside the worker. There
+#'   is no `debug` either, since a debug run never dispatches.
 #'
-#' @return A one-row result tibble from [evaluate_single_config()].
+#' @return A one-row result tibble from [evaluate_single_config()], its unit's
+#'   records still on it for the parent to lift.
 #' @keywords internal
 #' @noRd
 
@@ -2600,7 +2672,8 @@ evaluate_config_worker <- function(config_i, shared) {
     seed            = shared$seed,
     sg_window       = shared$sg_window,
     pca_threshold   = shared$pca_threshold,
-    outcome_range   = shared$outcome_range
+    outcome_range   = shared$outcome_range,
+    keep_traces     = shared$keep_traces
   )
 
   ## Both provenance records are sent rather than rebuilt. The data

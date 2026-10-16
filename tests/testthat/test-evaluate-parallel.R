@@ -60,6 +60,7 @@ worker_payload <- function() {
     settings        = horizons:::eval_settings(sg_window = 13L, pca_threshold = 0.9,
                                                outcome_range = c(-Inf, Inf)),
     checkpoint_dir  = NULL,
+    keep_traces     = FALSE,
     pkg_version     = as.character(utils::packageVersion("horizons"))
   )
 
@@ -127,23 +128,27 @@ describe("evaluate() parallel worker footprint", {
 
   })
 
-  it("carries the recipe settings and the outcome range in the payload and hands them to the config (#62, #76)", {
+  it("carries the recipe settings, the outcome range and keep_traces in the payload and hands them to the config (#62, #76)", {
 
     ## Run in-process: the worker body is an ordinary function, and what is
     ## under test is that it forwards shared$sg_window,
-    ## shared$pca_threshold and shared$outcome_range, not the dispatch.
-    ## evaluate_single_config() is replaced with a recorder, so nothing is
-    ## tuned.
-    expect_true(all(c("sg_window", "pca_threshold", "outcome_range") %in%
+    ## shared$pca_threshold, shared$outcome_range and shared$keep_traces,
+    ## not the dispatch. evaluate_single_config() is replaced with a
+    ## recorder, so nothing is tuned.
+    expect_true(all(c("sg_window", "pca_threshold", "outcome_range", "keep_traces") %in%
                       horizons:::SHARED_ARG_NAMES))
 
+    ## A debug run never dispatches, so debug is never sent
+    expect_false("debug" %in% horizons:::SHARED_ARG_NAMES)
+
     shared <- worker_payload()
+    shared$keep_traces <- TRUE
 
     seen <- NULL
 
     testthat::local_mocked_bindings(
       evaluate_single_config = function(...) {
-        seen <<- list(...)[c("sg_window", "pca_threshold", "outcome_range")]
+        seen <<- list(...)[c("sg_window", "pca_threshold", "outcome_range", "keep_traces")]
         tibble::tibble(config_id = "cfg_001", status = "failed")
       },
       .package = "horizons"
@@ -153,7 +158,7 @@ describe("evaluate() parallel worker footprint", {
 
     ## The outcome range rides the same payload (#76)
     expect_identical(seen, list(sg_window = 13L, pca_threshold = 0.9,
-                                outcome_range = c(-Inf, Inf)))
+                                outcome_range = c(-Inf, Inf), keep_traces = TRUE))
 
   })
 

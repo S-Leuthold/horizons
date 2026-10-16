@@ -181,6 +181,27 @@ trimmed training rows, so the cross-validated metrics (and the ranking
 on them) describe the trimmed population; the test metrics do not.
 }
 
+\section{Failed configurations}{
+
+Each configuration runs as one unit. A failure in any of its steps fails
+that configuration alone: its row has \code{status} \code{"failed"}, an
+\code{error_message} naming the step and the cause ("Grid search failed:
+..."), the root \code{class} of the failure, and, with
+\code{control_horizons(keep_traces = TRUE)}, the backtrace as text in \code{trace}.
+A recipe step that fails inside tuning is reproduced by prepping the
+recipe once on the training part, so the step's own error is recorded with
+its class; a failure tune keeps only as text is \code{horizons_error_run}. An
+error that is not the configuration's own (an input or dependency error,
+or a bug in horizons) stops the call. When some configurations failed and
+the rest are returned, one \code{horizons_warning_partial_failure} names them
+with each distinct cause. A configuration whose Bayesian search failed, or
+added nothing to the grid, keeps the grid's choice, says so in its
+\code{warnings}, and is named in one \code{horizons_warning_substitution}. With
+\code{control_horizons(debug = TRUE)} nothing is contained: the first failure,
+inside tuning included, stops the call with its backtrace, and the
+Bayesian search is not fallen back from.
+}
+
 \section{When every configuration fails}{
 
 \code{best_config} is chosen from the configs that succeeded or, when none did,

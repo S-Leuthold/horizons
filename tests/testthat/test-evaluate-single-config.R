@@ -552,6 +552,42 @@ describe("evaluate_single_config() - a Bayesian search that fails (#209)", {
       result$warnings[[1]], fixed = TRUE
     )))
 
+    ## A substitution warning of the unit's, which evaluate() lifts to its log
+    records <- attr(result, "unit_records")
+    expect_identical(records$class[records$type == "warning" &
+                                     startsWith(records$cause, "The Bayesian search failed")],
+                     "horizons_warning_substitution")
+
+  })
+
+  it("does not fall back under debug: the search's failure stops the call", {
+
+    expect_error(evaluate_single_config(
+      config_row    = make_eval_config(),
+      split         = setup$split,
+      cv_folds      = setup$folds,
+      role_map      = setup$role_map,
+      grid_size     = 1,
+      bayesian_iter = 2,
+      seed          = 42L,
+      debug         = TRUE
+    ))
+
+  })
+
+  it("records the search's own warnings on the row", {
+
+    real_bayes <- tune::tune_bayes
+    local_mocked_bindings(tune_bayes = function(...) {
+      warning("the search warned")
+      real_bayes(...)
+    }, .package = "tune")
+
+    result <- run(grid_size = 2)
+
+    expect_equal(result$status, "success")
+    expect_true("the search warned" %in% result$warnings[[1]])
+
   })
 
   it("records it when the search returns without an iteration past the grid", {
@@ -579,10 +615,9 @@ describe("evaluate_single_config() - a Bayesian search that fails (#209)", {
 ## Each stage's failure exit
 ## =========================================================================
 ## The recipe and model stages' exits are pinned by the failure-path tests
-## above. Each later stage runs inside safely_execute() and, when it errors,
-## returns the failed row naming the stage; with its exit removed the config
-## still fails, at a later stage under that stage's name, so each case asserts
-## the stage and the cause.
+## above. Each later stage is a labelled step of the configuration's unit and,
+## when it errors, the failed row names the stage; each case asserts the stage
+## and the cause.
 
 describe("evaluate_single_config() - each stage's failure exit", {
 
@@ -625,7 +660,11 @@ describe("evaluate_single_config() - each stage's failure exit", {
     local_mocked_bindings(tune_grid = function(...) stop("the grid broke"),
                           .package = "tune")
 
-    expect_failed_at(run_on_shared(), "Grid search", "the grid broke")
+    result <- run_on_shared()
+
+    expect_failed_at(result, "Grid search", "the grid broke")
+    expect_identical(result$class, "simpleError")
+    expect_true(result$runtime_secs > 0)
 
   })
 
@@ -635,6 +674,15 @@ describe("evaluate_single_config() - each stage's failure exit", {
                           .package = "tune")
 
     expect_failed_at(run_on_shared(), "Parameter selection", "nothing to select")
+
+  })
+
+  it("names the cross-validated metrics when they cannot be read", {
+
+    local_mocked_bindings(collect_metrics = function(...) stop("metrics unreadable"),
+                          .package = "tune")
+
+    expect_failed_at(run_on_shared(), "Cross-validated metrics", "metrics unreadable")
 
   })
 

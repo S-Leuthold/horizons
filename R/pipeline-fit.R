@@ -1272,6 +1272,7 @@ cold_start_evaluation <- function(x, metric, seed, collector, call = rlang::call
     best_params           = list(NULL),
     error_message         = NA_character_,
     class                 = NA_character_,
+    trace                 = list(NULL),
     warnings              = list(NULL),
     runtime_secs          = NA_real_
   )

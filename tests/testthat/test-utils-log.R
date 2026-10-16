@@ -267,6 +267,22 @@ describe("run_unit()", {
 
   })
 
+  it("keeps a record's cause and location apart, as the message joins them", {
+
+    rec <- recipes::recipe(mpg ~ ., data = mtcars) |>
+      recipes::step_mutate(boom = stop("singular matrix"))
+
+    out <- run_unit(recipes::prep(rec), "configuration", "cfg_2")
+
+    expect_identical(out$records$cause, "singular matrix")
+    expect_identical(out$records$where, "`step_mutate()`")
+    expect_identical(out$records$message, "singular matrix (in `step_mutate()`)")
+
+    clean <- run_unit(warning("no wrapper"), "configuration", "cfg_1")
+    expect_identical(clean$records$where, NA_character_)
+
+  })
+
   it("contains a run failure, naming the step and the root cause's class", {
 
     rec <- recipes::recipe(mpg ~ ., data = mtcars) |>
@@ -290,6 +306,19 @@ describe("run_unit()", {
 
     expect_type(out$records$trace[[1]], "character")
     expect_gt(length(out$records$trace[[1]]), 0L)
+
+  })
+
+  it("keeps the backtrace of a wrapped failure, which its parent holds", {
+
+    ## recipes wraps a step's error, and rlang then traces the parent only
+    rec <- recipes::recipe(mpg ~ ., data = mtcars) |>
+      recipes::step_mutate(boom = stop("singular matrix"))
+
+    out <- run_unit(recipes::prep(rec), "configuration", "cfg_2", keep_traces = TRUE)
+
+    expect_type(out$records$trace[[1]], "character")
+    expect_true(any(grepl("prep", out$records$trace[[1]], fixed = TRUE)))
 
   })
 
@@ -333,7 +362,7 @@ describe("run_unit()", {
 
   it("raises an internal error, rather than a unit failure, when a record cannot be built", {
 
-    local_mocked_bindings(condition_summary = function(...) stop("summary broke"))
+    local_mocked_bindings(condition_parts = function(...) stop("summary broke"))
 
     expect_error(run_unit({ warning("noted"); 1 }, "configuration", "cfg_1"),
                  "Recording a warning", class = "horizons_error_internal")
@@ -414,6 +443,64 @@ describe("run_unit()", {
 
     expect_equal(out$value, "done")
     expect_equal(out$records$type, "warning")
+
+  })
+
+})
+
+describe("warn_in_unit() and log_unit_warnings()", {
+
+  it("raises a horizons warning that a unit records under its topic's class", {
+
+    cause <- "column {wn_600} could not be read"
+
+    out <- run_unit({
+      warn_in_unit("substitution", "Fell back: {cause}")
+      "done"
+    }, "configuration", "cfg_1")
+
+    expect_equal(out$value, "done")
+    expect_identical(out$records$class, "horizons_warning_substitution")
+    expect_identical(out$records$message, "Fell back: column {wn_600} could not be read")
+
+    ## Outside a unit it is an ordinary warning of its topic
+    expect_warning(warn_in_unit("quality", "Weak."), "Weak.",
+                   class = "horizons_warning_quality")
+
+  })
+
+  it("refuses a topic it does not know, as a bug in its caller", {
+
+    expect_error(warn_in_unit("misc", "x"), "topic", class = "horizons_error_internal")
+
+  })
+
+  it("lifts only horizons warnings, one event per distinct message, naming the units that raised it", {
+
+    unit <- function(id, expr) run_unit(expr, "configuration", id)$records
+
+    records <- dplyr::bind_rows(
+      unit("cfg_1", { warn_in_unit("substitution", "Kept the grid's choice."); warning("ranger warned") }),
+      unit("cfg_2", warn_in_unit("substitution", "Kept the grid's choice.")),
+      unit("cfg_3", warn_in_unit("substitution", "Kept {.val braces} as text.")),
+      unit("cfg_4", stop("failed"))
+    )
+
+    col <- log_open("evaluate")
+    log_unit_warnings(col, records)
+    log_unit_warnings(col, NULL)
+    log <- log_close(col)
+
+    ## One topic, one row: the other package's warning and the failure stay
+    ## on their units' rows
+    expect_identical(log$topic, "substitution")
+    expect_identical(log$ids[[1]], c("cfg_1", "cfg_2", "cfg_3"))
+    expect_identical(log$n, 3L)
+    expect_match(log$message, "Kept the grid's choice. In 2 configurations: \"cfg_1\" and \"cfg_2\".",
+                 fixed = TRUE)
+    expect_match(log$message, "Kept \"braces\" as text. In 1 configuration: \"cfg_3\".",
+                 fixed = TRUE)
+    expect_false(grepl("ranger warned", log$message, fixed = TRUE))
 
   })
 

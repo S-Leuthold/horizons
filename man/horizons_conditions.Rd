@@ -21,7 +21,8 @@ because it was edited by hand or written by an older version. Re-run
 the verb that wrote the field, or start again from \code{\link[=configure]{configure()}}.}
 \item{\code{horizons_error_dependency}}{A needed package is missing, or the
 environment cannot run the call (a parallel run under
-\code{devtools::load_all()}, whose workers load the installed build).}
+\code{devtools::load_all()}, whose workers load the installed build, or one
+whose workers load another version of horizons).}
 \item{\code{horizons_error_run}}{The work was attempted and failed: every
 configuration or member failed, a download failed, or the run stopped
 on a failure that would hit every unit the same way.}
