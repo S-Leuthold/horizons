@@ -2436,3 +2436,185 @@ describe("evaluate() - the configurations' warnings and failures on the log", {
   })
 
 })
+
+
+## =========================================================================
+## Stopping early: the circuit breaker and a worker's death
+## =========================================================================
+
+describe("evaluate() - the circuit breaker", {
+
+  ## Failed rows from a mocked runner: the same failure in every
+  ## configuration but for its id and a number, unless `differ` names it
+  failing_runner <- function(template, ran, differ = character(0), succeed = character(0)) {
+    function(config_row, ...) {
+      id <- config_row$config_id
+      ran$ids <- c(ran$ids, id)
+      if (id %in% succeed) return(mock_eval_row(template, id, "success"))
+      row <- mock_eval_row(template, id, "failed", error = paste0(
+        if (id %in% differ) "Grid search failed: " else "Recipe building failed: ",
+        "no recipe for ", id, " at ", nchar(id) * 7, " rows"))
+      row$class <- "simpleError"
+      row
+    }
+  }
+
+  it("stops at the third identical failure across two models, with the rows so far, checkpointing none", {
+
+    template <- ev60()$evaluation$results[1, ]
+    ran      <- new.env()
+    local_mocked_bindings(evaluate_single_config = failing_runner(template, ran))
+
+    dir <- withr::local_tempdir()
+    err <- expect_error(
+      suppressWarnings(evaluate(make_eval_object(n = 60, n_configs = 5), seed = 42L,
+                                control = control_horizons(output_dir = dir))),
+      class = "horizons_error_systemic"
+    )
+
+    expect_true(inherits(err, "horizons_error_run"))
+    expect_identical(ran$ids, c("cfg_001", "cfg_002", "cfg_003"))
+    expect_identical(err$results$config_id, c("cfg_001", "cfg_002", "cfg_003"))
+    expect_match(conditionMessage(err), "The first 3 configurations to run all failed the same way, across 2 models",
+                 fixed = TRUE)
+    expect_match(conditionMessage(err), "breaker = FALSE", fixed = TRUE)
+    expect_length(list.files(file.path(dir, "checkpoints")), 0L)
+
+  })
+
+  it("does not stop when the identical failures are all on one model, and checkpoints them at the end", {
+
+    template <- ev60()$evaluation$results[1, ]
+    ran      <- new.env()
+    local_mocked_bindings(evaluate_single_config = failing_runner(template, ran))
+
+    obj <- make_eval_object(n = 60, n_configs = 4)
+    obj$config$configs$model <- "rf"
+
+    dir <- withr::local_tempdir()
+    expect_error(suppressWarnings(evaluate(obj, seed = 42L, control = control_horizons(output_dir = dir))),
+                 class = "horizons_error_all_configs_failed")
+
+    expect_length(ran$ids, 4L)
+    expect_setequal(list.files(file.path(dir, "checkpoints")), paste0(obj$config$configs$config_id, ".rds"))
+
+  })
+
+  it("is disarmed by a success, and its held rows are checkpointed then", {
+
+    template <- ev60()$evaluation$results[1, ]
+    ran      <- new.env()
+    local_mocked_bindings(evaluate_single_config = failing_runner(template, ran, succeed = "cfg_003"))
+
+    dir <- withr::local_tempdir()
+    ev  <- suppressWarnings(evaluate(make_eval_object(n = 60, n_configs = 5), seed = 42L,
+                                     control = control_horizons(output_dir = dir)))
+
+    expect_length(ran$ids, 5L)
+    expect_identical(ev$evaluation$best_config, "cfg_003")
+    expect_length(list.files(file.path(dir, "checkpoints")), 5L)
+
+  })
+
+  it("is disarmed by a different failure, and is off at breaker = FALSE", {
+
+    template <- ev60()$evaluation$results[1, ]
+
+    ran <- new.env()
+    local_mocked_bindings(evaluate_single_config = failing_runner(template, ran, differ = "cfg_002"))
+    expect_error(suppressWarnings(evaluate(make_eval_object(n = 60, n_configs = 5), seed = 42L)),
+                 class = "horizons_error_all_configs_failed")
+    expect_length(ran$ids, 5L)
+
+    ran <- new.env()
+    local_mocked_bindings(evaluate_single_config = failing_runner(template, ran))
+    expect_error(suppressWarnings(evaluate(make_eval_object(n = 60, n_configs = 5), seed = 42L,
+                                           control = control_horizons(breaker = FALSE))),
+                 class = "horizons_error_all_configs_failed")
+    expect_length(ran$ids, 5L)
+
+  })
+
+  it("waits for its limit", {
+
+    template <- ev60()$evaluation$results[1, ]
+    ran      <- new.env()
+    local_mocked_bindings(evaluate_single_config = failing_runner(template, ran))
+
+    err <- expect_error(suppressWarnings(evaluate(make_eval_object(n = 60, n_configs = 6), seed = 42L,
+                                                  control = control_horizons(breaker = 4L))),
+                        class = "horizons_error_systemic")
+    expect_length(ran$ids, 4L)
+    expect_length(err$results$config_id, 4L)
+
+  })
+
+  it("counts two failures as one when they differ only in the configuration's id, numbers and spacing", {
+
+    row <- function(id, message, class = "simpleError") {
+      tibble::tibble(config_id = id, status = "failed", error_message = message, class = class)
+    }
+
+    same <- breaker_key(row("cfg_001", "Grid search failed: boom in cfg_001 at 12  rows"))
+
+    expect_identical(breaker_key(row("cfg_002", "Grid search failed: boom in cfg_002 at 15 rows")), same)
+    expect_false(identical(breaker_key(row("cfg_002", "Recipe building failed: boom in cfg_002 at 15 rows")), same))
+    expect_false(identical(breaker_key(row("cfg_002", "Grid search failed: boom in cfg_002 at 15 rows",
+                                           class = "horizons_error_run")), same))
+
+  })
+
+})
+
+describe("evaluate() - a worker's death", {
+
+  it("stops the run as systemic, chained to future's error, with the rows finished so far", {
+
+    template <- ev60()$evaluation$results[1, ]
+
+    local_mocked_bindings(evaluate_single_config = function(config_row, ...) {
+      if (config_row$config_id == "cfg_002") {
+        stop(structure(class = c("FutureInterruptError", "FutureError", "error", "condition"),
+                       list(message = "A future worker died.", call = NULL)))
+      }
+      mock_eval_row(template, config_row$config_id, "success")
+    })
+
+    err <- expect_error(suppressWarnings(evaluate(make_eval_object(n = 60, n_configs = 3), seed = 42L)),
+                        class = "horizons_error_systemic")
+
+    expect_true(rlang::cnd_inherits(err, "FutureError"))
+    expect_identical(err$results$config_id, "cfg_001")
+    expect_match(conditionMessage(err), "A parallel worker stopped", fixed = TRUE)
+
+  })
+
+  it("stops a resamples-axis run whose worker is killed (installed build)", {
+
+    skip_unless_slow_tier()
+    skip_on_cran()
+    skip_if_dev_package()
+
+    local_plan(future::multisession, workers = 2)
+
+    ## A recipe step that kills the worker it runs on, on an analysis set;
+    ## never the parent, which preps the whole training part
+    parent <- Sys.getpid()
+    killer <- function(x) {
+      if (length(x) < 45 && Sys.getpid() != parent) tools::pskill(Sys.getpid(), tools::SIGKILL)
+      x
+    }
+    real_recipe <- build_recipe
+    local_mocked_bindings(build_recipe = function(...) {
+      real_recipe(...) |> recipes::step_mutate(wn_4000 = killer(wn_4000))
+    })
+
+    expect_error(
+      suppressWarnings(evaluate(make_eval_object(n = 60, n_configs = 1), seed = 42L,
+                                control = control_horizons(allow_par = TRUE, parallelize_over = "resamples"))),
+      class = "horizons_error_systemic"
+    )
+
+  })
+
+})

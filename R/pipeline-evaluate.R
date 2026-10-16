@@ -145,7 +145,13 @@
 #' is on the same folds (#101). A configuration whose final fit on the
 #' training part fails is failed too (#102). An error that is not the
 #' configuration's own (an input or dependency error, or a bug in horizons)
-#' stops the call. When some configurations failed and
+#' stops the call. So does a failure every configuration would share: when
+#' the first configurations to run fail the same way across at least two
+#' models, `evaluate()` stops with `horizons_error_systemic`, the rows so far
+#' as its `results` (`control_horizons(breaker = )`, 3 by default, `FALSE` to
+#' run every configuration; the configs axis has no breaker), and their
+#' failures are not checkpointed. A parallel worker that dies stops the run
+#' the same way. When some configurations failed and
 #' the rest are returned, one `horizons_warning_partial_failure` names them
 #' with each distinct cause. A configuration whose Bayesian search failed, or
 #' added nothing to the grid, keeps the grid's choice, says so in its
@@ -689,6 +695,11 @@ evaluate <- function(x,
 
     results_list <- list()
 
+    ## The circuit breaker watches the first configurations to run, so a
+    ## failure every configuration would share stops the call early
+    ## (control_horizons(breaker = )); the configs axis has none.
+    breaker <- new_breaker(control$breaker)
+
     for (i in seq_len(nrow(configs))) {
 
       cfg <- configs[i, ]
@@ -730,8 +741,9 @@ evaluate <- function(x,
 
       }
 
-      ## Evaluate this config
-      result_row <- evaluate_single_config(
+      ## Evaluate this config. A worker of the resamples axis that dies stops
+      ## the run, with the rows so far.
+      result_row <- stop_on_worker_death(evaluate_single_config(
         config_row      = cfg,
         split           = split,
         cv_folds        = cv_fold_obj,
@@ -748,7 +760,7 @@ evaluate <- function(x,
         outcome_range   = outcome_range,
         debug           = debug,
         keep_traces     = control$keep_traces
-      )
+      ), results_list, output_dir)
 
       ## Stamp before anything else sees the row, so the in-memory results and
       ## the checkpointed copy carry the same provenance.
@@ -815,15 +827,34 @@ evaluate <- function(x,
 
       }
 
-      ## Checkpoint: the per-config file is the only store (#42)
+      ## Checkpoint: the per-config file is the only store (#42). The rows of
+      ## a run of identical failures the breaker is watching are held back
+      ## until it disarms, so a tripped run leaves none to resume.
+      released <- breaker_feed(breaker, result_row, cfg$model)
+
+      if (breaker$tripped) {
+
+        not_run <- setdiff(configs$config_id[-seq_len(i)], completed_ids)
+        abort_breaker_trip(breaker, results_list, length(not_run))
+
+      }
+
       if (!is.null(checkpoint_dir)) {
 
-        write_checkpoint_row(result_row, checkpoint_dir)
+        for (row in released) write_checkpoint_row(row, checkpoint_dir)
 
       }
 
       ## Memory cleanup
       gc(verbose = FALSE)
+
+    }
+
+    ## The loop ended with the breaker still watching: its rows are ordinary
+    ## failures after all
+    if (!is.null(checkpoint_dir)) {
+
+      for (row in breaker_release(breaker)) write_checkpoint_row(row, checkpoint_dir)
 
     }
 
@@ -894,12 +925,14 @@ evaluate <- function(x,
 
     stopifnot(setequal(names(shared_args), SHARED_ARG_NAMES))
 
-    parallel_results <- furrr::future_map(
+    ## A worker that dies loses every value in memory; what it and the
+    ## others finished is in their checkpoints.
+    parallel_results <- stop_on_worker_death(furrr::future_map(
       seq_len(nrow(pending_configs)),
       evaluate_config_worker,
       shared   = shared_args,
       .options = furrr::furrr_options(seed = TRUE, chunk_size = 1)
-    )
+    ), lapply(completed_ids, function(id) checkpoint_results[[id]]), output_dir)
 
     ## Combine: checkpoint results + parallel results
     results_list <- c(
@@ -1441,9 +1474,185 @@ lift_unit_warnings <- function(rows, collector) {
 
   log_unit_warnings(collector, dplyr::bind_rows(lapply(rows, attr, "unit_records")))
 
+  drop_unit_records(rows)
+
+}
+
+#' Result rows without their units' records
+#'
+#' @param rows List of result rows.
+#' @return `rows`, each without the attribute `"unit_records"`.
+#' @keywords internal
+#' @noRd
+drop_unit_records <- function(rows) {
+
   lapply(rows, function(row) {
     attr(row, "unit_records") <- NULL
     row
+  })
+
+}
+
+## ---------------------------------------------------------------------------
+## Stopping early: the circuit breaker and a worker's death
+## ---------------------------------------------------------------------------
+## Both stop the call with horizons_error_systemic and the rows so far, since
+## every configuration still to run would fail the same way.
+
+#' A circuit breaker for the configurations a sequential run evaluates
+#'
+#' @description
+#' Armed from the start, it watches the configurations as they finish, not
+#' the rows loaded from checkpoints. A success, a pruned configuration, or a
+#' failure unlike those before it disarms it for the rest of the call. While
+#' armed it holds back the rows of the identical failures so far, and it
+#' trips once there are `limit` of them across at least two models:
+#' `configure()`'s grid runs a model's configurations together, so a failure
+#' local to one model fills the run first and never trips it.
+#'
+#' @param limit A whole number of at least 2, or `FALSE` for no breaker
+#'   (`control_horizons(breaker = )`).
+#' @return An environment: `armed`, `tripped`, the run's `key`, its `held`
+#'   rows and their `models`.
+#' @keywords internal
+#' @noRd
+new_breaker <- function(limit) {
+
+  breaker         <- new.env(parent = emptyenv())
+  breaker$limit   <- limit
+  breaker$armed   <- !isFALSE(limit)
+  breaker$tripped <- FALSE
+  breaker$key     <- NULL
+  breaker$held    <- list()
+  breaker$models  <- character(0)
+
+  breaker
+
+}
+
+#' Feed the breaker one configuration's row
+#'
+#' @param breaker From [new_breaker()].
+#' @param row The row the configuration returned.
+#' @param model Character(1). The configuration's model.
+#' @return List of the rows that may be checkpointed now: `row`, with the
+#'   held rows when it disarms the breaker, or none while the breaker holds
+#'   it. Sets `breaker$tripped` when this row trips it.
+#' @keywords internal
+#' @noRd
+breaker_feed <- function(breaker, row, model) {
+
+  if (!breaker$armed) return(list(row))
+
+  key <- if (identical(row$status, "failed")) breaker_key(row)
+
+  if (is.null(key) || (!is.null(breaker$key) && !identical(key, breaker$key))) {
+
+    return(c(breaker_release(breaker), list(row)))
+
+  }
+
+  breaker$key    <- key
+  breaker$held   <- c(breaker$held, list(row))
+  breaker$models <- c(breaker$models, model)
+
+  breaker$tripped <- length(breaker$held) >= breaker$limit &&
+    length(unique(breaker$models)) >= 2L
+
+  list()
+
+}
+
+#' Disarm the breaker, releasing the rows it held
+#'
+#' @param breaker From [new_breaker()].
+#' @return List of the held rows.
+#' @keywords internal
+#' @noRd
+breaker_release <- function(breaker) {
+
+  held          <- breaker$held
+  breaker$held  <- list()
+  breaker$armed <- FALSE
+
+  held
+
+}
+
+#' What makes two failures the same, for the breaker
+#'
+#' @param row A failed result row.
+#' @return Character(1): the failure's class and its message, with the
+#'   configuration's id, the numbers and the spacing set aside. The message
+#'   starts with the step, so a failure in another step is another failure.
+#' @keywords internal
+#' @noRd
+breaker_key <- function(row) {
+
+  message <- gsub(row$config_id, "<config>", row$error_message, fixed = TRUE)
+  message <- gsub("[0-9]+", "#", message)
+  message <- gsub("[[:space:]]+", " ", trimws(message))
+
+  paste(row$class, message, sep = "\r")
+
+}
+
+#' Stop the call because the breaker tripped
+#'
+#' @param breaker From [new_breaker()], tripped.
+#' @param rows List of the result rows so far.
+#' @param n_left Integer(1). The configurations it would still have run (not
+#'   those resumed from checkpoints).
+#' @param call The frame the error reports.
+#' @return Does not return; aborts with class `horizons_error_systemic`
+#'   (kind `run`), the rows so far as `results`.
+#' @keywords internal
+#' @noRd
+abort_breaker_trip <- function(breaker, rows, n_left, call = rlang::caller_env()) {
+
+  n_failed <- length(breaker$held)
+  n_models <- length(unique(breaker$models))
+  cause    <- breaker$held[[1]]$error_message
+
+  abort_horizons(c(
+    "The first {n_failed} configurations to run all failed the same way, across {n_models} models, so {.fn evaluate} stopped rather than run the other {n_left}.",
+    "x" = "{cause}",
+    "i" = "Their rows are in this error's {.field results} field and were not checkpointed, so a run after the fix evaluates them.",
+    "i" = "To run every configuration anyway, use {.code control_horizons(breaker = FALSE)}; to see the first failure's backtrace, {.code control_horizons(debug = TRUE)}."
+  ), kind = "run", class = "horizons_error_systemic",
+  results = dplyr::bind_rows(drop_unit_records(rows)), call = call)
+
+}
+
+#' Stop the call when a parallel worker dies
+#'
+#' @description
+#' future raises a worker's death as a `FutureError`, which no unit contains
+#' (`NEVER_CONTAINED`). It is turned into `horizons_error_systemic`, chained
+#' to future's error, with the rows finished so far.
+#'
+#' @param expr The work that dispatches to workers.
+#' @param rows List of the result rows finished so far, read when the worker
+#'   dies.
+#' @param output_dir The run's `output_dir`, or `NULL`.
+#' @param call The frame the error reports.
+#' @return The value of `expr`.
+#' @keywords internal
+#' @noRd
+stop_on_worker_death <- function(expr, rows, output_dir, call = rlang::caller_env()) {
+
+  rlang::try_fetch(expr, FutureError = function(e) {
+
+    abort_horizons(c(
+      "A parallel worker stopped while {.fn evaluate} was running, so the run cannot go on.",
+      "i" = if (is.null(output_dir)) {
+        "The rows finished so far are in this error's {.field results} field."
+      } else {
+        "The configurations finished are checkpointed in {.path {output_dir}}; calling {.fn evaluate} again with it resumes from them."
+      }
+    ), kind = "run", class = "horizons_error_systemic", parent = e,
+    results = dplyr::bind_rows(drop_unit_records(rows)), call = call)
+
   })
 
 }

@@ -39,6 +39,11 @@ failed in \code{\link[=evaluate]{evaluate()}}. The per-configuration results tra
 condition as \code{results}.}
 \item{\code{horizons_error_all_members_failed}}{(run) Every member failed in
 \code{fit()}. The per-member results travel as \code{results}.}
+\item{\code{horizons_error_systemic}}{(run) \code{\link[=evaluate]{evaluate()}} stopped early,
+because the first configurations to run failed the same way across at
+least two models (the circuit breaker,
+\code{control_horizons(breaker = )}), or because a parallel worker died.
+The rows finished so far travel as \code{results}.}
 \item{\code{horizons_error_promoted_warnings}}{(run) A verb ended with
 warnings under \code{options(warn = 2)}. Instead of turning the first warning
 into an error that loses the result, the verb aborts with the finished

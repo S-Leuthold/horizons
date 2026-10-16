@@ -339,6 +339,16 @@ describe("run_unit()", {
 
   })
 
+  it("never contains a worker's death, which future raises as a FutureError", {
+
+    died <- structure(class = c("FutureInterruptError", "FutureError", "error", "condition"),
+                      list(message = "A future worker died.", call = NULL))
+
+    expect_error(run_unit(stop(died), "configuration", "cfg_1"),
+                 class = "FutureInterruptError")
+
+  })
+
   it("never contains one that was chained to an upstream parent", {
 
     ## try_fetch() offers a declined condition's parent to the same handler,
