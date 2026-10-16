@@ -12,6 +12,13 @@
 * A registered library cached by an earlier version is refused, naming the cache file to delete.
 * `spectra()` refuses a source column named `.flag`.
 * Development builds say so when attached, and name the command that installs the latest release.
+* `evaluate()`, `fit()`, `ensemble()` and `select_training()` take a `control` argument made by the new `control_horizons()`. Their `allow_par`, `parallelize_over`, `output_dir`, `chunk_size` and `verbose` arguments move into it, a breaking change. A verb refuses a control field it does not use, and records the control it ran with on the slot it writes.
+* The row minimums for intervals, the applicability domain, the degradation check and the resemblance check can be set through `control_horizons()`.
+* `verbose` defaults to `getOption("horizons.verbose", TRUE)` in those four verbs and in `average()`.
+* `select_training()`'s `seed` defaults to 307, as the other verbs' do. The neighbour draw does not use the seed; the clusters of `scope = "cluster"`, and the resemblance check's reference sample on more than 2000 rows, change.
+* `evaluate()`'s `"auto"` parallel axis no longer chooses the configs axis without an `output_dir`, and `parallelize_over = "configs"` without one is refused (#233).
+* With `allow_par = TRUE` and no usable backend, the verbs warn once with a `horizons_warning_substitution`, recorded on the log, and run sequentially. The advice to install mirai or RhpcBLASctl is gone.
+* `evaluate()`'s worker payload limit keeps a `future.globals.maxSize` larger than 1 GiB; set `max_worker_payload` to lower it.
 
 # horizons 0.11.0
 
