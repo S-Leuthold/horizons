@@ -139,6 +139,7 @@ describe("check_parallel_backend()", {
     expect_identical(rows$topic, "substitution")
     expect_match(rows$message, "offers 1 worker", fixed = TRUE)
     expect_match(rows$message, "so it ran sequentially", fixed = TRUE)
+    expect_match(rows$message, "Register a backend before calling", fixed = TRUE)
 
   })
 
@@ -165,9 +166,10 @@ describe("check_parallel_backend()", {
     )
     local_mocked_bindings(registered_workers = function() 2L)
 
-    expect_error(check_parallel_backend("evaluate", log_open("evaluate")),
-                 "future.apply is not installed, but tune's future backend calls it.",
-                 fixed = TRUE, class = "horizons_error_dependency")
+    err <- expect_error(check_parallel_backend("evaluate", log_open("evaluate")),
+                        "future.apply is not installed, but tune's future backend calls it.",
+                        fixed = TRUE, class = "horizons_error_dependency")
+    expect_match(conditionMessage(err), "install.packages(\"future.apply\")", fixed = TRUE)
 
   })
 
