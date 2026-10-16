@@ -152,9 +152,12 @@ hd |> evaluate(control = control_horizons(allow_par = TRUE, output_dir = "output
 
 Before dispatch, BLAS, OpenMP, data.table and ranger threads are pinned to
 one in the calling process (via \code{RhpcBLASctl} when installed) and restored
-on exit. Configs are dispatched to a top-level worker that loads the
-\emph{installed} package, so parallel dispatch refuses to run under
-\code{devtools::load_all()}.
+on exit. On either axis the workers load the \emph{installed} package, so a
+parallel run refuses, before anything is drawn, under
+\code{devtools::load_all()} or when a worker loads another version of horizons
+than the session (class \code{horizons_error_dependency}). With
+\code{control_horizons(debug = TRUE)}, \code{evaluate()} runs in this session
+whatever \code{allow_par} says.
 }
 
 \section{Response outliers}{

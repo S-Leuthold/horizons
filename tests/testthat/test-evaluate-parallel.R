@@ -2,9 +2,9 @@
 ## Tests: evaluate() parallel execution
 ## ---------------------------------------------------------------------------
 
-## Parallel dispatch resolves the worker by name in the INSTALLED horizons, so
-## evaluate() refuses to dispatch under devtools::load_all() (see the guard
-## test below). The dispatching tests therefore run only against an installed
+## Parallel workers resolve horizons by name in the INSTALLED library, so
+## evaluate() refuses either parallel axis under devtools::load_all() (see the
+## guard tests below). The dispatching tests therefore run only against an installed
 ## build: R CMD check, or devtools::test() after devtools::install().
 ## skip_if_dev_package() comes from helper-load-all.R, shared with
 ## test-pipeline-predict.R's fresh-process round trip.
@@ -180,44 +180,80 @@ describe("evaluate() parallel worker footprint", {
     shared$seed        <- NULL
 
     err <- expect_error(horizons:::evaluate_config_worker(1L, shared),
-                        "but the parent runs 0.0.0.", fixed = TRUE,
+                        "but this session runs 0.0.0.", fixed = TRUE,
                         class = "horizons_error_dependency")
     expect_match(conditionMessage(err), "Reinstall the package so workers run matching code.",
                  fixed = TRUE)
 
   })
 
-  it("refuses to dispatch in parallel under devtools::load_all()", {
+  it("refuses a parallel run under devtools::load_all(), on either axis, before anything is drawn", {
 
-    skip_if_not(exists(".__DEVTOOLS__", envir = asNamespace("horizons"),
-                       inherits = FALSE),
-                "only meaningful under load_all()")
-    skip_on_cran()
-
-    local_plan(future::multisession, workers = 2)
-
-    obj    <- make_eval_object(n_configs = 4)   # 4 >= cv_folds (3) -> configs
-    tmpdir <- withr::local_tempdir()
+    ## The seam reports load_all(), so this runs on an installed build too;
+    ## the plan is mocked, since the refusal comes before it would be used
+    local_mocked_bindings(
+      running_under_load_all = function() TRUE,
+      check_parallel_backend = function(...) TRUE,
+      registered_workers     = function() 2L,
+      registered_plan_label  = function() "multisession",
+      draw_eval_split        = function(...) stop("the split was drawn"),
+      evaluate_single_config = function(...) stop("a configuration ran")
+    )
 
     withr::local_options(future.globals.maxSize = 12345)
 
-    out <- utils::capture.output(expect_error(
-      suppressWarnings(evaluate(obj, control = control_horizons(allow_par = TRUE, output_dir = tmpdir,
-                                                                verbose = TRUE))),
-      "load_all"
-    ))
+    for (over in c("configs", "resamples")) {
 
-    ## The lines printed before the guard, and the globals ceiling the
-    ## dispatch raised put back. This pins the guard where it sits today,
-    ## after those lines; if it moves ahead of them, these assertions move
-    ## to an installed-build test of the configs axis.
-    expect_identical(
-      sub(tmpdir, "<dir>", utils::tail(out, 3), fixed = TRUE),
-      c("│  Processing 4 pending configs...",
-        "│  Monitor: horizons::monitor_evaluate(\"<dir>\")",
-        "│")
-    )
+      tmpdir <- withr::local_tempdir()
+
+      out <- utils::capture.output(err <- expect_error(
+        evaluate(make_eval_object(n_configs = 4),
+                 control = control_horizons(allow_par = TRUE, parallelize_over = over,
+                                            output_dir = tmpdir, verbose = TRUE)),
+        "cannot run under `devtools::load_all()`", fixed = TRUE,
+        class = "horizons_error_dependency"
+      ))
+
+      expect_match(conditionMessage(err), "Install the package first", fixed = TRUE)
+
+      ## Refused at the door: no tree, no manifest, the globals ceiling as set
+      expect_identical(out, character())
+      expect_false(file.exists(file.path(tmpdir, "eval_manifest.rds")))
+
+    }
+
     expect_identical(getOption("future.globals.maxSize"), 12345)
+
+  })
+
+  it("refuses a parallel run whose workers load another version, before anything is drawn", {
+
+    local_mocked_bindings(
+      running_under_load_all  = function() FALSE,
+      worker_horizons_version = function() "0.0.1",
+      check_parallel_backend  = function(...) TRUE,
+      registered_workers      = function() 2L,
+      registered_plan_label   = function() "multisession",
+      draw_eval_split         = function(...) stop("the split was drawn")
+    )
+
+    expect_error(
+      evaluate(make_eval_object(n_configs = 1),
+               control = control_horizons(allow_par = TRUE, parallelize_over = "resamples")),
+      paste0("A parallel worker loads horizons 0.0.1, but this session runs ",
+             utils::packageVersion("horizons"), "."),
+      fixed = TRUE, class = "horizons_error_dependency"
+    )
+
+  })
+
+  it("asks a worker of the registered plan which horizons it loads", {
+
+    ## On a sequential plan the future runs here, so it loads this one
+    local_plan(future::sequential)
+
+    expect_identical(horizons:::worker_horizons_version(),
+                     as.character(utils::packageVersion("horizons")))
 
   })
 
@@ -360,6 +396,7 @@ describe("evaluate() - the parallel axis's setup", {
           header_rendered = function(e) NULL
         ),
         check_parallel_backend  = function(...) TRUE,
+        check_parallel_workers  = function(...) invisible(NULL),
         registered_workers      = function() workers,
         registered_plan_label   = function() "multisession",
         evaluate_single_config  = function(...) {
@@ -398,6 +435,32 @@ describe("evaluate() - the parallel axis's setup", {
 
   })
 
+  it("runs a debug run in this session, whatever allow_par says, without inspecting the plan", {
+
+    dir <- withr::local_tempdir()
+
+    out <- utils::capture.output(testthat::with_mocked_bindings(
+      tryCatch(
+        suppressWarnings(evaluate(make_eval_object(n = 60, n_configs = 1), seed = 42L,
+                                  control = control_horizons(allow_par = TRUE, debug = TRUE,
+                                                             output_dir = dir, verbose = TRUE))),
+        header_rendered = function(e) NULL
+      ),
+      check_parallel_backend = function(...) stop("the plan was inspected"),
+      check_parallel_workers = function(...) stop("the workers were asked"),
+      evaluate_single_config = function(...) rlang::abort("stop", class = "header_rendered"),
+      .package = "horizons"
+    ))
+
+    expect_identical(grep("Parallel:", out, value = TRUE, fixed = TRUE),
+                     "│  Parallel: off, since debug runs in this session")
+
+    manifest <- readRDS(file.path(dir, "eval_manifest.rds"))
+    expect_identical(manifest[c("allow_par", "axis", "plan", "workers")],
+                     list(allow_par = TRUE, axis = "sequential", plan = "sequential", workers = 1L))
+
+  })
+
 })
 
 describe("evaluate() - output_dir and the configs axis (#233)", {
@@ -429,6 +492,7 @@ describe("evaluate() - output_dir and the configs axis (#233)", {
         header_rendered = function(e) NULL
       ),
       check_parallel_backend = function(...) TRUE,
+      check_parallel_workers = function(...) invisible(NULL),
       registered_workers     = function() 2L,
       registered_plan_label  = function() "multisession",
       evaluate_single_config = function(...) rlang::abort("stop", class = "header_rendered"),
@@ -832,10 +896,11 @@ describe("evaluate() - results are identical across axes", {
   row_cols <- c("rmse", "rrmse", "rsq", "ccc", "rpd", "mae",
                 "cv_rmse", "cv_rrmse", "cv_rsq", "cv_ccc", "cv_rpd", "cv_mae")
 
-  it("resamples axis, chosen by auto on a real two-worker plan, matches the sequential run exactly", {
+  it("resamples axis, chosen by auto on a real two-worker plan, matches the sequential run exactly (installed build)", {
 
     skip_unless_slow_tier()
     skip_on_cran()
+    skip_if_dev_package()
     run        <- axes_seq_run()
     obj        <- run$obj
     seq_result <- run$result

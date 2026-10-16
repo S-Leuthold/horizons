@@ -103,9 +103,12 @@
 #'
 #' Before dispatch, BLAS, OpenMP, data.table and ranger threads are pinned to
 #' one in the calling process (via `RhpcBLASctl` when installed) and restored
-#' on exit. Configs are dispatched to a top-level worker that loads the
-#' *installed* package, so parallel dispatch refuses to run under
-#' `devtools::load_all()`.
+#' on exit. On either axis the workers load the *installed* package, so a
+#' parallel run refuses, before anything is drawn, under
+#' `devtools::load_all()` or when a worker loads another version of horizons
+#' than the session (class `horizons_error_dependency`). With
+#' `control_horizons(debug = TRUE)`, `evaluate()` runs in this session
+#' whatever `allow_par` says.
 #'
 #' @section Response outliers:
 #' When `validate()` was asked to remove response outliers
@@ -326,12 +329,18 @@ evaluate <- function(x,
   ## resolver is pure; the backend check reads the plan and downgrades to
   ## sequential, with a warning, when there is nothing to run on.
 
-  axis <- resolve_parallel_axis(parallelize_over, allow_par,
+  ## Debug runs in this session: a backtrace from a worker shows the
+  ## worker's plumbing, and no debugger attaches there. The user asked for
+  ## debug, so the tree says so rather than a warning.
+  debug    <- control$debug
+  dispatch <- allow_par && !debug
+
+  axis <- resolve_parallel_axis(parallelize_over, dispatch,
                                 n_configs      = nrow(configs),
                                 cv_folds       = cv_folds,
                                 has_output_dir = !is.null(output_dir))
 
-  if (allow_par && !check_parallel_backend("evaluate", collector)) {
+  if (dispatch && !check_parallel_backend("evaluate", collector)) {
 
     axis <- resolve_parallel_axis(parallelize_over, allow_par = FALSE,
                                   n_configs      = nrow(configs),
@@ -339,6 +348,11 @@ evaluate <- function(x,
                                   has_output_dir = !is.null(output_dir))
 
   }
+
+  ## On either axis the workers run horizons code (on the resamples axis,
+  ## tune's workers run the recipe steps and the PLS engine), so they must
+  ## run this session's horizons: checked here, before anything is drawn.
+  if (axis$axis != "sequential") check_parallel_workers()
 
   plan_label    <- if (axis$axis == "sequential") "sequential" else registered_plan_label()
   plan_workers  <- if (axis$axis == "sequential") 1L else registered_workers()
@@ -588,6 +602,10 @@ evaluate <- function(x,
       cat(paste0("\u2502  Parallel: over ", axis$axis, " on ", plan_label,
                  " (", workers_label, ")\n"))
 
+    } else if (allow_par && debug) {
+
+      cat("\u2502  Parallel: off, since debug runs in this session\n")
+
     }
 
     cat("\u2502\n")
@@ -823,22 +841,9 @@ evaluate <- function(x,
     ## `split` and `cv_fold_obj` included — would ship to every worker no matter
     ## what is passed explicitly.
 
-    ## Workers resolve the horizons namespace by NAME, which finds the INSTALLED
-    ## library — not this source tree. Under pkgload the installed copy may not
-    ## have these helpers at all; worse, a compatible-but-stale install runs old
-    ## helper code while the worker body is new, silently, and the worker
-    ## computes every metric. Refuse rather than produce quiet wrong numbers.
-    if (exists(".__DEVTOOLS__", envir = asNamespace("horizons"),
-               inherits = FALSE)) {
-
-      rlang::abort(paste0(
-        "Parallel `evaluate()` cannot run under `devtools::load_all()`. ",
-        "Workers load the installed `horizons`, not this source tree, so they ",
-        "would run stale code. Install the package first (`R CMD INSTALL`), ",
-        "or call `evaluate()` without parallelism."
-      ))
-
-    }
+    ## The workers resolve the horizons namespace by NAME, which finds the
+    ## INSTALLED library; check_parallel_workers() refused a session they
+    ## could not match before anything ran.
 
     shared_args <- list(
       data            = split$data,
@@ -2402,6 +2407,88 @@ evaluation_recipe <- function(x, call = rlang::caller_env()) {
 }
 
 ## -------------------------------------------------------------------------
+## The workers a parallel run dispatches to
+## -------------------------------------------------------------------------
+
+#' Refuse a parallel run whose workers cannot run this session's horizons
+#'
+#' @description
+#' On either parallel axis the workers run horizons code: the configs-axis
+#' worker body, and on the resamples axis the recipe steps and the PLS engine
+#' that tune's workers call. They load horizons by name, so they run the
+#' installed copy. Under `devtools::load_all()` that copy is not this source
+#' tree, and a worker would run stale code silently; otherwise one worker is
+#' asked which version it loads (one future, about 0.05 s on a running plan,
+#' drawing nothing from the parent's RNG) and a mismatch is refused. Both are
+#' `horizons_error_dependency`: an environment that cannot run the call.
+#'
+#' @param call The frame a refusal reports: `evaluate()`'s.
+#' @return `NULL`, invisibly.
+#' @keywords internal
+#' @noRd
+check_parallel_workers <- function(call = rlang::caller_env()) {
+
+  if (running_under_load_all()) {
+
+    abort_horizons(c(
+      "Parallel {.fn evaluate} cannot run under {.fn devtools::load_all}.",
+      "i" = "Workers load the installed {.pkg horizons}, not this source tree, so they would run stale code.",
+      "i" = "Install the package first ({.code R CMD INSTALL}), or call {.fn evaluate} without parallelism."
+    ), kind = "dependency", call = call)
+
+  }
+
+  parent <- as.character(utils::packageVersion("horizons"))
+  worker <- worker_horizons_version()
+
+  if (!identical(worker, parent)) abort_worker_version(worker, parent, call = call)
+
+  invisible(NULL)
+
+}
+
+#' Whether horizons was loaded by `devtools::load_all()`
+#'
+#' @return Logical(1). A seam, so a test can force the refusal on an
+#'   installed build.
+#' @keywords internal
+#' @noRd
+running_under_load_all <- function() {
+
+  exists(".__DEVTOOLS__", envir = asNamespace("horizons"), inherits = FALSE)
+
+}
+
+#' The horizons version a worker of the registered plan loads
+#'
+#' @return Character(1). A seam, so a test can report another version.
+#' @keywords internal
+#' @noRd
+worker_horizons_version <- function() {
+
+  future::value(future::future(as.character(utils::packageVersion("horizons")),
+                               seed = FALSE))
+
+}
+
+#' Abort because a worker loads another version of horizons
+#'
+#' @param worker,parent Character(1). The worker's version and this
+#'   session's.
+#' @param call The frame the refusal reports.
+#' @return Does not return; aborts with class `horizons_error_dependency`.
+#' @keywords internal
+#' @noRd
+abort_worker_version <- function(worker, parent, call = rlang::caller_env()) {
+
+  abort_horizons(c(
+    "A parallel worker loads horizons {worker}, but this session runs {parent}.",
+    "i" = "Reinstall the package so workers run matching code."
+  ), kind = "dependency", call = call)
+
+}
+
+## -------------------------------------------------------------------------
 ## Parallel worker
 ## -------------------------------------------------------------------------
 
@@ -2449,7 +2536,8 @@ evaluate_config_worker <- function(config_i, shared) {
   ## -------------------------------------------------------------------------
   ## The worker's horizons, then the cross-process contract
   ## -------------------------------------------------------------------------
-  ## A partial guard on the installed-vs-source hazard: it catches a worker
+  ## A partial guard on the installed-vs-source hazard, behind the one at
+  ## evaluate()'s door (check_parallel_workers()): it catches a worker
   ## loading a different horizons VERSION than the parent. It cannot catch
   ## same-version source edits, which is why evaluate() also refuses to
   ## dispatch under pkgload. Checked first, since another version's payload
@@ -2460,10 +2548,7 @@ evaluate_config_worker <- function(config_i, shared) {
   if (rlang::is_string(shared$pkg_version) &&
       !identical(worker_version, shared$pkg_version)) {
 
-    abort_horizons(c(
-      "A parallel worker loaded horizons {worker_version}, but the parent runs {shared$pkg_version}.",
-      "i" = "Reinstall the package so workers run matching code."
-    ), kind = "dependency")
+    abort_worker_version(worker_version, shared$pkg_version)
 
   }
 
