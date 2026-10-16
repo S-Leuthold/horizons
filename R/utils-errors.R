@@ -141,7 +141,8 @@ check_arg <- function(check,
 #'     the verb that wrote the field, or start again from [configure()].}
 #'   \item{`horizons_error_dependency`}{A needed package is missing, or the
 #'     environment cannot run the call (a parallel run under
-#'     `devtools::load_all()`, whose workers load the installed build).}
+#'     `devtools::load_all()`, whose workers load the installed build, or one
+#'     whose workers load another version of horizons).}
 #'   \item{`horizons_error_run`}{The work was attempted and failed: every
 #'     configuration or member failed, a download failed, or the run stopped
 #'     on a failure that would hit every unit the same way.}
@@ -156,6 +157,11 @@ check_arg <- function(check,
 #'     condition as `results`.}
 #'   \item{`horizons_error_all_members_failed`}{(run) Every member failed in
 #'     `fit()`. The per-member results travel as `results`.}
+#'   \item{`horizons_error_systemic`}{(run) [evaluate()] stopped early,
+#'     because the first configurations to run failed the same way across at
+#'     least two models (the circuit breaker,
+#'     `control_horizons(breaker = )`), or because a parallel worker died.
+#'     The rows finished so far travel as `results`.}
 #'   \item{`horizons_error_promoted_warnings`}{(run) A verb ended with
 #'     warnings under `options(warn = 2)`. Instead of turning the first warning
 #'     into an error that loses the result, the verb aborts with the finished
@@ -428,8 +434,8 @@ handle_results <- function(safe_result,
 #' @param error Error condition object, character string, or NULL.
 #'
 #' @return Single-row tibble with config_id, status, error_message, the
-#'   failure's root class (`NA` for an error given as text), metric columns
-#'   (all NA), and runtime_secs (NA).
+#'   failure's root class (`NA` for an error given as text), `trace` (a list
+#'   holding `NULL`), metric columns (all NA), and runtime_secs (NA).
 #' @keywords internal
 create_failed_result <- function(config_id, error = NULL) {
 
@@ -478,6 +484,7 @@ create_failed_result <- function(config_id, error = NULL) {
     ## The root cause's class, so a script can tell one kind of failure from
     ## another without reading the message
     class         = if (inherits(error, "condition")) root_class(error) else NA_character_,
+    trace         = list(NULL),
     warnings      = list(NULL),
     runtime_secs  = NA_real_
   )
@@ -982,6 +989,38 @@ text_records <- function(x, pinned = FALSE) {
 
 }
 
+#' Warning records from what a unit recorded
+#'
+#' @description
+#' The warnings [run_unit()] caught in a unit, as records that merge with
+#' tune's notes: a warning caught as it was raised and the same warning kept
+#' in tune's notes are one line on the row. A horizons warning (one raised
+#' with [warn_in_unit()]) is a package notice, so it is pinned. tune's own
+#' "All models failed" warning is left out: it is raised beside a result in
+#' which every model failed, and [check_tune_result()] records that as the
+#' failure, with its cause.
+#'
+#' @param records Records shaped like [new_unit_records()]'s.
+#' @return Records shaped like [new_warning_log()]'s, one per warning.
+#' @keywords internal
+#' @noRd
+unit_warning_records <- function(records) {
+
+  warnings <- records[records$type == "warning" &
+                        !startsWith(records$cause, "All models failed"), , drop = FALSE]
+
+  tibble::tibble(
+    cause   = warnings$cause,
+    where   = warnings$where,
+    n       = warnings$n,
+    scope   = rep(NA_character_, nrow(warnings)),
+    folds   = rep(list(character(0)), nrow(warnings)),
+    n_folds = rep(NA_integer_, nrow(warnings)),
+    pinned  = startsWith(warnings$class, "horizons_warning_")
+  )
+
+}
+
 #' Warning or error records from the notes of a tune result
 #'
 #' @param tune_results A `tune_results` object (grid, Bayesian, resamples or
@@ -989,21 +1028,32 @@ text_records <- function(x, pinned = FALSE) {
 #' @param type Character. Note types to keep: `"warning"`, `"error"`, or both.
 #' @param scope Character(1). `"cv"` for notes from cross-validation
 #'   resamples, `"test set"` for `last_fit()`'s.
+#' @param candidate `NULL`, or the candidate the notes are read for, from
+#'   [candidate_of()]: only the notes that belong to it are kept (#109).
 #' @return Records shaped like [new_warning_log()]'s, one per distinct note
-#'   text; empty when there are none or the notes cannot be read.
+#'   text; empty when there are none. Notes that cannot be read are one
+#'   pinned record saying so, with the cause, so a row never reads as clean
+#'   when its notes were lost.
 #' @keywords internal
 #' @noRd
-tune_note_records <- function(tune_results, type = "warning", scope = "cv") {
+tune_note_records <- function(tune_results, type = "warning", scope = "cv",
+                              candidate = NULL) {
 
-  notes <- tryCatch(tune::collect_notes(tune_results), error = function(e) NULL)
+  notes <- tryCatch(tune::collect_notes(tune_results), error = function(e) e)
 
-  if (!is.data.frame(notes) || !all(c("type", "note") %in% names(notes))) {
+  readable <- is.data.frame(notes) && all(c("type", "note") %in% names(notes))
 
-    return(new_warning_log())
+  if (!readable) {
+
+    why <- if (inherits(notes, "error")) condition_summary(notes) else "they have no type and note columns"
+
+    return(text_records(paste0("tune's notes could not be read: ", why), pinned = TRUE))
 
   }
 
   notes <- notes[notes$type %in% type, , drop = FALSE]
+
+  if (!is.null(candidate)) notes <- notes[notes_of(notes, candidate), , drop = FALSE]
 
   if (nrow(notes) == 0) return(new_warning_log())
 
@@ -1028,8 +1078,7 @@ tune_note_records <- function(tune_results, type = "warning", scope = "cv") {
 
   }
 
-  n_folds <- tryCatch(length(unique(resample_ids(tune_results))),
-                      error = function(e) NA_integer_)
+  n_folds <- length(unique(resample_ids(tune_results)))
 
   tibble::tibble(
     cause   = vapply(parts, `[[`, character(1), "cause"),
@@ -1040,6 +1089,144 @@ tune_note_records <- function(tune_results, type = "warning", scope = "cv") {
     n_folds = as.integer(n_folds),
     pinned  = FALSE
   )
+
+}
+
+#' The candidate a tune result's notes are read for
+#'
+#' @description
+#' tune keeps the notes of every candidate it tuned, so without a filter a
+#' configuration reports the warnings of hyperparameters it did not choose,
+#' such as an `mtry` above the predictor count on a candidate that lost
+#' (#109). A note belongs to the chosen candidate when:
+#'
+#' * its location has no model part (the recipe's prep, or its bake of the
+#'   assessment rows), since the recipe is the same for every candidate;
+#' * it is a grid note (`.iter` 0) at a model stage that holds the candidate.
+#'   tune numbers the model stages of `tune::schedule_grid()` in the order
+#'   of the grid it was given, which is why `evaluate_single_config()` draws
+#'   the grid itself; one stage holds every candidate that differs only in a
+#'   submodel parameter (glmnet's `penalty`, PLS's `num_comp`);
+#' * it is a Bayesian note of the candidate's own iteration;
+#' * it is tune's `internal` note (yardstick's, on a metric it could not
+#'   compute) of the candidate's iteration, on a fold where the candidate has
+#'   a metric missing.
+#'
+#' @param results The tune result the candidate was chosen from.
+#' @param best_params One-row tibble of the chosen hyperparameters, with
+#'   `.config`.
+#' @param grid The grid `tune_grid()` was given.
+#' @param workflow The workflow it tuned.
+#' @return List: `iter` (the candidate's Bayesian iteration, 0 for a grid
+#'   candidate), `model_stages` (the grid's model stages that hold it, or
+#'   `NULL` for every stage), `na_folds` (the resamples where one of its
+#'   metrics is missing) and `unmapped` (why the grid's schedule could not be
+#'   read, so every grid note is kept; `NULL` when it was, or not needed).
+#' @keywords internal
+#' @noRd
+candidate_of <- function(results, best_params, grid, workflow) {
+
+  config   <- best_params$.config[[1]]
+  per_fold <- tune::collect_metrics(results, summarize = FALSE)
+  mine     <- per_fold[per_fold$.config == config, , drop = FALSE]
+  iter     <- if (".iter" %in% names(mine)) as.integer(mine$.iter[1]) else 0L
+
+  ## The model stages of the grid that hold it. The schedule is tune's
+  ## developer interface, so a shape it no longer has keeps every grid note,
+  ## with the reason, rather than failing the configuration: the filter is
+  ## for reading the row, and the row is still right without it.
+  stages   <- NULL
+  unmapped <- NULL
+
+  if (iter == 0L) {
+
+    mapped <- tryCatch(grid_model_stages(grid, workflow, best_params),
+                       error = function(e) structure(condition_summary(e), class = "unmapped"))
+
+    if (inherits(mapped, "unmapped")) unmapped <- unclass(mapped) else stages <- mapped
+
+  }
+
+  list(
+    iter         = iter,
+    model_stages = stages,
+    na_folds     = unique(resample_ids(mine[is.na(mine$.estimate), , drop = FALSE])),
+    unmapped     = unmapped
+  )
+
+}
+
+#' The model stages of a grid that hold a candidate
+#'
+#' @description
+#' Matched on the parameters that are not submodels, since a stage carries a
+#' submodel's largest value and covers every candidate that differs only in
+#' it (glmnet's `penalty`, PLS's `num_comp`).
+#'
+#' @param grid The grid `tune_grid()` was given.
+#' @param workflow The workflow it tuned.
+#' @param best_params One-row tibble of the candidate's hyperparameters.
+#' @return Integer: the stages, in the order tune numbers them; `NULL` when
+#'   the recipe is tuned too (several preprocessor stages), for every stage.
+#'   Errors when `tune::schedule_grid()` returns a shape it does not read.
+#' @keywords internal
+#' @noRd
+grid_model_stages <- function(grid, workflow, best_params) {
+
+  schedule <- tune::schedule_grid(grid, workflow)
+
+  if (!is.data.frame(schedule) || !"model_stage" %in% names(schedule)) {
+    stop("tune's grid schedule has no model_stage column", call. = FALSE)
+  }
+
+  if (nrow(schedule) != 1L) return(NULL)
+
+  model_stage <- schedule$model_stage[[1]]
+
+  if (!is.data.frame(model_stage) || !"predict_stage" %in% names(model_stage)) {
+    stop("tune's grid schedule has no predict_stage column", call. = FALSE)
+  }
+
+  params  <- setdiff(names(model_stage),
+                     c("predict_stage", names(model_stage$predict_stage[[1]])))
+  missing <- setdiff(params, names(best_params))
+
+  if (length(missing) > 0) {
+    stop("tune's grid schedule has parameters the candidate lacks: ",
+         paste(missing, collapse = ", "), call. = FALSE)
+  }
+
+  holds <- rep(TRUE, nrow(model_stage))
+
+  for (p in params) holds <- holds & model_stage[[p]] == best_params[[p]][[1]]
+
+  which(holds)
+
+}
+
+#' Which notes belong to a candidate
+#'
+#' @param notes `tune::collect_notes()`'s table.
+#' @param candidate From [candidate_of()].
+#' @return Logical, one per note.
+#' @keywords internal
+#' @noRd
+notes_of <- function(notes, candidate) {
+
+  if (nrow(notes) == 0) return(logical(0))
+
+  iter  <- if (".iter" %in% names(notes)) as.integer(notes$.iter) else rep(0L, nrow(notes))
+  found <- regmatches(notes$location, regexec("model ([0-9]+)/[0-9]+", notes$location))
+  stage <- vapply(found, function(x) if (length(x) == 2L) as.integer(x[2]) else NA_integer_,
+                  integer(1))
+
+  own_iter <- iter == candidate$iter
+  internal <- notes$location %in% "internal"
+  in_stage <- is.null(candidate$model_stages) | stage %in% candidate$model_stages
+
+  ifelse(internal, own_iter & resample_ids(notes) %in% candidate$na_folds,
+         ifelse(is.na(stage), TRUE,
+                own_iter & (iter > 0L | in_stage)))
 
 }
 
@@ -1238,6 +1425,94 @@ tune_failure_cause <- function(tune_results) {
 
   paste0(causes[1], ", plus ", n_other, " other distinct error",
          if (n_other > 1) "s")
+
+}
+
+#' Fail a unit on what a tune call kept as text
+#'
+#' @description
+#' tune catches every error raised inside its resampling and returns, so a
+#' failure there reaches the unit only as notes and an unclassed warning. Run
+#' after each tune call, inside the call's step:
+#'
+#' * A recipe step that failed inside tune (an error note at a preprocessor
+#'   location) is reproduced outside it, when `recipe` is given, by prepping
+#'   the recipe once on the training part: the step's error then ends the
+#'   unit with its own class, or propagates for the kinds no unit contains. A
+#'   failure that does not reproduce there (one fold's rows only) is read
+#'   from the notes, as below. Prepping only on failure costs a run that
+#'   does not fail nothing, where a prep with feature selection can take
+#'   minutes.
+#' * A result in which every model failed ([tune::.is_cataclysmic()]) ends the
+#'   unit: `failure` and the most frequent error note are its message, and it
+#'   carries the trace tune kept for the first error (tune keeps one for an
+#'   engine's error and none for a recipe step's).
+#' * Under `debug` any error note ends the unit the same way, so the first
+#'   failure inside tune stops the call.
+#'
+#' @param results A tune result.
+#' @param failure Character(1). What a result in which every model failed
+#'   means, e.g. `"all models failed during CV"`; `NULL` when the caller falls
+#'   back instead (the Bayesian search).
+#' @param recipe The unit's untrained recipe, to reproduce a step's failure;
+#'   `NULL` when it was prepped before tuning.
+#' @param debug Logical(1).
+#' @param call The frame the failure reports.
+#' @return `NULL`, invisibly; aborts with class `horizons_error_run`.
+#' @keywords internal
+#' @noRd
+check_tune_result <- function(results,
+                              failure,
+                              recipe = NULL,
+                              debug  = FALSE,
+                              call   = rlang::caller_env()) {
+
+  notes  <- tune::collect_notes(results)
+  errors <- notes[notes$type %in% "error", , drop = FALSE]
+
+  ## A recipe step that failed inside tune, reproduced outside it --------------
+
+  ### A preprocessor location without a model part is the recipe's prep, or
+  ### its bake of the assessment rows ("(prediction data)").
+  step_failed <- any(grepl("^preprocessor [0-9]+/[0-9]+( \\(prediction data\\))?$",
+                           errors[["location"]]))
+
+  if (!is.null(recipe) && step_failed) unit_step("prep", recipes::prep(recipe))
+
+  ## Every model failed, or, under debug, any did ---------------------------------
+
+  every_model <- !is.null(failure) && tune::.is_cataclysmic(results)
+
+  if (!every_model && !(debug && nrow(errors) > 0)) return(invisible(NULL))
+
+  abort_tune_failure(results, if (every_model) failure else "a fit failed inside tune",
+                     call = call)
+
+}
+
+#' Abort a unit on a failure tune kept as text
+#'
+#' @param results A tune result.
+#' @param what Character(1). What failed, e.g. `"all models failed during
+#'   CV"`.
+#' @param call The frame the failure reports.
+#' @return Does not return; aborts with class `horizons_error_run`, the most
+#'   frequent error note as the cause, and the trace tune kept for the first
+#'   error note that has one.
+#' @keywords internal
+#' @noRd
+abort_tune_failure <- function(results, what, call = rlang::caller_env()) {
+
+  notes  <- tune::collect_notes(results)
+  errors <- notes[notes$type %in% "error", , drop = FALSE]
+  cause  <- tune_failure_cause(results)
+
+  abort_horizons(
+    if (is.null(cause)) "{what}" else "{what} \u2014 {cause}",
+    kind  = "run",
+    trace = Find(Negate(is.null), errors[["trace"]]),
+    call  = call
+  )
 
 }
 

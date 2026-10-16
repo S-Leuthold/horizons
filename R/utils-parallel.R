@@ -2,9 +2,9 @@
 ## Parallelism helpers: axis resolution, plan inspection, thread pinning
 ## ---------------------------------------------------------------------------
 ##
-## The rule these implement (evaluate-design.md, Parallelism): the user owns
-## the backend and the topology; the package owns only which axis of its work
-## the registered future plan is applied to. Nothing here ever calls
+## The rule these implement: the user owns the backend and the topology; the
+## package owns only which axis of its work the registered future plan is
+## applied to. Nothing here ever calls
 ## future::plan() to *set* a plan.
 
 ## ---------------------------------------------------------------------------

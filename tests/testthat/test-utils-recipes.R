@@ -742,7 +742,7 @@ describe("selection steps abort on a zero-column selector", {
       step_select_correlation(dplyr::matches(no_match), outcome = "SOC")
 
     expect_error(recipes::prep(rec), "`step_select_correlation()` selected zero columns",
-                 fixed = TRUE, class = "horizons_input_error")
+                 fixed = TRUE, class = "horizons_error_input")
 
   })
 
@@ -774,7 +774,7 @@ describe("selection steps abort on a zero-column selector", {
     rec <- base_recipe() |>
       recipes::step_pca(select_generated_spectra(), threshold = 0.995)
 
-    expect_error(recipes::prep(rec), "nothing to select")
+    expect_error(recipes::prep(rec), "nothing to select", class = "horizons_error_internal")
 
   })
 

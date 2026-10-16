@@ -56,8 +56,8 @@
 #'   earlier scoring schema, or recording less of the training data and
 #'   settings than this run does, was written by an earlier version: it is
 #'   dropped and its config re-evaluated. Rows for configs no longer in the
-#'   grid are dropped; a file that cannot be used warns and its config is
-#'   re-evaluated.
+#'   grid are dropped; a file that cannot be used is a note in the object's
+#'   `log` and a line in the progress tree, and its config is re-evaluated.
 #'
 #' @section Parallelism:
 #' With `control_horizons(allow_par = TRUE)`, `evaluate()` dispatches onto
@@ -103,9 +103,12 @@
 #'
 #' Before dispatch, BLAS, OpenMP, data.table and ranger threads are pinned to
 #' one in the calling process (via `RhpcBLASctl` when installed) and restored
-#' on exit. Configs are dispatched to a top-level worker that loads the
-#' *installed* package, so parallel dispatch refuses to run under
-#' `devtools::load_all()`.
+#' on exit. On either axis the workers load the *installed* package, so a
+#' parallel run refuses, before anything is drawn, under
+#' `devtools::load_all()` or when a worker loads another version of horizons
+#' than the session (class `horizons_error_dependency`). With
+#' `control_horizons(debug = TRUE)`, `evaluate()` runs in this session
+#' whatever `allow_par` says.
 #'
 #' @section Response outliers:
 #' When `validate()` was asked to remove response outliers
@@ -126,31 +129,77 @@
 #' trimmed training rows, so the cross-validated metrics (and the ranking
 #' on them) describe the trimmed population; the test metrics do not.
 #'
+#' @section Failed configurations:
+#' Each configuration runs as one unit. A failure in any of its steps fails
+#' that configuration alone: its row has `status` `"failed"`, an
+#' `error_message` naming the step and the cause ("Grid search failed:
+#' ..."), the root `class` of the failure, and, with
+#' `control_horizons(keep_traces = TRUE)`, the backtrace as text in `trace`.
+#' A recipe step that fails inside tuning is reproduced by prepping the
+#' recipe once on the training part, so the step's own error is recorded with
+#' its class; a failure tune keeps only as text is `horizons_error_run`. A
+#' hyperparameter candidate scored on fewer cross-validation folds than were
+#' drawn takes no part in the prune gate or the choice of hyperparameters,
+#' and a configuration with no grid candidate scored on every fold fails; a
+#' `cv_*` mean is kept only when it covers every fold, so every ranked value
+#' is on the same folds (#101). A configuration whose final fit on the
+#' training part fails is failed too (#102). An error that is not the
+#' configuration's own (an input or dependency error, or a bug in horizons)
+#' stops the call. So does a failure every configuration would share: when
+#' the first configurations to run fail the same way across at least two
+#' models, `evaluate()` stops with `horizons_error_systemic`, the rows so far
+#' as its `results` (`control_horizons(breaker = )`, 3 by default, `FALSE` to
+#' run every configuration; the configs axis has no breaker), and their
+#' failures are not checkpointed. A parallel worker that dies stops the run
+#' the same way, except during a Bayesian iteration on the resamples axis:
+#' tune catches each fit's failure there, so the iteration's candidate reads
+#' as one that failed. When some configurations failed and
+#' the rest are returned, one `horizons_warning_partial_failure` names them
+#' with each distinct cause. A configuration whose Bayesian search stopped
+#' early keeps the iterations it finished; one whose search failed before any
+#' iteration, or added nothing to the grid, keeps the grid's choice. Either
+#' says so in its `warnings` and is named in one
+#' `horizons_warning_substitution`. With
+#' `control_horizons(debug = TRUE)` nothing is contained: the first failure,
+#' inside tuning included, stops the call with its backtrace, and the
+#' Bayesian search is not fallen back from.
+#'
 #' @section When every configuration fails:
 #' `best_config` is chosen from the configs that succeeded or, when none did,
-#' from the pruned configs that carry a cross-validated value of `metric`.
-#' When there are neither, or none of them has a value of `metric` to rank
-#' on, `evaluate()` aborts with class `horizons_all_configs_failed`. The
+#' from the pruned configs that carry a cross-validated value of `metric`. A
+#' config without a value of `metric` is left out of the ranking, with one
+#' `horizons_warning_skipped` naming it. When configs were evaluated but none
+#' has a value of `metric`, `evaluate()` returns with `best_config` `NA` and
+#' that warning, and `fit()` asks for another `metric`.
+#'
+#' When every config failed, `evaluate()` aborts with class
+#' `horizons_error_all_configs_failed` (and `horizons_error_run`). The
 #' message lists the distinct error messages (the first three, each with the
 #' configs that raised it) and names any configs that were loaded from
 #' checkpoints in `output_dir` rather than run, since calling `evaluate()`
 #' again resumes them instead of re-running them. The per-config results,
 #' `error_message` included, travel on the condition as `results`, because
 #' `evaluate()` aborts before it assigns `x$evaluation`; after an uncaught
-#' abort, `rlang::last_error()$results` recovers them without re-running. A
-#' loop over subsets can catch the class, tolerate one subset whose every
-#' config fails, and keep its errors:
+#' abort, `rlang::last_error()$results` recovers them without re-running.
+#'
+#' A failure the first configurations share across at least two models stops
+#' the call earlier, with `horizons_error_systemic` (also
+#' `horizons_error_run`) and the rows finished so far as its `results`; with
+#' `control_horizons(breaker = FALSE)` every configuration runs and the call
+#' ends in the all-failed abort instead. Both carry `results`, so a loop over
+#' subsets can catch `horizons_error_run`, tolerate a subset that fails
+#' either way, and keep its errors:
 #'
 #' ```
 #' runs <- lapply(subsets, function(hd) {
 #'   tryCatch(
 #'     evaluate(hd, control = control_horizons(verbose = FALSE)),
-#'     horizons_all_configs_failed = function(e) e$results
+#'     horizons_error_run = function(e) e$results
 #'   )
 #' })
 #'
-#' # A horizons_eval for each subset that ranked, and the failed configs'
-#' # results table for each subset that did not.
+#' # A horizons_eval for each subset that ranked, and the results table so
+#' # far for each subset that failed.
 #' failed <- runs[!vapply(runs, inherits, logical(1), "horizons_eval")]
 #' ```
 #'
@@ -229,28 +278,26 @@ evaluate <- function(x,
   ## Step 1: Gate checks
   ## -----------------------------------------------------------------------
 
-  if (!metric %in% VALID_RANK_METRICS) {
-
-    rlang::abort(paste0(
-      "Invalid `metric`: '", metric, "'. ",
-      "Must be one of: ", paste(VALID_RANK_METRICS, collapse = ", ")
-    ))
-
-  }
+  check_rank_metric_arg(metric)
 
   configs <- x$config$configs
 
   if (is.null(configs) || nrow(configs) == 0) {
 
-    rlang::abort(
-      "No configurations found. Run `configure()` before `evaluate()`."
-    )
+    abort_horizons(c(
+      "No configurations found.",
+      "i" = "Run {.fn configure} before {.fn evaluate}."
+    ), kind = "input")
 
   }
 
   role_map    <- x$data$role_map
   outcome_col <- role_map$variable[role_map$role == "outcome"]
   analysis    <- x$data$analysis
+
+  ## The axis has to be in order for the spectral steps; the same for every
+  ## configuration, so checked once, before anything is drawn (#121)
+  check_band_order(role_map$variable[role_map$role == "predictor"])
 
   ## -----------------------------------------------------------------------
   ## Step 2: Handle NA outcome rows
@@ -291,22 +338,14 @@ evaluate <- function(x,
   check_outcome_variance(x, verb = "evaluate")
 
   ## -----------------------------------------------------------------------
-  ## Step 3: Validate minimum sample size
+  ## Step 3: The tuning settings
   ## -----------------------------------------------------------------------
+  ## Small samples are weak, not wrong, so they run: the folds' row count is
+  ## checked once the split and the trim have drawn the training part (Step
+  ## 4), and a small assessment fold warns (Step 5).
 
-  tuning    <- x$config$tuning
-  cv_folds  <- tuning$cv_folds
-  n_samples <- nrow(analysis)
-
-  if (n_samples < cv_folds * 2) {
-
-    rlang::abort(paste0(
-      "Insufficient sample size for evaluation. ",
-      "Need at least ", cv_folds * 2, " samples (cv_folds * 2), ",
-      "but only ", n_samples, " available."
-    ))
-
-  }
+  tuning   <- x$config$tuning
+  cv_folds <- tuning$cv_folds
 
   ## -----------------------------------------------------------------------
   ## Step 3a: The window has to fit the spectrum
@@ -331,12 +370,18 @@ evaluate <- function(x,
   ## resolver is pure; the backend check reads the plan and downgrades to
   ## sequential, with a warning, when there is nothing to run on.
 
-  axis <- resolve_parallel_axis(parallelize_over, allow_par,
+  ## Debug runs in this session: a backtrace from a worker shows the
+  ## worker's plumbing, and no debugger attaches there. The user asked for
+  ## debug, so the tree says so rather than a warning.
+  debug    <- control$debug
+  dispatch <- allow_par && !debug
+
+  axis <- resolve_parallel_axis(parallelize_over, dispatch,
                                 n_configs      = nrow(configs),
                                 cv_folds       = cv_folds,
                                 has_output_dir = !is.null(output_dir))
 
-  if (allow_par && !check_parallel_backend("evaluate", collector)) {
+  if (dispatch && !check_parallel_backend("evaluate", collector)) {
 
     axis <- resolve_parallel_axis(parallelize_over, allow_par = FALSE,
                                   n_configs      = nrow(configs),
@@ -344,6 +389,11 @@ evaluate <- function(x,
                                   has_output_dir = !is.null(output_dir))
 
   }
+
+  ## On either axis the workers run horizons code (on the resamples axis,
+  ## tune's workers run the recipe steps and the PLS engine), so they must
+  ## run this session's horizons: checked here, before anything is drawn.
+  if (axis$axis != "sequential") check_parallel_workers()
 
   plan_label    <- if (axis$axis == "sequential") "sequential" else registered_plan_label()
   plan_workers  <- if (axis$axis == "sequential") 1L else registered_workers()
@@ -376,7 +426,7 @@ evaluate <- function(x,
   drawn <- draw_eval_split(analysis, outcome_col, seed)
 
   trimmed <- trim_training_responses(drawn$split, outcome_col, trim_request,
-                                     id_col = id_column(role_map))
+                                     id_col = id_column(role_map), collector = collector)
   split   <- trimmed$split
 
   train_data <- rsample::training(split)
@@ -389,6 +439,12 @@ evaluate <- function(x,
   ## tuned on a constant. Refused before the folds are drawn (#132).
   drawn_rows <- drawn$split$data
   trim_ids   <- trimmed$record$trimmed_ids %||% character(0)
+
+  ## Every fold needs rows to fit on and a row to assess, and rsample refuses
+  ## as many folds as rows. That is the one sample size refused, here,
+  ## before anything is tuned.
+  check_fold_rows(n_train, cv_folds, n_modelled = nrow(analysis),
+                  n_test = n_test, n_trimmed = length(trim_ids))
 
   check_training_outcome_variance(
     train_data[[outcome_col]],
@@ -415,6 +471,15 @@ evaluate <- function(x,
     unstratified = function() rsample::vfold_cv(train_data, v = cv_folds)
   )
   cv_fold_obj <- cv_drawn$draw
+
+  ## A stratified draw that failed fell back to an unstratified one: what
+  ## ran is not what was asked, so each draw that did says so once.
+  log_strata_fallback(collector, drawn, "train/test split")
+  log_strata_fallback(collector, cv_drawn, "cross-validation folds")
+
+  ## A small assessment fold is weak, not wrong: it runs, with one warning.
+  ## Metrics undefined on a fold that small are NA.
+  log_small_folds(collector, cv_fold_obj)
 
   ## -----------------------------------------------------------------------
   ## Step 5b: Fingerprint the training rows
@@ -487,7 +552,8 @@ evaluate <- function(x,
       output_dir = output_dir,
       config_ids = configs$config_id,
       data_fp    = data_fp,
-      settings   = settings
+      settings   = settings,
+      collector  = collector
     )
 
     ## The count of loaded results is the Configs line's "from checkpoint",
@@ -572,12 +638,15 @@ evaluate <- function(x,
 
     if (axis$axis != "sequential") {
 
-      workers_label <- if (is.na(plan_workers)) "unbounded" else {
-        paste0(plan_workers, " worker", if (plan_workers != 1) "s" else "")
-      }
+      ## A parallel axis has two workers or more, or an unbounded count
+      workers_label <- if (is.na(plan_workers)) "unbounded" else paste0(plan_workers, " workers")
 
       cat(paste0("\u2502  Parallel: over ", axis$axis, " on ", plan_label,
                  " (", workers_label, ")\n"))
+
+    } else if (allow_par && debug) {
+
+      cat("\u2502  Parallel: off, since debug runs in this session\n")
 
     }
 
@@ -637,6 +706,11 @@ evaluate <- function(x,
 
     results_list <- list()
 
+    ## The circuit breaker watches the first configurations to run, so a
+    ## failure every configuration would share stops the call early
+    ## (control_horizons(breaker = )); the configs axis has none.
+    breaker <- new_breaker(control$breaker)
+
     for (i in seq_len(nrow(configs))) {
 
       cfg <- configs[i, ]
@@ -678,8 +752,9 @@ evaluate <- function(x,
 
       }
 
-      ## Evaluate this config
-      result_row <- evaluate_single_config(
+      ## Evaluate this config. A worker of the resamples axis that dies stops
+      ## the run, with the rows so far.
+      result_row <- stop_on_worker_death(evaluate_single_config(
         config_row      = cfg,
         split           = split,
         cv_folds        = cv_fold_obj,
@@ -693,8 +768,10 @@ evaluate <- function(x,
         seed            = seed,
         sg_window       = recipe_cfg$sg_window,
         pca_threshold   = recipe_cfg$pca_threshold,
-        outcome_range   = outcome_range
-      )
+        outcome_range   = outcome_range,
+        debug           = debug,
+        keep_traces     = control$keep_traces
+      ), results_list, output_dir)
 
       ## Stamp before anything else sees the row, so the in-memory results and
       ## the checkpointed copy carry the same provenance.
@@ -761,15 +838,40 @@ evaluate <- function(x,
 
       }
 
-      ## Checkpoint: the per-config file is the only store (#42)
+      ## Checkpoint: the per-config file is the only store (#42). The rows of
+      ## a run of identical failures the breaker is watching are held back
+      ## until it disarms, so a tripped run leaves none to resume.
+      released <- breaker_feed(breaker, result_row, cfg$model)
+
+      if (breaker$tripped) {
+
+        ## A stop saves the configurations still to run; with none left it
+        ## saves nothing, so the held failures are ordinary ones and the
+        ## call ends as any other whose configurations all failed
+        not_run <- setdiff(configs$config_id[-seq_len(i)], completed_ids)
+
+        if (length(not_run) > 0) abort_breaker_trip(breaker, results_list, length(not_run))
+
+        released <- breaker_release(breaker)
+
+      }
+
       if (!is.null(checkpoint_dir)) {
 
-        write_checkpoint_row(result_row, checkpoint_dir)
+        for (row in released) write_checkpoint_row(row, checkpoint_dir)
 
       }
 
       ## Memory cleanup
       gc(verbose = FALSE)
+
+    }
+
+    ## The loop ended with the breaker still watching: its rows are ordinary
+    ## failures after all
+    if (!is.null(checkpoint_dir)) {
+
+      for (row in breaker_release(breaker)) write_checkpoint_row(row, checkpoint_dir)
 
     }
 
@@ -814,22 +916,9 @@ evaluate <- function(x,
     ## `split` and `cv_fold_obj` included — would ship to every worker no matter
     ## what is passed explicitly.
 
-    ## Workers resolve the horizons namespace by NAME, which finds the INSTALLED
-    ## library — not this source tree. Under pkgload the installed copy may not
-    ## have these helpers at all; worse, a compatible-but-stale install runs old
-    ## helper code while the worker body is new, silently, and the worker
-    ## computes every metric. Refuse rather than produce quiet wrong numbers.
-    if (exists(".__DEVTOOLS__", envir = asNamespace("horizons"),
-               inherits = FALSE)) {
-
-      rlang::abort(paste0(
-        "Parallel `evaluate()` cannot run under `devtools::load_all()`. ",
-        "Workers load the installed `horizons`, not this source tree, so they ",
-        "would run stale code. Install the package first (`R CMD INSTALL`), ",
-        "or call `evaluate()` without parallelism."
-      ))
-
-    }
+    ## The workers resolve the horizons namespace by NAME, which finds the
+    ## INSTALLED library; check_parallel_workers() refused a session they
+    ## could not match before anything ran.
 
     shared_args <- list(
       data            = split$data,
@@ -847,17 +936,20 @@ evaluate <- function(x,
       data_fp         = data_fp,
       settings        = settings,
       checkpoint_dir  = checkpoint_dir,
+      keep_traces     = control$keep_traces,
       pkg_version     = as.character(utils::packageVersion("horizons"))
     )
 
     stopifnot(setequal(names(shared_args), SHARED_ARG_NAMES))
 
-    parallel_results <- furrr::future_map(
+    ## A worker that dies loses every value in memory; what it and the
+    ## others finished is in their checkpoints.
+    parallel_results <- stop_on_worker_death(furrr::future_map(
       seq_len(nrow(pending_configs)),
       evaluate_config_worker,
       shared   = shared_args,
       .options = furrr::furrr_options(seed = TRUE, chunk_size = 1)
-    )
+    ), lapply(completed_ids, function(id) checkpoint_results[[id]]), output_dir)
 
     ## Combine: checkpoint results + parallel results
     results_list <- c(
@@ -871,7 +963,8 @@ evaluate <- function(x,
   ## Step 9: Aggregate results
   ## -----------------------------------------------------------------------
 
-  all_results <- dplyr::bind_rows(results_list)
+  results_list <- lift_unit_warnings(results_list, collector)
+  all_results  <- dplyr::bind_rows(results_list)
 
   ## -----------------------------------------------------------------------
   ## Step 10: Determine best config
@@ -884,27 +977,60 @@ evaluate <- function(x,
 
   rank_column <- paste0("cv_", metric)
 
-  ## The successes, or the pruned configs when none succeeded: the rule
-  ## fit() applies to the same table.
-  candidates <- ranking_candidates(all_results, metric)
+  ## Nothing usable: every configuration failed. Rows resumed from
+  ## checkpoints are named, since re-running evaluate() does not re-run them.
+  evaluated <- all_results$config_id[all_results$status %in% c("success", "pruned")]
 
-  ## Nothing to rank: no candidates, or candidates none of which has a
-  ## cv_<metric> value, which rank_configs_by_cv() would refuse unclassed and
-  ## without the results. Rows resumed from checkpoints are named, since
-  ## re-running evaluate() does not re-run them.
-  if (nrow(candidates$rows) == 0 || all(is.na(candidates$rows[[rank_column]]))) {
+  if (length(evaluated) == 0) {
 
     abort_all_configs_failed(
-      all_results, metric,
+      all_results,
       checkpoint_ids = intersect(all_results$config_id, completed_ids),
       output_dir     = output_dir
     )
 
   }
 
-  ranked <- rank_configs_by_cv(candidates$rows, metric)
+  ## The successes, or the pruned configs when none succeeded: the rule
+  ## fit() applies to the same table. A configuration without a value of the
+  ## ranking metric is left out of the ranking, and said so once; when none
+  ## has one, the evaluation is returned without a best_config, since the
+  ## configurations were scored, and fit() asks for another metric.
+  candidates <- ranking_candidates(all_results, metric)
+  ranked     <- rank_configs_by_cv(candidates$rows, metric)
 
-  best_config_id <- ranked$config_id[1]
+  best_config_id <- if (nrow(ranked) > 0) ranked$config_id[1] else NA_character_
+
+  if (is.na(best_config_id)) {
+
+    ## The lines are rendered already, so each is substituted as text
+    reason <- unranked_reason(all_results, metric, "`evaluate(metric = )` or `fit(metric = )`")
+
+    log_warning(collector, "skipped", c(
+      "No configuration could be ranked, so the evaluation has no {.field best_config}: {reason[1]}",
+      stats::setNames(sprintf("{reason[%d]}", seq_along(reason)[-1]), names(reason)[-1])
+    ), ids = candidates$rows$config_id)
+
+  } else {
+
+    log_unranked(collector, candidates$rows, ranked, metric)
+
+  }
+
+  ## Some configurations failed and the rest are returned: one summary, with
+  ## each distinct cause and the configurations it failed
+  failed_rows <- all_results[all_results$status == "failed", , drop = FALSE]
+
+  if (nrow(failed_rows) > 0) {
+
+    n_failed <- nrow(failed_rows)
+
+    log_warning(collector, "partial_failure", c(
+      "{n_failed} of {nrow(all_results)} configuration{?s} failed, so the evaluation holds the rest.",
+      distinct_config_errors(failed_rows)
+    ), ids = failed_rows$config_id)
+
+  }
 
   ## -----------------------------------------------------------------------
   ## Step 11: Store evaluation metadata
@@ -961,22 +1087,33 @@ evaluate <- function(x,
     n_pruned  <- sum(all_results$status == "pruned")
     n_failed  <- sum(all_results$status == "failed")
 
-    ## Best config description
-    best_cfg   <- configs[configs$config_id == best_config_id, ]
-    best_model <- MODEL_DISPLAY_NAMES[best_cfg$model] %||% best_cfg$model
-    best_row   <- all_results[all_results$config_id == best_config_id, ]
-
     cat("\u2502\n")
     cat(paste0(
       "\u2502  Results: ", n_success, " success, ",
       n_pruned, " pruned, ", n_failed, " failed\n"
     ))
-    cat(paste0(
-      "\u2514\u2500 Best: ", best_config_id, " (", best_model, ")",
-      " \u2014 CV ", toupper(metric), " = ",
-      round(best_row[[rank_column]], 3),
-      " (test ", toupper(metric), " = ", round(best_row[[metric]], 3), ")\n"
-    ))
+
+    if (is.na(best_config_id)) {
+
+      cat(paste0("\u2514\u2500 Best: none, since no configuration that ",
+                 ranking_candidates(all_results, metric)$what, " has a CV ",
+                 toupper(metric), "\n"))
+
+    } else {
+
+      ## Best config description
+      best_cfg   <- configs[configs$config_id == best_config_id, ]
+      best_model <- MODEL_DISPLAY_NAMES[best_cfg$model] %||% best_cfg$model
+      best_row   <- all_results[all_results$config_id == best_config_id, ]
+
+      cat(paste0(
+        "\u2514\u2500 Best: ", best_config_id, " (", best_model, ")",
+        " \u2014 CV ", toupper(metric), " = ",
+        round(best_row[[rank_column]], 3),
+        " (test ", toupper(metric), " = ", round(best_row[[metric]], 3), ")\n"
+      ))
+
+    }
     cat(paste0(
       paste(rep("\u2500", 62), collapse = ""), "\n"
     ))
@@ -1191,23 +1328,26 @@ gate_checkpoint_rows <- function(candidates, data_fp, settings, config_ids = NUL
 #' Load the checkpoint rows evaluate() may resume
 #'
 #' Reads the store, gates every row, and reports: aborts on the first row
-#' written on other training data or under other settings, returns the drops
-#' as notes for `evaluate()` to print inside its tree (they used to print
-#' here, above the tree's header; #91), and warns naming any file it could
-#' not read.
+#' written on other training data or under other settings, and returns the
+#' drops, and the files it could not use, as notes for `evaluate()` to print
+#' inside its tree (they used to print here, above the tree's header; #91).
+#' A file it could not use costs only time, since its configuration is
+#' evaluated again, so it is a note in the log, not a warning.
 #'
 #' @param output_dir The run's output directory.
 #' @param config_ids The configs in this run's grid.
 #' @param data_fp,settings This run's fingerprint and settings.
 #' @param call The frame to report a refusal from; the default is the
 #'   caller's, so the error reads as `evaluate()`'s.
+#' @param collector The verb's collector, from `log_open()`, which records
+#'   the files it could not use.
 #' @return List with `rows` (one-row results named by config id) and `notes`
-#'   (character, one tree line per kind of dropped row; empty when none were
-#'   dropped).
+#'   (character, one tree line per kind of dropped row and per file it could
+#'   not use; empty when there were none).
 #' @keywords internal
 #' @noRd
 load_eval_checkpoints <- function(output_dir, config_ids, data_fp, settings,
-                                  call = rlang::caller_env()) {
+                                  collector, call = rlang::caller_env()) {
 
   store <- read_checkpoint_store(output_dir)
   gated <- gate_checkpoint_rows(store$rows, data_fp, settings, config_ids)
@@ -1270,7 +1410,10 @@ load_eval_checkpoints <- function(output_dir, config_ids, data_fp, settings,
 
   if (length(store$unreadable) > 0) {
 
-    warn_unreadable_checkpoints(store$unreadable, output_dir)
+    log_unreadable_checkpoints(collector, store$unreadable, output_dir)
+
+    notes <- c(notes, paste0("Could not use ", names(store$unreadable), ": ",
+                             unname(store$unreadable), " (will be re-evaluated)"))
 
   }
 
@@ -1293,6 +1436,10 @@ load_eval_checkpoints <- function(output_dir, config_ids, data_fp, settings,
 #' @noRd
 write_checkpoint_row <- function(row, checkpoint_dir) {
 
+  ## A unit's records are lifted onto the call's log, not stored: a resumed
+  ## row's warnings are read on the row (lift_unit_warnings()).
+  attr(row, "unit_records") <- NULL
+
   tmp <- tempfile(tmpdir = checkpoint_dir, fileext = ".rds.tmp")
   saveRDS(row, tmp)
   file.rename(tmp, file.path(checkpoint_dir, paste0(row$config_id, ".rds")))
@@ -1301,29 +1448,235 @@ write_checkpoint_row <- function(row, checkpoint_dir) {
 
 }
 
-#' Warn about files in the store that could not be used
+#' Record the files in the store that could not be used
 #'
+#' @param collector The verb's collector, from `log_open()`.
 #' @param unreadable Reasons, named by file relative to `output_dir`: a read
 #'   error, not a result row, or a row under a name other than its config's.
 #' @param output_dir The run's output directory.
-#' @return `NULL`, invisibly; warns with class `horizons_checkpoint_warning`.
+#' @return `NULL`, invisibly; adds one note to the collector, its ids the
+#'   files.
 #' @keywords internal
 #' @noRd
-warn_unreadable_checkpoints <- function(unreadable, output_dir) {
+log_unreadable_checkpoints <- function(collector, unreadable, output_dir) {
 
   n_files <- length(unreadable)
   details <- paste0(names(unreadable), ": ", unname(unreadable))
 
   ## Each detail is substituted, not inlined, so braces in upstream error
   ## text are never read as cli markup.
-  cli::cli_warn(c(
-    "!" = "{n_files} file{?s} in {.path {output_dir}} could not be used as {cli::qty(n_files)}{?a checkpoint/checkpoints}.",
-    stats::setNames(sprintf("{details[%d]}", seq_len(n_files)),
-                    rep("x", n_files)),
-    "i" = "A config with no usable checkpoint of its own is re-evaluated. Delete or replace {cli::qty(n_files)}{?the file/these files} once the run has finished."
-  ), class = "horizons_checkpoint_warning")
+  log_note(collector, c(
+    "{n_files} file{?s} in {.path {output_dir}} could not be used as {cli::qty(n_files)}{?a checkpoint/checkpoints}, so {cli::qty(n_files)}{?its configuration was/their configurations were} evaluated again.",
+    stats::setNames(sprintf("{details[%d]}", seq_len(n_files)), rep("x", n_files))
+  ), ids = names(unreadable))
 
   invisible(NULL)
+
+}
+
+#' Lift the configurations' horizons warnings onto the call's log
+#'
+#' @description
+#' [evaluate_single_config()] returns its unit's records on the row, as the
+#' attribute `"unit_records"`, since records are data and cross from a worker
+#' with the row. The horizons warnings among them go to the call's collector
+#' in one pass ([log_unit_warnings()]), so a message several configurations
+#' raised is one event naming them all, and the attribute is dropped, so
+#' neither the results nor a checkpoint keeps it. Only rows evaluated in this
+#' call carry it: a row resumed from a checkpoint reports its warnings on the
+#' row.
+#'
+#' @param rows List of result rows.
+#' @param collector The call's collector, from [log_open()].
+#' @return `rows`, without the attribute.
+#' @keywords internal
+#' @noRd
+lift_unit_warnings <- function(rows, collector) {
+
+  log_unit_warnings(collector, dplyr::bind_rows(lapply(rows, attr, "unit_records")))
+
+  drop_unit_records(rows)
+
+}
+
+#' Result rows without their units' records
+#'
+#' @param rows List of result rows.
+#' @return `rows`, each without the attribute `"unit_records"`.
+#' @keywords internal
+#' @noRd
+drop_unit_records <- function(rows) {
+
+  lapply(rows, function(row) {
+    attr(row, "unit_records") <- NULL
+    row
+  })
+
+}
+
+## ---------------------------------------------------------------------------
+## Stopping early: the circuit breaker and a worker's death
+## ---------------------------------------------------------------------------
+## Both stop the call with horizons_error_systemic and the rows so far, since
+## every configuration still to run would fail the same way.
+
+#' A circuit breaker for the configurations a sequential run evaluates
+#'
+#' @description
+#' Armed from the start, it watches the configurations as they finish, not
+#' the rows loaded from checkpoints. A success, a pruned configuration, or a
+#' failure unlike those before it disarms it for the rest of the call. While
+#' armed it holds back the rows of the identical failures so far, and it
+#' trips once there are `limit` of them across at least two models, while
+#' configurations remain to be run (with none left, `evaluate()` releases the
+#' rows instead):
+#' `configure()`'s grid runs a model's configurations together, so a failure
+#' local to one model fills the run first and never trips it.
+#'
+#' @param limit A whole number of at least 2, or `FALSE` for no breaker
+#'   (`control_horizons(breaker = )`).
+#' @return An environment: `armed`, `tripped`, the run's `key`, its `held`
+#'   rows and their `models`.
+#' @keywords internal
+#' @noRd
+new_breaker <- function(limit) {
+
+  breaker         <- new.env(parent = emptyenv())
+  breaker$limit   <- limit
+  breaker$armed   <- !isFALSE(limit)
+  breaker$tripped <- FALSE
+  breaker$key     <- NULL
+  breaker$held    <- list()
+  breaker$models  <- character(0)
+
+  breaker
+
+}
+
+#' Feed the breaker one configuration's row
+#'
+#' @param breaker From [new_breaker()].
+#' @param row The row the configuration returned.
+#' @param model Character(1). The configuration's model.
+#' @return List of the rows that may be checkpointed now: `row`, with the
+#'   held rows when it disarms the breaker, or none while the breaker holds
+#'   it. Sets `breaker$tripped` when this row trips it.
+#' @keywords internal
+#' @noRd
+breaker_feed <- function(breaker, row, model) {
+
+  if (!breaker$armed) return(list(row))
+
+  key <- if (identical(row$status, "failed")) breaker_key(row)
+
+  if (is.null(key) || (!is.null(breaker$key) && !identical(key, breaker$key))) {
+
+    return(c(breaker_release(breaker), list(row)))
+
+  }
+
+  breaker$key    <- key
+  breaker$held   <- c(breaker$held, list(row))
+  breaker$models <- c(breaker$models, model)
+
+  breaker$tripped <- length(breaker$held) >= breaker$limit &&
+    length(unique(breaker$models)) >= 2L
+
+  list()
+
+}
+
+#' Disarm the breaker, releasing the rows it held
+#'
+#' @param breaker From [new_breaker()].
+#' @return List of the held rows.
+#' @keywords internal
+#' @noRd
+breaker_release <- function(breaker) {
+
+  held          <- breaker$held
+  breaker$held  <- list()
+  breaker$armed <- FALSE
+
+  held
+
+}
+
+#' What makes two failures the same, for the breaker
+#'
+#' @param row A failed result row.
+#' @return Character(1): the failure's class and its message, with the
+#'   configuration's id, the numbers and the spacing set aside. The message
+#'   starts with the step, so a failure in another step is another failure.
+#' @keywords internal
+#' @noRd
+breaker_key <- function(row) {
+
+  message <- gsub(row$config_id, "<config>", row$error_message, fixed = TRUE)
+  message <- gsub("[0-9]+", "#", message)
+  message <- gsub("[[:space:]]+", " ", trimws(message))
+
+  paste(row$class, message, sep = "\r")
+
+}
+
+#' Stop the call because the breaker tripped
+#'
+#' @param breaker From [new_breaker()], tripped.
+#' @param rows List of the result rows so far.
+#' @param n_left Integer(1). The configurations it would still have run (not
+#'   those resumed from checkpoints).
+#' @param call The frame the error reports.
+#' @return Does not return; aborts with class `horizons_error_systemic`
+#'   (kind `run`), the rows so far as `results`.
+#' @keywords internal
+#' @noRd
+abort_breaker_trip <- function(breaker, rows, n_left, call = rlang::caller_env()) {
+
+  n_failed <- length(breaker$held)
+  n_models <- length(unique(breaker$models))
+  cause    <- breaker$held[[1]]$error_message
+
+  abort_horizons(c(
+    "The first {n_failed} configurations to run all failed the same way, across {n_models} models, so {.fn evaluate} stopped rather than run the other {n_left}.",
+    "x" = "{cause}",
+    "i" = "Their rows are in this error's {.field results} field and were not checkpointed, so a run after the fix evaluates them.",
+    "i" = "To run every configuration anyway, use {.code control_horizons(breaker = FALSE)}; to see the first failure's backtrace, {.code control_horizons(debug = TRUE)}."
+  ), kind = "run", class = "horizons_error_systemic",
+  results = dplyr::bind_rows(drop_unit_records(rows)), call = call)
+
+}
+
+#' Stop the call when a parallel worker dies
+#'
+#' @description
+#' future raises a worker's death as a `FutureError`, which no unit contains
+#' (`NEVER_CONTAINED`). It is turned into `horizons_error_systemic`, chained
+#' to future's error, with the rows finished so far.
+#'
+#' @param expr The work that dispatches to workers.
+#' @param rows List of the result rows finished so far, read when the worker
+#'   dies.
+#' @param output_dir The run's `output_dir`, or `NULL`.
+#' @param call The frame the error reports.
+#' @return The value of `expr`.
+#' @keywords internal
+#' @noRd
+stop_on_worker_death <- function(expr, rows, output_dir, call = rlang::caller_env()) {
+
+  rlang::try_fetch(expr, FutureError = function(e) {
+
+    abort_horizons(c(
+      "A parallel worker stopped while {.fn evaluate} was running, so the run cannot go on.",
+      "i" = if (is.null(output_dir)) {
+        "The rows finished so far are in this error's {.field results} field."
+      } else {
+        "The configurations finished are checkpointed in {.path {output_dir}}; calling {.fn evaluate} again with it resumes from them."
+      }
+    ), kind = "run", class = "horizons_error_systemic", parent = e,
+    results = dplyr::bind_rows(drop_unit_records(rows)), call = call)
+
+  })
 
 }
 
@@ -1457,18 +1810,18 @@ format_setting_value <- function(v) {
 #' @param output_dir The checkpoint directory being resumed.
 #' @param source Which file carried the mismatching settings.
 #' @param call The frame to report the error from (`evaluate()`'s).
-#' @return Never returns; aborts with class `horizons_input_error`.
+#' @return Never returns; aborts with class `horizons_error_input`.
 #' @keywords internal
 #' @noRd
 abort_checkpoint_settings_mismatch <- function(diffs, output_dir, source,
                                                call = rlang::caller_env()) {
 
-  cli::cli_abort(c(
+  abort_horizons(c(
     "Checkpoints in {.path {output_dir}} were tuned under different settings.",
     "x" = "{.file {source}} was tuned with {diffs}.",
     "i" = "Resuming would rank results tuned under two sets of settings together, and warm-start {.fn fit} from them.",
     "i" = "Use a different {.arg output_dir}, or delete the stale checkpoints in {.path {output_dir}}."
-  ), class = "horizons_input_error", call = call)
+  ), kind = "input", call = call)
 
 }
 
@@ -1673,7 +2026,7 @@ checkpoint_row_fingerprint <- function(row) {
 #'   from [describe_settings_diff()]. A changed `seed` moves the split, so it
 #'   surfaces here as a data mismatch; naming it says why.
 #' @param call The frame to report the error from (`evaluate()`'s).
-#' @return Never returns; aborts with class `horizons_input_error`.
+#' @return Never returns; aborts with class `horizons_error_input`.
 #' @keywords internal
 #' @noRd
 abort_checkpoint_data_mismatch <- function(stored, current, output_dir, source,
@@ -1692,14 +2045,14 @@ abort_checkpoint_data_mismatch <- function(stored, current, output_dir, source,
     rep("x", length(what))
   )
 
-  cli::cli_abort(c(
+  abort_horizons(c(
     "Checkpoints in {.path {output_dir}} were written on different training data.",
     found,
     if (length(settings_diff) > 0) c("i" = "That checkpoint was also tuned with {settings_diff}, which may be why."),
     "i" = "Resuming would reuse cross-validated results, and warm-start {.fn fit}, from hyperparameters tuned on the wrong rows.",
     if ("outcome" %in% differ) c("i" = "Keep one {.arg output_dir} per outcome."),
     "i" = "Use a different {.arg output_dir}, or delete the stale checkpoints in {.path {output_dir}}."
-  ), class = "horizons_input_error", call = call)
+  ), kind = "input", call = call)
 
 }
 
@@ -1734,21 +2087,21 @@ describe_data_diff <- function(stored, current, differ) {
 }
 
 ## ---------------------------------------------------------------------------
-## abort_all_configs_failed — nothing to rank, with the reasons attached
+## abort_all_configs_failed — every configuration failed, with the reasons attached
 ## ---------------------------------------------------------------------------
 
-#' Abort because no configuration can be ranked
+#' Abort because every configuration failed
 #'
 #' @description
-#' Raised by `evaluate()` when no configuration can be ranked: every one
-#' failed, or was pruned without a cross-validated value of the ranking
-#' metric (#41), or succeeded without one (its cross-validated metrics could
-#' not be recovered). `evaluate()` aborts before it assigns
-#' `x$evaluation`, so the results table travels on the condition as
-#' `results`, and the message lists the distinct error messages (the first
-#' three, each with the configs that raised it, and a count of the rest). A
-#' caller looping over subsets can catch the class and keep the per-config
-#' errors; see `evaluate()`'s "When every configuration fails" section.
+#' Raised by `evaluate()` when nothing usable came out: every configuration
+#' failed (#41). A configuration that was evaluated but has no value of the
+#' ranking metric is usable, so `evaluate()` returns instead. `evaluate()`
+#' aborts before it assigns `x$evaluation`, so the results table travels on
+#' the condition as `results`, and the message lists the distinct error
+#' messages (the first three, each with the configs that raised it, and a
+#' count of the rest). A caller looping over subsets can catch the class and
+#' keep the per-config errors; see `evaluate()`'s "When every configuration
+#' fails" section.
 #'
 #' Rows resumed from checkpoints are not re-run by calling `evaluate()`
 #' again, so the message names them and the files to delete. They are
@@ -1757,31 +2110,21 @@ describe_data_diff <- function(stored, current, differ) {
 #' `checkpoints/<config_id>.rds`.
 #'
 #' @param results The aggregated result rows (`evaluation$results` shape).
-#' @param metric Bare ranking metric name.
 #' @param checkpoint_ids Character. Config ids among `results` that were
 #'   loaded from checkpoints rather than run. Default none.
 #' @param output_dir The checkpoint directory, or `NULL`.
 #' @param call The call the condition is attributed to. Default: the caller,
 #'   `evaluate()`.
-#' @return Never returns; aborts with class `horizons_all_configs_failed`.
+#' @return Never returns; aborts with class
+#'   `horizons_error_all_configs_failed` (kind `run`).
 #' @keywords internal
 #' @noRd
-abort_all_configs_failed <- function(results, metric,
+abort_all_configs_failed <- function(results,
                                      checkpoint_ids = character(0),
                                      output_dir     = NULL,
                                      call           = rlang::caller_env()) {
 
-  rank_column <- paste0("cv_", metric)
-  n_total     <- nrow(results)
-  n_success   <- sum(results$status == "success")
-  n_failed    <- sum(results$status == "failed")
-  n_pruned    <- sum(results$status == "pruned")
-
-  header <- if (n_success > 0) {
-    "No configuration can be ranked: {n_success} succeeded, but none has a {.field {rank_column}} value."
-  } else {
-    "All configurations failed or were pruned without a {.field {rank_column}} value, so none can be ranked."
-  }
+  n_total <- nrow(results)
 
   ## Resumed rows are not re-run by calling evaluate() again, so a failure
   ## loaded from a checkpoint persists until its files are deleted. Built as
@@ -1810,13 +2153,14 @@ abort_all_configs_failed <- function(results, metric,
 
   }
 
-  cli::cli_abort(c(
-    header,
-    "i" = "Of {n_total} configuration{?s}: {n_success} succeeded, {n_failed} failed, {n_pruned} pruned.",
+  abort_horizons(c(
+    "All configurations failed, so none can be ranked.",
+    "i" = "{n_total} configuration{?s} failed.",
     distinct_config_errors(results),
     checkpoint_note,
-    "i" = "The per-config results, error messages included, are on this condition as {.field results}. Recover them without re-running with {.code rlang::last_error()$results}, or catch the class: {.code tryCatch(evaluate(x), horizons_all_configs_failed = function(e) e$results)}."
-  ), class = "horizons_all_configs_failed", results = results, call = call)
+    "i" = "The per-config results, error messages included, are on this condition as {.field results}. Recover them without re-running with {.code rlang::last_error()$results}, or catch the class: {.code tryCatch(evaluate(x), horizons_error_all_configs_failed = function(e) e$results)}."
+  ), kind = "run", class = "horizons_error_all_configs_failed", results = results,
+  call = call)
 
 }
 
@@ -1829,31 +2173,93 @@ abort_all_configs_failed <- function(results, metric,
 #' @description
 #' Returns the rows `evaluate()` picks `best_config` from and `fit()` picks
 #' its members from: the configurations that succeeded, or, when none did,
-#' the pruned configurations that carry a cross-validated value of the
-#' ranking metric. [rank_configs_by_cv()] then orders them. `fit()` used to
-#' keep successes only, so it refused an evaluation whose `best_config` was a
-#' pruned configuration (#38).
+#' the pruned configurations. [rank_configs_by_cv()] then orders those with a
+#' cross-validated value of the ranking metric, and the rest are the ones the
+#' verb says it left out. `fit()` used to keep successes only, so it refused
+#' an evaluation whose `best_config` was a pruned configuration (#38).
 #'
 #' @param results Tibble of evaluation result rows (`evaluation$results`
 #'   shape).
 #' @param metric Bare metric name, e.g. `"rpd"`.
-#' @return List with `rows` (the candidate rows, unranked; zero rows when
-#'   nothing qualifies) and `fallback` (`TRUE` when the rows are pruned
-#'   configurations because none succeeded).
+#' @return List with `rows` (the candidate rows, unranked, with or without a
+#'   value of the metric; zero rows when nothing succeeded or was pruned),
+#'   `fallback` (`TRUE` when the rows are pruned configurations because none
+#'   succeeded) and `what` (`"succeeded"` or `"pruned"`, for the messages).
 #' @keywords internal
 #' @noRd
 ranking_candidates <- function(results, metric) {
 
   successes <- results[results$status %in% "success", , drop = FALSE]
 
-  if (nrow(successes) > 0) return(list(rows = successes, fallback = FALSE))
+  if (nrow(successes) > 0) return(list(rows = successes, fallback = FALSE, what = "succeeded"))
 
-  cv_values <- results[[paste0("cv_", metric)]]
-  has_cv    <- if (is.null(cv_values)) rep(FALSE, nrow(results)) else !is.na(cv_values)
+  pruned <- results[results$status %in% "pruned", , drop = FALSE]
 
-  pruned <- results[results$status %in% "pruned" & has_cv, , drop = FALSE]
+  list(rows = pruned, fallback = nrow(pruned) > 0, what = "pruned")
 
-  list(rows = pruned, fallback = nrow(pruned) > 0)
+}
+
+#' The metrics an evaluation can be ranked by
+#'
+#' @description
+#' The ranking metrics for which [ranking_candidates()] holds a row with a
+#' cross-validated value: what `evaluate()` and `fit()` suggest when the one
+#' asked for ranks nothing, so neither suggests a metric that would be
+#' refused the same way.
+#'
+#' @param results Tibble of evaluation result rows.
+#' @return Character, a subset of `VALID_RANK_METRICS`.
+#' @keywords internal
+#' @noRd
+rankable_metrics <- function(results) {
+
+  VALID_RANK_METRICS[vapply(VALID_RANK_METRICS, function(m) {
+    rows <- ranking_candidates(results, m)$rows
+    any(!is.na(rows[[paste0("cv_", m)]]))
+  }, logical(1))]
+
+}
+
+#' Why nothing could be ranked, for the warning and the error that say so
+#'
+#' @param results Tibble of evaluation result rows.
+#' @param metric Bare metric name, which ranks nothing.
+#' @param how Character(1). How to rank by another metric, as rendered text,
+#'   e.g. ``"`fit(x, metric = )`"``.
+#' @return Character, rendered: the reason, then, as `"i"` bullets, where
+#'   pruned rows hold the metric and what to rank by instead.
+#' @keywords internal
+#' @noRd
+unranked_reason <- function(results, metric, how) {
+
+  candidates  <- ranking_candidates(results, metric)
+  rank_column <- paste0("cv_", metric)
+  n           <- nrow(candidates$rows)
+  held        <- rankable_metrics(results)
+
+  ## Pruned rows are ranked only when nothing succeeded, so a value they
+  ## hold is not one this ranking could use
+  pruned_with <- if (identical(candidates$what, "succeeded")) {
+    sum(results$status %in% "pruned" & !is.na(results[[rank_column]]))
+  } else 0L
+
+  c(
+    if (n == 0) {
+      cli::format_inline("None succeeded, and no configuration was pruned.")
+    } else if (identical(candidates$what, "succeeded")) {
+      cli::format_inline("{n} succeeded, but none has a {.field {rank_column}} value.")
+    } else {
+      cli::format_inline("None succeeded, and none of the {n} pruned configuration{?s} has a {.field {rank_column}} value.")
+    },
+    if (pruned_with > 0) {
+      c("i" = cli::format_inline("{pruned_with} pruned configuration{?s} {?has/have} one, but pruned configurations are ranked only when none succeeded."))
+    },
+    "i" = if (length(held) > 0) {
+      cli::format_inline("Rank by a metric the results hold: {how} with one of {.val {held}}.")
+    } else {
+      "No cross-validated metric was recorded; re-run `evaluate()`."
+    }
+  )
 
 }
 
@@ -1869,9 +2275,9 @@ ranking_candidates <- function(results, metric) {
 #' `evaluate()`'s `best_config` and `fit()`'s member selection, so the two can
 #' never disagree, and neither touches a test-set column (#50).
 #'
-#' Rows whose `cv_<metric>` is `NA` (a config whose CV panel could not be
-#' recovered) are dropped with a warning naming them. If no row can be
-#' ranked, aborts with the remedy: re-run `evaluate()`.
+#' Rows whose `cv_<metric>` is `NA` cannot be ranked and are left out,
+#' silently: the verbs that rank say so once, with the ids, and the monitor
+#' only displays the ranking. When no row has a value the result has no rows.
 #'
 #' @param results Tibble of evaluation result rows (`evaluation$results`
 #'   shape).
@@ -1884,33 +2290,8 @@ rank_configs_by_cv <- function(results, metric) {
   ### The eval validator at fit()'s door requires the cv_ columns.
   rank_column <- paste0("cv_", metric)
 
-  vals <- results[[rank_column]]
-
-  if (all(is.na(vals))) {
-
-    rlang::abort(paste0(
-      "All values of `", rank_column, "` are NA, so no config can be ranked. ",
-      "Re-run evaluate() to record cross-validated metrics."
-    ))
-
-  }
-
-  if (any(is.na(vals))) {
-
-    skipped <- results$config_id[is.na(vals)]
-
-    n_skipped <- length(skipped)
-
-    cli::cli_warn(c(
-      "!" = "{n_skipped} config{?s} skipped in ranking: `{rank_column}` is NA.",
-      "i" = "Skipped: {.val {skipped}}.",
-      "i" = "Their cross-validated value could not be recovered after tuning."
-    ))
-
-    results <- results[!is.na(vals), , drop = FALSE]
-    vals    <- results[[rank_column]]
-
-  }
+  results <- results[!is.na(results[[rank_column]]), , drop = FALSE]
+  vals    <- results[[rank_column]]
 
   ## Explicit tie-break on config_id so a fresh run, a resumed run (whose row
   ## order follows the checkpoint directory) and monitor_evaluate() all name
@@ -1918,6 +2299,38 @@ rank_configs_by_cv <- function(results, metric) {
   key <- if (metric %in% HIGHER_BETTER_METRICS) -vals else vals
 
   results[order(key, results$config_id), , drop = FALSE]
+
+}
+
+#' Record the configurations a ranking left out
+#'
+#' @description
+#' The one record of [rank_configs_by_cv()]'s left-out rows, which
+#' `evaluate()` and `fit()` both write: a `skipped` warning naming them, raised
+#' at the verb's end.
+#'
+#' @param collector The verb's collector, from `log_open()`.
+#' @param candidates The rows that were ranked.
+#' @param ranked What [rank_configs_by_cv()] returned for them.
+#' @param metric Bare metric name.
+#' @return The ids left out, invisibly.
+#' @keywords internal
+#' @noRd
+log_unranked <- function(collector, candidates, ranked, metric) {
+
+  rank_column <- paste0("cv_", metric)
+  unranked    <- setdiff(candidates$config_id, ranked$config_id)
+
+  if (length(unranked) > 0) {
+
+    log_warning(collector, "skipped", c(
+      "{length(unranked)} configuration{?s} left out of the ranking, with no {.field {rank_column}} value.",
+      "i" = "Left out: {.val {unranked}}."
+    ), ids = unranked)
+
+  }
+
+  invisible(unranked)
 
 }
 
@@ -1947,7 +2360,7 @@ rank_configs_by_cv <- function(results, metric) {
 #' @return List with `data` (the rows kept, in their original order),
 #'   `n_dropped` (integer, the rows without an outcome) and `n_flagged`
 #'   (integer, the flagged rows with an outcome). Aborts with class
-#'   `horizons_input_error` when no row is left.
+#'   `horizons_error_input` when no row is left.
 #' @keywords internal
 #' @noRd
 modelling_rows <- function(analysis, outcome_col, call = rlang::caller_env()) {
@@ -1958,10 +2371,11 @@ modelling_rows <- function(analysis, outcome_col, call = rlang::caller_env()) {
 
   if (all(na_mask)) {
 
-    cli::cli_abort(c(
+    abort_horizons(c(
       "All outcome values are NA, so there are no rows to model.",
-      "i" = "Outcome column: {.field {outcome_col}}."
-    ), class = "horizons_input_error")
+      "i" = "Outcome column: {.field {outcome_col}}.",
+      "i" = "Add measured values of it, or {.fn configure} another outcome."
+    ), kind = "input", call = call)
 
   }
 
@@ -1981,6 +2395,90 @@ modelling_rows <- function(analysis, outcome_col, call = rlang::caller_env()) {
     n_dropped = sum(na_mask),
     n_flagged = sum(flagged & !na_mask)
   )
+
+}
+
+## ---------------------------------------------------------------------------
+## The small-sample rule evaluate() and fit() share
+## ---------------------------------------------------------------------------
+## Small n is weak, not wrong, so it runs. The one sample size refused is a
+## training part without more rows than folds, which rsample cannot split
+## into folds that each have rows to fit on and to assess; a small
+## assessment fold warns. The trigger is the realised
+## folds, not the total n.
+
+#' Refuse a training part without more rows than cross-validation folds
+#'
+#' @param n_train Integer. Rows of the training part, after the split and
+#'   any response trim.
+#' @param cv_folds Integer. `config$tuning$cv_folds`.
+#' @param n_modelled,n_test,n_trimmed Integer. The modelled rows, and those
+#'   the split held out for the test set or the trim left out, for the
+#'   message.
+#' @param call The frame the refusal reports: the verb's.
+#' @return `NULL`, invisibly; aborts with class `horizons_error_input`.
+#' @keywords internal
+#' @noRd
+check_fold_rows <- function(n_train, cv_folds, n_modelled, n_test, n_trimmed = 0L,
+                            call = rlang::caller_env()) {
+
+  if (n_train > cv_folds) return(invisible(NULL))
+
+  elsewhere <- paste0("the test set holds ", n_test,
+                      if (n_trimmed > 0) paste0(" and the response trim left out ", n_trimmed))
+
+  abort_horizons(c(
+    "The training part has {n_train} row{?s}, but {cv_folds}-fold cross-validation needs more training rows than folds.",
+    "i" = "{n_modelled} row{?s} {?has/have} an observed outcome; {elsewhere}.",
+    "i" = "Add rows, or {.fn configure} fewer {.arg cv_folds}."
+  ), kind = "input", call = call)
+
+}
+
+#' Warn once when the smallest assessment fold is small
+#'
+#' @param collector The verb's collector, from `log_open()`.
+#' @param folds The `rset` the verb tunes on.
+#' @return The smallest fold's assessment rows, invisibly.
+#' @keywords internal
+#' @noRd
+log_small_folds <- function(collector, folds) {
+
+  n_rows   <- nrow(folds$splits[[1]]$data)
+  smallest <- min(vapply(folds$splits, function(s) n_rows - length(s$in_id), integer(1)))
+
+  if (smallest < SMALL_FOLD_ROWS) {
+
+    log_warning(collector, "quality", c(
+      "The smallest cross-validation fold has {smallest} row{?s} to assess, so the cross-validated metrics rest on few rows.",
+      "i" = "{n_rows} training rows in {nrow(folds)} folds; a metric undefined on a fold is NA."
+    ))
+
+  }
+
+  invisible(smallest)
+
+}
+
+#' Check a verb's ranking metric
+#'
+#' @param metric The verb's `metric` argument.
+#' @param call The frame the refusal reports: the verb's.
+#' @return `NULL`, invisibly; aborts with class `horizons_error_input`.
+#' @keywords internal
+#' @noRd
+check_rank_metric_arg <- function(metric, call = rlang::caller_env()) {
+
+  if (rlang::is_string(metric) && metric %in% VALID_RANK_METRICS) {
+
+    return(invisible(NULL))
+
+  }
+
+  abort_horizons(c(
+    "{.arg metric} must be one of {.val {VALID_RANK_METRICS}}.",
+    "x" = "Got {.val {metric}}."
+  ), kind = "input", call = call)
 
 }
 
@@ -2014,17 +2512,19 @@ modelling_rows <- function(analysis, outcome_col, call = rlang::caller_env()) {
 #' @param outcome_col Character. Name of the outcome column.
 #' @param seed Integer. The seed passed to `evaluate()` (or to `fit()` on a
 #'   cold start).
+#' @param call The frame a refusal reports: the verb's.
 #' @return List with `split` (the `rsplit`), `n_dropped` (integer, the rows
 #'   whose outcome is `NA`), `stratified` (`FALSE` when the split is
 #'   unstratified, because rsample dropped the strata or the stratified draw
-#'   failed; see [draw_stratified()]) and `strata_failed` (`TRUE` when the
-#'   stratified draw failed and was retried without strata). Aborts as
-#'   [modelling_rows()] does.
+#'   failed; see [draw_stratified()]), `strata_failed` (`TRUE` when the
+#'   stratified draw failed and was retried without strata) and
+#'   `strata_error` (why it failed, or `NA`). Aborts as [modelling_rows()]
+#'   does.
 #' @keywords internal
 #' @noRd
-draw_eval_split <- function(analysis, outcome_col, seed) {
+draw_eval_split <- function(analysis, outcome_col, seed, call = rlang::caller_env()) {
 
-  modelled <- modelling_rows(analysis, outcome_col)
+  modelled <- modelling_rows(analysis, outcome_col, call = call)
 
   set.seed(seed)
 
@@ -2039,7 +2539,8 @@ draw_eval_split <- function(analysis, outcome_col, seed) {
   list(split         = drawn$draw,
        n_dropped     = modelled$n_dropped,
        stratified    = drawn$stratified,
-       strata_failed = drawn$strata_failed)
+       strata_failed = drawn$strata_failed,
+       strata_error  = drawn$strata_error)
 
 }
 
@@ -2116,14 +2617,17 @@ response_trim_request <- function(x) {
 #' rows in their original order.
 #'
 #' When no fences can be drawn (fewer than four training values, or a zero
-#' IQR), nothing is trimmed and a warning with class
-#' `horizons_response_trim_warning` says so; the record carries the reason.
+#' IQR), nothing is trimmed, the record carries the reason, and the verb
+#' warns once at its end (`horizons_warning_skipped`): the trim asked for
+#' did not run.
 #'
 #' @param split The `rsplit` from [draw_eval_split()].
 #' @param outcome_col Character. The outcome column.
 #' @param trim The request from [response_trim_request()], or `NULL` for none.
 #' @param id_col Character. The identifier column the trimmed rows are
 #'   recorded by.
+#' @param collector The verb's collector, from `log_open()`, which records
+#'   the skipped trim.
 #' @return List with `split` (the trimmed split; `split` itself when `trim`
 #'   is `NULL`) and `record`: `NULL` when `trim` is, otherwise a list of
 #'   `outcome`, `method`, `threshold`, `fences_from` (`"training"`), `lower`
@@ -2132,7 +2636,7 @@ response_trim_request <- function(x) {
 #'   `skipped` (`NA`, `"too_few"` or `"zero_iqr"`).
 #' @keywords internal
 #' @noRd
-trim_training_responses <- function(split, outcome_col, trim, id_col) {
+trim_training_responses <- function(split, outcome_col, trim, id_col, collector) {
 
   if (is.null(trim)) return(list(split = split, record = NULL))
 
@@ -2168,10 +2672,10 @@ trim_training_responses <- function(split, outcome_col, trim, id_col) {
       "its outcome has a zero interquartile range"
     }
 
-    cli::cli_warn(c(
-      "!" = "Response trimming was requested, but no fences can be drawn on the training partition: {why}.",
+    log_warning(collector, "skipped", c(
+      "Response trimming was requested, but no fences can be drawn on the training partition: {why}.",
       "i" = "No training rows were trimmed."
-    ), class = "horizons_response_trim_warning")
+    ))
 
   }
 
@@ -2244,7 +2748,7 @@ render_response_trim <- function(trim) {
 #'   `evaluate()` or `fit()`.
 #' @return List with `sg_window`, `sg_window_cm` (`NA` when the axis spacing
 #'   cannot be read) and `pca_threshold`. Aborts with class
-#'   `horizons_input_error` when the window does not fit the spectrum.
+#'   `horizons_error_input` when the window does not fit the spectrum.
 #' @keywords internal
 #' @noRd
 evaluation_recipe <- function(x, call = rlang::caller_env()) {
@@ -2259,17 +2763,99 @@ evaluation_recipe <- function(x, call = rlang::caller_env()) {
       paste0(" (", signif(window_cm, 3), " cm\u207B\u00B9)")
     }
 
-    cli::cli_abort(c(
+    abort_horizons(c(
       "The Savitzky-Golay window is at least as wide as the spectrum.",
       "x" = "{.arg sg_window} is {recipe_cfg$sg_window} grid points{width}; the object has {n_spectral} spectral column{?s}.",
       "i" = "The window must be narrower than the spectrum. Re-run {.fn configure} with a smaller {.arg sg_window}, or keep more of the spectrum."
-    ), class = "horizons_input_error", call = call)
+    ), kind = "input", call = call)
 
   }
 
   list(sg_window     = recipe_cfg$sg_window,
        sg_window_cm  = window_cm,
        pca_threshold = recipe_cfg$pca_threshold)
+
+}
+
+## -------------------------------------------------------------------------
+## The workers a parallel run dispatches to
+## -------------------------------------------------------------------------
+
+#' Refuse a parallel run whose workers cannot run this session's horizons
+#'
+#' @description
+#' On either parallel axis the workers run horizons code: the configs-axis
+#' worker body, and on the resamples axis the recipe steps and the PLS engine
+#' that tune's workers call. They load horizons by name, so they run the
+#' installed copy. Under `devtools::load_all()` that copy is not this source
+#' tree, and a worker would run stale code silently; otherwise one worker is
+#' asked which version it loads (one future, about 0.05 s on a running plan,
+#' drawing nothing from the parent's RNG) and a mismatch is refused. Both are
+#' `horizons_error_dependency`: an environment that cannot run the call.
+#'
+#' @param call The frame a refusal reports: `evaluate()`'s.
+#' @return `NULL`, invisibly.
+#' @keywords internal
+#' @noRd
+check_parallel_workers <- function(call = rlang::caller_env()) {
+
+  if (running_under_load_all()) {
+
+    abort_horizons(c(
+      "Parallel {.fn evaluate} cannot run under {.fn devtools::load_all}.",
+      "i" = "Workers load the installed {.pkg horizons}, not this source tree, so they would run stale code.",
+      "i" = "Install the package first ({.code R CMD INSTALL}), or call {.fn evaluate} without parallelism."
+    ), kind = "dependency", call = call)
+
+  }
+
+  parent <- as.character(utils::packageVersion("horizons"))
+  worker <- worker_horizons_version()
+
+  if (!identical(worker, parent)) abort_worker_version(worker, parent, call = call)
+
+  invisible(NULL)
+
+}
+
+#' Whether horizons was loaded by `devtools::load_all()`
+#'
+#' @return Logical(1). A seam, so a test can force the refusal on an
+#'   installed build.
+#' @keywords internal
+#' @noRd
+running_under_load_all <- function() {
+
+  exists(".__DEVTOOLS__", envir = asNamespace("horizons"), inherits = FALSE)
+
+}
+
+#' The horizons version a worker of the registered plan loads
+#'
+#' @return Character(1). A seam, so a test can report another version.
+#' @keywords internal
+#' @noRd
+worker_horizons_version <- function() {
+
+  future::value(future::future(as.character(utils::packageVersion("horizons")),
+                               seed = FALSE))
+
+}
+
+#' Abort because a worker loads another version of horizons
+#'
+#' @param worker,parent Character(1). The worker's version and this
+#'   session's.
+#' @param call The frame the refusal reports.
+#' @return Does not return; aborts with class `horizons_error_dependency`.
+#' @keywords internal
+#' @noRd
+abort_worker_version <- function(worker, parent, call = rlang::caller_env()) {
+
+  abort_horizons(c(
+    "A parallel worker loads horizons {worker}, but this session runs {parent}.",
+    "i" = "Reinstall the package so workers run matching code."
+  ), kind = "dependency", call = call)
 
 }
 
@@ -2309,45 +2895,51 @@ evaluation_recipe <- function(x, call = rlang::caller_env()) {
 #'   `outcome_range` (the range scored predictions are clamped to), `data_fp`
 #'   and `settings` (the parent's [eval_data_fingerprint()] and
 #'   [eval_settings()] records, stamped on the row as-is), `checkpoint_dir`,
-#'   and `pkg_version`. There is no `allow_par`: on
-#'   the configs axis tune always runs sequentially inside the worker.
+#'   `keep_traces` and `pkg_version`. There is no `allow_par`: on
+#'   the configs axis tune always runs sequentially inside the worker. There
+#'   is no `debug` either, since a debug run never dispatches.
 #'
-#' @return A one-row result tibble from [evaluate_single_config()].
+#' @return A one-row result tibble from [evaluate_single_config()], its unit's
+#'   records still on it for the parent to lift.
 #' @keywords internal
 #' @noRd
 
 evaluate_config_worker <- function(config_i, shared) {
 
   ## -------------------------------------------------------------------------
-  ## Validate the cross-process contract
+  ## The worker's horizons, then the cross-process contract
   ## -------------------------------------------------------------------------
-  ## A mis-keyed entry arrives as NULL. Most then error, but `seed` and
-  ## `grid_size` do not: set.seed(NULL) reseeds from the clock and
-  ## tune_grid(grid = NULL) invents its own grid, so the run would succeed
-  ## while being unreproducible or tuned over the wrong space.
+  ## A partial guard on the installed-vs-source hazard, behind the one at
+  ## evaluate()'s door (check_parallel_workers()): it catches a worker
+  ## loading a different horizons VERSION than the parent. It cannot catch
+  ## same-version source edits, which is why evaluate() also refuses to
+  ## dispatch under pkgload. Checked first, since another version's payload
+  ## keys may differ, and that is a version skew, not a bug. A payload
+  ## without the parent's version is malformed, below.
+  worker_version <- as.character(utils::packageVersion("horizons"))
 
-  if (!setequal(names(shared), SHARED_ARG_NAMES)) {
+  if (rlang::is_string(shared$pkg_version) &&
+      !identical(worker_version, shared$pkg_version)) {
 
-    rlang::abort(paste0(
-      "Malformed worker payload. Missing: ",
-      paste(setdiff(SHARED_ARG_NAMES, names(shared)), collapse = ", ") %||% "-",
-      "; unexpected: ",
-      paste(setdiff(names(shared), SHARED_ARG_NAMES), collapse = ", ") %||% "-"
-    ))
+    abort_worker_version(worker_version, shared$pkg_version)
 
   }
 
-  ## Partial guard on the installed-vs-source hazard: catches a worker loading a
-  ## different horizons VERSION than the parent. It cannot catch same-version
-  ## source edits, which is why evaluate() also refuses to dispatch under pkgload.
-  worker_version <- as.character(utils::packageVersion("horizons"))
+  ## A mis-keyed entry arrives as NULL. Most then error, but `seed` and
+  ## `grid_size` do not: set.seed(NULL) reseeds from the clock and
+  ## tune_grid(grid = NULL) invents its own grid, so the run would succeed
+  ## while being unreproducible or tuned over the wrong space. The parent
+  ## asserts the same keys before dispatch, so a mismatch here means the
+  ## transport changed the payload.
+  if (!setequal(names(shared), SHARED_ARG_NAMES)) {
 
-  if (!identical(worker_version, shared$pkg_version)) {
+    missing    <- setdiff(SHARED_ARG_NAMES, names(shared))
+    unexpected <- setdiff(names(shared), SHARED_ARG_NAMES)
 
-    rlang::abort(paste0(
-      "Worker loaded horizons ", worker_version, " but the parent is ",
-      shared$pkg_version, ". Reinstall the package so workers run matching code."
-    ))
+    abort_horizons(c(
+      "Malformed worker payload.",
+      "x" = "Missing: {if (length(missing)) paste(missing, collapse = ', ') else '-'}; unexpected: {if (length(unexpected)) paste(unexpected, collapse = ', ') else '-'}."
+    ), kind = "internal")
 
   }
 
@@ -2381,7 +2973,8 @@ evaluate_config_worker <- function(config_i, shared) {
     seed            = shared$seed,
     sg_window       = shared$sg_window,
     pca_threshold   = shared$pca_threshold,
-    outcome_range   = shared$outcome_range
+    outcome_range   = shared$outcome_range,
+    keep_traces     = shared$keep_traces
   )
 
   ## Both provenance records are sent rather than rebuilt. The data

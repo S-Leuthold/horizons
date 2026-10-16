@@ -103,8 +103,8 @@ every row carries all six cross-validated metrics. A row scored under an
 earlier scoring schema, or recording less of the training data and
 settings than this run does, was written by an earlier version: it is
 dropped and its config re-evaluated. Rows for configs no longer in the
-grid are dropped; a file that cannot be used warns and its config is
-re-evaluated.
+grid are dropped; a file that cannot be used is a note in the object's
+\code{log} and a line in the progress tree, and its config is re-evaluated.
 }
 
 \section{Parallelism}{
@@ -152,9 +152,12 @@ hd |> evaluate(control = control_horizons(allow_par = TRUE, output_dir = "output
 
 Before dispatch, BLAS, OpenMP, data.table and ranger threads are pinned to
 one in the calling process (via \code{RhpcBLASctl} when installed) and restored
-on exit. Configs are dispatched to a top-level worker that loads the
-\emph{installed} package, so parallel dispatch refuses to run under
-\code{devtools::load_all()}.
+on exit. On either axis the workers load the \emph{installed} package, so a
+parallel run refuses, before anything is drawn, under
+\code{devtools::load_all()} or when a worker loads another version of horizons
+than the session (class \code{horizons_error_dependency}). With
+\code{control_horizons(debug = TRUE)}, \code{evaluate()} runs in this session
+whatever \code{allow_par} says.
 }
 
 \section{Response outliers}{
@@ -178,31 +181,79 @@ trimmed training rows, so the cross-validated metrics (and the ranking
 on them) describe the trimmed population; the test metrics do not.
 }
 
+\section{Failed configurations}{
+
+Each configuration runs as one unit. A failure in any of its steps fails
+that configuration alone: its row has \code{status} \code{"failed"}, an
+\code{error_message} naming the step and the cause ("Grid search failed:
+..."), the root \code{class} of the failure, and, with
+\code{control_horizons(keep_traces = TRUE)}, the backtrace as text in \code{trace}.
+A recipe step that fails inside tuning is reproduced by prepping the
+recipe once on the training part, so the step's own error is recorded with
+its class; a failure tune keeps only as text is \code{horizons_error_run}. A
+hyperparameter candidate scored on fewer cross-validation folds than were
+drawn takes no part in the prune gate or the choice of hyperparameters,
+and a configuration with no grid candidate scored on every fold fails; a
+\verb{cv_*} mean is kept only when it covers every fold, so every ranked value
+is on the same folds (#101). A configuration whose final fit on the
+training part fails is failed too (#102). An error that is not the
+configuration's own (an input or dependency error, or a bug in horizons)
+stops the call. So does a failure every configuration would share: when
+the first configurations to run fail the same way across at least two
+models, \code{evaluate()} stops with \code{horizons_error_systemic}, the rows so far
+as its \code{results} (\code{control_horizons(breaker = )}, 3 by default, \code{FALSE} to
+run every configuration; the configs axis has no breaker), and their
+failures are not checkpointed. A parallel worker that dies stops the run
+the same way, except during a Bayesian iteration on the resamples axis:
+tune catches each fit's failure there, so the iteration's candidate reads
+as one that failed. When some configurations failed and
+the rest are returned, one \code{horizons_warning_partial_failure} names them
+with each distinct cause. A configuration whose Bayesian search stopped
+early keeps the iterations it finished; one whose search failed before any
+iteration, or added nothing to the grid, keeps the grid's choice. Either
+says so in its \code{warnings} and is named in one
+\code{horizons_warning_substitution}. With
+\code{control_horizons(debug = TRUE)} nothing is contained: the first failure,
+inside tuning included, stops the call with its backtrace, and the
+Bayesian search is not fallen back from.
+}
+
 \section{When every configuration fails}{
 
 \code{best_config} is chosen from the configs that succeeded or, when none did,
-from the pruned configs that carry a cross-validated value of \code{metric}.
-When there are neither, or none of them has a value of \code{metric} to rank
-on, \code{evaluate()} aborts with class \code{horizons_all_configs_failed}. The
+from the pruned configs that carry a cross-validated value of \code{metric}. A
+config without a value of \code{metric} is left out of the ranking, with one
+\code{horizons_warning_skipped} naming it. When configs were evaluated but none
+has a value of \code{metric}, \code{evaluate()} returns with \code{best_config} \code{NA} and
+that warning, and \code{fit()} asks for another \code{metric}.
+
+When every config failed, \code{evaluate()} aborts with class
+\code{horizons_error_all_configs_failed} (and \code{horizons_error_run}). The
 message lists the distinct error messages (the first three, each with the
 configs that raised it) and names any configs that were loaded from
 checkpoints in \code{output_dir} rather than run, since calling \code{evaluate()}
 again resumes them instead of re-running them. The per-config results,
 \code{error_message} included, travel on the condition as \code{results}, because
 \code{evaluate()} aborts before it assigns \code{x$evaluation}; after an uncaught
-abort, \code{rlang::last_error()$results} recovers them without re-running. A
-loop over subsets can catch the class, tolerate one subset whose every
-config fails, and keep its errors:
+abort, \code{rlang::last_error()$results} recovers them without re-running.
+
+A failure the first configurations share across at least two models stops
+the call earlier, with \code{horizons_error_systemic} (also
+\code{horizons_error_run}) and the rows finished so far as its \code{results}; with
+\code{control_horizons(breaker = FALSE)} every configuration runs and the call
+ends in the all-failed abort instead. Both carry \code{results}, so a loop over
+subsets can catch \code{horizons_error_run}, tolerate a subset that fails
+either way, and keep its errors:
 
 \if{html}{\out{<div class="sourceCode">}}\preformatted{runs <- lapply(subsets, function(hd) \{
   tryCatch(
     evaluate(hd, control = control_horizons(verbose = FALSE)),
-    horizons_all_configs_failed = function(e) e$results
+    horizons_error_run = function(e) e$results
   )
 \})
 
-# A horizons_eval for each subset that ranked, and the failed configs'
-# results table for each subset that did not.
+# A horizons_eval for each subset that ranked, and the results table so
+# far for each subset that failed.
 failed <- runs[!vapply(runs, inherits, logical(1), "horizons_eval")]
 }\if{html}{\out{</div>}}
 }

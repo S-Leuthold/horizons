@@ -188,6 +188,57 @@ describe("cv_panel_at()", {
 
   })
 
+  it("keeps a mean only when it covers every fold, given the folds drawn", {
+
+    ## rsq undefined on one fold (constant predictions there): the mean over
+    ## the other two is left out rather than ranked on
+    per_fold <- tune::collect_metrics(tr, summarize = FALSE)
+    mine     <- per_fold$.config == best$.config
+    per_fold$.estimate[mine & per_fold$.metric == "rsq" & per_fold$id == "Fold1"] <- NA_real_
+
+    real_metrics <- tune::collect_metrics
+    local_mocked_bindings(collect_metrics = function(x, ..., summarize = TRUE) {
+      if (summarize) real_metrics(x, ...) else per_fold
+    }, .package = "tune")
+
+    panel <- cv_panel_at(tr, best, n_folds = 3L)
+
+    expect_true(is.na(panel$cv_rsq))
+    expect_equal(panel$cv_rmse, mean(per_fold$.estimate[mine & per_fold$.metric == "rmse"]))
+
+    ## Without the folds drawn, the mean over the folds with a value is kept
+    expect_equal(cv_panel_at(tr, best)$cv_rsq,
+                 mean(per_fold$.estimate[mine & per_fold$.metric == "rsq"], na.rm = TRUE))
+
+  })
+
+  it("counts each candidate on its own folds, as tune's summary does not when two share their values", {
+
+    ## tune pools the folds of candidates with equal hyperparameters, so a
+    ## Bayesian iteration that proposes a grid point again reports both on
+    ## twice the folds; the per-fold metrics count each on its own three
+    real_metrics <- tune::collect_metrics
+    local_mocked_bindings(collect_metrics = function(x, ..., summarize = TRUE) {
+      out <- real_metrics(x, ..., summarize = summarize)
+      if (summarize) out$n <- 2L * out$n
+      out
+    }, .package = "tune")
+
+    expect_setequal(complete_configs(tr, 3L), unique(tune::collect_metrics(tr)$.config))
+    expect_null(incomplete_note(tr, 3L))
+    expect_true(is.finite(cv_panel_at(tr, best, n_folds = 3L)$cv_rmse))
+
+  })
+
+  it("lets a failure to read the metrics through, for the configuration to fail on", {
+
+    local_mocked_bindings(collect_metrics = function(...) stop("metrics unreadable"),
+                          .package = "tune")
+
+    expect_error(cv_panel_at(tr, best), "metrics unreadable", fixed = TRUE)
+
+  })
+
   it("returns all-NA rather than erroring when the lookup is impossible", {
 
     expect_true(all(is.na(unlist(cv_panel_at(NULL, best)))))
@@ -364,6 +415,133 @@ describe("evaluate_single_config() - pruning", {
 })
 
 ## =========================================================================
+## The prune gate reads only candidates scored on every fold (#101)
+## =========================================================================
+
+describe("evaluate_single_config() - the prune gate under the fold rule (#101)", {
+
+  it("reads the best candidate scored on every fold, not one that missed a fold", {
+
+    setup <- make_eval_setup()
+
+    run <- function(...) {
+      suppressWarnings(evaluate_single_config(
+        config_row      = make_eval_config(),
+        split           = setup$split,
+        cv_folds        = setup$folds,
+        role_map        = setup$role_map,
+        grid_size       = 3,
+        bayesian_iter   = 1,
+        prune           = TRUE,
+        seed            = 42L,
+        ...
+      ))
+    }
+
+    ## The grid's candidates by RPD, from a run that keeps its grid result
+    ## (the first tune_grid() call; the Bayesian search makes its own)
+    real_grid <- tune::tune_grid
+    grid      <- NULL
+    local_mocked_bindings(tune_grid = function(...) {
+      res <- real_grid(...)
+      if (is.null(grid)) grid <<- res
+      res
+    }, .package = "tune")
+    run(prune_threshold = 0)
+
+    cm  <- tune::collect_metrics(grid)
+    rpd <- cm[cm$.metric == "rpd", ]
+    rpd <- rpd[order(-rpd$mean), ]
+    skip_if(rpd$mean[1] == rpd$mean[2], "the two best candidates tie")
+
+    ## The best candidate is marked as missing a fold, and the threshold sits
+    ## between it and the next: read alone, the next is below it
+    real_metrics <- tune::collect_metrics
+    local_mocked_bindings(collect_metrics = function(x, ..., summarize = TRUE) {
+      out <- real_metrics(x, ..., summarize = summarize)
+      if (!summarize && ".config" %in% names(out)) {
+        out$.estimate[out$.config == rpd$.config[1] & out$id == "Fold1"] <- NA_real_
+      }
+      out
+    }, .package = "tune")
+
+    result <- run(prune_threshold = mean(rpd$mean[1:2]))
+
+    expect_identical(result$below_prune_threshold, TRUE)
+    expect_identical(result$status, "pruned")
+
+    ## Under debug a candidate missing a fold stops the call, since leaving
+    ## it out is containment
+    expect_error(run(prune_threshold = 0, debug = TRUE), "a candidate was not scored on every fold",
+                 fixed = TRUE, class = "horizons_error_run")
+
+  })
+
+})
+
+
+## =========================================================================
+## A Bayesian search that proposes a grid point again
+## =========================================================================
+## tune pools the folds of candidates with equal hyperparameters, so both the
+## grid point and the iteration that repeated it report twice the folds drawn.
+## Counted that way, both were left out as incomplete and the choice moved
+## (a plsr search on 150 rows: 2 of 8 seeds). This is one of those seeds.
+
+describe("evaluate_single_config() - a Bayesian search that repeats a grid point", {
+
+  it("chooses as tune does, counting each candidate on its own folds", {
+
+    skip_unless_slow_tier()
+
+    obj <- make_eval_object(n = 150, n_wn = 40, n_configs = 1)
+    set.seed(8)
+    X <- as.matrix(obj$data$analysis[, grep("^wn_", names(obj$data$analysis))])
+    obj$data$analysis$SOC <- 3 + as.numeric(X %*% stats::rnorm(40, sd = 0.3)) + stats::rnorm(150, sd = 0.5)
+    obj$data$analysis$SOC <- obj$data$analysis$SOC - min(obj$data$analysis$SOC) + 0.1
+
+    set.seed(42)
+    split <- rsample::initial_split(obj$data$analysis, prop = 0.8)
+    folds <- rsample::vfold_cv(rsample::training(split), v = 5)
+    train <- rsample::training(split)
+
+    config <- obj$config$configs[1, ]
+    config$model <- "plsr"
+
+    set.seed(42, kind = "Mersenne-Twister")
+    rec <- build_recipe(config, train, obj$data$role_map)
+    wf  <- workflows::workflow() |> workflows::add_recipe(rec) |>
+      workflows::add_model(define_model_spec("plsr"))
+    prepped <- recipes::prep(rec)
+    baked   <- recipes::bake(prepped, NULL)
+    preds   <- baked[, prepped_predictors(prepped, baked)]
+    ps <- cap_pls_components(dials::finalize(workflows::extract_parameter_set_dials(wf), preds),
+                             ncol(preds), min_analysis_rows(folds))
+    tm <- tuning_metric_set("none", outcome_range = c(0, Inf))
+
+    grid    <- tune::.check_grid(grid = 10L, workflow = wf, pset = ps)
+    grid_rs <- suppressMessages(tune::tune_grid(wf, folds, grid = grid, metrics = tm, param_info = ps,
+                                                control = tune::control_grid(verbose = FALSE)))
+    set.seed(42, kind = "Mersenne-Twister")
+    bayes <- suppressMessages(tune::tune_bayes(wf, folds, initial = grid_rs, iter = 15, param_info = ps,
+                                               metrics = tm, control = tune::control_bayes(verbose = FALSE,
+                                                                                           no_improve = 10)))
+
+    ## The fixture repeats a proposal: tune reports some candidate on ten folds
+    summary <- tune::collect_metrics(bayes)
+    expect_true(any(summary$.metric == "rmse" & summary$n == 10L))
+
+    chosen <- select_complete(bayes, "rmse", 5L)
+    expect_identical(chosen$.config, tune::select_best(bayes, metric = "rmse")$.config)
+    expect_null(incomplete_note(bayes, 5L))
+    expect_false(anyNA(unlist(cv_panel_at(bayes, chosen, 5L)[c("cv_rmse", "cv_rpd")])))
+
+  })
+
+})
+
+
+## =========================================================================
 ## Tuning metrics are on the original scale (#49 / #38)
 ## =========================================================================
 ## The response transform is a skip = TRUE recipe step, so tune never applies
@@ -398,12 +576,13 @@ describe("evaluate_single_config() - tuning on the original scale", {
   ## bayesian_iter = 1: the prune gate only runs when there is a Bayesian
   ## stage to skip (#38), and this test is about the gate.
   ##
-  ## select_best() is wrapped, passing through, to record the results the
-  ## hyperparameters are chosen from. The returned row cannot show whether
-  ## the Bayesian stage ran here: the grid already holds plsr's best
-  ## num_comp, so the stage's one candidate does not change the choice.
-  real_select_best <- tune::select_best
-  selected_from    <- NULL
+  ## show_best() is wrapped, passing through, to record the results the
+  ## hyperparameters are chosen from (its last call is the choice; the prune
+  ## gate's is on the grid). The returned row cannot show whether the
+  ## Bayesian stage ran here: the grid already holds plsr's best num_comp,
+  ## so the stage's one candidate does not change the choice.
+  real_show_best <- tune::show_best
+  selected_from  <- NULL
 
   result <- with_mocked_bindings(
     evaluate_single_config(
@@ -417,9 +596,9 @@ describe("evaluate_single_config() - tuning on the original scale", {
       prune_threshold = 1.0,
       seed            = 42L
     ),
-    select_best = function(x, ...) {
+    show_best = function(x, ...) {
       selected_from <<- x
-      real_select_best(x, ...)
+      real_show_best(x, ...)
     },
     .package = "tune"
   )
@@ -552,6 +731,164 @@ describe("evaluate_single_config() - a Bayesian search that fails (#209)", {
       result$warnings[[1]], fixed = TRUE
     )))
 
+    ## A substitution warning of the unit's, which evaluate() lifts to its log
+    records <- attr(result, "unit_records")
+    expect_identical(records$class[records$type == "warning" &
+                                     startsWith(records$cause, "The Bayesian search failed")],
+                     "horizons_warning_substitution")
+
+  })
+
+  it("does not fall back under debug: the search's failure stops the call", {
+
+    expect_error(evaluate_single_config(
+      config_row    = make_eval_config(),
+      split         = setup$split,
+      cv_folds      = setup$folds,
+      role_map      = setup$role_map,
+      grid_size     = 1,
+      bayesian_iter = 2,
+      seed          = 42L,
+      debug         = TRUE
+    ))
+
+  })
+
+  ## tune recovers from an error in its search loop by returning the
+  ## iterations finished so far; here the second Gaussian-process
+  ## prediction fails, so one iteration has finished
+  gp_fails_at <- function(n, raise = function() stop("the GP broke")) {
+    real_pred_gp <- tune:::pred_gp
+    calls        <- 0L
+    function(...) {
+      calls <<- calls + 1L
+      if (calls == n) raise()
+      real_pred_gp(...)
+    }
+  }
+
+  it("keeps the iterations a search finished before it stopped, and says so with the cause", {
+
+    local_mocked_bindings(pred_gp = gp_fails_at(2L), .package = "tune")
+
+    real_select <- select_complete
+    chosen_from <- NULL
+    local_mocked_bindings(select_complete = function(results, ...) {
+      chosen_from <<- results
+      real_select(results, ...)
+    })
+
+    result <- run(grid_size = 2)
+
+    expect_equal(result$status, "success")
+    expect_identical(max(chosen_from$.iter), 1L)
+    expect_true(any(grepl(
+      "The Bayesian search stopped early, after 1 iteration, so the hyperparameters were chosen from those and the grid: the GP broke",
+      result$warnings[[1]], fixed = TRUE
+    )))
+
+    records <- attr(result, "unit_records")
+    expect_identical(records$class[startsWith(records$cause, "The Bayesian search stopped early")],
+                     "horizons_warning_substitution")
+
+  })
+
+  it("stops at an error in the search loop under debug, with that error", {
+
+    local_mocked_bindings(pred_gp = gp_fails_at(2L), .package = "tune")
+
+    expect_error(evaluate_single_config(
+      config_row    = make_eval_config(),
+      split         = setup$split,
+      cv_folds      = setup$folds,
+      role_map      = setup$role_map,
+      grid_size     = 2,
+      bayesian_iter = 2,
+      seed          = 42L,
+      debug         = TRUE
+    ), "the GP broke", fixed = TRUE)
+
+  })
+
+  it("lets a bug or a worker's death in the search loop through, which tune would have recovered from", {
+
+    local_mocked_bindings(pred_gp = gp_fails_at(2L, function() {
+      abort_horizons("Broken in the search loop.", kind = "internal")
+    }), .package = "tune")
+    expect_error(run(grid_size = 2), "Broken in the search loop.", fixed = TRUE,
+                 class = "horizons_error_internal")
+
+    local_mocked_bindings(pred_gp = gp_fails_at(2L, function() {
+      stop(structure(class = c("FutureInterruptError", "FutureError", "error", "condition"),
+                     list(message = "A future worker died.", call = NULL)))
+    }), .package = "tune")
+    expect_error(run(grid_size = 2), "A future worker died.", fixed = TRUE, class = "FutureError")
+
+  })
+
+  it("stops under debug when a candidate the search proposed fails in every fold", {
+
+    ## The engine fails on every Bayesian candidate and on none of the grid's:
+    ## tune drops such a candidate without a note, and the search returns
+    in_search   <- FALSE
+    real_glmnet <- glmnet::glmnet
+    real_bayes  <- tune::tune_bayes
+    local_mocked_bindings(glmnet = function(...) {
+      if (in_search) stop("the engine broke on a Bayesian candidate")
+      real_glmnet(...)
+    }, .package = "glmnet")
+    local_mocked_bindings(tune_bayes = function(...) {
+      in_search <<- TRUE
+      on.exit(in_search <<- FALSE)
+      real_bayes(...)
+    }, .package = "tune")
+
+    search <- function(debug) {
+      suppressWarnings(evaluate_single_config(
+        config_row    = make_eval_config(model = "elastic_net"),
+        split         = setup$split,
+        cv_folds      = setup$folds,
+        role_map      = setup$role_map,
+        grid_size     = 3,
+        bayesian_iter = 2,
+        seed          = 42L,
+        debug         = debug
+      ))
+    }
+
+    contained <- search(debug = FALSE)
+    expect_equal(contained$status, "success")
+    expect_true(any(grepl("The Bayesian search produced no results", contained$warnings[[1]], fixed = TRUE)))
+
+    expect_error(search(debug = TRUE), "failed in every fold, and tune keeps no record of why: All models failed for:",
+                 fixed = TRUE, class = "horizons_error_run")
+
+  })
+
+  it("falls back only from a run failure: a bug inside the search still stops the call", {
+
+    local_mocked_bindings(tune_bayes = function(...) {
+      abort_horizons("Broken inside the search.", kind = "internal")
+    }, .package = "tune")
+
+    expect_error(run(grid_size = 2), "Broken inside the search.", fixed = TRUE,
+                 class = "horizons_error_internal")
+
+  })
+
+  it("records the search's own warnings on the row", {
+
+    real_bayes <- tune::tune_bayes
+    local_mocked_bindings(tune_bayes = function(...) {
+      warning("the search warned")
+      real_bayes(...)
+    }, .package = "tune")
+
+    result <- run(grid_size = 2)
+
+    expect_equal(result$status, "success")
+    expect_true("the search warned" %in% result$warnings[[1]])
+
   })
 
   it("records it when the search returns without an iteration past the grid", {
@@ -579,10 +916,9 @@ describe("evaluate_single_config() - a Bayesian search that fails (#209)", {
 ## Each stage's failure exit
 ## =========================================================================
 ## The recipe and model stages' exits are pinned by the failure-path tests
-## above. Each later stage runs inside safely_execute() and, when it errors,
-## returns the failed row naming the stage; with its exit removed the config
-## still fails, at a later stage under that stage's name, so each case asserts
-## the stage and the cause.
+## above. Each later stage is a labelled step of the configuration's unit and,
+## when it errors, the failed row names the stage; each case asserts the stage
+## and the cause.
 
 describe("evaluate_single_config() - each stage's failure exit", {
 
@@ -625,16 +961,27 @@ describe("evaluate_single_config() - each stage's failure exit", {
     local_mocked_bindings(tune_grid = function(...) stop("the grid broke"),
                           .package = "tune")
 
-    expect_failed_at(run_on_shared(), "Grid search", "the grid broke")
+    result <- run_on_shared()
+
+    expect_failed_at(result, "Grid search", "the grid broke")
+    expect_identical(result$class, "simpleError")
+    expect_true(result$runtime_secs > 0)
 
   })
 
-  it("names the parameter selection when select_best() errors", {
+  it("names the parameter selection when it errors", {
 
-    local_mocked_bindings(select_best = function(...) stop("nothing to select"),
-                          .package = "tune")
+    local_mocked_bindings(select_complete = function(...) stop("nothing to select"))
 
     expect_failed_at(run_on_shared(), "Parameter selection", "nothing to select")
+
+  })
+
+  it("names the cross-validated metrics when they cannot be read", {
+
+    local_mocked_bindings(cv_panel_at = function(...) stop("metrics unreadable"))
+
+    expect_failed_at(run_on_shared(), "Cross-validated metrics", "metrics unreadable")
 
   })
 
@@ -728,10 +1075,13 @@ build_esc_mocked <- function() {
     build_recipe       = warn_then("the recipe stage warned", real_recipe),
     define_model_spec  = warn_then("the model stage warned", real_spec),
     prepped_predictors = warn_then("the finalize stage warned", real_preds),
-    ## What compute_original_scale_metrics() returns, with a warning, when
-    ## fewer than two test rows have both a truth and a prediction; the
-    ## runner calls it for the test rows only
-    compute_original_scale_metrics = function(...) tibble::tibble(),
+    ## What compute_original_scale_metrics() returns when fewer than two test
+    ## rows have both a truth and a prediction; the runner calls it for the
+    ## test rows only
+    compute_original_scale_metrics = function(...) {
+      tibble::tibble(.metric    = c("rmse", "rrmse", "rsq", "ccc", "rpd", "mae"),
+                     .estimator = "standard", .estimate = NA_real_, n = 1L)
+    },
     cv_panel_at = function(...) {
       tibble::as_tibble(stats::setNames(
         as.list(rep(NA_real_, 6)),
@@ -761,12 +1111,16 @@ describe("evaluate_single_config() - a run on parallel_over = 'everything' whose
 
   })
 
-  it("reports all six test metrics as NA when they cannot be computed", {
+  it("reports all six test metrics as NA when they cannot be computed, and says why on the row", {
 
     result <- esc_mocked()$result
     expect_true(all(is.na(unlist(result[c("rmse", "rrmse", "rsq", "ccc", "rpd", "mae")]))))
     expect_true(all(vapply(result[c("rmse", "rrmse", "rsq", "ccc", "rpd", "mae")],
                            is.double, logical(1))))
+    expect_true(
+      "The test-set metrics are NA: 1 test row has both an observed value and a prediction, and they need two." %in%
+        result$warnings[[1]]
+    )
 
   })
 
@@ -786,8 +1140,8 @@ describe("evaluate_single_config() - parallel_over", {
 
   it("refuses anything but 'resamples' or 'everything', naming the argument", {
 
-    ## The abort carries no package class (DECISIONS 2026-10-05), so its text
-    ## is the check.
+    ## The abort is rlang's own, from arg_match0(), which takes no class, so
+    ## its text is the check.
     setup <- make_eval_setup()
 
     expect_error(
@@ -906,6 +1260,83 @@ describe("the mtry upper bound", {
 
     expect_identical(as.integer(mtry_range$upper), length(pred_vars))
     expect_lt(as.integer(mtry_range$upper), subtracted_width(baked))
+
+  })
+
+})
+
+
+## =========================================================================
+## A configuration's warnings are its chosen candidate's (#109)
+## =========================================================================
+
+describe("evaluate_single_config() - the warnings of the chosen candidate (#109)", {
+
+  ## The grid is fixed, its order unlike .config's, with mtry = 50 above the
+  ## predictors: ranger warns for those candidates only. The choice is fixed
+  ## at mtry = 2, and the recipe warns at every prep. `stages` stands in for
+  ## the reading of tune's grid schedule when given (tune_grid() reads the
+  ## schedule too, so the schedule itself cannot be replaced here).
+  run_fixed_grid <- function(stages = NULL) {
+
+    setup <- make_eval_setup()
+    fixed <- tibble::tibble(mtry = c(50L, 2L, 50L, 3L), min_n = c(5L, 5L, 2L, 2L))
+
+    ## The size evaluate_single_config() asks for becomes the fixed grid;
+    ## tune_grid()'s own check of that grid passes through
+    real_check_grid <- tune::.check_grid
+    local_mocked_bindings(.check_grid = function(grid, ...) {
+      real_check_grid(if (is.numeric(grid)) fixed else grid, ...)
+    }, .package = "tune")
+
+    if (!is.null(stages)) local_mocked_bindings(grid_model_stages = stages)
+
+    warn_recipe <- function(config_row, train_data, role_map, ...) {
+      recipes::recipe(SOC ~ ., data = train_data) |>
+        recipes::update_role("sample_id", new_role = "id") |>
+        recipes::step_BoxCox(recipes::all_predictors())
+    }
+
+    local_mocked_bindings(
+      build_recipe    = warn_recipe,
+      select_complete = function(results, ...) {
+        cm <- tune::collect_metrics(results)
+        utils::head(cm[cm$mtry == 2L, c("mtry", "min_n", ".config")], 1)
+      }
+    )
+
+    evaluate_single_config(
+      config_row    = make_eval_config(),
+      split         = setup$split,
+      cv_folds      = setup$folds,
+      role_map      = setup$role_map,
+      bayesian_iter = 0,
+      seed          = 42L
+    )
+
+  }
+
+  it("leaves out the warnings of candidates it did not choose, and keeps the recipe's", {
+
+    result <- run_fixed_grid()
+
+    expect_identical(result$status, "success")
+    expect_identical(result$best_params[[1]]$mtry, 2L)
+    expect_false(any(grepl("columns were requested", result$warnings[[1]], fixed = TRUE)))
+    expect_true(any(grepl("Non-positive values in selected variable", result$warnings[[1]], fixed = TRUE)))
+
+  })
+
+  it("keeps every grid candidate's warnings, and says why, when tune's grid schedule has another shape", {
+
+    result <- run_fixed_grid(stages = function(...) {
+      stop("tune's grid schedule has no model_stage column", call. = FALSE)
+    })
+
+    expect_identical(result$status, "success")
+    expect_true(any(grepl("columns were requested", result$warnings[[1]], fixed = TRUE)))
+    expect_true(paste0("The warnings of every grid candidate are shown, not only the chosen one's: ",
+                       "tune's grid schedule has no model_stage column.") %in% result$warnings[[1]])
 
   })
 

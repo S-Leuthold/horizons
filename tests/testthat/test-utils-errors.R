@@ -309,6 +309,11 @@ describe("create_failed_result()", {
     expect_true(is.list(result$best_params))
     expect_null(result$best_params[[1]])
 
+    ## The failure's class and backtrace, which a unit's failure fills in
+    expect_identical(result$class, "simpleError")
+    expect_true(is.list(result$trace))
+    expect_null(result$trace[[1]])
+
   })
 
   it("handles NULL error gracefully", {

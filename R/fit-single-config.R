@@ -415,11 +415,14 @@ fit_single_config <- function(config_row,
       .id = "fold"
     )
 
+  ## A fold whose metric is NA (fewer than two complete pairs, or a metric
+  ## undefined there) is left out of the mean, so it is left out of the count
+  ## the standard error divides by too.
   cv_metrics <- fold_metrics |>
     dplyr::group_by(.metric) |>
     dplyr::summarize(
       mean    = mean(.estimate, na.rm = TRUE),
-      std_err = stats::sd(.estimate, na.rm = TRUE) / sqrt(dplyr::n()),
+      std_err = stats::sd(.estimate, na.rm = TRUE) / sqrt(sum(!is.na(.estimate))),
       .groups = "drop"
     )
 
@@ -489,31 +492,21 @@ fit_single_config <- function(config_row,
   ## Note: test_truth is already on original scale — test_data is raw
   ## (never passed through the recipe), so no back-transformation needed.
 
-  test_metrics_raw <- safely_execute(
-    compute_original_scale_metrics(test_truth, test_preds) |>
-      tidyr::pivot_wider(names_from = .metric, values_from = .estimate),
-    log_error          = FALSE,
-    capture_conditions = TRUE
-  )
+  ## Six NAs when fewer than two test rows have a prediction, and the
+  ## member's warnings say why
+  scored       <- compute_original_scale_metrics(test_truth, test_preds)
+  test_metrics <- metrics_row(scored)
+  na_reason    <- metrics_na_reason(scored)
 
-  if (!is.null(test_metrics_raw$error) ||
-      is.null(test_metrics_raw$result) ||
-      nrow(test_metrics_raw$result) == 0) {
+  if (!is.null(na_reason)) {
 
-    test_metrics <- tibble::tibble(
-      rmse = NA_real_, rrmse = NA_real_, rsq = NA_real_,
-      ccc  = NA_real_, rpd   = NA_real_, mae = NA_real_
-    )
-
-  } else {
-
-    test_metrics <- test_metrics_raw$result
-
-    required <- c("rmse", "rrmse", "rsq", "ccc", "rpd", "mae")
-    missing  <- setdiff(required, names(test_metrics))
-    for (m in missing) test_metrics[[m]] <- NA_real_
+    warning_log <- dplyr::bind_rows(warning_log, text_records(na_reason, pinned = TRUE))
 
   }
+
+  required <- c("rmse", "rrmse", "rsq", "ccc", "rpd", "mae")
+  missing  <- setdiff(required, names(test_metrics))
+  for (m in missing) test_metrics[[m]] <- NA_real_
 
   ## -----------------------------------------------------------------------
   ## Step 12: Degradation detection

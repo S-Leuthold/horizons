@@ -262,6 +262,45 @@ describe("fit_single_config() - cv_metrics", {
 
   })
 
+  it("counts only the folds with a metric in the standard error", {
+
+    ## A fold left with one complete pair has NA metrics, which the mean
+    ## leaves out; the standard error divides by the folds the mean averages
+    ## (#102)
+    ## Read the fixture before the mock (helper-memo.R); the rerun is the
+    ## fixture's run, so its out-of-fold predictions are the same
+    shared <- fsc()
+    preds  <- shared$result$cv_predictions
+    folds  <- split(preds, preds$.fold)
+    real   <- compute_original_scale_metrics
+
+    local_mocked_bindings(compute_original_scale_metrics = function(truth, estimate) {
+      if (identical(truth, folds[[1]]$truth)) return(real(truth[1], estimate[1]))
+      real(truth, estimate)
+    })
+
+    result <- fit_single_config(
+      config_row          = make_fit_config(),
+      split_F             = shared$setup$split_F,
+      cv_resamples        = shared$setup$folds,
+      role_map            = shared$setup$role_map,
+      best_params_eval    = make_fit_best_params(),
+      final_bayesian_iter = 0L,
+      grid_size           = 2L,
+      seed                = 42L
+    )
+
+    expect_identical(result$cv_predictions, preds)
+
+    cv_met <- result$cv_metrics
+    rmse   <- vapply(folds[-1], function(f) yardstick::rmse_vec(f$truth, f$.pred), numeric(1))
+
+    expect_length(folds, 3L)
+    expect_equal(cv_met$mean[cv_met$.metric == "rmse"], mean(rmse))
+    expect_equal(cv_met$std_err[cv_met$.metric == "rmse"], stats::sd(rmse) / sqrt(2))
+
+  })
+
 })
 
 
@@ -770,10 +809,10 @@ build_fsc_mocked <- function() {
     define_model_spec    = warn_then("the model stage warned", real_spec),
     prepped_predictors   = warn_then("the finalize stage warned", real_preds),
     tune_warmstart_bayes = warn_then("the tuning stage warned", real_tune),
-    ## What compute_original_scale_metrics() returns, with a warning, when
-    ## fewer than two test rows have both a truth and a prediction
+    ## What compute_original_scale_metrics() returns when fewer than two test
+    ## rows have both a truth and a prediction
     compute_original_scale_metrics = function(truth, estimate) {
-      if (identical(truth, test_truth)) return(tibble::tibble())
+      if (identical(truth, test_truth)) return(real_metrics(truth[1], estimate[1]))
       real_metrics(truth, estimate)
     }
   )
@@ -799,12 +838,16 @@ describe("fit_single_config() - a run whose stages warn and whose last steps fai
 
   })
 
-  it("reports all six test metrics as NA when they cannot be computed", {
+  it("reports all six test metrics as NA when they cannot be computed, and says why", {
 
     expect_identical(
       fsc_mocked()$result$test_metrics,
       tibble::tibble(rmse = NA_real_, rrmse = NA_real_, rsq = NA_real_,
                      ccc  = NA_real_, rpd   = NA_real_, mae = NA_real_)
+    )
+    expect_true(
+      "The test-set metrics are NA: 1 test row has both an observed value and a prediction, and they need two." %in%
+        fsc_mocked()$result$warnings
     )
 
   })

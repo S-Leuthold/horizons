@@ -124,7 +124,7 @@ describe("evaluate() - gate checks", {
     obj <- make_eval_object()
     obj$config$configs <- NULL
 
-    expect_error(evaluate(obj), "No configurations found")
+    expect_error(evaluate(obj), "No configurations found", class = "horizons_error_input")
 
   })
 
@@ -133,36 +133,73 @@ describe("evaluate() - gate checks", {
     obj <- make_eval_object()
     obj$config$configs <- obj$config$configs[0, ]
 
-    expect_error(evaluate(obj), "No configurations found")
+    expect_error(evaluate(obj), "No configurations found", class = "horizons_error_input")
 
   })
 
-  it("aborts when outcome column has no non-NA values", {
+  it("aborts when outcome column has no non-NA values, naming the remedy", {
 
     obj <- make_eval_object()
     outcome <- obj$data$role_map$variable[obj$data$role_map$role == "outcome"]
     obj$data$analysis[[outcome]] <- NA_real_
 
-    expect_error(evaluate(obj), "outcome.*NA")
+    err <- expect_error(evaluate(obj), "outcome.*NA", class = "horizons_error_input")
+    expect_match(conditionMessage(err), "another outcome", fixed = TRUE)
+    expect_identical(rlang::call_name(err$call), "evaluate")
 
   })
 
-  it("aborts when sample size is too small for CV, counting only rows with an observed outcome", {
+  it("refuses a training part without more rows than folds, counting only rows with an observed outcome", {
 
-    ## The abort carries no condition class yet, so its text is asserted
-    obj <- make_eval_object(n = 4)
+    local_mocked_bindings(evaluate_single_config = function(...) stop("a configuration ran"))
 
-    expect_error(evaluate(obj),
-                 "Need at least 6 samples (cv_folds * 2), but only 4 available.",
+    ## Three rows: the split leaves two to train on, under the three folds
+    err <- expect_error(evaluate(make_eval_object(n = 3)), class = "horizons_error_input")
+    msg <- gsub("\\s+", " ", conditionMessage(err))   # undo cli line wrapping
+
+    expect_match(msg, "The training part has 2 rows, but 3-fold cross-validation needs more training rows than folds.",
                  fixed = TRUE)
+    expect_match(msg, "3 rows have an observed outcome; the test set holds 1.", fixed = TRUE)
+    expect_match(msg, "fewer `cv_folds`", fixed = TRUE)
 
-    ## Eight rows, three without an outcome: five can be modelled
+    ## Eight rows, five without an outcome: three can be modelled
+    obj <- make_eval_object(n = 8)
+    obj$data$analysis$SOC[1:5] <- NA_real_
+
+    expect_error(evaluate(obj), "The training part has 2 rows", fixed = TRUE,
+                 class = "horizons_error_input")
+
+  })
+
+  it("runs a small sample, warning once that its folds are small", {
+
+    ## Read the fixture before the runner is mocked (helper-memo.R)
+    template <- ev60()$evaluation$results[1, ]
+
+    local_mocked_bindings(
+      evaluate_single_config = function(config_row, ...) {
+        mock_eval_row(template, config_row$config_id, "success")
+      }
+    )
+
+    ## Eight rows, three without an outcome: five modelled, four to train on
+    ## in three folds of one or two. Refused under 2 * cv_folds until 0.12.0.
     obj <- make_eval_object(n = 8)
     obj$data$analysis$SOC[1:3] <- NA_real_
 
-    expect_error(evaluate(obj),
-                 "Need at least 6 samples (cv_folds * 2), but only 5 available.",
+    ## (helper-parallel.R's collect_warnings(): this file's own is defined below)
+    got <- collect_warnings(evaluate(obj, seed = 42L), "")
+
+    quality <- Filter(function(w) inherits(w, "horizons_warning_quality"), got$warnings)
+    expect_length(quality, 1L)
+    expect_match(conditionMessage(quality[[1]]), "The smallest cross-validation fold has 1 row to assess",
                  fixed = TRUE)
+    expect_identical(sum(got$value$log$topic == "quality"), 1L)
+    expect_identical(got$value$evaluation$n_train, 4L)
+
+    ## Folds of ten or more rows are not small
+    quiet <- collect_warnings(evaluate(make_eval_object(n = 40), seed = 42L), "")
+    expect_false(any(vapply(quiet$warnings, inherits, logical(1), "horizons_warning_quality")))
 
   })
 
@@ -170,7 +207,31 @@ describe("evaluate() - gate checks", {
 
     obj <- make_eval_object()
 
-    expect_error(evaluate(obj, metric = "accuracy"), "metric")
+    err <- expect_error(evaluate(obj, metric = "accuracy"), "`metric` must be one of",
+                        class = "horizons_error_input")
+    expect_match(conditionMessage(err), "\"accuracy\"", fixed = TRUE)
+
+  })
+
+  it("refuses an axis whose bands are out of order before anything is drawn (#121)", {
+
+    ## Names the door validator does not parse as wavenumbers, so only the
+    ## band-order check sees them
+    local_mocked_bindings(
+      draw_eval_split = function(...) stop("a split was drawn"),
+      evaluate_single_config = function(...) stop("a configuration ran")
+    )
+
+    obj  <- make_eval_object()
+    pred <- obj$data$role_map$role == "predictor"
+    olds <- obj$data$role_map$variable[pred]
+    news <- sub("^wn_", "wn_X", olds)
+    names(obj$data$analysis)[match(olds, names(obj$data$analysis))] <- news
+
+    ## The first two bands swapped
+    obj$data$role_map$variable[pred] <- news[c(2, 1, 3:length(news))]
+
+    expect_error(evaluate(obj), "not monotonically ordered", class = "horizons_error_input")
 
   })
 
@@ -393,22 +454,21 @@ describe("rank_configs_by_cv()", {
 
   })
 
-  it("drops rows with NA cv_<metric> with a warning naming them", {
+  it("leaves out rows with NA cv_<metric>, silently: the verbs that rank say so", {
 
     unranked <- rows
     unranked$cv_rpd[1] <- NA_real_
 
-    expect_warning(ranked <- rank_configs_by_cv(unranked, "rpd"), "skipped")
+    expect_no_warning(ranked <- rank_configs_by_cv(unranked, "rpd"))
     expect_equal(ranked$config_id, c("b", "c"))
 
-  })
-
-  it("aborts with a re-run remedy when nothing can be ranked", {
-
+    ## Nothing to rank: no rows, and the caller decides what that means
     all_na <- rows
     all_na$cv_rpd <- NA_real_
 
-    expect_error(rank_configs_by_cv(all_na, "rpd"), "[Rr]e-run evaluate")
+    expect_no_warning(none <- rank_configs_by_cv(all_na, "rpd"))
+    expect_identical(nrow(none), 0L)
+    expect_named(none, names(rows))
 
     ## Results with no cv_ column are refused by the eval validator at fit()'s
     ## door (test-class-core.R), before anything is ranked.
@@ -426,7 +486,7 @@ describe("evaluate() - all configs fail", {
   ## evaluate() aborts before it assigns x$evaluation, so the message's old
   ## hint ("Check evaluation$results") could not be followed. The results now
   ## ride on the condition, so a loop over subsets can recover them (#41).
-  it("signals horizons_all_configs_failed, carrying the results and naming the errors", {
+  it("signals horizons_error_all_configs_failed, carrying the results and naming the errors", {
 
     obj <- make_eval_object(n_configs = 5)
 
@@ -442,10 +502,11 @@ describe("evaluate() - all configs fail", {
 
     err <- tryCatch(
       suppressWarnings(evaluate(obj)),
-      horizons_all_configs_failed = function(e) e
+      horizons_error_all_configs_failed = function(e) e
     )
 
-    expect_s3_class(err, "horizons_all_configs_failed")
+    expect_s3_class(err, "horizons_error_all_configs_failed")
+    expect_s3_class(err, "horizons_error_run")
 
     ## The per-config results, error messages included
     expect_s3_class(err$results, "tbl_df")
@@ -477,9 +538,9 @@ describe("evaluate() - all configs fail", {
                               error_message = "mocked")
 
     err <- expect_error(
-      abort_all_configs_failed(results, "rpd", checkpoint_ids = results$config_id,
+      abort_all_configs_failed(results, checkpoint_ids = results$config_id,
                                output_dir = "runs/soc"),
-      class = "horizons_all_configs_failed"
+      class = "horizons_error_all_configs_failed"
     )
 
     msg <- gsub("\\s+", " ", conditionMessage(err))   # undo cli line wrapping
@@ -512,7 +573,7 @@ describe("evaluate() - NA outcome rows", {
     expect_identical(modelling_rows(complete, "y")$n_dropped, 0L)
 
     expect_error(modelling_rows(df[c(2, 4), ], "y"),
-                 class = "horizons_input_error")
+                 class = "horizons_error_input")
 
   })
 
@@ -568,6 +629,39 @@ describe("evaluate() - NA outcome rows", {
 ## fit() cold-starts a configured object with one configuration by drawing
 ## the split itself, so the draw moved out of evaluate() into a helper both
 ## verbs call. It has to give the split evaluate() drew before the move.
+
+describe("check_fold_rows() and log_small_folds()", {
+
+  it("refuses as many training rows as folds or fewer, and no more", {
+
+    ## rsample refuses as many folds as rows
+    expect_error(rsample::vfold_cv(data.frame(x = 1:3), v = 3))
+
+    expect_no_error(check_fold_rows(4L, 3L, n_modelled = 5L, n_test = 1L))
+    expect_error(check_fold_rows(3L, 3L, n_modelled = 4L, n_test = 1L),
+                 "The training part has 3 rows, but 3-fold cross-validation needs more training rows than folds.",
+                 fixed = TRUE, class = "horizons_error_input")
+
+  })
+
+  it("warns when the smallest fold has fewer than SMALL_FOLD_ROWS rows to assess, and only then", {
+
+    folds_of <- function(n) rsample::vfold_cv(data.frame(x = seq_len(n)), v = 3)
+
+    at <- log_open("evaluate")
+    expect_identical(log_small_folds(at, folds_of(3L * SMALL_FOLD_ROWS)), SMALL_FOLD_ROWS)
+    expect_identical(nrow(log_close(at)), 0L)
+
+    under <- log_open("evaluate")
+    log_small_folds(under, folds_of(3L * (SMALL_FOLD_ROWS - 1L)))
+    log <- log_close(under)
+    expect_identical(log$topic, "quality")
+    expect_match(log$message, paste0("The smallest cross-validation fold has ", SMALL_FOLD_ROWS - 1L, " rows"),
+                 fixed = TRUE)
+
+  })
+
+})
 
 describe("draw_eval_split()", {
 
@@ -838,6 +932,25 @@ describe("evaluate() - response outliers are trimmed from the training partition
 
   })
 
+  it("counts the training rows left by the trim when it refuses too few rows for the folds", {
+
+    ## As many folds as the trimmed training part has rows, and fewer than
+    ## the rows as drawn: the refusal counts what the folds would be drawn on
+    n_left <- nrow(train_plain) - length(expected_trim)
+    short  <- v
+    short$config$tuning$cv_folds <- n_left
+
+    local_mocked_bindings(evaluate_single_config = function(...) stop("a configuration ran"))
+
+    err <- expect_error(suppressWarnings(evaluate(short, seed = 307L)), class = "horizons_error_input")
+    msg <- gsub("\\s+", " ", conditionMessage(err))
+
+    expect_match(msg, paste0("The training part has ", n_left, " rows, but ", n_left,
+                             "-fold cross-validation needs more training rows than folds."), fixed = TRUE)
+    expect_match(msg, paste0("the response trim left out ", length(expected_trim)), fixed = TRUE)
+
+  })
+
   it("fingerprints the trim: an untrimmed run's checkpoints are refused, naming it", {
 
     tmpdir <- withr::local_tempdir()
@@ -849,7 +962,7 @@ describe("evaluate() - response outliers are trimmed from the training partition
 
     err <- expect_error(
       suppressWarnings(evaluate(v, prune = FALSE, seed = 307L, control = control_horizons(output_dir = tmpdir))),
-      class = "horizons_input_error"
+      class = "horizons_error_input"
     )
 
     msg <- gsub("\\s+", " ", conditionMessage(err))   # undo cli line wrapping
@@ -902,14 +1015,26 @@ describe("evaluate() - response outliers are trimmed from the training partition
 
   })
 
-  it("warns and trims nothing when the training partition has no fences", {
+  it("records a skipped trim and trims nothing when the training partition has no fences", {
+
+    ## The trim runs inside the verb, which records it and warns once at its
+    ## end; here the verb's collector stands in
+    trim_with <- function(split) {
+      collector <- log_open("evaluate")
+      out       <- trim_training_responses(split, "SOC", request, "sample_id", collector)
+      log       <- log_close(collector)
+      caught    <- collect_warnings(signal_log(collector))
+      list(value = out, log = log, warnings = caught$warnings)
+    }
 
     flat <- plain
     flat$data$SOC[flat$in_id] <- 2
 
-    caught <- collect_warnings(trim_training_responses(flat, "SOC", request, "sample_id"))
+    caught <- trim_with(flat)
 
-    expect_true(has_warning_class(caught$warnings, "horizons_response_trim_warning"))
+    expect_identical(caught$log$topic, "skipped")
+    expect_length(caught$warnings, 1L)
+    expect_s3_class(caught$warnings[[1]], "horizons_warning_skipped")
     expect_identical(caught$value$record$skipped, "zero_iqr")
     expect_length(caught$value$record$trimmed_ids, 0)
     expect_identical(caught$value$split, flat)
@@ -919,15 +1044,19 @@ describe("evaluate() - response outliers are trimmed from the training partition
 
     expect_match(reason(caught), "be drawn on the training partition: its outcome has a zero interquartile range.",
                  fixed = TRUE)
+    expect_match(caught$log$message, "No training rows were trimmed.", fixed = TRUE)
 
     few <- plain
     few$data$SOC[few$in_id[-(1:3)]] <- NA_real_
 
-    caught <- collect_warnings(trim_training_responses(few, "SOC", request, "sample_id"))
+    caught <- trim_with(few)
 
     expect_identical(caught$value$record$skipped, "too_few")
     expect_match(reason(caught), "be drawn on the training partition: it has fewer than four outcome values (3).",
                  fixed = TRUE)
+
+    ## Fences drawn: nothing recorded
+    expect_identical(nrow(trim_with(plain)$log), 0L)
 
   })
 
@@ -1023,6 +1152,48 @@ describe("evaluate() - the split line and the fallback notes (#91)", {
     expect_identical(out[split_note], "│  Stratified split failed, retrying without strata")
     expect_identical(out[cv_note], "│  Stratified CV failed, retrying without strata")
     expect_true(all(c(split_note, cv_note) > header))
+
+  })
+
+  it("warns once, recorded first, that a failed stratified draw fell back, with why", {
+
+    ## Read the fixture before anything is mocked (helper-memo.R)
+    template <- ev60()$evaluation$results[1, ]
+
+    real_initial_split <- rsample::initial_split
+    real_vfold_cv      <- rsample::vfold_cv
+
+    local_mocked_bindings(
+      initial_split = function(data, prop = 3 / 4, strata = NULL, ...) {
+        if (!missing(strata)) stop("stratification refused")
+        real_initial_split(data, prop = prop, ...)
+      },
+      vfold_cv = function(data, v = 10, repeats = 1, strata = NULL, ...) {
+        if (!missing(strata)) stop("stratification refused")
+        real_vfold_cv(data, v = v, repeats = repeats, ...)
+      },
+      .package = "rsample"
+    )
+    local_mocked_bindings(
+      evaluate_single_config = function(config_row, ...) {
+        mock_eval_row(template, config_row$config_id, "success")
+      }
+    )
+
+    got <- collect_warnings(evaluate(make_eval_object(n = 60, n_configs = 1), seed = 42L))
+    sub <- Filter(function(w) inherits(w, "horizons_warning_substitution"), got$warnings)
+
+    expect_length(sub, 1L)
+    msg <- gsub("\\s+", " ", conditionMessage(sub[[1]]))
+    expect_match(msg, "The stratified draw of the train/test split failed, so it was drawn without strata",
+                 fixed = TRUE)
+    expect_match(msg, "The stratified draw of the cross-validation folds failed", fixed = TRUE)
+    expect_match(msg, "stratification refused", fixed = TRUE)
+
+    log <- got$value$log
+    expect_identical(log$topic, "substitution")
+    expect_identical(log$n, 2L)
+    expect_identical(sub[[1]]$log, log)
 
   })
 
@@ -1160,40 +1331,75 @@ describe("evaluate() - checkpointing", {
 
   })
 
-  ## A config whose CV panel could not be recovered succeeds with no value to
-  ## rank on. rank_configs_by_cv() refused such rows unclassed and without
-  ## the results, and re-running evaluate() resumes them rather than
-  ## re-running.
-  it("signals horizons_all_configs_failed when no success has a cv_<metric>, naming the checkpoints", {
+  ## A config can succeed with no value to rank on. rank_configs_by_cv()
+  ## refused such rows unclassed and without the results, then evaluate()
+  ## aborted; the configurations were scored, so the evaluation is returned,
+  ## without a best_config, and says so once.
+  it("returns without a best_config when no success has a cv_<metric>, says so once, and fit() asks for another metric", {
 
     ck     <- ck_b()
     obj    <- ck$value$obj
     tmpdir <- ck$dir
 
-    cv_cols <- paste0("cv_", c("rmse", "rrmse", "rsq", "ccc", "rpd", "mae"))
-
     for (f in list.files(file.path(tmpdir, "checkpoints"), full.names = TRUE)) {
       row <- readRDS(f)
-      row[cv_cols] <- NA_real_
+      row$cv_rpd <- NA_real_
       saveRDS(row, f)
     }
 
-    err <- tryCatch(
-      suppressWarnings(evaluate(obj,
-                                seed = 42L, control = control_horizons(output_dir = tmpdir))),
-      horizons_all_configs_failed = function(e) e
+    out <- utils::capture.output(got <- collect_warnings(
+      evaluate(obj, seed = 42L, control = control_horizons(output_dir = tmpdir, verbose = TRUE))
+    ))
+    ev  <- got$value
+
+    expect_s3_class(ev, "horizons_eval")
+    expect_identical(ev$evaluation$best_config, NA_character_)
+    expect_true("\u2514\u2500 Best: none, since no configuration that succeeded has a CV RPD" %in% out)
+    expect_setequal(ev$evaluation$results$config_id, obj$config$configs$config_id)
+
+    skipped <- Filter(function(w) inherits(w, "horizons_warning_skipped"), got$warnings)
+    expect_length(skipped, 1L)
+    expect_match(conditionMessage(skipped[[1]]), "2 succeeded, but none has a cv_rpd value", fixed = TRUE)
+    expect_identical(ev$log$topic[ev$log$verb == "evaluate"], "skipped")
+    expect_setequal(ev$log$ids[[1]], obj$config$configs$config_id)
+
+    ## fit() refuses it at its door, naming a metric the results hold
+    err <- expect_error(fit(ev, compute_uq = FALSE, compute_ad = FALSE),
+                        "2 succeeded, but none has a cv_rpd value.", fixed = TRUE,
+                        class = "horizons_input_error")
+    msg <- gsub("\\s+", " ", conditionMessage(err))   # undo cli line wrapping
+    expect_match(msg, "fit(x, metric = )", fixed = TRUE)
+    expect_match(msg, "\"rmse\"", fixed = TRUE)
+    expect_no_match(msg, "\"rpd\"", fixed = TRUE)
+
+  })
+
+  it("leaves a configuration without the ranking metric out of the ranking, and says so once", {
+
+    ## Read the fixture before the runner is mocked (helper-memo.R)
+    template <- ev60()$evaluation$results[1, ]
+
+    rows <- list(
+      cfg_001 = mock_eval_row(template, "cfg_001", "success", rpd = 2.1),
+      cfg_002 = mock_eval_row(template, "cfg_002", "success", rpd = 1.4)
+    )
+    rows$cfg_001$cv_rpd <- NA_real_
+
+    local_mocked_bindings(
+      evaluate_single_config = function(config_row, ...) rows[[config_row$config_id]]
     )
 
-    expect_s3_class(err, "horizons_all_configs_failed")
-    expect_setequal(err$results$config_id, obj$config$configs$config_id)
+    got <- collect_warnings(evaluate(make_eval_object(n = 60, n_configs = 2), seed = 42L))
+    ev  <- got$value
 
-    msg <- gsub("\\s+", " ", conditionMessage(err))   # undo cli line wrapping
-    expect_match(msg, "2 succeeded, but none has a cv_rpd value", fixed = TRUE)
-    expect_match(msg, "2 configurations were loaded from checkpoints", fixed = TRUE)
-    expect_match(msg, "cfg_001, cfg_002", fixed = TRUE)
+    expect_identical(ev$evaluation$best_config, "cfg_002")
 
-    ## One store (#42): the per-config files
-    expect_match(msg, "delete their files, checkpoints/<config_id>.rds.", fixed = TRUE)
+    skipped <- Filter(function(w) inherits(w, "horizons_warning_skipped"), got$warnings)
+    expect_length(skipped, 1L)
+    expect_match(conditionMessage(skipped[[1]]), "1 configuration left out of the ranking, with no cv_rpd value.",
+                 fixed = TRUE)
+    expect_identical(ev$log$ids[[1]], "cfg_001")
+    expect_identical(skipped[[1]]$log, ev$log)
 
   })
 
@@ -1299,7 +1505,7 @@ describe("evaluate() - recipe settings", {
 
     out <- refused_without_running(narrow)
 
-    expect_s3_class(out$error, "horizons_input_error")
+    expect_s3_class(out$error, "horizons_error_input")
     expect_match(conditionMessage(out$error), "9 grid points (18 cm", fixed = TRUE)
     expect_match(conditionMessage(out$error), "9 spectral columns", fixed = TRUE)
     expect_identical(out$ran, 0L)
@@ -1312,7 +1518,7 @@ describe("evaluate() - recipe settings", {
 
     out <- refused_without_running(obj)
 
-    expect_s3_class(out$error, "horizons_input_error")
+    expect_s3_class(out$error, "horizons_error_input")
     expect_match(conditionMessage(out$error), "21 grid points (42 cm", fixed = TRUE)
     expect_match(conditionMessage(out$error), "20 spectral columns", fixed = TRUE)
     expect_identical(out$ran, 0L)
@@ -1728,12 +1934,12 @@ describe("evaluate() - checkpoint data provenance", {
 
     expect_error(
       suppressWarnings(evaluate(make_eval_object(n = 60, n_configs = 2), prune = FALSE, seed = 42L, control = control_horizons(output_dir = tmpdir))),
-      class = "horizons_input_error"
+      class = "horizons_error_input"
     )
 
     err <- tryCatch(
       suppressWarnings(evaluate(make_eval_object(n = 60, n_configs = 2), prune = FALSE, seed = 42L, control = control_horizons(output_dir = tmpdir))),
-      horizons_input_error = function(e) e
+      horizons_error_input = function(e) e
     )
 
     msg <- flat_message(err)
@@ -1763,10 +1969,10 @@ describe("evaluate() - checkpoint data provenance", {
 
     err <- tryCatch(
       suppressWarnings(evaluate(obj_clay, prune = FALSE, seed = 42L, control = control_horizons(output_dir = tmpdir))),
-      horizons_input_error = function(e) e
+      horizons_error_input = function(e) e
     )
 
-    expect_s3_class(err, "horizons_input_error")
+    expect_s3_class(err, "horizons_error_input")
 
     ## Named, not two opaque hashes.
     msg <- flat_message(err)
@@ -1788,7 +1994,7 @@ describe("evaluate() - checkpoint data provenance", {
 
     tryCatch(
       suppressWarnings(evaluate(edit(obj), prune = FALSE, seed = 42L, control = control_horizons(output_dir = tmpdir))),
-      horizons_input_error = function(e) e
+      horizons_error_input = function(e) e
     )
 
   }
@@ -1800,7 +2006,7 @@ describe("evaluate() - checkpoint data provenance", {
       o
     })
 
-    expect_s3_class(err, "horizons_input_error")
+    expect_s3_class(err, "horizons_error_input")
     msg <- flat_message(err)
     expect_match(msg, "different predictor values")
     expect_no_match(msg, "different outcome values")
@@ -1814,7 +2020,7 @@ describe("evaluate() - checkpoint data provenance", {
       o
     })
 
-    expect_s3_class(err, "horizons_input_error")
+    expect_s3_class(err, "horizons_error_input")
     expect_match(flat_message(err),
                  "different outcome values")
 
@@ -1833,7 +2039,7 @@ describe("evaluate() - checkpoint data provenance", {
       o
     })
 
-    expect_s3_class(err, "horizons_input_error")
+    expect_s3_class(err, "horizons_error_input")
     expect_match(flat_message(err), "role_map")
 
   })
@@ -1857,7 +2063,9 @@ describe("evaluate() - checkpoint data provenance", {
                seed = 42L, control = control_horizons(output_dir = tmpdir))
     )
 
-    expect_false(has_warning_class(caught$warnings, "horizons_checkpoint_warning"))
+    ## Nothing unusable in the store: no note on the log
+    expect_named(caught$value$log, names(new_log()))
+    expect_false(any(caught$value$log$type == "note"))
     expect_equal(caught$value$evaluation$results$runtime_secs,
                  first$evaluation$results$runtime_secs)
 
@@ -1873,7 +2081,7 @@ describe("evaluate() - checkpoint data provenance", {
 
 describe("evaluate() - one checkpoint store (#42)", {
 
-  it("warns naming a per-config file it cannot read, and re-evaluates that config", {
+  it("notes a per-config file it cannot read, without warning, and re-evaluates that config", {
 
     ck     <- ck_a()
     obj    <- ck$value$obj
@@ -1881,11 +2089,20 @@ describe("evaluate() - one checkpoint store (#42)", {
 
     writeLines("not an rds file", file.path(tmpdir, "checkpoints", "cfg_001.rds"))
 
-    warns <- testthat::capture_warnings(
-      second <- evaluate(obj, prune = FALSE, seed = 42L, control = control_horizons(output_dir = tmpdir))
-    )
+    ## Only time is lost, so it is a note on the log and a line in the tree
+    out <- utils::capture.output(warns <- testthat::capture_warnings(
+      second <- evaluate(obj, prune = FALSE, seed = 42L,
+                         control = control_horizons(output_dir = tmpdir, verbose = TRUE))
+    ))
 
-    expect_true(any(grepl("cfg_001.rds", warns, fixed = TRUE)))
+    ## (rsample's own warnings about the small strata are not under test)
+    expect_false(any(grepl("cfg_001.rds", warns, fixed = TRUE)))
+    note <- second$log[second$log$type == "note", ]
+    expect_identical(nrow(note), 1L)
+    expect_identical(note$ids[[1]], "checkpoints/cfg_001.rds")
+    expect_match(note$message, "1 file in .* could not be used as a checkpoint, so its configuration was evaluated again.")
+    expect_match(note$message, "checkpoints/cfg_001.rds: ", fixed = TRUE)
+    expect_true(any(grepl("Could not use checkpoints/cfg_001.rds: .* \\(will be re-evaluated\\)$", out)))
     expect_setequal(second$evaluation$results$config_id, c("cfg_001", "cfg_002"))
 
     ## Re-evaluated and rewritten, so the next resume can read it.
@@ -1917,16 +2134,17 @@ describe("evaluate() - one checkpoint store (#42)", {
       list.files(file.path(tmpdir, "checkpoints"))[1], "file1a2b3c.rds"
     )
 
-    warns <- testthat::capture_warnings(
-      second <- evaluate(obj, prune = FALSE, seed = 42L, control = control_horizons(output_dir = tmpdir))
+    second <- suppressWarnings(
+      evaluate(obj, prune = FALSE, seed = 42L, control = control_horizons(output_dir = tmpdir))
     )
 
     got <- second$evaluation$results
     expect_equal(got$cv_rpd[got$config_id == "rf_001"], real$cv_rpd)
 
-    flat <- gsub("\\s+", " ", warns)
-    expect_true(any(grepl("file1a2b3c.rds: holds config rf_001; not a checkpoint name",
-                          flat, fixed = TRUE)))
+    note <- second$log$message[second$log$type == "note"]
+    expect_length(note, 1L)
+    expect_true(grepl("file1a2b3c.rds: holds config rf_001; not a checkpoint name",
+                      note, fixed = TRUE))
 
   })
 
@@ -1969,10 +2187,10 @@ describe("evaluate() - one checkpoint store (#42)", {
     ## than being dropped silently.
     err <- tryCatch(
       suppressWarnings(evaluate(obj, prune = FALSE, seed = 42L, control = control_horizons(output_dir = tmpdir))),
-      horizons_input_error = function(e) e
+      horizons_error_input = function(e) e
     )
 
-    expect_s3_class(err, "horizons_input_error")
+    expect_s3_class(err, "horizons_error_input")
     expect_match(flat_message(err), "cfg_001.rds", fixed = TRUE)
 
   })
@@ -2026,10 +2244,10 @@ describe("evaluate() - tuning-settings provenance", {
 
     err <- tryCatch(
       suppressWarnings(evaluate(changed, prune = FALSE, seed = 42L, control = control_horizons(output_dir = tmpdir))),
-      horizons_input_error = function(e) e
+      horizons_error_input = function(e) e
     )
 
-    expect_s3_class(err, "horizons_input_error")
+    expect_s3_class(err, "horizons_error_input")
 
     msg <- flat_message(err)
     expect_match(msg, "grid_size")
@@ -2050,7 +2268,7 @@ describe("evaluate() - tuning-settings provenance", {
       suppressWarnings(evaluate(obj, prune = TRUE,
                                 prune_threshold = 2, seed = 42L, control = control_horizons(output_dir = tmpdir))),
       "prune_threshold",
-      class = "horizons_input_error"
+      class = "horizons_error_input"
     )
 
     ## With pruning off the threshold is never read, so it cannot have
@@ -2088,9 +2306,9 @@ describe("evaluate() - tuning-settings provenance", {
     expect_equal(second$evaluation$rank_metric, "rmse")
 
     ## A clean store reports nothing unreadable: these per-config files, so
-    ## the resume raises no checkpoint warning, and a directory with no
-    ## checkpoints/.
-    expect_false(has_warning_class(caught$warnings, "horizons_checkpoint_warning"))
+    ## the resume records no note, and a directory with no checkpoints/.
+    expect_named(second$log, names(new_log()))
+    expect_false(any(second$log$type == "note"))
 
     store <- read_checkpoint_store(tmpdir)
     expect_length(store$rows, 2L)
@@ -2120,10 +2338,10 @@ describe("evaluate() - tuning-settings provenance", {
 
     err <- tryCatch(
       suppressWarnings(evaluate(wider, prune = FALSE, seed = 42L, control = control_horizons(output_dir = tmpdir))),
-      horizons_input_error = function(e) e
+      horizons_error_input = function(e) e
     )
 
-    expect_s3_class(err, "horizons_input_error")
+    expect_s3_class(err, "horizons_error_input")
     expect_match(flat_message(err), "sg_window")
     expect_match(flat_message(err), "settings")
 
@@ -2133,8 +2351,447 @@ describe("evaluate() - tuning-settings provenance", {
     expect_error(
       suppressWarnings(evaluate(tighter, prune = FALSE, seed = 42L, control = control_horizons(output_dir = tmpdir))),
       "pca_threshold",
-      class = "horizons_input_error"
+      class = "horizons_error_input"
     )
+
+  })
+
+})
+
+
+## =========================================================================
+## What the configurations report on the log
+## =========================================================================
+
+describe("evaluate() - the configurations' warnings and failures on the log", {
+
+  it("lifts a configuration's horizons warning onto the log once, naming the configurations, and stores no records", {
+
+    template <- ev60()$evaluation$results[1, ]
+
+    ## Each row as evaluate_single_config() returns it: its unit's records
+    ## on it, a substitution warning among them, and another package's
+    ## warning, which stays on the row
+    local_mocked_bindings(
+      evaluate_single_config = function(config_row, ...) {
+        id  <- config_row$config_id
+        row <- mock_eval_row(template, id, "success", warnings = "Kept the grid's choice.")
+        attr(row, "unit_records") <- run_unit({
+          warn_in_unit("substitution", "Kept the grid's choice.")
+          warning("ranger warned")
+        }, "configuration", id)$records
+        row
+      }
+    )
+
+    dir <- withr::local_tempdir()
+    got <- collect_warnings(evaluate(make_eval_object(n = 60, n_configs = 2), seed = 42L,
+                                     control = control_horizons(output_dir = dir)))
+    ev  <- got$value
+
+    subs <- Filter(function(w) inherits(w, "horizons_warning_substitution"), got$warnings)
+    expect_length(subs, 1L)
+    expect_false(any(vapply(got$warnings, function(w) grepl("ranger warned", conditionMessage(w)),
+                            logical(1))))
+
+    row <- ev$log[ev$log$topic %in% "substitution", ]
+    expect_identical(row$ids[[1]], c("cfg_001", "cfg_002"))
+    expect_match(row$message, "Kept the grid's choice. In 2 configurations", fixed = TRUE)
+    expect_identical(subs[[1]]$log, row)
+
+    expect_null(attr(readRDS(file.path(dir, "checkpoints", "cfg_001.rds")), "unit_records"))
+
+  })
+
+  it("says which configurations failed in one partial_failure warning, with each distinct cause", {
+
+    template <- ev60()$evaluation$results[1, ]
+
+    rows <- list(
+      cfg_001 = mock_eval_row(template, "cfg_001", "success"),
+      cfg_002 = mock_eval_row(template, "cfg_002", "failed", error = "Grid search failed: mocked {cause}"),
+      cfg_003 = mock_eval_row(template, "cfg_003", "failed", error = "Grid search failed: mocked {cause}")
+    )
+
+    local_mocked_bindings(
+      evaluate_single_config = function(config_row, ...) rows[[config_row$config_id]]
+    )
+
+    got <- collect_warnings(evaluate(make_eval_object(n = 60, n_configs = 3), seed = 42L))
+    ev  <- got$value
+
+    partial <- Filter(function(w) inherits(w, "horizons_warning_partial_failure"), got$warnings)
+    expect_length(partial, 1L)
+
+    row <- ev$log[ev$log$topic %in% "partial_failure", ]
+    expect_identical(row$ids[[1]], c("cfg_002", "cfg_003"))
+    expect_identical(row$n, 2L)
+    expect_match(row$message, "2 of 3 configurations failed, so the evaluation holds the rest.",
+                 fixed = TRUE)
+    expect_match(row$message, "Grid search failed: mocked {cause} (cfg_002, cfg_003)", fixed = TRUE)
+
+  })
+
+  it("raises no partial_failure warning when every configuration succeeded", {
+
+    expect_false("partial_failure" %in% ev60()$log$topic)
+
+  })
+
+  it("names a configuration whose Bayesian search failed in one substitution warning (#209)", {
+
+    ## A grid of one gives tune_bayes() a single initial point, so the search
+    ## fails; configure() refuses this, the object here is set by hand
+    obj <- make_eval_object(n = 60, n_configs = 1)
+    obj$config$tuning$grid_size     <- 1L
+    obj$config$tuning$bayesian_iter <- 2L
+
+    got <- collect_warnings(evaluate(obj, prune = FALSE, seed = 42L))
+    ev  <- got$value
+
+    subs <- Filter(function(w) inherits(w, "horizons_warning_substitution"), got$warnings)
+    expect_length(subs, 1L)
+    expect_match(conditionMessage(subs[[1]]), "The Bayesian search failed", fixed = TRUE)
+
+    row <- ev$log[ev$log$topic %in% "substitution", ]
+    expect_identical(row$ids[[1]], "cfg_001")
+    expect_identical(ev$evaluation$results$status, "success")
+
+  })
+
+  it("stops at the first configuration's failure under debug, with its own error", {
+
+    local_mocked_bindings(build_recipe = function(...) stop("no recipe for this config"))
+
+    ## The configuration's own error, not a contained failure: without debug
+    ## both configurations fail and the call ends in the all-failed abort
+    err <- expect_error(suppressWarnings(evaluate(make_eval_object(n = 60, n_configs = 2), seed = 42L,
+                                                  control = control_horizons(debug = TRUE))),
+                        "no recipe for this config", fixed = TRUE, class = "simpleError")
+    expect_false(inherits(err, "horizons_error"))
+
+  })
+
+  it("keeps a failed configuration's class, and its backtrace under keep_traces", {
+
+    local_mocked_bindings(build_recipe = function(...) stop("no recipe for this config"))
+
+    run <- function(keep_traces) {
+      suppressWarnings(tryCatch(
+        evaluate(make_eval_object(n = 60, n_configs = 1), seed = 42L,
+                 control = control_horizons(keep_traces = keep_traces)),
+        horizons_error_all_configs_failed = function(e) e$results
+      ))
+    }
+
+    kept <- run(TRUE)
+    expect_identical(kept$class, "simpleError")
+    expect_type(kept$trace[[1]], "character")
+
+    expect_null(run(FALSE)$trace[[1]])
+
+  })
+
+})
+
+
+## =========================================================================
+## Stopping early: the circuit breaker and a worker's death
+## =========================================================================
+
+describe("evaluate() - the circuit breaker", {
+
+  ## Failed rows from a mocked runner: the same failure in every
+  ## configuration but for its id and a number, unless `differ` names it
+  failing_runner <- function(template, ran, differ = character(0), succeed = character(0)) {
+    function(config_row, ...) {
+      id <- config_row$config_id
+      ran$ids <- c(ran$ids, id)
+      if (id %in% succeed) return(mock_eval_row(template, id, "success"))
+      row <- mock_eval_row(template, id, "failed", error = paste0(
+        if (id %in% differ) "Grid search failed: " else "Recipe building failed: ",
+        "no recipe for ", id, " at ", nchar(id) * 7, " rows"))
+      row$class <- "simpleError"
+      row
+    }
+  }
+
+  it("stops at the third identical failure across two models, with the rows so far, checkpointing none", {
+
+    template <- ev60()$evaluation$results[1, ]
+    ran      <- new.env()
+    local_mocked_bindings(evaluate_single_config = failing_runner(template, ran))
+
+    dir <- withr::local_tempdir()
+    err <- expect_error(
+      suppressWarnings(evaluate(make_eval_object(n = 60, n_configs = 5), seed = 42L,
+                                control = control_horizons(output_dir = dir))),
+      class = "horizons_error_systemic"
+    )
+
+    expect_true(inherits(err, "horizons_error_run"))
+    expect_identical(ran$ids, c("cfg_001", "cfg_002", "cfg_003"))
+    expect_identical(err$results$config_id, c("cfg_001", "cfg_002", "cfg_003"))
+    expect_match(conditionMessage(err), "The first 3 configurations to run all failed the same way, across 2 models",
+                 fixed = TRUE)
+    expect_match(conditionMessage(err), "breaker = FALSE", fixed = TRUE)
+    expect_length(list.files(file.path(dir, "checkpoints")), 0L)
+
+  })
+
+  it("does not stop when the identical failures are all on one model, and checkpoints them at the end", {
+
+    template <- ev60()$evaluation$results[1, ]
+    ran      <- new.env()
+    local_mocked_bindings(evaluate_single_config = failing_runner(template, ran))
+
+    obj <- make_eval_object(n = 60, n_configs = 4)
+    obj$config$configs$model <- "rf"
+
+    dir <- withr::local_tempdir()
+    expect_error(suppressWarnings(evaluate(obj, seed = 42L, control = control_horizons(output_dir = dir))),
+                 class = "horizons_error_all_configs_failed")
+
+    expect_length(ran$ids, 4L)
+    expect_setequal(list.files(file.path(dir, "checkpoints")), paste0(obj$config$configs$config_id, ".rds"))
+
+  })
+
+  it("is disarmed by a success, and its held rows are checkpointed then", {
+
+    template <- ev60()$evaluation$results[1, ]
+    ran      <- new.env()
+    local_mocked_bindings(evaluate_single_config = failing_runner(template, ran, succeed = "cfg_003"))
+
+    dir <- withr::local_tempdir()
+    ev  <- suppressWarnings(evaluate(make_eval_object(n = 60, n_configs = 5), seed = 42L,
+                                     control = control_horizons(output_dir = dir)))
+
+    expect_length(ran$ids, 5L)
+    expect_identical(ev$evaluation$best_config, "cfg_003")
+    expect_length(list.files(file.path(dir, "checkpoints")), 5L)
+
+  })
+
+  it("is disarmed by a different failure, and is off at breaker = FALSE", {
+
+    template <- ev60()$evaluation$results[1, ]
+
+    ran <- new.env()
+    local_mocked_bindings(evaluate_single_config = failing_runner(template, ran, differ = "cfg_002"))
+    expect_error(suppressWarnings(evaluate(make_eval_object(n = 60, n_configs = 5), seed = 42L)),
+                 class = "horizons_error_all_configs_failed")
+    expect_length(ran$ids, 5L)
+
+    ran <- new.env()
+    local_mocked_bindings(evaluate_single_config = failing_runner(template, ran))
+    expect_error(suppressWarnings(evaluate(make_eval_object(n = 60, n_configs = 5), seed = 42L,
+                                           control = control_horizons(breaker = FALSE))),
+                 class = "horizons_error_all_configs_failed")
+    expect_length(ran$ids, 5L)
+
+  })
+
+  it("does not stop when nothing is left to run: the last identical failures end in the all-failed abort, checkpointed", {
+
+    template <- ev60()$evaluation$results[1, ]
+    ran      <- new.env()
+    local_mocked_bindings(evaluate_single_config = failing_runner(template, ran))
+
+    dir <- withr::local_tempdir()
+    err <- expect_error(suppressWarnings(evaluate(make_eval_object(n = 60, n_configs = 3), seed = 42L,
+                                                  control = control_horizons(output_dir = dir))),
+                        class = "horizons_error_all_configs_failed")
+
+    expect_false(inherits(err, "horizons_error_systemic"))
+    expect_length(ran$ids, 3L)
+    expect_identical(err$results$config_id, c("cfg_001", "cfg_002", "cfg_003"))
+    expect_length(list.files(file.path(dir, "checkpoints")), 3L)
+
+  })
+
+  it("ends either way in an error of the run kind carrying the rows, which the subset loop in ?evaluate catches", {
+
+    template <- ev60()$evaluation$results[1, ]
+    local_mocked_bindings(evaluate_single_config = failing_runner(template, new.env()))
+
+    obj    <- make_eval_object(n = 60, n_configs = 5)
+    caught <- lapply(list(control_horizons(), control_horizons(breaker = FALSE)), function(control) {
+      tryCatch(suppressWarnings(evaluate(obj, seed = 42L, control = control)),
+               horizons_error_run = function(e) e)
+    })
+
+    expect_s3_class(caught[[1]], "horizons_error_systemic")
+    expect_identical(caught[[1]]$results$config_id, sprintf("cfg_%03d", 1:3))
+    expect_s3_class(caught[[2]], "horizons_error_all_configs_failed")
+    expect_identical(caught[[2]]$results$config_id, sprintf("cfg_%03d", 1:5))
+
+  })
+
+  it("waits for its limit", {
+
+    template <- ev60()$evaluation$results[1, ]
+    ran      <- new.env()
+    local_mocked_bindings(evaluate_single_config = failing_runner(template, ran))
+
+    err <- expect_error(suppressWarnings(evaluate(make_eval_object(n = 60, n_configs = 6), seed = 42L,
+                                                  control = control_horizons(breaker = 4L))),
+                        class = "horizons_error_systemic")
+    expect_length(ran$ids, 4L)
+    expect_length(err$results$config_id, 4L)
+
+  })
+
+  it("counts two failures as one when they differ only in the configuration's id, numbers and spacing", {
+
+    row <- function(id, message, class = "simpleError") {
+      tibble::tibble(config_id = id, status = "failed", error_message = message, class = class)
+    }
+
+    ## Ids as configure() writes them: the model, the recipe and a hash
+    a <- "rf_raw_none_none_a3f91c"
+    b <- "cubist_snv_log_pca_0b7e2d"
+
+    same <- breaker_key(row(a, paste0("Grid search failed: boom in ", a, " at 12  rows")))
+
+    expect_identical(breaker_key(row(b, paste0("Grid search failed: boom in ", b, " at 15 rows"))), same)
+    expect_false(identical(breaker_key(row(b, paste0("Recipe building failed: boom in ", b, " at 15 rows"))), same))
+    expect_false(identical(breaker_key(row(b, paste0("Grid search failed: boom in ", b, " at 15 rows"),
+                                           class = "horizons_error_run")), same))
+
+  })
+
+})
+
+describe("evaluate() - a worker's death", {
+
+  it("stops the run as systemic, chained to future's error, with the rows finished so far", {
+
+    template <- ev60()$evaluation$results[1, ]
+
+    local_mocked_bindings(evaluate_single_config = function(config_row, ...) {
+      if (config_row$config_id == "cfg_002") {
+        stop(structure(class = c("FutureInterruptError", "FutureError", "error", "condition"),
+                       list(message = "A future worker died.", call = NULL)))
+      }
+      mock_eval_row(template, config_row$config_id, "success")
+    })
+
+    err <- expect_error(suppressWarnings(evaluate(make_eval_object(n = 60, n_configs = 3), seed = 42L)),
+                        class = "horizons_error_systemic")
+
+    expect_true(rlang::cnd_inherits(err, "FutureError"))
+    expect_identical(err$results$config_id, "cfg_001")
+    expect_match(conditionMessage(err), "A parallel worker stopped", fixed = TRUE)
+    expect_match(conditionMessage(err), "in this error's results field", fixed = TRUE)
+
+    ## With an output_dir, the finished configurations are on disk to resume from
+    dir <- withr::local_tempdir()
+    err <- expect_error(suppressWarnings(evaluate(make_eval_object(n = 60, n_configs = 3), seed = 42L,
+                                                  control = control_horizons(output_dir = dir))),
+                        class = "horizons_error_systemic")
+    expect_match(gsub("\\s+", " ", conditionMessage(err)), "calling `evaluate()` again with it resumes from them",
+                 fixed = TRUE)
+    expect_identical(list.files(file.path(dir, "checkpoints")), "cfg_001.rds")
+
+  })
+
+  it("stops a resamples-axis run whose worker is killed (installed build)", {
+
+    skip_unless_slow_tier()
+    skip_on_cran()
+    skip_if_dev_package()
+
+    local_plan(future::multisession, workers = 2)
+
+    ## A recipe step that kills the worker it runs on, on an analysis set;
+    ## never the parent, which preps the whole training part. The function
+    ## is written into the step, so the worker needs nothing from here.
+    kill <- bquote((function(x) {
+      if (length(x) < 45 && Sys.getpid() != .(Sys.getpid())) tools::pskill(Sys.getpid(), tools::SIGKILL)
+      x
+    })(sample_id))
+    real_recipe <- build_recipe
+    local_mocked_bindings(build_recipe = function(...) {
+      real_recipe(...) |> recipes::step_mutate(sample_id = !!kill)
+    })
+
+    err <- expect_error(
+      suppressWarnings(evaluate(make_eval_object(n = 60, n_configs = 1), seed = 42L,
+                                control = control_horizons(allow_par = TRUE, parallelize_over = "resamples"))),
+      class = "horizons_error_systemic"
+    )
+    expect_true(rlang::cnd_inherits(err, "FutureError"))
+
+  })
+
+})
+
+
+## =========================================================================
+## The ranking report: what was left out, and what to rank by instead
+## =========================================================================
+
+describe("evaluate() - the ranking report when pruned configurations hold the metric", {
+
+  rows_with <- function(template, statuses, cv_rsq) {
+    rows <- Map(function(id, status, rsq) {
+      row <- mock_eval_row(template, id, status)
+      row$cv_rsq <- rsq
+      row
+    }, sprintf("cfg_%03d", seq_along(statuses)), statuses, cv_rsq)
+    stats::setNames(rows, sprintf("cfg_%03d", seq_along(statuses)))
+  }
+
+  it("names only the successes when none has the metric, says the pruned one is not ranked, and never suggests it", {
+
+    template <- ev60()$evaluation$results[1, ]
+    rows     <- rows_with(template, c("success", "pruned"), c(NA_real_, 0.6))
+    local_mocked_bindings(evaluate_single_config = function(config_row, ...) rows[[config_row$config_id]])
+
+    out <- utils::capture.output(got <- collect_warnings(
+      evaluate(make_eval_object(n = 60, n_configs = 2), metric = "rsq", seed = 42L,
+               control = control_horizons(verbose = TRUE))
+    ))
+    ev <- got$value
+
+    expect_identical(ev$evaluation$best_config, NA_character_)
+    expect_true("\u2514\u2500 Best: none, since no configuration that succeeded has a CV RSQ" %in% out)
+
+    skipped <- Filter(function(w) inherits(w, "horizons_warning_skipped"), got$warnings)
+    expect_length(skipped, 1L)
+    msg <- gsub("\\s+", " ", conditionMessage(skipped[[1]]))
+    expect_match(msg, "1 succeeded, but none has a cv_rsq value.", fixed = TRUE)
+    expect_match(msg, "1 pruned configuration has one, but pruned configurations are ranked only when none succeeded.",
+                 fixed = TRUE)
+    expect_no_match(msg, "\"rsq\"", fixed = TRUE)
+    expect_identical(ev$log$ids[ev$log$topic %in% "skipped"][[1]], "cfg_001")
+
+    ## fit() refuses it the same way, and suggests only a metric that ranks
+    err <- expect_error(fit(ev, metric = "rsq", compute_uq = FALSE, compute_ad = FALSE),
+                        "1 succeeded, but none has a cv_rsq value.", fixed = TRUE)
+    fit_msg <- gsub("\\s+", " ", conditionMessage(err))
+    expect_match(fit_msg, "fit(x, metric = )", fixed = TRUE)
+    expect_no_match(fit_msg, "\"rsq\"", fixed = TRUE)
+
+  })
+
+  it("ranks the pruned configurations when none succeeded, and says which lack the metric", {
+
+    template <- ev60()$evaluation$results[1, ]
+    rows     <- rows_with(template, c("pruned", "pruned"), c(NA_real_, 0.6))
+    local_mocked_bindings(evaluate_single_config = function(config_row, ...) rows[[config_row$config_id]])
+
+    got <- collect_warnings(evaluate(make_eval_object(n = 60, n_configs = 2), metric = "rsq", seed = 42L))
+    ev  <- got$value
+
+    expect_identical(ev$evaluation$best_config, "cfg_002")
+
+    skipped <- Filter(function(w) inherits(w, "horizons_warning_skipped"), got$warnings)
+    expect_length(skipped, 1L)
+    expect_match(conditionMessage(skipped[[1]]), "1 configuration left out of the ranking, with no cv_rsq value.",
+                 fixed = TRUE)
+    expect_identical(ev$log$ids[ev$log$topic %in% "skipped"][[1]], "cfg_001")
 
   })
 

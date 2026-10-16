@@ -18,7 +18,9 @@ evaluate_single_config(
   seed = 42L,
   sg_window = DEFAULT_SG_WINDOW,
   pca_threshold = DEFAULT_PCA_THRESHOLD,
-  outcome_range = DEFAULT_OUTCOME_RANGE
+  outcome_range = DEFAULT_OUTCOME_RANGE,
+  debug = FALSE,
+  keep_traces = FALSE
 )
 }
 \arguments{
@@ -75,6 +77,13 @@ which the back-transformed test-set predictions (and, for a transformed
 response, the tuning predictions) are clamped to before scoring.
 \code{evaluate()} reads it from \code{configure()}'s \code{config$outcome_range}.
 Default \code{c(0, Inf)}.}
+
+\item{debug}{Logical. Contain nothing: the first failure, inside tune
+included, stops the call with its backtrace, and the Bayesian search's
+failure is not fallen back from. Warnings are still recorded.}
+
+\item{keep_traces}{Logical. Keep a failure's backtrace, as text, in the
+row's \code{trace}.}
 }
 \value{
 Single-row tibble with columns: \code{config_id}, \code{status} (\code{"pruned"}
@@ -84,8 +93,12 @@ was taken against; \code{NA} when \code{prune = FALSE}), the six
 test-set metrics \code{rmse}, \code{rrmse}, \code{rsq}, \code{ccc}, \code{rpd}, \code{mae}, the six
 cross-validated means at the selected hyperparameters \code{cv_rmse},
 \code{cv_rrmse}, \code{cv_rsq}, \code{cv_ccc}, \code{cv_rpd}, \code{cv_mae} (what \code{evaluate()} and
-\code{fit()} rank on), \code{best_params} (list-column), \code{error_message},
-\code{warnings}, \code{runtime_secs}.
+\code{fit()} rank on), \code{best_params} (list-column), \code{error_message} (the
+failed step and the cause), \code{class} (the failure's root class), \code{trace}
+(list-column: the backtrace as text under \code{keep_traces}, else \code{NULL}),
+\code{warnings}, \code{runtime_secs}. The unit's records ride on the row as the
+attribute \code{"unit_records"}, for \code{evaluate()} to lift its horizons
+warnings onto the log.
 }
 \description{
 Inner-loop function for \code{evaluate()}. Takes a single config row, builds a
@@ -96,5 +109,10 @@ returns a single-row result tibble.
 This function is the \strong{capture layer} — it runs silently and returns
 structured data. All console output (tree rendering, progress messages) is
 the responsibility of the calling \code{evaluate()} function.
+
+The configuration is one unit (\code{run_unit()}): a run failure in any step
+ends it, and the row records the step (\code{EVAL_STEPS}), the cause, its root
+class and, with \code{keep_traces}, its backtrace. A door, internal or
+dependency error is not the configuration's and propagates.
 }
 \keyword{internal}
