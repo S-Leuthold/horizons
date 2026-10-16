@@ -1473,7 +1473,7 @@ trim_settings <- function(trim) {
 #' The message lists the distinct error messages (the first three, each with
 #' the members that raised it, and a count of the rest), and the per-member
 #' results table travels on the condition as `results`, as it does for
-#' `evaluate()`'s `horizons_all_configs_failed`.
+#' `evaluate()`'s `horizons_error_all_configs_failed`.
 #'
 #' @param results `fit()`'s per-member results tibble, with `error_message`.
 #' @param call The call the condition is attributed to. Default: the caller,
