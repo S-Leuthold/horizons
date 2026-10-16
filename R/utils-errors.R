@@ -1041,16 +1041,13 @@ tune_note_records <- function(tune_results, type = "warning", scope = "cv",
 
   notes <- tryCatch(tune::collect_notes(tune_results), error = function(e) e)
 
-  if (inherits(notes, "error")) {
+  readable <- is.data.frame(notes) && all(c("type", "note") %in% names(notes))
 
-    return(text_records(paste0("tune's notes could not be read: ", condition_summary(notes)),
-                        pinned = TRUE))
+  if (!readable) {
 
-  }
+    why <- if (inherits(notes, "error")) condition_summary(notes) else "they have no type and note columns"
 
-  if (!is.data.frame(notes) || !all(c("type", "note") %in% names(notes))) {
-
-    return(new_warning_log())
+    return(text_records(paste0("tune's notes could not be read: ", why), pinned = TRUE))
 
   }
 

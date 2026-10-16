@@ -759,6 +759,11 @@ describe("tune_note_messages() and tune_failure_cause()", {
     expect_length(lines, 1L)
     expect_match(lines, "^tune's notes could not be read: ")
 
+    ## Notes of another shape are as unreadable
+    local_mocked_bindings(collect_notes = function(...) tibble::tibble(x = 1), .package = "tune")
+    expect_identical(tune_note_messages(list(), type = "warning"),
+                     "tune's notes could not be read: they have no type and note columns")
+
   })
 
 })
