@@ -990,10 +990,13 @@ evaluate <- function(x,
 
   if (is.na(best_config_id)) {
 
+    ## The lines are rendered already, so each is substituted as text
+    reason <- unranked_reason(all_results, metric, "`evaluate(metric = )` or `fit(metric = )`")
+
     log_warning(collector, "skipped", c(
-      "No configuration could be ranked: none of the {length(evaluated)} evaluated has a {.field {rank_column}} value, so the evaluation has no {.field best_config}.",
-      "i" = "Rank by another cross-validated metric with {.code evaluate(metric = )} or {.code fit(metric = )}."
-    ), ids = evaluated)
+      "No configuration could be ranked, so the evaluation has no {.field best_config}: {reason[1]}",
+      stats::setNames(sprintf("{reason[%d]}", seq_along(reason)[-1]), names(reason)[-1])
+    ), ids = candidates$rows$config_id)
 
   } else {
 
@@ -1079,7 +1082,8 @@ evaluate <- function(x,
 
     if (is.na(best_config_id)) {
 
-      cat(paste0("\u2514\u2500 Best: none, since no configuration has a CV ",
+      cat(paste0("\u2514\u2500 Best: none, since no configuration that ",
+                 ranking_candidates(all_results, metric)$what, " has a CV ",
                  toupper(metric), "\n"))
 
     } else {
@@ -2154,31 +2158,93 @@ abort_all_configs_failed <- function(results,
 #' @description
 #' Returns the rows `evaluate()` picks `best_config` from and `fit()` picks
 #' its members from: the configurations that succeeded, or, when none did,
-#' the pruned configurations that carry a cross-validated value of the
-#' ranking metric. [rank_configs_by_cv()] then orders them. `fit()` used to
-#' keep successes only, so it refused an evaluation whose `best_config` was a
-#' pruned configuration (#38).
+#' the pruned configurations. [rank_configs_by_cv()] then orders those with a
+#' cross-validated value of the ranking metric, and the rest are the ones the
+#' verb says it left out. `fit()` used to keep successes only, so it refused
+#' an evaluation whose `best_config` was a pruned configuration (#38).
 #'
 #' @param results Tibble of evaluation result rows (`evaluation$results`
 #'   shape).
 #' @param metric Bare metric name, e.g. `"rpd"`.
-#' @return List with `rows` (the candidate rows, unranked; zero rows when
-#'   nothing qualifies) and `fallback` (`TRUE` when the rows are pruned
-#'   configurations because none succeeded).
+#' @return List with `rows` (the candidate rows, unranked, with or without a
+#'   value of the metric; zero rows when nothing succeeded or was pruned),
+#'   `fallback` (`TRUE` when the rows are pruned configurations because none
+#'   succeeded) and `what` (`"succeeded"` or `"pruned"`, for the messages).
 #' @keywords internal
 #' @noRd
 ranking_candidates <- function(results, metric) {
 
   successes <- results[results$status %in% "success", , drop = FALSE]
 
-  if (nrow(successes) > 0) return(list(rows = successes, fallback = FALSE))
+  if (nrow(successes) > 0) return(list(rows = successes, fallback = FALSE, what = "succeeded"))
 
-  cv_values <- results[[paste0("cv_", metric)]]
-  has_cv    <- if (is.null(cv_values)) rep(FALSE, nrow(results)) else !is.na(cv_values)
+  pruned <- results[results$status %in% "pruned", , drop = FALSE]
 
-  pruned <- results[results$status %in% "pruned" & has_cv, , drop = FALSE]
+  list(rows = pruned, fallback = nrow(pruned) > 0, what = "pruned")
 
-  list(rows = pruned, fallback = nrow(pruned) > 0)
+}
+
+#' The metrics an evaluation can be ranked by
+#'
+#' @description
+#' The ranking metrics for which [ranking_candidates()] holds a row with a
+#' cross-validated value: what `evaluate()` and `fit()` suggest when the one
+#' asked for ranks nothing, so neither suggests a metric that would be
+#' refused the same way.
+#'
+#' @param results Tibble of evaluation result rows.
+#' @return Character, a subset of `VALID_RANK_METRICS`.
+#' @keywords internal
+#' @noRd
+rankable_metrics <- function(results) {
+
+  VALID_RANK_METRICS[vapply(VALID_RANK_METRICS, function(m) {
+    rows <- ranking_candidates(results, m)$rows
+    any(!is.na(rows[[paste0("cv_", m)]]))
+  }, logical(1))]
+
+}
+
+#' Why nothing could be ranked, for the warning and the error that say so
+#'
+#' @param results Tibble of evaluation result rows.
+#' @param metric Bare metric name, which ranks nothing.
+#' @param how Character(1). How to rank by another metric, as rendered text,
+#'   e.g. ``"`fit(x, metric = )`"``.
+#' @return Character, rendered: the reason, then, as `"i"` bullets, where
+#'   pruned rows hold the metric and what to rank by instead.
+#' @keywords internal
+#' @noRd
+unranked_reason <- function(results, metric, how) {
+
+  candidates  <- ranking_candidates(results, metric)
+  rank_column <- paste0("cv_", metric)
+  n           <- nrow(candidates$rows)
+  held        <- rankable_metrics(results)
+
+  ## Pruned rows are ranked only when nothing succeeded, so a value they
+  ## hold is not one this ranking could use
+  pruned_with <- if (identical(candidates$what, "succeeded")) {
+    sum(results$status %in% "pruned" & !is.na(results[[rank_column]]))
+  } else 0L
+
+  c(
+    if (n == 0) {
+      cli::format_inline("None succeeded, and no configuration was pruned.")
+    } else if (identical(candidates$what, "succeeded")) {
+      cli::format_inline("{n} succeeded, but none has a {.field {rank_column}} value.")
+    } else {
+      cli::format_inline("None succeeded, and none of the {n} pruned configuration{?s} has a {.field {rank_column}} value.")
+    },
+    if (pruned_with > 0) {
+      c("i" = cli::format_inline("{pruned_with} pruned configuration{?s} {?has/have} one, but pruned configurations are ranked only when none succeeded."))
+    },
+    "i" = if (length(held) > 0) {
+      cli::format_inline("Rank by a metric the results hold: {how} with one of {.val {held}}.")
+    } else {
+      "No cross-validated metric was recorded; re-run `evaluate()`."
+    }
+  )
 
 }
 

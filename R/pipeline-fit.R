@@ -330,24 +330,14 @@ fit <- function(x,
       (n_candidates == 0 || all(is.na(candidates$rows[[rank_column]])))) {
 
     ## evaluate() returns such an evaluation, so re-running it would not help;
-    ## a metric the evaluated configurations hold would
-    evaluated <- eval_results[eval_results$status %in% c("success", "pruned"), , drop = FALSE]
-    held      <- VALID_RANK_METRICS[vapply(VALID_RANK_METRICS, function(m) {
-      any(!is.na(evaluated[[paste0("cv_", m)]]))
-    }, logical(1))]
+    ## a metric the same candidates hold would. The lines are rendered
+    ## already, so each is substituted as text.
+    reason <- unranked_reason(eval_results, rank_metric, "`fit(x, metric = )`")
 
     cli::cli_abort(c(
       "No configuration in {.field evaluation$results} can be fitted.",
-      "x" = if (n_candidates == 0) {
-        "None succeeded, and no pruned configuration has a {.field {rank_column}} value."
-      } else {
-        "{n_candidates} succeeded, but none has a {.field {rank_column}} value."
-      },
-      "i" = if (length(held) > 0) {
-        "Rank by a metric the results hold: {.code fit(x, metric = )} with one of {.val {held}}."
-      } else {
-        "No cross-validated metric was recorded; re-run {.fn evaluate}."
-      }
+      "x" = "{reason[1]}",
+      stats::setNames(sprintf("{reason[%d]}", seq_along(reason)[-1]), names(reason)[-1])
     ), class = "horizons_input_error")
 
   }

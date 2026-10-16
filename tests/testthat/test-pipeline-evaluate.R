@@ -1350,12 +1350,12 @@ describe("evaluate() - checkpointing", {
 
     expect_s3_class(ev, "horizons_eval")
     expect_identical(ev$evaluation$best_config, NA_character_)
-    expect_true("\u2514\u2500 Best: none, since no configuration has a CV RPD" %in% out)
+    expect_true("\u2514\u2500 Best: none, since no configuration that succeeded has a CV RPD" %in% out)
     expect_setequal(ev$evaluation$results$config_id, obj$config$configs$config_id)
 
     skipped <- Filter(function(w) inherits(w, "horizons_warning_skipped"), got$warnings)
     expect_length(skipped, 1L)
-    expect_match(conditionMessage(skipped[[1]]), "none of the 2 evaluated has a cv_rpd value", fixed = TRUE)
+    expect_match(conditionMessage(skipped[[1]]), "2 succeeded, but none has a cv_rpd value", fixed = TRUE)
     expect_identical(ev$log$topic[ev$log$verb == "evaluate"], "skipped")
     expect_setequal(ev$log$ids[[1]], obj$config$configs$config_id)
 
@@ -2682,6 +2682,76 @@ describe("evaluate() - a worker's death", {
       class = "horizons_error_systemic"
     )
     expect_true(rlang::cnd_inherits(err, "FutureError"))
+
+  })
+
+})
+
+
+## =========================================================================
+## The ranking report: what was left out, and what to rank by instead
+## =========================================================================
+
+describe("evaluate() - the ranking report when pruned configurations hold the metric", {
+
+  rows_with <- function(template, statuses, cv_rsq) {
+    rows <- Map(function(id, status, rsq) {
+      row <- mock_eval_row(template, id, status)
+      row$cv_rsq <- rsq
+      row
+    }, sprintf("cfg_%03d", seq_along(statuses)), statuses, cv_rsq)
+    stats::setNames(rows, sprintf("cfg_%03d", seq_along(statuses)))
+  }
+
+  it("names only the successes when none has the metric, says the pruned one is not ranked, and never suggests it", {
+
+    template <- ev60()$evaluation$results[1, ]
+    rows     <- rows_with(template, c("success", "pruned"), c(NA_real_, 0.6))
+    local_mocked_bindings(evaluate_single_config = function(config_row, ...) rows[[config_row$config_id]])
+
+    out <- utils::capture.output(got <- collect_warnings(
+      evaluate(make_eval_object(n = 60, n_configs = 2), metric = "rsq", seed = 42L,
+               control = control_horizons(verbose = TRUE))
+    ))
+    ev <- got$value
+
+    expect_identical(ev$evaluation$best_config, NA_character_)
+    expect_true("\u2514\u2500 Best: none, since no configuration that succeeded has a CV RSQ" %in% out)
+
+    skipped <- Filter(function(w) inherits(w, "horizons_warning_skipped"), got$warnings)
+    expect_length(skipped, 1L)
+    msg <- gsub("\\s+", " ", conditionMessage(skipped[[1]]))
+    expect_match(msg, "1 succeeded, but none has a cv_rsq value.", fixed = TRUE)
+    expect_match(msg, "1 pruned configuration has one, but pruned configurations are ranked only when none succeeded.",
+                 fixed = TRUE)
+    expect_no_match(msg, "\"rsq\"", fixed = TRUE)
+    expect_identical(ev$log$ids[ev$log$topic %in% "skipped"][[1]], "cfg_001")
+
+    ## fit() refuses it the same way, and suggests only a metric that ranks
+    err <- expect_error(fit(ev, metric = "rsq", compute_uq = FALSE, compute_ad = FALSE),
+                        "1 succeeded, but none has a cv_rsq value.", fixed = TRUE)
+    fit_msg <- gsub("\\s+", " ", conditionMessage(err))
+    expect_match(fit_msg, "fit(x, metric = )", fixed = TRUE)
+    expect_no_match(fit_msg, "\"rsq\"", fixed = TRUE)
+
+  })
+
+  it("ranks the pruned configurations when none succeeded, and says which lack the metric", {
+
+    template <- ev60()$evaluation$results[1, ]
+    rows     <- rows_with(template, c("pruned", "pruned"), c(NA_real_, 0.6))
+    local_mocked_bindings(evaluate_single_config = function(config_row, ...) rows[[config_row$config_id]])
+
+    got <- collect_warnings(evaluate(make_eval_object(n = 60, n_configs = 2), metric = "rsq", seed = 42L))
+    ev  <- got$value
+
+    expect_identical(ev$evaluation$best_config, "cfg_002")
+
+    skipped <- Filter(function(w) inherits(w, "horizons_warning_skipped"), got$warnings)
+    expect_length(skipped, 1L)
+    expect_match(conditionMessage(skipped[[1]]), "1 configuration left out of the ranking, with no cv_rsq value.",
+                 fixed = TRUE)
+    expect_identical(ev$log$ids[ev$log$topic %in% "skipped"][[1]], "cfg_001")
 
   })
 

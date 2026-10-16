@@ -72,7 +72,8 @@ describe("fit() - an evaluation with only pruned configs (#38)", {
 
     expect_error(
       fit(unranked, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE),
-      "None succeeded, and no pruned configuration has a cv_rpd value.", fixed = TRUE,
+      paste0("None succeeded, and none of the ", nrow(unranked$evaluation$results),
+             " pruned configurations has a cv_rpd value."), fixed = TRUE,
       class = "horizons_input_error"
     )
 
