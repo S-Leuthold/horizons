@@ -517,34 +517,18 @@ evaluate_single_config <- function(config_row,
   ## Step 13: Compute original-scale metrics
   ## -----------------------------------------------------------------------
 
-  metrics_result <- safely_execute(
-    compute_original_scale_metrics(
-      truth    = test_predictions[[outcome_col]],
-      estimate = test_predictions$.pred
-    ) |>
-      tidyr::pivot_wider(names_from = .metric, values_from = .estimate),
-    log_error          = FALSE,
-    capture_conditions = TRUE
+  ## Six NAs when fewer than two test rows have a prediction, and the row
+  ## says why
+  scored       <- compute_original_scale_metrics(
+    truth    = test_predictions[[outcome_col]],
+    estimate = test_predictions$.pred
   )
+  test_metrics <- metrics_row(scored)
+  na_reason    <- metrics_na_reason(scored)
 
-  if (!is.null(metrics_result$error) ||
-      is.null(metrics_result$result) ||
-      nrow(metrics_result$result) == 0) {
+  if (!is.null(na_reason)) {
 
-    test_metrics <- tibble::tibble(
-      rmse  = NA_real_, rsq = NA_real_, mae   = NA_real_,
-      rrmse = NA_real_, rpd = NA_real_, ccc   = NA_real_
-    )
-
-  } else {
-
-    test_metrics <- metrics_result$result
-
-    ## Guard: ensure all 6 metrics present after pivot
-    required <- c("rmse", "rrmse", "rsq", "ccc", "rpd", "mae")
-    missing  <- setdiff(required, names(test_metrics))
-
-    for (m in missing) test_metrics[[m]] <- NA_real_
+    warning_log <- dplyr::bind_rows(warning_log, text_records(na_reason, pinned = TRUE))
 
   }
 
@@ -559,12 +543,12 @@ evaluate_single_config <- function(config_row,
     status        = if (skip_bayesian) "pruned" else "success",
     below_prune_threshold = below_prune_threshold,
     prune_threshold       = if (prune) as.numeric(prune_threshold) else NA_real_,
-    rmse          = test_metrics$rmse   %||% NA_real_,
-    rrmse         = test_metrics$rrmse  %||% NA_real_,
-    rsq           = test_metrics$rsq    %||% NA_real_,
-    ccc           = test_metrics$ccc    %||% NA_real_,
-    rpd           = test_metrics$rpd    %||% NA_real_,
-    mae           = test_metrics$mae    %||% NA_real_,
+    rmse          = test_metrics$rmse,
+    rrmse         = test_metrics$rrmse,
+    rsq           = test_metrics$rsq,
+    ccc           = test_metrics$ccc,
+    rpd           = test_metrics$rpd,
+    mae           = test_metrics$mae,
     cv_rmse       = cv_panel$cv_rmse,
     cv_rrmse      = cv_panel$cv_rrmse,
     cv_rsq        = cv_panel$cv_rsq,

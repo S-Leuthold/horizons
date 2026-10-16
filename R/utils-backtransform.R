@@ -306,11 +306,17 @@ needs_back_transformation <- function(transformation) {
 #' `evaluation$results`. This is the canonical metric computation point —
 #' called once per config after last_fit + back-transform.
 #'
+#' A metric undefined on the rows it is given is `NA`, and the run goes on:
+#' with fewer than two complete pairs every metric is, so all six come back
+#' `NA` rather than as an empty table, and the caller records why.
+#'
 #' @param truth Numeric vector of observed values (original scale).
 #' @param estimate Numeric vector of predicted values (back-transformed).
 #'
-#' @return Tibble with `.metric`, `.estimator`, `.estimate` columns (6 rows).
-#'   Returns empty tibble if fewer than 2 complete cases.
+#' @return Tibble with one row per metric (`rmse`, `rrmse`, `rsq`, `ccc`,
+#'   `rpd`, `mae`) and the columns `.metric`, `.estimator`, `.estimate` and
+#'   `n`, the complete pairs the metrics were scored on. Every `.estimate` is
+#'   `NA` when `n` is below 2.
 #' @keywords internal
 compute_original_scale_metrics <- function(truth, estimate) {
 
@@ -322,12 +328,16 @@ compute_original_scale_metrics <- function(truth, estimate) {
   )
 
   metric_data <- metric_data[stats::complete.cases(metric_data), ]
+  n_pairs     <- nrow(metric_data)
 
-  if (nrow(metric_data) < 2) {
+  if (n_pairs < 2) {
 
-    warning("Insufficient data for metric calculation after removing NAs",
-            call. = FALSE)
-    return(tibble::tibble())
+    return(tibble::tibble(
+      .metric    = c("rmse", "rrmse", "rsq", "ccc", "rpd", "mae"),
+      .estimator = "standard",
+      .estimate  = NA_real_,
+      n          = n_pairs
+    ))
 
   }
 
@@ -342,6 +352,41 @@ compute_original_scale_metrics <- function(truth, estimate) {
     yardstick::mae
   )
 
-  metric_fn(metric_data, truth = truth, estimate = estimate)
+  scored   <- metric_fn(metric_data, truth = truth, estimate = estimate)
+  scored$n <- n_pairs
+
+  scored
+
+}
+
+#' The six metrics as one row, one column each
+#'
+#' @param metrics A table from [compute_original_scale_metrics()].
+#' @return One-row tibble with a column per metric.
+#' @keywords internal
+#' @noRd
+metrics_row <- function(metrics) {
+
+  tidyr::pivot_wider(metrics[c(".metric", ".estimate")],
+                     names_from = .metric, values_from = .estimate)
+
+}
+
+#' Why a configuration's or member's test-set metrics are NA
+#'
+#' @param metrics The test set's table from [compute_original_scale_metrics()].
+#' @return Character(1) for its warnings, or `NULL` when the metrics were
+#'   computed.
+#' @keywords internal
+#' @noRd
+metrics_na_reason <- function(metrics) {
+
+  n <- metrics$n[1]
+
+  if (n >= 2) return(NULL)
+
+  paste0("The test-set metrics are NA: ", n, " test row",
+         if (n == 1) " has" else "s have",
+         " both an observed value and a prediction, and they need two.")
 
 }

@@ -728,10 +728,13 @@ build_esc_mocked <- function() {
     build_recipe       = warn_then("the recipe stage warned", real_recipe),
     define_model_spec  = warn_then("the model stage warned", real_spec),
     prepped_predictors = warn_then("the finalize stage warned", real_preds),
-    ## What compute_original_scale_metrics() returns, with a warning, when
-    ## fewer than two test rows have both a truth and a prediction; the
-    ## runner calls it for the test rows only
-    compute_original_scale_metrics = function(...) tibble::tibble(),
+    ## What compute_original_scale_metrics() returns when fewer than two test
+    ## rows have both a truth and a prediction; the runner calls it for the
+    ## test rows only
+    compute_original_scale_metrics = function(...) {
+      tibble::tibble(.metric    = c("rmse", "rrmse", "rsq", "ccc", "rpd", "mae"),
+                     .estimator = "standard", .estimate = NA_real_, n = 1L)
+    },
     cv_panel_at = function(...) {
       tibble::as_tibble(stats::setNames(
         as.list(rep(NA_real_, 6)),
@@ -761,12 +764,16 @@ describe("evaluate_single_config() - a run on parallel_over = 'everything' whose
 
   })
 
-  it("reports all six test metrics as NA when they cannot be computed", {
+  it("reports all six test metrics as NA when they cannot be computed, and says why on the row", {
 
     result <- esc_mocked()$result
     expect_true(all(is.na(unlist(result[c("rmse", "rrmse", "rsq", "ccc", "rpd", "mae")]))))
     expect_true(all(vapply(result[c("rmse", "rrmse", "rsq", "ccc", "rpd", "mae")],
                            is.double, logical(1))))
+    expect_true(
+      "The test-set metrics are NA: 1 test row has both an observed value and a prediction, and they need two." %in%
+        result$warnings[[1]]
+    )
 
   })
 

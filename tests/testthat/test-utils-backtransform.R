@@ -304,27 +304,30 @@ describe("compute_original_scale_metrics()", {
     expect_s3_class(result, "tbl_df")
     expect_setequal(result$.metric, c("rmse", "rrmse", "rsq", "ccc", "rpd", "mae"))
     expect_equal(result, compute_original_scale_metrics(c(1, 4, 5), c(1.1, 4.1, 4.9)))
+    expect_identical(unique(result$n), 3L)
+    expect_false(anyNA(result$.estimate))
 
-    ## Pairs are dropped before the count, so one complete pair is too few
-    expect_warning(
-      short <- compute_original_scale_metrics(c(1, 2, NA), c(1.1, NA, 3)),
-      "Insufficient data"
-    )
-    expect_equal(nrow(short), 0)
+    ## Pairs are dropped before the count, so one complete pair is too few:
+    ## six NA metrics, counted, and no warning
+    expect_no_warning(short <- compute_original_scale_metrics(c(1, 2, NA), c(1.1, NA, 3)))
+    expect_identical(short$.metric, result$.metric)
+    expect_true(all(is.na(short$.estimate)))
+    expect_identical(unique(short$n), 1L)
 
   })
 
-  it("returns empty tibble for insufficient data", {
+  it("returns the six metrics as NA, with no warning, when no pair is complete", {
 
-    truth    <- c(NA)
-    estimate <- c(NA)
+    expect_no_warning(result <- compute_original_scale_metrics(NA_real_, NA_real_))
 
-    expect_warning(
-      result <- compute_original_scale_metrics(truth, estimate),
-      "Insufficient data"
-    )
+    expect_identical(result$.metric, c("rmse", "rrmse", "rsq", "ccc", "rpd", "mae"))
+    expect_identical(result$.estimate, rep(NA_real_, 6))
+    expect_identical(unique(result$n), 0L)
 
-    expect_equal(nrow(result), 0)
+    ## The reason a configuration's row gives for them
+    expect_identical(metrics_na_reason(result),
+                     "The test-set metrics are NA: 0 test rows have both an observed value and a prediction, and they need two.")
+    expect_null(metrics_na_reason(compute_original_scale_metrics(c(1, 4, 5), c(1.1, 4.1, 4.9))))
 
   })
 

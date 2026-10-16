@@ -613,10 +613,12 @@ build_ensemble_contract <- function(method,
 
   ## Ensemble performance on test_F (original scale, shared metric computer) --
 
-  metrics <- compute_original_scale_metrics(
+  ## The pair count each set was scored on is not stored with the metrics.
+  metrics   <- compute_original_scale_metrics(
     ensemble_pred$truth,
     ensemble_pred$.pred
   )
+  metrics$n <- NULL
 
   ## Per-member performance on the same test_F set --------------------------
 
@@ -625,6 +627,7 @@ build_ensemble_contract <- function(method,
     function(mp) {
 
       m <- compute_original_scale_metrics(mp$truth, mp$.pred)
+      m$n <- NULL
       m$config_id <- mp$config_id[1]
       m
 
@@ -633,21 +636,26 @@ build_ensemble_contract <- function(method,
 
   ## Improvement = ensemble vs best member on the rank metric, sign-aware ----
   ## (negative is a real outcome — xgb can degrade; we report it, not hide it.)
+  ## A metric undefined on the test rows is NA, for the ensemble or a member;
+  ## the improvement is NA when the ensemble's is, or no member has one.
 
   ens_val <- metrics$.estimate[metrics$.metric == rank_metric]
 
   member_vals <- member_metrics$.estimate[member_metrics$.metric == rank_metric]
+  member_vals <- member_vals[!is.na(member_vals)]
 
-  best_member <- if (rank_metric %in% HIGHER_BETTER_METRICS) {
-    max(member_vals, na.rm = TRUE)
-  } else {
-    min(member_vals, na.rm = TRUE)
-  }
+  improvement <- if (is.na(ens_val) || length(member_vals) == 0) {
 
-  improvement <- if (rank_metric %in% HIGHER_BETTER_METRICS) {
-    ens_val - best_member
+    NA_real_
+
+  } else if (rank_metric %in% HIGHER_BETTER_METRICS) {
+
+    ens_val - max(member_vals)
+
   } else {
-    best_member - ens_val
+
+    min(member_vals) - ens_val
+
   }
 
   list(

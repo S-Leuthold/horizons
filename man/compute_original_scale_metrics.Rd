@@ -12,12 +12,18 @@ compute_original_scale_metrics(truth, estimate)
 \item{estimate}{Numeric vector of predicted values (back-transformed).}
 }
 \value{
-Tibble with \code{.metric}, \code{.estimator}, \code{.estimate} columns (6 rows).
-Returns empty tibble if fewer than 2 complete cases.
+Tibble with one row per metric (\code{rmse}, \code{rrmse}, \code{rsq}, \code{ccc},
+\code{rpd}, \code{mae}) and the columns \code{.metric}, \code{.estimator}, \code{.estimate} and
+\code{n}, the complete pairs the metrics were scored on. Every \code{.estimate} is
+\code{NA} when \code{n} is below 2.
 }
 \description{
 After back-transforming predictions, compute the full metric set used in
 \code{evaluation$results}. This is the canonical metric computation point —
 called once per config after last_fit + back-transform.
+
+A metric undefined on the rows it is given is \code{NA}, and the run goes on:
+with fewer than two complete pairs every metric is, so all six come back
+\code{NA} rather than as an empty table, and the caller records why.
 }
 \keyword{internal}
