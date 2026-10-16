@@ -10,7 +10,7 @@
 #' structured data. All console output (tree rendering, progress messages) is
 #' the responsibility of the calling `evaluate()` function.
 #'
-#' The configuration is one unit ([run_unit()]): a run failure in any step
+#' The configuration is one unit (`run_unit()`): a run failure in any step
 #' ends it, and the row records the step (`EVAL_STEPS`), the cause, its root
 #' class and, with `keep_traces`, its backtrace. A door, internal or
 #' dependency error is not the configuration's and propagates.
