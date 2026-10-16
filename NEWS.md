@@ -6,6 +6,12 @@
 * Breaking: fifteen internal helpers are no longer exported, among them `safely_execute()`, `build_recipe()` and `fit_uq()`. Reach one with `horizons:::` if you relied on it.
 * `?horizons_conditions` documents the classes of horizons' errors and warnings: every error carries `horizons_error` and one kind (`input`, `validation`, `dependency`, `run`, `internal`), and every warning `horizons_warning` and one topic. The row-alignment check, a broken internal invariant, now raises `horizons_error_internal`.
 * horizons now requires rlang 1.2.0 and cli 3.4.0.
+* Every verb validates the object it is given, `predict()` included (#234). An object edited by hand or saved by an earlier version is refused with a `horizons_error_validation` whose `findings` field lists what is wrong, and which says how to rebuild it. Fits saved under 0.10.0 or 0.11.0 no longer predict: re-run the pipeline.
+* Duplicate or missing sample ids before `average()` no longer warn; `average()` and every later verb refuse them.
+* Evaluation checkpoints written by earlier versions are re-evaluated rather than reused.
+* A registered library cached by an earlier version is refused, naming the cache file to delete.
+* `spectra()` refuses a source column named `.flag`.
+* Development builds say so when attached, and name the command that installs the latest release.
 
 # horizons 0.11.0
 
