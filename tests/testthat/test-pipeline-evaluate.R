@@ -2610,6 +2610,24 @@ describe("evaluate() - the circuit breaker", {
 
   })
 
+  it("ends either way in an error of the run kind carrying the rows, which the subset loop in ?evaluate catches", {
+
+    template <- ev60()$evaluation$results[1, ]
+    local_mocked_bindings(evaluate_single_config = failing_runner(template, new.env()))
+
+    obj    <- make_eval_object(n = 60, n_configs = 5)
+    caught <- lapply(list(control_horizons(), control_horizons(breaker = FALSE)), function(control) {
+      tryCatch(suppressWarnings(evaluate(obj, seed = 42L, control = control)),
+               horizons_error_run = function(e) e)
+    })
+
+    expect_s3_class(caught[[1]], "horizons_error_systemic")
+    expect_identical(caught[[1]]$results$config_id, sprintf("cfg_%03d", 1:3))
+    expect_s3_class(caught[[2]], "horizons_error_all_configs_failed")
+    expect_identical(caught[[2]]$results$config_id, sprintf("cfg_%03d", 1:5))
+
+  })
+
   it("waits for its limit", {
 
     template <- ev60()$evaluation$results[1, ]

@@ -235,19 +235,25 @@ checkpoints in \code{output_dir} rather than run, since calling \code{evaluate()
 again resumes them instead of re-running them. The per-config results,
 \code{error_message} included, travel on the condition as \code{results}, because
 \code{evaluate()} aborts before it assigns \code{x$evaluation}; after an uncaught
-abort, \code{rlang::last_error()$results} recovers them without re-running. A
-loop over subsets can catch the class, tolerate one subset whose every
-config fails, and keep its errors:
+abort, \code{rlang::last_error()$results} recovers them without re-running.
+
+A failure the first configurations share across at least two models stops
+the call earlier, with \code{horizons_error_systemic} (also
+\code{horizons_error_run}) and the rows finished so far as its \code{results}; with
+\code{control_horizons(breaker = FALSE)} every configuration runs and the call
+ends in the all-failed abort instead. Both carry \code{results}, so a loop over
+subsets can catch \code{horizons_error_run}, tolerate a subset that fails
+either way, and keep its errors:
 
 \if{html}{\out{<div class="sourceCode">}}\preformatted{runs <- lapply(subsets, function(hd) \{
   tryCatch(
     evaluate(hd, control = control_horizons(verbose = FALSE)),
-    horizons_error_all_configs_failed = function(e) e$results
+    horizons_error_run = function(e) e$results
   )
 \})
 
-# A horizons_eval for each subset that ranked, and the failed configs'
-# results table for each subset that did not.
+# A horizons_eval for each subset that ranked, and the results table so
+# far for each subset that failed.
 failed <- runs[!vapply(runs, inherits, logical(1), "horizons_eval")]
 }\if{html}{\out{</div>}}
 }

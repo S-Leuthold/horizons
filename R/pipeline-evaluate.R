@@ -180,20 +180,26 @@
 #' again resumes them instead of re-running them. The per-config results,
 #' `error_message` included, travel on the condition as `results`, because
 #' `evaluate()` aborts before it assigns `x$evaluation`; after an uncaught
-#' abort, `rlang::last_error()$results` recovers them without re-running. A
-#' loop over subsets can catch the class, tolerate one subset whose every
-#' config fails, and keep its errors:
+#' abort, `rlang::last_error()$results` recovers them without re-running.
+#'
+#' A failure the first configurations share across at least two models stops
+#' the call earlier, with `horizons_error_systemic` (also
+#' `horizons_error_run`) and the rows finished so far as its `results`; with
+#' `control_horizons(breaker = FALSE)` every configuration runs and the call
+#' ends in the all-failed abort instead. Both carry `results`, so a loop over
+#' subsets can catch `horizons_error_run`, tolerate a subset that fails
+#' either way, and keep its errors:
 #'
 #' ```
 #' runs <- lapply(subsets, function(hd) {
 #'   tryCatch(
 #'     evaluate(hd, control = control_horizons(verbose = FALSE)),
-#'     horizons_error_all_configs_failed = function(e) e$results
+#'     horizons_error_run = function(e) e$results
 #'   )
 #' })
 #'
-#' # A horizons_eval for each subset that ranked, and the failed configs'
-#' # results table for each subset that did not.
+#' # A horizons_eval for each subset that ranked, and the results table so
+#' # far for each subset that failed.
 #' failed <- runs[!vapply(runs, inherits, logical(1), "horizons_eval")]
 #' ```
 #'
