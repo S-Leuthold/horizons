@@ -448,6 +448,11 @@ describe("evaluate_single_config() - the prune gate under the fold rule (#101)",
     expect_identical(result$below_prune_threshold, TRUE)
     expect_identical(result$status, "pruned")
 
+    ## Under debug a candidate missing a fold stops the call, since leaving
+    ## it out is containment
+    expect_error(run(prune_threshold = 0, debug = TRUE), "a candidate was not scored on every fold",
+                 fixed = TRUE, class = "horizons_error_run")
+
   })
 
 })

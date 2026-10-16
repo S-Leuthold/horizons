@@ -309,6 +309,21 @@ describe("run_unit()", {
 
   })
 
+  it("finds no backtrace in a chain that holds none, however deep", {
+
+    expect_null(chain_trace(simpleError("no trace here")))
+
+    ## Deeper than the walk's bound, as a chain that looped would be
+    deep <- simpleError("0")
+    for (i in 1:60) {
+      outer        <- simpleError(as.character(i))
+      outer$parent <- deep
+      deep         <- outer
+    }
+    expect_null(chain_trace(deep))
+
+  })
+
   it("keeps the backtrace of a wrapped failure, which its parent holds", {
 
     ## recipes wraps a step's error, and rlang then traces the parent only

@@ -1343,13 +1343,14 @@ describe("evaluate() - checkpointing", {
       saveRDS(row, f)
     }
 
-    got <- collect_warnings(
-      evaluate(obj, seed = 42L, control = control_horizons(output_dir = tmpdir))
-    )
+    out <- utils::capture.output(got <- collect_warnings(
+      evaluate(obj, seed = 42L, control = control_horizons(output_dir = tmpdir, verbose = TRUE))
+    ))
     ev  <- got$value
 
     expect_s3_class(ev, "horizons_eval")
     expect_identical(ev$evaluation$best_config, NA_character_)
+    expect_true("\u2514\u2500 Best: none, since no configuration has a CV RPD" %in% out)
     expect_setequal(ev$evaluation$results$config_id, obj$config$configs$config_id)
 
     skipped <- Filter(function(w) inherits(w, "horizons_warning_skipped"), got$warnings)
@@ -2642,6 +2643,16 @@ describe("evaluate() - a worker's death", {
     expect_true(rlang::cnd_inherits(err, "FutureError"))
     expect_identical(err$results$config_id, "cfg_001")
     expect_match(conditionMessage(err), "A parallel worker stopped", fixed = TRUE)
+    expect_match(conditionMessage(err), "in this error's results field", fixed = TRUE)
+
+    ## With an output_dir, the finished configurations are on disk to resume from
+    dir <- withr::local_tempdir()
+    err <- expect_error(suppressWarnings(evaluate(make_eval_object(n = 60, n_configs = 3), seed = 42L,
+                                                  control = control_horizons(output_dir = dir))),
+                        class = "horizons_error_systemic")
+    expect_match(gsub("\\s+", " ", conditionMessage(err)), "calling `evaluate()` again with it resumes from them",
+                 fixed = TRUE)
+    expect_identical(list.files(file.path(dir, "checkpoints")), "cfg_001.rds")
 
   })
 
