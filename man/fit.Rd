@@ -128,16 +128,29 @@ The members are the top \code{n_best} of the configurations \code{evaluate()} ch
 when none did, the pruned ones that carry a cross-validated value of
 \code{metric}. When every member fell below \code{evaluate()}'s \code{prune_threshold}
 (\code{evaluation$results$below_prune_threshold}), \code{fit()} warns with class
-\code{horizons_below_threshold_warning}, naming the threshold and the members'
-cross-validated RPD; that includes \code{bayesian_iter = 0}, where nothing is
-pruned. When the members are pruned configurations the warning also
-carries class \code{horizons_pruned_fallback_warning}. If every member fails,
+\code{horizons_warning_quality}, naming the threshold and the members'
+cross-validated RPD, and saying so when the members are pruned
+configurations; that includes \code{bayesian_iter = 0}, where nothing is
+pruned. If every member fails,
 \code{fit()} aborts with class \code{horizons_error_all_members_failed} (with
 \code{horizons_error_run}), listing the
 distinct error messages; the
 per-member results travel on the condition as \code{results}, and
 \code{models$results} keeps each member's \code{error_message} when some succeed.
 }
+\section{What fit() reports}{
+
+\code{fit()} warns once per kind at its end, after writing each warning to the
+object's \code{log}: a stratified draw (the calibration split, the folds, a
+cold start's split) that fell back to an unstratified one
+(\code{horizons_warning_substitution}); a smallest assessment fold under
+\code{SMALL_FOLD_ROWS} rows, or every member below \code{evaluate()}'s prune
+threshold (\code{horizons_warning_quality}); UQ and AD switched off because the
+calibration set is under \code{min_calib_rows} (\code{horizons_warning_skipped}).
+The folds are drawn from the rows the members are fitted on, which must
+outnumber the folds, or \code{fit()} refuses, as \code{evaluate()} does.
+}
+
 \section{Cold start from one configuration}{
 
 With one configuration there is nothing for \code{evaluate()} to choose, so a
@@ -158,9 +171,9 @@ The fit carries an unscreened evaluation record in place of
 \code{best_config} with status \code{"not_evaluated"}, its metric and \verb{cv_*} columns
 are \code{NA}, and \code{runtime_secs} is 0. \code{evaluation$recipe} records the recipe
 settings as \code{evaluate()} does, and \code{fit()} applies \code{evaluate()}'s checks
-first: an outcome that is not constant, at least twice \code{cv_folds} rows
-with an observed outcome, and a Savitzky-Golay window narrower than the
-spectrum. Re-fitting a cold-started fit starts cold again. With more than
+first: an outcome that is not constant, a training part with more rows
+than \code{cv_folds} once the split and the trim have drawn it, and a
+Savitzky-Golay window narrower than the spectrum. Re-fitting a cold-started fit starts cold again. With more than
 one configuration \code{fit()} aborts with class \code{horizons_error_input}:
 choosing among them is what \code{evaluate()} is for.
 }

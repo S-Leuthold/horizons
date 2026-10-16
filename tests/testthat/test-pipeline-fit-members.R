@@ -36,16 +36,16 @@ describe("fit() - an evaluation with only pruned configs (#38)", {
     w <- expect_warning(
       r <- keep_only_warning(
         fit(pruned, n_best = 2L, compute_uq = FALSE, compute_ad = FALSE, seed = 42L),
-        "horizons_pruned_fallback_warning"
+        "horizons_warning_quality"
       ),
-      class = "horizons_pruned_fallback_warning"
+      class = "horizons_warning_quality"
     )
 
-    ## One warning, carrying both classes: pruned members are below the
+    ## One quality warning, on the log too: pruned members are below the
     ## threshold by definition. It names the threshold and each member's cv RPD.
     msg <- gsub("\\s+", " ", conditionMessage(w))   # undo cli line wrapping
 
-    expect_s3_class(w, "horizons_below_threshold_warning")
+    expect_true("quality" %in% r$log$topic[r$log$verb == "fit"])
     expect_match(msg, "prune gate", fixed = TRUE)
     expect_match(msg, "prune threshold of 9999", fixed = TRUE)
 
@@ -115,8 +115,10 @@ describe("fit() - an evaluation with only pruned configs (#38)", {
     expect_s3_class(got$warnings[[1]], "horizons_warning_skipped")
     expect_match(conditionMessage(got$warnings[[1]]), left_out, fixed = TRUE)
 
-    log <- got$value$log[got$value$log$verb == "fit", ]
-    expect_identical(log$topic, "skipped")
+    ## The skipped ranking is one row of the log; the members also fell below
+    ## the prune threshold, a quality row of its own
+    log <- got$value$log[got$value$log$verb == "fit" & got$value$log$topic %in% "skipped", ]
+    expect_identical(nrow(log), 1L)
     expect_identical(log$ids[[1]], left_out)
     expect_false(left_out %in% got$value$models$results$config_id)
 
@@ -154,15 +156,15 @@ describe("fit() - members below the prune threshold at bayesian_iter = 0 (#38)",
     w <- expect_warning(
       r <- keep_only_warning(
         fit(below, n_best = 2L, compute_uq = FALSE, compute_ad = FALSE, seed = 42L),
-        "horizons_below_threshold_warning"
+        "horizons_warning_quality"
       ),
-      class = "horizons_below_threshold_warning"
+      class = "horizons_warning_quality"
     )
 
-    ## Not the fallback: these configs succeeded
-    expect_false(inherits(w, "horizons_pruned_fallback_warning"))
-
     msg <- gsub("\\s+", " ", conditionMessage(w))   # undo cli line wrapping
+
+    ## Not the fallback: these configs succeeded
+    expect_no_match(msg, "prune gate", fixed = TRUE)
     res <- below$evaluation$results
 
     expect_match(msg, "prune threshold of 9999", fixed = TRUE)
@@ -184,13 +186,12 @@ describe("fit() - members below the prune threshold at bayesian_iter = 0 (#38)",
     cleared <- below
     cleared$evaluation$results$below_prune_threshold[1] <- FALSE
 
-    expect_no_warning(
-      keep_only_warning(
-        fit(cleared, n_best = 2L, compute_uq = FALSE, compute_ad = FALSE, seed = 42L),
-        "horizons_below_threshold_warning"
-      ),
-      class = "horizons_below_threshold_warning"
+    r <- suppressWarnings(
+      fit(cleared, n_best = 2L, compute_uq = FALSE, compute_ad = FALSE, seed = 42L)
     )
+
+    expect_false(any(grepl("prune threshold", r$log$message[r$log$verb == "fit"], fixed = TRUE)))
+    expect_s3_class(r, "horizons_fit")
 
   })
 
@@ -209,12 +210,10 @@ describe("fit() - members below the prune threshold at bayesian_iter = 0 (#38)",
     )
 
     warn_text <- function(bayesian_iter) {
-      w <- tryCatch(
-        warn_members_below_threshold(members, fallback = FALSE,
-                                     bayesian_iter = bayesian_iter),
-        horizons_below_threshold_warning = function(w) w
-      )
-      gsub("\\s+", " ", conditionMessage(w))   # undo cli line wrapping
+      col <- log_open("fit")
+      log_members_below_threshold(col, members, fallback = FALSE,
+                                  bayesian_iter = bayesian_iter)
+      log_close(col)$message
     }
 
     expect_match(warn_text(0L), "no Bayesian stage to skip (`bayesian_iter = 0`)",
@@ -238,14 +237,21 @@ describe("fit() - members below the prune threshold at bayesian_iter = 0 (#38)",
     pruned <- unread
     pruned$status <- "pruned"
 
-    expect_warning(warn_members_below_threshold(pruned, fallback = TRUE),
-                   "prune threshold (not recorded on these rows)", fixed = TRUE,
-                   class = "horizons_pruned_fallback_warning")
+    logged <- function(members, fallback) {
+      col <- log_open("fit")
+      log_members_below_threshold(col, members, fallback = fallback)
+      log_close(col)
+    }
+
+    log <- logged(pruned, fallback = TRUE)
+    expect_identical(log$topic, "quality")
+    expect_match(log$message, "prune threshold (not recorded on these rows)", fixed = TRUE)
+    expect_identical(log$ids[[1]], c("cfg_001", "cfg_002"))
 
     succeeded <- unread
     succeeded$status <- "success"
 
-    expect_no_warning(warn_members_below_threshold(succeeded, fallback = FALSE))
+    expect_identical(nrow(logged(succeeded, fallback = FALSE)), 0L)
 
   })
 

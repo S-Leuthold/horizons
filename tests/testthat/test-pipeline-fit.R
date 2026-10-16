@@ -1043,6 +1043,134 @@ fit_header <- function(obj, ...) {
 
 }
 
+## =========================================================================
+## What fit() reports at its end
+## =========================================================================
+## The members are mocked to succeed (the fitted workflow is a stand-in, which
+## the validator does not read), so each test pays only for fit()'s own draws.
+
+fake_member <- function(config_row, ...) {
+
+  list(
+    config_id = config_row$config_id, status = "success", degraded = FALSE,
+    degraded_reason = NA_character_, fitted_workflow = "fitted workflow",
+    best_params = tibble::tibble(mtry = 2L), warm_start = TRUE, start_grid_size = 2L,
+    cv_predictions = NULL,
+    test_metrics = tibble::tibble(rmse = 0.5, rrmse = 20, rsq = 0.6, ccc = 0.7, rpd = 1.5, mae = 0.4),
+    cv_metrics = tibble::tibble(.metric = c("rmse", "rpd"), mean = c(0.45, 1.6), std_err = c(0.03, 0.1)),
+    uq = NULL, ad = NULL, warnings = NULL, error_message = NA_character_, runtime_secs = 1
+  )
+
+}
+
+## The warnings fit() raised, by class, and the object
+fit_reports <- function(obj, ...) {
+
+  got <- collect_warnings(
+    testthat::with_mocked_bindings(
+      fit(obj, n_best = 1L, seed = 42L, ...),
+      fit_single_config = fake_member, .package = "horizons"
+    ),
+    "."
+  )
+
+  list(value = got$value, warnings = got$warnings,
+       classes = vapply(got$warnings, function(w) class(w)[1], character(1)))
+
+}
+
+describe("fit() - what it reports at its end", {
+
+  it("warns skipped, whatever verbose is, when the calibration set is too small for UQ and AD (#145)", {
+
+    ## 60 rows: a calibration set of 10, under min_calib_rows
+    both <- fit_reports(mfo())
+    w    <- both$warnings[both$classes == "horizons_warning_skipped"]
+
+    expect_length(w, 1L)
+    expect_match(conditionMessage(w[[1]]),
+                 "Prediction intervals (UQ) and the applicability domain (AD) were not computed for any member: the calibration set has 10 rows, fewer than `min_calib_rows` (30).",
+                 fixed = TRUE)
+
+    log <- both$value$log[both$value$log$verb == "fit", ]
+    expect_identical(log$topic[log$topic %in% "skipped"], "skipped")
+    expect_identical(log$ids[log$topic %in% "skipped"][[1]], "cfg_001")
+
+    ## Only what was asked for is named, and nothing when neither was
+    ad_only <- fit_reports(mfo(), compute_uq = FALSE)
+    expect_match(conditionMessage(ad_only$warnings[ad_only$classes == "horizons_warning_skipped"][[1]]),
+                 "^The applicability domain \\(AD\\) was not computed")
+
+    neither <- fit_reports(mfo(), compute_uq = FALSE, compute_ad = FALSE)
+    expect_false("horizons_warning_skipped" %in% neither$classes)
+    expect_true(length(neither$classes) == 0 || !any(grepl("calibration", vapply(neither$warnings, conditionMessage, ""))))
+
+  })
+
+  it("warns substitution once per draw that fell back to no strata, with why", {
+
+    real_vfold_cv <- rsample::vfold_cv
+    local_mocked_bindings(
+      vfold_cv = function(data, v = 10, repeats = 1, strata = NULL, ...) {
+        if (!missing(strata)) stop("stratification refused")
+        real_vfold_cv(data, v = v, repeats = repeats, ...)
+      },
+      .package = "rsample"
+    )
+
+    got <- fit_reports(mfo(), compute_uq = FALSE, compute_ad = FALSE)
+    w   <- got$warnings[got$classes == "horizons_warning_substitution"]
+
+    expect_length(w, 1L)
+    expect_match(conditionMessage(w[[1]]), "The stratified draw of the cross-validation folds failed",
+                 fixed = TRUE)
+    expect_match(conditionMessage(w[[1]]), "stratification refused", fixed = TRUE)
+    expect_true("substitution" %in% got$value$log$topic[got$value$log$verb == "fit"])
+
+  })
+
+  it("warns quality when its own smallest assessment fold is small", {
+
+    ## 48 fit rows in 6 folds: 8 to assess in each
+    obj <- mfo()
+    obj$config$tuning$cv_folds <- 6L
+
+    got <- fit_reports(obj, compute_uq = FALSE, compute_ad = FALSE)
+    w   <- got$warnings[got$classes == "horizons_warning_quality"]
+
+    expect_length(w, 1L)
+    expect_match(conditionMessage(w[[1]]), "The smallest cross-validation fold has 8 rows to assess",
+                 fixed = TRUE)
+
+    ## At 3 folds of 16, nothing
+    quiet <- fit_reports(mfo(), compute_uq = FALSE, compute_ad = FALSE)
+    expect_false("horizons_warning_quality" %in% quiet$classes)
+
+  })
+
+  it("refuses fit rows no more than the folds, once calibration has taken its share", {
+
+    ## 250 rows: 200 in the training part, 40 of them for calibration, so the
+    ## folds would be drawn from 160 rows
+    obj <- make_fit_object(n = 250, n_configs = 1)
+    obj$config$tuning$cv_folds <- 170L
+
+    local_mocked_bindings(fit_single_config = function(...) stop("a member was fitted"))
+
+    err <- expect_error(suppressWarnings(fit(obj, n_best = 1L, seed = 42L)),
+                        "needs more training rows than folds", class = "horizons_error_input")
+    ## The fit rows and the calibration rows make up the training part
+    msg      <- gsub("\\s+", " ", conditionMessage(err))
+    fit_rows <- as.integer(sub(".*The training part has ([0-9]+) rows.*", "\\1", msg))
+    calib    <- as.integer(sub(".*the calibration set ([0-9]+).*", "\\1", msg))
+    expect_identical(fit_rows + calib, nrow(rsample::training(obj$evaluation$split)))
+    expect_true(calib >= N_CALIB_MIN)
+
+  })
+
+})
+
+
 describe("fit() - the draw lines and the notes (#91)", {
 
   it("says the CV folds are unstratified when rsample drew them without strata", {

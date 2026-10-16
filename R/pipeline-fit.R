@@ -50,15 +50,26 @@
 #' when none did, the pruned ones that carry a cross-validated value of
 #' `metric`. When every member fell below `evaluate()`'s `prune_threshold`
 #' (`evaluation$results$below_prune_threshold`), `fit()` warns with class
-#' `horizons_below_threshold_warning`, naming the threshold and the members'
-#' cross-validated RPD; that includes `bayesian_iter = 0`, where nothing is
-#' pruned. When the members are pruned configurations the warning also
-#' carries class `horizons_pruned_fallback_warning`. If every member fails,
+#' `horizons_warning_quality`, naming the threshold and the members'
+#' cross-validated RPD, and saying so when the members are pruned
+#' configurations; that includes `bayesian_iter = 0`, where nothing is
+#' pruned. If every member fails,
 #' `fit()` aborts with class `horizons_error_all_members_failed` (with
 #' `horizons_error_run`), listing the
 #' distinct error messages; the
 #' per-member results travel on the condition as `results`, and
 #' `models$results` keeps each member's `error_message` when some succeed.
+#'
+#' @section What fit() reports:
+#' `fit()` warns once per kind at its end, after writing each warning to the
+#' object's `log`: a stratified draw (the calibration split, the folds, a
+#' cold start's split) that fell back to an unstratified one
+#' (`horizons_warning_substitution`); a smallest assessment fold under
+#' `SMALL_FOLD_ROWS` rows, or every member below `evaluate()`'s prune
+#' threshold (`horizons_warning_quality`); UQ and AD switched off because the
+#' calibration set is under `min_calib_rows` (`horizons_warning_skipped`).
+#' The folds are drawn from the rows the members are fitted on, which must
+#' outnumber the folds, or `fit()` refuses, as `evaluate()` does.
 #'
 #' @section Cold start from one configuration:
 #' With one configuration there is nothing for `evaluate()` to choose, so a
@@ -79,9 +90,9 @@
 #' `best_config` with status `"not_evaluated"`, its metric and `cv_*` columns
 #' are `NA`, and `runtime_secs` is 0. `evaluation$recipe` records the recipe
 #' settings as `evaluate()` does, and `fit()` applies `evaluate()`'s checks
-#' first: an outcome that is not constant, at least twice `cv_folds` rows
-#' with an observed outcome, and a Savitzky-Golay window narrower than the
-#' spectrum. Re-fitting a cold-started fit starts cold again. With more than
+#' first: an outcome that is not constant, a training part with more rows
+#' than `cv_folds` once the split and the trim have drawn it, and a
+#' Savitzky-Golay window narrower than the spectrum. Re-fitting a cold-started fit starts cold again. With more than
 #' one configuration `fit()` aborts with class `horizons_error_input`:
 #' choosing among them is what `evaluate()` is for.
 #'
@@ -358,8 +369,8 @@ fit <- function(x,
   ## pruned fallback is one case; the other is bayesian_iter = 0, where the
   ## gate skips nothing, so below-threshold configs are successes and nothing
   ## else would say that none cleared the bar (#38).
-  warn_members_below_threshold(top_configs, fallback = candidates$fallback,
-                               bayesian_iter = x$config$tuning$bayesian_iter)
+  log_members_below_threshold(collector, top_configs, fallback = candidates$fallback,
+                              bayesian_iter = x$config$tuning$bayesian_iter)
 
   ## Extract references
   role_map     <- x$data$role_map
@@ -518,6 +529,11 @@ fit <- function(x,
       calib_note <- paste0("Calibration set too small (", nrow(calib_data),
                            " < ", control$min_calib_rows, "). Disabling ", disabled, ".")
 
+      ## Whatever verbose is: a fit without the intervals or the domain it
+      ## was asked for says so (#145)
+      log_calibration_skip(collector, compute_uq, compute_ad, nrow(calib_data),
+                           control$min_calib_rows, top_configs$config_id)
+
       compute_uq <- FALSE
       compute_ad <- FALSE
       train_Fit  <- train_F
@@ -556,6 +572,15 @@ fit <- function(x,
   ## -----------------------------------------------------------------------
   ## Step 2: Create CV resamples from train_Fit
   ## -----------------------------------------------------------------------
+  ## The folds are drawn from train_Fit, so it is the part the sample-size
+  ## rule reads: more rows than folds, as evaluate() asks of its own.
+
+  check_fold_rows(nrow(train_Fit), cv_folds,
+                  n_modelled = nrow(modelled$data),
+                  n_test     = n_test,
+                  n_trimmed  = length(trimmed_ids),
+                  n_calib    = if (is.null(calib_data)) 0L else sum(calib_kept))
+
   ## Seeded here: with the split reused, no draw precedes this one when UQ
   ## and AD are off, so the folds would otherwise follow the caller's RNG.
 
@@ -569,6 +594,13 @@ fit <- function(x,
     unstratified = function() rsample::vfold_cv(train_Fit, v = cv_folds)
   )
   cv_resamples <- cv_drawn$draw
+
+  ## A stratified draw that fell back to an unstratified one says so once,
+  ## each; a small assessment fold is weak, not wrong, and warns
+  if (cold_start) log_strata_fallback(collector, cold, "train/test split")
+  if (!is.null(calib_drawn)) log_strata_fallback(collector, calib_drawn, "calibration split")
+  log_strata_fallback(collector, cv_drawn, "cross-validation folds")
+  log_small_folds(collector, cv_resamples)
 
   ## -----------------------------------------------------------------------
   ## Step 3: Tree header
@@ -1177,11 +1209,11 @@ fit <- function(x,
 #' @param call The call the conditions are attributed to. Default: the
 #'   caller, `fit()`.
 #' @return List with `evaluation` (the record), `stratified` (`FALSE` when
-#'   the split is unstratified) and `strata_failed` (`TRUE` when the
-#'   stratified draw failed and was retried without strata), as
-#'   [draw_eval_split()] returns them. Aborts with class
+#'   the split is unstratified), `strata_failed` (`TRUE` when the
+#'   stratified draw failed and was retried without strata) and
+#'   `strata_error` (why), as [draw_eval_split()] returns them. Aborts with class
 #'   `horizons_error_input` when the object has no configuration or more than
-#'   one, too few rows have an observed outcome, the window is at least as
+#'   one, the training part has no more rows than folds, the window is at least as
 #'   wide as the spectrum, or `validate()`'s response-trim request is for
 #'   another outcome ([response_trim_request()]).
 #' @keywords internal
@@ -1220,15 +1252,6 @@ cold_start_evaluation <- function(x, metric, seed, collector, call = rlang::call
   modelled    <- modelling_rows(x$data$analysis, outcome_col, call = call)
   n_modelled  <- nrow(modelled$data)
 
-  if (n_modelled < cv_folds * 2) {
-
-    cli::cli_abort(c(
-      "Too few rows to fit: {n_modelled} ha{?s/ve} an observed {.field {outcome_col}}.",
-      "i" = "{.fn fit} needs at least {cv_folds * 2} (twice {.field cv_folds})."
-    ), class = "horizons_input_error", call = call)
-
-  }
-
   ## evaluate()'s next check: the Savitzky-Golay window has to fit the
   ## spectrum (#62). The record it returns is the one evaluate() stores, and
   ## fit() builds its recipe from the same settings.
@@ -1246,6 +1269,13 @@ cold_start_evaluation <- function(x, metric, seed, collector, call = rlang::call
   trimmed <- trim_training_responses(drawn$split, outcome_col, trim_request,
                                      id_col = id_column(role_map), collector = collector)
   split   <- trimmed$split
+
+  ## The sample-size rule evaluate() applies, at the same point: after the
+  ## split and the trim, the training part needs more rows than folds
+  check_fold_rows(nrow(rsample::training(split)), cv_folds, n_modelled = n_modelled,
+                  n_test    = nrow(rsample::testing(split)),
+                  n_trimmed = length(trimmed$record$trimmed_ids %||% character(0)),
+                  call      = call)
 
   ## The shape of an evaluate() results row (create_failed_result()'s
   ## columns less scoring_schema, since nothing was scored), all unmeasured
@@ -1283,7 +1313,8 @@ cold_start_evaluation <- function(x, metric, seed, collector, call = rlang::call
       timestamp     = Sys.time()
     ),
     stratified    = drawn$stratified,
-    strata_failed = drawn$strata_failed
+    strata_failed = drawn$strata_failed,
+    strata_error  = drawn$strata_error
   )
 
 }
@@ -1487,38 +1518,39 @@ abort_all_members_failed <- function(results, call = rlang::caller_env()) {
 }
 
 ## ---------------------------------------------------------------------------
-## warn_members_below_threshold \u2014 no member cleared the prune threshold
+## log_members_below_threshold — no member cleared the prune threshold
 ## ---------------------------------------------------------------------------
 
-#' Warn when every member fell below evaluate()'s prune threshold
+#' Record that every member fell below evaluate()'s prune threshold
 #'
 #' @description
 #' `evaluate()` records the prune gate's reading on every row as
 #' `below_prune_threshold` whenever `prune = TRUE`, apart from the status,
 #' which says only whether Bayesian refinement was skipped (#38). `fit()`
-#' warns, with class `horizons_below_threshold_warning`, when every member it
-#' is about to fit fell below the threshold, naming the threshold and each
-#' member's cross-validated RPD. Without this, `bayesian_iter = 0` would fit
-#' below-threshold configurations silently, since nothing is pruned there.
-#' When the members are pruned configurations (the fallback, because none
-#' succeeded) the one warning also carries class
-#' `horizons_pruned_fallback_warning` and says so.
+#' warns, `quality`, when every member it is about to fit fell below the
+#' threshold, naming the threshold and each member's cross-validated RPD:
+#' everything ran as documented, and the result is weaker than it looks.
+#' Without this, `bayesian_iter = 0` would fit below-threshold
+#' configurations silently, since nothing is pruned there. When the members
+#' are pruned configurations (the fallback, because none succeeded) the
+#' warning says so.
 #'
 #' A pruned row counts as below the threshold whether or not it carries the
 #' column, since the gate put it there. A row with no reading (`prune =
 #' FALSE`, or written before the column existed) does not, so one such member
 #' keeps the warning from firing.
 #'
+#' @param collector `fit()`'s collector, from `log_open()`.
 #' @param members The member rows (`evaluation$results` shape).
 #' @param fallback Logical. Whether the members are pruned configurations
 #'   because none succeeded.
 #' @param bayesian_iter The configured `bayesian_iter`
 #'   (`x$config$tuning$bayesian_iter`), which decides how the warning
 #'   explains unpruned members; `NULL` when unknown.
-#' @return Invisibly `NULL`. Called for the warning.
+#' @return `collector`, invisibly.
 #' @keywords internal
 #' @noRd
-warn_members_below_threshold <- function(members, fallback, bayesian_iter = NULL) {
+log_members_below_threshold <- function(collector, members, fallback, bayesian_iter = NULL) {
 
   ## Columns are read by name: results from before they existed, or built by
   ## hand, lack them, and `$` on a tibble without the column warns.
@@ -1529,7 +1561,7 @@ warn_members_below_threshold <- function(members, fallback, bayesian_iter = NULL
   n_members <- nrow(members)
   below     <- column_or("below_prune_threshold", NA) | members$status %in% "pruned"
 
-  if (n_members == 0 || !isTRUE(all(below))) return(invisible(NULL))
+  if (n_members == 0 || !isTRUE(all(below))) return(invisible(collector))
 
   thresholds <- unique(stats::na.omit(column_or("prune_threshold", NA_real_)))
 
@@ -1567,18 +1599,44 @@ warn_members_below_threshold <- function(members, fallback, bayesian_iter = NULL
 
   ## The config ids and numbers are the package's, but the text is built
   ## outside cli, so it is escaped rather than trusted as a template.
-  cli::cli_warn(c(
-    "!" = header,
+  log_warning(collector, "quality", c(
+    header,
     "i" = cli_escape(paste0(
       "Their grid-search RPD fell below ", threshold_text,
       ". Cross-validated RPD: ", cv_text, "."
     )),
     "i" = why,
     "i" = "Check their metrics before relying on the fit."
-  ), class = c(if (fallback) "horizons_pruned_fallback_warning",
-               "horizons_below_threshold_warning"))
+  ), ids = members$config_id)
 
-  invisible(NULL)
+  invisible(collector)
+
+}
+
+#' Record that UQ and AD were turned off for a small calibration set
+#'
+#' @param collector `fit()`'s collector.
+#' @param compute_uq,compute_ad Logical. What was asked for.
+#' @param n_calib Integer(1). The calibration rows drawn.
+#' @param min_calib_rows Integer(1). The minimum they fell short of.
+#' @param ids Character. The members it applies to.
+#' @return `collector`, invisibly.
+#' @keywords internal
+#' @noRd
+log_calibration_skip <- function(collector, compute_uq, compute_ad, n_calib,
+                                 min_calib_rows, ids) {
+
+  what <- paste(c(if (compute_uq) "Prediction intervals (UQ)",
+                  if (compute_ad) "the applicability domain (AD)"), collapse = " and ")
+  what <- paste0(toupper(substr(what, 1, 1)), substring(what, 2))
+  verb <- if (compute_uq && compute_ad) "were" else "was"
+
+  log_warning(collector, "skipped", c(
+    "{what} {verb} not computed for any member: the calibration set has {n_calib} row{?s}, fewer than {.code min_calib_rows} ({min_calib_rows}).",
+    "i" = "Fit on more rows, or lower {.code control_horizons(min_calib_rows = )}, to {conformal_min_rows(DEFAULT_UQ_LEVEL)} at least."
+  ), ids = ids)
+
+  invisible(collector)
 
 }
 

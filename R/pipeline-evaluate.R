@@ -2473,20 +2473,24 @@ modelling_rows <- function(analysis, outcome_col, call = rlang::caller_env()) {
 #' @param n_train Integer. Rows of the training part, after the split and
 #'   any response trim.
 #' @param cv_folds Integer. `config$tuning$cv_folds`.
-#' @param n_modelled,n_test,n_trimmed Integer. The modelled rows, and those
-#'   the split held out for the test set or the trim left out, for the
-#'   message.
+#' @param n_modelled,n_test,n_trimmed,n_calib Integer. The modelled rows,
+#'   and those the split held out for the test set, the trim left out or
+#'   `fit()` set aside for calibration, for the message.
 #' @param call The frame the refusal reports: the verb's.
 #' @return `NULL`, invisibly; aborts with class `horizons_error_input`.
 #' @keywords internal
 #' @noRd
 check_fold_rows <- function(n_train, cv_folds, n_modelled, n_test, n_trimmed = 0L,
-                            call = rlang::caller_env()) {
+                            n_calib = 0L, call = rlang::caller_env()) {
 
   if (n_train > cv_folds) return(invisible(NULL))
 
-  elsewhere <- paste0("the test set holds ", n_test,
-                      if (n_trimmed > 0) paste0(" and the response trim left out ", n_trimmed))
+  held <- c(paste0("the test set holds ", n_test),
+            if (n_calib > 0) paste0("the calibration set ", n_calib),
+            if (n_trimmed > 0) paste0("the response trim left out ", n_trimmed))
+  elsewhere <- if (length(held) == 1) held else {
+    paste0(paste(utils::head(held, -1), collapse = ", "), " and ", utils::tail(held, 1))
+  }
 
   abort_horizons(c(
     "The training part has {n_train} row{?s}, but {cv_folds}-fold cross-validation needs more training rows than folds.",

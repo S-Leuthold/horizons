@@ -362,15 +362,29 @@ describe("fit() - cold start from one configuration (#45)", {
 
   })
 
-  it("refuses too few rows to fit, naming its own floor", {
+  it("refuses a training part with no more rows than folds, as evaluate() does", {
 
+    ## 4 rows: 3 in the training part, for 3 folds
+    few <- make_eval_object(n = 4, n_configs = 1)
+
+    err <- expect_error(fit(few, seed = 42L), "The training part has 3 rows",
+                        fixed = TRUE, class = "horizons_error_input")
+    msg <- gsub("\\s+", " ", conditionMessage(err))
+    expect_match(msg, "3-fold cross-validation needs more training rows than folds", fixed = TRUE)
+
+  })
+
+  it("runs below the old floor of twice cv_folds, once the training part outnumbers the folds", {
+
+    ## 5 rows: 4 in the training part, which the old floor of 6 refused
     few <- make_eval_object(n = 5, n_configs = 1)
 
-    err <- expect_error(fit(few, seed = 42L), "Too few rows to fit: 5 have an observed",
-                        fixed = TRUE, class = "horizons_input_error")
-    msg <- gsub("\\s+", " ", conditionMessage(err))
-    expect_match(msg, "`fit()` needs at least 6 (twice cv_folds).", fixed = TRUE)
-    expect_no_match(msg, "evaluate()", fixed = TRUE)
+    local_mocked_bindings(
+      fit_single_config = function(...) rlang::abort("reached", class = "member_reached")
+    )
+
+    expect_error(suppressWarnings(fit(few, compute_uq = FALSE, compute_ad = FALSE, seed = 42L)),
+                 class = "member_reached")
 
   })
 
