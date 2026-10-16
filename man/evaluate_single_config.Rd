@@ -37,7 +37,9 @@ evaluate_single_config(
 \item{grid_size}{Integer. Number of grid points for \code{tune_grid()}.}
 
 \item{bayesian_iter}{Integer. Iterations for \code{tune_bayes()}. Set to 0 to
-skip Bayesian optimization entirely.}
+skip Bayesian optimization entirely. When every tuned parameter is a
+whole number and the space has no more points than \code{grid_size + bayesian_iter}, the grid is every point and the Bayesian stage does not
+run (\code{exhaustive_grid()}).}
 
 \item{prune}{Logical. If TRUE, record whether the best grid-search RPD
 falls below \code{prune_threshold} (\code{below_prune_threshold}), and when it

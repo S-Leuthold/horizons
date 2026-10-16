@@ -1347,6 +1347,89 @@ describe("evaluate_single_config() - the warnings of the chosen candidate (#109)
 ## A PLS config's component range (#216)
 ## =========================================================================
 
+describe("exhaustive_grid()", {
+
+  it("is every point of a whole-number space that fits the budget, and NULL otherwise", {
+
+    one <- dials::parameters(list(dials::num_comp(c(1L, 4L))))
+    expect_identical(exhaustive_grid(one, 4)$num_comp, 1:4)
+    expect_null(exhaustive_grid(one, 3))
+
+    two <- dials::parameters(list(dials::mtry(c(1L, 2L)), dials::min_n(c(2L, 3L))))
+    expect_identical(nrow(exhaustive_grid(two, 4)), 4L)
+    expect_null(exhaustive_grid(two, 3))
+
+    ## A continuous parameter, or a range not finalized, has no points to count
+    expect_null(exhaustive_grid(dials::parameters(list(dials::num_comp(c(1L, 4L)), dials::penalty())), 1e6))
+    expect_null(exhaustive_grid(dials::parameters(list(dials::mtry())), 1e6))
+
+  })
+
+})
+
+describe("evaluate_single_config() - a search space that fits the budget", {
+
+  run_plsr <- function(setup) {
+
+    real_grid  <- tune::tune_grid
+    real_bayes <- tune::tune_bayes
+    seen       <- new.env()
+    local_mocked_bindings(
+      tune_grid  = function(..., grid) {
+        if (is.null(seen$grid)) seen$grid <- grid
+        real_grid(..., grid = grid)
+      },
+      tune_bayes = function(...) {
+        seen$bayes <- TRUE
+        real_bayes(...)
+      },
+      .package = "tune"
+    )
+
+    row <- suppressWarnings(evaluate_single_config(
+      config_row    = make_eval_config(model = "plsr"),
+      split         = setup$split,
+      cv_folds      = setup$folds,
+      role_map      = setup$role_map,
+      grid_size     = 2,
+      bayesian_iter = 3,
+      seed          = 42L
+    ))
+
+    list(row = row, grid = seen$grid, bayes = isTRUE(seen$bayes))
+
+  }
+
+  it("grids every point and runs no Bayesian stage, with no warning, when the space has no more points than both together", {
+
+    ## 12 wavenumbers keep 4 predictors past the raw step's edge trim, so
+    ## num_comp takes 4 values against a budget of 2 + 3
+    got <- run_plsr(make_eval_setup(n = 60, n_wn = 12))
+
+    expect_identical(got$row$status, "success")
+    expect_identical(got$grid$num_comp, 1:4)
+    expect_false(got$bayes)
+    expect_false(any(grepl("Bayesian", got$row$warnings[[1]], fixed = TRUE)))
+
+    records <- attr(got$row, "unit_records")
+    expect_false(any(startsWith(records$class, "horizons_warning_")))
+
+  })
+
+  it("still searches a space with more points than the budget", {
+
+    ## 40 wavenumbers keep 32 predictors and 100 rows make folds of 50: 30
+    ## values of num_comp against a budget of 5
+    got <- run_plsr(make_eval_setup(n = 100, n_wn = 40))
+
+    expect_identical(got$row$status, "success")
+    expect_identical(nrow(got$grid), 2L)
+    expect_true(got$bayes)
+
+  })
+
+})
+
 describe("evaluate_single_config() - a PLS config", {
 
   it("hands tune_grid() num_comp up to the predictors and the smallest fold's rows less one, at most 30", {

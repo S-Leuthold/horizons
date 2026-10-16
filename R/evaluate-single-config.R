@@ -23,7 +23,10 @@
 #' @param role_map Tibble with `variable` and `role` columns.
 #' @param grid_size Integer. Number of grid points for `tune_grid()`.
 #' @param bayesian_iter Integer. Iterations for `tune_bayes()`. Set to 0 to
-#'   skip Bayesian optimization entirely.
+#'   skip Bayesian optimization entirely. When every tuned parameter is a
+#'   whole number and the space has no more points than `grid_size +
+#'   bayesian_iter`, the grid is every point and the Bayesian stage does not
+#'   run (`exhaustive_grid()`).
 #' @param prune Logical. If TRUE, record whether the best grid-search RPD
 #'   falls below `prune_threshold` (`below_prune_threshold`), and when it
 #'   does, skip Bayesian optimization and label the config `"pruned"`. With
@@ -193,6 +196,14 @@ evaluate_single_config <- function(config_row,
     ## -----------------------------------------------------------------------
     ## Step 4: Grid search
     ## -----------------------------------------------------------------------
+    ## A search space with no more points than the grid and the Bayesian
+    ## search would try together (plsr's num_comp on a short spectrum) is
+    ## gridded whole, and there is no Bayesian stage: tune's search runs out
+    ## of values to propose and errors inside its loop, which would read as a
+    ## failed search although every value was tried.
+
+    whole_space <- exhaustive_grid(param_set, grid_size + bayesian_iter)
+    search_iter <- if (is.null(whole_space)) bayesian_iter else 0L
 
     grid_results <- unit_step("tune_grid", {
 
@@ -200,7 +211,7 @@ evaluate_single_config <- function(config_row,
       ## numbers a note's model stage in the order of this grid, which is how
       ## a configuration's warnings are read for the candidate it chose
       ## (#109; candidate_of()).
-      grid <- tune::.check_grid(grid = grid_size, workflow = wflow, pset = param_set)
+      grid <- whole_space %||% tune::.check_grid(grid = grid_size, workflow = wflow, pset = param_set)
 
       results <- suppressMessages(
         tune::tune_grid(
@@ -265,7 +276,7 @@ evaluate_single_config <- function(config_row,
       below_prune_threshold <- !is.finite(best_grid$mean[1]) ||
         best_grid$mean[1] < prune_threshold
 
-      skip_bayesian <- below_prune_threshold && bayesian_iter > 0
+      skip_bayesian <- below_prune_threshold && search_iter > 0
 
     }
 
@@ -292,7 +303,7 @@ evaluate_single_config <- function(config_row,
 
     final_tune_results <- grid_results
 
-    if (!skip_bayesian && bayesian_iter > 0) {
+    if (!skip_bayesian && search_iter > 0) {
 
       ## Re-pin before every stochastic stage. tune's future path advances the
       ## parent stream past where the sequential loop leaves it (future_lapply()
@@ -320,7 +331,7 @@ evaluate_single_config <- function(config_row,
                 object     = wflow,
                 resamples  = cv_folds,
                 initial    = grid_results,
-                iter       = bayesian_iter,
+                iter       = search_iter,
                 param_info = param_set,
                 metrics    = tune_metrics,
                 control    = tune::control_bayes(
@@ -597,6 +608,63 @@ EVAL_STEPS <- c(
   back_transform      = "Back-transformation",
   test_metrics        = "Test metrics"
 )
+
+## ---------------------------------------------------------------------------
+## exhaustive_grid — a search space small enough to try whole
+## ---------------------------------------------------------------------------
+
+#' Every point of a search space that fits a budget
+#'
+#' @description
+#' When every tuned parameter takes whole-number values over a known range
+#' and the space has no more points than `budget`, the whole space as a grid;
+#' otherwise `NULL`. A search whose budget covers the space is then
+#' exhaustive: the grid is every point and no Bayesian stage runs, since
+#' tune's search, once it has no value left to propose, errors inside its
+#' loop rather than stopping.
+#'
+#' @param param_set A finalized `dials` parameter set.
+#' @param budget Numeric(1). The points the search would try: the grid's
+#'   size and the Bayesian iterations together.
+#' @return A tibble with one column per parameter (named by its id) and one
+#'   row per point, or `NULL`.
+#' @keywords internal
+#' @noRd
+exhaustive_grid <- function(param_set, budget) {
+
+  if (nrow(param_set) == 0) return(NULL)
+
+  values <- lapply(param_set$object, function(p) {
+
+    if (!inherits(p, "quant_param") || !identical(p$type, "integer") || !is.null(p$trans)) {
+      return(NULL)
+    }
+
+    lower <- p$range$lower
+    upper <- p$range$upper
+
+    ### unknown() until finalized
+    if (!is.numeric(lower) || !is.numeric(upper) || !is.finite(lower) || !is.finite(upper)) {
+      return(NULL)
+    }
+
+    if (!isTRUE(p$inclusive[[1]])) lower <- lower + 1
+    if (!isTRUE(p$inclusive[[2]])) upper <- upper - 1
+
+    if (upper < lower) return(NULL)
+
+    seq.int(as.integer(lower), as.integer(upper))
+
+  })
+
+  if (any(vapply(values, is.null, logical(1)))) return(NULL)
+  if (prod(lengths(values)) > budget) return(NULL)
+
+  names(values) <- param_set$id
+
+  tibble::as_tibble(expand.grid(values, KEEP.OUT.ATTRS = FALSE))
+
+}
 
 ## ---------------------------------------------------------------------------
 ## prepped_predictors — the columns dials::finalize() may count
