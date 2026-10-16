@@ -190,9 +190,15 @@ that configuration alone: its row has \code{status} \code{"failed"}, an
 \code{control_horizons(keep_traces = TRUE)}, the backtrace as text in \code{trace}.
 A recipe step that fails inside tuning is reproduced by prepping the
 recipe once on the training part, so the step's own error is recorded with
-its class; a failure tune keeps only as text is \code{horizons_error_run}. An
-error that is not the configuration's own (an input or dependency error,
-or a bug in horizons) stops the call. When some configurations failed and
+its class; a failure tune keeps only as text is \code{horizons_error_run}. A
+hyperparameter candidate scored on fewer cross-validation folds than were
+drawn takes no part in the prune gate or the choice of hyperparameters,
+and a configuration with no grid candidate scored on every fold fails; a
+\verb{cv_*} mean is kept only when it covers every fold, so every ranked value
+is on the same folds (#101). A configuration whose final fit on the
+training part fails is failed too (#102). An error that is not the
+configuration's own (an input or dependency error, or a bug in horizons)
+stops the call. When some configurations failed and
 the rest are returned, one \code{horizons_warning_partial_failure} names them
 with each distinct cause. A configuration whose Bayesian search failed, or
 added nothing to the grid, keeps the grid's choice, says so in its

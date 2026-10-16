@@ -188,6 +188,35 @@ describe("cv_panel_at()", {
 
   })
 
+  it("keeps a mean only when it covers every fold, given the folds drawn", {
+
+    ## rsq undefined on one fold (constant predictions there): tune averages
+    ## the other two, and the panel leaves it out rather than rank on them
+    cm <- tune::collect_metrics(tr)
+    cm <- cm[cm$.config == best$.config, ]
+    cm$n[cm$.metric == "rsq"] <- 2L
+
+    local_mocked_bindings(collect_metrics = function(...) cm, .package = "tune")
+
+    panel <- cv_panel_at(tr, best, n_folds = 3L)
+
+    expect_true(is.na(panel$cv_rsq))
+    expect_equal(panel$cv_rmse, cm$mean[cm$.metric == "rmse"])
+
+    ## Without the folds drawn, tune's mean is kept as it is
+    expect_equal(cv_panel_at(tr, best)$cv_rsq, cm$mean[cm$.metric == "rsq"])
+
+  })
+
+  it("lets a failure to read the metrics through, for the configuration to fail on", {
+
+    local_mocked_bindings(collect_metrics = function(...) stop("metrics unreadable"),
+                          .package = "tune")
+
+    expect_error(cv_panel_at(tr, best), "metrics unreadable", fixed = TRUE)
+
+  })
+
   it("returns all-NA rather than erroring when the lookup is impossible", {
 
     expect_true(all(is.na(unlist(cv_panel_at(NULL, best)))))
@@ -398,12 +427,13 @@ describe("evaluate_single_config() - tuning on the original scale", {
   ## bayesian_iter = 1: the prune gate only runs when there is a Bayesian
   ## stage to skip (#38), and this test is about the gate.
   ##
-  ## select_best() is wrapped, passing through, to record the results the
-  ## hyperparameters are chosen from. The returned row cannot show whether
-  ## the Bayesian stage ran here: the grid already holds plsr's best
-  ## num_comp, so the stage's one candidate does not change the choice.
-  real_select_best <- tune::select_best
-  selected_from    <- NULL
+  ## show_best() is wrapped, passing through, to record the results the
+  ## hyperparameters are chosen from (its last call is the choice; the prune
+  ## gate's is on the grid). The returned row cannot show whether the
+  ## Bayesian stage ran here: the grid already holds plsr's best num_comp,
+  ## so the stage's one candidate does not change the choice.
+  real_show_best <- tune::show_best
+  selected_from  <- NULL
 
   result <- with_mocked_bindings(
     evaluate_single_config(
@@ -417,9 +447,9 @@ describe("evaluate_single_config() - tuning on the original scale", {
       prune_threshold = 1.0,
       seed            = 42L
     ),
-    select_best = function(x, ...) {
+    show_best = function(x, ...) {
       selected_from <<- x
-      real_select_best(x, ...)
+      real_show_best(x, ...)
     },
     .package = "tune"
   )
@@ -668,10 +698,9 @@ describe("evaluate_single_config() - each stage's failure exit", {
 
   })
 
-  it("names the parameter selection when select_best() errors", {
+  it("names the parameter selection when it errors", {
 
-    local_mocked_bindings(select_best = function(...) stop("nothing to select"),
-                          .package = "tune")
+    local_mocked_bindings(select_complete = function(...) stop("nothing to select"))
 
     expect_failed_at(run_on_shared(), "Parameter selection", "nothing to select")
 
@@ -679,8 +708,7 @@ describe("evaluate_single_config() - each stage's failure exit", {
 
   it("names the cross-validated metrics when they cannot be read", {
 
-    local_mocked_bindings(collect_metrics = function(...) stop("metrics unreadable"),
-                          .package = "tune")
+    local_mocked_bindings(cv_panel_at = function(...) stop("metrics unreadable"))
 
     expect_failed_at(run_on_shared(), "Cross-validated metrics", "metrics unreadable")
 

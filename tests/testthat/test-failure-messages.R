@@ -73,6 +73,28 @@ fold_failing_recipe <- function(config_row, train_data, role_map, ...) {
 
 }
 
+## Fails on the one cross-validation analysis set that lacks a given value
+## (the fold whose assessment set holds it), and nowhere else: the whole
+## training set holds the value, and the sets baked (assessment, test) are
+## too small to be checked.
+fail_without <- function(x, value) {
+
+  if (length(x) > 15 && !any(x == value)) stop("boom on one fold")
+
+  x
+
+}
+
+one_fold_failing_recipe <- function(config_row, train_data, role_map, ...) {
+
+  value <- train_data$wn_4000[1]
+
+  recipes::recipe(SOC ~ ., data = train_data) |>
+    recipes::update_role("sample_id", new_role = "id") |>
+    recipes::step_mutate(boom = fail_without(wn_4000, !!value))
+
+}
+
 ## A tripwire inside a step: a horizons bug, which no unit contains
 tripwire_recipe <- function(config_row, train_data, role_map, ...) {
 
@@ -529,19 +551,86 @@ describe("evaluate_single_config() records the warnings tune kept in .notes", {
 
   })
 
-  it("records why the final fit on the test set failed", {
+})
 
+describe("evaluate_single_config() fails a configuration whose final fit fails (#102)", {
+
+  setup <- make_failure_setup()
+
+  it("fails it with the step's class when the recipe fails on the whole training set", {
+
+    ## Tuning succeeds on the smaller analysis sets; last_fit()'s prep on the
+    ## training part fails, and the prep outside tune reproduces it
     local_mocked_bindings(build_recipe = test_set_failing_recipe, .package = "horizons")
 
     result <- run_evaluate("elastic_net", setup)
 
-    ## Tuning succeeded and the test metrics are missing; the cause used to
-    ## be only in last_fit()'s .notes.
-    expect_true(is.na(result$rmse))
-    expect_true(
-      "Test-set fit failed: boom on the full training set (in `step_mutate()`)" %in%
-        result$warnings[[1]]
-    )
+    expect_identical(result$status, "failed")
+    expect_identical(result$error_message,
+                     "Recipe preparation failed: boom on the full training set (in `step_mutate()`)")
+    expect_identical(result$class, "simpleError")
+    expect_true(all(is.na(unlist(result[c("rmse", "rpd", "cv_rmse", "cv_rpd")]))))
+
+  })
+
+  it("fails it with tune's cause when the engine fails on the training part", {
+
+    real_glmnet <- glmnet::glmnet
+    local_mocked_bindings(glmnet = function(x, ...) {
+      if (nrow(x) > 25) stop("the engine broke on the training part")
+      real_glmnet(x, ...)
+    }, .package = "glmnet")
+
+    result <- run_evaluate("elastic_net", setup)
+
+    expect_identical(result$status, "failed")
+    expect_match(result$error_message,
+                 "^Test evaluation failed: the final fit failed \u2014 the engine broke on the training part")
+    expect_identical(result$class, "horizons_error_run")
+
+  })
+
+})
+
+describe("evaluate_single_config() chooses only among candidates scored on every fold (#101)", {
+
+  setup <- make_failure_setup()
+
+  it("fails a configuration whose every candidate failed on a fold, rather than ranking it on the rest", {
+
+    local_mocked_bindings(build_recipe = one_fold_failing_recipe, .package = "horizons")
+
+    result <- run_evaluate("elastic_net", setup)
+
+    expect_identical(result$status, "failed")
+    expect_match(result$error_message,
+                 "^Grid search failed: no grid candidate was scored on every fold \u2014 ")
+    expect_match(result$error_message, "boom on one fold (in `step_mutate()`; 1 of 3 folds)",
+                 fixed = TRUE)
+    expect_identical(result$class, "horizons_error_run")
+    expect_true(is.na(result$cv_rmse))
+
+  })
+
+  it("leaves out a candidate that failed on a fold and chooses among the rest, saying so on the row", {
+
+    ## The first engine fit fails: one candidate, on one fold
+    real_glmnet <- glmnet::glmnet
+    calls       <- 0L
+    local_mocked_bindings(glmnet = function(...) {
+      calls <<- calls + 1L
+      if (calls == 1L) stop("the engine broke")
+      real_glmnet(...)
+    }, .package = "glmnet")
+
+    result <- suppressWarnings(run_evaluate("elastic_net", setup))
+
+    expect_identical(result$status, "success")
+    expect_true(is.finite(result$cv_rmse))
+    expect_true(any(grepl(
+      "1 of 2 candidates was left out of the choice of hyperparameters, not being scored on every fold: the engine broke (1 of 3 folds).",
+      result$warnings[[1]], fixed = TRUE
+    )))
 
   })
 

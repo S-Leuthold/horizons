@@ -109,6 +109,7 @@ evaluate_single_config <- function(config_row,
   outcome_col    <- role_map$variable[role_map$role == "outcome"]
   transformation <- tolower(as.character(config_row$transformation))
   train_data     <- rsample::training(split)
+  n_folds        <- nrow(cv_folds)
 
   ## The row's warnings, as records that render_warning_log() reduces to one
   ## line per distinct message (#96): tune's notes and the package's own
@@ -212,6 +213,15 @@ evaluate_single_config <- function(config_row,
       check_tune_result(results, "all models failed during CV",
                         recipe = if (!prepped_now) recipe, debug = debug)
 
+      ## A candidate scored on fewer folds than were drawn takes no part in
+      ## the prune gate or the choice of hyperparameters (#101), so a grid
+      ## with none scored on every fold has nothing to choose from.
+      if (nrow(rank_complete(results, "rmse", n_folds, debug)) == 0) {
+
+        abort_tune_failure(results, "no grid candidate was scored on every fold")
+
+      }
+
       results
 
     })
@@ -241,7 +251,7 @@ evaluate_single_config <- function(config_row,
 
     if (prune) {
 
-      best_grid <- unit_step("prune", tune::show_best(grid_results, metric = "rpd", n = 1))
+      best_grid <- unit_step("prune", rank_complete(grid_results, "rpd", n_folds, debug))
 
       below_prune_threshold <- !is.finite(best_grid$mean[1]) ||
         best_grid$mean[1] < prune_threshold
@@ -343,21 +353,44 @@ evaluate_single_config <- function(config_row,
     ## -----------------------------------------------------------------------
     ## Step 7: Select best hyperparameters, and the CV panel there
     ## -----------------------------------------------------------------------
-    ## The cross-validated means tune scored for the chosen config, on the
-    ## original scale via tuning_metric_set(). evaluate() and fit() rank on
-    ## these rather than on the test-set metrics computed below, so the test
-    ## set stays held out from selection and its metrics are honest (#50).
+    ## Chosen as tune::select_best() chooses, among the candidates scored on
+    ## every fold (#101); the row says how many were left out, and why. The
+    ## cross-validated means tune scored for the chosen config, on the
+    ## original scale via tuning_metric_set(), are what evaluate() and fit()
+    ## rank on rather than the test-set metrics computed below, so the test
+    ## set stays held out from selection and its metrics are honest (#50). A
+    ## mean is kept only when it covers every fold, so every ranked value is
+    ## on the same support.
 
-    best_params <- unit_step("select_best", tune::select_best(final_tune_results, metric = "rmse"))
+    best_params <- unit_step("select_best",
+                             select_complete(final_tune_results, "rmse", n_folds, debug))
 
-    cv_panel <- unit_step("cv_panel", cv_panel_at(final_tune_results, best_params))
+    left_out <- unit_step("select_best", incomplete_note(final_tune_results, n_folds))
 
-    if (all(is.na(unlist(cv_panel)))) {
+    if (!is.null(left_out)) {
+
+      warning_log <- dplyr::bind_rows(warning_log, text_records(left_out, pinned = TRUE))
+
+    }
+
+    cv_panel <- unit_step("cv_panel", cv_panel_at(final_tune_results, best_params, n_folds))
+    cv_na    <- names(cv_panel)[is.na(unlist(cv_panel))]
+
+    if (length(cv_na) == length(cv_panel)) {
 
       warning_log <- dplyr::bind_rows(warning_log, text_records(
         "CV metrics at the selected hyperparameters could not be recovered; cv_* columns are NA.",
         pinned = TRUE
       ))
+
+    } else if (length(cv_na) > 0) {
+
+      warning_log <- dplyr::bind_rows(warning_log, text_records(paste0(
+        paste(cv_na, collapse = ", "), if (length(cv_na) == 1) " is" else " are",
+        " NA: the selected hyperparameters were not scored on every fold for ",
+        if (length(cv_na) == 1) "it" else "them",
+        ", and a cross-validated mean is kept only over every fold."
+      ), pinned = TRUE))
 
     }
 
@@ -374,24 +407,15 @@ evaluate_single_config <- function(config_row,
 
     ## Messages muffled, as around the two tuning calls: tune reports its
     ## notes on the console as it goes, and the row records them instead.
-    last_fit_obj <- unit_step("last_fit", suppressMessages(
-      tune::last_fit(final_wflow, split = split)
-    ))
+    ## A final fit that fails inside last_fit() fails the configuration
+    ## (#102): fit() would otherwise choose it and fail its final fit again.
+    last_fit_obj <- unit_step("last_fit", {
+      results <- suppressMessages(tune::last_fit(final_wflow, split = split))
+      check_tune_result(results, "the final fit failed",
+                        recipe = if (!prepped_now) recipe, debug = debug)
+      results
+    })
     collect_notes_from(last_fit_obj, scope = "test set")
-
-    ## A final fit that failed inside last_fit() leaves its reason only in
-    ## .notes, and the row below still reads as a success with NA test
-    ## metrics. The reason is recorded so the row says why (#96).
-    test_set_cause <- tune_failure_cause(last_fit_obj)
-
-    if (!is.null(test_set_cause)) {
-
-      warning_log <- dplyr::bind_rows(warning_log, text_records(
-        paste0("Test-set fit failed: ", test_set_cause),
-        pinned = TRUE
-      ))
-
-    }
 
     test_predictions <- unit_step("last_fit", tune::collect_predictions(last_fit_obj))
 
@@ -556,20 +580,25 @@ prepped_predictors <- function(prepped, baked) {
 #'
 #' @description
 #' Reads `tune::collect_metrics()` for the tuning result and returns the mean
-#' of each metric at the `.config` that `tune::select_best()` chose. These are
-#' the `cv_*` columns of `evaluation$results`, the quantities `evaluate()` and
-#' `fit()` rank on. A value that is missing or not finite is `NA_real_`, and
-#' so is every value when there is nothing to look up; a failure to read the
-#' metrics is the configuration's failure, at its `cv_panel` step.
+#' of each metric at the `.config` that was chosen. These are the `cv_*`
+#' columns of `evaluation$results`, the quantities `evaluate()` and `fit()`
+#' rank on. A value that is missing or not finite is `NA_real_`, and so is
+#' every value when there is nothing to look up; a failure to read the
+#' metrics is the configuration's failure, at its `cv_panel` step. With
+#' `n_folds`, a mean over fewer folds than that is `NA_real_` too (an `rsq`
+#' undefined on a fold whose predictions were constant, say), so every value
+#' ranked covers every fold.
 #'
 #' @param tune_results A `tune_results` object (grid or Bayesian).
-#' @param best_params One-row tibble from `tune::select_best()`, carrying
+#' @param best_params One-row tibble of the chosen hyperparameters, carrying
 #'   `.config`.
+#' @param n_folds Integer or `NULL`. The folds drawn; `NULL` keeps a mean
+#'   over any number of them.
 #' @param metrics Metric names to look up, in order.
 #' @return One-row tibble with columns `cv_<metric>`.
 #' @keywords internal
 #' @noRd
-cv_panel_at <- function(tune_results, best_params,
+cv_panel_at <- function(tune_results, best_params, n_folds = NULL,
                         metrics = c("rmse", "rrmse", "rsq", "ccc", "rpd", "mae")) {
 
   out <- stats::setNames(as.list(rep(NA_real_, length(metrics))),
@@ -592,12 +621,115 @@ cv_panel_at <- function(tune_results, best_params,
 
   for (m in metrics) {
 
-    v <- panel$mean[panel$.metric == m]
+    v       <- panel$mean[panel$.metric == m]
+    covered <- is.null(n_folds) || identical(as.integer(panel$n[panel$.metric == m]),
+                                             as.integer(n_folds))
 
-    if (length(v) == 1 && is.finite(v)) out[[paste0("cv_", m)]] <- v
+    if (length(v) == 1 && is.finite(v) && covered) out[[paste0("cv_", m)]] <- v
 
   }
 
   tibble::as_tibble(out)
+
+}
+
+## ---------------------------------------------------------------------------
+## The fold rule (#101): only candidates scored on every fold are compared
+## ---------------------------------------------------------------------------
+## tune averages a candidate's metric over the folds it was scored on, so a
+## candidate that failed on one fold is compared with the others on the folds
+## that survived, which is a different and easier test. A candidate missing a
+## fold is left out instead, as scikit-learn leaves out one whose mean is NaN.
+## A recipe step that fails on a fold fails every candidate there, so its
+## configuration then has none to choose from and fails.
+
+#' The candidates of a tune result scored on every fold
+#'
+#' @param results A tune result (grid or Bayesian).
+#' @param n_folds Integer(1). The folds drawn.
+#' @return Character: their `.config`s. Counted on `rmse`, which is `NA` on a
+#'   fold only when the fit made no predictions there; a metric undefined on
+#'   a fold whose predictions were constant (`rsq`) is not a failure.
+#' @keywords internal
+#' @noRd
+complete_configs <- function(results, n_folds) {
+
+  panel <- tune::collect_metrics(results)
+
+  panel$.config[panel$.metric == "rmse" & panel$n == n_folds]
+
+}
+
+#' The candidates scored on every fold, best first
+#'
+#' @description
+#' tune's own order and tie rule, as `tune::select_best()` applies them
+#' (`tune::show_best()` with every candidate), restricted to the candidates
+#' scored on every fold. Under `debug` a candidate missing a fold stops the
+#' call rather than being left out, since leaving it out is containment.
+#'
+#' @param results A tune result (grid or Bayesian).
+#' @param metric Character(1). The metric to order by.
+#' @param n_folds Integer(1). The folds drawn.
+#' @param debug Logical(1).
+#' @return `tune::show_best()`'s rows, possibly none.
+#' @keywords internal
+#' @noRd
+rank_complete <- function(results, metric, n_folds, debug = FALSE) {
+
+  ranked   <- tune::show_best(results, metric = metric, n = Inf)
+  complete <- ranked$.config %in% complete_configs(results, n_folds)
+
+  if (debug && !all(complete)) {
+
+    abort_tune_failure(results, "a candidate was not scored on every fold")
+
+  }
+
+  ranked[complete, , drop = FALSE]
+
+}
+
+#' The best hyperparameters among the candidates scored on every fold
+#'
+#' @description
+#' What `tune::select_best()` returns, chosen by [rank_complete()]: the
+#' hyperparameters and `.config` of the first candidate.
+#'
+#' @inheritParams rank_complete
+#' @return One-row tibble, or zero rows when no candidate was scored on every
+#'   fold.
+#' @keywords internal
+#' @noRd
+select_complete <- function(results, metric, n_folds, debug = FALSE) {
+
+  ranked <- rank_complete(results, metric, n_folds, debug)
+
+  utils::head(ranked[, c(tune::.get_tune_parameter_names(results), ".config"), drop = FALSE], 1)
+
+}
+
+#' The row's note on candidates left out for a missing fold
+#'
+#' @param results The tune result the hyperparameters were chosen from.
+#' @param n_folds Integer(1). The folds drawn.
+#' @return Character(1), or `NULL` when every candidate was scored on every
+#'   fold.
+#' @keywords internal
+#' @noRd
+incomplete_note <- function(results, n_folds) {
+
+  panel <- tune::collect_metrics(results)
+  all   <- unique(panel$.config)
+  n_out <- length(setdiff(all, complete_configs(results, n_folds)))
+
+  if (n_out == 0) return(NULL)
+
+  cause <- tune_failure_cause(results)
+
+  paste0(n_out, " of ", length(all), " candidate", if (length(all) != 1) "s",
+         if (n_out == 1) " was" else " were",
+         " left out of the choice of hyperparameters, not being scored on every fold",
+         if (!is.null(cause)) paste0(": ", cause), ".")
 
 }

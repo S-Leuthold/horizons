@@ -263,7 +263,10 @@ PARALLELIZE_OVER_VALUES <- c("auto", "configs", "resamples")
 #      succeeded), so rows checkpointed without it are re-evaluated.
 #   4  2026-10-16: each configuration runs as one unit: a failed row names
 #      its step, its root class and, under keep_traces, its backtrace, and a
-#      recipe step's failure inside tune is reproduced with its class.
+#      recipe step's failure inside tune is reproduced with its class. A
+#      candidate scored on fewer folds than were drawn is not chosen, a cv_*
+#      mean is kept only over every fold (#101), and a failed final fit
+#      fails the configuration (#102).
 SCORING_SCHEMA <- 4L
 
 # Schema of eval_manifest.rds, which evaluate() writes at the start of every

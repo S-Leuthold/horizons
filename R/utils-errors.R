@@ -1330,14 +1330,32 @@ check_tune_result <- function(results,
 
   if (!every_model && !(debug && nrow(errors) > 0)) return(invisible(NULL))
 
-  what  <- if (every_model) failure else "a fit failed inside tune"
-  cause <- tune_failure_cause(results)
-  trace <- Find(Negate(is.null), errors[["trace"]])
+  abort_tune_failure(results, if (every_model) failure else "a fit failed inside tune",
+                     call = call)
+
+}
+
+#' Abort a unit on a failure tune kept as text
+#'
+#' @param results A tune result.
+#' @param what Character(1). What failed, e.g. `"all models failed during
+#'   CV"`.
+#' @param call The frame the failure reports.
+#' @return Does not return; aborts with class `horizons_error_run`, the most
+#'   frequent error note as the cause, and the trace tune kept for the first
+#'   error note that has one.
+#' @keywords internal
+#' @noRd
+abort_tune_failure <- function(results, what, call = rlang::caller_env()) {
+
+  notes  <- tune::collect_notes(results)
+  errors <- notes[notes$type %in% "error", , drop = FALSE]
+  cause  <- tune_failure_cause(results)
 
   abort_horizons(
     if (is.null(cause)) "{what}" else "{what} \u2014 {cause}",
     kind  = "run",
-    trace = trace,
+    trace = Find(Negate(is.null), errors[["trace"]]),
     call  = call
   )
 
