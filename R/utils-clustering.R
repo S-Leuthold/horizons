@@ -1,17 +1,23 @@
 #' Cluster Spectral Predictors to Reduce Redundancy
 #'
 #' Groups collinear or redundant spectral bands into clusters and returns a reduced
-#' feature matrix containing one representative wavenumber per cluster.
+#' feature matrix containing one representative wavenumber per cluster: the
+#' cluster's middle band by its position in `spectra_mat`, which for the
+#' steps' columns (`spec001` onward, or wavenumbers in the decreasing order
+#' the validator keeps) is the middle of the cluster on the spectrum. Of two
+#' middle bands, the first is taken.
 #'
 #' @param spectra_mat A numeric matrix or data frame with columns as wavenumber predictors.
 #' @param k Integer. Number of clusters to retain (e.g., 300).
 #' @param method Character. Clustering method: either `"correlation"` or `"euclidean"`.
 #'
-#' @return A list with three elements:
+#' @return A list with four elements:
 #' \describe{
 #'   \item{reduced_mat}{A data frame with one representative column per cluster.}
 #'   \item{cluster_map}{A named list mapping representative wavenumbers to all members of their cluster.}
 #'   \item{selected_vars}{Character vector of retained wavenumber names.}
+#'   \item{clustered}{Logical. `FALSE` when there were fewer bands than `k`,
+#'     so each band is its own representative; the caller records it.}
 #' }
 #'
 #' @examples
@@ -22,7 +28,7 @@
 #'
 #' @importFrom stats cor as.dist hclust cutree
 #' @importFrom purrr map_lgl map_chr
-#' @importFrom cli cli_abort cli_alert_warning
+#' @importFrom cli cli_abort
 #' @keywords internal
 
 cluster_spectral_predictors <- function(spectra_mat,
@@ -32,34 +38,22 @@ cluster_spectral_predictors <- function(spectra_mat,
   method      <- match.arg(method)
   spectra_mat <- as.data.frame(spectra_mat)
 
-  ## ---------------------------------------------------------------------------
-  ## 1. Validate input
-  ## ---------------------------------------------------------------------------
-
-  if (!all(purrr::map_lgl(spectra_mat, is.numeric))) {
-
-    cli::cli_abort("All columns in `spectra_mat` must be numeric.")
-
-  }
-
-  if (!is.numeric(k) || length(k) != 1 || is.na(k) || k < 1 || k %% 1 != 0) {
-
-    cli::cli_abort("{.arg k} must be a positive integer.")
-
-  }
-
+  ### Both callers pass the numeric output of the steps before them and a k
+  ### they compute; a non-numeric column fails in cor() and a bad k in
+  ### cutree().
   k <- as.integer(k)
 
+  ### Fewer bands than clusters: each band is its own representative. The
+  ### caller records it rather than this helper printing it at every prep.
   if (ncol(spectra_mat) < k) {
-
-    cli::cli_alert_warning("Number of clusters (k) exceeds number of wavenumbers. Returning original matrix.")
 
     cluster_map        <- as.list(colnames(spectra_mat))
     names(cluster_map) <- colnames(spectra_mat)
 
     return(list(reduced_mat   = spectra_mat,
                 cluster_map   = cluster_map,
-                selected_vars = colnames(spectra_mat)))
+                selected_vars = colnames(spectra_mat),
+                clustered     = FALSE))
 
   }
 
@@ -69,17 +63,10 @@ cluster_spectral_predictors <- function(spectra_mat,
 
   if (method == "correlation") {
 
+    ### The steps drop near-constant bands first (drop_constant_bands()), so
+    ### a correlation is missing only for a band with no values at all, which
+    ### hclust() refuses.
     cormat  <- cor(spectra_mat, use = "pairwise.complete.obs")
-
-    if (anyNA(cormat)) {
-
-      cli::cli_abort(c(
-        "Correlation matrix contains NA values",
-        "i" = "Remove zero-variance predictors or use {.arg method} = {.val euclidean}"
-      ))
-
-    }
-
     distmat <- as.dist(1 - abs(cormat))
 
     } else {
@@ -101,22 +88,15 @@ cluster_spectral_predictors <- function(spectra_mat,
 
   cluster_map <- split(names(clusters), clusters)
 
-  purrr::map_chr(cluster_map,
-                 function(group) {
+  ## The middle band of each cluster by position, whatever the names: read as
+  ## numbers, the steps' spec001 names were NA, so every cluster was
+  ## represented by its first band (decided 2026-10-10)
+  positions <- stats::setNames(seq_len(ncol(spectra_mat)), colnames(spectra_mat))
 
-                   wave_nums <- suppressWarnings(as.numeric(group))
-
-                   if (all(is.na(wave_nums))) {
-
-                     return(group[1])
-
-                   } else {
-
-                     median_idx <- which.min(abs(wave_nums - median(wave_nums, na.rm = TRUE)))
-
-                     return(group[median_idx])
-                   }
-                 }) -> representative_bands
+  representative_bands <- vapply(cluster_map, function(group) {
+    at <- positions[group]
+    group[which.min(abs(at - stats::median(at)))]
+  }, character(1))
 
   ## ---------------------------------------------------------------------------
   ## 5. Return reduced matrix + metadata
@@ -128,5 +108,40 @@ cluster_spectral_predictors <- function(spectra_mat,
 
   return(list(reduced_mat   = reduced_mat,
               cluster_map   = cluster_map,
-              selected_vars = representative_bands))
+              selected_vars = representative_bands,
+              clustered     = TRUE))
+}
+
+
+#' Drop the Near-Constant Bands Before Clustering
+#'
+#' @description
+#' Shared by `step_select_cars()` and `step_select_boruta()`. A band with no
+#' spread has no correlation with any other, which `hclust()` refuses, and a
+#' band whose spread is round-off carries nothing to select. A band is
+#' dropped when its variance is not finite, is zero, or is at most
+#' `NEAR_CONSTANT_RATIO` of the median variance of the bands that vary. The
+#' cutoff is relative to the spectrum because correlation is scale-free:
+#' preprocessing rescales bands by orders of magnitude, and an absolute cutoff
+#' dropped informative bands of second-derivative spectra. The steps record
+#' the count (`n_constant`) rather than print it.
+#'
+#' @param spectra_mat Numeric matrix, one column per band.
+#' @return List: `spectra`, `spectra_mat` without its near-constant columns,
+#'   and `n_constant`, how many it dropped.
+#' @keywords internal
+#' @noRd
+drop_constant_bands <- function(spectra_mat) {
+
+  variances <- apply(spectra_mat, 2, stats::var, na.rm = TRUE)
+  varies    <- is.finite(variances) & variances > 0
+
+  ### The median of the bands that vary, so a spectrum padded with constant
+  ### bands still has a scale to measure against.
+  typical <- if (any(varies)) stats::median(variances[varies]) else 0
+  keep    <- varies & variances > NEAR_CONSTANT_RATIO * typical
+
+  list(spectra    = spectra_mat[, keep, drop = FALSE],
+       n_constant = sum(!keep))
+
 }

@@ -37,6 +37,8 @@
 #'   plan when `TRUE`. Default `FALSE`.
 #' @param seed Integer. Seed for the CV folds (passed through to
 #'   [fit_tuned_meta_learner()] so the meta-OOF is reproducible).
+#' @param debug Logical. From `ensemble()`'s control; see
+#'   [fit_tuned_meta_learner()].
 #' @param call The frame a member's failure to predict the test rows reports
 #'   (`ensemble()`'s).
 #'
@@ -51,6 +53,7 @@ fit_ensemble_penalized <- function(object,
                                    optimize  = TRUE,
                                    seed      = DEFAULT_ENSEMBLE_SEED,
                                    allow_par = FALSE,
+                                   debug     = FALSE,
                                    call      = rlang::caller_env()) {
 
   ## Build the spec per branch rather than with an inline `if` inside the
@@ -91,6 +94,7 @@ fit_ensemble_penalized <- function(object,
     extract_weights = extract_weights_penalized,
     seed            = seed,
     allow_par       = allow_par,
+    debug           = debug,
     call            = call
   )
 

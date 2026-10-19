@@ -52,4 +52,68 @@ rates to identify the minimal optimal wavelength set. The algorithm is run at
 For best results, this step should be applied \emph{after} spectral preprocessing (e.g. SNV,
 derivatives) and \emph{before} PCA or model fitting. CARS is particularly effective for
 identifying minimal wavelength sets that maintain predictive performance.
+
+CARS runs as its authors' code runs it (libPLS's \code{carspls}, with the
+randomised sampling of Li et al. 2009) on at most 150 cluster
+representatives of the selected columns (correlation clustering), after
+dropping near-constant columns (a variance not finite, zero, or at most a
+hundred-millionth of the median band's), for 50 iterations. Each iteration
+fits a PLS model on a Monte Carlo sample of 80\% of the rows, only to
+weight the bands: its
+coefficients weight them afresh, an exponentially decreasing function
+keeps the most heavily weighted, as many as the next iteration may fit (so
+the fits run from every band down to two, as carspls schedules them), and
+adaptive reweighted sampling draws among those, by weight and with
+replacement, as many times as there are bands, keeping the bands drawn.
+After the loop every iteration's set is scored by 5-fold cross-validation
+over all the rows the step is given, on one partition shared by every set
+(the rows sorted by the outcome and dealt to the folds in turn, as
+carspls's \code{plscv} deals them), at the component count where its error is
+lowest. The scoring fits take up to 30 components (the PLS model's own
+cap), no more than the set's bands or the rows a fold's fit has, less one.
+The weight fits take the component count that scoring chose for the full
+set of representatives, computed once before the loop, no more than the
+sample's rows less one or the set's bands: the weights only rank the
+bands, and a fit of 30 components on a small sample ranks them by noise. The step returns the set with the lowest score (#106), the first
+on ties, each kept representative bringing its whole cluster. The trained
+step records this in its \code{cars} element: the bands it selected from
+(\code{n_bands}), the near-constant bands it dropped before (\code{n_constant}),
+whether they were clustered (\code{clustered}, \code{FALSE} with fewer than 150, when
+each band is its own representative), the representatives
+(\code{n_representatives}), each representative's cluster (\code{clusters}, a list
+of the bands it stands for, named by the representative), the \code{path} (a
+tibble, one row per iteration: its \code{representatives}, the bands their
+clusters hold \code{n_bands}, \code{rmsecv}, its standard error across the folds
+\code{se}, and the component count \code{ncomp}; iteration \code{i}'s bands are
+\code{unlist(cars$clusters[cars$path$representatives[[i]]])}), the iteration
+chosen, the bands kept, \code{retained_all} and \code{skipped}. \code{retained_all} is
+\code{TRUE} when the first iteration's set, every band, scored lowest: CARS's
+answer can be no selection. It is the scored answer, not a fallback, so
+the step does not warn.
+The score is the one CARS chose by, not an estimate of accuracy: the
+lowest of 50 is biased low, and \code{evaluate()}'s folds, which rerun the step
+on each analysis set, measure the configuration.
+
+CARS is not expected to beat no selection. On soil MIR spectra (organic
+carbon, in cross-validation with the selection nested), it was level with
+no selection at 200 samples and more, and trailed it by about 4\% RMSE at
+100 samples, where CARS fits about 80 rows. On an outcome the spectra do
+not carry it does slightly worse, since it always returns a subset and on
+noise keeps the bands whose noise happens to line up with the outcome.
+Compare a CARS configuration against \code{feature_selection = "none"}:
+\code{evaluate()}'s folds rerun the selection on each analysis set, so their
+metrics show whether it costs accuracy on your data.
+
+With fewer than two bands left after the near-constant ones are dropped,
+there is nothing to select between: the step keeps them, records
+\code{skipped = TRUE}, and warns with class \code{horizons_warning_skipped}.
+
+When you \code{tidy()} this step, a tibble is returned with columns \code{terms}
+and \code{id}: before \code{prep()}, \code{terms} holds the selectors; after, the columns
+the step removed, as recipes' filter steps report them (#109).
+
+Its refusals (an \code{outcome} that is not one column of the training data, a
+\code{bake()} before \code{prep()}, new data lacking a column it selected) carry the
+class \code{horizons_error_input}. Raised inside \code{prep()}, recipes wraps them in
+\code{recipes_error_step}, so test for the class with \code{rlang::cnd_inherits()}.
 }

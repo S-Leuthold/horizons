@@ -147,6 +147,26 @@ DEFAULT_PCA_THRESHOLD <- 0.995
 # window wider than the polynomial order. See is_valid_sg_window().
 SG_WINDOW_MIN <- 5L
 
+# The selection steps drop a band before clustering when its variance is at
+# most this fraction of the median band's (drop_constant_bands()): a standard
+# deviation under a ten-thousandth of the typical band's, so its values differ
+# by round-off rather than by signal. The cutoff is relative because
+# correlation is scale-free and preprocessing rescales bands by orders of
+# magnitude: a second derivative is about a millionth of an absorbance. On
+# KSSL spectra under every preprocessing, at Savitzky-Golay windows of 9 and
+# 21, the lowest band sits at 7e-4 of the median, four orders of magnitude
+# above the cutoff.
+NEAR_CONSTANT_RATIO <- 1e-8
+
+# The fewest bands each selection step selects from; with fewer it keeps them
+# and warns that it was skipped (selection_warning()). CARS and Boruta need
+# two to choose between, and Boruta two to cluster; the correlation filter
+# needs five, for the three windows of three bands its threshold (their mean
+# plus one standard deviation) needs to select any.
+SELECTION_MIN_BANDS <- c(step_select_cars        = 2L,
+                         step_select_boruta      = 2L,
+                         step_select_correlation = 5L)
+
 ## fit() Parameters ------------------------------------------------------------
 
 DEFAULT_FINAL_BAYES_ITER <- 25L

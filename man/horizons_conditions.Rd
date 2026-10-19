@@ -41,23 +41,33 @@ condition as \code{results}.}
 \code{fit()}. The per-member results travel as \code{results}.}
 \item{\code{horizons_error_prediction_failed}}{(run) \code{predict()} had nothing
 to return: the configuration asked for, or every one of them, could
-not predict, or an ensemble's member or its combination could not;
-or \code{\link[=ensemble]{ensemble()}} could not be built, because a member could not predict
-the test rows. One row per failure travels as \code{results}: its \code{unit} (\code{"configuration"}, or
+not predict, or an ensemble's member or its combination could not.
+One row per failure travels as \code{results}: its \code{unit} (\code{"configuration"}, or
 \code{"combination"} for an ensemble's), \code{config_id} (\code{NA} for the
 combination), \code{step}, \code{class} and \code{error_message}.}
+\item{\code{horizons_error_ensemble_failed}}{(run) \code{\link[=ensemble]{ensemble()}}'s
+meta-learner could not be built, so there is no ensemble to return: a
+step of its tuning, its fit, its out-of-fold pass or the members'
+predictions of the test rows failed. The failure travels as \code{results},
+one row shaped as \code{horizons_error_prediction_failed}'s: \code{unit}
+(\code{"meta_learner"}), \code{config_id} (\code{NA}), \code{step}, \code{class} (the root
+cause's, e.g. \code{horizons_error_prediction_failed} for a member that
+cannot predict the test rows), \code{error_message} and \code{trace}.}
 \item{\code{horizons_error_systemic}}{(run) \code{\link[=evaluate]{evaluate()}} stopped early,
 because the first configurations to run failed the same way across at
 least two models (the circuit breaker,
-\code{control_horizons(breaker = )}), or because a parallel worker died.
-The rows finished so far travel as \code{results}.}
+\code{control_horizons(breaker = )}), or \code{\link[=evaluate]{evaluate()}}, \code{\link[=fit]{fit()}} or
+\code{\link[=ensemble]{ensemble()}} stopped because a parallel worker died. The rows finished
+so far travel as \code{results}; \code{NULL} from \code{ensemble()}, which has none
+before its meta-learner is built.}
 \item{\code{horizons_error_promoted_warnings}}{(run) A verb ended with
 warnings under \code{options(warn = 2)}. Instead of turning the first warning
 into an error that loses the result, the verb aborts with the finished
 result as \code{object} and its warnings as \code{log}.}
 \item{\code{horizons_error_download}}{(run) A spectral library could not be
 downloaded.}
-\item{\code{horizons_error_boruta}}{(run) \code{\link[=step_select_boruta]{step_select_boruta()}} failed.}
+\item{\code{horizons_error_boruta}}{(run) \code{\link[=step_select_boruta]{step_select_boruta()}}'s Boruta run
+failed; Boruta's error is in its message.}
 \item{\code{horizons_error_qc}}{(run) A quality check failed once it had been
 computed.}
 \item{\code{horizons_error_consent}}{(input) A library download was declined.}

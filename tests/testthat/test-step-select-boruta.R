@@ -166,7 +166,7 @@ describe("step_select_boruta() selects by Boruta (#75)", {
 
 describe("step_select_boruta() - Boruta's input and its forests", {
 
-  it("drops near-constant columns, says so, and hands Boruta at most 50 cluster representatives", {
+  it("drops near-constant columns, records them, and hands Boruta at most 50 cluster representatives", {
 
     skip_if_not_installed("Boruta")
 
@@ -183,10 +183,14 @@ describe("step_select_boruta() - Boruta's input and its forests", {
       .package = "Boruta"
     )
 
-    expect_message(prepped <- recipes::prep(boruta_recipe(d), training = d),
-                   "Filtering 1 near-constant features before clustering", fixed = TRUE)
+    expect_no_message(prepped <- recipes::prep(boruta_recipe(d), training = d),
+                      message = "near-constant")
 
     step <- prepped$steps[[1]]
+
+    expect_identical(step$boruta$n_constant, 1L)
+    expect_identical(step$boruta$n_bands, 59L)
+    expect_output(print(step), "1 near-constant band dropped before clustering", fixed = TRUE)
 
     ## The 59 that vary cluster to 50; every one of them is selected
     expect_length(seen, 50L)
@@ -234,7 +238,7 @@ describe("step_select_boruta() - Boruta's input and its forests", {
 
 describe("a failed Boruta run fails step_select_boruta() (#75)", {
 
-  it("aborts with horizons_boruta_error rather than select by correlation", {
+  it("aborts with horizons_error_boruta, Boruta's error in its message, rather than select by correlation", {
 
     skip_if_not_installed("Boruta")
 
@@ -244,16 +248,31 @@ describe("a failed Boruta run fails step_select_boruta() (#75)", {
 
     rec <- boruta_recipe(d)
 
-    expect_error(recipes::prep(rec, training = d), class = "horizons_boruta_error")
+    expect_error(recipes::prep(rec, training = d), class = "horizons_error_boruta")
     expect_error(recipes::prep(rec, training = d), "Boruta feature selection failed")
     expect_error(recipes::prep(rec, training = d), "Missing data in dependent variable")
 
     ## recipes wraps a step's error in its own recipes_error_step, so the
     ## class is one level down the chain: cnd_inherits() finds it, as the
-    ## step's documentation says to check it.
+    ## step's documentation says to check it. A run failure, carrying the
+    ## error Boruta raised in its message and ending the chain, so a unit's
+    ## record keeps its class and text rather than Boruta's.
     err <- tryCatch(recipes::prep(rec, training = d), error = identity)
 
-    expect_true(rlang::cnd_inherits(err, "horizons_boruta_error"))
+    expect_true(rlang::cnd_inherits(err, "horizons_error_boruta"))
+    expect_true(rlang::cnd_inherits(err, "horizons_error_run"))
+
+    ## The walk stops at the chain's end, so a prep that succeeds fails here
+    ## rather than loop.
+    boruta_err <- err
+    while (inherits(boruta_err, "error") && !inherits(boruta_err, "horizons_error_boruta")) {
+      boruta_err <- boruta_err$parent
+    }
+    expect_s3_class(boruta_err, "horizons_error_boruta")
+    expect_null(boruta_err$parent)
+    expect_match(conditionMessage(boruta_err), "Boruta feature selection failed: ", fixed = TRUE)
+    expect_match(conditionMessage(boruta_err), "Missing data in dependent variable", fixed = TRUE)
+    expect_identical(root_class(err), "horizons_error_boruta")
 
   })
 
@@ -300,7 +319,7 @@ describe("a failed Boruta run fails step_select_boruta() (#75)", {
     d <- boruta_signal_data()
 
     expect_error(recipes::prep(boruta_recipe(d), training = d),
-                 class = "horizons_boruta_error")
+                 class = "horizons_error_boruta")
     expect_error(recipes::prep(boruta_recipe(d), training = d),
                  "ranger said {mtry}", fixed = TRUE)
 
@@ -325,12 +344,14 @@ describe("step_select_boruta() when Boruta confirms nothing (#75)", {
 
     d <- boruta_signal_data()
 
-    expect_warning(prepped <- recipes::prep(boruta_recipe(d), training = d),
-                   class = "horizons_boruta_warning")
+    w <- expect_warning(prepped <- recipes::prep(boruta_recipe(d), training = d),
+                        "selected nothing", class = "horizons_warning_substitution")
 
     step <- prepped$steps[[1]]
     b    <- step$boruta
     spec <- grep("^spec", names(d), value = TRUE)
+
+    expect_identical(w$step, "step_select_boruta")
 
     expect_true(b$retained_all)
     expect_identical(b$n_rejected, 50L)
@@ -355,7 +376,8 @@ describe("step_select_boruta() when Boruta confirms nothing (#75)", {
     d <- boruta_signal_data()
 
     expect_warning(prepped <- recipes::prep(boruta_recipe(d), training = d),
-                   class = "horizons_boruta_warning")
+                   "The selection is the 2 attributes it left tentative (2 wavenumbers)",
+                   fixed = TRUE, class = "horizons_warning_quality")
 
     step <- prepped$steps[[1]]
     b    <- step$boruta
@@ -435,8 +457,8 @@ describe("step_select_boruta() inside resampling (#75)", {
 ## Input the step cannot use
 ## =========================================================================
 ##
-## These aborts carry no package class, so each test matches the finding's
-## own text.
+## The refusals are horizons_error_input; raised in prep(), recipes wraps
+## them in recipes_error_step, which expect_error()'s class matches through.
 
 describe("step_select_boruta() refuses input it cannot use", {
 
@@ -451,9 +473,11 @@ describe("step_select_boruta() refuses input it cannot use", {
 
     ## Act & Assert
     expect_error(recipes::prep(rec("clay"), training = d),
-                 "not found in training data", fixed = TRUE)
+                 "not found in training data", fixed = TRUE,
+                 class = "horizons_error_input")
     expect_error(recipes::prep(rec(c("SOC", "clay")), training = d),
-                 "must be a single character string", fixed = TRUE)
+                 "`outcome` must be a single string", fixed = TRUE,
+                 class = "horizons_error_input")
 
   })
 
@@ -466,7 +490,8 @@ describe("step_select_boruta() refuses input it cannot use", {
     ## Act & Assert. bake() on the recipe refuses an untrained recipe before
     ## any step runs, so the step itself is baked.
     expect_error(recipes::bake(rec$steps[[1]], new_data = d),
-                 "This step has not been trained yet", fixed = TRUE)
+                 "This step has not been trained yet", fixed = TRUE,
+                 class = "horizons_error_input")
 
   })
 
@@ -495,9 +520,83 @@ describe("step_select_boruta() refuses input it cannot use", {
 
     expect_length(prepped$steps[[2]]$selected_vars, 28L)
 
-    ## Act & Assert
-    expect_error(recipes::bake(prepped, new_data = d),
-                 "Some selected wavenumbers are missing in new_data.", fixed = TRUE)
+    ## Act & Assert: the missing columns named, through recipes' check (#109)
+    err <- expect_error(recipes::bake(prepped, new_data = d),
+                        "`new_data` lacks columns `step_select_boruta()` selected.",
+                        fixed = TRUE, class = "horizons_error_input")
+    expect_match(rlang::cnd_message(err), prepped$steps[[2]]$selected_vars[1], fixed = TRUE)
+
+  })
+
+})
+
+
+describe("step_select_boruta() with too few bands to select from", {
+
+  it("keeps the lone band left after its variance filter, runs no Boruta, and warns skipped", {
+
+    skip_if_not_installed("Boruta")
+
+    ## 49 constant bands and one that varies: one band is left, which
+    ## hclust() refused ("must have n >= 2 objects to cluster")
+    d <- boruta_signal_data(n = 30, p = 50)
+    for (j in sprintf("spec%03d", 2:50)) d[[j]] <- 1
+
+    calls <- 0L
+    local_mocked_bindings(Boruta = function(...) { calls <<- calls + 1L; stop("no Boruta here") },
+                          .package = "Boruta")
+
+    w <- expect_warning(
+      prepped <- suppressMessages(recipes::prep(boruta_recipe(d), training = d)),
+      "had 1 band to select from, fewer than the 2 it needs, so it is kept",
+      fixed = TRUE, class = "horizons_warning_skipped"
+    )
+
+    step <- prepped$steps[[1]]
+
+    expect_identical(step$selected_vars, "spec001")
+    expect_true(step$boruta$skipped)
+    expect_false(step$boruta$retained_all)
+    expect_identical(calls, 0L)
+    expect_identical(w$step, "step_select_boruta")
+    ## print() says it in the warning's words
+    expect_output(print(step), "`step_select_boruta()` had 1 band to select from, fewer than the 2 it needs, so it is kept",
+                  fixed = TRUE)
+
+    ## The record has every field a run's has, its settings among them
+    expect_identical(step$boruta$n_kept, 1L)
+    expect_identical(step$boruta$n_constant, 49L)
+    expect_identical(step$boruta$max_runs, 25L)
+    expect_identical(step$boruta$num_trees, 250L)
+
+    full <- boruta_signal_data()
+    local_mocked_bindings(Boruta = mock_boruta_deciding(function(nm) rep("Confirmed", length(nm))),
+                          .package = "Boruta")
+    ran <- recipes::prep(boruta_recipe(full), training = full)$steps[[1]]$boruta
+
+    expect_setequal(names(step$boruta), names(ran))
+
+  })
+
+})
+
+
+describe("step_select_boruta()'s tidy() (#109)", {
+
+  it("tidies to its selectors before prep and the columns it removed after", {
+
+    skip_if_not_installed("Boruta")
+
+    d   <- boruta_signal_data()
+    rec <- boruta_recipe(d)
+
+    expect_identical(recipes::tidy(rec, number = 1)$terms, "dplyr::matches(\"^spec[0-9]+$\")")
+
+    prepped <- boruta_prepped()
+    kept    <- prepped$steps[[1]]$selected_vars
+
+    expect_setequal(recipes::tidy(prepped, number = 1)$terms,
+                    setdiff(grep("^spec", names(d), value = TRUE), kept))
 
   })
 

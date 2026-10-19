@@ -276,7 +276,8 @@ describe("fit() - cold start from one configuration (#45)", {
 
   it("is refused by ensemble(), as any single-member fit is", {
 
-    expect_error(ensemble(cold), "at least 2 members")
+    expect_error(ensemble(cold), "needs at least 2 fitted members; `x` has 1",
+                 fixed = TRUE, class = "horizons_error_input")
 
   })
 
@@ -431,6 +432,21 @@ describe("fit() - cold start from one configuration (#45)", {
       expect_match(msg, "accuracy", fixed = TRUE)
       expect_match(msg, "rrmse", fixed = TRUE)
       expect_no_match(msg, "Re-run", fixed = TRUE)
+
+    }
+
+  })
+
+  it("refuses a compute_uq or compute_ad that is not TRUE or FALSE, before anything is fitted", {
+
+    local_mocked_bindings(
+      fit_single_config = function(...) stop("fit_single_config() was called")
+    )
+
+    for (bad in list(NULL, NA, c(TRUE, FALSE), "yes")) {
+
+      expect_error(fit(ev, compute_uq = bad), "compute_uq", class = "horizons_error_input")
+      expect_error(fit(ev, compute_ad = bad), "compute_ad", class = "horizons_error_input")
 
     }
 

@@ -32,29 +32,34 @@ describe("fit_tuned_meta_learner() - refusals", {
 
   })
 
-  it("aborts naming the engine when the meta-learner cannot be refit", {
+  it("fails the meta-learner's unit at its refit when the meta-learner cannot be refit", {
 
     fitted  <- ens_fitted()
     members <- gather_members(fitted)$members
     oof     <- build_oof_matrix(fitted, members)
 
     ## parsnip refuses a negative penalty when it fits, so the refit of this
-    ## fixed spec fails. The abort carries no package class.
+    ## fixed spec fails: a run failure of the meta-learner's unit, at its
+    ## refit
     spec <- parsnip::linear_reg(penalty = -1, mixture = 1) |>
       parsnip::set_engine("glmnet")
 
-    expect_error(
-      suppressWarnings(fit_tuned_meta_learner(
-        fitted, members, oof,
-        rank_metric     = "rpd",
-        optimize        = FALSE,
-        method          = "penalized",
-        spec            = spec,
-        grid            = NULL,
-        extract_weights = extract_weights_penalized
-      )),
-      "Meta-learner refit failed for the penalized ensemble.", fixed = TRUE
-    )
+    out <- suppressWarnings(run_unit(fit_tuned_meta_learner(
+      fitted, members, oof,
+      rank_metric     = "rpd",
+      optimize        = FALSE,
+      method          = "penalized",
+      spec            = spec,
+      grid            = NULL,
+      extract_weights = extract_weights_penalized
+    ), unit = "meta_learner", id = "penalized"))
+
+    failure <- out$records[out$records$type == "failure", , drop = FALSE]
+
+    expect_true(out$failed)
+    expect_identical(failure$step, "final_fit")
+    expect_match(unit_failure_message(failure, "Meta-learner"), "Final model fit failed:", fixed = TRUE)
+    expect_match(failure$message, "penalty", fixed = TRUE)
 
   })
 

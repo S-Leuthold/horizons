@@ -191,7 +191,10 @@ fit_single_config <- function(config_row,
 
     if (prepped_now) {
 
-      prepped <- unit_step("prep", recipes::prep(recipe))
+      ## This prep sets the bounds, and is not the model returned, so the
+      ## selection steps' warnings are not taken from it (the final fit's
+      ## record is read instead)
+      prepped <- unit_step("prep", quiet_selection_warnings(recipes::prep(recipe)))
       baked   <- unit_step("prep", recipes::bake(prepped, new_data = NULL))
 
       param_set <- unit_step("finalize_parameters", {
@@ -371,9 +374,13 @@ fit_single_config <- function(config_row,
 
     set.seed(seed, kind = "Mersenne-Twister")
 
-    final_fit <- unit_step("final_fit", suppressMessages(
+    final_fit <- unit_step("final_fit", suppressMessages(quiet_selection_warnings(
       workflows::fit(finalized_wf, data = train_data)
-    ))
+    )))
+
+    ## What the final fit's selection step did, raised once, from its trained
+    ## recipe, as evaluate() raises it
+    unit_step("selection_record", selection_reports(final_fit))
 
     ## -----------------------------------------------------------------------
     ## Step 8: Evaluate on test_F (original scale)

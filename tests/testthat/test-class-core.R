@@ -1415,6 +1415,7 @@ make_valid_ensemble <- function() {
     seed            = 307L,
     uq              = NULL,
     control         = NULL,
+    warnings        = NULL,
     timestamp       = Sys.time(),
     runtime_secs    = 1.5
   )
@@ -1471,6 +1472,27 @@ test_that("validate_horizons_ensemble accepts an improvement of NA, which no ran
   obj$ensemble$improvement <- NA_real_
 
   expect_identical(validate_horizons_ensemble(obj), obj)
+
+})
+
+test_that("validate_horizons_ensemble refuses warnings that are not character, or a contract without the key", {
+
+  obj <- make_valid_ensemble()
+
+  bad <- obj
+  bad$ensemble$warnings <- 1
+  err <- expect_error(validate_horizons_ensemble(bad), class = "horizons_error_validation")
+  expect_true(any(grepl("ensemble$warnings must be NULL or character", err$findings, fixed = TRUE)))
+
+  gone <- obj
+  gone$ensemble$warnings <- NULL
+  err <- expect_error(validate_horizons_ensemble(gone), class = "horizons_error_validation")
+  expect_true(any(grepl("warnings", err$findings, fixed = TRUE)))
+
+  ## Character is accepted
+  kept <- obj
+  kept$ensemble["warnings"] <- list("A line of the ensemble's own.")
+  expect_identical(validate_horizons_ensemble(kept), kept)
 
 })
 

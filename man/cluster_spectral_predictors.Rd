@@ -18,16 +18,22 @@ cluster_spectral_predictors(
 \item{method}{Character. Clustering method: either \code{"correlation"} or \code{"euclidean"}.}
 }
 \value{
-A list with three elements:
+A list with four elements:
 \describe{
 \item{reduced_mat}{A data frame with one representative column per cluster.}
 \item{cluster_map}{A named list mapping representative wavenumbers to all members of their cluster.}
 \item{selected_vars}{Character vector of retained wavenumber names.}
+\item{clustered}{Logical. \code{FALSE} when there were fewer bands than \code{k},
+so each band is its own representative; the caller records it.}
 }
 }
 \description{
 Groups collinear or redundant spectral bands into clusters and returns a reduced
-feature matrix containing one representative wavenumber per cluster.
+feature matrix containing one representative wavenumber per cluster: the
+cluster's middle band by its position in \code{spectra_mat}, which for the
+steps' columns (\code{spec001} onward, or wavenumbers in the decreasing order
+the validator keeps) is the middle of the cluster on the spectrum. Of two
+middle bands, the first is taken.
 }
 \examples{
 \dontrun{

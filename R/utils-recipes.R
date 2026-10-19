@@ -532,6 +532,324 @@ check_selection_columns <- function(col_names, step) {
 }
 
 ## ---------------------------------------------------------------------------
+## check_step_outcome, check_step_new_data
+## ---------------------------------------------------------------------------
+
+#' Refuse a Selection Step's Outcome That Is Not a Column of the Training Data
+#'
+#' @description
+#' Shared by the `prep()` methods of the three selection steps: `outcome` is
+#' the step's own argument, checked where recipes checks a step's arguments.
+#' Raised inside `prep()`, the refusal arrives wrapped in recipes'
+#' `recipes_error_step`, so a handler finds the class with
+#' [rlang::cnd_inherits()].
+#'
+#' @param outcome The step's `outcome`.
+#' @param training The training data `prep()` was given.
+#' @param call The frame the refusal reports: the step's `prep()`.
+#'
+#' @return `outcome`, invisibly; aborts with class `horizons_error_input`.
+#' @keywords internal
+#' @noRd
+check_step_outcome <- function(outcome, training, call = rlang::caller_env()) {
+
+  check_arg(rlang::check_string, outcome, arg = "outcome", call = call)
+
+  if (!outcome %in% names(training)) {
+
+    abort_horizons(c(
+      "Outcome column {.val {outcome}} not found in training data.",
+      "i" = "Set {.arg outcome} to the name of a column of the training data."
+    ), kind = "input", call = call)
+
+  }
+
+  invisible(outcome)
+
+}
+
+#' Refuse New Data That Lacks a Column a Selection Step Selected
+#'
+#' @description
+#' Shared by the `bake()` methods of the three selection steps. The columns
+#' are checked by [recipes::check_new_data()], as every recipes step checks
+#' them, and its error, which names the missing columns, is raised again
+#' with horizons' input class and kept as the parent.
+#'
+#' @param object The trained step.
+#' @param new_data The data `bake()` was given.
+#' @param call The frame the refusal reports: the step's `bake()`.
+#'
+#' @return `NULL`, invisibly; aborts with class `horizons_error_input`.
+#' @keywords internal
+#' @noRd
+check_step_new_data <- function(object, new_data, call = rlang::caller_env()) {
+
+  step <- class(object)[1]
+
+  rlang::try_fetch(
+    recipes::check_new_data(object$selected_vars, object, new_data),
+    error = function(e) {
+      abort_horizons(c(
+        "{.arg new_data} lacks columns {.fn {step}} selected.",
+        "i" = "{.arg new_data} must carry the columns the steps before this one produce."
+      ), kind = "input", parent = e, call = call)
+    }
+  )
+
+  invisible(NULL)
+
+}
+
+## ---------------------------------------------------------------------------
+## What a trained selection step says about its selection
+## ---------------------------------------------------------------------------
+## The three selection steps keep a record of what they did on the trained
+## step (`cars`, `boruta`, `correlation`). The warning a record calls for is
+## built from the record alone, by one function, so the step's prep() and
+## the reader evaluate() and fit() run on a fitted recipe raise the same
+## words.
+
+#' The record a trained selection step keeps
+#'
+#' @param step A trained `step_select_*` step.
+#' @return Its record (a list), or `NULL` for another step, or a step
+#'   trained before records existed.
+#' @keywords internal
+#' @noRd
+selection_record <- function(step) {
+
+  switch(class(step)[1],
+         step_select_cars        = step$cars,
+         step_select_boruta      = step$boruta,
+         step_select_correlation = step$correlation,
+         NULL)
+
+}
+
+#' The warning a trained selection step's record calls for
+#'
+#' @param step A trained `step_select_*` step.
+#' @return `NULL` when the record calls for none; otherwise a list with
+#'   `topic`, `message` (a cli message) and `env`, the environment it is
+#'   interpolated in.
+#' @keywords internal
+#' @noRd
+selection_warning <- function(step) {
+
+  rec  <- selection_record(step)
+  name <- class(step)[1]
+
+  if (is.null(rec)) return(NULL)
+
+  ## Too few bands to select from: kept, and the selection did not run -------
+
+  if (isTRUE(rec$skipped)) {
+
+    n    <- rec$n_bands
+    need <- SELECTION_MIN_BANDS[[name]]
+
+    message <- if (n == 0) {
+      "{.fn {name}} had no band to select from, every one being near-constant, so it keeps none."
+    } else {
+      "{.fn {name}} had {n} band{?s} to select from, fewer than the {need} it needs, so {cli::qty(n)}{?it is/they are} kept."
+    }
+
+    return(list(topic = "skipped", message = message, env = environment()))
+
+  }
+
+  ## Boruta selected nothing, or confirmed nothing --------------------------
+
+  if (identical(name, "step_select_boruta")) {
+
+    n_attributes <- rec$n_attributes
+    n_bands      <- rec$n_bands
+
+    if (isTRUE(rec$retained_all)) {
+
+      return(list(topic = "substitution", env = environment(), message = c(
+        "Boruta rejected all {n_attributes} attribute{?s} it tested, so {.fn step_select_boruta} selected nothing.",
+        "i" = "Retaining all {n_bands} variance-filtered wavenumber{?s}; the model sees an unselected spectrum."
+      )))
+
+    }
+
+    if (identical(as.integer(rec$n_confirmed), 0L)) {
+
+      runs        <- rec$runs
+      n_tentative <- rec$n_tentative
+      n_kept      <- rec$n_kept
+
+      return(list(topic = "quality", env = environment(), message = c(
+        "Boruta confirmed none of the {n_attributes} attribute{?s} it tested in {runs} run{?s}.",
+        "i" = "The selection is the {n_tentative} attribute{?s} it left tentative ({n_kept} wavenumber{?s}), none shown to beat the shadow features."
+      )))
+
+    }
+
+    return(NULL)
+
+  }
+
+  ## Nothing selected: every band kept, under the documented fallback --------
+
+  if (identical(name, "step_select_correlation") && isTRUE(rec$retained_all)) {
+
+    n <- rec$n_bands
+
+    return(list(topic = "substitution", env = environment(), message = c(
+      "No window cleared {.fn step_select_correlation}'s threshold, so it selected nothing.",
+      "i" = "Retaining all {n} wavenumber{?s}; the model sees an unselected spectrum."
+    )))
+
+  }
+
+  NULL
+
+}
+
+#' The print() line for a selection step that had too few bands
+#'
+#' The warning's own words ([selection_warning()]), so the console and the
+#' warning say it one way.
+#'
+#' @param step A trained `step_select_*` step whose record says `skipped`.
+#' @return `NULL`, invisibly; prints one line.
+#' @keywords internal
+#' @noRd
+print_selection_skipped <- function(step) {
+
+  w <- selection_warning(step)
+
+  if (!is.null(w)) cat("\u2022 ", cli::format_inline(w$message, .envir = w$env), "\n", sep = "")
+
+  invisible(NULL)
+
+}
+
+#' The print() line for the near-constant bands a step dropped
+#'
+#' @param record A trained step's record (`cars` or `boruta`), or `NULL` for
+#'   a step trained before the record existed.
+#' @return `NULL`, invisibly; prints one line when bands were dropped.
+#' @keywords internal
+#' @noRd
+print_constant_bands <- function(record) {
+
+  n <- record$n_constant
+
+  if (!is.null(n) && n > 0) {
+
+    cat("\u2022 ", n, " near-constant band", if (n == 1) "" else "s",
+        " dropped before clustering\n", sep = "")
+
+  }
+
+  invisible(NULL)
+
+}
+
+#' Raise the warning a trained selection step's record calls for
+#'
+#' @description
+#' Through [warn_in_unit()], with the field `step` naming the step: inside a
+#' unit it is recorded with its class; outside one it is an ordinary classed
+#' warning.
+#'
+#' @param step A trained `step_select_*` step.
+#' @return `step`, invisibly.
+#' @keywords internal
+#' @noRd
+raise_selection_warning <- function(step) {
+
+  w <- selection_warning(step)
+
+  if (!is.null(w)) warn_in_unit(w$topic, w$message, step = class(step)[1], .envir = w$env)
+
+  invisible(step)
+
+}
+
+#' Raise what a fitted workflow's selection steps did
+#'
+#' @description
+#' Shared by [evaluate_single_config()] and [fit_single_config()], after the
+#' final fit. A selection step's warning raised inside tune reaches the unit
+#' only as note text, so the outcome the step recorded on itself is raised
+#' again here, inside the unit, with its class and the step's own words, and
+#' the verb lifts it to its log under the configuration's id. A
+#' configuration's selection warnings come from this one recipe, the final
+#' fit's, whatever the model: every other prep in the unit runs under
+#' [quiet_selection_warnings()].
+#'
+#' @param workflow A fitted workflow.
+#' @return `NULL`, invisibly.
+#' @keywords internal
+#' @noRd
+selection_reports <- function(workflow) {
+
+  rec <- workflows::extract_recipe(workflow, estimated = TRUE)
+
+  for (step in rec$steps) raise_selection_warning(step)
+
+  invisible(NULL)
+
+}
+
+#' Muffle the warnings the selection steps raise
+#'
+#' @description
+#' The warnings [raise_selection_warning()] raises carry the field `step`;
+#' those are muffled, and every other condition goes on as it would. Used
+#' around the preps a unit runs that are not the model it returns (the
+#' tuning bounds' prep, the prep that reproduces a step's failure) and
+#' around `fit()`'s final fit, whose recipe [selection_reports()] reads.
+#'
+#' @param expr The prep or fit.
+#' @return The value of `expr`.
+#' @keywords internal
+#' @noRd
+quiet_selection_warnings <- function(expr) {
+
+  withCallingHandlers(
+    expr,
+    horizons_warning = function(w) {
+      if (!is.null(w[["step"]])) rlang::cnd_muffle(w)
+    }
+  )
+
+}
+
+## ---------------------------------------------------------------------------
+## tidy_selection_step
+## ---------------------------------------------------------------------------
+
+#' What a selection step's tidy() reports
+#'
+#' @description
+#' Shared by the `tidy()` methods of the three selection steps, which follow
+#' recipes' filter steps (`tidy.step_corr()`): before `prep()`, `terms`
+#' holds the selectors as text; after, the columns the step removed. A step
+#' from before #52 is read through [step_selectors()] and its `columns`.
+#'
+#' @param x A `step_select_*` step.
+#' @return Tibble with `terms` (character) and `id`.
+#' @keywords internal
+#' @noRd
+tidy_selection_step <- function(x) {
+
+  terms <- if (isTRUE(x$trained)) {
+    unname(setdiff(x$columns, x$selected_vars))
+  } else {
+    recipes::sel2char(step_selectors(x, class(x)[1]))
+  }
+
+  tibble::tibble(terms = as.character(terms), id = rep(x$id, length(terms)))
+
+}
+
+## ---------------------------------------------------------------------------
 ## step_selectors
 ## ---------------------------------------------------------------------------
 

@@ -159,23 +159,33 @@ check_arg <- function(check,
 #'     `fit()`. The per-member results travel as `results`.}
 #'   \item{`horizons_error_prediction_failed`}{(run) `predict()` had nothing
 #'     to return: the configuration asked for, or every one of them, could
-#'     not predict, or an ensemble's member or its combination could not;
-#'     or [ensemble()] could not be built, because a member could not predict
-#'     the test rows. One row per failure travels as `results`: its `unit` (`"configuration"`, or
+#'     not predict, or an ensemble's member or its combination could not.
+#'     One row per failure travels as `results`: its `unit` (`"configuration"`, or
 #'     `"combination"` for an ensemble's), `config_id` (`NA` for the
 #'     combination), `step`, `class` and `error_message`.}
+#'   \item{`horizons_error_ensemble_failed`}{(run) [ensemble()]'s
+#'     meta-learner could not be built, so there is no ensemble to return: a
+#'     step of its tuning, its fit, its out-of-fold pass or the members'
+#'     predictions of the test rows failed. The failure travels as `results`,
+#'     one row shaped as `horizons_error_prediction_failed`'s: `unit`
+#'     (`"meta_learner"`), `config_id` (`NA`), `step`, `class` (the root
+#'     cause's, e.g. `horizons_error_prediction_failed` for a member that
+#'     cannot predict the test rows), `error_message` and `trace`.}
 #'   \item{`horizons_error_systemic`}{(run) [evaluate()] stopped early,
 #'     because the first configurations to run failed the same way across at
 #'     least two models (the circuit breaker,
-#'     `control_horizons(breaker = )`), or because a parallel worker died.
-#'     The rows finished so far travel as `results`.}
+#'     `control_horizons(breaker = )`), or [evaluate()], [fit()] or
+#'     [ensemble()] stopped because a parallel worker died. The rows finished
+#'     so far travel as `results`; `NULL` from `ensemble()`, which has none
+#'     before its meta-learner is built.}
 #'   \item{`horizons_error_promoted_warnings`}{(run) A verb ended with
 #'     warnings under `options(warn = 2)`. Instead of turning the first warning
 #'     into an error that loses the result, the verb aborts with the finished
 #'     result as `object` and its warnings as `log`.}
 #'   \item{`horizons_error_download`}{(run) A spectral library could not be
 #'     downloaded.}
-#'   \item{`horizons_error_boruta`}{(run) [step_select_boruta()] failed.}
+#'   \item{`horizons_error_boruta`}{(run) [step_select_boruta()]'s Boruta run
+#'     failed; Boruta's error is in its message.}
 #'   \item{`horizons_error_qc`}{(run) A quality check failed once it had been
 #'     computed.}
 #'   \item{`horizons_error_consent`}{(input) A library download was declined.}
@@ -611,9 +621,9 @@ cli_escape <- function(x) {
 #' [note_in_unit()]. Its message is kept whole wherever it is recorded
 #' ([condition_parts()]): any other package's text inside it was capped when
 #' it was interpolated, through [condition_summary()]. Matched by exact
-#' class, so a step's own class (`horizons_boruta_error`) or one from before
-#' the conditions contract (`horizons_input_error`) is capped as another
-#' package's text until its code raises through [abort_horizons()].
+#' class, so a class from before the conditions contract
+#' (`horizons_input_error`) is capped as another package's text until its
+#' code raises through [abort_horizons()].
 #'
 #' @keywords internal
 #' @noRd
@@ -1531,7 +1541,11 @@ check_tune_result <- function(results,
   step_failed <- any(grepl("^preprocessor [0-9]+/[0-9]+( \\(prediction data\\))?$",
                            errors[["location"]]))
 
-  if (!is.null(recipe) && step_failed) unit_step("prep", recipes::prep(recipe))
+  ### The reproduction is not the model returned, so a selection step's
+  ### warnings from it are not taken (one recipe, the final fit's).
+  if (!is.null(recipe) && step_failed) {
+    unit_step("prep", quiet_selection_warnings(recipes::prep(recipe)))
+  }
 
   ## Every model failed, or, under debug, any did ---------------------------------
 

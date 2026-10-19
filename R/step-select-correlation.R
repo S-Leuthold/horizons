@@ -25,12 +25,32 @@
 #' The selection algorithm slides a 3-wavenumber window (6 cm-1 at 2 cm-1 resolution) across
 #' the spectrum, computes the mean absolute Spearman correlation between each window and
 #' the outcome, and retains all wavenumbers from windows where the score exceeds
-#' `mean + 1 SD`. Duplicate selections are collapsed. If no windows meet the threshold,
-#' all input wavenumbers are retained with a warning.
+#' `mean + 1 SD`. Duplicate selections are collapsed. If no window meets the
+#' threshold, every input wavenumber is retained, the trained step records
+#' `retained_all = TRUE`, and the step warns with class
+#' `horizons_warning_substitution` (#105).
+#'
+#' With fewer than five bands there are fewer than three windows, and the
+#' threshold cannot select among them (one window has no standard deviation,
+#' and two windows' mean plus one standard deviation lies above the higher):
+#' the step keeps the bands and warns with class `horizons_warning_skipped`,
+#' rather than report a substitution it could not have avoided. The
+#' trained step records what it did in its `correlation` element: the bands
+#' it scored, the threshold, the windows scored and kept, `retained_all` and
+#' `skipped`.
 #'
 #' This step is designed to operate on spectra that have already been preprocessed
 #' (e.g., SNV + derivative). It should be applied after spectral transformation but
 #' before dimensionality reduction (e.g., PCA) or model fitting.
+#'
+#' When you `tidy()` this step, a tibble is returned with columns `terms`
+#' and `id`: before `prep()`, `terms` holds the selectors; after, the columns
+#' the step removed, as recipes' filter steps report them (#109).
+#'
+#' Its refusals (an `outcome` that is not one column of the training data, a
+#' `bake()` before `prep()`, new data lacking a column it selected) carry the
+#' class `horizons_error_input`. Raised inside `prep()`, recipes wraps them in
+#' `recipes_error_step`, so test for the class with `rlang::cnd_inherits()`.
 #'
 #' @seealso [recipes::recipe()], [recipes::prep()], [recipes::bake()]
 #'
@@ -84,6 +104,8 @@ step_select_correlation <- function(recipe,
 ## Follows recipes' own contract: `terms` holds the selector quosures and
 ## survives prep, so a trained recipe can be re-prepped (`fresh = TRUE`);
 ## `columns` holds the names prep resolved them to, and is what bake reads.
+## `correlation` is prep's record of what it did (see prep()); bake never
+## reads it, and a step trained before it existed has none.
 
 #' @keywords internal
 #' @noRd
@@ -93,6 +115,7 @@ step_select_correlation_new <- function(terms,
                                         role,
                                         trained,
                                         selected_vars = NULL,
+                                        correlation   = NULL,
                                         skip,
                                         id) {
   out <- list(
@@ -102,6 +125,7 @@ step_select_correlation_new <- function(terms,
     role             = role,
     trained          = trained,
     selected_vars    = selected_vars,
+    correlation      = correlation,
     skip             = skip,
     id               = id)
 
@@ -122,15 +146,42 @@ prep.step_select_correlation <- function(x, training, info = NULL, ...) {
   col_names <- recipes::recipes_eval_select(selectors, training, info)
 
   check_selection_columns(col_names, "step_select_correlation")
+  check_step_outcome(x$outcome, training)
 
-  if (!is.character(x$outcome) || length(x$outcome) != 1) {
-    cli::cli_abort("The {.arg outcome} must be a single character string.")
-  }
-  if (!x$outcome %in% names(training)) {
-    cli::cli_abort("Outcome column {.val {x$outcome}} not found in training data.")
-  }
   outcome_vec <- training[[x$outcome]]
   spectra_mat <- as.matrix(training[, col_names])
+
+  window_size <- 3
+
+
+  trained_step <- function(kept, record) {
+    raise_selection_warning(step_select_correlation_new(
+      terms         = selectors,
+      columns       = col_names,
+      outcome       = x$outcome,
+      role          = x$role,
+      trained       = TRUE,
+      selected_vars = kept,
+      correlation   = record,
+      skip          = x$skip,
+      id            = x$id
+    ))
+  }
+
+  ## Too few bands for three windows: the threshold, the windows' mean plus
+  ## one sd, selects nothing from fewer (one window has no sd, and the mean
+  ## plus one sd of two lies above the higher), so the bands are kept and the
+  ## step says the selection did not run
+  if (length(col_names) < SELECTION_MIN_BANDS[["step_select_correlation"]]) {
+
+    return(trained_step(col_names, list(n_bands        = length(col_names),
+                                        threshold      = NA_real_,
+                                        n_windows      = 0L,
+                                        n_windows_kept = 0L,
+                                        retained_all   = FALSE,
+                                        skipped        = TRUE)))
+
+  }
 
   ## ---------------------------------------------------------------------------
   ## Stage 2: Vectorized correlation and rolling mean
@@ -140,14 +191,15 @@ prep.step_select_correlation <- function(x, training, info = NULL, ...) {
   all_cor_scores <- stats::cor(spectra_mat, outcome_vec, method = "spearman")
 
   # 2. Use a highly efficient rolling mean function
-  window_size   <- 3
   window_scores <- zoo::rollmean(x = abs(as.vector(all_cor_scores)), k = window_size)
 
   threshold <- mean(window_scores, na.rm = TRUE) + stats::sd(window_scores, na.rm = TRUE)
   keep_indices <- which(window_scores >= threshold)
 
+  ## No window clearing the threshold keeps every band, under the documented
+  ## fallback, and the trained step says so (retained_all); the warning is
+  ## built from that record (#105)
   if (length(keep_indices) == 0) {
-    cli::cli_alert_warning("No windows met the threshold. Retaining all predictors.")
     kept_wavenumbers <- col_names
   } else {
     ## Stage 4: Extract the wavenumbers that should be retained
@@ -158,16 +210,12 @@ prep.step_select_correlation <- function(x, training, info = NULL, ...) {
     )
   }
 
-  step_select_correlation_new(
-    terms         = selectors,
-    columns       = col_names,
-    outcome       = x$outcome,
-    role          = x$role,
-    trained       = TRUE,
-    selected_vars = kept_wavenumbers,
-    skip          = x$skip,
-    id            = x$id
-  )
+  trained_step(kept_wavenumbers, list(n_bands        = length(col_names),
+                                      threshold      = threshold,
+                                      n_windows      = length(window_scores),
+                                      n_windows_kept = length(keep_indices),
+                                      retained_all   = length(keep_indices) == 0,
+                                      skipped        = FALSE))
 }
 
 ## -----------------------------------------------------------------------------
@@ -178,12 +226,11 @@ prep.step_select_correlation <- function(x, training, info = NULL, ...) {
 bake.step_select_correlation <- function(object, new_data, ...) {
 
   if (is.null(object$selected_vars)) {
-    cli::cli_abort("This step has not been trained yet. Please call `prep()` first.")
+    abort_horizons("This step has not been trained yet. Please call `prep()` first.",
+                   kind = "input")
   }
 
-  if (!all(object$selected_vars %in% names(new_data))) {
-    cli::cli_abort("Some selected wavenumbers are missing in new_data.")
-  }
+  check_step_new_data(object, new_data)
 
   original_predictors <- object$columns
   other_cols          <- setdiff(names(new_data), original_predictors)
@@ -204,11 +251,17 @@ print.step_select_correlation <- function(x,
                                           width = max(20, options()$width - 30),
                                           ...) {
 
+  ## glue() trims a trailing newline, so each line ends with its own.
   cat("Correlation-based spectral feature selection step\n")
-  cat(glue::glue("\u2022 Outcome column: {x$outcome}\n"))
+  cat(glue::glue("\u2022 Outcome column: {x$outcome}"), "\n", sep = "")
 
   if (x$trained) {
-    cat(glue::glue("\u2022 {length(x$selected_vars)} wavenumbers retained after windowed scoring\n"))
+    cat(glue::glue("\u2022 {length(x$selected_vars)} wavenumbers retained after windowed scoring"), "\n", sep = "")
+    if (isTRUE(x$correlation$skipped)) {
+      print_selection_skipped(x)
+    } else if (isTRUE(x$correlation$retained_all)) {
+      cat("\u2022 No window cleared the threshold, so every band was kept\n")
+    }
   } else {
     cat("\u2022 Step not yet trained\n")
   }
@@ -238,5 +291,25 @@ print.step_select_correlation <- function(x,
 required_pkgs.step_select_correlation <- function(x, ...) {
 
   c("zoo", "horizons")
+
+}
+
+
+## ---------------------------------------------------------------------------
+## tidy
+## ---------------------------------------------------------------------------
+
+#' The columns step_select_correlation() removed
+#'
+#' @param x A `step_select_correlation` step.
+#' @param ... Not used.
+#' @return Tibble with `terms` and `id` ([tidy_selection_step()]).
+#' @importFrom recipes tidy
+#' @keywords internal
+#' @noRd
+#' @export
+tidy.step_select_correlation <- function(x, ...) {
+
+  tidy_selection_step(x)
 
 }

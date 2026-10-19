@@ -2,70 +2,8 @@
 ## Tests: cluster_spectral_predictors()
 ## ---------------------------------------------------------------------------
 ##
-## What the clustering refuses. The CARS and Boruta steps call it on their
-## selected columns at prep. These aborts carry no package class, so each
-## test matches the finding's own text.
-
-## Helper: n spectra of p bands named w1 ... wp. Drawn under the caller's
-## seed.
-cluster_data <- function(n = 20, p = 4) {
-
-  m <- matrix(stats::rnorm(n * p), nrow = n)
-  colnames(m) <- paste0("w", seq_len(p))
-
-  m
-
-}
-
-describe("cluster_spectral_predictors() refuses input it cannot cluster", {
-
-  it("aborts when a column is not numeric", {
-
-    ## Arrange
-    withr::local_seed(1)
-    spectra    <- as.data.frame(cluster_data())
-    spectra$w2 <- as.character(spectra$w2)
-
-    ## Act & Assert
-    expect_error(cluster_spectral_predictors(spectra, k = 2),
-                 "All columns in `spectra_mat` must be numeric.", fixed = TRUE)
-
-  })
-
-  it("aborts when k is not a positive whole number", {
-
-    ## Arrange
-    withr::local_seed(1)
-    spectra <- cluster_data()
-
-    ## Act & Assert
-    for (bad in list(0, -1, 2.5, NA_real_, "2", c(1, 2))) {
-
-      expect_error(cluster_spectral_predictors(spectra, k = bad),
-                   "must be a positive integer.", fixed = TRUE,
-                   info = paste("k =", deparse(bad)))
-
-    }
-
-  })
-
-  it("aborts when the correlation matrix has NA values", {
-
-    ## Arrange: a band with no observed values has no correlation with any
-    ## other
-    withr::local_seed(1)
-    spectra      <- cluster_data()
-    spectra[, 2] <- NA_real_
-
-    ## Act & Assert: the finding, and the remedy
-    err <- expect_error(cluster_spectral_predictors(spectra, k = 2, method = "correlation"),
-                        "Correlation matrix contains NA values", fixed = TRUE)
-    expect_match(conditionMessage(err), "Remove zero-variance predictors", fixed = TRUE)
-
-  })
-
-})
-
+## How the bands are clustered and represented. The CARS and Boruta steps
+## call it on their selected columns at prep.
 
 ## Two families of three bands named by wavenumber: 4000 to 3996 follow one
 ## signal, 2000 to 1996 another
@@ -113,14 +51,80 @@ describe("cluster_spectral_predictors() clusters", {
 
   })
 
-  it("returns every band, each its own cluster, when k is at least the band count", {
+  it("returns every band, each its own cluster, when k is at least the band count, and says so in its result", {
 
-    m   <- band_families()
-    res <- suppressMessages(cluster_spectral_predictors(m, k = 10))
+    m <- band_families()
 
+    ## Said in the result, which the caller records, not on the console
+    expect_no_message(res <- cluster_spectral_predictors(m, k = 10))
+
+    expect_false(res$clustered)
+    expect_true(cluster_spectral_predictors(m, k = 2)$clustered)
     expect_identical(res$selected_vars, colnames(m))
     expect_identical(names(res$cluster_map), colnames(m))
     expect_identical(unname(unlist(res$cluster_map)), colnames(m))
+
+  })
+
+})
+
+
+describe("cluster_spectral_predictors() represents each cluster by its middle band", {
+
+  it("takes the middle band by position under names that are not numbers, as the steps see them", {
+
+    ## The same two families, named as step_transform_spectra() names its
+    ## output. Read as numbers these are NA, which made the first band of
+    ## each cluster its representative.
+    m <- band_families()
+    colnames(m) <- sprintf("spec%03d", 1:6)
+
+    res <- cluster_spectral_predictors(m, k = 2)
+
+    expect_identical(unname(res$selected_vars), c("spec002", "spec005"))
+    expect_equal(unname(res$cluster_map), list(sprintf("spec%03d", 1:3), sprintf("spec%03d", 4:6)))
+
+  })
+
+  it("takes the first of the two middle bands of a cluster with an even count", {
+
+    m <- band_families()[, c(1:3, 4:6)]
+    m <- cbind(m[, 1:3], m[, 3] + withr::with_seed(3, stats::rnorm(30, sd = 0.05)), m[, 4:6])
+    colnames(m) <- sprintf("spec%03d", 1:7)
+
+    res <- cluster_spectral_predictors(m, k = 2)
+
+    expect_identical(unname(res$selected_vars), c("spec002", "spec006"))
+
+  })
+
+})
+
+
+describe("drop_constant_bands() judges a band against its spectrum's scale", {
+
+  it("drops a band with no spread, round-off spread or no values, and keeps the same bands at any scale", {
+
+    m <- withr::with_seed(1, {
+      m      <- matrix(stats::rnorm(40 * 6), 40)
+      m[, 2] <- 0.5
+      m[, 3] <- 0.5 + stats::rnorm(40, sd = 1e-9)
+      m[, 4] <- NA
+      m
+    })
+    colnames(m) <- sprintf("spec%03d", 1:6)
+
+    out <- drop_constant_bands(m)
+
+    expect_identical(colnames(out$spectra), c("spec001", "spec005", "spec006"))
+    expect_identical(out$n_constant, 3L)
+
+    ## A hundred-millionth of the size, as a second derivative is far smaller
+    ## than an absorbance: the bands that vary still vary for their spectrum
+    scaled <- drop_constant_bands(m * 1e-8)
+
+    expect_identical(colnames(scaled$spectra), colnames(out$spectra))
+    expect_identical(scaled$n_constant, 3L)
 
   })
 

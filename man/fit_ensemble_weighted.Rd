@@ -36,7 +36,9 @@ Default \code{DEFAULT_ENSEMBLE_SEED} (307).}
 (\code{ensemble()}'s).}
 }
 \value{
-The ensemble contract list from \code{\link[=build_ensemble_contract]{build_ensemble_contract()}}.
+The ensemble contract list from \code{\link[=build_ensemble_contract]{build_ensemble_contract()}}, with
+what the run recorded as attributes (\code{with_run_records()}). Runs inside
+\code{ensemble()}'s meta-learner unit, each step labelled.
 }
 \description{
 Combines member predictions by a fixed weighted average. With

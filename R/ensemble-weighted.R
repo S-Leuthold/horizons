@@ -40,7 +40,9 @@
 #' @param call The frame a member's failure to predict the test rows reports
 #'   (`ensemble()`'s).
 #'
-#' @return The ensemble contract list from [build_ensemble_contract()].
+#' @return The ensemble contract list from [build_ensemble_contract()], with
+#'   what the run recorded as attributes (`with_run_records()`). Runs inside
+#'   `ensemble()`'s meta-learner unit, each step labelled.
 #'
 #' @keywords internal
 #' @importFrom rlang .data
@@ -60,12 +62,12 @@ fit_ensemble_weighted <- function(object,
 
   ## Shared with ensemble UQ's per-fold calibration pass, which re-derives
   ## weights inside each fold's analysis set by the same rule.
-  weights <- derive_member_weights(
+  weights <- unit_step("member_weights", derive_member_weights(
     predictors = oof$predictors,
     truth      = oof$truth,
     members    = oof$members,
     optimize   = optimize
-  )
+  ))
 
   raw_weights <- weights$coef
 
@@ -96,17 +98,17 @@ fit_ensemble_weighted <- function(object,
   ## -------------------------------------------------------------------------
 
   ## Each member predicts the held-out Split-F test set (shared helper).
-  member_pred <- predict_members_on_test(object, members, call = call)
+  member_pred <- unit_step("test_predict", predict_members_on_test(object, members, call = call))
 
   ## Combine per-member test_F predictions by the weights, sample-aligned.
-  ensemble_pred <- member_pred |>
+  ensemble_pred <- unit_step("combine", member_pred |>
     dplyr::left_join(weights, by = c("config_id" = "member")) |>
     dplyr::group_by(.data$sample_id) |>
     dplyr::summarise(
       .pred = sum(.data$.pred * .data$coef),
       truth = dplyr::first(.data$truth),
       .groups = "drop"
-    )
+    ))
 
   ensemble_pred$.pred <- clamp_to_outcome_range(ensemble_pred$.pred, outcome_range)
 
@@ -114,7 +116,7 @@ fit_ensemble_weighted <- function(object,
   ## Step 4: Pack the contract (scoring is centralized in the builder)
   ## -------------------------------------------------------------------------
 
-  build_ensemble_contract(
+  contract <- unit_step("test_metrics", build_ensemble_contract(
     method        = "weighted",
     model         = weights,
     weights       = weights,
@@ -125,7 +127,9 @@ fit_ensemble_weighted <- function(object,
     oof_pred      = oof_pred,
     optimize      = optimize,
     seed          = seed
-  )
+  ))
+
+  with_run_records(contract, member_pred)
 
 }
 

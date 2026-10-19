@@ -462,7 +462,8 @@ unit_step <- function(step, expr) {
 #'
 #' @description
 #' The [unit_step()] labels inside [evaluate_single_config()],
-#' [fit_single_config()] and `predict_one_config()`, each with the words a
+#' [fit_single_config()], `predict_one_config()` and `ensemble()`'s
+#' meta-learner, each with the words a
 #' failed unit's `error_message` starts with ("Grid search failed: ..."). A
 #' label means the same step in every verb. A failure outside every step is named by the
 #' unit itself ([unit_failure_message()]).
@@ -488,6 +489,8 @@ UNIT_STEPS <- c(
   warm_start_grid     = "Warm-start grid search",
   warm_start_bayes    = "Warm-start Bayesian search",
   oof_predictions     = "OOF predictions",
+  oof_matrix          = "Out-of-fold matrix",
+  member_weights      = "Member weights",
   oof_back_transform  = "OOF back-transformation",
   final_fit           = "Final model fit",
   test_predict        = "Test prediction",
@@ -500,6 +503,7 @@ UNIT_STEPS <- c(
   ad_covariance       = "AD covariance",
   ad_calibration_bake = "AD calibration bake",
   ad_thresholds       = "AD thresholds",
+  selection_record    = "Selection record",
   bake                = "New-data bake",
   predict             = "Prediction",
   uq_bake             = "Interval recipe bake",
@@ -507,6 +511,8 @@ UNIT_STEPS <- c(
   ad_distance         = "Applicability-domain distance",
   combine             = "Ensemble combination",
   cv_plus_folds       = "CV+ fold predictions",
+  cv_plus_fold_models = "CV+ fold models",
+  cv_plus_diagnostics = "CV+ leave-self-out diagnostics",
   cv_plus_bounds      = "CV+ bounds"
 )
 
@@ -808,17 +814,20 @@ skipped_add_on <- function(what) {
 #'
 #' @param topic Character(1). One of `LOG_TOPICS`.
 #' @param message Character. A cli message, interpolated in `.envir`.
+#' @param ... Fields for the condition, e.g. `step`, which names the recipe
+#'   step that raised it ([quiet_selection_warnings()] reads it).
 #' @param .envir The environment the message is interpolated in.
 #' @return `NULL`, invisibly.
 #' @keywords internal
 #' @noRd
-warn_in_unit <- function(topic, message, .envir = rlang::caller_env()) {
+warn_in_unit <- function(topic, message, ..., .envir = rlang::caller_env()) {
 
   check_log_topic(topic)
 
   cli::cli_warn(
     message,
     class  = c(paste0("horizons_warning_", topic), "horizons_warning"),
+    ...,
     call   = NULL,
     .envir = .envir
   )
@@ -893,7 +902,7 @@ log_unit_records <- function(collector, records) {
     n_units <- length(ids)
 
     ### The text is substituted, not inlined, so braces in it stay text.
-    message <- c("{text}", "i" = "In {n_units} {unit}{cli::qty(n_units)}{?s}: {.val {ids}}.")
+    message <- c("{text}", "i" = unit_where(unit))
 
     if (identical(records$type[these][1], "note")) {
       log_note(collector, message, ids = ids)
@@ -904,6 +913,30 @@ log_unit_records <- function(collector, records) {
   }
 
   invisible(collector)
+
+}
+
+#' Where a unit's report came from, for its line on the log
+#'
+#' @description
+#' A configuration's or a member's line counts and names them ("In 2
+#' configurations: "a" and "b"."). An ensemble's units are one each, and
+#' are named for what they are rather than by their internal names ("In the
+#' ensemble's meta-learner ("penalized")."). Shared by [log_unit_records()]
+#' and `predict()`'s [log_foreign_warnings()].
+#'
+#' @param unit Character(1). The unit's name, from its records.
+#' @return Character(1): a cli template, interpolated where the line is
+#'   logged, with `unit`, `n_units` and `ids` in scope.
+#' @keywords internal
+#' @noRd
+unit_where <- function(unit) {
+
+  switch(unit,
+         meta_learner = "In the ensemble's meta-learner ({.val {ids}}).",
+         combination  = "In the ensemble's combination ({.val {ids}}).",
+         intervals    = "In the ensemble's prediction intervals.",
+         "In {n_units} {unit}{cli::qty(n_units)}{?s}: {.val {ids}}.")
 
 }
 

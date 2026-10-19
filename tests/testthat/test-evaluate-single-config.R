@@ -360,6 +360,11 @@ describe("evaluate_single_config() - failure paths", {
       expect_equal(result$status, "failed", label = model)
       expect_true(is.na(result$cv_rmse), label = model)
 
+      ## The step's own class and words on the row, not Boruta's error's
+      expect_identical(result$class, "horizons_error_boruta", label = model)
+      expect_match(result$error_message, "Boruta feature selection failed: Boruta could not run",
+                   fixed = TRUE, label = model)
+
     }
 
   })
@@ -1588,6 +1593,45 @@ describe("evaluate_single_config() - a PLS config", {
     num_comp <- param_info$object[[which(param_info$name == "num_comp")]]
     expect_equal(c(num_comp$range$lower, num_comp$range$upper), c(1, 12))
     expect_gt(min_analysis_rows(setup$folds) - 1, 12)
+
+  })
+
+})
+
+describe("evaluate_single_config() - a selection step's warning comes from the final fit's recipe", {
+
+  it("raises Boruta keeping every band once, for every model, read from the final fit", {
+
+    skip_if_not_installed("Boruta")
+
+    local_mocked_bindings(Boruta = mock_boruta_rejecting, .package = "Boruta")
+
+    ## 20 bands, 12 after the transform step's trim
+    wide <- make_eval_setup(n_wn = 20)
+
+    ## rf preps the recipe for its mtry bounds inside the unit, elastic_net
+    ## does not; either way the one warning is the final fit's, lifted with
+    ## its class, and the bounds prep's is not taken
+    for (model in c("rf", "elastic_net")) {
+
+      result <- evaluate_single_config(
+        config_row    = make_eval_config(model = model, feature_selection = "boruta"),
+        split         = wide$split,
+        cv_folds      = wide$folds,
+        role_map      = wide$role_map,
+        grid_size     = 2,
+        bayesian_iter = 0
+      )
+
+      rec <- attr(result, "unit_records")
+      hit <- rec[rec$type == "warning" & rec$class == "horizons_warning_substitution", , drop = FALSE]
+
+      expect_identical(result$status, "success", label = model)
+      expect_identical(nrow(hit), 1L, label = model)
+      expect_identical(hit$step, "selection_record", label = model)
+      expect_match(hit$message, "Boruta rejected all", fixed = TRUE, label = model)
+
+    }
 
   })
 

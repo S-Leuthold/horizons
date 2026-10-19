@@ -30,6 +30,70 @@
 #' derivatives) and *before* PCA or model fitting. CARS is particularly effective for
 #' identifying minimal wavelength sets that maintain predictive performance.
 #'
+#' CARS runs as its authors' code runs it (libPLS's `carspls`, with the
+#' randomised sampling of Li et al. 2009) on at most 150 cluster
+#' representatives of the selected columns (correlation clustering), after
+#' dropping near-constant columns (a variance not finite, zero, or at most a
+#' hundred-millionth of the median band's), for 50 iterations. Each iteration
+#' fits a PLS model on a Monte Carlo sample of 80% of the rows, only to
+#' weight the bands: its
+#' coefficients weight them afresh, an exponentially decreasing function
+#' keeps the most heavily weighted, as many as the next iteration may fit (so
+#' the fits run from every band down to two, as carspls schedules them), and
+#' adaptive reweighted sampling draws among those, by weight and with
+#' replacement, as many times as there are bands, keeping the bands drawn.
+#' After the loop every iteration's set is scored by 5-fold cross-validation
+#' over all the rows the step is given, on one partition shared by every set
+#' (the rows sorted by the outcome and dealt to the folds in turn, as
+#' carspls's `plscv` deals them), at the component count where its error is
+#' lowest. The scoring fits take up to 30 components (the PLS model's own
+#' cap), no more than the set's bands or the rows a fold's fit has, less one.
+#' The weight fits take the component count that scoring chose for the full
+#' set of representatives, computed once before the loop, no more than the
+#' sample's rows less one or the set's bands: the weights only rank the
+#' bands, and a fit of 30 components on a small sample ranks them by noise. The step returns the set with the lowest score (#106), the first
+#' on ties, each kept representative bringing its whole cluster. The trained
+#' step records this in its `cars` element: the bands it selected from
+#' (`n_bands`), the near-constant bands it dropped before (`n_constant`),
+#' whether they were clustered (`clustered`, `FALSE` with fewer than 150, when
+#' each band is its own representative), the representatives
+#' (`n_representatives`), each representative's cluster (`clusters`, a list
+#' of the bands it stands for, named by the representative), the `path` (a
+#' tibble, one row per iteration: its `representatives`, the bands their
+#' clusters hold `n_bands`, `rmsecv`, its standard error across the folds
+#' `se`, and the component count `ncomp`; iteration `i`'s bands are
+#' `unlist(cars$clusters[cars$path$representatives[[i]]])`), the iteration
+#' chosen, the bands kept, `retained_all` and `skipped`. `retained_all` is
+#' `TRUE` when the first iteration's set, every band, scored lowest: CARS's
+#' answer can be no selection. It is the scored answer, not a fallback, so
+#' the step does not warn.
+#' The score is the one CARS chose by, not an estimate of accuracy: the
+#' lowest of 50 is biased low, and `evaluate()`'s folds, which rerun the step
+#' on each analysis set, measure the configuration.
+#'
+#' CARS is not expected to beat no selection. On soil MIR spectra (organic
+#' carbon, in cross-validation with the selection nested), it was level with
+#' no selection at 200 samples and more, and trailed it by about 4% RMSE at
+#' 100 samples, where CARS fits about 80 rows. On an outcome the spectra do
+#' not carry it does slightly worse, since it always returns a subset and on
+#' noise keeps the bands whose noise happens to line up with the outcome.
+#' Compare a CARS configuration against `feature_selection = "none"`:
+#' `evaluate()`'s folds rerun the selection on each analysis set, so their
+#' metrics show whether it costs accuracy on your data.
+#'
+#' With fewer than two bands left after the near-constant ones are dropped,
+#' there is nothing to select between: the step keeps them, records
+#' `skipped = TRUE`, and warns with class `horizons_warning_skipped`.
+#'
+#' When you `tidy()` this step, a tibble is returned with columns `terms`
+#' and `id`: before `prep()`, `terms` holds the selectors; after, the columns
+#' the step removed, as recipes' filter steps report them (#109).
+#'
+#' Its refusals (an `outcome` that is not one column of the training data, a
+#' `bake()` before `prep()`, new data lacking a column it selected) carry the
+#' class `horizons_error_input`. Raised inside `prep()`, recipes wraps them in
+#' `recipes_error_step`, so test for the class with `rlang::cnd_inherits()`.
+#'
 #' @export
 
 ## -----------------------------------------------------------------------------
@@ -54,6 +118,7 @@ step_select_cars <- function(recipe,
                                         role          = role,
                                         trained       = trained,
                                         selected_vars = NULL,
+                                        cars          = NULL,
                                         skip          = skip,
                                         id            = id))
 }
@@ -65,6 +130,8 @@ step_select_cars <- function(recipe,
 ## Follows recipes' own contract: `terms` holds the selector quosures and
 ## survives prep, so a trained recipe can be re-prepped (`fresh = TRUE`);
 ## `columns` holds the names prep resolved them to, and is what bake reads.
+## `cars` is prep's record of what CARS did (see prep()); bake never reads it,
+## and a step trained before it existed has none.
 
 #' @keywords internal
 #' @noRd
@@ -74,6 +141,7 @@ step_select_cars_new <- function(terms,
                                  role,
                                  trained,
                                  selected_vars,
+                                 cars = NULL,
                                  skip,
                                  id) {
 
@@ -83,6 +151,7 @@ step_select_cars_new <- function(terms,
               role           = role,
               trained        = trained,
               selected_vars  = selected_vars,
+              cars           = cars,
               skip           = skip,
               id             = id )
 
@@ -106,14 +175,7 @@ prep.step_select_cars <- function(x, training, info = NULL, ...) {
   col_names <- recipes::recipes_eval_select(selectors, training, info)
 
   check_selection_columns(col_names, "step_select_cars")
-
-  if (!is.character(x$outcome) || length(x$outcome) != 1) {
-    cli::cli_abort("The {.arg outcome} must be a single character string.")
-  }
-
-  if (!x$outcome %in% names(training)) {
-    cli::cli_abort("Outcome column {.val {x$outcome}} not found in training data.")
-  }
+  check_step_outcome(x$outcome, training)
 
   outcome_vec  <- training[[x$outcome]]
   spectra_mat  <- as.matrix(training[, col_names, drop = FALSE])
@@ -121,6 +183,42 @@ prep.step_select_cars <- function(x, training, info = NULL, ...) {
   ## ---------------------------------------------------------------------------
   ## Stage 2: Cluster predictors before CARS
   ## ---------------------------------------------------------------------------
+  ## A band with no spread, relative to the spectrum's, has no correlation to
+  ## cluster on and nothing to select, so it is dropped before clustering, as
+  ## step_select_boruta() drops it, and counted on the record.
+
+  filtered    <- drop_constant_bands(spectra_mat)
+  spectra_mat <- filtered$spectra
+  n_constant  <- filtered$n_constant
+
+  ## Fewer than two bands left: there is nothing to select between, so they
+  ## are kept and the step says the selection did not run
+  if (ncol(spectra_mat) < SELECTION_MIN_BANDS[["step_select_cars"]]) {
+
+    kept <- colnames(spectra_mat)
+
+    return(raise_selection_warning(step_select_cars_new(
+      terms         = selectors,
+      columns       = col_names,
+      outcome       = x$outcome,
+      role          = x$role,
+      trained       = TRUE,
+      selected_vars = kept,
+      cars          = list(n_bands           = length(kept),
+                           n_constant        = n_constant,
+                           clustered         = FALSE,
+                           n_representatives = NA_integer_,
+                           clusters          = NULL,
+                           path              = NULL,
+                           iteration         = NA_integer_,
+                           n_kept            = length(kept),
+                           retained_all      = FALSE,
+                           skipped           = TRUE),
+      skip          = x$skip,
+      id            = x$id
+    )))
+
+  }
 
   cluster_spectral_predictors(spectra_mat,
                               k      = 150,
@@ -134,193 +232,224 @@ prep.step_select_cars <- function(x, training, info = NULL, ...) {
   ## ---------------------------------------------------------------------------
   ## Stage 3: Run CARS
   ## ---------------------------------------------------------------------------
+  ## As the authors' code runs it (libPLS's carspls, with the paper's
+  ## randomised sampling; Li et al. 2009). Each iteration fits PLS on a Monte
+  ## Carlo sample of the rows, using the bands entering it, only to weight
+  ## them: the coefficients weight the bands afresh, the exponentially
+  ## decreasing function keeps the K most heavily weighted (EDF), and
+  ## adaptive reweighted sampling draws as many times as there are bands,
+  ## with replacement, by weight among those K, keeping the bands drawn (ARS).
 
-  # CARS parameters
-  n_iterations   <- 50
-  mc_ratio       <- 0.8
-  n_components   <- min(5, floor(nrow(reduced_mat) / 3))
-  
-  # Initialize
-  n_samples      <- nrow(reduced_mat)
-  n_vars         <- ncol(reduced_mat)
-  selected_vars  <- seq_len(n_vars)
-  weights        <- rep(1, n_vars)
-  rmsecv_values  <- numeric(n_iterations)
-  decay          <- exp(log(2 / n_vars) / (n_iterations - 1))
+  n_iterations <- 50
+  mc_ratio     <- 0.8
 
-  for (iter in 1:n_iterations) {
+  n_samples <- nrow(reduced_mat)
+  n_mc      <- floor(n_samples * mc_ratio)
+  n_vars    <- ncol(reduced_mat)
+  decay     <- exp(log(2 / n_vars) / (n_iterations - 1))
 
-    # Safety check - need at least 2 variables for meaningful PLS
-    if(length(selected_vars) < 2) {
-      break
-    }
+  ## The partition every set is scored on, and the full set's score on it,
+  ## computed once before the loop. The weight fits take the component
+  ## count that score chose: the weights only rank the bands, and a fit of
+  ## as many components as the cap allows, on a Monte Carlo sample of 64 to
+  ## 128 rows, ranked them by noise (CARS was 10 to 12% worse than no
+  ## selection on organic carbon at those sizes). libPLS's own default for
+  ## the weight fit is two components.
+  folds       <- cars_folds(outcome_vec, 5L)
+  full        <- cars_score_subset(reduced_mat, outcome_vec, folds, PLS_MAX_COMP)
+  weight_comp <- full$ncomp
 
-    # Exponentially decreasing retention: n_vars \u2192 2 over n_iterations
-    n_keep         <- max(2, floor(n_vars * decay^(iter - 1)))
-    n_keep         <- min(n_keep, length(selected_vars))
-    
-    # Monte Carlo sampling
-    mc_samples     <- sample(n_samples, floor(n_samples * mc_ratio))
-    
-    # Weighted PLS on selected variables
-    X_subset       <- reduced_mat[mc_samples, selected_vars, drop = FALSE]
-    X_weighted     <- sweep(X_subset, 2, weights[selected_vars], "*")
-    y_subset       <- outcome_vec[mc_samples]
-    
-    # Fit PLS model (need to create a data frame for the formula interface)
-    pls_data       <- as.data.frame(X_weighted)
-    pls_data$y     <- y_subset
-    
-    # Determine number of components safely
-    n_comp_use <- min(n_components, ncol(X_weighted) - 1)
-    if(n_comp_use < 1) n_comp_use <- 1
-    
-    pls_fit        <- pls::plsr(y ~ ., 
-                                data       = pls_data,
-                                ncomp      = n_comp_use,
-                                validation = "LOO")
-    
-    # Get variable importance from regression coefficients
-    coef_result    <- coef(pls_fit, ncomp = n_comp_use)
-    
-    # Handle matrix, array, and vector cases robustly
-    var_importance <- tryCatch({
-      if(is.array(coef_result) && length(dim(coef_result)) > 1 && dim(coef_result)[2] >= 1) {
-        # Matrix case with at least 1 column
-        abs(coef_result[, 1])
-      } else {
-        # Vector case or degenerate matrix
-        abs(as.vector(coef_result))
-      }
-    }, error = function(e) {
-      # Ultimate fallback - flatten everything
-      abs(as.vector(coef_result))
-    })
-    
-    # Update weights using EDF (Exponentially Decreasing Function)
-    weights[selected_vars] <- weights[selected_vars] * var_importance
-    
-    # Select variables based on importance
-    importance_threshold <- sort(var_importance, decreasing = TRUE)[min(n_keep, length(var_importance))]
-    keep_indices        <- which(var_importance >= importance_threshold)
-    selected_vars       <- selected_vars[keep_indices]
-    
-    # Calculate RMSECV for monitoring  
-    rmsecv_values[iter] <- tryCatch({
-      sqrt(mean(pls::RMSEP(pls_fit, estimate = "CV")$val[1, , ]))
-    }, error = function(e) {
-      # Fallback: use validation stats if available
-      if(!is.null(pls_fit$validation)) {
-        sqrt(mean((pls_fit$validation$PRESS)/(nrow(pls_data))))
-      } else {
-        # Ultimate fallback
-        NA_real_
-      }
-    })
-    
-    # Early stopping if only one variable left
-    if (length(selected_vars) <= 1) break
-  }
-  
-  # Find optimal subset based on minimum RMSECV
-  optimal_iter <- which.min(rmsecv_values[1:iter])
-  
-  # Check if we found a valid optimal iteration
-  if (length(optimal_iter) == 0 || is.na(optimal_iter)) {
+  selected <- seq_len(n_vars)
+  sets     <- vector("list", n_iterations)
 
-    # No valid iteration found \u2014 keep all predictors as safe fallback
-    return(step_select_cars_new(
-      terms         = selectors,
-      columns       = col_names,
-      outcome       = x$outcome,
-      role          = x$role,
-      trained       = TRUE,
-      selected_vars = col_names,
-      skip          = x$skip,
-      id            = x$id
-    ))
+  for (iter in seq_len(n_iterations)) {
+
+    sets[[iter]] <- selected
+
+    ## EDF's count for the next iteration's set, as carspls computes it after
+    ## each fit (ratio a * exp(-b * (iter + 1))): the set fitted at iteration
+    ## i holds at most n_vars * decay^(i - 1) bands, every band at the first
+    ## and two at the last
+    n_keep     <- min(max(2, floor(n_vars * decay^iter)), length(selected))
+    mc_samples <- sample(n_samples, n_mc)
+
+    pls_data   <- as.data.frame(reduced_mat[mc_samples, selected, drop = FALSE])
+    pls_data$y <- outcome_vec[mc_samples]
+
+    ### The full set's CV-chosen count, limited as carspls's pls() limits a
+    ### fit, by the rows (less one) and the bands; a single band is fitted
+    ### with one.
+    n_comp  <- max(1, min(weight_comp, n_mc - 1, length(selected)))
+    pls_fit <- pls::plsr(y ~ ., data = pls_data, ncomp = n_comp)
+
+    ## Weights from this fit's coefficients alone (coef() on a pls fit is a
+    ## bands x 1 x 1 array)
+    w <- abs(as.vector(stats::coef(pls_fit, ncomp = n_comp)))
+    w <- w / sum(w)
+
+    edf      <- order(w, decreasing = TRUE)[seq_len(n_keep)]
+    drawn    <- edf[sample.int(length(edf), n_vars, replace = TRUE, prob = w[edf])]
+    selected <- selected[sort(unique(drawn))]
 
   }
-  
-  # Rerun to optimal iteration to get final variable set
-  selected_vars <- seq_len(n_vars)
-  weights      <- rep(1, n_vars)
-  
-  for (i in 1:optimal_iter) {
-    # Safety check
-    if(length(selected_vars) < 2) {
-      break
-    }
-    
-    n_keep        <- max(2, floor(n_vars * decay^(i - 1)))
-    n_keep        <- min(n_keep, length(selected_vars))
-    mc_samples    <- sample(n_samples, floor(n_samples * mc_ratio))
-    
-    X_subset      <- reduced_mat[mc_samples, selected_vars, drop = FALSE]
-    X_weighted    <- sweep(X_subset, 2, weights[selected_vars], "*")
-    y_subset      <- outcome_vec[mc_samples]
-    
-    # Create data frame for PLS
-    pls_data      <- as.data.frame(X_weighted)
-    pls_data$y    <- y_subset
-    
-    # Determine number of components safely
-    n_comp_use    <- min(n_components, ncol(X_weighted) - 1)
-    if(n_comp_use < 1) n_comp_use <- 1
-    
-    pls_fit       <- pls::plsr(y ~ .,
-                               data       = pls_data,
-                               ncomp      = n_comp_use,
-                               validation = "LOO")
-    
-    coef_result   <- coef(pls_fit, ncomp = n_comp_use)
-    
-    # Handle matrix, array, and vector cases robustly
-    var_importance <- tryCatch({
-      if(is.array(coef_result) && length(dim(coef_result)) > 1 && dim(coef_result)[2] >= 1) {
-        # Matrix case with at least 1 column
-        abs(coef_result[, 1])
-      } else {
-        # Vector case or degenerate matrix
-        abs(as.vector(coef_result))
-      }
-    }, error = function(e) {
-      # Ultimate fallback - flatten everything
-      abs(as.vector(coef_result))
-    })
-    
-    weights[selected_vars] <- weights[selected_vars] * var_importance
-    
-    importance_threshold <- sort(var_importance, decreasing = TRUE)[min(n_keep, length(var_importance))]
-    keep_indices        <- which(var_importance >= importance_threshold)
-    selected_vars       <- selected_vars[keep_indices]
-  }
-  
-  kept_cluster_vars <- cluster_vars[selected_vars]
+
+  ## After the loop, as carspls scores them: every iteration's set by 5-fold
+  ## CV over all the rows the step is given, on one partition shared by
+  ## every set, so the sets are compared on the same rows. The set with the
+  ## lowest score is returned (#106), the first on ties.
+  scored <- cars_score_path(reduced_mat, outcome_vec, sets, folds, PLS_MAX_COMP, first = full)
+  best   <- which.min(scored$rmsecv)
+
+  kept_cluster_vars <- cluster_vars[sets[[best]]]
 
   ## ---------------------------------------------------------------------------
   ## Stage 4: Map back to original wavenumbers
   ## ---------------------------------------------------------------------------
+  ## Each kept representative brings its whole cluster.
 
   kept_wavenumbers <- unique(unlist(cluster_map[kept_cluster_vars]))
 
-  if (length(kept_wavenumbers) == 0) {
-    cli::cli_alert_warning("No wavenumbers retained by CARS. Retaining all original predictors.")
-    kept_wavenumbers <- col_names
-  }
+  ## The path, recorded on the step: each iteration's set (its
+  ## representatives, and how many bands their clusters hold), its score,
+  ## the score's standard error across the folds, and its component count.
+  ## The score is the one CARS chose by, biased low as the least of 50. A
+  ## set's bands are its representatives' clusters, which the record keeps
+  ## once (`clusters`) rather than once per iteration.
+  representatives <- lapply(sets, function(s) unname(cluster_vars[s]))
+  clusters        <- unname(cluster_map[cluster_vars])
+  names(clusters) <- unname(cluster_vars)
+
+  path <- tibble::tibble(
+    iteration       = seq_len(n_iterations),
+    representatives = representatives,
+    n_bands         = vapply(representatives, function(r) length(unlist(clusters[r])), integer(1)),
+    rmsecv          = scored$rmsecv,
+    se              = scored$se,
+    ncomp           = scored$ncomp
+  )
+
+  cars_record <- list(n_bands           = ncol(spectra_mat),
+                      n_constant        = n_constant,
+                      clustered         = cluster_result$clustered,
+                      n_representatives = n_vars,
+                      clusters          = clusters,
+                      path              = path,
+                      iteration         = best,
+                      n_kept            = length(kept_wavenumbers),
+                      retained_all      = best == 1L,
+                      skipped           = FALSE)
 
   ## ---------------------------------------------------------------------------
   ## Stage 5: Return trained step
   ## ---------------------------------------------------------------------------
 
-  step_select_cars_new(terms          = selectors,
-                      columns        = col_names,
-                      outcome        = x$outcome,
-                      role           = x$role,
-                      trained        = TRUE,
-                      selected_vars  = kept_wavenumbers,
-                      skip           = x$skip,
-                      id             = x$id)
+  raise_selection_warning(step_select_cars_new(
+    terms          = selectors,
+    columns        = col_names,
+    outcome        = x$outcome,
+    role           = x$role,
+    trained        = TRUE,
+    selected_vars  = kept_wavenumbers,
+    cars           = cars_record,
+    skip           = x$skip,
+    id             = x$id
+  ))
+}
+
+
+## -----------------------------------------------------------------------------
+## CARS's scoring, as carspls runs it
+## -----------------------------------------------------------------------------
+
+#' The folds CARS scores every set on
+#'
+#' @description
+#' As libPLS's `plscv(order = 0)` partitions: the rows sorted by the outcome
+#' and dealt to the folds in turn, so each fold spans the outcome's range and
+#' the partition is the same for every set scored.
+#'
+#' @param y Numeric outcome.
+#' @param k Integer. The number of folds.
+#' @return List of `k` integer vectors of row indices.
+#' @keywords internal
+#' @noRd
+cars_folds <- function(y, k) {
+
+  sorted <- order(y)
+
+  unname(split(sorted, 1 + (seq_along(sorted) - 1) %% k))
+
+}
+
+#' Score one set of bands by cross-validated PLS
+#'
+#' @description
+#' One PLS fit per fold on the other folds' rows, predicting the fold's rows,
+#' at every component count up to `max_comp`, limited by the bands and by
+#' the rows a fold's fit is given (less one). The score is the root mean
+#' squared error over all rows at the component count where it is lowest
+#' (carspls's `selectLV = 0`; its default one-standard-deviation rule is not
+#' used), the intercept-only model left out.
+#'
+#' @param X Numeric matrix, the set's bands.
+#' @param y Numeric outcome.
+#' @param folds From [cars_folds()].
+#' @param max_comp Integer. The most components a fit may take.
+#' @return List: `rmsecv`, `se` (the standard error of the folds' RMSE at
+#'   that count) and `ncomp`.
+#' @keywords internal
+#' @noRd
+cars_score_subset <- function(X, y, folds, max_comp) {
+
+  n_comp <- max(1, min(max_comp, ncol(X), nrow(X) - max(lengths(folds)) - 1))
+
+  data   <- as.data.frame(X)
+  data$y <- y
+
+  fit <- pls::plsr(y ~ ., data = data, ncomp = n_comp, validation = "CV", segments = folds)
+
+  rmsep <- pls::RMSEP(fit, estimate = "CV", intercept = FALSE)$val[1, 1, ]
+  ncomp <- unname(which.min(rmsep))
+
+  errors    <- (fit$validation$pred[, 1, ncomp] - y)^2
+  fold_rmse <- vapply(folds, function(f) sqrt(mean(errors[f])), numeric(1))
+
+  list(rmsecv = unname(rmsep[ncomp]),
+       se     = stats::sd(fold_rmse) / sqrt(length(folds)),
+       ncomp  = ncomp)
+
+}
+
+#' Score every iteration's set, each distinct set once
+#'
+#' @param X Numeric matrix, the representatives.
+#' @param y Numeric outcome.
+#' @param sets List of integer vectors, the columns of `X` each iteration
+#'   fitted.
+#' @param folds From [cars_folds()].
+#' @param max_comp Integer. The most components a fit may take.
+#' @param first The first set's score, from [cars_score_subset()], when it is
+#'   already computed (the full set, scored before the loop); `NULL` to score
+#'   it here.
+#' @return Tibble, one row per iteration: `rmsecv`, `se` and `ncomp`.
+#' @keywords internal
+#' @noRd
+cars_score_path <- function(X, y, sets, folds, max_comp, first = NULL) {
+
+  key      <- vapply(sets, paste, character(1), collapse = ",")
+  distinct <- unique(key)
+
+  scored <- lapply(distinct, function(k) {
+    if (!is.null(first) && identical(k, key[1])) return(first)
+    cars_score_subset(X[, sets[[match(k, key)]], drop = FALSE], y, folds, max_comp)
+  })[match(key, distinct)]
+
+  tibble::tibble(
+    rmsecv = vapply(scored, `[[`, numeric(1), "rmsecv"),
+    se     = vapply(scored, `[[`, numeric(1), "se"),
+    ncomp  = vapply(scored, `[[`, integer(1), "ncomp")
+  )
+
 }
 
 
@@ -332,12 +461,11 @@ prep.step_select_cars <- function(x, training, info = NULL, ...) {
 bake.step_select_cars <- function(object, new_data, ...) {
 
   if (is.null(object$selected_vars)) {
-    cli::cli_abort("This step has not been trained yet. Please call `prep()` first.")
+    abort_horizons("This step has not been trained yet. Please call `prep()` first.",
+                   kind = "input")
   }
 
-  if (!all(object$selected_vars %in% names(new_data))) {
-    cli::cli_abort("Some selected wavenumbers are missing in new_data.")
-  }
+  check_step_new_data(object, new_data)
 
   ## Retain: selected spectral vars + all non-spectral columns
   keep_cols <- c(object$selected_vars,
@@ -357,11 +485,17 @@ print.step_select_cars <- function(x,
                                    width = max(20, options()$width - 30),
                                    ...) {
 
+  ## glue() trims a trailing newline, so each line ends with its own.
   cat("CARS-based spectral feature selection step\n")
-  cat(glue::glue("\u2022 Outcome column: {x$outcome}\n"))
+  cat(glue::glue("\u2022 Outcome column: {x$outcome}"), "\n", sep = "")
 
   if (x$trained) {
-    cat(glue::glue("\u2022 {length(x$selected_vars)} wavenumbers retained after CARS\n"))
+    cat(glue::glue("\u2022 {length(x$selected_vars)} wavenumbers retained after CARS"), "\n", sep = "")
+    print_constant_bands(x$cars)
+    if (isFALSE(x$cars$clustered) && !isTRUE(x$cars$skipped)) {
+      cat("\u2022 Fewer bands than 150, so each band was its own representative\n")
+    }
+    if (isTRUE(x$cars$skipped)) print_selection_skipped(x)
   } else {
     cat("\u2022 Step not yet trained\n")
   }
@@ -390,5 +524,25 @@ print.step_select_cars <- function(x,
 required_pkgs.step_select_cars <- function(x, ...) {
 
   c("pls", "horizons")
+
+}
+
+
+## ---------------------------------------------------------------------------
+## tidy
+## ---------------------------------------------------------------------------
+
+#' The columns step_select_cars() removed
+#'
+#' @param x A `step_select_cars` step.
+#' @param ... Not used.
+#' @return Tibble with `terms` and `id` ([tidy_selection_step()]).
+#' @importFrom recipes tidy
+#' @keywords internal
+#' @noRd
+#' @export
+tidy.step_select_cars <- function(x, ...) {
+
+  tidy_selection_step(x)
 
 }

@@ -48,12 +48,32 @@ Designed for use with high-resolution MIR spectra in wide format (columns = wave
 The selection algorithm slides a 3-wavenumber window (6 cm-1 at 2 cm-1 resolution) across
 the spectrum, computes the mean absolute Spearman correlation between each window and
 the outcome, and retains all wavenumbers from windows where the score exceeds
-\verb{mean + 1 SD}. Duplicate selections are collapsed. If no windows meet the threshold,
-all input wavenumbers are retained with a warning.
+\verb{mean + 1 SD}. Duplicate selections are collapsed. If no window meets the
+threshold, every input wavenumber is retained, the trained step records
+\code{retained_all = TRUE}, and the step warns with class
+\code{horizons_warning_substitution} (#105).
+
+With fewer than five bands there are fewer than three windows, and the
+threshold cannot select among them (one window has no standard deviation,
+and two windows' mean plus one standard deviation lies above the higher):
+the step keeps the bands and warns with class \code{horizons_warning_skipped},
+rather than report a substitution it could not have avoided. The
+trained step records what it did in its \code{correlation} element: the bands
+it scored, the threshold, the windows scored and kept, \code{retained_all} and
+\code{skipped}.
 
 This step is designed to operate on spectra that have already been preprocessed
 (e.g., SNV + derivative). It should be applied after spectral transformation but
 before dimensionality reduction (e.g., PCA) or model fitting.
+
+When you \code{tidy()} this step, a tibble is returned with columns \code{terms}
+and \code{id}: before \code{prep()}, \code{terms} holds the selectors; after, the columns
+the step removed, as recipes' filter steps report them (#109).
+
+Its refusals (an \code{outcome} that is not one column of the training data, a
+\code{bake()} before \code{prep()}, new data lacking a column it selected) carry the
+class \code{horizons_error_input}. Raised inside \code{prep()}, recipes wraps them in
+\code{recipes_error_step}, so test for the class with \code{rlang::cnd_inherits()}.
 }
 \seealso{
 \code{\link[recipes:recipe]{recipes::recipe()}}, \code{\link[recipes:prep]{recipes::prep()}}, \code{\link[recipes:bake]{recipes::bake()}}

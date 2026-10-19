@@ -161,7 +161,11 @@
 #' early keeps the iterations it finished; one whose search failed before any
 #' iteration, or added nothing to the grid, keeps the grid's choice. Either
 #' says so in its `warnings` and is named in one
-#' `horizons_warning_substitution`. With
+#' `horizons_warning_substitution`. A configuration whose feature-selection
+#' step kept every band (`horizons_warning_substitution`), confirmed nothing
+#' (`horizons_warning_quality`) or had too few bands to select from
+#' (`horizons_warning_skipped`) is named in that topic's warning, whatever
+#' the model: what the step did is read from the final fit's recipe. With
 #' `control_horizons(debug = TRUE)` nothing is contained: the first failure,
 #' inside tuning included, stops the call with its backtrace, and the
 #' Bayesian search is not fallen back from.
@@ -1700,13 +1704,15 @@ abort_breaker_trip <- function(breaker,
 #' reaches here as the unit's `horizons_error_systemic`, which no unit
 #' contains either ([worker_death_signal()]). Either is turned into
 #' `horizons_error_systemic`, chained to the error, with the rows finished so
-#' far; every other error passes through untouched.
+#' far when the verb has rows; every other error passes through untouched.
 #'
 #' @param expr The work that dispatches to workers.
 #' @param results The results table finished so far, carried as `results`;
-#'   evaluated only when a worker dies.
+#'   evaluated only when a worker dies. `NULL` when the verb has no rows to
+#'   carry (`ensemble()`), and then the message promises none.
 #' @param output_dir The run's `output_dir`, or `NULL`.
-#' @param verb Character(1). The verb that stops, `"evaluate"` or `"fit"`.
+#' @param verb Character(1). The verb that stops: `"evaluate"`, `"fit"` or
+#'   `"ensemble"`.
 #' @param call The frame the error reports.
 #' @return The value of `expr`.
 #' @keywords internal
@@ -1723,10 +1729,10 @@ stop_on_worker_death <- function(expr, results, output_dir = NULL, verb = "evalu
 
     abort_horizons(c(
       "A parallel worker stopped while {.fn {verb}} was running, so the run cannot go on.",
-      "i" = if (is.null(output_dir)) {
-        "The rows finished so far are in this error's {.field results} field."
-      } else {
+      "i" = if (!is.null(output_dir)) {
         "The configurations finished are checkpointed in {.path {output_dir}}; calling {.fn {verb}} again with it resumes from them."
+      } else if (!is.null(results)) {
+        "The rows finished so far are in this error's {.field results} field."
       }
     ), kind = "run", class = "horizons_error_systemic", parent = e,
     results = results, call = call)

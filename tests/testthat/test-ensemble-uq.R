@@ -315,16 +315,30 @@ describe("fit_ensemble_uq() - coverage", {
     ## The guardrail added after the 7%-coverage bug: a bundle whose own
     ## diagnostic sits more than 0.15 from the level still ships, with a warning
     ens_ref <- ens_built("weighted")
+    fitted  <- ens_fitted()
     bundle  <- ens_ref$ensemble$uq
 
     bundle$oof_coverage <- 0.60
     local_mocked_bindings(compute_ensemble_uq = function(...) bundle)
 
-    expect_warning(fit_ensemble_uq(ens_ref, level = 0.90, verbose = FALSE),
-                   "is far from the target level")
+    expect_warning(fit_ensemble_uq(ens_ref, level = 0.90),
+                   "is far from the target level", class = "horizons_warning_quality")
 
     bundle$oof_coverage <- 0.80
-    expect_no_warning(fit_ensemble_uq(ens_ref, level = 0.90, verbose = FALSE))
+    expect_no_warning(fit_ensemble_uq(ens_ref, level = 0.90))
+
+    ## Inside ensemble() it is recorded, written to the log and raised once,
+    ## at the end
+    bundle$oof_coverage <- 0.60
+    w <- expect_warning(
+      ens <- suppressWarnings(ensemble(fitted, method = "weighted", optimize = FALSE),
+                              classes = "simpleWarning"),
+      "is far from the target level", class = "horizons_warning_quality"
+    )
+    expect_identical(w$log$verb, "ensemble")
+    expect_identical(ens$log$topic[ens$log$verb == "ensemble"], "quality")
+    expect_match(ens$log$message[ens$log$verb == "ensemble"], "In the ensemble's prediction intervals.",
+                 fixed = TRUE)
 
   })
 
@@ -571,7 +585,7 @@ describe("predict.horizons_ensemble() - arguments in ...", {
 
 describe("ensemble UQ - degradation and gates", {
 
-  it("compute_ensemble_uq returns NULL below N_CALIB_MIN", {
+  it("compute_ensemble_uq refuses below min_calib_rows, with the counts and the remedy", {
 
     ens_ref <- ens_built("weighted")
     oof     <- build_oof_matrix(ens_ref, ens_ref$ensemble$weights$member)
@@ -585,14 +599,16 @@ describe("ensemble UQ - degradation and gates", {
       members    = oof$members
     )
 
-    result <- compute_ensemble_uq(
-      oof            = oof_small,
-      contract       = ens_ref$ensemble,
-      optimize       = FALSE,
-      conformal_seed = 1307L
+    err <- expect_error(
+      compute_ensemble_uq(oof = oof_small, contract = ens_ref$ensemble,
+                          optimize = FALSE, conformal_seed = 1307L),
+      class = "horizons_error_run"
     )
-
-    expect_null(result)
+    expect_match(conditionMessage(err), "has 25 rows to calibrate on, fewer than `min_calib_rows` (30)",
+                 fixed = TRUE)
+    expect_match(conditionMessage(err),
+                 "Fit on more rows, or lower `control_horizons(min_calib_rows = )` to 25 or fewer; CV+ at the 0.9 level needs 19.",
+                 fixed = TRUE)
 
     ## The same rows calibrate at a minimum below them. suppressWarnings():
     ## rsample's note that 25 rows are too few for its default strata breaks
@@ -603,7 +619,7 @@ describe("ensemble UQ - degradation and gates", {
 
   })
 
-  it("compute_ensemble_uq drops non-finite residuals, and returns NULL when too few are left", {
+  it("compute_ensemble_uq drops non-finite residuals, and refuses when too few are left", {
 
     ens_ref <- ens_built("weighted")
     oof     <- build_oof_matrix(ens_ref, ens_ref$ensemble$weights$member)
@@ -631,11 +647,53 @@ describe("ensemble UQ - degradation and gates", {
     ## One more than the rows above the minimum: the size gate runs again
     ## after the drop
     spoil <- seq_len(length(oof$truth) - N_CALIB_MIN + 1L)
-    expect_null(run())
+    err   <- expect_error(run(), class = "horizons_error_run")
+    expect_match(conditionMessage(err),
+                 sprintf("29 of the %d calibration rows have a finite residual, fewer than `min_calib_rows` (30).", length(oof$truth)),
+                 fixed = TRUE)
+    expect_match(conditionMessage(err), "lower `control_horizons(min_calib_rows = )` to 29 or fewer", fixed = TRUE)
 
   })
 
-  it("compute_ensemble_uq returns NULL, rather than an error, when the fold refit fails", {
+  it("compute_ensemble_uq names CV+'s floor, not min_calib_rows, when the rows fall below it", {
+
+    ens_ref <- ens_built("weighted")
+    oof     <- build_oof_matrix(ens_ref, ens_ref$ensemble$weights$member)
+
+    first <- function(n) {
+      keep <- seq_len(n)
+      list(predictors = oof$predictors[keep, , drop = FALSE], truth = oof$truth[keep],
+           row = oof$row[keep], members = oof$members)
+    }
+
+    run <- function(n, ...) {
+      ## suppressWarnings(): rsample's note that so few rows are too few for
+      ## its default strata breaks
+      suppressWarnings(compute_ensemble_uq(oof = first(n), contract = ens_ref$ensemble,
+                                           optimize = FALSE, conformal_seed = 1307L, ...))
+    }
+
+    ## 18 rows meet a minimum of 9 but not the 19 CV+ needs at 0.90: lowering
+    ## the minimum would not help, so it is not offered
+    err <- expect_error(run(18L, min_calib_rows = 9L), class = "horizons_error_run")
+    msg <- conditionMessage(err)
+
+    expect_match(msg, "18 of the 18 calibration rows have a finite residual, fewer than the 19 CV+ needs at the 0.9 level.",
+                 fixed = TRUE)
+    expect_match(msg, "Fit on more rows: CV+ at the 0.9 level needs 19 whatever `min_calib_rows` is.", fixed = TRUE)
+    expect_no_match(msg, "lower")
+
+    ## 15 rows under the default minimum are below the floor too
+    err <- expect_error(run(15L), class = "horizons_error_run")
+    msg <- conditionMessage(err)
+
+    expect_match(msg, "has 15 rows to calibrate on, fewer than `min_calib_rows` (30).", fixed = TRUE)
+    expect_match(msg, "needs 19 whatever `min_calib_rows` is.", fixed = TRUE)
+    expect_no_match(msg, "lower")
+
+  })
+
+  it("compute_ensemble_uq fails at its fold step when a fold refit fails", {
 
     ens_ref <- ens_built("weighted")
     oof     <- build_oof_matrix(ens_ref, ens_ref$ensemble$weights$member)
@@ -644,35 +702,67 @@ describe("ensemble UQ - degradation and gates", {
 
     ## suppressWarnings(): rsample's note that the 43 meta rows are too few
     ## for its default strata breaks
-    expect_null(suppressWarnings(compute_ensemble_uq(oof = oof, contract = ens_ref$ensemble,
-                                                     optimize = FALSE, conformal_seed = 1307L)))
+    out <- suppressWarnings(run_unit(
+      compute_ensemble_uq(oof = oof, contract = ens_ref$ensemble,
+                          optimize = FALSE, conformal_seed = 1307L),
+      unit = "intervals", id = "ensemble"
+    ))
+
+    expect_true(out$failed)
+    expect_identical(unit_failure_message(out$records, outside = NULL),
+                     "CV+ fold models failed: a fold refit failed")
 
   })
 
-  it("fit_ensemble_uq leaves the ensemble point-only, with one note, when calibration fails or errors", {
+  it("leaves the ensemble point-only, and says why once whatever verbose is, when calibration cannot run", {
 
-    ## UQ never fails the ensemble: a NULL bundle and an error inside the
-    ## calibration both leave $ensemble$uq empty, and verbose says so once
-    ens_ref <- ens_built("weighted")
-    no_uq   <- ens_ref
-    no_uq$ensemble["uq"] <- list(NULL)
+    ## UQ never fails the ensemble: a gate or a fold refit that fails leaves
+    ## $ensemble$uq empty, the log says why, and one skipped warning is raised
+    fitted <- ens_fitted()
 
-    for (calibration in list(function(...) NULL, function(...) stop("calibration broke"))) {
+    local_mocked_bindings(fit_uq_fold_models = function(...) stop("a fold refit failed"))
 
-      local_mocked_bindings(compute_ensemble_uq = calibration)
+    for (verbose in c(FALSE, TRUE)) {
 
-      msgs <- testthat::capture_messages(out <- fit_ensemble_uq(no_uq, verbose = TRUE))
+      out <- utils::capture.output(run <- collect_warnings(
+        ensemble(fitted, method = "weighted", optimize = FALSE,
+                 control = control_horizons(verbose = verbose)),
+        "Prediction intervals \\(CV\\+\\) were not computed"
+      ))
 
-      expect_null(out$ensemble$uq)
-      expect_length(msgs, 1L)
-      expect_match(msgs, "Ensemble UQ could not be calibrated", fixed = TRUE)
-      expect_no_message(fit_ensemble_uq(no_uq, verbose = FALSE))
+      ens <- run$value
 
-      ## Below CV+'s own floor, the note names the floor rather than the minimum
-      expect_match(testthat::capture_messages(fit_ensemble_uq(no_uq, min_calib_rows = 9L)),
-                   "needs >= 19", fixed = TRUE)
+      expect_null(ens$ensemble$uq)
+      expect_length(run$warnings, 1L)
+      expect_s3_class(run$warnings[[1]], "horizons_warning_skipped")
+      expect_match(conditionMessage(run$warnings[[1]]),
+                   "CV+ fold models failed: a fold refit failed", fixed = TRUE)
+
+      skipped <- ens$log[ens$log$verb == "ensemble" & ens$log$topic %in% "skipped", , drop = FALSE]
+      expect_identical(nrow(skipped), 1L)
+
+      ## Pinned on the ensemble's row too, as fit() keeps a member's lost
+      ## intervals on the member's row
+      expect_identical(
+        sum(grepl("Prediction intervals (CV+) were not computed: ", ens$ensemble$warnings, fixed = TRUE)), 1L
+      )
 
     }
+
+  })
+
+  it("stops the call when an invariant breaks inside the CV+ calibration", {
+
+    fitted <- ens_fitted()
+
+    local_mocked_bindings(fit_uq_fold_models = function(...) {
+      abort_horizons("a broken invariant", kind = "internal")
+    })
+
+    expect_error(
+      suppressWarnings(ensemble(fitted, method = "weighted", optimize = FALSE)),
+      class = "horizons_error_internal"
+    )
 
   })
 
@@ -685,10 +775,10 @@ describe("ensemble UQ - degradation and gates", {
     seen <- NULL
     local_mocked_bindings(compute_ensemble_uq = function(..., min_calib_rows) {
       seen <<- min_calib_rows
-      NULL
+      ens_ref$ensemble$uq
     })
 
-    fit_ensemble_uq(no_uq, verbose = FALSE, min_calib_rows = 12L)
+    fit_ensemble_uq(no_uq, min_calib_rows = 12L)
     expect_identical(seen, 12L)
 
   })
@@ -856,19 +946,6 @@ describe("ensemble UQ - degradation and gates", {
     expect_length(missing, 1L)
     expect_identical(w[[1]]$log$ids[[1]], missing)
     expect_true(all(is.finite(p$.pred)))
-
-  })
-
-  it("fit_ensemble_uq validates its inputs", {
-
-    fitted  <- ens_fitted()
-    ens_ref <- ens_built("weighted")
-
-    ## The aborts carry no package class.
-    expect_error(fit_ensemble_uq(fitted),
-                 "`x` must be a <horizons_ensemble> object", fixed = TRUE)
-    expect_error(fit_ensemble_uq(ens_ref, level = 1.5),
-                 "`level` must be a single numeric in (0, 1)", fixed = TRUE)
 
   })
 

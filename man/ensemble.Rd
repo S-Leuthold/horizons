@@ -32,14 +32,21 @@ from the tuning folds. Mirrors the \code{seed} argument of \code{\link[=fit]{fit
 
 \item{compute_uq}{Logical. Calibrate CV+ conformal prediction intervals for
 the ensemble (see \code{\link[=fit_ensemble_uq]{fit_ensemble_uq()}}), stored in \verb{$ensemble$uq} and
-consumed by \code{predict(..., interval = TRUE)}. Mirrors the \code{compute_uq}
+consumed by \code{predict()}. When they cannot be calibrated (fewer than
+\code{min_calib_rows} rows, too few finite residuals for CV+ at its level, or
+a fold refit that fails), the ensemble is returned point-only with one
+warning of class \code{horizons_warning_skipped} saying why, whatever
+\code{verbose} is (#145). Mirrors the \code{compute_uq}
 argument of \code{\link[=fit]{fit()}}. Placed after \code{seed} so pre-existing positional
 callers (\code{method}, \code{optimize}, \code{seed}) are unaffected. Default \code{TRUE}.}
 
 \item{control}{A \code{\link[=control_horizons]{control_horizons()}} object: how the run goes, not what
 it computes. \code{ensemble()} reads \code{allow_par}, \code{verbose}, \code{debug},
 \code{keep_traces} and \code{min_calib_rows}, and refuses any other field that is
-set. With \code{allow_par = TRUE}, the meta-learner's CV tuning and its
+set. With \code{debug = TRUE} the meta-learner runs in this session and its
+first failure, inside tuning included, stops the call with its
+backtrace; with \code{keep_traces = TRUE} a failure's backtrace is kept as
+text in the abort's \code{results}. With \code{allow_par = TRUE}, the meta-learner's CV tuning and its
 out-of-fold pass parallelise over folds on whatever \code{future::plan()} the
 caller has registered; \code{ensemble()} never registers a plan, and runs
 sequentially, warning with class \code{horizons_warning_substitution}, if the
@@ -69,13 +76,29 @@ comparable to the single-model metrics from \code{fit()}.
 
 Combined predictions are clamped to \code{configure()}'s \code{outcome_range}, as
 every scored and served prediction is, and \code{ensemble()} aborts with class
-\code{horizons_input_error} before fitting anything when an observed outcome
-lies outside it (#76).
+\code{horizons_error_input} before fitting anything when an observed outcome
+lies outside it (#76). Its other refusals (an \code{x} that is not a fit, an
+unknown \code{method}, an \code{optimize}, \code{seed} or \code{compute_uq} of the wrong type,
+a fit with fewer than two members) carry the same class.
 
 After the outcome-range check and before it fits anything, \code{ensemble()}
 checks that \code{x} still holds what a fitted object promises (its data,
 evaluation and fitted models), and aborts with class
 \code{horizons_error_validation} when it does not.
+
+The meta-learner is one unit: its tuning, its fit, its out-of-fold pass,
+the members' predictions of the test rows and the scoring are its steps.
+When any fails there is no ensemble to return, and \code{ensemble()} aborts with
+\code{horizons_error_ensemble_failed}, the step and the cause in its \code{results}
+field. A tuned meta-learner chooses its hyperparameters only among the
+candidates scored on every fold, as \code{\link[=evaluate]{evaluate()}} and \code{\link[=fit]{fit()}} do (#101).
+The warnings another package raised while it was built (the engine's,
+tune's for the chosen candidate, a member's while predicting the test
+rows) are kept in \code{ensemble$warnings}, as a member's are in
+\code{models$results$warnings}, with the package's own lines about the
+ensemble: the meta-learner's candidates left out for a missing fold, and
+the CV+ intervals not computed. horizons' own warnings are written to the
+log and raised once at the end.
 }
 \examples{
 \dontrun{

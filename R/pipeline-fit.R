@@ -75,7 +75,11 @@
 #' configurations without a value of the ranking metric left out of the
 #' choice of members (`horizons_warning_skipped`);
 #' a member whose warm-start Bayesian search failed and kept what it finished
-#' (`horizons_warning_substitution`, #209); some members failed and the rest
+#' (`horizons_warning_substitution`, #209); a member whose feature-selection
+#' step kept every band (`horizons_warning_substitution`), confirmed nothing
+#' (`horizons_warning_quality`) or had too few bands to select from
+#' (`horizons_warning_skipped`), read from its final fit's recipe; some
+#' members failed and the rest
 #' are returned (`horizons_warning_partial_failure`, naming them with each
 #' distinct cause). It records as notes on the log, without a warning, a
 #' member's fitted workflow stored whole because it could not be slimmed and
@@ -268,6 +272,9 @@ fit <- function(x,
   ## column with the advice to re-run evaluate(); on a cold start the record
   ## would fail validation only after every model had been fitted.
   if (!is.null(metric)) check_rank_metric_arg(metric)
+
+  check_arg(rlang::check_bool, compute_uq)
+  check_arg(rlang::check_bool, compute_ad)
 
   ## The object as it arrives (#234): on the evaluate() path its evaluation
   ## record, and through it the base contract; on a cold start the base

@@ -1050,8 +1050,7 @@ build_step_prepped <- function(step) {
   d   <- step_data()
   rec <- step_recipe(step, d)
 
-  ## CARS says, as a message, that it clusters fewer columns than it asks
-  ## for; a fixture's build must be quiet.
+  ## A fixture's build must be quiet.
   set.seed(1)
   prepped <- suppressMessages(recipes::prep(rec, training = d))
 
@@ -1547,6 +1546,30 @@ describe("build_recipe() under tune's parameter extraction", {
 
     expect_identical(unname(prepped$steps[[1]]$columns), wn)
     expect_true("site" %in% names(recipes::bake(prepped, new_data = NULL)))
+
+  })
+
+})
+
+
+## =========================================================================
+## The one-recipe rule: only the selection steps' warnings are muffled
+## =========================================================================
+
+describe("quiet_selection_warnings()", {
+
+  it("muffles the warnings a selection step raises, and lets every other warning through", {
+
+    expect_no_warning(quiet_selection_warnings(
+      warn_in_unit("substitution", "A step kept every band.", step = "step_select_cars")
+    ))
+
+    expect_warning(quiet_selection_warnings(warn_in_unit("quality", "Not a step's.")),
+                   "Not a step's.", class = "horizons_warning_quality")
+    expect_warning(quiet_selection_warnings(warning("a foreign warning")), "a foreign warning")
+    expect_error(quiet_selection_warnings(stop("an error")), "an error")
+
+    expect_identical(quiet_selection_warnings(1 + 1), 2)
 
   })
 
