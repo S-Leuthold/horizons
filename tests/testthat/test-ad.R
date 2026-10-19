@@ -282,7 +282,7 @@ test_that("predict_ad returns per-row NA for one bad spectrum and scores the res
 
 })
 
-test_that("predict_ad warns and returns NULL when the bake aborts", {
+test_that("predict_ad fails at its bake step when the bake aborts", {
 
   fx     <- ad_fitted_workflow()
   bundle <- fit_ad(fx$workflow, calib_data = fx$data)
@@ -291,14 +291,12 @@ test_that("predict_ad warns and returns NULL when the bake aborts", {
 
   new_df <- ad_new_spectra(fx$wn, n = 5)
 
-  ## Not a workflow: extract_recipe() aborts, which is the bug / schema case.
-  expect_warning(
-    ad <- predict_ad(list(), bundle, new_df),
-    "baking `new_data` through the fitted recipe failed", fixed = TRUE,
-    class = "horizons_ad_warning"
-  )
+  ## Not a workflow: extract_recipe() aborts, which predict() records as the
+  ## AD unit's failure
+  out <- run_unit(predict_ad(list(), bundle, new_df), "ad", "cfg_ad")
 
-  expect_null(ad)
+  expect_true(out$failed)
+  expect_identical(out$records$step[out$records$type == "failure"], "bake")
 
 })
 
@@ -322,27 +320,41 @@ test_that("predict_ad returns NULL, with a warning, when every spectrum is bad",
 
 })
 
-test_that("predict_ad warns with the cause and returns NULL when the distance fails", {
+test_that("predict_ad stops on the column-name tripwire when the bundle no longer matches the features", {
 
   fx     <- ad_fitted_workflow()
   bundle <- fit_ad(fx$workflow, calib_data = fx$data)
 
   expect_false(is.null(bundle))
 
-  ## The bake succeeds, but the bundle's centroid no longer matches the
-  ## recipe's features, so calculate_ad_distance() aborts. This used to
-  ## return NULL with no signal, and the AD columns vanished.
+  ## The bake succeeds, but the bundle's centroid no longer names the
+  ## recipe's features, so distances would bind to the wrong ones. This used
+  ## to return NULL with a warning; it is a bug, and stops the call.
   bundle$centroid <- bundle$centroid[-1]
 
   new_df <- ad_new_spectra(fx$wn, n = 5)
 
-  w <- expect_warning(
-    ad <- predict_ad(fx$workflow, bundle, new_df),
-    class = "horizons_ad_warning"
-  )
+  expect_error(predict_ad(fx$workflow, bundle, new_df),
+               "Feature column names must match", fixed = TRUE,
+               class = "horizons_error_internal")
 
-  expect_match(conditionMessage(w), "Feature column names must match", fixed = TRUE)
-  expect_null(ad)
+})
+
+test_that("predict_ad fails at its distance step when the distance cannot be computed", {
+
+  fx     <- ad_fitted_workflow()
+  bundle <- fit_ad(fx$workflow, calib_data = fx$data)
+
+  expect_false(is.null(bundle))
+
+  local_mocked_bindings(calculate_ad_distance = function(...) stop("covariance is singular"))
+
+  out <- run_unit(predict_ad(fx$workflow, bundle, ad_new_spectra(fx$wn, n = 5)), "ad", "cfg_ad")
+
+  expect_true(out$failed)
+  expect_identical(out$records$step[out$records$type == "failure"], "ad_distance")
+  expect_match(out$records$message[out$records$type == "failure"], "covariance is singular",
+               fixed = TRUE)
 
 })
 
@@ -356,15 +368,12 @@ test_that("every predict_ad warning names the config when it is given", {
   new_df     <- ad_new_spectra(fx$wn, n = 5)
   one_bad    <- new_df;  one_bad[3, fx$wn] <- NA_real_
   all_bad    <- new_df;  all_bad[, fx$wn]  <- NA_real_
-  bad_bundle <- bundle;  bad_bundle$centroid <- bad_bundle$centroid[-1]
 
-  ## One warning per case, in full: the bake aborts, one spectrum bakes to NA,
-  ## every spectrum does, and the distance fails
+  ## One warning per case, in full: one spectrum bakes to NA, and every
+  ## spectrum does
   expect_snapshot({
-    bake     <- predict_ad(list(), bundle, new_df, config_id = "cfg_ad")
     one_na   <- predict_ad(fx$workflow, bundle, one_bad, config_id = "cfg_ad")
     all_na   <- predict_ad(fx$workflow, bundle, all_bad, config_id = "cfg_ad")
-    distance <- predict_ad(fx$workflow, bad_bundle, new_df, config_id = "cfg_ad")
   })
 
 })

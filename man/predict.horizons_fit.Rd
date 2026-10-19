@@ -91,6 +91,18 @@ distance is a squared Mahalanobis distance in the model's feature space; the
 flag bins it against held-out-calibrated thresholds. Set \code{abstain_ood = TRUE}
 to \code{NA} predictions for out-of-domain samples while keeping the AD columns.
 
+\strong{When something cannot be computed.} Each configuration's predictions
+are computed on their own, and its intervals and applicability domain on
+their own within them. A configuration that cannot predict comes back as
+\code{NA} rows, named in one warning of class
+\code{horizons_warning_partial_failure}; when nothing can be predicted,
+\code{predict()} aborts with \code{horizons_error_prediction_failed}, the failures in
+its \code{results} field. Intervals or an applicability domain that cannot be
+computed leave their columns \code{NA}, and the configurations are named in one
+\code{horizons_warning_skipped}. Every warning is raised once, at the end of
+the call, and carries its record as the field \code{log}; \code{predict()} changes
+nothing on \code{object}.
+
 \strong{Interval level.} Intervals are at the coverage level the uncertainty was
 calibrated at in \code{fit()}, 0.90 by default. \code{predict()} has no \code{level}
 argument: a \code{level} is ignored with a warning of class

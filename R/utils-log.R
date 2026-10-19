@@ -461,10 +461,10 @@ unit_step <- function(step, expr) {
 #' The steps of a unit, and how a failed unit names each
 #'
 #' @description
-#' The [unit_step()] labels inside [evaluate_single_config()] and
-#' [fit_single_config()], each with the words a failed unit's
-#' `error_message` starts with ("Grid search failed: ..."). A label means the
-#' same step in either verb. A failure outside every step is named by the
+#' The [unit_step()] labels inside [evaluate_single_config()],
+#' [fit_single_config()] and `predict_one_config()`, each with the words a
+#' failed unit's `error_message` starts with ("Grid search failed: ..."). A
+#' label means the same step in every verb. A failure outside every step is named by the
 #' unit itself ([unit_failure_message()]).
 #'
 #' @keywords internal
@@ -499,7 +499,12 @@ UNIT_STEPS <- c(
   uq_calibration_quantiles = "Calibration quantiles",
   ad_covariance       = "AD covariance",
   ad_calibration_bake = "AD calibration bake",
-  ad_thresholds       = "AD thresholds"
+  ad_thresholds       = "AD thresholds",
+  bake                = "New-data bake",
+  predict             = "Prediction",
+  uq_bake             = "Interval recipe bake",
+  uq_quantiles        = "Interval quantiles",
+  ad_distance         = "Applicability-domain distance"
 )
 
 #' The message of a failed unit
@@ -723,6 +728,60 @@ unit_records <- function(records) {
     n       = vapply(records, `[[`, integer(1), "n"),
     trace   = lapply(records, `[[`, "trace")
   )
+
+}
+
+## ---------------------------------------------------------------------------
+## Add-on units
+## ---------------------------------------------------------------------------
+## An add-on is a unit inside another unit whose failure costs the parent only
+## what the add-on computes: a member's UQ, measured coverage, AD and slimming
+## in fit(); a configuration's intervals and AD in predict(). The parent says
+## what was not computed, with the add-on's failure as the reason.
+
+#' Run an add-on unit inside its parent's
+#'
+#' @description
+#' Runs `expr` as a unit of its own. When it fails, `on_failure` is called
+#' with the failure's message (the step's words and the cause,
+#' [unit_failure_message()]); it raises the parent's warning or note, which
+#' the parent's unit records. The add-on's own warnings and notes are the
+#' parent's: they come back relabelled with the parent's unit, for the
+#' parent's row and its verb's log.
+#'
+#' @param expr The add-on's work.
+#' @param unit Character(1). The add-on, e.g. `"uq"` or `"intervals"`.
+#' @param id Character(1). The parent's id.
+#' @param parent Character(1). The parent's unit, e.g. `"member"`.
+#' @param on_failure Function of one argument, the failure's message.
+#' @param debug Logical(1). Passed to [run_unit()].
+#' @return List: `value` (`NULL` when the add-on failed) and `records` (its
+#'   warnings and notes, under `parent`).
+#' @keywords internal
+#' @noRd
+run_add_on <- function(expr, unit, id, parent, on_failure, debug = FALSE) {
+
+  out  <- run_unit(expr, unit = unit, id = id, debug = debug)
+  kept <- out$records[out$records$type != "failure", , drop = FALSE]
+  kept$unit <- rep(parent, nrow(kept))
+
+  if (out$failed) on_failure(unit_failure_message(out$records, outside = NULL))
+
+  list(value = out$value, records = kept)
+
+}
+
+#' The parent's warning when an add-on it was asked for was not computed
+#'
+#' @param what Character(1). What was not computed, as the subject of "...
+#'   not computed", e.g. `"Prediction intervals (UQ) were"`.
+#' @return A function of the failure's message that raises one
+#'   `horizons_warning_skipped` from inside the parent's unit.
+#' @keywords internal
+#' @noRd
+skipped_add_on <- function(what) {
+
+  function(cause) warn_in_unit("skipped", "{what} not computed: {cause}")
 
 }
 

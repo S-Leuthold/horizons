@@ -373,6 +373,36 @@ describe("ensemble() - predict namespaces", {
 })
 
 ## =========================================================================
+## ensemble() — a member's warning while it scores the test rows
+## =========================================================================
+## The members predict the test rows as units, which record their warnings;
+## until ensemble() records them itself, an engine's warning reaches the
+## caller as it did before.
+
+describe("ensemble() - a member's warning on the test rows", {
+
+  it("reaches the caller, once per member that raised it", {
+
+    fitted <- ens_fitted()
+    real   <- utils::getS3method("predict", "workflow")
+
+    local_mocked_s3_method("predict", "workflow", function(object, new_data, ...) {
+      warning("the member engine says hello", call. = FALSE)
+      real(object, new_data, ...)
+    })
+
+    w <- collect_warnings(
+      ensemble(fitted, method = "weighted", optimize = FALSE, compute_uq = FALSE),
+      "the member engine says hello"
+    )$warnings
+
+    expect_length(w, length(unique(fitted$models$cv_predictions$config_id)))
+
+  })
+
+})
+
+## =========================================================================
 ## predict.horizons_ensemble() — output contract
 ## =========================================================================
 ## Predicting the held-out Split-F test set is the natural round-trip: it is
@@ -561,6 +591,21 @@ describe("predict.horizons_ensemble() - intervals and degradation", {
 
 describe("predict.horizons_ensemble() - aborts on a failing member", {
 
+  it("names every member that cannot predict", {
+
+    test_set <- ens_test_set()
+    ens      <- ens_built("weighted")
+
+    broken <- ens$ensemble$weights$member[1:2]
+    for (m in broken) ens$models$workflows[[m]] <- "not a workflow"
+
+    err <- expect_error(predict(ens, test_set, interval = FALSE),
+                        class = "horizons_error_prediction_failed")
+
+    expect_setequal(err$results$config_id, broken)
+
+  })
+
   it("does not renormalize; aborts when a member workflow cannot predict", {
 
     test_set <- ens_test_set()
@@ -569,10 +614,12 @@ describe("predict.horizons_ensemble() - aborts on a failing member", {
     broken_member <- ens$ensemble$weights$member[1]
     ens$models$workflows[[broken_member]] <- "not a workflow"
 
-    ## The abort carries no package class.
-    expect_error(predict(ens, test_set, interval = FALSE),
-                 paste0("Prediction failed for config '", broken_member, "'"),
-                 fixed = TRUE)
+    err <- expect_error(predict(ens, test_set, interval = FALSE),
+                        class = "horizons_error_prediction_failed")
+
+    expect_identical(err$results$config_id, broken_member)
+    expect_identical(err$results$step, "predict")
+    expect_match(conditionMessage(err), "it combines every member", fixed = TRUE)
 
   })
 

@@ -212,6 +212,13 @@ calculate_ad_distance <- function(new_matrix, ad_metadata) {
 }
 
 
+#' The applicability-domain bins, in order
+#'
+#' @keywords internal
+#' @noRd
+AD_BINS <- c("Q1", "Q2", "Q3", "Q4", "OOD")
+
+
 #' Assign applicability-domain bins
 #'
 #' @description
@@ -253,7 +260,7 @@ assign_ad_bin <- function(distances, thresholds) {
   cut(
     distances,
     breaks         = c(0, thresholds, Inf),
-    labels         = c("Q1", "Q2", "Q3", "Q4", "OOD"),
+    labels         = AD_BINS,
     right          = TRUE,
     include.lowest = TRUE
   )
@@ -390,26 +397,21 @@ check_finite_features <- function(x, what, call = rlang::caller_env()) {
 #' @description
 #' Bakes `new_spectra` through the fitted workflow's recipe to reach the
 #' model's feature space, then computes each sample's squared Mahalanobis
-#' distance to the training centroid and its AD bin. Returns the two predict-time
-#' AD columns, or `NULL` with a warning on any failure (so predict degrades to
-#' no-AD rather than erroring).
+#' distance to the training centroid and its AD bin. Run by
+#' `predict_one_config()` as a unit of its own: a failure raises, labelled
+#' with its step (`bake`, `ad_distance`), and the configuration's AD columns
+#' are `NA`, with one `skipped` warning.
 #'
 #' @details
 #' The recipe is re-extracted from the (butchered) stored `workflow` rather than
 #' cached in the AD bundle — the same recipe the model was fit with, so new
 #' samples land in the identical feature space the centroid/covariance were
 #' estimated in (D4). Column-name alignment is re-checked inside
-#' [calculate_ad_distance()].
+#' [calculate_ad_distance()], a tripwire that propagates.
 #'
-#' Two failure modes are kept distinct, because they mean different things. A
-#' bake that *aborts* is a bug or a schema problem — no sample gets an AD
-#' column, and the function warns rather than degrading quietly. A bake that
-#' *succeeds* but returns NA for some rows is the documented
+#' A bake that *succeeds* but returns NA for some rows is the documented
 #' `step_transform_spectra()` path for a malformed spectrum: those rows alone
-#' get `NA` distance and flag, and every other row is scored normally. The
-#' earlier whole-matrix `anyNA()` check conflated the two, so one bad spectrum
-#' in a batch silently removed AD (and therefore abstention) from the entire
-#' batch.
+#' get `NA` distance and flag, and every other row is scored normally.
 #'
 #' @param workflow The config's stored (butchered) fitted workflow.
 #' @param ad_bundle The config's AD bundle from `models$ad[[config_id]]`
@@ -420,21 +422,14 @@ check_finite_features <- function(x, what, call = rlang::caller_env()) {
 #'
 #' @return Tibble with `.ad_distance` (numeric, squared) and `.ad_flag`
 #'   (factor Q1-Q4/OOD), one row per sample — `NA` in both columns for rows
-#'   that baked to NA; or `NULL` when the bake aborted or the distance could
-#'   not be computed at all, each with a warning of class
-#'   `horizons_ad_warning`. A `NULL` bundle returns `NULL` without a warning.
+#'   that baked to NA, or `NULL` when every row did, each with a warning of
+#'   class `horizons_ad_warning`.
 #'
 #' @seealso [fit_ad()], [calculate_ad_distance()], [assign_ad_bin()].
 #'
 #' @keywords internal
 #' @noRd
 predict_ad <- function(workflow, ad_bundle, new_spectra, config_id = NULL) {
-
-  if (is.null(ad_bundle)) {
-
-    return(NULL)
-
-  }
 
   ## Every warning below names the config when it is known, so a multi-config
   ## predict says which model lost its AD. The id enters as a value.
@@ -446,41 +441,10 @@ predict_ad <- function(workflow, ad_bundle, new_spectra, config_id = NULL) {
 
   ## Bake new_data through the SAME recipe the model was fit with ---------------
 
-  bake_safe <- safely_execute(
-    {
-      prepped_recipe <- workflows::extract_recipe(workflow, estimated = TRUE)
-      as.matrix(recipes::bake(
-        prepped_recipe,
-        new_data = new_spectra,
-        recipes::all_predictors()
-      ))
-    },
-    log_error          = FALSE,
-    capture_conditions = TRUE
-  )
-
-  if (!is.null(bake_safe$error) || is.null(bake_safe$result)) {
-
-    ## Interpolated as a value, not as part of the template — an error message
-    ## carrying braces would otherwise be re-evaluated by cli.
-    bake_msg <- if (is.null(bake_safe$error)) {
-      "The recipe returned nothing."
-    } else {
-      condition_summary(bake_safe$error)
-    }
-
-    cli::cli_warn(c(
-      "!" = paste0(ad_label, " could not be computed: baking {.arg new_data} through the fitted recipe failed."),
-      "x" = "{bake_msg}",
-      "i" = "This is a bug or a schema mismatch between {.arg new_data} and the training axis, not a property of one sample.",
-      "i" = "No AD columns are returned, so out-of-domain abstention cannot be applied to this batch."
-    ), class = "horizons_ad_warning")
-
-    return(NULL)
-
-  }
-
-  new_matrix <- bake_safe$result
+  new_matrix <- unit_step("bake", {
+    prepped_recipe <- workflows::extract_recipe(workflow, estimated = TRUE)
+    as.matrix(recipes::bake(prepped_recipe, new_data = new_spectra, recipes::all_predictors()))
+  })
 
   ## Per-row NA: degrade those rows, score the rest ----------------------------
   ## A row that baked to NA (step_transform_spectra's documented failure path
@@ -510,44 +474,23 @@ predict_ad <- function(workflow, ad_bundle, new_spectra, config_id = NULL) {
 
   }
 
-  ## Distance + bin (safely — a covariance/alignment mismatch returns NULL) -----
+  ## Distance + bin --------------------------------------------------------------
 
-  ad_safe <- safely_execute(
-    {
-      metadata  <- list(centroid   = ad_bundle$centroid,
-                        cov_matrix = ad_bundle$cov_matrix)
+  unit_step("ad_distance", {
 
-      distances            <- rep(NA_real_, nrow(new_matrix))
-      distances[!bad_rows] <- calculate_ad_distance(
-        new_matrix[!bad_rows, , drop = FALSE],
-        metadata
-      )
+    metadata  <- list(centroid   = ad_bundle$centroid,
+                      cov_matrix = ad_bundle$cov_matrix)
 
-      flags <- assign_ad_bin(distances, ad_bundle$ad_thresholds)
+    distances            <- rep(NA_real_, nrow(new_matrix))
+    distances[!bad_rows] <- calculate_ad_distance(
+      new_matrix[!bad_rows, , drop = FALSE],
+      metadata
+    )
 
-      tibble::tibble(.ad_distance = distances, .ad_flag = flags)
-    },
-    log_error          = FALSE,
-    capture_conditions = TRUE
-  )
+    flags <- assign_ad_bin(distances, ad_bundle$ad_thresholds)
 
-  if (!is.null(ad_safe$error)) {
+    tibble::tibble(.ad_distance = distances, .ad_flag = flags)
 
-    ## Warned rather than dropped silently: the AD columns vanishing with no
-    ## signal is the failure this replaces. Interpolated as a value, as the
-    ## bake warning above is.
-    ad_msg <- condition_summary(ad_safe$error)
-
-    cli::cli_warn(c(
-      "!" = paste0(ad_label, " could not be computed: the distance to the training centroid failed."),
-      "x" = "{ad_msg}",
-      "i" = "Point predictions are returned without {.field .ad_distance} and {.field .ad_flag}, so out-of-domain abstention cannot be applied to this batch."
-    ), class = "horizons_ad_warning")
-
-    return(NULL)
-
-  }
-
-  ad_safe$result
+  })
 
 }

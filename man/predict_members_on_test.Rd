@@ -17,8 +17,10 @@ scale), one block per member.
 }
 \description{
 Has every ensemble member predict the Split-F assessment set (the held-out
-evaluation data \code{fit()} reserved), via \code{predict_one_config()} — predict once,
-back-transform once. Shared by all engines so the meaning of "test_F" and the
-per-member prediction contract live in one place.
+evaluation data \code{fit()} reserved), via \code{predict_members()} — predict once,
+back-transform once, one unit per member. Shared by all engines so the
+meaning of "test_F" and the per-member prediction contract live in one
+place. A member that cannot predict aborts with
+\code{horizons_error_prediction_failed}.
 }
 \keyword{internal}

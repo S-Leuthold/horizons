@@ -151,18 +151,9 @@ fit_single_config <- function(config_row,
   addon_records <- new_unit_records()
 
   run_addon <- function(expr, unit, on_failure) {
-    out  <- run_unit(expr, unit = unit, id = config_id, debug = debug)
-    kept <- out$records[out$records$type != "failure", , drop = FALSE]
-    kept$unit <- rep("member", nrow(kept))
-    addon_records <<- dplyr::bind_rows(addon_records, kept)
-    if (!out$failed) return(out$value)
-    on_failure(unit_failure_message(out$records, outside = NULL))
-    NULL
-  }
-
-  ## An add-on that was asked for and not computed is skipped, with why
-  skipped <- function(what) {
-    function(cause) warn_in_unit("skipped", "{what} not computed: {cause}")
+    out <- run_add_on(expr, unit, config_id, "member", on_failure, debug = debug)
+    addon_records <<- dplyr::bind_rows(addon_records, out$records)
+    out$value
   }
 
   ## How the re-tune started, once it has: from evaluate()'s parameters, or
@@ -458,7 +449,7 @@ fit_single_config <- function(config_row,
         outcome_range   = outcome_range,
         min_calib_rows  = min_calib_rows,
         debug           = debug
-      ), "uq", skipped("Prediction intervals (UQ) were"))
+      ), "uq", skipped_add_on("Prediction intervals (UQ) were"))
 
       ## Measured coverage on the held-out test rows (#118). The intervals are
       ## built by predict_intervals(), the function predict() serves them with,
@@ -470,7 +461,7 @@ fit_single_config <- function(config_row,
         coverage <- run_addon(
           test_interval_coverage(uq_result, test_preds, test_data, test_truth,
                                  config_id, outcome_range),
-          "coverage", skipped("Measured test coverage was")
+          "coverage", skipped_add_on("Measured test coverage was")
         )
 
         uq_result <- c(uq_result, coverage %||% test_interval_coverage_missing())
@@ -495,7 +486,7 @@ fit_single_config <- function(config_row,
         level           = DEFAULT_AD_LEVEL,
         min_calib_rows  = min_calib_rows,
         min_ad_rows     = min_ad_rows
-      ), "ad", skipped("The applicability domain (AD) was"))
+      ), "ad", skipped_add_on("The applicability domain (AD) was"))
 
     }
 
@@ -606,9 +597,8 @@ fit_single_config <- function(config_row,
 #' test outcomes they contain. This is the honest coverage figure: the test
 #' rows took no part in tuning, the quantile forest or the conformal
 #' calibration (#118). Run as a unit of its own by [fit_single_config()]:
-#' when [predict_intervals()] warns and returns `NULL`, this fails, the
-#' figures stay `NA`, and the member names it in a `skipped` warning with the
-#' interval warning beside it.
+#' when [predict_intervals()] fails, at the step its failure names, the
+#' figures stay `NA` and the member names it in a `skipped` warning.
 #'
 #' @param uq A UQ bundle from [fit_uq()].
 #' @param test_preds Numeric. Back-transformed test predictions, original
@@ -617,8 +607,7 @@ fit_single_config <- function(config_row,
 #' @param test_truth Numeric. The test outcomes, original scale.
 #' @param config_id Character(1). Named in any warning.
 #' @param outcome_range Numeric length 2. The bounds intervals are clamped to.
-#' @return List with `test_coverage`, `test_mean_width` and `n_test`. Aborts
-#'   with class `horizons_error_run` when no intervals were built.
+#' @return List with `test_coverage`, `test_mean_width` and `n_test`.
 #' @keywords internal
 #' @noRd
 test_interval_coverage <- function(uq, test_preds, test_data, test_truth,
@@ -627,15 +616,6 @@ test_interval_coverage <- function(uq, test_preds, test_data, test_truth,
   intervals <- predict_intervals(uq, test_preds, test_data,
                                  config_id     = config_id,
                                  outcome_range = outcome_range)
-
-  if (is.null(intervals)) {
-
-    abort_horizons(
-      "No intervals could be built for the test rows; the member's warnings say why.",
-      kind = "run"
-    )
-
-  }
 
   scored  <- !is.na(test_truth) & !is.na(intervals$.pred_lower) &
     !is.na(intervals$.pred_upper)

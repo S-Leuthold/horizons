@@ -39,6 +39,10 @@ failed in \code{\link[=evaluate]{evaluate()}}. The per-configuration results tra
 condition as \code{results}.}
 \item{\code{horizons_error_all_members_failed}}{(run) Every member failed in
 \code{fit()}. The per-member results travel as \code{results}.}
+\item{\code{horizons_error_prediction_failed}}{(run) \code{predict()} had nothing
+to return: the configuration asked for, or every one of them, could
+not predict, or an ensemble's member or its combination could not. One
+row per failure travels as \code{results}.}
 \item{\code{horizons_error_systemic}}{(run) \code{\link[=evaluate]{evaluate()}} stopped early,
 because the first configurations to run failed the same way across at
 least two models (the circuit breaker,

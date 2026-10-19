@@ -85,6 +85,18 @@ NULL
 #' flag bins it against held-out-calibrated thresholds. Set `abstain_ood = TRUE`
 #' to `NA` predictions for out-of-domain samples while keeping the AD columns.
 #'
+#' **When something cannot be computed.** Each configuration's predictions
+#' are computed on their own, and its intervals and applicability domain on
+#' their own within them. A configuration that cannot predict comes back as
+#' `NA` rows, named in one warning of class
+#' `horizons_warning_partial_failure`; when nothing can be predicted,
+#' `predict()` aborts with `horizons_error_prediction_failed`, the failures in
+#' its `results` field. Intervals or an applicability domain that cannot be
+#' computed leave their columns `NA`, and the configurations are named in one
+#' `horizons_warning_skipped`. Every warning is raised once, at the end of
+#' the call, and carries its record as the field `log`; `predict()` changes
+#' nothing on `object`.
+#'
 #' **Interval level.** Intervals are at the coverage level the uncertainty was
 #' calibrated at in `fit()`, 0.90 by default. `predict()` has no `level`
 #' argument: a `level` is ignored with a warning of class
@@ -221,7 +233,19 @@ predict.horizons_fit <- function(object,
   ## Step 4: Assemble output, then report
   ## -------------------------------------------------------------------------
 
-  log_winsorized(collector, lapply(preds, attr, "winsorized"))
+  ## Nothing usable: every configuration asked for failed
+  if (all(vapply(preds, attr, logical(1), "failed"))) {
+
+    n_failed <- length(preds)
+
+    abort_prediction_failed(
+      dplyr::bind_rows(lapply(preds, attr, "unit_records")),
+      "Nothing could be predicted: {cli::qty(n_failed)}{?the/every} configuration asked for failed."
+    )
+
+  }
+
+  log_prediction_units(collector, preds)
 
   preds <- lapply(preds, drop_block_reports)
 
@@ -291,7 +315,7 @@ intervals_returned <- function(predictions) {
 #'
 #' @keywords internal
 #' @noRd
-BLOCK_REPORTS <- c("winsorized")
+BLOCK_REPORTS <- c("failed", "unit_records", "winsorized")
 
 #' @noRd
 drop_block_reports <- function(block) {
@@ -865,13 +889,25 @@ check_abstention <- function(object, config_ids, abstain_ood, call = rlang::call
 }
 
 ## ---------------------------------------------------------------------------
-## predict_one_config() — point (+ interval) prediction for one config
+## predict_one_config() — one configuration's predictions, as one unit
 ## ---------------------------------------------------------------------------
 
-#' Predict from a single fitted config
+#' Predict from a single fitted config, as one unit
 #'
 #' Point predictions on the original response scale (back-transformed once),
-#' plus conformal intervals when a UQ bundle is present and `interval = TRUE`.
+#' plus conformal intervals when a UQ bundle is present and `interval = TRUE`,
+#' plus the applicability-domain columns when an AD bundle is present and
+#' `ad = TRUE`.
+#'
+#' The configuration's predictions are one unit ([run_unit()]): a run failure
+#' in any step leaves its block `NA`, and the caller reports it. Its intervals
+#' and its AD are units of their own inside it ([run_add_on()]): one that
+#' fails leaves its columns `NA` and the predictions standing, and the
+#' configuration names it in a `skipped` warning. What can never be contained
+#' (a row-alignment tripwire, a bug) stops the call.
+#'
+#' The block's columns are fixed before anything runs, by the bundles and the
+#' arguments: a column the configuration cannot fill is `NA`, never absent.
 #'
 #' @param object A `horizons_fit`.
 #' @param config_id The config to predict from.
@@ -883,19 +919,21 @@ check_abstention <- function(object, config_ids, abstain_ood, call = rlang::call
 #'   they must match the raw member OOF the meta-learner trained and calibrated
 #'   on, and the guardrail is applied once at the ensemble output instead.
 #' @param abstain_ood Logical; when `TRUE`, `.pred` and interval bounds are set
-#'   to `NA` for samples flagged out-of-domain (`.ad_flag == "OOD"`), while
-#'   `.ad_distance`/`.ad_flag` are preserved. `FALSE` (default) leaves
-#'   predictions untouched and only reports the AD columns.
+#'   to `NA` for samples flagged out-of-domain (`.ad_flag == "OOD"`), and for
+#'   every sample when the AD could not be computed, while `.ad_distance` and
+#'   `.ad_flag` are preserved. `FALSE` (default) leaves predictions untouched
+#'   and only reports the AD columns.
 #' @param ad Logical; compute the applicability-domain columns. `TRUE`
 #'   (default) for user-facing predictions. `FALSE` for the ensemble member
-#'   helpers, which keep only `.pred`: computing a member's AD there wasted a
-#'   bake per member and raised AD warnings about columns the ensemble never
-#'   returns. With `ad = FALSE` there is nothing to abstain on, so
-#'   `abstain_ood` is not applied.
-#' @return A tibble: sample_id, config_id, .pred (+ interval + AD columns).
-#'   Aborts with class `horizons_error_internal` when the predictions, the
-#'   interval columns or the AD columns do not have one row per row of
-#'   `new_spectra`, since all three are attached to its rows by position.
+#'   helpers, which keep only `.pred`. With `ad = FALSE` there is nothing to
+#'   abstain on, so `abstain_ood` is not applied.
+#' @return A tibble: sample_id, config_id, .pred (+ interval + AD columns),
+#'   with what `predict()` reports about it as attributes (`BLOCK_REPORTS`):
+#'   `"failed"` (logical(1)), `"unit_records"` (the unit's records, its
+#'   add-ons' warnings among them) and `"winsorized"`. Aborts with class
+#'   `horizons_error_internal` when the predictions, the interval columns or
+#'   the AD columns do not have one row per row of `new_spectra`, since all
+#'   three are attached to its rows by position.
 #' @keywords internal
 #' @noRd
 predict_one_config <- function(object, config_id, new_spectra, interval,
@@ -908,156 +946,146 @@ predict_one_config <- function(object, config_id, new_spectra, interval,
   ## name a configuration, and the configuration ids to be unique.
   cfg_row        <- object$config$configs[object$config$configs$config_id == config_id, ]
   transformation <- tolower(as.character(cfg_row$transformation))
+  outcome_range  <- outcome_range_setting(object)
+  bound          <- if (clamp) object$models$response_bound else NULL
 
-  ## -------------------------------------------------------------------------
-  ## Point prediction (transformed scale → back-transform ONCE to original)
-  ## -------------------------------------------------------------------------
+  ## The add-ons asked for, and so the block's columns, are fixed before
+  ## anything runs
+  uq        <- if (interval) object$models$uq[[config_id]]
+  ad_bundle <- if (ad) object$models$ad[[config_id]]
 
-  ## Routed through the safely_execute -> handle_results cascade: a butchered
-  ## workflow can fail at predict time (e.g. recipe re-introspection), and the
-  ## raw parsnip/workflows error carries no horizons context. Wrap so the
-  ## failure names the offending config.
-  pred_safe <- safely_execute(
-    stats::predict(workflow, new_data = new_spectra),
-    log_error          = FALSE,
-    capture_conditions = TRUE
-  )
+  block <- prediction_block(new_spectra$sample_id, config_id,
+                            intervals = !is.null(uq), ad = !is.null(ad_bundle))
 
-  point_trans <- handle_results(
-    pred_safe,
-    error_title = paste0("Prediction failed for config '", config_id, "'.")
-  )$.pred
+  winsorized     <- NULL
+  add_on_records <- new_unit_records()
 
-  ## Everything below is attached to new_spectra$sample_id by position: .pred,
-  ## the interval columns and the AD columns, and abstain_ood blanks rows by
-  ## the same alignment. parsnip returns one prediction per baked row, so a
-  ## recipe step that dropped rows at bake would shift every label silently.
-  check_rows_aligned(
-    what       = paste0("Point predictions for config '", config_id, "'"),
-    to         = "the rows of new_data",
-    n          = length(point_trans),
-    n_expected = nrow(new_spectra)
-  )
-
-  ## Unconditional funnel call: the "none" branch is a passthrough, and the
-  ## funnel clamps to the outcome's range, a floor at 0 under the default and
-  ## no floor for a signed outcome (#76). It takes no response bound here.
-  ## The intervals below are built around the point before the guardrail, so
-  ## winsorizing first would drag both interval bounds down by the overshoot,
-  ## which the documented contract ("interval bounds are not clamped") and the
-  ## ensemble path both rule out.
-  outcome_range <- outcome_range_setting(object)
-
-  point_pred <- back_transform_predictions(
-    point_trans,
-    transformation,
-    outcome_range = outcome_range
-  )
-
-  ## Deploy-time winsorization guardrail, on .pred only. Old objects without
-  ## response_bound degrade gracefully (NULL → no clamp), mirroring the
-  ## predictor_schema NULL-skip above. Fit-time paths deliberately do NOT pass
-  ## a bound — ranking must see raw model behavior — and ensemble machinery
-  ## passes clamp = FALSE (guardrail applies once at the ensemble output,
-  ## keeping member features consistent with the raw member OOF the
-  ## meta-learner trained and calibrated on).
-  bound   <- if (clamp) object$models$response_bound else NULL
-  bounded <- apply_response_bound(point_pred, bound)
-
-  out <- tibble::tibble(
-    sample_id = new_spectra$sample_id,
-    config_id = config_id,
-    .pred     = bounded$values
-  )
-
-  ## What the bound changed, reported once at predict()'s end
-  winsorized <- winsorized_report(new_spectra$sample_id, point_pred, bounded, bound)
-
-  ## -------------------------------------------------------------------------
-  ## Intervals (conformal CQR) — only if requested and a UQ bundle exists
-  ## -------------------------------------------------------------------------
-
-  uq <- object$models$uq[[config_id]]
-
-  if (interval && !is.null(uq)) {
-
-    interval_cols <- predict_intervals(
-      uq            = uq,
-      point_pred    = point_pred,
-      new_spectra   = new_spectra,
-      config_id     = config_id,
-      outcome_range = outcome_range
-    )
-
-    ## predict_intervals() returns NULL if quantile prediction fails — degrade
-    ## gracefully to point-only rather than erroring.
-    if (!is.null(interval_cols)) {
-
-      check_rows_aligned(
-        what       = paste0("Interval columns for config '", config_id, "'"),
-        to         = "the rows of new_data",
-        n          = nrow(interval_cols),
-        n_expected = nrow(new_spectra)
-      )
-
-      out <- dplyr::bind_cols(out, interval_cols)
-
-    }
-
+  ## The intervals and the AD are units of their own: their warnings are the
+  ## configuration's, and a failure is reported by the configuration
+  add_on <- function(expr, unit, on_failure) {
+    out <- run_add_on(expr, unit, config_id, "configuration", on_failure)
+    add_on_records <<- dplyr::bind_rows(add_on_records, out$records)
+    out$value
   }
 
-  ## -------------------------------------------------------------------------
-  ## Applicability domain — .ad_distance / .ad_flag when a bundle exists
-  ## -------------------------------------------------------------------------
-  ## Independent of intervals: AD reports even for point-only predictions. Old
-  ## objects without an AD bundle degrade to no AD columns quietly; a failed
-  ## bake or distance degrades the same way, with a horizons_ad_warning.
-  ## Callers that discard the AD columns (the ensemble member helpers) skip
-  ## the computation, and so its warnings.
+  unit <- run_unit({
 
-  if (!ad) {
+    ## -----------------------------------------------------------------------
+    ## Point prediction (transformed scale → back-transform ONCE to original)
+    ## -----------------------------------------------------------------------
 
-    attr(out, "winsorized") <- winsorized
-    return(out)
+    point_trans <- unit_step("predict", stats::predict(workflow, new_data = new_spectra))$.pred
 
-  }
-
-  ad_cols <- predict_ad(
-    workflow    = workflow,
-    ad_bundle   = object$models$ad[[config_id]],
-    new_spectra = new_spectra,
-    config_id   = config_id
-  )
-
-  if (!is.null(ad_cols)) {
-
-    ## Checked before the bind, and so before abstention blanks rows by it.
+    ## Everything below is attached to new_spectra$sample_id by position:
+    ## .pred, the interval columns and the AD columns, and abstain_ood blanks
+    ## rows by the same alignment. parsnip returns one prediction per baked
+    ## row, so a recipe step that dropped rows at bake would shift every label
+    ## silently.
     check_rows_aligned(
-      what       = paste0("Applicability-domain columns for config '", config_id, "'"),
+      what       = paste0("Point predictions for config '", config_id, "'"),
       to         = "the rows of new_data",
-      n          = nrow(ad_cols),
+      n          = length(point_trans),
       n_expected = nrow(new_spectra)
     )
 
-    out <- dplyr::bind_cols(out, ad_cols)
+    ## Unconditional funnel call: the "none" branch is a passthrough, and the
+    ## funnel clamps to the outcome's range, a floor at 0 under the default
+    ## and no floor for a signed outcome (#76). The intervals below are built
+    ## around the point before the response bound, so winsorizing first would
+    ## drag both interval bounds down by the overshoot, which the documented
+    ## contract ("interval bounds are not clamped") and the ensemble path both
+    ## rule out.
+    point_pred <- unit_step("back_transform", back_transform_predictions(
+      point_trans, transformation, outcome_range = outcome_range
+    ))
 
-    ## Abstention: NA out predictions for out-of-domain samples, keeping the AD
-    ## columns so the caller can see how far out each sample was. Interval
-    ## bounds are NA'd too — an interval on an abstained prediction is
-    ## meaningless. .ad_distance / .ad_flag are deliberately preserved.
-    if (abstain_ood) {
+    ## Deploy-time winsorization guardrail, on .pred only. Ensemble machinery
+    ## passes clamp = FALSE: the guardrail applies once at the ensemble
+    ## output, keeping member features consistent with the raw member OOF the
+    ## meta-learner trained and calibrated on.
+    bounded    <- apply_response_bound(point_pred, bound)
+    winsorized <- winsorized_report(new_spectra$sample_id, point_pred, bounded, bound)
 
-      ## Guard against an NA flag: assign_ad_bin() never produces one today
-      ## (every finite distance bins, Inf -> OOD), but an NA in the mask would
-      ## silently leave that row un-abstained, so exclude it explicitly.
-      ood <- !is.na(out$.ad_flag) & out$.ad_flag == "OOD"
+    out       <- block
+    out$.pred <- bounded$values
 
-      if (any(ood)) {
+    ## -----------------------------------------------------------------------
+    ## Intervals (conformal CQR), a unit of their own
+    ## -----------------------------------------------------------------------
 
-        pred_cols <- intersect(
-          c(".pred", ".pred_lower", ".pred_upper", ".interval_width"),
-          names(out)
+    if (!is.null(uq)) {
+
+      interval_cols <- add_on(
+        predict_intervals(uq, point_pred, new_spectra, config_id = config_id,
+                          outcome_range = outcome_range),
+        "intervals", skipped_add_on("Prediction intervals (UQ) were")
+      )
+
+      if (!is.null(interval_cols)) {
+
+        check_rows_aligned(
+          what       = paste0("Interval columns for config '", config_id, "'"),
+          to         = "the rows of new_data",
+          n          = nrow(interval_cols),
+          n_expected = nrow(new_spectra)
         )
+
+        out[names(interval_cols)] <- interval_cols
+
+      }
+
+    }
+
+    ## -----------------------------------------------------------------------
+    ## Applicability domain, a unit of its own
+    ## -----------------------------------------------------------------------
+    ## Independent of intervals: AD reports even for point-only predictions.
+    ## Under abstention an AD that could not be computed blanks every
+    ## prediction: an unknown domain is not in domain (decision 8).
+
+    if (!is.null(ad_bundle)) {
+
+      ad_failed <- if (abstain_ood) {
+        function(cause) warn_in_unit("skipped", c(
+          "The applicability domain (AD) was not computed, so the predictions are {.code NA} under {.code abstain_ood = TRUE}: {cause}"
+        ))
+      } else {
+        skipped_add_on("The applicability domain (AD) was")
+      }
+
+      ad_cols <- add_on(predict_ad(workflow, ad_bundle, new_spectra, config_id = config_id),
+                        "ad", ad_failed)
+
+      if (!is.null(ad_cols)) {
+
+        ## Checked before the assignment, and so before abstention blanks rows
+        ## by it.
+        check_rows_aligned(
+          what       = paste0("Applicability-domain columns for config '", config_id, "'"),
+          to         = "the rows of new_data",
+          n          = nrow(ad_cols),
+          n_expected = nrow(new_spectra)
+        )
+
+        out[names(ad_cols)] <- ad_cols
+
+      }
+
+      ## Abstention: NA out predictions for out-of-domain samples, keeping the
+      ## AD columns so the caller can see how far out each sample was. Interval
+      ## bounds are NA'd too — an interval on an abstained prediction is
+      ## meaningless. An NA flag is never out of domain by itself (a row the
+      ## AD could not score).
+      if (abstain_ood) {
+
+        ood <- if (is.null(ad_cols)) {
+          rep(TRUE, nrow(out))
+        } else {
+          !is.na(out$.ad_flag) & out$.ad_flag == "OOD"
+        }
+
+        pred_cols <- intersect(c(".pred", ".pred_lower", ".pred_upper", ".interval_width"),
+                               names(out))
 
         for (col in pred_cols) out[[col]][ood] <- NA_real_
 
@@ -1065,23 +1093,189 @@ predict_one_config <- function(object, config_id, new_spectra, interval,
 
     }
 
-  } else if (isTRUE(abstain_ood)) {
+    out
 
-    ## Abstention was asked for and cannot happen: predict_ad() could not
-    ## score the batch (the door refused a configuration without a bundle).
-    ## Saying so is the point — a silent pass-through returns exactly the
-    ## unabstained predictions the caller asked not to get.
-    cli::cli_warn(c(
-      "!" = "{.arg abstain_ood} was requested but no applicability-domain information is available for config {.val {config_id}}.",
-      "i" = "The AD computation failed; see the warning above.",
-      "i" = "Predictions are returned unabstained."
-    ), class = "horizons_ad_warning")
+  }, unit = "configuration", id = config_id)
+
+  result <- if (unit$failed) block else unit$value
+
+  attr(result, "failed")       <- unit$failed
+  attr(result, "unit_records") <- dplyr::bind_rows(unit$records, add_on_records)
+  attr(result, "winsorized")   <- if (!unit$failed) winsorized
+
+  result
+
+}
+
+#' An empty block of one configuration's predictions
+#'
+#' The columns a configuration's block has, every value `NA`: what a failed
+#' configuration returns, and what a successful one fills.
+#'
+#' @param sample_id The rows' sample ids.
+#' @param config_id Character(1).
+#' @param intervals,ad Logical(1). Whether the block has the interval and the
+#'   applicability-domain columns.
+#' @return A tibble.
+#' @keywords internal
+#' @noRd
+prediction_block <- function(sample_id, config_id, intervals = FALSE, ad = FALSE) {
+
+  n <- length(sample_id)
+
+  block <- tibble::tibble(
+    sample_id = sample_id,
+    config_id = rep(config_id, n),
+    .pred     = rep(NA_real_, n)
+  )
+
+  if (intervals) {
+
+    block$.pred_lower     <- rep(NA_real_, n)
+    block$.pred_upper     <- rep(NA_real_, n)
+    block$.interval_width <- rep(NA_real_, n)
 
   }
 
-  attr(out, "winsorized") <- winsorized
+  if (ad) {
 
-  out
+    block$.ad_distance <- rep(NA_real_, n)
+    block$.ad_flag     <- factor(rep(NA_character_, n), levels = AD_BINS)
+
+  }
+
+  block
+
+}
+
+## ---------------------------------------------------------------------------
+## What the configurations' units report at predict()'s end
+## ---------------------------------------------------------------------------
+
+#' One row per failed unit, as `horizons_error_prediction_failed` carries them
+#'
+#' @param records Unit records, shaped like [new_unit_records()]'s.
+#' @return Tibble: `config_id`, `step`, `class`, `error_message` (the step's
+#'   words and the cause), one row per failure.
+#' @keywords internal
+#' @noRd
+prediction_failures <- function(records) {
+
+  failures <- records[records$type == "failure", , drop = FALSE]
+
+  tibble::tibble(
+    config_id     = failures$id,
+    step          = failures$step,
+    class         = failures$class,
+    error_message = vapply(seq_len(nrow(failures)), function(i) {
+      unit_failure_message(failures[i, , drop = FALSE], outside = "Prediction")
+    }, character(1))
+  )
+
+}
+
+#' Abort because nothing could be predicted
+#'
+#' Raised when every configuration asked for failed, or when an ensemble's
+#' member or its combination failed (the ensemble combines every member, and
+#' renormalising its weights would be a silent substitution). The failures
+#' travel on the condition as `results`, as `evaluate()`'s and `fit()`'s do.
+#'
+#' @param records The units' records, holding their failures.
+#' @param header Character(1). The problem statement, a cli message.
+#' @param call The frame the error reports: the verb's.
+#' @param .envir The environment `header` is interpolated in.
+#' @return Does not return; aborts with class
+#'   `horizons_error_prediction_failed` (kind `run`).
+#' @keywords internal
+#' @noRd
+abort_prediction_failed <- function(records, header, call = rlang::caller_env(),
+                                    .envir = rlang::caller_env()) {
+
+  results <- prediction_failures(records)
+  header  <- cli::format_inline(header, .envir = .envir)
+
+  abort_horizons(c(
+    cli_escape(header),
+    distinct_config_errors(results),
+    "i" = "The failures are on this condition as {.field results}: {.code rlang::last_error()$results}."
+  ), kind = "run", class = "horizons_error_prediction_failed", results = results,
+  call = call)
+
+}
+
+#' Collect what the configurations' units reported
+#'
+#' One `partial_failure` warning when some configurations could not predict
+#' and others did; the `skipped` warnings and notes the units raised, through
+#' [log_unit_records()]; and every warning another package (or a recipe
+#' step) raised inside a unit, through [log_foreign_warnings()].
+#'
+#' @param collector The call's collector.
+#' @param blocks The configurations' blocks, from [predict_one_config()].
+#' @return `collector`, invisibly.
+#' @keywords internal
+#' @noRd
+log_prediction_units <- function(collector, blocks) {
+
+  records <- dplyr::bind_rows(lapply(blocks, attr, "unit_records"))
+  failed  <- vapply(blocks, attr, logical(1), "failed")
+
+  if (any(failed)) {
+
+    results  <- prediction_failures(records)
+    n_failed <- sum(failed)
+    n_total  <- length(blocks)
+
+    log_warning(collector, "partial_failure", c(
+      "{n_failed} of {n_total} configuration{?s} could not predict, so {?its/their} rows are {.code NA}.",
+      distinct_config_errors(results)
+    ), ids = results$config_id)
+
+  }
+
+  log_unit_records(collector, records)
+  log_foreign_warnings(collector, records)
+
+  log_winsorized(collector, lapply(blocks, attr, "winsorized"))
+
+  invisible(collector)
+
+}
+
+#' Collect the warnings another package raised inside a prediction unit
+#'
+#' `evaluate()` and `fit()` keep such a warning on the unit's row. `predict()`
+#' returns predictions only, with no row to keep it on (decision 1), so each
+#' distinct one is collected as a `quality` warning naming the units that
+#' raised it, and raised once at the end of the call with the rest.
+#'
+#' @param collector The call's collector.
+#' @param records Unit records, shaped like [new_unit_records()]'s.
+#' @return `collector`, invisibly.
+#' @keywords internal
+#' @noRd
+log_foreign_warnings <- function(collector, records) {
+
+  foreign <- records[records$type == "warning" &
+                       !startsWith(records$class, "horizons_warning_"), , drop = FALSE]
+
+  for (text in unique(foreign$message)) {
+
+    these   <- foreign$message == text
+    unit    <- foreign$unit[these][1]
+    ids     <- unique(foreign$id[these])
+    n_units <- length(ids)
+
+    ### The text is substituted, not inlined, so braces in it stay text.
+    log_warning(collector, "quality", c(
+      "A warning arose while predicting: {text}",
+      "i" = "In {n_units} {unit}{cli::qty(n_units)}{?s}: {.val {ids}}."
+    ), ids = ids)
+
+  }
+
+  invisible(collector)
 
 }
 
@@ -1091,43 +1285,72 @@ predict_one_config <- function(object, config_id, new_spectra, interval,
 
 #' Predict new spectra from each ensemble member
 #'
-#' Runs every member config through the same per-config primitive the single
-#' fit path uses ([predict_one_config()] — predict once, back-transform once)
-#' and stacks the results into one long frame. This is the predict-time analog
-#' of the train-time `predict_members_on_test()`: same structure, minus the
-#' truth column (new data carries no outcome).
+#' Runs every member config through the same per-config unit the single fit
+#' path uses ([predict_one_config()] — predict once, back-transform once) and
+#' stacks the results into one long frame. Shared by `predict()` on an
+#' ensemble and by `ensemble()`'s scoring of the test rows
+#' (`predict_members_on_test()`).
 #'
 #' Members are predicted point-only (`interval = FALSE`); the ensemble's own
 #' uncertainty is conformalized on the meta-learner's residuals downstream, not
 #' assembled from member intervals.
 #'
+#' A member that cannot predict aborts with `horizons_error_prediction_failed`,
+#' every failed member in its `results`: the meta-learner's combination is
+#' only valid over the exact member set it was trained on, so dropping a
+#' member would silently change what is being predicted.
+#'
 #' @param object A `horizons_ensemble` (or any object carrying
 #'   `models$workflows`).
 #' @param members Character vector of member `config_id`s to predict.
 #' @param new_spectra Tibble from [resolve_new_data()] (sample_id + predictors).
+#' @param call The frame the abort reports.
 #' @return A long tibble: `config_id`, `sample_id`, `.pred` (original scale),
-#'   one block per member.
+#'   one block per member, with the members' unit records as the attribute
+#'   `"unit_records"`.
 #' @keywords internal
 #' @noRd
-predict_members <- function(object, members, new_spectra) {
+predict_members <- function(object, members, new_spectra, call = rlang::caller_env()) {
 
   ## sample_id is the join key for every downstream combine (weighted average
   ## groups on it; the wide pivot keys rows on it): predict()'s door has
-  ## refused new_data whose sample_ids repeat.
+  ## refused new_data whose sample_ids repeat, and the fit validator refuses
+  ## a split whose test rows repeat one.
 
-  dplyr::bind_rows(lapply(members, function(m) {
+  ## clamp = FALSE: member predictions are meta-learner FEATURES here, and
+  ## must match the raw (unclamped) member OOF the meta-learner trained and
+  ## the UQ fold models calibrated on. The response-bound guardrail applies
+  ## once, at the combined ensemble output in predict.horizons_ensemble().
+  ## ad = FALSE: only .pred is kept, so a member's AD is not computed.
+  blocks <- lapply(members, function(m) {
+    predict_one_config(object, config_id = m, new_spectra = new_spectra,
+                       interval = FALSE, clamp = FALSE, ad = FALSE)
+  })
 
-    ## clamp = FALSE: member predictions are meta-learner FEATURES here, and
-    ## must match the raw (unclamped) member OOF the meta-learner trained and
-    ## the UQ fold models calibrated on. The response-bound guardrail applies
-    ## once, at the combined ensemble output in predict.horizons_ensemble().
-    ## ad = FALSE: only .pred is kept, so a member's AD is not computed.
-    pc <- predict_one_config(object, config_id = m, new_spectra = new_spectra,
-                             interval = FALSE, clamp = FALSE, ad = FALSE)
+  records <- dplyr::bind_rows(lapply(blocks, attr, "unit_records"))
+  failed  <- vapply(blocks, attr, logical(1), "failed")
 
-    tibble::tibble(config_id = m, sample_id = pc$sample_id, .pred = pc$.pred)
+  if (any(failed)) {
 
+    n_failed <- sum(failed)
+    n_total  <- length(members)
+
+    abort_prediction_failed(
+      records,
+      "The ensemble cannot predict: {n_failed} of its {n_total} member{?s} failed, and it combines every member.",
+      call = call
+    )
+
+  }
+
+  out <- dplyr::bind_rows(lapply(seq_along(members), function(i) {
+    tibble::tibble(config_id = members[i], sample_id = blocks[[i]]$sample_id,
+                   .pred = blocks[[i]]$.pred)
   }))
+
+  attr(out, "unit_records") <- records
+
+  out
 
 }
 
@@ -1143,10 +1366,12 @@ predict_members <- function(object, members, new_spectra) {
 #' The bounds are therefore assembled directly and **never back-transformed
 #' again** — re-transforming here would be the classic "applied twice" bug.
 #'
-#' Degrades to `NULL` (point-only output) when either step fails — a missing
-#' `ranger` namespace on the quantile forest (#65) is exactly this path — but
-#' warns naming the failing step rather than degrading silently, via
-#' [warn_interval_failure()].
+#' A failure in the bake or the forest raises, labelled with its step
+#' (`uq_bake`, `uq_quantiles`): the caller runs this as a unit of its own (a
+#' configuration's intervals in `predict()`, a member's measured coverage in
+#' `fit()`), which records it and says the intervals were not computed. A
+#' missing `ranger` is refused at `predict()`'s door, so it cannot arrive
+#' here (#65).
 #'
 #' The intervals are at the level the bundle was calibrated at,
 #' `uq$level_default`. There is no `level` argument: the body sets `level`
@@ -1157,10 +1382,10 @@ predict_members <- function(object, members, new_spectra) {
 #' @param point_pred Numeric point predictions, original scale.
 #' @param new_spectra Tibble of new data (sample_id + predictors).
 #' @param config_id Character(1) or `NULL`. The config this bundle belongs
-#'   to, named in the warning on failure. `NULL` (default) omits it.
+#'   to, named in a row-alignment failure. `NULL` (default) omits it.
 #' @param outcome_range Numeric length-2 vector the bounds are clamped to,
 #'   from [outcome_range_setting()]. Default `DEFAULT_OUTCOME_RANGE`.
-#' @return Tibble of interval columns, or NULL if quantile prediction fails.
+#' @return Tibble of interval columns, one row per row of `new_spectra`.
 #'   Aborts with class `horizons_error_internal` when `point_pred` or the
 #'   baked features do not have one row per row of `new_spectra`.
 #' @keywords internal
@@ -1187,25 +1412,12 @@ predict_intervals <- function(uq, point_pred, new_spectra, config_id = NULL,
 
   ## Bake new_data through the UQ recipe (predictors only — the same feature
   ## space the quantile forest was trained on).
-  bake_result <- safely_execute(
-    recipes::bake(uq$prepped_recipe, new_data = new_spectra,
-                  recipes::all_predictors()),
-    log_error          = FALSE,
-    capture_conditions = TRUE
-  )
+  new_features <- unit_step("uq_bake", as.data.frame(
+    recipes::bake(uq$prepped_recipe, new_data = new_spectra, recipes::all_predictors())
+  ))
 
-  if (!is.null(bake_result$error) || is.null(bake_result$result)) {
-
-    warn_interval_failure("baking new data through the UQ recipe",
-                          bake_result$error, config_id = config_id)
-    return(NULL)
-
-  }
-
-  new_features <- as.data.frame(bake_result$result)
-
-  ## Outside the degrade path above: a bake that ran but dropped rows is a
-  ## bug, not a reason to return point predictions only.
+  ## A bake that ran but dropped rows is a bug, not a reason to return point
+  ## predictions only.
   check_rows_aligned(
     what       = paste0("Features baked through the UQ recipe", for_config),
     to         = "the rows of new_data",
@@ -1214,27 +1426,15 @@ predict_intervals <- function(uq, point_pred, new_spectra, config_id = NULL,
   )
 
   ## Residual quantiles from the quantile forest (original scale).
-  q_result <- safely_execute(
-    stats::predict(
-      uq$quantile_model,
-      data      = new_features,
-      type      = "quantiles",
-      quantiles = c(alpha / 2, 1 - alpha / 2)
-    ),
-    log_error          = FALSE,
-    capture_conditions = TRUE
-  )
+  q <- unit_step("uq_quantiles", stats::predict(
+    uq$quantile_model,
+    data      = new_features,
+    type      = "quantiles",
+    quantiles = c(alpha / 2, 1 - alpha / 2)
+  ))
 
-  if (!is.null(q_result$error) || is.null(q_result$result)) {
-
-    warn_interval_failure("predicting quantiles from the UQ model",
-                          q_result$error, config_id = config_id)
-    return(NULL)
-
-  }
-
-  q_low  <- q_result$result$predictions[, 1]
-  q_high <- q_result$result$predictions[, 2]
+  q_low  <- q$predictions[, 1]
+  q_high <- q$predictions[, 2]
 
   ## Conformal margin from the (signed) calibration scores. May be negative —
   ## that is the point of signed CQR.

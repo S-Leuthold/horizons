@@ -219,9 +219,11 @@ horizons_metric_set <- function() {
 #'
 #' @description
 #' Has every ensemble member predict the Split-F assessment set (the held-out
-#' evaluation data `fit()` reserved), via `predict_one_config()` — predict once,
-#' back-transform once. Shared by all engines so the meaning of "test_F" and the
-#' per-member prediction contract live in one place.
+#' evaluation data `fit()` reserved), via `predict_members()` — predict once,
+#' back-transform once, one unit per member. Shared by all engines so the
+#' meaning of "test_F" and the per-member prediction contract live in one
+#' place. A member that cannot predict aborts with
+#' `horizons_error_prediction_failed`.
 #'
 #' @param object A `horizons_fit` object.
 #' @param members Character vector of member `config_id`s.
@@ -254,25 +256,32 @@ predict_members_on_test <- function(object, members) {
   ## The sample_id-keyed join below is load-bearing: a duplicate key would
   ## fan out each member's predictions. The fit validator at ensemble()'s door
   ## refuses a split whose rows do not carry unique sample_ids.
+  ##
+  ## The members predict through the same helper predict() uses, unclamped:
+  ## these predictions feed the ensemble's own test_F scoring (metrics,
+  ## member_metrics, improvement) and the meta-combine, so ranking and
+  ## comparison must see raw model behavior — a blow-up member must score
+  ## terribly, not be laundered by the deploy guardrail. A member that cannot
+  ## predict the test rows stops the build with the same error.
+  member_pred <- predict_members(object, members, test_data)
 
-  dplyr::bind_rows(lapply(members, function(m) {
+  ## A warning a member raised while predicting (an engine's) reaches
+  ## ensemble()'s caller as it did before the members ran as units, one per
+  ## occurrence, with the class of its root cause; ensemble()'s own unit
+  ## records them once it is converted.
+  records <- attr(member_pred, "unit_records")
+  raised  <- records[records$type == "warning", , drop = FALSE]
 
-    ## clamp = FALSE: these predictions feed the ensemble's own test_F scoring
-    ## (metrics, member_metrics, improvement) and the meta-combine. Ranking and
-    ## comparison must see raw model behavior — a blow-up member must score
-    ## terribly, not be laundered by the deploy guardrail — mirroring the
-    ## unclamped fit-time paths in fit-single-config.R.
-    ## ad = FALSE: only .pred is kept, so a member's AD is not computed.
-    pc <- predict_one_config(object, config_id = m, new_spectra = test_data,
-                             interval = FALSE, clamp = FALSE, ad = FALSE)
+  for (i in seq_len(nrow(raised))) {
 
-    dplyr::left_join(
-      tibble::tibble(config_id = m, sample_id = pc$sample_id, .pred = pc$.pred),
-      truth_df,
-      by = "sample_id"
-    )
+    warning(warningCondition(raised$message[i], class = raised$class[i]))
 
-  }))
+  }
+
+  attr(member_pred, "unit_records") <- NULL
+  attr(member_pred, "flagged")      <- NULL
+
+  dplyr::left_join(member_pred, truth_df, by = "sample_id")
 
 }
 
@@ -806,6 +815,10 @@ predict.horizons_ensemble <- function(object,
   ## -------------------------------------------------------------------------
 
   member_pred <- predict_members(object, members, new_spectra)
+
+  ## What the members' units reported (another package's warnings)
+  log_foreign_warnings(collector, attr(member_pred, "unit_records"))
+  attr(member_pred, "unit_records") <- NULL
 
   ## -------------------------------------------------------------------------
   ## Step 4: Combine member predictions by the meta-learner (per method)
