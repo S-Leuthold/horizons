@@ -618,7 +618,7 @@ describe("predict.horizons_ensemble() - aborts on a failing member", {
                         class = "horizons_error_prediction_failed")
 
     expect_identical(err$results$config_id, broken_member)
-    expect_identical(err$results$step, "predict")
+    expect_identical(err$results$step, "bake")
     expect_match(conditionMessage(err), "it combines every member", fixed = TRUE)
 
   })

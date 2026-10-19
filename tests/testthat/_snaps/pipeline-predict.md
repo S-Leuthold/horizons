@@ -28,11 +28,11 @@
 # predict.horizons_fit() - each configuration is one unit / aborts with the failure in results when the configuration asked for cannot predict
 
     Code
-      predict(broken, new_df)
+      predict(fitted_fixture, new_df)
     Condition
       Error in `predict()`:
       ! Nothing could be predicted: the configuration asked for failed.
-      x Prediction failed: no applicable method for 'predict' applied to an object of class "character" (cfg_001)
+      x Prediction failed: the engine broke (cfg_001)
       i The failures are on this condition as results: `rlang::last_error()$results`.
 
 # warn_interval_failure() - its reason / words each kind of reason: none, an error, a plain string, with and without a config

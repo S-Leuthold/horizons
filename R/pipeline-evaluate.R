@@ -2447,7 +2447,7 @@ log_unranked <- function(collector, candidates, ranked, metric) {
 modelling_rows <- function(analysis, outcome_col, call = rlang::caller_env()) {
 
   na_mask <- is.na(analysis[[outcome_col]])
-  flagged <- if (".flag" %in% names(analysis)) !is.na(analysis$.flag) else rep(FALSE, nrow(analysis))
+  flagged <- flagged_rows(analysis)
   drop    <- na_mask | flagged
 
   if (all(na_mask)) {
@@ -2476,6 +2476,24 @@ modelling_rows <- function(analysis, outcome_col, call = rlang::caller_env()) {
     n_dropped = sum(na_mask),
     n_flagged = sum(flagged & !na_mask)
   )
+
+}
+
+#' The rows a step flagged
+#'
+#' @description
+#' The one rule every verb that computes over predictors reads the flag by: a
+#' row whose `.flag` is not `NA` was kept by a step that could not use it.
+#' Without a `.flag` column every row is clean. [modelling_rows()] leaves
+#' flagged rows out of every model; `predict()` returns them as `NA`.
+#'
+#' @param data A data frame: an analysis table, or `predict()`'s `new_data`.
+#' @return Logical, one per row.
+#' @keywords internal
+#' @noRd
+flagged_rows <- function(data) {
+
+  if (".flag" %in% names(data)) !is.na(data$.flag) else rep(FALSE, nrow(data))
 
 }
 

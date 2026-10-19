@@ -395,101 +395,43 @@ check_finite_features <- function(x, what, call = rlang::caller_env()) {
 #' Compute AD distance + flag for new samples (prediction phase)
 #'
 #' @description
-#' Bakes `new_spectra` through the fitted workflow's recipe to reach the
-#' model's feature space, then computes each sample's squared Mahalanobis
-#' distance to the training centroid and its AD bin. Run by
-#' `predict_one_config()` as a unit of its own: a failure raises, labelled
-#' with its step (`bake`, `ad_distance`), and the configuration's AD columns
-#' are `NA`, with one `skipped` warning.
+#' Each sample's squared Mahalanobis distance to the training centroid, and
+#' its AD bin, from the features `predict()` baked through the configuration's
+#' recipe (the same recipe the model was fit with, so new samples land in the
+#' identical feature space the centroid and covariance were estimated in,
+#' D4). Run by `predict_one_config()` as a unit of its own: a failure raises,
+#' labelled `ad_distance`, and the configuration's AD columns are `NA`, with
+#' one `skipped` warning. Rows that baked to non-finite values never reach
+#' here: `predict()` returns them as `NA`, flagged.
 #'
-#' @details
-#' The recipe is re-extracted from the (butchered) stored `workflow` rather than
-#' cached in the AD bundle — the same recipe the model was fit with, so new
-#' samples land in the identical feature space the centroid/covariance were
-#' estimated in (D4). Column-name alignment is re-checked inside
-#' [calculate_ad_distance()], a tripwire that propagates.
+#' Column-name alignment is re-checked inside [calculate_ad_distance()], a
+#' tripwire that propagates.
 #'
-#' A bake that *succeeds* but returns NA for some rows is the documented
-#' `step_transform_spectra()` path for a malformed spectrum: those rows alone
-#' get `NA` distance and flag, and every other row is scored normally.
-#'
-#' @param workflow The config's stored (butchered) fitted workflow.
+#' @param new_matrix Numeric matrix of the baked predictors, every value
+#'   finite.
 #' @param ad_bundle The config's AD bundle from `models$ad[[config_id]]`
 #'   (`centroid`, `cov_matrix`, `ad_thresholds`).
-#' @param new_spectra Tibble from `resolve_new_data()` (sample_id + predictors).
-#' @param config_id Character(1) or `NULL`. The config the bundle belongs to,
-#'   named in every warning. `NULL` (default) omits it.
 #'
 #' @return Tibble with `.ad_distance` (numeric, squared) and `.ad_flag`
-#'   (factor Q1-Q4/OOD), one row per sample — `NA` in both columns for rows
-#'   that baked to NA, or `NULL` when every row did, each with a warning of
-#'   class `horizons_ad_warning`.
+#'   (factor Q1-Q4/OOD), one row per row of `new_matrix`.
 #'
 #' @seealso [fit_ad()], [calculate_ad_distance()], [assign_ad_bin()].
 #'
 #' @keywords internal
 #' @noRd
-predict_ad <- function(workflow, ad_bundle, new_spectra, config_id = NULL) {
-
-  ## Every warning below names the config when it is known, so a multi-config
-  ## predict says which model lost its AD. The id enters as a value.
-  ad_label <- if (is.null(config_id)) {
-    "Applicability domain"
-  } else {
-    "Applicability domain for config {.val {config_id}}"
-  }
-
-  ## Bake new_data through the SAME recipe the model was fit with ---------------
-
-  new_matrix <- unit_step("bake", {
-    prepped_recipe <- workflows::extract_recipe(workflow, estimated = TRUE)
-    as.matrix(recipes::bake(prepped_recipe, new_data = new_spectra, recipes::all_predictors()))
-  })
-
-  ## Per-row NA: degrade those rows, score the rest ----------------------------
-  ## A row that baked to NA (step_transform_spectra's documented failure path
-  ## for a malformed spectrum) has no position in feature space, so it gets no
-  ## distance. mahalanobis() would propagate that NA across the whole call, so
-  ## the bad rows are held out of the computation and re-inserted as NA.
-
-  bad_rows <- !stats::complete.cases(new_matrix)
-
-  if (all(bad_rows)) {
-
-    cli::cli_warn(c(
-      "!" = paste0(ad_label, " is unavailable for all {nrow(new_matrix)} sample{?s}: every spectrum baked to NA."),
-      "i" = "See the {.fn step_transform_spectra} warning above for the cause."
-    ), class = "horizons_ad_warning")
-
-    return(NULL)
-
-  }
-
-  if (any(bad_rows)) {
-
-    cli::cli_warn(c(
-      "!" = paste0(ad_label, " is NA for {sum(bad_rows)} of {nrow(new_matrix)} sample{?s} whose spectra baked to NA."),
-      "i" = "The remaining samples are scored normally; the NA rows are neither binned nor abstained on."
-    ), class = "horizons_ad_warning")
-
-  }
-
-  ## Distance + bin --------------------------------------------------------------
+predict_ad <- function(new_matrix, ad_bundle) {
 
   unit_step("ad_distance", {
 
-    metadata  <- list(centroid   = ad_bundle$centroid,
-                      cov_matrix = ad_bundle$cov_matrix)
-
-    distances            <- rep(NA_real_, nrow(new_matrix))
-    distances[!bad_rows] <- calculate_ad_distance(
-      new_matrix[!bad_rows, , drop = FALSE],
-      metadata
+    distances <- calculate_ad_distance(
+      new_matrix,
+      list(centroid = ad_bundle$centroid, cov_matrix = ad_bundle$cov_matrix)
     )
 
-    flags <- assign_ad_bin(distances, ad_bundle$ad_thresholds)
-
-    tibble::tibble(.ad_distance = distances, .ad_flag = flags)
+    tibble::tibble(
+      .ad_distance = distances,
+      .ad_flag     = assign_ad_bin(distances, ad_bundle$ad_thresholds)
+    )
 
   })
 

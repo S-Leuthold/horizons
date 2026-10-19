@@ -600,6 +600,109 @@ describe("check_predict_dots()", {
 
 
 ## ---------------------------------------------------------------------------
+## Rows that cannot be predicted: bake first, predict the rest
+## ---------------------------------------------------------------------------
+## A row flagged on arrival, or non-finite after a configuration's recipe, is
+## returned as NA in every column and named in one flagged warning; no engine,
+## forest or distance sees it (conditions.md, rows are removed only where
+## modelling happens).
+
+describe("predict.horizons_fit() - flagged rows", {
+
+  new_df <- make_new_spectra()
+  wn     <- grep("^wn_", names(new_df), value = TRUE)
+
+  ## The rows each call of the workflow's predict method was given
+  local_engine_rows <- function(env = parent.frame()) {
+    seen <- new.env()
+    seen$rows <- integer(0)
+    real <- utils::getS3method("predict", "workflow")
+    local_mocked_s3_method("predict", "workflow", function(object, new_data, ...) {
+      seen$rows <- c(seen$rows, nrow(new_data))
+      real(object, new_data, ...)
+    }, frame = env)
+    seen
+  }
+
+  as_flagged_data <- function(df, flag) {
+    df$.flag <- flag
+    new_horizons_data(
+      analysis = df,
+      role_map = tibble::tibble(
+        variable = c(wn, "sample_id", ".flag"),
+        role     = c(rep("predictor", length(wn)), "id", "meta")
+      )
+    )
+  }
+
+  it("returns rows flagged on arrival as NA, unpredicted, and names them once", {
+
+    flag   <- rep(NA_character_, nrow(new_df))
+    flag[c(2, 5)] <- "standardize"
+    seen   <- local_engine_rows()
+
+    w <- expect_warning(p <- predict(fitted_fixture, as_flagged_data(new_df, flag)),
+                        class = "horizons_warning_flagged")
+
+    expect_identical(seen$rows, nrow(new_df) - 2L)
+    expect_setequal(w$log$ids[[1]], new_df$sample_id[c(2, 5)])
+    expect_match(conditionMessage(w), "flagged on arrival", fixed = TRUE)
+
+    expect_true(all(is.na(as.matrix(p[c(2, 5), c(".pred", ".pred_lower", ".pred_upper", ".ad_distance")]))))
+
+    ## The other rows are what they are without the flagged ones
+    alone <- predict(fitted_fixture, new_df[-c(2, 5), ])
+    expect_equal(p[-c(2, 5), ], alone, ignore_attr = TRUE)
+
+  })
+
+  it("returns a row non-finite after the recipe as NA, naming it once over every configuration", {
+
+    bad <- new_df
+    bad[3, wn] <- NA_real_
+    two <- add_member_copy(fitted_fixture)
+
+    w <- collect_warnings(p <- predict(two, bad, config = "all"), "could not be predicted")$warnings
+
+    expect_length(w, 1L)
+    expect_identical(w[[1]]$log$ids[[1]], bad$sample_id[3])
+    expect_identical(w[[1]]$log$n, 1L)
+    expect_match(conditionMessage(w[[1]]), "not finite after the recipe of", fixed = TRUE)
+
+    row3 <- p[p$sample_id == bad$sample_id[3], ]
+    expect_true(all(is.na(as.matrix(row3[, c(".pred", ".pred_lower", ".ad_distance")]))))
+    expect_true(all(is.finite(p$.pred[p$sample_id != bad$sample_id[3]])))
+
+  })
+
+  it("predicts nothing when every row is bad, and keeps every column", {
+
+    flag <- rep("standardize", nrow(new_df))
+    seen <- local_engine_rows()
+
+    w <- expect_warning(p <- predict(fitted_fixture, as_flagged_data(new_df, flag)),
+                        class = "horizons_warning_flagged")
+
+    expect_length(seen$rows, 0L)
+    expect_equal(nrow(p), nrow(new_df))
+    expect_true(all(c(".pred", ".pred_lower", ".ad_distance", ".ad_flag") %in% names(p)))
+    expect_true(all(is.na(p$.pred)))
+
+  })
+
+  it("fails a configuration at its bake step when the bake cannot run", {
+
+    local_mocked_bindings(bake_predictors = function(...) stop("the recipe broke"))
+
+    err <- expect_error(predict(fitted_fixture, new_df), class = "horizons_error_prediction_failed")
+    expect_identical(err$results$step, "bake")
+
+  })
+
+})
+
+
+## ---------------------------------------------------------------------------
 ## What predict() reports, and where (decision 1)
 ## ---------------------------------------------------------------------------
 ## predict() returns predictions only. Its warnings are collected as it runs
@@ -886,30 +989,35 @@ describe("predict.horizons_fit() - applicability domain", {
 
   })
 
-  it("one malformed spectrum costs that row its AD, not the whole batch", {
+  it("one malformed spectrum costs that row, not the whole batch's AD or abstention", {
 
     expect_true(has_ad(fitted_fixture))
 
-    ## Four out-of-domain spectra plus one that bakes to NA (the documented
-    ## step_transform_spectra failure path). Previously the single NA row made
-    ## predict_ad() return NULL for the batch, which silently removed the AD
-    ## columns AND the abstention the caller asked for.
+    ## Four out-of-domain spectra plus one that bakes to NA. Before #145's
+    ## predict side, the single NA row made the AD return NULL for the batch,
+    ## which silently removed the AD columns AND the abstention the caller
+    ## asked for. Now the row is returned NA, flagged, and the rest are scored.
     bad_df    <- make_new_spectra(n = 5)
     wn        <- grep("^wn_", names(bad_df))
     bad_df[, wn]    <- bad_df[, wn] + 10        # far out of domain
     bad_df[3, wn]   <- NA_real_                 # malformed spectrum
 
-    p <- suppressWarnings(
-      predict(fitted_fixture, bad_df, interval = FALSE, abstain_ood = TRUE)
-    )
+    flagged <- collect_warnings(
+      p <- predict(fitted_fixture, bad_df, interval = FALSE, abstain_ood = TRUE),
+      "could not be predicted"
+    )$warnings
 
     expect_true(all(c(".ad_distance", ".ad_flag") %in% names(p)))
     expect_equal(sum(!is.na(p$.ad_distance)), 4L)
-    expect_true(is.na(p$.ad_distance[3]))
+    expect_true(is.na(p$.ad_distance[3]) && is.na(p$.pred[3]))
 
     ## Abstention still applies to the four scored rows.
     expect_true(all(p$.ad_flag[-3] == "OOD"))
     expect_true(all(is.na(p$.pred[-3])))
+
+    expect_length(flagged, 1L)
+    expect_s3_class(flagged[[1]], "horizons_warning_flagged")
+    expect_identical(flagged[[1]]$log$ids[[1]], bad_df$sample_id[3])
 
   })
 
@@ -1427,7 +1535,7 @@ describe("predict.horizons_fit() - each configuration is one unit", {
                         class = "horizons_warning_partial_failure")
 
     expect_identical(w$log$ids[[1]], "cfg_002")
-    expect_match(conditionMessage(w), "Prediction failed:", fixed = TRUE)
+    expect_match(conditionMessage(w), "New-data bake failed:", fixed = TRUE)
 
     expect_equal(nrow(p), 2L * nrow(new_df))
 
@@ -1445,16 +1553,17 @@ describe("predict.horizons_fit() - each configuration is one unit", {
 
   it("aborts with the failure in results when the configuration asked for cannot predict", {
 
-    broken <- broken_member(fitted_fixture, "cfg_001")
+    local_mocked_s3_method("predict", "workflow", function(object, new_data, ...) {
+      stop("the engine broke")
+    })
 
-    err <- expect_error(predict(broken, new_df), class = "horizons_error_prediction_failed")
+    err <- expect_error(predict(fitted_fixture, new_df), class = "horizons_error_prediction_failed")
 
     expect_s3_class(err, "horizons_error_run")
     expect_identical(err$results$config_id, "cfg_001")
     expect_identical(err$results$step, "predict")
-    expect_match(err$results$error_message, "^Prediction failed: ")
-    expect_snapshot(predict(broken, new_df), error = TRUE,
-                    transform = function(x) gsub("\\(in `[^`]+`\\)", "(in <call>)", x))
+    expect_match(err$results$error_message, "^Prediction failed: the engine broke")
+    expect_snapshot(predict(fitted_fixture, new_df), error = TRUE)
 
   })
 

@@ -85,6 +85,13 @@ NULL
 #' flag bins it against held-out-calibrated thresholds. Set `abstain_ood = TRUE`
 #' to `NA` predictions for out-of-domain samples while keeping the AD columns.
 #'
+#' **Rows that cannot be predicted.** `new_data` is baked through each
+#' configuration's recipe first. A row flagged on arrival (a `.flag` that is
+#' not `NA`: a step kept the sample but could not use it) or
+#' non-finite after the recipe is not predicted: it is returned as `NA` in
+#' every column, and the rows are named in one warning of class
+#' `horizons_warning_flagged`. The other rows are predicted as usual.
+#'
 #' **When something cannot be computed.** Each configuration's predictions
 #' are computed on their own, and its intervals and applicability domain on
 #' their own within them. A configuration that cannot predict comes back as
@@ -315,7 +322,7 @@ intervals_returned <- function(predictions) {
 #'
 #' @keywords internal
 #' @noRd
-BLOCK_REPORTS <- c("failed", "unit_records", "winsorized")
+BLOCK_REPORTS <- c("failed", "unit_records", "winsorized", "flagged")
 
 #' @noRd
 drop_block_reports <- function(block) {
@@ -640,8 +647,9 @@ abort_on_missing_predict_packages <- function(needed, call = rlang::caller_env()
 #'
 #' @param new_data A `horizons_data` or tibble/data.frame.
 #' @param call The frame a refusal reports: the verb's.
-#' @return A tibble with `sample_id` and the predictor columns; a bare
-#'   data frame is returned whole, with a `sample_id` added when it has none.
+#' @return A tibble with `sample_id`, the predictor columns and `.flag` when
+#'   the object has one; a bare data frame is returned whole, with a
+#'   `sample_id` added when it has none.
 #'   Aborts with class `horizons_error_input` when `new_data` is neither, or
 #'   a `horizons_data` without predictors.
 #' @keywords internal
@@ -656,6 +664,10 @@ resolve_new_data <- function(new_data, call = rlang::caller_env()) {
     pred_cols <- role_map$variable[role_map$role == "predictor"]
     id_col    <- role_map$variable[role_map$role == "id"][1]
 
+    ## A row a step flagged is carried with its flag, so predict() returns it
+    ## as NA rather than predicting it (flagged_rows())
+    flag_col  <- intersect(".flag", names(analysis))
+
     if (length(pred_cols) == 0) {
 
       abort_horizons(c(
@@ -666,7 +678,7 @@ resolve_new_data <- function(new_data, call = rlang::caller_env()) {
     }
 
     tibble::as_tibble(
-      analysis[, c(id_col, pred_cols), drop = FALSE]
+      analysis[, c(id_col, pred_cols, flag_col), drop = FALSE]
     ) |>
       dplyr::rename(sample_id = dplyr::all_of(id_col))
 
@@ -968,126 +980,164 @@ predict_one_config <- function(object, config_id, new_spectra, interval,
     out$value
   }
 
+  ## A row flagged on arrival is not predicted (flagged_rows())
+  arrived_flagged <- flagged_rows(new_spectra)
+  after_recipe    <- rep(FALSE, nrow(new_spectra))
+
   unit <- run_unit({
 
     ## -----------------------------------------------------------------------
-    ## Point prediction (transformed scale → back-transform ONCE to original)
+    ## Bake first: a row non-finite after the recipe is not predicted either
     ## -----------------------------------------------------------------------
+    ## The engine, the quantile forest and the AD distance see only the rows
+    ## that bake to finite values; the rest are NA in every column. The baked
+    ## matrix feeds the AD distance, so the AD does not bake again.
 
-    point_trans <- unit_step("predict", stats::predict(workflow, new_data = new_spectra))$.pred
+    usable <- !arrived_flagged
+    baked  <- NULL
 
-    ## Everything below is attached to new_spectra$sample_id by position:
-    ## .pred, the interval columns and the AD columns, and abstain_ood blanks
-    ## rows by the same alignment. parsnip returns one prediction per baked
-    ## row, so a recipe step that dropped rows at bake would shift every label
-    ## silently.
-    check_rows_aligned(
-      what       = paste0("Point predictions for config '", config_id, "'"),
-      to         = "the rows of new_data",
-      n          = length(point_trans),
-      n_expected = nrow(new_spectra)
-    )
+    if (any(usable)) {
 
-    ## Unconditional funnel call: the "none" branch is a passthrough, and the
-    ## funnel clamps to the outcome's range, a floor at 0 under the default
-    ## and no floor for a signed outcome (#76). The intervals below are built
-    ## around the point before the response bound, so winsorizing first would
-    ## drag both interval bounds down by the overshoot, which the documented
-    ## contract ("interval bounds are not clamped") and the ensemble path both
-    ## rule out.
-    point_pred <- unit_step("back_transform", back_transform_predictions(
-      point_trans, transformation, outcome_range = outcome_range
-    ))
+      baked <- unit_step("bake", bake_predictors(workflow, new_spectra[usable, , drop = FALSE]))
 
-    ## Deploy-time winsorization guardrail, on .pred only. Ensemble machinery
-    ## passes clamp = FALSE: the guardrail applies once at the ensemble
-    ## output, keeping member features consistent with the raw member OOF the
-    ## meta-learner trained and calibrated on.
-    bounded    <- apply_response_bound(point_pred, bound)
-    winsorized <- winsorized_report(new_spectra$sample_id, point_pred, bounded, bound)
-
-    out       <- block
-    out$.pred <- bounded$values
-
-    ## -----------------------------------------------------------------------
-    ## Intervals (conformal CQR), a unit of their own
-    ## -----------------------------------------------------------------------
-
-    if (!is.null(uq)) {
-
-      interval_cols <- add_on(
-        predict_intervals(uq, point_pred, new_spectra, config_id = config_id,
-                          outcome_range = outcome_range),
-        "intervals", skipped_add_on("Prediction intervals (UQ) were")
+      check_rows_aligned(
+        what       = paste0("Features baked for config '", config_id, "'"),
+        to         = "the rows of new_data it was given",
+        n          = nrow(baked),
+        n_expected = sum(usable)
       )
 
-      if (!is.null(interval_cols)) {
-
-        check_rows_aligned(
-          what       = paste0("Interval columns for config '", config_id, "'"),
-          to         = "the rows of new_data",
-          n          = nrow(interval_cols),
-          n_expected = nrow(new_spectra)
-        )
-
-        out[names(interval_cols)] <- interval_cols
-
-      }
+      after_recipe[usable] <- rowSums(!is.finite(baked)) > 0
 
     }
 
-    ## -----------------------------------------------------------------------
-    ## Applicability domain, a unit of its own
-    ## -----------------------------------------------------------------------
-    ## Independent of intervals: AD reports even for point-only predictions.
-    ## Under abstention an AD that could not be computed blanks every
-    ## prediction: an unknown domain is not in domain (decision 8).
+    good  <- usable & !after_recipe
+    rows  <- new_spectra[good, , drop = FALSE]
+    baked <- baked[!after_recipe[usable], , drop = FALSE]
 
-    if (!is.null(ad_bundle)) {
+    out <- block
 
-      ad_failed <- if (abstain_ood) {
-        function(cause) warn_in_unit("skipped", c(
-          "The applicability domain (AD) was not computed, so the predictions are {.code NA} under {.code abstain_ood = TRUE}: {cause}"
-        ))
-      } else {
-        skipped_add_on("The applicability domain (AD) was")
-      }
+    if (any(good)) {
 
-      ad_cols <- add_on(predict_ad(workflow, ad_bundle, new_spectra, config_id = config_id),
-                        "ad", ad_failed)
+      ## --------------------------------------------------------------------
+      ## Point prediction (transformed scale → back-transform ONCE to original)
+      ## --------------------------------------------------------------------
 
-      if (!is.null(ad_cols)) {
+      point_trans <- unit_step("predict", stats::predict(workflow, new_data = rows))$.pred
 
-        ## Checked before the assignment, and so before abstention blanks rows
-        ## by it.
-        check_rows_aligned(
-          what       = paste0("Applicability-domain columns for config '", config_id, "'"),
-          to         = "the rows of new_data",
-          n          = nrow(ad_cols),
-          n_expected = nrow(new_spectra)
+      ## Everything below is attached to the good rows by position: .pred, the
+      ## interval columns and the AD columns, and abstain_ood blanks rows by the
+      ## same alignment. parsnip returns one prediction per baked row, so a
+      ## recipe step that dropped rows at bake would shift every label
+      ## silently.
+      check_rows_aligned(
+        what       = paste0("Point predictions for config '", config_id, "'"),
+        to         = "the rows of new_data",
+        n          = length(point_trans),
+        n_expected = nrow(rows)
+      )
+
+      ## Unconditional funnel call: the "none" branch is a passthrough, and the
+      ## funnel clamps to the outcome's range, a floor at 0 under the default
+      ## and no floor for a signed outcome (#76). The intervals below are built
+      ## around the point before the response bound, so winsorizing first would
+      ## drag both interval bounds down by the overshoot, which the documented
+      ## contract ("interval bounds are not clamped") and the ensemble path both
+      ## rule out.
+      point_pred <- unit_step("back_transform", back_transform_predictions(
+        point_trans, transformation, outcome_range = outcome_range
+      ))
+
+      ## Deploy-time winsorization guardrail, on .pred only. Ensemble machinery
+      ## passes clamp = FALSE: the guardrail applies once at the ensemble
+      ## output, keeping member features consistent with the raw member OOF the
+      ## meta-learner trained and calibrated on.
+      bounded    <- apply_response_bound(point_pred, bound)
+      winsorized <- winsorized_report(rows$sample_id, point_pred, bounded, bound)
+
+      out$.pred[good] <- bounded$values
+
+      ## --------------------------------------------------------------------
+      ## Intervals (conformal CQR), a unit of their own
+      ## --------------------------------------------------------------------
+
+      if (!is.null(uq)) {
+
+        interval_cols <- add_on(
+          predict_intervals(uq, point_pred, rows, config_id = config_id,
+                            outcome_range = outcome_range),
+          "intervals", skipped_add_on("Prediction intervals (UQ) were")
         )
 
-        out[names(ad_cols)] <- ad_cols
+        if (!is.null(interval_cols)) {
+
+          check_rows_aligned(
+            what       = paste0("Interval columns for config '", config_id, "'"),
+            to         = "the rows of new_data",
+            n          = nrow(interval_cols),
+            n_expected = nrow(rows)
+          )
+
+          for (col in names(interval_cols)) out[[col]][good] <- interval_cols[[col]]
+
+        }
 
       }
 
-      ## Abstention: NA out predictions for out-of-domain samples, keeping the
-      ## AD columns so the caller can see how far out each sample was. Interval
-      ## bounds are NA'd too — an interval on an abstained prediction is
-      ## meaningless. An NA flag is never out of domain by itself (a row the
-      ## AD could not score).
-      if (abstain_ood) {
+      ## --------------------------------------------------------------------
+      ## Applicability domain, a unit of its own
+      ## --------------------------------------------------------------------
+      ## Independent of intervals: AD reports even for point-only predictions.
+      ## Under abstention an AD that could not be computed blanks every
+      ## prediction: an unknown domain is not in domain (decision 8).
 
-        ood <- if (is.null(ad_cols)) {
-          rep(TRUE, nrow(out))
+      if (!is.null(ad_bundle)) {
+
+        ad_failed <- if (abstain_ood) {
+          function(cause) warn_in_unit("skipped", c(
+            "The applicability domain (AD) was not computed, so the predictions are {.code NA} under {.code abstain_ood = TRUE}: {cause}"
+          ))
         } else {
-          !is.na(out$.ad_flag) & out$.ad_flag == "OOD"
+          skipped_add_on("The applicability domain (AD) was")
         }
 
-        pred_cols <- intersect(c(".pred", ".pred_lower", ".pred_upper", ".interval_width"),
-                               names(out))
+        ad_cols <- add_on(predict_ad(baked, ad_bundle), "ad", ad_failed)
 
-        for (col in pred_cols) out[[col]][ood] <- NA_real_
+        if (!is.null(ad_cols)) {
+
+          ## Checked before the assignment, and so before abstention blanks rows
+          ## by it.
+          check_rows_aligned(
+            what       = paste0("Applicability-domain columns for config '", config_id, "'"),
+            to         = "the rows of new_data",
+            n          = nrow(ad_cols),
+            n_expected = nrow(rows)
+          )
+
+          out$.ad_distance[good] <- ad_cols$.ad_distance
+          out$.ad_flag[good]     <- ad_cols$.ad_flag
+
+        }
+
+        ## Abstention: NA out predictions for out-of-domain samples, keeping the
+        ## AD columns so the caller can see how far out each sample was. Interval
+        ## bounds are NA'd too — an interval on an abstained prediction is
+        ## meaningless. An NA flag is never out of domain by itself (a row the
+        ## AD could not score).
+        if (abstain_ood) {
+
+          ood <- if (is.null(ad_cols)) {
+            good
+          } else {
+            !is.na(out$.ad_flag) & out$.ad_flag == "OOD"
+          }
+
+          pred_cols <- intersect(c(".pred", ".pred_lower", ".pred_upper", ".interval_width"),
+                                 names(out))
+
+          for (col in pred_cols) out[[col]][ood] <- NA_real_
+
+        }
 
       }
 
@@ -1102,8 +1152,31 @@ predict_one_config <- function(object, config_id, new_spectra, interval,
   attr(result, "failed")       <- unit$failed
   attr(result, "unit_records") <- dplyr::bind_rows(unit$records, add_on_records)
   attr(result, "winsorized")   <- if (!unit$failed) winsorized
+  attr(result, "flagged")      <- list(
+    arrived = new_spectra$sample_id[arrived_flagged],
+    recipe  = if (!unit$failed) new_spectra$sample_id[after_recipe] else character(0)
+  )
 
   result
+
+}
+
+#' Bake new data through a fitted workflow's recipe
+#'
+#' The predictors the model sees, from the recipe the workflow was fit with:
+#' what `predict()` checks for non-finite rows, and what the applicability
+#' domain is measured in.
+#'
+#' @param workflow A fitted (possibly butchered) workflow.
+#' @param new_data The rows to bake.
+#' @return Numeric matrix, one row per row of `new_data`.
+#' @keywords internal
+#' @noRd
+bake_predictors <- function(workflow, new_data) {
+
+  prepped <- workflows::extract_recipe(workflow, estimated = TRUE)
+
+  as.matrix(recipes::bake(prepped, new_data = new_data, recipes::all_predictors()))
 
 }
 
@@ -1237,9 +1310,71 @@ log_prediction_units <- function(collector, blocks) {
   log_unit_records(collector, records)
   log_foreign_warnings(collector, records)
 
+  log_flagged(collector, stats::setNames(lapply(blocks, attr, "flagged"),
+                                         vapply(blocks, function(b) b$config_id[1] %||% NA_character_,
+                                                character(1))))
   log_winsorized(collector, lapply(blocks, attr, "winsorized"))
 
   invisible(collector)
+
+}
+
+#' Collect one warning for the rows that could not be predicted
+#'
+#' A row flagged on arrival, or non-finite after a configuration's recipe, is
+#' returned as `NA` (conditions.md: rows are removed only where modelling
+#' happens). One `flagged` warning names them once, whatever the number of
+#' configurations: `ids` the samples, and the configurations whose recipe
+#' left them non-finite when more than one was predicted.
+#'
+#' @param collector The call's collector.
+#' @param reports Named list, one per configuration (or member): `NULL`, or
+#'   a list with `arrived` and `recipe`, the sample ids flagged on arrival and
+#'   after the recipe.
+#' @return `collector`, invisibly.
+#' @keywords internal
+#' @noRd
+log_flagged <- function(collector, reports) {
+
+  reports <- Filter(Negate(is.null), reports)
+
+  arrived   <- unique(unlist(lapply(reports, `[[`, "arrived")))
+  recipe_by <- lapply(reports, `[[`, "recipe")
+  recipe    <- setdiff(unique(unlist(recipe_by)), arrived)
+  ids       <- c(arrived, recipe)
+
+  if (length(ids) == 0) return(invisible(collector))
+
+  n         <- length(ids)
+  n_arrived <- length(arrived)
+  n_recipe  <- length(recipe)
+  configs   <- names(recipe_by)[lengths(recipe_by) > 0]
+  of        <- if (length(reports) > 1 && length(configs) > 0) {
+    cli::format_inline(" of {.val {configs}}")
+  } else {
+    ""
+  }
+
+  log_warning(collector, "flagged", c(
+    "{n} sample{?s} could not be predicted, so {?its row is/their rows are} {.code NA}.",
+    "i" = if (n_arrived > 0) "{n_arrived} {?was/were} flagged on arrival ({.field .flag}): {shown_ids(arrived)}.",
+    "i" = if (n_recipe > 0) "{n_recipe} {?was/were} not finite after the recipe{of}: {shown_ids(recipe)}."
+  ), ids = ids, n = n)
+
+}
+
+#' The first ids of a set, and how many more
+#'
+#' @param ids Character.
+#' @param n_show Integer. How many to name.
+#' @return Character(1), ids quoted and comma-separated.
+#' @keywords internal
+#' @noRd
+shown_ids <- function(ids, n_show = 5L) {
+
+  shown <- paste0('"', utils::head(ids, n_show), '"', collapse = ", ")
+
+  if (length(ids) > n_show) paste0(shown, " and ", length(ids) - n_show, " more") else shown
 
 }
 

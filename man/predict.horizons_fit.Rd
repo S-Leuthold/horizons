@@ -91,6 +91,13 @@ distance is a squared Mahalanobis distance in the model's feature space; the
 flag bins it against held-out-calibrated thresholds. Set \code{abstain_ood = TRUE}
 to \code{NA} predictions for out-of-domain samples while keeping the AD columns.
 
+\strong{Rows that cannot be predicted.} \code{new_data} is baked through each
+configuration's recipe first. A row flagged on arrival (a \code{.flag} that is
+not \code{NA}: a step kept the sample but could not use it) or
+non-finite after the recipe is not predicted: it is returned as \code{NA} in
+every column, and the rows are named in one warning of class
+\code{horizons_warning_flagged}. The other rows are predicted as usual.
+
 \strong{When something cannot be computed.} Each configuration's predictions
 are computed on their own, and its intervals and applicability domain on
 their own within them. A configuration that cannot predict comes back as
