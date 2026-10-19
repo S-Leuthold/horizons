@@ -37,15 +37,17 @@
 #' tentative are kept with the confirmed ones, and each kept representative
 #' brings its whole cluster.
 #'
-#' When Boruta confirms nothing, the step warns with class
-#' `horizons_boruta_warning`: if it rejected every attribute, the step keeps
-#' all the variance-filtered columns; otherwise it keeps the tentative ones.
+#' When Boruta confirms nothing, the step warns: if it rejected every
+#' attribute, the step keeps all the variance-filtered columns and warns
+#' with class `horizons_warning_substitution`; otherwise it keeps the
+#' tentative ones and warns with class `horizons_warning_quality`.
 #' When Boruta itself fails, `prep()` aborts; there is no fallback selector, so
 #' a Boruta error never yields results labelled Boruta from another method.
-#' The abort carries class `horizons_boruta_error` in its condition chain.
+#' The abort carries class `horizons_error_boruta` (kind `horizons_error_run`)
+#' in its condition chain, with Boruta's own error as its parent.
 #' Through `recipes::prep()` the outer condition is recipes' own
 #' `recipes_error_step`, with this error as its parent, so test for the class
-#' with `rlang::cnd_inherits(err, "horizons_boruta_error")` rather than
+#' with `rlang::cnd_inherits(err, "horizons_error_boruta")` rather than
 #' `inherits()`. Boruta is a suggested package; `prep()` checks that it is
 #' installed before doing any work.
 #'
@@ -63,7 +65,7 @@
 #' confirmed, tentative and rejected counts, each attribute's `decision`, the
 #' `runs`, `max_runs` and `num_trees`, the `mtry` ceiling and the `mtry` of
 #' each run (`mtry_by_run`), `retained_all`, `n_bands` (the bands left after
-#' the near-constant ones are dropped) and `skipped`. `print()` shows the
+#' the near-constant ones are dropped), `n_kept` and `skipped`. `print()` shows the
 #' counts.
 #'
 #' With fewer than two bands left after the near-constant ones are dropped,
@@ -261,28 +263,25 @@ prep.step_select_boruta <- function(x, training, info = NULL, ...) {
   ### There is no fallback selector. The step used to fall back to the 50
   ### columns most correlated with the outcome, so a config labelled "boruta"
   ### ran a correlation filter with nothing in the results saying so. An
-  ### error here stops the step; recipes::prep() wraps it in a
-  ### recipes_error_step, so the class sits one level down the chain.
+  ### error here stops the step, with Boruta's error as its parent, so its
+  ### class, call and backtrace survive; recipes::prep() wraps the step's
+  ### error in a recipes_error_step, so the class sits one level down.
 
-  boruta_fit <- tryCatch(Boruta::Boruta(x           = reduced_mat,
-                                        y           = outcome_vec,
-                                        doTrace     = 0,
-                                        maxRuns     = max_runs,
-                                        holdHistory = FALSE,
-                                        getImp      = ranger_importance),
-                         error = function(e) e)
-
-  if (inherits(boruta_fit, "error")) {
-
-    boruta_error <- conditionMessage(boruta_fit)
-
-    cli::cli_abort(c(
-      "Boruta feature selection failed: {boruta_error}",
-      "i" = "Boruta ran on {n_features} cluster representative{?s} of {length(col_names_filtered)} wavenumber{?s}, with ranger mtry at most {optimal_mtry}.",
-      "i" = "{.fn step_select_boruta} has no fallback selector, so the step fails rather than select by another method."
-    ), class = "horizons_boruta_error")
-
-  }
+  boruta_fit <- rlang::try_fetch(
+    Boruta::Boruta(x           = reduced_mat,
+                   y           = outcome_vec,
+                   doTrace     = 0,
+                   maxRuns     = max_runs,
+                   holdHistory = FALSE,
+                   getImp      = ranger_importance),
+    error = function(e) {
+      abort_horizons(c(
+        "Boruta feature selection failed.",
+        "i" = "Boruta ran on {n_features} cluster representative{?s} of {length(col_names_filtered)} wavenumber{?s}, with ranger mtry at most {optimal_mtry}.",
+        "i" = "{.fn step_select_boruta} has no fallback selector, so the step fails rather than select by another method."
+      ), kind = "run", class = "horizons_error_boruta", parent = e)
+    }
+  )
 
   decision <- boruta_fit$finalDecision
 
@@ -308,24 +307,18 @@ prep.step_select_boruta <- function(x, training, info = NULL, ...) {
   ## at 25 for speed, so Boruta often stops before it decides them.
   ##
   ## Boruta confirming nothing is a result, not a failure, and the step says
-  ## so rather than pass it off as a selection. Two cases:
+  ## so rather than pass it off as a selection. Two cases, recorded here and
+  ## warned from the record (selection_warning()):
   ##
   ##   - Every attribute rejected: nothing is selected, so the step keeps every
   ##     variance-filtered wavenumber, as the other selection steps keep all
-  ##     their columns when they select nothing.
+  ##     their columns when they select nothing (substitution).
   ##   - None confirmed, some tentative: the selection is the tentative
-  ##     attributes, none of which Boruta showed to beat the shadows.
-  ##
-  ## Both warn, and the trained record carries the counts either way.
+  ##     attributes, none of which Boruta showed to beat the shadows (quality).
 
   kept_cluster_vars <- Boruta::getSelectedAttributes(boruta_fit, withTentative = TRUE)
 
   if (length(kept_cluster_vars) == 0) {
-
-    cli::cli_warn(c(
-      "Boruta rejected all {n_features} attribute{?s} it tested, so {.fn step_select_boruta} selected nothing.",
-      "i" = "Retaining all {length(col_names_filtered)} variance-filtered wavenumber{?s}; the model sees an unselected spectrum."
-    ), class = "horizons_boruta_warning")
 
     kept_wavenumbers           <- col_names_filtered
     boruta_record$retained_all <- TRUE
@@ -334,16 +327,9 @@ prep.step_select_boruta <- function(x, training, info = NULL, ...) {
 
     kept_wavenumbers <- unique(unlist(cluster_map[kept_cluster_vars]))
 
-    if (boruta_record$n_confirmed == 0) {
-
-      cli::cli_warn(c(
-        "Boruta confirmed none of the {n_features} attribute{?s} it tested in {boruta_record$runs} run{?s}.",
-        "i" = "The selection is the {boruta_record$n_tentative} attribute{?s} it left tentative ({length(kept_wavenumbers)} wavenumber{?s}), none shown to beat the shadow features."
-      ), class = "horizons_boruta_warning")
-
-    }
-
   }
+
+  boruta_record$n_kept <- length(kept_wavenumbers)
 
   ## ---------------------------------------------------------------------------
   ## Stage 5: Return trained step

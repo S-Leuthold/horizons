@@ -60,15 +60,17 @@ which shrink as Boruta rejects attributes. Attributes Boruta leaves
 tentative are kept with the confirmed ones, and each kept representative
 brings its whole cluster.
 
-When Boruta confirms nothing, the step warns with class
-\code{horizons_boruta_warning}: if it rejected every attribute, the step keeps
-all the variance-filtered columns; otherwise it keeps the tentative ones.
+When Boruta confirms nothing, the step warns: if it rejected every
+attribute, the step keeps all the variance-filtered columns and warns
+with class \code{horizons_warning_substitution}; otherwise it keeps the
+tentative ones and warns with class \code{horizons_warning_quality}.
 When Boruta itself fails, \code{prep()} aborts; there is no fallback selector, so
 a Boruta error never yields results labelled Boruta from another method.
-The abort carries class \code{horizons_boruta_error} in its condition chain.
+The abort carries class \code{horizons_error_boruta} (kind \code{horizons_error_run})
+in its condition chain, with Boruta's own error as its parent.
 Through \code{recipes::prep()} the outer condition is recipes' own
 \code{recipes_error_step}, with this error as its parent, so test for the class
-with \code{rlang::cnd_inherits(err, "horizons_boruta_error")} rather than
+with \code{rlang::cnd_inherits(err, "horizons_error_boruta")} rather than
 \code{inherits()}. Boruta is a suggested package; \code{prep()} checks that it is
 installed before doing any work.
 
@@ -86,7 +88,7 @@ The trained step records what Boruta did in its \code{boruta} element: the
 confirmed, tentative and rejected counts, each attribute's \code{decision}, the
 \code{runs}, \code{max_runs} and \code{num_trees}, the \code{mtry} ceiling and the \code{mtry} of
 each run (\code{mtry_by_run}), \code{retained_all}, \code{n_bands} (the bands left after
-the near-constant ones are dropped) and \code{skipped}. \code{print()} shows the
+the near-constant ones are dropped), \code{n_kept} and \code{skipped}. \code{print()} shows the
 counts.
 
 With fewer than two bands left after the near-constant ones are dropped,

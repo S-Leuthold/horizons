@@ -662,6 +662,39 @@ selection_warning <- function(step) {
 
   }
 
+  ## Boruta selected nothing, or confirmed nothing --------------------------
+
+  if (identical(name, "step_select_boruta")) {
+
+    n_attributes <- rec$n_attributes
+    n_bands      <- rec$n_bands
+
+    if (isTRUE(rec$retained_all)) {
+
+      return(list(topic = "substitution", env = environment(), message = c(
+        "Boruta rejected all {n_attributes} attribute{?s} it tested, so {.fn step_select_boruta} selected nothing.",
+        "i" = "Retaining all {n_bands} variance-filtered wavenumber{?s}; the model sees an unselected spectrum."
+      )))
+
+    }
+
+    if (identical(as.integer(rec$n_confirmed), 0L)) {
+
+      runs        <- rec$runs
+      n_tentative <- rec$n_tentative
+      n_kept      <- rec$n_kept
+
+      return(list(topic = "quality", env = environment(), message = c(
+        "Boruta confirmed none of the {n_attributes} attribute{?s} it tested in {runs} run{?s}.",
+        "i" = "The selection is the {n_tentative} attribute{?s} it left tentative ({n_kept} wavenumber{?s}), none shown to beat the shadow features."
+      )))
+
+    }
+
+    return(NULL)
+
+  }
+
   ## Nothing selected: every band kept, under the documented fallback --------
 
   if (identical(name, "step_select_correlation") && isTRUE(rec$retained_all)) {

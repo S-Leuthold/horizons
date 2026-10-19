@@ -105,12 +105,12 @@ describe("the pls engine", {
 
     d <- make_pls_data(n = 12, p = 40)
     expect_warning(fit <- pls_fit(d$x, d$y, ncomp = 30L),
-                   "11 components, not the 30", class = "horizons_pls_warning")
+                   "11 components, not the 30", class = "horizons_warning_substitution")
     expect_identical(fit$horizons_ncomp, 11L)
 
     d <- make_pls_data(n = 60, p = 6)
     expect_warning(fit <- pls_fit(d$x, d$y, ncomp = 30L),
-                   "6 components, not the 30", class = "horizons_pls_warning")
+                   "6 components, not the 30", class = "horizons_warning_substitution")
     expect_identical(fit$horizons_ncomp, 6L)
 
     expect_no_warning(pls_fit(d$x, d$y, ncomp = 6L))

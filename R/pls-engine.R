@@ -90,7 +90,7 @@ register_pls_engine <- function() {
 #' scaled (a constant column is left unscaled, so it contributes nothing).
 #' `ncomp` is capped at the number of predictors and at the rows less one, the
 #' most components the data can hold. A fit asked for more uses that many and
-#' warns: the runners cap the tuning range from the whole training set, so a
+#' warns, with class `horizons_warning_substitution`: the runners cap the tuning range from the whole training set, so a
 #' fold whose recipe selects fewer predictors can still reach this cap.
 #'
 #' @param x Numeric matrix or data frame of predictors.
@@ -107,11 +107,12 @@ pls_fit <- function(x, y, ncomp = 2L) {
   requested <- as.integer(ncomp)
   ncomp     <- as.integer(max(1L, min(ncomp, ncol(x), nrow(x) - 1L)))
 
+  ## What ran differs from what was asked, under the documented cap
   if (ncomp < requested) {
 
-    cli::cli_warn(
-      "PLS fitted {ncomp} component{?s}, not the {requested} asked for: the data have {ncol(x)} predictor{?s} and {nrow(x)} row{?s}.",
-      class = "horizons_pls_warning"
+    warn_in_unit(
+      "substitution",
+      "PLS fitted {ncomp} component{?s}, not the {requested} asked for: the data have {ncol(x)} predictor{?s} and {nrow(x)} row{?s}."
     )
 
   }

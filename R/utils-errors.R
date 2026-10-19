@@ -175,7 +175,8 @@ check_arg <- function(check,
 #'     result as `object` and its warnings as `log`.}
 #'   \item{`horizons_error_download`}{(run) A spectral library could not be
 #'     downloaded.}
-#'   \item{`horizons_error_boruta`}{(run) [step_select_boruta()] failed.}
+#'   \item{`horizons_error_boruta`}{(run) [step_select_boruta()]'s Boruta run
+#'     failed; Boruta's own error is its parent.}
 #'   \item{`horizons_error_qc`}{(run) A quality check failed once it had been
 #'     computed.}
 #'   \item{`horizons_error_consent`}{(input) A library download was declined.}

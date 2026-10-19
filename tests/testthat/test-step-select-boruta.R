@@ -234,7 +234,7 @@ describe("step_select_boruta() - Boruta's input and its forests", {
 
 describe("a failed Boruta run fails step_select_boruta() (#75)", {
 
-  it("aborts with horizons_boruta_error rather than select by correlation", {
+  it("aborts with horizons_error_boruta, Boruta's error its parent, rather than select by correlation", {
 
     skip_if_not_installed("Boruta")
 
@@ -244,16 +244,29 @@ describe("a failed Boruta run fails step_select_boruta() (#75)", {
 
     rec <- boruta_recipe(d)
 
-    expect_error(recipes::prep(rec, training = d), class = "horizons_boruta_error")
+    expect_error(recipes::prep(rec, training = d), class = "horizons_error_boruta")
     expect_error(recipes::prep(rec, training = d), "Boruta feature selection failed")
     expect_error(recipes::prep(rec, training = d), "Missing data in dependent variable")
 
     ## recipes wraps a step's error in its own recipes_error_step, so the
     ## class is one level down the chain: cnd_inherits() finds it, as the
-    ## step's documentation says to check it.
+    ## step's documentation says to check it. A run failure, kept with the
+    ## error Boruta raised as its parent.
     err <- tryCatch(recipes::prep(rec, training = d), error = identity)
 
-    expect_true(rlang::cnd_inherits(err, "horizons_boruta_error"))
+    expect_true(rlang::cnd_inherits(err, "horizons_error_boruta"))
+    expect_true(rlang::cnd_inherits(err, "horizons_error_run"))
+
+    ## The walk stops at the chain's end, so a prep that succeeds fails here
+    ## rather than loop.
+    boruta_err <- err
+    while (inherits(boruta_err, "error") && !inherits(boruta_err, "horizons_error_boruta")) {
+      boruta_err <- boruta_err$parent
+    }
+    expect_s3_class(boruta_err, "horizons_error_boruta")
+    expect_s3_class(boruta_err$parent, "error")
+    expect_false(inherits(boruta_err$parent, "horizons_error"))
+    expect_match(conditionMessage(boruta_err$parent), "Missing data in dependent variable", fixed = TRUE)
 
   })
 
@@ -300,7 +313,7 @@ describe("a failed Boruta run fails step_select_boruta() (#75)", {
     d <- boruta_signal_data()
 
     expect_error(recipes::prep(boruta_recipe(d), training = d),
-                 class = "horizons_boruta_error")
+                 class = "horizons_error_boruta")
     expect_error(recipes::prep(boruta_recipe(d), training = d),
                  "ranger said {mtry}", fixed = TRUE)
 
@@ -325,12 +338,14 @@ describe("step_select_boruta() when Boruta confirms nothing (#75)", {
 
     d <- boruta_signal_data()
 
-    expect_warning(prepped <- recipes::prep(boruta_recipe(d), training = d),
-                   class = "horizons_boruta_warning")
+    w <- expect_warning(prepped <- recipes::prep(boruta_recipe(d), training = d),
+                        "selected nothing", class = "horizons_warning_substitution")
 
     step <- prepped$steps[[1]]
     b    <- step$boruta
     spec <- grep("^spec", names(d), value = TRUE)
+
+    expect_identical(w$step, "step_select_boruta")
 
     expect_true(b$retained_all)
     expect_identical(b$n_rejected, 50L)
@@ -355,7 +370,8 @@ describe("step_select_boruta() when Boruta confirms nothing (#75)", {
     d <- boruta_signal_data()
 
     expect_warning(prepped <- recipes::prep(boruta_recipe(d), training = d),
-                   class = "horizons_boruta_warning")
+                   "The selection is the 2 attributes it left tentative (2 wavenumbers)",
+                   fixed = TRUE, class = "horizons_warning_quality")
 
     step <- prepped$steps[[1]]
     b    <- step$boruta
