@@ -200,15 +200,41 @@ test_that("baseline-corrected targets are refused against the registered library
 
 })
 
-test_that("the registry's grid names the columns the built library has", {
+test_that("the registry's grid and baseline are the built library's", {
 
-  ## What the check before the download compares against is what the build
-  ## produces: build_ossl_library() standardizes onto exactly this grid
+  ## What the checks before the download compare against is what the build
+  ## produces: build_ossl_library() standardizes onto exactly this grid,
+  ## with this baseline
   m <- use_mini()
   f <- library_registry()$mini$filters
 
   expect_identical(paste0("wn_", canonical_grid(f$wn_min, f$wn_max, f$wn_step)),
                    m$pool$data$role_map$variable[m$pool$data$role_map$role == "predictor"])
+  expect_identical(m$pool$provenance$standardization$baseline, f$baseline)
+  expect_false(f$baseline)
+
+})
+
+test_that("baseline-corrected targets are refused against a registered library before it is downloaded (#107)", {
+
+  entry <- make_mini_ossl(withr::local_tempdir(), seed = 3, extras = FALSE, n_kssl = 60L)
+  local_mini_registry(entry)
+  local_mocked_bindings(resolve_source = function(...) stop("the library was resolved"))
+
+  ## On the mini library's grid, so the column checks pass and only the
+  ## baseline differs
+  wn  <- seq(700, 600, by = -2)
+  tbl <- withr::with_seed(1, data.frame(sample_id = paste0("T", 1:3),
+                                        matrix(1 + stats::runif(3 * length(wn)), 3,
+                                               dimnames = list(NULL, paste0("wn_", wn))),
+                                        check.names = FALSE))
+  utils::capture.output({
+    x <- spectra(tbl, id_col = "sample_id")
+    x <- standardize(x, resample = 2, trim = c(600, 700), baseline = TRUE)
+  })
+
+  expect_error(select_training(x, "mini", k = 5L),
+               "The targets were baseline-corrected", class = "horizons_error_input")
 
 })
 

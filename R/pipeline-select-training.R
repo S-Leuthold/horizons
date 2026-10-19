@@ -520,10 +520,11 @@ select_training <- function(x, library,
   target_vars   <- x$data$role_map$variable[x$data$role_map$role == "predictor"]
   restandardize <- !is.null(x$provenance$standardization)
 
-  ## A registered library's columns are known from the registry, the grid
-  ## build_ossl_library() standardizes it onto, so targets sharing none of
-  ## them are refused before the download, as a window too narrow is above.
-  ## The check runs again on the resolved pool below.
+  ## A registered library's columns and baseline are known from the
+  ## registry, which build_ossl_library() standardizes it with, so targets
+  ## off its grid or standardized differently are refused before the
+  ## download, as a window too narrow is above. Both checks run again on
+  ## the resolved pool below.
 
   if (registered) {
 
@@ -531,6 +532,14 @@ select_training <- function(x, library,
     reg_vars <- paste0("wn_", canonical_grid(reg_grid$wn_min, reg_grid$wn_max, reg_grid$wn_step))
 
     check_shared_columns(target_vars, reg_vars, restandardize = restandardize)
+
+    check_same_standardization(list(baseline         = isTRUE(reg_grid$baseline),
+                                    wavelength_range = c(reg_grid$wn_min, reg_grid$wn_max)),
+                               x$provenance$standardization,
+                               pool_step     = reg_grid$wn_step,
+                               target_step   = grid_summary(predictor_wavenumbers(x))$resolution,
+                               library_form  = "registered",
+                               restandardize = restandardize)
 
   }
 
