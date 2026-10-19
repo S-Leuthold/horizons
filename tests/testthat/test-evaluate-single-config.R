@@ -865,6 +865,73 @@ describe("evaluate_single_config() - a Bayesian search that fails (#209)", {
 
   })
 
+  it("counts a candidate the search proposed that failed in every fold among the candidates left out", {
+
+    ## As above: tune drops each Bayesian candidate, and its iteration log is
+    ## the only record of them, read outside debug too
+    in_search   <- FALSE
+    real_glmnet <- glmnet::glmnet
+    real_bayes  <- tune::tune_bayes
+    local_mocked_bindings(glmnet = function(...) {
+      if (in_search) stop("the engine broke on a Bayesian candidate")
+      real_glmnet(...)
+    }, .package = "glmnet")
+    local_mocked_bindings(tune_bayes = function(...) {
+      in_search <<- TRUE
+      on.exit(in_search <<- FALSE)
+      real_bayes(...)
+    }, .package = "tune")
+
+    result <- suppressWarnings(evaluate_single_config(
+      config_row    = make_eval_config(model = "elastic_net"),
+      split         = setup$split,
+      cv_folds      = setup$folds,
+      role_map      = setup$role_map,
+      grid_size     = 3,
+      bayesian_iter = 2,
+      seed          = 42L
+    ))
+
+    ## Both iterations' candidates, beside the grid's three
+    expect_equal(result$status, "success")
+    expect_true(any(grepl(
+      "2 of 5 candidates were left out of the choice of hyperparameters, not being scored on every fold.",
+      result$warnings[[1]], fixed = TRUE
+    )))
+
+  })
+
+  it("counts a candidate whose resampling errored as a whole among the candidates left out", {
+
+    ## tune's try() catches the error and logs "Couldn't estimate performance",
+    ## and the search then stops on an error of its own
+    in_search  <- FALSE
+    real_grid  <- tune::tune_grid
+    real_bayes <- tune::tune_bayes
+    local_mocked_bindings(
+      tune_grid = function(...) {
+        if (in_search) stop("the candidate's resampling broke")
+        real_grid(...)
+      },
+      tune_bayes = function(...) {
+        in_search <<- TRUE
+        on.exit(in_search <<- FALSE)
+        real_bayes(...)
+      },
+      .package = "tune"
+    )
+
+    result <- run(grid_size = 2)
+
+    expect_equal(result$status, "success")
+    expect_true(any(grepl("The Bayesian search failed", result$warnings[[1]], fixed = TRUE)))
+    expect_true(any(grepl(
+      "1 of 3 candidates was left out of the choice of hyperparameters, not being scored on every fold.",
+      result$warnings[[1]], fixed = TRUE
+    )))
+
+  })
+
   it("falls back only from a run failure: a bug inside the search still stops the call", {
 
     local_mocked_bindings(tune_bayes = function(...) {

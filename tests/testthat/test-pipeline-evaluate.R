@@ -2725,6 +2725,77 @@ describe("evaluate() - a worker's death", {
 
   })
 
+  it("stops a resamples-axis run whose worker is killed during a Bayesian iteration, checkpointing nothing (installed build)", {
+
+    skip_unless_slow_tier()
+    skip_on_cran()
+    skip_if_dev_package()
+
+    local_plan(future::multisession, workers = 2)
+
+    ## tune's search catches future's error there, so the death reaches
+    ## evaluate() only as future.apply's unclassed warning, matched by its
+    ## text: if that wording changes, this fails rather than the death
+    ## reading as a search that stopped early. The kill is armed at the
+    ## search's second Gaussian-process prediction, once an iteration has
+    ## run, and fires once, on a worker, from a recipe step that needs
+    ## nothing from here.
+    armed  <- withr::local_tempfile(pattern = "armed")
+    killed <- withr::local_tempfile(pattern = "killed")
+    kill <- bquote((function(x) {
+      if (file.exists(.(armed)) && !file.exists(.(killed)) && Sys.getpid() != .(Sys.getpid())) {
+        file.create(.(killed))
+        tools::pskill(Sys.getpid(), tools::SIGKILL)
+      }
+      x
+    })(sample_id))
+    real_recipe <- build_recipe
+    local_mocked_bindings(build_recipe = function(...) {
+      real_recipe(...) |> recipes::step_mutate(sample_id = !!kill)
+    })
+    real_pred_gp <- tune:::pred_gp
+    n_pred       <- 0L
+    local_mocked_bindings(pred_gp = function(...) {
+      n_pred <<- n_pred + 1L
+      if (n_pred == 2L) file.create(armed)
+      real_pred_gp(...)
+    }, .package = "tune")
+
+    obj <- make_eval_object(n = 60, n_configs = 1)
+    obj$config$tuning$grid_size     <- 3L
+    obj$config$tuning$bayesian_iter <- 4L
+
+    dir <- withr::local_tempdir()
+    err <- expect_error(
+      suppressWarnings(evaluate(obj, seed = 42L,
+                                control = control_horizons(allow_par = TRUE, parallelize_over = "resamples",
+                                                           output_dir = dir))),
+      class = "horizons_error_systemic"
+    )
+
+    expect_true(file.exists(killed))
+    expect_match(conditionMessage(err), "A parallel worker stopped", fixed = TRUE)
+    expect_match(conditionMessage(err$parent), "A parallel worker stopped during the Bayesian search", fixed = TRUE)
+    expect_length(list.files(file.path(dir, "checkpoints")), 0L)
+
+  })
+
+  it("is read from future.apply's warning for every class of future's errors, and for no other", {
+
+    caught <- function(class) simpleWarning(paste0("Caught ", class, ". Canceling all iterations ..."))
+
+    for (class in c("FutureInterruptError", "FutureError", "FutureLaunchError", "RngFutureError",
+                    "UnexpectedFutureResultError", "GlobalEnvMisuseFutureError")) {
+      expect_true(worker_death_warning(caught(class)), label = class)
+    }
+
+    ## future.apply warns the same way about an error the worker's own code raised
+    expect_false(worker_death_warning(caught("simpleError")))
+    expect_false(worker_death_warning(caught("rlang_error")))
+    expect_false(worker_death_warning(simpleWarning("A FutureInterruptError was caught.")))
+
+  })
+
 })
 
 

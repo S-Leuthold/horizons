@@ -204,9 +204,10 @@ models, \code{evaluate()} stops with \code{horizons_error_systemic}, the rows so
 as its \code{results} (\code{control_horizons(breaker = )}, 3 by default, \code{FALSE} to
 run every configuration; the configs axis has no breaker), and their
 failures are not checkpointed. A parallel worker that dies stops the run
-the same way, except during a Bayesian iteration on the resamples axis:
-tune catches each fit's failure there, so the iteration's candidate reads
-as one that failed. When some configurations failed and
+the same way, during a Bayesian iteration too: tune catches future's error
+there, so the death is read from the warning future.apply raises first
+("Caught FutureInterruptError. Canceling all iterations ..."), which has
+no class and is matched by its text. When some configurations failed and
 the rest are returned, one \code{horizons_warning_partial_failure} names them
 with each distinct cause. A configuration whose Bayesian search stopped
 early keeps the iterations it finished; one whose search failed before any

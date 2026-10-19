@@ -293,15 +293,25 @@ evaluate_single_config <- function(config_row,
     ## on.exit() returns the iterations finished so far, and that return
     ## cancels the unwind of any handler outside it. So the first error to
     ## leave tune's own catches is recorded as it is raised, with its trace,
-    ## and what to do about it is decided once tune_bayes() has returned. A
-    ## proposed candidate that fails in every fold leaves no note and raises
+    ## and what to do about it is decided once tune_bayes() has returned.
+    ##
+    ## A proposed candidate that fails in every fold leaves no note and raises
     ## nothing: tune drops it and says only "All models failed for: ..." in
-    ## its iteration log, which is read under debug, so that debug stops
-    ## there too. A worker that dies during an iteration on the resamples
-    ## axis is caught by tune's try() around each fit and is never raised
-    ## here; it reads as a candidate that failed.
+    ## its iteration log, or "Couldn't estimate performance" when its
+    ## resampling errored as a whole. The log is on in every mode, its output
+    ## muffled, and read: the candidates it drops are counted in the row's
+    ## note on candidates left out, and under debug the first stops the call.
+    ##
+    ## A worker that dies during an iteration on the resamples axis never
+    ## reaches here as future's error: tune's try() around the candidate's
+    ## resampling catches it. future.apply warns first, "Caught
+    ## FutureInterruptError. Canceling all iterations ...", unclassed, so the
+    ## death is read from that text (worker_death_warning()) and stops the
+    ## run as systemic once tune_bayes() has returned, as a death in the grid
+    ## stage does.
 
     final_tune_results <- grid_results
+    n_dropped          <- 0L
 
     if (!skip_bayesian && search_iter > 0) {
 
@@ -314,14 +324,24 @@ evaluate_single_config <- function(config_row,
 
       unit_step("tune_bayes", {
 
-        stopped    <- NULL
-        all_failed <- NULL
+        stopped     <- NULL
+        all_failed  <- NULL
+        worker_died <- NULL
 
         read_log <- function(m) {
           text <- cli::ansi_strip(conditionMessage(m))
-          if (is.null(all_failed) && grepl("All models failed for:", text, fixed = TRUE)) {
-            all_failed <<- trimws(sub("^.*?(All models failed for:)", "\\1", text, perl = TRUE))
+          if (grepl("All models failed for:", text, fixed = TRUE)) {
+            n_dropped <<- n_dropped + 1L
+            if (is.null(all_failed)) {
+              all_failed <<- trimws(sub("^.*?(All models failed for:)", "\\1", text, perl = TRUE))
+            }
+          } else if (grepl("Couldn't estimate performance", text, fixed = TRUE)) {
+            n_dropped <<- n_dropped + 1L
           }
+        }
+
+        read_warning <- function(w) {
+          if (is.null(worker_died) && worker_death_warning(w)) worker_died <<- w
         }
 
         bayes_results <- tryCatch(
@@ -338,7 +358,7 @@ evaluate_single_config <- function(config_row,
                   save_pred     = FALSE,
                   save_workflow = FALSE,
                   verbose       = FALSE,
-                  verbose_iter  = debug,
+                  verbose_iter  = TRUE,
                   no_improve    = BAYES_NO_IMPROVE_LIMIT,
                   allow_par     = allow_par,
                   parallel_over = parallel_over
@@ -346,12 +366,22 @@ evaluate_single_config <- function(config_row,
               ),
               message = read_log
             )),
-            error = function(e) if (is.null(stopped)) stopped <<- rlang::cnd_entrace(e)
+            warning = read_warning,
+            error   = function(e) if (is.null(stopped)) stopped <<- rlang::cnd_entrace(e)
           ),
           ## An error tune did not recover from (before its loop starts):
           ## recorded above, nothing to keep
           error = function(e) NULL
         )
+
+        if (!is.null(worker_died)) {
+
+          abort_horizons(
+            "A parallel worker stopped during the Bayesian search.",
+            kind = "run", class = "horizons_error_systemic", parent = worker_died
+          )
+
+        }
 
         if (!is.null(stopped) && (debug || rlang::cnd_inherits(stopped, NEVER_CONTAINED))) {
 
@@ -438,7 +468,7 @@ evaluate_single_config <- function(config_row,
 
     }
 
-    left_out <- unit_step("select_best", incomplete_note(final_tune_results, n_folds))
+    left_out <- unit_step("select_best", incomplete_note(final_tune_results, n_folds, n_dropped))
 
     if (!is.null(left_out)) {
 
@@ -869,20 +899,23 @@ select_complete <- function(results, metric, n_folds, debug = FALSE) {
 #'
 #' @param results The tune result the hyperparameters were chosen from.
 #' @param n_folds Integer(1). The folds drawn.
+#' @param n_dropped Integer(1). Candidates the Bayesian search proposed and
+#'   tune dropped, scored on no fold, which `results` does not hold.
 #' @return Character(1), or `NULL` when every candidate was scored on every
 #'   fold.
 #' @keywords internal
 #' @noRd
-incomplete_note <- function(results, n_folds) {
+incomplete_note <- function(results, n_folds, n_dropped = 0L) {
 
   all   <- unique(config_metrics(results)$.config)
-  n_out <- length(setdiff(all, complete_configs(results, n_folds)))
+  n_out <- length(setdiff(all, complete_configs(results, n_folds))) + n_dropped
+  n_all <- length(all) + n_dropped
 
   if (n_out == 0) return(NULL)
 
   cause <- tune_failure_cause(results)
 
-  paste0(n_out, " of ", length(all), " candidate", if (length(all) != 1) "s",
+  paste0(n_out, " of ", n_all, " candidate", if (n_all != 1) "s",
          if (n_out == 1) " was" else " were",
          " left out of the choice of hyperparameters, not being scored on every fold",
          if (!is.null(cause)) paste0(": ", cause), ".")

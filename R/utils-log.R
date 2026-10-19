@@ -420,12 +420,13 @@ flatten_message <- function(message) {
 #' A bug, a door error and a missing package are not local to a unit: each
 #' would hit every unit the same way, so it propagates with its class, chain
 #' and backtrace intact. Nor is a parallel worker's death, which future
-#' raises as a `FutureError`: the run cannot go on, and the verb stops it as
-#' systemic.
+#' raises as a `FutureError`, or a unit raises as `horizons_error_systemic`
+#' when tune caught future's error: the run cannot go on, and the verb stops
+#' it as systemic.
 #'
 #' @keywords internal
 #' @noRd
-NEVER_CONTAINED <- c(paste0("horizons_error_", c("internal", "input", "dependency")),
+NEVER_CONTAINED <- c(paste0("horizons_error_", c("internal", "input", "dependency", "systemic")),
                      "FutureError")
 
 #' The labels of the steps running now, innermost last
