@@ -1595,6 +1595,53 @@ test_that("hulls over ranges an end apart by less than the coarser step pass (#1
 })
 
 
+test_that("hulls over different ranges name the range both reach, which a library file can meet too (#107)", {
+
+  ## Targets from an instrument whose axis stops at 601.67 and 3998.47,
+  ## standardized exactly as the 600 to 4000 library was: the grid points
+  ## 600 and 4000 lie outside their data, so their hull runs 604 to 3996.
+  ## Asking them to match the library's 600 to 4000 cannot be met; fitting
+  ## the library's hull over the range both reach can.
+  fx <- select_fixture(n_pool = 120)
+
+  tm     <- predictor_matrix(fx$targets)
+  raw_wn <- round(rev(599.74 + 1.93 * (0:1761)), 2)
+  raw_wn <- raw_wn[raw_wn >= 600 & raw_wn <= 4000]
+  rs     <- resample_spectra(tm$matrix, tm$wavenumbers, new_wav = raw_wn)
+  m      <- rs$matrix
+  colnames(m) <- paste0("wn_", rs$wavelengths)
+
+  utils::capture.output({
+    raw     <- spectra(dplyr::bind_cols(tibble::tibble(sample_id = rownames(tm$matrix)), tibble::as_tibble(m)))
+    targets <- suppressWarnings(standardize(raw, resample = 4, trim = c(600, 4000), baseline = TRUE))
+    pool    <- standardize(fx$pool, resample = 4, trim = c(600, 4000), baseline = TRUE)
+  })
+
+  expect_identical(targets$provenance$standardization$wavelength_range, c(604, 3996))
+
+  err <- expect_error(select_training(targets, pool, k = 10, properties = "clay"), class = "horizons_error_input")
+  msg <- gsub("\\s+", " ", conditionMessage(err))
+
+  expect_match(msg, "Fit both hulls over the range both reach, 604 to 3996 cm-1", fixed = TRUE)
+  expect_match(msg, "the library with `standardize(library, resample = 4, trim = c(604, 3996), baseline = TRUE)`", fixed = TRUE)
+
+  ## The targets already fit theirs there, so they are not asked to move
+  expect_false(grepl("the targets with", msg, fixed = TRUE))
+
+  ## A library file is the user's to standardize again, so it is offered the
+  ## same remedy
+  path <- file.path(withr::local_tempdir(), "library.qs2")
+  qs2::qs_save(pool, path)
+  err <- expect_error(select_training(targets, path, k = 10, properties = "clay"), class = "horizons_error_input")
+  expect_match(gsub("\\s+", " ", conditionMessage(err)), "the library with `standardize(library, resample = 4", fixed = TRUE)
+
+  ## Following it from spectra() is accepted
+  utils::capture.output(pool_both <- standardize(fx$pool, resample = 4, trim = c(604, 3996), baseline = TRUE))
+  expect_s3_class(select_training(targets, pool_both, k = 10, properties = "clay"), "horizons_data")
+
+})
+
+
 test_that("the record carries the SG window in cm-1 and the space's floor", {
 
   fx  <- select_fixture(n_pool = 100)

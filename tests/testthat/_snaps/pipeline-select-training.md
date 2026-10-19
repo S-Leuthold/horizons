@@ -17,8 +17,8 @@
       ! `x` and `library` were standardized differently.
       x Both were baseline-corrected, the library's hull over 600 to 4000 cm-1 and the targets' over 1000 to 3000 cm-1, so the hulls are pinned at different ends.
       i A model trained on one baseline cannot predict the other.
-      i Standardize the targets from `spectra()` over the library's range: `standardize(x, resample = 8, trim = c(600, 4000), baseline = TRUE)`.
-      i Or standardize the library over the targets' range.
+      i Fit both hulls over the range both reach, 1000 to 3000 cm-1, standardizing from `spectra()`:
+      * the library with `standardize(library, resample = 4, trim = c(1000, 3000), baseline = TRUE)`
 
 # verbose = TRUE reports the pool, the space and the draw
 

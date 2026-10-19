@@ -1447,8 +1447,9 @@ check_pool_unpromoted <- function(pool) {
 #'   `provenance$standardization`.
 #' @param pool_step,target_step [Numeric.] Each axis's median spacing.
 #' @param library_form [Character.] The library's `form` (`"object"`,
-#'   `"path"`, `"registered"`): only a pool in memory is offered the remedy
-#'   of standardizing the library instead.
+#'   `"path"`, `"registered"`): a pool in memory or a library file is the
+#'   user's to standardize again, so it is offered the library-side remedy;
+#'   a registered library is not.
 #' @param restandardize [Logical.] Whether the targets were standardized
 #'   already, so a remedy that adds a baseline needs `force = TRUE`.
 #' @param call The frame the refusal reports: the verb's.
@@ -1470,17 +1471,31 @@ check_same_standardization <- function(pool_record, target_record, pool_step, ta
   l_step  <- signif(pool_step, 4)
   force   <- if (restandardize) ", force = TRUE" else ""
   lib_force <- if (is.null(pool_record)) "" else ", force = TRUE"
-  own     <- identical(library_form, "object")
+  own     <- library_form %in% c("object", "path")
 
   if (pool_hull && target_hull) {
 
-    if (all(abs(p_range - t_range) < max(pool_step, target_step))) return(invisible(NULL))
+    tol <- max(pool_step, target_step)
+
+    if (all(abs(p_range - t_range) < tol)) return(invisible(NULL))
+
+    ### The range both reach: a side whose data stops short of the other's
+    ### hull end cannot fit a hull there, so both are fitted over the
+    ### overlap, each side named only when its hull has to move.
+    both    <- c(max(p_range[1], t_range[1]), min(p_range[2], t_range[2]))
+    t_moves <- any(abs(t_range - both) >= tol)
+    p_moves <- any(abs(p_range - both) >= tol)
 
     problem <- "Both were baseline-corrected, the library's hull over {p_range[1]} to {p_range[2]} cm-1 and the targets' over {t_range[1]} to {t_range[2]} cm-1, so the hulls are pinned at different ends."
-    remedy  <- c(
-      "i" = "Standardize the targets from {.fn spectra} over the library's range: {.code standardize(x, resample = {t_step}, trim = c({p_range[1]}, {p_range[2]}), baseline = TRUE)}.",
-      "i" = if (own) "Or standardize the library over the targets' range."
-    )
+    remedy  <- if (own) {
+      c(
+        "i" = "Fit both hulls over the range both reach, {both[1]} to {both[2]} cm-1, standardizing from {.fn spectra}:",
+        "*" = if (t_moves) "the targets with {.code standardize(x, resample = {t_step}, trim = c({both[1]}, {both[2]}), baseline = TRUE)}",
+        "*" = if (p_moves) "the library with {.code standardize(library, resample = {l_step}, trim = c({both[1]}, {both[2]}), baseline = TRUE)}"
+      )
+    } else {
+      c("i" = "Standardize the targets from {.fn spectra} over the library's range: {.code standardize(x, resample = {t_step}, trim = c({p_range[1]}, {p_range[2]}), baseline = TRUE)}.")
+    }
 
   } else if (pool_hull) {
 
