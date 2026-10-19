@@ -133,8 +133,8 @@ describe("step_select_cars() selects", {
     skip_if_not_installed("pls")
 
     ## Over seeds 1 to 20 (the recipe built under the seed, as here) both
-    ## signal bands survive at every seed, with 2 to 8 bands kept (median 3);
-    ## at seed 1 the set is pinned below.
+    ## signal bands survive at every seed, with exactly those two kept at 19
+    ## and three at one; at seed 1 the set is pinned below.
     d <- cars_signal_data()
 
     prepped  <- withr::with_seed(1, suppressMessages(recipes::prep(cars_recipe(d), training = d)))
@@ -142,7 +142,7 @@ describe("step_select_cars() selects", {
 
     expect_true(all(c("wn_3980", "wn_3950") %in% selected))
     expect_lt(length(selected), 40L)
-    expect_setequal(selected, paste0("wn_", c(3926, 3938, 3950, 3964, 3978, 3980, 3988, 4000)))
+    expect_setequal(selected, c("wn_3980", "wn_3950"))
 
   })
 
@@ -329,6 +329,20 @@ describe("step_select_cars() weights the bands as published (Li et al. 2009)", {
     expect_identical(tr$pools, expected)
     expect_identical(sizes[1], 40L)
     expect_lte(sizes[50], 2L)
+
+  })
+
+  it("fits up to five components, and one per band when there are fewer, as carspls's pls() caps them", {
+
+    skip_if_not_installed("pls")
+
+    tr    <- cars_traced()
+    sizes <- lengths(tr$seen)
+    ncomp <- vapply(tr$fits, function(f) as.integer(f$fit$ncomp), integer(1))
+
+    ## The late sets hold five bands or fewer, so the cap binds there
+    expect_true(any(sizes < 5L))
+    expect_identical(ncomp, as.integer(pmin(5L, sizes)))
 
   })
 
@@ -529,7 +543,7 @@ describe("step_select_cars()'s tidy() and print() (#109)", {
 
     expect_length(lines, 3L)
     expect_identical(lines[2], "\u2022 Outcome column: SOC")
-    expect_identical(lines[3], "\u2022 8 wavenumbers retained after CARS")
+    expect_identical(lines[3], paste0("\u2022 ", length(step$selected_vars), " wavenumbers retained after CARS"))
 
   })
 

@@ -35,7 +35,8 @@
 #' dropping near-constant columns (a variance not finite, zero, or at most a
 #' hundred-millionth of the median band's), for 50 iterations. Each iteration fits a
 #' PLS model of up to five components on a Monte Carlo sample of 80% of the
-#' rows and scores it by its leave-one-out RMSEP at its best number of
+#' rows (and no more components than bands) and scores it by its
+#' leave-one-out RMSEP at its best number of
 #' components. The fit's coefficients weight the bands afresh: an
 #' exponentially decreasing function keeps the most heavily weighted, as many
 #' as the next iteration may fit (so the fits run from every band down to
@@ -234,8 +235,9 @@ prep.step_select_cars <- function(x, training, info = NULL, ...) {
     pls_data   <- as.data.frame(reduced_mat[mc_samples, selected, drop = FALSE])
     pls_data$y <- outcome_vec[mc_samples]
 
-    ### ARS can leave a single band, which PLS fits with one component.
-    n_comp  <- max(1, min(n_components, length(selected) - 1))
+    ### As many components as bands at most, as carspls's pls() caps them
+    ### (min(A, rows, bands)); a single band is fitted with one.
+    n_comp  <- max(1, min(n_components, length(selected)))
     pls_fit <- pls::plsr(y ~ ., data = pls_data, ncomp = n_comp, validation = "LOO")
 
     ## The cross-validated RMSEP at the best number of components, the

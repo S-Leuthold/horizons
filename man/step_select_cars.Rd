@@ -58,7 +58,8 @@ representatives of the selected columns (correlation clustering), after
 dropping near-constant columns (a variance not finite, zero, or at most a
 hundred-millionth of the median band's), for 50 iterations. Each iteration fits a
 PLS model of up to five components on a Monte Carlo sample of 80\% of the
-rows and scores it by its leave-one-out RMSEP at its best number of
+rows (and no more components than bands) and scores it by its
+leave-one-out RMSEP at its best number of
 components. The fit's coefficients weight the bands afresh: an
 exponentially decreasing function keeps the most heavily weighted, as many
 as the next iteration may fit (so the fits run from every band down to
