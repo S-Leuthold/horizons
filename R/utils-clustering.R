@@ -1,7 +1,11 @@
 #' Cluster Spectral Predictors to Reduce Redundancy
 #'
 #' Groups collinear or redundant spectral bands into clusters and returns a reduced
-#' feature matrix containing one representative wavenumber per cluster.
+#' feature matrix containing one representative wavenumber per cluster: the
+#' cluster's middle band by its position in `spectra_mat`, which for the
+#' steps' columns (`spec001` onward, or wavenumbers in the decreasing order
+#' the validator keeps) is the middle of the cluster on the spectrum. Of two
+#' middle bands, the first is taken.
 #'
 #' @param spectra_mat A numeric matrix or data frame with columns as wavenumber predictors.
 #' @param k Integer. Number of clusters to retain (e.g., 300).
@@ -32,22 +36,9 @@ cluster_spectral_predictors <- function(spectra_mat,
   method      <- match.arg(method)
   spectra_mat <- as.data.frame(spectra_mat)
 
-  ## ---------------------------------------------------------------------------
-  ## 1. Validate input
-  ## ---------------------------------------------------------------------------
-
-  if (!all(purrr::map_lgl(spectra_mat, is.numeric))) {
-
-    cli::cli_abort("All columns in `spectra_mat` must be numeric.")
-
-  }
-
-  if (!is.numeric(k) || length(k) != 1 || is.na(k) || k < 1 || k %% 1 != 0) {
-
-    cli::cli_abort("{.arg k} must be a positive integer.")
-
-  }
-
+  ### Both callers pass the numeric output of the steps before them and a k
+  ### they compute; a non-numeric column fails in cor() and a bad k in
+  ### cutree().
   k <- as.integer(k)
 
   if (ncol(spectra_mat) < k) {
@@ -94,22 +85,15 @@ cluster_spectral_predictors <- function(spectra_mat,
 
   cluster_map <- split(names(clusters), clusters)
 
-  purrr::map_chr(cluster_map,
-                 function(group) {
+  ## The middle band of each cluster by position, whatever the names: read as
+  ## numbers, the steps' spec001 names were NA, so every cluster was
+  ## represented by its first band (decided 2026-10-10)
+  positions <- stats::setNames(seq_len(ncol(spectra_mat)), colnames(spectra_mat))
 
-                   wave_nums <- suppressWarnings(as.numeric(group))
-
-                   if (all(is.na(wave_nums))) {
-
-                     return(group[1])
-
-                   } else {
-
-                     median_idx <- which.min(abs(wave_nums - median(wave_nums, na.rm = TRUE)))
-
-                     return(group[median_idx])
-                   }
-                 }) -> representative_bands
+  representative_bands <- vapply(cluster_map, function(group) {
+    at <- positions[group]
+    group[which.min(abs(at - stats::median(at)))]
+  }, character(1))
 
   ## ---------------------------------------------------------------------------
   ## 5. Return reduced matrix + metadata

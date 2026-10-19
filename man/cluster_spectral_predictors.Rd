@@ -27,7 +27,11 @@ A list with three elements:
 }
 \description{
 Groups collinear or redundant spectral bands into clusters and returns a reduced
-feature matrix containing one representative wavenumber per cluster.
+feature matrix containing one representative wavenumber per cluster: the
+cluster's middle band by its position in \code{spectra_mat}, which for the
+steps' columns (\code{spec001} onward, or wavenumbers in the decreasing order
+the validator keeps) is the middle of the cluster on the spectrum. Of two
+middle bands, the first is taken.
 }
 \examples{
 \dontrun{
