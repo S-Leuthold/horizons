@@ -1402,3 +1402,39 @@ describe("fit_single_config() - a selection step's warning comes from the final 
   })
 
 })
+
+describe("fit_single_config() - a failed Boruta run (#75)", {
+
+  it("fails the member with the step's class and words, rather than Boruta's error's", {
+
+    skip_if_not_installed("Boruta")
+
+    setup <- make_fit_setup(n_wn = 20)
+
+    local_mocked_bindings(Boruta = function(...) stop("Boruta could not run"), .package = "Boruta")
+
+    ## rf fails where the recipe is prepped for its mtry bounds; elastic_net
+    ## has no mtry and fails inside the re-tune
+    for (model in c("rf", "elastic_net")) {
+
+      result <- fit_single_config(
+        config_row          = make_fit_config(model = model, feature_selection = "boruta"),
+        split_F             = setup$split_F,
+        cv_resamples        = setup$folds,
+        role_map            = setup$role_map,
+        best_params_eval    = NULL,
+        final_bayesian_iter = 0L,
+        grid_size           = 2L,
+        seed                = 42L
+      )
+
+      expect_identical(result$status, "failed", label = model)
+      expect_identical(result$class, "horizons_error_boruta", label = model)
+      expect_match(result$error_message, "Boruta feature selection failed: Boruta could not run",
+                   fixed = TRUE, label = model)
+
+    }
+
+  })
+
+})

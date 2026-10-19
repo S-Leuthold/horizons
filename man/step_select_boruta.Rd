@@ -67,7 +67,7 @@ tentative ones and warns with class \code{horizons_warning_quality}.
 When Boruta itself fails, \code{prep()} aborts; there is no fallback selector, so
 a Boruta error never yields results labelled Boruta from another method.
 The abort carries class \code{horizons_error_boruta} (kind \code{horizons_error_run})
-in its condition chain, with Boruta's own error as its parent.
+in its condition chain, with Boruta's error in its message.
 Through \code{recipes::prep()} the outer condition is recipes' own
 \code{recipes_error_step}, with this error as its parent, so test for the class
 with \code{rlang::cnd_inherits(err, "horizons_error_boruta")} rather than

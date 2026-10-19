@@ -64,7 +64,7 @@ result as \code{object} and its warnings as \code{log}.}
 \item{\code{horizons_error_download}}{(run) A spectral library could not be
 downloaded.}
 \item{\code{horizons_error_boruta}}{(run) \code{\link[=step_select_boruta]{step_select_boruta()}}'s Boruta run
-failed; Boruta's own error is its parent.}
+failed; Boruta's error is in its message.}
 \item{\code{horizons_error_qc}}{(run) A quality check failed once it had been
 computed.}
 \item{\code{horizons_error_consent}}{(input) A library download was declined.}

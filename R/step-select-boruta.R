@@ -44,7 +44,7 @@
 #' When Boruta itself fails, `prep()` aborts; there is no fallback selector, so
 #' a Boruta error never yields results labelled Boruta from another method.
 #' The abort carries class `horizons_error_boruta` (kind `horizons_error_run`)
-#' in its condition chain, with Boruta's own error as its parent.
+#' in its condition chain, with Boruta's error in its message.
 #' Through `recipes::prep()` the outer condition is recipes' own
 #' `recipes_error_step`, with this error as its parent, so test for the class
 #' with `rlang::cnd_inherits(err, "horizons_error_boruta")` rather than
@@ -271,9 +271,11 @@ prep.step_select_boruta <- function(x, training, info = NULL, ...) {
   ### There is no fallback selector. The step used to fall back to the 50
   ### columns most correlated with the outcome, so a config labelled "boruta"
   ### ran a correlation filter with nothing in the results saying so. An
-  ### error here stops the step, with Boruta's error as its parent, so its
-  ### class, call and backtrace survive; recipes::prep() wraps the step's
-  ### error in a recipes_error_step, so the class sits one level down.
+  ### error here stops the step with Boruta's error in its message, as every
+  ### contained run error carries its cause: with Boruta's error as a parent,
+  ### a unit's record would walk past this error to Boruta's and keep that
+  ### class and text instead. recipes::prep() wraps the step's error in a
+  ### recipes_error_step, so the class sits one level down.
 
   boruta_fit <- rlang::try_fetch(
     Boruta::Boruta(x           = reduced_mat,
@@ -283,11 +285,12 @@ prep.step_select_boruta <- function(x, training, info = NULL, ...) {
                    holdHistory = FALSE,
                    getImp      = ranger_importance),
     error = function(e) {
+      cause <- condition_summary(e)
       abort_horizons(c(
-        "Boruta feature selection failed.",
+        "Boruta feature selection failed: {cause}",
         "i" = "Boruta ran on {n_features} cluster representative{?s} of {length(col_names_filtered)} wavenumber{?s}, with ranger mtry at most {optimal_mtry}.",
         "i" = "{.fn step_select_boruta} has no fallback selector, so the step fails rather than select by another method."
-      ), kind = "run", class = "horizons_error_boruta", parent = e)
+      ), kind = "run", class = "horizons_error_boruta")
     }
   )
 

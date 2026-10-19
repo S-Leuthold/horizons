@@ -360,6 +360,11 @@ describe("evaluate_single_config() - failure paths", {
       expect_equal(result$status, "failed", label = model)
       expect_true(is.na(result$cv_rmse), label = model)
 
+      ## The step's own class and words on the row, not Boruta's error's
+      expect_identical(result$class, "horizons_error_boruta", label = model)
+      expect_match(result$error_message, "Boruta feature selection failed: Boruta could not run",
+                   fixed = TRUE, label = model)
+
     }
 
   })

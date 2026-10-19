@@ -238,7 +238,7 @@ describe("step_select_boruta() - Boruta's input and its forests", {
 
 describe("a failed Boruta run fails step_select_boruta() (#75)", {
 
-  it("aborts with horizons_error_boruta, Boruta's error its parent, rather than select by correlation", {
+  it("aborts with horizons_error_boruta, Boruta's error in its message, rather than select by correlation", {
 
     skip_if_not_installed("Boruta")
 
@@ -254,8 +254,9 @@ describe("a failed Boruta run fails step_select_boruta() (#75)", {
 
     ## recipes wraps a step's error in its own recipes_error_step, so the
     ## class is one level down the chain: cnd_inherits() finds it, as the
-    ## step's documentation says to check it. A run failure, kept with the
-    ## error Boruta raised as its parent.
+    ## step's documentation says to check it. A run failure, carrying the
+    ## error Boruta raised in its message and ending the chain, so a unit's
+    ## record keeps its class and text rather than Boruta's.
     err <- tryCatch(recipes::prep(rec, training = d), error = identity)
 
     expect_true(rlang::cnd_inherits(err, "horizons_error_boruta"))
@@ -268,9 +269,10 @@ describe("a failed Boruta run fails step_select_boruta() (#75)", {
       boruta_err <- boruta_err$parent
     }
     expect_s3_class(boruta_err, "horizons_error_boruta")
-    expect_s3_class(boruta_err$parent, "error")
-    expect_false(inherits(boruta_err$parent, "horizons_error"))
-    expect_match(conditionMessage(boruta_err$parent), "Missing data in dependent variable", fixed = TRUE)
+    expect_null(boruta_err$parent)
+    expect_match(conditionMessage(boruta_err), "Boruta feature selection failed: ", fixed = TRUE)
+    expect_match(conditionMessage(boruta_err), "Missing data in dependent variable", fixed = TRUE)
+    expect_identical(root_class(err), "horizons_error_boruta")
 
   })
 
