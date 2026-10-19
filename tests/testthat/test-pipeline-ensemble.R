@@ -557,16 +557,27 @@ describe("predict.horizons_ensemble() - intervals and degradation", {
 
   })
 
-  it("compute_uq = FALSE returns point-only with an informative message", {
+  it("compute_uq = FALSE returns point-only, silently, by default", {
 
     test_set <- ens_test_set()
     ens0     <- ens_built("weighted", compute_uq = FALSE)
 
-    expect_message(
-      p <- predict(ens0, test_set, interval = TRUE),
-      regexp = "intervals are not available"
-    )
+    expect_no_message(expect_no_warning(p <- predict(ens0, test_set)))
     expect_false(".pred_lower" %in% names(p))
+
+  })
+
+  it("compute_uq = FALSE gives NA bounds, and says so once, when interval = TRUE asks for them (#145)", {
+
+    test_set <- ens_test_set()
+    ens0     <- ens_built("weighted", compute_uq = FALSE)
+
+    w <- expect_warning(p <- predict(ens0, test_set, interval = TRUE),
+                        class = "horizons_warning_skipped")
+
+    expect_match(conditionMessage(w), "the ensemble has no CV+ bundle", fixed = TRUE)
+    expect_true(all(is.na(p$.pred_lower)))
+    expect_true(all(is.finite(p$.pred)))
 
   })
 
@@ -810,10 +821,10 @@ describe("predict.horizons_ensemble() - preflight", {
 
   })
 
-  it("refuses an interval that is not TRUE or FALSE", {
+  it("refuses an interval that is not TRUE, FALSE or NULL", {
 
     expect_error(predict(ens_built("weighted"), ens_test_set(), interval = 1),
-                 "`interval` must be `TRUE` or `FALSE`", fixed = TRUE,
+                 "`interval` must be `TRUE`, `FALSE`, or `NULL`", fixed = TRUE,
                  class = "horizons_error_input")
 
   })
@@ -867,7 +878,7 @@ describe("predict.horizons_ensemble() - selected training set", {
     ens      <- ens_selected()
 
     warns <- testthat::capture_warnings(
-      p <- suppressMessages(predict(ens, test_set, interval = TRUE))
+      p <- predict(ens, test_set, interval = TRUE)
     )
 
     expect_equal(sum(grepl("Conformal coverage is not guaranteed", warns)), 1L)
@@ -893,8 +904,7 @@ describe("predict.horizons_ensemble() - selected training set", {
     test_set <- ens_test_set()
 
     warns <- testthat::capture_warnings(
-      suppressMessages(predict(ens_selected(uq = FALSE), test_set,
-                               interval = TRUE))
+      predict(ens_selected(uq = FALSE), test_set, interval = TRUE)
     )
 
     expect_false(any(grepl("Conformal coverage", warns)))
@@ -907,7 +917,7 @@ describe("predict.horizons_ensemble() - selected training set", {
     ens      <- ens_built("weighted")
 
     warns <- testthat::capture_warnings(
-      suppressMessages(predict(ens, test_set, interval = TRUE))
+      predict(ens, test_set, interval = TRUE)
     )
 
     expect_false(any(grepl("Conformal coverage", warns)))
@@ -945,7 +955,7 @@ describe("predict.horizons_ensemble() - trimmed members (#77)", {
     caught   <- list()
 
     withCallingHandlers(
-      suppressMessages(predict(trimmed_ensemble(), test_set, interval = TRUE)),
+      predict(trimmed_ensemble(), test_set, interval = TRUE),
       warning = function(w) {
         caught[[length(caught) + 1L]] <<- w
         invokeRestart("muffleWarning")
@@ -966,7 +976,7 @@ describe("predict.horizons_ensemble() - trimmed members (#77)", {
 
     quiet <- function(ens, interval) {
       warns <- testthat::capture_warnings(
-        suppressMessages(predict(ens, test_set, interval = interval))
+        predict(ens, test_set, interval = interval)
       )
       !any(grepl("training fences", warns))
     }

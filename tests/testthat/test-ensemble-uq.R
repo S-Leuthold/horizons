@@ -531,7 +531,7 @@ describe("predict.horizons_ensemble() - arguments in ...", {
     no_uq$ensemble["uq"] <- list(NULL)
 
     w <- expect_warning(
-      suppressMessages(predict(no_uq, test_set, level = 0.95)),
+      predict(no_uq, test_set, level = 0.95),
       class = "horizons_warning_input"
     )
 
@@ -716,7 +716,7 @@ describe("ensemble UQ - degradation and gates", {
         assemble(uq, member_pred, outcome_range)
       })
 
-      p <- suppressWarnings(suppressMessages(predict(ens, test_set, interval = TRUE)))
+      p <- suppressWarnings(predict(ens, test_set, interval = TRUE))
       expect_identical(seen$outcome_range, range)
 
       wide <- tidyr::pivot_wider(

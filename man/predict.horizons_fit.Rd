@@ -8,7 +8,7 @@
   object,
   new_data,
   config = "best",
-  interval = TRUE,
+  interval = NULL,
   abstain_ood = FALSE,
   ...
 )
@@ -31,15 +31,18 @@ alignment is the caller's responsibility (see Details).}
 config, with a \code{config_id} column).
 }}
 
-\item{interval}{Logical. Return conformal prediction intervals when UQ is
-available? Default \code{TRUE}. The intervals are at the level they were
-calibrated at in \code{fit()}, 0.90 by default (see Details). Ignored (with a
-note) for configs that have no UQ bundle. When intervals are actually
-available and the model was fit on a training object carrying a
-\verb{$selection} (from \code{select_training()}), this
-warns once that conformal coverage is not guaranteed: the calibration rows
-were chosen for proximity to the targets, so they are not exchangeable
-with arbitrary prediction data.}
+\item{interval}{Conformal prediction intervals. \code{NULL} (the default):
+intervals for each configuration that has a UQ bundle (\code{fit(compute_uq = TRUE)}), and none, silently, for one that has none; the interval columns
+appear when any configuration predicted has a bundle. \code{TRUE}: intervals
+asked for; a configuration without a bundle gets \code{NA} bounds and is named
+in one warning of class \code{horizons_warning_skipped}. \code{FALSE}: none. The
+intervals are at the level they were calibrated at in \code{fit()}, 0.90 by
+default (see Details). When intervals are returned and the model was fit
+on a training object carrying a \verb{$selection} (from \code{select_training()}),
+this warns once, with class \code{horizons_warning_quality}, that conformal
+coverage is not guaranteed: the calibration rows were chosen for
+proximity to the targets, so they are not exchangeable with arbitrary
+prediction data.}
 
 \item{abstain_ood}{Logical. When \code{TRUE}, \code{.pred} (and any interval bounds)
 are set to \code{NA} for samples flagged out-of-domain (\code{.ad_flag == "OOD"}),
@@ -61,8 +64,9 @@ rows with the same columns:
 \item{sample_id}{Sample identifier from \code{new_data}.}
 \item{config_id}{Config used (present when \code{config = "all"}).}
 \item{.pred}{Point prediction, original response scale.}
-\item{.pred_lower}{Lower interval bound (if \code{interval = TRUE} and UQ
-available), original scale.}
+\item{.pred_lower}{Lower interval bound, original scale: present when
+\code{interval = TRUE}, or \code{NULL} and a configuration predicted has a UQ
+bundle; \code{NA} where a configuration has none.}
 \item{.pred_upper}{Upper interval bound.}
 \item{.interval_width}{\code{.pred_upper - .pred_lower}.}
 \item{.ad_distance}{Squared Mahalanobis distance to the training centroid

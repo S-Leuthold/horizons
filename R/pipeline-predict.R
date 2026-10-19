@@ -35,15 +35,19 @@ NULL
 #'   - a `config_id` string: a specific fitted model.
 #'   - `"all"`: every successfully fitted model (long output, one block per
 #'     config, with a `config_id` column).
-#' @param interval Logical. Return conformal prediction intervals when UQ is
-#'   available? Default `TRUE`. The intervals are at the level they were
-#'   calibrated at in `fit()`, 0.90 by default (see Details). Ignored (with a
-#'   note) for configs that have no UQ bundle. When intervals are actually
-#'   available and the model was fit on a training object carrying a
-#'   `$selection` (from `select_training()`), this
-#'   warns once that conformal coverage is not guaranteed: the calibration rows
-#'   were chosen for proximity to the targets, so they are not exchangeable
-#'   with arbitrary prediction data.
+#' @param interval Conformal prediction intervals. `NULL` (the default):
+#'   intervals for each configuration that has a UQ bundle (`fit(compute_uq =
+#'   TRUE)`), and none, silently, for one that has none; the interval columns
+#'   appear when any configuration predicted has a bundle. `TRUE`: intervals
+#'   asked for; a configuration without a bundle gets `NA` bounds and is named
+#'   in one warning of class `horizons_warning_skipped`. `FALSE`: none. The
+#'   intervals are at the level they were calibrated at in `fit()`, 0.90 by
+#'   default (see Details). When intervals are returned and the model was fit
+#'   on a training object carrying a `$selection` (from `select_training()`),
+#'   this warns once, with class `horizons_warning_quality`, that conformal
+#'   coverage is not guaranteed: the calibration rows were chosen for
+#'   proximity to the targets, so they are not exchangeable with arbitrary
+#'   prediction data.
 #' @param abstain_ood Logical. When `TRUE`, `.pred` (and any interval bounds)
 #'   are set to `NA` for samples flagged out-of-domain (`.ad_flag == "OOD"`),
 #'   while `.ad_distance`/`.ad_flag` are preserved so the caller can see how far
@@ -62,8 +66,9 @@ NULL
 #'     \item{sample_id}{Sample identifier from `new_data`.}
 #'     \item{config_id}{Config used (present when `config = "all"`).}
 #'     \item{.pred}{Point prediction, original response scale.}
-#'     \item{.pred_lower}{Lower interval bound (if `interval = TRUE` and UQ
-#'       available), original scale.}
+#'     \item{.pred_lower}{Lower interval bound, original scale: present when
+#'       `interval = TRUE`, or `NULL` and a configuration predicted has a UQ
+#'       bundle; `NA` where a configuration has none.}
 #'     \item{.pred_upper}{Upper interval bound.}
 #'     \item{.interval_width}{`.pred_upper - .pred_lower`.}
 #'     \item{.ad_distance}{Squared Mahalanobis distance to the training centroid
@@ -155,7 +160,7 @@ NULL
 predict.horizons_fit <- function(object,
                                  new_data,
                                  config      = "best",
-                                 interval    = TRUE,
+                                 interval    = NULL,
                                  abstain_ood = FALSE,
                                  ...) {
 
@@ -174,7 +179,7 @@ predict.horizons_fit <- function(object,
   ## warning carries its own record.
   collector <- log_open("predict")
 
-  check_arg(rlang::check_bool, interval)
+  check_arg(rlang::check_bool, interval, allow_null = TRUE)
   check_arg(rlang::check_bool, abstain_ood)
   check_arg(rlang::check_string, config)
 
@@ -215,6 +220,15 @@ predict.horizons_fit <- function(object,
 
   ## Validate new_data carries the training-axis predictor columns fit() stored.
   check_predictor_schema(object, new_spectra)
+
+  ## Intervals asked for where there is no UQ bundle to build them from (#145)
+  if (isTRUE(interval)) {
+
+    log_missing_intervals(collector, config_ids[vapply(
+      config_ids, function(id) is.null(object$models$uq[[id]]), logical(1)
+    )])
+
+  }
 
   ## -------------------------------------------------------------------------
   ## Step 2-3: Predict per config (point + optional intervals)
@@ -330,6 +344,43 @@ drop_block_reports <- function(block) {
 
   for (a in BLOCK_REPORTS) attr(block, a) <- NULL
   block
+
+}
+
+#' Collect one warning for intervals asked for where there is no bundle
+#'
+#' Under `interval = TRUE` a configuration (or an ensemble) without a UQ bundle
+#' returns `NA` bounds; one `skipped` warning names them (#145). Under the
+#' default, `interval = NULL`, there is nothing to say: intervals were asked
+#' for only where they exist, and `fit()` (or `ensemble()`) said when it
+#' skipped them.
+#'
+#' @param collector The call's collector.
+#' @param ids Character. The configurations without a bundle, or
+#'   `"ensemble"`.
+#' @return `collector`, invisibly.
+#' @keywords internal
+#' @noRd
+log_missing_intervals <- function(collector, ids) {
+
+  if (length(ids) == 0) return(invisible(collector))
+
+  ensemble <- identical(ids, "ensemble")
+  n        <- length(ids)
+
+  log_warning(collector, "skipped", c(
+    if (ensemble) {
+      "Prediction intervals were asked for, but the ensemble has no CV+ bundle, so its bounds are {.code NA}."
+    } else {
+      "Prediction intervals were asked for, but {n} configuration{?s} {?has/have} no UQ bundle, so {?its/their} bounds are {.code NA}: {.val {ids}}."
+    },
+    "i" = if (ensemble) {
+      "{.fn ensemble} computed none ({.code compute_uq = FALSE}, or too few calibration rows; its log says which)."
+    } else {
+      "{.fn fit} computed none ({.code compute_uq = FALSE}, or too few calibration rows; its log says which)."
+    },
+    "i" = "Leave {.arg interval} at {.code NULL} for intervals only where they exist, or set it to {.code FALSE}."
+  ), ids = if (ensemble) character(0) else ids)
 
 }
 
@@ -924,7 +975,9 @@ check_abstention <- function(object, config_ids, abstain_ood, call = rlang::call
 #' @param object A `horizons_fit`.
 #' @param config_id The config to predict from.
 #' @param new_spectra Tibble from [resolve_new_data()] (sample_id + predictors).
-#' @param interval Logical; return intervals when UQ is available.
+#' @param interval `NULL`, `TRUE` or `FALSE`, as `predict()`'s: `NULL`
+#'   computes intervals when the configuration has a UQ bundle; `TRUE` also
+#'   gives a configuration without one `NA` interval columns.
 #' @param clamp Logical; apply the deploy-time response-bound winsorization
 #'   (`models$response_bound`). `TRUE` for user-facing single-model predictions;
 #'   `FALSE` inside ensemble machinery, where member predictions are features —
@@ -963,11 +1016,12 @@ predict_one_config <- function(object, config_id, new_spectra, interval,
 
   ## The add-ons asked for, and so the block's columns, are fixed before
   ## anything runs
-  uq        <- if (interval) object$models$uq[[config_id]]
+  uq        <- if (!isFALSE(interval)) object$models$uq[[config_id]]
   ad_bundle <- if (ad) object$models$ad[[config_id]]
 
   block <- prediction_block(new_spectra$sample_id, config_id,
-                            intervals = !is.null(uq), ad = !is.null(ad_bundle))
+                            intervals = isTRUE(interval) || !is.null(uq),
+                            ad        = !is.null(ad_bundle))
 
   winsorized     <- NULL
   add_on_records <- new_unit_records()

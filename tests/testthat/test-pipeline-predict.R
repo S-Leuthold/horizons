@@ -293,15 +293,51 @@ describe("predict.horizons_fit() - intervals", {
 
   })
 
-  it("degrades to point-only (no error) when a config has no UQ bundle", {
+  it("returns point predictions, silently, for a config with no UQ bundle by default", {
 
     ## Strip the UQ bundle to simulate compute_uq = FALSE for this config.
     no_uq <- fitted_fixture
     no_uq$models["uq"] <- list(NULL)
 
-    p <- predict(no_uq, new_df, interval = TRUE)
+    expect_no_warning(p <- predict(no_uq, new_df))
     expect_false(".pred_lower" %in% names(p))
     expect_true(".pred" %in% names(p))
+
+  })
+
+  it("gives NA bounds, and says so once, when interval = TRUE asks for intervals a config has no bundle for (#145)", {
+
+    no_uq <- fitted_fixture
+    no_uq$models["uq"] <- list(NULL)
+
+    w <- expect_warning(p <- predict(no_uq, new_df, interval = TRUE),
+                        class = "horizons_warning_skipped")
+
+    expect_identical(w$log$ids[[1]], "cfg_001")
+    expect_match(conditionMessage(w), "no UQ bundle", fixed = TRUE)
+    expect_true(all(c(".pred_lower", ".pred_upper", ".interval_width") %in% names(p)))
+    expect_true(all(is.na(p$.pred_lower)))
+    expect_true(all(is.finite(p$.pred)))
+
+  })
+
+  it("under config = 'all', fills the bounds of the configs with a bundle and leaves the rest NA", {
+
+    two <- add_member_copy(fitted_fixture)
+    two$models$uq[["cfg_002"]] <- NULL
+
+    expect_no_warning(p <- predict(two, new_df, config = "all"))
+
+    expect_true(all(!is.na(p$.pred_lower[p$config_id == "cfg_001"])))
+    expect_true(all(is.na(p$.pred_lower[p$config_id == "cfg_002"])))
+
+  })
+
+  it("refuses an interval that is not TRUE, FALSE or NULL", {
+
+    expect_error(predict(fitted_fixture, new_df, interval = "yes"),
+                 "`interval` must be `TRUE`, `FALSE`, or `NULL`", fixed = TRUE,
+                 class = "horizons_error_input")
 
   })
 
@@ -402,13 +438,10 @@ describe("predict.horizons_fit() - input validation", {
 
   })
 
-  it("refuses interval and abstain_ood that are not TRUE or FALSE", {
+  it("refuses an abstain_ood that is not TRUE or FALSE", {
 
     new_df <- make_new_spectra()
 
-    expect_error(predict(fitted_fixture, new_df, interval = "yes"),
-                 "`interval` must be `TRUE` or `FALSE`", fixed = TRUE,
-                 class = "horizons_error_input")
     expect_error(predict(fitted_fixture, new_df, abstain_ood = NA),
                  "`abstain_ood` must be `TRUE` or `FALSE`", fixed = TRUE,
                  class = "horizons_error_input")
@@ -1216,11 +1249,16 @@ describe("predict.horizons_fit() - selected training set", {
   it("is silent on a selected fit with no UQ, where no intervals are returned", {
 
     warns <- testthat::capture_warnings(
-      p <- predict(selected_no_uq, new_df, interval = TRUE)
+      p <- predict(selected_no_uq, new_df)
     )
 
-    expect_false(any(grepl("Conformal coverage", warns)))
+    expect_length(warns, 0L)
     expect_false(".pred_lower" %in% names(p))
+
+    ## Asked for explicitly, the bounds are NA, and the coverage is not
+    ## qualified
+    warns <- testthat::capture_warnings(predict(selected_no_uq, new_df, interval = TRUE))
+    expect_false(any(grepl("Conformal coverage", warns)))
 
   })
 
@@ -1238,7 +1276,7 @@ describe("predict.horizons_fit() - selected training set", {
     )
 
     expect_false(any(grepl("Conformal coverage", warns)))
-    expect_false(".pred_lower" %in% names(p))
+    expect_true(all(is.na(p$.pred_lower)))
 
   })
 

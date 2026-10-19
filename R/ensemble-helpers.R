@@ -688,12 +688,14 @@ build_ensemble_contract <- function(method,
 #'   schema. **The spectra must already be on the training axis** — the same
 #'   requirement as [predict.horizons_fit()]; see its Details for the axis-
 #'   alignment limitation.
-#' @param interval Logical. Return CV+ conformal prediction intervals when
-#'   ensemble uncertainty quantification is available (`object$ensemble$uq`,
-#'   calibrated by [fit_ensemble_uq()] — on by default in [ensemble()]).
-#'   Default `TRUE`. The intervals are at the level they were calibrated at
-#'   in [ensemble()], 0.90 by default (see Details). When no UQ bundle is
-#'   present, point predictions are returned with a one-time note. When the
+#' @param interval CV+ conformal prediction intervals, from the ensemble's own
+#'   uncertainty bundle (`object$ensemble$uq`, calibrated by
+#'   [fit_ensemble_uq()] — on by default in [ensemble()]). `NULL` (the
+#'   default): intervals when the bundle exists, and none, silently, when it
+#'   does not. `TRUE`: intervals asked for; without a bundle the bounds are
+#'   `NA`, with one warning of class `horizons_warning_skipped`. `FALSE`:
+#'   none. The intervals are at the level they were calibrated at in
+#'   [ensemble()], 0.90 by default (see Details). When the
 #'   members were fit on a response-trimmed training partition
 #'   (`validate(remove_outliers =
 #'   "response")`, #77), the intervals come from out-of-fold predictions on
@@ -711,8 +713,8 @@ build_ensemble_contract <- function(method,
 #'     \item{.pred}{Ensemble point prediction, original response scale.}
 #'   }
 #'   Interval columns (`.pred_lower`, `.pred_upper`, `.interval_width`) are
-#'   joined on by `sample_id` when ensemble UQ is present and
-#'   `interval = TRUE`.
+#'   put in place by `sample_id` when `interval = TRUE`, or `NULL` and the
+#'   ensemble has a CV+ bundle.
 #'
 #' @details
 #' All ensemble members must predict successfully. A member that fails to
@@ -748,7 +750,7 @@ build_ensemble_contract <- function(method,
 #' @exportS3Method stats::predict horizons_ensemble
 predict.horizons_ensemble <- function(object,
                                       new_data,
-                                      interval = TRUE,
+                                      interval = NULL,
                                       ...) {
 
   ## -------------------------------------------------------------------------
@@ -764,7 +766,7 @@ predict.horizons_ensemble <- function(object,
   ## its end (finish_predict()). predict() writes nothing to the object.
   collector <- log_open("predict")
 
-  check_arg(rlang::check_bool, interval)
+  check_arg(rlang::check_bool, interval, allow_null = TRUE)
 
   ## Nothing in `...` is used. A `level` warns, naming the level the CV+
   ## bundle was calibrated at; anything else aborts (#141).
@@ -844,13 +846,13 @@ predict.horizons_ensemble <- function(object,
   method        <- object$ensemble$method
   outcome_range <- outcome_range_setting(object)
   uq            <- object$ensemble$uq
-  intervals     <- isTRUE(interval) && !is.null(uq)
+  intervals     <- !isFALSE(interval) && !is.null(uq)
   winsorized    <- NULL
 
   out <- tibble::tibble(sample_id = new_spectra$sample_id,
                         .pred     = rep(NA_real_, nrow(new_spectra)))
 
-  if (intervals) {
+  if (intervals || isTRUE(interval)) {
 
     out$.pred_lower     <- rep(NA_real_, nrow(out))
     out$.pred_upper     <- rep(NA_real_, nrow(out))
@@ -858,14 +860,8 @@ predict.horizons_ensemble <- function(object,
 
   }
 
-  if (isTRUE(interval) && is.null(uq)) {
-
-    cli::cli_inform(c(
-      "i" = "Ensemble prediction intervals are not available; \\
-             returning point predictions."
-    ))
-
-  }
+  ## Intervals asked for, and no CV+ bundle to build them from (#145)
+  if (isTRUE(interval) && is.null(uq)) log_missing_intervals(collector, "ensemble")
 
   if (nrow(usable) > 0) {
 
