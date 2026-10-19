@@ -234,6 +234,7 @@ Short by more at an end, however much (an ATR crystal's cutoff, a trimmed
 noisy edge, a batch trimmed to one region), the space is built fresh on
 the library's columns inside the targets' range, uncached, with one
 \code{horizons_warning_coverage} saying what was missing and what was searched.
+A \code{window} wider than that overlap is refused, in cm-1.
 
 \strong{The cached space.} A registered library's space at the default
 settings is built right after the library itself, at first use, and

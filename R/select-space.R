@@ -105,13 +105,6 @@ transform_similarity <- function(M, wn,
 
     }
 
-    if (window > ncol(M)) {
-
-      cli::cli_abort("{.arg window} ({window}) is wider than the {ncol(M)} column{?s} of the spectra",
-                     class = "horizons_input_error")
-
-    }
-
   }
 
   ids <- rownames(M)

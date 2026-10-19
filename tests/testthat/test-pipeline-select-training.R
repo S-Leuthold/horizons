@@ -210,6 +210,30 @@ test_that("select_training() returns the pool's log", {
 })
 
 
+test_that("a window wider than the stretch of the library the targets cover is refused, in cm-1", {
+
+  ## Targets over 4000 to 3984 cm-1 cover five of the pool's 4 cm-1 columns,
+  ## and the default 40 cm-1 window is 11 points there; prospectr needs
+  ## fewer points than columns
+  fx      <- select_fixture(n_pool = 60)
+  targets <- make_axis_object(seq(4000, 3984, by = -8), n = 4L, prefix = "N")
+
+  err <- expect_error(suppressWarnings(select_training(targets, fx$pool, k = 5, properties = "clay")),
+                      class = "horizons_error_input")
+  msg <- gsub("\\s+", " ", conditionMessage(err))
+
+  expect_identical(rlang::call_name(err$call), "select_training")
+  expect_match(msg, "A `window` of 40 cm⁻¹ is wider than the 16 cm⁻¹ of the library the targets cover", fixed = TRUE)
+  expect_match(msg, "5 columns from 3984 to 4000", fixed = TRUE)
+
+  ## A window that fits the overlap runs: 8 cm-1 is 3 points there
+  expect_s3_class(suppressWarnings(select_training(targets, fx$pool, k = 5, properties = "clay",
+                                                   window = 8, poly = 1L)),
+                  "horizons_data")
+
+})
+
+
 test_that("select_training() writes its coverage warning to the log before raising it, once", {
 
   ## Targets trimmed to 1000-4000: the search is the overlap, 400 cm-1 short

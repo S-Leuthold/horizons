@@ -90,6 +90,7 @@
 #' noisy edge, a batch trimmed to one region), the space is built fresh on
 #' the library's columns inside the targets' range, uncached, with one
 #' `horizons_warning_coverage` saying what was missing and what was searched.
+#' A `window` wider than that overlap is refused, in cm-1.
 #'
 #' **The cached space.** A registered library's space at the default
 #' settings is built right after the library itself, at first use, and
@@ -806,6 +807,25 @@ select_training <- function(x, library,
       "A {.arg window} of {window} cm\u207B\u00B9 is {window_points} point{?s} on the library's {search_res} cm\u207B\u00B9 grid, too few for a polynomial of order {poly}",
       "i" = "Widen {.arg window} or lower {.arg poly}."
     ), class = "horizons_input_error")
+
+  }
+
+  ## The filter needs fewer points than the search grid has columns. Targets
+  ## that cover only a short stretch of the library are searched on that
+  ## overlap alone, which can be narrower than the window.
+
+  n_search <- length(sa$wavenumbers)
+
+  if (derivative > 0 && window_points >= n_search) {
+
+    searched <- range(sa$wavenumbers)
+    span     <- searched[2] - searched[1]
+
+    abort_horizons(c(
+      "A {.arg window} of {window} cm\u207B\u00B9 is wider than the {span} cm\u207B\u00B9 of the library the targets cover.",
+      "x" = "The similarity space is built on the library's {n_search} column{?s} from {searched[1]} to {searched[2]} cm\u207B\u00B9, and the window is {window_points} points on them; the filter needs fewer.",
+      "i" = "Narrow {.arg window} below {span} cm\u207B\u00B9, or standardize the targets over more of the library's range."
+    ), kind = "input")
 
   }
 

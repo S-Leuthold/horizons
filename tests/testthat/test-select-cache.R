@@ -391,7 +391,7 @@ test_that("a library whose default space cannot be built is still cached, with a
 
   ## Assert: the build failed for the reason arranged, not another; the
   ## library is built and cached; its space is left to the first draw
-  expect_match(conditionMessage(w), "is wider than the 16 columns of the spectra", fixed = TRUE)
+  expect_match(conditionMessage(w), "filter length w must be lower than ncol(X)", fixed = TRUE)
   expect_s3_class(res$pool, "horizons_data")
   expect_true(file.exists(file.path(cache, "mini_v0.qs2")))
   expect_length(space_files(cache), 0L)

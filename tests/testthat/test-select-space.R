@@ -156,11 +156,6 @@ test_that("transform_similarity() validates the filter arguments itself", {
   expect_error(transform_similarity(pm$matrix, pm$wavenumbers, derivative = 2L, poly = 1L),
                class = "horizons_input_error")
 
-  ## Window wider than the spectra
-  expect_error(transform_similarity(pm$matrix[, 1:9, drop = FALSE], pm$wavenumbers[1:9],
-                                    window = 11L),
-               class = "horizons_input_error")
-
   ## None of this fires when the derivative is off
   expect_silent(transform_similarity(pm$matrix, pm$wavenumbers, derivative = 0L, window = 10L))
 
