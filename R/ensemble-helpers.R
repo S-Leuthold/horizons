@@ -284,10 +284,7 @@ predict_members_on_test <- function(object, members, call = rlang::caller_env())
 
   }
 
-  attr(member_pred, "unit_records") <- NULL
-  attr(member_pred, "flagged")      <- NULL
-
-  dplyr::left_join(member_pred, truth_df, by = "sample_id")
+  dplyr::left_join(drop_block_reports(member_pred), truth_df, by = "sample_id")
 
 }
 
@@ -836,8 +833,7 @@ predict.horizons_ensemble <- function(object,
   member_pred <- predict_members(object, members, new_spectra)
   records     <- attr(member_pred, "unit_records")
   flagged     <- attr(member_pred, "flagged")
-  attr(member_pred, "unit_records") <- NULL
-  attr(member_pred, "flagged")      <- NULL
+  member_pred <- drop_block_reports(member_pred)
 
   ## A row any member could not use (flagged on arrival, or non-finite after
   ## its recipe) is not predicted by the ensemble: an xgb meta-model would
@@ -870,7 +866,7 @@ predict.horizons_ensemble <- function(object,
   }
 
   ## Intervals asked for, and no CV+ bundle to build them from (#145)
-  if (isTRUE(interval) && is.null(uq)) log_missing_intervals(collector, "ensemble")
+  if (isTRUE(interval) && is.null(uq)) log_missing_intervals(collector, ensemble = TRUE)
 
   if (nrow(usable) > 0) {
 

@@ -274,7 +274,7 @@ predict.horizons_fit <- function(object,
 
   }
 
-  log_prediction_units(collector, preds)
+  log_prediction_units(collector, preds, config_ids)
 
   preds <- lapply(preds, drop_block_reports)
 
@@ -363,17 +363,17 @@ drop_block_reports <- function(block) {
 #' skipped them.
 #'
 #' @param collector The call's collector.
-#' @param ids Character. The configurations without a bundle, or
-#'   `"ensemble"`.
+#' @param ids Character. The configurations without a bundle.
+#' @param ensemble Logical. `TRUE` for an ensemble without a CV+ bundle, which
+#'   has no configurations to name.
 #' @return `collector`, invisibly.
 #' @keywords internal
 #' @noRd
-log_missing_intervals <- function(collector, ids) {
+log_missing_intervals <- function(collector, ids = character(0), ensemble = FALSE) {
 
-  if (length(ids) == 0) return(invisible(collector))
+  if (!ensemble && length(ids) == 0) return(invisible(collector))
 
-  ensemble <- identical(ids, "ensemble")
-  n        <- length(ids)
+  n <- length(ids)
 
   log_warning(collector, "skipped", c(
     if (ensemble) {
@@ -387,7 +387,7 @@ log_missing_intervals <- function(collector, ids) {
       "{.fn fit} computed none ({.code compute_uq = FALSE}, or too few calibration rows; its log says which)."
     },
     "i" = "Leave {.arg interval} at {.code NULL} for intervals only where they exist, or set it to {.code FALSE}."
-  ), ids = if (ensemble) character(0) else ids)
+  ), ids = ids)
 
 }
 
@@ -1371,10 +1371,11 @@ abort_prediction_failed <- function(records, header, call = rlang::caller_env(),
 #'
 #' @param collector The call's collector.
 #' @param blocks The configurations' blocks, from [predict_one_config()].
+#' @param config_ids The configurations, in the blocks' order.
 #' @return `collector`, invisibly.
 #' @keywords internal
 #' @noRd
-log_prediction_units <- function(collector, blocks) {
+log_prediction_units <- function(collector, blocks, config_ids) {
 
   records <- dplyr::bind_rows(lapply(blocks, attr, "unit_records"))
   failed  <- vapply(blocks, attr, logical(1), "failed")
@@ -1392,13 +1393,11 @@ log_prediction_units <- function(collector, blocks) {
 
   }
 
-  block_ids <- vapply(blocks, function(b) b$config_id[1] %||% NA_character_, character(1))
-
   log_prediction_reports(
     collector,
     records    = records,
-    flagged    = stats::setNames(lapply(blocks, attr, "flagged"), block_ids),
-    winsorized = stats::setNames(lapply(blocks, attr, "winsorized"), block_ids)
+    flagged    = stats::setNames(lapply(blocks, attr, "flagged"), config_ids),
+    winsorized = stats::setNames(lapply(blocks, attr, "winsorized"), config_ids)
   )
 
 }
