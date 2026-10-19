@@ -1258,10 +1258,12 @@ describe("fit_single_config() - UQ and AD as units of their own (#145)", {
     expect_true(any(grepl("AD covariance estimated with fewer samples than features",
                           result$warnings, fixed = TRUE)))
 
-    ## Not a horizons topic, so it stays on the row and is not lifted
+    ## Not a horizons topic, so it stays on the row and is not lifted; it is
+    ## the member's record, as every add-on record the member keeps is
     records <- attr(result, "unit_records")
     covariance <- grepl("fewer samples than features", records$message, fixed = TRUE)
     expect_false(any(startsWith(records$class[covariance], "horizons_warning_")))
+    expect_identical(unique(records$unit[covariance]), "member")
 
   })
 
