@@ -394,6 +394,15 @@ fit_single_config <- function(config_row,
       min_n = min_degradation_rows
     ))
 
+    ## A check that could not run leaves degraded NA, not FALSE, which would
+    ## read as checked and fine; the row and fit()'s log say why
+    if (!is.null(degradation$cause)) {
+
+      cause <- degradation$cause
+      warn_in_unit("skipped", "The degradation check did not run: {cause}.")
+
+    }
+
     ## -----------------------------------------------------------------------
     ## Step 10: UQ (must run BEFORE butchering — needs the mold)
     ## -----------------------------------------------------------------------
@@ -634,8 +643,13 @@ test_interval_coverage_missing <- function() {
 #' After a response trim (#77) the folds ran on rows inside the training
 #' fences while the test rows are untrimmed, so with `response_fences` the
 #' test rows compared are those inside the fences, and the reason says so;
-#' the test metrics `fit()` reports are untouched. Fewer than `min_n` usable
-#' test rows leave too little to bootstrap, and nothing is flagged.
+#' the test metrics `fit()` reports are untouched.
+#'
+#' The check cannot run with fewer than `min_n` usable test rows (too few to
+#' bootstrap), without a finite cross-validated RPD to compare with, with
+#' constant test outcomes (whose RPD of 0 says nothing about the fit), or
+#' with a test RPD that is not finite. Then `degraded` is `NA`, not `FALSE`,
+#' and `cause` says which.
 #'
 #' @param cv_metrics Tibble with `.metric` and `mean`.
 #' @param test_truth,test_preds Numeric. Test outcomes and back-transformed
@@ -648,8 +662,10 @@ test_interval_coverage_missing <- function() {
 #' @param min_n Integer. The fewest usable test rows the check bootstraps
 #'   from; `control_horizons(min_degradation_rows = )`. Default
 #'   `DEGRADATION_MIN_N`.
-#' @return List with `degraded` (logical) and `reason` (character, `NA` when
-#'   not degraded).
+#' @return List with `degraded` (`TRUE`, `FALSE`, or `NA` when the check
+#'   could not run), `reason` (character, the record of a `TRUE` flag, `NA`
+#'   otherwise) and `cause` (character, why the check could not run; `NULL`
+#'   when it ran).
 #' @keywords internal
 #' @noRd
 check_degradation <- function(cv_metrics, test_truth, test_preds,
@@ -658,7 +674,8 @@ check_degradation <- function(cv_metrics, test_truth, test_preds,
                               level  = DEGRADATION_LEVEL,
                               min_n  = DEGRADATION_MIN_N) {
 
-  not_flagged <- list(degraded = FALSE, reason = NA_character_)
+  not_flagged <- list(degraded = FALSE, reason = NA_character_, cause = NULL)
+  cannot_run  <- function(cause) list(degraded = NA, reason = NA_character_, cause = cause)
   fences_text <- NULL
   usable      <- !is.na(test_truth) & !is.na(test_preds)
 
@@ -682,17 +699,31 @@ check_degradation <- function(cv_metrics, test_truth, test_preds,
 
   rpd_cv <- cv_metrics[cv_metrics$.metric == "rpd", , drop = FALSE]
 
-  ## Constant test outcomes give an RPD of 0 that says nothing about the fit
-  if (n < min_n || nrow(rpd_cv) != 1 || !is.finite(rpd_cv$mean) ||
-      stats::sd(truth) < .Machine$double.eps) {
+  if (n < min_n) {
 
-    return(not_flagged)
+    return(cannot_run(sprintf(
+      "the test set has %d usable row%s%s, fewer than the %d it bootstraps from (`min_degradation_rows`)",
+      n, if (n == 1) "" else "s", fences_text %||% "", min_n
+    )))
+
+  }
+
+  if (nrow(rpd_cv) != 1 || !is.finite(rpd_cv$mean)) {
+
+    return(cannot_run("there is no finite cross-validated RPD to compare the test RPD with"))
+
+  }
+
+  ## Constant test outcomes give an RPD of 0 that says nothing about the fit
+  if (stats::sd(truth) < .Machine$double.eps) {
+
+    return(cannot_run("the test outcomes are constant, so their RPD says nothing about the fit"))
 
   }
 
   test_rpd <- rpd_vec(truth, preds)
 
-  if (!is.finite(test_rpd)) return(not_flagged)
+  if (!is.finite(test_rpd)) return(cannot_run("the test RPD is not finite"))
 
   ## Bootstrap with a local seed; the caller's stream is restored on exit.
   had_seed <- exists(".Random.seed", envir = globalenv(), inherits = FALSE)
@@ -724,6 +755,7 @@ check_degradation <- function(cv_metrics, test_truth, test_preds,
 
   list(
     degraded = TRUE,
+    cause    = NULL,
     reason   = sprintf(
       "test RPD %.3f (%g%% bootstrap interval [%.3f, %.3f], %d test rows%s) is below the CV mean RPD %.3f",
       test_rpd, 100 * level, bounds[1], bounds[2], n, fences_text %||% "", rpd_cv$mean

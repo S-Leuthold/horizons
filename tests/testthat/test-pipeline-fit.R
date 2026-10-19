@@ -1134,6 +1134,27 @@ describe("fit() - what it reports at its end", {
 
   })
 
+  it("leaves degraded NA when the degradation check could not run, and warns skipped once, naming the members", {
+
+    got <- collect_warnings(
+      fit(mfo(), n_best = 2L, seed = 42L, compute_uq = FALSE, compute_ad = FALSE,
+          control = control_horizons(min_degradation_rows = 50L)),
+      "."
+    )
+    res <- got$value$models$results
+    w   <- got$warnings[vapply(got$warnings, inherits, logical(1), "horizons_warning_skipped")]
+    why <- "The degradation check did not run: the test set has"
+
+    expect_identical(res$degraded, c(NA, NA))
+    expect_identical(res$degraded_reason, c(NA_character_, NA_character_))
+    expect_true(all(vapply(res$warnings, function(x) any(startsWith(x, why)), logical(1))))
+
+    expect_length(w, 1L)
+    expect_match(conditionMessage(w[[1]]), why, fixed = TRUE)
+    expect_match(conditionMessage(w[[1]]), "In 2 members", fixed = TRUE)
+
+  })
+
   it("warns substitution once per draw that fell back to no strata, with why", {
 
     real_vfold_cv <- rsample::vfold_cv
@@ -1414,7 +1435,7 @@ describe("check_degradation()", {
 
     ## Twelve of the poor fit's test rows: flagged at a minimum of 10, not at 20
     expect_true(check_degradation(cv_4, truth[1:12], poor[1:12])$degraded)
-    expect_false(check_degradation(cv_4, truth[1:12], poor[1:12], min_n = 20L)$degraded)
+    expect_identical(check_degradation(cv_4, truth[1:12], poor[1:12], min_n = 20L)$degraded, NA)
 
   })
 
@@ -1479,30 +1500,49 @@ describe("check_degradation()", {
 
   })
 
-  it("flags nothing with too few test rows to bootstrap", {
+  ## A check that cannot run leaves degraded NA, not FALSE, with why; the
+  ## reason stays the record of a TRUE flag
+  cannot_run <- function(out, cause) {
+    expect_identical(out$degraded, NA)
+    expect_identical(out$reason, NA_character_)
+    expect_identical(out$cause, cause)
+  }
 
-    out <- check_degradation(cv_4, truth[1:5], poor[1:5])
+  it("does not run with too few test rows to bootstrap, and says so", {
 
-    expect_false(out$degraded)
+    cannot_run(check_degradation(cv_4, truth[1:5], poor[1:5]),
+               "the test set has 5 usable rows, fewer than the 10 it bootstraps from (`min_degradation_rows`)")
 
-    out <- check_degradation(cv_4, t_fenced, rep(15, 32),
-                             response_fences = c(lower = 100, upper = 200))
-
-    expect_false(out$degraded)
+    cannot_run(check_degradation(cv_4, t_fenced, rep(15, 32), response_fences = c(lower = 100, upper = 200)),
+               paste0("the test set has 0 usable rows of 32 within the training fences [100, 200], ",
+                      "fewer than the 10 it bootstraps from (`min_degradation_rows`)"))
 
   })
 
-  it("flags nothing when the test outcomes are constant", {
+  it("does not run when the test outcomes are constant, and says so", {
 
-    expect_false(check_degradation(cv_4, rep(5, 20), stats::rnorm(20, 5))$degraded)
+    cannot_run(check_degradation(cv_4, rep(5, 20), stats::rnorm(20, 5)),
+               "the test outcomes are constant, so their RPD says nothing about the fit")
 
   })
 
-  it("flags nothing without a finite CV RPD", {
+  it("does not run without a finite CV RPD, and says so", {
 
     no_rpd <- tibble::tibble(.metric = "rmse", mean = 1, std_err = 0.1)
+    na_rpd <- tibble::tibble(.metric = "rpd", mean = NA_real_, std_err = NA_real_)
 
-    expect_false(check_degradation(no_rpd, truth, poor)$degraded)
+    for (cv in list(no_rpd, na_rpd)) {
+      cannot_run(check_degradation(cv, truth, poor),
+                 "there is no finite cross-validated RPD to compare the test RPD with")
+    }
+
+  })
+
+  it("does not run when the test RPD is not finite, and says so", {
+
+    local_mocked_bindings(rpd_vec = function(...) NaN)
+
+    cannot_run(check_degradation(cv_4, truth, poor), "the test RPD is not finite")
 
   })
 
