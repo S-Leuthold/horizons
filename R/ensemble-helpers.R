@@ -109,28 +109,9 @@ build_oof_matrix <- function(object, members) {
 
   cv <- cv[cv$config_id %in% members, c(".row", "config_id", ".pred", "truth")]
 
-  ## Completeness guard: every member must cover the same .row set. A member
-  ## missing rows would leave silent NA holes in the meta-feature matrix and
-  ## produce a plausible-but-wrong ensemble. Fail loudly instead.
-
-  per_member_rows <- split(cv$.row, cv$config_id)
-  row_union       <- sort(unique(cv$.row))
-
-  incomplete <- names(per_member_rows)[
-    vapply(per_member_rows,
-           function(r) !setequal(r, row_union),
-           logical(1))
-  ]
-
-  if (length(incomplete) > 0) {
-
-    cli::cli_abort(c(
-      "Out-of-fold predictions are not row-aligned across members.",
-      "x" = "Member{?s} with missing rows: {.val {incomplete}}.",
-      "i" = "Every member must have an OOF prediction for each training sample."
-    ))
-
-  }
+  ## Every member covers the same .row set, with no row twice: fit() fails a
+  ## member that missed a fold (#101), and the door validator refuses a fit
+  ## whose cv_predictions do not line up (validate_horizons_fit()).
 
   ## Wide reshape: one column per member, rows keyed by .row. Sort by .row so
   ## the predictor matrix, truth, and row index are all in the same order.

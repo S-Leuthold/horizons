@@ -47,16 +47,12 @@ compute_c_alpha <- function(scores, level) {
 
   ### fit_uq() passes DEFAULT_UQ_LEVEL and predict_intervals() a stored
   ### level_default, which predict()'s door validator checks is in (0, 1).
+  ### Neither passes too few finite scores: fit_uq() keeps a bundle only
+  ### with at least conformal_min_rows(level) of them, and the validator
+  ### refuses a saved bundle with fewer.
 
   scores <- scores[is.finite(scores)]
   n      <- length(scores)
-
-  if (n == 0) {
-
-    rlang::abort("No finite scores available for conformal calibration.")
-
-  }
-
   alpha  <- 1 - level
 
   ## Finite-sample correction: ceiling to be conservative
@@ -81,6 +77,13 @@ compute_c_alpha <- function(scores, level) {
 #' This function is the **capture layer** — it runs silently and returns a
 #' structured list. Messaging is the caller's responsibility.
 #'
+#' [fit_single_config()] runs it as a unit of its own (`run_unit()`): any
+#' step that fails ends the bundle, with the step's label, and the member
+#' keeps its model without intervals. A calibration set too small for the
+#' bundle is such a failure, with the counts. Only the in-sample diagnostics
+#' have a local recovery: when the out-of-fold quantile prediction fails they
+#' are `NA` and a note says why, since the bundle is complete without them.
+#'
 #' @param fitted_workflow A fitted tidymodels workflow (final model on
 #'   train_Fit).
 #' @param oof_predictions Tibble with columns `.pred`, `.pred_trans`, `truth`,
@@ -99,15 +102,19 @@ compute_c_alpha <- function(scores, level) {
 #'   `predict()` clamps the point predictions the intervals are served
 #'   around. Default `c(0, Inf)`.
 #' @param min_calib_rows Integer. The fewest calibration rows the bundle is
-#'   computed from, before and after rows without an outcome are dropped;
+#'   computed from, before and after rows without a finite score are dropped;
 #'   `control_horizons(min_calib_rows = )`. Default `N_CALIB_MIN`.
+#' @param debug Logical. Stop at the first failure, the diagnostics' included,
+#'   rather than recover.
 #'
 #' @return Named list with fields: `quantile_model`, `scores`, `n_calib`,
 #'   `level_default`, `oof_coverage`, `mean_width`, `prepped_recipe`.
-#'   Returns NULL if calibration set is too small (`n < min_calib_rows`).
-#'   Aborts with class `horizons_error_internal` when an out-of-fold `.row`
-#'   falls outside the rows the model was fit on, or when the calibration
-#'   predictions or features do not have one row per row of `calib_data`.
+#'   Aborts with class `horizons_error_run` when the calibration set is too
+#'   small (under `min_calib_rows` rows, or fewer finite scores than that or
+#'   than `level_default`'s order statistic needs), and with class
+#'   `horizons_error_internal` when an out-of-fold `.row` falls outside the
+#'   rows the model was fit on, or when the calibration predictions or
+#'   features do not have one row per row of `calib_data`.
 #'
 #' @keywords internal
 fit_uq <- function(fitted_workflow,
@@ -118,17 +125,14 @@ fit_uq <- function(fitted_workflow,
                    level_default   = DEFAULT_UQ_LEVEL,
                    seed            = NULL,
                    outcome_range   = DEFAULT_OUTCOME_RANGE,
-                   min_calib_rows  = N_CALIB_MIN) {
+                   min_calib_rows  = N_CALIB_MIN,
+                   debug           = FALSE) {
 
   outcome_col <- role_map$variable[role_map$role == "outcome"]
 
-  ## --- Guard: NULL or insufficient calibration data -------------------------
+  ## --- Guard: insufficient calibration data ---------------------------------
 
-  if (is.null(calib_data) || nrow(calib_data) < min_calib_rows) {
-
-    return(NULL)
-
-  }
+  check_calibration_rows(calib_data, min_calib_rows)
 
   ## -----------------------------------------------------------------------
   ## Phase 1: Train quantile model on OOF residuals
@@ -143,7 +147,7 @@ fit_uq <- function(fitted_workflow,
 
   ## fold-specific analysis sets. Coverage is enforced by conformal calibration
   ## on calib_data, which uses the same full-train-prepped recipe pipeline.
-  train_data_for_bake <- workflows::extract_mold(fitted_workflow)$predictors
+  train_data_for_bake <- mold_predictors(fitted_workflow)
 
   ## OOF residuals: truth - .pred (original scale, standard sign convention)
   oof_residuals <- oof_predictions$truth - oof_predictions$.pred
@@ -173,8 +177,7 @@ fit_uq <- function(fitted_workflow,
   oof_features <- train_data_for_bake[oof_rows, , drop = FALSE]
 
   ## Train quantile forest
-  qrf_result <- safely_execute(
-    ranger::ranger(
+  quantile_model <- unit_step("uq_quantile_forest", ranger::ranger(
       x           = as.data.frame(oof_features),
       y           = oof_residuals,
       quantreg    = TRUE,
@@ -188,37 +191,15 @@ fit_uq <- function(fitted_workflow,
       ## forest was not reproducible in its own right. NULL keeps ranger's
       ## default for callers that manage the stream themselves.
       seed        = seed
-    ),
-    log_error          = FALSE,
-    capture_conditions = TRUE
-  )
-
-  if (!is.null(qrf_result$error)) {
-
-    return(NULL)
-
-  }
-
-  quantile_model <- qrf_result$result
+  ))
 
   ## -----------------------------------------------------------------------
   ## Phase 2: Conformal calibration on calib_data
   ## -----------------------------------------------------------------------
 
   ## Point predictions on calibration set
-  calib_point_result <- safely_execute(
-    stats::predict(fitted_workflow, new_data = calib_data),
-    log_error          = FALSE,
-    capture_conditions = TRUE
-  )
-
-  if (!is.null(calib_point_result$error)) {
-
-    return(NULL)
-
-  }
-
-  calib_point_preds <- calib_point_result$result$.pred
+  calib_point_preds <- unit_step("uq_calibration_predict",
+                                 stats::predict(fitted_workflow, new_data = calib_data)$.pred)
 
   ## The predictions, the baked features below and the truth are paired by
   ## position to form the scores. A recipe step that dropped rows at bake
@@ -235,20 +216,9 @@ fit_uq <- function(fitted_workflow,
   ## back_transform_predictions() must reach the calibration residuals too,
   ## since the intervals are served around clamped point predictions (#53,
   ## #76).
-  bt_result <- safely_execute(
-    back_transform_predictions(calib_point_preds, transformation, warn = FALSE,
-                               outcome_range = outcome_range),
-    log_error          = FALSE,
-    capture_conditions = TRUE
-  )
-
-  if (!is.null(bt_result$error)) {
-
-    return(NULL)
-
-  }
-
-  calib_point_preds <- bt_result$result
+  calib_point_preds <- unit_step("uq_back_transform", back_transform_predictions(
+    calib_point_preds, transformation, warn = FALSE, outcome_range = outcome_range
+  ))
 
   ## Bake calibration features through the same prepped recipe
   calib_features <- recipes::bake(
@@ -268,25 +238,15 @@ fit_uq <- function(fitted_workflow,
   alpha <- 1 - level_default
   tau   <- c(alpha / 2, 1 - alpha / 2)
 
-  calib_q_result <- safely_execute(
-    stats::predict(
-      quantile_model,
-      data      = as.data.frame(calib_features),
-      type      = "quantiles",
-      quantiles = tau
-    ),
-    log_error          = FALSE,
-    capture_conditions = TRUE
-  )
+  calib_q <- unit_step("uq_calibration_quantiles", stats::predict(
+    quantile_model,
+    data      = as.data.frame(calib_features),
+    type      = "quantiles",
+    quantiles = tau
+  ))
 
-  if (!is.null(calib_q_result$error)) {
-
-    return(NULL)
-
-  }
-
-  q_low  <- calib_q_result$result$predictions[, 1]
-  q_high <- calib_q_result$result$predictions[, 2]
+  q_low  <- calib_q$predictions[, 1]
+  q_high <- calib_q$predictions[, 2]
 
   ## Calibration residuals (original scale)
   calib_truth     <- calib_data[[outcome_col]]
@@ -302,15 +262,22 @@ fit_uq <- function(fitted_workflow,
   scores <- pmax(q_low - calib_residuals,
                  calib_residuals - q_high)
 
-  ## Remove NA scores (from NA truth values in calib_data)
-  scores  <- scores[!is.na(scores)]
+  ## Keep the finite scores: NA where a calibration row has no outcome, and
+  ## the same count compute_c_alpha() reads at predict time
+  n_rows  <- length(scores)
+  scores  <- scores[is.finite(scores)]
   n_calib <- length(scores)
 
-  ## Re-check minimum after NA removal, and the order statistic's own floor,
-  ## below which the interval would cover less than its level
-  if (n_calib < max(min_calib_rows, conformal_min_rows(level_default))) {
+  ## Re-check the minimum on the scores kept, and the order statistic's own
+  ## floor, below which the interval would cover less than its level
+  needed <- max(min_calib_rows, conformal_min_rows(level_default))
 
-    return(NULL)
+  if (n_calib < needed) {
+
+    abort_horizons(
+      "{n_calib} of the {n_rows} calibration row{?s} have a finite score, fewer than the {needed} that {.code min_calib_rows} and the {level_default} level need.",
+      kind = "run"
+    )
 
   }
 
@@ -320,28 +287,43 @@ fit_uq <- function(fitted_workflow,
 
   c_alpha <- compute_c_alpha(scores, level_default)
 
-  ## OOF coverage: predict quantiles on OOF features, check coverage
-  oof_q_result <- safely_execute(
+  ## OOF coverage: predict quantiles on OOF features, check coverage. The
+  ## bundle is complete without these diagnostics, so a failure here leaves
+  ## them NA with a note. That recovery is containment, so it follows
+  ## run_unit()'s rule: under debug nothing is recovered from, and a kind no
+  ## unit contains is raised again as it is.
+  predict_oof <- function() {
     stats::predict(
       quantile_model,
       data      = as.data.frame(oof_features),
       type      = "quantiles",
       quantiles = tau
-    ),
-    log_error          = FALSE,
-    capture_conditions = TRUE
-  )
+    )
+  }
 
-  if (!is.null(oof_q_result$error)) {
+  oof_q <- if (debug) predict_oof() else rlang::try_fetch(predict_oof(), error = function(e) {
 
-    ## Fallback: use NA for diagnostics, still return UQ object
+    ### Raised again with its class, chain and trace. Declining with zap()
+    ### is not enough: try_fetch() then offers the condition's parent to the
+    ### same handler, and an upstream parent would be contained.
+    if (rlang::cnd_inherits(e, NEVER_CONTAINED)) stop(e)
+
+    cause <- condition_summary(e)
+    note_in_unit("The in-sample interval diagnostics (oof_coverage, mean_width) were not computed: {cause}")
+
+    NULL
+
+  })
+
+  if (is.null(oof_q)) {
+
     oof_coverage <- NA_real_
     mean_width   <- NA_real_
 
   } else {
 
-    oof_q_low  <- oof_q_result$result$predictions[, 1]
-    oof_q_high <- oof_q_result$result$predictions[, 2]
+    oof_q_low  <- oof_q$predictions[, 1]
+    oof_q_high <- oof_q$predictions[, 2]
 
     ## Interval bounds (original scale)
     oof_lower <- oof_predictions$.pred + oof_q_low  - c_alpha
@@ -370,5 +352,54 @@ fit_uq <- function(fitted_workflow,
     mean_width     = mean_width,
     prepped_recipe = prepped_recipe
   )
+
+}
+
+
+## ===========================================================================
+## The calibration set's size, and the rows a fitted workflow was trained on
+## ===========================================================================
+
+#' Refuse a calibration set too small for UQ or AD
+#'
+#' @description
+#' `fit()` switches UQ and AD off below `min_calib_rows` before any member is
+#' fitted ([fit()]'s gate, which warns `skipped`), so inside a member this is
+#' reached only by a caller that skipped the gate. It is the bundle's own
+#' condition, a run failure of its unit with the counts.
+#'
+#' @param calib_data Data frame, or `NULL`.
+#' @param min_calib_rows Integer(1).
+#' @param call The frame the failure reports.
+#' @return `NULL`, invisibly; aborts with class `horizons_error_run`.
+#' @keywords internal
+#' @noRd
+check_calibration_rows <- function(calib_data, min_calib_rows, call = rlang::caller_env()) {
+
+  n_calib <- if (is.null(calib_data)) 0L else nrow(calib_data)
+
+  if (n_calib >= min_calib_rows) return(invisible(NULL))
+
+  abort_horizons(
+    "The calibration set has {n_calib} row{?s}, fewer than {.code min_calib_rows} ({min_calib_rows}).",
+    kind = "run", call = call
+  )
+
+}
+
+#' The predictors a fitted workflow was trained on
+#'
+#' @description
+#' The baked predictors in the workflow's mold, the feature space UQ's
+#' quantile forest and AD's covariance both live in. Read before the
+#' workflow is butchered, which strips the mold.
+#'
+#' @param fitted_workflow A fitted, unbutchered workflow.
+#' @return Tibble of predictors, one row per training row.
+#' @keywords internal
+#' @noRd
+mold_predictors <- function(fitted_workflow) {
+
+  workflows::extract_mold(fitted_workflow)$predictors
 
 }

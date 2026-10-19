@@ -230,6 +230,40 @@ describe("cv_panel_at()", {
 
   })
 
+  it("summarises each candidate's folds as tune does: the same mean, count and standard error", {
+
+    ## The summary fit() also reads its members' folds through
+    ours  <- config_metrics(tr)
+    tunes <- tune::collect_metrics(tr)
+    both  <- merge(ours, tunes, by = c(".config", ".metric"), suffixes = c("", "_tune"))
+
+    expect_identical(nrow(both), nrow(tunes))
+    expect_identical(both$mean, both$mean_tune)
+    expect_identical(both$n, as.integer(both$n_tune))
+    expect_equal(both$std_err, both$std_err_tune)
+
+    ## Kept over every fold only
+    short <- over_every_fold(ours, 4L)
+    expect_true(all(is.na(short$mean)) && all(is.na(short$std_err)))
+    expect_identical(over_every_fold(ours, 3L)$mean, ours$mean)
+
+  })
+
+  it("says which cross-validated metrics are NA and why, in one line both verbs share", {
+
+    expect_null(cv_na_line(character(0), 6L))
+    expect_identical(
+      cv_na_line("rsq", 6L),
+      "Cross-validated rsq is NA: it could not be computed on every fold, and a cross-validated mean is kept only over every fold."
+    )
+    expect_match(cv_na_line(c("rsq", "ccc"), 6L), "^Cross-validated rsq and ccc are NA: they could not")
+    expect_identical(
+      cv_na_line(c("rmse", "rrmse", "rsq", "ccc", "rpd", "mae"), 6L),
+      "CV metrics at the selected hyperparameters could not be recovered; cv_* columns are NA."
+    )
+
+  })
+
   it("lets a failure to read the metrics through, for the configuration to fail on", {
 
     local_mocked_bindings(collect_metrics = function(...) stop("metrics unreadable"),

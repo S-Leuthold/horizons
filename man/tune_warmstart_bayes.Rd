@@ -7,12 +7,13 @@
 tune_warmstart_bayes(
   workflow,
   cv_resamples,
-  best_params,
+  initial_grid,
   param_set,
   bayesian_iter,
-  grid_size = WARMSTART_GRID_SIZE,
   metric_set,
-  allow_par = FALSE
+  allow_par = FALSE,
+  recipe = NULL,
+  debug = FALSE
 )
 }
 \arguments{
@@ -20,7 +21,7 @@ tune_warmstart_bayes(
 
 \item{cv_resamples}{A \code{vfold_cv} object.}
 
-\item{best_params}{Single-row tibble from evaluate's \code{select_best()}.}
+\item{initial_grid}{The starting grid, from \code{\link[=build_warmstart_grid]{build_warmstart_grid()}}.}
 
 \item{param_set}{Finalized \code{parameters} object.}
 
@@ -29,33 +30,30 @@ tune_warmstart_bayes(
 \item{metric_set}{A \code{yardstick::metric_set}.}
 
 \item{allow_par}{Logical. Passed to tune control functions.}
+
+\item{recipe}{The member's untrained recipe, to reproduce a step's failure
+inside tune with its class; \code{NULL} when it was prepped before tuning.}
+
+\item{debug}{Logical. Stop at the first failure rather than fall back.}
 }
 \value{
-List with:
-\itemize{
-\item \code{tune_results}: The final tuning result object
-\item \code{best_params}: Single-row tibble of best hyperparameters
-\item \code{fallback_used}: Logical, TRUE if grid fallback was used
-\item \code{grid_points}: Integer, the number of points in the starting grid
-(the space-filling grid when \code{fallback_used} is TRUE)
-\item \code{bayes_failed}: Logical, TRUE when \code{bayesian_iter > 0} and the
-Bayesian search errored or produced no iteration past the grid, so the
-grid's choice is kept
-\item \code{bayes_error}: Character, why, when \code{bayes_failed} is TRUE; NULL
-otherwise
-\item \code{error}: Character, present only when the grid failed, in which case
-\code{tune_results} and \code{best_params} are NULL. When every model failed it
-carries the most frequent distinct error note from \code{.notes}.
-}
+List with \code{tune_results} (the result the hyperparameters were
+chosen from), \code{best_params} (single-row tibble, with \code{.config}), \code{grid}
+(\code{initial_grid}, which the member reads its notes through, #109) and
+\code{n_dropped} (the candidates the Bayesian search proposed and tune
+dropped, scored on no fold).
 }
 \description{
-Orchestrates the re-tuning sequence for fit():
+The re-tuning sequence of a \code{fit()} member, run inside its unit:
 \enumerate{
-\item Build warm-start grid via \code{build_warmstart_grid()}
-\item Evaluate grid via \code{tune::tune_grid()}
-\item If \code{bayesian_iter > 0}, refine via \code{tune::tune_bayes()} seeded from
-the grid results
-\item Select best params via \code{tune::select_best(metric = "rmse")}
+\item Evaluate the starting grid (\code{\link[=build_warmstart_grid]{build_warmstart_grid()}}) with
+\code{tune::tune_grid()}. A result in which every model failed fails the
+member, with tune's cause (\code{check_tune_result()}), and so does a grid
+with no candidate scored on every fold (#101).
+\item If \code{bayesian_iter > 0}, refine with \code{bayes_search()}, which keeps what
+it finished when it fails, and says so (#209).
+\item Choose the hyperparameters by RMSE among the candidates scored on every
+fold (\code{select_complete()}).
 }
 }
 \keyword{internal}

@@ -234,7 +234,7 @@ describe("an object with no outcome", {
 
     expect_error(fit(obj),
                  "There is no configuration to fit.", fixed = TRUE,
-                 class = "horizons_input_error")
+                 class = "horizons_error_input")
 
   })
 

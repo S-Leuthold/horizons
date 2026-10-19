@@ -463,30 +463,37 @@ describe("tune_warmstart_bayes() - return contract", {
     min_n = 5L
   )
 
+  grid <- build_warmstart_grid(best_params, ts$param_set)
+
   result <- tune_warmstart_bayes(
     workflow      = ts$wf,
     cv_resamples  = ts$folds,
-    best_params   = best_params,
+    initial_grid  = grid,
     param_set     = ts$param_set,
     bayesian_iter = 0L,
     metric_set    = ts$metric_set,
     allow_par     = FALSE
   )
 
-  it("is a list with tune_results, fallback_used and a single-row best_params tibble", {
+  it("is a list with tune_results, a single-row best_params tibble, the grid it started from and the dropped count", {
 
     expect_true(is.list(result))
     expect_true("tune_results" %in% names(result))
-    expect_true("best_params" %in% names(result))
-    expect_true("fallback_used" %in% names(result))
     expect_s3_class(result$best_params, "tbl_df")
     expect_equal(nrow(result$best_params), 1)
+    expect_true(".config" %in% names(result$best_params))
+
+    ## The grid comes back, for the member to read its notes through (#109)
+    expect_identical(result$grid, grid)
+
+    ## No Bayesian stage, so no candidate it proposed was dropped
+    expect_identical(result$n_dropped, 0L)
 
   })
 
-  it("fallback_used is FALSE when valid best_params provided", {
+  it("starts from evaluate()'s parameters when they are usable", {
 
-    expect_false(result$fallback_used)
+    expect_true(usable_best_params(best_params, ts$param_set))
 
   })
 
@@ -495,24 +502,29 @@ describe("tune_warmstart_bayes() - return contract", {
 
 describe("tune_warmstart_bayes() - a Bayesian search that fails (#209)", {
 
-  it("keeps the grid's choice and says why", {
+  it("keeps the grid's choice and says why, with a substitution warning", {
 
     ts <- make_tune_setup()
 
     ## A starting grid of one point: tune_bayes() needs two, so it aborts.
-    result <- suppressWarnings(tune_warmstart_bayes(
-      workflow      = ts$wf,
-      cv_resamples  = ts$folds,
-      best_params   = tibble::tibble(mtry = 5L, trees = 100L, min_n = 5L),
-      param_set     = ts$param_set,
-      bayesian_iter = 2L,
-      grid_size     = 1L,
-      metric_set    = ts$metric_set,
-      allow_par     = FALSE
-    ))
+    ## Outside a member's unit the warning is an ordinary one of its topic.
+    w <- expect_warning(
+      result <- keep_only_warning(tune_warmstart_bayes(
+        workflow      = ts$wf,
+        cv_resamples  = ts$folds,
+        initial_grid  = build_warmstart_grid(tibble::tibble(mtry = 5L, trees = 100L, min_n = 5L),
+                                             ts$param_set, max_points = 1L),
+        param_set     = ts$param_set,
+        bayesian_iter = 2L,
+        metric_set    = ts$metric_set,
+        allow_par     = FALSE
+      ), "horizons_warning_substitution"),
+      class = "horizons_warning_substitution"
+    )
 
-    expect_true(result$bayes_failed)
-    expect_type(result$bayes_error, "character")
+    expect_match(conditionMessage(w),
+                 "The warm-start Bayesian search failed, so the hyperparameters were chosen from its starting grid alone",
+                 fixed = TRUE)
     expect_equal(nrow(result$best_params), 1)
 
   })
@@ -521,25 +533,50 @@ describe("tune_warmstart_bayes() - a Bayesian search that fails (#209)", {
 
     ts <- make_tune_setup()
 
-    ## What tune_bayes() returns when its loop errors or every candidate
-    ## fails: the starting grid's results alone
+    ## What tune_bayes() returns when every candidate fails: the starting
+    ## grid's results alone
     local_mocked_bindings(tune_bayes = function(object, resamples, initial, ...) initial,
                           .package = "tune")
 
-    result <- tune_warmstart_bayes(
-      workflow      = ts$wf,
-      cv_resamples  = ts$folds,
-      best_params   = tibble::tibble(mtry = 5L, trees = 100L, min_n = 5L),
-      param_set     = ts$param_set,
-      bayesian_iter = 2L,
-      grid_size     = 3L,
-      metric_set    = ts$metric_set,
-      allow_par     = FALSE
+    w <- expect_warning(
+      result <- tune_warmstart_bayes(
+        workflow      = ts$wf,
+        cv_resamples  = ts$folds,
+        initial_grid  = build_warmstart_grid(tibble::tibble(mtry = 5L, trees = 100L, min_n = 5L),
+                                             ts$param_set, max_points = 3L),
+        param_set     = ts$param_set,
+        bayesian_iter = 2L,
+        metric_set    = ts$metric_set,
+        allow_par     = FALSE
+      ),
+      class = "horizons_warning_substitution"
     )
 
-    expect_identical(result$bayes_failed, TRUE)
-    expect_identical(result$bayes_error, "the search produced no results")
+    expect_match(conditionMessage(w),
+                 "The warm-start Bayesian search produced no results, so the hyperparameters were chosen from its starting grid alone.",
+                 fixed = TRUE)
     expect_equal(nrow(result$best_params), 1)
+
+  })
+
+  it("does not fall back under debug, stopping with the search's error", {
+
+    ts <- make_tune_setup()
+
+    expect_error(
+      tune_warmstart_bayes(
+        workflow      = ts$wf,
+        cv_resamples  = ts$folds,
+        initial_grid  = build_warmstart_grid(tibble::tibble(mtry = 5L, trees = 100L, min_n = 5L),
+                                             ts$param_set, max_points = 1L),
+        param_set     = ts$param_set,
+        bayesian_iter = 2L,
+        metric_set    = ts$metric_set,
+        allow_par     = FALSE,
+        debug         = TRUE
+      ),
+      "The GP model requires 2+ initial points", fixed = TRUE
+    )
 
   })
 
@@ -548,27 +585,25 @@ describe("tune_warmstart_bayes() - a Bayesian search that fails (#209)", {
 
 describe("tune_warmstart_bayes() - a starting grid that errors", {
 
-  it("returns the cause with no results, and the grid's size", {
+  it("raises the cause, for the member's unit to record", {
 
     ts <- make_tune_setup()
 
     local_mocked_bindings(tune_grid = function(...) stop("the grid broke"), .package = "tune")
 
-    result <- tune_warmstart_bayes(
-      workflow      = ts$wf,
-      cv_resamples  = ts$folds,
-      best_params   = tibble::tibble(mtry = 5L, trees = 100L, min_n = 5L),
-      param_set     = ts$param_set,
-      bayesian_iter = 0L,
-      grid_size     = 3L,
-      metric_set    = ts$metric_set,
-      allow_par     = FALSE
+    expect_error(
+      tune_warmstart_bayes(
+        workflow      = ts$wf,
+        cv_resamples  = ts$folds,
+        initial_grid  = build_warmstart_grid(tibble::tibble(mtry = 5L, trees = 100L, min_n = 5L),
+                                             ts$param_set, max_points = 3L),
+        param_set     = ts$param_set,
+        bayesian_iter = 0L,
+        metric_set    = ts$metric_set,
+        allow_par     = FALSE
+      ),
+      "the grid broke", fixed = TRUE
     )
-
-    expect_null(result$tune_results)
-    expect_null(result$best_params)
-    expect_identical(result$grid_points, 3L)
-    expect_match(result$error, "the grid broke", fixed = TRUE)
 
   })
 
@@ -579,16 +614,17 @@ describe("tune_warmstart_bayes() - fallback behavior", {
 
   ts <- make_tune_setup()
 
-  it("still returns results when best_params is NULL (fallback grid)", {
+  it("still returns results from the space-filling grid when best_params is NULL", {
 
     ## A three-point fallback grid: the fallback does not depend on its size
+    expect_false(usable_best_params(NULL, ts$param_set))
+
     result <- tune_warmstart_bayes(
       workflow      = ts$wf,
       cv_resamples  = ts$folds,
-      best_params   = NULL,
+      initial_grid  = build_warmstart_grid(NULL, ts$param_set, max_points = 3L),
       param_set     = ts$param_set,
       bayesian_iter = 0L,
-      grid_size     = 3L,
       metric_set    = ts$metric_set,
       allow_par     = FALSE
     )
@@ -596,7 +632,6 @@ describe("tune_warmstart_bayes() - fallback behavior", {
     expect_true(is.list(result))
     expect_s3_class(result$best_params, "tbl_df")
     expect_equal(nrow(result$best_params), 1)
-    expect_true(result$fallback_used)
 
   })
 
@@ -616,24 +651,26 @@ describe("tune_warmstart_bayes() - Bayesian stage", {
     )
 
     budget <- 2L
+    warm   <- build_warmstart_grid(best_params, ts$param_set, max_points = 5L)
 
     ## tune's control seed and the model fits draw from the session's random
-    ## stream, so pin it
-    result <- withr::with_seed(42, tune_warmstart_bayes(
-      workflow      = ts$wf,
-      cv_resamples  = ts$folds,
-      best_params   = best_params,
-      param_set     = ts$param_set,
-      bayesian_iter = budget,
-      grid_size     = 5L,
-      metric_set    = ts$metric_set,
-      allow_par     = FALSE
-    ))
+    ## stream, so pin it. A search that ran raises no substitution warning.
+    expect_no_warning(
+      result <- withr::with_seed(42, tune_warmstart_bayes(
+        workflow      = ts$wf,
+        cv_resamples  = ts$folds,
+        initial_grid  = warm,
+        param_set     = ts$param_set,
+        bayesian_iter = budget,
+        metric_set    = ts$metric_set,
+        allow_par     = FALSE
+      )),
+      class = "horizons_warning_substitution"
+    )
 
-    ## The Bayesian stage neither errored back to the grid results nor started
-    ## from a fallback grid
-    expect_false(result$bayes_failed)
-    expect_false(result$fallback_used)
+    ## The warm start was usable, so the re-tune did not fall back to a
+    ## space-filling grid
+    expect_true(usable_best_params(best_params, ts$param_set))
 
     ## Its results replaced the grid's: tune_bayes() returns iteration results,
     ## with .iter 0 for the starting grid and 1 onwards for each iteration. The
@@ -647,7 +684,6 @@ describe("tune_warmstart_bayes() - Bayesian stage", {
     ## best point, not from a starting design of its own
     tuned <- ts$param_set$name
     start <- dplyr::distinct(metrics[metrics$.iter == 0, tuned])
-    warm  <- build_warmstart_grid(best_params, ts$param_set, max_points = 5L)
     expect_true(any(start$mtry == 2L & start$min_n == 5L))
     expect_equal(
       dplyr::arrange(start, dplyr::across(dplyr::all_of(tuned))),
@@ -657,6 +693,34 @@ describe("tune_warmstart_bayes() - Bayesian stage", {
 
     expect_s3_class(result$best_params, "tbl_df")
     expect_equal(nrow(result$best_params), 1)
+
+  })
+
+})
+
+
+describe("bayes_search()", {
+
+  it("caps the line tune logged for a candidate it dropped, as another package's text, when debug stops on it", {
+
+    long <- paste0("All models failed for: ", strrep("penalty=1e-04, ", 70))
+
+    local_mocked_bindings(tune_bayes = function(...) {
+      message(long)
+      NULL
+    }, .package = "tune")
+
+    err <- expect_error(
+      bayes_search(workflow = NULL, resamples = NULL, initial = NULL, iter = 1L,
+                   param_info = NULL, metrics = NULL, debug = TRUE),
+      class = "horizons_error_run"
+    )
+
+    msg <- conditionMessage(err)
+
+    expect_match(msg, "tune keeps no record of why: All models failed for: penalty", fixed = TRUE)
+    expect_match(msg, "...", fixed = TRUE)
+    expect_lt(nchar(msg), 500)
 
   })
 

@@ -1366,7 +1366,7 @@ describe("evaluate() - checkpointing", {
     ## fit() refuses it at its door, naming a metric the results hold
     err <- expect_error(fit(ev, compute_uq = FALSE, compute_ad = FALSE),
                         "2 succeeded, but none has a cv_rpd value.", fixed = TRUE,
-                        class = "horizons_input_error")
+                        class = "horizons_error_input")
     msg <- gsub("\\s+", " ", conditionMessage(err))   # undo cli line wrapping
     expect_match(msg, "fit(x, metric = )", fixed = TRUE)
     expect_match(msg, "\"rmse\"", fixed = TRUE)
@@ -2697,6 +2697,24 @@ describe("evaluate() - a worker's death", {
     expect_match(gsub("\\s+", " ", conditionMessage(err)), "calling `evaluate()` again with it resumes from them",
                  fixed = TRUE)
     expect_identical(list.files(file.path(dir, "checkpoints")), "cfg_001.rds")
+
+  })
+
+  it("carries a results table with every column and no rows when the first configuration's worker dies", {
+
+    local_mocked_bindings(evaluate_single_config = function(config_row, ...) {
+      stop(structure(class = c("FutureInterruptError", "FutureError", "error", "condition"),
+                     list(message = "A future worker died.", call = NULL)))
+    })
+
+    err <- expect_error(suppressWarnings(evaluate(make_eval_object(n = 60, n_configs = 3), seed = 42L)),
+                        class = "horizons_error_systemic")
+
+    one <- create_failed_result("cfg_001", "failed")
+
+    expect_identical(nrow(err$results), 0L)
+    expect_identical(names(err$results), names(one))
+    expect_identical(vapply(err$results, typeof, character(1)), vapply(one, typeof, character(1)))
 
   })
 

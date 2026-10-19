@@ -20,14 +20,14 @@
 #' as response outliers (`evaluation$response_trim$trimmed_ids`; see
 #' `evaluate()`'s "Response outliers" section), the id and outcome columns
 #' must match the split's, value for value and in order, or `fit()` aborts
-#' with class `horizons_input_error`. The trim is reused, not recomputed, so
+#' with class `horizons_error_input`. The trim is reused, not recomputed, so
 #' `fit()` trains without exactly the rows `evaluate()` left out and scores
 #' on the same untrimmed test rows. A trim request `validate()` records
 #' after `evaluate()` therefore cannot reach the fit, and `fit()` refuses it
 #' rather than ignore it: when `validation$outliers$response_trim` differs
 #' from the trim `evaluate()` applied (one without the other, or another
 #' outcome, method or threshold), `fit()` aborts with class
-#' `horizons_input_error`, saying which differs. Re-running `evaluate()`
+#' `horizons_error_input`, saying which differs. Re-running `evaluate()`
 #' applies the current request. A trim that drew no fences counts as
 #' applied, under the request it ran for. Columns added since `evaluate()`,
 #' such as a sibling response from `add_response()`, are carried into the
@@ -50,14 +50,58 @@
 #' when none did, the pruned ones that carry a cross-validated value of
 #' `metric`. When every member fell below `evaluate()`'s `prune_threshold`
 #' (`evaluation$results$below_prune_threshold`), `fit()` warns with class
-#' `horizons_below_threshold_warning`, naming the threshold and the members'
-#' cross-validated RPD; that includes `bayesian_iter = 0`, where nothing is
-#' pruned. When the members are pruned configurations the warning also
-#' carries class `horizons_pruned_fallback_warning`. If every member fails,
-#' `fit()` aborts with class `horizons_all_members_failed`, listing the
+#' `horizons_warning_quality`, naming the threshold and the members'
+#' cross-validated RPD, and saying so when the members are pruned
+#' configurations; that includes `bayesian_iter = 0`, where nothing is
+#' pruned. If every member fails,
+#' `fit()` aborts with class `horizons_error_all_members_failed` (with
+#' `horizons_error_run`), listing the
 #' distinct error messages; the
 #' per-member results travel on the condition as `results`, and
 #' `models$results` keeps each member's `error_message` when some succeed.
+#'
+#' @section What fit() reports:
+#' `fit()` warns once per kind at its end, after writing each warning to the
+#' object's `log`: a stratified draw (the calibration split, the folds, a
+#' cold start's split) that fell back to an unstratified one
+#' (`horizons_warning_substitution`); a smallest assessment fold under
+#' `SMALL_FOLD_ROWS` rows, or every member below `evaluate()`'s prune
+#' threshold (`horizons_warning_quality`); UQ and AD switched off because the
+#' calibration set is under `min_calib_rows` (`horizons_warning_skipped`);
+#' members whose prediction intervals, measured coverage or applicability
+#' domain could not be computed, with why (`horizons_warning_skipped`, #145);
+#' members whose degradation check could not run, whose `degraded` is then
+#' `NA` with the cause in their warnings (`horizons_warning_skipped`);
+#' configurations without a value of the ranking metric left out of the
+#' choice of members (`horizons_warning_skipped`);
+#' a member whose warm-start Bayesian search failed and kept what it finished
+#' (`horizons_warning_substitution`, #209); some members failed and the rest
+#' are returned (`horizons_warning_partial_failure`, naming them with each
+#' distinct cause). It records as notes on the log, without a warning, a
+#' member's fitted workflow stored whole because it could not be slimmed and
+#' in-sample interval diagnostics that could not be computed. The folds are
+#' drawn from the rows the members are fitted on, which must outnumber the
+#' folds, or `fit()` refuses, as `evaluate()` does.
+#'
+#' @section Members that fail:
+#' Each member is one unit: a failure in any step of its re-tune, its
+#' out-of-fold predictions, its final fit or its test scoring fails that
+#' member alone, and `models$results` records the step and the cause in
+#' `error_message`, the root cause's class in `class`, and, with
+#' `control_horizons(keep_traces = TRUE)`, its backtrace as text in `trace`.
+#' A member's own warnings, from the engines and from tune, are in
+#' `models$results$warnings`. A bug, a refusal or a missing package is not
+#' the member's and stops the call. When the first members fail the same
+#' way across at least two models, `fit()` stops with
+#' `horizons_error_systemic` and the members so far as `results`
+#' (`control_horizons(breaker = )`, 3 by default, `FALSE` to fit every
+#' member), and it stops the same way when a parallel worker dies. With
+#' `control_horizons(debug = TRUE)` the re-tunes run in this session and the
+#' first failure, inside tuning included, stops the call with its backtrace.
+#' Before a parallel run `fit()` refuses a session loaded with
+#' `devtools::load_all()`, and one whose workers load another version of
+#' horizons (`horizons_error_dependency`), since tune's workers run horizons'
+#' recipe steps.
 #'
 #' @section Cold start from one configuration:
 #' With one configuration there is nothing for `evaluate()` to choose, so a
@@ -69,7 +113,11 @@
 #' partition alone. With no parameters from
 #' `evaluate()` to warm-start from, the re-tune starts from a space-filling
 #' grid of `grid_size` points; the console tree says so, and
-#' `models$results$warm_start` is `FALSE`. The degradation check needs
+#' `models$results$warm_start` is `FALSE`. On either path, a search space
+#' whose tuned parameters are all whole numbers, with no more points than
+#' `grid_size + final_bayesian_iter`, is gridded whole with no Bayesian
+#' search, as `evaluate()` grids it: at the defaults that is every plsr
+#' member, each `num_comp` up to its cap tried. The degradation check needs
 #' nothing from `evaluate()`, since it compares the test RPD with `fit()`'s
 #' own cross-validation.
 #'
@@ -78,10 +126,11 @@
 #' `best_config` with status `"not_evaluated"`, its metric and `cv_*` columns
 #' are `NA`, and `runtime_secs` is 0. `evaluation$recipe` records the recipe
 #' settings as `evaluate()` does, and `fit()` applies `evaluate()`'s checks
-#' first: an outcome that is not constant, at least twice `cv_folds` rows
-#' with an observed outcome, and a Savitzky-Golay window narrower than the
-#' spectrum. Re-fitting a cold-started fit starts cold again. With more than
-#' one configuration `fit()` aborts with class `horizons_input_error`:
+#' first: an outcome that is not constant, a Savitzky-Golay window narrower
+#' than the spectrum, and more rows than `cv_folds` to draw the folds from,
+#' which `fit()` checks on either path. Re-fitting a cold-started fit starts
+#' cold again. With more than one configuration `fit()` aborts with class
+#' `horizons_error_input`:
 #' choosing among them is what `evaluate()` is for.
 #'
 #' @param x A `horizons_eval` object (output of `evaluate()`), or a
@@ -91,7 +140,7 @@
 #'   A cold start has one.
 #' @param metric Character or NULL. Metric for ranking the candidate
 #'   configs, by bare name: one of `"rpd"`, `"rsq"`, `"rmse"`, `"rrmse"`,
-#'   `"ccc"`, `"mae"`, or `fit()` aborts with class `horizons_input_error`.
+#'   `"ccc"`, `"mae"`, or `fit()` aborts with class `horizons_error_input`.
 #'   If NULL, uses the rank_metric from `evaluate()`; on a cold start, where
 #'   there is nothing to rank and the metric is only recorded, the one a
 #'   cold-started fit recorded, else `"rpd"`. Ranking reads the
@@ -134,10 +183,10 @@
 #' the range or is infinite, naming `outcome_range` and how to set it (#76);
 #' when the ranking metric is `"rrmse"` and the range's lower bound is
 #' negative, since the mean outcome it divides by can then be zero or
-#' negative; and, on the `evaluate()` path, when the range differs from the
-#' one `evaluate()` recorded on its results rows (rows from before the range
-#' was recorded count as the default), since the members were chosen on
-#' predictions clamped to that range.
+#' negative; and, on the `evaluate()` path, with class `horizons_error_input`,
+#' when the range differs from the one `evaluate()` recorded on its results
+#' rows (rows from before the range was recorded count as the default), since
+#' the members were chosen on predictions clamped to that range.
 #'
 #' @section Zero outcome variance:
 #' On either path, before anything is drawn, `fit()` aborts with class
@@ -170,8 +219,9 @@
 #'   `horizons_ensemble`, it returns a `horizons_fit` whose `ensemble` slot
 #'   is empty again, since the ensemble was built on the members it replaces.
 #'   `models$results` records how each member's re-tune started:
-#'   `warm_start` (`TRUE` from `evaluate()`'s parameters, `FALSE` from a
-#'   space-filling grid) and `start_grid_size`.
+#'   `warm_start` (`TRUE` when `evaluate()`'s parameters were usable, so the
+#'   grid is centred on them or is the whole space, `FALSE` for a
+#'   space-filling grid) and `start_grid_size`, the starting grid's points.
 #'
 #' @export
 fit <- function(x,
@@ -206,10 +256,10 @@ fit <- function(x,
 
   if (cold_start && !inherits(x, "horizons_data")) {
 
-    cli::cli_abort(c(
+    abort_horizons(c(
       "{.fn fit} needs a {.cls horizons_eval} from {.fn evaluate}, or a configured {.cls horizons_data} with one configuration.",
       "x" = "{.arg x} is {.obj_type_friendly {x}}."
-    ), class = "horizons_input_error")
+    ), kind = "input")
 
   }
 
@@ -217,15 +267,7 @@ fit <- function(x,
   ## evaluate() path an unknown name used to surface as a missing cv_<metric>
   ## column with the advice to re-run evaluate(); on a cold start the record
   ## would fail validation only after every model had been fitted.
-  if (!is.null(metric) &&
-      (!rlang::is_string(metric) || !metric %in% VALID_RANK_METRICS)) {
-
-    cli::cli_abort(c(
-      "{.arg metric} must be one of {.val {VALID_RANK_METRICS}}.",
-      "x" = "Got {.val {metric}}."
-    ), class = "horizons_input_error")
-
-  }
+  if (!is.null(metric)) check_rank_metric_arg(metric)
 
   ## The object as it arrives (#234): on the evaluate() path its evaluation
   ## record, and through it the base contract; on a cold start the base
@@ -267,6 +309,11 @@ fit <- function(x,
   ## (#137). A cold start reads the request itself.
   if (!cold_start) check_trim_request(x)
 
+  ## The axis has to be in order for the spectral steps; the same for every
+  ## member, so checked once, before anything is drawn, as evaluate() checks
+  ## it (#121)
+  check_band_order(x$data$role_map$variable[x$data$role_map$role == "predictor"])
+
   ## Notes on the draws and the member count are printed inside the tree,
   ## after its header in Step 3; they used to print above it (#91).
 
@@ -290,12 +337,24 @@ fit <- function(x,
   ## -----------------------------------------------------------------------
   ## The user owns the backend. Confirm there is one to run on, pin threads
   ## in this process before tune spawns anything, and never touch the plan.
+  ##
+  ## Debug runs in this session: a backtrace from a worker shows the worker's
+  ## plumbing, and no debugger attaches there. The user asked for debug, so
+  ## the tree says so rather than a warning.
+
+  debug       <- control$debug
+  par_by_user <- allow_par
+  allow_par   <- allow_par && !debug
 
   if (allow_par) {
 
     allow_par <- check_parallel_backend("fit", collector)
 
     if (allow_par) {
+
+      ## tune's workers run horizons' recipe steps and the PLS engine, so
+      ## they must run this session's horizons
+      check_parallel_workers("fit")
 
       unpin_threads <- pin_parent_threads()
       on.exit(unpin_threads(), add = TRUE)
@@ -335,11 +394,11 @@ fit <- function(x,
     ## already, so each is substituted as text.
     reason <- unranked_reason(eval_results, rank_metric, "`fit(x, metric = )`")
 
-    cli::cli_abort(c(
+    abort_horizons(c(
       "No configuration in {.field evaluation$results} can be fitted.",
       "x" = "{reason[1]}",
       stats::setNames(sprintf("{reason[%d]}", seq_along(reason)[-1]), names(reason)[-1])
-    ), class = "horizons_input_error")
+    ), kind = "input")
 
   }
 
@@ -360,8 +419,8 @@ fit <- function(x,
   ## pruned fallback is one case; the other is bayesian_iter = 0, where the
   ## gate skips nothing, so below-threshold configs are successes and nothing
   ## else would say that none cleared the bar (#38).
-  warn_members_below_threshold(top_configs, fallback = candidates$fallback,
-                               bayesian_iter = x$config$tuning$bayesian_iter)
+  log_members_below_threshold(collector, top_configs, fallback = candidates$fallback,
+                              bayesian_iter = x$config$tuning$bayesian_iter)
 
   ## Extract references
   role_map     <- x$data$role_map
@@ -455,12 +514,12 @@ fit <- function(x,
       ""
     }
 
-    cli::cli_abort(c(
+    abort_horizons(c(
       "{.fn evaluate}'s split does not index the rows this object models.",
       "x" = "{.field evaluation$split} was drawn on {nrow(split_F$data)} row{?s}; the analysis table has {nrow(modelled_rows)} with an observed {.field {outcome_col}}{trim_note}, and their {.field {id_col}} or {.field {outcome_col}} values differ.",
       "i" = "The rows or outcomes changed after {.fn evaluate}, or the object was built by hand.",
       "i" = "Re-run {.fn evaluate} on the object as it is now."
-    ), class = "horizons_input_error")
+    ), kind = "input")
 
   }
 
@@ -520,6 +579,11 @@ fit <- function(x,
       calib_note <- paste0("Calibration set too small (", nrow(calib_data),
                            " < ", control$min_calib_rows, "). Disabling ", disabled, ".")
 
+      ## Whatever verbose is: a fit without the intervals or the domain it
+      ## was asked for says so (#145)
+      log_calibration_skip(collector, compute_uq, compute_ad, nrow(calib_data),
+                           control$min_calib_rows, top_configs$config_id)
+
       compute_uq <- FALSE
       compute_ad <- FALSE
       train_Fit  <- train_F
@@ -558,6 +622,15 @@ fit <- function(x,
   ## -----------------------------------------------------------------------
   ## Step 2: Create CV resamples from train_Fit
   ## -----------------------------------------------------------------------
+  ## The folds are drawn from train_Fit, so it is the part the sample-size
+  ## rule reads: more rows than folds, as evaluate() asks of its own.
+
+  check_fold_rows(nrow(train_Fit), cv_folds,
+                  n_modelled = nrow(modelled$data),
+                  n_test     = n_test,
+                  n_trimmed  = length(trimmed_ids),
+                  n_calib    = if (is.null(calib_data)) 0L else sum(calib_kept))
+
   ## Seeded here: with the split reused, no draw precedes this one when UQ
   ## and AD are off, so the folds would otherwise follow the caller's RNG.
 
@@ -571,6 +644,13 @@ fit <- function(x,
     unstratified = function() rsample::vfold_cv(train_Fit, v = cv_folds)
   )
   cv_resamples <- cv_drawn$draw
+
+  ## A stratified draw that fell back to an unstratified one says so once,
+  ## each; a small assessment fold is weak, not wrong, and warns
+  if (cold_start) log_strata_fallback(collector, cold, "train/test split")
+  if (!is.null(calib_drawn)) log_strata_fallback(collector, calib_drawn, "calibration split")
+  log_strata_fallback(collector, cv_drawn, "cross-validation folds")
+  log_small_folds(collector, cv_resamples)
 
   ## -----------------------------------------------------------------------
   ## Step 3: Tree header
@@ -707,6 +787,13 @@ fit <- function(x,
       "\u2502  Bayesian: ", final_bayesian_iter,
       if (cold_start) " iterations from a space-filling grid\n" else " iterations with warm-start\n"
     ))
+
+    if (par_by_user && debug) {
+
+      cat("\u2502  Parallel: off, since debug runs in this session\n")
+
+    }
+
     cat("\u2502\n")
 
   }
@@ -714,8 +801,14 @@ fit <- function(x,
   ## -----------------------------------------------------------------------
   ## Step 4: Config loop
   ## -----------------------------------------------------------------------
+  ## Each member is one unit (fit_single_config()). The circuit breaker
+  ## watches the first members, so a failure every member would share stops
+  ## the call early (control_horizons(breaker = )), and a parallel worker
+  ## that dies stops it at once; either way the members so far are the
+  ## error's results.
 
   results_list <- list()
+  breaker      <- new_breaker(control$breaker)
 
   for (i in seq_len(n_best)) {
 
@@ -747,7 +840,7 @@ fit <- function(x,
     best_params_eval <- top_row$best_params[[1]]
 
     ## Call capture layer
-    config_result <- fit_single_config(
+    config_result <- stop_on_worker_death(fit_single_config(
       config_row          = cfg,
       split_F             = split_F,
       cv_resamples        = cv_resamples,
@@ -767,8 +860,10 @@ fit <- function(x,
       response_fences     = response_fences,
       min_calib_rows       = control$min_calib_rows,
       min_ad_rows          = control$min_ad_rows,
-      min_degradation_rows = control$min_degradation_rows
-    )
+      min_degradation_rows = control$min_degradation_rows,
+      debug                = debug,
+      keep_traces          = control$keep_traces
+    ), member_results(results_list), verb = "fit")
 
     results_list[[i]] <- config_result
 
@@ -782,7 +877,7 @@ fit <- function(x,
 
         start_text <- paste0(
           if (cold_start) "Cold start: no warm-start parameters" else "No usable warm-start parameters from evaluate()",
-          "; space-filling grid of ", config_result$start_grid_size, " points"
+          "; grid of ", config_result$start_grid_size, " points"
         )
 
         cat(paste0(
@@ -821,7 +916,7 @@ fit <- function(x,
         }
 
         ## Degradation flag
-        if (config_result$degraded) {
+        if (isTRUE(config_result$degraded)) {
 
           cat(paste0(
             "\u2502  ", cont, "\u251C\u2500 ",
@@ -877,10 +972,28 @@ fit <- function(x,
 
     }
 
+    ## A run of identical failures across two models stops the call while
+    ## members remain; with none left they are ordinary failures
+    breaker_feed(breaker, config_result, cfg$model)
+
+    if (breaker$tripped) {
+
+      if (i < n_best) {
+        abort_breaker_trip(breaker, member_results(results_list), n_best - i,
+                           verb = "fit", units = "members", checkpoints = FALSE)
+      }
+
+      breaker_release(breaker)
+
+    }
+
     ## Memory cleanup after each config
     gc(verbose = FALSE)
 
   }
+
+  ## What the members reported goes on the call's log, from their records
+  results_list <- lift_unit_records(results_list, collector)
 
   ## -----------------------------------------------------------------------
   ## Step 5: Assemble results
@@ -912,39 +1025,7 @@ fit <- function(x,
   }
 
   ## Build results tibble
-  results_tibble <- purrr::map_dfr(results_list, function(res) {
-
-    tm <- res$test_metrics
-    cv <- res$cv_metrics
-
-    ## Extract CV summary metrics
-    cv_rmse <- if (!is.null(cv)) cv[cv$.metric == "rmse", ] else NULL
-    cv_rpd  <- if (!is.null(cv)) cv[cv$.metric == "rpd", ]  else NULL
-
-    tibble::tibble(
-      config_id       = res$config_id,
-      status          = res$status,
-      degraded        = res$degraded %||% NA,
-      degraded_reason = res$degraded_reason %||% NA_character_,
-      rmse            = if (!is.null(tm)) tm$rmse  else NA_real_,
-      rrmse           = if (!is.null(tm)) tm$rrmse else NA_real_,
-      rsq             = if (!is.null(tm)) tm$rsq   else NA_real_,
-      ccc             = if (!is.null(tm)) tm$ccc   else NA_real_,
-      rpd             = if (!is.null(tm)) tm$rpd   else NA_real_,
-      mae             = if (!is.null(tm)) tm$mae   else NA_real_,
-      cv_rmse_mean    = if (!is.null(cv_rmse) && nrow(cv_rmse) == 1) cv_rmse$mean    else NA_real_,
-      cv_rmse_se      = if (!is.null(cv_rmse) && nrow(cv_rmse) == 1) cv_rmse$std_err else NA_real_,
-      cv_rpd_mean     = if (!is.null(cv_rpd)  && nrow(cv_rpd)  == 1) cv_rpd$mean     else NA_real_,
-      cv_rpd_se       = if (!is.null(cv_rpd)  && nrow(cv_rpd)  == 1) cv_rpd$std_err  else NA_real_,
-      best_params     = list(res$best_params),
-      warm_start      = res$warm_start %||% NA,
-      start_grid_size = res$start_grid_size %||% NA_integer_,
-      error_message   = res$error_message %||% NA_character_,
-      class           = res$class %||% NA_character_,
-      runtime_secs    = res$runtime_secs
-    )
-
-  })
+  results_tibble <- member_results(results_list)
 
   ## Every member failed. Abort here with the members' errors; carrying on
   ## reached validate_horizons_fit(), which refused the empty workflows slot
@@ -952,6 +1033,19 @@ fit <- function(x,
   if (length(workflows_list) == 0) {
 
     abort_all_members_failed(results_tibble)
+
+  }
+
+  ## Some members failed and the rest are returned: one summary, with each
+  ## distinct cause and the members it failed
+  failed_rows <- results_tibble[results_tibble$status == "failed", , drop = FALSE]
+
+  if (nrow(failed_rows) > 0) {
+
+    log_warning(collector, "partial_failure", c(
+      "{nrow(failed_rows)} of {nrow(results_tibble)} member{?s} failed, so the fit holds the rest.",
+      distinct_config_errors(failed_rows)
+    ), ids = failed_rows$config_id)
 
   }
 
@@ -1148,6 +1242,76 @@ fit <- function(x,
 }
 
 ## ---------------------------------------------------------------------------
+## member_results — the members table
+## ---------------------------------------------------------------------------
+
+#' The members table of a fit
+#'
+#' @description
+#' One row per member `fit_single_config()` returned, fitted or failed:
+#' `models$results`, and the `results` a stop carries. A member list
+#' without a field (a failed one, or one built by hand) records a typed `NA`.
+#'
+#' @param results_list List of members, as `fit_single_config()` returns them.
+#' @return Tibble.
+#' @keywords internal
+#' @noRd
+member_results <- function(results_list) {
+
+  ## No member yet: a table with every column and no rows, so a stop before
+  ## the first member finished carries the same shape as one after it
+  if (length(results_list) == 0) {
+    return(member_row(list(config_id = NA_character_, status = NA_character_))[0, ])
+  }
+
+  purrr::map_dfr(results_list, member_row)
+
+}
+
+#' One member's row of the members table
+#'
+#' @param res A member, as `fit_single_config()` returns it.
+#' @return One-row tibble.
+#' @keywords internal
+#' @noRd
+member_row <- function(res) {
+
+  tm <- res$test_metrics
+  cv <- res$cv_metrics
+
+  ## Extract CV summary metrics
+  cv_rmse <- if (!is.null(cv)) cv[cv$.metric == "rmse", ] else NULL
+  cv_rpd  <- if (!is.null(cv)) cv[cv$.metric == "rpd", ]  else NULL
+
+  tibble::tibble(
+    config_id       = res$config_id,
+    status          = res$status,
+    degraded        = res$degraded %||% NA,
+    degraded_reason = res$degraded_reason %||% NA_character_,
+    rmse            = if (!is.null(tm)) tm$rmse  else NA_real_,
+    rrmse           = if (!is.null(tm)) tm$rrmse else NA_real_,
+    rsq             = if (!is.null(tm)) tm$rsq   else NA_real_,
+    ccc             = if (!is.null(tm)) tm$ccc   else NA_real_,
+    rpd             = if (!is.null(tm)) tm$rpd   else NA_real_,
+    mae             = if (!is.null(tm)) tm$mae   else NA_real_,
+    cv_rmse_mean    = if (!is.null(cv_rmse) && nrow(cv_rmse) == 1) cv_rmse$mean    else NA_real_,
+    cv_rmse_se      = if (!is.null(cv_rmse) && nrow(cv_rmse) == 1) cv_rmse$std_err else NA_real_,
+    cv_rpd_mean     = if (!is.null(cv_rpd)  && nrow(cv_rpd)  == 1) cv_rpd$mean     else NA_real_,
+    cv_rpd_se       = if (!is.null(cv_rpd)  && nrow(cv_rpd)  == 1) cv_rpd$std_err  else NA_real_,
+    best_params     = list(res$best_params),
+    warm_start      = res$warm_start %||% NA,
+    start_grid_size = as.integer(res$start_grid_size %||% NA_integer_),
+    error_message   = res$error_message %||% NA_character_,
+    class           = res$class %||% NA_character_,
+    trace           = list(res$trace),
+    warnings        = list(res$warnings),
+    runtime_secs    = as.numeric(res$runtime_secs %||% NA_real_)
+  )
+
+}
+
+
+## ---------------------------------------------------------------------------
 ## cold_start_evaluation \u2014 the evaluation record fit() writes without evaluate()
 ## ---------------------------------------------------------------------------
 
@@ -1179,11 +1343,11 @@ fit <- function(x,
 #' @param call The call the conditions are attributed to. Default: the
 #'   caller, `fit()`.
 #' @return List with `evaluation` (the record), `stratified` (`FALSE` when
-#'   the split is unstratified) and `strata_failed` (`TRUE` when the
-#'   stratified draw failed and was retried without strata), as
-#'   [draw_eval_split()] returns them. Aborts with class
-#'   `horizons_input_error` when the object has no configuration or more than
-#'   one, too few rows have an observed outcome, the window is at least as
+#'   the split is unstratified), `strata_failed` (`TRUE` when the
+#'   stratified draw failed and was retried without strata) and
+#'   `strata_error` (why), as [draw_eval_split()] returns them. Aborts with class
+#'   `horizons_error_input` when the object has no configuration or more than
+#'   one, the window is at least as
 #'   wide as the spectrum, or `validate()`'s response-trim request is for
 #'   another outcome ([response_trim_request()]).
 #' @keywords internal
@@ -1195,19 +1359,19 @@ cold_start_evaluation <- function(x, metric, seed, collector, call = rlang::call
 
   if (n_configs == 0) {
 
-    cli::cli_abort(c(
+    abort_horizons(c(
       "There is no configuration to fit.",
       "i" = "Run {.fn configure} first."
-    ), class = "horizons_input_error", call = call)
+    ), kind = "input", call = call)
 
   }
 
   if (n_configs > 1) {
 
-    cli::cli_abort(c(
+    abort_horizons(c(
       "{.fn fit} can start without {.fn evaluate} only from a single configuration, and this object has {n_configs} configurations.",
       "i" = "Choosing among configurations is what {.fn evaluate} is for. Run it first, and {.fn fit} re-tunes the best of them."
-    ), class = "horizons_input_error", call = call)
+    ), kind = "input", call = call)
 
   }
 
@@ -1215,21 +1379,10 @@ cold_start_evaluation <- function(x, metric, seed, collector, call = rlang::call
   ## carries, as a fit of an evaluated object keeps evaluate()'s.
   rank_metric <- metric %||% x$evaluation$rank_metric %||% "rpd"
 
-  ## The rows evaluate() would model, and the floor it applies to them
+  ## The rows evaluate() would model
   role_map    <- x$data$role_map
   outcome_col <- role_map$variable[role_map$role == "outcome"]
-  cv_folds    <- x$config$tuning$cv_folds
   modelled    <- modelling_rows(x$data$analysis, outcome_col, call = call)
-  n_modelled  <- nrow(modelled$data)
-
-  if (n_modelled < cv_folds * 2) {
-
-    cli::cli_abort(c(
-      "Too few rows to fit: {n_modelled} ha{?s/ve} an observed {.field {outcome_col}}.",
-      "i" = "{.fn fit} needs at least {cv_folds * 2} (twice {.field cv_folds})."
-    ), class = "horizons_input_error", call = call)
-
-  }
 
   ## evaluate()'s next check: the Savitzky-Golay window has to fit the
   ## spectrum (#62). The record it returns is the one evaluate() stores, and
@@ -1248,6 +1401,10 @@ cold_start_evaluation <- function(x, metric, seed, collector, call = rlang::call
   trimmed <- trim_training_responses(drawn$split, outcome_col, trim_request,
                                      id_col = id_column(role_map), collector = collector)
   split   <- trimmed$split
+
+  ## The sample-size rule is fit()'s own check on the rows its folds are
+  ## drawn from, which are this training part less any calibration rows, so
+  ## it refuses every case a check here would, as evaluate() refuses them.
 
   ## The shape of an evaluate() results row (create_failed_result()'s
   ## columns less scoring_schema, since nothing was scored), all unmeasured
@@ -1285,7 +1442,8 @@ cold_start_evaluation <- function(x, metric, seed, collector, call = rlang::call
       timestamp     = Sys.time()
     ),
     stratified    = drawn$stratified,
-    strata_failed = drawn$strata_failed
+    strata_failed = drawn$strata_failed,
+    strata_error  = drawn$strata_error
   )
 
 }
@@ -1310,7 +1468,7 @@ cold_start_evaluation <- function(x, metric, seed, collector, call = rlang::call
 #'   [outcome_range_setting()].
 #' @param call The call the condition is attributed to. Default: the caller,
 #'   `fit()`.
-#' @return `NULL`, invisibly. Aborts with class `horizons_input_error`.
+#' @return `NULL`, invisibly. Aborts with class `horizons_error_input`.
 #' @keywords internal
 #' @noRd
 check_evaluated_outcome_range <- function(x, outcome_range,
@@ -1337,12 +1495,12 @@ check_evaluated_outcome_range <- function(x, outcome_range,
 
   range_text <- format_outcome_range(outcome_range)
 
-  cli::cli_abort(c(
+  abort_horizons(c(
     "{.fn evaluate} scored these configurations under another {.arg outcome_range}.",
     "x" = "{.fn evaluate} recorded {recorded} on {sum(differs)} results row{?s}; this object's range is {range_text}.",
     "i" = "The members and their warm-start parameters were chosen on predictions clamped to that range.",
     "i" = "Re-run {.fn evaluate} on the object as it is now."
-  ), class = "horizons_input_error", call = call)
+  ), kind = "input", call = call)
 
 }
 
@@ -1372,7 +1530,7 @@ check_evaluated_outcome_range <- function(x, outcome_range,
 #' @param x A `horizons_eval` that was screened by `evaluate()`.
 #' @param call The call the condition is attributed to. Default: the caller,
 #'   `fit()`.
-#' @return `NULL`, invisibly. Aborts with class `horizons_input_error`,
+#' @return `NULL`, invisibly. Aborts with class `horizons_error_input`,
 #'   saying what differs.
 #' @keywords internal
 #' @noRd
@@ -1424,14 +1582,14 @@ check_trim_request <- function(x, call = rlang::caller_env()) {
     c("i" = "To fit with the trim {.fn evaluate} applied, restore its request: {.code validate(x, remove_outliers = \"response\", response_threshold = {app_threshold})}.")
   }
 
-  cli::cli_abort(c(
+  abort_horizons(c(
     "{.fn validate}'s response-trim request differs from the trim {.fn evaluate} applied.",
     differs,
     "i" = "{.fn fit} reuses the rows {.fn evaluate} trimmed; it does not apply a request itself.",
     restore,
     "i" = paste(if (is.null(restore)) "Re-run" else "Or re-run",
                 "{.fn evaluate} to apply the current request, then {.fn fit}.")
-  ), class = "horizons_input_error", call = call)
+  ), kind = "input", call = call)
 
 }
 
@@ -1469,7 +1627,8 @@ trim_settings <- function(trim) {
 #' @param results `fit()`'s per-member results tibble, with `error_message`.
 #' @param call The call the condition is attributed to. Default: the caller,
 #'   `fit()`.
-#' @return Never returns; aborts with class `horizons_all_members_failed`.
+#' @return Never returns; aborts with class
+#'   `horizons_error_all_members_failed` (kind `run`).
 #' @keywords internal
 #' @noRd
 abort_all_members_failed <- function(results, call = rlang::caller_env()) {
@@ -1478,47 +1637,49 @@ abort_all_members_failed <- function(results, call = rlang::caller_env()) {
 
   ## distinct_config_errors() returns the bullets brace-escaped, so upstream
   ## error text cannot be read as a cli template.
-  cli::cli_abort(c(
+  abort_horizons(c(
     "All {n_members} configuration{?s} {.fn fit} re-tuned failed, so there is no model to return.",
     distinct_config_errors(results),
     "i" = "The per-member results, error messages included, are on this condition as {.field results}. Recover them with {.code rlang::last_error()$results}."
-  ), class = "horizons_all_members_failed", results = results, call = call)
+  ), kind = "run", class = "horizons_error_all_members_failed", results = results,
+  call = call)
 
 }
 
 ## ---------------------------------------------------------------------------
-## warn_members_below_threshold \u2014 no member cleared the prune threshold
+## log_members_below_threshold — no member cleared the prune threshold
 ## ---------------------------------------------------------------------------
 
-#' Warn when every member fell below evaluate()'s prune threshold
+#' Record that every member fell below evaluate()'s prune threshold
 #'
 #' @description
 #' `evaluate()` records the prune gate's reading on every row as
 #' `below_prune_threshold` whenever `prune = TRUE`, apart from the status,
 #' which says only whether Bayesian refinement was skipped (#38). `fit()`
-#' warns, with class `horizons_below_threshold_warning`, when every member it
-#' is about to fit fell below the threshold, naming the threshold and each
-#' member's cross-validated RPD. Without this, `bayesian_iter = 0` would fit
-#' below-threshold configurations silently, since nothing is pruned there.
-#' When the members are pruned configurations (the fallback, because none
-#' succeeded) the one warning also carries class
-#' `horizons_pruned_fallback_warning` and says so.
+#' warns, `quality`, when every member it is about to fit fell below the
+#' threshold, naming the threshold and each member's cross-validated RPD:
+#' everything ran as documented, and the result is weaker than it looks.
+#' Without this, `bayesian_iter = 0` would fit below-threshold
+#' configurations silently, since nothing is pruned there. When the members
+#' are pruned configurations (the fallback, because none succeeded) the
+#' warning says so.
 #'
 #' A pruned row counts as below the threshold whether or not it carries the
 #' column, since the gate put it there. A row with no reading (`prune =
 #' FALSE`, or written before the column existed) does not, so one such member
 #' keeps the warning from firing.
 #'
+#' @param collector `fit()`'s collector, from `log_open()`.
 #' @param members The member rows (`evaluation$results` shape).
 #' @param fallback Logical. Whether the members are pruned configurations
 #'   because none succeeded.
 #' @param bayesian_iter The configured `bayesian_iter`
 #'   (`x$config$tuning$bayesian_iter`), which decides how the warning
 #'   explains unpruned members; `NULL` when unknown.
-#' @return Invisibly `NULL`. Called for the warning.
+#' @return `collector`, invisibly.
 #' @keywords internal
 #' @noRd
-warn_members_below_threshold <- function(members, fallback, bayesian_iter = NULL) {
+log_members_below_threshold <- function(collector, members, fallback, bayesian_iter = NULL) {
 
   ## Columns are read by name: results from before they existed, or built by
   ## hand, lack them, and `$` on a tibble without the column warns.
@@ -1529,7 +1690,7 @@ warn_members_below_threshold <- function(members, fallback, bayesian_iter = NULL
   n_members <- nrow(members)
   below     <- column_or("below_prune_threshold", NA) | members$status %in% "pruned"
 
-  if (n_members == 0 || !isTRUE(all(below))) return(invisible(NULL))
+  if (n_members == 0 || !isTRUE(all(below))) return(invisible(collector))
 
   thresholds <- unique(stats::na.omit(column_or("prune_threshold", NA_real_)))
 
@@ -1567,18 +1728,45 @@ warn_members_below_threshold <- function(members, fallback, bayesian_iter = NULL
 
   ## The config ids and numbers are the package's, but the text is built
   ## outside cli, so it is escaped rather than trusted as a template.
-  cli::cli_warn(c(
-    "!" = header,
+  log_warning(collector, "quality", c(
+    header,
     "i" = cli_escape(paste0(
       "Their grid-search RPD fell below ", threshold_text,
       ". Cross-validated RPD: ", cv_text, "."
     )),
     "i" = why,
     "i" = "Check their metrics before relying on the fit."
-  ), class = c(if (fallback) "horizons_pruned_fallback_warning",
-               "horizons_below_threshold_warning"))
+  ), ids = members$config_id)
 
-  invisible(NULL)
+  invisible(collector)
+
+}
+
+#' Record that UQ and AD were turned off for a small calibration set
+#'
+#' @param collector `fit()`'s collector.
+#' @param compute_uq,compute_ad Logical. What was asked for.
+#' @param n_calib Integer(1). The calibration rows drawn.
+#' @param min_calib_rows Integer(1). The minimum they fell short of.
+#' @param ids Character. The members it applies to.
+#' @return `collector`, invisibly.
+#' @keywords internal
+#' @noRd
+log_calibration_skip <- function(collector, compute_uq, compute_ad, n_calib,
+                                 min_calib_rows, ids) {
+
+  what <- paste(c(if (compute_uq) "Prediction intervals (UQ)",
+                  if (compute_ad) "the applicability domain (AD)"), collapse = " and ")
+  what <- paste0(toupper(substr(what, 1, 1)), substring(what, 2))
+  ## The verb follows the subject: intervals are plural, the domain is not
+  verb <- if (compute_uq) "were" else "was"
+
+  log_warning(collector, "skipped", c(
+    "{what} {verb} not computed for any member: the calibration set has {n_calib} row{?s}, fewer than {.code min_calib_rows} ({min_calib_rows}).",
+    "i" = "Fit on more rows, or lower {.code control_horizons(min_calib_rows = )}, to {conformal_min_rows(DEFAULT_UQ_LEVEL)} at least."
+  ), ids = ids)
+
+  invisible(collector)
 
 }
 

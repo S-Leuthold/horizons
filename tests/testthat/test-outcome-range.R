@@ -536,7 +536,7 @@ describe("a d13C-like outcome with outcome_range = c(-Inf, Inf)", {
     )
 
     err <- expect_error(fit(moved, n_best = 1L),
-                        class = "horizons_input_error")
+                        class = "horizons_error_input")
     expect_match(flat_message(err), "outcome_range")
     expect_match(flat_message(err), "c(-Inf, Inf)", fixed = TRUE)
     expect_match(flat_message(err), "c(-40, 0)", fixed = TRUE)
@@ -927,11 +927,11 @@ describe("check_evaluated_outcome_range()", {
 
     signed <- results_with(list(eval_settings(outcome_range = c(-Inf, Inf))))
     expect_error(check_evaluated_outcome_range(x_with(signed), DEFAULT_OUTCOME_RANGE),
-                 class = "horizons_input_error")
+                 class = "horizons_error_input")
 
     old <- results_with(list(eval_settings(seed = 1L)))
     err <- expect_error(check_evaluated_outcome_range(x_with(old), c(-Inf, Inf)),
-                        class = "horizons_input_error")
+                        class = "horizons_error_input")
     expect_match(flat_message(err), "unrecorded", fixed = TRUE)
 
     ## Evaluations from before the settings stamp carry no settings column;
@@ -939,7 +939,7 @@ describe("check_evaluated_outcome_range()", {
     bare <- tibble::tibble(config_id = "c1")
     expect_error(check_evaluated_outcome_range(x_with(bare), c(-Inf, Inf)),
                  "recorded unrecorded (the zero floor) on 1 results row",
-                 fixed = TRUE, class = "horizons_input_error")
+                 fixed = TRUE, class = "horizons_error_input")
 
   })
 

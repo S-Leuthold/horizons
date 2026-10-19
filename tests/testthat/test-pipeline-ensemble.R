@@ -604,9 +604,10 @@ describe("ensemble() and predict.horizons_ensemble() - member AD and intervals",
       ad_thresholds = c(q25 = 1, q50 = 2, q75 = 3, ood = 4)
     )), member)
 
-    ## Not a UQ bundle beyond the level the fit validator checks. Member
-    ## scoring asks for no intervals, so it is never read.
-    broken$models$uq <- stats::setNames(list(list(method = "not a bundle", level_default = 0.9)), member)
+    ## Not a UQ bundle beyond the level and the scores the fit validator
+    ## checks. Member scoring asks for no intervals, so it is never read.
+    broken$models$uq <- stats::setNames(list(list(method = "not a bundle", level_default = 0.9,
+                                                  scores = seq_len(9))), member)
 
     expect_no_warning(
       ens <- keep_only_warning(

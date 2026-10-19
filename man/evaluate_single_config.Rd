@@ -113,7 +113,7 @@ structured data. All console output (tree rendering, progress messages) is
 the responsibility of the calling \code{evaluate()} function.
 
 The configuration is one unit (\code{run_unit()}): a run failure in any step
-ends it, and the row records the step (\code{EVAL_STEPS}), the cause, its root
+ends it, and the row records the step (\code{UNIT_STEPS}), the cause, its root
 class and, with \code{keep_traces}, its backtrace. A door, internal or
 dependency error is not the configuration's and propagates.
 }

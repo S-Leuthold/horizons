@@ -75,7 +75,7 @@ describe("fit() - preflight validation", {
     expect_error(
       fit(list(a = 1)),
       "needs a <horizons_eval> from `evaluate()`", fixed = TRUE,
-      class = "horizons_input_error"
+      class = "horizons_error_input"
     )
 
   })
@@ -88,7 +88,7 @@ describe("fit() - preflight validation", {
     expect_error(
       fit(obj),
       "No configuration in evaluation$results can be fitted", fixed = TRUE,
-      class = "horizons_input_error"
+      class = "horizons_error_input"
     )
 
   })
@@ -110,6 +110,27 @@ describe("fit() - preflight validation", {
 
     err <- expect_error(fit(no_rows), class = "horizons_error_validation")
     expect_true(any(grepl("results has no rows", err$findings, fixed = TRUE)))
+
+  })
+
+  it("refuses a predictor axis out of order at its door, before anything is drawn (#121)", {
+
+    ## Names the validator's wavenumber pattern does not parse, so only the
+    ## band-order check can see the order
+    obj <- mfo()
+    wn  <- obj$data$role_map$variable[obj$data$role_map$role == "predictor"]
+    new <- paste0("wn_X", c(3990, 4000, rev(seq(3900, by = 2, length.out = length(wn) - 2))))
+
+    names(obj$data$analysis)[match(wn, names(obj$data$analysis))] <- new
+    obj$data$role_map$variable[match(wn, obj$data$role_map$variable)] <- new
+
+    local_mocked_bindings(
+      draw_stratified   = function(...) stop("a draw was made"),
+      fit_single_config = function(...) stop("a member was fitted")
+    )
+
+    expect_error(fit(obj, n_best = 1L), "not monotonically ordered",
+                 class = "horizons_error_input")
 
   })
 
@@ -743,7 +764,7 @@ describe("fit() - scores on evaluate()'s split", {
     expect_error(
       fit(stale, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE),
       "does not index the rows this object models",
-      class = "horizons_input_error"
+      class = "horizons_error_input"
     )
 
     ## Same ids, one outcome changed: the split's rows no longer carry the
@@ -754,7 +775,7 @@ describe("fit() - scores on evaluate()'s split", {
     expect_error(
       fit(relabelled, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE),
       "does not index the rows this object models",
-      class = "horizons_input_error"
+      class = "horizons_error_input"
     )
 
     ## A record without the key, or with a split that is not an rsplit, is
@@ -833,7 +854,7 @@ describe("fit() - member ranking (#50)", {
         suppressWarnings(
           fit(obj, n_best = 2L, compute_uq = FALSE, compute_ad = FALSE, seed = 42L)
         ),
-        horizons_all_members_failed = function(e) NULL
+        horizons_error_all_members_failed = function(e) NULL
       ),
       fit_single_config = function(...) {
         cfg  <- list(...)$config_row
@@ -1010,7 +1031,7 @@ fit_header <- function(obj, ...) {
     testthat::with_mocked_bindings(
       tryCatch(
         suppressWarnings(fit(obj, seed = 42L, control = control_horizons(verbose = TRUE), ...)),
-        horizons_all_members_failed = function(e) NULL
+        horizons_error_all_members_failed = function(e) NULL
       ),
       fit_single_config = function(...) {
         list(config_id = "cfg_001", status = "failed", error_message = "mocked",
@@ -1021,6 +1042,218 @@ fit_header <- function(obj, ...) {
   )
 
 }
+
+## =========================================================================
+## What fit() reports at its end
+## =========================================================================
+## The members are mocked to succeed (the fitted workflow is a stand-in, which
+## the validator does not read), so each test pays only for fit()'s own draws.
+
+fake_member <- function(config_row, ...) {
+
+  list(
+    config_id = config_row$config_id, status = "success", degraded = FALSE,
+    degraded_reason = NA_character_, fitted_workflow = "fitted workflow",
+    best_params = tibble::tibble(mtry = 2L), warm_start = TRUE, start_grid_size = 2L,
+    cv_predictions = NULL,
+    test_metrics = tibble::tibble(rmse = 0.5, rrmse = 20, rsq = 0.6, ccc = 0.7, rpd = 1.5, mae = 0.4),
+    cv_metrics = tibble::tibble(.metric = c("rmse", "rpd"), mean = c(0.45, 1.6), std_err = c(0.03, 0.1)),
+    uq = NULL, ad = NULL, warnings = NULL, error_message = NA_character_, runtime_secs = 1
+  )
+
+}
+
+## The warnings fit() raised, by class, and the object
+fit_reports <- function(obj, ...) {
+
+  got <- collect_warnings(
+    testthat::with_mocked_bindings(
+      fit(obj, n_best = 1L, seed = 42L, ...),
+      fit_single_config = fake_member, .package = "horizons"
+    ),
+    "."
+  )
+
+  list(value = got$value, warnings = got$warnings,
+       classes = vapply(got$warnings, function(w) class(w)[1], character(1)))
+
+}
+
+describe("fit() - what it reports at its end", {
+
+  it("warns skipped, whatever verbose is, when the calibration set is too small for UQ and AD (#145)", {
+
+    ## 60 rows: a calibration set of 10, under min_calib_rows
+    both <- fit_reports(mfo())
+    w    <- both$warnings[both$classes == "horizons_warning_skipped"]
+
+    expect_length(w, 1L)
+    expect_match(conditionMessage(w[[1]]),
+                 "Prediction intervals (UQ) and the applicability domain (AD) were not computed for any member: the calibration set has 10 rows, fewer than `min_calib_rows` (30).",
+                 fixed = TRUE)
+
+    log <- both$value$log[both$value$log$verb == "fit", ]
+    expect_identical(log$topic[log$topic %in% "skipped"], "skipped")
+    expect_identical(log$ids[log$topic %in% "skipped"][[1]], "cfg_001")
+
+    ## Only what was asked for is named, and nothing when neither was
+    ad_only <- fit_reports(mfo(), compute_uq = FALSE)
+    expect_match(conditionMessage(ad_only$warnings[ad_only$classes == "horizons_warning_skipped"][[1]]),
+                 "^The applicability domain \\(AD\\) was not computed")
+
+    uq_only <- fit_reports(mfo(), compute_ad = FALSE)
+    expect_match(conditionMessage(uq_only$warnings[uq_only$classes == "horizons_warning_skipped"][[1]]),
+                 "^Prediction intervals \\(UQ\\) were not computed for any member")
+
+    neither <- fit_reports(mfo(), compute_uq = FALSE, compute_ad = FALSE)
+    expect_false("horizons_warning_skipped" %in% neither$classes)
+    expect_true(length(neither$classes) == 0 || !any(grepl("calibration", vapply(neither$warnings, conditionMessage, ""))))
+
+  })
+
+  it("warns skipped once, naming the members, when their prediction intervals could not be built (#145)", {
+
+    ## Real fits of the members, several seconds even without the search
+    skip_unless_slow_tier()
+
+    ## A calibration set of 10 passes min_calib_rows = 10, and each member's
+    ## UQ unit fails; the members are fitted all the same. No Bayesian
+    ## iterations: the search is not what is tested.
+    obj <- mfo()
+    obj$config$tuning$final_bayesian_iter <- 0L
+
+    local_mocked_bindings(fit_uq = function(...) stop("the forest broke"))
+
+    got <- collect_warnings(
+      fit(obj, n_best = 2L, seed = 42L, compute_ad = FALSE,
+          control = control_horizons(min_calib_rows = 10L)),
+      "."
+    )
+    w <- got$warnings[vapply(got$warnings, inherits, logical(1), "horizons_warning_skipped")]
+
+    expect_length(w, 1L)
+    expect_match(conditionMessage(w[[1]]),
+                 "Prediction intervals (UQ) were not computed: the forest broke", fixed = TRUE)
+    expect_match(conditionMessage(w[[1]]), "In 2 members", fixed = TRUE)
+
+    expect_identical(got$value$models$results$status, c("success", "success"))
+    expect_null(got$value$models$uq)
+
+    log <- got$value$log[got$value$log$verb == "fit" & got$value$log$topic %in% "skipped", ]
+    expect_identical(nrow(log), 1L)
+    expect_setequal(log$ids[[1]], got$value$models$results$config_id)
+
+  })
+
+  it("leaves degraded NA when the degradation check could not run, and warns skipped once, naming the members", {
+
+    ## Real fits of the members, several seconds even without the search
+    skip_unless_slow_tier()
+
+    ## No Bayesian iterations: the search is not what is tested. Verbose, so
+    ## the tree reads a degraded that is NA too
+    obj <- mfo()
+    obj$config$tuning$final_bayesian_iter <- 0L
+
+    tree <- utils::capture.output(got <- collect_warnings(
+      fit(obj, n_best = 2L, seed = 42L, compute_uq = FALSE, compute_ad = FALSE,
+          control = control_horizons(min_degradation_rows = 50L, verbose = TRUE)),
+      "."
+    ))
+    res <- got$value$models$results
+
+    expect_false(any(grepl("DEGRADED", tree, fixed = TRUE)))
+    expect_true(any(grepl("Successful: 2 / 2", tree, fixed = TRUE)))
+    w   <- got$warnings[vapply(got$warnings, inherits, logical(1), "horizons_warning_skipped")]
+    why <- "The degradation check did not run: the test set has"
+
+    expect_identical(res$degraded, c(NA, NA))
+    expect_identical(res$degraded_reason, c(NA_character_, NA_character_))
+    expect_true(all(vapply(res$warnings, function(x) any(startsWith(x, why)), logical(1))))
+
+    expect_length(w, 1L)
+    expect_match(conditionMessage(w[[1]]), why, fixed = TRUE)
+    expect_match(conditionMessage(w[[1]]), "In 2 members", fixed = TRUE)
+
+  })
+
+  it("warns substitution once for the draws that fell back to no strata, naming each, with why", {
+
+    ## A cold start with AD on draws three: the train/test split, the
+    ## calibration split and the folds. Built before anything is mocked.
+    obj <- make_eval_object(n = 60, n_configs = 1)
+
+    real_initial_split <- rsample::initial_split
+    real_vfold_cv      <- rsample::vfold_cv
+    local_mocked_bindings(
+      initial_split = function(data, prop = 3 / 4, strata = NULL, ...) {
+        if (!missing(strata)) stop("stratification refused")
+        real_initial_split(data, prop = prop, ...)
+      },
+      vfold_cv = function(data, v = 10, repeats = 1, strata = NULL, ...) {
+        if (!missing(strata)) stop("stratification refused")
+        real_vfold_cv(data, v = v, repeats = repeats, ...)
+      },
+      .package = "rsample"
+    )
+
+    got <- fit_reports(obj, compute_uq = FALSE, compute_ad = TRUE)
+    w   <- got$warnings[got$classes == "horizons_warning_substitution"]
+
+    expect_length(w, 1L)
+    msg <- gsub("\\s+", " ", conditionMessage(w[[1]]))
+    expect_match(msg, "The stratified draw of the train/test split failed", fixed = TRUE)
+    expect_match(msg, "The stratified draw of the calibration split failed", fixed = TRUE)
+    expect_match(msg, "The stratified draw of the cross-validation folds failed", fixed = TRUE)
+    expect_match(msg, "stratification refused", fixed = TRUE)
+
+    ## The log holds the three, under one substitution row
+    log <- got$value$log[got$value$log$verb == "fit" & got$value$log$topic %in% "substitution", ]
+    expect_identical(log$n, 3L)
+
+  })
+
+  it("warns quality when its own smallest assessment fold is small", {
+
+    ## 48 fit rows in 6 folds: 8 to assess in each
+    obj <- mfo()
+    obj$config$tuning$cv_folds <- 6L
+
+    got <- fit_reports(obj, compute_uq = FALSE, compute_ad = FALSE)
+    w   <- got$warnings[got$classes == "horizons_warning_quality"]
+
+    expect_length(w, 1L)
+    expect_match(conditionMessage(w[[1]]), "The smallest cross-validation fold has 8 rows to assess",
+                 fixed = TRUE)
+
+    ## At 3 folds of 16, nothing
+    quiet <- fit_reports(mfo(), compute_uq = FALSE, compute_ad = FALSE)
+    expect_false("horizons_warning_quality" %in% quiet$classes)
+
+  })
+
+  it("refuses fit rows no more than the folds, once calibration has taken its share", {
+
+    ## 250 rows: 200 in the training part, 40 of them for calibration, so the
+    ## folds would be drawn from 160 rows
+    obj <- fit250_uq()$obj
+    obj$config$tuning$cv_folds <- 170L
+
+    local_mocked_bindings(fit_single_config = function(...) stop("a member was fitted"))
+
+    err <- expect_error(suppressWarnings(fit(obj, n_best = 1L, seed = 42L)),
+                        "needs more training rows than folds", class = "horizons_error_input")
+    ## The fit rows and the calibration rows make up the training part
+    msg      <- gsub("\\s+", " ", conditionMessage(err))
+    fit_rows <- as.integer(sub(".*The training part has ([0-9]+) rows.*", "\\1", msg))
+    calib    <- as.integer(sub(".*the calibration set ([0-9]+).*", "\\1", msg))
+    expect_identical(fit_rows + calib, nrow(rsample::training(obj$evaluation$split)))
+    expect_true(calib >= N_CALIB_MIN)
+
+  })
+
+})
+
 
 describe("fit() - the draw lines and the notes (#91)", {
 
@@ -1238,7 +1471,7 @@ describe("check_degradation()", {
 
     ## Twelve of the poor fit's test rows: flagged at a minimum of 10, not at 20
     expect_true(check_degradation(cv_4, truth[1:12], poor[1:12])$degraded)
-    expect_false(check_degradation(cv_4, truth[1:12], poor[1:12], min_n = 20L)$degraded)
+    expect_identical(check_degradation(cv_4, truth[1:12], poor[1:12], min_n = 20L)$degraded, NA)
 
   })
 
@@ -1303,30 +1536,49 @@ describe("check_degradation()", {
 
   })
 
-  it("flags nothing with too few test rows to bootstrap", {
+  ## A check that cannot run leaves degraded NA, not FALSE, with why; the
+  ## reason stays the record of a TRUE flag
+  cannot_run <- function(out, cause) {
+    expect_identical(out$degraded, NA)
+    expect_identical(out$reason, NA_character_)
+    expect_identical(out$cause, cause)
+  }
 
-    out <- check_degradation(cv_4, truth[1:5], poor[1:5])
+  it("does not run with too few test rows to bootstrap, and says so", {
 
-    expect_false(out$degraded)
+    cannot_run(check_degradation(cv_4, truth[1:5], poor[1:5]),
+               "the test set has 5 usable rows, fewer than the 10 it bootstraps from (`min_degradation_rows`)")
 
-    out <- check_degradation(cv_4, t_fenced, rep(15, 32),
-                             response_fences = c(lower = 100, upper = 200))
-
-    expect_false(out$degraded)
+    cannot_run(check_degradation(cv_4, t_fenced, rep(15, 32), response_fences = c(lower = 100, upper = 200)),
+               paste0("the test set has 0 usable rows of 32 within the training fences [100, 200], ",
+                      "fewer than the 10 it bootstraps from (`min_degradation_rows`)"))
 
   })
 
-  it("flags nothing when the test outcomes are constant", {
+  it("does not run when the test outcomes are constant, and says so", {
 
-    expect_false(check_degradation(cv_4, rep(5, 20), stats::rnorm(20, 5))$degraded)
+    cannot_run(check_degradation(cv_4, rep(5, 20), stats::rnorm(20, 5)),
+               "the test outcomes are constant, so their RPD says nothing about the fit")
 
   })
 
-  it("flags nothing without a finite CV RPD", {
+  it("does not run without a finite CV RPD, and says so", {
 
     no_rpd <- tibble::tibble(.metric = "rmse", mean = 1, std_err = 0.1)
+    na_rpd <- tibble::tibble(.metric = "rpd", mean = NA_real_, std_err = NA_real_)
 
-    expect_false(check_degradation(no_rpd, truth, poor)$degraded)
+    for (cv in list(no_rpd, na_rpd)) {
+      cannot_run(check_degradation(cv, truth, poor),
+                 "there is no finite cross-validated RPD to compare the test RPD with")
+    }
+
+  })
+
+  it("does not run when the test RPD is not finite, and says so", {
+
+    local_mocked_bindings(rpd_vec = function(...) NaN)
+
+    cannot_run(check_degradation(cv_4, truth, poor), "the test RPD is not finite")
 
   })
 

@@ -473,7 +473,7 @@ describe("run_unit()", {
 
 })
 
-describe("warn_in_unit() and log_unit_warnings()", {
+describe("warn_in_unit() and log_unit_records()", {
 
   it("raises a horizons warning that a unit records under its topic's class", {
 
@@ -512,8 +512,8 @@ describe("warn_in_unit() and log_unit_warnings()", {
     )
 
     col <- log_open("evaluate")
-    log_unit_warnings(col, records)
-    log_unit_warnings(col, NULL)
+    log_unit_records(col, records)
+    log_unit_records(col, NULL)
     log <- log_close(col)
 
     ## One topic, one row: the other package's warning and the failure stay
@@ -526,6 +526,90 @@ describe("warn_in_unit() and log_unit_warnings()", {
     expect_match(log$message, "Kept \"braces\" as text. In 1 configuration: \"cfg_3\".",
                  fixed = TRUE)
     expect_false(grepl("ranger warned", log$message, fixed = TRUE))
+
+  })
+
+})
+
+describe("unit_failure_message()", {
+
+  it("names the step a unit failed in, the unit itself outside every step, or neither", {
+
+    in_step <- run_unit(unit_step("final_fit", stop("no fit")), "member", "cfg_1")$records
+    outside <- run_unit(stop("no data"), "ad", "cfg_1")$records
+
+    expect_match(unit_failure_message(in_step, "Fit"), "^Final model fit failed: no fit")
+    expect_match(unit_failure_message(outside, "Fit"), "^Fit failed: no data")
+
+    ## An add-on's own condition says what failed, so it stands alone
+    expect_match(unit_failure_message(outside, NULL), "^no data")
+
+  })
+
+})
+
+describe("note_in_unit()", {
+
+  it("is recorded as a note by the unit it is raised in, and silent outside one", {
+
+    out <- run_unit({
+      note_in_unit("Stored whole: {.val {'butcher'}} failed")
+      "done"
+    }, "member", "cfg_1")
+
+    expect_equal(out$value, "done")
+    expect_identical(out$records$type, "note")
+    expect_identical(out$records$class, "horizons_note")
+    expect_identical(out$records$message, "Stored whole: \"butcher\" failed")
+
+    ## Under debug too
+    debugged <- run_unit(note_in_unit("A note."), "member", "cfg_1", debug = TRUE)
+    expect_identical(debugged$records$type, "note")
+
+    ## Outside a unit nothing handles it: no message, no warning
+    expect_silent(note_in_unit("Nobody listens."))
+
+  })
+
+  it("is recorded once, by the innermost unit, not again by an enclosing one", {
+
+    inner <- NULL
+    outer <- run_unit({
+      inner <- run_unit(note_in_unit("Inner note."), "uq", "cfg_1")
+      "done"
+    }, "member", "cfg_1")
+
+    expect_identical(inner$records$type, "note")
+    expect_identical(nrow(outer$records), 0L)
+
+  })
+
+  it("is lifted to the log as a note, one per distinct message, beside the warnings", {
+
+    unit <- function(id, expr) run_unit(expr, "member", id)$records
+
+    records <- dplyr::bind_rows(
+      unit("cfg_1", { note_in_unit("Stored whole."); warn_in_unit("skipped", "No UQ.") }),
+      unit("cfg_2", note_in_unit("Stored whole."))
+    )
+
+    col <- log_open("fit")
+    log_unit_records(col, records)
+    log <- log_close(col)
+
+    expect_identical(log$type, c("note", "warning"))
+    expect_identical(log$topic, c(NA_character_, "skipped"))
+    expect_identical(log$ids[[1]], c("cfg_1", "cfg_2"))
+    expect_match(log$message[1], "Stored whole. In 2 members", fixed = TRUE)
+
+    ## A note is recorded, never raised: the one warning is the skipped one
+    raised <- list()
+    withCallingHandlers(signal_log(col), warning = function(w) {
+      raised[[length(raised) + 1L]] <<- w
+      invokeRestart("muffleWarning")
+    })
+    expect_length(raised, 1L)
+    expect_s3_class(raised[[1]], "horizons_warning_skipped")
 
   })
 

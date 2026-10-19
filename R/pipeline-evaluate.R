@@ -773,7 +773,7 @@ evaluate <- function(x,
         outcome_range   = outcome_range,
         debug           = debug,
         keep_traces     = control$keep_traces
-      ), results_list, output_dir)
+      ), results_so_far(results_list), output_dir)
 
       ## Stamp before anything else sees the row, so the in-memory results and
       ## the checkpointed copy carry the same provenance.
@@ -852,7 +852,10 @@ evaluate <- function(x,
         ## call ends as any other whose configurations all failed
         not_run <- setdiff(configs$config_id[-seq_len(i)], completed_ids)
 
-        if (length(not_run) > 0) abort_breaker_trip(breaker, results_list, length(not_run))
+        if (length(not_run) > 0) {
+          abort_breaker_trip(breaker, results_so_far(results_list),
+                             length(not_run))
+        }
 
         released <- breaker_release(breaker)
 
@@ -951,7 +954,8 @@ evaluate <- function(x,
       evaluate_config_worker,
       shared   = shared_args,
       .options = furrr::furrr_options(seed = TRUE, chunk_size = 1)
-    ), lapply(completed_ids, function(id) checkpoint_results[[id]]), output_dir)
+    ), results_so_far(lapply(completed_ids, function(id) checkpoint_results[[id]])),
+    output_dir)
 
     ## Combine: checkpoint results + parallel results
     results_list <- c(
@@ -965,7 +969,7 @@ evaluate <- function(x,
   ## Step 9: Aggregate results
   ## -----------------------------------------------------------------------
 
-  results_list <- lift_unit_warnings(results_list, collector)
+  results_list <- lift_unit_records(results_list, collector)
   all_results  <- dplyr::bind_rows(results_list)
 
   ## -----------------------------------------------------------------------
@@ -1445,7 +1449,7 @@ load_eval_checkpoints <- function(output_dir, config_ids, data_fp, settings,
 write_checkpoint_row <- function(row, checkpoint_dir) {
 
   ## A unit's records are lifted onto the call's log, not stored: a resumed
-  ## row's warnings are read on the row (lift_unit_warnings()).
+  ## row's warnings are read on the row (lift_unit_records()).
   attr(row, "unit_records") <- NULL
 
   tmp <- tempfile(tmpdir = checkpoint_dir, fileext = ".rds.tmp")
@@ -1482,14 +1486,14 @@ log_unreadable_checkpoints <- function(collector, unreadable, output_dir) {
 
 }
 
-#' Lift the configurations' horizons warnings onto the call's log
+#' Lift what the configurations reported onto the call's log
 #'
 #' @description
 #' [evaluate_single_config()] returns its unit's records on the row, as the
 #' attribute `"unit_records"`, since records are data and cross from a worker
 #' with the row. The horizons warnings among them go to the call's collector
-#' in one pass ([log_unit_warnings()]), so a message several configurations
-#' raised is one event naming them all, and the attribute is dropped, so
+#' in one pass, with their notes ([log_unit_records()]), so a message several
+#' configurations raised is one event naming them all, and the attribute is dropped, so
 #' neither the results nor a checkpoint keeps it. Only rows evaluated in this
 #' call carry it: a row resumed from a checkpoint reports its warnings on the
 #' row.
@@ -1499,11 +1503,31 @@ log_unreadable_checkpoints <- function(collector, unreadable, output_dir) {
 #' @return `rows`, without the attribute.
 #' @keywords internal
 #' @noRd
-lift_unit_warnings <- function(rows, collector) {
+lift_unit_records <- function(rows, collector) {
 
-  log_unit_warnings(collector, dplyr::bind_rows(lapply(rows, attr, "unit_records")))
+  log_unit_records(collector, dplyr::bind_rows(lapply(rows, attr, "unit_records")))
 
   drop_unit_records(rows)
+
+}
+
+#' The results table so far, for a stop to carry
+#'
+#' @description
+#' The rows finished before a stop, bound into a table without their units'
+#' records. With none finished it is a table with every column of a results
+#' row ([create_failed_result()]) and no rows, so a stop before the first
+#' configuration carries the same shape as one after it.
+#'
+#' @param rows List of result rows.
+#' @return Tibble.
+#' @keywords internal
+#' @noRd
+results_so_far <- function(rows) {
+
+  if (length(rows) == 0) return(create_failed_result(NA_character_)[0, ])
+
+  dplyr::bind_rows(drop_unit_records(rows))
 
 }
 
@@ -1631,27 +1655,40 @@ breaker_key <- function(row) {
 #' Stop the call because the breaker tripped
 #'
 #' @param breaker From [new_breaker()], tripped.
-#' @param rows List of the result rows so far.
-#' @param n_left Integer(1). The configurations it would still have run (not
-#'   those resumed from checkpoints).
+#' @param results The results table so far, carried as `results`.
+#' @param n_left Integer(1). The units it would still have run (not those
+#'   resumed from checkpoints).
+#' @param verb Character(1). The verb that stops, `"evaluate"` or `"fit"`.
+#' @param units Character(1). What its units are called, plural.
+#' @param checkpoints Logical(1). Whether the verb checkpoints its units, so
+#'   the error says the held rows were not.
 #' @param call The frame the error reports.
 #' @return Does not return; aborts with class `horizons_error_systemic`
-#'   (kind `run`), the rows so far as `results`.
+#'   (kind `run`), the results so far as `results`.
 #' @keywords internal
 #' @noRd
-abort_breaker_trip <- function(breaker, rows, n_left, call = rlang::caller_env()) {
+abort_breaker_trip <- function(breaker,
+                               results,
+                               n_left,
+                               verb        = "evaluate",
+                               units       = "configurations",
+                               checkpoints = TRUE,
+                               call        = rlang::caller_env()) {
 
   n_failed <- length(breaker$held)
   n_models <- length(unique(breaker$models))
   cause    <- breaker$held[[1]]$error_message
 
   abort_horizons(c(
-    "The first {n_failed} configurations to run all failed the same way, across {n_models} models, so {.fn evaluate} stopped rather than run the other {n_left}.",
+    "The first {n_failed} {units} to run all failed the same way, across {n_models} models, so {.fn {verb}} stopped rather than run the other {n_left}.",
     "x" = "{cause}",
-    "i" = "Their rows are in this error's {.field results} field and were not checkpointed, so a run after the fix evaluates them.",
-    "i" = "To run every configuration anyway, use {.code control_horizons(breaker = FALSE)}; to see the first failure's backtrace, {.code control_horizons(debug = TRUE)}."
-  ), kind = "run", class = "horizons_error_systemic",
-  results = dplyr::bind_rows(drop_unit_records(rows)), call = call)
+    "i" = if (checkpoints) {
+      "Their rows are in this error's {.field results} field and were not checkpointed, so a run after the fix evaluates them."
+    } else {
+      "Their rows are in this error's {.field results} field."
+    },
+    "i" = "To run every one anyway, use {.code control_horizons(breaker = FALSE)}; to see the first failure's backtrace, {.code control_horizons(debug = TRUE)}."
+  ), kind = "run", class = "horizons_error_systemic", results = results, call = call)
 
 }
 
@@ -1666,14 +1703,16 @@ abort_breaker_trip <- function(breaker, rows, n_left, call = rlang::caller_env()
 #' far; every other error passes through untouched.
 #'
 #' @param expr The work that dispatches to workers.
-#' @param rows List of the result rows finished so far, read when the worker
-#'   dies.
+#' @param results The results table finished so far, carried as `results`;
+#'   evaluated only when a worker dies.
 #' @param output_dir The run's `output_dir`, or `NULL`.
+#' @param verb Character(1). The verb that stops, `"evaluate"` or `"fit"`.
 #' @param call The frame the error reports.
 #' @return The value of `expr`.
 #' @keywords internal
 #' @noRd
-stop_on_worker_death <- function(expr, rows, output_dir, call = rlang::caller_env()) {
+stop_on_worker_death <- function(expr, results, output_dir = NULL, verb = "evaluate",
+                                 call = rlang::caller_env()) {
 
   ## One handler for both classes. try_fetch() nests its handlers, so with
   ## one per class the systemic error raised for a FutureError would be
@@ -1683,14 +1722,14 @@ stop_on_worker_death <- function(expr, rows, output_dir, call = rlang::caller_en
     if (!inherits(e, c("FutureError", "horizons_error_systemic"))) return(rlang::zap())
 
     abort_horizons(c(
-      "A parallel worker stopped while {.fn evaluate} was running, so the run cannot go on.",
+      "A parallel worker stopped while {.fn {verb}} was running, so the run cannot go on.",
       "i" = if (is.null(output_dir)) {
         "The rows finished so far are in this error's {.field results} field."
       } else {
-        "The configurations finished are checkpointed in {.path {output_dir}}; calling {.fn evaluate} again with it resumes from them."
+        "The configurations finished are checkpointed in {.path {output_dir}}; calling {.fn {verb}} again with it resumes from them."
       }
     ), kind = "run", class = "horizons_error_systemic", parent = e,
-    results = dplyr::bind_rows(drop_unit_records(rows)), call = call)
+    results = results, call = call)
 
   }
 
@@ -2454,20 +2493,24 @@ modelling_rows <- function(analysis, outcome_col, call = rlang::caller_env()) {
 #' @param n_train Integer. Rows of the training part, after the split and
 #'   any response trim.
 #' @param cv_folds Integer. `config$tuning$cv_folds`.
-#' @param n_modelled,n_test,n_trimmed Integer. The modelled rows, and those
-#'   the split held out for the test set or the trim left out, for the
-#'   message.
+#' @param n_modelled,n_test,n_trimmed,n_calib Integer. The modelled rows,
+#'   and those the split held out for the test set, the trim left out or
+#'   `fit()` set aside for calibration, for the message.
 #' @param call The frame the refusal reports: the verb's.
 #' @return `NULL`, invisibly; aborts with class `horizons_error_input`.
 #' @keywords internal
 #' @noRd
 check_fold_rows <- function(n_train, cv_folds, n_modelled, n_test, n_trimmed = 0L,
-                            call = rlang::caller_env()) {
+                            n_calib = 0L, call = rlang::caller_env()) {
 
   if (n_train > cv_folds) return(invisible(NULL))
 
-  elsewhere <- paste0("the test set holds ", n_test,
-                      if (n_trimmed > 0) paste0(" and the response trim left out ", n_trimmed))
+  held <- c(paste0("the test set holds ", n_test),
+            if (n_calib > 0) paste0("the calibration set ", n_calib),
+            if (n_trimmed > 0) paste0("the response trim left out ", n_trimmed))
+  elsewhere <- if (length(held) == 1) held else {
+    paste0(paste(utils::head(held, -1), collapse = ", "), " and ", utils::tail(held, 1))
+  }
 
   abort_horizons(c(
     "The training part has {n_train} row{?s}, but {cv_folds}-fold cross-validation needs more training rows than folds.",
@@ -2835,18 +2878,19 @@ evaluation_recipe <- function(x, call = rlang::caller_env()) {
 #' drawing nothing from the parent's RNG) and a mismatch is refused. Both are
 #' `horizons_error_dependency`: an environment that cannot run the call.
 #'
-#' @param call The frame a refusal reports: `evaluate()`'s.
+#' @param verb Character(1). The verb asking, `"evaluate"` or `"fit"`.
+#' @param call The frame a refusal reports: the verb's.
 #' @return `NULL`, invisibly.
 #' @keywords internal
 #' @noRd
-check_parallel_workers <- function(call = rlang::caller_env()) {
+check_parallel_workers <- function(verb = "evaluate", call = rlang::caller_env()) {
 
   if (running_under_load_all()) {
 
     abort_horizons(c(
-      "Parallel {.fn evaluate} cannot run under {.fn devtools::load_all}.",
+      "Parallel {.fn {verb}} cannot run under {.fn devtools::load_all}.",
       "i" = "Workers load the installed {.pkg horizons}, not this source tree, so they would run stale code.",
-      "i" = "Install the package first ({.code R CMD INSTALL}), or call {.fn evaluate} without parallelism."
+      "i" = "Install the package first ({.code R CMD INSTALL}), or call {.fn {verb}} without parallelism."
     ), kind = "dependency", call = call)
 
   }

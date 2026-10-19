@@ -24,7 +24,7 @@ A cold start has one.}
 
 \item{metric}{Character or NULL. Metric for ranking the candidate
 configs, by bare name: one of \code{"rpd"}, \code{"rsq"}, \code{"rmse"}, \code{"rrmse"},
-\code{"ccc"}, \code{"mae"}, or \code{fit()} aborts with class \code{horizons_input_error}.
+\code{"ccc"}, \code{"mae"}, or \code{fit()} aborts with class \code{horizons_error_input}.
 If NULL, uses the rank_metric from \code{evaluate()}; on a cold start, where
 there is nothing to rank and the metric is only recorded, the one a
 cold-started fit recorded, else \code{"rpd"}. Ranking reads the
@@ -75,8 +75,9 @@ training object carried a \verb{$selection} from \code{select_training()}, which
 \code{horizons_ensemble}, it returns a \code{horizons_fit} whose \code{ensemble} slot
 is empty again, since the ensemble was built on the members it replaces.
 \code{models$results} records how each member's re-tune started:
-\code{warm_start} (\code{TRUE} from \code{evaluate()}'s parameters, \code{FALSE} from a
-space-filling grid) and \code{start_grid_size}.
+\code{warm_start} (\code{TRUE} when \code{evaluate()}'s parameters were usable, so the
+grid is centred on them or is the whole space, \code{FALSE} for a
+space-filling grid) and \code{start_grid_size}, the starting grid's points.
 }
 \description{
 Re-tunes the top N configurations from \code{evaluate()} with warm-start
@@ -98,14 +99,14 @@ the rows this object models: after dropping the rows whose outcome is \code{NA}
 as response outliers (\code{evaluation$response_trim$trimmed_ids}; see
 \code{evaluate()}'s "Response outliers" section), the id and outcome columns
 must match the split's, value for value and in order, or \code{fit()} aborts
-with class \code{horizons_input_error}. The trim is reused, not recomputed, so
+with class \code{horizons_error_input}. The trim is reused, not recomputed, so
 \code{fit()} trains without exactly the rows \code{evaluate()} left out and scores
 on the same untrimmed test rows. A trim request \code{validate()} records
 after \code{evaluate()} therefore cannot reach the fit, and \code{fit()} refuses it
 rather than ignore it: when \code{validation$outliers$response_trim} differs
 from the trim \code{evaluate()} applied (one without the other, or another
 outcome, method or threshold), \code{fit()} aborts with class
-\code{horizons_input_error}, saying which differs. Re-running \code{evaluate()}
+\code{horizons_error_input}, saying which differs. Re-running \code{evaluate()}
 applies the current request. A trim that drew no fences counts as
 applied, under the request it ran for. Columns added since \code{evaluate()},
 such as a sibling response from \code{add_response()}, are carried into the
@@ -128,15 +129,63 @@ The members are the top \code{n_best} of the configurations \code{evaluate()} ch
 when none did, the pruned ones that carry a cross-validated value of
 \code{metric}. When every member fell below \code{evaluate()}'s \code{prune_threshold}
 (\code{evaluation$results$below_prune_threshold}), \code{fit()} warns with class
-\code{horizons_below_threshold_warning}, naming the threshold and the members'
-cross-validated RPD; that includes \code{bayesian_iter = 0}, where nothing is
-pruned. When the members are pruned configurations the warning also
-carries class \code{horizons_pruned_fallback_warning}. If every member fails,
-\code{fit()} aborts with class \code{horizons_all_members_failed}, listing the
+\code{horizons_warning_quality}, naming the threshold and the members'
+cross-validated RPD, and saying so when the members are pruned
+configurations; that includes \code{bayesian_iter = 0}, where nothing is
+pruned. If every member fails,
+\code{fit()} aborts with class \code{horizons_error_all_members_failed} (with
+\code{horizons_error_run}), listing the
 distinct error messages; the
 per-member results travel on the condition as \code{results}, and
 \code{models$results} keeps each member's \code{error_message} when some succeed.
 }
+\section{What fit() reports}{
+
+\code{fit()} warns once per kind at its end, after writing each warning to the
+object's \code{log}: a stratified draw (the calibration split, the folds, a
+cold start's split) that fell back to an unstratified one
+(\code{horizons_warning_substitution}); a smallest assessment fold under
+\code{SMALL_FOLD_ROWS} rows, or every member below \code{evaluate()}'s prune
+threshold (\code{horizons_warning_quality}); UQ and AD switched off because the
+calibration set is under \code{min_calib_rows} (\code{horizons_warning_skipped});
+members whose prediction intervals, measured coverage or applicability
+domain could not be computed, with why (\code{horizons_warning_skipped}, #145);
+members whose degradation check could not run, whose \code{degraded} is then
+\code{NA} with the cause in their warnings (\code{horizons_warning_skipped});
+configurations without a value of the ranking metric left out of the
+choice of members (\code{horizons_warning_skipped});
+a member whose warm-start Bayesian search failed and kept what it finished
+(\code{horizons_warning_substitution}, #209); some members failed and the rest
+are returned (\code{horizons_warning_partial_failure}, naming them with each
+distinct cause). It records as notes on the log, without a warning, a
+member's fitted workflow stored whole because it could not be slimmed and
+in-sample interval diagnostics that could not be computed. The folds are
+drawn from the rows the members are fitted on, which must outnumber the
+folds, or \code{fit()} refuses, as \code{evaluate()} does.
+}
+
+\section{Members that fail}{
+
+Each member is one unit: a failure in any step of its re-tune, its
+out-of-fold predictions, its final fit or its test scoring fails that
+member alone, and \code{models$results} records the step and the cause in
+\code{error_message}, the root cause's class in \code{class}, and, with
+\code{control_horizons(keep_traces = TRUE)}, its backtrace as text in \code{trace}.
+A member's own warnings, from the engines and from tune, are in
+\code{models$results$warnings}. A bug, a refusal or a missing package is not
+the member's and stops the call. When the first members fail the same
+way across at least two models, \code{fit()} stops with
+\code{horizons_error_systemic} and the members so far as \code{results}
+(\code{control_horizons(breaker = )}, 3 by default, \code{FALSE} to fit every
+member), and it stops the same way when a parallel worker dies. With
+\code{control_horizons(debug = TRUE)} the re-tunes run in this session and the
+first failure, inside tuning included, stops the call with its backtrace.
+Before a parallel run \code{fit()} refuses a session loaded with
+\code{devtools::load_all()}, and one whose workers load another version of
+horizons (\code{horizons_error_dependency}), since tune's workers run horizons'
+recipe steps.
+}
+
 \section{Cold start from one configuration}{
 
 With one configuration there is nothing for \code{evaluate()} to choose, so a
@@ -148,7 +197,11 @@ exactly the rows \code{evaluate()} would have, and applies a response trim
 partition alone. With no parameters from
 \code{evaluate()} to warm-start from, the re-tune starts from a space-filling
 grid of \code{grid_size} points; the console tree says so, and
-\code{models$results$warm_start} is \code{FALSE}. The degradation check needs
+\code{models$results$warm_start} is \code{FALSE}. On either path, a search space
+whose tuned parameters are all whole numbers, with no more points than
+\code{grid_size + final_bayesian_iter}, is gridded whole with no Bayesian
+search, as \code{evaluate()} grids it: at the defaults that is every plsr
+member, each \code{num_comp} up to its cap tried. The degradation check needs
 nothing from \code{evaluate()}, since it compares the test RPD with \code{fit()}'s
 own cross-validation.
 
@@ -157,10 +210,11 @@ The fit carries an unscreened evaluation record in place of
 \code{best_config} with status \code{"not_evaluated"}, its metric and \verb{cv_*} columns
 are \code{NA}, and \code{runtime_secs} is 0. \code{evaluation$recipe} records the recipe
 settings as \code{evaluate()} does, and \code{fit()} applies \code{evaluate()}'s checks
-first: an outcome that is not constant, at least twice \code{cv_folds} rows
-with an observed outcome, and a Savitzky-Golay window narrower than the
-spectrum. Re-fitting a cold-started fit starts cold again. With more than
-one configuration \code{fit()} aborts with class \code{horizons_input_error}:
+first: an outcome that is not constant, a Savitzky-Golay window narrower
+than the spectrum, and more rows than \code{cv_folds} to draw the folds from,
+which \code{fit()} checks on either path. Re-fitting a cold-started fit starts
+cold again. With more than one configuration \code{fit()} aborts with class
+\code{horizons_error_input}:
 choosing among them is what \code{evaluate()} is for.
 }
 
@@ -185,10 +239,10 @@ with class \code{horizons_input_error} when an observed outcome lies outside
 the range or is infinite, naming \code{outcome_range} and how to set it (#76);
 when the ranking metric is \code{"rrmse"} and the range's lower bound is
 negative, since the mean outcome it divides by can then be zero or
-negative; and, on the \code{evaluate()} path, when the range differs from the
-one \code{evaluate()} recorded on its results rows (rows from before the range
-was recorded count as the default), since the members were chosen on
-predictions clamped to that range.
+negative; and, on the \code{evaluate()} path, with class \code{horizons_error_input},
+when the range differs from the one \code{evaluate()} recorded on its results
+rows (rows from before the range was recorded count as the default), since
+the members were chosen on predictions clamped to that range.
 }
 
 \section{Zero outcome variance}{

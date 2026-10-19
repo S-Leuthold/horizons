@@ -2160,8 +2160,13 @@ validate_horizons_eval <- function(x, call = rlang::caller_env()) {
 #'    reachable, every workflow key is a defined config id.
 #' 9. **I7 — uq ⊆ workflows**: `uq` is NULL, or a named list whose keys are a
 #'    subset of the workflow keys (not every fitted config earns a UQ bundle —
-#'    only successful ones with sufficient calibration data).
-#' 10. **runtime_secs**: single non-negative numeric. **timestamp**: POSIXct.
+#'    only successful ones with sufficient calibration data). Each bundle
+#'    has a `level_default` in (0, 1) and at least
+#'    `conformal_min_rows(level_default)` finite `scores`, which `predict()`
+#'    takes the conformal margin from.
+#' 10. **cv_predictions**: every member covers the same `.row` set, with no
+#'    `.row` twice for a member, since `ensemble()` reads them as one matrix.
+#' 11. **runtime_secs**: single non-negative numeric. **timestamp**: POSIXct.
 #'
 #' @param x `horizons_fit`. The object to validate.
 #' @param call The frame the error reports: the verb that validated.
@@ -2373,7 +2378,9 @@ validate_horizons_fit <- function(x, call = rlang::caller_env()) {
                    warm_start      = "logical",
                    start_grid_size = "integer",
                    error_message   = "character",
-                   class           = "character")
+                   class           = "character",
+                   trace           = "list",
+                   warnings        = "list")
 
     present <- intersect(names(col_types), names(fit_res))
     actual  <- vapply(present, function(col) typeof(fit_res[[col]]), character(1))
@@ -2451,6 +2458,57 @@ validate_horizons_fit <- function(x, call = rlang::caller_env()) {
         ))
 
       }
+
+      ## predict() takes the conformal margin from the saved scores, which
+      ## need as many finite values as the level's order statistic: fewer,
+      ## and the interval would cover less than its level, or nothing at all
+      ok_level   <- setdiff(names(uq), bad_level)
+      bad_scores <- ok_level[!vapply(uq[ok_level], function(b) {
+        scores <- b$scores
+        is.numeric(scores) && sum(is.finite(scores)) >= conformal_min_rows(b$level_default)
+      }, logical(1))]
+
+      if (length(bad_scores) > 0) {
+
+        errors <- c(errors, cli::format_inline(
+          "{.field uq} {cli::qty(length(bad_scores))}bundle{?s} {.val {bad_scores}} {?has/have} fewer finite {.field scores} than {?its/their} {.field level_default} needs"
+        ))
+
+      }
+
+    }
+
+  }
+
+  ## The members' out-of-fold predictions line up ---------------------------------
+  ## ensemble() reads them as one matrix keyed by .row: a member missing a row
+  ## would leave a hole in it, and a row twice would make a cell a list. fit()
+  ## fails a member that missed a fold (#101), so a fit that breaks this was
+  ## changed after it.
+
+  cv <- md$cv_predictions
+
+  if (is.data.frame(cv) && nrow(cv) > 0 && all(c(".row", "config_id") %in% names(cv))) {
+
+    rows_by_member <- split(cv$.row, cv$config_id)
+    all_rows       <- sort(unique(cv$.row))
+
+    short  <- names(rows_by_member)[!vapply(rows_by_member, setequal, logical(1), all_rows)]
+    repeated <- names(rows_by_member)[vapply(rows_by_member, anyDuplicated, integer(1)) > 0]
+
+    if (length(short) > 0) {
+
+      errors <- c(errors, cli::format_inline(
+        "{.field cv_predictions} for {cli::qty(length(short))}member{?s} {.val {short}} {?does/do} not cover every {.field .row} the other members do"
+      ))
+
+    }
+
+    if (length(repeated) > 0) {
+
+      errors <- c(errors, cli::format_inline(
+        "{.field cv_predictions} for {cli::qty(length(repeated))}member{?s} {.val {repeated}} {?has/have} a {.field .row} more than once"
+      ))
 
     }
 

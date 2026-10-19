@@ -99,7 +99,7 @@ describe("fit() - cold start from one configuration (#45)", {
 
   it("prints and records the space-filling start", {
 
-    expect_true(any(grepl("Cold start: no warm-start parameters; space-filling grid of 2 points",
+    expect_true(any(grepl("Cold start: no warm-start parameters; grid of 2 points",
                           cold_out, fixed = TRUE)))
     expect_false(cold$models$results$warm_start)
     expect_identical(cold$models$results$start_grid_size, 2L)
@@ -171,7 +171,7 @@ describe("fit() - cold start from one configuration (#45)", {
           suppressWarnings(
             fit(budget, compute_uq = FALSE, compute_ad = FALSE, control = control_horizons(verbose = TRUE))
           ),
-          horizons_all_members_failed = function(e) NULL
+          horizons_error_all_members_failed = function(e) NULL
         ),
         fit_single_config = function(...) {
           list(config_id = "cfg_001", status = "failed", error_message = "mocked",
@@ -284,7 +284,7 @@ describe("fit() - cold start from one configuration (#45)", {
 
     two <- make_eval_object(n = 60, n_configs = 2)
 
-    err <- expect_error(fit(two), class = "horizons_input_error")
+    err <- expect_error(fit(two), class = "horizons_error_input")
 
     msg <- gsub("\\s+", " ", conditionMessage(err))   # undo cli line wrapping
     expect_match(msg, "can start without `evaluate()` only from a single configuration", fixed = TRUE)
@@ -322,7 +322,7 @@ describe("fit() - cold start from one configuration (#45)", {
         suppressWarnings(
           fit(tuned, compute_uq = FALSE, compute_ad = FALSE)
         ),
-        horizons_all_members_failed = function(e) NULL
+        horizons_error_all_members_failed = function(e) NULL
       ),
       fit_single_config = function(...) {
         seen <<- list(...)[c("sg_window", "pca_threshold")]
@@ -362,15 +362,33 @@ describe("fit() - cold start from one configuration (#45)", {
 
   })
 
-  it("refuses too few rows to fit, naming its own floor", {
+  it("refuses a training part with no more rows than folds, as evaluate() does", {
 
+    ## 4 rows: 3 in the training part, for 3 folds. fit()'s own check on the
+    ## rows its folds are drawn from refuses it, before any member is fitted,
+    ## at the boundary evaluate() refuses at; 5 rows run (below)
+    few <- make_eval_object(n = 4, n_configs = 1)
+
+    local_mocked_bindings(fit_single_config = function(...) stop("a member was fitted"))
+
+    err <- expect_error(suppressWarnings(fit(few, seed = 42L)), "The training part has 3 rows",
+                        fixed = TRUE, class = "horizons_error_input")
+    msg <- gsub("\\s+", " ", conditionMessage(err))
+    expect_match(msg, "3-fold cross-validation needs more training rows than folds", fixed = TRUE)
+
+  })
+
+  it("runs below the old floor of twice cv_folds, once the training part outnumbers the folds", {
+
+    ## 5 rows: 4 in the training part, which the old floor of 6 refused
     few <- make_eval_object(n = 5, n_configs = 1)
 
-    err <- expect_error(fit(few, seed = 42L), "Too few rows to fit: 5 have an observed",
-                        fixed = TRUE, class = "horizons_input_error")
-    msg <- gsub("\\s+", " ", conditionMessage(err))
-    expect_match(msg, "`fit()` needs at least 6 (twice cv_folds).", fixed = TRUE)
-    expect_no_match(msg, "evaluate()", fixed = TRUE)
+    local_mocked_bindings(
+      fit_single_config = function(...) rlang::abort("reached", class = "member_reached")
+    )
+
+    expect_error(suppressWarnings(fit(few, compute_uq = FALSE, compute_ad = FALSE, seed = 42L)),
+                 class = "member_reached")
 
   })
 
@@ -379,7 +397,7 @@ describe("fit() - cold start from one configuration (#45)", {
     none <- obj
     none$config$configs <- obj$config$configs[0, ]
 
-    expect_error(fit(none), "configure()", class = "horizons_input_error")
+    expect_error(fit(none), "configure()", class = "horizons_error_input")
 
   })
 
@@ -407,7 +425,7 @@ describe("fit() - cold start from one configuration (#45)", {
     for (x in list(obj, ev)) {
 
       err <- expect_error(fit(x, metric = "accuracy"),
-                          class = "horizons_input_error")
+                          class = "horizons_error_input")
 
       msg <- gsub("\\s+", " ", conditionMessage(err))   # undo cli line wrapping
       expect_match(msg, "accuracy", fixed = TRUE)

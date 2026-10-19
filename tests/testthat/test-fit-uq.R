@@ -24,17 +24,8 @@ describe("compute_c_alpha() - basic contract", {
 
   ## A level outside (0, 1) is refused at predict()'s door, where the stored
   ## level_default is checked (test-class-core.R); fit_uq() passes a constant.
-
-  it("refuses scores with no finite value", {
-
-    ## The abort carries no package class. Without it the quantile of an
-    ## empty set is NA, returned as the correction.
-    expect_error(
-      compute_c_alpha(c(NA, NaN, Inf, -Inf), level = 0.90),
-      "No finite scores available for conformal calibration", fixed = TRUE
-    )
-
-  })
+  ## So are too few finite scores: fit_uq() keeps a bundle only with enough
+  ## (below), and the validator refuses a saved one with fewer.
 
 })
 
@@ -333,7 +324,24 @@ describe("fit_uq() - conformal scores properties", {
     expect_length(at_min$scores, N_CALIB_MIN)
     expect_false(anyNA(at_min$scores))
 
-    expect_null(fit_missing(n_missing + 1L))
+    expect_error(fit_missing(n_missing + 1L),
+                 "29 of the 40 calibration rows have a finite score, fewer than the 30",
+                 fixed = TRUE, class = "horizons_error_run")
+
+  })
+
+  it("counts only finite scores, so an infinite outcome is left out too", {
+
+    calib <- setup$calib_data
+    calib[[setup$outcome_col]][seq_len(nrow(calib) - N_CALIB_MIN)] <- NA_real_
+    calib[[setup$outcome_col]][nrow(calib)] <- Inf
+
+    expect_error(
+      fit_uq(fitted_workflow = setup$fitted_wf, oof_predictions = setup$oof_predictions,
+             calib_data = calib, role_map = setup$role_map),
+      "29 of the 40 calibration rows have a finite score", fixed = TRUE,
+      class = "horizons_error_run"
+    )
 
   })
 
@@ -345,18 +353,20 @@ describe("fit_uq() - too few calibration points", {
   ## Create setup with only 10 calibration points (below N_CALIB_MIN = 30)
   setup <- make_uq_setup(n_calib = 10)
 
-  it("returns NULL when calibration set is too small", {
+  it("fails, saying why, when the calibration set is too small", {
 
-    result <- fit_uq(
-      fitted_workflow = setup$fitted_wf,
-      oof_predictions = setup$oof_predictions,
-      calib_data      = setup$calib_data,
-      role_map        = setup$role_map,
-      transformation  = "none",
-      level_default   = 0.90
+    expect_error(
+      fit_uq(
+        fitted_workflow = setup$fitted_wf,
+        oof_predictions = setup$oof_predictions,
+        calib_data      = setup$calib_data,
+        role_map        = setup$role_map,
+        transformation  = "none",
+        level_default   = 0.90
+      ),
+      "The calibration set has 10 rows, fewer than `min_calib_rows` (30).", fixed = TRUE,
+      class = "horizons_error_run"
     )
-
-    expect_null(result)
 
   })
 
@@ -367,7 +377,7 @@ describe("fit_uq() - too few calibration points", {
                  calib_data = setup$calib_data, role_map = setup$role_map,
                  transformation = "none", level_default = 0.90)
 
-    expect_null(do.call(fit_uq, args))
+    expect_error(do.call(fit_uq, args), class = "horizons_error_run")
     expect_false(is.null(do.call(fit_uq, c(args, min_calib_rows = 8L))))
 
   })
@@ -375,16 +385,16 @@ describe("fit_uq() - too few calibration points", {
   it("refuses fewer scores than its level's order statistic needs, whatever the minimum", {
 
     ## 8 rows: the 90% correction would need the 9th smallest of 8 scores
-    for (n_calib in c(8, 9)) {
-
-      small  <- make_uq_setup(n_calib = n_calib)
-      result <- fit_uq(fitted_workflow = small$fitted_wf, oof_predictions = small$oof_predictions,
-                       calib_data = small$calib_data, role_map = small$role_map,
-                       transformation = "none", level_default = 0.90, min_calib_rows = 2L)
-
-      expect_identical(is.null(result), n_calib == 8, label = paste(n_calib, "rows"))
-
+    fit_small <- function(n_calib) {
+      small <- make_uq_setup(n_calib = n_calib)
+      fit_uq(fitted_workflow = small$fitted_wf, oof_predictions = small$oof_predictions,
+             calib_data = small$calib_data, role_map = small$role_map,
+             transformation = "none", level_default = 0.90, min_calib_rows = 2L)
     }
+
+    expect_error(fit_small(8), "8 of the 8 calibration rows have a finite score, fewer than the 9",
+                 fixed = TRUE, class = "horizons_error_run")
+    expect_equal(fit_small(9)$n_calib, 9L)
 
   })
 
@@ -451,47 +461,82 @@ describe("fit_uq() - a prediction step that fails", {
   ## suppressWarnings() around the setup only, as in the row-alignment block
   setup <- suppressWarnings(make_uq_setup())
 
-  it("returns NULL, rather than aborting, when a calibration prediction fails", {
+  ## Run as fit_single_config() runs it: a unit of its own
+  run_uq <- function(debug = FALSE) {
+    run_unit(fit_uq(
+      fitted_workflow = setup$fitted_wf,
+      oof_predictions = setup$oof_predictions,
+      calib_data      = setup$calib_data,
+      role_map        = setup$role_map,
+      debug           = debug
+    ), unit = "uq", id = "cfg_001", debug = debug)
+  }
+
+  it("fails at the step the calibration prediction failed in, for its unit to record", {
 
     ## Each call mocks one method for its own duration
-    fit_mocked <- function(class, method) {
+    fail_with <- function(class, method) {
       local_mocked_s3_method("predict", class, method)
-      fit_uq(
-        fitted_workflow = setup$fitted_wf,
-        oof_predictions = setup$oof_predictions,
-        calib_data      = setup$calib_data,
-        role_map        = setup$role_map
-      )
+      run_uq()
     }
 
     ## The point prediction on the calibration set
-    expect_null(fit_mocked("workflow", function(object, new_data, ...) {
-      stop("point prediction failed")
-    }))
+    point <- fail_with("workflow", function(object, new_data, ...) stop("point prediction failed"))
+
+    expect_true(point$failed)
+    expect_identical(point$records$step, "uq_calibration_predict")
+    expect_true(startsWith(point$records$message, "point prediction failed"))
 
     ## The quantile prediction on the calibration set
-    expect_null(fit_mocked("ranger", quantile_prediction_failing_on(nrow(setup$calib_data))))
+    quantiles <- fail_with("ranger", quantile_prediction_failing_on(nrow(setup$calib_data)))
+
+    expect_true(quantiles$failed)
+    expect_identical(quantiles$records$step, "uq_calibration_quantiles")
+    expect_true(startsWith(unit_failure_message(quantiles$records, NULL),
+                           "Calibration quantiles failed: quantile prediction failed"))
 
   })
 
-  it("keeps the bundle, with NA diagnostics, when the out-of-fold quantile prediction fails", {
+  it("keeps the bundle, with NA diagnostics and a note saying why, when the out-of-fold quantile prediction fails", {
 
     local_mocked_s3_method(
       "predict", "ranger",
       quantile_prediction_failing_on(nrow(setup$oof_predictions))
     )
 
-    result <- fit_uq(
-      fitted_workflow = setup$fitted_wf,
-      oof_predictions = setup$oof_predictions,
-      calib_data      = setup$calib_data,
-      role_map        = setup$role_map
-    )
+    out    <- run_uq()
+    result <- out$value
 
-    expect_false(is.null(result))
+    expect_false(out$failed)
     expect_equal(result$n_calib, nrow(setup$calib_data))
     expect_identical(result$oof_coverage, NA_real_)
     expect_identical(result$mean_width, NA_real_)
+
+    note <- out$records[out$records$type == "note", , drop = FALSE]
+    expect_true(startsWith(note$message, paste(
+      "The in-sample interval diagnostics (oof_coverage, mean_width) were not computed:",
+      "quantile prediction failed"
+    )))
+
+    ## Under debug the failure stops the unit instead
+    expect_error(run_uq(debug = TRUE), "quantile prediction failed", fixed = TRUE)
+
+  })
+
+  it("lets a tripwire inside the diagnostics through, whatever its parent", {
+
+    ## A parent from another package is the case a declined handler would
+    ## be offered again, and contain
+    real_predict <- getS3method("predict", "ranger")
+    local_mocked_s3_method("predict", "ranger", function(object, data, ...) {
+      if (nrow(data) == nrow(setup$oof_predictions)) {
+        abort_horizons("Rows misaligned.", kind = "internal",
+                       parent = simpleError("the upstream cause"))
+      }
+      real_predict(object, data, ...)
+    })
+
+    expect_error(run_uq(), "Rows misaligned.", fixed = TRUE, class = "horizons_error_internal")
 
   })
 
@@ -509,9 +554,9 @@ describe("fit_uq() - quantile forest thread pinning", {
     setup    <- make_uq_setup()
     captured <- NULL
 
-    ## Capture ranger's arguments without fitting: fit_uq() wraps the call in
-    ## safely_execute(), so the mocked error is absorbed and returns NULL.
-    testthat::with_mocked_bindings(
+    ## Capture ranger's arguments without fitting: the mocked error is the
+    ## forest step's failure, which fit_uq() raises for its unit to record
+    expect_error(testthat::with_mocked_bindings(
       ranger = function(...) { captured <<- list(...); stop("captured") },
       suppressWarnings(fit_uq(
         fitted_workflow = setup$fitted_wf,
@@ -522,7 +567,7 @@ describe("fit_uq() - quantile forest thread pinning", {
         level_default   = 0.90
       )),
       .package = "ranger"
-    )
+    ), "captured", fixed = TRUE)
 
     expect_false(is.null(captured))
     expect_identical(captured$num.threads, 1L)

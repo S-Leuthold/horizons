@@ -458,11 +458,79 @@ unit_step <- function(step, expr) {
 
 }
 
+#' The steps of a unit, and how a failed unit names each
+#'
+#' @description
+#' The [unit_step()] labels inside [evaluate_single_config()] and
+#' [fit_single_config()], each with the words a failed unit's
+#' `error_message` starts with ("Grid search failed: ..."). A label means the
+#' same step in either verb. A failure outside every step is named by the
+#' unit itself ([unit_failure_message()]).
+#'
+#' @keywords internal
+#' @noRd
+UNIT_STEPS <- c(
+  recipe              = "Recipe building",
+  model_spec          = "Model specification",
+  workflow            = "Workflow creation",
+  prep                = "Recipe preparation",
+  finalize_parameters = "Parameter finalization",
+  tune_grid           = "Grid search",
+  prune               = "Prune check",
+  tune_bayes          = "Bayesian search",
+  select_best         = "Parameter selection",
+  cv_panel            = "Cross-validated metrics",
+  finalize_workflow   = "Workflow finalization",
+  last_fit            = "Test evaluation",
+  back_transform      = "Back-transformation",
+  test_metrics        = "Test metrics",
+  warm_start_tune     = "Warm-start tuning",
+  warm_start_grid     = "Warm-start grid search",
+  warm_start_bayes    = "Warm-start Bayesian search",
+  oof_predictions     = "OOF predictions",
+  oof_back_transform  = "OOF back-transformation",
+  final_fit           = "Final model fit",
+  test_predict        = "Test prediction",
+  test_back_transform = "Test back-transformation",
+  degradation         = "Degradation check",
+  uq_quantile_forest       = "Quantile forest",
+  uq_calibration_predict   = "Calibration prediction",
+  uq_back_transform        = "Calibration back-transformation",
+  uq_calibration_quantiles = "Calibration quantiles",
+  ad_covariance       = "AD covariance",
+  ad_calibration_bake = "AD calibration bake",
+  ad_thresholds       = "AD thresholds"
+)
+
+#' The message of a failed unit
+#'
+#' @param records The unit's records, shaped like [new_unit_records()]'s,
+#'   holding its failure.
+#' @param outside Character(1). What the unit is called when it failed
+#'   outside every labelled step, e.g. `"Evaluation"`; `NULL` for the cause
+#'   alone, when the unit's own condition says what failed (an add-on's data
+#'   too small to compute from).
+#' @return Character(1): the step's words (`UNIT_STEPS`), "failed: ", and
+#'   the cause.
+#' @keywords internal
+#' @noRd
+unit_failure_message <- function(records, outside) {
+
+  failure <- records[records$type == "failure", , drop = FALSE]
+  step    <- failure$step[1]
+
+  label <- if (is.na(step)) outside else UNIT_STEPS[[step]]
+
+  paste0(if (!is.null(label)) paste0(label, " failed: "), failure$message[1])
+
+}
+
 #' An empty set of unit records
 #'
-#' @return Tibble with one row per failure or warning in a unit: `unit` (what
-#'   kind of unit, e.g. `"configuration"`), `id`, `step` (the innermost
-#'   [unit_step()] label, or `NA`), `type` (`"failure"` or `"warning"`),
+#' @return Tibble with one row per failure, warning or note in a unit: `unit`
+#'   (what kind of unit, e.g. `"configuration"`), `id`, `step` (the innermost
+#'   [unit_step()] label, or `NA`), `type` (`"failure"`, `"warning"` or
+#'   `"note"`),
 #'   `class` (the root cause's class), `message` (one line, from
 #'   [condition_summary()]), `cause` and `where` (the two parts `message`
 #'   joins, from [condition_parts()], so a record can be merged with the same
@@ -494,6 +562,7 @@ new_unit_records <- function() {
 #'
 #' * A warning is recorded and muffled, and the unit goes on. Nothing is
 #'   printed or raised: the verb decides what to report at its end.
+#' * A note ([note_in_unit()]) is recorded and muffled the same way.
 #' * An error of a kind in `NEVER_CONTAINED` propagates untouched, with its
 #'   class, chain and backtrace, including when a recipe step has wrapped it.
 #' * Any other error is a run failure: it is recorded with the step it arose
@@ -583,6 +652,10 @@ run_unit <- function(expr, unit, id, debug = FALSE, keep_traces = FALSE) {
       warning = function(w) {
         record(w, "warning")
         rlang::cnd_muffle(w)
+      },
+      horizons_note = function(cnd) {
+        record(cnd, "note")
+        rlang::cnd_muffle(cnd)
       }
     )
 
@@ -600,6 +673,12 @@ run_unit <- function(expr, unit, id, debug = FALSE, keep_traces = FALSE) {
       ### declining lets it go on to the caller instead of becoming the
       ### unit's value.
       rlang::cnd_muffle(w)
+      rlang::zap()
+    },
+    ### Muffled here, so an enclosing unit does not record it again
+    horizons_note = function(cnd) {
+      record(cnd, "note")
+      rlang::cnd_muffle(cnd)
       rlang::zap()
     },
     error = function(e) {
@@ -663,7 +742,7 @@ unit_records <- function(records) {
 #' @description
 #' Signals `horizons_warning_<topic>`. Inside [run_unit()] it is recorded with
 #' that class and muffled, and the verb lifts it to its log with
-#' [log_unit_warnings()]; outside a unit it is an ordinary warning.
+#' [log_unit_records()]; outside a unit it is an ordinary warning.
 #'
 #' @param topic Character(1). One of `LOG_TOPICS`.
 #' @param message Character. A cli message, interpolated in `.envir`.
@@ -686,32 +765,62 @@ warn_in_unit <- function(topic, message, .envir = rlang::caller_env()) {
 
 }
 
-#' Lift the horizons warnings units raised onto a verb call's log
+#' Report a note from inside a unit
+#'
+#' @description
+#' Signals a `horizons_note` condition: something the verb reports without
+#' warning (a fitted workflow stored unslimmed, say). Inside [run_unit()] it
+#' is recorded as a note and muffled, and the verb lifts it to its log with
+#' [log_unit_records()]; outside a unit nothing handles it, and it is
+#' silent.
+#'
+#' @param message Character. A cli message, interpolated in `.envir`.
+#' @param .envir The environment the message is interpolated in.
+#' @return `NULL`, invisibly.
+#' @keywords internal
+#' @noRd
+note_in_unit <- function(message, .envir = rlang::caller_env()) {
+
+  ### Rendered as plain text, as log_event() renders a verb's own notes
+  old_opts <- options(cli.num_colors = 1L, cli.width = 100000L)
+  on.exit(options(old_opts), add = TRUE)
+
+  text <- flatten_message(vapply(message, cli::format_inline, character(1), .envir = .envir))
+
+  rlang::signal(text, class = "horizons_note")
+
+  invisible(NULL)
+
+}
+
+#' Lift what units reported onto a verb call's log
 #'
 #' @description
 #' Of the units' records, the warnings raised with [warn_in_unit()] go to the
-#' collector under their topic, one event per distinct message, its ids the
-#' units that raised it. Every other record stays where it is: a failure on
-#' its unit's row, and another package's warning in the row's warnings.
+#' collector under their topic, and the notes raised with [note_in_unit()]
+#' as notes, each kind one event per distinct message, its ids the units
+#' that raised it. Every other record stays where it is: a failure on its
+#' unit's row, and another package's warning in the row's warnings.
 #'
 #' @param collector From [log_open()].
 #' @param records Records shaped like [new_unit_records()]'s, or `NULL`.
 #' @return `collector`, invisibly.
 #' @keywords internal
 #' @noRd
-log_unit_warnings <- function(collector, records) {
+log_unit_records <- function(collector, records) {
 
   if (is.null(records) || !"class" %in% names(records)) return(invisible(collector))
 
   topic  <- sub("^horizons_warning_", "", records$class)
-  lifted <- records$type == "warning" &
-    startsWith(records$class, "horizons_warning_") & topic %in% LOG_TOPICS
+  lifted <- (records$type == "warning" &
+               startsWith(records$class, "horizons_warning_") & topic %in% LOG_TOPICS) |
+    records$type == "note"
 
   if (!any(lifted)) return(invisible(collector))
 
   records <- records[lifted, , drop = FALSE]
-  topic   <- topic[lifted]
-  key     <- paste0(topic, "\r", records$message)
+  topic   <- ifelse(records$type == "note", NA_character_, topic[lifted])
+  key     <- paste0(records$type, "\r", topic, "\r", records$message)
 
   for (k in unique(key)) {
 
@@ -722,10 +831,13 @@ log_unit_warnings <- function(collector, records) {
     n_units <- length(ids)
 
     ### The text is substituted, not inlined, so braces in it stay text.
-    log_warning(collector, topic[these][1], c(
-      "{text}",
-      "i" = "In {n_units} {unit}{cli::qty(n_units)}{?s}: {.val {ids}}."
-    ), ids = ids)
+    message <- c("{text}", "i" = "In {n_units} {unit}{cli::qty(n_units)}{?s}: {.val {ids}}.")
+
+    if (identical(records$type[these][1], "note")) {
+      log_note(collector, message, ids = ids)
+    } else {
+      log_warning(collector, topic[these][1], message, ids = ids)
+    }
 
   }
 

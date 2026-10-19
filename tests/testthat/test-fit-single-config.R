@@ -262,24 +262,13 @@ describe("fit_single_config() - cv_metrics", {
 
   })
 
-  it("counts only the folds with a metric in the standard error", {
+  ## Read the fixture before a mock (helper-memo.R); a rerun is the fixture's
+  ## run, so its out-of-fold predictions are the same
+  rerun_with_fold_metrics <- function(shared, fold_metrics) {
 
-    ## A fold left with one complete pair has NA metrics, which the mean
-    ## leaves out; the standard error divides by the folds the mean averages
-    ## (#102)
-    ## Read the fixture before the mock (helper-memo.R); the rerun is the
-    ## fixture's run, so its out-of-fold predictions are the same
-    shared <- fsc()
-    preds  <- shared$result$cv_predictions
-    folds  <- split(preds, preds$.fold)
-    real   <- compute_original_scale_metrics
+    local_mocked_bindings(compute_original_scale_metrics = fold_metrics)
 
-    local_mocked_bindings(compute_original_scale_metrics = function(truth, estimate) {
-      if (identical(truth, folds[[1]]$truth)) return(real(truth[1], estimate[1]))
-      real(truth, estimate)
-    })
-
-    result <- fit_single_config(
+    fit_single_config(
       config_row          = make_fit_config(),
       split_F             = shared$setup$split_F,
       cv_resamples        = shared$setup$folds,
@@ -290,14 +279,59 @@ describe("fit_single_config() - cv_metrics", {
       seed                = 42L
     )
 
+  }
+
+  it("keeps a cross-validated mean only over every fold: a fold with too few pairs leaves it NA, and says so", {
+
+    ## A fold left with one complete pair has NA metrics, so no metric has a
+    ## mean over every fold, nor a standard error, as in evaluate()
+    shared <- fsc()
+    preds  <- shared$result$cv_predictions
+    folds  <- split(preds, preds$.fold)
+    real   <- compute_original_scale_metrics
+
+    result <- rerun_with_fold_metrics(shared, function(truth, estimate) {
+      if (identical(truth, folds[[1]]$truth)) return(real(truth[1], estimate[1]))
+      real(truth, estimate)
+    })
+
     expect_identical(result$cv_predictions, preds)
+    expect_length(folds, 3L)
 
     cv_met <- result$cv_metrics
-    rmse   <- vapply(folds[-1], function(f) yardstick::rmse_vec(f$truth, f$.pred), numeric(1))
+    expect_true(all(is.na(cv_met$mean)))
+    expect_true(all(is.na(cv_met$std_err)))
+    expect_true(all(cv_met$n == 2L))
+    expect_true("CV metrics at the selected hyperparameters could not be recovered; cv_* columns are NA." %in%
+                  result$warnings)
 
-    expect_length(folds, 3L)
+  })
+
+  it("averages rmse and rpd over every fold when a fold's predictions are constant, leaves rsq NA, and keeps yardstick's warning on the row (#102)", {
+
+    shared <- fsc()
+    preds  <- shared$result$cv_predictions
+    folds  <- split(preds, preds$.fold)
+    real   <- compute_original_scale_metrics
+
+    result <- rerun_with_fold_metrics(shared, function(truth, estimate) {
+      if (identical(truth, folds[[1]]$truth)) estimate <- rep(mean(estimate), length(estimate))
+      real(truth, estimate)
+    })
+
+    cv_met <- result$cv_metrics
+    flat   <- c(list(rep(mean(folds[[1]]$.pred), nrow(folds[[1]]))), lapply(folds[-1], `[[`, ".pred"))
+    rmse   <- mapply(function(f, p) yardstick::rmse_vec(f$truth, p), folds, flat)
+
     expect_equal(cv_met$mean[cv_met$.metric == "rmse"], mean(rmse))
-    expect_equal(cv_met$std_err[cv_met$.metric == "rmse"], stats::sd(rmse) / sqrt(2))
+    expect_equal(cv_met$std_err[cv_met$.metric == "rmse"], stats::sd(rmse) / sqrt(3))
+    expect_true(is.finite(cv_met$mean[cv_met$.metric == "rpd"]))
+    expect_true(is.na(cv_met$mean[cv_met$.metric == "rsq"]))
+
+    ## rmse and rpd, which models$results shows, are whole, so no line; the
+    ## warning yardstick raised on the constant fold is the member's
+    expect_false(any(startsWith(result$warnings, "Cross-validated")))
+    expect_true(any(grepl("estimate. is constant", result$warnings)))
 
   })
 
@@ -492,8 +526,9 @@ describe("fit_single_config() - failure paths", {
     setup <- fsc()$setup
     local_mocked_bindings(tune_warmstart_bayes = function(...) stop("the search broke"))
 
+    ## Its starting grid was built, so how the re-tune started is recorded
     expect_failed_at(run_on_shared(setup), "Warm-start tuning", "the search broke",
-                     warm_start = NA)
+                     warm_start = TRUE)
 
   })
 
@@ -657,6 +692,12 @@ describe("fit_single_config() - a warm-start search that fails (#209)", {
       "The warm-start Bayesian search failed, so the hyperparameters were chosen from its starting grid alone",
       result$warnings, fixed = TRUE
     )))
+
+    ## A substitution warning on the member's records, which fit() lifts once
+    ## to its log, as evaluate()'s configuration does
+    records <- attr(result, "unit_records")
+    fell_back <- startsWith(records$message, "The warm-start Bayesian search failed")
+    expect_identical(records$class[fell_back], "horizons_warning_substitution")
 
   })
 
@@ -852,7 +893,7 @@ describe("fit_single_config() - a run whose stages warn and whose last steps fai
 
   })
 
-  it("stores the unbutchered workflow when butcher() fails, and it predicts", {
+  it("stores the unbutchered workflow when butcher() fails, and it predicts, with a note saying so", {
 
     shared <- fsc_mocked()
     wf     <- shared$result$fitted_workflow
@@ -862,6 +903,15 @@ describe("fit_single_config() - a run whose stages warn and whose last steps fai
 
     test_data <- rsample::testing(shared$setup$split_F)
     expect_equal(nrow(stats::predict(wf, new_data = test_data)), nrow(test_data))
+
+    ## A note on the member's row and in its records, for fit() to log; not a
+    ## warning
+    note <- "The fitted workflow is stored whole, not slimmed: butcher failed"
+    expect_true(any(startsWith(shared$result$warnings, note)))
+
+    records <- attr(shared$result, "unit_records")
+    expect_identical(records$type[startsWith(records$message, note)], "note")
+    expect_identical(records$unit[startsWith(records$message, note)], "member")
 
   })
 
@@ -896,7 +946,12 @@ describe("fit_single_config() - measured coverage when it cannot be measured (#1
 
   no_coverage <- list(test_coverage = NA_real_, test_mean_width = NA_real_, n_test = 0L)
 
-  it("leaves the figures NA and records the warning when no intervals can be built", {
+  skipped_lines <- function(result) {
+    records <- attr(result, "unit_records")
+    records$message[records$class %in% "horizons_warning_skipped"]
+  }
+
+  it("leaves the figures NA, records the interval warning and says coverage was skipped when no intervals can be built", {
 
     setup <- fsc()$setup
     ## predict_intervals() warns and returns NULL when it fails
@@ -910,12 +965,17 @@ describe("fit_single_config() - measured coverage when it cannot be measured (#1
 
     result <- run_with_uq(setup)
 
+    expect_equal(result$status, "success")
     expect_identical(result$uq[names(no_coverage)], no_coverage)
     expect_true(any(grepl("intervals could not be built", result$warnings, fixed = TRUE)))
+    expect_identical(skipped_lines(result), paste(
+      "Measured test coverage was not computed: No intervals could be built for the",
+      "test rows; the member's warnings say why."
+    ))
 
   })
 
-  it("leaves the figures NA, and keeps the bundle, when measuring errors", {
+  it("leaves the figures NA, and keeps the bundle, when measuring errors, and says why", {
 
     setup <- fsc()$setup
     local_mocked_bindings(
@@ -927,6 +987,21 @@ describe("fit_single_config() - measured coverage when it cannot be measured (#1
 
     expect_equal(result$uq$sentinel, "fit_uq() ran")
     expect_identical(result$uq[names(no_coverage)], no_coverage)
+    expect_true(startsWith(skipped_lines(result),
+                           "Measured test coverage was not computed: coverage could not be measured"))
+
+  })
+
+  it("lets the interval builder's tripwire stop the member", {
+
+    setup <- fsc()$setup
+    local_mocked_bindings(
+      fit_uq            = function(...) list(sentinel = "fit_uq() ran"),
+      predict_intervals = function(...) abort_horizons("Rows misaligned.", kind = "internal")
+    )
+
+    expect_error(run_with_uq(setup), "Rows misaligned.", fixed = TRUE,
+                 class = "horizons_error_internal")
 
   })
 
@@ -944,6 +1019,251 @@ describe("fit_single_config() - measured coverage when it cannot be measured (#1
                                        config_id = "cfg_001", outcome_range = c(0, Inf))
 
     expect_identical(coverage, no_coverage)
+
+  })
+
+})
+
+
+## =========================================================================
+## A search space that fits the budget
+## =========================================================================
+## 20 wavenumbers keep 12 predictors past the raw step's edge trim, so a
+## plsr member's num_comp takes 12 values.
+
+describe("fit_single_config() - a search space that fits the budget", {
+
+  run_plsr <- function(final_bayesian_iter) {
+
+    setup    <- make_fit_setup(n_wn = 20)
+    searched <- FALSE
+
+    local_mocked_bindings(bayes_search = function(...) {
+      searched <<- TRUE
+      list(results = list(...)$initial, n_dropped = 0L)
+    })
+
+    result <- fit_single_config(
+      config_row          = make_fit_config(model = "plsr"),
+      split_F             = setup$split_F,
+      cv_resamples        = setup$folds,
+      role_map            = setup$role_map,
+      best_params_eval    = NULL,
+      final_bayesian_iter = final_bayesian_iter,
+      grid_size           = 2L,
+      seed                = 42L
+    )
+
+    list(result = result, searched = searched)
+
+  }
+
+  it("grids every point and runs no Bayesian search, with no warning, when the space has no more points than both together", {
+
+    got <- run_plsr(25L)
+
+    expect_identical(got$result$status, "success")
+    expect_false(got$searched)
+    expect_identical(got$result$start_grid_size, 12L)
+    expect_false(any(grepl("Bayesian search", got$result$warnings, fixed = TRUE)))
+
+  })
+
+  it("still searches a space with more points than the budget", {
+
+    got <- run_plsr(5L)
+
+    expect_identical(got$result$status, "success")
+    expect_true(got$searched)
+    expect_identical(got$result$start_grid_size, 2L)
+
+  })
+
+})
+
+
+## =========================================================================
+## The warnings of the chosen candidate (#109)
+## =========================================================================
+## The re-tune's grid is fixed, with mtry = 50 above the predictors: ranger
+## warns for those candidates only. The choice is fixed at mtry = 2, and the
+## recipe warns at every prep. `stages` stands in for the reading of tune's
+## grid schedule when given.
+
+describe("fit_single_config() - the warnings of the chosen candidate (#109)", {
+
+  run_fixed_grid <- function(stages = NULL) {
+
+    setup <- fsc()$setup
+    fixed <- tibble::tibble(mtry = c(50L, 2L, 50L, 3L), min_n = c(5L, 5L, 2L, 2L))
+
+    if (!is.null(stages)) local_mocked_bindings(grid_model_stages = stages)
+
+    warn_recipe <- function(config_row, train_data, role_map, ...) {
+      recipes::recipe(SOC ~ ., data = train_data) |>
+        recipes::update_role("sample_id", new_role = "id") |>
+        recipes::step_BoxCox(recipes::all_predictors())
+    }
+
+    local_mocked_bindings(
+      build_recipe         = warn_recipe,
+      build_warmstart_grid = function(...) fixed,
+      select_complete      = function(results, ...) {
+        cm <- tune::collect_metrics(results)
+        utils::head(cm[cm$mtry == 2L, c("mtry", "min_n", ".config")], 1)
+      }
+    )
+
+    fit_single_config(
+      config_row          = make_fit_config(),
+      split_F             = setup$split_F,
+      cv_resamples        = setup$folds,
+      role_map            = setup$role_map,
+      best_params_eval    = make_fit_best_params(),
+      final_bayesian_iter = 0L,
+      grid_size           = 4L,
+      seed                = 42L
+    )
+
+  }
+
+  it("leaves out the warnings of candidates its re-tune did not choose, and keeps the recipe's", {
+
+    result <- run_fixed_grid()
+
+    expect_identical(result$status, "success")
+    expect_identical(result$best_params$mtry, 2L)
+    expect_false(any(grepl("columns were requested", result$warnings, fixed = TRUE)))
+    expect_true(any(grepl("Non-positive values in selected variable", result$warnings, fixed = TRUE)))
+
+  })
+
+  it("keeps every grid candidate's warnings, and says why, when tune's grid schedule has another shape", {
+
+    result <- run_fixed_grid(stages = function(...) {
+      stop("tune's grid schedule has no model_stage column", call. = FALSE)
+    })
+
+    expect_identical(result$status, "success")
+    expect_true(any(grepl("columns were requested", result$warnings, fixed = TRUE)))
+    expect_true(paste0("The warnings of every grid candidate are shown, not only the chosen one's: ",
+                       "tune's grid schedule has no model_stage column.") %in% result$warnings)
+
+  })
+
+})
+
+
+## =========================================================================
+## UQ and AD as units of their own (#145)
+## =========================================================================
+## A failure inside either costs the member only what it computes, is named
+## in a skipped warning the member raises, and a tripwire inside stops the
+## member. The test rows stand in for the calibration set.
+
+describe("fit_single_config() - UQ and AD as units of their own (#145)", {
+
+  run_addons <- function(setup = fsc()$setup, debug = FALSE, ...) {
+
+    fit_single_config(
+      config_row          = make_fit_config(),
+      split_F             = setup$split_F,
+      cv_resamples        = setup$folds,
+      calib_data          = rsample::testing(setup$split_F),
+      role_map            = setup$role_map,
+      best_params_eval    = make_fit_best_params(mtry = 2L),
+      final_bayesian_iter = 0L,
+      grid_size           = 2L,
+      allow_par           = FALSE,
+      seed                = 42L,
+      debug               = debug,
+      ...
+    )
+
+  }
+
+  skipped_lines <- function(result) {
+    records <- attr(result, "unit_records")
+    records$message[records$class %in% "horizons_warning_skipped"]
+  }
+
+  it("keeps the member without intervals when the quantile forest fails, and says why", {
+
+    ## Only the quantile forest fails: the member's own rf runs on ranger too
+    real_ranger <- ranger::ranger
+    local_mocked_bindings(ranger = function(...) {
+      if (isTRUE(list(...)$quantreg)) stop("forest failed")
+      real_ranger(...)
+    }, .package = "ranger")
+
+    result <- run_addons(compute_uq = TRUE, min_calib_rows = 5L)
+
+    expect_equal(result$status, "success")
+    expect_null(result$uq)
+    expect_false(is.null(result$fitted_workflow))
+
+    line <- skipped_lines(result)
+    expect_length(line, 1L)
+    expect_true(startsWith(line, "Prediction intervals (UQ) were not computed: Quantile forest failed: forest failed"))
+    expect_true(any(startsWith(result$warnings, "Prediction intervals (UQ) were not computed")))
+
+  })
+
+  it("keeps the member without an applicability domain when its data cannot support one, and says why", {
+
+    ## The test rows, fewer than the default min_calib_rows, are the
+    ## calibration set; the member is fitted as before
+    result <- run_addons(compute_ad = TRUE)
+
+    expect_equal(result$status, "success")
+    expect_null(result$ad)
+    expect_true(startsWith(skipped_lines(result),
+                           "The applicability domain (AD) was not computed: The calibration set has"))
+
+  })
+
+  it("stops the member at a tripwire inside UQ: the out-of-fold rows past the mold", {
+
+    ## The mold read a row short, so the last out-of-fold .row indexes no
+    ## training row
+    real_mold <- mold_predictors
+    local_mocked_bindings(mold_predictors = function(wf) real_mold(wf)[-1, , drop = FALSE])
+
+    expect_error(run_addons(compute_uq = TRUE, min_calib_rows = 5L), "Out-of-fold rows",
+                 class = "horizons_error_internal")
+
+  })
+
+  it("stops at an add-on's failure under debug, rather than skipping it", {
+
+    local_mocked_bindings(fit_ad = function(...) stop("the domain broke"))
+
+    err <- expect_error(run_addons(compute_ad = TRUE, debug = TRUE), "the domain broke", fixed = TRUE)
+
+    ## The error itself, not one horizons wrapped it in
+    expect_s3_class(err, "simpleError")
+    expect_false(inherits(err, "horizons_error"))
+
+  })
+
+  it("records the AD covariance's warning for fewer samples than features on the member's row", {
+
+    ## 60 wavenumbers keep 52 predictors past the raw step's edge trim, more
+    ## than the 45 training rows
+    setup  <- make_fit_setup(n_wn = 60)
+    result <- run_addons(setup, compute_ad = TRUE, min_calib_rows = 5L, min_ad_rows = 5L)
+
+    expect_equal(result$status, "success")
+    expect_false(is.null(result$ad))
+    expect_true(any(grepl("AD covariance estimated with fewer samples than features",
+                          result$warnings, fixed = TRUE)))
+
+    ## Not a horizons topic, so it stays on the row and is not lifted; it is
+    ## the member's record, as every add-on record the member keeps is
+    records <- attr(result, "unit_records")
+    covariance <- grepl("fewer samples than features", records$message, fixed = TRUE)
+    expect_false(any(startsWith(records$class[covariance], "horizons_warning_")))
+    expect_identical(unique(records$unit[covariance]), "member")
 
   })
 

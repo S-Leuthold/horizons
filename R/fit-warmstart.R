@@ -294,54 +294,51 @@ point_in_grid <- function(point, grid) {
 
 #' Warm-Start Bayesian Optimization
 #'
-#' Orchestrates the re-tuning sequence for fit():
-#' 1. Build warm-start grid via `build_warmstart_grid()`
-#' 2. Evaluate grid via `tune::tune_grid()`
-#' 3. If `bayesian_iter > 0`, refine via `tune::tune_bayes()` seeded from
-#'    the grid results
-#' 4. Select best params via `tune::select_best(metric = "rmse")`
+#' The re-tuning sequence of a `fit()` member, run inside its unit:
+#' 1. Evaluate the starting grid ([build_warmstart_grid()]) with
+#'    `tune::tune_grid()`. A result in which every model failed fails the
+#'    member, with tune's cause (`check_tune_result()`), and so does a grid
+#'    with no candidate scored on every fold (#101).
+#' 2. If `bayesian_iter > 0`, refine with `bayes_search()`, which keeps what
+#'    it finished when it fails, and says so (#209).
+#' 3. Choose the hyperparameters by RMSE among the candidates scored on every
+#'    fold (`select_complete()`).
 #'
 #' @param workflow A tidymodels workflow (recipe + model spec, not fitted).
 #' @param cv_resamples A `vfold_cv` object.
-#' @param best_params Single-row tibble from evaluate's `select_best()`.
+#' @param initial_grid The starting grid, from [build_warmstart_grid()].
 #' @param param_set Finalized `parameters` object.
 #' @param bayesian_iter Integer. Bayesian iterations after grid. 0 = grid only.
 #' @param metric_set A `yardstick::metric_set`.
 #' @param allow_par Logical. Passed to tune control functions.
+#' @param recipe The member's untrained recipe, to reproduce a step's failure
+#'   inside tune with its class; `NULL` when it was prepped before tuning.
+#' @param debug Logical. Stop at the first failure rather than fall back.
 #'
-#' @return List with:
-#'   - `tune_results`: The final tuning result object
-#'   - `best_params`: Single-row tibble of best hyperparameters
-#'   - `fallback_used`: Logical, TRUE if grid fallback was used
-#'   - `grid_points`: Integer, the number of points in the starting grid
-#'     (the space-filling grid when `fallback_used` is TRUE)
-#'   - `bayes_failed`: Logical, TRUE when `bayesian_iter > 0` and the
-#'     Bayesian search errored or produced no iteration past the grid, so the
-#'     grid's choice is kept
-#'   - `bayes_error`: Character, why, when `bayes_failed` is TRUE; NULL
-#'     otherwise
-#'   - `error`: Character, present only when the grid failed, in which case
-#'     `tune_results` and `best_params` are NULL. When every model failed it
-#'     carries the most frequent distinct error note from `.notes`.
+#' @return List with `tune_results` (the result the hyperparameters were
+#'   chosen from), `best_params` (single-row tibble, with `.config`), `grid`
+#'   (`initial_grid`, which the member reads its notes through, #109) and
+#'   `n_dropped` (the candidates the Bayesian search proposed and tune
+#'   dropped, scored on no fold).
 #'
 #' @keywords internal
 tune_warmstart_bayes <- function(workflow,
-                                  cv_resamples,
-                                  best_params,
-                                  param_set,
-                                  bayesian_iter,
-                                  grid_size  = WARMSTART_GRID_SIZE,
-                                  metric_set,
-                                  allow_par = FALSE) {
+                                 cv_resamples,
+                                 initial_grid,
+                                 param_set,
+                                 bayesian_iter,
+                                 metric_set,
+                                 allow_par = FALSE,
+                                 recipe    = NULL,
+                                 debug     = FALSE) {
 
-  ## --- Phase 1: Build warm-start grid and run tune_grid -------------------
+  n_folds <- nrow(cv_resamples)
 
-  initial_grid <- build_warmstart_grid(best_params, param_set,
-                                       max_points = grid_size)
-  fallback_used <- !usable_best_params(best_params, param_set)
+  ## --- Phase 1: the starting grid --------------------------------------------
 
-  grid_result <- safely_execute(
-    tune::tune_grid(
+  grid_results <- unit_step("warm_start_grid", {
+
+    results <- suppressMessages(tune::tune_grid(
       workflow,
       resamples = cv_resamples,
       grid      = initial_grid,
@@ -351,99 +348,56 @@ tune_warmstart_bayes <- function(workflow,
         allow_par     = allow_par,
         parallel_over = "resamples"   # what tune resolves NULL to here; explicit for visibility, no behaviour change
       )
-    ),
-    log_error          = FALSE,
-    capture_conditions = TRUE
-  )
-
-  if (!is.null(grid_result$error)) {
-
-    return(list(
-      tune_results  = NULL,
-      best_params   = NULL,
-      fallback_used = fallback_used,
-      grid_points   = nrow(initial_grid),
-      error         = condition_summary(grid_result$error)
     ))
 
-  }
+    check_tune_result(results, "all models failed during CV", recipe = recipe, debug = debug)
 
-  tune_results <- grid_result$result
-  bayes_failed <- FALSE
-  bayes_error  <- NULL
+    ## A candidate scored on fewer folds than were drawn takes no part in the
+    ## choice (#101), so a grid with none scored on every fold has nothing to
+    ## choose from.
+    if (nrow(rank_complete(results, "rmse", n_folds, debug)) == 0) {
 
-  ## Every model failed: tune_grid() returns rather than erroring, with the
-  ## reason only in .notes. Stop here with that reason, as
-  ## evaluate_single_config() does, instead of letting tune_bayes() and
-  ## select_best() fail on an empty grid with "All models failed" (#96).
-  if (any(grepl("All models failed", unlist(grid_result$warnings)))) {
+      abort_tune_failure(results, "no grid candidate was scored on every fold")
 
-    cause <- tune_failure_cause(tune_results)
+    }
 
-    return(list(
-      tune_results  = NULL,
-      best_params   = NULL,
-      fallback_used = fallback_used,
-      grid_points   = nrow(initial_grid),
-      error         = paste0("all models failed during CV",
-                             if (!is.null(cause)) paste0(" \u2014 ", cause))
-    ))
+    results
 
-  }
+  })
 
-  ## --- Phase 2: Bayesian optimization (if requested) ----------------------
+  ## --- Phase 2: Bayesian optimization (if requested) -----------------------
+
+  tune_results <- grid_results
+  n_dropped    <- 0L
 
   if (bayesian_iter > 0) {
 
-    bayes_result <- safely_execute(
-      tune::tune_bayes(
-        workflow,
-        resamples  = cv_resamples,
-        initial    = tune_results,
-        iter       = as.integer(bayesian_iter),
-        metrics    = metric_set,
-        param_info = param_set,
-        control    = tune::control_bayes(
-          no_improve    = BAYES_NO_IMPROVE_LIMIT,
-          allow_par     = allow_par,
-          parallel_over = "resamples"
-        )
-      ),
-      log_error          = FALSE,
-      capture_conditions = TRUE
-    )
+    search <- unit_step("warm_start_bayes", bayes_search(
+      workflow      = workflow,
+      resamples     = cv_resamples,
+      initial       = grid_results,
+      iter          = bayesian_iter,
+      param_info    = param_set,
+      metrics       = metric_set,
+      allow_par     = allow_par,
+      parallel_over = "resamples",
+      debug         = debug,
+      search        = "the warm-start Bayesian search",
+      grid          = "its starting grid"
+    ))
 
-    ## If the search fails, or returns without an iteration past the grid,
-    ## fall back to the grid results and say why (#209).
-    if (!is.null(bayes_result$error)) {
-
-      bayes_failed <- TRUE
-      bayes_error  <- condition_summary(bayes_result$error)
-
-    } else if (!bayes_iterations_ran(bayes_result$result)) {
-
-      bayes_failed <- TRUE
-      bayes_error  <- "the search produced no results"
-
-    } else {
-
-      tune_results <- bayes_result$result
-
-    }
+    tune_results <- search$results
+    n_dropped    <- search$n_dropped
 
   }
 
   ## --- Phase 3: Select best -----------------------------------------------
 
-  final_best <- tune::select_best(tune_results, metric = "rmse")
-
   list(
-    tune_results  = tune_results,
-    best_params   = final_best,
-    fallback_used = fallback_used,
-    grid_points   = nrow(initial_grid),
-    bayes_failed  = bayes_failed,
-    bayes_error   = bayes_error
+    tune_results = tune_results,
+    best_params  = unit_step("select_best", select_complete(tune_results, "rmse", n_folds, debug)),
+    grid         = initial_grid,
+    n_dropped    = n_dropped
   )
 
 }
@@ -464,5 +418,250 @@ tune_warmstart_bayes <- function(workflow,
 bayes_iterations_ran <- function(results) {
 
   ".iter" %in% names(results) && any(results$.iter > 0, na.rm = TRUE)
+
+}
+
+#' Run a Bayesian search from a grid, keeping what it finished
+#'
+#' @description
+#' The Bayesian stage of [evaluate_single_config()] and of `fit()`'s
+#' warm-start re-tune ([tune_warmstart_bayes()]). A search that fails keeps
+#' what it finished: the iterations that ran, or the grid's choice when none
+#' did, and says so with a substitution warning ([warn_in_unit()]) that the
+#' unit's row shows and the verb puts on its log (#209). That fallback is
+#' containment, so the kinds no unit contains still propagate, and under
+#' `debug` nothing is fallen back from.
+#'
+#' tune recovers from an error inside its search loop itself: an on.exit()
+#' returns the iterations finished so far, and that return cancels the
+#' unwind of any handler outside it. So the first error to leave tune's own
+#' catches is recorded as it is raised, with its trace, and what to do about
+#' it is decided once `tune_bayes()` has returned.
+#'
+#' A proposed candidate that fails in every fold leaves no note and raises
+#' nothing: tune drops it and says only "All models failed for: ..." in its
+#' iteration log, or "Couldn't estimate performance" when its resampling
+#' errored as a whole. The log is on in every mode, its output muffled, and
+#' read: the candidates it drops are counted (`n_dropped`) for the row's note
+#' on candidates left out ([incomplete_note()]), and under `debug` the first
+#' stops the call.
+#'
+#' A worker that dies during an iteration on the resamples axis never
+#' reaches here as future's error: tune's `try()` around the candidate's
+#' resampling catches it. future.apply reports it first, "Caught
+#' FutureInterruptError. Canceling all iterations ...", unclassed, as a
+#' warning before 1.21.0 and as a message since, so the death is read from
+#' that text in either ([worker_death_signal()]) and stops the run as
+#' systemic once `tune_bayes()` has returned, as a death in the grid stage
+#' does.
+#'
+#' The same on.exit() return swallows a Ctrl-C during the search, so the
+#' interrupt is recorded as it arrives and raised again once tune has
+#' returned: the search the user stopped is not kept as a result.
+#'
+#' The caller re-pins the seed first where it needs one, and grids a space
+#' small enough to try whole instead of searching it ([exhaustive_grid()]).
+#'
+#' @param workflow,resamples,initial,iter,param_info,metrics Passed to
+#'   [tune::tune_bayes()].
+#' @param allow_par,parallel_over Passed to [tune::control_bayes()].
+#' @param debug Logical(1). Stop at the first failure rather than fall back.
+#' @param search,grid Character(1). How the messages name the search and the
+#'   grid it started from, e.g. `"the Bayesian search"` and `"the grid"`.
+#' @return List with `results` (the tune result to choose from: the
+#'   search's when it ran an iteration, else `initial`) and `n_dropped` (the
+#'   candidates it proposed that tune dropped, scored on no fold).
+#' @keywords internal
+#' @noRd
+bayes_search <- function(workflow,
+                         resamples,
+                         initial,
+                         iter,
+                         param_info,
+                         metrics,
+                         allow_par     = FALSE,
+                         parallel_over = "resamples",
+                         debug         = FALSE,
+                         search        = "the Bayesian search",
+                         grid          = "the grid") {
+
+  stopped     <- NULL
+  all_failed  <- NULL
+  worker_died <- NULL
+  interrupted <- FALSE
+  n_dropped   <- 0L
+  search_cap  <- paste0(toupper(substr(search, 1, 1)), substring(search, 2))
+
+  read_death <- function(cnd) {
+    if (is.null(worker_died) && worker_death_signal(cnd)) worker_died <<- cnd
+  }
+
+  read_log <- function(m) {
+    read_death(m)
+    text <- cli::ansi_strip(conditionMessage(m))
+    if (grepl("All models failed for:", text, fixed = TRUE)) {
+      n_dropped <<- n_dropped + 1L
+      if (is.null(all_failed)) {
+        all_failed <<- trimws(sub("^.*?(All models failed for:)", "\\1", text, perl = TRUE))
+      }
+    } else if (grepl("Couldn't estimate performance", text, fixed = TRUE)) {
+      n_dropped <<- n_dropped + 1L
+    }
+  }
+
+  bayes_results <- tryCatch(
+    withCallingHandlers(
+      suppressMessages(withCallingHandlers(
+        tune::tune_bayes(
+          object     = workflow,
+          resamples  = resamples,
+          initial    = initial,
+          iter       = as.integer(iter),
+          param_info = param_info,
+          metrics    = metrics,
+          control    = tune::control_bayes(
+            save_pred     = FALSE,
+            save_workflow = FALSE,
+            verbose       = FALSE,
+            verbose_iter  = TRUE,
+            no_improve    = BAYES_NO_IMPROVE_LIMIT,
+            allow_par     = allow_par,
+            parallel_over = parallel_over
+          )
+        ),
+        message = read_log
+      )),
+      warning   = read_death,
+      error     = function(e) if (is.null(stopped)) stopped <<- rlang::cnd_entrace(e),
+      interrupt = function(i) interrupted <<- TRUE
+    ),
+    ## An error tune did not recover from (before its loop starts):
+    ## recorded above, nothing to keep
+    error = function(e) NULL
+  )
+
+  if (interrupted) rlang::interrupt()
+
+  if (!is.null(worker_died)) {
+
+    abort_horizons(
+      "A parallel worker stopped during {search}.",
+      kind = "run", class = "horizons_error_systemic", parent = worker_died
+    )
+
+  }
+
+  if (!is.null(stopped) && (debug || rlang::cnd_inherits(stopped, NEVER_CONTAINED))) {
+
+    stop(stopped)
+
+  }
+
+  if (debug && !is.null(all_failed)) {
+
+    ### tune's own line, capped as another package's text is
+    why <- condition_summary(all_failed)
+
+    abort_horizons(
+      "a candidate {search} proposed failed in every fold, and tune keeps no record of why: {why}",
+      kind = "run"
+    )
+
+  }
+
+  if (!is.null(bayes_results)) check_tune_result(bayes_results, failure = NULL, debug = debug)
+
+  cause  <- if (!is.null(stopped)) condition_summary(stopped)
+  n_iter <- if (!is.null(bayes_results) && bayes_iterations_ran(bayes_results)) {
+    max(bayes_results$.iter, na.rm = TRUE)
+  } else 0L
+
+  if (n_iter > 0) {
+
+    if (!is.null(cause)) {
+
+      warn_in_unit("substitution",
+                   "{search_cap} stopped early, after {n_iter} iteration{?s}, so the hyperparameters were chosen from those and {grid}: {cause}")
+
+    }
+
+    ## Candidates that failed in some folds leave their reasons in .notes,
+    ## which the caller reads
+    return(list(results = bayes_results, n_dropped = n_dropped))
+
+  }
+
+  if (!is.null(cause)) {
+
+    warn_in_unit("substitution",
+                 "{search_cap} failed, so the hyperparameters were chosen from {grid} alone: {cause}")
+
+  } else {
+
+    ## The search returned without an iteration past the grid: every
+    ## candidate failed in every fold, which tune drops without a note.
+    warn_in_unit("substitution",
+                 "{search_cap} produced no results, so the hyperparameters were chosen from {grid} alone.")
+
+  }
+
+  list(results = initial, n_dropped = n_dropped)
+
+}
+
+## ---------------------------------------------------------------------------
+## exhaustive_grid — a search space small enough to try whole
+## ---------------------------------------------------------------------------
+
+#' Every point of a search space that fits a budget
+#'
+#' @description
+#' When every tuned parameter takes whole-number values over a known range
+#' and the space has no more points than `budget`, the whole space as a grid;
+#' otherwise `NULL`. A search whose budget covers the space is then
+#' exhaustive: the grid is every point and no Bayesian stage runs, since
+#' tune's search, once it has no value left to propose, errors inside its
+#' loop rather than stopping.
+#'
+#' @param param_set A finalized `dials` parameter set.
+#' @param budget Numeric(1). The points the search would try: the grid's
+#'   size and the Bayesian iterations together.
+#' @return A tibble with one column per parameter (named by its id) and one
+#'   row per point, or `NULL`.
+#' @keywords internal
+#' @noRd
+exhaustive_grid <- function(param_set, budget) {
+
+  if (nrow(param_set) == 0) return(NULL)
+
+  values <- lapply(param_set$object, function(p) {
+
+    if (!inherits(p, "quant_param") || !identical(p$type, "integer") || !is.null(p$trans)) {
+      return(NULL)
+    }
+
+    lower <- p$range$lower
+    upper <- p$range$upper
+
+    ### unknown() until finalized
+    if (!is.numeric(lower) || !is.numeric(upper) || !is.finite(lower) || !is.finite(upper)) {
+      return(NULL)
+    }
+
+    if (!isTRUE(p$inclusive[[1]])) lower <- lower + 1
+    if (!isTRUE(p$inclusive[[2]])) upper <- upper - 1
+
+    if (upper < lower) return(NULL)
+
+    seq.int(as.integer(lower), as.integer(upper))
+
+  })
+
+  if (any(vapply(values, is.null, logical(1)))) return(NULL)
+  if (prod(lengths(values)) > budget) return(NULL)
+
+  names(values) <- param_set$id
+
+  tibble::as_tibble(expand.grid(values, KEEP.OUT.ATTRS = FALSE))
 
 }
