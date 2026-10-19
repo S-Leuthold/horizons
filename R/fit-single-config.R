@@ -226,8 +226,17 @@ fit_single_config <- function(config_row,
 
     best_params <- retune$best_params
 
-    ## The warnings tune kept for the chosen candidate (#109)
-    collect_notes_from(retune$tune_results)
+    ## The warnings tune kept for the chosen candidate (#109), as
+    ## evaluate_single_config() reads them: the re-tune returns the grid
+    ## tune_grid() ran, which tune numbers its notes' model stages by, and a
+    ## Bayesian result carries that grid's notes as iteration 0
+    candidate <- unit_step("select_best", candidate_of(retune$tune_results, best_params,
+                                                       retune$grid, wflow))
+    collect_notes_from(retune$tune_results, candidate = candidate)
+
+    unmapped <- unmapped_line(candidate)
+
+    if (!is.null(unmapped)) pin(unmapped)
 
     ## The candidates left out of the choice for a missing fold, the Bayesian
     ## search's dropped ones among them, as evaluate()'s row says (#101)

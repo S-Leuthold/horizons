@@ -342,12 +342,11 @@ evaluate_single_config <- function(config_row,
     candidate <- unit_step("select_best", candidate_of(final_tune_results, best_params, grid, wflow))
     collect_notes_from(final_tune_results, candidate = candidate)
 
-    if (!is.null(candidate$unmapped)) {
+    unmapped <- unmapped_line(candidate)
 
-      warning_log <- dplyr::bind_rows(warning_log, text_records(paste0(
-        "The warnings of every grid candidate are shown, not only the chosen one's: ",
-        candidate$unmapped, "."
-      ), pinned = TRUE))
+    if (!is.null(unmapped)) {
+
+      warning_log <- dplyr::bind_rows(warning_log, text_records(unmapped, pinned = TRUE))
 
     }
 

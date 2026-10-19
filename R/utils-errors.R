@@ -1185,6 +1185,22 @@ candidate_of <- function(results, best_params, grid, workflow) {
 
 }
 
+#' The row's line when a candidate's warnings could not be told apart
+#'
+#' @param candidate From [candidate_of()].
+#' @return Character(1), or `NULL` when the grid's schedule was read and the
+#'   row holds only the chosen candidate's warnings.
+#' @keywords internal
+#' @noRd
+unmapped_line <- function(candidate) {
+
+  if (is.null(candidate$unmapped)) return(NULL)
+
+  paste0("The warnings of every grid candidate are shown, not only the chosen one's: ",
+         candidate$unmapped, ".")
+
+}
+
 #' The model stages of a grid that hold a candidate
 #'
 #' @description

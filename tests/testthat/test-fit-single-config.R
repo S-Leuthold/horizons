@@ -1020,6 +1020,78 @@ describe("fit_single_config() - measured coverage when it cannot be measured (#1
 
 
 ## =========================================================================
+## The warnings of the chosen candidate (#109)
+## =========================================================================
+## The re-tune's grid is fixed, with mtry = 50 above the predictors: ranger
+## warns for those candidates only. The choice is fixed at mtry = 2, and the
+## recipe warns at every prep. `stages` stands in for the reading of tune's
+## grid schedule when given.
+
+describe("fit_single_config() - the warnings of the chosen candidate (#109)", {
+
+  run_fixed_grid <- function(stages = NULL) {
+
+    setup <- fsc()$setup
+    fixed <- tibble::tibble(mtry = c(50L, 2L, 50L, 3L), min_n = c(5L, 5L, 2L, 2L))
+
+    if (!is.null(stages)) local_mocked_bindings(grid_model_stages = stages)
+
+    warn_recipe <- function(config_row, train_data, role_map, ...) {
+      recipes::recipe(SOC ~ ., data = train_data) |>
+        recipes::update_role("sample_id", new_role = "id") |>
+        recipes::step_BoxCox(recipes::all_predictors())
+    }
+
+    local_mocked_bindings(
+      build_recipe         = warn_recipe,
+      build_warmstart_grid = function(...) fixed,
+      select_complete      = function(results, ...) {
+        cm <- tune::collect_metrics(results)
+        utils::head(cm[cm$mtry == 2L, c("mtry", "min_n", ".config")], 1)
+      }
+    )
+
+    fit_single_config(
+      config_row          = make_fit_config(),
+      split_F             = setup$split_F,
+      cv_resamples        = setup$folds,
+      role_map            = setup$role_map,
+      best_params_eval    = make_fit_best_params(),
+      final_bayesian_iter = 0L,
+      grid_size           = 4L,
+      seed                = 42L
+    )
+
+  }
+
+  it("leaves out the warnings of candidates its re-tune did not choose, and keeps the recipe's", {
+
+    result <- run_fixed_grid()
+
+    expect_identical(result$status, "success")
+    expect_identical(result$best_params$mtry, 2L)
+    expect_false(any(grepl("columns were requested", result$warnings, fixed = TRUE)))
+    expect_true(any(grepl("Non-positive values in selected variable", result$warnings, fixed = TRUE)))
+
+  })
+
+  it("keeps every grid candidate's warnings, and says why, when tune's grid schedule has another shape", {
+
+    result <- run_fixed_grid(stages = function(...) {
+      stop("tune's grid schedule has no model_stage column", call. = FALSE)
+    })
+
+    expect_identical(result$status, "success")
+    expect_true(any(grepl("columns were requested", result$warnings, fixed = TRUE)))
+    expect_true(paste0("The warnings of every grid candidate are shown, not only the chosen one's: ",
+                       "tune's grid schedule has no model_stage column.") %in% result$warnings)
+
+  })
+
+})
+
+
+## =========================================================================
 ## UQ and AD as units of their own (#145)
 ## =========================================================================
 ## A failure inside either costs the member only what it computes, is named
