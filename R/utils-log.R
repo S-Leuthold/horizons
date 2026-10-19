@@ -902,7 +902,7 @@ log_unit_records <- function(collector, records) {
     n_units <- length(ids)
 
     ### The text is substituted, not inlined, so braces in it stay text.
-    message <- c("{text}", "i" = "In {n_units} {unit}{cli::qty(n_units)}{?s}: {.val {ids}}.")
+    message <- c("{text}", "i" = unit_where(unit))
 
     if (identical(records$type[these][1], "note")) {
       log_note(collector, message, ids = ids)
@@ -913,6 +913,30 @@ log_unit_records <- function(collector, records) {
   }
 
   invisible(collector)
+
+}
+
+#' Where a unit's report came from, for its line on the log
+#'
+#' @description
+#' A configuration's or a member's line counts and names them ("In 2
+#' configurations: "a" and "b"."). An ensemble's units are one each, and
+#' are named for what they are rather than by their internal names ("In the
+#' ensemble's meta-learner ("penalized")."). Shared by [log_unit_records()]
+#' and `predict()`'s [log_foreign_warnings()].
+#'
+#' @param unit Character(1). The unit's name, from its records.
+#' @return Character(1): a cli template, interpolated where the line is
+#'   logged, with `unit`, `n_units` and `ids` in scope.
+#' @keywords internal
+#' @noRd
+unit_where <- function(unit) {
+
+  switch(unit,
+         meta_learner = "In the ensemble's meta-learner ({.val {ids}}).",
+         combination  = "In the ensemble's combination ({.val {ids}}).",
+         intervals    = "In the ensemble's prediction intervals.",
+         "In {n_units} {unit}{cli::qty(n_units)}{?s}: {.val {ids}}.")
 
 }
 

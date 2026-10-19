@@ -49,9 +49,10 @@ combination), \code{step}, \code{class} and \code{error_message}.}
 meta-learner could not be built, so there is no ensemble to return: a
 step of its tuning, its fit, its out-of-fold pass or the members'
 predictions of the test rows failed. The failure travels as \code{results},
-one row: \code{unit}, \code{id} (the method), \code{step}, \code{class} (the root cause's,
-e.g. \code{horizons_error_prediction_failed} for a member that cannot
-predict the test rows), \code{error_message} and \code{trace}.}
+one row shaped as \code{horizons_error_prediction_failed}'s: \code{unit}
+(\code{"meta_learner"}), \code{config_id} (\code{NA}), \code{step}, \code{class} (the root
+cause's, e.g. \code{horizons_error_prediction_failed} for a member that
+cannot predict the test rows), \code{error_message} and \code{trace}.}
 \item{\code{horizons_error_systemic}}{(run) \code{\link[=evaluate]{evaluate()}} stopped early,
 because the first configurations to run failed the same way across at
 least two models (the circuit breaker,

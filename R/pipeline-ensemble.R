@@ -293,7 +293,7 @@ ensemble <- function(x,
 
     cv_plus <- run_unit(
       fit_ensemble_uq(x, min_calib_rows = control$min_calib_rows),
-      unit = "cv_plus", id = method, debug = debug
+      unit = "intervals", id = "ensemble", debug = debug
     )
 
     records <- dplyr::bind_rows(records, cv_plus$records[cv_plus$records$type != "failure", , drop = FALSE])
@@ -462,10 +462,11 @@ render_ensemble_summary <- function(contract, rank_metric) {
 #' @description
 #' The meta-learner is `ensemble()`'s unit, and without it there is no
 #' ensemble to return. The failure travels on the condition as `results`, as
-#' `evaluate()`'s, `fit()`'s and `predict()`'s do: one row, with the unit,
-#' its id (the method), the step it failed in, the root cause's class, the
-#' message, and under `control_horizons(keep_traces = TRUE)` the backtrace as
-#' text.
+#' `evaluate()`'s, `fit()`'s and `predict()`'s do: one row, shaped as
+#' `horizons_error_prediction_failed`'s, with the unit (`"meta_learner"`),
+#' `config_id` (`NA`, the unit not being a configuration), the step it
+#' failed in, the root cause's class, the message, and under
+#' `control_horizons(keep_traces = TRUE)` the backtrace as text.
 #'
 #' @param records The meta-learner unit's records, holding its failure.
 #' @param method Character(1). The ensemble method.
@@ -480,7 +481,7 @@ abort_ensemble_failed <- function(records, method, call = rlang::caller_env()) {
 
   results <- tibble::tibble(
     unit          = failure$unit,
-    id            = failure$id,
+    config_id     = NA_character_,
     step          = failure$step,
     class         = failure$class,
     error_message = unit_failure_message(failure, outside = "Meta-learner"),

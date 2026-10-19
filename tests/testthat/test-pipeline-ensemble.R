@@ -508,6 +508,12 @@ describe("ensemble() - the meta-learner as one unit", {
     expect_match(err$results$error_message, "no meta-learner candidate was scored on every fold",
                  fixed = TRUE)
 
+    ## Shaped as predict()'s failures are: the unit, and no configuration
+    expect_identical(names(err$results),
+                     c("unit", "config_id", "step", "class", "error_message", "trace"))
+    expect_identical(err$results$unit, "meta_learner")
+    expect_identical(err$results$config_id, NA_character_)
+
   })
 
   it("keeps the warnings tune noted for the meta-learner in the ensemble's warnings", {

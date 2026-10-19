@@ -336,6 +336,8 @@ describe("fit_ensemble_uq() - coverage", {
     )
     expect_identical(w$log$verb, "ensemble")
     expect_identical(ens$log$topic[ens$log$verb == "ensemble"], "quality")
+    expect_match(ens$log$message[ens$log$verb == "ensemble"], "In the ensemble's prediction intervals.",
+                 fixed = TRUE)
 
   })
 
@@ -702,7 +704,7 @@ describe("ensemble UQ - degradation and gates", {
     out <- suppressWarnings(run_unit(
       compute_ensemble_uq(oof = oof, contract = ens_ref$ensemble,
                           optimize = FALSE, conformal_seed = 1307L),
-      unit = "cv_plus", id = "weighted"
+      unit = "intervals", id = "ensemble"
     ))
 
     expect_true(out$failed)

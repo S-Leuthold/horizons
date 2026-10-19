@@ -529,6 +529,28 @@ describe("warn_in_unit() and log_unit_records()", {
 
   })
 
+  it("names an ensemble's units for what they are, not by their internal names", {
+
+    records <- dplyr::bind_rows(
+      run_unit(warn_in_unit("quality", "The meta-learner warned."), "meta_learner", "penalized")$records,
+      run_unit(warn_in_unit("quality", "The intervals warned."), "intervals", "ensemble")$records,
+      run_unit(warn_in_unit("quality", "The combination warned."), "combination", "weighted")$records
+    )
+
+    col <- log_open("ensemble")
+    log_unit_records(col, records)
+    log <- log_close(col)
+
+    expect_match(log$message, "The meta-learner warned. In the ensemble's meta-learner (\"penalized\").",
+                 fixed = TRUE, all = FALSE)
+    expect_match(log$message, "The intervals warned. In the ensemble's prediction intervals.",
+                 fixed = TRUE, all = FALSE)
+    expect_match(log$message, "The combination warned. In the ensemble's combination (\"weighted\").",
+                 fixed = TRUE, all = FALSE)
+    expect_false(any(grepl("meta_learner|In 1 ", log$message)))
+
+  })
+
 })
 
 describe("unit_failure_message()", {

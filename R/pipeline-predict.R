@@ -1516,7 +1516,7 @@ log_foreign_warnings <- function(collector, records) {
     ### The text is substituted, not inlined, so braces in it stay text.
     log_warning(collector, "quality", c(
       "A warning arose while predicting: {text}",
-      "i" = "In {n_units} {unit}{cli::qty(n_units)}{?s}: {.val {ids}}."
+      "i" = unit_where(unit)
     ), ids = ids)
 
   }

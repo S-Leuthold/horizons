@@ -167,9 +167,10 @@ check_arg <- function(check,
 #'     meta-learner could not be built, so there is no ensemble to return: a
 #'     step of its tuning, its fit, its out-of-fold pass or the members'
 #'     predictions of the test rows failed. The failure travels as `results`,
-#'     one row: `unit`, `id` (the method), `step`, `class` (the root cause's,
-#'     e.g. `horizons_error_prediction_failed` for a member that cannot
-#'     predict the test rows), `error_message` and `trace`.}
+#'     one row shaped as `horizons_error_prediction_failed`'s: `unit`
+#'     (`"meta_learner"`), `config_id` (`NA`), `step`, `class` (the root
+#'     cause's, e.g. `horizons_error_prediction_failed` for a member that
+#'     cannot predict the test rows), `error_message` and `trace`.}
 #'   \item{`horizons_error_systemic`}{(run) [evaluate()] stopped early,
 #'     because the first configurations to run failed the same way across at
 #'     least two models (the circuit breaker,
