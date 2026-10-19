@@ -71,11 +71,15 @@
 #' lowest of 50 is biased low, and `evaluate()`'s folds, which rerun the step
 #' on each analysis set, measure the configuration.
 #'
-#' On an outcome the spectra do not carry, CARS can do slightly worse than
-#' no selection: it always returns a subset, and on noise it keeps the bands
-#' whose noise happens to line up with the outcome. Compare a CARS
-#' configuration against `feature_selection = "none"`, which `evaluate()`'s
-#' nested folds report honestly.
+#' CARS is not expected to beat no selection. On soil MIR spectra (organic
+#' carbon, in cross-validation with the selection nested), it was level with
+#' no selection at 200 samples and more, and trailed it by about 4% RMSE at
+#' 100 samples, where CARS fits about 80 rows. On an outcome the spectra do
+#' not carry it does slightly worse, since it always returns a subset and on
+#' noise keeps the bands whose noise happens to line up with the outcome.
+#' Compare a CARS configuration against `feature_selection = "none"`:
+#' `evaluate()`'s folds rerun the selection on each analysis set, so their
+#' metrics show whether it costs accuracy on your data.
 #'
 #' With fewer than two bands left after the near-constant ones are dropped,
 #' there is nothing to select between: the step keeps them, records
