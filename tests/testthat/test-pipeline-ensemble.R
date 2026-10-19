@@ -373,6 +373,66 @@ describe("ensemble() - predict namespaces", {
 })
 
 ## =========================================================================
+## ensemble() — a member's warning while it scores the test rows
+## =========================================================================
+## The members predict the test rows as units, which record their warnings;
+## until ensemble() records them itself, an engine's warning reaches the
+## caller as it did before.
+
+describe("ensemble() - a member's warning on the test rows", {
+
+  it("reaches the caller, once per member that raised it", {
+
+    fitted <- ens_fitted()
+    real   <- utils::getS3method("predict", "workflow")
+
+    local_mocked_s3_method("predict", "workflow", function(object, new_data, ...) {
+      warning("the member engine says hello", call. = FALSE)
+      real(object, new_data, ...)
+    })
+
+    w <- collect_warnings(
+      ensemble(fitted, method = "weighted", optimize = FALSE, compute_uq = FALSE),
+      "the member engine says hello"
+    )$warnings
+
+    expect_length(w, length(unique(fitted$models$cv_predictions$config_id)))
+
+  })
+
+})
+
+describe("ensemble() - a member that cannot predict the test rows", {
+
+  ## The build stops, in ensemble()'s words and frame, for the weighted engine
+  ## and for the tuned meta-learners' shared scaffold
+
+  for (method in c("weighted", "penalized")) {
+
+    it(sprintf("stops the build and reports ensemble()'s call (%s)", method), {
+
+      fitted <- ens_fitted()
+      broken <- fitted$models$best_config
+      fitted$models$workflows[[broken]] <- "not a workflow"
+
+      ## The meta-learner's folds warn on the fixture's small n (rsample)
+      err <- expect_error(
+        suppressWarnings(ensemble(fitted, method = method, optimize = FALSE, compute_uq = FALSE)),
+        class = "horizons_error_prediction_failed"
+      )
+
+      expect_identical(rlang::call_name(err$call), "ensemble")
+      expect_match(conditionMessage(err), "The ensemble could not be built: 1 of its", fixed = TRUE)
+      expect_match(conditionMessage(err), "could not predict the test rows", fixed = TRUE)
+      expect_identical(err$results$config_id, broken)
+
+    })
+
+  }
+
+})
+
+## =========================================================================
 ## predict.horizons_ensemble() — output contract
 ## =========================================================================
 ## Predicting the held-out Split-F test set is the natural round-trip: it is
@@ -527,16 +587,27 @@ describe("predict.horizons_ensemble() - intervals and degradation", {
 
   })
 
-  it("compute_uq = FALSE returns point-only with an informative message", {
+  it("compute_uq = FALSE returns point-only, silently, by default", {
 
     test_set <- ens_test_set()
     ens0     <- ens_built("weighted", compute_uq = FALSE)
 
-    expect_message(
-      p <- predict(ens0, test_set, interval = TRUE),
-      regexp = "intervals are not available"
-    )
+    expect_no_message(expect_no_warning(p <- predict(ens0, test_set)))
     expect_false(".pred_lower" %in% names(p))
+
+  })
+
+  it("compute_uq = FALSE gives NA bounds, and says so once, when interval = TRUE asks for them (#145)", {
+
+    test_set <- ens_test_set()
+    ens0     <- ens_built("weighted", compute_uq = FALSE)
+
+    w <- expect_warning(p <- predict(ens0, test_set, interval = TRUE),
+                        class = "horizons_warning_skipped")
+
+    expect_match(conditionMessage(w), "the ensemble has no CV+ bundle", fixed = TRUE)
+    expect_true(all(is.na(p$.pred_lower)))
+    expect_true(all(is.finite(p$.pred)))
 
   })
 
@@ -561,6 +632,21 @@ describe("predict.horizons_ensemble() - intervals and degradation", {
 
 describe("predict.horizons_ensemble() - aborts on a failing member", {
 
+  it("names every member that cannot predict", {
+
+    test_set <- ens_test_set()
+    ens      <- ens_built("weighted")
+
+    broken <- ens$ensemble$weights$member[1:2]
+    for (m in broken) ens$models$workflows[[m]] <- "not a workflow"
+
+    err <- expect_error(predict(ens, test_set, interval = FALSE),
+                        class = "horizons_error_prediction_failed")
+
+    expect_setequal(err$results$config_id, broken)
+
+  })
+
   it("does not renormalize; aborts when a member workflow cannot predict", {
 
     test_set <- ens_test_set()
@@ -569,10 +655,118 @@ describe("predict.horizons_ensemble() - aborts on a failing member", {
     broken_member <- ens$ensemble$weights$member[1]
     ens$models$workflows[[broken_member]] <- "not a workflow"
 
-    ## The abort carries no package class.
-    expect_error(predict(ens, test_set, interval = FALSE),
-                 paste0("Prediction failed for config '", broken_member, "'"),
-                 fixed = TRUE)
+    err <- expect_error(predict(ens, test_set, interval = FALSE),
+                        class = "horizons_error_prediction_failed")
+
+    expect_identical(err$results$config_id, broken_member)
+    expect_identical(err$results$unit, "configuration")
+    expect_identical(err$results$step, "bake")
+    expect_match(conditionMessage(err), "it combines every member", fixed = TRUE)
+
+  })
+
+})
+
+## =========================================================================
+## predict.horizons_ensemble() — rows a member cannot use, and the combine
+## =========================================================================
+## A row any member could not use is NA in the ensemble's output, for every
+## method: an xgb meta-model would read the member's NA as missing and return
+## a number. The combination is one unit; when it fails there is nothing to
+## return.
+
+describe("predict.horizons_ensemble() - flagged rows and the combination", {
+
+  pred_cols <- function(test_set) setdiff(names(test_set), "sample_id")
+
+  for (m in c("weighted", "xgb")) {
+
+    it(paste0("returns NA for a row a member cannot use, and the rest as without it, for ", m), {
+
+      test_set <- ens_test_set()
+      ens      <- ens_built(m)
+
+      bad <- test_set
+      bad[2, intersect(pred_cols(test_set), ens$models$predictor_schema)] <- NA_real_
+
+      w <- collect_warnings(p <- predict(ens, bad, interval = TRUE),
+                            "could not be predicted")$warnings
+
+      expect_length(w, 1L)
+      expect_identical(w[[1]]$log$ids[[1]], bad$sample_id[2])
+
+      expect_equal(nrow(p), nrow(bad))
+      expect_true(is.na(p$.pred[2]) && is.na(p$.pred_lower[2]))
+
+      alone <- suppressWarnings(predict(ens, test_set[-2, ], interval = TRUE))
+      expect_equal(p[-2, ], alone, ignore_attr = TRUE)
+
+    })
+
+  }
+
+  it("returns a row flagged on arrival as NA", {
+
+    test_set <- ens_test_set()
+    ens      <- ens_built("weighted")
+
+    flagged       <- test_set
+    flagged$.flag <- c("standardize", rep(NA_character_, nrow(test_set) - 1L))
+
+    w <- expect_warning(p <- predict(ens, flagged, interval = FALSE),
+                        class = "horizons_warning_flagged")
+
+    expect_match(conditionMessage(w), "flagged on arrival", fixed = TRUE)
+    expect_true(is.na(p$.pred[1]))
+    expect_true(all(is.finite(p$.pred[-1])))
+
+  })
+
+  for (m in c("weighted", "penalized")) {
+
+    it(paste0("returns zero rows with its columns for zero rows of new_data, for ", m), {
+
+      test_set <- ens_test_set()
+      ens      <- ens_built(m)
+
+      p <- predict(ens, test_set[0, ], interval = TRUE)
+
+      expect_equal(nrow(p), 0L)
+      expect_named(p, c("sample_id", ".pred", ".pred_lower", ".pred_upper", ".interval_width"))
+
+    })
+
+  }
+
+  it("returns its predictions in new_data's row order", {
+
+    test_set <- ens_test_set()
+    ens      <- ens_built("weighted")
+
+    set.seed(11)
+    shuffled <- test_set[sample(nrow(test_set)), ]
+
+    p <- predict(ens, shuffled, interval = FALSE)
+
+    expect_identical(p$sample_id, shuffled$sample_id)
+
+  })
+
+  it("aborts with the combination's failure when the combination cannot run", {
+
+    test_set <- ens_test_set()
+    ens      <- ens_built("weighted")
+
+    local_mocked_bindings(combine_ensemble_weighted = function(...) stop("the weights broke"))
+
+    err <- expect_error(predict(ens, test_set, interval = FALSE),
+                        class = "horizons_error_prediction_failed")
+
+    expect_identical(err$results$step, "combine")
+    expect_identical(err$results$unit, "combination")
+    expect_identical(err$results$config_id, NA_character_)
+    expect_match(conditionMessage(err), "its combination failed", fixed = TRUE)
+    expect_match(conditionMessage(err), "the weights broke (combination)", fixed = TRUE)
 
   })
 
@@ -582,45 +776,73 @@ describe("predict.horizons_ensemble() - aborts on a failing member", {
 ## Members' applicability domain and intervals are not computed
 ## =========================================================================
 ## The member helpers keep only .pred, so a member's AD was baked, scored and
-## dropped: wasted work, and AD warnings about columns the ensemble never
-## returns. A member AD bundle that no longer matches the member's features
-## makes the distance fail, which is what would warn if it were computed. A
-## member's UQ bundle is likewise never read: the ensemble's intervals come
-## from its own CV+ bundle.
+## dropped: wasted work. A member's UQ bundle is likewise never read: the
+## ensemble's intervals come from its own CV+ bundle. Each member here carries
+## an AD bundle and a UQ bundle, so a member helper that asked for either
+## would compute it.
+
+describe("predict.horizons_ensemble() - what its units report", {
+
+  it("raises a horizons warning a member raised while predicting, once, naming the members, as on a fit", {
+
+    test_set <- ens_test_set()
+    ens      <- ens_built("weighted")
+    real     <- utils::getS3method("predict", "workflow")
+
+    local_mocked_s3_method("predict", "workflow", function(object, new_data, ...) {
+      warn_in_unit("substitution", "A member substituted something.")
+      real(object, new_data, ...)
+    })
+
+    w <- collect_warnings(predict(ens, test_set, interval = FALSE),
+                          "A member substituted something")$warnings
+
+    expect_length(w, 1L)
+    expect_s3_class(w[[1]], "horizons_warning_substitution")
+    expect_setequal(w[[1]]$log$ids[[1]], ens$ensemble$weights$member)
+
+  })
+
+})
 
 describe("ensemble() and predict.horizons_ensemble() - member AD and intervals", {
 
-  it("raises no AD warning from a broken member AD bundle, and never reads a member's UQ bundle", {
+  it("never computes a member's applicability domain or intervals, in ensemble() or predict()", {
 
     fitted   <- ens_fitted()
     test_set <- ens_test_set()
 
-    broken <- fitted
-    member <- names(broken$models$workflows)[1]
+    with_bundles <- fitted
+    member       <- names(with_bundles$models$workflows)[1]
 
-    broken$models$ad <- stats::setNames(list(list(
+    with_bundles$models$ad <- stats::setNames(list(list(
       centroid      = c(wn_0 = 0),
       cov_matrix    = matrix(1, dimnames = list("wn_0", "wn_0")),
       ad_thresholds = c(q25 = 1, q50 = 2, q75 = 3, ood = 4)
     )), member)
 
     ## Not a UQ bundle beyond the level and the scores the fit validator
-    ## checks. Member scoring asks for no intervals, so it is never read.
-    broken$models$uq <- stats::setNames(list(list(method = "not a bundle", level_default = 0.9,
-                                                  scores = seq_len(9))), member)
+    ## checks: reading it would fail the intervals.
+    with_bundles$models$uq <- stats::setNames(list(list(method = "not a bundle", level_default = 0.9,
+                                                        scores = seq_len(9))), member)
 
-    expect_no_warning(
-      ens <- keep_only_warning(
-        ensemble(broken, method = "weighted", optimize = FALSE),
-        "horizons_ad_warning"
-      ),
-      class = "horizons_ad_warning"
+    calls <- c(intervals = 0L, ad = 0L)
+    local_mocked_bindings(
+      predict_intervals = function(...) {
+        calls[["intervals"]] <<- calls[["intervals"]] + 1L
+        stop("a member's intervals were computed")
+      },
+      predict_ad = function(...) {
+        calls[["ad"]] <<- calls[["ad"]] + 1L
+        stop("a member's applicability domain was computed")
+      }
     )
 
-    expect_no_warning(
-      keep_only_warning(predict(ens, test_set, interval = FALSE), "horizons_ad_warning"),
-      class = "horizons_ad_warning"
-    )
+    ens <- suppressWarnings(ensemble(with_bundles, method = "weighted", optimize = FALSE))
+    p   <- suppressWarnings(predict(ens, test_set))
+
+    expect_identical(calls, c(intervals = 0L, ad = 0L))
+    expect_true(all(is.finite(p$.pred)))
 
   })
 
@@ -641,6 +863,31 @@ describe("predict.horizons_ensemble() - preflight", {
     err <- expect_error(predict.horizons_ensemble(fitted, test_set),
                         class = "horizons_error_validation")
     expect_true(any(grepl("is not a <horizons_ensemble> object", err$findings, fixed = TRUE)))
+
+  })
+
+  it("refuses new_data whose sample_ids repeat, before predicting any member", {
+
+    test_set <- ens_test_set()
+    ens      <- ens_built("weighted")
+
+    dup <- rbind(test_set, test_set[1, ])
+
+    ## A member that would fail shows that no member is predicted first
+    ens$models$workflows[[ens$ensemble$weights$member[1]]] <- "not a workflow"
+
+    err <- expect_error(predict(ens, dup, interval = FALSE), class = "horizons_error_input")
+    expect_match(conditionMessage(err), "must be unique to predict from an ensemble", fixed = TRUE)
+    expect_match(conditionMessage(err), test_set$sample_id[1], fixed = TRUE)
+    expect_identical(rlang::call_name(err$call), "predict")
+
+  })
+
+  it("refuses an interval that is not TRUE, FALSE or NULL", {
+
+    expect_error(predict(ens_built("weighted"), ens_test_set(), interval = 1),
+                 "`interval` must be `TRUE`, `FALSE`, or `NULL`", fixed = TRUE,
+                 class = "horizons_error_input")
 
   })
 
@@ -674,7 +921,7 @@ describe("predict.horizons_ensemble() - preflight", {
 ## Same warning, same conditions, same wording as predict.horizons_fit(): the
 ## ensemble's CV+ intervals inherit the calibration rows' non-exchangeability
 ## exactly as the member intervals do. Both paths call
-## warn_selection_intervals(), so the two cannot drift apart.
+## log_interval_quality(), so the two cannot drift apart.
 
 describe("predict.horizons_ensemble() - selected training set", {
 
@@ -693,7 +940,7 @@ describe("predict.horizons_ensemble() - selected training set", {
     ens      <- ens_selected()
 
     warns <- testthat::capture_warnings(
-      p <- suppressMessages(predict(ens, test_set, interval = TRUE))
+      p <- predict(ens, test_set, interval = TRUE)
     )
 
     expect_equal(sum(grepl("Conformal coverage is not guaranteed", warns)), 1L)
@@ -719,8 +966,7 @@ describe("predict.horizons_ensemble() - selected training set", {
     test_set <- ens_test_set()
 
     warns <- testthat::capture_warnings(
-      suppressMessages(predict(ens_selected(uq = FALSE), test_set,
-                               interval = TRUE))
+      predict(ens_selected(uq = FALSE), test_set, interval = TRUE)
     )
 
     expect_false(any(grepl("Conformal coverage", warns)))
@@ -733,7 +979,7 @@ describe("predict.horizons_ensemble() - selected training set", {
     ens      <- ens_built("weighted")
 
     warns <- testthat::capture_warnings(
-      suppressMessages(predict(ens, test_set, interval = TRUE))
+      predict(ens, test_set, interval = TRUE)
     )
 
     expect_false(any(grepl("Conformal coverage", warns)))
@@ -771,14 +1017,14 @@ describe("predict.horizons_ensemble() - trimmed members (#77)", {
     caught   <- list()
 
     withCallingHandlers(
-      suppressMessages(predict(trimmed_ensemble(), test_set, interval = TRUE)),
+      predict(trimmed_ensemble(), test_set, interval = TRUE),
       warning = function(w) {
         caught[[length(caught) + 1L]] <<- w
         invokeRestart("muffleWarning")
       }
     )
 
-    trim_warnings <- Filter(function(w) inherits(w, "horizons_response_trim_warning"), caught)
+    trim_warnings <- Filter(function(w) inherits(w, "horizons_warning_quality"), caught)
 
     expect_length(trim_warnings, 1L)
     expect_match(conditionMessage(trim_warnings[[1]]),
@@ -792,7 +1038,7 @@ describe("predict.horizons_ensemble() - trimmed members (#77)", {
 
     quiet <- function(ens, interval) {
       warns <- testthat::capture_warnings(
-        suppressMessages(predict(ens, test_set, interval = interval))
+        predict(ens, test_set, interval = interval)
       )
       !any(grepl("training fences", warns))
     }
@@ -843,8 +1089,8 @@ describe("ensemble() weighted - test-set combine", {
     ## predictions fall below the floor at 0 and some stay above it
     real_members <- predict_members_on_test
     shifted      <- NULL
-    local_mocked_bindings(predict_members_on_test = function(object, members) {
-      mp       <- real_members(object, members)
+    local_mocked_bindings(predict_members_on_test = function(object, members, ...) {
+      mp       <- real_members(object, members, ...)
       mp$.pred <- mp$.pred - 20
       shifted <<- mp
       mp

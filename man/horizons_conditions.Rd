@@ -39,6 +39,13 @@ failed in \code{\link[=evaluate]{evaluate()}}. The per-configuration results tra
 condition as \code{results}.}
 \item{\code{horizons_error_all_members_failed}}{(run) Every member failed in
 \code{fit()}. The per-member results travel as \code{results}.}
+\item{\code{horizons_error_prediction_failed}}{(run) \code{predict()} had nothing
+to return: the configuration asked for, or every one of them, could
+not predict, or an ensemble's member or its combination could not;
+or \code{\link[=ensemble]{ensemble()}} could not be built, because a member could not predict
+the test rows. One row per failure travels as \code{results}: its \code{unit} (\code{"configuration"}, or
+\code{"combination"} for an ensemble's), \code{config_id} (\code{NA} for the
+combination), \code{step}, \code{class} and \code{error_message}.}
 \item{\code{horizons_error_systemic}}{(run) \code{\link[=evaluate]{evaluate()}} stopped early,
 because the first configurations to run failed the same way across at
 least two models (the circuit breaker,
@@ -66,11 +73,15 @@ needs a model package that is not installed.}
 asked ran, under a documented fallback.}
 \item{\code{horizons_warning_quality}}{Everything ran as asked, but the result
 is weaker than its output shows (small folds, every member below the
-prune threshold).}
+prune threshold). \code{predict()} raises each distinct warning another
+package raised while predicting under this topic, naming the
+configurations (or an ensemble's units) that raised it.}
 \item{\code{horizons_warning_skipped}}{Something asked for did not run, such
 as a member's prediction intervals.}
 \item{\code{horizons_warning_flagged}}{A step kept samples it could not use;
-modelling leaves them out.}
+modelling leaves them out. From \code{predict()}, the rows it returned \code{NA}
+because they were flagged on arrival (\code{.flag}) or were not finite after
+a configuration's recipe.}
 \item{\code{horizons_warning_partial_failure}}{Some units failed and the rest
 returned.}
 \item{\code{horizons_warning_coverage}}{The data only partly covers what is

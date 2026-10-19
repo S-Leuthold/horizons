@@ -363,6 +363,20 @@ describe("fit_ensemble_uq() - coverage", {
 
 describe("predict.horizons_ensemble() - CV+ intervals", {
 
+  it("returns a prediction and its interval for a single row of new_data (#235)", {
+
+    test_set <- ens_test_set()
+    ens_ref  <- ens_built("weighted")
+
+    p <- predict(ens_ref, test_set[1, ], interval = TRUE)
+
+    expect_equal(nrow(p), 1L)
+    expect_identical(p$sample_id, test_set$sample_id[1])
+    expect_true(is.finite(p$.pred_lower) && is.finite(p$.pred_upper))
+    expect_lte(p$.pred_lower, p$.pred_upper)
+
+  })
+
   it("interval columns key by sample_id: shuffled rows give identical bounds", {
 
     test_set <- ens_test_set()
@@ -500,7 +514,7 @@ describe("predict.horizons_ensemble() - arguments in ...", {
 
     w <- expect_warning(
       p <- predict(ens_ref, test_set, level = 0.95),
-      class = "horizons_input_warning"
+      class = "horizons_warning_input"
     )
 
     expect_match(conditionMessage(w), "0.9.", fixed = TRUE)
@@ -517,8 +531,8 @@ describe("predict.horizons_ensemble() - arguments in ...", {
     no_uq$ensemble["uq"] <- list(NULL)
 
     w <- expect_warning(
-      suppressMessages(predict(no_uq, test_set, level = 0.95)),
-      class = "horizons_input_warning"
+      predict(no_uq, test_set, level = 0.95),
+      class = "horizons_warning_input"
     )
 
     expect_match(conditionMessage(w), paste0(DEFAULT_UQ_LEVEL, "."), fixed = TRUE)
@@ -532,7 +546,7 @@ describe("predict.horizons_ensemble() - arguments in ...", {
 
     expect_error(
       predict(ens_ref, test_set, config = "all"),
-      class  = "horizons_input_error",
+      class  = "horizons_error_input",
       regexp = "config"
     )
 
@@ -702,7 +716,7 @@ describe("ensemble UQ - degradation and gates", {
         assemble(uq, member_pred, outcome_range)
       })
 
-      p <- suppressWarnings(suppressMessages(predict(ens, test_set, interval = TRUE)))
+      p <- suppressWarnings(predict(ens, test_set, interval = TRUE))
       expect_identical(seen$outcome_range, range)
 
       wide <- tidyr::pivot_wider(
@@ -770,7 +784,7 @@ describe("ensemble UQ - degradation and gates", {
 
   })
 
-  it("predict_ensemble_intervals warns and returns NULL when a fold model cannot predict", {
+  it("predict_ensemble_intervals fails at its fold step when a fold model cannot predict", {
 
     test_set <- ens_test_set()
     ens_ref  <- ens_built("weighted")
@@ -786,16 +800,14 @@ describe("ensemble UQ - degradation and gates", {
     ## recycles it back to the original row count instead of shortening it.
     broken_uq$fold_models[[1]] <- broken_uq$fold_models[[1]][1, ]
 
-    result <- NULL
-    expect_warning(
-      result <- predict_ensemble_intervals(broken_uq, mp),
-      class = "horizons_interval_warning"
-    )
-    expect_null(result)
+    out <- run_unit(predict_ensemble_intervals(broken_uq, mp), "intervals", "ensemble")
+
+    expect_true(out$failed)
+    expect_identical(out$records$step[out$records$type == "failure"], "cv_plus_folds")
 
   })
 
-  it("predict.horizons_ensemble(interval = TRUE) warns end to end and still returns point predictions", {
+  it("predict.horizons_ensemble(interval = TRUE) keeps the predictions, leaves the bounds NA, and says so once", {
 
     test_set <- ens_test_set()
     ens_ref  <- ens_built("weighted")
@@ -805,13 +817,45 @@ describe("ensemble UQ - degradation and gates", {
       broken_ens$ensemble$uq$fold_models[[1]][1, ]
 
     p <- NULL
-    expect_warning(
+    w <- expect_warning(
       p <- predict(broken_ens, test_set, interval = TRUE),
-      class = "horizons_interval_warning"
+      class = "horizons_warning_skipped"
     )
 
-    expect_true(".pred" %in% names(p))
-    expect_false(".pred_lower" %in% names(p))
+    expect_match(conditionMessage(w),
+                 "Prediction intervals (CV+) were not computed: CV+ fold predictions failed:",
+                 fixed = TRUE)
+    expect_true(all(is.finite(p$.pred)))
+    expect_true(all(c(".pred_lower", ".pred_upper", ".interval_width") %in% names(p)))
+    expect_true(all(is.na(p$.pred_lower)))
+
+  })
+
+  it("names the rows whose CV+ bounds are NA, keeping the rest (#145)", {
+
+    test_set <- ens_test_set()
+    ens_ref  <- ens_built("weighted")
+    real     <- predict_fold_model
+
+    ## The first fold model cannot predict the first new row
+    calls <- 0L
+    local_mocked_bindings(predict_fold_model = function(fold_model, method, member_mat, ...) {
+      out <- real(fold_model, method, member_mat, ...)
+      calls <<- calls + 1L
+      if (calls == 1L) out[1] <- NA_real_
+      out
+    })
+
+    w <- collect_warnings(p <- predict(ens_ref, test_set, interval = TRUE),
+                          "CV\\+\\) were not computed for")$warnings
+
+    expect_length(w, 1L)
+    expect_s3_class(w[[1]], "horizons_warning_skipped")
+
+    missing <- p$sample_id[is.na(p$.pred_lower)]
+    expect_length(missing, 1L)
+    expect_identical(w[[1]]$log$ids[[1]], missing)
+    expect_true(all(is.finite(p$.pred)))
 
   })
 

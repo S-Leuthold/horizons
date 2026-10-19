@@ -186,11 +186,23 @@ describe("predict.horizons_fit() - config selection", {
 
   })
 
+  it("refuses a config that is not a single string, as predict()", {
+
+    err <- expect_error(predict(fitted_fixture, new_df, config = c("best", "all")),
+                        class = "horizons_error_input")
+    expect_match(conditionMessage(err), "`config` must be a single string", fixed = TRUE)
+    expect_identical(rlang::call_name(err$call), "predict")
+
+    expect_error(predict(fitted_fixture, new_df, config = 1L),
+                 class = "horizons_error_input")
+
+  })
+
   it("an unknown config_id errors informatively", {
 
     expect_error(
       predict(fitted_fixture, new_df, config = "nonsense"),
-      "not among the fitted models"
+      "not among the fitted models", class = "horizons_error_input"
     )
 
   })
@@ -281,15 +293,51 @@ describe("predict.horizons_fit() - intervals", {
 
   })
 
-  it("degrades to point-only (no error) when a config has no UQ bundle", {
+  it("returns point predictions, silently, for a config with no UQ bundle by default", {
 
     ## Strip the UQ bundle to simulate compute_uq = FALSE for this config.
     no_uq <- fitted_fixture
     no_uq$models["uq"] <- list(NULL)
 
-    p <- predict(no_uq, new_df, interval = TRUE)
+    expect_no_warning(p <- predict(no_uq, new_df))
     expect_false(".pred_lower" %in% names(p))
     expect_true(".pred" %in% names(p))
+
+  })
+
+  it("gives NA bounds, and says so once, when interval = TRUE asks for intervals a config has no bundle for (#145)", {
+
+    no_uq <- fitted_fixture
+    no_uq$models["uq"] <- list(NULL)
+
+    w <- expect_warning(p <- predict(no_uq, new_df, interval = TRUE),
+                        class = "horizons_warning_skipped")
+
+    expect_identical(w$log$ids[[1]], "cfg_001")
+    expect_match(conditionMessage(w), "no UQ bundle", fixed = TRUE)
+    expect_true(all(c(".pred_lower", ".pred_upper", ".interval_width") %in% names(p)))
+    expect_true(all(is.na(p$.pred_lower)))
+    expect_true(all(is.finite(p$.pred)))
+
+  })
+
+  it("under config = 'all', fills the bounds of the configs with a bundle and leaves the rest NA", {
+
+    two <- add_member_copy(fitted_fixture)
+    two$models$uq[["cfg_002"]] <- NULL
+
+    expect_no_warning(p <- predict(two, new_df, config = "all"))
+
+    expect_true(all(!is.na(p$.pred_lower[p$config_id == "cfg_001"])))
+    expect_true(all(is.na(p$.pred_lower[p$config_id == "cfg_002"])))
+
+  })
+
+  it("refuses an interval that is not TRUE, FALSE or NULL", {
+
+    expect_error(predict(fitted_fixture, new_df, interval = "yes"),
+                 "`interval` must be `TRUE`, `FALSE`, or `NULL`", fixed = TRUE,
+                 class = "horizons_error_input")
 
   })
 
@@ -366,6 +414,40 @@ describe("predict.horizons_fit() - input validation", {
 
   })
 
+  it("refuses new_data that is neither a horizons_data nor a data frame, as predict()", {
+
+    err <- expect_error(predict(fitted_fixture, as.matrix(make_new_spectra())),
+                        class = "horizons_error_input")
+    expect_identical(rlang::call_name(err$call), "predict")
+    expect_snapshot(predict(fitted_fixture, list(a = 1)), error = TRUE)
+
+  })
+
+  it("refuses a horizons_data new_data with no predictor columns", {
+
+    new_df <- make_new_spectra()
+    hd <- new_horizons_data(
+      analysis = new_df,
+      role_map = tibble::tibble(variable = names(new_df),
+                                role     = c(rep("meta", ncol(new_df) - 1L), "id"))
+    )
+
+    err <- expect_error(predict(fitted_fixture, hd), class = "horizons_error_input")
+    expect_identical(rlang::call_name(err$call), "predict")
+    expect_snapshot(predict(fitted_fixture, hd), error = TRUE)
+
+  })
+
+  it("refuses an abstain_ood that is not TRUE or FALSE", {
+
+    new_df <- make_new_spectra()
+
+    expect_error(predict(fitted_fixture, new_df, abstain_ood = NA),
+                 "`abstain_ood` must be `TRUE` or `FALSE`", fixed = TRUE,
+                 class = "horizons_error_input")
+
+  })
+
   it("accepts a horizons_data object as new_data", {
 
     ## Wrap new spectra as a minimal horizons_data (id + predictors), plus a
@@ -412,11 +494,15 @@ describe("predict.horizons_fit() - arguments in ...", {
 
     w <- expect_warning(
       p <- predict(fitted_fixture, new_df, level = 0.95),
-      class = "horizons_input_warning"
+      class = "horizons_warning_input"
     )
 
     expect_match(conditionMessage(w), "0.9.", fixed = TRUE)
     expect_equal(p, reference)
+
+    ## Raised at the end, carrying its record
+    expect_identical(w$log$topic, "input")
+    expect_identical(w$log$verb, "predict")
 
   })
 
@@ -428,7 +514,7 @@ describe("predict.horizons_fit() - arguments in ...", {
 
     w <- expect_warning(
       predict(relevelled, new_df, level = 0.95),
-      class = "horizons_input_warning"
+      class = "horizons_warning_input"
     )
 
     expect_match(conditionMessage(w), "0.8.", fixed = TRUE)
@@ -438,7 +524,7 @@ describe("predict.horizons_fit() - arguments in ...", {
 
     w <- expect_warning(
       predict(no_uq, new_df, level = 0.95),
-      class = "horizons_input_warning"
+      class = "horizons_warning_input"
     )
 
     expect_match(conditionMessage(w), paste0(DEFAULT_UQ_LEVEL, "."), fixed = TRUE)
@@ -449,14 +535,14 @@ describe("predict.horizons_fit() - arguments in ...", {
 
     expect_error(
       predict(fitted_fixture, new_df, intervals = FALSE),
-      class  = "horizons_input_error",
+      class  = "horizons_error_input",
       regexp = "intervals"
     )
 
     ## The stats convention's `newdata` is not `new_data`.
     expect_error(
       predict(fitted_fixture, newdata = new_df),
-      class  = "horizons_input_error",
+      class  = "horizons_error_input",
       regexp = "newdata"
     )
 
@@ -473,16 +559,19 @@ describe("predict.horizons_fit() - arguments in ...", {
 
 describe("check_predict_dots()", {
 
-  it("does not evaluate the dots", {
+  it("does not evaluate the dots, and collects the level warning rather than raising it", {
 
-    expect_warning(
-      check_predict_dots(level = stop("evaluated"), .level_default = 0.9),
-      class = "horizons_input_warning"
+    col <- log_open("predict")
+
+    expect_no_warning(
+      check_predict_dots(level = stop("evaluated"), .level_default = 0.9, .collector = col)
     )
+    expect_identical(log_rows(col)$topic, "input")
 
     expect_error(
-      check_predict_dots(foo = stop("evaluated"), .level_default = 0.9),
-      class  = "horizons_input_error",
+      check_predict_dots(foo = stop("evaluated"), .level_default = 0.9,
+                         .collector = log_open("predict")),
+      class  = "horizons_error_input",
       regexp = "foo"
     )
 
@@ -491,8 +580,8 @@ describe("check_predict_dots()", {
   it("refuses unnamed arguments, showing them", {
 
     expect_error(
-      check_predict_dots(0.95, .level_default = 0.9),
-      class  = "horizons_input_error",
+      check_predict_dots(0.95, .level_default = 0.9, .collector = log_open("predict")),
+      class  = "horizons_error_input",
       regexp = "0.95"
     )
 
@@ -501,31 +590,251 @@ describe("check_predict_dots()", {
   it("aborts rather than warns when level comes with an unknown argument", {
 
     expect_error(
-      check_predict_dots(level = 0.95, foo = 1, .level_default = 0.9),
-      class = "horizons_input_error"
+      check_predict_dots(level = 0.95, foo = 1, .level_default = 0.9,
+                         .collector = log_open("predict")),
+      class = "horizons_error_input"
     )
 
   })
 
   it("is silent on empty dots", {
 
-    expect_no_condition(check_predict_dots(.level_default = 0.9))
+    col <- log_open("predict")
+    expect_no_condition(check_predict_dots(.level_default = 0.9, .collector = col))
+    expect_length(col$events, 0)
 
   })
 
   it("checks user arguments that share a name with its own", {
 
+    col <- log_open("predict")
+
     expect_error(
-      check_predict_dots(call = 1, .level_default = 0.9),
-      class  = "horizons_input_error",
+      check_predict_dots(call = 1, .level_default = 0.9, .collector = col),
+      class  = "horizons_error_input",
       regexp = "call"
     )
 
     expect_error(
-      check_predict_dots(level_default = 0.95, .level_default = 0.9),
-      class  = "horizons_input_error",
+      check_predict_dots(level_default = 0.95, .level_default = 0.9, .collector = col),
+      class  = "horizons_error_input",
       regexp = "level_default"
     )
+
+    expect_error(
+      check_predict_dots(collector = 1, .level_default = 0.9, .collector = col),
+      class  = "horizons_error_input",
+      regexp = "collector"
+    )
+
+  })
+
+})
+
+
+## ---------------------------------------------------------------------------
+## Rows that cannot be predicted: bake first, predict the rest
+## ---------------------------------------------------------------------------
+## A row flagged on arrival, or non-finite after a configuration's recipe, is
+## returned as NA in every column and named in one flagged warning; no engine,
+## forest or distance sees it (conditions.md, rows are removed only where
+## modelling happens).
+
+describe("predict.horizons_fit() - one row of new_data", {
+
+  it("returns one prediction with its interval and AD for a single row", {
+
+    one <- make_new_spectra(n = 1)
+
+    p <- predict(fitted_fixture, one)
+
+    expect_equal(nrow(p), 1L)
+    expect_true(is.finite(p$.pred) && is.finite(p$.pred_lower) && is.finite(p$.pred_upper))
+    expect_lte(p$.pred_lower, p$.pred_upper)
+    expect_false(is.na(p$.ad_flag))
+
+  })
+
+})
+
+
+describe("predict.horizons_fit() - zero rows of new_data", {
+
+  it("returns zero rows with the call's columns, running no engine", {
+
+    seen <- 0L
+    local_mocked_s3_method("predict", "workflow", function(object, new_data, ...) {
+      seen <<- seen + 1L
+      stop("no engine should run")
+    })
+
+    zero <- make_new_spectra()[0, ]
+
+    p <- predict(fitted_fixture, zero)
+
+    expect_equal(nrow(p), 0L)
+    expect_named(p, c("sample_id", ".pred", ".pred_lower", ".pred_upper", ".interval_width",
+                      ".ad_distance", ".ad_flag"))
+    expect_identical(seen, 0L)
+
+    two <- add_member_copy(fitted_fixture)
+    expect_true("config_id" %in% names(predict(two, zero, config = "all", interval = FALSE)))
+
+  })
+
+  it("still says an ignored level is ignored", {
+
+    expect_warning(predict(fitted_fixture, make_new_spectra()[0, ], level = 0.95),
+                   class = "horizons_warning_input")
+
+  })
+
+})
+
+
+describe("predict.horizons_fit() - flagged rows", {
+
+  new_df <- make_new_spectra()
+  wn     <- grep("^wn_", names(new_df), value = TRUE)
+
+  ## The rows each call of the workflow's predict method was given
+  local_engine_rows <- function(env = parent.frame()) {
+    seen <- new.env()
+    seen$rows <- integer(0)
+    real <- utils::getS3method("predict", "workflow")
+    local_mocked_s3_method("predict", "workflow", function(object, new_data, ...) {
+      seen$rows <- c(seen$rows, nrow(new_data))
+      real(object, new_data, ...)
+    }, frame = env)
+    seen
+  }
+
+  as_flagged_data <- function(df, flag) {
+    df$.flag <- flag
+    new_horizons_data(
+      analysis = df,
+      role_map = tibble::tibble(
+        variable = c(wn, "sample_id", ".flag"),
+        role     = c(rep("predictor", length(wn)), "id", "meta")
+      )
+    )
+  }
+
+  it("returns rows flagged on arrival as NA, unpredicted, and names them once", {
+
+    flag   <- rep(NA_character_, nrow(new_df))
+    flag[c(2, 5)] <- "standardize"
+    seen   <- local_engine_rows()
+
+    w <- expect_warning(p <- predict(fitted_fixture, as_flagged_data(new_df, flag)),
+                        class = "horizons_warning_flagged")
+
+    expect_identical(seen$rows, nrow(new_df) - 2L)
+    expect_setequal(w$log$ids[[1]], new_df$sample_id[c(2, 5)])
+    expect_match(conditionMessage(w), "flagged on arrival", fixed = TRUE)
+
+    expect_true(all(is.na(as.matrix(p[c(2, 5), c(".pred", ".pred_lower", ".pred_upper", ".ad_distance")]))))
+
+    ## The other rows are what they are without the flagged ones
+    alone <- predict(fitted_fixture, new_df[-c(2, 5), ])
+    expect_equal(p[-c(2, 5), ], alone, ignore_attr = TRUE)
+
+  })
+
+  it("returns a row non-finite after the recipe as NA, naming it once over every configuration", {
+
+    bad <- new_df
+    bad[3, wn] <- NA_real_
+    two <- add_member_copy(fitted_fixture)
+
+    w <- collect_warnings(p <- predict(two, bad, config = "all"), "could not be predicted")$warnings
+
+    expect_length(w, 1L)
+    expect_identical(w[[1]]$log$ids[[1]], bad$sample_id[3])
+    expect_identical(w[[1]]$log$n, 1L)
+    expect_match(conditionMessage(w[[1]]), "not finite after the recipe of", fixed = TRUE)
+
+    row3 <- p[p$sample_id == bad$sample_id[3], ]
+    expect_true(all(is.na(as.matrix(row3[, c(".pred", ".pred_lower", ".ad_distance")]))))
+    expect_true(all(is.finite(p$.pred[p$sample_id != bad$sample_id[3]])))
+
+  })
+
+  it("predicts nothing when every row is bad, and keeps every column", {
+
+    flag <- rep("standardize", nrow(new_df))
+    seen <- local_engine_rows()
+
+    w <- expect_warning(p <- predict(fitted_fixture, as_flagged_data(new_df, flag)),
+                        class = "horizons_warning_flagged")
+
+    expect_length(seen$rows, 0L)
+    expect_equal(nrow(p), nrow(new_df))
+    expect_true(all(c(".pred", ".pred_lower", ".ad_distance", ".ad_flag") %in% names(p)))
+    expect_true(all(is.na(p$.pred)))
+
+  })
+
+  it("fails a configuration at its bake step when the bake cannot run", {
+
+    local_mocked_bindings(bake_predictors = function(...) stop("the recipe broke"))
+
+    err <- expect_error(predict(fitted_fixture, new_df), class = "horizons_error_prediction_failed")
+    expect_identical(err$results$step, "bake")
+
+  })
+
+})
+
+
+## ---------------------------------------------------------------------------
+## What predict() reports, and where (decision 1)
+## ---------------------------------------------------------------------------
+## predict() returns predictions only. Its warnings are collected as it runs
+## and raised once per topic at its end, each carrying its record as the
+## field `log`; nothing is written to the object.
+
+describe("predict.horizons_fit() - what it reports", {
+
+  new_df <- make_new_spectra()
+
+  ## Three topics in one call: an ignored level (input), winsorized
+  ## predictions (applicability), intervals on a selected fit (quality)
+  noisy <- function() {
+    x <- fitted_fixture
+    x$models$response_bound    <- stats::median(predict(fitted_fixture, new_df)$.pred)
+    x$models$selection_present <- TRUE
+    x
+  }
+
+  it("raises each topic once, at the end, with its record", {
+
+    caught <- list()
+    p <- withCallingHandlers(
+      predict(noisy(), new_df, level = 0.95),
+      warning = function(w) {
+        caught[[length(caught) + 1L]] <<- w
+        invokeRestart("muffleWarning")
+      }
+    )
+
+    topics <- vapply(caught, function(w) w$log$topic, character(1))
+    expect_identical(sort(topics), c("applicability", "input", "quality"))
+    expect_true(all(vapply(caught, inherits, logical(1), what = "horizons_warning")))
+    expect_null(attr(p, "winsorized"))
+
+  })
+
+  it("under warn = 2, ends with the predictions on the error", {
+
+    x <- noisy()
+    reference <- suppressWarnings(predict(x, new_df))
+
+    withr::local_options(warn = 2)
+
+    err <- expect_error(predict(x, new_df), class = "horizons_error_promoted_warnings")
+    expect_identical(err$object, reference)
+    expect_setequal(err$log$topic, c("applicability", "quality"))
 
   })
 
@@ -607,19 +916,73 @@ describe("predict.horizons_fit() - response bound guardrail", {
     clamped_fixture <- fitted_fixture
     clamped_fixture$models$response_bound <- bound
 
-    expect_warning(
+    w <- expect_warning(
       p <- predict(clamped_fixture, new_df, interval = FALSE),
-      "winsorized"
+      "winsorized", class = "horizons_warning_applicability"
     )
 
     expect_true(all(p$.pred <= bound))
     expect_equal(nrow(p), nrow(new_df))
+
+    ## The record names the samples it clamped
+    clipped <- new_df$sample_id[p_raw$.pred > bound]
+    expect_gt(length(clipped), 0)
+    expect_setequal(w$log$ids[[1]], clipped)
+    expect_identical(w$log$n, length(clipped))
 
   })
 
   ## A fit without a response_bound was written by an earlier version; the
   ## door validator refuses it (#234), so there is no backward-compatible
   ## path to test.
+
+  it("raises one warning for every configuration it winsorized, naming each sample once", {
+
+    p_raw <- predict(fitted_fixture, new_df, interval = FALSE)
+    bound <- stats::median(p_raw$.pred)
+
+    two <- add_member_copy(fitted_fixture)
+    two$models$response_bound <- bound
+
+    warns <- collect_warnings(predict(two, new_df, config = "all", interval = FALSE),
+                              "winsorized")$warnings
+
+    expect_length(warns, 1L)
+    clipped <- new_df$sample_id[p_raw$.pred > bound]
+    ## n counts the samples, as every log row's n counts its ids; the
+    ## predictions per configuration are in the message
+    expect_setequal(warns[[1]]$log$ids[[1]], clipped)
+    expect_identical(warns[[1]]$log$n, length(clipped))
+    for (id in names(two$models$workflows)) {
+      expect_match(conditionMessage(warns[[1]]), sprintf('"%s" %d', id, length(clipped)),
+                   fixed = TRUE)
+    }
+
+  })
+
+  it("names only the predictions it serves: a sample abstained on is not reported as winsorized", {
+
+    ## Half the batch far out of domain, and a bound under every prediction,
+    ## so every row is over it
+    ood_df  <- new_df
+    wn      <- grep("^wn_", names(ood_df))
+    shifted <- 1:4
+    ood_df[shifted, wn] <- ood_df[shifted, wn] + 10
+
+    p_raw <- predict(fitted_fixture, ood_df, interval = FALSE)
+    low   <- fitted_fixture
+    low$models$response_bound <- min(p_raw$.pred) / 2
+
+    w <- collect_warnings(p <- predict(low, ood_df, interval = FALSE, abstain_ood = TRUE),
+                          "winsorized")$warnings
+
+    abstained <- is.na(p$.pred)
+    expect_true(any(abstained) && any(!abstained))
+
+    expect_length(w, 1L)
+    expect_setequal(w[[1]]$log$ids[[1]], ood_df$sample_id[!abstained])
+
+  })
 
   it("does not clamp interval bounds (only the point prediction)", {
 
@@ -724,46 +1087,67 @@ describe("predict.horizons_fit() - applicability domain", {
 
   })
 
-  it("one malformed spectrum costs that row its AD, not the whole batch", {
+  it("one malformed spectrum costs that row, not the whole batch's AD or abstention", {
 
     expect_true(has_ad(fitted_fixture))
 
-    ## Four out-of-domain spectra plus one that bakes to NA (the documented
-    ## step_transform_spectra failure path). Previously the single NA row made
-    ## predict_ad() return NULL for the batch, which silently removed the AD
-    ## columns AND the abstention the caller asked for.
+    ## Four out-of-domain spectra plus one that bakes to NA. Before #145's
+    ## predict side, the single NA row made the AD return NULL for the batch,
+    ## which silently removed the AD columns AND the abstention the caller
+    ## asked for. Now the row is returned NA, flagged, and the rest are scored.
     bad_df    <- make_new_spectra(n = 5)
     wn        <- grep("^wn_", names(bad_df))
     bad_df[, wn]    <- bad_df[, wn] + 10        # far out of domain
     bad_df[3, wn]   <- NA_real_                 # malformed spectrum
 
-    p <- suppressWarnings(
-      predict(fitted_fixture, bad_df, interval = FALSE, abstain_ood = TRUE)
-    )
+    flagged <- collect_warnings(
+      p <- predict(fitted_fixture, bad_df, interval = FALSE, abstain_ood = TRUE),
+      "could not be predicted"
+    )$warnings
 
     expect_true(all(c(".ad_distance", ".ad_flag") %in% names(p)))
     expect_equal(sum(!is.na(p$.ad_distance)), 4L)
-    expect_true(is.na(p$.ad_distance[3]))
+    expect_true(is.na(p$.ad_distance[3]) && is.na(p$.pred[3]))
 
     ## Abstention still applies to the four scored rows.
     expect_true(all(p$.ad_flag[-3] == "OOD"))
     expect_true(all(is.na(p$.pred[-3])))
 
+    expect_length(flagged, 1L)
+    expect_s3_class(flagged[[1]], "horizons_warning_flagged")
+    expect_identical(flagged[[1]]$log$ids[[1]], bad_df$sample_id[3])
+
   })
 
-  it("warns when abstain_ood is asked for and no AD is available", {
+  it("refuses abstain_ood at its door when a configuration predicted has no AD", {
 
     no_ad <- fitted_fixture
     no_ad$models["ad"] <- list(NULL)
 
-    expect_warning(
-      p <- predict(no_ad, new_df, interval = FALSE, abstain_ood = TRUE),
-      "`abstain_ood` was requested but no applicability-domain information is available",
-      fixed = TRUE, class = "horizons_ad_warning"
-    )
+    err <- expect_error(predict(no_ad, new_df, interval = FALSE, abstain_ood = TRUE),
+                        class = "horizons_error_input")
+    expect_match(conditionMessage(err), "needs an applicability domain for every configuration",
+                 fixed = TRUE)
+    expect_match(conditionMessage(err), "cfg_001", fixed = TRUE)
 
-    expect_false(".ad_flag" %in% names(p))
-    expect_true(all(!is.na(p$.pred)))          # nothing was abstained
+  })
+
+  it("refuses abstention under config = 'all' when any configuration has no AD, naming it and the ones that do", {
+
+    two <- add_member_copy(fitted_fixture)
+    two$models$ad[["cfg_002"]] <- NULL
+
+    expect_true(has_ad(two))
+    expect_null(two$models$ad[["cfg_002"]])
+
+    expect_error(predict(two, new_df, config = "all", interval = FALSE, abstain_ood = TRUE),
+                 "cfg_002", class = "horizons_error_input")
+    expect_snapshot(predict(two, new_df, config = "all", interval = FALSE, abstain_ood = TRUE),
+                    error = TRUE)
+
+    ## The configuration with an AD bundle abstains on its own
+    p <- predict(two, new_df, config = "cfg_001", interval = FALSE, abstain_ood = TRUE)
+    expect_true(all(c(".ad_distance", ".ad_flag") %in% names(p)))
 
   })
 
@@ -772,14 +1156,7 @@ describe("predict.horizons_fit() - applicability domain", {
     no_ad <- fitted_fixture
     no_ad$models["ad"] <- list(NULL)
 
-    warns <- testthat::capture_warnings(
-      predict(no_ad, new_df, interval = FALSE)
-    )
-
-    expect_false(any(grepl("abstain_ood", warns)))
-
-    expect_no_warning(predict(no_ad, new_df, interval = FALSE),
-                      class = "horizons_ad_warning")
+    expect_no_warning(predict(no_ad, new_df, interval = FALSE))
 
   })
 
@@ -847,7 +1224,7 @@ describe("predict.horizons_fit() - selected training set", {
 
     expect_warning(
       predict(selected_fixture, new_df, interval = TRUE),
-      class = "horizons_select_warning"
+      class = "horizons_warning_quality"
     )
 
   })
@@ -878,11 +1255,45 @@ describe("predict.horizons_fit() - selected training set", {
   it("is silent on a selected fit with no UQ, where no intervals are returned", {
 
     warns <- testthat::capture_warnings(
-      p <- predict(selected_no_uq, new_df, interval = TRUE)
+      p <- predict(selected_no_uq, new_df)
+    )
+
+    expect_length(warns, 0L)
+    expect_false(".pred_lower" %in% names(p))
+
+    ## Asked for explicitly, the bounds are NA, and the coverage is not
+    ## qualified
+    warns <- testthat::capture_warnings(predict(selected_no_uq, new_df, interval = TRUE))
+    expect_false(any(grepl("Conformal coverage", warns)))
+
+  })
+
+  it("is silent when the configuration predicted has no bundle, though another has one (#145)", {
+
+    ## The gate reads the intervals returned, not whether any configuration
+    ## of the object has a bundle
+    two <- add_member_copy(selected_fixture)
+    two$models$uq[["cfg_001"]] <- NULL
+
+    expect_true(has_uq(two))
+
+    warns <- testthat::capture_warnings(
+      p <- predict(two, new_df, config = "cfg_001", interval = TRUE)
     )
 
     expect_false(any(grepl("Conformal coverage", warns)))
-    expect_false(".pred_lower" %in% names(p))
+    expect_true(all(is.na(p$.pred_lower)))
+
+  })
+
+  it("is silent when the intervals could not be computed", {
+
+    broken <- selected_fixture
+    broken$models$uq[["cfg_001"]]$quantile_model <- structure(list(), class = "not_a_real_model")
+
+    warns <- testthat::capture_warnings(predict(broken, new_df, interval = TRUE))
+
+    expect_false(any(grepl("Conformal coverage", warns)))
 
   })
 
@@ -909,10 +1320,11 @@ describe("abort_on_missing_predict_packages() - missing package gate", {
 
     err <- tryCatch(
       abort_on_missing_predict_packages(list(horizonsFakePkgXYZ123 = "cubist")),
-      horizons_missing_predict_package = function(e) e
+      horizons_error_missing_predict_package = function(e) e
     )
 
-    expect_s3_class(err, "horizons_missing_predict_package")
+    expect_s3_class(err, "horizons_error_missing_predict_package")
+    expect_s3_class(err, "horizons_error_dependency")
     expect_match(conditionMessage(err), "horizonsFakePkgXYZ123")
     expect_match(conditionMessage(err), "cubist")
 
@@ -925,10 +1337,11 @@ describe("abort_on_missing_predict_packages() - missing package gate", {
         horizonsFakePkgXYZ123 = "cubist",
         horizonsFakePkgABC456 = "mars"
       )),
-      horizons_missing_predict_package = function(e) e
+      horizons_error_missing_predict_package = function(e) e
     )
 
-    expect_s3_class(err, "horizons_missing_predict_package")
+    expect_s3_class(err, "horizons_error_missing_predict_package")
+    expect_s3_class(err, "horizons_error_dependency")
     expect_match(conditionMessage(err), "horizonsFakePkgXYZ123")
     expect_match(conditionMessage(err), "horizonsFakePkgABC456")
 
@@ -1034,7 +1447,7 @@ requested_packages <- function(obj, config_ids) {
 
   testthat::with_mocked_bindings(
     ensure_predict_namespaces(obj, config_ids = config_ids),
-    abort_on_missing_predict_packages = function(needed_pkgs) needed <<- needed_pkgs
+    abort_on_missing_predict_packages = function(needed_pkgs, ...) needed <<- needed_pkgs
   )
 
   needed
@@ -1110,7 +1523,7 @@ describe("ensure_predict_namespaces() - per-model coverage", {
     expect_error(
       ensure_predict_namespaces(obj, config_ids = c("cfg_rf", "cfg_mars")),
       "horizonsFakePkgXYZ123",
-      class = "horizons_missing_predict_package"
+      class = "horizons_error_missing_predict_package"
     )
 
   })
@@ -1119,13 +1532,15 @@ describe("ensure_predict_namespaces() - per-model coverage", {
 
 
 ## ---------------------------------------------------------------------------
-## predict_intervals() — failure now warns instead of degrading silently (#65)
+## The intervals and the AD are units of their own (#65, #145)
 ## ---------------------------------------------------------------------------
-## Before this fix, any failure in the bake-then-quantile-predict step (e.g. a
+## Before #65, any failure in the bake-then-quantile-predict step (e.g. a
 ## missing ranger namespace on the quantile forest) degraded to NULL with no
-## message, so `interval = TRUE` silently came back with no interval columns.
+## message. Now each failure is the intervals unit's, recorded with its step:
+## the configuration keeps its predictions, its interval columns are NA, and
+## it is named in one skipped warning.
 
-describe("predict_intervals() - failure warns instead of degrading silently", {
+describe("predict_intervals() - a failure is the intervals unit's", {
 
   new_df <- make_new_spectra()
   point_pred <- rep(5, nrow(new_df))
@@ -1133,45 +1548,39 @@ describe("predict_intervals() - failure warns instead of degrading silently", {
   cfg_id <- names(fitted_fixture$models$workflows)[1]
   uq     <- fitted_fixture$models$uq[[cfg_id]]
 
+  failed_step <- function(out) out$records$step[out$records$type == "failure"]
+
   it("the fixture carries a UQ bundle, so the gate is exercised", {
 
     expect_false(is.null(uq))
 
   })
 
-  it("warns and returns NULL when the quantile model cannot predict", {
+  it("fails at its quantiles step when the quantile model cannot predict", {
 
     broken_uq <- uq
     broken_uq$quantile_model <- structure(list(), class = "not_a_real_model")
 
-    result <- NULL
+    out <- run_unit(predict_intervals(broken_uq, point_pred, new_df), "intervals", cfg_id)
 
-    expect_warning(
-      result <- predict_intervals(broken_uq, point_pred, new_df),
-      class = "horizons_interval_warning"
-    )
-
-    expect_null(result)
+    expect_true(out$failed)
+    expect_identical(failed_step(out), "uq_quantiles")
 
   })
 
-  it("warns and returns NULL when baking new data through the UQ recipe fails", {
+  it("fails at its bake step when baking new data through the UQ recipe fails", {
 
     broken_uq <- uq
     broken_uq$prepped_recipe <- "not a recipe"
 
-    result <- NULL
+    out <- run_unit(predict_intervals(broken_uq, point_pred, new_df), "intervals", cfg_id)
 
-    expect_warning(
-      result <- predict_intervals(broken_uq, point_pred, new_df),
-      class = "horizons_interval_warning"
-    )
-
-    expect_null(result)
+    expect_true(out$failed)
+    expect_identical(failed_step(out), "uq_bake")
 
   })
 
-  it("end to end: predict(interval = TRUE) warns and still returns point predictions", {
+  it("end to end: predict(interval = TRUE) keeps the predictions, leaves the bounds NA, and says so once", {
 
     broken_fixture <- fitted_fixture
     broken_fixture$models$uq[[cfg_id]]$quantile_model <-
@@ -1179,13 +1588,167 @@ describe("predict_intervals() - failure warns instead of degrading silently", {
 
     p <- NULL
 
-    expect_warning(
+    w <- expect_warning(
       p <- predict(broken_fixture, new_df, interval = TRUE),
-      class = "horizons_interval_warning"
+      class = "horizons_warning_skipped"
     )
 
-    expect_true(".pred" %in% names(p))
-    expect_false(".pred_lower" %in% names(p))
+    expect_match(conditionMessage(w),
+                 "Prediction intervals (UQ) were not computed: Interval quantiles failed:",
+                 fixed = TRUE)
+    expect_identical(w$log$ids[[1]], cfg_id)
+
+    expect_true(all(is.finite(p$.pred)))
+    expect_true(all(c(".pred_lower", ".pred_upper", ".interval_width") %in% names(p)))
+    expect_true(all(is.na(p$.pred_lower) & is.na(p$.pred_upper)))
+
+  })
+
+})
+
+
+## ---------------------------------------------------------------------------
+## Each configuration's predictions are one unit
+## ---------------------------------------------------------------------------
+## A configuration that cannot predict comes back as NA rows with one
+## partial_failure warning; when nothing can be predicted, predict() aborts
+## with the failures in results. A tripwire still stops the call.
+
+describe("predict.horizons_fit() - each configuration is one unit", {
+
+  new_df <- make_new_spectra()
+
+  broken_member <- function(fit, ids) {
+    for (id in ids) fit$models$workflows[[id]] <- "not a workflow"
+    fit
+  }
+
+  it("returns NA rows for a configuration that cannot predict, and names it once", {
+
+    two <- broken_member(add_member_copy(fitted_fixture), "cfg_002")
+
+    w <- expect_warning(p <- predict(two, new_df, config = "all"),
+                        class = "horizons_warning_partial_failure")
+
+    expect_identical(w$log$ids[[1]], "cfg_002")
+    expect_match(conditionMessage(w), "New-data bake failed:", fixed = TRUE)
+
+    expect_equal(nrow(p), 2L * nrow(new_df))
+
+    failed <- p[p$config_id == "cfg_002", ]
+    kept   <- p[p$config_id == "cfg_001", ]
+
+    expect_true(all(is.na(as.matrix(failed[, c(".pred", ".pred_lower", ".pred_upper", ".ad_distance")]))))
+    expect_true(all(is.na(failed$.ad_flag)))
+    expect_true(all(is.finite(kept$.pred)))
+
+    ## The same predictions whether or not the warning is heard
+    expect_identical(suppressWarnings(predict(two, new_df, config = "all")), p)
+
+  })
+
+  it("aborts with the failure in results when the configuration asked for cannot predict", {
+
+    local_mocked_s3_method("predict", "workflow", function(object, new_data, ...) {
+      stop("the engine broke")
+    })
+
+    err <- expect_error(predict(fitted_fixture, new_df), class = "horizons_error_prediction_failed")
+
+    expect_s3_class(err, "horizons_error_run")
+    expect_identical(err$results$config_id, "cfg_001")
+    expect_identical(err$results$step, "predict")
+    expect_match(err$results$error_message, "^Prediction failed: the engine broke")
+    expect_snapshot(predict(fitted_fixture, new_df), error = TRUE)
+
+  })
+
+  it("aborts with every failure when every configuration fails", {
+
+    broken <- broken_member(add_member_copy(fitted_fixture), c("cfg_001", "cfg_002"))
+
+    err <- expect_error(predict(broken, new_df, config = "all"),
+                        class = "horizons_error_prediction_failed")
+
+    expect_setequal(err$results$config_id, c("cfg_001", "cfg_002"))
+
+  })
+
+  it("lets the applicability domain's column-name tripwire stop the call", {
+
+    ## Same length, reordered names: distances would bind to the wrong
+    ## features, so this is a bug, not a run failure
+    reordered <- fitted_fixture
+    cid       <- names(reordered$models$ad)[1]
+    names(reordered$models$ad[[cid]]$centroid) <- rev(names(reordered$models$ad[[cid]]$centroid))
+
+    expect_error(predict(reordered, new_df, config = cid, interval = FALSE),
+                 "Feature column names must match", class = "horizons_error_internal")
+
+  })
+
+  it("keeps the predictions when the applicability domain cannot be computed, and names it", {
+
+    local_mocked_bindings(calculate_ad_distance = function(...) stop("covariance is singular"))
+
+    w <- expect_warning(p <- predict(fitted_fixture, new_df, interval = FALSE),
+                        class = "horizons_warning_skipped")
+
+    expect_match(conditionMessage(w),
+                 "The applicability domain (AD) was not computed: Applicability-domain distance failed: covariance is singular",
+                 fixed = TRUE)
+    expect_true(all(is.finite(p$.pred)))
+    expect_true(all(c(".ad_distance", ".ad_flag") %in% names(p)))
+    expect_true(all(is.na(p$.ad_distance) & is.na(p$.ad_flag)))
+
+  })
+
+  it("abstains on every row of a configuration whose applicability domain cannot be computed", {
+
+    local_mocked_bindings(calculate_ad_distance = function(...) stop("covariance is singular"))
+
+    w <- expect_warning(p <- predict(fitted_fixture, new_df, abstain_ood = TRUE),
+                        class = "horizons_warning_skipped")
+
+    expect_match(conditionMessage(w), "the predictions are `NA` under `abstain_ood = TRUE`",
+                 fixed = TRUE)
+    expect_true(all(is.na(as.matrix(p[, c(".pred", ".pred_lower", ".pred_upper", ".interval_width")]))))
+
+  })
+
+  it("raises a horizons warning a configuration raised while predicting, once, naming it", {
+
+    real <- utils::getS3method("predict", "workflow")
+
+    local_mocked_s3_method("predict", "workflow", function(object, new_data, ...) {
+      warn_in_unit("substitution", "A member substituted something.")
+      real(object, new_data, ...)
+    })
+
+    w <- collect_warnings(predict(add_member_copy(fitted_fixture), new_df, config = "all",
+                                  interval = FALSE),
+                          "A member substituted something")$warnings
+
+    expect_length(w, 1L)
+    expect_s3_class(w[[1]], "horizons_warning_substitution")
+    expect_setequal(w[[1]]$log$ids[[1]], c("cfg_001", "cfg_002"))
+
+  })
+
+  it("raises another package's warning from a configuration once, as quality, naming it", {
+
+    local_mocked_s3_method("predict", "workflow", function(object, new_data, ...) {
+      warning("the engine says hello", call. = FALSE)
+      tibble::tibble(.pred = rep(5, nrow(new_data)))
+    })
+
+    w <- collect_warnings(predict(add_member_copy(fitted_fixture), new_df, config = "all",
+                                  interval = FALSE),
+                          "the engine says hello")$warnings
+
+    expect_length(w, 1L)
+    expect_s3_class(w[[1]], "horizons_warning_quality")
+    expect_setequal(w[[1]]$log$ids[[1]], c("cfg_001", "cfg_002"))
 
   })
 
@@ -1293,94 +1856,6 @@ describe("predict_intervals() - row alignment before the bounds are assembled", 
 
     expect_no_error(out <- predict_intervals(uq, rep(5, nrow(new_df)), new_df))
     expect_identical(nrow(out), nrow(new_df))
-
-  })
-
-})
-
-
-## ---------------------------------------------------------------------------
-## warn_interval_failure() — config naming and brace-safety (#65 review)
-## ---------------------------------------------------------------------------
-## `detail` (the upstream error message) is untrusted, possibly data-derived
-## text — a column name like a bare `{wn_600}` is a realistic example. Handed
-## to cli as a TEMPLATE rather than a VALUE, a brace or an unmatched quote in
-## that text crashes predict() itself, rather than just being reported.
-
-describe("warn_interval_failure() - config naming and brace-safety", {
-
-  it("does not crash when the underlying error message contains braces", {
-
-    brace_error <- simpleError('unexpected column `{wn_600}` in new_data')
-
-    warns <- NULL
-
-    expect_no_error(
-      warns <- testthat::capture_warnings(
-        warn_interval_failure("baking new data through the UQ recipe", brace_error)
-      )
-    )
-
-    expect_true(any(grepl("{wn_600}", warns, fixed = TRUE)))
-
-  })
-
-  it("names the config in the warning when one is given", {
-
-    expect_warning(
-      warn_interval_failure("predicting quantiles from the UQ model",
-                            simpleError("boom"), config_id = "cfg_001"),
-      regexp = "cfg_001",
-      class = "horizons_interval_warning"
-    )
-
-  })
-
-  it("omits any config mention when none is given", {
-
-    warns <- testthat::capture_warnings(
-      warn_interval_failure("predicting quantiles from the UQ model",
-                            simpleError("boom"))
-    )
-
-    expect_false(any(grepl("config", warns, ignore.case = TRUE)))
-
-  })
-
-})
-
-
-describe("warn_interval_failure() - its reason", {
-
-  it("words each kind of reason: none, an error, a plain string, with and without a config", {
-
-    expect_snapshot({
-      warn_interval_failure("baking new data through the UQ recipe", NULL)
-      warn_interval_failure("baking new data through the UQ recipe", simpleError("the bake broke"))
-      warn_interval_failure("predicting quantiles from the UQ model", "a plain reason")
-      warn_interval_failure("predicting quantiles from the UQ model", "a plain reason",
-                            config_id = "cfg_001")
-    })
-
-  })
-
-})
-
-
-## ---------------------------------------------------------------------------
-## predict_members() — one row per sample before members are combined
-## ---------------------------------------------------------------------------
-
-describe("predict_members() - repeated sample ids", {
-
-  it("refuses new_data whose sample_ids repeat, before predicting any member", {
-
-    ## The abort carries no package class, so its text is the check. The
-    ## object holds no member, so the refusal must come first.
-    expect_error(
-      predict_members(list(), "cfg_001", tibble::tibble(sample_id = c("A", "A"))),
-      "Duplicate keys would fan out the member-prediction combine.", fixed = TRUE
-    )
 
   })
 

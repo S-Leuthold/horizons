@@ -217,7 +217,7 @@ fit_uq <- function(fitted_workflow,
   ## since the intervals are served around clamped point predictions (#53,
   ## #76).
   calib_point_preds <- unit_step("uq_back_transform", back_transform_predictions(
-    calib_point_preds, transformation, warn = FALSE, outcome_range = outcome_range
+    calib_point_preds, transformation, outcome_range = outcome_range
   ))
 
   ## Bake calibration features through the same prepped recipe

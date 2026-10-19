@@ -41,7 +41,7 @@ meta-learner's honest out-of-fold residuals: a fresh 5-fold partition of
 the meta frame (drawn at \verb{ensemble seed + 1000}, disjoint from the tuning
 folds), per-fold refits of the finalized combiner with the fold models
 retained, and the signed residuals CQR-style. Consumed by
-\code{\link[=predict.horizons_ensemble]{predict.horizons_ensemble()}} when \code{interval = TRUE}.
+\code{\link[=predict.horizons_ensemble]{predict.horizons_ensemble()}} unless \code{interval = FALSE}.
 
 Runs inside \code{\link[=ensemble]{ensemble()}} when \code{compute_uq = TRUE}, at \code{level}
 (\code{DEFAULT_UQ_LEVEL}, 0.90). It is internal: to add UQ to an ensemble built

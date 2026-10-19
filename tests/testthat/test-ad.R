@@ -185,18 +185,16 @@ test_that("far-out-of-distribution samples are flagged OOD", {
 
 
 ## ---------------------------------------------------------------------------
-## predict_ad() — one bad spectrum degrades one row, not the batch
+## predict_ad() — the distance on the features predict() baked
 ## ---------------------------------------------------------------------------
-## A spectrum that bakes to all-NA is step_transform_spectra's documented
-## failure path. The earlier whole-matrix anyNA() check turned that single row
-## into a NULL AD result for the whole call, which also silently disabled
-## abstention. A bake that ABORTS is a different thing — a bug or a schema
-## problem — and is warned about rather than degraded.
+## predict() bakes new data once per configuration and hands the AD the rows
+## that baked to finite values; a row that did not is returned as NA and
+## flagged (test-pipeline-predict.R). A failure here is the AD unit's.
 ## ---------------------------------------------------------------------------
 
-## A fitted workflow whose recipe carries the real transform step, so the NA
-## path under test is the production one rather than a hand-built matrix. Its
-## 60 rows clear N_CALIB_MIN, so fit_ad() must return a bundle; the tests below
+## A fitted workflow whose recipe carries the real transform step, so the
+## features are the production ones rather than a hand-built matrix. Its 60
+## rows clear N_CALIB_MIN, so fit_ad() must return a bundle; the tests below
 ## assert it.
 ad_fitted_workflow <- function(n = 60, n_wn = 12, seed = 41) {
 
@@ -253,125 +251,64 @@ test_that("fit_ad() takes its minimums from min_calib_rows and min_ad_rows", {
 
 })
 
-test_that("predict_ad returns per-row NA for one bad spectrum and scores the rest", {
+test_that("predict_ad scores a matrix of baked features", {
 
   fx     <- ad_fitted_workflow()
   bundle <- fit_ad(fx$workflow, calib_data = fx$data)
 
   expect_false(is.null(bundle))
 
-  new_df           <- ad_new_spectra(fx$wn, n = 5)
-  new_df[3, fx$wn] <- NA_real_                   # one malformed spectrum
-
-  ## It warns about the degraded rows rather than dropping AD
-  warns <- testthat::capture_warnings(ad <- predict_ad(fx$workflow, bundle, new_df))
-
-  expect_true(any(grepl("Applicability domain is NA for 1 of 5", warns)))
-  expect_false(is.null(ad))
+  baked <- bake_predictors(fx$workflow, ad_new_spectra(fx$wn, n = 5))
+  ad    <- predict_ad(baked, bundle)
 
   expect_s3_class(ad, "tbl_df")
   expect_equal(nrow(ad), 5L)
-
-  expect_true(is.na(ad$.ad_distance[3]))
-  expect_true(is.na(ad$.ad_flag[3]))
-
-  ## The other four are scored normally — the whole batch is not lost.
-  expect_equal(sum(!is.na(ad$.ad_distance)), 4L)
-  expect_true(all(ad$.ad_distance[-3] >= 0))
-  expect_true(all(!is.na(ad$.ad_flag[-3])))
+  expect_true(all(ad$.ad_distance >= 0))
+  expect_identical(levels(ad$.ad_flag), AD_BINS)
+  expect_false(anyNA(ad$.ad_flag))
 
 })
 
-test_that("predict_ad warns and returns NULL when the bake aborts", {
+test_that("predict_ad stops on the column-name tripwire when the bundle no longer matches the features", {
 
   fx     <- ad_fitted_workflow()
   bundle <- fit_ad(fx$workflow, calib_data = fx$data)
 
   expect_false(is.null(bundle))
 
-  new_df <- ad_new_spectra(fx$wn, n = 5)
-
-  ## Not a workflow: extract_recipe() aborts, which is the bug / schema case.
-  expect_warning(
-    ad <- predict_ad(list(), bundle, new_df),
-    "baking `new_data` through the fitted recipe failed", fixed = TRUE,
-    class = "horizons_ad_warning"
-  )
-
-  expect_null(ad)
-
-})
-
-test_that("predict_ad returns NULL, with a warning, when every spectrum is bad", {
-
-  fx     <- ad_fitted_workflow()
-  bundle <- fit_ad(fx$workflow, calib_data = fx$data)
-
-  expect_false(is.null(bundle))
-
-  new_df         <- ad_new_spectra(fx$wn, n = 5)
-  new_df[, fx$wn] <- NA_real_
-
-  expect_warning(
-    ad <- predict_ad(fx$workflow, bundle, new_df),
-    "is unavailable for all 5 samples", fixed = TRUE,
-    class = "horizons_ad_warning"
-  )
-
-  expect_null(ad)
-
-})
-
-test_that("predict_ad warns with the cause and returns NULL when the distance fails", {
-
-  fx     <- ad_fitted_workflow()
-  bundle <- fit_ad(fx$workflow, calib_data = fx$data)
-
-  expect_false(is.null(bundle))
-
-  ## The bake succeeds, but the bundle's centroid no longer matches the
-  ## recipe's features, so calculate_ad_distance() aborts. This used to
-  ## return NULL with no signal, and the AD columns vanished.
+  ## The bundle's centroid no longer names the recipe's features, so
+  ## distances would bind to the wrong ones. This used to return NULL with a
+  ## warning; it is a bug, and stops the call.
   bundle$centroid <- bundle$centroid[-1]
 
-  new_df <- ad_new_spectra(fx$wn, n = 5)
+  baked <- bake_predictors(fx$workflow, ad_new_spectra(fx$wn, n = 5))
 
-  w <- expect_warning(
-    ad <- predict_ad(fx$workflow, bundle, new_df),
-    class = "horizons_ad_warning"
-  )
-
-  expect_match(conditionMessage(w), "Feature column names must match", fixed = TRUE)
-  expect_null(ad)
+  expect_error(predict_ad(baked, bundle),
+               "Feature column names must match", fixed = TRUE,
+               class = "horizons_error_internal")
 
 })
 
-test_that("every predict_ad warning names the config when it is given", {
+test_that("predict_ad fails at its distance step when the distance cannot be computed", {
 
   fx     <- ad_fitted_workflow()
   bundle <- fit_ad(fx$workflow, calib_data = fx$data)
 
   expect_false(is.null(bundle))
 
-  new_df     <- ad_new_spectra(fx$wn, n = 5)
-  one_bad    <- new_df;  one_bad[3, fx$wn] <- NA_real_
-  all_bad    <- new_df;  all_bad[, fx$wn]  <- NA_real_
-  bad_bundle <- bundle;  bad_bundle$centroid <- bad_bundle$centroid[-1]
+  local_mocked_bindings(calculate_ad_distance = function(...) stop("covariance is singular"))
 
-  ## One warning per case, in full: the bake aborts, one spectrum bakes to NA,
-  ## every spectrum does, and the distance fails
-  expect_snapshot({
-    bake     <- predict_ad(list(), bundle, new_df, config_id = "cfg_ad")
-    one_na   <- predict_ad(fx$workflow, bundle, one_bad, config_id = "cfg_ad")
-    all_na   <- predict_ad(fx$workflow, bundle, all_bad, config_id = "cfg_ad")
-    distance <- predict_ad(fx$workflow, bad_bundle, new_df, config_id = "cfg_ad")
-  })
+  baked <- bake_predictors(fx$workflow, ad_new_spectra(fx$wn, n = 5))
+  out   <- run_unit(predict_ad(baked, bundle), "ad", "cfg_ad")
+
+  expect_true(out$failed)
+  expect_identical(out$records$step[out$records$type == "failure"], "ad_distance")
+  expect_match(out$records$message[out$records$type == "failure"], "covariance is singular",
+               fixed = TRUE)
 
 })
 
 
-## ---------------------------------------------------------------------------
-## fit_ad() — data it cannot estimate from is a run failure, with the counts
 ## ---------------------------------------------------------------------------
 ## fit_ad() runs as a unit of its own inside the member, so each condition it
 ## cannot compute from raises, and the member names it in a skipped warning

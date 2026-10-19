@@ -8,7 +8,7 @@
   object,
   new_data,
   config = "best",
-  interval = TRUE,
+  interval = NULL,
   abstain_ood = FALSE,
   ...
 )
@@ -31,41 +31,55 @@ alignment is the caller's responsibility (see Details).}
 config, with a \code{config_id} column).
 }}
 
-\item{interval}{Logical. Return conformal prediction intervals when UQ is
-available? Default \code{TRUE}. The intervals are at the level they were
-calibrated at in \code{fit()}, 0.90 by default (see Details). Ignored (with a
-note) for configs that have no UQ bundle. When intervals are actually
-available and the model was fit on a training object carrying a
-\verb{$selection} (from \code{select_training()}), this
-warns once that conformal coverage is not guaranteed: the calibration rows
-were chosen for proximity to the targets, so they are not exchangeable
-with arbitrary prediction data.}
+\item{interval}{Conformal prediction intervals. \code{NULL} (the default):
+intervals for each configuration that has a UQ bundle (\code{fit(compute_uq = TRUE)}), and none, silently, for one that has none; the interval columns
+appear when any configuration predicted has a bundle. \code{TRUE}: intervals
+asked for; a configuration without a bundle gets \code{NA} bounds and is named
+in one warning of class \code{horizons_warning_skipped}. \code{FALSE}: none. The
+intervals are at the level they were calibrated at in \code{fit()}, 0.90 by
+default (see Details). When intervals are returned and the model was fit
+on a training object carrying a \verb{$selection} (from \code{select_training()}),
+this warns once, with class \code{horizons_warning_quality}, that conformal
+coverage is not guaranteed: the calibration rows were chosen for
+proximity to the targets, so they are not exchangeable with arbitrary
+prediction data.}
 
 \item{abstain_ood}{Logical. When \code{TRUE}, \code{.pred} (and any interval bounds)
 are set to \code{NA} for samples flagged out-of-domain (\code{.ad_flag == "OOD"}),
 while \code{.ad_distance}/\code{.ad_flag} are preserved so the caller can see how far
 out each sample was. Default \code{FALSE} (report AD, predict for all samples).
-Has no effect on configs without an AD bundle.}
+Every configuration predicted needs an AD bundle: one without is refused
+with an error of class \code{horizons_error_input}, since a prediction that is
+not \code{NA} under abstention claims to be in domain. For the same reason,
+when a configuration's applicability domain cannot be computed, every one
+of its predictions (and bounds) is \code{NA} under abstention, and the
+configuration is named in one warning of class \code{horizons_warning_skipped}.}
 
 \item{...}{Not used; present for S3 method consistency. A \code{level} passed
 here is ignored with a warning (see Details), and any other argument is
 an error.}
 }
 \value{
-A tibble in long format, one row per sample (per config when
-\code{config = "all"}):
+A tibble in long format, one row per row of \code{new_data} (per config
+when \code{config = "all"}), in its order; zero rows of \code{new_data} give zero
+rows with the same columns:
 \describe{
 \item{sample_id}{Sample identifier from \code{new_data}.}
 \item{config_id}{Config used (present when \code{config = "all"}).}
 \item{.pred}{Point prediction, original response scale.}
-\item{.pred_lower}{Lower interval bound (if \code{interval = TRUE} and UQ
-available), original scale.}
+\item{.pred_lower}{Lower interval bound, original scale: present when
+\code{interval = TRUE}, or \code{NULL} and a configuration predicted has a UQ
+bundle; \code{NA} where a configuration has none.}
 \item{.pred_upper}{Upper interval bound.}
 \item{.interval_width}{\code{.pred_upper - .pred_lower}.}
 \item{.ad_distance}{Squared Mahalanobis distance to the training centroid
-in model feature space (if the config has an AD bundle).}
+in model feature space: present when a configuration predicted has an
+AD bundle (\code{fit(compute_ad = TRUE)}); \code{NA} where a configuration has
+none, as under \code{config = "all"}, or where the AD could not be
+computed.}
 \item{.ad_flag}{Applicability-domain bin: \code{Q1}-\code{Q4} (within domain,
-increasing distance) or \code{OOD} (out-of-domain).}
+increasing distance) or \code{OOD} (out-of-domain); present and \code{NA} as
+\code{.ad_distance} is.}
 }
 }
 \description{
@@ -89,11 +103,30 @@ distance is a squared Mahalanobis distance in the model's feature space; the
 flag bins it against held-out-calibrated thresholds. Set \code{abstain_ood = TRUE}
 to \code{NA} predictions for out-of-domain samples while keeping the AD columns.
 
+\strong{Rows that cannot be predicted.} \code{new_data} is baked through each
+configuration's recipe first. A row flagged on arrival (a \code{.flag} that is
+not \code{NA}: a step kept the sample but could not use it) or
+non-finite after the recipe is not predicted: it is returned as \code{NA} in
+every column, and the rows are named in one warning of class
+\code{horizons_warning_flagged}. The other rows are predicted as usual.
+
+\strong{When something cannot be computed.} Each configuration's predictions
+are computed on their own, and its intervals and applicability domain on
+their own within them. A configuration that cannot predict comes back as
+\code{NA} rows, named in one warning of class
+\code{horizons_warning_partial_failure}; when nothing can be predicted,
+\code{predict()} aborts with \code{horizons_error_prediction_failed}, the failures in
+its \code{results} field. Intervals or an applicability domain that cannot be
+computed leave their columns \code{NA}, and the configurations are named in one
+\code{horizons_warning_skipped}. Every warning is raised once, at the end of
+the call, and carries its record as the field \code{log}; \code{predict()} changes
+nothing on \code{object}.
+
 \strong{Interval level.} Intervals are at the coverage level the uncertainty was
 calibrated at in \code{fit()}, 0.90 by default. \code{predict()} has no \code{level}
 argument: a \code{level} is ignored with a warning of class
-\code{horizons_input_warning}, and any other argument it does not take is an
-error of class \code{horizons_input_error}.
+\code{horizons_warning_input}, and any other argument it does not take is an
+error of class \code{horizons_error_input}.
 
 \strong{Outcome range.} Point predictions and interval bounds are clamped to
 the \code{outcome_range} given to \code{\link[=configure]{configure()}}, silently, since the range is

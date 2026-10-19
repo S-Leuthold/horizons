@@ -39,6 +39,8 @@
 #'   plan when `TRUE`. Default `FALSE`.
 #' @param seed Integer. Seed for the CV folds (passed through to
 #'   [fit_tuned_meta_learner()] so the meta-OOF is reproducible).
+#' @param call The frame a member's failure to predict the test rows reports
+#'   (`ensemble()`'s).
 #'
 #' @return The ensemble contract list from [build_ensemble_contract()].
 #'
@@ -49,7 +51,8 @@ fit_ensemble_xgb <- function(object,
                              rank_metric,
                              optimize  = TRUE,
                              seed      = DEFAULT_ENSEMBLE_SEED,
-                             allow_par = FALSE) {
+                             allow_par = FALSE,
+                             call      = rlang::caller_env()) {
 
   ## Build the spec per branch, not with an inline `if` inside boost_tree().
   ## parsnip stores model args as lazy quosures it never forces, so an
@@ -98,7 +101,8 @@ fit_ensemble_xgb <- function(object,
     grid            = grid,
     extract_weights = extract_weights_xgb,
     seed            = seed,
-    allow_par       = allow_par
+    allow_par       = allow_par,
+    call            = call
   )
 
 }

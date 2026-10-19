@@ -4,7 +4,7 @@
 \alias{predict.horizons_ensemble}
 \title{Predict Soil Properties from a Fitted Ensemble}
 \usage{
-\method{predict}{horizons_ensemble}(object, new_data, interval = TRUE, ...)
+\method{predict}{horizons_ensemble}(object, new_data, interval = NULL, ...)
 }
 \arguments{
 \item{object}{A \code{horizons_ensemble} object (the output of \code{\link[=ensemble]{ensemble()}}).}
@@ -15,16 +15,18 @@ schema. \strong{The spectra must already be on the training axis} — the same
 requirement as \code{\link[=predict.horizons_fit]{predict.horizons_fit()}}; see its Details for the axis-
 alignment limitation.}
 
-\item{interval}{Logical. Return CV+ conformal prediction intervals when
-ensemble uncertainty quantification is available (\code{object$ensemble$uq},
-calibrated by \code{\link[=fit_ensemble_uq]{fit_ensemble_uq()}} — on by default in \code{\link[=ensemble]{ensemble()}}).
-Default \code{TRUE}. The intervals are at the level they were calibrated at
-in \code{\link[=ensemble]{ensemble()}}, 0.90 by default (see Details). When no UQ bundle is
-present, point predictions are returned with a one-time note. When the
+\item{interval}{CV+ conformal prediction intervals, from the ensemble's own
+uncertainty bundle (\code{object$ensemble$uq}, calibrated by
+\code{\link[=fit_ensemble_uq]{fit_ensemble_uq()}} — on by default in \code{\link[=ensemble]{ensemble()}}). \code{NULL} (the
+default): intervals when the bundle exists, and none, silently, when it
+does not. \code{TRUE}: intervals asked for; without a bundle the bounds are
+\code{NA}, with one warning of class \code{horizons_warning_skipped}. \code{FALSE}:
+none. The intervals are at the level they were calibrated at in
+\code{\link[=ensemble]{ensemble()}}, 0.90 by default (see Details). When the
 members were fit on a response-trimmed training partition
 (\code{validate(remove_outliers = "response")}, #77), the intervals come from out-of-fold predictions on
 the rows inside the training fences, so this warns once, with class
-\code{horizons_response_trim_warning}, that they were calibrated within those
+\code{horizons_warning_quality}, that they were calibrated within those
 fences and can undercover samples outside them.}
 
 \item{...}{Not used; present for S3 method consistency. A \code{level} passed
@@ -32,14 +34,15 @@ here is ignored with a warning (see Details), and any other argument is
 an error.}
 }
 \value{
-A tibble, one row per sample:
+A tibble, one row per row of \code{new_data}, in its order (zero rows
+give zero rows with the same columns):
 \describe{
 \item{sample_id}{Sample identifier from \code{new_data}.}
 \item{.pred}{Ensemble point prediction, original response scale.}
 }
 Interval columns (\code{.pred_lower}, \code{.pred_upper}, \code{.interval_width}) are
-joined on by \code{sample_id} when ensemble UQ is present and
-\code{interval = TRUE}.
+put in place by \code{sample_id} when \code{interval = TRUE}, or \code{NULL} and the
+ensemble has a CV+ bundle.
 }
 \description{
 Generates stacked-ensemble predictions for new spectra. Every member predicts
@@ -52,10 +55,15 @@ the fitted meta-model.
 }
 \details{
 All ensemble members must predict successfully. A member that fails to
-predict on \code{new_data} aborts the call naming the offending config — the
-meta-learner's combination is only valid over the exact member set it was
-trained on, so dropping a member would silently change what is being
-predicted.
+predict on \code{new_data}, or a combination that fails, aborts the call with
+\code{horizons_error_prediction_failed}, the failures in its \code{results} field —
+the meta-learner's combination is only valid over the exact member set it
+was trained on, so dropping a member would silently change what is being
+predicted. A row any member could not use (flagged on arrival, or
+non-finite after its recipe) is returned as \code{NA} and named in one
+\code{horizons_warning_flagged}. CV+ intervals that cannot be computed leave
+their columns \code{NA}, with one \code{horizons_warning_skipped}. The predictions
+come back one row per row of \code{new_data}, in its order.
 
 \strong{Interval semantics.} Bounds are genuine CV+ aggregates (Barber et al.
 2021) over the retained fold models and signed calibration residuals — not
@@ -67,8 +75,8 @@ full-data refit). This is deliberate and not repaired.
 \strong{Interval level.} Intervals are at the coverage level the CV+ bundle was
 calibrated at in \code{\link[=ensemble]{ensemble()}}, 0.90 by default. \code{predict()} has no \code{level}
 argument: a \code{level} is ignored with a warning of class
-\code{horizons_input_warning}, and any other argument it does not take is an
-error of class \code{horizons_input_error}.
+\code{horizons_warning_input}, and any other argument it does not take is an
+error of class \code{horizons_error_input}.
 }
 \examples{
 \dontrun{

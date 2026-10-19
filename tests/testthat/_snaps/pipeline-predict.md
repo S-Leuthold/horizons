@@ -1,30 +1,37 @@
-# warn_interval_failure() - its reason / words each kind of reason: none, an error, a plain string, with and without a config
+# predict.horizons_fit() - input validation / refuses new_data that is neither a horizons_data nor a data frame, as predict()
 
     Code
-      warn_interval_failure("baking new data through the UQ recipe", NULL)
+      predict(fitted_fixture, list(a = 1))
     Condition
-      Warning:
-      ! Prediction intervals could not be computed (baking new data through the UQ recipe); returning point predictions only.
-      x unknown error
+      Error in `predict()`:
+      ! `new_data` must be a <horizons_data> object or a data frame, not a list.
+
+# predict.horizons_fit() - input validation / refuses a horizons_data new_data with no predictor columns
+
     Code
-      warn_interval_failure("baking new data through the UQ recipe", simpleError(
-        "the bake broke"))
+      predict(fitted_fixture, hd)
     Condition
-      Warning:
-      ! Prediction intervals could not be computed (baking new data through the UQ recipe); returning point predictions only.
-      x the bake broke
+      Error in `predict()`:
+      ! `new_data` has no predictor columns in its role map.
+      i Give the spectral columns the "predictor" role, as `spectra()` does.
+
+# predict.horizons_fit() - applicability domain / refuses abstention under config = 'all' when any configuration has no AD, naming it and the ones that do
+
     Code
-      warn_interval_failure("predicting quantiles from the UQ model",
-        "a plain reason")
+      predict(two, new_df, config = "all", interval = FALSE, abstain_ood = TRUE)
     Condition
-      Warning:
-      ! Prediction intervals could not be computed (predicting quantiles from the UQ model); returning point predictions only.
-      x a plain reason
+      Error in `predict()`:
+      ! `abstain_ood` needs an applicability domain for every configuration predicted.
+      x 1 configuration has none: "cfg_002".
+      i Predict the ones that have one ("cfg_001") with `config`, refit with `fit(compute_ad = TRUE)`, or drop `abstain_ood`.
+
+# predict.horizons_fit() - each configuration is one unit / aborts with the failure in results when the configuration asked for cannot predict
+
     Code
-      warn_interval_failure("predicting quantiles from the UQ model",
-        "a plain reason", config_id = "cfg_001")
+      predict(fitted_fixture, new_df)
     Condition
-      Warning:
-      ! Prediction intervals could not be computed for config "cfg_001" (predicting quantiles from the UQ model); returning point predictions only.
-      x a plain reason
+      Error in `predict()`:
+      ! Nothing could be predicted: the configuration asked for failed.
+      x Prediction failed: the engine broke (cfg_001)
+      i The failures are on this condition as results: `rlang::last_error()$results`.
 

@@ -157,6 +157,13 @@ check_arg <- function(check,
 #'     condition as `results`.}
 #'   \item{`horizons_error_all_members_failed`}{(run) Every member failed in
 #'     `fit()`. The per-member results travel as `results`.}
+#'   \item{`horizons_error_prediction_failed`}{(run) `predict()` had nothing
+#'     to return: the configuration asked for, or every one of them, could
+#'     not predict, or an ensemble's member or its combination could not;
+#'     or [ensemble()] could not be built, because a member could not predict
+#'     the test rows. One row per failure travels as `results`: its `unit` (`"configuration"`, or
+#'     `"combination"` for an ensemble's), `config_id` (`NA` for the
+#'     combination), `step`, `class` and `error_message`.}
 #'   \item{`horizons_error_systemic`}{(run) [evaluate()] stopped early,
 #'     because the first configurations to run failed the same way across at
 #'     least two models (the circuit breaker,
@@ -182,11 +189,15 @@ check_arg <- function(check,
 #'     asked ran, under a documented fallback.}
 #'   \item{`horizons_warning_quality`}{Everything ran as asked, but the result
 #'     is weaker than its output shows (small folds, every member below the
-#'     prune threshold).}
+#'     prune threshold). `predict()` raises each distinct warning another
+#'     package raised while predicting under this topic, naming the
+#'     configurations (or an ensemble's units) that raised it.}
 #'   \item{`horizons_warning_skipped`}{Something asked for did not run, such
 #'     as a member's prediction intervals.}
 #'   \item{`horizons_warning_flagged`}{A step kept samples it could not use;
-#'     modelling leaves them out.}
+#'     modelling leaves them out. From `predict()`, the rows it returned `NA`
+#'     because they were flagged on arrival (`.flag`) or were not finite after
+#'     a configuration's recipe.}
 #'   \item{`horizons_warning_partial_failure`}{Some units failed and the rest
 #'     returned.}
 #'   \item{`horizons_warning_coverage`}{The data only partly covers what is

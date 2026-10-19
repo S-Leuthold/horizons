@@ -349,7 +349,7 @@ make_original_scale_metric <- function(name, vec_fn, direction, transformation,
   ### Back-transform the estimate only, then score as usual.
   scaled_vec <- function(truth, estimate, na_rm = TRUE, ...) {
 
-    estimate <- back_transform_predictions(estimate, transformation, warn = FALSE,
+    estimate <- back_transform_predictions(estimate, transformation,
                                            outcome_range = outcome_range)
     vec_fn(truth, estimate, na_rm = na_rm, ...)
 

@@ -407,7 +407,7 @@ describe("fit_single_config() - log transformation", {
   it("scores the test rows on the original scale, from the back-transformed predictions", {
 
     preds <- stats::predict(result$fitted_workflow, new_data = test_data)$.pred
-    preds <- back_transform_predictions(preds, "log", warn = FALSE)
+    preds <- back_transform_predictions(preds, "log")
 
     expect_equal(result$test_metrics$rmse, yardstick::rmse_vec(test_data$SOC, preds))
 
@@ -951,26 +951,22 @@ describe("fit_single_config() - measured coverage when it cannot be measured (#1
     records$message[records$class %in% "horizons_warning_skipped"]
   }
 
-  it("leaves the figures NA, records the interval warning and says coverage was skipped when no intervals can be built", {
+  it("leaves the figures NA and says coverage was skipped, with the interval step that failed, when no intervals can be built", {
 
     setup <- fsc()$setup
-    ## predict_intervals() warns and returns NULL when it fails
+    ## predict_intervals() fails at the step it labels
     local_mocked_bindings(
       fit_uq            = function(...) list(sentinel = "fit_uq() ran"),
-      predict_intervals = function(...) {
-        warning("intervals could not be built", call. = FALSE)
-        NULL
-      }
+      predict_intervals = function(...) unit_step("uq_quantiles", stop("intervals could not be built"))
     )
 
     result <- run_with_uq(setup)
 
     expect_equal(result$status, "success")
     expect_identical(result$uq[names(no_coverage)], no_coverage)
-    expect_true(any(grepl("intervals could not be built", result$warnings, fixed = TRUE)))
     expect_identical(skipped_lines(result), paste(
-      "Measured test coverage was not computed: No intervals could be built for the",
-      "test rows; the member's warnings say why."
+      "Measured test coverage was not computed: Interval quantiles failed:",
+      "intervals could not be built"
     ))
 
   })

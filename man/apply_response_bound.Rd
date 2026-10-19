@@ -13,14 +13,15 @@ apply_response_bound(values, upper_bound)
 whose training values are all negative), or NULL (no clamp).}
 }
 \value{
-\code{values}, winsorized to \code{upper_bound} where it was exceeded.
+List: \code{values}, winsorized to \code{upper_bound} where it was exceeded,
+and \code{over}, a logical vector marking the values that were.
 }
 \description{
-The guardrail primitive shared by \code{\link[=back_transform_predictions]{back_transform_predictions()}} (single-
-model deploy path) and \code{predict.horizons_ensemble()} (the combined ensemble
-output). Values above \code{upper_bound} are clamped to it with a visible
-warning; \code{upper_bound = NULL} is a no-op. The warning is deliberately
-unconditional — a guardrail that fires silently defeats its purpose — so
-callers that suppress diagnostic warnings still surface this one.
+The guardrail \code{predict()} applies to the point predictions it serves: each
+configuration's in \code{predict_one_config()}, and the combined output in
+\code{predict.horizons_ensemble()}. Values above \code{upper_bound} are clamped to
+it; \code{upper_bound = NULL} is a no-op. Silent itself: it returns which
+values it clamped, and \code{predict()} reports them once per call, in one
+\code{horizons_warning_applicability} naming the samples.
 }
 \keyword{internal}

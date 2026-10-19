@@ -15,7 +15,8 @@ fit_tuned_meta_learner(
   grid,
   extract_weights,
   seed = DEFAULT_ENSEMBLE_SEED,
-  allow_par = FALSE
+  allow_par = FALSE,
+  call = rlang::caller_env()
 )
 }
 \arguments{
@@ -46,6 +47,9 @@ the tuning resamples and the genuine meta-OOF are reproducible.}
 build their control through \code{meta_tune_control()} with it, so the
 meta-learner never dispatches onto a registered plan unless asked.
 Default \code{FALSE}.}
+
+\item{call}{The frame a member's failure to predict the test rows reports
+(\code{ensemble()}'s).}
 }
 \value{
 The ensemble contract list from \code{\link[=build_ensemble_contract]{build_ensemble_contract()}}.
