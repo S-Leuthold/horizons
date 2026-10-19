@@ -126,7 +126,7 @@ test_that("a PLS space is never cached", {
 ## The search axis and its two tiers
 ## ---------------------------------------------------------------------------
 
-test_that("targets on another grid are searched on the library's and returned on their own", {
+test_that("targets on another grid are searched on the library's and returned on the library's columns at theirs", {
 
   m <- use_mini()
   x <- mini_targets(m$pool, wn = seq(700, 600, by = -4))
@@ -140,7 +140,39 @@ test_that("targets on another grid are searched on the library's and returned on
   ## The training set is on the targets' 4 cm-1 grid
   wn_out <- as.numeric(sub("^wn_", "", grep("^wn_", names(out$data$analysis), value = TRUE)))
   expect_identical(sort(wn_out), sort(seq(600, 700, by = 4)))
-  expect_identical(out$selection$reconciliation$operation, "resampled")
+  expect_identical(out$selection$reconciliation$operation, "subset")
+
+})
+
+test_that("targets that share no column with a registered library are refused before it is downloaded (#236)", {
+
+  ## Registered, not built: resolving it would download and build it
+  entry <- make_mini_ossl(withr::local_tempdir(), seed = 3, extras = FALSE, n_kssl = 60L)
+  local_mini_registry(entry)
+  local_mocked_bindings(resolve_source = function(...) stop("the library was resolved"))
+
+  ## An instrument's own axis over the mini library's 600 to 700 cm-1
+  wn  <- rev(600.1431 + 1.928571 * (0:51))
+  tbl <- data.frame(sample_id = paste0("T", 1:3),
+                    matrix(stats::runif(3 * length(wn)), 3, dimnames = list(NULL, paste0("wn_", wn))),
+                    check.names = FALSE)
+  utils::capture.output(x <- spectra(tbl, id_col = "sample_id"))
+
+  err <- expect_error(select_training(x, "mini", k = 5L), class = "horizons_error_input")
+  expect_match(gsub("\\s+", " ", conditionMessage(err)),
+               "standardize(x, resample = 2, trim = c(600, 700))", fixed = TRUE)
+
+})
+
+test_that("the registry's grid names the columns the built library has", {
+
+  ## What the check before the download compares against is what the build
+  ## produces: build_ossl_library() standardizes onto exactly this grid
+  m <- use_mini()
+  f <- library_registry()$mini$filters
+
+  expect_identical(paste0("wn_", canonical_grid(f$wn_min, f$wn_max, f$wn_step)),
+                   m$pool$data$role_map$variable[m$pool$data$role_map$role == "predictor"])
 
 })
 

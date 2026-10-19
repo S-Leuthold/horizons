@@ -1,8 +1,10 @@
 # R/select-reconcile.R
-# The first act of select_training(): bring the reference pool onto the
-# targets' wavenumber axis. The targets' grid is the reference; the pool is
-# resampled to it through the same routine standardize() uses. A gapped axis
-# and a coverage shortfall beyond half a spacing are the hard stops.
+# select_training()'s two axes. The search measures distances on the
+# library's own grid, with the targets resampled onto it for the search only;
+# the training set comes back on the library's own columns at the
+# wavenumbers the targets share with it, nothing interpolated (#236). An axis
+# with under two columns or a gap, and targets that share no column with the
+# library, are refused at the verb's door.
 
 
 ## ---------------------------------------------------------------------------
@@ -21,7 +23,7 @@
 #' @return [List.] `matrix` (samples by wavenumbers, row names `sample_id`,
 #'   no column names) and `wavenumbers` (numeric, decreasing).
 #'
-#' @seealso [reconcile_axes()]
+#' @seealso [search_axis()]
 #' @noRd
 predictor_matrix <- function(x) {
 
@@ -66,7 +68,7 @@ predictor_wavenumbers <- function(x) {
 ## grid_summary() — Range, resolution, count of a wavenumber grid
 ## ---------------------------------------------------------------------------
 
-#' Summarise a wavenumber grid for the reconciliation record
+#' Summarise a wavenumber grid for the axis checks and the record
 #'
 #' @details
 #' A gap has to clear both a ratio and an absolute width. The ratio alone
@@ -166,278 +168,137 @@ check_select_axis <- function(wn, arg, what, call = rlang::caller_env()) {
 
 
 ## ---------------------------------------------------------------------------
-## reconcile_axes() — Put the pool on the targets' grid
+## shared_columns() — the targets' wavenumbers the library has
 ## ---------------------------------------------------------------------------
 
-#' Bring a reference pool onto the targets' wavenumber axis
+#' Split the targets' predictor columns into those the library shares
 #'
 #' @description
-#' The targets' wavenumbers are the grid. Every pool spectrum is resampled
-#' onto them with `resample_spectra()`, so the training set the verb returns
-#' and the targets it will predict share one axis end to end. A pool already
-#' on the targets' grid is passed through unchanged.
+#' The training set is the library's own columns at the wavenumbers the
+#' targets share with it (#236). A column is shared when the library has a
+#' predictor of the same name, the rule `predict()` applies to the same
+#' columns later (`check_predictor_schema()`), so the targets can always
+#' predict from a model trained on the result. `standardize()` names every
+#' column `wn_<wavenumber>` on a grid rounded to six decimals, so on anything
+#' it made, name and value agree.
 #'
-#' @details
-#' `standardize()` puts every dataset on the canonical grid, the multiples of
-#' `resample` inside the trim bounds (#64), so two sources standardized with
-#' the same `resample` and `trim` normally arrive on the same columns and
-#' pass straight through. They still can differ: targets standardized with
-#' `resample = NULL` keep their instrument's own axis, a different `resample`
-#' or `trim` gives a different grid, and `trim = NULL` leaves each source on
-#' its own extent. This function is where the two meet, and it settles the
-#' axis in the user's favour.
+#' @param target_vars [Character.] The targets' predictor columns.
+#' @param library_vars [Character.] The library's predictor columns.
 #'
-#' Both axes have passed `select_training()`'s door (`check_select_axis()`):
-#' two columns or more, and no gap. Two conditions are checked, in this order:
-#'
-#' * Coverage. If the pool does not span the targets' range at either end the
-#'   function stops and names the end to trim, and says by how much. Within
-#'   half the pool's median spacing the overshoot is clamped instead: the
-#'   pool's endpoint is the nearest knot there is, so the overshooting column
-#'   is taken there rather than extrapolated, and the clamp is recorded and
-#'   warned about. Beyond that the stop stands; a training set narrower than
-#'   the targets would break `predict()` later.
-#' * Resolution. Targets finer than the pool are allowed with a warning
-#'   (class `horizons_select_warning`): the interpolation invents nothing,
-#'   and the user would do better standardizing coarser.
-#'
-#' @param pool [horizons_data.] The reference pool.
-#' @param targets [horizons_data.] The samples to be predicted.
-#' @param quiet [Logical.] Record the warnings without raising them, for a
-#'   second call whose first already raised them. Default: `FALSE`.
-#'
-#' @return [List.] `matrix` (pool rows by target wavenumbers, row names
-#'   `sample_id`), `wavenumbers` (the targets' grid, decreasing), and
-#'   `record` with `target_grid`, `pool_grid` (each from `grid_summary()`,
-#'   so each carrying `resolution`, `contiguous` and any `gaps`),
-#'   `operation` (`"resampled"` or `"none"`), `clamp` (`NULL`, or the
-#'   overshoot at each end with the tolerance applied) and `warnings`
-#'   (character, possibly empty).
-#'
-#' @seealso [resample_spectra()], [predictor_matrix()]
+#' @return [List.] `shared` (the library's columns the targets also have, in
+#'   the library's order) and `target_only` (the targets' columns the library
+#'   lacks, in the targets' order).
 #' @noRd
-reconcile_axes <- function(pool, targets, quiet = FALSE) {
-
-  for (nm in c("pool", "targets")) {
-
-    obj <- get(nm)
-
-    if (!inherits(obj, "horizons_data")) {
-
-      cli::cli_abort("{.arg {nm}} must be a {.cls horizons_data}, not {.cls {class(obj)[1]}}",
-                     class = "horizons_input_error")
-
-    }
-
-  }
-
-  pm <- predictor_matrix(pool)
-  tm <- predictor_matrix(targets)
-
-  pool_wn   <- pm$wavenumbers
-  target_wn <- tm$wavenumbers
-
-  target_grid <- grid_summary(target_wn)
-  pool_grid   <- grid_summary(pool_wn)
-  warnings    <- character(0)
-
-  ## Coverage: the one hard stop, to within half a pool spacing ---------------
-
-  ### Since #64, standardize() puts both sides on the canonical grid, so an
-  ### overshoot needs an axis it did not make: targets standardized with
-  ### resample = NULL (an instrument's own axis, 3999.57 against the pool's
-  ### 4000) or with a trim wider than the pool. Inside half a spacing the
-  ### pool's endpoint is the nearest knot there is, so the overshooting
-  ### column is resampled at that endpoint and the clamp is recorded. Beyond
-  ### it, the verb still stops: a training set narrower than the targets
-  ### breaks predict() later.
-
-  tol       <- pool_grid$resolution / 2
-  clamp     <- NULL
-  resamp_wn <- target_wn
-
-  high_over <- target_grid$range[2] - pool_grid$range[2]
-  low_over  <- pool_grid$range[1] - target_grid$range[1]
-
-  if (high_over > tol) {
-
-    cli::cli_abort(c(
-      "The pool does not cover the targets' high end",
-      "x" = "Targets reach {target_grid$range[2]} cm-1; the pool stops at {pool_grid$range[2]}, an overshoot of {signif(high_over, 4)} cm-1",
-      "i" = "Overshoots up to {signif(tol, 4)} cm-1 (half the pool's spacing) are clamped; trim the targets' high end to {pool_grid$range[2]} cm-1 or below before selecting"
-    ), class = "horizons_input_error")
-
-  }
-
-  if (low_over > tol) {
-
-    cli::cli_abort(c(
-      "The pool does not cover the targets' low end",
-      "x" = "Targets reach {target_grid$range[1]} cm-1; the pool stops at {pool_grid$range[1]}, an overshoot of {signif(low_over, 4)} cm-1",
-      "i" = "Overshoots up to {signif(tol, 4)} cm-1 (half the pool's spacing) are clamped; trim the targets' low end to {pool_grid$range[1]} cm-1 or above before selecting"
-    ), class = "horizons_input_error")
-
-  }
-
-  if (high_over > 0 || low_over > 0) {
-
-    clamp <- list(high = if (high_over > 0) high_over else 0,
-                  low  = if (low_over  > 0) low_over  else 0,
-                  tolerance = tol)
-
-    resamp_wn[resamp_wn > pool_grid$range[2]] <- pool_grid$range[2]
-    resamp_wn[resamp_wn < pool_grid$range[1]] <- pool_grid$range[1]
-
-    msg <- cli::format_inline(
-      "The targets overshoot the pool by at most {signif(max(high_over, low_over), 4)} cm-1, within half the pool's {pool_grid$resolution} cm-1 spacing. The overshooting columns were taken at the pool's endpoint rather than extrapolated."
-    )
-    warnings <- c(warnings, msg)
-    if (!quiet) cli::cli_warn(msg, class = "horizons_select_warning")
-
-  }
-
-  ## Same grid: nothing to do -------------------------------------------------
-
-  if (identical(pool_wn, target_wn)) {
-
-    return(list(
-      matrix      = pm$matrix,
-      wavenumbers = pool_wn,
-      record      = list(target_grid = target_grid,
-                         pool_grid   = pool_grid,
-                         operation   = "none",
-                         clamp       = clamp,
-                         warnings    = warnings)
-    ))
-
-  }
-
-  ## Resolution: finer targets are allowed, with a warning --------------------
-
-  if (target_grid$resolution < pool_grid$resolution) {
-
-    msg <- cli::format_inline(
-      "The targets are finer ({target_grid$resolution} cm-1) than the pool ({pool_grid$resolution} cm-1); interpolating the pool up adds no information. Standardize the targets coarser if you can."
-    )
-    warnings <- c(warnings, msg)
-    if (!quiet) cli::cli_warn(msg, class = "horizons_select_warning")
-
-  }
-
-  ## Resample the pool onto the targets' grid ---------------------------------
-
-  rs <- resample_spectra(pm$matrix, pool_wn, new_wav = resamp_wn)
-
-  m <- rs$matrix
-  dimnames(m) <- list(rownames(pm$matrix), NULL)
-
-  ### The returned axis is the targets' own, even when a column was clamped:
-  ### the clamp moves where the pool was sampled, not what the targets are,
-  ### and one axis end to end is what the rest of the verb rests on.
+shared_columns <- function(target_vars, library_vars) {
 
   list(
-    matrix      = m,
-    wavenumbers = target_wn,
-    record      = list(target_grid = target_grid,
-                       pool_grid   = pool_grid,
-                       operation   = "resampled",
-                       clamp       = clamp,
-                       warnings    = warnings)
+    shared      = library_vars[library_vars %in% target_vars],
+    target_only = target_vars[!target_vars %in% library_vars]
   )
 
 }
 
 
 ## ---------------------------------------------------------------------------
-## reconciled_standardization() — The pool's record, on the targets' axis
+## check_shared_columns() — refuse targets that share no column
 ## ---------------------------------------------------------------------------
 
-#' Rewrite a resampled pool's standardization record for its new axis
+#' Stop when the targets share no wavenumber column with the library
 #'
 #' @description
-#' `provenance$standardization` describes the object's own axis. Once
-#' `reconcile_axes()` has resampled the pool onto the targets' wavenumbers,
-#' the pool's record describes columns the object no longer has: a pool
-#' standardized at 4 cm-1, drawn around targets at 8, would record step 4 on
-#' an axis spaced 8 (#90). This returns the record the resampled pool should
-#' carry. Call it only when the pool was resampled; a pool already on the
-#' targets' grid keeps its record as it is, because it is still true.
+#' `select_training()`'s door for #236. Targets on an instrument's own axis,
+#' or on a grid that misses every library column, would leave a training set
+#' with no predictors. The refusal names the `standardize()` call that puts
+#' the targets on the library's grid, built from the library's own range and
+#' step.
+#'
+#' @param target_vars [Character.] The targets' predictor columns.
+#' @param library_vars [Character.] The library's predictor columns: the
+#'   resolved pool's, or a registered library's grid before it is downloaded.
+#' @param restandardize [Logical.] Whether the targets were standardized
+#'   already, so the call needs `force = TRUE`.
+#' @param call The frame the refusal reports: the verb's.
+#'
+#' @return [List.] `shared_columns()`'s result, when anything is shared.
+#'   Aborts with class `horizons_error_input` otherwise.
+#' @noRd
+check_shared_columns <- function(target_vars, library_vars, restandardize = FALSE,
+                                 call = rlang::caller_env()) {
+
+  cols <- shared_columns(target_vars, library_vars)
+
+  if (length(cols$shared)) return(cols)
+
+  t_grid <- grid_summary(as.numeric(sub("^wn_", "", target_vars)))
+  l_grid <- grid_summary(as.numeric(sub("^wn_", "", library_vars)))
+
+  t_step <- signif(t_grid$resolution, 4)
+  l_step <- signif(l_grid$resolution, 4)
+  remedy <- sprintf("standardize(x, resample = %s, trim = c(%s, %s)%s)",
+                    l_step, l_grid$range[1], l_grid$range[2],
+                    if (restandardize) ", force = TRUE" else "")
+
+  abort_horizons(c(
+    "{.arg x} and {.arg library} share no wavenumber column.",
+    "x" = "The targets' {t_grid$n} columns run from {t_grid$range[1]} to {t_grid$range[2]} cm-1, about {t_step} cm-1 apart; the library's {l_grid$n} run from {l_grid$range[1]} to {l_grid$range[2]}, {l_step} cm-1 apart.",
+    "i" = "The training set is the library's own columns at the wavenumbers the targets share with it. Put the targets on the library's grid with {.code {remedy}}, or on a multiple of its {l_step} cm-1 step."
+  ), kind = "input", call = call)
+
+}
+
+
+## ---------------------------------------------------------------------------
+## returned_standardization() — the library's record, for the columns kept
+## ---------------------------------------------------------------------------
+
+#' The standardization record of a training set on a subset of its columns
+#'
+#' @description
+#' `provenance$standardization` describes the object's own axis. The
+#' training set carries its library's record, and when it keeps only some of
+#' the library's columns (targets on a coarser or narrower grid), the axis
+#' fields are rewritten to describe the columns it has: a library at 4 cm-1
+#' drawn around targets at 8 records step 8, the axis's spacing (#90), which
+#' `axis_spacing_cm()` falls back to.
 #'
 #' @details
-#' The axis fields are replaced: `grid` becomes the targets' (their own
-#' record's `grid`, so `NULL` when the targets were not put on a canonical
-#' grid, the convention `standardize()` uses), `n_wavelengths` and
-#' `wavelength_range` are read off the new axis, and `resampled` is `TRUE`,
-#' since the values were re-interpolated. The targets' `grid` is copied only
-#' when its `n` and range agree with `wn`; otherwise `grid` is written
-#' `NULL`, so the record describes the axis without resting on the targets'
-#' record having been kept true upstream.
+#' `n_wavelengths` and `wavelength_range` are read off the returned axis.
+#' `grid` is `min`, `max`, `step` and `n` of the returned axis, in the order
+#' `standardize()` writes them, when the library's record had a grid and the
+#' returned wavenumbers are evenly spaced; otherwise `NULL`, `standardize()`'s
+#' convention for an axis on no grid. The arguments (`resample`, `trim`,
+#' `remove_water`, `baseline`), `resampled` and `applied_at` stay the
+#' library's, since they produced the values, which are not interpolated:
+#' `resample` can then differ from `grid$step`. When every library column is
+#' kept, the record is the library's, unchanged; a library never standardized
+#' has none, and gets none.
 #'
-#' The arguments stay the pool's: `resample`, `trim`, `remove_water`,
-#' `baseline` and `applied_at` describe the `standardize()` call that
-#' produced these values, which resampling onto another axis does not undo,
-#' and a later `force = TRUE` no-op call already records its own arguments
-#' beside a grid an earlier call built. So `resample` can differ from
-#' `grid$step`, and `trim` from `wavelength_range`. Under `baseline = TRUE`
-#' the convex hull was fitted and subtracted on the pool's grid and the
-#' corrected spectra were then interpolated onto the targets', which is not
-#' the same as correcting on the targets' grid, where the hull would be
-#' pinned at the targets' points. Any other key the pool's record carries
-#' is kept.
-#'
-#' The move itself is recorded under `reconciliation`: `operation`
-#' (`"resampled"`), `clamp` (`NULL`, or the overshoot at each end: an end
-#' column there holds the pool's endpoint value, up to half a pool spacing
-#' off the grid point it is named for) and `pool`, the pool's record as it
-#' stood before, whose `grid` is the pool's original grid. This is the
-#' object's own axis history and travels with `provenance`; it is not
-#' `selection$reconciliation`, which is the selection record's account of
-#' the comparison, with the grid summaries both axes were compared on and
-#' the warnings raised.
-#'
-#' A pool that was never standardized has no record, and gets none: the
-#' verb does not mark as standardized rows that `standardize()` never saw.
-#'
-#' @param pool_record [List or NULL.] The pool's `provenance$standardization`.
-#' @param target_record [List or NULL.] The targets'
+#' @param pool_record [List or NULL.] The library's
 #'   `provenance$standardization`.
-#' @param wn [Numeric.] The wavenumbers the pool now sits on, the targets'.
-#' @param clamp [List or NULL.] `reconcile_axes()`'s `record$clamp`.
+#' @param wn [Numeric.] The returned columns' wavenumbers.
+#' @param n_library [Integer.] How many predictor columns the library has.
 #'
-#' @return [List or NULL.] The record for the resampled pool; `NULL` when
-#'   `pool_record` is.
-#'
-#' @seealso [reconcile_axes()]
+#' @return [List or NULL.] The record for the training set.
 #' @noRd
-reconciled_standardization <- function(pool_record, target_record, wn, clamp) {
+returned_standardization <- function(pool_record, wn, n_library) {
 
-  if (is.null(pool_record)) return(NULL)
+  if (is.null(pool_record) || length(wn) == n_library) return(pool_record)
 
-  ## The targets' grid, if it is the axis the pool now sits on --------------
+  spacing <- abs(diff(wn))
+  step    <- round(stats::median(spacing), GRID_DIGITS)
+  even    <- length(wn) >= 2L && all(abs(spacing - step) <= GRID_TOL)
 
-  ### A grid whose count or ends disagree with wn describes some other axis;
-  ### NULL says "no canonical grid" without claiming one.
-  grid <- target_record$grid
+  grid <- if (!is.null(pool_record$grid) && even) {
+    list(min = min(wn), max = max(wn), step = step, n = length(wn))
+  } else {
+    NULL
+  }
 
-  grid_ok <- is.list(grid) &&
-             is.numeric(grid$n)   && length(grid$n)   == 1L && isTRUE(grid$n == length(wn)) &&
-             is.numeric(grid$min) && length(grid$min) == 1L && isTRUE(abs(grid$min - min(wn)) <= GRID_TOL) &&
-             is.numeric(grid$max) && length(grid$max) == 1L && isTRUE(abs(grid$max - max(wn)) <= GRID_TOL)
-
-  if (!grid_ok) grid <- NULL
-
-  ## The pool's record, its axis fields replaced -----------------------------
-
-  ### Assigned by name through single brackets, so a NULL grid or clamp is
-  ### kept as an entry rather than deleting the key, as standardize() writes
-  ### grid.
-  axis <- list(
-    resampled        = TRUE,
-    grid             = grid,
-    n_wavelengths    = length(wn),
-    wavelength_range = c(min(wn), max(wn)),
-    reconciliation   = list(operation = "resampled", clamp = clamp, pool = pool_record)
-  )
+  ### Assigned by name through single brackets, so a NULL grid is kept as an
+  ### entry rather than deleting the key, as standardize() writes it.
+  axis <- list(grid             = grid,
+               n_wavelengths    = length(wn),
+               wavelength_range = c(min(wn), max(wn)))
 
   record <- pool_record
   record[names(axis)] <- axis
@@ -457,8 +318,8 @@ reconciled_standardization <- function(pool_record, target_record, wn, clamp) {
 #' Distances are measured in the library's own similarity space, on the
 #' library's grid, so a cached space serves every batch whatever its grid.
 #' The targets are resampled onto that grid for the search only; the
-#' training set returned is still built on the targets' grid, by
-#' `reconcile_axes()` on the drawn rows.
+#' training set returned is the library's own columns at the wavenumbers the
+#' targets share with it (`shared_columns()`), never interpolated.
 #'
 #' Coverage decides the grid, in two tiers:
 #' * `"full"`: the targets reach both ends of the library's range, to within
@@ -470,6 +331,9 @@ reconciled_standardization <- function(pool_record, target_record, wn, clamp) {
 #'   The search grid is the library's columns inside the targets' range, and
 #'   the space is built fresh on them. `select_training()` reports it as a
 #'   `coverage` warning from `record$missing`; nothing is raised here.
+#'
+#' The ranges always overlap here: the verb has refused, at its door, targets
+#' that share no column with the library.
 #'
 #' @param pool_wn [Numeric.] The library's wavenumbers.
 #' @param target_m [Matrix.] Target spectra, rows named by sample id.

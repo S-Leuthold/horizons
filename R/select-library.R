@@ -705,8 +705,8 @@ build_ossl_library <- function(raw, entry, verbose = TRUE) {
 
   lab <- lab[match(ids, lab$sample_id), , drop = FALSE]
 
-  ## standardize() on the native grid moves no values; it records the axis,
-  ## which is what lets the draw reconcile the library against the targets.
+  ## standardize() on the native grid moves no values; it records the axis
+  ## and how it was standardized, which the draw compares with the targets'.
 
   build <- function() {
 

@@ -58,7 +58,7 @@ gaussian_family <- function(n, wn, centres, noise = 0.01) {
 #' them. The targets are `n_targets` pool rows (half from each family),
 #' resampled onto an 8 cm-1 grid with `prospectr::resample()` and then
 #' perturbed with noise, except one, `twin_id`, which is left exact so its
-#' reconciled pool row is identical.
+#' pool row at the targets' wavenumbers is identical.
 #'
 #' Set `n_replicates` above zero to put replicate scans of the twinned pool
 #' row into the pool as well. That is the case the gap-based twin rule could
@@ -69,8 +69,8 @@ gaussian_family <- function(n, wn, centres, noise = 0.01) {
 #' @param n_targets [Integer.] Target rows, even. Default: `8`.
 #' @param seed [Integer.] Default: `1`.
 #' @param target_range [Numeric, length 2.] `c(max, min)` of the target grid.
-#'   Default: `c(4000, 600)`, inside the pool. Use a wider range to trigger
-#'   the coverage stop.
+#'   Default: `c(4000, 600)`, inside the pool. Use a wider range for target
+#'   columns the pool lacks, a narrower one for a search on the overlap.
 #' @param n_replicates [Integer.] Extra pool rows that are the twinned pool
 #'   row plus `replicate_noise`, appended after the `n_pool` ordinary rows.
 #'   Default: `0`, which leaves the fixture and its RNG stream untouched.
@@ -250,6 +250,34 @@ make_axis_object <- function(wn, n = 6L, prefix = "A", seed = 7L, clay = FALSE) 
   }
 
   obj
+
+}
+
+
+## ---------------------------------------------------------------------------
+## pool_on_targets() — the fixture pool on the columns the targets share
+## ---------------------------------------------------------------------------
+
+#' The fixture pool's spectra at the targets' wavenumbers
+#'
+#' @description
+#' What `select_training()` returns the drawn rows on (#236): the pool's own
+#' columns at the wavenumbers the targets share with it, nothing
+#' interpolated. The fixture's grids are nested (pool at 4 cm-1, targets at
+#' 8), so every target column is shared.
+#'
+#' @param fx [List.] From `make_select_fixture()` or `select_fixture()`.
+#'
+#' @return [List.] `matrix` (pool rows by the shared columns, row names
+#'   `sample_id`) and `wavenumbers` (the shared columns', decreasing).
+#' @noRd
+pool_on_targets <- function(fx) {
+
+  pm   <- predictor_matrix(fx$pool)
+  vars <- function(x) x$data$role_map$variable[x$data$role_map$role == "predictor"]
+  keep <- match(shared_columns(vars(fx$targets), vars(fx$pool))$shared, vars(fx$pool))
+
+  list(matrix = pm$matrix[, keep, drop = FALSE], wavenumbers = pm$wavenumbers[keep])
 
 }
 

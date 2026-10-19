@@ -43,11 +43,9 @@ Default \code{FALSE}. Not recommended — may cause data quality issues.}
 were actually re-interpolated (\code{resampled}), and the grid they sit on
 (\code{grid}: \code{min}, \code{max}, \code{step}, \code{n}; \code{NULL} without resampling).
 \code{resample} records the argument as given, never the axis's spacing;
-read that from \code{grid$step} or from the columns. On an object
-\code{select_training()} returns after resampling its pool onto the targets'
-axis, the record is rewritten to describe that axis (see
-\code{\link[=select_training]{select_training()}}), and \code{grid} can be \code{NULL} there though the pool
-itself was on a grid, when the targets sit on none.
+read that from \code{grid$step} or from the columns. A training set
+\code{select_training()} returns carries its library's record, with the axis
+fields describing the columns it returns (see \code{\link[=select_training]{select_training()}}).
 }
 \description{
 Applies standardization operations to get spectra into a consistent format

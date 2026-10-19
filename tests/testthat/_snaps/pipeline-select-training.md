@@ -1,3 +1,13 @@
+# targets on an instrument's own axis share no column and are refused, naming the standardize() call (#236)
+
+    Code
+      select_training(targets, pool, k = 10)
+    Condition
+      Error in `select_training()`:
+      ! `x` and `library` share no wavenumber column.
+      x The targets' 1763 columns run from 599.7431 to 3997.885202 cm-1, about 1.929 cm-1 apart; the library's 851 run from 600 to 4000, 4 cm-1 apart.
+      i The training set is the library's own columns at the wavenumbers the targets share with it. Put the targets on the library's grid with `standardize(x, resample = 4, trim = c(600, 4000), force = TRUE)`, or on a multiple of its 4 cm-1 step.
+
 # verbose = TRUE reports the pool, the space and the draw
 
     Code

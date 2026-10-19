@@ -1,8 +1,8 @@
 # R/pipeline-select-training.R
 # Draw a training set from a reference pool around a batch of targets. The
 # only place in the pipeline where library and unknowns meet before anything
-# is fitted, so the reconciliation of their axes, the self-leakage check and
-# the selection-time distance live here.
+# is fitted, so the comparison of their axes, the self-leakage check and the
+# selection-time distance live here.
 
 
 ## =============================================================================
@@ -67,12 +67,19 @@
 #' space, on the library's grid: the targets are resampled onto it for the
 #' search only, so one fitted space serves every batch whatever its grid, and
 #' for a registered library or a library file that space is cached (see
-#' "The cached space"). The training set comes back on the targets' grid:
-#' only the drawn rows are resampled onto it, through the same routine
-#' `standardize()` uses, so the training set and the targets share one axis
-#' end to end and the whole library is never copied onto a batch's grid.
-#' `x$selection$search` records the search axis and
-#' `x$selection$reconciliation` the return.
+#' "The cached space"). The training set comes back on the library's own
+#' columns at the wavenumbers the targets share with it: a column is shared
+#' when the library has a predictor of the same name, and nothing is
+#' interpolated. Targets on a coarser canonical grid (4 or 8 cm-1 against a
+#' 2 cm-1 library) share every one of their columns, so the training set
+#' comes back on their step. Target columns the library lacks (a wider range,
+#' a finer or offset step) are named in one `horizons_warning_coverage`;
+#' [predict()] uses only the columns the model was trained on, so the targets
+#' predict as they are. Targets that share no column with the library, such
+#' as an instrument's own axis, are refused, naming the [standardize()] call
+#' that puts them on the library's grid; for a registered library that is
+#' checked before the download. `x$selection$search` records the search axis
+#' and `x$selection$reconciliation` the columns returned.
 #'
 #' **Coverage.** The targets should span the library's range. Within half
 #' the library's spacing, or less than one of their own grid steps (a coarse
@@ -90,15 +97,14 @@
 #' the same way, keyed by the file's hash. A pool passed in memory, a PLS
 #' space and an overlap space are built every call and not cached.
 #'
-#' **Reconciliation.** Either axis carrying a hole — a spacing more than
-#' three times its own median and more than 30 cm-1 — stops the verb before anything interpolates, because a
-#' resampling spline and a Savitzky-Golay window both run straight across a
-#' gap and invent absorbance at its edges without erroring; a deleted water
-#' band belongs in `mask`, which is applied after the derivative. A pool that
-#' does not cover the targets' range also stops the verb, except within half
-#' the pool's spacing, where the overshooting column is taken at the pool's
-#' endpoint rather than extrapolated and the clamp is recorded and warned
-#' about. Targets finer than the pool warn. `window` is a width in cm-1, so
+#' **Axes the search cannot use.** Either axis with fewer than two
+#' wavenumbers, or carrying a hole (a spacing more than three times its own
+#' median and more than 30 cm-1), is refused before anything interpolates,
+#' the targets' before the library resolves: a resampling spline and a
+#' Savitzky-Golay window both run straight across a gap and invent
+#' absorbance at its edges without erroring, and a deleted water band
+#' belongs in `mask`, which is applied after the derivative. `window` is a
+#' width in cm-1, so
 #' the filter is the same physical filter on any batch; the point count it
 #' becomes on the library's grid is recorded in `settings$window_points`, and
 #' the width that count actually spans in `settings$window_cm`.
@@ -157,7 +163,7 @@
 #' `x$selection$library` records which library was drawn from.
 #'
 #' **What the record holds** (`x$selection`): the settings as resolved, the
-#' reconciliation, the pool's identity, the targets' identity (their source,
+#' columns returned, the pool's identity, the targets' identity (their source,
 #' row count and a hash of their ids), the membership table (target by
 #' property by pool row, with the space it was measured in, distance, rank,
 #' and whether the row was `retained` in the object after the twin
@@ -170,7 +176,8 @@
 #' @param x `horizons_data.` The targets: the samples to be predicted. One
 #'   row per sample, with finite spectra: the record names each target by its
 #'   `sample_id`, so replicate scans that share one are refused and should be
-#'   averaged first with [average()].
+#'   averaged first with [average()]. On a grid that shares columns with the
+#'   library's, as [standardize()] puts them (see "Two axes").
 #' @param library `horizons_data` or `character`. The reference library:
 #'   a `horizons_data` with one or more response columns (your own pool,
 #'   `spectra() |> standardize() |> add_response()`), the name of a
@@ -252,27 +259,24 @@
 #'   that is set. The control it ran with, defaults filled in, is recorded
 #'   as `selection$settings$control`.
 #'
-#' @return `horizons_data.` Rows drawn from `pool`, on the targets'
-#'   wavenumber grid, with every response column the pool carried, three
-#'   provenance columns with role `meta` (`.drawn_by`, `.min_distance`,
-#'   and `.group` except under `scope = "sample"`), and the record in
-#'   `x$selection`. `provenance$standardization` describes the returned
-#'   axis. When the pool was resampled onto the targets' grid, the pool's
-#'   record is rewritten: `grid` is the targets' (`NULL` when they are not on
-#'   a canonical grid, or when their recorded grid does not match their
-#'   columns), `n_wavelengths` and `wavelength_range` are the new axis's, and
-#'   `resampled` is `TRUE`, while the `standardize()` arguments (`resample`,
-#'   `trim`, `remove_water`, `baseline`) and `applied_at` stay the pool's,
-#'   since they produced its values; so `resample` can differ from
-#'   `grid$step`, and `trim` from `wavelength_range`. Its `reconciliation`
-#'   entry records the move: `operation`, `clamp` (the overshoot at each end
-#'   when an end column was taken at the pool's endpoint, else `NULL`) and
-#'   `pool`, the pool's record as it was, carrying its original `grid`. That
-#'   entry is the object's axis history and travels with its provenance; it
-#'   is distinct from `x$selection$reconciliation`, the selection's record of
-#'   how the two axes compared. A pool already on the targets' grid keeps its
-#'   record unchanged, and a pool never standardized keeps none. `x$log` is
-#'   the pool's, with a row for each `coverage` warning this call raised.
+#' @return `horizons_data.` Rows drawn from `pool`, on the library's own
+#'   columns at the wavenumbers the targets share with it, with every
+#'   response column the pool carried, three provenance columns with role
+#'   `meta` (`.drawn_by`, `.min_distance`, and `.group` except under
+#'   `scope = "sample"`), and the record in `x$selection`.
+#'   `provenance$standardization` is the library's, describing the returned
+#'   axis: when only some of the library's columns are returned (targets on a
+#'   coarser or narrower grid), `n_wavelengths`, `wavelength_range` and `grid`
+#'   describe the columns returned (`grid` is `NULL` when they are not evenly
+#'   spaced, or the library was on no grid), while the `standardize()`
+#'   arguments (`resample`, `trim`, `remove_water`, `baseline`), `resampled`
+#'   and `applied_at` stay the library's, since they produced the values; so
+#'   `resample` can differ from `grid$step`. A library never standardized has
+#'   no record, and the training set gets none. `x$selection$reconciliation`
+#'   records the columns returned: `operation` (`"none"` when every library
+#'   column is returned, else `"subset"`), `n_shared`, `shared_range`, and
+#'   `target_only`, the targets' wavenumbers the library lacks. `x$log` is the
+#'   pool's, with a row for each `coverage` warning this call raised.
 #'
 #' @examples
 #' \dontrun{
@@ -417,8 +421,10 @@ select_training <- function(x, library,
   ## caught here, before the download; any other library is in hand already
   ## and is checked once it resolves (Step 2), before anything is built.
 
-  if (is.character(library) && length(library) == 1L && library %in% names(library_registry()) &&
-      window_ok && deriv_ok && poly_ok && derivative > 0) {
+  registered <- is.character(library) && length(library) == 1L &&
+                library %in% names(library_registry())
+
+  if (registered && window_ok && deriv_ok && poly_ok && derivative > 0) {
 
     lib_res <- library_registry()[[library]]$filters$wn_step
     pts     <- window_to_points(window, lib_res)
@@ -498,6 +504,23 @@ select_training <- function(x, library,
   ## two columns or more, and no gap (check_select_axis()).
   check_select_axis(predictor_wavenumbers(x), "x", "the targets")
 
+  target_vars   <- x$data$role_map$variable[x$data$role_map$role == "predictor"]
+  restandardize <- !is.null(x$provenance$standardization)
+
+  ## A registered library's columns are known from the registry, the grid
+  ## build_ossl_library() standardizes it onto, so targets sharing none of
+  ## them are refused before the download, as a window too narrow is above.
+  ## The check runs again on the resolved pool below.
+
+  if (registered) {
+
+    reg_grid <- library_registry()[[library]]$filters
+    reg_vars <- paste0("wn_", canonical_grid(reg_grid$wn_min, reg_grid$wn_max, reg_grid$wn_step))
+
+    check_shared_columns(target_vars, reg_vars, restandardize = restandardize)
+
+  }
+
   resolved <- resolve_source(library, verbose = isTRUE(verbose))
   pool     <- resolved$pool
 
@@ -575,6 +598,35 @@ select_training <- function(x, library,
 
   check_select_axis(predictor_wavenumbers(pool), "library", "the pool")
 
+  ## The columns the training set will have (#236) ---------------------------
+
+  ## The library's own columns at the wavenumbers the targets share with it,
+  ## nothing interpolated. Targets that share none are refused; the targets'
+  ## columns the library lacks are reported, since predict() uses only the
+  ## columns the model was trained on.
+
+  pool_vars <- pool$data$role_map$variable[pool$data$role_map$role == "predictor"]
+  cols      <- check_shared_columns(target_vars, pool_vars, restandardize = restandardize)
+
+  if (length(cols$target_only)) {
+
+    lib_wn  <- predictor_wavenumbers(pool)
+    only_wn <- as.numeric(sub("^wn_", "", cols$target_only))
+    outside <- sum(only_wn < min(lib_wn) - GRID_TOL | only_wn > max(lib_wn) + GRID_TOL)
+    between <- length(only_wn) - outside
+    lib_lo  <- min(lib_wn)
+    lib_hi  <- max(lib_wn)
+    lib_res <- signif(grid_summary(lib_wn)$resolution, 4)
+
+    log_warning(collector, "coverage", c(
+      "{length(cols$target_only)} of the targets' {length(target_vars)} wavenumber columns are not in the library, so the training set has the {length(cols$shared)} they share.",
+      "i" = if (outside > 0) "{outside} lie outside the library's {lib_lo} to {lib_hi} cm-1.",
+      "i" = if (between > 0) "{between} fall between the library's columns, which are {lib_res} cm-1 apart; standardize the targets at a multiple of {lib_res} cm-1 to share every column.",
+      "i" = "{.fn predict} uses only the columns the model was trained on, so the targets predict as they are."
+    ), ids = cols$target_only)
+
+  }
+
   k_by <- resolve_k(k, properties)
 
   if (verbose) cat(paste0("\u251C\u2500 ", cli::style_bold("Selecting training set"), "...\n"))
@@ -586,23 +638,19 @@ select_training <- function(x, library,
   ## Distances are measured in the library's own space, on the library's
   ## grid, so one space (cached, for a registered library or a library file)
   ## serves every batch; the targets are resampled onto it for the search
-  ## only. The training set comes back on the targets' grid, and only the
-  ## drawn rows are put there (Step 4). That return reconciliation is checked
-  ## now, on one library row, so a library that does not cover the targets
-  ## stops before anything is built.
+  ## only. The training set comes back on the library's own columns at the
+  ## wavenumbers the targets share (Step 5), checked at the door above.
 
   pm <- predictor_matrix(pool)
   tm <- predictor_matrix(x)
 
-  rc_check <- reconcile_axes(subset_rows(pool, pool$data$analysis$sample_id[1]), x)
-  sa       <- search_axis(pm$wavenumbers, tm$matrix, tm$wavenumbers)
+  sa <- search_axis(pm$wavenumbers, tm$matrix, tm$wavenumbers)
 
   ## Targets short of the library's range are searched on the overlap, in a
   ## space built fresh and not cached. The warning's ids are the library
   ## columns the search left out.
   if (sa$record$mode == "overlap") {
 
-    pool_vars  <- pool$data$role_map$variable[pool$data$role_map$role == "predictor"]
     left_out   <- pool_vars[-sa$pool_cols]
     short_low  <- signif(sa$record$missing[["low"]],  4)
     short_high <- signif(sa$record$missing[["high"]], 4)
@@ -1007,23 +1055,12 @@ select_training <- function(x, library,
   groups <- build_groups(group_of_target, membership,
                          if (scope == "global") pool_ids[eligible] else union_ids, scope)
 
-  ## Only the drawn rows go onto the targets' grid. The returned object
-  ## carries their provenance, so once they are resampled its
-  ## standardization record describes the targets' axis, not the library's
-  ## (#90). The checks and their warnings ran in Step 1.
+  ## The drawn rows, on the library's own columns at the wavenumbers the
+  ## targets share (#236): the other predictor columns are dropped below,
+  ## by name, and nothing is interpolated. The door and the coverage warning
+  ## ran before the search.
 
   drawn <- subset_rows(pool, union_ids)
-  rc    <- reconcile_axes(drawn, x, quiet = TRUE)
-  out   <- rebuild_predictors(drawn, rc$matrix, rc$wavenumbers)
-
-  if (rc$record$operation == "resampled") {
-
-    out$provenance$standardization <- reconciled_standardization(
-      pool$provenance$standardization, x$provenance$standardization, rc$wavenumbers,
-      clamp = rc$record$clamp
-    )
-
-  }
 
   if (scope == "global") {
 
@@ -1061,20 +1098,29 @@ select_training <- function(x, library,
   }
 
   ## The meta columns were computed in union_ids order and are attached by
-  ## position, which holds while subset_rows() returns rows in keep order and
-  ## the reconciliation keeps them there.
+  ## position, which holds while subset_rows() returns rows in keep order.
   check_rows_aligned(
     what         = paste0("Provenance columns (", paste(names(meta), collapse = ", "), ")"),
     to           = "the drawn rows",
-    ids          = out$data$analysis$sample_id,
+    ids          = drawn$data$analysis$sample_id,
     expected_ids = union_ids
   )
 
-  analysis <- dplyr::bind_cols(out$data$analysis, meta)
-  role_map <- dplyr::bind_rows(out$data$role_map,
+  ## The library's predictor columns the targets do not share leave with the
+  ## same rebuild that adds the provenance columns.
+  dropped  <- setdiff(pool_vars, cols$shared)
+  analysis <- dplyr::bind_cols(drawn$data$analysis[, setdiff(names(drawn$data$analysis), dropped), drop = FALSE],
+                               meta)
+  role_map <- dplyr::bind_rows(drawn$data$role_map[!drawn$data$role_map$variable %in% dropped, ],
                                tibble::tibble(variable = names(meta), role = "meta"))
 
-  out <- set_analysis(out, analysis, role_map)
+  out <- set_analysis(drawn, analysis, role_map)
+
+  ## The library's standardization record, its axis fields describing the
+  ## columns returned when they are only some of the library's (#90)
+  out$provenance$standardization <- returned_standardization(
+    pool$provenance$standardization, as.numeric(sub("^wn_", "", cols$shared)), length(pool_vars)
+  )
 
   ## Pool sizes per property ------------------------------------------------
 
@@ -1116,7 +1162,10 @@ select_training <- function(x, library,
       space_note = space_note,
       control = control
     ),
-    reconciliation   = rc$record,
+    reconciliation   = list(operation    = if (length(cols$shared) == length(pool_vars)) "none" else "subset",
+                            n_shared     = length(cols$shared),
+                            shared_range = range(as.numeric(sub("^wn_", "", cols$shared))),
+                            target_only  = as.numeric(sub("^wn_", "", cols$target_only))),
     search           = c(sa$record, list(cache = cache)),
     pool             = list(n_rows = length(pool_ids), id_hash = digest::digest(sort(pool_ids, method = "radix"))),
     targets          = list(source  = x$provenance$spectra_source,
@@ -1374,7 +1423,7 @@ check_pool_unpromoted <- function(pool) {
 #' leaves an instrument gain difference of around 1.5x silent, which is the
 #' band this check is not for.
 #'
-#' @param pool_m [Matrix.] Pool spectra on the reconciled grid, raw.
+#' @param pool_m [Matrix.] Pool spectra on the search grid, raw.
 #' @param target_m [Matrix.] Target spectra on the same grid, raw.
 #' @param ratio [Numeric.] Fold difference that counts as a mismatch.
 #'   Default: `2`.
@@ -1413,59 +1462,6 @@ check_photometric_units <- function(pool_m, target_m, ratio = 2) {
     basis         = if (located) "median and iqr" else "iqr",
     mismatch      = isTRUE(scale_off || loc_off)
   )
-
-}
-
-
-## ---------------------------------------------------------------------------
-## rebuild_predictors() — Replace the predictor block of a horizons_data
-## ---------------------------------------------------------------------------
-
-#' Replace a horizons_data object's spectra with a matrix on a new grid
-#'
-#' @description
-#' Swaps the predictor columns for `m` (rows in the object's row order),
-#' names them `wn_<wavenumber>`, and rebuilds the role map, the pattern
-#' `standardize()` uses after resampling.
-#'
-#' @param x [horizons_data.] The object.
-#' @param m [Matrix.] New spectra, one row per analysis row in the table's
-#'   order. Row names, when present, are the rows' `sample_id`s.
-#' @param wn [Numeric.] Wavenumbers of `m`'s columns, decreasing.
-#'
-#' @return [horizons_data.] `x` with the predictor block replaced. Aborts
-#'   with class `horizons_error_internal` when `m`'s rows do not line up with
-#'   the analysis rows (see [check_rows_aligned()]).
-#' @noRd
-rebuild_predictors <- function(x, m, wn) {
-
-  role_map <- x$data$role_map
-  analysis <- x$data$analysis
-
-  ## The matrix rows replace the spectra of the analysis rows by position.
-  ## reconcile_axes() names them by sample_id, so the order is checked too.
-  check_rows_aligned(
-    what         = "Reconciled spectra",
-    to           = "the analysis rows",
-    n            = nrow(m),
-    n_expected   = nrow(analysis),
-    ids          = rownames(m),
-    expected_ids = analysis$sample_id
-  )
-
-  new_names <- paste0("wn_", wn)
-  colnames(m) <- new_names
-  rownames(m) <- NULL
-
-  non_pred <- role_map$variable[role_map$role != "predictor"]
-
-  new_analysis <- dplyr::bind_cols(analysis[, non_pred, drop = FALSE], tibble::as_tibble(m))
-  new_role_map <- tibble::tibble(
-    variable = c(non_pred, new_names),
-    role     = c(role_map$role[role_map$role != "predictor"], rep("predictor", length(new_names)))
-  )
-
-  set_analysis(x, new_analysis, new_role_map)
 
 }
 

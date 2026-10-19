@@ -581,11 +581,9 @@ report_standardize_summary <- function(operations, n_samples, final_n_wavelength
 #'   were actually re-interpolated (`resampled`), and the grid they sit on
 #'   (`grid`: `min`, `max`, `step`, `n`; `NULL` without resampling).
 #'   `resample` records the argument as given, never the axis's spacing;
-#'   read that from `grid$step` or from the columns. On an object
-#'   `select_training()` returns after resampling its pool onto the targets'
-#'   axis, the record is rewritten to describe that axis (see
-#'   [select_training()]), and `grid` can be `NULL` there though the pool
-#'   itself was on a grid, when the targets sit on none.
+#'   read that from `grid$step` or from the columns. A training set
+#'   `select_training()` returns carries its library's record, with the axis
+#'   fields describing the columns it returns (see [select_training()]).
 #'
 #' @examples
 #' \dontrun{
@@ -777,15 +775,6 @@ standardize <- function(x,
       n_wavelengths    = length(axis_vars),
       wavelength_range = if (any(is.finite(axis_wn))) range(axis_wn, na.rm = TRUE) else c(NA_real_, NA_real_)
     )
-
-    ### select_training()'s record of moving a pool onto its targets' axis
-    ### (#90) is axis history too, so it is carried the same way. Only that
-    ### verb writes the key, so it is added only where there is one.
-    if (keep_prior && !is.null(prior$reconciliation)) {
-
-      x$provenance$standardization$reconciliation <- prior$reconciliation
-
-    }
 
     if (length(operations) > 0) {
 
