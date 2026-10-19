@@ -1106,8 +1106,7 @@ predict_one_config <- function(object, config_id, new_spectra, interval,
       ## passes clamp = FALSE: the guardrail applies once at the ensemble
       ## output, keeping member features consistent with the raw member OOF the
       ## meta-learner trained and calibrated on.
-      bounded    <- apply_response_bound(point_pred, bound)
-      winsorized <- winsorized_report(rows$sample_id, point_pred, bounded, bound)
+      bounded <- apply_response_bound(point_pred, bound)
 
       out$.pred[good] <- bounded$values
 
@@ -1194,6 +1193,11 @@ predict_one_config <- function(object, config_id, new_spectra, interval,
         }
 
       }
+
+      ## What the bound changed in the predictions served: a row abstained on
+      ## is returned NA, so it is not reported as winsorized
+      bounded$over <- bounded$over & !is.na(out$.pred[good])
+      winsorized   <- winsorized_report(rows$sample_id, point_pred, bounded, bound)
 
     }
 

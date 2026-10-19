@@ -954,6 +954,30 @@ describe("predict.horizons_fit() - response bound guardrail", {
 
   })
 
+  it("names only the predictions it serves: a sample abstained on is not reported as winsorized", {
+
+    ## Half the batch far out of domain, and a bound under every prediction,
+    ## so every row is over it
+    ood_df  <- new_df
+    wn      <- grep("^wn_", names(ood_df))
+    shifted <- 1:4
+    ood_df[shifted, wn] <- ood_df[shifted, wn] + 10
+
+    p_raw <- predict(fitted_fixture, ood_df, interval = FALSE)
+    low   <- fitted_fixture
+    low$models$response_bound <- min(p_raw$.pred) / 2
+
+    w <- collect_warnings(p <- predict(low, ood_df, interval = FALSE, abstain_ood = TRUE),
+                          "winsorized")$warnings
+
+    abstained <- is.na(p$.pred)
+    expect_true(any(abstained) && any(!abstained))
+
+    expect_length(w, 1L)
+    expect_setequal(w[[1]]$log$ids[[1]], ood_df$sample_id[!abstained])
+
+  })
+
   it("does not clamp interval bounds (only the point prediction)", {
 
     ## .pred_upper deliberately stays unclamped: truncating the interval
