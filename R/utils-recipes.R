@@ -662,6 +662,19 @@ selection_warning <- function(step) {
 
   }
 
+  ## Nothing selected: every band kept, under the documented fallback --------
+
+  if (identical(name, "step_select_correlation") && isTRUE(rec$retained_all)) {
+
+    n <- rec$n_bands
+
+    return(list(topic = "substitution", env = environment(), message = c(
+      "No window cleared {.fn step_select_correlation}'s threshold, so it selected nothing.",
+      "i" = "Retaining all {n} wavenumber{?s}; the model sees an unselected spectrum."
+    )))
+
+  }
+
   NULL
 
 }

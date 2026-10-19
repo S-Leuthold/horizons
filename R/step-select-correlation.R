@@ -25,8 +25,10 @@
 #' The selection algorithm slides a 3-wavenumber window (6 cm-1 at 2 cm-1 resolution) across
 #' the spectrum, computes the mean absolute Spearman correlation between each window and
 #' the outcome, and retains all wavenumbers from windows where the score exceeds
-#' `mean + 1 SD`. Duplicate selections are collapsed. If no windows meet the threshold,
-#' all input wavenumbers are retained with a warning.
+#' `mean + 1 SD`. Duplicate selections are collapsed. If no window meets the
+#' threshold, every input wavenumber is retained, the trained step records
+#' `retained_all = TRUE`, and the step warns with class
+#' `horizons_warning_substitution` (#105).
 #'
 #' With fewer bands than its three-band window, no window can be scored: the
 #' step keeps them and warns with class `horizons_warning_skipped`. The
@@ -184,8 +186,10 @@ prep.step_select_correlation <- function(x, training, info = NULL, ...) {
   threshold <- mean(window_scores, na.rm = TRUE) + stats::sd(window_scores, na.rm = TRUE)
   keep_indices <- which(window_scores >= threshold)
 
+  ## No window clearing the threshold keeps every band, under the documented
+  ## fallback, and the trained step says so (retained_all); the warning is
+  ## built from that record (#105)
   if (length(keep_indices) == 0) {
-    cli::cli_alert_warning("No windows met the threshold. Retaining all predictors.")
     kept_wavenumbers <- col_names
   } else {
     ## Stage 4: Extract the wavenumbers that should be retained

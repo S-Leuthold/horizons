@@ -46,6 +46,8 @@ describe("step_select_correlation() keeps the windows that score", {
     step <- recipes::prep(correlation_recipe(d), training = d)$steps[[1]]
 
     expect_identical(step$selected_vars, signal_windows)
+    expect_false(step$correlation$retained_all)
+    expect_false(step$correlation$skipped)
 
   })
 
@@ -70,8 +72,15 @@ describe("step_select_correlation() keeps the windows that score", {
     withr::local_seed(1)
     d <- correlation_data(p = 4, signal = "wn_3996")
 
-    expect_message(prepped <- recipes::prep(correlation_recipe(d), training = d),
-                   "No windows met the threshold. Retaining all predictors.", fixed = TRUE)
+    ## A substitution, said once and recorded on the trained step (#105)
+    w <- expect_warning(prepped <- recipes::prep(correlation_recipe(d), training = d),
+                        "No window cleared `step_select_correlation()`'s threshold, so it selected nothing.",
+                        fixed = TRUE, class = "horizons_warning_substitution")
+
+    expect_identical(w$step, "step_select_correlation")
+    expect_match(conditionMessage(w), "Retaining all 4 wavenumbers", fixed = TRUE)
+    expect_true(prepped$steps[[1]]$correlation$retained_all)
+    expect_identical(prepped$steps[[1]]$correlation$n_windows_kept, 0L)
 
     ## Kept whole, the selection carries the names recipes gave the columns
     expect_identical(unname(prepped$steps[[1]]$selected_vars),

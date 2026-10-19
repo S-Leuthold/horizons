@@ -48,8 +48,10 @@ Designed for use with high-resolution MIR spectra in wide format (columns = wave
 The selection algorithm slides a 3-wavenumber window (6 cm-1 at 2 cm-1 resolution) across
 the spectrum, computes the mean absolute Spearman correlation between each window and
 the outcome, and retains all wavenumbers from windows where the score exceeds
-\verb{mean + 1 SD}. Duplicate selections are collapsed. If no windows meet the threshold,
-all input wavenumbers are retained with a warning.
+\verb{mean + 1 SD}. Duplicate selections are collapsed. If no window meets the
+threshold, every input wavenumber is retained, the trained step records
+\code{retained_all = TRUE}, and the step warns with class
+\code{horizons_warning_substitution} (#105).
 
 With fewer bands than its three-band window, no window can be scored: the
 step keeps them and warns with class \code{horizons_warning_skipped}. The
