@@ -1758,7 +1758,8 @@ log_calibration_skip <- function(collector, compute_uq, compute_ad, n_calib,
   what <- paste(c(if (compute_uq) "Prediction intervals (UQ)",
                   if (compute_ad) "the applicability domain (AD)"), collapse = " and ")
   what <- paste0(toupper(substr(what, 1, 1)), substring(what, 2))
-  verb <- if (compute_uq && compute_ad) "were" else "was"
+  ## The verb follows the subject: intervals are plural, the domain is not
+  verb <- if (compute_uq) "were" else "was"
 
   log_warning(collector, "skipped", c(
     "{what} {verb} not computed for any member: the calibration set has {n_calib} row{?s}, fewer than {.code min_calib_rows} ({min_calib_rows}).",

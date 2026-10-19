@@ -1101,6 +1101,10 @@ describe("fit() - what it reports at its end", {
     expect_match(conditionMessage(ad_only$warnings[ad_only$classes == "horizons_warning_skipped"][[1]]),
                  "^The applicability domain \\(AD\\) was not computed")
 
+    uq_only <- fit_reports(mfo(), compute_ad = FALSE)
+    expect_match(conditionMessage(uq_only$warnings[uq_only$classes == "horizons_warning_skipped"][[1]]),
+                 "^Prediction intervals \\(UQ\\) were not computed for any member")
+
     neither <- fit_reports(mfo(), compute_uq = FALSE, compute_ad = FALSE)
     expect_false("horizons_warning_skipped" %in% neither$classes)
     expect_true(length(neither$classes) == 0 || !any(grepl("calibration", vapply(neither$warnings, conditionMessage, ""))))
