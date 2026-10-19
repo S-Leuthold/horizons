@@ -696,3 +696,31 @@ describe("tune_warmstart_bayes() - Bayesian stage", {
   })
 
 })
+
+
+describe("bayes_search()", {
+
+  it("caps the line tune logged for a candidate it dropped, as another package's text, when debug stops on it", {
+
+    long <- paste0("All models failed for: ", strrep("penalty=1e-04, ", 70))
+
+    local_mocked_bindings(tune_bayes = function(...) {
+      message(long)
+      NULL
+    }, .package = "tune")
+
+    err <- expect_error(
+      bayes_search(workflow = NULL, resamples = NULL, initial = NULL, iter = 1L,
+                   param_info = NULL, metrics = NULL, debug = TRUE),
+      class = "horizons_error_run"
+    )
+
+    msg <- conditionMessage(err)
+
+    expect_match(msg, "tune keeps no record of why: All models failed for: penalty", fixed = TRUE)
+    expect_match(msg, "...", fixed = TRUE)
+    expect_lt(nchar(msg), 500)
+
+  })
+
+})

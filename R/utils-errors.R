@@ -593,6 +593,21 @@ cli_escape <- function(x) {
 ## condition_summary
 ## ---------------------------------------------------------------------------
 
+#' The classes of a condition horizons composed
+#'
+#' @description
+#' A condition raised with [abort_horizons()], [warn_in_unit()] or
+#' [note_in_unit()]. Its message is kept whole wherever it is recorded
+#' ([condition_parts()]): any other package's text inside it was capped when
+#' it was interpolated, through [condition_summary()]. Matched by exact
+#' class, so a step's own class (`horizons_boruta_error`) or one from before
+#' the conditions contract (`horizons_input_error`) is capped as another
+#' package's text until its code raises through [abort_horizons()].
+#'
+#' @keywords internal
+#' @noRd
+HORIZONS_OWN_CLASSES <- c("horizons_error", "horizons_warning", "horizons_note")
+
 #' Summarise a condition as one readable line
 #'
 #' @description
@@ -626,7 +641,8 @@ cli_escape <- function(x) {
 #' @param detail Character or `NULL`. Extra context for the closing
 #'   parentheses, after the location, e.g. how many folds raised a note.
 #' @param max_chars Integer. The longest cause kept before it is cut and
-#'   marked with `"..."`.
+#'   marked with `"..."`. Only another package's text is cut: a condition
+#'   horizons composed (`HORIZONS_OWN_CLASSES`) is kept whole.
 #'
 #' @return Character(1), never empty. A condition with no text anywhere in
 #'   its chain is described by its class.
@@ -644,7 +660,8 @@ condition_summary <- function(x, detail = NULL, max_chars = 300L) {
 #'
 #' @inheritParams condition_summary
 #' @return List with `cause` (character(1), never empty, capped at
-#'   `max_chars`) and `where` (a backticked call, or `NA`).
+#'   `max_chars` unless horizons composed it) and `where` (a backticked
+#'   call, or `NA`).
 #' @keywords internal
 #' @noRd
 condition_parts <- function(x, max_chars = 300L) {
@@ -667,8 +684,12 @@ condition_parts <- function(x, max_chars = 300L) {
   ## The cap keeps a results-table cell readable. The cause is at the front,
   ## so a cut only drops the tail of a long root message (in practice the
   ## trailing cli hint bullets), never the reason itself, and the location
-  ## and detail are added after the cut so they always survive.
-  if (isTRUE(nchar(cause, allowNA = TRUE) > max_chars)) {
+  ## and detail are added after the cut so they always survive. Only text
+  ## another package raised is cut: a message horizons composed is kept
+  ## whole, since the other package's text inside it went through this cap
+  ## when it was interpolated, and cutting it would drop what the package
+  ## added after that text, a location or a fold count.
+  if (!isTRUE(parts$own) && isTRUE(nchar(cause, allowNA = TRUE) > max_chars)) {
 
     cause <- paste0(substr(cause, 1L, max_chars - 3L), "...")
 
@@ -702,8 +723,9 @@ format_condition <- function(cause, where = NA_character_, detail = NULL) {
 #'
 #' @param cnd A condition.
 #' @return List with `cause` (character, possibly empty), `where` (a
-#'   backticked call such as ``"`step_mutate()`"``, or `NULL`) and `fallback`
-#'   (the text to use when `cause` is empty).
+#'   backticked call such as ``"`step_mutate()`"``, or `NULL`), `fallback`
+#'   (the text to use when `cause` is empty) and `own` (whether the condition
+#'   the cause is read from is one horizons composed, `HORIZONS_OWN_CLASSES`).
 #' @keywords internal
 #' @noRd
 condition_cause <- function(cnd) {
@@ -757,7 +779,8 @@ condition_cause <- function(cnd) {
 
   }
 
-  list(cause = texts[root], where = where, fallback = fallback)
+  list(cause = texts[root], where = where, fallback = fallback,
+       own = inherits(chain[[root]], HORIZONS_OWN_CLASSES))
 
 }
 
@@ -964,7 +987,8 @@ new_warning_log <- function() {
 #' Warning records from captured text
 #'
 #' @param x Character (or a list of strings, as `safely_execute()` returns).
-#' @param pinned Logical. A package notice that the cap must never hide.
+#' @param pinned Logical. A package notice that the cap must never hide,
+#'   and the package's own text, so it is not cut at 300 characters either.
 #' @return Records shaped like [new_warning_log()]'s, one per distinct text.
 #' @keywords internal
 #' @noRd
@@ -975,7 +999,10 @@ text_records <- function(x, pinned = FALSE) {
   if (length(x) == 0) return(new_warning_log())
 
   distinct <- unique(x)
-  parts    <- lapply(distinct, condition_parts)
+
+  ### A pinned line is the package's own text, kept whole as a message
+  ### horizons composed is; captured text from another package is capped.
+  parts <- lapply(distinct, condition_parts, max_chars = if (pinned) Inf else 300L)
 
   tibble::tibble(
     cause   = vapply(parts, `[[`, character(1), "cause"),

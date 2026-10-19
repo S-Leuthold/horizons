@@ -559,8 +559,11 @@ bayes_search <- function(workflow,
 
   if (debug && !is.null(all_failed)) {
 
+    ### tune's own line, capped as another package's text is
+    why <- condition_summary(all_failed)
+
     abort_horizons(
-      "a candidate {search} proposed failed in every fold, and tune keeps no record of why: {all_failed}",
+      "a candidate {search} proposed failed in every fold, and tune keeps no record of why: {why}",
       kind = "run"
     )
 

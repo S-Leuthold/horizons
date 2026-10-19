@@ -54,6 +54,24 @@ test_set_failing_recipe <- function(config_row, train_data, role_map, ...) {
 
 }
 
+## As fail_on_a_fold(), with a cause long enough that the failure horizons
+## composes around it passes 300 characters
+fail_long_on_a_fold <- function(x) {
+
+  if (length(x) < 25) stop(paste0("boom on a fold:", strrep(" a long cause", 20)))
+
+  x
+
+}
+
+long_fold_failing_recipe <- function(config_row, train_data, role_map, ...) {
+
+  recipes::recipe(SOC ~ ., data = train_data) |>
+    recipes::update_role("sample_id", new_role = "id") |>
+    recipes::step_mutate(boom = fail_long_on_a_fold(wn_4000))
+
+}
+
 ## The other way round: fails on a cross-validation analysis set (about 20
 ## rows) and preps on the whole training set (about 30), so the failure is
 ## seen only inside tune.
@@ -370,6 +388,40 @@ describe("condition_summary()", {
 
   })
 
+  it("keeps a message horizons composed whole, however long: an error, a warning or a note", {
+
+    text <- paste(paste(rep("word", 100), collapse = " "), "(in 3 of 5 folds)")
+
+    err  <- tryCatch(abort_horizons(text, kind = "run"), error = function(e) e)
+    warn <- tryCatch(warn_in_unit("substitution", text), warning = function(w) w)
+    note <- tryCatch(note_in_unit(text), horizons_note = function(n) n)
+
+    for (cnd in list(err, warn, note)) {
+      expect_true(endsWith(condition_summary(cnd, max_chars = 50L), "(in 3 of 5 folds)"),
+                  label = class(cnd)[1])
+    }
+
+    ## Another package's text is cut, and so is a class from before the
+    ## conditions contract or a step's own, until it raises through
+    ## abort_horizons()
+    foreign <- simpleError(text)
+    old     <- rlang::error_cnd(c("horizons_boruta_error", "horizons_input_error"), message = text)
+
+    for (cnd in list(foreign, old)) {
+      expect_match(condition_summary(cnd, max_chars = 50L), "...", fixed = TRUE)
+    }
+
+  })
+
+  it("keeps a pinned line whole, as the package's own text, and caps text captured from another package", {
+
+    line <- paste(paste(rep("word", 100), collapse = " "), "(3 of 5 folds).")
+
+    expect_identical(text_records(line, pinned = TRUE)$cause, line)
+    expect_match(text_records(line)$cause, "...", fixed = TRUE)
+
+  })
+
 })
 
 ## ---------------------------------------------------------------------------
@@ -452,6 +504,18 @@ describe("evaluate_single_config() records the cause of a recipe step error", {
     ## own "All models failed" warning is not repeated as a warning
     expect_identical(result$class, "horizons_error_run")
     expect_false(any(grepl("All models failed", result$warnings[[1]], fixed = TRUE)))
+
+  })
+
+  it("keeps the location and fold count of a long cause, since horizons composed the failure around it", {
+
+    local_mocked_bindings(build_recipe = long_fold_failing_recipe, .package = "horizons")
+
+    result <- run_evaluate("elastic_net", setup)
+
+    expect_identical(result$status, "failed")
+    expect_gt(nchar(result$error_message), 300)
+    expect_match(result$error_message, "a long cause (in `step_mutate()`; 3 of 3 folds)", fixed = TRUE)
 
   })
 
