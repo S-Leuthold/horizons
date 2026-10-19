@@ -3,8 +3,9 @@
 ## ---------------------------------------------------------------------------
 ##
 ## Which windows the step keeps, and what it refuses. Its re-prep and round
-## trip through build_recipe() are tested in test-utils-recipes.R. The aborts
-## carry no package class, so each test matches the finding's own text.
+## trip through build_recipe() are tested in test-utils-recipes.R. Its
+## refusals are horizons_error_input; raised in prep(), recipes wraps them in
+## recipes_error_step, which expect_error()'s class matches through.
 
 ## Helper: n spectra of p bands named wn_<wavenumber>, and an outcome
 ## carried by one band. Drawn under the caller's seed.
@@ -138,6 +139,40 @@ describe("step_select_correlation() refuses input it cannot use", {
                         "`new_data` lacks columns `step_select_correlation()` selected.",
                         fixed = TRUE, class = "horizons_error_input")
     expect_match(rlang::cnd_message(err), selected[1], fixed = TRUE)
+
+  })
+
+})
+
+
+describe("step_select_correlation() with too few bands to select from", {
+
+  it("keeps one or two bands, scores no window, and warns skipped, with no warning from base R", {
+
+    for (p in 1:2) {
+
+      d <- withr::with_seed(1, {
+        m <- matrix(stats::rnorm(30 * p), 30)
+        colnames(m) <- paste0("wn_", seq(4000, by = -2, length.out = p))
+        d <- tibble::as_tibble(m)
+        d$SOC <- d$wn_4000 + stats::rnorm(30, sd = 0.3)
+        d
+      })
+
+      w <- testthat::capture_warnings(
+        prepped <- recipes::prep(correlation_recipe(d), training = d)
+      )
+
+      step <- prepped$steps[[1]]
+
+      expect_length(w, 1L)
+      expect_identical(unname(step$selected_vars), colnames(d)[seq_len(p)], label = paste(p, "bands"))
+      expect_true(step$correlation$skipped)
+      expect_warning(recipes::prep(correlation_recipe(d), training = d),
+                     "too few to score a three-band window", fixed = TRUE,
+                     class = "horizons_warning_skipped")
+
+    }
 
   })
 

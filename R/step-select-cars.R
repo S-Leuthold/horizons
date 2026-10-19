@@ -39,9 +39,13 @@
 #' shrink on an exponential schedule to two. The step returns the set of
 #' bands the lowest score was measured on (#106), each kept representative
 #' bringing its whole cluster. The trained step records this in its `cars`
-#' element: the representatives, each iteration's score, the iteration
-#' chosen, the bands kept, and `retained_all` (always `FALSE`: CARS always
-#' selects).
+#' element: the bands it selected from, the representatives, each
+#' iteration's score, the iteration chosen, the bands kept, `retained_all`
+#' (always `FALSE`: CARS always selects) and `skipped`.
+#'
+#' With fewer than two bands left after the near-constant ones are dropped,
+#' there is nothing to select between: the step keeps them, records
+#' `skipped = TRUE`, and warns with class `horizons_warning_skipped`.
 #'
 #' Its refusals (an `outcome` that is not one column of the training data, a
 #' `bake()` before `prep()`, new data lacking a column it selected) carry the
@@ -142,6 +146,32 @@ prep.step_select_cars <- function(x, training, info = NULL, ...) {
 
   spectra_mat <- drop_constant_bands(spectra_mat)
 
+  ## Fewer than two bands left: there is nothing to select between, so they
+  ## are kept and the step says the selection did not run
+  if (ncol(spectra_mat) < 2) {
+
+    kept <- colnames(spectra_mat)
+
+    return(raise_selection_warning(step_select_cars_new(
+      terms         = selectors,
+      columns       = col_names,
+      outcome       = x$outcome,
+      role          = x$role,
+      trained       = TRUE,
+      selected_vars = kept,
+      cars          = list(n_bands           = length(kept),
+                           n_representatives = NA_integer_,
+                           scores            = NULL,
+                           iteration         = NA_integer_,
+                           n_kept            = length(kept),
+                           retained_all      = FALSE,
+                           skipped           = TRUE),
+      skip          = x$skip,
+      id            = x$id
+    )))
+
+  }
+
   cluster_spectral_predictors(spectra_mat,
                               k      = 150,
                               method = "correlation") -> cluster_result
@@ -214,25 +244,29 @@ prep.step_select_cars <- function(x, training, info = NULL, ...) {
 
   kept_wavenumbers <- unique(unlist(cluster_map[kept_cluster_vars]))
 
-  cars_record <- list(n_representatives = n_vars,
+  cars_record <- list(n_bands           = ncol(spectra_mat),
+                      n_representatives = n_vars,
                       scores            = scores,
                       iteration         = best,
                       n_kept            = length(kept_wavenumbers),
-                      retained_all      = FALSE)
+                      retained_all      = FALSE,
+                      skipped           = FALSE)
 
   ## ---------------------------------------------------------------------------
   ## Stage 5: Return trained step
   ## ---------------------------------------------------------------------------
 
-  step_select_cars_new(terms          = selectors,
-                      columns        = col_names,
-                      outcome        = x$outcome,
-                      role           = x$role,
-                      trained        = TRUE,
-                      selected_vars  = kept_wavenumbers,
-                      cars           = cars_record,
-                      skip           = x$skip,
-                      id             = x$id)
+  raise_selection_warning(step_select_cars_new(
+    terms          = selectors,
+    columns        = col_names,
+    outcome        = x$outcome,
+    role           = x$role,
+    trained        = TRUE,
+    selected_vars  = kept_wavenumbers,
+    cars           = cars_record,
+    skip           = x$skip,
+    id             = x$id
+  ))
 }
 
 

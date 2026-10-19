@@ -51,6 +51,12 @@ the outcome, and retains all wavenumbers from windows where the score exceeds
 \verb{mean + 1 SD}. Duplicate selections are collapsed. If no windows meet the threshold,
 all input wavenumbers are retained with a warning.
 
+With fewer bands than its three-band window, no window can be scored: the
+step keeps them and warns with class \code{horizons_warning_skipped}. The
+trained step records what it did in its \code{correlation} element: the bands
+it scored, the threshold, the windows scored and kept, \code{retained_all} and
+\code{skipped}.
+
 This step is designed to operate on spectra that have already been preprocessed
 (e.g., SNV + derivative). It should be applied after spectral transformation but
 before dimensionality reduction (e.g., PCA) or model fitting.

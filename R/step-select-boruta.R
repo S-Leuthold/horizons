@@ -62,7 +62,14 @@
 #' The trained step records what Boruta did in its `boruta` element: the
 #' confirmed, tentative and rejected counts, each attribute's `decision`, the
 #' `runs`, `max_runs` and `num_trees`, the `mtry` ceiling and the `mtry` of
-#' each run (`mtry_by_run`), and `retained_all`. `print()` shows the counts.
+#' each run (`mtry_by_run`), `retained_all`, `n_bands` (the bands left after
+#' the near-constant ones are dropped) and `skipped`. `print()` shows the
+#' counts.
+#'
+#' With fewer than two bands left after the near-constant ones are dropped,
+#' they cannot be clustered and there is nothing to select between: the step
+#' keeps them, records `skipped = TRUE`, and warns with class
+#' `horizons_warning_skipped`, rather than failing.
 #'
 #' @export
 
@@ -162,6 +169,37 @@ prep.step_select_boruta <- function(x, training, info = NULL, ...) {
   spectra_mat        <- drop_constant_bands(spectra_mat)
   col_names_filtered <- colnames(spectra_mat)
 
+  ## Fewer than two bands left: they cannot be clustered and there is nothing
+  ## to select between, so they are kept and the step says the selection did
+  ## not run. A one-band model is weak, not wrong (Sam, 2026-10-14).
+  if (ncol(spectra_mat) < 2) {
+
+    return(raise_selection_warning(step_select_boruta_new(
+      terms         = selectors,
+      columns       = col_names,
+      outcome       = x$outcome,
+      role          = x$role,
+      trained       = TRUE,
+      selected_vars = col_names_filtered,
+      boruta        = list(n_bands      = length(col_names_filtered),
+                           n_attributes = 0L,
+                           n_confirmed  = 0L,
+                           n_tentative  = 0L,
+                           n_rejected   = 0L,
+                           decision     = NULL,
+                           runs         = 0L,
+                           max_runs     = 25L,
+                           num_trees    = 250L,
+                           mtry         = NA_integer_,
+                           mtry_by_run  = integer(0),
+                           retained_all = FALSE,
+                           skipped      = TRUE),
+      skip          = x$skip,
+      id            = x$id
+    )))
+
+  }
+
   # Use more aggressive clustering for spectral data (k=50 instead of 150)
   cluster_spectral_predictors(spectra_mat,
                               k      = min(50, ncol(spectra_mat)),
@@ -248,7 +286,8 @@ prep.step_select_boruta <- function(x, training, info = NULL, ...) {
 
   decision <- boruta_fit$finalDecision
 
-  boruta_record <- list(n_attributes = n_features,
+  boruta_record <- list(n_bands      = length(col_names_filtered),
+                        n_attributes = n_features,
                         n_confirmed  = sum(decision == "Confirmed"),
                         n_tentative  = sum(decision == "Tentative"),
                         n_rejected   = sum(decision == "Rejected"),
@@ -258,7 +297,8 @@ prep.step_select_boruta <- function(x, training, info = NULL, ...) {
                         num_trees    = num_trees,
                         mtry         = as.integer(optimal_mtry),
                         mtry_by_run  = mtry_by_run,
-                        retained_all = FALSE)
+                        retained_all = FALSE,
+                        skipped      = FALSE)
 
   ## ---------------------------------------------------------------------------
   ## Stage 4: Map back to original wavenumbers
@@ -309,15 +349,17 @@ prep.step_select_boruta <- function(x, training, info = NULL, ...) {
   ## Stage 5: Return trained step
   ## ---------------------------------------------------------------------------
 
-  step_select_boruta_new(terms          = selectors,
-                         columns        = col_names,
-                         outcome        = x$outcome,
-                         role           = x$role,
-                         trained        = TRUE,
-                         selected_vars  = kept_wavenumbers,
-                         boruta         = boruta_record,
-                         skip           = x$skip,
-                         id             = x$id)
+  raise_selection_warning(step_select_boruta_new(
+    terms          = selectors,
+    columns        = col_names,
+    outcome        = x$outcome,
+    role           = x$role,
+    trained        = TRUE,
+    selected_vars  = kept_wavenumbers,
+    boruta         = boruta_record,
+    skip           = x$skip,
+    id             = x$id
+  ))
 }
 
 
@@ -365,6 +407,11 @@ print.step_select_boruta <- function(x,
     b <- x$boruta
 
     if (!is.null(b)) {
+
+      if (isTRUE(b$skipped)) {
+        cat(glue::glue("\u2022 Too few bands to run Boruta, so the {b$n_bands} left were kept"), "\n", sep = "")
+        return(invisible(x))
+      }
 
       cat(glue::glue("\u2022 Boruta: {b$n_confirmed} confirmed, {b$n_tentative} tentative, ",
                      "{b$n_rejected} rejected of {b$n_attributes} cluster representatives ",

@@ -85,5 +85,12 @@ class \code{horizons_error_input}. Raised inside \code{prep()}, recipes wraps th
 The trained step records what Boruta did in its \code{boruta} element: the
 confirmed, tentative and rejected counts, each attribute's \code{decision}, the
 \code{runs}, \code{max_runs} and \code{num_trees}, the \code{mtry} ceiling and the \code{mtry} of
-each run (\code{mtry_by_run}), and \code{retained_all}. \code{print()} shows the counts.
+each run (\code{mtry_by_run}), \code{retained_all}, \code{n_bands} (the bands left after
+the near-constant ones are dropped) and \code{skipped}. \code{print()} shows the
+counts.
+
+With fewer than two bands left after the near-constant ones are dropped,
+they cannot be clustered and there is nothing to select between: the step
+keeps them, records \code{skipped = TRUE}, and warns with class
+\code{horizons_warning_skipped}, rather than failing.
 }

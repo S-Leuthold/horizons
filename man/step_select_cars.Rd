@@ -62,9 +62,13 @@ leave-one-out RMSEP at its best number of components; the bands kept then
 shrink on an exponential schedule to two. The step returns the set of
 bands the lowest score was measured on (#106), each kept representative
 bringing its whole cluster. The trained step records this in its \code{cars}
-element: the representatives, each iteration's score, the iteration
-chosen, the bands kept, and \code{retained_all} (always \code{FALSE}: CARS always
-selects).
+element: the bands it selected from, the representatives, each
+iteration's score, the iteration chosen, the bands kept, \code{retained_all}
+(always \code{FALSE}: CARS always selects) and \code{skipped}.
+
+With fewer than two bands left after the near-constant ones are dropped,
+there is nothing to select between: the step keeps them, records
+\code{skipped = TRUE}, and warns with class \code{horizons_warning_skipped}.
 
 Its refusals (an \code{outcome} that is not one column of the training data, a
 \code{bake()} before \code{prep()}, new data lacking a column it selected) carry the

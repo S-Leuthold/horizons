@@ -507,3 +507,38 @@ describe("step_select_boruta() refuses input it cannot use", {
   })
 
 })
+
+
+describe("step_select_boruta() with too few bands to select from", {
+
+  it("keeps the lone band left after its variance filter, runs no Boruta, and warns skipped", {
+
+    skip_if_not_installed("Boruta")
+
+    ## 49 constant bands and one that varies: one band is left, which
+    ## hclust() refused ("must have n >= 2 objects to cluster")
+    d <- boruta_signal_data(n = 30, p = 50)
+    for (j in sprintf("spec%03d", 2:50)) d[[j]] <- 1
+
+    calls <- 0L
+    local_mocked_bindings(Boruta = function(...) { calls <<- calls + 1L; stop("no Boruta here") },
+                          .package = "Boruta")
+
+    w <- expect_warning(
+      prepped <- suppressMessages(recipes::prep(boruta_recipe(d), training = d)),
+      "had 1 band to select from, too few to cluster them and run Boruta, so it is kept",
+      fixed = TRUE, class = "horizons_warning_skipped"
+    )
+
+    step <- prepped$steps[[1]]
+
+    expect_identical(step$selected_vars, "spec001")
+    expect_true(step$boruta$skipped)
+    expect_false(step$boruta$retained_all)
+    expect_identical(calls, 0L)
+    expect_identical(w$step, "step_select_boruta")
+    expect_output(print(step), "Too few bands to run Boruta, so the 1 left were kept")
+
+  })
+
+})

@@ -28,6 +28,12 @@
 #' `mean + 1 SD`. Duplicate selections are collapsed. If no windows meet the threshold,
 #' all input wavenumbers are retained with a warning.
 #'
+#' With fewer bands than its three-band window, no window can be scored: the
+#' step keeps them and warns with class `horizons_warning_skipped`. The
+#' trained step records what it did in its `correlation` element: the bands
+#' it scored, the threshold, the windows scored and kept, `retained_all` and
+#' `skipped`.
+#'
 #' This step is designed to operate on spectra that have already been preprocessed
 #' (e.g., SNV + derivative). It should be applied after spectral transformation but
 #' before dimensionality reduction (e.g., PCA) or model fitting.
@@ -89,6 +95,8 @@ step_select_correlation <- function(recipe,
 ## Follows recipes' own contract: `terms` holds the selector quosures and
 ## survives prep, so a trained recipe can be re-prepped (`fresh = TRUE`);
 ## `columns` holds the names prep resolved them to, and is what bake reads.
+## `correlation` is prep's record of what it did (see prep()); bake never
+## reads it, and a step trained before it existed has none.
 
 #' @keywords internal
 #' @noRd
@@ -98,6 +106,7 @@ step_select_correlation_new <- function(terms,
                                         role,
                                         trained,
                                         selected_vars = NULL,
+                                        correlation   = NULL,
                                         skip,
                                         id) {
   out <- list(
@@ -107,6 +116,7 @@ step_select_correlation_new <- function(terms,
     role             = role,
     trained          = trained,
     selected_vars    = selected_vars,
+    correlation      = correlation,
     skip             = skip,
     id               = id)
 
@@ -132,6 +142,35 @@ prep.step_select_correlation <- function(x, training, info = NULL, ...) {
   outcome_vec <- training[[x$outcome]]
   spectra_mat <- as.matrix(training[, col_names])
 
+  window_size <- 3
+
+  trained_step <- function(kept, record) {
+    raise_selection_warning(step_select_correlation_new(
+      terms         = selectors,
+      columns       = col_names,
+      outcome       = x$outcome,
+      role          = x$role,
+      trained       = TRUE,
+      selected_vars = kept,
+      correlation   = record,
+      skip          = x$skip,
+      id            = x$id
+    ))
+  }
+
+  ## Fewer bands than a window: no window can be scored, so they are kept and
+  ## the step says the selection did not run
+  if (length(col_names) < window_size) {
+
+    return(trained_step(col_names, list(n_bands        = length(col_names),
+                                        threshold      = NA_real_,
+                                        n_windows      = 0L,
+                                        n_windows_kept = 0L,
+                                        retained_all   = FALSE,
+                                        skipped        = TRUE)))
+
+  }
+
   ## ---------------------------------------------------------------------------
   ## Stage 2: Vectorized correlation and rolling mean
   ## ---------------------------------------------------------------------------
@@ -140,7 +179,6 @@ prep.step_select_correlation <- function(x, training, info = NULL, ...) {
   all_cor_scores <- stats::cor(spectra_mat, outcome_vec, method = "spearman")
 
   # 2. Use a highly efficient rolling mean function
-  window_size   <- 3
   window_scores <- zoo::rollmean(x = abs(as.vector(all_cor_scores)), k = window_size)
 
   threshold <- mean(window_scores, na.rm = TRUE) + stats::sd(window_scores, na.rm = TRUE)
@@ -158,16 +196,12 @@ prep.step_select_correlation <- function(x, training, info = NULL, ...) {
     )
   }
 
-  step_select_correlation_new(
-    terms         = selectors,
-    columns       = col_names,
-    outcome       = x$outcome,
-    role          = x$role,
-    trained       = TRUE,
-    selected_vars = kept_wavenumbers,
-    skip          = x$skip,
-    id            = x$id
-  )
+  trained_step(kept_wavenumbers, list(n_bands        = length(col_names),
+                                      threshold      = threshold,
+                                      n_windows      = length(window_scores),
+                                      n_windows_kept = length(keep_indices),
+                                      retained_all   = length(keep_indices) == 0,
+                                      skipped        = FALSE))
 }
 
 ## -----------------------------------------------------------------------------

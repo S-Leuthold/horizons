@@ -808,17 +808,20 @@ skipped_add_on <- function(what) {
 #'
 #' @param topic Character(1). One of `LOG_TOPICS`.
 #' @param message Character. A cli message, interpolated in `.envir`.
+#' @param ... Fields for the condition, e.g. `step`, which names the recipe
+#'   step that raised it ([quiet_selection_warnings()] reads it).
 #' @param .envir The environment the message is interpolated in.
 #' @return `NULL`, invisibly.
 #' @keywords internal
 #' @noRd
-warn_in_unit <- function(topic, message, .envir = rlang::caller_env()) {
+warn_in_unit <- function(topic, message, ..., .envir = rlang::caller_env()) {
 
   check_log_topic(topic)
 
   cli::cli_warn(
     message,
     class  = c(paste0("horizons_warning_", topic), "horizons_warning"),
+    ...,
     call   = NULL,
     .envir = .envir
   )

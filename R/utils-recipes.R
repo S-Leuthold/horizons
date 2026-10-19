@@ -602,6 +602,92 @@ check_step_new_data <- function(object, new_data, call = rlang::caller_env()) {
 }
 
 ## ---------------------------------------------------------------------------
+## What a trained selection step says about its selection
+## ---------------------------------------------------------------------------
+## The three selection steps keep a record of what they did on the trained
+## step (`cars`, `boruta`, `correlation`). The warning a record calls for is
+## built from the record alone, by one function, so the step's prep() and
+## the reader evaluate() and fit() run on a fitted recipe raise the same
+## words.
+
+#' The record a trained selection step keeps
+#'
+#' @param step A trained `step_select_*` step.
+#' @return Its record (a list), or `NULL` for another step, or a step
+#'   trained before records existed.
+#' @keywords internal
+#' @noRd
+selection_record <- function(step) {
+
+  switch(class(step)[1],
+         step_select_cars        = step$cars,
+         step_select_boruta      = step$boruta,
+         step_select_correlation = step$correlation,
+         NULL)
+
+}
+
+#' The warning a trained selection step's record calls for
+#'
+#' @param step A trained `step_select_*` step.
+#' @return `NULL` when the record calls for none; otherwise a list with
+#'   `topic`, `message` (a cli message) and `env`, the environment it is
+#'   interpolated in.
+#' @keywords internal
+#' @noRd
+selection_warning <- function(step) {
+
+  rec  <- selection_record(step)
+  name <- class(step)[1]
+
+  if (is.null(rec)) return(NULL)
+
+  ## Too few bands to select from: kept, and the selection did not run -------
+
+  if (isTRUE(rec$skipped)) {
+
+    n    <- rec$n_bands
+    what <- switch(name,
+                   step_select_cars        = "run CARS",
+                   step_select_boruta      = "cluster them and run Boruta",
+                   step_select_correlation = "score a three-band window")
+
+    message <- if (n == 0) {
+      "{.fn {name}} had no band to select from, every one being near-constant, so it keeps none."
+    } else {
+      "{.fn {name}} had {n} band{?s} to select from, too few to {what}, so {cli::qty(n)}{?it is/they are} kept."
+    }
+
+    return(list(topic = "skipped", message = message, env = environment()))
+
+  }
+
+  NULL
+
+}
+
+#' Raise the warning a trained selection step's record calls for
+#'
+#' @description
+#' Through [warn_in_unit()], with the field `step` naming the step: inside a
+#' unit it is recorded with its class; outside one it is an ordinary classed
+#' warning.
+#'
+#' @param step A trained `step_select_*` step.
+#' @return `step`, invisibly.
+#' @keywords internal
+#' @noRd
+raise_selection_warning <- function(step) {
+
+  w <- selection_warning(step)
+
+  if (!is.null(w)) warn_in_unit(w$topic, w$message, step = class(step)[1], .envir = w$env)
+
+  invisible(step)
+
+}
+
+## ---------------------------------------------------------------------------
 ## step_selectors
 ## ---------------------------------------------------------------------------
 

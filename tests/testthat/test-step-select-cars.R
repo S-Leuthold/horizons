@@ -271,3 +271,37 @@ describe("step_select_cars() and near-constant bands", {
   })
 
 })
+
+
+describe("step_select_cars() with too few bands to select from", {
+
+  it("keeps a lone band, runs no PLS, and warns skipped", {
+
+    skip_if_not_installed("pls")
+
+    ## Two bands, one constant: one is left after the near-constant filter
+    d <- withr::with_seed(1, tibble::tibble(wn_4000 = stats::rnorm(30), wn_3998 = 1))
+    d$SOC <- 2 * d$wn_4000 + withr::with_seed(2, stats::rnorm(30, sd = 0.3))
+
+    calls <- 0L
+    local_mocked_bindings(plsr = function(...) { calls <<- calls + 1L; stop("no PLS here") },
+                          .package = "pls")
+
+    w <- expect_warning(
+      prepped <- suppressMessages(recipes::prep(cars_recipe(d), training = d)),
+      class = "horizons_warning_skipped"
+    )
+
+    step <- prepped$steps[[1]]
+
+    expect_identical(step$selected_vars, "wn_4000")
+    expect_true(step$cars$skipped)
+    expect_identical(step$cars$n_bands, 1L)
+    expect_identical(calls, 0L)
+    expect_identical(w$step, "step_select_cars")
+    expect_match(conditionMessage(w), "had 1 band to select from, too few to run CARS, so it is kept",
+                 fixed = TRUE)
+
+  })
+
+})
