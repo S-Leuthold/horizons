@@ -80,9 +80,12 @@ step records this in its \code{cars} element: the bands it selected from
 (\code{n_bands}), the near-constant bands it dropped before (\code{n_constant}),
 whether they were clustered (\code{clustered}, \code{FALSE} with fewer than 150, when
 each band is its own representative), the representatives
-(\code{n_representatives}), the \code{path} (a tibble, one row per
-iteration: its \code{representatives} and \code{bands}, \code{rmsecv}, its standard error
-across the folds \code{se}, and the component count \code{ncomp}), the iteration
+(\code{n_representatives}), each representative's cluster (\code{clusters}, a list
+of the bands it stands for, named by the representative), the \code{path} (a
+tibble, one row per iteration: its \code{representatives}, the bands their
+clusters hold \code{n_bands}, \code{rmsecv}, its standard error across the folds
+\code{se}, and the component count \code{ncomp}; iteration \code{i}'s bands are
+\code{unlist(cars$clusters[cars$path$representatives[[i]]])}), the iteration
 chosen, the bands kept, \code{retained_all} and \code{skipped}. \code{retained_all} is
 \code{TRUE} when the first iteration's set, every band, scored lowest: CARS's
 answer can be no selection. It is the scored answer, not a fallback, so

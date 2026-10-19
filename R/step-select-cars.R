@@ -57,9 +57,12 @@
 #' (`n_bands`), the near-constant bands it dropped before (`n_constant`),
 #' whether they were clustered (`clustered`, `FALSE` with fewer than 150, when
 #' each band is its own representative), the representatives
-#' (`n_representatives`), the `path` (a tibble, one row per
-#' iteration: its `representatives` and `bands`, `rmsecv`, its standard error
-#' across the folds `se`, and the component count `ncomp`), the iteration
+#' (`n_representatives`), each representative's cluster (`clusters`, a list
+#' of the bands it stands for, named by the representative), the `path` (a
+#' tibble, one row per iteration: its `representatives`, the bands their
+#' clusters hold `n_bands`, `rmsecv`, its standard error across the folds
+#' `se`, and the component count `ncomp`; iteration `i`'s bands are
+#' `unlist(cars$clusters[cars$path$representatives[[i]]])`), the iteration
 #' chosen, the bands kept, `retained_all` and `skipped`. `retained_all` is
 #' `TRUE` when the first iteration's set, every band, scored lowest: CARS's
 #' answer can be no selection. It is the scored answer, not a fallback, so
@@ -201,6 +204,7 @@ prep.step_select_cars <- function(x, training, info = NULL, ...) {
                            n_constant        = n_constant,
                            clustered         = FALSE,
                            n_representatives = NA_integer_,
+                           clusters          = NULL,
                            path              = NULL,
                            iteration         = NA_integer_,
                            n_kept            = length(kept),
@@ -302,15 +306,19 @@ prep.step_select_cars <- function(x, training, info = NULL, ...) {
   kept_wavenumbers <- unique(unlist(cluster_map[kept_cluster_vars]))
 
   ## The path, recorded on the step: each iteration's set (its
-  ## representatives, and the bands their clusters hold), its score, the
-  ## score's standard error across the folds, and its component count. The
-  ## score is the one CARS chose by, biased low as the least of 50.
+  ## representatives, and how many bands their clusters hold), its score,
+  ## the score's standard error across the folds, and its component count.
+  ## The score is the one CARS chose by, biased low as the least of 50. A
+  ## set's bands are its representatives' clusters, which the record keeps
+  ## once (`clusters`) rather than once per iteration.
+  representatives <- lapply(sets, function(s) unname(cluster_vars[s]))
+  clusters        <- unname(cluster_map[cluster_vars])
+  names(clusters) <- unname(cluster_vars)
+
   path <- tibble::tibble(
     iteration       = seq_len(n_iterations),
-    representatives = lapply(sets, function(s) unname(cluster_vars[s])),
-    bands           = lapply(sets, function(s) {
-      unique(unlist(cluster_map[cluster_vars[s]], use.names = FALSE))
-    }),
+    representatives = representatives,
+    n_bands         = vapply(representatives, function(r) length(unlist(clusters[r])), integer(1)),
     rmsecv          = scored$rmsecv,
     se              = scored$se,
     ncomp           = scored$ncomp
@@ -320,6 +328,7 @@ prep.step_select_cars <- function(x, training, info = NULL, ...) {
                       n_constant        = n_constant,
                       clustered         = cluster_result$clustered,
                       n_representatives = n_vars,
+                      clusters          = clusters,
                       path              = path,
                       iteration         = best,
                       n_kept            = length(kept_wavenumbers),

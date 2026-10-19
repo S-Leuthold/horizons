@@ -328,15 +328,20 @@ describe("step_select_cars() scores every set after the loop, as carspls does (#
     rec  <- tr$step$cars
     path <- rec$path
 
-    expect_identical(names(path), c("iteration", "representatives", "bands", "rmsecv", "se", "ncomp"))
+    expect_identical(names(path), c("iteration", "representatives", "n_bands", "rmsecv", "se", "ncomp"))
     expect_identical(path$iteration, 1:50)
     expect_identical(lengths(path$representatives), vapply(tr$weight, function(w) length(w$bands), integer(1)))
     expect_identical(path$representatives[[1]], tr$weight[[1]]$bands)
     expect_length(path$representatives[[1]], 150L)
-    expect_setequal(path$bands[[1]], paste0("wn_", seq(4000, by = -2, length.out = 160)))
 
-    ## Each set's bands are its representatives' clusters, never fewer
-    expect_true(all(lengths(path$bands) >= lengths(path$representatives)))
+    ## The clusters are kept once, one per representative; a set's bands are
+    ## its representatives' clusters, as many as n_bands says
+    bands_of <- function(i) unlist(rec$clusters[path$representatives[[i]]], use.names = FALSE)
+
+    expect_identical(names(rec$clusters), path$representatives[[1]])
+    expect_setequal(bands_of(1), paste0("wn_", seq(4000, by = -2, length.out = 160)))
+    expect_identical(path$n_bands, vapply(seq_len(50), function(i) length(bands_of(i)), integer(1)))
+    expect_true(all(path$n_bands >= lengths(path$representatives)))
 
     ## The score, its count and its standard error are the scoring fit's
     key  <- vapply(path$representatives, paste, character(1), collapse = ",")
@@ -354,7 +359,7 @@ describe("step_select_cars() scores every set after the loop, as carspls does (#
 
     ## The set returned is the chosen iteration's bands
     expect_identical(rec$iteration, which.min(path$rmsecv))
-    expect_setequal(tr$step$selected_vars, path$bands[[rec$iteration]])
+    expect_setequal(tr$step$selected_vars, bands_of(rec$iteration))
 
   })
 
