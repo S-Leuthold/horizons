@@ -50,7 +50,10 @@ while \code{.ad_distance}/\code{.ad_flag} are preserved so the caller can see ho
 out each sample was. Default \code{FALSE} (report AD, predict for all samples).
 Every configuration predicted needs an AD bundle: one without is refused
 with an error of class \code{horizons_error_input}, since a prediction that is
-not \code{NA} under abstention claims to be in domain.}
+not \code{NA} under abstention claims to be in domain. For the same reason,
+when a configuration's applicability domain cannot be computed, every one
+of its predictions (and bounds) is \code{NA} under abstention, and the
+configuration is named in one warning of class \code{horizons_warning_skipped}.}
 
 \item{...}{Not used; present for S3 method consistency. A \code{level} passed
 here is ignored with a warning (see Details), and any other argument is
@@ -70,9 +73,13 @@ bundle; \code{NA} where a configuration has none.}
 \item{.pred_upper}{Upper interval bound.}
 \item{.interval_width}{\code{.pred_upper - .pred_lower}.}
 \item{.ad_distance}{Squared Mahalanobis distance to the training centroid
-in model feature space (if the config has an AD bundle).}
+in model feature space: present when a configuration predicted has an
+AD bundle (\code{fit(compute_ad = TRUE)}); \code{NA} where a configuration has
+none, as under \code{config = "all"}, or where the AD could not be
+computed.}
 \item{.ad_flag}{Applicability-domain bin: \code{Q1}-\code{Q4} (within domain,
-increasing distance) or \code{OOD} (out-of-domain).}
+increasing distance) or \code{OOD} (out-of-domain); present and \code{NA} as
+\code{.ad_distance} is.}
 }
 }
 \description{

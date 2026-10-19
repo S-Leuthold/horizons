@@ -54,7 +54,10 @@ NULL
 #'   out each sample was. Default `FALSE` (report AD, predict for all samples).
 #'   Every configuration predicted needs an AD bundle: one without is refused
 #'   with an error of class `horizons_error_input`, since a prediction that is
-#'   not `NA` under abstention claims to be in domain.
+#'   not `NA` under abstention claims to be in domain. For the same reason,
+#'   when a configuration's applicability domain cannot be computed, every one
+#'   of its predictions (and bounds) is `NA` under abstention, and the
+#'   configuration is named in one warning of class `horizons_warning_skipped`.
 #' @param ... Not used; present for S3 method consistency. A `level` passed
 #'   here is ignored with a warning (see Details), and any other argument is
 #'   an error.
@@ -72,9 +75,13 @@ NULL
 #'     \item{.pred_upper}{Upper interval bound.}
 #'     \item{.interval_width}{`.pred_upper - .pred_lower`.}
 #'     \item{.ad_distance}{Squared Mahalanobis distance to the training centroid
-#'       in model feature space (if the config has an AD bundle).}
+#'       in model feature space: present when a configuration predicted has an
+#'       AD bundle (`fit(compute_ad = TRUE)`); `NA` where a configuration has
+#'       none, as under `config = "all"`, or where the AD could not be
+#'       computed.}
 #'     \item{.ad_flag}{Applicability-domain bin: `Q1`-`Q4` (within domain,
-#'       increasing distance) or `OOD` (out-of-domain).}
+#'       increasing distance) or `OOD` (out-of-domain); present and `NA` as
+#'       `.ad_distance` is.}
 #'   }
 #'
 #' @details
@@ -464,7 +471,8 @@ winsorized_report <- function(sample_id, values, bounded, bound) {
 #' @param .call The predict method's frame, for the error's call. The
 #'   arguments are dot-prefixed so a user argument named `level_default`,
 #'   `collector` or `call` lands in `...` and is checked, not bound to them.
-#' @return Invisibly `NULL`; aborts with class `horizons_error_input`.
+#' @return Invisibly `NULL`. A `level` adds its warning to `.collector`; any
+#'   other argument aborts with class `horizons_error_input`.
 #' @keywords internal
 #' @noRd
 check_predict_dots <- function(..., .level_default = NULL, .collector,
@@ -966,9 +974,10 @@ check_abstention <- function(object, config_ids, abstain_ood, call = rlang::call
 #' Predict from a single fitted config, as one unit
 #'
 #' Point predictions on the original response scale (back-transformed once),
-#' plus conformal intervals when a UQ bundle is present and `interval = TRUE`,
-#' plus the applicability-domain columns when an AD bundle is present and
-#' `ad = TRUE`.
+#' plus conformal intervals when a UQ bundle is present and `interval` is not
+#' `FALSE`, plus the applicability-domain columns when an AD bundle is present
+#' and `ad = TRUE`. Rows flagged on arrival, or not finite after the recipe,
+#' are not predicted and stay `NA`.
 #'
 #' The configuration's predictions are one unit ([run_unit()]): a run failure
 #' in any step leaves its block `NA`, and the caller reports it. Its intervals
@@ -1003,7 +1012,10 @@ check_abstention <- function(object, config_ids, abstain_ood, call = rlang::call
 #' @return A tibble: sample_id, config_id, .pred (+ interval + AD columns),
 #'   with what `predict()` reports about it as attributes (`BLOCK_REPORTS`):
 #'   `"failed"` (logical(1)), `"unit_records"` (the unit's records, its
-#'   add-ons' warnings among them) and `"winsorized"`. Aborts with class
+#'   add-ons' warnings among them), `"winsorized"` ([winsorized_report()]'s
+#'   record, or `NULL`) and `"flagged"` (a list: `arrived`, the sample ids
+#'   flagged on arrival, and `recipe`, those not finite after the recipe).
+#'   Aborts with class
 #'   `horizons_error_internal` when the predictions, the interval columns or
 #'   the AD columns do not have one row per row of `new_spectra`, since all
 #'   three are attached to its rows by position.

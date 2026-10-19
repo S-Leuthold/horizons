@@ -516,7 +516,7 @@ compute_ensemble_uq <- function(oof,
 #' the meta frame (drawn at `ensemble seed + 1000`, disjoint from the tuning
 #' folds), per-fold refits of the finalized combiner with the fold models
 #' retained, and the signed residuals CQR-style. Consumed by
-#' [predict.horizons_ensemble()] when `interval = TRUE`.
+#' [predict.horizons_ensemble()] unless `interval = FALSE`.
 #'
 #' Runs inside [ensemble()] when `compute_uq = TRUE`, at `level`
 #' (`DEFAULT_UQ_LEVEL`, 0.90). It is internal: to add UQ to an ensemble built
