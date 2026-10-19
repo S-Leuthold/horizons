@@ -84,6 +84,12 @@ The score is the one CARS chose by, not an estimate of accuracy: the
 lowest of 50 is biased low, and \code{evaluate()}'s folds, which rerun the step
 on each analysis set, measure the configuration.
 
+On an outcome the spectra do not carry, CARS can do slightly worse than
+no selection: it always returns a subset, and on noise it keeps the bands
+whose noise happens to line up with the outcome. Compare a CARS
+configuration against \code{feature_selection = "none"}, which \code{evaluate()}'s
+nested folds report honestly.
+
 With fewer than two bands left after the near-constant ones are dropped,
 there is nothing to select between: the step keeps them, records
 \code{skipped = TRUE}, and warns with class \code{horizons_warning_skipped}.

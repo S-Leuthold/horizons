@@ -61,6 +61,12 @@
 #' lowest of 50 is biased low, and `evaluate()`'s folds, which rerun the step
 #' on each analysis set, measure the configuration.
 #'
+#' On an outcome the spectra do not carry, CARS can do slightly worse than
+#' no selection: it always returns a subset, and on noise it keeps the bands
+#' whose noise happens to line up with the outcome. Compare a CARS
+#' configuration against `feature_selection = "none"`, which `evaluate()`'s
+#' nested folds report honestly.
+#'
 #' With fewer than two bands left after the near-constant ones are dropped,
 #' there is nothing to select between: the step keeps them, records
 #' `skipped = TRUE`, and warns with class `horizons_warning_skipped`.
