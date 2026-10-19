@@ -171,8 +171,8 @@ monitor_evaluate <- function(output_dir, watch = FALSE, interval = 10) {
   pct <- round(100 * n_complete / manifest$n_total, 1)
 
   ## Find best so far, by the SAME rule evaluate() will use:
-  ## ranking_candidates() (successes, or pruned rows with a cv value when
-  ## none succeeded), ranked on cv_<metric> through rank_configs_by_cv() with
+  ## ranking_candidates() (the successes, or the pruned rows when none
+  ## succeeded), ranked on cv_<metric> through rank_configs_by_cv() with
   ## its config_id tie-break. When no candidate has a cv value, evaluate()
   ## ranks none either.
   best_config <- NA_character_

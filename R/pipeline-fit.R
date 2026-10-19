@@ -311,10 +311,11 @@ fit <- function(x,
   rank_metric <- metric %||% x$evaluation$rank_metric %||% "rpd"
 
   ## The candidates are evaluate()'s best_config candidates: the successes
-  ## or, when none succeeded, the pruned configs with a cv_<metric>. fit()
-  ## used to keep successes only, so it refused an evaluation whose
-  ## best_config was a pruned config (#38). A cold start's one configuration
-  ## is the member as it stands: not_evaluated, with nothing to rank on.
+  ## or, when none succeeded, the pruned configs, and one without a
+  ## cv_<metric> is left out of the ranking. fit() used to keep successes
+  ## only, so it refused an evaluation whose best_config was a pruned config
+  ## (#38). A cold start's one configuration is the member as it stands:
+  ## not_evaluated, with nothing to rank on.
   candidates  <- if (cold_start) {
     list(rows = eval_results, fallback = FALSE)
   } else {
