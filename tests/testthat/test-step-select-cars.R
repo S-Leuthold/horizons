@@ -112,27 +112,128 @@ describe("step_select_cars() refuses input it cannot use", {
 })
 
 
+## Helper: 40 noise bands, the outcome on two of them (wn_3980 and
+## wn_3950), 60 rows, drawn at seed 1
+cars_signal_data <- function() {
+
+  withr::with_seed(1, {
+    m <- matrix(stats::rnorm(60 * 40), 60)
+    colnames(m) <- paste0("wn_", seq(4000, by = -2, length.out = 40))
+    d <- tibble::as_tibble(m)
+    d$SOC <- 2 * d$wn_3980 - 2 * d$wn_3950 + stats::rnorm(60, sd = 0.3)
+    d
+  })
+
+}
+
 describe("step_select_cars() selects", {
 
   it("keeps both bands that carry the outcome and drops some of the rest", {
 
     skip_if_not_installed("pls")
 
-    ## 40 noise bands, the outcome on two of them. The original keeps both
-    ## at every one of 20 seeds, with 6 to 29 bands.
-    d <- withr::with_seed(1, {
-      m <- matrix(stats::rnorm(60 * 40), 60)
-      colnames(m) <- paste0("wn_", seq(4000, by = -2, length.out = 40))
-      d <- tibble::as_tibble(m)
-      d$SOC <- 2 * d$wn_3980 - 2 * d$wn_3950 + stats::rnorm(60, sd = 0.3)
-      d
-    })
+    ## Over seeds 1 to 20 (the recipe built under the seed, as here) both
+    ## signal bands survive at every seed, with 3 to 40 bands kept (median
+    ## 21); at seed 1 the set is pinned below.
+    d <- cars_signal_data()
 
     prepped  <- withr::with_seed(1, suppressMessages(recipes::prep(cars_recipe(d), training = d)))
     selected <- prepped$steps[[1]]$selected_vars
 
     expect_true(all(c("wn_3980", "wn_3950") %in% selected))
     expect_lt(length(selected), 40L)
+    expect_setequal(selected, paste0("wn_", c(3922, 3926, 3928, 3930, 3932, 3934, 3936, 3938,
+                                              3944, 3946, 3948, 3950, 3956, 3958, 3960, 3964,
+                                              3968, 3972, 3974, 3978, 3980, 3990, 3994, 3996,
+                                              3998, 4000)))
+
+  })
+
+})
+
+
+describe("step_select_cars() returns the set it scored (#106)", {
+
+  it("returns the bands the lowest-scoring iteration's fit was given, scored at its best component count", {
+
+    skip_if_not_installed("pls")
+
+    d <- cars_signal_data()
+
+    ## Each iteration's fit, and the bands it was given
+    seen <- list()
+    fits <- list()
+    real <- pls::plsr
+    local_mocked_bindings(plsr = function(formula, data, ...) {
+      fit <- real(formula, data = data, ...)
+      seen[[length(seen) + 1L]] <<- setdiff(names(data), "y")
+      fits[[length(fits) + 1L]] <<- fit
+      fit
+    }, .package = "pls")
+
+    step <- withr::with_seed(1, suppressMessages(recipes::prep(cars_recipe(d), training = d)))$steps[[1]]
+    rec  <- step$cars
+
+    expect_length(seen, 50L)
+    expect_identical(rec$iteration, which.min(rec$scores))
+
+    ## Fewer than 150 bands, so each band is its own cluster and the bands
+    ## kept are the representatives the chosen fit was given: not those of a
+    ## rerun with new draws, nor the set left after that iteration's cut
+    expect_setequal(step$selected_vars, seen[[rec$iteration]])
+    expect_identical(rec$n_kept, length(step$selected_vars))
+
+    ## Each score is its fit's cross-validated RMSEP at the best number of
+    ## components, the intercept-only model left out
+    best <- vapply(fits, function(f) {
+      min(pls::RMSEP(f, estimate = "CV", intercept = FALSE)$val)
+    }, numeric(1))
+    expect_equal(rec$scores, best)
+
+  })
+
+  it("fails when PLS cannot score an iteration, rather than score it another way or keep every band (#105)", {
+
+    skip_if_not_installed("pls")
+
+    d <- cars_signal_data()
+
+    local_mocked_bindings(RMSEP = function(...) stop("PLS could not score this fit"), .package = "pls")
+
+    expect_error(withr::with_seed(1, suppressMessages(recipes::prep(cars_recipe(d), training = d))),
+                 "PLS could not score this fit", fixed = TRUE)
+
+  })
+
+  it("leaves the intercept-only model out of the score, which would win on an outcome no band carries", {
+
+    skip_if_not_installed("pls")
+
+    ## A noise outcome: at seed 1, the intercept-only model's RMSEP is the
+    ## lowest at 8 of the 50 iterations
+    d <- withr::with_seed(2, {
+      m <- matrix(stats::rnorm(60 * 40), 60)
+      colnames(m) <- paste0("wn_", seq(4000, by = -2, length.out = 40))
+      d <- tibble::as_tibble(m)
+      d$SOC <- stats::rnorm(60)
+      d
+    })
+
+    fits <- list()
+    real <- pls::plsr
+    local_mocked_bindings(plsr = function(formula, data, ...) {
+      fit <- real(formula, data = data, ...)
+      fits[[length(fits) + 1L]] <<- fit
+      fit
+    }, .package = "pls")
+
+    rec <- withr::with_seed(1, suppressMessages(recipes::prep(cars_recipe(d), training = d)))$steps[[1]]$cars
+
+    with_intercept <- vapply(fits, function(f) min(pls::RMSEP(f, estimate = "CV")$val), numeric(1))
+    components     <- vapply(fits, function(f) min(pls::RMSEP(f, estimate = "CV", intercept = FALSE)$val), numeric(1))
+
+    expect_true(any(with_intercept < components))
+    expect_equal(rec$scores, components)
 
   })
 

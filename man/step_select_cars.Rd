@@ -53,6 +53,18 @@ For best results, this step should be applied \emph{after} spectral preprocessin
 derivatives) and \emph{before} PCA or model fitting. CARS is particularly effective for
 identifying minimal wavelength sets that maintain predictive performance.
 
+CARS runs on at most 150 cluster representatives of the selected columns
+(correlation clustering), for 50 iterations. Each iteration fits a PLS
+model of up to five components on a Monte Carlo sample of 80\% of the rows,
+weighted by the bands' accumulated importance, and scores it by its
+leave-one-out RMSEP at its best number of components; the bands kept then
+shrink on an exponential schedule to two. The step returns the set of
+bands the lowest score was measured on (#106), each kept representative
+bringing its whole cluster. The trained step records this in its \code{cars}
+element: the representatives, each iteration's score, the iteration
+chosen, the bands kept, and \code{retained_all} (always \code{FALSE}: CARS always
+selects).
+
 Its refusals (an \code{outcome} that is not one column of the training data, a
 \code{bake()} before \code{prep()}, new data lacking a column it selected) carry the
 class \code{horizons_error_input}. Raised inside \code{prep()}, recipes wraps them in

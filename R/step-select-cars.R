@@ -30,6 +30,18 @@
 #' derivatives) and *before* PCA or model fitting. CARS is particularly effective for
 #' identifying minimal wavelength sets that maintain predictive performance.
 #'
+#' CARS runs on at most 150 cluster representatives of the selected columns
+#' (correlation clustering), for 50 iterations. Each iteration fits a PLS
+#' model of up to five components on a Monte Carlo sample of 80% of the rows,
+#' weighted by the bands' accumulated importance, and scores it by its
+#' leave-one-out RMSEP at its best number of components; the bands kept then
+#' shrink on an exponential schedule to two. The step returns the set of
+#' bands the lowest score was measured on (#106), each kept representative
+#' bringing its whole cluster. The trained step records this in its `cars`
+#' element: the representatives, each iteration's score, the iteration
+#' chosen, the bands kept, and `retained_all` (always `FALSE`: CARS always
+#' selects).
+#'
 #' Its refusals (an `outcome` that is not one column of the training data, a
 #' `bake()` before `prep()`, new data lacking a column it selected) carry the
 #' class `horizons_error_input`. Raised inside `prep()`, recipes wraps them in
@@ -59,6 +71,7 @@ step_select_cars <- function(recipe,
                                         role          = role,
                                         trained       = trained,
                                         selected_vars = NULL,
+                                        cars          = NULL,
                                         skip          = skip,
                                         id            = id))
 }
@@ -70,6 +83,8 @@ step_select_cars <- function(recipe,
 ## Follows recipes' own contract: `terms` holds the selector quosures and
 ## survives prep, so a trained recipe can be re-prepped (`fresh = TRUE`);
 ## `columns` holds the names prep resolved them to, and is what bake reads.
+## `cars` is prep's record of what CARS did (see prep()); bake never reads it,
+## and a step trained before it existed has none.
 
 #' @keywords internal
 #' @noRd
@@ -79,6 +94,7 @@ step_select_cars_new <- function(terms,
                                  role,
                                  trained,
                                  selected_vars,
+                                 cars = NULL,
                                  skip,
                                  id) {
 
@@ -88,6 +104,7 @@ step_select_cars_new <- function(terms,
               role           = role,
               trained        = trained,
               selected_vars  = selected_vars,
+              cars           = cars,
               skip           = skip,
               id             = id )
 
@@ -132,180 +149,71 @@ prep.step_select_cars <- function(x, training, info = NULL, ...) {
   ## ---------------------------------------------------------------------------
   ## Stage 3: Run CARS
   ## ---------------------------------------------------------------------------
+  ## Each iteration fits a weighted PLS on a Monte Carlo sample of the rows,
+  ## using the bands entering it, scores that fit, and eliminates down to a
+  ## retention schedule that shrinks exponentially to two bands. The step
+  ## returns the set the lowest score was measured on (#106): the set entering
+  ## that iteration, kept as the loop runs, not a rerun with new draws.
 
-  # CARS parameters
-  n_iterations   <- 50
-  mc_ratio       <- 0.8
-  n_components   <- min(5, floor(nrow(reduced_mat) / 3))
-  
-  # Initialize
-  n_samples      <- nrow(reduced_mat)
-  n_vars         <- ncol(reduced_mat)
-  selected_vars  <- seq_len(n_vars)
-  weights        <- rep(1, n_vars)
-  rmsecv_values  <- numeric(n_iterations)
-  decay          <- exp(log(2 / n_vars) / (n_iterations - 1))
+  n_iterations <- 50
+  mc_ratio     <- 0.8
+  n_components <- min(5, floor(nrow(reduced_mat) / 3))
 
-  for (iter in 1:n_iterations) {
+  n_samples <- nrow(reduced_mat)
+  n_vars    <- ncol(reduced_mat)
+  decay     <- exp(log(2 / n_vars) / (n_iterations - 1))
 
-    # Safety check - need at least 2 variables for meaningful PLS
-    if(length(selected_vars) < 2) {
-      break
-    }
+  selected <- seq_len(n_vars)
+  weights  <- rep(1, n_vars)
+  sets     <- vector("list", n_iterations)
+  scores   <- rep(NA_real_, n_iterations)
 
-    # Exponentially decreasing retention: n_vars \u2192 2 over n_iterations
-    n_keep         <- max(2, floor(n_vars * decay^(iter - 1)))
-    n_keep         <- min(n_keep, length(selected_vars))
-    
-    # Monte Carlo sampling
-    mc_samples     <- sample(n_samples, floor(n_samples * mc_ratio))
-    
-    # Weighted PLS on selected variables
-    X_subset       <- reduced_mat[mc_samples, selected_vars, drop = FALSE]
-    X_weighted     <- sweep(X_subset, 2, weights[selected_vars], "*")
-    y_subset       <- outcome_vec[mc_samples]
-    
-    # Fit PLS model (need to create a data frame for the formula interface)
-    pls_data       <- as.data.frame(X_weighted)
-    pls_data$y     <- y_subset
-    
-    # Determine number of components safely
-    n_comp_use <- min(n_components, ncol(X_weighted) - 1)
-    if(n_comp_use < 1) n_comp_use <- 1
-    
-    pls_fit        <- pls::plsr(y ~ ., 
-                                data       = pls_data,
-                                ncomp      = n_comp_use,
-                                validation = "LOO")
-    
-    # Get variable importance from regression coefficients
-    coef_result    <- coef(pls_fit, ncomp = n_comp_use)
-    
-    # Handle matrix, array, and vector cases robustly
-    var_importance <- tryCatch({
-      if(is.array(coef_result) && length(dim(coef_result)) > 1 && dim(coef_result)[2] >= 1) {
-        # Matrix case with at least 1 column
-        abs(coef_result[, 1])
-      } else {
-        # Vector case or degenerate matrix
-        abs(as.vector(coef_result))
-      }
-    }, error = function(e) {
-      # Ultimate fallback - flatten everything
-      abs(as.vector(coef_result))
-    })
-    
-    # Update weights using EDF (Exponentially Decreasing Function)
-    weights[selected_vars] <- weights[selected_vars] * var_importance
-    
-    # Select variables based on importance
-    importance_threshold <- sort(var_importance, decreasing = TRUE)[min(n_keep, length(var_importance))]
-    keep_indices        <- which(var_importance >= importance_threshold)
-    selected_vars       <- selected_vars[keep_indices]
-    
-    # Calculate RMSECV for monitoring  
-    rmsecv_values[iter] <- tryCatch({
-      sqrt(mean(pls::RMSEP(pls_fit, estimate = "CV")$val[1, , ]))
-    }, error = function(e) {
-      # Fallback: use validation stats if available
-      if(!is.null(pls_fit$validation)) {
-        sqrt(mean((pls_fit$validation$PRESS)/(nrow(pls_data))))
-      } else {
-        # Ultimate fallback
-        NA_real_
-      }
-    })
-    
-    # Early stopping if only one variable left
-    if (length(selected_vars) <= 1) break
-  }
-  
-  # Find optimal subset based on minimum RMSECV
-  optimal_iter <- which.min(rmsecv_values[1:iter])
-  
-  # Check if we found a valid optimal iteration
-  if (length(optimal_iter) == 0 || is.na(optimal_iter)) {
+  for (iter in seq_len(n_iterations)) {
 
-    # No valid iteration found \u2014 keep all predictors as safe fallback
-    return(step_select_cars_new(
-      terms         = selectors,
-      columns       = col_names,
-      outcome       = x$outcome,
-      role          = x$role,
-      trained       = TRUE,
-      selected_vars = col_names,
-      skip          = x$skip,
-      id            = x$id
-    ))
+    sets[[iter]] <- selected
+
+    ## The schedule keeps at least two bands, so every set entering an
+    ## iteration has two or more
+    n_keep     <- min(max(2, floor(n_vars * decay^(iter - 1))), length(selected))
+    mc_samples <- sample(n_samples, floor(n_samples * mc_ratio))
+
+    X_weighted <- sweep(reduced_mat[mc_samples, selected, drop = FALSE], 2,
+                        weights[selected], "*")
+    pls_data   <- as.data.frame(X_weighted)
+    pls_data$y <- outcome_vec[mc_samples]
+
+    n_comp  <- min(n_components, ncol(X_weighted) - 1)
+    pls_fit <- pls::plsr(y ~ ., data = pls_data, ncomp = n_comp, validation = "LOO")
+
+    ## The cross-validated RMSEP at the best number of components, the
+    ## published score (Li et al. 2009); the intercept-only model is left out
+    scores[iter] <- min(pls::RMSEP(pls_fit, estimate = "CV", intercept = FALSE)$val)
+
+    ### coef() on a pls fit is a bands x 1 x 1 array.
+    importance <- abs(as.vector(stats::coef(pls_fit, ncomp = n_comp)))
+
+    weights[selected] <- weights[selected] * importance
+    threshold         <- sort(importance, decreasing = TRUE)[n_keep]
+    selected          <- selected[importance >= threshold]
 
   }
-  
-  # Rerun to optimal iteration to get final variable set
-  selected_vars <- seq_len(n_vars)
-  weights      <- rep(1, n_vars)
-  
-  for (i in 1:optimal_iter) {
-    # Safety check
-    if(length(selected_vars) < 2) {
-      break
-    }
-    
-    n_keep        <- max(2, floor(n_vars * decay^(i - 1)))
-    n_keep        <- min(n_keep, length(selected_vars))
-    mc_samples    <- sample(n_samples, floor(n_samples * mc_ratio))
-    
-    X_subset      <- reduced_mat[mc_samples, selected_vars, drop = FALSE]
-    X_weighted    <- sweep(X_subset, 2, weights[selected_vars], "*")
-    y_subset      <- outcome_vec[mc_samples]
-    
-    # Create data frame for PLS
-    pls_data      <- as.data.frame(X_weighted)
-    pls_data$y    <- y_subset
-    
-    # Determine number of components safely
-    n_comp_use    <- min(n_components, ncol(X_weighted) - 1)
-    if(n_comp_use < 1) n_comp_use <- 1
-    
-    pls_fit       <- pls::plsr(y ~ .,
-                               data       = pls_data,
-                               ncomp      = n_comp_use,
-                               validation = "LOO")
-    
-    coef_result   <- coef(pls_fit, ncomp = n_comp_use)
-    
-    # Handle matrix, array, and vector cases robustly
-    var_importance <- tryCatch({
-      if(is.array(coef_result) && length(dim(coef_result)) > 1 && dim(coef_result)[2] >= 1) {
-        # Matrix case with at least 1 column
-        abs(coef_result[, 1])
-      } else {
-        # Vector case or degenerate matrix
-        abs(as.vector(coef_result))
-      }
-    }, error = function(e) {
-      # Ultimate fallback - flatten everything
-      abs(as.vector(coef_result))
-    })
-    
-    weights[selected_vars] <- weights[selected_vars] * var_importance
-    
-    importance_threshold <- sort(var_importance, decreasing = TRUE)[min(n_keep, length(var_importance))]
-    keep_indices        <- which(var_importance >= importance_threshold)
-    selected_vars       <- selected_vars[keep_indices]
-  }
-  
-  kept_cluster_vars <- cluster_vars[selected_vars]
+
+  best <- which.min(scores)
+
+  kept_cluster_vars <- cluster_vars[sets[[best]]]
 
   ## ---------------------------------------------------------------------------
   ## Stage 4: Map back to original wavenumbers
   ## ---------------------------------------------------------------------------
+  ## Each kept representative brings its whole cluster.
 
   kept_wavenumbers <- unique(unlist(cluster_map[kept_cluster_vars]))
 
-  if (length(kept_wavenumbers) == 0) {
-    cli::cli_alert_warning("No wavenumbers retained by CARS. Retaining all original predictors.")
-    kept_wavenumbers <- col_names
-  }
+  cars_record <- list(n_representatives = n_vars,
+                      scores            = scores,
+                      iteration         = best,
+                      n_kept            = length(kept_wavenumbers),
+                      retained_all      = FALSE)
 
   ## ---------------------------------------------------------------------------
   ## Stage 5: Return trained step
@@ -317,6 +225,7 @@ prep.step_select_cars <- function(x, training, info = NULL, ...) {
                       role           = x$role,
                       trained        = TRUE,
                       selected_vars  = kept_wavenumbers,
+                      cars           = cars_record,
                       skip           = x$skip,
                       id             = x$id)
 }
