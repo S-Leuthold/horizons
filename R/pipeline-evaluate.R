@@ -1662,7 +1662,7 @@ abort_breaker_trip <- function(breaker, rows, n_left, call = rlang::caller_env()
 #' reaches here as the unit's `horizons_error_systemic`, which no unit
 #' contains either ([worker_death_warning()]). Either is turned into
 #' `horizons_error_systemic`, chained to the error, with the rows finished so
-#' far.
+#' far; every other error passes through untouched.
 #'
 #' @param expr The work that dispatches to workers.
 #' @param rows List of the result rows finished so far, read when the worker
@@ -1674,7 +1674,12 @@ abort_breaker_trip <- function(breaker, rows, n_left, call = rlang::caller_env()
 #' @noRd
 stop_on_worker_death <- function(expr, rows, output_dir, call = rlang::caller_env()) {
 
+  ## One handler for both classes. try_fetch() nests its handlers, so with
+  ## one per class the systemic error raised for a FutureError would be
+  ## caught by the other and wrapped a second time.
   died <- function(e) {
+
+    if (!inherits(e, c("FutureError", "horizons_error_systemic"))) return(rlang::zap())
 
     abort_horizons(c(
       "A parallel worker stopped while {.fn evaluate} was running, so the run cannot go on.",
@@ -1688,7 +1693,7 @@ stop_on_worker_death <- function(expr, rows, output_dir, call = rlang::caller_en
 
   }
 
-  rlang::try_fetch(expr, FutureError = died, horizons_error_systemic = died)
+  rlang::try_fetch(expr, error = died)
 
 }
 

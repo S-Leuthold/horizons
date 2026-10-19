@@ -2681,6 +2681,10 @@ describe("evaluate() - a worker's death", {
                         class = "horizons_error_systemic")
 
     expect_true(rlang::cnd_inherits(err, "FutureError"))
+    ## Wrapped once: future's error is the direct parent, and the message is
+    ## not repeated
+    expect_s3_class(err$parent, "FutureError")
+    expect_length(gregexpr("A parallel worker stopped while", conditionMessage(err), fixed = TRUE)[[1]], 1L)
     expect_identical(err$results$config_id, "cfg_001")
     expect_match(conditionMessage(err), "A parallel worker stopped", fixed = TRUE)
     expect_match(conditionMessage(err), "in this error's results field", fixed = TRUE)
@@ -2722,6 +2726,10 @@ describe("evaluate() - a worker's death", {
       class = "horizons_error_systemic"
     )
     expect_true(rlang::cnd_inherits(err, "FutureError"))
+    ## Wrapped once: future's error is the direct parent, and the message is
+    ## not repeated
+    expect_s3_class(err$parent, "FutureError")
+    expect_length(gregexpr("A parallel worker stopped while", conditionMessage(err), fixed = TRUE)[[1]], 1L)
 
   })
 
@@ -2776,7 +2784,22 @@ describe("evaluate() - a worker's death", {
     expect_true(file.exists(killed))
     expect_match(conditionMessage(err), "A parallel worker stopped", fixed = TRUE)
     expect_match(conditionMessage(err$parent), "A parallel worker stopped during the Bayesian search", fixed = TRUE)
+    ## Wrapped once: the unit's systemic error is the direct parent, and
+    ## future.apply's warning is its cause
+    expect_s3_class(err$parent, "horizons_error_systemic")
+    expect_s3_class(err$parent$parent, "warning")
+    expect_match(conditionMessage(err$parent$parent), "^Caught [A-Za-z]*Future[A-Za-z]*Error\\. Canceling all iterations")
     expect_length(list.files(file.path(dir, "checkpoints")), 0L)
+
+  })
+
+  it("lets an error that is not a worker's death through, unwrapped", {
+
+    boom <- simpleError("Not a worker's death.")
+    err  <- expect_error(stop_on_worker_death(stop(boom), list(), NULL), "Not a worker's death.", fixed = TRUE)
+
+    expect_identical(class(err), class(boom))
+    expect_null(err$parent)
 
   })
 
