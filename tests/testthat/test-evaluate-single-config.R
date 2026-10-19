@@ -1445,6 +1445,23 @@ describe("exhaustive_grid()", {
 
   })
 
+  it("counts only the values inside an exclusive bound, and is NULL for an empty space", {
+
+    k <- function(range, inclusive) {
+      dials::new_quant_param(type = "integer", range = range, inclusive = inclusive, label = c(k = "k"))
+    }
+
+    ## 1 and 5 are excluded, so three points fit a budget of three
+    open <- dials::parameters(list(k(c(1L, 5L), c(FALSE, FALSE))))
+    expect_identical(exhaustive_grid(open, 3)$k, 2:4)
+
+    ## A range whose only value is excluded has no points, and nor has a
+    ## parameter set with no parameters
+    expect_null(exhaustive_grid(dials::parameters(list(k(c(1L, 1L), c(FALSE, TRUE)))), 10))
+    expect_null(exhaustive_grid(dials::parameters(list()), 10))
+
+  })
+
 })
 
 describe("evaluate_single_config() - a search space that fits the budget", {
