@@ -402,7 +402,7 @@ evaluate_single_config <- function(config_row,
     ## must apply to every transformation so evaluation scores what deploy
     ## serves (#53, #76).
     test_predictions$.pred <- unit_step("back_transform", back_transform_predictions(
-      test_predictions$.pred, transformation, warn = FALSE, outcome_range = outcome_range
+      test_predictions$.pred, transformation, outcome_range = outcome_range
     ))
 
     ## Six NAs when fewer than two test rows have a prediction, and the row

@@ -18,56 +18,32 @@
 #' Clamping here means the evaluation, OOF and calibration paths score the
 #' same predictions a deployed model would serve, rather than a vector that
 #' differs from it wherever a model extrapolated past the range (#53). The
-#' `upper_bound` guardrail is deliberately not applied the same way, because
-#' fit-time ranking must see raw upper-tail behaviour.
+#' response bound is a different thing, applied by `predict()` to served
+#' point predictions only ([apply_response_bound()]), because fit-time
+#' ranking must see raw upper-tail behaviour.
+#'
+#' A negative value on the square-root scale is set to 0 before squaring, so
+#' it cannot square into a wrong positive. That is correctness, not a
+#' departure from what was asked, so it is silent, as the clamp is.
 #'
 #' @param predictions Numeric vector of predictions on the transformed scale.
 #' @param transformation Character: "none", "log", "sqrt", or "log10".
-#' @param warn Logical. Warn on edge cases (very large values, negatives)?
-#'   Note: `warn = FALSE` suppresses these diagnostic warnings only — the
-#'   `upper_bound` winsorization warning is a guardrail and always fires. All
-#'   conditions signal via `cli` (uniform `rlang_warning` class).
-#' @param upper_bound Optional single finite numeric above the lower bound of
-#'   `outcome_range` (so positive under the default range). When supplied,
-#'   the back-transformed (original-scale) predictions are winsorized to this
-#'   bound, uniformly across all transformations. `NULL` (the default) applies
-#'   no upper clamp. The winsorization warning is NOT gated by `warn` — a
-#'   caller that passes a bound has opted into the guardrail and must see it
-#'   trip (visible recoverable failure over silent drift).
 #' @param outcome_range Numeric length-2 vector, lower < upper, either end
 #'   possibly infinite: the outcome's physical range, which every
 #'   original-scale value is clamped to. A `-Inf` lower bound applies no
-#'   floor and an `Inf` upper bound no cap. Default `c(0, Inf)`, the
-#'   non-negative floor.
+#'   floor and an `Inf` upper bound no cap. Default `DEFAULT_OUTCOME_RANGE`,
+#'   `c(0, Inf)`, the non-negative floor.
 #'
 #' @return Numeric vector on the original response scale, clamped to
 #'   `outcome_range`.
 #' @keywords internal
-back_transform_predictions <- function(predictions, transformation, warn = TRUE,
-                                       upper_bound   = NULL,
-                                       outcome_range = c(0, Inf)) {
+back_transform_predictions <- function(predictions, transformation,
+                                       outcome_range = DEFAULT_OUTCOME_RANGE) {
 
   if (is.null(predictions) || length(predictions) == 0) return(predictions)
 
   ### outcome_range and transformation come from outcome_range_setting() and
   ### the configuration grid, which every verb's door validator has checked.
-
-  ## The bound caps predictions from above, so it has to sit above the floor;
-  ## under the default range that is the "single positive finite" rule the
-  ## guardrail has always had.
-  if (!is.null(upper_bound)) {
-
-    if (!is.numeric(upper_bound) || length(upper_bound) != 1 ||
-        !is.finite(upper_bound) || upper_bound <= outcome_range[1]) {
-
-      cli::cli_abort(c(
-        "{.arg upper_bound} must be a single finite numeric above the lower bound of {.arg outcome_range} ({outcome_range[1]}).",
-        "x" = "Got {.val {upper_bound}}."
-      ))
-
-    }
-
-  }
 
   transformation <- tolower(as.character(transformation))
 
@@ -75,33 +51,13 @@ back_transform_predictions <- function(predictions, transformation, warn = TRUE,
 
     "none" = predictions,
 
-    "log" = {
-
-      if (warn && any(predictions > 50, na.rm = TRUE)) {
-
-        cli::cli_warn("Very large values detected in log-scale predictions (>50). Check for outliers.")
-
-      }
-
-      exp(predictions) - 1
-
-    },
+    "log" = exp(predictions) - 1,
 
     "sqrt" = {
 
-      ## A negative value on the sqrt scale back-transforms to an impossible
-      ## negative original value once squared would flip its sign (e.g. -3 ->
-      ## +9). Clamp to 0 ALWAYS — this is correctness, not a warning. The
-      ## warning about it is what's gated by `warn`. (Previously the clamp
-      ## itself sat inside `if (warn)`, so production callers passing
-      ## warn = FALSE silently squared negatives into wrong positives.)
+      ## A negative value on the sqrt scale would square into an impossible
+      ## positive original value (-3 -> +9), so it is set to 0 first.
       neg <- predictions < 0 & !is.na(predictions)
-
-      if (warn && any(neg)) {
-
-        cli::cli_warn("Negative values detected in sqrt-scale predictions. Setting to 0.")
-
-      }
 
       predictions[neg] <- 0
 
@@ -109,17 +65,7 @@ back_transform_predictions <- function(predictions, transformation, warn = TRUE,
 
     },
 
-    "log10" = {
-
-      if (warn && any(predictions > 50, na.rm = TRUE)) {
-
-        cli::cli_warn("Very large values detected in log10-scale predictions (>50). Check for outliers.")
-
-      }
-
-      10^predictions - 1
-
-    },
+    "log10" = 10^predictions - 1,
 
     ## Default: the door validators refuse a transformation outside
     ## VALID_TRANSFORMATIONS (#234), so reaching here is a bug. Serving the
@@ -139,12 +85,7 @@ back_transform_predictions <- function(predictions, transformation, warn = TRUE,
   ## applied here rather than at each caller so evaluation scores exactly what
   ## predict() serves (#53). The sqrt clamp above is a different thing: it
   ## prevents a negative sqrt-scale value from squaring into a wrong positive.
-  out <- clamp_to_outcome_range(out, outcome_range)
-
-  ## Deploy-time guardrail: winsorize the original-scale output to the caller's
-  ## bound. Unlike the floor this is opt-in, because fit-time ranking must see
-  ## raw upper-tail behaviour.
-  apply_response_bound(out, upper_bound)
+  clamp_to_outcome_range(out, outcome_range)
 
 }
 
@@ -155,10 +96,11 @@ back_transform_predictions <- function(predictions, transformation, warn = TRUE,
 #' Winsorize Predictions to the Deploy-Time Response Upper Bound
 #'
 #' @description
-#' The guardrail primitive shared by [back_transform_predictions()] (single-
-#' model deploy path) and `predict.horizons_ensemble()` (the combined ensemble
-#' output). Values above `upper_bound` are clamped to it with a visible
-#' warning; `upper_bound = NULL` is a no-op. The warning is deliberately
+#' The guardrail primitive `predict()` applies to the point predictions it
+#' serves: each configuration's in `predict_one_config()`, and the combined
+#' output in `predict.horizons_ensemble()`. Values above `upper_bound` are
+#' clamped to it with a visible warning; `upper_bound = NULL` is a no-op. The
+#' warning is deliberately
 #' unconditional — a guardrail that fires silently defeats its purpose — so
 #' callers that suppress diagnostic warnings still surface this one.
 #'
@@ -277,9 +219,8 @@ compute_response_bound <- function(y, outcome_range = DEFAULT_OUTCOME_RANGE) {
 #' `"none"` is the only value that means no transformation. `"log"`,
 #' `"log10"` and `"sqrt"` return `TRUE`, and so does any other value,
 #' including `""` and `NA`, so an unknown transformation is never mistaken for
-#' none. [back_transform_predictions()] treats the same values as unknown: it
-#' does not back-transform the predictions (they are still clamped to
-#' `outcome_range`), and warns when `warn = TRUE`.
+#' none. [back_transform_predictions()] treats the same values as unknown, as
+#' a bug, since the door validators refuse them first (#234).
 #'
 #' @param transformation Character string indicating transformation type,
 #'   matched case-insensitively.

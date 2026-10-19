@@ -819,7 +819,6 @@ predict_one_config <- function(object, config_id, new_spectra, interval,
   point_pred <- back_transform_predictions(
     point_trans,
     transformation,
-    warn          = FALSE,
     outcome_range = outcome_range
   )
 

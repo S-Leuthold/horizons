@@ -407,7 +407,7 @@ describe("fit_single_config() - log transformation", {
   it("scores the test rows on the original scale, from the back-transformed predictions", {
 
     preds <- stats::predict(result$fitted_workflow, new_data = test_data)$.pred
-    preds <- back_transform_predictions(preds, "log", warn = FALSE)
+    preds <- back_transform_predictions(preds, "log")
 
     expect_equal(result$test_metrics$rmse, yardstick::rmse_vec(test_data$SOC, preds))
 

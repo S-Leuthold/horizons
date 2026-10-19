@@ -7,9 +7,7 @@
 back_transform_predictions(
   predictions,
   transformation,
-  warn = TRUE,
-  upper_bound = NULL,
-  outcome_range = c(0, Inf)
+  outcome_range = DEFAULT_OUTCOME_RANGE
 )
 }
 \arguments{
@@ -17,24 +15,11 @@ back_transform_predictions(
 
 \item{transformation}{Character: "none", "log", "sqrt", or "log10".}
 
-\item{warn}{Logical. Warn on edge cases (very large values, negatives)?
-Note: \code{warn = FALSE} suppresses these diagnostic warnings only — the
-\code{upper_bound} winsorization warning is a guardrail and always fires. All
-conditions signal via \code{cli} (uniform \code{rlang_warning} class).}
-
-\item{upper_bound}{Optional single finite numeric above the lower bound of
-\code{outcome_range} (so positive under the default range). When supplied,
-the back-transformed (original-scale) predictions are winsorized to this
-bound, uniformly across all transformations. \code{NULL} (the default) applies
-no upper clamp. The winsorization warning is NOT gated by \code{warn} — a
-caller that passes a bound has opted into the guardrail and must see it
-trip (visible recoverable failure over silent drift).}
-
 \item{outcome_range}{Numeric length-2 vector, lower < upper, either end
 possibly infinite: the outcome's physical range, which every
 original-scale value is clamped to. A \code{-Inf} lower bound applies no
-floor and an \code{Inf} upper bound no cap. Default \code{c(0, Inf)}, the
-non-negative floor.}
+floor and an \code{Inf} upper bound no cap. Default \code{DEFAULT_OUTCOME_RANGE},
+\code{c(0, Inf)}, the non-negative floor.}
 }
 \value{
 Numeric vector on the original response scale, clamped to
@@ -57,7 +42,12 @@ with \code{outcome_range = c(-Inf, Inf)} and is not floored at all (#76).
 Clamping here means the evaluation, OOF and calibration paths score the
 same predictions a deployed model would serve, rather than a vector that
 differs from it wherever a model extrapolated past the range (#53). The
-\code{upper_bound} guardrail is deliberately not applied the same way, because
-fit-time ranking must see raw upper-tail behaviour.
+response bound is a different thing, applied by \code{predict()} to served
+point predictions only (\code{\link[=apply_response_bound]{apply_response_bound()}}), because fit-time
+ranking must see raw upper-tail behaviour.
+
+A negative value on the square-root scale is set to 0 before squaring, so
+it cannot square into a wrong positive. That is correctness, not a
+departure from what was asked, so it is silent, as the clamp is.
 }
 \keyword{internal}

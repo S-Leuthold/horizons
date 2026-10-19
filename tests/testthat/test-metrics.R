@@ -252,7 +252,7 @@ describe("tuning_metric_set()", {
       got  <- tuning_metric_set(trans)(df, truth = truth, estimate = estimate)
       want <- compute_original_scale_metrics(
         truth    = truth,
-        estimate = back_transform_predictions(est, trans, warn = FALSE)
+        estimate = back_transform_predictions(est, trans)
       )
 
       expect_equal(got$.metric, all_metric_names, info = trans)

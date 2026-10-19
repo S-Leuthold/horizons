@@ -48,72 +48,31 @@ describe("back_transform_predictions()", {
 
   })
 
-  it("warns for very large log-scale predictions", {
-
-    preds <- c(1, 2, 60)  # 60 on log scale → huge number
-
-    expect_warning(
-      back_transform_predictions(preds, "log", warn = TRUE),
-      "large"
-    )
-
-  })
-
-  it("warns for very large log10-scale predictions, and only for those", {
-
-    expect_warning(
-      back_transform_predictions(c(1, 2, 60), "log10", warn = TRUE),
-      "large values detected in log10-scale"
-    )
-
-    expect_silent(back_transform_predictions(c(1, 2, 3), "log10", warn = TRUE))
-
-  })
-
   it("refuses an unknown transformation as a bug, since the doors refuse one first (#234)", {
 
     ## Serving it untransformed was the defect: predictions on the wrong scale
     expect_error(back_transform_predictions(c(1, 2, 3), "boxcox"),
                  "boxcox", class = "horizons_error_internal")
-    expect_error(back_transform_predictions(c(1, 2, 3), "boxcox", warn = FALSE),
-                 class = "horizons_error_internal")
 
   })
 
-  it("clamps negative sqrt predictions to 0 with warning", {
+  it("raises no warning on large or negative transformed values", {
 
-    preds <- c(1, -0.5, 3)
-
-    expect_warning(
-      result <- back_transform_predictions(preds, "sqrt", warn = TRUE),
-      "Negative"
-    )
-
-    expect_equal(result[2], 0)
+    ## Large log-scale values are the response bound's to report, where
+    ## predict() serves them; a negative sqrt-scale value is set to 0, which is
+    ## correctness rather than a departure.
+    expect_silent(back_transform_predictions(c(1, 2, 60), "log"))
+    expect_silent(back_transform_predictions(c(1, 2, 60), "log10"))
+    expect_silent(back_transform_predictions(c(1, -0.5, 3), "sqrt"))
 
   })
 
-  it("suppresses warnings when warn = FALSE", {
+  it("clamps negative sqrt predictions to 0 rather than squaring them", {
 
-    preds_log  <- c(1, 2, 60)
-    preds_sqrt <- c(1, -0.5, 3)
-
-    expect_silent(back_transform_predictions(preds_log, "log", warn = FALSE))
-    expect_silent(back_transform_predictions(preds_log, "log10", warn = FALSE))
-    expect_silent(back_transform_predictions(preds_sqrt, "sqrt", warn = FALSE))
-
-    ## upper_bound = NULL (the default) applies no bound, so nothing is winsorized
-    expect_silent(back_transform_predictions(c(1, 2, 7), "log", warn = FALSE,
-                                             upper_bound = NULL))
-
-  })
-
-  it("clamps negative sqrt predictions even when warn = FALSE", {
-
-    ## Regression guard: the clamp is correctness, not a warning. Production
-    ## callers pass warn = FALSE; a negative sqrt-scale value must still be
-    ## floored to 0 (not squared into a wrong positive, e.g. -0.5 -> 0.25).
-    result <- back_transform_predictions(c(1, -0.5, 3), "sqrt", warn = FALSE)
+    ## Regression guard: the clamp is correctness, not a warning; a negative
+    ## sqrt-scale value must be floored to 0 (not squared into a wrong
+    ## positive, e.g. -0.5 -> 0.25).
+    result <- back_transform_predictions(c(1, -0.5, 3), "sqrt")
 
     expect_equal(result[2], 0)        # clamped, NOT 0.25
     expect_equal(result, c(1, 0, 9))  # 1^2, clamp, 3^2
@@ -125,27 +84,15 @@ describe("back_transform_predictions()", {
     ## log / log10: a transformed-scale value below 0 back-transforms below 0
     ## (exp(-2) - 1 = -0.86). Deploy floors it; evaluation must score the same
     ## vector. "none": a model can predict a negative clay percent directly.
-    expect_equal(back_transform_predictions(c(-2, 0, 1),   "log",   warn = FALSE),
+    expect_equal(back_transform_predictions(c(-2, 0, 1),   "log"),
                  c(0, 0, exp(1) - 1))
-    expect_equal(back_transform_predictions(c(-2, 0, 1),   "log10", warn = FALSE),
+    expect_equal(back_transform_predictions(c(-2, 0, 1),   "log10"),
                  c(0, 0, 9))
-    expect_equal(back_transform_predictions(c(-1, 0, 2.5), "none",  warn = FALSE),
+    expect_equal(back_transform_predictions(c(-1, 0, 2.5), "none"),
                  c(0, 0, 2.5))
 
     ## NAs survive the floor
     expect_equal(back_transform_predictions(c(-1, NA), "none"), c(0, NA))
-
-  })
-
-  it("applies the floor before the upper bound, so both hold at once", {
-
-    expect_warning(
-      r <- back_transform_predictions(c(-3, 0.5, 10), "log", warn = FALSE,
-                                      upper_bound = 5),
-      "winsorized"
-    )
-
-    expect_equal(r, c(0, exp(0.5) - 1, 5))
 
   })
 
@@ -163,7 +110,25 @@ describe("back_transform_predictions()", {
 
   })
 
-  it("winsorizes log-scale blow-ups to upper_bound with an informative warning", {
+})
+
+describe("apply_response_bound()", {
+
+  ## predict() applies the bound to the original-scale predictions
+  ## back_transform_predictions() returns, so these compose the two.
+
+  it("applies after the floor, so both hold at once", {
+
+    expect_warning(
+      r <- apply_response_bound(back_transform_predictions(c(-3, 0.5, 10), "log"), 5),
+      "winsorized"
+    )
+
+    expect_equal(r, c(0, exp(0.5) - 1, 5))
+
+  })
+
+  it("winsorizes log-scale blow-ups to the bound with an informative warning", {
 
     ## The 257 g/kg escape: an unconstrained log-scale prediction inflates
     ## through exp() to a physically impossible value. With a bound supplied,
@@ -172,8 +137,7 @@ describe("back_transform_predictions()", {
     preds <- c(1, 2, 7)  # exp(7) - 1 = 1095.6
 
     expect_warning(
-      result <- back_transform_predictions(preds, "log", warn = FALSE,
-                                           upper_bound = 100),
+      result <- apply_response_bound(back_transform_predictions(preds, "log"), 100),
       "winsorized"
     )
 
@@ -182,7 +146,7 @@ describe("back_transform_predictions()", {
 
     ## Warning content: count and pre-clamp max
     w <- tryCatch(
-      back_transform_predictions(preds, "log", warn = FALSE, upper_bound = 100),
+      apply_response_bound(back_transform_predictions(preds, "log"), 100),
       warning = function(w) conditionMessage(w)
     )
     expect_match(w, "1 prediction")
@@ -192,9 +156,11 @@ describe("back_transform_predictions()", {
 
   it("applies the bound uniformly across all transforms", {
 
-    expect_warning(r_none  <- back_transform_predictions(c(1, 500),  "none",  upper_bound = 100), "winsorized")
-    expect_warning(r_sqrt  <- back_transform_predictions(c(1, 30),   "sqrt",  upper_bound = 100), "winsorized")
-    expect_warning(r_log10 <- back_transform_predictions(c(1, 4),    "log10", upper_bound = 100), "winsorized")
+    bound <- function(x, trans) apply_response_bound(back_transform_predictions(x, trans), 100)
+
+    expect_warning(r_none  <- bound(c(1, 500), "none"),  "winsorized")
+    expect_warning(r_sqrt  <- bound(c(1, 30),  "sqrt"),  "winsorized")
+    expect_warning(r_log10 <- bound(c(1, 4),   "log10"), "winsorized")
 
     expect_equal(r_none[2],  100)
     expect_equal(r_sqrt[2],  100)   # 30^2 = 900 -> clamped
@@ -207,7 +173,7 @@ describe("back_transform_predictions()", {
     y <- c(0.1, 1, 5, 42, 100)
 
     expect_equal(
-      back_transform_predictions(log(y + 1), "log", upper_bound = 1e6),
+      apply_response_bound(back_transform_predictions(log(y + 1), "log"), 1e6),
       y, tolerance = 1e-10
     )
 
@@ -216,24 +182,11 @@ describe("back_transform_predictions()", {
   it("passes NA values through unclamped when a bound is supplied", {
 
     result <- suppressWarnings(
-      back_transform_predictions(c(1, NA, 7), "log", warn = FALSE,
-                                 upper_bound = 100)
+      apply_response_bound(back_transform_predictions(c(1, NA, 7), "log"), 100)
     )
 
     expect_true(is.na(result[2]))
     expect_equal(result[3], 100)
-
-  })
-
-  it("aborts on invalid upper_bound values", {
-
-    preds <- c(1, 2)
-    msg   <- "must be a single finite numeric"
-
-    expect_error(back_transform_predictions(preds, "log", upper_bound = -5),      msg)
-    expect_error(back_transform_predictions(preds, "log", upper_bound = Inf),     msg)
-    expect_error(back_transform_predictions(preds, "log", upper_bound = c(1, 2)), msg)
-    expect_error(back_transform_predictions(preds, "log", upper_bound = "100"),   msg)
 
   })
 

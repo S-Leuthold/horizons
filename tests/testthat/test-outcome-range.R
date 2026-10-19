@@ -229,7 +229,7 @@ describe("back_transform_predictions() - outcome_range", {
 
     expect_identical(eval(formals(back_transform_predictions)$outcome_range),
                      DEFAULT_OUTCOME_RANGE)
-    expect_identical(back_transform_predictions(c(-2, 3), "none", warn = FALSE),
+    expect_identical(back_transform_predictions(c(-2, 3), "none"),
                      c(0, 3))
 
   })
@@ -237,37 +237,39 @@ describe("back_transform_predictions() - outcome_range", {
   it("keeps negative predictions under a signed range", {
 
     expect_identical(
-      back_transform_predictions(c(-25, -18), "none", warn = FALSE,
+      back_transform_predictions(c(-25, -18), "none",
                                  outcome_range = c(-Inf, Inf)),
       c(-25, -18)
     )
 
     ## log(x + 1) back-transforms below zero for x in (-1, 0); only the
     ## default range floors it
-    expect_equal(back_transform_predictions(log(0.5), "log", warn = FALSE,
+    expect_equal(back_transform_predictions(log(0.5), "log",
                                             outcome_range = c(-Inf, Inf)),
                  -0.5)
-    expect_identical(back_transform_predictions(log(0.5), "log", warn = FALSE), 0)
+    expect_identical(back_transform_predictions(log(0.5), "log"), 0)
 
   })
 
   it("caps at a finite upper bound, silently", {
 
     expect_silent(
-      out <- back_transform_predictions(c(50, 140), "none", warn = FALSE,
+      out <- back_transform_predictions(c(50, 140), "none",
                                         outcome_range = c(0, 100))
     )
     expect_identical(out, c(50, 100))
 
   })
 
-  it("accepts a negative upper_bound only when the range reaches below it", {
+  it("winsorizes to a negative response bound under a signed range", {
 
-    expect_error(back_transform_predictions(c(-20, -10), "none", upper_bound = -12))
-
+    ## The bound itself is checked against the range by the fit validator at
+    ## predict()'s door; under a signed range a negative bound applies.
     expect_warning(
-      out <- back_transform_predictions(c(-20, -10), "none", upper_bound = -12,
-                                        outcome_range = c(-Inf, Inf)),
+      out <- apply_response_bound(
+        back_transform_predictions(c(-20, -10), "none", outcome_range = c(-Inf, Inf)),
+        -12
+      ),
       "winsorized"
     )
     expect_identical(out, c(-20, -12))

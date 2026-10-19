@@ -343,7 +343,7 @@ fit_single_config <- function(config_row,
     ## is already on the original scale: the outcome transform is a skip =
     ## TRUE step, skipped at assessment.
     cv_predictions$.pred <- unit_step("oof_back_transform", back_transform_predictions(
-      cv_predictions$.pred_trans, transformation, warn = FALSE, outcome_range = outcome_range
+      cv_predictions$.pred_trans, transformation, outcome_range = outcome_range
     ))
 
     ## -----------------------------------------------------------------------
@@ -392,7 +392,7 @@ fit_single_config <- function(config_row,
 
     ## Back-transform, unconditionally (see the OOF block above, #53 and #76)
     test_preds <- unit_step("test_back_transform", back_transform_predictions(
-      test_preds, transformation, warn = FALSE, outcome_range = outcome_range
+      test_preds, transformation, outcome_range = outcome_range
     ))
 
     ## test_truth is already on the original scale: test_data is raw (never

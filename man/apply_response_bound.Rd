@@ -16,10 +16,11 @@ whose training values are all negative), or NULL (no clamp).}
 \code{values}, winsorized to \code{upper_bound} where it was exceeded.
 }
 \description{
-The guardrail primitive shared by \code{\link[=back_transform_predictions]{back_transform_predictions()}} (single-
-model deploy path) and \code{predict.horizons_ensemble()} (the combined ensemble
-output). Values above \code{upper_bound} are clamped to it with a visible
-warning; \code{upper_bound = NULL} is a no-op. The warning is deliberately
+The guardrail primitive \code{predict()} applies to the point predictions it
+serves: each configuration's in \code{predict_one_config()}, and the combined
+output in \code{predict.horizons_ensemble()}. Values above \code{upper_bound} are
+clamped to it with a visible warning; \code{upper_bound = NULL} is a no-op. The
+warning is deliberately
 unconditional — a guardrail that fires silently defeats its purpose — so
 callers that suppress diagnostic warnings still surface this one.
 }
