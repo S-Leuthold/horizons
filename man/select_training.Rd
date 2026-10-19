@@ -219,10 +219,12 @@ interpolated. Targets on a coarser canonical grid (4 or 8 cm-1 against a
 comes back on their step. Target columns the library lacks (a wider range,
 a finer or offset step) are named in one \code{horizons_warning_coverage};
 \code{\link[=predict]{predict()}} uses only the columns the model was trained on, so the targets
-predict as they are. Targets that share no column with the library, such
-as an instrument's own axis, are refused, naming the \code{\link[=standardize]{standardize()}} call
-that puts them on the library's grid; for a registered library that is
-checked before the download. \code{x$selection$search} records the search axis
+predict as they are. Targets that share no column with the library, or
+whose wavenumbers inside its range are not on a grid aligned with the
+library's (an instrument's own axis, which can share a few columns by
+coincidence), are refused, naming the \code{\link[=standardize]{standardize()}} call that puts them
+on the library's grid; for a registered library that is checked before
+the download. \code{x$selection$search} records the search axis
 and \code{x$selection$reconciliation} the columns returned.
 
 \strong{Coverage.} The targets should span the library's range. Within half

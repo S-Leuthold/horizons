@@ -172,6 +172,35 @@ test_that("shared_columns() keeps the library's columns the targets name, in the
 })
 
 
+test_that("axes_aligned() passes grids standardize() makes and refuses an instrument's own axis", {
+
+  lib <- seq(4000, 600, by = -2)
+
+  ## Coarser, finer and offset canonical grids lie on one lattice with it
+  expect_true(axes_aligned(seq(4000, 600, by = -8), lib))
+  expect_true(axes_aligned(seq(4000, 600, by = -1), lib))
+  expect_true(axes_aligned(seq(3999, 600, by = -3), lib))
+  expect_true(axes_aligned(seq(4096, 504, by = -8), lib))
+
+  ## So do targets on the library's own axis, canonical or not
+  native <- rev(599.7431 + 1.928571 * (0:1762))
+  expect_true(axes_aligned(native[100:900], native))
+
+  ## An instrument's own axis is refused, though it shares four columns with
+  ## a 4 cm-1 grid by coincidence, and though 1.93 and 4 have a common
+  ## divisor in decimal; so is a grid offset by a whole wavenumber
+  coincident <- rev(599.74 + 1.93 * (0:1761))
+  expect_length(intersect(coincident, seq(4000, 600, by = -4)), 4L)
+  expect_false(axes_aligned(coincident, seq(4000, 600, by = -4)))
+  expect_false(axes_aligned(seq(3999, 601, by = -2), lib))
+
+  ## And the other way round: canonical targets against a library left on
+  ## an instrument's axis
+  expect_false(axes_aligned(seq(4000, 600, by = -4), coincident))
+
+})
+
+
 test_that("check_shared_columns() refuses targets that share no column, naming the standardize() call", {
 
   lib <- paste0("wn_", seq(4000, 600, by = -2))
@@ -189,7 +218,17 @@ test_that("check_shared_columns() refuses targets that share no column, naming t
   expect_match(gsub("\\s+", " ", conditionMessage(err)),
                "standardize(x, resample = 2, trim = c(600, 4000), force = TRUE)", fixed = TRUE)
 
-  ## Anything shared passes, with the split
+  ## An instrument's own axis that shares a few columns by coincidence is
+  ## refused too, saying so
+  coincident <- paste0("wn_", rev(599.74 + 1.93 * (0:1761)))
+  err <- expect_error(check_shared_columns(coincident, lib), class = "horizons_error_input")
+  msg <- gsub("\\s+", " ", conditionMessage(err))
+
+  expect_match(msg, "not on a grid aligned with", fixed = TRUE)
+  expect_match(msg, "9 of the targets' 1761 columns inside the library's range coincide with library columns", fixed = TRUE)
+  expect_match(msg, "standardize(x, resample = 2, trim = c(600, 4000))", fixed = TRUE)
+
+  ## Anything shared on an aligned grid passes, with the split
   expect_identical(check_shared_columns(lib[1:3], lib)$shared, lib[1:3])
 
 })

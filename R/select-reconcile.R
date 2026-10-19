@@ -200,17 +200,66 @@ shared_columns <- function(target_vars, library_vars) {
 
 
 ## ---------------------------------------------------------------------------
-## check_shared_columns() — refuse targets that share no column
+## axes_aligned() — the targets on a grid the library's lines up with
 ## ---------------------------------------------------------------------------
 
-#' Stop when the targets share no wavenumber column with the library
+#' Whether the targets' wavenumbers lie on a grid aligned with the library's
 #'
 #' @description
-#' `select_training()`'s door for #236. Targets on an instrument's own axis,
-#' or on a grid that misses every library column, would leave a training set
-#' with no predictors. The refusal names the `standardize()` call that puts
-#' the targets on the library's grid, built from the library's own range and
-#' step.
+#' Two grids are aligned when every target wavenumber inside the library's
+#' range lies on one lattice with the library's columns, so their shared
+#' columns are the grids' common multiples, not coincidences. Either the
+#' targets' columns there are all library columns (one axis, or the targets
+#' a subset of it), or both axes are canonical grids, every wavenumber a
+#' whole multiple of its own axis's step, which is what `standardize()`
+#' makes: two such grids lie on the multiples of the greatest common divisor
+#' of their steps, through the library's lowest column. A raw instrument
+#' axis is neither. It can still share a few column names with a canonical
+#' grid by coincidence (599.74 + 1.93 k shares 4 with a 4 cm-1 grid from 600
+#' to 4000), which would otherwise train a model on those few columns.
+#'
+#' @details
+#' The steps are not compared through their greatest common divisor
+#' directly: in decimal, 1.93 and 2 have one, 0.01, and that lattice holds
+#' the coincidental axis above. Asking that each axis be a canonical grid
+#' gives the same answer for every pair `standardize()` can make and refuses
+#' that one. A wavenumber is on its grid when it is within `GRID_TOL` of a
+#' whole multiple of the axis's median spacing.
+#'
+#' @param target_wn [Numeric.] The targets' wavenumbers.
+#' @param library_wn [Numeric.] The library's wavenumbers.
+#'
+#' @return [Logical(1).]
+#' @noRd
+axes_aligned <- function(target_wn, library_wn) {
+
+  inside <- target_wn[target_wn >= min(library_wn) - GRID_TOL & target_wn <= max(library_wn) + GRID_TOL]
+
+  if (all(inside %in% library_wn)) return(TRUE)
+
+  on_own_grid <- function(wn, of = wn) {
+    step <- stats::median(abs(diff(sort(of))))
+    all(abs(wn - round(wn / step) * step) <= GRID_TOL)
+  }
+
+  on_own_grid(inside, of = target_wn) && on_own_grid(library_wn)
+
+}
+
+
+## ---------------------------------------------------------------------------
+## check_shared_columns() — refuse targets not on the library's grid
+## ---------------------------------------------------------------------------
+
+#' Stop when the targets are not on a grid aligned with the library's
+#'
+#' @description
+#' `select_training()`'s door for #236. Targets that share no column with
+#' the library would leave a training set with no predictors, and targets on
+#' an instrument's own axis that share a few columns by coincidence would
+#' leave one with only those (`axes_aligned()`). Both are targets that were
+#' not put on the library's grid, and the refusal names the `standardize()`
+#' call that does it, built from the library's own range and step.
 #'
 #' @param target_vars [Character.] The targets' predictor columns.
 #' @param library_vars [Character.] The library's predictor columns: the
@@ -219,18 +268,23 @@ shared_columns <- function(target_vars, library_vars) {
 #'   already, so the call needs `force = TRUE`.
 #' @param call The frame the refusal reports: the verb's.
 #'
-#' @return [List.] `shared_columns()`'s result, when anything is shared.
-#'   Aborts with class `horizons_error_input` otherwise.
+#' @return [List.] `shared_columns()`'s result, when the targets are on an
+#'   aligned grid and share at least one column. Aborts with class
+#'   `horizons_error_input` otherwise.
 #' @noRd
 check_shared_columns <- function(target_vars, library_vars, restandardize = FALSE,
                                  call = rlang::caller_env()) {
 
-  cols <- shared_columns(target_vars, library_vars)
+  cols      <- shared_columns(target_vars, library_vars)
+  target_wn <- as.numeric(sub("^wn_", "", target_vars))
+  lib_wn    <- as.numeric(sub("^wn_", "", library_vars))
 
-  if (length(cols$shared)) return(cols)
+  aligned <- axes_aligned(target_wn, lib_wn)
 
-  t_grid <- grid_summary(as.numeric(sub("^wn_", "", target_vars)))
-  l_grid <- grid_summary(as.numeric(sub("^wn_", "", library_vars)))
+  if (length(cols$shared) && aligned) return(cols)
+
+  t_grid <- grid_summary(target_wn)
+  l_grid <- grid_summary(lib_wn)
 
   t_step <- signif(t_grid$resolution, 4)
   l_step <- signif(l_grid$resolution, 4)
@@ -238,9 +292,18 @@ check_shared_columns <- function(target_vars, library_vars, restandardize = FALS
                     l_step, l_grid$range[1], l_grid$range[2],
                     if (restandardize) ", force = TRUE" else "")
 
+  header <- if (length(cols$shared)) {
+    "{.arg x}'s wavenumbers are not on a grid aligned with {.arg library}'s."
+  } else {
+    "{.arg x} and {.arg library} share no wavenumber column."
+  }
+
+  n_in <- sum(target_wn >= l_grid$range[1] - GRID_TOL & target_wn <= l_grid$range[2] + GRID_TOL)
+
   abort_horizons(c(
-    "{.arg x} and {.arg library} share no wavenumber column.",
+    header,
     "x" = "The targets' {t_grid$n} columns run from {t_grid$range[1]} to {t_grid$range[2]} cm-1, about {t_step} cm-1 apart; the library's {l_grid$n} run from {l_grid$range[1]} to {l_grid$range[2]}, {l_step} cm-1 apart.",
+    "x" = if (length(cols$shared)) "{length(cols$shared)} of the targets' {n_in} columns inside the library's range coincide with library columns; the rest lie on no grid shared with it, as an instrument's own axis does.",
     "i" = "The training set is the library's own columns at the wavenumbers the targets share with it. Put the targets on the library's grid with {.code {remedy}}, or on a multiple of its {l_step} cm-1 step."
   ), kind = "input", call = call)
 

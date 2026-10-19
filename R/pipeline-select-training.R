@@ -75,10 +75,12 @@
 #' comes back on their step. Target columns the library lacks (a wider range,
 #' a finer or offset step) are named in one `horizons_warning_coverage`;
 #' [predict()] uses only the columns the model was trained on, so the targets
-#' predict as they are. Targets that share no column with the library, such
-#' as an instrument's own axis, are refused, naming the [standardize()] call
-#' that puts them on the library's grid; for a registered library that is
-#' checked before the download. `x$selection$search` records the search axis
+#' predict as they are. Targets that share no column with the library, or
+#' whose wavenumbers inside its range are not on a grid aligned with the
+#' library's (an instrument's own axis, which can share a few columns by
+#' coincidence), are refused, naming the [standardize()] call that puts them
+#' on the library's grid; for a registered library that is checked before
+#' the download. `x$selection$search` records the search axis
 #' and `x$selection$reconciliation` the columns returned.
 #'
 #' **Coverage.** The targets should span the library's range. Within half

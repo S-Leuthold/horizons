@@ -164,6 +164,24 @@ test_that("targets that share no column with a registered library are refused be
 
 })
 
+test_that("targets that coincide with a registered library at a column, on no aligned grid, are refused before it is downloaded (#236)", {
+
+  entry <- make_mini_ossl(withr::local_tempdir(), seed = 3, extras = FALSE, n_kssl = 60L)
+  local_mini_registry(entry)
+  local_mocked_bindings(resolve_source = function(...) stop("the library was resolved"))
+
+  ## 600 + 1.93 k shares one column, 600, with the mini library's 2 cm-1 grid
+  wn  <- rev(600 + 1.93 * (0:51))
+  tbl <- data.frame(sample_id = paste0("T", 1:3),
+                    matrix(stats::runif(3 * length(wn)), 3, dimnames = list(NULL, paste0("wn_", wn))),
+                    check.names = FALSE)
+  utils::capture.output(x <- spectra(tbl, id_col = "sample_id"))
+
+  expect_error(select_training(x, "mini", k = 5L),
+               "not on a grid aligned with", class = "horizons_error_input")
+
+})
+
 test_that("baseline-corrected targets are refused against the registered library, which is not corrected (#107)", {
 
   m <- use_mini()

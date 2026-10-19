@@ -1381,6 +1381,32 @@ test_that("targets on an instrument's own axis share no column and are refused, 
 })
 
 
+test_that("targets on an instrument's own axis that share a few columns by coincidence are refused (#236)", {
+
+  ## 599.74 + 1.93 k shares four column names with the pool's 4 cm-1 grid
+  ## (1144, 1916, 2688 and 3460), which without the alignment rule would be a
+  ## training set of four columns behind a coverage warning
+  fx <- select_fixture(n_pool = 60)
+
+  coincident <- rev(599.74 + 1.93 * (0:1761))
+  set.seed(3)
+  m <- gaussian_family(4, coincident, centres = c(3400, 2920, 1630, 1030))
+  colnames(m) <- paste0("wn_", coincident)
+  utils::capture.output(targets <- spectra(dplyr::bind_cols(tibble::tibble(sample_id = sprintf("C%02d", 1:4)),
+                                                            tibble::as_tibble(m))))
+
+  expect_length(intersect(colnames(m), fx$pool$data$role_map$variable), 4L)
+
+  err <- expect_error(select_training(targets, fx$pool, k = 5), class = "horizons_error_input")
+  msg <- gsub("\\s+", " ", conditionMessage(err))
+
+  expect_identical(rlang::call_name(err$call), "select_training")
+  expect_match(msg, "`x`'s wavenumbers are not on a grid aligned with `library`'s", fixed = TRUE)
+  expect_match(msg, "4 of the targets' 1761 columns inside the library's range coincide", fixed = TRUE)
+
+})
+
+
 test_that("targets finer than the library get its own columns, with one coverage warning naming the rest (#236)", {
 
   fx      <- select_fixture(n_pool = 60)
