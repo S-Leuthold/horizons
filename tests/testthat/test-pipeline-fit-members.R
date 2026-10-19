@@ -556,6 +556,29 @@ describe("fit() - each member is one unit", {
 
   })
 
+  it("carries a members table with every column and no rows when the first member's worker dies", {
+
+    err <- expect_error(
+      testthat::with_mocked_bindings(
+        suppressWarnings(fit(make_fit_object(n = 60, n_configs = 2), n_best = 2L,
+                             compute_uq = FALSE, compute_ad = FALSE, seed = 42L)),
+        fit_single_config = function(config_row, ...) {
+          stop(structure(class = c("FutureInterruptError", "FutureError", "error", "condition"),
+                         list(message = "worker died", call = NULL)))
+        },
+        .package = "horizons"
+      ),
+      class = "horizons_error_systemic"
+    )
+
+    one <- member_results(list(fitted_member(list(config_id = "cfg_001"))))
+
+    expect_identical(nrow(err$results), 0L)
+    expect_identical(names(err$results), names(one))
+    expect_identical(vapply(err$results, typeof, character(1)), vapply(one, typeof, character(1)))
+
+  })
+
   it("refuses a parallel run its workers cannot match, before anything is drawn", {
 
     obj <- make_fit_object(n = 60, n_configs = 1)

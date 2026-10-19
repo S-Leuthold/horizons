@@ -773,7 +773,7 @@ evaluate <- function(x,
         outcome_range   = outcome_range,
         debug           = debug,
         keep_traces     = control$keep_traces
-      ), dplyr::bind_rows(drop_unit_records(results_list)), output_dir)
+      ), results_so_far(results_list), output_dir)
 
       ## Stamp before anything else sees the row, so the in-memory results and
       ## the checkpointed copy carry the same provenance.
@@ -853,7 +853,7 @@ evaluate <- function(x,
         not_run <- setdiff(configs$config_id[-seq_len(i)], completed_ids)
 
         if (length(not_run) > 0) {
-          abort_breaker_trip(breaker, dplyr::bind_rows(drop_unit_records(results_list)),
+          abort_breaker_trip(breaker, results_so_far(results_list),
                              length(not_run))
         }
 
@@ -954,7 +954,7 @@ evaluate <- function(x,
       evaluate_config_worker,
       shared   = shared_args,
       .options = furrr::furrr_options(seed = TRUE, chunk_size = 1)
-    ), dplyr::bind_rows(lapply(completed_ids, function(id) checkpoint_results[[id]])),
+    ), results_so_far(lapply(completed_ids, function(id) checkpoint_results[[id]])),
     output_dir)
 
     ## Combine: checkpoint results + parallel results
@@ -1508,6 +1508,26 @@ lift_unit_records <- function(rows, collector) {
   log_unit_records(collector, dplyr::bind_rows(lapply(rows, attr, "unit_records")))
 
   drop_unit_records(rows)
+
+}
+
+#' The results table so far, for a stop to carry
+#'
+#' @description
+#' The rows finished before a stop, bound into a table without their units'
+#' records. With none finished it is a table with every column of a results
+#' row ([create_failed_result()]) and no rows, so a stop before the first
+#' configuration carries the same shape as one after it.
+#'
+#' @param rows List of result rows.
+#' @return Tibble.
+#' @keywords internal
+#' @noRd
+results_so_far <- function(rows) {
+
+  if (length(rows) == 0) return(create_failed_result(NA_character_)[0, ])
+
+  dplyr::bind_rows(drop_unit_records(rows))
 
 }
 

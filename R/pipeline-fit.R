@@ -1244,46 +1244,55 @@ fit <- function(x,
 #' @noRd
 member_results <- function(results_list) {
 
-  rows <- purrr::map_dfr(results_list, function(res) {
+  ## No member yet: a table with every column and no rows, so a stop before
+  ## the first member finished carries the same shape as one after it
+  if (length(results_list) == 0) {
+    return(member_row(list(config_id = NA_character_, status = NA_character_))[0, ])
+  }
 
-    tm <- res$test_metrics
-    cv <- res$cv_metrics
+  purrr::map_dfr(results_list, member_row)
 
-    ## Extract CV summary metrics
-    cv_rmse <- if (!is.null(cv)) cv[cv$.metric == "rmse", ] else NULL
-    cv_rpd  <- if (!is.null(cv)) cv[cv$.metric == "rpd", ]  else NULL
+}
 
-    tibble::tibble(
-      config_id       = res$config_id,
-      status          = res$status,
-      degraded        = res$degraded %||% NA,
-      degraded_reason = res$degraded_reason %||% NA_character_,
-      rmse            = if (!is.null(tm)) tm$rmse  else NA_real_,
-      rrmse           = if (!is.null(tm)) tm$rrmse else NA_real_,
-      rsq             = if (!is.null(tm)) tm$rsq   else NA_real_,
-      ccc             = if (!is.null(tm)) tm$ccc   else NA_real_,
-      rpd             = if (!is.null(tm)) tm$rpd   else NA_real_,
-      mae             = if (!is.null(tm)) tm$mae   else NA_real_,
-      cv_rmse_mean    = if (!is.null(cv_rmse) && nrow(cv_rmse) == 1) cv_rmse$mean    else NA_real_,
-      cv_rmse_se      = if (!is.null(cv_rmse) && nrow(cv_rmse) == 1) cv_rmse$std_err else NA_real_,
-      cv_rpd_mean     = if (!is.null(cv_rpd)  && nrow(cv_rpd)  == 1) cv_rpd$mean     else NA_real_,
-      cv_rpd_se       = if (!is.null(cv_rpd)  && nrow(cv_rpd)  == 1) cv_rpd$std_err  else NA_real_,
-      best_params     = list(res$best_params),
-      warm_start      = res$warm_start %||% NA,
-      start_grid_size = as.integer(res$start_grid_size %||% NA_integer_),
-      error_message   = res$error_message %||% NA_character_,
-      class           = res$class %||% NA_character_,
-      trace           = list(res$trace),
-      warnings        = list(res$warnings),
-      runtime_secs    = as.numeric(res$runtime_secs %||% NA_real_)
-    )
+#' One member's row of the members table
+#'
+#' @param res A member, as `fit_single_config()` returns it.
+#' @return One-row tibble.
+#' @keywords internal
+#' @noRd
+member_row <- function(res) {
 
-  })
+  tm <- res$test_metrics
+  cv <- res$cv_metrics
 
-  if (nrow(rows) > 0) return(rows)
+  ## Extract CV summary metrics
+  cv_rmse <- if (!is.null(cv)) cv[cv$.metric == "rmse", ] else NULL
+  cv_rpd  <- if (!is.null(cv)) cv[cv$.metric == "rpd", ]  else NULL
 
-  ## No member yet: the table's columns, without rows
-  tibble::tibble(config_id = character(0), status = character(0), error_message = character(0))
+  tibble::tibble(
+    config_id       = res$config_id,
+    status          = res$status,
+    degraded        = res$degraded %||% NA,
+    degraded_reason = res$degraded_reason %||% NA_character_,
+    rmse            = if (!is.null(tm)) tm$rmse  else NA_real_,
+    rrmse           = if (!is.null(tm)) tm$rrmse else NA_real_,
+    rsq             = if (!is.null(tm)) tm$rsq   else NA_real_,
+    ccc             = if (!is.null(tm)) tm$ccc   else NA_real_,
+    rpd             = if (!is.null(tm)) tm$rpd   else NA_real_,
+    mae             = if (!is.null(tm)) tm$mae   else NA_real_,
+    cv_rmse_mean    = if (!is.null(cv_rmse) && nrow(cv_rmse) == 1) cv_rmse$mean    else NA_real_,
+    cv_rmse_se      = if (!is.null(cv_rmse) && nrow(cv_rmse) == 1) cv_rmse$std_err else NA_real_,
+    cv_rpd_mean     = if (!is.null(cv_rpd)  && nrow(cv_rpd)  == 1) cv_rpd$mean     else NA_real_,
+    cv_rpd_se       = if (!is.null(cv_rpd)  && nrow(cv_rpd)  == 1) cv_rpd$std_err  else NA_real_,
+    best_params     = list(res$best_params),
+    warm_start      = res$warm_start %||% NA,
+    start_grid_size = as.integer(res$start_grid_size %||% NA_integer_),
+    error_message   = res$error_message %||% NA_character_,
+    class           = res$class %||% NA_character_,
+    trace           = list(res$trace),
+    warnings        = list(res$warnings),
+    runtime_secs    = as.numeric(res$runtime_secs %||% NA_real_)
+  )
 
 }
 

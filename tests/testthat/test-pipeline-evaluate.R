@@ -2700,6 +2700,24 @@ describe("evaluate() - a worker's death", {
 
   })
 
+  it("carries a results table with every column and no rows when the first configuration's worker dies", {
+
+    local_mocked_bindings(evaluate_single_config = function(config_row, ...) {
+      stop(structure(class = c("FutureInterruptError", "FutureError", "error", "condition"),
+                     list(message = "A future worker died.", call = NULL)))
+    })
+
+    err <- expect_error(suppressWarnings(evaluate(make_eval_object(n = 60, n_configs = 3), seed = 42L)),
+                        class = "horizons_error_systemic")
+
+    one <- create_failed_result("cfg_001", "failed")
+
+    expect_identical(nrow(err$results), 0L)
+    expect_identical(names(err$results), names(one))
+    expect_identical(vapply(err$results, typeof, character(1)), vapply(one, typeof, character(1)))
+
+  })
+
   it("stops a resamples-axis run whose worker is killed (installed build)", {
 
     skip_unless_slow_tier()
