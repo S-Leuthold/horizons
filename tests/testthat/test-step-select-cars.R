@@ -361,16 +361,66 @@ describe("step_select_cars() and near-constant bands", {
       d
     })
 
-    expect_message(
+    ## Counted on the record and shown by print(), not said on the console,
+    ## which tune and verbose = FALSE cannot quiet
+    expect_no_message(
       prepped <- withr::with_seed(1, recipes::prep(cars_recipe(d), training = d)),
-      "Filtering 1 near-constant features before clustering", fixed = TRUE
+      message = "near-constant"
     )
 
     step <- prepped$steps[[1]]
 
+    expect_identical(step$cars$n_constant, 1L)
+    expect_identical(step$cars$n_bands, 159L)
     expect_identical(step$cars$n_representatives, 150L)
     expect_false("wn_3900" %in% step$selected_vars)
     expect_gt(length(step$selected_vars), 0L)
+    expect_output(print(step), "1 near-constant band dropped before clustering", fixed = TRUE)
+
+  })
+
+  it("keeps a band small in absolute terms but not for its spectrum: second derivatives at a wide window", {
+
+    skip_if_not_installed("pls")
+
+    ## Smooth spectra: a sharp peak that varies and carries nothing, and a
+    ## broad shallow one whose height is the outcome
+    d <- withr::with_seed(1, {
+      n <- 60; p <- 120; j <- seq_len(p)
+      sharp  <- exp(-((j - 30) / 6)^2)
+      broad  <- exp(-((j - 90) / 20)^2)
+      height <- stats::rnorm(n, 1, 0.3)
+      m <- outer(stats::rnorm(n, 0.5, 0.05), rep(1, p)) +
+        outer(stats::rnorm(n, 1, 0.3), sharp) +
+        0.002 * outer(height, broad) +
+        matrix(stats::rnorm(n * p, sd = 1e-4), n)
+      colnames(m) <- paste0("wn_", seq(4000, by = -2, length.out = p))
+      d     <- tibble::as_tibble(m)
+      d$SOC <- 10 * height + stats::rnorm(n, sd = 0.1)
+      d
+    })
+
+    transform <- recipes::recipe(SOC ~ ., data = d) |>
+      step_transform_spectra(dplyr::starts_with("wn_"), preprocessing = "deriv2", window_size = 21)
+
+    ## The band that carries the outcome has a variance far below 1e-10, but
+    ## ordinary for a second-derivative spectrum
+    baked <- recipes::bake(recipes::prep(transform, training = d), new_data = NULL)
+    spec  <- as.matrix(baked[, grepl("^spec[0-9]+$", names(baked))])
+    best  <- which.max(abs(stats::cor(spec, baked$SOC))[, 1])
+
+    expect_gt(abs(stats::cor(spec[, best], baked$SOC)), 0.8)
+    expect_lt(stats::var(spec[, best]), 1e-10)
+
+    prepped <- withr::with_seed(1, suppressMessages(recipes::prep(
+      transform |> step_select_cars(dplyr::matches("^spec[0-9]+$"), outcome = "SOC"),
+      training = d
+    )))
+
+    step <- prepped$steps[[2]]
+
+    expect_identical(step$cars$n_constant, 0L)
+    expect_identical(step$cars$n_bands, ncol(spec))
 
   })
 

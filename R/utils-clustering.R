@@ -112,26 +112,32 @@ cluster_spectral_predictors <- function(spectra_mat,
 #' Drop the Near-Constant Bands Before Clustering
 #'
 #' @description
-#' Shared by `step_select_cars()` and `step_select_boruta()`. A band whose
-#' variance is at most `1e-10` has no correlation with any other, so it
-#' cannot be clustered, and it carries nothing to select. Says how many it
-#' drops.
+#' Shared by `step_select_cars()` and `step_select_boruta()`. A band with no
+#' spread has no correlation with any other, which `hclust()` refuses, and a
+#' band whose spread is round-off carries nothing to select. A band is
+#' dropped when its variance is not finite, is zero, or is at most
+#' `NEAR_CONSTANT_RATIO` of the median variance of the bands that vary. The
+#' cutoff is relative to the spectrum because correlation is scale-free:
+#' preprocessing rescales bands by orders of magnitude, and an absolute cutoff
+#' dropped informative bands of second-derivative spectra. The steps record
+#' the count (`n_constant`) rather than print it.
 #'
 #' @param spectra_mat Numeric matrix, one column per band.
-#' @return `spectra_mat` without its near-constant columns.
+#' @return List: `spectra`, `spectra_mat` without its near-constant columns,
+#'   and `n_constant`, how many it dropped.
 #' @keywords internal
 #' @noRd
 drop_constant_bands <- function(spectra_mat) {
 
   variances <- apply(spectra_mat, 2, stats::var, na.rm = TRUE)
-  keep      <- !is.na(variances) & variances > 1e-10
+  varies    <- is.finite(variances) & variances > 0
 
-  if (!all(keep)) {
+  ### The median of the bands that vary, so a spectrum padded with constant
+  ### bands still has a scale to measure against.
+  typical <- if (any(varies)) stats::median(variances[varies]) else 0
+  keep    <- varies & variances > NEAR_CONSTANT_RATIO * typical
 
-    cli::cli_alert_info("Filtering {sum(!keep)} near-constant features before clustering")
-
-  }
-
-  spectra_mat[, keep, drop = FALSE]
+  list(spectra    = spectra_mat[, keep, drop = FALSE],
+       n_constant = sum(!keep))
 
 }

@@ -92,8 +92,9 @@ The trained step records what Boruta did in its \code{boruta} element: the
 confirmed, tentative and rejected counts, each attribute's \code{decision}, the
 \code{runs}, \code{max_runs} and \code{num_trees}, the \code{mtry} ceiling and the \code{mtry} of
 each run (\code{mtry_by_run}), \code{retained_all}, \code{n_bands} (the bands left after
-the near-constant ones are dropped), \code{n_kept} and \code{skipped}. \code{print()} shows the
-counts.
+the near-constant ones are dropped), \code{n_constant} (the near-constant bands
+dropped: a variance not finite, zero, or at most a hundred-millionth of the
+median band's), \code{n_kept} and \code{skipped}. \code{print()} shows the counts.
 
 With fewer than two bands left after the near-constant ones are dropped,
 they cannot be clustered and there is nothing to select between: the step

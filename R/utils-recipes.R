@@ -712,6 +712,28 @@ selection_warning <- function(step) {
 
 }
 
+#' The print() line for the near-constant bands a step dropped
+#'
+#' @param record A trained step's record (`cars` or `boruta`), or `NULL` for
+#'   a step trained before the record existed.
+#' @return `NULL`, invisibly; prints one line when bands were dropped.
+#' @keywords internal
+#' @noRd
+print_constant_bands <- function(record) {
+
+  n <- record$n_constant
+
+  if (!is.null(n) && n > 0) {
+
+    cat("\u2022 ", n, " near-constant band", if (n == 1) "" else "s",
+        " dropped before clustering\n", sep = "")
+
+  }
+
+  invisible(NULL)
+
+}
+
 #' Raise the warning a trained selection step's record calls for
 #'
 #' @description

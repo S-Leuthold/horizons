@@ -32,7 +32,8 @@
 #'
 #' CARS runs as published (Li et al. 2009) on at most 150 cluster
 #' representatives of the selected columns (correlation clustering), after
-#' dropping near-constant columns, for 50 iterations. Each iteration fits a
+#' dropping near-constant columns (a variance not finite, zero, or at most a
+#' hundred-millionth of the median band's), for 50 iterations. Each iteration fits a
 #' PLS model of up to five components on a Monte Carlo sample of 80% of the
 #' rows and scores it by its leave-one-out RMSEP at its best number of
 #' components. The fit's coefficients weight the bands afresh: an
@@ -42,7 +43,8 @@
 #' as there are bands, keeping the bands drawn. The step returns the set of
 #' bands the lowest score was measured on (#106), each kept representative
 #' bringing its whole cluster. The trained step records this in its `cars`
-#' element: the bands it selected from, the representatives, each
+#' element: the bands it selected from (`n_bands`), the near-constant bands
+#' it dropped before (`n_constant`), the representatives, each
 #' iteration's score, the iteration chosen, the bands kept, `retained_all`
 #' (always `FALSE`: CARS always selects) and `skipped`.
 #'
@@ -148,10 +150,13 @@ prep.step_select_cars <- function(x, training, info = NULL, ...) {
   ## ---------------------------------------------------------------------------
   ## Stage 2: Cluster predictors before CARS
   ## ---------------------------------------------------------------------------
-  ## A near-constant band has no correlation with any other, so it is dropped
-  ## before clustering, as step_select_boruta() drops it.
+  ## A band with no spread, relative to the spectrum's, has no correlation to
+  ## cluster on and nothing to select, so it is dropped before clustering, as
+  ## step_select_boruta() drops it, and counted on the record.
 
-  spectra_mat <- drop_constant_bands(spectra_mat)
+  filtered    <- drop_constant_bands(spectra_mat)
+  spectra_mat <- filtered$spectra
+  n_constant  <- filtered$n_constant
 
   ## Fewer than two bands left: there is nothing to select between, so they
   ## are kept and the step says the selection did not run
@@ -167,6 +172,7 @@ prep.step_select_cars <- function(x, training, info = NULL, ...) {
       trained       = TRUE,
       selected_vars = kept,
       cars          = list(n_bands           = length(kept),
+                           n_constant        = n_constant,
                            n_representatives = NA_integer_,
                            scores            = NULL,
                            iteration         = NA_integer_,
@@ -255,6 +261,7 @@ prep.step_select_cars <- function(x, training, info = NULL, ...) {
   kept_wavenumbers <- unique(unlist(cluster_map[kept_cluster_vars]))
 
   cars_record <- list(n_bands           = ncol(spectra_mat),
+                      n_constant        = n_constant,
                       n_representatives = n_vars,
                       scores            = scores,
                       iteration         = best,
@@ -318,6 +325,7 @@ print.step_select_cars <- function(x,
 
   if (x$trained) {
     cat(glue::glue("\u2022 {length(x$selected_vars)} wavenumbers retained after CARS"), "\n", sep = "")
+    print_constant_bands(x$cars)
     if (isTRUE(x$cars$skipped)) {
       cat("\u2022 Too few bands to run CARS, so every band left was kept\n")
     }

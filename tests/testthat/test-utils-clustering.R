@@ -95,3 +95,33 @@ describe("cluster_spectral_predictors() represents each cluster by its middle ba
   })
 
 })
+
+
+describe("drop_constant_bands() judges a band against its spectrum's scale", {
+
+  it("drops a band with no spread, round-off spread or no values, and keeps the same bands at any scale", {
+
+    m <- withr::with_seed(1, {
+      m      <- matrix(stats::rnorm(40 * 6), 40)
+      m[, 2] <- 0.5
+      m[, 3] <- 0.5 + stats::rnorm(40, sd = 1e-9)
+      m[, 4] <- NA
+      m
+    })
+    colnames(m) <- sprintf("spec%03d", 1:6)
+
+    out <- drop_constant_bands(m)
+
+    expect_identical(colnames(out$spectra), c("spec001", "spec005", "spec006"))
+    expect_identical(out$n_constant, 3L)
+
+    ## A hundred-millionth of the size, as a second derivative is far smaller
+    ## than an absorbance: the bands that vary still vary for their spectrum
+    scaled <- drop_constant_bands(m * 1e-8)
+
+    expect_identical(colnames(scaled$spectra), colnames(out$spectra))
+    expect_identical(scaled$n_constant, 3L)
+
+  })
+
+})

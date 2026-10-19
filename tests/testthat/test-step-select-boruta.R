@@ -166,7 +166,7 @@ describe("step_select_boruta() selects by Boruta (#75)", {
 
 describe("step_select_boruta() - Boruta's input and its forests", {
 
-  it("drops near-constant columns, says so, and hands Boruta at most 50 cluster representatives", {
+  it("drops near-constant columns, records them, and hands Boruta at most 50 cluster representatives", {
 
     skip_if_not_installed("Boruta")
 
@@ -183,10 +183,14 @@ describe("step_select_boruta() - Boruta's input and its forests", {
       .package = "Boruta"
     )
 
-    expect_message(prepped <- recipes::prep(boruta_recipe(d), training = d),
-                   "Filtering 1 near-constant features before clustering", fixed = TRUE)
+    expect_no_message(prepped <- recipes::prep(boruta_recipe(d), training = d),
+                      message = "near-constant")
 
     step <- prepped$steps[[1]]
+
+    expect_identical(step$boruta$n_constant, 1L)
+    expect_identical(step$boruta$n_bands, 59L)
+    expect_output(print(step), "1 near-constant band dropped before clustering", fixed = TRUE)
 
     ## The 59 that vary cluster to 50; every one of them is selected
     expect_length(seen, 50L)

@@ -55,7 +55,8 @@ identifying minimal wavelength sets that maintain predictive performance.
 
 CARS runs as published (Li et al. 2009) on at most 150 cluster
 representatives of the selected columns (correlation clustering), after
-dropping near-constant columns, for 50 iterations. Each iteration fits a
+dropping near-constant columns (a variance not finite, zero, or at most a
+hundred-millionth of the median band's), for 50 iterations. Each iteration fits a
 PLS model of up to five components on a Monte Carlo sample of 80\% of the
 rows and scores it by its leave-one-out RMSEP at its best number of
 components. The fit's coefficients weight the bands afresh: an
@@ -65,7 +66,8 @@ sampling draws among those, by weight and with replacement, as many times
 as there are bands, keeping the bands drawn. The step returns the set of
 bands the lowest score was measured on (#106), each kept representative
 bringing its whole cluster. The trained step records this in its \code{cars}
-element: the bands it selected from, the representatives, each
+element: the bands it selected from (\code{n_bands}), the near-constant bands
+it dropped before (\code{n_constant}), the representatives, each
 iteration's score, the iteration chosen, the bands kept, \code{retained_all}
 (always \code{FALSE}: CARS always selects) and \code{skipped}.
 

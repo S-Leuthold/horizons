@@ -69,8 +69,9 @@
 #' confirmed, tentative and rejected counts, each attribute's `decision`, the
 #' `runs`, `max_runs` and `num_trees`, the `mtry` ceiling and the `mtry` of
 #' each run (`mtry_by_run`), `retained_all`, `n_bands` (the bands left after
-#' the near-constant ones are dropped), `n_kept` and `skipped`. `print()` shows the
-#' counts.
+#' the near-constant ones are dropped), `n_constant` (the near-constant bands
+#' dropped: a variance not finite, zero, or at most a hundred-millionth of the
+#' median band's), `n_kept` and `skipped`. `print()` shows the counts.
 #'
 #' With fewer than two bands left after the near-constant ones are dropped,
 #' they cannot be clustered and there is nothing to select between: the step
@@ -172,7 +173,9 @@ prep.step_select_boruta <- function(x, training, info = NULL, ...) {
   ## Stage 2: Variance filtering and clustering
   ## ---------------------------------------------------------------------------
 
-  spectra_mat        <- drop_constant_bands(spectra_mat)
+  filtered           <- drop_constant_bands(spectra_mat)
+  spectra_mat        <- filtered$spectra
+  n_constant         <- filtered$n_constant
   col_names_filtered <- colnames(spectra_mat)
 
   ## Fewer than two bands left: they cannot be clustered and there is nothing
@@ -188,6 +191,7 @@ prep.step_select_boruta <- function(x, training, info = NULL, ...) {
       trained       = TRUE,
       selected_vars = col_names_filtered,
       boruta        = list(n_bands      = length(col_names_filtered),
+                           n_constant   = n_constant,
                            n_attributes = 0L,
                            n_confirmed  = 0L,
                            n_tentative  = 0L,
@@ -290,6 +294,7 @@ prep.step_select_boruta <- function(x, training, info = NULL, ...) {
   decision <- boruta_fit$finalDecision
 
   boruta_record <- list(n_bands      = length(col_names_filtered),
+                        n_constant   = n_constant,
                         n_attributes = n_features,
                         n_confirmed  = sum(decision == "Confirmed"),
                         n_tentative  = sum(decision == "Tentative"),
@@ -397,6 +402,8 @@ print.step_select_boruta <- function(x,
     b <- x$boruta
 
     if (!is.null(b)) {
+
+      print_constant_bands(b)
 
       if (isTRUE(b$skipped)) {
         cat(glue::glue("\u2022 Too few bands to run Boruta, so the {b$n_bands} left were kept"), "\n", sep = "")
