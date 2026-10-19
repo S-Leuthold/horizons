@@ -386,10 +386,13 @@ log_missing_intervals <- function(collector, ids) {
 
 #' Collect one warning for the predictions the response bound winsorized
 #'
+#' `n` counts the samples, as every log row's `n` counts its `ids`; under
+#' `config = "all"` a bullet gives each configuration's count of predictions.
+#'
 #' @param collector The call's collector.
-#' @param reports List, one per block: `NULL`, or a list with `ids` (the
-#'   samples winsorized), `n`, `max` (the largest value before the bound) and
-#'   `bound`.
+#' @param reports List, one per block, named by configuration when there are
+#'   several: `NULL`, or a list with `ids` (the samples winsorized), `n`,
+#'   `max` (the largest value before the bound) and `bound`.
 #' @return `collector`, invisibly.
 #' @keywords internal
 #' @noRd
@@ -399,13 +402,18 @@ log_winsorized <- function(collector, reports) {
 
   if (length(reports) == 0) return(invisible(collector))
 
-  ids   <- unique(unlist(lapply(reports, `[[`, "ids")))
-  n     <- sum(vapply(reports, `[[`, integer(1), "n"))
-  top   <- max(vapply(reports, `[[`, numeric(1), "max"))
-  bound <- reports[[1]]$bound
+  ids    <- unique(unlist(lapply(reports, `[[`, "ids")))
+  n      <- length(ids)
+  counts <- vapply(reports, `[[`, integer(1), "n")
+  top    <- max(vapply(reports, `[[`, numeric(1), "max"))
+  bound  <- reports[[1]]$bound
+  by     <- if (length(reports) > 1 && !is.null(names(reports))) {
+    paste0('"', names(reports), '" ', counts, collapse = ", ")
+  }
 
   log_warning(collector, "applicability", c(
-    "{n} prediction{?s} exceeded the response upper bound and {?was/were} winsorized.",
+    "{n} sample{?s} {?was/were} predicted above the response upper bound and winsorized to it.",
+    "i" = if (!is.null(by)) "Predictions winsorized, by configuration: {by}.",
     "i" = "Max pre-clamp value: {round(top, 2)}; bound: {round(bound, 2)}.",
     "i" = "Large overshoots usually indicate extrapolation beyond the training domain."
   ), ids = ids, n = n)
@@ -1372,13 +1380,13 @@ log_prediction_units <- function(collector, blocks) {
 
   }
 
+  block_ids <- vapply(blocks, function(b) b$config_id[1] %||% NA_character_, character(1))
+
   log_prediction_reports(
     collector,
     records    = records,
-    flagged    = stats::setNames(lapply(blocks, attr, "flagged"),
-                                 vapply(blocks, function(b) b$config_id[1] %||% NA_character_,
-                                        character(1))),
-    winsorized = lapply(blocks, attr, "winsorized")
+    flagged    = stats::setNames(lapply(blocks, attr, "flagged"), block_ids),
+    winsorized = stats::setNames(lapply(blocks, attr, "winsorized"), block_ids)
   )
 
 }

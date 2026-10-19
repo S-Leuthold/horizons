@@ -949,8 +949,14 @@ describe("predict.horizons_fit() - response bound guardrail", {
 
     expect_length(warns, 1L)
     clipped <- new_df$sample_id[p_raw$.pred > bound]
+    ## n counts the samples, as every log row's n counts its ids; the
+    ## predictions per configuration are in the message
     expect_setequal(warns[[1]]$log$ids[[1]], clipped)
-    expect_identical(warns[[1]]$log$n, 2L * length(clipped))
+    expect_identical(warns[[1]]$log$n, length(clipped))
+    for (id in names(two$models$workflows)) {
+      expect_match(conditionMessage(warns[[1]]), sprintf('"%s" %d', id, length(clipped)),
+                   fixed = TRUE)
+    }
 
   })
 

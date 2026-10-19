@@ -197,9 +197,26 @@ describe("log_winsorized()", {
     rows <- log_rows(col)
 
     expect_identical(rows$topic, "applicability")
-    expect_match(rows$message, "1 prediction exceeded the response upper bound", fixed = TRUE)
+    expect_match(rows$message, "1 sample was predicted above the response upper bound", fixed = TRUE)
     expect_match(rows$message, "1095.63", fixed = TRUE)
     expect_identical(rows$ids[[1]], "c")
+
+  })
+
+  it("counts samples, not predictions, and gives each configuration's count", {
+
+    values <- c(200, 300)
+    report <- winsorized_report(c("a", "b"), values,
+                                apply_response_bound(values, 100), 100)
+    col    <- log_open("predict")
+
+    log_winsorized(col, list(cfg_1 = report, cfg_2 = report))
+    rows <- log_rows(col)
+
+    expect_identical(rows$n, 2L)
+    expect_identical(rows$ids[[1]], c("a", "b"))
+    expect_match(rows$message, "2 samples were predicted above", fixed = TRUE)
+    expect_match(rows$message, '"cfg_1" 2, "cfg_2" 2', fixed = TRUE)
 
   })
 
