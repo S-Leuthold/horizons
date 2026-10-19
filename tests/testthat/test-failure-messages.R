@@ -413,6 +413,13 @@ describe("condition_summary()", {
 
   })
 
+  it("makes no records from no text", {
+
+    expect_identical(text_records(character(0)), new_warning_log())
+    expect_identical(text_records(list()), new_warning_log())
+
+  })
+
   it("keeps a pinned line whole, as the package's own text, and caps text captured from another package", {
 
     line <- paste(paste(rep("word", 100), collapse = " "), "(3 of 5 folds).")
@@ -679,18 +686,22 @@ describe("evaluate_single_config() chooses only among candidates scored on every
 
   it("leaves out a candidate that failed on a fold and chooses among the rest, saying so on the row", {
 
-    ## The first engine fit fails: one candidate, on one fold
+    ## The engine fails once, on the candidate that would win on its other
+    ## folds (mixture 0.05): it is left out, and the complete one is chosen
     real_glmnet <- glmnet::glmnet
-    calls       <- 0L
+    failed      <- FALSE
     local_mocked_bindings(glmnet = function(...) {
-      calls <<- calls + 1L
-      if (calls == 1L) stop("the engine broke")
+      if (!failed && isTRUE(all.equal(list(...)$alpha, 0.05))) {
+        failed <<- TRUE
+        stop("the engine broke")
+      }
       real_glmnet(...)
     }, .package = "glmnet")
 
     result <- suppressWarnings(run_evaluate("elastic_net", setup))
 
     expect_identical(result$status, "success")
+    expect_identical(result$best_params[[1]]$mixture, 1)
     expect_true(is.finite(result$cv_rmse))
     expect_true(any(grepl(
       "1 of 2 candidates was left out of the choice of hyperparameters, not being scored on every fold: the engine broke (1 of 3 folds).",
@@ -838,18 +849,22 @@ describe("fit_single_config() chooses only among candidates scored on every fold
 
   it("leaves out a candidate that failed on a fold and chooses among the rest, saying so on the row", {
 
-    ## The first engine fit fails: one candidate, on one fold
+    ## The engine fails once, on the candidate that would win on its other
+    ## folds (mixture 0.05): it is left out, and the complete one is chosen
     real_glmnet <- glmnet::glmnet
-    calls       <- 0L
+    failed      <- FALSE
     local_mocked_bindings(glmnet = function(...) {
-      calls <<- calls + 1L
-      if (calls == 1L) stop("the engine broke")
+      if (!failed && isTRUE(all.equal(list(...)$alpha, 0.05))) {
+        failed <<- TRUE
+        stop("the engine broke")
+      }
       real_glmnet(...)
     }, .package = "glmnet")
 
     result <- suppressWarnings(run_fit("elastic_net", setup))
 
     expect_identical(result$status, "success")
+    expect_identical(result$best_params$mixture, 1)
     expect_true(any(grepl(
       "1 of 2 candidates was left out of the choice of hyperparameters, not being scored on every fold: the engine broke (1 of 3 folds).",
       result$warnings, fixed = TRUE
