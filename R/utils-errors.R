@@ -621,9 +621,9 @@ cli_escape <- function(x) {
 #' [note_in_unit()]. Its message is kept whole wherever it is recorded
 #' ([condition_parts()]): any other package's text inside it was capped when
 #' it was interpolated, through [condition_summary()]. Matched by exact
-#' class, so a step's own class (`horizons_boruta_error`) or one from before
-#' the conditions contract (`horizons_input_error`) is capped as another
-#' package's text until its code raises through [abort_horizons()].
+#' class, so a class from before the conditions contract
+#' (`horizons_input_error`) is capped as another package's text until its
+#' code raises through [abort_horizons()].
 #'
 #' @keywords internal
 #' @noRd
