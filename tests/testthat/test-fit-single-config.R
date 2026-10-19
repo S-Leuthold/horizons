@@ -262,24 +262,13 @@ describe("fit_single_config() - cv_metrics", {
 
   })
 
-  it("counts only the folds with a metric in the standard error", {
+  ## Read the fixture before a mock (helper-memo.R); a rerun is the fixture's
+  ## run, so its out-of-fold predictions are the same
+  rerun_with_fold_metrics <- function(shared, fold_metrics) {
 
-    ## A fold left with one complete pair has NA metrics, which the mean
-    ## leaves out; the standard error divides by the folds the mean averages
-    ## (#102)
-    ## Read the fixture before the mock (helper-memo.R); the rerun is the
-    ## fixture's run, so its out-of-fold predictions are the same
-    shared <- fsc()
-    preds  <- shared$result$cv_predictions
-    folds  <- split(preds, preds$.fold)
-    real   <- compute_original_scale_metrics
+    local_mocked_bindings(compute_original_scale_metrics = fold_metrics)
 
-    local_mocked_bindings(compute_original_scale_metrics = function(truth, estimate) {
-      if (identical(truth, folds[[1]]$truth)) return(real(truth[1], estimate[1]))
-      real(truth, estimate)
-    })
-
-    result <- fit_single_config(
+    fit_single_config(
       config_row          = make_fit_config(),
       split_F             = shared$setup$split_F,
       cv_resamples        = shared$setup$folds,
@@ -290,14 +279,59 @@ describe("fit_single_config() - cv_metrics", {
       seed                = 42L
     )
 
+  }
+
+  it("keeps a cross-validated mean only over every fold: a fold with too few pairs leaves it NA, and says so", {
+
+    ## A fold left with one complete pair has NA metrics, so no metric has a
+    ## mean over every fold, nor a standard error, as in evaluate()
+    shared <- fsc()
+    preds  <- shared$result$cv_predictions
+    folds  <- split(preds, preds$.fold)
+    real   <- compute_original_scale_metrics
+
+    result <- rerun_with_fold_metrics(shared, function(truth, estimate) {
+      if (identical(truth, folds[[1]]$truth)) return(real(truth[1], estimate[1]))
+      real(truth, estimate)
+    })
+
     expect_identical(result$cv_predictions, preds)
+    expect_length(folds, 3L)
 
     cv_met <- result$cv_metrics
-    rmse   <- vapply(folds[-1], function(f) yardstick::rmse_vec(f$truth, f$.pred), numeric(1))
+    expect_true(all(is.na(cv_met$mean)))
+    expect_true(all(is.na(cv_met$std_err)))
+    expect_true(all(cv_met$n == 2L))
+    expect_true("CV metrics at the selected hyperparameters could not be recovered; cv_* columns are NA." %in%
+                  result$warnings)
 
-    expect_length(folds, 3L)
+  })
+
+  it("averages rmse and rpd over every fold when a fold's predictions are constant, leaves rsq NA, and keeps yardstick's warning on the row (#102)", {
+
+    shared <- fsc()
+    preds  <- shared$result$cv_predictions
+    folds  <- split(preds, preds$.fold)
+    real   <- compute_original_scale_metrics
+
+    result <- rerun_with_fold_metrics(shared, function(truth, estimate) {
+      if (identical(truth, folds[[1]]$truth)) estimate <- rep(mean(estimate), length(estimate))
+      real(truth, estimate)
+    })
+
+    cv_met <- result$cv_metrics
+    flat   <- c(list(rep(mean(folds[[1]]$.pred), nrow(folds[[1]]))), lapply(folds[-1], `[[`, ".pred"))
+    rmse   <- mapply(function(f, p) yardstick::rmse_vec(f$truth, p), folds, flat)
+
     expect_equal(cv_met$mean[cv_met$.metric == "rmse"], mean(rmse))
-    expect_equal(cv_met$std_err[cv_met$.metric == "rmse"], stats::sd(rmse) / sqrt(2))
+    expect_equal(cv_met$std_err[cv_met$.metric == "rmse"], stats::sd(rmse) / sqrt(3))
+    expect_true(is.finite(cv_met$mean[cv_met$.metric == "rpd"]))
+    expect_true(is.na(cv_met$mean[cv_met$.metric == "rsq"]))
+
+    ## rmse and rpd, which models$results shows, are whole, so no line; the
+    ## warning yardstick raised on the constant fold is the member's
+    expect_false(any(startsWith(result$warnings, "Cross-validated")))
+    expect_true(any(grepl("estimate. is constant", result$warnings)))
 
   })
 

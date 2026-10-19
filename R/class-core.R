@@ -2164,7 +2164,9 @@ validate_horizons_eval <- function(x, call = rlang::caller_env()) {
 #'    has a `level_default` in (0, 1) and at least
 #'    `conformal_min_rows(level_default)` finite `scores`, which `predict()`
 #'    takes the conformal margin from.
-#' 10. **runtime_secs**: single non-negative numeric. **timestamp**: POSIXct.
+#' 10. **cv_predictions**: every member covers the same `.row` set, with no
+#'    `.row` twice for a member, since `ensemble()` reads them as one matrix.
+#' 11. **runtime_secs**: single non-negative numeric. **timestamp**: POSIXct.
 #'
 #' @param x `horizons_fit`. The object to validate.
 #' @param call The frame the error reports: the verb that validated.
@@ -2473,6 +2475,40 @@ validate_horizons_fit <- function(x, call = rlang::caller_env()) {
         ))
 
       }
+
+    }
+
+  }
+
+  ## The members' out-of-fold predictions line up ---------------------------------
+  ## ensemble() reads them as one matrix keyed by .row: a member missing a row
+  ## would leave a hole in it, and a row twice would make a cell a list. fit()
+  ## fails a member that missed a fold (#101), so a fit that breaks this was
+  ## changed after it.
+
+  cv <- md$cv_predictions
+
+  if (is.data.frame(cv) && nrow(cv) > 0 && all(c(".row", "config_id") %in% names(cv))) {
+
+    rows_by_member <- split(cv$.row, cv$config_id)
+    all_rows       <- sort(unique(cv$.row))
+
+    short  <- names(rows_by_member)[!vapply(rows_by_member, setequal, logical(1), all_rows)]
+    repeated <- names(rows_by_member)[vapply(rows_by_member, anyDuplicated, integer(1)) > 0]
+
+    if (length(short) > 0) {
+
+      errors <- c(errors, cli::format_inline(
+        "{.field cv_predictions} for {cli::qty(length(short))}member{?s} {.val {short}} {?does/do} not cover every {.field .row} the other members do"
+      ))
+
+    }
+
+    if (length(repeated) > 0) {
+
+      errors <- c(errors, cli::format_inline(
+        "{.field cv_predictions} for {cli::qty(length(repeated))}member{?s} {.val {repeated}} {?has/have} a {.field .row} more than once"
+      ))
 
     }
 

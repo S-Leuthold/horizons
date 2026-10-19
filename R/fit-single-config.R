@@ -229,6 +229,13 @@ fit_single_config <- function(config_row,
     ## The warnings tune kept for the chosen candidate (#109)
     collect_notes_from(retune$tune_results)
 
+    ## The candidates left out of the choice for a missing fold, the Bayesian
+    ## search's dropped ones among them, as evaluate()'s row says (#101)
+    left_out <- unit_step("select_best", incomplete_note(retune$tune_results, n_folds,
+                                                         retune$n_dropped))
+
+    if (!is.null(left_out)) pin(left_out)
+
     ## -----------------------------------------------------------------------
     ## Step 5: Finalize workflow and generate OOF predictions
     ## -----------------------------------------------------------------------
@@ -253,6 +260,16 @@ fit_single_config <- function(config_row,
       ))
       check_tune_result(results, "every out-of-fold fit failed",
                         recipe = if (!prepped_now) recipe, debug = debug)
+
+      ## The fold rule (#101): the run is one candidate, so a fold it was not
+      ## scored on fails the member rather than leaving its out-of-fold
+      ## predictions without that fold's rows
+      if (length(complete_configs(results, n_folds)) == 0) {
+
+        abort_tune_failure(results, "out-of-fold predictions are missing for a fold")
+
+      }
+
       results
     })
 
@@ -291,28 +308,29 @@ fit_single_config <- function(config_row,
     ## Step 6: Fold-wise CV metrics (original scale)
     ## -----------------------------------------------------------------------
     ## Inside the unit, so a warning yardstick raises here is the member's
-    ## (#102).
+    ## (#102). Each metric averages every fold or is NA, with its standard
+    ## error over every fold, as evaluate()'s cross-validated metrics do: a
+    ## mean over the folds a metric happened to be defined on (rsq on a fold
+    ## whose predictions were constant) would compare unlike quantities.
 
     cv_metrics <- unit_step("cv_panel", {
 
       fold_metrics <- split(cv_predictions, cv_predictions$`.fold`) |>
         purrr::map_dfr(
           ~ compute_original_scale_metrics(.x$truth, .x$.pred),
-          .id = "fold"
+          .id = "id"
         )
 
-      ## A fold whose metric is NA (fewer than two complete pairs, or a metric
-      ## undefined there) is left out of the mean, so it is left out of the
-      ## count the standard error divides by too.
-      fold_metrics |>
-        dplyr::group_by(.metric) |>
-        dplyr::summarize(
-          mean    = mean(.estimate, na.rm = TRUE),
-          std_err = stats::sd(.estimate, na.rm = TRUE) / sqrt(sum(!is.na(.estimate))),
-          .groups = "drop"
-        )
+      over_every_fold(summarise_folds(fold_metrics, ".metric"), n_folds)
 
     })
+
+    ## The row says which of the cross-validated metrics models$results shows
+    ## are NA, and why, with the line evaluate()'s rows use
+    shown <- cv_metrics[cv_metrics$.metric %in% c("rmse", "rpd"), , drop = FALSE]
+    cv_na <- cv_na_line(shown$.metric[is.na(shown$mean)], nrow(shown))
+
+    if (!is.null(cv_na)) pin(cv_na)
 
     ## -----------------------------------------------------------------------
     ## Step 7: Fit final model on full training data

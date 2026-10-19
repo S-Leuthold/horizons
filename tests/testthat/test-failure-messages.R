@@ -817,6 +817,125 @@ describe("fit_single_config() records the cause of a recipe step error", {
 
 })
 
+describe("fit_single_config() chooses only among candidates scored on every fold, and fails a member that missed one (#101)", {
+
+  setup <- make_failure_setup()
+
+  it("fails a member whose every warm-start candidate failed on a fold, rather than choosing on the rest", {
+
+    local_mocked_bindings(build_recipe = one_fold_failing_recipe, .package = "horizons")
+
+    result <- run_fit("elastic_net", setup)
+
+    expect_identical(result$status, "failed")
+    expect_match(result$error_message,
+                 "^Warm-start grid search failed: no grid candidate was scored on every fold \u2014 ")
+    expect_match(result$error_message, "boom on one fold (in `step_mutate()`; 1 of 3 folds)",
+                 fixed = TRUE)
+    expect_identical(result$class, "horizons_error_run")
+
+  })
+
+  it("leaves out a candidate that failed on a fold and chooses among the rest, saying so on the row", {
+
+    ## The first engine fit fails: one candidate, on one fold
+    real_glmnet <- glmnet::glmnet
+    calls       <- 0L
+    local_mocked_bindings(glmnet = function(...) {
+      calls <<- calls + 1L
+      if (calls == 1L) stop("the engine broke")
+      real_glmnet(...)
+    }, .package = "glmnet")
+
+    result <- suppressWarnings(run_fit("elastic_net", setup))
+
+    expect_identical(result$status, "success")
+    expect_true(any(grepl(
+      "1 of 2 candidates was left out of the choice of hyperparameters, not being scored on every fold: the engine broke (1 of 3 folds).",
+      result$warnings, fixed = TRUE
+    )))
+
+  })
+
+  it("counts a candidate the warm-start search proposed and tune dropped among those left out", {
+
+    ## tune's try() catches the error and logs "Couldn't estimate performance",
+    ## and the search then stops on an error of its own
+    in_search  <- FALSE
+    real_grid  <- tune::tune_grid
+    real_bayes <- tune::tune_bayes
+    local_mocked_bindings(
+      tune_grid = function(...) {
+        if (in_search) stop("the candidate's resampling broke")
+        real_grid(...)
+      },
+      tune_bayes = function(...) {
+        in_search <<- TRUE
+        on.exit(in_search <<- FALSE)
+        real_bayes(...)
+      },
+      .package = "tune"
+    )
+
+    result <- fit_single_config(
+      config_row          = make_failure_config("elastic_net"),
+      split_F             = setup$split,
+      cv_resamples        = setup$folds,
+      role_map            = setup$role_map,
+      best_params_eval    = NULL,
+      final_bayesian_iter = 2L,
+      grid_size           = 2,
+      seed                = 42L
+    )
+
+    expect_identical(result$status, "success")
+    expect_true(any(grepl("The warm-start Bayesian search failed", result$warnings, fixed = TRUE)))
+    expect_true(any(grepl(
+      "1 of 3 candidates was left out of the choice of hyperparameters, not being scored on every fold.",
+      result$warnings, fixed = TRUE
+    )))
+
+  })
+
+  it("fails a member whose out-of-fold fits missed a fold, rather than keeping predictions without it", {
+
+    ## The step fails on one fold, and only while the out-of-fold predictions
+    ## are made, so the re-tune chose its candidate on every fold
+    oof <- new.env()
+    oof$on <- FALSE
+
+    fail_without_in_oof <- function(x, value) {
+      if (oof$on && length(x) > 15 && !any(x == value)) stop("boom on one out-of-fold fit")
+      x
+    }
+
+    local_mocked_bindings(build_recipe = function(config_row, train_data, role_map, ...) {
+      value <- train_data$wn_4000[1]
+      recipes::recipe(SOC ~ ., data = train_data) |>
+        recipes::update_role("sample_id", new_role = "id") |>
+        recipes::step_mutate(boom = fail_without_in_oof(wn_4000, !!value))
+    }, .package = "horizons")
+
+    real_resamples <- tune::fit_resamples
+    local_mocked_bindings(fit_resamples = function(...) {
+      oof$on <- TRUE
+      on.exit(oof$on <- FALSE)
+      real_resamples(...)
+    }, .package = "tune")
+
+    result <- run_fit("elastic_net", setup)
+
+    expect_identical(result$status, "failed")
+    expect_match(result$error_message,
+                 "^OOF predictions failed: out-of-fold predictions are missing for a fold \u2014 ")
+    expect_match(result$error_message, "boom on one out-of-fold fit (in `step_mutate()`; 1 of 3 folds)",
+                 fixed = TRUE)
+    expect_null(result$cv_predictions)
+
+  })
+
+})
+
 describe("fit_single_config() records the warnings tune kept in .notes", {
 
   setup <- make_failure_setup()

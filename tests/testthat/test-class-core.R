@@ -3030,6 +3030,22 @@ describe("the class validators' new checks (#234)", {
     obj$models$uq$cfg_a$scores <- c(seq_len(9), NA)
     expect_no_error(validate_horizons_fit(obj))
 
+    ## Members' out-of-fold predictions that do not line up, which ensemble()
+    ## would read as one matrix
+    oof <- function(rows, ids) tibble::tibble(.row = rows, config_id = ids, .pred = 1, truth = 1)
+
+    obj <- make_valid_fit()
+    obj$models$cv_predictions <- oof(c(1:3, 1:3), rep(c("cfg_a", "cfg_b"), each = 3))
+    expect_no_error(validate_horizons_fit(obj))
+
+    obj$models$cv_predictions <- oof(c(1:3, 1:2), rep(c("cfg_a", "cfg_b"), c(3, 2)))
+    expect_true(any(grepl("for member \"cfg_b\" does not cover every .row the other members do",
+                          finding_of(validate_horizons_fit(obj)), fixed = TRUE)))
+
+    obj$models$cv_predictions <- oof(c(1:3, 1, 2, 3, 3), rep(c("cfg_a", "cfg_b"), c(3, 4)))
+    expect_true(any(grepl("for member \"cfg_b\" has a .row more than once",
+                          finding_of(validate_horizons_fit(obj)), fixed = TRUE)))
+
     shapes <- list(
       short_centroid = function(b) { b$centroid <- numeric(0); b },
       cov_mismatch   = function(b) { b$cov_matrix <- diag(2); b },

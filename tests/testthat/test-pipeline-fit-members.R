@@ -556,6 +556,38 @@ describe("fit() - each member is one unit", {
 
   })
 
+  it("fails the member whose every out-of-fold fit failed and returns the other, rather than stopping fit() (#102)", {
+
+    ## The cubist member's engine fails on every fold, but only while its
+    ## out-of-fold predictions are made; the rf member is untouched
+    in_oof <- FALSE
+    real_cubist    <- Cubist::cubist
+    real_resamples <- tune::fit_resamples
+    local_mocked_bindings(cubist = function(...) {
+      if (in_oof) stop("the engine broke on every fold")
+      real_cubist(...)
+    }, .package = "Cubist")
+    local_mocked_bindings(fit_resamples = function(...) {
+      in_oof <<- TRUE
+      on.exit(in_oof <<- FALSE)
+      real_resamples(...)
+    }, .package = "tune")
+
+    got <- collect_warnings(
+      fit(make_fit_object(n = 60, n_configs = 2), n_best = 2L, seed = 42L,
+          compute_uq = FALSE, compute_ad = FALSE),
+      "."
+    )
+    res <- got$value$models$results
+
+    expect_identical(res$status, c("success", "failed"))
+    expect_match(res$error_message[2],
+                 "^OOF predictions failed: every out-of-fold fit failed \u2014 the engine broke on every fold")
+    expect_identical(names(got$value$models$workflows), res$config_id[1])
+    expect_true(any(vapply(got$warnings, inherits, logical(1), "horizons_warning_partial_failure")))
+
+  })
+
   it("carries a members table with every column and no rows when the first member's worker dies", {
 
     err <- expect_error(
