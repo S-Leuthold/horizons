@@ -55,8 +55,10 @@ predict the test rows), \code{error_message} and \code{trace}.}
 \item{\code{horizons_error_systemic}}{(run) \code{\link[=evaluate]{evaluate()}} stopped early,
 because the first configurations to run failed the same way across at
 least two models (the circuit breaker,
-\code{control_horizons(breaker = )}), or because a parallel worker died.
-The rows finished so far travel as \code{results}.}
+\code{control_horizons(breaker = )}), or \code{\link[=evaluate]{evaluate()}}, \code{\link[=fit]{fit()}} or
+\code{\link[=ensemble]{ensemble()}} stopped because a parallel worker died. The rows finished
+so far travel as \code{results}; \code{NULL} from \code{ensemble()}, which has none
+before its meta-learner is built.}
 \item{\code{horizons_error_promoted_warnings}}{(run) A verb ended with
 warnings under \code{options(warn = 2)}. Instead of turning the first warning
 into an error that loses the result, the verb aborts with the finished

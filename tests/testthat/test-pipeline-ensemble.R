@@ -451,10 +451,15 @@ describe("ensemble() - the meta-learner as one unit", {
                      list(message = "the worker died", call = NULL)))
     })
 
-    expect_error(
+    err <- expect_error(
       ensemble(fitted, method = "weighted", optimize = FALSE, compute_uq = FALSE),
       class = "horizons_error_systemic"
     )
+
+    ## ensemble() has no rows before its meta-learner is built, so it
+    ## carries none and promises none
+    expect_null(err$results)
+    expect_no_match(conditionMessage(err), "rows finished so far", fixed = TRUE)
 
   })
 
