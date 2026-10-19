@@ -156,11 +156,6 @@ test_that("transform_similarity() validates the filter arguments itself", {
   expect_error(transform_similarity(pm$matrix, pm$wavenumbers, derivative = 2L, poly = 1L),
                class = "horizons_input_error")
 
-  ## Window wider than the spectra
-  expect_error(transform_similarity(pm$matrix[, 1:9, drop = FALSE], pm$wavenumbers[1:9],
-                                    window = 11L),
-               class = "horizons_input_error")
-
   ## None of this fires when the derivative is off
   expect_silent(transform_similarity(pm$matrix, pm$wavenumbers, derivative = 0L, window = 10L))
 
@@ -587,7 +582,7 @@ test_that("project_similarity() works for the PLS space too", {
 test_that("project_similarity() places the exact twin on its pool row", {
 
   fx <- select_fixture(n_pool = 60)
-  rc <- reconcile_axes(fx$pool, fx$targets)
+  rc <- pool_on_targets(fx)
   tm <- predictor_matrix(fx$targets)
 
   sp <- build_similarity_space(rc$matrix, rc$wavenumbers)
@@ -602,7 +597,7 @@ test_that("project_similarity() aborts on a wavenumber mismatch", {
 
   fx <- select_fixture(n_pool = 60)
   pm <- predictor_matrix(fx$pool)
-  tm <- predictor_matrix(fx$targets)   # not reconciled: different grid
+  tm <- predictor_matrix(fx$targets)   # the targets' 8 cm-1 grid, not the space's 4
 
   sp <- build_similarity_space(pm$matrix, pm$wavenumbers)
 

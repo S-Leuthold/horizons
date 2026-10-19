@@ -1,7 +1,7 @@
 # tests/testthat/test-select-cache.R
 # The flip and the cached similarity space: distances measured in the
 # library's own space on its grid, the space cached beside a registered
-# library or a library file, and the three coverage tiers.
+# library or a library file, and the two coverage tiers.
 #
 # The miniature library comes from helper-mini-library.R.
 
@@ -123,10 +123,10 @@ test_that("a PLS space is never cached", {
 
 
 ## ---------------------------------------------------------------------------
-## The search axis and its three tiers
+## The search axis and its two tiers
 ## ---------------------------------------------------------------------------
 
-test_that("targets on another grid are searched on the library's and returned on their own", {
+test_that("targets on another grid are searched on the library's and returned on the library's columns at theirs", {
 
   m <- use_mini()
   x <- mini_targets(m$pool, wn = seq(700, 600, by = -4))
@@ -140,18 +140,112 @@ test_that("targets on another grid are searched on the library's and returned on
   ## The training set is on the targets' 4 cm-1 grid
   wn_out <- as.numeric(sub("^wn_", "", grep("^wn_", names(out$data$analysis), value = TRUE)))
   expect_identical(sort(wn_out), sort(seq(600, 700, by = 4)))
-  expect_identical(out$selection$reconciliation$operation, "resampled")
+  expect_identical(out$selection$reconciliation$operation, "subset")
 
 })
 
-test_that("targets short of the library by up to 50 cm-1 search the overlap, uncached, and warn", {
+test_that("targets that share no column with a registered library are refused before it is downloaded (#236)", {
+
+  ## Registered, not built: resolving it would download and build it
+  entry <- make_mini_ossl(withr::local_tempdir(), seed = 3, extras = FALSE, n_kssl = 60L)
+  local_mini_registry(entry)
+  local_mocked_bindings(resolve_source = function(...) stop("the library was resolved"))
+
+  ## An instrument's own axis over the mini library's 600 to 700 cm-1
+  wn  <- rev(600.1431 + 1.928571 * (0:51))
+  tbl <- data.frame(sample_id = paste0("T", 1:3),
+                    matrix(stats::runif(3 * length(wn)), 3, dimnames = list(NULL, paste0("wn_", wn))),
+                    check.names = FALSE)
+  utils::capture.output(x <- spectra(tbl, id_col = "sample_id"))
+
+  err <- expect_error(select_training(x, "mini", k = 5L), class = "horizons_error_input")
+  expect_match(gsub("\\s+", " ", conditionMessage(err)),
+               "standardize(x, resample = 2, trim = c(600, 700))", fixed = TRUE)
+
+})
+
+test_that("targets that coincide with a registered library at a column, on no aligned grid, are refused before it is downloaded (#236)", {
+
+  entry <- make_mini_ossl(withr::local_tempdir(), seed = 3, extras = FALSE, n_kssl = 60L)
+  local_mini_registry(entry)
+  local_mocked_bindings(resolve_source = function(...) stop("the library was resolved"))
+
+  ## 600 + 1.93 k shares one column, 600, with the mini library's 2 cm-1 grid
+  wn  <- rev(600 + 1.93 * (0:51))
+  tbl <- data.frame(sample_id = paste0("T", 1:3),
+                    matrix(stats::runif(3 * length(wn)), 3, dimnames = list(NULL, paste0("wn_", wn))),
+                    check.names = FALSE)
+  utils::capture.output(x <- spectra(tbl, id_col = "sample_id"))
+
+  expect_error(select_training(x, "mini", k = 5L),
+               "not on a grid aligned with", class = "horizons_error_input")
+
+})
+
+test_that("baseline-corrected targets are refused against the registered library, which is not corrected (#107)", {
+
+  m <- use_mini()
+  x <- mini_targets(m$pool)
+
+  utils::capture.output(x <- standardize(x, resample = 2, trim = c(600, 700), baseline = TRUE))
+
+  err <- expect_error(select_training(x, "mini", k = 5L), class = "horizons_error_input")
+  msg <- gsub("\\s+", " ", conditionMessage(err))
+
+  expect_match(msg, "The targets were baseline-corrected", fixed = TRUE)
+  expect_identical(m$pool$provenance$standardization$baseline, FALSE)
+
+  ## A registered library is not the user's to standardize again
+  expect_false(grepl("Or correct the library", msg, fixed = TRUE))
+
+})
+
+test_that("the registry's grid and baseline are the built library's", {
+
+  ## What the checks before the download compare against is what the build
+  ## produces: build_ossl_library() standardizes onto exactly this grid,
+  ## with this baseline
+  m <- use_mini()
+  f <- library_registry()$mini$filters
+
+  expect_identical(paste0("wn_", canonical_grid(f$wn_min, f$wn_max, f$wn_step)),
+                   m$pool$data$role_map$variable[m$pool$data$role_map$role == "predictor"])
+  expect_identical(m$pool$provenance$standardization$baseline, f$baseline)
+  expect_false(f$baseline)
+
+})
+
+test_that("baseline-corrected targets are refused against a registered library before it is downloaded (#107)", {
+
+  entry <- make_mini_ossl(withr::local_tempdir(), seed = 3, extras = FALSE, n_kssl = 60L)
+  local_mini_registry(entry)
+  local_mocked_bindings(resolve_source = function(...) stop("the library was resolved"))
+
+  ## On the mini library's grid, so the column checks pass and only the
+  ## baseline differs
+  wn  <- seq(700, 600, by = -2)
+  tbl <- withr::with_seed(1, data.frame(sample_id = paste0("T", 1:3),
+                                        matrix(1 + stats::runif(3 * length(wn)), 3,
+                                               dimnames = list(NULL, paste0("wn_", wn))),
+                                        check.names = FALSE))
+  utils::capture.output({
+    x <- spectra(tbl, id_col = "sample_id")
+    x <- standardize(x, resample = 2, trim = c(600, 700), baseline = TRUE)
+  })
+
+  expect_error(select_training(x, "mini", k = 5L),
+               "The targets were baseline-corrected", class = "horizons_error_input")
+
+})
+
+test_that("targets short of the library's range search the overlap, uncached, and warn coverage", {
 
   m <- use_mini()
   x <- mini_targets(m$pool, wn = seq(700, 630, by = -2))
 
   expect_warning(
     out <- select_training(x, "mini", k = 5L),
-    "short of the library's range", class = "horizons_select_warning"
+    "short of the library's range", class = "horizons_warning_coverage"
   )
 
   expect_identical(out$selection$search$mode, "overlap")
@@ -162,13 +256,21 @@ test_that("targets short of the library by up to 50 cm-1 search the overlap, unc
 
 })
 
-test_that("targets short by more than 50 cm-1 are refused, naming the end", {
+test_that("targets short by more than 50 cm-1 are searched on the overlap too, not refused", {
 
+  ## 60 cm-1 short at the low end, which was refused until the search took
+  ## any overlap: the warning names the shortfall and what was searched. The
+  ## overlap is 21 columns, so the window is narrowed to fit inside it.
   m <- use_mini()
   x <- mini_targets(m$pool, wn = seq(700, 660, by = -2))
 
-  expect_error(select_training(x, "mini", k = 5L),
-               class = "horizons_input_error", regexp = "low end")
+  w <- expect_warning(out <- select_training(x, "mini", k = 5L, window = 20),
+                      class = "horizons_warning_coverage")
+
+  expect_match(conditionMessage(w), "Short by 60 cm-1 at the low end", fixed = TRUE)
+  expect_match(conditionMessage(w), "from 660 to 700 cm-1", fixed = TRUE)
+  expect_identical(out$selection$search$mode, "overlap")
+  expect_equal(out$selection$search$missing[["low"]], 60)
 
 })
 
@@ -289,7 +391,7 @@ test_that("a library whose default space cannot be built is still cached, with a
 
   ## Assert: the build failed for the reason arranged, not another; the
   ## library is built and cached; its space is left to the first draw
-  expect_match(conditionMessage(w), "is wider than the 16 columns of the spectra", fixed = TRUE)
+  expect_match(conditionMessage(w), "filter length w must be lower than ncol(X)", fixed = TRUE)
   expect_s3_class(res$pool, "horizons_data")
   expect_true(file.exists(file.path(cache, "mini_v0.qs2")))
   expect_length(space_files(cache), 0L)

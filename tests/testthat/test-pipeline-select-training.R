@@ -210,6 +210,91 @@ test_that("select_training() returns the pool's log", {
 })
 
 
+test_that("a window that does not fit in the stretch of the library the targets cover is refused, in cm-1", {
+
+  ## Targets over 4000 to 3984 cm-1 cover five of the pool's 4 cm-1 columns,
+  ## and the default 40 cm-1 window is 11 points there; prospectr needs
+  ## fewer points than columns
+  fx      <- select_fixture(n_pool = 60)
+  targets <- make_axis_object(seq(4000, 3984, by = -8), n = 4L, prefix = "N")
+
+  err <- expect_error(suppressWarnings(select_training(targets, fx$pool, k = 5, properties = "clay")),
+                      class = "horizons_error_input")
+  msg <- gsub("\\s+", " ", conditionMessage(err))
+
+  expect_identical(rlang::call_name(err$call), "select_training")
+  expect_match(msg, "A `window` of 40 cm⁻¹ does not fit in the 16 cm⁻¹ of the library the targets cover", fixed = TRUE)
+  expect_match(msg, "5 columns from 3984 to 4000", fixed = TRUE)
+
+  ## A window exactly as many points as the overlap has columns is refused
+  ## too: targets over 4000 to 3960 cover 11 columns, the window's 11 points
+  exact <- make_axis_object(seq(4000, 3960, by = -8), n = 4L, prefix = "E")
+  expect_error(suppressWarnings(select_training(exact, fx$pool, k = 5, properties = "clay")),
+               "does not fit in the 40 cm⁻¹ of the library the targets cover", class = "horizons_error_input")
+
+  ## A window that fits the overlap runs: 8 cm-1 is 3 points there
+  expect_s3_class(suppressWarnings(select_training(targets, fx$pool, k = 5, properties = "clay",
+                                                   window = 8, poly = 1L)),
+                  "horizons_data")
+
+})
+
+
+test_that("select_training() writes its coverage warning to the log before raising it, once", {
+
+  ## Targets trimmed to 1000-4000: the search is the overlap, 400 cm-1 short
+  ## at the low end, which the 50 cm-1 limit used to refuse
+  fx <- select_fixture(n_pool = 60, target_range = c(4000, 1000))
+
+  warned <- list()
+  out <- withCallingHandlers(
+    select_training(fx$targets, fx$pool, k = 5, properties = "clay"),
+    horizons_warning = function(w) {
+      warned[[length(warned) + 1L]] <<- w
+      invokeRestart("muffleWarning")
+    }
+  )
+
+  ## One warning, carrying the row it wrote
+  expect_length(warned, 1L)
+  expect_s3_class(warned[[1]], "horizons_warning_coverage")
+  expect_match(conditionMessage(warned[[1]]), "Short by 400 cm-1 at the low end", fixed = TRUE)
+
+  ## The row is on the object, after the pool's
+  row <- out$log[out$log$verb == "select_training", ]
+  expect_identical(nrow(row), 1L)
+  expect_identical(row$type, "warning")
+  expect_identical(row$topic, "coverage")
+  expect_identical(warned[[1]]$log, row)
+
+  ## Its ids are the library columns the search left out, 600 to 996 cm-1
+  left_out <- paste0("wn_", seq(996, 600, by = -4))
+  expect_setequal(row$ids[[1]], left_out)
+  expect_identical(row$n, length(left_out))
+
+  ## The record does not depend on the signal
+  quiet <- suppressWarnings(select_training(fx$targets, fx$pool, k = 5, properties = "clay"))
+  expect_identical(quiet$log, out$log)
+
+})
+
+
+test_that("select_training() under warn = 2 ends in one error that keeps the selection", {
+
+  fx <- select_fixture(n_pool = 60, target_range = c(4000, 1000))
+
+  withr::local_options(warn = 2)
+
+  err <- expect_error(select_training(fx$targets, fx$pool, k = 5, properties = "clay"),
+                      class = "horizons_error_promoted_warnings")
+
+  expect_s3_class(err$object, "horizons_data")
+  expect_identical(err$log$topic, "coverage")
+  expect_identical(err$object$log[err$object$log$verb == "select_training", ]$topic, "coverage")
+
+})
+
+
 test_that("select_training() refuses a pool that carries state from later verbs", {
 
   fx <- select_fixture(n_pool = 60)
@@ -360,6 +445,53 @@ test_that("select_training() refuses a pool that fails the base contract", {
 })
 
 
+test_that("select_training() refuses a target axis it cannot search, before the library resolves", {
+
+  fx <- select_fixture(n_pool = 60)
+
+  one    <- make_axis_object(4000, prefix = "T")
+  gapped <- seq(4000, 600, by = -8)
+  gapped <- make_axis_object(gapped[!(gapped >= 1580 & gapped <= 1720)], prefix = "H")
+
+  ## The targets' axis needs nothing from the library, so a registered
+  ## library is not fetched for targets the verb would refuse
+  local_mocked_bindings(resolve_source = function(...) stop("the library was resolved"))
+
+  err <- expect_error(select_training(one, fx$pool, k = 5),
+                      regexp = "at least two wavenumbers", class = "horizons_error_input")
+  expect_match(conditionMessage(err), "`x`, the targets", fixed = TRUE)
+  expect_identical(rlang::call_name(err$call), "select_training")
+
+  err <- expect_error(select_training(gapped, "kssl", k = 5),
+                      regexp = "gap", class = "horizons_error_input")
+  expect_match(conditionMessage(err), "`x`, the targets", fixed = TRUE)
+  expect_match(conditionMessage(err), "mask", fixed = TRUE)
+
+})
+
+
+test_that("select_training() refuses a library axis it cannot search, naming library", {
+
+  fx <- select_fixture(n_pool = 60)
+
+  one    <- make_axis_object(4000, n = 12L, prefix = "L", clay = TRUE)
+  gapped <- seq(4000, 600, by = -4)
+  gapped <- make_axis_object(gapped[!(gapped >= 1580 & gapped <= 1720)], n = 12L,
+                             prefix = "G", clay = TRUE)
+
+  err <- expect_error(select_training(fx$targets, one, k = 5),
+                      regexp = "at least two wavenumbers", class = "horizons_error_input")
+  expect_match(conditionMessage(err), "`library`, the pool", fixed = TRUE)
+  expect_identical(rlang::call_name(err$call), "select_training")
+
+  err <- expect_error(select_training(fx$targets, gapped, k = 5),
+                      regexp = "1576|1724", class = "horizons_error_input")
+  expect_match(conditionMessage(err), "`library`, the pool", fixed = TRUE)
+  expect_match(conditionMessage(err), "mask", fixed = TRUE)
+
+})
+
+
 test_that("select_training() refuses a pool that is itself a selection", {
 
   fx    <- select_fixture(n_pool = 60)
@@ -467,7 +599,7 @@ test_that("the resemblance check is seeded and leaves the caller's RNG alone", {
   ## Arrange: a pool over the 2,000-row reference cap would be slow to build,
   ## so exercise the helper directly on a pool that is over it.
   fx <- select_fixture(n_pool = 60)
-  rc <- reconcile_axes(fx$pool, fx$targets)
+  rc <- pool_on_targets(fx)
   tm <- predictor_matrix(fx$targets)
   sp <- build_similarity_space(rc$matrix, rc$wavenumbers, ncomp = 4L)
   st <- project_similarity(sp, tm$matrix, tm$wavenumbers)
@@ -882,7 +1014,7 @@ test_that("at k = 1 batch and global record every twin in the measured pool, wit
   ## clay and 8 of the 32 for oc.
 
   fx <- select_fixture(n_pool = 60, seed = 3, n_replicates = 3)
-  rc <- reconcile_axes(fx$pool, fx$targets)
+  rc <- pool_on_targets(fx)
   tm <- predictor_matrix(fx$targets)
   sp <- build_similarity_space(rc$matrix, rc$wavenumbers, sdev_floor = SELECT_SDEV_FLOOR)
   St <- project_similarity(sp, tm$matrix, tm$wavenumbers)
@@ -1081,7 +1213,10 @@ test_that("the record carries settings, reconciliation, pool identity and distan
   expect_identical(s$settings$metric, "euclidean")
   expect_identical(s$settings$space,  "pca")
   expect_true(s$settings$ncomp_retained >= 1L)
-  expect_identical(s$reconciliation$operation, "resampled")
+  expect_identical(s$reconciliation$operation, "subset")
+  expect_identical(s$reconciliation$n_shared, length(fx$target_wn))
+  expect_identical(s$reconciliation$shared_range, c(600, 4000))
+  expect_identical(s$reconciliation$target_only, numeric(0))
   expect_identical(s$pool$n_rows, 100L)
   expect_match(s$pool$id_hash, "^[0-9a-f]+$")
   expect_named(s$target_distances, c("target_id", "property", "space", "nearest", "mean_k"))
@@ -1148,11 +1283,12 @@ test_that("the id hashes take radix order under a collation that orders case oth
 })
 
 
-## The standardization record describes the returned axis (#90). The fixture
-## already sits on the two lattices, so standardize() records each grid
-## without re-interpolating.
+## The training set is the library's own columns at the wavenumbers the
+## targets share (#236), and its standardization record describes those
+## columns (#90). The fixture already sits on the two lattices, so
+## standardize() records each grid without re-interpolating.
 
-test_that("a pool resampled onto the targets' grid records that grid, and the pool's (#90)", {
+test_that("targets on a coarser grid get the library's own values there, and the record says step 8 (#236, #90)", {
 
   fx <- select_fixture(n_pool = 100)
 
@@ -1165,7 +1301,16 @@ test_that("a pool resampled onto the targets' grid records that grid, and the po
   rec <- out$provenance$standardization
   wn  <- predictor_matrix(out)$wavenumbers
 
-  expect_identical(out$selection$reconciliation$operation, "resampled")
+  ## Every target column is shared, so nothing is warned and none is missing
+  expect_identical(out$selection$reconciliation$operation, "subset")
+  expect_identical(out$selection$reconciliation$n_shared, 426L)
+  expect_identical(out$selection$reconciliation$target_only, numeric(0))
+
+  ## The library's own values at the targets' wavenumbers, not a spline's
+  pred <- function(x) x$data$role_map$variable[x$data$role_map$role == "predictor"]
+  expect_identical(pred(out), pred(targets))
+  expect_identical(predictor_matrix(out)$matrix,
+                   predictor_matrix(subset_rows(pool, out$data$analysis$sample_id))$matrix[, match(pred(out), pred(pool))])
 
   ## The recorded step is the axis's spacing, the targets' 8, not the pool's 4
   expect_equal(rec$grid$step, stats::median(abs(diff(wn))))
@@ -1173,25 +1318,20 @@ test_that("a pool resampled onto the targets' grid records that grid, and the po
   expect_identical(rec$grid, targets$provenance$standardization$grid)
   expect_identical(rec$n_wavelengths, length(wn))
   expect_equal(rec$wavelength_range, range(wn))
-  expect_true(rec$resampled)
 
   ## So axis_spacing_cm()'s fallback agrees with the axis it reads first
   expect_equal(rec$grid$step, axis_spacing_cm(out))
 
-  ## The move is recorded, with the pool's own record and its 4 cm-1 grid;
-  ## the targets sit inside the pool, so nothing was clamped
-  expect_identical(rec$reconciliation$operation, "resampled")
-  expect_true("clamp" %in% names(rec$reconciliation))
-  expect_null(rec$reconciliation$clamp)
-  expect_identical(rec$reconciliation$pool, pool$provenance$standardization)
-  expect_equal(rec$reconciliation$pool$grid$step, 4)
+  ## Nothing was moved, so there is no record of a move
+  expect_false("reconciliation" %in% names(rec))
 
   ## The standardize() arguments that produced the values stay the pool's,
-  ## and so does the time they were applied
+  ## and so do whether it resampled and when
   expect_identical(rec$resample, 4)
   expect_identical(rec$trim, c(600, 4000))
   expect_identical(rec$remove_water, FALSE)
   expect_identical(rec$baseline, FALSE)
+  expect_identical(rec$resampled, pool$provenance$standardization$resampled)
   expect_identical(rec$applied_at, pool$provenance$standardization$applied_at)
 
 })
@@ -1214,12 +1354,14 @@ test_that("a pool already on the targets' grid keeps its standardization record 
 })
 
 
-test_that("targets with no grid record give the resampled pool a NULL grid, and an unstandardized pool no record (#90)", {
+test_that("the record describes the columns returned whatever the targets' record, and an unstandardized pool gives none (#90)", {
 
   fx <- select_fixture(n_pool = 100)
 
-  ## The targets' axis is the 8 cm-1 lattice, but resample = NULL records
-  ## no grid for it, so there is none to copy
+  ## The targets' axis is the 8 cm-1 lattice, but resample = NULL records no
+  ## grid for it. The columns returned are the library's at those
+  ## wavenumbers, evenly spaced on a library that had a grid, so the record
+  ## gives them one.
   utils::capture.output({
     pool    <- standardize(fx$pool,    resample = 4,    trim = c(600, 4000))
     targets <- standardize(fx$targets, resample = NULL, trim = c(600, 4000))
@@ -1227,10 +1369,9 @@ test_that("targets with no grid record give the resampled pool a NULL grid, and 
 
   rec <- select_training(targets, pool, k = 10)$provenance$standardization
 
-  expect_true("grid" %in% names(rec))
-  expect_null(rec$grid)
+  expect_null(targets$provenance$standardization$grid)
+  expect_identical(rec$grid, list(min = 600, max = 4000, step = 8, n = 426L))
   expect_identical(rec$n_wavelengths, fx$targets$data$n_predictors)
-  expect_equal(rec$reconciliation$pool$grid$step, 4)
 
   ## A pool standardize() never saw is not marked standardized
   expect_null(quiet_select(fx, k = 10)$provenance$standardization)
@@ -1238,14 +1379,13 @@ test_that("targets with no grid record give the resampled pool a NULL grid, and 
 })
 
 
-test_that("targets on an instrument's own axis give the resampled pool a NULL grid, and the clamp (#90)", {
+test_that("targets on an instrument's own axis share no column and are refused, naming the standardize() call (#236)", {
 
   fx <- select_fixture(n_pool = 100)
 
-  ## Off-grid, 599.74 + 1.93 k: on no canonical grid, and starting 0.26
-  ## cm-1 below the pool's 600, inside half its 4 cm-1 spacing, so the lowest
-  ## column is taken at the pool's endpoint and the clamp is recorded
-  offgrid_wn <- rev(599.74 + 1.93 * (0:1761))
+  ## Off-grid, 599.7431 + 1.928571 k: on no canonical grid, and no column
+  ## named as the pool's 4 cm-1 grid names them
+  offgrid_wn <- rev(599.7431 + 1.928571 * (0:1762))
 
   set.seed(3)
   m <- rbind(gaussian_family(4, offgrid_wn, centres = c(3400, 2920, 1630, 1030)),
@@ -1261,34 +1401,324 @@ test_that("targets on an instrument's own axis give the resampled pool a NULL gr
     targets <- standardize(spectra(tbl), resample = NULL, trim = NULL)
   })
 
-  ## The clamp and the finer targets both warn; the record is under test here
-  warned <- character()
-  out <- withCallingHandlers(
-    select_training(targets, pool, k = 10),
-    horizons_select_warning = function(w) {
-      warned <<- c(warned, conditionMessage(w))
-      invokeRestart("muffleWarning")
-    }
-  )
+  err <- expect_error(select_training(targets, pool, k = 10), class = "horizons_error_input")
+  expect_identical(rlang::call_name(err$call), "select_training")
+
+  ## Standardized already, so the remedy carries force = TRUE
+  expect_match(gsub("\\s+", " ", conditionMessage(err)),
+               "standardize(x, resample = 4, trim = c(600, 4000), force = TRUE)", fixed = TRUE)
+
+  expect_snapshot(select_training(targets, pool, k = 10), error = TRUE)
+
+})
+
+
+test_that("targets on an instrument's own axis that share a few columns by coincidence are refused (#236)", {
+
+  ## 599.74 + 1.93 k shares four column names with the pool's 4 cm-1 grid
+  ## (1144, 1916, 2688 and 3460), which without the alignment rule would be a
+  ## training set of four columns behind a coverage warning
+  fx <- select_fixture(n_pool = 60)
+
+  coincident <- rev(599.74 + 1.93 * (0:1761))
+  set.seed(3)
+  m <- gaussian_family(4, coincident, centres = c(3400, 2920, 1630, 1030))
+  colnames(m) <- paste0("wn_", coincident)
+  utils::capture.output(targets <- spectra(dplyr::bind_cols(tibble::tibble(sample_id = sprintf("C%02d", 1:4)),
+                                                            tibble::as_tibble(m))))
+
+  expect_length(intersect(colnames(m), fx$pool$data$role_map$variable), 4L)
+
+  err <- expect_error(select_training(targets, fx$pool, k = 5), class = "horizons_error_input")
+  msg <- gsub("\\s+", " ", conditionMessage(err))
+
+  expect_identical(rlang::call_name(err$call), "select_training")
+  expect_match(msg, "`x`'s wavenumbers are not on a grid aligned with `library`'s", fixed = TRUE)
+  expect_match(msg, "4 of the targets' 1761 columns inside the library's range coincide", fixed = TRUE)
+
+})
+
+
+test_that("the grid door's remedy asks for the library's baseline, so following it passes (#236, #107)", {
+
+  ## A hull-corrected library, and targets on an instrument's axis spanning
+  ## it: the call that puts them on its grid has to correct them too, or it
+  ## leads to the standardization door
+  fx <- select_fixture(n_pool = 60)
+  utils::capture.output(pool <- standardize(fx$pool, resample = 4, baseline = TRUE))
+  targets <- make_axis_object(rev(598.1 + 1.93 * (0:1764)), n = 4L, prefix = "I")
+
+  err <- expect_error(select_training(targets, pool, k = 5), class = "horizons_error_input")
+  expect_match(gsub("\\s+", " ", conditionMessage(err)),
+               "`standardize(x, resample = 4, trim = c(600, 4000), baseline = TRUE)`", fixed = TRUE)
+
+  utils::capture.output(on_grid <- standardize(targets, resample = 4, trim = c(600, 4000), baseline = TRUE))
+  expect_s3_class(select_training(on_grid, pool, k = 5), "horizons_data")
+
+})
+
+
+test_that("a library on an instrument's own axis is the side named in the remedy (#236)", {
+
+  ## No change to the targets can put them on a grid the library is not on,
+  ## so the refusal names the library's call: on the targets' 4 cm-1 step
+  ## when they have one, and both sides' when neither has
+  library <- make_axis_object(rev(599.7431 + 1.928571 * (0:1762)), n = 40L, prefix = "L", clay = TRUE)
+  utils::capture.output(targets <- standardize(make_axis_object(seq(4000, 600, by = -4), n = 4L, prefix = "T"),
+                                               resample = 4))
+
+  err <- expect_error(select_training(targets, library, k = 5), class = "horizons_error_input")
+  msg <- gsub("\\s+", " ", conditionMessage(err))
+
+  expect_match(msg, "The library is on no grid of its own", fixed = TRUE)
+  expect_match(msg, "Put it on one: `standardize(library, resample = 4, trim = c(600, 3996))`", fixed = TRUE)
+  expect_false(grepl("standardize(x,", msg, fixed = TRUE))
+
+  ## Following it is accepted
+  utils::capture.output(library_on <- standardize(library, resample = 4, trim = c(600, 3996)))
+  expect_s3_class(suppressWarnings(select_training(targets, library_on, k = 5)), "horizons_data")
+
+  ## Neither on a grid: both calls, on a common whole-number step
+  off <- make_axis_object(rev(599.74 + 1.93 * (0:1761)), n = 4L, prefix = "O")
+  err <- expect_error(select_training(off, library, k = 5), class = "horizons_error_input")
+  expect_match(gsub("\\s+", " ", conditionMessage(err)),
+               "Put it and the targets on one: `standardize(library, resample = 2, trim = c(600, 3996))` and `standardize(x, resample = 2, trim = c(600, 3996))`",
+               fixed = TRUE)
+
+})
+
+
+test_that("targets finer than the library get its own columns, with one coverage warning naming the rest (#236)", {
+
+  fx      <- select_fixture(n_pool = 60)
+  targets <- make_axis_object(seq(4000, 600, by = -2), n = 4L, prefix = "F")
+
+  w <- expect_warning(out <- select_training(targets, fx$pool, k = 5, properties = "clay"),
+                      class = "horizons_warning_coverage")
+
+  pred <- function(x) x$data$role_map$variable[x$data$role_map$role == "predictor"]
+
+  ## The pool's whole axis comes back, as it was: nothing interpolated up
+  expect_identical(pred(out), pred(fx$pool))
+  expect_identical(out$selection$reconciliation$operation, "none")
+  expect_identical(predictor_matrix(out)$matrix,
+                   predictor_matrix(subset_rows(fx$pool, out$data$analysis$sample_id))$matrix)
+
+  ## The 850 target columns between the pool's are named, in the record and
+  ## on the log row the warning carries
+  only <- setdiff(pred(targets), pred(fx$pool))
+  expect_length(only, 850L)
+  expect_identical(out$selection$reconciliation$target_only, as.numeric(sub("^wn_", "", only)))
+
+  msg <- gsub("\\s+", " ", conditionMessage(w))
+  expect_match(msg, "850 of the targets' 1701 wavenumber columns are not in the library", fixed = TRUE)
+  expect_match(msg, "850 fall between the library's columns, which are 4 cm-1 apart", fixed = TRUE)
+  expect_false(grepl("outside", msg))
+  expect_identical(w$log$ids[[1]], only)
+  expect_identical(w$log$n, 850L)
+
+})
+
+
+test_that("targets wider than the library get the columns they share, with the rest named (#236)", {
+
+  ## 4096 to 504 at 8 cm-1 against a pool at 600 to 4000: twelve columns past
+  ## each end, which was a refusal
+  fx <- select_fixture(n_pool = 60, target_range = c(4096, 504))
+
+  w <- expect_warning(out <- select_training(fx$targets, fx$pool, k = 5, properties = "clay"),
+                      class = "horizons_warning_coverage")
+
+  wn <- predictor_matrix(out)$wavenumbers
+  expect_identical(range(wn), c(600, 4000))
+  expect_identical(wn, seq(4000, 600, by = -8))
+  expect_identical(sort(out$selection$reconciliation$target_only),
+                   sort(c(seq(4096, 4008, by = -8), seq(592, 504, by = -8))))
+
+  msg <- gsub("\\s+", " ", conditionMessage(w))
+  expect_match(msg, "24 of the targets' 450 wavenumber columns are not in the library", fixed = TRUE)
+  expect_match(msg, "24 lie outside the library's 600 to 4000 cm-1", fixed = TRUE)
+
+})
+
+
+test_that("targets on an offset step get the columns both grids share, at their common step (#236)", {
+
+  ## Targets at 6 cm-1 against a pool at 4: they share every 12 cm-1
+  fx <- select_fixture(n_pool = 60)
+
+  utils::capture.output(pool <- standardize(fx$pool, resample = 4, trim = c(600, 4000)))
+  targets <- make_axis_object(seq(3996, 600, by = -6), n = 4L, prefix = "S")
+
+  w <- expect_warning(out <- select_training(targets, pool, k = 5, properties = "clay"),
+                      class = "horizons_warning_coverage")
+
+  wn <- predictor_matrix(out)$wavenumbers
+  expect_identical(wn, seq(3996, 600, by = -12))
 
   rec <- out$provenance$standardization
-  wn  <- predictor_matrix(out)$wavenumbers
+  expect_identical(rec$grid, list(min = 600, max = 3996, step = 12, n = length(wn)))
+  expect_identical(rec$resample, 4)
+  expect_match(gsub("\\s+", " ", conditionMessage(w)),
+               "standardize the targets at a multiple of 4 cm-1 to share every column", fixed = TRUE)
 
-  expect_true(any(grepl("overshoot", warned)))
+})
 
-  expect_true("grid" %in% names(rec))
-  expect_null(rec$grid)
-  expect_identical(rec$n_wavelengths, length(wn))
-  expect_identical(rec$n_wavelengths, length(offgrid_wn))
-  expect_equal(rec$wavelength_range, range(wn))
-  expect_equal(rec$wavelength_range, c(599.74, max(offgrid_wn)))
 
-  ## The lowest column holds the pool's value at 600, 0.26 cm-1 from the
-  ## 599.74 it is named for, and the axis record says so
-  expect_identical(rec$reconciliation$clamp, out$selection$reconciliation$clamp)
-  expect_equal(rec$reconciliation$clamp$low, 0.26)
-  expect_equal(rec$reconciliation$clamp$high, 0)
-  expect_equal(rec$reconciliation$pool$grid$step, 4)
+## Standardized alike (#107): the training set is the library's spectra as
+## standardize() left them, so a hull on one side only, or hulls fitted over
+## different ranges, is refused before any work.
+
+test_that("a baseline on one side only is refused, either way round (#107)", {
+
+  fx <- select_fixture(n_pool = 60)
+
+  utils::capture.output({
+    pool_hull    <- standardize(fx$pool,    resample = 4, baseline = TRUE)
+    pool_plain   <- standardize(fx$pool,    resample = 4)
+    target_hull  <- standardize(fx$targets, resample = 8, baseline = TRUE)
+    target_plain <- standardize(fx$targets, resample = 8)
+  })
+
+  ## The library corrected, the targets not
+  err <- expect_error(select_training(target_plain, pool_hull, k = 5), class = "horizons_error_input")
+  msg <- gsub("\\s+", " ", conditionMessage(err))
+
+  expect_identical(rlang::call_name(err$call), "select_training")
+  expect_match(msg, "were standardized differently", fixed = TRUE)
+  expect_match(msg, "The library was baseline-corrected", fixed = TRUE)
+  expect_match(msg, "standardize(x, resample = 8, trim = c(600, 4000), baseline = TRUE, force = TRUE)", fixed = TRUE)
+  ## The library-side remedy starts from spectra(): standardizing the corrected
+  ## library again would record no baseline over values that still carry it.
+  ## It keeps the library's step, which resample's default would change.
+  expect_match(msg, "Or standardize the library from `spectra()` without `baseline`, `standardize(library, resample = 4, trim = c(600, 4000))`; a hull already subtracted cannot be put back", fixed = TRUE)
+
+  ## The targets corrected, the library not
+  err <- expect_error(select_training(target_hull, pool_plain, k = 5), class = "horizons_error_input")
+  msg <- gsub("\\s+", " ", conditionMessage(err))
+
+  expect_match(msg, "The targets were baseline-corrected", fixed = TRUE)
+  expect_match(msg, "a hull already subtracted cannot be put back", fixed = TRUE)
+  expect_match(msg, "`standardize(library, resample = 4, trim = c(600, 4000), baseline = TRUE, force = TRUE)`", fixed = TRUE)
+
+  ## Corrected on both sides over the same range, or on neither, runs
+  expect_s3_class(select_training(target_hull, pool_hull, k = 5), "horizons_data")
+  expect_s3_class(select_training(target_plain, pool_plain, k = 5), "horizons_data")
+
+})
+
+
+test_that("a side never standardized counts as not baseline-corrected (#107)", {
+
+  fx <- select_fixture(n_pool = 60)
+
+  utils::capture.output({
+    pool_hull   <- standardize(fx$pool,    resample = 4, baseline = TRUE)
+    target_hull <- standardize(fx$targets, resample = 8, baseline = TRUE)
+  })
+
+  expect_null(fx$pool$provenance$standardization)
+  expect_null(fx$targets$provenance$standardization)
+
+  expect_error(select_training(target_hull, fx$pool, k = 5),
+               "The targets were baseline-corrected", class = "horizons_error_input")
+  expect_error(select_training(fx$targets, pool_hull, k = 5),
+               "The library was baseline-corrected", class = "horizons_error_input")
+
+  ## Unstandardized targets need no force = TRUE to be corrected
+  err <- expect_error(select_training(fx$targets, pool_hull, k = 5), class = "horizons_error_input")
+  expect_match(gsub("\\s+", " ", conditionMessage(err)),
+               "standardize(x, resample = 8, trim = c(600, 4000), baseline = TRUE)`", fixed = TRUE)
+
+})
+
+
+test_that("hulls fitted over ranges an end apart by a step or more are refused (#107)", {
+
+  fx <- select_fixture(n_pool = 60)
+
+  utils::capture.output({
+    pool    <- standardize(fx$pool,    resample = 4, baseline = TRUE)
+    trimmed <- standardize(fx$targets, resample = 8, trim = c(1000, 3000), baseline = TRUE)
+    one_off <- standardize(fx$targets, resample = 8, trim = c(608, 4000),  baseline = TRUE)
+  })
+
+  err <- expect_error(select_training(trimmed, pool, k = 5), class = "horizons_error_input")
+  msg <- gsub("\\s+", " ", conditionMessage(err))
+
+  expect_match(msg, "the library's hull over 600 to 4000 cm-1 and the targets' over 1000 to 3000 cm-1", fixed = TRUE)
+  expect_snapshot(select_training(trimmed, pool, k = 5), error = TRUE)
+
+  ## One end off by the coarser grid's step, 8 cm-1, is a different hull
+  expect_error(select_training(one_off, pool, k = 5),
+               "hulls are pinned at different ends", class = "horizons_error_input")
+
+})
+
+
+test_that("hulls over ranges an end apart by less than the coarser step pass (#107)", {
+
+  ## A 6 cm-1 grid over 600 to 4000 ends at 3996: 4 cm-1 short of the 4 cm-1
+  ## library's end, under the coarser 6 cm-1 step, so it is the same hull as
+  ## close as the two grids land. It shares every 12 cm-1, so it warns.
+  fx <- select_fixture(n_pool = 60)
+
+  utils::capture.output({
+    pool    <- standardize(fx$pool,    resample = 4, baseline = TRUE)
+    targets <- standardize(fx$targets, resample = 6, baseline = TRUE)
+  })
+
+  expect_identical(targets$provenance$standardization$wavelength_range, c(600, 3996))
+
+  expect_warning(out <- select_training(targets, pool, k = 5), class = "horizons_warning_coverage")
+  expect_s3_class(out, "horizons_data")
+
+})
+
+
+test_that("hulls over different ranges name the range both reach, which a library file can meet too (#107)", {
+
+  ## Targets from an instrument whose axis stops at 601.67 and 3998.47,
+  ## standardized exactly as the 600 to 4000 library was: the grid points
+  ## 600 and 4000 lie outside their data, so their hull runs 604 to 3996.
+  ## Asking them to match the library's 600 to 4000 cannot be met; fitting
+  ## the library's hull over the range both reach can.
+  fx <- select_fixture(n_pool = 120)
+
+  tm     <- predictor_matrix(fx$targets)
+  raw_wn <- round(rev(599.74 + 1.93 * (0:1761)), 2)
+  raw_wn <- raw_wn[raw_wn >= 600 & raw_wn <= 4000]
+  rs     <- resample_spectra(tm$matrix, tm$wavenumbers, new_wav = raw_wn)
+  m      <- rs$matrix
+  colnames(m) <- paste0("wn_", rs$wavelengths)
+
+  utils::capture.output({
+    raw     <- spectra(dplyr::bind_cols(tibble::tibble(sample_id = rownames(tm$matrix)), tibble::as_tibble(m)))
+    targets <- suppressWarnings(standardize(raw, resample = 4, trim = c(600, 4000), baseline = TRUE))
+    pool    <- standardize(fx$pool, resample = 4, trim = c(600, 4000), baseline = TRUE)
+  })
+
+  expect_identical(targets$provenance$standardization$wavelength_range, c(604, 3996))
+
+  err <- expect_error(select_training(targets, pool, k = 10, properties = "clay"), class = "horizons_error_input")
+  msg <- gsub("\\s+", " ", conditionMessage(err))
+
+  expect_match(msg, "Fit both hulls over the range both reach, 604 to 3996 cm-1", fixed = TRUE)
+  expect_match(msg, "the library with `standardize(library, resample = 4, trim = c(604, 3996), baseline = TRUE)`", fixed = TRUE)
+
+  ## The targets already fit theirs there, so they are not asked to move
+  expect_false(grepl("the targets with", msg, fixed = TRUE))
+
+  ## A library file is the user's to standardize again, so it is offered the
+  ## same remedy
+  path <- file.path(withr::local_tempdir(), "library.qs2")
+  qs2::qs_save(pool, path)
+  err <- expect_error(select_training(targets, path, k = 10, properties = "clay"), class = "horizons_error_input")
+  expect_match(gsub("\\s+", " ", conditionMessage(err)), "the library with `standardize(library, resample = 4", fixed = TRUE)
+
+  ## Following it from spectra() is accepted
+  utils::capture.output(pool_both <- standardize(fx$pool, resample = 4, trim = c(604, 3996), baseline = TRUE))
+  expect_s3_class(select_training(targets, pool_both, k = 10, properties = "clay"), "horizons_data")
 
 })
 
@@ -1356,13 +1786,18 @@ test_that("a PLS space records and prints that it selected on the pool's own res
 })
 
 
-test_that("the return validates and runs through the ordinary chain", {
+test_that("the return validates and runs through the ordinary chain, and predicts targets with columns it lacks", {
 
   skip_unless_slow_tier()
   skip_on_cran()
 
-  fx  <- select_fixture(n_pool = 300)
-  out <- quiet_select(fx, k = 30, properties = "clay")
+  ## Targets 4096 to 504 cm-1 against a pool at 600 to 4000: the training
+  ## set has the 426 columns they share, and the targets carry 24 more,
+  ## which predict() must leave alone (#236)
+  fx <- select_fixture(n_pool = 300, target_range = c(4096, 504))
+
+  expect_warning(out <- quiet_select(fx, k = 30, properties = "clay"),
+                 class = "horizons_warning_coverage")
 
   expect_no_error(validate_horizons_data(out))
 
@@ -1387,14 +1822,24 @@ test_that("the return validates and runs through the ordinary chain", {
   ## The targets carry none of the provenance columns (.drawn_by,
   ## .min_distance, .group) the training set does. predict() must not
   ## require them: the recipe's meta role is not baked (2026-09-21).
-  f <- suppressWarnings(fit(ev, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE))
+  ## The drawn set leaves 29 calibration rows, so the floor is lowered for the
+  ## applicability domain to run
+  f <- suppressWarnings(fit(ev, n_best = 1L, compute_uq = FALSE, compute_ad = TRUE,
+                            control = control_horizons(min_calib_rows = 20L)))
   expect_s3_class(f, "horizons_fit")
   expect_identical(f$models$results$status, "success")
   expect_false(any(c(".drawn_by", ".min_distance", ".group") %in% names(fx$targets$data$analysis)))
 
+  ## The applicability domain ran, so its bake and distance meet the
+  ## targets' extra columns too
+  expect_false(is.null(f$models$ad[[f$models$best_config]]))
+  extra <- setdiff(names(fx$targets$data$analysis), f$models$predictor_schema)
+  expect_length(setdiff(extra, "sample_id"), 24L)
+
   p <- predict(f, fx$targets, interval = FALSE)
   expect_identical(nrow(p), fx$targets$data$n_rows)
   expect_true(all(is.finite(p$.pred)))
+  expect_true(all(is.finite(p$.ad_distance)))
 
 })
 
@@ -1641,23 +2086,5 @@ test_that("select_training() refuses to return a record of the wrong shape", {
     expect_error(quiet_select(fx, k = 5), "selection\\$groups",
                  class = "horizons_error_validation")
   )
-
-})
-
-
-test_that("rebuild_predictors() refuses a matrix whose rows are not the analysis rows", {
-
-  fx <- select_fixture(n_pool = 60)
-  pm <- predictor_matrix(fx$pool)
-  n  <- nrow(pm$matrix)
-
-  expect_error(rebuild_predictors(fx$pool, pm$matrix[rev(seq_len(n)), ], pm$wavenumbers),
-               "Reconciled spectra", class = "horizons_error_internal")
-
-  expect_error(rebuild_predictors(fx$pool, pm$matrix[-1, ], pm$wavenumbers),
-               "Got 59 rows for 60", class = "horizons_error_internal")
-
-  out <- rebuild_predictors(fx$pool, pm$matrix, pm$wavenumbers)
-  expect_identical(out$data$analysis$sample_id, fx$pool$data$analysis$sample_id)
 
 })

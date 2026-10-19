@@ -35,7 +35,8 @@
 #'    unless the object came from `select_training()`
 #'
 #' The selection record is a list with `settings` (every lever the draw used),
-#' `reconciliation` (how the drawn rows were brought onto the targets' axis),
+#' `reconciliation` (which of the targets' wavenumbers the training set has:
+#' the library's columns they share, and those the library lacks),
 #' `search` (the axis distances were measured on, and whether a cached space
 #' was used), `pool` (row count and an id hash of the source pool),
 #' `library` (where the library came from), `depth` (the depth restriction as

@@ -105,13 +105,6 @@ transform_similarity <- function(M, wn,
 
     }
 
-    if (window > ncol(M)) {
-
-      cli::cli_abort("{.arg window} ({window}) is wider than the {ncol(M)} column{?s} of the spectra",
-                     class = "horizons_input_error")
-
-    }
-
   }
 
   ids <- rownames(M)
@@ -428,7 +421,7 @@ pls_space_scores <- function(fit, X, k) {
 #' @description
 #' Applies the space's spectral transform to new rows and projects them with
 #' the pool's loadings. The rows must be on the wavenumbers the space was
-#' built on; that is what `reconcile_axes()` guarantees for a pool and its
+#' built on; that is what `search_axis()` guarantees for a library and its
 #' targets.
 #'
 #' @param space [horizons_similarity_space.] From `build_similarity_space()`.
@@ -453,8 +446,7 @@ project_similarity <- function(space, M, wn) {
 
     cli::cli_abort(c(
       "The rows are not on the wavenumbers the similarity space was built on",
-      "x" = "Space: {length(space$input_wavenumbers)} wavenumbers from {max(space$input_wavenumbers)} to {min(space$input_wavenumbers)}; rows: {length(wn)} from {max(wn)} to {min(wn)}",
-      "i" = "Reconcile the axes first ({.fn reconcile_axes})"
+      "x" = "Space: {length(space$input_wavenumbers)} wavenumbers from {max(space$input_wavenumbers)} to {min(space$input_wavenumbers)}; rows: {length(wn)} from {max(wn)} to {min(wn)}"
     ), class = "horizons_input_error")
 
   }

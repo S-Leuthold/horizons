@@ -31,7 +31,9 @@ select_training(
 \item{x}{\code{horizons_data.} The targets: the samples to be predicted. One
 row per sample, with finite spectra: the record names each target by its
 \code{sample_id}, so replicate scans that share one are refused and should be
-averaged first with \code{\link[=average]{average()}}.}
+averaged first with \code{\link[=average]{average()}}. On a grid that shares columns with the
+library's, as \code{\link[=standardize]{standardize()}} puts them (see "Two axes"), and
+standardized as the library was (see "Standardized alike").}
 
 \item{library}{\code{horizons_data} or \code{character}. The reference library:
 a \code{horizons_data} with one or more response columns (your own pool,
@@ -133,26 +135,24 @@ that is set. The control it ran with, defaults filled in, is recorded
 as \code{selection$settings$control}.}
 }
 \value{
-\code{horizons_data.} Rows drawn from \code{pool}, on the targets'
-wavenumber grid, with every response column the pool carried, three
-provenance columns with role \code{meta} (\code{.drawn_by}, \code{.min_distance},
-and \code{.group} except under \code{scope = "sample"}), and the record in
-\code{x$selection}. \code{provenance$standardization} describes the returned
-axis. When the pool was resampled onto the targets' grid, the pool's
-record is rewritten: \code{grid} is the targets' (\code{NULL} when they are not on
-a canonical grid, or when their recorded grid does not match their
-columns), \code{n_wavelengths} and \code{wavelength_range} are the new axis's, and
-\code{resampled} is \code{TRUE}, while the \code{standardize()} arguments (\code{resample},
-\code{trim}, \code{remove_water}, \code{baseline}) and \code{applied_at} stay the pool's,
-since they produced its values; so \code{resample} can differ from
-\code{grid$step}, and \code{trim} from \code{wavelength_range}. Its \code{reconciliation}
-entry records the move: \code{operation}, \code{clamp} (the overshoot at each end
-when an end column was taken at the pool's endpoint, else \code{NULL}) and
-\code{pool}, the pool's record as it was, carrying its original \code{grid}. That
-entry is the object's axis history and travels with its provenance; it
-is distinct from \code{x$selection$reconciliation}, the selection's record of
-how the two axes compared. A pool already on the targets' grid keeps its
-record unchanged, and a pool never standardized keeps none.
+\code{horizons_data.} Rows drawn from \code{pool}, on the library's own
+columns at the wavenumbers the targets share with it, with every
+response column the pool carried, three provenance columns with role
+\code{meta} (\code{.drawn_by}, \code{.min_distance}, and \code{.group} except under
+\code{scope = "sample"}), and the record in \code{x$selection}.
+\code{provenance$standardization} is the library's, describing the returned
+axis: when only some of the library's columns are returned (targets on a
+coarser or narrower grid), \code{n_wavelengths}, \code{wavelength_range} and \code{grid}
+describe the columns returned (\code{grid} is \code{NULL} when they are not evenly
+spaced, or the library was on no grid), while the \code{standardize()}
+arguments (\code{resample}, \code{trim}, \code{remove_water}, \code{baseline}), \code{resampled}
+and \code{applied_at} stay the library's, since they produced the values; so
+\code{resample} can differ from \code{grid$step}. A library never standardized has
+no record, and the training set gets none. \code{x$selection$reconciliation}
+records the columns returned: \code{operation} (\code{"none"} when every library
+column is returned, else \code{"subset"}), \code{n_shared}, \code{shared_range}, and
+\code{target_only}, the targets' wavenumbers the library lacks. \code{x$log} is the
+pool's, with a row for each \code{coverage} warning this call raised.
 }
 \description{
 Draws a training set from a reference pool (a spectral library with
@@ -211,19 +211,30 @@ training set by about 6 \% (see the design spec).
 space, on the library's grid: the targets are resampled onto it for the
 search only, so one fitted space serves every batch whatever its grid, and
 for a registered library or a library file that space is cached (see
-"The cached space"). The training set comes back on the targets' grid:
-only the drawn rows are resampled onto it, through the same routine
-\code{standardize()} uses, so the training set and the targets share one axis
-end to end and the whole library is never copied onto a batch's grid.
-\code{x$selection$search} records the search axis and
-\code{x$selection$reconciliation} the return.
+"The cached space"). The training set comes back on the library's own
+columns at the wavenumbers the targets share with it: a column is shared
+when the library has a predictor of the same name, and nothing is
+interpolated. Targets on a coarser canonical grid (4 or 8 cm-1 against a
+2 cm-1 library) share every one of their columns, so the training set
+comes back on their step. Target columns the library lacks (a wider range,
+a finer or offset step) are named in one \code{horizons_warning_coverage};
+\code{\link[=predict]{predict()}} uses only the columns the model was trained on, so the targets
+predict as they are. Targets that share no column with the library, or
+whose wavenumbers inside its range are not on a grid aligned with the
+library's (an instrument's own axis, which can share a few columns by
+coincidence), are refused, naming the \code{\link[=standardize]{standardize()}} call that puts them
+on the library's grid; for a registered library that is checked before
+the download. \code{x$selection$search} records the search axis
+and \code{x$selection$reconciliation} the columns returned.
 
 \strong{Coverage.} The targets should span the library's range. Within half
 the library's spacing, or less than one of their own grid steps (a coarse
 grid cannot land on 600 or 4000), they do, and the cached space is used.
-Short by up to 50 cm-1 at an end (an ATR crystal's cutoff, a trimmed noisy
-edge), the space is built fresh on the overlap, uncached, with a warning.
-Short by more, the verb stops and names the missing range.
+Short by more at an end, however much (an ATR crystal's cutoff, a trimmed
+noisy edge, a batch trimmed to one region), the space is built fresh on
+the library's columns inside the targets' range, uncached, with one
+\code{horizons_warning_coverage} saying what was missing and what was searched.
+A \code{window} that does not fit in that overlap is refused, in cm-1.
 
 \strong{The cached space.} A registered library's space at the default
 settings is built right after the library itself, at first use, and
@@ -233,18 +244,27 @@ then, one small file per setting under
 the same way, keyed by the file's hash. A pool passed in memory, a PLS
 space and an overlap space are built every call and not cached.
 
-\strong{Reconciliation.} Either axis carrying a hole — a spacing more than
-three times its own median and more than 30 cm-1 — stops the verb before anything interpolates, because a
-resampling spline and a Savitzky-Golay window both run straight across a
-gap and invent absorbance at its edges without erroring; a deleted water
-band belongs in \code{mask}, which is applied after the derivative. A pool that
-does not cover the targets' range also stops the verb, except within half
-the pool's spacing, where the overshooting column is taken at the pool's
-endpoint rather than extrapolated and the clamp is recorded and warned
-about. Targets finer than the pool warn. \code{window} is a width in cm-1, so
+\strong{Axes the search cannot use.} Either axis with fewer than two
+wavenumbers, or carrying a hole (a spacing more than three times its own
+median and more than 30 cm-1), is refused before anything interpolates,
+the targets' before the library resolves: a resampling spline and a
+Savitzky-Golay window both run straight across a gap and invent
+absorbance at its edges without erroring, and a deleted water band
+belongs in \code{mask}, which is applied after the derivative. \code{window} is a
+width in cm-1, so
 the filter is the same physical filter on any batch; the point count it
 becomes on the library's grid is recorded in \code{settings$window_points}, and
 the width that count actually spans in \code{settings$window_cm}.
+
+\strong{Standardized alike.} The training set is the library's spectra as
+\code{\link[=standardize]{standardize()}} left them, so the targets must have been left the same
+way: baseline-corrected on both sides or neither, and when both, with the
+hulls fitted over the same range (each end within the coarser grid's
+step). Otherwise the model would train on one preprocessing and predict
+another, and the call is refused before any work, naming the
+\code{\link[=standardize]{standardize()}} call that matches the targets to the library (#107). A
+side that never went through \code{\link[=standardize]{standardize()}} counts as not corrected.
+The registered \code{"kssl"} library is not baseline-corrected.
 
 \strong{Self-leakage.} A pool row that sits far closer to a target than that
 target's surroundings do — distance zero, or below \code{twin_ratio} times the
@@ -300,7 +320,7 @@ interactive session, and a non-interactive one needs
 \code{x$selection$library} records which library was drawn from.
 
 \strong{What the record holds} (\code{x$selection}): the settings as resolved, the
-reconciliation, the pool's identity, the targets' identity (their source,
+columns returned, the pool's identity, the targets' identity (their source,
 row count and a hash of their ids), the membership table (target by
 property by pool row, with the space it was measured in, distance, rank,
 and whether the row was \code{retained} in the object after the twin

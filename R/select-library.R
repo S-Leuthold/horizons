@@ -76,7 +76,11 @@ library_registry <- function() {
         spectral_pattern = "^scan_mir\\.([0-9]+)_abs$",
         wn_min           = 600L,
         wn_max           = 4000L,
-        wn_step          = 2L
+        wn_step          = 2L,
+        ## Not hull-corrected. select_training() reads this before the
+        ## download to refuse hull-corrected targets (#107), and the build
+        ## standardizes with it, so the two cannot disagree.
+        baseline         = FALSE
       ),
 
       ## Short property name -> OSSL v1.2 soillab L1 column. Units are OSSL's
@@ -705,13 +709,14 @@ build_ossl_library <- function(raw, entry, verbose = TRUE) {
 
   lab <- lab[match(ids, lab$sample_id), , drop = FALSE]
 
-  ## standardize() on the native grid moves no values; it records the axis,
-  ## which is what lets the draw reconcile the library against the targets.
+  ## standardize() on the native grid moves no values; it records the axis
+  ## and how it was standardized, which the draw compares with the targets'.
 
   build <- function() {
 
     pool <- spectra(df, id_col = "sample_id")
-    pool <- standardize(pool, resample = f$wn_step, trim = c(f$wn_min, f$wn_max))
+    pool <- standardize(pool, resample = f$wn_step, trim = c(f$wn_min, f$wn_max),
+                        baseline = isTRUE(f$baseline))
     add_response(pool, lab, variable = pm$property)
 
   }

@@ -1,43 +1,9 @@
 # tests/testthat/test-select-reconcile.R
-# Tests for predictor_matrix(), reconcile_axes() and
-# reconciled_standardization(), the first act of select_training(): bring the
-# pool onto the targets' wavenumber axis, and its record with it. And
-# search_axis(), which puts the targets on the library's grid for the search.
-
-
-## =============================================================================
-## A horizons_data on an arbitrary wavenumber axis
-## =============================================================================
-
-#' Build a minimal horizons_data on the wavenumbers given
-#'
-#' @description
-#' The fixture's grids are regular and contiguous by construction, which is
-#' exactly what the gap and clamp checks need to vary. This builds a small
-#' object on any axis, spectra included, with no responses.
-#'
-#' @param wn [Numeric.] Wavenumbers, decreasing.
-#' @param n [Integer.] Rows. Default: `6`.
-#' @param prefix [Character.] Sample id prefix. Default: `"A"`.
-#'
-#' @return [horizons_data.]
-#' @noRd
-make_axis_object <- function(wn, n = 6L, prefix = "A", seed = 7L) {
-
-  set.seed(seed)
-
-  m <- gaussian_family(n, wn, centres = c(3400, 2920, 1630, 1030))
-  colnames(m) <- paste0("wn_", wn)
-
-  tbl <- dplyr::bind_cols(
-    tibble::tibble(sample_id = sprintf("%s%03d", prefix, seq_len(n))),
-    tibble::as_tibble(m)
-  )
-
-  utils::capture.output(obj <- spectra(tbl))
-  obj
-
-}
+# Tests for select_training()'s two axes: predictor_matrix(), grid_summary()
+# and the axis door (check_select_axis()); shared_columns(), the door for
+# targets that share no column, and returned_standardization(), the training
+# set's record (#236, #90); and search_axis(), which puts the targets on the
+# library's grid for the search.
 
 
 ## =============================================================================
@@ -59,153 +25,36 @@ test_that("predictor_matrix() returns the spectra with decreasing wavenumbers", 
 
 
 ## =============================================================================
-## reconcile_axes() — the targets' grid is the reference
-## =============================================================================
-
-test_that("reconcile_axes() puts the pool on the targets' wavenumbers", {
-
-  ## Arrange: pool at 4 cm-1, targets at 8 cm-1
-  fx <- select_fixture(n_pool = 20)
-
-  ## Act
-  out <- reconcile_axes(fx$pool, fx$targets)
-
-  ## Assert
-  expect_identical(out$wavenumbers, fx$target_wn)
-  expect_identical(dim(out$matrix), c(20L, length(fx$target_wn)))
-  expect_identical(rownames(out$matrix), fx$pool$data$analysis$sample_id)
-  expect_identical(out$record$operation, "resampled")
-  expect_identical(out$record$target_grid$n, length(fx$target_wn))
-  expect_identical(out$record$pool_grid$n,   length(fx$pool_wn))
-  expect_equal(out$record$target_grid$resolution, 8)
-  expect_equal(out$record$pool_grid$resolution,   4)
-  expect_length(out$record$warnings, 0L)
-
-})
-
-
-test_that("reconcile_axes() reproduces the twin exactly on a nested grid", {
-
-  ## The target grid is every other pool column, so the spline passes
-  ## through the pool's own values at those knots.
-  fx  <- select_fixture(n_pool = 20)
-  out <- reconcile_axes(fx$pool, fx$targets)
-
-  twin_target <- predictor_matrix(fx$targets)$matrix[fx$twin_id, ]
-  twin_pool   <- out$matrix[fx$twin_pool_id, ]
-
-  expect_equal(unname(twin_pool), unname(twin_target), tolerance = 1e-12)
-
-})
-
-
-test_that("reconcile_axes() passes an identical grid through untouched", {
-
-  fx <- select_fixture(n_pool = 20)
-
-  ## Targets on the pool's own grid: use pool rows as targets
-  same <- subset_rows(fx$pool, c("P001", "P002"))
-
-  out <- reconcile_axes(fx$pool, same)
-
-  expect_identical(out$record$operation, "none")
-  expect_identical(out$wavenumbers, fx$pool_wn)
-  expect_identical(unname(out$matrix), unname(predictor_matrix(fx$pool)$matrix))
-
-})
-
-
-test_that("reconcile_axes() stops when the pool does not cover the targets' high end", {
-
-  fx <- select_fixture(n_pool = 20, target_range = c(4096, 600))
-
-  expect_error(reconcile_axes(fx$pool, fx$targets),
-               regexp = "high end.*4000", class = "horizons_input_error")
-
-})
-
-
-test_that("reconcile_axes() stops when the pool does not cover the targets' low end", {
-
-  fx <- select_fixture(n_pool = 20, target_range = c(4000, 504))
-
-  expect_error(reconcile_axes(fx$pool, fx$targets),
-               regexp = "low end.*600", class = "horizons_input_error")
-
-})
-
-
-test_that("reconcile_axes() warns when the targets are finer than the pool", {
-
-  ## Arrange: swap roles so the 4 cm-1 pool becomes the targets of an
-  ## 8 cm-1 pool. Give the coarse side responses so it is a valid pool.
-  fx <- select_fixture(n_pool = 20)
-
-  coarse <- fx$targets
-  lab    <- tibble::tibble(sample_id = coarse$data$analysis$sample_id,
-                           clay = seq_len(coarse$data$n_rows))
-  utils::capture.output(coarse <- add_response(coarse, lab, variable = "clay"))
-
-  ## Act / Assert
-  expect_warning(out <- reconcile_axes(coarse, fx$pool),
-                 regexp = "finer", class = "horizons_select_warning")
-
-  expect_identical(out$wavenumbers, fx$pool_wn)
-  expect_identical(out$record$operation, "resampled")
-  expect_length(out$record$warnings, 1L)
-  expect_match(out$record$warnings, "finer")
-
-})
-
-
-## =============================================================================
 ## Contiguity — a deleted band is a refusal, not a spline fill
 ## =============================================================================
 
 test_that("grid_summary() reports a contiguous grid as contiguous", {
 
-  fx  <- select_fixture(n_pool = 20)
-  out <- reconcile_axes(fx$pool, fx$targets)
+  fx <- select_fixture(n_pool = 20)
 
-  expect_true(out$record$pool_grid$contiguous)
-  expect_true(out$record$target_grid$contiguous)
-  expect_null(out$record$pool_grid$gaps)
-  expect_equal(out$record$pool_grid$max_spacing, 4)
-  expect_null(out$record$clamp)
+  pool_grid   <- grid_summary(fx$pool_wn)
+  target_grid <- grid_summary(fx$target_wn)
 
-})
-
-
-test_that("reconcile_axes() stops on a gapped pool axis and names the gap", {
-
-  ## A 140 cm-1 hole, the narrower of the two ranges standardize(remove_water)
-  ## deletes. It clears the endpoint coverage test and would be spline-filled.
-  fx      <- select_fixture(n_pool = 20)
-  gapped  <- seq(4000, 600, by = -4)
-  gapped  <- gapped[!(gapped >= 1580 & gapped <= 1720)]
-
-  pool <- make_axis_object(gapped, prefix = "G")
-
-  expect_error(reconcile_axes(pool, fx$targets),
-               regexp = "pool", class = "horizons_input_error")
-  expect_error(reconcile_axes(pool, fx$targets),
-               regexp = "1576|1724", class = "horizons_input_error")
-  expect_error(reconcile_axes(pool, fx$targets),
-               regexp = "mask", class = "horizons_input_error")
+  expect_true(pool_grid$contiguous)
+  expect_true(target_grid$contiguous)
+  expect_null(pool_grid$gaps)
+  expect_equal(pool_grid$max_spacing, 4)
 
 })
 
 
-test_that("reconcile_axes() stops on a gapped target axis too", {
+test_that("check_select_axis() refuses an axis of one wavenumber, and passes a usable one", {
 
-  fx     <- select_fixture(n_pool = 20)
-  gapped <- seq(4000, 600, by = -8)
-  gapped <- gapped[!(gapped >= 1580 & gapped <= 1720)]
+  ## One column has no spacing for grid_summary() to take a median of, and
+  ## nothing for the derivative to run along
+  expect_error(check_select_axis(4000, "x", "the targets"),
+               regexp = "at least two wavenumbers", class = "horizons_error_input")
+  expect_error(check_select_axis(numeric(0), "library", "the pool"),
+               regexp = "has 0 predictor columns", class = "horizons_error_input")
 
-  targets <- make_axis_object(gapped, prefix = "H")
-
-  expect_error(reconcile_axes(fx$pool, targets),
-               regexp = "targets", class = "horizons_input_error")
+  ## Two columns are an axis; a usable one returns its summary
+  expect_identical(check_select_axis(c(4000, 3996), "x", "the targets")$n, 2L)
+  expect_true(check_select_axis(seq(4000, 600, by = -4), "x", "the targets")$contiguous)
 
 })
 
@@ -264,80 +113,101 @@ test_that("grid_summary() still catches a deleted band on either side of it", {
 
 
 ## =============================================================================
-## Coverage tolerance — half a pool spacing is clamped, not refused
+## shared_columns() and its door: the library's own columns the targets share
 ## =============================================================================
 
-test_that("reconcile_axes() clamps a target grid overshooting by less than half a spacing", {
+test_that("shared_columns() keeps the library's columns the targets name, in the library's order", {
 
-  ## Targets on an axis standardize() did not put on the canonical grid, as
-  ## with resample = NULL, overshooting the pool's end by a fraction.
-  ## The pool is at 4 cm-1, so the tolerance is 2 cm-1 and a 1 cm-1
-  ## overshoot at the high end is inside it.
-  fx      <- select_fixture(n_pool = 20)
-  over_wn <- seq(4001, 601, by = -8)
-  targets <- make_axis_object(over_wn, prefix = "O")
+  lib <- paste0("wn_", seq(4000, 600, by = -2))
 
-  expect_warning(out <- reconcile_axes(fx$pool, targets),
-                 regexp = "overshoot", class = "horizons_select_warning")
+  ## Coarser targets share every one of their columns
+  coarse <- paste0("wn_", seq(4000, 600, by = -8))
+  out    <- shared_columns(coarse, lib)
 
-  ## The axis returned is the targets' own, overshooting column included
-  expect_identical(out$wavenumbers, over_wn)
-  expect_identical(ncol(out$matrix), length(over_wn))
-  expect_true(all(is.finite(out$matrix)))
+  expect_identical(out$shared, coarse)
+  expect_identical(out$target_only, character())
 
-  ## And the clamp is on the record, with the tolerance it was judged against
-  expect_equal(out$record$clamp$high, 1)
-  expect_equal(out$record$clamp$low, 0)
-  expect_equal(out$record$clamp$tolerance, 2)
-  expect_length(out$record$warnings, 1L)
-  expect_match(out$record$warnings, "overshoot")
+  ## Finer and wider targets: the library's columns inside, the rest named
+  fine <- paste0("wn_", seq(4100, 600, by = -1))
+  out  <- shared_columns(fine, lib)
 
-})
+  expect_identical(out$shared, lib)
+  expect_identical(out$target_only, setdiff(fine, lib))
 
-
-test_that("reconcile_axes() still stops beyond the tolerance, stating the overshoot", {
-
-  fx      <- select_fixture(n_pool = 20)
-  targets <- make_axis_object(seq(4005, 605, by = -8), prefix = "P")
-
-  expect_error(reconcile_axes(fx$pool, targets),
-               regexp = "high end", class = "horizons_input_error")
-  expect_error(reconcile_axes(fx$pool, targets),
-               regexp = "5 cm-1", class = "horizons_input_error")
+  ## A name, not a nearby value: an instrument's own axis, 0.26 cm-1 off the
+  ## grid at its low end, shares nothing, and neither does a grid offset by
+  ## a whole wavenumber
+  instrument <- paste0("wn_", rev(599.7431 + 1.928571 * (0:1762)))
+  expect_length(shared_columns(instrument, lib)$shared, 0L)
+  expect_length(shared_columns(paste0("wn_", seq(3999, 601, by = -2)), lib)$shared, 0L)
 
 })
 
 
-test_that("reconcile_axes() clamps the low end the same way", {
+test_that("axes_aligned() passes grids standardize() makes and refuses an instrument's own axis", {
 
-  fx      <- select_fixture(n_pool = 20)
-  under   <- seq(3999, 599, by = -8)
-  targets <- make_axis_object(under, prefix = "Q")
+  lib <- seq(4000, 600, by = -2)
 
-  expect_warning(out <- reconcile_axes(fx$pool, targets),
-                 class = "horizons_select_warning")
+  ## Coarser, finer and offset canonical grids lie on one lattice with it
+  expect_true(axes_aligned(seq(4000, 600, by = -8), lib))
+  expect_true(axes_aligned(seq(4000, 600, by = -1), lib))
+  expect_true(axes_aligned(seq(3999, 600, by = -3), lib))
+  expect_true(axes_aligned(seq(4096, 504, by = -8), lib))
 
-  expect_equal(out$record$clamp$low, 1)
-  expect_equal(out$record$clamp$high, 0)
-  expect_identical(out$wavenumbers, under)
+  ## So do targets on the library's own axis, canonical or not
+  native <- rev(599.7431 + 1.928571 * (0:1762))
+  expect_true(axes_aligned(native[100:900], native))
+
+  ## An instrument's own axis is refused, though it shares four columns with
+  ## a 4 cm-1 grid by coincidence, and though 1.93 and 4 have a common
+  ## divisor in decimal; so is a grid offset by a whole wavenumber
+  coincident <- rev(599.74 + 1.93 * (0:1761))
+  expect_length(intersect(coincident, seq(4000, 600, by = -4)), 4L)
+  expect_false(axes_aligned(coincident, seq(4000, 600, by = -4)))
+  expect_false(axes_aligned(seq(3999, 601, by = -2), lib))
+
+  ## And the other way round: canonical targets against a library left on
+  ## an instrument's axis
+  expect_false(axes_aligned(seq(4000, 600, by = -4), coincident))
 
 })
 
 
-test_that("reconcile_axes() rejects inputs that are not horizons_data", {
+test_that("check_shared_columns() refuses targets that share no column, naming the standardize() call", {
 
-  fx <- select_fixture(n_pool = 20)
+  lib <- paste0("wn_", seq(4000, 600, by = -2))
+  off <- paste0("wn_", rev(599.7431 + 1.928571 * (0:1762)))
 
-  expect_error(reconcile_axes(data.frame(a = 1), fx$targets),
-               class = "horizons_input_error")
-  expect_error(reconcile_axes(fx$pool, data.frame(a = 1)),
-               class = "horizons_input_error")
+  err <- expect_error(check_shared_columns(off, lib), class = "horizons_error_input")
+  msg <- gsub("\\s+", " ", conditionMessage(err))
+
+  expect_match(msg, "share no wavenumber column", fixed = TRUE)
+  expect_match(msg, "standardize(x, resample = 2, trim = c(600, 4000))", fixed = TRUE)
+
+  ## Targets standardized already need force = TRUE to be put on the grid
+  err <- expect_error(check_shared_columns(off, lib, restandardize = TRUE),
+                      class = "horizons_error_input")
+  expect_match(gsub("\\s+", " ", conditionMessage(err)),
+               "standardize(x, resample = 2, trim = c(600, 4000), force = TRUE)", fixed = TRUE)
+
+  ## An instrument's own axis that shares a few columns by coincidence is
+  ## refused too, saying so
+  coincident <- paste0("wn_", rev(599.74 + 1.93 * (0:1761)))
+  err <- expect_error(check_shared_columns(coincident, lib), class = "horizons_error_input")
+  msg <- gsub("\\s+", " ", conditionMessage(err))
+
+  expect_match(msg, "not on a grid aligned with", fixed = TRUE)
+  expect_match(msg, "9 of the targets' 1761 columns inside the library's range coincide with library columns", fixed = TRUE)
+  expect_match(msg, "standardize(x, resample = 2, trim = c(600, 4000))", fixed = TRUE)
+
+  ## Anything shared on an aligned grid passes, with the split
+  expect_identical(check_shared_columns(lib[1:3], lib)$shared, lib[1:3])
 
 })
 
 
 ## =============================================================================
-## reconciled_standardization(): the pool's record on the targets' axis (#90)
+## returned_standardization(): the library's record, for the columns kept (#90)
 ## =============================================================================
 
 #' A standardize()-shaped record on the canonical grid at `step`
@@ -365,82 +235,57 @@ std_record <- function(step, ...) {
 }
 
 
-test_that("reconciled_standardization() replaces the axis fields and keeps the pool's arguments", {
+test_that("returned_standardization() describes the columns kept and keeps the library's arguments (#90)", {
 
-  pool   <- std_record(4, extra = "kept")
-  target <- std_record(8)
-  wn     <- seq(4000, 600, by = -8)
-  clamp  <- list(high = 0, low = 0.26, tolerance = 2)
+  ## A library at 4 cm-1, its columns kept at the targets' 8: the record says
+  ## step 8, the axis's spacing, not the library's 4
+  pool <- std_record(4, extra = "kept")
+  wn   <- seq(4000, 600, by = -8)
 
-  rec <- reconciled_standardization(pool, target, wn, clamp = clamp)
+  rec <- returned_standardization(pool, wn, n_library = pool$n_wavelengths)
 
-  ## The axis the pool now sits on
-  expect_identical(rec$grid, target$grid)
+  expect_identical(rec$grid, std_record(8)$grid)
   expect_identical(rec$n_wavelengths, length(wn))
   expect_identical(rec$wavelength_range, c(600, 4000))
-  expect_true(rec$resampled)
 
-  ## The call that produced the values, and anything else the pool carried
-  for (key in c("resample", "trim", "remove_water", "baseline", "applied_at", "extra")) {
+  ## The call that produced the values, and anything else the library carried
+  for (key in c("resample", "trim", "remove_water", "baseline", "resampled", "applied_at", "extra")) {
 
     expect_identical(rec[[key]], pool[[key]], info = key)
 
   }
 
-  ## The move, with the pool's record as it stood
-  expect_identical(rec$reconciliation,
-                   list(operation = "resampled", clamp = clamp, pool = pool))
+  expect_false("reconciliation" %in% names(rec))
 
 })
 
 
-test_that("reconciled_standardization() keeps a NULL grid and clamp as entries, and gives no record for none", {
-
-  wn  <- seq(4000, 600, by = -8)
-  rec <- reconciled_standardization(std_record(4), NULL, wn, clamp = NULL)
-
-  expect_true(all(c("grid", "reconciliation") %in% names(rec)))
-  expect_null(rec$grid)
-  expect_true("clamp" %in% names(rec$reconciliation))
-  expect_null(rec$reconciliation$clamp)
-
-  ## A pool standardize() never saw is not given a record
-  expect_null(reconciled_standardization(NULL, std_record(8), wn, clamp = NULL))
-
-})
-
-
-test_that("reconciled_standardization() writes a NULL grid when the targets' grid does not match the axis", {
+test_that("returned_standardization() keeps a whole axis's record, writes a NULL grid off a grid, and gives none for none", {
 
   pool <- std_record(4)
-  wn   <- seq(4000, 600, by = -8)
 
-  ## A grid that matches the columns is copied
-  expect_identical(reconciled_standardization(pool, std_record(8), wn, clamp = NULL)$grid,
-                   std_record(8)$grid)
+  ## Every library column kept: the record as it was
+  expect_identical(returned_standardization(pool, seq(4000, 600, by = -4), pool$n_wavelengths), pool)
 
-  ## One whose count, range or shape disagrees is not, nor one whose count is
-  ## not a number or that is not a list at all
-  short  <- std_record(8)
-  short$grid$n <- short$grid$n - 1L
-  wide   <- std_record(8)
-  wide$grid$max <- 4008
-  broken <- std_record(8)
-  broken$grid$n <- NULL
-  text   <- std_record(8)
-  text$grid$n <- as.character(text$grid$n)
-  atomic <- std_record(8)
-  atomic$grid <- "canonical"
+  ## Columns not evenly spaced are on no grid, and the key stays
+  uneven <- c(seq(4000, 2000, by = -4), seq(1992, 600, by = -8))
+  rec    <- returned_standardization(pool, uneven, pool$n_wavelengths)
 
-  for (target in list(short = short, wide = wide, broken = broken, text = text, atomic = atomic)) {
+  expect_true("grid" %in% names(rec))
+  expect_null(rec$grid)
+  expect_identical(rec$n_wavelengths, length(uneven))
+  expect_identical(rec$wavelength_range, c(600, 4000))
 
-    rec <- reconciled_standardization(pool, target, wn, clamp = NULL)
+  ## A library on no grid gives its subset none either
+  nogrid <- pool
+  nogrid["grid"] <- list(NULL)
+  rec <- returned_standardization(nogrid, seq(4000, 600, by = -8), pool$n_wavelengths)
 
-    expect_true("grid" %in% names(rec))
-    expect_null(rec$grid)
-    expect_identical(rec$n_wavelengths, length(wn))
+  expect_true("grid" %in% names(rec))
+  expect_null(rec$grid)
 
-  }
+  ## A library standardize() never saw is not given a record
+  expect_null(returned_standardization(NULL, seq(4000, 600, by = -8), 851L))
 
 })
 
@@ -475,11 +320,11 @@ test_that("search_axis() records each coverage tier with its shortfall and its g
   expect_identical(out$record$missing, c(low = 0, high = 0.5))
 
   ## 30 cm-1 short at the high end: the overlap, the library's columns inside
-  ## the targets' range only
+  ## the targets' range only. The verb warns from the record; the helper
+  ## raises nothing.
   wn <- seq(670, 600, by = -2)
 
-  expect_warning(out <- search_axis(lib_wn, on(wn), wn),
-                 "short of the library's range", class = "horizons_select_warning")
+  expect_no_warning(out <- search_axis(lib_wn, on(wn), wn))
   expect_identical(out$record$mode, "overlap")
   expect_identical(out$record$missing, c(low = 0, high = 30))
   expect_identical(out$wavenumbers, seq(670, 600, by = -2))
@@ -489,16 +334,17 @@ test_that("search_axis() records each coverage tier with its shortfall and its g
   ## within it, so it is the overlap too (under one step is full)
   wn <- seq(696, 616, by = -16)
 
-  expect_warning(out <- search_axis(lib_wn, on(wn), wn),
-                 "short of the library's range", class = "horizons_select_warning")
+  expect_no_warning(out <- search_axis(lib_wn, on(wn), wn))
   expect_identical(out$record$mode, "overlap")
   expect_identical(out$record$missing, c(low = 16, high = 4))
 
-  ## A library with a hole in its axis is refused, as the targets' would be
-  gapped <- lib_wn[!(lib_wn > 640 & lib_wn < 680)]
+  ## Short by more than the 50 cm-1 that used to be refused: still the
+  ## overlap, with nothing raised
+  wn <- seq(700, 680, by = -2)
 
-  expect_error(search_axis(gapped, on(lib_wn), lib_wn),
-               "The wavenumber axis of the pool has 1 gap in it", fixed = TRUE,
-               class = "horizons_input_error")
+  expect_no_warning(out <- search_axis(lib_wn, on(wn), wn))
+  expect_identical(out$record$mode, "overlap")
+  expect_identical(out$record$missing, c(low = 80, high = 0))
+  expect_identical(out$wavenumbers, seq(700, 680, by = -2))
 
 })

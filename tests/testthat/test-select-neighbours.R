@@ -7,12 +7,12 @@
 ## Helpers
 ## =============================================================================
 
-#' Pool and target scores in the default space, reconciled
+#' Pool and target scores in the default space, the pool on the targets' columns
 #' @noRd
 fixture_scores <- function(n_pool = 60, ncomp = 4L, seed = 1) {
 
   fx <- select_fixture(n_pool = n_pool, seed = seed)
-  rc <- reconcile_axes(fx$pool, fx$targets)
+  rc <- pool_on_targets(fx)
   tm <- predictor_matrix(fx$targets)
   sp <- build_similarity_space(rc$matrix, rc$wavenumbers, ncomp = ncomp)
   st <- project_similarity(sp, tm$matrix, tm$wavenumbers)
@@ -443,7 +443,7 @@ test_that("draw_neighbours() flags the whole replicate cluster at k below its si
   ## neighbourhood, and the draw still reaches k with no short draw.
 
   fxr <- select_fixture(n_pool = 60, seed = 3, n_replicates = 3)
-  rc  <- reconcile_axes(fxr$pool, fxr$targets)
+  rc  <- pool_on_targets(fxr)
   tm  <- predictor_matrix(fxr$targets)
   sp  <- build_similarity_space(rc$matrix, rc$wavenumbers, ncomp = 4L)
   st  <- project_similarity(sp, tm$matrix, tm$wavenumbers)
