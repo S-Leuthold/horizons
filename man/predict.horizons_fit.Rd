@@ -54,8 +54,9 @@ here is ignored with a warning (see Details), and any other argument is
 an error.}
 }
 \value{
-A tibble in long format, one row per sample (per config when
-\code{config = "all"}):
+A tibble in long format, one row per row of \code{new_data} (per config
+when \code{config = "all"}), in its order; zero rows of \code{new_data} give zero
+rows with the same columns:
 \describe{
 \item{sample_id}{Sample identifier from \code{new_data}.}
 \item{config_id}{Config used (present when \code{config = "all"}).}

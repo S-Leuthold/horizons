@@ -704,7 +704,8 @@ build_ensemble_contract <- function(method,
 #'   here is ignored with a warning (see Details), and any other argument is
 #'   an error.
 #'
-#' @return A tibble, one row per sample:
+#' @return A tibble, one row per row of `new_data`, in its order (zero rows
+#'   give zero rows with the same columns):
 #'   \describe{
 #'     \item{sample_id}{Sample identifier from `new_data`.}
 #'     \item{.pred}{Ensemble point prediction, original response scale.}

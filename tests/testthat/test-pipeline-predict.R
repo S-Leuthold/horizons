@@ -625,6 +625,40 @@ describe("predict.horizons_fit() - one row of new_data", {
 })
 
 
+describe("predict.horizons_fit() - zero rows of new_data", {
+
+  it("returns zero rows with the call's columns, running no engine", {
+
+    seen <- 0L
+    local_mocked_s3_method("predict", "workflow", function(object, new_data, ...) {
+      seen <<- seen + 1L
+      stop("no engine should run")
+    })
+
+    zero <- make_new_spectra()[0, ]
+
+    p <- predict(fitted_fixture, zero)
+
+    expect_equal(nrow(p), 0L)
+    expect_named(p, c("sample_id", ".pred", ".pred_lower", ".pred_upper", ".interval_width",
+                      ".ad_distance", ".ad_flag"))
+    expect_identical(seen, 0L)
+
+    two <- add_member_copy(fitted_fixture)
+    expect_true("config_id" %in% names(predict(two, zero, config = "all", interval = FALSE)))
+
+  })
+
+  it("still says an ignored level is ignored", {
+
+    expect_warning(predict(fitted_fixture, make_new_spectra()[0, ], level = 0.95),
+                   class = "horizons_warning_input")
+
+  })
+
+})
+
+
 describe("predict.horizons_fit() - flagged rows", {
 
   new_df <- make_new_spectra()

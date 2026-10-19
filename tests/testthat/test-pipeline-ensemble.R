@@ -680,6 +680,22 @@ describe("predict.horizons_ensemble() - flagged rows and the combination", {
 
   })
 
+  for (m in c("weighted", "penalized")) {
+
+    it(paste0("returns zero rows with its columns for zero rows of new_data, for ", m), {
+
+      test_set <- ens_test_set()
+      ens      <- ens_built(m)
+
+      p <- predict(ens, test_set[0, ], interval = TRUE)
+
+      expect_equal(nrow(p), 0L)
+      expect_named(p, c("sample_id", ".pred", ".pred_lower", ".pred_upper", ".interval_width"))
+
+    })
+
+  }
+
   it("returns its predictions in new_data's row order", {
 
     test_set <- ens_test_set()

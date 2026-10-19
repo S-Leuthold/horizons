@@ -32,7 +32,8 @@ here is ignored with a warning (see Details), and any other argument is
 an error.}
 }
 \value{
-A tibble, one row per sample:
+A tibble, one row per row of \code{new_data}, in its order (zero rows
+give zero rows with the same columns):
 \describe{
 \item{sample_id}{Sample identifier from \code{new_data}.}
 \item{.pred}{Ensemble point prediction, original response scale.}

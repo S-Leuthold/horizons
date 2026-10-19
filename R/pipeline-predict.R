@@ -55,8 +55,9 @@ NULL
 #'   here is ignored with a warning (see Details), and any other argument is
 #'   an error.
 #'
-#' @return A tibble in long format, one row per sample (per config when
-#'   `config = "all"`):
+#' @return A tibble in long format, one row per row of `new_data` (per config
+#'   when `config = "all"`), in its order; zero rows of `new_data` give zero
+#'   rows with the same columns:
 #'   \describe{
 #'     \item{sample_id}{Sample identifier from `new_data`.}
 #'     \item{config_id}{Config used (present when `config = "all"`).}
