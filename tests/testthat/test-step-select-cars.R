@@ -133,8 +133,8 @@ describe("step_select_cars() selects", {
     skip_if_not_installed("pls")
 
     ## Over seeds 1 to 20 (the recipe built under the seed, as here) both
-    ## signal bands survive at every seed, with exactly those two kept at 19
-    ## and three at one; at seed 1 the set is pinned below.
+    ## signal bands survive at every seed, with exactly those two kept at 16
+    ## and three at four; at seed 1 the set is pinned below.
     d <- cars_signal_data()
 
     prepped  <- withr::with_seed(1, suppressMessages(recipes::prep(cars_recipe(d), training = d)))
@@ -142,50 +142,142 @@ describe("step_select_cars() selects", {
 
     expect_true(all(c("wn_3980", "wn_3950") %in% selected))
     expect_lt(length(selected), 40L)
-    expect_setequal(selected, c("wn_3980", "wn_3950"))
+    expect_setequal(selected, c("wn_3980", "wn_3950", "wn_3938"))
 
   })
 
 })
 
 
-describe("step_select_cars() returns the set it scored (#106)", {
+## Helper: every PLS fit a prep makes, split as the step makes them. The
+## weight fits (one per iteration, on its Monte Carlo sample, with no
+## validation) and the scoring fits (one per distinct set, cross-validated
+## on the shared folds, over every row).
+cars_fits <- function(d, seed = 1) {
 
-  it("returns the bands the lowest-scoring iteration's fit was given, scored at its best component count", {
+  weight  <- list()
+  scoring <- list()
+
+  real <- pls::plsr
+  local_mocked_bindings(plsr = function(formula, data, ...) {
+    fit  <- real(formula, data = data, ...)
+    args <- list(...)
+    one  <- list(fit = fit, bands = setdiff(names(data), "y"), rows = nrow(data),
+                 segments = args$segments, ncomp = args$ncomp)
+    if (identical(args$validation, "CV")) {
+      scoring[[length(scoring) + 1L]] <<- one
+    } else {
+      weight[[length(weight) + 1L]] <<- one
+    }
+    fit
+  }, .package = "pls")
+
+  step <- withr::with_seed(seed, suppressMessages(recipes::prep(cars_recipe(d), training = d)))$steps[[1]]
+
+  list(step = step, weight = weight, scoring = scoring)
+
+}
+
+## Helper: carspls's folds, written out: rows sorted by the outcome and dealt
+## to five folds in turn (plscv, order = 0)
+dealt_folds <- function(y) {
+  sorted <- order(y)
+  unname(split(sorted, 1 + (seq_along(sorted) - 1) %% 5))
+}
+
+
+describe("step_select_cars() scores every set after the loop, as carspls does (#106)", {
+
+  it("returns the set with the lowest score, each iteration's set scored on every row and on one partition", {
 
     skip_if_not_installed("pls")
 
-    d <- cars_signal_data()
+    d  <- cars_signal_data()
+    tr <- cars_fits(d)
 
-    ## Each iteration's fit, and the bands it was given
-    seen <- list()
-    fits <- list()
-    real <- pls::plsr
-    local_mocked_bindings(plsr = function(formula, data, ...) {
-      fit <- real(formula, data = data, ...)
-      seen[[length(seen) + 1L]] <<- setdiff(names(data), "y")
-      fits[[length(fits) + 1L]] <<- fit
-      fit
-    }, .package = "pls")
+    rec <- tr$step$cars
+    key <- vapply(tr$weight, function(w) paste(w$bands, collapse = ","), character(1))
 
-    step <- withr::with_seed(1, suppressMessages(recipes::prep(cars_recipe(d), training = d)))$steps[[1]]
-    rec  <- step$cars
+    ## Fifty weight fits, each on the 48-row Monte Carlo sample of the 60
+    ## rows; one scoring fit per distinct set, each on all 60 rows
+    expect_length(tr$weight, 50L)
+    expect_true(all(vapply(tr$weight, `[[`, integer(1), "rows") == 48L))
+    expect_length(tr$scoring, length(unique(key)))
+    expect_true(all(vapply(tr$scoring, `[[`, integer(1), "rows") == 60L))
 
-    expect_length(seen, 50L)
-    expect_identical(rec$iteration, which.min(rec$scores))
+    ## The one partition, the same for every set: rows sorted by the outcome
+    ## and dealt to the folds in turn
+    for (s in tr$scoring) expect_identical(s$segments, dealt_folds(d$SOC))
 
-    ## Fewer than 150 bands, so each band is its own cluster and the bands
-    ## kept are the representatives the chosen fit was given: not those of a
-    ## rerun with new draws, nor the set left after that iteration's cut
-    expect_setequal(step$selected_vars, seen[[rec$iteration]])
-    expect_identical(rec$n_kept, length(step$selected_vars))
-
-    ## Each score is its fit's cross-validated RMSEP at the best number of
-    ## components, the intercept-only model left out
-    best <- vapply(fits, function(f) {
-      min(pls::RMSEP(f, estimate = "CV", intercept = FALSE)$val)
+    ## Every iteration's score is its set's, and the set returned is the
+    ## lowest-scoring iteration's, every band of which its fits were given
+    scored <- vapply(tr$scoring, function(s) {
+      min(pls::RMSEP(s$fit, estimate = "CV", intercept = FALSE)$val)
     }, numeric(1))
-    expect_equal(rec$scores, best)
+    names(scored) <- vapply(tr$scoring, function(s) paste(s$bands, collapse = ","), character(1))
+
+    expect_equal(rec$scores, unname(scored[key]))
+    expect_identical(rec$iteration, which.min(rec$scores))
+    expect_setequal(tr$step$selected_vars, tr$weight[[rec$iteration]]$bands)
+    expect_identical(rec$n_kept, length(tr$step$selected_vars))
+
+  })
+
+  it("scores a set by carspls's arithmetic: the pooled RMSECV over the dealt folds at its best component count", {
+
+    skip_if_not_installed("pls")
+
+    ## Six bands, so every band is its own representative and the first
+    ## iteration's set is all six
+    d <- withr::with_seed(3, {
+      m <- matrix(stats::rnorm(30 * 6), 30)
+      colnames(m) <- paste0("wn_", seq(4000, by = -2, length.out = 6))
+      d <- tibble::as_tibble(m)
+      d$SOC <- m[, 1] - 0.5 * m[, 4] + stats::rnorm(30, sd = 0.5)
+      d
+    })
+
+    rec <- withr::with_seed(1, suppressMessages(recipes::prep(cars_recipe(d), training = d)))$steps[[1]]$cars
+
+    ## By hand: each fold predicted by a PLS fit on the other four, at every
+    ## component count up to the cap (five, here fewer than the six bands and
+    ## the 23 rows a fold's fit has less one); the score is the root of the
+    ## pooled squared error at the count where it is lowest
+    X     <- as.matrix(d[, 1:6])
+    folds <- dealt_folds(d$SOC)
+    A     <- min(5L, 6L, 30L - max(lengths(folds)) - 1L)
+    press <- matrix(NA_real_, 30, A)
+
+    for (f in folds) {
+      fit <- pls::plsr(SOC ~ ., data = d[-f, ], ncomp = A)
+      for (a in seq_len(A)) press[f, a] <- (predict(fit, newdata = d[f, ], ncomp = a)[, 1, 1] - d$SOC[f])^2
+    }
+
+    rmsecv <- sqrt(colMeans(press))
+
+    expect_equal(rec$scores[1], min(rmsecv))
+
+  })
+
+  it("takes each set's minimum over component counts, not libPLS's one-standard-deviation rule", {
+
+    skip_if_not_installed("pls")
+
+    d  <- cars_signal_data()
+    tr <- cars_fits(d)
+
+    ## The first set, every band: its error at each component count, and the
+    ## count libPLS's default rule would take (the fewest within one standard
+    ## deviation of the per-row squared errors at the minimum)
+    first <- tr$scoring[[1]]
+    e2    <- (first$fit$validation$pred[, 1, ] - d$SOC)^2
+    mse   <- colMeans(e2)
+    lv    <- which.min(mse)
+    lv_sd <- min(which(mse <= min(mse) + stats::sd(e2[, lv])))
+
+    expect_lt(lv_sd, lv)
+    expect_equal(tr$step$cars$scores[1], unname(sqrt(mse[lv])))
+    expect_gt(unname(sqrt(mse[lv_sd])), tr$step$cars$scores[1])
 
   })
 
@@ -206,8 +298,8 @@ describe("step_select_cars() returns the set it scored (#106)", {
 
     skip_if_not_installed("pls")
 
-    ## A noise outcome: at seed 1, the intercept-only model's RMSEP is the
-    ## lowest at 8 of the 50 iterations
+    ## A noise outcome, where the intercept-only model's error is the lowest
+    ## for some sets
     d <- withr::with_seed(2, {
       m <- matrix(stats::rnorm(60 * 40), 60)
       colnames(m) <- paste0("wn_", seq(4000, by = -2, length.out = 40))
@@ -216,21 +308,13 @@ describe("step_select_cars() returns the set it scored (#106)", {
       d
     })
 
-    fits <- list()
-    real <- pls::plsr
-    local_mocked_bindings(plsr = function(formula, data, ...) {
-      fit <- real(formula, data = data, ...)
-      fits[[length(fits) + 1L]] <<- fit
-      fit
-    }, .package = "pls")
+    tr <- cars_fits(d)
 
-    rec <- withr::with_seed(1, suppressMessages(recipes::prep(cars_recipe(d), training = d)))$steps[[1]]$cars
-
-    with_intercept <- vapply(fits, function(f) min(pls::RMSEP(f, estimate = "CV")$val), numeric(1))
-    components     <- vapply(fits, function(f) min(pls::RMSEP(f, estimate = "CV", intercept = FALSE)$val), numeric(1))
+    with_intercept <- vapply(tr$scoring, function(s) min(pls::RMSEP(s$fit, estimate = "CV")$val), numeric(1))
+    components     <- vapply(tr$scoring, function(s) min(pls::RMSEP(s$fit, estimate = "CV", intercept = FALSE)$val), numeric(1))
 
     expect_true(any(with_intercept < components))
-    expect_equal(rec$scores, components)
+    expect_true(all(tr$step$cars$scores %in% components))
 
   })
 
@@ -250,11 +334,15 @@ describe("step_select_cars() weights the bands as published (Li et al. 2009)", {
     pools <- integer(0)
     draws <- list()
 
+    ## The weight fits only: the scoring fits after the loop are
+    ## cross-validated
     real <- pls::plsr
     local_mocked_bindings(plsr = function(formula, data, ...) {
       fit <- real(formula, data = data, ...)
-      seen[[length(seen) + 1L]] <<- setdiff(names(data), "y")
-      fits[[length(fits) + 1L]] <<- list(fit = fit, data = data)
+      if (!identical(list(...)$validation, "CV")) {
+        seen[[length(seen) + 1L]] <<- setdiff(names(data), "y")
+        fits[[length(fits) + 1L]] <<- list(fit = fit, data = data)
+      }
       fit
     }, .package = "pls")
 
@@ -275,7 +363,7 @@ describe("step_select_cars() weights the bands as published (Li et al. 2009)", {
 
   }
 
-  it("returns no band its scoring fit gave no weight", {
+  it("returns no band its weight fit gave no weight", {
 
     skip_if_not_installed("pls")
 

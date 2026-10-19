@@ -30,25 +30,31 @@
 #' derivatives) and *before* PCA or model fitting. CARS is particularly effective for
 #' identifying minimal wavelength sets that maintain predictive performance.
 #'
-#' CARS runs as published (Li et al. 2009) on at most 150 cluster
+#' CARS runs as its authors' code runs it (libPLS's `carspls`, with the
+#' randomised sampling of Li et al. 2009) on at most 150 cluster
 #' representatives of the selected columns (correlation clustering), after
 #' dropping near-constant columns (a variance not finite, zero, or at most a
-#' hundred-millionth of the median band's), for 50 iterations. Each iteration fits a
-#' PLS model of up to five components on a Monte Carlo sample of 80% of the
-#' rows (and no more components than bands) and scores it by its
-#' leave-one-out RMSEP at its best number of
-#' components. The fit's coefficients weight the bands afresh: an
-#' exponentially decreasing function keeps the most heavily weighted, as many
-#' as the next iteration may fit (so the fits run from every band down to
-#' two, as carspls schedules them), and adaptive reweighted
-#' sampling draws among those, by weight and with replacement, as many times
-#' as there are bands, keeping the bands drawn. The step returns the set of
-#' bands the lowest score was measured on (#106), each kept representative
-#' bringing its whole cluster. The trained step records this in its `cars`
-#' element: the bands it selected from (`n_bands`), the near-constant bands
-#' it dropped before (`n_constant`), the representatives, each
-#' iteration's score, the iteration chosen, the bands kept, `retained_all`
-#' (always `FALSE`: CARS always selects) and `skipped`.
+#' hundred-millionth of the median band's), for 50 iterations. Each iteration
+#' fits a PLS model of up to five components (and no more than it has bands)
+#' on a Monte Carlo sample of 80% of the rows, only to weight the bands: its
+#' coefficients weight them afresh, an exponentially decreasing function
+#' keeps the most heavily weighted, as many as the next iteration may fit (so
+#' the fits run from every band down to two, as carspls schedules them), and
+#' adaptive reweighted sampling draws among those, by weight and with
+#' replacement, as many times as there are bands, keeping the bands drawn.
+#' After the loop every iteration's set is scored by 5-fold cross-validation
+#' over all the rows the step is given, on one partition shared by every set
+#' (the rows sorted by the outcome and dealt to the folds in turn, as
+#' carspls's `plscv` deals them), at the component count where its error is
+#' lowest. The step returns the set with the lowest score (#106), the first
+#' on ties, each kept representative bringing its whole cluster. The trained
+#' step records this in its `cars` element: the bands it selected from
+#' (`n_bands`), the near-constant bands it dropped before (`n_constant`), the
+#' representatives, each iteration's score, the iteration chosen, the bands
+#' kept, `retained_all` (always `FALSE`: CARS always selects) and `skipped`.
+#' The score is the one CARS chose by, not an estimate of accuracy: the
+#' lowest of 50 is biased low, and `evaluate()`'s folds, which rerun the step
+#' on each analysis set, measure the configuration.
 #'
 #' With fewer than two bands left after the near-constant ones are dropped,
 #' there is nothing to select between: the step keeps them, records
@@ -199,15 +205,13 @@ prep.step_select_cars <- function(x, training, info = NULL, ...) {
   ## ---------------------------------------------------------------------------
   ## Stage 3: Run CARS
   ## ---------------------------------------------------------------------------
-  ## The published method (Li et al. 2009; libPLS's carspls). Each iteration
-  ## fits a PLS model on a Monte Carlo sample of the rows, using the bands
-  ## entering it, and scores the fit. Its coefficients weight the bands
-  ## afresh: the exponentially decreasing function keeps the K most heavily
-  ## weighted (EDF), and adaptive reweighted sampling draws as many times as
-  ## there are bands, with replacement, by weight among those K, keeping the
-  ## bands drawn (ARS). The step returns the set the lowest score was
-  ## measured on (#106): the set entering that iteration, every band of
-  ## which its fit was given.
+  ## As the authors' code runs it (libPLS's carspls, with the paper's
+  ## randomised sampling; Li et al. 2009). Each iteration fits PLS on a Monte
+  ## Carlo sample of the rows, using the bands entering it, only to weight
+  ## them: the coefficients weight the bands afresh, the exponentially
+  ## decreasing function keeps the K most heavily weighted (EDF), and
+  ## adaptive reweighted sampling draws as many times as there are bands,
+  ## with replacement, by weight among those K, keeping the bands drawn (ARS).
 
   n_iterations <- 50
   mc_ratio     <- 0.8
@@ -219,7 +223,6 @@ prep.step_select_cars <- function(x, training, info = NULL, ...) {
 
   selected <- seq_len(n_vars)
   sets     <- vector("list", n_iterations)
-  scores   <- rep(NA_real_, n_iterations)
 
   for (iter in seq_len(n_iterations)) {
 
@@ -238,11 +241,7 @@ prep.step_select_cars <- function(x, training, info = NULL, ...) {
     ### As many components as bands at most, as carspls's pls() caps them
     ### (min(A, rows, bands)); a single band is fitted with one.
     n_comp  <- max(1, min(n_components, length(selected)))
-    pls_fit <- pls::plsr(y ~ ., data = pls_data, ncomp = n_comp, validation = "LOO")
-
-    ## The cross-validated RMSEP at the best number of components, the
-    ## published score; the intercept-only model is left out
-    scores[iter] <- min(pls::RMSEP(pls_fit, estimate = "CV", intercept = FALSE)$val)
+    pls_fit <- pls::plsr(y ~ ., data = pls_data, ncomp = n_comp)
 
     ## Weights from this fit's coefficients alone (coef() on a pls fit is a
     ## bands x 1 x 1 array)
@@ -255,7 +254,13 @@ prep.step_select_cars <- function(x, training, info = NULL, ...) {
 
   }
 
-  best <- which.min(scores)
+  ## After the loop, as carspls scores them: every iteration's set by 5-fold
+  ## CV over all the rows the step is given, on one partition shared by
+  ## every set, so the sets are compared on the same rows. The set with the
+  ## lowest score is returned (#106), the first on ties.
+  folds  <- cars_folds(outcome_vec, 5L)
+  scored <- cars_score_path(reduced_mat, outcome_vec, sets, folds, n_components)
+  best   <- which.min(scored$rmsecv)
 
   kept_cluster_vars <- cluster_vars[sets[[best]]]
 
@@ -269,7 +274,7 @@ prep.step_select_cars <- function(x, training, info = NULL, ...) {
   cars_record <- list(n_bands           = ncol(spectra_mat),
                       n_constant        = n_constant,
                       n_representatives = n_vars,
-                      scores            = scores,
+                      scores            = scored$rmsecv,
                       iteration         = best,
                       n_kept            = length(kept_wavenumbers),
                       retained_all      = FALSE,
@@ -290,6 +295,98 @@ prep.step_select_cars <- function(x, training, info = NULL, ...) {
     skip           = x$skip,
     id             = x$id
   ))
+}
+
+
+## -----------------------------------------------------------------------------
+## CARS's scoring, as carspls runs it
+## -----------------------------------------------------------------------------
+
+#' The folds CARS scores every set on
+#'
+#' @description
+#' As libPLS's `plscv(order = 0)` partitions: the rows sorted by the outcome
+#' and dealt to the folds in turn, so each fold spans the outcome's range and
+#' the partition is the same for every set scored.
+#'
+#' @param y Numeric outcome.
+#' @param k Integer. The number of folds.
+#' @return List of `k` integer vectors of row indices.
+#' @keywords internal
+#' @noRd
+cars_folds <- function(y, k) {
+
+  sorted <- order(y)
+
+  unname(split(sorted, 1 + (seq_along(sorted) - 1) %% k))
+
+}
+
+#' Score one set of bands by cross-validated PLS
+#'
+#' @description
+#' One PLS fit per fold on the other folds' rows, predicting the fold's rows,
+#' at every component count up to `max_comp`, limited by the bands and by
+#' the rows a fold's fit is given (less one). The score is the root mean
+#' squared error over all rows at the component count where it is lowest
+#' (carspls's `selectLV = 0`; its default one-standard-deviation rule is not
+#' used), the intercept-only model left out.
+#'
+#' @param X Numeric matrix, the set's bands.
+#' @param y Numeric outcome.
+#' @param folds From [cars_folds()].
+#' @param max_comp Integer. The most components a fit may take.
+#' @return List: `rmsecv`, `se` (the standard error of the folds' RMSE at
+#'   that count) and `ncomp`.
+#' @keywords internal
+#' @noRd
+cars_score_subset <- function(X, y, folds, max_comp) {
+
+  n_comp <- max(1, min(max_comp, ncol(X), nrow(X) - max(lengths(folds)) - 1))
+
+  data   <- as.data.frame(X)
+  data$y <- y
+
+  fit <- pls::plsr(y ~ ., data = data, ncomp = n_comp, validation = "CV", segments = folds)
+
+  rmsep <- pls::RMSEP(fit, estimate = "CV", intercept = FALSE)$val[1, 1, ]
+  ncomp <- unname(which.min(rmsep))
+
+  errors    <- (fit$validation$pred[, 1, ncomp] - y)^2
+  fold_rmse <- vapply(folds, function(f) sqrt(mean(errors[f])), numeric(1))
+
+  list(rmsecv = unname(rmsep[ncomp]),
+       se     = stats::sd(fold_rmse) / sqrt(length(folds)),
+       ncomp  = ncomp)
+
+}
+
+#' Score every iteration's set, each distinct set once
+#'
+#' @param X Numeric matrix, the representatives.
+#' @param y Numeric outcome.
+#' @param sets List of integer vectors, the columns of `X` each iteration
+#'   fitted.
+#' @param folds From [cars_folds()].
+#' @param max_comp Integer. The most components a fit may take.
+#' @return Tibble, one row per iteration: `rmsecv`, `se` and `ncomp`.
+#' @keywords internal
+#' @noRd
+cars_score_path <- function(X, y, sets, folds, max_comp) {
+
+  key      <- vapply(sets, paste, character(1), collapse = ",")
+  distinct <- unique(key)
+
+  scored <- lapply(distinct, function(k) {
+    cars_score_subset(X[, sets[[match(k, key)]], drop = FALSE], y, folds, max_comp)
+  })[match(key, distinct)]
+
+  tibble::tibble(
+    rmsecv = vapply(scored, `[[`, numeric(1), "rmsecv"),
+    se     = vapply(scored, `[[`, numeric(1), "se"),
+    ncomp  = vapply(scored, `[[`, integer(1), "ncomp")
+  )
+
 }
 
 
