@@ -83,8 +83,10 @@ each band is its own representative), the representatives
 (\code{n_representatives}), the \code{path} (a tibble, one row per
 iteration: its \code{representatives} and \code{bands}, \code{rmsecv}, its standard error
 across the folds \code{se}, and the component count \code{ncomp}), the iteration
-chosen, the bands kept, \code{retained_all} (always \code{FALSE}: CARS always
-selects) and \code{skipped}.
+chosen, the bands kept, \code{retained_all} and \code{skipped}. \code{retained_all} is
+\code{TRUE} when the first iteration's set, every band, scored lowest: CARS's
+answer can be no selection. It is the scored answer, not a fallback, so
+the step does not warn.
 The score is the one CARS chose by, not an estimate of accuracy: the
 lowest of 50 is biased low, and \code{evaluate()}'s folds, which rerun the step
 on each analysis set, measure the configuration.

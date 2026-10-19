@@ -219,6 +219,8 @@ describe("step_select_cars() scores every set after the loop, as carspls does (#
     expect_identical(rec$iteration, which.min(rec$path$rmsecv))
     expect_setequal(tr$step$selected_vars, tr$weight[[rec$iteration]]$bands)
     expect_identical(rec$n_kept, length(tr$step$selected_vars))
+    expect_gt(rec$iteration, 1L)
+    expect_false(rec$retained_all)
 
   })
 
@@ -274,10 +276,15 @@ describe("step_select_cars() scores every set after the loop, as carspls does (#
                      ncomp = rep(1L, length(sets)))
     })
 
-    step <- withr::with_seed(1, suppressMessages(recipes::prep(cars_recipe(d), training = d)))$steps[[1]]
+    ## CARS's scored answer is every band: recorded, and no warning, since
+    ## it is not a fallback
+    expect_no_warning(
+      step <- withr::with_seed(1, suppressMessages(recipes::prep(cars_recipe(d), training = d)))$steps[[1]]
+    )
 
     expect_identical(step$cars$iteration, 1L)
     expect_length(step$selected_vars, 40L)
+    expect_true(step$cars$retained_all)
 
   })
 

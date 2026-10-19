@@ -60,8 +60,10 @@
 #' (`n_representatives`), the `path` (a tibble, one row per
 #' iteration: its `representatives` and `bands`, `rmsecv`, its standard error
 #' across the folds `se`, and the component count `ncomp`), the iteration
-#' chosen, the bands kept, `retained_all` (always `FALSE`: CARS always
-#' selects) and `skipped`.
+#' chosen, the bands kept, `retained_all` and `skipped`. `retained_all` is
+#' `TRUE` when the first iteration's set, every band, scored lowest: CARS's
+#' answer can be no selection. It is the scored answer, not a fallback, so
+#' the step does not warn.
 #' The score is the one CARS chose by, not an estimate of accuracy: the
 #' lowest of 50 is biased low, and `evaluate()`'s folds, which rerun the step
 #' on each analysis set, measure the configuration.
@@ -321,7 +323,7 @@ prep.step_select_cars <- function(x, training, info = NULL, ...) {
                       path              = path,
                       iteration         = best,
                       n_kept            = length(kept_wavenumbers),
-                      retained_all      = FALSE,
+                      retained_all      = best == 1L,
                       skipped           = FALSE)
 
   ## ---------------------------------------------------------------------------
