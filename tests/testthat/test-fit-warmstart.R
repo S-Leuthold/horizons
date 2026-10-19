@@ -574,7 +574,8 @@ describe("tune_warmstart_bayes() - a Bayesian search that fails (#209)", {
         metric_set    = ts$metric_set,
         allow_par     = FALSE,
         debug         = TRUE
-      )
+      ),
+      "The GP model requires 2+ initial points", fixed = TRUE
     )
 
   })

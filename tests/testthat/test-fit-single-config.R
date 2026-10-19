@@ -693,6 +693,12 @@ describe("fit_single_config() - a warm-start search that fails (#209)", {
       result$warnings, fixed = TRUE
     )))
 
+    ## A substitution warning on the member's records, which fit() lifts once
+    ## to its log, as evaluate()'s configuration does
+    records <- attr(result, "unit_records")
+    fell_back <- startsWith(records$message, "The warm-start Bayesian search failed")
+    expect_identical(records$class[fell_back], "horizons_warning_substitution")
+
   })
 
 })
@@ -1232,7 +1238,11 @@ describe("fit_single_config() - UQ and AD as units of their own (#145)", {
 
     local_mocked_bindings(fit_ad = function(...) stop("the domain broke"))
 
-    expect_error(run_addons(compute_ad = TRUE, debug = TRUE), "the domain broke", fixed = TRUE)
+    err <- expect_error(run_addons(compute_ad = TRUE, debug = TRUE), "the domain broke", fixed = TRUE)
+
+    ## The error itself, not one horizons wrapped it in
+    expect_s3_class(err, "simpleError")
+    expect_false(inherits(err, "horizons_error"))
 
   })
 
