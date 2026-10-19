@@ -297,12 +297,12 @@ point_in_grid <- function(point, grid) {
 #' The re-tuning sequence of a `fit()` member, run inside its unit:
 #' 1. Evaluate the starting grid ([build_warmstart_grid()]) with
 #'    `tune::tune_grid()`. A result in which every model failed fails the
-#'    member, with tune's cause ([check_tune_result()]), and so does a grid
+#'    member, with tune's cause (`check_tune_result()`), and so does a grid
 #'    with no candidate scored on every fold (#101).
-#' 2. If `bayesian_iter > 0`, refine with [bayes_search()], which keeps what
+#' 2. If `bayesian_iter > 0`, refine with `bayes_search()`, which keeps what
 #'    it finished when it fails, and says so (#209).
 #' 3. Choose the hyperparameters by RMSE among the candidates scored on every
-#'    fold ([select_complete()]).
+#'    fold (`select_complete()`).
 #'
 #' @param workflow A tidymodels workflow (recipe + model spec, not fitted).
 #' @param cv_resamples A `vfold_cv` object.

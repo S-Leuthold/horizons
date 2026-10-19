@@ -48,12 +48,12 @@ The re-tuning sequence of a \code{fit()} member, run inside its unit:
 \enumerate{
 \item Evaluate the starting grid (\code{\link[=build_warmstart_grid]{build_warmstart_grid()}}) with
 \code{tune::tune_grid()}. A result in which every model failed fails the
-member, with tune's cause (\code{\link[=check_tune_result]{check_tune_result()}}), and so does a grid
+member, with tune's cause (\code{check_tune_result()}), and so does a grid
 with no candidate scored on every fold (#101).
-\item If \code{bayesian_iter > 0}, refine with \code{\link[=bayes_search]{bayes_search()}}, which keeps what
+\item If \code{bayesian_iter > 0}, refine with \code{bayes_search()}, which keeps what
 it finished when it fails, and says so (#209).
 \item Choose the hyperparameters by RMSE among the candidates scored on every
-fold (\code{\link[=select_complete]{select_complete()}}).
+fold (\code{select_complete()}).
 }
 }
 \keyword{internal}
