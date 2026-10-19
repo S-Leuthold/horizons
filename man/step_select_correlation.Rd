@@ -63,6 +63,10 @@ This step is designed to operate on spectra that have already been preprocessed
 (e.g., SNV + derivative). It should be applied after spectral transformation but
 before dimensionality reduction (e.g., PCA) or model fitting.
 
+When you \code{tidy()} this step, a tibble is returned with columns \code{terms}
+and \code{id}: before \code{prep()}, \code{terms} holds the selectors; after, the columns
+the step removed, as recipes' filter steps report them (#109).
+
 Its refusals (an \code{outcome} that is not one column of the training data, a
 \code{bake()} before \code{prep()}, new data lacking a column it selected) carry the
 class \code{horizons_error_input}. Raised inside \code{prep()}, recipes wraps them in

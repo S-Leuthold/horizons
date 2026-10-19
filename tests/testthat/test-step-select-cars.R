@@ -409,3 +409,43 @@ describe("step_select_cars() with too few bands to select from", {
   })
 
 })
+
+
+describe("step_select_cars()'s tidy() and print() (#109)", {
+
+  it("tidies to its selectors before prep and the columns it removed after", {
+
+    skip_if_not_installed("pls")
+
+    d   <- cars_signal_data()
+    rec <- cars_recipe(d)
+
+    untrained <- recipes::tidy(rec, number = 1)
+
+    expect_identical(untrained$terms, "dplyr::starts_with(\"wn_\")")
+    expect_identical(untrained$id, rec$steps[[1]]$id)
+
+    prepped <- withr::with_seed(1, suppressMessages(recipes::prep(rec, training = d)))
+    trained <- recipes::tidy(prepped, number = 1)
+    kept    <- prepped$steps[[1]]$selected_vars
+
+    expect_setequal(trained$terms, setdiff(grep("^wn_", names(d), value = TRUE), kept))
+    expect_false(any(kept %in% trained$terms))
+
+  })
+
+  it("prints one line per fact", {
+
+    skip_if_not_installed("pls")
+
+    d     <- cars_signal_data()
+    step  <- withr::with_seed(1, suppressMessages(recipes::prep(cars_recipe(d), training = d)))$steps[[1]]
+    lines <- utils::capture.output(print(step))
+
+    expect_length(lines, 3L)
+    expect_identical(lines[2], "\u2022 Outcome column: SOC")
+    expect_identical(lines[3], "\u2022 8 wavenumbers retained after CARS")
+
+  })
+
+})

@@ -734,6 +734,34 @@ raise_selection_warning <- function(step) {
 }
 
 ## ---------------------------------------------------------------------------
+## tidy_selection_step
+## ---------------------------------------------------------------------------
+
+#' What a selection step's tidy() reports
+#'
+#' @description
+#' Shared by the `tidy()` methods of the three selection steps, which follow
+#' recipes' filter steps (`tidy.step_corr()`): before `prep()`, `terms`
+#' holds the selectors as text; after, the columns the step removed. A step
+#' from before #52 is read through [step_selectors()] and its `columns`.
+#'
+#' @param x A `step_select_*` step.
+#' @return Tibble with `terms` (character) and `id`.
+#' @keywords internal
+#' @noRd
+tidy_selection_step <- function(x) {
+
+  terms <- if (isTRUE(x$trained)) {
+    unname(setdiff(x$columns, x$selected_vars))
+  } else {
+    recipes::sel2char(step_selectors(x, class(x)[1]))
+  }
+
+  tibble::tibble(terms = as.character(terms), id = rep(x$id, length(terms)))
+
+}
+
+## ---------------------------------------------------------------------------
 ## step_selectors
 ## ---------------------------------------------------------------------------
 

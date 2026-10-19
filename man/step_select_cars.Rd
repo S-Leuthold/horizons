@@ -73,6 +73,10 @@ With fewer than two bands left after the near-constant ones are dropped,
 there is nothing to select between: the step keeps them, records
 \code{skipped = TRUE}, and warns with class \code{horizons_warning_skipped}.
 
+When you \code{tidy()} this step, a tibble is returned with columns \code{terms}
+and \code{id}: before \code{prep()}, \code{terms} holds the selectors; after, the columns
+the step removed, as recipes' filter steps report them (#109).
+
 Its refusals (an \code{outcome} that is not one column of the training data, a
 \code{bake()} before \code{prep()}, new data lacking a column it selected) carry the
 class \code{horizons_error_input}. Raised inside \code{prep()}, recipes wraps them in

@@ -56,6 +56,10 @@
 #' fails on some folds only, tune keeps those errors in its notes and scores
 #' the folds that ran.
 #'
+#' When you `tidy()` this step, a tibble is returned with columns `terms`
+#' and `id`: before `prep()`, `terms` holds the selectors; after, the columns
+#' the step removed, as recipes' filter steps report them (#109).
+#'
 #' Its refusals (an `outcome` that is not one column of the training data, a
 #' `bake()` before `prep()`, new data lacking a column it selected) carry the
 #' class `horizons_error_input`. Raised inside `prep()`, recipes wraps them in
@@ -438,5 +442,25 @@ print.step_select_boruta <- function(x,
 required_pkgs.step_select_boruta <- function(x, ...) {
 
   c("Boruta", "ranger", "horizons")
+
+}
+
+
+## ---------------------------------------------------------------------------
+## tidy
+## ---------------------------------------------------------------------------
+
+#' The columns step_select_boruta() removed
+#'
+#' @param x A `step_select_boruta` step.
+#' @param ... Not used.
+#' @return Tibble with `terms` and `id` ([tidy_selection_step()]).
+#' @importFrom recipes tidy
+#' @keywords internal
+#' @noRd
+#' @export
+tidy.step_select_boruta <- function(x, ...) {
+
+  tidy_selection_step(x)
 
 }

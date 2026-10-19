@@ -186,3 +186,29 @@ describe("step_select_correlation() with too few bands to select from", {
   })
 
 })
+
+
+describe("step_select_correlation()'s tidy() and print() (#109)", {
+
+  it("tidies to its selectors before prep and the columns it removed after, and prints one line per fact", {
+
+    withr::local_seed(1)
+    d   <- correlation_data(n = 100)
+    rec <- correlation_recipe(d)
+
+    expect_identical(recipes::tidy(rec, number = 1)$terms, "dplyr::starts_with(\"wn_\")")
+
+    prepped <- recipes::prep(rec, training = d)
+    kept    <- prepped$steps[[1]]$selected_vars
+
+    expect_setequal(recipes::tidy(prepped, number = 1)$terms,
+                    setdiff(grep("^wn_", names(d), value = TRUE), kept))
+
+    lines <- utils::capture.output(print(prepped$steps[[1]]))
+
+    expect_length(lines, 3L)
+    expect_identical(lines[2], "\u2022 Outcome column: SOC")
+
+  })
+
+})

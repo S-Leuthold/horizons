@@ -558,3 +558,25 @@ describe("step_select_boruta() with too few bands to select from", {
   })
 
 })
+
+
+describe("step_select_boruta()'s tidy() (#109)", {
+
+  it("tidies to its selectors before prep and the columns it removed after", {
+
+    skip_if_not_installed("Boruta")
+
+    d   <- boruta_signal_data()
+    rec <- boruta_recipe(d)
+
+    expect_identical(recipes::tidy(rec, number = 1)$terms, "dplyr::matches(\"^spec[0-9]+$\")")
+
+    prepped <- boruta_prepped()
+    kept    <- prepped$steps[[1]]$selected_vars
+
+    expect_setequal(recipes::tidy(prepped, number = 1)$terms,
+                    setdiff(grep("^spec", names(d), value = TRUE), kept))
+
+  })
+
+})

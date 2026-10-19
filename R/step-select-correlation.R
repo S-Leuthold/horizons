@@ -40,6 +40,10 @@
 #' (e.g., SNV + derivative). It should be applied after spectral transformation but
 #' before dimensionality reduction (e.g., PCA) or model fitting.
 #'
+#' When you `tidy()` this step, a tibble is returned with columns `terms`
+#' and `id`: before `prep()`, `terms` holds the selectors; after, the columns
+#' the step removed, as recipes' filter steps report them (#109).
+#'
 #' Its refusals (an `outcome` that is not one column of the training data, a
 #' `bake()` before `prep()`, new data lacking a column it selected) carry the
 #' class `horizons_error_input`. Raised inside `prep()`, recipes wraps them in
@@ -241,11 +245,17 @@ print.step_select_correlation <- function(x,
                                           width = max(20, options()$width - 30),
                                           ...) {
 
+  ## glue() trims a trailing newline, so each line ends with its own.
   cat("Correlation-based spectral feature selection step\n")
-  cat(glue::glue("\u2022 Outcome column: {x$outcome}\n"))
+  cat(glue::glue("\u2022 Outcome column: {x$outcome}"), "\n", sep = "")
 
   if (x$trained) {
-    cat(glue::glue("\u2022 {length(x$selected_vars)} wavenumbers retained after windowed scoring\n"))
+    cat(glue::glue("\u2022 {length(x$selected_vars)} wavenumbers retained after windowed scoring"), "\n", sep = "")
+    if (isTRUE(x$correlation$skipped)) {
+      cat("\u2022 Too few bands to score a window, so every band was kept\n")
+    } else if (isTRUE(x$correlation$retained_all)) {
+      cat("\u2022 No window cleared the threshold, so every band was kept\n")
+    }
   } else {
     cat("\u2022 Step not yet trained\n")
   }
@@ -275,5 +285,25 @@ print.step_select_correlation <- function(x,
 required_pkgs.step_select_correlation <- function(x, ...) {
 
   c("zoo", "horizons")
+
+}
+
+
+## ---------------------------------------------------------------------------
+## tidy
+## ---------------------------------------------------------------------------
+
+#' The columns step_select_correlation() removed
+#'
+#' @param x A `step_select_correlation` step.
+#' @param ... Not used.
+#' @return Tibble with `terms` and `id` ([tidy_selection_step()]).
+#' @importFrom recipes tidy
+#' @keywords internal
+#' @noRd
+#' @export
+tidy.step_select_correlation <- function(x, ...) {
+
+  tidy_selection_step(x)
 
 }

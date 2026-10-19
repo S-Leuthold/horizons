@@ -50,6 +50,10 @@
 #' there is nothing to select between: the step keeps them, records
 #' `skipped = TRUE`, and warns with class `horizons_warning_skipped`.
 #'
+#' When you `tidy()` this step, a tibble is returned with columns `terms`
+#' and `id`: before `prep()`, `terms` holds the selectors; after, the columns
+#' the step removed, as recipes' filter steps report them (#109).
+#'
 #' Its refusals (an `outcome` that is not one column of the training data, a
 #' `bake()` before `prep()`, new data lacking a column it selected) carry the
 #' class `horizons_error_input`. Raised inside `prep()`, recipes wraps them in
@@ -308,11 +312,15 @@ print.step_select_cars <- function(x,
                                    width = max(20, options()$width - 30),
                                    ...) {
 
+  ## glue() trims a trailing newline, so each line ends with its own.
   cat("CARS-based spectral feature selection step\n")
-  cat(glue::glue("\u2022 Outcome column: {x$outcome}\n"))
+  cat(glue::glue("\u2022 Outcome column: {x$outcome}"), "\n", sep = "")
 
   if (x$trained) {
-    cat(glue::glue("\u2022 {length(x$selected_vars)} wavenumbers retained after CARS\n"))
+    cat(glue::glue("\u2022 {length(x$selected_vars)} wavenumbers retained after CARS"), "\n", sep = "")
+    if (isTRUE(x$cars$skipped)) {
+      cat("\u2022 Too few bands to run CARS, so every band left was kept\n")
+    }
   } else {
     cat("\u2022 Step not yet trained\n")
   }
@@ -341,5 +349,25 @@ print.step_select_cars <- function(x,
 required_pkgs.step_select_cars <- function(x, ...) {
 
   c("pls", "horizons")
+
+}
+
+
+## ---------------------------------------------------------------------------
+## tidy
+## ---------------------------------------------------------------------------
+
+#' The columns step_select_cars() removed
+#'
+#' @param x A `step_select_cars` step.
+#' @param ... Not used.
+#' @return Tibble with `terms` and `id` ([tidy_selection_step()]).
+#' @importFrom recipes tidy
+#' @keywords internal
+#' @noRd
+#' @export
+tidy.step_select_cars <- function(x, ...) {
+
+  tidy_selection_step(x)
 
 }
