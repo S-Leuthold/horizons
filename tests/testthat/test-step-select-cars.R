@@ -4,8 +4,9 @@
 ##
 ## What the step refuses, and that it keeps the bands carrying the outcome.
 ## Its re-prep and round trip through build_recipe() are tested in
-## test-utils-recipes.R. These aborts carry no
-## package class, so each test matches the finding's own text.
+## test-utils-recipes.R. Its refusals are horizons_error_input; raised in
+## prep(), recipes wraps them in recipes_error_step, which expect_error()'s
+## class matches through.
 
 ## Helper: n spectra of p bands named wn_<wavenumber>, and an outcome
 ## carried by one band. Drawn under the caller's seed.
@@ -38,8 +39,10 @@ describe("step_select_cars() refuses input it cannot use", {
     d <- cars_data()
 
     ## Act & Assert
-    expect_error(recipes::prep(cars_recipe(d, outcome = c("SOC", "clay"))),
-                 "must be a single character string", fixed = TRUE)
+    err <- expect_error(recipes::prep(cars_recipe(d, outcome = c("SOC", "clay"))),
+                        "`outcome` must be a single string", fixed = TRUE,
+                        class = "horizons_error_input")
+    expect_true(rlang::cnd_inherits(err, "horizons_error_input"))
 
   })
 
@@ -51,7 +54,10 @@ describe("step_select_cars() refuses input it cannot use", {
 
     ## Act & Assert
     expect_error(recipes::prep(cars_recipe(d, outcome = "clay")),
-                 "not found in training data", fixed = TRUE)
+                 "not found in training data", fixed = TRUE,
+                 class = "horizons_error_input")
+    expect_error(recipes::prep(cars_recipe(d, outcome = "clay")),
+                 "Set `outcome` to the name of a column of the training data", fixed = TRUE)
 
   })
 
@@ -65,7 +71,8 @@ describe("step_select_cars() refuses input it cannot use", {
     ## Act & Assert. bake() on the recipe refuses an untrained recipe before
     ## any step runs, so the step itself is baked.
     expect_error(recipes::bake(rec$steps[[1]], new_data = d),
-                 "This step has not been trained yet", fixed = TRUE)
+                 "This step has not been trained yet", fixed = TRUE,
+                 class = "horizons_error_input")
 
   })
 
@@ -92,9 +99,13 @@ describe("step_select_cars() refuses input it cannot use", {
     expect_gt(length(selected), 0L)
     expect_true(all(grepl("^spec[0-9]+$", selected)))
 
-    ## Act & Assert
-    expect_error(recipes::bake(prepped, new_data = d),
-                 "Some selected wavenumbers are missing in new_data.", fixed = TRUE)
+    ## Act & Assert: horizons' class, and recipes' check, which names the
+    ## missing columns, as the parent (#109)
+    err <- expect_error(recipes::bake(prepped, new_data = d),
+                        "`new_data` lacks columns `step_select_cars()` selected.",
+                        fixed = TRUE, class = "horizons_error_input")
+    expect_match(rlang::cnd_message(err), selected[1], fixed = TRUE)
+    expect_match(rlang::cnd_message(err), "missing from `new_data`", fixed = TRUE)
 
   })
 

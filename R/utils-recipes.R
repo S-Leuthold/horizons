@@ -532,6 +532,76 @@ check_selection_columns <- function(col_names, step) {
 }
 
 ## ---------------------------------------------------------------------------
+## check_step_outcome, check_step_new_data
+## ---------------------------------------------------------------------------
+
+#' Refuse a Selection Step's Outcome That Is Not a Column of the Training Data
+#'
+#' @description
+#' Shared by the `prep()` methods of the three selection steps: `outcome` is
+#' the step's own argument, checked where recipes checks a step's arguments.
+#' Raised inside `prep()`, the refusal arrives wrapped in recipes'
+#' `recipes_error_step`, so a handler finds the class with
+#' [rlang::cnd_inherits()].
+#'
+#' @param outcome The step's `outcome`.
+#' @param training The training data `prep()` was given.
+#' @param call The frame the refusal reports: the step's `prep()`.
+#'
+#' @return `outcome`, invisibly; aborts with class `horizons_error_input`.
+#' @keywords internal
+#' @noRd
+check_step_outcome <- function(outcome, training, call = rlang::caller_env()) {
+
+  check_arg(rlang::check_string, outcome, arg = "outcome", call = call)
+
+  if (!outcome %in% names(training)) {
+
+    abort_horizons(c(
+      "Outcome column {.val {outcome}} not found in training data.",
+      "i" = "Set {.arg outcome} to the name of a column of the training data."
+    ), kind = "input", call = call)
+
+  }
+
+  invisible(outcome)
+
+}
+
+#' Refuse New Data That Lacks a Column a Selection Step Selected
+#'
+#' @description
+#' Shared by the `bake()` methods of the three selection steps. The columns
+#' are checked by [recipes::check_new_data()], as every recipes step checks
+#' them, and its error, which names the missing columns, is raised again
+#' with horizons' input class and kept as the parent.
+#'
+#' @param object The trained step.
+#' @param new_data The data `bake()` was given.
+#' @param call The frame the refusal reports: the step's `bake()`.
+#'
+#' @return `NULL`, invisibly; aborts with class `horizons_error_input`.
+#' @keywords internal
+#' @noRd
+check_step_new_data <- function(object, new_data, call = rlang::caller_env()) {
+
+  step <- class(object)[1]
+
+  rlang::try_fetch(
+    recipes::check_new_data(object$selected_vars, object, new_data),
+    error = function(e) {
+      abort_horizons(c(
+        "{.arg new_data} lacks columns {.fn {step}} selected.",
+        "i" = "{.arg new_data} must carry the columns the steps before this one produce."
+      ), kind = "input", parent = e, call = call)
+    }
+  )
+
+  invisible(NULL)
+
+}
+
+## ---------------------------------------------------------------------------
 ## step_selectors
 ## ---------------------------------------------------------------------------
 

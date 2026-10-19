@@ -52,4 +52,9 @@ rates to identify the minimal optimal wavelength set. The algorithm is run at
 For best results, this step should be applied \emph{after} spectral preprocessing (e.g. SNV,
 derivatives) and \emph{before} PCA or model fitting. CARS is particularly effective for
 identifying minimal wavelength sets that maintain predictive performance.
+
+Its refusals (an \code{outcome} that is not one column of the training data, a
+\code{bake()} before \code{prep()}, new data lacking a column it selected) carry the
+class \code{horizons_error_input}. Raised inside \code{prep()}, recipes wraps them in
+\code{recipes_error_step}, so test for the class with \code{rlang::cnd_inherits()}.
 }

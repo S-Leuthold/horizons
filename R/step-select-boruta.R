@@ -54,6 +54,11 @@
 #' fails on some folds only, tune keeps those errors in its notes and scores
 #' the folds that ran.
 #'
+#' Its refusals (an `outcome` that is not one column of the training data, a
+#' `bake()` before `prep()`, new data lacking a column it selected) carry the
+#' class `horizons_error_input`. Raised inside `prep()`, recipes wraps them in
+#' `recipes_error_step`, so test for the class with `rlang::cnd_inherits()`.
+#'
 #' The trained step records what Boruta did in its `boruta` element: the
 #' confirmed, tentative and rejected counts, each attribute's `decision`, the
 #' `runs`, `max_runs` and `num_trees`, the `mtry` ceiling and the `mtry` of
@@ -140,14 +145,7 @@ prep.step_select_boruta <- function(x, training, info = NULL, ...) {
   col_names <- recipes::recipes_eval_select(selectors, training, info)
 
   check_selection_columns(col_names, "step_select_boruta")
-
-  if (!is.character(x$outcome) || length(x$outcome) != 1) {
-    cli::cli_abort("The {.arg outcome} must be a single character string.")
-  }
-
-  if (!x$outcome %in% names(training)) {
-    cli::cli_abort("Outcome column {.val {x$outcome}} not found in training data.")
-  }
+  check_step_outcome(x$outcome, training)
 
   ## Boruta is suggested, not imported. Checked here, before any work, so a
   ## missing install names the package rather than surfacing as a Boruta
@@ -340,12 +338,11 @@ prep.step_select_boruta <- function(x, training, info = NULL, ...) {
 bake.step_select_boruta <- function(object, new_data, ...) {
 
   if (is.null(object$selected_vars)) {
-    cli::cli_abort("This step has not been trained yet. Please call `prep()` first.")
+    abort_horizons("This step has not been trained yet. Please call `prep()` first.",
+                   kind = "input")
   }
 
-  if (!all(object$selected_vars %in% names(new_data))) {
-    cli::cli_abort("Some selected wavenumbers are missing in new_data.")
-  }
+  check_step_new_data(object, new_data)
 
   ## Retain: selected spectral vars + all non-spectral columns
   keep_cols <- c(object$selected_vars,

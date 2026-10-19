@@ -77,6 +77,11 @@ Boruta fails on the full training set or on every resampling fold. When it
 fails on some folds only, tune keeps those errors in its notes and scores
 the folds that ran.
 
+Its refusals (an \code{outcome} that is not one column of the training data, a
+\code{bake()} before \code{prep()}, new data lacking a column it selected) carry the
+class \code{horizons_error_input}. Raised inside \code{prep()}, recipes wraps them in
+\code{recipes_error_step}, so test for the class with \code{rlang::cnd_inherits()}.
+
 The trained step records what Boruta did in its \code{boruta} element: the
 confirmed, tentative and rejected counts, each attribute's \code{decision}, the
 \code{runs}, \code{max_runs} and \code{num_trees}, the \code{mtry} ceiling and the \code{mtry} of

@@ -54,6 +54,11 @@ all input wavenumbers are retained with a warning.
 This step is designed to operate on spectra that have already been preprocessed
 (e.g., SNV + derivative). It should be applied after spectral transformation but
 before dimensionality reduction (e.g., PCA) or model fitting.
+
+Its refusals (an \code{outcome} that is not one column of the training data, a
+\code{bake()} before \code{prep()}, new data lacking a column it selected) carry the
+class \code{horizons_error_input}. Raised inside \code{prep()}, recipes wraps them in
+\code{recipes_error_step}, so test for the class with \code{rlang::cnd_inherits()}.
 }
 \seealso{
 \code{\link[recipes:recipe]{recipes::recipe()}}, \code{\link[recipes:prep]{recipes::prep()}}, \code{\link[recipes:bake]{recipes::bake()}}

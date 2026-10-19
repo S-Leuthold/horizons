@@ -32,6 +32,11 @@
 #' (e.g., SNV + derivative). It should be applied after spectral transformation but
 #' before dimensionality reduction (e.g., PCA) or model fitting.
 #'
+#' Its refusals (an `outcome` that is not one column of the training data, a
+#' `bake()` before `prep()`, new data lacking a column it selected) carry the
+#' class `horizons_error_input`. Raised inside `prep()`, recipes wraps them in
+#' `recipes_error_step`, so test for the class with `rlang::cnd_inherits()`.
+#'
 #' @seealso [recipes::recipe()], [recipes::prep()], [recipes::bake()]
 #'
 #' @importFrom recipes recipe prep bake step add_step rand_id recipes_eval_select update_role update_role_requirements all_predictors all_outcomes
@@ -122,13 +127,8 @@ prep.step_select_correlation <- function(x, training, info = NULL, ...) {
   col_names <- recipes::recipes_eval_select(selectors, training, info)
 
   check_selection_columns(col_names, "step_select_correlation")
+  check_step_outcome(x$outcome, training)
 
-  if (!is.character(x$outcome) || length(x$outcome) != 1) {
-    cli::cli_abort("The {.arg outcome} must be a single character string.")
-  }
-  if (!x$outcome %in% names(training)) {
-    cli::cli_abort("Outcome column {.val {x$outcome}} not found in training data.")
-  }
   outcome_vec <- training[[x$outcome]]
   spectra_mat <- as.matrix(training[, col_names])
 
@@ -178,12 +178,11 @@ prep.step_select_correlation <- function(x, training, info = NULL, ...) {
 bake.step_select_correlation <- function(object, new_data, ...) {
 
   if (is.null(object$selected_vars)) {
-    cli::cli_abort("This step has not been trained yet. Please call `prep()` first.")
+    abort_horizons("This step has not been trained yet. Please call `prep()` first.",
+                   kind = "input")
   }
 
-  if (!all(object$selected_vars %in% names(new_data))) {
-    cli::cli_abort("Some selected wavenumbers are missing in new_data.")
-  }
+  check_step_new_data(object, new_data)
 
   original_predictors <- object$columns
   other_cols          <- setdiff(names(new_data), original_predictors)
