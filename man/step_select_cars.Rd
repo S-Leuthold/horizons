@@ -69,9 +69,12 @@ After the loop every iteration's set is scored by 5-fold cross-validation
 over all the rows the step is given, on one partition shared by every set
 (the rows sorted by the outcome and dealt to the folds in turn, as
 carspls's \code{plscv} deals them), at the component count where its error is
-lowest. Every fit, for the weights and for the scores, takes up to 30
-components (the PLS model's own cap), and no more than its bands or the
-rows it is fitted on, less one. The step returns the set with the lowest score (#106), the first
+lowest. The scoring fits take up to 30 components (the PLS model's own
+cap), no more than the set's bands or the rows a fold's fit has, less one.
+The weight fits take the component count that scoring chose for the full
+set of representatives, computed once before the loop, no more than the
+sample's rows less one or the set's bands: the weights only rank the
+bands, and a fit of 30 components on a small sample ranks them by noise. The step returns the set with the lowest score (#106), the first
 on ties, each kept representative bringing its whole cluster. The trained
 step records this in its \code{cars} element: the bands it selected from
 (\code{n_bands}), the near-constant bands it dropped before (\code{n_constant}),

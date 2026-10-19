@@ -131,8 +131,8 @@ describe("step_select_cars() selects", {
     skip_if_not_installed("pls")
 
     ## Over seeds 1 to 20 (the recipe built under the seed, as here) both
-    ## signal bands survive at every seed, with exactly those two kept at 16
-    ## and three to five at the other four; at seed 1 the set is pinned
+    ## signal bands survive at every seed, with exactly those two kept at 18
+    ## and three or four at the other two; at seed 1 the set is pinned
     ## below.
     d <- cars_signal_data()
 
@@ -141,7 +141,7 @@ describe("step_select_cars() selects", {
 
     expect_true(all(c("wn_3980", "wn_3950") %in% selected))
     expect_lt(length(selected), 40L)
-    expect_setequal(selected, c("wn_3998", "wn_3980", "wn_3964", "wn_3950", "wn_3938"))
+    expect_setequal(selected, c("wn_3980", "wn_3950"))
 
   })
 
@@ -269,7 +269,7 @@ describe("step_select_cars() scores every set after the loop, as carspls does (#
     d <- cars_signal_data()
 
     ## Every set scored alike: the first iteration's, every band, is returned
-    local_mocked_bindings(cars_score_path = function(X, y, sets, folds, max_comp) {
+    local_mocked_bindings(cars_score_path = function(X, y, sets, folds, max_comp, ...) {
       tibble::tibble(rmsecv = rep(1, length(sets)), se = rep(0, length(sets)),
                      ncomp = rep(1L, length(sets)))
     })
@@ -515,26 +515,32 @@ describe("step_select_cars() weights the bands as published (Li et al. 2009)", {
 
   })
 
-  it("fits up to the PLS cap of 30 components, limited by the bands and by the rows less one, for weights and scores", {
+  it("fits the weights at the full set's CV-chosen count, and scores up to the PLS cap of 30", {
 
     skip_if_not_installed("pls")
 
     ## 60 rows of 40 bands: the weight fits have 48 rows, the scoring fits'
-    ## folds 48, so the cap of 30 binds until the sets fall below 30 bands
+    ## folds 48. The full set, scored first, before the loop, chooses a
+    ## count well under 30; the weight fits take it, limited by their bands,
+    ## and the scoring fits take up to 30, limited by theirs
     tr <- cars_fits(cars_signal_data())
 
+    full    <- tr$scoring[[1]]
+    chosen  <- unname(which.min(pls::RMSEP(full$fit, estimate = "CV", intercept = FALSE)$val[1, 1, ]))
     w_bands <- vapply(tr$weight, function(w) length(w$bands), integer(1))
     w_comp  <- vapply(tr$weight, `[[`, numeric(1), "ncomp")
     s_bands <- vapply(tr$scoring, function(s) length(s$bands), integer(1))
     s_comp  <- vapply(tr$scoring, `[[`, numeric(1), "ncomp")
 
-    expect_identical(w_comp[1], 30)
-    expect_true(any(w_bands < 30L))
-    expect_identical(w_comp, as.numeric(pmin(PLS_MAX_COMP, 47L, w_bands)))
+    expect_length(full$bands, 40L)
+    expect_lt(chosen, 30L)
+    expect_identical(w_comp, as.numeric(pmin(chosen, 47L, w_bands)))
+    expect_identical(s_comp[1], 30)
     expect_identical(s_comp, as.numeric(pmin(PLS_MAX_COMP, 47L, s_bands)))
+    expect_identical(tr$step$cars$path$ncomp[1], chosen)
 
-    ## 25 rows: the weight fits' 20-row samples and the scoring fits' 20-row
-    ## folds allow 19
+    ## 25 rows: the scoring fits' 20-row folds allow 19, and the weight fits'
+    ## 20-row samples allow 19 too, above the count chosen
     small <- withr::with_seed(4, {
       m <- matrix(stats::rnorm(25 * 40), 25)
       colnames(m) <- paste0("wn_", seq(4000, by = -2, length.out = 40))
@@ -543,10 +549,11 @@ describe("step_select_cars() weights the bands as published (Li et al. 2009)", {
       d
     })
 
-    tr <- cars_fits(small)
+    tr     <- cars_fits(small)
+    chosen <- unname(which.min(pls::RMSEP(tr$scoring[[1]]$fit, estimate = "CV", intercept = FALSE)$val[1, 1, ]))
 
-    expect_identical(tr$weight[[1]]$ncomp, 19)
     expect_identical(tr$scoring[[1]]$ncomp, 19)
+    expect_identical(tr$weight[[1]]$ncomp, as.numeric(min(chosen, 19L)))
 
   })
 

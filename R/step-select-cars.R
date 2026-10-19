@@ -46,9 +46,12 @@
 #' over all the rows the step is given, on one partition shared by every set
 #' (the rows sorted by the outcome and dealt to the folds in turn, as
 #' carspls's `plscv` deals them), at the component count where its error is
-#' lowest. Every fit, for the weights and for the scores, takes up to 30
-#' components (the PLS model's own cap), and no more than its bands or the
-#' rows it is fitted on, less one. The step returns the set with the lowest score (#106), the first
+#' lowest. The scoring fits take up to 30 components (the PLS model's own
+#' cap), no more than the set's bands or the rows a fold's fit has, less one.
+#' The weight fits take the component count that scoring chose for the full
+#' set of representatives, computed once before the loop, no more than the
+#' sample's rows less one or the set's bands: the weights only rank the
+#' bands, and a fit of 30 components on a small sample ranks them by noise. The step returns the set with the lowest score (#106), the first
 #' on ties, each kept representative bringing its whole cluster. The trained
 #' step records this in its `cars` element: the bands it selected from
 #' (`n_bands`), the near-constant bands it dropped before (`n_constant`),
@@ -235,6 +238,17 @@ prep.step_select_cars <- function(x, training, info = NULL, ...) {
   n_vars    <- ncol(reduced_mat)
   decay     <- exp(log(2 / n_vars) / (n_iterations - 1))
 
+  ## The partition every set is scored on, and the full set's score on it,
+  ## computed once before the loop. The weight fits take the component
+  ## count that score chose: the weights only rank the bands, and a fit of
+  ## as many components as the cap allows, on a Monte Carlo sample of 64 to
+  ## 128 rows, ranked them by noise (CARS was 10 to 12% worse than no
+  ## selection on organic carbon at those sizes). libPLS's own default for
+  ## the weight fit is two components.
+  folds       <- cars_folds(outcome_vec, 5L)
+  full        <- cars_score_subset(reduced_mat, outcome_vec, folds, PLS_MAX_COMP)
+  weight_comp <- full$ncomp
+
   selected <- seq_len(n_vars)
   sets     <- vector("list", n_iterations)
 
@@ -252,12 +266,10 @@ prep.step_select_cars <- function(x, training, info = NULL, ...) {
     pls_data   <- as.data.frame(reduced_mat[mc_samples, selected, drop = FALSE])
     pls_data$y <- outcome_vec[mc_samples]
 
-    ### The package's PLS cap (PLS_MAX_COMP), limited as carspls's pls()
-    ### limits it, by the rows (less one) and the bands; a single band is
-    ### fitted with one. A cap of five underfitted organic carbon, which
-    ### needs about 13, so the weights and the scores came from a model
-    ### that could not fit the outcome.
-    n_comp  <- max(1, min(PLS_MAX_COMP, n_mc - 1, length(selected)))
+    ### The full set's CV-chosen count, limited as carspls's pls() limits a
+    ### fit, by the rows (less one) and the bands; a single band is fitted
+    ### with one.
+    n_comp  <- max(1, min(weight_comp, n_mc - 1, length(selected)))
     pls_fit <- pls::plsr(y ~ ., data = pls_data, ncomp = n_comp)
 
     ## Weights from this fit's coefficients alone (coef() on a pls fit is a
@@ -275,8 +287,7 @@ prep.step_select_cars <- function(x, training, info = NULL, ...) {
   ## CV over all the rows the step is given, on one partition shared by
   ## every set, so the sets are compared on the same rows. The set with the
   ## lowest score is returned (#106), the first on ties.
-  folds  <- cars_folds(outcome_vec, 5L)
-  scored <- cars_score_path(reduced_mat, outcome_vec, sets, folds, PLS_MAX_COMP)
+  scored <- cars_score_path(reduced_mat, outcome_vec, sets, folds, PLS_MAX_COMP, first = full)
   best   <- which.min(scored$rmsecv)
 
   kept_cluster_vars <- cluster_vars[sets[[best]]]
@@ -402,15 +413,19 @@ cars_score_subset <- function(X, y, folds, max_comp) {
 #'   fitted.
 #' @param folds From [cars_folds()].
 #' @param max_comp Integer. The most components a fit may take.
+#' @param first The first set's score, from [cars_score_subset()], when it is
+#'   already computed (the full set, scored before the loop); `NULL` to score
+#'   it here.
 #' @return Tibble, one row per iteration: `rmsecv`, `se` and `ncomp`.
 #' @keywords internal
 #' @noRd
-cars_score_path <- function(X, y, sets, folds, max_comp) {
+cars_score_path <- function(X, y, sets, folds, max_comp, first = NULL) {
 
   key      <- vapply(sets, paste, character(1), collapse = ",")
   distinct <- unique(key)
 
   scored <- lapply(distinct, function(k) {
+    if (!is.null(first) && identical(k, key[1])) return(first)
     cars_score_subset(X[, sets[[match(k, key)]], drop = FALSE], y, folds, max_comp)
   })[match(key, distinct)]
 
