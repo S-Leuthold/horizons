@@ -1551,3 +1551,27 @@ describe("build_recipe() under tune's parameter extraction", {
   })
 
 })
+
+
+## =========================================================================
+## The one-recipe rule: only the selection steps' warnings are muffled
+## =========================================================================
+
+describe("quiet_selection_warnings()", {
+
+  it("muffles the warnings a selection step raises, and lets every other warning through", {
+
+    expect_no_warning(quiet_selection_warnings(
+      warn_in_unit("substitution", "A step kept every band.", step = "step_select_cars")
+    ))
+
+    expect_warning(quiet_selection_warnings(warn_in_unit("quality", "Not a step's.")),
+                   "Not a step's.", class = "horizons_warning_quality")
+    expect_warning(quiet_selection_warnings(warning("a foreign warning")), "a foreign warning")
+    expect_error(quiet_selection_warnings(stop("an error")), "an error")
+
+    expect_identical(quiet_selection_warnings(1 + 1), 2)
+
+  })
+
+})

@@ -1353,3 +1353,52 @@ describe("fit_single_config() - a PLS config", {
   })
 
 })
+
+## Boruta, mocked to reject every attribute it is given, so the step keeps
+## every band and records it
+mock_boruta_rejecting <- function(x, y, ...) {
+
+  decision <- factor(rep("Rejected", ncol(x)), levels = c("Tentative", "Confirmed", "Rejected"))
+  names(decision) <- colnames(x)
+
+  structure(list(finalDecision = decision), class = "Boruta")
+
+}
+
+describe("fit_single_config() - a selection step's warning comes from the final fit's recipe", {
+
+  it("raises Boruta keeping every band once, read from the final fit", {
+
+    skip_if_not_installed("Boruta")
+
+    local_mocked_bindings(Boruta = mock_boruta_rejecting, .package = "Boruta")
+
+    setup <- make_fit_setup(n_wn = 20)
+
+    ## rf preps the recipe for its mtry bounds, and the final fit preps it
+    ## again; neither's warning is taken, only the record the reader reads
+    for (model in c("rf", "elastic_net")) {
+
+      result <- fit_single_config(
+        config_row          = make_fit_config(model = model, feature_selection = "boruta"),
+        split_F             = setup$split_F,
+        cv_resamples        = setup$folds,
+        role_map            = setup$role_map,
+        best_params_eval    = NULL,
+        final_bayesian_iter = 0L,
+        grid_size           = 2L,
+        seed                = 42L
+      )
+
+      rec <- attr(result, "unit_records")
+      hit <- rec[rec$type == "warning" & rec$class == "horizons_warning_substitution", , drop = FALSE]
+
+      expect_identical(result$status, "success", label = model)
+      expect_identical(nrow(hit), 1L, label = model)
+      expect_identical(hit$step, "selection_record", label = model)
+
+    }
+
+  })
+
+})

@@ -733,6 +733,56 @@ raise_selection_warning <- function(step) {
 
 }
 
+#' Raise what a fitted workflow's selection steps did
+#'
+#' @description
+#' Shared by [evaluate_single_config()] and [fit_single_config()], after the
+#' final fit. A selection step's warning raised inside tune reaches the unit
+#' only as note text, so the outcome the step recorded on itself is raised
+#' again here, inside the unit, with its class and the step's own words, and
+#' the verb lifts it to its log under the configuration's id. A
+#' configuration's selection warnings come from this one recipe, the final
+#' fit's, whatever the model: every other prep in the unit runs under
+#' [quiet_selection_warnings()].
+#'
+#' @param workflow A fitted workflow.
+#' @return `NULL`, invisibly.
+#' @keywords internal
+#' @noRd
+selection_reports <- function(workflow) {
+
+  rec <- workflows::extract_recipe(workflow, estimated = TRUE)
+
+  for (step in rec$steps) raise_selection_warning(step)
+
+  invisible(NULL)
+
+}
+
+#' Muffle the warnings the selection steps raise
+#'
+#' @description
+#' The warnings [raise_selection_warning()] raises carry the field `step`;
+#' those are muffled, and every other condition goes on as it would. Used
+#' around the preps a unit runs that are not the model it returns (the
+#' tuning bounds' prep, the prep that reproduces a step's failure) and
+#' around `fit()`'s final fit, whose recipe [selection_reports()] reads.
+#'
+#' @param expr The prep or fit.
+#' @return The value of `expr`.
+#' @keywords internal
+#' @noRd
+quiet_selection_warnings <- function(expr) {
+
+  withCallingHandlers(
+    expr,
+    horizons_warning = function(w) {
+      if (!is.null(w[["step"]])) rlang::cnd_muffle(w)
+    }
+  )
+
+}
+
 ## ---------------------------------------------------------------------------
 ## tidy_selection_step
 ## ---------------------------------------------------------------------------

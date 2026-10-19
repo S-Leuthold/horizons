@@ -500,6 +500,7 @@ UNIT_STEPS <- c(
   ad_covariance       = "AD covariance",
   ad_calibration_bake = "AD calibration bake",
   ad_thresholds       = "AD thresholds",
+  selection_record    = "Selection record",
   bake                = "New-data bake",
   predict             = "Prediction",
   uq_bake             = "Interval recipe bake",

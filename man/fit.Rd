@@ -155,7 +155,11 @@ members whose degradation check could not run, whose \code{degraded} is then
 configurations without a value of the ranking metric left out of the
 choice of members (\code{horizons_warning_skipped});
 a member whose warm-start Bayesian search failed and kept what it finished
-(\code{horizons_warning_substitution}, #209); some members failed and the rest
+(\code{horizons_warning_substitution}, #209); a member whose feature-selection
+step kept every band (\code{horizons_warning_substitution}), confirmed nothing
+(\code{horizons_warning_quality}) or had too few bands to select from
+(\code{horizons_warning_skipped}), read from its final fit's recipe; some
+members failed and the rest
 are returned (\code{horizons_warning_partial_failure}, naming them with each
 distinct cause). It records as notes on the log, without a warning, a
 member's fitted workflow stored whole because it could not be slimmed and

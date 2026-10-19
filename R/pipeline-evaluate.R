@@ -161,7 +161,11 @@
 #' early keeps the iterations it finished; one whose search failed before any
 #' iteration, or added nothing to the grid, keeps the grid's choice. Either
 #' says so in its `warnings` and is named in one
-#' `horizons_warning_substitution`. With
+#' `horizons_warning_substitution`. A configuration whose feature-selection
+#' step kept every band (`horizons_warning_substitution`), confirmed nothing
+#' (`horizons_warning_quality`) or had too few bands to select from
+#' (`horizons_warning_skipped`) is named in that topic's warning, whatever
+#' the model: what the step did is read from the final fit's recipe. With
 #' `control_horizons(debug = TRUE)` nothing is contained: the first failure,
 #' inside tuning included, stops the call with its backtrace, and the
 #' Bayesian search is not fallen back from.

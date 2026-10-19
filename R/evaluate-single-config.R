@@ -166,7 +166,10 @@ evaluate_single_config <- function(config_row,
 
     if (prepped_now) {
 
-      prepped <- unit_step("prep", recipes::prep(recipe))
+      ## This prep sets the bounds, and is not the model returned, so the
+      ## selection steps' warnings are not taken from it (the final fit's
+      ## record is read instead, below)
+      prepped <- unit_step("prep", quiet_selection_warnings(recipes::prep(recipe)))
       baked   <- unit_step("prep", recipes::bake(prepped, new_data = NULL))
 
       param_set <- unit_step("finalize_parameters", {
@@ -390,6 +393,11 @@ evaluate_single_config <- function(config_row,
       results
     })
     collect_notes_from(last_fit_obj, scope = "test set")
+
+    ## What the final fit's selection step did, read from its trained recipe:
+    ## inside last_fit() its warning reached tune's notes only as text, so it
+    ## is raised again here, with its class, for the log
+    unit_step("selection_record", selection_reports(tune::extract_workflow(last_fit_obj)))
 
     test_predictions <- unit_step("last_fit", tune::collect_predictions(last_fit_obj))
 

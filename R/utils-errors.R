@@ -1532,7 +1532,11 @@ check_tune_result <- function(results,
   step_failed <- any(grepl("^preprocessor [0-9]+/[0-9]+( \\(prediction data\\))?$",
                            errors[["location"]]))
 
-  if (!is.null(recipe) && step_failed) unit_step("prep", recipes::prep(recipe))
+  ### The reproduction is not the model returned, so a selection step's
+  ### warnings from it are not taken (one recipe, the final fit's).
+  if (!is.null(recipe) && step_failed) {
+    unit_step("prep", quiet_selection_warnings(recipes::prep(recipe)))
+  }
 
   ## Every model failed, or, under debug, any did ---------------------------------
 
