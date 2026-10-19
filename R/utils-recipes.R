@@ -650,7 +650,7 @@ selection_warning <- function(step) {
     what <- switch(name,
                    step_select_cars        = "run CARS",
                    step_select_boruta      = "cluster them and run Boruta",
-                   step_select_correlation = "score a three-band window")
+                   step_select_correlation = "score the three windows its threshold needs")
 
     message <- if (n == 0) {
       "{.fn {name}} had no band to select from, every one being near-constant, so it keeps none."

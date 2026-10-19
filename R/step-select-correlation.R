@@ -30,8 +30,11 @@
 #' `retained_all = TRUE`, and the step warns with class
 #' `horizons_warning_substitution` (#105).
 #'
-#' With fewer bands than its three-band window, no window can be scored: the
-#' step keeps them and warns with class `horizons_warning_skipped`. The
+#' With fewer than five bands there are fewer than three windows, and the
+#' threshold cannot select among them (one window has no standard deviation,
+#' and two windows' mean plus one standard deviation lies above the higher):
+#' the step keeps the bands and warns with class `horizons_warning_skipped`,
+#' rather than report a substitution it could not have avoided. The
 #' trained step records what it did in its `correlation` element: the bands
 #' it scored, the threshold, the windows scored and kept, `retained_all` and
 #' `skipped`.
@@ -150,6 +153,11 @@ prep.step_select_correlation <- function(x, training, info = NULL, ...) {
 
   window_size <- 3
 
+  ## The threshold is the windows' mean plus one sd, which selects nothing
+  ## from fewer than three windows: one has no sd, and the mean plus one sd
+  ## of two lies above the higher of them
+  min_windows <- 3
+
   trained_step <- function(kept, record) {
     raise_selection_warning(step_select_correlation_new(
       terms         = selectors,
@@ -164,9 +172,9 @@ prep.step_select_correlation <- function(x, training, info = NULL, ...) {
     ))
   }
 
-  ## Fewer bands than a window: no window can be scored, so they are kept and
-  ## the step says the selection did not run
-  if (length(col_names) < window_size) {
+  ## Too few bands for three windows: no selection can be made, so they are
+  ## kept and the step says the selection did not run
+  if (length(col_names) - window_size + 1 < min_windows) {
 
     return(trained_step(col_names, list(n_bands        = length(col_names),
                                         threshold      = NA_real_,

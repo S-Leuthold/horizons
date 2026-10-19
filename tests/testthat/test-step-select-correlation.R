@@ -67,10 +67,17 @@ describe("step_select_correlation() keeps the windows that score", {
 
   it("keeps every band, and says so, when no window clears the threshold", {
 
-    ## Two windows: the mean plus one sd of two unequal scores lies above
-    ## the higher of them
-    withr::local_seed(1)
-    d <- correlation_data(p = 4, signal = "wn_3996")
+    ## Six bands, four windows: a noise band, then five copies of the band
+    ## the outcome follows. The windows score s, r, r, r with s below r, so
+    ## the threshold, their mean plus one sd, is r + (r - s) / 4, above all
+    d <- withr::with_seed(1, {
+      signal <- stats::rnorm(30)
+      m      <- cbind(stats::rnorm(30), matrix(signal, 30, 5))
+      colnames(m) <- paste0("wn_", seq(4000, by = -2, length.out = 6))
+      d     <- tibble::as_tibble(m)
+      d$SOC <- 2 * signal + stats::rnorm(30, sd = 0.5)
+      d
+    })
 
     ## A substitution, said once and recorded on the trained step (#105)
     w <- expect_warning(prepped <- recipes::prep(correlation_recipe(d), training = d),
@@ -78,13 +85,13 @@ describe("step_select_correlation() keeps the windows that score", {
                         fixed = TRUE, class = "horizons_warning_substitution")
 
     expect_identical(w$step, "step_select_correlation")
-    expect_match(conditionMessage(w), "Retaining all 4 wavenumbers", fixed = TRUE)
+    expect_match(conditionMessage(w), "Retaining all 6 wavenumbers", fixed = TRUE)
     expect_true(prepped$steps[[1]]$correlation$retained_all)
+    expect_identical(prepped$steps[[1]]$correlation$n_windows, 4L)
     expect_identical(prepped$steps[[1]]$correlation$n_windows_kept, 0L)
 
     ## Kept whole, the selection carries the names recipes gave the columns
-    expect_identical(unname(prepped$steps[[1]]$selected_vars),
-                     c("wn_4000", "wn_3998", "wn_3996", "wn_3994"))
+    expect_identical(unname(prepped$steps[[1]]$selected_vars), colnames(d)[1:6])
 
   })
 
@@ -156,9 +163,12 @@ describe("step_select_correlation() refuses input it cannot use", {
 
 describe("step_select_correlation() with too few bands to select from", {
 
-  it("keeps one or two bands, scores no window, and warns skipped, with no warning from base R", {
+  it("keeps up to four bands, too few for the three windows its threshold needs, and warns skipped, with no warning from base R", {
 
-    for (p in 1:2) {
+    ## With three or four bands the windows can be scored, but one window has
+    ## no sd and two always fall below their mean plus one sd, so the step
+    ## would report a substitution it could not have avoided
+    for (p in 1:4) {
 
       d <- withr::with_seed(1, {
         m <- matrix(stats::rnorm(30 * p), 30)
@@ -177,8 +187,9 @@ describe("step_select_correlation() with too few bands to select from", {
       expect_length(w, 1L)
       expect_identical(unname(step$selected_vars), colnames(d)[seq_len(p)], label = paste(p, "bands"))
       expect_true(step$correlation$skipped)
+      expect_identical(step$correlation$n_windows, 0L, label = paste(p, "bands"))
       expect_warning(recipes::prep(correlation_recipe(d), training = d),
-                     "too few to score a three-band window", fixed = TRUE,
+                     "too few to score the three windows its threshold needs", fixed = TRUE,
                      class = "horizons_warning_skipped")
 
     }

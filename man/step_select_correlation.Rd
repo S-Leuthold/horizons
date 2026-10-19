@@ -53,8 +53,11 @@ threshold, every input wavenumber is retained, the trained step records
 \code{retained_all = TRUE}, and the step warns with class
 \code{horizons_warning_substitution} (#105).
 
-With fewer bands than its three-band window, no window can be scored: the
-step keeps them and warns with class \code{horizons_warning_skipped}. The
+With fewer than five bands there are fewer than three windows, and the
+threshold cannot select among them (one window has no standard deviation,
+and two windows' mean plus one standard deviation lies above the higher):
+the step keeps the bands and warns with class \code{horizons_warning_skipped},
+rather than report a substitution it could not have avoided. The
 trained step records what it did in its \code{correlation} element: the bands
 it scored, the threshold, the windows scored and kept, \code{retained_all} and
 \code{skipped}.
