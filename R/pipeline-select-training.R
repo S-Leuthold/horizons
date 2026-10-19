@@ -531,7 +531,8 @@ select_training <- function(x, library,
     reg_grid <- library_registry()[[library]]$filters
     reg_vars <- paste0("wn_", canonical_grid(reg_grid$wn_min, reg_grid$wn_max, reg_grid$wn_step))
 
-    check_shared_columns(target_vars, reg_vars, restandardize = restandardize)
+    check_shared_columns(target_vars, reg_vars, restandardize = restandardize,
+                         library_form = "registered")
 
     check_same_standardization(list(baseline         = isTRUE(reg_grid$baseline),
                                     wavelength_range = c(reg_grid$wn_min, reg_grid$wn_max)),
@@ -628,7 +629,9 @@ select_training <- function(x, library,
   ## columns the model was trained on.
 
   pool_vars <- pool$data$role_map$variable[pool$data$role_map$role == "predictor"]
-  cols      <- check_shared_columns(target_vars, pool_vars, restandardize = restandardize)
+  cols      <- check_shared_columns(target_vars, pool_vars, restandardize = restandardize,
+                                    library_form         = resolved$record$form,
+                                    library_standardized = !is.null(pool$provenance$standardization))
 
   ## Standardized alike (#107): a hull on one side only, or hulls fitted over
   ## different ranges, would train on one preprocessing and predict another.

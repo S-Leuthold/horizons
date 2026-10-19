@@ -237,12 +237,29 @@ axes_aligned <- function(target_wn, library_wn) {
 
   if (all(inside %in% library_wn)) return(TRUE)
 
-  on_own_grid <- function(wn, of = wn) {
-    step <- stats::median(abs(diff(sort(of))))
-    all(abs(wn - round(wn / step) * step) <= GRID_TOL)
-  }
-
   on_own_grid(inside, of = target_wn) && on_own_grid(library_wn)
+
+}
+
+
+#' Whether wavenumbers are whole multiples of an axis's step
+#'
+#' @description
+#' What `standardize()` makes: a canonical grid is the multiples of its step
+#' (`canonical_grid()`), so each wavenumber is within `GRID_TOL` of one. An
+#' instrument's own axis is not.
+#'
+#' @param wn [Numeric.] The wavenumbers to test.
+#' @param of [Numeric.] The axis whose median spacing is the step. Default:
+#'   `wn`.
+#'
+#' @return [Logical(1).]
+#' @noRd
+on_own_grid <- function(wn, of = wn) {
+
+  step <- stats::median(abs(diff(sort(of))))
+
+  all(abs(wn - round(wn / step) * step) <= GRID_TOL)
 
 }
 
@@ -273,6 +290,7 @@ axes_aligned <- function(target_wn, library_wn) {
 #'   `horizons_error_input` otherwise.
 #' @noRd
 check_shared_columns <- function(target_vars, library_vars, restandardize = FALSE,
+                                 library_form = "object", library_standardized = FALSE,
                                  call = rlang::caller_env()) {
 
   cols      <- shared_columns(target_vars, library_vars)
@@ -292,6 +310,26 @@ check_shared_columns <- function(target_vars, library_vars, restandardize = FALS
                     l_step, l_grid$range[1], l_grid$range[2],
                     if (restandardize) ", force = TRUE" else "")
 
+  ### A library left on an instrument's own axis is the side off its grid,
+  ### and no change to the targets can meet it: name the library's call,
+  ### on the targets' step when they are on a grid of their own, and the
+  ### targets' too when they are not. Only a library in memory or in a file
+  ### is the user's to standardize; a registered one is always on its grid.
+  library_off <- !on_own_grid(lib_wn) && library_form %in% c("object", "path")
+
+  if (library_off) {
+
+    step   <- if (on_own_grid(target_wn)) t_step else max(1, round(l_grid$resolution))
+    bounds <- c(ceiling(l_grid$range[1] / step - 1e-9), floor(l_grid$range[2] / step + 1e-9)) * step
+    calls  <- c(sprintf("standardize(library, resample = %s, trim = c(%s, %s)%s)", step, bounds[1], bounds[2],
+                        if (library_standardized) ", force = TRUE" else ""),
+                if (!on_own_grid(target_wn)) {
+                  sprintf("standardize(x, resample = %s, trim = c(%s, %s)%s)", step, bounds[1], bounds[2],
+                          if (restandardize) ", force = TRUE" else "")
+                })
+
+  }
+
   header <- if (length(cols$shared)) {
     "{.arg x}'s wavenumbers are not on a grid aligned with {.arg library}'s."
   } else {
@@ -304,7 +342,9 @@ check_shared_columns <- function(target_vars, library_vars, restandardize = FALS
     header,
     "x" = "The targets' {t_grid$n} columns run from {t_grid$range[1]} to {t_grid$range[2]} cm-1, about {t_step} cm-1 apart; the library's {l_grid$n} run from {l_grid$range[1]} to {l_grid$range[2]}, {l_step} cm-1 apart.",
     "x" = if (length(cols$shared)) "{length(cols$shared)} of the targets' {n_in} columns inside the library's range coincide with library columns; the rest lie on no grid shared with it, as an instrument's own axis does.",
-    "i" = "The training set is the library's own columns at the wavenumbers the targets share with it. Put the targets on the library's grid with {.code {remedy}}, or on a multiple of its {l_step} cm-1 step."
+    "i" = if (!library_off) "The training set is the library's own columns at the wavenumbers the targets share with it. Put the targets on the library's grid with {.code {remedy}}, or on a multiple of its {l_step} cm-1 step.",
+    "i" = if (library_off && length(calls) == 1L) "The library is on no grid of its own, about {l_step} cm-1 apart, as an instrument's axis is. Put it on one: {.code {calls[1]}}.",
+    "i" = if (library_off && length(calls) == 2L) "The library is on no grid of its own, about {l_step} cm-1 apart, as an instrument's axis is. Put it and the targets on one: {.code {calls[1]}} and {.code {calls[2]}}."
   ), kind = "input", call = call)
 
 }

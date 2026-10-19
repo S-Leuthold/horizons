@@ -1407,6 +1407,36 @@ test_that("targets on an instrument's own axis that share a few columns by coinc
 })
 
 
+test_that("a library on an instrument's own axis is the side named in the remedy (#236)", {
+
+  ## No change to the targets can put them on a grid the library is not on,
+  ## so the refusal names the library's call: on the targets' 4 cm-1 step
+  ## when they have one, and both sides' when neither has
+  library <- make_axis_object(rev(599.7431 + 1.928571 * (0:1762)), n = 40L, prefix = "L", clay = TRUE)
+  utils::capture.output(targets <- standardize(make_axis_object(seq(4000, 600, by = -4), n = 4L, prefix = "T"),
+                                               resample = 4))
+
+  err <- expect_error(select_training(targets, library, k = 5), class = "horizons_error_input")
+  msg <- gsub("\\s+", " ", conditionMessage(err))
+
+  expect_match(msg, "The library is on no grid of its own", fixed = TRUE)
+  expect_match(msg, "Put it on one: `standardize(library, resample = 4, trim = c(600, 3996))`", fixed = TRUE)
+  expect_false(grepl("standardize(x,", msg, fixed = TRUE))
+
+  ## Following it is accepted
+  utils::capture.output(library_on <- standardize(library, resample = 4, trim = c(600, 3996)))
+  expect_s3_class(suppressWarnings(select_training(targets, library_on, k = 5)), "horizons_data")
+
+  ## Neither on a grid: both calls, on a common whole-number step
+  off <- make_axis_object(rev(599.74 + 1.93 * (0:1761)), n = 4L, prefix = "O")
+  err <- expect_error(select_training(off, library, k = 5), class = "horizons_error_input")
+  expect_match(gsub("\\s+", " ", conditionMessage(err)),
+               "Put it and the targets on one: `standardize(library, resample = 2, trim = c(600, 3996))` and `standardize(x, resample = 2, trim = c(600, 3996))`",
+               fixed = TRUE)
+
+})
+
+
 test_that("targets finer than the library get its own columns, with one coverage warning naming the rest (#236)", {
 
   fx      <- select_fixture(n_pool = 60)
