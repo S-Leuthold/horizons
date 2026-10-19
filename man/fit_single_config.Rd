@@ -57,6 +57,9 @@ and no Bayesian search runs (\code{exhaustive_grid()}).}
 
 \item{compute_uq}{Logical. Whether to train UQ components.}
 
+\item{compute_ad}{Logical. Whether to fit the applicability domain, on the
+same calibration set as UQ.}
+
 \item{allow_par}{Logical. Passed to tune control functions.}
 
 \item{seed}{Integer. Random seed for reproducibility.}
@@ -86,13 +89,27 @@ trim: the check reads the test RPD).}
 control fields of the same names: the fewest rows UQ and AD calibrate
 on, AD's covariance is estimated from, and the degradation check
 bootstraps from.}
+
+\item{debug}{Logical. Contain nothing: the first failure, inside tune and
+the add-ons included, stops the call with its backtrace, and the
+warm-start Bayesian search's failure is not fallen back from. Warnings
+are still recorded.}
+
+\item{keep_traces}{Logical. Keep a failure's backtrace, as text, in the
+member's \code{trace}.}
 }
 \value{
-List with fields: config_id, status, degraded, degraded_reason,
-fitted_workflow, best_params, warm_start, start_grid_size,
-cv_predictions, test_metrics, cv_metrics, uq, warnings, error_message,
-runtime_secs. \code{uq}, when present, carries the measured coverage on the
-held-out test rows: \code{test_coverage}, \code{test_mean_width} and \code{n_test}.
+List with fields: config_id, status, degraded (\code{NA} when the
+check could not run), degraded_reason, fitted_workflow, best_params,
+warm_start, start_grid_size, cv_predictions, test_metrics, cv_metrics,
+uq, ad, warnings, error_message (the failed step and the cause), class
+(the failure's root class), trace (the backtrace as text under
+\code{keep_traces}, else \code{NULL}), runtime_secs. \code{uq}, when present, carries
+the measured coverage on the held-out test rows: \code{test_coverage},
+\code{test_mean_width} and \code{n_test}. The unit's records, with its add-ons'
+warnings and notes, ride on the list as the attribute
+\code{"unit_records"}, for \code{fit()} to lift its horizons warnings and notes
+onto the log.
 \code{warm_start} is \code{TRUE} when \code{best_params_eval} was usable, so the
 re-tune's grid is centred on it or is the whole space when that fits
 the budget (\code{exhaustive_grid()}), \code{FALSE} when it fell back to a
@@ -108,5 +125,13 @@ the held-out test set, and detects performance degradation.
 This function is the \strong{capture layer} — it runs silently and returns a
 structured list. All console output (tree rendering, progress messages) is
 the responsibility of the calling \code{fit()} function.
+
+The member is one unit (\code{run_unit()}): a run failure in any step ends it,
+and the member records the step (\code{UNIT_STEPS}), the cause, its root class
+and, with \code{keep_traces}, its backtrace. A door, internal or dependency
+error is not the member's and propagates. UQ, measured coverage, AD and
+slimming run as units of their own inside it: one that fails costs the
+member only what it computes, and the member says so with a \code{skipped}
+warning (slimming: a note).
 }
 \keyword{internal}

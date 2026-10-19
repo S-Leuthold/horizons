@@ -10,6 +10,14 @@
 #' structured list. All console output (tree rendering, progress messages) is
 #' the responsibility of the calling `fit()` function.
 #'
+#' The member is one unit (`run_unit()`): a run failure in any step ends it,
+#' and the member records the step (`UNIT_STEPS`), the cause, its root class
+#' and, with `keep_traces`, its backtrace. A door, internal or dependency
+#' error is not the member's and propagates. UQ, measured coverage, AD and
+#' slimming run as units of their own inside it: one that fails costs the
+#' member only what it computes, and the member says so with a `skipped`
+#' warning (slimming: a note).
+#'
 #' @param config_row Single-row tibble from `config$configs`.
 #' @param split_F An `rsplit` object (Split F: train_F / test_F).
 #' @param cv_resamples A `vfold_cv` object created from train_Fit (or train_F).
@@ -27,6 +35,8 @@
 #'   and no Bayesian search runs (`exhaustive_grid()`).
 #' @param grid_size Integer. Grid size for warm-start exploration.
 #' @param compute_uq Logical. Whether to train UQ components.
+#' @param compute_ad Logical. Whether to fit the applicability domain, on the
+#'   same calibration set as UQ.
 #' @param allow_par Logical. Passed to tune control functions.
 #' @param seed Integer. Random seed for reproducibility.
 #' @param sg_window Odd integer. Savitzky-Golay window in grid points, passed
@@ -50,12 +60,24 @@
 #'   control fields of the same names: the fewest rows UQ and AD calibrate
 #'   on, AD's covariance is estimated from, and the degradation check
 #'   bootstraps from.
+#' @param debug Logical. Contain nothing: the first failure, inside tune and
+#'   the add-ons included, stops the call with its backtrace, and the
+#'   warm-start Bayesian search's failure is not fallen back from. Warnings
+#'   are still recorded.
+#' @param keep_traces Logical. Keep a failure's backtrace, as text, in the
+#'   member's `trace`.
 #'
-#' @return List with fields: config_id, status, degraded, degraded_reason,
-#'   fitted_workflow, best_params, warm_start, start_grid_size,
-#'   cv_predictions, test_metrics, cv_metrics, uq, warnings, error_message,
-#'   runtime_secs. `uq`, when present, carries the measured coverage on the
-#'   held-out test rows: `test_coverage`, `test_mean_width` and `n_test`.
+#' @return List with fields: config_id, status, degraded (`NA` when the
+#'   check could not run), degraded_reason, fitted_workflow, best_params,
+#'   warm_start, start_grid_size, cv_predictions, test_metrics, cv_metrics,
+#'   uq, ad, warnings, error_message (the failed step and the cause), class
+#'   (the failure's root class), trace (the backtrace as text under
+#'   `keep_traces`, else `NULL`), runtime_secs. `uq`, when present, carries
+#'   the measured coverage on the held-out test rows: `test_coverage`,
+#'   `test_mean_width` and `n_test`. The unit's records, with its add-ons'
+#'   warnings and notes, ride on the list as the attribute
+#'   `"unit_records"`, for `fit()` to lift its horizons warnings and notes
+#'   onto the log.
 #'   `warm_start` is `TRUE` when `best_params_eval` was usable, so the
 #'   re-tune's grid is centred on it or is the whole space when that fits
 #'   the budget (`exhaustive_grid()`), `FALSE` when it fell back to a

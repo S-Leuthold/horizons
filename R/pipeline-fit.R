@@ -70,6 +70,10 @@
 #' calibration set is under `min_calib_rows` (`horizons_warning_skipped`);
 #' members whose prediction intervals, measured coverage or applicability
 #' domain could not be computed, with why (`horizons_warning_skipped`, #145);
+#' members whose degradation check could not run, whose `degraded` is then
+#' `NA` with the cause in their warnings (`horizons_warning_skipped`);
+#' configurations without a value of the ranking metric left out of the
+#' choice of members (`horizons_warning_skipped`);
 #' a member whose warm-start Bayesian search failed and kept what it finished
 #' (`horizons_warning_substitution`, #209); some members failed and the rest
 #' are returned (`horizons_warning_partial_failure`, naming them with each

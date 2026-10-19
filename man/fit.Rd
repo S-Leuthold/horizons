@@ -150,6 +150,10 @@ threshold (\code{horizons_warning_quality}); UQ and AD switched off because the
 calibration set is under \code{min_calib_rows} (\code{horizons_warning_skipped});
 members whose prediction intervals, measured coverage or applicability
 domain could not be computed, with why (\code{horizons_warning_skipped}, #145);
+members whose degradation check could not run, whose \code{degraded} is then
+\code{NA} with the cause in their warnings (\code{horizons_warning_skipped});
+configurations without a value of the ranking metric left out of the
+choice of members (\code{horizons_warning_skipped});
 a member whose warm-start Bayesian search failed and kept what it finished
 (\code{horizons_warning_substitution}, #209); some members failed and the rest
 are returned (\code{horizons_warning_partial_failure}, naming them with each
