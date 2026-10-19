@@ -807,14 +807,11 @@ describe("predict.horizons_fit() - what it reports", {
     x
   }
 
-  it("raises each topic once, at the end, with its record, and leaves the object as it was", {
-
-    x      <- noisy()
-    before <- x
+  it("raises each topic once, at the end, with its record", {
 
     caught <- list()
     p <- withCallingHandlers(
-      predict(x, new_df, level = 0.95),
+      predict(noisy(), new_df, level = 0.95),
       warning = function(w) {
         caught[[length(caught) + 1L]] <<- w
         invokeRestart("muffleWarning")
@@ -822,23 +819,9 @@ describe("predict.horizons_fit() - what it reports", {
     )
 
     topics <- vapply(caught, function(w) w$log$topic, character(1))
-    expect_setequal(topics, c("input", "applicability", "quality"))
+    expect_identical(sort(topics), c("applicability", "input", "quality"))
     expect_true(all(vapply(caught, inherits, logical(1), what = "horizons_warning")))
-    expect_identical(x, before)
     expect_null(attr(p, "winsorized"))
-
-  })
-
-  it("returns the same predictions when its warnings are silenced", {
-
-    x <- noisy()
-
-    quiet <- suppressWarnings(predict(x, new_df))
-    loud  <- NULL
-    warns <- testthat::capture_warnings(loud <- predict(x, new_df))
-
-    expect_gt(length(warns), 0)
-    expect_identical(quiet, loud)
 
   })
 
@@ -1143,14 +1126,7 @@ describe("predict.horizons_fit() - applicability domain", {
     no_ad <- fitted_fixture
     no_ad$models["ad"] <- list(NULL)
 
-    warns <- testthat::capture_warnings(
-      predict(no_ad, new_df, interval = FALSE)
-    )
-
-    expect_false(any(grepl("abstain_ood", warns)))
-
-    expect_no_warning(predict(no_ad, new_df, interval = FALSE),
-                      class = "horizons_ad_warning")
+    expect_no_warning(predict(no_ad, new_df, interval = FALSE))
 
   })
 

@@ -742,45 +742,49 @@ describe("predict.horizons_ensemble() - flagged rows and the combination", {
 ## Members' applicability domain and intervals are not computed
 ## =========================================================================
 ## The member helpers keep only .pred, so a member's AD was baked, scored and
-## dropped: wasted work, and AD warnings about columns the ensemble never
-## returns. A member AD bundle that no longer matches the member's features
-## makes the distance fail, which is what would warn if it were computed. A
-## member's UQ bundle is likewise never read: the ensemble's intervals come
-## from its own CV+ bundle.
+## dropped: wasted work. A member's UQ bundle is likewise never read: the
+## ensemble's intervals come from its own CV+ bundle. Each member here carries
+## an AD bundle and a UQ bundle, so a member helper that asked for either
+## would compute it.
 
 describe("ensemble() and predict.horizons_ensemble() - member AD and intervals", {
 
-  it("raises no AD warning from a broken member AD bundle, and never reads a member's UQ bundle", {
+  it("never computes a member's applicability domain or intervals, in ensemble() or predict()", {
 
     fitted   <- ens_fitted()
     test_set <- ens_test_set()
 
-    broken <- fitted
-    member <- names(broken$models$workflows)[1]
+    with_bundles <- fitted
+    member       <- names(with_bundles$models$workflows)[1]
 
-    broken$models$ad <- stats::setNames(list(list(
+    with_bundles$models$ad <- stats::setNames(list(list(
       centroid      = c(wn_0 = 0),
       cov_matrix    = matrix(1, dimnames = list("wn_0", "wn_0")),
       ad_thresholds = c(q25 = 1, q50 = 2, q75 = 3, ood = 4)
     )), member)
 
     ## Not a UQ bundle beyond the level and the scores the fit validator
-    ## checks. Member scoring asks for no intervals, so it is never read.
-    broken$models$uq <- stats::setNames(list(list(method = "not a bundle", level_default = 0.9,
-                                                  scores = seq_len(9))), member)
+    ## checks: reading it would fail the intervals.
+    with_bundles$models$uq <- stats::setNames(list(list(method = "not a bundle", level_default = 0.9,
+                                                        scores = seq_len(9))), member)
 
-    expect_no_warning(
-      ens <- keep_only_warning(
-        ensemble(broken, method = "weighted", optimize = FALSE),
-        "horizons_ad_warning"
-      ),
-      class = "horizons_ad_warning"
+    calls <- c(intervals = 0L, ad = 0L)
+    local_mocked_bindings(
+      predict_intervals = function(...) {
+        calls[["intervals"]] <<- calls[["intervals"]] + 1L
+        stop("a member's intervals were computed")
+      },
+      predict_ad = function(...) {
+        calls[["ad"]] <<- calls[["ad"]] + 1L
+        stop("a member's applicability domain was computed")
+      }
     )
 
-    expect_no_warning(
-      keep_only_warning(predict(ens, test_set, interval = FALSE), "horizons_ad_warning"),
-      class = "horizons_ad_warning"
-    )
+    ens <- suppressWarnings(ensemble(with_bundles, method = "weighted", optimize = FALSE))
+    p   <- suppressWarnings(predict(ens, test_set))
+
+    expect_identical(calls, c(intervals = 0L, ad = 0L))
+    expect_true(all(is.finite(p$.pred)))
 
   })
 
@@ -859,7 +863,7 @@ describe("predict.horizons_ensemble() - preflight", {
 ## Same warning, same conditions, same wording as predict.horizons_fit(): the
 ## ensemble's CV+ intervals inherit the calibration rows' non-exchangeability
 ## exactly as the member intervals do. Both paths call
-## warn_selection_intervals(), so the two cannot drift apart.
+## log_interval_quality(), so the two cannot drift apart.
 
 describe("predict.horizons_ensemble() - selected training set", {
 
