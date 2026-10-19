@@ -108,28 +108,18 @@ build_oof_matrix <- function(object, members) {
 
   ## Wide reshape: one column per member, rows keyed by .row. Sort by .row so
   ## the predictor matrix, truth, and row index are all in the same order.
-  ## Routed through the safely_execute -> handle_results cascade: pivot_wider
-  ## fails (silently building list-columns) on duplicate .row/config_id pairs,
-  ## which the completeness guard above does not catch.
+  ## The validator's refusal of a duplicate .row for a member is what keeps
+  ## pivot_wider() from building list-columns here; inside ensemble() this
+  ## runs as the meta-learner unit's first step (oof_matrix).
 
   ## Carry truth through the pivot — it is constant per .row, so it rides as an
   ## id column and comes out aligned, avoiding a separate dedup-and-reorder.
 
-  wide_safe <- safely_execute(
-    tidyr::pivot_wider(
-      cv[, c(".row", "truth", "config_id", ".pred")],
-      names_from   = "config_id",
-      values_from  = ".pred",
-      names_prefix = "member_"
-    ),
-    log_error          = FALSE,
-    capture_conditions = TRUE
-  )
-
-  wide <- handle_results(
-    wide_safe,
-    error_title = "Failed to reshape out-of-fold predictions into the member matrix.",
-    error_hints = "Duplicate .row/config_id pairs in cv_predictions can cause this."
+  wide <- tidyr::pivot_wider(
+    cv[, c(".row", "truth", "config_id", ".pred")],
+    names_from   = "config_id",
+    values_from  = ".pred",
+    names_prefix = "member_"
   )
 
   wide <- wide[order(wide$.row), ]
