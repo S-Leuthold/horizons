@@ -75,8 +75,9 @@ training object carried a \verb{$selection} from \code{select_training()}, which
 \code{horizons_ensemble}, it returns a \code{horizons_fit} whose \code{ensemble} slot
 is empty again, since the ensemble was built on the members it replaces.
 \code{models$results} records how each member's re-tune started:
-\code{warm_start} (\code{TRUE} from \code{evaluate()}'s parameters, \code{FALSE} from a
-space-filling grid) and \code{start_grid_size}.
+\code{warm_start} (\code{TRUE} when \code{evaluate()}'s parameters were usable, so the
+grid is centred on them or is the whole space, \code{FALSE} for a
+space-filling grid) and \code{start_grid_size}, the starting grid's points.
 }
 \description{
 Re-tunes the top N configurations from \code{evaluate()} with warm-start
@@ -192,7 +193,11 @@ exactly the rows \code{evaluate()} would have, and applies a response trim
 partition alone. With no parameters from
 \code{evaluate()} to warm-start from, the re-tune starts from a space-filling
 grid of \code{grid_size} points; the console tree says so, and
-\code{models$results$warm_start} is \code{FALSE}. The degradation check needs
+\code{models$results$warm_start} is \code{FALSE}. On either path, a search space
+whose tuned parameters are all whole numbers, with no more points than
+\code{grid_size + final_bayesian_iter}, is gridded whole with no Bayesian
+search, as \code{evaluate()} grids it: at the defaults that is every plsr
+member, each \code{num_comp} up to its cap tried. The degradation check needs
 nothing from \code{evaluate()}, since it compares the test RPD with \code{fit()}'s
 own cross-validation.
 

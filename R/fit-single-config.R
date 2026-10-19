@@ -22,6 +22,9 @@
 #'   or NULL (`fit()`'s cold start), in which case the re-tune starts from a
 #'   space-filling grid.
 #' @param final_bayesian_iter Integer. Bayesian iterations for re-tuning.
+#'   When every tuned parameter is a whole number and the space has no more
+#'   points than `grid_size + final_bayesian_iter`, the grid is every point
+#'   and no Bayesian search runs (`exhaustive_grid()`).
 #' @param grid_size Integer. Grid size for warm-start exploration.
 #' @param compute_uq Logical. Whether to train UQ components.
 #' @param allow_par Logical. Passed to tune control functions.
@@ -53,10 +56,11 @@
 #'   cv_predictions, test_metrics, cv_metrics, uq, warnings, error_message,
 #'   runtime_secs. `uq`, when present, carries the measured coverage on the
 #'   held-out test rows: `test_coverage`, `test_mean_width` and `n_test`.
-#'   `warm_start` is `TRUE` when the re-tune started from
-#'   `best_params_eval`, `FALSE` when it fell back to a space-filling grid of
-#'   `start_grid_size` points, and `NA` (both) when the config failed
-#'   before tuning.
+#'   `warm_start` is `TRUE` when `best_params_eval` was usable, so the
+#'   re-tune's grid is centred on it or is the whole space when that fits
+#'   the budget (`exhaustive_grid()`), `FALSE` when it fell back to a
+#'   space-filling grid, and `NA` (both) when the config failed before
+#'   tuning. `start_grid_size` is the starting grid's points.
 #'
 #' @keywords internal
 fit_single_config <- function(config_row,
@@ -204,9 +208,16 @@ fit_single_config <- function(config_row,
     ## -----------------------------------------------------------------------
     ## The grid is centred on evaluate()'s parameters, or space-filling when
     ## there are none to use; how it started is recorded before it runs, so a
-    ## re-tune that fails still says.
+    ## re-tune that fails still says. A search space with no more points than
+    ## the grid and the Bayesian search would try together (plsr's num_comp)
+    ## is gridded whole, with no Bayesian stage, as evaluate() grids it:
+    ## tune's search errors inside its loop once it has no value left to
+    ## propose, which would read as a failed search although every value was
+    ## tried.
 
-    initial_grid    <- unit_step("warm_start_tune", build_warmstart_grid(
+    whole_space     <- exhaustive_grid(param_set, grid_size + final_bayesian_iter)
+    search_iter     <- if (is.null(whole_space)) final_bayesian_iter else 0L
+    initial_grid    <- unit_step("warm_start_tune", whole_space %||% build_warmstart_grid(
       best_params_eval, param_set, max_points = grid_size
     ))
     warm_start      <- usable_best_params(best_params_eval, param_set)
@@ -217,7 +228,7 @@ fit_single_config <- function(config_row,
       cv_resamples  = cv_resamples,
       initial_grid  = initial_grid,
       param_set     = param_set,
-      bayesian_iter = final_bayesian_iter,
+      bayesian_iter = search_iter,
       metric_set    = tune_metrics,
       allow_par     = allow_par,
       recipe        = if (!prepped_now) recipe,

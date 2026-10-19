@@ -109,7 +109,11 @@
 #' partition alone. With no parameters from
 #' `evaluate()` to warm-start from, the re-tune starts from a space-filling
 #' grid of `grid_size` points; the console tree says so, and
-#' `models$results$warm_start` is `FALSE`. The degradation check needs
+#' `models$results$warm_start` is `FALSE`. On either path, a search space
+#' whose tuned parameters are all whole numbers, with no more points than
+#' `grid_size + final_bayesian_iter`, is gridded whole with no Bayesian
+#' search, as `evaluate()` grids it: at the defaults that is every plsr
+#' member, each `num_comp` up to its cap tried. The degradation check needs
 #' nothing from `evaluate()`, since it compares the test RPD with `fit()`'s
 #' own cross-validation.
 #'
@@ -210,8 +214,9 @@
 #'   `horizons_ensemble`, it returns a `horizons_fit` whose `ensemble` slot
 #'   is empty again, since the ensemble was built on the members it replaces.
 #'   `models$results` records how each member's re-tune started:
-#'   `warm_start` (`TRUE` from `evaluate()`'s parameters, `FALSE` from a
-#'   space-filling grid) and `start_grid_size`.
+#'   `warm_start` (`TRUE` when `evaluate()`'s parameters were usable, so the
+#'   grid is centred on them or is the whole space, `FALSE` for a
+#'   space-filling grid) and `start_grid_size`, the starting grid's points.
 #'
 #' @export
 fit <- function(x,
@@ -867,7 +872,7 @@ fit <- function(x,
 
         start_text <- paste0(
           if (cold_start) "Cold start: no warm-start parameters" else "No usable warm-start parameters from evaluate()",
-          "; space-filling grid of ", config_result$start_grid_size, " points"
+          "; grid of ", config_result$start_grid_size, " points"
         )
 
         cat(paste0(

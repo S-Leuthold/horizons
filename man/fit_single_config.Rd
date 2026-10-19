@@ -48,7 +48,10 @@ calibration leakage.}
 or NULL (\code{fit()}'s cold start), in which case the re-tune starts from a
 space-filling grid.}
 
-\item{final_bayesian_iter}{Integer. Bayesian iterations for re-tuning.}
+\item{final_bayesian_iter}{Integer. Bayesian iterations for re-tuning.
+When every tuned parameter is a whole number and the space has no more
+points than \code{grid_size + final_bayesian_iter}, the grid is every point
+and no Bayesian search runs (\code{exhaustive_grid()}).}
 
 \item{grid_size}{Integer. Grid size for warm-start exploration.}
 
@@ -90,10 +93,11 @@ fitted_workflow, best_params, warm_start, start_grid_size,
 cv_predictions, test_metrics, cv_metrics, uq, warnings, error_message,
 runtime_secs. \code{uq}, when present, carries the measured coverage on the
 held-out test rows: \code{test_coverage}, \code{test_mean_width} and \code{n_test}.
-\code{warm_start} is \code{TRUE} when the re-tune started from
-\code{best_params_eval}, \code{FALSE} when it fell back to a space-filling grid of
-\code{start_grid_size} points, and \code{NA} (both) when the config failed
-before tuning.
+\code{warm_start} is \code{TRUE} when \code{best_params_eval} was usable, so the
+re-tune's grid is centred on it or is the whole space when that fits
+the budget (\code{exhaustive_grid()}), \code{FALSE} when it fell back to a
+space-filling grid, and \code{NA} (both) when the config failed before
+tuning. \code{start_grid_size} is the starting grid's points.
 }
 \description{
 Inner-loop function for \code{fit()}. Takes a single config row from the

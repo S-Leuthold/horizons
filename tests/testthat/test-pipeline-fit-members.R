@@ -588,6 +588,60 @@ describe("fit() - each member is one unit", {
 
   })
 
+  it("stops with the members so far when a worker dies during a warm-start Bayesian search, reported as a message or a warning", {
+
+    ## tune catches future's error inside its search; future.apply reports it
+    ## first, as a warning before 1.21.0 and as a message since. The first
+    ## member's search returns without an iteration, the second one's worker
+    ## dies.
+    for (report in list(message, warning)) {
+
+      calls <- 0L
+      local_mocked_bindings(tune_bayes = function(...) {
+        calls <<- calls + 1L
+        if (calls == 2L) report("Caught FutureInterruptError. Canceling all iterations ...")
+        list(...)$initial
+      }, .package = "tune")
+
+      err <- expect_error(
+        suppressWarnings(fit(make_fit_object(n = 60, n_configs = 2), n_best = 2L,
+                             compute_uq = FALSE, compute_ad = FALSE, seed = 42L)),
+        class = "horizons_error_systemic"
+      )
+
+      expect_match(conditionMessage(err), "A parallel worker stopped while `fit()` was running",
+                   fixed = TRUE)
+      expect_identical(err$results$config_id, "cfg_001")
+      expect_s3_class(err$parent, "horizons_error_systemic")
+      expect_match(conditionMessage(err$parent),
+                   "A parallel worker stopped during the warm-start Bayesian search.", fixed = TRUE)
+
+    }
+
+  })
+
+  it("stops at a Ctrl-C during a warm-start Bayesian search, rather than keeping the iterations before it", {
+
+    ## tune's on.exit() return cancels the interrupt's unwind, so without the
+    ## record the search's first iteration came back as the member's result
+    real_pred_gp <- tune:::pred_gp
+    calls        <- 0L
+    local_mocked_bindings(pred_gp = function(...) {
+      calls <<- calls + 1L
+      if (calls == 2L) rlang::interrupt()
+      real_pred_gp(...)
+    }, .package = "tune")
+
+    got <- tryCatch(
+      suppressWarnings(fit(make_fit_object(n = 60, n_configs = 1), n_best = 1L,
+                           compute_uq = FALSE, compute_ad = FALSE, seed = 42L)),
+      interrupt = function(i) "interrupted"
+    )
+
+    expect_identical(got, "interrupted")
+
+  })
+
   it("carries a members table with every column and no rows when the first member's worker dies", {
 
     err <- expect_error(

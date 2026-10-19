@@ -1020,6 +1020,63 @@ describe("fit_single_config() - measured coverage when it cannot be measured (#1
 
 
 ## =========================================================================
+## A search space that fits the budget
+## =========================================================================
+## 20 wavenumbers keep 12 predictors past the raw step's edge trim, so a
+## plsr member's num_comp takes 12 values.
+
+describe("fit_single_config() - a search space that fits the budget", {
+
+  run_plsr <- function(final_bayesian_iter) {
+
+    setup    <- make_fit_setup(n_wn = 20)
+    searched <- FALSE
+
+    local_mocked_bindings(bayes_search = function(...) {
+      searched <<- TRUE
+      list(results = list(...)$initial, n_dropped = 0L)
+    })
+
+    result <- fit_single_config(
+      config_row          = make_fit_config(model = "plsr"),
+      split_F             = setup$split_F,
+      cv_resamples        = setup$folds,
+      role_map            = setup$role_map,
+      best_params_eval    = NULL,
+      final_bayesian_iter = final_bayesian_iter,
+      grid_size           = 2L,
+      seed                = 42L
+    )
+
+    list(result = result, searched = searched)
+
+  }
+
+  it("grids every point and runs no Bayesian search, with no warning, when the space has no more points than both together", {
+
+    got <- run_plsr(25L)
+
+    expect_identical(got$result$status, "success")
+    expect_false(got$searched)
+    expect_identical(got$result$start_grid_size, 12L)
+    expect_false(any(grepl("Bayesian search", got$result$warnings, fixed = TRUE)))
+
+  })
+
+  it("still searches a space with more points than the budget", {
+
+    got <- run_plsr(5L)
+
+    expect_identical(got$result$status, "success")
+    expect_true(got$searched)
+    expect_identical(got$result$start_grid_size, 2L)
+
+  })
+
+})
+
+
+## =========================================================================
 ## The warnings of the chosen candidate (#109)
 ## =========================================================================
 ## The re-tune's grid is fixed, with mtry = 50 above the predictors: ranger

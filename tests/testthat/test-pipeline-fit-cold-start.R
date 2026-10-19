@@ -99,7 +99,7 @@ describe("fit() - cold start from one configuration (#45)", {
 
   it("prints and records the space-filling start", {
 
-    expect_true(any(grepl("Cold start: no warm-start parameters; space-filling grid of 2 points",
+    expect_true(any(grepl("Cold start: no warm-start parameters; grid of 2 points",
                           cold_out, fixed = TRUE)))
     expect_false(cold$models$results$warm_start)
     expect_identical(cold$models$results$start_grid_size, 2L)
